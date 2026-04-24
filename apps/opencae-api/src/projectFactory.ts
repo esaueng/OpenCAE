@@ -91,6 +91,23 @@ export function createSampleProject(
     "selection-web-face": faceLabels.get("face-web-front") ?? "Feature face",
     "selection-base-face": faceLabels.get("face-base-bottom") ?? "Base face"
   };
+  const bodySelection = templateStudy.namedSelections.find((selection) => selection.entityType === "body");
+  const faceSelections = displayModel.faces.map((face) => {
+    const templateSelection = templateStudy.namedSelections.find((selection) => selection.geometryRefs[0]?.entityId === face.id);
+    const selectionId = templateSelection?.id ?? `selection-${face.id}`;
+    return {
+      ...(templateSelection ?? {
+        id: selectionId,
+        entityType: "face" as const,
+        geometryRefs: []
+      }),
+      id: selectionId,
+      name: selectionNames[selectionId] ?? face.label,
+      entityType: "face" as const,
+      geometryRefs: [{ bodyId: "body-bracket", entityType: "face" as const, entityId: face.id, label: face.label }],
+      fingerprint: `${face.id}-${sampleId}-v1`
+    };
+  });
   return {
     ...bracketDemoProject,
     id: projectId,
@@ -102,7 +119,7 @@ export function createSampleProject(
         projectId,
         filename: meta.filename,
         artifactKey: `${projectId}/geometry/${sampleId}-display.json`,
-        metadata: { ...geometry.metadata, sampleModel: sampleId, displayModelRef: `${projectId}/geometry/${sampleId}-display.json` }
+        metadata: { ...geometry.metadata, sampleModel: sampleId, displayModelRef: `${projectId}/geometry/${sampleId}-display.json`, faceCount: displayModel.faces.length }
       }]
       : [],
     studies: [{
@@ -111,18 +128,16 @@ export function createSampleProject(
       projectId,
       name: "Static Stress",
       geometryScope: templateStudy.geometryScope.map((scope) => ({ ...scope, label: meta.modelName })),
-      namedSelections: templateStudy.namedSelections.map((selection) => {
-        const faceId = selection.geometryRefs[0]?.entityId;
-        return {
-          ...selection,
-          name: selectionNames[selection.id] ?? selection.name,
-          geometryRefs: selection.geometryRefs.map((ref) => ({
-            ...ref,
-            label: ref.entityType === "body" ? meta.modelName : faceLabels.get(ref.entityId) ?? ref.label
-          })),
-          fingerprint: faceId ? `${faceId}-${sampleId}-v1` : selection.fingerprint
-        };
-      }),
+      namedSelections: [
+        ...(bodySelection
+          ? [{
+            ...bodySelection,
+            name: `${meta.modelName} body`,
+            geometryRefs: bodySelection.geometryRefs.map((ref) => ({ ...ref, label: meta.modelName }))
+          }]
+          : []),
+        ...faceSelections
+      ],
       runs: options.includeSeedRun ? templateStudy.runs : []
     }],
     createdAt: options.now,
@@ -133,7 +148,15 @@ export function createSampleProject(
 export function sampleDisplayModelFor(sampleId: SampleModelId): DisplayModel {
   const meta = SAMPLE_META[sampleId];
   const facesBySample: Record<SampleModelId, DisplayModel["faces"]> = {
-    bracket: bracketDisplayModel.faces,
+    bracket: [
+      ...bracketDisplayModel.faces,
+      { id: "face-upright-front", label: "Upright front face", color: "#64748b", center: [-1.18, 1.42, 0.58], normal: [0, 0, 1], stressValue: 78 },
+      { id: "face-upright-left", label: "Upright outer side", color: "#64748b", center: [-1.57, 1.18, 0], normal: [-1, 0, 0], stressValue: 68 },
+      { id: "face-upright-right", label: "Upright inner side", color: "#64748b", center: [-0.76, 1.22, 0], normal: [1, 0, 0], stressValue: 86 },
+      { id: "face-base-front", label: "Base front face", color: "#64748b", center: [0.68, -0.24, 0.58], normal: [0, -1, 0], stressValue: 52 },
+      { id: "face-base-end", label: "Base end face", color: "#64748b", center: [2.36, 0, 0], normal: [1, 0, 0], stressValue: 44 },
+      { id: "face-rib-side", label: "Rib side face", color: "#22c55e", center: [-0.26, 0.78, 0.22], normal: [0, 0, 1], stressValue: 92 }
+    ],
     plate: [
       { id: "face-base-left", label: "Left clamp face", color: "#4da3ff", center: [-1.45, 0.0, 0.17], normal: [0, 0, 1], stressValue: 42 },
       { id: "face-load-top", label: "Right load pad", color: "#f59e0b", center: [1.42, 0.0, 0.17], normal: [0, 0, 1], stressValue: 118 },
