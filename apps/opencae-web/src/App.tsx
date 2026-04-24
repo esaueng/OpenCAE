@@ -1,5 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Constraint, DisplayModel, Load, Project, ResultSummary, RunEvent, Study } from "@opencae/schema";
+import { Save } from "lucide-react";
 import { addLoad, addSupport, assignMaterial, createProject, generateMesh, getResults, importLocalProject, loadSampleProject, runSimulation, subscribeToRun, updateStudy as saveStudyPatch, type SampleModelId } from "./lib/api";
 import { BottomPanel } from "./components/BottomPanel";
 import { RightPanel } from "./components/RightPanel";
@@ -14,6 +15,18 @@ import {
   type LoadDirectionLabel,
   type LoadType
 } from "./loadPreview";
+import { buildLocalProjectFile, suggestedProjectFilename } from "./projectFile";
+
+interface SaveFilePickerHandle {
+  createWritable: () => Promise<{ write: (content: Blob) => Promise<void>; close: () => Promise<void> }>;
+}
+
+interface SaveFilePickerWindow extends Window {
+  showSaveFilePicker?: (options: {
+    suggestedName: string;
+    types: Array<{ description: string; accept: Record<string, string[]> }>;
+  }) => Promise<SaveFilePickerHandle>;
+}
 
 const seededSummary: ResultSummary = {
   maxStress: 142,
@@ -96,6 +109,18 @@ export function App() {
     });
   }, [study]);
 
+  useEffect(() => {
+    if (!project || !displayModel) return;
+    function handleShortcut(event: KeyboardEvent) {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+        event.preventDefault();
+        void handleSaveProject();
+      }
+    }
+    window.addEventListener("keydown", handleShortcut);
+    return () => window.removeEventListener("keydown", handleShortcut);
+  }, [displayModel, project]);
+
   async function openProjectResponse(action: Promise<{ project: Project; displayModel: DisplayModel; message?: string }>) {
     const response = await action;
     setProject(response.project);
@@ -120,6 +145,18 @@ export function App() {
     void openProjectResponse(importLocalProject(file)).catch((error: unknown) => {
       pushMessage(error instanceof Error ? error.message : "Could not open local project.");
     });
+  }
+
+  async function handleSaveProject() {
+    if (!project || !displayModel) return;
+    try {
+      const savedAt = await saveProjectToLocalDisk(project, displayModel);
+      setProject({ ...project, updatedAt: savedAt });
+      pushMessage("Project saved to local disk.");
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      pushMessage(error instanceof Error ? error.message : "Could not save project.");
+    }
   }
 
   function pushMessage(message: string) {
@@ -230,6 +267,10 @@ export function App() {
         <button className={`primary topbar-action ${solverRunning ? "running" : ""}`} onClick={handleRunSimulation}>
           <span aria-hidden="true">▶</span>{solverRunning ? "Running…" : "Run simulation"}
         </button>
+        <button className="secondary topbar-action" type="button" onClick={handleSaveProject} title="Save project to local disk">
+          <Save size={16} aria-hidden="true" />
+          Save project
+        </button>
         <span className="local-pill"><span aria-hidden="true" />local</span>
       </header>
 
@@ -310,6 +351,33 @@ export function App() {
 
 function stepLabel(step: StepId) {
   return step.charAt(0).toUpperCase() + step.slice(1);
+}
+
+async function saveProjectToLocalDisk(project: Project, displayModel: DisplayModel): Promise<string> {
+  const savedAt = new Date().toISOString();
+  const filename = suggestedProjectFilename(project.name);
+  const blob = new Blob([JSON.stringify(buildLocalProjectFile(project, displayModel, savedAt), null, 2)], {
+    type: "application/json"
+  });
+  const savePicker = (window as SaveFilePickerWindow).showSaveFilePicker;
+  if (savePicker) {
+    const handle = await savePicker({
+      suggestedName: filename,
+      types: [{ description: "OpenCAE project", accept: { "application/json": [".json", ".opencae"] } }]
+    });
+    const writable = await handle.createWritable();
+    await writable.write(blob);
+    await writable.close();
+    return savedAt;
+  }
+
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+  return savedAt;
 }
 
 function TopbarMark() {
