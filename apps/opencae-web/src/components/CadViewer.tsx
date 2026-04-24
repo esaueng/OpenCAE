@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { ElementRef, MutableRefObject } from "react";
 import { Billboard, Bounds, Edges, GizmoHelper, Grid, Html, Line, OrbitControls, Text, useBounds, useGizmoContext } from "@react-three/drei";
-import { Canvas } from "@react-three/fiber";
+import { Canvas, useThree } from "@react-three/fiber";
 import type { ThreeEvent } from "@react-three/fiber";
 import type { DisplayFace, DisplayModel, ResultField } from "@opencae/schema";
 import { RotateCcw } from "lucide-react";
@@ -61,9 +62,11 @@ const BRACKET_HOLES = [
   { id: "base-hole-right", center: [1.2, 0] as [number, number], radius: 0.13, supported: true }
 ];
 type SampleModelKind = "blank" | "bracket" | "plate" | "cantilever" | "uploaded";
+type ViewerOrbitControls = ElementRef<typeof OrbitControls>;
 const UPLOADED_BOX_SIZE: [number, number, number] = [2.2, 1.44, 1.04];
 
 export function CadViewer(props: CadViewerProps) {
+  const controlsRef = useRef<ViewerOrbitControls | null>(null);
   const effectiveViewMode: ViewMode = props.activeStep === "results" ? props.viewMode : props.viewMode === "mesh" ? "mesh" : "model";
   const isLightTheme = props.themeMode === "light";
   const viewportBackground = isLightTheme ? "#f7f9fc" : "#070b10";
@@ -80,7 +83,8 @@ export function CadViewer(props: CadViewerProps) {
           <BracketModel {...props} viewMode={effectiveViewMode} />
           <BoundsCameraReset signal={props.fitSignal} />
         </Bounds>
-        <OrbitControls makeDefault enableDamping dampingFactor={0.08} target={[0, 1.05, 0]} />
+        <OrbitControls ref={controlsRef} makeDefault enableDamping dampingFactor={0.08} target={[0, 1.05, 0]} />
+        <ShiftPanControls controlsRef={controlsRef} />
         <GizmoHelper alignment="bottom-left" margin={[92, 92]}>
           <CleanAxisGizmo />
         </GizmoHelper>
@@ -94,6 +98,91 @@ export function CadViewer(props: CadViewerProps) {
       {effectiveViewMode === "results" && <ResultLegend resultMode={props.resultMode} resultFields={props.resultFields} />}
     </section>
   );
+}
+
+function ShiftPanControls({ controlsRef }: { controlsRef: MutableRefObject<ViewerOrbitControls | null> }) {
+  const { camera, gl } = useThree();
+
+  useEffect(() => {
+    const element = gl.domElement;
+    const drag = {
+      active: false,
+      pointerId: -1,
+      x: 0,
+      y: 0
+    };
+
+    function finishPan() {
+      if (!drag.active) return;
+      drag.active = false;
+      const controls = controlsRef.current;
+      if (controls) controls.enabled = true;
+      if (drag.pointerId >= 0 && element.hasPointerCapture(drag.pointerId)) {
+        element.releasePointerCapture(drag.pointerId);
+      }
+      drag.pointerId = -1;
+    }
+
+    function beginPan(event: PointerEvent) {
+      if (!event.shiftKey || event.button !== 0) return;
+      const controls = controlsRef.current;
+      if (!controls) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      drag.active = true;
+      drag.pointerId = event.pointerId;
+      drag.x = event.clientX;
+      drag.y = event.clientY;
+      controls.enabled = false;
+      element.setPointerCapture(event.pointerId);
+    }
+
+    function movePan(event: PointerEvent) {
+      if (!drag.active || event.pointerId !== drag.pointerId) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const controls = controlsRef.current;
+      if (!controls) return;
+      const deltaX = event.clientX - drag.x;
+      const deltaY = event.clientY - drag.y;
+      drag.x = event.clientX;
+      drag.y = event.clientY;
+      panCamera(camera, controls.target, deltaX, deltaY, element.clientHeight || 1);
+      controls.update();
+    }
+
+    element.addEventListener("pointerdown", beginPan, { capture: true });
+    element.addEventListener("pointermove", movePan, { capture: true });
+    element.addEventListener("pointerup", finishPan, { capture: true });
+    element.addEventListener("pointercancel", finishPan, { capture: true });
+    element.addEventListener("lostpointercapture", finishPan);
+    return () => {
+      element.removeEventListener("pointerdown", beginPan, { capture: true });
+      element.removeEventListener("pointermove", movePan, { capture: true });
+      element.removeEventListener("pointerup", finishPan, { capture: true });
+      element.removeEventListener("pointercancel", finishPan, { capture: true });
+      element.removeEventListener("lostpointercapture", finishPan);
+      const controls = controlsRef.current;
+      if (controls) controls.enabled = true;
+    };
+  }, [camera, controlsRef, gl]);
+
+  return null;
+}
+
+function panCamera(camera: THREE.Camera, target: THREE.Vector3, deltaX: number, deltaY: number, viewportHeight: number) {
+  const perspectiveCamera = camera as THREE.PerspectiveCamera;
+  const distance = camera.position.distanceTo(target);
+  const targetDistance = perspectiveCamera.isPerspectiveCamera
+    ? distance * Math.tan((perspectiveCamera.fov / 2) * THREE.MathUtils.DEG2RAD)
+    : distance;
+  const scale = (2 * targetDistance) / viewportHeight;
+  const panOffset = new THREE.Vector3();
+  const xAxis = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 0).multiplyScalar(-deltaX * scale);
+  const yAxis = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 1).multiplyScalar(deltaY * scale);
+  panOffset.add(xAxis).add(yAxis);
+  camera.position.add(panOffset);
+  target.add(panOffset);
 }
 
 function CleanAxisGizmo() {
