@@ -183,7 +183,7 @@ function BracketModel({ displayModel, activeStep, selectedFaceId, onSelectFace, 
       ))}
       {loadMarkers.map((marker) => {
         const face = displayModel.faces.find((item) => item.id === marker.faceId);
-        return face ? <LoadGlyph key={marker.id} kind={modelKind} marker={marker} face={face} active={activeStep === "loads"} /> : null;
+        return face ? <LoadGlyph key={marker.id} marker={marker} face={face} active={activeStep === "loads"} /> : null;
       })}
       {supportMarkers.map((marker) => {
         const face = displayModel.faces.find((item) => item.id === marker.faceId);
@@ -735,39 +735,11 @@ function ResultLegend({ resultMode }: { resultMode: ResultMode }) {
   );
 }
 
-function LoadGlyph({ kind, marker, face, active }: { kind: SampleModelKind; marker: ViewerLoadMarker; face: DisplayFace; active: boolean }) {
+function LoadGlyph({ marker, face, active }: { marker: ViewerLoadMarker; face: DisplayFace; active: boolean }) {
   const markerDirection = new THREE.Vector3(...marker.direction).normalize();
   const isNormalDirection = marker.directionLabel === "Normal";
   const markerColor = marker.preview ? "#7cc7ff" : active ? "#4da3ff" : "#f59e0b";
   const labelTone = active || marker.preview ? "active-load" : "load";
-  if (kind === "bracket" && face.id === "face-load-top") {
-    const center = new THREE.Vector3(...face.center);
-    const loadOffset = new THREE.Vector3((marker.stackIndex - 0.5) * 0.24, marker.stackIndex * 0.08, 0);
-    const faceNormal = new THREE.Vector3(...face.normal).normalize();
-    const arrowDirection = isNormalDirection ? faceNormal : markerDirection;
-    const tangent = new THREE.Vector3(0, 0, 1);
-    const arrowOffsets = marker.type === "gravity" ? [0] : [-0.22, 0, 0.22];
-    const arrowLength = marker.type === "pressure" ? 0.42 : marker.type === "gravity" ? 0.76 : 0.58;
-    return (
-      <group>
-        {arrowOffsets.map((zOffset) => (
-          <ArrowGlyph
-            key={zOffset}
-            {...arrowPointsOutsideSurface(center.clone().add(loadOffset).add(tangent.clone().multiplyScalar(zOffset)), faceNormal, arrowDirection, arrowLength)}
-            color={markerColor}
-            shaftRadius={0.026}
-            headRadius={0.105}
-            headLength={0.24}
-          />
-        ))}
-        <SceneLabel
-          label={loadLabel(marker)}
-          position={center.clone().add(loadOffset).add(new THREE.Vector3(0.08, 0.34, 0.36)).toArray()}
-          tone={labelTone}
-        />
-      </group>
-    );
-  }
 
   const normal = new THREE.Vector3(...face.normal).normalize();
   const center = new THREE.Vector3(...face.center);
