@@ -311,7 +311,7 @@ function UnsupportedUploadedModelNotice({ filename }: { filename: string }) {
       <Html center position={[0, 0.35, 0]} className="model-notice">
         <strong>Preview unavailable</strong>
         <span>{filename.replace(" uploaded model", "")}</span>
-        <small>STEP/IGES/BREP files are stored, but this local viewer can preview STL or OBJ meshes.</small>
+        <small>This local viewer can preview STL or OBJ meshes. Replace this model with a supported mesh file.</small>
       </Html>
     </group>
   );

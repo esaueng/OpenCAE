@@ -124,7 +124,11 @@ api.post("/api/projects/:projectId/uploads", async (request, reply) => {
   if (!project) return reply.code(404).send({ error: "Project not found" });
   const body = request.body as { filename?: string; size?: number; contentType?: string; contentBase64?: string } | undefined;
   const filename = sanitizeFilename(body?.filename);
-  if (!filename) return reply.code(400).send({ error: "Choose a STEP, IGES, STL, OBJ, BREP, or OpenCAE model file." });
+  if (!filename) {
+    return reply.code(400).send({
+      error: "Only STL and OBJ model uploads are supported in the local viewer. Convert STEP, IGES, or BREP to STL/OBJ before uploading."
+    });
+  }
 
   const contentBase64 = typeof body?.contentBase64 === "string" && body.contentBase64.length > 0 ? body.contentBase64 : undefined;
   const displayModel = uploadedDisplayModelFor(filename, contentBase64);
@@ -436,7 +440,7 @@ function sanitizeFilename(filename: unknown): string | undefined {
   const cleaned = filename.trim().split(/[\\/]/).pop()?.replace(/[^\w .-]/g, "_") ?? "";
   if (!cleaned) return undefined;
   const extension = cleaned.split(".").pop()?.toLowerCase();
-  if (!extension || !["step", "stp", "iges", "igs", "stl", "obj", "brep", "json", "opencae"].includes(extension)) return undefined;
+  if (!extension || !["stl", "obj"].includes(extension)) return undefined;
   return cleaned;
 }
 

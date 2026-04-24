@@ -120,7 +120,15 @@ export function subscribeToRun(runId: string, onEvent: (event: RunEvent) => void
 
 async function readJson<T>(response: Response): Promise<T> {
   if (!response.ok) {
-    throw new Error(await response.text());
+    const text = await response.text();
+    let message = text;
+    try {
+      const parsed = JSON.parse(text) as { error?: string };
+      message = parsed.error ?? text;
+    } catch {
+      // Use the raw response body when the server did not return JSON.
+    }
+    throw new Error(message);
   }
   return response.json() as Promise<T>;
 }
