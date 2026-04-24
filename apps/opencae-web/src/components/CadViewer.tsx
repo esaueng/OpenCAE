@@ -48,6 +48,7 @@ interface CadViewerProps {
 
 const BRACKET_DEPTH = 1.1;
 const RIB_DEPTH = 0.38;
+const PLATE_DEPTH = 0.32;
 const ISO_CAMERA_DIRECTION = new THREE.Vector3(1, 1, 1).normalize();
 const ISO_CAMERA_UP = new THREE.Vector3(0, 1, 0).projectOnPlane(ISO_CAMERA_DIRECTION).normalize();
 const BRACKET_HOLES = [
@@ -55,6 +56,7 @@ const BRACKET_HOLES = [
   { id: "base-hole-left", center: [0.24, 0] as [number, number], radius: 0.13, supported: true },
   { id: "base-hole-right", center: [1.2, 0] as [number, number], radius: 0.13, supported: true }
 ];
+type SampleModelKind = "bracket" | "plate" | "cantilever";
 
 export function CadViewer(props: CadViewerProps) {
   const effectiveViewMode: ViewMode = props.activeStep === "results" ? props.viewMode : props.viewMode === "mesh" ? "mesh" : "model";
@@ -149,6 +151,7 @@ function AxisDot({ color, position }: { color: string; position: [number, number
 
 function BracketModel({ displayModel, activeStep, selectedFaceId, onSelectFace, viewMode, resultMode, showDeformed, stressExaggeration, loadMarkers, supportMarkers }: CadViewerProps) {
   const [hovered, setHovered] = useState<string | null>(null);
+  const modelKind = modelKindForDisplayModel(displayModel);
   const groupScale: [number, number, number] = showDeformed && viewMode === "results" ? [1.02, 1.06, 1.01] : [1, 1, 1];
   const materialColor = useMemo(() => colorForResult(displayModel.faces, viewMode, resultMode), [displayModel.faces, resultMode, viewMode]);
   const showResultMarkers = viewMode === "results" && activeStep === "results";
@@ -157,16 +160,17 @@ function BracketModel({ displayModel, activeStep, selectedFaceId, onSelectFace, 
   return (
     <group scale={groupScale}>
       {isResultView ? (
-        <AnalysisResultModel resultMode={resultMode} stressExaggeration={stressExaggeration} />
+        <AnalysisResultModel kind={modelKind} resultMode={resultMode} stressExaggeration={stressExaggeration} />
       ) : (
-        <BracketSolid color={materialColor("face-base-bottom")} />
+        <SampleSolid kind={modelKind} color={materialColor("face-base-bottom")} />
       )}
-      <HoleRims />
-      {viewMode === "mesh" && <MeshOverlay />}
+      <HoleRims kind={modelKind} />
+      {viewMode === "mesh" && <MeshOverlay kind={modelKind} />}
       {displayModel.faces.map((face) => (
         <FacePickTarget
           key={face.id}
           face={face}
+          modelKind={modelKind}
           placementMode={activeStep === "loads" || activeStep === "supports"}
           selected={selectedFaceId === face.id}
           hovered={hovered === face.id}
@@ -176,11 +180,11 @@ function BracketModel({ displayModel, activeStep, selectedFaceId, onSelectFace, 
       ))}
       {loadMarkers.map((marker) => {
         const face = displayModel.faces.find((item) => item.id === marker.faceId);
-        return face ? <LoadGlyph key={marker.id} marker={marker} face={face} active={activeStep === "loads"} /> : null;
+        return face ? <LoadGlyph key={marker.id} kind={modelKind} marker={marker} face={face} active={activeStep === "loads"} /> : null;
       })}
       {supportMarkers.map((marker) => {
         const face = displayModel.faces.find((item) => item.id === marker.faceId);
-        return face ? <SupportGlyph key={marker.id} marker={marker} face={face} active={activeStep === "supports"} /> : null;
+        return face ? <SupportGlyph key={marker.id} kind={modelKind} marker={marker} face={face} active={activeStep === "supports"} /> : null;
       })}
       {showResultMarkers && (
         <>
@@ -191,6 +195,18 @@ function BracketModel({ displayModel, activeStep, selectedFaceId, onSelectFace, 
       )}
     </group>
   );
+}
+
+function modelKindForDisplayModel(displayModel: DisplayModel): SampleModelKind {
+  if (displayModel.id.includes("plate")) return "plate";
+  if (displayModel.id.includes("cantilever")) return "cantilever";
+  return "bracket";
+}
+
+function SampleSolid({ kind, color }: { kind: SampleModelKind; color: string }) {
+  if (kind === "plate") return <PlateSolid color={color} />;
+  if (kind === "cantilever") return <CantileverSolid color={color} />;
+  return <BracketSolid color={color} />;
 }
 
 function BracketSolid({ color }: { color: string }) {
@@ -212,11 +228,35 @@ function BracketSolid({ color }: { color: string }) {
   );
 }
 
-function AnalysisResultModel({ resultMode, stressExaggeration }: { resultMode: ResultMode; stressExaggeration: number }) {
+function PlateSolid({ color }: { color: string }) {
+  const plateGeometry = useMemo(() => createPlateGeometry(), []);
+  return (
+    <mesh>
+      <primitive attach="geometry" object={plateGeometry} />
+      <meshStandardMaterial color={color} metalness={0.2} roughness={0.5} />
+      <Edges color="#c8d3df" threshold={15} />
+    </mesh>
+  );
+}
+
+function CantileverSolid({ color }: { color: string }) {
+  return (
+    <mesh position={[0, 0.18, 0]}>
+      <boxGeometry args={[3.8, 0.5, 0.72]} />
+      <meshStandardMaterial color={color} metalness={0.2} roughness={0.5} />
+      <Edges color="#c8d3df" threshold={15} />
+    </mesh>
+  );
+}
+
+function AnalysisResultModel({ kind, resultMode, stressExaggeration }: { kind: SampleModelKind; resultMode: ResultMode; stressExaggeration: number }) {
+  if (kind !== "bracket") {
+    return <SampleSolid kind={kind} color={resultPalette(resultMode).body[2] ?? "#9aa7b4"} />;
+  }
   return (
     <group>
       <SmoothBracketBody resultMode={resultMode} stressExaggeration={stressExaggeration} />
-      <HoleRims />
+      <HoleRims kind="bracket" />
     </group>
   );
 }
@@ -410,6 +450,34 @@ function createBracketShape() {
   return shape;
 }
 
+function createPlateGeometry() {
+  const geometry = new THREE.ExtrudeGeometry(createPlateShape(), {
+    depth: PLATE_DEPTH,
+    bevelEnabled: true,
+    bevelThickness: 0.01,
+    bevelSize: 0.01,
+    bevelSegments: 2,
+    curveSegments: 64
+  });
+  geometry.translate(0, 0, -PLATE_DEPTH / 2);
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+function createPlateShape() {
+  const shape = new THREE.Shape();
+  shape.moveTo(-1.9, -0.75);
+  shape.lineTo(1.9, -0.75);
+  shape.lineTo(1.9, 0.75);
+  shape.lineTo(-1.9, 0.75);
+  shape.closePath();
+
+  const hole = new THREE.Path();
+  hole.absellipse(0, 0, 0.3, 0.3, 0, Math.PI * 2, true);
+  shape.holes.push(hole);
+  return shape;
+}
+
 function createRibGeometry() {
   const geometry = new THREE.ExtrudeGeometry(createRibShape(), {
     depth: RIB_DEPTH,
@@ -498,8 +566,8 @@ function sceneLabelColors(tone: "max" | "mid" | "min" | "load" | "active-load") 
   return { background: "#201809", border: "#f59e0b", text: "#e6edf3" };
 }
 
-function SupportGlyph({ marker, face, active }: { marker: ViewerSupportMarker; face: DisplayFace; active: boolean }) {
-  if (face.id === "face-base-left") {
+function SupportGlyph({ kind, marker, face, active }: { kind: SampleModelKind; marker: ViewerSupportMarker; face: DisplayFace; active: boolean }) {
+  if (kind === "bracket" && face.id === "face-base-left") {
     const depthOffset = Math.min(marker.stackIndex, 2) * 0.05;
     return (
       <group position={[0, 0, depthOffset]}>
@@ -577,12 +645,12 @@ function ResultLegend({ resultMode }: { resultMode: ResultMode }) {
   );
 }
 
-function LoadGlyph({ marker, face, active }: { marker: ViewerLoadMarker; face: DisplayFace; active: boolean }) {
+function LoadGlyph({ kind, marker, face, active }: { kind: SampleModelKind; marker: ViewerLoadMarker; face: DisplayFace; active: boolean }) {
   const markerDirection = new THREE.Vector3(...marker.direction).normalize();
   const isNormalDirection = marker.directionLabel === "Normal";
   const markerColor = marker.preview ? "#7cc7ff" : active ? "#4da3ff" : "#f59e0b";
   const labelTone = active || marker.preview ? "active-load" : "load";
-  if (face.id === "face-load-top") {
+  if (kind === "bracket" && face.id === "face-load-top") {
     const center = new THREE.Vector3(...face.center);
     const loadOffset = new THREE.Vector3((marker.stackIndex - 0.5) * 0.24, marker.stackIndex * 0.08, 0);
     const faceNormal = new THREE.Vector3(...face.normal).normalize();
@@ -671,7 +739,18 @@ function ArrowGlyph({
   );
 }
 
-function HoleRims() {
+function HoleRims({ kind }: { kind: SampleModelKind }) {
+  if (kind === "plate") {
+    return (
+      <mesh position={[0, 0, PLATE_DEPTH / 2 + 0.025]}>
+        <torusGeometry args={[0.31, 0.028, 12, 72]} />
+        <meshStandardMaterial color="#b9c8d8" roughness={0.3} metalness={0.6} />
+      </mesh>
+    );
+  }
+
+  if (kind === "cantilever") return null;
+
   return (
     <>
       {BRACKET_HOLES.map((hole) => (
@@ -713,9 +792,28 @@ function SupportBurst({ radius, active = false }: { radius: number; active?: boo
   );
 }
 
-function MeshOverlay() {
+function MeshOverlay({ kind }: { kind: SampleModelKind }) {
   const bodyGeometry = useMemo(() => createBracketBodyGeometry(), []);
   const ribGeometry = useMemo(() => createRibGeometry(), []);
+  const plateGeometry = useMemo(() => createPlateGeometry(), []);
+  if (kind === "plate") {
+    return (
+      <mesh>
+        <primitive attach="geometry" object={plateGeometry} />
+        <meshBasicMaterial color="#9ad1ff" wireframe transparent opacity={0.3} />
+      </mesh>
+    );
+  }
+
+  if (kind === "cantilever") {
+    return (
+      <mesh position={[0, 0.18, 0]}>
+        <boxGeometry args={[3.8, 0.5, 0.72, 18, 4, 4]} />
+        <meshBasicMaterial color="#9ad1ff" wireframe transparent opacity={0.3} />
+      </mesh>
+    );
+  }
+
   return (
     <group>
       <mesh>
@@ -732,6 +830,7 @@ function MeshOverlay() {
 
 function FacePickTarget({
   face,
+  modelKind,
   selected,
   hovered,
   placementMode,
@@ -739,6 +838,7 @@ function FacePickTarget({
   onSelect
 }: {
   face: DisplayFace;
+  modelKind: SampleModelKind;
   selected: boolean;
   hovered: boolean;
   placementMode: boolean;
@@ -748,7 +848,7 @@ function FacePickTarget({
   const scale = selected ? 1.15 : hovered ? 1.08 : 1;
   const color = selected ? "#4da3ff" : hovered ? "#f8d77b" : face.color;
   const rotation = rotationForNormal(face.normal);
-  const size = targetSizeForFace(face.id, placementMode);
+  const size = targetSizeForFace(face.id, modelKind, placementMode);
   const opacity = selected || hovered ? 0.5 : placementMode ? 0.26 : 0.18;
   return (
     <mesh
@@ -772,8 +872,17 @@ function FacePickTarget({
   );
 }
 
-function targetSizeForFace(faceId: string, placementMode: boolean): [number, number] {
+function targetSizeForFace(faceId: string, modelKind: SampleModelKind, placementMode: boolean): [number, number] {
   if (!placementMode) return [0.54, 0.42];
+  if (modelKind === "plate") {
+    if (faceId === "face-base-bottom") return [3.6, 1.35];
+    if (faceId === "face-web-front") return [0.86, 0.86];
+    return [0.92, 0.9];
+  }
+  if (modelKind === "cantilever") {
+    if (faceId === "face-load-top" || faceId === "face-base-left") return [0.72, 0.72];
+    return [2.9, 0.68];
+  }
   if (faceId === "face-load-top") return [0.78, 1.08];
   if (faceId === "face-base-bottom") return [2.55, 0.92];
   if (faceId === "face-base-left") return [1.42, 0.5];
