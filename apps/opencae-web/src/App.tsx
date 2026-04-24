@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Constraint, DisplayModel, Load, Project, ResultSummary, RunEvent, Study } from "@opencae/schema";
 import { Save } from "lucide-react";
-import { addLoad, addSupport, assignMaterial, createProject, generateMesh, getResults, importLocalProject, loadSampleProject, runSimulation, subscribeToRun, updateStudy as saveStudyPatch, type SampleModelId } from "./lib/api";
+import { addLoad, addSupport, assignMaterial, createProject, generateMesh, getResults, importLocalProject, loadSampleProject, runSimulation, subscribeToRun, updateStudy as saveStudyPatch, uploadModel, type SampleModelId } from "./lib/api";
 import { BottomPanel } from "./components/BottomPanel";
 import { RightPanel } from "./components/RightPanel";
 import { StartScreen } from "./components/StartScreen";
@@ -144,6 +144,13 @@ export function App() {
   function handleOpenProject(file: File) {
     void openProjectResponse(importLocalProject(file)).catch((error: unknown) => {
       pushMessage(error instanceof Error ? error.message : "Could not open local project.");
+    });
+  }
+
+  function handleUploadModel(file: File) {
+    if (!project) return;
+    void openProjectResponse(uploadModel(project.id, file)).catch((error: unknown) => {
+      pushMessage(error instanceof Error ? error.message : "Could not upload model.");
     });
   }
 
@@ -311,6 +318,7 @@ export function App() {
           draftLoadDirection={draftLoadDirection}
           onFitView={() => setFitSignal((value) => value + 1)}
           onLoadSample={handleLoadSample}
+          onUploadModel={handleUploadModel}
           onSampleModelChange={handleLoadSample}
           onViewModeChange={setViewMode}
           onResultModeChange={setResultMode}

@@ -1,5 +1,5 @@
-import { useEffect, useState, type ReactNode } from "react";
-import { ArrowDown, Check, Download, Eye, FileText, Grid3X3, Maximize2, Play, Plus, RotateCcw, X } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { ArrowDown, Check, Download, Eye, FileText, Grid3X3, Maximize2, Play, Plus, RotateCcw, Upload, X } from "lucide-react";
 import { starterMaterials } from "@opencae/materials";
 import type { Constraint, DisplayFace, Load, Project, ResultSummary, Study } from "@opencae/schema";
 import type { ResultMode, ViewMode } from "./CadViewer";
@@ -24,6 +24,7 @@ interface RightPanelProps {
   draftLoadDirection: LoadDirectionLabel;
   onFitView: () => void;
   onLoadSample: (sample?: SampleModelId) => void;
+  onUploadModel: (file: File) => void;
   onSampleModelChange: (sample: SampleModelId) => void;
   onViewModeChange: (mode: ViewMode) => void;
   onResultModeChange: (mode: ResultMode) => void;
@@ -58,10 +59,12 @@ export function RightPanel(props: RightPanelProps) {
   );
 }
 
-function ModelPanel({ project, study, viewMode, sampleModel, onFitView, onViewModeChange, onLoadSample, onSampleModelChange }: RightPanelProps) {
+function ModelPanel({ project, study, viewMode, sampleModel, onFitView, onViewModeChange, onLoadSample, onUploadModel, onSampleModelChange }: RightPanelProps) {
   const [confirmSampleLoad, setConfirmSampleLoad] = useState(false);
+  const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const geometry = project.geometryFiles[0];
   const isBlankProject = !geometry;
+  const isUploadedProject = geometry?.metadata.source === "local-upload";
   const faceCount = Number(geometry?.metadata.faceCount ?? 0);
   const bodyCount = Number(geometry?.metadata.bodyCount ?? 0);
   const sampleLabel = sampleModel === "bracket" ? "Bracket Demo" : sampleModel === "plate" ? "Plate Demo" : "Cantilever Demo";
@@ -106,6 +109,23 @@ function ModelPanel({ project, study, viewMode, sampleModel, onFitView, onViewMo
         <button className="secondary" onClick={onFitView}><Maximize2 size={16} />Fit view</button>
         <button className={viewMode === "mesh" ? "primary" : "secondary"} onClick={() => onViewModeChange(viewMode === "mesh" ? "model" : "mesh")}><Eye size={16} />Toggle mesh</button>
       </div>
+      <input
+        ref={uploadInputRef}
+        className="hidden-file-input"
+        type="file"
+        tabIndex={-1}
+        aria-hidden="true"
+        accept=".step,.stp,.iges,.igs,.stl,.obj,.brep,.json,.opencae"
+        onChange={(event) => {
+          const file = event.currentTarget.files?.[0];
+          event.currentTarget.value = "";
+          if (file) onUploadModel(file);
+        }}
+      />
+      <button className={isBlankProject ? "primary wide" : "secondary wide"} type="button" onClick={() => uploadInputRef.current?.click()}>
+        <Upload size={16} />
+        {isBlankProject ? "Upload model" : "Replace model"}
+      </button>
       <button
         className={confirmSampleLoad ? "primary wide" : "secondary wide"}
         onClick={handleLoadSampleClick}
@@ -116,7 +136,9 @@ function ModelPanel({ project, study, viewMode, sampleModel, onFitView, onViewMo
       </button>
       {confirmSampleLoad && <p className="panel-copy confirm-copy">This will reload {sampleLabel} and reset the sample setup.</p>}
       {isBlankProject ? (
-        <Callout>This project is blank. Open a local OpenCAE project file or load a sample when you want preconfigured geometry.</Callout>
+        <Callout>Upload a STEP, IGES, STL, OBJ, or BREP file to start setting up this blank project. Native CAD parsing is mocked in this local build, so uploaded files use a generic selectable body.</Callout>
+      ) : isUploadedProject ? (
+        <Callout>{geometry.filename} is loaded from local disk as a generic selectable body. You can apply material, supports, loads, mesh, and run the mock simulation workflow.</Callout>
       ) : (
         <>
           <SectionTitle>Preconfigured</SectionTitle>

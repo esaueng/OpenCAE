@@ -43,6 +43,16 @@ export async function importLocalProject(file: File): Promise<SampleProjectRespo
   return readJson(response);
 }
 
+export async function uploadModel(projectId: string, file: File): Promise<SampleProjectResponse> {
+  const contentBase64 = await fileToBase64(file);
+  const response = await fetch(`/api/projects/${projectId}/uploads`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ filename: file.name, size: file.size, contentType: file.type || "application/octet-stream", contentBase64 })
+  });
+  return readJson(response);
+}
+
 export async function generateMesh(studyId: string, preset: "coarse" | "medium" | "fine"): Promise<{ study: Study; message: string }> {
   const response = await fetch(`/api/studies/${studyId}/mesh`, {
     method: "POST",
@@ -113,4 +123,16 @@ async function readJson<T>(response: Response): Promise<T> {
     throw new Error(await response.text());
   }
   return response.json() as Promise<T>;
+}
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener("load", () => {
+      const result = typeof reader.result === "string" ? reader.result : "";
+      resolve(result.includes(",") ? result.split(",").pop() ?? "" : result);
+    });
+    reader.addEventListener("error", () => reject(reader.error ?? new Error("Could not read model file.")));
+    reader.readAsDataURL(file);
+  });
 }

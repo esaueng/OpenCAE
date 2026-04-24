@@ -10,7 +10,17 @@ import { ProjectSchema, type DisplayModel, type Load, type Project, type RunEven
 import { LocalMockComputeBackend } from "@opencae/solver-service";
 import { FileSystemObjectStorageProvider } from "@opencae/storage";
 import { validateStaticStressStudy } from "@opencae/study-core";
-import { blankDisplayModel, createBlankProject, createSampleProject, normalizeSampleId, sampleDisplayModelFor, sampleProjectName, type SampleModelId } from "./projectFactory";
+import {
+  attachUploadedModelToProject,
+  blankDisplayModel,
+  createBlankProject,
+  createSampleProject,
+  normalizeSampleId,
+  sampleDisplayModelFor,
+  sampleProjectName,
+  uploadedDisplayModelFor,
+  type SampleModelId
+} from "./projectFactory";
 
 const api = Fastify({ logger: true });
 await api.register(cors, { origin: true });
@@ -93,7 +103,7 @@ api.post("/api/projects/import", async (request, reply) => {
   if (!parsed.success) return reply.code(400).send({ error: "The selected file is not a valid OpenCAE project JSON." });
 
   const project = parsed.data;
-  const displayModel = parseDisplayModel(body && "displayModel" in body ? body.displayModel : undefined) ?? displayModelForProject(project);
+  const displayModel = parseDisplayModel(body && "displayModel" in body ? body.displayModel : undefined) ?? await displayModelForProject(project);
   db.upsertProject(project);
   if (project.geometryFiles[0]?.artifactKey) {
     await storage.putObject(project.geometryFiles[0].artifactKey, JSON.stringify(displayModel, null, 2));
@@ -105,14 +115,42 @@ api.get("/api/projects/:projectId", async (request, reply) => {
   const { projectId } = request.params as { projectId: string };
   const project = db.getProject(projectId);
   if (!project) return reply.code(404).send({ error: "Project not found" });
-  if (!project.geometryFiles.length) return { project, displayModel: blankDisplayModel() };
-  const sample = normalizeSampleId(project.geometryFiles[0]?.metadata.sampleModel);
-  return { project, displayModel: sampleDisplayModelFor(sample) };
+  return { project, displayModel: await displayModelForProject(project) };
 });
 
-api.post("/api/projects/:projectId/uploads", async (request) => {
+api.post("/api/projects/:projectId/uploads", async (request, reply) => {
   const { projectId } = request.params as { projectId: string };
-  return { projectId, message: "Local upload endpoint scaffolded. Native CAD import is not enabled yet." };
+  const project = db.getProject(projectId);
+  if (!project) return reply.code(404).send({ error: "Project not found" });
+  const body = request.body as { filename?: string; size?: number; contentType?: string; contentBase64?: string } | undefined;
+  const filename = sanitizeFilename(body?.filename);
+  if (!filename) return reply.code(400).send({ error: "Choose a STEP, IGES, STL, OBJ, BREP, or OpenCAE model file." });
+
+  const displayModel = uploadedDisplayModelFor(filename);
+  const artifactKey = `${project.id}/geometry/uploaded-display.json`;
+  const nextProject = attachUploadedModelToProject(project, {
+    geometryId: `geom-upload-${crypto.randomUUID()}`,
+    filename,
+    artifactKey,
+    now: new Date().toISOString(),
+    displayModel
+  });
+  nextProject.geometryFiles[0]!.metadata = {
+    ...nextProject.geometryFiles[0]!.metadata,
+    originalSize: Number.isFinite(body?.size) ? body?.size : undefined,
+    contentType: body?.contentType
+  };
+  db.upsertProject(nextProject);
+  await storage.putObject(artifactKey, JSON.stringify(displayModel, null, 2));
+  if (typeof body?.contentBase64 === "string" && body.contentBase64.length > 0) {
+    await storage.putObject(`${project.id}/uploads/${filename}`, Buffer.from(body.contentBase64, "base64"));
+  }
+  await storage.putObject(`${project.id}/uploads/${filename}.metadata.json`, JSON.stringify({ filename, size: body?.size, contentType: body?.contentType }, null, 2));
+  return {
+    project: nextProject,
+    displayModel,
+    message: `${filename} uploaded. Native CAD parsing is mocked, so OpenCAE created a generic selectable body for setup.`
+  };
 });
 
 api.get("/api/projects/:projectId/files", async (request) => {
@@ -165,15 +203,16 @@ api.post("/api/studies/:studyId/materials", async (request, reply) => {
   const study = db.getStudy(studyId);
   if (!study) return reply.code(404).send({ error: "Study not found" });
   const body = request.body as { materialId?: string } | undefined;
+  const bodySelection = study.namedSelections.find((selection) => selection.entityType === "body");
   const assignment = {
     id: "assign-material-current",
     materialId: body?.materialId ?? bracketDemoMaterial.id,
-    selectionRef: "selection-body-bracket",
+    selectionRef: bodySelection?.id ?? "selection-body-bracket",
     status: "complete" as const
   };
   const next = { ...study, materialAssignments: [assignment] };
   db.upsertStudy(next);
-  return { study: next, message: "Material assigned to bracket." };
+  return { study: next, message: `Material assigned to ${bodySelection?.name ?? "model"}.` };
 });
 
 api.post("/api/studies/:studyId/supports", async (request, reply) => {
@@ -341,9 +380,19 @@ function isLoadType(type: unknown): type is Load["type"] {
   return type === "force" || type === "pressure" || type === "gravity";
 }
 
-function displayModelForProject(project: Project): DisplayModel {
+async function displayModelForProject(project: Project): Promise<DisplayModel> {
   if (!project.geometryFiles.length) return blankDisplayModel();
-  return sampleDisplayModelFor(normalizeSampleId(project.geometryFiles[0]?.metadata.sampleModel));
+  const geometry = project.geometryFiles[0];
+  if (geometry?.metadata.source === "local-upload") {
+    const displayModelRef = typeof geometry.metadata.displayModelRef === "string" ? geometry.metadata.displayModelRef : geometry.artifactKey;
+    try {
+      const artifact = await storage.getObject(displayModelRef);
+      return parseDisplayModel(JSON.parse(artifact.toString("utf8"))) ?? uploadedDisplayModelFor(geometry.filename);
+    } catch {
+      return uploadedDisplayModelFor(geometry.filename);
+    }
+  }
+  return sampleDisplayModelFor(normalizeSampleId(geometry?.metadata.sampleModel));
 }
 
 function parseDisplayModel(value: unknown): DisplayModel | undefined {
@@ -376,6 +425,15 @@ function isDisplayFace(value: unknown): boolean {
 
 function isVector3(value: unknown): value is [number, number, number] {
   return Array.isArray(value) && value.length === 3 && value.every((item) => typeof item === "number" && Number.isFinite(item));
+}
+
+function sanitizeFilename(filename: unknown): string | undefined {
+  if (typeof filename !== "string") return undefined;
+  const cleaned = filename.trim().split(/[\\/]/).pop()?.replace(/[^\w .-]/g, "_") ?? "";
+  if (!cleaned) return undefined;
+  const extension = cleaned.split(".").pop()?.toLowerCase();
+  if (!extension || !["step", "stp", "iges", "igs", "stl", "obj", "brep", "json", "opencae"].includes(extension)) return undefined;
+  return cleaned;
 }
 
 async function ensureSampleArtifacts(): Promise<void> {

@@ -712,6 +712,14 @@ input {
   width: 100%;
 }
 
+.hidden-file-input {
+  position: fixed;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
 .input-with-unit {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 56px;

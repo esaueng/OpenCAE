@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { blankDisplayModel, createBlankProject, createSampleProject, sampleDisplayModelFor } from "./projectFactory";
+import { attachUploadedModelToProject, blankDisplayModel, createBlankProject, uploadedDisplayModelFor, createSampleProject, sampleDisplayModelFor } from "./projectFactory";
 
 describe("projectFactory", () => {
   test("creates a blank project without preconfigured geometry or study setup", () => {
@@ -66,5 +66,33 @@ describe("projectFactory", () => {
 
     expect(faceSelections.map((selection) => selection.geometryRefs[0]?.entityId)).toContain("face-upright-front");
     expect(faceSelections.map((selection) => selection.geometryRefs[0]?.entityId)).toContain("face-base-end");
+  });
+
+  test("attaches an uploaded model with selectable faces to a blank project", () => {
+    const blank = createBlankProject({
+      projectId: "project-upload",
+      studyId: "study-upload",
+      now: "2026-04-24T12:00:00.000Z"
+    });
+    const displayModel = uploadedDisplayModelFor("mounting-plate.step");
+    const project = attachUploadedModelToProject(blank, {
+      geometryId: "geom-upload",
+      filename: "mounting-plate.step",
+      artifactKey: "project-upload/geometry/uploaded-display.json",
+      now: "2026-04-24T12:05:00.000Z",
+      displayModel
+    });
+
+    expect(project.name).toBe("Untitled Project");
+    expect(project.geometryFiles[0]?.filename).toBe("mounting-plate.step");
+    expect(project.geometryFiles[0]?.metadata.source).toBe("local-upload");
+    expect(project.geometryFiles[0]?.metadata.faceCount).toBe(displayModel.faces.length);
+    expect(project.studies[0]?.geometryScope).toEqual([
+      { bodyId: "body-uploaded", entityType: "body", entityId: "body-uploaded", label: "mounting-plate body" }
+    ]);
+    expect(project.studies[0]?.namedSelections.filter((selection) => selection.entityType === "face")).toHaveLength(displayModel.faces.length);
+    expect(project.studies[0]?.constraints).toEqual([]);
+    expect(project.studies[0]?.loads).toEqual([]);
+    expect(project.studies[0]?.meshSettings.status).toBe("not_started");
   });
 });
