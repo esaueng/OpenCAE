@@ -126,7 +126,8 @@ api.post("/api/projects/:projectId/uploads", async (request, reply) => {
   const filename = sanitizeFilename(body?.filename);
   if (!filename) return reply.code(400).send({ error: "Choose a STEP, IGES, STL, OBJ, BREP, or OpenCAE model file." });
 
-  const displayModel = uploadedDisplayModelFor(filename);
+  const contentBase64 = typeof body?.contentBase64 === "string" && body.contentBase64.length > 0 ? body.contentBase64 : undefined;
+  const displayModel = uploadedDisplayModelFor(filename, contentBase64);
   const artifactKey = `${project.id}/geometry/uploaded-display.json`;
   const nextProject = attachUploadedModelToProject(project, {
     geometryId: `geom-upload-${crypto.randomUUID()}`,
@@ -142,14 +143,17 @@ api.post("/api/projects/:projectId/uploads", async (request, reply) => {
   };
   db.upsertProject(nextProject);
   await storage.putObject(artifactKey, JSON.stringify(displayModel, null, 2));
-  if (typeof body?.contentBase64 === "string" && body.contentBase64.length > 0) {
-    await storage.putObject(`${project.id}/uploads/${filename}`, Buffer.from(body.contentBase64, "base64"));
+  if (contentBase64) {
+    await storage.putObject(`${project.id}/uploads/${filename}`, Buffer.from(contentBase64, "base64"));
   }
   await storage.putObject(`${project.id}/uploads/${filename}.metadata.json`, JSON.stringify({ filename, size: body?.size, contentType: body?.contentType }, null, 2));
+  const previewMessage = displayModel.visualMesh
+    ? "Previewing the uploaded mesh in the viewport."
+    : "Native CAD preview is not available yet. Upload STL or OBJ when you need the viewport to match the file.";
   return {
     project: nextProject,
     displayModel,
-    message: `${filename} uploaded. Native CAD parsing is mocked, so OpenCAE created a generic selectable body for setup.`
+    message: `${filename} uploaded. ${previewMessage}`
   };
 });
 
