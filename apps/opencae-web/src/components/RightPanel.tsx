@@ -116,7 +116,7 @@ function ModelPanel({ project, study, viewMode, sampleModel, onFitView, onViewMo
         type="file"
         tabIndex={-1}
         aria-hidden="true"
-        accept=".step,.stp,.iges,.igs,.stl,.obj,.brep,.json,.opencae"
+        accept=".stl,.obj"
         onChange={(event) => {
           const file = event.currentTarget.files?.[0];
           event.currentTarget.value = "";
@@ -137,9 +137,9 @@ function ModelPanel({ project, study, viewMode, sampleModel, onFitView, onViewMo
       </button>
       {confirmSampleLoad && <p className="panel-copy confirm-copy">This will reload {sampleLabel} and reset the sample setup.</p>}
       {isBlankProject ? (
-        <Callout>Upload STL or OBJ to preview the model in this local viewer. STEP, IGES, and BREP files can be stored, but native CAD preview is not available yet.</Callout>
+        <Callout>Upload STL or OBJ to preview the model in this local viewer. Convert STEP, IGES, or BREP to STL/OBJ before uploading.</Callout>
       ) : isUploadedProject ? (
-        <Callout>{uploadPreviewFormat ? `${geometry.filename} is loaded with a ${uploadPreviewFormat} viewport preview.` : `${geometry.filename} is stored, but native CAD preview is not available yet. Upload STL or OBJ when the viewport needs to match the file.`}</Callout>
+        <Callout>{uploadPreviewFormat ? `${geometry.filename} is loaded with a ${uploadPreviewFormat} viewport preview.` : `${geometry.filename} cannot be previewed in this local viewer. Replace it with STL or OBJ.`}</Callout>
       ) : (
         <>
           <SectionTitle>Preconfigured</SectionTitle>
