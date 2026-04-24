@@ -1122,30 +1122,7 @@ function HoleRims({ kind }: { kind: SampleModelKind }) {
     );
   }
 
-  if (kind === "cantilever" || kind === "uploaded") return null;
-
-  return (
-    <>
-      {BRACKET_HOLES.map((hole) => (
-        <MountHole
-          key={hole.id}
-          position={[hole.center[0], hole.center[1], BRACKET_DEPTH / 2 + 0.025]}
-          radius={hole.radius}
-        />
-      ))}
-    </>
-  );
-}
-
-function MountHole({ position, radius }: { position: [number, number, number]; radius: number }) {
-  return (
-    <group position={position}>
-      <mesh>
-        <torusGeometry args={[radius * 1.08, radius * 0.16, 10, 56]} />
-        <meshStandardMaterial color="#b9c8d8" roughness={0.3} metalness={0.6} />
-      </mesh>
-    </group>
-  );
+  return null;
 }
 
 function SupportBurst({ radius, active = false }: { radius: number; active?: boolean }) {
