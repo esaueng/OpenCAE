@@ -322,7 +322,7 @@ api.post("/api/studies/:studyId/runs", async (request, reply) => {
     status: "queued",
     jobId,
     meshRef: studySnapshot.meshSettings.meshRef,
-    solverBackend: "local-mock",
+    solverBackend: "local-static-superposition",
     solverVersion: "0.1.0",
     startedAt: new Date().toISOString(),
     diagnostics: []

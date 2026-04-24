@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { Constraint, DisplayModel, Load, Project, ResultSummary, RunEvent, Study } from "@opencae/schema";
+import type { Constraint, DisplayModel, Load, Project, ResultField, ResultSummary, RunEvent, Study } from "@opencae/schema";
 import { Save } from "lucide-react";
 import { addLoad, addSupport, assignMaterial, createProject, generateMesh, getResults, importLocalProject, loadSampleProject, runSimulation, subscribeToRun, updateStudy as saveStudyPatch, uploadModel, type SampleModelId } from "./lib/api";
 import { BottomPanel } from "./components/BottomPanel";
@@ -59,6 +59,7 @@ export function App() {
   const [activeRunId, setActiveRunId] = useState("run-bracket-demo-seeded");
   const [completedRunId, setCompletedRunId] = useState("run-bracket-demo-seeded");
   const [resultSummary, setResultSummary] = useState<ResultSummary>(seededSummary);
+  const [resultFields, setResultFields] = useState<ResultField[]>([]);
   const [draftLoadType, setDraftLoadType] = useState<LoadType>("force");
   const [draftLoadValue, setDraftLoadValue] = useState(500);
   const [draftLoadDirection, setDraftLoadDirection] = useState<LoadDirectionLabel>("-Y");
@@ -136,6 +137,7 @@ export function App() {
     setStepHistory(["model"]);
     setStepHistoryIndex(0);
     setViewMode("model");
+    setResultFields([]);
     const nextCompletedRunId = latestReportRunId(response.project.studies[0] ?? null, "") ?? "";
     setActiveRunId(nextCompletedRunId);
     setCompletedRunId(nextCompletedRunId);
@@ -249,6 +251,7 @@ export function App() {
         source.close();
         const results = await getResults(response.run.id);
         setResultSummary(results.summary);
+        setResultFields(results.fields);
         setCompletedRunId(response.run.id);
         setViewMode("results");
         setActiveStep("results");
@@ -315,6 +318,7 @@ export function App() {
           resultMode={resultMode}
           showDeformed={showDeformed}
           stressExaggeration={stressExaggeration}
+          resultFields={resultFields}
           themeMode={themeMode}
           fitSignal={fitSignal}
           loadMarkers={loadMarkers}

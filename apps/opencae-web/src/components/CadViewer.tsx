@@ -2,12 +2,13 @@ import { useEffect, useMemo, useState } from "react";
 import { Billboard, Bounds, Edges, GizmoHelper, Grid, Html, Line, OrbitControls, Text, useBounds, useGizmoContext } from "@react-three/drei";
 import { Canvas } from "@react-three/fiber";
 import type { ThreeEvent } from "@react-three/fiber";
-import type { DisplayFace, DisplayModel } from "@opencae/schema";
+import type { DisplayFace, DisplayModel, ResultField } from "@opencae/schema";
 import { RotateCcw } from "lucide-react";
 import * as THREE from "three";
 import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
 import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
 import type { StepId } from "./StepBar";
+import { resultSamplesForFaces, type FaceResultSample } from "../resultFields";
 
 export type ViewMode = "model" | "mesh" | "results";
 export type ResultMode = "stress" | "displacement" | "safety_factor";
@@ -41,6 +42,7 @@ interface CadViewerProps {
   resultMode: ResultMode;
   showDeformed: boolean;
   stressExaggeration: number;
+  resultFields: ResultField[];
   themeMode: ThemeMode;
   fitSignal: number;
   loadMarkers: ViewerLoadMarker[];
@@ -89,7 +91,7 @@ export function CadViewer(props: CadViewerProps) {
           Reset View
         </button>
       </div>
-      {effectiveViewMode === "results" && <ResultLegend resultMode={props.resultMode} />}
+      {effectiveViewMode === "results" && <ResultLegend resultMode={props.resultMode} resultFields={props.resultFields} />}
     </section>
   );
 }
@@ -152,7 +154,7 @@ function AxisDot({ color, position }: { color: string; position: [number, number
   );
 }
 
-function BracketModel({ displayModel, activeStep, selectedFaceId, onSelectFace, viewMode, resultMode, showDeformed, stressExaggeration, loadMarkers, supportMarkers }: CadViewerProps) {
+function BracketModel({ displayModel, activeStep, selectedFaceId, onSelectFace, viewMode, resultMode, showDeformed, stressExaggeration, resultFields, loadMarkers, supportMarkers }: CadViewerProps) {
   const [hovered, setHovered] = useState<string | null>(null);
   const modelKind = modelKindForDisplayModel(displayModel);
   const materialColor = useMemo(() => colorForResult(displayModel.faces, viewMode, resultMode), [displayModel.faces, resultMode, viewMode]);
@@ -163,7 +165,15 @@ function BracketModel({ displayModel, activeStep, selectedFaceId, onSelectFace, 
   return (
     <group>
       {isResultView ? (
-        <AnalysisResultModel kind={modelKind} resultMode={resultMode} showDeformed={showDeformed} stressExaggeration={stressExaggeration} />
+        <AnalysisResultModel
+          kind={modelKind}
+          displayModel={displayModel}
+          resultMode={resultMode}
+          showDeformed={showDeformed}
+          stressExaggeration={stressExaggeration}
+          resultFields={resultFields}
+          loadMarkers={loadMarkers.filter((marker) => !marker.preview)}
+        />
       ) : (
         <SampleSolid kind={modelKind} displayModel={displayModel} color={materialColor("face-base-bottom")} />
       )}
@@ -189,7 +199,7 @@ function BracketModel({ displayModel, activeStep, selectedFaceId, onSelectFace, 
         const face = displayModel.faces.find((item) => item.id === marker.faceId);
         return face ? <SupportGlyph key={marker.id} kind={modelKind} marker={marker} face={face} active={activeStep === "supports"} /> : null;
       })}
-      {showResultMarkers && resultProbesForKind(modelKind, resultMode).map((probe) => <ResultProbe key={`${probe.tone}-${probe.label}`} {...probe} />)}
+      {showResultMarkers && resultProbesForKind(modelKind, resultMode, resultFields).map((probe) => <ResultProbe key={`${probe.tone}-${probe.label}`} {...probe} />)}
     </group>
   );
 }
@@ -311,22 +321,92 @@ function UnsupportedUploadedModelNotice({ filename }: { filename: string }) {
   );
 }
 
-function AnalysisResultModel({ kind, resultMode, showDeformed, stressExaggeration }: { kind: SampleModelKind; resultMode: ResultMode; showDeformed: boolean; stressExaggeration: number }) {
+function AnalysisResultModel({
+  kind,
+  displayModel,
+  resultMode,
+  showDeformed,
+  stressExaggeration,
+  resultFields,
+  loadMarkers
+}: {
+  kind: SampleModelKind;
+  displayModel: DisplayModel;
+  resultMode: ResultMode;
+  showDeformed: boolean;
+  stressExaggeration: number;
+  resultFields: ResultField[];
+  loadMarkers: ViewerLoadMarker[];
+}) {
   if (kind === "blank") return null;
-  if (kind !== "bracket") {
-    return <SampleResultSolid kind={kind} resultMode={resultMode} showDeformed={showDeformed} stressExaggeration={stressExaggeration} />;
+  const samples = resultSamplesForFaces(displayModel.faces, resultFields, resultMode);
+  if (kind === "bracket") {
+    return <BracketResultSolid kind={kind} samples={samples} resultMode={resultMode} showDeformed={showDeformed} stressExaggeration={stressExaggeration} loadMarkers={loadMarkers} />;
   }
+  return <SampleResultSolid kind={kind} samples={samples} resultMode={resultMode} showDeformed={showDeformed} stressExaggeration={stressExaggeration} loadMarkers={loadMarkers} />;
+}
+
+function BracketResultSolid({
+  kind,
+  samples,
+  resultMode,
+  showDeformed,
+  stressExaggeration,
+  loadMarkers
+}: {
+  kind: SampleModelKind;
+  samples: FaceResultSample[];
+  resultMode: ResultMode;
+  showDeformed: boolean;
+  stressExaggeration: number;
+  loadMarkers: ViewerLoadMarker[];
+}) {
+  const bodyGeometry = useMemo(
+    () => colorizeResultGeometry(createBracketBodyGeometry(), kind, resultMode, showDeformed, stressExaggeration, samples, loadMarkers),
+    [kind, loadMarkers, resultMode, samples, showDeformed, stressExaggeration]
+  );
+  const ribGeometry = useMemo(
+    () => colorizeResultGeometry(createRibGeometry(), kind, resultMode, showDeformed, stressExaggeration, samples, loadMarkers),
+    [kind, loadMarkers, resultMode, samples, showDeformed, stressExaggeration]
+  );
   return (
     <group>
-      <SmoothBracketBody resultMode={resultMode} showDeformed={showDeformed} stressExaggeration={stressExaggeration} />
+      <mesh geometry={bodyGeometry}>
+        <meshStandardMaterial vertexColors metalness={0.18} roughness={0.52} side={THREE.DoubleSide} />
+        <Edges color="#43556a" threshold={18} />
+      </mesh>
+      <mesh geometry={ribGeometry}>
+        <meshStandardMaterial vertexColors metalness={0.18} roughness={0.52} side={THREE.DoubleSide} />
+        <Edges color="#43556a" threshold={18} />
+      </mesh>
       <HoleRims kind="bracket" />
     </group>
   );
 }
 
-function SampleResultSolid({ kind, resultMode, showDeformed, stressExaggeration }: { kind: SampleModelKind; resultMode: ResultMode; showDeformed: boolean; stressExaggeration: number }) {
-  const plateGeometry = useMemo(() => colorizeResultGeometry(createPlateGeometry(), kind, resultMode, showDeformed, stressExaggeration), [kind, resultMode, showDeformed, stressExaggeration]);
-  const cantileverGeometry = useMemo(() => colorizeResultGeometry(new THREE.BoxGeometry(3.8, 0.5, 0.72, 40, 8, 8), kind, resultMode, showDeformed, stressExaggeration), [kind, resultMode, showDeformed, stressExaggeration]);
+function SampleResultSolid({
+  kind,
+  samples,
+  resultMode,
+  showDeformed,
+  stressExaggeration,
+  loadMarkers
+}: {
+  kind: SampleModelKind;
+  samples: FaceResultSample[];
+  resultMode: ResultMode;
+  showDeformed: boolean;
+  stressExaggeration: number;
+  loadMarkers: ViewerLoadMarker[];
+}) {
+  const plateGeometry = useMemo(
+    () => colorizeResultGeometry(createPlateGeometry(), kind, resultMode, showDeformed, stressExaggeration, samples, loadMarkers),
+    [kind, loadMarkers, resultMode, samples, showDeformed, stressExaggeration]
+  );
+  const cantileverGeometry = useMemo(
+    () => colorizeResultGeometry(new THREE.BoxGeometry(3.8, 0.5, 0.72, 40, 8, 8), kind, resultMode, showDeformed, stressExaggeration, samples, loadMarkers),
+    [kind, loadMarkers, resultMode, samples, showDeformed, stressExaggeration]
+  );
   if (kind === "plate") {
     return (
       <mesh geometry={plateGeometry}>
@@ -346,16 +426,24 @@ function SampleResultSolid({ kind, resultMode, showDeformed, stressExaggeration 
   return <SampleSolid kind={kind} color={resultPalette(resultMode).body[2] ?? "#9aa7b4"} />;
 }
 
-function colorizeResultGeometry(geometry: THREE.BufferGeometry, kind: SampleModelKind, resultMode: ResultMode, showDeformed: boolean, stressExaggeration: number) {
+function colorizeResultGeometry(
+  geometry: THREE.BufferGeometry,
+  kind: SampleModelKind,
+  resultMode: ResultMode,
+  showDeformed: boolean,
+  stressExaggeration: number,
+  samples: FaceResultSample[],
+  loadMarkers: ViewerLoadMarker[]
+) {
   const colors: number[] = [];
   const positions = geometry.getAttribute("position");
   const color = new THREE.Color();
   for (let index = 0; index < positions.count; index += 1) {
     const point = new THREE.Vector3(positions.getX(index), positions.getY(index), positions.getZ(index));
-    color.copy(resultColorForPoint(kind, resultMode, stressExaggeration, point));
+    color.copy(resultColorForPoint(kind, resultMode, stressExaggeration, point, samples));
     colors.push(color.r, color.g, color.b);
     if (showDeformed) {
-      const deformed = deformedPointForKind(kind, point, stressExaggeration);
+      const deformed = deformedPointForResults(kind, point, stressExaggeration, samples, loadMarkers);
       positions.setXYZ(index, deformed.x, deformed.y, deformed.z);
     }
   }
@@ -363,6 +451,23 @@ function colorizeResultGeometry(geometry: THREE.BufferGeometry, kind: SampleMode
   positions.needsUpdate = true;
   geometry.computeVertexNormals();
   return geometry;
+}
+
+function deformedPointForResults(kind: SampleModelKind, point: THREE.Vector3, stressExaggeration: number, samples: FaceResultSample[], loadMarkers: ViewerLoadMarker[]) {
+  if (!loadMarkers.length) return deformedPointForKind(kind, point, stressExaggeration);
+  const next = point.clone();
+  const span = resultSampleSpan(samples);
+  const scale = 0.045 + Math.max(0, stressExaggeration - 1) * 0.075;
+  const deformation = new THREE.Vector3();
+  for (const marker of loadMarkers) {
+    const sample = samples.find((item) => item.face.id === marker.faceId);
+    if (!sample) continue;
+    const center = new THREE.Vector3(...sample.face.center);
+    const direction = new THREE.Vector3(...marker.direction).normalize();
+    const weight = Math.exp(-0.5 * (point.distanceTo(center) / Math.max(span * 0.48, 0.001)) ** 2);
+    deformation.addScaledVector(direction, weight * scale * Math.max(0.35, marker.value / 500));
+  }
+  return next.add(deformation);
 }
 
 function deformedPointForKind(kind: SampleModelKind, point: THREE.Vector3, stressExaggeration: number) {
@@ -381,15 +486,40 @@ function deformedPointForKind(kind: SampleModelKind, point: THREE.Vector3, stres
   return next;
 }
 
-function resultColorForPoint(kind: SampleModelKind, resultMode: ResultMode, stressExaggeration: number, point: THREE.Vector3) {
-  const stress = stressFractionForPoint(kind, point);
-  const displacement = displacementFractionForPoint(kind, point);
+function resultColorForPoint(kind: SampleModelKind, resultMode: ResultMode, stressExaggeration: number, point: THREE.Vector3, samples: FaceResultSample[]) {
+  const sampleValue = resultFractionFromSamples(point, samples);
+  const stress = sampleValue ?? stressFractionForPoint(kind, point);
+  const displacement = sampleValue ?? displacementFractionForPoint(kind, point);
   const t = resultMode === "displacement"
     ? displacement
     : resultMode === "safety_factor"
-      ? 1 - stress * 0.88
+      ? sampleValue ?? (1 - stress * 0.88)
       : Math.max(0, Math.min(1, 0.5 + (stress - 0.5) * stressExaggeration));
   return new THREE.Color(interpolatedPaletteColor(resultPalette(resultMode).body, t));
+}
+
+function resultFractionFromSamples(point: THREE.Vector3, samples: FaceResultSample[]): number | null {
+  if (!samples.length) return null;
+  const span = resultSampleSpan(samples);
+  let weighted = 0;
+  let totalWeight = 0;
+  for (const sample of samples) {
+    const center = new THREE.Vector3(...sample.face.center);
+    const weight = Math.exp(-0.5 * (point.distanceTo(center) / Math.max(span * 0.28, 0.001)) ** 2) + 0.015;
+    weighted += sample.normalized * weight;
+    totalWeight += weight;
+  }
+  return totalWeight > 0 ? Math.max(0, Math.min(1, weighted / totalWeight)) : null;
+}
+
+function resultSampleSpan(samples: FaceResultSample[]): number {
+  let span = 1;
+  for (const left of samples) {
+    for (const right of samples) {
+      span = Math.max(span, new THREE.Vector3(...left.face.center).distanceTo(new THREE.Vector3(...right.face.center)));
+    }
+  }
+  return span;
 }
 
 function stressFractionForPoint(kind: SampleModelKind, point: THREE.Vector3) {
@@ -706,8 +836,8 @@ function normalizeGeometry(geometry: THREE.BufferGeometry): void {
 
 type ResultProbeConfig = { label: string; anchor: [number, number, number]; labelPosition: [number, number, number]; tone: "max" | "mid" | "min" };
 
-function resultProbesForKind(kind: SampleModelKind, resultMode: ResultMode): ResultProbeConfig[] {
-  const labels = resultProbeLabels(resultMode);
+function resultProbesForKind(kind: SampleModelKind, resultMode: ResultMode, resultFields: ResultField[]): ResultProbeConfig[] {
+  const labels = resultProbeLabels(resultMode, resultFields);
   if (kind === "plate") {
     return [
       { label: labels.max, anchor: [0.08, 0.3, PLATE_DEPTH / 2 + 0.07], labelPosition: [-0.55, 0.78, 0.62], tone: "max" },
@@ -730,7 +860,18 @@ function resultProbesForKind(kind: SampleModelKind, resultMode: ResultMode): Res
   ];
 }
 
-function resultProbeLabels(resultMode: ResultMode) {
+function resultProbeLabels(resultMode: ResultMode, resultFields: ResultField[]) {
+  const field = resultFields.find((candidate) => candidate.type === resultMode && candidate.location === "face");
+  if (field?.values.length) {
+    const sorted = [...field.values].sort((left, right) => left - right);
+    const min = sorted[0] ?? field.min;
+    const mid = sorted[Math.floor(sorted.length / 2)] ?? (field.min + field.max) / 2;
+    const max = sorted.at(-1) ?? field.max;
+    const unit = field.units ? ` ${field.units}` : "";
+    if (resultMode === "displacement") return { max: `Disp: ${formatResultValue(max)}${unit}`, mid: `Disp: ${formatResultValue(mid)}${unit}`, min: `Disp: ${formatResultValue(min)}${unit}` };
+    if (resultMode === "safety_factor") return { max: `FoS: ${formatResultValue(min)}`, mid: `FoS: ${formatResultValue(mid)}`, min: `FoS: ${formatResultValue(max)}` };
+    return { max: `Stress: ${formatResultValue(max)}${unit}`, mid: `Stress: ${formatResultValue(mid)}${unit}`, min: `Stress: ${formatResultValue(min)}${unit}` };
+  }
   if (resultMode === "displacement") {
     return { max: "Disp: 0.184 mm", mid: "Disp: 0.092 mm", min: "Disp: 0.012 mm" };
   }
@@ -738,6 +879,10 @@ function resultProbeLabels(resultMode: ResultMode) {
     return { max: "FoS: 1.8", mid: "FoS: 4.7", min: "FoS: 7.6" };
   }
   return { max: "Stress: 142 MPa", mid: "Stress: 64 MPa", min: "Stress: 28 MPa" };
+}
+
+function formatResultValue(value: number) {
+  return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(3)));
 }
 
 function ResultProbe({ label, anchor, labelPosition, tone }: ResultProbeConfig) {
@@ -851,14 +996,15 @@ function supportLabel(marker: ViewerSupportMarker) {
   return `${kind} ${marker.stackIndex + 1}: ${marker.label}`;
 }
 
-function ResultLegend({ resultMode }: { resultMode: ResultMode }) {
+function ResultLegend({ resultMode, resultFields }: { resultMode: ResultMode; resultFields: ResultField[] }) {
   const title = resultMode === "stress" ? "Von Mises Stress" : resultMode === "displacement" ? "Displacement" : "Safety Factor";
-  const unit = resultMode === "stress" ? "MPa" : resultMode === "displacement" ? "mm" : "";
-  const min = resultMode === "stress" ? "28 Min" : resultMode === "displacement" ? "0 Min" : "1.8 Min";
-  const max = resultMode === "stress" ? "142 Max" : resultMode === "displacement" ? "0.184 Max" : "7.6 Max";
-  const mid1 = resultMode === "stress" ? "106" : resultMode === "displacement" ? "0.138" : "6.2";
-  const mid2 = resultMode === "stress" ? "85" : resultMode === "displacement" ? "0.092" : "4.7";
-  const mid3 = resultMode === "stress" ? "57" : resultMode === "displacement" ? "0.046" : "3.2";
+  const field = resultFields.find((candidate) => candidate.type === resultMode && candidate.location === "face");
+  const unit = field?.units ?? (resultMode === "stress" ? "MPa" : resultMode === "displacement" ? "mm" : "");
+  const minValue = field?.min ?? (resultMode === "stress" ? 28 : resultMode === "displacement" ? 0 : 1.8);
+  const maxValue = field?.max ?? (resultMode === "stress" ? 142 : resultMode === "displacement" ? 0.184 : 7.6);
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map((tick) => formatResultValue(minValue + (maxValue - minValue) * tick));
+  const min = `${ticks[0]} Min`;
+  const max = `${ticks[4]} Max`;
   return (
     <div className={`analysis-legend ${resultMode === "safety_factor" ? "safety-scale" : ""}`}>
       <strong>Nodes: 42,381</strong>
@@ -868,9 +1014,9 @@ function ResultLegend({ resultMode }: { resultMode: ResultMode }) {
       <div className="legend-scale" />
       <div className="legend-values">
         <span>{min}</span>
-        <span>{mid3}</span>
-        <span>{mid2}</span>
-        <span>{mid1}</span>
+        <span>{ticks[1]}</span>
+        <span>{ticks[2]}</span>
+        <span>{ticks[3]}</span>
         <span>{max}</span>
       </div>
     </div>
