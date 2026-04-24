@@ -155,16 +155,15 @@ function AxisDot({ color, position }: { color: string; position: [number, number
 function BracketModel({ displayModel, activeStep, selectedFaceId, onSelectFace, viewMode, resultMode, showDeformed, stressExaggeration, loadMarkers, supportMarkers }: CadViewerProps) {
   const [hovered, setHovered] = useState<string | null>(null);
   const modelKind = modelKindForDisplayModel(displayModel);
-  const groupScale: [number, number, number] = showDeformed && viewMode === "results" ? [1.02, 1.06, 1.01] : [1, 1, 1];
   const materialColor = useMemo(() => colorForResult(displayModel.faces, viewMode, resultMode), [displayModel.faces, resultMode, viewMode]);
   const showResultMarkers = viewMode === "results" && activeStep === "results";
   const isResultView = viewMode === "results";
   const showBoundaryMarkers = !isResultView;
 
   return (
-    <group scale={groupScale}>
+    <group>
       {isResultView ? (
-        <AnalysisResultModel kind={modelKind} resultMode={resultMode} stressExaggeration={stressExaggeration} />
+        <AnalysisResultModel kind={modelKind} resultMode={resultMode} showDeformed={showDeformed} stressExaggeration={stressExaggeration} />
       ) : (
         <SampleSolid kind={modelKind} displayModel={displayModel} color={materialColor("face-base-bottom")} />
       )}
@@ -312,22 +311,22 @@ function UnsupportedUploadedModelNotice({ filename }: { filename: string }) {
   );
 }
 
-function AnalysisResultModel({ kind, resultMode, stressExaggeration }: { kind: SampleModelKind; resultMode: ResultMode; stressExaggeration: number }) {
+function AnalysisResultModel({ kind, resultMode, showDeformed, stressExaggeration }: { kind: SampleModelKind; resultMode: ResultMode; showDeformed: boolean; stressExaggeration: number }) {
   if (kind === "blank") return null;
   if (kind !== "bracket") {
-    return <SampleResultSolid kind={kind} resultMode={resultMode} stressExaggeration={stressExaggeration} />;
+    return <SampleResultSolid kind={kind} resultMode={resultMode} showDeformed={showDeformed} stressExaggeration={stressExaggeration} />;
   }
   return (
     <group>
-      <SmoothBracketBody resultMode={resultMode} stressExaggeration={stressExaggeration} />
+      <SmoothBracketBody resultMode={resultMode} showDeformed={showDeformed} stressExaggeration={stressExaggeration} />
       <HoleRims kind="bracket" />
     </group>
   );
 }
 
-function SampleResultSolid({ kind, resultMode, stressExaggeration }: { kind: SampleModelKind; resultMode: ResultMode; stressExaggeration: number }) {
-  const plateGeometry = useMemo(() => colorizeResultGeometry(createPlateGeometry(), kind, resultMode, stressExaggeration), [kind, resultMode, stressExaggeration]);
-  const cantileverGeometry = useMemo(() => colorizeResultGeometry(new THREE.BoxGeometry(3.8, 0.5, 0.72, 40, 8, 8), kind, resultMode, stressExaggeration), [kind, resultMode, stressExaggeration]);
+function SampleResultSolid({ kind, resultMode, showDeformed, stressExaggeration }: { kind: SampleModelKind; resultMode: ResultMode; showDeformed: boolean; stressExaggeration: number }) {
+  const plateGeometry = useMemo(() => colorizeResultGeometry(createPlateGeometry(), kind, resultMode, showDeformed, stressExaggeration), [kind, resultMode, showDeformed, stressExaggeration]);
+  const cantileverGeometry = useMemo(() => colorizeResultGeometry(new THREE.BoxGeometry(3.8, 0.5, 0.72, 40, 8, 8), kind, resultMode, showDeformed, stressExaggeration), [kind, resultMode, showDeformed, stressExaggeration]);
   if (kind === "plate") {
     return (
       <mesh geometry={plateGeometry}>
@@ -347,7 +346,7 @@ function SampleResultSolid({ kind, resultMode, stressExaggeration }: { kind: Sam
   return <SampleSolid kind={kind} color={resultPalette(resultMode).body[2] ?? "#9aa7b4"} />;
 }
 
-function colorizeResultGeometry(geometry: THREE.BufferGeometry, kind: SampleModelKind, resultMode: ResultMode, stressExaggeration: number) {
+function colorizeResultGeometry(geometry: THREE.BufferGeometry, kind: SampleModelKind, resultMode: ResultMode, showDeformed: boolean, stressExaggeration: number) {
   const colors: number[] = [];
   const positions = geometry.getAttribute("position");
   const color = new THREE.Color();
@@ -355,10 +354,31 @@ function colorizeResultGeometry(geometry: THREE.BufferGeometry, kind: SampleMode
     const point = new THREE.Vector3(positions.getX(index), positions.getY(index), positions.getZ(index));
     color.copy(resultColorForPoint(kind, resultMode, stressExaggeration, point));
     colors.push(color.r, color.g, color.b);
+    if (showDeformed) {
+      const deformed = deformedPointForKind(kind, point, stressExaggeration);
+      positions.setXYZ(index, deformed.x, deformed.y, deformed.z);
+    }
   }
   geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+  positions.needsUpdate = true;
   geometry.computeVertexNormals();
   return geometry;
+}
+
+function deformedPointForKind(kind: SampleModelKind, point: THREE.Vector3, stressExaggeration: number) {
+  const next = point.clone();
+  const scale = 0.08 + Math.max(0, stressExaggeration - 1) * 0.12;
+  if (kind === "plate") {
+    const span = Math.max(0, Math.min(1, (point.x + 1.9) / 3.8));
+    const holeInfluence = gaussian2d(point.x, point.y, 0, 0, 0.58, 0.58);
+    next.y -= scale * span * span;
+    next.z += scale * 0.52 * span * (point.y >= 0 ? 1 : -1) + holeInfluence * scale * 0.18;
+  } else if (kind === "cantilever") {
+    const span = Math.max(0, Math.min(1, (point.x + 1.9) / 3.8));
+    next.y -= scale * 1.15 * span * span;
+    next.z += scale * 0.28 * span * (point.z >= 0 ? 1 : -1);
+  }
+  return next;
 }
 
 function resultColorForPoint(kind: SampleModelKind, resultMode: ResultMode, stressExaggeration: number, point: THREE.Vector3) {
@@ -400,40 +420,41 @@ function gaussian2d(x: number, y: number, cx: number, cy: number, rx: number, ry
   return Math.exp(-0.5 * (dx * dx + dy * dy));
 }
 
-function SmoothBracketBody({ resultMode, stressExaggeration }: { resultMode: ResultMode; stressExaggeration: number }) {
+function SmoothBracketBody({ resultMode, showDeformed, stressExaggeration }: { resultMode: ResultMode; showDeformed: boolean; stressExaggeration: number }) {
   const bodyGeometry = useMemo(() => createBracketBodyGeometry(), []);
   const ribGeometry = useMemo(() => createRibGeometry(), []);
   return (
     <group>
       <mesh>
         <primitive attach="geometry" object={bodyGeometry} />
-        <ResultMaterial resultMode={resultMode} part="body" stressExaggeration={stressExaggeration} />
+        <ResultMaterial resultMode={resultMode} part="body" showDeformed={showDeformed} stressExaggeration={stressExaggeration} />
         <Edges color="#43556a" threshold={18} />
       </mesh>
       <mesh>
         <primitive attach="geometry" object={ribGeometry} />
-        <ResultMaterial resultMode={resultMode} part="rib" stressExaggeration={stressExaggeration} />
+        <ResultMaterial resultMode={resultMode} part="rib" showDeformed={showDeformed} stressExaggeration={stressExaggeration} />
         <Edges color="#43556a" threshold={18} />
       </mesh>
     </group>
   );
 }
 
-function ResultMaterial({ resultMode, part, stressExaggeration }: { resultMode: ResultMode; part: "body" | "rib"; stressExaggeration: number }) {
+function ResultMaterial({ resultMode, part, showDeformed, stressExaggeration }: { resultMode: ResultMode; part: "body" | "rib"; showDeformed: boolean; stressExaggeration: number }) {
   const mode = resultMode === "stress" ? 0 : resultMode === "displacement" ? 1 : 2;
   const partValue = part === "body" ? 0 : 1;
   const uniforms = useMemo(
     () => ({
       uMode: { value: mode },
       uPart: { value: partValue },
+      uShowDeformed: { value: showDeformed ? 1 : 0 },
       uStressExaggeration: { value: stressExaggeration }
     }),
-    [mode, partValue, stressExaggeration]
+    [mode, partValue, showDeformed, stressExaggeration]
   );
 
   return (
     <shaderMaterial
-      key={`${part}-${resultMode}-${stressExaggeration}`}
+      key={`${part}-${resultMode}-${showDeformed}-${stressExaggeration}`}
       uniforms={uniforms}
       vertexShader={RESULT_VERTEX_SHADER}
       fragmentShader={RESULT_FRAGMENT_SHADER}
@@ -445,11 +466,26 @@ function ResultMaterial({ resultMode, part, stressExaggeration }: { resultMode: 
 const RESULT_VERTEX_SHADER = `
   varying vec3 vLocalPosition;
   varying vec3 vNormal;
+  uniform int uShowDeformed;
+  uniform float uStressExaggeration;
+
+  float bracketSpan(vec3 p) {
+    return clamp((p.x + 1.55) / 3.90, 0.0, 1.0);
+  }
 
   void main() {
+    vec3 deformed = position;
+    if (uShowDeformed == 1) {
+      float scale = 0.07 + max(uStressExaggeration - 1.0, 0.0) * 0.10;
+      float upright = smoothstep(0.20, 2.62, position.y) * (1.0 - bracketSpan(position) * 0.35);
+      float base = bracketSpan(position);
+      deformed.y -= scale * (upright * upright + base * base * 0.55);
+      deformed.x += scale * 0.22 * upright;
+      deformed.z += scale * 0.28 * (position.z >= 0.0 ? 1.0 : -1.0) * max(upright, base * 0.55);
+    }
     vLocalPosition = position;
     vNormal = normalize(normalMatrix * normal);
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(deformed, 1.0);
   }
 `;
 
