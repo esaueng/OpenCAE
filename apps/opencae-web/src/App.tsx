@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import type { Constraint, DisplayModel, Load, Project, ResultSummary, RunEvent, Study } from "@opencae/schema";
-import { addLoad, addSupport, assignMaterial, createProject, generateMesh, getResults, loadSampleProject, openMostRecentProject, runSimulation, subscribeToRun, updateStudy as saveStudyPatch, type SampleModelId } from "./lib/api";
+import { addLoad, addSupport, assignMaterial, createProject, generateMesh, getResults, importLocalProject, loadSampleProject, runSimulation, subscribeToRun, updateStudy as saveStudyPatch, type SampleModelId } from "./lib/api";
 import { BottomPanel } from "./components/BottomPanel";
 import { RightPanel } from "./components/RightPanel";
 import { StartScreen } from "./components/StartScreen";
@@ -113,11 +113,13 @@ export function App() {
   }
 
   function handleCreateProject() {
-    void openProjectResponse(createProject(sampleModel));
+    void openProjectResponse(createProject());
   }
 
-  function handleOpenProject() {
-    void openProjectResponse(openMostRecentProject());
+  function handleOpenProject(file: File) {
+    void openProjectResponse(importLocalProject(file)).catch((error: unknown) => {
+      pushMessage(error instanceof Error ? error.message : "Could not open local project.");
+    });
   }
 
   function pushMessage(message: string) {

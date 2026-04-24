@@ -56,7 +56,7 @@ const BRACKET_HOLES = [
   { id: "base-hole-left", center: [0.24, 0] as [number, number], radius: 0.13, supported: true },
   { id: "base-hole-right", center: [1.2, 0] as [number, number], radius: 0.13, supported: true }
 ];
-type SampleModelKind = "bracket" | "plate" | "cantilever";
+type SampleModelKind = "blank" | "bracket" | "plate" | "cantilever";
 
 export function CadViewer(props: CadViewerProps) {
   const effectiveViewMode: ViewMode = props.activeStep === "results" ? props.viewMode : props.viewMode === "mesh" ? "mesh" : "model";
@@ -198,12 +198,14 @@ function BracketModel({ displayModel, activeStep, selectedFaceId, onSelectFace, 
 }
 
 function modelKindForDisplayModel(displayModel: DisplayModel): SampleModelKind {
+  if (displayModel.bodyCount === 0 || displayModel.id.includes("blank")) return "blank";
   if (displayModel.id.includes("plate")) return "plate";
   if (displayModel.id.includes("cantilever")) return "cantilever";
   return "bracket";
 }
 
 function SampleSolid({ kind, color }: { kind: SampleModelKind; color: string }) {
+  if (kind === "blank") return null;
   if (kind === "plate") return <PlateSolid color={color} />;
   if (kind === "cantilever") return <CantileverSolid color={color} />;
   return <BracketSolid color={color} />;
@@ -250,6 +252,7 @@ function CantileverSolid({ color }: { color: string }) {
 }
 
 function AnalysisResultModel({ kind, resultMode, stressExaggeration }: { kind: SampleModelKind; resultMode: ResultMode; stressExaggeration: number }) {
+  if (kind === "blank") return null;
   if (kind !== "bracket") {
     return <SampleSolid kind={kind} color={resultPalette(resultMode).body[2] ?? "#9aa7b4"} />;
   }
@@ -740,6 +743,7 @@ function ArrowGlyph({
 }
 
 function HoleRims({ kind }: { kind: SampleModelKind }) {
+  if (kind === "blank") return null;
   if (kind === "plate") {
     return (
       <mesh position={[0, 0, PLATE_DEPTH / 2 + 0.025]}>
@@ -796,6 +800,8 @@ function MeshOverlay({ kind }: { kind: SampleModelKind }) {
   const bodyGeometry = useMemo(() => createBracketBodyGeometry(), []);
   const ribGeometry = useMemo(() => createRibGeometry(), []);
   const plateGeometry = useMemo(() => createPlateGeometry(), []);
+  if (kind === "blank") return null;
+
   if (kind === "plate") {
     return (
       <mesh>
