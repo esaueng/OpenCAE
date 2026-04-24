@@ -72,6 +72,81 @@ export function blankDisplayModel(): DisplayModel {
   };
 }
 
+export function uploadedDisplayModelFor(filename: string): DisplayModel {
+  const modelName = baseNameForModel(filename);
+  return {
+    id: "display-uploaded",
+    name: `${modelName} imported body`,
+    bodyCount: 1,
+    faces: [
+      { id: "face-upload-top", label: "Top face", color: "#f59e0b", center: [0, 0.72, 0], normal: [0, 1, 0], stressValue: 72 },
+      { id: "face-upload-bottom", label: "Bottom face", color: "#4da3ff", center: [0, -0.72, 0], normal: [0, -1, 0], stressValue: 48 },
+      { id: "face-upload-front", label: "Front face", color: "#22c55e", center: [0, 0, 0.52], normal: [0, 0, 1], stressValue: 64 },
+      { id: "face-upload-back", label: "Back face", color: "#64748b", center: [0, 0, -0.52], normal: [0, 0, -1], stressValue: 54 },
+      { id: "face-upload-left", label: "Left face", color: "#8b949e", center: [-1.1, 0, 0], normal: [-1, 0, 0], stressValue: 58 },
+      { id: "face-upload-right", label: "Right face", color: "#8b949e", center: [1.1, 0, 0], normal: [1, 0, 0], stressValue: 84 }
+    ]
+  };
+}
+
+export function attachUploadedModelToProject(
+  project: Project,
+  options: { geometryId: string; filename: string; artifactKey: string; now: string; displayModel: DisplayModel }
+): Project {
+  const study = project.studies[0];
+  const modelName = baseNameForModel(options.filename);
+  const bodyLabel = `${modelName} body`;
+  const bodySelection = {
+    id: "selection-body-uploaded",
+    name: bodyLabel,
+    entityType: "body" as const,
+    geometryRefs: [{ bodyId: "body-uploaded", entityType: "body" as const, entityId: "body-uploaded", label: bodyLabel }],
+    fingerprint: `body-uploaded-${modelName}`
+  };
+  const faceSelections = options.displayModel.faces.map((face) => ({
+    id: `selection-${face.id}`,
+    name: face.label,
+    entityType: "face" as const,
+    geometryRefs: [{ bodyId: "body-uploaded", entityType: "face" as const, entityId: face.id, label: face.label }],
+    fingerprint: `${face.id}-uploaded-v1`
+  }));
+
+  return {
+    ...project,
+    geometryFiles: [{
+      id: options.geometryId,
+      projectId: project.id,
+      filename: options.filename,
+      localPath: `uploads/${options.filename}`,
+      artifactKey: options.artifactKey,
+      status: "ready",
+      metadata: {
+        source: "local-upload",
+        nativeCadImport: false,
+        displayModelRef: options.artifactKey,
+        bodyCount: options.displayModel.bodyCount,
+        faceCount: options.displayModel.faces.length
+      }
+    }],
+    studies: study
+      ? [{
+        ...study,
+        geometryScope: [{ bodyId: "body-uploaded", entityType: "body" as const, entityId: "body-uploaded", label: bodyLabel }],
+        materialAssignments: [],
+        namedSelections: [bodySelection, ...faceSelections],
+        constraints: [],
+        loads: [],
+        meshSettings: {
+          preset: study.meshSettings.preset,
+          status: "not_started"
+        },
+        runs: []
+      }]
+      : [],
+    updatedAt: options.now
+  };
+}
+
 export function createSampleProject(
   sampleId: SampleModelId,
   options: { projectId: string; studyId: string; name?: string; now: string; includeSeedRun: boolean }
@@ -180,4 +255,10 @@ export function sampleDisplayModelFor(sampleId: SampleModelId): DisplayModel {
 
 export function sampleProjectName(sampleId: SampleModelId): string {
   return SAMPLE_META[sampleId].projectName;
+}
+
+function baseNameForModel(filename: string): string {
+  const safeName = filename.trim().split(/[\\/]/).pop() || "Uploaded model";
+  const withoutExtension = safeName.replace(/\.[^.]+$/, "");
+  return withoutExtension || "Uploaded model";
 }

@@ -56,7 +56,8 @@ const BRACKET_HOLES = [
   { id: "base-hole-left", center: [0.24, 0] as [number, number], radius: 0.13, supported: true },
   { id: "base-hole-right", center: [1.2, 0] as [number, number], radius: 0.13, supported: true }
 ];
-type SampleModelKind = "blank" | "bracket" | "plate" | "cantilever";
+type SampleModelKind = "blank" | "bracket" | "plate" | "cantilever" | "uploaded";
+const UPLOADED_BOX_SIZE: [number, number, number] = [2.2, 1.44, 1.04];
 
 export function CadViewer(props: CadViewerProps) {
   const effectiveViewMode: ViewMode = props.activeStep === "results" ? props.viewMode : props.viewMode === "mesh" ? "mesh" : "model";
@@ -199,6 +200,7 @@ function BracketModel({ displayModel, activeStep, selectedFaceId, onSelectFace, 
 
 function modelKindForDisplayModel(displayModel: DisplayModel): SampleModelKind {
   if (displayModel.bodyCount === 0 || displayModel.id.includes("blank")) return "blank";
+  if (displayModel.id.includes("uploaded")) return "uploaded";
   if (displayModel.id.includes("plate")) return "plate";
   if (displayModel.id.includes("cantilever")) return "cantilever";
   return "bracket";
@@ -206,6 +208,7 @@ function modelKindForDisplayModel(displayModel: DisplayModel): SampleModelKind {
 
 function SampleSolid({ kind, color }: { kind: SampleModelKind; color: string }) {
   if (kind === "blank") return null;
+  if (kind === "uploaded") return <UploadedSolid color={color} />;
   if (kind === "plate") return <PlateSolid color={color} />;
   if (kind === "cantilever") return <CantileverSolid color={color} />;
   return <BracketSolid color={color} />;
@@ -246,6 +249,16 @@ function CantileverSolid({ color }: { color: string }) {
     <mesh position={[0, 0.18, 0]}>
       <boxGeometry args={[3.8, 0.5, 0.72]} />
       <meshStandardMaterial color={color} metalness={0.2} roughness={0.5} />
+      <Edges color="#c8d3df" threshold={15} />
+    </mesh>
+  );
+}
+
+function UploadedSolid({ color }: { color: string }) {
+  return (
+    <mesh>
+      <boxGeometry args={[...UPLOADED_BOX_SIZE, 10, 6, 6]} />
+      <meshStandardMaterial color={color} metalness={0.18} roughness={0.54} />
       <Edges color="#c8d3df" threshold={15} />
     </mesh>
   );
@@ -775,7 +788,7 @@ function HoleRims({ kind }: { kind: SampleModelKind }) {
     );
   }
 
-  if (kind === "cantilever") return null;
+  if (kind === "cantilever" || kind === "uploaded") return null;
 
   return (
     <>
@@ -837,6 +850,15 @@ function MeshOverlay({ kind }: { kind: SampleModelKind }) {
     return (
       <mesh position={[0, 0.18, 0]}>
         <boxGeometry args={[3.8, 0.5, 0.72, 18, 4, 4]} />
+        <meshBasicMaterial color="#9ad1ff" wireframe transparent opacity={0.3} />
+      </mesh>
+    );
+  }
+
+  if (kind === "uploaded") {
+    return (
+      <mesh>
+        <boxGeometry args={[...UPLOADED_BOX_SIZE, 10, 6, 6]} />
         <meshBasicMaterial color="#9ad1ff" wireframe transparent opacity={0.3} />
       </mesh>
     );
@@ -910,6 +932,11 @@ function targetSizeForFace(faceId: string, modelKind: SampleModelKind, placement
   if (modelKind === "cantilever") {
     if (faceId === "face-load-top" || faceId === "face-base-left") return [0.72, 0.72];
     return [2.9, 0.68];
+  }
+  if (modelKind === "uploaded") {
+    if (faceId === "face-upload-top" || faceId === "face-upload-bottom") return [UPLOADED_BOX_SIZE[0], UPLOADED_BOX_SIZE[2]];
+    if (faceId === "face-upload-front" || faceId === "face-upload-back") return [UPLOADED_BOX_SIZE[0], UPLOADED_BOX_SIZE[1]];
+    return [UPLOADED_BOX_SIZE[2], UPLOADED_BOX_SIZE[1]];
   }
   if (faceId === "face-load-top") return [0.78, 1.08];
   if (faceId === "face-base-bottom") return [2.55, 0.92];
