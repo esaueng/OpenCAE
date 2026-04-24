@@ -68,9 +68,48 @@ describe("LocalMockComputeBackend", () => {
       vi.useRealTimers();
     }
   });
+
+  test("changes the solved stress field when the same total force is moved to a different face", async () => {
+    vi.useFakeTimers();
+    try {
+      const storage = new MemoryStorage();
+      const backend = new LocalMockComputeBackend(storage);
+
+      const topRun = backend.runStaticSolve({
+        study: studyWithLoads([{ id: "top-load", type: "force", value: 500, direction: [0, -1, 0], selectionRef: "selection-load-face" }]),
+        runId: "run-top",
+        meshRef: "mesh-top",
+        publish: vi.fn()
+      });
+      await vi.runAllTimersAsync();
+      const top = await topRun;
+
+      const endRun = backend.runStaticSolve({
+        study: studyWithLoads([{ id: "end-load", type: "force", value: 500, direction: [1, 0, 0], selectionRef: "selection-end-face" }]),
+        runId: "run-end",
+        meshRef: "mesh-end",
+        publish: vi.fn()
+      });
+      await vi.runAllTimersAsync();
+      const end = await endRun;
+
+      const topStress = top.fields.find((field) => field.type === "stress")?.values;
+      const endStress = end.fields.find((field) => field.type === "stress")?.values;
+      const topDisplacement = top.fields.find((field) => field.type === "displacement")?.values;
+      const endDisplacement = end.fields.find((field) => field.type === "displacement")?.values;
+
+      expect(top.summary.reactionForce).toBe(end.summary.reactionForce);
+      expect(topStress).not.toEqual(endStress);
+      expect(topDisplacement).not.toEqual(endDisplacement);
+      expect(topStress?.length).toBe(3);
+      expect(endStress?.length).toBe(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
-function studyWithLoads(loads: Array<{ id: string; type: Load["type"]; value: number; direction: [number, number, number] }>): Study {
+function studyWithLoads(loads: Array<{ id: string; type: Load["type"]; value: number; direction: [number, number, number]; selectionRef?: string }>): Study {
   return {
     id: "study-test",
     projectId: "project-test",
@@ -85,6 +124,20 @@ function studyWithLoads(loads: Array<{ id: string; type: Load["type"]; value: nu
         entityType: "face",
         geometryRefs: [{ bodyId: "body", entityType: "face", entityId: "face-load", label: "Load face" }],
         fingerprint: "face-load"
+      },
+      {
+        id: "selection-end-face",
+        name: "End face",
+        entityType: "face",
+        geometryRefs: [{ bodyId: "body", entityType: "face", entityId: "face-end", label: "Base end face" }],
+        fingerprint: "face-end"
+      },
+      {
+        id: "selection-web-face",
+        name: "Web face",
+        entityType: "face",
+        geometryRefs: [{ bodyId: "body", entityType: "face", entityId: "face-web", label: "Brace face" }],
+        fingerprint: "face-web"
       }
     ],
     contacts: [],
@@ -92,7 +145,7 @@ function studyWithLoads(loads: Array<{ id: string; type: Load["type"]; value: nu
     loads: loads.map((load) => ({
       id: load.id,
       type: load.type,
-      selectionRef: "selection-load-face",
+      selectionRef: load.selectionRef ?? "selection-load-face",
       parameters: { value: load.value, units: load.type === "pressure" ? "kPa" : "N", direction: load.direction },
       status: "complete"
     })),

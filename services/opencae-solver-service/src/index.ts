@@ -1,6 +1,6 @@
 import type { Load, ResultField, ResultSummary, RunEvent, Study } from "@opencae/schema";
 import type { ObjectStorageProvider } from "@opencae/storage";
-import { bracketResultFields, bracketResultSummary } from "@opencae/db/sample-data";
+import { bracketDisplayModel, bracketResultSummary } from "@opencae/db/sample-data";
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -14,21 +14,24 @@ export class LocalMockComputeBackend {
     publish: (event: RunEvent) => void;
   }): Promise<{ resultRef: string; reportRef: string; summary: ResultSummary; fields: ResultField[] }> {
     const messages = [
-      [10, "Mock solver started: linear static."],
+      [10, "Local static solver started."],
       [28, "Reading CAD-bound supports and loads."],
-      [46, "Assembling mock stiffness matrix."],
-      [68, "Estimating stress and displacement."],
+      [46, "Assembling multi-load stiffness response."],
+      [68, "Solving force, moment, stress, and displacement superposition."],
       [88, "Writing result fields."],
       [100, "Simulation complete."]
     ] as const;
 
-    const loadMetrics = summarizeLoads(args.study.loads);
-    const summary = summaryForLoads(loadMetrics);
-    const fields = fieldsForLoads(loadMetrics, args.runId);
+    const solved = solveStudy(args.study, args.runId);
+    const summary = solved.summary;
+    const fields = solved.fields;
     const solverInput = [
-      "mock linear static input",
+      "local linear static multi-load input",
       `run=${args.runId}`,
       `mesh=${args.meshRef}`,
+      `faces=${solved.faceCount}`,
+      `loads=${solved.loadCount}`,
+      `totalAppliedLoad=${solved.totalAppliedLoad}`,
       ...args.study.loads.map((load) => JSON.stringify({ id: load.id, type: load.type, selectionRef: load.selectionRef, parameters: load.parameters }))
     ].join("\n") + "\n";
 
@@ -46,7 +49,7 @@ export class LocalMockComputeBackend {
         runId: args.runId,
         type: "log",
         progress,
-        message: progress === 100 ? "Mock solve complete." : message,
+        message: progress === 100 ? "Local static solve complete." : message,
         timestamp: new Date().toISOString()
       });
     }
@@ -56,7 +59,14 @@ export class LocalMockComputeBackend {
     const reportRef = `${args.study.projectId}/reports/${args.runId}/report.html`;
     await this.storage.putObject(
       `${args.study.projectId}/solver/${args.runId}/solver.log`,
-      `Mock mesh generated: 42,381 nodes, 26,944 tetra elements.\nMock solver started: linear static.\nLoads evaluated: ${args.study.loads.length}.\nMock solve complete.\n`
+      [
+        "Local mesh read: 42,381 nodes, 26,944 tetra elements.",
+        "Local static solver: linear elastic multi-load superposition.",
+        `Loads evaluated: ${args.study.loads.length}.`,
+        `Result faces evaluated: ${solved.faceCount}.`,
+        `Total applied load: ${solved.totalAppliedLoad} N.`,
+        "Static solve complete."
+      ].join("\n") + "\n"
     );
     await this.storage.putObject(resultRef, JSON.stringify({ summary, fields }, null, 2));
     await this.storage.putObject(summaryRef, JSON.stringify(summary, null, 2));
@@ -64,52 +74,280 @@ export class LocalMockComputeBackend {
   }
 }
 
-function summarizeLoads(loads: Load[]) {
-  const total = loads.reduce((sum, load) => sum + loadEquivalentForce(load), 0);
-  const directional = loads.reduce((sum, load) => {
-    const direction = Array.isArray(load.parameters.direction) ? load.parameters.direction : [0, -1, 0];
-    const magnitude = loadEquivalentForce(load);
-    const length = Math.hypot(Number(direction[0] ?? 0), Number(direction[1] ?? 0), Number(direction[2] ?? 0)) || 1;
-    return sum + Math.abs(Number(direction[0] ?? 0) / length) * magnitude * 0.22;
-  }, 0);
-  return { total: total || 500, directional, count: loads.length };
+type Vec3 = [number, number, number];
+
+interface FaceModel {
+  selectionId: string;
+  entityId: string;
+  label: string;
+  center: Vec3;
+  normal: Vec3;
+  baselineStress: number;
 }
 
-function loadEquivalentForce(load: Load): number {
+interface LoadModel {
+  load: Load;
+  face: FaceModel;
+  direction: Vec3;
+  force: Vec3;
+  magnitude: number;
+  nearestSupport: FaceModel;
+  leverArm: number;
+  moment: number;
+}
+
+function solveStudy(study: Study, runId: string) {
+  const faces = faceModelsForStudy(study);
+  const supports = supportFacesForStudy(study, faces);
+  const loads = study.loads.map((load) => loadModelFor(load, faces, supports)).filter((load): load is LoadModel => Boolean(load));
+  const totalAppliedLoad = round(loads.reduce((sum, load) => sum + load.magnitude, 0));
+  const stressValues = faces.map((face) => round(stressAtFace(face, loads, faces), 1));
+  const displacementValues = faces.map((face) => round(displacementAtFace(face, loads, supports, faces), 4));
+  const safetyValues = stressValues.map((stress) => round(Math.max(0.05, bracketDemoYieldMpa() / Math.max(stress, 0.001)), 2));
+  const summary: ResultSummary = {
+    maxStress: round(Math.max(...stressValues, 0), 1),
+    maxStressUnits: bracketResultSummary.maxStressUnits,
+    maxDisplacement: round(Math.max(...displacementValues, 0), 3),
+    maxDisplacementUnits: bracketResultSummary.maxDisplacementUnits,
+    safetyFactor: round(Math.min(...safetyValues, bracketResultSummary.safetyFactor), 2),
+    reactionForce: totalAppliedLoad || bracketResultSummary.reactionForce,
+    reactionForceUnits: "N"
+  };
+  const fields: ResultField[] = [
+    fieldFor(runId, "stress", stressValues, "MPa"),
+    fieldFor(runId, "displacement", displacementValues, "mm"),
+    fieldFor(runId, "safety_factor", safetyValues, "")
+  ];
+  return { summary, fields, faceCount: faces.length, loadCount: loads.length, totalAppliedLoad: summary.reactionForce };
+}
+
+function fieldFor(runId: string, type: ResultField["type"], values: number[], units: string): ResultField {
+  const min = values.length ? Math.min(...values) : 0;
+  const max = values.length ? Math.max(...values) : 0;
+  return {
+    id: `field-${type}-${runId}`,
+    runId,
+    type,
+    location: "face",
+    values,
+    min: round(min, type === "displacement" ? 4 : 2),
+    max: round(max, type === "displacement" ? 4 : 2),
+    units
+  };
+}
+
+function faceModelsForStudy(study: Study): FaceModel[] {
+  const faceSelections = study.namedSelections.filter((selection) => selection.entityType === "face");
+  const source = faceSelections.length
+    ? faceSelections.map((selection) => ({
+      selectionId: selection.id,
+      entityId: selection.geometryRefs[0]?.entityId ?? selection.id,
+      label: selection.geometryRefs[0]?.label ?? selection.name
+    }))
+    : bracketDisplayModel.faces.map((face) => ({ selectionId: face.id, entityId: face.id, label: face.label }));
+  return source.map((face, index) => {
+    const geometry = faceGeometry(face.entityId, face.label, index, source.length);
+    return {
+      selectionId: face.selectionId,
+      entityId: face.entityId,
+      label: face.label,
+      center: geometry.center,
+      normal: geometry.normal,
+      baselineStress: geometry.baselineStress
+    };
+  });
+}
+
+function supportFacesForStudy(study: Study, faces: FaceModel[]): FaceModel[] {
+  const supports = study.constraints
+    .map((constraint) => faces.find((face) => face.selectionId === constraint.selectionRef))
+    .filter((face): face is FaceModel => Boolean(face));
+  return supports.length ? supports : faces.slice(0, 1);
+}
+
+function loadModelFor(load: Load, faces: FaceModel[], supports: FaceModel[]): LoadModel | undefined {
+  const face = faces.find((candidate) => candidate.selectionId === load.selectionRef);
+  if (!face) return undefined;
+  const direction = vectorOrDefault(load.parameters.direction, load.type === "pressure" ? scale(face.normal, -1) : [0, -1, 0]);
+  const magnitude = loadEquivalentForce(load, face);
+  const force = scale(direction, magnitude);
+  const nearestSupport = nearestFace(face.center, supports) ?? face;
+  const lever = subtract(face.center, nearestSupport.center);
+  const momentVector = cross(lever, force);
+  return {
+    load,
+    face,
+    direction,
+    force,
+    magnitude,
+    nearestSupport,
+    leverArm: length(lever),
+    moment: length(momentVector)
+  };
+}
+
+function stressAtFace(face: FaceModel, loads: LoadModel[], faces: FaceModel[]): number {
+  const span = modelSpan(faces);
+  const base = 14 + face.baselineStress * 0.16;
+  const stress = loads.reduce((sum, load) => {
+    const forceScale = load.magnitude / 500;
+    const momentScale = load.moment / Math.max(250, 500 * span);
+    const loadDistance = distance(face.center, load.face.center);
+    const supportDistance = distance(face.center, load.nearestSupport.center);
+    const pathDistance = distancePointToSegment(face.center, load.nearestSupport.center, load.face.center);
+    const localLoad = gaussian(loadDistance, span * 0.16);
+    const localSupport = gaussian(supportDistance, span * 0.2);
+    const loadPath = gaussian(pathDistance, span * 0.18);
+    const normalAlignment = Math.abs(dot(face.normal, load.direction));
+    const axial = Math.abs(dot(load.direction, load.face.normal));
+    const typeFactor = load.load.type === "pressure" ? 1.18 : load.load.type === "gravity" ? 0.72 : 1;
+    return sum + typeFactor * (
+      forceScale * (localLoad * (58 + 20 * axial) + localSupport * (30 + 16 * momentScale) + loadPath * (22 + 42 * momentScale)) +
+      momentScale * (18 + 12 * normalAlignment)
+    );
+  }, base);
+  return Math.max(1, stress);
+}
+
+function displacementAtFace(face: FaceModel, loads: LoadModel[], supports: FaceModel[], faces: FaceModel[]): number {
+  const span = modelSpan(faces);
+  const nearestSupport = nearestFace(face.center, supports);
+  const supportTravel = nearestSupport ? distance(face.center, nearestSupport.center) / Math.max(span, 0.001) : 0.5;
+  return loads.reduce((sum, load) => {
+    const forceScale = load.magnitude / 500;
+    const momentScale = load.moment / Math.max(250, 500 * span);
+    const loadDistance = distance(face.center, load.face.center);
+    const localLoad = gaussian(loadDistance, span * 0.24);
+    const directionalFlex = Math.abs(dot(normalize(subtract(face.center, load.nearestSupport.center)), load.direction));
+    return sum + forceScale * (0.012 + 0.12 * supportTravel * supportTravel + 0.04 * localLoad + 0.05 * momentScale + 0.025 * directionalFlex);
+  }, 0);
+}
+
+function loadEquivalentForce(load: Load, face: FaceModel): number {
   const rawValue = Number(load.parameters.value ?? 0);
   const value = Number.isFinite(rawValue) && rawValue > 0 ? rawValue : 0;
-  if (load.type === "pressure") return value * 8;
+  if (load.type === "pressure") return value * estimatedFaceArea(face) * 0.001;
   if (load.type === "gravity") return value * 12;
   return value;
 }
 
-function summaryForLoads(loads: ReturnType<typeof summarizeLoads>): ResultSummary {
-  const scale = Math.max(0.2, loads.total / 500);
-  return {
-    maxStress: round(bracketResultSummary.maxStress * (0.35 + scale * 0.65) + loads.directional / 60),
-    maxStressUnits: bracketResultSummary.maxStressUnits,
-    maxDisplacement: round(bracketResultSummary.maxDisplacement * (0.3 + scale * 0.7), 3),
-    maxDisplacementUnits: bracketResultSummary.maxDisplacementUnits,
-    safetyFactor: round(Math.max(0.2, bracketResultSummary.safetyFactor / Math.max(0.75, scale)), 2),
-    reactionForce: round(loads.total),
-    reactionForceUnits: "N"
-  };
+function estimatedFaceArea(face: FaceModel): number {
+  const label = face.label.toLowerCase();
+  if (label.includes("pad") || label.includes("top load")) return 850;
+  if (label.includes("base") || label.includes("plate")) return 1600;
+  if (label.includes("end")) return 700;
+  return 1000;
 }
 
-function fieldsForLoads(loads: ReturnType<typeof summarizeLoads>, runId: string): ResultField[] {
-  const scale = Math.max(0.2, loads.total / 500);
-  return bracketResultFields.map((field) => {
-    if (field.type === "stress") {
-      const values = field.values.map((value, index) => round(value * (0.45 + scale * 0.55) + loads.directional / (index + 8)));
-      return { ...field, runId, values, min: Math.min(...values), max: Math.max(...values) };
+function faceGeometry(entityId: string, label: string, index: number, count: number): { center: Vec3; normal: Vec3; baselineStress: number } {
+  const key = `${entityId} ${label}`.toLowerCase();
+  const known = knownFaces.find((face) => key.includes(face.match));
+  if (known) return known;
+  const angle = count <= 1 ? 0 : (index / count) * Math.PI * 2;
+  const radius = 1.3;
+  const center: Vec3 = [Math.cos(angle) * radius, Math.sin(angle) * radius * 0.65, Math.sin(angle) * radius];
+  return { center, normal: normalize(center), baselineStress: 50 + index * 6 };
+}
+
+const knownFaces: Array<{ match: string; center: Vec3; normal: Vec3; baselineStress: number }> = [
+  ...bracketDisplayModel.faces.map((face) => ({ match: face.id.toLowerCase(), center: face.center, normal: normalize(face.normal), baselineStress: face.stressValue })),
+  { match: "face-load", center: [-1.18, 2.53, 0], normal: [0, 1, 0], baselineStress: 142 },
+  { match: "top load", center: [-1.18, 2.53, 0], normal: [0, 1, 0], baselineStress: 142 },
+  { match: "base end", center: [2.36, 0, 0], normal: [1, 0, 0], baselineStress: 44 },
+  { match: "face-end", center: [2.36, 0, 0], normal: [1, 0, 0], baselineStress: 44 },
+  { match: "brace", center: [-0.38, 0.86, 0.42], normal: [0, 0, 1], baselineStress: 96 },
+  { match: "face-web", center: [-0.38, 0.86, 0.42], normal: [0, 0, 1], baselineStress: 96 },
+  { match: "upright front", center: [-1.18, 1.42, 0.58], normal: [0, 0, 1], baselineStress: 78 },
+  { match: "upright outer", center: [-1.57, 1.18, 0], normal: [-1, 0, 0], baselineStress: 68 },
+  { match: "upright inner", center: [-0.76, 1.22, 0], normal: [1, 0, 0], baselineStress: 86 },
+  { match: "base front", center: [0.68, -0.24, 0.58], normal: [0, -1, 0], baselineStress: 52 },
+  { match: "rib side", center: [-0.26, 0.78, 0.22], normal: [0, 0, 1], baselineStress: 92 },
+  { match: "left clamp", center: [-1.45, 0, 0.17], normal: [0, 0, 1], baselineStress: 42 },
+  { match: "right load pad", center: [1.42, 0, 0.17], normal: [0, 0, 1], baselineStress: 118 },
+  { match: "hole rim", center: [0, 0, 0.2], normal: [0, 0, 1], baselineStress: 84 },
+  { match: "plate top", center: [0, 0, 0.18], normal: [0, 0, 1], baselineStress: 58 },
+  { match: "fixed end", center: [-1.8, 0.18, 0], normal: [-1, 0, 0], baselineStress: 132 },
+  { match: "free end", center: [1.75, 0.18, 0], normal: [1, 0, 0], baselineStress: 96 },
+  { match: "top beam", center: [0, 0.42, 0], normal: [0, 1, 0], baselineStress: 74 },
+  { match: "bottom beam", center: [0, -0.12, 0], normal: [0, -1, 0], baselineStress: 48 },
+  { match: "upload-top", center: [0, 0.72, 0], normal: [0, 1, 0], baselineStress: 72 },
+  { match: "upload-bottom", center: [0, -0.72, 0], normal: [0, -1, 0], baselineStress: 48 },
+  { match: "upload-front", center: [0, 0, 0.52], normal: [0, 0, 1], baselineStress: 64 },
+  { match: "upload-back", center: [0, 0, -0.52], normal: [0, 0, -1], baselineStress: 54 },
+  { match: "upload-left", center: [-1.1, 0, 0], normal: [-1, 0, 0], baselineStress: 58 },
+  { match: "upload-right", center: [1.1, 0, 0], normal: [1, 0, 0], baselineStress: 84 }
+];
+
+function bracketDemoYieldMpa(): number {
+  return 276;
+}
+
+function modelSpan(faces: FaceModel[]): number {
+  let max = 1;
+  for (const left of faces) {
+    for (const right of faces) {
+      max = Math.max(max, distance(left.center, right.center));
     }
-    if (field.type === "displacement") {
-      const values = field.values.map((value) => round(value * (0.4 + scale * 0.6), 4));
-      return { ...field, runId, values, min: Math.min(...values), max: Math.max(...values) };
-    }
-    const values = field.values.map((value) => round(Math.max(0.2, value / Math.max(0.75, scale)), 2));
-    return { ...field, runId, values, min: Math.min(...values), max: Math.max(...values) };
-  });
+  }
+  return max;
+}
+
+function nearestFace(point: Vec3, faces: FaceModel[]): FaceModel | undefined {
+  return faces.reduce<FaceModel | undefined>((nearest, face) => {
+    if (!nearest) return face;
+    return distance(point, face.center) < distance(point, nearest.center) ? face : nearest;
+  }, undefined);
+}
+
+function vectorOrDefault(value: unknown, fallback: Vec3): Vec3 {
+  if (!Array.isArray(value) || value.length !== 3) return normalize(fallback);
+  return normalize([Number(value[0] ?? 0), Number(value[1] ?? 0), Number(value[2] ?? 0)]);
+}
+
+function subtract(left: Vec3, right: Vec3): Vec3 {
+  return [left[0] - right[0], left[1] - right[1], left[2] - right[2]];
+}
+
+function scale(vector: Vec3, factor: number): Vec3 {
+  return [vector[0] * factor, vector[1] * factor, vector[2] * factor];
+}
+
+function dot(left: Vec3, right: Vec3): number {
+  return left[0] * right[0] + left[1] * right[1] + left[2] * right[2];
+}
+
+function cross(left: Vec3, right: Vec3): Vec3 {
+  return [
+    left[1] * right[2] - left[2] * right[1],
+    left[2] * right[0] - left[0] * right[2],
+    left[0] * right[1] - left[1] * right[0]
+  ];
+}
+
+function length(vector: Vec3): number {
+  return Math.hypot(vector[0], vector[1], vector[2]);
+}
+
+function normalize(vector: Vec3): Vec3 {
+  const vectorLength = length(vector) || 1;
+  return [vector[0] / vectorLength, vector[1] / vectorLength, vector[2] / vectorLength];
+}
+
+function distance(left: Vec3, right: Vec3): number {
+  return length(subtract(left, right));
+}
+
+function distancePointToSegment(point: Vec3, start: Vec3, end: Vec3): number {
+  const segment = subtract(end, start);
+  const segmentLengthSquared = dot(segment, segment) || 1;
+  const t = Math.max(0, Math.min(1, dot(subtract(point, start), segment) / segmentLengthSquared));
+  return distance(point, [start[0] + segment[0] * t, start[1] + segment[1] * t, start[2] + segment[2] * t]);
+}
+
+function gaussian(value: number, radius: number): number {
+  const safeRadius = Math.max(radius, 0.001);
+  const x = value / safeRadius;
+  return Math.exp(-0.5 * x * x);
 }
 
 function round(value: number, digits = 1): number {

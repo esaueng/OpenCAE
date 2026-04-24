@@ -489,7 +489,7 @@ function RunPanel({ study, runProgress, onRunSimulation }: RightPanelProps) {
       <div className="progress"><span style={{ width: `${runProgress}%` }} /></div>
       <SectionTitle>Solver</SectionTitle>
       <div className="summary-box">
-        <Info label="Backend" value="mock-linear-static" />
+        <Info label="Backend" value="local-static-superposition" />
         <Info label="Version" value="0.1.0" />
         <Info label="Runner" value="local-in-memory" />
         <Info label="Progress" value={`${runProgress}%`} />

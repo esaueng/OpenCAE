@@ -57,7 +57,7 @@ export function StepBar({ activeStep, study, hasResults, onSelect }: StepBarProp
       <div className="stepbar-footer">
         <div><span>study</span><strong>static</strong></div>
         <div><span>units</span><strong>SI · mm</strong></div>
-        <div><span>backend</span><strong>mock</strong></div>
+        <div><span>backend</span><strong>local</strong></div>
       </div>
     </nav>
   );

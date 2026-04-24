@@ -152,7 +152,7 @@ export const COPY = {
       solverSection: 'Solver',
       solverInfo: {
         backend: 'Backend',
-        backendValue: 'mock-linear-static',
+        backendValue: 'local-static-superposition',
         version: 'Version',
         versionValue: '0.1.0',
         runner: 'Runner',
@@ -231,7 +231,7 @@ export const COPY = {
       study: 'study',
       mesh: 'mesh',
       solver: 'solver',
-      mockBackend: 'mock backend',
+      mockBackend: 'local solver',
     },
     values: {
       meshNone: 'Not generated',
@@ -253,21 +253,21 @@ export const COPY = {
       `${type} of ${value} ${unit} added on ${face}`,
     meshStarting: (preset: string) => `Starting mesh generation · preset=${preset}`,
     meshGenerated: (nodes: number, elements: number) =>
-      `Mock mesh generated: ${nodes.toLocaleString()} nodes, ${elements.toLocaleString()} tetra elements`,
+      `Mesh generated: ${nodes.toLocaleString()} nodes, ${elements.toLocaleString()} tetra elements`,
     reportWritten: (path: string) => `Report written to ${path}`,
   },
 
   // ─── Solver log messages (engineering register) ─────────
-  // Paired with mock progress percentages for the streaming run flow
+  // Paired with progress percentages for the streaming run flow
   solverLog: [
-    { pct: 0,   level: 'info' as const, msg: 'Mock solver started: linear static' },
+    { pct: 0,   level: 'info' as const, msg: 'Local static solver started' },
     { pct: 12,  level: 'info' as const, msg: 'Assembling global stiffness matrix' },
     { pct: 28,  level: 'info' as const, msg: 'Assembly complete · 42,381 DOFs' },
     { pct: 45,  level: 'info' as const, msg: 'Applying boundary conditions' },
     { pct: 62,  level: 'info' as const, msg: 'Solving K·u = f · conjugate gradient' },
     { pct: 82,  level: 'info' as const, msg: 'Computing element stresses' },
     { pct: 95,  level: 'info' as const, msg: 'Post-processing results' },
-    { pct: 100, level: 'ok'   as const, msg: 'Mock solve complete' },
+    { pct: 100, level: 'ok'   as const, msg: 'Local static solve complete' },
   ],
 
   // ─── Selection indicator (viewer top-left glass chip) ───

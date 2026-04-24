@@ -47,7 +47,7 @@ export function BottomPanel({ status, logs, projectName, studyName, meshStatus, 
           <span><b>mesh</b>{meshStatus}</span>
           <span><b>solver</b>{solverStatus}</span>
         </div>
-        <span className="mock-backend">mock backend</span>
+        <span className="mock-backend">local solver</span>
       </div>
     </footer>
   );
