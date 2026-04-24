@@ -40,6 +40,9 @@ interface RightPanelProps {
   onUpdateLoad: (load: Load) => void;
   onGenerateMesh: (preset: "coarse" | "medium" | "fine") => void;
   onRunSimulation: () => void;
+  canGenerateReport: boolean;
+  reportUrl?: string;
+  reportFilename?: string;
   onGenerateReport: () => void;
 }
 
@@ -503,6 +506,9 @@ function ResultsPanel({
   onResultModeChange,
   onToggleDeformed,
   onStressExaggerationChange,
+  canGenerateReport,
+  reportUrl,
+  reportFilename,
   onGenerateReport
 }: RightPanelProps) {
   return (
@@ -535,12 +541,19 @@ function ResultsPanel({
         <Info label="Reaction force" value={`${resultSummary.reactionForce} ${resultSummary.reactionForceUnits}`} />
       </div>
       <div className="legend"><span /> <small>Low</small><small>High</small></div>
-      <button className="primary wide" onClick={onGenerateReport}><FileText size={16} />Generate report</button>
+      <ReportDownloadAction
+        canGenerateReport={canGenerateReport}
+        reportUrl={reportUrl}
+        reportFilename={reportFilename}
+        onGenerateReport={onGenerateReport}
+        label="Generate report"
+        icon={<FileText size={16} />}
+      />
     </Panel>
   );
 }
 
-function ReportPanel({ onGenerateReport }: RightPanelProps) {
+function ReportPanel({ canGenerateReport, reportUrl, reportFilename, onGenerateReport }: RightPanelProps) {
   return (
     <Panel title="Report" helper="Generate a simple HTML report you can share.">
       <div className="summary-box">
@@ -548,7 +561,14 @@ function ReportPanel({ onGenerateReport }: RightPanelProps) {
         <Info label="Sections" value="7" />
         <Info label="Output" value="./data/reports" />
       </div>
-      <button className="primary wide" onClick={onGenerateReport}><Download size={18} />Generate & download</button>
+      <ReportDownloadAction
+        canGenerateReport={canGenerateReport}
+        reportUrl={reportUrl}
+        reportFilename={reportFilename}
+        onGenerateReport={onGenerateReport}
+        label="Generate & download"
+        icon={<Download size={18} />}
+      />
       <SectionTitle>Contents</SectionTitle>
       <div className="report-list">
         {["Project & study", "Material & boundary conditions", "Mesh summary", "Stress field & max locations", "Displacement field", "Reaction forces", "Diagnostics"].map((item) => (
@@ -556,6 +576,31 @@ function ReportPanel({ onGenerateReport }: RightPanelProps) {
         ))}
       </div>
     </Panel>
+  );
+}
+
+function ReportDownloadAction({
+  canGenerateReport,
+  reportUrl,
+  reportFilename,
+  onGenerateReport,
+  label,
+  icon
+}: {
+  canGenerateReport: boolean;
+  reportUrl?: string;
+  reportFilename?: string;
+  onGenerateReport: () => void;
+  label: string;
+  icon: ReactNode;
+}) {
+  if (!canGenerateReport || !reportUrl) {
+    return <button className="primary wide" disabled type="button">{icon}{label}</button>;
+  }
+  return (
+    <a className="primary wide" href={reportUrl} download={reportFilename} onClick={onGenerateReport}>
+      {icon}{label}
+    </a>
   );
 }
 

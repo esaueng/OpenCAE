@@ -306,7 +306,13 @@ api.post("/api/studies/:studyId/runs", async (request, reply) => {
       study: studySnapshot,
       runId,
       meshRef: studySnapshot.meshSettings.meshRef ?? "mesh-not-generated",
-      publish: (event) => runState.publish(runId, event)
+      publish: (event) => {
+        if (event.type === "complete") {
+          runState.publish(runId, { ...event, type: "progress", progress: 96, message: "Finalizing result artifacts." });
+          return;
+        }
+        runState.publish(runId, event);
+      }
     });
     const reportRef = await reports.generateReport({ projectId: studySnapshot.projectId, runId, summary: result.summary });
     db.upsertRun({
@@ -316,6 +322,7 @@ api.post("/api/studies/:studyId/runs", async (request, reply) => {
       reportRef,
       finishedAt: new Date().toISOString()
     });
+    publish(runId, "complete", 100, "Simulation complete.");
   });
   return { run, streamUrl: `/api/runs/${runId}/stream`, message: "Simulation running." };
 });

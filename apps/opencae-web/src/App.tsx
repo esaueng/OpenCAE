@@ -57,6 +57,7 @@ export function App() {
   const [logs, setLogs] = useState<string[]>(["Ready | Local Mode"]);
   const [runProgress, setRunProgress] = useState(0);
   const [activeRunId, setActiveRunId] = useState("run-bracket-demo-seeded");
+  const [completedRunId, setCompletedRunId] = useState("run-bracket-demo-seeded");
   const [resultSummary, setResultSummary] = useState<ResultSummary>(seededSummary);
   const [draftLoadType, setDraftLoadType] = useState<LoadType>("force");
   const [draftLoadValue, setDraftLoadValue] = useState(500);
@@ -64,6 +65,11 @@ export function App() {
   const [sampleModel, setSampleModel] = useState<SampleModelId>("bracket");
 
   const study = project?.studies[0] ?? null;
+  const reportRunId = useMemo(() => {
+    if (completedRunId) return completedRunId;
+    if (runProgress >= 100 && activeRunId) return activeRunId;
+    return latestReportRunId(study, "");
+  }, [activeRunId, completedRunId, runProgress, study]);
   const selectedFace = useMemo(() => displayModel?.faces.find((face) => face.id === selectedFaceId) ?? null, [displayModel, selectedFaceId]);
   const solverRunning = runProgress > 0 && runProgress < 100;
   const canUndoStep = stepHistoryIndex > 0;
@@ -129,6 +135,9 @@ export function App() {
     setStepHistory(["model"]);
     setStepHistoryIndex(0);
     setViewMode("model");
+    const nextCompletedRunId = latestReportRunId(response.project.studies[0] ?? null, "") ?? "";
+    setActiveRunId(nextCompletedRunId);
+    setCompletedRunId(nextCompletedRunId);
     pushMessage(response.message ?? "Project opened.");
   }
 
@@ -229,6 +238,7 @@ export function App() {
     if (!study) return;
     const response = await runSimulation(study.id);
     setActiveRunId(response.run.id);
+    setCompletedRunId("");
     setRunProgress(0);
     pushMessage(response.message);
     const source = subscribeToRun(response.run.id, async (event: RunEvent) => {
@@ -238,10 +248,19 @@ export function App() {
         source.close();
         const results = await getResults(response.run.id);
         setResultSummary(results.summary);
+        setCompletedRunId(response.run.id);
         setViewMode("results");
         setActiveStep("results");
       }
     });
+  }
+
+  function handleGenerateReport() {
+    if (!reportRunId) {
+      pushMessage("Run the simulation before generating a report.");
+      return;
+    }
+    pushMessage("Report download started.");
   }
 
   if (!project || !displayModel || !study) {
@@ -351,7 +370,10 @@ export function App() {
           }
           onGenerateMesh={(preset) => updateStudy(generateMesh(study.id, preset), "run")}
           onRunSimulation={handleRunSimulation}
-          onGenerateReport={() => window.open(`/api/runs/${activeRunId}/report`, "_blank", "noopener,noreferrer")}
+          canGenerateReport={Boolean(reportRunId)}
+          reportUrl={reportRunId ? `/api/runs/${reportRunId}/report` : undefined}
+          reportFilename={`${project.name.replace(/[^\w.-]+/g, "-").replace(/^-+|-+$/g, "").toLowerCase() || "opencae"}-report.html`}
+          onGenerateReport={handleGenerateReport}
         />
       </main>
 
@@ -362,6 +384,13 @@ export function App() {
 
 function stepLabel(step: StepId) {
   return step.charAt(0).toUpperCase() + step.slice(1);
+}
+
+function latestReportRunId(study: Study | null, activeRunId: string): string | null {
+  if (!study) return null;
+  if (study.runs.some((run) => run.id === activeRunId && (run.reportRef || run.resultRef || run.status === "complete"))) return activeRunId;
+  const completed = [...study.runs].reverse().find((run) => run.reportRef || run.resultRef || run.status === "complete");
+  return completed?.id ?? null;
 }
 
 async function saveProjectToLocalDisk(project: Project, displayModel: DisplayModel): Promise<string> {

@@ -790,6 +790,7 @@ input {
   border-radius: var(--radius-md);
   border: var(--border-thin);
   font-weight: var(--fw-medium);
+  text-decoration: none;
 }
 
 .primary {

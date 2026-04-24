@@ -109,6 +109,22 @@ export async function getResults(runId: string): Promise<ResultsResponse> {
   return readJson(response);
 }
 
+export async function getReportHtml(runId: string): Promise<string> {
+  const response = await fetch(`/api/runs/${runId}/report`);
+  if (!response.ok) {
+    const text = await response.text();
+    let message = text;
+    try {
+      const parsed = JSON.parse(text) as { error?: string };
+      message = parsed.error ?? text;
+    } catch {
+      // Use the raw response body when the server did not return JSON.
+    }
+    throw new Error(message);
+  }
+  return response.text();
+}
+
 export function subscribeToRun(runId: string, onEvent: (event: RunEvent) => void): EventSource {
   const source = new EventSource(`/api/runs/${runId}/stream`);
   const eventTypes: RunEvent["type"][] = ["state", "progress", "message", "log", "diagnostic", "complete", "cancelled", "error"];
