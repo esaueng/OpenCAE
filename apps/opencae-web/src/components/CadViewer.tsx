@@ -666,8 +666,7 @@ function LoadGlyph({ kind, marker, face, active }: { kind: SampleModelKind; mark
         {arrowOffsets.map((zOffset) => (
           <ArrowGlyph
             key={zOffset}
-            start={center.clone().add(loadOffset).add(tangent.clone().multiplyScalar(zOffset)).add(arrowDirection.clone().multiplyScalar(-arrowLength))}
-            end={center.clone().add(loadOffset).add(tangent.clone().multiplyScalar(zOffset))}
+            {...arrowPointsOutsideSurface(center.clone().add(loadOffset).add(tangent.clone().multiplyScalar(zOffset)), faceNormal, arrowDirection, arrowLength)}
             color={markerColor}
             shaftRadius={0.026}
             headRadius={0.105}
@@ -690,8 +689,7 @@ function LoadGlyph({ kind, marker, face, active }: { kind: SampleModelKind; mark
   tangent.normalize();
   const loadOffset = tangent.multiplyScalar((marker.stackIndex - 0.5) * 0.22);
   const arrowDirection = isNormalDirection ? normal : markerDirection;
-  const start = center.clone().add(loadOffset).add(normal.clone().multiplyScalar(0.22)).add(arrowDirection.clone().multiplyScalar(-0.54));
-  const end = center.clone().add(loadOffset).add(normal.clone().multiplyScalar(0.22));
+  const { start, end } = arrowPointsOutsideSurface(center.clone().add(loadOffset), normal, arrowDirection, 0.54);
 
   return (
     <group>
@@ -710,6 +708,23 @@ function loadLabel(marker: ViewerLoadMarker) {
   return `${prefix}: ${marker.type} ${marker.value} ${marker.units} ${marker.directionLabel}`;
 }
 
+function arrowPointsOutsideSurface(surfacePoint: THREE.Vector3, normal: THREE.Vector3, direction: THREE.Vector3, length: number) {
+  const faceNormal = normal.clone().normalize();
+  const arrowDirection = direction.clone().normalize();
+  const rawStart = surfacePoint.clone().add(arrowDirection.clone().multiplyScalar(-length));
+  const rawEnd = surfacePoint.clone();
+  const minNormalDistance = Math.min(
+    rawStart.clone().sub(surfacePoint).dot(faceNormal),
+    rawEnd.clone().sub(surfacePoint).dot(faceNormal)
+  );
+  const clearance = 0.12;
+  const outsideShift = faceNormal.multiplyScalar(clearance - minNormalDistance);
+  return {
+    start: rawStart.add(outsideShift),
+    end: rawEnd.add(outsideShift)
+  };
+}
+
 function ArrowGlyph({
   start,
   end,
@@ -726,15 +741,22 @@ function ArrowGlyph({
   headLength?: number;
 }) {
   const direction = end.clone().sub(start);
-  const midpoint = start.clone().add(direction.clone().multiplyScalar(0.5));
-  const quaternion = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction.clone().normalize());
+  const directionLength = direction.length();
+  if (directionLength < 0.001) return null;
+  const unitDirection = direction.clone().normalize();
+  const shaftEnd = end.clone().add(unitDirection.clone().multiplyScalar(-headLength * 0.72));
+  const shaftDirection = shaftEnd.clone().sub(start);
+  const shaftLength = Math.max(0.001, shaftDirection.length());
+  const midpoint = start.clone().add(shaftDirection.clone().multiplyScalar(0.5));
+  const quaternion = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), unitDirection);
+  const conePosition = end.clone().add(unitDirection.clone().multiplyScalar(-headLength * 0.5));
   return (
     <>
       <mesh position={midpoint.toArray()} quaternion={quaternion}>
-        <cylinderGeometry args={[shaftRadius, shaftRadius, direction.length(), 16]} />
+        <cylinderGeometry args={[shaftRadius, shaftRadius, shaftLength, 16]} />
         <meshBasicMaterial color={color} />
       </mesh>
-      <mesh position={end.toArray()} quaternion={quaternion}>
+      <mesh position={conePosition.toArray()} quaternion={quaternion}>
         <coneGeometry args={[headRadius, headLength, 24]} />
         <meshBasicMaterial color={color} />
       </mesh>
