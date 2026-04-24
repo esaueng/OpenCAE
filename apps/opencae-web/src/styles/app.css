@@ -468,7 +468,7 @@ svg {
 }
 
 .viewer-shell.results-view {
-  background: #f7f9fc;
+  background: var(--color-viewport-bg);
 }
 
 .viewer-hud {
@@ -504,6 +504,12 @@ svg {
 }
 
 .results-view .viewer-reset {
+  color: var(--color-text);
+  background: rgba(17, 24, 33, 0.85);
+  border-color: var(--color-border);
+}
+
+.theme-light .results-view .viewer-reset {
   color: #263140;
   background: rgba(255, 255, 255, 0.82);
   border-color: rgba(82, 103, 130, 0.32);
