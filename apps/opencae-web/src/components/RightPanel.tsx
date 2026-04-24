@@ -63,6 +63,13 @@ function ModelPanel({ project, study, viewMode, sampleModel, onFitView, onViewMo
   const geometry = project.geometryFiles[0];
   const faceCount = Number(geometry?.metadata.faceCount ?? 22);
   const bodyCount = Number(geometry?.metadata.bodyCount ?? 1);
+  const sampleLabel = sampleModel === "bracket" ? "Bracket Demo" : sampleModel === "plate" ? "Plate Demo" : "Cantilever Demo";
+  const preconfigured =
+    sampleModel === "bracket"
+      ? { support: "2 mounting holes · flange", load: "top face · -Y direction", callout: "An L-bracket is bolted at the flange; a vertical load on the top face creates a peak stress at the inside corner, reduced by the gusset rib." }
+      : sampleModel === "plate"
+        ? { support: "left clamp face", load: "right load pad · -Y direction", callout: "A flat plate is constrained on the left and loaded on the opposite pad, with the central hole acting as the stress concentration." }
+        : { support: "fixed end face", load: "free end face · -Y direction", callout: "A cantilever beam is fixed at one end and loaded at the free end, producing bending stress along the beam span." };
 
   function handleLoadSampleClick() {
     if (!confirmSampleLoad) {
@@ -106,13 +113,13 @@ function ModelPanel({ project, study, viewMode, sampleModel, onFitView, onViewMo
         <RotateCcw size={16} />
         {confirmSampleLoad ? "Click again to load sample" : "Load sample project"}
       </button>
-      {confirmSampleLoad && <p className="panel-copy confirm-copy">This will reload Bracket Demo and reset the sample setup.</p>}
+      {confirmSampleLoad && <p className="panel-copy confirm-copy">This will reload {sampleLabel} and reset the sample setup.</p>}
       <SectionTitle>Preconfigured</SectionTitle>
       <div className="concept-card-list">
-        <ConceptCard icon={<SupportIcon />} title="Fixed support" detail="2 mounting holes · flange" tone="warning" />
-        <ConceptCard icon={<ArrowDown size={18} />} title="Force · 500 N" detail="top face · -Y direction" tone="accent" />
+        <ConceptCard icon={<SupportIcon />} title="Fixed support" detail={preconfigured.support} tone="warning" />
+        <ConceptCard icon={<ArrowDown size={18} />} title="Force · 500 N" detail={preconfigured.load} tone="accent" />
       </div>
-      <Callout>An L-bracket is bolted at the flange; a vertical load on the top face creates a peak stress at the inside corner, reduced by the gusset rib.</Callout>
+      <Callout>{preconfigured.callout}</Callout>
       <Info label="Study" value={study.name} />
     </Panel>
   );
