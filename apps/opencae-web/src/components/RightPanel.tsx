@@ -186,12 +186,19 @@ function MaterialPanel({ study, onAssignMaterial }: RightPanelProps) {
 }
 
 function SupportsPanel({ selectedFace, study, onAddSupport, onUpdateSupport }: RightPanelProps) {
-  const selectedRef = selectedFace ? selectionForFace(study, selectedFace.id) : undefined;
+  const faceSelections = study.namedSelections.filter((selection) => selection.entityType === "face");
+  const selectedFromViewport = selectedFace ? selectionForFace(study, selectedFace.id) : undefined;
+  const [placementRef, setPlacementRef] = useState(selectedFromViewport?.id ?? faceSelections[0]?.id ?? "");
+  useEffect(() => {
+    if (selectedFromViewport) setPlacementRef(selectedFromViewport.id);
+  }, [selectedFromViewport?.id]);
+  const selectedRef = faceSelections.find((selection) => selection.id === placementRef) ?? selectedFromViewport;
   const addLabel = study.constraints.length ? "Add another fixed support" : "Add fixed support";
   return (
     <Panel title="Supports" helper="Choose where the part is held fixed. Select a face, then add a fixed support. You can add more than one.">
-      <button className="outline-action wide" disabled={!selectedRef} onClick={() => onAddSupport(selectedRef?.id)}><Plus size={18} />{addLabel}</button>
       <PlacementReadout selectedRef={selectedRef} fallbackLabel={selectedFace?.label} />
+      <SelectionField study={study} value={selectedRef?.id ?? ""} onChange={setPlacementRef} />
+      <button className="outline-action wide" disabled={!selectedRef} onClick={() => selectedRef && onAddSupport(selectedRef.id)}><Plus size={18} />{addLabel}</button>
       <SectionTitle>Applied</SectionTitle>
       <SupportEditorList study={study} onUpdateSupport={onUpdateSupport} />
       <Callout>Fixed supports prevent any motion of the selected face.</Callout>
