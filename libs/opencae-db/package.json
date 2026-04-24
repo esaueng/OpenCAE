@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@opencae/materials": "workspace:*",
+    "@opencae/post-service": "workspace:*",
     "@opencae/schema": "workspace:*",
     "@opencae/storage": "workspace:*",
     "better-sqlite3": "^11.7.0"

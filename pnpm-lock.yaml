@@ -109,6 +109,9 @@ importers:
       '@opencae/materials':
         specifier: workspace:*
         version: link:../opencae-materials
+      '@opencae/post-service':
+        specifier: workspace:*
+        version: link:../../services/opencae-post-service
       '@opencae/schema':
         specifier: workspace:*
         version: link:../opencae-schema

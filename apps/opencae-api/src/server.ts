@@ -5,7 +5,7 @@ import { SQLiteDatabaseProvider } from "@opencae/db";
 import { bracketDemoMaterial, bracketDemoProject, bracketDisplayModel, bracketResultFields, bracketResultSummary } from "@opencae/db/sample-data";
 import { InMemoryJobQueueProvider, LocalRunStateProvider } from "@opencae/jobs";
 import { MockMeshService } from "@opencae/mesh-service";
-import { LocalReportProvider } from "@opencae/post-service";
+import { buildHtmlReport, buildPdfReport, LocalReportProvider, reportPdfKeyFor } from "@opencae/post-service";
 import { ProjectSchema, type DisplayModel, type Load, type Project, type RunEvent, type Study, type StudyRun } from "@opencae/schema";
 import { LocalMockComputeBackend } from "@opencae/solver-service";
 import { FileSystemObjectStorageProvider } from "@opencae/storage";
@@ -165,6 +165,35 @@ api.get("/api/projects/:projectId/files", async (request) => {
   const { projectId } = request.params as { projectId: string };
   const project = db.getProject(projectId);
   return { files: project?.geometryFiles ?? [] };
+});
+
+api.get("/api/projects/:projectId/report", async (request, reply) => {
+  const { projectId } = request.params as { projectId: string };
+  const project = db.getProject(projectId);
+  if (!project) return reply.code(404).send({ error: "Project not found" });
+
+  const run = latestCompletedRunForProject(project);
+  const reportRef = run?.reportRef;
+  if (!reportRef) return reply.code(404).send({ error: "Report not found. Run the simulation before generating a report." });
+
+  const html = await storage.getObject(reportRef);
+  reply.header("content-type", "text/html; charset=utf-8");
+  return html.toString("utf8");
+});
+
+api.get("/api/projects/:projectId/report.pdf", async (request, reply) => {
+  const { projectId } = request.params as { projectId: string };
+  const project = db.getProject(projectId);
+  if (!project) return reply.code(404).send({ error: "Project not found" });
+
+  const run = latestCompletedRunForProject(project);
+  const reportRef = run?.reportRef;
+  if (!reportRef) return reply.code(404).send({ error: "Report not found. Run the simulation before downloading a PDF." });
+
+  const pdf = await pdfForReport(run, reportRef);
+  reply.header("content-type", "application/pdf");
+  reply.header("content-disposition", `attachment; filename="${pdfFilename(project.name)}"`);
+  return pdf;
 });
 
 api.get("/api/projects/:projectId/studies", async (request) => {
@@ -381,10 +410,22 @@ api.get("/api/runs/:runId/results", async (request, reply) => {
 api.get("/api/runs/:runId/report", async (request, reply) => {
   const { runId } = request.params as { runId: string };
   const run = db.getRun(runId);
+  if (!run && runId !== "run-bracket-demo-seeded") return reply.code(404).send({ error: "Run not found" });
   const reportRef = run?.reportRef ?? "project-bracket-demo/reports/report.html";
   const html = await storage.getObject(reportRef);
   reply.header("content-type", "text/html; charset=utf-8");
   return html.toString("utf8");
+});
+
+api.get("/api/runs/:runId/report.pdf", async (request, reply) => {
+  const { runId } = request.params as { runId: string };
+  const run = db.getRun(runId);
+  if (!run && runId !== "run-bracket-demo-seeded") return reply.code(404).send({ error: "Run not found" });
+  const reportRef = run?.reportRef ?? "project-bracket-demo/reports/report.html";
+  const pdf = await pdfForReport(run, reportRef);
+  reply.header("content-type", "application/pdf");
+  reply.header("content-disposition", `attachment; filename="${pdfFilename(runId)}"`);
+  return pdf;
 });
 
 function publish(runId: string, type: RunEvent["type"], progress: number | undefined, message: string): void {
@@ -393,6 +434,40 @@ function publish(runId: string, type: RunEvent["type"], progress: number | undef
 
 function isLoadType(type: unknown): type is Load["type"] {
   return type === "force" || type === "pressure" || type === "gravity";
+}
+
+function latestCompletedRunForProject(project: Project): StudyRun | undefined {
+  return project.studies
+    .flatMap((study) => study.runs)
+    .filter((run) => run.reportRef || run.resultRef || run.status === "complete")
+    .sort((left, right) => {
+      const leftTime = Date.parse(left.finishedAt ?? left.startedAt ?? "");
+      const rightTime = Date.parse(right.finishedAt ?? right.startedAt ?? "");
+      return (rightTime || 0) - (leftTime || 0);
+    })[0];
+}
+
+function pdfFilename(name: string): string {
+  const base = name.replace(/[^\w.-]+/g, "-").replace(/^-+|-+$/g, "").toLowerCase() || "opencae";
+  return `${base}-report.pdf`;
+}
+
+async function pdfForReport(run: StudyRun | undefined, reportRef: string): Promise<Buffer> {
+  const pdfRef = reportPdfKeyFor(reportRef);
+  try {
+    return await storage.getObject(pdfRef);
+  } catch {
+    const summary = run?.resultRef ? await summaryForResult(run.resultRef) : bracketResultSummary;
+    const pdf = buildPdfReport(run?.id ?? "run-bracket-demo-seeded", summary);
+    await storage.putObject(pdfRef, pdf);
+    return pdf;
+  }
+}
+
+async function summaryForResult(resultRef: string): Promise<typeof bracketResultSummary> {
+  const artifact = await storage.getObject(resultRef);
+  const parsed = JSON.parse(artifact.toString("utf8")) as { summary?: typeof bracketResultSummary };
+  return parsed.summary ?? bracketResultSummary;
 }
 
 async function displayModelForProject(project: Project): Promise<DisplayModel> {
@@ -464,7 +539,11 @@ async function ensureSampleArtifacts(): Promise<void> {
   );
   await storage.putObject(
     "project-bracket-demo/reports/report.html",
-    "<!doctype html><html><body><h1>Bracket Demo Static Stress Report</h1><p>Max stress: 142 MPa</p><p>Max displacement: 0.184 mm</p><p>Safety factor: 1.8</p><p>Reaction force: 500 N</p></body></html>"
+    buildHtmlReport("run-bracket-demo-seeded", bracketResultSummary)
+  );
+  await storage.putObject(
+    "project-bracket-demo/reports/report.pdf",
+    buildPdfReport("run-bracket-demo-seeded", bracketResultSummary)
   );
 }
 

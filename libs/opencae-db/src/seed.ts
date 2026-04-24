@@ -1,4 +1,5 @@
 import { FileSystemObjectStorageProvider } from "@opencae/storage";
+import { buildHtmlReport, buildPdfReport } from "@opencae/post-service";
 import { SQLiteDatabaseProvider } from "./index";
 import { bracketDemoProject, bracketDisplayModel, bracketResultFields, bracketResultSummary } from "./sampleData";
 
@@ -18,7 +19,11 @@ await storage.putObject(
 );
 await storage.putObject(
   "project-bracket-demo/reports/report.html",
-  `<!doctype html><html><head><title>Bracket Demo Report</title></head><body><h1>Bracket Demo Static Stress Report</h1><p>Max stress: 142 MPa</p><p>Max displacement: 0.184 mm</p><p>Safety factor: 1.8</p><p>Reaction force: 500 N</p></body></html>`
+  buildHtmlReport("run-bracket-demo-seeded", bracketResultSummary)
+);
+await storage.putObject(
+  "project-bracket-demo/reports/report.pdf",
+  buildPdfReport("run-bracket-demo-seeded", bracketResultSummary)
 );
 
 console.log("Seeded Bracket Demo project and artifacts.");
