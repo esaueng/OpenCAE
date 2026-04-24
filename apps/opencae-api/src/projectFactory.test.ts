@@ -35,6 +35,7 @@ describe("projectFactory", () => {
       expect(project.geometryFiles[0]?.filename).toContain(sampleId);
       expect(sampleDisplayModelFor(sampleId).name.toLowerCase()).toContain(sampleId);
       expect(project.studies[0]?.geometryScope[0]?.label.toLowerCase()).toContain(sampleId === "bracket" ? "bracket" : sampleId);
+      expect(project.studies[0]?.namedSelections.filter((selection) => selection.entityType === "face")).toHaveLength(sampleDisplayModelFor(sampleId).faces.length);
     }
   });
 
@@ -45,9 +46,25 @@ describe("projectFactory", () => {
 
     expect(plate.faces).not.toEqual(bracket.faces);
     expect(cantilever.faces).not.toEqual(bracket.faces);
-    expect(new Set(plate.faces.map((face) => face.id))).toEqual(new Set(bracket.faces.map((face) => face.id)));
-    expect(new Set(cantilever.faces.map((face) => face.id))).toEqual(new Set(bracket.faces.map((face) => face.id)));
+    for (const faceId of ["face-base-left", "face-load-top", "face-web-front", "face-base-bottom"]) {
+      expect(plate.faces.map((face) => face.id)).toContain(faceId);
+      expect(cantilever.faces.map((face) => face.id)).toContain(faceId);
+      expect(bracket.faces.map((face) => face.id)).toContain(faceId);
+    }
     expect(plate.faces.find((face) => face.id === "face-load-top")?.label).toBe("Right load pad");
     expect(cantilever.faces.find((face) => face.id === "face-base-left")?.normal).toEqual([-1, 0, 0]);
+  });
+
+  test("adds selectable named selections for bracket display faces", () => {
+    const project = createSampleProject("bracket", {
+      projectId: "project-bracket",
+      studyId: "study-bracket",
+      now: "2026-04-24T12:00:00.000Z",
+      includeSeedRun: false
+    });
+    const faceSelections = project.studies[0]?.namedSelections.filter((selection) => selection.entityType === "face") ?? [];
+
+    expect(faceSelections.map((selection) => selection.geometryRefs[0]?.entityId)).toContain("face-upright-front");
+    expect(faceSelections.map((selection) => selection.geometryRefs[0]?.entityId)).toContain("face-base-end");
   });
 });

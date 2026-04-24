@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { ArrowDown, Check, Download, Eye, FileText, Grid3X3, Maximize2, Play, Plus, RotateCcw, X } from "lucide-react";
 import { starterMaterials } from "@opencae/materials";
 import type { Constraint, DisplayFace, Load, Project, ResultSummary, Study } from "@opencae/schema";
@@ -188,11 +188,18 @@ function LoadsPanel({
   onAddLoad,
   onUpdateLoad
 }: RightPanelProps) {
-  const selectedRef = selectedFace ? selectionForFace(study, selectedFace.id) : undefined;
+  const faceSelections = study.namedSelections.filter((selection) => selection.entityType === "face");
+  const selectedFromViewport = selectedFace ? selectionForFace(study, selectedFace.id) : undefined;
+  const [placementRef, setPlacementRef] = useState(selectedFromViewport?.id ?? faceSelections[0]?.id ?? "");
+  useEffect(() => {
+    if (selectedFromViewport) setPlacementRef(selectedFromViewport.id);
+  }, [selectedFromViewport?.id]);
+  const selectedRef = faceSelections.find((selection) => selection.id === placementRef) ?? selectedFromViewport;
   const units = unitsForLoadType(draftLoadType);
   return (
     <Panel title="Loads" helper="Choose where force or pressure is applied. Select a face, then add a load.">
       <PlacementReadout selectedRef={selectedRef} fallbackLabel={selectedFace?.label} />
+      <SelectionField study={study} value={selectedRef?.id ?? ""} onChange={setPlacementRef} />
       <label className="field">
         Load type
         <div className="segmented" role="group" aria-label="Load type">
@@ -404,7 +411,7 @@ function EmptyEditableList({ title }: { title: string }) {
 }
 
 function selectionForFace(study: Study, faceId: string) {
-  return study.namedSelections.find((item) => item.geometryRefs.some((ref) => ref.entityId === faceId));
+  return study.namedSelections.find((item) => item.entityType === "face" && item.geometryRefs.some((ref) => ref.entityId === faceId));
 }
 
 function MeshPanel({ study, onGenerateMesh }: RightPanelProps) {

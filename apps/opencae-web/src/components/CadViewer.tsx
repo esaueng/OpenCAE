@@ -892,6 +892,11 @@ function targetSizeForFace(faceId: string, modelKind: SampleModelKind, placement
   if (faceId === "face-load-top") return [0.78, 1.08];
   if (faceId === "face-base-bottom") return [2.55, 0.92];
   if (faceId === "face-base-left") return [1.42, 0.5];
+  if (faceId === "face-upright-front") return [0.82, 2.2];
+  if (faceId === "face-upright-left" || faceId === "face-upright-right") return [1.05, 2.05];
+  if (faceId === "face-base-front") return [2.8, 0.56];
+  if (faceId === "face-base-end") return [0.74, 0.58];
+  if (faceId === "face-rib-side") return [1.02, 0.92];
   return [1.0, 0.7];
 }
 

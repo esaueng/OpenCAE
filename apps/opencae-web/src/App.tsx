@@ -330,9 +330,12 @@ export function App() {
           onDraftLoadTypeChange={setDraftLoadType}
           onDraftLoadValueChange={setDraftLoadValue}
           onDraftLoadDirectionChange={setDraftLoadDirection}
-          onAddLoad={(type, value, selectionRef, direction) =>
-            selectedFace && updateStudy(addLoad(study.id, type, value, selectionRef, directionVectorForLabel(direction, selectedFace)))
-          }
+          onAddLoad={(type, value, selectionRef, direction) => {
+            const selection = study.namedSelections.find((item) => item.id === selectionRef);
+            const faceId = selection?.geometryRefs[0]?.entityId;
+            const face = selectedFace?.id === faceId ? selectedFace : displayModel.faces.find((item) => item.id === faceId);
+            if (face) updateStudy(addLoad(study.id, type, value, selectionRef, directionVectorForLabel(direction, face)));
+          }}
           onUpdateLoad={(load: Load) =>
             updateStudy(
               saveStudyPatch(study.id, { loads: study.loads.map((item) => (item.id === load.id ? load : item)) }, "Load updated.")
