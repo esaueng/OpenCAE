@@ -28,6 +28,7 @@ svg {
     linear-gradient(rgba(77, 163, 255, 0.055) 1px, transparent 1px),
     linear-gradient(90deg, rgba(77, 163, 255, 0.055) 1px, transparent 1px);
   background-size: 42px 42px;
+  background-position: 50% 50%;
   mask-image: radial-gradient(circle at center, black 0%, black 36%, transparent 72%);
   pointer-events: none;
 }
