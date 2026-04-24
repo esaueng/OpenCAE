@@ -64,9 +64,9 @@ const UPLOADED_BOX_SIZE: [number, number, number] = [2.2, 1.44, 1.04];
 export function CadViewer(props: CadViewerProps) {
   const effectiveViewMode: ViewMode = props.activeStep === "results" ? props.viewMode : props.viewMode === "mesh" ? "mesh" : "model";
   const isLightTheme = props.themeMode === "light";
-  const viewportBackground = effectiveViewMode === "results" || isLightTheme ? "#f7f9fc" : "#070b10";
-  const gridCellColor = effectiveViewMode === "results" || isLightTheme ? "#d9e0ea" : "#263140";
-  const gridSectionColor = effectiveViewMode === "results" || isLightTheme ? "#c2ccd8" : "#3a4654";
+  const viewportBackground = isLightTheme ? "#f7f9fc" : "#070b10";
+  const gridCellColor = isLightTheme ? "#d9e0ea" : "#263140";
+  const gridSectionColor = isLightTheme ? "#c2ccd8" : "#3a4654";
   return (
     <section className={`viewer-shell ${effectiveViewMode === "results" ? "results-view" : ""}`} aria-label="3D CAD viewer">
       <Canvas camera={{ position: [4.8, 4.8, 4.8], up: ISO_CAMERA_UP.toArray(), fov: 42 }}>
@@ -159,6 +159,7 @@ function BracketModel({ displayModel, activeStep, selectedFaceId, onSelectFace, 
   const materialColor = useMemo(() => colorForResult(displayModel.faces, viewMode, resultMode), [displayModel.faces, resultMode, viewMode]);
   const showResultMarkers = viewMode === "results" && activeStep === "results";
   const isResultView = viewMode === "results";
+  const showBoundaryMarkers = !isResultView;
 
   return (
     <group scale={groupScale}>
@@ -181,21 +182,15 @@ function BracketModel({ displayModel, activeStep, selectedFaceId, onSelectFace, 
           onSelect={onSelectFace}
         />
       ))}
-      {loadMarkers.map((marker) => {
+      {showBoundaryMarkers && loadMarkers.map((marker) => {
         const face = displayModel.faces.find((item) => item.id === marker.faceId);
         return face ? <LoadGlyph key={marker.id} marker={marker} face={face} active={activeStep === "loads"} /> : null;
       })}
-      {supportMarkers.map((marker) => {
+      {showBoundaryMarkers && supportMarkers.map((marker) => {
         const face = displayModel.faces.find((item) => item.id === marker.faceId);
         return face ? <SupportGlyph key={marker.id} kind={modelKind} marker={marker} face={face} active={activeStep === "supports"} /> : null;
       })}
-      {showResultMarkers && (
-        <>
-          <ResultProbe label="Stress: 142 MPa" anchor={[-1.18, 2.55, 0.62]} labelPosition={[-0.45, 2.95, 1.05]} tone="max" />
-          <ResultProbe label="Stress: 64 MPa" anchor={[-0.34, 0.86, 0.48]} labelPosition={[0.34, 1.24, 1.0]} tone="mid" />
-          <ResultProbe label="Stress: 28 MPa" anchor={[2.25, 0.14, 0.62]} labelPosition={[1.75, 0.54, 1.0]} tone="min" />
-        </>
-      )}
+      {showResultMarkers && resultProbesForKind(modelKind, resultMode).map((probe) => <ResultProbe key={`${probe.tone}-${probe.label}`} {...probe} />)}
     </group>
   );
 }
@@ -320,7 +315,7 @@ function UnsupportedUploadedModelNotice({ filename }: { filename: string }) {
 function AnalysisResultModel({ kind, resultMode, stressExaggeration }: { kind: SampleModelKind; resultMode: ResultMode; stressExaggeration: number }) {
   if (kind === "blank") return null;
   if (kind !== "bracket") {
-    return <SampleSolid kind={kind} color={resultPalette(resultMode).body[2] ?? "#9aa7b4"} />;
+    return <SampleResultSolid kind={kind} resultMode={resultMode} stressExaggeration={stressExaggeration} />;
   }
   return (
     <group>
@@ -328,6 +323,81 @@ function AnalysisResultModel({ kind, resultMode, stressExaggeration }: { kind: S
       <HoleRims kind="bracket" />
     </group>
   );
+}
+
+function SampleResultSolid({ kind, resultMode, stressExaggeration }: { kind: SampleModelKind; resultMode: ResultMode; stressExaggeration: number }) {
+  const plateGeometry = useMemo(() => colorizeResultGeometry(createPlateGeometry(), kind, resultMode, stressExaggeration), [kind, resultMode, stressExaggeration]);
+  const cantileverGeometry = useMemo(() => colorizeResultGeometry(new THREE.BoxGeometry(3.8, 0.5, 0.72, 40, 8, 8), kind, resultMode, stressExaggeration), [kind, resultMode, stressExaggeration]);
+  if (kind === "plate") {
+    return (
+      <mesh geometry={plateGeometry}>
+        <meshStandardMaterial vertexColors metalness={0.18} roughness={0.52} side={THREE.DoubleSide} />
+        <Edges color="#43556a" threshold={18} />
+      </mesh>
+    );
+  }
+  if (kind === "cantilever") {
+    return (
+      <mesh geometry={cantileverGeometry} position={[0, 0.18, 0]}>
+        <meshStandardMaterial vertexColors metalness={0.18} roughness={0.52} />
+        <Edges color="#43556a" threshold={18} />
+      </mesh>
+    );
+  }
+  return <SampleSolid kind={kind} color={resultPalette(resultMode).body[2] ?? "#9aa7b4"} />;
+}
+
+function colorizeResultGeometry(geometry: THREE.BufferGeometry, kind: SampleModelKind, resultMode: ResultMode, stressExaggeration: number) {
+  const colors: number[] = [];
+  const positions = geometry.getAttribute("position");
+  const color = new THREE.Color();
+  for (let index = 0; index < positions.count; index += 1) {
+    const point = new THREE.Vector3(positions.getX(index), positions.getY(index), positions.getZ(index));
+    color.copy(resultColorForPoint(kind, resultMode, stressExaggeration, point));
+    colors.push(color.r, color.g, color.b);
+  }
+  geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+function resultColorForPoint(kind: SampleModelKind, resultMode: ResultMode, stressExaggeration: number, point: THREE.Vector3) {
+  const stress = stressFractionForPoint(kind, point);
+  const displacement = displacementFractionForPoint(kind, point);
+  const t = resultMode === "displacement"
+    ? displacement
+    : resultMode === "safety_factor"
+      ? 1 - stress * 0.88
+      : Math.max(0, Math.min(1, 0.5 + (stress - 0.5) * stressExaggeration));
+  return new THREE.Color(interpolatedPaletteColor(resultPalette(resultMode).body, t));
+}
+
+function stressFractionForPoint(kind: SampleModelKind, point: THREE.Vector3) {
+  if (kind === "plate") {
+    const hole = gaussian2d(point.x, point.y, 0.02, 0.31, 0.54, 0.34);
+    const clamp = gaussian2d(point.x, point.y, -1.55, 0, 0.42, 0.76);
+    const load = gaussian2d(point.x, point.y, 1.42, 0, 0.48, 0.46);
+    return Math.max(0, Math.min(1, 0.12 + hole * 0.72 + clamp * 0.26 + load * 0.22));
+  }
+  if (kind === "cantilever") {
+    const fixedEnd = gaussian2d(point.x, point.y, -1.8, 0, 0.38, 0.42);
+    const topFiber = gaussian2d(point.x, point.y, -1.0, 0.25, 1.2, 0.16);
+    const loadEnd = gaussian2d(point.x, point.y, 1.65, -0.05, 0.5, 0.32);
+    return Math.max(0, Math.min(1, 0.08 + fixedEnd * 0.78 + topFiber * 0.28 + loadEnd * 0.16));
+  }
+  return 0.45;
+}
+
+function displacementFractionForPoint(kind: SampleModelKind, point: THREE.Vector3) {
+  if (kind === "plate") return Math.max(0, Math.min(1, 0.12 + ((point.x + 1.9) / 3.8) * 0.82));
+  if (kind === "cantilever") return Math.max(0, Math.min(1, 0.05 + ((point.x + 1.9) / 3.8) * 0.9));
+  return 0.45;
+}
+
+function gaussian2d(x: number, y: number, cx: number, cy: number, rx: number, ry: number) {
+  const dx = (x - cx) / rx;
+  const dy = (y - cy) / ry;
+  return Math.exp(-0.5 * (dx * dx + dy * dy));
 }
 
 function SmoothBracketBody({ resultMode, stressExaggeration }: { resultMode: ResultMode; stressExaggeration: number }) {
@@ -598,7 +668,43 @@ function normalizeGeometry(geometry: THREE.BufferGeometry): void {
   geometry.computeBoundingBox();
 }
 
-function ResultProbe({ label, anchor, labelPosition, tone }: { label: string; anchor: [number, number, number]; labelPosition: [number, number, number]; tone: "max" | "mid" | "min" }) {
+type ResultProbeConfig = { label: string; anchor: [number, number, number]; labelPosition: [number, number, number]; tone: "max" | "mid" | "min" };
+
+function resultProbesForKind(kind: SampleModelKind, resultMode: ResultMode): ResultProbeConfig[] {
+  const labels = resultProbeLabels(resultMode);
+  if (kind === "plate") {
+    return [
+      { label: labels.max, anchor: [0.08, 0.3, PLATE_DEPTH / 2 + 0.07], labelPosition: [-0.55, 0.78, 0.62], tone: "max" },
+      { label: labels.mid, anchor: [-1.46, 0, PLATE_DEPTH / 2 + 0.06], labelPosition: [-1.1, -0.62, 0.58], tone: "mid" },
+      { label: labels.min, anchor: [1.72, -0.48, PLATE_DEPTH / 2 + 0.06], labelPosition: [1.22, -0.96, 0.58], tone: "min" }
+    ];
+  }
+  if (kind === "cantilever") {
+    return [
+      { label: labels.max, anchor: [-1.72, 0.48, 0.0], labelPosition: [-1.12, 0.88, 0.52], tone: "max" },
+      { label: labels.mid, anchor: [-0.45, 0.44, 0.0], labelPosition: [0.08, 0.84, 0.52], tone: "mid" },
+      { label: labels.min, anchor: [1.72, 0.12, 0.0], labelPosition: [1.18, -0.32, 0.52], tone: "min" }
+    ];
+  }
+  if (kind === "uploaded" || kind === "blank") return [];
+  return [
+    { label: labels.max, anchor: [-1.18, 2.55, 0.62], labelPosition: [-0.45, 2.95, 1.05], tone: "max" },
+    { label: labels.mid, anchor: [-0.34, 0.86, 0.48], labelPosition: [0.34, 1.24, 1.0], tone: "mid" },
+    { label: labels.min, anchor: [2.25, 0.14, 0.62], labelPosition: [1.75, 0.54, 1.0], tone: "min" }
+  ];
+}
+
+function resultProbeLabels(resultMode: ResultMode) {
+  if (resultMode === "displacement") {
+    return { max: "Disp: 0.184 mm", mid: "Disp: 0.092 mm", min: "Disp: 0.012 mm" };
+  }
+  if (resultMode === "safety_factor") {
+    return { max: "FoS: 1.8", mid: "FoS: 4.7", min: "FoS: 7.6" };
+  }
+  return { max: "Stress: 142 MPa", mid: "Stress: 64 MPa", min: "Stress: 28 MPa" };
+}
+
+function ResultProbe({ label, anchor, labelPosition, tone }: ResultProbeConfig) {
   return (
     <group>
       <Line points={[anchor, labelPosition]} color="#6d7480" transparent opacity={0.75} lineWidth={1} />
@@ -1027,11 +1133,16 @@ function resultPalette(resultMode: ResultMode): { body: string[] } {
   };
 }
 
-function gradient(value: number, min: number, max: number, colors: string[]): string {
-  const t = Math.max(0, Math.min(1, (value - min) / (max - min)));
+function interpolatedPaletteColor(colors: string[], value: number): string {
+  const t = Math.max(0, Math.min(1, value));
   const index = Math.min(colors.length - 2, Math.floor(t * (colors.length - 1)));
   const localT = t * (colors.length - 1) - index;
   return new THREE.Color(colors[index] ?? colors[0]).lerp(new THREE.Color(colors[index + 1] ?? colors.at(-1)), localT).getStyle();
+}
+
+function gradient(value: number, min: number, max: number, colors: string[]): string {
+  const t = Math.max(0, Math.min(1, (value - min) / (max - min)));
+  return interpolatedPaletteColor(colors, t);
 }
 
 function rotationForNormal(normal: [number, number, number]): [number, number, number] {
