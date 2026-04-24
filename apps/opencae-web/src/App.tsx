@@ -70,6 +70,7 @@ export function App() {
     if (runProgress >= 100 && activeRunId) return activeRunId;
     return latestReportRunId(study, "");
   }, [activeRunId, completedRunId, runProgress, study]);
+  const reportDownloadUrl = reportRunId ? `/api/runs/${reportRunId}/report.pdf` : project ? `/api/projects/${project.id}/report.pdf` : undefined;
   const selectedFace = useMemo(() => displayModel?.faces.find((face) => face.id === selectedFaceId) ?? null, [displayModel, selectedFaceId]);
   const solverRunning = runProgress > 0 && runProgress < 100;
   const canUndoStep = stepHistoryIndex > 0;
@@ -256,11 +257,11 @@ export function App() {
   }
 
   function handleGenerateReport() {
-    if (!reportRunId) {
+    if (!reportDownloadUrl) {
       pushMessage("Run the simulation before generating a report.");
       return;
     }
-    pushMessage("Report download started.");
+    pushMessage("PDF report download started.");
   }
 
   if (!project || !displayModel || !study) {
@@ -370,9 +371,9 @@ export function App() {
           }
           onGenerateMesh={(preset) => updateStudy(generateMesh(study.id, preset), "run")}
           onRunSimulation={handleRunSimulation}
-          canGenerateReport={Boolean(reportRunId)}
-          reportUrl={reportRunId ? `/api/runs/${reportRunId}/report` : undefined}
-          reportFilename={`${project.name.replace(/[^\w.-]+/g, "-").replace(/^-+|-+$/g, "").toLowerCase() || "opencae"}-report.html`}
+          canGenerateReport={Boolean(reportDownloadUrl)}
+          reportUrl={reportDownloadUrl}
+          reportFilename={`${project.name.replace(/[^\w.-]+/g, "-").replace(/^-+|-+$/g, "").toLowerCase() || "opencae"}-report.pdf`}
           onGenerateReport={handleGenerateReport}
         />
       </main>

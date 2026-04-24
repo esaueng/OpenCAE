@@ -555,10 +555,10 @@ function ResultsPanel({
 
 function ReportPanel({ canGenerateReport, reportUrl, reportFilename, onGenerateReport }: RightPanelProps) {
   return (
-    <Panel title="Report" helper="Generate a simple HTML report you can share.">
+    <Panel title="Report" helper="Generate a polished PDF report you can share.">
       <div className="summary-box">
-        <Info label="Format" value="HTML · self-contained" />
-        <Info label="Sections" value="7" />
+        <Info label="Format" value="PDF · print ready" />
+        <Info label="Companion" value="HTML · self-contained" />
         <Info label="Output" value="./data/reports" />
       </div>
       <ReportDownloadAction
@@ -566,7 +566,7 @@ function ReportPanel({ canGenerateReport, reportUrl, reportFilename, onGenerateR
         reportUrl={reportUrl}
         reportFilename={reportFilename}
         onGenerateReport={onGenerateReport}
-        label="Generate & download"
+        label="Generate & download PDF"
         icon={<Download size={18} />}
       />
       <SectionTitle>Contents</SectionTitle>
@@ -595,7 +595,7 @@ function ReportDownloadAction({
   icon: ReactNode;
 }) {
   if (!canGenerateReport || !reportUrl) {
-    return <button className="primary wide" disabled type="button">{icon}{label}</button>;
+    return <button className="primary wide" type="button" onClick={onGenerateReport}>{icon}{label}</button>;
   }
   return (
     <a className="primary wide" href={reportUrl} download={reportFilename} onClick={onGenerateReport}>

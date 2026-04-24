@@ -39,8 +39,10 @@ describe("LocalReportProvider", () => {
 
     expect(first).toBe("project-test/reports/run-a/report.html");
     expect(second).toBe("project-test/reports/run-b/report.html");
-    expect((await storage.getObject(first)).toString("utf8")).toContain("Reaction force: 500 N");
-    expect((await storage.getObject(second)).toString("utf8")).toContain("Reaction force: 1500 N");
+    expect((await storage.getObject(first)).toString("utf8")).toContain("Reaction force</td><td>500 N");
+    expect((await storage.getObject(second)).toString("utf8")).toContain("Reaction force</td><td>1,500 N");
+    expect((await storage.getObject("project-test/reports/run-a/report.pdf")).subarray(0, 4).toString("utf8")).toBe("%PDF");
+    expect((await storage.getObject("project-test/reports/run-b/report.pdf")).subarray(0, 4).toString("utf8")).toBe("%PDF");
   });
 });
 
