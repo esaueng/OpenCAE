@@ -72,8 +72,18 @@ export function blankDisplayModel(): DisplayModel {
   };
 }
 
-export function uploadedDisplayModelFor(filename: string): DisplayModel {
+export function uploadedDisplayModelFor(filename: string, contentBase64?: string): DisplayModel {
   const modelName = baseNameForModel(filename);
+  const previewFormat = previewFormatForFilename(filename);
+  if (!previewFormat || !contentBase64) {
+    return {
+      id: "display-uploaded",
+      name: `${modelName} uploaded model`,
+      bodyCount: 0,
+      faces: []
+    };
+  }
+
   return {
     id: "display-uploaded",
     name: `${modelName} imported body`,
@@ -85,7 +95,12 @@ export function uploadedDisplayModelFor(filename: string): DisplayModel {
       { id: "face-upload-back", label: "Back face", color: "#64748b", center: [0, 0, -0.52], normal: [0, 0, -1], stressValue: 54 },
       { id: "face-upload-left", label: "Left face", color: "#8b949e", center: [-1.1, 0, 0], normal: [-1, 0, 0], stressValue: 58 },
       { id: "face-upload-right", label: "Right face", color: "#8b949e", center: [1.1, 0, 0], normal: [1, 0, 0], stressValue: 84 }
-    ]
+    ],
+    visualMesh: {
+      format: previewFormat,
+      filename,
+      contentBase64
+    }
   };
 }
 
@@ -124,6 +139,7 @@ export function attachUploadedModelToProject(
         source: "local-upload",
         nativeCadImport: false,
         displayModelRef: options.artifactKey,
+        previewFormat: options.displayModel.visualMesh?.format,
         bodyCount: options.displayModel.bodyCount,
         faceCount: options.displayModel.faces.length
       }
@@ -261,4 +277,10 @@ function baseNameForModel(filename: string): string {
   const safeName = filename.trim().split(/[\\/]/).pop() || "Uploaded model";
   const withoutExtension = safeName.replace(/\.[^.]+$/, "");
   return withoutExtension || "Uploaded model";
+}
+
+function previewFormatForFilename(filename: string): "stl" | "obj" | undefined {
+  const extension = filename.trim().split(".").pop()?.toLowerCase();
+  if (extension === "stl" || extension === "obj") return extension;
+  return undefined;
 }

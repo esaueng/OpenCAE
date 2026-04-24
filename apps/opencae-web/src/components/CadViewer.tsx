@@ -5,6 +5,8 @@ import type { ThreeEvent } from "@react-three/fiber";
 import type { DisplayFace, DisplayModel } from "@opencae/schema";
 import { RotateCcw } from "lucide-react";
 import * as THREE from "three";
+import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
+import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
 import type { StepId } from "./StepBar";
 
 export type ViewMode = "model" | "mesh" | "results";
@@ -163,11 +165,11 @@ function BracketModel({ displayModel, activeStep, selectedFaceId, onSelectFace, 
       {isResultView ? (
         <AnalysisResultModel kind={modelKind} resultMode={resultMode} stressExaggeration={stressExaggeration} />
       ) : (
-        <SampleSolid kind={modelKind} color={materialColor("face-base-bottom")} />
+        <SampleSolid kind={modelKind} displayModel={displayModel} color={materialColor("face-base-bottom")} />
       )}
       <HoleRims kind={modelKind} />
       {viewMode === "mesh" && <MeshOverlay kind={modelKind} />}
-      {displayModel.faces.map((face) => (
+      {(modelKind === "uploaded" && !displayModel.visualMesh ? [] : displayModel.faces).map((face) => (
         <FacePickTarget
           key={face.id}
           face={face}
@@ -206,9 +208,9 @@ function modelKindForDisplayModel(displayModel: DisplayModel): SampleModelKind {
   return "bracket";
 }
 
-function SampleSolid({ kind, color }: { kind: SampleModelKind; color: string }) {
+function SampleSolid({ kind, color, displayModel }: { kind: SampleModelKind; color: string; displayModel?: DisplayModel }) {
   if (kind === "blank") return null;
-  if (kind === "uploaded") return <UploadedSolid color={color} />;
+  if (kind === "uploaded") return <UploadedSolid displayModel={displayModel} color={color} />;
   if (kind === "plate") return <PlateSolid color={color} />;
   if (kind === "cantilever") return <CantileverSolid color={color} />;
   return <BracketSolid color={color} />;
@@ -254,13 +256,64 @@ function CantileverSolid({ color }: { color: string }) {
   );
 }
 
-function UploadedSolid({ color }: { color: string }) {
+function UploadedSolid({ displayModel, color }: { displayModel?: DisplayModel; color: string }) {
+  if (!displayModel?.visualMesh) return <UnsupportedUploadedModelNotice filename={displayModel?.name ?? "Uploaded model"} />;
+  if (displayModel.visualMesh.format === "obj") return <UploadedObjModel displayModel={displayModel} />;
+  return <UploadedStlModel displayModel={displayModel} color={color} />;
+}
+
+function UploadedStlModel({ displayModel, color }: { displayModel: DisplayModel; color: string }) {
+  const geometry = useMemo(() => {
+    const parsed = new STLLoader().parse(base64ToArrayBuffer(displayModel.visualMesh?.contentBase64 ?? ""));
+    normalizeGeometry(parsed);
+    parsed.computeVertexNormals();
+    return parsed;
+  }, [displayModel.visualMesh?.contentBase64]);
+
   return (
-    <mesh>
-      <boxGeometry args={[...UPLOADED_BOX_SIZE, 10, 6, 6]} />
+    <mesh geometry={geometry}>
       <meshStandardMaterial color={color} metalness={0.18} roughness={0.54} />
       <Edges color="#c8d3df" threshold={15} />
     </mesh>
+  );
+}
+
+function UploadedObjModel({ displayModel }: { displayModel: DisplayModel }) {
+  const object = useMemo(() => {
+    const text = new TextDecoder().decode(base64ToArrayBuffer(displayModel.visualMesh?.contentBase64 ?? ""));
+    const parsed = new OBJLoader().parse(text);
+    const box = new THREE.Box3().setFromObject(parsed);
+    const size = box.getSize(new THREE.Vector3());
+    const center = box.getCenter(new THREE.Vector3());
+    const maxDimension = Math.max(size.x, size.y, size.z, 0.001);
+    parsed.position.sub(center);
+    parsed.scale.setScalar(2.4 / maxDimension);
+    parsed.traverse((child) => {
+      if (child instanceof THREE.Mesh) {
+        child.material = new THREE.MeshStandardMaterial({ color: "#9aa7b4", metalness: 0.18, roughness: 0.54 });
+        child.castShadow = true;
+        child.receiveShadow = true;
+      }
+    });
+    return parsed;
+  }, [displayModel.visualMesh?.contentBase64]);
+
+  return <primitive object={object} />;
+}
+
+function UnsupportedUploadedModelNotice({ filename }: { filename: string }) {
+  return (
+    <group>
+      <mesh visible={false}>
+        <boxGeometry args={[1, 1, 1]} />
+        <meshBasicMaterial transparent opacity={0} />
+      </mesh>
+      <Html center position={[0, 0.35, 0]} className="model-notice">
+        <strong>Preview unavailable</strong>
+        <span>{filename.replace(" uploaded model", "")}</span>
+        <small>STEP/IGES/BREP files are stored, but this local viewer can preview STL or OBJ meshes.</small>
+      </Html>
+    </group>
   );
 }
 
@@ -522,6 +575,27 @@ function createRibShape() {
   }
   shape.closePath();
   return shape;
+}
+
+function base64ToArrayBuffer(value: string): ArrayBuffer {
+  const binary = window.atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes.buffer;
+}
+
+function normalizeGeometry(geometry: THREE.BufferGeometry): void {
+  geometry.computeBoundingBox();
+  const box = geometry.boundingBox;
+  if (!box) return;
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+  const maxDimension = Math.max(size.x, size.y, size.z, 0.001);
+  geometry.translate(-center.x, -center.y, -center.z);
+  geometry.scale(2.4 / maxDimension, 2.4 / maxDimension, 2.4 / maxDimension);
+  geometry.computeBoundingBox();
 }
 
 function ResultProbe({ label, anchor, labelPosition, tone }: { label: string; anchor: [number, number, number]; labelPosition: [number, number, number]; tone: "max" | "mid" | "min" }) {
@@ -855,14 +929,7 @@ function MeshOverlay({ kind }: { kind: SampleModelKind }) {
     );
   }
 
-  if (kind === "uploaded") {
-    return (
-      <mesh>
-        <boxGeometry args={[...UPLOADED_BOX_SIZE, 10, 6, 6]} />
-        <meshBasicMaterial color="#9ad1ff" wireframe transparent opacity={0.3} />
-      </mesh>
-    );
-  }
+  if (kind === "uploaded") return null;
 
   return (
     <group>

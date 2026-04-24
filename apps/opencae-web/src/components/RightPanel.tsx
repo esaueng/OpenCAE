@@ -65,6 +65,7 @@ function ModelPanel({ project, study, viewMode, sampleModel, onFitView, onViewMo
   const geometry = project.geometryFiles[0];
   const isBlankProject = !geometry;
   const isUploadedProject = geometry?.metadata.source === "local-upload";
+  const uploadPreviewFormat = typeof geometry?.metadata.previewFormat === "string" ? geometry.metadata.previewFormat.toUpperCase() : "";
   const faceCount = Number(geometry?.metadata.faceCount ?? 0);
   const bodyCount = Number(geometry?.metadata.bodyCount ?? 0);
   const sampleLabel = sampleModel === "bracket" ? "Bracket Demo" : sampleModel === "plate" ? "Plate Demo" : "Cantilever Demo";
@@ -136,9 +137,9 @@ function ModelPanel({ project, study, viewMode, sampleModel, onFitView, onViewMo
       </button>
       {confirmSampleLoad && <p className="panel-copy confirm-copy">This will reload {sampleLabel} and reset the sample setup.</p>}
       {isBlankProject ? (
-        <Callout>Upload a STEP, IGES, STL, OBJ, or BREP file to start setting up this blank project. Native CAD parsing is mocked in this local build, so uploaded files use a generic selectable body.</Callout>
+        <Callout>Upload STL or OBJ to preview the model in this local viewer. STEP, IGES, and BREP files can be stored, but native CAD preview is not available yet.</Callout>
       ) : isUploadedProject ? (
-        <Callout>{geometry.filename} is loaded from local disk as a generic selectable body. You can apply material, supports, loads, mesh, and run the mock simulation workflow.</Callout>
+        <Callout>{uploadPreviewFormat ? `${geometry.filename} is loaded with a ${uploadPreviewFormat} viewport preview.` : `${geometry.filename} is stored, but native CAD preview is not available yet. Upload STL or OBJ when the viewport needs to match the file.`}</Callout>
       ) : (
         <>
           <SectionTitle>Preconfigured</SectionTitle>

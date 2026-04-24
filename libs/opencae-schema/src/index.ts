@@ -187,4 +187,9 @@ export interface DisplayModel {
   name: string;
   bodyCount: number;
   faces: DisplayFace[];
+  visualMesh?: {
+    format: "stl" | "obj";
+    filename: string;
+    contentBase64: string;
+  };
 }

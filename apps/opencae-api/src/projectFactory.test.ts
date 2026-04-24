@@ -68,25 +68,27 @@ describe("projectFactory", () => {
     expect(faceSelections.map((selection) => selection.geometryRefs[0]?.entityId)).toContain("face-base-end");
   });
 
-  test("attaches an uploaded model with selectable faces to a blank project", () => {
+  test("attaches a previewable uploaded mesh with selectable placement faces", () => {
     const blank = createBlankProject({
       projectId: "project-upload",
       studyId: "study-upload",
       now: "2026-04-24T12:00:00.000Z"
     });
-    const displayModel = uploadedDisplayModelFor("mounting-plate.step");
+    const displayModel = uploadedDisplayModelFor("mounting-plate.stl", "U1RMIERBVEE=");
     const project = attachUploadedModelToProject(blank, {
       geometryId: "geom-upload",
-      filename: "mounting-plate.step",
+      filename: "mounting-plate.stl",
       artifactKey: "project-upload/geometry/uploaded-display.json",
       now: "2026-04-24T12:05:00.000Z",
       displayModel
     });
 
     expect(project.name).toBe("Untitled Project");
-    expect(project.geometryFiles[0]?.filename).toBe("mounting-plate.step");
+    expect(project.geometryFiles[0]?.filename).toBe("mounting-plate.stl");
     expect(project.geometryFiles[0]?.metadata.source).toBe("local-upload");
+    expect(project.geometryFiles[0]?.metadata.previewFormat).toBe("stl");
     expect(project.geometryFiles[0]?.metadata.faceCount).toBe(displayModel.faces.length);
+    expect(displayModel.visualMesh?.format).toBe("stl");
     expect(project.studies[0]?.geometryScope).toEqual([
       { bodyId: "body-uploaded", entityType: "body", entityId: "body-uploaded", label: "mounting-plate body" }
     ]);
@@ -94,5 +96,13 @@ describe("projectFactory", () => {
     expect(project.studies[0]?.constraints).toEqual([]);
     expect(project.studies[0]?.loads).toEqual([]);
     expect(project.studies[0]?.meshSettings.status).toBe("not_started");
+  });
+
+  test("does not create fake placement faces for unsupported native CAD previews", () => {
+    const displayModel = uploadedDisplayModelFor("hat-clip.step", "SVNPMTAzMDM=");
+
+    expect(displayModel.bodyCount).toBe(0);
+    expect(displayModel.faces).toEqual([]);
+    expect(displayModel.visualMesh).toBeUndefined();
   });
 });
