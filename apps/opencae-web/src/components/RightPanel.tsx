@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { ArrowDown, Check, Download, Eye, FileText, Grid3X3, Maximize2, Play, Plus, RotateCcw, Upload, X } from "lucide-react";
+import { Anchor, ArrowDown, Check, Download, Eye, FileText, Grid3X3, Maximize2, Play, Plus, RotateCcw, Upload, X } from "lucide-react";
 import { starterMaterials } from "@opencae/materials";
 import type { Constraint, DisplayFace, Load, Project, ResultSummary, Study } from "@opencae/schema";
 import type { ResultMode, ViewMode } from "./CadViewer";
@@ -651,7 +651,7 @@ function PlacementReadout({ selectedRef, fallbackLabel }: { selectedRef: ReturnT
 }
 
 function SupportIcon() {
-  return <svg viewBox="0 0 18 18" aria-hidden="true"><path d="M3 9.5h12v4H3v-4Z" fill="none" stroke="currentColor" strokeWidth="1.5" /><path d="M5 13.5v2M9 13.5v2M13 13.5v2M4 15.5h10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>;
+  return <Anchor size={18} strokeWidth={1.8} aria-hidden="true" />;
 }
 
 function formatMPa(valuePa: number) {

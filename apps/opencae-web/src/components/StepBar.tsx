@@ -1,5 +1,5 @@
 import type { Study } from "@opencae/schema";
-import { Activity, Box, Check, Crosshair, FileText, FlaskConical, Layers3, Play, Shield } from "lucide-react";
+import { Activity, Anchor, Box, FileText, FlaskConical, Layers3, Play, Weight } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 export type StepId = "model" | "material" | "supports" | "loads" | "mesh" | "run" | "results" | "report";
@@ -14,8 +14,8 @@ interface StepBarProps {
 const steps: ReadonlyArray<{ id: StepId; label: string; Icon: LucideIcon }> = [
   { id: "model", label: "Model", Icon: Box },
   { id: "material", label: "Material", Icon: FlaskConical },
-  { id: "supports", label: "Supports", Icon: Shield },
-  { id: "loads", label: "Loads", Icon: Crosshair },
+  { id: "supports", label: "Supports", Icon: Anchor },
+  { id: "loads", label: "Loads", Icon: Weight },
   { id: "mesh", label: "Mesh", Icon: Layers3 },
   { id: "run", label: "Run", Icon: Play },
   { id: "results", label: "Results", Icon: Activity },
@@ -38,7 +38,7 @@ export function StepBar({ activeStep, study, hasResults, onSelect }: StepBarProp
     <nav className="stepbar" aria-label="Simulation workflow">
       <div className="stepbar-eyebrow">workflow</div>
       <div className="step-list">
-      {steps.map((step, index) => {
+      {steps.map((step) => {
         const isActive = activeStep === step.id;
         const isComplete = completed[step.id];
         const StepIcon = step.Icon;
@@ -46,10 +46,9 @@ export function StepBar({ activeStep, study, hasResults, onSelect }: StepBarProp
           <button key={step.id} className={`step ${isActive ? "active" : ""}`} onClick={() => onSelect(step.id)} aria-current={isActive ? "step" : undefined}>
             <span className={`step-icon ${isComplete ? "done" : ""}`} aria-hidden="true">
               <StepIcon size={18} strokeWidth={1.8} />
-              {isComplete ? <span className="step-check"><Check size={11} strokeWidth={2.5} /></span> : <span className="step-number">{index + 1}</span>}
             </span>
             <span>{step.label}</span>
-            <span className={`step-dot ${isComplete ? "done" : ""}`} />
+            <span className="step-dot" />
           </button>
         );
       })}
