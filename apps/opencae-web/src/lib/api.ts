@@ -23,21 +23,23 @@ export async function loadSampleProject(sample: SampleModelId = "bracket"): Prom
   return readJson(response);
 }
 
-export async function createProject(sample: SampleModelId): Promise<SampleProjectResponse> {
+export async function createProject(): Promise<SampleProjectResponse> {
   const response = await fetch("/api/projects", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ sample })
+    body: JSON.stringify({ mode: "blank" })
   });
   return readJson(response);
 }
 
-export async function openMostRecentProject(): Promise<SampleProjectResponse> {
-  const projectsResponse = await fetch("/api/projects");
-  const { projects } = await readJson<{ projects: Project[] }>(projectsResponse);
-  const project = projects.find((item) => item.studies.length > 0);
-  if (!project) return createProject("bracket");
-  const response = await fetch(`/api/projects/${project.id}`);
+export async function importLocalProject(file: File): Promise<SampleProjectResponse> {
+  const text = await file.text();
+  const payload = JSON.parse(text) as unknown;
+  const response = await fetch("/api/projects/import", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload)
+  });
   return readJson(response);
 }
 

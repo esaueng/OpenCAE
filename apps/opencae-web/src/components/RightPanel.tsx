@@ -61,8 +61,9 @@ export function RightPanel(props: RightPanelProps) {
 function ModelPanel({ project, study, viewMode, sampleModel, onFitView, onViewModeChange, onLoadSample, onSampleModelChange }: RightPanelProps) {
   const [confirmSampleLoad, setConfirmSampleLoad] = useState(false);
   const geometry = project.geometryFiles[0];
-  const faceCount = Number(geometry?.metadata.faceCount ?? 22);
-  const bodyCount = Number(geometry?.metadata.bodyCount ?? 1);
+  const isBlankProject = !geometry;
+  const faceCount = Number(geometry?.metadata.faceCount ?? 0);
+  const bodyCount = Number(geometry?.metadata.bodyCount ?? 0);
   const sampleLabel = sampleModel === "bracket" ? "Bracket Demo" : sampleModel === "plate" ? "Plate Demo" : "Cantilever Demo";
   const preconfigured =
     sampleModel === "bracket"
@@ -94,7 +95,7 @@ function ModelPanel({ project, study, viewMode, sampleModel, onFitView, onViewMo
       </label>
       <div className="summary-box">
         <Info label="Project" value={project.name} />
-        <Info label="Model" value={geometry?.filename ?? "bracket.step"} />
+        <Info label="Model" value={geometry?.filename ?? "No model loaded"} />
         <Info label="Bodies" value={String(bodyCount)} />
         <Info label="Faces" value={String(faceCount)} />
         <Info label="Volume" value="41,280 mm^3" />
@@ -114,12 +115,18 @@ function ModelPanel({ project, study, viewMode, sampleModel, onFitView, onViewMo
         {confirmSampleLoad ? "Click again to load sample" : "Load sample project"}
       </button>
       {confirmSampleLoad && <p className="panel-copy confirm-copy">This will reload {sampleLabel} and reset the sample setup.</p>}
-      <SectionTitle>Preconfigured</SectionTitle>
-      <div className="concept-card-list">
-        <ConceptCard icon={<SupportIcon />} title="Fixed support" detail={preconfigured.support} tone="warning" />
-        <ConceptCard icon={<ArrowDown size={18} />} title="Force · 500 N" detail={preconfigured.load} tone="accent" />
-      </div>
-      <Callout>{preconfigured.callout}</Callout>
+      {isBlankProject ? (
+        <Callout>This project is blank. Open a local OpenCAE project file or load a sample when you want preconfigured geometry.</Callout>
+      ) : (
+        <>
+          <SectionTitle>Preconfigured</SectionTitle>
+          <div className="concept-card-list">
+            <ConceptCard icon={<SupportIcon />} title="Fixed support" detail={preconfigured.support} tone="warning" />
+            <ConceptCard icon={<ArrowDown size={18} />} title="Force · 500 N" detail={preconfigured.load} tone="accent" />
+          </div>
+          <Callout>{preconfigured.callout}</Callout>
+        </>
+      )}
       <Info label="Study" value={study.name} />
     </Panel>
   );

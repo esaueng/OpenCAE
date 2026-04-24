@@ -6,11 +6,11 @@ import { bracketDemoMaterial, bracketDemoProject, bracketDisplayModel, bracketRe
 import { InMemoryJobQueueProvider, LocalRunStateProvider } from "@opencae/jobs";
 import { MockMeshService } from "@opencae/mesh-service";
 import { LocalReportProvider } from "@opencae/post-service";
-import type { Load, Project, RunEvent, Study, StudyRun } from "@opencae/schema";
+import { ProjectSchema, type DisplayModel, type Load, type Project, type RunEvent, type Study, type StudyRun } from "@opencae/schema";
 import { LocalMockComputeBackend } from "@opencae/solver-service";
 import { FileSystemObjectStorageProvider } from "@opencae/storage";
 import { validateStaticStressStudy } from "@opencae/study-core";
-import { createSampleProject, normalizeSampleId, sampleDisplayModelFor, sampleProjectName, type SampleModelId } from "./projectFactory";
+import { blankDisplayModel, createBlankProject, createSampleProject, normalizeSampleId, sampleDisplayModelFor, sampleProjectName, type SampleModelId } from "./projectFactory";
 
 const api = Fastify({ logger: true });
 await api.register(cors, { origin: true });
@@ -60,9 +60,20 @@ api.post("/api/sample-project/load", async (request) => {
 api.get("/api/projects", async () => ({ projects: db.listProjects() }));
 
 api.post("/api/projects", async (request) => {
-  const body = request.body as Partial<Project> & { sample?: SampleModelId } | undefined;
-  const sample = normalizeSampleId(body?.sample);
+  const body = request.body as Partial<Project> & { sample?: SampleModelId; mode?: "blank" | "sample" } | undefined;
   const now = new Date().toISOString();
+  if (body?.mode !== "sample") {
+    const project = createBlankProject({
+      projectId: `project-${crypto.randomUUID()}`,
+      studyId: `study-${crypto.randomUUID()}`,
+      name: body?.name,
+      now
+    });
+    db.upsertProject(project);
+    return { project, displayModel: blankDisplayModel(), message: "Blank project created." };
+  }
+
+  const sample = normalizeSampleId(body?.sample);
   const project = createSampleProject(sample, {
     projectId: `project-${crypto.randomUUID()}`,
     studyId: `study-${crypto.randomUUID()}`,
@@ -75,10 +86,26 @@ api.post("/api/projects", async (request) => {
   return { project, displayModel: sampleDisplayModelFor(sample), message: "Project created." };
 });
 
+api.post("/api/projects/import", async (request, reply) => {
+  const body = request.body as { project?: unknown; displayModel?: unknown } | Project | undefined;
+  const candidate = body && "project" in body ? body.project : body;
+  const parsed = ProjectSchema.safeParse(candidate);
+  if (!parsed.success) return reply.code(400).send({ error: "The selected file is not a valid OpenCAE project JSON." });
+
+  const project = parsed.data;
+  const displayModel = parseDisplayModel(body && "displayModel" in body ? body.displayModel : undefined) ?? displayModelForProject(project);
+  db.upsertProject(project);
+  if (project.geometryFiles[0]?.artifactKey) {
+    await storage.putObject(project.geometryFiles[0].artifactKey, JSON.stringify(displayModel, null, 2));
+  }
+  return { project, displayModel, message: `${project.name} opened from local file.` };
+});
+
 api.get("/api/projects/:projectId", async (request, reply) => {
   const { projectId } = request.params as { projectId: string };
   const project = db.getProject(projectId);
   if (!project) return reply.code(404).send({ error: "Project not found" });
+  if (!project.geometryFiles.length) return { project, displayModel: blankDisplayModel() };
   const sample = normalizeSampleId(project.geometryFiles[0]?.metadata.sampleModel);
   return { project, displayModel: sampleDisplayModelFor(sample) };
 });
@@ -312,6 +339,43 @@ function publish(runId: string, type: RunEvent["type"], progress: number | undef
 
 function isLoadType(type: unknown): type is Load["type"] {
   return type === "force" || type === "pressure" || type === "gravity";
+}
+
+function displayModelForProject(project: Project): DisplayModel {
+  if (!project.geometryFiles.length) return blankDisplayModel();
+  return sampleDisplayModelFor(normalizeSampleId(project.geometryFiles[0]?.metadata.sampleModel));
+}
+
+function parseDisplayModel(value: unknown): DisplayModel | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const candidate = value as Partial<DisplayModel>;
+  if (
+    typeof candidate.id === "string" &&
+    typeof candidate.name === "string" &&
+    typeof candidate.bodyCount === "number" &&
+    Array.isArray(candidate.faces) &&
+    candidate.faces.every(isDisplayFace)
+  ) {
+    return candidate as DisplayModel;
+  }
+  return undefined;
+}
+
+function isDisplayFace(value: unknown): boolean {
+  if (!value || typeof value !== "object") return false;
+  const face = value as Partial<DisplayModel["faces"][number]>;
+  return (
+    typeof face.id === "string" &&
+    typeof face.label === "string" &&
+    typeof face.color === "string" &&
+    typeof face.stressValue === "number" &&
+    isVector3(face.center) &&
+    isVector3(face.normal)
+  );
+}
+
+function isVector3(value: unknown): value is [number, number, number] {
+  return Array.isArray(value) && value.length === 3 && value.every((item) => typeof item === "number" && Number.isFinite(item));
 }
 
 async function ensureSampleArtifacts(): Promise<void> {

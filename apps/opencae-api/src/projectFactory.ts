@@ -28,6 +28,50 @@ export function normalizeSampleId(value: unknown): SampleModelId {
   return value === "plate" || value === "cantilever" ? value : "bracket";
 }
 
+export function createBlankProject(options: { projectId: string; studyId: string; name?: string; now: string }): Project {
+  const projectId = options.projectId;
+  return {
+    id: projectId,
+    name: options.name ?? "Untitled Project",
+    schemaVersion: bracketDemoProject.schemaVersion,
+    unitSystem: "SI",
+    geometryFiles: [],
+    studies: [{
+      id: options.studyId,
+      projectId,
+      name: "Static Stress",
+      type: "static_stress",
+      geometryScope: [],
+      materialAssignments: [],
+      namedSelections: [],
+      contacts: [],
+      constraints: [],
+      loads: [],
+      meshSettings: {
+        preset: "medium",
+        status: "not_started"
+      },
+      solverSettings: {
+        analysisType: "linear_static",
+        smallDisplacement: true
+      },
+      validation: [],
+      runs: []
+    }],
+    createdAt: options.now,
+    updatedAt: options.now
+  };
+}
+
+export function blankDisplayModel(): DisplayModel {
+  return {
+    id: "display-blank",
+    name: "No model loaded",
+    bodyCount: 0,
+    faces: []
+  };
+}
+
 export function createSampleProject(
   sampleId: SampleModelId,
   options: { projectId: string; studyId: string; name?: string; now: string; includeSeedRun: boolean }

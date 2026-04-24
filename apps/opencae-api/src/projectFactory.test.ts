@@ -1,7 +1,24 @@
 import { describe, expect, test } from "vitest";
-import { createSampleProject, sampleDisplayModelFor } from "./projectFactory";
+import { blankDisplayModel, createBlankProject, createSampleProject, sampleDisplayModelFor } from "./projectFactory";
 
 describe("projectFactory", () => {
+  test("creates a blank project without preconfigured geometry or study setup", () => {
+    const project = createBlankProject({
+      projectId: "project-blank",
+      studyId: "study-blank",
+      now: "2026-04-24T12:00:00.000Z"
+    });
+
+    expect(project.name).toBe("Untitled Project");
+    expect(project.geometryFiles).toEqual([]);
+    expect(project.studies[0]?.namedSelections).toEqual([]);
+    expect(project.studies[0]?.materialAssignments).toEqual([]);
+    expect(project.studies[0]?.constraints).toEqual([]);
+    expect(project.studies[0]?.loads).toEqual([]);
+    expect(project.studies[0]?.meshSettings.status).toBe("not_started");
+    expect(blankDisplayModel().bodyCount).toBe(0);
+  });
+
   test("creates a usable project from each selectable sample", () => {
     for (const sampleId of ["bracket", "plate", "cantilever"] as const) {
       const project = createSampleProject(sampleId, {

@@ -1,16 +1,28 @@
+import { useRef } from "react";
+
 interface StartScreenProps {
   onLoadSample: () => void;
   onCreateProject: () => void;
-  onOpenProject: () => void;
+  onOpenProject: (file: File) => void;
 }
 
 export function StartScreen({ onLoadSample, onCreateProject, onOpenProject }: StartScreenProps) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   return (
     <main
       className="start-screen"
       tabIndex={0}
       onKeyDown={(event) => {
         if (event.key === "Enter") onLoadSample();
+        if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "n") {
+          event.preventDefault();
+          onCreateProject();
+        }
+        if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "o") {
+          event.preventDefault();
+          fileInputRef.current?.click();
+        }
       }}
     >
       <div className="start-top">
@@ -33,10 +45,21 @@ export function StartScreen({ onLoadSample, onCreateProject, onOpenProject }: St
             <span>Create new project</span>
             <kbd>⌘ N</kbd>
           </button>
-          <button className="start-action secondary" onClick={() => onOpenProject()}>
+          <button className="start-action secondary" onClick={() => fileInputRef.current?.click()}>
             <span>Open local project</span>
             <kbd>⌘ O</kbd>
           </button>
+          <input
+            ref={fileInputRef}
+            className="visually-hidden"
+            type="file"
+            accept=".json,.opencae,.opencae.json,application/json"
+            onChange={(event) => {
+              const file = event.currentTarget.files?.[0];
+              event.currentTarget.value = "";
+              if (file) onOpenProject(file);
+            }}
+          />
         </div>
         <p className="start-caption">OpenCAE helps you test how parts respond to forces. Start with the sample project to see a complete example.</p>
       </section>
