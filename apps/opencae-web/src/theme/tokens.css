@@ -1,0 +1,215 @@
+/* ─────────────────────────────────────────────────────────────
+   OpenCAE Design Tokens
+   Drop in at: apps/opencae-web/src/theme/tokens.css
+   Import once in main.tsx BEFORE any component imports.
+   ───────────────────────────────────────────────────────────── */
+
+:root {
+  /* ── Surfaces & text ──────────────────────────────────── */
+  --color-bg: #0b0f14;
+  --color-surface: #111821;
+  --color-surface-2: #17202b;
+  --color-surface-hover: #1b2430;
+  --color-border: #2a3441;
+  --color-border-strong: #3a4554;
+  --color-text: #e6edf3;
+  --color-text-muted: #8b949e;
+  --color-text-subtle: #5c6672;
+
+  /* ── Semantic ─────────────────────────────────────────── */
+  --color-accent: #4da3ff;
+  --color-accent-dim: rgba(77, 163, 255, 0.12);
+  --color-accent-border: rgba(77, 163, 255, 0.45);
+  --color-warning: #f59e0b;
+  --color-error: #ef4444;
+  --color-success: #22c55e;
+  --color-viewport-bg: #070b10;
+
+  /* ── Result ramp (stress contour: blue → teal → green → yellow → red) ── */
+  --color-ramp-0: #2050b0;
+  --color-ramp-1: #3489d8;
+  --color-ramp-2: #39c8c8;
+  --color-ramp-3: #5fd979;
+  --color-ramp-4: #f2c23a;
+  --color-ramp-5: #ef5d3a;
+
+  /* ── Typography ───────────────────────────────────────── */
+  --font-ui: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  --fs-mini: 10.5px;
+  --fs-xs: 11.5px;
+  --fs-sm: 12px;
+  --fs-base: 13px;
+  --fs-md: 14px;
+  --fs-lg: 16px;
+  --fs-xl: 22px;
+  --fs-display: 38px;
+
+  --fw-regular: 400;
+  --fw-medium: 500;
+
+  --lh-tight: 1.35;
+  --lh-normal: 1.5;
+  --lh-loose: 1.7;
+
+  --ls-eyebrow: 0.14em;
+  --ls-tagline: 0.2em;
+
+  /* ── Spacing scale (4-based) ──────────────────────────── */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+  --sp-7: 48px;
+
+  /* ── Radii ────────────────────────────────────────────── */
+  --radius-sm: 3px;
+  --radius-md: 4px;
+  --radius-pill: 10px;
+
+  /* ── Borders (composed) ───────────────────────────────── */
+  --border-thin: 1px solid var(--color-border);
+  --border-strong: 1px solid var(--color-border-strong);
+
+  /* ── Layout dimensions ────────────────────────────────── */
+  --topbar-h: 44px;
+  --statusbar-h: 30px;
+  --stepbar-w: 212px;
+  --context-w: 344px;
+  --log-drawer-h: 200px;
+
+  /* ── Motion ───────────────────────────────────────────── */
+  --dur-fast: 100ms;
+  --dur-base: 200ms;
+  --dur-slow: 500ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* ── Z-index scale ────────────────────────────────────── */
+  --z-base: 0;
+  --z-viewer-overlay: 2;
+  --z-log-drawer: 5;
+  --z-modal: 50;
+  --z-start-screen: 100;
+}
+
+.theme-light {
+  --color-bg: #edf2f7;
+  --color-surface: #f8fafc;
+  --color-surface-2: #e9eff6;
+  --color-surface-hover: #dfe8f2;
+  --color-border: #c8d2df;
+  --color-border-strong: #aebbc9;
+  --color-text: #17202b;
+  --color-text-muted: #536170;
+  --color-text-subtle: #7a8795;
+  --color-accent: #1677d2;
+  --color-accent-dim: rgba(22, 119, 210, 0.12);
+  --color-accent-border: rgba(22, 119, 210, 0.42);
+  --color-viewport-bg: #f7f9fc;
+  --shadow-panel: 0 12px 30px rgba(37, 54, 73, 0.14);
+  color-scheme: light;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Base reset (minimal — expand in a separate reset if needed)
+   ───────────────────────────────────────────────────────────── */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-ui);
+  font-size: var(--fs-base);
+  line-height: var(--lh-normal);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+button {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+[tabindex]:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+input, select, textarea {
+  font-family: inherit;
+  font-size: inherit;
+  color: var(--color-text);
+  background: var(--color-bg);
+  border: var(--border-thin);
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
+  height: 30px;
+}
+
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--color-accent-dim);
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Reduced motion: disable non-essential animation/transition
+   ───────────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Custom scrollbar (WebKit — dark, subtle)
+   ───────────────────────────────────────────────────────────── */
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 5px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-border-strong);
+  background-clip: padding-box;
+  border: 2px solid transparent;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Utility: mono
+   Use sparingly — prefer the <code> element or component props.
+   ───────────────────────────────────────────────────────────── */
+
+.mono {
+  font-family: var(--font-mono);
+  font-feature-settings: "zero" 1;
+}

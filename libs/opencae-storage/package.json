@@ -1,0 +1,12 @@
+{
+  "name": "@opencae/storage",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@types/node": "^22.10.5"
+  }
+}

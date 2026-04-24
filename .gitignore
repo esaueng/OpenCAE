@@ -1,0 +1,17 @@
+node_modules/
+dist/
+.vite/
+.DS_Store
+data/sqlite/*.sqlite
+data/sqlite/*.sqlite-*
+data/artifacts/**
+data/logs/**
+data/reports/**
+**/data/sqlite/*.sqlite
+**/data/sqlite/*.sqlite-*
+**/data/artifacts/**
+**/data/logs/**
+**/data/reports/**
+!data/artifacts/.gitkeep
+!data/logs/.gitkeep
+!data/reports/.gitkeep

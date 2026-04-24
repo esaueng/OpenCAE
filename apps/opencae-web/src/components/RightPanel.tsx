@@ -1,0 +1,567 @@
+import { useState, type ReactNode } from "react";
+import { ArrowDown, Check, Download, Eye, FileText, Grid3X3, Maximize2, Play, Plus, RotateCcw, X } from "lucide-react";
+import { starterMaterials } from "@opencae/materials";
+import type { Constraint, DisplayFace, Load, Project, ResultSummary, Study } from "@opencae/schema";
+import type { ResultMode, ViewMode } from "./CadViewer";
+import type { StepId } from "./StepBar";
+import { directionLabelForLoad, directionVectorForLabel, unitsForLoadType, type LoadDirectionLabel, type LoadType } from "../loadPreview";
+import type { SampleModelId } from "../lib/api";
+
+interface RightPanelProps {
+  activeStep: StepId;
+  project: Project;
+  study: Study;
+  selectedFace: DisplayFace | null;
+  viewMode: ViewMode;
+  resultMode: ResultMode;
+  showDeformed: boolean;
+  stressExaggeration: number;
+  resultSummary: ResultSummary;
+  runProgress: number;
+  sampleModel: SampleModelId;
+  draftLoadType: LoadType;
+  draftLoadValue: number;
+  draftLoadDirection: LoadDirectionLabel;
+  onFitView: () => void;
+  onLoadSample: (sample?: SampleModelId) => void;
+  onSampleModelChange: (sample: SampleModelId) => void;
+  onViewModeChange: (mode: ViewMode) => void;
+  onResultModeChange: (mode: ResultMode) => void;
+  onToggleDeformed: () => void;
+  onStressExaggerationChange: (value: number) => void;
+  onAssignMaterial: (materialId: string) => void;
+  onAddSupport: (selectionRef?: string) => void;
+  onUpdateSupport: (support: Constraint) => void;
+  onDraftLoadTypeChange: (type: LoadType) => void;
+  onDraftLoadValueChange: (value: number) => void;
+  onDraftLoadDirectionChange: (direction: LoadDirectionLabel) => void;
+  onAddLoad: (type: LoadType, value: number, selectionRef: string, direction: LoadDirectionLabel) => void;
+  onUpdateLoad: (load: Load) => void;
+  onGenerateMesh: (preset: "coarse" | "medium" | "fine") => void;
+  onRunSimulation: () => void;
+  onGenerateReport: () => void;
+}
+
+export function RightPanel(props: RightPanelProps) {
+  return (
+    <aside className="side-panel">
+      {props.selectedFace && <div className="selection-readout">Face selected: {props.selectedFace.label}</div>}
+      {props.activeStep === "model" && <ModelPanel {...props} />}
+      {props.activeStep === "material" && <MaterialPanel {...props} />}
+      {props.activeStep === "supports" && <SupportsPanel {...props} />}
+      {props.activeStep === "loads" && <LoadsPanel {...props} />}
+      {props.activeStep === "mesh" && <MeshPanel {...props} />}
+      {props.activeStep === "run" && <RunPanel {...props} />}
+      {props.activeStep === "results" && <ResultsPanel {...props} />}
+      {props.activeStep === "report" && <ReportPanel {...props} />}
+    </aside>
+  );
+}
+
+function ModelPanel({ project, study, viewMode, sampleModel, onFitView, onViewModeChange, onLoadSample, onSampleModelChange }: RightPanelProps) {
+  const [confirmSampleLoad, setConfirmSampleLoad] = useState(false);
+  const geometry = project.geometryFiles[0];
+  const faceCount = Number(geometry?.metadata.faceCount ?? 22);
+  const bodyCount = Number(geometry?.metadata.bodyCount ?? 1);
+
+  function handleLoadSampleClick() {
+    if (!confirmSampleLoad) {
+      setConfirmSampleLoad(true);
+      return;
+    }
+    setConfirmSampleLoad(false);
+    onLoadSample(sampleModel);
+  }
+
+  return (
+    <Panel title="Model" helper="Inspect the 3D part. Orbit with left-drag, pan with right-drag, zoom with scroll.">
+      <label className="field">
+        Sample model
+        <div className="segmented" role="group" aria-label="Sample model">
+          {(["bracket", "plate", "cantilever"] as const).map((sample) => (
+            <button key={sample} className={sampleModel === sample ? "active" : ""} type="button" onClick={() => onSampleModelChange(sample)}>
+              {capitalize(sample)}
+            </button>
+          ))}
+        </div>
+      </label>
+      <div className="summary-box">
+        <Info label="Project" value={project.name} />
+        <Info label="Model" value={geometry?.filename ?? "bracket.step"} />
+        <Info label="Bodies" value={String(bodyCount)} />
+        <Info label="Faces" value={String(faceCount)} />
+        <Info label="Volume" value="41,280 mm^3" />
+        <Info label="Mass" value="111 g" />
+        <Info label="Units" value="mm" />
+      </div>
+      <div className="button-grid">
+        <button className="secondary" onClick={onFitView}><Maximize2 size={16} />Fit view</button>
+        <button className={viewMode === "mesh" ? "primary" : "secondary"} onClick={() => onViewModeChange(viewMode === "mesh" ? "model" : "mesh")}><Eye size={16} />Toggle mesh</button>
+      </div>
+      <button
+        className={confirmSampleLoad ? "primary wide" : "secondary wide"}
+        onClick={handleLoadSampleClick}
+        title={confirmSampleLoad ? "Click again to reload the sample project" : "Prepare to reload the sample project"}
+      >
+        <RotateCcw size={16} />
+        {confirmSampleLoad ? "Click again to load sample" : "Load sample project"}
+      </button>
+      {confirmSampleLoad && <p className="panel-copy confirm-copy">This will reload Bracket Demo and reset the sample setup.</p>}
+      <SectionTitle>Preconfigured</SectionTitle>
+      <div className="concept-card-list">
+        <ConceptCard icon={<SupportIcon />} title="Fixed support" detail="2 mounting holes · flange" tone="warning" />
+        <ConceptCard icon={<ArrowDown size={18} />} title="Force · 500 N" detail="top face · -Y direction" tone="accent" />
+      </div>
+      <Callout>An L-bracket is bolted at the flange; a vertical load on the top face creates a peak stress at the inside corner, reduced by the gusset rib.</Callout>
+      <Info label="Study" value={study.name} />
+    </Panel>
+  );
+}
+
+function MaterialPanel({ study, onAssignMaterial }: RightPanelProps) {
+  const current = study.materialAssignments[0]?.materialId ?? "mat-aluminum-6061";
+  const currentMaterial = starterMaterials.find((material) => material.id === current) ?? starterMaterials[0];
+  return (
+    <Panel title="Material" helper="Choose what the part is made of.">
+      <label className="field">
+        Material library
+        <select defaultValue={current} id="material-select">
+          {starterMaterials.map((material) => (
+            <option key={material.id} value={material.id}>{material.name}</option>
+          ))}
+        </select>
+      </label>
+      {currentMaterial && (
+        <div className="summary-box">
+          <Info label="Young's modulus" value={`${formatMPa(currentMaterial.youngsModulus)} MPa`} />
+          <Info label="Poisson ratio" value={String(currentMaterial.poissonRatio)} />
+          <Info label="Density" value={`${currentMaterial.density.toLocaleString()} kg/m^3`} />
+          <Info label="Yield strength" value={`${formatMPa(currentMaterial.yieldStrength)} MPa`} />
+        </div>
+      )}
+      <button className="primary wide" onClick={() => onAssignMaterial((document.getElementById("material-select") as HTMLSelectElement).value)}>Apply to bracket</button>
+      <SectionTitle>Assigned</SectionTitle>
+      <div className="concept-card-list">
+        <ConceptCard icon={<Check size={18} />} title={currentMaterial?.name ?? "Material"} detail="bracket · all bodies" tone="accent" />
+      </div>
+    </Panel>
+  );
+}
+
+function SupportsPanel({ selectedFace, study, onAddSupport, onUpdateSupport }: RightPanelProps) {
+  const selectedRef = selectedFace ? selectionForFace(study, selectedFace.id) : undefined;
+  const addLabel = study.constraints.length ? "Add another fixed support" : "Add fixed support";
+  return (
+    <Panel title="Supports" helper="Choose where the part is held fixed. Select a face, then add a fixed support. You can add more than one.">
+      <button className="outline-action wide" disabled={!selectedRef} onClick={() => onAddSupport(selectedRef?.id)}><Plus size={18} />{addLabel}</button>
+      <PlacementReadout selectedRef={selectedRef} fallbackLabel={selectedFace?.label} />
+      <SectionTitle>Applied</SectionTitle>
+      <SupportEditorList study={study} onUpdateSupport={onUpdateSupport} />
+      <Callout>Fixed supports prevent any motion of the selected face.</Callout>
+    </Panel>
+  );
+}
+
+function LoadsPanel({
+  selectedFace,
+  study,
+  draftLoadType,
+  draftLoadValue,
+  draftLoadDirection,
+  onDraftLoadTypeChange,
+  onDraftLoadValueChange,
+  onDraftLoadDirectionChange,
+  onAddLoad,
+  onUpdateLoad
+}: RightPanelProps) {
+  const selectedRef = selectedFace ? selectionForFace(study, selectedFace.id) : undefined;
+  const units = unitsForLoadType(draftLoadType);
+  return (
+    <Panel title="Loads" helper="Choose where force or pressure is applied. Select a face, then add a load.">
+      <PlacementReadout selectedRef={selectedRef} fallbackLabel={selectedFace?.label} />
+      <label className="field">
+        Load type
+        <div className="segmented" role="group" aria-label="Load type">
+          {(["force", "pressure", "gravity"] as const).map((type) => (
+            <button key={type} className={draftLoadType === type ? "active" : ""} type="button" onClick={() => onDraftLoadTypeChange(type)}>{capitalize(type)}</button>
+          ))}
+        </div>
+      </label>
+      <label className="field">
+        Magnitude
+        <span className="input-with-unit">
+          <input
+            id="load-value"
+            type="number"
+            value={draftLoadValue}
+            onChange={(event) => onDraftLoadValueChange(Number(event.currentTarget.value))}
+          />
+          <span>{units}</span>
+        </span>
+      </label>
+      <label className="field">
+        Direction
+        <div className="segmented direction-options" role="group" aria-label="Direction">
+          {(["-Y", "+Y", "+X", "-X", "Normal"] as const).map((option) => (
+            <button key={option} className={draftLoadDirection === option ? "active" : ""} type="button" onClick={() => onDraftLoadDirectionChange(option)}>{option}</button>
+          ))}
+        </div>
+      </label>
+      <button className="outline-action wide" disabled={!selectedRef} onClick={() => selectedRef && onAddLoad(draftLoadType, draftLoadValue, selectedRef.id, draftLoadDirection)}><Plus size={18} />Add load</button>
+      <SectionTitle>Applied</SectionTitle>
+      <LoadEditorList study={study} onUpdateLoad={onUpdateLoad} />
+    </Panel>
+  );
+}
+
+function LoadEditorList({ study, onUpdateLoad }: { study: Study; onUpdateLoad: (load: Load) => void }) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+  if (!study.loads.length) return <EmptyEditableList title="Loads" />;
+
+  return (
+    <div className="editable-list">
+      <h3>Loads</h3>
+      {study.loads.map((load) => {
+        const editing = editingId === load.id;
+        const units = String(load.parameters.units ?? (load.type === "pressure" ? "kPa" : "N"));
+        const selection = study.namedSelections.find((candidate) => candidate.id === load.selectionRef);
+        const label = selection?.geometryRefs[0]?.label ?? "selected face";
+        return (
+          <div className="editable-item" key={load.id}>
+            <div className="editable-summary">
+              <span className="item-icon"><ArrowDown size={18} /></span>
+              <strong>{capitalize(load.type)} · {String(load.parameters.value ?? "")} {units}</strong>
+              <small>{label} · {directionLabelForLoad(load)} direction</small>
+              <span className="remove-glyph" aria-hidden="true"><X size={16} /></span>
+            </div>
+            {editing ? (
+              <LoadEditForm
+                load={load}
+                study={study}
+                onCancel={() => setEditingId(null)}
+                onSave={(nextLoad) => {
+                  onUpdateLoad(nextLoad);
+                  setEditingId(null);
+                }}
+              />
+            ) : (
+              <button className="secondary wide" type="button" onClick={() => setEditingId(load.id)}>Edit load</button>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function LoadEditForm({ load, study, onSave, onCancel }: { load: Load; study: Study; onSave: (load: Load) => void; onCancel: () => void }) {
+  const [type, setType] = useState<"force" | "pressure" | "gravity">(load.type);
+  const [value, setValue] = useState(String(load.parameters.value ?? 500));
+  const [selectionRef, setSelectionRef] = useState(load.selectionRef);
+  const [direction, setDirection] = useState<LoadDirectionLabel>(directionLabelForLoad(load));
+  const units = unitsForLoadType(type);
+  const selectedFace = study.namedSelections.find((selection) => selection.id === selectionRef)?.geometryRefs[0];
+  const directionFace: DisplayFace = {
+    id: selectedFace?.entityId ?? "selected-face",
+    label: selectedFace?.label ?? "selected face",
+    color: "#fff",
+    center: [0, 0, 0],
+    normal: direction === "Normal" && Array.isArray(load.parameters.direction) ? load.parameters.direction as [number, number, number] : [0, 1, 0],
+    stressValue: 0
+  };
+  return (
+    <div className="edit-form">
+      <label className="field">
+        Load type
+        <select value={type} onChange={(event) => setType(event.currentTarget.value as "force" | "pressure" | "gravity")}>
+          <option value="force">Force</option>
+          <option value="pressure">Pressure</option>
+          <option value="gravity">Gravity</option>
+        </select>
+      </label>
+      <label className="field">
+        Magnitude
+        <input type="number" value={value} onChange={(event) => setValue(event.currentTarget.value)} />
+      </label>
+      <SelectionField study={study} value={selectionRef} onChange={setSelectionRef} />
+      <label className="field">
+        Direction
+        <select value={direction} onChange={(event) => setDirection(event.currentTarget.value as LoadDirectionLabel)}>
+          {(["-Y", "+Y", "+X", "-X", "Normal"] as const).map((option) => (
+            <option key={option} value={option}>{option}</option>
+          ))}
+        </select>
+      </label>
+      <div className="edit-actions">
+        <button
+          className="primary"
+          type="button"
+          onClick={() => onSave({ ...load, type, selectionRef, parameters: { ...load.parameters, value: Number(value), units, direction: directionVectorForLabel(direction, directionFace) } })}
+        >
+          Save
+        </button>
+        <button className="secondary" type="button" onClick={onCancel}>Cancel</button>
+      </div>
+    </div>
+  );
+}
+
+function SupportEditorList({ study, onUpdateSupport }: { study: Study; onUpdateSupport: (support: Constraint) => void }) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+  if (!study.constraints.length) return <EmptyEditableList title="Supports" />;
+
+  return (
+    <div className="editable-list">
+      <h3>Supports</h3>
+      {study.constraints.map((support) => {
+        const editing = editingId === support.id;
+        const selection = study.namedSelections.find((candidate) => candidate.id === support.selectionRef);
+        const label = selection?.geometryRefs[0]?.label ?? "selected face";
+        return (
+          <div className="editable-item" key={support.id}>
+            <div className="editable-summary">
+              <span className="item-icon warning"><SupportIcon /></span>
+              <strong>{support.type === "fixed" ? "Fixed support" : "Prescribed displacement"}</strong>
+              <small>{label}</small>
+              <span className="remove-glyph" aria-hidden="true"><X size={16} /></span>
+            </div>
+            {editing ? (
+              <SupportEditForm
+                support={support}
+                study={study}
+                onCancel={() => setEditingId(null)}
+                onSave={(nextSupport) => {
+                  onUpdateSupport(nextSupport);
+                  setEditingId(null);
+                }}
+              />
+            ) : (
+              <button className="secondary wide" type="button" onClick={() => setEditingId(support.id)}>Edit support</button>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function SupportEditForm({ support, study, onSave, onCancel }: { support: Constraint; study: Study; onSave: (support: Constraint) => void; onCancel: () => void }) {
+  const [type, setType] = useState<"fixed" | "prescribed_displacement">(support.type);
+  const [selectionRef, setSelectionRef] = useState(support.selectionRef);
+  return (
+    <div className="edit-form">
+      <label className="field">
+        Support type
+        <select value={type} onChange={(event) => setType(event.currentTarget.value as "fixed" | "prescribed_displacement")}>
+          <option value="fixed">Fixed support</option>
+          <option value="prescribed_displacement">Prescribed displacement</option>
+        </select>
+      </label>
+      <SelectionField study={study} value={selectionRef} onChange={setSelectionRef} />
+      <div className="edit-actions">
+        <button className="primary" type="button" onClick={() => onSave({ ...support, type, selectionRef })}>Save</button>
+        <button className="secondary" type="button" onClick={onCancel}>Cancel</button>
+      </div>
+    </div>
+  );
+}
+
+function SelectionField({ study, value, onChange }: { study: Study; value: string; onChange: (selectionRef: string) => void }) {
+  const faceSelections = study.namedSelections.filter((selection) => selection.entityType === "face");
+  return (
+    <label className="field">
+      Placement
+      <select value={value} onChange={(event) => onChange(event.currentTarget.value)}>
+        {faceSelections.map((selection) => (
+          <option key={selection.id} value={selection.id}>{selection.geometryRefs[0]?.label ?? selection.name}</option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function EmptyEditableList({ title }: { title: string }) {
+  return (
+    <div className="editable-list">
+      <h3>{title}</h3>
+      <p className="muted">None yet</p>
+    </div>
+  );
+}
+
+function selectionForFace(study: Study, faceId: string) {
+  return study.namedSelections.find((item) => item.geometryRefs.some((ref) => ref.entityId === faceId));
+}
+
+function MeshPanel({ study, onGenerateMesh }: RightPanelProps) {
+  const [preset, setPreset] = useState<"coarse" | "medium" | "fine">(study.meshSettings.preset);
+  return (
+    <Panel title="Mesh" helper="The mesh breaks the model into small pieces so OpenCAE can calculate results.">
+      <label className="field">
+        Quality preset
+        <div className="segmented" role="group" aria-label="Mesh quality">
+          {(["coarse", "medium", "fine"] as const).map((option) => (
+            <button key={option} className={preset === option ? "active" : ""} type="button" onClick={() => setPreset(option)}>{capitalize(option)}</button>
+          ))}
+        </div>
+      </label>
+      <button className="primary wide" onClick={() => onGenerateMesh(preset)}><Grid3X3 size={18} />Generate mesh</button>
+      <Callout>{capitalize(preset)} creates a {preset === "medium" ? "good balance between accuracy and speed" : preset === "coarse" ? "fast preview mesh for early setup checks" : "denser mesh for more detailed result gradients"}.</Callout>
+      {study.meshSettings.summary && (
+        <div className="summary-box">
+          <Info label="Nodes" value={study.meshSettings.summary.nodes.toLocaleString()} />
+          <Info label="Elements" value={study.meshSettings.summary.elements.toLocaleString()} />
+          <Info label="Warnings" value={String(study.meshSettings.summary.warnings.length)} />
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+function RunPanel({ study, runProgress, onRunSimulation }: RightPanelProps) {
+  const checks = [
+    ["Material assigned", study.materialAssignments.length > 0],
+    ["Support added", study.constraints.length > 0],
+    ["Load added", study.loads.length > 0],
+    ["Mesh generated", study.meshSettings.status === "complete"]
+  ] as const;
+  return (
+    <Panel title="Run" helper="Run the simulation to estimate stress and displacement.">
+      <SectionTitle>Readiness</SectionTitle>
+      <div className="checklist">
+        {checks.map(([label, done]) => <span key={label} className={done ? "check done" : "check"}><span>{done ? <Check size={18} /> : null}</span>{label}</span>)}
+      </div>
+      <button className="primary wide" onClick={onRunSimulation}><Play size={16} />Run simulation</button>
+      <div className="progress"><span style={{ width: `${runProgress}%` }} /></div>
+      <SectionTitle>Solver</SectionTitle>
+      <div className="summary-box">
+        <Info label="Backend" value="mock-linear-static" />
+        <Info label="Version" value="0.1.0" />
+        <Info label="Runner" value="local-in-memory" />
+        <Info label="Progress" value={`${runProgress}%`} />
+      </div>
+    </Panel>
+  );
+}
+
+function ResultsPanel({
+  resultMode,
+  showDeformed,
+  stressExaggeration,
+  resultSummary,
+  onResultModeChange,
+  onToggleDeformed,
+  onStressExaggerationChange,
+  onGenerateReport
+}: RightPanelProps) {
+  return (
+    <Panel title="Results" helper="View stress and displacement directly on the 3D model.">
+      <Callout>Use the mode controls to inspect stress, displacement, or factor of safety on the 3D model.</Callout>
+      <div className="result-buttons">
+        <button className={resultMode === "stress" ? "primary" : "secondary"} onClick={() => onResultModeChange("stress")}>Stress</button>
+        <button className={resultMode === "displacement" ? "primary" : "secondary"} onClick={() => onResultModeChange("displacement")}>Displacement</button>
+        <button className={resultMode === "safety_factor" ? "primary" : "secondary"} onClick={() => onResultModeChange("safety_factor")}>Safety factor</button>
+      </div>
+      {resultMode === "stress" && (
+        <label className="field range-field">
+          <span className="range-label"><span>Stress exaggeration</span><strong>{stressExaggeration.toFixed(1)}x</strong></span>
+          <input
+            type="range"
+            min="1"
+            max="4"
+            step="0.1"
+            value={stressExaggeration}
+            onChange={(event) => onStressExaggerationChange(Number(event.currentTarget.value))}
+          />
+        </label>
+      )}
+      <label className="toggle"><input type="checkbox" checked={showDeformed} onChange={onToggleDeformed} /> Deformed shape</label>
+      <p className="panel-copy">Red areas have higher stress. Blue areas have lower stress.</p>
+      <div className="summary-box">
+        <Info label="Max stress" value={`${resultSummary.maxStress} ${resultSummary.maxStressUnits}`} />
+        <Info label="Max displacement" value={`${resultSummary.maxDisplacement} ${resultSummary.maxDisplacementUnits}`} />
+        <Info label="Safety factor" value={String(resultSummary.safetyFactor)} />
+        <Info label="Reaction force" value={`${resultSummary.reactionForce} ${resultSummary.reactionForceUnits}`} />
+      </div>
+      <div className="legend"><span /> <small>Low</small><small>High</small></div>
+      <button className="primary wide" onClick={onGenerateReport}><FileText size={16} />Generate report</button>
+    </Panel>
+  );
+}
+
+function ReportPanel({ onGenerateReport }: RightPanelProps) {
+  return (
+    <Panel title="Report" helper="Generate a simple HTML report you can share.">
+      <div className="summary-box">
+        <Info label="Format" value="HTML · self-contained" />
+        <Info label="Sections" value="7" />
+        <Info label="Output" value="./data/reports" />
+      </div>
+      <button className="primary wide" onClick={onGenerateReport}><Download size={18} />Generate & download</button>
+      <SectionTitle>Contents</SectionTitle>
+      <div className="report-list">
+        {["Project & study", "Material & boundary conditions", "Mesh summary", "Stress field & max locations", "Displacement field", "Reaction forces", "Diagnostics"].map((item) => (
+          <div key={item}>{item}</div>
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
+function Panel({ title, helper, children }: { title: string; helper: string; children: ReactNode }) {
+  const step = ["Model", "Material", "Supports", "Loads", "Mesh", "Run", "Results", "Report"].indexOf(title) + 1;
+  return (
+    <div className="panel-section">
+      <div className="panel-header">
+        <div className="panel-eyebrow">Step {step || 1} of 8</div>
+        <h2>{title}</h2>
+        <p className="helper">{helper}</p>
+      </div>
+      <div className="panel-body">{children}</div>
+    </div>
+  );
+}
+
+function Info({ label, value }: { label: string; value: string }) {
+  return <div className="info-row"><span>{label}</span><strong>{value}</strong></div>;
+}
+
+function SectionTitle({ children }: { children: ReactNode }) {
+  return <h3 className="section-title">{children}</h3>;
+}
+
+function Callout({ children }: { children: ReactNode }) {
+  return <p className="callout">{children}</p>;
+}
+
+function ConceptCard({ icon, title, detail, tone = "accent" }: { icon: ReactNode; title: string; detail: string; tone?: "accent" | "warning" }) {
+  return (
+    <div className="concept-card">
+      <span className={`concept-icon ${tone}`}>{icon}</span>
+      <span>
+        <strong>{title}</strong>
+        <small>{detail}</small>
+      </span>
+    </div>
+  );
+}
+
+function PlacementReadout({ selectedRef, fallbackLabel }: { selectedRef: ReturnType<typeof selectionForFace> | undefined; fallbackLabel?: string }) {
+  return (
+    <div className={selectedRef ? "placement-chip ready" : "placement-chip"}>
+      {selectedRef ? `Selected ${selectedRef.geometryRefs[0]?.label ?? fallbackLabel}` : "Select a face in the model viewport"}
+    </div>
+  );
+}
+
+function SupportIcon() {
+  return <svg viewBox="0 0 18 18" aria-hidden="true"><path d="M3 9.5h12v4H3v-4Z" fill="none" stroke="currentColor" strokeWidth="1.5" /><path d="M5 13.5v2M9 13.5v2M13 13.5v2M4 15.5h10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>;
+}
+
+function formatMPa(valuePa: number) {
+  return Math.round(valuePa / 1_000_000).toLocaleString();
+}
+
+function capitalize(value: string) {
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
