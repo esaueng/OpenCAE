@@ -1,0 +1,14 @@
+{
+  "name": "@opencae/mesh-service",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@opencae/mesh-contract": "workspace:*",
+    "@opencae/schema": "workspace:*",
+    "@opencae/storage": "workspace:*"
+  }
+}

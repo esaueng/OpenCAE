@@ -1,0 +1,26 @@
+{
+  "name": "@opencae/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@fastify/cors": "^10.0.2",
+    "@opencae/cad-service": "workspace:*",
+    "@opencae/db": "workspace:*",
+    "@opencae/jobs": "workspace:*",
+    "@opencae/mesh-service": "workspace:*",
+    "@opencae/post-service": "workspace:*",
+    "@opencae/schema": "workspace:*",
+    "@opencae/solver-service": "workspace:*",
+    "@opencae/study-core": "workspace:*",
+    "@opencae/storage": "workspace:*",
+    "fastify": "^5.2.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5"
+  }
+}
