@@ -43,6 +43,7 @@ interface CadViewerProps {
   viewMode: ViewMode;
   resultMode: ResultMode;
   showDeformed: boolean;
+  showDimensions: boolean;
   stressExaggeration: number;
   resultFields: ResultField[];
   themeMode: ThemeMode;
@@ -88,6 +89,7 @@ export function CadViewer(props: CadViewerProps) {
         <Grid args={[8, 8]} cellColor={gridCellColor} sectionColor={gridSectionColor} fadeDistance={12} fadeStrength={1.2} position={[0, 0, gridFloorZ]} rotation={[Math.PI / 2, 0, 0]} />
         <Bounds fit clip observe margin={1.65}>
           <BracketModel {...props} viewMode={effectiveViewMode} />
+          {props.showDimensions && <ModelDimensionOverlay displayModel={props.displayModel} />}
           <BoundsCameraReset signal={props.fitSignal} />
         </Bounds>
         <OrbitControls ref={controlsRef} makeDefault enableDamping dampingFactor={0.08} target={[0, 0.75, 0.4]} />
@@ -339,6 +341,86 @@ function gridFloorZForDisplayModel(displayModel: DisplayModel) {
   if (kind === "plate") return -PLATE_DEPTH / 2 - 0.12;
   if (kind === "cantilever") return -0.48;
   return -0.27;
+}
+
+function dimensionBoundsForDisplayModel(displayModel: DisplayModel) {
+  const kind = modelKindForDisplayModel(displayModel);
+  if (kind === "blank") return null;
+  if (kind === "plate") {
+    return new THREE.Box3(new THREE.Vector3(-1.9, -0.75, -PLATE_DEPTH / 2), new THREE.Vector3(1.9, 0.75, PLATE_DEPTH / 2));
+  }
+  if (kind === "cantilever") {
+    return new THREE.Box3(new THREE.Vector3(-1.9, -0.07, -0.36), new THREE.Vector3(1.9, 0.43, 0.36));
+  }
+  if (kind === "uploaded") {
+    return displayModel.nativeCad
+      ? new THREE.Box3(new THREE.Vector3(-1.1, -0.72, -0.52), new THREE.Vector3(1.1, 0.72, 0.52))
+      : new THREE.Box3(new THREE.Vector3(-1.2, -1.2, -1.2), new THREE.Vector3(1.2, 1.2, 1.2));
+  }
+  return new THREE.Box3(new THREE.Vector3(-1.55, -0.24, -BRACKET_DEPTH / 2), new THREE.Vector3(2.35, 2.62, BRACKET_DEPTH / 2));
+}
+
+function formatDimensionLabel(value: number) {
+  return Number.isInteger(value) ? `${value}` : value.toFixed(1);
+}
+
+function ModelDimensionOverlay({ displayModel }: { displayModel: DisplayModel }) {
+  const dimensions = displayModel.dimensions;
+  const bounds = dimensionBoundsForDisplayModel(displayModel);
+  if (!dimensions || !bounds) return null;
+
+  const min = bounds.min;
+  const max = bounds.max;
+  const xOffset = Math.max(0.16, (max.x - min.x) * 0.04);
+  const yOffset = Math.max(0.16, (max.y - min.y) * 0.08);
+  const zOffset = Math.max(0.16, (max.z - min.z) * 0.18);
+  const xLineY = min.y - yOffset;
+  const yLineX = min.x - xOffset;
+  const zLineX = max.x + xOffset;
+  const zLineY = max.y + yOffset;
+  const floorZ = min.z - zOffset;
+  const units = dimensions.units;
+
+  return (
+    <group renderOrder={20}>
+      <DimensionLine
+        start={[min.x, xLineY, floorZ]}
+        end={[max.x, xLineY, floorZ]}
+        label={`X ${formatDimensionLabel(dimensions.x)} ${units}`}
+      />
+      <DimensionLine
+        start={[yLineX, min.y, floorZ]}
+        end={[yLineX, max.y, floorZ]}
+        label={`Y ${formatDimensionLabel(dimensions.y)} ${units}`}
+      />
+      <DimensionLine
+        start={[zLineX, zLineY, min.z]}
+        end={[zLineX, zLineY, max.z]}
+        label={`Z ${formatDimensionLabel(dimensions.z)} ${units}`}
+      />
+    </group>
+  );
+}
+
+function DimensionLine({ start, end, label }: { start: [number, number, number]; end: [number, number, number]; label: string }) {
+  const labelPosition: [number, number, number] = [(start[0] + end[0]) / 2, (start[1] + end[1]) / 2, (start[2] + end[2]) / 2];
+  return (
+    <group>
+      <Line points={[start, end]} color="#4da3ff" lineWidth={1.8} transparent opacity={0.95} />
+      <DimensionEndpoint position={start} />
+      <DimensionEndpoint position={end} />
+      <SceneLabel label={label} position={labelPosition} tone="dimension" />
+    </group>
+  );
+}
+
+function DimensionEndpoint({ position }: { position: [number, number, number] }) {
+  return (
+    <mesh position={position}>
+      <sphereGeometry args={[0.035, 16, 16]} />
+      <meshBasicMaterial color="#4da3ff" depthTest={false} toneMapped={false} />
+    </mesh>
+  );
 }
 
 function uploadedFaceHitFromEvent(event: ThreeEvent<PointerEvent> | ThreeEvent<MouseEvent>): ModelSelectionHit | null {
@@ -1243,7 +1325,7 @@ function SceneLabel({
 }: {
   label: string;
   position: [number, number, number];
-  tone: "max" | "mid" | "min" | "load" | "active-load";
+  tone: "max" | "mid" | "min" | "load" | "active-load" | "dimension";
 }) {
   const labelWidth = Math.max(0.58, label.length * 0.052);
   const colors = sceneLabelColors(tone);
@@ -1273,10 +1355,11 @@ function SceneLabel({
   );
 }
 
-function sceneLabelColors(tone: "max" | "mid" | "min" | "load" | "active-load") {
+function sceneLabelColors(tone: "max" | "mid" | "min" | "load" | "active-load" | "dimension") {
   if (tone === "max") return { background: "#fee2e2", border: "#ef4444", text: "#111827" };
   if (tone === "mid") return { background: "#fef3c7", border: "#f59e0b", text: "#111827" };
   if (tone === "min") return { background: "#dbeafe", border: "#2563eb", text: "#111827" };
+  if (tone === "dimension") return { background: "#071525", border: "#4da3ff", text: "#e6edf3" };
   if (tone === "active-load") return { background: "#071525", border: "#4da3ff", text: "#e6edf3" };
   return { background: "#201809", border: "#f59e0b", text: "#e6edf3" };
 }

@@ -51,6 +51,7 @@ export function App() {
   const [themeMode, setThemeMode] = useState<ThemeMode>("dark");
   const [resultMode, setResultMode] = useState<ResultMode>("stress");
   const [showDeformed, setShowDeformed] = useState(false);
+  const [showDimensions, setShowDimensions] = useState(false);
   const [stressExaggeration, setStressExaggeration] = useState(1.8);
   const [fitSignal, setFitSignal] = useState(0);
   const [status, setStatus] = useState("Ready");
@@ -416,6 +417,7 @@ export function App() {
           viewMode={viewMode}
           resultMode={resultMode}
           showDeformed={showDeformed}
+          showDimensions={showDimensions}
           stressExaggeration={stressExaggeration}
           resultFields={resultFields}
           themeMode={themeMode}
@@ -433,6 +435,7 @@ export function App() {
           viewMode={viewMode}
           resultMode={resultMode}
           showDeformed={showDeformed}
+          showDimensions={showDimensions}
           stressExaggeration={stressExaggeration}
           resultSummary={resultSummary}
           runProgress={runProgress}
@@ -447,6 +450,7 @@ export function App() {
           onViewModeChange={setViewMode}
           onResultModeChange={setResultMode}
           onToggleDeformed={() => setShowDeformed((value) => !value)}
+          onToggleDimensions={() => setShowDimensions((value) => !value)}
           onStressExaggerationChange={setStressExaggeration}
           onAssignMaterial={(materialId) => updateStudy(assignMaterial(study.id, materialId), "supports")}
           onAddSupport={(selectionRef) => updateStudy(addSupport(study.id, selectionRef))}
