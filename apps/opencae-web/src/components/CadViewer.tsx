@@ -1341,11 +1341,14 @@ function SceneLabel({
   const labelWidth = Math.max(1.02, label.length * 0.098);
   const colors = sceneLabelColors(tone);
   return (
-    <Billboard position={position}>
+    <Billboard position={position} renderOrder={50}>
       <Text
         anchorX="center"
         anchorY="middle"
         color={colors.text}
+        material-depthTest={false}
+        material-depthWrite={false}
+        material-toneMapped={false}
         fontSize={0.135}
         letterSpacing={0}
         maxWidth={labelWidth - 0.16}
