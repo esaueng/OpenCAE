@@ -78,6 +78,9 @@ importers:
       lucide-react:
         specifier: ^0.468.0
         version: 0.468.0(react@18.3.1)
+      occt-import-js:
+        specifier: ^0.0.23
+        version: 0.0.23
       react:
         specifier: ^18.3.1
         version: 18.3.1
@@ -1403,6 +1406,9 @@ packages:
 
   obliterator@2.0.5:
     resolution: {integrity: sha512-42CPE9AhahZRsMNslczq0ctAEtqk8Eka26QofnqC346BZdHDySk3LWka23LI7ULIw11NmltpiLagIq8gBozxTw==}
+
+  occt-import-js@0.0.23:
+    resolution: {integrity: sha512-RFfYQXYFX5C1mB1Aywm0ShcUKzXOr/VzTnlzhBSDJOR6YCAPt1HYCzeXWg1vwwjn/cUxwqRNhhtf1dlewoZYCQ==}
 
   on-exit-leak-free@2.1.2:
     resolution: {integrity: sha512-0eJJY6hXLGf1udHwfNftBqH+g73EU4B504nZeKpz1sYRKafAghwxEJunB2O7rDZkL4PGfsMVnTXZ2EjibbqcsA==}
@@ -2966,6 +2972,8 @@ snapshots:
   object-assign@4.1.1: {}
 
   obliterator@2.0.5: {}
+
+  occt-import-js@0.0.23: {}
 
   on-exit-leak-free@2.1.2: {}
 

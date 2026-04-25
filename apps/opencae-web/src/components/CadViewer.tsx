@@ -12,6 +12,7 @@ import type { StepId } from "./StepBar";
 import { faceForModelHit, type SampleModelKind } from "../modelSelection";
 import { modelRotationRadians } from "../modelOrientation";
 import { formatResultValue, resultProbeSamplesForFaces, resultSamplesForFaces, type FaceResultSample, type ResultProbeTone } from "../resultFields";
+import { stepPreviewGroupFromBase64 } from "../stepPreview";
 
 export type ViewMode = "model" | "mesh" | "results";
 export type ResultMode = "stress" | "displacement" | "safety_factor";
@@ -546,17 +547,40 @@ function UploadedSolid({ displayModel, color, pickHandlers }: { displayModel?: D
 
 function UploadedNativeCadModel({ displayModel, color, pickHandlers }: { displayModel: DisplayModel; color: string; pickHandlers?: ModelPickHandlers }) {
   const filename = displayModel.nativeCad?.filename ?? displayModel.name;
-  return (
-    <group>
-      <mesh {...pickHandlers}>
-        <boxGeometry args={[2.2, 1.44, 1.04]} />
-        <meshStandardMaterial color={color} metalness={0.2} roughness={0.5} />
-        <Edges color="#c8d3df" threshold={15} />
-      </mesh>
-      <Html center position={[0, 1.05, 0]} className="model-notice compact">
-        <strong>STEP import</strong>
+  const [preview, setPreview] = useState<{ status: "loading" | "ready" | "error"; object?: THREE.Group; message?: string }>({ status: "loading" });
+
+  useEffect(() => {
+    let cancelled = false;
+    setPreview({ status: "loading" });
+    stepPreviewGroupFromBase64(displayModel.nativeCad?.contentBase64 ?? "", color)
+      .then((object) => {
+        if (!cancelled) setPreview({ status: "ready", object });
+      })
+      .catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : "STEP preview could not be generated.";
+        if (!cancelled) setPreview({ status: "error", message });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [color, displayModel.nativeCad?.contentBase64]);
+
+  if (preview.status === "loading") {
+    return (
+      <Html center position={[0, 0.35, 0]} className="model-notice">
+        <strong>Loading STEP preview</strong>
         <span>{filename}</span>
       </Html>
+    );
+  }
+
+  if (preview.status === "error" || !preview.object) {
+    return <UnsupportedUploadedModelNotice filename={`${filename} ${preview.message ?? ""}`.trim()} />;
+  }
+
+  return (
+    <group {...pickHandlers}>
+      <primitive object={preview.object} />
     </group>
   );
 }
@@ -671,6 +695,7 @@ function UploadedResultSolid({
   if (displayModel.nativeCad) {
     return (
       <UploadedNativeCadResultModel
+        displayModel={displayModel}
         samples={samples}
         resultMode={resultMode}
         showDeformed={showDeformed}
@@ -701,28 +726,16 @@ function UploadedResultSolid({
 }
 
 function UploadedNativeCadResultModel({
-  samples,
-  resultMode,
-  showDeformed,
-  stressExaggeration,
-  loadMarkers
+  displayModel
 }: {
+  displayModel: DisplayModel;
   samples: FaceResultSample[];
   resultMode: ResultMode;
   showDeformed: boolean;
   stressExaggeration: number;
   loadMarkers: ViewerLoadMarker[];
 }) {
-  const geometry = useMemo(
-    () => colorizeResultGeometry(new THREE.BoxGeometry(2.2, 1.44, 1.04, 36, 24, 20), "uploaded", resultMode, showDeformed, stressExaggeration, samples, loadMarkers),
-    [loadMarkers, resultMode, samples, showDeformed, stressExaggeration]
-  );
-  return (
-    <mesh geometry={geometry}>
-      <meshStandardMaterial vertexColors metalness={0.18} roughness={0.52} />
-      <Edges color="#43556a" threshold={18} />
-    </mesh>
-  );
+  return <UploadedNativeCadModel displayModel={displayModel} color="#63a9e5" />;
 }
 
 function UploadedStlResultModel({
