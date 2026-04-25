@@ -15,6 +15,7 @@ import {
   type LoadDirectionLabel,
   type LoadType
 } from "./loadPreview";
+import { resetDisplayModelOrientation, rotateDisplayModel, type RotationAxis } from "./modelOrientation";
 import { buildLocalProjectFile, suggestedProjectFilename, type LocalResultBundle } from "./projectFile";
 
 interface SaveFilePickerHandle {
@@ -298,6 +299,18 @@ export function App() {
     navigateToStep(step);
   }
 
+  function handleRotateModel(axis: RotationAxis) {
+    setDisplayModel((current) => (current ? rotateDisplayModel(current, axis) : current));
+    setFitSignal((value) => value + 1);
+    pushMessage(`Model rotated around ${axis.toUpperCase()} axis.`);
+  }
+
+  function handleResetModelOrientation() {
+    setDisplayModel((current) => (current ? resetDisplayModelOrientation(current) : current));
+    setFitSignal((value) => value + 1);
+    pushMessage("Model orientation reset.");
+  }
+
   function handleUndoAction() {
     if (!project || !canUndoAction) return;
     const previous = undoStack[undoStack.length - 1];
@@ -444,6 +457,8 @@ export function App() {
           draftLoadValue={draftLoadValue}
           draftLoadDirection={draftLoadDirection}
           onFitView={() => setFitSignal((value) => value + 1)}
+          onRotateModel={handleRotateModel}
+          onResetModelOrientation={handleResetModelOrientation}
           onLoadSample={handleLoadSample}
           onUploadModel={handleUploadModel}
           onSampleModelChange={handleLoadSample}

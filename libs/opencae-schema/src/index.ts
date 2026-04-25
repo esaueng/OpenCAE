@@ -287,6 +287,11 @@ export interface DisplayModel {
   name: string;
   bodyCount: number;
   faces: DisplayFace[];
+  orientation?: {
+    x: number;
+    y: number;
+    z: number;
+  };
   dimensions?: {
     x: number;
     y: number;

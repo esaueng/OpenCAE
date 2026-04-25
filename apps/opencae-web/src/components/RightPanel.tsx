@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { AlertTriangle, Anchor, ArrowDown, Check, Download, Eye, FileText, Grid3X3, Maximize2, Play, Plus, RotateCcw, Ruler, ShieldCheck, Upload, X } from "lucide-react";
+import { AlertTriangle, Anchor, ArrowDown, Check, Download, Eye, FileText, Grid3X3, Maximize2, Play, Plus, RotateCcw, RotateCw, Ruler, ShieldCheck, Upload, X } from "lucide-react";
 import { defaultPrintParametersFor, effectiveMaterialProperties, normalizePrintParameters, starterMaterials, type PrintMaterialParameters } from "@opencae/materials";
 import { assessResultFailure, estimateAllowableLoadForSafetyFactor } from "@opencae/schema";
 import type { Constraint, DisplayFace, DisplayModel, Load, Project, ResultSummary, Study } from "@opencae/schema";
@@ -7,6 +7,7 @@ import type { ResultMode, ViewMode } from "./CadViewer";
 import type { StepId } from "./StepBar";
 import { directionLabelForLoad, directionVectorForLabel, unitsForLoadType, type LoadDirectionLabel, type LoadType } from "../loadPreview";
 import type { SampleModelId } from "../lib/api";
+import { formatModelOrientation, getModelOrientation, type RotationAxis } from "../modelOrientation";
 
 interface RightPanelProps {
   activeStep: StepId;
@@ -26,6 +27,8 @@ interface RightPanelProps {
   draftLoadValue: number;
   draftLoadDirection: LoadDirectionLabel;
   onFitView: () => void;
+  onRotateModel: (axis: RotationAxis) => void;
+  onResetModelOrientation: () => void;
   onLoadSample: (sample?: SampleModelId) => void;
   onUploadModel: (file: File) => void;
   onSampleModelChange: (sample: SampleModelId) => void;
@@ -75,7 +78,7 @@ export function RightPanel(props: RightPanelProps) {
   );
 }
 
-function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sampleModel, onFitView, onViewModeChange, onToggleDimensions, onLoadSample, onUploadModel, onSampleModelChange }: RightPanelProps) {
+function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sampleModel, onFitView, onRotateModel, onResetModelOrientation, onViewModeChange, onToggleDimensions, onLoadSample, onUploadModel, onSampleModelChange }: RightPanelProps) {
   const [confirmSampleLoad, setConfirmSampleLoad] = useState(false);
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const geometry = project.geometryFiles[0];
@@ -86,6 +89,8 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sa
   const faceCount = Number(geometry?.metadata.faceCount ?? 0);
   const bodyCount = Number(geometry?.metadata.bodyCount ?? 0);
   const sampleLabel = sampleModel === "bracket" ? "Bracket Demo" : sampleModel === "plate" ? "Plate Demo" : "Cantilever Demo";
+  const orientation = getModelOrientation(displayModel);
+  const hasCustomOrientation = orientation.x !== 0 || orientation.y !== 0 || orientation.z !== 0;
   const preconfigured =
     sampleModel === "bracket"
       ? { support: "2 mounting holes · flange", load: "top face · -Z direction", callout: "An L-bracket is bolted at the flange; a vertical load on the top face creates a peak stress at the inside corner, reduced by the gusset rib." }
@@ -128,6 +133,20 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sa
         {showDimensions ? "Hide dimensions" : "Show dimensions"}
       </button>
       {showDimensions && <ModelDimensions displayModel={displayModel} />}
+      <SectionTitle>Orientation</SectionTitle>
+      <div className="orientation-controls" role="group" aria-label="Model rotation">
+        {(["x", "y", "z"] as const).map((axis) => (
+          <button key={axis} className="secondary" type="button" onClick={() => onRotateModel(axis)} title={`Rotate model around ${axis.toUpperCase()} axis`}>
+            <RotateCw size={15} />
+            {axis.toUpperCase()}
+          </button>
+        ))}
+        <button className="secondary" type="button" onClick={onResetModelOrientation} disabled={!hasCustomOrientation} title="Reset model orientation">
+          <RotateCcw size={15} />
+          Reset
+        </button>
+      </div>
+      <p className="orientation-readout">{formatModelOrientation(displayModel)}</p>
       <div className="button-grid">
         <button className="secondary" onClick={onFitView}><Maximize2 size={16} />Fit view</button>
         <button className={viewMode === "mesh" ? "primary" : "secondary"} onClick={() => onViewModeChange(viewMode === "mesh" ? "model" : "mesh")}><Eye size={16} />Toggle mesh</button>
