@@ -904,6 +904,25 @@ button:disabled {
   grid-template-columns: 1fr;
 }
 
+.orientation-controls {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--sp-2);
+  margin-top: 8px;
+}
+
+.orientation-controls button {
+  min-width: 0;
+  padding-inline: 8px;
+}
+
+.orientation-readout {
+  margin: 8px 0 14px;
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+}
+
 .info-row {
   display: flex;
   align-items: baseline;

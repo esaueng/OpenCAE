@@ -30,6 +30,13 @@ describe("projectFile", () => {
     expect(payload.displayModel).toBe(displayModel);
   });
 
+  test("keeps saved model orientation in the local project payload", () => {
+    const orientedDisplayModel = { ...displayModel, orientation: { x: 0, y: 90, z: 180 } } satisfies DisplayModel;
+    const payload = buildLocalProjectFile(project, orientedDisplayModel, "2026-04-24T13:00:00.000Z");
+
+    expect(payload.displayModel.orientation).toEqual({ x: 0, y: 90, z: 180 });
+  });
+
   test("can include simulation results in the local project payload", () => {
     const summary = {
       maxStress: 168.5,

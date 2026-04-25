@@ -10,6 +10,7 @@ import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
 import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
 import type { StepId } from "./StepBar";
 import { faceForModelHit, type SampleModelKind } from "../modelSelection";
+import { modelRotationRadians } from "../modelOrientation";
 import { formatResultValue, resultProbeSamplesForFaces, resultSamplesForFaces, type FaceResultSample, type ResultProbeTone } from "../resultFields";
 
 export type ViewMode = "model" | "mesh" | "results";
@@ -81,6 +82,7 @@ export function CadViewer(props: CadViewerProps) {
   const gridCellColor = isLightTheme ? "#d9e0ea" : "#263140";
   const gridSectionColor = isLightTheme ? "#c2ccd8" : "#3a4654";
   const gridFloorZ = useMemo(() => gridFloorZForDisplayModel(props.displayModel), [props.displayModel]);
+  const modelRotation = useMemo(() => modelRotationRadians(props.displayModel), [props.displayModel]);
   return (
     <section className={`viewer-shell ${effectiveViewMode === "results" ? "results-view" : ""}`} aria-label="3D CAD viewer">
       <Canvas camera={{ position: [4.8, -4.8, 4.8], up: ISO_CAMERA_UP.toArray(), fov: 42 }}>
@@ -89,9 +91,11 @@ export function CadViewer(props: CadViewerProps) {
         <directionalLight position={[4, 6, 3]} intensity={effectiveViewMode === "results" || isLightTheme ? 1.45 : 2.2} />
         <Grid args={[8, 8]} cellColor={gridCellColor} sectionColor={gridSectionColor} fadeDistance={12} fadeStrength={1.2} position={[0, 0, gridFloorZ]} rotation={[Math.PI / 2, 0, 0]} />
         <Bounds fit clip observe margin={1.65}>
-          <group rotation={MODEL_TO_Z_UP_ROTATION}>
-            <BracketModel {...props} viewMode={effectiveViewMode} />
-            {props.showDimensions && <ModelDimensionOverlay displayModel={props.displayModel} />}
+          <group rotation={modelRotation}>
+            <group rotation={MODEL_TO_Z_UP_ROTATION}>
+              <BracketModel {...props} viewMode={effectiveViewMode} />
+              {props.showDimensions && <ModelDimensionOverlay displayModel={props.displayModel} />}
+            </group>
           </group>
           <BoundsCameraReset signal={props.fitSignal} />
         </Bounds>
@@ -340,7 +344,25 @@ function modelKindForDisplayModel(displayModel: DisplayModel): SampleModelKind {
 
 function gridFloorZForDisplayModel(displayModel: DisplayModel) {
   const bounds = dimensionBoundsForDisplayModel(displayModel);
-  return bounds ? bounds.min.y - 0.12 : -0.27;
+  if (!bounds) return -0.27;
+  const rotation = modelRotationRadians(displayModel);
+  const transform = new THREE.Matrix4()
+    .makeRotationFromEuler(new THREE.Euler(...rotation))
+    .multiply(new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(...MODEL_TO_Z_UP_ROTATION)));
+  const transformedBounds = transformedBox(bounds, transform);
+  return transformedBounds.min.z - 0.12;
+}
+
+function transformedBox(bounds: THREE.Box3, transform: THREE.Matrix4) {
+  const nextBounds = new THREE.Box3();
+  for (const x of [bounds.min.x, bounds.max.x]) {
+    for (const y of [bounds.min.y, bounds.max.y]) {
+      for (const z of [bounds.min.z, bounds.max.z]) {
+        nextBounds.expandByPoint(new THREE.Vector3(x, y, z).applyMatrix4(transform));
+      }
+    }
+  }
+  return nextBounds;
 }
 
 function dimensionBoundsForDisplayModel(displayModel: DisplayModel) {
