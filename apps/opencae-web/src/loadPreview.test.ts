@@ -28,6 +28,8 @@ describe("load preview helpers", () => {
   test("maps direction labels to saved vectors", () => {
     expect(directionVectorForLabel("-Y", face)).toEqual([0, -1, 0]);
     expect(directionVectorForLabel("+X", face)).toEqual([1, 0, 0]);
+    expect(directionVectorForLabel("+Z", face)).toEqual([0, 0, 1]);
+    expect(directionVectorForLabel("-Z", face)).toEqual([0, 0, -1]);
     expect(directionVectorForLabel("Normal", face)).toEqual([0, 0, 1]);
   });
 
@@ -65,6 +67,19 @@ describe("load preview helpers", () => {
       stackIndex: 0
     });
     expect(directionLabelForLoad(load)).toBe("+X");
+  });
+
+  test("reads saved Z load directions", () => {
+    const load: Load = {
+      id: "load-z",
+      type: "force",
+      selectionRef: "selection-side",
+      parameters: { value: 250, units: "N", direction: [0, 0, -1] },
+      status: "complete"
+    };
+
+    expect(loadMarkerFromLoad(load, study, 0)?.directionLabel).toBe("-Z");
+    expect(directionLabelForLoad(load)).toBe("-Z");
   });
 
   test("omits the draft marker while an existing load is being edited", () => {
