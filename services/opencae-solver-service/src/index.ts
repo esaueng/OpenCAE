@@ -109,7 +109,7 @@ function solveStudy(study: Study, runId: string) {
   const response = materialResponse(material, loads);
   const totalAppliedLoad = round(loads.reduce((sum, load) => sum + load.magnitude, 0));
   const stressValues = faces.map((face) => round(stressAtFace(face, loads, faces) * response.stressScale, 1));
-  const displacementValues = faces.map((face) => round(displacementAtFace(face, loads, supports, faces) * response.displacementScale, 4));
+  const displacementValues = faces.map((face) => round(displacementAtFace(face, loads, faces) * response.displacementScale, 4));
   const safetyValues = stressValues.map((stress) => round(Math.max(0.05, response.yieldMpa / Math.max(stress, 0.001)), 2));
   const summary: ResultSummary = {
     maxStress: round(Math.max(...stressValues, 0), 1),
@@ -233,17 +233,26 @@ function stressAtFace(face: FaceModel, loads: LoadModel[], faces: FaceModel[]): 
   return Math.max(1, stress);
 }
 
-function displacementAtFace(face: FaceModel, loads: LoadModel[], supports: FaceModel[], faces: FaceModel[]): number {
+function displacementAtFace(face: FaceModel, loads: LoadModel[], faces: FaceModel[]): number {
   const span = modelSpan(faces);
-  const nearestSupport = nearestFace(face.center, supports);
-  const supportTravel = nearestSupport ? distance(face.center, nearestSupport.center) / Math.max(span, 0.001) : 0.5;
   return loads.reduce((sum, load) => {
     const forceScale = load.magnitude / 500;
     const momentScale = load.moment / Math.max(250, 500 * span);
     const loadDistance = distance(face.center, load.face.center);
+    const pathDistance = distancePointToSegment(face.center, load.nearestSupport.center, load.face.center);
+    const pathTravel = segmentParameter(face.center, load.nearestSupport.center, load.face.center);
+    const bendingAlignment = length(cross(normalize(subtract(load.face.center, load.nearestSupport.center)), load.direction));
+    const beamShape = pathTravel * pathTravel * (3 - 2 * pathTravel);
     const localLoad = gaussian(loadDistance, span * 0.24);
+    const loadPath = gaussian(pathDistance, span * 0.22);
     const directionalFlex = Math.abs(dot(normalize(subtract(face.center, load.nearestSupport.center)), load.direction));
-    return sum + forceScale * (0.012 + 0.12 * supportTravel * supportTravel + 0.04 * localLoad + 0.05 * momentScale + 0.025 * directionalFlex);
+    return sum + forceScale * (
+      0.004 +
+      (0.16 + 0.1 * momentScale + 0.08 * bendingAlignment) * beamShape +
+      0.025 * localLoad * (0.4 + 0.6 * beamShape) +
+      0.015 * loadPath * pathTravel +
+      0.01 * directionalFlex * beamShape
+    );
   }, 0);
 }
 
@@ -359,9 +368,14 @@ function distance(left: Vec3, right: Vec3): number {
 
 function distancePointToSegment(point: Vec3, start: Vec3, end: Vec3): number {
   const segment = subtract(end, start);
-  const segmentLengthSquared = dot(segment, segment) || 1;
-  const t = Math.max(0, Math.min(1, dot(subtract(point, start), segment) / segmentLengthSquared));
+  const t = segmentParameter(point, start, end);
   return distance(point, [start[0] + segment[0] * t, start[1] + segment[1] * t, start[2] + segment[2] * t]);
+}
+
+function segmentParameter(point: Vec3, start: Vec3, end: Vec3): number {
+  const segment = subtract(end, start);
+  const segmentLengthSquared = dot(segment, segment) || 1;
+  return Math.max(0, Math.min(1, dot(subtract(point, start), segment) / segmentLengthSquared));
 }
 
 function gaussian(value: number, radius: number): number {
