@@ -1339,28 +1339,24 @@ function SceneLabel({
   position: [number, number, number];
   tone: "max" | "mid" | "min" | "load" | "active-load" | "dimension";
 }) {
-  const labelHeight = 0.28;
-  const labelWidth = Math.max(0.82, label.length * 0.078);
+  const labelHeight = 0.36;
+  const labelWidth = Math.max(1.02, label.length * 0.098);
   const colors = sceneLabelColors(tone);
   return (
     <Billboard position={position}>
       <mesh position={[0, 0, -0.012]}>
         <planeGeometry args={[labelWidth, labelHeight]} />
-        <meshBasicMaterial color={colors.background} transparent opacity={0.94} side={THREE.DoubleSide} />
+        <meshBasicMaterial color={colors.background} transparent opacity={0.62} side={THREE.DoubleSide} depthWrite={false} />
       </mesh>
-      <lineSegments position={[0, 0, -0.008]}>
-        <edgesGeometry args={[new THREE.PlaneGeometry(labelWidth, labelHeight)]} />
-        <lineBasicMaterial color={colors.border} />
-      </lineSegments>
       <Text
         anchorX="center"
         anchorY="middle"
         color={colors.text}
-        fontSize={0.095}
+        fontSize={0.12}
         letterSpacing={0}
-        maxWidth={labelWidth - 0.12}
+        maxWidth={labelWidth - 0.16}
         outlineColor={colors.background}
-        outlineWidth={0.003}
+        outlineWidth={0.004}
       >
         {label}
       </Text>
