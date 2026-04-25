@@ -235,6 +235,9 @@ importers:
       '@opencae/db':
         specifier: workspace:*
         version: link:../../libs/opencae-db
+      '@opencae/materials':
+        specifier: workspace:*
+        version: link:../../libs/opencae-materials
       '@opencae/schema':
         specifier: workspace:*
         version: link:../../libs/opencae-schema
