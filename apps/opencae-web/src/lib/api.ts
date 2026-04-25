@@ -1,10 +1,12 @@
 import type { DisplayModel, Project, ResultField, ResultSummary, RunEvent, Study } from "@opencae/schema";
 import type { LoadDirection, LoadType } from "../loadPreview";
+import type { LocalResultBundle } from "../projectFile";
 
 export interface SampleProjectResponse {
   message?: string;
   project: Project;
   displayModel: DisplayModel;
+  results?: LocalResultBundle;
 }
 
 export type SampleModelId = "bracket" | "plate" | "cantilever";

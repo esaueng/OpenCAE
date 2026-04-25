@@ -14,7 +14,7 @@ import {
   type LoadDirectionLabel,
   type LoadType
 } from "./loadPreview";
-import { buildLocalProjectFile, suggestedProjectFilename } from "./projectFile";
+import { buildLocalProjectFile, suggestedProjectFilename, type LocalResultBundle } from "./projectFile";
 
 interface SaveFilePickerHandle {
   createWritable: () => Promise<{ write: (content: Blob) => Promise<void>; close: () => Promise<void> }>;
@@ -123,18 +123,30 @@ export function App() {
     return () => window.removeEventListener("keydown", handleShortcut);
   }, [displayModel, project, undoStack, redoStack]);
 
-  async function openProjectResponse(action: Promise<{ project: Project; displayModel: DisplayModel; message?: string }>) {
+  async function openProjectResponse(action: Promise<{ project: Project; displayModel: DisplayModel; message?: string; results?: LocalResultBundle }>) {
     const response = await action;
     setProject(response.project);
     setDisplayModel(response.displayModel);
-    applyStep("model");
     setUndoStack([]);
     setRedoStack([]);
-    setViewMode("model");
-    setResultFields([]);
-    const nextCompletedRunId = latestReportRunId(response.project.studies[0] ?? null, "") ?? "";
-    setActiveRunId(nextCompletedRunId);
-    setCompletedRunId(nextCompletedRunId);
+    if (response.results?.fields.length) {
+      setResultSummary(response.results.summary);
+      setResultFields(response.results.fields);
+      const restoredRunId = response.results.completedRunId ?? response.results.activeRunId ?? latestReportRunId(response.project.studies[0] ?? null, "") ?? "";
+      setActiveRunId(response.results.activeRunId ?? restoredRunId);
+      setCompletedRunId(restoredRunId);
+      setRunProgress(100);
+      setViewMode("results");
+      setActiveStep("results");
+    } else {
+      applyStep("model");
+      setViewMode("model");
+      setResultFields([]);
+      setRunProgress(0);
+      const nextCompletedRunId = latestReportRunId(response.project.studies[0] ?? null, "") ?? "";
+      setActiveRunId(nextCompletedRunId);
+      setCompletedRunId(nextCompletedRunId);
+    }
     pushMessage(response.message ?? "Project opened.");
   }
 
@@ -163,7 +175,12 @@ export function App() {
   async function handleSaveProject() {
     if (!project || !displayModel) return;
     try {
-      const savedAt = await saveProjectToLocalDisk(project, displayModel);
+      const savedAt = await saveProjectToLocalDisk(project, displayModel, {
+        activeRunId,
+        completedRunId,
+        summary: resultSummary,
+        fields: resultFields
+      });
       setProject({ ...project, updatedAt: savedAt });
       pushMessage("Project saved to local disk.");
     } catch (error) {
@@ -464,10 +481,11 @@ function latestReportRunId(study: Study | null, activeRunId: string): string | n
   return completed?.id ?? null;
 }
 
-async function saveProjectToLocalDisk(project: Project, displayModel: DisplayModel): Promise<string> {
+async function saveProjectToLocalDisk(project: Project, displayModel: DisplayModel, results?: LocalResultBundle): Promise<string> {
   const savedAt = new Date().toISOString();
   const filename = suggestedProjectFilename(project.name);
-  const blob = new Blob([JSON.stringify(buildLocalProjectFile(project, displayModel, savedAt), null, 2)], {
+  const savedResults = results?.fields.length ? results : undefined;
+  const blob = new Blob([JSON.stringify(buildLocalProjectFile(project, displayModel, savedAt, savedResults), null, 2)], {
     type: "application/json"
   });
   const savePicker = (window as SaveFilePickerWindow).showSaveFilePicker;

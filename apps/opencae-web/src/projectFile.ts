@@ -1,20 +1,34 @@
-import type { DisplayModel, Project } from "@opencae/schema";
+import type { DisplayModel, Project, ResultField, ResultSummary } from "@opencae/schema";
+
+export interface LocalResultBundle {
+  activeRunId?: string;
+  completedRunId?: string;
+  summary: ResultSummary;
+  fields: ResultField[];
+}
 
 export interface LocalProjectFile {
   format: "opencae-local-project";
-  version: 1;
+  version: 2;
   savedAt: string;
   project: Project;
   displayModel: DisplayModel;
+  results?: LocalResultBundle;
 }
 
-export function buildLocalProjectFile(project: Project, displayModel: DisplayModel, savedAt = new Date().toISOString()): LocalProjectFile {
+export function buildLocalProjectFile(
+  project: Project,
+  displayModel: DisplayModel,
+  savedAt = new Date().toISOString(),
+  results?: LocalResultBundle
+): LocalProjectFile {
   return {
     format: "opencae-local-project",
-    version: 1,
+    version: 2,
     savedAt,
     project: { ...project, updatedAt: savedAt },
-    displayModel
+    displayModel,
+    ...(results ? { results } : {})
   };
 }
 
