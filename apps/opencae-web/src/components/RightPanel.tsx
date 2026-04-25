@@ -670,10 +670,10 @@ function ModelDimensions({ displayModel }: { displayModel: DisplayModel }) {
 
   return (
     <div className="summary-box dimension-box">
-      <Info label="Overall" value={`${formatDimension(dimensions.x)} x ${formatDimension(dimensions.y)} x ${formatDimension(dimensions.z)} ${dimensions.units}`} />
+      <Info label="Overall" value={`${formatDimension(dimensions.x)} x ${formatDimension(dimensions.z)} x ${formatDimension(dimensions.y)} ${dimensions.units}`} />
       <Info label="X length" value={`${formatDimension(dimensions.x)} ${dimensions.units}`} />
-      <Info label="Y height" value={`${formatDimension(dimensions.y)} ${dimensions.units}`} />
-      <Info label="Z depth" value={`${formatDimension(dimensions.z)} ${dimensions.units}`} />
+      <Info label="Y depth" value={`${formatDimension(dimensions.z)} ${dimensions.units}`} />
+      <Info label="Z height" value={`${formatDimension(dimensions.y)} ${dimensions.units}`} />
     </div>
   );
 }

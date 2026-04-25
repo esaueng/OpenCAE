@@ -59,6 +59,7 @@ const PLATE_DEPTH = 0.32;
 const WORLD_UP = new THREE.Vector3(0, 0, 1);
 const ISO_CAMERA_DIRECTION = new THREE.Vector3(1, -1, 1).normalize();
 const ISO_CAMERA_UP = WORLD_UP.clone().projectOnPlane(ISO_CAMERA_DIRECTION).normalize();
+const MODEL_TO_Z_UP_ROTATION: [number, number, number] = [Math.PI / 2, 0, 0];
 const BRACKET_HOLES = [
   { id: "upright-hole", center: [-1.2, 1.48] as [number, number], radius: 0.17, supported: false },
   { id: "base-hole-left", center: [0.24, 0] as [number, number], radius: 0.13, supported: true },
@@ -88,11 +89,13 @@ export function CadViewer(props: CadViewerProps) {
         <directionalLight position={[4, 6, 3]} intensity={effectiveViewMode === "results" || isLightTheme ? 1.45 : 2.2} />
         <Grid args={[8, 8]} cellColor={gridCellColor} sectionColor={gridSectionColor} fadeDistance={12} fadeStrength={1.2} position={[0, 0, gridFloorZ]} rotation={[Math.PI / 2, 0, 0]} />
         <Bounds fit clip observe margin={1.65}>
-          <BracketModel {...props} viewMode={effectiveViewMode} />
-          {props.showDimensions && <ModelDimensionOverlay displayModel={props.displayModel} />}
+          <group rotation={MODEL_TO_Z_UP_ROTATION}>
+            <BracketModel {...props} viewMode={effectiveViewMode} />
+            {props.showDimensions && <ModelDimensionOverlay displayModel={props.displayModel} />}
+          </group>
           <BoundsCameraReset signal={props.fitSignal} />
         </Bounds>
-        <OrbitControls ref={controlsRef} makeDefault enableDamping dampingFactor={0.08} target={[0, 0.75, 0.4]} />
+        <OrbitControls ref={controlsRef} makeDefault enableDamping dampingFactor={0.08} target={[0, 0, 0.75]} />
         <ShiftPanControls controlsRef={controlsRef} />
         <GizmoHelper alignment="bottom-left" margin={[92, 92]}>
           <CleanAxisGizmo />
@@ -276,8 +279,9 @@ function BracketModel({ displayModel, activeStep, selectedFaceId, onSelectFace, 
   function hitFromEvent(event: ThreeEvent<PointerEvent> | ThreeEvent<MouseEvent>): ModelSelectionHit | null {
     if (!placementMode || isResultView) return null;
     if (modelKind === "uploaded") return uploadedFaceHitFromEvent(event);
-    const face = faceForModelHit(modelKind, displayModel.faces, event.point);
-    return face ? { face, point: event.point.toArray() as [number, number, number] } : null;
+    const modelPoint = worldPointToModelSpace(event.point);
+    const face = faceForModelHit(modelKind, displayModel.faces, modelPoint);
+    return face ? { face, point: modelPoint.toArray() as [number, number, number] } : null;
   }
 
   const pickHandlers: ModelPickHandlers = {
@@ -335,12 +339,8 @@ function modelKindForDisplayModel(displayModel: DisplayModel): SampleModelKind {
 }
 
 function gridFloorZForDisplayModel(displayModel: DisplayModel) {
-  const kind = modelKindForDisplayModel(displayModel);
-  if (kind === "uploaded") return -1.42;
-  if (kind === "bracket") return -BRACKET_DEPTH / 2 - 0.12;
-  if (kind === "plate") return -PLATE_DEPTH / 2 - 0.12;
-  if (kind === "cantilever") return -0.48;
-  return -0.27;
+  const bounds = dimensionBoundsForDisplayModel(displayModel);
+  return bounds ? bounds.min.y - 0.12 : -0.27;
 }
 
 function dimensionBoundsForDisplayModel(displayModel: DisplayModel) {
@@ -364,6 +364,19 @@ function formatDimensionLabel(value: number) {
   return Number.isInteger(value) ? `${value}` : value.toFixed(1);
 }
 
+function worldPointToModelSpace(point: THREE.Vector3) {
+  return new THREE.Vector3(point.x, point.z, -point.y);
+}
+
+function worldNormalToModelSpace(normal: THREE.Vector3) {
+  return new THREE.Vector3(normal.x, normal.z, -normal.y).normalize();
+}
+
+function markerDirectionInModelSpace(marker: ViewerLoadMarker) {
+  const direction = new THREE.Vector3(...marker.direction).normalize();
+  return marker.directionLabel === "Normal" ? direction : worldNormalToModelSpace(direction);
+}
+
 function ModelDimensionOverlay({ displayModel }: { displayModel: DisplayModel }) {
   const dimensions = displayModel.dimensions;
   const bounds = dimensionBoundsForDisplayModel(displayModel);
@@ -375,28 +388,26 @@ function ModelDimensionOverlay({ displayModel }: { displayModel: DisplayModel })
   const yOffset = Math.max(0.16, (max.y - min.y) * 0.08);
   const zOffset = Math.max(0.16, (max.z - min.z) * 0.18);
   const xLineY = min.y - yOffset;
-  const yLineX = min.x - xOffset;
-  const zLineX = max.x + xOffset;
-  const zLineY = max.y + yOffset;
-  const floorZ = min.z - zOffset;
+  const xLineZ = min.z - zOffset;
+  const axisLineX = max.x + xOffset;
   const units = dimensions.units;
 
   return (
     <group renderOrder={20}>
       <DimensionLine
-        start={[min.x, xLineY, floorZ]}
-        end={[max.x, xLineY, floorZ]}
+        start={[min.x, xLineY, xLineZ]}
+        end={[max.x, xLineY, xLineZ]}
         label={`X ${formatDimensionLabel(dimensions.x)} ${units}`}
       />
       <DimensionLine
-        start={[yLineX, min.y, floorZ]}
-        end={[yLineX, max.y, floorZ]}
-        label={`Y ${formatDimensionLabel(dimensions.y)} ${units}`}
+        start={[axisLineX, xLineY, min.z]}
+        end={[axisLineX, xLineY, max.z]}
+        label={`Y ${formatDimensionLabel(dimensions.z)} ${units}`}
       />
       <DimensionLine
-        start={[zLineX, zLineY, min.z]}
-        end={[zLineX, zLineY, max.z]}
-        label={`Z ${formatDimensionLabel(dimensions.z)} ${units}`}
+        start={[axisLineX, min.y, max.z + zOffset]}
+        end={[axisLineX, max.y, max.z + zOffset]}
+        label={`Z ${formatDimensionLabel(dimensions.y)} ${units}`}
       />
     </group>
   );
@@ -424,12 +435,13 @@ function DimensionEndpoint({ position }: { position: [number, number, number] })
 }
 
 function uploadedFaceHitFromEvent(event: ThreeEvent<PointerEvent> | ThreeEvent<MouseEvent>): ModelSelectionHit | null {
-  const normal = event.face?.normal.clone().normalize() ?? new THREE.Vector3(0, 0, 1);
-  const point = event.point.toArray() as [number, number, number];
+  const worldNormal = event.face?.normal.clone().transformDirection(event.object.matrixWorld).normalize() ?? new THREE.Vector3(0, 0, 1);
+  const normal = worldNormalToModelSpace(worldNormal);
+  const point = worldPointToModelSpace(event.point).toArray() as [number, number, number];
   return {
     face: {
       id: uploadedFaceId(point, normal),
-      label: labelForNormal(normal),
+      label: labelForNormal(worldNormal),
       color: "#4da3ff",
       center: point,
       normal: normal.toArray() as [number, number, number],
@@ -849,7 +861,7 @@ function deformedPointForResults(
     const sample = samples.find((item) => item.face.id === marker.faceId);
     if (!sample) continue;
     const center = new THREE.Vector3(...sample.face.center);
-    const direction = new THREE.Vector3(...marker.direction).normalize();
+    const direction = markerDirectionInModelSpace(marker);
     const weight = Math.exp(-0.5 * (point.distanceTo(center) / Math.max(span * 0.48, 0.001)) ** 2);
     deformation.addScaledVector(direction, weight * scale * Math.max(0.35, marker.value / 500));
   }
@@ -871,7 +883,7 @@ function deformedUploadedPoint(point: THREE.Vector3, stressExaggeration: number,
 function resultantLoadDirection(loadMarkers: ViewerLoadMarker[]) {
   const direction = new THREE.Vector3();
   for (const marker of loadMarkers) {
-    direction.add(new THREE.Vector3(...marker.direction).normalize());
+    direction.add(markerDirectionInModelSpace(marker));
   }
   if (direction.lengthSq() < 0.0001) return new THREE.Vector3(0, 0, -1);
   return direction.normalize();
@@ -1445,7 +1457,7 @@ function ResultLegend({ resultMode, resultFields }: { resultMode: ResultMode; re
 }
 
 function LoadGlyph({ marker, face, active }: { marker: ViewerLoadMarker; face: DisplayFace; active: boolean }) {
-  const markerDirection = new THREE.Vector3(...marker.direction).normalize();
+  const markerDirection = markerDirectionInModelSpace(marker);
   const isNormalDirection = marker.directionLabel === "Normal";
   const markerColor = marker.preview ? "#7cc7ff" : active ? "#4da3ff" : "#f59e0b";
   const labelTone = active || marker.preview ? "active-load" : "load";
