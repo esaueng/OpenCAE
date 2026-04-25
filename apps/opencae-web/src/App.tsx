@@ -11,6 +11,7 @@ import type { ViewerLoadMarker, ViewerSupportMarker } from "./components/CadView
 import {
   createViewerLoadMarkers,
   directionVectorForLabel,
+  unitsForLoadType,
   type LoadDirectionLabel,
   type LoadType
 } from "./loadPreview";
@@ -237,6 +238,23 @@ export function App() {
     );
   }
 
+  async function addLoadForFace(type: LoadType, value: number, face: DisplayFace, direction: LoadDirectionLabel) {
+    if (!study) return;
+    const existingSelection = study.namedSelections.find((item) => item.entityType === "face" && item.geometryRefs.some((ref) => ref.entityId === face.id));
+    const selection = existingSelection ?? namedSelectionForFace(study, face);
+    const nextSelections = existingSelection ? study.namedSelections : [...study.namedSelections, selection];
+    const load: Load = {
+      id: `load-${crypto.randomUUID()}`,
+      type,
+      selectionRef: selection.id,
+      parameters: { value, units: unitsForLoadType(type), direction: directionVectorForLabel(direction, face) },
+      status: "complete"
+    };
+    await updateStudy(
+      saveStudyPatch(study.id, { namedSelections: nextSelections, loads: [...study.loads, load] }, "Load added.")
+    );
+  }
+
   async function handleRenameProject(name: string) {
     if (!project) return;
     const nextName = name.trim().replace(/\s+/g, " ");
@@ -439,8 +457,13 @@ export function App() {
           onAddLoad={(type, value, selectionRef, direction) => {
             const selection = study.namedSelections.find((item) => item.id === selectionRef);
             const faceId = selection?.geometryRefs[0]?.entityId;
-            const face = selectedFace?.id === faceId ? selectedFace : displayModel.faces.find((item) => item.id === faceId);
-            if (face) updateStudy(addLoad(study.id, type, value, selectionRef, directionVectorForLabel(direction, face)));
+            const face = selectedFace?.id === faceId || (!selection && selectedFace) ? selectedFace : displayModel.faces.find((item) => item.id === faceId);
+            if (!face) return;
+            if (selection) {
+              updateStudy(addLoad(study.id, type, value, selection.id, directionVectorForLabel(direction, face)));
+              return;
+            }
+            void addLoadForFace(type, value, face, direction);
           }}
           onUpdateLoad={(load: Load) =>
             updateStudy(

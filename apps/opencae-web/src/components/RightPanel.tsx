@@ -39,7 +39,7 @@ interface RightPanelProps {
   onDraftLoadValueChange: (value: number) => void;
   onDraftLoadDirectionChange: (direction: LoadDirectionLabel) => void;
   onLoadEditorActiveChange: (active: boolean) => void;
-  onAddLoad: (type: LoadType, value: number, selectionRef: string, direction: LoadDirectionLabel) => void;
+  onAddLoad: (type: LoadType, value: number, selectionRef: string | undefined, direction: LoadDirectionLabel) => void;
   onUpdateLoad: (load: Load) => void;
   onRemoveLoad: (loadId: string) => void;
   onGenerateMesh: (preset: "coarse" | "medium" | "fine") => void;
@@ -235,6 +235,7 @@ function LoadsPanel({
   onLoadEditorActiveChange
 }: RightPanelProps) {
   const selectedFromViewport = selectedFace ? selectionForFace(study, selectedFace.id) : undefined;
+  const hasSelectedFace = Boolean(selectedFace);
   const units = unitsForLoadType(draftLoadType);
   return (
     <Panel title="Loads" helper="Choose where force or pressure is applied. Select a face, then add a load.">
@@ -267,7 +268,7 @@ function LoadsPanel({
           ))}
         </div>
       </label>
-      <button className="outline-action wide" disabled={!selectedFromViewport} onClick={() => selectedFromViewport && onAddLoad(draftLoadType, draftLoadValue, selectedFromViewport.id, draftLoadDirection)}><Plus size={18} />Add load</button>
+      <button className="outline-action wide" disabled={!hasSelectedFace} onClick={() => hasSelectedFace && onAddLoad(draftLoadType, draftLoadValue, selectedFromViewport?.id, draftLoadDirection)}><Plus size={18} />Add load</button>
       <SectionTitle>Applied</SectionTitle>
       <LoadEditorList study={study} onUpdateLoad={onUpdateLoad} onRemoveLoad={onRemoveLoad} onEditingChange={onLoadEditorActiveChange} />
     </Panel>
