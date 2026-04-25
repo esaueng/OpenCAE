@@ -65,6 +65,7 @@ describe("projectFactory", () => {
     const faceSelections = project.studies[0]?.namedSelections.filter((selection) => selection.entityType === "face") ?? [];
 
     expect(faceSelections.map((selection) => selection.geometryRefs[0]?.entityId)).toContain("face-upright-front");
+    expect(faceSelections.map((selection) => selection.geometryRefs[0]?.entityId)).toContain("face-upright-hole");
     expect(faceSelections.map((selection) => selection.geometryRefs[0]?.entityId)).toContain("face-base-end");
   });
 
