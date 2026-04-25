@@ -17,6 +17,7 @@ import {
 } from "./loadPreview";
 import { resetDisplayModelOrientation, rotateDisplayModel, type RotationAxis } from "./modelOrientation";
 import { buildLocalProjectFile, suggestedProjectFilename, type LocalResultBundle } from "./projectFile";
+import { buildAutosavedWorkspace, readAutosavedWorkspace, writeAutosavedWorkspace, type ThemeMode } from "./appPersistence";
 
 interface SaveFilePickerHandle {
   createWritable: () => Promise<{ write: (content: Blob) => Promise<void>; close: () => Promise<void> }>;
@@ -39,34 +40,36 @@ const seededSummary: ResultSummary = {
   reactionForceUnits: "N"
 };
 
-type ThemeMode = "dark" | "light";
-
 export function App() {
-  const [project, setProject] = useState<Project | null>(null);
-  const [displayModel, setDisplayModel] = useState<DisplayModel | null>(null);
-  const [activeStep, setActiveStep] = useState<StepId>("model");
-  const [undoStack, setUndoStack] = useState<Project[]>([]);
-  const [redoStack, setRedoStack] = useState<Project[]>([]);
-  const [selectedFaceId, setSelectedFaceId] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<ViewMode>("model");
-  const [themeMode, setThemeMode] = useState<ThemeMode>("dark");
-  const [resultMode, setResultMode] = useState<ResultMode>("stress");
-  const [showDeformed, setShowDeformed] = useState(false);
-  const [showDimensions, setShowDimensions] = useState(false);
-  const [stressExaggeration, setStressExaggeration] = useState(1.8);
+  const restoredWorkspace = useMemo(() => readAutosavedWorkspace(), []);
+  const restoredProjectFile = restoredWorkspace?.projectFile;
+  const restoredUi = restoredWorkspace?.ui;
+  const restoredResults = restoredProjectFile?.results;
+  const [project, setProject] = useState<Project | null>(restoredProjectFile?.project ?? null);
+  const [displayModel, setDisplayModel] = useState<DisplayModel | null>(restoredProjectFile?.displayModel ?? null);
+  const [activeStep, setActiveStep] = useState<StepId>(restoredUi?.activeStep ?? "model");
+  const [undoStack, setUndoStack] = useState<Project[]>(restoredUi?.undoStack ?? []);
+  const [redoStack, setRedoStack] = useState<Project[]>(restoredUi?.redoStack ?? []);
+  const [selectedFaceId, setSelectedFaceId] = useState<string | null>(restoredUi?.selectedFaceId ?? null);
+  const [viewMode, setViewMode] = useState<ViewMode>(restoredUi?.viewMode ?? (restoredResults?.fields.length ? "results" : "model"));
+  const [themeMode, setThemeMode] = useState<ThemeMode>(restoredUi?.themeMode ?? "dark");
+  const [resultMode, setResultMode] = useState<ResultMode>(restoredUi?.resultMode ?? "stress");
+  const [showDeformed, setShowDeformed] = useState(restoredUi?.showDeformed ?? false);
+  const [showDimensions, setShowDimensions] = useState(restoredUi?.showDimensions ?? false);
+  const [stressExaggeration, setStressExaggeration] = useState(restoredUi?.stressExaggeration ?? 1.8);
   const [fitSignal, setFitSignal] = useState(0);
-  const [status, setStatus] = useState("Ready");
-  const [logs, setLogs] = useState<string[]>(["Ready | Local Mode"]);
-  const [runProgress, setRunProgress] = useState(0);
-  const [activeRunId, setActiveRunId] = useState("run-bracket-demo-seeded");
-  const [completedRunId, setCompletedRunId] = useState("run-bracket-demo-seeded");
-  const [resultSummary, setResultSummary] = useState<ResultSummary>(seededSummary);
-  const [resultFields, setResultFields] = useState<ResultField[]>([]);
-  const [draftLoadType, setDraftLoadType] = useState<LoadType>("force");
-  const [draftLoadValue, setDraftLoadValue] = useState(500);
-  const [draftLoadDirection, setDraftLoadDirection] = useState<LoadDirectionLabel>("-Z");
+  const [status, setStatus] = useState(restoredUi?.status ?? (restoredProjectFile ? "Workspace restored after reload." : "Ready"));
+  const [logs, setLogs] = useState<string[]>(restoredUi?.logs.length ? restoredUi.logs : restoredProjectFile ? ["Workspace restored after reload.", "Ready | Local Mode"] : ["Ready | Local Mode"]);
+  const [runProgress, setRunProgress] = useState(restoredUi?.runProgress ?? (restoredResults?.fields.length ? 100 : 0));
+  const [activeRunId, setActiveRunId] = useState(restoredUi?.activeRunId || restoredResults?.activeRunId || restoredResults?.completedRunId || "run-bracket-demo-seeded");
+  const [completedRunId, setCompletedRunId] = useState(restoredUi?.completedRunId || restoredResults?.completedRunId || "run-bracket-demo-seeded");
+  const [resultSummary, setResultSummary] = useState<ResultSummary>(restoredResults?.summary ?? seededSummary);
+  const [resultFields, setResultFields] = useState<ResultField[]>(restoredResults?.fields ?? []);
+  const [draftLoadType, setDraftLoadType] = useState<LoadType>(restoredUi?.draftLoadType ?? "force");
+  const [draftLoadValue, setDraftLoadValue] = useState(restoredUi?.draftLoadValue ?? 500);
+  const [draftLoadDirection, setDraftLoadDirection] = useState<LoadDirectionLabel>(restoredUi?.draftLoadDirection ?? "-Z");
   const [loadEditorActive, setLoadEditorActive] = useState(false);
-  const [sampleModel, setSampleModel] = useState<SampleModelId>("bracket");
+  const [sampleModel, setSampleModel] = useState<SampleModelId>(restoredUi?.sampleModel ?? "bracket");
 
   const study = project?.studies[0] ?? null;
   const reportRunId = useMemo(() => {
@@ -128,6 +131,68 @@ export function App() {
     window.addEventListener("keydown", handleShortcut);
     return () => window.removeEventListener("keydown", handleShortcut);
   }, [displayModel, project, undoStack, redoStack]);
+
+  useEffect(() => {
+    if (!project || !displayModel) return;
+    const timeout = window.setTimeout(() => {
+      writeAutosavedWorkspace(buildAutosavedWorkspace({
+        project,
+        displayModel,
+        results: resultFields.length ? {
+          activeRunId,
+          completedRunId,
+          summary: resultSummary,
+          fields: resultFields
+        } : undefined,
+        ui: {
+          activeStep,
+          selectedFaceId,
+          viewMode,
+          themeMode,
+          resultMode,
+          showDeformed,
+          showDimensions,
+          stressExaggeration,
+          draftLoadType,
+          draftLoadValue,
+          draftLoadDirection,
+          sampleModel,
+          activeRunId,
+          completedRunId,
+          runProgress,
+          undoStack,
+          redoStack,
+          status,
+          logs
+        }
+      }));
+    }, 150);
+    return () => window.clearTimeout(timeout);
+  }, [
+    activeRunId,
+    activeStep,
+    completedRunId,
+    displayModel,
+    draftLoadDirection,
+    draftLoadType,
+    draftLoadValue,
+    logs,
+    project,
+    redoStack,
+    resultFields,
+    resultMode,
+    resultSummary,
+    runProgress,
+    sampleModel,
+    selectedFaceId,
+    showDeformed,
+    showDimensions,
+    status,
+    stressExaggeration,
+    themeMode,
+    undoStack,
+    viewMode
+  ]);
 
   async function openProjectResponse(action: Promise<{ project: Project; displayModel: DisplayModel; message?: string; results?: LocalResultBundle }>) {
     const response = await action;
