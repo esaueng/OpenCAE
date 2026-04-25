@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { AlertTriangle, Anchor, ArrowDown, Check, Download, Eye, FileText, Grid3X3, Maximize2, Play, Plus, RotateCcw, RotateCw, Ruler, ShieldCheck, Upload, X } from "lucide-react";
+import { AlertTriangle, Anchor, ArrowDown, Check, CircleHelp, Download, Eye, FileText, Grid3X3, Maximize2, Play, Plus, RotateCcw, RotateCw, Ruler, ShieldCheck, Upload, X } from "lucide-react";
 import { defaultPrintParametersFor, effectiveMaterialProperties, normalizePrintParameters, starterMaterials, type PrintMaterialParameters } from "@opencae/materials";
 import { assessResultFailure, estimateAllowableLoadForSafetyFactor } from "@opencae/schema";
 import type { Constraint, DisplayFace, DisplayModel, Load, Project, ResultSummary, Study } from "@opencae/schema";
@@ -9,6 +9,7 @@ import { directionLabelForLoad, directionVectorForLabel, equivalentForceForLoad,
 import type { SampleModelId } from "../lib/api";
 import { formatModelOrientation, getModelOrientation, type RotationAxis } from "../modelOrientation";
 import { shouldShowSampleModelPicker } from "../modelPanelState";
+import { LAYER_DIRECTION_HELP_TEXT } from "../materialPrintSettings";
 
 interface RightPanelProps {
   activeStep: StepId;
@@ -293,7 +294,13 @@ function MaterialPanel({ study, onAssignMaterial }: RightPanelProps) {
                   </span>
                 </label>
                 <label className="field">
-                  Layer direction
+                  <span className="field-label-with-help">
+                    Layer direction
+                    <span className="tooltip-trigger" tabIndex={0} role="button" aria-label="Layer direction help" aria-describedby="layer-direction-help">
+                      <CircleHelp size={15} aria-hidden="true" />
+                      <span id="layer-direction-help" className="field-tooltip" role="tooltip">{LAYER_DIRECTION_HELP_TEXT}</span>
+                    </span>
+                  </span>
                   <select
                     value={printParameters.layerOrientation ?? "z"}
                     onChange={(event) => updatePrintParameters({ layerOrientation: event.currentTarget.value as PrintMaterialParameters["layerOrientation"] })}
