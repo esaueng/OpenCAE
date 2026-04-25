@@ -78,13 +78,14 @@ export function CadViewer(props: CadViewerProps) {
   const viewportBackground = isLightTheme ? "#f7f9fc" : "#070b10";
   const gridCellColor = isLightTheme ? "#d9e0ea" : "#263140";
   const gridSectionColor = isLightTheme ? "#c2ccd8" : "#3a4654";
+  const gridFloorZ = useMemo(() => gridFloorZForDisplayModel(props.displayModel), [props.displayModel]);
   return (
     <section className={`viewer-shell ${effectiveViewMode === "results" ? "results-view" : ""}`} aria-label="3D CAD viewer">
       <Canvas camera={{ position: [4.8, -4.8, 4.8], up: ISO_CAMERA_UP.toArray(), fov: 42 }}>
         <color attach="background" args={[viewportBackground]} />
         <ambientLight intensity={effectiveViewMode === "results" || isLightTheme ? 1.4 : 0.75} />
         <directionalLight position={[4, 6, 3]} intensity={effectiveViewMode === "results" || isLightTheme ? 1.45 : 2.2} />
-        <Grid args={[8, 8]} cellColor={gridCellColor} sectionColor={gridSectionColor} fadeDistance={12} fadeStrength={1.2} position={[0, 0, -0.27]} rotation={[Math.PI / 2, 0, 0]} />
+        <Grid args={[8, 8]} cellColor={gridCellColor} sectionColor={gridSectionColor} fadeDistance={12} fadeStrength={1.2} position={[0, 0, gridFloorZ]} rotation={[Math.PI / 2, 0, 0]} />
         <Bounds fit clip observe margin={1.65}>
           <BracketModel {...props} viewMode={effectiveViewMode} />
           <BoundsCameraReset signal={props.fitSignal} />
@@ -328,6 +329,15 @@ function modelKindForDisplayModel(displayModel: DisplayModel): SampleModelKind {
   if (displayModel.id.includes("plate")) return "plate";
   if (displayModel.id.includes("cantilever")) return "cantilever";
   return "bracket";
+}
+
+function gridFloorZForDisplayModel(displayModel: DisplayModel) {
+  const kind = modelKindForDisplayModel(displayModel);
+  if (kind === "uploaded") return -1.42;
+  if (kind === "bracket") return -BRACKET_DEPTH / 2 - 0.12;
+  if (kind === "plate") return -PLATE_DEPTH / 2 - 0.12;
+  if (kind === "cantilever") return -0.48;
+  return -0.27;
 }
 
 function SampleSolid({ kind, color, displayModel, pickHandlers }: { kind: SampleModelKind; color: string; displayModel?: DisplayModel; pickHandlers?: ModelPickHandlers }) {
