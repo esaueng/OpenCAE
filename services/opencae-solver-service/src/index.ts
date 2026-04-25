@@ -5,6 +5,7 @@ import type { ObjectStorageProvider } from "@opencae/storage";
 import { bracketDisplayModel, bracketResultSummary } from "@opencae/db/sample-data";
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const STANDARD_GRAVITY = 9.80665;
 
 export class LocalMockComputeBackend {
   constructor(private readonly storage: ObjectStorageProvider) {}
@@ -275,7 +276,10 @@ function loadEquivalentForce(load: Load, face: FaceModel): number {
   const rawValue = Number(load.parameters.value ?? 0);
   const value = Number.isFinite(rawValue) && rawValue > 0 ? rawValue : 0;
   if (load.type === "pressure") return value * estimatedFaceArea(face) * 0.001;
-  if (load.type === "gravity") return value * 12;
+  if (load.type === "gravity") {
+    const equivalentForce = Number(load.parameters.equivalentForceN);
+    return Number.isFinite(equivalentForce) && equivalentForce > 0 ? equivalentForce : value * STANDARD_GRAVITY;
+  }
   return value;
 }
 

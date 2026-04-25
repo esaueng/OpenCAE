@@ -69,6 +69,28 @@ describe("LocalMockComputeBackend", () => {
     }
   });
 
+  test("converts payload mass gravity loads to equivalent reaction force", async () => {
+    vi.useFakeTimers();
+    try {
+      const storage = new MemoryStorage();
+      const backend = new LocalMockComputeBackend(storage);
+
+      const run = backend.runStaticSolve({
+        study: studyWithLoads([{ id: "payload-mass", type: "gravity", value: 10, direction: [0, 0, -1] }]),
+        runId: "run-payload",
+        meshRef: "mesh-payload",
+        publish: vi.fn()
+      });
+      await vi.runAllTimersAsync();
+      const solved = await run;
+
+      expect(solved.summary.reactionForce).toBe(98.1);
+      expect(solved.summary.reactionForceUnits).toBe("N");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   test("changes the solved stress field when the same total force is moved to a different face", async () => {
     vi.useFakeTimers();
     try {

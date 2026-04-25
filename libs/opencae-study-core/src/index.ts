@@ -4,7 +4,7 @@ export function validateStaticStressStudy(study: Study): Diagnostic[] {
   const diagnostics: Diagnostic[] = [];
   if (study.materialAssignments.length === 0) diagnostics.push(issue("validation-material", "Choose what the part is made of."));
   if (study.constraints.length === 0) diagnostics.push(issue("validation-support", "Choose where the part is held fixed."));
-  if (study.loads.length === 0) diagnostics.push(issue("validation-load", "Choose where force or pressure is applied."));
+  if (study.loads.length === 0) diagnostics.push(issue("validation-load", "Choose where force, pressure, or payload weight is applied."));
   for (const load of study.loads) {
     const selection = study.namedSelections.find((item) => item.id === load.selectionRef);
     if (!selection || selection.entityType !== "face") {
