@@ -44,6 +44,8 @@ interface RightPanelProps {
   onRemoveLoad: (loadId: string) => void;
   onGenerateMesh: (preset: "coarse" | "medium" | "fine") => void;
   onRunSimulation: () => void;
+  canRunSimulation: boolean;
+  missingRunItems: string[];
   canGenerateReport: boolean;
   reportUrl?: string;
   reportFilename?: string;
@@ -469,7 +471,7 @@ function MeshPanel({ study, onGenerateMesh }: RightPanelProps) {
   );
 }
 
-function RunPanel({ study, runProgress, onRunSimulation }: RightPanelProps) {
+function RunPanel({ study, runProgress, onRunSimulation, canRunSimulation, missingRunItems }: RightPanelProps) {
   const checks = [
     ["Material assigned", study.materialAssignments.length > 0],
     ["Support added", study.constraints.length > 0],
@@ -482,7 +484,15 @@ function RunPanel({ study, runProgress, onRunSimulation }: RightPanelProps) {
       <div className="checklist">
         {checks.map(([label, done]) => <span key={label} className={done ? "check done" : "check"}><span>{done ? <Check size={18} /> : null}</span>{label}</span>)}
       </div>
-      <button className="primary wide" onClick={onRunSimulation}><Play size={16} />Run simulation</button>
+      <button
+        className="primary wide"
+        onClick={onRunSimulation}
+        disabled={!canRunSimulation}
+        title={missingRunItems.length ? `Complete before running: ${missingRunItems.join(", ")}` : "Run simulation"}
+      >
+        <Play size={16} />Run simulation
+      </button>
+      {missingRunItems.length > 0 && <p className="panel-copy">Complete {missingRunItems.join(", ").toLowerCase()} before running.</p>}
       <div className="progress"><span style={{ width: `${runProgress}%` }} /></div>
       <SectionTitle>Solver</SectionTitle>
       <div className="summary-box">
