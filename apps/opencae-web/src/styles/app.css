@@ -251,17 +251,40 @@ svg {
 
 .topbar-tools {
   display: flex;
-  gap: 2px;
+  align-items: center;
+  gap: 8px;
   margin-left: auto;
 }
 
+.history-tools {
+  display: inline-flex;
+  align-items: center;
+  overflow: hidden;
+  border: var(--border-thin);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-1);
+}
+
 .icon-button {
-  width: 30px;
-  height: 30px;
+  width: 34px;
+  height: 34px;
   display: grid;
   place-items: center;
   color: var(--color-text-muted);
   border-radius: var(--radius-md);
+}
+
+.history-button {
+  border-radius: 0;
+}
+
+.history-button + .history-button {
+  border-left: var(--border-thin);
+}
+
+.theme-button {
+  border: var(--border-thin);
+  background: var(--color-surface-1);
 }
 
 .icon-button svg {

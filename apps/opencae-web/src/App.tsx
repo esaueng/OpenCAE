@@ -288,10 +288,12 @@ export function App() {
           <span>{study.name}</span>
         </div>
         <div className="topbar-tools" aria-label="Workspace tools">
-          <button className="icon-button" type="button" title="Undo last change" aria-label="Undo last change" disabled={!canUndoAction} onClick={handleUndoAction}><UndoIcon /></button>
-          <button className="icon-button" type="button" title="Redo last change" aria-label="Redo last change" disabled={!canRedoAction} onClick={handleRedoAction}><RedoIcon /></button>
+          <div className="history-tools" role="group" aria-label="Undo and redo">
+            <button className="icon-button history-button" type="button" title="Undo last change" aria-label="Undo last change" disabled={!canUndoAction} onClick={handleUndoAction}><UndoIcon /></button>
+            <button className="icon-button history-button" type="button" title="Redo last change" aria-label="Redo last change" disabled={!canRedoAction} onClick={handleRedoAction}><RedoIcon /></button>
+          </div>
           <button
-            className="icon-button"
+            className="icon-button theme-button"
             type="button"
             title={themeMode === "dark" ? "Switch to light mode" : "Switch to dark mode"}
             aria-label={themeMode === "dark" ? "Switch to light mode" : "Switch to dark mode"}
