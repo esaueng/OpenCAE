@@ -75,6 +75,9 @@ export function App() {
   const reportDownloadUrl = reportRunId ? `/api/runs/${reportRunId}/report.pdf` : project ? `/api/projects/${project.id}/report.pdf` : undefined;
   const selectedFace = useMemo(() => displayModel?.faces.find((face) => face.id === selectedFaceId) ?? null, [displayModel, selectedFaceId]);
   const solverRunning = runProgress > 0 && runProgress < 100;
+  const runReadiness = useMemo(() => readinessForStudy(study), [study]);
+  const canRunSimulation = runReadiness.every((item) => item.done) && !solverRunning;
+  const missingRunItems = runReadiness.filter((item) => !item.done).map((item) => item.label);
   const canUndoAction = undoStack.length > 0;
   const canRedoAction = redoStack.length > 0;
   const loadMarkers = useMemo<ViewerLoadMarker[]>(() => {
@@ -327,6 +330,10 @@ export function App() {
 
   async function handleRunSimulation() {
     if (!study) return;
+    if (!canRunSimulation) {
+      pushMessage(missingRunItems.length ? `Complete before running: ${missingRunItems.join(", ")}.` : "Simulation is already running.");
+      return;
+    }
     const response = await runSimulation(study.id);
     setActiveRunId(response.run.id);
     setCompletedRunId("");
@@ -384,7 +391,12 @@ export function App() {
             {themeMode === "dark" ? <SunIcon /> : <MoonIcon />}
           </button>
         </div>
-        <button className={`primary topbar-action ${solverRunning ? "running" : ""}`} onClick={handleRunSimulation}>
+        <button
+          className={`primary topbar-action ${solverRunning ? "running" : ""}`}
+          onClick={handleRunSimulation}
+          disabled={!canRunSimulation}
+          title={missingRunItems.length ? `Complete before running: ${missingRunItems.join(", ")}` : "Run simulation"}
+        >
           <span aria-hidden="true">▶</span>{solverRunning ? "Running…" : "Run simulation"}
         </button>
         <button className="secondary topbar-action" type="button" onClick={handleSaveProject} title="Save project to local disk">
@@ -475,6 +487,8 @@ export function App() {
           }
           onGenerateMesh={(preset) => updateStudy(generateMesh(study.id, preset), "run")}
           onRunSimulation={handleRunSimulation}
+          canRunSimulation={canRunSimulation}
+          missingRunItems={missingRunItems}
           canGenerateReport={Boolean(reportDownloadUrl)}
           reportUrl={reportDownloadUrl}
           reportFilename={`${project.name.replace(/[^\w.-]+/g, "-").replace(/^-+|-+$/g, "").toLowerCase() || "opencae"}-report.pdf`}
@@ -532,6 +546,15 @@ function latestReportRunId(study: Study | null, activeRunId: string): string | n
   if (study.runs.some((run) => run.id === activeRunId && (run.reportRef || run.resultRef || run.status === "complete"))) return activeRunId;
   const completed = [...study.runs].reverse().find((run) => run.reportRef || run.resultRef || run.status === "complete");
   return completed?.id ?? null;
+}
+
+function readinessForStudy(study: Study | null) {
+  return [
+    { label: "Material assigned", done: Boolean(study?.materialAssignments.length) },
+    { label: "Support added", done: Boolean(study?.constraints.length) },
+    { label: "Load added", done: Boolean(study?.loads.length) },
+    { label: "Mesh generated", done: study?.meshSettings.status === "complete" }
+  ];
 }
 
 function namedSelectionForFace(study: Study, face: DisplayFace): NamedSelection {
