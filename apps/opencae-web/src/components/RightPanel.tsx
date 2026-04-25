@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AlertTriangle, Anchor, ArrowDown, Check, Download, Eye, FileText, Grid3X3, Maximize2, Play, Plus, RotateCcw, Ruler, ShieldCheck, Upload, X } from "lucide-react";
-import { starterMaterials } from "@opencae/materials";
+import { defaultPrintParametersFor, effectiveMaterialProperties, normalizePrintParameters, starterMaterials, type PrintMaterialParameters } from "@opencae/materials";
 import { assessResultFailure, estimateAllowableLoadForSafetyFactor } from "@opencae/schema";
 import type { Constraint, DisplayFace, DisplayModel, Load, Project, ResultSummary, Study } from "@opencae/schema";
 import type { ResultMode, ViewMode } from "./CadViewer";
@@ -34,7 +34,7 @@ interface RightPanelProps {
   onToggleDeformed: () => void;
   onToggleDimensions: () => void;
   onStressExaggerationChange: (value: number) => void;
-  onAssignMaterial: (materialId: string) => void;
+  onAssignMaterial: (materialId: string, parameters?: Record<string, unknown>) => void;
   onAddSupport: (selectionRef?: string) => void;
   onUpdateSupport: (support: Constraint) => void;
   onRemoveSupport: (supportId: string) => void;
@@ -55,6 +55,8 @@ interface RightPanelProps {
   onGenerateReport: () => void;
   onStepSelect: (step: StepId) => void;
 }
+
+const EMPTY_PARAMETERS: Record<string, unknown> = {};
 
 export function RightPanel(props: RightPanelProps) {
   return (
@@ -176,35 +178,117 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sa
 }
 
 function MaterialPanel({ study, onAssignMaterial }: RightPanelProps) {
-  const current = study.materialAssignments[0]?.materialId ?? "mat-aluminum-6061";
+  const currentAssignment = study.materialAssignments[0];
+  const current = currentAssignment?.materialId ?? "mat-aluminum-6061";
+  const currentParameters = currentAssignment?.parameters ?? EMPTY_PARAMETERS;
   const [selectedMaterialId, setSelectedMaterialId] = useState(current);
+  const [printParameters, setPrintParameters] = useState<PrintMaterialParameters>(() => {
+    const material = materialForId(current);
+    return material.printProfile ? normalizePrintParameters(material, currentParameters) : defaultPrintParametersFor(material);
+  });
+
   useEffect(() => {
+    const material = materialForId(current);
     setSelectedMaterialId(current);
-  }, [current]);
-  const selectedMaterial = starterMaterials.find((material) => material.id === selectedMaterialId) ?? starterMaterials[0];
-  const assignedMaterial = starterMaterials.find((material) => material.id === current) ?? starterMaterials[0];
+    setPrintParameters(material.printProfile ? normalizePrintParameters(material, currentParameters) : defaultPrintParametersFor(material));
+  }, [current, currentParameters]);
+
+  const selectedMaterial = materialForId(selectedMaterialId);
+  const assignedMaterial = materialForId(current);
+  const printable = Boolean(selectedMaterial.printProfile);
+  const effectiveMaterial = effectiveMaterialProperties(selectedMaterial, printable ? { ...printParameters } : {});
+  const assignedPrintParameters = assignedMaterial.printProfile ? normalizePrintParameters(assignedMaterial, currentParameters) : undefined;
+  const assignedDetail = assignedPrintParameters?.printed
+    ? `3D printed · ${assignedPrintParameters.infillDensity}% infill`
+    : "all bodies";
+
+  function handleMaterialChange(materialId: string) {
+    const material = materialForId(materialId);
+    setSelectedMaterialId(materialId);
+    setPrintParameters(material.printProfile ? defaultPrintParametersFor(material) : { printed: false, infillDensity: 100, wallCount: 1, layerOrientation: "z" });
+  }
+
+  function updatePrintParameters(patch: Partial<PrintMaterialParameters>) {
+    setPrintParameters((previous) => normalizePrintParameters(selectedMaterial, { ...previous, ...patch }));
+  }
+
   return (
     <Panel title="Material" helper="Choose what the part is made of.">
       <label className="field">
         Material library
-        <select value={selectedMaterialId} onChange={(event) => setSelectedMaterialId(event.currentTarget.value)}>
+        <select value={selectedMaterialId} onChange={(event) => handleMaterialChange(event.currentTarget.value)}>
           {starterMaterials.map((material) => (
             <option key={material.id} value={material.id}>{material.name}</option>
           ))}
         </select>
       </label>
-      {selectedMaterial && (
-        <div className="summary-box">
-          <Info label="Young's modulus" value={`${formatMPa(selectedMaterial.youngsModulus)} MPa`} />
-          <Info label="Poisson ratio" value={String(selectedMaterial.poissonRatio)} />
-          <Info label="Density" value={`${selectedMaterial.density.toLocaleString()} kg/m^3`} />
-          <Info label="Yield strength" value={`${formatMPa(selectedMaterial.yieldStrength)} MPa`} />
-        </div>
+      <div className="summary-box">
+        <Info label={printable && printParameters.printed ? "Effective modulus" : "Young's modulus"} value={`${formatMPa(effectiveMaterial.youngsModulus)} MPa`} />
+        <Info label="Poisson ratio" value={String(selectedMaterial.poissonRatio)} />
+        <Info label={printable && printParameters.printed ? "Effective density" : "Density"} value={`${Math.round(effectiveMaterial.density).toLocaleString()} kg/m^3`} />
+        <Info label={printable && printParameters.printed ? "Effective yield" : "Yield strength"} value={`${formatMPa(effectiveMaterial.yieldStrength)} MPa`} />
+        {selectedMaterial.printProfile && <Info label="Print process" value={selectedMaterial.printProfile.process} />}
+      </div>
+      {printable && (
+        <>
+          <SectionTitle>3D Print Settings</SectionTitle>
+          <div className="print-settings">
+            <label className="toggle material-print-toggle">
+              <input
+                type="checkbox"
+                checked={Boolean(printParameters.printed)}
+                onChange={(event) => updatePrintParameters({ printed: event.currentTarget.checked })}
+              />
+              3D printed part
+            </label>
+            {printParameters.printed && (
+              <div className="print-settings-grid">
+                <label className="field">
+                  Infill density
+                  <span className="input-with-unit">
+                    <input
+                      type="number"
+                      min="1"
+                      max="100"
+                      value={printParameters.infillDensity ?? 100}
+                      onChange={(event) => updatePrintParameters({ infillDensity: Number(event.currentTarget.value) })}
+                    />
+                    <span>%</span>
+                  </span>
+                </label>
+                <label className="field">
+                  Wall count
+                  <span className="input-with-unit">
+                    <input
+                      type="number"
+                      min="1"
+                      max="12"
+                      value={printParameters.wallCount ?? 1}
+                      onChange={(event) => updatePrintParameters({ wallCount: Number(event.currentTarget.value) })}
+                    />
+                    <span>walls</span>
+                  </span>
+                </label>
+                <label className="field">
+                  Layer direction
+                  <select
+                    value={printParameters.layerOrientation ?? "z"}
+                    onChange={(event) => updatePrintParameters({ layerOrientation: event.currentTarget.value as PrintMaterialParameters["layerOrientation"] })}
+                  >
+                    <option value="z">Z build direction</option>
+                    <option value="x">X build direction</option>
+                    <option value="y">Y build direction</option>
+                  </select>
+                </label>
+              </div>
+            )}
+          </div>
+        </>
       )}
-      <button className="primary wide" onClick={() => onAssignMaterial(selectedMaterialId)}>Apply to bracket</button>
+      <button className="primary wide" onClick={() => onAssignMaterial(selectedMaterialId, printable ? { ...printParameters } : {})}>Apply material</button>
       <SectionTitle>Assigned</SectionTitle>
       <div className="concept-card-list">
-        <ConceptCard icon={<Check size={18} />} title={assignedMaterial?.name ?? "Material"} detail="bracket · all bodies" tone="accent" />
+        <ConceptCard icon={<Check size={18} />} title={assignedMaterial?.name ?? "Material"} detail={`bracket · ${assignedDetail}`} tone="accent" />
       </div>
     </Panel>
   );
@@ -741,6 +825,10 @@ function PlacementReadout({ selectedRef, fallbackLabel }: { selectedRef: ReturnT
       {selectedRef ? `Selected ${selectedRef.geometryRefs[0]?.label ?? fallbackLabel}` : "Select a face in the model viewport"}
     </div>
   );
+}
+
+function materialForId(materialId: string) {
+  return starterMaterials.find((material) => material.id === materialId) ?? starterMaterials[0]!;
 }
 
 function SupportIcon() {

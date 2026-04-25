@@ -270,12 +270,13 @@ api.post("/api/studies/:studyId/materials", async (request, reply) => {
   const { studyId } = request.params as { studyId: string };
   const study = db.getStudy(studyId);
   if (!study) return reply.code(404).send({ error: "Study not found" });
-  const body = request.body as { materialId?: string } | undefined;
+  const body = request.body as { materialId?: string; parameters?: Record<string, unknown> } | undefined;
   const bodySelection = study.namedSelections.find((selection) => selection.entityType === "body");
   const assignment = {
     id: "assign-material-current",
     materialId: body?.materialId ?? bracketDemoMaterial.id,
     selectionRef: bodySelection?.id ?? "selection-body-bracket",
+    parameters: body?.parameters ?? {},
     status: "complete" as const
   };
   const next = { ...study, materialAssignments: [assignment] };

@@ -215,16 +215,49 @@ describe("LocalMockComputeBackend", () => {
       vi.useRealTimers();
     }
   });
+
+  test("uses 3D print infill settings to reduce stiffness and strength", async () => {
+    vi.useFakeTimers();
+    try {
+      const storage = new MemoryStorage();
+      const backend = new LocalMockComputeBackend(storage);
+      const load = { id: "load-a", type: "force" as const, value: 500, direction: [0, -1, 0] as [number, number, number] };
+
+      const solidRun = backend.runStaticSolve({
+        study: studyWithLoads([load], "mat-petg", { printed: false }),
+        runId: "run-petg-solid",
+        meshRef: "mesh-petg-solid",
+        publish: vi.fn()
+      });
+      await vi.runAllTimersAsync();
+      const solid = await solidRun;
+
+      const printedRun = backend.runStaticSolve({
+        study: studyWithLoads([load], "mat-petg", { printed: true, infillDensity: 35, wallCount: 3, layerOrientation: "z" }),
+        runId: "run-petg-printed",
+        meshRef: "mesh-petg-printed",
+        publish: vi.fn()
+      });
+      await vi.runAllTimersAsync();
+      const printed = await printedRun;
+
+      expect(printed.summary.maxDisplacement).toBeGreaterThan(solid.summary.maxDisplacement);
+      expect(printed.summary.safetyFactor).toBeLessThan(solid.summary.safetyFactor);
+      expect(await storage.getObject("project-test/solver/run-petg-printed/solver.inp").then((buffer) => buffer.toString("utf8"))).toContain("infillDensity=35");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
-function studyWithLoads(loads: Array<{ id: string; type: Load["type"]; value: number; direction: [number, number, number]; selectionRef?: string }>, materialId = "mat-aluminum-6061"): Study {
+function studyWithLoads(loads: Array<{ id: string; type: Load["type"]; value: number; direction: [number, number, number]; selectionRef?: string }>, materialId = "mat-aluminum-6061", materialParameters: Record<string, unknown> = {}): Study {
   return {
     id: "study-test",
     projectId: "project-test",
     name: "Static Stress",
     type: "static_stress",
     geometryScope: [],
-    materialAssignments: [{ id: "assign", materialId, selectionRef: "selection-body", status: "complete" }],
+    materialAssignments: [{ id: "assign", materialId, selectionRef: "selection-body", parameters: materialParameters, status: "complete" }],
     namedSelections: [
       {
         id: "selection-load-face",

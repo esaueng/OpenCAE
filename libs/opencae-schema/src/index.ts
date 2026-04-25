@@ -12,10 +12,20 @@ export const DiagnosticSchema = z.object({
 export const MaterialSchema = z.object({
   id: z.string(),
   name: z.string(),
+  category: z.enum(["metal", "plastic", "composite", "resin"]).optional(),
   youngsModulus: z.number(),
   poissonRatio: z.number(),
   density: z.number(),
-  yieldStrength: z.number()
+  yieldStrength: z.number(),
+  printProfile: z
+    .object({
+      process: z.enum(["FDM", "SLA", "SLS", "MJF", "Metal AM"]),
+      defaultInfillDensity: z.number().min(1).max(100).optional(),
+      defaultWallCount: z.number().min(1).max(12).optional(),
+      defaultLayerOrientation: z.enum(["x", "y", "z"]).optional(),
+      layerStrengthFactor: z.number().min(0.1).max(1).optional()
+    })
+    .optional()
 });
 
 export const GeometryReferenceSchema = z.object({
@@ -109,6 +119,7 @@ export const StudySchema = z.object({
       id: z.string(),
       materialId: z.string(),
       selectionRef: z.string(),
+      parameters: z.record(z.unknown()).optional(),
       status: z.enum(["not_started", "ready", "warning", "complete"])
     })
   ),
