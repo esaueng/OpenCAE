@@ -257,7 +257,7 @@ function LoadsPanel({
       <label className="field">
         Direction
         <div className="segmented direction-options" role="group" aria-label="Direction">
-          {(["-Y", "+Y", "+X", "-X", "Normal"] as const).map((option) => (
+          {(["-Y", "+Y", "+X", "-X", "+Z", "-Z", "Normal"] as const).map((option) => (
             <button key={option} className={draftLoadDirection === option ? "active" : ""} type="button" onClick={() => onDraftLoadDirectionChange(option)}>{option}</button>
           ))}
         </div>
@@ -346,7 +346,7 @@ function LoadEditForm({ load, study, onSave, onCancel }: { load: Load; study: St
       <label className="field">
         Direction
         <select value={direction} onChange={(event) => setDirection(event.currentTarget.value as LoadDirectionLabel)}>
-          {(["-Y", "+Y", "+X", "-X", "Normal"] as const).map((option) => (
+          {(["-Y", "+Y", "+X", "-X", "+Z", "-Z", "Normal"] as const).map((option) => (
             <option key={option} value={option}>{option}</option>
           ))}
         </select>

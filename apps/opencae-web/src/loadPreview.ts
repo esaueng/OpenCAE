@@ -2,14 +2,16 @@ import type { DisplayFace, Load, Study } from "@opencae/schema";
 import type { ViewerLoadMarker } from "./components/CadViewer";
 
 export type LoadType = "force" | "pressure" | "gravity";
-export type LoadDirectionLabel = "-Y" | "+Y" | "+X" | "-X" | "Normal";
+export type LoadDirectionLabel = "-Y" | "+Y" | "+X" | "-X" | "+Z" | "-Z" | "Normal";
 export type LoadDirection = [number, number, number];
 
 const DIRECTION_VECTORS: Record<Exclude<LoadDirectionLabel, "Normal">, LoadDirection> = {
   "-Y": [0, -1, 0],
   "+Y": [0, 1, 0],
   "+X": [1, 0, 0],
-  "-X": [-1, 0, 0]
+  "-X": [-1, 0, 0],
+  "+Z": [0, 0, 1],
+  "-Z": [0, 0, -1]
 };
 
 export function unitsForLoadType(type: LoadType) {
@@ -28,6 +30,8 @@ export function directionLabelForVector(direction: unknown): LoadDirectionLabel 
   if (x === -1 && y === 0 && z === 0) return "-X";
   if (x === 0 && y === 1 && z === 0) return "+Y";
   if (x === 0 && y === -1 && z === 0) return "-Y";
+  if (x === 0 && y === 0 && z === 1) return "+Z";
+  if (x === 0 && y === 0 && z === -1) return "-Z";
   return "Normal";
 }
 
