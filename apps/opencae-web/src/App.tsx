@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Constraint, DisplayModel, Load, Project, ResultField, ResultSummary, RunEvent, Study } from "@opencae/schema";
 import { RotateCcw, Save } from "lucide-react";
-import { addLoad, addSupport, assignMaterial, createProject, generateMesh, getResults, importLocalProject, loadSampleProject, runSimulation, subscribeToRun, updateStudy as saveStudyPatch, uploadModel, type SampleModelId } from "./lib/api";
+import { addLoad, addSupport, assignMaterial, createProject, generateMesh, getResults, importLocalProject, loadSampleProject, renameProject, runSimulation, subscribeToRun, updateStudy as saveStudyPatch, uploadModel, type SampleModelId } from "./lib/api";
 import { BottomPanel } from "./components/BottomPanel";
 import { RightPanel } from "./components/RightPanel";
 import { StartScreen } from "./components/StartScreen";
@@ -187,6 +187,20 @@ export function App() {
     if (nextStep) navigateToStep(nextStep);
   }
 
+  async function handleRenameProject(name: string) {
+    if (!project) return;
+    const nextName = name.trim().replace(/\s+/g, " ");
+    if (!nextName || nextName === project.name) return;
+    try {
+      const response = await renameProject(project.id, nextName);
+      recordUndoSnapshot(project);
+      setProject(response.project);
+      pushMessage(response.message);
+    } catch (error) {
+      pushMessage(error instanceof Error ? error.message : "Could not rename project.");
+    }
+  }
+
   function recordUndoSnapshot(snapshot: Project) {
     setUndoStack((history) => [...history, structuredClone(snapshot)].slice(-30));
     setRedoStack([]);
@@ -283,7 +297,7 @@ export function App() {
         <div className="brand"><TopbarMark />OpenCAE</div>
         <div className="topbar-divider topbar-divider-project" />
         <div className="breadcrumb">
-          <span className="breadcrumb-chip">{project.name}</span>
+          <ProjectNameChip name={project.name} onRename={handleRenameProject} />
           <span className="breadcrumb-sep">/</span>
           <span>{study.name}</span>
         </div>
@@ -389,11 +403,51 @@ export function App() {
           reportUrl={reportDownloadUrl}
           reportFilename={`${project.name.replace(/[^\w.-]+/g, "-").replace(/^-+|-+$/g, "").toLowerCase() || "opencae"}-report.pdf`}
           onGenerateReport={handleGenerateReport}
+          onStepSelect={handleStepSelect}
         />
       </main>
 
       <BottomPanel status={status} logs={logs} projectName={project.name} studyName={study.name} meshStatus={study.meshSettings.status === "complete" ? "Ready" : "Not generated"} solverStatus={solverRunning ? "Running" : runProgress >= 100 ? "Complete" : "Idle"} />
     </div>
+  );
+}
+
+function ProjectNameChip({ name, onRename }: { name: string; onRename: (name: string) => Promise<void> }) {
+  const [editing, setEditing] = useState(false);
+  const [draftName, setDraftName] = useState(name);
+  useEffect(() => {
+    if (!editing) setDraftName(name);
+  }, [editing, name]);
+
+  async function commitName() {
+    const nextName = draftName.trim().replace(/\s+/g, " ");
+    setEditing(false);
+    if (nextName) await onRename(nextName);
+  }
+
+  if (editing) {
+    return (
+      <input
+        className="breadcrumb-chip breadcrumb-input"
+        value={draftName}
+        autoFocus
+        onChange={(event) => setDraftName(event.currentTarget.value)}
+        onBlur={() => void commitName()}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") void commitName();
+          if (event.key === "Escape") {
+            setDraftName(name);
+            setEditing(false);
+          }
+        }}
+      />
+    );
+  }
+
+  return (
+    <button className="breadcrumb-chip breadcrumb-button" type="button" onClick={() => setEditing(true)} title="Rename project">
+      {name}
+    </button>
   );
 }
 

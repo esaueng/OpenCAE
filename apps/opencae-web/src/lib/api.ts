@@ -53,6 +53,15 @@ export async function uploadModel(projectId: string, file: File): Promise<Sample
   return readJson(response);
 }
 
+export async function renameProject(projectId: string, name: string): Promise<{ project: Project; message: string }> {
+  const response = await fetch(`/api/projects/${projectId}`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name })
+  });
+  return readJson(response);
+}
+
 export async function generateMesh(studyId: string, preset: "coarse" | "medium" | "fine"): Promise<{ study: Study; message: string }> {
   const response = await fetch(`/api/studies/${studyId}/mesh`, {
     method: "POST",
