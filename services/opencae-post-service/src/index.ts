@@ -171,23 +171,120 @@ function kpiBox(x: number, y: number, label: string, value: string, accent: [num
 }
 
 function contourDrawing(x: number, y: number, width: number, height: number): string {
+  const beam = [
+    [x + 58, y + 66],
+    [x + 230, y + 44],
+    [x + 276, y + 72],
+    [x + 98, y + 98]
+  ];
+  const top = [
+    [x + 98, y + 98],
+    [x + 276, y + 72],
+    [x + 246, y + 132],
+    [x + 78, y + 156]
+  ];
+  const side = [
+    [x + 230, y + 44],
+    [x + 276, y + 72],
+    [x + 246, y + 132],
+    [x + 202, y + 104]
+  ];
   return [
     "0.04 0.07 0.13 rg",
     `${x} ${y} ${width} ${height} re f`,
-    "0.10 0.35 0.84 rg",
-    `${x + 20} ${y + 22} ${width - 40} ${height - 44} re f`,
-    "0.12 0.75 0.55 rg",
-    `${x + 42} ${y + 42} ${width - 85} ${height - 84} re f`,
-    "0.96 0.78 0.23 rg",
-    `${x + 80} ${y + 62} ${width - 160} ${height - 124} re f`,
-    "0.89 0.18 0.34 rg",
-    `${x + 120} ${y + 88} ${width - 238} ${height - 176} re f`,
-    "0.95 0.95 0.95 RG 1.2 w",
-    `${x + 96} ${y + 72} 74 74 re S`,
-    "0.12 0.45 0.95 rg",
-    `${x + 38} ${y + 34} 8 8 re f`,
-    "0.91 0.25 0.21 rg",
-    `${x + width - 54} ${y + height - 50} 8 8 re f`
+    "0.08 0.13 0.22 RG 0.35 w",
+    ...gridLines(x, y, width, height),
+    "0.12 0.35 0.78 rg",
+    polygon(beam),
+    "0.12 0.70 0.82 rg",
+    polygon([
+      [x + 92, y + 70],
+      [x + 155, y + 62],
+      [x + 201, y + 90],
+      [x + 136, y + 100]
+    ]),
+    "0.95 0.76 0.20 rg",
+    polygon([
+      [x + 136, y + 100],
+      [x + 201, y + 90],
+      [x + 246, y + 118],
+      [x + 180, y + 130]
+    ]),
+    "0.90 0.18 0.34 rg",
+    polygon([
+      [x + 180, y + 130],
+      [x + 246, y + 118],
+      [x + 246, y + 132],
+      [x + 78, y + 156],
+      [x + 96, y + 134]
+    ]),
+    "0.35 0.47 0.62 rg",
+    polygon(side),
+    "0.62 0.72 0.84 rg",
+    polygon(top),
+    "0.82 0.88 0.95 RG 1.1 w",
+    polyline([...beam, beam[0]!, [x + 78, y + 156], [x + 246, y + 132], [x + 276, y + 72]]),
+    "0.27 0.55 0.90 rg",
+    circle(x + 80, y + 82, 4),
+    circle(x + 88, y + 80, 4),
+    "0.95 0.67 0.13 rg",
+    arrow(x + 238, y + 160, x + 238, y + 130),
+    text("Load", x + 220, y + 168, 7, "F2", [0.85, 0.9, 1]),
+    "0.27 0.70 0.48 rg",
+    supportMarker(x + 72, y + 64),
+    "0.07 0.10 0.16 rg",
+    text("MODEL VIEW", x + 18, y + height - 24, 7, "F2", [0.65, 0.72, 0.82]),
+    "0.15 0.45 0.95 rg",
+    `${x + 20} ${y + 18} 60 5 re f`,
+    "0.15 0.75 0.70 rg",
+    `${x + 80} ${y + 18} 60 5 re f`,
+    "0.96 0.78 0.20 rg",
+    `${x + 140} ${y + 18} 60 5 re f`,
+    "0.90 0.20 0.28 rg",
+    `${x + 200} ${y + 18} 60 5 re f`
+  ].join("\n");
+}
+
+function gridLines(x: number, y: number, width: number, height: number): string[] {
+  const lines: string[] = [];
+  for (let offset = -80; offset <= width + 80; offset += 38) {
+    lines.push(`${x + offset} ${y + 12} m ${x + offset + 110} ${y + height - 18} l S`);
+    lines.push(`${x + offset} ${y + height - 18} m ${x + offset + 138} ${y + 12} l S`);
+  }
+  return lines;
+}
+
+function polygon(points: number[][]): string {
+  const [first, ...rest] = points;
+  if (!first) return "";
+  return `${first[0]} ${first[1]} m ${rest.map((point) => `${point[0]} ${point[1]} l`).join(" ")} h f`;
+}
+
+function polyline(points: number[][]): string {
+  const [first, ...rest] = points;
+  if (!first) return "";
+  return `${first[0]} ${first[1]} m ${rest.map((point) => `${point[0]} ${point[1]} l`).join(" ")} S`;
+}
+
+function circle(x: number, y: number, radius: number): string {
+  const c = radius * 0.55228475;
+  return `${x + radius} ${y} m ${x + radius} ${y + c} ${x + c} ${y + radius} ${x} ${y + radius} c ${x - c} ${y + radius} ${x - radius} ${y + c} ${x - radius} ${y} c ${x - radius} ${y - c} ${x - c} ${y - radius} ${x} ${y - radius} c ${x + c} ${y - radius} ${x + radius} ${y - c} ${x + radius} ${y} c f`;
+}
+
+function arrow(x1: number, y1: number, x2: number, y2: number): string {
+  return [
+    "4 w 0.95 0.67 0.13 RG",
+    `${x1} ${y1} m ${x2} ${y2} l S`,
+    "0.95 0.67 0.13 rg",
+    polygon([[x2, y2], [x2 - 7, y2 + 13], [x2 + 7, y2 + 13]])
+  ].join("\n");
+}
+
+function supportMarker(x: number, y: number): string {
+  return [
+    polygon([[x, y], [x + 10, y - 16], [x - 10, y - 16]]),
+    polygon([[x + 18, y - 2], [x + 28, y - 18], [x + 8, y - 18]]),
+    polygon([[x + 36, y - 4], [x + 46, y - 20], [x + 26, y - 20]])
   ].join("\n");
 }
 
@@ -227,7 +324,7 @@ function coverSvg(): string {
 }
 
 function stressFieldSvg(summary: ResultSummary): string {
-  return `<svg class="visual" viewBox="0 0 560 320" role="img" aria-label="Stress field preview image"><defs><linearGradient id="heat" x1="0" x2="1"><stop stop-color="#1d4ed8"/><stop offset=".34" stop-color="#22c55e"/><stop offset=".62" stop-color="#facc15"/><stop offset="1" stop-color="#ef4444"/></linearGradient><filter id="soft"><feGaussianBlur stdDeviation="20"/></filter></defs><rect width="560" height="320" fill="#0b1220"/><g opacity=".86"><rect x="66" y="82" width="410" height="156" rx="4" fill="#1d4ed8"/><path d="M76 232 240 92h220v126L286 238z" fill="url(#heat)" filter="url(#soft)"/><rect x="110" y="116" width="84" height="66" fill="#93c5fd" opacity=".28"/><rect x="380" y="126" width="68" height="58" fill="#fecaca" opacity=".35"/><circle cx="278" cy="160" r="44" fill="#0b1220"/><circle cx="278" cy="160" r="48" fill="none" stroke="#d1d5db" stroke-width="10"/><circle cx="212" cy="112" r="7" fill="#ef4444"/><circle cx="414" cy="220" r="8" fill="#3b82f6"/></g><text x="24" y="288" fill="#cbd5e1" font-size="15" font-family="monospace">Max stress ${escapeHtml(format(summary.maxStress))} ${escapeHtml(summary.maxStressUnits)} · displacement ${escapeHtml(format(summary.maxDisplacement))} ${escapeHtml(summary.maxDisplacementUnits)}</text></svg>`;
+  return `<svg class="visual result-model" viewBox="0 0 560 320" role="img" aria-label="Stress contour preview on the analyzed model"><defs><linearGradient id="beamStress" x1="0" x2="1"><stop stop-color="#2563eb"/><stop offset=".36" stop-color="#22d3ee"/><stop offset=".64" stop-color="#facc15"/><stop offset="1" stop-color="#ef4444"/></linearGradient><linearGradient id="sideShade" x1="0" x2="1"><stop stop-color="#334155"/><stop offset="1" stop-color="#64748b"/></linearGradient></defs><rect width="560" height="320" fill="#0b1220"/><g stroke="#172033" stroke-width="1">${Array.from({ length: 15 }, (_, index) => `<path d="M${-80 + index * 48} 288 260 74" />`).join("")}${Array.from({ length: 15 }, (_, index) => `<path d="M${44 + index * 48} 72 392 290" />`).join("")}</g><g transform="translate(54 18)"><path d="M66 194 392 154 462 196 128 244Z" fill="url(#beamStress)"/><path d="M392 154 462 196 430 242 360 202Z" fill="url(#sideShade)"/><path d="M128 244 462 196 430 242 98 290Z" fill="#475569"/><path d="M66 194 392 154 462 196 128 244Z" fill="none" stroke="#cbd5e1" stroke-width="3"/><path d="M128 244 98 290 430 242 462 196M392 154 360 202 430 242" fill="none" stroke="#94a3b8" stroke-width="2"/><circle cx="116" cy="222" r="16" fill="#0b1220" stroke="#bfdbfe" stroke-width="6"/><circle cx="166" cy="214" r="16" fill="#0b1220" stroke="#bfdbfe" stroke-width="6"/><path d="M384 64 384 142" stroke="#f59e0b" stroke-width="10" stroke-linecap="round"/><path d="M384 152 368 120 400 120Z" fill="#f59e0b"/><rect x="324" y="40" width="128" height="28" rx="3" fill="#0f172a" stroke="#f59e0b"/><text x="388" y="59" fill="#e5e7eb" text-anchor="middle" font-size="12" font-family="ui-monospace, monospace">Load</text><g fill="#38bdf8"><path d="M88 256 100 278 76 278Z"/><path d="M132 250 144 272 120 272Z"/><path d="M176 244 188 266 164 266Z"/></g><path d="M260 94 330 116 286 190 218 168Z" fill="#ffffff" opacity=".18" stroke="#e2e8f0" stroke-width="2"/></g><g transform="translate(28 270)" font-family="ui-monospace, monospace" font-size="12" fill="#cbd5e1"><rect x="0" y="0" width="270" height="10" rx="5" fill="url(#beamStress)"/><text x="0" y="28">Max stress ${escapeHtml(format(summary.maxStress))} ${escapeHtml(summary.maxStressUnits)}</text><text x="0" y="46">Max displacement ${escapeHtml(format(summary.maxDisplacement))} ${escapeHtml(summary.maxDisplacementUnits)}</text></g></svg>`;
 }
 
 function clamp(value: number, min: number, max: number): number {
