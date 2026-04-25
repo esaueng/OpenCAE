@@ -1339,24 +1339,20 @@ function SceneLabel({
   position: [number, number, number];
   tone: "max" | "mid" | "min" | "load" | "active-load" | "dimension";
 }) {
-  const labelHeight = 0.36;
   const labelWidth = Math.max(1.02, label.length * 0.098);
   const colors = sceneLabelColors(tone);
   return (
     <Billboard position={position}>
-      <mesh position={[0, 0, -0.012]}>
-        <planeGeometry args={[labelWidth, labelHeight]} />
-        <meshBasicMaterial color={colors.background} transparent opacity={0.62} side={THREE.DoubleSide} depthWrite={false} />
-      </mesh>
       <Text
         anchorX="center"
         anchorY="middle"
         color={colors.text}
-        fontSize={0.12}
+        fontSize={0.135}
         letterSpacing={0}
         maxWidth={labelWidth - 0.16}
-        outlineColor={colors.background}
-        outlineWidth={0.004}
+        outlineColor={colors.outline}
+        outlineOpacity={0.88}
+        outlineWidth={0.018}
       >
         {label}
       </Text>
@@ -1365,12 +1361,12 @@ function SceneLabel({
 }
 
 function sceneLabelColors(tone: "max" | "mid" | "min" | "load" | "active-load" | "dimension") {
-  if (tone === "max") return { background: "#fee2e2", border: "#ef4444", text: "#111827" };
-  if (tone === "mid") return { background: "#fef3c7", border: "#f59e0b", text: "#111827" };
-  if (tone === "min") return { background: "#dbeafe", border: "#2563eb", text: "#111827" };
-  if (tone === "dimension") return { background: "#071525", border: "#4da3ff", text: "#e6edf3" };
-  if (tone === "active-load") return { background: "#071525", border: "#4da3ff", text: "#e6edf3" };
-  return { background: "#201809", border: "#f59e0b", text: "#e6edf3" };
+  if (tone === "max") return { outline: "#1f0707", text: "#fee2e2" };
+  if (tone === "mid") return { outline: "#1f1300", text: "#fef3c7" };
+  if (tone === "min") return { outline: "#06142a", text: "#dbeafe" };
+  if (tone === "dimension") return { outline: "#03101d", text: "#8cc8ff" };
+  if (tone === "active-load") return { outline: "#03101d", text: "#8cc8ff" };
+  return { outline: "#1f1300", text: "#ffe6a3" };
 }
 
 function SupportGlyph({ kind, marker, face, active }: { kind: SampleModelKind; marker: ViewerSupportMarker; face: DisplayFace; active: boolean }) {
@@ -1467,13 +1463,14 @@ function LoadGlyph({ marker, face, active }: { marker: ViewerLoadMarker; face: D
   const loadOffset = tangent.multiplyScalar((marker.stackIndex - 0.5) * 0.22);
   const arrowDirection = isNormalDirection ? normal : markerDirection;
   const { start, end } = arrowPointsOutsideSurface(center.clone().add(loadOffset), normal, arrowDirection, 0.54);
+  const tailLabelPosition = start.clone().add(arrowDirection.clone().multiplyScalar(-0.18)).add(normal.clone().multiplyScalar(0.08));
 
   return (
     <group>
       <ArrowGlyph start={start} end={end} color={markerColor} />
       <SceneLabel
         label={loadLabel(marker)}
-        position={end.clone().add(new THREE.Vector3(0, 0.2, 0)).toArray()}
+        position={tailLabelPosition.toArray()}
         tone={labelTone}
       />
     </group>
