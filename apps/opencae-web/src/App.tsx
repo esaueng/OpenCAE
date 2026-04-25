@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Constraint, DisplayModel, Load, Project, ResultField, ResultSummary, RunEvent, Study } from "@opencae/schema";
-import { Save } from "lucide-react";
+import { RotateCcw, Save } from "lucide-react";
 import { addLoad, addSupport, assignMaterial, createProject, generateMesh, getResults, importLocalProject, loadSampleProject, runSimulation, subscribeToRun, updateStudy as saveStudyPatch, uploadModel, type SampleModelId } from "./lib/api";
 import { BottomPanel } from "./components/BottomPanel";
 import { RightPanel } from "./components/RightPanel";
@@ -440,11 +440,11 @@ function TopbarMark() {
 }
 
 function UndoIcon() {
-  return <svg viewBox="0 0 18 18" aria-hidden="true"><path d="M7 5H3v4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /><path d="M3.5 8.5A5.4 5.4 0 1 0 5 4.8" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>;
+  return <RotateCcw size={18} aria-hidden="true" />;
 }
 
 function RedoIcon() {
-  return <svg viewBox="0 0 18 18" aria-hidden="true"><path d="M11 5h4v4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /><path d="M14.5 8.5A5.4 5.4 0 1 1 13 4.8" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>;
+  return <RotateCcw className="redo-icon" size={18} aria-hidden="true" />;
 }
 
 function SunIcon() {
