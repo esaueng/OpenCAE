@@ -8,6 +8,7 @@ import type { StepId } from "./StepBar";
 import { directionLabelForLoad, directionVectorForLabel, equivalentForceForLoad, unitsForLoadType, type LoadDirectionLabel, type LoadType } from "../loadPreview";
 import type { SampleModelId } from "../lib/api";
 import { formatModelOrientation, getModelOrientation, type RotationAxis } from "../modelOrientation";
+import { shouldShowSampleModelPicker } from "../modelPanelState";
 
 interface RightPanelProps {
   activeStep: StepId;
@@ -84,6 +85,7 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sa
   const geometry = project.geometryFiles[0];
   const isBlankProject = !geometry;
   const isUploadedProject = geometry?.metadata.source === "local-upload";
+  const showSampleModelPicker = shouldShowSampleModelPicker(project);
   const uploadPreviewFormat = typeof geometry?.metadata.previewFormat === "string" ? geometry.metadata.previewFormat.toUpperCase() : "";
   const isNativeCadImport = Boolean(geometry?.metadata.nativeCadImport);
   const faceCount = Number(geometry?.metadata.faceCount ?? 0);
@@ -109,16 +111,18 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sa
 
   return (
     <Panel title="Model" helper="Inspect the 3D part. Orbit with left-drag, pan with right-drag, zoom with scroll.">
-      <label className="field">
-        Sample model
-        <div className="segmented" role="group" aria-label="Sample model">
-          {(["bracket", "plate", "cantilever"] as const).map((sample) => (
-            <button key={sample} className={sampleModel === sample ? "active" : ""} type="button" onClick={() => onSampleModelChange(sample)}>
-              {capitalize(sample)}
-            </button>
-          ))}
-        </div>
-      </label>
+      {showSampleModelPicker && (
+        <label className="field">
+          Sample model
+          <div className="segmented" role="group" aria-label="Sample model">
+            {(["bracket", "plate", "cantilever"] as const).map((sample) => (
+              <button key={sample} className={sampleModel === sample ? "active" : ""} type="button" onClick={() => onSampleModelChange(sample)}>
+                {capitalize(sample)}
+              </button>
+            ))}
+          </div>
+        </label>
+      )}
       <div className="summary-box">
         <Info label="Project" value={project.name} />
         <Info label="Model" value={geometry?.filename ?? "No model loaded"} />
