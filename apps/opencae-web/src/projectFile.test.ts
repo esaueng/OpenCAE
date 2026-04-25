@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import type { DisplayModel, Project } from "@opencae/schema";
+import type { DisplayModel, Project, ResultField, ResultSummary } from "@opencae/schema";
 import { buildLocalProjectFile, suggestedProjectFilename } from "./projectFile";
 
 const project = {
@@ -25,9 +25,42 @@ describe("projectFile", () => {
     const payload = buildLocalProjectFile(project, displayModel, "2026-04-24T13:00:00.000Z");
 
     expect(payload.format).toBe("opencae-local-project");
-    expect(payload.version).toBe(1);
+    expect(payload.version).toBe(2);
     expect(payload.project.updatedAt).toBe("2026-04-24T13:00:00.000Z");
     expect(payload.displayModel).toBe(displayModel);
+  });
+
+  test("can include simulation results in the local project payload", () => {
+    const summary = {
+      maxStress: 168.5,
+      maxStressUnits: "MPa",
+      maxDisplacement: 0.157,
+      maxDisplacementUnits: "mm",
+      safetyFactor: 1.64,
+      reactionForce: 500,
+      reactionForceUnits: "N"
+    } satisfies ResultSummary;
+    const fields = [{
+      id: "field-1",
+      runId: "run-1",
+      type: "stress",
+      location: "face",
+      values: [12, 24],
+      min: 12,
+      max: 24,
+      units: "MPa"
+    }] satisfies ResultField[];
+
+    const payload = buildLocalProjectFile(project, displayModel, "2026-04-24T13:00:00.000Z", {
+      activeRunId: "run-1",
+      completedRunId: "run-1",
+      summary,
+      fields
+    });
+
+    expect(payload.results?.summary).toBe(summary);
+    expect(payload.results?.fields).toBe(fields);
+    expect(payload.results?.completedRunId).toBe("run-1");
   });
 
   test("suggests a safe local filename", () => {

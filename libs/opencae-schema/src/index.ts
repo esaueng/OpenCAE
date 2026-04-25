@@ -196,6 +196,7 @@ export interface DisplayModel {
   nativeCad?: {
     format: "step";
     filename: string;
+    contentBase64?: string;
   };
   visualMesh?: {
     format: "stl" | "obj";

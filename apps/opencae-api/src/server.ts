@@ -6,7 +6,19 @@ import { bracketDemoMaterial, bracketDemoProject, bracketDisplayModel, bracketRe
 import { InMemoryJobQueueProvider, LocalRunStateProvider } from "@opencae/jobs";
 import { MockMeshService } from "@opencae/mesh-service";
 import { buildHtmlReport, buildPdfReport, LocalReportProvider, reportPdfKeyFor } from "@opencae/post-service";
-import { ProjectSchema, type DisplayModel, type Load, type Project, type RunEvent, type Study, type StudyRun } from "@opencae/schema";
+import {
+  ProjectSchema,
+  ResultFieldSchema,
+  ResultSummarySchema,
+  type DisplayModel,
+  type Load,
+  type Project,
+  type ResultField,
+  type ResultSummary,
+  type RunEvent,
+  type Study,
+  type StudyRun
+} from "@opencae/schema";
 import { LocalMockComputeBackend } from "@opencae/solver-service";
 import { FileSystemObjectStorageProvider } from "@opencae/storage";
 import { validateStaticStressStudy } from "@opencae/study-core";
@@ -97,18 +109,19 @@ api.post("/api/projects", async (request) => {
 });
 
 api.post("/api/projects/import", async (request, reply) => {
-  const body = request.body as { project?: unknown; displayModel?: unknown } | Project | undefined;
+  const body = request.body as { project?: unknown; displayModel?: unknown; results?: unknown } | Project | undefined;
   const candidate = body && "project" in body ? body.project : body;
   const parsed = ProjectSchema.safeParse(candidate);
   if (!parsed.success) return reply.code(400).send({ error: "The selected file is not a valid OpenCAE project JSON." });
 
   const project = parsed.data;
   const displayModel = parseDisplayModel(body && "displayModel" in body ? body.displayModel : undefined) ?? await displayModelForProject(project);
-  db.upsertProject(project);
-  if (project.geometryFiles[0]?.artifactKey) {
-    await storage.putObject(project.geometryFiles[0].artifactKey, JSON.stringify(displayModel, null, 2));
-  }
-  return { project, displayModel, message: `${project.name} opened from local file.` };
+  const results = parseLocalResults(body && "results" in body ? body.results : undefined, project);
+  const importedProject = results ? projectWithImportedResultRefs(project, results) : project;
+  db.upsertProject(importedProject);
+  await persistImportedModelArtifacts(importedProject, displayModel);
+  if (results) await persistImportedResults(importedProject, results);
+  return { project: importedProject, displayModel, results, message: `${importedProject.name} opened from local file.` };
 });
 
 api.get("/api/projects/:projectId", async (request, reply) => {
@@ -482,6 +495,76 @@ async function summaryForResult(resultRef: string): Promise<typeof bracketResult
   const artifact = await storage.getObject(resultRef);
   const parsed = JSON.parse(artifact.toString("utf8")) as { summary?: typeof bracketResultSummary };
   return parsed.summary ?? bracketResultSummary;
+}
+
+interface ImportedResultBundle {
+  activeRunId?: string;
+  completedRunId?: string;
+  summary: ResultSummary;
+  fields: ResultField[];
+}
+
+function parseLocalResults(value: unknown, project: Project): ImportedResultBundle | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const candidate = value as Partial<ImportedResultBundle>;
+  const summary = ResultSummarySchema.safeParse(candidate.summary);
+  const fields = ResultFieldSchema.array().safeParse(candidate.fields);
+  if (!summary.success || !fields.success || fields.data.length === 0) return undefined;
+  const projectRunIds = new Set(project.studies.flatMap((study) => study.runs.map((run) => run.id)));
+  const completedRunId = typeof candidate.completedRunId === "string" ? candidate.completedRunId : undefined;
+  const activeRunId = typeof candidate.activeRunId === "string" ? candidate.activeRunId : undefined;
+  const fieldRunId = fields.data[0]?.runId;
+  const runId = completedRunId ?? activeRunId ?? fieldRunId;
+  if (runId && projectRunIds.size > 0 && !projectRunIds.has(runId)) return undefined;
+  return {
+    activeRunId,
+    completedRunId: completedRunId ?? runId,
+    summary: summary.data,
+    fields: fields.data
+  };
+}
+
+function projectWithImportedResultRefs(project: Project, results: ImportedResultBundle): Project {
+  const runId = results.completedRunId ?? results.activeRunId ?? results.fields[0]?.runId;
+  if (!runId) return project;
+  return {
+    ...project,
+    studies: project.studies.map((study) => ({
+      ...study,
+      runs: study.runs.map((run) =>
+        run.id === runId
+          ? {
+              ...run,
+              status: "complete",
+              resultRef: run.resultRef ?? `${project.id}/results/${runId}/results.json`,
+              reportRef: run.reportRef ?? `${project.id}/reports/${runId}.html`
+            }
+          : run
+      )
+    }))
+  };
+}
+
+async function persistImportedModelArtifacts(project: Project, displayModel: DisplayModel): Promise<void> {
+  const geometry = project.geometryFiles[0];
+  if (!geometry?.artifactKey) return;
+  await storage.putObject(geometry.artifactKey, JSON.stringify(displayModel, null, 2));
+  if (displayModel.nativeCad?.contentBase64) {
+    await storage.putObject(`${project.id}/uploads/${displayModel.nativeCad.filename}`, Buffer.from(displayModel.nativeCad.contentBase64, "base64"));
+  }
+  if (displayModel.visualMesh?.contentBase64) {
+    await storage.putObject(`${project.id}/uploads/${displayModel.visualMesh.filename}`, Buffer.from(displayModel.visualMesh.contentBase64, "base64"));
+  }
+}
+
+async function persistImportedResults(project: Project, results: ImportedResultBundle): Promise<void> {
+  const runId = results.completedRunId ?? results.activeRunId ?? results.fields[0]?.runId;
+  if (!runId) return;
+  const run = project.studies.flatMap((study) => study.runs).find((item) => item.id === runId);
+  const resultRef = run?.resultRef ?? `${project.id}/results/${runId}/results.json`;
+  const reportRef = run?.reportRef ?? `${project.id}/reports/${runId}.html`;
+  await storage.putObject(resultRef, JSON.stringify({ summary: results.summary, fields: results.fields }, null, 2));
+  await storage.putObject(reportRef, buildHtmlReport(runId, results.summary));
 }
 
 async function displayModelForProject(project: Project): Promise<DisplayModel> {

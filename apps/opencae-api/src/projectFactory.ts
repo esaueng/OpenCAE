@@ -87,7 +87,8 @@ export function uploadedDisplayModelFor(filename: string, contentBase64?: string
       faces: uploadedBoxFaces(),
       nativeCad: {
         format: nativeFormat,
-        filename
+        filename,
+        contentBase64
       }
     };
   }
