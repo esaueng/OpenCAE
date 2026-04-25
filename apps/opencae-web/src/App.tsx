@@ -18,6 +18,7 @@ import {
 import { resetDisplayModelOrientation, rotateDisplayModel, type RotationAxis } from "./modelOrientation";
 import { buildLocalProjectFile, suggestedProjectFilename, type LocalResultBundle } from "./projectFile";
 import { buildAutosavedWorkspace, readAutosavedWorkspace, writeAutosavedWorkspace, type ThemeMode } from "./appPersistence";
+import { shouldShowStartScreen } from "./appShellState";
 
 interface SaveFilePickerHandle {
   createWritable: () => Promise<{ write: (content: Blob) => Promise<void>; close: () => Promise<void> }>;
@@ -47,6 +48,7 @@ export function App() {
   const restoredResults = restoredProjectFile?.results;
   const [project, setProject] = useState<Project | null>(restoredProjectFile?.project ?? null);
   const [displayModel, setDisplayModel] = useState<DisplayModel | null>(restoredProjectFile?.displayModel ?? null);
+  const [homeRequested, setHomeRequested] = useState(!restoredProjectFile);
   const [activeStep, setActiveStep] = useState<StepId>(restoredUi?.activeStep ?? "model");
   const [undoStack, setUndoStack] = useState<Project[]>(restoredUi?.undoStack ?? []);
   const [redoStack, setRedoStack] = useState<Project[]>(restoredUi?.redoStack ?? []);
@@ -196,6 +198,7 @@ export function App() {
 
   async function openProjectResponse(action: Promise<{ project: Project; displayModel: DisplayModel; message?: string; results?: LocalResultBundle }>) {
     const response = await action;
+    setHomeRequested(false);
     setProject(response.project);
     setDisplayModel(response.displayModel);
     setUndoStack([]);
@@ -441,14 +444,20 @@ export function App() {
     pushMessage("PDF report download started.");
   }
 
-  if (!project || !displayModel || !study) {
+  function handleOpenStartMenu() {
+    setHomeRequested(true);
+  }
+
+  if (shouldShowStartScreen({ homeRequested, hasProject: Boolean(project), hasDisplayModel: Boolean(displayModel), hasStudy: Boolean(study) }) || !project || !displayModel || !study) {
     return <StartScreen onLoadSample={handleLoadSample} onCreateProject={handleCreateProject} onOpenProject={handleOpenProject} />;
   }
 
   return (
     <div className={`app-shell theme-${themeMode}`}>
       <header className="topbar">
-        <div className="brand"><TopbarMark />OpenCAE</div>
+        <button className="brand brand-button" type="button" onClick={handleOpenStartMenu} title="Back to start menu" aria-label="Back to start menu">
+          <TopbarMark />OpenCAE
+        </button>
         <div className="topbar-divider topbar-divider-project" />
         <div className="breadcrumb">
           <ProjectNameChip name={project.name} onRename={handleRenameProject} />
