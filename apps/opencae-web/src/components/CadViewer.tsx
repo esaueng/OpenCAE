@@ -476,10 +476,124 @@ function AnalysisResultModel({
 }) {
   if (kind === "blank") return null;
   const samples = resultSamplesForFaces(displayModel.faces, resultFields, resultMode);
+  if (kind === "uploaded") {
+    return (
+      <UploadedResultSolid
+        displayModel={displayModel}
+        samples={samples}
+        resultMode={resultMode}
+        showDeformed={showDeformed}
+        stressExaggeration={stressExaggeration}
+        loadMarkers={loadMarkers}
+      />
+    );
+  }
   if (kind === "bracket") {
     return <BracketResultSolid kind={kind} samples={samples} resultMode={resultMode} showDeformed={showDeformed} stressExaggeration={stressExaggeration} loadMarkers={loadMarkers} />;
   }
   return <SampleResultSolid kind={kind} samples={samples} resultMode={resultMode} showDeformed={showDeformed} stressExaggeration={stressExaggeration} loadMarkers={loadMarkers} />;
+}
+
+function UploadedResultSolid({
+  displayModel,
+  samples,
+  resultMode,
+  showDeformed,
+  stressExaggeration,
+  loadMarkers
+}: {
+  displayModel: DisplayModel;
+  samples: FaceResultSample[];
+  resultMode: ResultMode;
+  showDeformed: boolean;
+  stressExaggeration: number;
+  loadMarkers: ViewerLoadMarker[];
+}) {
+  if (displayModel.nativeCad) {
+    return (
+      <UploadedNativeCadResultModel
+        samples={samples}
+        resultMode={resultMode}
+        showDeformed={showDeformed}
+        stressExaggeration={stressExaggeration}
+        loadMarkers={loadMarkers}
+      />
+    );
+  }
+
+  if (displayModel.visualMesh?.format === "stl") {
+    return (
+      <UploadedStlResultModel
+        displayModel={displayModel}
+        samples={samples}
+        resultMode={resultMode}
+        showDeformed={showDeformed}
+        stressExaggeration={stressExaggeration}
+        loadMarkers={loadMarkers}
+      />
+    );
+  }
+
+  if (displayModel.visualMesh?.format === "obj") {
+    return <UploadedObjModel displayModel={displayModel} />;
+  }
+
+  return <UnsupportedUploadedModelNotice filename={displayModel.name} />;
+}
+
+function UploadedNativeCadResultModel({
+  samples,
+  resultMode,
+  showDeformed,
+  stressExaggeration,
+  loadMarkers
+}: {
+  samples: FaceResultSample[];
+  resultMode: ResultMode;
+  showDeformed: boolean;
+  stressExaggeration: number;
+  loadMarkers: ViewerLoadMarker[];
+}) {
+  const geometry = useMemo(
+    () => colorizeResultGeometry(new THREE.BoxGeometry(2.2, 1.44, 1.04, 36, 24, 20), "uploaded", resultMode, showDeformed, stressExaggeration, samples, loadMarkers),
+    [loadMarkers, resultMode, samples, showDeformed, stressExaggeration]
+  );
+  return (
+    <mesh geometry={geometry}>
+      <meshStandardMaterial vertexColors metalness={0.18} roughness={0.52} />
+      <Edges color="#43556a" threshold={18} />
+    </mesh>
+  );
+}
+
+function UploadedStlResultModel({
+  displayModel,
+  samples,
+  resultMode,
+  showDeformed,
+  stressExaggeration,
+  loadMarkers
+}: {
+  displayModel: DisplayModel;
+  samples: FaceResultSample[];
+  resultMode: ResultMode;
+  showDeformed: boolean;
+  stressExaggeration: number;
+  loadMarkers: ViewerLoadMarker[];
+}) {
+  const geometry = useMemo(() => {
+    const parsed = new STLLoader().parse(base64ToArrayBuffer(displayModel.visualMesh?.contentBase64 ?? ""));
+    normalizeGeometry(parsed);
+    parsed.computeVertexNormals();
+    return colorizeResultGeometry(parsed, "uploaded", resultMode, showDeformed, stressExaggeration, samples, loadMarkers);
+  }, [displayModel.visualMesh?.contentBase64, loadMarkers, resultMode, samples, showDeformed, stressExaggeration]);
+
+  return (
+    <mesh geometry={geometry}>
+      <meshStandardMaterial vertexColors metalness={0.18} roughness={0.52} side={THREE.DoubleSide} />
+      <Edges color="#43556a" threshold={18} />
+    </mesh>
+  );
 }
 
 function BracketResultSolid({
