@@ -211,10 +211,22 @@ svg {
   font-weight: var(--fw-medium);
 }
 
+.brand-button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.brand-button:hover,
+.brand-button:focus-visible {
+  color: var(--color-accent);
+}
+
 .brand svg {
   width: 18px;
   height: 18px;
-  color: var(--color-text);
+  color: currentColor;
 }
 
 .topbar-divider {
