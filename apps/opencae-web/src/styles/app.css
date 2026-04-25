@@ -259,10 +259,7 @@ svg {
 .history-tools {
   display: inline-flex;
   align-items: center;
-  overflow: hidden;
-  border: var(--border-thin);
-  border-radius: var(--radius-md);
-  background: var(--color-surface-1);
+  gap: 4px;
 }
 
 .icon-button {
@@ -275,11 +272,8 @@ svg {
 }
 
 .history-button {
-  border-radius: 0;
-}
-
-.history-button + .history-button {
-  border-left: var(--border-thin);
+  border: 0;
+  background: transparent;
 }
 
 .theme-button {
@@ -290,6 +284,10 @@ svg {
 .icon-button svg {
   width: 18px;
   height: 18px;
+}
+
+.redo-icon {
+  transform: scaleX(-1);
 }
 
 .icon-button:hover {
