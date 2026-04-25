@@ -688,12 +688,14 @@ function colorizeResultGeometry(
   const colors: number[] = [];
   const positions = geometry.getAttribute("position");
   const color = new THREE.Color();
+  geometry.computeBoundingBox();
+  const bounds = geometry.boundingBox?.clone();
   for (let index = 0; index < positions.count; index += 1) {
     const point = new THREE.Vector3(positions.getX(index), positions.getY(index), positions.getZ(index));
     color.copy(resultColorForPoint(kind, resultMode, stressExaggeration, point, samples));
     colors.push(color.r, color.g, color.b);
     if (showDeformed) {
-      const deformed = deformedPointForResults(kind, point, stressExaggeration, samples, loadMarkers);
+      const deformed = deformedPointForResults(kind, point, stressExaggeration, samples, loadMarkers, bounds);
       positions.setXYZ(index, deformed.x, deformed.y, deformed.z);
     }
   }
@@ -703,7 +705,15 @@ function colorizeResultGeometry(
   return geometry;
 }
 
-function deformedPointForResults(kind: SampleModelKind, point: THREE.Vector3, stressExaggeration: number, samples: FaceResultSample[], loadMarkers: ViewerLoadMarker[]) {
+function deformedPointForResults(
+  kind: SampleModelKind,
+  point: THREE.Vector3,
+  stressExaggeration: number,
+  samples: FaceResultSample[],
+  loadMarkers: ViewerLoadMarker[],
+  bounds?: THREE.Box3
+) {
+  if (kind === "uploaded") return deformedUploadedPoint(point, stressExaggeration, loadMarkers, bounds);
   if (!loadMarkers.length) return deformedPointForKind(kind, point, stressExaggeration);
   const next = point.clone();
   const span = resultSampleSpan(samples);
@@ -718,6 +728,27 @@ function deformedPointForResults(kind: SampleModelKind, point: THREE.Vector3, st
     deformation.addScaledVector(direction, weight * scale * Math.max(0.35, marker.value / 500));
   }
   return next.add(deformation);
+}
+
+function deformedUploadedPoint(point: THREE.Vector3, stressExaggeration: number, loadMarkers: ViewerLoadMarker[], bounds?: THREE.Box3) {
+  const next = point.clone();
+  const size = bounds?.getSize(new THREE.Vector3()) ?? new THREE.Vector3(2.4, 2.4, 2.4);
+  const maxDimension = Math.max(size.x, size.y, size.z, 1);
+  const direction = resultantLoadDirection(loadMarkers);
+  const magnitude = loadMarkers.length
+    ? loadMarkers.reduce((total, marker) => total + Math.max(0.25, marker.value / 500), 0) / loadMarkers.length
+    : 1;
+  const scale = maxDimension * (0.012 + Math.max(0, stressExaggeration - 1) * 0.012) * magnitude;
+  return next.addScaledVector(direction, scale);
+}
+
+function resultantLoadDirection(loadMarkers: ViewerLoadMarker[]) {
+  const direction = new THREE.Vector3();
+  for (const marker of loadMarkers) {
+    direction.add(new THREE.Vector3(...marker.direction).normalize());
+  }
+  if (direction.lengthSq() < 0.0001) return new THREE.Vector3(0, 0, -1);
+  return direction.normalize();
 }
 
 function deformedPointForKind(kind: SampleModelKind, point: THREE.Vector3, stressExaggeration: number) {
