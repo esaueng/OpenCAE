@@ -161,29 +161,34 @@ function ModelPanel({ project, study, viewMode, sampleModel, onFitView, onViewMo
 
 function MaterialPanel({ study, onAssignMaterial }: RightPanelProps) {
   const current = study.materialAssignments[0]?.materialId ?? "mat-aluminum-6061";
-  const currentMaterial = starterMaterials.find((material) => material.id === current) ?? starterMaterials[0];
+  const [selectedMaterialId, setSelectedMaterialId] = useState(current);
+  useEffect(() => {
+    setSelectedMaterialId(current);
+  }, [current]);
+  const selectedMaterial = starterMaterials.find((material) => material.id === selectedMaterialId) ?? starterMaterials[0];
+  const assignedMaterial = starterMaterials.find((material) => material.id === current) ?? starterMaterials[0];
   return (
     <Panel title="Material" helper="Choose what the part is made of.">
       <label className="field">
         Material library
-        <select defaultValue={current} id="material-select">
+        <select value={selectedMaterialId} onChange={(event) => setSelectedMaterialId(event.currentTarget.value)}>
           {starterMaterials.map((material) => (
             <option key={material.id} value={material.id}>{material.name}</option>
           ))}
         </select>
       </label>
-      {currentMaterial && (
+      {selectedMaterial && (
         <div className="summary-box">
-          <Info label="Young's modulus" value={`${formatMPa(currentMaterial.youngsModulus)} MPa`} />
-          <Info label="Poisson ratio" value={String(currentMaterial.poissonRatio)} />
-          <Info label="Density" value={`${currentMaterial.density.toLocaleString()} kg/m^3`} />
-          <Info label="Yield strength" value={`${formatMPa(currentMaterial.yieldStrength)} MPa`} />
+          <Info label="Young's modulus" value={`${formatMPa(selectedMaterial.youngsModulus)} MPa`} />
+          <Info label="Poisson ratio" value={String(selectedMaterial.poissonRatio)} />
+          <Info label="Density" value={`${selectedMaterial.density.toLocaleString()} kg/m^3`} />
+          <Info label="Yield strength" value={`${formatMPa(selectedMaterial.yieldStrength)} MPa`} />
         </div>
       )}
-      <button className="primary wide" onClick={() => onAssignMaterial((document.getElementById("material-select") as HTMLSelectElement).value)}>Apply to bracket</button>
+      <button className="primary wide" onClick={() => onAssignMaterial(selectedMaterialId)}>Apply to bracket</button>
       <SectionTitle>Assigned</SectionTitle>
       <div className="concept-card-list">
-        <ConceptCard icon={<Check size={18} />} title={currentMaterial?.name ?? "Material"} detail="bracket · all bodies" tone="accent" />
+        <ConceptCard icon={<Check size={18} />} title={assignedMaterial?.name ?? "Material"} detail="bracket · all bodies" tone="accent" />
       </div>
     </Panel>
   );
