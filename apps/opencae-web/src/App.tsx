@@ -43,8 +43,8 @@ export function App() {
   const [project, setProject] = useState<Project | null>(null);
   const [displayModel, setDisplayModel] = useState<DisplayModel | null>(null);
   const [activeStep, setActiveStep] = useState<StepId>("model");
-  const [stepHistory, setStepHistory] = useState<StepId[]>(["model"]);
-  const [stepHistoryIndex, setStepHistoryIndex] = useState(0);
+  const [undoStack, setUndoStack] = useState<Project[]>([]);
+  const [redoStack, setRedoStack] = useState<Project[]>([]);
   const [selectedFaceId, setSelectedFaceId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("model");
   const [themeMode, setThemeMode] = useState<ThemeMode>("dark");
@@ -74,8 +74,8 @@ export function App() {
   const reportDownloadUrl = reportRunId ? `/api/runs/${reportRunId}/report.pdf` : project ? `/api/projects/${project.id}/report.pdf` : undefined;
   const selectedFace = useMemo(() => displayModel?.faces.find((face) => face.id === selectedFaceId) ?? null, [displayModel, selectedFaceId]);
   const solverRunning = runProgress > 0 && runProgress < 100;
-  const canUndoStep = stepHistoryIndex > 0;
-  const canRedoStep = stepHistoryIndex < stepHistory.length - 1;
+  const canUndoAction = undoStack.length > 0;
+  const canRedoAction = redoStack.length > 0;
   const loadMarkers = useMemo<ViewerLoadMarker[]>(() => {
     return createViewerLoadMarkers({
       study,
@@ -110,18 +110,26 @@ export function App() {
         event.preventDefault();
         void handleSaveProject();
       }
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z") {
+        event.preventDefault();
+        if (event.shiftKey) {
+          handleRedoAction();
+        } else {
+          handleUndoAction();
+        }
+      }
     }
     window.addEventListener("keydown", handleShortcut);
     return () => window.removeEventListener("keydown", handleShortcut);
-  }, [displayModel, project]);
+  }, [displayModel, project, undoStack, redoStack]);
 
   async function openProjectResponse(action: Promise<{ project: Project; displayModel: DisplayModel; message?: string }>) {
     const response = await action;
     setProject(response.project);
     setDisplayModel(response.displayModel);
     applyStep("model");
-    setStepHistory(["model"]);
-    setStepHistoryIndex(0);
+    setUndoStack([]);
+    setRedoStack([]);
     setViewMode("model");
     setResultFields([]);
     const nextCompletedRunId = latestReportRunId(response.project.studies[0] ?? null, "") ?? "";
@@ -172,10 +180,16 @@ export function App() {
   async function updateStudy(action: Promise<{ study: Study; message: string }>, nextStep?: StepId) {
     const response = await action;
     if (project) {
+      recordUndoSnapshot(project);
       setProject({ ...project, studies: project.studies.map((item) => (item.id === response.study.id ? response.study : item)) });
     }
     pushMessage(response.message);
     if (nextStep) navigateToStep(nextStep);
+  }
+
+  function recordUndoSnapshot(snapshot: Project) {
+    setUndoStack((history) => [...history, structuredClone(snapshot)].slice(-30));
+    setRedoStack([]);
   }
 
   function applyStep(step: StepId) {
@@ -192,35 +206,41 @@ export function App() {
   function navigateToStep(step: StepId) {
     if (step === activeStep) return;
     applyStep(step);
-    setStepHistory((history) => {
-      const nextHistory = [...history.slice(0, stepHistoryIndex + 1), step];
-      setStepHistoryIndex(nextHistory.length - 1);
-      return nextHistory;
-    });
   }
 
   function handleStepSelect(step: StepId) {
     navigateToStep(step);
   }
 
-  function handleUndoStep() {
-    if (!canUndoStep) return;
-    const nextIndex = stepHistoryIndex - 1;
-    const step = stepHistory[nextIndex];
-    if (!step) return;
-    setStepHistoryIndex(nextIndex);
-    applyStep(step);
-    pushMessage(`Returned to ${stepLabel(step)}.`);
+  function handleUndoAction() {
+    if (!project || !canUndoAction) return;
+    const previous = undoStack[undoStack.length - 1];
+    if (!previous) return;
+    setUndoStack(undoStack.slice(0, -1));
+    setRedoStack([...redoStack, structuredClone(project)]);
+    setProject(structuredClone(previous));
+    void persistProjectSnapshot(previous, "Undo applied.");
   }
 
-  function handleRedoStep() {
-    if (!canRedoStep) return;
-    const nextIndex = stepHistoryIndex + 1;
-    const step = stepHistory[nextIndex];
-    if (!step) return;
-    setStepHistoryIndex(nextIndex);
-    applyStep(step);
-    pushMessage(`Moved to ${stepLabel(step)}.`);
+  function handleRedoAction() {
+    if (!project || !canRedoAction) return;
+    const next = redoStack[redoStack.length - 1];
+    if (!next) return;
+    setRedoStack(redoStack.slice(0, -1));
+    setUndoStack([...undoStack, structuredClone(project)].slice(-30));
+    setProject(structuredClone(next));
+    void persistProjectSnapshot(next, "Redo applied.");
+  }
+
+  async function persistProjectSnapshot(snapshot: Project, message: string) {
+    const snapshotStudy = snapshot.studies[0];
+    if (!snapshotStudy) return;
+    try {
+      await saveStudyPatch(snapshotStudy.id, snapshotStudy, message);
+      pushMessage(message);
+    } catch (error) {
+      pushMessage(error instanceof Error ? error.message : "Could not update undo history.");
+    }
   }
 
   async function handleRunSimulation() {
@@ -268,8 +288,8 @@ export function App() {
           <span>{study.name}</span>
         </div>
         <div className="topbar-tools" aria-label="Workspace tools">
-          <button className="icon-button" type="button" title="Previous workflow step" aria-label="Previous workflow step" disabled={!canUndoStep} onClick={handleUndoStep}><UndoIcon /></button>
-          <button className="icon-button" type="button" title="Next workflow step" aria-label="Next workflow step" disabled={!canRedoStep} onClick={handleRedoStep}><RedoIcon /></button>
+          <button className="icon-button" type="button" title="Undo last change" aria-label="Undo last change" disabled={!canUndoAction} onClick={handleUndoAction}><UndoIcon /></button>
+          <button className="icon-button" type="button" title="Redo last change" aria-label="Redo last change" disabled={!canRedoAction} onClick={handleRedoAction}><RedoIcon /></button>
           <button
             className="icon-button"
             type="button"
@@ -372,10 +392,6 @@ export function App() {
       <BottomPanel status={status} logs={logs} projectName={project.name} studyName={study.name} meshStatus={study.meshSettings.status === "complete" ? "Ready" : "Not generated"} solverStatus={solverRunning ? "Running" : runProgress >= 100 ? "Complete" : "Idle"} />
     </div>
   );
-}
-
-function stepLabel(step: StepId) {
-  return step.charAt(0).toUpperCase() + step.slice(1);
 }
 
 function latestReportRunId(study: Study | null, activeRunId: string): string | null {
