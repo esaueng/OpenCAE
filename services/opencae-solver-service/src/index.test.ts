@@ -133,12 +133,51 @@ describe("LocalMockComputeBackend", () => {
       await vi.runAllTimersAsync();
       const abs = await absRun;
 
+      expect(abs.summary.maxStress).toBe(aluminum.summary.maxStress);
       expect(abs.summary.maxDisplacement).toBeGreaterThan(aluminum.summary.maxDisplacement);
       expect(abs.summary.safetyFactor).toBeLessThan(aluminum.summary.safetyFactor);
+      expect(abs.fields.find((field) => field.type === "stress")?.values).toEqual(
+        aluminum.fields.find((field) => field.type === "stress")?.values
+      );
       expect(abs.fields.find((field) => field.type === "displacement")?.values).not.toEqual(
         aluminum.fields.find((field) => field.type === "displacement")?.values
       );
       expect(abs.fields.find((field) => field.type === "safety_factor")?.values).not.toEqual(
+        aluminum.fields.find((field) => field.type === "safety_factor")?.values
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("does not cap the material safety factor at the seed summary value", async () => {
+    vi.useFakeTimers();
+    try {
+      const storage = new MemoryStorage();
+      const backend = new LocalMockComputeBackend(storage);
+      const load = { id: "load-a", type: "force" as const, value: 500, direction: [0, -1, 0] as [number, number, number] };
+
+      const aluminumRun = backend.runStaticSolve({
+        study: studyWithLoads([load], "mat-aluminum-6061"),
+        runId: "run-aluminum-safety",
+        meshRef: "mesh-aluminum",
+        publish: vi.fn()
+      });
+      await vi.runAllTimersAsync();
+      const aluminum = await aluminumRun;
+
+      const titaniumRun = backend.runStaticSolve({
+        study: studyWithLoads([load], "mat-titanium-grade-5"),
+        runId: "run-titanium",
+        meshRef: "mesh-titanium",
+        publish: vi.fn()
+      });
+      await vi.runAllTimersAsync();
+      const titanium = await titaniumRun;
+
+      expect(titanium.summary.maxStress).toBe(aluminum.summary.maxStress);
+      expect(titanium.summary.safetyFactor).toBeGreaterThan(aluminum.summary.safetyFactor);
+      expect(titanium.fields.find((field) => field.type === "safety_factor")?.values).not.toEqual(
         aluminum.fields.find((field) => field.type === "safety_factor")?.values
       );
     } finally {
