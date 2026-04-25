@@ -150,6 +150,33 @@ describe("LocalMockComputeBackend", () => {
     }
   });
 
+  test("solves cantilever plastic displacement at the loaded free end", async () => {
+    vi.useFakeTimers();
+    try {
+      const storage = new MemoryStorage();
+      const backend = new LocalMockComputeBackend(storage);
+
+      const run = backend.runStaticSolve({
+        study: cantileverStudy("mat-abs"),
+        runId: "run-cantilever-abs",
+        meshRef: "mesh-cantilever",
+        publish: vi.fn()
+      });
+      await vi.runAllTimersAsync();
+      const result = await run;
+
+      const displacementValues = result.fields.find((field) => field.type === "displacement")?.values ?? [];
+      const fixedEndDisplacement = displacementValues[0] ?? 0;
+      const freeEndDisplacement = displacementValues[1] ?? 0;
+
+      expect(displacementValues.indexOf(Math.max(...displacementValues))).toBe(1);
+      expect(freeEndDisplacement).toBeGreaterThan(fixedEndDisplacement * 2);
+      expect(freeEndDisplacement).toBeGreaterThan(10);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   test("does not cap the material safety factor at the seed summary value", async () => {
     vi.useFakeTimers();
     try {
@@ -226,6 +253,60 @@ function studyWithLoads(loads: Array<{ id: string; type: Load["type"]; value: nu
       parameters: { value: load.value, units: load.type === "pressure" ? "kPa" : "N", direction: load.direction },
       status: "complete"
     })),
+    meshSettings: { preset: "medium", status: "complete", meshRef: "mesh", summary: { nodes: 10, elements: 4, warnings: [] } },
+    solverSettings: {},
+    validation: [],
+    runs: []
+  };
+}
+
+function cantileverStudy(materialId: string): Study {
+  return {
+    id: "study-cantilever",
+    projectId: "project-cantilever",
+    name: "Static Stress",
+    type: "static_stress",
+    geometryScope: [],
+    materialAssignments: [{ id: "assign", materialId, selectionRef: "selection-body", status: "complete" }],
+    namedSelections: [
+      {
+        id: "selection-fixed-face",
+        name: "Fixed end face",
+        entityType: "face",
+        geometryRefs: [{ bodyId: "body", entityType: "face", entityId: "face-base-left", label: "Fixed end face" }],
+        fingerprint: "face-base-left-cantilever"
+      },
+      {
+        id: "selection-load-face",
+        name: "Free end load face",
+        entityType: "face",
+        geometryRefs: [{ bodyId: "body", entityType: "face", entityId: "face-load-top", label: "Free end load face" }],
+        fingerprint: "face-load-top-cantilever"
+      },
+      {
+        id: "selection-web-face",
+        name: "Top beam face",
+        entityType: "face",
+        geometryRefs: [{ bodyId: "body", entityType: "face", entityId: "face-web-front", label: "Top beam face" }],
+        fingerprint: "face-web-front-cantilever"
+      },
+      {
+        id: "selection-base-face",
+        name: "Beam bottom face",
+        entityType: "face",
+        geometryRefs: [{ bodyId: "body", entityType: "face", entityId: "face-base-bottom", label: "Beam bottom face" }],
+        fingerprint: "face-base-bottom-cantilever"
+      }
+    ],
+    contacts: [],
+    constraints: [{ id: "fixed", type: "fixed", selectionRef: "selection-fixed-face", parameters: {}, status: "complete" }],
+    loads: [{
+      id: "load-free-end",
+      type: "force",
+      selectionRef: "selection-load-face",
+      parameters: { value: 500, units: "N", direction: [0, 0, -1] },
+      status: "complete"
+    }],
     meshSettings: { preset: "medium", status: "complete", meshRef: "mesh", summary: { nodes: 10, elements: 4, warnings: [] } },
     solverSettings: {},
     validation: [],
