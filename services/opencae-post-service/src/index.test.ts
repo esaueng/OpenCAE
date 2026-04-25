@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import type { ObjectStorageProvider } from "@opencae/storage";
-import { LocalReportProvider } from "./index";
+import { buildHtmlReport, LocalReportProvider } from "./index";
 
 class MemoryStorage implements ObjectStorageProvider {
   objects = new Map<string, Buffer>();
@@ -43,6 +43,14 @@ describe("LocalReportProvider", () => {
     expect((await storage.getObject(second)).toString("utf8")).toContain("Reaction force</td><td>1,500 N");
     expect((await storage.getObject("project-test/reports/run-a/report.pdf")).subarray(0, 4).toString("utf8")).toBe("%PDF");
     expect((await storage.getObject("project-test/reports/run-b/report.pdf")).subarray(0, 4).toString("utf8")).toBe("%PDF");
+  });
+
+  test("uses a CAD-like model preview instead of the old block heatmap", () => {
+    const html = buildHtmlReport("run-a", summary(500));
+
+    expect(html).toContain("class=\"visual result-model\"");
+    expect(html).toContain("Stress contour preview on the analyzed model");
+    expect(html).not.toContain("feGaussianBlur");
   });
 });
 

@@ -454,14 +454,10 @@ function pdfFilename(name: string): string {
 
 async function pdfForReport(run: StudyRun | undefined, reportRef: string): Promise<Buffer> {
   const pdfRef = reportPdfKeyFor(reportRef);
-  try {
-    return await storage.getObject(pdfRef);
-  } catch {
-    const summary = run?.resultRef ? await summaryForResult(run.resultRef) : bracketResultSummary;
-    const pdf = buildPdfReport(run?.id ?? "run-bracket-demo-seeded", summary);
-    await storage.putObject(pdfRef, pdf);
-    return pdf;
-  }
+  const summary = run?.resultRef ? await summaryForResult(run.resultRef) : bracketResultSummary;
+  const pdf = buildPdfReport(run?.id ?? "run-bracket-demo-seeded", summary);
+  await storage.putObject(pdfRef, pdf);
+  return pdf;
 }
 
 async function summaryForResult(resultRef: string): Promise<typeof bracketResultSummary> {
