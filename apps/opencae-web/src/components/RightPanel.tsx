@@ -46,6 +46,7 @@ interface RightPanelProps {
   reportUrl?: string;
   reportFilename?: string;
   onGenerateReport: () => void;
+  onStepSelect: (step: StepId) => void;
 }
 
 export function RightPanel(props: RightPanelProps) {
@@ -60,6 +61,7 @@ export function RightPanel(props: RightPanelProps) {
       {props.activeStep === "run" && <RunPanel {...props} />}
       {props.activeStep === "results" && <ResultsPanel {...props} />}
       {props.activeStep === "report" && <ReportPanel {...props} />}
+      <WorkflowNav activeStep={props.activeStep} onStepSelect={props.onStepSelect} />
     </aside>
   );
 }
@@ -605,6 +607,33 @@ function Panel({ title, helper, children }: { title: string; helper: string; chi
         <p className="helper">{helper}</p>
       </div>
       <div className="panel-body">{children}</div>
+    </div>
+  );
+}
+
+const WORKFLOW_STEPS: Array<{ id: StepId; label: string }> = [
+  { id: "model", label: "Model" },
+  { id: "material", label: "Material" },
+  { id: "supports", label: "Supports" },
+  { id: "loads", label: "Loads" },
+  { id: "mesh", label: "Mesh" },
+  { id: "run", label: "Run" },
+  { id: "results", label: "Results" },
+  { id: "report", label: "Report" }
+];
+
+function WorkflowNav({ activeStep, onStepSelect }: { activeStep: StepId; onStepSelect: (step: StepId) => void }) {
+  const index = WORKFLOW_STEPS.findIndex((step) => step.id === activeStep);
+  const previousStep = index > 0 ? WORKFLOW_STEPS[index - 1] : undefined;
+  const nextStep = index >= 0 && index < WORKFLOW_STEPS.length - 1 ? WORKFLOW_STEPS[index + 1] : undefined;
+  return (
+    <div className="workflow-nav" aria-label="Workflow navigation">
+      <button className="secondary" type="button" disabled={!previousStep} onClick={() => previousStep && onStepSelect(previousStep.id)}>
+        {previousStep ? `Back: ${previousStep.label}` : "Back"}
+      </button>
+      <button className="primary" type="button" disabled={!nextStep} onClick={() => nextStep && onStepSelect(nextStep.id)}>
+        {nextStep ? `Next: ${nextStep.label}` : "Next"}
+      </button>
     </div>
   );
 }

@@ -118,6 +118,22 @@ api.get("/api/projects/:projectId", async (request, reply) => {
   return { project, displayModel: await displayModelForProject(project) };
 });
 
+api.put("/api/projects/:projectId", async (request, reply) => {
+  const { projectId } = request.params as { projectId: string };
+  const project = db.getProject(projectId);
+  if (!project) return reply.code(404).send({ error: "Project not found" });
+  const body = request.body as { name?: unknown } | undefined;
+  const name = sanitizeProjectName(body?.name);
+  if (!name) return reply.code(400).send({ error: "Project name is required." });
+  const nextProject: Project = {
+    ...project,
+    name,
+    updatedAt: new Date().toISOString()
+  };
+  db.upsertProject(nextProject);
+  return { project: nextProject, message: "Project renamed." };
+});
+
 api.post("/api/projects/:projectId/uploads", async (request, reply) => {
   const { projectId } = request.params as { projectId: string };
   const project = db.getProject(projectId);
@@ -522,6 +538,12 @@ function sanitizeFilename(filename: unknown): string | undefined {
   const extension = cleaned.split(".").pop()?.toLowerCase();
   if (!extension || !["step", "stp", "stl", "obj"].includes(extension)) return undefined;
   return cleaned;
+}
+
+function sanitizeProjectName(name: unknown): string | undefined {
+  if (typeof name !== "string") return undefined;
+  const cleaned = name.trim().replace(/\s+/g, " ");
+  return cleaned || undefined;
 }
 
 async function ensureSampleArtifacts(): Promise<void> {
