@@ -181,6 +181,15 @@ export type Project = z.infer<typeof ProjectSchema>;
 export type RunEvent = z.infer<typeof RunEventSchema>;
 export type FailureAssessment = NonNullable<ResultSummary["failureAssessment"]>;
 
+export interface LoadCapacityEstimate {
+  status: "available" | "unknown";
+  targetSafetyFactor: number;
+  currentLoad: number;
+  allowableLoad: number;
+  loadScale: number;
+  loadUnits: string;
+}
+
 export function assessResultFailure(summary: Pick<ResultSummary, "safetyFactor" | "maxStress" | "maxStressUnits">): FailureAssessment {
   const safetyFactor = Number(summary.safetyFactor);
   if (!Number.isFinite(safetyFactor) || safetyFactor <= 0) {
@@ -218,6 +227,39 @@ export function assessResultFailure(summary: Pick<ResultSummary, "safetyFactor" 
 function formatAssessmentNumber(value: number): string {
   if (!Number.isFinite(value)) return "unknown";
   return value.toLocaleString(undefined, { maximumFractionDigits: 3 });
+}
+
+export function estimateAllowableLoadForSafetyFactor(
+  summary: Pick<ResultSummary, "safetyFactor" | "reactionForce" | "reactionForceUnits">,
+  targetSafetyFactor: number
+): LoadCapacityEstimate {
+  const currentSafetyFactor = Number(summary.safetyFactor);
+  const currentLoad = Number(summary.reactionForce);
+  const target = Number(targetSafetyFactor);
+  if (!Number.isFinite(currentSafetyFactor) || currentSafetyFactor <= 0 || !Number.isFinite(currentLoad) || currentLoad <= 0 || !Number.isFinite(target) || target <= 0) {
+    return {
+      status: "unknown",
+      targetSafetyFactor: Number.isFinite(target) ? target : 0,
+      currentLoad: Number.isFinite(currentLoad) ? currentLoad : 0,
+      allowableLoad: 0,
+      loadScale: 0,
+      loadUnits: summary.reactionForceUnits
+    };
+  }
+
+  const loadScale = currentSafetyFactor / target;
+  return {
+    status: "available",
+    targetSafetyFactor: target,
+    currentLoad,
+    allowableLoad: roundAssessmentNumber(currentLoad * loadScale),
+    loadScale: roundAssessmentNumber(loadScale),
+    loadUnits: summary.reactionForceUnits
+  };
+}
+
+function roundAssessmentNumber(value: number): number {
+  return Math.round(value * 1000) / 1000;
 }
 
 export interface DisplayFace {

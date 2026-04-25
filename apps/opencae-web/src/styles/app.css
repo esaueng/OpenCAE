@@ -1012,6 +1012,39 @@ button:disabled {
   line-height: var(--lh-loose);
 }
 
+.load-capacity-tool {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  background: var(--color-surface-2);
+  border: var(--border-thin);
+  border-radius: var(--radius-md);
+}
+
+.load-capacity-tool .field {
+  margin-bottom: 0;
+}
+
+.capacity-readout {
+  display: grid;
+  gap: 3px;
+  padding-top: 10px;
+  border-top: 1px dotted rgba(139, 148, 158, 0.28);
+}
+
+.capacity-readout span,
+.capacity-readout small {
+  color: var(--color-text-muted);
+  font-size: var(--fs-sm);
+}
+
+.capacity-readout strong {
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-medium);
+}
+
 .list-block p {
   margin: 6px 0;
   color: var(--color-text-muted);
