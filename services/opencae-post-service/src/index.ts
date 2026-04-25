@@ -1,3 +1,4 @@
+import { assessResultFailure } from "@opencae/schema";
 import type { ResultSummary } from "@opencae/schema";
 import type { ObjectStorageProvider } from "@opencae/storage";
 
@@ -22,6 +23,7 @@ export function reportPdfKeyFor(reportRef: string): string {
 export function buildHtmlReport(runId: string, summary: ResultSummary): string {
   const stressScore = clamp(summary.maxStress / Math.max(summary.maxStress, 1), 0, 1);
   const safetyPct = clamp(summary.safetyFactor / 3, 0, 1);
+  const assessment = summary.failureAssessment ?? assessResultFailure(summary);
   return `<!doctype html>
 <html>
   <head>
@@ -51,6 +53,11 @@ export function buildHtmlReport(runId: string, summary: ResultSummary): string {
       td:last-child { text-align: right; font-weight: 700; }
       .bar { height: 10px; border-radius: 999px; background: linear-gradient(90deg, #2563eb, #22c55e, #facc15, #ef4444); overflow: hidden; }
       .marker { width: 2px; height: 16px; margin-left: ${Math.round(stressScore * 100)}%; background: #111827; transform: translateY(-3px); }
+      .assessment { border-left: 4px solid var(--blue); padding: 14px 16px; background: #f8fbff; margin: 14px 0 0; }
+      .assessment.fail { border-left-color: var(--red); background: #fff5f5; }
+      .assessment.warning { border-left-color: var(--amber); background: #fffbeb; }
+      .assessment.pass { border-left-color: var(--green); background: #f0fdf4; }
+      .assessment strong { display: block; font-size: 18px; }
       .note { color: var(--muted); margin: 12px 0 0; }
       .footer { color: var(--muted); font-size: 12px; display: flex; justify-content: space-between; }
     </style>
@@ -91,6 +98,10 @@ export function buildHtmlReport(runId: string, summary: ResultSummary): string {
       </section>
       <section>
         <h2>Assessment</h2>
+        <div class="assessment ${assessment.status}">
+          <strong>${escapeHtml(assessment.title)}</strong>
+          <p class="note">${escapeHtml(assessment.message)}</p>
+        </div>
         <div class="bar"><div class="marker"></div></div>
         <p class="note">Stress range is normalized for report visualization. Review the simulation setup, constraints, loads, mesh quality, and material assumptions before using these values for design decisions.</p>
       </section>
@@ -101,6 +112,7 @@ export function buildHtmlReport(runId: string, summary: ResultSummary): string {
 }
 
 export function buildPdfReport(runId: string, summary: ResultSummary): Buffer {
+  const assessment = summary.failureAssessment ?? assessResultFailure(summary);
   const commands = [
     "q",
     "0.95 0.97 1 rg 0 0 612 792 re f",
@@ -123,9 +135,10 @@ export function buildPdfReport(runId: string, summary: ResultSummary): Buffer {
     tableRow(384, 342, "Max displacement", `${format(summary.maxDisplacement)} ${summary.maxDisplacementUnits}`),
     tableRow(384, 314, "Factor of safety", format(summary.safetyFactor)),
     tableRow(384, 286, "Reaction force", `${format(summary.reactionForce)} ${summary.reactionForceUnits}`),
+    tableRow(384, 258, "Failure check", assessment.title),
     text("Engineering Notes", 48, 184, 16, "F1"),
     wrappedText(
-      "This report summarizes the local OpenCAE static stress run. The visual contour is a report image derived from the result summary and is intended for communication and review. Confirm material properties, boundary conditions, load placement, and mesh quality before using the values for design release.",
+      `${assessment.title}: ${assessment.message} This report summarizes the local OpenCAE static stress run. Confirm material properties, boundary conditions, load placement, and mesh quality before using the values for design release.`,
       48,
       158,
       500,
