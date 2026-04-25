@@ -16,6 +16,7 @@ interface RightPanelProps {
   viewMode: ViewMode;
   resultMode: ResultMode;
   showDeformed: boolean;
+  showDimensions: boolean;
   stressExaggeration: number;
   resultSummary: ResultSummary;
   runProgress: number;
@@ -30,6 +31,7 @@ interface RightPanelProps {
   onViewModeChange: (mode: ViewMode) => void;
   onResultModeChange: (mode: ResultMode) => void;
   onToggleDeformed: () => void;
+  onToggleDimensions: () => void;
   onStressExaggerationChange: (value: number) => void;
   onAssignMaterial: (materialId: string) => void;
   onAddSupport: (selectionRef?: string) => void;
@@ -70,9 +72,8 @@ export function RightPanel(props: RightPanelProps) {
   );
 }
 
-function ModelPanel({ project, displayModel, study, viewMode, sampleModel, onFitView, onViewModeChange, onLoadSample, onUploadModel, onSampleModelChange }: RightPanelProps) {
+function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sampleModel, onFitView, onViewModeChange, onToggleDimensions, onLoadSample, onUploadModel, onSampleModelChange }: RightPanelProps) {
   const [confirmSampleLoad, setConfirmSampleLoad] = useState(false);
-  const [showDimensions, setShowDimensions] = useState(false);
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const geometry = project.geometryFiles[0];
   const isBlankProject = !geometry;
@@ -119,7 +120,7 @@ function ModelPanel({ project, displayModel, study, viewMode, sampleModel, onFit
         <Info label="Mass" value="111 g" />
         <Info label="Units" value="mm" />
       </div>
-      <button className={showDimensions ? "primary wide" : "secondary wide"} type="button" onClick={() => setShowDimensions((value) => !value)}>
+      <button className={showDimensions ? "primary wide" : "secondary wide"} type="button" onClick={onToggleDimensions}>
         <Ruler size={16} />
         {showDimensions ? "Hide dimensions" : "Show dimensions"}
       </button>
