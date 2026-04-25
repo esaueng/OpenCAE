@@ -77,6 +77,21 @@ export function blankDisplayModel(): DisplayModel {
 
 export function uploadedDisplayModelFor(filename: string, contentBase64?: string): DisplayModel {
   const modelName = baseNameForModel(filename);
+  const nativeFormat = nativeCadFormatForFilename(filename);
+  if (nativeFormat) {
+    return {
+      id: "display-uploaded",
+      name: `${modelName} imported body`,
+      bodyCount: 1,
+      dimensions: { x: 96, y: 48, z: 32, units: "mm" },
+      faces: uploadedBoxFaces(),
+      nativeCad: {
+        format: nativeFormat,
+        filename
+      }
+    };
+  }
+
   const previewFormat = previewFormatForFilename(filename);
   if (!previewFormat || !contentBase64) {
     return {
@@ -91,14 +106,8 @@ export function uploadedDisplayModelFor(filename: string, contentBase64?: string
     id: "display-uploaded",
     name: `${modelName} imported body`,
     bodyCount: 1,
-    faces: [
-      { id: "face-upload-top", label: "Top face", color: "#f59e0b", center: [0, 0.72, 0], normal: [0, 1, 0], stressValue: 72 },
-      { id: "face-upload-bottom", label: "Bottom face", color: "#4da3ff", center: [0, -0.72, 0], normal: [0, -1, 0], stressValue: 48 },
-      { id: "face-upload-front", label: "Front face", color: "#22c55e", center: [0, 0, 0.52], normal: [0, 0, 1], stressValue: 64 },
-      { id: "face-upload-back", label: "Back face", color: "#64748b", center: [0, 0, -0.52], normal: [0, 0, -1], stressValue: 54 },
-      { id: "face-upload-left", label: "Left face", color: "#8b949e", center: [-1.1, 0, 0], normal: [-1, 0, 0], stressValue: 58 },
-      { id: "face-upload-right", label: "Right face", color: "#8b949e", center: [1.1, 0, 0], normal: [1, 0, 0], stressValue: 84 }
-    ],
+    dimensions: { x: 96, y: 48, z: 32, units: "mm" },
+    faces: uploadedBoxFaces(),
     visualMesh: {
       format: previewFormat,
       filename,
@@ -106,6 +115,24 @@ export function uploadedDisplayModelFor(filename: string, contentBase64?: string
     }
   };
 }
+
+function uploadedBoxFaces(): DisplayModel["faces"] {
+  return [
+    { id: "face-upload-top", label: "Top face", color: "#f59e0b", center: [0, 0.72, 0], normal: [0, 1, 0], stressValue: 72 },
+    { id: "face-upload-bottom", label: "Bottom face", color: "#4da3ff", center: [0, -0.72, 0], normal: [0, -1, 0], stressValue: 48 },
+    { id: "face-upload-front", label: "Front face", color: "#22c55e", center: [0, 0, 0.52], normal: [0, 0, 1], stressValue: 64 },
+    { id: "face-upload-back", label: "Back face", color: "#64748b", center: [0, 0, -0.52], normal: [0, 0, -1], stressValue: 54 },
+    { id: "face-upload-left", label: "Left face", color: "#8b949e", center: [-1.1, 0, 0], normal: [-1, 0, 0], stressValue: 58 },
+    { id: "face-upload-right", label: "Right face", color: "#8b949e", center: [1.1, 0, 0], normal: [1, 0, 0], stressValue: 84 }
+  ];
+}
+
+function nativeCadFormatForFilename(filename: string): "step" | undefined {
+  const extension = filename.trim().split(".").pop()?.toLowerCase();
+  if (extension === "step" || extension === "stp") return "step";
+  return undefined;
+}
+
 
 export function attachUploadedModelToProject(
   project: Project,
@@ -126,9 +153,8 @@ export function attachUploadedModelToProject(
     name: face.label,
     entityType: "face" as const,
     geometryRefs: [{ bodyId: "body-uploaded", entityType: "face" as const, entityId: face.id, label: face.label }],
-    fingerprint: `${face.id}-uploaded-v1`
+    fingerprint: `${face.id}-${face.label}`
   }));
-
   return {
     ...project,
     geometryFiles: [{
@@ -140,28 +166,31 @@ export function attachUploadedModelToProject(
       status: "ready",
       metadata: {
         source: "local-upload",
-        nativeCadImport: false,
+        nativeCadImport: Boolean(options.displayModel.nativeCad),
         displayModelRef: options.artifactKey,
-        previewFormat: options.displayModel.visualMesh?.format,
+        previewFormat: options.displayModel.visualMesh?.format ?? options.displayModel.nativeCad?.format,
         bodyCount: options.displayModel.bodyCount,
         faceCount: options.displayModel.faces.length
       }
     }],
-    studies: study
-      ? [{
-        ...study,
-        geometryScope: [{ bodyId: "body-uploaded", entityType: "body" as const, entityId: "body-uploaded", label: bodyLabel }],
-        materialAssignments: [],
-        namedSelections: [bodySelection, ...faceSelections],
-        constraints: [],
-        loads: [],
-        meshSettings: {
-          preset: study.meshSettings.preset,
-          status: "not_started"
-        },
-        runs: []
-      }]
-      : [],
+    studies: study ? [{
+      ...study,
+      geometryScope: [{ bodyId: "body-uploaded", entityType: "body" as const, entityId: "body-uploaded", label: bodyLabel }],
+      materialAssignments: [],
+      namedSelections: [
+        bodySelection,
+        ...faceSelections
+      ],
+      constraints: [],
+      loads: [],
+      meshSettings: {
+        ...study.meshSettings,
+        status: "not_started",
+        meshRef: undefined,
+        summary: undefined
+      },
+      runs: []
+    }] : project.studies,
     updatedAt: options.now
   };
 }

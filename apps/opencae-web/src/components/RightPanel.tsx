@@ -72,6 +72,7 @@ function ModelPanel({ project, displayModel, study, viewMode, sampleModel, onFit
   const isBlankProject = !geometry;
   const isUploadedProject = geometry?.metadata.source === "local-upload";
   const uploadPreviewFormat = typeof geometry?.metadata.previewFormat === "string" ? geometry.metadata.previewFormat.toUpperCase() : "";
+  const isNativeCadImport = Boolean(geometry?.metadata.nativeCadImport);
   const faceCount = Number(geometry?.metadata.faceCount ?? 0);
   const bodyCount = Number(geometry?.metadata.bodyCount ?? 0);
   const sampleLabel = sampleModel === "bracket" ? "Bracket Demo" : sampleModel === "plate" ? "Plate Demo" : "Cantilever Demo";
@@ -127,7 +128,7 @@ function ModelPanel({ project, displayModel, study, viewMode, sampleModel, onFit
         type="file"
         tabIndex={-1}
         aria-hidden="true"
-        accept=".stl,.obj"
+        accept=".step,.stp,.stl,.obj"
         onChange={(event) => {
           const file = event.currentTarget.files?.[0];
           event.currentTarget.value = "";
@@ -148,9 +149,9 @@ function ModelPanel({ project, displayModel, study, viewMode, sampleModel, onFit
       </button>
       {confirmSampleLoad && <p className="panel-copy confirm-copy">This will reload {sampleLabel} and reset the sample setup.</p>}
       {isBlankProject ? (
-        <Callout>Upload STL or OBJ to preview the model in this local viewer. Convert STEP, IGES, or BREP to STL/OBJ before uploading.</Callout>
+        <Callout>Upload STEP, STP, or STL to import a model. STL files use the mesh preview; STEP files import as a selectable CAD body.</Callout>
       ) : isUploadedProject ? (
-        <Callout>{uploadPreviewFormat ? `${geometry.filename} is loaded with a ${uploadPreviewFormat} viewport preview.` : `${geometry.filename} cannot be previewed in this local viewer. Replace it with STL or OBJ.`}</Callout>
+        <Callout>{isNativeCadImport ? `${geometry.filename} is loaded as a selectable STEP import.` : uploadPreviewFormat ? `${geometry.filename} is loaded with a ${uploadPreviewFormat} viewport preview.` : `${geometry.filename} cannot be previewed in this local viewer. Replace it with STEP, STP, or STL.`}</Callout>
       ) : (
         <>
           <SectionTitle>Preconfigured</SectionTitle>

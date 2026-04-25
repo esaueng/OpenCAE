@@ -193,6 +193,10 @@ export interface DisplayModel {
     z: number;
     units: string;
   };
+  nativeCad?: {
+    format: "step";
+    filename: string;
+  };
   visualMesh?: {
     format: "stl" | "obj";
     filename: string;
