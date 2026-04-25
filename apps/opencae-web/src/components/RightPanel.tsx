@@ -262,11 +262,11 @@ function LoadsPanel({
       </label>
       <label className="field">
         Direction
-        <div className="segmented direction-options" role="group" aria-label="Direction">
+        <select value={draftLoadDirection} onChange={(event) => onDraftLoadDirectionChange(event.currentTarget.value as LoadDirectionLabel)}>
           {(["-Y", "+Y", "+X", "-X", "+Z", "-Z", "Normal"] as const).map((option) => (
-            <button key={option} className={draftLoadDirection === option ? "active" : ""} type="button" onClick={() => onDraftLoadDirectionChange(option)}>{option}</button>
+            <option key={option} value={option}>{directionOptionLabel(option)}</option>
           ))}
-        </div>
+        </select>
       </label>
       <button className="outline-action wide" disabled={!hasSelectedFace} onClick={() => hasSelectedFace && onAddLoad(draftLoadType, draftLoadValue, selectedFromViewport?.id, draftLoadDirection)}><Plus size={18} />Add load</button>
       <SectionTitle>Applied</SectionTitle>
@@ -705,6 +705,11 @@ function formatMPa(valuePa: number) {
 
 function formatDimension(value: number) {
   return Number.isInteger(value) ? value.toLocaleString() : value.toLocaleString(undefined, { maximumFractionDigits: 2 });
+}
+
+function directionOptionLabel(direction: LoadDirectionLabel) {
+  if (direction === "Normal") return "Face normal";
+  return `Global ${direction}`;
 }
 
 function capitalize(value: string) {

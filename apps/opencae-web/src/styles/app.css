@@ -1181,10 +1181,6 @@ button:disabled {
   font-size: var(--fs-xs);
 }
 
-.direction-options {
-  grid-template-columns: repeat(5, 1fr);
-}
-
 .bottom-panel {
   position: relative;
   background: var(--color-surface);
