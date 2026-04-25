@@ -378,9 +378,27 @@ function CantileverSolid({ color, pickHandlers }: { color: string; pickHandlers?
 }
 
 function UploadedSolid({ displayModel, color, pickHandlers }: { displayModel?: DisplayModel; color: string; pickHandlers?: ModelPickHandlers }) {
+  if (displayModel?.nativeCad) return <UploadedNativeCadModel displayModel={displayModel} color={color} pickHandlers={pickHandlers} />;
   if (!displayModel?.visualMesh) return <UnsupportedUploadedModelNotice filename={displayModel?.name ?? "Uploaded model"} />;
   if (displayModel.visualMesh.format === "obj") return <UploadedObjModel displayModel={displayModel} pickHandlers={pickHandlers} />;
   return <UploadedStlModel displayModel={displayModel} color={color} pickHandlers={pickHandlers} />;
+}
+
+function UploadedNativeCadModel({ displayModel, color, pickHandlers }: { displayModel: DisplayModel; color: string; pickHandlers?: ModelPickHandlers }) {
+  const filename = displayModel.nativeCad?.filename ?? displayModel.name;
+  return (
+    <group>
+      <mesh {...pickHandlers}>
+        <boxGeometry args={[2.2, 1.44, 1.04]} />
+        <meshStandardMaterial color={color} metalness={0.2} roughness={0.5} />
+        <Edges color="#c8d3df" threshold={15} />
+      </mesh>
+      <Html center position={[0, 1.05, 0]} className="model-notice compact">
+        <strong>STEP import</strong>
+        <span>{filename}</span>
+      </Html>
+    </group>
+  );
 }
 
 function UploadedStlModel({ displayModel, color, pickHandlers }: { displayModel: DisplayModel; color: string; pickHandlers?: ModelPickHandlers }) {
@@ -432,7 +450,7 @@ function UnsupportedUploadedModelNotice({ filename }: { filename: string }) {
       <Html center position={[0, 0.35, 0]} className="model-notice">
         <strong>Preview unavailable</strong>
         <span>{filename.replace(" uploaded model", "")}</span>
-        <small>This local viewer can preview STL or OBJ meshes. Replace this model with a supported mesh file.</small>
+        <small>This local viewer can import STEP, STP, STL, or OBJ files. Replace this model with a supported file.</small>
       </Html>
     </group>
   );

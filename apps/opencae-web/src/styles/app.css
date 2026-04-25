@@ -569,6 +569,12 @@ svg {
   line-height: 1.45;
 }
 
+.model-notice.compact {
+  width: 180px;
+  padding: 8px 10px;
+  font-size: var(--fs-xs);
+}
+
 .analysis-legend {
   position: absolute;
   bottom: 12px;

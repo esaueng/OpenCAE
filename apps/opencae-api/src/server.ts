@@ -126,7 +126,7 @@ api.post("/api/projects/:projectId/uploads", async (request, reply) => {
   const filename = sanitizeFilename(body?.filename);
   if (!filename) {
     return reply.code(400).send({
-      error: "Only STL and OBJ model uploads are supported in the local viewer. Convert STEP, IGES, or BREP to STL/OBJ before uploading."
+      error: "Only STEP, STP, STL, and OBJ model uploads are supported in the local viewer."
     });
   }
 
@@ -153,7 +153,9 @@ api.post("/api/projects/:projectId/uploads", async (request, reply) => {
   await storage.putObject(`${project.id}/uploads/${filename}.metadata.json`, JSON.stringify({ filename, size: body?.size, contentType: body?.contentType }, null, 2));
   const previewMessage = displayModel.visualMesh
     ? "Previewing the uploaded mesh in the viewport."
-    : "Native CAD preview is not available yet. Upload STL or OBJ when you need the viewport to match the file.";
+    : displayModel.nativeCad
+      ? "Previewing a selectable STEP import body in the viewport."
+      : "Preview is not available for this file.";
   return {
     project: nextProject,
     displayModel,
@@ -518,7 +520,7 @@ function sanitizeFilename(filename: unknown): string | undefined {
   const cleaned = filename.trim().split(/[\\/]/).pop()?.replace(/[^\w .-]/g, "_") ?? "";
   if (!cleaned) return undefined;
   const extension = cleaned.split(".").pop()?.toLowerCase();
-  if (!extension || !["stl", "obj"].includes(extension)) return undefined;
+  if (!extension || !["step", "stp", "stl", "obj"].includes(extension)) return undefined;
   return cleaned;
 }
 

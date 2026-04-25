@@ -101,11 +101,32 @@ describe("projectFactory", () => {
     expect(project.studies[0]?.meshSettings.status).toBe("not_started");
   });
 
-  test("does not create fake placement faces for unsupported native CAD previews", () => {
+  test("imports STEP as a selectable native CAD display model", () => {
     const displayModel = uploadedDisplayModelFor("hat-clip.step", "SVNPMTAzMDM=");
 
-    expect(displayModel.bodyCount).toBe(0);
-    expect(displayModel.faces).toEqual([]);
+    expect(displayModel.bodyCount).toBe(1);
+    expect(displayModel.faces).toHaveLength(6);
+    expect(displayModel.nativeCad?.format).toBe("step");
     expect(displayModel.visualMesh).toBeUndefined();
+  });
+
+  test("attaches STEP uploads with selectable placement faces", () => {
+    const blank = createBlankProject({
+      projectId: "project-step-upload",
+      studyId: "study-step-upload",
+      now: "2026-04-24T12:00:00.000Z"
+    });
+    const displayModel = uploadedDisplayModelFor("hat-clip.step", "SVNPMTAzMDM=");
+    const project = attachUploadedModelToProject(blank, {
+      geometryId: "geom-step",
+      filename: "hat-clip.step",
+      artifactKey: "project-step-upload/geometry/uploaded-display.json",
+      now: "2026-04-24T12:05:00.000Z",
+      displayModel
+    });
+
+    expect(project.geometryFiles[0]?.metadata.nativeCadImport).toBe(true);
+    expect(project.geometryFiles[0]?.metadata.previewFormat).toBe("step");
+    expect(project.studies[0]?.namedSelections.filter((selection) => selection.entityType === "face")).toHaveLength(6);
   });
 });
