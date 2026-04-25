@@ -187,6 +187,12 @@ export interface DisplayModel {
   name: string;
   bodyCount: number;
   faces: DisplayFace[];
+  dimensions?: {
+    x: number;
+    y: number;
+    z: number;
+    units: string;
+  };
   visualMesh?: {
     format: "stl" | "obj";
     filename: string;

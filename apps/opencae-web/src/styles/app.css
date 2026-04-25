@@ -865,6 +865,17 @@ button:disabled {
   border-radius: var(--radius-md);
 }
 
+.dimension-box {
+  margin-bottom: 14px;
+}
+
+.dimension-box p {
+  margin: 8px 0 0;
+  color: var(--color-text-muted);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-loose);
+}
+
 .list-block h3,
 .editable-list h3,
 .section-title {

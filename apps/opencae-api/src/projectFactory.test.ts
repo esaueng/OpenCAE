@@ -34,6 +34,8 @@ describe("projectFactory", () => {
       expect(project.studies[0]?.projectId).toBe(project.id);
       expect(project.geometryFiles[0]?.filename).toContain(sampleId);
       expect(sampleDisplayModelFor(sampleId).name.toLowerCase()).toContain(sampleId);
+      expect(sampleDisplayModelFor(sampleId).dimensions?.units).toBe("mm");
+      expect(sampleDisplayModelFor(sampleId).dimensions?.x).toBeGreaterThan(0);
       expect(project.studies[0]?.geometryScope[0]?.label.toLowerCase()).toContain(sampleId === "bracket" ? "bracket" : sampleId);
       expect(project.studies[0]?.namedSelections.filter((selection) => selection.entityType === "face")).toHaveLength(sampleDisplayModelFor(sampleId).faces.length);
     }

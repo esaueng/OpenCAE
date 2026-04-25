@@ -3,24 +3,27 @@ import { bracketDemoProject, bracketDisplayModel } from "@opencae/db/sample-data
 
 export type SampleModelId = "bracket" | "plate" | "cantilever";
 
-const SAMPLE_META: Record<SampleModelId, { projectName: string; modelName: string; filename: string; displayName: string }> = {
+const SAMPLE_META: Record<SampleModelId, { projectName: string; modelName: string; filename: string; displayName: string; dimensions: DisplayModel["dimensions"] }> = {
   bracket: {
     projectName: "Bracket Demo",
     modelName: "Bracket",
     filename: "bracket-demo.step",
-    displayName: "bracket demo body"
+    displayName: "bracket demo body",
+    dimensions: { x: 120, y: 88, z: 34, units: "mm" }
   },
   plate: {
     projectName: "Plate Demo",
     modelName: "Plate",
     filename: "plate-with-hole.step",
-    displayName: "plate demo body"
+    displayName: "plate demo body",
+    dimensions: { x: 120, y: 48, z: 10, units: "mm" }
   },
   cantilever: {
     projectName: "Cantilever Demo",
     modelName: "Cantilever",
     filename: "cantilever-beam.step",
-    displayName: "cantilever demo body"
+    displayName: "cantilever demo body",
+    dimensions: { x: 180, y: 24, z: 24, units: "mm" }
   }
 };
 
@@ -266,6 +269,7 @@ export function sampleDisplayModelFor(sampleId: SampleModelId): DisplayModel {
     ...bracketDisplayModel,
     id: `display-${sampleId}`,
     name: meta.displayName,
+    dimensions: meta.dimensions,
     faces: facesBySample[sampleId]
   };
 }

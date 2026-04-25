@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Anchor, ArrowDown, Check, Download, Eye, FileText, Grid3X3, Maximize2, Play, Plus, RotateCcw, Upload, X } from "lucide-react";
+import { Anchor, ArrowDown, Check, Download, Eye, FileText, Grid3X3, Maximize2, Play, Plus, RotateCcw, Ruler, Upload, X } from "lucide-react";
 import { starterMaterials } from "@opencae/materials";
-import type { Constraint, DisplayFace, Load, Project, ResultSummary, Study } from "@opencae/schema";
+import type { Constraint, DisplayFace, DisplayModel, Load, Project, ResultSummary, Study } from "@opencae/schema";
 import type { ResultMode, ViewMode } from "./CadViewer";
 import type { StepId } from "./StepBar";
 import { directionLabelForLoad, directionVectorForLabel, unitsForLoadType, type LoadDirectionLabel, type LoadType } from "../loadPreview";
@@ -10,6 +10,7 @@ import type { SampleModelId } from "../lib/api";
 interface RightPanelProps {
   activeStep: StepId;
   project: Project;
+  displayModel: DisplayModel;
   study: Study;
   selectedFace: DisplayFace | null;
   viewMode: ViewMode;
@@ -63,8 +64,9 @@ export function RightPanel(props: RightPanelProps) {
   );
 }
 
-function ModelPanel({ project, study, viewMode, sampleModel, onFitView, onViewModeChange, onLoadSample, onUploadModel, onSampleModelChange }: RightPanelProps) {
+function ModelPanel({ project, displayModel, study, viewMode, sampleModel, onFitView, onViewModeChange, onLoadSample, onUploadModel, onSampleModelChange }: RightPanelProps) {
   const [confirmSampleLoad, setConfirmSampleLoad] = useState(false);
+  const [showDimensions, setShowDimensions] = useState(false);
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const geometry = project.geometryFiles[0];
   const isBlankProject = !geometry;
@@ -110,6 +112,11 @@ function ModelPanel({ project, study, viewMode, sampleModel, onFitView, onViewMo
         <Info label="Mass" value="111 g" />
         <Info label="Units" value="mm" />
       </div>
+      <button className={showDimensions ? "primary wide" : "secondary wide"} type="button" onClick={() => setShowDimensions((value) => !value)}>
+        <Ruler size={16} />
+        {showDimensions ? "Hide dimensions" : "Show dimensions"}
+      </button>
+      {showDimensions && <ModelDimensions displayModel={displayModel} />}
       <div className="button-grid">
         <button className="secondary" onClick={onFitView}><Maximize2 size={16} />Fit view</button>
         <button className={viewMode === "mesh" ? "primary" : "secondary"} onClick={() => onViewModeChange(viewMode === "mesh" ? "model" : "mesh")}><Eye size={16} />Toggle mesh</button>
@@ -605,6 +612,27 @@ function Info({ label, value }: { label: string; value: string }) {
   return <div className="info-row"><span>{label}</span><strong>{value}</strong></div>;
 }
 
+function ModelDimensions({ displayModel }: { displayModel: DisplayModel }) {
+  const dimensions = displayModel.dimensions;
+  if (!dimensions) {
+    return (
+      <div className="summary-box dimension-box">
+        <Info label="Dimensions" value="Unavailable" />
+        <p>Real model extents are not available for this imported preview.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="summary-box dimension-box">
+      <Info label="Overall" value={`${formatDimension(dimensions.x)} x ${formatDimension(dimensions.y)} x ${formatDimension(dimensions.z)} ${dimensions.units}`} />
+      <Info label="X length" value={`${formatDimension(dimensions.x)} ${dimensions.units}`} />
+      <Info label="Y height" value={`${formatDimension(dimensions.y)} ${dimensions.units}`} />
+      <Info label="Z depth" value={`${formatDimension(dimensions.z)} ${dimensions.units}`} />
+    </div>
+  );
+}
+
 function SectionTitle({ children }: { children: ReactNode }) {
   return <h3 className="section-title">{children}</h3>;
 }
@@ -639,6 +667,10 @@ function SupportIcon() {
 
 function formatMPa(valuePa: number) {
   return Math.round(valuePa / 1_000_000).toLocaleString();
+}
+
+function formatDimension(value: number) {
+  return Number.isInteger(value) ? value.toLocaleString() : value.toLocaleString(undefined, { maximumFractionDigits: 2 });
 }
 
 function capitalize(value: string) {

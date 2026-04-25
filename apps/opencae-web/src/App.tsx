@@ -336,6 +336,7 @@ export function App() {
         <RightPanel
           activeStep={activeStep}
           project={project}
+          displayModel={displayModel}
           study={study}
           selectedFace={selectedFace}
           viewMode={viewMode}

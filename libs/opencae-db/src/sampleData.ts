@@ -15,6 +15,7 @@ export const bracketDisplayModel: DisplayModel = {
   id: "display-bracket-demo",
   name: "Bracket demo body",
   bodyCount: 1,
+  dimensions: { x: 120, y: 88, z: 34, units: "mm" },
   faces: [
     { id: "face-base-left", label: "Base mounting holes", color: "#4da3ff", center: [0.65, 0.02, 0.58], normal: [0, 0, 1], stressValue: 36 },
     { id: "face-load-top", label: "Top load face", color: "#f59e0b", center: [-1.18, 2.53, 0], normal: [0, 1, 0], stressValue: 142 },
