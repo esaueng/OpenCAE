@@ -4,7 +4,7 @@ import { starterMaterials } from "./index";
 describe("starterMaterials", () => {
   test("includes common engineering and 3D printed material options", () => {
     expect(starterMaterials.map((material) => material.id)).toEqual(
-      expect.arrayContaining(["mat-petg", "mat-asa", "mat-tpu-95a", "mat-nylon-cf", "mat-peek", "mat-sla-tough-resin"])
+      expect.arrayContaining(["mat-petg", "mat-asa", "mat-nylon-cf", "mat-peek", "mat-sla-tough-resin"])
     );
   });
 

@@ -13,7 +13,6 @@ export const starterMaterials: Material[] = [
   { id: "mat-pla-plus", name: "PLA+ Plastic", category: "plastic", youngsModulus: 3900000000, poissonRatio: 0.36, density: 1240, yieldStrength: 68000000, printProfile: fdmProfile(35, 3, 0.7) },
   { id: "mat-petg", name: "PETG", category: "plastic", youngsModulus: 2100000000, poissonRatio: 0.38, density: 1270, yieldStrength: 50000000, printProfile: fdmProfile(40, 3, 0.72) },
   { id: "mat-asa", name: "ASA", category: "plastic", youngsModulus: 2200000000, poissonRatio: 0.35, density: 1070, yieldStrength: 46000000, printProfile: fdmProfile(35, 3, 0.7) },
-  { id: "mat-tpu-95a", name: "TPU 95A", category: "plastic", youngsModulus: 120000000, poissonRatio: 0.45, density: 1210, yieldStrength: 26000000, printProfile: fdmProfile(35, 3, 0.62) },
   { id: "mat-nylon", name: "Nylon", category: "plastic", youngsModulus: 2800000000, poissonRatio: 0.39, density: 1150, yieldStrength: 70000000, printProfile: fdmProfile(40, 3, 0.74) },
   { id: "mat-nylon-cf", name: "Carbon Fiber Nylon", category: "composite", youngsModulus: 7600000000, poissonRatio: 0.34, density: 1180, yieldStrength: 105000000, printProfile: fdmProfile(40, 4, 0.78) },
   { id: "mat-pa12-sls", name: "PA12 Nylon SLS", category: "plastic", youngsModulus: 1700000000, poissonRatio: 0.39, density: 1010, yieldStrength: 48000000, printProfile: { process: "SLS", defaultInfillDensity: 100, defaultWallCount: 2, defaultLayerOrientation: "z", layerStrengthFactor: 0.9 } },
