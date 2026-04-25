@@ -9,9 +9,8 @@ import { StepBar, type StepId } from "./components/StepBar";
 import { CadViewer, type ResultMode, type ViewMode } from "./components/CadViewer";
 import type { ViewerLoadMarker, ViewerSupportMarker } from "./components/CadViewer";
 import {
-  createDraftLoadMarker,
+  createViewerLoadMarkers,
   directionVectorForLabel,
-  loadMarkerFromLoad,
   type LoadDirectionLabel,
   type LoadType
 } from "./loadPreview";
@@ -63,6 +62,7 @@ export function App() {
   const [draftLoadType, setDraftLoadType] = useState<LoadType>("force");
   const [draftLoadValue, setDraftLoadValue] = useState(500);
   const [draftLoadDirection, setDraftLoadDirection] = useState<LoadDirectionLabel>("-Y");
+  const [loadEditorActive, setLoadEditorActive] = useState(false);
   const [sampleModel, setSampleModel] = useState<SampleModelId>("bracket");
 
   const study = project?.studies[0] ?? null;
@@ -77,27 +77,13 @@ export function App() {
   const canUndoStep = stepHistoryIndex > 0;
   const canRedoStep = stepHistoryIndex < stepHistory.length - 1;
   const loadMarkers = useMemo<ViewerLoadMarker[]>(() => {
-    if (!study) return [];
-    const faceCounts = new Map<string, number>();
-    const markers = study.loads.flatMap((load) => {
-      const marker = loadMarkerFromLoad(load, study, 0);
-      if (!marker) return [];
-      const stackIndex = faceCounts.get(marker.faceId) ?? 0;
-      faceCounts.set(marker.faceId, stackIndex + 1);
-      return [{ ...marker, stackIndex }];
+    return createViewerLoadMarkers({
+      study,
+      selectedFace,
+      draftLoad: { type: draftLoadType, value: draftLoadValue, directionLabel: draftLoadDirection },
+      includeDraftPreview: activeStep === "loads" && !loadEditorActive
     });
-    const selectedStackIndex = selectedFaceId ? faceCounts.get(selectedFaceId) ?? 0 : 0;
-    const draftMarker = activeStep === "loads"
-      ? createDraftLoadMarker({
-        selectedFace,
-        type: draftLoadType,
-        value: draftLoadValue,
-        directionLabel: draftLoadDirection,
-        stackIndex: selectedStackIndex
-      })
-      : null;
-    return draftMarker ? [...markers, draftMarker] : markers;
-  }, [activeStep, draftLoadDirection, draftLoadType, draftLoadValue, selectedFace, selectedFaceId, study]);
+  }, [activeStep, draftLoadDirection, draftLoadType, draftLoadValue, loadEditorActive, selectedFace, study]);
   const supportMarkers = useMemo<ViewerSupportMarker[]>(() => {
     if (!study) return [];
     const faceCounts = new Map<string, number>();
@@ -362,6 +348,7 @@ export function App() {
           onDraftLoadTypeChange={setDraftLoadType}
           onDraftLoadValueChange={setDraftLoadValue}
           onDraftLoadDirectionChange={setDraftLoadDirection}
+          onLoadEditorActiveChange={setLoadEditorActive}
           onAddLoad={(type, value, selectionRef, direction) => {
             const selection = study.namedSelections.find((item) => item.id === selectionRef);
             const faceId = selection?.geometryRefs[0]?.entityId;

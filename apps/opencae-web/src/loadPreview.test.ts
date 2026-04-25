@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import type { DisplayFace, Load, NamedSelection, Study } from "@opencae/schema";
-import { createDraftLoadMarker, directionLabelForLoad, directionVectorForLabel, loadMarkerFromLoad } from "./loadPreview";
+import { createDraftLoadMarker, createViewerLoadMarkers, directionLabelForLoad, directionVectorForLabel, loadMarkerFromLoad } from "./loadPreview";
 
 const face: DisplayFace = {
   id: "face-side",
@@ -20,8 +20,9 @@ const selection: NamedSelection = {
 };
 
 const study = {
+  loads: [],
   namedSelections: [selection]
-} as Study;
+} as unknown as Study;
 
 describe("load preview helpers", () => {
   test("maps direction labels to saved vectors", () => {
@@ -64,5 +65,24 @@ describe("load preview helpers", () => {
       stackIndex: 0
     });
     expect(directionLabelForLoad(load)).toBe("+X");
+  });
+
+  test("omits the draft marker while an existing load is being edited", () => {
+    const savedLoad: Load = {
+      id: "load-1",
+      type: "force",
+      selectionRef: "selection-side",
+      parameters: { value: 500, units: "N", direction: [0, -1, 0] },
+      status: "complete"
+    };
+    const markers = createViewerLoadMarkers({
+      study: { ...study, loads: [savedLoad] } as unknown as Study,
+      selectedFace: face,
+      draftLoad: { type: "force", value: 500, directionLabel: "-Y" },
+      includeDraftPreview: false
+    });
+
+    expect(markers).toHaveLength(1);
+    expect(markers[0]?.id).toBe("load-1");
   });
 });

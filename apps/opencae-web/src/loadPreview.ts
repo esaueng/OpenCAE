@@ -52,6 +52,39 @@ export function loadMarkerFromLoad(load: Load, study: Study, stackIndex: number)
   };
 }
 
+export function createViewerLoadMarkers({
+  study,
+  selectedFace,
+  draftLoad,
+  includeDraftPreview
+}: {
+  study: Study | null;
+  selectedFace: DisplayFace | null;
+  draftLoad: { type: LoadType; value: number; directionLabel: LoadDirectionLabel };
+  includeDraftPreview: boolean;
+}): ViewerLoadMarker[] {
+  if (!study) return [];
+  const faceCounts = new Map<string, number>();
+  const markers = study.loads.flatMap((load) => {
+    const marker = loadMarkerFromLoad(load, study, 0);
+    if (!marker) return [];
+    const stackIndex = faceCounts.get(marker.faceId) ?? 0;
+    faceCounts.set(marker.faceId, stackIndex + 1);
+    return [{ ...marker, stackIndex }];
+  });
+  const selectedStackIndex = selectedFace ? faceCounts.get(selectedFace.id) ?? 0 : 0;
+  const draftMarker = includeDraftPreview
+    ? createDraftLoadMarker({
+      selectedFace,
+      type: draftLoad.type,
+      value: draftLoad.value,
+      directionLabel: draftLoad.directionLabel,
+      stackIndex: selectedStackIndex
+    })
+    : null;
+  return draftMarker ? [...markers, draftMarker] : markers;
+}
+
 export function createDraftLoadMarker({
   selectedFace,
   type,
