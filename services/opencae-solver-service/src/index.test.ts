@@ -107,16 +107,54 @@ describe("LocalMockComputeBackend", () => {
       vi.useRealTimers();
     }
   });
+
+  test("uses assigned material stiffness and yield strength in result fields", async () => {
+    vi.useFakeTimers();
+    try {
+      const storage = new MemoryStorage();
+      const backend = new LocalMockComputeBackend(storage);
+      const load = { id: "load-a", type: "force" as const, value: 500, direction: [0, -1, 0] as [number, number, number] };
+
+      const aluminumRun = backend.runStaticSolve({
+        study: studyWithLoads([load], "mat-aluminum-6061"),
+        runId: "run-aluminum",
+        meshRef: "mesh-aluminum",
+        publish: vi.fn()
+      });
+      await vi.runAllTimersAsync();
+      const aluminum = await aluminumRun;
+
+      const absRun = backend.runStaticSolve({
+        study: studyWithLoads([load], "mat-abs"),
+        runId: "run-abs",
+        meshRef: "mesh-abs",
+        publish: vi.fn()
+      });
+      await vi.runAllTimersAsync();
+      const abs = await absRun;
+
+      expect(abs.summary.maxDisplacement).toBeGreaterThan(aluminum.summary.maxDisplacement);
+      expect(abs.summary.safetyFactor).toBeLessThan(aluminum.summary.safetyFactor);
+      expect(abs.fields.find((field) => field.type === "displacement")?.values).not.toEqual(
+        aluminum.fields.find((field) => field.type === "displacement")?.values
+      );
+      expect(abs.fields.find((field) => field.type === "safety_factor")?.values).not.toEqual(
+        aluminum.fields.find((field) => field.type === "safety_factor")?.values
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
-function studyWithLoads(loads: Array<{ id: string; type: Load["type"]; value: number; direction: [number, number, number]; selectionRef?: string }>): Study {
+function studyWithLoads(loads: Array<{ id: string; type: Load["type"]; value: number; direction: [number, number, number]; selectionRef?: string }>, materialId = "mat-aluminum-6061"): Study {
   return {
     id: "study-test",
     projectId: "project-test",
     name: "Static Stress",
     type: "static_stress",
     geometryScope: [],
-    materialAssignments: [{ id: "assign", materialId: "mat", selectionRef: "selection-body", status: "complete" }],
+    materialAssignments: [{ id: "assign", materialId, selectionRef: "selection-body", status: "complete" }],
     namedSelections: [
       {
         id: "selection-load-face",

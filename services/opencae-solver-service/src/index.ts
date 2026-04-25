@@ -1,4 +1,5 @@
-import type { Load, ResultField, ResultSummary, RunEvent, Study } from "@opencae/schema";
+import { starterMaterials } from "@opencae/materials";
+import type { Load, Material, ResultField, ResultSummary, RunEvent, Study } from "@opencae/schema";
 import type { ObjectStorageProvider } from "@opencae/storage";
 import { bracketDisplayModel, bracketResultSummary } from "@opencae/db/sample-data";
 
@@ -29,6 +30,9 @@ export class LocalMockComputeBackend {
       "local linear static multi-load input",
       `run=${args.runId}`,
       `mesh=${args.meshRef}`,
+      `material=${solved.material.id}`,
+      `youngsModulus=${solved.material.youngsModulus}`,
+      `yieldStrength=${solved.material.yieldStrength}`,
       `faces=${solved.faceCount}`,
       `loads=${solved.loadCount}`,
       `totalAppliedLoad=${solved.totalAppliedLoad}`,
@@ -62,6 +66,7 @@ export class LocalMockComputeBackend {
       [
         "Local mesh read: 42,381 nodes, 26,944 tetra elements.",
         "Local static solver: linear elastic multi-load superposition.",
+        `Material: ${solved.material.name}.`,
         `Loads evaluated: ${args.study.loads.length}.`,
         `Result faces evaluated: ${solved.faceCount}.`,
         `Total applied load: ${solved.totalAppliedLoad} N.`,
@@ -100,10 +105,12 @@ function solveStudy(study: Study, runId: string) {
   const faces = faceModelsForStudy(study);
   const supports = supportFacesForStudy(study, faces);
   const loads = study.loads.map((load) => loadModelFor(load, faces, supports)).filter((load): load is LoadModel => Boolean(load));
+  const material = materialForStudy(study);
+  const response = materialResponse(material, loads);
   const totalAppliedLoad = round(loads.reduce((sum, load) => sum + load.magnitude, 0));
-  const stressValues = faces.map((face) => round(stressAtFace(face, loads, faces), 1));
-  const displacementValues = faces.map((face) => round(displacementAtFace(face, loads, supports, faces), 4));
-  const safetyValues = stressValues.map((stress) => round(Math.max(0.05, bracketDemoYieldMpa() / Math.max(stress, 0.001)), 2));
+  const stressValues = faces.map((face) => round(stressAtFace(face, loads, faces) * response.stressScale, 1));
+  const displacementValues = faces.map((face) => round(displacementAtFace(face, loads, supports, faces) * response.displacementScale, 4));
+  const safetyValues = stressValues.map((stress) => round(Math.max(0.05, response.yieldMpa / Math.max(stress, 0.001)), 2));
   const summary: ResultSummary = {
     maxStress: round(Math.max(...stressValues, 0), 1),
     maxStressUnits: bracketResultSummary.maxStressUnits,
@@ -118,7 +125,25 @@ function solveStudy(study: Study, runId: string) {
     fieldFor(runId, "displacement", displacementValues, "mm"),
     fieldFor(runId, "safety_factor", safetyValues, "")
   ];
-  return { summary, fields, faceCount: faces.length, loadCount: loads.length, totalAppliedLoad: summary.reactionForce };
+  return { summary, fields, faceCount: faces.length, loadCount: loads.length, totalAppliedLoad: summary.reactionForce, material };
+}
+
+function materialForStudy(study: Study): Material {
+  const materialId = study.materialAssignments[0]?.materialId;
+  return starterMaterials.find((material) => material.id === materialId) ?? starterMaterials[0]!;
+}
+
+function materialResponse(material: Material, loads: LoadModel[]): { stressScale: number; displacementScale: number; yieldMpa: number } {
+  const reference = starterMaterials[0]!;
+  const youngsScale = reference.youngsModulus / Math.max(material.youngsModulus, 1);
+  const poissonScale = 1 + (material.poissonRatio - reference.poissonRatio) * 0.3;
+  const hasGravity = loads.some((load) => load.load.type === "gravity");
+  const densityScale = hasGravity ? 1 + (material.density / reference.density - 1) * 0.08 : 1;
+  return {
+    stressScale: round(poissonScale * densityScale, 4),
+    displacementScale: round(youngsScale * densityScale, 4),
+    yieldMpa: material.yieldStrength / 1_000_000
+  };
 }
 
 function fieldFor(runId: string, type: ResultField["type"], values: number[], units: string): ResultField {
@@ -277,10 +302,6 @@ const knownFaces: Array<{ match: string; center: Vec3; normal: Vec3; baselineStr
   { match: "upload-left", center: [-1.1, 0, 0], normal: [-1, 0, 0], baselineStress: 58 },
   { match: "upload-right", center: [1.1, 0, 0], normal: [1, 0, 0], baselineStress: 84 }
 ];
-
-function bracketDemoYieldMpa(): number {
-  return 276;
-}
 
 function modelSpan(faces: FaceModel[]): number {
   let max = 1;
