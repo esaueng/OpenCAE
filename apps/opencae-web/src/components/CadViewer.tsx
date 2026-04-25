@@ -7,12 +7,12 @@ import type { DisplayFace, DisplayModel, ResultField } from "@opencae/schema";
 import { RotateCcw } from "lucide-react";
 import * as THREE from "three";
 import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
-import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
 import type { StepId } from "./StepBar";
 import { faceForModelHit, type SampleModelKind } from "../modelSelection";
 import { modelRotationRadians } from "../modelOrientation";
 import { formatResultValue, resultProbeSamplesForFaces, resultSamplesForFaces, type FaceResultSample, type ResultProbeTone } from "../resultFields";
 import { stepPreviewGroupFromBase64 } from "../stepPreview";
+import { normalizedStlGeometryFromBuffer } from "../stlPreview";
 
 export type ViewMode = "model" | "mesh" | "results";
 export type ResultMode = "stress" | "displacement" | "safety_factor";
@@ -587,10 +587,7 @@ function UploadedNativeCadModel({ displayModel, color, pickHandlers }: { display
 
 function UploadedStlModel({ displayModel, color, pickHandlers }: { displayModel: DisplayModel; color: string; pickHandlers?: ModelPickHandlers }) {
   const geometry = useMemo(() => {
-    const parsed = new STLLoader().parse(base64ToArrayBuffer(displayModel.visualMesh?.contentBase64 ?? ""));
-    normalizeGeometry(parsed);
-    parsed.computeVertexNormals();
-    return parsed;
+    return normalizedStlGeometryFromBuffer(base64ToArrayBuffer(displayModel.visualMesh?.contentBase64 ?? ""));
   }, [displayModel.visualMesh?.contentBase64]);
 
   return (
@@ -754,9 +751,7 @@ function UploadedStlResultModel({
   loadMarkers: ViewerLoadMarker[];
 }) {
   const geometry = useMemo(() => {
-    const parsed = new STLLoader().parse(base64ToArrayBuffer(displayModel.visualMesh?.contentBase64 ?? ""));
-    normalizeGeometry(parsed);
-    parsed.computeVertexNormals();
+    const parsed = normalizedStlGeometryFromBuffer(base64ToArrayBuffer(displayModel.visualMesh?.contentBase64 ?? ""));
     return colorizeResultGeometry(parsed, "uploaded", resultMode, showDeformed, stressExaggeration, samples, loadMarkers);
   }, [displayModel.visualMesh?.contentBase64, loadMarkers, resultMode, samples, showDeformed, stressExaggeration]);
 
@@ -1273,18 +1268,6 @@ function base64ToArrayBuffer(value: string): ArrayBuffer {
     bytes[index] = binary.charCodeAt(index);
   }
   return bytes.buffer;
-}
-
-function normalizeGeometry(geometry: THREE.BufferGeometry): void {
-  geometry.computeBoundingBox();
-  const box = geometry.boundingBox;
-  if (!box) return;
-  const size = box.getSize(new THREE.Vector3());
-  const center = box.getCenter(new THREE.Vector3());
-  const maxDimension = Math.max(size.x, size.y, size.z, 0.001);
-  geometry.translate(-center.x, -center.y, -center.z);
-  geometry.scale(2.4 / maxDimension, 2.4 / maxDimension, 2.4 / maxDimension);
-  geometry.computeBoundingBox();
 }
 
 type ResultProbeConfig = { label: string; anchor: [number, number, number]; labelPosition: [number, number, number]; tone: ResultProbeTone };
