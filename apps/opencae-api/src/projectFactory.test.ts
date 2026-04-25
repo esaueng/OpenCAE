@@ -38,6 +38,7 @@ describe("projectFactory", () => {
       expect(sampleDisplayModelFor(sampleId).dimensions?.x).toBeGreaterThan(0);
       expect(project.studies[0]?.geometryScope[0]?.label.toLowerCase()).toContain(sampleId === "bracket" ? "bracket" : sampleId);
       expect(project.studies[0]?.namedSelections.filter((selection) => selection.entityType === "face")).toHaveLength(sampleDisplayModelFor(sampleId).faces.length);
+      expect(project.studies[0]?.loads[0]?.parameters.direction).toEqual([0, 0, -1]);
     }
   });
 

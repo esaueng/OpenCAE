@@ -154,7 +154,7 @@ export const bracketDemoProject: Project = {
           id: "load-downward-force",
           type: "force",
           selectionRef: "selection-load-face",
-          parameters: { value: 500, units: "N", direction: [0, -1, 0] },
+          parameters: { value: 500, units: "N", direction: [0, 0, -1] },
           status: "complete"
         }
       ],
