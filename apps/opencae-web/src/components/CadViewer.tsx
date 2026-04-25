@@ -390,24 +390,23 @@ function ModelDimensionOverlay({ displayModel }: { displayModel: DisplayModel })
   const xLineY = min.y - yOffset;
   const xLineZ = min.z - zOffset;
   const axisLineX = max.x + xOffset;
-  const units = dimensions.units;
 
   return (
     <group renderOrder={20}>
       <DimensionLine
         start={[min.x, xLineY, xLineZ]}
         end={[max.x, xLineY, xLineZ]}
-        label={`X ${formatDimensionLabel(dimensions.x)} ${units}`}
+        label={`X ${formatDimensionLabel(dimensions.x)}`}
       />
       <DimensionLine
         start={[axisLineX, xLineY, min.z]}
         end={[axisLineX, xLineY, max.z]}
-        label={`Y ${formatDimensionLabel(dimensions.z)} ${units}`}
+        label={`Y ${formatDimensionLabel(dimensions.z)}`}
       />
       <DimensionLine
         start={[axisLineX, min.y, max.z + zOffset]}
         end={[axisLineX, max.y, max.z + zOffset]}
-        label={`Z ${formatDimensionLabel(dimensions.y)} ${units}`}
+        label={`Z ${formatDimensionLabel(dimensions.y)}`}
       />
     </group>
   );
@@ -1325,7 +1324,7 @@ function ModelHitLabel({ hit, active }: { hit: ModelSelectionHit; active: boolea
         <sphereGeometry args={[active ? 0.035 : 0.026, 18, 18]} />
         <meshBasicMaterial color={active ? "#4da3ff" : "#f8d77b"} depthTest={false} toneMapped={false} />
       </mesh>
-      <SceneLabel label={hit.face.label} position={labelPosition.toArray()} tone={active ? "active-load" : "load"} />
+      <SceneLabel label={compactFaceLabel(hit.face.label)} position={labelPosition.toArray()} tone={active ? "active-load" : "load"} />
     </group>
   );
 }
@@ -1418,8 +1417,8 @@ function SupportBurstAt({ position, normal, active }: { position: [number, numbe
 }
 
 function supportLabel(marker: ViewerSupportMarker) {
-  const kind = marker.type === "fixed" ? "Fixed" : "Prescribed";
-  return `${kind} ${marker.stackIndex + 1}: ${marker.label}`;
+  const kind = marker.type === "fixed" ? "Fix" : "Disp";
+  return `${kind} ${marker.stackIndex + 1}`;
 }
 
 function ResultLegend({ resultMode, resultFields }: { resultMode: ResultMode; resultFields: ResultField[] }) {
@@ -1478,8 +1477,18 @@ function LoadGlyph({ marker, face, active }: { marker: ViewerLoadMarker; face: D
 }
 
 function loadLabel(marker: ViewerLoadMarker) {
-  const prefix = marker.preview ? "Preview" : `Load ${marker.stackIndex + 1}`;
-  return `${prefix}: ${marker.type} ${marker.value} ${marker.units} ${marker.directionLabel}`;
+  const prefix = marker.preview ? "Prev" : `L${marker.stackIndex + 1}`;
+  const kind = marker.type === "pressure" ? "P" : marker.type === "gravity" ? "G" : "F";
+  return `${prefix} ${kind} ${marker.value}${marker.units} ${marker.directionLabel}`;
+}
+
+function compactFaceLabel(label: string) {
+  return label
+    .replace(/\bmounting holes\b/i, "holes")
+    .replace(/\bload face\b/i, "")
+    .replace(/\bface\b/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function arrowPointsOutsideSurface(surfacePoint: THREE.Vector3, normal: THREE.Vector3, direction: THREE.Vector3, length: number) {
