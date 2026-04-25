@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AlertTriangle, Anchor, ArrowDown, Check, Download, Eye, FileText, Grid3X3, Maximize2, Play, Plus, RotateCcw, Ruler, ShieldCheck, Upload, X } from "lucide-react";
 import { starterMaterials } from "@opencae/materials";
-import { assessResultFailure } from "@opencae/schema";
+import { assessResultFailure, estimateAllowableLoadForSafetyFactor } from "@opencae/schema";
 import type { Constraint, DisplayFace, DisplayModel, Load, Project, ResultSummary, Study } from "@opencae/schema";
 import type { ResultMode, ViewMode } from "./CadViewer";
 import type { StepId } from "./StepBar";
@@ -520,7 +520,10 @@ function ResultsPanel({
   reportFilename,
   onGenerateReport
 }: RightPanelProps) {
+  const [targetSafetyFactor, setTargetSafetyFactor] = useState(1.5);
   const assessment = resultSummary.failureAssessment ?? assessResultFailure(resultSummary);
+  const loadCapacity = estimateAllowableLoadForSafetyFactor(resultSummary, targetSafetyFactor);
+  const canEstimateLoad = loadCapacity.status === "available";
   const AssessmentIcon = assessment.status === "pass" ? ShieldCheck : AlertTriangle;
   return (
     <Panel title="Results" helper="View stress and displacement directly on the 3D model.">
@@ -557,6 +560,30 @@ function ResultsPanel({
         <Info label="Safety factor" value={String(resultSummary.safetyFactor)} />
         <Info label="Failure check" value={assessment.title} />
         <Info label="Reaction force" value={`${resultSummary.reactionForce} ${resultSummary.reactionForceUnits}`} />
+      </div>
+      <SectionTitle>Reverse Check</SectionTitle>
+      <div className="load-capacity-tool">
+        <label className="field">
+          Target factor of safety
+          <span className="input-with-unit">
+            <input
+              type="number"
+              min="0.1"
+              step="0.1"
+              value={targetSafetyFactor}
+              onChange={(event) => {
+                const next = Number(event.currentTarget.value);
+                setTargetSafetyFactor(Number.isFinite(next) && next > 0 ? next : 1.5);
+              }}
+            />
+            <span>FoS</span>
+          </span>
+        </label>
+        <div className="capacity-readout">
+          <span>Max total load</span>
+          <strong>{canEstimateLoad ? `${formatLoadCapacity(loadCapacity.allowableLoad)} ${loadCapacity.loadUnits}` : "Unavailable"}</strong>
+          <small>{canEstimateLoad ? `Current ${formatLoadCapacity(loadCapacity.currentLoad)} ${loadCapacity.loadUnits} · ${formatLoadCapacity(loadCapacity.loadScale)}x` : "Run a valid simulation first."}</small>
+        </div>
       </div>
       <div className="legend"><span /> <small>Low</small><small>High</small></div>
       <ReportDownloadAction
@@ -726,6 +753,11 @@ function formatMPa(valuePa: number) {
 
 function formatDimension(value: number) {
   return Number.isInteger(value) ? value.toLocaleString() : value.toLocaleString(undefined, { maximumFractionDigits: 2 });
+}
+
+function formatLoadCapacity(value: number) {
+  if (!Number.isFinite(value)) return "--";
+  return value.toLocaleString(undefined, { maximumFractionDigits: value >= 100 ? 0 : 2 });
 }
 
 function directionOptionLabel(direction: LoadDirectionLabel) {
