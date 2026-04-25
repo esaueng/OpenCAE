@@ -55,8 +55,9 @@ interface CadViewerProps {
 const BRACKET_DEPTH = 1.1;
 const RIB_DEPTH = 0.38;
 const PLATE_DEPTH = 0.32;
-const ISO_CAMERA_DIRECTION = new THREE.Vector3(1, 1, 1).normalize();
-const ISO_CAMERA_UP = new THREE.Vector3(0, 1, 0).projectOnPlane(ISO_CAMERA_DIRECTION).normalize();
+const WORLD_UP = new THREE.Vector3(0, 0, 1);
+const ISO_CAMERA_DIRECTION = new THREE.Vector3(1, -1, 1).normalize();
+const ISO_CAMERA_UP = WORLD_UP.clone().projectOnPlane(ISO_CAMERA_DIRECTION).normalize();
 const BRACKET_HOLES = [
   { id: "upright-hole", center: [-1.2, 1.48] as [number, number], radius: 0.17, supported: false },
   { id: "base-hole-left", center: [0.24, 0] as [number, number], radius: 0.13, supported: true },
@@ -79,16 +80,16 @@ export function CadViewer(props: CadViewerProps) {
   const gridSectionColor = isLightTheme ? "#c2ccd8" : "#3a4654";
   return (
     <section className={`viewer-shell ${effectiveViewMode === "results" ? "results-view" : ""}`} aria-label="3D CAD viewer">
-      <Canvas camera={{ position: [4.8, 4.8, 4.8], up: ISO_CAMERA_UP.toArray(), fov: 42 }}>
+      <Canvas camera={{ position: [4.8, -4.8, 4.8], up: ISO_CAMERA_UP.toArray(), fov: 42 }}>
         <color attach="background" args={[viewportBackground]} />
         <ambientLight intensity={effectiveViewMode === "results" || isLightTheme ? 1.4 : 0.75} />
         <directionalLight position={[4, 6, 3]} intensity={effectiveViewMode === "results" || isLightTheme ? 1.45 : 2.2} />
-        <Grid args={[8, 8]} cellColor={gridCellColor} sectionColor={gridSectionColor} fadeDistance={12} fadeStrength={1.2} position={[0, -0.27, 0]} />
+        <Grid args={[8, 8]} cellColor={gridCellColor} sectionColor={gridSectionColor} fadeDistance={12} fadeStrength={1.2} position={[0, 0, -0.27]} rotation={[Math.PI / 2, 0, 0]} />
         <Bounds fit clip observe margin={1.65}>
           <BracketModel {...props} viewMode={effectiveViewMode} />
           <BoundsCameraReset signal={props.fitSignal} />
         </Bounds>
-        <OrbitControls ref={controlsRef} makeDefault enableDamping dampingFactor={0.08} target={[0, 1.05, 0]} />
+        <OrbitControls ref={controlsRef} makeDefault enableDamping dampingFactor={0.08} target={[0, 0.75, 0.4]} />
         <ShiftPanControls controlsRef={controlsRef} />
         <GizmoHelper alignment="bottom-left" margin={[92, 92]}>
           <CleanAxisGizmo />
