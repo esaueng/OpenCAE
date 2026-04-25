@@ -273,6 +273,7 @@ function BracketModel({ displayModel, activeStep, selectedFaceId, onSelectFace, 
 
   function hitFromEvent(event: ThreeEvent<PointerEvent> | ThreeEvent<MouseEvent>): ModelSelectionHit | null {
     if (!placementMode || isResultView) return null;
+    if (modelKind === "uploaded") return uploadedFaceHitFromEvent(event);
     const face = faceForModelHit(modelKind, displayModel.faces, event.point);
     return face ? { face, point: event.point.toArray() as [number, number, number] } : null;
   }
@@ -338,6 +339,39 @@ function gridFloorZForDisplayModel(displayModel: DisplayModel) {
   if (kind === "plate") return -PLATE_DEPTH / 2 - 0.12;
   if (kind === "cantilever") return -0.48;
   return -0.27;
+}
+
+function uploadedFaceHitFromEvent(event: ThreeEvent<PointerEvent> | ThreeEvent<MouseEvent>): ModelSelectionHit | null {
+  const normal = event.face?.normal.clone().normalize() ?? new THREE.Vector3(0, 0, 1);
+  const point = event.point.toArray() as [number, number, number];
+  return {
+    face: {
+      id: uploadedFaceId(point, normal),
+      label: labelForNormal(normal),
+      color: "#4da3ff",
+      center: point,
+      normal: normal.toArray() as [number, number, number],
+      stressValue: 72
+    },
+    point
+  };
+}
+
+function uploadedFaceId(point: [number, number, number], normal: THREE.Vector3) {
+  const values = [...point, normal.x, normal.y, normal.z].map((value) => value.toFixed(2).replace("-", "m").replace(".", "p"));
+  return `face-upload-picked-${values.join("-")}`;
+}
+
+function labelForNormal(normal: THREE.Vector3) {
+  const axis = [
+    { label: "Right face", value: normal.x },
+    { label: "Left face", value: -normal.x },
+    { label: "Back face", value: normal.y },
+    { label: "Front face", value: -normal.y },
+    { label: "Top face", value: normal.z },
+    { label: "Bottom face", value: -normal.z }
+  ].sort((left, right) => right.value - left.value)[0];
+  return axis?.value && axis.value > 0.72 ? axis.label : "Selected model face";
 }
 
 function SampleSolid({ kind, color, displayModel, pickHandlers }: { kind: SampleModelKind; color: string; displayModel?: DisplayModel; pickHandlers?: ModelPickHandlers }) {
