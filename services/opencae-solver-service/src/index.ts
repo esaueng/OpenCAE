@@ -1,4 +1,4 @@
-import { starterMaterials } from "@opencae/materials";
+import { effectiveMaterialProperties, starterMaterials } from "@opencae/materials";
 import { assessResultFailure } from "@opencae/schema";
 import type { Load, Material, ResultField, ResultSummary, RunEvent, Study } from "@opencae/schema";
 import type { ObjectStorageProvider } from "@opencae/storage";
@@ -34,9 +34,12 @@ export class LocalMockComputeBackend {
       `material=${solved.material.id}`,
       `youngsModulus=${solved.material.youngsModulus}`,
       `yieldStrength=${solved.material.yieldStrength}`,
+      `effectiveYoungsModulus=${solved.effectiveMaterial.youngsModulus}`,
+      `effectiveYieldStrength=${solved.effectiveMaterial.yieldStrength}`,
       `faces=${solved.faceCount}`,
       `loads=${solved.loadCount}`,
       `totalAppliedLoad=${solved.totalAppliedLoad}`,
+      ...Object.entries(solved.materialParameters).map(([key, value]) => `${key}=${String(value)}`),
       ...args.study.loads.map((load) => JSON.stringify({ id: load.id, type: load.type, selectionRef: load.selectionRef, parameters: load.parameters }))
     ].join("\n") + "\n";
 
@@ -68,6 +71,7 @@ export class LocalMockComputeBackend {
         "Local mesh read: 42,381 nodes, 26,944 tetra elements.",
         "Local static solver: linear elastic multi-load superposition.",
         `Material: ${solved.material.name}.`,
+        `Effective material: E=${Math.round(solved.effectiveMaterial.youngsModulus / 1_000_000).toLocaleString()} MPa, yield=${Math.round(solved.effectiveMaterial.yieldStrength / 1_000_000).toLocaleString()} MPa.`,
         `Loads evaluated: ${args.study.loads.length}.`,
         `Result faces evaluated: ${solved.faceCount}.`,
         `Total applied load: ${solved.totalAppliedLoad} N.`,
@@ -107,7 +111,9 @@ function solveStudy(study: Study, runId: string) {
   const supports = supportFacesForStudy(study, faces);
   const loads = study.loads.map((load) => loadModelFor(load, faces, supports)).filter((load): load is LoadModel => Boolean(load));
   const material = materialForStudy(study);
-  const response = materialResponse(material, loads);
+  const materialParameters = materialParametersForStudy(study);
+  const effectiveMaterial = effectiveMaterialProperties(material, materialParameters);
+  const response = materialResponse(effectiveMaterial, loads);
   const totalAppliedLoad = round(loads.reduce((sum, load) => sum + load.magnitude, 0));
   const stressValues = faces.map((face) => round(stressAtFace(face, loads, faces) * response.stressScale, 1));
   const displacementValues = faces.map((face) => round(displacementAtFace(face, loads, faces) * response.displacementScale, 4));
@@ -130,12 +136,16 @@ function solveStudy(study: Study, runId: string) {
     fieldFor(runId, "displacement", displacementValues, "mm"),
     fieldFor(runId, "safety_factor", safetyValues, "")
   ];
-  return { summary, fields, faceCount: faces.length, loadCount: loads.length, totalAppliedLoad: summary.reactionForce, material };
+  return { summary, fields, faceCount: faces.length, loadCount: loads.length, totalAppliedLoad: summary.reactionForce, material, effectiveMaterial, materialParameters };
 }
 
 function materialForStudy(study: Study): Material {
   const materialId = study.materialAssignments[0]?.materialId;
   return starterMaterials.find((material) => material.id === materialId) ?? starterMaterials[0]!;
+}
+
+function materialParametersForStudy(study: Study): Record<string, unknown> {
+  return study.materialAssignments[0]?.parameters ?? {};
 }
 
 function materialResponse(material: Material, loads: LoadModel[]): { stressScale: number; displacementScale: number; yieldMpa: number } {

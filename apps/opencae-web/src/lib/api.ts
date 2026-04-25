@@ -73,11 +73,11 @@ export async function generateMesh(studyId: string, preset: "coarse" | "medium" 
   return readJson(response);
 }
 
-export async function assignMaterial(studyId: string, materialId: string): Promise<{ study: Study; message: string }> {
+export async function assignMaterial(studyId: string, materialId: string, parameters: Record<string, unknown> = {}): Promise<{ study: Study; message: string }> {
   const response = await fetch(`/api/studies/${studyId}/materials`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ materialId })
+    body: JSON.stringify({ materialId, parameters })
   });
   return readJson(response);
 }
