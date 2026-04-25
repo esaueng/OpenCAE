@@ -1009,7 +1009,18 @@ button:disabled {
   grid-column: 3;
   grid-row: 1 / span 2;
   align-self: center;
+  justify-self: center;
+  width: 28px;
+  height: 28px;
+  display: inline-grid;
+  place-items: center;
   color: var(--color-text-subtle);
+  border-radius: var(--radius-sm);
+}
+
+.remove-glyph:hover {
+  color: var(--color-text);
+  background: var(--color-surface-hover);
 }
 
 .edit-form {

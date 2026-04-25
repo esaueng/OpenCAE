@@ -34,12 +34,14 @@ interface RightPanelProps {
   onAssignMaterial: (materialId: string) => void;
   onAddSupport: (selectionRef?: string) => void;
   onUpdateSupport: (support: Constraint) => void;
+  onRemoveSupport: (supportId: string) => void;
   onDraftLoadTypeChange: (type: LoadType) => void;
   onDraftLoadValueChange: (value: number) => void;
   onDraftLoadDirectionChange: (direction: LoadDirectionLabel) => void;
   onLoadEditorActiveChange: (active: boolean) => void;
   onAddLoad: (type: LoadType, value: number, selectionRef: string, direction: LoadDirectionLabel) => void;
   onUpdateLoad: (load: Load) => void;
+  onRemoveLoad: (loadId: string) => void;
   onGenerateMesh: (preset: "coarse" | "medium" | "fine") => void;
   onRunSimulation: () => void;
   canGenerateReport: boolean;
@@ -204,7 +206,7 @@ function MaterialPanel({ study, onAssignMaterial }: RightPanelProps) {
   );
 }
 
-function SupportsPanel({ selectedFace, study, onAddSupport, onUpdateSupport }: RightPanelProps) {
+function SupportsPanel({ selectedFace, study, onAddSupport, onUpdateSupport, onRemoveSupport }: RightPanelProps) {
   const selectedFromViewport = selectedFace ? selectionForFace(study, selectedFace.id) : undefined;
   const addLabel = study.constraints.length ? "Add another fixed support" : "Add fixed support";
   return (
@@ -212,7 +214,7 @@ function SupportsPanel({ selectedFace, study, onAddSupport, onUpdateSupport }: R
       <PlacementReadout selectedRef={selectedFromViewport} fallbackLabel={selectedFace?.label} />
       <button className="outline-action wide" disabled={!selectedFromViewport} onClick={() => selectedFromViewport && onAddSupport(selectedFromViewport.id)}><Plus size={18} />{addLabel}</button>
       <SectionTitle>Applied</SectionTitle>
-      <SupportEditorList study={study} onUpdateSupport={onUpdateSupport} />
+      <SupportEditorList study={study} onUpdateSupport={onUpdateSupport} onRemoveSupport={onRemoveSupport} />
       <Callout>Fixed supports prevent any motion of the selected face.</Callout>
     </Panel>
   );
@@ -229,6 +231,7 @@ function LoadsPanel({
   onDraftLoadDirectionChange,
   onAddLoad,
   onUpdateLoad,
+  onRemoveLoad,
   onLoadEditorActiveChange
 }: RightPanelProps) {
   const selectedFromViewport = selectedFace ? selectionForFace(study, selectedFace.id) : undefined;
@@ -266,12 +269,12 @@ function LoadsPanel({
       </label>
       <button className="outline-action wide" disabled={!selectedFromViewport} onClick={() => selectedFromViewport && onAddLoad(draftLoadType, draftLoadValue, selectedFromViewport.id, draftLoadDirection)}><Plus size={18} />Add load</button>
       <SectionTitle>Applied</SectionTitle>
-      <LoadEditorList study={study} onUpdateLoad={onUpdateLoad} onEditingChange={onLoadEditorActiveChange} />
+      <LoadEditorList study={study} onUpdateLoad={onUpdateLoad} onRemoveLoad={onRemoveLoad} onEditingChange={onLoadEditorActiveChange} />
     </Panel>
   );
 }
 
-function LoadEditorList({ study, onUpdateLoad, onEditingChange }: { study: Study; onUpdateLoad: (load: Load) => void; onEditingChange: (active: boolean) => void }) {
+function LoadEditorList({ study, onUpdateLoad, onRemoveLoad, onEditingChange }: { study: Study; onUpdateLoad: (load: Load) => void; onRemoveLoad: (loadId: string) => void; onEditingChange: (active: boolean) => void }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   useEffect(() => {
     onEditingChange(editingId !== null);
@@ -293,7 +296,7 @@ function LoadEditorList({ study, onUpdateLoad, onEditingChange }: { study: Study
               <span className="item-icon"><ArrowDown size={18} /></span>
               <strong>{capitalize(load.type)} · {String(load.parameters.value ?? "")} {units}</strong>
               <small>{label} · {directionLabelForLoad(load)} direction</small>
-              <span className="remove-glyph" aria-hidden="true"><X size={16} /></span>
+              <button className="remove-glyph" type="button" aria-label={`Remove ${capitalize(load.type)} load`} onClick={() => onRemoveLoad(load.id)}><X size={16} /></button>
             </div>
             {editing ? (
               <LoadEditForm
@@ -367,7 +370,7 @@ function LoadEditForm({ load, study, onSave, onCancel }: { load: Load; study: St
   );
 }
 
-function SupportEditorList({ study, onUpdateSupport }: { study: Study; onUpdateSupport: (support: Constraint) => void }) {
+function SupportEditorList({ study, onUpdateSupport, onRemoveSupport }: { study: Study; onUpdateSupport: (support: Constraint) => void; onRemoveSupport: (supportId: string) => void }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   if (!study.constraints.length) return <EmptyEditableList title="Supports" />;
 
@@ -384,7 +387,7 @@ function SupportEditorList({ study, onUpdateSupport }: { study: Study; onUpdateS
               <span className="item-icon warning"><SupportIcon /></span>
               <strong>{support.type === "fixed" ? "Fixed support" : "Prescribed displacement"}</strong>
               <small>{label}</small>
-              <span className="remove-glyph" aria-hidden="true"><X size={16} /></span>
+              <button className="remove-glyph" type="button" aria-label="Remove support" onClick={() => onRemoveSupport(support.id)}><X size={16} /></button>
             </div>
             {editing ? (
               <SupportEditForm

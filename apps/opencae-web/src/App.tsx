@@ -382,6 +382,9 @@ export function App() {
               )
             )
           }
+          onRemoveSupport={(supportId) =>
+            updateStudy(saveStudyPatch(study.id, { constraints: study.constraints.filter((item) => item.id !== supportId) }, "Support removed."))
+          }
           onDraftLoadTypeChange={setDraftLoadType}
           onDraftLoadValueChange={setDraftLoadValue}
           onDraftLoadDirectionChange={setDraftLoadDirection}
@@ -396,6 +399,9 @@ export function App() {
             updateStudy(
               saveStudyPatch(study.id, { loads: study.loads.map((item) => (item.id === load.id ? load : item)) }, "Load updated.")
             )
+          }
+          onRemoveLoad={(loadId) =>
+            updateStudy(saveStudyPatch(study.id, { loads: study.loads.filter((item) => item.id !== loadId) }, "Load removed."))
           }
           onGenerateMesh={(preset) => updateStudy(generateMesh(study.id, preset), "run")}
           onRunSimulation={handleRunSimulation}
