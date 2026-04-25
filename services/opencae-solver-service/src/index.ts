@@ -116,7 +116,7 @@ function solveStudy(study: Study, runId: string) {
     maxStressUnits: bracketResultSummary.maxStressUnits,
     maxDisplacement: round(Math.max(...displacementValues, 0), 3),
     maxDisplacementUnits: bracketResultSummary.maxDisplacementUnits,
-    safetyFactor: round(Math.min(...safetyValues, bracketResultSummary.safetyFactor), 2),
+    safetyFactor: round(safetyValues.length ? Math.min(...safetyValues) : bracketResultSummary.safetyFactor, 2),
     reactionForce: totalAppliedLoad || bracketResultSummary.reactionForce,
     reactionForceUnits: "N"
   };
@@ -136,11 +136,10 @@ function materialForStudy(study: Study): Material {
 function materialResponse(material: Material, loads: LoadModel[]): { stressScale: number; displacementScale: number; yieldMpa: number } {
   const reference = starterMaterials[0]!;
   const youngsScale = reference.youngsModulus / Math.max(material.youngsModulus, 1);
-  const poissonScale = 1 + (material.poissonRatio - reference.poissonRatio) * 0.3;
   const hasGravity = loads.some((load) => load.load.type === "gravity");
   const densityScale = hasGravity ? 1 + (material.density / reference.density - 1) * 0.08 : 1;
   return {
-    stressScale: round(poissonScale * densityScale, 4),
+    stressScale: round(densityScale, 4),
     displacementScale: round(youngsScale * densityScale, 4),
     yieldMpa: material.yieldStrength / 1_000_000
   };
