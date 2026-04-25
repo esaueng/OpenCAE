@@ -44,7 +44,7 @@ describe("validateStaticStressStudy", () => {
     expect(validateStaticStressStudy(study).map((item) => item.message)).toEqual([
       "Choose what the part is made of.",
       "Choose where the part is held fixed.",
-      "Choose where force or pressure is applied.",
+      "Choose where force, pressure, or payload weight is applied.",
       "Generate the mesh before running."
     ]);
   });

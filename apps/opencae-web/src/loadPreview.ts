@@ -4,6 +4,7 @@ import type { ViewerLoadMarker } from "./components/CadViewer";
 export type LoadType = "force" | "pressure" | "gravity";
 export type LoadDirectionLabel = "-Y" | "+Y" | "+X" | "-X" | "+Z" | "-Z" | "Normal";
 export type LoadDirection = [number, number, number];
+export const STANDARD_GRAVITY = 9.80665;
 
 const DIRECTION_VECTORS: Record<Exclude<LoadDirectionLabel, "Normal">, LoadDirection> = {
   "-Y": [0, -1, 0],
@@ -15,7 +16,16 @@ const DIRECTION_VECTORS: Record<Exclude<LoadDirectionLabel, "Normal">, LoadDirec
 };
 
 export function unitsForLoadType(type: LoadType) {
-  return type === "pressure" ? "kPa" : "N";
+  if (type === "pressure") return "kPa";
+  if (type === "gravity") return "kg";
+  return "N";
+}
+
+export function equivalentForceForLoad(load: Pick<Load, "type" | "parameters">): number {
+  const rawValue = Number(load.parameters.value ?? 0);
+  if (!Number.isFinite(rawValue) || rawValue <= 0) return 0;
+  if (load.type === "gravity") return rawValue * STANDARD_GRAVITY;
+  return rawValue;
 }
 
 export function directionVectorForLabel(label: LoadDirectionLabel, face: DisplayFace): LoadDirection {

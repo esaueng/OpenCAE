@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import type { DisplayFace, Load, NamedSelection, Study } from "@opencae/schema";
-import { createDraftLoadMarker, createViewerLoadMarkers, directionLabelForLoad, directionVectorForLabel, loadMarkerFromLoad } from "./loadPreview";
+import { createDraftLoadMarker, createViewerLoadMarkers, directionLabelForLoad, directionVectorForLabel, loadMarkerFromLoad, unitsForLoadType } from "./loadPreview";
 
 const face: DisplayFace = {
   id: "face-side",
@@ -44,6 +44,16 @@ describe("load preview helpers", () => {
       directionLabel: "Normal",
       stackIndex: 2,
       preview: true
+    });
+  });
+
+  test("treats gravity loads as payload mass inputs", () => {
+    expect(unitsForLoadType("gravity")).toBe("kg");
+    expect(createDraftLoadMarker({ selectedFace: face, type: "gravity", value: 10, directionLabel: "-Z", stackIndex: 0 })).toMatchObject({
+      type: "gravity",
+      value: 10,
+      units: "kg",
+      direction: [0, 0, -1]
     });
   });
 

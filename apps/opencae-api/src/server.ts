@@ -312,7 +312,7 @@ api.post("/api/studies/:studyId/loads", async (request, reply) => {
     id: `load-${crypto.randomUUID()}`,
     type,
     selectionRef: body?.selectionRef ?? "selection-load-face",
-    parameters: { value: body?.value ?? 500, units: type === "pressure" ? "kPa" : "N", direction: body?.direction ?? [0, 0, -1] },
+    parameters: { value: body?.value ?? 500, units: unitsForLoadType(type), direction: body?.direction ?? [0, 0, -1] },
     status: "complete"
   };
   const next = { ...study, loads: [...study.loads, load] };
@@ -466,6 +466,12 @@ function publish(runId: string, type: RunEvent["type"], progress: number | undef
 
 function isLoadType(type: unknown): type is Load["type"] {
   return type === "force" || type === "pressure" || type === "gravity";
+}
+
+function unitsForLoadType(type: Load["type"]) {
+  if (type === "pressure") return "kPa";
+  if (type === "gravity") return "kg";
+  return "N";
 }
 
 function latestCompletedRunForProject(project: Project): StudyRun | undefined {

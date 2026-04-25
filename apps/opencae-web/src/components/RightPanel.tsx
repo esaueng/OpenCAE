@@ -5,7 +5,7 @@ import { assessResultFailure, estimateAllowableLoadForSafetyFactor } from "@open
 import type { Constraint, DisplayFace, DisplayModel, Load, Project, ResultSummary, Study } from "@opencae/schema";
 import type { ResultMode, ViewMode } from "./CadViewer";
 import type { StepId } from "./StepBar";
-import { directionLabelForLoad, directionVectorForLabel, unitsForLoadType, type LoadDirectionLabel, type LoadType } from "../loadPreview";
+import { directionLabelForLoad, directionVectorForLabel, equivalentForceForLoad, unitsForLoadType, type LoadDirectionLabel, type LoadType } from "../loadPreview";
 import type { SampleModelId } from "../lib/api";
 import { formatModelOrientation, getModelOrientation, type RotationAxis } from "../modelOrientation";
 
@@ -344,19 +344,31 @@ function LoadsPanel({
   const selectedFromViewport = selectedFace ? selectionForFace(study, selectedFace.id) : undefined;
   const hasSelectedFace = Boolean(selectedFace);
   const units = unitsForLoadType(draftLoadType);
+  const valueLabel = draftLoadType === "gravity" ? "Payload mass" : "Magnitude";
+  const addLabel = draftLoadType === "gravity" ? "Add payload mass" : "Add load";
   return (
-    <Panel title="Loads" helper="Choose where force or pressure is applied. Select a face, then add a load.">
+    <Panel title="Loads" helper="Choose where force, pressure, or payload weight is applied. Select a face, then add a load.">
       <PlacementReadout selectedRef={selectedFromViewport} fallbackLabel={selectedFace?.label} />
       <label className="field">
         Load type
         <div className="segmented" role="group" aria-label="Load type">
           {(["force", "pressure", "gravity"] as const).map((type) => (
-            <button key={type} className={draftLoadType === type ? "active" : ""} type="button" onClick={() => onDraftLoadTypeChange(type)}>{capitalize(type)}</button>
+            <button
+              key={type}
+              className={draftLoadType === type ? "active" : ""}
+              type="button"
+              onClick={() => {
+                onDraftLoadTypeChange(type);
+                if (type !== draftLoadType) onDraftLoadValueChange(defaultValueForLoadType(type));
+              }}
+            >
+              {loadTypeLabel(type)}
+            </button>
           ))}
         </div>
       </label>
       <label className="field">
-        Magnitude
+        {valueLabel}
         <span className="input-with-unit">
           <input
             id="load-value"
@@ -367,6 +379,7 @@ function LoadsPanel({
           <span>{units}</span>
         </span>
       </label>
+      {draftLoadType === "gravity" && <Callout>{formatNumber(equivalentForceForLoad({ type: "gravity", parameters: { value: draftLoadValue } }))} N equivalent weight.</Callout>}
       <label className="field">
         Direction
         <select value={draftLoadDirection} onChange={(event) => onDraftLoadDirectionChange(event.currentTarget.value as LoadDirectionLabel)}>
@@ -375,7 +388,7 @@ function LoadsPanel({
           ))}
         </select>
       </label>
-      <button className="outline-action wide" disabled={!hasSelectedFace} onClick={() => hasSelectedFace && onAddLoad(draftLoadType, draftLoadValue, selectedFromViewport?.id, draftLoadDirection)}><Plus size={18} />Add load</button>
+      <button className="outline-action wide" disabled={!hasSelectedFace} onClick={() => hasSelectedFace && onAddLoad(draftLoadType, draftLoadValue, selectedFromViewport?.id, draftLoadDirection)}><Plus size={18} />{addLabel}</button>
       <SectionTitle>Applied</SectionTitle>
       <LoadEditorList study={study} onUpdateLoad={onUpdateLoad} onRemoveLoad={onRemoveLoad} onEditingChange={onLoadEditorActiveChange} />
     </Panel>
@@ -395,16 +408,17 @@ function LoadEditorList({ study, onUpdateLoad, onRemoveLoad, onEditingChange }: 
       <h3>Loads</h3>
       {study.loads.map((load) => {
         const editing = editingId === load.id;
-        const units = String(load.parameters.units ?? (load.type === "pressure" ? "kPa" : "N"));
+        const units = String(load.parameters.units ?? unitsForLoadType(load.type));
         const selection = study.namedSelections.find((candidate) => candidate.id === load.selectionRef);
         const label = selection?.geometryRefs[0]?.label ?? "selected face";
+        const equivalentForce = load.type === "gravity" ? ` · ${formatNumber(equivalentForceForLoad(load))} N weight` : "";
         return (
           <div className="editable-item" key={load.id}>
             <div className="editable-summary">
               <span className="item-icon"><ArrowDown size={18} /></span>
-              <strong>{capitalize(load.type)} · {String(load.parameters.value ?? "")} {units}</strong>
-              <small>{label} · {directionLabelForLoad(load)} direction</small>
-              <button className="remove-glyph" type="button" aria-label={`Remove ${capitalize(load.type)} load`} onClick={() => onRemoveLoad(load.id)}><X size={16} /></button>
+              <strong>{loadTypeLabel(load.type)} · {String(load.parameters.value ?? "")} {units}</strong>
+              <small>{label} · {directionLabelForLoad(load)} direction{equivalentForce}</small>
+              <button className="remove-glyph" type="button" aria-label={`Remove ${loadTypeLabel(load.type)} load`} onClick={() => onRemoveLoad(load.id)}><X size={16} /></button>
             </div>
             {editing ? (
               <LoadEditForm
@@ -448,13 +462,14 @@ function LoadEditForm({ load, study, onSave, onCancel }: { load: Load; study: St
         <select value={type} onChange={(event) => setType(event.currentTarget.value as "force" | "pressure" | "gravity")}>
           <option value="force">Force</option>
           <option value="pressure">Pressure</option>
-          <option value="gravity">Gravity</option>
+          <option value="gravity">Payload mass</option>
         </select>
       </label>
       <label className="field">
-        Magnitude
+        {type === "gravity" ? "Payload mass" : "Magnitude"}
         <input type="number" value={value} onChange={(event) => setValue(event.currentTarget.value)} />
       </label>
+      {type === "gravity" && <Callout>{formatNumber(equivalentForceForLoad({ type: "gravity", parameters: { value: Number(value) } }))} N equivalent weight.</Callout>}
       <PlacementReadout selectedRef={selectedRef} />
       <label className="field">
         Direction
@@ -865,6 +880,22 @@ function formatDimension(value: number) {
 function formatLoadCapacity(value: number) {
   if (!Number.isFinite(value)) return "--";
   return value.toLocaleString(undefined, { maximumFractionDigits: value >= 100 ? 0 : 2 });
+}
+
+function formatNumber(value: number) {
+  if (!Number.isFinite(value)) return "--";
+  return value.toLocaleString(undefined, { maximumFractionDigits: value >= 100 ? 0 : 1 });
+}
+
+function loadTypeLabel(type: LoadType) {
+  if (type === "gravity") return "Payload mass";
+  return capitalize(type);
+}
+
+function defaultValueForLoadType(type: LoadType) {
+  if (type === "pressure") return 100;
+  if (type === "gravity") return 5;
+  return 500;
 }
 
 function directionOptionLabel(direction: LoadDirectionLabel) {
