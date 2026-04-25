@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { Constraint, DisplayModel, Load, Project, ResultField, ResultSummary, RunEvent, Study } from "@opencae/schema";
+import type { Constraint, DisplayFace, DisplayModel, Load, NamedSelection, Project, ResultField, ResultSummary, RunEvent, Study } from "@opencae/schema";
 import { RotateCcw, Save } from "lucide-react";
 import { addLoad, addSupport, assignMaterial, createProject, generateMesh, getResults, importLocalProject, loadSampleProject, renameProject, runSimulation, subscribeToRun, updateStudy as saveStudyPatch, uploadModel, type SampleModelId } from "./lib/api";
 import { BottomPanel } from "./components/BottomPanel";
@@ -204,6 +204,39 @@ export function App() {
     if (nextStep) navigateToStep(nextStep);
   }
 
+  function handleViewportFaceSelect(face: DisplayFace) {
+    setSelectedFaceId(face.id);
+    if (displayModel && !displayModel.faces.some((item) => item.id === face.id)) {
+      setDisplayModel({ ...displayModel, faces: [...displayModel.faces, face] });
+    }
+    if (activeStep === "supports") {
+      void addFixedSupportForFace(face);
+      return;
+    }
+    pushMessage(`${face.label} selected.`);
+  }
+
+  async function addFixedSupportForFace(face: DisplayFace) {
+    if (!study) return;
+    const existingSelection = study.namedSelections.find((item) => item.entityType === "face" && item.geometryRefs.some((ref) => ref.entityId === face.id));
+    const selection = existingSelection ?? namedSelectionForFace(study, face);
+    if (study.constraints.some((support) => support.selectionRef === selection.id)) {
+      pushMessage(`Fixed support already exists on ${selection.name}.`);
+      return;
+    }
+    const nextSelections = existingSelection ? study.namedSelections : [...study.namedSelections, selection];
+    const nextSupport: Constraint = {
+      id: `constraint-${crypto.randomUUID()}`,
+      type: "fixed",
+      selectionRef: selection.id,
+      parameters: {},
+      status: "complete"
+    };
+    await updateStudy(
+      saveStudyPatch(study.id, { namedSelections: nextSelections, constraints: [...study.constraints, nextSupport] }, "Fixed support added.")
+    );
+  }
+
   async function handleRenameProject(name: string) {
     if (!project) return;
     const nextName = name.trim().replace(/\s+/g, " ");
@@ -349,10 +382,7 @@ export function App() {
           displayModel={displayModel}
           activeStep={activeStep}
           selectedFaceId={selectedFaceId}
-          onSelectFace={(face) => {
-            setSelectedFaceId(face.id);
-            pushMessage(`${face.label} selected.`);
-          }}
+          onSelectFace={handleViewportFaceSelect}
           viewMode={viewMode}
           resultMode={resultMode}
           showDeformed={showDeformed}
@@ -479,6 +509,17 @@ function latestReportRunId(study: Study | null, activeRunId: string): string | n
   if (study.runs.some((run) => run.id === activeRunId && (run.reportRef || run.resultRef || run.status === "complete"))) return activeRunId;
   const completed = [...study.runs].reverse().find((run) => run.reportRef || run.resultRef || run.status === "complete");
   return completed?.id ?? null;
+}
+
+function namedSelectionForFace(study: Study, face: DisplayFace): NamedSelection {
+  const bodyId = study.geometryScope[0]?.bodyId ?? "body-uploaded";
+  return {
+    id: `selection-${face.id}`,
+    name: face.label,
+    entityType: "face",
+    geometryRefs: [{ bodyId, entityType: "face", entityId: face.id, label: face.label }],
+    fingerprint: `${face.id}-${face.center.map((value) => value.toFixed(3)).join("-")}`
+  };
 }
 
 async function saveProjectToLocalDisk(project: Project, displayModel: DisplayModel, results?: LocalResultBundle): Promise<string> {
