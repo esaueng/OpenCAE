@@ -87,13 +87,13 @@ describe("load preview helpers", () => {
       id: "load-1",
       type: "force",
       selectionRef: "selection-side",
-      parameters: { value: 500, units: "N", direction: [0, -1, 0] },
+      parameters: { value: 500, units: "N", direction: [0, 0, -1] },
       status: "complete"
     };
     const markers = createViewerLoadMarkers({
       study: { ...study, loads: [savedLoad] } as unknown as Study,
       selectedFace: face,
-      draftLoad: { type: "force", value: 500, directionLabel: "-Y" },
+      draftLoad: { type: "force", value: 500, directionLabel: "-Z" },
       includeDraftPreview: false
     });
 

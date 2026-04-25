@@ -63,7 +63,7 @@ export function App() {
   const [resultFields, setResultFields] = useState<ResultField[]>([]);
   const [draftLoadType, setDraftLoadType] = useState<LoadType>("force");
   const [draftLoadValue, setDraftLoadValue] = useState(500);
-  const [draftLoadDirection, setDraftLoadDirection] = useState<LoadDirectionLabel>("-Y");
+  const [draftLoadDirection, setDraftLoadDirection] = useState<LoadDirectionLabel>("-Z");
   const [loadEditorActive, setLoadEditorActive] = useState(false);
   const [sampleModel, setSampleModel] = useState<SampleModelId>("bracket");
 

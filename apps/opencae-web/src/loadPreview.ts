@@ -24,7 +24,7 @@ export function directionVectorForLabel(label: LoadDirectionLabel, face: Display
 }
 
 export function directionLabelForVector(direction: unknown): LoadDirectionLabel {
-  if (!isDirection(direction)) return "-Y";
+  if (!isDirection(direction)) return "-Z";
   const [x, y, z] = direction;
   if (x === 1 && y === 0 && z === 0) return "+X";
   if (x === -1 && y === 0 && z === 0) return "-X";
@@ -43,7 +43,7 @@ export function loadMarkerFromLoad(load: Load, study: Study, stackIndex: number)
   const selection = study.namedSelections.find((item) => item.id === load.selectionRef);
   const faceId = selection?.geometryRefs[0]?.entityId;
   if (!faceId) return null;
-  const direction = isDirection(load.parameters.direction) ? load.parameters.direction : ([0, -1, 0] as LoadDirection);
+  const direction = isDirection(load.parameters.direction) ? load.parameters.direction : ([0, 0, -1] as LoadDirection);
   return {
     id: load.id,
     faceId,

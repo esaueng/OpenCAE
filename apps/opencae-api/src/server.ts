@@ -311,7 +311,7 @@ api.post("/api/studies/:studyId/loads", async (request, reply) => {
     id: `load-${crypto.randomUUID()}`,
     type,
     selectionRef: body?.selectionRef ?? "selection-load-face",
-    parameters: { value: body?.value ?? 500, units: type === "pressure" ? "kPa" : "N", direction: body?.direction ?? [0, -1, 0] },
+    parameters: { value: body?.value ?? 500, units: type === "pressure" ? "kPa" : "N", direction: body?.direction ?? [0, 0, -1] },
     status: "complete"
   };
   const next = { ...study, loads: [...study.loads, load] };

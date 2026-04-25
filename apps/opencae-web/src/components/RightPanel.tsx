@@ -85,10 +85,10 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sa
   const sampleLabel = sampleModel === "bracket" ? "Bracket Demo" : sampleModel === "plate" ? "Plate Demo" : "Cantilever Demo";
   const preconfigured =
     sampleModel === "bracket"
-      ? { support: "2 mounting holes · flange", load: "top face · -Y direction", callout: "An L-bracket is bolted at the flange; a vertical load on the top face creates a peak stress at the inside corner, reduced by the gusset rib." }
+      ? { support: "2 mounting holes · flange", load: "top face · -Z direction", callout: "An L-bracket is bolted at the flange; a vertical load on the top face creates a peak stress at the inside corner, reduced by the gusset rib." }
       : sampleModel === "plate"
-        ? { support: "left clamp face", load: "right load pad · -Y direction", callout: "A flat plate is constrained on the left and loaded on the opposite pad, with the central hole acting as the stress concentration." }
-        : { support: "fixed end face", load: "free end face · -Y direction", callout: "A cantilever beam is fixed at one end and loaded at the free end, producing bending stress along the beam span." };
+        ? { support: "left clamp face", load: "right load pad · -Z direction", callout: "A flat plate is constrained on the left and loaded on the opposite pad, with the central hole acting as the stress concentration." }
+        : { support: "fixed end face", load: "free end face · -Z direction", callout: "A cantilever beam is fixed at one end and loaded at the free end, producing bending stress along the beam span." };
 
   function handleLoadSampleClick() {
     if (!confirmSampleLoad) {
