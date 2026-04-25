@@ -145,6 +145,13 @@ export const ResultSummarySchema = z.object({
   maxDisplacement: z.number(),
   maxDisplacementUnits: z.string(),
   safetyFactor: z.number(),
+  failureAssessment: z
+    .object({
+      status: z.enum(["pass", "warning", "fail", "unknown"]),
+      title: z.string(),
+      message: z.string()
+    })
+    .optional(),
   reactionForce: z.number(),
   reactionForceUnits: z.string()
 });
@@ -172,6 +179,46 @@ export type StudyRun = z.infer<typeof StudyRunSchema>;
 export type Study = z.infer<typeof StudySchema>;
 export type Project = z.infer<typeof ProjectSchema>;
 export type RunEvent = z.infer<typeof RunEventSchema>;
+export type FailureAssessment = NonNullable<ResultSummary["failureAssessment"]>;
+
+export function assessResultFailure(summary: Pick<ResultSummary, "safetyFactor" | "maxStress" | "maxStressUnits">): FailureAssessment {
+  const safetyFactor = Number(summary.safetyFactor);
+  if (!Number.isFinite(safetyFactor) || safetyFactor <= 0) {
+    return {
+      status: "unknown",
+      title: "Failure check unavailable",
+      message: "Run the simulation with a valid material, support, load, and mesh to assess failure risk."
+    };
+  }
+
+  const stressText = `${formatAssessmentNumber(summary.maxStress)} ${summary.maxStressUnits}`;
+  if (safetyFactor < 1) {
+    return {
+      status: "fail",
+      title: "Likely to fail",
+      message: `Peak stress is ${stressText}, which exceeds the assigned material yield limit.`
+    };
+  }
+
+  if (safetyFactor < 1.5) {
+    return {
+      status: "warning",
+      title: "Low safety margin",
+      message: `Safety factor is ${formatAssessmentNumber(safetyFactor)}. Increase material strength, section size, or reduce load.`
+    };
+  }
+
+  return {
+    status: "pass",
+    title: "Unlikely to yield",
+    message: `Safety factor is ${formatAssessmentNumber(safetyFactor)}. Peak stress is below the assigned material yield limit.`
+  };
+}
+
+function formatAssessmentNumber(value: number): string {
+  if (!Number.isFinite(value)) return "unknown";
+  return value.toLocaleString(undefined, { maximumFractionDigits: 3 });
+}
 
 export interface DisplayFace {
   id: string;

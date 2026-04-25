@@ -1,4 +1,5 @@
 import { starterMaterials } from "@opencae/materials";
+import { assessResultFailure } from "@opencae/schema";
 import type { Load, Material, ResultField, ResultSummary, RunEvent, Study } from "@opencae/schema";
 import type { ObjectStorageProvider } from "@opencae/storage";
 import { bracketDisplayModel, bracketResultSummary } from "@opencae/db/sample-data";
@@ -111,7 +112,7 @@ function solveStudy(study: Study, runId: string) {
   const stressValues = faces.map((face) => round(stressAtFace(face, loads, faces) * response.stressScale, 1));
   const displacementValues = faces.map((face) => round(displacementAtFace(face, loads, faces) * response.displacementScale, 4));
   const safetyValues = stressValues.map((stress) => round(Math.max(0.05, response.yieldMpa / Math.max(stress, 0.001)), 2));
-  const summary: ResultSummary = {
+  const summaryBase = {
     maxStress: round(Math.max(...stressValues, 0), 1),
     maxStressUnits: bracketResultSummary.maxStressUnits,
     maxDisplacement: round(Math.max(...displacementValues, 0), 3),
@@ -119,6 +120,10 @@ function solveStudy(study: Study, runId: string) {
     safetyFactor: round(safetyValues.length ? Math.min(...safetyValues) : bracketResultSummary.safetyFactor, 2),
     reactionForce: totalAppliedLoad || bracketResultSummary.reactionForce,
     reactionForceUnits: "N"
+  };
+  const summary: ResultSummary = {
+    ...summaryBase,
+    failureAssessment: assessResultFailure(summaryBase)
   };
   const fields: ResultField[] = [
     fieldFor(runId, "stress", stressValues, "MPa"),

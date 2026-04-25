@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Anchor, ArrowDown, Check, Download, Eye, FileText, Grid3X3, Maximize2, Play, Plus, RotateCcw, Ruler, Upload, X } from "lucide-react";
+import { AlertTriangle, Anchor, ArrowDown, Check, Download, Eye, FileText, Grid3X3, Maximize2, Play, Plus, RotateCcw, Ruler, ShieldCheck, Upload, X } from "lucide-react";
 import { starterMaterials } from "@opencae/materials";
+import { assessResultFailure } from "@opencae/schema";
 import type { Constraint, DisplayFace, DisplayModel, Load, Project, ResultSummary, Study } from "@opencae/schema";
 import type { ResultMode, ViewMode } from "./CadViewer";
 import type { StepId } from "./StepBar";
@@ -519,9 +520,17 @@ function ResultsPanel({
   reportFilename,
   onGenerateReport
 }: RightPanelProps) {
+  const assessment = resultSummary.failureAssessment ?? assessResultFailure(resultSummary);
+  const AssessmentIcon = assessment.status === "pass" ? ShieldCheck : AlertTriangle;
   return (
     <Panel title="Results" helper="View stress and displacement directly on the 3D model.">
-      <Callout>Use the mode controls to inspect stress, displacement, or factor of safety on the 3D model.</Callout>
+      <div className={`failure-assessment ${assessment.status}`}>
+        <span className="assessment-icon"><AssessmentIcon size={20} /></span>
+        <span>
+          <strong>{assessment.title}</strong>
+          <small>{assessment.message}</small>
+        </span>
+      </div>
       <div className="result-buttons">
         <button className={resultMode === "stress" ? "primary" : "secondary"} onClick={() => onResultModeChange("stress")}>Stress</button>
         <button className={resultMode === "displacement" ? "primary" : "secondary"} onClick={() => onResultModeChange("displacement")}>Displacement</button>
@@ -546,6 +555,7 @@ function ResultsPanel({
         <Info label="Max stress" value={`${resultSummary.maxStress} ${resultSummary.maxStressUnits}`} />
         <Info label="Max displacement" value={`${resultSummary.maxDisplacement} ${resultSummary.maxDisplacementUnits}`} />
         <Info label="Safety factor" value={String(resultSummary.safetyFactor)} />
+        <Info label="Failure check" value={assessment.title} />
         <Info label="Reaction force" value={`${resultSummary.reactionForce} ${resultSummary.reactionForceUnits}`} />
       </div>
       <div className="legend"><span /> <small>Low</small><small>High</small></div>

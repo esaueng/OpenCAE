@@ -52,15 +52,22 @@ describe("LocalReportProvider", () => {
     expect(html).toContain("Stress contour preview on the analyzed model");
     expect(html).not.toContain("feGaussianBlur");
   });
+
+  test("includes a failure assessment for low safety-factor results", () => {
+    const html = buildHtmlReport("run-a", summary(500, 0.82));
+
+    expect(html).toContain("Likely to fail");
+    expect(html).toContain("exceeds the assigned material yield limit");
+  });
 });
 
-function summary(reactionForce: number) {
+function summary(reactionForce: number, safetyFactor = 2) {
   return {
     maxStress: reactionForce / 10,
     maxStressUnits: "MPa",
     maxDisplacement: reactionForce / 1000,
     maxDisplacementUnits: "mm",
-    safetyFactor: 2,
+    safetyFactor,
     reactionForce,
     reactionForceUnits: "N"
   };

@@ -947,6 +947,71 @@ button:disabled {
   line-height: var(--lh-loose);
 }
 
+.failure-assessment {
+  margin-top: 14px;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  padding: 12px;
+  color: var(--color-text);
+  background: rgba(77, 163, 255, 0.12);
+  border-left: 3px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+}
+
+.failure-assessment.fail {
+  background: rgba(239, 68, 68, 0.12);
+  border-left-color: var(--color-error);
+}
+
+.failure-assessment.warning {
+  background: rgba(245, 158, 11, 0.13);
+  border-left-color: var(--color-warning);
+}
+
+.failure-assessment.pass {
+  background: rgba(34, 197, 94, 0.12);
+  border-left-color: var(--color-success);
+}
+
+.failure-assessment .assessment-icon {
+  width: 28px;
+  height: 28px;
+  display: inline-grid;
+  place-items: center;
+  color: var(--color-accent);
+}
+
+.failure-assessment.fail .assessment-icon {
+  color: var(--color-error);
+}
+
+.failure-assessment.warning .assessment-icon {
+  color: var(--color-warning);
+}
+
+.failure-assessment.pass .assessment-icon {
+  color: var(--color-success);
+}
+
+.failure-assessment strong,
+.failure-assessment small {
+  display: block;
+}
+
+.failure-assessment strong {
+  font-size: var(--fs-md);
+  font-weight: var(--fw-medium);
+}
+
+.failure-assessment small {
+  margin-top: 3px;
+  color: var(--color-text-muted);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-loose);
+}
+
 .list-block p {
   margin: 6px 0;
   color: var(--color-text-muted);

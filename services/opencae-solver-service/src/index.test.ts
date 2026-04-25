@@ -172,6 +172,10 @@ describe("LocalMockComputeBackend", () => {
       expect(displacementValues.indexOf(Math.max(...displacementValues))).toBe(1);
       expect(freeEndDisplacement).toBeGreaterThan(fixedEndDisplacement * 2);
       expect(freeEndDisplacement).toBeGreaterThan(10);
+      expect(result.summary.failureAssessment).toMatchObject({
+        status: "fail",
+        title: "Likely to fail"
+      });
     } finally {
       vi.useRealTimers();
     }
