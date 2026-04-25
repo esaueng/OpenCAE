@@ -9,6 +9,7 @@ import * as THREE from "three";
 import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
 import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
 import type { StepId } from "./StepBar";
+import { faceForModelHit, type SampleModelKind } from "../modelSelection";
 import { resultSamplesForFaces, type FaceResultSample } from "../resultFields";
 
 export type ViewMode = "model" | "mesh" | "results";
@@ -61,9 +62,13 @@ const BRACKET_HOLES = [
   { id: "base-hole-left", center: [0.24, 0] as [number, number], radius: 0.13, supported: true },
   { id: "base-hole-right", center: [1.2, 0] as [number, number], radius: 0.13, supported: true }
 ];
-type SampleModelKind = "blank" | "bracket" | "plate" | "cantilever" | "uploaded";
 type ViewerOrbitControls = ElementRef<typeof OrbitControls>;
-const UPLOADED_BOX_SIZE: [number, number, number] = [2.2, 1.44, 1.04];
+type ModelSelectionHit = { face: DisplayFace; point: [number, number, number] };
+type ModelPickHandlers = {
+  onPointerMove?: (event: ThreeEvent<PointerEvent>) => void;
+  onPointerOut?: () => void;
+  onClick?: (event: ThreeEvent<MouseEvent>) => void;
+};
 
 export function CadViewer(props: CadViewerProps) {
   const controlsRef = useRef<ViewerOrbitControls | null>(null);
@@ -244,12 +249,46 @@ function AxisDot({ color, position }: { color: string; position: [number, number
 }
 
 function BracketModel({ displayModel, activeStep, selectedFaceId, onSelectFace, viewMode, resultMode, showDeformed, stressExaggeration, resultFields, loadMarkers, supportMarkers }: CadViewerProps) {
-  const [hovered, setHovered] = useState<string | null>(null);
+  const [hoveredHit, setHoveredHit] = useState<ModelSelectionHit | null>(null);
+  const [selectedHit, setSelectedHit] = useState<ModelSelectionHit | null>(null);
   const modelKind = modelKindForDisplayModel(displayModel);
   const materialColor = useMemo(() => colorForResult(displayModel.faces, viewMode, resultMode), [displayModel.faces, resultMode, viewMode]);
   const showResultMarkers = viewMode === "results" && activeStep === "results";
   const isResultView = viewMode === "results";
   const showBoundaryMarkers = !isResultView;
+  const placementMode = activeStep === "loads" || activeStep === "supports";
+  const activeHit = hoveredHit ?? selectedHit;
+
+  useEffect(() => {
+    if (!selectedFaceId) {
+      setSelectedHit(null);
+      return;
+    }
+    if (selectedHit?.face.id === selectedFaceId) return;
+    const face = displayModel.faces.find((candidate) => candidate.id === selectedFaceId);
+    setSelectedHit(face ? { face, point: face.center } : null);
+  }, [displayModel.faces, selectedFaceId, selectedHit?.face.id]);
+
+  function hitFromEvent(event: ThreeEvent<PointerEvent> | ThreeEvent<MouseEvent>): ModelSelectionHit | null {
+    if (!placementMode || isResultView) return null;
+    const face = faceForModelHit(modelKind, displayModel.faces, event.point);
+    return face ? { face, point: event.point.toArray() as [number, number, number] } : null;
+  }
+
+  const pickHandlers: ModelPickHandlers = {
+    onPointerMove: (event) => {
+      const hit = hitFromEvent(event);
+      setHoveredHit(hit);
+    },
+    onPointerOut: () => setHoveredHit(null),
+    onClick: (event) => {
+      const hit = hitFromEvent(event);
+      if (!hit) return;
+      event.stopPropagation();
+      setSelectedHit(hit);
+      onSelectFace(hit.face);
+    }
+  };
 
   return (
     <group>
@@ -264,22 +303,11 @@ function BracketModel({ displayModel, activeStep, selectedFaceId, onSelectFace, 
           loadMarkers={loadMarkers.filter((marker) => !marker.preview)}
         />
       ) : (
-        <SampleSolid kind={modelKind} displayModel={displayModel} color={materialColor("face-base-bottom")} />
+        <SampleSolid kind={modelKind} displayModel={displayModel} color={materialColor("face-base-bottom")} pickHandlers={pickHandlers} />
       )}
       <HoleRims kind={modelKind} />
       {viewMode === "mesh" && <MeshOverlay kind={modelKind} />}
-      {(modelKind === "uploaded" && !displayModel.visualMesh ? [] : displayModel.faces).map((face) => (
-        <FacePickTarget
-          key={face.id}
-          face={face}
-          modelKind={modelKind}
-          placementMode={activeStep === "loads" || activeStep === "supports"}
-          selected={selectedFaceId === face.id}
-          hovered={hovered === face.id}
-          onHover={setHovered}
-          onSelect={onSelectFace}
-        />
-      ))}
+      {activeHit && <ModelHitLabel hit={activeHit} active={activeHit.face.id === selectedFaceId} />}
       {showBoundaryMarkers && loadMarkers.map((marker) => {
         const face = displayModel.faces.find((item) => item.id === marker.faceId);
         return face ? <LoadGlyph key={marker.id} marker={marker} face={face} active={activeStep === "loads"} /> : null;
@@ -301,25 +329,25 @@ function modelKindForDisplayModel(displayModel: DisplayModel): SampleModelKind {
   return "bracket";
 }
 
-function SampleSolid({ kind, color, displayModel }: { kind: SampleModelKind; color: string; displayModel?: DisplayModel }) {
+function SampleSolid({ kind, color, displayModel, pickHandlers }: { kind: SampleModelKind; color: string; displayModel?: DisplayModel; pickHandlers?: ModelPickHandlers }) {
   if (kind === "blank") return null;
-  if (kind === "uploaded") return <UploadedSolid displayModel={displayModel} color={color} />;
-  if (kind === "plate") return <PlateSolid color={color} />;
-  if (kind === "cantilever") return <CantileverSolid color={color} />;
-  return <BracketSolid color={color} />;
+  if (kind === "uploaded") return <UploadedSolid displayModel={displayModel} color={color} pickHandlers={pickHandlers} />;
+  if (kind === "plate") return <PlateSolid color={color} pickHandlers={pickHandlers} />;
+  if (kind === "cantilever") return <CantileverSolid color={color} pickHandlers={pickHandlers} />;
+  return <BracketSolid color={color} pickHandlers={pickHandlers} />;
 }
 
-function BracketSolid({ color }: { color: string }) {
+function BracketSolid({ color, pickHandlers }: { color: string; pickHandlers?: ModelPickHandlers }) {
   const bodyGeometry = useMemo(() => createBracketBodyGeometry(), []);
   const ribGeometry = useMemo(() => createRibGeometry(), []);
   return (
     <group>
-      <mesh>
+      <mesh {...pickHandlers}>
         <primitive attach="geometry" object={bodyGeometry} />
         <meshStandardMaterial color={color} metalness={0.22} roughness={0.52} />
         <Edges color="#aebdca" threshold={15} />
       </mesh>
-      <mesh>
+      <mesh {...pickHandlers}>
         <primitive attach="geometry" object={ribGeometry} />
         <meshStandardMaterial color="#a8b8c6" metalness={0.18} roughness={0.5} />
         <Edges color="#c8d3df" threshold={15} />
@@ -328,10 +356,10 @@ function BracketSolid({ color }: { color: string }) {
   );
 }
 
-function PlateSolid({ color }: { color: string }) {
+function PlateSolid({ color, pickHandlers }: { color: string; pickHandlers?: ModelPickHandlers }) {
   const plateGeometry = useMemo(() => createPlateGeometry(), []);
   return (
-    <mesh>
+    <mesh {...pickHandlers}>
       <primitive attach="geometry" object={plateGeometry} />
       <meshStandardMaterial color={color} metalness={0.2} roughness={0.5} />
       <Edges color="#c8d3df" threshold={15} />
@@ -339,9 +367,9 @@ function PlateSolid({ color }: { color: string }) {
   );
 }
 
-function CantileverSolid({ color }: { color: string }) {
+function CantileverSolid({ color, pickHandlers }: { color: string; pickHandlers?: ModelPickHandlers }) {
   return (
-    <mesh position={[0, 0.18, 0]}>
+    <mesh position={[0, 0.18, 0]} {...pickHandlers}>
       <boxGeometry args={[3.8, 0.5, 0.72]} />
       <meshStandardMaterial color={color} metalness={0.2} roughness={0.5} />
       <Edges color="#c8d3df" threshold={15} />
@@ -349,13 +377,13 @@ function CantileverSolid({ color }: { color: string }) {
   );
 }
 
-function UploadedSolid({ displayModel, color }: { displayModel?: DisplayModel; color: string }) {
+function UploadedSolid({ displayModel, color, pickHandlers }: { displayModel?: DisplayModel; color: string; pickHandlers?: ModelPickHandlers }) {
   if (!displayModel?.visualMesh) return <UnsupportedUploadedModelNotice filename={displayModel?.name ?? "Uploaded model"} />;
-  if (displayModel.visualMesh.format === "obj") return <UploadedObjModel displayModel={displayModel} />;
-  return <UploadedStlModel displayModel={displayModel} color={color} />;
+  if (displayModel.visualMesh.format === "obj") return <UploadedObjModel displayModel={displayModel} pickHandlers={pickHandlers} />;
+  return <UploadedStlModel displayModel={displayModel} color={color} pickHandlers={pickHandlers} />;
 }
 
-function UploadedStlModel({ displayModel, color }: { displayModel: DisplayModel; color: string }) {
+function UploadedStlModel({ displayModel, color, pickHandlers }: { displayModel: DisplayModel; color: string; pickHandlers?: ModelPickHandlers }) {
   const geometry = useMemo(() => {
     const parsed = new STLLoader().parse(base64ToArrayBuffer(displayModel.visualMesh?.contentBase64 ?? ""));
     normalizeGeometry(parsed);
@@ -364,14 +392,14 @@ function UploadedStlModel({ displayModel, color }: { displayModel: DisplayModel;
   }, [displayModel.visualMesh?.contentBase64]);
 
   return (
-    <mesh geometry={geometry}>
+    <mesh geometry={geometry} {...pickHandlers}>
       <meshStandardMaterial color={color} metalness={0.18} roughness={0.54} />
       <Edges color="#c8d3df" threshold={15} />
     </mesh>
   );
 }
 
-function UploadedObjModel({ displayModel }: { displayModel: DisplayModel }) {
+function UploadedObjModel({ displayModel, pickHandlers }: { displayModel: DisplayModel; pickHandlers?: ModelPickHandlers }) {
   const object = useMemo(() => {
     const text = new TextDecoder().decode(base64ToArrayBuffer(displayModel.visualMesh?.contentBase64 ?? ""));
     const parsed = new OBJLoader().parse(text);
@@ -391,7 +419,7 @@ function UploadedObjModel({ displayModel }: { displayModel: DisplayModel }) {
     return parsed;
   }, [displayModel.visualMesh?.contentBase64]);
 
-  return <primitive object={object} />;
+  return <primitive object={object} {...pickHandlers} />;
 }
 
 function UnsupportedUploadedModelNotice({ filename }: { filename: string }) {
@@ -987,6 +1015,19 @@ function ResultProbe({ label, anchor, labelPosition, tone }: ResultProbeConfig) 
   );
 }
 
+function ModelHitLabel({ hit, active }: { hit: ModelSelectionHit; active: boolean }) {
+  const labelPosition = new THREE.Vector3(...hit.point).add(new THREE.Vector3(0, 0.12, 0.12));
+  return (
+    <group>
+      <mesh position={hit.point}>
+        <sphereGeometry args={[active ? 0.035 : 0.026, 18, 18]} />
+        <meshBasicMaterial color={active ? "#4da3ff" : "#f8d77b"} depthTest={false} toneMapped={false} />
+      </mesh>
+      <SceneLabel label={hit.face.label} position={labelPosition.toArray()} tone={active ? "active-load" : "load"} />
+    </group>
+  );
+}
+
 function SceneLabel({
   label,
   position,
@@ -1269,77 +1310,6 @@ function MeshOverlay({ kind }: { kind: SampleModelKind }) {
       </mesh>
     </group>
   );
-}
-
-function FacePickTarget({
-  face,
-  modelKind,
-  selected,
-  hovered,
-  placementMode,
-  onHover,
-  onSelect
-}: {
-  face: DisplayFace;
-  modelKind: SampleModelKind;
-  selected: boolean;
-  hovered: boolean;
-  placementMode: boolean;
-  onHover: (id: string | null) => void;
-  onSelect: (face: DisplayFace) => void;
-}) {
-  const scale = selected ? 1.15 : hovered ? 1.08 : 1;
-  const color = selected ? "#4da3ff" : hovered ? "#f8d77b" : face.color;
-  const rotation = rotationForNormal(face.normal);
-  const size = targetSizeForFace(face.id, modelKind, placementMode);
-  const opacity = selected || hovered ? 0.5 : placementMode ? 0.26 : 0.18;
-  return (
-    <mesh
-      position={face.center}
-      rotation={rotation}
-      scale={[scale, scale, scale]}
-      onPointerOver={(event: ThreeEvent<PointerEvent>) => {
-        event.stopPropagation();
-        onHover(face.id);
-      }}
-      onPointerOut={() => onHover(null)}
-      onClick={(event: ThreeEvent<MouseEvent>) => {
-        event.stopPropagation();
-        onSelect(face);
-      }}
-    >
-      <planeGeometry args={size} />
-      <meshBasicMaterial color={color} transparent opacity={opacity} side={THREE.DoubleSide} />
-      {(selected || hovered) && <Html center className="face-label">{face.label}</Html>}
-    </mesh>
-  );
-}
-
-function targetSizeForFace(faceId: string, modelKind: SampleModelKind, placementMode: boolean): [number, number] {
-  if (!placementMode) return [0.54, 0.42];
-  if (modelKind === "plate") {
-    if (faceId === "face-base-bottom") return [3.6, 1.35];
-    if (faceId === "face-web-front") return [0.86, 0.86];
-    return [0.92, 0.9];
-  }
-  if (modelKind === "cantilever") {
-    if (faceId === "face-load-top" || faceId === "face-base-left") return [0.72, 0.72];
-    return [2.9, 0.68];
-  }
-  if (modelKind === "uploaded") {
-    if (faceId === "face-upload-top" || faceId === "face-upload-bottom") return [UPLOADED_BOX_SIZE[0], UPLOADED_BOX_SIZE[2]];
-    if (faceId === "face-upload-front" || faceId === "face-upload-back") return [UPLOADED_BOX_SIZE[0], UPLOADED_BOX_SIZE[1]];
-    return [UPLOADED_BOX_SIZE[2], UPLOADED_BOX_SIZE[1]];
-  }
-  if (faceId === "face-load-top") return [0.78, 1.08];
-  if (faceId === "face-base-bottom") return [2.55, 0.92];
-  if (faceId === "face-base-left") return [1.42, 0.5];
-  if (faceId === "face-upright-front") return [0.82, 2.2];
-  if (faceId === "face-upright-left" || faceId === "face-upright-right") return [1.05, 2.05];
-  if (faceId === "face-base-front") return [2.8, 0.56];
-  if (faceId === "face-base-end") return [0.74, 0.58];
-  if (faceId === "face-rib-side") return [1.02, 0.92];
-  return [1.0, 0.7];
 }
 
 function BoundsCameraReset({ signal }: { signal: number }) {
