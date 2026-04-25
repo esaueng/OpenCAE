@@ -10,7 +10,7 @@ import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
 import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
 import type { StepId } from "./StepBar";
 import { faceForModelHit, type SampleModelKind } from "../modelSelection";
-import { resultSamplesForFaces, type FaceResultSample } from "../resultFields";
+import { formatResultValue, resultProbeSamplesForFaces, resultSamplesForFaces, type FaceResultSample, type ResultProbeTone } from "../resultFields";
 
 export type ViewMode = "model" | "mesh" | "results";
 export type ResultMode = "stress" | "displacement" | "safety_factor";
@@ -325,7 +325,7 @@ function BracketModel({ displayModel, activeStep, selectedFaceId, onSelectFace, 
         const face = displayModel.faces.find((item) => item.id === marker.faceId);
         return face ? <SupportGlyph key={marker.id} kind={modelKind} marker={marker} face={face} active={activeStep === "supports"} /> : null;
       })}
-      {showResultMarkers && resultProbesForKind(modelKind, resultMode, resultFields).map((probe) => <ResultProbe key={`${probe.tone}-${probe.label}`} {...probe} />)}
+      {showResultMarkers && resultProbesForKind(modelKind, displayModel.faces, resultMode, resultFields).map((probe) => <ResultProbe key={`${probe.tone}-${probe.label}-${probe.anchor.join(",")}`} {...probe} />)}
     </group>
   );
 }
@@ -1252,9 +1252,15 @@ function normalizeGeometry(geometry: THREE.BufferGeometry): void {
   geometry.computeBoundingBox();
 }
 
-type ResultProbeConfig = { label: string; anchor: [number, number, number]; labelPosition: [number, number, number]; tone: "max" | "mid" | "min" };
+type ResultProbeConfig = { label: string; anchor: [number, number, number]; labelPosition: [number, number, number]; tone: ResultProbeTone };
 
-function resultProbesForKind(kind: SampleModelKind, resultMode: ResultMode, resultFields: ResultField[]): ResultProbeConfig[] {
+function resultProbesForKind(kind: SampleModelKind, faces: DisplayFace[], resultMode: ResultMode, resultFields: ResultField[]): ResultProbeConfig[] {
+  if (kind === "cantilever") {
+    const dynamicProbes = resultProbeSamplesForFaces(faces, resultFields, resultMode);
+    if (dynamicProbes.length) {
+      return dynamicProbes.map((probe) => resultProbeForFace(probe.face, probe.label, probe.tone));
+    }
+  }
   const labels = resultProbeLabels(resultMode, resultFields);
   if (kind === "plate") {
     return [
@@ -1278,6 +1284,24 @@ function resultProbesForKind(kind: SampleModelKind, resultMode: ResultMode, resu
   ];
 }
 
+function resultProbeForFace(face: DisplayFace, label: string, tone: ResultProbeTone): ResultProbeConfig {
+  const center = new THREE.Vector3(...face.center);
+  const normal = new THREE.Vector3(...face.normal).normalize();
+  const anchor = center.clone().add(normal.clone().multiplyScalar(0.06));
+  const toneOffset = tone === "max"
+    ? new THREE.Vector3(0.1, 0.34, 0.54)
+    : tone === "mid"
+      ? new THREE.Vector3(0.18, 0.34, 0.52)
+      : new THREE.Vector3(-0.08, -0.34, 0.52);
+  const labelPosition = anchor.clone().add(normal.clone().multiplyScalar(0.42)).add(toneOffset);
+  return {
+    label,
+    anchor: anchor.toArray() as [number, number, number],
+    labelPosition: labelPosition.toArray() as [number, number, number],
+    tone
+  };
+}
+
 function resultProbeLabels(resultMode: ResultMode, resultFields: ResultField[]) {
   const field = resultFields.find((candidate) => candidate.type === resultMode && candidate.location === "face");
   if (field?.values.length) {
@@ -1297,10 +1321,6 @@ function resultProbeLabels(resultMode: ResultMode, resultFields: ResultField[]) 
     return { max: "FoS: 1.8", mid: "FoS: 4.7", min: "FoS: 7.6" };
   }
   return { max: "Stress: 142 MPa", mid: "Stress: 64 MPa", min: "Stress: 28 MPa" };
-}
-
-function formatResultValue(value: number) {
-  return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(3)));
 }
 
 function ResultProbe({ label, anchor, labelPosition, tone }: ResultProbeConfig) {
