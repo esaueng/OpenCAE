@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { Anchor, ArrowDown, Check, Download, Eye, FileText, Grid3X3, Maximize2, Play, Plus, RotateCcw, Upload, X } from "lucide-react";
 import { starterMaterials } from "@opencae/materials";
 import type { Constraint, DisplayFace, Load, Project, ResultSummary, Study } from "@opencae/schema";
@@ -189,19 +189,12 @@ function MaterialPanel({ study, onAssignMaterial }: RightPanelProps) {
 }
 
 function SupportsPanel({ selectedFace, study, onAddSupport, onUpdateSupport }: RightPanelProps) {
-  const faceSelections = study.namedSelections.filter((selection) => selection.entityType === "face");
   const selectedFromViewport = selectedFace ? selectionForFace(study, selectedFace.id) : undefined;
-  const [placementRef, setPlacementRef] = useState(selectedFromViewport?.id ?? faceSelections[0]?.id ?? "");
-  useEffect(() => {
-    if (selectedFromViewport) setPlacementRef(selectedFromViewport.id);
-  }, [selectedFromViewport?.id]);
-  const selectedRef = faceSelections.find((selection) => selection.id === placementRef) ?? selectedFromViewport;
   const addLabel = study.constraints.length ? "Add another fixed support" : "Add fixed support";
   return (
     <Panel title="Supports" helper="Choose where the part is held fixed. Select a face, then add a fixed support. You can add more than one.">
-      <PlacementReadout selectedRef={selectedRef} fallbackLabel={selectedFace?.label} />
-      <SelectionField study={study} value={selectedRef?.id ?? ""} onChange={setPlacementRef} />
-      <button className="outline-action wide" disabled={!selectedRef} onClick={() => selectedRef && onAddSupport(selectedRef.id)}><Plus size={18} />{addLabel}</button>
+      <PlacementReadout selectedRef={selectedFromViewport} fallbackLabel={selectedFace?.label} />
+      <button className="outline-action wide" disabled={!selectedFromViewport} onClick={() => selectedFromViewport && onAddSupport(selectedFromViewport.id)}><Plus size={18} />{addLabel}</button>
       <SectionTitle>Applied</SectionTitle>
       <SupportEditorList study={study} onUpdateSupport={onUpdateSupport} />
       <Callout>Fixed supports prevent any motion of the selected face.</Callout>
@@ -221,18 +214,11 @@ function LoadsPanel({
   onAddLoad,
   onUpdateLoad
 }: RightPanelProps) {
-  const faceSelections = study.namedSelections.filter((selection) => selection.entityType === "face");
   const selectedFromViewport = selectedFace ? selectionForFace(study, selectedFace.id) : undefined;
-  const [placementRef, setPlacementRef] = useState(selectedFromViewport?.id ?? faceSelections[0]?.id ?? "");
-  useEffect(() => {
-    if (selectedFromViewport) setPlacementRef(selectedFromViewport.id);
-  }, [selectedFromViewport?.id]);
-  const selectedRef = faceSelections.find((selection) => selection.id === placementRef) ?? selectedFromViewport;
   const units = unitsForLoadType(draftLoadType);
   return (
     <Panel title="Loads" helper="Choose where force or pressure is applied. Select a face, then add a load.">
-      <PlacementReadout selectedRef={selectedRef} fallbackLabel={selectedFace?.label} />
-      <SelectionField study={study} value={selectedRef?.id ?? ""} onChange={setPlacementRef} />
+      <PlacementReadout selectedRef={selectedFromViewport} fallbackLabel={selectedFace?.label} />
       <label className="field">
         Load type
         <div className="segmented" role="group" aria-label="Load type">
@@ -261,7 +247,7 @@ function LoadsPanel({
           ))}
         </div>
       </label>
-      <button className="outline-action wide" disabled={!selectedRef} onClick={() => selectedRef && onAddLoad(draftLoadType, draftLoadValue, selectedRef.id, draftLoadDirection)}><Plus size={18} />Add load</button>
+      <button className="outline-action wide" disabled={!selectedFromViewport} onClick={() => selectedFromViewport && onAddLoad(draftLoadType, draftLoadValue, selectedFromViewport.id, draftLoadDirection)}><Plus size={18} />Add load</button>
       <SectionTitle>Applied</SectionTitle>
       <LoadEditorList study={study} onUpdateLoad={onUpdateLoad} />
     </Panel>
@@ -311,10 +297,10 @@ function LoadEditorList({ study, onUpdateLoad }: { study: Study; onUpdateLoad: (
 function LoadEditForm({ load, study, onSave, onCancel }: { load: Load; study: Study; onSave: (load: Load) => void; onCancel: () => void }) {
   const [type, setType] = useState<"force" | "pressure" | "gravity">(load.type);
   const [value, setValue] = useState(String(load.parameters.value ?? 500));
-  const [selectionRef, setSelectionRef] = useState(load.selectionRef);
   const [direction, setDirection] = useState<LoadDirectionLabel>(directionLabelForLoad(load));
   const units = unitsForLoadType(type);
-  const selectedFace = study.namedSelections.find((selection) => selection.id === selectionRef)?.geometryRefs[0];
+  const selectedRef = study.namedSelections.find((selection) => selection.id === load.selectionRef);
+  const selectedFace = selectedRef?.geometryRefs[0];
   const directionFace: DisplayFace = {
     id: selectedFace?.entityId ?? "selected-face",
     label: selectedFace?.label ?? "selected face",
@@ -337,7 +323,7 @@ function LoadEditForm({ load, study, onSave, onCancel }: { load: Load; study: St
         Magnitude
         <input type="number" value={value} onChange={(event) => setValue(event.currentTarget.value)} />
       </label>
-      <SelectionField study={study} value={selectionRef} onChange={setSelectionRef} />
+      <PlacementReadout selectedRef={selectedRef} />
       <label className="field">
         Direction
         <select value={direction} onChange={(event) => setDirection(event.currentTarget.value as LoadDirectionLabel)}>
@@ -350,7 +336,7 @@ function LoadEditForm({ load, study, onSave, onCancel }: { load: Load; study: St
         <button
           className="primary"
           type="button"
-          onClick={() => onSave({ ...load, type, selectionRef, parameters: { ...load.parameters, value: Number(value), units, direction: directionVectorForLabel(direction, directionFace) } })}
+          onClick={() => onSave({ ...load, type, parameters: { ...load.parameters, value: Number(value), units, direction: directionVectorForLabel(direction, directionFace) } })}
         >
           Save
         </button>
@@ -401,7 +387,7 @@ function SupportEditorList({ study, onUpdateSupport }: { study: Study; onUpdateS
 
 function SupportEditForm({ support, study, onSave, onCancel }: { support: Constraint; study: Study; onSave: (support: Constraint) => void; onCancel: () => void }) {
   const [type, setType] = useState<"fixed" | "prescribed_displacement">(support.type);
-  const [selectionRef, setSelectionRef] = useState(support.selectionRef);
+  const selectedRef = study.namedSelections.find((selection) => selection.id === support.selectionRef);
   return (
     <div className="edit-form">
       <label className="field">
@@ -411,26 +397,12 @@ function SupportEditForm({ support, study, onSave, onCancel }: { support: Constr
           <option value="prescribed_displacement">Prescribed displacement</option>
         </select>
       </label>
-      <SelectionField study={study} value={selectionRef} onChange={setSelectionRef} />
+      <PlacementReadout selectedRef={selectedRef} />
       <div className="edit-actions">
-        <button className="primary" type="button" onClick={() => onSave({ ...support, type, selectionRef })}>Save</button>
+        <button className="primary" type="button" onClick={() => onSave({ ...support, type })}>Save</button>
         <button className="secondary" type="button" onClick={onCancel}>Cancel</button>
       </div>
     </div>
-  );
-}
-
-function SelectionField({ study, value, onChange }: { study: Study; value: string; onChange: (selectionRef: string) => void }) {
-  const faceSelections = study.namedSelections.filter((selection) => selection.entityType === "face");
-  return (
-    <label className="field">
-      Placement
-      <select value={value} onChange={(event) => onChange(event.currentTarget.value)}>
-        {faceSelections.map((selection) => (
-          <option key={selection.id} value={selection.id}>{selection.geometryRefs[0]?.label ?? selection.name}</option>
-        ))}
-      </select>
-    </label>
   );
 }
 
