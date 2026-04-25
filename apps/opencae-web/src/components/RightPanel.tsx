@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Anchor, ArrowDown, Check, Download, Eye, FileText, Grid3X3, Maximize2, Play, Plus, RotateCcw, Upload, X } from "lucide-react";
 import { starterMaterials } from "@opencae/materials";
 import type { Constraint, DisplayFace, Load, Project, ResultSummary, Study } from "@opencae/schema";
@@ -36,6 +36,7 @@ interface RightPanelProps {
   onDraftLoadTypeChange: (type: LoadType) => void;
   onDraftLoadValueChange: (value: number) => void;
   onDraftLoadDirectionChange: (direction: LoadDirectionLabel) => void;
+  onLoadEditorActiveChange: (active: boolean) => void;
   onAddLoad: (type: LoadType, value: number, selectionRef: string, direction: LoadDirectionLabel) => void;
   onUpdateLoad: (load: Load) => void;
   onGenerateMesh: (preset: "coarse" | "medium" | "fine") => void;
@@ -212,7 +213,8 @@ function LoadsPanel({
   onDraftLoadValueChange,
   onDraftLoadDirectionChange,
   onAddLoad,
-  onUpdateLoad
+  onUpdateLoad,
+  onLoadEditorActiveChange
 }: RightPanelProps) {
   const selectedFromViewport = selectedFace ? selectionForFace(study, selectedFace.id) : undefined;
   const units = unitsForLoadType(draftLoadType);
@@ -249,13 +251,17 @@ function LoadsPanel({
       </label>
       <button className="outline-action wide" disabled={!selectedFromViewport} onClick={() => selectedFromViewport && onAddLoad(draftLoadType, draftLoadValue, selectedFromViewport.id, draftLoadDirection)}><Plus size={18} />Add load</button>
       <SectionTitle>Applied</SectionTitle>
-      <LoadEditorList study={study} onUpdateLoad={onUpdateLoad} />
+      <LoadEditorList study={study} onUpdateLoad={onUpdateLoad} onEditingChange={onLoadEditorActiveChange} />
     </Panel>
   );
 }
 
-function LoadEditorList({ study, onUpdateLoad }: { study: Study; onUpdateLoad: (load: Load) => void }) {
+function LoadEditorList({ study, onUpdateLoad, onEditingChange }: { study: Study; onUpdateLoad: (load: Load) => void; onEditingChange: (active: boolean) => void }) {
   const [editingId, setEditingId] = useState<string | null>(null);
+  useEffect(() => {
+    onEditingChange(editingId !== null);
+    return () => onEditingChange(false);
+  }, [editingId, onEditingChange]);
   if (!study.loads.length) return <EmptyEditableList title="Loads" />;
 
   return (
