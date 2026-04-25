@@ -745,6 +745,56 @@ svg {
   font-weight: var(--fw-medium);
 }
 
+.field-label-with-help {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.tooltip-trigger {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  color: var(--color-text-subtle);
+  cursor: help;
+  outline: none;
+}
+
+.tooltip-trigger:hover,
+.tooltip-trigger:focus-visible {
+  color: var(--color-accent);
+}
+
+.field-tooltip {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 30;
+  width: min(280px, 72vw);
+  padding: 10px 11px;
+  color: var(--color-text);
+  background: rgba(11, 17, 24, 0.94);
+  border: var(--border-thin);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-regular);
+  line-height: 1.45;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(3px);
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.tooltip-trigger:hover .field-tooltip,
+.tooltip-trigger:focus-visible .field-tooltip {
+  opacity: 1;
+  transform: translateY(0);
+}
+
 .range-field input[type="range"] {
   width: 100%;
   accent-color: var(--color-accent);
