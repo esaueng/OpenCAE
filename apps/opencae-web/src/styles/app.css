@@ -118,6 +118,10 @@ svg {
   border-color: var(--color-accent);
 }
 
+.start-action.sample-action {
+  margin-top: 6px;
+}
+
 .start-action.secondary {
   color: var(--color-text);
   background: rgba(17, 24, 33, 0.72);
