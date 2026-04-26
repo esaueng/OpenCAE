@@ -88,7 +88,7 @@ describe("load preview helpers", () => {
     expect(loadMarkerFromLoad(load, study, 0)?.point).toEqual([1.25, 2.5, 3.75]);
   });
 
-  test("presents payload mass markers as part labels without arrows", () => {
+  test("presents applied payload mass markers as load labels without arrows", () => {
     const load: Load = {
       id: "load-payload",
       type: "gravity",
@@ -105,7 +105,7 @@ describe("load preview helpers", () => {
 
     expect(marker?.payloadObject?.label).toBe("Part 2");
     expect(marker && loadMarkerViewportPresentation(marker)).toEqual({
-      label: "Part 2",
+      label: "L1",
       showArrow: false,
       tone: "payload-mass",
       color: "#34d399"
