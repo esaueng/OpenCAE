@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { describe, expect, test } from "vitest";
-import { colorizeResultObject, payloadHighlightObjectId, shouldShowModelHitLabel } from "./CadViewer";
+import { VIEWER_GIZMO_ALIGNMENT, colorizeResultObject, payloadHighlightObjectId, shouldShowModelHitLabel } from "./CadViewer";
 import type { FaceResultSample } from "../resultFields";
 
 const samples: FaceResultSample[] = [
@@ -17,6 +17,10 @@ const samples: FaceResultSample[] = [
 ];
 
 describe("CadViewer result coloring", () => {
+  test("positions the viewer XYZ axes in the bottom-right corner", () => {
+    expect(VIEWER_GIZMO_ALIGNMENT).toBe("bottom-right");
+  });
+
   test("hides face selection callouts in result view", () => {
     expect(shouldShowModelHitLabel("results", true)).toBe(false);
     expect(shouldShowModelHitLabel("model", true)).toBe(true);
