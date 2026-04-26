@@ -1248,11 +1248,11 @@ export function colorizeResultObject(
   loadMarkers: ViewerLoadMarker[]
 ) {
   object.updateMatrixWorld(true);
-  const excludedPayloadObjectIds = new Set(loadMarkers.map((marker) => marker.payloadObject?.id).filter((id): id is string => Boolean(id)));
+  const excludedPayloadObjects = resultPayloadObjectRefs(loadMarkers);
   const resultMeshes: THREE.Mesh<THREE.BufferGeometry>[] = [];
   object.traverse((child) => {
     if (!(child instanceof THREE.Mesh) || !(child.geometry instanceof THREE.BufferGeometry)) return;
-    if (excludedPayloadObjectIds.has(resultObjectIdFor(child))) {
+    if (isResultPayloadObject(child, excludedPayloadObjects)) {
       child.visible = true;
       child.material = new THREE.MeshStandardMaterial({
         color: RESULT_PAYLOAD_MATERIAL_COLOR,
@@ -1286,14 +1286,37 @@ export function colorizeResultObject(
   return object;
 }
 
-function resultObjectIdFor(object: THREE.Object3D) {
+type ResultPayloadObjectRefs = {
+  ids: Set<string>;
+  labels: Set<string>;
+};
+
+function resultPayloadObjectRefs(loadMarkers: ViewerLoadMarker[]): ResultPayloadObjectRefs {
+  const refs: ResultPayloadObjectRefs = { ids: new Set(), labels: new Set() };
+  for (const marker of loadMarkers) {
+    addResultPayloadRef(refs.ids, marker.payloadObject?.id);
+    addResultPayloadRef(refs.labels, marker.payloadObject?.label);
+  }
+  return refs;
+}
+
+function isResultPayloadObject(object: THREE.Object3D, refs: ResultPayloadObjectRefs) {
   let current: THREE.Object3D | null = object;
   while (current) {
-    const id = current.userData.opencaeObjectId;
-    if (typeof id === "string") return id;
+    if (refs.ids.has(normalizedResultPayloadRef(current.userData.opencaeObjectId))) return true;
+    if (refs.labels.has(normalizedResultPayloadRef(current.userData.opencaeObjectLabel))) return true;
     current = current.parent;
   }
-  return "";
+  return false;
+}
+
+function addResultPayloadRef(refs: Set<string>, value: unknown) {
+  const normalized = normalizedResultPayloadRef(value);
+  if (normalized) refs.add(normalized);
+}
+
+function normalizedResultPayloadRef(value: unknown) {
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
 }
 
 function resultBoundsForMeshes(meshes: THREE.Mesh<THREE.BufferGeometry>[]) {
