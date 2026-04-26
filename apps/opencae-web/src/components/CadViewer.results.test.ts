@@ -21,11 +21,11 @@ describe("CadViewer result coloring", () => {
     expect(VIEWER_GIZMO_ALIGNMENT).toBe("bottom-right");
   });
 
-  test("maps gizmo Z clicks to a square top view", () => {
+  test("maps gizmo Z clicks to a clockwise square top view", () => {
     const topView = cameraViewForAxis(axisLabelToViewAxis("Z"));
 
     expect(topView.direction.toArray()).toEqual([0, 0, 1]);
-    expect(topView.up.toArray()).toEqual([0, 1, 0]);
+    expect(topView.up.toArray()).toEqual([-1, 0, 0]);
   });
 
   test("rotates the camera orbit around a requested gizmo axis", () => {
