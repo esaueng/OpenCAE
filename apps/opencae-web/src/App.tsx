@@ -23,6 +23,7 @@ import { buildAutosavedWorkspace, readAutosavedWorkspace, writeAutosavedWorkspac
 import { canNavigateToStep, shouldAutoAdvanceAfterMeshGeneration, shouldShowStartScreen } from "./appShellState";
 import { displayModelForUnits, loadValueForUnits, resultFieldForUnits, resultSummaryForUnits, type UnitSystem } from "./unitDisplay";
 import { supportDisplayLabel } from "./supportLabels";
+import { nextSelectedPayloadObject } from "./payloadSelection";
 
 interface SaveFilePickerHandle {
   createWritable: () => Promise<{ write: (content: Blob) => Promise<void>; close: () => Promise<void> }>;
@@ -328,8 +329,8 @@ export function App() {
   function handleViewportFaceSelect(face: DisplayFace, point?: [number, number, number], payloadObject?: PayloadObjectSelection) {
     setSelectedFaceId(face.id);
     const isPayloadObjectLoad = activeStep === "loads" && draftLoadType === "gravity";
-    setSelectedPayloadObject(isPayloadObjectLoad ? payloadObject ?? null : null);
-    setSelectedLoadPoint(activeStep === "loads" ? (isPayloadObjectLoad ? payloadObject?.center ?? point ?? face.center : point ?? face.center) : null);
+    setSelectedPayloadObject((current) => nextSelectedPayloadObject({ activeStep, draftLoadType, current, payloadObject }));
+    setSelectedLoadPoint(activeStep === "loads" ? (isPayloadObjectLoad ? payloadObject?.center ?? selectedPayloadObject?.center ?? point ?? face.center : point ?? face.center) : null);
     if (displayModel && !displayModel.faces.some((item) => item.id === face.id)) {
       setDisplayModel({ ...displayModel, faces: [...displayModel.faces, face] });
     }
@@ -568,6 +569,7 @@ export function App() {
           activeStep={activeStep}
           selectedFaceId={selectedFaceId}
           payloadObjectSelectionMode={activeStep === "loads" && draftLoadType === "gravity"}
+          selectedPayloadObject={selectedPayloadObject}
           onSelectFace={handleViewportFaceSelect}
           viewMode={viewMode}
           resultMode={resultMode}
@@ -643,9 +645,17 @@ export function App() {
             const applicationPoint = type === "gravity" && payloadObject ? payloadObject.center : selectedLoadPoint;
             if (selection) {
               updateStudy(addLoad(study.id, type, value, selection.id, directionVectorForLabel(direction, face), applicationPoint, payloadObject, study, payloadMetadata));
+              if (type === "gravity") {
+                setSelectedPayloadObject(null);
+                setSelectedLoadPoint(null);
+              }
               return;
             }
             void addLoadForFace(type, value, face, direction, applicationPoint, payloadObject, payloadMetadata);
+            if (type === "gravity") {
+              setSelectedPayloadObject(null);
+              setSelectedLoadPoint(null);
+            }
           }}
           onUpdateLoad={(load: Load) =>
             updateStudy(
