@@ -397,8 +397,9 @@ function dimensionBoundsForDisplayModel(displayModel: DisplayModel) {
   return new THREE.Box3(new THREE.Vector3(-1.55, -0.24, -BRACKET_DEPTH / 2), new THREE.Vector3(2.35, 2.62, BRACKET_DEPTH / 2));
 }
 
-function formatDimensionLabel(value: number) {
-  return Number.isInteger(value) ? `${value}` : value.toFixed(1);
+function formatDimensionLabel(value: number, units: string) {
+  const formatted = Number.isInteger(value) ? `${value}` : value.toFixed(1);
+  return `${formatted} ${units}`;
 }
 
 function worldPointToModelSpace(point: THREE.Vector3) {
@@ -433,17 +434,17 @@ function ModelDimensionOverlay({ displayModel }: { displayModel: DisplayModel })
       <DimensionLine
         start={[min.x, xLineY, xLineZ]}
         end={[max.x, xLineY, xLineZ]}
-        label={`X ${formatDimensionLabel(dimensions.x)}`}
+        label={`X ${formatDimensionLabel(dimensions.x, dimensions.units)}`}
       />
       <DimensionLine
         start={[axisLineX, xLineY, min.z]}
         end={[axisLineX, xLineY, max.z]}
-        label={`Y ${formatDimensionLabel(dimensions.z)}`}
+        label={`Y ${formatDimensionLabel(dimensions.z, dimensions.units)}`}
       />
       <DimensionLine
         start={[axisLineX, min.y, max.z + zOffset]}
         end={[axisLineX, max.y, max.z + zOffset]}
-        label={`Z ${formatDimensionLabel(dimensions.y)}`}
+        label={`Z ${formatDimensionLabel(dimensions.y, dimensions.units)}`}
       />
     </group>
   );

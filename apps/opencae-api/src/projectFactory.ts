@@ -1,5 +1,6 @@
 import type { DisplayModel, Project } from "@opencae/schema";
 import { bracketDemoProject, bracketDisplayModel } from "@opencae/db/sample-data";
+import { stlDimensionsFromBase64 } from "@opencae/units";
 
 export type SampleModelId = "bracket" | "plate" | "cantilever";
 
@@ -78,12 +79,16 @@ export function blankDisplayModel(): DisplayModel {
 export function uploadedDisplayModelFor(filename: string, contentBase64?: string): DisplayModel {
   const modelName = baseNameForModel(filename);
   const nativeFormat = nativeCadFormatForFilename(filename);
+  const previewFormat = previewFormatForFilename(filename);
+  const dimensions = previewFormat === "stl"
+    ? stlDimensionsFromBase64(contentBase64) ?? { x: 96, y: 48, z: 32, units: "mm" as const }
+    : { x: 96, y: 48, z: 32, units: "mm" as const };
   if (nativeFormat) {
     return {
       id: "display-uploaded",
       name: `${modelName} imported body`,
       bodyCount: 1,
-      dimensions: { x: 96, y: 48, z: 32, units: "mm" },
+      dimensions,
       faces: uploadedBoxFaces(),
       nativeCad: {
         format: nativeFormat,
@@ -93,7 +98,6 @@ export function uploadedDisplayModelFor(filename: string, contentBase64?: string
     };
   }
 
-  const previewFormat = previewFormatForFilename(filename);
   if (!previewFormat || !contentBase64) {
     return {
       id: "display-uploaded",
@@ -107,7 +111,7 @@ export function uploadedDisplayModelFor(filename: string, contentBase64?: string
     id: "display-uploaded",
     name: `${modelName} imported body`,
     bodyCount: 1,
-    dimensions: { x: 96, y: 48, z: 32, units: "mm" },
+    dimensions,
     faces: uploadedBoxFaces(),
     visualMesh: {
       format: previewFormat,

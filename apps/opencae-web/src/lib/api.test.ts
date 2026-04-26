@@ -28,6 +28,18 @@ const displayModel = {
   faces: []
 } satisfies DisplayModel;
 
+const sizedAsciiStl = `
+solid tray
+facet normal 0 0 1
+outer loop
+vertex 0 0 0
+vertex 268.8 0 0
+vertex 0 289.9 246.05
+endloop
+endfacet
+endsolid tray
+`;
+
 describe("api", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -60,7 +72,7 @@ describe("api", () => {
   test("uploads a model locally when the API is unavailable", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new TypeError("NetworkError when attempting to fetch resource."))));
 
-    const file = new File([new Uint8Array([1, 2, 3])], "seed-tray.stl", { type: "model/stl" });
+    const file = new File([sizedAsciiStl], "seed-tray.stl", { type: "model/stl" });
     const response = await uploadModel("project-1", file, project);
 
     expect(response.project.geometryFiles[0]?.filename).toBe("seed-tray.stl");
@@ -68,10 +80,10 @@ describe("api", () => {
     expect(response.project.geometryFiles[0]?.metadata.embeddedModel).toMatchObject({
       filename: "seed-tray.stl",
       contentType: "model/stl",
-      size: 3,
-      contentBase64: "AQID"
+      size: sizedAsciiStl.length
     });
     expect(response.displayModel.visualMesh?.filename).toBe("seed-tray.stl");
+    expect(response.displayModel.dimensions).toEqual({ x: 268.8, y: 246.1, z: 289.9, units: "mm" });
     expect(response.message).toContain("Previewing the uploaded mesh");
   });
 

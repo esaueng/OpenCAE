@@ -18,6 +18,7 @@
     "@opencae/solver-service": "workspace:*",
     "@opencae/study-core": "workspace:*",
     "@opencae/storage": "workspace:*",
+    "@opencae/units": "workspace:*",
     "fastify": "^5.2.1"
   },
   "devDependencies": {
