@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import type { DisplayFace, Load, NamedSelection, Study } from "@opencae/schema";
-import { createViewerLoadMarkers, directionLabelForLoad, directionVectorForLabel, loadMarkerFromLoad, payloadObjectForLoad, unitsForLoadType } from "./loadPreview";
+import { createViewerLoadMarkers, directionLabelForLoad, directionVectorForLabel, loadMarkerDisplayLabel, loadMarkerFromLoad, payloadObjectForLoad, unitsForLoadType } from "./loadPreview";
 
 const face: DisplayFace = {
   id: "face-side",
@@ -139,5 +139,17 @@ describe("load preview helpers", () => {
 
     expect(markers).toHaveLength(1);
     expect(markers[0]?.id).toBe("load-1");
+  });
+
+  test("formats the viewport load label for reuse in the sidebar", () => {
+    const marker = loadMarkerFromLoad({
+      id: "load-1",
+      type: "force",
+      selectionRef: "selection-side",
+      parameters: { value: 500, units: "N", direction: [0, 0, -1] },
+      status: "complete"
+    }, study, 0);
+
+    expect(marker && loadMarkerDisplayLabel(marker)).toBe("L1 F 500 N -Z");
   });
 });

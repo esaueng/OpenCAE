@@ -15,7 +15,7 @@ import { formatResultValue, resultProbeSamplesForFaces, resultSamplesForFaces, t
 import { stepPreviewFromBase64 } from "../stepPreview";
 import { normalizedStlGeometryFromBuffer } from "../stlPreview";
 import { lengthForUnits, stressForUnits, type UnitSystem } from "../unitDisplay";
-import type { PayloadObjectSelection } from "../loadPreview";
+import { loadMarkerDisplayLabel, type PayloadObjectSelection } from "../loadPreview";
 
 export type ViewMode = "model" | "mesh" | "results";
 export type ResultMode = "stress" | "displacement" | "safety_factor";
@@ -1696,24 +1696,12 @@ function LoadGlyph({ marker, face, active }: { marker: ViewerLoadMarker; face: D
     <group>
       <ArrowGlyph start={start} end={end} color={markerColor} />
       <SceneLabel
-        label={loadLabel(marker)}
+        label={loadMarkerDisplayLabel(marker)}
         position={tailLabelPosition.toArray()}
         tone={labelTone}
       />
     </group>
   );
-}
-
-function loadLabel(marker: ViewerLoadMarker) {
-  const kind = marker.type === "pressure" ? "P" : marker.type === "gravity" ? "G" : "F";
-  return `L${marker.stackIndex + 1} ${kind} ${formatLoadMarkerValue(marker.value)} ${marker.units} ${marker.directionLabel}`;
-}
-
-function formatLoadMarkerValue(value: number) {
-  if (!Number.isFinite(value)) {
-    return "--";
-  }
-  return value.toLocaleString(undefined, { maximumFractionDigits: 1 });
 }
 
 function compactFaceLabel(label: string) {

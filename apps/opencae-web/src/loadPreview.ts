@@ -95,6 +95,22 @@ export function createViewerLoadMarkers({ study }: { study: Study | null }): Vie
   });
 }
 
+export function loadMarkerOrdinalLabel(marker: ViewerLoadMarker) {
+  return `L${marker.stackIndex + 1}`;
+}
+
+export function loadMarkerDisplayLabel(marker: ViewerLoadMarker) {
+  const kind = marker.type === "pressure" ? "P" : marker.type === "gravity" ? "G" : "F";
+  return `${loadMarkerOrdinalLabel(marker)} ${kind} ${formatLoadMarkerValue(marker.value)} ${marker.units} ${marker.directionLabel}`;
+}
+
+function formatLoadMarkerValue(value: number) {
+  if (!Number.isFinite(value)) {
+    return "--";
+  }
+  return value.toLocaleString(undefined, { maximumFractionDigits: 1 });
+}
+
 function isDirection(value: unknown): value is LoadDirection {
   return isVector3(value);
 }
