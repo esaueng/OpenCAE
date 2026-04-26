@@ -9,7 +9,7 @@ import * as THREE from "three";
 import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
 import type { StepId } from "./StepBar";
 import { faceForModelHit, type SampleModelKind } from "../modelSelection";
-import { modelRotationRadians } from "../modelOrientation";
+import { modelRotationRadians, type RotationAxis } from "../modelOrientation";
 import { formatResultValue, resultProbeSamplesForFaces, resultSamplesForFaces, type FaceResultSample, type ResultProbeTone } from "../resultFields";
 import { stepPreviewGroupFromBase64 } from "../stepPreview";
 import { normalizedStlGeometryFromBuffer } from "../stlPreview";
@@ -53,6 +53,8 @@ interface CadViewerProps {
   unitSystem: UnitSystem;
   themeMode: ThemeMode;
   fitSignal: number;
+  viewAxis: RotationAxis | null;
+  viewAxisSignal: number;
   loadMarkers: ViewerLoadMarker[];
   supportMarkers: ViewerSupportMarker[];
   onResetView: () => void;
@@ -101,7 +103,7 @@ export function CadViewer(props: CadViewerProps) {
               {props.showDimensions && <ModelDimensionOverlay displayModel={props.displayModel} />}
             </group>
           </group>
-          <BoundsCameraReset signal={props.fitSignal} />
+          <BoundsCameraReset signal={props.fitSignal} viewAxis={props.viewAxis} viewAxisSignal={props.viewAxisSignal} />
         </Bounds>
         <OrbitControls ref={controlsRef} makeDefault enableDamping dampingFactor={0.08} target={[0, 0, 0.75]} />
         <ShiftPanControls controlsRef={controlsRef} />
@@ -1685,15 +1687,22 @@ function MeshOverlay({ kind }: { kind: SampleModelKind }) {
   );
 }
 
-function BoundsCameraReset({ signal }: { signal: number }) {
+function BoundsCameraReset({ signal, viewAxis, viewAxisSignal }: { signal: number; viewAxis: RotationAxis | null; viewAxisSignal: number }) {
   const bounds = useBounds();
   useEffect(() => {
     const nextBounds = bounds.refresh().clip();
     const { center, distance } = nextBounds.getSize();
-    const cameraPosition = center.clone().addScaledVector(ISO_CAMERA_DIRECTION, distance * 1.08);
-    nextBounds.moveTo(cameraPosition).lookAt({ target: center, up: ISO_CAMERA_UP });
-  }, [bounds, signal]);
+    const view = viewAxis ? cameraViewForAxis(viewAxis) : { direction: ISO_CAMERA_DIRECTION, up: ISO_CAMERA_UP };
+    const cameraPosition = center.clone().addScaledVector(view.direction, distance * 1.08);
+    nextBounds.moveTo(cameraPosition).lookAt({ target: center, up: view.up });
+  }, [bounds, signal, viewAxis, viewAxisSignal]);
   return null;
+}
+
+function cameraViewForAxis(axis: RotationAxis): { direction: THREE.Vector3; up: THREE.Vector3 } {
+  if (axis === "x") return { direction: new THREE.Vector3(1, 0, 0), up: WORLD_UP };
+  if (axis === "y") return { direction: new THREE.Vector3(0, 1, 0), up: WORLD_UP };
+  return { direction: new THREE.Vector3(0, 0, 1), up: new THREE.Vector3(0, 1, 0) };
 }
 
 function colorForResult(faces: DisplayFace[], viewMode: ViewMode, resultMode: ResultMode) {
