@@ -420,6 +420,10 @@ svg {
   box-shadow: 0 0 10px rgba(34, 197, 94, 0.65);
 }
 
+.status-strip > .local-pill {
+  margin-left: auto;
+}
+
 .workspace {
   min-height: 0;
   display: grid;
@@ -2019,7 +2023,7 @@ button:disabled {
   .topbar-tools,
   .breadcrumb-sep,
   .breadcrumb > span:last-child,
-  .local-pill {
+  .topbar .local-pill {
     display: none;
   }
 

@@ -74,6 +74,7 @@ export function BottomPanel({ status, logs, projectName, studyName, meshStatus, 
           <span><b>mesh</b>{meshStatus}</span>
           <span><b>solver</b>{solverStatus}</span>
         </div>
+        <span className="local-pill"><span aria-hidden="true" />local</span>
       </div>
     </footer>
   );
