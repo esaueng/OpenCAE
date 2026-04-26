@@ -69,7 +69,7 @@ describe("CadViewer result coloring", () => {
     expect(colors.slice(0, 3)).not.toEqual(colors.slice(6, 9));
   });
 
-  test("excludes payload mass meshes and stretches simulated vertices across the full stress ramp", () => {
+  test("shows payload mass meshes as solid parts while stretching simulated vertices across the full stress ramp", () => {
     const simulatedGeometry = new THREE.BufferGeometry();
     simulatedGeometry.setAttribute("position", new THREE.Float32BufferAttribute([-0.2, 0, 0, 0, 0, 0, 0.2, 0, 0], 3));
     const simulatedMesh = new THREE.Mesh(simulatedGeometry, new THREE.MeshStandardMaterial({ color: "#63a9e5" }));
@@ -100,7 +100,9 @@ describe("CadViewer result coloring", () => {
     const lowColor = new THREE.Color(colors[0]!, colors[1]!, colors[2]!);
     const highColor = new THREE.Color(colors[6]!, colors[7]!, colors[8]!);
 
-    expect(payloadMesh.visible).toBe(false);
+    expect(payloadMesh.visible).toBe(true);
+    expect((payloadMesh.material as THREE.MeshStandardMaterial).vertexColors).toBe(false);
+    expect((payloadMesh.material as THREE.MeshStandardMaterial).color.getHexString()).toBe("8f9aa5");
     expect(lowColor.b).toBeGreaterThan(lowColor.r);
     expect(highColor.r).toBeGreaterThan(highColor.b);
   });
