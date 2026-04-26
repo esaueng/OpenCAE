@@ -71,6 +71,23 @@ describe("load preview helpers", () => {
     expect(payloadObjectForLoad(load)).toEqual({ id: "part-1", label: "Payload part", center: [1, 2, 3] });
   });
 
+  test("uses payload object center for gravity load markers when no point is saved", () => {
+    const load: Load = {
+      id: "load-payload",
+      type: "gravity",
+      selectionRef: "selection-side",
+      parameters: {
+        value: 5,
+        units: "kg",
+        direction: [0, 0, -1],
+        payloadObject: { id: "rod-1", label: "Rod 1", center: [1.25, 2.5, 3.75] }
+      },
+      status: "complete"
+    };
+
+    expect(loadMarkerFromLoad(load, study, 0)?.point).toEqual([1.25, 2.5, 3.75]);
+  });
+
   test("treats gravity loads as payload mass inputs", () => {
     expect(unitsForLoadType("gravity")).toBe("kg");
     const load: Load = {

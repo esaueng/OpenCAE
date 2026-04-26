@@ -631,14 +631,16 @@ export function App() {
           onAddLoad={(type, value, selectionRef, direction) => {
             const selection = study.namedSelections.find((item) => item.id === selectionRef);
             const faceId = selection?.geometryRefs[0]?.entityId;
-            const face = selectedFace?.id === faceId || (!selection && selectedFace) ? selectedFace : displayModel.faces.find((item) => item.id === faceId);
-            if (!face) return;
             const payloadObject = type === "gravity" ? selectedPayloadObject : null;
+            const fallbackPayloadFace = payloadObject ? faceForPayloadObject(payloadObject) : null;
+            const face = selectedFace?.id === faceId || (!selection && selectedFace) ? selectedFace : displayModel.faces.find((item) => item.id === faceId) ?? fallbackPayloadFace;
+            if (!face) return;
+            const applicationPoint = type === "gravity" && payloadObject ? payloadObject.center : selectedLoadPoint;
             if (selection) {
-              updateStudy(addLoad(study.id, type, value, selection.id, directionVectorForLabel(direction, face), selectedLoadPoint, payloadObject, study));
+              updateStudy(addLoad(study.id, type, value, selection.id, directionVectorForLabel(direction, face), applicationPoint, payloadObject, study));
               return;
             }
-            void addLoadForFace(type, value, face, direction, selectedLoadPoint, payloadObject);
+            void addLoadForFace(type, value, face, direction, applicationPoint, payloadObject);
           }}
           onUpdateLoad={(load: Load) =>
             updateStudy(
@@ -729,6 +731,17 @@ function namedSelectionForFace(study: Study, face: DisplayFace): NamedSelection 
     entityType: "face",
     geometryRefs: [{ bodyId, entityType: "face", entityId: face.id, label: face.label }],
     fingerprint: `${face.id}-${face.center.map((value) => value.toFixed(3)).join("-")}`
+  };
+}
+
+function faceForPayloadObject(payloadObject: PayloadObjectSelection): DisplayFace {
+  return {
+    id: `payload-face-${payloadObject.id}`,
+    label: payloadObject.label,
+    color: "#4da3ff",
+    center: payloadObject.center,
+    normal: [0, 0, 1],
+    stressValue: 0
   };
 }
 

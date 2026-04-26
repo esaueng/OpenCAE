@@ -70,10 +70,11 @@ export function loadMarkerFromLoad(load: Load, study: Study, stackIndex: number)
   const faceId = selection?.geometryRefs[0]?.entityId;
   if (!faceId) return null;
   const direction = isDirection(load.parameters.direction) ? load.parameters.direction : ([0, 0, -1] as LoadDirection);
+  const payloadObject = payloadObjectForLoad(load);
   return {
     id: load.id,
     faceId,
-    point: applicationPointForLoad(load),
+    point: applicationPointForLoad(load) ?? (load.type === "gravity" ? payloadObject?.center : undefined),
     type: load.type,
     value: Number(load.parameters.value ?? 0),
     units: String(load.parameters.units ?? unitsForLoadType(load.type)),
