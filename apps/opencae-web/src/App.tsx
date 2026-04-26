@@ -595,7 +595,7 @@ export function App() {
           onToggleDeformed={() => setShowDeformed((value) => !value)}
           onToggleDimensions={() => setShowDimensions((value) => !value)}
           onStressExaggerationChange={setStressExaggeration}
-          onAssignMaterial={(materialId, parameters) => updateStudy(assignMaterial(study.id, materialId, parameters), "supports")}
+          onAssignMaterial={(materialId, parameters) => updateStudy(assignMaterial(study.id, materialId, parameters, study), "supports")}
           onAddSupport={(selectionRef) => updateStudy(addSupport(study.id, selectionRef))}
           onUpdateSupport={(support: Constraint) =>
             updateStudy(

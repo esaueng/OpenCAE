@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
-import type { DisplayModel, Project } from "@opencae/schema";
-import { createProject, importLocalProject, loadSampleProject, uploadModel } from "./api";
+import type { DisplayModel, Project, Study } from "@opencae/schema";
+import { assignMaterial, createProject, importLocalProject, loadSampleProject, uploadModel } from "./api";
 
 const project = {
   id: "project-1",
@@ -27,6 +27,29 @@ const displayModel = {
   bodyCount: 0,
   faces: []
 } satisfies DisplayModel;
+
+const study = {
+  id: "study-1",
+  projectId: "project-1",
+  name: "Static Stress",
+  type: "static_stress",
+  geometryScope: [{ bodyId: "body-1", entityType: "body", entityId: "body-1", label: "Body" }],
+  materialAssignments: [],
+  namedSelections: [{
+    id: "selection-body-1",
+    name: "Imported body",
+    entityType: "body",
+    geometryRefs: [{ bodyId: "body-1", entityType: "body", entityId: "body-1", label: "Body" }],
+    fingerprint: "body-1"
+  }],
+  contacts: [],
+  constraints: [],
+  loads: [],
+  meshSettings: { preset: "medium", status: "not_started" },
+  solverSettings: {},
+  validation: [],
+  runs: []
+} satisfies Study;
 
 const sizedAsciiStl = `
 solid tray
@@ -105,6 +128,21 @@ describe("api", () => {
     expect(response.project.name).toBe("Untitled Project");
     expect(response.project.geometryFiles).toHaveLength(0);
     expect(response.displayModel.name).toBe("No model loaded");
+  });
+
+  test("assigns material locally when the API is unavailable", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("missing", { status: 404 })));
+
+    const response = await assignMaterial("study-1", "mat-pla", { printed: true, infillDensity: 35 }, study);
+
+    expect(response.study.materialAssignments).toEqual([{
+      id: "assign-material-current",
+      materialId: "mat-pla",
+      selectionRef: "selection-body-1",
+      parameters: { printed: true, infillDensity: 35 },
+      status: "complete"
+    }]);
+    expect(response.message).toBe("Material assigned to Imported body.");
   });
 
   test("opens a local project file without requiring the API", async () => {
