@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import type { DisplayFace, Load, NamedSelection, Study } from "@opencae/schema";
-import { createViewerLoadMarkers, directionLabelForLoad, directionVectorForLabel, loadMarkerDisplayLabel, loadMarkerFromLoad, payloadObjectForLoad, unitsForLoadType } from "./loadPreview";
+import { createViewerLoadMarkers, directionLabelForLoad, directionVectorForLabel, loadMarkerDisplayLabel, loadMarkerFromLoad, loadMarkerViewportPresentation, payloadObjectForLoad, unitsForLoadType } from "./loadPreview";
 
 const face: DisplayFace = {
   id: "face-side",
@@ -86,6 +86,30 @@ describe("load preview helpers", () => {
     };
 
     expect(loadMarkerFromLoad(load, study, 0)?.point).toEqual([1.25, 2.5, 3.75]);
+  });
+
+  test("presents payload mass markers as part labels without arrows", () => {
+    const load: Load = {
+      id: "load-payload",
+      type: "gravity",
+      selectionRef: "selection-side",
+      parameters: {
+        value: 5,
+        units: "kg",
+        direction: [0, 0, -1],
+        payloadObject: { id: "rod-1", label: "Part 2", center: [1.25, 2.5, 3.75] }
+      },
+      status: "complete"
+    };
+    const marker = loadMarkerFromLoad(load, study, 0);
+
+    expect(marker?.payloadObject?.label).toBe("Part 2");
+    expect(marker && loadMarkerViewportPresentation(marker)).toEqual({
+      label: "Part 2",
+      showArrow: false,
+      tone: "payload-mass",
+      color: "#34d399"
+    });
   });
 
   test("treats gravity loads as payload mass inputs", () => {

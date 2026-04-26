@@ -11,10 +11,10 @@ describe("payload object highlighting", () => {
     second.userData.opencaeObjectId = "rod-2";
     root.add(first, second);
 
-    highlightPayloadObjectMeshes(root, "rod-2", { baseColor: "#9aa7b4", highlightColor: "#7cc7ff" });
+    highlightPayloadObjectMeshes(root, "rod-2", { baseColor: "#9aa7b4", highlightColor: "#34d399" });
 
     expect((first.material as THREE.MeshStandardMaterial).color.getHexString()).toBe("9aa7b4");
-    expect((second.material as THREE.MeshStandardMaterial).color.getHexString()).toBe("7cc7ff");
+    expect((second.material as THREE.MeshStandardMaterial).color.getHexString()).toBe("34d399");
     expect((second.material as THREE.MeshStandardMaterial).emissive.getHexString()).toBe("1f6fb8");
   });
 });

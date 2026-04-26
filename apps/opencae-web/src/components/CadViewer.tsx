@@ -15,7 +15,7 @@ import { formatResultValue, resultProbeSamplesForFaces, resultSamplesForFaces, t
 import { stepPreviewFromBase64 } from "../stepPreview";
 import { normalizedStlGeometryFromBuffer } from "../stlPreview";
 import { lengthForUnits, stressForUnits, type UnitSystem } from "../unitDisplay";
-import { loadMarkerDisplayLabel, type PayloadObjectSelection } from "../loadPreview";
+import { loadMarkerViewportPresentation, type PayloadObjectSelection } from "../loadPreview";
 import { highlightPayloadObjectMeshes } from "../payloadObjectHighlight";
 
 export type ViewMode = "model" | "mesh" | "results";
@@ -25,6 +25,7 @@ export interface ViewerLoadMarker {
   id: string;
   faceId: string;
   point?: [number, number, number];
+  payloadObject?: PayloadObjectSelection;
   type: string;
   value: number;
   units: string;
@@ -728,7 +729,7 @@ function UploadedNativeCadModel({
   }, [color, displayModel.nativeCad?.contentBase64, onMeasureDisplayModelDimensions, onUploadedPreviewBounds]);
 
   useEffect(() => {
-    if (preview.object) highlightPayloadObjectMeshes(preview.object, activePayloadObjectId, { baseColor: color, highlightColor: "#7cc7ff" });
+    if (preview.object) highlightPayloadObjectMeshes(preview.object, activePayloadObjectId, { baseColor: color, highlightColor: "#34d399" });
   }, [activePayloadObjectId, color, preview.object]);
 
   if (preview.status === "loading") {
@@ -761,7 +762,7 @@ function UploadedStlModel({ displayModel, color, pickHandlers, activePayloadObje
   }, [displayModel.visualMesh?.contentBase64]);
 
   useEffect(() => {
-    if (meshRef.current) highlightPayloadObjectMeshes(meshRef.current, activePayloadObjectId, { baseColor: color, highlightColor: "#7cc7ff" });
+    if (meshRef.current) highlightPayloadObjectMeshes(meshRef.current, activePayloadObjectId, { baseColor: color, highlightColor: "#34d399" });
   }, [activePayloadObjectId, color]);
 
   return (
@@ -796,7 +797,7 @@ function UploadedObjModel({ displayModel, pickHandlers, activePayloadObjectId }:
   }, [displayModel.visualMesh?.contentBase64]);
 
   useEffect(() => {
-    highlightPayloadObjectMeshes(object, activePayloadObjectId, { baseColor: "#9aa7b4", highlightColor: "#7cc7ff" });
+    highlightPayloadObjectMeshes(object, activePayloadObjectId, { baseColor: "#9aa7b4", highlightColor: "#34d399" });
   }, [activePayloadObjectId, object]);
 
   return <primitive object={object} {...pickHandlers} />;
@@ -1596,7 +1597,7 @@ function SceneLabel({
 }: {
   label: string;
   position: [number, number, number];
-  tone: "max" | "mid" | "min" | "load" | "active-load" | "dimension";
+  tone: "max" | "mid" | "min" | "load" | "active-load" | "payload-mass" | "dimension";
 }) {
   const labelWidth = Math.max(1.02, label.length * 0.098);
   const colors = sceneLabelColors(tone);
@@ -1622,12 +1623,13 @@ function SceneLabel({
   );
 }
 
-function sceneLabelColors(tone: "max" | "mid" | "min" | "load" | "active-load" | "dimension") {
+function sceneLabelColors(tone: "max" | "mid" | "min" | "load" | "active-load" | "payload-mass" | "dimension") {
   if (tone === "max") return { outline: "#1f0707", text: "#fee2e2" };
   if (tone === "mid") return { outline: "#1f1300", text: "#fef3c7" };
   if (tone === "min") return { outline: "#06142a", text: "#dbeafe" };
   if (tone === "dimension") return { outline: "#03101d", text: "#8cc8ff" };
   if (tone === "active-load") return { outline: "#03101d", text: "#8cc8ff" };
+  if (tone === "payload-mass") return { outline: "#032018", text: "#6ee7c8" };
   return { outline: "#1f1300", text: "#ffe6a3" };
 }
 
@@ -1713,10 +1715,11 @@ function ResultLegend({ resultMode, resultFields, unitSystem }: { resultMode: Re
 }
 
 function LoadGlyph({ marker, face, active }: { marker: ViewerLoadMarker; face: DisplayFace; active: boolean }) {
+  const presentation = loadMarkerViewportPresentation(marker);
   const markerDirection = markerDirectionInModelSpace(marker);
   const isNormalDirection = marker.directionLabel === "Normal";
-  const markerColor = active ? "#4da3ff" : "#f59e0b";
-  const labelTone = active ? "active-load" : "load";
+  const markerColor = marker.type === "gravity" ? presentation.color : active ? "#4da3ff" : presentation.color;
+  const labelTone = marker.type === "gravity" ? presentation.tone : active ? "active-load" : presentation.tone;
 
   const normal = new THREE.Vector3(...face.normal).normalize();
   const center = new THREE.Vector3(...(marker.point ?? face.center));
@@ -1727,13 +1730,14 @@ function LoadGlyph({ marker, face, active }: { marker: ViewerLoadMarker; face: D
   const arrowDirection = isNormalDirection ? normal : markerDirection;
   const { start, end } = arrowPointsOutsideSurface(center.clone().add(loadOffset), normal, arrowDirection, 0.54);
   const tailLabelPosition = start.clone().add(arrowDirection.clone().multiplyScalar(-0.18)).add(normal.clone().multiplyScalar(0.08));
+  const massLabelPosition = center.clone().add(loadOffset).add(normal.clone().multiplyScalar(0.24)).add(new THREE.Vector3(0, 0.12, 0));
 
   return (
     <group>
-      <ArrowGlyph start={start} end={end} color={markerColor} />
+      {presentation.showArrow && <ArrowGlyph start={start} end={end} color={markerColor} />}
       <SceneLabel
-        label={loadMarkerDisplayLabel(marker)}
-        position={tailLabelPosition.toArray()}
+        label={presentation.label}
+        position={(presentation.showArrow ? tailLabelPosition : massLabelPosition).toArray()}
         tone={labelTone}
       />
     </group>
