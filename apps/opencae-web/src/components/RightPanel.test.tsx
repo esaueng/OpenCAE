@@ -55,6 +55,90 @@ const resultSummary: ResultSummary = {
 };
 
 describe("RightPanel payload mass controls", () => {
+  test("shows contextual weak X build yield on cantilever material previews", () => {
+    const html = renderToStaticMarkup(
+      <RightPanel
+        activeStep="material"
+        project={project}
+        displayModel={{
+          ...displayModel,
+          id: "display-cantilever",
+          faces: [
+            { id: "face-base-left", label: "Fixed end face", color: "#4da3ff", center: [-1.8, 0.18, 0], normal: [-1, 0, 0], stressValue: 132 },
+            { id: "face-load-top", label: "Free end load face", color: "#4da3ff", center: [1.75, 0.18, 0], normal: [1, 0, 0], stressValue: 96 }
+          ]
+        }}
+        study={{
+          ...study,
+          materialAssignments: [{ id: "assign", materialId: "mat-petg", selectionRef: "selection-body", parameters: { printed: true, infillDensity: 100, wallCount: 3, layerOrientation: "x" }, status: "complete" }],
+          namedSelections: [
+            {
+              id: "selection-fixed-face",
+              name: "Fixed end face",
+              entityType: "face",
+              geometryRefs: [{ bodyId: "body", entityType: "face", entityId: "face-base-left", label: "Fixed end face" }],
+              fingerprint: "fixed"
+            },
+            {
+              id: "selection-load-face",
+              name: "Free end load face",
+              entityType: "face",
+              geometryRefs: [{ bodyId: "body", entityType: "face", entityId: "face-load-top", label: "Free end load face" }],
+              fingerprint: "load"
+            }
+          ],
+          constraints: [{ id: "fixed", type: "fixed", selectionRef: "selection-fixed-face", parameters: {}, status: "complete" }],
+          loads: [{ id: "load", type: "force", selectionRef: "selection-load-face", parameters: { value: 500, direction: [0, 0, -1] }, status: "complete" }]
+        }}
+        selectedFace={null}
+        viewMode="model"
+        resultMode="stress"
+        showDeformed={false}
+        showDimensions={false}
+        stressExaggeration={1}
+        resultSummary={resultSummary}
+        runProgress={0}
+        sampleModel="cantilever"
+        draftLoadType="force"
+        draftLoadValue={500}
+        draftLoadDirection="-Z"
+        selectedLoadPoint={null}
+        selectedPayloadObject={null}
+        onFitView={vi.fn()}
+        onRotateModel={vi.fn()}
+        onResetModelOrientation={vi.fn()}
+        onLoadSample={vi.fn()}
+        onUploadModel={vi.fn()}
+        onSampleModelChange={vi.fn()}
+        onViewModeChange={vi.fn()}
+        onResultModeChange={vi.fn()}
+        onToggleDeformed={vi.fn()}
+        onToggleDimensions={vi.fn()}
+        onStressExaggerationChange={vi.fn()}
+        onAssignMaterial={vi.fn()}
+        onAddSupport={vi.fn()}
+        onUpdateSupport={vi.fn()}
+        onRemoveSupport={vi.fn()}
+        onDraftLoadTypeChange={vi.fn()}
+        onDraftLoadValueChange={vi.fn()}
+        onDraftLoadDirectionChange={vi.fn()}
+        onAddLoad={vi.fn()}
+        onUpdateLoad={vi.fn()}
+        onPreviewLoadEdit={vi.fn()}
+        onRemoveLoad={vi.fn()}
+        onGenerateMesh={vi.fn()}
+        onRunSimulation={vi.fn()}
+        canRunSimulation={false}
+        missingRunItems={[]}
+        canGenerateReport={false}
+        onGenerateReport={vi.fn()}
+        onStepSelect={vi.fn()}
+      />
+    );
+
+    expect(html).toContain("17.5 MPa");
+  });
+
   test("enables adding payload mass when a payload object is selected without a named face selection", () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
     try {

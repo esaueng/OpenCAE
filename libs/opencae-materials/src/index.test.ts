@@ -44,6 +44,21 @@ describe("starterMaterials", () => {
     expect(zBuild.yieldStrength).toBeGreaterThan(yBuild.yieldStrength);
     expect(xBuild.yieldStrength).toBe(yBuild.yieldStrength);
   });
+
+  test("applies a severe interlayer penalty when the print direction is critical", async () => {
+    const { effectiveMaterialProperties } = await import("./index");
+    const petg = starterMaterials.find((material) => material.id === "mat-petg");
+    expect(petg).toBeDefined();
+
+    const parameters = { printed: true, infillDensity: 100, wallCount: 3 };
+    const xCritical = effectiveMaterialProperties(petg!, { ...parameters, layerOrientation: "x" }, { criticalLayerAxis: "x" });
+    const yBuild = effectiveMaterialProperties(petg!, { ...parameters, layerOrientation: "y" }, { criticalLayerAxis: "x" });
+    const genericX = effectiveMaterialProperties(petg!, { ...parameters, layerOrientation: "x" });
+
+    expect(xCritical.yieldStrength).toBeCloseTo(petg!.yieldStrength * 0.35);
+    expect(xCritical.yieldStrength).toBeLessThan(yBuild.yieldStrength * 0.6);
+    expect(genericX.yieldStrength).toBe(yBuild.yieldStrength);
+  });
 });
 
 describe("payloadMaterials", () => {

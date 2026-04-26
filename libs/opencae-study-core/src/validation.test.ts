@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Study } from "@opencae/schema";
-import { validateStaticStressStudy } from "./index";
+import { inferCriticalPrintAxis, validateStaticStressStudy } from "./index";
 
 describe("validateStaticStressStudy", () => {
   const readyStudy: Study = {
@@ -64,5 +64,40 @@ describe("validateStaticStressStudy", () => {
       "Load bad-direction needs a 3D direction vector.",
       "Load bad-selection must reference a face selection."
     ]);
+  });
+
+  it("infers the dominant bending span as the critical print axis", () => {
+    const study: Study = {
+      ...readyStudy,
+      constraints: [{ id: "fixed", type: "fixed", selectionRef: "selection-fixed-face", parameters: {}, status: "complete" }],
+      namedSelections: [
+        {
+          id: "selection-fixed-face",
+          name: "Fixed end face",
+          entityType: "face",
+          geometryRefs: [{ bodyId: "body", entityType: "face", entityId: "face-base-left", label: "Fixed end face" }],
+          fingerprint: "fixed"
+        },
+        {
+          id: "selection-load-face",
+          name: "Free end load face",
+          entityType: "face",
+          geometryRefs: [{ bodyId: "body", entityType: "face", entityId: "face-load-top", label: "Free end load face" }],
+          fingerprint: "load"
+        }
+      ],
+      loads: [{
+        id: "load-free-end",
+        type: "force",
+        selectionRef: "selection-load-face",
+        parameters: { value: 500, direction: [0, 0, -1] },
+        status: "complete"
+      }]
+    };
+
+    expect(inferCriticalPrintAxis(study, [
+      { selectionId: "selection-fixed-face", entityId: "face-base-left", center: [-1.8, 0.18, 0] },
+      { selectionId: "selection-load-face", entityId: "face-load-top", center: [1.75, 0.18, 0] }
+    ])).toBe("x");
   });
 });

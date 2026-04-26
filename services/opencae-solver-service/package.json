@@ -11,6 +11,7 @@
     "@opencae/materials": "workspace:*",
     "@opencae/schema": "workspace:*",
     "@opencae/solver-contract": "workspace:*",
+    "@opencae/study-core": "workspace:*",
     "@opencae/storage": "workspace:*"
   }
 }
