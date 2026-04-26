@@ -111,9 +111,11 @@ export function loadMarkerDisplayLabel(marker: ViewerLoadMarker) {
 
 export function loadMarkerViewportPresentation(marker: ViewerLoadMarker) {
   if (marker.type === "gravity") {
+    const targetLabel = marker.payloadObject?.label?.trim();
     return {
-      label: loadMarkerOrdinalLabel(marker),
+      label: targetLabel ? `${loadMarkerOrdinalLabel(marker)} ${targetLabel}` : loadMarkerOrdinalLabel(marker),
       showArrow: false,
+      showLeader: true,
       tone: "payload-mass" as const,
       color: "#34d399"
     };
@@ -121,6 +123,7 @@ export function loadMarkerViewportPresentation(marker: ViewerLoadMarker) {
   return {
     label: loadMarkerDisplayLabel(marker),
     showArrow: true,
+    showLeader: false,
     tone: "load" as const,
     color: "#f59e0b"
   };

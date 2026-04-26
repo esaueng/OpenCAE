@@ -105,8 +105,9 @@ describe("load preview helpers", () => {
 
     expect(marker?.payloadObject?.label).toBe("Part 2");
     expect(marker && loadMarkerViewportPresentation(marker)).toEqual({
-      label: "L1",
+      label: "L1 Part 2",
       showArrow: false,
+      showLeader: true,
       tone: "payload-mass",
       color: "#34d399"
     });
