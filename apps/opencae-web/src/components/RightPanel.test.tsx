@@ -118,4 +118,71 @@ describe("RightPanel payload mass controls", () => {
       consoleError.mockRestore();
     }
   });
+
+  test("opens load editing from the applied load card without an edit button", () => {
+    const html = renderToStaticMarkup(
+      <RightPanel
+        activeStep="loads"
+        project={project}
+        displayModel={displayModel}
+        study={{
+          ...study,
+          loads: [{
+            id: "load-1",
+            type: "force",
+            selectionRef: "selection-top",
+            parameters: { value: 500, units: "N", direction: [0, 0, -1] },
+            status: "complete"
+          }]
+        }}
+        selectedFace={displayModel.faces[0] ?? null}
+        viewMode="model"
+        resultMode="stress"
+        showDeformed={false}
+        showDimensions={false}
+        stressExaggeration={1}
+        resultSummary={resultSummary}
+        runProgress={0}
+        sampleModel="bracket"
+        draftLoadType="force"
+        draftLoadValue={500}
+        draftLoadDirection="-Z"
+        selectedLoadPoint={null}
+        selectedPayloadObject={null}
+        onFitView={vi.fn()}
+        onRotateModel={vi.fn()}
+        onResetModelOrientation={vi.fn()}
+        onLoadSample={vi.fn()}
+        onUploadModel={vi.fn()}
+        onSampleModelChange={vi.fn()}
+        onViewModeChange={vi.fn()}
+        onResultModeChange={vi.fn()}
+        onToggleDeformed={vi.fn()}
+        onToggleDimensions={vi.fn()}
+        onStressExaggerationChange={vi.fn()}
+        onAssignMaterial={vi.fn()}
+        onAddSupport={vi.fn()}
+        onUpdateSupport={vi.fn()}
+        onRemoveSupport={vi.fn()}
+        onDraftLoadTypeChange={vi.fn()}
+        onDraftLoadValueChange={vi.fn()}
+        onDraftLoadDirectionChange={vi.fn()}
+        onAddLoad={vi.fn()}
+        onUpdateLoad={vi.fn()}
+        onPreviewLoadEdit={vi.fn()}
+        onRemoveLoad={vi.fn()}
+        onGenerateMesh={vi.fn()}
+        onRunSimulation={vi.fn()}
+        canRunSimulation={false}
+        missingRunItems={[]}
+        canGenerateReport={false}
+        onGenerateReport={vi.fn()}
+        onStepSelect={vi.fn()}
+      />
+    );
+
+    expect(html).not.toContain("Edit load");
+    expect(html).toContain('role="button"');
+    expect(html).toContain('aria-label="Edit L1 force load"');
+  });
 });

@@ -1515,6 +1515,16 @@ button:disabled {
   border-radius: var(--radius-md);
 }
 
+.editable-item.clickable {
+  cursor: pointer;
+}
+
+.editable-item.clickable:hover,
+.editable-item.clickable:focus-visible {
+  border-color: var(--color-accent-border);
+  background: var(--color-surface-hover);
+}
+
 .theme-light .editable-item {
   background: rgba(255, 255, 255, 0.55);
 }
