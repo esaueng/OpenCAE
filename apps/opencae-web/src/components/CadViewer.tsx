@@ -4,7 +4,7 @@ import { Billboard, Bounds, Edges, GizmoHelper, Grid, Html, Line, OrbitControls,
 import { Canvas, useThree } from "@react-three/fiber";
 import type { ThreeEvent } from "@react-three/fiber";
 import type { DisplayFace, DisplayModel, ResultField } from "@opencae/schema";
-import { RotateCcw } from "lucide-react";
+import { Maximize2 } from "lucide-react";
 import * as THREE from "three";
 import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
 import type { StepId } from "./StepBar";
@@ -107,11 +107,12 @@ export function CadViewer(props: CadViewerProps) {
         </GizmoHelper>
       </Canvas>
       <div className="viewer-hud">
-        <button className="viewer-reset" type="button" onClick={props.onResetView} title="Reset view">
-          <RotateCcw size={15} aria-hidden="true" />
-          Reset View
+        <button className="viewer-reset" type="button" onClick={props.onResetView} title="Reset view" aria-label="Reset view">
+          <Maximize2 size={14} aria-hidden="true" />
+          <span className="visually-hidden">Reset view</span>
         </button>
       </div>
+      <div className="viewer-watermark" aria-hidden="true">Built by Esau Engineering</div>
       {effectiveViewMode === "results" && <ResultLegend resultMode={props.resultMode} resultFields={props.resultFields} />}
     </section>
   );
