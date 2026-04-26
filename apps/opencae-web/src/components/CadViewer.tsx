@@ -17,7 +17,7 @@ import { normalizedStlGeometryFromBuffer } from "../stlPreview";
 import { lengthForUnits, stressForUnits, type UnitSystem } from "../unitDisplay";
 import { loadMarkerViewportPresentation, type PayloadObjectSelection } from "../loadPreview";
 import { highlightPayloadObjectMeshes } from "../payloadObjectHighlight";
-import { payloadMassLabelOffset } from "../calloutLabelLayout";
+import { layoutOutsideModelLabels, payloadMassLabelOffset, type LabelAnchor } from "../calloutLabelLayout";
 
 export type ViewMode = "model" | "mesh" | "results";
 export type ResultMode = "stress" | "displacement" | "safety_factor";
@@ -308,6 +308,23 @@ function BracketModel({
   const activeHit = hoveredHit ?? selectedHit;
   const showModelHitLabel = shouldShowModelHitLabel(viewMode, Boolean(hoveredHit));
   const activePayloadObjectId = payloadHighlightObjectId(payloadObjectSelectionMode, hoveredHit?.payloadObject ?? null);
+  const boundaryLabelPositions = useMemo(() => {
+    if (!showBoundaryMarkers) return new Map<string, [number, number, number]>();
+    const bounds = dimensionBoundsForDisplayModel(displayModel);
+    if (!bounds) return new Map<string, [number, number, number]>();
+    const anchors: LabelAnchor[] = [
+      ...loadMarkers.map((marker) => {
+        const face = displayModel.faces.find((item) => item.id === marker.faceId);
+        return face ? { id: boundaryLabelKey("load", marker.id), anchor: loadMarkerAnchor(marker, face) } : null;
+      }),
+      ...supportMarkers.map((marker) => {
+        const face = displayModel.faces.find((item) => item.id === marker.faceId);
+        return face ? { id: boundaryLabelKey("support", marker.id), anchor: supportMarkerAnchor(marker, face) } : null;
+      })
+    ].filter((anchor): anchor is LabelAnchor => Boolean(anchor));
+
+    return new Map(layoutOutsideModelLabels(anchors, boxToLabelBounds(bounds)).map((label) => [label.id, label.position]));
+  }, [displayModel, loadMarkers, showBoundaryMarkers, supportMarkers]);
 
   useEffect(() => {
     if (!selectedFaceId) {
@@ -384,11 +401,11 @@ function BracketModel({
       {showModelHitLabel && hoveredHit && <ModelHitLabel hit={hoveredHit} active={hoveredHit.face.id === selectedFaceId} />}
       {showBoundaryMarkers && loadMarkers.map((marker) => {
         const face = displayModel.faces.find((item) => item.id === marker.faceId);
-        return face ? <LoadGlyph key={marker.id} marker={marker} face={face} active={activeStep === "loads"} /> : null;
+        return face ? <LoadGlyph key={marker.id} marker={marker} face={face} active={activeStep === "loads"} labelPosition={boundaryLabelPositions.get(boundaryLabelKey("load", marker.id))} /> : null;
       })}
       {showBoundaryMarkers && supportMarkers.map((marker) => {
         const face = displayModel.faces.find((item) => item.id === marker.faceId);
-        return face ? <SupportGlyph key={marker.id} kind={modelKind} marker={marker} face={face} active={activeStep === "supports"} /> : null;
+        return face ? <SupportGlyph key={marker.id} kind={modelKind} marker={marker} face={face} active={activeStep === "supports"} labelPosition={boundaryLabelPositions.get(boundaryLabelKey("support", marker.id))} /> : null;
       })}
       {showResultMarkers && resultProbesForKind(modelKind, displayModel.faces, resultMode, resultFields, unitSystem).map((probe) => <ResultProbe key={`${probe.tone}-${probe.label}-${probe.anchor.join(",")}`} {...probe} />)}
     </group>
@@ -451,6 +468,26 @@ function dimensionBoundsForDisplayModel(displayModel: DisplayModel) {
     return new THREE.Box3(halfSize.clone().multiplyScalar(-1), halfSize);
   }
   return new THREE.Box3(new THREE.Vector3(-1.55, -0.24, -BRACKET_DEPTH / 2), new THREE.Vector3(2.35, 2.62, BRACKET_DEPTH / 2));
+}
+
+function boxToLabelBounds(bounds: THREE.Box3) {
+  return {
+    min: bounds.min.toArray() as [number, number, number],
+    max: bounds.max.toArray() as [number, number, number]
+  };
+}
+
+function boundaryLabelKey(kind: "load" | "support", id: string) {
+  return `${kind}:${id}`;
+}
+
+function loadMarkerAnchor(marker: ViewerLoadMarker, face: DisplayFace): [number, number, number] {
+  return marker.point ?? marker.payloadObject?.center ?? face.center;
+}
+
+function supportMarkerAnchor(marker: ViewerSupportMarker, face: DisplayFace): [number, number, number] {
+  if (marker.faceId === "face-base-left") return [0.72, 0, BRACKET_DEPTH / 2 + 0.065];
+  return face.center;
 }
 
 function formatDimensionLabel(value: number, units: string) {
@@ -1815,9 +1852,11 @@ function sceneLabelColors(tone: "max" | "mid" | "min" | "load" | "active-load" |
   return { outline: "#1f1300", text: "#ffe6a3" };
 }
 
-function SupportGlyph({ kind, marker, face, active }: { kind: SampleModelKind; marker: ViewerSupportMarker; face: DisplayFace; active: boolean }) {
+function SupportGlyph({ kind, marker, face, active, labelPosition }: { kind: SampleModelKind; marker: ViewerSupportMarker; face: DisplayFace; active: boolean; labelPosition?: [number, number, number] }) {
   if (kind === "bracket" && face.id === "face-base-left") {
     const depthOffset = Math.min(marker.stackIndex, 2) * 0.05;
+    const anchor: [number, number, number] = [0.72, 0, BRACKET_DEPTH / 2 + 0.065 + depthOffset];
+    const position = labelPosition ?? [0.72, 0.38 + marker.stackIndex * 0.16, BRACKET_DEPTH / 2 + 0.2] as [number, number, number];
     return (
       <group position={[0, 0, depthOffset]}>
         {BRACKET_HOLES.filter((hole) => hole.supported).map((hole) => (
@@ -1825,9 +1864,10 @@ function SupportGlyph({ kind, marker, face, active }: { kind: SampleModelKind; m
             <SupportBurst radius={hole.radius} active={active} />
           </group>
         ))}
+        <BoundaryLabelLeader anchor={anchor} labelPosition={position} color={active ? "#4da3ff" : "#f59e0b"} />
         <SceneLabel
           label={supportLabel(marker)}
-          position={[0.72, 0.38 + marker.stackIndex * 0.16, BRACKET_DEPTH / 2 + 0.2]}
+          position={position}
           tone={active ? "active-load" : "load"}
         />
       </group>
@@ -1841,7 +1881,7 @@ function SupportGlyph({ kind, marker, face, active }: { kind: SampleModelKind; m
   tangent.normalize();
   const offset = tangent.multiplyScalar((marker.stackIndex - 0.5) * 0.22);
   const anchor = center.clone().add(offset).add(normal.clone().multiplyScalar(0.04));
-  const labelPosition = anchor.clone().add(normal.clone().multiplyScalar(0.32)).add(new THREE.Vector3(0, 0.14, 0));
+  const position = labelPosition ?? anchor.clone().add(normal.clone().multiplyScalar(0.32)).add(new THREE.Vector3(0, 0.14, 0)).toArray() as [number, number, number];
   return (
     <group>
       <mesh position={anchor.toArray()} rotation={rotationForNormal(face.normal)}>
@@ -1849,7 +1889,8 @@ function SupportGlyph({ kind, marker, face, active }: { kind: SampleModelKind; m
         <meshBasicMaterial color={active ? "#4da3ff" : "#f59e0b"} transparent opacity={0.88} side={THREE.DoubleSide} />
       </mesh>
       <SupportBurstAt position={anchor.toArray()} normal={normal} active={active} />
-      <SceneLabel label={supportLabel(marker)} position={labelPosition.toArray()} tone={active ? "active-load" : "load"} />
+      <BoundaryLabelLeader anchor={anchor.toArray()} labelPosition={position} color={active ? "#4da3ff" : "#f59e0b"} />
+      <SceneLabel label={supportLabel(marker)} position={position} tone={active ? "active-load" : "load"} />
     </group>
   );
 }
@@ -1896,7 +1937,7 @@ function ResultLegend({ resultMode, resultFields, unitSystem }: { resultMode: Re
   );
 }
 
-function LoadGlyph({ marker, face, active }: { marker: ViewerLoadMarker; face: DisplayFace; active: boolean }) {
+function LoadGlyph({ marker, face, active, labelPosition }: { marker: ViewerLoadMarker; face: DisplayFace; active: boolean; labelPosition?: [number, number, number] }) {
   const presentation = loadMarkerViewportPresentation(marker);
   const markerDirection = markerDirectionInModelSpace(marker);
   const isNormalDirection = marker.directionLabel === "Normal";
@@ -1913,11 +1954,13 @@ function LoadGlyph({ marker, face, active }: { marker: ViewerLoadMarker; face: D
   const { start, end } = arrowPointsOutsideSurface(center.clone().add(loadOffset), normal, arrowDirection, 0.54);
   const tailLabelPosition = start.clone().add(arrowDirection.clone().multiplyScalar(-0.18)).add(normal.clone().multiplyScalar(0.08));
   const payloadOffset = payloadMassLabelOffset(marker.labelIndex);
-  const massLabelPosition = center
+  const massLabelPosition = labelPosition ? new THREE.Vector3(...labelPosition) : center
     .clone()
     .add(tangent.clone().multiplyScalar(payloadOffset.tangent))
     .add(normal.clone().multiplyScalar(0.24))
     .add(new THREE.Vector3(0, payloadOffset.lift, 0));
+  const forceLabelPosition = labelPosition ? new THREE.Vector3(...labelPosition) : tailLabelPosition;
+  const glyphAnchor = presentation.showArrow ? end.toArray() as [number, number, number] : center.toArray() as [number, number, number];
 
   return (
     <group>
@@ -1929,13 +1972,21 @@ function LoadGlyph({ marker, face, active }: { marker: ViewerLoadMarker; face: D
           color={markerColor}
         />
       )}
+      {labelPosition && <BoundaryLabelLeader anchor={glyphAnchor} labelPosition={labelPosition} color={markerColor} />}
       <SceneLabel
         label={presentation.label}
-        position={(presentation.showArrow ? tailLabelPosition : massLabelPosition).toArray()}
+        position={(presentation.showArrow ? forceLabelPosition : massLabelPosition).toArray()}
         tone={labelTone}
       />
     </group>
   );
+}
+
+function BoundaryLabelLeader({ anchor, labelPosition, color }: { anchor: [number, number, number]; labelPosition: [number, number, number]; color: string }) {
+  const anchorVector = new THREE.Vector3(...anchor);
+  const labelVector = new THREE.Vector3(...labelPosition);
+  const leaderEnd = labelVector.clone().add(anchorVector.clone().sub(labelVector).normalize().multiplyScalar(0.2));
+  return <Line points={[anchor, leaderEnd.toArray()]} color={color} transparent opacity={0.62} lineWidth={1.2} />;
 }
 
 function PayloadMassLeader({ anchor, labelPosition, color }: { anchor: THREE.Vector3; labelPosition: THREE.Vector3; color: string }) {
