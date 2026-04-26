@@ -314,7 +314,14 @@ function BracketModel({
 
   function hitFromEvent(event: ThreeEvent<PointerEvent> | ThreeEvent<MouseEvent>): ModelSelectionHit | null {
     if (!placementMode || isResultView) return null;
-    if (modelKind === "uploaded") return uploadedFaceHitFromEvent(event, displayModel);
+    if (modelKind === "uploaded") {
+      const hit = uploadedFaceHitFromEvent(event, displayModel);
+      if (!hit) return null;
+      return {
+        ...hit,
+        payloadObject: payloadObjectSelectionMode ? payloadObjectFromEvent(event, displayModel, modelKind, hit.face) : undefined
+      };
+    }
     const modelPoint = viewerPointToModelSpace(event.point, displayModel);
     const face = faceForModelHit(modelKind, displayModel.faces, modelPoint);
     if (!face) return null;

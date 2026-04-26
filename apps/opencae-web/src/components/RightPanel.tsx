@@ -363,6 +363,7 @@ function LoadsPanel({
 }: RightPanelProps) {
   const selectedFromViewport = selectedFace ? selectionForFace(study, selectedFace.id) : undefined;
   const hasSelectedFace = Boolean(selectedFace);
+  const canAddDraftLoad = draftLoadType === "gravity" ? Boolean(selectedPayloadObject) : hasSelectedFace;
   const units = unitsForLoadType(draftLoadType);
   const displayDraftLoad = loadValueForUnits(draftLoadValue, units, project.unitSystem);
   const valueLabel = draftLoadType === "gravity" ? "Payload mass" : "Magnitude";
@@ -418,7 +419,7 @@ function LoadsPanel({
           ))}
         </select>
       </label>
-      <button className="outline-action wide" disabled={!hasSelectedFace} onClick={() => hasSelectedFace && onAddLoad(draftLoadType, draftLoadValue, selectedFromViewport?.id, draftLoadDirection)}><Plus size={18} />{addLabel}</button>
+      <button className="outline-action wide" disabled={!canAddDraftLoad} onClick={() => canAddDraftLoad && onAddLoad(draftLoadType, draftLoadValue, selectedFromViewport?.id, draftLoadDirection)}><Plus size={18} />{addLabel}</button>
       <SectionTitle>Applied</SectionTitle>
       <LoadEditorList study={study} unitSystem={project.unitSystem} onUpdateLoad={onUpdateLoad} onPreviewLoadEdit={onPreviewLoadEdit} onRemoveLoad={onRemoveLoad} />
     </Panel>

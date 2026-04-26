@@ -10,6 +10,15 @@ const importedMesh = {
   index: { array: [0, 1, 2] }
 };
 
+const secondImportedMesh = {
+  attributes: {
+    position: { array: [20, 0, 0, 30, 0, 0, 20, 4, 0] },
+    normal: { array: [0, 0, 1, 0, 0, 1, 0, 0, 1] }
+  },
+  index: { array: [0, 1, 2] },
+  name: "Rod 2"
+};
+
 describe("STEP preview helpers", () => {
   test("builds three geometry from imported STEP mesh data", () => {
     const geometry = geometryFromOcctMesh(importedMesh);
@@ -47,5 +56,13 @@ describe("STEP preview helpers", () => {
     expect(preview.normalizedBounds.max.x).toBeCloseTo(renderedBounds.max.x);
     expect(preview.normalizedBounds.max.y).toBeCloseTo(renderedBounds.max.y);
     expect(preview.normalizedBounds.max.z).toBeCloseTo(renderedBounds.max.z);
+  });
+
+  test("assigns stable payload metadata to each imported part mesh", () => {
+    const preview = normalizedStepPreviewFromMeshes([{ ...importedMesh, name: "Rod 1" }, secondImportedMesh], "#9aa7b4");
+    const meshes = preview.object.children.filter((child): child is THREE.Mesh => child instanceof THREE.Mesh);
+
+    expect(meshes.map((mesh) => mesh.userData.opencaeObjectId)).toEqual(["step-object-1", "step-object-2"]);
+    expect(meshes.map((mesh) => mesh.userData.opencaeObjectLabel)).toEqual(["Rod 1", "Rod 2"]);
   });
 });
