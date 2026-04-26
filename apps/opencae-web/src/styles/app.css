@@ -528,23 +528,21 @@ svg {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 28px;
-  padding: 0 4px;
+  min-height: 22px;
+  padding: 0;
   justify-self: center;
   color: var(--color-text-muted);
-  background: rgba(11, 15, 20, 0.28);
-  border: var(--border-thin);
-  border-radius: var(--radius-sm);
+  background: transparent;
+  border: 0;
   font-size: var(--fs-mini);
   text-transform: none;
-  width: min(78px, calc(100% - 20px));
+  width: auto;
 }
 
 .unit-toggle:hover,
 .unit-toggle:focus-visible {
   color: var(--color-accent);
-  border-color: var(--color-accent-border);
-  background: var(--color-accent-dim);
+  outline: none;
 }
 
 .stepbar-footer strong {
