@@ -86,6 +86,7 @@ type ModelPickHandlers = {
   onPointerOut?: () => void;
   onClick?: (event: ThreeEvent<MouseEvent>) => void;
 };
+export const VIEWER_GIZMO_ALIGNMENT = "bottom-right";
 
 export function CadViewer(props: CadViewerProps) {
   const controlsRef = useRef<ViewerOrbitControls | null>(null);
@@ -119,7 +120,7 @@ export function CadViewer(props: CadViewerProps) {
         </Bounds>
         <OrbitControls ref={controlsRef} makeDefault enableDamping dampingFactor={0.08} target={[0, 0, 0.75]} />
         <ShiftPanControls controlsRef={controlsRef} />
-        <GizmoHelper alignment="bottom-left" margin={[92, 92]}>
+        <GizmoHelper alignment={VIEWER_GIZMO_ALIGNMENT} margin={[92, 92]}>
           <CleanAxisGizmo />
         </GizmoHelper>
       </Canvas>
