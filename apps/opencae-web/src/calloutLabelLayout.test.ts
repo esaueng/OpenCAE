@@ -37,13 +37,13 @@ describe("callout label layout", () => {
     expect(new Set(positions.map(([x, y]) => `${x.toFixed(2)},${y.toFixed(2)}`)).size).toBe(positions.length);
   });
 
-  test("keeps single side labels aimed away from their anchor", () => {
+  test("keeps single side labels aimed away from the model center through their anchor", () => {
     const [label] = layoutOutsideModelLabels(
       [{ id: "end-load", anchor: [1, -0.6, 0] }],
       { min: [-1, -1, -0.1], max: [1, 1, 0.1] }
     );
 
     expect(label?.position[0]).toBeGreaterThan(1);
-    expect(label?.position[1]).toBeCloseTo(-0.6);
+    expect(label?.position[1]).toBeLessThan(-0.6);
   });
 });

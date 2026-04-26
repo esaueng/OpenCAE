@@ -29,7 +29,7 @@ export function layoutOutsideModelLabels(anchors: LabelAnchor[], bounds: LabelBo
   }
 
   return (Object.entries(groups) as Array<[LabelSide, LabelAnchor[]]>).flatMap(([side, sideAnchors]) => (
-    distributeSideLabels(side, sideAnchors, bounds, margin, z)
+    distributeSideLabels(side, sideAnchors, bounds, margin, z, centerX, centerY)
   ));
 }
 
@@ -40,7 +40,7 @@ function labelSideForAnchor(anchor: [number, number, number], centerX: number, c
   return yScore < 0 ? "bottom" : "top";
 }
 
-function distributeSideLabels(side: LabelSide, anchors: LabelAnchor[], bounds: LabelBounds, margin: number, z: number): PositionedLabel[] {
+function distributeSideLabels(side: LabelSide, anchors: LabelAnchor[], bounds: LabelBounds, margin: number, z: number, centerX: number, centerY: number): PositionedLabel[] {
   const sorted = [...anchors].sort((a, b) => (
     side === "left" || side === "right" ? a.anchor[1] - b.anchor[1] : a.anchor[0] - b.anchor[0]
   ));
@@ -55,7 +55,9 @@ function distributeSideLabels(side: LabelSide, anchors: LabelAnchor[], bounds: L
 
   return sorted.map((anchor, index) => {
     const anchorAlong = side === "left" || side === "right" ? anchor.anchor[1] : anchor.anchor[0];
-    const along = sorted.length === 1 ? clamp(anchorAlong, laneStart, laneEnd) : laneStart + (span * index) / (sorted.length - 1);
+    const centerAlong = side === "left" || side === "right" ? centerY : centerX;
+    const outwardAlong = anchorAlong + directionAwayFromCenter(anchorAlong, centerAlong) * Math.min(margin * 0.7, span * 0.5);
+    const along = sorted.length === 1 ? clamp(outwardAlong, laneStart, laneEnd) : laneStart + (span * index) / (sorted.length - 1);
     if (side === "left") return { ...anchor, position: [bounds.min[0] - margin, along, z] };
     if (side === "right") return { ...anchor, position: [bounds.max[0] + margin, along, z] };
     if (side === "bottom") return { ...anchor, position: [along, bounds.min[1] - margin, z] };
@@ -65,4 +67,9 @@ function distributeSideLabels(side: LabelSide, anchors: LabelAnchor[], bounds: L
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
+}
+
+function directionAwayFromCenter(value: number, center: number) {
+  if (Math.abs(value - center) < 0.001) return 0;
+  return value < center ? -1 : 1;
 }
