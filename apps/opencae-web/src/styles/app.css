@@ -454,7 +454,7 @@ svg {
 .step {
   height: 48px;
   display: grid;
-  grid-template-columns: 30px minmax(52px, 1fr) 5px;
+  grid-template-columns: 30px minmax(0, 1fr);
   align-items: center;
   gap: 7px;
   padding: 0 6px;
@@ -516,13 +516,6 @@ svg {
 
 .step.active .step-icon.done {
   color: var(--color-success);
-}
-
-.step-dot {
-  width: 5px;
-  height: 5px;
-  border-radius: 999px;
-  background: var(--color-border-strong);
 }
 
 .stepbar-footer {
@@ -1990,8 +1983,7 @@ button:disabled {
   }
 
   .stepbar-eyebrow,
-  .stepbar-footer,
-  .step-dot {
+  .stepbar-footer {
     display: none;
   }
 
@@ -2009,7 +2001,7 @@ button:disabled {
     line-height: 1.1;
   }
 
-  .step > span:not(.step-icon):not(.step-dot) {
+  .step > span:not(.step-icon) {
     max-width: 82px;
     overflow-wrap: anywhere;
   }
@@ -2060,7 +2052,7 @@ button:disabled {
     grid-template-rows: 32px;
   }
 
-  .step > span:not(.step-icon):not(.step-dot) {
+  .step > span:not(.step-icon) {
     position: absolute;
     width: 1px;
     height: 1px;

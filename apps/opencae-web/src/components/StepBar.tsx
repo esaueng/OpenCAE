@@ -57,7 +57,6 @@ export function StepBar({ activeStep, project, study, hasResults, onSelect, onUn
               <StepIcon size={18} strokeWidth={1.8} />
             </span>
             <span>{step.label}</span>
-            <span className="step-dot" />
           </button>
         );
       })}
