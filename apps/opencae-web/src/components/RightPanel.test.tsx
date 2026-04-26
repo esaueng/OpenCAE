@@ -139,6 +139,67 @@ describe("RightPanel payload mass controls", () => {
     expect(html).toContain("17.5 MPa");
   });
 
+  test("hides print process details when a printable material is not marked as 3D printed", () => {
+    const html = renderToStaticMarkup(
+      <RightPanel
+        activeStep="material"
+        project={project}
+        displayModel={displayModel}
+        study={{
+          ...study,
+          materialAssignments: [{ id: "assign", materialId: "mat-abs", selectionRef: "selection-body", parameters: { printed: false, infillDensity: 35, wallCount: 3, layerOrientation: "z" }, status: "complete" }]
+        }}
+        selectedFace={null}
+        viewMode="model"
+        resultMode="stress"
+        showDeformed={false}
+        showDimensions={false}
+        stressExaggeration={1}
+        resultSummary={resultSummary}
+        runProgress={0}
+        sampleModel="bracket"
+        draftLoadType="force"
+        draftLoadValue={500}
+        draftLoadDirection="-Z"
+        selectedLoadPoint={null}
+        selectedPayloadObject={null}
+        onFitView={vi.fn()}
+        onRotateModel={vi.fn()}
+        onResetModelOrientation={vi.fn()}
+        onLoadSample={vi.fn()}
+        onUploadModel={vi.fn()}
+        onSampleModelChange={vi.fn()}
+        onViewModeChange={vi.fn()}
+        onResultModeChange={vi.fn()}
+        onToggleDeformed={vi.fn()}
+        onToggleDimensions={vi.fn()}
+        onStressExaggerationChange={vi.fn()}
+        onAssignMaterial={vi.fn()}
+        onAddSupport={vi.fn()}
+        onUpdateSupport={vi.fn()}
+        onRemoveSupport={vi.fn()}
+        onDraftLoadTypeChange={vi.fn()}
+        onDraftLoadValueChange={vi.fn()}
+        onDraftLoadDirectionChange={vi.fn()}
+        onAddLoad={vi.fn()}
+        onUpdateLoad={vi.fn()}
+        onPreviewLoadEdit={vi.fn()}
+        onRemoveLoad={vi.fn()}
+        onGenerateMesh={vi.fn()}
+        onRunSimulation={vi.fn()}
+        canRunSimulation={false}
+        missingRunItems={[]}
+        canGenerateReport={false}
+        onGenerateReport={vi.fn()}
+        onStepSelect={vi.fn()}
+      />
+    );
+
+    expect(html).toContain("3D printed part");
+    expect(html).not.toContain("Print process");
+    expect(html).not.toContain("FDM");
+  });
+
   test("enables adding payload mass when a payload object is selected without a named face selection", () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
     try {
