@@ -39,7 +39,8 @@ export function StepBar({ activeStep, project, study, hasResults, onSelect, onUn
 
   const unitLabel = project.unitSystem === "SI" ? "metric" : "imperial";
   const unitShort = project.unitSystem === "SI" ? "mm" : "in";
-  const nextUnitLabel = project.unitSystem === "SI" ? "Imperial" : "Metric";
+  const currentUnitLabel = project.unitSystem === "SI" ? "Metric" : "Imperial";
+  const nextUnitSystem = project.unitSystem === "SI" ? "US" : "SI";
 
   return (
     <nav className="stepbar" aria-label="Simulation workflow">
@@ -77,8 +78,8 @@ export function StepBar({ activeStep, project, study, hasResults, onSelect, onUn
           <strong>{unitLabel}</strong>
           <span aria-hidden="true" />
           <strong>{unitShort}</strong>
-          <button type="button" className="unit-toggle" onClick={() => onUnitSystemChange(project.unitSystem === "SI" ? "US" : "SI")}>
-            {nextUnitLabel}
+          <button type="button" className="unit-toggle" aria-label={`Switch to ${nextUnitSystem === "SI" ? "metric" : "imperial"} units`} onClick={() => onUnitSystemChange(nextUnitSystem)}>
+            {currentUnitLabel}
           </button>
         </div>
         <div><span>backend</span><strong>local</strong></div>
