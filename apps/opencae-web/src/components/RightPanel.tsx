@@ -11,6 +11,7 @@ import type { SampleModelId } from "../lib/api";
 import { formatModelOrientation, getModelOrientation, type RotationAxis } from "../modelOrientation";
 import { shouldShowSampleModelPicker } from "../modelPanelState";
 import { SETTING_HELP, type SettingHelpId, type SettingHelpVisual } from "../settingHelp";
+import { supportDisplayLabel } from "../supportLabels";
 import { getViewportTooltipPosition } from "../tooltipPosition";
 import { forceForUnits, loadValueForUnits, type UnitSystem } from "../unitDisplay";
 
@@ -511,11 +512,17 @@ function LoadEditForm({ load, study, onSave, onCancel }: { load: Load; study: St
 function SupportEditorList({ study, onUpdateSupport, onRemoveSupport }: { study: Study; onUpdateSupport: (support: Constraint) => void; onRemoveSupport: (supportId: string) => void }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   if (!study.constraints.length) return <EmptyEditableList title="Supports" />;
+  let fixedSupportCount = 0;
+  let prescribedSupportCount = 0;
+  const supportItems = study.constraints.map((support) => {
+    const supportOrdinal = support.type === "fixed" ? ++fixedSupportCount : ++prescribedSupportCount;
+    return { support, displayLabel: supportDisplayLabel(support, supportOrdinal) };
+  });
 
   return (
     <div className="editable-list">
       <h3>Supports</h3>
-      {study.constraints.map((support) => {
+      {supportItems.map(({ support, displayLabel }) => {
         const editing = editingId === support.id;
         const selection = study.namedSelections.find((candidate) => candidate.id === support.selectionRef);
         const label = selection?.geometryRefs[0]?.label ?? "selected face";
@@ -523,7 +530,7 @@ function SupportEditorList({ study, onUpdateSupport, onRemoveSupport }: { study:
           <div className="editable-item" key={support.id}>
             <div className="editable-summary">
               <span className="item-icon warning"><SupportIcon /></span>
-              <strong>{support.type === "fixed" ? "Fixed support" : "Prescribed displacement"}</strong>
+              <strong>{displayLabel} · {support.type === "fixed" ? "Fixed support" : "Prescribed displacement"}</strong>
               <small>{label}</small>
               <button className="remove-glyph" type="button" aria-label="Remove support" onClick={() => onRemoveSupport(support.id)}><X size={16} /></button>
             </div>
