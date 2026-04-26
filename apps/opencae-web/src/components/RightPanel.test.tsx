@@ -18,7 +18,7 @@ const displayModel: DisplayModel = {
   id: "display-uploaded",
   name: "Fixture imported body",
   bodyCount: 1,
-  faces: []
+  faces: [{ id: "face-top", label: "Top face", color: "#4da3ff", center: [0, 0, 0], normal: [0, 0, 1], stressValue: 0 }]
 };
 
 const study: Study = {
@@ -28,7 +28,13 @@ const study: Study = {
   type: "static_stress",
   geometryScope: [{ bodyId: "body-uploaded", entityType: "body", entityId: "body-uploaded", label: "Fixture body" }],
   materialAssignments: [],
-  namedSelections: [],
+  namedSelections: [{
+    id: "selection-top",
+    name: "Top face",
+    entityType: "face",
+    geometryRefs: [{ bodyId: "body-uploaded", entityType: "face", entityId: "face-top", label: "Top face" }],
+    fingerprint: "face-top"
+  }],
   contacts: [],
   constraints: [],
   loads: [],
@@ -58,7 +64,7 @@ describe("RightPanel payload mass controls", () => {
           project={project}
           displayModel={displayModel}
           study={study}
-          selectedFace={null}
+          selectedFace={displayModel.faces[0] ?? null}
           viewMode="model"
           resultMode="stress"
           showDeformed={false}
@@ -105,6 +111,7 @@ describe("RightPanel payload mass controls", () => {
       );
 
       expect(html).toContain("Selected Rod 1");
+      expect(html).not.toContain("Selected Top face");
       expect(html).toContain("Add payload mass");
       expect(html).not.toMatch(/<button class="outline-action wide" disabled="">[\s\S]*Add payload mass/);
     } finally {

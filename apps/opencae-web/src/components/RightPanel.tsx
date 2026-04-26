@@ -71,9 +71,10 @@ interface RightPanelProps {
 const EMPTY_PARAMETERS: Record<string, unknown> = {};
 
 export function RightPanel(props: RightPanelProps) {
+  const selectedPayloadLabel = props.activeStep === "loads" && props.draftLoadType === "gravity" ? props.selectedPayloadObject?.label : undefined;
   return (
     <aside className="side-panel">
-      {props.selectedFace && <div className="selection-readout">Face selected: {props.selectedFace.label}</div>}
+      {selectedPayloadLabel ? <div className="selection-readout">Payload selected: {selectedPayloadLabel}</div> : props.selectedFace && <div className="selection-readout">Face selected: {props.selectedFace.label}</div>}
       {props.activeStep === "model" && <ModelPanel {...props} />}
       {props.activeStep === "material" && <MaterialPanel {...props} />}
       {props.activeStep === "supports" && <SupportsPanel {...props} />}
@@ -362,6 +363,7 @@ function LoadsPanel({
   onRemoveLoad
 }: RightPanelProps) {
   const selectedFromViewport = selectedFace ? selectionForFace(study, selectedFace.id) : undefined;
+  const placementSelection = draftLoadType === "gravity" ? undefined : selectedFromViewport;
   const hasSelectedFace = Boolean(selectedFace);
   const canAddDraftLoad = draftLoadType === "gravity" ? Boolean(selectedPayloadObject) : hasSelectedFace;
   const units = unitsForLoadType(draftLoadType);
@@ -376,7 +378,7 @@ function LoadsPanel({
     <Panel title="Loads" helper={draftLoadType === "gravity" ? "Choose the object carrying payload mass, then add its weight as a load." : "Choose where force or pressure is applied. Click a specific point on a face, then add a load."}>
       <HelpNote helpId="loadPlacement" />
       <PlacementReadout
-        selectedRef={selectedFromViewport}
+        selectedRef={placementSelection}
         fallbackLabel={selectedPayloadObject?.label ?? selectedFace?.label}
         detail={selectedPayloadObject ? "object selected" : selectedLoadPoint ? "point picked" : undefined}
       />
