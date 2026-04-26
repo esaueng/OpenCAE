@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import type { DisplayModel, Project, ResultField, ResultSummary } from "@opencae/schema";
-import { buildLocalProjectFile, suggestedProjectFilename } from "./projectFile";
+import { buildLocalProjectFile, embedUploadedModelFile, suggestedProjectFilename } from "./projectFile";
 
 const project = {
   id: "project-1",
@@ -68,6 +68,65 @@ describe("projectFile", () => {
     expect(payload.results?.summary).toBe(summary);
     expect(payload.results?.fields).toBe(fields);
     expect(payload.results?.completedRunId).toBe("run-1");
+  });
+
+  test("embeds uploaded model bytes in the project geometry metadata", () => {
+    const uploadedProject = {
+      ...project,
+      geometryFiles: [{
+        id: "geometry-1",
+        projectId: "project-1",
+        filename: "uploaded-bracket.stl",
+        localPath: "uploads/uploaded-bracket.stl",
+        artifactKey: "project-1/geometry/uploaded-display.json",
+        status: "ready",
+        metadata: { source: "local-upload" }
+      }]
+    } satisfies Project;
+
+    const embeddedModel = {
+      filename: "uploaded-bracket.stl",
+      contentType: "model/stl",
+      size: 4,
+      contentBase64: "AQIDBA=="
+    };
+
+    const nextProject = embedUploadedModelFile(uploadedProject, embeddedModel);
+    const payload = buildLocalProjectFile(nextProject, displayModel, "2026-04-24T13:00:00.000Z");
+
+    expect(payload.project.geometryFiles[0]?.metadata.embeddedModel).toEqual(embeddedModel);
+  });
+
+  test("backs up uploaded display model bytes into the saved project payload", () => {
+    const uploadedProject = {
+      ...project,
+      geometryFiles: [{
+        id: "geometry-1",
+        projectId: "project-1",
+        filename: "uploaded-bracket.stl",
+        localPath: "uploads/uploaded-bracket.stl",
+        artifactKey: "project-1/geometry/uploaded-display.json",
+        status: "ready",
+        metadata: { source: "local-upload" }
+      }]
+    } satisfies Project;
+    const uploadedDisplayModel = {
+      ...displayModel,
+      visualMesh: {
+        format: "stl",
+        filename: "uploaded-bracket.stl",
+        contentBase64: "AQIDBA=="
+      }
+    } satisfies DisplayModel;
+
+    const payload = buildLocalProjectFile(uploadedProject, uploadedDisplayModel, "2026-04-24T13:00:00.000Z");
+
+    expect(payload.project.geometryFiles[0]?.metadata.embeddedModel).toEqual({
+      filename: "uploaded-bracket.stl",
+      contentType: "model/stl",
+      size: 4,
+      contentBase64: "AQIDBA=="
+    });
   });
 
   test("suggests a safe local filename", () => {
