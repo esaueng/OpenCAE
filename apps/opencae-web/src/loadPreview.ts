@@ -5,6 +5,11 @@ export type LoadType = "force" | "pressure" | "gravity";
 export type LoadDirectionLabel = "-Y" | "+Y" | "+X" | "-X" | "+Z" | "-Z" | "Normal";
 export type LoadDirection = [number, number, number];
 export type LoadApplicationPoint = [number, number, number];
+export interface PayloadObjectSelection {
+  id: string;
+  label: string;
+  center: LoadApplicationPoint;
+}
 export const STANDARD_GRAVITY = 9.80665;
 
 const DIRECTION_VECTORS: Record<Exclude<LoadDirectionLabel, "Normal">, LoadDirection> = {
@@ -52,6 +57,12 @@ export function directionLabelForLoad(load: Load): LoadDirectionLabel {
 
 export function applicationPointForLoad(load: Load): LoadApplicationPoint | undefined {
   return isVector3(load.parameters.applicationPoint) ? load.parameters.applicationPoint : undefined;
+}
+
+export function payloadObjectForLoad(load: Load): PayloadObjectSelection | undefined {
+  const value = load.parameters.payloadObject;
+  if (!isRecord(value) || typeof value.id !== "string" || typeof value.label !== "string" || !isVector3(value.center)) return undefined;
+  return { id: value.id, label: value.label, center: value.center };
 }
 
 export function loadMarkerFromLoad(load: Load, study: Study, stackIndex: number): ViewerLoadMarker | null {
@@ -142,4 +153,8 @@ function isDirection(value: unknown): value is LoadDirection {
 
 function isVector3(value: unknown): value is LoadApplicationPoint {
   return Array.isArray(value) && value.length === 3 && value.every((item) => typeof item === "number" && Number.isFinite(item));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object";
 }

@@ -1,5 +1,5 @@
 import type { DisplayModel, Project, ResultField, ResultSummary, RunEvent, Study } from "@opencae/schema";
-import type { LoadApplicationPoint, LoadDirection, LoadType } from "../loadPreview";
+import type { LoadApplicationPoint, LoadDirection, LoadType, PayloadObjectSelection } from "../loadPreview";
 import { embedUploadedModelFile, type EmbeddedModelFile, type LocalResultBundle } from "../projectFile";
 import { createLocalBlankProject, createLocalSampleProject, createLocalUploadResponse, openLocalProjectPayload } from "../localProjectFactory";
 
@@ -127,11 +127,11 @@ export async function updateStudy(studyId: string, patch: Partial<Study>, messag
   return { ...data, message };
 }
 
-export async function addLoad(studyId: string, type: LoadType, value: number, selectionRef: string, direction: LoadDirection, applicationPoint?: LoadApplicationPoint | null): Promise<{ study: Study; message: string }> {
+export async function addLoad(studyId: string, type: LoadType, value: number, selectionRef: string, direction: LoadDirection, applicationPoint?: LoadApplicationPoint | null, payloadObject?: PayloadObjectSelection | null): Promise<{ study: Study; message: string }> {
   const response = await fetch(`/api/studies/${studyId}/loads`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ type, value, selectionRef, direction, applicationPoint })
+    body: JSON.stringify({ type, value, selectionRef, direction, applicationPoint, payloadObject })
   });
   return readJson(response);
 }

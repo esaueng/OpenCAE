@@ -33,9 +33,14 @@ export function normalizedStepGroupFromMeshes(meshes: OcctMesh[], color: string)
   const group = new THREE.Group();
   const material = new THREE.MeshStandardMaterial({ color, metalness: 0.18, roughness: 0.54 });
 
-  for (const importedMesh of meshes) {
+  for (const [index, importedMesh] of meshes.entries()) {
     const geometry = geometryFromOcctMesh(importedMesh);
     const mesh = new THREE.Mesh(geometry, material.clone());
+    const importedName = (importedMesh as { name?: unknown }).name;
+    const label = typeof importedName === "string" && importedName.trim() ? importedName.trim() : `Part ${index + 1}`;
+    mesh.name = label;
+    mesh.userData.opencaeObjectId = `step-object-${index + 1}`;
+    mesh.userData.opencaeObjectLabel = label;
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     mesh.add(

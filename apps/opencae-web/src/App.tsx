@@ -13,6 +13,7 @@ import {
   directionVectorForLabel,
   unitsForLoadType,
   type LoadDirectionLabel,
+  type PayloadObjectSelection,
   type LoadType
 } from "./loadPreview";
 import { resetDisplayModelOrientation, type RotationAxis } from "./modelOrientation";
@@ -56,6 +57,7 @@ export function App() {
   const [redoStack, setRedoStack] = useState<Project[]>(restoredUi?.redoStack ?? []);
   const [selectedFaceId, setSelectedFaceId] = useState<string | null>(restoredUi?.selectedFaceId ?? null);
   const [selectedLoadPoint, setSelectedLoadPoint] = useState<[number, number, number] | null>(restoredUi?.selectedLoadPoint ?? null);
+  const [selectedPayloadObject, setSelectedPayloadObject] = useState<PayloadObjectSelection | null>(restoredUi?.selectedPayloadObject ?? null);
   const [viewMode, setViewMode] = useState<ViewMode>(restoredUi?.viewMode ?? (restoredResults?.fields.length ? "results" : "model"));
   const [themeMode, setThemeMode] = useState<ThemeMode>(restoredUi?.themeMode ?? "dark");
   const [resultMode, setResultMode] = useState<ResultMode>(restoredUi?.resultMode ?? "stress");
@@ -96,6 +98,13 @@ export function App() {
   const missingRunItems = runReadiness.filter((item) => !item.done).map((item) => item.label);
   const canUndoAction = undoStack.length > 0;
   const canRedoAction = redoStack.length > 0;
+
+  useEffect(() => {
+    if (draftLoadType !== "gravity" && selectedPayloadObject) {
+      setSelectedPayloadObject(null);
+    }
+  }, [draftLoadType, selectedPayloadObject]);
+
   const loadMarkers = useMemo<ViewerLoadMarker[]>(() => {
     const markers = createViewerLoadMarkers({
       study,
@@ -167,6 +176,7 @@ export function App() {
           activeStep,
           selectedFaceId,
           selectedLoadPoint,
+          selectedPayloadObject,
           viewMode,
           themeMode,
           resultMode,
@@ -205,6 +215,7 @@ export function App() {
     runProgress,
     sampleModel,
     selectedLoadPoint,
+    selectedPayloadObject,
     selectedFaceId,
     showDeformed,
     showDimensions,
@@ -223,6 +234,7 @@ export function App() {
     setUndoStack([]);
     setRedoStack([]);
     setSelectedLoadPoint(null);
+    setSelectedPayloadObject(null);
     if (response.results?.fields.length) {
       setResultSummary(response.results.summary);
       setResultFields(response.results.fields);
@@ -298,9 +310,11 @@ export function App() {
     if (nextStep) navigateToStep(nextStep);
   }
 
-  function handleViewportFaceSelect(face: DisplayFace, point?: [number, number, number]) {
+  function handleViewportFaceSelect(face: DisplayFace, point?: [number, number, number], payloadObject?: PayloadObjectSelection) {
     setSelectedFaceId(face.id);
-    setSelectedLoadPoint(activeStep === "loads" ? point ?? face.center : null);
+    const isPayloadObjectLoad = activeStep === "loads" && draftLoadType === "gravity";
+    setSelectedPayloadObject(isPayloadObjectLoad ? payloadObject ?? null : null);
+    setSelectedLoadPoint(activeStep === "loads" ? (isPayloadObjectLoad ? payloadObject?.center ?? point ?? face.center : point ?? face.center) : null);
     if (displayModel && !displayModel.faces.some((item) => item.id === face.id)) {
       setDisplayModel({ ...displayModel, faces: [...displayModel.faces, face] });
     }
@@ -332,7 +346,7 @@ export function App() {
     );
   }
 
-  async function addLoadForFace(type: LoadType, value: number, face: DisplayFace, direction: LoadDirectionLabel, applicationPoint?: [number, number, number] | null) {
+  async function addLoadForFace(type: LoadType, value: number, face: DisplayFace, direction: LoadDirectionLabel, applicationPoint?: [number, number, number] | null, payloadObject?: PayloadObjectSelection | null) {
     if (!study) return;
     const existingSelection = study.namedSelections.find((item) => item.entityType === "face" && item.geometryRefs.some((ref) => ref.entityId === face.id));
     const selection = existingSelection ?? namedSelectionForFace(study, face);
@@ -341,7 +355,7 @@ export function App() {
       id: `load-${crypto.randomUUID()}`,
       type,
       selectionRef: selection.id,
-      parameters: { value, units: unitsForLoadType(type), direction: directionVectorForLabel(direction, face), ...(applicationPoint ? { applicationPoint } : {}) },
+      parameters: { value, units: unitsForLoadType(type), direction: directionVectorForLabel(direction, face), ...(applicationPoint ? { applicationPoint } : {}), ...(payloadObject ? { payloadObject } : {}) },
       status: "complete"
     };
     await updateStudy(
@@ -534,6 +548,7 @@ export function App() {
           displayModel={displayModelForUi}
           activeStep={activeStep}
           selectedFaceId={selectedFaceId}
+          payloadObjectSelectionMode={activeStep === "loads" && draftLoadType === "gravity"}
           onSelectFace={handleViewportFaceSelect}
           viewMode={viewMode}
           resultMode={resultMode}
@@ -568,6 +583,7 @@ export function App() {
           draftLoadValue={draftLoadValue}
           draftLoadDirection={draftLoadDirection}
           selectedLoadPoint={selectedLoadPoint}
+          selectedPayloadObject={selectedPayloadObject}
           onFitView={handleFitDefaultView}
           onRotateModel={handleRotateModel}
           onResetModelOrientation={handleResetModelOrientation}
@@ -602,11 +618,12 @@ export function App() {
             const faceId = selection?.geometryRefs[0]?.entityId;
             const face = selectedFace?.id === faceId || (!selection && selectedFace) ? selectedFace : displayModel.faces.find((item) => item.id === faceId);
             if (!face) return;
+            const payloadObject = type === "gravity" ? selectedPayloadObject : null;
             if (selection) {
-              updateStudy(addLoad(study.id, type, value, selection.id, directionVectorForLabel(direction, face), selectedLoadPoint));
+              updateStudy(addLoad(study.id, type, value, selection.id, directionVectorForLabel(direction, face), selectedLoadPoint, payloadObject));
               return;
             }
-            void addLoadForFace(type, value, face, direction, selectedLoadPoint);
+            void addLoadForFace(type, value, face, direction, selectedLoadPoint, payloadObject);
           }}
           onUpdateLoad={(load: Load) =>
             updateStudy(
