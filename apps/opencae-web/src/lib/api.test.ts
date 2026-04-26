@@ -57,6 +57,24 @@ describe("api", () => {
     expect(response.project.geometryFiles[0]?.metadata.embeddedModel).toEqual(expectedEmbeddedModel);
   });
 
+  test("uploads a model locally when the API is unavailable", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new TypeError("NetworkError when attempting to fetch resource."))));
+
+    const file = new File([new Uint8Array([1, 2, 3])], "seed-tray.stl", { type: "model/stl" });
+    const response = await uploadModel("project-1", file, project);
+
+    expect(response.project.geometryFiles[0]?.filename).toBe("seed-tray.stl");
+    expect(response.project.geometryFiles[0]?.metadata.previewFormat).toBe("stl");
+    expect(response.project.geometryFiles[0]?.metadata.embeddedModel).toMatchObject({
+      filename: "seed-tray.stl",
+      contentType: "model/stl",
+      size: 3,
+      contentBase64: "AQID"
+    });
+    expect(response.displayModel.visualMesh?.filename).toBe("seed-tray.stl");
+    expect(response.message).toContain("Previewing the uploaded mesh");
+  });
+
   test("loads the sample project locally when the API is unavailable", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("missing", { status: 404 })));
 

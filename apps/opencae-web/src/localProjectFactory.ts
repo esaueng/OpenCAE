@@ -1,7 +1,7 @@
 import type { DisplayModel, Project } from "@opencae/schema";
 import { ProjectSchema } from "@opencae/schema";
 import { bracketDemoProject, bracketDisplayModel } from "@opencae/db/sample-data";
-import type { LocalResultBundle } from "./projectFile";
+import type { EmbeddedModelFile, LocalResultBundle } from "./projectFile";
 import type { SampleModelId, SampleProjectResponse } from "./lib/api";
 
 const SAMPLE_META: Record<SampleModelId, { projectName: string; modelName: string; filename: string; displayName: string; dimensions: DisplayModel["dimensions"] }> = {
@@ -169,6 +169,37 @@ export function openLocalProjectPayload(payload: unknown): SampleProjectResponse
   };
 }
 
+export function createLocalUploadResponse(project: Project, embeddedModel: EmbeddedModelFile, now = new Date().toISOString()): SampleProjectResponse {
+  const displayModel = uploadedDisplayModelFor(embeddedModel.filename, embeddedModel.contentBase64);
+  const artifactKey = `${project.id}/geometry/uploaded-display.json`;
+  const nextProject = attachUploadedModelToProject(project, {
+    geometryId: `geom-upload-${newLocalId()}`,
+    filename: embeddedModel.filename,
+    artifactKey,
+    now,
+    displayModel
+  });
+  const geometry = nextProject.geometryFiles[0];
+  if (geometry) {
+    geometry.metadata = {
+      ...geometry.metadata,
+      embeddedModel,
+      originalSize: embeddedModel.size,
+      contentType: embeddedModel.contentType
+    };
+  }
+  const previewMessage = displayModel.visualMesh
+    ? "Previewing the uploaded mesh in the viewport."
+    : displayModel.nativeCad
+      ? "Previewing a selectable STEP import body in the viewport."
+      : "Preview is not available for this file.";
+  return {
+    project: nextProject,
+    displayModel,
+    message: `${embeddedModel.filename} uploaded. ${previewMessage}`
+  };
+}
+
 function sampleDisplayModelFor(sample: SampleModelId): DisplayModel {
   const meta = SAMPLE_META[sample];
   const facesBySample: Record<SampleModelId, DisplayModel["faces"]> = {
@@ -204,6 +235,120 @@ function sampleDisplayModelFor(sample: SampleModelId): DisplayModel {
   };
 }
 
+function uploadedDisplayModelFor(filename: string, contentBase64?: string): DisplayModel {
+  const modelName = baseNameForModel(filename);
+  const nativeFormat = nativeCadFormatForFilename(filename);
+  if (nativeFormat) {
+    return {
+      id: "display-uploaded",
+      name: `${modelName} imported body`,
+      bodyCount: 1,
+      dimensions: { x: 96, y: 48, z: 32, units: "mm" },
+      faces: uploadedBoxFaces(),
+      nativeCad: {
+        format: nativeFormat,
+        filename,
+        contentBase64
+      }
+    };
+  }
+
+  const previewFormat = previewFormatForFilename(filename);
+  if (!previewFormat || !contentBase64) {
+    return {
+      id: "display-uploaded",
+      name: `${modelName} uploaded model`,
+      bodyCount: 0,
+      faces: []
+    };
+  }
+
+  return {
+    id: "display-uploaded",
+    name: `${modelName} imported body`,
+    bodyCount: 1,
+    dimensions: { x: 96, y: 48, z: 32, units: "mm" },
+    faces: uploadedBoxFaces(),
+    visualMesh: {
+      format: previewFormat,
+      filename,
+      contentBase64
+    }
+  };
+}
+
+function attachUploadedModelToProject(
+  project: Project,
+  options: { geometryId: string; filename: string; artifactKey: string; now: string; displayModel: DisplayModel }
+): Project {
+  const study = project.studies[0];
+  const modelName = baseNameForModel(options.filename);
+  const bodyLabel = `${modelName} body`;
+  const bodySelection = {
+    id: "selection-body-uploaded",
+    name: bodyLabel,
+    entityType: "body" as const,
+    geometryRefs: [{ bodyId: "body-uploaded", entityType: "body" as const, entityId: "body-uploaded", label: bodyLabel }],
+    fingerprint: `body-uploaded-${modelName}`
+  };
+  const faceSelections = options.displayModel.faces.map((face) => ({
+    id: `selection-${face.id}`,
+    name: face.label,
+    entityType: "face" as const,
+    geometryRefs: [{ bodyId: "body-uploaded", entityType: "face" as const, entityId: face.id, label: face.label }],
+    fingerprint: `${face.id}-${face.label}`
+  }));
+  return {
+    ...project,
+    geometryFiles: [{
+      id: options.geometryId,
+      projectId: project.id,
+      filename: options.filename,
+      localPath: `uploads/${options.filename}`,
+      artifactKey: options.artifactKey,
+      status: "ready",
+      metadata: {
+        source: "local-upload",
+        nativeCadImport: Boolean(options.displayModel.nativeCad),
+        displayModelRef: options.artifactKey,
+        previewFormat: options.displayModel.visualMesh?.format ?? options.displayModel.nativeCad?.format,
+        bodyCount: options.displayModel.bodyCount,
+        faceCount: options.displayModel.faces.length
+      }
+    }],
+    studies: study ? [{
+      ...study,
+      geometryScope: [{ bodyId: "body-uploaded", entityType: "body" as const, entityId: "body-uploaded", label: bodyLabel }],
+      materialAssignments: [],
+      namedSelections: [
+        bodySelection,
+        ...faceSelections
+      ],
+      constraints: [],
+      loads: [],
+      meshSettings: {
+        ...study.meshSettings,
+        status: "not_started",
+        meshRef: undefined,
+        summary: undefined
+      },
+      runs: []
+    }] : project.studies,
+    updatedAt: options.now
+  };
+}
+
+function uploadedBoxFaces(): DisplayModel["faces"] {
+  return [
+    { id: "face-upload-top", label: "Top face", color: "#f59e0b", center: [0, 0.72, 0], normal: [0, 1, 0], stressValue: 72 },
+    { id: "face-upload-bottom", label: "Bottom face", color: "#4da3ff", center: [0, -0.72, 0], normal: [0, -1, 0], stressValue: 48 },
+    { id: "face-upload-front", label: "Front face", color: "#22c55e", center: [0, 0, 0.52], normal: [0, 0, 1], stressValue: 64 },
+    { id: "face-upload-back", label: "Back face", color: "#64748b", center: [0, 0, -0.52], normal: [0, 0, -1], stressValue: 54 },
+    { id: "face-upload-left", label: "Left face", color: "#8b949e", center: [-1.1, 0, 0], normal: [-1, 0, 0], stressValue: 58 },
+    { id: "face-upload-right", label: "Right face", color: "#8b949e", center: [1.1, 0, 0], normal: [1, 0, 0], stressValue: 84 }
+  ];
+}
+
 function displayModelForProject(project: Project): DisplayModel {
   const sample = normalizeSampleId(project.geometryFiles[0]?.metadata.sampleModel);
   if (project.geometryFiles.length) return sampleDisplayModelFor(sample);
@@ -212,6 +357,24 @@ function displayModelForProject(project: Project): DisplayModel {
 
 function normalizeSampleId(value: unknown): SampleModelId {
   return value === "plate" || value === "cantilever" ? value : "bracket";
+}
+
+function nativeCadFormatForFilename(filename: string): "step" | undefined {
+  const extension = filename.trim().split(".").pop()?.toLowerCase();
+  if (extension === "step" || extension === "stp") return "step";
+  return undefined;
+}
+
+function previewFormatForFilename(filename: string): "stl" | "obj" | undefined {
+  const extension = filename.trim().split(".").pop()?.toLowerCase();
+  if (extension === "stl" || extension === "obj") return extension;
+  return undefined;
+}
+
+function baseNameForModel(filename: string): string {
+  const safeName = filename.trim().split(/[\\/]/).pop() || "Uploaded model";
+  const withoutExtension = safeName.replace(/\.[^.]+$/, "");
+  return withoutExtension || "Uploaded model";
 }
 
 function hasObjectKey<Key extends string>(value: unknown, key: Key): value is Record<Key, unknown> {
