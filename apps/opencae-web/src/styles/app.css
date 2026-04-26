@@ -1593,7 +1593,7 @@ button:disabled {
 
 .editable-list {
   display: grid;
-  gap: 10px;
+  gap: 8px;
 }
 
 .editable-item {
@@ -1603,6 +1603,11 @@ button:disabled {
   background: var(--color-surface-2);
   border: var(--border-thin);
   border-radius: var(--radius-md);
+}
+
+.editable-item.load-item {
+  gap: 6px;
+  padding: 8px 10px;
 }
 
 .editable-item.clickable {
@@ -1634,6 +1639,20 @@ button:disabled {
   color: var(--color-accent);
 }
 
+.editable-summary .load-type-icon {
+  width: 18px;
+  height: 18px;
+  align-self: center;
+}
+
+.editable-summary .load-type-icon.pressure {
+  color: #39c8c8;
+}
+
+.editable-summary .load-type-icon.gravity {
+  color: var(--color-success);
+}
+
 .editable-summary .item-icon.warning {
   color: var(--color-warning);
 }
@@ -1652,6 +1671,20 @@ button:disabled {
   font-size: var(--fs-xs);
   font-family: var(--font-mono);
   overflow-wrap: anywhere;
+}
+
+.load-item .editable-summary {
+  grid-template-columns: 20px minmax(0, 1fr) 18px;
+  gap: 2px 8px;
+}
+
+.load-item .editable-summary strong {
+  font-size: var(--fs-sm);
+}
+
+.load-item .editable-summary small {
+  font-size: var(--fs-mini);
+  line-height: 1.35;
 }
 
 .remove-glyph {

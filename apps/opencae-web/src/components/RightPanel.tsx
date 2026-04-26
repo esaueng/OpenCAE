@@ -1,6 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { AlertTriangle, Anchor, ArrowDown, Check, CircleHelp, Download, Eye, FileText, Grid3X3, Maximize2, Play, Plus, RotateCcw, Ruler, ShieldCheck, Upload, X } from "lucide-react";
+import { AlertTriangle, Anchor, ArrowDown, Check, CircleHelp, Download, Eye, FileText, Gauge, Grid3X3, Maximize2, Play, Plus, RotateCcw, Ruler, ScanLine, ShieldCheck, Upload, Weight, X } from "lucide-react";
 import { defaultPrintParametersFor, effectiveMaterialProperties, massKgForPayloadMaterial, normalizePrintParameters, payloadMaterialForId, payloadMaterials, starterMaterials, type PayloadMaterialCategory, type PrintMaterialParameters } from "@opencae/materials";
 import { assessResultFailure, estimateAllowableLoadForSafetyFactor } from "@opencae/schema";
 import type { Constraint, DisplayFace, DisplayModel, Load, Project, ResultSummary, Study } from "@opencae/schema";
@@ -588,7 +588,7 @@ function LoadEditorList({ study, unitSystem, onUpdateLoad, onPreviewLoadEdit, on
         const beginEdit = () => setEditingId(load.id);
         return (
           <div
-            className={`editable-item ${editing ? "" : "clickable"}`}
+            className={`editable-item load-item ${editing ? "" : "clickable"}`}
             key={load.id}
             role={editing ? undefined : "button"}
             tabIndex={editing ? undefined : 0}
@@ -601,7 +601,7 @@ function LoadEditorList({ study, unitSystem, onUpdateLoad, onPreviewLoadEdit, on
             }}
           >
             <div className="editable-summary">
-              <span className="item-icon"><ArrowDown size={18} /></span>
+              <span className={`item-icon load-type-icon ${load.type}`}><LoadTypeIcon type={load.type} /></span>
               <strong>{loadLabel ? `${loadLabel} · ` : ""}{loadTypeLabel(load.type)} · {formatNumber(displayLoad.value)} {displayLoad.units}</strong>
               <small>{label}{pointLabel} · {directionLabelForLoad(load)} direction{equivalentForce}</small>
               <button
@@ -793,6 +793,12 @@ function SupportEditorList({ study, onUpdateSupport, onRemoveSupport }: { study:
       })}
     </div>
   );
+}
+
+function LoadTypeIcon({ type }: { type: LoadType }) {
+  if (type === "pressure") return <Gauge size={16} />;
+  if (type === "gravity") return <Weight size={16} />;
+  return <ScanLine size={16} />;
 }
 
 function SupportEditForm({ support, study, onSave, onCancel }: { support: Constraint; study: Study; onSave: (support: Constraint) => void; onCancel: () => void }) {
