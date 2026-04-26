@@ -15,3 +15,8 @@ export function shouldShowStartScreen({
 export function shouldAutoAdvanceAfterMeshGeneration() {
   return false;
 }
+
+export function canNavigateToStep(step: string, { meshStatus }: { meshStatus: string }) {
+  if (step !== "run") return true;
+  return meshStatus === "complete";
+}
