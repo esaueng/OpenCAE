@@ -17,6 +17,7 @@ import { normalizedStlGeometryFromBuffer } from "../stlPreview";
 import { lengthForUnits, stressForUnits, type UnitSystem } from "../unitDisplay";
 import { loadMarkerViewportPresentation, type PayloadObjectSelection } from "../loadPreview";
 import { highlightPayloadObjectMeshes } from "../payloadObjectHighlight";
+import { payloadMassLabelOffset } from "../calloutLabelLayout";
 
 export type ViewMode = "model" | "mesh" | "results";
 export type ResultMode = "stress" | "displacement" | "safety_factor";
@@ -1726,11 +1727,16 @@ function LoadGlyph({ marker, face, active }: { marker: ViewerLoadMarker; face: D
   const tangent = new THREE.Vector3().crossVectors(normal, new THREE.Vector3(0, 1, 0));
   if (tangent.lengthSq() < 0.001) tangent.set(1, 0, 0);
   tangent.normalize();
-  const loadOffset = tangent.multiplyScalar((marker.stackIndex - 0.5) * 0.22);
+  const loadOffset = tangent.clone().multiplyScalar((marker.stackIndex - 0.5) * 0.22);
   const arrowDirection = isNormalDirection ? normal : markerDirection;
   const { start, end } = arrowPointsOutsideSurface(center.clone().add(loadOffset), normal, arrowDirection, 0.54);
   const tailLabelPosition = start.clone().add(arrowDirection.clone().multiplyScalar(-0.18)).add(normal.clone().multiplyScalar(0.08));
-  const massLabelPosition = center.clone().add(loadOffset).add(normal.clone().multiplyScalar(0.24)).add(new THREE.Vector3(0, 0.12, 0));
+  const payloadOffset = payloadMassLabelOffset(marker.labelIndex);
+  const massLabelPosition = center
+    .clone()
+    .add(tangent.clone().multiplyScalar(payloadOffset.tangent))
+    .add(normal.clone().multiplyScalar(0.24))
+    .add(new THREE.Vector3(0, payloadOffset.lift, 0));
 
   return (
     <group>
