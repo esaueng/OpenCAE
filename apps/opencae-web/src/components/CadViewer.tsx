@@ -34,6 +34,7 @@ export interface ViewerSupportMarker {
   id: string;
   faceId: string;
   type: string;
+  displayLabel: string;
   label: string;
   stackIndex: number;
 }
@@ -1475,8 +1476,7 @@ function SupportBurstAt({ position, normal, active }: { position: [number, numbe
 }
 
 function supportLabel(marker: ViewerSupportMarker) {
-  const kind = marker.type === "fixed" ? "Fix" : "Disp";
-  return `${kind} ${marker.stackIndex + 1}`;
+  return marker.displayLabel;
 }
 
 function ResultLegend({ resultMode, resultFields, unitSystem }: { resultMode: ResultMode; resultFields: ResultField[]; unitSystem: UnitSystem }) {

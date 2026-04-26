@@ -20,6 +20,7 @@ import { buildLocalProjectFile, suggestedProjectFilename, type LocalResultBundle
 import { buildAutosavedWorkspace, readAutosavedWorkspace, writeAutosavedWorkspace, type ThemeMode } from "./appPersistence";
 import { shouldShowStartScreen } from "./appShellState";
 import { displayModelForUnits, loadValueForUnits, resultFieldForUnits, resultSummaryForUnits, type UnitSystem } from "./unitDisplay";
+import { supportDisplayLabel } from "./supportLabels";
 
 interface SaveFilePickerHandle {
   createWritable: () => Promise<{ write: (content: Blob) => Promise<void>; close: () => Promise<void> }>;
@@ -107,16 +108,20 @@ export function App() {
   const supportMarkers = useMemo<ViewerSupportMarker[]>(() => {
     if (!study) return [];
     const faceCounts = new Map<string, number>();
+    let fixedSupportCount = 0;
+    let prescribedSupportCount = 0;
     return study.constraints.flatMap((support) => {
       const selection = study.namedSelections.find((item) => item.id === support.selectionRef);
       const faceId = selection?.geometryRefs[0]?.entityId;
       if (!faceId) return [];
       const stackIndex = faceCounts.get(faceId) ?? 0;
       faceCounts.set(faceId, stackIndex + 1);
+      const supportOrdinal = support.type === "fixed" ? ++fixedSupportCount : ++prescribedSupportCount;
       return [{
         id: support.id,
         faceId,
         type: support.type,
+        displayLabel: supportDisplayLabel(support, supportOrdinal),
         label: selection?.geometryRefs[0]?.label ?? selection?.name ?? "selected face",
         stackIndex
       }];
