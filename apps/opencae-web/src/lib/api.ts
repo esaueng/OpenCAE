@@ -99,13 +99,33 @@ export async function generateMesh(studyId: string, preset: "coarse" | "medium" 
   return readJson(response);
 }
 
-export async function assignMaterial(studyId: string, materialId: string, parameters: Record<string, unknown> = {}): Promise<{ study: Study; message: string }> {
-  const response = await fetch(`/api/studies/${studyId}/materials`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ materialId, parameters })
-  });
-  return readJson(response);
+export async function assignMaterial(studyId: string, materialId: string, parameters: Record<string, unknown> = {}, currentStudy?: Study): Promise<{ study: Study; message: string }> {
+  return fetchJsonWithFallback(
+    `/api/studies/${studyId}/materials`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ materialId, parameters })
+    },
+    () => {
+      if (!currentStudy) throw new Error("Could not assign material without an open study.");
+      const bodySelection = currentStudy.namedSelections.find((selection) => selection.entityType === "body");
+      const selectionRef = bodySelection?.id ?? currentStudy.geometryScope[0]?.entityId ?? "selection-body-local";
+      return {
+        study: {
+          ...currentStudy,
+          materialAssignments: [{
+            id: "assign-material-current",
+            materialId,
+            selectionRef,
+            parameters,
+            status: "complete" as const
+          }]
+        },
+        message: `Material assigned to ${bodySelection?.name ?? "model"}.`
+      };
+    }
+  );
 }
 
 export async function addSupport(studyId: string, selectionRef?: string): Promise<{ study: Study; message: string }> {
