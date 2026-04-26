@@ -11,7 +11,7 @@ import type { StepId } from "./StepBar";
 import { faceForModelHit, type SampleModelKind } from "../modelSelection";
 import { modelRotationRadians, type RotationAxis } from "../modelOrientation";
 import { formatResultValue, resultProbeSamplesForFaces, resultSamplesForFaces, type FaceResultSample, type ResultProbeTone } from "../resultFields";
-import { stepPreviewGroupFromBase64 } from "../stepPreview";
+import { stepPreviewFromBase64 } from "../stepPreview";
 import { normalizedStlGeometryFromBuffer } from "../stlPreview";
 import { lengthForUnits, stressForUnits, type UnitSystem } from "../unitDisplay";
 import type { PayloadObjectSelection } from "../loadPreview";
@@ -61,6 +61,7 @@ interface CadViewerProps {
   loadMarkers: ViewerLoadMarker[];
   supportMarkers: ViewerSupportMarker[];
   onResetView: () => void;
+  onMeasureDisplayModelDimensions?: (dimensions: NonNullable<DisplayModel["dimensions"]>) => void;
 }
 
 const BRACKET_DEPTH = 1.1;
@@ -85,6 +86,7 @@ type ModelPickHandlers = {
 
 export function CadViewer(props: CadViewerProps) {
   const controlsRef = useRef<ViewerOrbitControls | null>(null);
+  const [uploadedPreviewBounds, setUploadedPreviewBounds] = useState<THREE.Box3 | null>(null);
   const effectiveViewMode: ViewMode = props.activeStep === "results" ? props.viewMode : props.viewMode === "mesh" ? "mesh" : "model";
   const isLightTheme = props.themeMode === "light";
   const viewportBackground = isLightTheme ? "#f7f9fc" : "#070b10";
@@ -92,6 +94,9 @@ export function CadViewer(props: CadViewerProps) {
   const gridSectionColor = isLightTheme ? "#c2ccd8" : "#3a4654";
   const gridFloorZ = useMemo(() => gridFloorZForDisplayModel(props.displayModel), [props.displayModel]);
   const modelRotation = useMemo(() => modelRotationRadians(props.displayModel), [props.displayModel]);
+  useEffect(() => {
+    setUploadedPreviewBounds(null);
+  }, [props.displayModel.nativeCad?.contentBase64, props.displayModel.visualMesh?.contentBase64]);
   return (
     <section className={`viewer-shell ${effectiveViewMode === "results" ? "results-view" : ""}`} aria-label="3D CAD viewer">
       <Canvas camera={{ position: [4.8, -4.8, 4.8], up: ISO_CAMERA_UP.toArray(), fov: 42 }}>
@@ -102,8 +107,8 @@ export function CadViewer(props: CadViewerProps) {
         <Bounds fit clip observe margin={1.65}>
           <group rotation={modelRotation}>
             <group rotation={MODEL_TO_Z_UP_ROTATION}>
-              <BracketModel {...props} viewMode={effectiveViewMode} />
-              {props.showDimensions && <ModelDimensionOverlay displayModel={props.displayModel} />}
+              <BracketModel {...props} viewMode={effectiveViewMode} onUploadedPreviewBounds={setUploadedPreviewBounds} />
+              {props.showDimensions && <ModelDimensionOverlay displayModel={props.displayModel} uploadedPreviewBounds={uploadedPreviewBounds} />}
             </group>
           </group>
           <BoundsCameraReset signal={props.fitSignal} viewAxis={props.viewAxis} viewAxisSignal={props.viewAxisSignal} />
@@ -269,7 +274,23 @@ function AxisDot({ color, position }: { color: string; position: [number, number
   );
 }
 
-function BracketModel({ displayModel, activeStep, selectedFaceId, payloadObjectSelectionMode, onSelectFace, viewMode, resultMode, showDeformed, stressExaggeration, resultFields, unitSystem, loadMarkers, supportMarkers }: CadViewerProps) {
+function BracketModel({
+  displayModel,
+  activeStep,
+  selectedFaceId,
+  payloadObjectSelectionMode,
+  onSelectFace,
+  viewMode,
+  resultMode,
+  showDeformed,
+  stressExaggeration,
+  resultFields,
+  unitSystem,
+  loadMarkers,
+  supportMarkers,
+  onMeasureDisplayModelDimensions,
+  onUploadedPreviewBounds
+}: CadViewerProps & { onUploadedPreviewBounds: (bounds: THREE.Box3) => void }) {
   const [hoveredHit, setHoveredHit] = useState<ModelSelectionHit | null>(null);
   const [selectedHit, setSelectedHit] = useState<ModelSelectionHit | null>(null);
   const modelKind = modelKindForDisplayModel(displayModel);
@@ -329,9 +350,18 @@ function BracketModel({ displayModel, activeStep, selectedFaceId, payloadObjectS
           stressExaggeration={stressExaggeration}
           resultFields={resultFields}
           loadMarkers={loadMarkers.filter((marker) => !marker.preview)}
+          onMeasureDisplayModelDimensions={onMeasureDisplayModelDimensions}
+          onUploadedPreviewBounds={onUploadedPreviewBounds}
         />
       ) : (
-        <SampleSolid kind={modelKind} displayModel={displayModel} color={materialColor("face-base-bottom")} pickHandlers={pickHandlers} />
+        <SampleSolid
+          kind={modelKind}
+          displayModel={displayModel}
+          color={materialColor("face-base-bottom")}
+          pickHandlers={pickHandlers}
+          onMeasureDisplayModelDimensions={onMeasureDisplayModelDimensions}
+          onUploadedPreviewBounds={onUploadedPreviewBounds}
+        />
       )}
       <HoleRims kind={modelKind} />
       {viewMode === "mesh" && <MeshOverlay kind={modelKind} />}
@@ -421,9 +451,11 @@ function markerDirectionInModelSpace(marker: ViewerLoadMarker) {
   return marker.directionLabel === "Normal" ? direction : worldNormalToModelSpace(direction);
 }
 
-function ModelDimensionOverlay({ displayModel }: { displayModel: DisplayModel }) {
+function ModelDimensionOverlay({ displayModel, uploadedPreviewBounds }: { displayModel: DisplayModel; uploadedPreviewBounds: THREE.Box3 | null }) {
   const dimensions = displayModel.dimensions;
-  const bounds = dimensionBoundsForDisplayModel(displayModel);
+  const bounds = modelKindForDisplayModel(displayModel) === "uploaded" && uploadedPreviewBounds
+    ? uploadedPreviewBounds
+    : dimensionBoundsForDisplayModel(displayModel);
   if (!dimensions || !bounds) return null;
 
   const min = bounds.min;
@@ -543,9 +575,33 @@ function labelForNormal(normal: THREE.Vector3) {
   return axis?.value && axis.value > 0.72 ? axis.label : "Selected model face";
 }
 
-function SampleSolid({ kind, color, displayModel, pickHandlers }: { kind: SampleModelKind; color: string; displayModel?: DisplayModel; pickHandlers?: ModelPickHandlers }) {
+function SampleSolid({
+  kind,
+  color,
+  displayModel,
+  pickHandlers,
+  onMeasureDisplayModelDimensions,
+  onUploadedPreviewBounds
+}: {
+  kind: SampleModelKind;
+  color: string;
+  displayModel?: DisplayModel;
+  pickHandlers?: ModelPickHandlers;
+  onMeasureDisplayModelDimensions?: (dimensions: NonNullable<DisplayModel["dimensions"]>) => void;
+  onUploadedPreviewBounds?: (bounds: THREE.Box3) => void;
+}) {
   if (kind === "blank") return null;
-  if (kind === "uploaded") return <UploadedSolid displayModel={displayModel} color={color} pickHandlers={pickHandlers} />;
+  if (kind === "uploaded") {
+    return (
+      <UploadedSolid
+        displayModel={displayModel}
+        color={color}
+        pickHandlers={pickHandlers}
+        onMeasureDisplayModelDimensions={onMeasureDisplayModelDimensions}
+        onUploadedPreviewBounds={onUploadedPreviewBounds}
+      />
+    );
+  }
   if (kind === "plate") return <PlateSolid color={color} pickHandlers={pickHandlers} />;
   if (kind === "cantilever") return <CantileverSolid color={color} pickHandlers={pickHandlers} />;
   return <BracketSolid color={color} pickHandlers={pickHandlers} />;
@@ -591,23 +647,60 @@ function CantileverSolid({ color, pickHandlers }: { color: string; pickHandlers?
   );
 }
 
-function UploadedSolid({ displayModel, color, pickHandlers }: { displayModel?: DisplayModel; color: string; pickHandlers?: ModelPickHandlers }) {
-  if (displayModel?.nativeCad) return <UploadedNativeCadModel displayModel={displayModel} color={color} pickHandlers={pickHandlers} />;
+function UploadedSolid({
+  displayModel,
+  color,
+  pickHandlers,
+  onMeasureDisplayModelDimensions,
+  onUploadedPreviewBounds
+}: {
+  displayModel?: DisplayModel;
+  color: string;
+  pickHandlers?: ModelPickHandlers;
+  onMeasureDisplayModelDimensions?: (dimensions: NonNullable<DisplayModel["dimensions"]>) => void;
+  onUploadedPreviewBounds?: (bounds: THREE.Box3) => void;
+}) {
+  if (displayModel?.nativeCad) {
+    return (
+      <UploadedNativeCadModel
+        displayModel={displayModel}
+        color={color}
+        pickHandlers={pickHandlers}
+        onMeasureDisplayModelDimensions={onMeasureDisplayModelDimensions}
+        onUploadedPreviewBounds={onUploadedPreviewBounds}
+      />
+    );
+  }
   if (!displayModel?.visualMesh) return <UnsupportedUploadedModelNotice filename={displayModel?.name ?? "Uploaded model"} />;
   if (displayModel.visualMesh.format === "obj") return <UploadedObjModel displayModel={displayModel} pickHandlers={pickHandlers} />;
   return <UploadedStlModel displayModel={displayModel} color={color} pickHandlers={pickHandlers} />;
 }
 
-function UploadedNativeCadModel({ displayModel, color, pickHandlers }: { displayModel: DisplayModel; color: string; pickHandlers?: ModelPickHandlers }) {
+function UploadedNativeCadModel({
+  displayModel,
+  color,
+  pickHandlers,
+  onMeasureDisplayModelDimensions,
+  onUploadedPreviewBounds
+}: {
+  displayModel: DisplayModel;
+  color: string;
+  pickHandlers?: ModelPickHandlers;
+  onMeasureDisplayModelDimensions?: (dimensions: NonNullable<DisplayModel["dimensions"]>) => void;
+  onUploadedPreviewBounds?: (bounds: THREE.Box3) => void;
+}) {
   const filename = displayModel.nativeCad?.filename ?? displayModel.name;
   const [preview, setPreview] = useState<{ status: "loading" | "ready" | "error"; object?: THREE.Group; message?: string }>({ status: "loading" });
 
   useEffect(() => {
     let cancelled = false;
     setPreview({ status: "loading" });
-    stepPreviewGroupFromBase64(displayModel.nativeCad?.contentBase64 ?? "", color)
-      .then((object) => {
-        if (!cancelled) setPreview({ status: "ready", object });
+    stepPreviewFromBase64(displayModel.nativeCad?.contentBase64 ?? "", color)
+      .then((nextPreview) => {
+        if (cancelled) return;
+        setPreview({ status: "ready", object: nextPreview.object });
+        onMeasureDisplayModelDimensions?.(nextPreview.dimensions);
+        onUploadedPreviewBounds?.(nextPreview.normalizedBounds);
       })
       .catch((error: unknown) => {
         const message = error instanceof Error ? error.message : "STEP preview could not be generated.";
@@ -616,7 +709,7 @@ function UploadedNativeCadModel({ displayModel, color, pickHandlers }: { display
     return () => {
       cancelled = true;
     };
-  }, [color, displayModel.nativeCad?.contentBase64]);
+  }, [color, displayModel.nativeCad?.contentBase64, onMeasureDisplayModelDimensions, onUploadedPreviewBounds]);
 
   if (preview.status === "loading") {
     return (
@@ -703,7 +796,9 @@ function AnalysisResultModel({
   showDeformed,
   stressExaggeration,
   resultFields,
-  loadMarkers
+  loadMarkers,
+  onMeasureDisplayModelDimensions,
+  onUploadedPreviewBounds
 }: {
   kind: SampleModelKind;
   displayModel: DisplayModel;
@@ -712,6 +807,8 @@ function AnalysisResultModel({
   stressExaggeration: number;
   resultFields: ResultField[];
   loadMarkers: ViewerLoadMarker[];
+  onMeasureDisplayModelDimensions?: (dimensions: NonNullable<DisplayModel["dimensions"]>) => void;
+  onUploadedPreviewBounds: (bounds: THREE.Box3) => void;
 }) {
   if (kind === "blank") return null;
   const samples = resultSamplesForFaces(displayModel.faces, resultFields, resultMode);
@@ -724,6 +821,8 @@ function AnalysisResultModel({
         showDeformed={showDeformed}
         stressExaggeration={stressExaggeration}
         loadMarkers={loadMarkers}
+        onMeasureDisplayModelDimensions={onMeasureDisplayModelDimensions}
+        onUploadedPreviewBounds={onUploadedPreviewBounds}
       />
     );
   }
@@ -739,7 +838,9 @@ function UploadedResultSolid({
   resultMode,
   showDeformed,
   stressExaggeration,
-  loadMarkers
+  loadMarkers,
+  onMeasureDisplayModelDimensions,
+  onUploadedPreviewBounds
 }: {
   displayModel: DisplayModel;
   samples: FaceResultSample[];
@@ -747,6 +848,8 @@ function UploadedResultSolid({
   showDeformed: boolean;
   stressExaggeration: number;
   loadMarkers: ViewerLoadMarker[];
+  onMeasureDisplayModelDimensions?: (dimensions: NonNullable<DisplayModel["dimensions"]>) => void;
+  onUploadedPreviewBounds: (bounds: THREE.Box3) => void;
 }) {
   if (displayModel.nativeCad) {
     return (
@@ -757,6 +860,8 @@ function UploadedResultSolid({
         showDeformed={showDeformed}
         stressExaggeration={stressExaggeration}
         loadMarkers={loadMarkers}
+        onMeasureDisplayModelDimensions={onMeasureDisplayModelDimensions}
+        onUploadedPreviewBounds={onUploadedPreviewBounds}
       />
     );
   }
@@ -782,7 +887,9 @@ function UploadedResultSolid({
 }
 
 function UploadedNativeCadResultModel({
-  displayModel
+  displayModel,
+  onMeasureDisplayModelDimensions,
+  onUploadedPreviewBounds
 }: {
   displayModel: DisplayModel;
   samples: FaceResultSample[];
@@ -790,8 +897,17 @@ function UploadedNativeCadResultModel({
   showDeformed: boolean;
   stressExaggeration: number;
   loadMarkers: ViewerLoadMarker[];
+  onMeasureDisplayModelDimensions?: (dimensions: NonNullable<DisplayModel["dimensions"]>) => void;
+  onUploadedPreviewBounds: (bounds: THREE.Box3) => void;
 }) {
-  return <UploadedNativeCadModel displayModel={displayModel} color="#63a9e5" />;
+  return (
+    <UploadedNativeCadModel
+      displayModel={displayModel}
+      color="#63a9e5"
+      onMeasureDisplayModelDimensions={onMeasureDisplayModelDimensions}
+      onUploadedPreviewBounds={onUploadedPreviewBounds}
+    />
+  );
 }
 
 function UploadedStlResultModel({

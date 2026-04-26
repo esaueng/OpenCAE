@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Constraint, DisplayFace, DisplayModel, Load, NamedSelection, Project, ResultField, ResultSummary, RunEvent, Study } from "@opencae/schema";
 import { RotateCcw, Save } from "lucide-react";
 import { addLoad, addSupport, assignMaterial, createProject, generateMesh, getResults, importLocalProject, loadSampleProject, renameProject, runSimulation, subscribeToRun, updateStudy as saveStudyPatch, uploadModel, type SampleModelId } from "./lib/api";
@@ -98,6 +98,21 @@ export function App() {
   const missingRunItems = runReadiness.filter((item) => !item.done).map((item) => item.label);
   const canUndoAction = undoStack.length > 0;
   const canRedoAction = redoStack.length > 0;
+
+  const handleMeasureDisplayModelDimensions = useCallback((dimensions: NonNullable<DisplayModel["dimensions"]>) => {
+    setDisplayModel((current) => {
+      if (!current?.nativeCad) return current;
+      if (
+        current.dimensions?.x === dimensions.x &&
+        current.dimensions?.y === dimensions.y &&
+        current.dimensions?.z === dimensions.z &&
+        current.dimensions?.units === dimensions.units
+      ) {
+        return current;
+      }
+      return { ...current, dimensions };
+    });
+  }, []);
 
   useEffect(() => {
     if (draftLoadType !== "gravity" && selectedPayloadObject) {
@@ -564,6 +579,7 @@ export function App() {
           loadMarkers={loadMarkers}
           supportMarkers={supportMarkers}
           onResetView={handleFitDefaultView}
+          onMeasureDisplayModelDimensions={handleMeasureDisplayModelDimensions}
         />
         <RightPanel
           activeStep={activeStep}

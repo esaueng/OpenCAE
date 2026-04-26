@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { describe, expect, test } from "vitest";
-import { geometryFromOcctMesh, normalizedStepGroupFromMeshes } from "./stepPreview";
+import { geometryFromOcctMesh, normalizedStepPreviewFromMeshes } from "./stepPreview";
 
 const importedMesh = {
   attributes: {
@@ -19,7 +19,8 @@ describe("STEP preview helpers", () => {
   });
 
   test("normalizes imported STEP meshes instead of substituting a placeholder box", () => {
-    const group = normalizedStepGroupFromMeshes([importedMesh], "#9aa7b4");
+    const preview = normalizedStepPreviewFromMeshes([importedMesh], "#9aa7b4");
+    const group = preview.object;
     const mesh = group.children.find((child) => child instanceof THREE.Mesh) as THREE.Mesh | undefined;
 
     expect(mesh).toBeDefined();
@@ -28,5 +29,23 @@ describe("STEP preview helpers", () => {
     expect(group.position.x).toBeCloseTo(-1.2);
     const box = new THREE.Box3().setFromObject(group);
     expect(box.getCenter(new THREE.Vector3()).length()).toBeCloseTo(0);
+  });
+
+  test("measures source STEP dimensions before preview normalization", () => {
+    const preview = normalizedStepPreviewFromMeshes([importedMesh], "#9aa7b4");
+
+    expect(preview.dimensions).toEqual({ x: 10, y: 4, z: 0, units: "mm" });
+  });
+
+  test("returns normalized bounds matching the rendered preview object", () => {
+    const preview = normalizedStepPreviewFromMeshes([importedMesh], "#9aa7b4");
+    const renderedBounds = new THREE.Box3().setFromObject(preview.object);
+
+    expect(preview.normalizedBounds.min.x).toBeCloseTo(renderedBounds.min.x);
+    expect(preview.normalizedBounds.min.y).toBeCloseTo(renderedBounds.min.y);
+    expect(preview.normalizedBounds.min.z).toBeCloseTo(renderedBounds.min.z);
+    expect(preview.normalizedBounds.max.x).toBeCloseTo(renderedBounds.max.x);
+    expect(preview.normalizedBounds.max.y).toBeCloseTo(renderedBounds.max.y);
+    expect(preview.normalizedBounds.max.z).toBeCloseTo(renderedBounds.max.z);
   });
 });

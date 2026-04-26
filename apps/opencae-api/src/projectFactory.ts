@@ -82,7 +82,7 @@ export function uploadedDisplayModelFor(filename: string, contentBase64?: string
   const previewFormat = previewFormatForFilename(filename);
   const dimensions = previewFormat === "stl"
     ? stlDimensionsFromBase64(contentBase64) ?? { x: 96, y: 48, z: 32, units: "mm" as const }
-    : { x: 96, y: 48, z: 32, units: "mm" as const };
+    : undefined;
   if (nativeFormat) {
     return {
       id: "display-uploaded",

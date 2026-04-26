@@ -4,6 +4,17 @@ import occtWasmUrl from "occt-import-js/dist/occt-import-js.wasm?url";
 
 let occtPromise: Promise<OcctImporter> | null = null;
 
+export interface StepPreview {
+  object: THREE.Group;
+  dimensions: {
+    x: number;
+    y: number;
+    z: number;
+    units: "mm";
+  };
+  normalizedBounds: THREE.Box3;
+}
+
 export function geometryFromOcctMesh(mesh: OcctMesh): THREE.BufferGeometry {
   const positions = mesh.attributes?.position?.array;
   if (!positions?.length) {
@@ -29,7 +40,7 @@ export function geometryFromOcctMesh(mesh: OcctMesh): THREE.BufferGeometry {
   return geometry;
 }
 
-export function normalizedStepGroupFromMeshes(meshes: OcctMesh[], color: string): THREE.Group {
+export function normalizedStepPreviewFromMeshes(meshes: OcctMesh[], color: string): StepPreview {
   const group = new THREE.Group();
   const material = new THREE.MeshStandardMaterial({ color, metalness: 0.18, roughness: 0.54 });
 
@@ -63,10 +74,19 @@ export function normalizedStepGroupFromMeshes(meshes: OcctMesh[], color: string)
   const scale = 2.4 / maxDimension;
   group.scale.setScalar(scale);
   group.position.copy(center.multiplyScalar(-scale));
-  return group;
+  return {
+    object: group,
+    dimensions: {
+      x: size.x,
+      y: size.y,
+      z: size.z,
+      units: "mm"
+    },
+    normalizedBounds: new THREE.Box3().setFromObject(group)
+  };
 }
 
-export async function stepPreviewGroupFromBase64(contentBase64: string, color: string): Promise<THREE.Group> {
+export async function stepPreviewFromBase64(contentBase64: string, color: string): Promise<StepPreview> {
   const importer = await getOcctImporter();
   const bytes = base64ToUint8Array(contentBase64);
   const result = importer.ReadStepFile(bytes, null);
@@ -75,7 +95,7 @@ export async function stepPreviewGroupFromBase64(contentBase64: string, color: s
     throw new Error(`STEP import failed${result.errorCode ? ` (${result.errorCode})` : ""}.`);
   }
 
-  return normalizedStepGroupFromMeshes(result.meshes ?? [], color);
+  return normalizedStepPreviewFromMeshes(result.meshes ?? [], color);
 }
 
 function getOcctImporter(): Promise<OcctImporter> {
