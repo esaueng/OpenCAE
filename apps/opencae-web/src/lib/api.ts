@@ -1,4 +1,5 @@
-import type { DisplayModel, Project, ResultField, ResultSummary, RunEvent, Study } from "@opencae/schema";
+import { solveStudy } from "@opencae/solver-service";
+import type { DisplayModel, Project, ResultField, ResultSummary, RunEvent, Study, StudyRun } from "@opencae/schema";
 import type { LoadApplicationPoint, LoadDirection, LoadType, PayloadObjectSelection } from "../loadPreview";
 import { embedUploadedModelFile, type EmbeddedModelFile, type LocalResultBundle } from "../projectFile";
 import { createLocalBlankProject, createLocalSampleProject, createLocalUploadResponse, openLocalProjectPayload } from "../localProjectFactory";
@@ -16,6 +17,9 @@ export interface ResultsResponse {
   summary: ResultSummary;
   fields: ResultField[];
 }
+
+const localResultsByRunId = new Map<string, ResultsResponse>();
+const localEventsByRunId = new Map<string, RunEvent[]>();
 
 export async function loadSampleProject(sample: SampleModelId = "bracket"): Promise<SampleProjectResponse> {
   return fetchJsonWithFallback(
@@ -221,12 +225,19 @@ export async function addLoad(studyId: string, type: LoadType, value: number, se
   );
 }
 
-export async function runSimulation(studyId: string): Promise<{ run: { id: string }; streamUrl: string; message: string }> {
-  const response = await fetch(`/api/studies/${studyId}/runs`, { method: "POST" });
-  return readJson(response);
+export async function runSimulation(studyId: string, currentStudy?: Study): Promise<{ run: { id: string }; streamUrl: string; message: string }> {
+  try {
+    const response = await fetch(`/api/studies/${studyId}/runs`, { method: "POST" });
+    return await readJson(response);
+  } catch (error) {
+    if (!currentStudy) throw error;
+    return runSimulationLocally(currentStudy);
+  }
 }
 
 export async function getResults(runId: string): Promise<ResultsResponse> {
+  const localResults = localResultsByRunId.get(runId);
+  if (localResults) return localResults;
   const response = await fetch(`/api/runs/${runId}/results`);
   return readJson(response);
 }
@@ -248,12 +259,57 @@ export async function getReportHtml(runId: string): Promise<string> {
 }
 
 export function subscribeToRun(runId: string, onEvent: (event: RunEvent) => void): EventSource {
+  const localEvents = localEventsByRunId.get(runId);
+  if (localEvents) return subscribeToLocalRun(localEvents, onEvent);
   const source = new EventSource(`/api/runs/${runId}/stream`);
   const eventTypes: RunEvent["type"][] = ["state", "progress", "message", "log", "diagnostic", "complete", "cancelled", "error"];
   for (const type of eventTypes) {
     source.addEventListener(type, (message) => onEvent(JSON.parse((message as MessageEvent).data) as RunEvent));
   }
   return source;
+}
+
+function runSimulationLocally(study: Study): { run: StudyRun; streamUrl: string; message: string } {
+  const runId = `run-local-${crypto.randomUUID()}`;
+  const solved = solveStudy(study, runId);
+  localResultsByRunId.set(runId, { summary: solved.summary, fields: solved.fields });
+  const now = new Date().toISOString();
+  const events: RunEvent[] = [
+    { runId, type: "state", progress: 0, message: "Simulation queued locally.", timestamp: now },
+    { runId, type: "progress", progress: 10, message: "Local static solver started.", timestamp: now },
+    { runId, type: "progress", progress: 46, message: "Assembling local stiffness response.", timestamp: now },
+    { runId, type: "progress", progress: 88, message: "Writing local result fields.", timestamp: now },
+    { runId, type: "complete", progress: 100, message: "Simulation complete.", timestamp: now }
+  ];
+  localEventsByRunId.set(runId, events);
+  return {
+    run: {
+      id: runId,
+      studyId: study.id,
+      status: "queued",
+      jobId: `job-${runId}`,
+      meshRef: study.meshSettings.meshRef,
+      solverBackend: "local-static-superposition",
+      solverVersion: "0.1.0",
+      startedAt: now,
+      diagnostics: []
+    },
+    streamUrl: `local:${runId}`,
+    message: "Simulation running locally."
+  };
+}
+
+function subscribeToLocalRun(events: RunEvent[], onEvent: (event: RunEvent) => void): EventSource {
+  let closed = false;
+  const timers = events.map((event, index) => globalThis.setTimeout(() => {
+    if (!closed) onEvent(event);
+  }, index * 25));
+  return {
+    close() {
+      closed = true;
+      timers.forEach((timer) => globalThis.clearTimeout(timer));
+    }
+  } as EventSource;
 }
 
 async function readJson<T>(response: Response): Promise<T> {

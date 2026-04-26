@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
-import type { DisplayModel, Project, Study } from "@opencae/schema";
-import { addLoad, addSupport, assignMaterial, createProject, generateMesh, importLocalProject, loadSampleProject, updateStudy, uploadModel } from "./api";
+import type { DisplayModel, Project, RunEvent, Study } from "@opencae/schema";
+import { addLoad, addSupport, assignMaterial, createProject, generateMesh, getResults, importLocalProject, loadSampleProject, runSimulation, subscribeToRun, updateStudy, uploadModel } from "./api";
 
 const project = {
   id: "project-1",
@@ -207,6 +207,36 @@ describe("api", () => {
       }
     });
     expect(response.message).toBe("Mesh generated locally.");
+  });
+
+  test("runs simulations locally when the API does not know the restored study", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: "Study not found" }), {
+      status: 404,
+      headers: { "content-type": "application/json" }
+    })));
+    const readyStudy = {
+      ...study,
+      materialAssignments: [{ id: "assign-1", materialId: "mat-aluminum-6061", selectionRef: "selection-body-1", status: "complete" }],
+      constraints: [{ id: "constraint-1", type: "fixed", selectionRef: "selection-face-1", parameters: {}, status: "complete" }],
+      loads: [{ id: "load-1", type: "force", selectionRef: "selection-face-1", parameters: { value: 500, units: "N", direction: [0, -1, 0] }, status: "complete" }],
+      meshSettings: { preset: "fine", status: "complete", meshRef: "project-1/mesh/mesh-summary.json" }
+    } as Study;
+
+    const response = await runSimulation("study-1", readyStudy);
+    const completed = await new Promise<RunEvent>((resolve) => {
+      const source = subscribeToRun(response.run.id, (event) => {
+        if (event.type === "complete") {
+          source.close();
+          resolve(event);
+        }
+      });
+    });
+    const results = await getResults(response.run.id);
+
+    expect(response.message).toBe("Simulation running locally.");
+    expect(completed.progress).toBe(100);
+    expect(results.fields.map((field) => field.runId)).toEqual([response.run.id, response.run.id, response.run.id]);
+    expect(results.summary.maxStress).toBeGreaterThan(0);
   });
 
   test("updates studies locally when the API is unavailable", async () => {

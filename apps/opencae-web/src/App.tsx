@@ -478,7 +478,7 @@ export function App() {
       pushMessage(missingRunItems.length ? `Complete before running: ${missingRunItems.join(", ")}.` : "Simulation is already running.");
       return;
     }
-    const response = await runSimulation(study.id);
+    const response = await runSimulation(study.id, study);
     setActiveRunId(response.run.id);
     setCompletedRunId("");
     setRunProgress(0);
