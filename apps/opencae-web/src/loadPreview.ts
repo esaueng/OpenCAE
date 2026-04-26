@@ -9,6 +9,15 @@ export interface PayloadObjectSelection {
   id: string;
   label: string;
   center: LoadApplicationPoint;
+  volumeM3?: number;
+  volumeSource?: "mesh" | "step" | "bounds-fallback" | "manual";
+  volumeStatus?: "available" | "estimated" | "unknown";
+}
+export type PayloadMassMode = "material" | "manual";
+export interface PayloadLoadMetadata {
+  payloadMaterialId?: string;
+  payloadVolumeM3?: number;
+  payloadMassMode?: PayloadMassMode;
 }
 export const STANDARD_GRAVITY = 9.80665;
 
@@ -62,7 +71,14 @@ export function applicationPointForLoad(load: Load): LoadApplicationPoint | unde
 export function payloadObjectForLoad(load: Load): PayloadObjectSelection | undefined {
   const value = load.parameters.payloadObject;
   if (!isRecord(value) || typeof value.id !== "string" || typeof value.label !== "string" || !isVector3(value.center)) return undefined;
-  return { id: value.id, label: value.label, center: value.center };
+  return {
+    id: value.id,
+    label: value.label,
+    center: value.center,
+    ...(positiveNumber(value.volumeM3) ? { volumeM3: value.volumeM3 } : {}),
+    ...(isVolumeSource(value.volumeSource) ? { volumeSource: value.volumeSource } : {}),
+    ...(isVolumeStatus(value.volumeStatus) ? { volumeStatus: value.volumeStatus } : {})
+  };
 }
 
 export function loadMarkerFromLoad(load: Load, study: Study, stackIndex: number): ViewerLoadMarker | null {
@@ -146,4 +162,16 @@ function isVector3(value: unknown): value is LoadApplicationPoint {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object";
+}
+
+function positiveNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
+function isVolumeSource(value: unknown): value is NonNullable<PayloadObjectSelection["volumeSource"]> {
+  return value === "mesh" || value === "step" || value === "bounds-fallback" || value === "manual";
+}
+
+function isVolumeStatus(value: unknown): value is NonNullable<PayloadObjectSelection["volumeStatus"]> {
+  return value === "available" || value === "estimated" || value === "unknown";
 }

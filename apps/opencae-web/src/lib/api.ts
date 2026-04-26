@@ -1,6 +1,6 @@
 import { solveStudy } from "@opencae/solver-service";
 import type { DisplayModel, Project, ResultField, ResultSummary, RunEvent, Study, StudyRun } from "@opencae/schema";
-import type { LoadApplicationPoint, LoadDirection, LoadType, PayloadObjectSelection } from "../loadPreview";
+import type { LoadApplicationPoint, LoadDirection, LoadType, PayloadLoadMetadata, PayloadObjectSelection } from "../loadPreview";
 import { embedUploadedModelFile, type EmbeddedModelFile, type LocalResultBundle } from "../projectFile";
 import { createLocalBlankProject, createLocalSampleProject, createLocalUploadResponse, openLocalProjectPayload } from "../localProjectFactory";
 
@@ -195,13 +195,13 @@ export async function updateStudy(studyId: string, patch: Partial<Study>, messag
   ).then((data) => ({ ...data, message }));
 }
 
-export async function addLoad(studyId: string, type: LoadType, value: number, selectionRef: string, direction: LoadDirection, applicationPoint?: LoadApplicationPoint | null, payloadObject?: PayloadObjectSelection | null, currentStudy?: Study): Promise<{ study: Study; message: string }> {
+export async function addLoad(studyId: string, type: LoadType, value: number, selectionRef: string, direction: LoadDirection, applicationPoint?: LoadApplicationPoint | null, payloadObject?: PayloadObjectSelection | null, currentStudy?: Study, payloadMetadata: PayloadLoadMetadata = {}): Promise<{ study: Study; message: string }> {
   return fetchJsonWithFallback(
     `/api/studies/${studyId}/loads`,
     {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ type, value, selectionRef, direction, applicationPoint, payloadObject })
+      body: JSON.stringify({ type, value, selectionRef, direction, applicationPoint, payloadObject, ...payloadMetadata })
     },
     () => {
       if (!currentStudy) throw new Error("Could not add load without an open study.");
@@ -214,7 +214,7 @@ export async function addLoad(studyId: string, type: LoadType, value: number, se
               id: `load-${crypto.randomUUID()}`,
               type,
               selectionRef,
-              parameters: { value, units: type === "pressure" ? "kPa" : type === "gravity" ? "kg" : "N", direction, ...(applicationPoint ? { applicationPoint } : {}), ...(payloadObject ? { payloadObject } : {}) },
+              parameters: { value, units: type === "pressure" ? "kPa" : type === "gravity" ? "kg" : "N", direction, ...(applicationPoint ? { applicationPoint } : {}), ...(payloadObject ? { payloadObject } : {}), ...(type === "gravity" ? payloadMetadata : {}) },
               status: "complete" as const
             }
           ]

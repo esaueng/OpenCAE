@@ -188,6 +188,37 @@ describe("api", () => {
     expect(response.message).toBe("Load added.");
   });
 
+  test("adds payload material metadata locally while preserving value as mass", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("missing", { status: 404 })));
+
+    const response = await addLoad(
+      "study-1",
+      "gravity",
+      2.7,
+      "selection-face-1",
+      [0, 0, -1],
+      [1, 2, 3],
+      { id: "payload-1", label: "Payload part", center: [1, 2, 3], volumeM3: 0.001, volumeSource: "mesh", volumeStatus: "available" },
+      study,
+      { payloadMaterialId: "payload-aluminum-6061", payloadVolumeM3: 0.001, payloadMassMode: "material" }
+    );
+
+    expect(response.study.loads[0]?.parameters).toMatchObject({
+      value: 2.7,
+      units: "kg",
+      payloadMaterialId: "payload-aluminum-6061",
+      payloadVolumeM3: 0.001,
+      payloadMassMode: "material",
+      payloadObject: {
+        id: "payload-1",
+        label: "Payload part",
+        volumeM3: 0.001,
+        volumeSource: "mesh",
+        volumeStatus: "available"
+      }
+    });
+  });
+
   test("generates mesh locally when the API does not know the restored study", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: "Study not found" }), {
       status: 404,

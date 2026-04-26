@@ -7,6 +7,8 @@ export interface ModelDimensions {
   units: "mm";
 }
 
+export type Triangle = [[number, number, number], [number, number, number], [number, number, number]];
+
 export function formatEngineeringValue(value: number, units: string): string {
   return `${value.toLocaleString(undefined, { maximumFractionDigits: 3 })} ${units}`.trim();
 }
@@ -29,6 +31,27 @@ export function stlDimensionsFromBytes(bytes: Uint8Array): ModelDimensions | und
   };
 }
 
+export function stlVolumeM3FromBase64(contentBase64?: string): number | undefined {
+  if (!contentBase64) return undefined;
+  return stlVolumeM3FromBytes(base64ToBytes(contentBase64));
+}
+
+export function stlVolumeM3FromBytes(bytes: Uint8Array): number | undefined {
+  const triangles = isExactBinaryStl(bytes) ? binaryStlTriangles(bytes) : asciiStlTriangles(bytes);
+  if (!triangles.length) return undefined;
+  return meshVolumeM3FromTriangles(triangles);
+}
+
+export function meshVolumeM3FromTriangles(triangles: Triangle[]): number | undefined {
+  if (!triangles.length) return undefined;
+  let volumeMm3 = 0;
+  for (const [a, b, c] of triangles) {
+    volumeMm3 += dot(a, cross(b, c)) / 6;
+  }
+  const volume = Math.abs(volumeMm3) / 1_000_000_000;
+  return Number.isFinite(volume) && volume > 0 ? volume : undefined;
+}
+
 function binaryStlBounds(bytes: Uint8Array) {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const triangleCount = view.getUint32(80, true);
@@ -48,6 +71,26 @@ function binaryStlBounds(bytes: Uint8Array) {
   return { min, max };
 }
 
+function binaryStlTriangles(bytes: Uint8Array): Triangle[] {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const triangleCount = view.getUint32(80, true);
+  const triangles: Triangle[] = [];
+  for (let triangleIndex = 0; triangleIndex < triangleCount; triangleIndex += 1) {
+    const triangleOffset = 84 + triangleIndex * 50 + 12;
+    const triangle: Triangle = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+    for (let vertexIndex = 0; vertexIndex < 3; vertexIndex += 1) {
+      const vertex = triangle[vertexIndex]!;
+      for (let axis = 0; axis < 3; axis += 1) {
+        const value = view.getFloat32(triangleOffset + vertexIndex * 12 + axis * 4, true);
+        if (!Number.isFinite(value)) return [];
+        vertex[axis] = value;
+      }
+    }
+    triangles.push(triangle);
+  }
+  return triangles;
+}
+
 function asciiStlBounds(bytes: Uint8Array) {
   const text = new TextDecoder().decode(bytes);
   const vertexPattern = /^\s*vertex\s+([-+]?\d*\.?\d+(?:e[-+]?\d+)?)\s+([-+]?\d*\.?\d+(?:e[-+]?\d+)?)\s+([-+]?\d*\.?\d+(?:e[-+]?\d+)?)/gim;
@@ -65,6 +108,40 @@ function asciiStlBounds(bytes: Uint8Array) {
     }
   }
   return vertexCount ? { min, max } : undefined;
+}
+
+function asciiStlTriangles(bytes: Uint8Array): Triangle[] {
+  const vertices = asciiStlVertices(bytes);
+  const triangles: Triangle[] = [];
+  for (let index = 0; index + 2 < vertices.length; index += 3) {
+    triangles.push([vertices[index]!, vertices[index + 1]!, vertices[index + 2]!]);
+  }
+  return triangles;
+}
+
+function asciiStlVertices(bytes: Uint8Array): Array<[number, number, number]> {
+  const text = new TextDecoder().decode(bytes);
+  const vertexPattern = /^\s*vertex\s+([-+]?\d*\.?\d+(?:e[-+]?\d+)?)\s+([-+]?\d*\.?\d+(?:e[-+]?\d+)?)\s+([-+]?\d*\.?\d+(?:e[-+]?\d+)?)/gim;
+  const vertices: Array<[number, number, number]> = [];
+  let match: RegExpExecArray | null;
+  while ((match = vertexPattern.exec(text))) {
+    const vertex = [Number(match[1]), Number(match[2]), Number(match[3])] as [number, number, number];
+    if (!vertex.every((value) => Number.isFinite(value))) return [];
+    vertices.push(vertex);
+  }
+  return vertices;
+}
+
+function dot(a: [number, number, number], b: [number, number, number]) {
+  return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+
+function cross(a: [number, number, number], b: [number, number, number]): [number, number, number] {
+  return [
+    a[1] * b[2] - a[2] * b[1],
+    a[2] * b[0] - a[0] * b[2],
+    a[0] * b[1] - a[1] * b[0]
+  ];
 }
 
 function isExactBinaryStl(bytes: Uint8Array): boolean {

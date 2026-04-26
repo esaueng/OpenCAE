@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import type { OcctImporter, OcctMesh } from "occt-import-js";
 import occtWasmUrl from "occt-import-js/dist/occt-import-js.wasm?url";
+import { meshVolumeM3FromTriangles, type Triangle } from "@opencae/units";
 
 let occtPromise: Promise<OcctImporter> | null = null;
 
@@ -52,6 +53,12 @@ export function normalizedStepPreviewFromMeshes(meshes: OcctMesh[], color: strin
     mesh.name = label;
     mesh.userData.opencaeObjectId = `step-object-${index + 1}`;
     mesh.userData.opencaeObjectLabel = label;
+    const volumeM3 = volumeM3FromGeometry(geometry);
+    if (volumeM3) {
+      mesh.userData.opencaeVolumeM3 = volumeM3;
+      mesh.userData.opencaeVolumeSource = "step";
+      mesh.userData.opencaeVolumeStatus = "available";
+    }
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     mesh.add(
@@ -84,6 +91,31 @@ export function normalizedStepPreviewFromMeshes(meshes: OcctMesh[], color: strin
     },
     normalizedBounds: new THREE.Box3().setFromObject(group)
   };
+}
+
+function volumeM3FromGeometry(geometry: THREE.BufferGeometry): number | undefined {
+  const positions = geometry.getAttribute("position");
+  if (!positions) return undefined;
+  const triangles: Triangle[] = [];
+  const index = geometry.getIndex();
+  if (index) {
+    for (let offset = 0; offset + 2 < index.count; offset += 3) {
+      triangles.push([
+        vertexAt(positions, index.getX(offset)),
+        vertexAt(positions, index.getX(offset + 1)),
+        vertexAt(positions, index.getX(offset + 2))
+      ]);
+    }
+  } else {
+    for (let offset = 0; offset + 2 < positions.count; offset += 3) {
+      triangles.push([vertexAt(positions, offset), vertexAt(positions, offset + 1), vertexAt(positions, offset + 2)]);
+    }
+  }
+  return meshVolumeM3FromTriangles(triangles);
+}
+
+function vertexAt(positions: THREE.BufferAttribute | THREE.InterleavedBufferAttribute, index: number): [number, number, number] {
+  return [positions.getX(index), positions.getY(index), positions.getZ(index)];
 }
 
 export async function stepPreviewFromBase64(contentBase64: string, color: string): Promise<StepPreview> {

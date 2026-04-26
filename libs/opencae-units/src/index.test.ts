@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { stlDimensionsFromBytes } from ".";
+import { meshVolumeM3FromTriangles, stlDimensionsFromBytes, stlVolumeM3FromBytes } from ".";
 
 function binaryStl(vertices: [number, number, number][]): Uint8Array {
   const triangleCount = vertices.length / 3;
@@ -53,5 +53,68 @@ endsolid part
       z: 50.8,
       units: "mm"
     });
+  });
+});
+
+describe("mesh volume", () => {
+  test("computes closed mesh volume in cubic meters from millimeter vertices", () => {
+    const size = 10;
+    const p = {
+      a: [0, 0, 0] as [number, number, number],
+      b: [size, 0, 0] as [number, number, number],
+      c: [size, size, 0] as [number, number, number],
+      d: [0, size, 0] as [number, number, number],
+      e: [0, 0, size] as [number, number, number],
+      f: [size, 0, size] as [number, number, number],
+      g: [size, size, size] as [number, number, number],
+      h: [0, size, size] as [number, number, number]
+    };
+    const triangles: Array<[[number, number, number], [number, number, number], [number, number, number]]> = [
+      [p.a, p.c, p.b], [p.a, p.d, p.c],
+      [p.e, p.f, p.g], [p.e, p.g, p.h],
+      [p.a, p.b, p.f], [p.a, p.f, p.e],
+      [p.d, p.h, p.g], [p.d, p.g, p.c],
+      [p.a, p.e, p.h], [p.a, p.h, p.d],
+      [p.b, p.c, p.g], [p.b, p.g, p.f]
+    ];
+
+    expect(meshVolumeM3FromTriangles(triangles)).toBeCloseTo(0.000001);
+  });
+
+  test("computes ASCII STL volume from triangles", () => {
+    const bytes = new TextEncoder().encode(`
+solid tetra
+facet normal 0 0 1
+outer loop
+vertex 0 0 0
+vertex 100 0 0
+vertex 0 100 0
+endloop
+endfacet
+facet normal 1 0 0
+outer loop
+vertex 0 0 0
+vertex 0 0 100
+vertex 100 0 0
+endloop
+endfacet
+facet normal 0 1 0
+outer loop
+vertex 0 0 0
+vertex 0 100 0
+vertex 0 0 100
+endloop
+endfacet
+facet normal 1 1 1
+outer loop
+vertex 100 0 0
+vertex 0 0 100
+vertex 0 100 0
+endloop
+endfacet
+endsolid tetra
+`);
+
+    expect(stlVolumeM3FromBytes(bytes)).toBeCloseTo(1 / 6000);
   });
 });

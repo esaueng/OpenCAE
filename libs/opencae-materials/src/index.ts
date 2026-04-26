@@ -1,5 +1,25 @@
 import type { Material } from "@opencae/schema";
 
+export type PayloadMaterialCategory =
+  | "metal"
+  | "plastic"
+  | "composite"
+  | "resin"
+  | "ceramic-glass"
+  | "semiconductor"
+  | "rubber"
+  | "wood"
+  | "concrete-stone"
+  | "liquid"
+  | "misc";
+
+export interface PayloadMaterial {
+  id: string;
+  name: string;
+  category: PayloadMaterialCategory;
+  density: number;
+}
+
 export const starterMaterials: Material[] = [
   { id: "mat-aluminum-6061", name: "Aluminum 6061", category: "metal", youngsModulus: 68900000000, poissonRatio: 0.33, density: 2700, yieldStrength: 276000000 },
   { id: "mat-aluminum-7075", name: "Aluminum 7075", category: "metal", youngsModulus: 71700000000, poissonRatio: 0.33, density: 2810, yieldStrength: 503000000 },
@@ -23,6 +43,81 @@ export const starterMaterials: Material[] = [
   { id: "mat-sla-standard-resin", name: "Standard Resin", category: "resin", youngsModulus: 2200000000, poissonRatio: 0.38, density: 1120, yieldStrength: 42000000, printProfile: { process: "SLA", defaultInfillDensity: 100, defaultWallCount: 1, defaultLayerOrientation: "z", layerStrengthFactor: 0.82 } },
   { id: "mat-316l-am", name: "316L Stainless AM", category: "metal", youngsModulus: 180000000000, poissonRatio: 0.3, density: 7900, yieldStrength: 470000000, printProfile: { process: "Metal AM", defaultInfillDensity: 100, defaultWallCount: 1, defaultLayerOrientation: "z", layerStrengthFactor: 0.92 } }
 ];
+
+export const payloadMaterials: PayloadMaterial[] = [
+  { id: "payload-aluminum-6061", name: "Aluminum 6061", category: "metal", density: 2700 },
+  { id: "payload-aluminum-7075", name: "Aluminum 7075", category: "metal", density: 2810 },
+  { id: "payload-steel", name: "Carbon steel", category: "metal", density: 7850 },
+  { id: "payload-stainless-304", name: "Stainless steel 304", category: "metal", density: 8000 },
+  { id: "payload-stainless-316", name: "Stainless steel 316", category: "metal", density: 8000 },
+  { id: "payload-cast-iron", name: "Cast iron", category: "metal", density: 7200 },
+  { id: "payload-titanium-grade-5", name: "Titanium Grade 5", category: "metal", density: 4430 },
+  { id: "payload-copper", name: "Copper", category: "metal", density: 8960 },
+  { id: "payload-brass", name: "Brass", category: "metal", density: 8530 },
+  { id: "payload-bronze", name: "Bronze", category: "metal", density: 8800 },
+  { id: "payload-magnesium", name: "Magnesium alloy", category: "metal", density: 1740 },
+  { id: "payload-zinc", name: "Zinc", category: "metal", density: 7140 },
+  { id: "payload-lead", name: "Lead", category: "metal", density: 11340 },
+  { id: "payload-tungsten", name: "Tungsten", category: "metal", density: 19300 },
+  { id: "payload-abs", name: "ABS", category: "plastic", density: 1040 },
+  { id: "payload-pla", name: "PLA", category: "plastic", density: 1240 },
+  { id: "payload-petg", name: "PETG", category: "plastic", density: 1270 },
+  { id: "payload-asa", name: "ASA", category: "plastic", density: 1070 },
+  { id: "payload-nylon", name: "Nylon", category: "plastic", density: 1150 },
+  { id: "payload-polycarbonate", name: "Polycarbonate", category: "plastic", density: 1200 },
+  { id: "payload-acrylic", name: "Acrylic PMMA", category: "plastic", density: 1180 },
+  { id: "payload-hdpe", name: "HDPE", category: "plastic", density: 950 },
+  { id: "payload-ldpe", name: "LDPE", category: "plastic", density: 920 },
+  { id: "payload-pp", name: "Polypropylene", category: "plastic", density: 900 },
+  { id: "payload-pvc", name: "PVC", category: "plastic", density: 1380 },
+  { id: "payload-ptfe", name: "PTFE", category: "plastic", density: 2200 },
+  { id: "payload-peek", name: "PEEK", category: "plastic", density: 1300 },
+  { id: "payload-carbon-fiber", name: "Carbon fiber composite", category: "composite", density: 1550 },
+  { id: "payload-fiberglass", name: "Fiberglass composite", category: "composite", density: 1850 },
+  { id: "payload-g10", name: "G10/FR4 fiberglass", category: "composite", density: 1850 },
+  { id: "payload-nylon-cf", name: "Carbon fiber nylon", category: "composite", density: 1180 },
+  { id: "payload-standard-resin", name: "Standard photopolymer resin", category: "resin", density: 1120 },
+  { id: "payload-tough-resin", name: "Tough photopolymer resin", category: "resin", density: 1180 },
+  { id: "payload-ceramic-resin", name: "Ceramic-filled resin", category: "resin", density: 1700 },
+  { id: "payload-glass", name: "Soda-lime glass", category: "ceramic-glass", density: 2500 },
+  { id: "payload-borosilicate", name: "Borosilicate glass", category: "ceramic-glass", density: 2230 },
+  { id: "payload-alumina", name: "Alumina ceramic", category: "ceramic-glass", density: 3900 },
+  { id: "payload-zirconia", name: "Zirconia ceramic", category: "ceramic-glass", density: 6000 },
+  { id: "payload-porcelain", name: "Porcelain", category: "ceramic-glass", density: 2400 },
+  { id: "payload-silicon", name: "Silicon", category: "semiconductor", density: 2330 },
+  { id: "payload-silicon-carbide", name: "Silicon carbide", category: "semiconductor", density: 3210 },
+  { id: "payload-gallium-arsenide", name: "Gallium arsenide", category: "semiconductor", density: 5320 },
+  { id: "payload-rubber", name: "Natural rubber", category: "rubber", density: 930 },
+  { id: "payload-neoprene", name: "Neoprene", category: "rubber", density: 1230 },
+  { id: "payload-silicone-rubber", name: "Silicone rubber", category: "rubber", density: 1130 },
+  { id: "payload-tpu", name: "TPU", category: "rubber", density: 1200 },
+  { id: "payload-oak", name: "Oak", category: "wood", density: 750 },
+  { id: "payload-maple", name: "Maple", category: "wood", density: 700 },
+  { id: "payload-pine", name: "Pine", category: "wood", density: 500 },
+  { id: "payload-birch-plywood", name: "Birch plywood", category: "wood", density: 680 },
+  { id: "payload-mdf", name: "MDF", category: "wood", density: 750 },
+  { id: "payload-concrete", name: "Concrete", category: "concrete-stone", density: 2400 },
+  { id: "payload-granite", name: "Granite", category: "concrete-stone", density: 2700 },
+  { id: "payload-marble", name: "Marble", category: "concrete-stone", density: 2650 },
+  { id: "payload-brick", name: "Brick", category: "concrete-stone", density: 1900 },
+  { id: "payload-water", name: "Water", category: "liquid", density: 1000 },
+  { id: "payload-oil", name: "Mineral oil", category: "liquid", density: 850 },
+  { id: "payload-gasoline", name: "Gasoline", category: "liquid", density: 740 },
+  { id: "payload-ethanol", name: "Ethanol", category: "liquid", density: 789 },
+  { id: "payload-paper", name: "Paper/cardboard", category: "misc", density: 700 },
+  { id: "payload-ice", name: "Ice", category: "misc", density: 917 },
+  { id: "payload-foam-eps", name: "EPS foam", category: "misc", density: 30 }
+];
+
+export function payloadMaterialForId(materialId: string): PayloadMaterial {
+  return payloadMaterials.find((material) => material.id === materialId) ?? payloadMaterials[0]!;
+}
+
+export function massKgForPayloadMaterial(materialId: string, volumeM3: number): number {
+  const volume = Number(volumeM3);
+  if (!Number.isFinite(volume) || volume <= 0) return 0;
+  return payloadMaterialForId(materialId).density * volume;
+}
 
 export interface PrintMaterialParameters {
   printed?: boolean;
