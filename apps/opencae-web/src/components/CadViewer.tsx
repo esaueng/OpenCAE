@@ -74,6 +74,7 @@ const PLATE_DEPTH = 0.32;
 const WORLD_UP = new THREE.Vector3(0, 0, 1);
 const ISO_CAMERA_DIRECTION = new THREE.Vector3(1, -1, 1).normalize();
 const ISO_CAMERA_UP = WORLD_UP.clone().projectOnPlane(ISO_CAMERA_DIRECTION).normalize();
+const RESULT_PAYLOAD_MATERIAL_COLOR = "#8f9aa5";
 const BRACKET_HOLES = [
   { id: "upright-hole", center: [-1.2, 1.48] as [number, number], radius: 0.17, supported: false },
   { id: "base-hole-left", center: [0.24, 0] as [number, number], radius: 0.13, supported: true },
@@ -1211,7 +1212,13 @@ export function colorizeResultObject(
   object.traverse((child) => {
     if (!(child instanceof THREE.Mesh) || !(child.geometry instanceof THREE.BufferGeometry)) return;
     if (excludedPayloadObjectIds.has(resultObjectIdFor(child))) {
-      child.visible = false;
+      child.visible = true;
+      child.material = new THREE.MeshStandardMaterial({
+        color: RESULT_PAYLOAD_MATERIAL_COLOR,
+        metalness: 0.14,
+        roughness: 0.58,
+        side: THREE.DoubleSide
+      });
       return;
     }
     child.visible = true;
