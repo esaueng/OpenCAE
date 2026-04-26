@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import type { DisplayFace, Load, NamedSelection, Study } from "@opencae/schema";
-import { createDraftLoadMarker, createViewerLoadMarkers, directionLabelForLoad, directionVectorForLabel, loadMarkerFromLoad, payloadObjectForLoad, unitsForLoadType } from "./loadPreview";
+import { createViewerLoadMarkers, directionLabelForLoad, directionVectorForLabel, loadMarkerFromLoad, payloadObjectForLoad, unitsForLoadType } from "./loadPreview";
 
 const face: DisplayFace = {
   id: "face-side",
@@ -33,28 +33,8 @@ describe("load preview helpers", () => {
     expect(directionVectorForLabel("Normal", face)).toEqual([0, 0, 1]);
   });
 
-  test("creates a draft marker for the currently selected face", () => {
-    expect(createDraftLoadMarker({ selectedFace: face, type: "pressure", value: 125, directionLabel: "Normal", stackIndex: 2 })).toEqual({
-      id: "draft-load-preview",
-      faceId: "face-side",
-      point: undefined,
-      type: "pressure",
-      value: 125,
-      units: "kPa",
-      direction: [0, 0, 1],
-      directionLabel: "Normal",
-      stackIndex: 2,
-      preview: true
-    });
-  });
-
-  test("uses a picked face point for draft and saved load markers", () => {
+  test("uses a picked face point for saved load markers", () => {
     const point: [number, number, number] = [1.2, 2.1, 3.05];
-    expect(createDraftLoadMarker({ selectedFace: face, type: "force", value: 500, directionLabel: "-Z", applicationPoint: point, stackIndex: 0 })).toMatchObject({
-      faceId: "face-side",
-      point
-    });
-
     const load: Load = {
       id: "load-point",
       type: "force",
@@ -85,12 +65,28 @@ describe("load preview helpers", () => {
 
   test("treats gravity loads as payload mass inputs", () => {
     expect(unitsForLoadType("gravity")).toBe("kg");
-    expect(createDraftLoadMarker({ selectedFace: face, type: "gravity", value: 10, directionLabel: "-Z", stackIndex: 0 })).toMatchObject({
+    const load: Load = {
+      id: "load-gravity",
+      type: "gravity",
+      selectionRef: "selection-side",
+      parameters: { value: 10, units: "kg", direction: [0, 0, -1] },
+      status: "complete"
+    };
+
+    expect(loadMarkerFromLoad(load, study, 0)).toMatchObject({
       type: "gravity",
       value: 10,
       units: "kg",
       direction: [0, 0, -1]
     });
+  });
+
+  test("does not create an unsaved marker for the selected load face", () => {
+    const markers = createViewerLoadMarkers({
+      study
+    });
+
+    expect(markers).toEqual([]);
   });
 
   test("reads saved load direction and label for existing markers", () => {
@@ -129,7 +125,7 @@ describe("load preview helpers", () => {
     expect(directionLabelForLoad(load)).toBe("-Z");
   });
 
-  test("omits the draft marker while an existing load is being edited", () => {
+  test("returns saved load markers without adding draft markers", () => {
     const savedLoad: Load = {
       id: "load-1",
       type: "force",
@@ -138,10 +134,7 @@ describe("load preview helpers", () => {
       status: "complete"
     };
     const markers = createViewerLoadMarkers({
-      study: { ...study, loads: [savedLoad] } as unknown as Study,
-      selectedFace: face,
-      draftLoad: { type: "force", value: 500, directionLabel: "-Z" },
-      includeDraftPreview: false
+      study: { ...study, loads: [savedLoad] } as unknown as Study
     });
 
     expect(markers).toHaveLength(1);

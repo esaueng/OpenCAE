@@ -9,7 +9,8 @@ import * as THREE from "three";
 import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
 import type { StepId } from "./StepBar";
 import { faceForModelHit, type SampleModelKind } from "../modelSelection";
-import { modelRotationRadians, type RotationAxis } from "../modelOrientation";
+import { baseModelRotationRadians, modelRotationRadians, modelToViewerMatrix, viewerNormalToModelSpace, viewerPointToModelSpace, type RotationAxis } from "../modelOrientation";
+import { dimensionValuesForDisplayModel } from "../modelDimensions";
 import { formatResultValue, resultProbeSamplesForFaces, resultSamplesForFaces, type FaceResultSample, type ResultProbeTone } from "../resultFields";
 import { stepPreviewFromBase64 } from "../stepPreview";
 import { normalizedStlGeometryFromBuffer } from "../stlPreview";
@@ -29,7 +30,6 @@ export interface ViewerLoadMarker {
   direction: [number, number, number];
   directionLabel: string;
   stackIndex: number;
-  preview?: boolean;
 }
 
 export interface ViewerSupportMarker {
@@ -70,7 +70,6 @@ const PLATE_DEPTH = 0.32;
 const WORLD_UP = new THREE.Vector3(0, 0, 1);
 const ISO_CAMERA_DIRECTION = new THREE.Vector3(1, -1, 1).normalize();
 const ISO_CAMERA_UP = WORLD_UP.clone().projectOnPlane(ISO_CAMERA_DIRECTION).normalize();
-const MODEL_TO_Z_UP_ROTATION: [number, number, number] = [Math.PI / 2, 0, 0];
 const BRACKET_HOLES = [
   { id: "upright-hole", center: [-1.2, 1.48] as [number, number], radius: 0.17, supported: false },
   { id: "base-hole-left", center: [0.24, 0] as [number, number], radius: 0.13, supported: true },
@@ -94,6 +93,7 @@ export function CadViewer(props: CadViewerProps) {
   const gridSectionColor = isLightTheme ? "#c2ccd8" : "#3a4654";
   const gridFloorZ = useMemo(() => gridFloorZForDisplayModel(props.displayModel), [props.displayModel]);
   const modelRotation = useMemo(() => modelRotationRadians(props.displayModel), [props.displayModel]);
+  const baseModelRotation = useMemo(() => baseModelRotationRadians(props.displayModel), [props.displayModel]);
   useEffect(() => {
     setUploadedPreviewBounds(null);
   }, [props.displayModel.nativeCad?.contentBase64, props.displayModel.visualMesh?.contentBase64]);
@@ -106,7 +106,7 @@ export function CadViewer(props: CadViewerProps) {
         <Grid args={[8, 8]} cellColor={gridCellColor} sectionColor={gridSectionColor} fadeDistance={12} fadeStrength={1.2} position={[0, 0, gridFloorZ]} rotation={[Math.PI / 2, 0, 0]} />
         <Bounds fit clip observe margin={1.65}>
           <group rotation={modelRotation}>
-            <group rotation={MODEL_TO_Z_UP_ROTATION}>
+            <group rotation={baseModelRotation}>
               <BracketModel {...props} viewMode={effectiveViewMode} onUploadedPreviewBounds={setUploadedPreviewBounds} />
               {props.showDimensions && <ModelDimensionOverlay displayModel={props.displayModel} uploadedPreviewBounds={uploadedPreviewBounds} />}
             </group>
@@ -313,8 +313,8 @@ function BracketModel({
 
   function hitFromEvent(event: ThreeEvent<PointerEvent> | ThreeEvent<MouseEvent>): ModelSelectionHit | null {
     if (!placementMode || isResultView) return null;
-    if (modelKind === "uploaded") return uploadedFaceHitFromEvent(event);
-    const modelPoint = worldPointToModelSpace(event.point);
+    if (modelKind === "uploaded") return uploadedFaceHitFromEvent(event, displayModel);
+    const modelPoint = viewerPointToModelSpace(event.point, displayModel);
     const face = faceForModelHit(modelKind, displayModel.faces, modelPoint);
     if (!face) return null;
     return {
@@ -349,7 +349,7 @@ function BracketModel({
           showDeformed={showDeformed}
           stressExaggeration={stressExaggeration}
           resultFields={resultFields}
-          loadMarkers={loadMarkers.filter((marker) => !marker.preview)}
+          loadMarkers={loadMarkers}
           onMeasureDisplayModelDimensions={onMeasureDisplayModelDimensions}
           onUploadedPreviewBounds={onUploadedPreviewBounds}
         />
@@ -390,11 +390,7 @@ function modelKindForDisplayModel(displayModel: DisplayModel): SampleModelKind {
 function gridFloorZForDisplayModel(displayModel: DisplayModel) {
   const bounds = dimensionBoundsForDisplayModel(displayModel);
   if (!bounds) return -0.27;
-  const rotation = modelRotationRadians(displayModel);
-  const transform = new THREE.Matrix4()
-    .makeRotationFromEuler(new THREE.Euler(...rotation))
-    .multiply(new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(...MODEL_TO_Z_UP_ROTATION)));
-  const transformedBounds = transformedBox(bounds, transform);
+  const transformedBounds = transformedBox(bounds, modelToViewerMatrix(displayModel));
   return transformedBounds.min.z - 0.12;
 }
 
@@ -453,10 +449,11 @@ function markerDirectionInModelSpace(marker: ViewerLoadMarker) {
 
 function ModelDimensionOverlay({ displayModel, uploadedPreviewBounds }: { displayModel: DisplayModel; uploadedPreviewBounds: THREE.Box3 | null }) {
   const dimensions = displayModel.dimensions;
+  const dimensionValues = dimensionValuesForDisplayModel(displayModel);
   const bounds = modelKindForDisplayModel(displayModel) === "uploaded" && uploadedPreviewBounds
     ? uploadedPreviewBounds
     : dimensionBoundsForDisplayModel(displayModel);
-  if (!dimensions || !bounds) return null;
+  if (!dimensions || !dimensionValues || !bounds) return null;
 
   const min = bounds.min;
   const max = bounds.max;
@@ -472,17 +469,17 @@ function ModelDimensionOverlay({ displayModel, uploadedPreviewBounds }: { displa
       <DimensionLine
         start={[min.x, xLineY, xLineZ]}
         end={[max.x, xLineY, xLineZ]}
-        label={`X ${formatDimensionLabel(dimensions.x, dimensions.units)}`}
+        label={`X ${formatDimensionLabel(dimensionValues.x, dimensionValues.units)}`}
       />
       <DimensionLine
         start={[axisLineX, xLineY, min.z]}
         end={[axisLineX, xLineY, max.z]}
-        label={`Y ${formatDimensionLabel(dimensions.z, dimensions.units)}`}
+        label={`Y ${formatDimensionLabel(dimensionValues.y, dimensionValues.units)}`}
       />
       <DimensionLine
         start={[axisLineX, min.y, max.z + zOffset]}
         end={[axisLineX, max.y, max.z + zOffset]}
-        label={`Z ${formatDimensionLabel(dimensions.y, dimensions.units)}`}
+        label={`Z ${formatDimensionLabel(dimensionValues.z, dimensionValues.units)}`}
       />
     </group>
   );
@@ -509,14 +506,14 @@ function DimensionEndpoint({ position }: { position: [number, number, number] })
   );
 }
 
-function uploadedFaceHitFromEvent(event: ThreeEvent<PointerEvent> | ThreeEvent<MouseEvent>): ModelSelectionHit | null {
+function uploadedFaceHitFromEvent(event: ThreeEvent<PointerEvent> | ThreeEvent<MouseEvent>, displayModel: DisplayModel): ModelSelectionHit | null {
   const worldNormal = event.face?.normal.clone().transformDirection(event.object.matrixWorld).normalize() ?? new THREE.Vector3(0, 0, 1);
-  const normal = worldNormalToModelSpace(worldNormal);
-  const point = worldPointToModelSpace(event.point).toArray() as [number, number, number];
+  const normal = viewerNormalToModelSpace(worldNormal, displayModel);
+  const point = viewerPointToModelSpace(event.point, displayModel).toArray() as [number, number, number];
   return {
     face: {
       id: uploadedFaceId(point, normal),
-      label: labelForNormal(worldNormal),
+      label: labelForNormal(normal),
       color: "#4da3ff",
       center: point,
       normal: normal.toArray() as [number, number, number],
@@ -543,7 +540,7 @@ function payloadObjectFromEvent(event: ThreeEvent<PointerEvent> | ThreeEvent<Mou
   return {
     id: String(target.userData.opencaeObjectId ?? target.uuid),
     label: String(target.userData.opencaeObjectLabel ?? (target.name || displayModel.name)),
-    center: worldPointToModelSpace(center).toArray() as [number, number, number]
+    center: viewerPointToModelSpace(center, displayModel).toArray() as [number, number, number]
   };
 }
 
@@ -1682,8 +1679,8 @@ function ResultLegend({ resultMode, resultFields, unitSystem }: { resultMode: Re
 function LoadGlyph({ marker, face, active }: { marker: ViewerLoadMarker; face: DisplayFace; active: boolean }) {
   const markerDirection = markerDirectionInModelSpace(marker);
   const isNormalDirection = marker.directionLabel === "Normal";
-  const markerColor = marker.preview ? "#7cc7ff" : active ? "#4da3ff" : "#f59e0b";
-  const labelTone = active || marker.preview ? "active-load" : "load";
+  const markerColor = active ? "#4da3ff" : "#f59e0b";
+  const labelTone = active ? "active-load" : "load";
 
   const normal = new THREE.Vector3(...face.normal).normalize();
   const center = new THREE.Vector3(...(marker.point ?? face.center));
@@ -1708,9 +1705,8 @@ function LoadGlyph({ marker, face, active }: { marker: ViewerLoadMarker; face: D
 }
 
 function loadLabel(marker: ViewerLoadMarker) {
-  const prefix = marker.preview ? "Prev" : `L${marker.stackIndex + 1}`;
   const kind = marker.type === "pressure" ? "P" : marker.type === "gravity" ? "G" : "F";
-  return `${prefix} ${kind} ${formatLoadMarkerValue(marker.value)} ${marker.units} ${marker.directionLabel}`;
+  return `L${marker.stackIndex + 1} ${kind} ${formatLoadMarkerValue(marker.value)} ${marker.units} ${marker.directionLabel}`;
 }
 
 function formatLoadMarkerValue(value: number) {
