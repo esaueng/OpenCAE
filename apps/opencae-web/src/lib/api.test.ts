@@ -133,6 +133,36 @@ describe("api", () => {
     expect(response.message).toBe("Bracket Demo loaded.");
   });
 
+  test("loads the plate sample locally with a payload mass load", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("missing", { status: 404 })));
+
+    const response = await loadSampleProject("plate");
+    const load = response.project.studies[0]?.loads[0];
+
+    expect(response.project.name).toBe("Plate Demo");
+    expect(load).toMatchObject({
+      type: "gravity",
+      selectionRef: "selection-load-face",
+      parameters: {
+        value: 0.15552,
+        units: "kg",
+        direction: [0, 0, -1],
+        applicationPoint: [1.42, 0, 0.17],
+        payloadMaterialId: "payload-aluminum-6061",
+        payloadVolumeM3: 0.0000576,
+        payloadMassMode: "material",
+        payloadObject: {
+          id: "payload-display-plate",
+          label: "plate demo body",
+          center: [1.42, 0, 0.17],
+          volumeM3: 0.0000576,
+          volumeSource: "bounds-fallback",
+          volumeStatus: "estimated"
+        }
+      }
+    });
+  });
+
   test("creates a blank project locally when the API is unavailable", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new TypeError("Failed to fetch"))));
 

@@ -70,6 +70,38 @@ describe("projectFactory", () => {
     expect(cantilever.faces.find((face) => face.id === "face-base-left")?.normal).toEqual([-1, 0, 0]);
   });
 
+  test("configures the plate sample with a payload mass load", () => {
+    const project = createSampleProject("plate", {
+      projectId: "project-plate",
+      studyId: "study-plate",
+      now: "2026-04-24T12:00:00.000Z",
+      includeSeedRun: false
+    });
+    const load = project.studies[0]?.loads[0];
+
+    expect(load).toMatchObject({
+      type: "gravity",
+      selectionRef: "selection-load-face",
+      parameters: {
+        value: 0.15552,
+        units: "kg",
+        direction: [0, 0, -1],
+        applicationPoint: [1.42, 0, 0.17],
+        payloadMaterialId: "payload-aluminum-6061",
+        payloadVolumeM3: 0.0000576,
+        payloadMassMode: "material",
+        payloadObject: {
+          id: "payload-display-plate",
+          label: "plate demo body",
+          center: [1.42, 0, 0.17],
+          volumeM3: 0.0000576,
+          volumeSource: "bounds-fallback",
+          volumeStatus: "estimated"
+        }
+      }
+    });
+  });
+
   test("adds selectable named selections for bracket display faces", () => {
     const project = createSampleProject("bracket", {
       projectId: "project-bracket",
