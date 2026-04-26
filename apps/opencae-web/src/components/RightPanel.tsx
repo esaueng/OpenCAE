@@ -1,6 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { AlertTriangle, Anchor, ArrowDown, Check, CircleHelp, Download, Eye, FileText, Grid3X3, Maximize2, Play, Plus, RotateCcw, RotateCw, Ruler, ShieldCheck, Upload, X } from "lucide-react";
+import { AlertTriangle, Anchor, ArrowDown, Check, CircleHelp, Download, Eye, FileText, Grid3X3, Maximize2, Play, Plus, RotateCcw, Ruler, ShieldCheck, Upload, X } from "lucide-react";
 import { defaultPrintParametersFor, effectiveMaterialProperties, normalizePrintParameters, starterMaterials, type PrintMaterialParameters } from "@opencae/materials";
 import { assessResultFailure, estimateAllowableLoadForSafetyFactor } from "@opencae/schema";
 import type { Constraint, DisplayFace, DisplayModel, Load, Project, ResultSummary, Study } from "@opencae/schema";
@@ -177,10 +177,10 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sa
       <HelpNote helpId="dimensions" />
       {showDimensions && <ModelDimensions displayModel={displayModel} />}
       <SectionTitle helpId="orientation">Orientation</SectionTitle>
-      <div className="orientation-controls" role="group" aria-label="Model rotation">
+      <div className="orientation-controls" role="group" aria-label="Axis view">
         {(["x", "y", "z"] as const).map((axis) => (
-          <button key={axis} className="secondary" type="button" onClick={() => onRotateModel(axis)} title={`Rotate model around ${axis.toUpperCase()} axis`}>
-            <RotateCw size={15} />
+          <button key={axis} className="secondary" type="button" onClick={() => onRotateModel(axis)} title={`View perpendicular to ${axis.toUpperCase()} axis`}>
+            <Eye size={15} />
             {axis.toUpperCase()}
           </button>
         ))}

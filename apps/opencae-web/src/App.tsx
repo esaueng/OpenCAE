@@ -15,7 +15,7 @@ import {
   type LoadDirectionLabel,
   type LoadType
 } from "./loadPreview";
-import { resetDisplayModelOrientation, rotateDisplayModel, type RotationAxis } from "./modelOrientation";
+import { resetDisplayModelOrientation, type RotationAxis } from "./modelOrientation";
 import { buildLocalProjectFile, suggestedProjectFilename, type LocalResultBundle } from "./projectFile";
 import { buildAutosavedWorkspace, readAutosavedWorkspace, writeAutosavedWorkspace, type ThemeMode } from "./appPersistence";
 import { shouldShowStartScreen } from "./appShellState";
@@ -62,6 +62,8 @@ export function App() {
   const [showDimensions, setShowDimensions] = useState(restoredUi?.showDimensions ?? false);
   const [stressExaggeration, setStressExaggeration] = useState(restoredUi?.stressExaggeration ?? 1.8);
   const [fitSignal, setFitSignal] = useState(0);
+  const [viewAxis, setViewAxis] = useState<RotationAxis | null>(null);
+  const [viewAxisSignal, setViewAxisSignal] = useState(0);
   const [status, setStatus] = useState(restoredUi?.status ?? (restoredProjectFile ? "Workspace restored after reload." : "Ready"));
   const [logs, setLogs] = useState<string[]>(restoredUi?.logs.length ? restoredUi.logs : restoredProjectFile ? ["Workspace restored after reload.", "Ready | Local Mode"] : ["Ready | Local Mode"]);
   const [runProgress, setRunProgress] = useState(restoredUi?.runProgress ?? (restoredResults?.fields.length ? 100 : 0));
@@ -382,15 +384,21 @@ export function App() {
   }
 
   function handleRotateModel(axis: RotationAxis) {
-    setDisplayModel((current) => (current ? rotateDisplayModel(current, axis) : current));
-    setFitSignal((value) => value + 1);
-    pushMessage(`Model rotated around ${axis.toUpperCase()} axis.`);
+    setViewAxis(axis);
+    setViewAxisSignal((value) => value + 1);
+    pushMessage(`View aligned perpendicular to ${axis.toUpperCase()} axis.`);
   }
 
   function handleResetModelOrientation() {
     setDisplayModel((current) => (current ? resetDisplayModelOrientation(current) : current));
+    setViewAxis(null);
     setFitSignal((value) => value + 1);
     pushMessage("Model orientation reset.");
+  }
+
+  function handleFitDefaultView() {
+    setViewAxis(null);
+    setFitSignal((value) => value + 1);
   }
 
   function handleUnitSystemChange(unitSystem: UnitSystem) {
@@ -531,9 +539,11 @@ export function App() {
           unitSystem={displayUnitSystem}
           themeMode={themeMode}
           fitSignal={fitSignal}
+          viewAxis={viewAxis}
+          viewAxisSignal={viewAxisSignal}
           loadMarkers={loadMarkers}
           supportMarkers={supportMarkers}
-          onResetView={() => setFitSignal((value) => value + 1)}
+          onResetView={handleFitDefaultView}
         />
         <RightPanel
           activeStep={activeStep}
@@ -552,7 +562,7 @@ export function App() {
           draftLoadType={draftLoadType}
           draftLoadValue={draftLoadValue}
           draftLoadDirection={draftLoadDirection}
-          onFitView={() => setFitSignal((value) => value + 1)}
+          onFitView={handleFitDefaultView}
           onRotateModel={handleRotateModel}
           onResetModelOrientation={handleResetModelOrientation}
           onLoadSample={handleLoadSample}
