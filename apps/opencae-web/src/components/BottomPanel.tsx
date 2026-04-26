@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type MouseEvent } from "react";
 import { REQUIRED_SETTING_HELP_IDS, SETTING_HELP, type SettingHelpVisual } from "../settingHelp";
 
 interface BottomPanelProps {
@@ -11,13 +11,17 @@ interface BottomPanelProps {
 }
 
 export function BottomPanel({ status, logs, projectName, studyName, meshStatus, solverStatus }: BottomPanelProps) {
-  const [expanded, setExpanded] = useState(false);
-  const [tab, setTab] = useState<"tips" | "logs">("tips");
+  const [tab, setTab] = useState<"tips" | "logs" | null>(null);
+  const expanded = tab !== null;
   const healthy = solverStatus === "Running" ? "running" : meshStatus === "Ready" ? "ready" : "warning";
 
-  function selectTab(nextTab: typeof tab) {
+  function selectTab(nextTab: NonNullable<typeof tab>, event: MouseEvent<HTMLButtonElement>) {
+    if (tab === nextTab) {
+      setTab(null);
+      event.currentTarget.blur();
+      return;
+    }
     setTab(nextTab);
-    setExpanded(nextTab === "logs" || nextTab === "tips" ? (value) => (tab === nextTab ? !value : true) : false);
   }
 
   return (
@@ -57,7 +61,7 @@ export function BottomPanel({ status, logs, projectName, studyName, meshStatus, 
       <div className="status-strip">
         <div className="status-tabs">
           {(["tips", "logs"] as const).map((item) => (
-            <button key={item} className={tab === item ? "active" : ""} onClick={() => selectTab(item)}>
+            <button key={item} className={tab === item ? "active" : ""} onClick={(event) => selectTab(item, event)}>
               {item[0]?.toUpperCase()}{item.slice(1)}
               {item === "logs" && <span className="count-pill">{logs.length}</span>}
             </button>
