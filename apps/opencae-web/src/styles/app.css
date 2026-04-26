@@ -825,7 +825,7 @@ svg {
   display: grid;
   grid-template-columns: 58px minmax(0, 1fr);
   gap: 10px;
-  width: min(340px, 76vw);
+  width: min(440px, calc(100vw - 24px));
   padding: 11px;
   color: var(--color-text);
   background: rgba(11, 17, 24, 0.94);
@@ -851,12 +851,18 @@ svg {
   display: block;
 }
 
+.field-tooltip .help-visual {
+  grid-row: 1 / span 2;
+}
+
 .field-tooltip strong {
+  grid-column: 2;
   margin-bottom: 3px;
   color: var(--color-text);
 }
 
 .field-tooltip > span:last-child {
+  grid-column: 2;
   color: var(--color-text-muted);
 }
 
