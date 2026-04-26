@@ -79,6 +79,7 @@ export function loadMarkerFromLoad(load: Load, study: Study, stackIndex: number)
     units: String(load.parameters.units ?? unitsForLoadType(load.type)),
     direction,
     directionLabel: directionLabelForVector(direction),
+    labelIndex: stackIndex,
     stackIndex
   };
 }
@@ -86,17 +87,18 @@ export function loadMarkerFromLoad(load: Load, study: Study, stackIndex: number)
 export function createViewerLoadMarkers({ study }: { study: Study | null }): ViewerLoadMarker[] {
   if (!study) return [];
   const faceCounts = new Map<string, number>();
+  let labelIndex = 0;
   return study.loads.flatMap((load) => {
     const marker = loadMarkerFromLoad(load, study, 0);
     if (!marker) return [];
     const stackIndex = faceCounts.get(marker.faceId) ?? 0;
     faceCounts.set(marker.faceId, stackIndex + 1);
-    return [{ ...marker, stackIndex }];
+    return [{ ...marker, labelIndex: labelIndex++, stackIndex }];
   });
 }
 
 export function loadMarkerOrdinalLabel(marker: ViewerLoadMarker) {
-  return `L${marker.stackIndex + 1}`;
+  return `L${marker.labelIndex + 1}`;
 }
 
 export function loadMarkerDisplayLabel(marker: ViewerLoadMarker) {

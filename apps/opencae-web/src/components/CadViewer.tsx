@@ -29,6 +29,7 @@ export interface ViewerLoadMarker {
   units: string;
   direction: [number, number, number];
   directionLabel: string;
+  labelIndex: number;
   stackIndex: number;
 }
 
