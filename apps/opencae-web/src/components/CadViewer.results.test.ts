@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { describe, expect, test } from "vitest";
-import { VIEWER_GIZMO_ALIGNMENT, axisLabelToViewAxis, cameraViewForAxis, colorizeResultObject, payloadHighlightObjectId, rotatedCameraOrbit, shouldShowModelHitLabel } from "./CadViewer";
+import { VIEWER_GIZMO_ALIGNMENT, axisLabelToViewAxis, cameraViewForAxis, colorizeResultObject, payloadHighlightObjectId, printLayerVisualizationForBounds, rotatedCameraOrbit, shouldShowModelHitLabel } from "./CadViewer";
 import type { FaceResultSample } from "../resultFields";
 
 const samples: FaceResultSample[] = [
@@ -53,6 +53,20 @@ describe("CadViewer result coloring", () => {
     expect(payloadHighlightObjectId(true, null)).toBeUndefined();
     expect(payloadHighlightObjectId(true, { id: "payload-part", label: "Payload part", center: [0, 0, 0] })).toBe("payload-part");
     expect(payloadHighlightObjectId(false, { id: "payload-part", label: "Payload part", center: [0, 0, 0] })).toBeUndefined();
+  });
+
+  test("builds layer visualization planes perpendicular to the selected print direction", () => {
+    const bounds = new THREE.Box3(new THREE.Vector3(-2, -1, -0.5), new THREE.Vector3(2, 1, 0.5));
+
+    const zBuild = printLayerVisualizationForBounds(bounds, "z");
+    const xBuild = printLayerVisualizationForBounds(bounds, "x");
+
+    expect(zBuild?.axis.toArray()).toEqual([0, 0, 1]);
+    expect(zBuild?.label).toBe("Z build");
+    expect(zBuild?.planes).toHaveLength(7);
+    expect(zBuild?.planes[0]?.every((point) => point[2] === -0.5)).toBe(true);
+    expect(xBuild?.axis.toArray()).toEqual([1, 0, 0]);
+    expect(xBuild?.planes[0]?.every((point) => point[0] === -2)).toBe(true);
   });
 
   test("applies vertex result colors to imported native CAD preview meshes", () => {

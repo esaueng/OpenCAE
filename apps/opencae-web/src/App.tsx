@@ -2,11 +2,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Constraint, DisplayFace, DisplayModel, Load, NamedSelection, Project, ResultField, ResultSummary, RunEvent, Study } from "@opencae/schema";
 import { RotateCcw, Save } from "lucide-react";
 import { addLoad, addSupport, assignMaterial, createProject, generateMesh, getResults, importLocalProject, loadSampleProject, renameProject, runSimulation, subscribeToRun, updateStudy as saveStudyPatch, uploadModel, type SampleModelId } from "./lib/api";
+import { normalizePrintParameters, starterMaterials } from "@opencae/materials";
 import { BottomPanel } from "./components/BottomPanel";
 import { RightPanel } from "./components/RightPanel";
 import { StartScreen } from "./components/StartScreen";
 import { StepBar, type StepId } from "./components/StepBar";
-import { CadViewer, type ResultMode, type ViewMode } from "./components/CadViewer";
+import { CadViewer, type PrintLayerOrientation, type ResultMode, type ViewMode } from "./components/CadViewer";
 import type { ViewerLoadMarker, ViewerSupportMarker } from "./components/CadViewer";
 import {
   createViewerLoadMarkers,
@@ -83,6 +84,14 @@ export function App() {
   const [sampleModel, setSampleModel] = useState<SampleModelId>(restoredUi?.sampleModel ?? "bracket");
 
   const study = project?.studies[0] ?? null;
+  const printLayerOrientation = useMemo<PrintLayerOrientation | null>(() => {
+    const assignment = study?.materialAssignments[0];
+    if (!assignment) return null;
+    const material = starterMaterials.find((candidate) => candidate.id === assignment.materialId);
+    if (!material?.printProfile) return null;
+    const parameters = normalizePrintParameters(material, assignment.parameters ?? {});
+    return parameters.printed ? parameters.layerOrientation ?? "z" : null;
+  }, [study?.materialAssignments]);
   const reportRunId = useMemo(() => {
     if (completedRunId) return completedRunId;
     if (runProgress >= 100 && activeRunId) return activeRunId;
@@ -588,6 +597,7 @@ export function App() {
           viewAxisSignal={viewAxisSignal}
           loadMarkers={loadMarkers}
           supportMarkers={supportMarkers}
+          printLayerOrientation={printLayerOrientation}
           onResetView={handleFitDefaultView}
           onMeasureDisplayModelDimensions={handleMeasureDisplayModelDimensions}
         />

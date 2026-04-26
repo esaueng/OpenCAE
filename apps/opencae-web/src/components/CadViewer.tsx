@@ -23,6 +23,7 @@ import { layoutOutsideModelLabels, payloadMassLabelOffset, type LabelAnchor } fr
 export type ViewMode = "model" | "mesh" | "results";
 export type ResultMode = "stress" | "displacement" | "safety_factor";
 export type ThemeMode = "dark" | "light";
+export type PrintLayerOrientation = "x" | "y" | "z";
 export interface ViewerLoadMarker {
   id: string;
   faceId: string;
@@ -67,6 +68,7 @@ interface CadViewerProps {
   viewAxisSignal: number;
   loadMarkers: ViewerLoadMarker[];
   supportMarkers: ViewerSupportMarker[];
+  printLayerOrientation: PrintLayerOrientation | null;
   onResetView: () => void;
   onMeasureDisplayModelDimensions?: (dimensions: NonNullable<DisplayModel["dimensions"]>) => void;
 }
@@ -118,7 +120,7 @@ export function CadViewer(props: CadViewerProps) {
         <Bounds fit clip observe margin={1.65}>
           <group rotation={modelRotation}>
             <group rotation={baseModelRotation}>
-              <BracketModel {...props} viewMode={effectiveViewMode} onUploadedPreviewBounds={setUploadedPreviewBounds} />
+              <BracketModel {...props} viewMode={effectiveViewMode} uploadedPreviewBounds={uploadedPreviewBounds} onUploadedPreviewBounds={setUploadedPreviewBounds} />
               {props.showDimensions && <ModelDimensionOverlay displayModel={props.displayModel} uploadedPreviewBounds={uploadedPreviewBounds} />}
             </group>
           </group>
@@ -341,8 +343,10 @@ function BracketModel({
   loadMarkers,
   supportMarkers,
   onMeasureDisplayModelDimensions,
+  printLayerOrientation,
+  uploadedPreviewBounds,
   onUploadedPreviewBounds
-}: CadViewerProps & { onUploadedPreviewBounds: (bounds: THREE.Box3) => void }) {
+}: CadViewerProps & { uploadedPreviewBounds: THREE.Box3 | null; onUploadedPreviewBounds: (bounds: THREE.Box3) => void }) {
   const [hoveredHit, setHoveredHit] = useState<ModelSelectionHit | null>(null);
   const [selectedHit, setSelectedHit] = useState<ModelSelectionHit | null>(null);
   const modelKind = modelKindForDisplayModel(displayModel);
@@ -440,6 +444,12 @@ function BracketModel({
           activePayloadObjectId={activePayloadObjectId}
           onMeasureDisplayModelDimensions={onMeasureDisplayModelDimensions}
           onUploadedPreviewBounds={onUploadedPreviewBounds}
+        />
+      )}
+      {printLayerOrientation && !isResultView && (
+        <PrintLayerOverlay
+          bounds={modelKind === "uploaded" && uploadedPreviewBounds ? uploadedPreviewBounds : dimensionBoundsForDisplayModel(displayModel)}
+          orientation={printLayerOrientation}
         />
       )}
       <HoleRims kind={modelKind} />
@@ -609,6 +619,87 @@ function DimensionEndpoint({ position }: { position: [number, number, number] })
     <mesh position={position}>
       <sphereGeometry args={[0.035, 16, 16]} />
       <meshBasicMaterial color="#4da3ff" depthTest={false} toneMapped={false} />
+    </mesh>
+  );
+}
+
+interface PrintLayerVisualization {
+  axis: THREE.Vector3;
+  label: string;
+  planes: Array<Array<[number, number, number]>>;
+  arrowStart: [number, number, number];
+  arrowEnd: [number, number, number];
+  labelPosition: [number, number, number];
+}
+
+export function printLayerVisualizationForBounds(bounds: THREE.Box3 | null, orientation: PrintLayerOrientation): PrintLayerVisualization | null {
+  if (!bounds || bounds.isEmpty()) return null;
+  const axisIndex = orientation === "x" ? 0 : orientation === "y" ? 1 : 2;
+  const axis = new THREE.Vector3(axisIndex === 0 ? 1 : 0, axisIndex === 1 ? 1 : 0, axisIndex === 2 ? 1 : 0);
+  const min = bounds.min.toArray() as [number, number, number];
+  const max = bounds.max.toArray() as [number, number, number];
+  const size = bounds.getSize(new THREE.Vector3());
+  const span = Math.max(size.x, size.y, size.z, 0.001);
+  const layerCount = 7;
+  const planes = Array.from({ length: layerCount }, (_, index) => {
+    const t = index / (layerCount - 1);
+    const value = min[axisIndex] + (max[axisIndex] - min[axisIndex]) * t;
+    return layerPlanePoints(min, max, axisIndex, value);
+  });
+  const center = bounds.getCenter(new THREE.Vector3());
+  const offset = new THREE.Vector3(size.x, size.y, size.z).multiplyScalar(0.18);
+  const arrowStart = center.clone().add(new THREE.Vector3(offset.x, offset.y, offset.z)).add(axis.clone().multiplyScalar(-span * 0.18));
+  const arrowEnd = arrowStart.clone().add(axis.clone().multiplyScalar(span * 0.42));
+  return {
+    axis,
+    label: `${orientation.toUpperCase()} build`,
+    planes,
+    arrowStart: arrowStart.toArray() as [number, number, number],
+    arrowEnd: arrowEnd.toArray() as [number, number, number],
+    labelPosition: arrowEnd.clone().add(axis.clone().multiplyScalar(span * 0.08)).toArray() as [number, number, number]
+  };
+}
+
+function layerPlanePoints(min: [number, number, number], max: [number, number, number], axisIndex: number, value: number): Array<[number, number, number]> {
+  const first = (axisIndex + 1) % 3;
+  const second = (axisIndex + 2) % 3;
+  const corners = [
+    [min[first], min[second]],
+    [max[first], min[second]],
+    [max[first], max[second]],
+    [min[first], max[second]],
+    [min[first], min[second]]
+  ];
+  return corners.map(([firstValue, secondValue]) => {
+    const point = [0, 0, 0] as [number, number, number];
+    point[axisIndex] = value;
+    point[first] = firstValue ?? 0;
+    point[second] = secondValue ?? 0;
+    return point;
+  });
+}
+
+function PrintLayerOverlay({ bounds, orientation }: { bounds: THREE.Box3 | null; orientation: PrintLayerOrientation }) {
+  const visualization = useMemo(() => printLayerVisualizationForBounds(bounds, orientation), [bounds, orientation]);
+  if (!visualization) return null;
+  return (
+    <group renderOrder={18}>
+      {visualization.planes.map((plane, index) => (
+        <Line key={`${orientation}-layer-${index}`} points={plane} color="#63e6be" transparent opacity={0.34} lineWidth={1.15} />
+      ))}
+      <Line points={[visualization.arrowStart, visualization.arrowEnd]} color="#63e6be" transparent opacity={0.92} lineWidth={2.6} />
+      <LayerArrowHead position={visualization.arrowEnd} axis={visualization.axis} />
+      <SceneLabel label={visualization.label} position={visualization.labelPosition} tone="print" />
+    </group>
+  );
+}
+
+function LayerArrowHead({ position, axis }: { position: [number, number, number]; axis: THREE.Vector3 }) {
+  const quaternion = useMemo(() => new THREE.Quaternion().setFromUnitVectors(WORLD_UP, axis.clone().normalize()), [axis]);
+  return (
+    <mesh position={position} quaternion={quaternion}>
+      <coneGeometry args={[0.07, 0.18, 24]} />
+      <meshBasicMaterial color="#63e6be" depthTest={false} toneMapped={false} />
     </mesh>
   );
 }
@@ -1956,7 +2047,7 @@ function SceneLabel({
 }: {
   label: string;
   position: [number, number, number];
-  tone: "max" | "mid" | "min" | "load" | "active-load" | "payload-mass" | "dimension";
+  tone: "max" | "mid" | "min" | "load" | "active-load" | "payload-mass" | "dimension" | "print";
 }) {
   const labelWidth = Math.max(1.02, label.length * 0.098);
   const colors = sceneLabelColors(tone);
@@ -1982,11 +2073,12 @@ function SceneLabel({
   );
 }
 
-function sceneLabelColors(tone: "max" | "mid" | "min" | "load" | "active-load" | "payload-mass" | "dimension") {
+function sceneLabelColors(tone: "max" | "mid" | "min" | "load" | "active-load" | "payload-mass" | "dimension" | "print") {
   if (tone === "max") return { outline: "#1f0707", text: "#fee2e2" };
   if (tone === "mid") return { outline: "#1f1300", text: "#fef3c7" };
   if (tone === "min") return { outline: "#06142a", text: "#dbeafe" };
   if (tone === "dimension") return { outline: "#03101d", text: "#8cc8ff" };
+  if (tone === "print") return { outline: "#032018", text: "#a7f3d0" };
   if (tone === "active-load") return { outline: "#03101d", text: "#8cc8ff" };
   if (tone === "payload-mass") return { outline: "#032018", text: "#6ee7c8" };
   return { outline: "#1f1300", text: "#ffe6a3" };
