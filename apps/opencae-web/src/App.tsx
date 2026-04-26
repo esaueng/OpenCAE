@@ -23,7 +23,7 @@ import { buildAutosavedWorkspace, readAutosavedWorkspace, writeAutosavedWorkspac
 import { canNavigateToStep, shouldAutoAdvanceAfterMeshGeneration, shouldShowStartScreen } from "./appShellState";
 import { displayModelForUnits, loadValueForUnits, resultFieldForUnits, resultSummaryForUnits, type UnitSystem } from "./unitDisplay";
 import { supportDisplayLabel } from "./supportLabels";
-import { nextSelectedPayloadObject } from "./payloadSelection";
+import { nextSelectedPayloadObject, shouldClearPayloadSelectionOnViewerMiss } from "./payloadSelection";
 
 interface SaveFilePickerHandle {
   createWritable: () => Promise<{ write: (content: Blob) => Promise<void>; close: () => Promise<void> }>;
@@ -341,6 +341,12 @@ export function App() {
     pushMessage(`${face.label} selected.`);
   }
 
+  function handleViewerMiss() {
+    if (!shouldClearPayloadSelectionOnViewerMiss({ activeStep, draftLoadType })) return;
+    setSelectedPayloadObject(null);
+    setSelectedLoadPoint(null);
+  }
+
   async function addFixedSupportForFace(face: DisplayFace) {
     if (!study) return;
     const existingSelection = study.namedSelections.find((item) => item.entityType === "face" && item.geometryRefs.some((ref) => ref.entityId === face.id));
@@ -570,6 +576,7 @@ export function App() {
           selectedFaceId={selectedFaceId}
           payloadObjectSelectionMode={activeStep === "loads" && draftLoadType === "gravity"}
           selectedPayloadObject={selectedPayloadObject}
+          onViewerMiss={handleViewerMiss}
           onSelectFace={handleViewportFaceSelect}
           viewMode={viewMode}
           resultMode={resultMode}
