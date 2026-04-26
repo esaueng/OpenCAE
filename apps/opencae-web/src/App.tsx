@@ -85,6 +85,7 @@ export function App() {
   const [previewLoadEdit, setPreviewLoadEdit] = useState<Load | null>(null);
   const [sampleModel, setSampleModel] = useState<SampleModelId>(restoredUi?.sampleModel ?? "bracket");
   const [previewPrintLayerOrientation, setPreviewPrintLayerOrientation] = useState<PrintLayerOrientation | null | undefined>(undefined);
+  const [isStepbarCollapsed, setIsStepbarCollapsed] = useState(false);
 
   const study = project?.studies[0] ?? null;
   const assignedPrintLayerOrientation = useMemo<PrintLayerOrientation | null>(() => {
@@ -566,7 +567,7 @@ export function App() {
   }
 
   return (
-    <div className={`app-shell theme-${themeMode}`}>
+    <div className={`app-shell theme-${themeMode} ${isStepbarCollapsed ? "stepbar-collapsed" : ""}`}>
       <header className="topbar">
         <button className="brand brand-button" type="button" onClick={handleOpenStartMenu} title="Back to start menu" aria-label="Back to start menu">
           <TopbarMark />OpenCAE <span className="beta-tag">beta</span>
@@ -607,7 +608,16 @@ export function App() {
       </header>
 
       <main className="workspace">
-        <StepBar activeStep={activeStep} project={project} onSelect={handleStepSelect} onUnitSystemChange={handleUnitSystemChange} study={study} hasResults={viewMode === "results"} />
+        <StepBar
+          activeStep={activeStep}
+          collapsed={isStepbarCollapsed}
+          project={project}
+          onSelect={handleStepSelect}
+          onToggleCollapsed={() => setIsStepbarCollapsed((collapsed) => !collapsed)}
+          onUnitSystemChange={handleUnitSystemChange}
+          study={study}
+          hasResults={viewMode === "results"}
+        />
         <CadViewer
           displayModel={displayModelForUi}
           activeStep={activeStep}

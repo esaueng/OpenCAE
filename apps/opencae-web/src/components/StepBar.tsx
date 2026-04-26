@@ -1,5 +1,5 @@
 import type { Project, Study } from "@opencae/schema";
-import { Activity, Anchor, Box, FileText, FlaskConical, Github, Layers3, MessageSquare, Play, Weight } from "lucide-react";
+import { Activity, Anchor, Box, FileText, FlaskConical, Github, Layers3, MessageSquare, PanelLeftClose, PanelLeftOpen, Play, Weight } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { canNavigateToStep } from "../appShellState";
 import type { UnitSystem } from "../unitDisplay";
@@ -11,7 +11,9 @@ interface StepBarProps {
   project: Project;
   study: Study;
   hasResults: boolean;
+  collapsed: boolean;
   onSelect: (step: StepId) => void;
+  onToggleCollapsed: () => void;
   onUnitSystemChange: (unitSystem: UnitSystem) => void;
 }
 
@@ -26,7 +28,7 @@ const steps: ReadonlyArray<{ id: StepId; label: string; Icon: LucideIcon }> = [
   { id: "report", label: "Report", Icon: FileText }
 ] as const;
 
-export function StepBar({ activeStep, project, study, hasResults, onSelect, onUnitSystemChange }: StepBarProps) {
+export function StepBar({ activeStep, project, study, hasResults, collapsed, onSelect, onToggleCollapsed, onUnitSystemChange }: StepBarProps) {
   const completed: Record<StepId, boolean> = {
     model: true,
     material: study.materialAssignments.length > 0,
@@ -43,8 +45,20 @@ export function StepBar({ activeStep, project, study, hasResults, onSelect, onUn
   const nextUnitSystem = project.unitSystem === "SI" ? "US" : "SI";
 
   return (
-    <nav className="stepbar" aria-label="Simulation workflow">
-      <div className="stepbar-eyebrow">workflow</div>
+    <nav className={`stepbar ${collapsed ? "collapsed" : ""}`} aria-label="Simulation workflow">
+      <div className="stepbar-header">
+        <div className="stepbar-eyebrow">workflow</div>
+        <button
+          type="button"
+          className="stepbar-collapse"
+          onClick={onToggleCollapsed}
+          title={collapsed ? "Expand workflow" : "Collapse workflow"}
+          aria-label={collapsed ? "Expand workflow" : "Collapse workflow"}
+          aria-pressed={collapsed}
+        >
+          {collapsed ? <PanelLeftOpen size={15} aria-hidden="true" /> : <PanelLeftClose size={15} aria-hidden="true" />}
+        </button>
+      </div>
       <div className="step-list">
       {steps.map((step) => {
         const isActive = activeStep === step.id;
