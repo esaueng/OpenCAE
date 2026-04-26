@@ -112,7 +112,7 @@ export function loadMarkerDisplayLabel(marker: ViewerLoadMarker) {
 export function loadMarkerViewportPresentation(marker: ViewerLoadMarker) {
   if (marker.type === "gravity") {
     return {
-      label: marker.payloadObject?.label ?? loadMarkerDisplayLabel(marker),
+      label: loadMarkerOrdinalLabel(marker),
       showArrow: false,
       tone: "payload-mass" as const,
       color: "#34d399"
