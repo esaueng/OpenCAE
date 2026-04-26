@@ -51,6 +51,7 @@ describe("app persistence", () => {
       ui: {
         activeStep: "results",
         selectedFaceId: "face-1",
+        selectedLoadPoint: [0.1, 0.2, 0.3],
         viewMode: "results",
         themeMode: "dark",
         resultMode: "stress",
@@ -86,6 +87,7 @@ describe("app persistence", () => {
       ui: {
         activeStep: "loads",
         selectedFaceId: null,
+        selectedLoadPoint: null,
         viewMode: "model",
         themeMode: "light",
         resultMode: "displacement",
@@ -107,6 +109,7 @@ describe("app persistence", () => {
     });
 
     expect(parseAutosavedWorkspacePayload(JSON.stringify(snapshot))?.ui.sampleModel).toBe("plate");
+    expect(parseAutosavedWorkspacePayload(JSON.stringify(snapshot))?.ui.selectedLoadPoint).toBeNull();
     expect(parseAutosavedWorkspacePayload("{bad json")).toBeNull();
     expect(parseAutosavedWorkspacePayload(JSON.stringify({ ...snapshot, version: 99 }))).toBeNull();
   });

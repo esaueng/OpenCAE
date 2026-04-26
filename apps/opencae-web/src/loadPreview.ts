@@ -4,6 +4,7 @@ import type { ViewerLoadMarker } from "./components/CadViewer";
 export type LoadType = "force" | "pressure" | "gravity";
 export type LoadDirectionLabel = "-Y" | "+Y" | "+X" | "-X" | "+Z" | "-Z" | "Normal";
 export type LoadDirection = [number, number, number];
+export type LoadApplicationPoint = [number, number, number];
 export const STANDARD_GRAVITY = 9.80665;
 
 const DIRECTION_VECTORS: Record<Exclude<LoadDirectionLabel, "Normal">, LoadDirection> = {
@@ -49,6 +50,10 @@ export function directionLabelForLoad(load: Load): LoadDirectionLabel {
   return directionLabelForVector(load.parameters.direction);
 }
 
+export function applicationPointForLoad(load: Load): LoadApplicationPoint | undefined {
+  return isVector3(load.parameters.applicationPoint) ? load.parameters.applicationPoint : undefined;
+}
+
 export function loadMarkerFromLoad(load: Load, study: Study, stackIndex: number): ViewerLoadMarker | null {
   const selection = study.namedSelections.find((item) => item.id === load.selectionRef);
   const faceId = selection?.geometryRefs[0]?.entityId;
@@ -57,6 +62,7 @@ export function loadMarkerFromLoad(load: Load, study: Study, stackIndex: number)
   return {
     id: load.id,
     faceId,
+    point: applicationPointForLoad(load),
     type: load.type,
     value: Number(load.parameters.value ?? 0),
     units: String(load.parameters.units ?? unitsForLoadType(load.type)),
@@ -74,7 +80,7 @@ export function createViewerLoadMarkers({
 }: {
   study: Study | null;
   selectedFace: DisplayFace | null;
-  draftLoad: { type: LoadType; value: number; directionLabel: LoadDirectionLabel };
+  draftLoad: { type: LoadType; value: number; directionLabel: LoadDirectionLabel; applicationPoint?: LoadApplicationPoint | null };
   includeDraftPreview: boolean;
 }): ViewerLoadMarker[] {
   if (!study) return [];
@@ -93,6 +99,7 @@ export function createViewerLoadMarkers({
       type: draftLoad.type,
       value: draftLoad.value,
       directionLabel: draftLoad.directionLabel,
+      applicationPoint: draftLoad.applicationPoint,
       stackIndex: selectedStackIndex
     })
     : null;
@@ -104,18 +111,21 @@ export function createDraftLoadMarker({
   type,
   value,
   directionLabel,
+  applicationPoint,
   stackIndex
 }: {
   selectedFace: DisplayFace | null;
   type: LoadType;
   value: number;
   directionLabel: LoadDirectionLabel;
+  applicationPoint?: LoadApplicationPoint | null;
   stackIndex: number;
 }): ViewerLoadMarker | null {
   if (!selectedFace) return null;
   return {
     id: "draft-load-preview",
     faceId: selectedFace.id,
+    point: applicationPoint ?? undefined,
     type,
     value,
     units: unitsForLoadType(type),
@@ -127,5 +137,9 @@ export function createDraftLoadMarker({
 }
 
 function isDirection(value: unknown): value is LoadDirection {
-  return Array.isArray(value) && value.length === 3 && value.every((item) => typeof item === "number");
+  return isVector3(value);
+}
+
+function isVector3(value: unknown): value is LoadApplicationPoint {
+  return Array.isArray(value) && value.length === 3 && value.every((item) => typeof item === "number" && Number.isFinite(item));
 }
