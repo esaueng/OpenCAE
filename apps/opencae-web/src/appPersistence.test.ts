@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import type { DisplayModel, Project, ResultField, ResultSummary } from "@opencae/schema";
+import type { DisplayModel, Project, ResultField, ResultSummary, Study } from "@opencae/schema";
 import { buildAutosavedWorkspace, parseAutosavedWorkspacePayload } from "./appPersistence";
 
 const project = {
@@ -40,6 +40,73 @@ const fields = [{
   max: 12,
   units: "MPa"
 }] satisfies ResultField[];
+
+const studyWithSetup = {
+  id: "study-1",
+  projectId: "project-1",
+  name: "Static Stress",
+  type: "static_stress",
+  geometryScope: [{ bodyId: "body-1", entityType: "body", entityId: "body-1", label: "Body" }],
+  materialAssignments: [{
+    id: "assign-1",
+    materialId: "mat-aluminum-6061",
+    selectionRef: "selection-body",
+    parameters: { printed: false },
+    status: "complete"
+  }],
+  namedSelections: [
+    {
+      id: "selection-body",
+      name: "Body",
+      entityType: "body",
+      geometryRefs: [{ bodyId: "body-1", entityType: "body", entityId: "body-1", label: "Body" }],
+      fingerprint: "body"
+    },
+    {
+      id: "selection-top",
+      name: "Top face",
+      entityType: "face",
+      geometryRefs: [{ bodyId: "body-1", entityType: "face", entityId: "face-top", label: "Top face" }],
+      fingerprint: "face-top"
+    }
+  ],
+  contacts: [],
+  constraints: [{
+    id: "constraint-1",
+    type: "fixed",
+    selectionRef: "selection-top",
+    parameters: {},
+    status: "complete"
+  }],
+  loads: [
+    {
+      id: "load-force",
+      type: "force",
+      selectionRef: "selection-top",
+      parameters: { value: 500, units: "N", direction: [0, 0, -1], applicationPoint: [1, 2, 3] },
+      status: "complete"
+    },
+    {
+      id: "load-payload",
+      type: "gravity",
+      selectionRef: "selection-top",
+      parameters: {
+        value: 0.159,
+        units: "kg",
+        direction: [0, 0, -1],
+        payloadMaterialId: "payload-silicon",
+        payloadVolumeM3: 0.0000682,
+        payloadMassMode: "material",
+        payloadObject: { id: "part-8", label: "Part 8", center: [0.1, 0.2, 0.3], volumeM3: 0.0000682, volumeSource: "step", volumeStatus: "available" }
+      },
+      status: "complete"
+    }
+  ],
+  meshSettings: { preset: "medium", status: "complete", meshRef: "mesh-1", summary: { nodes: 10, elements: 5, warnings: [] } },
+  solverSettings: {},
+  validation: [],
+  runs: [{ id: "run-1", studyId: "study-1", status: "complete", jobId: "job-1", solverBackend: "local", solverVersion: "test", diagnostics: [] }]
+} satisfies Study;
 
 describe("app persistence", () => {
   test("builds a reloadable snapshot with project, model, results, and UI state", () => {
@@ -115,5 +182,56 @@ describe("app persistence", () => {
     expect(parseAutosavedWorkspacePayload(JSON.stringify(snapshot))?.ui.selectedPayloadObject).toBeNull();
     expect(parseAutosavedWorkspacePayload("{bad json")).toBeNull();
     expect(parseAutosavedWorkspacePayload(JSON.stringify({ ...snapshot, version: 99 }))).toBeNull();
+  });
+
+  test("preserves study setup, fixed supports, loads, payload masses, and mesh after reload", () => {
+    const setupProject = { ...project, studies: [studyWithSetup] } satisfies Project;
+    const snapshot = buildAutosavedWorkspace({
+      project: setupProject,
+      displayModel,
+      savedAt: "2026-04-24T13:00:00.000Z",
+      ui: {
+        activeStep: "loads",
+        selectedFaceId: "face-top",
+        selectedLoadPoint: [0.1, 0.2, 0.3],
+        selectedPayloadObject: { id: "part-8", label: "Part 8", center: [0.1, 0.2, 0.3], volumeM3: 0.0000682, volumeSource: "step", volumeStatus: "available" },
+        viewMode: "model",
+        themeMode: "dark",
+        resultMode: "stress",
+        showDeformed: false,
+        showDimensions: false,
+        stressExaggeration: 1,
+        draftLoadType: "gravity",
+        draftLoadValue: 0.159,
+        draftLoadDirection: "-Z",
+        sampleModel: "bracket",
+        activeRunId: "run-1",
+        completedRunId: "run-1",
+        runProgress: 100,
+        undoStack: [setupProject],
+        redoStack: [setupProject],
+        status: "Setup ready",
+        logs: ["Setup ready"]
+      }
+    });
+
+    const parsed = parseAutosavedWorkspacePayload(JSON.stringify(snapshot));
+    const parsedStudy = parsed?.projectFile.project.studies[0];
+
+    expect(parsedStudy?.materialAssignments).toEqual(studyWithSetup.materialAssignments);
+    expect(parsedStudy?.constraints).toEqual(studyWithSetup.constraints);
+    expect(parsedStudy?.loads).toEqual(studyWithSetup.loads);
+    expect(parsedStudy?.meshSettings).toEqual(studyWithSetup.meshSettings);
+    expect(parsedStudy?.runs).toEqual(studyWithSetup.runs);
+    expect(parsed?.ui.selectedPayloadObject).toEqual({
+      id: "part-8",
+      label: "Part 8",
+      center: [0.1, 0.2, 0.3],
+      volumeM3: 0.0000682,
+      volumeSource: "step",
+      volumeStatus: "available"
+    });
+    expect(parsed?.ui.undoStack[0]?.studies[0]?.loads).toEqual(studyWithSetup.loads);
+    expect(parsed?.ui.redoStack[0]?.studies[0]?.constraints).toEqual(studyWithSetup.constraints);
   });
 });
