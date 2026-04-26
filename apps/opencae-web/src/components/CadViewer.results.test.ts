@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { describe, expect, test } from "vitest";
-import { VIEWER_GIZMO_ALIGNMENT, colorizeResultObject, payloadHighlightObjectId, shouldShowModelHitLabel } from "./CadViewer";
+import { VIEWER_GIZMO_ALIGNMENT, axisLabelToViewAxis, cameraViewForAxis, colorizeResultObject, payloadHighlightObjectId, shouldShowModelHitLabel } from "./CadViewer";
 import type { FaceResultSample } from "../resultFields";
 
 const samples: FaceResultSample[] = [
@@ -19,6 +19,13 @@ const samples: FaceResultSample[] = [
 describe("CadViewer result coloring", () => {
   test("positions the viewer XYZ axes in the bottom-right corner", () => {
     expect(VIEWER_GIZMO_ALIGNMENT).toBe("bottom-right");
+  });
+
+  test("maps gizmo Z clicks to a square top view", () => {
+    const topView = cameraViewForAxis(axisLabelToViewAxis("Z"));
+
+    expect(topView.direction.toArray()).toEqual([0, 0, 1]);
+    expect(topView.up.toArray()).toEqual([0, 1, 0]);
   });
 
   test("hides face selection callouts in result view", () => {
