@@ -75,6 +75,7 @@ export function loadMarkerFromLoad(load: Load, study: Study, stackIndex: number)
     id: load.id,
     faceId,
     point: applicationPointForLoad(load) ?? (load.type === "gravity" ? payloadObject?.center : undefined),
+    payloadObject,
     type: load.type,
     value: Number(load.parameters.value ?? 0),
     units: String(load.parameters.units ?? unitsForLoadType(load.type)),
@@ -106,6 +107,23 @@ export function loadMarkerOrdinalLabel(marker: ViewerLoadMarker) {
 export function loadMarkerDisplayLabel(marker: ViewerLoadMarker) {
   const kind = marker.type === "pressure" ? "P" : marker.type === "gravity" ? "G" : "F";
   return `${loadMarkerOrdinalLabel(marker)} ${kind} ${formatLoadMarkerValue(marker.value)} ${marker.units} ${marker.directionLabel}`;
+}
+
+export function loadMarkerViewportPresentation(marker: ViewerLoadMarker) {
+  if (marker.type === "gravity") {
+    return {
+      label: marker.payloadObject?.label ?? loadMarkerDisplayLabel(marker),
+      showArrow: false,
+      tone: "payload-mass" as const,
+      color: "#34d399"
+    };
+  }
+  return {
+    label: loadMarkerDisplayLabel(marker),
+    showArrow: true,
+    tone: "load" as const,
+    color: "#f59e0b"
+  };
 }
 
 function formatLoadMarkerValue(value: number) {
