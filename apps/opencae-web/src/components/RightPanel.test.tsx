@@ -113,6 +113,9 @@ describe("RightPanel payload mass controls", () => {
       expect(html).toContain("Selected Rod 1");
       expect(html).not.toContain("Selected Top face");
       expect(html).toContain("Payload material");
+      expect(html).not.toContain("Search materials");
+      expect(html).toContain("<datalist");
+      expect(html).toContain('value="Carbon steel"');
       expect(html).toContain("Calculated mass");
       expect(html).toContain("Manual mass override");
       expect(html).toContain("Add payload mass");

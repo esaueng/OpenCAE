@@ -497,31 +497,43 @@ function PayloadMassControls({
   onPayloadMassModeChange: (mode: PayloadMassMode) => void;
   onManualMassChange: (displayValue: number) => void;
 }) {
-  const [materialQuery, setMaterialQuery] = useState("");
+  const materialListId = useId();
+  const selectedPayloadMaterial = payloadMaterialForId(payloadMaterialId);
+  const [materialQuery, setMaterialQuery] = useState(selectedPayloadMaterial.name);
   const displayManualMass = loadValueForUnits(manualMassKg, "kg", unitSystem);
   const volumeSource = payloadObject?.volumeStatus === "estimated" ? "estimated from bounds" : payloadObject?.volumeSource ?? "not available";
-  const normalizedQuery = materialQuery.trim().toLowerCase();
+
+  useEffect(() => {
+    setMaterialQuery(selectedPayloadMaterial.name);
+  }, [selectedPayloadMaterial.name]);
+
+  function handleMaterialInput(value: string) {
+    setMaterialQuery(value);
+    const exactMaterial = payloadMaterials.find((material) => material.name.toLowerCase() === value.trim().toLowerCase());
+    if (exactMaterial && exactMaterial.id !== payloadMaterialId) {
+      onPayloadMaterialChange(exactMaterial.id);
+    }
+  }
+
   return (
     <>
       <label className="field">
-        <span>Search materials</span>
-        <input value={materialQuery} onChange={(event) => setMaterialQuery(event.currentTarget.value)} />
-      </label>
-      <label className="field">
         <HelpLabel helpId="loadMagnitude">Payload material</HelpLabel>
-        <select value={payloadMaterialId} onChange={(event) => onPayloadMaterialChange(event.currentTarget.value)}>
-          {PAYLOAD_CATEGORY_ORDER.map((category) => {
-            const materials = payloadMaterials.filter((material) => material.category === category && (!normalizedQuery || material.name.toLowerCase().includes(normalizedQuery)));
-            if (!materials.length) return null;
-            return (
-              <optgroup key={category} label={PAYLOAD_CATEGORY_LABELS[category]}>
-                {materials.map((material) => (
-                  <option key={material.id} value={material.id}>{material.name}</option>
-                ))}
-              </optgroup>
-            );
-          })}
-        </select>
+        <input
+          list={materialListId}
+          value={materialQuery}
+          onChange={(event) => handleMaterialInput(event.currentTarget.value)}
+          onBlur={() => setMaterialQuery(payloadMaterialForId(payloadMaterialId).name)}
+        />
+        <datalist id={materialListId}>
+          {PAYLOAD_CATEGORY_ORDER.flatMap((category) =>
+            payloadMaterials
+              .filter((material) => material.category === category)
+              .map((material) => (
+                <option key={material.id} value={material.name} label={PAYLOAD_CATEGORY_LABELS[category]} />
+              ))
+          )}
+        </datalist>
       </label>
       <Info label="Payload volume" value={payloadObject?.volumeM3 ? `${formatVolume(payloadObject.volumeM3, "m^3", unitSystem)} · ${volumeSource}` : "Select a closed object or use manual mass"} />
       <label className="toggle material-print-toggle">
