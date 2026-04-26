@@ -632,7 +632,7 @@ interface PrintLayerVisualization {
 
 export function printLayerVisualizationForBounds(bounds: THREE.Box3 | null, orientation: PrintLayerOrientation): PrintLayerVisualization | null {
   if (!bounds || bounds.isEmpty()) return null;
-  const axisIndex = orientation === "x" ? 0 : orientation === "y" ? 1 : 2;
+  const axisIndex = orientation === "x" ? 0 : orientation === "y" ? 2 : 1;
   const axis = new THREE.Vector3(axisIndex === 0 ? 1 : 0, axisIndex === 1 ? 1 : 0, axisIndex === 2 ? 1 : 0);
   const min = bounds.min.toArray() as [number, number, number];
   const max = bounds.max.toArray() as [number, number, number];

@@ -55,16 +55,19 @@ describe("CadViewer result coloring", () => {
     expect(payloadHighlightObjectId(false, { id: "payload-part", label: "Payload part", center: [0, 0, 0] })).toBeUndefined();
   });
 
-  test("builds layer visualization planes perpendicular to the selected print direction", () => {
+  test("builds layer visualization planes perpendicular to the selected viewer print direction", () => {
     const bounds = new THREE.Box3(new THREE.Vector3(-2, -1, -0.5), new THREE.Vector3(2, 1, 0.5));
 
     const zBuild = printLayerVisualizationForBounds(bounds, "z");
+    const yBuild = printLayerVisualizationForBounds(bounds, "y");
     const xBuild = printLayerVisualizationForBounds(bounds, "x");
 
-    expect(zBuild?.axis.toArray()).toEqual([0, 0, 1]);
+    expect(zBuild?.axis.toArray()).toEqual([0, 1, 0]);
     expect(zBuild?.label).toBe("Z build");
     expect(zBuild?.planes).toHaveLength(7);
-    expect(zBuild?.planes[0]?.every((point) => point[2] === -0.5)).toBe(true);
+    expect(zBuild?.planes[0]?.every((point) => point[1] === -1)).toBe(true);
+    expect(yBuild?.axis.toArray()).toEqual([0, 0, 1]);
+    expect(yBuild?.planes[0]?.every((point) => point[2] === -0.5)).toBe(true);
     expect(xBuild?.axis.toArray()).toEqual([1, 0, 0]);
     expect(xBuild?.planes[0]?.every((point) => point[0] === -2)).toBe(true);
   });
