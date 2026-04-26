@@ -530,13 +530,14 @@ svg {
   justify-content: center;
   min-height: 28px;
   padding: 0 6px;
+  justify-self: center;
   color: var(--color-text-muted);
   background: rgba(11, 15, 20, 0.28);
   border: var(--border-thin);
   border-radius: var(--radius-sm);
   font-size: var(--fs-mini);
   text-transform: none;
-  width: 100%;
+  width: calc(100% - 6px);
 }
 
 .unit-toggle:hover,
