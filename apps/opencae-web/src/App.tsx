@@ -55,6 +55,7 @@ export function App() {
   const [undoStack, setUndoStack] = useState<Project[]>(restoredUi?.undoStack ?? []);
   const [redoStack, setRedoStack] = useState<Project[]>(restoredUi?.redoStack ?? []);
   const [selectedFaceId, setSelectedFaceId] = useState<string | null>(restoredUi?.selectedFaceId ?? null);
+  const [selectedLoadPoint, setSelectedLoadPoint] = useState<[number, number, number] | null>(restoredUi?.selectedLoadPoint ?? null);
   const [viewMode, setViewMode] = useState<ViewMode>(restoredUi?.viewMode ?? (restoredResults?.fields.length ? "results" : "model"));
   const [themeMode, setThemeMode] = useState<ThemeMode>(restoredUi?.themeMode ?? "dark");
   const [resultMode, setResultMode] = useState<ResultMode>(restoredUi?.resultMode ?? "stress");
@@ -99,14 +100,14 @@ export function App() {
     const markers = createViewerLoadMarkers({
       study,
       selectedFace,
-      draftLoad: { type: draftLoadType, value: draftLoadValue, directionLabel: draftLoadDirection },
+      draftLoad: { type: draftLoadType, value: draftLoadValue, directionLabel: draftLoadDirection, applicationPoint: selectedLoadPoint },
       includeDraftPreview: activeStep === "loads" && !loadEditorActive
     });
     return markers.map((marker) => {
       const converted = loadValueForUnits(marker.value, marker.units, displayUnitSystem);
       return { ...marker, value: converted.value, units: converted.units };
     });
-  }, [activeStep, displayUnitSystem, draftLoadDirection, draftLoadType, draftLoadValue, loadEditorActive, selectedFace, study]);
+  }, [activeStep, displayUnitSystem, draftLoadDirection, draftLoadType, draftLoadValue, loadEditorActive, selectedFace, selectedLoadPoint, study]);
   const supportMarkers = useMemo<ViewerSupportMarker[]>(() => {
     if (!study) return [];
     const faceCounts = new Map<string, number>();
@@ -165,6 +166,7 @@ export function App() {
         ui: {
           activeStep,
           selectedFaceId,
+          selectedLoadPoint,
           viewMode,
           themeMode,
           resultMode,
@@ -202,6 +204,7 @@ export function App() {
     resultSummary,
     runProgress,
     sampleModel,
+    selectedLoadPoint,
     selectedFaceId,
     showDeformed,
     showDimensions,
@@ -219,6 +222,7 @@ export function App() {
     setDisplayModel(response.displayModel);
     setUndoStack([]);
     setRedoStack([]);
+    setSelectedLoadPoint(null);
     if (response.results?.fields.length) {
       setResultSummary(response.results.summary);
       setResultFields(response.results.fields);
@@ -294,8 +298,9 @@ export function App() {
     if (nextStep) navigateToStep(nextStep);
   }
 
-  function handleViewportFaceSelect(face: DisplayFace) {
+  function handleViewportFaceSelect(face: DisplayFace, point?: [number, number, number]) {
     setSelectedFaceId(face.id);
+    setSelectedLoadPoint(activeStep === "loads" ? point ?? face.center : null);
     if (displayModel && !displayModel.faces.some((item) => item.id === face.id)) {
       setDisplayModel({ ...displayModel, faces: [...displayModel.faces, face] });
     }
@@ -327,7 +332,7 @@ export function App() {
     );
   }
 
-  async function addLoadForFace(type: LoadType, value: number, face: DisplayFace, direction: LoadDirectionLabel) {
+  async function addLoadForFace(type: LoadType, value: number, face: DisplayFace, direction: LoadDirectionLabel, applicationPoint?: [number, number, number] | null) {
     if (!study) return;
     const existingSelection = study.namedSelections.find((item) => item.entityType === "face" && item.geometryRefs.some((ref) => ref.entityId === face.id));
     const selection = existingSelection ?? namedSelectionForFace(study, face);
@@ -336,7 +341,7 @@ export function App() {
       id: `load-${crypto.randomUUID()}`,
       type,
       selectionRef: selection.id,
-      parameters: { value, units: unitsForLoadType(type), direction: directionVectorForLabel(direction, face) },
+      parameters: { value, units: unitsForLoadType(type), direction: directionVectorForLabel(direction, face), ...(applicationPoint ? { applicationPoint } : {}) },
       status: "complete"
     };
     await updateStudy(
@@ -562,6 +567,7 @@ export function App() {
           draftLoadType={draftLoadType}
           draftLoadValue={draftLoadValue}
           draftLoadDirection={draftLoadDirection}
+          selectedLoadPoint={selectedLoadPoint}
           onFitView={handleFitDefaultView}
           onRotateModel={handleRotateModel}
           onResetModelOrientation={handleResetModelOrientation}
@@ -597,10 +603,10 @@ export function App() {
             const face = selectedFace?.id === faceId || (!selection && selectedFace) ? selectedFace : displayModel.faces.find((item) => item.id === faceId);
             if (!face) return;
             if (selection) {
-              updateStudy(addLoad(study.id, type, value, selection.id, directionVectorForLabel(direction, face)));
+              updateStudy(addLoad(study.id, type, value, selection.id, directionVectorForLabel(direction, face), selectedLoadPoint));
               return;
             }
-            void addLoadForFace(type, value, face, direction);
+            void addLoadForFace(type, value, face, direction, selectedLoadPoint);
           }}
           onUpdateLoad={(load: Load) =>
             updateStudy(

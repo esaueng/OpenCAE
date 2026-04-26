@@ -97,7 +97,7 @@ export const SETTING_HELP: Record<SettingHelpId, SettingHelp> = {
   },
   loadPlacement: {
     title: "Load placement",
-    body: "Select the face where the force, pressure, or payload weight acts. The selected face controls both where the load appears and where the solver applies it.",
+    body: "Click the exact point on the face where the force, pressure, or payload weight acts. The selected point controls where the load appears and where the solver applies it.",
     visual: "load"
   },
   loadType: {

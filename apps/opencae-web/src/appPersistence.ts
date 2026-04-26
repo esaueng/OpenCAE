@@ -8,6 +8,7 @@ import {
 } from "@opencae/schema";
 import { buildLocalProjectFile, type LocalProjectFile, type LocalResultBundle } from "./projectFile";
 import type { LoadDirectionLabel, LoadType } from "./loadPreview";
+import type { LoadApplicationPoint } from "./loadPreview";
 import type { ResultMode, ViewMode } from "./components/CadViewer";
 import type { StepId } from "./components/StepBar";
 import type { SampleModelId } from "./lib/api";
@@ -19,6 +20,7 @@ export type ThemeMode = "dark" | "light";
 export interface WorkspaceUiSnapshot {
   activeStep: StepId;
   selectedFaceId: string | null;
+  selectedLoadPoint: LoadApplicationPoint | null;
   viewMode: ViewMode;
   themeMode: ThemeMode;
   resultMode: ResultMode;
@@ -150,6 +152,7 @@ function parseUiSnapshot(value: unknown): WorkspaceUiSnapshot | null {
   return {
     activeStep: readEnum(value.activeStep, STEPS, "model"),
     selectedFaceId: typeof value.selectedFaceId === "string" ? value.selectedFaceId : null,
+    selectedLoadPoint: isVector3(value.selectedLoadPoint) ? value.selectedLoadPoint : null,
     viewMode: readEnum(value.viewMode, VIEW_MODES, "model"),
     themeMode: readEnum(value.themeMode, THEMES, "dark"),
     resultMode: readEnum(value.resultMode, RESULT_MODES, "stress"),

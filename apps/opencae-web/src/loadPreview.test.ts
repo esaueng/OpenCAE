@@ -37,6 +37,7 @@ describe("load preview helpers", () => {
     expect(createDraftLoadMarker({ selectedFace: face, type: "pressure", value: 125, directionLabel: "Normal", stackIndex: 2 })).toEqual({
       id: "draft-load-preview",
       faceId: "face-side",
+      point: undefined,
       type: "pressure",
       value: 125,
       units: "kPa",
@@ -45,6 +46,24 @@ describe("load preview helpers", () => {
       stackIndex: 2,
       preview: true
     });
+  });
+
+  test("uses a picked face point for draft and saved load markers", () => {
+    const point: [number, number, number] = [1.2, 2.1, 3.05];
+    expect(createDraftLoadMarker({ selectedFace: face, type: "force", value: 500, directionLabel: "-Z", applicationPoint: point, stackIndex: 0 })).toMatchObject({
+      faceId: "face-side",
+      point
+    });
+
+    const load: Load = {
+      id: "load-point",
+      type: "force",
+      selectionRef: "selection-side",
+      parameters: { value: 500, units: "N", direction: [0, 0, -1], applicationPoint: point },
+      status: "complete"
+    };
+
+    expect(loadMarkerFromLoad(load, study, 0)?.point).toEqual(point);
   });
 
   test("treats gravity loads as payload mass inputs", () => {
@@ -69,6 +88,7 @@ describe("load preview helpers", () => {
     expect(loadMarkerFromLoad(load, study, 0)).toEqual({
       id: "load-1",
       faceId: "face-side",
+      point: undefined,
       type: "force",
       value: 500,
       units: "N",

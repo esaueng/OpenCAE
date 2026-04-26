@@ -21,6 +21,7 @@ export type ThemeMode = "dark" | "light";
 export interface ViewerLoadMarker {
   id: string;
   faceId: string;
+  point?: [number, number, number];
   type: string;
   value: number;
   units: string;
@@ -43,7 +44,7 @@ interface CadViewerProps {
   displayModel: DisplayModel;
   activeStep: StepId;
   selectedFaceId: string | null;
-  onSelectFace: (face: DisplayFace) => void;
+  onSelectFace: (face: DisplayFace, point?: [number, number, number]) => void;
   viewMode: ViewMode;
   resultMode: ResultMode;
   showDeformed: boolean;
@@ -306,7 +307,7 @@ function BracketModel({ displayModel, activeStep, selectedFaceId, onSelectFace, 
       if (!hit) return;
       event.stopPropagation();
       setSelectedHit(hit);
-      onSelectFace(hit.face);
+      onSelectFace(hit.face, hit.point);
     }
   };
 
@@ -1517,7 +1518,7 @@ function LoadGlyph({ marker, face, active }: { marker: ViewerLoadMarker; face: D
   const labelTone = active || marker.preview ? "active-load" : "load";
 
   const normal = new THREE.Vector3(...face.normal).normalize();
-  const center = new THREE.Vector3(...face.center);
+  const center = new THREE.Vector3(...(marker.point ?? face.center));
   const tangent = new THREE.Vector3().crossVectors(normal, new THREE.Vector3(0, 1, 0));
   if (tangent.lengthSq() < 0.001) tangent.set(1, 0, 0);
   tangent.normalize();

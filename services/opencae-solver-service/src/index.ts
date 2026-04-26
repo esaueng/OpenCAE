@@ -211,8 +211,9 @@ function loadModelFor(load: Load, faces: FaceModel[], supports: FaceModel[]): Lo
   const direction = vectorOrDefault(load.parameters.direction, load.type === "pressure" ? scale(face.normal, -1) : [0, -1, 0]);
   const magnitude = loadEquivalentForce(load, face);
   const force = scale(direction, magnitude);
-  const nearestSupport = nearestFace(face.center, supports) ?? face;
-  const lever = subtract(face.center, nearestSupport.center);
+  const applicationPoint = vectorOrDefault(load.parameters.applicationPoint, face.center);
+  const nearestSupport = nearestFace(applicationPoint, supports) ?? face;
+  const lever = subtract(applicationPoint, nearestSupport.center);
   const momentVector = cross(lever, force);
   return {
     load,

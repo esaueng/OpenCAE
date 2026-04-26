@@ -305,14 +305,14 @@ api.post("/api/studies/:studyId/loads", async (request, reply) => {
   const { studyId } = request.params as { studyId: string };
   const study = db.getStudy(studyId);
   if (!study) return reply.code(404).send({ error: "Study not found" });
-  const body = request.body as Partial<Load> & { value?: number; selectionRef?: string; direction?: [number, number, number] } | undefined;
+  const body = request.body as Partial<Load> & { value?: number; selectionRef?: string; direction?: [number, number, number]; applicationPoint?: [number, number, number] } | undefined;
   const type = body?.type ?? "force";
   if (!isLoadType(type)) return reply.code(400).send({ error: "Invalid load type." });
   const load: Load = {
     id: `load-${crypto.randomUUID()}`,
     type,
     selectionRef: body?.selectionRef ?? "selection-load-face",
-    parameters: { value: body?.value ?? 500, units: unitsForLoadType(type), direction: body?.direction ?? [0, 0, -1] },
+    parameters: { value: body?.value ?? 500, units: unitsForLoadType(type), direction: body?.direction ?? [0, 0, -1], ...(body?.applicationPoint ? { applicationPoint: body.applicationPoint } : {}) },
     status: "complete"
   };
   const next = { ...study, loads: [...study.loads, load] };
