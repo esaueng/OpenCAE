@@ -820,10 +820,8 @@ svg {
 }
 
 .field-tooltip {
-  position: absolute;
-  right: 0;
-  bottom: calc(100% + 8px);
-  z-index: 30;
+  position: fixed;
+  z-index: 1000;
   display: grid;
   grid-template-columns: 58px minmax(0, 1fr);
   gap: 10px;
@@ -843,6 +841,11 @@ svg {
   transition: opacity 120ms ease, transform 120ms ease;
 }
 
+.field-tooltip--floating {
+  opacity: 1;
+  transform: translateY(0);
+}
+
 .field-tooltip strong,
 .field-tooltip > span:last-child {
   display: block;
@@ -855,12 +858,6 @@ svg {
 
 .field-tooltip > span:last-child {
   color: var(--color-text-muted);
-}
-
-.tooltip-trigger:hover .field-tooltip,
-.tooltip-trigger:focus-visible .field-tooltip {
-  opacity: 1;
-  transform: translateY(0);
 }
 
 .help-note {
