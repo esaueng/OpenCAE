@@ -13,6 +13,7 @@ import {
   createViewerLoadMarkers,
   directionVectorForLabel,
   unitsForLoadType,
+  type DraftLoadPreview,
   type LoadDirectionLabel,
   type PayloadObjectSelection,
   type PayloadLoadMetadata,
@@ -80,6 +81,7 @@ export function App() {
   const [draftLoadType, setDraftLoadType] = useState<LoadType>(restoredUi?.draftLoadType ?? "force");
   const [draftLoadValue, setDraftLoadValue] = useState(restoredUi?.draftLoadValue ?? 500);
   const [draftLoadDirection, setDraftLoadDirection] = useState<LoadDirectionLabel>(restoredUi?.draftLoadDirection ?? "-Z");
+  const [draftPayloadPreview, setDraftPayloadPreview] = useState<{ value: number; metadata: PayloadLoadMetadata } | null>(null);
   const [previewLoadEdit, setPreviewLoadEdit] = useState<Load | null>(null);
   const [sampleModel, setSampleModel] = useState<SampleModelId>(restoredUi?.sampleModel ?? "bracket");
   const [previewPrintLayerOrientation, setPreviewPrintLayerOrientation] = useState<PrintLayerOrientation | null | undefined>(undefined);
@@ -137,13 +139,42 @@ export function App() {
     if (activeStep !== "loads") setPreviewLoadEdit(null);
   }, [activeStep]);
 
+  const draftLoadPreview = useMemo<DraftLoadPreview | undefined>(() => {
+    if (!study || activeStep !== "loads") return undefined;
+    const isPayloadMass = draftLoadType === "gravity";
+    const face = isPayloadMass && selectedPayloadObject ? faceForPayloadObject(selectedPayloadObject) : selectedFace;
+    const point = isPayloadMass ? selectedPayloadObject?.center ?? null : selectedLoadPoint;
+    if (!face || !point) return undefined;
+    const existingSelection = study.namedSelections.find((item) => item.entityType === "face" && item.geometryRefs.some((ref) => ref.entityId === face.id));
+    const selection = existingSelection ?? namedSelectionForFace(study, face);
+    const value = isPayloadMass ? draftPayloadPreview?.value ?? draftLoadValue : draftLoadValue;
+    const payloadMetadata = isPayloadMass ? draftPayloadPreview?.metadata ?? {} : {};
+    return {
+      selection,
+      load: {
+        id: "draft-load-preview",
+        type: draftLoadType,
+        selectionRef: selection.id,
+        parameters: {
+          value,
+          units: unitsForLoadType(draftLoadType),
+          direction: directionVectorForLabel(draftLoadDirection, face),
+          applicationPoint: point,
+          ...(isPayloadMass && selectedPayloadObject ? { payloadObject: selectedPayloadObject } : {}),
+          ...payloadMetadata
+        },
+        status: "complete"
+      }
+    };
+  }, [activeStep, draftLoadDirection, draftLoadType, draftLoadValue, draftPayloadPreview, selectedFace, selectedLoadPoint, selectedPayloadObject, study]);
+
   const loadMarkers = useMemo<ViewerLoadMarker[]>(() => {
-    const markers = createViewerLoadMarkers({ study, loadPreviews: previewLoadEdit ? [previewLoadEdit] : [] });
+    const markers = createViewerLoadMarkers({ study, loadPreviews: previewLoadEdit ? [previewLoadEdit] : [], draftLoadPreview });
     return markers.map((marker) => {
       const converted = loadValueForUnits(marker.value, marker.units, displayUnitSystem);
       return { ...marker, value: converted.value, units: converted.units };
     });
-  }, [displayUnitSystem, previewLoadEdit, study]);
+  }, [displayUnitSystem, draftLoadPreview, previewLoadEdit, study]);
   const supportMarkers = useMemo<ViewerSupportMarker[]>(() => {
     if (!study) return [];
     const faceCounts = new Map<string, number>();
@@ -662,18 +693,15 @@ export function App() {
             const applicationPoint = type === "gravity" && payloadObject ? payloadObject.center : selectedLoadPoint;
             if (selection) {
               updateStudy(addLoad(study.id, type, value, selection.id, directionVectorForLabel(direction, face), applicationPoint, payloadObject, study, payloadMetadata));
-              if (type === "gravity") {
-                setSelectedPayloadObject(null);
-                setSelectedLoadPoint(null);
-              }
+              setSelectedLoadPoint(null);
+              if (type === "gravity") setSelectedPayloadObject(null);
               return;
             }
             void addLoadForFace(type, value, face, direction, applicationPoint, payloadObject, payloadMetadata);
-            if (type === "gravity") {
-              setSelectedPayloadObject(null);
-              setSelectedLoadPoint(null);
-            }
+            setSelectedLoadPoint(null);
+            if (type === "gravity") setSelectedPayloadObject(null);
           }}
+          onDraftPayloadPreviewChange={setDraftPayloadPreview}
           onUpdateLoad={(load: Load) =>
             updateStudy(
               saveStudyPatch(study.id, { loads: study.loads.map((item) => (item.id === load.id ? load : item)) }, "Load updated.", study)

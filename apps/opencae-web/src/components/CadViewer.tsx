@@ -36,6 +36,7 @@ export interface ViewerLoadMarker {
   directionLabel: string;
   labelIndex: number;
   stackIndex: number;
+  preview?: boolean;
 }
 
 export interface ViewerSupportMarker {
@@ -356,7 +357,8 @@ function BracketModel({
   const showBoundaryMarkers = !isResultView;
   const placementMode = activeStep === "loads" || activeStep === "supports";
   const activeHit = hoveredHit ?? selectedHit;
-  const showModelHitLabel = shouldShowModelHitLabel(viewMode, Boolean(hoveredHit));
+  const hasDraftLoadPreview = activeStep === "loads" && loadMarkers.some((marker) => marker.preview);
+  const showModelHitLabel = shouldShowModelHitLabel(viewMode, Boolean(hoveredHit), hasDraftLoadPreview);
   const activePayloadObjectId = payloadHighlightObjectId(payloadObjectSelectionMode, selectedPayloadObject ?? hoveredHit?.payloadObject ?? null);
   const boundaryLabelPositions = useMemo(() => {
     if (!showBoundaryMarkers) return new Map<string, [number, number, number]>();
@@ -468,8 +470,8 @@ function BracketModel({
   );
 }
 
-export function shouldShowModelHitLabel(viewMode: ViewMode, hasActiveHit: boolean) {
-  return hasActiveHit && viewMode !== "results";
+export function shouldShowModelHitLabel(viewMode: ViewMode, hasActiveHit: boolean, suppressForDraftLoadPreview = false) {
+  return hasActiveHit && viewMode !== "results" && !suppressForDraftLoadPreview;
 }
 
 export function payloadHighlightObjectId(payloadObjectSelectionMode: boolean, payloadObject: PayloadObjectSelection | null | undefined) {

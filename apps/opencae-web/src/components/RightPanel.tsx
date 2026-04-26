@@ -56,6 +56,7 @@ interface RightPanelProps {
   onDraftLoadTypeChange: (type: LoadType) => void;
   onDraftLoadValueChange: (value: number) => void;
   onDraftLoadDirectionChange: (direction: LoadDirectionLabel) => void;
+  onDraftPayloadPreviewChange?: (preview: { value: number; metadata: PayloadLoadMetadata } | null) => void;
   onAddLoad: (type: LoadType, value: number, selectionRef: string | undefined, direction: LoadDirectionLabel, payloadMetadata?: PayloadLoadMetadata) => void;
   onUpdateLoad: (load: Load) => void;
   onPreviewLoadEdit: (load: Load | null) => void;
@@ -72,6 +73,7 @@ interface RightPanelProps {
 }
 
 const EMPTY_PARAMETERS: Record<string, unknown> = {};
+const noopDraftPayloadPreviewChange = () => undefined;
 
 export function RightPanel(props: RightPanelProps) {
   const selectedPayloadLabel = props.activeStep === "loads" && props.draftLoadType === "gravity" ? props.selectedPayloadObject?.label : undefined;
@@ -365,6 +367,7 @@ function LoadsPanel({
   onDraftLoadTypeChange,
   onDraftLoadValueChange,
   onDraftLoadDirectionChange,
+  onDraftPayloadPreviewChange = noopDraftPayloadPreviewChange,
   onAddLoad,
   onUpdateLoad,
   onPreviewLoadEdit,
@@ -396,6 +399,13 @@ function LoadsPanel({
     const baseValue = loadValueForUnits(displayValue, displayDraftLoad.units, "SI");
     onDraftLoadValueChange(baseValue.value);
   }
+  useEffect(() => {
+    onDraftPayloadPreviewChange(
+      draftLoadType === "gravity"
+        ? { value: effectiveDraftValue, metadata: payloadMetadata }
+        : null
+    );
+  }, [draftLoadType, effectiveDraftValue, onDraftPayloadPreviewChange, payloadMassMode, payloadMaterialId, payloadVolumeM3]);
   return (
     <Panel title="Loads" helper={draftLoadType === "gravity" ? "Choose the object carrying payload mass, then add its weight as a load." : "Choose where force or pressure is applied. Click a specific point on a face, then add a load."}>
       <HelpNote helpId="loadPlacement" />

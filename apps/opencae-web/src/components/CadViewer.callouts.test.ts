@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { supportMarkerAnchor } from "./CadViewer";
+import { shouldShowModelHitLabel, supportMarkerAnchor } from "./CadViewer";
 
 describe("CadViewer callouts", () => {
   test("uses the real cantilever fixed face as the support callout anchor", () => {
@@ -15,5 +15,11 @@ describe("CadViewer callouts", () => {
 
     expect(supportMarkerAnchor("cantilever", marker, face)).toEqual(face.center);
     expect(supportMarkerAnchor("bracket", marker, face)).not.toEqual(face.center);
+  });
+
+  test("keeps model hit labels unless a draft load preview is active", () => {
+    expect(shouldShowModelHitLabel("model", true, false)).toBe(true);
+    expect(shouldShowModelHitLabel("model", true, true)).toBe(false);
+    expect(shouldShowModelHitLabel("results", true, false)).toBe(false);
   });
 });
