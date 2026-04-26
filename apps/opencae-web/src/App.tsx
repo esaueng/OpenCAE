@@ -19,7 +19,7 @@ import {
 import { resetDisplayModelOrientation, type RotationAxis } from "./modelOrientation";
 import { buildLocalProjectFile, suggestedProjectFilename, type LocalResultBundle } from "./projectFile";
 import { buildAutosavedWorkspace, readAutosavedWorkspace, writeAutosavedWorkspace, type ThemeMode } from "./appPersistence";
-import { shouldAutoAdvanceAfterMeshGeneration, shouldShowStartScreen } from "./appShellState";
+import { canNavigateToStep, shouldAutoAdvanceAfterMeshGeneration, shouldShowStartScreen } from "./appShellState";
 import { displayModelForUnits, loadValueForUnits, resultFieldForUnits, resultSummaryForUnits, type UnitSystem } from "./unitDisplay";
 import { supportDisplayLabel } from "./supportLabels";
 
@@ -409,6 +409,10 @@ export function App() {
 
   function navigateToStep(step: StepId) {
     if (step === activeStep) return;
+    if (!canNavigateToStep(step, { meshStatus: study?.meshSettings.status ?? "not_started" })) {
+      pushMessage("Generate the mesh before going to Run.");
+      return;
+    }
     applyStep(step);
   }
 

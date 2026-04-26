@@ -185,4 +185,60 @@ describe("RightPanel payload mass controls", () => {
     expect(html).toContain('role="button"');
     expect(html).toContain('aria-label="Edit L1 force load"');
   });
+
+  test("disables next run navigation until mesh generation is complete", () => {
+    const html = renderToStaticMarkup(
+      <RightPanel
+        activeStep="mesh"
+        project={project}
+        displayModel={displayModel}
+        study={{ ...study, meshSettings: { preset: "medium", status: "not_started" } }}
+        selectedFace={displayModel.faces[0] ?? null}
+        viewMode="model"
+        resultMode="stress"
+        showDeformed={false}
+        showDimensions={false}
+        stressExaggeration={1}
+        resultSummary={resultSummary}
+        runProgress={0}
+        sampleModel="bracket"
+        draftLoadType="force"
+        draftLoadValue={500}
+        draftLoadDirection="-Z"
+        selectedLoadPoint={null}
+        selectedPayloadObject={null}
+        onFitView={vi.fn()}
+        onRotateModel={vi.fn()}
+        onResetModelOrientation={vi.fn()}
+        onLoadSample={vi.fn()}
+        onUploadModel={vi.fn()}
+        onSampleModelChange={vi.fn()}
+        onViewModeChange={vi.fn()}
+        onResultModeChange={vi.fn()}
+        onToggleDeformed={vi.fn()}
+        onToggleDimensions={vi.fn()}
+        onStressExaggerationChange={vi.fn()}
+        onAssignMaterial={vi.fn()}
+        onAddSupport={vi.fn()}
+        onUpdateSupport={vi.fn()}
+        onRemoveSupport={vi.fn()}
+        onDraftLoadTypeChange={vi.fn()}
+        onDraftLoadValueChange={vi.fn()}
+        onDraftLoadDirectionChange={vi.fn()}
+        onAddLoad={vi.fn()}
+        onUpdateLoad={vi.fn()}
+        onPreviewLoadEdit={vi.fn()}
+        onRemoveLoad={vi.fn()}
+        onGenerateMesh={vi.fn()}
+        onRunSimulation={vi.fn()}
+        canRunSimulation={false}
+        missingRunItems={["Mesh generated"]}
+        canGenerateReport={false}
+        onGenerateReport={vi.fn()}
+        onStepSelect={vi.fn()}
+      />
+    );
+
+    expect(html).toContain('<button class="primary" type="button" disabled="">Next: Run</button>');
+  });
 });

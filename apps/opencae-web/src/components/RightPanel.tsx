@@ -15,6 +15,7 @@ import { SETTING_HELP, type SettingHelpId, type SettingHelpVisual } from "../set
 import { supportDisplayLabel } from "../supportLabels";
 import { getViewportTooltipPosition } from "../tooltipPosition";
 import { forceForUnits, formatDensity, formatMass, formatMaterialStress, formatVolume, loadValueForUnits, type UnitSystem } from "../unitDisplay";
+import { canNavigateToStep } from "../appShellState";
 
 interface RightPanelProps {
   activeStep: StepId;
@@ -83,7 +84,7 @@ export function RightPanel(props: RightPanelProps) {
       {props.activeStep === "run" && <RunPanel {...props} />}
       {props.activeStep === "results" && <ResultsPanel {...props} />}
       {props.activeStep === "report" && <ReportPanel {...props} />}
-      <WorkflowNav activeStep={props.activeStep} onStepSelect={props.onStepSelect} />
+      <WorkflowNav activeStep={props.activeStep} study={props.study} onStepSelect={props.onStepSelect} />
     </aside>
   );
 }
@@ -886,16 +887,17 @@ const WORKFLOW_STEPS: Array<{ id: StepId; label: string }> = [
   { id: "report", label: "Report" }
 ];
 
-function WorkflowNav({ activeStep, onStepSelect }: { activeStep: StepId; onStepSelect: (step: StepId) => void }) {
+function WorkflowNav({ activeStep, study, onStepSelect }: { activeStep: StepId; study: Study; onStepSelect: (step: StepId) => void }) {
   const index = WORKFLOW_STEPS.findIndex((step) => step.id === activeStep);
   const previousStep = index > 0 ? WORKFLOW_STEPS[index - 1] : undefined;
   const nextStep = index >= 0 && index < WORKFLOW_STEPS.length - 1 ? WORKFLOW_STEPS[index + 1] : undefined;
+  const canGoNext = Boolean(nextStep && canNavigateToStep(nextStep.id, { meshStatus: study.meshSettings.status }));
   return (
     <div className="workflow-nav" aria-label="Workflow navigation">
       <button className="secondary" type="button" disabled={!previousStep} onClick={() => previousStep && onStepSelect(previousStep.id)}>
         {previousStep ? `Back: ${previousStep.label}` : "Back"}
       </button>
-      <button className="primary" type="button" disabled={!nextStep} onClick={() => nextStep && onStepSelect(nextStep.id)}>
+      <button className="primary" type="button" disabled={!canGoNext} onClick={() => nextStep && canGoNext && onStepSelect(nextStep.id)}>
         {nextStep ? `Next: ${nextStep.label}` : "Next"}
       </button>
     </div>

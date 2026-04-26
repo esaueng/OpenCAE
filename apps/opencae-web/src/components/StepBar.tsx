@@ -1,6 +1,7 @@
 import type { Project, Study } from "@opencae/schema";
 import { Activity, Anchor, Box, FileText, FlaskConical, Github, Layers3, MessageSquare, Play, Weight } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { canNavigateToStep } from "../appShellState";
 import type { UnitSystem } from "../unitDisplay";
 
 export type StepId = "model" | "material" | "supports" | "loads" | "mesh" | "run" | "results" | "report";
@@ -49,9 +50,10 @@ export function StepBar({ activeStep, project, study, hasResults, onSelect, onUn
       {steps.map((step) => {
         const isActive = activeStep === step.id;
         const isComplete = completed[step.id];
+        const canSelect = canNavigateToStep(step.id, { meshStatus: study.meshSettings.status });
         const StepIcon = step.Icon;
         return (
-          <button key={step.id} className={`step ${isActive ? "active" : ""}`} onClick={() => onSelect(step.id)} aria-current={isActive ? "step" : undefined}>
+          <button key={step.id} className={`step ${isActive ? "active" : ""}`} disabled={!canSelect} onClick={() => onSelect(step.id)} aria-current={isActive ? "step" : undefined}>
             <span className={`step-icon ${isComplete ? "done" : ""}`} aria-hidden="true">
               <StepIcon size={18} strokeWidth={1.8} />
             </span>
