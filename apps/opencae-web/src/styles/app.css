@@ -469,17 +469,21 @@ svg {
   margin-top: auto;
   letter-spacing: 0;
   text-transform: lowercase;
+  min-width: 0;
 }
 
 .stepbar-footer > div:not(.stepbar-actions) {
   display: flex;
   justify-content: space-between;
+  gap: 6px;
+  min-width: 0;
 }
 
 .stepbar-footer > .unit-switch {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 6px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, auto);
+  gap: 3px 6px;
+  align-items: center;
 }
 
 .unit-switch .unit-toggle {
@@ -495,6 +499,7 @@ svg {
   border-radius: var(--radius-sm);
   font-size: var(--fs-mini);
   text-transform: none;
+  width: 100%;
 }
 
 .unit-toggle:hover,
@@ -507,6 +512,10 @@ svg {
 .stepbar-footer strong {
   color: var(--color-text-muted);
   font-weight: var(--fw-regular);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .stepbar-actions {
@@ -521,6 +530,7 @@ svg {
   align-items: center;
   justify-content: center;
   gap: 7px;
+  min-width: 0;
   min-height: 30px;
   padding: 0 8px;
   color: var(--color-text-muted);
@@ -531,6 +541,10 @@ svg {
   font-size: var(--fs-xs);
   letter-spacing: 0;
   text-transform: none;
+}
+
+.stepbar-link svg {
+  flex: 0 0 auto;
 }
 
 .stepbar-link:hover {
