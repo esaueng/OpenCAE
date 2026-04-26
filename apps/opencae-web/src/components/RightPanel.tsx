@@ -125,6 +125,16 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sa
               </button>
             ))}
           </div>
+          <button
+            className={confirmSampleLoad ? "primary wide" : "secondary wide"}
+            type="button"
+            onClick={handleLoadSampleClick}
+            title={confirmSampleLoad ? "Click again to reload the sample project" : "Prepare to reload the sample project"}
+          >
+            <RotateCcw size={16} />
+            {confirmSampleLoad ? "Click again to load sample" : "Load sample project"}
+          </button>
+          {confirmSampleLoad && <span className="panel-copy confirm-copy">This will reload {sampleLabel} and reset the sample setup.</span>}
         </label>
       )}
       <div className="summary-box">
@@ -177,15 +187,6 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sa
         <Upload size={16} />
         {isBlankProject ? "Upload model" : "Replace model"}
       </button>
-      <button
-        className={confirmSampleLoad ? "primary wide" : "secondary wide"}
-        onClick={handleLoadSampleClick}
-        title={confirmSampleLoad ? "Click again to reload the sample project" : "Prepare to reload the sample project"}
-      >
-        <RotateCcw size={16} />
-        {confirmSampleLoad ? "Click again to load sample" : "Load sample project"}
-      </button>
-      {confirmSampleLoad && <p className="panel-copy confirm-copy">This will reload {sampleLabel} and reset the sample setup.</p>}
       {isBlankProject ? (
         <Callout>Upload STEP, STP, or STL to import a model. STL files use the mesh preview; STEP files import as a selectable CAD body.</Callout>
       ) : isUploadedProject ? (
