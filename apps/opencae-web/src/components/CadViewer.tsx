@@ -94,6 +94,8 @@ type ModelPickHandlers = {
   onClick?: (event: ThreeEvent<MouseEvent>) => void;
 };
 export const VIEWER_GIZMO_ALIGNMENT = "bottom-right";
+const VIEWER_FIT_MARGIN = 1.28;
+const VIEWER_CAMERA_DISTANCE_SCALE = 0.98;
 
 export function CadViewer(props: CadViewerProps) {
   const controlsRef = useRef<ViewerOrbitControls | null>(null);
@@ -118,7 +120,7 @@ export function CadViewer(props: CadViewerProps) {
         <ambientLight intensity={effectiveViewMode === "results" || isLightTheme ? 1.4 : 0.75} />
         <directionalLight position={[4, 6, 3]} intensity={effectiveViewMode === "results" || isLightTheme ? 1.45 : 2.2} />
         <Grid args={[8, 8]} cellColor={gridCellColor} sectionColor={gridSectionColor} fadeDistance={12} fadeStrength={1.2} position={[0, 0, gridFloorZ]} rotation={[Math.PI / 2, 0, 0]} />
-        <Bounds fit clip observe margin={1.65}>
+        <Bounds fit clip observe margin={VIEWER_FIT_MARGIN}>
           <group rotation={modelRotation}>
             <group rotation={baseModelRotation}>
               <BracketModel {...props} viewMode={effectiveViewMode} uploadedPreviewBounds={uploadedPreviewBounds} onUploadedPreviewBounds={setUploadedPreviewBounds} />
@@ -2363,7 +2365,7 @@ function BoundsCameraReset({ signal, viewAxis, viewAxisSignal }: { signal: numbe
     const nextBounds = bounds.refresh().clip();
     const { center, distance } = nextBounds.getSize();
     const view = viewAxis ? cameraViewForAxis(viewAxis) : { direction: ISO_CAMERA_DIRECTION, up: ISO_CAMERA_UP };
-    const cameraPosition = center.clone().addScaledVector(view.direction, distance * 1.08);
+    const cameraPosition = center.clone().addScaledVector(view.direction, distance * VIEWER_CAMERA_DISTANCE_SCALE);
     nextBounds.moveTo(cameraPosition).lookAt({ target: center, up: view.up });
   }, [bounds, signal, viewAxis, viewAxisSignal]);
   return null;
@@ -2376,7 +2378,7 @@ function GizmoCameraReset({ axis, signal }: { axis: RotationAxis | null; signal:
     const nextBounds = bounds.refresh().clip();
     const { center, distance } = nextBounds.getSize();
     const view = cameraViewForAxis(axis);
-    const cameraPosition = center.clone().addScaledVector(view.direction, distance * 1.08);
+    const cameraPosition = center.clone().addScaledVector(view.direction, distance * VIEWER_CAMERA_DISTANCE_SCALE);
     nextBounds.moveTo(cameraPosition).lookAt({ target: center, up: view.up });
   }, [axis, bounds, signal]);
   return null;
