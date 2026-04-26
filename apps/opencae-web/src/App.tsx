@@ -604,7 +604,6 @@ export function App() {
           <Save size={16} aria-hidden="true" />
           Save project
         </button>
-        <span className="local-pill"><span aria-hidden="true" />local</span>
       </header>
 
       <main className="workspace">
