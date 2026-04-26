@@ -842,7 +842,10 @@ function AnalysisResultModel({
   onUploadedPreviewBounds: (bounds: THREE.Box3) => void;
 }) {
   if (kind === "blank") return null;
-  const samples = resultSamplesForFaces(displayModel.faces, resultFields, resultMode);
+  const samples = useMemo(
+    () => resultSamplesForFaces(displayModel.faces, resultFields, resultMode),
+    [displayModel.faces, resultFields, resultMode]
+  );
   if (kind === "uploaded") {
     return (
       <UploadedResultSolid
@@ -919,6 +922,11 @@ function UploadedResultSolid({
 
 function UploadedNativeCadResultModel({
   displayModel,
+  samples,
+  resultMode,
+  showDeformed,
+  stressExaggeration,
+  loadMarkers,
   onMeasureDisplayModelDimensions,
   onUploadedPreviewBounds
 }: {
@@ -931,14 +939,52 @@ function UploadedNativeCadResultModel({
   onMeasureDisplayModelDimensions?: (dimensions: NonNullable<DisplayModel["dimensions"]>) => void;
   onUploadedPreviewBounds: (bounds: THREE.Box3) => void;
 }) {
-  return (
-    <UploadedNativeCadModel
-      displayModel={displayModel}
-      color="#63a9e5"
-      onMeasureDisplayModelDimensions={onMeasureDisplayModelDimensions}
-      onUploadedPreviewBounds={onUploadedPreviewBounds}
-    />
-  );
+  const filename = displayModel.nativeCad?.filename ?? displayModel.name;
+  const [preview, setPreview] = useState<{ status: "loading" | "ready" | "error"; object?: THREE.Group; message?: string }>({ status: "loading" });
+
+  useEffect(() => {
+    let cancelled = false;
+    setPreview({ status: "loading" });
+    stepPreviewFromBase64(displayModel.nativeCad?.contentBase64 ?? "", "#63a9e5")
+      .then((nextPreview) => {
+        if (cancelled) return;
+        colorizeResultObject(nextPreview.object, "uploaded", resultMode, showDeformed, stressExaggeration, samples, loadMarkers);
+        setPreview({ status: "ready", object: nextPreview.object });
+        onMeasureDisplayModelDimensions?.(nextPreview.dimensions);
+        onUploadedPreviewBounds(nextPreview.normalizedBounds);
+      })
+      .catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : "STEP preview could not be generated.";
+        if (!cancelled) setPreview({ status: "error", message });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    displayModel.nativeCad?.contentBase64,
+    loadMarkers,
+    onMeasureDisplayModelDimensions,
+    onUploadedPreviewBounds,
+    resultMode,
+    samples,
+    showDeformed,
+    stressExaggeration
+  ]);
+
+  if (preview.status === "loading") {
+    return (
+      <Html center position={[0, 0.35, 0]} className="model-notice">
+        <strong>Loading STEP preview</strong>
+        <span>{filename}</span>
+      </Html>
+    );
+  }
+
+  if (preview.status === "error" || !preview.object) {
+    return <UnsupportedUploadedModelNotice filename={`${filename} ${preview.message ?? ""}`.trim()} />;
+  }
+
+  return <primitive object={preview.object} />;
 }
 
 function UploadedStlResultModel({
@@ -1076,6 +1122,28 @@ function colorizeResultGeometry(
   positions.needsUpdate = true;
   geometry.computeVertexNormals();
   return geometry;
+}
+
+export function colorizeResultObject(
+  object: THREE.Object3D,
+  kind: SampleModelKind,
+  resultMode: ResultMode,
+  showDeformed: boolean,
+  stressExaggeration: number,
+  samples: FaceResultSample[],
+  loadMarkers: ViewerLoadMarker[]
+) {
+  object.traverse((child) => {
+    if (!(child instanceof THREE.Mesh) || !(child.geometry instanceof THREE.BufferGeometry)) return;
+    colorizeResultGeometry(child.geometry, kind, resultMode, showDeformed, stressExaggeration, samples, loadMarkers);
+    child.material = new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      metalness: 0.18,
+      roughness: 0.52,
+      side: THREE.DoubleSide
+    });
+  });
+  return object;
 }
 
 function deformedPointForResults(
