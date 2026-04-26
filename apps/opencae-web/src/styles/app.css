@@ -169,6 +169,10 @@ svg {
   text-align: center;
 }
 
+.start-caption span {
+  display: block;
+}
+
 .start-footer {
   position: absolute;
   right: 24px;
