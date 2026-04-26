@@ -12,6 +12,7 @@
     "@opencae/db": "workspace:*",
     "@opencae/materials": "workspace:*",
     "@opencae/schema": "workspace:*",
+    "@opencae/solver-service": "workspace:*",
     "@opencae/units": "workspace:*",
     "@react-three/drei": "^9.122.0",
     "@react-three/fiber": "^8.17.10",

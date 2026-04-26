@@ -107,7 +107,7 @@ interface LoadModel {
   moment: number;
 }
 
-function solveStudy(study: Study, runId: string) {
+export function solveStudy(study: Study, runId: string) {
   const faces = faceModelsForStudy(study);
   const supports = supportFacesForStudy(study, faces);
   const loads = study.loads.map((load) => loadModelFor(load, faces, supports)).filter((load): load is LoadModel => Boolean(load));
