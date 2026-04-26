@@ -54,10 +54,15 @@ function distributeSideLabels(side: LabelSide, anchors: LabelAnchor[], bounds: L
   const span = Math.max(0, laneEnd - laneStart);
 
   return sorted.map((anchor, index) => {
-    const along = sorted.length === 1 ? (laneStart + laneEnd) / 2 : laneStart + (span * index) / (sorted.length - 1);
+    const anchorAlong = side === "left" || side === "right" ? anchor.anchor[1] : anchor.anchor[0];
+    const along = sorted.length === 1 ? clamp(anchorAlong, laneStart, laneEnd) : laneStart + (span * index) / (sorted.length - 1);
     if (side === "left") return { ...anchor, position: [bounds.min[0] - margin, along, z] };
     if (side === "right") return { ...anchor, position: [bounds.max[0] + margin, along, z] };
     if (side === "bottom") return { ...anchor, position: [along, bounds.min[1] - margin, z] };
     return { ...anchor, position: [along, bounds.max[1] + margin, z] };
   });
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
 }
