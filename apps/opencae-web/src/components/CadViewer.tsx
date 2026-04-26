@@ -365,12 +365,12 @@ function BracketModel({
       }),
       ...supportMarkers.map((marker) => {
         const face = displayModel.faces.find((item) => item.id === marker.faceId);
-        return face ? { id: boundaryLabelKey("support", marker.id), anchor: supportMarkerAnchor(marker, face) } : null;
+        return face ? { id: boundaryLabelKey("support", marker.id), anchor: supportMarkerAnchor(modelKind, marker, face) } : null;
       })
     ].filter((anchor): anchor is LabelAnchor => Boolean(anchor));
 
     return new Map(layoutOutsideModelLabels(anchors, boxToLabelBounds(bounds)).map((label) => [label.id, label.position]));
-  }, [displayModel, loadMarkers, showBoundaryMarkers, supportMarkers]);
+  }, [displayModel, loadMarkers, modelKind, showBoundaryMarkers, supportMarkers]);
 
   useEffect(() => {
     if (!selectedFaceId) {
@@ -531,8 +531,8 @@ function loadMarkerAnchor(marker: ViewerLoadMarker, face: DisplayFace): [number,
   return marker.point ?? marker.payloadObject?.center ?? face.center;
 }
 
-function supportMarkerAnchor(marker: ViewerSupportMarker, face: DisplayFace): [number, number, number] {
-  if (marker.faceId === "face-base-left") return [0.72, 0, BRACKET_DEPTH / 2 + 0.065];
+export function supportMarkerAnchor(kind: SampleModelKind, marker: ViewerSupportMarker, face: DisplayFace): [number, number, number] {
+  if (kind === "bracket" && marker.faceId === "face-base-left") return [0.72, 0, BRACKET_DEPTH / 2 + 0.065];
   return face.center;
 }
 
