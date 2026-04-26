@@ -175,7 +175,7 @@ svg {
   bottom: 20px;
   left: 24px;
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: var(--sp-4);
   color: var(--color-text-subtle);
   font-family: var(--font-mono);

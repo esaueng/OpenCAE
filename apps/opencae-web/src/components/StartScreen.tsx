@@ -64,7 +64,6 @@ export function StartScreen({ onLoadSample, onCreateProject, onOpenProject }: St
         <p className="start-caption">OpenCAE helps you test how parts respond to forces. Start with the sample project to see a complete example.</p>
       </section>
       <footer className="start-footer">
-        <span>./data/artifacts · SQLite · in-memory jobs</span>
         <a href="https://github.com/esaueng/opencae-beta" target="_blank" rel="noreferrer">github</a>
       </footer>
     </main>
