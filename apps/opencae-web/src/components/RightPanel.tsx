@@ -6,7 +6,7 @@ import { assessResultFailure, estimateAllowableLoadForSafetyFactor } from "@open
 import type { Constraint, DisplayFace, DisplayModel, Load, Project, ResultSummary, Study } from "@opencae/schema";
 import type { ResultMode, ViewMode } from "./CadViewer";
 import type { StepId } from "./StepBar";
-import { applicationPointForLoad, directionLabelForLoad, directionVectorForLabel, equivalentForceForLoad, payloadObjectForLoad, unitsForLoadType, type LoadApplicationPoint, type LoadDirectionLabel, type LoadType, type PayloadObjectSelection } from "../loadPreview";
+import { applicationPointForLoad, createViewerLoadMarkers, directionLabelForLoad, directionVectorForLabel, equivalentForceForLoad, loadMarkerOrdinalLabel, payloadObjectForLoad, unitsForLoadType, type LoadApplicationPoint, type LoadDirectionLabel, type LoadType, type PayloadObjectSelection } from "../loadPreview";
 import type { SampleModelId } from "../lib/api";
 import { dimensionValuesForDisplayModel } from "../modelDimensions";
 import { formatModelOrientation, getModelOrientation, type RotationAxis } from "../modelOrientation";
@@ -426,6 +426,7 @@ function LoadsPanel({
 function LoadEditorList({ study, unitSystem, onUpdateLoad, onRemoveLoad }: { study: Study; unitSystem: UnitSystem; onUpdateLoad: (load: Load) => void; onRemoveLoad: (loadId: string) => void }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   if (!study.loads.length) return <EmptyEditableList title="Loads" />;
+  const loadLabelsById = new Map(createViewerLoadMarkers({ study }).map((marker) => [marker.id, loadMarkerOrdinalLabel(marker)]));
 
   return (
     <div className="editable-list">
@@ -439,11 +440,12 @@ function LoadEditorList({ study, unitSystem, onUpdateLoad, onRemoveLoad }: { stu
         const payloadObject = payloadObjectForLoad(load);
         const pointLabel = payloadObject ? ` · ${payloadObject.label}` : applicationPointForLoad(load) ? " · point load" : "";
         const equivalentForce = load.type === "gravity" ? ` · ${formatEquivalentForce(equivalentForceForLoad(load), unitSystem)} weight` : "";
+        const loadLabel = loadLabelsById.get(load.id);
         return (
           <div className="editable-item" key={load.id}>
             <div className="editable-summary">
               <span className="item-icon"><ArrowDown size={18} /></span>
-              <strong>{loadTypeLabel(load.type)} · {formatNumber(displayLoad.value)} {displayLoad.units}</strong>
+              <strong>{loadLabel ? `${loadLabel} · ` : ""}{loadTypeLabel(load.type)} · {formatNumber(displayLoad.value)} {displayLoad.units}</strong>
               <small>{label}{pointLabel} · {directionLabelForLoad(load)} direction{equivalentForce}</small>
               <button className="remove-glyph" type="button" aria-label={`Remove ${loadTypeLabel(load.type)} load`} onClick={() => onRemoveLoad(load.id)}><X size={16} /></button>
             </div>
