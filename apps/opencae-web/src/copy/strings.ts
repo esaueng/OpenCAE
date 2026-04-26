@@ -28,7 +28,7 @@ export const COPY = {
     primarySubtitle: 'Bracket demo · full workflow preview',
     newProject: 'Create new project',
     openProject: 'Open local project',
-    shortcuts: { new: '⌘ N', open: '⌘ O' },
+    shortcuts: { new: 'N', open: 'O' },
     caption:
       'OpenCAE helps you test how parts respond to forces. ' +
       'Start with the sample project to see a complete example.',

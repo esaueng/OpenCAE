@@ -15,11 +15,11 @@ export function StartScreen({ onLoadSample, onCreateProject, onOpenProject }: St
       tabIndex={0}
       onKeyDown={(event) => {
         if (event.key === "Enter") onLoadSample();
-        if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "n") {
+        if (!event.metaKey && !event.ctrlKey && !event.altKey && event.key.toLowerCase() === "n") {
           event.preventDefault();
           onCreateProject();
         }
-        if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "o") {
+        if (!event.metaKey && !event.ctrlKey && !event.altKey && event.key.toLowerCase() === "o") {
           event.preventDefault();
           fileInputRef.current?.click();
         }
@@ -43,11 +43,11 @@ export function StartScreen({ onLoadSample, onCreateProject, onOpenProject }: St
           </button>
           <button className="start-action secondary" onClick={() => onCreateProject()}>
             <span>Create new project</span>
-            <kbd>⌘ N</kbd>
+            <kbd>N</kbd>
           </button>
           <button className="start-action secondary" onClick={() => fileInputRef.current?.click()}>
             <span>Open local project</span>
-            <kbd>⌘ O</kbd>
+            <kbd>O</kbd>
           </button>
           <input
             ref={fileInputRef}
