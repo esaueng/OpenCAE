@@ -5,7 +5,7 @@ import { Canvas, useThree } from "@react-three/fiber";
 import type { ThreeEvent } from "@react-three/fiber";
 import type { DisplayFace, DisplayModel, ResultField } from "@opencae/schema";
 import { meshVolumeM3FromTriangles, type Triangle } from "@opencae/units";
-import { RotateCcw } from "lucide-react";
+import { House } from "lucide-react";
 import * as THREE from "three";
 import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
 import type { StepId } from "./StepBar";
@@ -140,7 +140,7 @@ export function CadViewer(props: CadViewerProps) {
       </Canvas>
       <div className="viewer-hud">
         <button className="viewer-reset" type="button" onClick={props.onResetView} title="Reset view" aria-label="Reset view">
-          <RotateCcw size={14} aria-hidden="true" />
+          <House size={14} aria-hidden="true" />
           <span className="visually-hidden">Reset view</span>
         </button>
       </div>
