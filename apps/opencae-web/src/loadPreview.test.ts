@@ -150,6 +150,34 @@ describe("load preview helpers", () => {
     expect(markers[0]?.id).toBe("load-1");
   });
 
+  test("uses edited load previews for viewer markers before the edit is saved", () => {
+    const savedLoad: Load = {
+      id: "load-1",
+      type: "force",
+      selectionRef: "selection-side",
+      parameters: { value: 500, units: "N", direction: [0, 0, -1] },
+      status: "complete"
+    };
+    const previewLoad: Load = {
+      ...savedLoad,
+      parameters: { ...savedLoad.parameters, direction: [0, 1, 0] }
+    };
+
+    const markers = createViewerLoadMarkers({
+      study: { ...study, loads: [savedLoad] } as unknown as Study,
+      loadPreviews: [previewLoad]
+    });
+
+    expect(markers).toHaveLength(1);
+    expect(markers[0]).toMatchObject({
+      id: "load-1",
+      direction: [0, 1, 0],
+      directionLabel: "+Y",
+      labelIndex: 0,
+      stackIndex: 0
+    });
+  });
+
   test("formats the viewport load label for reuse in the sidebar", () => {
     const marker = loadMarkerFromLoad({
       id: "load-1",
