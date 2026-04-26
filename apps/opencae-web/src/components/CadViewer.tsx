@@ -627,8 +627,6 @@ interface PrintLayerVisualization {
   axis: THREE.Vector3;
   label: string;
   planes: Array<Array<[number, number, number]>>;
-  arrowStart: [number, number, number];
-  arrowEnd: [number, number, number];
   labelPosition: [number, number, number];
 }
 
@@ -648,15 +646,12 @@ export function printLayerVisualizationForBounds(bounds: THREE.Box3 | null, orie
   });
   const center = bounds.getCenter(new THREE.Vector3());
   const offset = new THREE.Vector3(size.x, size.y, size.z).multiplyScalar(0.18);
-  const arrowStart = center.clone().add(new THREE.Vector3(offset.x, offset.y, offset.z)).add(axis.clone().multiplyScalar(-span * 0.18));
-  const arrowEnd = arrowStart.clone().add(axis.clone().multiplyScalar(span * 0.42));
+  const labelPosition = center.clone().add(offset).add(axis.clone().multiplyScalar(span * 0.32));
   return {
     axis,
     label: `${orientation.toUpperCase()} build`,
     planes,
-    arrowStart: arrowStart.toArray() as [number, number, number],
-    arrowEnd: arrowEnd.toArray() as [number, number, number],
-    labelPosition: arrowEnd.clone().add(axis.clone().multiplyScalar(span * 0.08)).toArray() as [number, number, number]
+    labelPosition: labelPosition.toArray() as [number, number, number]
   };
 }
 
@@ -687,20 +682,8 @@ function PrintLayerOverlay({ bounds, orientation }: { bounds: THREE.Box3 | null;
       {visualization.planes.map((plane, index) => (
         <Line key={`${orientation}-layer-${index}`} points={plane} color="#63e6be" transparent opacity={0.34} lineWidth={1.15} />
       ))}
-      <Line points={[visualization.arrowStart, visualization.arrowEnd]} color="#63e6be" transparent opacity={0.92} lineWidth={2.6} />
-      <LayerArrowHead position={visualization.arrowEnd} axis={visualization.axis} />
       <SceneLabel label={visualization.label} position={visualization.labelPosition} tone="print" />
     </group>
-  );
-}
-
-function LayerArrowHead({ position, axis }: { position: [number, number, number]; axis: THREE.Vector3 }) {
-  const quaternion = useMemo(() => new THREE.Quaternion().setFromUnitVectors(WORLD_UP, axis.clone().normalize()), [axis]);
-  return (
-    <mesh position={position} quaternion={quaternion}>
-      <coneGeometry args={[0.07, 0.18, 24]} />
-      <meshBasicMaterial color="#63e6be" depthTest={false} toneMapped={false} />
-    </mesh>
   );
 }
 
