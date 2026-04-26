@@ -38,7 +38,6 @@ export function StepBar({ activeStep, project, study, hasResults, onSelect, onUn
     report: study.runs.some((run) => Boolean(run.reportRef))
   };
 
-  const unitLabel = project.unitSystem === "SI" ? "metric" : "imperial";
   const unitShort = project.unitSystem === "SI" ? "mm" : "in";
   const currentUnitLabel = project.unitSystem === "SI" ? "Metric" : "Imperial";
   const nextUnitSystem = project.unitSystem === "SI" ? "US" : "SI";
@@ -77,8 +76,6 @@ export function StepBar({ activeStep, project, study, hasResults, onSelect, onUn
         <div><span>study</span><strong>static</strong></div>
         <div className="unit-switch">
           <span>units</span>
-          <strong>{unitLabel}</strong>
-          <span aria-hidden="true" />
           <strong>{unitShort}</strong>
           <button type="button" className="unit-toggle" aria-label={`Switch to ${nextUnitSystem === "SI" ? "metric" : "imperial"} units`} onClick={() => onUnitSystemChange(nextUnitSystem)}>
             {currentUnitLabel}
