@@ -12,6 +12,7 @@ import { formatModelOrientation, getModelOrientation, type RotationAxis } from "
 import { shouldShowSampleModelPicker } from "../modelPanelState";
 import { SETTING_HELP, type SettingHelpId, type SettingHelpVisual } from "../settingHelp";
 import { getViewportTooltipPosition } from "../tooltipPosition";
+import { forceForUnits, loadValueForUnits, type UnitSystem } from "../unitDisplay";
 
 interface RightPanelProps {
   activeStep: StepId;
@@ -337,6 +338,7 @@ function SupportsPanel({ selectedFace, study, onAddSupport, onUpdateSupport, onR
 }
 
 function LoadsPanel({
+  project,
   selectedFace,
   study,
   draftLoadType,
@@ -389,7 +391,7 @@ function LoadsPanel({
           <span>{units}</span>
         </span>
       </label>
-      {draftLoadType === "gravity" && <Callout>{formatNumber(equivalentForceForLoad({ type: "gravity", parameters: { value: draftLoadValue } }))} N equivalent weight.</Callout>}
+      {draftLoadType === "gravity" && <Callout>{formatEquivalentForce(equivalentForceForLoad({ type: "gravity", parameters: { value: draftLoadValue } }), project.unitSystem)} equivalent weight.</Callout>}
       <label className="field">
         <HelpLabel helpId="loadDirection">Direction</HelpLabel>
         <select value={draftLoadDirection} onChange={(event) => onDraftLoadDirectionChange(event.currentTarget.value as LoadDirectionLabel)}>
@@ -400,12 +402,12 @@ function LoadsPanel({
       </label>
       <button className="outline-action wide" disabled={!hasSelectedFace} onClick={() => hasSelectedFace && onAddLoad(draftLoadType, draftLoadValue, selectedFromViewport?.id, draftLoadDirection)}><Plus size={18} />{addLabel}</button>
       <SectionTitle>Applied</SectionTitle>
-      <LoadEditorList study={study} onUpdateLoad={onUpdateLoad} onRemoveLoad={onRemoveLoad} onEditingChange={onLoadEditorActiveChange} />
+      <LoadEditorList study={study} unitSystem={project.unitSystem} onUpdateLoad={onUpdateLoad} onRemoveLoad={onRemoveLoad} onEditingChange={onLoadEditorActiveChange} />
     </Panel>
   );
 }
 
-function LoadEditorList({ study, onUpdateLoad, onRemoveLoad, onEditingChange }: { study: Study; onUpdateLoad: (load: Load) => void; onRemoveLoad: (loadId: string) => void; onEditingChange: (active: boolean) => void }) {
+function LoadEditorList({ study, unitSystem, onUpdateLoad, onRemoveLoad, onEditingChange }: { study: Study; unitSystem: UnitSystem; onUpdateLoad: (load: Load) => void; onRemoveLoad: (loadId: string) => void; onEditingChange: (active: boolean) => void }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   useEffect(() => {
     onEditingChange(editingId !== null);
@@ -419,14 +421,15 @@ function LoadEditorList({ study, onUpdateLoad, onRemoveLoad, onEditingChange }: 
       {study.loads.map((load) => {
         const editing = editingId === load.id;
         const units = String(load.parameters.units ?? unitsForLoadType(load.type));
+        const displayLoad = loadValueForUnits(Number(load.parameters.value ?? 0), units, unitSystem);
         const selection = study.namedSelections.find((candidate) => candidate.id === load.selectionRef);
         const label = selection?.geometryRefs[0]?.label ?? "selected face";
-        const equivalentForce = load.type === "gravity" ? ` · ${formatNumber(equivalentForceForLoad(load))} N weight` : "";
+        const equivalentForce = load.type === "gravity" ? ` · ${formatEquivalentForce(equivalentForceForLoad(load), unitSystem)} weight` : "";
         return (
           <div className="editable-item" key={load.id}>
             <div className="editable-summary">
               <span className="item-icon"><ArrowDown size={18} /></span>
-              <strong>{loadTypeLabel(load.type)} · {String(load.parameters.value ?? "")} {units}</strong>
+              <strong>{loadTypeLabel(load.type)} · {formatNumber(displayLoad.value)} {displayLoad.units}</strong>
               <small>{label} · {directionLabelForLoad(load)} direction{equivalentForce}</small>
               <button className="remove-glyph" type="button" aria-label={`Remove ${loadTypeLabel(load.type)} load`} onClick={() => onRemoveLoad(load.id)}><X size={16} /></button>
             </div>
@@ -996,6 +999,11 @@ function formatDimension(value: number) {
 function formatLoadCapacity(value: number) {
   if (!Number.isFinite(value)) return "--";
   return value.toLocaleString(undefined, { maximumFractionDigits: value >= 100 ? 0 : 2 });
+}
+
+function formatEquivalentForce(valueNewtons: number, unitSystem: UnitSystem) {
+  const converted = forceForUnits(valueNewtons, "N", unitSystem);
+  return `${formatNumber(converted.value)} ${converted.units}`;
 }
 
 function formatNumber(value: number) {

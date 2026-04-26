@@ -13,6 +13,7 @@ import { modelRotationRadians } from "../modelOrientation";
 import { formatResultValue, resultProbeSamplesForFaces, resultSamplesForFaces, type FaceResultSample, type ResultProbeTone } from "../resultFields";
 import { stepPreviewGroupFromBase64 } from "../stepPreview";
 import { normalizedStlGeometryFromBuffer } from "../stlPreview";
+import { lengthForUnits, stressForUnits, type UnitSystem } from "../unitDisplay";
 
 export type ViewMode = "model" | "mesh" | "results";
 export type ResultMode = "stress" | "displacement" | "safety_factor";
@@ -48,6 +49,7 @@ interface CadViewerProps {
   showDimensions: boolean;
   stressExaggeration: number;
   resultFields: ResultField[];
+  unitSystem: UnitSystem;
   themeMode: ThemeMode;
   fitSignal: number;
   loadMarkers: ViewerLoadMarker[];
@@ -113,7 +115,7 @@ export function CadViewer(props: CadViewerProps) {
         </button>
       </div>
       <div className="viewer-watermark" aria-hidden="true">Built by Esau Engineering</div>
-      {effectiveViewMode === "results" && <ResultLegend resultMode={props.resultMode} resultFields={props.resultFields} />}
+      {effectiveViewMode === "results" && <ResultLegend resultMode={props.resultMode} resultFields={props.resultFields} unitSystem={props.unitSystem} />}
     </section>
   );
 }
@@ -261,7 +263,7 @@ function AxisDot({ color, position }: { color: string; position: [number, number
   );
 }
 
-function BracketModel({ displayModel, activeStep, selectedFaceId, onSelectFace, viewMode, resultMode, showDeformed, stressExaggeration, resultFields, loadMarkers, supportMarkers }: CadViewerProps) {
+function BracketModel({ displayModel, activeStep, selectedFaceId, onSelectFace, viewMode, resultMode, showDeformed, stressExaggeration, resultFields, unitSystem, loadMarkers, supportMarkers }: CadViewerProps) {
   const [hoveredHit, setHoveredHit] = useState<ModelSelectionHit | null>(null);
   const [selectedHit, setSelectedHit] = useState<ModelSelectionHit | null>(null);
   const modelKind = modelKindForDisplayModel(displayModel);
@@ -331,7 +333,7 @@ function BracketModel({ displayModel, activeStep, selectedFaceId, onSelectFace, 
         const face = displayModel.faces.find((item) => item.id === marker.faceId);
         return face ? <SupportGlyph key={marker.id} kind={modelKind} marker={marker} face={face} active={activeStep === "supports"} /> : null;
       })}
-      {showResultMarkers && resultProbesForKind(modelKind, displayModel.faces, resultMode, resultFields).map((probe) => <ResultProbe key={`${probe.tone}-${probe.label}-${probe.anchor.join(",")}`} {...probe} />)}
+      {showResultMarkers && resultProbesForKind(modelKind, displayModel.faces, resultMode, resultFields, unitSystem).map((probe) => <ResultProbe key={`${probe.tone}-${probe.label}-${probe.anchor.join(",")}`} {...probe} />)}
     </group>
   );
 }
@@ -1273,14 +1275,14 @@ function base64ToArrayBuffer(value: string): ArrayBuffer {
 
 type ResultProbeConfig = { label: string; anchor: [number, number, number]; labelPosition: [number, number, number]; tone: ResultProbeTone };
 
-function resultProbesForKind(kind: SampleModelKind, faces: DisplayFace[], resultMode: ResultMode, resultFields: ResultField[]): ResultProbeConfig[] {
+function resultProbesForKind(kind: SampleModelKind, faces: DisplayFace[], resultMode: ResultMode, resultFields: ResultField[], unitSystem: UnitSystem): ResultProbeConfig[] {
   if (kind === "cantilever") {
     const dynamicProbes = resultProbeSamplesForFaces(faces, resultFields, resultMode);
     if (dynamicProbes.length) {
       return dynamicProbes.map((probe) => resultProbeForFace(probe.face, probe.label, probe.tone));
     }
   }
-  const labels = resultProbeLabels(resultMode, resultFields);
+  const labels = resultProbeLabels(resultMode, resultFields, unitSystem);
   if (kind === "plate") {
     return [
       { label: labels.max, anchor: [0.08, 0.3, PLATE_DEPTH / 2 + 0.07], labelPosition: [-0.55, 0.78, 0.62], tone: "max" },
@@ -1321,7 +1323,7 @@ function resultProbeForFace(face: DisplayFace, label: string, tone: ResultProbeT
   };
 }
 
-function resultProbeLabels(resultMode: ResultMode, resultFields: ResultField[]) {
+function resultProbeLabels(resultMode: ResultMode, resultFields: ResultField[], unitSystem: UnitSystem) {
   const field = resultFields.find((candidate) => candidate.type === resultMode && candidate.location === "face");
   if (field?.values.length) {
     const sorted = [...field.values].sort((left, right) => left - right);
@@ -1334,12 +1336,26 @@ function resultProbeLabels(resultMode: ResultMode, resultFields: ResultField[]) 
     return { max: `Stress: ${formatResultValue(max)}${unit}`, mid: `Stress: ${formatResultValue(mid)}${unit}`, min: `Stress: ${formatResultValue(min)}${unit}` };
   }
   if (resultMode === "displacement") {
-    return { max: "Disp: 0.184 mm", mid: "Disp: 0.092 mm", min: "Disp: 0.012 mm" };
+    const max = lengthForUnits(0.184, "mm", unitSystem);
+    const mid = lengthForUnits(0.092, "mm", unitSystem);
+    const min = lengthForUnits(0.012, "mm", unitSystem);
+    return {
+      max: `Disp: ${formatResultValue(max.value)} ${max.units}`,
+      mid: `Disp: ${formatResultValue(mid.value)} ${mid.units}`,
+      min: `Disp: ${formatResultValue(min.value)} ${min.units}`
+    };
   }
   if (resultMode === "safety_factor") {
     return { max: "FoS: 1.8", mid: "FoS: 4.7", min: "FoS: 7.6" };
   }
-  return { max: "Stress: 142 MPa", mid: "Stress: 64 MPa", min: "Stress: 28 MPa" };
+  const max = stressForUnits(142, "MPa", unitSystem);
+  const mid = stressForUnits(64, "MPa", unitSystem);
+  const min = stressForUnits(28, "MPa", unitSystem);
+  return {
+    max: `Stress: ${formatResultValue(max.value)} ${max.units}`,
+    mid: `Stress: ${formatResultValue(mid.value)} ${mid.units}`,
+    min: `Stress: ${formatResultValue(min.value)} ${min.units}`
+  };
 }
 
 function ResultProbe({ label, anchor, labelPosition, tone }: ResultProbeConfig) {
@@ -1463,12 +1479,14 @@ function supportLabel(marker: ViewerSupportMarker) {
   return `${kind} ${marker.stackIndex + 1}`;
 }
 
-function ResultLegend({ resultMode, resultFields }: { resultMode: ResultMode; resultFields: ResultField[] }) {
+function ResultLegend({ resultMode, resultFields, unitSystem }: { resultMode: ResultMode; resultFields: ResultField[]; unitSystem: UnitSystem }) {
   const title = resultMode === "stress" ? "Von Mises Stress" : resultMode === "displacement" ? "Displacement" : "Safety Factor";
   const field = resultFields.find((candidate) => candidate.type === resultMode && candidate.location === "face");
-  const unit = field?.units ?? (resultMode === "stress" ? "MPa" : resultMode === "displacement" ? "mm" : "");
-  const minValue = field?.min ?? (resultMode === "stress" ? 28 : resultMode === "displacement" ? 0 : 1.8);
-  const maxValue = field?.max ?? (resultMode === "stress" ? 142 : resultMode === "displacement" ? 0.184 : 7.6);
+  const fallbackMin = resultMode === "stress" ? stressForUnits(28, "MPa", unitSystem) : resultMode === "displacement" ? lengthForUnits(0, "mm", unitSystem) : { value: 1.8, units: "" };
+  const fallbackMax = resultMode === "stress" ? stressForUnits(142, "MPa", unitSystem) : resultMode === "displacement" ? lengthForUnits(0.184, "mm", unitSystem) : { value: 7.6, units: "" };
+  const unit = field?.units ?? fallbackMax.units;
+  const minValue = field?.min ?? fallbackMin.value;
+  const maxValue = field?.max ?? fallbackMax.value;
   const ticks = [0, 0.25, 0.5, 0.75, 1].map((tick) => formatResultValue(minValue + (maxValue - minValue) * tick));
   const min = `${ticks[0]} Min`;
   const max = `${ticks[4]} Max`;
