@@ -161,8 +161,7 @@ svg {
 }
 
 .start-caption {
-  width: 320px;
-  max-width: 100%;
+  width: min(430px, 100%);
   margin: 20px 0 0;
   color: var(--color-text-muted);
   font-size: var(--fs-sm);
