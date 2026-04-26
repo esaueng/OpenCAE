@@ -16,6 +16,7 @@ import { stepPreviewFromBase64 } from "../stepPreview";
 import { normalizedStlGeometryFromBuffer } from "../stlPreview";
 import { lengthForUnits, stressForUnits, type UnitSystem } from "../unitDisplay";
 import { loadMarkerDisplayLabel, type PayloadObjectSelection } from "../loadPreview";
+import { highlightPayloadObjectMeshes } from "../payloadObjectHighlight";
 
 export type ViewMode = "model" | "mesh" | "results";
 export type ResultMode = "stress" | "displacement" | "safety_factor";
@@ -301,6 +302,7 @@ function BracketModel({
   const showBoundaryMarkers = !isResultView;
   const placementMode = activeStep === "loads" || activeStep === "supports";
   const activeHit = hoveredHit ?? selectedHit;
+  const activePayloadObjectId = payloadObjectSelectionMode ? activeHit?.payloadObject?.id : undefined;
 
   useEffect(() => {
     if (!selectedFaceId) {
@@ -367,6 +369,7 @@ function BracketModel({
           displayModel={displayModel}
           color={materialColor("face-base-bottom")}
           pickHandlers={pickHandlers}
+          activePayloadObjectId={activePayloadObjectId}
           onMeasureDisplayModelDimensions={onMeasureDisplayModelDimensions}
           onUploadedPreviewBounds={onUploadedPreviewBounds}
         />
@@ -585,6 +588,7 @@ function SampleSolid({
   color,
   displayModel,
   pickHandlers,
+  activePayloadObjectId,
   onMeasureDisplayModelDimensions,
   onUploadedPreviewBounds
 }: {
@@ -592,6 +596,7 @@ function SampleSolid({
   color: string;
   displayModel?: DisplayModel;
   pickHandlers?: ModelPickHandlers;
+  activePayloadObjectId?: string;
   onMeasureDisplayModelDimensions?: (dimensions: NonNullable<DisplayModel["dimensions"]>) => void;
   onUploadedPreviewBounds?: (bounds: THREE.Box3) => void;
 }) {
@@ -602,6 +607,7 @@ function SampleSolid({
         displayModel={displayModel}
         color={color}
         pickHandlers={pickHandlers}
+        activePayloadObjectId={activePayloadObjectId}
         onMeasureDisplayModelDimensions={onMeasureDisplayModelDimensions}
         onUploadedPreviewBounds={onUploadedPreviewBounds}
       />
@@ -656,12 +662,14 @@ function UploadedSolid({
   displayModel,
   color,
   pickHandlers,
+  activePayloadObjectId,
   onMeasureDisplayModelDimensions,
   onUploadedPreviewBounds
 }: {
   displayModel?: DisplayModel;
   color: string;
   pickHandlers?: ModelPickHandlers;
+  activePayloadObjectId?: string;
   onMeasureDisplayModelDimensions?: (dimensions: NonNullable<DisplayModel["dimensions"]>) => void;
   onUploadedPreviewBounds?: (bounds: THREE.Box3) => void;
 }) {
@@ -671,26 +679,29 @@ function UploadedSolid({
         displayModel={displayModel}
         color={color}
         pickHandlers={pickHandlers}
+        activePayloadObjectId={activePayloadObjectId}
         onMeasureDisplayModelDimensions={onMeasureDisplayModelDimensions}
         onUploadedPreviewBounds={onUploadedPreviewBounds}
       />
     );
   }
   if (!displayModel?.visualMesh) return <UnsupportedUploadedModelNotice filename={displayModel?.name ?? "Uploaded model"} />;
-  if (displayModel.visualMesh.format === "obj") return <UploadedObjModel displayModel={displayModel} pickHandlers={pickHandlers} />;
-  return <UploadedStlModel displayModel={displayModel} color={color} pickHandlers={pickHandlers} />;
+  if (displayModel.visualMesh.format === "obj") return <UploadedObjModel displayModel={displayModel} pickHandlers={pickHandlers} activePayloadObjectId={activePayloadObjectId} />;
+  return <UploadedStlModel displayModel={displayModel} color={color} pickHandlers={pickHandlers} activePayloadObjectId={activePayloadObjectId} />;
 }
 
 function UploadedNativeCadModel({
   displayModel,
   color,
   pickHandlers,
+  activePayloadObjectId,
   onMeasureDisplayModelDimensions,
   onUploadedPreviewBounds
 }: {
   displayModel: DisplayModel;
   color: string;
   pickHandlers?: ModelPickHandlers;
+  activePayloadObjectId?: string;
   onMeasureDisplayModelDimensions?: (dimensions: NonNullable<DisplayModel["dimensions"]>) => void;
   onUploadedPreviewBounds?: (bounds: THREE.Box3) => void;
 }) {
@@ -716,6 +727,10 @@ function UploadedNativeCadModel({
     };
   }, [color, displayModel.nativeCad?.contentBase64, onMeasureDisplayModelDimensions, onUploadedPreviewBounds]);
 
+  useEffect(() => {
+    if (preview.object) highlightPayloadObjectMeshes(preview.object, activePayloadObjectId, { baseColor: color, highlightColor: "#7cc7ff" });
+  }, [activePayloadObjectId, color, preview.object]);
+
   if (preview.status === "loading") {
     return (
       <Html center position={[0, 0.35, 0]} className="model-notice">
@@ -736,7 +751,8 @@ function UploadedNativeCadModel({
   );
 }
 
-function UploadedStlModel({ displayModel, color, pickHandlers }: { displayModel: DisplayModel; color: string; pickHandlers?: ModelPickHandlers }) {
+function UploadedStlModel({ displayModel, color, pickHandlers, activePayloadObjectId }: { displayModel: DisplayModel; color: string; pickHandlers?: ModelPickHandlers; activePayloadObjectId?: string }) {
+  const meshRef = useRef<THREE.Mesh | null>(null);
   const geometry = useMemo(() => {
     const nextGeometry = normalizedStlGeometryFromBuffer(base64ToArrayBuffer(displayModel.visualMesh?.contentBase64 ?? ""));
     nextGeometry.userData.opencaeObjectLabel = displayModel.name.replace(" uploaded model", "");
@@ -744,15 +760,19 @@ function UploadedStlModel({ displayModel, color, pickHandlers }: { displayModel:
     return nextGeometry;
   }, [displayModel.visualMesh?.contentBase64]);
 
+  useEffect(() => {
+    if (meshRef.current) highlightPayloadObjectMeshes(meshRef.current, activePayloadObjectId, { baseColor: color, highlightColor: "#7cc7ff" });
+  }, [activePayloadObjectId, color]);
+
   return (
-    <mesh geometry={geometry} userData={geometry.userData} {...pickHandlers}>
+    <mesh ref={meshRef} geometry={geometry} userData={geometry.userData} {...pickHandlers}>
       <meshStandardMaterial color={color} metalness={0.18} roughness={0.54} />
       <Edges color="#c8d3df" threshold={15} />
     </mesh>
   );
 }
 
-function UploadedObjModel({ displayModel, pickHandlers }: { displayModel: DisplayModel; pickHandlers?: ModelPickHandlers }) {
+function UploadedObjModel({ displayModel, pickHandlers, activePayloadObjectId }: { displayModel: DisplayModel; pickHandlers?: ModelPickHandlers; activePayloadObjectId?: string }) {
   const object = useMemo(() => {
     const text = new TextDecoder().decode(base64ToArrayBuffer(displayModel.visualMesh?.contentBase64 ?? ""));
     const parsed = new OBJLoader().parse(text);
@@ -774,6 +794,10 @@ function UploadedObjModel({ displayModel, pickHandlers }: { displayModel: Displa
     });
     return parsed;
   }, [displayModel.visualMesh?.contentBase64]);
+
+  useEffect(() => {
+    highlightPayloadObjectMeshes(object, activePayloadObjectId, { baseColor: "#9aa7b4", highlightColor: "#7cc7ff" });
+  }, [activePayloadObjectId, object]);
 
   return <primitive object={object} {...pickHandlers} />;
 }
@@ -1549,14 +1573,18 @@ function ResultProbe({ label, anchor, labelPosition, tone }: ResultProbeConfig) 
 }
 
 function ModelHitLabel({ hit, active }: { hit: ModelSelectionHit; active: boolean }) {
-  const labelPosition = new THREE.Vector3(...hit.point).add(new THREE.Vector3(0, 0.12, 0.12));
+  const anchor = hit.payloadObject?.center ?? hit.point;
+  const label = hit.payloadObject?.label ?? compactFaceLabel(hit.face.label);
+  const labelPosition = new THREE.Vector3(...anchor).add(new THREE.Vector3(0, 0.12, 0.12));
   return (
     <group>
-      <mesh position={hit.point}>
-        <sphereGeometry args={[active ? 0.035 : 0.026, 18, 18]} />
-        <meshBasicMaterial color={active ? "#4da3ff" : "#f8d77b"} depthTest={false} toneMapped={false} />
-      </mesh>
-      <SceneLabel label={compactFaceLabel(hit.face.label)} position={labelPosition.toArray()} tone={active ? "active-load" : "load"} />
+      {!hit.payloadObject && (
+        <mesh position={hit.point}>
+          <sphereGeometry args={[active ? 0.035 : 0.026, 18, 18]} />
+          <meshBasicMaterial color={active ? "#4da3ff" : "#f8d77b"} depthTest={false} toneMapped={false} />
+        </mesh>
+      )}
+      <SceneLabel label={label} position={labelPosition.toArray()} tone={active ? "active-load" : "load"} />
     </group>
   );
 }
