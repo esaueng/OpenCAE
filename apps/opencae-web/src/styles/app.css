@@ -1873,7 +1873,7 @@ button:disabled {
   height: var(--statusbar-h);
   display: flex;
   align-items: center;
-  gap: var(--sp-4);
+  gap: var(--sp-3);
   padding: 0 12px;
   color: var(--color-text-muted);
   overflow: hidden;
@@ -1882,8 +1882,8 @@ button:disabled {
 .status-tabs {
   height: 100%;
   display: flex;
-  align-items: stretch;
-  gap: var(--sp-3);
+  align-items: center;
+  gap: 6px;
 }
 
 .status-tabs button {
@@ -1891,22 +1891,22 @@ button:disabled {
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  min-height: 22px;
+  padding: 0 8px;
   color: var(--color-text-muted);
+  background: rgba(11, 15, 20, 0.24);
+  border: var(--border-thin);
+  border-radius: var(--radius-md);
   font-size: var(--fs-xs);
 }
 
+.status-tabs button:hover,
+.status-tabs button:focus-visible,
 .status-tabs button.active {
   color: var(--color-text);
-}
-
-.status-tabs button.active::after {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  height: 2px;
-  content: "";
-  background: var(--color-accent);
+  background: var(--color-surface-2);
+  border-color: var(--color-accent-border);
+  outline: none;
 }
 
 .count-pill {
@@ -1924,7 +1924,7 @@ button:disabled {
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 0;
+  gap: var(--sp-3);
   overflow: hidden;
   white-space: nowrap;
 }
@@ -1933,8 +1933,6 @@ button:disabled {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 0 10px;
-  border-left: var(--border-thin);
   font-family: var(--font-mono);
   font-size: var(--fs-xs);
 }
