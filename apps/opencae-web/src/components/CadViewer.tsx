@@ -51,6 +51,7 @@ interface CadViewerProps {
   activeStep: StepId;
   selectedFaceId: string | null;
   payloadObjectSelectionMode: boolean;
+  selectedPayloadObject: PayloadObjectSelection | null;
   onSelectFace: (face: DisplayFace, point?: [number, number, number], payloadObject?: PayloadObjectSelection) => void;
   viewMode: ViewMode;
   resultMode: ResultMode;
@@ -328,6 +329,7 @@ function BracketModel({
   activeStep,
   selectedFaceId,
   payloadObjectSelectionMode,
+  selectedPayloadObject,
   onSelectFace,
   viewMode,
   resultMode,
@@ -350,7 +352,7 @@ function BracketModel({
   const placementMode = activeStep === "loads" || activeStep === "supports";
   const activeHit = hoveredHit ?? selectedHit;
   const showModelHitLabel = shouldShowModelHitLabel(viewMode, Boolean(hoveredHit));
-  const activePayloadObjectId = payloadHighlightObjectId(payloadObjectSelectionMode, hoveredHit?.payloadObject ?? null);
+  const activePayloadObjectId = payloadHighlightObjectId(payloadObjectSelectionMode, selectedPayloadObject ?? hoveredHit?.payloadObject ?? null);
   const boundaryLabelPositions = useMemo(() => {
     if (!showBoundaryMarkers) return new Map<string, [number, number, number]>();
     const bounds = dimensionBoundsForDisplayModel(displayModel);
