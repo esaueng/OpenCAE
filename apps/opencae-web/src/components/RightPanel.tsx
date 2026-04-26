@@ -137,6 +137,28 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sa
           {confirmSampleLoad && <span className="panel-copy confirm-copy">This will reload {sampleLabel} and reset the sample setup.</span>}
         </label>
       )}
+      <input
+        ref={uploadInputRef}
+        className="hidden-file-input"
+        type="file"
+        tabIndex={-1}
+        aria-hidden="true"
+        accept=".step,.stp,.stl,.obj"
+        onChange={(event) => {
+          const file = event.currentTarget.files?.[0];
+          event.currentTarget.value = "";
+          if (file) onUploadModel(file);
+        }}
+      />
+      <button className={isBlankProject ? "primary wide" : "secondary wide"} type="button" onClick={() => uploadInputRef.current?.click()}>
+        <Upload size={16} />
+        {isBlankProject ? "Upload model" : "Replace model"}
+      </button>
+      {isBlankProject ? (
+        <Callout>Upload STEP, STP, or STL to import a model. STL files use the mesh preview; STEP files import as a selectable CAD body.</Callout>
+      ) : isUploadedProject ? (
+        <Callout>{isNativeCadImport ? `${geometry.filename} is loaded as a selectable STEP import.` : uploadPreviewFormat ? `${geometry.filename} is loaded with a ${uploadPreviewFormat} viewport preview.` : `${geometry.filename} cannot be previewed in this local viewer. Replace it with STEP, STP, or STL.`}</Callout>
+      ) : null}
       <div className="summary-box">
         <Info label="Project" value={project.name} />
         <Info label="Model" value={geometry?.filename ?? "No model loaded"} />
@@ -170,28 +192,7 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sa
         <button className="secondary" onClick={onFitView}><Maximize2 size={16} />Fit view</button>
         <button className={viewMode === "mesh" ? "primary" : "secondary"} onClick={() => onViewModeChange(viewMode === "mesh" ? "model" : "mesh")}><Eye size={16} />Toggle mesh</button>
       </div>
-      <input
-        ref={uploadInputRef}
-        className="hidden-file-input"
-        type="file"
-        tabIndex={-1}
-        aria-hidden="true"
-        accept=".step,.stp,.stl,.obj"
-        onChange={(event) => {
-          const file = event.currentTarget.files?.[0];
-          event.currentTarget.value = "";
-          if (file) onUploadModel(file);
-        }}
-      />
-      <button className={isBlankProject ? "primary wide" : "secondary wide"} type="button" onClick={() => uploadInputRef.current?.click()}>
-        <Upload size={16} />
-        {isBlankProject ? "Upload model" : "Replace model"}
-      </button>
-      {isBlankProject ? (
-        <Callout>Upload STEP, STP, or STL to import a model. STL files use the mesh preview; STEP files import as a selectable CAD body.</Callout>
-      ) : isUploadedProject ? (
-        <Callout>{isNativeCadImport ? `${geometry.filename} is loaded as a selectable STEP import.` : uploadPreviewFormat ? `${geometry.filename} is loaded with a ${uploadPreviewFormat} viewport preview.` : `${geometry.filename} cannot be previewed in this local viewer. Replace it with STEP, STP, or STL.`}</Callout>
-      ) : (
+      {!isBlankProject && !isUploadedProject && (
         <>
           <SectionTitle>Preconfigured</SectionTitle>
           <div className="concept-card-list">
