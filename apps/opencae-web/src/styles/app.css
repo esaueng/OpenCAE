@@ -1436,13 +1436,16 @@ button:disabled {
 
 .summary-box,
 .list-block,
-.editable-list,
 .placement-chip {
   margin-top: 14px;
   padding: 10px;
   background: var(--color-surface-2);
   border: var(--border-thin);
   border-radius: var(--radius-md);
+}
+
+.editable-list {
+  margin-top: 14px;
 }
 
 .dimension-box {
