@@ -25,6 +25,8 @@ describe("STEP preview helpers", () => {
     expect(mesh).toBeDefined();
     expect((mesh?.geometry as THREE.BufferGeometry).getAttribute("position").count).toBe(3);
     expect(group.scale.x).toBeCloseTo(0.24);
-    expect(group.position.x).toBeCloseTo(-5);
+    expect(group.position.x).toBeCloseTo(-1.2);
+    const box = new THREE.Box3().setFromObject(group);
+    expect(box.getCenter(new THREE.Vector3()).length()).toBeCloseTo(0);
   });
 });
