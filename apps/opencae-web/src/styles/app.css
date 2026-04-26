@@ -830,7 +830,7 @@ svg {
 }
 
 .panel-header {
-  padding: 14px 16px 10px;
+  padding: 10px 16px 8px;
   border-bottom: var(--border-thin);
 }
 
@@ -844,10 +844,14 @@ svg {
 }
 
 .panel-section h2 {
-  margin: 5px 0 7px;
+  margin: 3px 0 4px;
   font-size: var(--fs-lg);
   font-weight: var(--fw-medium);
   letter-spacing: 0;
+}
+
+.panel-header .helper {
+  line-height: 1.38;
 }
 
 .helper,
@@ -1244,9 +1248,9 @@ input {
 
 .print-settings {
   display: grid;
-  gap: 10px;
-  margin: 14px 0;
-  padding: 10px;
+  gap: 8px;
+  margin: 10px 0 12px;
+  padding: 8px;
   background: var(--color-surface-2);
   border: var(--border-thin);
   border-radius: var(--radius-md);
@@ -1255,7 +1259,7 @@ input {
 .print-settings-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  gap: 8px;
 }
 
 .print-settings-grid .field {

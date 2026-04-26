@@ -273,7 +273,7 @@ function MaterialPanel({ project, displayModel, study, onAssignMaterial, onPrevi
         <Info label="Poisson ratio" value={String(selectedMaterial.poissonRatio)} />
         <Info label={printable && printParameters.printed ? "Effective density" : "Density"} value={formatDensity(effectiveMaterial.density, "kg/m^3", project.unitSystem)} />
         <Info label={printable && printParameters.printed ? "Effective yield" : "Yield strength"} value={formatMaterialStress(effectiveMaterial.yieldStrength, project.unitSystem)} />
-        {selectedMaterial.printProfile && <Info label="Print process" value={selectedMaterial.printProfile.process} />}
+        {printable && printParameters.printed && selectedMaterial.printProfile && <Info label="Print process" value={selectedMaterial.printProfile.process} />}
       </div>
       {printable && (
         <>
