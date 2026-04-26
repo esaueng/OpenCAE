@@ -116,6 +116,7 @@ describe("RightPanel payload mass controls", () => {
       expect(html).not.toContain("Search materials");
       expect(html).toContain("<datalist");
       expect(html).toContain('value="Carbon steel"');
+      expect(html).not.toContain('label="Plastics"');
       expect(html).toContain("Calculated mass");
       expect(html).toContain("Manual mass override");
       expect(html).toContain("Add payload mass");

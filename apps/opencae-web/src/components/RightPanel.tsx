@@ -462,20 +462,6 @@ function LoadsPanel({
   );
 }
 
-const PAYLOAD_CATEGORY_LABELS: Record<PayloadMaterialCategory, string> = {
-  metal: "Metals",
-  plastic: "Plastics",
-  composite: "Composites",
-  resin: "Resins",
-  "ceramic-glass": "Ceramics & glass",
-  semiconductor: "Semiconductors",
-  rubber: "Rubber & elastomers",
-  wood: "Wood",
-  "concrete-stone": "Concrete & stone",
-  liquid: "Liquids",
-  misc: "Miscellaneous"
-};
-
 const PAYLOAD_CATEGORY_ORDER: PayloadMaterialCategory[] = ["metal", "plastic", "composite", "resin", "ceramic-glass", "semiconductor", "rubber", "wood", "concrete-stone", "liquid", "misc"];
 
 function PayloadMassControls({
@@ -530,7 +516,7 @@ function PayloadMassControls({
             payloadMaterials
               .filter((material) => material.category === category)
               .map((material) => (
-                <option key={material.id} value={material.name} label={PAYLOAD_CATEGORY_LABELS[category]} />
+                <option key={material.id} value={material.name} />
               ))
           )}
         </datalist>
