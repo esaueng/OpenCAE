@@ -178,42 +178,39 @@ export function App() {
 
   useEffect(() => {
     if (!project || !displayModel) return;
-    const timeout = window.setTimeout(() => {
-      writeAutosavedWorkspace(buildAutosavedWorkspace({
-        project,
-        displayModel,
-        results: resultFields.length ? {
-          activeRunId,
-          completedRunId,
-          summary: resultSummary,
-          fields: resultFields
-        } : undefined,
-        ui: {
-          activeStep,
-          selectedFaceId,
-          selectedLoadPoint,
-          selectedPayloadObject,
-          viewMode,
-          themeMode,
-          resultMode,
-          showDeformed,
-          showDimensions,
-          stressExaggeration,
-          draftLoadType,
-          draftLoadValue,
-          draftLoadDirection,
-          sampleModel,
-          activeRunId,
-          completedRunId,
-          runProgress,
-          undoStack,
-          redoStack,
-          status,
-          logs
-        }
-      }));
-    }, 150);
-    return () => window.clearTimeout(timeout);
+    writeAutosavedWorkspace(buildAutosavedWorkspace({
+      project,
+      displayModel,
+      results: resultFields.length ? {
+        activeRunId,
+        completedRunId,
+        summary: resultSummary,
+        fields: resultFields
+      } : undefined,
+      ui: {
+        activeStep,
+        selectedFaceId,
+        selectedLoadPoint,
+        selectedPayloadObject,
+        viewMode,
+        themeMode,
+        resultMode,
+        showDeformed,
+        showDimensions,
+        stressExaggeration,
+        draftLoadType,
+        draftLoadValue,
+        draftLoadDirection,
+        sampleModel,
+        activeRunId,
+        completedRunId,
+        runProgress,
+        undoStack,
+        redoStack,
+        status,
+        logs
+      }
+    }));
   }, [
     activeRunId,
     activeStep,
