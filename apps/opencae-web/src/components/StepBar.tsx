@@ -1,5 +1,5 @@
 import type { Study } from "@opencae/schema";
-import { Activity, Anchor, Box, FileText, FlaskConical, Layers3, Play, Weight } from "lucide-react";
+import { Activity, Anchor, Box, FileText, FlaskConical, Github, Layers3, MessageSquare, Play, Weight } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 export type StepId = "model" | "material" | "supports" | "loads" | "mesh" | "run" | "results" | "report";
@@ -54,6 +54,16 @@ export function StepBar({ activeStep, study, hasResults, onSelect }: StepBarProp
       })}
       </div>
       <div className="stepbar-footer">
+        <div className="stepbar-actions" aria-label="Project links">
+          <button type="button" className="stepbar-link" onClick={() => undefined}>
+            <MessageSquare size={14} aria-hidden="true" />
+            Feedback
+          </button>
+          <a className="stepbar-link" href="https://github.com/esaueng/opencae-beta" target="_blank" rel="noreferrer">
+            <Github size={14} aria-hidden="true" />
+            GitHub
+          </a>
+        </div>
         <div><span>study</span><strong>static</strong></div>
         <div><span>units</span><strong>SI · mm</strong></div>
         <div><span>backend</span><strong>local</strong></div>

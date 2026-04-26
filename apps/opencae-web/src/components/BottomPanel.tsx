@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { REQUIRED_SETTING_HELP_IDS, SETTING_HELP, type SettingHelpVisual } from "../settingHelp";
 
 interface BottomPanelProps {
   status: string;
@@ -16,12 +17,12 @@ export function BottomPanel({ status, logs, projectName, studyName, meshStatus, 
 
   function selectTab(nextTab: typeof tab) {
     setTab(nextTab);
-    setExpanded(nextTab === "logs" ? (value) => !value : false);
+    setExpanded(nextTab === "logs" || nextTab === "tips" ? (value) => (tab === nextTab ? !value : true) : false);
   }
 
   return (
     <footer className={`bottom-panel ${expanded ? "expanded" : ""}`}>
-      {expanded && (
+      {expanded && tab === "logs" && (
         <div className="bottom-content">
           <pre>
             {logs.map((entry, index) => {
@@ -29,6 +30,28 @@ export function BottomPanel({ status, logs, projectName, studyName, meshStatus, 
               return `${new Date(Date.now() - index * 15000).toLocaleTimeString([], { hour12: false })} ${level.padEnd(4, " ")} ${entry}`;
             }).join("\n")}
           </pre>
+        </div>
+      )}
+      {expanded && tab === "tips" && (
+        <div className="bottom-content tips-content">
+          <div className="tips-drawer-header">
+            <span>Settings tips</span>
+            <strong>{REQUIRED_SETTING_HELP_IDS.length} guides</strong>
+          </div>
+          <div className="tips-grid">
+            {REQUIRED_SETTING_HELP_IDS.map((helpId) => {
+              const help = SETTING_HELP[helpId];
+              return (
+                <article className="tip-card" key={helpId}>
+                  <TipVisual kind={help.visual} />
+                  <span>
+                    <strong>{help.title}</strong>
+                    <small>{help.body}</small>
+                  </span>
+                </article>
+              );
+            })}
+          </div>
         </div>
       )}
       <div className="status-strip">
@@ -50,6 +73,16 @@ export function BottomPanel({ status, logs, projectName, studyName, meshStatus, 
         <span className="mock-backend">local solver</span>
       </div>
     </footer>
+  );
+}
+
+function TipVisual({ kind }: { kind: SettingHelpVisual }) {
+  return (
+    <span className={`help-visual ${kind}`} aria-hidden="true">
+      <span className="help-part" />
+      <span className="help-force" />
+      <span className="help-grid" />
+    </span>
   );
 }
 
