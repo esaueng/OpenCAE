@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { canNavigateToStep, shouldAutoAdvanceAfterMeshGeneration, shouldShowStartScreen } from "./appShellState";
+import { canNavigateToStep, printLayerOrientationForViewer, shouldAutoAdvanceAfterMeshGeneration, shouldShowStartScreen } from "./appShellState";
 
 describe("app shell state", () => {
   test("shows the start screen when home is requested from an open project", () => {
@@ -15,5 +15,11 @@ describe("app shell state", () => {
     expect(canNavigateToStep("run", { meshStatus: "ready" })).toBe(false);
     expect(canNavigateToStep("run", { meshStatus: "complete" })).toBe(true);
     expect(canNavigateToStep("mesh", { meshStatus: "not_started" })).toBe(true);
+  });
+
+  test("uses draft print direction for viewer preview before material is applied", () => {
+    expect(printLayerOrientationForViewer("z", "x")).toBe("x");
+    expect(printLayerOrientationForViewer("z", null)).toBeNull();
+    expect(printLayerOrientationForViewer("z", undefined)).toBe("z");
   });
 });

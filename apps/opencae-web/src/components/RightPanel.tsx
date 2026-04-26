@@ -48,6 +48,7 @@ interface RightPanelProps {
   onToggleDimensions: () => void;
   onStressExaggerationChange: (value: number) => void;
   onAssignMaterial: (materialId: string, parameters?: Record<string, unknown>) => void;
+  onPreviewPrintLayerOrientation?: (orientation: "x" | "y" | "z" | null) => void;
   onAddSupport: (selectionRef?: string) => void;
   onUpdateSupport: (support: Constraint) => void;
   onRemoveSupport: (supportId: string) => void;
@@ -214,7 +215,7 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sa
   );
 }
 
-function MaterialPanel({ project, study, onAssignMaterial }: RightPanelProps) {
+function MaterialPanel({ project, study, onAssignMaterial, onPreviewPrintLayerOrientation }: RightPanelProps) {
   const currentAssignment = study.materialAssignments[0];
   const current = currentAssignment?.materialId ?? "mat-aluminum-6061";
   const currentParameters = currentAssignment?.parameters ?? EMPTY_PARAMETERS;
@@ -238,6 +239,10 @@ function MaterialPanel({ project, study, onAssignMaterial }: RightPanelProps) {
   const assignedDetail = assignedPrintParameters?.printed
     ? `3D printed · ${assignedPrintParameters.infillDensity}% infill`
     : "all bodies";
+
+  useEffect(() => {
+    onPreviewPrintLayerOrientation?.(printable && printParameters.printed ? printParameters.layerOrientation ?? "z" : null);
+  }, [onPreviewPrintLayerOrientation, printable, printParameters.layerOrientation, printParameters.printed]);
 
   function handleMaterialChange(materialId: string) {
     const material = materialForId(materialId);

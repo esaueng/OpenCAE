@@ -20,3 +20,7 @@ export function canNavigateToStep(step: string, { meshStatus }: { meshStatus: st
   if (step !== "run") return true;
   return meshStatus === "complete";
 }
+
+export function printLayerOrientationForViewer<T extends string>(assigned: T | null, preview: T | null | undefined): T | null {
+  return preview === undefined ? assigned : preview;
+}

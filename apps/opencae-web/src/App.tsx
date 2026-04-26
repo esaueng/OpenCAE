@@ -21,7 +21,7 @@ import {
 import { resetDisplayModelOrientation, type RotationAxis } from "./modelOrientation";
 import { buildLocalProjectFile, suggestedProjectFilename, type LocalResultBundle } from "./projectFile";
 import { buildAutosavedWorkspace, readAutosavedWorkspace, writeAutosavedWorkspace, type ThemeMode } from "./appPersistence";
-import { canNavigateToStep, shouldAutoAdvanceAfterMeshGeneration, shouldShowStartScreen } from "./appShellState";
+import { canNavigateToStep, printLayerOrientationForViewer, shouldAutoAdvanceAfterMeshGeneration, shouldShowStartScreen } from "./appShellState";
 import { displayModelForUnits, loadValueForUnits, resultFieldForUnits, resultSummaryForUnits, type UnitSystem } from "./unitDisplay";
 import { supportDisplayLabel } from "./supportLabels";
 import { nextSelectedPayloadObject, shouldClearPayloadSelectionOnViewerMiss } from "./payloadSelection";
@@ -82,9 +82,10 @@ export function App() {
   const [draftLoadDirection, setDraftLoadDirection] = useState<LoadDirectionLabel>(restoredUi?.draftLoadDirection ?? "-Z");
   const [previewLoadEdit, setPreviewLoadEdit] = useState<Load | null>(null);
   const [sampleModel, setSampleModel] = useState<SampleModelId>(restoredUi?.sampleModel ?? "bracket");
+  const [previewPrintLayerOrientation, setPreviewPrintLayerOrientation] = useState<PrintLayerOrientation | null | undefined>(undefined);
 
   const study = project?.studies[0] ?? null;
-  const printLayerOrientation = useMemo<PrintLayerOrientation | null>(() => {
+  const assignedPrintLayerOrientation = useMemo<PrintLayerOrientation | null>(() => {
     const assignment = study?.materialAssignments[0];
     if (!assignment) return null;
     const material = starterMaterials.find((candidate) => candidate.id === assignment.materialId);
@@ -92,6 +93,7 @@ export function App() {
     const parameters = normalizePrintParameters(material, assignment.parameters ?? {});
     return parameters.printed ? parameters.layerOrientation ?? "z" : null;
   }, [study?.materialAssignments]);
+  const printLayerOrientation = printLayerOrientationForViewer(assignedPrintLayerOrientation, previewPrintLayerOrientation);
   const reportRunId = useMemo(() => {
     if (completedRunId) return completedRunId;
     if (runProgress >= 100 && activeRunId) return activeRunId;
@@ -632,6 +634,7 @@ export function App() {
           onToggleDimensions={() => setShowDimensions((value) => !value)}
           onStressExaggerationChange={setStressExaggeration}
           onAssignMaterial={(materialId, parameters) => updateStudy(assignMaterial(study.id, materialId, parameters, study), "supports")}
+          onPreviewPrintLayerOrientation={setPreviewPrintLayerOrientation}
           onAddSupport={(selectionRef) => updateStudy(addSupport(study.id, selectionRef, study))}
           onUpdateSupport={(support: Constraint) =>
             updateStudy(
