@@ -1,7 +1,7 @@
 import type { Project, Study } from "@opencae/schema";
 import { Activity, Anchor, Box, FileText, FlaskConical, Github, Layers3, MessageSquare, Play, Weight } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { formatUnitSystemLabel, type UnitSystem } from "../unitDisplay";
+import type { UnitSystem } from "../unitDisplay";
 
 export type StepId = "model" | "material" | "supports" | "loads" | "mesh" | "run" | "results" | "report";
 
@@ -37,6 +37,10 @@ export function StepBar({ activeStep, project, study, hasResults, onSelect, onUn
     report: study.runs.some((run) => Boolean(run.reportRef))
   };
 
+  const unitLabel = project.unitSystem === "SI" ? "metric" : "imperial";
+  const unitShort = project.unitSystem === "SI" ? "mm" : "in";
+  const nextUnitLabel = project.unitSystem === "SI" ? "Imperial" : "Metric";
+
   return (
     <nav className="stepbar" aria-label="Simulation workflow">
       <div className="stepbar-eyebrow">workflow</div>
@@ -70,9 +74,11 @@ export function StepBar({ activeStep, project, study, hasResults, onSelect, onUn
         <div><span>study</span><strong>static</strong></div>
         <div className="unit-switch">
           <span>units</span>
-          <strong>{formatUnitSystemLabel(project.unitSystem)}</strong>
+          <strong>{unitLabel}</strong>
+          <span aria-hidden="true" />
+          <strong>{unitShort}</strong>
           <button type="button" className="unit-toggle" onClick={() => onUnitSystemChange(project.unitSystem === "SI" ? "US" : "SI")}>
-            {project.unitSystem === "SI" ? "Use Imperial" : "Use Metric"}
+            {nextUnitLabel}
           </button>
         </div>
         <div><span>backend</span><strong>local</strong></div>
