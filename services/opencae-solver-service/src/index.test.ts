@@ -147,7 +147,7 @@ describe("LocalMockComputeBackend", () => {
       const aluminum = await aluminumRun;
 
       const absRun = backend.runStaticSolve({
-        study: studyWithLoads([load], "mat-abs"),
+        study: studyWithLoads([load], "mat-abs", { printed: false }),
         runId: "run-abs",
         meshRef: "mesh-abs",
         publish: vi.fn()
@@ -263,8 +263,12 @@ describe("LocalMockComputeBackend", () => {
       await vi.runAllTimersAsync();
       const printed = await printedRun;
 
+      expect(printed.summary.maxStress).toBeGreaterThan(solid.summary.maxStress);
       expect(printed.summary.maxDisplacement).toBeGreaterThan(solid.summary.maxDisplacement);
       expect(printed.summary.safetyFactor).toBeLessThan(solid.summary.safetyFactor);
+      expect(printed.fields.find((field) => field.type === "stress")?.values).not.toEqual(
+        solid.fields.find((field) => field.type === "stress")?.values
+      );
       expect(await storage.getObject("project-test/solver/run-petg-printed/solver.inp").then((buffer) => buffer.toString("utf8"))).toContain("infillDensity=35");
     } finally {
       vi.useRealTimers();
