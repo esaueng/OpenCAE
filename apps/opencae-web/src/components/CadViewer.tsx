@@ -1920,11 +1920,33 @@ function LoadGlyph({ marker, face, active }: { marker: ViewerLoadMarker; face: D
   return (
     <group>
       {presentation.showArrow && <ArrowGlyph start={start} end={end} color={markerColor} />}
+      {presentation.showLeader && (
+        <PayloadMassLeader
+          anchor={center}
+          labelPosition={massLabelPosition}
+          color={markerColor}
+        />
+      )}
       <SceneLabel
         label={presentation.label}
         position={(presentation.showArrow ? tailLabelPosition : massLabelPosition).toArray()}
         tone={labelTone}
       />
+    </group>
+  );
+}
+
+function PayloadMassLeader({ anchor, labelPosition, color }: { anchor: THREE.Vector3; labelPosition: THREE.Vector3; color: string }) {
+  const labelAnchor = labelPosition.clone().add(anchor.clone().sub(labelPosition).normalize().multiplyScalar(0.16));
+  return (
+    <group>
+      <Line points={[anchor.toArray(), labelAnchor.toArray()]} color={color} transparent opacity={0.82} lineWidth={1.4} />
+      <Billboard position={anchor.toArray()}>
+        <mesh>
+          <ringGeometry args={[0.045, 0.072, 28]} />
+          <meshBasicMaterial color={color} depthTest={false} toneMapped={false} transparent opacity={0.92} />
+        </mesh>
+      </Billboard>
     </group>
   );
 }
