@@ -1,7 +1,7 @@
 import type { DisplayModel, Project, ResultField, ResultSummary, RunEvent, Study } from "@opencae/schema";
 import type { LoadDirection, LoadType } from "../loadPreview";
 import { embedUploadedModelFile, type EmbeddedModelFile, type LocalResultBundle } from "../projectFile";
-import { createLocalBlankProject, createLocalSampleProject, openLocalProjectPayload } from "../localProjectFactory";
+import { createLocalBlankProject, createLocalSampleProject, createLocalUploadResponse, openLocalProjectPayload } from "../localProjectFactory";
 
 export interface SampleProjectResponse {
   message?: string;
@@ -55,7 +55,7 @@ export async function importLocalProject(file: File): Promise<SampleProjectRespo
   );
 }
 
-export async function uploadModel(projectId: string, file: File): Promise<SampleProjectResponse> {
+export async function uploadModel(projectId: string, file: File, currentProject?: Project): Promise<SampleProjectResponse> {
   const contentBase64 = await fileToBase64(file);
   const embeddedModel: EmbeddedModelFile = {
     filename: file.name,
@@ -63,12 +63,18 @@ export async function uploadModel(projectId: string, file: File): Promise<Sample
     size: file.size,
     contentBase64
   };
-  const response = await fetch(`/api/projects/${projectId}/uploads`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ ...embeddedModel })
-  });
-  const data = await readJson<SampleProjectResponse>(response);
+  const data = await fetchJsonWithFallback(
+    `/api/projects/${projectId}/uploads`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ...embeddedModel })
+    },
+    () => {
+      if (!currentProject) throw new Error("Could not upload model without an open project.");
+      return createLocalUploadResponse(currentProject, embeddedModel);
+    }
+  );
   return {
     ...data,
     project: embedUploadedModelFile(data.project, embeddedModel)

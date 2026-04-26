@@ -255,7 +255,7 @@ export function App() {
 
   function handleUploadModel(file: File) {
     if (!project) return;
-    void openProjectResponse(uploadModel(project.id, file)).catch((error: unknown) => {
+    void openProjectResponse(uploadModel(project.id, file, project)).catch((error: unknown) => {
       pushMessage(error instanceof Error ? error.message : "Could not upload model.");
     });
   }
