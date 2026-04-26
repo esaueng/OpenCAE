@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { describe, expect, test } from "vitest";
-import { colorizeResultObject } from "./CadViewer";
+import { colorizeResultObject, shouldShowModelHitLabel } from "./CadViewer";
 import type { FaceResultSample } from "../resultFields";
 
 const samples: FaceResultSample[] = [
@@ -17,6 +17,12 @@ const samples: FaceResultSample[] = [
 ];
 
 describe("CadViewer result coloring", () => {
+  test("hides face selection callouts in result view", () => {
+    expect(shouldShowModelHitLabel("results", true)).toBe(false);
+    expect(shouldShowModelHitLabel("model", true)).toBe(true);
+    expect(shouldShowModelHitLabel("mesh", false)).toBe(false);
+  });
+
   test("applies vertex result colors to imported native CAD preview meshes", () => {
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute("position", new THREE.Float32BufferAttribute([-1, 0, 0, 0, 0, 0, 1, 0, 0], 3));
