@@ -126,6 +126,11 @@ export interface PrintMaterialParameters {
   layerOrientation?: "x" | "y" | "z";
 }
 
+export interface PrintStrengthContext {
+  criticalLayerAxis?: "x" | "y" | "z";
+  criticalLayerFactor?: number;
+}
+
 export function defaultPrintParametersFor(material: Material): PrintMaterialParameters {
   return {
     printed: Boolean(material.printProfile),
@@ -135,7 +140,7 @@ export function defaultPrintParametersFor(material: Material): PrintMaterialPara
   };
 }
 
-export function effectiveMaterialProperties(material: Material, parameters: Record<string, unknown> = {}): Material {
+export function effectiveMaterialProperties(material: Material, parameters: Record<string, unknown> = {}, context: PrintStrengthContext = {}): Material {
   const printSettings = normalizePrintParameters(material, parameters);
   if (!material.printProfile || !printSettings.printed) return material;
 
@@ -143,7 +148,9 @@ export function effectiveMaterialProperties(material: Material, parameters: Reco
   const wallCount = clamp(printSettings.wallCount ?? 3, 1, 12);
   const shellShare = clamp(0.12 + wallCount * 0.045, 0.16, 0.5);
   const sectionFill = clamp(shellShare + (1 - shellShare) * infill, 0.05, 1);
-  const layerFactor = printSettings.layerOrientation === "z" ? 1 : material.printProfile.layerStrengthFactor ?? 0.72;
+  const criticalLayerFactor = context.criticalLayerFactor ?? 0.35;
+  const genericLayerFactor = printSettings.layerOrientation === "z" ? 1 : material.printProfile.layerStrengthFactor ?? 0.72;
+  const layerFactor = context.criticalLayerAxis === printSettings.layerOrientation ? criticalLayerFactor : genericLayerFactor;
   const stiffnessFactor = clamp(0.18 + 0.82 * sectionFill ** 1.35, 0.08, 1);
   const strengthFactor = clamp((0.25 + 0.75 * sectionFill ** 1.15) * layerFactor, 0.08, 1);
   const densityFactor = clamp(0.18 + 0.82 * sectionFill, 0.08, 1);

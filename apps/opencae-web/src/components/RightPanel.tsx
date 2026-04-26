@@ -4,6 +4,7 @@ import { AlertTriangle, Anchor, ArrowDown, Check, CircleHelp, Download, Eye, Fil
 import { defaultPrintParametersFor, effectiveMaterialProperties, massKgForPayloadMaterial, normalizePrintParameters, payloadMaterialForId, payloadMaterials, starterMaterials, type PayloadMaterialCategory, type PrintMaterialParameters } from "@opencae/materials";
 import { assessResultFailure, estimateAllowableLoadForSafetyFactor } from "@opencae/schema";
 import type { Constraint, DisplayFace, DisplayModel, Load, Project, ResultSummary, Study } from "@opencae/schema";
+import { inferCriticalPrintAxis } from "@opencae/study-core";
 import type { ResultMode, ViewMode } from "./CadViewer";
 import type { StepId } from "./StepBar";
 import { applicationPointForLoad, createViewerLoadMarkers, directionLabelForLoad, directionVectorForLabel, equivalentForceForLoad, loadMarkerOrdinalLabel, payloadObjectForLoad, unitsForLoadType, type LoadApplicationPoint, type LoadDirectionLabel, type LoadType, type PayloadLoadMetadata, type PayloadMassMode, type PayloadObjectSelection } from "../loadPreview";
@@ -215,7 +216,7 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sa
   );
 }
 
-function MaterialPanel({ project, study, onAssignMaterial, onPreviewPrintLayerOrientation }: RightPanelProps) {
+function MaterialPanel({ project, displayModel, study, onAssignMaterial, onPreviewPrintLayerOrientation }: RightPanelProps) {
   const currentAssignment = study.materialAssignments[0];
   const current = currentAssignment?.materialId ?? "mat-aluminum-6061";
   const currentParameters = currentAssignment?.parameters ?? EMPTY_PARAMETERS;
@@ -234,7 +235,8 @@ function MaterialPanel({ project, study, onAssignMaterial, onPreviewPrintLayerOr
   const selectedMaterial = materialForId(selectedMaterialId);
   const assignedMaterial = materialForId(current);
   const printable = Boolean(selectedMaterial.printProfile);
-  const effectiveMaterial = effectiveMaterialProperties(selectedMaterial, printable ? { ...printParameters } : {});
+  const criticalLayerAxis = inferCriticalPrintAxis(study, displayModel.faces.map((face) => ({ entityId: face.id, center: face.center })));
+  const effectiveMaterial = effectiveMaterialProperties(selectedMaterial, printable ? { ...printParameters } : {}, { criticalLayerAxis });
   const assignedPrintParameters = assignedMaterial.printProfile ? normalizePrintParameters(assignedMaterial, currentParameters) : undefined;
   const assignedDetail = assignedPrintParameters?.printed
     ? `3D printed · ${assignedPrintParameters.infillDensity}% infill`

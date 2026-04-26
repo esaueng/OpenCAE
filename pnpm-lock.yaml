@@ -78,6 +78,9 @@ importers:
       '@opencae/solver-service':
         specifier: workspace:*
         version: link:../../services/opencae-solver-service
+      '@opencae/study-core':
+        specifier: workspace:*
+        version: link:../../libs/opencae-study-core
       '@opencae/units':
         specifier: workspace:*
         version: link:../../libs/opencae-units
@@ -262,6 +265,9 @@ importers:
       '@opencae/storage':
         specifier: workspace:*
         version: link:../../libs/opencae-storage
+      '@opencae/study-core':
+        specifier: workspace:*
+        version: link:../../libs/opencae-study-core
 
 packages:
 

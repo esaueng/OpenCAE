@@ -203,6 +203,47 @@ describe("LocalMockComputeBackend", () => {
     }
   });
 
+  test("makes X build direction much weaker for cantilever bending across layer lines", async () => {
+    vi.useFakeTimers();
+    try {
+      const storage = new MemoryStorage();
+      const backend = new LocalMockComputeBackend(storage);
+
+      const xRun = backend.runStaticSolve({
+        study: cantileverStudy("mat-petg", { printed: true, infillDensity: 100, wallCount: 3, layerOrientation: "x" }),
+        runId: "run-cantilever-petg-x",
+        meshRef: "mesh-cantilever",
+        publish: vi.fn()
+      });
+      await vi.runAllTimersAsync();
+      const x = await xRun;
+
+      const yRun = backend.runStaticSolve({
+        study: cantileverStudy("mat-petg", { printed: true, infillDensity: 100, wallCount: 3, layerOrientation: "y" }),
+        runId: "run-cantilever-petg-y",
+        meshRef: "mesh-cantilever",
+        publish: vi.fn()
+      });
+      await vi.runAllTimersAsync();
+      const y = await yRun;
+
+      const zRun = backend.runStaticSolve({
+        study: cantileverStudy("mat-petg", { printed: true, infillDensity: 100, wallCount: 3, layerOrientation: "z" }),
+        runId: "run-cantilever-petg-z",
+        meshRef: "mesh-cantilever",
+        publish: vi.fn()
+      });
+      await vi.runAllTimersAsync();
+      const z = await zRun;
+
+      expect(x.summary.safetyFactor).toBeLessThan(y.summary.safetyFactor * 0.7);
+      expect(x.summary.safetyFactor).toBeLessThan(z.summary.safetyFactor * 0.5);
+      expect(await storage.getObject("project-cantilever/solver/run-cantilever-petg-x/solver.inp").then((buffer) => buffer.toString("utf8"))).toContain("layerOrientation=x");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   test("does not cap the material safety factor at the seed summary value", async () => {
     vi.useFakeTimers();
     try {
@@ -323,14 +364,14 @@ function studyWithLoads(loads: Array<{ id: string; type: Load["type"]; value: nu
   };
 }
 
-function cantileverStudy(materialId: string): Study {
+function cantileverStudy(materialId: string, materialParameters: Record<string, unknown> = {}): Study {
   return {
     id: "study-cantilever",
     projectId: "project-cantilever",
     name: "Static Stress",
     type: "static_stress",
     geometryScope: [],
-    materialAssignments: [{ id: "assign", materialId, selectionRef: "selection-body", status: "complete" }],
+    materialAssignments: [{ id: "assign", materialId, selectionRef: "selection-body", parameters: materialParameters, status: "complete" }],
     namedSelections: [
       {
         id: "selection-fixed-face",

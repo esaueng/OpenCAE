@@ -3,6 +3,7 @@ import { assessResultFailure } from "@opencae/schema";
 import type { Load, Material, ResultField, ResultSummary, RunEvent, Study } from "@opencae/schema";
 import type { ObjectStorageProvider } from "@opencae/storage";
 import { bracketDisplayModel, bracketResultSummary } from "@opencae/db/sample-data";
+import { inferCriticalPrintAxis } from "@opencae/study-core";
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const STANDARD_GRAVITY = 9.80665;
@@ -113,7 +114,8 @@ export function solveStudy(study: Study, runId: string) {
   const loads = study.loads.map((load) => loadModelFor(load, faces, supports)).filter((load): load is LoadModel => Boolean(load));
   const material = materialForStudy(study);
   const materialParameters = materialParametersForStudy(study);
-  const effectiveMaterial = effectiveMaterialProperties(material, materialParameters);
+  const criticalLayerAxis = inferCriticalPrintAxis(study, faces);
+  const effectiveMaterial = effectiveMaterialProperties(material, materialParameters, { criticalLayerAxis });
   const response = materialResponse(effectiveMaterial, loads);
   const totalAppliedLoad = round(loads.reduce((sum, load) => sum + load.magnitude, 0));
   const stressValues = faces.map((face) => round(stressAtFace(face, loads, faces) * response.stressScale, 1));
@@ -298,7 +300,9 @@ function estimatedFaceArea(face: FaceModel): number {
 
 function faceGeometry(entityId: string, label: string, index: number, count: number): { center: Vec3; normal: Vec3; baselineStress: number } {
   const key = `${entityId} ${label}`.toLowerCase();
-  const known = knownFaces.find((face) => key.includes(face.match));
+  const known = knownFaces
+    .filter((face) => key.includes(face.match))
+    .sort((left, right) => right.match.length - left.match.length)[0];
   if (known) return known;
   const angle = count <= 1 ? 0 : (index / count) * Math.PI * 2;
   const radius = 1.3;
@@ -308,6 +312,10 @@ function faceGeometry(entityId: string, label: string, index: number, count: num
 
 const knownFaces: Array<{ match: string; center: Vec3; normal: Vec3; baselineStress: number }> = [
   ...bracketDisplayModel.faces.map((face) => ({ match: face.id.toLowerCase(), center: face.center, normal: normalize(face.normal), baselineStress: face.stressValue })),
+  { match: "face-base-left fixed end face", center: [-1.8, 0.18, 0], normal: [-1, 0, 0], baselineStress: 132 },
+  { match: "face-load-top free end load face", center: [1.75, 0.18, 0], normal: [1, 0, 0], baselineStress: 96 },
+  { match: "face-web-front top beam face", center: [0, 0.42, 0], normal: [0, 1, 0], baselineStress: 74 },
+  { match: "face-base-bottom beam bottom face", center: [0, -0.08, 0], normal: [0, -1, 0], baselineStress: 46 },
   { match: "face-load", center: [-1.18, 2.53, 0], normal: [0, 1, 0], baselineStress: 142 },
   { match: "top load", center: [-1.18, 2.53, 0], normal: [0, 1, 0], baselineStress: 142 },
   { match: "base end", center: [2.36, 0, 0], normal: [1, 0, 0], baselineStress: 44 },
