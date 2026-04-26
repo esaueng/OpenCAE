@@ -12,7 +12,7 @@ interface BottomPanelProps {
 
 export function BottomPanel({ status, logs, projectName, studyName, meshStatus, solverStatus }: BottomPanelProps) {
   const [expanded, setExpanded] = useState(false);
-  const [tab, setTab] = useState<"tips" | "logs" | "diagnostics">("tips");
+  const [tab, setTab] = useState<"tips" | "logs">("tips");
   const healthy = solverStatus === "Running" ? "running" : meshStatus === "Ready" ? "ready" : "warning";
 
   function selectTab(nextTab: typeof tab) {
@@ -56,7 +56,7 @@ export function BottomPanel({ status, logs, projectName, studyName, meshStatus, 
       )}
       <div className="status-strip">
         <div className="status-tabs">
-          {(["tips", "logs", "diagnostics"] as const).map((item) => (
+          {(["tips", "logs"] as const).map((item) => (
             <button key={item} className={tab === item ? "active" : ""} onClick={() => selectTab(item)}>
               {item[0]?.toUpperCase()}{item.slice(1)}
               {item === "logs" && <span className="count-pill">{logs.length}</span>}
