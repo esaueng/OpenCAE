@@ -569,7 +569,7 @@ export function App() {
     <div className={`app-shell theme-${themeMode}`}>
       <header className="topbar">
         <button className="brand brand-button" type="button" onClick={handleOpenStartMenu} title="Back to start menu" aria-label="Back to start menu">
-          <TopbarMark />OpenCAE
+          <TopbarMark />OpenCAE <span className="beta-tag">beta</span>
         </button>
         <div className="topbar-divider topbar-divider-project" />
         <div className="breadcrumb">

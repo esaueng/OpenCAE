@@ -266,6 +266,21 @@ svg {
   color: currentColor;
 }
 
+.beta-tag {
+  display: inline-flex;
+  align-items: center;
+  min-height: 16px;
+  padding: 0 5px;
+  color: var(--color-accent);
+  background: var(--color-accent-dim);
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
 .topbar-divider {
   width: 1px;
   height: 20px;
@@ -529,7 +544,7 @@ svg {
 .stepbar-footer > .unit-switch {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, auto);
-  gap: 3px 6px;
+  gap: 4px 6px;
   align-items: center;
 }
 
