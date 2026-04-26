@@ -563,7 +563,10 @@ function LoadEditorList({ study, unitSystem, onUpdateLoad, onPreviewLoadEdit, on
         const selection = study.namedSelections.find((candidate) => candidate.id === load.selectionRef);
         const label = selection?.geometryRefs[0]?.label ?? "selected face";
         const payloadObject = payloadObjectForLoad(load);
-        const pointLabel = payloadObject ? ` · ${payloadObject.label}` : applicationPointForLoad(load) ? " · point load" : "";
+        const payloadMaterial = load.type === "gravity" && typeof load.parameters.payloadMaterialId === "string" ? payloadMaterialForId(load.parameters.payloadMaterialId).name : "";
+        const pointLabel = payloadObject
+          ? ` · ${payloadObject.label}${payloadMaterial ? ` · ${payloadMaterial}` : ""}`
+          : applicationPointForLoad(load) ? " · point load" : "";
         const equivalentForce = load.type === "gravity" ? ` · ${formatEquivalentForce(equivalentForceForLoad(load), unitSystem)} weight` : "";
         const loadLabel = loadLabelsById.get(load.id);
         const editLabel = `Edit ${loadLabel ? `${loadLabel} ` : ""}${load.type} load`;

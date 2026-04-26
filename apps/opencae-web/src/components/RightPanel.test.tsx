@@ -189,6 +189,78 @@ describe("RightPanel payload mass controls", () => {
     expect(html).toContain('aria-label="Edit L1 force load"');
   });
 
+  test("shows the selected payload material in applied payload mass loads", () => {
+    const html = renderToStaticMarkup(
+      <RightPanel
+        activeStep="loads"
+        project={project}
+        displayModel={displayModel}
+        study={{
+          ...study,
+          loads: [{
+            id: "load-1",
+            type: "gravity",
+            selectionRef: "selection-top",
+            parameters: {
+              value: 0.159,
+              units: "kg",
+              direction: [0, 0, -1],
+              payloadMaterialId: "payload-silicon",
+              payloadObject: { id: "part-8", label: "Part 8", center: [1, 2, 3] }
+            },
+            status: "complete"
+          }]
+        }}
+        selectedFace={displayModel.faces[0] ?? null}
+        viewMode="model"
+        resultMode="stress"
+        showDeformed={false}
+        showDimensions={false}
+        stressExaggeration={1}
+        resultSummary={resultSummary}
+        runProgress={0}
+        sampleModel="bracket"
+        draftLoadType="gravity"
+        draftLoadValue={0.159}
+        draftLoadDirection="-Z"
+        selectedLoadPoint={null}
+        selectedPayloadObject={null}
+        onFitView={vi.fn()}
+        onRotateModel={vi.fn()}
+        onResetModelOrientation={vi.fn()}
+        onLoadSample={vi.fn()}
+        onUploadModel={vi.fn()}
+        onSampleModelChange={vi.fn()}
+        onViewModeChange={vi.fn()}
+        onResultModeChange={vi.fn()}
+        onToggleDeformed={vi.fn()}
+        onToggleDimensions={vi.fn()}
+        onStressExaggerationChange={vi.fn()}
+        onAssignMaterial={vi.fn()}
+        onAddSupport={vi.fn()}
+        onUpdateSupport={vi.fn()}
+        onRemoveSupport={vi.fn()}
+        onDraftLoadTypeChange={vi.fn()}
+        onDraftLoadValueChange={vi.fn()}
+        onDraftLoadDirectionChange={vi.fn()}
+        onAddLoad={vi.fn()}
+        onUpdateLoad={vi.fn()}
+        onPreviewLoadEdit={vi.fn()}
+        onRemoveLoad={vi.fn()}
+        onGenerateMesh={vi.fn()}
+        onRunSimulation={vi.fn()}
+        canRunSimulation={false}
+        missingRunItems={[]}
+        canGenerateReport={false}
+        onGenerateReport={vi.fn()}
+        onStepSelect={vi.fn()}
+      />
+    );
+
+    expect(html).toContain("Payload mass");
+    expect(html).toContain("Part 8 · Silicon");
+  });
+
   test("disables next run navigation until mesh generation is complete", () => {
     const html = renderToStaticMarkup(
       <RightPanel
