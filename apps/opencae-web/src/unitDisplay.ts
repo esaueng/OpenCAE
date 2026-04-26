@@ -7,6 +7,8 @@ const MPA_PER_KSI = 6.894757293168361;
 const NEWTONS_PER_LBF = 4.4482216152605;
 const KPA_PER_PSI = 6.894757293168361;
 const KG_PER_LB = 0.45359237;
+const CUBIC_MM_PER_CUBIC_INCH = MM_PER_INCH ** 3;
+const LB_PER_KG_PER_CUBIC_METER = 0.0624279605761;
 
 export function formatUnitSystemLabel(unitSystem: UnitSystem): string {
   return unitSystem === "US" ? "Imperial · in" : "Metric · mm";
@@ -25,6 +27,25 @@ export function formatStress(value: number, units: string, unitSystem: UnitSyste
 export function formatForce(value: number, units: string, unitSystem: UnitSystem): string {
   const converted = forceForUnits(value, units, unitSystem);
   return `${formatDisplayNumber(converted.value)} ${converted.units}`.trim();
+}
+
+export function formatVolume(value: number, units: string, unitSystem: UnitSystem): string {
+  const converted = volumeForUnits(value, units, unitSystem);
+  return `${formatDisplayNumber(converted.value)} ${converted.units}`.trim();
+}
+
+export function formatMass(value: number, units: string, unitSystem: UnitSystem): string {
+  const converted = massForUnits(value, units, unitSystem);
+  return `${formatDisplayNumber(converted.value)} ${converted.units}`.trim();
+}
+
+export function formatDensity(value: number, units: string, unitSystem: UnitSystem): string {
+  const converted = densityForUnits(value, units, unitSystem);
+  return `${formatDisplayNumber(converted.value)} ${converted.units}`.trim();
+}
+
+export function formatMaterialStress(valuePa: number, unitSystem: UnitSystem): string {
+  return formatStress(valuePa / 1_000_000, "MPa", unitSystem);
 }
 
 export function loadValueForUnits(value: number, units: string, unitSystem: UnitSystem): { value: number; units: string } {
@@ -113,8 +134,22 @@ export function pressureForUnits(value: number, units: string, unitSystem: UnitS
 }
 
 export function massForUnits(value: number, units: string, unitSystem: UnitSystem): { value: number; units: string } {
+  if (unitSystem === "US" && units === "g") return { value: value / 1000 / KG_PER_LB, units: "lb" };
+  if (unitSystem === "SI" && units === "lb") return { value: value * KG_PER_LB, units: "kg" };
   if (unitSystem === "US" && units === "kg") return { value: value / KG_PER_LB, units: "lb" };
   if (unitSystem === "SI" && units === "lb") return { value: value * KG_PER_LB, units: "kg" };
+  return { value, units };
+}
+
+export function volumeForUnits(value: number, units: string, unitSystem: UnitSystem): { value: number; units: string } {
+  if (unitSystem === "US" && units === "mm^3") return { value: value / CUBIC_MM_PER_CUBIC_INCH, units: "in^3" };
+  if (unitSystem === "SI" && units === "in^3") return { value: value * CUBIC_MM_PER_CUBIC_INCH, units: "mm^3" };
+  return { value, units };
+}
+
+export function densityForUnits(value: number, units: string, unitSystem: UnitSystem): { value: number; units: string } {
+  if (unitSystem === "US" && units === "kg/m^3") return { value: value * LB_PER_KG_PER_CUBIC_METER, units: "lb/ft^3" };
+  if (unitSystem === "SI" && units === "lb/ft^3") return { value: value / LB_PER_KG_PER_CUBIC_METER, units: "kg/m^3" };
   return { value, units };
 }
 
