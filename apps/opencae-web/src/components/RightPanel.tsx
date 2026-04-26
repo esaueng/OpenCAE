@@ -1,4 +1,5 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { AlertTriangle, Anchor, ArrowDown, Check, CircleHelp, Download, Eye, FileText, Grid3X3, Maximize2, Play, Plus, RotateCcw, RotateCw, Ruler, ShieldCheck, Upload, X } from "lucide-react";
 import { defaultPrintParametersFor, effectiveMaterialProperties, normalizePrintParameters, starterMaterials, type PrintMaterialParameters } from "@opencae/materials";
 import { assessResultFailure, estimateAllowableLoadForSafetyFactor } from "@opencae/schema";
@@ -10,6 +11,7 @@ import type { SampleModelId } from "../lib/api";
 import { formatModelOrientation, getModelOrientation, type RotationAxis } from "../modelOrientation";
 import { shouldShowSampleModelPicker } from "../modelPanelState";
 import { SETTING_HELP, type SettingHelpId, type SettingHelpVisual } from "../settingHelp";
+import { getViewportTooltipPosition } from "../tooltipPosition";
 
 interface RightPanelProps {
   activeStep: StepId;
@@ -844,16 +846,54 @@ function HelpNote({ helpId }: { helpId: SettingHelpId }) {
 function SettingHelpTrigger({ helpId }: { helpId: SettingHelpId }) {
   const tooltipId = useId();
   const help = SETTING_HELP[helpId];
+  const triggerRef = useRef<HTMLSpanElement | null>(null);
+  const tooltipRef = useRef<HTMLSpanElement | null>(null);
+  const [isTooltipOpen, setIsTooltipOpen] = useState(false);
+  const [tooltipStyle, setTooltipStyle] = useState<CSSProperties | undefined>();
+
+  const updateTooltipPosition = () => {
+    const trigger = triggerRef.current;
+    if (!trigger || typeof window === "undefined") return;
+    const tooltipRect = tooltipRef.current?.getBoundingClientRect();
+    const position = getViewportTooltipPosition({
+      triggerRect: trigger.getBoundingClientRect(),
+      viewport: { width: window.innerWidth, height: window.innerHeight },
+      tooltip: { width: tooltipRect?.width || 340, height: tooltipRect?.height || 142 }
+    });
+    setTooltipStyle({ top: position.top, left: position.left });
+  };
+
+  useLayoutEffect(() => {
+    if (!isTooltipOpen) return;
+    updateTooltipPosition();
+  }, [isTooltipOpen, helpId]);
+
+  useEffect(() => {
+    if (!isTooltipOpen || typeof window === "undefined") return;
+    window.addEventListener("resize", updateTooltipPosition);
+    window.addEventListener("scroll", updateTooltipPosition, true);
+    return () => {
+      window.removeEventListener("resize", updateTooltipPosition);
+      window.removeEventListener("scroll", updateTooltipPosition, true);
+    };
+  }, [isTooltipOpen]);
+
   return (
     <span
+      ref={triggerRef}
       className="tooltip-trigger"
       tabIndex={0}
       role="button"
       aria-label={`${help.title} help`}
       aria-describedby={tooltipId}
+      onMouseEnter={() => setIsTooltipOpen(true)}
+      onMouseLeave={() => setIsTooltipOpen(false)}
+      onFocus={() => setIsTooltipOpen(true)}
+      onBlur={() => setIsTooltipOpen(false)}
       onClick={(event) => {
         event.preventDefault();
         event.stopPropagation();
+        setIsTooltipOpen((current) => !current);
       }}
       onMouseDown={(event) => {
         event.preventDefault();
@@ -861,11 +901,15 @@ function SettingHelpTrigger({ helpId }: { helpId: SettingHelpId }) {
       }}
     >
       <CircleHelp size={15} aria-hidden="true" />
-      <span id={tooltipId} className="field-tooltip" role="tooltip">
-        <HelpVisual kind={help.visual} />
-        <strong>{help.title}</strong>
-        <span>{help.body}</span>
-      </span>
+      {isTooltipOpen &&
+        createPortal(
+          <span ref={tooltipRef} id={tooltipId} className="field-tooltip field-tooltip--floating" role="tooltip" style={tooltipStyle}>
+            <HelpVisual kind={help.visual} />
+            <strong>{help.title}</strong>
+            <span>{help.body}</span>
+          </span>,
+          document.body
+        )}
     </span>
   );
 }
