@@ -1,4 +1,5 @@
 import type { DisplayModel } from "@opencae/schema";
+import * as THREE from "three";
 
 export type RotationAxis = "x" | "y" | "z";
 
@@ -9,6 +10,8 @@ export interface ModelOrientation {
 }
 
 const DEFAULT_ORIENTATION: ModelOrientation = { x: 0, y: 0, z: 0 };
+const LEGACY_SAMPLE_BASE_ROTATION: [number, number, number] = [Math.PI / 2, 0, 0];
+const NO_BASE_ROTATION: [number, number, number] = [0, 0, 0];
 
 export function getModelOrientation(displayModel: DisplayModel): ModelOrientation {
   return {
@@ -45,9 +48,31 @@ export function modelRotationRadians(displayModel: DisplayModel): [number, numbe
   ];
 }
 
+export function baseModelRotationRadians(displayModel: DisplayModel): [number, number, number] {
+  return isUploadedDisplayModel(displayModel) || displayModel.bodyCount === 0 ? NO_BASE_ROTATION : LEGACY_SAMPLE_BASE_ROTATION;
+}
+
+export function modelToViewerMatrix(displayModel: DisplayModel): THREE.Matrix4 {
+  return new THREE.Matrix4()
+    .makeRotationFromEuler(new THREE.Euler(...modelRotationRadians(displayModel)))
+    .multiply(new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(...baseModelRotationRadians(displayModel))));
+}
+
+export function viewerPointToModelSpace(point: THREE.Vector3, displayModel: DisplayModel): THREE.Vector3 {
+  return point.clone().applyMatrix4(modelToViewerMatrix(displayModel).invert());
+}
+
+export function viewerNormalToModelSpace(normal: THREE.Vector3, displayModel: DisplayModel): THREE.Vector3 {
+  return normal.clone().transformDirection(modelToViewerMatrix(displayModel).invert()).normalize();
+}
+
 export function formatModelOrientation(displayModel: DisplayModel): string {
   const orientation = getModelOrientation(displayModel);
   return `X ${orientation.x} deg / Y ${orientation.y} deg / Z ${orientation.z} deg`;
+}
+
+export function isUploadedDisplayModel(displayModel: DisplayModel): boolean {
+  return Boolean(displayModel.nativeCad || displayModel.visualMesh || displayModel.id.includes("uploaded"));
 }
 
 function normalizeDegrees(value: number): number {

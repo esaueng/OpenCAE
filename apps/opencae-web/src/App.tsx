@@ -77,7 +77,6 @@ export function App() {
   const [draftLoadType, setDraftLoadType] = useState<LoadType>(restoredUi?.draftLoadType ?? "force");
   const [draftLoadValue, setDraftLoadValue] = useState(restoredUi?.draftLoadValue ?? 500);
   const [draftLoadDirection, setDraftLoadDirection] = useState<LoadDirectionLabel>(restoredUi?.draftLoadDirection ?? "-Z");
-  const [loadEditorActive, setLoadEditorActive] = useState(false);
   const [sampleModel, setSampleModel] = useState<SampleModelId>(restoredUi?.sampleModel ?? "bracket");
 
   const study = project?.studies[0] ?? null;
@@ -121,17 +120,12 @@ export function App() {
   }, [draftLoadType, selectedPayloadObject]);
 
   const loadMarkers = useMemo<ViewerLoadMarker[]>(() => {
-    const markers = createViewerLoadMarkers({
-      study,
-      selectedFace,
-      draftLoad: { type: draftLoadType, value: draftLoadValue, directionLabel: draftLoadDirection, applicationPoint: selectedLoadPoint },
-      includeDraftPreview: activeStep === "loads" && !loadEditorActive
-    });
+    const markers = createViewerLoadMarkers({ study });
     return markers.map((marker) => {
       const converted = loadValueForUnits(marker.value, marker.units, displayUnitSystem);
       return { ...marker, value: converted.value, units: converted.units };
     });
-  }, [activeStep, displayUnitSystem, draftLoadDirection, draftLoadType, draftLoadValue, loadEditorActive, selectedFace, selectedLoadPoint, study]);
+  }, [displayUnitSystem, study]);
   const supportMarkers = useMemo<ViewerSupportMarker[]>(() => {
     if (!study) return [];
     const faceCounts = new Map<string, number>();
@@ -629,7 +623,6 @@ export function App() {
           onDraftLoadTypeChange={setDraftLoadType}
           onDraftLoadValueChange={setDraftLoadValue}
           onDraftLoadDirectionChange={setDraftLoadDirection}
-          onLoadEditorActiveChange={setLoadEditorActive}
           onAddLoad={(type, value, selectionRef, direction) => {
             const selection = study.namedSelections.find((item) => item.id === selectionRef);
             const faceId = selection?.geometryRefs[0]?.entityId;

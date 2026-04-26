@@ -8,6 +8,7 @@ import type { ResultMode, ViewMode } from "./CadViewer";
 import type { StepId } from "./StepBar";
 import { applicationPointForLoad, directionLabelForLoad, directionVectorForLabel, equivalentForceForLoad, payloadObjectForLoad, unitsForLoadType, type LoadApplicationPoint, type LoadDirectionLabel, type LoadType, type PayloadObjectSelection } from "../loadPreview";
 import type { SampleModelId } from "../lib/api";
+import { dimensionValuesForDisplayModel } from "../modelDimensions";
 import { formatModelOrientation, getModelOrientation, type RotationAxis } from "../modelOrientation";
 import { shouldShowSampleModelPicker } from "../modelPanelState";
 import { SETTING_HELP, type SettingHelpId, type SettingHelpVisual } from "../settingHelp";
@@ -52,7 +53,6 @@ interface RightPanelProps {
   onDraftLoadTypeChange: (type: LoadType) => void;
   onDraftLoadValueChange: (value: number) => void;
   onDraftLoadDirectionChange: (direction: LoadDirectionLabel) => void;
-  onLoadEditorActiveChange: (active: boolean) => void;
   onAddLoad: (type: LoadType, value: number, selectionRef: string | undefined, direction: LoadDirectionLabel) => void;
   onUpdateLoad: (load: Load) => void;
   onRemoveLoad: (loadId: string) => void;
@@ -357,8 +357,7 @@ function LoadsPanel({
   onDraftLoadDirectionChange,
   onAddLoad,
   onUpdateLoad,
-  onRemoveLoad,
-  onLoadEditorActiveChange
+  onRemoveLoad
 }: RightPanelProps) {
   const selectedFromViewport = selectedFace ? selectionForFace(study, selectedFace.id) : undefined;
   const hasSelectedFace = Boolean(selectedFace);
@@ -419,17 +418,13 @@ function LoadsPanel({
       </label>
       <button className="outline-action wide" disabled={!hasSelectedFace} onClick={() => hasSelectedFace && onAddLoad(draftLoadType, draftLoadValue, selectedFromViewport?.id, draftLoadDirection)}><Plus size={18} />{addLabel}</button>
       <SectionTitle>Applied</SectionTitle>
-      <LoadEditorList study={study} unitSystem={project.unitSystem} onUpdateLoad={onUpdateLoad} onRemoveLoad={onRemoveLoad} onEditingChange={onLoadEditorActiveChange} />
+      <LoadEditorList study={study} unitSystem={project.unitSystem} onUpdateLoad={onUpdateLoad} onRemoveLoad={onRemoveLoad} />
     </Panel>
   );
 }
 
-function LoadEditorList({ study, unitSystem, onUpdateLoad, onRemoveLoad, onEditingChange }: { study: Study; unitSystem: UnitSystem; onUpdateLoad: (load: Load) => void; onRemoveLoad: (loadId: string) => void; onEditingChange: (active: boolean) => void }) {
+function LoadEditorList({ study, unitSystem, onUpdateLoad, onRemoveLoad }: { study: Study; unitSystem: UnitSystem; onUpdateLoad: (load: Load) => void; onRemoveLoad: (loadId: string) => void }) {
   const [editingId, setEditingId] = useState<string | null>(null);
-  useEffect(() => {
-    onEditingChange(editingId !== null);
-    return () => onEditingChange(false);
-  }, [editingId, onEditingChange]);
   if (!study.loads.length) return <EmptyEditableList title="Loads" />;
 
   return (
@@ -965,7 +960,7 @@ function Info({ label, value }: { label: string; value: string }) {
 }
 
 function ModelDimensions({ displayModel }: { displayModel: DisplayModel }) {
-  const dimensions = displayModel.dimensions;
+  const dimensions = dimensionValuesForDisplayModel(displayModel);
   if (!dimensions) {
     return (
       <div className="summary-box dimension-box">
@@ -977,10 +972,10 @@ function ModelDimensions({ displayModel }: { displayModel: DisplayModel }) {
 
   return (
     <div className="summary-box dimension-box">
-      <Info label="Overall" value={`${formatDimension(dimensions.x)} x ${formatDimension(dimensions.z)} x ${formatDimension(dimensions.y)} ${dimensions.units}`} />
+      <Info label="Overall" value={`${formatDimension(dimensions.x)} x ${formatDimension(dimensions.y)} x ${formatDimension(dimensions.z)} ${dimensions.units}`} />
       <Info label="X length" value={`${formatDimension(dimensions.x)} ${dimensions.units}`} />
-      <Info label="Y depth" value={`${formatDimension(dimensions.z)} ${dimensions.units}`} />
-      <Info label="Z height" value={`${formatDimension(dimensions.y)} ${dimensions.units}`} />
+      <Info label="Y depth" value={`${formatDimension(dimensions.y)} ${dimensions.units}`} />
+      <Info label="Z height" value={`${formatDimension(dimensions.z)} ${dimensions.units}`} />
     </div>
   );
 }
