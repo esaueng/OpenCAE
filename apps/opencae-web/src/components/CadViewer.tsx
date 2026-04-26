@@ -1539,7 +1539,14 @@ function LoadGlyph({ marker, face, active }: { marker: ViewerLoadMarker; face: D
 function loadLabel(marker: ViewerLoadMarker) {
   const prefix = marker.preview ? "Prev" : `L${marker.stackIndex + 1}`;
   const kind = marker.type === "pressure" ? "P" : marker.type === "gravity" ? "G" : "F";
-  return `${prefix} ${kind} ${marker.value}${marker.units} ${marker.directionLabel}`;
+  return `${prefix} ${kind} ${formatLoadMarkerValue(marker.value)} ${marker.units} ${marker.directionLabel}`;
+}
+
+function formatLoadMarkerValue(value: number) {
+  if (!Number.isFinite(value)) {
+    return "--";
+  }
+  return value.toLocaleString(undefined, { maximumFractionDigits: 1 });
 }
 
 function compactFaceLabel(label: string) {
