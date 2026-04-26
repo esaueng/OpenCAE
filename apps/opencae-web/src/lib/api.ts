@@ -1,6 +1,6 @@
 import type { DisplayModel, Project, ResultField, ResultSummary, RunEvent, Study } from "@opencae/schema";
 import type { LoadDirection, LoadType } from "../loadPreview";
-import type { LocalResultBundle } from "../projectFile";
+import { embedUploadedModelFile, type EmbeddedModelFile, type LocalResultBundle } from "../projectFile";
 
 export interface SampleProjectResponse {
   message?: string;
@@ -47,12 +47,22 @@ export async function importLocalProject(file: File): Promise<SampleProjectRespo
 
 export async function uploadModel(projectId: string, file: File): Promise<SampleProjectResponse> {
   const contentBase64 = await fileToBase64(file);
+  const embeddedModel: EmbeddedModelFile = {
+    filename: file.name,
+    contentType: file.type || "application/octet-stream",
+    size: file.size,
+    contentBase64
+  };
   const response = await fetch(`/api/projects/${projectId}/uploads`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ filename: file.name, size: file.size, contentType: file.type || "application/octet-stream", contentBase64 })
+    body: JSON.stringify({ ...embeddedModel })
   });
-  return readJson(response);
+  const data = await readJson<SampleProjectResponse>(response);
+  return {
+    ...data,
+    project: embedUploadedModelFile(data.project, embeddedModel)
+  };
 }
 
 export async function renameProject(projectId: string, name: string): Promise<{ project: Project; message: string }> {
@@ -160,14 +170,12 @@ async function readJson<T>(response: Response): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-function fileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.addEventListener("load", () => {
-      const result = typeof reader.result === "string" ? reader.result : "";
-      resolve(result.includes(",") ? result.split(",").pop() ?? "" : result);
-    });
-    reader.addEventListener("error", () => reject(reader.error ?? new Error("Could not read model file.")));
-    reader.readAsDataURL(file);
-  });
+async function fileToBase64(file: File): Promise<string> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
+  }
+  return btoa(binary);
 }
