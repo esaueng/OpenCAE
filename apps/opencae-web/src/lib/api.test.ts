@@ -110,6 +110,19 @@ describe("api", () => {
     expect(response.message).toContain("Previewing the uploaded mesh");
   });
 
+  test("uploads STEP locally without placeholder dimensions before browser measurement", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new TypeError("NetworkError when attempting to fetch resource."))));
+
+    const file = new File(["ISO-10303-21"], "seed-tray.step", { type: "model/step" });
+    const response = await uploadModel("project-1", file, project);
+
+    expect(response.project.geometryFiles[0]?.filename).toBe("seed-tray.step");
+    expect(response.project.geometryFiles[0]?.metadata.previewFormat).toBe("step");
+    expect(response.displayModel.nativeCad?.filename).toBe("seed-tray.step");
+    expect(response.displayModel.dimensions).toBeUndefined();
+    expect(response.message).toContain("Previewing a selectable STEP import body");
+  });
+
   test("loads the sample project locally when the API is unavailable", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("missing", { status: 404 })));
 

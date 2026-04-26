@@ -120,6 +120,7 @@ describe("projectFactory", () => {
 
     expect(displayModel.bodyCount).toBe(1);
     expect(displayModel.faces).toHaveLength(6);
+    expect(displayModel.dimensions).toBeUndefined();
     expect(displayModel.nativeCad?.format).toBe("step");
     expect(displayModel.nativeCad?.contentBase64).toBe("SVNPMTAzMDM=");
     expect(displayModel.visualMesh).toBeUndefined();
