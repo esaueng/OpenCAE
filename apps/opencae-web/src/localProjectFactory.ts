@@ -1,4 +1,4 @@
-import type { DisplayModel, Project } from "@opencae/schema";
+import type { DisplayModel, Load, Project } from "@opencae/schema";
 import { ProjectSchema } from "@opencae/schema";
 import { bracketDemoProject, bracketDisplayModel } from "@opencae/db/sample-data";
 import { stlDimensionsFromBase64 } from "@opencae/units";
@@ -98,6 +98,7 @@ export function createLocalSampleProject(sample: SampleModelId = "bracket", now 
               : []),
             ...faceSelections
           ],
+          loads: sampleLoadsFor(sample, templateStudy.loads, displayModel, meta.displayName),
           runs: sample === "bracket" ? templateStudy.runs : []
         }]
       : [],
@@ -106,6 +107,42 @@ export function createLocalSampleProject(sample: SampleModelId = "bracket", now 
   };
 
   return { project, displayModel, message: `${meta.projectName} loaded.` };
+}
+
+function sampleLoadsFor(sample: SampleModelId, templateLoads: Load[], displayModel: DisplayModel, payloadLabel: string): Load[] {
+  if (sample !== "plate") return templateLoads;
+  const payloadFace = displayModel.faces.find((face) => face.id === "face-load-top");
+  const volumeM3 = dimensionsVolumeM3(displayModel.dimensions);
+  const center = payloadFace?.center ?? [0, 0, 0] as [number, number, number];
+  return templateLoads.map((load) => load.selectionRef === "selection-load-face"
+    ? {
+        ...load,
+        type: "gravity",
+        parameters: {
+          value: volumeM3 * 2700,
+          units: "kg",
+          direction: [0, 0, -1],
+          applicationPoint: center,
+          payloadMaterialId: "payload-aluminum-6061",
+          payloadVolumeM3: volumeM3,
+          payloadMassMode: "material",
+          payloadObject: {
+            id: `payload-${displayModel.id}`,
+            label: payloadLabel,
+            center,
+            volumeM3,
+            volumeSource: "bounds-fallback",
+            volumeStatus: "estimated"
+          }
+        },
+        status: "complete"
+      }
+    : load);
+}
+
+function dimensionsVolumeM3(dimensions: DisplayModel["dimensions"]) {
+  if (!dimensions) return 0;
+  return Math.max(dimensions.x, 0) * Math.max(dimensions.y, 0) * Math.max(dimensions.z, 0) / 1_000_000_000;
 }
 
 export function createLocalBlankProject(now = new Date().toISOString()): SampleProjectResponse {
