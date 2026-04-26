@@ -121,4 +121,51 @@ describe("CadViewer result coloring", () => {
     expect(lowColor.b).toBeGreaterThan(lowColor.r);
     expect(highColor.r).toBeGreaterThan(highColor.b);
   });
+
+  test("keeps split meshes for the same payload-loaded object solid grey", () => {
+    const simulatedGeometry = new THREE.BufferGeometry();
+    simulatedGeometry.setAttribute("position", new THREE.Float32BufferAttribute([-0.2, 0, 0, 0, 0, 0, 0.2, 0, 0], 3));
+    const simulatedMesh = new THREE.Mesh(simulatedGeometry, new THREE.MeshStandardMaterial({ color: "#63a9e5" }));
+    simulatedMesh.userData.opencaeObjectId = "simulated-part";
+
+    const payloadGroup = new THREE.Group();
+    payloadGroup.userData.opencaeObjectId = "rod-group";
+    payloadGroup.userData.opencaeObjectLabel = "Rod 1";
+
+    const selectedPayloadGeometry = new THREE.BufferGeometry();
+    selectedPayloadGeometry.setAttribute("position", new THREE.Float32BufferAttribute([1, 0, 0, 1.1, 0, 0, 1.2, 0, 0], 3));
+    const selectedPayloadMesh = new THREE.Mesh(selectedPayloadGeometry, new THREE.MeshStandardMaterial({ color: "#63a9e5" }));
+    selectedPayloadMesh.userData.opencaeObjectId = "rod-segment-a";
+    selectedPayloadMesh.userData.opencaeObjectLabel = "Rod 1";
+
+    const siblingPayloadGeometry = new THREE.BufferGeometry();
+    siblingPayloadGeometry.setAttribute("position", new THREE.Float32BufferAttribute([1, 0.1, 0, 1.1, 0.1, 0, 1.2, 0.1, 0], 3));
+    const siblingPayloadMesh = new THREE.Mesh(siblingPayloadGeometry, new THREE.MeshStandardMaterial({ color: "#63a9e5" }));
+    siblingPayloadMesh.userData.opencaeObjectId = "rod-segment-b";
+    siblingPayloadMesh.userData.opencaeObjectLabel = "Rod 1";
+
+    payloadGroup.add(selectedPayloadMesh, siblingPayloadMesh);
+
+    const group = new THREE.Group();
+    group.add(simulatedMesh, payloadGroup);
+
+    colorizeResultObject(group, "uploaded", "stress", false, 1, samples, [{
+      id: "load-payload",
+      faceId: "right",
+      payloadObject: { id: "rod-segment-a", label: "Rod 1", center: [1.1, 0, 0] },
+      type: "gravity",
+      value: 2,
+      units: "kg",
+      direction: [0, 0, -1],
+      directionLabel: "-Z",
+      labelIndex: 0,
+      stackIndex: 0
+    }]);
+
+    expect((selectedPayloadMesh.material as THREE.MeshStandardMaterial).vertexColors).toBe(false);
+    expect((selectedPayloadMesh.material as THREE.MeshStandardMaterial).color.getHexString()).toBe("8f9aa5");
+    expect((siblingPayloadMesh.material as THREE.MeshStandardMaterial).vertexColors).toBe(false);
+    expect((siblingPayloadMesh.material as THREE.MeshStandardMaterial).color.getHexString()).toBe("8f9aa5");
+    expect((simulatedMesh.material as THREE.MeshStandardMaterial).vertexColors).toBe(true);
+  });
 });
