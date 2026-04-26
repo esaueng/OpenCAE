@@ -390,9 +390,15 @@ function dimensionBoundsForDisplayModel(displayModel: DisplayModel) {
     return new THREE.Box3(new THREE.Vector3(-1.9, -0.07, -0.36), new THREE.Vector3(1.9, 0.43, 0.36));
   }
   if (kind === "uploaded") {
-    return displayModel.nativeCad
-      ? new THREE.Box3(new THREE.Vector3(-1.1, -0.72, -0.52), new THREE.Vector3(1.1, 0.72, 0.52))
-      : new THREE.Box3(new THREE.Vector3(-1.2, -1.2, -1.2), new THREE.Vector3(1.2, 1.2, 1.2));
+    const dimensions = displayModel.dimensions;
+    if (!dimensions) return new THREE.Box3(new THREE.Vector3(-1.2, -1.2, -1.2), new THREE.Vector3(1.2, 1.2, 1.2));
+    const maxDimension = Math.max(dimensions.x, dimensions.y, dimensions.z, 0.001);
+    const halfSize = new THREE.Vector3(
+      (dimensions.x / maxDimension) * 1.2,
+      (dimensions.y / maxDimension) * 1.2,
+      (dimensions.z / maxDimension) * 1.2
+    );
+    return new THREE.Box3(halfSize.clone().multiplyScalar(-1), halfSize);
   }
   return new THREE.Box3(new THREE.Vector3(-1.55, -0.24, -BRACKET_DEPTH / 2), new THREE.Vector3(2.35, 2.62, BRACKET_DEPTH / 2));
 }
@@ -656,8 +662,9 @@ function UploadedObjModel({ displayModel, pickHandlers }: { displayModel: Displa
     const size = box.getSize(new THREE.Vector3());
     const center = box.getCenter(new THREE.Vector3());
     const maxDimension = Math.max(size.x, size.y, size.z, 0.001);
-    parsed.position.sub(center);
-    parsed.scale.setScalar(2.4 / maxDimension);
+    const scale = 2.4 / maxDimension;
+    parsed.scale.setScalar(scale);
+    parsed.position.copy(center.multiplyScalar(-scale));
     parsed.traverse((child) => {
       if (child instanceof THREE.Mesh) {
         child.userData.opencaeObjectId = child.name || child.uuid;

@@ -60,8 +60,9 @@ export function normalizedStepGroupFromMeshes(meshes: OcctMesh[], color: string)
   const size = box.getSize(new THREE.Vector3());
   const center = box.getCenter(new THREE.Vector3());
   const maxDimension = Math.max(size.x, size.y, size.z, 0.001);
-  group.position.sub(center);
-  group.scale.setScalar(2.4 / maxDimension);
+  const scale = 2.4 / maxDimension;
+  group.scale.setScalar(scale);
+  group.position.copy(center.multiplyScalar(-scale));
   return group;
 }
 
