@@ -19,9 +19,17 @@ const selection: NamedSelection = {
   fingerprint: "side"
 };
 
+const secondSelection: NamedSelection = {
+  id: "selection-back",
+  name: "Back face",
+  entityType: "face",
+  geometryRefs: [{ bodyId: "body-1", entityType: "face", entityId: "face-back", label: "Back face" }],
+  fingerprint: "back"
+};
+
 const study = {
   loads: [],
-  namedSelections: [selection]
+  namedSelections: [selection, secondSelection]
 } as unknown as Study;
 
 describe("load preview helpers", () => {
@@ -107,6 +115,7 @@ describe("load preview helpers", () => {
       units: "N",
       direction: [1, 0, 0],
       directionLabel: "+X",
+      labelIndex: 0,
       stackIndex: 0
     });
     expect(directionLabelForLoad(load)).toBe("+X");
@@ -151,5 +160,32 @@ describe("load preview helpers", () => {
     }, study, 0);
 
     expect(marker && loadMarkerDisplayLabel(marker)).toBe("L1 F 500 N -Z");
+  });
+
+  test("numbers load labels globally across different faces", () => {
+    const markers = createViewerLoadMarkers({
+      study: {
+        ...study,
+        loads: [
+          {
+            id: "load-1",
+            type: "force",
+            selectionRef: "selection-side",
+            parameters: { value: 500, units: "N", direction: [0, 0, -1] },
+            status: "complete"
+          },
+          {
+            id: "load-2",
+            type: "force",
+            selectionRef: "selection-back",
+            parameters: { value: 500, units: "N", direction: [0, 0, -1] },
+            status: "complete"
+          }
+        ]
+      } as unknown as Study
+    });
+
+    expect(markers.map(loadMarkerDisplayLabel)).toEqual(["L1 F 500 N -Z", "L2 F 500 N -Z"]);
+    expect(markers.map((marker) => marker.stackIndex)).toEqual([0, 0]);
   });
 });
