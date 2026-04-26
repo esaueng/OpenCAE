@@ -139,6 +139,92 @@ describe("load preview helpers", () => {
     expect(markers).toEqual([]);
   });
 
+  test("creates an unsaved draft marker for a selected load point", () => {
+    const point: [number, number, number] = [1.2, 2.1, 3.05];
+    const draftLoad: Load = {
+      id: "draft-load",
+      type: "force",
+      selectionRef: "selection-side",
+      parameters: { value: 500, units: "N", direction: [0, 0, -1], applicationPoint: point },
+      status: "complete"
+    };
+
+    const markers = createViewerLoadMarkers({
+      study,
+      draftLoadPreview: { load: draftLoad, selection }
+    });
+
+    expect(markers).toHaveLength(1);
+    expect(markers[0]).toMatchObject({
+      id: "draft-load",
+      faceId: "face-side",
+      point,
+      preview: true,
+      labelIndex: 0,
+      stackIndex: 0
+    });
+    expect(loadMarkerDisplayLabel(markers[0]!)).toBe("L1 F 500 N -Z");
+  });
+
+  test("numbers an unsaved draft marker after saved loads", () => {
+    const savedLoad: Load = {
+      id: "load-1",
+      type: "force",
+      selectionRef: "selection-side",
+      parameters: { value: 500, units: "N", direction: [0, 0, -1] },
+      status: "complete"
+    };
+    const draftLoad: Load = {
+      id: "draft-load",
+      type: "pressure",
+      selectionRef: "selection-back",
+      parameters: { value: 100, units: "kPa", direction: [1, 0, 0], applicationPoint: [2, 3, 4] },
+      status: "complete"
+    };
+
+    const markers = createViewerLoadMarkers({
+      study: { ...study, loads: [savedLoad] } as unknown as Study,
+      draftLoadPreview: { load: draftLoad, selection: secondSelection }
+    });
+
+    expect(markers.map(loadMarkerDisplayLabel)).toEqual(["L1 F 500 N -Z", "L2 P 100 kPa +X"]);
+    expect(markers[1]).toMatchObject({ preview: true, labelIndex: 1, stackIndex: 0 });
+  });
+
+  test("updates draft marker display from draft load inputs", () => {
+    const draftLoad: Load = {
+      id: "draft-load",
+      type: "pressure",
+      selectionRef: "selection-side",
+      parameters: { value: 250, units: "kPa", direction: [0, 1, 0], applicationPoint: [1, 2, 3] },
+      status: "complete"
+    };
+
+    const markers = createViewerLoadMarkers({
+      study,
+      draftLoadPreview: { load: draftLoad, selection }
+    });
+
+    expect(markers.map(loadMarkerDisplayLabel)).toEqual(["L1 P 250 kPa +Y"]);
+  });
+
+  test("does not create an unsaved draft marker without a valid draft selection", () => {
+    const draftLoad: Load = {
+      id: "draft-load",
+      type: "force",
+      selectionRef: "missing-selection",
+      parameters: { value: 500, units: "N", direction: [0, 0, -1], applicationPoint: [1, 2, 3] },
+      status: "complete"
+    };
+
+    const markers = createViewerLoadMarkers({
+      study,
+      draftLoadPreview: { load: draftLoad, selection: undefined }
+    });
+
+    expect(markers).toEqual([]);
+  });
+
   test("reads saved load direction and label for existing markers", () => {
     const load: Load = {
       id: "load-1",
