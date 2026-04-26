@@ -65,7 +65,7 @@ export function StartScreen({ onLoadSample, onCreateProject, onOpenProject }: St
       </section>
       <footer className="start-footer">
         <span>./data/artifacts · SQLite · in-memory jobs</span>
-        <span>docs · examples · github</span>
+        <a href="https://github.com/esaueng/opencae-beta" target="_blank" rel="noreferrer">github</a>
       </footer>
     </main>
   );

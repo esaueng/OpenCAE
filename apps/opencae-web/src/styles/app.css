@@ -182,6 +182,15 @@ svg {
   font-size: var(--fs-mini);
 }
 
+.start-footer a {
+  color: inherit;
+}
+
+.start-footer a:hover,
+.start-footer a:focus-visible {
+  color: var(--color-accent);
+}
+
 .app-shell {
   height: 100%;
   display: grid;
