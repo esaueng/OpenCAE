@@ -2235,7 +2235,7 @@ export function axisLabelToViewAxis(label: "X" | "Y" | "Z"): RotationAxis {
 export function cameraViewForAxis(axis: RotationAxis): { direction: THREE.Vector3; up: THREE.Vector3 } {
   if (axis === "x") return { direction: new THREE.Vector3(1, 0, 0), up: WORLD_UP };
   if (axis === "y") return { direction: new THREE.Vector3(0, 1, 0), up: WORLD_UP };
-  return { direction: new THREE.Vector3(0, 0, 1), up: new THREE.Vector3(0, 1, 0) };
+  return { direction: new THREE.Vector3(0, 0, 1), up: new THREE.Vector3(-1, 0, 0) };
 }
 
 export function rotatedCameraOrbit(position: THREE.Vector3, target: THREE.Vector3, up: THREE.Vector3, axis: RotationAxis, radians: number) {
