@@ -19,6 +19,7 @@ import { resetDisplayModelOrientation, rotateDisplayModel, type RotationAxis } f
 import { buildLocalProjectFile, suggestedProjectFilename, type LocalResultBundle } from "./projectFile";
 import { buildAutosavedWorkspace, readAutosavedWorkspace, writeAutosavedWorkspace, type ThemeMode } from "./appPersistence";
 import { shouldShowStartScreen } from "./appShellState";
+import { displayModelForUnits, loadValueForUnits, resultFieldForUnits, resultSummaryForUnits, type UnitSystem } from "./unitDisplay";
 
 interface SaveFilePickerHandle {
   createWritable: () => Promise<{ write: (content: Blob) => Promise<void>; close: () => Promise<void> }>;
@@ -81,6 +82,10 @@ export function App() {
   }, [activeRunId, completedRunId, runProgress, study]);
   const reportDownloadUrl = reportRunId ? `/api/runs/${reportRunId}/report.pdf` : project ? `/api/projects/${project.id}/report.pdf` : undefined;
   const selectedFace = useMemo(() => displayModel?.faces.find((face) => face.id === selectedFaceId) ?? null, [displayModel, selectedFaceId]);
+  const displayUnitSystem = project?.unitSystem ?? "SI";
+  const displayModelForUi = useMemo(() => displayModel ? displayModelForUnits(displayModel, displayUnitSystem) : null, [displayModel, displayUnitSystem]);
+  const resultSummaryForUi = useMemo(() => resultSummaryForUnits(resultSummary, displayUnitSystem), [displayUnitSystem, resultSummary]);
+  const resultFieldsForUi = useMemo(() => resultFields.map((field) => resultFieldForUnits(field, displayUnitSystem)), [displayUnitSystem, resultFields]);
   const solverRunning = runProgress > 0 && runProgress < 100;
   const runReadiness = useMemo(() => readinessForStudy(study), [study]);
   const canRunSimulation = runReadiness.every((item) => item.done) && !solverRunning;
@@ -88,13 +93,17 @@ export function App() {
   const canUndoAction = undoStack.length > 0;
   const canRedoAction = redoStack.length > 0;
   const loadMarkers = useMemo<ViewerLoadMarker[]>(() => {
-    return createViewerLoadMarkers({
+    const markers = createViewerLoadMarkers({
       study,
       selectedFace,
       draftLoad: { type: draftLoadType, value: draftLoadValue, directionLabel: draftLoadDirection },
       includeDraftPreview: activeStep === "loads" && !loadEditorActive
     });
-  }, [activeStep, draftLoadDirection, draftLoadType, draftLoadValue, loadEditorActive, selectedFace, study]);
+    return markers.map((marker) => {
+      const converted = loadValueForUnits(marker.value, marker.units, displayUnitSystem);
+      return { ...marker, value: converted.value, units: converted.units };
+    });
+  }, [activeStep, displayUnitSystem, draftLoadDirection, draftLoadType, draftLoadValue, loadEditorActive, selectedFace, study]);
   const supportMarkers = useMemo<ViewerSupportMarker[]>(() => {
     if (!study) return [];
     const faceCounts = new Map<string, number>();
@@ -379,6 +388,13 @@ export function App() {
     pushMessage("Model orientation reset.");
   }
 
+  function handleUnitSystemChange(unitSystem: UnitSystem) {
+    if (!project || project.unitSystem === unitSystem) return;
+    recordUndoSnapshot(project);
+    setProject({ ...project, unitSystem });
+    pushMessage(`Project units switched to ${unitSystem === "SI" ? "metric" : "imperial"}.`);
+  }
+
   function handleUndoAction() {
     if (!project || !canUndoAction) return;
     const previous = undoStack[undoStack.length - 1];
@@ -448,7 +464,7 @@ export function App() {
     setHomeRequested(true);
   }
 
-  if (shouldShowStartScreen({ homeRequested, hasProject: Boolean(project), hasDisplayModel: Boolean(displayModel), hasStudy: Boolean(study) }) || !project || !displayModel || !study) {
+  if (shouldShowStartScreen({ homeRequested, hasProject: Boolean(project), hasDisplayModel: Boolean(displayModel), hasStudy: Boolean(study) }) || !project || !displayModel || !displayModelForUi || !study) {
     return <StartScreen onLoadSample={handleLoadSample} onCreateProject={handleCreateProject} onOpenProject={handleOpenProject} />;
   }
 
@@ -495,9 +511,9 @@ export function App() {
       </header>
 
       <main className="workspace">
-        <StepBar activeStep={activeStep} onSelect={handleStepSelect} study={study} hasResults={viewMode === "results"} />
+        <StepBar activeStep={activeStep} project={project} onSelect={handleStepSelect} onUnitSystemChange={handleUnitSystemChange} study={study} hasResults={viewMode === "results"} />
         <CadViewer
-          displayModel={displayModel}
+          displayModel={displayModelForUi}
           activeStep={activeStep}
           selectedFaceId={selectedFaceId}
           onSelectFace={handleViewportFaceSelect}
@@ -506,7 +522,8 @@ export function App() {
           showDeformed={showDeformed}
           showDimensions={showDimensions}
           stressExaggeration={stressExaggeration}
-          resultFields={resultFields}
+          resultFields={resultFieldsForUi}
+          unitSystem={displayUnitSystem}
           themeMode={themeMode}
           fitSignal={fitSignal}
           loadMarkers={loadMarkers}
@@ -516,7 +533,7 @@ export function App() {
         <RightPanel
           activeStep={activeStep}
           project={project}
-          displayModel={displayModel}
+          displayModel={displayModelForUi}
           study={study}
           selectedFace={selectedFace}
           viewMode={viewMode}
@@ -524,7 +541,7 @@ export function App() {
           showDeformed={showDeformed}
           showDimensions={showDimensions}
           stressExaggeration={stressExaggeration}
-          resultSummary={resultSummary}
+          resultSummary={resultSummaryForUi}
           runProgress={runProgress}
           sampleModel={sampleModel}
           draftLoadType={draftLoadType}

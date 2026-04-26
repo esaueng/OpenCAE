@@ -1,14 +1,17 @@
-import type { Study } from "@opencae/schema";
+import type { Project, Study } from "@opencae/schema";
 import { Activity, Anchor, Box, FileText, FlaskConical, Github, Layers3, MessageSquare, Play, Weight } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { formatUnitSystemLabel, type UnitSystem } from "../unitDisplay";
 
 export type StepId = "model" | "material" | "supports" | "loads" | "mesh" | "run" | "results" | "report";
 
 interface StepBarProps {
   activeStep: StepId;
+  project: Project;
   study: Study;
   hasResults: boolean;
   onSelect: (step: StepId) => void;
+  onUnitSystemChange: (unitSystem: UnitSystem) => void;
 }
 
 const steps: ReadonlyArray<{ id: StepId; label: string; Icon: LucideIcon }> = [
@@ -22,7 +25,7 @@ const steps: ReadonlyArray<{ id: StepId; label: string; Icon: LucideIcon }> = [
   { id: "report", label: "Report", Icon: FileText }
 ] as const;
 
-export function StepBar({ activeStep, study, hasResults, onSelect }: StepBarProps) {
+export function StepBar({ activeStep, project, study, hasResults, onSelect, onUnitSystemChange }: StepBarProps) {
   const completed: Record<StepId, boolean> = {
     model: true,
     material: study.materialAssignments.length > 0,
@@ -65,7 +68,13 @@ export function StepBar({ activeStep, study, hasResults, onSelect }: StepBarProp
           </a>
         </div>
         <div><span>study</span><strong>static</strong></div>
-        <div><span>units</span><strong>SI · mm</strong></div>
+        <div className="unit-switch">
+          <span>units</span>
+          <strong>{formatUnitSystemLabel(project.unitSystem)}</strong>
+          <button type="button" className="unit-toggle" onClick={() => onUnitSystemChange(project.unitSystem === "SI" ? "US" : "SI")}>
+            {project.unitSystem === "SI" ? "Use Imperial" : "Use Metric"}
+          </button>
+        </div>
         <div><span>backend</span><strong>local</strong></div>
       </div>
     </nav>

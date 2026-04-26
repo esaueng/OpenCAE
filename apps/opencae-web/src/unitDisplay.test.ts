@@ -1,0 +1,60 @@
+import { describe, expect, test } from "vitest";
+import { displayModelForUnits, formatForce, formatLength, formatStress, formatUnitSystemLabel, loadValueForUnits, resultFieldForUnits, resultSummaryForUnits } from "./unitDisplay";
+
+describe("unit display formatting", () => {
+  test("labels project unit systems for the workspace footer", () => {
+    expect(formatUnitSystemLabel("SI")).toBe("Metric · mm");
+    expect(formatUnitSystemLabel("US")).toBe("Imperial · in");
+  });
+
+  test("formats SI base values as imperial display values", () => {
+    expect(formatLength(25.4, "mm", "US")).toBe("1 in");
+    expect(formatStress(142, "MPa", "US")).toBe("20.6 ksi");
+    expect(formatForce(500, "N", "US")).toBe("112.4 lbf");
+    expect(loadValueForUnits(6.894757293168361, "kPa", "US")).toEqual({ value: 1, units: "psi" });
+    expect(loadValueForUnits(0.45359237, "kg", "US")).toEqual({ value: 1, units: "lb" });
+  });
+
+  test("converts result summaries and fields without changing safety factors", () => {
+    const summary = resultSummaryForUnits({
+      maxStress: 142,
+      maxStressUnits: "MPa",
+      maxDisplacement: 0.184,
+      maxDisplacementUnits: "mm",
+      safetyFactor: 1.8,
+      reactionForce: 500,
+      reactionForceUnits: "N"
+    }, "US");
+
+    expect(summary.maxStressUnits).toBe("ksi");
+    expect(summary.maxDisplacementUnits).toBe("in");
+    expect(summary.safetyFactor).toBe(1.8);
+    expect(summary.reactionForceUnits).toBe("lbf");
+
+    const field = resultFieldForUnits({
+      id: "field-displacement",
+      runId: "run",
+      type: "displacement",
+      location: "node",
+      values: [0, 0.254],
+      min: 0,
+      max: 0.254,
+      units: "mm"
+    }, "US");
+
+    expect(field.units).toBe("in");
+    expect(field.max).toBeCloseTo(0.01);
+  });
+
+  test("converts display model dimensions", () => {
+    const displayModel = displayModelForUnits({
+      id: "model",
+      name: "model",
+      bodyCount: 1,
+      dimensions: { x: 25.4, y: 50.8, z: 76.2, units: "mm" },
+      faces: []
+    }, "US");
+
+    expect(displayModel.dimensions).toEqual({ x: 1, y: 2, z: 3, units: "in" });
+  });
+});
