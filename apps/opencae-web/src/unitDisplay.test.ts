@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { displayModelForUnits, formatForce, formatLength, formatStress, formatUnitSystemLabel, loadValueForUnits, resultFieldForUnits, resultSummaryForUnits } from "./unitDisplay";
+import { displayModelForUnits, formatDensity, formatForce, formatLength, formatMass, formatMaterialStress, formatStress, formatUnitSystemLabel, formatVolume, loadValueForUnits, resultFieldForUnits, resultSummaryForUnits } from "./unitDisplay";
 
 describe("unit display formatting", () => {
   test("labels project unit systems for the workspace footer", () => {
@@ -11,6 +11,10 @@ describe("unit display formatting", () => {
     expect(formatLength(25.4, "mm", "US")).toBe("1 in");
     expect(formatStress(142, "MPa", "US")).toBe("20.6 ksi");
     expect(formatForce(500, "N", "US")).toBe("112.4 lbf");
+    expect(formatVolume(41_280, "mm^3", "US")).toBe("2.519 in^3");
+    expect(formatMass(111, "g", "US")).toBe("0.245 lb");
+    expect(formatDensity(2700, "kg/m^3", "US")).toBe("168.6 lb/ft^3");
+    expect(formatMaterialStress(68_900_000_000, "US")).toBe("9,993.1 ksi");
     expect(loadValueForUnits(6.894757293168361, "kPa", "US")).toEqual({ value: 1, units: "psi" });
     expect(loadValueForUnits(0.45359237, "kg", "US")).toEqual({ value: 1, units: "lb" });
   });

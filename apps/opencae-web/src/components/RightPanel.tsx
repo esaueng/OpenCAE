@@ -13,7 +13,7 @@ import { shouldShowSampleModelPicker } from "../modelPanelState";
 import { SETTING_HELP, type SettingHelpId, type SettingHelpVisual } from "../settingHelp";
 import { supportDisplayLabel } from "../supportLabels";
 import { getViewportTooltipPosition } from "../tooltipPosition";
-import { forceForUnits, loadValueForUnits, type UnitSystem } from "../unitDisplay";
+import { forceForUnits, formatDensity, formatMass, formatMaterialStress, formatVolume, loadValueForUnits, type UnitSystem } from "../unitDisplay";
 
 interface RightPanelProps {
   activeStep: StepId;
@@ -96,6 +96,7 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sa
   const faceCount = Number(geometry?.metadata.faceCount ?? 0);
   const bodyCount = Number(geometry?.metadata.bodyCount ?? 0);
   const sampleLabel = sampleModel === "bracket" ? "Bracket Demo" : sampleModel === "plate" ? "Plate Demo" : "Cantilever Demo";
+  const sampleForceLabel = formatEquivalentForce(500, project.unitSystem);
   const orientation = getModelOrientation(displayModel);
   const hasCustomOrientation = orientation.x !== 0 || orientation.y !== 0 || orientation.z !== 0;
   const preconfigured =
@@ -165,9 +166,9 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sa
         <Info label="Model" value={geometry?.filename ?? "No model loaded"} />
         <Info label="Bodies" value={String(bodyCount)} />
         <Info label="Faces" value={String(faceCount)} />
-        <Info label="Volume" value="41,280 mm^3" />
-        <Info label="Mass" value="111 g" />
-        <Info label="Units" value="mm" />
+        <Info label="Volume" value={formatVolume(41_280, "mm^3", project.unitSystem)} />
+        <Info label="Mass" value={formatMass(111, "g", project.unitSystem)} />
+        <Info label="Units" value={project.unitSystem === "US" ? "in" : "mm"} />
       </div>
       <button className={showDimensions ? "primary wide" : "secondary wide"} type="button" onClick={onToggleDimensions}>
         <Ruler size={16} />
@@ -198,7 +199,7 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sa
           <SectionTitle>Preconfigured</SectionTitle>
           <div className="concept-card-list">
             <ConceptCard icon={<SupportIcon />} title="Fixed support" detail={preconfigured.support} tone="warning" />
-            <ConceptCard icon={<ArrowDown size={18} />} title="Force · 500 N" detail={preconfigured.load} tone="accent" />
+            <ConceptCard icon={<ArrowDown size={18} />} title={`Force · ${sampleForceLabel}`} detail={preconfigured.load} tone="accent" />
           </div>
           <Callout>{preconfigured.callout}</Callout>
         </>
@@ -208,7 +209,7 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sa
   );
 }
 
-function MaterialPanel({ study, onAssignMaterial }: RightPanelProps) {
+function MaterialPanel({ project, study, onAssignMaterial }: RightPanelProps) {
   const currentAssignment = study.materialAssignments[0];
   const current = currentAssignment?.materialId ?? "mat-aluminum-6061";
   const currentParameters = currentAssignment?.parameters ?? EMPTY_PARAMETERS;
@@ -254,10 +255,10 @@ function MaterialPanel({ study, onAssignMaterial }: RightPanelProps) {
         </select>
       </label>
       <div className="summary-box">
-        <Info label={printable && printParameters.printed ? "Effective modulus" : "Young's modulus"} value={`${formatMPa(effectiveMaterial.youngsModulus)} MPa`} />
+        <Info label={printable && printParameters.printed ? "Effective modulus" : "Young's modulus"} value={formatMaterialStress(effectiveMaterial.youngsModulus, project.unitSystem)} />
         <Info label="Poisson ratio" value={String(selectedMaterial.poissonRatio)} />
-        <Info label={printable && printParameters.printed ? "Effective density" : "Density"} value={`${Math.round(effectiveMaterial.density).toLocaleString()} kg/m^3`} />
-        <Info label={printable && printParameters.printed ? "Effective yield" : "Yield strength"} value={`${formatMPa(effectiveMaterial.yieldStrength)} MPa`} />
+        <Info label={printable && printParameters.printed ? "Effective density" : "Density"} value={formatDensity(effectiveMaterial.density, "kg/m^3", project.unitSystem)} />
+        <Info label={printable && printParameters.printed ? "Effective yield" : "Yield strength"} value={formatMaterialStress(effectiveMaterial.yieldStrength, project.unitSystem)} />
         {selectedMaterial.printProfile && <Info label="Print process" value={selectedMaterial.printProfile.process} />}
       </div>
       {printable && (
@@ -358,8 +359,13 @@ function LoadsPanel({
   const selectedFromViewport = selectedFace ? selectionForFace(study, selectedFace.id) : undefined;
   const hasSelectedFace = Boolean(selectedFace);
   const units = unitsForLoadType(draftLoadType);
+  const displayDraftLoad = loadValueForUnits(draftLoadValue, units, project.unitSystem);
   const valueLabel = draftLoadType === "gravity" ? "Payload mass" : "Magnitude";
   const addLabel = draftLoadType === "gravity" ? "Add payload mass" : "Add load";
+  function handleDraftValueChange(displayValue: number) {
+    const baseValue = loadValueForUnits(displayValue, displayDraftLoad.units, "SI");
+    onDraftLoadValueChange(baseValue.value);
+  }
   return (
     <Panel title="Loads" helper="Choose where force, pressure, or payload weight is applied. Select a face, then add a load.">
       <HelpNote helpId="loadPlacement" />
@@ -388,10 +394,10 @@ function LoadsPanel({
           <input
             id="load-value"
             type="number"
-            value={draftLoadValue}
-            onChange={(event) => onDraftLoadValueChange(Number(event.currentTarget.value))}
+            value={formatInputValue(displayDraftLoad.value)}
+            onChange={(event) => handleDraftValueChange(Number(event.currentTarget.value))}
           />
-          <span>{units}</span>
+          <span>{displayDraftLoad.units}</span>
         </span>
       </label>
       {draftLoadType === "gravity" && <Callout>{formatEquivalentForce(equivalentForceForLoad({ type: "gravity", parameters: { value: draftLoadValue } }), project.unitSystem)} equivalent weight.</Callout>}
@@ -440,6 +446,7 @@ function LoadEditorList({ study, unitSystem, onUpdateLoad, onRemoveLoad, onEditi
               <LoadEditForm
                 load={load}
                 study={study}
+                unitSystem={unitSystem}
                 onCancel={() => setEditingId(null)}
                 onSave={(nextLoad) => {
                   onUpdateLoad(nextLoad);
@@ -456,11 +463,15 @@ function LoadEditorList({ study, unitSystem, onUpdateLoad, onRemoveLoad, onEditi
   );
 }
 
-function LoadEditForm({ load, study, onSave, onCancel }: { load: Load; study: Study; onSave: (load: Load) => void; onCancel: () => void }) {
+function LoadEditForm({ load, study, unitSystem, onSave, onCancel }: { load: Load; study: Study; unitSystem: UnitSystem; onSave: (load: Load) => void; onCancel: () => void }) {
   const [type, setType] = useState<"force" | "pressure" | "gravity">(load.type);
-  const [value, setValue] = useState(String(load.parameters.value ?? 500));
+  const [value, setValue] = useState(() => {
+    const initialUnits = String(load.parameters.units ?? unitsForLoadType(load.type));
+    return formatInputValue(loadValueForUnits(Number(load.parameters.value ?? 500), initialUnits, unitSystem).value);
+  });
   const [direction, setDirection] = useState<LoadDirectionLabel>(directionLabelForLoad(load));
   const units = unitsForLoadType(type);
+  const displayUnits = loadValueForUnits(defaultValueForLoadType(type), units, unitSystem).units;
   const selectedRef = study.namedSelections.find((selection) => selection.id === load.selectionRef);
   const selectedFace = selectedRef?.geometryRefs[0];
   const directionFace: DisplayFace = {
@@ -483,9 +494,12 @@ function LoadEditForm({ load, study, onSave, onCancel }: { load: Load; study: St
       </label>
       <label className="field">
         <HelpLabel helpId="loadMagnitude">{type === "gravity" ? "Payload mass" : "Magnitude"}</HelpLabel>
-        <input type="number" value={value} onChange={(event) => setValue(event.currentTarget.value)} />
+        <span className="input-with-unit">
+          <input type="number" value={value} onChange={(event) => setValue(event.currentTarget.value)} />
+          <span>{displayUnits}</span>
+        </span>
       </label>
-      {type === "gravity" && <Callout>{formatNumber(equivalentForceForLoad({ type: "gravity", parameters: { value: Number(value) } }))} N equivalent weight.</Callout>}
+      {type === "gravity" && <Callout>{formatEquivalentForce(equivalentForceForLoad({ type: "gravity", parameters: { value: loadValueForUnits(Number(value), displayUnits, "SI").value } }), unitSystem)} equivalent weight.</Callout>}
       <PlacementReadout selectedRef={selectedRef} />
       <label className="field">
         <HelpLabel helpId="loadDirection">Direction</HelpLabel>
@@ -499,7 +513,7 @@ function LoadEditForm({ load, study, onSave, onCancel }: { load: Load; study: St
         <button
           className="primary"
           type="button"
-          onClick={() => onSave({ ...load, type, parameters: { ...load.parameters, value: Number(value), units, direction: directionVectorForLabel(direction, directionFace) } })}
+          onClick={() => onSave({ ...load, type, parameters: { ...load.parameters, value: loadValueForUnits(Number(value), displayUnits, "SI").value, units, direction: directionVectorForLabel(direction, directionFace) } })}
         >
           Save
         </button>
@@ -997,10 +1011,6 @@ function SupportIcon() {
   return <Anchor size={18} strokeWidth={1.8} aria-hidden="true" />;
 }
 
-function formatMPa(valuePa: number) {
-  return Math.round(valuePa / 1_000_000).toLocaleString();
-}
-
 function formatDimension(value: number) {
   return Number.isInteger(value) ? value.toLocaleString() : value.toLocaleString(undefined, { maximumFractionDigits: 2 });
 }
@@ -1018,6 +1028,11 @@ function formatEquivalentForce(valueNewtons: number, unitSystem: UnitSystem) {
 function formatNumber(value: number) {
   if (!Number.isFinite(value)) return "--";
   return value.toLocaleString(undefined, { maximumFractionDigits: value >= 100 ? 0 : 1 });
+}
+
+function formatInputValue(value: number) {
+  if (!Number.isFinite(value)) return "";
+  return Number(value.toFixed(3)).toString();
 }
 
 function loadTypeLabel(type: LoadType) {
