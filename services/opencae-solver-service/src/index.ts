@@ -151,11 +151,15 @@ function materialParametersForStudy(study: Study): Record<string, unknown> {
 
 function materialResponse(material: Material, loads: LoadModel[]): { stressScale: number; displacementScale: number; yieldMpa: number } {
   const reference = starterMaterials[0]!;
+  const baseMaterial = starterMaterials.find((candidate) => candidate.id === material.id) ?? material;
   const youngsScale = reference.youngsModulus / Math.max(material.youngsModulus, 1);
+  const stiffnessReduction = baseMaterial.youngsModulus / Math.max(material.youngsModulus, 1);
+  const strengthReduction = baseMaterial.yieldStrength / Math.max(material.yieldStrength, 1);
+  const printedStressScale = clamp(1 + (Math.max(stiffnessReduction, strengthReduction) - 1) * 0.35, 1, 2.25);
   const hasGravity = loads.some((load) => load.load.type === "gravity");
   const densityScale = hasGravity ? 1 + (material.density / reference.density - 1) * 0.08 : 1;
   return {
-    stressScale: round(densityScale, 4),
+    stressScale: round(densityScale * printedStressScale, 4),
     displacementScale: round(youngsScale * densityScale, 4),
     yieldMpa: material.yieldStrength / 1_000_000
   };
@@ -407,4 +411,8 @@ function gaussian(value: number, radius: number): number {
 function round(value: number, digits = 1): number {
   const factor = 10 ** digits;
   return Math.round(value * factor) / factor;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
 }
