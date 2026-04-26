@@ -15,3 +15,7 @@ export function nextSelectedPayloadObject({
   if (activeStep !== "loads" || draftLoadType !== "gravity") return null;
   return payloadObject ?? current;
 }
+
+export function shouldClearPayloadSelectionOnViewerMiss({ activeStep, draftLoadType }: { activeStep: StepId; draftLoadType: string }): boolean {
+  return activeStep === "loads" && draftLoadType === "gravity";
+}
