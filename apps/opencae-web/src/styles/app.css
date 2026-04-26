@@ -183,14 +183,15 @@ svg {
   color: var(--color-text-muted);
   font-family: var(--font-mono);
   font-size: var(--fs-mini);
-  opacity: 0;
-  transition: color var(--dur-fast) var(--ease-out), opacity var(--dur-fast) var(--ease-out);
+  text-decoration: none;
+  text-underline-offset: 3px;
+  transition: color var(--dur-fast) var(--ease-out);
 }
 
 .start-credit:hover,
 .start-credit:focus-visible {
   color: var(--color-accent);
-  opacity: 1;
+  text-decoration: underline;
 }
 
 .start-footer {
