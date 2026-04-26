@@ -128,32 +128,79 @@ export async function assignMaterial(studyId: string, materialId: string, parame
   );
 }
 
-export async function addSupport(studyId: string, selectionRef?: string): Promise<{ study: Study; message: string }> {
-  const response = await fetch(`/api/studies/${studyId}/supports`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ selectionRef })
-  });
-  return readJson(response);
+export async function addSupport(studyId: string, selectionRef?: string, currentStudy?: Study): Promise<{ study: Study; message: string }> {
+  return fetchJsonWithFallback(
+    `/api/studies/${studyId}/supports`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ selectionRef })
+    },
+    () => {
+      if (!currentStudy) throw new Error("Could not add support without an open study.");
+      return {
+        study: {
+          ...currentStudy,
+          constraints: [
+            ...currentStudy.constraints,
+            {
+              id: `constraint-${crypto.randomUUID()}`,
+              type: "fixed" as const,
+              selectionRef: selectionRef ?? currentStudy.namedSelections.find((selection) => selection.entityType === "face")?.id ?? "selection-fixed-face",
+              parameters: {},
+              status: "complete" as const
+            }
+          ]
+        },
+        message: "Fixed support added."
+      };
+    }
+  );
 }
 
-export async function updateStudy(studyId: string, patch: Partial<Study>, message = "Study updated."): Promise<{ study: Study; message: string }> {
-  const response = await fetch(`/api/studies/${studyId}`, {
-    method: "PUT",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(patch)
-  });
-  const data = await readJson<{ study: Study }>(response);
-  return { ...data, message };
+export async function updateStudy(studyId: string, patch: Partial<Study>, message = "Study updated.", currentStudy?: Study): Promise<{ study: Study; message: string }> {
+  return fetchJsonWithFallback(
+    `/api/studies/${studyId}`,
+    {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(patch)
+    },
+    () => {
+      if (!currentStudy) throw new Error("Could not update study without an open study.");
+      return { study: { ...currentStudy, ...patch }, message };
+    }
+  ).then((data) => ({ ...data, message }));
 }
 
-export async function addLoad(studyId: string, type: LoadType, value: number, selectionRef: string, direction: LoadDirection, applicationPoint?: LoadApplicationPoint | null, payloadObject?: PayloadObjectSelection | null): Promise<{ study: Study; message: string }> {
-  const response = await fetch(`/api/studies/${studyId}/loads`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ type, value, selectionRef, direction, applicationPoint, payloadObject })
-  });
-  return readJson(response);
+export async function addLoad(studyId: string, type: LoadType, value: number, selectionRef: string, direction: LoadDirection, applicationPoint?: LoadApplicationPoint | null, payloadObject?: PayloadObjectSelection | null, currentStudy?: Study): Promise<{ study: Study; message: string }> {
+  return fetchJsonWithFallback(
+    `/api/studies/${studyId}/loads`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type, value, selectionRef, direction, applicationPoint, payloadObject })
+    },
+    () => {
+      if (!currentStudy) throw new Error("Could not add load without an open study.");
+      return {
+        study: {
+          ...currentStudy,
+          loads: [
+            ...currentStudy.loads,
+            {
+              id: `load-${crypto.randomUUID()}`,
+              type,
+              selectionRef,
+              parameters: { value, units: type === "pressure" ? "kPa" : type === "gravity" ? "kg" : "N", direction, ...(applicationPoint ? { applicationPoint } : {}), ...(payloadObject ? { payloadObject } : {}) },
+              status: "complete" as const
+            }
+          ]
+        },
+        message: "Load added."
+      };
+    }
+  );
 }
 
 export async function runSimulation(studyId: string): Promise<{ run: { id: string }; streamUrl: string; message: string }> {

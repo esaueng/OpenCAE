@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { DisplayModel, Project, Study } from "@opencae/schema";
-import { assignMaterial, createProject, importLocalProject, loadSampleProject, uploadModel } from "./api";
+import { addLoad, addSupport, assignMaterial, createProject, importLocalProject, loadSampleProject, updateStudy, uploadModel } from "./api";
 
 const project = {
   id: "project-1",
@@ -143,6 +143,46 @@ describe("api", () => {
       status: "complete"
     }]);
     expect(response.message).toBe("Material assigned to Imported body.");
+  });
+
+  test("adds supports locally when the API is unavailable", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("missing", { status: 404 })));
+
+    const response = await addSupport("study-1", "selection-face-1", study);
+
+    expect(response.study.constraints).toHaveLength(1);
+    expect(response.study.constraints[0]).toMatchObject({
+      type: "fixed",
+      selectionRef: "selection-face-1",
+      parameters: {},
+      status: "complete"
+    });
+    expect(response.message).toBe("Fixed support added.");
+  });
+
+  test("adds loads locally when the API is unavailable", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("missing", { status: 404 })));
+
+    const response = await addLoad("study-1", "force", 500, "selection-face-1", [0, 0, -1], [1, 2, 3], null, study);
+
+    expect(response.study.loads).toHaveLength(1);
+    expect(response.study.loads[0]).toMatchObject({
+      type: "force",
+      selectionRef: "selection-face-1",
+      parameters: { value: 500, units: "N", direction: [0, 0, -1], applicationPoint: [1, 2, 3] },
+      status: "complete"
+    });
+    expect(response.message).toBe("Load added.");
+  });
+
+  test("updates studies locally when the API is unavailable", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("missing", { status: 404 })));
+
+    const response = await updateStudy("study-1", { constraints: [{ id: "constraint-1", type: "fixed", selectionRef: "selection-face-1", parameters: {}, status: "complete" }] }, "Support added.", study);
+
+    expect(response.study.constraints).toHaveLength(1);
+    expect(response.study.loads).toHaveLength(0);
+    expect(response.message).toBe("Support added.");
   });
 
   test("opens a local project file without requiring the API", async () => {

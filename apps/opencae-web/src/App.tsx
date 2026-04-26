@@ -342,7 +342,7 @@ export function App() {
       status: "complete"
     };
     await updateStudy(
-      saveStudyPatch(study.id, { namedSelections: nextSelections, constraints: [...study.constraints, nextSupport] }, "Fixed support added.")
+      saveStudyPatch(study.id, { namedSelections: nextSelections, constraints: [...study.constraints, nextSupport] }, "Fixed support added.", study)
     );
   }
 
@@ -359,7 +359,7 @@ export function App() {
       status: "complete"
     };
     await updateStudy(
-      saveStudyPatch(study.id, { namedSelections: nextSelections, loads: [...study.loads, load] }, "Load added.")
+      saveStudyPatch(study.id, { namedSelections: nextSelections, loads: [...study.loads, load] }, "Load added.", study)
     );
   }
 
@@ -596,18 +596,19 @@ export function App() {
           onToggleDimensions={() => setShowDimensions((value) => !value)}
           onStressExaggerationChange={setStressExaggeration}
           onAssignMaterial={(materialId, parameters) => updateStudy(assignMaterial(study.id, materialId, parameters, study), "supports")}
-          onAddSupport={(selectionRef) => updateStudy(addSupport(study.id, selectionRef))}
+          onAddSupport={(selectionRef) => updateStudy(addSupport(study.id, selectionRef, study))}
           onUpdateSupport={(support: Constraint) =>
             updateStudy(
               saveStudyPatch(
                 study.id,
                 { constraints: study.constraints.map((item) => (item.id === support.id ? support : item)) },
-                "Support updated."
+                "Support updated.",
+                study
               )
             )
           }
           onRemoveSupport={(supportId) =>
-            updateStudy(saveStudyPatch(study.id, { constraints: study.constraints.filter((item) => item.id !== supportId) }, "Support removed."))
+            updateStudy(saveStudyPatch(study.id, { constraints: study.constraints.filter((item) => item.id !== supportId) }, "Support removed.", study))
           }
           onDraftLoadTypeChange={setDraftLoadType}
           onDraftLoadValueChange={setDraftLoadValue}
@@ -620,18 +621,18 @@ export function App() {
             if (!face) return;
             const payloadObject = type === "gravity" ? selectedPayloadObject : null;
             if (selection) {
-              updateStudy(addLoad(study.id, type, value, selection.id, directionVectorForLabel(direction, face), selectedLoadPoint, payloadObject));
+              updateStudy(addLoad(study.id, type, value, selection.id, directionVectorForLabel(direction, face), selectedLoadPoint, payloadObject, study));
               return;
             }
             void addLoadForFace(type, value, face, direction, selectedLoadPoint, payloadObject);
           }}
           onUpdateLoad={(load: Load) =>
             updateStudy(
-              saveStudyPatch(study.id, { loads: study.loads.map((item) => (item.id === load.id ? load : item)) }, "Load updated.")
+              saveStudyPatch(study.id, { loads: study.loads.map((item) => (item.id === load.id ? load : item)) }, "Load updated.", study)
             )
           }
           onRemoveLoad={(loadId) =>
-            updateStudy(saveStudyPatch(study.id, { loads: study.loads.filter((item) => item.id !== loadId) }, "Load removed."))
+            updateStudy(saveStudyPatch(study.id, { loads: study.loads.filter((item) => item.id !== loadId) }, "Load removed.", study))
           }
           onGenerateMesh={(preset) => updateStudy(generateMesh(study.id, preset), "run")}
           onRunSimulation={handleRunSimulation}
