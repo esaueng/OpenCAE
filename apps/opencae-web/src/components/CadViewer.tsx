@@ -1102,20 +1102,23 @@ function colorizeResultGeometry(
   showDeformed: boolean,
   stressExaggeration: number,
   samples: FaceResultSample[],
-  loadMarkers: ViewerLoadMarker[]
+  loadMarkers: ViewerLoadMarker[],
+  coordinateTransform?: ResultCoordinateTransform
 ) {
   const colors: number[] = [];
   const positions = geometry.getAttribute("position");
   const color = new THREE.Color();
   geometry.computeBoundingBox();
-  const bounds = geometry.boundingBox?.clone();
+  const bounds = coordinateTransform?.bounds ?? geometry.boundingBox?.clone();
   for (let index = 0; index < positions.count; index += 1) {
     const point = new THREE.Vector3(positions.getX(index), positions.getY(index), positions.getZ(index));
-    color.copy(resultColorForPoint(kind, resultMode, stressExaggeration, point, samples));
+    const resultPoint = coordinateTransform?.toResultPoint(point) ?? point;
+    color.copy(resultColorForPoint(kind, resultMode, stressExaggeration, resultPoint, samples));
     colors.push(color.r, color.g, color.b);
     if (showDeformed) {
-      const deformed = deformedPointForResults(kind, point, stressExaggeration, samples, loadMarkers, bounds);
-      positions.setXYZ(index, deformed.x, deformed.y, deformed.z);
+      const deformed = deformedPointForResults(kind, resultPoint, stressExaggeration, samples, loadMarkers, bounds);
+      const localDeformed = coordinateTransform?.fromResultPoint(deformed) ?? deformed;
+      positions.setXYZ(index, localDeformed.x, localDeformed.y, localDeformed.z);
     }
   }
   geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
@@ -1123,6 +1126,12 @@ function colorizeResultGeometry(
   geometry.computeVertexNormals();
   return geometry;
 }
+
+type ResultCoordinateTransform = {
+  bounds?: THREE.Box3;
+  toResultPoint: (point: THREE.Vector3) => THREE.Vector3;
+  fromResultPoint: (point: THREE.Vector3) => THREE.Vector3;
+};
 
 export function colorizeResultObject(
   object: THREE.Object3D,
@@ -1133,9 +1142,17 @@ export function colorizeResultObject(
   samples: FaceResultSample[],
   loadMarkers: ViewerLoadMarker[]
 ) {
+  object.updateMatrixWorld(true);
+  const bounds = new THREE.Box3().setFromObject(object);
   object.traverse((child) => {
     if (!(child instanceof THREE.Mesh) || !(child.geometry instanceof THREE.BufferGeometry)) return;
-    colorizeResultGeometry(child.geometry, kind, resultMode, showDeformed, stressExaggeration, samples, loadMarkers);
+    const toResultMatrix = child.matrixWorld.clone();
+    const fromResultMatrix = toResultMatrix.clone().invert();
+    colorizeResultGeometry(child.geometry, kind, resultMode, showDeformed, stressExaggeration, samples, loadMarkers, {
+      bounds,
+      toResultPoint: (point) => point.clone().applyMatrix4(toResultMatrix),
+      fromResultPoint: (point) => point.clone().applyMatrix4(fromResultMatrix)
+    });
     child.material = new THREE.MeshStandardMaterial({
       vertexColors: true,
       metalness: 0.18,
