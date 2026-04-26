@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ElementRef, MutableRefObject } from "react";
-import { Billboard, Bounds, Edges, GizmoHelper, Grid, Html, Line, OrbitControls, Text, useBounds, useGizmoContext } from "@react-three/drei";
+import { Billboard, Bounds, Edges, GizmoHelper, Grid, Html, Line, OrbitControls, Text, useBounds } from "@react-three/drei";
 import { Canvas, useThree } from "@react-three/fiber";
 import type { ThreeEvent } from "@react-three/fiber";
 import type { DisplayFace, DisplayModel, ResultField } from "@opencae/schema";
@@ -91,6 +91,7 @@ export const VIEWER_GIZMO_ALIGNMENT = "bottom-right";
 export function CadViewer(props: CadViewerProps) {
   const controlsRef = useRef<ViewerOrbitControls | null>(null);
   const [uploadedPreviewBounds, setUploadedPreviewBounds] = useState<THREE.Box3 | null>(null);
+  const [gizmoViewRequest, setGizmoViewRequest] = useState<{ axis: RotationAxis | null; signal: number }>({ axis: null, signal: 0 });
   const effectiveViewMode: ViewMode = props.activeStep === "results" ? props.viewMode : props.viewMode === "mesh" ? "mesh" : "model";
   const isLightTheme = props.themeMode === "light";
   const viewportBackground = isLightTheme ? "#f7f9fc" : "#070b10";
@@ -117,11 +118,12 @@ export function CadViewer(props: CadViewerProps) {
             </group>
           </group>
           <BoundsCameraReset signal={props.fitSignal} viewAxis={props.viewAxis} viewAxisSignal={props.viewAxisSignal} />
+          <GizmoCameraReset axis={gizmoViewRequest.axis} signal={gizmoViewRequest.signal} />
         </Bounds>
         <OrbitControls ref={controlsRef} makeDefault enableDamping dampingFactor={0.08} target={[0, 0, 0.75]} />
         <ShiftPanControls controlsRef={controlsRef} />
         <GizmoHelper alignment={VIEWER_GIZMO_ALIGNMENT} margin={[92, 92]}>
-          <CleanAxisGizmo />
+          <CleanAxisGizmo onSelectAxis={(axis) => setGizmoViewRequest((request) => ({ axis, signal: request.signal + 1 }))} />
         </GizmoHelper>
       </Canvas>
       <div className="viewer-hud">
@@ -221,7 +223,7 @@ function panCamera(camera: THREE.Camera, target: THREE.Vector3, deltaX: number, 
   target.add(panOffset);
 }
 
-function CleanAxisGizmo() {
+function CleanAxisGizmo({ onSelectAxis }: { onSelectAxis: (axis: RotationAxis) => void }) {
   const axes: Array<{ label: "X" | "Y" | "Z"; color: string; position: [number, number, number] }> = [
     { label: "X", color: "#ff4b7d", position: [0.92, 0, 0] },
     { label: "Y", color: "#2ddc94", position: [0, 0.92, 0] },
@@ -233,7 +235,7 @@ function CleanAxisGizmo() {
       {axes.map((axis) => (
         <group key={axis.label}>
           <Line points={[[0, 0, 0], axis.position]} color={axis.color} lineWidth={4} />
-          <AxisHead {...axis} />
+          <AxisHead {...axis} onSelectAxis={onSelectAxis} />
           <AxisDot color={axis.color} position={axis.position.map((value) => -value * 0.72) as [number, number, number]} />
         </group>
       ))}
@@ -247,14 +249,13 @@ function CleanAxisGizmo() {
   );
 }
 
-function AxisHead({ label, color, position }: { label: "X" | "Y" | "Z"; color: string; position: [number, number, number] }) {
-  const { tweenCamera } = useGizmoContext();
+function AxisHead({ label, color, position, onSelectAxis }: { label: "X" | "Y" | "Z"; color: string; position: [number, number, number]; onSelectAxis: (axis: RotationAxis) => void }) {
   return (
     <Billboard
       position={position}
       onPointerDown={(event: ThreeEvent<PointerEvent>) => {
         event.stopPropagation();
-        tweenCamera(new THREE.Vector3(...position));
+        onSelectAxis(axisLabelToViewAxis(label));
       }}
     >
       <mesh>
@@ -2100,7 +2101,24 @@ function BoundsCameraReset({ signal, viewAxis, viewAxisSignal }: { signal: numbe
   return null;
 }
 
-function cameraViewForAxis(axis: RotationAxis): { direction: THREE.Vector3; up: THREE.Vector3 } {
+function GizmoCameraReset({ axis, signal }: { axis: RotationAxis | null; signal: number }) {
+  const bounds = useBounds();
+  useEffect(() => {
+    if (!axis) return;
+    const nextBounds = bounds.refresh().clip();
+    const { center, distance } = nextBounds.getSize();
+    const view = cameraViewForAxis(axis);
+    const cameraPosition = center.clone().addScaledVector(view.direction, distance * 1.08);
+    nextBounds.moveTo(cameraPosition).lookAt({ target: center, up: view.up });
+  }, [axis, bounds, signal]);
+  return null;
+}
+
+export function axisLabelToViewAxis(label: "X" | "Y" | "Z"): RotationAxis {
+  return label.toLowerCase() as RotationAxis;
+}
+
+export function cameraViewForAxis(axis: RotationAxis): { direction: THREE.Vector3; up: THREE.Vector3 } {
   if (axis === "x") return { direction: new THREE.Vector3(1, 0, 0), up: WORLD_UP };
   if (axis === "y") return { direction: new THREE.Vector3(0, 1, 0), up: WORLD_UP };
   return { direction: new THREE.Vector3(0, 0, 1), up: new THREE.Vector3(0, 1, 0) };
