@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { DisplayModel, Project } from "@opencae/schema";
-import { uploadModel } from "./api";
+import { createProject, importLocalProject, loadSampleProject, uploadModel } from "./api";
 
 const project = {
   id: "project-1",
@@ -55,5 +55,36 @@ describe("api", () => {
 
     expect(requestBody).toEqual(expectedEmbeddedModel);
     expect(response.project.geometryFiles[0]?.metadata.embeddedModel).toEqual(expectedEmbeddedModel);
+  });
+
+  test("loads the sample project locally when the API is unavailable", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("missing", { status: 404 })));
+
+    const response = await loadSampleProject("bracket");
+
+    expect(response.project.name).toBe("Bracket Demo");
+    expect(response.displayModel.name).toBe("bracket demo body");
+    expect(response.message).toBe("Bracket Demo loaded.");
+  });
+
+  test("creates a blank project locally when the API is unavailable", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new TypeError("Failed to fetch"))));
+
+    const response = await createProject();
+
+    expect(response.project.name).toBe("Untitled Project");
+    expect(response.project.geometryFiles).toHaveLength(0);
+    expect(response.displayModel.name).toBe("No model loaded");
+  });
+
+  test("opens a local project file without requiring the API", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("missing", { status: 404 })));
+    const file = new File([JSON.stringify({ project, displayModel })], "project.opencae.json", { type: "application/json" });
+
+    const response = await importLocalProject(file);
+
+    expect(response.project.name).toBe("Uploaded Project");
+    expect(response.displayModel.name).toBe("Display");
+    expect(response.message).toBe("Uploaded Project opened from local file.");
   });
 });

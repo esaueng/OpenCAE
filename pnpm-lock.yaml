@@ -63,6 +63,9 @@ importers:
 
   apps/opencae-web:
     dependencies:
+      '@opencae/db':
+        specifier: workspace:*
+        version: link:../../libs/opencae-db
       '@opencae/materials':
         specifier: workspace:*
         version: link:../../libs/opencae-materials

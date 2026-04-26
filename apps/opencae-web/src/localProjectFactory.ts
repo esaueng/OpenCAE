@@ -1,0 +1,244 @@
+import type { DisplayModel, Project } from "@opencae/schema";
+import { ProjectSchema } from "@opencae/schema";
+import { bracketDemoProject, bracketDisplayModel } from "@opencae/db/sample-data";
+import type { LocalResultBundle } from "./projectFile";
+import type { SampleModelId, SampleProjectResponse } from "./lib/api";
+
+const SAMPLE_META: Record<SampleModelId, { projectName: string; modelName: string; filename: string; displayName: string; dimensions: DisplayModel["dimensions"] }> = {
+  bracket: {
+    projectName: "Bracket Demo",
+    modelName: "Bracket",
+    filename: "bracket-demo.step",
+    displayName: "bracket demo body",
+    dimensions: { x: 120, y: 88, z: 34, units: "mm" }
+  },
+  plate: {
+    projectName: "Plate Demo",
+    modelName: "Plate",
+    filename: "plate-with-hole.step",
+    displayName: "plate demo body",
+    dimensions: { x: 120, y: 48, z: 10, units: "mm" }
+  },
+  cantilever: {
+    projectName: "Cantilever Demo",
+    modelName: "Cantilever",
+    filename: "cantilever-beam.step",
+    displayName: "cantilever demo body",
+    dimensions: { x: 180, y: 24, z: 24, units: "mm" }
+  }
+};
+
+export function createLocalSampleProject(sample: SampleModelId = "bracket", now = new Date().toISOString()): SampleProjectResponse {
+  const meta = SAMPLE_META[sample];
+  const templateStudy = bracketDemoProject.studies[0];
+  const geometry = bracketDemoProject.geometryFiles[0];
+  const displayModel = sampleDisplayModelFor(sample);
+  const faceLabels = new Map(displayModel.faces.map((face) => [face.id, face.label]));
+  const selectionNames: Record<string, string> = {
+    "selection-body-bracket": `${meta.modelName} body`,
+    "selection-fixed-face": faceLabels.get("face-base-left") ?? "Fixed face",
+    "selection-load-face": faceLabels.get("face-load-top") ?? "Load face",
+    "selection-web-face": faceLabels.get("face-web-front") ?? "Feature face",
+    "selection-base-face": faceLabels.get("face-base-bottom") ?? "Base face"
+  };
+  const bodySelection = templateStudy?.namedSelections.find((selection) => selection.entityType === "body");
+  const faceSelections = displayModel.faces.map((face) => {
+    const templateSelection = templateStudy?.namedSelections.find((selection) => selection.geometryRefs[0]?.entityId === face.id);
+    const selectionId = templateSelection?.id ?? `selection-${face.id}`;
+    return {
+      ...(templateSelection ?? {
+        id: selectionId,
+        entityType: "face" as const,
+        geometryRefs: []
+      }),
+      id: selectionId,
+      name: selectionNames[selectionId] ?? face.label,
+      entityType: "face" as const,
+      geometryRefs: [{ bodyId: "body-bracket", entityType: "face" as const, entityId: face.id, label: face.label }],
+      fingerprint: `${face.id}-${sample}-v1`
+    };
+  });
+
+  const project: Project = {
+    ...bracketDemoProject,
+    id: bracketDemoProject.id,
+    name: meta.projectName,
+    unitSystem: "SI",
+    geometryFiles: geometry
+      ? [{
+          ...geometry,
+          id: `geom-${sample}-${bracketDemoProject.id}`,
+          projectId: bracketDemoProject.id,
+          filename: meta.filename,
+          artifactKey: `${bracketDemoProject.id}/geometry/${sample}-display.json`,
+          metadata: {
+            ...geometry.metadata,
+            source: "sample",
+            sampleModel: sample,
+            displayModelRef: `${bracketDemoProject.id}/geometry/${sample}-display.json`,
+            faceCount: displayModel.faces.length
+          }
+        }]
+      : [],
+    studies: templateStudy
+      ? [{
+          ...templateStudy,
+          id: templateStudy.id,
+          projectId: bracketDemoProject.id,
+          name: "Static Stress",
+          geometryScope: templateStudy.geometryScope.map((scope) => ({ ...scope, label: meta.modelName })),
+          namedSelections: [
+            ...(bodySelection
+              ? [{
+                  ...bodySelection,
+                  name: `${meta.modelName} body`,
+                  geometryRefs: bodySelection.geometryRefs.map((ref) => ({ ...ref, label: meta.modelName }))
+                }]
+              : []),
+            ...faceSelections
+          ],
+          runs: sample === "bracket" ? templateStudy.runs : []
+        }]
+      : [],
+    createdAt: now,
+    updatedAt: now
+  };
+
+  return { project, displayModel, message: `${meta.projectName} loaded.` };
+}
+
+export function createLocalBlankProject(now = new Date().toISOString()): SampleProjectResponse {
+  const projectId = `project-${newLocalId()}`;
+  const studyId = `study-${newLocalId()}`;
+  return {
+    project: {
+      id: projectId,
+      name: "Untitled Project",
+      schemaVersion: bracketDemoProject.schemaVersion,
+      unitSystem: "SI",
+      geometryFiles: [],
+      studies: [{
+        id: studyId,
+        projectId,
+        name: "Static Stress",
+        type: "static_stress",
+        geometryScope: [],
+        materialAssignments: [],
+        namedSelections: [],
+        contacts: [],
+        constraints: [],
+        loads: [],
+        meshSettings: {
+          preset: "medium",
+          status: "not_started"
+        },
+        solverSettings: {
+          analysisType: "linear_static",
+          smallDisplacement: true
+        },
+        validation: [],
+        runs: []
+      }],
+      createdAt: now,
+      updatedAt: now
+    },
+    displayModel: {
+      id: "display-blank",
+      name: "No model loaded",
+      bodyCount: 0,
+      faces: []
+    },
+    message: "Blank project created."
+  };
+}
+
+export function openLocalProjectPayload(payload: unknown): SampleProjectResponse {
+  const candidate = hasObjectKey(payload, "project") ? payload.project : payload;
+  const parsed = ProjectSchema.safeParse(candidate);
+  if (!parsed.success) throw new Error("The selected file is not a valid OpenCAE project JSON.");
+
+  const displayModel = hasObjectKey(payload, "displayModel") && isDisplayModel(payload.displayModel)
+    ? payload.displayModel
+    : displayModelForProject(parsed.data);
+  const results = hasObjectKey(payload, "results") && isLocalResultBundle(payload.results) ? payload.results : undefined;
+  return {
+    project: parsed.data,
+    displayModel,
+    ...(results ? { results } : {}),
+    message: `${parsed.data.name} opened from local file.`
+  };
+}
+
+function sampleDisplayModelFor(sample: SampleModelId): DisplayModel {
+  const meta = SAMPLE_META[sample];
+  const facesBySample: Record<SampleModelId, DisplayModel["faces"]> = {
+    bracket: [
+      ...bracketDisplayModel.faces,
+      { id: "face-upright-hole", label: "Upright through hole", color: "#4da3ff", center: [-1.2, 1.48, 0.58], normal: [0, 0, 1], stressValue: 76 },
+      { id: "face-upright-front", label: "Upright front face", color: "#64748b", center: [-1.18, 1.42, 0.58], normal: [0, 0, 1], stressValue: 78 },
+      { id: "face-upright-left", label: "Upright outer side", color: "#64748b", center: [-1.57, 1.18, 0], normal: [-1, 0, 0], stressValue: 68 },
+      { id: "face-upright-right", label: "Upright inner side", color: "#64748b", center: [-0.76, 1.22, 0], normal: [1, 0, 0], stressValue: 86 },
+      { id: "face-base-front", label: "Base front face", color: "#64748b", center: [0.68, -0.24, 0.58], normal: [0, -1, 0], stressValue: 52 },
+      { id: "face-base-end", label: "Base end face", color: "#64748b", center: [2.36, 0, 0], normal: [1, 0, 0], stressValue: 44 },
+      { id: "face-rib-side", label: "Rib side face", color: "#22c55e", center: [-0.26, 0.78, 0.22], normal: [0, 0, 1], stressValue: 92 }
+    ],
+    plate: [
+      { id: "face-base-left", label: "Left clamp face", color: "#4da3ff", center: [-1.45, 0.0, 0.17], normal: [0, 0, 1], stressValue: 42 },
+      { id: "face-load-top", label: "Right load pad", color: "#f59e0b", center: [1.42, 0.0, 0.17], normal: [0, 0, 1], stressValue: 118 },
+      { id: "face-web-front", label: "Hole rim region", color: "#22c55e", center: [0.0, 0.0, 0.2], normal: [0, 0, 1], stressValue: 84 },
+      { id: "face-base-bottom", label: "Plate top face", color: "#8b949e", center: [0.0, 0.0, 0.18], normal: [0, 0, 1], stressValue: 58 }
+    ],
+    cantilever: [
+      { id: "face-base-left", label: "Fixed end face", color: "#4da3ff", center: [-1.8, 0.18, 0], normal: [-1, 0, 0], stressValue: 132 },
+      { id: "face-load-top", label: "Free end load face", color: "#f59e0b", center: [1.75, 0.18, 0], normal: [1, 0, 0], stressValue: 96 },
+      { id: "face-web-front", label: "Top beam face", color: "#22c55e", center: [0.0, 0.42, 0], normal: [0, 1, 0], stressValue: 74 },
+      { id: "face-base-bottom", label: "Beam bottom face", color: "#8b949e", center: [0.0, -0.08, 0], normal: [0, -1, 0], stressValue: 46 }
+    ]
+  };
+  return {
+    ...bracketDisplayModel,
+    id: `display-${sample}`,
+    name: meta.displayName,
+    dimensions: meta.dimensions,
+    faces: facesBySample[sample]
+  };
+}
+
+function displayModelForProject(project: Project): DisplayModel {
+  const sample = normalizeSampleId(project.geometryFiles[0]?.metadata.sampleModel);
+  if (project.geometryFiles.length) return sampleDisplayModelFor(sample);
+  return { id: "display-blank", name: "No model loaded", bodyCount: 0, faces: [] };
+}
+
+function normalizeSampleId(value: unknown): SampleModelId {
+  return value === "plate" || value === "cantilever" ? value : "bracket";
+}
+
+function hasObjectKey<Key extends string>(value: unknown, key: Key): value is Record<Key, unknown> {
+  return Boolean(value && typeof value === "object" && key in value);
+}
+
+function isDisplayModel(value: unknown): value is DisplayModel {
+  return Boolean(
+    value &&
+    typeof value === "object" &&
+    typeof (value as Partial<DisplayModel>).id === "string" &&
+    typeof (value as Partial<DisplayModel>).name === "string" &&
+    typeof (value as Partial<DisplayModel>).bodyCount === "number" &&
+    Array.isArray((value as Partial<DisplayModel>).faces)
+  );
+}
+
+function isLocalResultBundle(value: unknown): value is LocalResultBundle {
+  return Boolean(
+    value &&
+    typeof value === "object" &&
+    hasObjectKey(value, "summary") &&
+    hasObjectKey(value, "fields") &&
+    Array.isArray(value.fields)
+  );
+}
+
+function newLocalId(): string {
+  return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
