@@ -66,6 +66,9 @@ export function StartScreen({ onLoadSample, onCreateProject, onOpenProject }: St
           <span>Start with the sample project to see a complete example.</span>
         </p>
       </section>
+      <a className="start-credit" href="https://shop.esaulabs.com/" target="_blank" rel="noreferrer">
+        Built by Esau Engineering
+      </a>
       <footer className="start-footer">
         <a href="https://github.com/esaueng/opencae-beta" target="_blank" rel="noreferrer">github</a>
       </footer>
