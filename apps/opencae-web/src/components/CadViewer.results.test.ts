@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { describe, expect, test } from "vitest";
-import { colorizeResultObject, shouldShowModelHitLabel } from "./CadViewer";
+import { colorizeResultObject, payloadHighlightObjectId, shouldShowModelHitLabel } from "./CadViewer";
 import type { FaceResultSample } from "../resultFields";
 
 const samples: FaceResultSample[] = [
@@ -21,6 +21,12 @@ describe("CadViewer result coloring", () => {
     expect(shouldShowModelHitLabel("results", true)).toBe(false);
     expect(shouldShowModelHitLabel("model", true)).toBe(true);
     expect(shouldShowModelHitLabel("mesh", false)).toBe(false);
+  });
+
+  test("uses only hovered payload hits for setup-view object highlighting", () => {
+    expect(payloadHighlightObjectId(true, null)).toBeUndefined();
+    expect(payloadHighlightObjectId(true, { id: "payload-part", label: "Payload part", center: [0, 0, 0] })).toBe("payload-part");
+    expect(payloadHighlightObjectId(false, { id: "payload-part", label: "Payload part", center: [0, 0, 0] })).toBeUndefined();
   });
 
   test("applies vertex result colors to imported native CAD preview meshes", () => {

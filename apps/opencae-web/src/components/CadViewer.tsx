@@ -304,8 +304,8 @@ function BracketModel({
   const showBoundaryMarkers = !isResultView;
   const placementMode = activeStep === "loads" || activeStep === "supports";
   const activeHit = hoveredHit ?? selectedHit;
-  const showModelHitLabel = shouldShowModelHitLabel(viewMode, Boolean(activeHit));
-  const activePayloadObjectId = payloadObjectSelectionMode ? activeHit?.payloadObject?.id : undefined;
+  const showModelHitLabel = shouldShowModelHitLabel(viewMode, Boolean(hoveredHit));
+  const activePayloadObjectId = payloadHighlightObjectId(payloadObjectSelectionMode, hoveredHit?.payloadObject ?? null);
 
   useEffect(() => {
     if (!selectedFaceId) {
@@ -379,7 +379,7 @@ function BracketModel({
       )}
       <HoleRims kind={modelKind} />
       {viewMode === "mesh" && <MeshOverlay kind={modelKind} />}
-      {showModelHitLabel && activeHit && <ModelHitLabel hit={activeHit} active={activeHit.face.id === selectedFaceId} />}
+      {showModelHitLabel && hoveredHit && <ModelHitLabel hit={hoveredHit} active={hoveredHit.face.id === selectedFaceId} />}
       {showBoundaryMarkers && loadMarkers.map((marker) => {
         const face = displayModel.faces.find((item) => item.id === marker.faceId);
         return face ? <LoadGlyph key={marker.id} marker={marker} face={face} active={activeStep === "loads"} /> : null;
@@ -395,6 +395,10 @@ function BracketModel({
 
 export function shouldShowModelHitLabel(viewMode: ViewMode, hasActiveHit: boolean) {
   return hasActiveHit && viewMode !== "results";
+}
+
+export function payloadHighlightObjectId(payloadObjectSelectionMode: boolean, payloadObject: PayloadObjectSelection | null | undefined) {
+  return payloadObjectSelectionMode ? payloadObject?.id : undefined;
 }
 
 function modelKindForDisplayModel(displayModel: DisplayModel): SampleModelKind {
