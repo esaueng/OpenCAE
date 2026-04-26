@@ -19,7 +19,7 @@ import {
 import { resetDisplayModelOrientation, type RotationAxis } from "./modelOrientation";
 import { buildLocalProjectFile, suggestedProjectFilename, type LocalResultBundle } from "./projectFile";
 import { buildAutosavedWorkspace, readAutosavedWorkspace, writeAutosavedWorkspace, type ThemeMode } from "./appPersistence";
-import { shouldShowStartScreen } from "./appShellState";
+import { shouldAutoAdvanceAfterMeshGeneration, shouldShowStartScreen } from "./appShellState";
 import { displayModelForUnits, loadValueForUnits, resultFieldForUnits, resultSummaryForUnits, type UnitSystem } from "./unitDisplay";
 import { supportDisplayLabel } from "./supportLabels";
 
@@ -651,7 +651,7 @@ export function App() {
           onRemoveLoad={(loadId) =>
             updateStudy(saveStudyPatch(study.id, { loads: study.loads.filter((item) => item.id !== loadId) }, "Load removed.", study))
           }
-          onGenerateMesh={(preset) => updateStudy(generateMesh(study.id, preset, study), "run")}
+          onGenerateMesh={(preset) => updateStudy(generateMesh(study.id, preset, study), shouldAutoAdvanceAfterMeshGeneration() ? "run" : undefined)}
           onRunSimulation={handleRunSimulation}
           canRunSimulation={canRunSimulation}
           missingRunItems={missingRunItems}

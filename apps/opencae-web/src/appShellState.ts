@@ -11,3 +11,7 @@ export function shouldShowStartScreen({
 }) {
   return homeRequested || !hasProject || !hasDisplayModel || !hasStudy;
 }
+
+export function shouldAutoAdvanceAfterMeshGeneration() {
+  return false;
+}
