@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { describe, expect, test } from "vitest";
-import { VIEWER_GIZMO_ALIGNMENT, axisLabelToViewAxis, cameraViewForAxis, colorizeResultObject, payloadHighlightObjectId, shouldShowModelHitLabel } from "./CadViewer";
+import { VIEWER_GIZMO_ALIGNMENT, axisLabelToViewAxis, cameraViewForAxis, colorizeResultObject, payloadHighlightObjectId, rotatedCameraOrbit, shouldShowModelHitLabel } from "./CadViewer";
 import type { FaceResultSample } from "../resultFields";
 
 const samples: FaceResultSample[] = [
@@ -26,6 +26,21 @@ describe("CadViewer result coloring", () => {
 
     expect(topView.direction.toArray()).toEqual([0, 0, 1]);
     expect(topView.up.toArray()).toEqual([0, 1, 0]);
+  });
+
+  test("rotates the camera orbit around a requested gizmo axis", () => {
+    const rotated = rotatedCameraOrbit(
+      new THREE.Vector3(1, 0, 0),
+      new THREE.Vector3(0, 0, 0),
+      new THREE.Vector3(0, 0, 1),
+      "z",
+      Math.PI / 2
+    );
+
+    expect(rotated.position.x).toBeCloseTo(0);
+    expect(rotated.position.y).toBeCloseTo(1);
+    expect(rotated.position.z).toBeCloseTo(0);
+    expect(rotated.up.toArray()).toEqual([0, 0, 1]);
   });
 
   test("hides face selection callouts in result view", () => {
