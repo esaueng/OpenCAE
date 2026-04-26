@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { DisplayModel, Project, Study } from "@opencae/schema";
-import { addLoad, addSupport, assignMaterial, createProject, importLocalProject, loadSampleProject, updateStudy, uploadModel } from "./api";
+import { addLoad, addSupport, assignMaterial, createProject, generateMesh, importLocalProject, loadSampleProject, updateStudy, uploadModel } from "./api";
 
 const project = {
   id: "project-1",
@@ -186,6 +186,27 @@ describe("api", () => {
       status: "complete"
     });
     expect(response.message).toBe("Load added.");
+  });
+
+  test("generates mesh locally when the API does not know the restored study", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: "Study not found" }), {
+      status: 404,
+      headers: { "content-type": "application/json" }
+    })));
+
+    const response = await generateMesh("study-1", "fine", study);
+
+    expect(response.study.meshSettings).toEqual({
+      preset: "fine",
+      status: "complete",
+      meshRef: "project-1/mesh/mesh-summary.json",
+      summary: {
+        nodes: 88420,
+        elements: 57102,
+        warnings: ["Fine preset is mocked; no native mesher was run."]
+      }
+    });
+    expect(response.message).toBe("Mesh generated locally.");
   });
 
   test("updates studies locally when the API is unavailable", async () => {

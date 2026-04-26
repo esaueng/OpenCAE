@@ -643,7 +643,7 @@ export function App() {
           onRemoveLoad={(loadId) =>
             updateStudy(saveStudyPatch(study.id, { loads: study.loads.filter((item) => item.id !== loadId) }, "Load removed.", study))
           }
-          onGenerateMesh={(preset) => updateStudy(generateMesh(study.id, preset), "run")}
+          onGenerateMesh={(preset) => updateStudy(generateMesh(study.id, preset, study), "run")}
           onRunSimulation={handleRunSimulation}
           canRunSimulation={canRunSimulation}
           missingRunItems={missingRunItems}

@@ -90,13 +90,31 @@ export async function renameProject(projectId: string, name: string): Promise<{ 
   return readJson(response);
 }
 
-export async function generateMesh(studyId: string, preset: "coarse" | "medium" | "fine"): Promise<{ study: Study; message: string }> {
-  const response = await fetch(`/api/studies/${studyId}/mesh`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ preset })
-  });
-  return readJson(response);
+export async function generateMesh(studyId: string, preset: "coarse" | "medium" | "fine", currentStudy?: Study): Promise<{ study: Study; message: string }> {
+  return fetchJsonWithFallback(
+    `/api/studies/${studyId}/mesh`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ preset })
+    },
+    () => {
+      if (!currentStudy) throw new Error("Could not generate mesh without an open study.");
+      const summary = meshSummaryForPreset(preset);
+      return {
+        study: {
+          ...currentStudy,
+          meshSettings: {
+            preset,
+            status: "complete" as const,
+            meshRef: `${currentStudy.projectId}/mesh/mesh-summary.json`,
+            summary
+          }
+        },
+        message: "Mesh generated locally."
+      };
+    }
+  );
 }
 
 export async function assignMaterial(studyId: string, materialId: string, parameters: Record<string, unknown> = {}, currentStudy?: Study): Promise<{ study: Study; message: string }> {
@@ -260,6 +278,15 @@ async function fetchJsonWithFallback<T>(input: RequestInfo | URL, init: RequestI
   } catch {
     return fallback();
   }
+}
+
+function meshSummaryForPreset(preset: "coarse" | "medium" | "fine") {
+  const summaryByPreset = {
+    coarse: { nodes: 12840, elements: 7320, warnings: [] },
+    medium: { nodes: 42381, elements: 26944, warnings: ["Small feature simplified for the mock mesh."] },
+    fine: { nodes: 88420, elements: 57102, warnings: ["Fine preset is mocked; no native mesher was run."] }
+  };
+  return summaryByPreset[preset];
 }
 
 async function fileToBase64(file: File): Promise<string> {
