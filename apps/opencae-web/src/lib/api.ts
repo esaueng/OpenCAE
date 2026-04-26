@@ -1,6 +1,7 @@
 import type { DisplayModel, Project, ResultField, ResultSummary, RunEvent, Study } from "@opencae/schema";
 import type { LoadDirection, LoadType } from "../loadPreview";
 import { embedUploadedModelFile, type EmbeddedModelFile, type LocalResultBundle } from "../projectFile";
+import { createLocalBlankProject, createLocalSampleProject, openLocalProjectPayload } from "../localProjectFactory";
 
 export interface SampleProjectResponse {
   message?: string;
@@ -17,32 +18,41 @@ export interface ResultsResponse {
 }
 
 export async function loadSampleProject(sample: SampleModelId = "bracket"): Promise<SampleProjectResponse> {
-  const response = await fetch("/api/sample-project/load", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ sample })
-  });
-  return readJson(response);
+  return fetchJsonWithFallback(
+    "/api/sample-project/load",
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sample })
+    },
+    () => createLocalSampleProject(sample)
+  );
 }
 
 export async function createProject(): Promise<SampleProjectResponse> {
-  const response = await fetch("/api/projects", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ mode: "blank" })
-  });
-  return readJson(response);
+  return fetchJsonWithFallback(
+    "/api/projects",
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ mode: "blank" })
+    },
+    () => createLocalBlankProject()
+  );
 }
 
 export async function importLocalProject(file: File): Promise<SampleProjectResponse> {
   const text = await file.text();
   const payload = JSON.parse(text) as unknown;
-  const response = await fetch("/api/projects/import", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(payload)
-  });
-  return readJson(response);
+  return fetchJsonWithFallback(
+    "/api/projects/import",
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload)
+    },
+    () => openLocalProjectPayload(payload)
+  );
 }
 
 export async function uploadModel(projectId: string, file: File): Promise<SampleProjectResponse> {
@@ -168,6 +178,15 @@ async function readJson<T>(response: Response): Promise<T> {
     throw new Error(message);
   }
   return response.json() as Promise<T>;
+}
+
+async function fetchJsonWithFallback<T>(input: RequestInfo | URL, init: RequestInit, fallback: () => T | Promise<T>): Promise<T> {
+  try {
+    const response = await fetch(input, init);
+    return await readJson<T>(response);
+  } catch {
+    return fallback();
+  }
 }
 
 async function fileToBase64(file: File): Promise<string> {
