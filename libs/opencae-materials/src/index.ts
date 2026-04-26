@@ -143,7 +143,7 @@ export function effectiveMaterialProperties(material: Material, parameters: Reco
   const wallCount = clamp(printSettings.wallCount ?? 3, 1, 12);
   const shellShare = clamp(0.12 + wallCount * 0.045, 0.16, 0.5);
   const sectionFill = clamp(shellShare + (1 - shellShare) * infill, 0.05, 1);
-  const layerFactor = printSettings.layerOrientation === "z" ? material.printProfile.layerStrengthFactor ?? 0.72 : 0.9;
+  const layerFactor = printSettings.layerOrientation === "z" ? 1 : material.printProfile.layerStrengthFactor ?? 0.72;
   const stiffnessFactor = clamp(0.18 + 0.82 * sectionFill ** 1.35, 0.08, 1);
   const strengthFactor = clamp((0.25 + 0.75 * sectionFill ** 1.15) * layerFactor, 0.08, 1);
   const densityFactor = clamp(0.18 + 0.82 * sectionFill, 0.08, 1);

@@ -29,6 +29,21 @@ describe("starterMaterials", () => {
     expect(printed.yieldStrength).toBeLessThan(petg!.yieldStrength);
     expect(printed.density).toBeLessThan(petg!.density);
   });
+
+  test("treats Z build direction as the strongest printed orientation", async () => {
+    const { effectiveMaterialProperties } = await import("./index");
+    const petg = starterMaterials.find((material) => material.id === "mat-petg");
+    expect(petg).toBeDefined();
+
+    const parameters = { printed: true, infillDensity: 35, wallCount: 3 };
+    const zBuild = effectiveMaterialProperties(petg!, { ...parameters, layerOrientation: "z" });
+    const xBuild = effectiveMaterialProperties(petg!, { ...parameters, layerOrientation: "x" });
+    const yBuild = effectiveMaterialProperties(petg!, { ...parameters, layerOrientation: "y" });
+
+    expect(zBuild.yieldStrength).toBeGreaterThan(xBuild.yieldStrength);
+    expect(zBuild.yieldStrength).toBeGreaterThan(yBuild.yieldStrength);
+    expect(xBuild.yieldStrength).toBe(yBuild.yieldStrength);
+  });
 });
 
 describe("payloadMaterials", () => {
