@@ -6,7 +6,7 @@ import { assessResultFailure, estimateAllowableLoadForSafetyFactor } from "@open
 import type { Constraint, DisplayFace, DisplayModel, Load, Project, ResultSummary, Study } from "@opencae/schema";
 import type { ResultMode, ViewMode } from "./CadViewer";
 import type { StepId } from "./StepBar";
-import { applicationPointForLoad, directionLabelForLoad, directionVectorForLabel, equivalentForceForLoad, unitsForLoadType, type LoadApplicationPoint, type LoadDirectionLabel, type LoadType } from "../loadPreview";
+import { applicationPointForLoad, directionLabelForLoad, directionVectorForLabel, equivalentForceForLoad, payloadObjectForLoad, unitsForLoadType, type LoadApplicationPoint, type LoadDirectionLabel, type LoadType, type PayloadObjectSelection } from "../loadPreview";
 import type { SampleModelId } from "../lib/api";
 import { formatModelOrientation, getModelOrientation, type RotationAxis } from "../modelOrientation";
 import { shouldShowSampleModelPicker } from "../modelPanelState";
@@ -33,6 +33,7 @@ interface RightPanelProps {
   draftLoadValue: number;
   draftLoadDirection: LoadDirectionLabel;
   selectedLoadPoint: LoadApplicationPoint | null;
+  selectedPayloadObject: PayloadObjectSelection | null;
   onFitView: () => void;
   onRotateModel: (axis: RotationAxis) => void;
   onResetModelOrientation: () => void;
@@ -350,6 +351,7 @@ function LoadsPanel({
   draftLoadValue,
   draftLoadDirection,
   selectedLoadPoint,
+  selectedPayloadObject,
   onDraftLoadTypeChange,
   onDraftLoadValueChange,
   onDraftLoadDirectionChange,
@@ -369,9 +371,13 @@ function LoadsPanel({
     onDraftLoadValueChange(baseValue.value);
   }
   return (
-    <Panel title="Loads" helper="Choose where force, pressure, or payload weight is applied. Click a specific point on a face, then add a load.">
+    <Panel title="Loads" helper={draftLoadType === "gravity" ? "Choose the object carrying payload mass, then add its weight as a load." : "Choose where force or pressure is applied. Click a specific point on a face, then add a load."}>
       <HelpNote helpId="loadPlacement" />
-      <PlacementReadout selectedRef={selectedFromViewport} fallbackLabel={selectedFace?.label} detail={selectedLoadPoint ? "point picked" : undefined} />
+      <PlacementReadout
+        selectedRef={selectedFromViewport}
+        fallbackLabel={selectedPayloadObject?.label ?? selectedFace?.label}
+        detail={selectedPayloadObject ? "object selected" : selectedLoadPoint ? "point picked" : undefined}
+      />
       <label className="field">
         <HelpLabel helpId="loadType">Load type</HelpLabel>
         <div className="segmented" role="group" aria-label="Load type">
@@ -435,7 +441,8 @@ function LoadEditorList({ study, unitSystem, onUpdateLoad, onRemoveLoad, onEditi
         const displayLoad = loadValueForUnits(Number(load.parameters.value ?? 0), units, unitSystem);
         const selection = study.namedSelections.find((candidate) => candidate.id === load.selectionRef);
         const label = selection?.geometryRefs[0]?.label ?? "selected face";
-        const pointLabel = applicationPointForLoad(load) ? " · point load" : "";
+        const payloadObject = payloadObjectForLoad(load);
+        const pointLabel = payloadObject ? ` · ${payloadObject.label}` : applicationPointForLoad(load) ? " · point load" : "";
         const equivalentForce = load.type === "gravity" ? ` · ${formatEquivalentForce(equivalentForceForLoad(load), unitSystem)} weight` : "";
         return (
           <div className="editable-item" key={load.id}>

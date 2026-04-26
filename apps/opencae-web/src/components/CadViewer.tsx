@@ -14,6 +14,7 @@ import { formatResultValue, resultProbeSamplesForFaces, resultSamplesForFaces, t
 import { stepPreviewGroupFromBase64 } from "../stepPreview";
 import { normalizedStlGeometryFromBuffer } from "../stlPreview";
 import { lengthForUnits, stressForUnits, type UnitSystem } from "../unitDisplay";
+import type { PayloadObjectSelection } from "../loadPreview";
 
 export type ViewMode = "model" | "mesh" | "results";
 export type ResultMode = "stress" | "displacement" | "safety_factor";
@@ -44,7 +45,8 @@ interface CadViewerProps {
   displayModel: DisplayModel;
   activeStep: StepId;
   selectedFaceId: string | null;
-  onSelectFace: (face: DisplayFace, point?: [number, number, number]) => void;
+  payloadObjectSelectionMode: boolean;
+  onSelectFace: (face: DisplayFace, point?: [number, number, number], payloadObject?: PayloadObjectSelection) => void;
   viewMode: ViewMode;
   resultMode: ResultMode;
   showDeformed: boolean;
@@ -74,7 +76,7 @@ const BRACKET_HOLES = [
   { id: "base-hole-right", center: [1.2, 0] as [number, number], radius: 0.13, supported: true }
 ];
 type ViewerOrbitControls = ElementRef<typeof OrbitControls>;
-type ModelSelectionHit = { face: DisplayFace; point: [number, number, number] };
+type ModelSelectionHit = { face: DisplayFace; point: [number, number, number]; payloadObject?: PayloadObjectSelection };
 type ModelPickHandlers = {
   onPointerMove?: (event: ThreeEvent<PointerEvent>) => void;
   onPointerOut?: () => void;
@@ -267,7 +269,7 @@ function AxisDot({ color, position }: { color: string; position: [number, number
   );
 }
 
-function BracketModel({ displayModel, activeStep, selectedFaceId, onSelectFace, viewMode, resultMode, showDeformed, stressExaggeration, resultFields, unitSystem, loadMarkers, supportMarkers }: CadViewerProps) {
+function BracketModel({ displayModel, activeStep, selectedFaceId, payloadObjectSelectionMode, onSelectFace, viewMode, resultMode, showDeformed, stressExaggeration, resultFields, unitSystem, loadMarkers, supportMarkers }: CadViewerProps) {
   const [hoveredHit, setHoveredHit] = useState<ModelSelectionHit | null>(null);
   const [selectedHit, setSelectedHit] = useState<ModelSelectionHit | null>(null);
   const modelKind = modelKindForDisplayModel(displayModel);
@@ -293,7 +295,12 @@ function BracketModel({ displayModel, activeStep, selectedFaceId, onSelectFace, 
     if (modelKind === "uploaded") return uploadedFaceHitFromEvent(event);
     const modelPoint = worldPointToModelSpace(event.point);
     const face = faceForModelHit(modelKind, displayModel.faces, modelPoint);
-    return face ? { face, point: modelPoint.toArray() as [number, number, number] } : null;
+    if (!face) return null;
+    return {
+      face,
+      point: modelPoint.toArray() as [number, number, number],
+      payloadObject: payloadObjectSelectionMode ? payloadObjectFromEvent(event, displayModel, modelKind, face) : undefined
+    };
   }
 
   const pickHandlers: ModelPickHandlers = {
@@ -307,7 +314,7 @@ function BracketModel({ displayModel, activeStep, selectedFaceId, onSelectFace, 
       if (!hit) return;
       event.stopPropagation();
       setSelectedHit(hit);
-      onSelectFace(hit.face, hit.point);
+      onSelectFace(hit.face, hit.point, hit.payloadObject);
     }
   };
 
@@ -480,6 +487,38 @@ function uploadedFaceHitFromEvent(event: ThreeEvent<PointerEvent> | ThreeEvent<M
   };
 }
 
+function payloadObjectFromEvent(event: ThreeEvent<PointerEvent> | ThreeEvent<MouseEvent>, displayModel: DisplayModel, kind: SampleModelKind, face: DisplayFace): PayloadObjectSelection {
+  if (kind !== "uploaded") {
+    return {
+      id: `payload-${displayModel.id}`,
+      label: displayModel.name,
+      center: face.center
+    };
+  }
+
+  const target = payloadObjectTargetFor(event.object);
+  const bounds = new THREE.Box3().setFromObject(target);
+  const center = bounds.isEmpty()
+    ? event.point
+    : bounds.getCenter(new THREE.Vector3());
+  return {
+    id: String(target.userData.opencaeObjectId ?? target.uuid),
+    label: String(target.userData.opencaeObjectLabel ?? (target.name || displayModel.name)),
+    center: worldPointToModelSpace(center).toArray() as [number, number, number]
+  };
+}
+
+function payloadObjectTargetFor(object: THREE.Object3D) {
+  let target: THREE.Object3D = object;
+  let current: THREE.Object3D | null = object;
+  while (current) {
+    if (current.userData.opencaeObjectLabel) return current;
+    if (current instanceof THREE.Mesh) target = current;
+    current = current.parent;
+  }
+  return target;
+}
+
 function uploadedFaceId(point: [number, number, number], normal: THREE.Vector3) {
   const values = [...point, normal.x, normal.y, normal.z].map((value) => value.toFixed(2).replace("-", "m").replace(".", "p"));
   return `face-upload-picked-${values.join("-")}`;
@@ -594,11 +633,14 @@ function UploadedNativeCadModel({ displayModel, color, pickHandlers }: { display
 
 function UploadedStlModel({ displayModel, color, pickHandlers }: { displayModel: DisplayModel; color: string; pickHandlers?: ModelPickHandlers }) {
   const geometry = useMemo(() => {
-    return normalizedStlGeometryFromBuffer(base64ToArrayBuffer(displayModel.visualMesh?.contentBase64 ?? ""));
+    const nextGeometry = normalizedStlGeometryFromBuffer(base64ToArrayBuffer(displayModel.visualMesh?.contentBase64 ?? ""));
+    nextGeometry.userData.opencaeObjectLabel = displayModel.name.replace(" uploaded model", "");
+    nextGeometry.userData.opencaeObjectId = "uploaded-stl-object";
+    return nextGeometry;
   }, [displayModel.visualMesh?.contentBase64]);
 
   return (
-    <mesh geometry={geometry} {...pickHandlers}>
+    <mesh geometry={geometry} userData={geometry.userData} {...pickHandlers}>
       <meshStandardMaterial color={color} metalness={0.18} roughness={0.54} />
       <Edges color="#c8d3df" threshold={15} />
     </mesh>
@@ -617,6 +659,8 @@ function UploadedObjModel({ displayModel, pickHandlers }: { displayModel: Displa
     parsed.scale.setScalar(2.4 / maxDimension);
     parsed.traverse((child) => {
       if (child instanceof THREE.Mesh) {
+        child.userData.opencaeObjectId = child.name || child.uuid;
+        child.userData.opencaeObjectLabel = child.name || displayModel.name.replace(" uploaded model", "");
         child.material = new THREE.MeshStandardMaterial({ color: "#9aa7b4", metalness: 0.18, roughness: 0.54 });
         child.castShadow = true;
         child.receiveShadow = true;

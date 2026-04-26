@@ -8,7 +8,7 @@ import {
 } from "@opencae/schema";
 import { buildLocalProjectFile, type LocalProjectFile, type LocalResultBundle } from "./projectFile";
 import type { LoadDirectionLabel, LoadType } from "./loadPreview";
-import type { LoadApplicationPoint } from "./loadPreview";
+import type { LoadApplicationPoint, PayloadObjectSelection } from "./loadPreview";
 import type { ResultMode, ViewMode } from "./components/CadViewer";
 import type { StepId } from "./components/StepBar";
 import type { SampleModelId } from "./lib/api";
@@ -21,6 +21,7 @@ export interface WorkspaceUiSnapshot {
   activeStep: StepId;
   selectedFaceId: string | null;
   selectedLoadPoint: LoadApplicationPoint | null;
+  selectedPayloadObject: PayloadObjectSelection | null;
   viewMode: ViewMode;
   themeMode: ThemeMode;
   resultMode: ResultMode;
@@ -153,6 +154,7 @@ function parseUiSnapshot(value: unknown): WorkspaceUiSnapshot | null {
     activeStep: readEnum(value.activeStep, STEPS, "model"),
     selectedFaceId: typeof value.selectedFaceId === "string" ? value.selectedFaceId : null,
     selectedLoadPoint: isVector3(value.selectedLoadPoint) ? value.selectedLoadPoint : null,
+    selectedPayloadObject: parsePayloadObject(value.selectedPayloadObject),
     viewMode: readEnum(value.viewMode, VIEW_MODES, "model"),
     themeMode: readEnum(value.themeMode, THEMES, "dark"),
     resultMode: readEnum(value.resultMode, RESULT_MODES, "stress"),
@@ -214,6 +216,11 @@ function clamp(value: number, min: number, max: number): number {
 
 function isVector3(value: unknown): value is [number, number, number] {
   return Array.isArray(value) && value.length === 3 && value.every((item) => typeof item === "number" && Number.isFinite(item));
+}
+
+function parsePayloadObject(value: unknown): PayloadObjectSelection | null {
+  if (!isRecord(value) || typeof value.id !== "string" || typeof value.label !== "string" || !isVector3(value.center)) return null;
+  return { id: value.id, label: value.label, center: value.center };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
