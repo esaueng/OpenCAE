@@ -1103,17 +1103,27 @@ function colorizeResultGeometry(
   stressExaggeration: number,
   samples: FaceResultSample[],
   loadMarkers: ViewerLoadMarker[],
-  coordinateTransform?: ResultCoordinateTransform
+  coordinateTransform?: ResultCoordinateTransform,
+  valueRange?: ResultValueRange
 ) {
   const colors: number[] = [];
   const positions = geometry.getAttribute("position");
   const color = new THREE.Color();
+  const resultPoints: THREE.Vector3[] = [];
+  const values: number[] = [];
   geometry.computeBoundingBox();
   const bounds = coordinateTransform?.bounds ?? geometry.boundingBox?.clone();
   for (let index = 0; index < positions.count; index += 1) {
     const point = new THREE.Vector3(positions.getX(index), positions.getY(index), positions.getZ(index));
     const resultPoint = coordinateTransform?.toResultPoint(point) ?? point;
-    color.copy(resultColorForPoint(kind, resultMode, stressExaggeration, resultPoint, samples));
+    resultPoints.push(resultPoint);
+    values.push(resultValueForPoint(kind, resultMode, stressExaggeration, resultPoint, samples));
+  }
+  const range = valueRange ?? resultValueRange(values);
+  for (let index = 0; index < positions.count; index += 1) {
+    const point = new THREE.Vector3(positions.getX(index), positions.getY(index), positions.getZ(index));
+    const resultPoint = resultPoints[index] ?? point;
+    color.copy(resultColorForValue(resultMode, normalizeResultValue(values[index] ?? 0.5, range)));
     colors.push(color.r, color.g, color.b);
     if (showDeformed) {
       const deformed = deformedPointForResults(kind, resultPoint, stressExaggeration, samples, loadMarkers, bounds);
@@ -1133,6 +1143,11 @@ type ResultCoordinateTransform = {
   fromResultPoint: (point: THREE.Vector3) => THREE.Vector3;
 };
 
+type ResultValueRange = {
+  min: number;
+  max: number;
+};
+
 export function colorizeResultObject(
   object: THREE.Object3D,
   kind: SampleModelKind,
@@ -1143,24 +1158,87 @@ export function colorizeResultObject(
   loadMarkers: ViewerLoadMarker[]
 ) {
   object.updateMatrixWorld(true);
-  const bounds = new THREE.Box3().setFromObject(object);
+  const excludedPayloadObjectIds = new Set(loadMarkers.map((marker) => marker.payloadObject?.id).filter((id): id is string => Boolean(id)));
+  const resultMeshes: THREE.Mesh<THREE.BufferGeometry>[] = [];
   object.traverse((child) => {
     if (!(child instanceof THREE.Mesh) || !(child.geometry instanceof THREE.BufferGeometry)) return;
+    if (excludedPayloadObjectIds.has(resultObjectIdFor(child))) {
+      child.visible = false;
+      return;
+    }
+    child.visible = true;
+    resultMeshes.push(child as THREE.Mesh<THREE.BufferGeometry>);
+  });
+  const bounds = resultBoundsForMeshes(resultMeshes);
+  const values = resultMeshes.flatMap((mesh) => resultValuesForMesh(mesh, kind, resultMode, stressExaggeration, samples));
+  const valueRange = resultValueRange(values);
+  for (const child of resultMeshes) {
     const toResultMatrix = child.matrixWorld.clone();
     const fromResultMatrix = toResultMatrix.clone().invert();
     colorizeResultGeometry(child.geometry, kind, resultMode, showDeformed, stressExaggeration, samples, loadMarkers, {
       bounds,
       toResultPoint: (point) => point.clone().applyMatrix4(toResultMatrix),
       fromResultPoint: (point) => point.clone().applyMatrix4(fromResultMatrix)
-    });
+    }, valueRange);
     child.material = new THREE.MeshStandardMaterial({
       vertexColors: true,
       metalness: 0.18,
       roughness: 0.52,
       side: THREE.DoubleSide
     });
-  });
+  }
   return object;
+}
+
+function resultObjectIdFor(object: THREE.Object3D) {
+  let current: THREE.Object3D | null = object;
+  while (current) {
+    const id = current.userData.opencaeObjectId;
+    if (typeof id === "string") return id;
+    current = current.parent;
+  }
+  return "";
+}
+
+function resultBoundsForMeshes(meshes: THREE.Mesh<THREE.BufferGeometry>[]) {
+  const bounds = new THREE.Box3();
+  for (const mesh of meshes) {
+    mesh.updateMatrixWorld(true);
+    bounds.expandByObject(mesh);
+  }
+  return bounds.isEmpty() ? undefined : bounds;
+}
+
+function resultValuesForMesh(
+  mesh: THREE.Mesh<THREE.BufferGeometry>,
+  kind: SampleModelKind,
+  resultMode: ResultMode,
+  stressExaggeration: number,
+  samples: FaceResultSample[]
+) {
+  const values: number[] = [];
+  const positions = mesh.geometry.getAttribute("position");
+  const toResultMatrix = mesh.matrixWorld;
+  for (let index = 0; index < positions.count; index += 1) {
+    const point = new THREE.Vector3(positions.getX(index), positions.getY(index), positions.getZ(index)).applyMatrix4(toResultMatrix);
+    values.push(resultValueForPoint(kind, resultMode, stressExaggeration, point, samples));
+  }
+  return values;
+}
+
+function resultValueRange(values: number[]): ResultValueRange {
+  const finiteValues = values.filter(Number.isFinite);
+  if (!finiteValues.length) return { min: 0, max: 1 };
+  return {
+    min: Math.min(...finiteValues),
+    max: Math.max(...finiteValues)
+  };
+}
+
+function normalizeResultValue(value: number, range: ResultValueRange) {
+  const span = range.max - range.min;
+  if (!Number.isFinite(span) || Math.abs(span) < 1e-9) return 0.5;
+  return Math.max(0, Math.min(1, (value - range.min) / span));
 }
 
 function deformedPointForResults(
@@ -1226,14 +1304,21 @@ function deformedPointForKind(kind: SampleModelKind, point: THREE.Vector3, stres
 }
 
 function resultColorForPoint(kind: SampleModelKind, resultMode: ResultMode, stressExaggeration: number, point: THREE.Vector3, samples: FaceResultSample[]) {
+  return resultColorForValue(resultMode, resultValueForPoint(kind, resultMode, stressExaggeration, point, samples));
+}
+
+function resultValueForPoint(kind: SampleModelKind, resultMode: ResultMode, stressExaggeration: number, point: THREE.Vector3, samples: FaceResultSample[]) {
   const sampleValue = resultFractionFromSamples(point, samples);
   const stress = sampleValue ?? stressFractionForPoint(kind, point);
   const displacement = sampleValue ?? displacementFractionForPoint(kind, point);
-  const t = resultMode === "displacement"
+  return resultMode === "displacement"
     ? displacement
     : resultMode === "safety_factor"
       ? sampleValue ?? (1 - stress * 0.88)
       : Math.max(0, Math.min(1, 0.5 + (stress - 0.5) * stressExaggeration));
+}
+
+function resultColorForValue(resultMode: ResultMode, t: number) {
   return new THREE.Color(interpolatedPaletteColor(resultPalette(resultMode).body, t));
 }
 
