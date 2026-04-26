@@ -650,21 +650,14 @@ svg {
   bottom: 14px;
   z-index: var(--z-viewer-overlay);
   transform: translateX(50%);
-  padding: 4px 8px;
   color: rgba(203, 213, 225, 0.58);
-  background: rgba(7, 11, 16, 0.38);
-  border: 1px solid rgba(148, 163, 184, 0.14);
-  border-radius: 999px;
   font-size: 11px;
   letter-spacing: 0.01em;
   pointer-events: none;
-  backdrop-filter: blur(6px);
 }
 
 .theme-light .viewer-watermark {
   color: rgba(51, 65, 85, 0.62);
-  background: rgba(255, 255, 255, 0.52);
-  border-color: rgba(100, 116, 139, 0.18);
 }
 
 .result-marker,
