@@ -446,13 +446,37 @@ function LoadEditorList({ study, unitSystem, onUpdateLoad, onPreviewLoadEdit, on
         const pointLabel = payloadObject ? ` · ${payloadObject.label}` : applicationPointForLoad(load) ? " · point load" : "";
         const equivalentForce = load.type === "gravity" ? ` · ${formatEquivalentForce(equivalentForceForLoad(load), unitSystem)} weight` : "";
         const loadLabel = loadLabelsById.get(load.id);
+        const editLabel = `Edit ${loadLabel ? `${loadLabel} ` : ""}${load.type} load`;
+        const beginEdit = () => setEditingId(load.id);
         return (
-          <div className="editable-item" key={load.id}>
+          <div
+            className={`editable-item ${editing ? "" : "clickable"}`}
+            key={load.id}
+            role={editing ? undefined : "button"}
+            tabIndex={editing ? undefined : 0}
+            aria-label={editing ? undefined : editLabel}
+            onClick={editing ? undefined : beginEdit}
+            onKeyDown={editing ? undefined : (event) => {
+              if (event.key !== "Enter" && event.key !== " ") return;
+              event.preventDefault();
+              beginEdit();
+            }}
+          >
             <div className="editable-summary">
               <span className="item-icon"><ArrowDown size={18} /></span>
               <strong>{loadLabel ? `${loadLabel} · ` : ""}{loadTypeLabel(load.type)} · {formatNumber(displayLoad.value)} {displayLoad.units}</strong>
               <small>{label}{pointLabel} · {directionLabelForLoad(load)} direction{equivalentForce}</small>
-              <button className="remove-glyph" type="button" aria-label={`Remove ${loadTypeLabel(load.type)} load`} onClick={() => onRemoveLoad(load.id)}><X size={16} /></button>
+              <button
+                className="remove-glyph"
+                type="button"
+                aria-label={`Remove ${loadTypeLabel(load.type)} load`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onRemoveLoad(load.id);
+                }}
+              >
+                <X size={16} />
+              </button>
             </div>
             {editing ? (
               <LoadEditForm
@@ -467,9 +491,7 @@ function LoadEditorList({ study, unitSystem, onUpdateLoad, onPreviewLoadEdit, on
                   setEditingId(null);
                 }}
               />
-            ) : (
-              <button className="secondary wide" type="button" onClick={() => setEditingId(load.id)}>Edit load</button>
-            )}
+            ) : null}
           </div>
         );
       })}
