@@ -1,6 +1,18 @@
 import { describe, expect, test } from "vitest";
 import { attachUploadedModelToProject, blankDisplayModel, createBlankProject, uploadedDisplayModelFor, createSampleProject, sampleDisplayModelFor } from "./projectFactory";
 
+const sizedAsciiStlBase64 = btoa(`
+solid tray
+facet normal 0 0 1
+outer loop
+vertex 0 0 0
+vertex 268.8 0 0
+vertex 0 289.9 246.05
+endloop
+endfacet
+endsolid tray
+`);
+
 describe("projectFactory", () => {
   test("creates a blank project without preconfigured geometry or study setup", () => {
     const project = createBlankProject({
@@ -78,7 +90,7 @@ describe("projectFactory", () => {
       studyId: "study-upload",
       now: "2026-04-24T12:00:00.000Z"
     });
-    const displayModel = uploadedDisplayModelFor("mounting-plate.stl", "U1RMIERBVEE=");
+    const displayModel = uploadedDisplayModelFor("mounting-plate.stl", sizedAsciiStlBase64);
     const project = attachUploadedModelToProject(blank, {
       geometryId: "geom-upload",
       filename: "mounting-plate.stl",
@@ -93,6 +105,7 @@ describe("projectFactory", () => {
     expect(project.geometryFiles[0]?.metadata.previewFormat).toBe("stl");
     expect(project.geometryFiles[0]?.metadata.faceCount).toBe(displayModel.faces.length);
     expect(displayModel.visualMesh?.format).toBe("stl");
+    expect(displayModel.dimensions).toEqual({ x: 268.8, y: 246.1, z: 289.9, units: "mm" });
     expect(project.studies[0]?.geometryScope).toEqual([
       { bodyId: "body-uploaded", entityType: "body", entityId: "body-uploaded", label: "mounting-plate body" }
     ]);
