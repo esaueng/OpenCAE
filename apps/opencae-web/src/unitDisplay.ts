@@ -8,6 +8,8 @@ const NEWTONS_PER_LBF = 4.4482216152605;
 const KPA_PER_PSI = 6.894757293168361;
 const KG_PER_LB = 0.45359237;
 const CUBIC_MM_PER_CUBIC_INCH = MM_PER_INCH ** 3;
+const CUBIC_CM_PER_CUBIC_METER = 1_000_000;
+const CUBIC_IN_PER_CUBIC_METER = 61_023.7440947323;
 const LB_PER_KG_PER_CUBIC_METER = 0.0624279605761;
 
 export function formatUnitSystemLabel(unitSystem: UnitSystem): string {
@@ -144,6 +146,8 @@ export function massForUnits(value: number, units: string, unitSystem: UnitSyste
 export function volumeForUnits(value: number, units: string, unitSystem: UnitSystem): { value: number; units: string } {
   if (unitSystem === "US" && units === "mm^3") return { value: value / CUBIC_MM_PER_CUBIC_INCH, units: "in^3" };
   if (unitSystem === "SI" && units === "in^3") return { value: value * CUBIC_MM_PER_CUBIC_INCH, units: "mm^3" };
+  if (unitSystem === "SI" && units === "m^3") return { value: value * CUBIC_CM_PER_CUBIC_METER, units: "cm^3" };
+  if (unitSystem === "US" && units === "m^3") return { value: value * CUBIC_IN_PER_CUBIC_METER, units: "in^3" };
   return { value, units };
 }
 

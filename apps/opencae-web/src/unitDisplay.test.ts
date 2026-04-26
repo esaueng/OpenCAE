@@ -19,6 +19,11 @@ describe("unit display formatting", () => {
     expect(loadValueForUnits(0.45359237, "kg", "US")).toEqual({ value: 1, units: "lb" });
   });
 
+  test("formats small payload volumes without rounding to zero", () => {
+    expect(formatVolume(0.0000682, "m^3", "SI")).toBe("68.2 cm^3");
+    expect(formatVolume(0.0000682, "m^3", "US")).toBe("4.162 in^3");
+  });
+
   test("converts result summaries and fields without changing safety factors", () => {
     const summary = resultSummaryForUnits({
       maxStress: 142,
