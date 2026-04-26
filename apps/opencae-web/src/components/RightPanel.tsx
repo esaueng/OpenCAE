@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { AlertTriangle, Anchor, ArrowDown, Check, CircleHelp, Download, Eye, FileText, Grid3X3, Maximize2, Play, Plus, RotateCcw, RotateCw, Ruler, ShieldCheck, Upload, X } from "lucide-react";
 import { defaultPrintParametersFor, effectiveMaterialProperties, normalizePrintParameters, starterMaterials, type PrintMaterialParameters } from "@opencae/materials";
 import { assessResultFailure, estimateAllowableLoadForSafetyFactor } from "@opencae/schema";
@@ -9,7 +9,7 @@ import { directionLabelForLoad, directionVectorForLabel, equivalentForceForLoad,
 import type { SampleModelId } from "../lib/api";
 import { formatModelOrientation, getModelOrientation, type RotationAxis } from "../modelOrientation";
 import { shouldShowSampleModelPicker } from "../modelPanelState";
-import { LAYER_DIRECTION_HELP_TEXT } from "../materialPrintSettings";
+import { SETTING_HELP, type SettingHelpId, type SettingHelpVisual } from "../settingHelp";
 
 interface RightPanelProps {
   activeStep: StepId;
@@ -114,7 +114,7 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sa
     <Panel title="Model" helper="Inspect the 3D part. Orbit with left-drag, pan with right-drag, zoom with scroll.">
       {showSampleModelPicker && (
         <label className="field">
-          Sample model
+          <HelpLabel helpId="sampleModel">Sample model</HelpLabel>
           <div className="segmented" role="group" aria-label="Sample model">
             {(["bracket", "plate", "cantilever"] as const).map((sample) => (
               <button key={sample} className={sampleModel === sample ? "active" : ""} type="button" onClick={() => onSampleModelChange(sample)}>
@@ -137,8 +137,9 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sa
         <Ruler size={16} />
         {showDimensions ? "Hide dimensions" : "Show dimensions"}
       </button>
+      <HelpNote helpId="dimensions" />
       {showDimensions && <ModelDimensions displayModel={displayModel} />}
-      <SectionTitle>Orientation</SectionTitle>
+      <SectionTitle helpId="orientation">Orientation</SectionTitle>
       <div className="orientation-controls" role="group" aria-label="Model rotation">
         {(["x", "y", "z"] as const).map((axis) => (
           <button key={axis} className="secondary" type="button" onClick={() => onRotateModel(axis)} title={`Rotate model around ${axis.toUpperCase()} axis`}>
@@ -239,7 +240,7 @@ function MaterialPanel({ study, onAssignMaterial }: RightPanelProps) {
   return (
     <Panel title="Material" helper="Choose what the part is made of.">
       <label className="field">
-        Material library
+        <HelpLabel helpId="materialLibrary">Material library</HelpLabel>
         <select value={selectedMaterialId} onChange={(event) => handleMaterialChange(event.currentTarget.value)}>
           {starterMaterials.map((material) => (
             <option key={material.id} value={material.id}>{material.name}</option>
@@ -255,7 +256,7 @@ function MaterialPanel({ study, onAssignMaterial }: RightPanelProps) {
       </div>
       {printable && (
         <>
-          <SectionTitle>3D Print Settings</SectionTitle>
+          <SectionTitle helpId="printSettings">3D Print Settings</SectionTitle>
           <div className="print-settings">
             <label className="toggle material-print-toggle">
               <input
@@ -263,12 +264,12 @@ function MaterialPanel({ study, onAssignMaterial }: RightPanelProps) {
                 checked={Boolean(printParameters.printed)}
                 onChange={(event) => updatePrintParameters({ printed: event.currentTarget.checked })}
               />
-              3D printed part
+              <HelpLabel helpId="printedPart">3D printed part</HelpLabel>
             </label>
             {printParameters.printed && (
               <div className="print-settings-grid">
                 <label className="field">
-                  Infill density
+                  <HelpLabel helpId="infillDensity">Infill density</HelpLabel>
                   <span className="input-with-unit">
                     <input
                       type="number"
@@ -281,7 +282,7 @@ function MaterialPanel({ study, onAssignMaterial }: RightPanelProps) {
                   </span>
                 </label>
                 <label className="field">
-                  Wall count
+                  <HelpLabel helpId="wallCount">Wall count</HelpLabel>
                   <span className="input-with-unit">
                     <input
                       type="number"
@@ -294,13 +295,7 @@ function MaterialPanel({ study, onAssignMaterial }: RightPanelProps) {
                   </span>
                 </label>
                 <label className="field">
-                  <span className="field-label-with-help">
-                    Layer direction
-                    <span className="tooltip-trigger" tabIndex={0} role="button" aria-label="Layer direction help" aria-describedby="layer-direction-help">
-                      <CircleHelp size={15} aria-hidden="true" />
-                      <span id="layer-direction-help" className="field-tooltip" role="tooltip">{LAYER_DIRECTION_HELP_TEXT}</span>
-                    </span>
-                  </span>
+                  <HelpLabel helpId="layerDirection">Layer direction</HelpLabel>
                   <select
                     value={printParameters.layerOrientation ?? "z"}
                     onChange={(event) => updatePrintParameters({ layerOrientation: event.currentTarget.value as PrintMaterialParameters["layerOrientation"] })}
@@ -329,6 +324,7 @@ function SupportsPanel({ selectedFace, study, onAddSupport, onUpdateSupport, onR
   const addLabel = study.constraints.length ? "Add another fixed support" : "Add fixed support";
   return (
     <Panel title="Supports" helper="Choose where the part is held fixed. Select a face, then add a fixed support. You can add more than one.">
+      <HelpNote helpId="supportPlacement" />
       <PlacementReadout selectedRef={selectedFromViewport} fallbackLabel={selectedFace?.label} />
       <button className="outline-action wide" disabled={!selectedFromViewport} onClick={() => selectedFromViewport && onAddSupport(selectedFromViewport.id)}><Plus size={18} />{addLabel}</button>
       <SectionTitle>Applied</SectionTitle>
@@ -359,9 +355,10 @@ function LoadsPanel({
   const addLabel = draftLoadType === "gravity" ? "Add payload mass" : "Add load";
   return (
     <Panel title="Loads" helper="Choose where force, pressure, or payload weight is applied. Select a face, then add a load.">
+      <HelpNote helpId="loadPlacement" />
       <PlacementReadout selectedRef={selectedFromViewport} fallbackLabel={selectedFace?.label} />
       <label className="field">
-        Load type
+        <HelpLabel helpId="loadType">Load type</HelpLabel>
         <div className="segmented" role="group" aria-label="Load type">
           {(["force", "pressure", "gravity"] as const).map((type) => (
             <button
@@ -379,7 +376,7 @@ function LoadsPanel({
         </div>
       </label>
       <label className="field">
-        {valueLabel}
+        <HelpLabel helpId="loadMagnitude">{valueLabel}</HelpLabel>
         <span className="input-with-unit">
           <input
             id="load-value"
@@ -392,7 +389,7 @@ function LoadsPanel({
       </label>
       {draftLoadType === "gravity" && <Callout>{formatNumber(equivalentForceForLoad({ type: "gravity", parameters: { value: draftLoadValue } }))} N equivalent weight.</Callout>}
       <label className="field">
-        Direction
+        <HelpLabel helpId="loadDirection">Direction</HelpLabel>
         <select value={draftLoadDirection} onChange={(event) => onDraftLoadDirectionChange(event.currentTarget.value as LoadDirectionLabel)}>
           {(["-Y", "+Y", "+X", "-X", "+Z", "-Z", "Normal"] as const).map((option) => (
             <option key={option} value={option}>{directionOptionLabel(option)}</option>
@@ -469,7 +466,7 @@ function LoadEditForm({ load, study, onSave, onCancel }: { load: Load; study: St
   return (
     <div className="edit-form">
       <label className="field">
-        Load type
+        <HelpLabel helpId="loadType">Load type</HelpLabel>
         <select value={type} onChange={(event) => setType(event.currentTarget.value as "force" | "pressure" | "gravity")}>
           <option value="force">Force</option>
           <option value="pressure">Pressure</option>
@@ -477,13 +474,13 @@ function LoadEditForm({ load, study, onSave, onCancel }: { load: Load; study: St
         </select>
       </label>
       <label className="field">
-        {type === "gravity" ? "Payload mass" : "Magnitude"}
+        <HelpLabel helpId="loadMagnitude">{type === "gravity" ? "Payload mass" : "Magnitude"}</HelpLabel>
         <input type="number" value={value} onChange={(event) => setValue(event.currentTarget.value)} />
       </label>
       {type === "gravity" && <Callout>{formatNumber(equivalentForceForLoad({ type: "gravity", parameters: { value: Number(value) } }))} N equivalent weight.</Callout>}
       <PlacementReadout selectedRef={selectedRef} />
       <label className="field">
-        Direction
+        <HelpLabel helpId="loadDirection">Direction</HelpLabel>
         <select value={direction} onChange={(event) => setDirection(event.currentTarget.value as LoadDirectionLabel)}>
           {(["-Y", "+Y", "+X", "-X", "+Z", "-Z", "Normal"] as const).map((option) => (
             <option key={option} value={option}>{option}</option>
@@ -549,7 +546,7 @@ function SupportEditForm({ support, study, onSave, onCancel }: { support: Constr
   return (
     <div className="edit-form">
       <label className="field">
-        Support type
+        <HelpLabel helpId="supportType">Support type</HelpLabel>
         <select value={type} onChange={(event) => setType(event.currentTarget.value as "fixed" | "prescribed_displacement")}>
           <option value="fixed">Fixed support</option>
           <option value="prescribed_displacement">Prescribed displacement</option>
@@ -582,7 +579,7 @@ function MeshPanel({ study, onGenerateMesh }: RightPanelProps) {
   return (
     <Panel title="Mesh" helper="The mesh breaks the model into small pieces so OpenCAE can calculate results.">
       <label className="field">
-        Quality preset
+        <HelpLabel helpId="meshQuality">Quality preset</HelpLabel>
         <div className="segmented" role="group" aria-label="Mesh quality">
           {(["coarse", "medium", "fine"] as const).map((option) => (
             <button key={option} className={preset === option ? "active" : ""} type="button" onClick={() => setPreset(option)}>{capitalize(option)}</button>
@@ -611,7 +608,7 @@ function RunPanel({ study, runProgress, onRunSimulation, canRunSimulation, missi
   ] as const;
   return (
     <Panel title="Run" helper="Run the simulation to estimate stress and displacement.">
-      <SectionTitle>Readiness</SectionTitle>
+      <SectionTitle helpId="runReadiness">Readiness</SectionTitle>
       <div className="checklist">
         {checks.map(([label, done]) => <span key={label} className={done ? "check done" : "check"}><span>{done ? <Check size={18} /> : null}</span>{label}</span>)}
       </div>
@@ -625,7 +622,7 @@ function RunPanel({ study, runProgress, onRunSimulation, canRunSimulation, missi
       </button>
       {missingRunItems.length > 0 && <p className="panel-copy">Complete {missingRunItems.join(", ").toLowerCase()} before running.</p>}
       <div className="progress"><span style={{ width: `${runProgress}%` }} /></div>
-      <SectionTitle>Solver</SectionTitle>
+      <SectionTitle helpId="solver">Solver</SectionTitle>
       <div className="summary-box">
         <Info label="Backend" value="local-static-superposition" />
         <Info label="Version" value="0.1.0" />
@@ -663,6 +660,7 @@ function ResultsPanel({
           <small>{assessment.message}</small>
         </span>
       </div>
+      <HelpNote helpId="resultMode" />
       <div className="result-buttons">
         <button className={resultMode === "stress" ? "primary" : "secondary"} onClick={() => onResultModeChange("stress")}>Stress</button>
         <button className={resultMode === "displacement" ? "primary" : "secondary"} onClick={() => onResultModeChange("displacement")}>Displacement</button>
@@ -670,7 +668,7 @@ function ResultsPanel({
       </div>
       {resultMode === "stress" && (
         <label className="field range-field">
-          <span className="range-label"><span>Stress exaggeration</span><strong>{stressExaggeration.toFixed(1)}x</strong></span>
+          <span className="range-label"><HelpLabel helpId="stressExaggeration">Stress exaggeration</HelpLabel><strong>{stressExaggeration.toFixed(1)}x</strong></span>
           <input
             type="range"
             min="1"
@@ -681,7 +679,7 @@ function ResultsPanel({
           />
         </label>
       )}
-      <label className="toggle"><input type="checkbox" checked={showDeformed} onChange={onToggleDeformed} /> Deformed shape</label>
+      <label className="toggle"><input type="checkbox" checked={showDeformed} onChange={onToggleDeformed} /> <HelpLabel helpId="deformedShape">Deformed shape</HelpLabel></label>
       <p className="panel-copy">Red areas have higher stress. Blue areas have lower stress.</p>
       <div className="summary-box">
         <Info label="Max stress" value={`${resultSummary.maxStress} ${resultSummary.maxStressUnits}`} />
@@ -690,10 +688,10 @@ function ResultsPanel({
         <Info label="Failure check" value={assessment.title} />
         <Info label="Reaction force" value={`${resultSummary.reactionForce} ${resultSummary.reactionForceUnits}`} />
       </div>
-      <SectionTitle>Reverse Check</SectionTitle>
+      <SectionTitle helpId="targetSafetyFactor">Reverse Check</SectionTitle>
       <div className="load-capacity-tool">
         <label className="field">
-          Target factor of safety
+          <HelpLabel helpId="targetSafetyFactor">Target factor of safety</HelpLabel>
           <span className="input-with-unit">
             <input
               type="number"
@@ -730,6 +728,7 @@ function ResultsPanel({
 function ReportPanel({ canGenerateReport, reportUrl, reportFilename, onGenerateReport }: RightPanelProps) {
   return (
     <Panel title="Report" helper="Generate a polished PDF report you can share.">
+      <HelpNote helpId="reportOutput" />
       <div className="summary-box">
         <Info label="Format" value="PDF · print ready" />
         <Info label="Companion" value="HTML · self-contained" />
@@ -819,6 +818,68 @@ function WorkflowNav({ activeStep, onStepSelect }: { activeStep: StepId; onStepS
   );
 }
 
+function HelpLabel({ children, helpId }: { children: ReactNode; helpId: SettingHelpId }) {
+  return (
+    <span className="field-label-with-help">
+      {children}
+      <SettingHelpTrigger helpId={helpId} />
+    </span>
+  );
+}
+
+function HelpNote({ helpId }: { helpId: SettingHelpId }) {
+  const help = SETTING_HELP[helpId];
+  return (
+    <div className="help-note">
+      <HelpVisual kind={help.visual} />
+      <span>
+        <strong>{help.title}</strong>
+        <small>{help.body}</small>
+      </span>
+      <SettingHelpTrigger helpId={helpId} />
+    </div>
+  );
+}
+
+function SettingHelpTrigger({ helpId }: { helpId: SettingHelpId }) {
+  const tooltipId = useId();
+  const help = SETTING_HELP[helpId];
+  return (
+    <span
+      className="tooltip-trigger"
+      tabIndex={0}
+      role="button"
+      aria-label={`${help.title} help`}
+      aria-describedby={tooltipId}
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+      }}
+      onMouseDown={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+      }}
+    >
+      <CircleHelp size={15} aria-hidden="true" />
+      <span id={tooltipId} className="field-tooltip" role="tooltip">
+        <HelpVisual kind={help.visual} />
+        <strong>{help.title}</strong>
+        <span>{help.body}</span>
+      </span>
+    </span>
+  );
+}
+
+function HelpVisual({ kind }: { kind: SettingHelpVisual }) {
+  return (
+    <span className={`help-visual ${kind}`} aria-hidden="true">
+      <span className="help-part" />
+      <span className="help-force" />
+      <span className="help-grid" />
+    </span>
+  );
+}
+
 function Info({ label, value }: { label: string; value: string }) {
   return <div className="info-row"><span>{label}</span><strong>{value}</strong></div>;
 }
@@ -844,8 +905,8 @@ function ModelDimensions({ displayModel }: { displayModel: DisplayModel }) {
   );
 }
 
-function SectionTitle({ children }: { children: ReactNode }) {
-  return <h3 className="section-title">{children}</h3>;
+function SectionTitle({ children, helpId }: { children: ReactNode; helpId?: SettingHelpId }) {
+  return <h3 className="section-title">{helpId ? <HelpLabel helpId={helpId}>{children}</HelpLabel> : children}</h3>;
 }
 
 function Callout({ children }: { children: ReactNode }) {
