@@ -4,6 +4,7 @@ import { Billboard, Bounds, Edges, GizmoHelper, Grid, Html, Line, OrbitControls,
 import { Canvas, useThree } from "@react-three/fiber";
 import type { ThreeEvent } from "@react-three/fiber";
 import type { DisplayFace, DisplayModel, ResultField } from "@opencae/schema";
+import { meshVolumeM3FromTriangles, type Triangle } from "@opencae/units";
 import { RotateCcw } from "lucide-react";
 import * as THREE from "three";
 import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
@@ -628,10 +629,12 @@ function uploadedFaceHitFromEvent(event: ThreeEvent<PointerEvent> | ThreeEvent<M
 
 function payloadObjectFromEvent(event: ThreeEvent<PointerEvent> | ThreeEvent<MouseEvent>, displayModel: DisplayModel, kind: SampleModelKind, face: DisplayFace): PayloadObjectSelection {
   if (kind !== "uploaded") {
+    const volumeM3 = fallbackDisplayModelVolumeM3(displayModel);
     return {
       id: `payload-${displayModel.id}`,
       label: displayModel.name,
-      center: face.center
+      center: face.center,
+      ...(volumeM3 ? { volumeM3, volumeSource: "bounds-fallback" as const, volumeStatus: "estimated" as const } : { volumeStatus: "unknown" as const })
     };
   }
 
@@ -643,8 +646,44 @@ function payloadObjectFromEvent(event: ThreeEvent<PointerEvent> | ThreeEvent<Mou
   return {
     id: String(target.userData.opencaeObjectId ?? target.uuid),
     label: String(target.userData.opencaeObjectLabel ?? (target.name || displayModel.name)),
-    center: viewerPointToModelSpace(center, displayModel).toArray() as [number, number, number]
+    center: viewerPointToModelSpace(center, displayModel).toArray() as [number, number, number],
+    ...payloadVolumeMetadata(target, displayModel, bounds)
   };
+}
+
+function payloadVolumeMetadata(target: THREE.Object3D, displayModel: DisplayModel, bounds: THREE.Box3): Pick<PayloadObjectSelection, "volumeM3" | "volumeSource" | "volumeStatus"> {
+  const directVolume = Number(target.userData.opencaeVolumeM3);
+  if (Number.isFinite(directVolume) && directVolume > 0) {
+    return {
+      volumeM3: directVolume,
+      volumeSource: target.userData.opencaeVolumeSource === "step" ? "step" : "mesh",
+      volumeStatus: "available"
+    };
+  }
+  const fallback = fallbackVolumeM3ForBounds(displayModel, bounds);
+  return fallback ? { volumeM3: fallback, volumeSource: "bounds-fallback", volumeStatus: "estimated" } : { volumeStatus: "unknown" };
+}
+
+function fallbackDisplayModelVolumeM3(displayModel: DisplayModel): number | undefined {
+  const dimensions = displayModel.dimensions;
+  return dimensions ? dimensionsVolumeM3(dimensions.x, dimensions.y, dimensions.z) : undefined;
+}
+
+function fallbackVolumeM3ForBounds(displayModel: DisplayModel, bounds: THREE.Box3): number | undefined {
+  const dimensions = displayModel.dimensions;
+  if (!dimensions || bounds.isEmpty()) return undefined;
+  const full = dimensionBoundsForDisplayModel(displayModel);
+  if (!full) return undefined;
+  const fullSize = full.getSize(new THREE.Vector3());
+  const targetSize = bounds.getSize(new THREE.Vector3());
+  const fullVolume = fullSize.x * fullSize.y * fullSize.z;
+  const targetVolume = targetSize.x * targetSize.y * targetSize.z;
+  const ratio = fullVolume > 0 && targetVolume > 0 ? Math.min(1, targetVolume / fullVolume) : 1;
+  return dimensionsVolumeM3(dimensions.x, dimensions.y, dimensions.z) * ratio;
+}
+
+function dimensionsVolumeM3(x: number, y: number, z: number) {
+  return Math.max(x, 0) * Math.max(y, 0) * Math.max(z, 0) / 1_000_000_000;
 }
 
 function payloadObjectTargetFor(object: THREE.Object3D) {
@@ -879,6 +918,12 @@ function UploadedObjModel({ displayModel, pickHandlers, activePayloadObjectId }:
       if (child instanceof THREE.Mesh) {
         child.userData.opencaeObjectId = child.name || child.uuid;
         child.userData.opencaeObjectLabel = child.name || displayModel.name.replace(" uploaded model", "");
+        const volumeM3 = volumeM3FromThreeGeometry(child.geometry);
+        if (volumeM3) {
+          child.userData.opencaeVolumeM3 = volumeM3;
+          child.userData.opencaeVolumeSource = "mesh";
+          child.userData.opencaeVolumeStatus = "available";
+        }
         child.material = new THREE.MeshStandardMaterial({ color: "#9aa7b4", metalness: 0.18, roughness: 0.54 });
         child.castShadow = true;
         child.receiveShadow = true;
@@ -892,6 +937,27 @@ function UploadedObjModel({ displayModel, pickHandlers, activePayloadObjectId }:
   }, [activePayloadObjectId, object]);
 
   return <primitive object={object} {...pickHandlers} />;
+}
+
+function volumeM3FromThreeGeometry(geometry: THREE.BufferGeometry): number | undefined {
+  const positions = geometry.getAttribute("position");
+  if (!positions) return undefined;
+  const triangles: Triangle[] = [];
+  const index = geometry.getIndex();
+  if (index) {
+    for (let offset = 0; offset + 2 < index.count; offset += 3) {
+      triangles.push([threeVertexAt(positions, index.getX(offset)), threeVertexAt(positions, index.getX(offset + 1)), threeVertexAt(positions, index.getX(offset + 2))]);
+    }
+  } else {
+    for (let offset = 0; offset + 2 < positions.count; offset += 3) {
+      triangles.push([threeVertexAt(positions, offset), threeVertexAt(positions, offset + 1), threeVertexAt(positions, offset + 2)]);
+    }
+  }
+  return meshVolumeM3FromTriangles(triangles);
+}
+
+function threeVertexAt(positions: THREE.BufferAttribute | THREE.InterleavedBufferAttribute, index: number): [number, number, number] {
+  return [positions.getX(index), positions.getY(index), positions.getZ(index)];
 }
 
 function UnsupportedUploadedModelNotice({ filename }: { filename: string }) {

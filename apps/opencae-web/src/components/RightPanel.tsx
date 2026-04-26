@@ -1,12 +1,12 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { AlertTriangle, Anchor, ArrowDown, Check, CircleHelp, Download, Eye, FileText, Grid3X3, Maximize2, Play, Plus, RotateCcw, Ruler, ShieldCheck, Upload, X } from "lucide-react";
-import { defaultPrintParametersFor, effectiveMaterialProperties, normalizePrintParameters, starterMaterials, type PrintMaterialParameters } from "@opencae/materials";
+import { defaultPrintParametersFor, effectiveMaterialProperties, massKgForPayloadMaterial, normalizePrintParameters, payloadMaterialForId, payloadMaterials, starterMaterials, type PayloadMaterialCategory, type PrintMaterialParameters } from "@opencae/materials";
 import { assessResultFailure, estimateAllowableLoadForSafetyFactor } from "@opencae/schema";
 import type { Constraint, DisplayFace, DisplayModel, Load, Project, ResultSummary, Study } from "@opencae/schema";
 import type { ResultMode, ViewMode } from "./CadViewer";
 import type { StepId } from "./StepBar";
-import { applicationPointForLoad, createViewerLoadMarkers, directionLabelForLoad, directionVectorForLabel, equivalentForceForLoad, loadMarkerOrdinalLabel, payloadObjectForLoad, unitsForLoadType, type LoadApplicationPoint, type LoadDirectionLabel, type LoadType, type PayloadObjectSelection } from "../loadPreview";
+import { applicationPointForLoad, createViewerLoadMarkers, directionLabelForLoad, directionVectorForLabel, equivalentForceForLoad, loadMarkerOrdinalLabel, payloadObjectForLoad, unitsForLoadType, type LoadApplicationPoint, type LoadDirectionLabel, type LoadType, type PayloadLoadMetadata, type PayloadMassMode, type PayloadObjectSelection } from "../loadPreview";
 import type { SampleModelId } from "../lib/api";
 import { dimensionValuesForDisplayModel } from "../modelDimensions";
 import { formatModelOrientation, getModelOrientation, type RotationAxis } from "../modelOrientation";
@@ -54,7 +54,7 @@ interface RightPanelProps {
   onDraftLoadTypeChange: (type: LoadType) => void;
   onDraftLoadValueChange: (value: number) => void;
   onDraftLoadDirectionChange: (direction: LoadDirectionLabel) => void;
-  onAddLoad: (type: LoadType, value: number, selectionRef: string | undefined, direction: LoadDirectionLabel) => void;
+  onAddLoad: (type: LoadType, value: number, selectionRef: string | undefined, direction: LoadDirectionLabel, payloadMetadata?: PayloadLoadMetadata) => void;
   onUpdateLoad: (load: Load) => void;
   onPreviewLoadEdit: (load: Load | null) => void;
   onRemoveLoad: (loadId: string) => void;
@@ -366,11 +366,25 @@ function LoadsPanel({
   const selectedFromViewport = selectedFace ? selectionForFace(study, selectedFace.id) : undefined;
   const placementSelection = draftLoadType === "gravity" ? undefined : selectedFromViewport;
   const hasSelectedFace = Boolean(selectedFace);
-  const canAddDraftLoad = draftLoadType === "gravity" ? Boolean(selectedPayloadObject) : hasSelectedFace;
   const units = unitsForLoadType(draftLoadType);
-  const displayDraftLoad = loadValueForUnits(draftLoadValue, units, project.unitSystem);
   const valueLabel = draftLoadType === "gravity" ? "Payload mass" : "Magnitude";
   const addLabel = draftLoadType === "gravity" ? "Add payload mass" : "Add load";
+  const [payloadMaterialId, setPayloadMaterialId] = useState("payload-steel");
+  const [payloadMassMode, setPayloadMassMode] = useState<PayloadMassMode>("material");
+  const payloadVolumeM3 = selectedPayloadObject?.volumeM3;
+  const calculatedPayloadMass = payloadVolumeM3 ? massKgForPayloadMaterial(payloadMaterialId, payloadVolumeM3) : 0;
+  const effectiveDraftValue = draftLoadType === "gravity" && payloadMassMode === "material" && calculatedPayloadMass > 0 ? calculatedPayloadMass : draftLoadValue;
+  const displayDraftLoad = loadValueForUnits(effectiveDraftValue, units, project.unitSystem);
+  const selectedPayloadMaterial = payloadMaterialForId(payloadMaterialId);
+  const canAddPayloadMass = payloadMassMode === "manual" ? draftLoadValue > 0 : calculatedPayloadMass > 0;
+  const canAddDraftLoad = draftLoadType === "gravity" ? Boolean(selectedPayloadObject) && canAddPayloadMass : hasSelectedFace;
+  const payloadMetadata: PayloadLoadMetadata = draftLoadType === "gravity"
+    ? {
+      payloadMaterialId,
+      ...(payloadVolumeM3 ? { payloadVolumeM3 } : {}),
+      payloadMassMode
+    }
+    : {};
   function handleDraftValueChange(displayValue: number) {
     const baseValue = loadValueForUnits(displayValue, displayDraftLoad.units, "SI");
     onDraftLoadValueChange(baseValue.value);
@@ -401,19 +415,38 @@ function LoadsPanel({
           ))}
         </div>
       </label>
-      <label className="field">
-        <HelpLabel helpId="loadMagnitude">{valueLabel}</HelpLabel>
-        <span className="input-with-unit">
-          <input
-            id="load-value"
-            type="number"
-            value={formatInputValue(displayDraftLoad.value)}
-            onChange={(event) => handleDraftValueChange(Number(event.currentTarget.value))}
-          />
-          <span>{displayDraftLoad.units}</span>
-        </span>
-      </label>
-      {draftLoadType === "gravity" && <Callout>{formatEquivalentForce(equivalentForceForLoad({ type: "gravity", parameters: { value: draftLoadValue } }), project.unitSystem)} equivalent weight.</Callout>}
+      {draftLoadType === "gravity" ? (
+        <PayloadMassControls
+          unitSystem={project.unitSystem}
+          payloadObject={selectedPayloadObject}
+          payloadMaterialId={payloadMaterialId}
+          payloadMassMode={payloadMassMode}
+          manualMassKg={draftLoadValue}
+          onPayloadMaterialChange={setPayloadMaterialId}
+          onPayloadMassModeChange={setPayloadMassMode}
+          onManualMassChange={handleDraftValueChange}
+        />
+      ) : (
+        <label className="field">
+          <HelpLabel helpId="loadMagnitude">{valueLabel}</HelpLabel>
+          <span className="input-with-unit">
+            <input
+              id="load-value"
+              type="number"
+              value={formatInputValue(displayDraftLoad.value)}
+              onChange={(event) => handleDraftValueChange(Number(event.currentTarget.value))}
+            />
+            <span>{displayDraftLoad.units}</span>
+          </span>
+        </label>
+      )}
+      {draftLoadType === "gravity" && (
+        <>
+          <Info label="Selected density" value={formatDensity(selectedPayloadMaterial.density, "kg/m^3", project.unitSystem)} />
+          <Info label="Calculated mass" value={formatMass(calculatedPayloadMass, "kg", project.unitSystem)} />
+          <Callout>{formatEquivalentForce(equivalentForceForLoad({ type: "gravity", parameters: { value: effectiveDraftValue } }), project.unitSystem)} equivalent weight.</Callout>
+        </>
+      )}
       <label className="field">
         <HelpLabel helpId="loadDirection">Direction</HelpLabel>
         <select value={draftLoadDirection} onChange={(event) => onDraftLoadDirectionChange(event.currentTarget.value as LoadDirectionLabel)}>
@@ -422,10 +455,96 @@ function LoadsPanel({
           ))}
         </select>
       </label>
-      <button className="outline-action wide" disabled={!canAddDraftLoad} onClick={() => canAddDraftLoad && onAddLoad(draftLoadType, draftLoadValue, selectedFromViewport?.id, draftLoadDirection)}><Plus size={18} />{addLabel}</button>
+      <button className="outline-action wide" disabled={!canAddDraftLoad} onClick={() => canAddDraftLoad && onAddLoad(draftLoadType, effectiveDraftValue, selectedFromViewport?.id, draftLoadDirection, payloadMetadata)}><Plus size={18} />{addLabel}</button>
       <SectionTitle>Applied</SectionTitle>
       <LoadEditorList study={study} unitSystem={project.unitSystem} onUpdateLoad={onUpdateLoad} onPreviewLoadEdit={onPreviewLoadEdit} onRemoveLoad={onRemoveLoad} />
     </Panel>
+  );
+}
+
+const PAYLOAD_CATEGORY_LABELS: Record<PayloadMaterialCategory, string> = {
+  metal: "Metals",
+  plastic: "Plastics",
+  composite: "Composites",
+  resin: "Resins",
+  "ceramic-glass": "Ceramics & glass",
+  semiconductor: "Semiconductors",
+  rubber: "Rubber & elastomers",
+  wood: "Wood",
+  "concrete-stone": "Concrete & stone",
+  liquid: "Liquids",
+  misc: "Miscellaneous"
+};
+
+const PAYLOAD_CATEGORY_ORDER: PayloadMaterialCategory[] = ["metal", "plastic", "composite", "resin", "ceramic-glass", "semiconductor", "rubber", "wood", "concrete-stone", "liquid", "misc"];
+
+function PayloadMassControls({
+  unitSystem,
+  payloadObject,
+  payloadMaterialId,
+  payloadMassMode,
+  manualMassKg,
+  onPayloadMaterialChange,
+  onPayloadMassModeChange,
+  onManualMassChange
+}: {
+  unitSystem: UnitSystem;
+  payloadObject: PayloadObjectSelection | null;
+  payloadMaterialId: string;
+  payloadMassMode: PayloadMassMode;
+  manualMassKg: number;
+  onPayloadMaterialChange: (materialId: string) => void;
+  onPayloadMassModeChange: (mode: PayloadMassMode) => void;
+  onManualMassChange: (displayValue: number) => void;
+}) {
+  const [materialQuery, setMaterialQuery] = useState("");
+  const displayManualMass = loadValueForUnits(manualMassKg, "kg", unitSystem);
+  const volumeSource = payloadObject?.volumeStatus === "estimated" ? "estimated from bounds" : payloadObject?.volumeSource ?? "not available";
+  const normalizedQuery = materialQuery.trim().toLowerCase();
+  return (
+    <>
+      <label className="field">
+        <span>Search materials</span>
+        <input value={materialQuery} onChange={(event) => setMaterialQuery(event.currentTarget.value)} />
+      </label>
+      <label className="field">
+        <HelpLabel helpId="loadMagnitude">Payload material</HelpLabel>
+        <select value={payloadMaterialId} onChange={(event) => onPayloadMaterialChange(event.currentTarget.value)}>
+          {PAYLOAD_CATEGORY_ORDER.map((category) => {
+            const materials = payloadMaterials.filter((material) => material.category === category && (!normalizedQuery || material.name.toLowerCase().includes(normalizedQuery)));
+            if (!materials.length) return null;
+            return (
+              <optgroup key={category} label={PAYLOAD_CATEGORY_LABELS[category]}>
+                {materials.map((material) => (
+                  <option key={material.id} value={material.id}>{material.name}</option>
+                ))}
+              </optgroup>
+            );
+          })}
+        </select>
+      </label>
+      <Info label="Payload volume" value={payloadObject?.volumeM3 ? `${formatVolume(payloadObject.volumeM3, "m^3", unitSystem)} · ${volumeSource}` : "Select a closed object or use manual mass"} />
+      <label className="toggle material-print-toggle">
+        <input
+          type="checkbox"
+          checked={payloadMassMode === "manual"}
+          onChange={(event) => onPayloadMassModeChange(event.currentTarget.checked ? "manual" : "material")}
+        />
+        <span>
+          <strong>Manual mass override</strong>
+          <small>Use a measured mass instead of material density times model volume.</small>
+        </span>
+      </label>
+      {payloadMassMode === "manual" && (
+        <label className="field">
+          <HelpLabel helpId="loadMagnitude">Payload mass</HelpLabel>
+          <span className="input-with-unit">
+            <input type="number" value={formatInputValue(displayManualMass.value)} onChange={(event) => onManualMassChange(Number(event.currentTarget.value))} />
+            <span>{displayManualMass.units}</span>
+          </span>
+        </label>
+      )}
+    </>
   );
 }
 
@@ -507,8 +626,19 @@ function LoadEditForm({ load, study, unitSystem, onSave, onCancel, onPreviewChan
     return formatInputValue(loadValueForUnits(Number(load.parameters.value ?? 500), initialUnits, unitSystem).value);
   });
   const [direction, setDirection] = useState<LoadDirectionLabel>(directionLabelForLoad(load));
+  const [payloadMaterialId, setPayloadMaterialId] = useState(String(load.parameters.payloadMaterialId ?? "payload-steel"));
+  const [payloadMassMode, setPayloadMassMode] = useState<PayloadMassMode>(load.parameters.payloadMassMode === "manual" ? "manual" : "material");
   const units = unitsForLoadType(type);
   const displayUnits = loadValueForUnits(defaultValueForLoadType(type), units, unitSystem).units;
+  const payloadObject = payloadObjectForLoad(load) ?? null;
+  const payloadVolumeM3 = positiveNumber(load.parameters.payloadVolumeM3) ? load.parameters.payloadVolumeM3 : payloadObject?.volumeM3;
+  const calculatedPayloadMass = payloadVolumeM3 ? massKgForPayloadMaterial(payloadMaterialId, payloadVolumeM3) : 0;
+  const manualMassKg = loadValueForUnits(Number(value), displayUnits, "SI").value;
+  const editedValue = type === "gravity" && payloadMassMode === "material" && calculatedPayloadMass > 0 ? calculatedPayloadMass : manualMassKg;
+  const payloadMetadata: PayloadLoadMetadata = type === "gravity"
+    ? { payloadMaterialId, ...(payloadVolumeM3 ? { payloadVolumeM3 } : {}), payloadMassMode }
+    : {};
+  const selectedPayloadMaterial = payloadMaterialForId(payloadMaterialId);
   const selectedRef = study.namedSelections.find((selection) => selection.id === load.selectionRef);
   const selectedFace = selectedRef?.geometryRefs[0];
   const directionFace: DisplayFace = useMemo(() => ({
@@ -519,7 +649,7 @@ function LoadEditForm({ load, study, unitSystem, onSave, onCancel, onPreviewChan
     normal: direction === "Normal" && Array.isArray(load.parameters.direction) ? load.parameters.direction as [number, number, number] : [0, 1, 0],
     stressValue: 0
   }), [direction, load.parameters.direction, selectedFace?.entityId, selectedFace?.label]);
-  const previewLoad = useMemo(() => editedLoadForForm(load, type, value, displayUnits, units, direction, directionFace), [direction, directionFace, displayUnits, load, type, units, value]);
+  const previewLoad = useMemo(() => editedLoadForForm(load, type, value, displayUnits, units, direction, directionFace, payloadMetadata, editedValue), [direction, directionFace, displayUnits, editedValue, load, payloadMetadata, type, units, value]);
 
   useEffect(() => {
     onPreviewChange(previewLoad);
@@ -536,14 +666,31 @@ function LoadEditForm({ load, study, unitSystem, onSave, onCancel, onPreviewChan
           <option value="gravity">Payload mass</option>
         </select>
       </label>
-      <label className="field">
-        <HelpLabel helpId="loadMagnitude">{type === "gravity" ? "Payload mass" : "Magnitude"}</HelpLabel>
-        <span className="input-with-unit">
-          <input type="number" value={value} onChange={(event) => setValue(event.currentTarget.value)} />
-          <span>{displayUnits}</span>
-        </span>
-      </label>
-      {type === "gravity" && <Callout>{formatEquivalentForce(equivalentForceForLoad({ type: "gravity", parameters: { value: loadValueForUnits(Number(value), displayUnits, "SI").value } }), unitSystem)} equivalent weight.</Callout>}
+      {type === "gravity" ? (
+        <>
+          <PayloadMassControls
+            unitSystem={unitSystem}
+            payloadObject={payloadObject}
+            payloadMaterialId={payloadMaterialId}
+            payloadMassMode={payloadMassMode}
+            manualMassKg={manualMassKg}
+            onPayloadMaterialChange={setPayloadMaterialId}
+            onPayloadMassModeChange={setPayloadMassMode}
+            onManualMassChange={(displayValue) => setValue(formatInputValue(displayValue))}
+          />
+          <Info label="Selected density" value={formatDensity(selectedPayloadMaterial.density, "kg/m^3", unitSystem)} />
+          <Info label="Calculated mass" value={formatMass(calculatedPayloadMass, "kg", unitSystem)} />
+          <Callout>{formatEquivalentForce(equivalentForceForLoad({ type: "gravity", parameters: { value: editedValue } }), unitSystem)} equivalent weight.</Callout>
+        </>
+      ) : (
+        <label className="field">
+          <HelpLabel helpId="loadMagnitude">Magnitude</HelpLabel>
+          <span className="input-with-unit">
+            <input type="number" value={value} onChange={(event) => setValue(event.currentTarget.value)} />
+            <span>{displayUnits}</span>
+          </span>
+        </label>
+      )}
       <PlacementReadout selectedRef={selectedRef} />
       <label className="field">
         <HelpLabel helpId="loadDirection">Direction</HelpLabel>
@@ -567,17 +714,22 @@ function LoadEditForm({ load, study, unitSystem, onSave, onCancel, onPreviewChan
   );
 }
 
-function editedLoadForForm(load: Load, type: LoadType, value: string, displayUnits: string, units: string, direction: LoadDirectionLabel, directionFace: DisplayFace): Load {
+function editedLoadForForm(load: Load, type: LoadType, value: string, displayUnits: string, units: string, direction: LoadDirectionLabel, directionFace: DisplayFace, payloadMetadata: PayloadLoadMetadata = {}, overrideValue?: number): Load {
   return {
     ...load,
     type,
     parameters: {
       ...load.parameters,
-      value: loadValueForUnits(Number(value), displayUnits, "SI").value,
+      value: overrideValue ?? loadValueForUnits(Number(value), displayUnits, "SI").value,
       units,
-      direction: directionVectorForLabel(direction, directionFace)
+      direction: directionVectorForLabel(direction, directionFace),
+      ...(type === "gravity" ? payloadMetadata : {})
     }
   };
+}
+
+function positiveNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
 }
 
 function SupportEditorList({ study, onUpdateSupport, onRemoveSupport }: { study: Study; onUpdateSupport: (support: Constraint) => void; onRemoveSupport: (supportId: string) => void }) {

@@ -77,7 +77,7 @@ describe("RightPanel payload mass controls", () => {
           draftLoadValue={5}
           draftLoadDirection="-Z"
           selectedLoadPoint={[1, 2, 3]}
-          selectedPayloadObject={{ id: "rod-1", label: "Rod 1", center: [1, 2, 3] }}
+          selectedPayloadObject={{ id: "rod-1", label: "Rod 1", center: [1, 2, 3], volumeM3: 0.001, volumeSource: "mesh", volumeStatus: "available" }}
           onFitView={vi.fn()}
           onRotateModel={vi.fn()}
           onResetModelOrientation={vi.fn()}
@@ -112,6 +112,9 @@ describe("RightPanel payload mass controls", () => {
 
       expect(html).toContain("Selected Rod 1");
       expect(html).not.toContain("Selected Top face");
+      expect(html).toContain("Payload material");
+      expect(html).toContain("Calculated mass");
+      expect(html).toContain("Manual mass override");
       expect(html).toContain("Add payload mass");
       expect(html).not.toMatch(/<button class="outline-action wide" disabled="">[\s\S]*Add payload mass/);
     } finally {

@@ -14,6 +14,7 @@ import {
   unitsForLoadType,
   type LoadDirectionLabel,
   type PayloadObjectSelection,
+  type PayloadLoadMetadata,
   type LoadType
 } from "./loadPreview";
 import { resetDisplayModelOrientation, type RotationAxis } from "./modelOrientation";
@@ -360,7 +361,7 @@ export function App() {
     );
   }
 
-  async function addLoadForFace(type: LoadType, value: number, face: DisplayFace, direction: LoadDirectionLabel, applicationPoint?: [number, number, number] | null, payloadObject?: PayloadObjectSelection | null) {
+  async function addLoadForFace(type: LoadType, value: number, face: DisplayFace, direction: LoadDirectionLabel, applicationPoint?: [number, number, number] | null, payloadObject?: PayloadObjectSelection | null, payloadMetadata: PayloadLoadMetadata = {}) {
     if (!study) return;
     const existingSelection = study.namedSelections.find((item) => item.entityType === "face" && item.geometryRefs.some((ref) => ref.entityId === face.id));
     const selection = existingSelection ?? namedSelectionForFace(study, face);
@@ -369,7 +370,7 @@ export function App() {
       id: `load-${crypto.randomUUID()}`,
       type,
       selectionRef: selection.id,
-      parameters: { value, units: unitsForLoadType(type), direction: directionVectorForLabel(direction, face), ...(applicationPoint ? { applicationPoint } : {}), ...(payloadObject ? { payloadObject } : {}) },
+      parameters: { value, units: unitsForLoadType(type), direction: directionVectorForLabel(direction, face), ...(applicationPoint ? { applicationPoint } : {}), ...(payloadObject ? { payloadObject } : {}), ...(type === "gravity" ? payloadMetadata : {}) },
       status: "complete"
     };
     await updateStudy(
@@ -632,7 +633,7 @@ export function App() {
           onDraftLoadTypeChange={setDraftLoadType}
           onDraftLoadValueChange={setDraftLoadValue}
           onDraftLoadDirectionChange={setDraftLoadDirection}
-          onAddLoad={(type, value, selectionRef, direction) => {
+          onAddLoad={(type, value, selectionRef, direction, payloadMetadata = {}) => {
             const selection = study.namedSelections.find((item) => item.id === selectionRef);
             const faceId = selection?.geometryRefs[0]?.entityId;
             const payloadObject = type === "gravity" ? selectedPayloadObject : null;
@@ -641,10 +642,10 @@ export function App() {
             if (!face) return;
             const applicationPoint = type === "gravity" && payloadObject ? payloadObject.center : selectedLoadPoint;
             if (selection) {
-              updateStudy(addLoad(study.id, type, value, selection.id, directionVectorForLabel(direction, face), applicationPoint, payloadObject, study));
+              updateStudy(addLoad(study.id, type, value, selection.id, directionVectorForLabel(direction, face), applicationPoint, payloadObject, study, payloadMetadata));
               return;
             }
-            void addLoadForFace(type, value, face, direction, applicationPoint, payloadObject);
+            void addLoadForFace(type, value, face, direction, applicationPoint, payloadObject, payloadMetadata);
           }}
           onUpdateLoad={(load: Load) =>
             updateStudy(

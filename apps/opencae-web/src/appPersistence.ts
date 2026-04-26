@@ -220,7 +220,14 @@ function isVector3(value: unknown): value is [number, number, number] {
 
 function parsePayloadObject(value: unknown): PayloadObjectSelection | null {
   if (!isRecord(value) || typeof value.id !== "string" || typeof value.label !== "string" || !isVector3(value.center)) return null;
-  return { id: value.id, label: value.label, center: value.center };
+  return {
+    id: value.id,
+    label: value.label,
+    center: value.center,
+    ...(typeof value.volumeM3 === "number" && Number.isFinite(value.volumeM3) && value.volumeM3 > 0 ? { volumeM3: value.volumeM3 } : {}),
+    ...(value.volumeSource === "mesh" || value.volumeSource === "step" || value.volumeSource === "bounds-fallback" || value.volumeSource === "manual" ? { volumeSource: value.volumeSource } : {}),
+    ...(value.volumeStatus === "available" || value.volumeStatus === "estimated" || value.volumeStatus === "unknown" ? { volumeStatus: value.volumeStatus } : {})
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

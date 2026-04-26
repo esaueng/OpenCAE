@@ -1,10 +1,17 @@
 import * as THREE from "three";
 import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
+import { stlVolumeM3FromBytes } from "@opencae/units";
 
 const NORMALIZED_MODEL_SIZE = 2.4;
 
 export function normalizedStlGeometryFromBuffer(buffer: ArrayBuffer): THREE.BufferGeometry {
+  const volumeM3 = stlVolumeM3FromBytes(new Uint8Array(buffer));
   const geometry = new STLLoader().parse(stlLoaderInputFor(buffer));
+  if (volumeM3) {
+    geometry.userData.opencaeVolumeM3 = volumeM3;
+    geometry.userData.opencaeVolumeSource = "mesh";
+    geometry.userData.opencaeVolumeStatus = "available";
+  }
   normalizeStlGeometry(geometry);
   geometry.computeVertexNormals();
   return geometry;
