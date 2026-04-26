@@ -34,13 +34,6 @@ export function StartScreen({ onLoadSample, onCreateProject, onOpenProject }: St
         <h1 id="opencae-title">OpenCAE</h1>
         <p className="start-tagline">open structural simulation</p>
         <div className="start-actions">
-          <button className="start-action primary" onClick={() => onLoadSample()}>
-            <span>
-              <strong>Load sample project</strong>
-              <small>Bracket demo · full workflow preview</small>
-            </span>
-            <span aria-hidden="true">→</span>
-          </button>
           <button className="start-action secondary" onClick={() => onCreateProject()}>
             <span>Create new project</span>
             <kbd>N</kbd>
@@ -48,6 +41,13 @@ export function StartScreen({ onLoadSample, onCreateProject, onOpenProject }: St
           <button className="start-action secondary" onClick={() => fileInputRef.current?.click()}>
             <span>Open local project</span>
             <kbd>O</kbd>
+          </button>
+          <button className="start-action primary sample-action" onClick={() => onLoadSample()}>
+            <span>
+              <strong>Load sample project</strong>
+              <small>Bracket demo · full workflow preview</small>
+            </span>
+            <span aria-hidden="true">→</span>
           </button>
           <input
             ref={fileInputRef}
