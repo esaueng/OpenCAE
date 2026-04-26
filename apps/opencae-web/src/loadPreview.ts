@@ -84,12 +84,13 @@ export function loadMarkerFromLoad(load: Load, study: Study, stackIndex: number)
   };
 }
 
-export function createViewerLoadMarkers({ study }: { study: Study | null }): ViewerLoadMarker[] {
+export function createViewerLoadMarkers({ study, loadPreviews = [] }: { study: Study | null; loadPreviews?: Load[] }): ViewerLoadMarker[] {
   if (!study) return [];
+  const previewsById = new Map(loadPreviews.map((load) => [load.id, load]));
   const faceCounts = new Map<string, number>();
   let labelIndex = 0;
   return study.loads.flatMap((load) => {
-    const marker = loadMarkerFromLoad(load, study, 0);
+    const marker = loadMarkerFromLoad(previewsById.get(load.id) ?? load, study, 0);
     if (!marker) return [];
     const stackIndex = faceCounts.get(marker.faceId) ?? 0;
     faceCounts.set(marker.faceId, stackIndex + 1);

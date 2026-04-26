@@ -77,6 +77,7 @@ export function App() {
   const [draftLoadType, setDraftLoadType] = useState<LoadType>(restoredUi?.draftLoadType ?? "force");
   const [draftLoadValue, setDraftLoadValue] = useState(restoredUi?.draftLoadValue ?? 500);
   const [draftLoadDirection, setDraftLoadDirection] = useState<LoadDirectionLabel>(restoredUi?.draftLoadDirection ?? "-Z");
+  const [previewLoadEdit, setPreviewLoadEdit] = useState<Load | null>(null);
   const [sampleModel, setSampleModel] = useState<SampleModelId>(restoredUi?.sampleModel ?? "bracket");
 
   const study = project?.studies[0] ?? null;
@@ -119,13 +120,17 @@ export function App() {
     }
   }, [draftLoadType, selectedPayloadObject]);
 
+  useEffect(() => {
+    if (activeStep !== "loads") setPreviewLoadEdit(null);
+  }, [activeStep]);
+
   const loadMarkers = useMemo<ViewerLoadMarker[]>(() => {
-    const markers = createViewerLoadMarkers({ study });
+    const markers = createViewerLoadMarkers({ study, loadPreviews: previewLoadEdit ? [previewLoadEdit] : [] });
     return markers.map((marker) => {
       const converted = loadValueForUnits(marker.value, marker.units, displayUnitSystem);
       return { ...marker, value: converted.value, units: converted.units };
     });
-  }, [displayUnitSystem, study]);
+  }, [displayUnitSystem, previewLoadEdit, study]);
   const supportMarkers = useMemo<ViewerSupportMarker[]>(() => {
     if (!study) return [];
     const faceCounts = new Map<string, number>();
@@ -640,6 +645,7 @@ export function App() {
               saveStudyPatch(study.id, { loads: study.loads.map((item) => (item.id === load.id ? load : item)) }, "Load updated.", study)
             )
           }
+          onPreviewLoadEdit={setPreviewLoadEdit}
           onRemoveLoad={(loadId) =>
             updateStudy(saveStudyPatch(study.id, { loads: study.loads.filter((item) => item.id !== loadId) }, "Load removed.", study))
           }

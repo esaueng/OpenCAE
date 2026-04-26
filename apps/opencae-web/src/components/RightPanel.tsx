@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { AlertTriangle, Anchor, ArrowDown, Check, CircleHelp, Download, Eye, FileText, Grid3X3, Maximize2, Play, Plus, RotateCcw, Ruler, ShieldCheck, Upload, X } from "lucide-react";
 import { defaultPrintParametersFor, effectiveMaterialProperties, normalizePrintParameters, starterMaterials, type PrintMaterialParameters } from "@opencae/materials";
@@ -55,6 +55,7 @@ interface RightPanelProps {
   onDraftLoadDirectionChange: (direction: LoadDirectionLabel) => void;
   onAddLoad: (type: LoadType, value: number, selectionRef: string | undefined, direction: LoadDirectionLabel) => void;
   onUpdateLoad: (load: Load) => void;
+  onPreviewLoadEdit: (load: Load | null) => void;
   onRemoveLoad: (loadId: string) => void;
   onGenerateMesh: (preset: "coarse" | "medium" | "fine") => void;
   onRunSimulation: () => void;
@@ -357,6 +358,7 @@ function LoadsPanel({
   onDraftLoadDirectionChange,
   onAddLoad,
   onUpdateLoad,
+  onPreviewLoadEdit,
   onRemoveLoad
 }: RightPanelProps) {
   const selectedFromViewport = selectedFace ? selectionForFace(study, selectedFace.id) : undefined;
@@ -418,12 +420,12 @@ function LoadsPanel({
       </label>
       <button className="outline-action wide" disabled={!hasSelectedFace} onClick={() => hasSelectedFace && onAddLoad(draftLoadType, draftLoadValue, selectedFromViewport?.id, draftLoadDirection)}><Plus size={18} />{addLabel}</button>
       <SectionTitle>Applied</SectionTitle>
-      <LoadEditorList study={study} unitSystem={project.unitSystem} onUpdateLoad={onUpdateLoad} onRemoveLoad={onRemoveLoad} />
+      <LoadEditorList study={study} unitSystem={project.unitSystem} onUpdateLoad={onUpdateLoad} onPreviewLoadEdit={onPreviewLoadEdit} onRemoveLoad={onRemoveLoad} />
     </Panel>
   );
 }
 
-function LoadEditorList({ study, unitSystem, onUpdateLoad, onRemoveLoad }: { study: Study; unitSystem: UnitSystem; onUpdateLoad: (load: Load) => void; onRemoveLoad: (loadId: string) => void }) {
+function LoadEditorList({ study, unitSystem, onUpdateLoad, onPreviewLoadEdit, onRemoveLoad }: { study: Study; unitSystem: UnitSystem; onUpdateLoad: (load: Load) => void; onPreviewLoadEdit: (load: Load | null) => void; onRemoveLoad: (loadId: string) => void }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   if (!study.loads.length) return <EmptyEditableList title="Loads" />;
   const loadLabelsById = new Map(createViewerLoadMarkers({ study }).map((marker) => [marker.id, loadMarkerOrdinalLabel(marker)]));
@@ -454,8 +456,10 @@ function LoadEditorList({ study, unitSystem, onUpdateLoad, onRemoveLoad }: { stu
                 load={load}
                 study={study}
                 unitSystem={unitSystem}
+                onPreviewChange={onPreviewLoadEdit}
                 onCancel={() => setEditingId(null)}
                 onSave={(nextLoad) => {
+                  onPreviewLoadEdit(null);
                   onUpdateLoad(nextLoad);
                   setEditingId(null);
                 }}
@@ -470,7 +474,7 @@ function LoadEditorList({ study, unitSystem, onUpdateLoad, onRemoveLoad }: { stu
   );
 }
 
-function LoadEditForm({ load, study, unitSystem, onSave, onCancel }: { load: Load; study: Study; unitSystem: UnitSystem; onSave: (load: Load) => void; onCancel: () => void }) {
+function LoadEditForm({ load, study, unitSystem, onSave, onCancel, onPreviewChange }: { load: Load; study: Study; unitSystem: UnitSystem; onSave: (load: Load) => void; onCancel: () => void; onPreviewChange: (load: Load | null) => void }) {
   const [type, setType] = useState<"force" | "pressure" | "gravity">(load.type);
   const [value, setValue] = useState(() => {
     const initialUnits = String(load.parameters.units ?? unitsForLoadType(load.type));
@@ -481,14 +485,21 @@ function LoadEditForm({ load, study, unitSystem, onSave, onCancel }: { load: Loa
   const displayUnits = loadValueForUnits(defaultValueForLoadType(type), units, unitSystem).units;
   const selectedRef = study.namedSelections.find((selection) => selection.id === load.selectionRef);
   const selectedFace = selectedRef?.geometryRefs[0];
-  const directionFace: DisplayFace = {
+  const directionFace: DisplayFace = useMemo(() => ({
     id: selectedFace?.entityId ?? "selected-face",
     label: selectedFace?.label ?? "selected face",
     color: "#fff",
     center: [0, 0, 0],
     normal: direction === "Normal" && Array.isArray(load.parameters.direction) ? load.parameters.direction as [number, number, number] : [0, 1, 0],
     stressValue: 0
-  };
+  }), [direction, load.parameters.direction, selectedFace?.entityId, selectedFace?.label]);
+  const previewLoad = useMemo(() => editedLoadForForm(load, type, value, displayUnits, units, direction, directionFace), [direction, directionFace, displayUnits, load, type, units, value]);
+
+  useEffect(() => {
+    onPreviewChange(previewLoad);
+    return () => onPreviewChange(null);
+  }, [onPreviewChange, previewLoad]);
+
   return (
     <div className="edit-form">
       <label className="field">
@@ -520,7 +531,7 @@ function LoadEditForm({ load, study, unitSystem, onSave, onCancel }: { load: Loa
         <button
           className="primary"
           type="button"
-          onClick={() => onSave({ ...load, type, parameters: { ...load.parameters, value: loadValueForUnits(Number(value), displayUnits, "SI").value, units, direction: directionVectorForLabel(direction, directionFace) } })}
+          onClick={() => onSave(previewLoad)}
         >
           Save
         </button>
@@ -528,6 +539,19 @@ function LoadEditForm({ load, study, unitSystem, onSave, onCancel }: { load: Loa
       </div>
     </div>
   );
+}
+
+function editedLoadForForm(load: Load, type: LoadType, value: string, displayUnits: string, units: string, direction: LoadDirectionLabel, directionFace: DisplayFace): Load {
+  return {
+    ...load,
+    type,
+    parameters: {
+      ...load.parameters,
+      value: loadValueForUnits(Number(value), displayUnits, "SI").value,
+      units,
+      direction: directionVectorForLabel(direction, directionFace)
+    }
+  };
 }
 
 function SupportEditorList({ study, onUpdateSupport, onRemoveSupport }: { study: Study; onUpdateSupport: (support: Constraint) => void; onRemoveSupport: (supportId: string) => void }) {
