@@ -2,6 +2,18 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import type { DisplayModel, Project, RunEvent, Study } from "@opencae/schema";
 import { addLoad, addSupport, assignMaterial, createProject, generateMesh, getResults, importLocalProject, loadSampleProject, runSimulation, subscribeToRun, updateStudy, uploadModel } from "./api";
 
+const TestFile = globalThis.File ?? class extends Blob {
+  name: string;
+  lastModified: number;
+  webkitRelativePath = "";
+
+  constructor(bits: BlobPart[], name: string, options?: FilePropertyBag) {
+    super(bits, options);
+    this.name = name;
+    this.lastModified = options?.lastModified ?? Date.now();
+  }
+};
+
 const project = {
   id: "project-1",
   name: "Uploaded Project",
@@ -76,7 +88,7 @@ describe("api", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    const file = new File([new Uint8Array([1, 2, 3])], "uploaded-bracket.stl", { type: "model/stl" });
+    const file = new TestFile([new Uint8Array([1, 2, 3])], "uploaded-bracket.stl", { type: "model/stl" });
     const response = await uploadModel("project-1", file);
 
     const requestInit = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
@@ -95,7 +107,7 @@ describe("api", () => {
   test("uploads a model locally when the API is unavailable", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new TypeError("NetworkError when attempting to fetch resource."))));
 
-    const file = new File([sizedAsciiStl], "seed-tray.stl", { type: "model/stl" });
+    const file = new TestFile([sizedAsciiStl], "seed-tray.stl", { type: "model/stl" });
     const response = await uploadModel("project-1", file, project);
 
     expect(response.project.geometryFiles[0]?.filename).toBe("seed-tray.stl");
@@ -113,7 +125,7 @@ describe("api", () => {
   test("uploads STEP locally without placeholder dimensions before browser measurement", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new TypeError("NetworkError when attempting to fetch resource."))));
 
-    const file = new File(["ISO-10303-21"], "seed-tray.step", { type: "model/step" });
+    const file = new TestFile(["ISO-10303-21"], "seed-tray.step", { type: "model/step" });
     const response = await uploadModel("project-1", file, project);
 
     expect(response.project.geometryFiles[0]?.filename).toBe("seed-tray.step");
@@ -320,7 +332,7 @@ describe("api", () => {
 
   test("opens a local project file without requiring the API", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("missing", { status: 404 })));
-    const file = new File([JSON.stringify({ project, displayModel })], "project.opencae.json", { type: "application/json" });
+    const file = new TestFile([JSON.stringify({ project, displayModel })], "project.opencae.json", { type: "application/json" });
 
     const response = await importLocalProject(file);
 

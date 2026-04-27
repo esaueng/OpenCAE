@@ -106,6 +106,9 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sa
   const bodyCount = Number(geometry?.metadata.bodyCount ?? 0);
   const sampleLabel = sampleModel === "bracket" ? "Bracket Demo" : sampleModel === "plate" ? "Hook Demo" : "Cantilever Demo";
   const sampleForceLabel = formatEquivalentForce(500, project.unitSystem);
+  const sampleSummaryVolumeMm3 = sampleModel === "plate" ? 96_000 : 41_280;
+  const sampleSummaryMassG = sampleModel === "plate" ? 259 : 111;
+  const sampleLoadTitle = sampleModel === "plate" ? `Payload mass · ${formatMass(0.2592, "kg", project.unitSystem)}` : `Force · ${sampleForceLabel}`;
   const orientation = getModelOrientation(displayModel);
   const hasCustomOrientation = orientation.x !== 0 || orientation.y !== 0 || orientation.z !== 0;
   const preconfigured =
@@ -175,8 +178,8 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sa
         <Info label="Model" value={geometry?.filename ?? "No model loaded"} />
         <Info label="Bodies" value={String(bodyCount)} />
         <Info label="Faces" value={String(faceCount)} />
-        <Info label="Volume" value={formatVolume(41_280, "mm^3", project.unitSystem)} />
-        <Info label="Mass" value={formatMass(111, "g", project.unitSystem)} />
+        <Info label="Volume" value={formatVolume(sampleSummaryVolumeMm3, "mm^3", project.unitSystem)} />
+        <Info label="Mass" value={formatMass(sampleSummaryMassG, "g", project.unitSystem)} />
         <Info label="Units" value={project.unitSystem === "US" ? "in" : "mm"} />
       </div>
       <button className={showDimensions ? "primary wide" : "secondary wide"} type="button" onClick={onToggleDimensions}>
@@ -208,7 +211,7 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sa
           <SectionTitle>Preconfigured</SectionTitle>
           <div className="concept-card-list">
             <ConceptCard icon={<SupportIcon />} title="Fixed support" detail={preconfigured.support} tone="warning" />
-            <ConceptCard icon={<ArrowDown size={18} />} title={`Force · ${sampleForceLabel}`} detail={preconfigured.load} tone="accent" />
+            <ConceptCard icon={<ArrowDown size={18} />} title={sampleLoadTitle} detail={preconfigured.load} tone="accent" />
           </div>
           <Callout>{preconfigured.callout}</Callout>
         </>
