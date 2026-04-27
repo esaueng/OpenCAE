@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { describe, expect, test } from "vitest";
-import { VIEWER_GIZMO_ALIGNMENT, axisLabelToViewAxis, cameraViewForAxis, colorizeResultObject, legendTickLabels, payloadHighlightObjectId, printLayerVisualizationForBounds, rotatedCameraOrbit, shouldShowModelHitLabel } from "./CadViewer";
+import { VIEWER_GIZMO_ALIGNMENT, axisLabelToViewAxis, cameraViewForAxis, colorizeResultObject, displayedLegendTickLabels, legendTickLabels, payloadHighlightObjectId, printLayerVisualizationForBounds, rotatedCameraOrbit, shouldShowModelHitLabel } from "./CadViewer";
 import type { FaceResultSample } from "../resultFields";
 
 const samples: FaceResultSample[] = [
@@ -23,6 +23,10 @@ describe("CadViewer result coloring", () => {
 
   test("keeps result legend extrema labels separate from numeric ticks", () => {
     expect(legendTickLabels(88.3, 156.6)).toEqual(["88.3", "105.375", "122.45", "139.525", "156.6"]);
+  });
+
+  test("shows only min, middle, and max result legend tick labels", () => {
+    expect(displayedLegendTickLabels(88.3, 156.6)).toEqual(["88.3", "122.45", "156.6"]);
   });
 
   test("maps gizmo Z clicks to a clockwise square top view", () => {

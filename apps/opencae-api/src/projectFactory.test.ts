@@ -44,7 +44,7 @@ describe("projectFactory", () => {
       expect(project.name).toBe(`Test ${sampleId}`);
       expect(project.studies).toHaveLength(1);
       expect(project.studies[0]?.projectId).toBe(project.id);
-      const expectedSampleName = sampleId === "plate" ? "hook" : sampleId;
+      const expectedSampleName = sampleId === "plate" ? "beam" : sampleId;
       expect(project.geometryFiles[0]?.filename).toContain(expectedSampleName);
       expect(sampleDisplayModelFor(sampleId).name.toLowerCase()).toContain(expectedSampleName);
       expect(sampleDisplayModelFor(sampleId).dimensions?.units).toBe("mm");
@@ -67,11 +67,11 @@ describe("projectFactory", () => {
       expect(cantilever.faces.map((face) => face.id)).toContain(faceId);
       expect(bracket.faces.map((face) => face.id)).toContain(faceId);
     }
-    expect(plate.faces.find((face) => face.id === "face-load-top")?.label).toBe("Hanging payload mass");
+    expect(plate.faces.find((face) => face.id === "face-load-top")?.label).toBe("End payload mass");
     expect(cantilever.faces.find((face) => face.id === "face-base-left")?.normal).toEqual([-1, 0, 0]);
   });
 
-  test("configures the hook sample with a hanging payload mass load", () => {
+  test("configures the beam sample with a payload mass sitting on the free end", () => {
     const project = createSampleProject("plate", {
       projectId: "project-plate",
       studyId: "study-plate",
@@ -80,31 +80,31 @@ describe("projectFactory", () => {
     });
     const load = project.studies[0]?.loads[0];
 
-    expect(project.name).toBe("Hook Demo");
-    expect(project.geometryFiles[0]?.filename).toBe("wall-hook-payload.step");
-    expect(sampleDisplayModelFor("plate").name).toBe("wall hook assembly");
+    expect(project.name).toBe("Beam Demo");
+    expect(project.geometryFiles[0]?.filename).toBe("end-loaded-beam.step");
+    expect(sampleDisplayModelFor("plate").name).toBe("end loaded beam assembly");
     expect(sampleDisplayModelFor("plate").faces.map((face) => face.label)).toEqual([
-      "Rear mounting face",
-      "Hanging payload mass",
-      "Hook throat",
-      "Mounting body"
+      "Fixed end face",
+      "End payload mass",
+      "Beam top face",
+      "Beam body"
     ]);
     expect(load).toMatchObject({
       type: "gravity",
       selectionRef: "selection-load-face",
       parameters: {
-        value: 0.2592,
+        value: 0.497664,
         units: "kg",
         direction: [0, 0, -1],
-        applicationPoint: [1.2, -1.34, 0],
+        applicationPoint: [1.48, 0.56, 0],
         payloadMaterialId: "payload-aluminum-6061",
-        payloadVolumeM3: 0.000096,
+        payloadVolumeM3: 0.00018432,
         payloadMassMode: "material",
         payloadObject: {
           id: "payload-display-plate",
-          label: "hanging payload mass",
-          center: [1.2, -1.34, 0],
-          volumeM3: 0.000096,
+          label: "end payload mass",
+          center: [1.48, 0.56, 0],
+          volumeM3: 0.00018432,
           volumeSource: "bounds-fallback",
           volumeStatus: "estimated"
         }
