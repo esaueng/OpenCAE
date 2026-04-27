@@ -105,10 +105,13 @@
   --color-border-strong: #aebbc9;
   --color-text: #17202b;
   --color-text-muted: #536170;
-  --color-text-subtle: #7a8795;
-  --color-accent: #1677d2;
+  --color-text-subtle: #5f6b7a;
+  --color-accent: #0b63b6;
   --color-accent-dim: rgba(22, 119, 210, 0.12);
   --color-accent-border: rgba(22, 119, 210, 0.42);
+  --color-warning: #a16207;
+  --color-error: #b91c1c;
+  --color-success: #15803d;
   --color-viewport-bg: #f7f9fc;
   --shadow-panel: 0 12px 30px rgba(37, 54, 73, 0.14);
   color-scheme: light;
