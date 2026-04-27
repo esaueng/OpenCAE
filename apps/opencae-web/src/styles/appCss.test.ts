@@ -57,4 +57,12 @@ describe("app CSS", () => {
   test("uses primary text for panel titles", () => {
     expect(cssRule(".panel-section h2")).toMatch(/color:\s*var\(--color-text\)/);
   });
+
+  test("anchors the start screen logo to the grid center", () => {
+    const startBrand = cssRule(".start-brand");
+
+    expect(startBrand).toMatch(/position:\s*absolute/);
+    expect(startBrand).toMatch(/top:\s*50%/);
+    expect(startBrand).toMatch(/transform:\s*translate\(-50%,\s*-28px\)/);
+  });
 });
