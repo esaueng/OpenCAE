@@ -77,7 +77,6 @@ interface CadViewerProps {
 const BRACKET_DEPTH = 1.1;
 const RIB_DEPTH = 0.38;
 const HOOK_DEPTH = 0.34;
-const PLATE_DEPTH = HOOK_DEPTH;
 const HOOK_PAYLOAD_OBJECT_ID = "payload-display-plate";
 const HOOK_PAYLOAD_LABEL = "hanging payload mass";
 const HOOK_PAYLOAD_CENTER: [number, number, number] = [1.2, -1.34, 0];
