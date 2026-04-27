@@ -68,9 +68,14 @@ describe("app CSS", () => {
 
   test("aligns all start screen footer text on one row", () => {
     const startFooter = cssRule(".start-footer");
+    const startFooterItems = cssRule(".start-footer > *");
+    const localRuntime = cssRule(".local-runtime");
 
     expect(startFooter).toMatch(/display:\s*grid/);
     expect(startFooter).toMatch(/grid-template-columns:\s*minmax\(0,\s*1fr\)\s*auto\s*minmax\(0,\s*1fr\)/);
     expect(startFooter).toMatch(/align-items:\s*baseline/);
+    expect(startFooterItems).toMatch(/color:\s*inherit/);
+    expect(startFooterItems).toMatch(/font:\s*inherit/);
+    expect(localRuntime).toMatch(/color:\s*inherit/);
   });
 });
