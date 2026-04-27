@@ -71,7 +71,7 @@ describe("CadViewer result coloring", () => {
     const xBuild = printLayerVisualizationForBounds(bounds, "x");
 
     expect(zBuild?.axis.toArray()).toEqual([0, 1, 0]);
-    expect(zBuild?.label).toBe("Z build");
+    expect(zBuild).not.toHaveProperty("label");
     expect(zBuild?.planes).toHaveLength(7);
     expect(zBuild?.planes[0]?.every((point) => point[1] === -1)).toBe(true);
     expect(yBuild?.axis.toArray()).toEqual([0, 0, 1]);

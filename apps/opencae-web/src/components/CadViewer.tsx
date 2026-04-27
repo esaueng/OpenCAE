@@ -645,9 +645,7 @@ function DimensionEndpoint({ position }: { position: [number, number, number] })
 
 interface PrintLayerVisualization {
   axis: THREE.Vector3;
-  label: string;
   planes: Array<Array<[number, number, number]>>;
-  labelPosition: [number, number, number];
 }
 
 export function printLayerVisualizationForBounds(bounds: THREE.Box3 | null, orientation: PrintLayerOrientation): PrintLayerVisualization | null {
@@ -664,14 +662,9 @@ export function printLayerVisualizationForBounds(bounds: THREE.Box3 | null, orie
     const value = min[axisIndex] + (max[axisIndex] - min[axisIndex]) * t;
     return layerPlanePoints(min, max, axisIndex, value);
   });
-  const center = bounds.getCenter(new THREE.Vector3());
-  const offset = new THREE.Vector3(size.x, size.y, size.z).multiplyScalar(0.18);
-  const labelPosition = center.clone().add(offset).add(axis.clone().multiplyScalar(span * 0.32));
   return {
     axis,
-    label: `${orientation.toUpperCase()} build`,
-    planes,
-    labelPosition: labelPosition.toArray() as [number, number, number]
+    planes
   };
 }
 
@@ -702,7 +695,6 @@ function PrintLayerOverlay({ bounds, orientation }: { bounds: THREE.Box3 | null;
       {visualization.planes.map((plane, index) => (
         <Line key={`${orientation}-layer-${index}`} points={plane} color="#63e6be" transparent opacity={0.34} lineWidth={1.15} />
       ))}
-      <SceneLabel label={visualization.label} position={visualization.labelPosition} tone="print" />
     </group>
   );
 }
