@@ -1,6 +1,6 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "opencae-local",
+  "name": "opencae",
   "main": "apps/opencae-web/worker/index.ts",
   "compatibility_date": "2026-04-27",
   "assets": {
