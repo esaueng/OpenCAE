@@ -133,29 +133,37 @@ describe("api", () => {
     expect(response.message).toBe("Bracket Demo loaded.");
   });
 
-  test("loads the plate sample locally with a payload mass load", async () => {
+  test("loads the hook sample locally with a hanging payload mass load", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("missing", { status: 404 })));
 
     const response = await loadSampleProject("plate");
     const load = response.project.studies[0]?.loads[0];
 
-    expect(response.project.name).toBe("Plate Demo");
+    expect(response.project.name).toBe("Hook Demo");
+    expect(response.project.geometryFiles[0]?.filename).toBe("wall-hook-payload.step");
+    expect(response.displayModel.name).toBe("wall hook assembly");
+    expect(response.displayModel.faces.map((face) => face.label)).toEqual([
+      "Rear mounting face",
+      "Hanging payload mass",
+      "Hook throat",
+      "Mounting body"
+    ]);
     expect(load).toMatchObject({
       type: "gravity",
       selectionRef: "selection-load-face",
       parameters: {
-        value: 0.15552,
+        value: 0.2592,
         units: "kg",
         direction: [0, 0, -1],
-        applicationPoint: [1.42, 0, 0.17],
+        applicationPoint: [1.2, -1.34, 0],
         payloadMaterialId: "payload-aluminum-6061",
-        payloadVolumeM3: 0.0000576,
+        payloadVolumeM3: 0.000096,
         payloadMassMode: "material",
         payloadObject: {
           id: "payload-display-plate",
-          label: "plate demo body",
-          center: [1.42, 0, 0.17],
-          volumeM3: 0.0000576,
+          label: "hanging payload mass",
+          center: [1.2, -1.34, 0],
+          volumeM3: 0.000096,
           volumeSource: "bounds-fallback",
           volumeStatus: "estimated"
         }
