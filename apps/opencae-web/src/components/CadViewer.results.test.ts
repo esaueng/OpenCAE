@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { describe, expect, test } from "vitest";
-import { VIEWER_GIZMO_ALIGNMENT, axisLabelToViewAxis, cameraViewForAxis, colorizeResultObject, displayedLegendTickLabels, legendTickLabels, payloadHighlightObjectId, printLayerVisualizationForBounds, rotatedCameraOrbit, shouldShowModelHitLabel } from "./CadViewer";
+import { VIEWER_GIZMO_ALIGNMENT, axisLabelToViewAxis, cameraViewForAxis, colorizeResultObject, displayedLegendTickLabels, legendTickLabels, payloadHighlightObjectId, printLayerVisualizationForBounds, rotatedCameraOrbit, shouldShowDimensionOverlay, shouldShowModelHitLabel } from "./CadViewer";
 import type { FaceResultSample } from "../resultFields";
 
 const samples: FaceResultSample[] = [
@@ -55,6 +55,12 @@ describe("CadViewer result coloring", () => {
     expect(shouldShowModelHitLabel("results", true)).toBe(false);
     expect(shouldShowModelHitLabel("model", true)).toBe(true);
     expect(shouldShowModelHitLabel("mesh", false)).toBe(false);
+  });
+
+  test("hides overall dimensions in result view even when dimensions are enabled", () => {
+    expect(shouldShowDimensionOverlay(true, "results")).toBe(false);
+    expect(shouldShowDimensionOverlay(true, "model")).toBe(true);
+    expect(shouldShowDimensionOverlay(false, "model")).toBe(false);
   });
 
   test("uses only hovered payload hits for setup-view object highlighting", () => {
