@@ -3,7 +3,8 @@
   height: 100%;
 }
 
-svg {
+svg,
+img {
   display: block;
 }
 
@@ -247,10 +248,12 @@ svg {
   color: var(--color-accent);
 }
 
-.brand svg {
+.brand svg,
+.brand img {
   width: 18px;
   height: 18px;
   color: currentColor;
+  border-radius: 4px;
 }
 
 .beta-tag {
