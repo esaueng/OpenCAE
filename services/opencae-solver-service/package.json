@@ -13,5 +13,6 @@
     "@opencae/solver-contract": "workspace:*",
     "@opencae/study-core": "workspace:*",
     "@opencae/storage": "workspace:*"
-  }
+  },
+  "license": "Apache-2.0"
 }

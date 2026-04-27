@@ -8,5 +8,6 @@
   },
   "dependencies": {
     "zod": "^3.24.1"
-  }
+  },
+  "license": "Apache-2.0"
 }

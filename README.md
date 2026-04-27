@@ -73,6 +73,10 @@ The current Bracket Demo includes a placeholder bracket body, Aluminum 6061 mate
 - [File format](docs/file-format/README.md)
 - [Validation](docs/validation/README.md)
 
+## License
+
+OpenCAE is licensed under the [Apache License 2.0](LICENSE).
+
 ## Scope
 
 This scaffold intentionally does not include real native CAD, meshing, or finite element solver integrations yet. The service contracts and workspace boundaries are in place so those integrations can be added without rewriting the user workflow.

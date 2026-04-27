@@ -10,5 +10,6 @@
     "@opencae/db": "workspace:*",
     "@opencae/schema": "workspace:*",
     "@opencae/storage": "workspace:*"
-  }
+  },
+  "license": "Apache-2.0"
 }
