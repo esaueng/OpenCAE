@@ -66,7 +66,7 @@ export function StartScreen({ onLoadSample, onCreateProject, onOpenProject }: St
           <span>Start with the sample project to see a complete example.</span>
         </p>
       </section>
-      <a className="start-credit" href="https://shop.esaulabs.com/" target="_blank" rel="noreferrer">
+      <a className="start-credit" href="https://esauengineering.com/" target="_blank" rel="noreferrer">
         Built by Esau Engineering
       </a>
       <footer className="start-footer">
