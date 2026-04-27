@@ -918,6 +918,14 @@ svg {
   border-bottom: var(--border-thin);
 }
 
+.panel-title-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 4px;
+}
+
 .panel-eyebrow,
 .section-title {
   color: var(--color-text-subtle);
@@ -928,7 +936,7 @@ svg {
 }
 
 .panel-section h2 {
-  margin: 3px 0 4px;
+  margin: 0;
   font-size: var(--fs-lg);
   font-weight: var(--fw-medium);
   letter-spacing: 0;

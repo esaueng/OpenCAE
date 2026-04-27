@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test, vi } from "vitest";
 import type { DisplayModel, Project, ResultSummary, Study } from "@opencae/schema";
 import { RightPanel } from "./RightPanel";
+import type { StepId } from "./StepBar";
 
 const project: Project = {
   id: "project-1",
@@ -54,7 +55,80 @@ const resultSummary: ResultSummary = {
   reactionForceUnits: "N"
 };
 
+function renderPanel(activeStep: StepId, overrides: Partial<Parameters<typeof RightPanel>[0]> = {}) {
+  return renderToStaticMarkup(
+    <RightPanel
+      activeStep={activeStep}
+      project={project}
+      displayModel={displayModel}
+      study={study}
+      selectedFace={null}
+      viewMode="model"
+      resultMode="stress"
+      showDeformed={false}
+      showDimensions={false}
+      stressExaggeration={1}
+      resultSummary={resultSummary}
+      runProgress={0}
+      sampleModel="bracket"
+      draftLoadType="force"
+      draftLoadValue={500}
+      draftLoadDirection="-Z"
+      selectedLoadPoint={null}
+      selectedPayloadObject={null}
+      onFitView={vi.fn()}
+      onRotateModel={vi.fn()}
+      onResetModelOrientation={vi.fn()}
+      onLoadSample={vi.fn()}
+      onUploadModel={vi.fn()}
+      onSampleModelChange={vi.fn()}
+      onViewModeChange={vi.fn()}
+      onResultModeChange={vi.fn()}
+      onToggleDeformed={vi.fn()}
+      onToggleDimensions={vi.fn()}
+      onStressExaggerationChange={vi.fn()}
+      onAssignMaterial={vi.fn()}
+      onAddSupport={vi.fn()}
+      onUpdateSupport={vi.fn()}
+      onRemoveSupport={vi.fn()}
+      onDraftLoadTypeChange={vi.fn()}
+      onDraftLoadValueChange={vi.fn()}
+      onDraftLoadDirectionChange={vi.fn()}
+      onAddLoad={vi.fn()}
+      onUpdateLoad={vi.fn()}
+      onPreviewLoadEdit={vi.fn()}
+      onRemoveLoad={vi.fn()}
+      onGenerateMesh={vi.fn()}
+      onRunSimulation={vi.fn()}
+      canRunSimulation={false}
+      missingRunItems={[]}
+      canGenerateReport={false}
+      onGenerateReport={vi.fn()}
+      onStepSelect={vi.fn()}
+      {...overrides}
+    />
+  );
+}
+
 describe("RightPanel payload mass controls", () => {
+  test("places every step title and step number on the same header row", () => {
+    const steps: Array<{ id: StepId; title: string; step: number }> = [
+      { id: "model", title: "Model", step: 1 },
+      { id: "material", title: "Material", step: 2 },
+      { id: "supports", title: "Supports", step: 3 },
+      { id: "loads", title: "Loads", step: 4 },
+      { id: "mesh", title: "Mesh", step: 5 },
+      { id: "run", title: "Run", step: 6 },
+      { id: "results", title: "Results", step: 7 },
+      { id: "report", title: "Report", step: 8 }
+    ];
+
+    for (const item of steps) {
+      const html = renderPanel(item.id);
+      expect(html).toContain(`<div class="panel-title-row"><h2>${item.title}</h2><div class="panel-eyebrow">Step ${item.step} of 8</div></div>`);
+    }
+  });
+
   test("shows contextual weak X build yield on cantilever material previews", () => {
     const html = renderToStaticMarkup(
       <RightPanel
