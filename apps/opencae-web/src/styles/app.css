@@ -1018,6 +1018,7 @@ svg {
 
 .panel-section h2 {
   margin: 0;
+  color: var(--color-text);
   font-size: var(--fs-lg);
   font-weight: var(--fw-medium);
   letter-spacing: 0;
