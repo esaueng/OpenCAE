@@ -424,7 +424,7 @@ export function App() {
     const nextName = name.trim().replace(/\s+/g, " ");
     if (!nextName || nextName === project.name) return;
     try {
-      const response = await renameProject(project.id, nextName);
+      const response = await renameProject(project.id, nextName, project);
       recordUndoSnapshot(project);
       setProject(response.project);
       pushMessage(response.message);
