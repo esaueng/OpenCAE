@@ -19,6 +19,7 @@ export type ThemeMode = "dark" | "light";
 
 export interface WorkspaceUiSnapshot {
   activeStep: StepId;
+  homeRequested: boolean;
   selectedFaceId: string | null;
   selectedLoadPoint: LoadApplicationPoint | null;
   selectedPayloadObject: PayloadObjectSelection | null;
@@ -152,6 +153,7 @@ function parseUiSnapshot(value: unknown): WorkspaceUiSnapshot | null {
   if (!isRecord(value)) return null;
   return {
     activeStep: readEnum(value.activeStep, STEPS, "model"),
+    homeRequested: value.homeRequested === true,
     selectedFaceId: typeof value.selectedFaceId === "string" ? value.selectedFaceId : null,
     selectedLoadPoint: isVector3(value.selectedLoadPoint) ? value.selectedLoadPoint : null,
     selectedPayloadObject: parsePayloadObject(value.selectedPayloadObject),

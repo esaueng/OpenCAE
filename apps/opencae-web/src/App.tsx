@@ -56,7 +56,7 @@ export function App() {
   const restoredResults = restoredProjectFile?.results;
   const [project, setProject] = useState<Project | null>(restoredProjectFile?.project ?? null);
   const [displayModel, setDisplayModel] = useState<DisplayModel | null>(restoredProjectFile?.displayModel ?? null);
-  const [homeRequested, setHomeRequested] = useState(!restoredProjectFile);
+  const [homeRequested, setHomeRequested] = useState(restoredUi?.homeRequested ?? !restoredProjectFile);
   const [activeStep, setActiveStep] = useState<StepId>(restoredUi?.activeStep ?? "model");
   const [undoStack, setUndoStack] = useState<Project[]>(restoredUi?.undoStack ?? []);
   const [redoStack, setRedoStack] = useState<Project[]>(restoredUi?.redoStack ?? []);
@@ -227,6 +227,7 @@ export function App() {
       } : undefined,
       ui: {
         activeStep,
+        homeRequested,
         selectedFaceId,
         selectedLoadPoint,
         selectedPayloadObject,
@@ -257,6 +258,7 @@ export function App() {
     draftLoadDirection,
     draftLoadType,
     draftLoadValue,
+    homeRequested,
     logs,
     project,
     redoStack,

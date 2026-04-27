@@ -117,6 +117,7 @@ describe("app persistence", () => {
       results: { activeRunId: "run-1", completedRunId: "run-1", summary, fields },
       ui: {
         activeStep: "results",
+        homeRequested: true,
         selectedFaceId: "face-1",
         selectedLoadPoint: [0.1, 0.2, 0.3],
         selectedPayloadObject: { id: "payload-1", label: "Payload part", center: [0.1, 0.2, 0.3] },
@@ -144,7 +145,9 @@ describe("app persistence", () => {
     expect(snapshot.projectFile.displayModel).toBe(displayModel);
     expect(snapshot.projectFile.results?.fields).toBe(fields);
     expect(snapshot.ui.activeStep).toBe("results");
+    expect(snapshot.ui.homeRequested).toBe(true);
     expect(snapshot.ui.showDeformed).toBe(true);
+    expect(parseAutosavedWorkspacePayload(JSON.stringify(snapshot))?.ui.homeRequested).toBe(true);
   });
 
   test("parses valid autosave JSON and rejects invalid autosave JSON", () => {
@@ -154,6 +157,7 @@ describe("app persistence", () => {
       savedAt: "2026-04-24T13:00:00.000Z",
       ui: {
         activeStep: "loads",
+        homeRequested: false,
         selectedFaceId: null,
         selectedLoadPoint: null,
         selectedPayloadObject: null,
@@ -192,6 +196,7 @@ describe("app persistence", () => {
       savedAt: "2026-04-24T13:00:00.000Z",
       ui: {
         activeStep: "loads",
+        homeRequested: false,
         selectedFaceId: "face-top",
         selectedLoadPoint: [0.1, 0.2, 0.3],
         selectedPayloadObject: { id: "part-8", label: "Part 8", center: [0.1, 0.2, 0.3], volumeM3: 0.0000682, volumeSource: "step", volumeStatus: "available" },
