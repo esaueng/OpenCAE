@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { DisplayModel, Project, RunEvent, Study } from "@opencae/schema";
-import { addLoad, addSupport, assignMaterial, createProject, generateMesh, getResults, importLocalProject, loadSampleProject, runSimulation, subscribeToRun, updateStudy, uploadModel } from "./api";
+import { addLoad, addSupport, assignMaterial, createProject, generateMesh, getResults, importLocalProject, loadSampleProject, renameProject, runSimulation, subscribeToRun, updateStudy, uploadModel } from "./api";
 
 const TestFile = globalThis.File ?? class extends Blob {
   name: string;
@@ -191,6 +191,18 @@ describe("api", () => {
     expect(response.project.name).toBe("Untitled Project");
     expect(response.project.geometryFiles).toHaveLength(0);
     expect(response.displayModel.name).toBe("No model loaded");
+  });
+
+  test("renames a project locally when the API is unavailable", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("missing", { status: 404 })));
+
+    const response = await renameProject("project-1", "Fixture Analysis", project);
+
+    expect(response.project.name).toBe("Fixture Analysis");
+    expect(response.project.id).toBe("project-1");
+    expect(response.project.studies).toBe(project.studies);
+    expect(response.project.updatedAt).not.toBe(project.updatedAt);
+    expect(response.message).toBe("Project renamed locally.");
   });
 
   test("assigns material locally when the API is unavailable", async () => {

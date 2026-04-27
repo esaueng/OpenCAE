@@ -85,13 +85,26 @@ export async function uploadModel(projectId: string, file: File, currentProject?
   };
 }
 
-export async function renameProject(projectId: string, name: string): Promise<{ project: Project; message: string }> {
-  const response = await fetch(`/api/projects/${projectId}`, {
-    method: "PUT",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ name })
-  });
-  return readJson(response);
+export async function renameProject(projectId: string, name: string, currentProject?: Project): Promise<{ project: Project; message: string }> {
+  return fetchJsonWithFallback(
+    `/api/projects/${projectId}`,
+    {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name })
+    },
+    () => {
+      if (!currentProject) throw new Error("Could not rename project without an open project.");
+      return {
+        project: {
+          ...currentProject,
+          name,
+          updatedAt: new Date().toISOString()
+        },
+        message: "Project renamed locally."
+      };
+    }
+  );
 }
 
 export async function generateMesh(studyId: string, preset: "coarse" | "medium" | "fine", currentStudy?: Study): Promise<{ study: Study; message: string }> {
