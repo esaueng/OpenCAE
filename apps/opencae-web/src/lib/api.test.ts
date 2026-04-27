@@ -145,37 +145,37 @@ describe("api", () => {
     expect(response.message).toBe("Bracket Demo loaded.");
   });
 
-  test("loads the hook sample locally with a hanging payload mass load", async () => {
+  test("loads the beam sample locally with a payload mass sitting on the free end", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("missing", { status: 404 })));
 
     const response = await loadSampleProject("plate");
     const load = response.project.studies[0]?.loads[0];
 
-    expect(response.project.name).toBe("Hook Demo");
-    expect(response.project.geometryFiles[0]?.filename).toBe("wall-hook-payload.step");
-    expect(response.displayModel.name).toBe("wall hook assembly");
+    expect(response.project.name).toBe("Beam Demo");
+    expect(response.project.geometryFiles[0]?.filename).toBe("end-loaded-beam.step");
+    expect(response.displayModel.name).toBe("end loaded beam assembly");
     expect(response.displayModel.faces.map((face) => face.label)).toEqual([
-      "Rear mounting face",
-      "Hanging payload mass",
-      "Hook throat",
-      "Mounting body"
+      "Fixed end face",
+      "End payload mass",
+      "Beam top face",
+      "Beam body"
     ]);
     expect(load).toMatchObject({
       type: "gravity",
       selectionRef: "selection-load-face",
       parameters: {
-        value: 0.2592,
+        value: 0.497664,
         units: "kg",
         direction: [0, 0, -1],
-        applicationPoint: [1.2, -1.34, 0],
+        applicationPoint: [1.48, 0.56, 0],
         payloadMaterialId: "payload-aluminum-6061",
-        payloadVolumeM3: 0.000096,
+        payloadVolumeM3: 0.00018432,
         payloadMassMode: "material",
         payloadObject: {
           id: "payload-display-plate",
-          label: "hanging payload mass",
-          center: [1.2, -1.34, 0],
-          volumeM3: 0.000096,
+          label: "end payload mass",
+          center: [1.48, 0.56, 0],
+          volumeM3: 0.00018432,
           volumeSource: "bounds-fallback",
           volumeStatus: "estimated"
         }

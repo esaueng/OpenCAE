@@ -104,18 +104,18 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sa
   const isNativeCadImport = Boolean(geometry?.metadata.nativeCadImport);
   const faceCount = Number(geometry?.metadata.faceCount ?? 0);
   const bodyCount = Number(geometry?.metadata.bodyCount ?? 0);
-  const sampleLabel = sampleModel === "bracket" ? "Bracket Demo" : sampleModel === "plate" ? "Hook Demo" : "Cantilever Demo";
+  const sampleLabel = sampleModel === "bracket" ? "Bracket Demo" : sampleModel === "plate" ? "Beam Demo" : "Cantilever Demo";
   const sampleForceLabel = formatEquivalentForce(500, project.unitSystem);
-  const sampleSummaryVolumeMm3 = sampleModel === "plate" ? 96_000 : 41_280;
-  const sampleSummaryMassG = sampleModel === "plate" ? 259 : 111;
-  const sampleLoadTitle = sampleModel === "plate" ? `Payload mass · ${formatMass(0.2592, "kg", project.unitSystem)}` : `Force · ${sampleForceLabel}`;
+  const sampleSummaryVolumeMm3 = sampleModel === "plate" ? 184_320 : 41_280;
+  const sampleSummaryMassG = sampleModel === "plate" ? 498 : 111;
+  const sampleLoadTitle = sampleModel === "plate" ? `Payload mass · ${formatMass(0.497664, "kg", project.unitSystem)}` : `Force · ${sampleForceLabel}`;
   const orientation = getModelOrientation(displayModel);
   const hasCustomOrientation = orientation.x !== 0 || orientation.y !== 0 || orientation.z !== 0;
   const preconfigured =
     sampleModel === "bracket"
       ? { support: "2 mounting holes · flange", load: "top face · -Z direction", callout: "An L-bracket is bolted at the flange; a vertical load on the top face creates a peak stress at the inside corner, reduced by the gusset rib." }
       : sampleModel === "plate"
-        ? { support: "rear mounting face", load: "hanging payload mass · -Z direction", callout: "A wall hook is fixed at its mounting face and carries a suspended payload mass below the hook throat, concentrating stress around the curved bend." }
+        ? { support: "fixed end face", load: "end payload mass · -Z direction", callout: "A simple beam is fixed at one end and carries a payload mass sitting on the free end, producing bending stress along the span." }
         : { support: "fixed end face", load: "free end face · -Z direction", callout: "A cantilever beam is fixed at one end and loaded at the free end, producing bending stress along the beam span." };
 
   function handleLoadSampleClick() {
@@ -135,7 +135,7 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sa
           <div className="segmented" role="group" aria-label="Sample model">
             {(["bracket", "plate", "cantilever"] as const).map((sample) => (
               <button key={sample} className={sampleModel === sample ? "active" : ""} type="button" onClick={() => onSampleModelChange(sample)}>
-                {sample === "plate" ? "Hook" : capitalize(sample)}
+                {sample === "plate" ? "Beam" : capitalize(sample)}
               </button>
             ))}
           </div>
