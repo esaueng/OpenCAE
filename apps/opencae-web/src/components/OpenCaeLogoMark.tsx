@@ -1,0 +1,29 @@
+export function OpenCaeLogoMark({ className, title }: { className?: string; title?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 64 64" role={title ? "img" : undefined} aria-label={title} aria-hidden={title ? undefined : true}>
+      {title ? <title>{title}</title> : null}
+      <defs>
+        <linearGradient id="opencae-logo-bg" x1="10" y1="6" x2="54" y2="58" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stopColor="#111c33" />
+          <stop offset="1" stopColor="#06101d" />
+        </linearGradient>
+        <linearGradient id="opencae-logo-edge" x1="14" y1="13" x2="51" y2="52" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stopColor="#55d7ff" />
+          <stop offset="1" stopColor="#73f6d2" />
+        </linearGradient>
+      </defs>
+      <rect width="64" height="64" rx="13" fill="url(#opencae-logo-bg)" />
+      <path d="M32 10 52 21.5v23L32 56 12 44.5v-23L32 10Z" fill="none" stroke="url(#opencae-logo-edge)" strokeWidth="4" strokeLinejoin="round" />
+      <path d="M12 21.5 32 33l20-11.5M32 33v23M22 27v23M42 27v23M22 27l20 11.5M42 27 22 38.5" fill="none" stroke="url(#opencae-logo-edge)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+      <g fill="#7df46d" stroke="#b8ff9f" strokeWidth="1">
+        <circle cx="32" cy="10" r="4" />
+        <circle cx="12" cy="21.5" r="4" />
+        <circle cx="52" cy="21.5" r="4" />
+        <circle cx="32" cy="33" r="4" />
+        <circle cx="12" cy="44.5" r="4" />
+        <circle cx="52" cy="44.5" r="4" />
+        <circle cx="32" cy="56" r="4" />
+      </g>
+    </svg>
+  );
+}
