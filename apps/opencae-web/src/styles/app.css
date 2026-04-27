@@ -33,27 +33,6 @@ svg {
   pointer-events: none;
 }
 
-.start-top {
-  position: absolute;
-  top: 20px;
-  left: 24px;
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  color: var(--color-text-subtle);
-  font-family: var(--font-mono);
-  font-size: var(--fs-xs);
-  text-transform: lowercase;
-}
-
-.version-chip {
-  padding: 2px 7px;
-  color: var(--color-text-muted);
-  background: var(--color-surface);
-  border: var(--border-thin);
-  border-radius: var(--radius-sm);
-}
-
 .start-brand {
   position: relative;
   z-index: 1;
@@ -204,11 +183,15 @@ svg {
   bottom: 20px;
   left: 24px;
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
   gap: var(--sp-4);
   color: var(--color-text-subtle);
   font-family: var(--font-mono);
   font-size: var(--fs-mini);
+}
+
+.local-runtime {
+  color: var(--color-text-muted);
 }
 
 .start-footer a {

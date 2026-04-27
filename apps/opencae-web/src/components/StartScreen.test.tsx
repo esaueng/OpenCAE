@@ -11,5 +11,8 @@ describe("StartScreen", () => {
     expect(html).toContain('href="https://esauengineering.com/"');
     expect(html).toContain("Built by Esau Engineering");
     expect(html).toContain('href="https://github.com/esaueng/OpenCAE"');
+    expect(html).toContain("Runs locally");
+    expect(html).not.toContain("v0.1.0-mvp");
+    expect(html).not.toContain("local mode");
   });
 });

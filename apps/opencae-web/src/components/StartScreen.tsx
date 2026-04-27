@@ -26,10 +26,6 @@ export function StartScreen({ onLoadSample, onCreateProject, onOpenProject }: St
         }
       }}
     >
-      <div className="start-top">
-        <span className="version-chip">v0.1.0-mvp</span>
-        <span>local mode</span>
-      </div>
       <section className="start-brand" aria-labelledby="opencae-title">
         <OpenCaeLogoMark className="start-mark" title="OpenCAE mark" />
         <h1 id="opencae-title">OpenCAE</h1>
@@ -71,6 +67,7 @@ export function StartScreen({ onLoadSample, onCreateProject, onOpenProject }: St
         Built by Esau Engineering
       </a>
       <footer className="start-footer">
+        <span className="local-runtime">Runs locally</span>
         <a href="https://github.com/esaueng/OpenCAE" target="_blank" rel="noreferrer">github</a>
       </footer>
     </main>
