@@ -189,11 +189,17 @@ img {
 }
 
 .local-runtime {
-  color: var(--color-text-muted);
+  color: inherit;
+}
+
+.start-footer > * {
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
 }
 
 .start-footer a {
-  color: inherit;
+  text-decoration-color: currentColor;
 }
 
 .start-github {
