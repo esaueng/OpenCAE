@@ -58,11 +58,11 @@ describe("app CSS", () => {
     expect(cssRule(".panel-section h2")).toMatch(/color:\s*var\(--color-text\)/);
   });
 
-  test("anchors the start screen logo to the grid center", () => {
+  test("places the start screen logo on the grid rhythm above center", () => {
     const startBrand = cssRule(".start-brand");
 
     expect(startBrand).toMatch(/position:\s*absolute/);
-    expect(startBrand).toMatch(/top:\s*50%/);
+    expect(startBrand).toMatch(/top:\s*calc\(50%\s*-\s*126px\)/);
     expect(startBrand).toMatch(/transform:\s*translate\(-50%,\s*-28px\)/);
   });
 

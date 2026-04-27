@@ -37,7 +37,7 @@ img {
 .start-brand {
   position: absolute;
   z-index: 1;
-  top: 50%;
+  top: calc(50% - 126px);
   left: 50%;
   width: min(340px, 100%);
   display: flex;
