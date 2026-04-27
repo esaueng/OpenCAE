@@ -1,5 +1,5 @@
 import type { Project, Study } from "@opencae/schema";
-import { Activity, Anchor, Box, FileText, FlaskConical, Github, Layers3, MessageSquare, PanelLeftClose, PanelLeftOpen, Play, Weight } from "lucide-react";
+import { Activity, Anchor, Atom, Box, FileText, Github, Layers3, MessageSquare, PanelLeftClose, PanelLeftOpen, Play, Weight } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { canNavigateToStep } from "../appShellState";
 import type { UnitSystem } from "../unitDisplay";
@@ -19,7 +19,7 @@ interface StepBarProps {
 
 const steps: ReadonlyArray<{ id: StepId; label: string; Icon: LucideIcon }> = [
   { id: "model", label: "Model", Icon: Box },
-  { id: "material", label: "Material", Icon: FlaskConical },
+  { id: "material", label: "Material", Icon: Atom },
   { id: "supports", label: "Supports", Icon: Anchor },
   { id: "loads", label: "Loads", Icon: Weight },
   { id: "mesh", label: "Mesh", Icon: Layers3 },

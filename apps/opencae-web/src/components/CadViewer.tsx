@@ -107,6 +107,7 @@ export function CadViewer(props: CadViewerProps) {
   const [gizmoViewRequest, setGizmoViewRequest] = useState<{ axis: RotationAxis | null; signal: number }>({ axis: null, signal: 0 });
   const [gizmoRotationRequest, setGizmoRotationRequest] = useState<{ axis: RotationAxis | null; signal: number }>({ axis: null, signal: 0 });
   const effectiveViewMode: ViewMode = props.activeStep === "results" ? props.viewMode : props.viewMode === "mesh" ? "mesh" : "model";
+  const showDimensionOverlay = shouldShowDimensionOverlay(props.showDimensions, effectiveViewMode);
   const isLightTheme = props.themeMode === "light";
   const viewportBackground = isLightTheme ? "#f7f9fc" : "#070b10";
   const gridCellColor = isLightTheme ? "#d9e0ea" : "#263140";
@@ -128,7 +129,7 @@ export function CadViewer(props: CadViewerProps) {
           <group rotation={modelRotation}>
             <group rotation={baseModelRotation}>
               <BracketModel {...props} viewMode={effectiveViewMode} uploadedPreviewBounds={uploadedPreviewBounds} onUploadedPreviewBounds={setUploadedPreviewBounds} />
-              {props.showDimensions && <ModelDimensionOverlay displayModel={props.displayModel} uploadedPreviewBounds={uploadedPreviewBounds} />}
+              {showDimensionOverlay && <ModelDimensionOverlay displayModel={props.displayModel} uploadedPreviewBounds={uploadedPreviewBounds} />}
             </group>
           </group>
           <BoundsCameraReset signal={props.fitSignal} viewAxis={props.viewAxis} viewAxisSignal={props.viewAxisSignal} />
@@ -478,6 +479,10 @@ function BracketModel({
 
 export function shouldShowModelHitLabel(viewMode: ViewMode, hasActiveHit: boolean, suppressForDraftLoadPreview = false) {
   return hasActiveHit && viewMode !== "results" && !suppressForDraftLoadPreview;
+}
+
+export function shouldShowDimensionOverlay(showDimensions: boolean, viewMode: ViewMode) {
+  return showDimensions && viewMode !== "results";
 }
 
 export function payloadHighlightObjectId(payloadObjectSelectionMode: boolean, payloadObject: PayloadObjectSelection | null | undefined) {

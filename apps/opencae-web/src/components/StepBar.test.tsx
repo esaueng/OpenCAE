@@ -60,4 +60,21 @@ describe("StepBar", () => {
     expect(css).not.toContain(".stepbar.collapsed .stepbar-footer,\n.stepbar.collapsed .step > span:not(.step-icon)");
     expect(css).toMatch(/\.stepbar\.collapsed\s+\.stepbar-footer\s*\{[\s\S]*?display:\s*grid;/);
   });
+
+  test("uses an atom icon for the material step", () => {
+    const html = renderToStaticMarkup(
+      <StepBar
+        activeStep="material"
+        project={project}
+        study={study}
+        hasResults={false}
+        collapsed={false}
+        onSelect={vi.fn()}
+        onToggleCollapsed={vi.fn()}
+        onUnitSystemChange={vi.fn()}
+      />
+    );
+
+    expect(html).toMatch(/lucide-atom[\s\S]*Material/);
+  });
 });
