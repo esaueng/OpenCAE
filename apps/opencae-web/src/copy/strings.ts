@@ -59,7 +59,6 @@ export const COPY = {
       mesh: 'Mesh',
       run: 'Run',
       results: 'Results',
-      report: 'Report',
     },
     footer: {
       study: { key: 'study', value: 'static' },
@@ -84,7 +83,7 @@ export const COPY = {
   // ─── Context panel — per step ───────────────────────────
   panels: {
     model: {
-      eyebrow: 'Step 1 of 8',
+      eyebrow: 'Step 1 of 7',
       title: 'Model',
       guidance:
         'Inspect the 3D part. Orbit with left-drag, pan with right-drag, zoom with scroll.',
@@ -95,7 +94,7 @@ export const COPY = {
     },
 
     material: {
-      eyebrow: 'Step 2 of 8',
+      eyebrow: 'Step 2 of 7',
       title: 'Material',
       guidance: 'Choose what the part is made of.',
       librarySelect: 'Material library',
@@ -104,7 +103,7 @@ export const COPY = {
     },
 
     supports: {
-      eyebrow: 'Step 3 of 8',
+      eyebrow: 'Step 3 of 7',
       title: 'Supports',
       guidance: 'Choose where the part is held fixed. Select a face, then click add.',
       addFixedBtn: 'Add fixed support',
@@ -113,7 +112,7 @@ export const COPY = {
     },
 
     loads: {
-      eyebrow: 'Step 4 of 8',
+      eyebrow: 'Step 4 of 7',
       title: 'Loads',
       guidance: 'Choose where force or pressure is applied. Select a face, then add a load.',
       typeLabel: 'Load type',
@@ -124,7 +123,7 @@ export const COPY = {
     },
 
     mesh: {
-      eyebrow: 'Step 5 of 8',
+      eyebrow: 'Step 5 of 7',
       title: 'Mesh',
       guidance:
         'The mesh breaks the model into small pieces so OpenCAE can calculate results.',
@@ -137,7 +136,7 @@ export const COPY = {
     },
 
     run: {
-      eyebrow: 'Step 6 of 8',
+      eyebrow: 'Step 6 of 7',
       title: 'Run',
       guidance: 'Run the simulation to estimate stress and displacement.',
       readinessSection: 'Readiness',
@@ -161,7 +160,7 @@ export const COPY = {
     },
 
     results: {
-      eyebrow: 'Step 7 of 8',
+      eyebrow: 'Step 7 of 7',
       title: 'Results',
       guidance: 'View stress and displacement directly on the 3D model.',
       fieldLabel: 'Result field',
@@ -181,34 +180,8 @@ export const COPY = {
       displaySection: 'Display',
       undeformed: 'Undeformed',
       deformed: 'Deformed ×10',
-      reportBtn: 'Generate report',
       emptyState: 'Run the simulation first to see results here.',
       emptyCta: 'Go to run',
-    },
-
-    report: {
-      eyebrow: 'Step 8 of 8',
-      title: 'Report',
-      guidance: 'Generate a simple HTML report you can share.',
-      infoCard: {
-        format: 'Format',
-        formatValue: 'HTML · self-contained',
-        sections: 'Sections',
-        sectionsValue: '7',
-        output: 'Output',
-        outputValue: './data/reports',
-      },
-      generateBtn: 'Generate & download',
-      contentsSection: 'Contents',
-      contents: [
-        'Project & study',
-        'Material & boundary conditions',
-        'Mesh summary',
-        'Stress field & max locations',
-        'Displacement field',
-        'Reaction forces',
-        'Diagnostics',
-      ],
     },
   },
 
@@ -254,7 +227,6 @@ export const COPY = {
     meshStarting: (preset: string) => `Starting mesh generation · preset=${preset}`,
     meshGenerated: (nodes: number, elements: number) =>
       `Mesh generated: ${nodes.toLocaleString()} nodes, ${elements.toLocaleString()} tetra elements`,
-    reportWritten: (path: string) => `Report written to ${path}`,
   },
 
   // ─── Solver log messages (engineering register) ─────────

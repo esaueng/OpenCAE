@@ -1,10 +1,10 @@
 import type { Project, Study } from "@opencae/schema";
-import { Activity, Anchor, Atom, Box, FileText, Github, Layers3, MessageSquare, PanelLeftClose, PanelLeftOpen, Play, Weight } from "lucide-react";
+import { Activity, Anchor, Atom, Box, Github, Layers3, MessageSquare, PanelLeftClose, PanelLeftOpen, Play, Weight } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { canNavigateToStep } from "../appShellState";
 import type { UnitSystem } from "../unitDisplay";
 
-export type StepId = "model" | "material" | "supports" | "loads" | "mesh" | "run" | "results" | "report";
+export type StepId = "model" | "material" | "supports" | "loads" | "mesh" | "run" | "results";
 
 interface StepBarProps {
   activeStep: StepId;
@@ -24,8 +24,7 @@ const steps: ReadonlyArray<{ id: StepId; label: string; Icon: LucideIcon }> = [
   { id: "loads", label: "Loads", Icon: Weight },
   { id: "mesh", label: "Mesh", Icon: Layers3 },
   { id: "run", label: "Run", Icon: Play },
-  { id: "results", label: "Results", Icon: Activity },
-  { id: "report", label: "Report", Icon: FileText }
+  { id: "results", label: "Results", Icon: Activity }
 ] as const;
 
 export function StepBar({ activeStep, project, study, hasResults, collapsed, onSelect, onToggleCollapsed, onUnitSystemChange }: StepBarProps) {
@@ -36,8 +35,7 @@ export function StepBar({ activeStep, project, study, hasResults, collapsed, onS
     loads: study.loads.length > 0,
     mesh: study.meshSettings.status === "complete",
     run: hasResults || study.runs.some((run) => run.status === "complete"),
-    results: hasResults || study.runs.some((run) => run.status === "complete"),
-    report: study.runs.some((run) => Boolean(run.reportRef))
+    results: hasResults || study.runs.some((run) => run.status === "complete")
   };
 
   const unitShort = project.unitSystem === "SI" ? "mm" : "in";

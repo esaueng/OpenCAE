@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { describe, expect, test } from "vitest";
-import { VIEWER_GIZMO_ALIGNMENT, axisLabelToViewAxis, cameraViewForAxis, colorizeResultObject, displayedLegendTickLabels, legendTickLabels, payloadHighlightObjectId, printLayerVisualizationForBounds, rotatedCameraOrbit, shouldShowDimensionOverlay, shouldShowModelHitLabel } from "./CadViewer";
+import { VIEWER_GIZMO_ALIGNMENT, axisLabelToViewAxis, cameraDistanceForBounds, cameraViewForAxis, colorizeResultObject, displayedLegendTickLabels, legendTickLabels, payloadHighlightObjectId, printLayerVisualizationForBounds, rotatedCameraOrbit, shouldShowDimensionOverlay, shouldShowModelHitLabel } from "./CadViewer";
 import type { FaceResultSample } from "../resultFields";
 
 const samples: FaceResultSample[] = [
@@ -49,6 +49,20 @@ describe("CadViewer result coloring", () => {
     expect(rotated.position.y).toBeCloseTo(1);
     expect(rotated.position.z).toBeCloseTo(0);
     expect(rotated.up.toArray()).toEqual([0, 0, 1]);
+  });
+
+  test("fits camera distance to the projected bounds width", () => {
+    const bounds = new THREE.Box3(new THREE.Vector3(-5, -0.5, -0.5), new THREE.Vector3(5, 0.5, 0.5));
+    const distance = cameraDistanceForBounds(
+      bounds,
+      new THREE.Vector3(0, 0, 1),
+      new THREE.Vector3(0, 1, 0),
+      42,
+      1,
+      1.2
+    );
+
+    expect(distance).toBeCloseTo((5 / Math.tan(THREE.MathUtils.degToRad(21))) * 1.2);
   });
 
   test("hides face selection callouts in result view", () => {

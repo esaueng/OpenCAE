@@ -102,8 +102,6 @@ function renderPanel(activeStep: StepId, overrides: Partial<Parameters<typeof Ri
       onRunSimulation={vi.fn()}
       canRunSimulation={false}
       missingRunItems={[]}
-      canGenerateReport={false}
-      onGenerateReport={vi.fn()}
       onStepSelect={vi.fn()}
       {...overrides}
     />
@@ -119,14 +117,20 @@ describe("RightPanel payload mass controls", () => {
       { id: "loads", title: "Loads", step: 4 },
       { id: "mesh", title: "Mesh", step: 5 },
       { id: "run", title: "Run", step: 6 },
-      { id: "results", title: "Results", step: 7 },
-      { id: "report", title: "Report", step: 8 }
+      { id: "results", title: "Results", step: 7 }
     ];
 
     for (const item of steps) {
       const html = renderPanel(item.id);
-      expect(html).toContain(`<div class="panel-title-row"><h2>${item.title}</h2><div class="panel-eyebrow">Step ${item.step} of 8</div></div>`);
+      expect(html).toContain(`<div class="panel-title-row"><h2>${item.title}</h2><div class="panel-eyebrow">Step ${item.step} of 7</div></div>`);
     }
+  });
+
+  test("does not expose report generation from the results panel", () => {
+    const html = renderPanel("results");
+
+    expect(html).not.toContain("Generate report");
+    expect(html).not.toContain("Report");
   });
 
   test("shows contextual weak X build yield on cantilever material previews", () => {
@@ -204,8 +208,6 @@ describe("RightPanel payload mass controls", () => {
         onRunSimulation={vi.fn()}
         canRunSimulation={false}
         missingRunItems={[]}
-        canGenerateReport={false}
-        onGenerateReport={vi.fn()}
         onStepSelect={vi.fn()}
       />
     );
@@ -263,8 +265,6 @@ describe("RightPanel payload mass controls", () => {
         onRunSimulation={vi.fn()}
         canRunSimulation={false}
         missingRunItems={[]}
-        canGenerateReport={false}
-        onGenerateReport={vi.fn()}
         onStepSelect={vi.fn()}
       />
     );
@@ -323,8 +323,6 @@ describe("RightPanel payload mass controls", () => {
           onRunSimulation={vi.fn()}
           canRunSimulation={false}
           missingRunItems={[]}
-          canGenerateReport={false}
-          onGenerateReport={vi.fn()}
           onStepSelect={vi.fn()}
         />
       );
@@ -401,8 +399,6 @@ describe("RightPanel payload mass controls", () => {
         onRunSimulation={vi.fn()}
         canRunSimulation={false}
         missingRunItems={[]}
-        canGenerateReport={false}
-        onGenerateReport={vi.fn()}
         onStepSelect={vi.fn()}
       />
     );
@@ -474,8 +470,6 @@ describe("RightPanel payload mass controls", () => {
         onRunSimulation={vi.fn()}
         canRunSimulation={false}
         missingRunItems={[]}
-        canGenerateReport={false}
-        onGenerateReport={vi.fn()}
         onStepSelect={vi.fn()}
       />
     );
@@ -531,8 +525,6 @@ describe("RightPanel payload mass controls", () => {
         onRunSimulation={vi.fn()}
         canRunSimulation={false}
         missingRunItems={["Mesh generated"]}
-        canGenerateReport={false}
-        onGenerateReport={vi.fn()}
         onStepSelect={vi.fn()}
       />
     );

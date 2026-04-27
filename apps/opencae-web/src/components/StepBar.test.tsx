@@ -77,4 +77,22 @@ describe("StepBar", () => {
 
     expect(html).toMatch(/lucide-atom[\s\S]*Material/);
   });
+
+  test("does not render a report workflow step", () => {
+    const html = renderToStaticMarkup(
+      <StepBar
+        activeStep="results"
+        project={project}
+        study={study}
+        hasResults={false}
+        collapsed={false}
+        onSelect={vi.fn()}
+        onToggleCollapsed={vi.fn()}
+        onUnitSystemChange={vi.fn()}
+      />
+    );
+
+    expect(html).not.toContain("Report");
+    expect(html).not.toContain("lucide-file-text");
+  });
 });

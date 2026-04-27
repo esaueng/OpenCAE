@@ -97,12 +97,6 @@ export function App() {
     return parameters.printed ? parameters.layerOrientation ?? "z" : null;
   }, [study?.materialAssignments]);
   const printLayerOrientation = printLayerOrientationForViewer(assignedPrintLayerOrientation, previewPrintLayerOrientation);
-  const reportRunId = useMemo(() => {
-    if (completedRunId) return completedRunId;
-    if (runProgress >= 100 && activeRunId) return activeRunId;
-    return latestReportRunId(study, "");
-  }, [activeRunId, completedRunId, runProgress, study]);
-  const reportDownloadUrl = reportRunId ? `/api/runs/${reportRunId}/report.pdf` : project ? `/api/projects/${project.id}/report.pdf` : undefined;
   const selectedFace = useMemo(() => displayModel?.faces.find((face) => face.id === selectedFaceId) ?? null, [displayModel, selectedFaceId]);
   const displayUnitSystem = project?.unitSystem ?? "SI";
   const displayModelForUi = useMemo(() => displayModel ? displayModelForUnits(displayModel, displayUnitSystem) : null, [displayModel, displayUnitSystem]);
@@ -294,7 +288,7 @@ export function App() {
     if (response.results?.fields.length) {
       setResultSummary(response.results.summary);
       setResultFields(response.results.fields);
-      const restoredRunId = response.results.completedRunId ?? response.results.activeRunId ?? latestReportRunId(response.project.studies[0] ?? null, "") ?? "";
+      const restoredRunId = response.results.completedRunId ?? response.results.activeRunId ?? latestCompletedRunId(response.project.studies[0] ?? null, "") ?? "";
       setActiveRunId(response.results.activeRunId ?? restoredRunId);
       setCompletedRunId(restoredRunId);
       setRunProgress(100);
@@ -305,7 +299,7 @@ export function App() {
       setViewMode("model");
       setResultFields([]);
       setRunProgress(0);
-      const nextCompletedRunId = latestReportRunId(response.project.studies[0] ?? null, "") ?? "";
+      const nextCompletedRunId = latestCompletedRunId(response.project.studies[0] ?? null, "") ?? "";
       setActiveRunId(nextCompletedRunId);
       setCompletedRunId(nextCompletedRunId);
     }
@@ -550,14 +544,6 @@ export function App() {
     });
   }
 
-  function handleGenerateReport() {
-    if (!reportDownloadUrl) {
-      pushMessage("Run the simulation before generating a report.");
-      return;
-    }
-    pushMessage("PDF report download started.");
-  }
-
   function handleOpenStartMenu() {
     setHomeRequested(true);
   }
@@ -724,10 +710,6 @@ export function App() {
           onRunSimulation={handleRunSimulation}
           canRunSimulation={canRunSimulation}
           missingRunItems={missingRunItems}
-          canGenerateReport={Boolean(reportDownloadUrl)}
-          reportUrl={reportDownloadUrl}
-          reportFilename={`${project.name.replace(/[^\w.-]+/g, "-").replace(/^-+|-+$/g, "").toLowerCase() || "opencae"}-report.pdf`}
-          onGenerateReport={handleGenerateReport}
           onStepSelect={handleStepSelect}
         />
       </main>
@@ -776,10 +758,10 @@ function ProjectNameChip({ name, onRename }: { name: string; onRename: (name: st
   );
 }
 
-function latestReportRunId(study: Study | null, activeRunId: string): string | null {
+function latestCompletedRunId(study: Study | null, activeRunId: string): string | null {
   if (!study) return null;
-  if (study.runs.some((run) => run.id === activeRunId && (run.reportRef || run.resultRef || run.status === "complete"))) return activeRunId;
-  const completed = [...study.runs].reverse().find((run) => run.reportRef || run.resultRef || run.status === "complete");
+  if (study.runs.some((run) => run.id === activeRunId && (run.resultRef || run.status === "complete"))) return activeRunId;
+  const completed = [...study.runs].reverse().find((run) => run.resultRef || run.status === "complete");
   return completed?.id ?? null;
 }
 

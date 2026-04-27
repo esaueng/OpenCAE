@@ -5,8 +5,7 @@ export type SettingHelpVisual =
   | "load"
   | "mesh"
   | "support"
-  | "results"
-  | "report";
+  | "results";
 
 export type SettingHelpId =
   | "sampleModel"
@@ -30,8 +29,7 @@ export type SettingHelpId =
   | "resultMode"
   | "stressExaggeration"
   | "deformedShape"
-  | "targetSafetyFactor"
-  | "reportOutput";
+  | "targetSafetyFactor";
 
 export interface SettingHelp {
   title: string;
@@ -127,7 +125,7 @@ export const SETTING_HELP: Record<SettingHelpId, SettingHelp> = {
   },
   solver: {
     title: "Solver",
-    body: "Shows the local solver backend and progress. Results are estimates from the local static solver, not a certified finite-element report.",
+    body: "Shows the local solver backend and progress. Results are estimates from the local static solver, not a certified finite-element analysis.",
     visual: "results"
   },
   resultMode: {
@@ -149,11 +147,6 @@ export const SETTING_HELP: Record<SettingHelpId, SettingHelp> = {
     title: "Target safety factor",
     body: "Reverse-checks the current result to estimate the maximum load for the safety factor you want. Higher targets allow less load.",
     visual: "results"
-  },
-  reportOutput: {
-    title: "Report output",
-    body: "Generates a downloadable report with model setup, material data, boundary conditions, result values, and the current simulation summary.",
-    visual: "report"
   }
 };
 
