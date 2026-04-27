@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { shouldShowModelHitLabel, supportMarkerAnchor } from "./CadViewer";
+import { hookPayloadSelectionForTarget, shouldShowModelHitLabel, supportMarkerAnchor } from "./CadViewer";
 
 describe("CadViewer callouts", () => {
   test("uses the real cantilever fixed face as the support callout anchor", () => {
@@ -21,5 +21,17 @@ describe("CadViewer callouts", () => {
     expect(shouldShowModelHitLabel("model", true, false)).toBe(true);
     expect(shouldShowModelHitLabel("model", true, true)).toBe(false);
     expect(shouldShowModelHitLabel("results", true, false)).toBe(false);
+  });
+
+  test("selects the visible hook payload mass as the payload object", () => {
+    expect(hookPayloadSelectionForTarget("payload-display-plate")).toEqual({
+      id: "payload-display-plate",
+      label: "hanging payload mass",
+      center: [1.2, -1.34, 0],
+      volumeM3: 0.000096,
+      volumeSource: "bounds-fallback",
+      volumeStatus: "estimated"
+    });
+    expect(hookPayloadSelectionForTarget("hook-arm")).toBeNull();
   });
 });

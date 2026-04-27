@@ -76,7 +76,12 @@ interface CadViewerProps {
 
 const BRACKET_DEPTH = 1.1;
 const RIB_DEPTH = 0.38;
-const PLATE_DEPTH = 0.32;
+const HOOK_DEPTH = 0.34;
+const PLATE_DEPTH = HOOK_DEPTH;
+const HOOK_PAYLOAD_OBJECT_ID = "payload-display-plate";
+const HOOK_PAYLOAD_LABEL = "hanging payload mass";
+const HOOK_PAYLOAD_CENTER: [number, number, number] = [1.2, -1.34, 0];
+const HOOK_PAYLOAD_VOLUME_M3 = 0.000096;
 const WORLD_UP = new THREE.Vector3(0, 0, 1);
 const ISO_CAMERA_DIRECTION = new THREE.Vector3(1, -1, 1).normalize();
 const ISO_CAMERA_UP = WORLD_UP.clone().projectOnPlane(ISO_CAMERA_DIRECTION).normalize();
@@ -511,7 +516,7 @@ function dimensionBoundsForDisplayModel(displayModel: DisplayModel) {
   const kind = modelKindForDisplayModel(displayModel);
   if (kind === "blank") return null;
   if (kind === "plate") {
-    return new THREE.Box3(new THREE.Vector3(-1.9, -0.75, -PLATE_DEPTH / 2), new THREE.Vector3(1.9, 0.75, PLATE_DEPTH / 2));
+    return new THREE.Box3(new THREE.Vector3(-1.52, -1.56, -0.28), new THREE.Vector3(1.54, 0.82, 0.28));
   }
   if (kind === "cantilever") {
     return new THREE.Box3(new THREE.Vector3(-1.9, -0.07, -0.36), new THREE.Vector3(1.9, 0.43, 0.36));
@@ -548,6 +553,18 @@ function loadMarkerAnchor(marker: ViewerLoadMarker, face: DisplayFace): [number,
 export function supportMarkerAnchor(kind: SampleModelKind, marker: ViewerSupportMarker, face: DisplayFace): [number, number, number] {
   if (kind === "bracket" && marker.faceId === "face-base-left") return [0.72, 0, BRACKET_DEPTH / 2 + 0.065];
   return face.center;
+}
+
+export function hookPayloadSelectionForTarget(targetId: unknown): PayloadObjectSelection | null {
+  if (targetId !== HOOK_PAYLOAD_OBJECT_ID) return null;
+  return {
+    id: HOOK_PAYLOAD_OBJECT_ID,
+    label: HOOK_PAYLOAD_LABEL,
+    center: HOOK_PAYLOAD_CENTER,
+    volumeM3: HOOK_PAYLOAD_VOLUME_M3,
+    volumeSource: "bounds-fallback",
+    volumeStatus: "estimated"
+  };
 }
 
 function formatDimensionLabel(value: number, units: string) {
@@ -709,6 +726,10 @@ function uploadedFaceHitFromEvent(event: ThreeEvent<PointerEvent> | ThreeEvent<M
 }
 
 function payloadObjectFromEvent(event: ThreeEvent<PointerEvent> | ThreeEvent<MouseEvent>, displayModel: DisplayModel, kind: SampleModelKind, face: DisplayFace): PayloadObjectSelection {
+  if (kind === "plate") {
+    const payloadObject = hookPayloadSelectionForTarget(payloadObjectTargetFor(event.object).userData.opencaeObjectId);
+    if (payloadObject) return payloadObject;
+  }
   if (kind !== "uploaded") {
     const volumeM3 = fallbackDisplayModelVolumeM3(displayModel);
     return {
@@ -825,7 +846,7 @@ function SampleSolid({
       />
     );
   }
-  if (kind === "plate") return <PlateSolid color={color} pickHandlers={pickHandlers} />;
+  if (kind === "plate") return <HookSolid color={color} pickHandlers={pickHandlers} />;
   if (kind === "cantilever") return <CantileverSolid color={color} pickHandlers={pickHandlers} />;
   return <BracketSolid color={color} pickHandlers={pickHandlers} />;
 }
@@ -849,14 +870,25 @@ function BracketSolid({ color, pickHandlers }: { color: string; pickHandlers?: M
   );
 }
 
-function PlateSolid({ color, pickHandlers }: { color: string; pickHandlers?: ModelPickHandlers }) {
-  const plateGeometry = useMemo(() => createPlateGeometry(), []);
+function HookSolid({ color, pickHandlers }: { color: string; pickHandlers?: ModelPickHandlers }) {
+  const mountGeometry = useMemo(() => createHookMountGeometry(), []);
+  const armGeometry = useMemo(() => createHookArmGeometry(), []);
+  const payloadGeometry = useMemo(() => createHookPayloadGeometry(), []);
   return (
-    <mesh {...pickHandlers}>
-      <primitive attach="geometry" object={plateGeometry} />
-      <meshStandardMaterial color={color} metalness={0.2} roughness={0.5} />
-      <Edges color="#c8d3df" threshold={15} />
-    </mesh>
+    <group {...pickHandlers}>
+      <mesh geometry={mountGeometry}>
+        <meshStandardMaterial color={color} metalness={0.22} roughness={0.5} />
+        <Edges color="#c8d3df" threshold={15} />
+      </mesh>
+      <mesh geometry={armGeometry}>
+        <meshStandardMaterial color="#aebdcc" metalness={0.24} roughness={0.46} />
+        <Edges color="#d6e0ea" threshold={18} />
+      </mesh>
+      <mesh geometry={payloadGeometry} userData={{ opencaeObjectId: HOOK_PAYLOAD_OBJECT_ID, opencaeObjectLabel: HOOK_PAYLOAD_LABEL }}>
+        <meshStandardMaterial color="#8f9aa5" metalness={0.12} roughness={0.58} />
+        <Edges color="#d1d8df" threshold={15} />
+      </mesh>
+    </group>
   );
 }
 
@@ -1305,20 +1337,35 @@ function SampleResultSolid({
   stressExaggeration: number;
   loadMarkers: ViewerLoadMarker[];
 }) {
-  const plateGeometry = useMemo(
-    () => colorizeResultGeometry(createPlateGeometry(), kind, resultMode, showDeformed, stressExaggeration, samples, loadMarkers),
+  const hookMountGeometry = useMemo(
+    () => colorizeResultGeometry(createHookMountGeometry(), kind, resultMode, showDeformed, stressExaggeration, samples, loadMarkers),
     [kind, loadMarkers, resultMode, samples, showDeformed, stressExaggeration]
   );
+  const hookArmGeometry = useMemo(
+    () => colorizeResultGeometry(createHookArmGeometry(), kind, resultMode, showDeformed, stressExaggeration, samples, loadMarkers),
+    [kind, loadMarkers, resultMode, samples, showDeformed, stressExaggeration]
+  );
+  const hookPayloadGeometry = useMemo(() => createHookPayloadGeometry(), []);
   const cantileverGeometry = useMemo(
     () => colorizeResultGeometry(new THREE.BoxGeometry(3.8, 0.5, 0.72, 40, 8, 8), kind, resultMode, showDeformed, stressExaggeration, samples, loadMarkers),
     [kind, loadMarkers, resultMode, samples, showDeformed, stressExaggeration]
   );
   if (kind === "plate") {
     return (
-      <mesh geometry={plateGeometry}>
-        <meshStandardMaterial vertexColors metalness={0.18} roughness={0.52} side={THREE.DoubleSide} />
-        <Edges color="#43556a" threshold={18} />
-      </mesh>
+      <group>
+        <mesh geometry={hookMountGeometry}>
+          <meshStandardMaterial vertexColors metalness={0.18} roughness={0.52} side={THREE.DoubleSide} />
+          <Edges color="#43556a" threshold={18} />
+        </mesh>
+        <mesh geometry={hookArmGeometry}>
+          <meshStandardMaterial vertexColors metalness={0.2} roughness={0.48} side={THREE.DoubleSide} />
+          <Edges color="#43556a" threshold={18} />
+        </mesh>
+        <mesh geometry={hookPayloadGeometry}>
+          <meshStandardMaterial color={RESULT_PAYLOAD_MATERIAL_COLOR} metalness={0.12} roughness={0.58} />
+          <Edges color="#596472" threshold={18} />
+        </mesh>
+      </group>
     );
   }
   if (kind === "cantilever") {
@@ -1557,10 +1604,10 @@ function deformedPointForKind(kind: SampleModelKind, point: THREE.Vector3, stres
   const next = point.clone();
   const scale = 0.08 + Math.max(0, stressExaggeration - 1) * 0.12;
   if (kind === "plate") {
-    const span = Math.max(0, Math.min(1, (point.x + 1.9) / 3.8));
-    const holeInfluence = gaussian2d(point.x, point.y, 0, 0, 0.58, 0.58);
-    next.y -= scale * span * span;
-    next.z += scale * 0.52 * span * (point.y >= 0 ? 1 : -1) + holeInfluence * scale * 0.18;
+    const reach = Math.max(0, Math.min(1, (point.x + 1.35) / 2.6));
+    const throatInfluence = gaussian2d(point.x, point.y, 0.72, -0.48, 0.5, 0.42);
+    next.y -= scale * 0.85 * reach * reach;
+    next.z += scale * 0.28 * reach * (point.z >= 0 ? 1 : -1) + throatInfluence * scale * 0.12;
   } else if (kind === "cantilever") {
     const span = Math.max(0, Math.min(1, (point.x + 1.9) / 3.8));
     next.y -= scale * 1.15 * span * span;
@@ -1614,10 +1661,10 @@ function resultSampleSpan(samples: FaceResultSample[]): number {
 
 function stressFractionForPoint(kind: SampleModelKind, point: THREE.Vector3) {
   if (kind === "plate") {
-    const hole = gaussian2d(point.x, point.y, 0.02, 0.31, 0.54, 0.34);
-    const clamp = gaussian2d(point.x, point.y, -1.55, 0, 0.42, 0.76);
-    const load = gaussian2d(point.x, point.y, 1.42, 0, 0.48, 0.46);
-    return Math.max(0, Math.min(1, 0.12 + hole * 0.72 + clamp * 0.26 + load * 0.22));
+    const throat = gaussian2d(point.x, point.y, 0.72, -0.48, 0.44, 0.38);
+    const mount = gaussian2d(point.x, point.y, -0.92, 0.16, 0.48, 0.72);
+    const payload = gaussian2d(point.x, point.y, HOOK_PAYLOAD_CENTER[0], HOOK_PAYLOAD_CENTER[1], 0.42, 0.32);
+    return Math.max(0, Math.min(1, 0.12 + throat * 0.72 + mount * 0.28 + payload * 0.18));
   }
   if (kind === "cantilever") {
     const fixedEnd = gaussian2d(point.x, point.y, -1.8, 0, 0.38, 0.42);
@@ -1629,7 +1676,7 @@ function stressFractionForPoint(kind: SampleModelKind, point: THREE.Vector3) {
 }
 
 function displacementFractionForPoint(kind: SampleModelKind, point: THREE.Vector3) {
-  if (kind === "plate") return Math.max(0, Math.min(1, 0.12 + ((point.x + 1.9) / 3.8) * 0.82));
+  if (kind === "plate") return Math.max(0, Math.min(1, 0.08 + ((point.x + 1.35) / 2.6) * 0.62 + Math.max(0, -point.y - 0.25) * 0.22));
   if (kind === "cantilever") return Math.max(0, Math.min(1, 0.05 + ((point.x + 1.9) / 3.8) * 0.9));
   return 0.45;
 }
@@ -1845,32 +1892,32 @@ function createBracketShape() {
   return shape;
 }
 
-function createPlateGeometry() {
-  const geometry = new THREE.ExtrudeGeometry(createPlateShape(), {
-    depth: PLATE_DEPTH,
-    bevelEnabled: true,
-    bevelThickness: 0.01,
-    bevelSize: 0.01,
-    bevelSegments: 2,
-    curveSegments: 64
-  });
-  geometry.translate(0, 0, -PLATE_DEPTH / 2);
+function createHookMountGeometry() {
+  const geometry = new THREE.BoxGeometry(0.58, 1.42, HOOK_DEPTH, 8, 18, 6);
+  geometry.translate(-1.18, 0.1, 0);
   geometry.computeVertexNormals();
   return geometry;
 }
 
-function createPlateShape() {
-  const shape = new THREE.Shape();
-  shape.moveTo(-1.9, -0.75);
-  shape.lineTo(1.9, -0.75);
-  shape.lineTo(1.9, 0.75);
-  shape.lineTo(-1.9, 0.75);
-  shape.closePath();
+function createHookArmGeometry() {
+  const curve = new THREE.CatmullRomCurve3([
+    new THREE.Vector3(-0.9, 0.22, 0),
+    new THREE.Vector3(-0.28, 0.18, 0),
+    new THREE.Vector3(0.5, -0.1, 0),
+    new THREE.Vector3(1.02, -0.58, 0),
+    new THREE.Vector3(1.2, -1.02, 0),
+    new THREE.Vector3(0.88, -1.08, 0)
+  ]);
+  const geometry = new THREE.TubeGeometry(curve, 72, 0.105, 20, false);
+  geometry.computeVertexNormals();
+  return geometry;
+}
 
-  const hole = new THREE.Path();
-  hole.absellipse(0, 0, 0.3, 0.3, 0, Math.PI * 2, true);
-  shape.holes.push(hole);
-  return shape;
+function createHookPayloadGeometry() {
+  const geometry = new THREE.BoxGeometry(0.58, 0.38, 0.44, 8, 6, 8);
+  geometry.translate(...HOOK_PAYLOAD_CENTER);
+  geometry.computeVertexNormals();
+  return geometry;
 }
 
 function createRibGeometry() {
@@ -1924,9 +1971,9 @@ function resultProbesForKind(kind: SampleModelKind, faces: DisplayFace[], result
   const labels = resultProbeLabels(resultMode, resultFields, unitSystem);
   if (kind === "plate") {
     return [
-      { label: labels.max, anchor: [0.08, 0.3, PLATE_DEPTH / 2 + 0.07], labelPosition: [-0.55, 0.78, 0.62], tone: "max" },
-      { label: labels.mid, anchor: [-1.46, 0, PLATE_DEPTH / 2 + 0.06], labelPosition: [-1.1, -0.62, 0.58], tone: "mid" },
-      { label: labels.min, anchor: [1.72, -0.48, PLATE_DEPTH / 2 + 0.06], labelPosition: [1.22, -0.96, 0.58], tone: "min" }
+      { label: labels.max, anchor: [0.72, -0.48, 0.18], labelPosition: [0.18, -0.86, 0.74], tone: "max" },
+      { label: labels.mid, anchor: [-1.16, 0.54, 0.2], labelPosition: [-0.62, 0.92, 0.72], tone: "mid" },
+      { label: labels.min, anchor: [1.2, -1.34, 0.26], labelPosition: [1.56, -1.06, 0.74], tone: "min" }
     ];
   }
   if (kind === "cantilever") {
@@ -2127,6 +2174,10 @@ function supportLabel(marker: ViewerSupportMarker) {
   return marker.displayLabel;
 }
 
+export function legendTickLabels(minValue: number, maxValue: number) {
+  return [0, 0.25, 0.5, 0.75, 1].map((tick) => formatResultValue(minValue + (maxValue - minValue) * tick));
+}
+
 function ResultLegend({ resultMode, resultFields, unitSystem }: { resultMode: ResultMode; resultFields: ResultField[]; unitSystem: UnitSystem }) {
   const title = resultMode === "stress" ? "Von Mises Stress" : resultMode === "displacement" ? "Displacement" : "Safety Factor";
   const field = resultFields.find((candidate) => candidate.type === resultMode && candidate.location === "face");
@@ -2135,9 +2186,7 @@ function ResultLegend({ resultMode, resultFields, unitSystem }: { resultMode: Re
   const unit = field?.units ?? fallbackMax.units;
   const minValue = field?.min ?? fallbackMin.value;
   const maxValue = field?.max ?? fallbackMax.value;
-  const ticks = [0, 0.25, 0.5, 0.75, 1].map((tick) => formatResultValue(minValue + (maxValue - minValue) * tick));
-  const min = `${ticks[0]} Min`;
-  const max = `${ticks[4]} Max`;
+  const ticks = legendTickLabels(minValue, maxValue);
   return (
     <div className={`analysis-legend ${resultMode === "safety_factor" ? "safety-scale" : ""}`}>
       <strong>Nodes: 42,381</strong>
@@ -2146,11 +2195,15 @@ function ResultLegend({ resultMode, resultFields, unitSystem }: { resultMode: Re
       <span>Unit: {unit || "ratio"}</span>
       <div className="legend-scale" />
       <div className="legend-values">
-        <span>{min}</span>
+        <span>{ticks[0]}</span>
         <span>{ticks[1]}</span>
         <span>{ticks[2]}</span>
         <span>{ticks[3]}</span>
-        <span>{max}</span>
+        <span>{ticks[4]}</span>
+      </div>
+      <div className="legend-extrema">
+        <span>Min</span>
+        <span>Max</span>
       </div>
     </div>
   );
@@ -2292,10 +2345,14 @@ function HoleRims({ kind }: { kind: SampleModelKind }) {
   if (kind === "blank") return null;
   if (kind === "plate") {
     return (
-      <mesh position={[0, 0, PLATE_DEPTH / 2 + 0.025]}>
-        <torusGeometry args={[0.31, 0.028, 12, 72]} />
-        <meshStandardMaterial color="#b9c8d8" roughness={0.3} metalness={0.6} />
-      </mesh>
+      <group>
+        {[-0.36, 0.56].map((y) => (
+          <mesh key={y} position={[-1.18, y, HOOK_DEPTH / 2 + 0.025]}>
+            <torusGeometry args={[0.13, 0.018, 12, 48]} />
+            <meshStandardMaterial color="#c4d0dc" roughness={0.32} metalness={0.52} />
+          </mesh>
+        ))}
+      </group>
     );
   }
 
@@ -2322,15 +2379,20 @@ function SupportBurst({ radius, active = false }: { radius: number; active?: boo
 function MeshOverlay({ kind }: { kind: SampleModelKind }) {
   const bodyGeometry = useMemo(() => createBracketBodyGeometry(), []);
   const ribGeometry = useMemo(() => createRibGeometry(), []);
-  const plateGeometry = useMemo(() => createPlateGeometry(), []);
+  const hookMountGeometry = useMemo(() => createHookMountGeometry(), []);
+  const hookArmGeometry = useMemo(() => createHookArmGeometry(), []);
+  const hookPayloadGeometry = useMemo(() => createHookPayloadGeometry(), []);
   if (kind === "blank") return null;
 
   if (kind === "plate") {
     return (
-      <mesh>
-        <primitive attach="geometry" object={plateGeometry} />
-        <meshBasicMaterial color="#9ad1ff" wireframe transparent opacity={0.3} />
-      </mesh>
+      <group>
+        {[hookMountGeometry, hookArmGeometry, hookPayloadGeometry].map((geometry, index) => (
+          <mesh key={index} geometry={geometry}>
+            <meshBasicMaterial color="#9ad1ff" wireframe transparent opacity={0.3} />
+          </mesh>
+        ))}
+      </group>
     );
   }
 

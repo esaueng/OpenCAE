@@ -104,7 +104,7 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sa
   const isNativeCadImport = Boolean(geometry?.metadata.nativeCadImport);
   const faceCount = Number(geometry?.metadata.faceCount ?? 0);
   const bodyCount = Number(geometry?.metadata.bodyCount ?? 0);
-  const sampleLabel = sampleModel === "bracket" ? "Bracket Demo" : sampleModel === "plate" ? "Plate Demo" : "Cantilever Demo";
+  const sampleLabel = sampleModel === "bracket" ? "Bracket Demo" : sampleModel === "plate" ? "Hook Demo" : "Cantilever Demo";
   const sampleForceLabel = formatEquivalentForce(500, project.unitSystem);
   const orientation = getModelOrientation(displayModel);
   const hasCustomOrientation = orientation.x !== 0 || orientation.y !== 0 || orientation.z !== 0;
@@ -112,7 +112,7 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sa
     sampleModel === "bracket"
       ? { support: "2 mounting holes · flange", load: "top face · -Z direction", callout: "An L-bracket is bolted at the flange; a vertical load on the top face creates a peak stress at the inside corner, reduced by the gusset rib." }
       : sampleModel === "plate"
-        ? { support: "left clamp face", load: "payload mass on right pad · -Z direction", callout: "A flat plate is constrained on the left and carries payload mass on the opposite pad, with the central hole acting as the stress concentration." }
+        ? { support: "rear mounting face", load: "hanging payload mass · -Z direction", callout: "A wall hook is fixed at its mounting face and carries a suspended payload mass below the hook throat, concentrating stress around the curved bend." }
         : { support: "fixed end face", load: "free end face · -Z direction", callout: "A cantilever beam is fixed at one end and loaded at the free end, producing bending stress along the beam span." };
 
   function handleLoadSampleClick() {
@@ -132,7 +132,7 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sa
           <div className="segmented" role="group" aria-label="Sample model">
             {(["bracket", "plate", "cantilever"] as const).map((sample) => (
               <button key={sample} className={sampleModel === sample ? "active" : ""} type="button" onClick={() => onSampleModelChange(sample)}>
-                {capitalize(sample)}
+                {sample === "plate" ? "Hook" : capitalize(sample)}
               </button>
             ))}
           </div>

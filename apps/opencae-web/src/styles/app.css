@@ -853,9 +853,32 @@ svg {
 
 .legend-values {
   grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  column-gap: 4px;
+  color: var(--color-text-muted);
+}
+
+.legend-values span {
+  min-width: 0;
+  overflow: hidden;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.legend-values span:first-child {
+  text-align: left;
+}
+
+.legend-values span:last-child {
+  text-align: right;
+}
+
+.legend-extrema {
+  grid-column: 1 / -1;
   display: flex;
   justify-content: space-between;
-  gap: var(--sp-2);
   color: var(--color-text-muted);
 }
 

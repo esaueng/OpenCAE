@@ -13,11 +13,11 @@ const SAMPLE_META: Record<SampleModelId, { projectName: string; modelName: strin
     dimensions: { x: 120, y: 88, z: 34, units: "mm" }
   },
   plate: {
-    projectName: "Plate Demo",
-    modelName: "Plate",
-    filename: "plate-with-hole.step",
-    displayName: "plate demo body",
-    dimensions: { x: 120, y: 48, z: 10, units: "mm" }
+    projectName: "Hook Demo",
+    modelName: "Hook",
+    filename: "wall-hook-payload.step",
+    displayName: "wall hook assembly",
+    dimensions: { x: 120, y: 80, z: 10, units: "mm" }
   },
   cantilever: {
     projectName: "Cantilever Demo",
@@ -288,10 +288,10 @@ export function sampleDisplayModelFor(sampleId: SampleModelId): DisplayModel {
       { id: "face-rib-side", label: "Rib side face", color: "#22c55e", center: [-0.26, 0.78, 0.22], normal: [0, 0, 1], stressValue: 92 }
     ],
     plate: [
-      { id: "face-base-left", label: "Left clamp face", color: "#4da3ff", center: [-1.45, 0.0, 0.17], normal: [0, 0, 1], stressValue: 42 },
-      { id: "face-load-top", label: "Right load pad", color: "#f59e0b", center: [1.42, 0.0, 0.17], normal: [0, 0, 1], stressValue: 118 },
-      { id: "face-web-front", label: "Hole rim region", color: "#22c55e", center: [0.0, 0.0, 0.2], normal: [0, 0, 1], stressValue: 84 },
-      { id: "face-base-bottom", label: "Plate top face", color: "#8b949e", center: [0.0, 0.0, 0.18], normal: [0, 0, 1], stressValue: 58 }
+      { id: "face-base-left", label: "Rear mounting face", color: "#4da3ff", center: [-1.46, 0.08, 0], normal: [-1, 0, 0], stressValue: 52 },
+      { id: "face-load-top", label: "Hanging payload mass", color: "#f59e0b", center: [1.2, -1.34, 0], normal: [0, 0, 1], stressValue: 118 },
+      { id: "face-web-front", label: "Hook throat", color: "#22c55e", center: [0.72, -0.48, 0.16], normal: [0, 0, 1], stressValue: 98 },
+      { id: "face-base-bottom", label: "Mounting body", color: "#8b949e", center: [-1.16, 0.08, 0.18], normal: [0, 0, 1], stressValue: 64 }
     ],
     cantilever: [
       { id: "face-base-left", label: "Fixed end face", color: "#4da3ff", center: [-1.8, 0.18, 0], normal: [-1, 0, 0], stressValue: 132 },
@@ -328,7 +328,7 @@ function sampleLoadsFor(sampleId: SampleModelId, templateLoads: Load[], displayM
           payloadMassMode: "material",
           payloadObject: {
             id: `payload-${displayModel.id}`,
-            label: payloadLabel,
+            label: "hanging payload mass",
             center,
             volumeM3,
             volumeSource: "bounds-fallback",
