@@ -42,6 +42,11 @@ pnpm deploy:cloudflare
 
 Wrangler uses [wrangler.jsonc](wrangler.jsonc). The deploy builds `apps/opencae-web/dist`, serves it through the Worker asset binding, and uses SPA fallback routing for browser routes.
 
+For Cloudflare Builds, set:
+
+- Build command: `pnpm build:cloudflare`
+- Deploy command: `npx wrangler deploy --config wrangler.jsonc`
+
 ## Workspace Layout
 
 - `apps/opencae-web` - React/Vite CAD workspace and static stress workflow.
