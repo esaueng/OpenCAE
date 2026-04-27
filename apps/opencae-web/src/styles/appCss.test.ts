@@ -9,4 +9,10 @@ describe("app CSS", () => {
     expect(css).toMatch(/\.theme-light\s+\.viewer-reset\s*\{[\s\S]*?background:\s*rgba\(255,\s*255,\s*255,\s*0\.9\)/);
     expect(css).toMatch(/\.theme-light\s+\.viewer-reset\s*\{[\s\S]*?border-color:\s*rgba\(82,\s*103,\s*130,\s*0\.24\)/);
   });
+
+  test("lightens the analysis legend in light mode", () => {
+    expect(css).toMatch(/\.theme-light\s+\.analysis-legend\s*\{[\s\S]*?background:\s*rgba\(255,\s*255,\s*255,\s*0\.88\)/);
+    expect(css).toMatch(/\.theme-light\s+\.analysis-legend\s*\{[\s\S]*?color:\s*var\(--color-text\)/);
+    expect(css).toMatch(/\.theme-light\s+\.analysis-legend\s+\.legend-scale\s*\{[\s\S]*?border-color:\s*rgba\(82,\s*103,\s*130,\s*0\.24\)/);
+  });
 });
