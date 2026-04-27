@@ -91,7 +91,8 @@ export function StepBar({ activeStep, project, study, hasResults, collapsed, onS
           <span>units</span>
           <strong>{unitShort}</strong>
           <button type="button" className="unit-toggle" aria-label={`Switch to ${nextUnitSystem === "SI" ? "metric" : "imperial"} units`} onClick={() => onUnitSystemChange(nextUnitSystem)}>
-            {currentUnitLabel}
+            <span className="unit-toggle-label">{currentUnitLabel}</span>
+            <span className="unit-toggle-short" aria-hidden="true">{unitShort}</span>
           </button>
         </div>
         <div><span>backend</span><strong>local</strong></div>

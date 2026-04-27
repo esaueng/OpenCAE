@@ -592,6 +592,10 @@ svg {
   width: auto;
 }
 
+.unit-toggle-short {
+  display: none;
+}
+
 .unit-toggle:hover,
 .unit-toggle:focus-visible {
   color: var(--color-accent);
@@ -652,7 +656,6 @@ svg {
 }
 
 .stepbar.collapsed .stepbar-eyebrow,
-.stepbar.collapsed .stepbar-footer,
 .stepbar.collapsed .step > span:not(.step-icon) {
   position: absolute;
   width: 1px;
@@ -670,6 +673,61 @@ svg {
   justify-items: center;
   gap: 0;
   padding: 0;
+}
+
+.stepbar.collapsed .stepbar-footer {
+  justify-items: center;
+  gap: 6px;
+  width: 100%;
+}
+
+.stepbar.collapsed .stepbar-footer > div:not(.stepbar-actions):not(.unit-switch) {
+  display: none;
+}
+
+.stepbar.collapsed .stepbar-actions {
+  gap: 6px;
+  margin-bottom: 0;
+}
+
+.stepbar.collapsed .stepbar-link {
+  width: 34px;
+  min-height: 30px;
+  padding: 0;
+  gap: 0;
+  font-size: 0;
+}
+
+.stepbar.collapsed .stepbar-link svg {
+  width: 16px;
+  height: 16px;
+}
+
+.stepbar.collapsed .unit-switch {
+  display: grid;
+  grid-template-columns: 1fr;
+  justify-items: center;
+  gap: 3px;
+}
+
+.stepbar.collapsed .unit-switch > span,
+.stepbar.collapsed .unit-switch > strong,
+.stepbar.collapsed .unit-toggle-label {
+  display: none;
+}
+
+.stepbar.collapsed .unit-switch .unit-toggle {
+  grid-column: auto;
+  width: 34px;
+  min-height: 24px;
+  border: var(--border-thin);
+  border-radius: var(--radius-md);
+  background: rgba(11, 15, 20, 0.28);
+  font-family: var(--font-mono);
+}
+
+.stepbar.collapsed .unit-toggle-short {
+  display: inline;
 }
 
 .viewer-shell {
@@ -2151,6 +2209,10 @@ button:disabled {
   .stepbar-eyebrow,
   .stepbar-footer {
     display: none;
+  }
+
+  .stepbar.collapsed .stepbar-footer {
+    display: grid;
   }
 
   .step {
