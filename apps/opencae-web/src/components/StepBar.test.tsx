@@ -51,6 +51,7 @@ describe("StepBar", () => {
     expect(html).toContain("stepbar collapsed");
     expect(html).toContain("Feedback");
     expect(html).toContain("GitHub");
+    expect(html).toContain('href="https://github.com/esaueng/OpenCAE"');
     expect(html).toContain("Metric");
   });
 

@@ -79,7 +79,7 @@ export function StepBar({ activeStep, project, study, hasResults, collapsed, onS
             <MessageSquare size={14} aria-hidden="true" />
             Feedback
           </button>
-          <a className="stepbar-link" href="https://github.com/esaueng/opencae-beta" target="_blank" rel="noreferrer">
+          <a className="stepbar-link" href="https://github.com/esaueng/OpenCAE" target="_blank" rel="noreferrer">
             <Github size={14} aria-hidden="true" />
             GitHub
           </a>
