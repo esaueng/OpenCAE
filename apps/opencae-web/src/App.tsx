@@ -4,6 +4,7 @@ import { RotateCcw, Save } from "lucide-react";
 import { addLoad, addSupport, assignMaterial, createProject, generateMesh, getResults, importLocalProject, loadSampleProject, renameProject, runSimulation, subscribeToRun, updateStudy as saveStudyPatch, uploadModel, type SampleModelId } from "./lib/api";
 import { normalizePrintParameters, starterMaterials } from "@opencae/materials";
 import { BottomPanel } from "./components/BottomPanel";
+import { OpenCaeLogoMark } from "./components/OpenCaeLogoMark";
 import { RightPanel } from "./components/RightPanel";
 import { StartScreen } from "./components/StartScreen";
 import { StepBar, type StepId } from "./components/StepBar";
@@ -556,7 +557,7 @@ export function App() {
     <div className={`app-shell theme-${themeMode} ${isStepbarCollapsed ? "stepbar-collapsed" : ""}`}>
       <header className="topbar">
         <button className="brand brand-button" type="button" onClick={handleOpenStartMenu} title="Back to start menu" aria-label="Back to start menu">
-          <TopbarMark />OpenCAE <span className="beta-tag">beta</span>
+          <OpenCaeLogoMark />OpenCAE <span className="beta-tag">beta</span>
         </button>
         <div className="topbar-divider topbar-divider-project" />
         <div className="breadcrumb">
@@ -822,15 +823,6 @@ async function saveProjectToLocalDisk(project: Project, displayModel: DisplayMod
   link.click();
   URL.revokeObjectURL(url);
   return savedAt;
-}
-
-function TopbarMark() {
-  return (
-    <svg viewBox="0 0 18 18" aria-hidden="true">
-      <path d="M9 1.8 15.2 5.4v7.2L9 16.2l-6.2-3.6V5.4L9 1.8Z" fill="none" stroke="currentColor" strokeWidth="1.4" />
-      <path d="M5.6 6.9 9 5l3.4 1.9v4.2L9 13l-3.4-1.9V6.9Z" fill="none" stroke="currentColor" strokeWidth="1" opacity="0.68" />
-    </svg>
-  );
 }
 
 function UndoIcon() {
