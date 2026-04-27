@@ -1,0 +1,15 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "opencae-local",
+  "main": "apps/opencae-web/worker/index.ts",
+  "compatibility_date": "2026-04-27",
+  "assets": {
+    "directory": "apps/opencae-web/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application"
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  }
+}

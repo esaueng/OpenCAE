@@ -30,6 +30,18 @@ pnpm build
 pnpm test
 ```
 
+## Cloudflare Worker Deploy
+
+The Cloudflare target serves the Vite web app from Workers Static Assets. It is intentionally local-first: API-backed actions return a JSON 503 from the Worker so the web client uses its browser-local fallback behavior.
+
+```bash
+pnpm install
+pnpm deploy:cloudflare:dry-run
+pnpm deploy:cloudflare
+```
+
+Wrangler uses [wrangler.jsonc](wrangler.jsonc). The deploy builds `apps/opencae-web/dist`, serves it through the Worker asset binding, and uses SPA fallback routing for browser routes.
+
 ## Workspace Layout
 
 - `apps/opencae-web` - React/Vite CAD workspace and static stress workflow.
