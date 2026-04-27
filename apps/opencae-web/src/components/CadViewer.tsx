@@ -99,7 +99,6 @@ type ModelPickHandlers = {
 };
 export const VIEWER_GIZMO_ALIGNMENT = "bottom-right";
 const VIEWER_FIT_MARGIN = 1.28;
-const VIEWER_CAMERA_DISTANCE_SCALE = 0.98;
 
 export function CadViewer(props: CadViewerProps) {
   const controlsRef = useRef<ViewerOrbitControls | null>(null);
@@ -2380,26 +2379,36 @@ function MeshOverlay({ kind }: { kind: SampleModelKind }) {
 
 function BoundsCameraReset({ signal, viewAxis, viewAxisSignal }: { signal: number; viewAxis: RotationAxis | null; viewAxisSignal: number }) {
   const bounds = useBounds();
+  const { camera, size } = useThree();
   useEffect(() => {
     const nextBounds = bounds.refresh().clip();
-    const { center, distance } = nextBounds.getSize();
+    const { box, center, distance } = nextBounds.getSize();
     const view = viewAxis ? cameraViewForAxis(viewAxis) : { direction: ISO_CAMERA_DIRECTION, up: ISO_CAMERA_UP };
-    const cameraPosition = center.clone().addScaledVector(view.direction, distance * VIEWER_CAMERA_DISTANCE_SCALE);
+    const perspectiveCamera = camera as THREE.PerspectiveCamera;
+    const fitDistance = perspectiveCamera.isPerspectiveCamera
+      ? cameraDistanceForBounds(box, view.direction, view.up, perspectiveCamera.fov, size.width / size.height, VIEWER_FIT_MARGIN)
+      : distance;
+    const cameraPosition = center.clone().addScaledVector(view.direction, fitDistance);
     nextBounds.moveTo(cameraPosition).lookAt({ target: center, up: view.up });
-  }, [bounds, signal, viewAxis, viewAxisSignal]);
+  }, [bounds, camera, signal, size.height, size.width, viewAxis, viewAxisSignal]);
   return null;
 }
 
 function GizmoCameraReset({ axis, signal }: { axis: RotationAxis | null; signal: number }) {
   const bounds = useBounds();
+  const { camera, size } = useThree();
   useEffect(() => {
     if (!axis) return;
     const nextBounds = bounds.refresh().clip();
-    const { center, distance } = nextBounds.getSize();
+    const { box, center, distance } = nextBounds.getSize();
     const view = cameraViewForAxis(axis);
-    const cameraPosition = center.clone().addScaledVector(view.direction, distance * VIEWER_CAMERA_DISTANCE_SCALE);
+    const perspectiveCamera = camera as THREE.PerspectiveCamera;
+    const fitDistance = perspectiveCamera.isPerspectiveCamera
+      ? cameraDistanceForBounds(box, view.direction, view.up, perspectiveCamera.fov, size.width / size.height, VIEWER_FIT_MARGIN)
+      : distance;
+    const cameraPosition = center.clone().addScaledVector(view.direction, fitDistance);
     nextBounds.moveTo(cameraPosition).lookAt({ target: center, up: view.up });
-  }, [axis, bounds, signal]);
+  }, [axis, bounds, camera, signal, size.height, size.width]);
   return null;
 }
 
@@ -2426,6 +2435,43 @@ export function cameraViewForAxis(axis: RotationAxis): { direction: THREE.Vector
   if (axis === "x") return { direction: new THREE.Vector3(1, 0, 0), up: WORLD_UP };
   if (axis === "y") return { direction: new THREE.Vector3(0, 1, 0), up: WORLD_UP };
   return { direction: new THREE.Vector3(0, 0, 1), up: new THREE.Vector3(-1, 0, 0) };
+}
+
+export function cameraDistanceForBounds(
+  bounds: THREE.Box3,
+  direction: THREE.Vector3,
+  up: THREE.Vector3,
+  fovDegrees: number,
+  aspect: number,
+  margin: number
+) {
+  const center = bounds.getCenter(new THREE.Vector3());
+  const viewDirection = direction.clone().normalize();
+  const right = new THREE.Vector3().crossVectors(viewDirection, up).normalize();
+  const viewUp = new THREE.Vector3().crossVectors(right, viewDirection).normalize();
+  const corners = [
+    new THREE.Vector3(bounds.min.x, bounds.min.y, bounds.min.z),
+    new THREE.Vector3(bounds.min.x, bounds.min.y, bounds.max.z),
+    new THREE.Vector3(bounds.min.x, bounds.max.y, bounds.min.z),
+    new THREE.Vector3(bounds.min.x, bounds.max.y, bounds.max.z),
+    new THREE.Vector3(bounds.max.x, bounds.min.y, bounds.min.z),
+    new THREE.Vector3(bounds.max.x, bounds.min.y, bounds.max.z),
+    new THREE.Vector3(bounds.max.x, bounds.max.y, bounds.min.z),
+    new THREE.Vector3(bounds.max.x, bounds.max.y, bounds.max.z)
+  ];
+  const halfExtents = corners.reduce(
+    (extents, corner) => {
+      const offset = corner.sub(center);
+      extents.x = Math.max(extents.x, Math.abs(offset.dot(right)));
+      extents.y = Math.max(extents.y, Math.abs(offset.dot(viewUp)));
+      return extents;
+    },
+    new THREE.Vector2(0, 0)
+  );
+  const verticalFov = THREE.MathUtils.degToRad(fovDegrees);
+  const fitHeightDistance = halfExtents.y / Math.tan(verticalFov / 2);
+  const fitWidthDistance = halfExtents.x / (Math.tan(verticalFov / 2) * aspect);
+  return Math.max(fitHeightDistance, fitWidthDistance) * margin;
 }
 
 export function rotatedCameraOrbit(position: THREE.Vector3, target: THREE.Vector3, up: THREE.Vector3, axis: RotationAxis, radians: number) {

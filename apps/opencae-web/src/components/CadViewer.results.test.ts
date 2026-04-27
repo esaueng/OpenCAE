@@ -65,6 +65,18 @@ describe("CadViewer result coloring", () => {
     expect(distance).toBeCloseTo((5 / Math.tan(THREE.MathUtils.degToRad(21))) * 1.2);
   });
 
+  test("fits isometric reset distance to the projected diagonal height", () => {
+    const bounds = new THREE.Box3(new THREE.Vector3(-5, -5, -5), new THREE.Vector3(5, 5, 5));
+    const view = {
+      direction: new THREE.Vector3(1, -1, 1).normalize(),
+      up: new THREE.Vector3(0, 0, 1).projectOnPlane(new THREE.Vector3(1, -1, 1).normalize()).normalize()
+    };
+
+    const distance = cameraDistanceForBounds(bounds, view.direction, view.up, 42, 1, 1.28);
+
+    expect(distance).toBeCloseTo(27.24, 1);
+  });
+
   test("hides face selection callouts in result view", () => {
     expect(shouldShowModelHitLabel("results", true)).toBe(false);
     expect(shouldShowModelHitLabel("model", true)).toBe(true);
