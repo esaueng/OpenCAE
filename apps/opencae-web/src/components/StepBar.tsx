@@ -75,10 +75,10 @@ export function StepBar({ activeStep, project, study, hasResults, collapsed, onS
       </div>
       <div className="stepbar-footer">
         <div className="stepbar-actions" aria-label="Project links">
-          <button type="button" className="stepbar-link" onClick={() => undefined}>
+          <a className="stepbar-link" href="https://form.esauengineering.com/opencae-feedback" target="_blank" rel="noreferrer">
             <MessageSquare size={14} aria-hidden="true" />
             Feedback
-          </button>
+          </a>
           <a className="stepbar-link" href="https://github.com/esaueng/OpenCAE" target="_blank" rel="noreferrer">
             <Github size={14} aria-hidden="true" />
             GitHub
