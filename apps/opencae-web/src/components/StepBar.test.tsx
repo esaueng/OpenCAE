@@ -1,0 +1,63 @@
+import { renderToStaticMarkup } from "react-dom/server";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { describe, expect, test, vi } from "vitest";
+import type { Project, Study } from "@opencae/schema";
+import { StepBar } from "./StepBar";
+
+const project: Project = {
+  id: "project-1",
+  name: "Collapsed Sidebar",
+  schemaVersion: "0.1.0",
+  unitSystem: "SI",
+  geometryFiles: [],
+  studies: [],
+  createdAt: "2026-01-01T00:00:00.000Z",
+  updatedAt: "2026-01-01T00:00:00.000Z"
+};
+
+const study: Study = {
+  id: "study-1",
+  projectId: "project-1",
+  name: "Static Stress",
+  type: "static_stress",
+  geometryScope: [],
+  materialAssignments: [],
+  namedSelections: [],
+  contacts: [],
+  constraints: [],
+  loads: [],
+  meshSettings: { preset: "medium", status: "not_started" },
+  solverSettings: {},
+  validation: [],
+  runs: []
+};
+
+describe("StepBar", () => {
+  test("keeps utility controls available when collapsed", () => {
+    const html = renderToStaticMarkup(
+      <StepBar
+        activeStep="model"
+        project={project}
+        study={study}
+        hasResults={false}
+        collapsed
+        onSelect={vi.fn()}
+        onToggleCollapsed={vi.fn()}
+        onUnitSystemChange={vi.fn()}
+      />
+    );
+
+    expect(html).toContain("stepbar collapsed");
+    expect(html).toContain("Feedback");
+    expect(html).toContain("GitHub");
+    expect(html).toContain("Metric");
+  });
+
+  test("does not visually hide the collapsed utility footer", () => {
+    const css = readFileSync(resolve(__dirname, "../styles/app.css"), "utf8");
+
+    expect(css).not.toContain(".stepbar.collapsed .stepbar-footer,\n.stepbar.collapsed .step > span:not(.step-icon)");
+    expect(css).toMatch(/\.stepbar\.collapsed\s+\.stepbar-footer\s*\{[\s\S]*?display:\s*grid;/);
+  });
+});
