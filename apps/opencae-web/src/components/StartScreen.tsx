@@ -71,7 +71,7 @@ export function StartScreen({ onLoadSample, onCreateProject, onOpenProject }: St
         Built by Esau Engineering
       </a>
       <footer className="start-footer">
-        <a href="https://github.com/esaueng/opencae-beta" target="_blank" rel="noreferrer">github</a>
+        <a href="https://github.com/esaueng/OpenCAE" target="_blank" rel="noreferrer">github</a>
       </footer>
     </main>
   );
