@@ -53,7 +53,7 @@ interface StorageLike {
   setItem: (key: string, value: string) => void;
 }
 
-const STEPS: StepId[] = ["model", "material", "supports", "loads", "mesh", "run", "results", "report"];
+const STEPS: StepId[] = ["model", "material", "supports", "loads", "mesh", "run", "results"];
 const VIEW_MODES: ViewMode[] = ["model", "mesh", "results"];
 const RESULT_MODES: ResultMode[] = ["stress", "displacement", "safety_factor"];
 const THEMES: ThemeMode[] = ["dark", "light"];

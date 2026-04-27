@@ -1,6 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { AlertTriangle, Anchor, ArrowDown, Check, CircleHelp, Download, Eye, FileText, Gauge, Grid3X3, Maximize2, Play, Plus, RotateCcw, Ruler, ScanLine, ShieldCheck, Upload, Weight, X } from "lucide-react";
+import { AlertTriangle, Anchor, ArrowDown, Check, CircleHelp, Eye, Gauge, Grid3X3, Maximize2, Play, Plus, RotateCcw, Ruler, ScanLine, ShieldCheck, Upload, Weight, X } from "lucide-react";
 import { defaultPrintParametersFor, effectiveMaterialProperties, massKgForPayloadMaterial, normalizePrintParameters, payloadMaterialForId, payloadMaterials, starterMaterials, type PayloadMaterialCategory, type PrintMaterialParameters } from "@opencae/materials";
 import { assessResultFailure, estimateAllowableLoadForSafetyFactor } from "@opencae/schema";
 import type { Constraint, DisplayFace, DisplayModel, Load, Project, ResultSummary, Study } from "@opencae/schema";
@@ -65,10 +65,6 @@ interface RightPanelProps {
   onRunSimulation: () => void;
   canRunSimulation: boolean;
   missingRunItems: string[];
-  canGenerateReport: boolean;
-  reportUrl?: string;
-  reportFilename?: string;
-  onGenerateReport: () => void;
   onStepSelect: (step: StepId) => void;
 }
 
@@ -87,7 +83,6 @@ export function RightPanel(props: RightPanelProps) {
       {props.activeStep === "mesh" && <MeshPanel {...props} />}
       {props.activeStep === "run" && <RunPanel {...props} />}
       {props.activeStep === "results" && <ResultsPanel {...props} />}
-      {props.activeStep === "report" && <ReportPanel {...props} />}
       <WorkflowNav activeStep={props.activeStep} study={props.study} onStepSelect={props.onStepSelect} />
     </aside>
   );
@@ -904,11 +899,7 @@ function ResultsPanel({
   resultSummary,
   onResultModeChange,
   onToggleDeformed,
-  onStressExaggerationChange,
-  canGenerateReport,
-  reportUrl,
-  reportFilename,
-  onGenerateReport
+  onStressExaggerationChange
 }: RightPanelProps) {
   const [targetSafetyFactor, setTargetSafetyFactor] = useState(1.5);
   const assessment = resultSummary.failureAssessment ?? assessResultFailure(resultSummary);
@@ -977,78 +968,18 @@ function ResultsPanel({
         </div>
       </div>
       <div className="legend"><span /> <small>Low</small><small>High</small></div>
-      <ReportDownloadAction
-        canGenerateReport={canGenerateReport}
-        reportUrl={reportUrl}
-        reportFilename={reportFilename}
-        onGenerateReport={onGenerateReport}
-        label="Generate report"
-        icon={<FileText size={16} />}
-      />
     </Panel>
-  );
-}
-
-function ReportPanel({ canGenerateReport, reportUrl, reportFilename, onGenerateReport }: RightPanelProps) {
-  return (
-    <Panel title="Report" helper="Generate a polished PDF report you can share.">
-      <HelpNote helpId="reportOutput" />
-      <div className="summary-box">
-        <Info label="Format" value="PDF · print ready" />
-        <Info label="Companion" value="HTML · self-contained" />
-        <Info label="Output" value="./data/reports" />
-      </div>
-      <ReportDownloadAction
-        canGenerateReport={canGenerateReport}
-        reportUrl={reportUrl}
-        reportFilename={reportFilename}
-        onGenerateReport={onGenerateReport}
-        label="Generate & download PDF"
-        icon={<Download size={18} />}
-      />
-      <SectionTitle>Contents</SectionTitle>
-      <div className="report-list">
-        {["Project & study", "Material & boundary conditions", "Mesh summary", "Stress field & max locations", "Displacement field", "Reaction forces", "Diagnostics"].map((item) => (
-          <div key={item}>{item}</div>
-        ))}
-      </div>
-    </Panel>
-  );
-}
-
-function ReportDownloadAction({
-  canGenerateReport,
-  reportUrl,
-  reportFilename,
-  onGenerateReport,
-  label,
-  icon
-}: {
-  canGenerateReport: boolean;
-  reportUrl?: string;
-  reportFilename?: string;
-  onGenerateReport: () => void;
-  label: string;
-  icon: ReactNode;
-}) {
-  if (!canGenerateReport || !reportUrl) {
-    return <button className="primary wide" type="button" onClick={onGenerateReport}>{icon}{label}</button>;
-  }
-  return (
-    <a className="primary wide" href={reportUrl} download={reportFilename} onClick={onGenerateReport}>
-      {icon}{label}
-    </a>
   );
 }
 
 function Panel({ title, helper, children }: { title: string; helper: string; children: ReactNode }) {
-  const step = ["Model", "Material", "Supports", "Loads", "Mesh", "Run", "Results", "Report"].indexOf(title) + 1;
+  const step = ["Model", "Material", "Supports", "Loads", "Mesh", "Run", "Results"].indexOf(title) + 1;
   return (
     <div className="panel-section">
       <div className="panel-header">
         <div className="panel-title-row">
           <h2>{title}</h2>
-          <div className="panel-eyebrow">Step {step || 1} of 8</div>
+          <div className="panel-eyebrow">Step {step || 1} of 7</div>
         </div>
         <p className="helper">{helper}</p>
       </div>
@@ -1064,8 +995,7 @@ const WORKFLOW_STEPS: Array<{ id: StepId; label: string }> = [
   { id: "loads", label: "Loads" },
   { id: "mesh", label: "Mesh" },
   { id: "run", label: "Run" },
-  { id: "results", label: "Results" },
-  { id: "report", label: "Report" }
+  { id: "results", label: "Results" }
 ];
 
 function WorkflowNav({ activeStep, study, onStepSelect }: { activeStep: StepId; study: Study; onStepSelect: (step: StepId) => void }) {
