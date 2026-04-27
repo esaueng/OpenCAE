@@ -65,4 +65,12 @@ describe("app CSS", () => {
     expect(startBrand).toMatch(/top:\s*50%/);
     expect(startBrand).toMatch(/transform:\s*translate\(-50%,\s*-28px\)/);
   });
+
+  test("aligns all start screen footer text on one row", () => {
+    const startFooter = cssRule(".start-footer");
+
+    expect(startFooter).toMatch(/display:\s*grid/);
+    expect(startFooter).toMatch(/grid-template-columns:\s*minmax\(0,\s*1fr\)\s*auto\s*minmax\(0,\s*1fr\)/);
+    expect(startFooter).toMatch(/align-items:\s*baseline/);
+  });
 });

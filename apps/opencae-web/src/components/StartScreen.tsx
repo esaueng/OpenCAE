@@ -63,12 +63,12 @@ export function StartScreen({ onLoadSample, onCreateProject, onOpenProject }: St
           <span>Start with the sample project to see a complete example.</span>
         </p>
       </section>
-      <a className="start-credit" href="https://esauengineering.com/" target="_blank" rel="noreferrer">
-        Built by Esau Engineering
-      </a>
       <footer className="start-footer">
         <span className="local-runtime">Runs locally</span>
-        <a href="https://github.com/esaueng/OpenCAE" target="_blank" rel="noreferrer">github</a>
+        <a className="start-credit" href="https://esauengineering.com/" target="_blank" rel="noreferrer">
+          Built by Esau Engineering
+        </a>
+        <a className="start-github" href="https://github.com/esaueng/OpenCAE" target="_blank" rel="noreferrer">github</a>
       </footer>
     </main>
   );
