@@ -1046,8 +1046,10 @@ function Panel({ title, helper, children }: { title: string; helper: string; chi
   return (
     <div className="panel-section">
       <div className="panel-header">
-        <div className="panel-eyebrow">Step {step || 1} of 8</div>
-        <h2>{title}</h2>
+        <div className="panel-title-row">
+          <h2>{title}</h2>
+          <div className="panel-eyebrow">Step {step || 1} of 8</div>
+        </div>
         <p className="helper">{helper}</p>
       </div>
       <div className="panel-body">{children}</div>
