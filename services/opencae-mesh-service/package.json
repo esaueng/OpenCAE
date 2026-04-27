@@ -10,5 +10,6 @@
     "@opencae/mesh-contract": "workspace:*",
     "@opencae/schema": "workspace:*",
     "@opencae/storage": "workspace:*"
-  }
+  },
+  "license": "Apache-2.0"
 }
