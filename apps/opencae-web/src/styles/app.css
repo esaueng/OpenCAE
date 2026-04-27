@@ -161,15 +161,7 @@ img {
 }
 
 .start-credit {
-  position: absolute;
-  z-index: 1;
-  left: 50%;
-  bottom: 20px;
-  transform: translateX(-50%);
-  padding: 6px 12px;
   color: var(--color-text-muted);
-  font-family: var(--font-mono);
-  font-size: var(--fs-mini);
   text-decoration: none;
   text-underline-offset: 3px;
   transition: color var(--dur-fast) var(--ease-out);
@@ -186,12 +178,14 @@ img {
   right: 24px;
   bottom: 20px;
   left: 24px;
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: baseline;
   gap: var(--sp-4);
   color: var(--color-text-subtle);
   font-family: var(--font-mono);
   font-size: var(--fs-mini);
+  line-height: 1;
 }
 
 .local-runtime {
@@ -200,6 +194,10 @@ img {
 
 .start-footer a {
   color: inherit;
+}
+
+.start-github {
+  justify-self: end;
 }
 
 .start-footer a:hover,
