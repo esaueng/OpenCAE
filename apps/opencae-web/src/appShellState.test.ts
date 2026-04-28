@@ -1,5 +1,11 @@
 import { describe, expect, test } from "vitest";
-import { canNavigateToStep, printLayerOrientationForViewer, shouldAutoAdvanceAfterMeshGeneration, shouldShowStartScreen } from "./appShellState";
+import {
+  canNavigateToStep,
+  printLayerOrientationForViewer,
+  shouldAutoAdvanceAfterMaterialAssignment,
+  shouldAutoAdvanceAfterMeshGeneration,
+  shouldShowStartScreen
+} from "./appShellState";
 
 describe("app shell state", () => {
   test("shows the start screen when home is requested from an open project", () => {
@@ -8,6 +14,10 @@ describe("app shell state", () => {
 
   test("does not auto-advance after mesh generation", () => {
     expect(shouldAutoAdvanceAfterMeshGeneration()).toBe(false);
+  });
+
+  test("does not auto-advance after material assignment", () => {
+    expect(shouldAutoAdvanceAfterMaterialAssignment()).toBe(false);
   });
 
   test("blocks run navigation until the mesh is complete", () => {
