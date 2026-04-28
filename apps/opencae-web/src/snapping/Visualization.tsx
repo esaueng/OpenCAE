@@ -2,6 +2,21 @@ import { Billboard, Line, Text } from "@react-three/drei";
 import * as THREE from "three";
 import type { HoveredEntity, SnapMeasurement, SnapResult, Vec3 } from "./types";
 
+export const SNAP_OVERLAY_USER_DATA_KEY = "opencaeSnapOverlay";
+
+export function snapOverlayUserData() {
+  return { [SNAP_OVERLAY_USER_DATA_KEY]: true };
+}
+
+export function isSnapOverlayObject(object: THREE.Object3D | null | undefined) {
+  let current: THREE.Object3D | null | undefined = object;
+  while (current) {
+    if (current.userData[SNAP_OVERLAY_USER_DATA_KEY] === true) return true;
+    current = current.parent;
+  }
+  return false;
+}
+
 export function disableSnapOverlayRaycast(_raycaster?: THREE.Raycaster, _intersections?: THREE.Intersection[]) {
   // Snap helpers are visual affordances only; model geometry must remain the pick target.
 }
@@ -9,7 +24,7 @@ export function disableSnapOverlayRaycast(_raycaster?: THREE.Raycaster, _interse
 export function SnapVisualization({ result, mode }: { result: SnapResult | null; mode: "loads" | "supports" }) {
   if (!result) return null;
   return (
-    <group renderOrder={40}>
+    <group renderOrder={40} userData={snapOverlayUserData()}>
       <HoveredEntityHighlight entity={result.hovered} />
       <SnapConstructionGuides result={result} />
       <SnapMeasurementGuides result={result} />
