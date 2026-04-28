@@ -27,6 +27,7 @@ import {
   blankDisplayModel,
   createBlankProject,
   createSampleProject,
+  createStaticStressStudy,
   normalizeSampleId,
   sampleDisplayModelFor,
   sampleProjectName,
@@ -235,9 +236,12 @@ api.get("/api/projects/:projectId/studies", async (request) => {
 api.post("/api/projects/:projectId/studies", async (request) => {
   const { projectId } = request.params as { projectId: string };
   const project = db.getProject(projectId);
-  const study = bracketDemoProject.studies[0];
-  if (!project || !study) return { error: "Project not found" };
-  const newStudy: Study = { ...study, id: `study-${crypto.randomUUID()}`, projectId, name: "Static Stress", runs: [] };
+  if (!project) return { error: "Project not found" };
+  const displayModel = await displayModelForProject(project);
+  const newStudy = createStaticStressStudy(project, displayModel, {
+    studyId: `study-${crypto.randomUUID()}`,
+    now: new Date().toISOString()
+  });
   db.upsertStudy(newStudy);
   return { study: newStudy };
 });
