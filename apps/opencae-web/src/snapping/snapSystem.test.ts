@@ -5,6 +5,7 @@ import { queryHoveredEntity } from "./geometryQuery";
 import { generateSnapCandidates } from "./snapGenerator";
 import { getSnapSuggestion, smoothSnapPoint } from "./snapController";
 import { selectBestSnapCandidate } from "./snapScoring";
+import { snapConstructionGuides } from "./Visualization";
 import type { CursorRay, HoveredEntity, SnapCandidate } from "./types";
 
 function rayToward(point: [number, number, number]): CursorRay {
@@ -143,5 +144,48 @@ describe("constraint inference and controller", () => {
     });
     expect(result?.snapPoint[0]).toBeCloseTo(0.9935);
     expect(smoothSnapPoint([0, 0, 0], [10, 0, 0], 0.35)).toEqual([3.5, 0, 0]);
+  });
+});
+
+describe("snap visualization guides", () => {
+  test("builds face centerlines through the snap target", () => {
+    const guides = snapConstructionGuides({
+      hovered: { type: "face", id: "face-top", position: [0, 0, 1], normal: [0, 0, 1], faceId: "face-top" },
+      snapPoint: [0.1, 0.2, 1],
+      rawSnapPoint: [0, 0, 1],
+      direction: [0, 0, 1],
+      suggestionType: "force",
+      candidateKind: "face-centroid",
+      score: 0
+    });
+
+    expect(guides).toEqual([
+      { kind: "centerline", points: [[-0.46, 0, 1], [0.46, 0, 1]], color: "#4da3ff", lineWidth: 2.2, opacity: 0.72 },
+      { kind: "centerline", points: [[0, -0.46, 1], [0, 0.46, 1]], color: "#4da3ff", lineWidth: 2.2, opacity: 0.72 }
+    ]);
+  });
+
+  test("builds an edge alignment line and midpoint tick at the snap target", () => {
+    const guides = snapConstructionGuides({
+      hovered: {
+        type: "edge",
+        id: "edge-1",
+        position: [0, 0, 0],
+        normal: [0, 0, 1],
+        faceId: "face-top",
+        endpoints: [[-1, 0, 0], [1, 0, 0]]
+      },
+      snapPoint: [0, 0, 0],
+      rawSnapPoint: [0, 0, 0],
+      direction: [1, 0, 0],
+      suggestionType: "distributed",
+      candidateKind: "edge-midpoint",
+      score: 0
+    });
+
+    expect(guides).toEqual([
+      { kind: "alignment", points: [[-1, 0, 0], [1, 0, 0]], color: "#63e6be", lineWidth: 3.4, opacity: 0.88 },
+      { kind: "midpoint-tick", points: [[0, -0.14, 0], [0, 0.14, 0]], color: "#f8d77b", lineWidth: 3, opacity: 0.96 }
+    ]);
   });
 });
