@@ -108,7 +108,6 @@ export function loadMarkerFromLoad(load: Load, study: Study, stackIndex: number,
 }
 
 export function createViewerLoadMarkers({ study, loadPreviews = [], draftLoadPreview }: { study: Study | null; loadPreviews?: Load[]; draftLoadPreview?: DraftLoadPreview }): ViewerLoadMarker[] {
-  void draftLoadPreview;
   if (!study) return [];
   const previewsById = new Map(loadPreviews.map((load) => [load.id, load]));
   const faceCounts = new Map<string, number>();
@@ -120,7 +119,25 @@ export function createViewerLoadMarkers({ study, loadPreviews = [], draftLoadPre
     faceCounts.set(marker.faceId, stackIndex + 1);
     return [{ ...marker, labelIndex: labelIndex++, stackIndex }];
   });
-  return markers;
+  const draftMarker = markerFromDraftLoadPreview(draftLoadPreview, study, faceCounts, labelIndex);
+  return draftMarker ? [...markers, draftMarker] : markers;
+}
+
+function markerFromDraftLoadPreview(
+  draftLoadPreview: DraftLoadPreview | undefined,
+  study: Study,
+  faceCounts: Map<string, number>,
+  labelIndex: number
+): ViewerLoadMarker | null {
+  if (!draftLoadPreview?.selection) return null;
+  const draftStudy = study.namedSelections.some((selection) => selection.id === draftLoadPreview.selection?.id)
+    ? study
+    : { ...study, namedSelections: [...study.namedSelections, draftLoadPreview.selection as Study["namedSelections"][number]] };
+  const marker = loadMarkerFromLoad(draftLoadPreview.load, draftStudy, 0, true);
+  if (!marker) return null;
+  const stackIndex = faceCounts.get(marker.faceId) ?? 0;
+  faceCounts.set(marker.faceId, stackIndex + 1);
+  return { ...marker, labelIndex, stackIndex, preview: true };
 }
 
 export function loadMarkerOrdinalLabel(marker: ViewerLoadMarker) {
