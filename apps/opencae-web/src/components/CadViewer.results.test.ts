@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { describe, expect, test } from "vitest";
-import { VIEWER_GIZMO_ALIGNMENT, axisLabelToViewAxis, cameraDistanceForBounds, cameraViewForAxis, colorizeResultObject, createUndeformedResultOutlineObject, defaultHomeViewTarget, displayedLegendTickLabels, legendTickLabels, payloadHighlightObjectId, printLayerVisualizationForBounds, resultProbesForKind, rotatedCameraOrbit, shouldShowDimensionOverlay, shouldShowModelHitLabel, shouldShowUndeformedResultOutline } from "./CadViewer";
+import { VIEWER_GIZMO_ALIGNMENT, axisLabelToViewAxis, cameraDistanceForBounds, cameraViewForAxis, colorizeResultObject, createUndeformedResultOutlineObject, defaultHomeViewTarget, displayedLegendTickLabels, legendTickLabels, payloadHighlightObjectId, printLayerVisualizationForBounds, resultProbesForKind, resultValueForPoint, rotatedCameraOrbit, shouldShowDimensionOverlay, shouldShowModelHitLabel, shouldShowUndeformedResultOutline } from "./CadViewer";
 import type { FaceResultSample } from "../resultFields";
 import type { DisplayFace, ResultField } from "@opencae/schema";
 
@@ -143,6 +143,44 @@ describe("CadViewer result coloring", () => {
     expect(probes[0]?.anchor).toEqual([1.48, 0.34, 0]);
     expect(probes[1]?.anchor).toEqual([0, 0.34, 0]);
     expect(probes[2]?.anchor).toEqual([-1.96, 0.14, 0]);
+  });
+
+  test("anchors cantilever stress probes at the fixed support for transverse bending", () => {
+    const cantileverFaces: DisplayFace[] = [
+      { id: "face-base-left", label: "Fixed end face", color: "#4da3ff", center: [-1.9, 0.18, 0], normal: [-1, 0, 0], stressValue: 132 },
+      { id: "face-load-top", label: "Free end load face", color: "#f59e0b", center: [1.9, 0.18, 0], normal: [1, 0, 0], stressValue: 96 },
+      { id: "face-web-front", label: "Top beam face", color: "#22c55e", center: [0, 0.42, 0], normal: [0, 1, 0], stressValue: 74 },
+      { id: "face-base-bottom", label: "Beam bottom face", color: "#8b949e", center: [0, -0.08, 0], normal: [0, -1, 0], stressValue: 46 }
+    ];
+    const fields: ResultField[] = [{
+      id: "stress",
+      runId: "run",
+      type: "stress",
+      location: "face",
+      values: [155.1, 108.4, 87.5, 42.2],
+      min: 42.2,
+      max: 155.1,
+      units: "MPa"
+    }];
+
+    const probes = resultProbesForKind("cantilever", cantileverFaces, "stress", fields, "SI");
+
+    expect(probes[0]).toMatchObject({ tone: "max", label: "Stress: 155.1 MPa" });
+    expect(probes[0]?.anchor[0]).toBeLessThan(-1.8);
+  });
+
+  test("renders cantilever stress as a fixed-end outer-fiber contour without a free-end hotspot", () => {
+    const fixedOuter = resultValueForPoint("cantilever", "stress", 1, new THREE.Vector3(-1.82, 0.42, 0.34), []);
+    const fixedNeutral = resultValueForPoint("cantilever", "stress", 1, new THREE.Vector3(-1.82, 0.18, 0), []);
+    const midOuter = resultValueForPoint("cantilever", "stress", 1, new THREE.Vector3(0, 0.42, 0.34), []);
+    const freeOuter = resultValueForPoint("cantilever", "stress", 1, new THREE.Vector3(1.82, 0.42, 0.34), []);
+    const fixedDisplacement = resultValueForPoint("cantilever", "displacement", 1, new THREE.Vector3(-1.82, 0.18, 0), []);
+    const freeDisplacement = resultValueForPoint("cantilever", "displacement", 1, new THREE.Vector3(1.82, 0.18, 0), []);
+
+    expect(fixedOuter).toBeGreaterThan(freeOuter * 1.6);
+    expect(fixedOuter).toBeGreaterThan(fixedNeutral);
+    expect(midOuter).toBeGreaterThan(freeOuter);
+    expect(freeDisplacement).toBeGreaterThan(fixedDisplacement);
   });
 
   test("shows undeformed result outlines only while displaying deformed shape", () => {

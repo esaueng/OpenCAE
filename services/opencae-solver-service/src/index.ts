@@ -248,12 +248,43 @@ function stressAtFace(face: FaceModel, loads: LoadModel[], faces: FaceModel[]): 
     const normalAlignment = Math.abs(dot(face.normal, load.direction));
     const axial = Math.abs(dot(load.direction, load.face.normal));
     const typeFactor = load.load.type === "pressure" ? 1.18 : load.load.type === "gravity" ? 0.72 : 1;
+    if (isTransverseBeamBending(load)) {
+      const pathTravel = segmentParameter(face.center, load.nearestSupport.center, load.face.center);
+      const bendingMoment = Math.max(0, 1 - pathTravel);
+      const fiberFactor = bendingFiberFactor(face, load);
+      const loadApplicationCap = localLoad * (6 + 6 * axial) * (1 - bendingMoment * 0.65);
+      return sum + typeFactor * (
+        forceScale * (
+          bendingMoment * (72 + 32 * momentScale) * fiberFactor +
+          localSupport * (28 + 22 * momentScale) +
+          loadPath * bendingMoment * (18 + 28 * momentScale) +
+          loadApplicationCap
+        ) +
+        momentScale * bendingMoment * (10 + 8 * normalAlignment)
+      );
+    }
     return sum + typeFactor * (
       forceScale * (localLoad * (58 + 20 * axial) + localSupport * (30 + 16 * momentScale) + loadPath * (22 + 42 * momentScale)) +
       momentScale * (18 + 12 * normalAlignment)
     );
   }, base);
   return Math.max(1, stress);
+}
+
+function isTransverseBeamBending(load: LoadModel): boolean {
+  if (load.load.type === "pressure" || load.leverArm < 0.001) return false;
+  const spanDirection = normalize(subtract(load.face.center, load.nearestSupport.center));
+  const axialAlignment = Math.abs(dot(spanDirection, load.direction));
+  const transverseAlignment = length(cross(spanDirection, load.direction));
+  return transverseAlignment > 0.55 && axialAlignment < 0.72;
+}
+
+function bendingFiberFactor(face: FaceModel, load: LoadModel): number {
+  const spanDirection = normalize(subtract(load.face.center, load.nearestSupport.center));
+  const transverseDirection = normalize(subtract(load.direction, scale(spanDirection, dot(load.direction, spanDirection))));
+  const outerFiberAlignment = Math.abs(dot(face.normal, transverseDirection));
+  const supportCrossSection = Math.abs(dot(face.normal, spanDirection));
+  return clamp(0.48 + outerFiberAlignment * 0.42 + supportCrossSection * 0.2, 0.48, 1.05);
 }
 
 function displacementAtFace(face: FaceModel, loads: LoadModel[], faces: FaceModel[]): number {
