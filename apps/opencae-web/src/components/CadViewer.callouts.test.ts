@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { beamPayloadSelectionForTarget, faceIdForPlacementSnap, pointForPlacementSnap, shouldShowModelHitLabel, supportGlyphAnchor, supportMarkerAnchor } from "./CadViewer";
+import { beamPayloadSelectionForTarget, faceIdForPlacementSnap, loadGlyphSurfacePoint, pointForPlacementSnap, shouldShowModelHitLabel, supportGlyphAnchor, supportMarkerAnchor } from "./CadViewer";
 
 describe("CadViewer callouts", () => {
   test("uses the real cantilever fixed face as the support callout anchor", () => {
@@ -57,7 +57,7 @@ describe("CadViewer callouts", () => {
     expect(beamPayloadSelectionForTarget("beam-body")).toBeNull();
   });
 
-  test("uses snapped placement points while preserving face-based selections", () => {
+  test("uses exact snap targets while preserving face-based selections", () => {
     const snap = {
       hovered: { type: "vertex" as const, id: "vertex-1", position: [1, 1, 1] as [number, number, number], faceId: "face-load-top" },
       snapPoint: [0.95, 0.95, 1] as [number, number, number],
@@ -68,8 +68,33 @@ describe("CadViewer callouts", () => {
       score: 0.01
     };
 
-    expect(pointForPlacementSnap([0.9, 0.9, 1], snap)).toEqual([0.95, 0.95, 1]);
+    expect(pointForPlacementSnap([0.9, 0.9, 1], snap)).toEqual([1, 1, 1]);
     expect(pointForPlacementSnap([0.9, 0.9, 1], snap, true)).toEqual([0.9, 0.9, 1]);
     expect(faceIdForPlacementSnap("face-load-top", snap)).toBe("face-load-top");
+  });
+
+  test("does not stack-offset explicit point load anchors", () => {
+    const face = {
+      id: "face-load-top",
+      label: "Free end load face",
+      color: "#4da3ff",
+      center: [0, 0, 0] as [number, number, number],
+      normal: [0, 1, 0] as [number, number, number],
+      stressValue: 72
+    };
+    const marker = {
+      id: "load-1",
+      faceId: "face-load-top",
+      point: [0.5, 0.5, 0] as [number, number, number],
+      type: "force",
+      value: 500,
+      units: "N",
+      direction: [0, 0, -1] as [number, number, number],
+      directionLabel: "-Z",
+      labelIndex: 0,
+      stackIndex: 3
+    };
+
+    expect(loadGlyphSurfacePoint(marker, face).toArray()).toEqual([0.5, 0.5, 0]);
   });
 });
