@@ -75,7 +75,9 @@ The current Bracket Demo includes a placeholder bracket body, Aluminum 6061 mate
 
 ## License
 
-OpenCAE is licensed under the [Apache License 2.0](LICENSE).
+OpenCAE is licensed under the Apache License 2.0.
+
+Copyright 2026 Esau Engineering. The OpenCAE name and logo are trademarks of Esau Engineering.
 
 ## Scope
 
