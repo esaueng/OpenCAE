@@ -1966,11 +1966,11 @@ function base64ToArrayBuffer(value: string): ArrayBuffer {
 
 type ResultProbeConfig = { label: string; anchor: [number, number, number]; labelPosition: [number, number, number]; tone: ResultProbeTone };
 
-function resultProbesForKind(kind: SampleModelKind, faces: DisplayFace[], resultMode: ResultMode, resultFields: ResultField[], unitSystem: UnitSystem): ResultProbeConfig[] {
-  if (kind === "cantilever") {
+export function resultProbesForKind(kind: SampleModelKind, faces: DisplayFace[], resultMode: ResultMode, resultFields: ResultField[], unitSystem: UnitSystem): ResultProbeConfig[] {
+  if (kind === "plate" || kind === "cantilever") {
     const dynamicProbes = resultProbeSamplesForFaces(faces, resultFields, resultMode);
     if (dynamicProbes.length) {
-      return dynamicProbes.map((probe) => resultProbeForFace(probe.face, probe.label, probe.tone));
+      return dynamicProbes.map((probe) => resultProbeForFace(kind, probe.face, probe.label, probe.tone));
     }
   }
   const labels = resultProbeLabels(resultMode, resultFields, unitSystem);
@@ -1996,9 +1996,8 @@ function resultProbesForKind(kind: SampleModelKind, faces: DisplayFace[], result
   ];
 }
 
-function resultProbeForFace(face: DisplayFace, label: string, tone: ResultProbeTone): ResultProbeConfig {
-  const center = new THREE.Vector3(...face.center);
-  const normal = new THREE.Vector3(...face.normal).normalize();
+function resultProbeForFace(kind: SampleModelKind, face: DisplayFace, label: string, tone: ResultProbeTone): ResultProbeConfig {
+  const { center, normal } = resultProbeSurfaceForFace(kind, face);
   const anchor = center.clone().add(normal.clone().multiplyScalar(0.06));
   const toneOffset = tone === "max"
     ? new THREE.Vector3(0.1, 0.34, 0.54)
@@ -2012,6 +2011,32 @@ function resultProbeForFace(face: DisplayFace, label: string, tone: ResultProbeT
     labelPosition: labelPosition.toArray() as [number, number, number],
     tone
   };
+}
+
+function resultProbeSurfaceForFace(kind: SampleModelKind, face: DisplayFace): { center: THREE.Vector3; normal: THREE.Vector3 } {
+  const center = new THREE.Vector3(...face.center);
+  const normal = new THREE.Vector3(...face.normal).normalize();
+  if (kind !== "plate") return { center, normal };
+
+  if (face.id === "face-load-top") {
+    return {
+      center: new THREE.Vector3(center.x, BEAM_TOP_Y, center.z),
+      normal: new THREE.Vector3(0, 1, 0)
+    };
+  }
+  if (face.id === "face-web-front") {
+    return {
+      center: new THREE.Vector3(center.x, BEAM_TOP_Y, center.z),
+      normal: new THREE.Vector3(0, 1, 0)
+    };
+  }
+  if (face.id === "face-base-bottom") {
+    return {
+      center: new THREE.Vector3(center.x, center.y, BEAM_DEPTH / 2),
+      normal: new THREE.Vector3(0, 0, 1)
+    };
+  }
+  return { center, normal };
 }
 
 function resultProbeLabels(resultMode: ResultMode, resultFields: ResultField[], unitSystem: UnitSystem) {
