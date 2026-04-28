@@ -103,6 +103,8 @@ type ModelPickHandlers = {
 };
 export const VIEWER_GIZMO_ALIGNMENT = "bottom-right";
 const VIEWER_FIT_MARGIN = 1.28;
+const DEFAULT_HOME_FIT_MARGIN = 1.46;
+const VIEWER_FIT_RETRY_DELAY_MS = 120;
 
 export function CadViewer(props: CadViewerProps) {
   const controlsRef = useRef<ViewerOrbitControls | null>(null);
@@ -2444,16 +2446,37 @@ function BoundsCameraReset({ signal, viewAxis, viewAxisSignal }: { signal: numbe
   const bounds = useBounds();
   const { camera, size } = useThree();
   useEffect(() => {
-    const nextBounds = bounds.refresh().clip();
-    const { box, center, distance } = nextBounds.getSize();
-    const view = viewAxis ? cameraViewForAxis(viewAxis) : { direction: ISO_CAMERA_DIRECTION, up: ISO_CAMERA_UP };
-    const target = viewAxis ? center : defaultHomeViewTarget(box, view.direction, view.up);
-    const perspectiveCamera = camera as THREE.PerspectiveCamera;
-    const fitDistance = perspectiveCamera.isPerspectiveCamera
-      ? cameraDistanceForBounds(box, view.direction, view.up, perspectiveCamera.fov, size.width / size.height, VIEWER_FIT_MARGIN)
-      : distance;
-    const cameraPosition = target.clone().addScaledVector(view.direction, fitDistance);
-    nextBounds.moveTo(cameraPosition).lookAt({ target, up: view.up });
+    let cancelled = false;
+    let frameId = 0;
+    let retryFrameId = 0;
+    const retryTimerId = window.setTimeout(() => {
+      frameId = window.requestAnimationFrame(() => {
+        retryFrameId = window.requestAnimationFrame(resetCamera);
+      });
+    }, VIEWER_FIT_RETRY_DELAY_MS);
+
+    function resetCamera() {
+      if (cancelled) return;
+      const nextBounds = bounds.refresh().clip();
+      const { box, center, distance } = nextBounds.getSize();
+      const view = viewAxis ? cameraViewForAxis(viewAxis) : { direction: ISO_CAMERA_DIRECTION, up: ISO_CAMERA_UP };
+      const target = viewAxis ? center : defaultHomeViewTarget(box, view.direction, view.up);
+      const perspectiveCamera = camera as THREE.PerspectiveCamera;
+      const fitMargin = viewAxis ? VIEWER_FIT_MARGIN : DEFAULT_HOME_FIT_MARGIN;
+      const fitDistance = perspectiveCamera.isPerspectiveCamera
+        ? cameraDistanceForBounds(box, view.direction, view.up, perspectiveCamera.fov, size.width / size.height, fitMargin)
+        : distance;
+      const cameraPosition = target.clone().addScaledVector(view.direction, fitDistance);
+      nextBounds.moveTo(cameraPosition).lookAt({ target, up: view.up });
+    }
+
+    resetCamera();
+    return () => {
+      cancelled = true;
+      window.clearTimeout(retryTimerId);
+      if (frameId) window.cancelAnimationFrame(frameId);
+      if (retryFrameId) window.cancelAnimationFrame(retryFrameId);
+    };
   }, [bounds, camera, signal, size.height, size.width, viewAxis, viewAxisSignal]);
   return null;
 }
