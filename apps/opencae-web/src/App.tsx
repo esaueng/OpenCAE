@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Constraint, DisplayFace, DisplayModel, Load, NamedSelection, Project, ResultField, ResultSummary, RunEvent, Study } from "@opencae/schema";
 import { RotateCcw, Save } from "lucide-react";
 import { addLoad, addSupport, assignMaterial, createProject, generateMesh, getResults, importLocalProject, loadSampleProject, renameProject, runSimulation, subscribeToRun, updateStudy as saveStudyPatch, uploadModel, type SampleModelId } from "./lib/api";
@@ -93,6 +93,7 @@ export function App() {
   const [sampleModel, setSampleModel] = useState<SampleModelId>(restoredUi?.sampleModel ?? "bracket");
   const [previewPrintLayerOrientation, setPreviewPrintLayerOrientation] = useState<PrintLayerOrientation | null | undefined>(undefined);
   const [isStepbarCollapsed, setIsStepbarCollapsed] = useState(false);
+  const didRequestRestoredHomeView = useRef(false);
 
   const study = project?.studies[0] ?? null;
   const assignedPrintLayerOrientation = useMemo<PrintLayerOrientation | null>(() => {
@@ -115,6 +116,13 @@ export function App() {
   const missingRunItems = runReadiness.filter((item) => !item.done).map((item) => item.label);
   const canUndoAction = undoStack.length > 0;
   const canRedoAction = redoStack.length > 0;
+
+  useEffect(() => {
+    if (didRequestRestoredHomeView.current) return;
+    if (!restoredProjectFile || homeRequested || !project || !displayModel) return;
+    didRequestRestoredHomeView.current = true;
+    requestDefaultHomeView();
+  }, [displayModel, homeRequested, project, restoredProjectFile]);
 
   const handleMeasureDisplayModelDimensions = useCallback((dimensions: NonNullable<DisplayModel["dimensions"]>) => {
     setDisplayModel((current) => {
