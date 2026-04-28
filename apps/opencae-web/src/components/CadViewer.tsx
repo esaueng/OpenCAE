@@ -108,7 +108,6 @@ export function CadViewer(props: CadViewerProps) {
   const controlsRef = useRef<ViewerOrbitControls | null>(null);
   const [uploadedPreviewBounds, setUploadedPreviewBounds] = useState<THREE.Box3 | null>(null);
   const [gizmoViewRequest, setGizmoViewRequest] = useState<{ axis: RotationAxis | null; signal: number }>({ axis: null, signal: 0 });
-  const [gizmoRotationRequest, setGizmoRotationRequest] = useState<{ axis: RotationAxis | null; signal: number }>({ axis: null, signal: 0 });
   const effectiveViewMode: ViewMode = props.activeStep === "results" ? props.viewMode : props.viewMode === "mesh" ? "mesh" : "model";
   const showDimensionOverlay = shouldShowDimensionOverlay(props.showDimensions, effectiveViewMode);
   const isLightTheme = props.themeMode === "light";
@@ -138,13 +137,11 @@ export function CadViewer(props: CadViewerProps) {
           <BoundsCameraReset signal={props.fitSignal} viewAxis={props.viewAxis} viewAxisSignal={props.viewAxisSignal} />
           <GizmoCameraReset axis={gizmoViewRequest.axis} signal={gizmoViewRequest.signal} />
         </Bounds>
-        <GizmoCameraRotation controlsRef={controlsRef} axis={gizmoRotationRequest.axis} signal={gizmoRotationRequest.signal} />
         <OrbitControls ref={controlsRef} makeDefault enableDamping dampingFactor={0.08} target={[0, 0, 0.75]} />
         <ShiftPanControls controlsRef={controlsRef} />
         <GizmoHelper alignment={VIEWER_GIZMO_ALIGNMENT} margin={[92, 92]}>
           <CleanAxisGizmo
             onSelectAxis={(axis) => setGizmoViewRequest((request) => ({ axis, signal: request.signal + 1 }))}
-            onRotateAxis={(axis) => setGizmoRotationRequest((request) => ({ axis, signal: request.signal + 1 }))}
           />
         </GizmoHelper>
       </Canvas>
@@ -245,8 +242,7 @@ function panCamera(camera: THREE.Camera, target: THREE.Vector3, deltaX: number, 
   target.add(panOffset);
 }
 
-function CleanAxisGizmo({ onSelectAxis, onRotateAxis }: { onSelectAxis: (axis: RotationAxis) => void; onRotateAxis: (axis: RotationAxis) => void }) {
-  const [hovered, setHovered] = useState(false);
+function CleanAxisGizmo({ onSelectAxis }: { onSelectAxis: (axis: RotationAxis) => void }) {
   const axes: Array<{ label: "X" | "Y" | "Z"; color: string; position: [number, number, number] }> = [
     { label: "X", color: "#ff4b7d", position: [0.92, 0, 0] },
     { label: "Y", color: "#2ddc94", position: [0, 0.92, 0] },
@@ -254,11 +250,7 @@ function CleanAxisGizmo({ onSelectAxis, onRotateAxis }: { onSelectAxis: (axis: R
   ];
 
   return (
-    <group
-      scale={38}
-      onPointerOver={() => setHovered(true)}
-      onPointerOut={() => setHovered(false)}
-    >
+    <group scale={38}>
       {axes.map((axis) => (
         <group key={axis.label}>
           <Line points={[[0, 0, 0], axis.position]} color={axis.color} lineWidth={4} />
@@ -266,13 +258,6 @@ function CleanAxisGizmo({ onSelectAxis, onRotateAxis }: { onSelectAxis: (axis: R
           <AxisDot color={axis.color} position={axis.position.map((value) => -value * 0.72) as [number, number, number]} />
         </group>
       ))}
-      {hovered && (
-        <group>
-          <AxisRotateHandle label="RX" axis="x" color="#ff4b7d" position={[0.05, -0.78, 0.32]} onRotateAxis={onRotateAxis} />
-          <AxisRotateHandle label="RY" axis="y" color="#2ddc94" position={[-0.78, 0.08, 0.32]} onRotateAxis={onRotateAxis} />
-          <AxisRotateHandle label="RZ" axis="z" color="#4da3ff" position={[0.54, 0.54, 0.32]} onRotateAxis={onRotateAxis} />
-        </group>
-      )}
       <Billboard>
         <mesh>
           <sphereGeometry args={[0.065, 18, 18]} />
@@ -280,30 +265,6 @@ function CleanAxisGizmo({ onSelectAxis, onRotateAxis }: { onSelectAxis: (axis: R
         </mesh>
       </Billboard>
     </group>
-  );
-}
-
-function AxisRotateHandle({ label, axis, color, position, onRotateAxis }: { label: string; axis: RotationAxis; color: string; position: [number, number, number]; onRotateAxis: (axis: RotationAxis) => void }) {
-  return (
-    <Billboard
-      position={position}
-      onPointerDown={(event: ThreeEvent<PointerEvent>) => {
-        event.stopPropagation();
-        onRotateAxis(axis);
-      }}
-    >
-      <mesh>
-        <circleGeometry args={[0.2, 32]} />
-        <meshBasicMaterial color="#0b1622" depthTest={false} transparent opacity={0.92} toneMapped={false} />
-      </mesh>
-      <mesh position={[0, 0, 0.006]}>
-        <ringGeometry args={[0.16, 0.19, 32]} />
-        <meshBasicMaterial color={color} depthTest={false} toneMapped={false} />
-      </mesh>
-      <Text anchorX="center" anchorY="middle" color={color} fontSize={0.115} letterSpacing={0} position={[0, 0, 0.012]}>
-        {label}
-      </Text>
-    </Billboard>
   );
 }
 
@@ -2486,21 +2447,6 @@ function GizmoCameraReset({ axis, signal }: { axis: RotationAxis | null; signal:
     const cameraPosition = center.clone().addScaledVector(view.direction, fitDistance);
     nextBounds.moveTo(cameraPosition).lookAt({ target: center, up: view.up });
   }, [axis, bounds, camera, signal, size.height, size.width]);
-  return null;
-}
-
-function GizmoCameraRotation({ controlsRef, axis, signal }: { controlsRef: MutableRefObject<ViewerOrbitControls | null>; axis: RotationAxis | null; signal: number }) {
-  const { camera } = useThree();
-  useEffect(() => {
-    if (!axis) return;
-    const controls = controlsRef.current;
-    const target = controls?.target?.clone() ?? new THREE.Vector3(0, 0, 0.75);
-    const nextOrbit = rotatedCameraOrbit(camera.position, target, camera.up, axis, Math.PI / 2);
-    camera.position.copy(nextOrbit.position);
-    camera.up.copy(nextOrbit.up);
-    camera.lookAt(target);
-    controls?.update();
-  }, [axis, camera, controlsRef, signal]);
   return null;
 }
 
