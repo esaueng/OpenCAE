@@ -6,7 +6,8 @@ export function selectBestSnapCandidate(candidates: SnapCandidate[], cursorPoint
   const thresholdPixels = config.thresholdPixels ?? DEFAULT_SNAP_CONFIG.thresholdPixels;
   const distanceWeight = config.distanceWeight ?? DEFAULT_SNAP_CONFIG.distanceWeight;
   const useScreenDistance = Boolean(config.screenPosition && config.projectToScreen);
-  let best: ScoredSnapCandidate | null = null;
+  let bestPreferred: ScoredSnapCandidate | null = null;
+  let bestFallback: ScoredSnapCandidate | null = null;
 
   for (const candidate of candidates) {
     const distanceToCursor = useScreenDistance
@@ -15,12 +16,15 @@ export function selectBestSnapCandidate(candidates: SnapCandidate[], cursorPoint
     const threshold = useScreenDistance ? thresholdPixels : thresholdWorld;
     if (distanceToCursor > threshold) continue;
     const score = distanceWeight * distanceToCursor + candidate.priority;
-    if (!best || score < best.score) {
-      best = { candidate, score, distanceToCursor };
+    const scored = { candidate, score, distanceToCursor };
+    if (candidate.fallback) {
+      if (!bestFallback || score < bestFallback.score) bestFallback = scored;
+    } else if (!bestPreferred || score < bestPreferred.score) {
+      bestPreferred = scored;
     }
   }
 
-  return best;
+  return bestPreferred ?? bestFallback;
 }
 
 function screenDistance(candidate: { x: number; y: number } | undefined, cursor: { x: number; y: number } | undefined) {

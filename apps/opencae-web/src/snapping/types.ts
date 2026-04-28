@@ -10,6 +10,7 @@ export type SnapCandidateKind =
   | "edge-midpoint"
   | "edge-closest"
   | "face-centroid"
+  | "face-centerline"
   | "face-projected"
   | "face-closest";
 
@@ -33,6 +34,7 @@ export interface SnapCandidate {
   kind: SnapCandidateKind;
   point: Vec3;
   priority: number;
+  fallback?: boolean;
 }
 
 export interface ScoredSnapCandidate {
@@ -81,6 +83,7 @@ export const SNAP_PRIORITIES: Record<SnapCandidateKind, number> = {
   vertex: 0,
   "edge-endpoint": 0.005,
   "edge-midpoint": 0.01,
+  "face-centerline": 0.015,
   "face-centroid": 0.02,
   "edge-closest": 0.025,
   "face-projected": 0.03,

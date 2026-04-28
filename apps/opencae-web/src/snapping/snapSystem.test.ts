@@ -79,9 +79,26 @@ describe("snap generation and scoring", () => {
     ]);
     expect(generateSnapCandidates(face, rayToward([0.25, 0.5, 1])).map((candidate) => candidate.kind)).toEqual([
       "face-centroid",
+      "face-centerline",
+      "face-centerline",
       "face-projected",
       "face-closest"
     ]);
+  });
+
+  test("snaps face hits to centerlines before free projected points", () => {
+    const result = getSnapSuggestion(rayToward([0.03, 0.55, 1]), {
+      objects: [boxMesh()],
+      mode: "loads",
+      thresholdWorld: 0.08,
+      smoothingAlpha: 1,
+      ownerFace: { id: "face-top", position: [0, 0, 1], normal: [0, 0, 1] }
+    });
+
+    expect(result).toMatchObject({
+      candidateKind: "face-centerline",
+      rawSnapPoint: [0, 0.55, 1]
+    });
   });
 
   test("selects the best candidate using distance and CAD priority", () => {
@@ -152,10 +169,10 @@ describe("snap visualization guides", () => {
     const guides = snapConstructionGuides({
       hovered: { type: "face", id: "face-top", position: [0, 0, 1], normal: [0, 0, 1], faceId: "face-top" },
       snapPoint: [0.1, 0.2, 1],
-      rawSnapPoint: [0, 0, 1],
+      rawSnapPoint: [0, 0.2, 1],
       direction: [0, 0, 1],
       suggestionType: "force",
-      candidateKind: "face-centroid",
+      candidateKind: "face-centerline",
       score: 0
     });
 
