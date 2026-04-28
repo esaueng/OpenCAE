@@ -45,13 +45,6 @@ interface SaveFilePickerWindow extends Window {
   }) => Promise<SaveFilePickerHandle>;
 }
 
-interface PendingLoadPlacement {
-  type: Exclude<LoadType, "gravity">;
-  value: number;
-  direction: LoadDirectionLabel;
-  payloadMetadata: PayloadLoadMetadata;
-}
-
 const seededSummary: ResultSummary = {
   maxStress: 142,
   maxStressUnits: "MPa",
@@ -97,7 +90,6 @@ export function App() {
   const [draftLoadDirection, setDraftLoadDirection] = useState<LoadDirectionLabel>(restoredUi?.draftLoadDirection ?? "-Z");
   const [draftPayloadPreview, setDraftPayloadPreview] = useState<{ value: number; metadata: PayloadLoadMetadata } | null>(null);
   const [previewLoadEdit, setPreviewLoadEdit] = useState<Load | null>(null);
-  const [pendingLoadPlacement, setPendingLoadPlacement] = useState<PendingLoadPlacement | null>(null);
   const [sampleModel, setSampleModel] = useState<SampleModelId>(restoredUi?.sampleModel ?? "bracket");
   const [previewPrintLayerOrientation, setPreviewPrintLayerOrientation] = useState<PrintLayerOrientation | null | undefined>(undefined);
   const [isStepbarCollapsed, setIsStepbarCollapsed] = useState(false);
@@ -155,7 +147,6 @@ export function App() {
 
   useEffect(() => {
     if (activeStep !== "loads") setPreviewLoadEdit(null);
-    if (activeStep !== "loads") setPendingLoadPlacement(null);
   }, [activeStep]);
 
   const draftLoadPreview = useMemo<DraftLoadPreview | undefined>(() => {
@@ -398,13 +389,6 @@ export function App() {
     }
     if (activeStep === "supports") {
       void addFixedSupportForFace(face);
-      return;
-    }
-    if (activeStep === "loads" && pendingLoadPlacement && nextLoadPoint) {
-      const pending = pendingLoadPlacement;
-      setPendingLoadPlacement(null);
-      void addLoadForFace(pending.type, pending.value, face, pending.direction, nextLoadPoint, null, pending.payloadMetadata)
-        .then(() => setSelectedLoadPoint(null));
       return;
     }
     pushMessage(`${face.label} selected.`);
@@ -716,25 +700,15 @@ export function App() {
             updateStudy(saveStudyPatch(study.id, { constraints: study.constraints.filter((item) => item.id !== supportId) }, "Support removed.", study))
           }
           onDraftLoadTypeChange={(type) => {
-            setPendingLoadPlacement(null);
             setDraftLoadType(type);
           }}
           onDraftLoadValueChange={(value) => {
-            setPendingLoadPlacement(null);
             setDraftLoadValue(value);
           }}
           onDraftLoadDirectionChange={(direction) => {
-            setPendingLoadPlacement(null);
             setDraftLoadDirection(direction);
           }}
-          isPlacingLoad={Boolean(pendingLoadPlacement)}
           onAddLoad={(type, value, selectionRef, direction, payloadMetadata = {}) => {
-            if (type !== "gravity") {
-              setPendingLoadPlacement({ type, value, direction, payloadMetadata });
-              setSelectedLoadPoint(null);
-              pushMessage("Click a point on the model to place the load.");
-              return;
-            }
             const selection = study.namedSelections.find((item) => item.id === selectionRef);
             const faceId = selection?.geometryRefs[0]?.entityId;
             const payloadObject = type === "gravity" ? selectedPayloadObject : null;
@@ -742,6 +716,10 @@ export function App() {
             const face = selectedFace?.id === faceId || (!selection && selectedFace) ? selectedFace : displayModel.faces.find((item) => item.id === faceId) ?? fallbackPayloadFace;
             if (!face) return;
             const applicationPoint = type === "gravity" && payloadObject ? payloadObject.center : selectedLoadPoint;
+            if (type !== "gravity" && !applicationPoint) {
+              pushMessage("Select a point on the model before adding a load.");
+              return;
+            }
             if (selection) {
               updateStudy(addLoad(study.id, type, value, selection.id, directionVectorForLabel(direction, face), applicationPoint, payloadObject, study, payloadMetadata));
               setSelectedLoadPoint(null);
