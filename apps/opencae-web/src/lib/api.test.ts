@@ -184,6 +184,16 @@ describe("api", () => {
     });
   });
 
+  test("loads the cantilever sample with markers anchored on the beam end faces", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("missing", { status: 404 })));
+
+    const response = await loadSampleProject("cantilever");
+
+    expect(response.project.name).toBe("Cantilever Demo");
+    expect(response.displayModel.faces.find((face) => face.id === "face-base-left")?.center).toEqual([-1.9, 0.18, 0]);
+    expect(response.displayModel.faces.find((face) => face.id === "face-load-top")?.center).toEqual([1.9, 0.18, 0]);
+  });
+
   test("creates a blank project locally when the API is unavailable", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new TypeError("Failed to fetch"))));
 

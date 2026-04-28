@@ -312,8 +312,8 @@ function faceGeometry(entityId: string, label: string, index: number, count: num
 
 const knownFaces: Array<{ match: string; center: Vec3; normal: Vec3; baselineStress: number }> = [
   ...bracketDisplayModel.faces.map((face) => ({ match: face.id.toLowerCase(), center: face.center, normal: normalize(face.normal), baselineStress: face.stressValue })),
-  { match: "face-base-left fixed end face", center: [-1.8, 0.18, 0], normal: [-1, 0, 0], baselineStress: 132 },
-  { match: "face-load-top free end load face", center: [1.75, 0.18, 0], normal: [1, 0, 0], baselineStress: 96 },
+  { match: "face-base-left fixed end face", center: [-1.9, 0.18, 0], normal: [-1, 0, 0], baselineStress: 132 },
+  { match: "face-load-top free end load face", center: [1.9, 0.18, 0], normal: [1, 0, 0], baselineStress: 96 },
   { match: "face-web-front top beam face", center: [0, 0.42, 0], normal: [0, 1, 0], baselineStress: 74 },
   { match: "face-base-bottom beam bottom face", center: [0, -0.08, 0], normal: [0, -1, 0], baselineStress: 46 },
   { match: "face-load", center: [-1.18, 2.53, 0], normal: [0, 1, 0], baselineStress: 142 },
@@ -331,8 +331,8 @@ const knownFaces: Array<{ match: string; center: Vec3; normal: Vec3; baselineStr
   { match: "right load pad", center: [1.42, 0, 0.17], normal: [0, 0, 1], baselineStress: 118 },
   { match: "hole rim", center: [0, 0, 0.2], normal: [0, 0, 1], baselineStress: 84 },
   { match: "plate top", center: [0, 0, 0.18], normal: [0, 0, 1], baselineStress: 58 },
-  { match: "fixed end", center: [-1.8, 0.18, 0], normal: [-1, 0, 0], baselineStress: 132 },
-  { match: "free end", center: [1.75, 0.18, 0], normal: [1, 0, 0], baselineStress: 96 },
+  { match: "fixed end", center: [-1.9, 0.18, 0], normal: [-1, 0, 0], baselineStress: 132 },
+  { match: "free end", center: [1.9, 0.18, 0], normal: [1, 0, 0], baselineStress: 96 },
   { match: "top beam", center: [0, 0.42, 0], normal: [0, 1, 0], baselineStress: 74 },
   { match: "bottom beam", center: [0, -0.12, 0], normal: [0, -1, 0], baselineStress: 48 },
   { match: "upload-top", center: [0, 0.72, 0], normal: [0, 1, 0], baselineStress: 72 },
