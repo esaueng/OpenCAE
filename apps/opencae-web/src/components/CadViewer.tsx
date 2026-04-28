@@ -1199,7 +1199,7 @@ function UploadedNativeCadResultModel({
   onUploadedPreviewBounds: (bounds: THREE.Box3) => void;
 }) {
   const filename = displayModel.nativeCad?.filename ?? displayModel.name;
-  const [preview, setPreview] = useState<{ status: "loading" | "ready" | "error"; object?: THREE.Group; message?: string }>({ status: "loading" });
+  const [preview, setPreview] = useState<{ status: "loading" | "ready" | "error"; object?: THREE.Group; outline?: THREE.Group; message?: string }>({ status: "loading" });
 
   useEffect(() => {
     let cancelled = false;
@@ -1207,8 +1207,9 @@ function UploadedNativeCadResultModel({
     stepPreviewFromBase64(displayModel.nativeCad?.contentBase64 ?? "", "#63a9e5")
       .then((nextPreview) => {
         if (cancelled) return;
+        const outline = showDeformed ? createUndeformedResultOutlineObject(nextPreview.object) : undefined;
         colorizeResultObject(nextPreview.object, "uploaded", resultMode, showDeformed, stressExaggeration, samples, loadMarkers);
-        setPreview({ status: "ready", object: nextPreview.object });
+        setPreview({ status: "ready", object: nextPreview.object, outline });
         onMeasureDisplayModelDimensions?.(nextPreview.dimensions);
         onUploadedPreviewBounds(nextPreview.normalizedBounds);
       })
@@ -1243,7 +1244,12 @@ function UploadedNativeCadResultModel({
     return <UnsupportedUploadedModelNotice filename={`${filename} ${preview.message ?? ""}`.trim()} />;
   }
 
-  return <primitive object={preview.object} />;
+  return (
+    <group>
+      {preview.outline && <primitive object={preview.outline} />}
+      <primitive object={preview.object} />
+    </group>
+  );
 }
 
 function UploadedStlResultModel({
@@ -1261,16 +1267,20 @@ function UploadedStlResultModel({
   stressExaggeration: number;
   loadMarkers: ViewerLoadMarker[];
 }) {
+  const outlineGeometry = useMemo(() => normalizedStlGeometryFromBuffer(base64ToArrayBuffer(displayModel.visualMesh?.contentBase64 ?? "")), [displayModel.visualMesh?.contentBase64]);
   const geometry = useMemo(() => {
     const parsed = normalizedStlGeometryFromBuffer(base64ToArrayBuffer(displayModel.visualMesh?.contentBase64 ?? ""));
     return colorizeResultGeometry(parsed, "uploaded", resultMode, showDeformed, stressExaggeration, samples, loadMarkers);
   }, [displayModel.visualMesh?.contentBase64, loadMarkers, resultMode, samples, showDeformed, stressExaggeration]);
 
   return (
-    <mesh geometry={geometry}>
-      <meshStandardMaterial vertexColors metalness={0.18} roughness={0.52} side={THREE.DoubleSide} />
-      <Edges color="#43556a" threshold={18} />
-    </mesh>
+    <group>
+      {shouldShowUndeformedResultOutline(showDeformed) && <UndeformedGeometryOutline geometry={outlineGeometry} />}
+      <mesh geometry={geometry}>
+        <meshStandardMaterial vertexColors metalness={0.18} roughness={0.52} side={THREE.DoubleSide} />
+        <Edges color="#43556a" threshold={18} />
+      </mesh>
+    </group>
   );
 }
 
@@ -1289,6 +1299,8 @@ function BracketResultSolid({
   stressExaggeration: number;
   loadMarkers: ViewerLoadMarker[];
 }) {
+  const outlineBodyGeometry = useMemo(() => createBracketBodyGeometry(), []);
+  const outlineRibGeometry = useMemo(() => createRibGeometry(), []);
   const bodyGeometry = useMemo(
     () => colorizeResultGeometry(createBracketBodyGeometry(), kind, resultMode, showDeformed, stressExaggeration, samples, loadMarkers),
     [kind, loadMarkers, resultMode, samples, showDeformed, stressExaggeration]
@@ -1299,6 +1311,12 @@ function BracketResultSolid({
   );
   return (
     <group>
+      {shouldShowUndeformedResultOutline(showDeformed) && (
+        <>
+          <UndeformedGeometryOutline geometry={outlineBodyGeometry} />
+          <UndeformedGeometryOutline geometry={outlineRibGeometry} />
+        </>
+      )}
       <mesh geometry={bodyGeometry}>
         <meshStandardMaterial vertexColors metalness={0.18} roughness={0.52} side={THREE.DoubleSide} />
         <Edges color="#43556a" threshold={18} />
@@ -1327,6 +1345,9 @@ function SampleResultSolid({
   stressExaggeration: number;
   loadMarkers: ViewerLoadMarker[];
 }) {
+  const outlineBeamGeometry = useMemo(() => createBeamGeometry(), []);
+  const outlineBeamPayloadGeometry = useMemo(() => createBeamPayloadGeometry(), []);
+  const outlineCantileverGeometry = useMemo(() => new THREE.BoxGeometry(3.8, 0.5, 0.72, 40, 8, 8), []);
   const beamGeometry = useMemo(
     () => colorizeResultGeometry(createBeamGeometry(), kind, resultMode, showDeformed, stressExaggeration, samples, loadMarkers),
     [kind, loadMarkers, resultMode, samples, showDeformed, stressExaggeration]
@@ -1339,6 +1360,12 @@ function SampleResultSolid({
   if (kind === "plate") {
     return (
       <group>
+        {shouldShowUndeformedResultOutline(showDeformed) && (
+          <>
+            <UndeformedGeometryOutline geometry={outlineBeamGeometry} />
+            <UndeformedGeometryOutline geometry={outlineBeamPayloadGeometry} />
+          </>
+        )}
         <mesh geometry={beamGeometry}>
           <meshStandardMaterial vertexColors metalness={0.18} roughness={0.52} side={THREE.DoubleSide} />
           <Edges color="#43556a" threshold={18} />
@@ -1352,13 +1379,59 @@ function SampleResultSolid({
   }
   if (kind === "cantilever") {
     return (
-      <mesh geometry={cantileverGeometry} position={[0, 0.18, 0]}>
-        <meshStandardMaterial vertexColors metalness={0.18} roughness={0.52} />
-        <Edges color="#43556a" threshold={18} />
-      </mesh>
+      <group>
+        {shouldShowUndeformedResultOutline(showDeformed) && <UndeformedGeometryOutline geometry={outlineCantileverGeometry} position={[0, 0.18, 0]} />}
+        <mesh geometry={cantileverGeometry} position={[0, 0.18, 0]}>
+          <meshStandardMaterial vertexColors metalness={0.18} roughness={0.52} />
+          <Edges color="#43556a" threshold={18} />
+        </mesh>
+      </group>
     );
   }
   return <SampleSolid kind={kind} color={resultPalette(resultMode).body[2] ?? "#9aa7b4"} />;
+}
+
+export function shouldShowUndeformedResultOutline(showDeformed: boolean) {
+  return showDeformed;
+}
+
+function UndeformedGeometryOutline({ geometry, position }: { geometry: THREE.BufferGeometry; position?: [number, number, number] }) {
+  const edgeGeometry = useMemo(() => new THREE.EdgesGeometry(geometry, 18), [geometry]);
+
+  return (
+    <lineSegments geometry={edgeGeometry} position={position} renderOrder={8}>
+      <lineBasicMaterial color="#dbeafe" transparent opacity={0.72} depthTest={false} depthWrite={false} toneMapped={false} />
+    </lineSegments>
+  );
+}
+
+export function createUndeformedResultOutlineObject(object: THREE.Object3D) {
+  object.updateMatrixWorld(true);
+  const outline = new THREE.Group();
+  outline.name = "undeformed-result-outline";
+  const rootWorldInverse = object.matrixWorld.clone().invert();
+
+  object.traverse((child) => {
+    if (!(child instanceof THREE.Mesh) || !(child.geometry instanceof THREE.BufferGeometry)) return;
+    const edges = new THREE.LineSegments(
+      new THREE.EdgesGeometry(child.geometry, 18),
+      new THREE.LineBasicMaterial({
+        color: "#dbeafe",
+        transparent: true,
+        opacity: 0.72,
+        depthTest: false,
+        depthWrite: false,
+        toneMapped: false
+      })
+    );
+    edges.name = `${child.name || "mesh"} undeformed outline`;
+    edges.renderOrder = 8;
+    edges.matrix.copy(rootWorldInverse.clone().multiply(child.matrixWorld));
+    edges.matrixAutoUpdate = false;
+    outline.add(edges);
+  });
+
+  return outline;
 }
 
 function colorizeResultGeometry(

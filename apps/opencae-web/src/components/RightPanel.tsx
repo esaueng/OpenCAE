@@ -930,6 +930,7 @@ function ResultsPanel({
             max="4"
             step="0.1"
             value={stressExaggeration}
+            style={{ "--range-progress": `${rangeProgressPercent(stressExaggeration, 1, 4)}%` } as CSSProperties}
             onChange={(event) => onStressExaggerationChange(Number(event.currentTarget.value))}
           />
         </label>
@@ -970,6 +971,11 @@ function ResultsPanel({
       <div className="legend"><span /> <small>Low</small><small>High</small></div>
     </Panel>
   );
+}
+
+export function rangeProgressPercent(value: number, min: number, max: number) {
+  if (max <= min) return 0;
+  return Math.min(100, Math.max(0, ((value - min) / (max - min)) * 100));
 }
 
 function Panel({ title, helper, children }: { title: string; helper: string; children: ReactNode }) {
