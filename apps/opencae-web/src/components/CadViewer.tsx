@@ -534,6 +534,16 @@ function loadMarkerAnchor(marker: ViewerLoadMarker, face: DisplayFace): [number,
   return marker.point ?? marker.payloadObject?.center ?? face.center;
 }
 
+export function loadGlyphSurfacePoint(marker: ViewerLoadMarker, face: DisplayFace) {
+  const center = new THREE.Vector3(...loadMarkerAnchor(marker, face));
+  if (marker.point || marker.payloadObject) return center;
+  const normal = new THREE.Vector3(...face.normal).normalize();
+  const tangent = new THREE.Vector3().crossVectors(normal, new THREE.Vector3(0, 1, 0));
+  if (tangent.lengthSq() < 0.001) tangent.set(1, 0, 0);
+  tangent.normalize();
+  return center.add(tangent.multiplyScalar((marker.stackIndex - 0.5) * 0.22));
+}
+
 export function supportMarkerAnchor(kind: SampleModelKind, marker: ViewerSupportMarker, face: DisplayFace): [number, number, number] {
   if (kind === "bracket" && marker.faceId === "face-base-left") return [0.72, 0, BRACKET_DEPTH / 2 + 0.065];
   return face.center;
@@ -557,7 +567,7 @@ export function beamPayloadSelectionForTarget(targetId: unknown): PayloadObjectS
 
 export function pointForPlacementSnap(point: [number, number, number], snapResult: SnapResult | null | undefined, freePlacement = false): [number, number, number] {
   if (freePlacement) return point;
-  return snapResult?.snapPoint ?? point;
+  return snapResult?.rawSnapPoint ?? point;
 }
 
 export function faceIdForPlacementSnap(faceId: string, snapResult: SnapResult | null | undefined) {
@@ -2322,13 +2332,12 @@ function LoadGlyph({ marker, face, active, labelPosition }: { marker: ViewerLoad
   const labelTone = marker.type === "gravity" ? presentation.tone : active ? "active-load" : presentation.tone;
 
   const normal = new THREE.Vector3(...face.normal).normalize();
-  const center = new THREE.Vector3(...(marker.point ?? face.center));
+  const center = new THREE.Vector3(...loadMarkerAnchor(marker, face));
   const tangent = new THREE.Vector3().crossVectors(normal, new THREE.Vector3(0, 1, 0));
   if (tangent.lengthSq() < 0.001) tangent.set(1, 0, 0);
   tangent.normalize();
-  const loadOffset = tangent.clone().multiplyScalar((marker.stackIndex - 0.5) * 0.22);
   const arrowDirection = isNormalDirection ? normal : markerDirection;
-  const { start, end } = arrowPointsOutsideSurface(center.clone().add(loadOffset), normal, arrowDirection, 0.54);
+  const { start, end } = arrowPointsOutsideSurface(loadGlyphSurfacePoint(marker, face), normal, arrowDirection, 0.54);
   const tailLabelPosition = start.clone().add(arrowDirection.clone().multiplyScalar(-0.18)).add(normal.clone().multiplyScalar(0.08));
   const payloadOffset = payloadMassLabelOffset(marker.labelIndex);
   const massLabelPosition = labelPosition ? new THREE.Vector3(...labelPosition) : center
