@@ -99,7 +99,7 @@ describe("snap generation and scoring", () => {
       ]
     };
 
-    const result = getSnapSuggestion(rayToward([0.234, 0.02, 1]), {
+    const result = getSnapSuggestion(rayToward([0.239, 0.027, 1]), {
       objects: [boxMesh()],
       mode: "loads",
       thresholdWorld: 0.08,
@@ -109,8 +109,8 @@ describe("snap generation and scoring", () => {
 
     expect(result).toMatchObject({
       candidateKind: "face-unit",
-      rawSnapPoint: [0.24, 0, 1],
-      measurements: [{ label: "38 mm from edge", start: [1, 0, 1], end: [0.24, 0, 1] }]
+      rawSnapPoint: [0.24, 0.027, 1],
+      measurements: [{ label: "38 mm from edge", start: [1, 0.027, 1], end: [0.24, 0.027, 1] }]
     });
   });
 

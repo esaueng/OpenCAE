@@ -35,7 +35,7 @@ function centerlineCandidatesForAxis(projected: Vec3, faceCenter: Vec3, axis: Pa
   const centerlineCandidate: SnapCandidate = { kind: "face-centerline", point: centerlinePoint, priority: SNAP_PRIORITIES["face-centerline"] };
   if (!isCompleteSnapAxis(axis)) return [centerlineCandidate];
 
-  const unitCandidate = wholeUnitCandidate(centerlinePoint, axis);
+  const unitCandidate = wholeUnitCandidate(projected, axis);
   return unitCandidate ? [unitCandidate, centerlineCandidate] : [centerlineCandidate];
 }
 
@@ -46,17 +46,19 @@ function closestPointOnLine(point: Vec3, linePoint: Vec3, lineDirection: THREE.V
   return roundedVec3(origin.add(direction.multiplyScalar(target.sub(origin).dot(direction))));
 }
 
-function wholeUnitCandidate(centerlinePoint: Vec3, axis: FaceSnapAxis): SnapCandidate | null {
+function wholeUnitCandidate(projectedPoint: Vec3, axis: FaceSnapAxis): SnapCandidate | null {
   const direction = new THREE.Vector3(...axis.direction).normalize();
   const minPoint = new THREE.Vector3(...axis.minPoint);
   const maxPoint = new THREE.Vector3(...axis.maxPoint);
-  const point = new THREE.Vector3(...centerlinePoint);
+  const point = new THREE.Vector3(...projectedPoint);
   const spanUnits = Math.max(0, minPoint.distanceTo(maxPoint) * axis.unitsPerWorld);
   if (!Number.isFinite(spanUnits) || spanUnits <= 0 || axis.unitsPerWorld <= 0) return null;
   const unitStep = axis.unitStep && axis.unitStep > 0 ? axis.unitStep : 1;
-  const unitsFromMin = THREE.MathUtils.clamp(point.clone().sub(minPoint).dot(direction) * axis.unitsPerWorld, 0, spanUnits);
+  const currentFromMinWorld = point.clone().sub(minPoint).dot(direction);
+  const unitsFromMin = THREE.MathUtils.clamp(currentFromMinWorld * axis.unitsPerWorld, 0, spanUnits);
   const snappedFromMin = THREE.MathUtils.clamp(Math.round(unitsFromMin / unitStep) * unitStep, 0, spanUnits);
-  const snappedPoint = roundedVec3(minPoint.add(direction.multiplyScalar(snappedFromMin / axis.unitsPerWorld)));
+  const snappedPointVector = point.clone().add(direction.clone().multiplyScalar((snappedFromMin / axis.unitsPerWorld) - currentFromMinWorld));
+  const snappedPoint = roundedVec3(snappedPointVector);
   const measurement = edgeDistanceMeasurement(axis, snappedPoint, snappedFromMin, spanUnits);
   return {
     kind: "face-unit",
@@ -67,10 +69,15 @@ function wholeUnitCandidate(centerlinePoint: Vec3, axis: FaceSnapAxis): SnapCand
 }
 
 function edgeDistanceMeasurement(axis: FaceSnapAxis, point: Vec3, fromMin: number, spanUnits: number): SnapMeasurement {
+  const direction = new THREE.Vector3(...axis.direction).normalize();
+  const pointVector = new THREE.Vector3(...point);
   const fromMax = Math.max(0, spanUnits - fromMin);
   const useMin = fromMin <= fromMax;
-  const edgePoint = useMin ? axis.minPoint : axis.maxPoint;
   const value = useMin ? fromMin : fromMax;
+  const edgePoint = pointVector
+    .clone()
+    .add(direction.multiplyScalar((useMin ? -fromMin : fromMax) / axis.unitsPerWorld))
+    .toArray() as Vec3;
   return {
     kind: "edge-distance",
     start: edgePoint,
