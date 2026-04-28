@@ -19,6 +19,19 @@ export function snapMeasurementGuides(result: SnapResult): SnapMeasurement[] {
   return result.measurements ?? [];
 }
 
+export interface SnapMeasurementRuler {
+  line: [Vec3, Vec3];
+  ticks: Array<[Vec3, Vec3]>;
+  labelPosition: Vec3;
+  label: string;
+  color: string;
+  lineWidth: number;
+  opacity: number;
+  fontSize: number;
+  outlineWidth: number;
+  maxWidth: number;
+}
+
 export interface SnapConstructionGuide {
   kind: "centerline" | "alignment" | "midpoint-tick";
   points: [Vec3, Vec3];
@@ -71,34 +84,75 @@ function SnapMeasurementGuides({ result }: { result: SnapResult }) {
 }
 
 function EdgeDistanceGuide({ measurement, normal }: { measurement: SnapMeasurement; normal: Vec3 }) {
-  const start = new THREE.Vector3(...measurement.start);
-  const end = new THREE.Vector3(...measurement.end);
-  const midpoint = start.clone().add(end).multiplyScalar(0.5);
-  const normalOffset = new THREE.Vector3(...normal).normalize().multiplyScalar(0.055);
-  const labelPosition = midpoint.clone().add(normalOffset);
+  const ruler = snapMeasurementRuler(measurement, normal);
   return (
     <group>
-      <Line points={[measurement.start, measurement.end]} color="#f8d77b" lineWidth={2.1} transparent opacity={0.88} />
-      <Billboard position={labelPosition.toArray() as Vec3} renderOrder={52}>
+      <Line points={ruler.line} color={ruler.color} lineWidth={ruler.lineWidth} transparent opacity={ruler.opacity} />
+      {ruler.ticks.map((tick, index) => (
+        <Line key={`tick-${index}`} points={tick} color={ruler.color} lineWidth={ruler.lineWidth} transparent opacity={ruler.opacity} />
+      ))}
+      <Billboard position={ruler.labelPosition} renderOrder={52}>
         <Text
           anchorX="center"
           anchorY="middle"
-          color="#fef3c7"
+          color="#dbeafe"
           material-depthTest={false}
           material-depthWrite={false}
           material-toneMapped={false}
-          fontSize={0.105}
+          fontSize={ruler.fontSize}
           letterSpacing={0}
-          maxWidth={1.4}
-          outlineColor="#1f1300"
-          outlineOpacity={0.9}
-          outlineWidth={0.015}
+          maxWidth={ruler.maxWidth}
+          outlineColor="#03101d"
+          outlineOpacity={0.74}
+          outlineWidth={ruler.outlineWidth}
         >
-          {measurement.label}
+          {ruler.label}
         </Text>
       </Billboard>
     </group>
   );
+}
+
+export function snapMeasurementRuler(measurement: SnapMeasurement, normal: Vec3): SnapMeasurementRuler {
+  const start = new THREE.Vector3(...measurement.start);
+  const end = new THREE.Vector3(...measurement.end);
+  const faceNormal = new THREE.Vector3(...normal).normalize();
+  const lineDirection = end.clone().sub(start).normalize();
+  const tickDirection = rulerTickDirection(faceNormal, lineDirection);
+  const lift = faceNormal.clone().multiplyScalar(0.014);
+  const labelOffset = tickDirection.clone().multiplyScalar(0.066).add(faceNormal.clone().multiplyScalar(0.022));
+  const liftedStart = start.clone().add(lift);
+  const liftedEnd = end.clone().add(lift);
+  const midpoint = liftedStart.clone().add(liftedEnd).multiplyScalar(0.5);
+  return {
+    line: [liftedStart.toArray() as Vec3, liftedEnd.toArray() as Vec3],
+    ticks: [
+      rulerTick(liftedStart, tickDirection, 0.04),
+      rulerTick(midpoint, tickDirection, 0.026),
+      rulerTick(liftedEnd, tickDirection, 0.04)
+    ],
+    labelPosition: midpoint.add(labelOffset).toArray() as Vec3,
+    label: measurement.label,
+    color: "#8cc8ff",
+    lineWidth: 1.15,
+    opacity: 0.62,
+    fontSize: 0.052,
+    outlineWidth: 0.005,
+    maxWidth: 0.8
+  };
+}
+
+function rulerTick(origin: THREE.Vector3, direction: THREE.Vector3, halfLength: number): [Vec3, Vec3] {
+  return [
+    origin.clone().add(direction.clone().multiplyScalar(-halfLength)).toArray() as Vec3,
+    origin.clone().add(direction.clone().multiplyScalar(halfLength)).toArray() as Vec3
+  ];
+}
+
+function rulerTickDirection(normal: THREE.Vector3, lineDirection: THREE.Vector3) {
+  const tickDirection = new THREE.Vector3().crossVectors(normal, lineDirection).normalize();
+  if (tickDirection.lengthSq() < 0.001) return perpendicularAxis(lineDirection);
+  return tickDirection;
 }
 
 export function HoveredEntityHighlight({ entity }: { entity: HoveredEntity }) {

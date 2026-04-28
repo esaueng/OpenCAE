@@ -5,7 +5,7 @@ import { queryHoveredEntity } from "./geometryQuery";
 import { generateSnapCandidates } from "./snapGenerator";
 import { getSnapSuggestion, smoothSnapPoint } from "./snapController";
 import { selectBestSnapCandidate } from "./snapScoring";
-import { snapConstructionGuides, snapIndicatorStyle, snapMeasurementGuides, snapPreviewArrowStyle } from "./Visualization";
+import { snapConstructionGuides, snapIndicatorStyle, snapMeasurementGuides, snapMeasurementRuler, snapPreviewArrowStyle } from "./Visualization";
 import type { CursorRay, HoveredEntity, SnapCandidate } from "./types";
 
 function rayToward(point: [number, number, number]): CursorRay {
@@ -237,6 +237,21 @@ describe("snap visualization guides", () => {
     });
 
     expect(guides).toEqual([{ kind: "edge-distance", start: [1, 0, 1], end: [0.24, 0, 1], label: "38 mm from edge", value: 38, units: "mm" }]);
+  });
+
+  test("renders edge distance as a subtle ruler on the part", () => {
+    const ruler = snapMeasurementRuler(
+      { kind: "edge-distance", start: [1, 0, 1], end: [0.24, 0, 1], label: "38 mm from edge", value: 38, units: "mm" },
+      [0, 0, 1]
+    );
+
+    expect(ruler.ticks).toHaveLength(3);
+    expect(ruler.lineWidth).toBeLessThan(1.3);
+    expect(ruler.opacity).toBeLessThan(0.7);
+    expect(ruler.fontSize).toBeLessThan(0.06);
+    expect(ruler.outlineWidth).toBeLessThan(0.006);
+    expect(ruler.line[0][2]).toBeCloseTo(1.014);
+    expect(ruler.labelPosition[1]).toBeLessThan(0);
   });
 
   test("builds an edge alignment line and midpoint tick at the snap target", () => {
