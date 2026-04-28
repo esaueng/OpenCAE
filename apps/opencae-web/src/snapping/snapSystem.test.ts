@@ -5,7 +5,7 @@ import { queryHoveredEntity } from "./geometryQuery";
 import { generateSnapCandidates } from "./snapGenerator";
 import { getSnapSuggestion, smoothSnapPoint } from "./snapController";
 import { selectBestSnapCandidate } from "./snapScoring";
-import { disableSnapOverlayRaycast, snapConstructionGuides, snapIndicatorStyle, snapMeasurementGuides, snapMeasurementRuler, snapPreviewArrowStyle } from "./Visualization";
+import { disableSnapOverlayRaycast, isSnapOverlayObject, snapConstructionGuides, snapIndicatorStyle, snapMeasurementGuides, snapMeasurementRuler, snapOverlayUserData, snapPreviewArrowStyle } from "./Visualization";
 import type { CursorRay, HoveredEntity, SnapCandidate } from "./types";
 
 function rayToward(point: [number, number, number]): CursorRay {
@@ -198,6 +198,19 @@ describe("snap visualization guides", () => {
 
     expect(disableSnapOverlayRaycast(undefined, intersections as never[])).toBeUndefined();
     expect(intersections).toHaveLength(0);
+  });
+
+  test("marks snap overlay descendants for placement click fallback", () => {
+    const root = new THREE.Group();
+    const child = new THREE.Mesh(new THREE.SphereGeometry(1));
+    const unrelated = new THREE.Group();
+    root.userData = snapOverlayUserData();
+    root.add(child);
+
+    expect(isSnapOverlayObject(child)).toBe(true);
+    expect(isSnapOverlayObject(root)).toBe(true);
+    expect(isSnapOverlayObject(unrelated)).toBe(false);
+    expect(isSnapOverlayObject(null)).toBe(false);
   });
 
   test("keeps the cursor placement marker visually compact", () => {

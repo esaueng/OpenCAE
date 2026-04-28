@@ -20,7 +20,7 @@ import { loadMarkerViewportPresentation, type PayloadObjectSelection } from "../
 import { highlightPayloadObjectMeshes } from "../payloadObjectHighlight";
 import { layoutOutsideModelLabels, payloadMassLabelOffset, type LabelAnchor } from "../calloutLabelLayout";
 import { getSnapSuggestion } from "../snapping/snapController";
-import { SnapVisualization } from "../snapping/Visualization";
+import { isSnapOverlayObject, SnapVisualization } from "../snapping/Visualization";
 import type { CursorRay, FaceSnapAxis, SnapMeasurement, SnapResult, Vec3 } from "../snapping/types";
 
 export type ViewMode = "model" | "mesh" | "results";
@@ -408,9 +408,23 @@ function BracketModel({
       onSelectFace(hit.face, hit.point, hit.payloadObject);
     }
   };
+  const overlayFallbackPickHandlers: ModelPickHandlers = {
+    onPointerMove: (event) => {
+      if (!isSnapOverlayObject(event.object)) return;
+      event.stopPropagation();
+    },
+    onClick: (event) => {
+      if (!isSnapOverlayObject(event.object)) return;
+      const hit = hoveredHit ?? selectedHit;
+      if (!hit) return;
+      event.stopPropagation();
+      setSelectedHit(hit);
+      onSelectFace(hit.face, hit.point, hit.payloadObject);
+    }
+  };
 
   return (
-    <group>
+    <group {...overlayFallbackPickHandlers}>
       {isResultView ? (
         <AnalysisResultModel
           kind={modelKind}
