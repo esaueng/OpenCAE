@@ -23,7 +23,13 @@ import {
 import { resetDisplayModelOrientation, type RotationAxis } from "./modelOrientation";
 import { buildLocalProjectFile, suggestedProjectFilename, type LocalResultBundle } from "./projectFile";
 import { buildAutosavedWorkspace, readAutosavedWorkspace, writeAutosavedWorkspace, type ThemeMode } from "./appPersistence";
-import { canNavigateToStep, printLayerOrientationForViewer, shouldAutoAdvanceAfterMeshGeneration, shouldShowStartScreen } from "./appShellState";
+import {
+  canNavigateToStep,
+  printLayerOrientationForViewer,
+  shouldAutoAdvanceAfterMaterialAssignment,
+  shouldAutoAdvanceAfterMeshGeneration,
+  shouldShowStartScreen
+} from "./appShellState";
 import { displayModelForUnits, loadValueForUnits, resultFieldForUnits, resultSummaryForUnits, type UnitSystem } from "./unitDisplay";
 import { supportDisplayLabel } from "./supportLabels";
 import { nextSelectedPayloadObject, shouldClearPayloadSelectionOnViewerMiss } from "./payloadSelection";
@@ -662,7 +668,9 @@ export function App() {
           onToggleDeformed={() => setShowDeformed((value) => !value)}
           onToggleDimensions={() => setShowDimensions((value) => !value)}
           onStressExaggerationChange={setStressExaggeration}
-          onAssignMaterial={(materialId, parameters) => updateStudy(assignMaterial(study.id, materialId, parameters, study), "supports")}
+          onAssignMaterial={(materialId, parameters) =>
+            updateStudy(assignMaterial(study.id, materialId, parameters, study), shouldAutoAdvanceAfterMaterialAssignment() ? "supports" : undefined)
+          }
           onPreviewPrintLayerOrientation={setPreviewPrintLayerOrientation}
           onAddSupport={(selectionRef) => updateStudy(addSupport(study.id, selectionRef, study))}
           onUpdateSupport={(support: Constraint) =>
