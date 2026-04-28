@@ -30,7 +30,8 @@ export function queryHoveredEntity(cursorRay: CursorRay, context: SnapQueryConte
         id: `${faceId}:vertex:${nearestVertex.vertex.map((value) => value.toFixed(3)).join(",")}`,
         position: nearestVertex.vertex,
         normal,
-        faceId
+        faceId,
+        snapAxes: context.ownerFace?.snapAxes
       };
     }
 
@@ -48,7 +49,8 @@ export function queryHoveredEntity(cursorRay: CursorRay, context: SnapQueryConte
         position: nearestEdge.point,
         normal,
         faceId,
-        endpoints: nearestEdge.endpoints
+        endpoints: nearestEdge.endpoints,
+        snapAxes: context.ownerFace?.snapAxes
       };
     }
   }
@@ -58,7 +60,8 @@ export function queryHoveredEntity(cursorRay: CursorRay, context: SnapQueryConte
     id: faceId,
     position: context.ownerFace?.position ?? hitPoint,
     normal: normalizeVec3(normal),
-    faceId
+    faceId,
+    snapAxes: context.ownerFace?.snapAxes
   };
 }
 

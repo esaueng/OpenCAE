@@ -1,6 +1,6 @@
-import { Billboard, Line } from "@react-three/drei";
+import { Billboard, Line, Text } from "@react-three/drei";
 import * as THREE from "three";
-import type { HoveredEntity, SnapResult, Vec3 } from "./types";
+import type { HoveredEntity, SnapMeasurement, SnapResult, Vec3 } from "./types";
 
 export function SnapVisualization({ result, mode }: { result: SnapResult | null; mode: "loads" | "supports" }) {
   if (!result) return null;
@@ -8,10 +8,15 @@ export function SnapVisualization({ result, mode }: { result: SnapResult | null;
     <group renderOrder={40}>
       <HoveredEntityHighlight entity={result.hovered} />
       <SnapConstructionGuides result={result} />
+      <SnapMeasurementGuides result={result} />
       <SnapIndicator result={result} />
       {mode === "loads" ? <SnapForcePreview result={result} /> : <SnapSupportPreview result={result} />}
     </group>
   );
+}
+
+export function snapMeasurementGuides(result: SnapResult): SnapMeasurement[] {
+  return result.measurements ?? [];
 }
 
 export interface SnapConstructionGuide {
@@ -51,6 +56,47 @@ function SnapConstructionGuides({ result }: { result: SnapResult }) {
       {snapConstructionGuides(result).map((guide, index) => (
         <Line key={`${guide.kind}-${index}`} points={guide.points} color={guide.color} lineWidth={guide.lineWidth} transparent opacity={guide.opacity} />
       ))}
+    </group>
+  );
+}
+
+function SnapMeasurementGuides({ result }: { result: SnapResult }) {
+  return (
+    <group>
+      {snapMeasurementGuides(result).map((measurement, index) => (
+        <EdgeDistanceGuide key={`${measurement.kind}-${index}`} measurement={measurement} normal={result.hovered.normal ?? result.direction} />
+      ))}
+    </group>
+  );
+}
+
+function EdgeDistanceGuide({ measurement, normal }: { measurement: SnapMeasurement; normal: Vec3 }) {
+  const start = new THREE.Vector3(...measurement.start);
+  const end = new THREE.Vector3(...measurement.end);
+  const midpoint = start.clone().add(end).multiplyScalar(0.5);
+  const normalOffset = new THREE.Vector3(...normal).normalize().multiplyScalar(0.055);
+  const labelPosition = midpoint.clone().add(normalOffset);
+  return (
+    <group>
+      <Line points={[measurement.start, measurement.end]} color="#f8d77b" lineWidth={2.1} transparent opacity={0.88} />
+      <Billboard position={labelPosition.toArray() as Vec3} renderOrder={52}>
+        <Text
+          anchorX="center"
+          anchorY="middle"
+          color="#fef3c7"
+          material-depthTest={false}
+          material-depthWrite={false}
+          material-toneMapped={false}
+          fontSize={0.105}
+          letterSpacing={0}
+          maxWidth={1.4}
+          outlineColor="#1f1300"
+          outlineOpacity={0.9}
+          outlineWidth={0.015}
+        >
+          {measurement.label}
+        </Text>
+      </Billboard>
     </group>
   );
 }

@@ -30,7 +30,8 @@ export function getSnapSuggestion(cursorRay: CursorRay, context: SnapQueryContex
     direction: suggestion.direction,
     suggestionType: suggestion.suggestionType,
     candidateKind: best.candidate.kind,
-    score: best.score
+    score: best.score,
+    measurements: best.candidate.measurements
   };
 }
 

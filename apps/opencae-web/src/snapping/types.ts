@@ -11,6 +11,7 @@ export type SnapCandidateKind =
   | "edge-closest"
   | "face-centroid"
   | "face-centerline"
+  | "face-unit"
   | "face-projected"
   | "face-closest";
 
@@ -28,6 +29,25 @@ export interface HoveredEntity {
   normal?: Vec3;
   faceId?: string;
   endpoints?: [Vec3, Vec3];
+  snapAxes?: FaceSnapAxis[];
+}
+
+export interface FaceSnapAxis {
+  direction: Vec3;
+  minPoint: Vec3;
+  maxPoint: Vec3;
+  unitsPerWorld: number;
+  units: string;
+  unitStep?: number;
+}
+
+export interface SnapMeasurement {
+  kind: "edge-distance";
+  start: Vec3;
+  end: Vec3;
+  label: string;
+  value: number;
+  units: string;
 }
 
 export interface SnapCandidate {
@@ -35,6 +55,7 @@ export interface SnapCandidate {
   point: Vec3;
   priority: number;
   fallback?: boolean;
+  measurements?: SnapMeasurement[];
 }
 
 export interface ScoredSnapCandidate {
@@ -51,6 +72,7 @@ export interface SnapResult {
   suggestionType: SuggestionType;
   candidateKind: SnapCandidateKind;
   score: number;
+  measurements?: SnapMeasurement[];
 }
 
 export interface SnapConfig {
@@ -69,6 +91,7 @@ export interface SnapQueryContext extends SnapConfig {
     id: string;
     position: Vec3;
     normal: Vec3;
+    snapAxes?: FaceSnapAxis[];
   };
 }
 
@@ -83,6 +106,7 @@ export const SNAP_PRIORITIES: Record<SnapCandidateKind, number> = {
   vertex: 0,
   "edge-endpoint": 0.005,
   "edge-midpoint": 0.01,
+  "face-unit": 0.012,
   "face-centerline": 0.015,
   "face-centroid": 0.02,
   "edge-closest": 0.025,
