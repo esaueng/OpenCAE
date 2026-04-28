@@ -290,6 +290,7 @@ export function App() {
     setHomeRequested(false);
     setProject(response.project);
     setDisplayModel(response.displayModel);
+    requestDefaultHomeView();
     setUndoStack([]);
     setRedoStack([]);
     setSelectedLoadPoint(null);
@@ -479,14 +480,17 @@ export function App() {
 
   function handleResetModelOrientation() {
     setDisplayModel((current) => (current ? resetDisplayModelOrientation(current) : current));
-    setViewAxis(null);
-    setFitSignal((value) => value + 1);
+    requestDefaultHomeView();
     pushMessage("Model orientation reset.");
   }
 
-  function handleFitDefaultView() {
+  function requestDefaultHomeView() {
     setViewAxis(null);
     setFitSignal((value) => value + 1);
+  }
+
+  function handleFitDefaultView() {
+    requestDefaultHomeView();
   }
 
   function handleUnitSystemChange(unitSystem: UnitSystem) {
