@@ -252,7 +252,7 @@ function sampleDisplayModelFor(sample: SampleModelId): DisplayModel {
       { id: "face-rib-side", label: "Rib side face", color: "#22c55e", center: [-0.26, 0.78, 0.22], normal: [0, 0, 1], stressValue: 92 }
     ],
     plate: [
-      { id: "face-base-left", label: "Fixed end face", color: "#4da3ff", center: [-1.82, 0.14, 0], normal: [-1, 0, 0], stressValue: 82 },
+      { id: "face-base-left", label: "Fixed end face", color: "#4da3ff", center: [-1.9, 0.14, 0], normal: [-1, 0, 0], stressValue: 82 },
       { id: "face-load-top", label: "End payload mass", color: "#f59e0b", center: [1.48, 0.49, 0], normal: [0, 1, 0], stressValue: 118 },
       { id: "face-web-front", label: "Beam top face", color: "#22c55e", center: [0.0, 0.38, 0], normal: [0, 1, 0], stressValue: 92 },
       { id: "face-base-bottom", label: "Beam body", color: "#8b949e", center: [0.0, 0.14, 0.0], normal: [0, 0, 1], stressValue: 58 }

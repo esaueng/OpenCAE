@@ -1719,7 +1719,7 @@ function resultSampleSpan(samples: FaceResultSample[]): number {
 
 function stressFractionForPoint(kind: SampleModelKind, point: THREE.Vector3) {
   if (kind === "plate") {
-    const fixedEnd = gaussian2d(point.x, point.y, -1.82, 0.14, 0.38, 0.36);
+    const fixedEnd = gaussian2d(point.x, point.y, -1.9, 0.14, 0.38, 0.36);
     const topFiber = gaussian2d(point.x, point.y, -0.55, 0.36, 1.35, 0.16);
     const payload = gaussian2d(point.x, point.y, BEAM_PAYLOAD_CENTER[0], BEAM_PAYLOAD_CENTER[1], 0.44, 0.3);
     return Math.max(0, Math.min(1, 0.08 + fixedEnd * 0.74 + topFiber * 0.3 + payload * 0.16));
