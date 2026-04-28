@@ -167,14 +167,14 @@ describe("api", () => {
         value: 0.497664,
         units: "kg",
         direction: [0, 0, -1],
-        applicationPoint: [1.48, 0.56, 0],
+        applicationPoint: [1.48, 0.49, 0],
         payloadMaterialId: "payload-aluminum-6061",
         payloadVolumeM3: 0.00018432,
         payloadMassMode: "material",
         payloadObject: {
           id: "payload-display-plate",
           label: "end payload mass",
-          center: [1.48, 0.56, 0],
+          center: [1.48, 0.49, 0],
           volumeM3: 0.00018432,
           volumeSource: "bounds-fallback",
           volumeStatus: "estimated"

@@ -27,7 +27,7 @@ describe("CadViewer callouts", () => {
     expect(beamPayloadSelectionForTarget("payload-display-plate")).toEqual({
       id: "payload-display-plate",
       label: "end payload mass",
-      center: [1.48, 0.56, 0],
+      center: [1.48, 0.49, 0],
       volumeM3: 0.00018432,
       volumeSource: "bounds-fallback",
       volumeStatus: "estimated"
