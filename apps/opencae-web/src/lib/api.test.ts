@@ -160,6 +160,7 @@ describe("api", () => {
       "Beam top face",
       "Beam body"
     ]);
+    expect(response.displayModel.faces[0]?.center).toEqual([-1.9, 0.14, 0]);
     expect(load).toMatchObject({
       type: "gravity",
       selectionRef: "selection-load-face",
