@@ -76,7 +76,6 @@ function renderPanel(activeStep: StepId, overrides: Partial<Parameters<typeof Ri
       draftLoadDirection="-Z"
       selectedLoadPoint={null}
       selectedPayloadObject={null}
-      isPlacingLoad={false}
       onFitView={vi.fn()}
       onRotateModel={vi.fn()}
       onResetModelOrientation={vi.fn()}
@@ -546,17 +545,22 @@ describe("RightPanel payload mass controls", () => {
     expect(html).toContain('<button class="primary" type="button" disabled="">Next: Run</button>');
   });
 
-  test("starts force placement from the add load action before a face is selected", () => {
+  test("requires a picked model point before adding a force load", () => {
     const markup = renderPanel("loads");
 
     expect(markup).toContain(">Add load<");
-    expect(markup).not.toContain("disabled=\"\"");
+    expect(markup).toContain('<button class="outline-action wide" disabled="">');
+    expect(markup).toContain("Select a point on the model, then click Add load.");
   });
 
-  test("shows an armed placement state after add load is clicked", () => {
-    const markup = renderPanel("loads", { isPlacingLoad: true });
+  test("keeps a picked force location ready for the add load action", () => {
+    const markup = renderPanel("loads", {
+      selectedFace: displayModel.faces[0],
+      selectedLoadPoint: [1, 2, 3]
+    });
 
-    expect(markup).toContain("Click the model to place");
-    expect(markup).toContain("Click model to place load");
+    expect(markup).toContain("point picked");
+    expect(markup).toContain(">Add load<");
+    expect(markup).not.toContain('<button class="outline-action wide" disabled="">');
   });
 });

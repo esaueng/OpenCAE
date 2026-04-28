@@ -37,7 +37,6 @@ interface RightPanelProps {
   draftLoadDirection: LoadDirectionLabel;
   selectedLoadPoint: LoadApplicationPoint | null;
   selectedPayloadObject: PayloadObjectSelection | null;
-  isPlacingLoad?: boolean;
   onFitView: () => void;
   onRotateModel: (axis: RotationAxis) => void;
   onResetModelOrientation: () => void;
@@ -363,7 +362,6 @@ function LoadsPanel({
   draftLoadDirection,
   selectedLoadPoint,
   selectedPayloadObject,
-  isPlacingLoad = false,
   onDraftLoadTypeChange,
   onDraftLoadValueChange,
   onDraftLoadDirectionChange,
@@ -377,7 +375,7 @@ function LoadsPanel({
   const placementSelection = draftLoadType === "gravity" ? undefined : selectedFromViewport;
   const units = unitsForLoadType(draftLoadType);
   const valueLabel = draftLoadType === "gravity" ? "Payload mass" : "Magnitude";
-  const addLabel = isPlacingLoad ? "Click model to place load" : draftLoadType === "gravity" ? "Add payload mass" : "Add load";
+  const addLabel = draftLoadType === "gravity" ? "Add payload mass" : "Add load";
   const [payloadMaterialId, setPayloadMaterialId] = useState("payload-steel");
   const [payloadMassMode, setPayloadMassMode] = useState<PayloadMassMode>("material");
   const payloadVolumeM3 = selectedPayloadObject?.volumeM3;
@@ -386,7 +384,7 @@ function LoadsPanel({
   const displayDraftLoad = loadValueForUnits(effectiveDraftValue, units, project.unitSystem);
   const selectedPayloadMaterial = payloadMaterialForId(payloadMaterialId);
   const canAddPayloadMass = payloadMassMode === "manual" ? draftLoadValue > 0 : calculatedPayloadMass > 0;
-  const canAddDraftLoad = draftLoadType === "gravity" ? Boolean(selectedPayloadObject) && canAddPayloadMass : !isPlacingLoad;
+  const canAddDraftLoad = draftLoadType === "gravity" ? Boolean(selectedPayloadObject) && canAddPayloadMass : Boolean(selectedFace && selectedLoadPoint);
   const payloadMetadata: PayloadLoadMetadata = draftLoadType === "gravity"
     ? {
       payloadMaterialId,
@@ -406,12 +404,12 @@ function LoadsPanel({
     );
   }, [draftLoadType, effectiveDraftValue, onDraftPayloadPreviewChange, payloadMassMode, payloadMaterialId, payloadVolumeM3]);
   return (
-    <Panel title="Loads" helper={isPlacingLoad ? "Click the model to place this load at an exact point." : draftLoadType === "gravity" ? "Choose the object carrying payload mass, then add its weight as a load." : "Set the load values, then click Add load and pick the point on the model."}>
+    <Panel title="Loads" helper={draftLoadType === "gravity" ? "Choose the object carrying payload mass, then add its weight as a load." : "Select a point on the model, then click Add load."}>
       <HelpNote helpId="loadPlacement" />
       <PlacementReadout
         selectedRef={placementSelection}
         fallbackLabel={selectedPayloadObject?.label ?? selectedFace?.label}
-        detail={isPlacingLoad ? "Click the model to place" : selectedPayloadObject ? "object selected" : selectedLoadPoint ? "point picked" : undefined}
+        detail={selectedPayloadObject ? "object selected" : selectedLoadPoint ? "point picked" : undefined}
       />
       <label className="field">
         <HelpLabel helpId="loadType">Load type</HelpLabel>
