@@ -68,8 +68,8 @@ describe("CadViewer result coloring", () => {
   test("fits isometric reset distance to the projected diagonal height", () => {
     const bounds = new THREE.Box3(new THREE.Vector3(-5, -5, -5), new THREE.Vector3(5, 5, 5));
     const view = {
-      direction: new THREE.Vector3(1, -1, 1).normalize(),
-      up: new THREE.Vector3(0, 0, 1).projectOnPlane(new THREE.Vector3(1, -1, 1).normalize()).normalize()
+      direction: new THREE.Vector3(1, 1, 1).normalize(),
+      up: new THREE.Vector3(0, 0, 1).projectOnPlane(new THREE.Vector3(1, 1, 1).normalize()).normalize()
     };
 
     const distance = cameraDistanceForBounds(bounds, view.direction, view.up, 42, 1, 1.28);
