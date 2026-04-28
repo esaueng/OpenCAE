@@ -117,20 +117,18 @@ export function HoveredEntityHighlight({ entity }: { entity: HoveredEntity }) {
 }
 
 export function SnapIndicator({ result }: { result: SnapResult }) {
-  const color = result.candidateKind === "edge-midpoint" ? "#63e6be" : result.candidateKind === "vertex" ? "#f8d77b" : "#4da3ff";
+  const style = snapIndicatorStyle(result);
   return (
     <Billboard position={result.rawSnapPoint}>
       <group>
         <mesh>
-          <ringGeometry args={[0.055, 0.083, 32]} />
-          <meshBasicMaterial color={color} depthTest={false} toneMapped={false} transparent opacity={0.94} />
+          <ringGeometry args={[style.ringInnerRadius, style.ringOuterRadius, 28]} />
+          <meshBasicMaterial color={style.color} depthTest={false} toneMapped={false} transparent opacity={style.ringOpacity} />
         </mesh>
         <mesh>
-          <sphereGeometry args={[0.027, 18, 18]} />
-          <meshBasicMaterial color={color} depthTest={false} toneMapped={false} />
+          <sphereGeometry args={[style.dotRadius, 14, 14]} />
+          <meshBasicMaterial color={style.color} depthTest={false} toneMapped={false} transparent opacity={style.dotOpacity} />
         </mesh>
-        <Line points={[[-0.115, 0, 0], [0.115, 0, 0]]} color={color} lineWidth={2} transparent opacity={0.9} />
-        <Line points={[[0, -0.115, 0], [0, 0.115, 0]]} color={color} lineWidth={2} transparent opacity={0.9} />
       </group>
     </Billboard>
   );
@@ -139,8 +137,9 @@ export function SnapIndicator({ result }: { result: SnapResult }) {
 export function SnapForcePreview({ result }: { result: SnapResult }) {
   const end = new THREE.Vector3(...result.rawSnapPoint);
   const direction = new THREE.Vector3(...result.direction).normalize();
-  const start = end.clone().add(direction.clone().multiplyScalar(-0.42));
-  return <PreviewArrow start={start.toArray() as Vec3} end={end.toArray() as Vec3} color="#f59e0b" />;
+  const style = snapPreviewArrowStyle();
+  const start = end.clone().add(direction.clone().multiplyScalar(-style.length));
+  return <PreviewArrow start={start.toArray() as Vec3} end={end.toArray() as Vec3} color={style.color} lineWidth={style.lineWidth} opacity={style.opacity} showHead={style.showHead} />;
 }
 
 export function SnapSupportPreview({ result }: { result: SnapResult }) {
@@ -158,17 +157,41 @@ export function SnapSupportPreview({ result }: { result: SnapResult }) {
   );
 }
 
-function PreviewArrow({ start, end, color }: { start: Vec3; end: Vec3; color: string }) {
+export function snapIndicatorStyle(result: Pick<SnapResult, "candidateKind">) {
+  const color = result.candidateKind === "edge-midpoint" ? "#63e6be" : result.candidateKind === "vertex" ? "#f8d77b" : "#4da3ff";
+  return {
+    color,
+    ringInnerRadius: 0.032,
+    ringOuterRadius: 0.044,
+    ringOpacity: 0.88,
+    dotRadius: 0.013,
+    dotOpacity: 0.95
+  };
+}
+
+export function snapPreviewArrowStyle() {
+  return {
+    color: "#8cc8ff",
+    length: 0.28,
+    lineWidth: 1.45,
+    opacity: 0.58,
+    showHead: false
+  };
+}
+
+function PreviewArrow({ start, end, color, lineWidth = 2.4, opacity = 0.86, showHead = true }: { start: Vec3; end: Vec3; color: string; lineWidth?: number; opacity?: number; showHead?: boolean }) {
   const direction = new THREE.Vector3(...end).sub(new THREE.Vector3(...start)).normalize();
   const conePosition = new THREE.Vector3(...end).sub(direction.clone().multiplyScalar(0.035));
   const quaternion = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction);
   return (
     <group>
-      <Line points={[start, end]} color={color} lineWidth={2.4} transparent opacity={0.86} />
-      <mesh position={conePosition.toArray()} quaternion={quaternion}>
-        <coneGeometry args={[0.055, 0.14, 18]} />
-        <meshBasicMaterial color={color} depthTest={false} toneMapped={false} transparent opacity={0.86} />
-      </mesh>
+      <Line points={[start, end]} color={color} lineWidth={lineWidth} transparent opacity={opacity} />
+      {showHead && (
+        <mesh position={conePosition.toArray()} quaternion={quaternion}>
+          <coneGeometry args={[0.055, 0.14, 18]} />
+          <meshBasicMaterial color={color} depthTest={false} toneMapped={false} transparent opacity={opacity} />
+        </mesh>
+      )}
     </group>
   );
 }
