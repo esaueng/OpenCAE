@@ -203,6 +203,34 @@ describe("LocalMockComputeBackend", () => {
     }
   });
 
+  test("solves cantilever transverse bending with max stress at the fixed support", async () => {
+    vi.useFakeTimers();
+    try {
+      const storage = new MemoryStorage();
+      const backend = new LocalMockComputeBackend(storage);
+
+      const run = backend.runStaticSolve({
+        study: cantileverStudy("mat-abs"),
+        runId: "run-cantilever-stress",
+        meshRef: "mesh-cantilever",
+        publish: vi.fn()
+      });
+      await vi.runAllTimersAsync();
+      const result = await run;
+
+      const stressValues = result.fields.find((field) => field.type === "stress")?.values ?? [];
+      const displacementValues = result.fields.find((field) => field.type === "displacement")?.values ?? [];
+      const fixedEndStress = stressValues[0] ?? 0;
+      const freeEndStress = stressValues[1] ?? 0;
+
+      expect(stressValues.indexOf(Math.max(...stressValues))).toBe(0);
+      expect(fixedEndStress).toBeGreaterThan(freeEndStress * 1.25);
+      expect(displacementValues.indexOf(Math.max(...displacementValues))).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   test("makes X build direction much weaker for cantilever bending across layer lines", async () => {
     vi.useFakeTimers();
     try {

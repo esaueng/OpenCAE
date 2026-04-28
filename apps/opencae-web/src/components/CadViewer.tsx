@@ -1821,14 +1821,14 @@ function resultColorForPoint(kind: SampleModelKind, resultMode: ResultMode, stre
   return resultColorForValue(resultMode, resultValueForPoint(kind, resultMode, stressExaggeration, point, samples));
 }
 
-function resultValueForPoint(kind: SampleModelKind, resultMode: ResultMode, stressExaggeration: number, point: THREE.Vector3, samples: FaceResultSample[]) {
+export function resultValueForPoint(kind: SampleModelKind, resultMode: ResultMode, stressExaggeration: number, point: THREE.Vector3, samples: FaceResultSample[]) {
   const sampleValue = resultFractionFromSamples(point, samples);
-  const stress = sampleValue ?? stressFractionForPoint(kind, point);
+  const stress = kind === "cantilever" ? cantileverBendingStressFraction(point) : sampleValue ?? stressFractionForPoint(kind, point);
   const displacement = sampleValue ?? displacementFractionForPoint(kind, point);
   return resultMode === "displacement"
     ? displacement
     : resultMode === "safety_factor"
-      ? sampleValue ?? (1 - stress * 0.88)
+      ? kind === "cantilever" ? Math.max(0, Math.min(1, 1 - stress * 0.88)) : sampleValue ?? (1 - stress * 0.88)
       : Math.max(0, Math.min(1, 0.5 + (stress - 0.5) * stressExaggeration));
 }
 
@@ -1868,12 +1868,21 @@ function stressFractionForPoint(kind: SampleModelKind, point: THREE.Vector3) {
     return Math.max(0, Math.min(1, 0.08 + fixedEnd * 0.74 + topFiber * 0.3 + payload * 0.16));
   }
   if (kind === "cantilever") {
-    const fixedEnd = gaussian2d(point.x, point.y, -1.9, 0, 0.38, 0.42);
-    const topFiber = gaussian2d(point.x, point.y, -1.0, 0.25, 1.2, 0.16);
-    const loadEnd = gaussian2d(point.x, point.y, 1.9, -0.05, 0.5, 0.32);
-    return Math.max(0, Math.min(1, 0.08 + fixedEnd * 0.78 + topFiber * 0.28 + loadEnd * 0.16));
+    return cantileverBendingStressFraction(point);
   }
   return 0.45;
+}
+
+function cantileverBendingStressFraction(point: THREE.Vector3) {
+  const travel = Math.max(0, Math.min(1, (point.x + 1.9) / 3.8));
+  const moment = (1 - travel) ** 0.85;
+  const fiberY = Math.max(0, Math.min(1, Math.abs(point.y - BEAM_CENTER_Y) / (BEAM_HEIGHT / 2)));
+  const fiberZ = Math.max(0, Math.min(1, Math.abs(point.z) / (BEAM_DEPTH / 2)));
+  const fiber = 0.3 + Math.max(fiberY, fiberZ) * 0.7;
+  const fixedRoot = gaussian2d(point.x, point.y, -1.9, BEAM_CENTER_Y, 0.32, 0.34);
+  const banding = 0.035 * Math.sin((1 - travel) * Math.PI * 5) * moment;
+  const localLoad = gaussian2d(point.x, point.y, 1.9, BEAM_CENTER_Y, 0.38, 0.34) * 0.06;
+  return Math.max(0, Math.min(1, 0.08 + moment * (0.66 * fiber + 0.16) + fixedRoot * 0.18 + banding + localLoad));
 }
 
 function displacementFractionForPoint(kind: SampleModelKind, point: THREE.Vector3) {
