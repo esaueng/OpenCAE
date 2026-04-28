@@ -69,6 +69,7 @@ describe("CadViewer callouts", () => {
     };
 
     expect(pointForPlacementSnap([0.9, 0.9, 1], snap)).toEqual([0.95, 0.95, 1]);
+    expect(pointForPlacementSnap([0.9, 0.9, 1], snap, true)).toEqual([0.9, 0.9, 1]);
     expect(faceIdForPlacementSnap("face-load-top", snap)).toBe("face-load-top");
   });
 });
