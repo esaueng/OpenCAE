@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { beamPayloadSelectionForTarget, shouldShowModelHitLabel, supportGlyphAnchor, supportMarkerAnchor } from "./CadViewer";
+import { beamPayloadSelectionForTarget, faceIdForPlacementSnap, pointForPlacementSnap, shouldShowModelHitLabel, supportGlyphAnchor, supportMarkerAnchor } from "./CadViewer";
 
 describe("CadViewer callouts", () => {
   test("uses the real cantilever fixed face as the support callout anchor", () => {
@@ -55,5 +55,20 @@ describe("CadViewer callouts", () => {
       volumeStatus: "estimated"
     });
     expect(beamPayloadSelectionForTarget("beam-body")).toBeNull();
+  });
+
+  test("uses snapped placement points while preserving face-based selections", () => {
+    const snap = {
+      hovered: { type: "vertex" as const, id: "vertex-1", position: [1, 1, 1] as [number, number, number], faceId: "face-load-top" },
+      snapPoint: [0.95, 0.95, 1] as [number, number, number],
+      rawSnapPoint: [1, 1, 1] as [number, number, number],
+      direction: [0, 0, 1] as [number, number, number],
+      suggestionType: "force" as const,
+      candidateKind: "vertex" as const,
+      score: 0.01
+    };
+
+    expect(pointForPlacementSnap([0.9, 0.9, 1], snap)).toEqual([0.95, 0.95, 1]);
+    expect(faceIdForPlacementSnap("face-load-top", snap)).toBe("face-load-top");
   });
 });

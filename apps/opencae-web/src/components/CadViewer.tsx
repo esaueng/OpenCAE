@@ -19,6 +19,9 @@ import { lengthForUnits, stressForUnits, type UnitSystem } from "../unitDisplay"
 import { loadMarkerViewportPresentation, type PayloadObjectSelection } from "../loadPreview";
 import { highlightPayloadObjectMeshes } from "../payloadObjectHighlight";
 import { layoutOutsideModelLabels, payloadMassLabelOffset, type LabelAnchor } from "../calloutLabelLayout";
+import { getSnapSuggestion } from "../snapping/snapController";
+import { SnapVisualization } from "../snapping/Visualization";
+import type { CursorRay, SnapResult, Vec3 } from "../snapping/types";
 
 export type ViewMode = "model" | "mesh" | "results";
 export type ResultMode = "stress" | "displacement" | "safety_factor";
@@ -95,7 +98,7 @@ const BRACKET_HOLES = [
   { id: "base-hole-right", center: [1.2, 0] as [number, number], radius: 0.13, supported: true }
 ];
 type ViewerOrbitControls = ElementRef<typeof OrbitControls>;
-type ModelSelectionHit = { face: DisplayFace; point: [number, number, number]; payloadObject?: PayloadObjectSelection };
+type ModelSelectionHit = { face: DisplayFace; point: [number, number, number]; payloadObject?: PayloadObjectSelection; snapResult?: SnapResult | null };
 type ModelPickHandlers = {
   onPointerMove?: (event: ThreeEvent<PointerEvent>) => void;
   onPointerOut?: () => void;
@@ -323,6 +326,7 @@ function BracketModel({
 }: CadViewerProps & { uploadedPreviewBounds: THREE.Box3 | null; onUploadedPreviewBounds: (bounds: THREE.Box3) => void }) {
   const [hoveredHit, setHoveredHit] = useState<ModelSelectionHit | null>(null);
   const [selectedHit, setSelectedHit] = useState<ModelSelectionHit | null>(null);
+  const [snapResult, setSnapResult] = useState<SnapResult | null>(null);
   const modelKind = modelKindForDisplayModel(displayModel);
   const materialColor = useMemo(() => colorForResult(displayModel.faces, viewMode, resultMode), [displayModel.faces, resultMode, viewMode]);
   const showResultMarkers = viewMode === "results" && activeStep === "results";
@@ -366,17 +370,22 @@ function BracketModel({
     if (modelKind === "uploaded") {
       const hit = uploadedFaceHitFromEvent(event, displayModel);
       if (!hit) return null;
+      const snap = snapResultFromEvent(event, displayModel, hit.face, activeStep);
       return {
         ...hit,
+        point: pointForPlacementSnap(hit.point, snap),
+        snapResult: snap,
         payloadObject: payloadObjectSelectionMode ? payloadObjectFromEvent(event, displayModel, modelKind, hit.face) : undefined
       };
     }
     const modelPoint = viewerPointToModelSpace(event.point, displayModel);
     const face = faceForModelHit(modelKind, displayModel.faces, modelPoint);
     if (!face) return null;
+    const snap = snapResultFromEvent(event, displayModel, face, activeStep);
     return {
       face,
-      point: modelPoint.toArray() as [number, number, number],
+      point: pointForPlacementSnap(modelPoint.toArray() as [number, number, number], snap),
+      snapResult: snap,
       payloadObject: payloadObjectSelectionMode ? payloadObjectFromEvent(event, displayModel, modelKind, face) : undefined
     };
   }
@@ -385,8 +394,12 @@ function BracketModel({
     onPointerMove: (event) => {
       const hit = hitFromEvent(event);
       setHoveredHit(hit);
+      setSnapResult(hit?.snapResult ?? null);
     },
-    onPointerOut: () => setHoveredHit(null),
+    onPointerOut: () => {
+      setHoveredHit(null);
+      setSnapResult(null);
+    },
     onClick: (event) => {
       const hit = hitFromEvent(event);
       if (!hit) return;
@@ -429,6 +442,7 @@ function BracketModel({
       )}
       <HoleRims kind={modelKind} />
       {viewMode === "mesh" && <MeshOverlay kind={modelKind} />}
+      {placementMode && !isResultView && <SnapVisualization result={snapResult} mode={activeStep === "supports" ? "supports" : "loads"} />}
       {showModelHitLabel && hoveredHit && <ModelHitLabel hit={hoveredHit} active={hoveredHit.face.id === selectedFaceId} />}
       {showBoundaryMarkers && loadMarkers.map((marker) => {
         const face = displayModel.faces.find((item) => item.id === marker.faceId);
@@ -539,6 +553,62 @@ export function beamPayloadSelectionForTarget(targetId: unknown): PayloadObjectS
     volumeSource: "bounds-fallback",
     volumeStatus: "estimated"
   };
+}
+
+export function pointForPlacementSnap(point: [number, number, number], snapResult: SnapResult | null | undefined): [number, number, number] {
+  return snapResult?.snapPoint ?? point;
+}
+
+export function faceIdForPlacementSnap(faceId: string, snapResult: SnapResult | null | undefined) {
+  return snapResult?.hovered.faceId ?? faceId;
+}
+
+function snapResultFromEvent(event: ThreeEvent<PointerEvent> | ThreeEvent<MouseEvent>, displayModel: DisplayModel, face: DisplayFace, activeStep: StepId): SnapResult | null {
+  const cursorRay = cursorRayFromEvent(event);
+  const result = getSnapSuggestion(cursorRay, {
+    objects: [event.object],
+    mode: activeStep === "supports" ? "supports" : "loads",
+    ownerFace: {
+      id: face.id,
+      position: modelPointToViewerSpace(face.center, displayModel),
+      normal: modelNormalToViewerSpace(face.normal, displayModel)
+    }
+  });
+  return result ? snapResultToModelSpace(result, displayModel) : null;
+}
+
+function cursorRayFromEvent(event: ThreeEvent<PointerEvent> | ThreeEvent<MouseEvent>): CursorRay {
+  return {
+    origin: event.ray.origin.toArray() as Vec3,
+    direction: event.ray.direction.toArray() as Vec3,
+    cursorPoint: event.point.toArray() as Vec3,
+    screenPosition: { x: event.nativeEvent.clientX, y: event.nativeEvent.clientY }
+  };
+}
+
+function snapResultToModelSpace(result: SnapResult, displayModel: DisplayModel): SnapResult {
+  return {
+    ...result,
+    snapPoint: viewerPointToModelSpace(new THREE.Vector3(...result.snapPoint), displayModel).toArray() as Vec3,
+    rawSnapPoint: viewerPointToModelSpace(new THREE.Vector3(...result.rawSnapPoint), displayModel).toArray() as Vec3,
+    direction: viewerNormalToModelSpace(new THREE.Vector3(...result.direction), displayModel).toArray() as Vec3,
+    hovered: {
+      ...result.hovered,
+      position: viewerPointToModelSpace(new THREE.Vector3(...result.hovered.position), displayModel).toArray() as Vec3,
+      normal: result.hovered.normal ? viewerNormalToModelSpace(new THREE.Vector3(...result.hovered.normal), displayModel).toArray() as Vec3 : undefined,
+      endpoints: result.hovered.endpoints
+        ? result.hovered.endpoints.map((point) => viewerPointToModelSpace(new THREE.Vector3(...point), displayModel).toArray() as Vec3) as [Vec3, Vec3]
+        : undefined
+    }
+  };
+}
+
+function modelPointToViewerSpace(point: [number, number, number], displayModel: DisplayModel): Vec3 {
+  return new THREE.Vector3(...point).applyMatrix4(modelToViewerMatrix(displayModel)).toArray() as Vec3;
+}
+
+function modelNormalToViewerSpace(normal: [number, number, number], displayModel: DisplayModel): Vec3 {
+  return new THREE.Vector3(...normal).transformDirection(modelToViewerMatrix(displayModel)).normalize().toArray() as Vec3;
 }
 
 function formatDimensionLabel(value: number, units: string) {
