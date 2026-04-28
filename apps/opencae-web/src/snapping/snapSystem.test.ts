@@ -5,7 +5,7 @@ import { queryHoveredEntity } from "./geometryQuery";
 import { generateSnapCandidates } from "./snapGenerator";
 import { getSnapSuggestion, smoothSnapPoint } from "./snapController";
 import { selectBestSnapCandidate } from "./snapScoring";
-import { snapConstructionGuides, snapMeasurementGuides } from "./Visualization";
+import { snapConstructionGuides, snapIndicatorStyle, snapMeasurementGuides, snapPreviewArrowStyle } from "./Visualization";
 import type { CursorRay, HoveredEntity, SnapCandidate } from "./types";
 
 function rayToward(point: [number, number, number]): CursorRay {
@@ -193,6 +193,20 @@ describe("constraint inference and controller", () => {
 });
 
 describe("snap visualization guides", () => {
+  test("keeps the cursor placement marker visually compact", () => {
+    expect(snapIndicatorStyle({ candidateKind: "face-unit" })).toMatchObject({
+      ringInnerRadius: 0.032,
+      ringOuterRadius: 0.044,
+      dotRadius: 0.013
+    });
+    expect(snapPreviewArrowStyle()).toMatchObject({
+      length: 0.28,
+      lineWidth: 1.45,
+      opacity: 0.58,
+      showHead: false
+    });
+  });
+
   test("builds face centerlines through the snap target", () => {
     const guides = snapConstructionGuides({
       hovered: { type: "face", id: "face-top", position: [0, 0, 1], normal: [0, 0, 1], faceId: "face-top" },
