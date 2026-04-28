@@ -457,8 +457,8 @@ function BracketModel({
   );
 }
 
-export function shouldShowModelHitLabel(viewMode: ViewMode, hasActiveHit: boolean, suppressForDraftLoadPreview = false) {
-  return hasActiveHit && viewMode !== "results" && !suppressForDraftLoadPreview;
+export function shouldShowModelHitLabel(_viewMode: ViewMode, _hasActiveHit: boolean, _suppressForDraftLoadPreview = false) {
+  return false;
 }
 
 export function shouldShowDimensionOverlay(showDimensions: boolean, viewMode: ViewMode) {

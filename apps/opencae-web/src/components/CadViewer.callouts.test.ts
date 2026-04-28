@@ -39,8 +39,8 @@ describe("CadViewer callouts", () => {
     expect(cantileverAnchor.z).toBeCloseTo(0);
   });
 
-  test("keeps model hit labels unless a draft load preview is active", () => {
-    expect(shouldShowModelHitLabel("model", true, false)).toBe(true);
+  test("hides placement hover labels so snap indicators mark the target", () => {
+    expect(shouldShowModelHitLabel("model", true, false)).toBe(false);
     expect(shouldShowModelHitLabel("model", true, true)).toBe(false);
     expect(shouldShowModelHitLabel("results", true, false)).toBe(false);
   });
