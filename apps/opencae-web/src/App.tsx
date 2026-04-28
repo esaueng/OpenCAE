@@ -7,8 +7,8 @@ import { BottomPanel } from "./components/BottomPanel";
 import { OpenCaeLogoMark } from "./components/OpenCaeLogoMark";
 import { RightPanel } from "./components/RightPanel";
 import { StartScreen } from "./components/StartScreen";
-import type { StepId } from "./components/StepBar";
-import { BoundaryConditionMenu, CreateSimulationModal, StudyTree } from "./components/SimulationWorkflow";
+import { StepBar, type StepId } from "./components/StepBar";
+import { BoundaryConditionMenu, CreateSimulationModal } from "./components/SimulationWorkflow";
 import { CadViewer, type PrintLayerOrientation, type ResultMode, type ViewMode } from "./components/CadViewer";
 import type { ViewerLoadMarker, ViewerSupportMarker } from "./components/CadViewer";
 import {
@@ -652,14 +652,15 @@ export function App() {
 
       <main className="workspace">
         {study ? (
-          <StudyTree
+          <StepBar
             activeStep={activeStep}
-            study={study}
-            hasGeometry={displayModel.bodyCount > 0 || project.geometryFiles.length > 0}
-            hasResults={viewMode === "results" || resultFields.length > 0}
-            runProgress={runProgress}
+            collapsed={isStepbarCollapsed}
+            project={project}
             onSelect={handleStepSelect}
-            onOpenBoundaryMenu={() => setShowBoundaryConditionMenu((value) => !value)}
+            onToggleCollapsed={() => setIsStepbarCollapsed((collapsed) => !collapsed)}
+            onUnitSystemChange={handleUnitSystemChange}
+            study={study}
+            hasResults={viewMode === "results" || resultFields.length > 0}
           />
         ) : (
           <NoStudyPanel
