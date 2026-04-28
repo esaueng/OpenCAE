@@ -7,8 +7,50 @@ export function SnapVisualization({ result, mode }: { result: SnapResult | null;
   return (
     <group renderOrder={40}>
       <HoveredEntityHighlight entity={result.hovered} />
+      <SnapConstructionGuides result={result} />
       <SnapIndicator result={result} />
       {mode === "loads" ? <SnapForcePreview result={result} /> : <SnapSupportPreview result={result} />}
+    </group>
+  );
+}
+
+export interface SnapConstructionGuide {
+  kind: "centerline" | "alignment" | "midpoint-tick";
+  points: [Vec3, Vec3];
+  color: string;
+  lineWidth: number;
+  opacity: number;
+}
+
+export function snapConstructionGuides(result: SnapResult): SnapConstructionGuide[] {
+  if (result.hovered.type === "edge" && result.hovered.endpoints) {
+    return [
+      { kind: "alignment", points: result.hovered.endpoints, color: "#63e6be", lineWidth: 3.4, opacity: 0.88 },
+      { kind: "midpoint-tick", points: midpointTick(result), color: "#f8d77b", lineWidth: 3, opacity: 0.96 }
+    ];
+  }
+
+  const [firstAxis, secondAxis] = faceGuideAxes(result.hovered.normal ?? result.direction);
+  const origin = new THREE.Vector3(...result.rawSnapPoint);
+  const halfLength = 0.46;
+  return [firstAxis, secondAxis].map((axis) => ({
+    kind: "centerline" as const,
+    points: [
+      origin.clone().add(axis.clone().multiplyScalar(-halfLength)).toArray() as Vec3,
+      origin.clone().add(axis.clone().multiplyScalar(halfLength)).toArray() as Vec3
+    ],
+    color: "#4da3ff",
+    lineWidth: 2.2,
+    opacity: 0.72
+  }));
+}
+
+function SnapConstructionGuides({ result }: { result: SnapResult }) {
+  return (
+    <group>
+      {snapConstructionGuides(result).map((guide, index) => (
+        <Line key={`${guide.kind}-${index}`} points={guide.points} color={guide.color} lineWidth={guide.lineWidth} transparent opacity={guide.opacity} />
+      ))}
     </group>
   );
 }
@@ -32,10 +74,18 @@ export function SnapIndicator({ result }: { result: SnapResult }) {
   const color = result.candidateKind === "edge-midpoint" ? "#63e6be" : result.candidateKind === "vertex" ? "#f8d77b" : "#4da3ff";
   return (
     <Billboard position={result.rawSnapPoint}>
-      <mesh>
-        <sphereGeometry args={[0.038, 18, 18]} />
-        <meshBasicMaterial color={color} depthTest={false} toneMapped={false} />
-      </mesh>
+      <group>
+        <mesh>
+          <ringGeometry args={[0.055, 0.083, 32]} />
+          <meshBasicMaterial color={color} depthTest={false} toneMapped={false} transparent opacity={0.94} />
+        </mesh>
+        <mesh>
+          <sphereGeometry args={[0.027, 18, 18]} />
+          <meshBasicMaterial color={color} depthTest={false} toneMapped={false} />
+        </mesh>
+        <Line points={[[-0.115, 0, 0], [0.115, 0, 0]]} color={color} lineWidth={2} transparent opacity={0.9} />
+        <Line points={[[0, -0.115, 0], [0, 0.115, 0]]} color={color} lineWidth={2} transparent opacity={0.9} />
+      </group>
     </Billboard>
   );
 }
@@ -75,4 +125,31 @@ function PreviewArrow({ start, end, color }: { start: Vec3; end: Vec3; color: st
       </mesh>
     </group>
   );
+}
+
+function midpointTick(result: SnapResult): [Vec3, Vec3] {
+  const endpoints = result.hovered.endpoints;
+  if (!endpoints) return [result.rawSnapPoint, result.rawSnapPoint];
+  const edgeDirection = new THREE.Vector3(...endpoints[1]).sub(new THREE.Vector3(...endpoints[0])).normalize();
+  const faceNormal = new THREE.Vector3(...(result.hovered.normal ?? [0, 0, 1])).normalize();
+  let tickDirection = new THREE.Vector3().crossVectors(faceNormal, edgeDirection).normalize();
+  if (tickDirection.lengthSq() < 0.001) tickDirection = perpendicularAxis(edgeDirection);
+  const origin = new THREE.Vector3(...result.rawSnapPoint);
+  return [
+    origin.clone().add(tickDirection.clone().multiplyScalar(-0.14)).toArray() as Vec3,
+    origin.clone().add(tickDirection.clone().multiplyScalar(0.14)).toArray() as Vec3
+  ];
+}
+
+function faceGuideAxes(normalValue: Vec3): [THREE.Vector3, THREE.Vector3] {
+  const normal = new THREE.Vector3(...normalValue).normalize();
+  const reference = Math.abs(normal.z) > 0.85 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(0, 0, 1);
+  const firstAxis = new THREE.Vector3().crossVectors(reference, normal).normalize();
+  const secondAxis = new THREE.Vector3().crossVectors(normal, firstAxis).normalize();
+  return [firstAxis, secondAxis];
+}
+
+function perpendicularAxis(axis: THREE.Vector3) {
+  const reference = Math.abs(axis.z) > 0.85 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(0, 0, 1);
+  return new THREE.Vector3().crossVectors(axis, reference).normalize();
 }
