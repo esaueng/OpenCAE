@@ -373,7 +373,7 @@ function BracketModel({
       const snap = snapResultFromEvent(event, displayModel, hit.face, activeStep);
       return {
         ...hit,
-        point: pointForPlacementSnap(hit.point, snap),
+        point: pointForPlacementSnap(hit.point, snap, event.nativeEvent.altKey),
         snapResult: snap,
         payloadObject: payloadObjectSelectionMode ? payloadObjectFromEvent(event, displayModel, modelKind, hit.face) : undefined
       };
@@ -384,7 +384,7 @@ function BracketModel({
     const snap = snapResultFromEvent(event, displayModel, face, activeStep);
     return {
       face,
-      point: pointForPlacementSnap(modelPoint.toArray() as [number, number, number], snap),
+      point: pointForPlacementSnap(modelPoint.toArray() as [number, number, number], snap, event.nativeEvent.altKey),
       snapResult: snap,
       payloadObject: payloadObjectSelectionMode ? payloadObjectFromEvent(event, displayModel, modelKind, face) : undefined
     };
@@ -555,7 +555,8 @@ export function beamPayloadSelectionForTarget(targetId: unknown): PayloadObjectS
   };
 }
 
-export function pointForPlacementSnap(point: [number, number, number], snapResult: SnapResult | null | undefined): [number, number, number] {
+export function pointForPlacementSnap(point: [number, number, number], snapResult: SnapResult | null | undefined, freePlacement = false): [number, number, number] {
+  if (freePlacement) return point;
   return snapResult?.snapPoint ?? point;
 }
 
