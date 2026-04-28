@@ -139,7 +139,7 @@ describe("load preview helpers", () => {
     expect(markers).toEqual([]);
   });
 
-  test("creates an unsaved draft marker for a selected load point", () => {
+  test("does not create an unsaved draft marker for a selected load point", () => {
     const point: [number, number, number] = [1.2, 2.1, 3.05];
     const draftLoad: Load = {
       id: "draft-load",
@@ -154,19 +154,10 @@ describe("load preview helpers", () => {
       draftLoadPreview: { load: draftLoad, selection }
     });
 
-    expect(markers).toHaveLength(1);
-    expect(markers[0]).toMatchObject({
-      id: "draft-load",
-      faceId: "face-side",
-      point,
-      preview: true,
-      labelIndex: 0,
-      stackIndex: 0
-    });
-    expect(loadMarkerDisplayLabel(markers[0]!)).toBe("L1 F 500 N -Z");
+    expect(markers).toEqual([]);
   });
 
-  test("numbers an unsaved draft marker after saved loads", () => {
+  test("does not number unsaved draft markers after saved loads", () => {
     const savedLoad: Load = {
       id: "load-1",
       type: "force",
@@ -187,11 +178,10 @@ describe("load preview helpers", () => {
       draftLoadPreview: { load: draftLoad, selection: secondSelection }
     });
 
-    expect(markers.map(loadMarkerDisplayLabel)).toEqual(["L1 F 500 N -Z", "L2 P 100 kPa +X"]);
-    expect(markers[1]).toMatchObject({ preview: true, labelIndex: 1, stackIndex: 0 });
+    expect(markers.map(loadMarkerDisplayLabel)).toEqual(["L1 F 500 N -Z"]);
   });
 
-  test("updates draft marker display from draft load inputs", () => {
+  test("does not create draft marker display from draft load inputs", () => {
     const draftLoad: Load = {
       id: "draft-load",
       type: "pressure",
@@ -205,7 +195,7 @@ describe("load preview helpers", () => {
       draftLoadPreview: { load: draftLoad, selection }
     });
 
-    expect(markers.map(loadMarkerDisplayLabel)).toEqual(["L1 P 250 kPa +Y"]);
+    expect(markers).toEqual([]);
   });
 
   test("does not create an unsaved draft marker without a valid draft selection", () => {
