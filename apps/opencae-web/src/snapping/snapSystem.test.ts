@@ -5,7 +5,7 @@ import { queryHoveredEntity } from "./geometryQuery";
 import { generateSnapCandidates } from "./snapGenerator";
 import { getSnapSuggestion, smoothSnapPoint } from "./snapController";
 import { selectBestSnapCandidate } from "./snapScoring";
-import { snapConstructionGuides, snapIndicatorStyle, snapMeasurementGuides, snapMeasurementRuler, snapPreviewArrowStyle } from "./Visualization";
+import { disableSnapOverlayRaycast, snapConstructionGuides, snapIndicatorStyle, snapMeasurementGuides, snapMeasurementRuler, snapPreviewArrowStyle } from "./Visualization";
 import type { CursorRay, HoveredEntity, SnapCandidate } from "./types";
 
 function rayToward(point: [number, number, number]): CursorRay {
@@ -193,6 +193,13 @@ describe("constraint inference and controller", () => {
 });
 
 describe("snap visualization guides", () => {
+  test("keeps snap overlays out of pointer picking", () => {
+    const intersections: unknown[] = [];
+
+    expect(disableSnapOverlayRaycast(undefined, intersections as never[])).toBeUndefined();
+    expect(intersections).toHaveLength(0);
+  });
+
   test("keeps the cursor placement marker visually compact", () => {
     expect(snapIndicatorStyle({ candidateKind: "face-unit" })).toMatchObject({
       ringInnerRadius: 0.032,

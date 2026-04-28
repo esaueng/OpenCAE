@@ -2,6 +2,10 @@ import { Billboard, Line, Text } from "@react-three/drei";
 import * as THREE from "three";
 import type { HoveredEntity, SnapMeasurement, SnapResult, Vec3 } from "./types";
 
+export function disableSnapOverlayRaycast(_raycaster?: THREE.Raycaster, _intersections?: THREE.Intersection[]) {
+  // Snap helpers are visual affordances only; model geometry must remain the pick target.
+}
+
 export function SnapVisualization({ result, mode }: { result: SnapResult | null; mode: "loads" | "supports" }) {
   if (!result) return null;
   return (
@@ -67,7 +71,7 @@ function SnapConstructionGuides({ result }: { result: SnapResult }) {
   return (
     <group>
       {snapConstructionGuides(result).map((guide, index) => (
-        <Line key={`${guide.kind}-${index}`} points={guide.points} color={guide.color} lineWidth={guide.lineWidth} transparent opacity={guide.opacity} />
+        <Line key={`${guide.kind}-${index}`} points={guide.points} color={guide.color} lineWidth={guide.lineWidth} transparent opacity={guide.opacity} raycast={disableSnapOverlayRaycast} />
       ))}
     </group>
   );
@@ -87,9 +91,9 @@ function EdgeDistanceGuide({ measurement, normal }: { measurement: SnapMeasureme
   const ruler = snapMeasurementRuler(measurement, normal);
   return (
     <group>
-      <Line points={ruler.line} color={ruler.color} lineWidth={ruler.lineWidth} transparent opacity={ruler.opacity} />
+      <Line points={ruler.line} color={ruler.color} lineWidth={ruler.lineWidth} transparent opacity={ruler.opacity} raycast={disableSnapOverlayRaycast} />
       {ruler.ticks.map((tick, index) => (
-        <Line key={`tick-${index}`} points={tick} color={ruler.color} lineWidth={ruler.lineWidth} transparent opacity={ruler.opacity} />
+        <Line key={`tick-${index}`} points={tick} color={ruler.color} lineWidth={ruler.lineWidth} transparent opacity={ruler.opacity} raycast={disableSnapOverlayRaycast} />
       ))}
       <Billboard position={ruler.labelPosition} renderOrder={52}>
         <Text
@@ -105,6 +109,7 @@ function EdgeDistanceGuide({ measurement, normal }: { measurement: SnapMeasureme
           outlineColor="#03101d"
           outlineOpacity={0.74}
           outlineWidth={ruler.outlineWidth}
+          raycast={disableSnapOverlayRaycast}
         >
           {ruler.label}
         </Text>
@@ -158,11 +163,11 @@ function rulerTickDirection(normal: THREE.Vector3, lineDirection: THREE.Vector3)
 export function HoveredEntityHighlight({ entity }: { entity: HoveredEntity }) {
   const color = entity.type === "vertex" ? "#f8d77b" : entity.type === "edge" ? "#63e6be" : "#4da3ff";
   if (entity.type === "edge" && entity.endpoints) {
-    return <Line points={entity.endpoints} color={color} lineWidth={3} transparent opacity={0.92} />;
+    return <Line points={entity.endpoints} color={color} lineWidth={3} transparent opacity={0.92} raycast={disableSnapOverlayRaycast} />;
   }
   return (
     <Billboard position={entity.position}>
-      <mesh>
+      <mesh raycast={disableSnapOverlayRaycast}>
         <ringGeometry args={[0.05, 0.07, 28]} />
         <meshBasicMaterial color={color} depthTest={false} toneMapped={false} transparent opacity={0.92} />
       </mesh>
@@ -175,11 +180,11 @@ export function SnapIndicator({ result }: { result: SnapResult }) {
   return (
     <Billboard position={result.rawSnapPoint}>
       <group>
-        <mesh>
+        <mesh raycast={disableSnapOverlayRaycast}>
           <ringGeometry args={[style.ringInnerRadius, style.ringOuterRadius, 28]} />
           <meshBasicMaterial color={style.color} depthTest={false} toneMapped={false} transparent opacity={style.ringOpacity} />
         </mesh>
-        <mesh>
+        <mesh raycast={disableSnapOverlayRaycast}>
           <sphereGeometry args={[style.dotRadius, 14, 14]} />
           <meshBasicMaterial color={style.color} depthTest={false} toneMapped={false} transparent opacity={style.dotOpacity} />
         </mesh>
@@ -201,12 +206,12 @@ export function SnapSupportPreview({ result }: { result: SnapResult }) {
   const quaternion = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal);
   return (
     <group position={result.rawSnapPoint} quaternion={quaternion}>
-      <mesh>
+      <mesh raycast={disableSnapOverlayRaycast}>
         <circleGeometry args={[0.095, 28]} />
         <meshBasicMaterial color="#4da3ff" transparent opacity={0.58} side={THREE.DoubleSide} depthTest={false} toneMapped={false} />
       </mesh>
-      <Line points={[[-0.11, -0.11, 0.01], [0.11, 0.11, 0.01]]} color="#4da3ff" lineWidth={2} />
-      <Line points={[[0.11, -0.11, 0.01], [-0.11, 0.11, 0.01]]} color="#4da3ff" lineWidth={2} />
+      <Line points={[[-0.11, -0.11, 0.01], [0.11, 0.11, 0.01]]} color="#4da3ff" lineWidth={2} raycast={disableSnapOverlayRaycast} />
+      <Line points={[[0.11, -0.11, 0.01], [-0.11, 0.11, 0.01]]} color="#4da3ff" lineWidth={2} raycast={disableSnapOverlayRaycast} />
     </group>
   );
 }
@@ -239,9 +244,9 @@ function PreviewArrow({ start, end, color, lineWidth = 2.4, opacity = 0.86, show
   const quaternion = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction);
   return (
     <group>
-      <Line points={[start, end]} color={color} lineWidth={lineWidth} transparent opacity={opacity} />
+      <Line points={[start, end]} color={color} lineWidth={lineWidth} transparent opacity={opacity} raycast={disableSnapOverlayRaycast} />
       {showHead && (
-        <mesh position={conePosition.toArray()} quaternion={quaternion}>
+        <mesh position={conePosition.toArray()} quaternion={quaternion} raycast={disableSnapOverlayRaycast}>
           <coneGeometry args={[0.055, 0.14, 18]} />
           <meshBasicMaterial color={color} depthTest={false} toneMapped={false} transparent opacity={opacity} />
         </mesh>
