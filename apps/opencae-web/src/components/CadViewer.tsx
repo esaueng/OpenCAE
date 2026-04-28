@@ -1725,9 +1725,9 @@ function stressFractionForPoint(kind: SampleModelKind, point: THREE.Vector3) {
     return Math.max(0, Math.min(1, 0.08 + fixedEnd * 0.74 + topFiber * 0.3 + payload * 0.16));
   }
   if (kind === "cantilever") {
-    const fixedEnd = gaussian2d(point.x, point.y, -1.8, 0, 0.38, 0.42);
+    const fixedEnd = gaussian2d(point.x, point.y, -1.9, 0, 0.38, 0.42);
     const topFiber = gaussian2d(point.x, point.y, -1.0, 0.25, 1.2, 0.16);
-    const loadEnd = gaussian2d(point.x, point.y, 1.65, -0.05, 0.5, 0.32);
+    const loadEnd = gaussian2d(point.x, point.y, 1.9, -0.05, 0.5, 0.32);
     return Math.max(0, Math.min(1, 0.08 + fixedEnd * 0.78 + topFiber * 0.28 + loadEnd * 0.16));
   }
   return 0.45;

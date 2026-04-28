@@ -258,8 +258,8 @@ function sampleDisplayModelFor(sample: SampleModelId): DisplayModel {
       { id: "face-base-bottom", label: "Beam body", color: "#8b949e", center: [0.0, 0.14, 0.0], normal: [0, 0, 1], stressValue: 58 }
     ],
     cantilever: [
-      { id: "face-base-left", label: "Fixed end face", color: "#4da3ff", center: [-1.8, 0.18, 0], normal: [-1, 0, 0], stressValue: 132 },
-      { id: "face-load-top", label: "Free end load face", color: "#f59e0b", center: [1.75, 0.18, 0], normal: [1, 0, 0], stressValue: 96 },
+      { id: "face-base-left", label: "Fixed end face", color: "#4da3ff", center: [-1.9, 0.18, 0], normal: [-1, 0, 0], stressValue: 132 },
+      { id: "face-load-top", label: "Free end load face", color: "#f59e0b", center: [1.9, 0.18, 0], normal: [1, 0, 0], stressValue: 96 },
       { id: "face-web-front", label: "Top beam face", color: "#22c55e", center: [0.0, 0.42, 0], normal: [0, 1, 0], stressValue: 74 },
       { id: "face-base-bottom", label: "Beam bottom face", color: "#8b949e", center: [0.0, -0.08, 0], normal: [0, -1, 0], stressValue: 46 }
     ]
