@@ -77,9 +77,13 @@ interface CadViewerProps {
 const BRACKET_DEPTH = 1.1;
 const RIB_DEPTH = 0.38;
 const BEAM_DEPTH = 0.36;
+const BEAM_HEIGHT = 0.28;
+const BEAM_CENTER_Y = BEAM_HEIGHT / 2;
+const BEAM_TOP_Y = BEAM_HEIGHT;
+const BEAM_PAYLOAD_HEIGHT = 0.42;
 const BEAM_PAYLOAD_OBJECT_ID = "payload-display-plate";
 const BEAM_PAYLOAD_LABEL = "end payload mass";
-const BEAM_PAYLOAD_CENTER: [number, number, number] = [1.48, 0.56, 0];
+const BEAM_PAYLOAD_CENTER: [number, number, number] = [1.48, BEAM_TOP_Y + BEAM_PAYLOAD_HEIGHT / 2, 0];
 const BEAM_PAYLOAD_VOLUME_M3 = 0.00018432;
 const WORLD_UP = new THREE.Vector3(0, 0, 1);
 const ISO_CAMERA_DIRECTION = new THREE.Vector3(1, -1, 1).normalize();
@@ -1947,14 +1951,14 @@ function createBracketShape() {
 }
 
 function createBeamGeometry() {
-  const geometry = new THREE.BoxGeometry(3.8, 0.28, BEAM_DEPTH, 40, 6, 8);
-  geometry.translate(0, 0.14, 0);
+  const geometry = new THREE.BoxGeometry(3.8, BEAM_HEIGHT, BEAM_DEPTH, 40, 6, 8);
+  geometry.translate(0, BEAM_CENTER_Y, 0);
   geometry.computeVertexNormals();
   return geometry;
 }
 
 function createBeamPayloadGeometry() {
-  const geometry = new THREE.BoxGeometry(0.58, 0.42, 0.5, 8, 6, 8);
+  const geometry = new THREE.BoxGeometry(0.58, BEAM_PAYLOAD_HEIGHT, 0.5, 8, 6, 8);
   geometry.translate(...BEAM_PAYLOAD_CENTER);
   geometry.computeVertexNormals();
   return geometry;
