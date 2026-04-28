@@ -31,7 +31,7 @@ export function snapConstructionGuides(result: SnapResult): SnapConstructionGuid
   }
 
   const [firstAxis, secondAxis] = faceGuideAxes(result.hovered.normal ?? result.direction);
-  const origin = new THREE.Vector3(...result.rawSnapPoint);
+  const origin = new THREE.Vector3(...result.hovered.position);
   const halfLength = 0.46;
   return [firstAxis, secondAxis].map((axis) => ({
     kind: "centerline" as const,
