@@ -1,7 +1,8 @@
 import * as THREE from "three";
 import { describe, expect, test } from "vitest";
-import { VIEWER_GIZMO_ALIGNMENT, axisLabelToViewAxis, cameraDistanceForBounds, cameraViewForAxis, colorizeResultObject, createUndeformedResultOutlineObject, displayedLegendTickLabels, legendTickLabels, payloadHighlightObjectId, printLayerVisualizationForBounds, rotatedCameraOrbit, shouldShowDimensionOverlay, shouldShowModelHitLabel, shouldShowUndeformedResultOutline } from "./CadViewer";
+import { VIEWER_GIZMO_ALIGNMENT, axisLabelToViewAxis, cameraDistanceForBounds, cameraViewForAxis, colorizeResultObject, createUndeformedResultOutlineObject, displayedLegendTickLabels, legendTickLabels, payloadHighlightObjectId, printLayerVisualizationForBounds, resultProbesForKind, rotatedCameraOrbit, shouldShowDimensionOverlay, shouldShowModelHitLabel, shouldShowUndeformedResultOutline } from "./CadViewer";
 import type { FaceResultSample } from "../resultFields";
+import type { DisplayFace, ResultField } from "@opencae/schema";
 
 const samples: FaceResultSample[] = [
   {
@@ -87,6 +88,36 @@ describe("CadViewer result coloring", () => {
     expect(shouldShowDimensionOverlay(true, "results")).toBe(false);
     expect(shouldShowDimensionOverlay(true, "model")).toBe(true);
     expect(shouldShowDimensionOverlay(false, "model")).toBe(false);
+  });
+
+  test("anchors beam result probes to solved faces instead of static fallback points", () => {
+    const beamFaces: DisplayFace[] = [
+      { id: "face-base-left", label: "Fixed end face", color: "#4da3ff", center: [-1.9, 0.14, 0], normal: [-1, 0, 0], stressValue: 82 },
+      { id: "face-load-top", label: "End payload mass", color: "#f59e0b", center: [1.48, 0.49, 0], normal: [0, 1, 0], stressValue: 118 },
+      { id: "face-web-front", label: "Beam top face", color: "#22c55e", center: [0, 0.38, 0], normal: [0, 1, 0], stressValue: 92 },
+      { id: "face-base-bottom", label: "Beam body", color: "#8b949e", center: [0, 0.14, 0], normal: [0, 0, 1], stressValue: 58 }
+    ];
+    const fields: ResultField[] = [{
+      id: "stress",
+      runId: "run",
+      type: "stress",
+      location: "face",
+      values: [22.8, 37.4, 35.6, 30.1],
+      min: 22.8,
+      max: 37.4,
+      units: "MPa"
+    }];
+
+    const probes = resultProbesForKind("plate", beamFaces, "stress", fields, "SI");
+
+    expect(probes.map((probe) => [probe.tone, probe.label])).toEqual([
+      ["max", "Stress: 37.4 MPa"],
+      ["mid", "Stress: 35.6 MPa"],
+      ["min", "Stress: 22.8 MPa"]
+    ]);
+    expect(probes[0]?.anchor).toEqual([1.48, 0.34, 0]);
+    expect(probes[1]?.anchor).toEqual([0, 0.34, 0]);
+    expect(probes[2]?.anchor).toEqual([-1.96, 0.14, 0]);
   });
 
   test("shows undeformed result outlines only while displaying deformed shape", () => {
