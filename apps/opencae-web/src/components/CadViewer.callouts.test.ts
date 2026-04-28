@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { beamPayloadSelectionForTarget, faceIdForPlacementSnap, faceSnapAxesForDisplayModel, loadGlyphSurfacePoint, pointForPlacementSnap, shouldShowModelHitLabel, supportGlyphAnchor, supportMarkerAnchor } from "./CadViewer";
+import { beamPayloadSelectionForTarget, faceIdForPlacementSnap, faceSnapAxesForDisplayModel, loadGlyphLabelPosition, loadGlyphSurfacePoint, pointForPlacementSnap, shouldShowModelHitLabel, supportGlyphAnchor, supportMarkerAnchor } from "./CadViewer";
 
 describe("CadViewer callouts", () => {
   test("uses the real cantilever fixed face as the support callout anchor", () => {
@@ -96,6 +96,34 @@ describe("CadViewer callouts", () => {
     };
 
     expect(loadGlyphSurfacePoint(marker, face).toArray()).toEqual([0.5, 0.5, 0]);
+  });
+
+  test("keeps adjacent point load labels in distinct local lanes", () => {
+    const face = {
+      id: "face-load-top",
+      label: "Free end load face",
+      color: "#4da3ff",
+      center: [0, 0, 0] as [number, number, number],
+      normal: [1, 0, 0] as [number, number, number],
+      stressValue: 72
+    };
+    const markers = [0, 1, 2].map((labelIndex) => ({
+      id: `load-${labelIndex + 1}`,
+      faceId: "face-load-top",
+      point: [0, labelIndex * 0.05, 0] as [number, number, number],
+      type: "force",
+      value: 500,
+      units: "N",
+      direction: [0, 0, -1] as [number, number, number],
+      directionLabel: "-Z",
+      labelIndex,
+      stackIndex: 0
+    }));
+
+    const labelPositions = markers.map((marker) => loadGlyphLabelPosition(marker, face).toArray());
+
+    expect(new Set(labelPositions.map((position) => position.map((value) => value.toFixed(3)).join(","))).size).toBe(3);
+    expect(labelPositions.every((position) => position.every(Number.isFinite))).toBe(true);
   });
 
   test("derives whole-unit snap axes from displayed model dimensions", () => {

@@ -342,7 +342,7 @@ function BracketModel({
     const bounds = dimensionBoundsForDisplayModel(displayModel);
     if (!bounds) return new Map<string, [number, number, number]>();
     const anchors: LabelAnchor[] = [
-      ...loadMarkers.map((marker) => {
+      ...loadMarkers.filter((marker) => marker.type === "gravity").map((marker) => {
         const face = displayModel.faces.find((item) => item.id === marker.faceId);
         return face ? { id: boundaryLabelKey("load", marker.id), anchor: loadMarkerAnchor(marker, face) } : null;
       }),
@@ -726,6 +726,13 @@ function worldNormalToModelSpace(normal: THREE.Vector3) {
 function markerDirectionInModelSpace(marker: ViewerLoadMarker) {
   const direction = new THREE.Vector3(...marker.direction).normalize();
   return marker.directionLabel === "Normal" ? direction : worldNormalToModelSpace(direction);
+}
+
+function labelLaneOffset(index: number) {
+  const safeIndex = Number.isFinite(index) && index >= 0 ? Math.floor(index) : 0;
+  const lane = (safeIndex % 3) - 1;
+  const row = Math.floor(safeIndex / 3);
+  return { lane, row };
 }
 
 function ModelDimensionOverlay({ displayModel, uploadedPreviewBounds }: { displayModel: DisplayModel; uploadedPreviewBounds: THREE.Box3 | null }) {
@@ -2426,14 +2433,13 @@ function LoadGlyph({ marker, face, active, labelPosition }: { marker: ViewerLoad
   tangent.normalize();
   const arrowDirection = isNormalDirection ? normal : markerDirection;
   const { start, end } = arrowPointsOutsideSurface(loadGlyphSurfacePoint(marker, face), normal, arrowDirection, 0.54);
-  const tailLabelPosition = start.clone().add(arrowDirection.clone().multiplyScalar(-0.18)).add(normal.clone().multiplyScalar(0.08));
   const payloadOffset = payloadMassLabelOffset(marker.labelIndex);
   const massLabelPosition = labelPosition ? new THREE.Vector3(...labelPosition) : center
     .clone()
     .add(tangent.clone().multiplyScalar(payloadOffset.tangent))
     .add(normal.clone().multiplyScalar(0.24))
     .add(new THREE.Vector3(0, payloadOffset.lift, 0));
-  const forceLabelPosition = labelPosition ? new THREE.Vector3(...labelPosition) : tailLabelPosition;
+  const forceLabelPosition = labelPosition ? new THREE.Vector3(...labelPosition) : loadGlyphLabelPosition(marker, face, start, normal, arrowDirection);
   const glyphAnchor = presentation.showArrow ? end.toArray() as [number, number, number] : center.toArray() as [number, number, number];
 
   return (
@@ -2454,6 +2460,32 @@ function LoadGlyph({ marker, face, active, labelPosition }: { marker: ViewerLoad
       />
     </group>
   );
+}
+
+export function loadGlyphLabelPosition(
+  marker: ViewerLoadMarker,
+  face: DisplayFace,
+  arrowStart?: THREE.Vector3,
+  faceNormal?: THREE.Vector3,
+  arrowDirection?: THREE.Vector3
+) {
+  const normal = faceNormal?.clone().normalize() ?? new THREE.Vector3(...face.normal).normalize();
+  const direction = arrowDirection?.clone().normalize() ?? markerDirectionInModelSpace(marker);
+  const start = arrowStart?.clone() ?? arrowPointsOutsideSurface(
+    loadGlyphSurfacePoint(marker, face),
+    normal,
+    marker.directionLabel === "Normal" ? normal : direction,
+    0.54
+  ).start;
+  const side = new THREE.Vector3().crossVectors(direction, normal);
+  if (side.lengthSq() < 0.001) side.crossVectors(direction, new THREE.Vector3(0, 1, 0));
+  if (side.lengthSq() < 0.001) side.set(1, 0, 0);
+  side.normalize();
+  const { lane, row } = labelLaneOffset(marker.labelIndex);
+  return start
+    .add(direction.clone().multiplyScalar(-0.18))
+    .add(normal.clone().multiplyScalar(0.1 + row * 0.08))
+    .add(side.multiplyScalar(lane * 0.22));
 }
 
 function PickedLoadLocationMarker({ marker, face, active }: { marker: ViewerLoadMarker; face: DisplayFace; active: boolean }) {
