@@ -103,9 +103,9 @@ describe("CadViewer result coloring", () => {
     expect(target.clone().sub(center).dot(up)).toBeCloseTo(-1.47, 1);
   });
 
-  test("hides face selection callouts in result view", () => {
+  test("hides face selection callouts so snapping markers carry placement feedback", () => {
     expect(shouldShowModelHitLabel("results", true)).toBe(false);
-    expect(shouldShowModelHitLabel("model", true)).toBe(true);
+    expect(shouldShowModelHitLabel("model", true)).toBe(false);
     expect(shouldShowModelHitLabel("mesh", false)).toBe(false);
   });
 
