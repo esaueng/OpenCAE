@@ -2531,7 +2531,7 @@ export function cameraDistanceForBounds(
   ];
   const halfExtents = corners.reduce(
     (extents, corner) => {
-      const offset = corner.sub(center);
+      const offset = corner.clone().sub(center);
       extents.x = Math.max(extents.x, Math.abs(offset.dot(right)));
       extents.y = Math.max(extents.y, Math.abs(offset.dot(viewUp)));
       return extents;
@@ -2539,9 +2539,16 @@ export function cameraDistanceForBounds(
     new THREE.Vector2(0, 0)
   );
   const verticalFov = THREE.MathUtils.degToRad(fovDegrees);
-  const fitHeightDistance = halfExtents.y / Math.tan(verticalFov / 2);
-  const fitWidthDistance = halfExtents.x / (Math.tan(verticalFov / 2) * aspect);
-  return Math.max(fitHeightDistance, fitWidthDistance) * margin;
+  const verticalTan = Math.tan(verticalFov / 2);
+  const horizontalTan = verticalTan * aspect;
+  const fitDistance = corners.reduce((distance, corner) => {
+    const offset = corner.clone().sub(center);
+    const depthTowardCamera = offset.dot(viewDirection);
+    const fitHeightDistance = Math.abs(offset.dot(viewUp)) / verticalTan;
+    const fitWidthDistance = Math.abs(offset.dot(right)) / horizontalTan;
+    return Math.max(distance, depthTowardCamera + Math.max(fitHeightDistance, fitWidthDistance));
+  }, Math.max(halfExtents.y / verticalTan, halfExtents.x / horizontalTan));
+  return fitDistance * margin;
 }
 
 export function rotatedCameraOrbit(position: THREE.Vector3, target: THREE.Vector3, up: THREE.Vector3, axis: RotationAxis, radians: number) {
