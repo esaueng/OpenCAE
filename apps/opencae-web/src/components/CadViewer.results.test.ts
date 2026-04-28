@@ -63,7 +63,21 @@ describe("CadViewer result coloring", () => {
       1.2
     );
 
-    expect(distance).toBeCloseTo((5 / Math.tan(THREE.MathUtils.degToRad(21))) * 1.2);
+    expect(distance).toBeCloseTo((0.5 + 5 / Math.tan(THREE.MathUtils.degToRad(21))) * 1.2);
+  });
+
+  test("fits camera distance to long model depth in side view", () => {
+    const bounds = new THREE.Box3(new THREE.Vector3(-5, -0.5, -0.5), new THREE.Vector3(5, 0.5, 0.5));
+    const distance = cameraDistanceForBounds(
+      bounds,
+      new THREE.Vector3(1, 0, 0),
+      new THREE.Vector3(0, 0, 1),
+      42,
+      1,
+      1.2
+    );
+
+    expect(distance).toBeCloseTo((5 + 0.5 / Math.tan(THREE.MathUtils.degToRad(21))) * 1.2);
   });
 
   test("fits isometric reset distance to the projected diagonal height", () => {
@@ -75,7 +89,7 @@ describe("CadViewer result coloring", () => {
 
     const distance = cameraDistanceForBounds(bounds, view.direction, view.up, 42, 1, 1.28);
 
-    expect(distance).toBeCloseTo(27.24, 1);
+    expect(distance).toBeCloseTo(30.92, 1);
   });
 
   test("pans the default home target lower so the model appears higher in the viewport", () => {
