@@ -525,6 +525,10 @@ export function supportMarkerAnchor(kind: SampleModelKind, marker: ViewerSupport
   return face.center;
 }
 
+export function supportGlyphAnchor(kind: SampleModelKind, marker: ViewerSupportMarker, face: DisplayFace) {
+  return new THREE.Vector3(...supportMarkerAnchor(kind, marker, face)).add(new THREE.Vector3(...face.normal).normalize().multiplyScalar(0.04));
+}
+
 export function beamPayloadSelectionForTarget(targetId: unknown): PayloadObjectSelection | null {
   if (targetId !== BEAM_PAYLOAD_OBJECT_ID) return null;
   return {
@@ -2173,12 +2177,7 @@ function SupportGlyph({ kind, marker, face, active, labelPosition }: { kind: Sam
   }
 
   const normal = new THREE.Vector3(...face.normal).normalize();
-  const center = new THREE.Vector3(...face.center);
-  const tangent = new THREE.Vector3().crossVectors(normal, new THREE.Vector3(0, 1, 0));
-  if (tangent.lengthSq() < 0.001) tangent.set(1, 0, 0);
-  tangent.normalize();
-  const offset = tangent.multiplyScalar((marker.stackIndex - 0.5) * 0.22);
-  const anchor = center.clone().add(offset).add(normal.clone().multiplyScalar(0.04));
+  const anchor = supportGlyphAnchor(kind, marker, face);
   const position = labelPosition ?? anchor.clone().add(normal.clone().multiplyScalar(0.32)).add(new THREE.Vector3(0, 0.14, 0)).toArray() as [number, number, number];
   return (
     <group>
