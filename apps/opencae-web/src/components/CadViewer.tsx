@@ -2447,12 +2447,13 @@ function BoundsCameraReset({ signal, viewAxis, viewAxisSignal }: { signal: numbe
     const nextBounds = bounds.refresh().clip();
     const { box, center, distance } = nextBounds.getSize();
     const view = viewAxis ? cameraViewForAxis(viewAxis) : { direction: ISO_CAMERA_DIRECTION, up: ISO_CAMERA_UP };
+    const target = viewAxis ? center : defaultHomeViewTarget(box, view.direction, view.up);
     const perspectiveCamera = camera as THREE.PerspectiveCamera;
     const fitDistance = perspectiveCamera.isPerspectiveCamera
       ? cameraDistanceForBounds(box, view.direction, view.up, perspectiveCamera.fov, size.width / size.height, VIEWER_FIT_MARGIN)
       : distance;
-    const cameraPosition = center.clone().addScaledVector(view.direction, fitDistance);
-    nextBounds.moveTo(cameraPosition).lookAt({ target: center, up: view.up });
+    const cameraPosition = target.clone().addScaledVector(view.direction, fitDistance);
+    nextBounds.moveTo(cameraPosition).lookAt({ target, up: view.up });
   }, [bounds, camera, signal, size.height, size.width, viewAxis, viewAxisSignal]);
   return null;
 }
@@ -2483,6 +2484,27 @@ export function cameraViewForAxis(axis: RotationAxis): { direction: THREE.Vector
   if (axis === "x") return { direction: new THREE.Vector3(1, 0, 0), up: WORLD_UP };
   if (axis === "y") return { direction: new THREE.Vector3(0, 1, 0), up: WORLD_UP };
   return { direction: new THREE.Vector3(0, 0, 1), up: new THREE.Vector3(-1, 0, 0) };
+}
+
+export function defaultHomeViewTarget(bounds: THREE.Box3, direction: THREE.Vector3, up: THREE.Vector3) {
+  const center = bounds.getCenter(new THREE.Vector3());
+  const viewDirection = direction.clone().normalize();
+  const right = new THREE.Vector3().crossVectors(viewDirection, up).normalize();
+  const viewUp = new THREE.Vector3().crossVectors(right, viewDirection).normalize();
+  const projectedHalfHeight = projectedBoundsHalfHeight(bounds, center, viewUp);
+  return center.addScaledVector(viewUp, -projectedHalfHeight * 0.18);
+}
+
+function projectedBoundsHalfHeight(bounds: THREE.Box3, center: THREE.Vector3, viewUp: THREE.Vector3) {
+  let halfHeight = 0;
+  for (const x of [bounds.min.x, bounds.max.x]) {
+    for (const y of [bounds.min.y, bounds.max.y]) {
+      for (const z of [bounds.min.z, bounds.max.z]) {
+        halfHeight = Math.max(halfHeight, Math.abs(new THREE.Vector3(x, y, z).sub(center).dot(viewUp)));
+      }
+    }
+  }
+  return halfHeight;
 }
 
 export function cameraDistanceForBounds(
