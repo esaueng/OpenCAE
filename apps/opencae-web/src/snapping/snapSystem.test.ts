@@ -5,7 +5,7 @@ import { queryHoveredEntity } from "./geometryQuery";
 import { generateSnapCandidates } from "./snapGenerator";
 import { getSnapSuggestion, smoothSnapPoint } from "./snapController";
 import { selectBestSnapCandidate } from "./snapScoring";
-import { snapConstructionGuides } from "./Visualization";
+import { snapConstructionGuides, snapMeasurementGuides } from "./Visualization";
 import type { CursorRay, HoveredEntity, SnapCandidate } from "./types";
 
 function rayToward(point: [number, number, number]): CursorRay {
@@ -84,6 +84,34 @@ describe("snap generation and scoring", () => {
       "face-projected",
       "face-closest"
     ]);
+  });
+
+  test("generates whole-unit face snap candidates with edge distance measurements", () => {
+    const face: HoveredEntity = {
+      type: "face",
+      id: "f-1",
+      position: [0, 0, 1],
+      normal: [0, 0, 1],
+      faceId: "face-top",
+      snapAxes: [
+        { direction: [1, 0, 0], minPoint: [-1, 0, 1], maxPoint: [1, 0, 1], unitsPerWorld: 50, units: "mm", unitStep: 1 },
+        { direction: [0, 1, 0], minPoint: [0, -1, 1], maxPoint: [0, 1, 1], unitsPerWorld: 50, units: "mm", unitStep: 1 }
+      ]
+    };
+
+    const result = getSnapSuggestion(rayToward([0.234, 0.02, 1]), {
+      objects: [boxMesh()],
+      mode: "loads",
+      thresholdWorld: 0.08,
+      smoothingAlpha: 1,
+      ownerFace: { id: "face-top", position: face.position, normal: face.normal!, snapAxes: face.snapAxes }
+    });
+
+    expect(result).toMatchObject({
+      candidateKind: "face-unit",
+      rawSnapPoint: [0.24, 0, 1],
+      measurements: [{ label: "38 mm from edge", start: [1, 0, 1], end: [0.24, 0, 1] }]
+    });
   });
 
   test("snaps face hits to centerlines before free projected points", () => {
@@ -180,6 +208,21 @@ describe("snap visualization guides", () => {
       { kind: "centerline", points: [[-0.46, 0, 1], [0.46, 0, 1]], color: "#4da3ff", lineWidth: 2.2, opacity: 0.72 },
       { kind: "centerline", points: [[0, -0.46, 1], [0, 0.46, 1]], color: "#4da3ff", lineWidth: 2.2, opacity: 0.72 }
     ]);
+  });
+
+  test("exposes edge distance measurement guides", () => {
+    const guides = snapMeasurementGuides({
+      hovered: { type: "face", id: "face-top", position: [0, 0, 1], normal: [0, 0, 1], faceId: "face-top" },
+      snapPoint: [0.24, 0, 1],
+      rawSnapPoint: [0.24, 0, 1],
+      direction: [0, 0, 1],
+      suggestionType: "force",
+      candidateKind: "face-unit",
+      score: 0,
+      measurements: [{ kind: "edge-distance", start: [1, 0, 1], end: [0.24, 0, 1], label: "38 mm from edge", value: 38, units: "mm" }]
+    });
+
+    expect(guides).toEqual([{ kind: "edge-distance", start: [1, 0, 1], end: [0.24, 0, 1], label: "38 mm from edge", value: 38, units: "mm" }]);
   });
 
   test("builds an edge alignment line and midpoint tick at the snap target", () => {

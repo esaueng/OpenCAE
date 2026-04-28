@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { beamPayloadSelectionForTarget, faceIdForPlacementSnap, loadGlyphSurfacePoint, pointForPlacementSnap, shouldShowModelHitLabel, supportGlyphAnchor, supportMarkerAnchor } from "./CadViewer";
+import { beamPayloadSelectionForTarget, faceIdForPlacementSnap, faceSnapAxesForDisplayModel, loadGlyphSurfacePoint, pointForPlacementSnap, shouldShowModelHitLabel, supportGlyphAnchor, supportMarkerAnchor } from "./CadViewer";
 
 describe("CadViewer callouts", () => {
   test("uses the real cantilever fixed face as the support callout anchor", () => {
@@ -96,5 +96,31 @@ describe("CadViewer callouts", () => {
     };
 
     expect(loadGlyphSurfacePoint(marker, face).toArray()).toEqual([0.5, 0.5, 0]);
+  });
+
+  test("derives whole-unit snap axes from displayed model dimensions", () => {
+    const displayModel = {
+      id: "display-cantilever",
+      name: "Cantilever",
+      bodyCount: 1,
+      dimensions: { x: 180, y: 24, z: 24, units: "mm" as const },
+      faces: []
+    };
+    const face = {
+      id: "face-load-top",
+      label: "Free end load face",
+      color: "#4da3ff",
+      center: [1.9, 0.18, 0] as [number, number, number],
+      normal: [1, 0, 0] as [number, number, number],
+      stressValue: 96
+    };
+
+    const axes = faceSnapAxesForDisplayModel(displayModel, face);
+
+    expect(axes).toHaveLength(2);
+    expect(axes[0]).toMatchObject({ direction: [0, 1, 0], minPoint: [1.9, -0.07, 0], maxPoint: [1.9, 0.43, 0], units: "mm", unitStep: 1 });
+    expect(axes[0]?.unitsPerWorld).toBeCloseTo(48);
+    expect(axes[1]).toMatchObject({ direction: [0, 0, 1], minPoint: [1.9, 0.18, -0.36], maxPoint: [1.9, 0.18, 0.36], units: "mm", unitStep: 1 });
+    expect(axes[1]?.unitsPerWorld).toBeCloseTo(33.333333);
   });
 });

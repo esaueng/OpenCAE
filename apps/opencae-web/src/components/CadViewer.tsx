@@ -21,7 +21,7 @@ import { highlightPayloadObjectMeshes } from "../payloadObjectHighlight";
 import { layoutOutsideModelLabels, payloadMassLabelOffset, type LabelAnchor } from "../calloutLabelLayout";
 import { getSnapSuggestion } from "../snapping/snapController";
 import { SnapVisualization } from "../snapping/Visualization";
-import type { CursorRay, SnapResult, Vec3 } from "../snapping/types";
+import type { CursorRay, FaceSnapAxis, SnapMeasurement, SnapResult, Vec3 } from "../snapping/types";
 
 export type ViewMode = "model" | "mesh" | "results";
 export type ResultMode = "stress" | "displacement" | "safety_factor";
@@ -526,6 +526,56 @@ function boxToLabelBounds(bounds: THREE.Box3) {
   };
 }
 
+export function faceSnapAxesForDisplayModel(displayModel: DisplayModel, face: DisplayFace): FaceSnapAxis[] {
+  const bounds = dimensionBoundsForDisplayModel(displayModel);
+  const dimensions = dimensionValuesForDisplayModel(displayModel);
+  if (!bounds || !dimensions) return [];
+  const normalAxis = dominantAxis(face.normal);
+  return ([0, 1, 2] as const)
+    .filter((axisIndex) => axisIndex !== normalAxis)
+    .flatMap((axisIndex) => faceSnapAxisForBounds(bounds, dimensions, face.center, axisIndex));
+}
+
+function faceSnapAxisForBounds(
+  bounds: THREE.Box3,
+  dimensions: NonNullable<ReturnType<typeof dimensionValuesForDisplayModel>>,
+  center: [number, number, number],
+  axisIndex: 0 | 1 | 2
+): FaceSnapAxis[] {
+  const minValue = bounds.min.getComponent(axisIndex);
+  const maxValue = bounds.max.getComponent(axisIndex);
+  const spanWorld = maxValue - minValue;
+  const spanUnits = dimensionValueForDisplayAxis(dimensions, axisIndex);
+  if (!Number.isFinite(spanWorld) || !Number.isFinite(spanUnits) || spanWorld <= 0 || spanUnits <= 0) return [];
+  const minPoint = [...center] as Vec3;
+  const maxPoint = [...center] as Vec3;
+  minPoint[axisIndex] = minValue;
+  maxPoint[axisIndex] = maxValue;
+  const direction = [0, 0, 0] as Vec3;
+  direction[axisIndex] = 1;
+  return [{
+    direction,
+    minPoint,
+    maxPoint,
+    unitsPerWorld: spanUnits / spanWorld,
+    units: dimensions.units,
+    unitStep: dimensions.units === "in" ? 0.05 : 1
+  }];
+}
+
+function dimensionValueForDisplayAxis(dimensions: NonNullable<ReturnType<typeof dimensionValuesForDisplayModel>>, axisIndex: 0 | 1 | 2) {
+  if (axisIndex === 0) return dimensions.x;
+  if (axisIndex === 2) return dimensions.y;
+  return dimensions.z;
+}
+
+function dominantAxis(vector: [number, number, number]) {
+  const values = vector.map(Math.abs);
+  if ((values[0] ?? 0) >= (values[1] ?? 0) && (values[0] ?? 0) >= (values[2] ?? 0)) return 0;
+  if ((values[1] ?? 0) >= (values[2] ?? 0)) return 1;
+  return 2;
+}
+
 function boundaryLabelKey(kind: "load" | "support", id: string) {
   return `${kind}:${id}`;
 }
@@ -582,7 +632,13 @@ function snapResultFromEvent(event: ThreeEvent<PointerEvent> | ThreeEvent<MouseE
     ownerFace: {
       id: face.id,
       position: modelPointToViewerSpace(face.center, displayModel),
-      normal: modelNormalToViewerSpace(face.normal, displayModel)
+      normal: modelNormalToViewerSpace(face.normal, displayModel),
+      snapAxes: faceSnapAxesForDisplayModel(displayModel, face).map((axis) => ({
+        ...axis,
+        direction: modelNormalToViewerSpace(axis.direction, displayModel),
+        minPoint: modelPointToViewerSpace(axis.minPoint, displayModel),
+        maxPoint: modelPointToViewerSpace(axis.maxPoint, displayModel)
+      }))
     }
   });
   return result ? snapResultToModelSpace(result, displayModel) : null;
@@ -609,8 +665,23 @@ function snapResultToModelSpace(result: SnapResult, displayModel: DisplayModel):
       normal: result.hovered.normal ? viewerNormalToModelSpace(new THREE.Vector3(...result.hovered.normal), displayModel).toArray() as Vec3 : undefined,
       endpoints: result.hovered.endpoints
         ? result.hovered.endpoints.map((point) => viewerPointToModelSpace(new THREE.Vector3(...point), displayModel).toArray() as Vec3) as [Vec3, Vec3]
-        : undefined
-    }
+        : undefined,
+      snapAxes: result.hovered.snapAxes?.map((axis) => ({
+        ...axis,
+        direction: viewerNormalToModelSpace(new THREE.Vector3(...axis.direction), displayModel).toArray() as Vec3,
+        minPoint: viewerPointToModelSpace(new THREE.Vector3(...axis.minPoint), displayModel).toArray() as Vec3,
+        maxPoint: viewerPointToModelSpace(new THREE.Vector3(...axis.maxPoint), displayModel).toArray() as Vec3
+      }))
+    },
+    measurements: result.measurements?.map((measurement) => snapMeasurementToModelSpace(measurement, displayModel))
+  };
+}
+
+function snapMeasurementToModelSpace(measurement: SnapMeasurement, displayModel: DisplayModel): SnapMeasurement {
+  return {
+    ...measurement,
+    start: viewerPointToModelSpace(new THREE.Vector3(...measurement.start), displayModel).toArray() as Vec3,
+    end: viewerPointToModelSpace(new THREE.Vector3(...measurement.end), displayModel).toArray() as Vec3
   };
 }
 
