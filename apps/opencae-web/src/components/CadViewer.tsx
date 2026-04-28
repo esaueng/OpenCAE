@@ -460,7 +460,10 @@ function BracketModel({
       {showModelHitLabel && hoveredHit && <ModelHitLabel hit={hoveredHit} active={hoveredHit.face.id === selectedFaceId} />}
       {showBoundaryMarkers && loadMarkers.map((marker) => {
         const face = displayModel.faces.find((item) => item.id === marker.faceId);
-        return face ? <LoadGlyph key={marker.id} marker={marker} face={face} active={activeStep === "loads"} labelPosition={boundaryLabelPositions.get(boundaryLabelKey("load", marker.id))} /> : null;
+        if (!face) return null;
+        return marker.preview
+          ? <PickedLoadLocationMarker key={marker.id} marker={marker} face={face} active={activeStep === "loads"} />
+          : <LoadGlyph key={marker.id} marker={marker} face={face} active={activeStep === "loads"} labelPosition={boundaryLabelPositions.get(boundaryLabelKey("load", marker.id))} />;
       })}
       {showBoundaryMarkers && supportMarkers.map((marker) => {
         const face = displayModel.faces.find((item) => item.id === marker.faceId);
@@ -2450,6 +2453,30 @@ function LoadGlyph({ marker, face, active, labelPosition }: { marker: ViewerLoad
         tone={labelTone}
       />
     </group>
+  );
+}
+
+function PickedLoadLocationMarker({ marker, face, active }: { marker: ViewerLoadMarker; face: DisplayFace; active: boolean }) {
+  const normal = new THREE.Vector3(...face.normal).normalize();
+  const anchor = loadGlyphSurfacePoint(marker, face).clone().add(normal.multiplyScalar(0.035));
+  const color = active ? "#4da3ff" : "#93c5fd";
+  return (
+    <Billboard position={anchor.toArray()} renderOrder={24}>
+      <group>
+        <mesh>
+          <ringGeometry args={[0.055, 0.075, 36]} />
+          <meshBasicMaterial color={color} depthTest={false} transparent opacity={0.96} toneMapped={false} />
+        </mesh>
+        <mesh>
+          <circleGeometry args={[0.026, 28]} />
+          <meshBasicMaterial color={color} depthTest={false} transparent opacity={0.72} toneMapped={false} />
+        </mesh>
+        <Line points={[[-0.105, 0, 0.002], [-0.078, 0, 0.002]]} color={color} transparent opacity={0.82} lineWidth={1.15} depthTest={false} />
+        <Line points={[[0.078, 0, 0.002], [0.105, 0, 0.002]]} color={color} transparent opacity={0.82} lineWidth={1.15} depthTest={false} />
+        <Line points={[[0, -0.105, 0.002], [0, -0.078, 0.002]]} color={color} transparent opacity={0.82} lineWidth={1.15} depthTest={false} />
+        <Line points={[[0, 0.078, 0.002], [0, 0.105, 0.002]]} color={color} transparent opacity={0.82} lineWidth={1.15} depthTest={false} />
+      </group>
+    </Billboard>
   );
 }
 

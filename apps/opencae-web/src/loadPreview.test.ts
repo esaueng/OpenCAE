@@ -139,7 +139,7 @@ describe("load preview helpers", () => {
     expect(markers).toEqual([]);
   });
 
-  test("does not create an unsaved draft marker for a selected load point", () => {
+  test("creates a lightweight preview marker for a selected load point", () => {
     const point: [number, number, number] = [1.2, 2.1, 3.05];
     const draftLoad: Load = {
       id: "draft-load",
@@ -154,10 +154,18 @@ describe("load preview helpers", () => {
       draftLoadPreview: { load: draftLoad, selection }
     });
 
-    expect(markers).toEqual([]);
+    expect(markers).toHaveLength(1);
+    expect(markers[0]).toMatchObject({
+      id: "draft-load",
+      faceId: "face-side",
+      point,
+      preview: true,
+      labelIndex: 0,
+      stackIndex: 0
+    });
   });
 
-  test("does not number unsaved draft markers after saved loads", () => {
+  test("numbers unsaved draft markers after saved loads without changing saved marker labels", () => {
     const savedLoad: Load = {
       id: "load-1",
       type: "force",
@@ -178,10 +186,17 @@ describe("load preview helpers", () => {
       draftLoadPreview: { load: draftLoad, selection: secondSelection }
     });
 
-    expect(markers.map(loadMarkerDisplayLabel)).toEqual(["L1 F 500 N -Z"]);
+    expect(markers.map(loadMarkerDisplayLabel)).toEqual(["L1 F 500 N -Z", "L2 P 100 kPa +X"]);
+    expect(markers[1]).toMatchObject({
+      id: "draft-load",
+      faceId: "face-back",
+      preview: true,
+      labelIndex: 1,
+      stackIndex: 0
+    });
   });
 
-  test("does not create draft marker display from draft load inputs", () => {
+  test("creates preview marker display from draft load inputs", () => {
     const draftLoad: Load = {
       id: "draft-load",
       type: "pressure",
@@ -195,7 +210,9 @@ describe("load preview helpers", () => {
       draftLoadPreview: { load: draftLoad, selection }
     });
 
-    expect(markers).toEqual([]);
+    expect(markers).toHaveLength(1);
+    expect(markers[0]?.preview).toBe(true);
+    expect(markers[0]?.point).toEqual([1, 2, 3]);
   });
 
   test("does not create an unsaved draft marker without a valid draft selection", () => {
