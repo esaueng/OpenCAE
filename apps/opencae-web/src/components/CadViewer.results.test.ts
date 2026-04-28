@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { describe, expect, test } from "vitest";
-import { VIEWER_GIZMO_ALIGNMENT, axisLabelToViewAxis, cameraDistanceForBounds, cameraViewForAxis, colorizeResultObject, createUndeformedResultOutlineObject, displayedLegendTickLabels, legendTickLabels, payloadHighlightObjectId, printLayerVisualizationForBounds, resultProbesForKind, rotatedCameraOrbit, shouldShowDimensionOverlay, shouldShowModelHitLabel, shouldShowUndeformedResultOutline } from "./CadViewer";
+import { VIEWER_GIZMO_ALIGNMENT, axisLabelToViewAxis, cameraDistanceForBounds, cameraViewForAxis, colorizeResultObject, createUndeformedResultOutlineObject, defaultHomeViewTarget, displayedLegendTickLabels, legendTickLabels, payloadHighlightObjectId, printLayerVisualizationForBounds, resultProbesForKind, rotatedCameraOrbit, shouldShowDimensionOverlay, shouldShowModelHitLabel, shouldShowUndeformedResultOutline } from "./CadViewer";
 import type { FaceResultSample } from "../resultFields";
 import type { DisplayFace, ResultField } from "@opencae/schema";
 
@@ -76,6 +76,17 @@ describe("CadViewer result coloring", () => {
     const distance = cameraDistanceForBounds(bounds, view.direction, view.up, 42, 1, 1.28);
 
     expect(distance).toBeCloseTo(27.24, 1);
+  });
+
+  test("pans the default home target lower so the model appears higher in the viewport", () => {
+    const bounds = new THREE.Box3(new THREE.Vector3(-5, -5, -5), new THREE.Vector3(5, 5, 5));
+    const direction = new THREE.Vector3(1, 1, 1).normalize();
+    const up = new THREE.Vector3(0, 0, 1).projectOnPlane(direction).normalize();
+    const center = bounds.getCenter(new THREE.Vector3());
+    const target = defaultHomeViewTarget(bounds, direction, up);
+
+    expect(target.clone().sub(center).dot(up)).toBeLessThan(0);
+    expect(target.clone().sub(center).dot(up)).toBeCloseTo(-1.47, 1);
   });
 
   test("hides face selection callouts in result view", () => {
