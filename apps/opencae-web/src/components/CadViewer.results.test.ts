@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { describe, expect, test } from "vitest";
-import { VIEWER_GIZMO_ALIGNMENT, axisLabelToViewAxis, cameraDistanceForBounds, cameraViewForAxis, colorizeResultObject, displayedLegendTickLabels, legendTickLabels, payloadHighlightObjectId, printLayerVisualizationForBounds, rotatedCameraOrbit, shouldShowDimensionOverlay, shouldShowModelHitLabel } from "./CadViewer";
+import { VIEWER_GIZMO_ALIGNMENT, axisLabelToViewAxis, cameraDistanceForBounds, cameraViewForAxis, colorizeResultObject, createUndeformedResultOutlineObject, displayedLegendTickLabels, legendTickLabels, payloadHighlightObjectId, printLayerVisualizationForBounds, rotatedCameraOrbit, shouldShowDimensionOverlay, shouldShowModelHitLabel, shouldShowUndeformedResultOutline } from "./CadViewer";
 import type { FaceResultSample } from "../resultFields";
 
 const samples: FaceResultSample[] = [
@@ -89,6 +89,11 @@ describe("CadViewer result coloring", () => {
     expect(shouldShowDimensionOverlay(false, "model")).toBe(false);
   });
 
+  test("shows undeformed result outlines only while displaying deformed shape", () => {
+    expect(shouldShowUndeformedResultOutline(true)).toBe(true);
+    expect(shouldShowUndeformedResultOutline(false)).toBe(false);
+  });
+
   test("uses only hovered payload hits for setup-view object highlighting", () => {
     expect(payloadHighlightObjectId(true, null)).toBeUndefined();
     expect(payloadHighlightObjectId(true, { id: "payload-part", label: "Payload part", center: [0, 0, 0] })).toBe("payload-part");
@@ -124,6 +129,25 @@ describe("CadViewer result coloring", () => {
     const colors = Array.from((mesh.geometry as THREE.BufferGeometry).getAttribute("color").array);
     expect(colors.slice(0, 3)).not.toEqual(colors.slice(6, 9));
     expect((mesh.material as THREE.MeshStandardMaterial).vertexColors).toBe(true);
+  });
+
+  test("builds undeformed outline geometry before native CAD result meshes are deformed", () => {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.Float32BufferAttribute([-1, 0, 0, 0, 0, 0, 1, 0, 0], 3));
+    geometry.setIndex([0, 1, 2]);
+    const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color: "#63a9e5" }));
+    const group = new THREE.Group();
+    group.add(mesh);
+
+    const outline = createUndeformedResultOutlineObject(group);
+    colorizeResultObject(group, "uploaded", "stress", true, 4, samples, []);
+
+    const outlineLine = outline.children[0] as THREE.LineSegments<THREE.BufferGeometry>;
+    const outlinePositions = Array.from(outlineLine.geometry.getAttribute("position").array);
+    const deformedPositions = Array.from((mesh.geometry as THREE.BufferGeometry).getAttribute("position").array);
+
+    expect(outlinePositions).toContain(-1);
+    expect(deformedPositions).not.toEqual([-1, 0, 0, 0, 0, 0, 1, 0, 0]);
   });
 
   test("samples transformed native CAD vertices in normalized result coordinates", () => {

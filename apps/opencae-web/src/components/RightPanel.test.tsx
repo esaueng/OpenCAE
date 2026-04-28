@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test, vi } from "vitest";
 import type { DisplayModel, Project, ResultSummary, Study } from "@opencae/schema";
-import { RightPanel } from "./RightPanel";
+import { RightPanel, rangeProgressPercent } from "./RightPanel";
 import type { StepId } from "./StepBar";
 
 const project: Project = {
@@ -109,6 +109,19 @@ function renderPanel(activeStep: StepId, overrides: Partial<Parameters<typeof Ri
 }
 
 describe("RightPanel payload mass controls", () => {
+  test("maps range slider values to a full visual fill at the maximum", () => {
+    expect(rangeProgressPercent(1, 1, 4)).toBe(0);
+    expect(rangeProgressPercent(2.5, 1, 4)).toBe(50);
+    expect(rangeProgressPercent(4, 1, 4)).toBe(100);
+    expect(rangeProgressPercent(5, 1, 4)).toBe(100);
+  });
+
+  test("sets the result exaggeration slider fill to the current value", () => {
+    const markup = renderPanel("results", { stressExaggeration: 4 });
+
+    expect(markup).toContain("--range-progress:100%");
+  });
+
   test("places every step title and step number on the same header row", () => {
     const steps: Array<{ id: StepId; title: string; step: number }> = [
       { id: "model", title: "Model", step: 1 },

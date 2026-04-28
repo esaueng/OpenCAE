@@ -1335,7 +1335,67 @@ img {
 
 .range-field input[type="range"] {
   width: 100%;
-  accent-color: var(--color-accent);
+  height: 24px;
+  margin: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  cursor: pointer;
+  --range-progress: 0%;
+  --range-track-bg: rgba(82, 103, 130, 0.38);
+  --range-track-fill: var(--color-accent);
+  --range-thumb-color: #f2f6fb;
+}
+
+.range-field input[type="range"]::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 999px;
+  background:
+    linear-gradient(
+      90deg,
+      var(--range-track-fill) 0%,
+      var(--range-track-fill) var(--range-progress),
+      var(--range-track-bg) var(--range-progress),
+      var(--range-track-bg) 100%
+    );
+}
+
+.range-field input[type="range"]::-webkit-slider-thumb {
+  width: 18px;
+  height: 18px;
+  margin-top: -6px;
+  border: 2px solid var(--range-thumb-color);
+  border-radius: 50%;
+  appearance: none;
+  -webkit-appearance: none;
+  background: var(--range-track-fill);
+  box-shadow: 0 0 0 1px rgba(8, 12, 16, 0.5);
+}
+
+.range-field input[type="range"]::-moz-range-track {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--range-track-bg);
+}
+
+.range-field input[type="range"]::-moz-range-progress {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--range-track-fill);
+}
+
+.range-field input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--range-thumb-color);
+  border-radius: 50%;
+  background: var(--range-track-fill);
+  box-shadow: 0 0 0 1px rgba(8, 12, 16, 0.5);
+}
+
+.range-field input[type="range"]:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 3px;
 }
 
 .range-label {
