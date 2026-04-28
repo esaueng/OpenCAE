@@ -147,7 +147,6 @@ function dimensionsVolumeM3(dimensions: DisplayModel["dimensions"]) {
 
 export function createLocalBlankProject(now = new Date().toISOString()): SampleProjectResponse {
   const projectId = `project-${newLocalId()}`;
-  const studyId = `study-${newLocalId()}`;
   return {
     project: {
       id: projectId,
@@ -155,28 +154,7 @@ export function createLocalBlankProject(now = new Date().toISOString()): SampleP
       schemaVersion: bracketDemoProject.schemaVersion,
       unitSystem: "SI",
       geometryFiles: [],
-      studies: [{
-        id: studyId,
-        projectId,
-        name: "Static Stress",
-        type: "static_stress",
-        geometryScope: [],
-        materialAssignments: [],
-        namedSelections: [],
-        contacts: [],
-        constraints: [],
-        loads: [],
-        meshSettings: {
-          preset: "medium",
-          status: "not_started"
-        },
-        solverSettings: {
-          analysisType: "linear_static",
-          smallDisplacement: true
-        },
-        validation: [],
-        runs: []
-      }],
+      studies: [],
       createdAt: now,
       updatedAt: now
     },
@@ -188,6 +166,10 @@ export function createLocalBlankProject(now = new Date().toISOString()): SampleP
     },
     message: "Blank project created."
   };
+}
+
+export function createLocalStaticStressStudy(project: Project, displayModel: DisplayModel, studyId = `study-${newLocalId()}`, now = new Date().toISOString()): Project["studies"][number] {
+  return createStaticStressStudyForProject(project, displayModel, studyId, now);
 }
 
 export function openLocalProjectPayload(payload: unknown): SampleProjectResponse {
@@ -273,7 +255,7 @@ function sampleDisplayModelFor(sample: SampleModelId): DisplayModel {
   };
 }
 
-function uploadedDisplayModelFor(filename: string, contentBase64?: string): DisplayModel {
+export function uploadedDisplayModelFor(filename: string, contentBase64?: string): DisplayModel {
   const modelName = baseNameForModel(filename);
   const nativeFormat = nativeCadFormatForFilename(filename);
   const previewFormat = previewFormatForFilename(filename);
@@ -318,26 +300,26 @@ function uploadedDisplayModelFor(filename: string, contentBase64?: string): Disp
   };
 }
 
-function attachUploadedModelToProject(
+export function attachUploadedModelToProject(
   project: Project,
   options: { geometryId: string; filename: string; artifactKey: string; now: string; displayModel: DisplayModel }
 ): Project {
-  const study = project.studies[0];
   const modelName = baseNameForModel(options.filename);
   const bodyLabel = `${modelName} body`;
-  const bodySelection = {
-    id: "selection-body-uploaded",
-    name: bodyLabel,
-    entityType: "body" as const,
-    geometryRefs: [{ bodyId: "body-uploaded", entityType: "body" as const, entityId: "body-uploaded", label: bodyLabel }],
-    fingerprint: `body-uploaded-${modelName}`
-  };
-  const faceSelections = options.displayModel.faces.map((face) => ({
-    id: `selection-${face.id}`,
-    name: face.label,
-    entityType: "face" as const,
-    geometryRefs: [{ bodyId: "body-uploaded", entityType: "face" as const, entityId: face.id, label: face.label }],
-    fingerprint: `${face.id}-${face.label}`
+  const studies = project.studies.map((study) => ({
+    ...study,
+    geometryScope: [{ bodyId: "body-uploaded", entityType: "body" as const, entityId: "body-uploaded", label: bodyLabel }],
+    materialAssignments: [],
+    namedSelections: namedSelectionsForDisplayModel(bodyLabel, options.displayModel),
+    constraints: [],
+    loads: [],
+    meshSettings: {
+      ...study.meshSettings,
+      status: "not_started" as const,
+      meshRef: undefined,
+      summary: undefined
+    },
+    runs: []
   }));
   return {
     ...project,
@@ -357,26 +339,58 @@ function attachUploadedModelToProject(
         faceCount: options.displayModel.faces.length
       }
     }],
-    studies: study ? [{
-      ...study,
-      geometryScope: [{ bodyId: "body-uploaded", entityType: "body" as const, entityId: "body-uploaded", label: bodyLabel }],
-      materialAssignments: [],
-      namedSelections: [
-        bodySelection,
-        ...faceSelections
-      ],
-      constraints: [],
-      loads: [],
-      meshSettings: {
-        ...study.meshSettings,
-        status: "not_started",
-        meshRef: undefined,
-        summary: undefined
-      },
-      runs: []
-    }] : project.studies,
+    studies,
     updatedAt: options.now
   };
+}
+
+function createStaticStressStudyForProject(project: Project, displayModel: DisplayModel, studyId: string, now: string): Project["studies"][number] {
+  const geometry = project.geometryFiles[0];
+  const modelName = geometry ? baseNameForModel(geometry.filename) : displayModel.name || "model";
+  const bodyLabel = `${modelName} body`;
+  return {
+    id: studyId,
+    projectId: project.id,
+    name: "Static Stress",
+    type: "static_stress",
+    geometryScope: displayModel.bodyCount > 0
+      ? [{ bodyId: "body-uploaded", entityType: "body" as const, entityId: "body-uploaded", label: bodyLabel }]
+      : [],
+    materialAssignments: [],
+    namedSelections: displayModel.bodyCount > 0 ? namedSelectionsForDisplayModel(bodyLabel, displayModel) : [],
+    contacts: [],
+    constraints: [],
+    loads: [],
+    meshSettings: {
+      preset: "medium",
+      status: "not_started"
+    },
+    solverSettings: {
+      analysisType: "linear_static",
+      smallDisplacement: true,
+      createdAt: now
+    },
+    validation: [],
+    runs: []
+  };
+}
+
+function namedSelectionsForDisplayModel(bodyLabel: string, displayModel: DisplayModel) {
+  const bodySelection = {
+    id: "selection-body-uploaded",
+    name: bodyLabel,
+    entityType: "body" as const,
+    geometryRefs: [{ bodyId: "body-uploaded", entityType: "body" as const, entityId: "body-uploaded", label: bodyLabel }],
+    fingerprint: `body-uploaded-${bodyLabel}`
+  };
+  const faceSelections = displayModel.faces.map((face) => ({
+    id: `selection-${face.id}`,
+    name: face.label,
+    entityType: "face" as const,
+    geometryRefs: [{ bodyId: "body-uploaded", entityType: "face" as const, entityId: face.id, label: face.label }],
+    fingerprint: `${face.id}-${face.label}`
+  }));
+  return [bodySelection, ...faceSelections];
 }
 
 function uploadedBoxFaces(): DisplayModel["faces"] {

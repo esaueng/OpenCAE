@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { AlertTriangle, Anchor, ArrowDown, Check, CircleHelp, Eye, Gauge, Grid3X3, Maximize2, Play, Plus, RotateCcw, Ruler, ScanLine, ShieldCheck, Upload, Weight, X } from "lucide-react";
 import { defaultPrintParametersFor, effectiveMaterialProperties, massKgForPayloadMaterial, normalizePrintParameters, payloadMaterialForId, payloadMaterials, starterMaterials, type PayloadMaterialCategory, type PrintMaterialParameters } from "@opencae/materials";
 import { assessResultFailure, estimateAllowableLoadForSafetyFactor } from "@opencae/schema";
-import type { Constraint, DisplayFace, DisplayModel, Load, Project, ResultSummary, Study } from "@opencae/schema";
+import type { Constraint, DisplayFace, DisplayModel, Load, Project, ResultField, ResultSummary, Study } from "@opencae/schema";
 import { inferCriticalPrintAxis } from "@opencae/study-core";
 import type { ResultMode, ViewMode } from "./CadViewer";
 import type { StepId } from "./StepBar";
@@ -17,6 +17,7 @@ import { supportDisplayLabel } from "../supportLabels";
 import { getViewportTooltipPosition } from "../tooltipPosition";
 import { forceForUnits, formatDensity, formatMass, formatMaterialStress, formatVolume, loadValueForUnits, type UnitSystem } from "../unitDisplay";
 import { canNavigateToStep } from "../appShellState";
+import { MaterialLibraryModal, ResultsFieldSelector } from "./SimulationWorkflow";
 
 interface RightPanelProps {
   activeStep: StepId;
@@ -30,6 +31,7 @@ interface RightPanelProps {
   showDimensions: boolean;
   stressExaggeration: number;
   resultSummary: ResultSummary;
+  resultFields?: ResultField[];
   runProgress: number;
   sampleModel: SampleModelId;
   draftLoadType: LoadType;
@@ -225,6 +227,7 @@ function MaterialPanel({ project, displayModel, study, onAssignMaterial, onPrevi
     const material = materialForId(current);
     return material.printProfile ? normalizePrintParameters(material, currentParameters) : defaultPrintParametersFor(material);
   });
+  const [showLibrary, setShowLibrary] = useState(false);
 
   useEffect(() => {
     const material = materialForId(current);
@@ -266,6 +269,7 @@ function MaterialPanel({ project, displayModel, study, onAssignMaterial, onPrevi
           ))}
         </select>
       </label>
+      <button className="secondary wide" type="button" onClick={() => setShowLibrary(true)}>Open material library</button>
       <div className="summary-box">
         <Info label={printable && printParameters.printed ? "Effective modulus" : "Young's modulus"} value={formatMaterialStress(effectiveMaterial.youngsModulus, project.unitSystem)} />
         <Info label="Poisson ratio" value={String(selectedMaterial.poissonRatio)} />
@@ -330,6 +334,20 @@ function MaterialPanel({ project, displayModel, study, onAssignMaterial, onPrevi
         </>
       )}
       <button className="primary wide" onClick={() => onAssignMaterial(selectedMaterialId, printable ? { ...printParameters } : {})}>Apply material</button>
+      <MaterialLibraryModal
+        open={showLibrary}
+        selectedMaterialId={selectedMaterialId}
+        assignedSelectionLabel={study.geometryScope[0]?.label ?? displayModel.name}
+        unitSystem={project.unitSystem}
+        onSelectMaterial={handleMaterialChange}
+        onApply={(materialId) => {
+          const material = materialForId(materialId);
+          const parameters = materialId === selectedMaterialId ? printParameters : defaultPrintParametersFor(material);
+          onAssignMaterial(materialId, material.printProfile ? { ...parameters } : {});
+          setShowLibrary(false);
+        }}
+        onClose={() => setShowLibrary(false)}
+      />
       <SectionTitle>Assigned</SectionTitle>
       <div className="concept-card-list">
         <ConceptCard icon={<Check size={18} />} title={assignedMaterial?.name ?? "Material"} detail={`bracket · ${assignedDetail}`} tone="accent" />
@@ -892,10 +910,13 @@ function RunPanel({ study, runProgress, onRunSimulation, canRunSimulation, missi
 }
 
 function ResultsPanel({
+  project,
   resultMode,
   showDeformed,
   stressExaggeration,
   resultSummary,
+  resultFields = [],
+  study,
   onResultModeChange,
   onToggleDeformed,
   onStressExaggerationChange
@@ -907,6 +928,12 @@ function ResultsPanel({
   const AssessmentIcon = assessment.status === "pass" ? ShieldCheck : AlertTriangle;
   return (
     <Panel title="Results" helper="View stress and displacement directly on the 3D model.">
+      <ResultsFieldSelector
+        resultMode={resultMode}
+        fields={resultFields}
+        unitSystem={project.unitSystem}
+        onResultModeChange={onResultModeChange}
+      />
       <div className={`failure-assessment ${assessment.status}`}>
         <span className="assessment-icon"><AssessmentIcon size={20} /></span>
         <span>

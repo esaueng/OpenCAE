@@ -7,7 +7,8 @@ import { BottomPanel } from "./components/BottomPanel";
 import { OpenCaeLogoMark } from "./components/OpenCaeLogoMark";
 import { RightPanel } from "./components/RightPanel";
 import { StartScreen } from "./components/StartScreen";
-import { StepBar, type StepId } from "./components/StepBar";
+import type { StepId } from "./components/StepBar";
+import { BoundaryConditionMenu, CreateSimulationModal, StudyTree } from "./components/SimulationWorkflow";
 import { CadViewer, type PrintLayerOrientation, type ResultMode, type ViewMode } from "./components/CadViewer";
 import type { ViewerLoadMarker, ViewerSupportMarker } from "./components/CadViewer";
 import {
@@ -33,6 +34,7 @@ import {
 import { displayModelForUnits, loadValueForUnits, resultFieldForUnits, resultSummaryForUnits, type UnitSystem } from "./unitDisplay";
 import { supportDisplayLabel } from "./supportLabels";
 import { nextSelectedPayloadObject, shouldClearPayloadSelectionOnViewerMiss } from "./payloadSelection";
+import { createLocalStaticStressStudy } from "./localProjectFactory";
 
 interface SaveFilePickerHandle {
   createWritable: () => Promise<{ write: (content: Blob) => Promise<void>; close: () => Promise<void> }>;
@@ -93,6 +95,8 @@ export function App() {
   const [sampleModel, setSampleModel] = useState<SampleModelId>(restoredUi?.sampleModel ?? "bracket");
   const [previewPrintLayerOrientation, setPreviewPrintLayerOrientation] = useState<PrintLayerOrientation | null | undefined>(undefined);
   const [isStepbarCollapsed, setIsStepbarCollapsed] = useState(false);
+  const [showCreateSimulation, setShowCreateSimulation] = useState(false);
+  const [showBoundaryConditionMenu, setShowBoundaryConditionMenu] = useState(false);
   const didRequestRestoredHomeView = useRef(false);
 
   const study = project?.studies[0] ?? null;
@@ -303,6 +307,7 @@ export function App() {
     setRedoStack([]);
     setSelectedLoadPoint(null);
     setSelectedPayloadObject(null);
+    setShowCreateSimulation(!response.project.studies.length);
     if (response.results?.fields.length) {
       setResultSummary(response.results.summary);
       setResultFields(response.results.fields);
@@ -481,6 +486,29 @@ export function App() {
     navigateToStep(step);
   }
 
+  function handleCreateStaticSimulation() {
+    if (!project || !displayModel) return;
+    const nextStudy = createLocalStaticStressStudy(project, displayModel);
+    const nextProject = { ...project, studies: [nextStudy], updatedAt: new Date().toISOString() };
+    recordUndoSnapshot(project);
+    setProject(nextProject);
+    setShowCreateSimulation(false);
+    applyStep(displayModel.bodyCount > 0 ? "material" : "model");
+    pushMessage("Static simulation created.");
+  }
+
+  function handleBoundaryConditionType(type: "fixed" | "prescribed_displacement" | "force" | "pressure" | "gravity") {
+    setShowBoundaryConditionMenu(false);
+    if (type === "fixed" || type === "prescribed_displacement") {
+      applyStep("supports");
+      if (type === "fixed" && selectedFace) void addFixedSupportForFace(selectedFace);
+      return;
+    }
+    setDraftLoadType(type);
+    setDraftLoadValue(defaultValueForLoadType(type));
+    applyStep("loads");
+  }
+
   function handleRotateModel(axis: RotationAxis) {
     setViewAxis(axis);
     setViewAxisSignal((value) => value + 1);
@@ -570,7 +598,7 @@ export function App() {
     setHomeRequested(true);
   }
 
-  if (shouldShowStartScreen({ homeRequested, hasProject: Boolean(project), hasDisplayModel: Boolean(displayModel), hasStudy: Boolean(study) }) || !project || !displayModel || !displayModelForUi || !study) {
+  if (shouldShowStartScreen({ homeRequested, hasProject: Boolean(project), hasDisplayModel: Boolean(displayModel), hasStudy: Boolean(study) }) || !project || !displayModel || !displayModelForUi) {
     return <StartScreen onLoadSample={handleLoadSample} onCreateProject={handleCreateProject} onOpenProject={handleOpenProject} />;
   }
 
@@ -583,8 +611,7 @@ export function App() {
         <div className="topbar-divider topbar-divider-project" />
         <div className="breadcrumb">
           <ProjectNameChip name={project.name} onRename={handleRenameProject} />
-          <span className="breadcrumb-sep">/</span>
-          <span>{study.name}</span>
+          {study ? <><span className="breadcrumb-sep">/</span><span>{study.name}</span></> : <><span className="breadcrumb-sep">/</span><span>No simulation</span></>}
         </div>
         <div className="topbar-tools" aria-label="Workspace tools">
           <div className="history-tools" role="group" aria-label="Undo and redo">
@@ -600,14 +627,22 @@ export function App() {
           >
             {themeMode === "dark" ? <SunIcon /> : <MoonIcon />}
           </button>
+          <button
+            className="unit-topbar-toggle"
+            type="button"
+            title={`Switch to ${displayUnitSystem === "SI" ? "imperial" : "metric"} units`}
+            onClick={() => handleUnitSystemChange(displayUnitSystem === "SI" ? "US" : "SI")}
+          >
+            {displayUnitSystem === "SI" ? "mm" : "in"}
+          </button>
         </div>
         <button
           className={`primary topbar-action ${solverRunning ? "running" : ""}`}
-          onClick={handleRunSimulation}
-          disabled={!canRunSimulation}
+          onClick={study ? handleRunSimulation : handleCreateStaticSimulation}
+          disabled={study ? !canRunSimulation : false}
           title={missingRunItems.length ? `Complete before running: ${missingRunItems.join(", ")}` : "Run simulation"}
         >
-          <span aria-hidden="true">▶</span>{solverRunning ? "Running…" : "Run simulation"}
+          <span aria-hidden="true">▶</span>{study ? (solverRunning ? "Running…" : "Run simulation") : "Create simulation"}
         </button>
         <button className="secondary topbar-action" type="button" onClick={handleSaveProject} title="Save project to local disk">
           <Save size={16} aria-hidden="true" />
@@ -616,21 +651,28 @@ export function App() {
       </header>
 
       <main className="workspace">
-        <StepBar
-          activeStep={activeStep}
-          collapsed={isStepbarCollapsed}
-          project={project}
-          onSelect={handleStepSelect}
-          onToggleCollapsed={() => setIsStepbarCollapsed((collapsed) => !collapsed)}
-          onUnitSystemChange={handleUnitSystemChange}
-          study={study}
-          hasResults={viewMode === "results"}
-        />
+        {study ? (
+          <StudyTree
+            activeStep={activeStep}
+            study={study}
+            hasGeometry={displayModel.bodyCount > 0 || project.geometryFiles.length > 0}
+            hasResults={viewMode === "results" || resultFields.length > 0}
+            runProgress={runProgress}
+            onSelect={handleStepSelect}
+            onOpenBoundaryMenu={() => setShowBoundaryConditionMenu((value) => !value)}
+          />
+        ) : (
+          <NoStudyPanel
+            hasGeometry={displayModel.bodyCount > 0 || project.geometryFiles.length > 0}
+            onUploadModel={handleUploadModel}
+            onCreateSimulation={() => setShowCreateSimulation(true)}
+          />
+        )}
         <CadViewer
           displayModel={displayModelForUi}
           activeStep={activeStep}
           selectedFaceId={selectedFaceId}
-          payloadObjectSelectionMode={activeStep === "loads" && draftLoadType === "gravity"}
+          payloadObjectSelectionMode={Boolean(study && activeStep === "loads" && draftLoadType === "gravity")}
           selectedPayloadObject={selectedPayloadObject}
           onViewerMiss={handleViewerMiss}
           onSelectFace={handleViewportFaceSelect}
@@ -651,7 +693,7 @@ export function App() {
           onResetView={handleFitDefaultView}
           onMeasureDisplayModelDimensions={handleMeasureDisplayModelDimensions}
         />
-        <RightPanel
+        {study ? <RightPanel
           activeStep={activeStep}
           project={project}
           displayModel={displayModelForUi}
@@ -663,6 +705,7 @@ export function App() {
           showDimensions={showDimensions}
           stressExaggeration={stressExaggeration}
           resultSummary={resultSummaryForUi}
+          resultFields={resultFieldsForUi}
           runProgress={runProgress}
           sampleModel={sampleModel}
           draftLoadType={draftLoadType}
@@ -745,11 +788,76 @@ export function App() {
           canRunSimulation={canRunSimulation}
           missingRunItems={missingRunItems}
           onStepSelect={handleStepSelect}
+        /> : null}
+        {showBoundaryConditionMenu && study ? (
+          <BoundaryConditionMenu
+            open
+            onSelect={handleBoundaryConditionType}
+            onClose={() => setShowBoundaryConditionMenu(false)}
+          />
+        ) : null}
+        <CreateSimulationModal
+          open={showCreateSimulation}
+          onCreateStatic={handleCreateStaticSimulation}
+          onClose={() => setShowCreateSimulation(false)}
         />
       </main>
 
-      <BottomPanel status={status} logs={logs} projectName={project.name} studyName={study.name} meshStatus={study.meshSettings.status === "complete" ? "Ready" : "Not generated"} solverStatus={solverRunning ? "Running" : runProgress >= 100 ? "Complete" : "Idle"} />
+      <BottomPanel status={status} logs={logs} projectName={project.name} studyName={study?.name ?? "No simulation"} meshStatus={study?.meshSettings.status === "complete" ? "Ready" : "Not generated"} solverStatus={solverRunning ? "Running" : runProgress >= 100 ? "Complete" : "Idle"} />
     </div>
+  );
+}
+
+function NoStudyPanel({ hasGeometry, onUploadModel, onCreateSimulation }: { hasGeometry: boolean; onUploadModel: (file: File) => void; onCreateSimulation: () => void }) {
+  const uploadInputRef = useRef<HTMLInputElement | null>(null);
+  return (
+    <aside className="study-tree no-study-panel">
+      <section className="study-tree-section">
+        <div className="study-tree-section-header">
+          <span>Geometries</span>
+        </div>
+        <div className="tree-row active">
+          <button type="button">
+            <span className={`setup-status ${hasGeometry ? "complete" : "missing"}`} />
+            Geometry
+          </button>
+        </div>
+      </section>
+      <section className="study-tree-section">
+        <div className="study-tree-section-header">
+          <span>Simulations</span>
+        </div>
+        <button className="outline-action wide" type="button" onClick={onCreateSimulation}>Create Simulation</button>
+        <p className="panel-copy">Create a Static Analysis after loading geometry. Other analysis types are listed in the simulation picker as future options.</p>
+      </section>
+      <section className="study-tree-section">
+        <div className="study-tree-section-header">
+          <span>Model</span>
+        </div>
+        <input
+          ref={uploadInputRef}
+          className="hidden-file-input"
+          type="file"
+          tabIndex={-1}
+          aria-hidden="true"
+          accept=".step,.stp,.stl,.obj"
+          onChange={(event) => {
+            const file = event.currentTarget.files?.[0];
+            event.currentTarget.value = "";
+            if (file) onUploadModel(file);
+          }}
+        />
+        <button className={hasGeometry ? "secondary wide" : "primary wide"} type="button" onClick={() => uploadInputRef.current?.click()}>
+          {hasGeometry ? "Replace model" : "Upload model"}
+        </button>
+      </section>
+      <section className="study-tree-section">
+        <div className="study-tree-section-header">
+          <span>Job status</span>
+        </div>
+        <span className="job-status-row inactive">No active simulation</span>
+      </section>
+    </aside>
   );
 }
 
@@ -828,6 +936,12 @@ function faceForPayloadObject(payloadObject: PayloadObjectSelection): DisplayFac
     normal: [0, 0, 1],
     stressValue: 0
   };
+}
+
+function defaultValueForLoadType(type: LoadType) {
+  if (type === "pressure") return 100;
+  if (type === "gravity") return 5;
+  return 500;
 }
 
 async function saveProjectToLocalDisk(project: Project, displayModel: DisplayModel, results?: LocalResultBundle): Promise<string> {

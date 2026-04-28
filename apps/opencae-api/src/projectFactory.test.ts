@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { attachUploadedModelToProject, blankDisplayModel, createBlankProject, uploadedDisplayModelFor, createSampleProject, sampleDisplayModelFor } from "./projectFactory";
+import { attachUploadedModelToProject, blankDisplayModel, createBlankProject, createStaticStressStudy, uploadedDisplayModelFor, createSampleProject, sampleDisplayModelFor } from "./projectFactory";
 
 const sizedAsciiStlBase64 = btoa(`
 solid tray
@@ -14,7 +14,7 @@ endsolid tray
 `);
 
 describe("projectFactory", () => {
-  test("creates a blank project without preconfigured geometry or study setup", () => {
+  test("creates a blank project without preconfigured geometry or active study", () => {
     const project = createBlankProject({
       projectId: "project-blank",
       studyId: "study-blank",
@@ -23,12 +23,39 @@ describe("projectFactory", () => {
 
     expect(project.name).toBe("Untitled Project");
     expect(project.geometryFiles).toEqual([]);
-    expect(project.studies[0]?.namedSelections).toEqual([]);
-    expect(project.studies[0]?.materialAssignments).toEqual([]);
-    expect(project.studies[0]?.constraints).toEqual([]);
-    expect(project.studies[0]?.loads).toEqual([]);
-    expect(project.studies[0]?.meshSettings.status).toBe("not_started");
+    expect(project.studies).toEqual([]);
     expect(blankDisplayModel().bodyCount).toBe(0);
+  });
+
+  test("creates static stress study setup after geometry is available", () => {
+    const blank = createBlankProject({
+      projectId: "project-study",
+      studyId: "study-unused",
+      now: "2026-04-24T12:00:00.000Z"
+    });
+    const displayModel = uploadedDisplayModelFor("mounting-plate.stl", sizedAsciiStlBase64);
+    const project = attachUploadedModelToProject(blank, {
+      geometryId: "geom-upload",
+      filename: "mounting-plate.stl",
+      artifactKey: "project-study/geometry/uploaded-display.json",
+      now: "2026-04-24T12:05:00.000Z",
+      displayModel
+    });
+
+    const study = createStaticStressStudy(project, displayModel, {
+      studyId: "study-static",
+      now: "2026-04-24T12:06:00.000Z"
+    });
+
+    expect(study.name).toBe("Static Stress");
+    expect(study.geometryScope).toEqual([
+      { bodyId: "body-uploaded", entityType: "body", entityId: "body-uploaded", label: "mounting-plate body" }
+    ]);
+    expect(study.namedSelections.filter((selection) => selection.entityType === "face")).toHaveLength(displayModel.faces.length);
+    expect(study.materialAssignments).toEqual([]);
+    expect(study.constraints).toEqual([]);
+    expect(study.loads).toEqual([]);
+    expect(study.meshSettings.status).toBe("not_started");
   });
 
   test("creates a usable project from each selectable sample", () => {
@@ -148,13 +175,7 @@ describe("projectFactory", () => {
     expect(project.geometryFiles[0]?.metadata.faceCount).toBe(displayModel.faces.length);
     expect(displayModel.visualMesh?.format).toBe("stl");
     expect(displayModel.dimensions).toEqual({ x: 268.8, y: 246.1, z: 289.9, units: "mm" });
-    expect(project.studies[0]?.geometryScope).toEqual([
-      { bodyId: "body-uploaded", entityType: "body", entityId: "body-uploaded", label: "mounting-plate body" }
-    ]);
-    expect(project.studies[0]?.namedSelections.filter((selection) => selection.entityType === "face")).toHaveLength(displayModel.faces.length);
-    expect(project.studies[0]?.constraints).toEqual([]);
-    expect(project.studies[0]?.loads).toEqual([]);
-    expect(project.studies[0]?.meshSettings.status).toBe("not_started");
+    expect(project.studies).toEqual([]);
   });
 
   test("imports STEP as a selectable native CAD display model", () => {
@@ -185,6 +206,6 @@ describe("projectFactory", () => {
 
     expect(project.geometryFiles[0]?.metadata.nativeCadImport).toBe(true);
     expect(project.geometryFiles[0]?.metadata.previewFormat).toBe("step");
-    expect(project.studies[0]?.namedSelections.filter((selection) => selection.entityType === "face")).toHaveLength(6);
+    expect(project.studies).toEqual([]);
   });
 });

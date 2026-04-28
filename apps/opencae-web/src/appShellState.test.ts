@@ -12,6 +12,10 @@ describe("app shell state", () => {
     expect(shouldShowStartScreen({ homeRequested: true, hasProject: true, hasDisplayModel: true, hasStudy: true })).toBe(true);
   });
 
+  test("keeps the workspace open when a project exists before simulation creation", () => {
+    expect(shouldShowStartScreen({ homeRequested: false, hasProject: true, hasDisplayModel: true, hasStudy: false })).toBe(false);
+  });
+
   test("does not auto-advance after mesh generation", () => {
     expect(shouldAutoAdvanceAfterMeshGeneration()).toBe(false);
   });

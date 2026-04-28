@@ -9,7 +9,7 @@ export function shouldShowStartScreen({
   hasDisplayModel: boolean;
   hasStudy: boolean;
 }) {
-  return homeRequested || !hasProject || !hasDisplayModel || !hasStudy;
+  return homeRequested || !hasProject || !hasDisplayModel;
 }
 
 export function shouldAutoAdvanceAfterMeshGeneration() {
