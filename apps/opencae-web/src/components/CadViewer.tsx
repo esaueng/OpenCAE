@@ -86,7 +86,7 @@ const BEAM_PAYLOAD_LABEL = "end payload mass";
 const BEAM_PAYLOAD_CENTER: [number, number, number] = [1.48, BEAM_TOP_Y + BEAM_PAYLOAD_HEIGHT / 2, 0];
 const BEAM_PAYLOAD_VOLUME_M3 = 0.00018432;
 const WORLD_UP = new THREE.Vector3(0, 0, 1);
-const ISO_CAMERA_DIRECTION = new THREE.Vector3(1, -1, 1).normalize();
+const ISO_CAMERA_DIRECTION = new THREE.Vector3(1, 1, 1).normalize();
 const ISO_CAMERA_UP = WORLD_UP.clone().projectOnPlane(ISO_CAMERA_DIRECTION).normalize();
 const RESULT_PAYLOAD_MATERIAL_COLOR = "#8f9aa5";
 const BRACKET_HOLES = [
@@ -122,7 +122,7 @@ export function CadViewer(props: CadViewerProps) {
   }, [props.displayModel.nativeCad?.contentBase64, props.displayModel.visualMesh?.contentBase64]);
   return (
     <section className={`viewer-shell ${effectiveViewMode === "results" ? "results-view" : ""}`} aria-label="3D CAD viewer">
-      <Canvas camera={{ position: [4.8, -4.8, 4.8], up: ISO_CAMERA_UP.toArray(), fov: 42 }} onPointerMissed={props.onViewerMiss}>
+      <Canvas camera={{ position: [4.8, 4.8, 4.8], up: ISO_CAMERA_UP.toArray(), fov: 42 }} onPointerMissed={props.onViewerMiss}>
         <color attach="background" args={[viewportBackground]} />
         <ambientLight intensity={effectiveViewMode === "results" || isLightTheme ? 1.4 : 0.75} />
         <directionalLight position={[4, 6, 3]} intensity={effectiveViewMode === "results" || isLightTheme ? 1.45 : 2.2} />
