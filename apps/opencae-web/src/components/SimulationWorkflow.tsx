@@ -16,10 +16,7 @@ interface CreateSimulationModalProps {
 }
 
 export function CreateSimulationModal({ open, onCreateStatic, onCreateDynamic, onClose }: CreateSimulationModalProps) {
-  const [selectedType, setSelectedType] = useState<"static" | "dynamic">("static");
   if (!open) return null;
-  const selectedAnalysis = selectedType === "static" ? staticAnalysisOption : dynamicAnalysisOption;
-  const handleCreate = selectedType === "static" ? onCreateStatic : onCreateDynamic;
   return (
     <div className="workflow-modal-backdrop" role="presentation">
       <section className="workflow-modal create-simulation-dialog" role="dialog" aria-modal="true" aria-labelledby="create-simulation-title">
@@ -29,44 +26,71 @@ export function CreateSimulationModal({ open, onCreateStatic, onCreateDynamic, o
             <X size={18} />
           </button>
         </header>
-        <div className="simulation-picker-layout">
-          <section className="simulation-choice-list" aria-label="Choose simulation type">
-            <h3>Choose simulation type</h3>
-            {[staticAnalysisOption, dynamicAnalysisOption].map((option) => (
-              <button
-                key={option.type}
-                className={`simulation-choice-card ${selectedType === option.type ? "active" : ""}`}
-                type="button"
-                aria-pressed={selectedType === option.type}
-                onClick={() => setSelectedType(option.type)}
-              >
-                <img src={option.image} alt={option.imageAlt} />
-                <span>
-                  <strong>{option.title}</strong>
-                  <small>{option.summary}</small>
-                </span>
-              </button>
-            ))}
-          </section>
-          <article className="analysis-description selected-analysis-summary">
-            <img className="analysis-example-image" src={selectedAnalysis.image} alt={`${selectedAnalysis.imageAlt} large preview`} />
-            <h3>{selectedAnalysis.title}</h3>
-            <p>{selectedAnalysis.description}</p>
-            <div className="analysis-tags" aria-label={`${selectedAnalysis.title} capabilities`}>
-              {selectedAnalysis.tags.map((tag) => <span key={tag}>{tag}</span>)}
-            </div>
-          </article>
-        </div>
-        <footer className="workflow-modal-footer">
-          <span><strong>Need Help?</strong> Static handles steady loads; Dynamic handles transient loads with inertia.</span>
-          <button className="primary" type="button" onClick={handleCreate}>Create Simulation</button>
-        </footer>
+        <SimulationTypePicker onCreateStatic={onCreateStatic} onCreateDynamic={onCreateDynamic} />
       </section>
     </div>
   );
 }
 
+export function CreateSimulationScreen({ onCreateStatic, onCreateDynamic }: Omit<CreateSimulationModalProps, "open" | "onClose">) {
+  return (
+    <main className="simulation-type-screen" aria-labelledby="simulation-type-title">
+      <section className="workflow-modal create-simulation-dialog simulation-type-card">
+        <header className="workflow-modal-header simulation-type-header">
+          <span>
+            <small>New project</small>
+            <h2 id="simulation-type-title">Choose Simulation Type</h2>
+          </span>
+        </header>
+        <SimulationTypePicker onCreateStatic={onCreateStatic} onCreateDynamic={onCreateDynamic} />
+      </section>
+    </main>
+  );
+}
+
 type AnalysisChoice = "static" | "dynamic";
+
+function SimulationTypePicker({ onCreateStatic, onCreateDynamic }: Omit<CreateSimulationModalProps, "open" | "onClose">) {
+  const [selectedType, setSelectedType] = useState<AnalysisChoice>("static");
+  const selectedAnalysis = selectedType === "static" ? staticAnalysisOption : dynamicAnalysisOption;
+  const handleCreate = selectedType === "static" ? onCreateStatic : onCreateDynamic;
+  return (
+    <>
+      <div className="simulation-picker-layout">
+        <section className="simulation-choice-list" aria-label="Choose simulation type">
+          <h3>Choose simulation type</h3>
+          {[staticAnalysisOption, dynamicAnalysisOption].map((option) => (
+            <button
+              key={option.type}
+              className={`simulation-choice-card ${selectedType === option.type ? "active" : ""}`}
+              type="button"
+              aria-pressed={selectedType === option.type}
+              onClick={() => setSelectedType(option.type)}
+            >
+              <img src={option.image} alt={option.imageAlt} />
+              <span>
+                <strong>{option.title}</strong>
+                <small>{option.summary}</small>
+              </span>
+            </button>
+          ))}
+        </section>
+        <article className="analysis-description selected-analysis-summary">
+          <img className="analysis-example-image" src={selectedAnalysis.image} alt={`${selectedAnalysis.imageAlt} large preview`} />
+          <h3>{selectedAnalysis.title}</h3>
+          <p>{selectedAnalysis.description}</p>
+          <div className="analysis-tags" aria-label={`${selectedAnalysis.title} capabilities`}>
+            {selectedAnalysis.tags.map((tag) => <span key={tag}>{tag}</span>)}
+          </div>
+        </article>
+      </div>
+      <footer className="workflow-modal-footer">
+        <span><strong>Need Help?</strong> Static handles steady loads; Dynamic handles transient loads with inertia.</span>
+        <button className="primary" type="button" onClick={handleCreate}>Create Simulation</button>
+      </footer>
+    </>
+  );
+}
 
 const staticAnalysisOption = {
   type: "static" as AnalysisChoice,

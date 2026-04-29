@@ -10,4 +10,10 @@ describe("App workflow layout", () => {
     expect(appSource).toContain("<StepBar");
     expect(appSource).not.toContain("<StudyTree");
   });
+
+  test("routes project files without a study to the required simulation type screen", () => {
+    expect(appSource).toContain("if (project && displayModel && displayModelForUi && !study)");
+    expect(appSource).toContain("<CreateSimulationScreen");
+    expect(appSource).not.toContain("<NoStudyPanel");
+  });
 });
