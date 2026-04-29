@@ -3,10 +3,12 @@
   "name": "opencae-cloud-fea",
   "main": "apps/opencae-web/worker/index.ts",
   "compatibility_date": "2026-04-27",
+  "compatibility_flags": ["nodejs_compat"],
   "assets": {
     "directory": "apps/opencae-web/dist",
     "binding": "ASSETS",
-    "not_found_handling": "single-page-application"
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/health"]
   },
   "r2_buckets": [
     {

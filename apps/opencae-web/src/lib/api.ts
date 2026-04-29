@@ -1,8 +1,8 @@
-import { solveDynamicStudy, solveStudy } from "@opencae/solver-service";
 import type { AnalysisMesh, DisplayModel, DynamicSolverSettings, MeshQuality, Project, ResultField, ResultSummary, RunEvent, Study, StudyRun } from "@opencae/schema";
 import type { LoadApplicationPoint, LoadDirection, LoadType, PayloadLoadMetadata, PayloadObjectSelection } from "../loadPreview";
 import { embedUploadedModelFile, type EmbeddedModelFile, type LocalResultBundle } from "../projectFile";
 import { createLocalBlankProject, createLocalSampleProject, createLocalUploadResponse, openLocalProjectPayload } from "../localProjectFactory";
+import { fallbackSolveLocalStudy, solveLocalStudyInWorker } from "../workers/performanceClient";
 
 export interface SampleProjectResponse {
   message?: string;
@@ -20,7 +20,7 @@ export interface ResultsResponse {
 }
 
 const localResultsByRunId = new Map<string, ResultsResponse | Promise<ResultsResponse>>();
-const localResultSolversByRunId = new Map<string, () => ResultsResponse>();
+const localResultSolversByRunId = new Map<string, () => Promise<ResultsResponse>>();
 const localEventsByRunId = new Map<string, RunEvent[]>();
 const MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.005;
 
@@ -327,10 +327,8 @@ function runSimulationLocally(study: Study, displayModel?: DisplayModel, staticB
   const runId = `run-local-${crypto.randomUUID()}`;
   localResultSolversByRunId.set(runId, () => {
     const analysisMesh = displayModel ? analysisMeshForDisplayModel(displayModel, study.meshSettings.preset) : undefined;
-    const solved = study.type === "dynamic_structural"
-      ? solveDynamicStudy(study, runId, analysisMesh)
-      : solveStudy(study, runId, analysisMesh);
-    return { summary: solved.summary, fields: solved.fields };
+    const payload = { study, runId, analysisMesh };
+    return solveLocalStudyInWorker(payload).catch(() => fallbackSolveLocalStudy(payload));
   });
   const now = new Date().toISOString();
   const events: RunEvent[] = study.type === "dynamic_structural" ? localDynamicRunEvents(runId, study, now) : addRunTiming([

@@ -37,6 +37,7 @@ describe("Worker UI performance rewrite boundaries", () => {
 
   test("declares explicit chunks and a bundle budget command", () => {
     expect(viteConfigSource).toContain("manualChunks");
+    expect(viteConfigSource).toContain("modulePreload: false");
     expect(viteConfigSource).toContain("viewer-three");
     expect(viteConfigSource).toContain("cad-import");
     expect(packageJson.scripts["check:bundle"]).toBe("node ../../scripts/check-web-bundle-budget.mjs");

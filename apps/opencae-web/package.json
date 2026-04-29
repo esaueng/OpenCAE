@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 5173",
     "build": "tsc --noEmit && vite build",
+    "check:bundle": "node ../../scripts/check-web-bundle-budget.mjs",
     "preview": "vite preview --host 0.0.0.0 --port 5173"
   },
   "dependencies": {
