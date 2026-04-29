@@ -27,12 +27,12 @@ describe("Cloudflare FEA worker orchestration", () => {
     };
     const defaultConfig = JSON.parse(readFileSync(resolve(__dirname, "../../../wrangler.jsonc"), "utf8")) as typeof containerConfig;
 
-    expect(packageJson.scripts["deploy:cloudflare"]).toContain("--config wrangler.containers.jsonc");
-    expect(packageJson.scripts["deploy:cloudflare:dry-run"]).toContain("--config wrangler.containers.jsonc");
+    expect(packageJson.scripts["deploy:cloudflare"]).toContain("--config wrangler.jsonc");
+    expect(packageJson.scripts["deploy:cloudflare:dry-run"]).toContain("--config wrangler.jsonc");
     expect(containerConfig.name).toBe("opencae");
     expect(containerConfig.containers?.[0]).toMatchObject({ class_name: "OpenCaeFeaContainer", image: "opencae/opencae-fea:latest" });
     expect(containerConfig.durable_objects?.bindings).toContainEqual({ name: "FEA_CONTAINER", class_name: "OpenCaeFeaContainer" });
-    expect(defaultConfig.containers?.[0]).toMatchObject({ class_name: "OpenCaeFeaContainer", image: "opencae/opencae-fea:latest" });
+    expect(defaultConfig.containers).toBeUndefined();
     expect(defaultConfig.durable_objects?.bindings).toContainEqual({ name: "FEA_CONTAINER", class_name: "OpenCaeFeaContainer" });
   });
 
@@ -189,6 +189,34 @@ describe("Cloudflare FEA worker orchestration", () => {
     expect(results.fields.some((field) => field.frameIndex === 1)).toBe(true);
     expect(results.fields[0]?.samples?.[0]?.source).toBe("calculix");
     expect(results.fields[0]?.samples?.[0]?.vonMisesStressPa).toBeGreaterThan(0);
+  });
+
+  test("queue handler resolves standard Durable Object namespace container bindings by name", async () => {
+    const bucket = new MemoryR2Bucket();
+    await bucket.put("runs/run-cloud-do/request.json", JSON.stringify({
+      runId: "run-cloud-do",
+      projectId: "project-1",
+      studyId: "study-1",
+      fidelity: "ultra",
+      study: { id: "study-1", type: "static_stress" }
+    }));
+    const message = { body: { runId: "run-cloud-do" }, ack: vi.fn(), retry: vi.fn() };
+    const idFromName = vi.fn((name: string) => `id:${name}`);
+    const get = vi.fn((id: string) => ({
+      fetch: vi.fn(async () => Response.json(cloudContainerSolveResponse("run-cloud-do", false)))
+    }));
+    const env = {
+      ASSETS: { fetch: vi.fn(async () => new Response("asset")) },
+      FEA_ARTIFACTS: bucket,
+      FEA_CONTAINER: { idFromName, get }
+    };
+
+    await worker.queue({ messages: [message] }, env);
+    const results = JSON.parse(await (await bucket.get("runs/run-cloud-do/results.json"))!.text()) as { summary: { maxStress: number } };
+
+    expect(idFromName).toHaveBeenCalledWith("run-cloud-do");
+    expect(get).toHaveBeenCalledWith("id:run-cloud-do");
+    expect(results.summary.maxStress).toBe(431400000);
   });
 
   test("queue handler records failed container diagnostics without fake results", async () => {

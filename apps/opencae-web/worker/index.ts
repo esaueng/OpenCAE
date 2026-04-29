@@ -21,6 +21,7 @@ type ContainerFetchBinding = {
 };
 
 type ContainerBinding = ContainerFetchBinding | {
+  idFromName?(name: string): unknown;
   get?(id?: string): ContainerFetchBinding;
   getByName?(name: string): ContainerFetchBinding;
   getRandom?(): ContainerFetchBinding;
@@ -226,13 +227,14 @@ async function runCloudFeaSolve(runId: string, env: Env): Promise<void> {
 async function callFeaContainer(env: Env, payload: Record<string, unknown>): Promise<Response> {
   const binding = env.FEA_CONTAINER;
   if (!binding) throw new Error("Cloud FEA container binding is not configured.");
+  const instanceName = typeof payload.runId === "string" ? payload.runId : crypto.randomUUID();
   const fetcher = "fetch" in binding
     ? binding
     : binding.getByName
-      ? binding.getByName(typeof payload.runId === "string" ? payload.runId : crypto.randomUUID())
+      ? binding.getByName(instanceName)
       : binding.getRandom
         ? binding.getRandom()
-        : binding.get?.(typeof payload.runId === "string" ? payload.runId : undefined);
+        : binding.get?.(binding.idFromName ? binding.idFromName(instanceName) as string : instanceName);
   if (!fetcher) throw new Error("Cloud FEA container instance could not be resolved.");
   await fetcher.startAndWaitForPorts?.();
   return fetcher.fetch(new Request("https://opencae-fea-container/solve", {
