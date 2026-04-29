@@ -569,6 +569,16 @@ export function App() {
     pushMessage("Dynamic structural simulation created.");
   }
 
+  function invalidateCompletedRunState() {
+    setCompletedRunId("");
+    setActiveRunId("");
+    setRunProgress(0);
+    setResultFields([]);
+    setResultFrameIndex(0);
+    setResultPlaybackFramePosition(0);
+    setResultPlaybackPlaying(false);
+  }
+
   function handleUpdateSolverSettings(settings: Partial<DynamicSolverSettings>) {
     if (!study || study.type !== "dynamic_structural") return;
     const nextSettings = {
@@ -576,6 +586,7 @@ export function App() {
       ...settings,
       outputInterval: settings.timeStep ?? settings.outputInterval ?? study.solverSettings.timeStep
     };
+    invalidateCompletedRunState();
     void updateStudy(
       saveStudyPatch(
         study.id,
