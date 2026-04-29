@@ -1,11 +1,11 @@
 import { assessResultFailure } from "@opencae/schema";
-import type { ResultSummary } from "@opencae/schema";
+import type { ResultField, ResultSummary, Study } from "@opencae/schema";
 import type { ObjectStorageProvider } from "@opencae/storage";
 
 export class LocalReportProvider {
   constructor(private readonly storage: ObjectStorageProvider) {}
 
-  async generateReport(args: { projectId: string; runId: string; summary: ResultSummary }): Promise<string> {
+  async generateReport(args: { projectId: string; runId: string; summary: ResultSummary; study?: Study; fields?: ResultField[] }): Promise<string> {
     const artifactKey = `${args.projectId}/reports/${args.runId}/report.html`;
     const pdfKey = `${args.projectId}/reports/${args.runId}/report.pdf`;
     const html = buildHtmlReport(args.runId, args.summary);
@@ -24,11 +24,22 @@ export function buildHtmlReport(runId: string, summary: ResultSummary): string {
   const stressScore = clamp(summary.maxStress / Math.max(summary.maxStress, 1), 0, 1);
   const safetyPct = clamp(summary.safetyFactor / 3, 0, 1);
   const assessment = summary.failureAssessment ?? assessResultFailure(summary);
+  const analysisLabel = summary.transient ? "Dynamic structural" : "Static stress";
+  const transientRows = summary.transient
+    ? `
+            <tr><td>Integration method</td><td>${escapeHtml(summary.transient.integrationMethod)}</td></tr>
+            <tr><td>Time range</td><td>${format(summary.transient.startTime)}s - ${format(summary.transient.endTime)}s</td></tr>
+            <tr><td>Time step</td><td>${format(summary.transient.timeStep)}s</td></tr>
+            <tr><td>Output interval</td><td>${format(summary.transient.outputInterval)}s</td></tr>
+            <tr><td>Damping ratio</td><td>${format(summary.transient.dampingRatio)}</td></tr>
+            <tr><td>Frame count</td><td>${format(summary.transient.frameCount)}</td></tr>
+            <tr><td>Peak displacement time</td><td>${format(summary.transient.peakDisplacementTimeSeconds)}s</td></tr>`
+    : "";
   return `<!doctype html>
 <html>
   <head>
     <meta charset="utf-8" />
-    <title>OpenCAE Static Stress Report</title>
+    <title>OpenCAE ${escapeHtml(analysisLabel)} Report</title>
     <style>
       :root { color-scheme: light; --ink:#111827; --muted:#667085; --line:#d8dee8; --blue:#2563eb; --cyan:#1fb6ff; --green:#23c55e; --amber:#f5b84b; --red:#ef4444; }
       * { box-sizing: border-box; }
@@ -66,7 +77,7 @@ export function buildHtmlReport(runId: string, summary: ResultSummary): string {
     <main class="page">
       <header>
         ${coverSvg()}
-        <div class="eyebrow">OpenCAE static stress simulation</div>
+        <div class="eyebrow">OpenCAE ${escapeHtml(analysisLabel.toLowerCase())} simulation</div>
         <h1>Structural Analysis Report</h1>
         <div class="run">Run ${escapeHtml(runId)}</div>
       </header>
@@ -87,12 +98,13 @@ export function buildHtmlReport(runId: string, summary: ResultSummary): string {
         <div class="card">
           <h2>Result Summary</h2>
           <table>
-            <tr><td>Analysis type</td><td>Static stress</td></tr>
+            <tr><td>Analysis type</td><td>${escapeHtml(analysisLabel)}</td></tr>
             <tr><td>Stress result</td><td>Von Mises</td></tr>
             <tr><td>Max stress</td><td>${format(summary.maxStress)} ${escapeHtml(summary.maxStressUnits)}</td></tr>
             <tr><td>Max displacement</td><td>${format(summary.maxDisplacement)} ${escapeHtml(summary.maxDisplacementUnits)}</td></tr>
             <tr><td>Factor of safety</td><td>${format(summary.safetyFactor)}</td></tr>
             <tr><td>Reaction force</td><td>${format(summary.reactionForce)} ${escapeHtml(summary.reactionForceUnits)}</td></tr>
+            ${transientRows}
           </table>
         </div>
       </section>
@@ -113,6 +125,7 @@ export function buildHtmlReport(runId: string, summary: ResultSummary): string {
 
 export function buildPdfReport(runId: string, summary: ResultSummary): Buffer {
   const assessment = summary.failureAssessment ?? assessResultFailure(summary);
+  const analysisLabel = summary.transient ? "Dynamic structural" : "Static stress";
   const commands = [
     "q",
     "0.95 0.97 1 rg 0 0 612 792 re f",
@@ -129,7 +142,7 @@ export function buildPdfReport(runId: string, summary: ResultSummary): Buffer {
     text("Stress Field Preview", 48, 462, 16, "F1"),
     contourDrawing(48, 226, 310, 204),
     text("Result Summary", 384, 462, 16, "F1"),
-    tableRow(384, 426, "Analysis type", "Static stress"),
+    tableRow(384, 426, "Analysis type", analysisLabel),
     tableRow(384, 398, "Stress result", "Von Mises"),
     tableRow(384, 370, "Max stress", `${format(summary.maxStress)} ${summary.maxStressUnits}`),
     tableRow(384, 342, "Max displacement", `${format(summary.maxDisplacement)} ${summary.maxDisplacementUnits}`),

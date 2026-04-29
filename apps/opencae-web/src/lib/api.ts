@@ -1,4 +1,4 @@
-import { solveStudy } from "@opencae/solver-service";
+import { solveDynamicStudy, solveStudy } from "@opencae/solver-service";
 import type { AnalysisMesh, DisplayModel, Project, ResultField, ResultSummary, RunEvent, Study, StudyRun } from "@opencae/schema";
 import type { LoadApplicationPoint, LoadDirection, LoadType, PayloadLoadMetadata, PayloadObjectSelection } from "../loadPreview";
 import { embedUploadedModelFile, type EmbeddedModelFile, type LocalResultBundle } from "../projectFile";
@@ -204,7 +204,7 @@ export async function updateStudy(studyId: string, patch: Partial<Study>, messag
     },
     () => {
       if (!currentStudy) throw new Error("Could not update study without an open study.");
-      return { study: { ...currentStudy, ...patch }, message };
+      return { study: { ...currentStudy, ...patch } as Study, message };
     }
   ).then((data) => ({ ...data, message }));
 }
@@ -269,10 +269,20 @@ export function subscribeToRun(runId: string, onEvent: (event: RunEvent) => void
 
 function runSimulationLocally(study: Study, displayModel?: DisplayModel): { run: StudyRun; streamUrl: string; message: string } {
   const runId = `run-local-${crypto.randomUUID()}`;
-  const solved = solveStudy(study, runId, displayModel ? analysisMeshForDisplayModel(displayModel, study.meshSettings.preset) : undefined);
+  const analysisMesh = displayModel ? analysisMeshForDisplayModel(displayModel, study.meshSettings.preset) : undefined;
+  const solved = study.type === "dynamic_structural"
+    ? solveDynamicStudy(study, runId, analysisMesh)
+    : solveStudy(study, runId, analysisMesh);
   localResultsByRunId.set(runId, { summary: solved.summary, fields: solved.fields });
   const now = new Date().toISOString();
-  const events: RunEvent[] = [
+  const events: RunEvent[] = study.type === "dynamic_structural" ? [
+    { runId, type: "state", progress: 0, message: "Simulation queued locally.", timestamp: now },
+    { runId, type: "progress", progress: 10, message: "Local dynamic solver started.", timestamp: now },
+    { runId, type: "progress", progress: 44, message: "Estimating lumped mass, stiffness, and damping.", timestamp: now },
+    { runId, type: "progress", progress: 66, message: "Integrating dynamic response with Newmark average acceleration.", timestamp: now },
+    { runId, type: "progress", progress: 88, message: "Writing dynamic result frames.", timestamp: now },
+    { runId, type: "complete", progress: 100, message: "Simulation complete.", timestamp: now }
+  ] : [
     { runId, type: "state", progress: 0, message: "Simulation queued locally.", timestamp: now },
     { runId, type: "progress", progress: 10, message: "Local static solver started.", timestamp: now },
     { runId, type: "progress", progress: 46, message: "Assembling local stiffness response.", timestamp: now },
@@ -287,7 +297,7 @@ function runSimulationLocally(study: Study, displayModel?: DisplayModel): { run:
       status: "queued",
       jobId: `job-${runId}`,
       meshRef: study.meshSettings.meshRef,
-      solverBackend: "local-static-superposition",
+      solverBackend: study.type === "dynamic_structural" ? "local-dynamic-newmark" : "local-static-superposition",
       solverVersion: "0.1.0",
       startedAt: now,
       diagnostics: []

@@ -8,8 +8,15 @@ export interface ComputeBackend {
     analysisMesh?: AnalysisMesh;
     publish: (event: RunEvent) => void;
   }): Promise<{ resultRef: string; reportRef: string; summary: ResultSummary; fields: ResultField[] }>;
+  runDynamicSolve(args: {
+    study: Study;
+    runId: string;
+    meshRef: string;
+    analysisMesh?: AnalysisMesh;
+    publish: (event: RunEvent) => void;
+  }): Promise<{ resultRef: string; reportRef: string; summary: ResultSummary; fields: ResultField[] }>;
 }
 
 export interface ReportProvider {
-  generateReport(args: { projectId: string; runId: string; summary: ResultSummary }): Promise<string>;
+  generateReport(args: { projectId: string; runId: string; summary: ResultSummary; study?: Study; fields?: ResultField[] }): Promise<string>;
 }

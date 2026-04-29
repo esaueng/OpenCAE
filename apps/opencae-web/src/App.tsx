@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Constraint, DisplayFace, DisplayModel, Load, NamedSelection, Project, ResultField, ResultSummary, RunEvent, Study } from "@opencae/schema";
+import type { Constraint, DisplayFace, DisplayModel, DynamicSolverSettings, Load, NamedSelection, Project, ResultField, ResultSummary, RunEvent, Study } from "@opencae/schema";
 import { RotateCcw, Save } from "lucide-react";
 import { addLoad, addSupport, assignMaterial, createProject, generateMesh, getResults, importLocalProject, loadSampleProject, renameProject, runSimulation, subscribeToRun, updateStudy as saveStudyPatch, uploadModel, type SampleModelId } from "./lib/api";
 import { normalizePrintParameters, starterMaterials } from "@opencae/materials";
@@ -34,7 +34,7 @@ import {
 import { displayModelForUnits, loadValueForUnits, resultFieldForUnits, resultSummaryForUnits, type UnitSystem } from "./unitDisplay";
 import { supportDisplayLabel } from "./supportLabels";
 import { nextSelectedPayloadObject, shouldClearPayloadSelectionOnViewerMiss } from "./payloadSelection";
-import { createLocalStaticStressStudy } from "./localProjectFactory";
+import { createLocalDynamicStructuralStudy, createLocalStaticStressStudy } from "./localProjectFactory";
 
 interface SaveFilePickerHandle {
   createWritable: () => Promise<{ write: (content: Blob) => Promise<void>; close: () => Promise<void> }>;
@@ -87,6 +87,7 @@ export function App() {
   const [completedRunId, setCompletedRunId] = useState(restoredUi?.completedRunId || restoredResults?.completedRunId || "run-bracket-demo-seeded");
   const [resultSummary, setResultSummary] = useState<ResultSummary>(restoredResults?.summary ?? seededSummary);
   const [resultFields, setResultFields] = useState<ResultField[]>(restoredResults?.fields ?? []);
+  const [resultFrameIndex, setResultFrameIndex] = useState(0);
   const [draftLoadType, setDraftLoadType] = useState<LoadType>(restoredUi?.draftLoadType ?? "force");
   const [draftLoadValue, setDraftLoadValue] = useState(restoredUi?.draftLoadValue ?? 500);
   const [draftLoadDirection, setDraftLoadDirection] = useState<LoadDirectionLabel>(restoredUi?.draftLoadDirection ?? "-Z");
@@ -114,6 +115,7 @@ export function App() {
   const displayModelForUi = useMemo(() => displayModel ? displayModelForUnits(displayModel, displayUnitSystem) : null, [displayModel, displayUnitSystem]);
   const resultSummaryForUi = useMemo(() => resultSummaryForUnits(resultSummary, displayUnitSystem), [displayUnitSystem, resultSummary]);
   const resultFieldsForUi = useMemo(() => resultFields.map((field) => resultFieldForUnits(field, displayUnitSystem)), [displayUnitSystem, resultFields]);
+  const visibleResultFieldsForUi = useMemo(() => fieldsForResultFrame(resultFieldsForUi, resultFrameIndex), [resultFieldsForUi, resultFrameIndex]);
   const solverRunning = runProgress > 0 && runProgress < 100;
   const runReadiness = useMemo(() => readinessForStudy(study), [study]);
   const canRunSimulation = runReadiness.every((item) => item.done) && !solverRunning;
@@ -311,6 +313,7 @@ export function App() {
     if (response.results?.fields.length) {
       setResultSummary(response.results.summary);
       setResultFields(response.results.fields);
+      setResultFrameIndex(0);
       const restoredRunId = response.results.completedRunId ?? response.results.activeRunId ?? latestCompletedRunId(response.project.studies[0] ?? null, "") ?? "";
       setActiveRunId(response.results.activeRunId ?? restoredRunId);
       setCompletedRunId(restoredRunId);
@@ -321,6 +324,7 @@ export function App() {
       applyStep("model");
       setViewMode("model");
       setResultFields([]);
+      setResultFrameIndex(0);
       setRunProgress(0);
       const nextCompletedRunId = latestCompletedRunId(response.project.studies[0] ?? null, "") ?? "";
       setActiveRunId(nextCompletedRunId);
@@ -497,6 +501,29 @@ export function App() {
     pushMessage("Static simulation created.");
   }
 
+  function handleCreateDynamicSimulation() {
+    if (!project || !displayModel) return;
+    const nextStudy = createLocalDynamicStructuralStudy(project, displayModel);
+    const nextProject = { ...project, studies: [nextStudy], updatedAt: new Date().toISOString() };
+    recordUndoSnapshot(project);
+    setProject(nextProject);
+    setShowCreateSimulation(false);
+    applyStep(displayModel.bodyCount > 0 ? "material" : "model");
+    pushMessage("Dynamic structural simulation created.");
+  }
+
+  function handleUpdateSolverSettings(settings: Partial<DynamicSolverSettings>) {
+    if (!study || study.type !== "dynamic_structural") return;
+    void updateStudy(
+      saveStudyPatch(
+        study.id,
+        { solverSettings: { ...study.solverSettings, ...settings } },
+        "Dynamic settings updated.",
+        study
+      )
+    );
+  }
+
   function handleBoundaryConditionType(type: "fixed" | "prescribed_displacement" | "force" | "pressure" | "gravity") {
     setShowBoundaryConditionMenu(false);
     if (type === "fixed" || type === "prescribed_displacement") {
@@ -587,6 +614,7 @@ export function App() {
         const results = await getResults(response.run.id);
         setResultSummary(results.summary);
         setResultFields(results.fields);
+        setResultFrameIndex(0);
         setCompletedRunId(response.run.id);
         setViewMode("results");
         setActiveStep("results");
@@ -667,7 +695,7 @@ export function App() {
           showDeformed={showDeformed}
           showDimensions={showDimensions}
           stressExaggeration={stressExaggeration}
-          resultFields={resultFieldsForUi}
+          resultFields={visibleResultFieldsForUi}
           unitSystem={displayUnitSystem}
           themeMode={themeMode}
           fitSignal={fitSignal}
@@ -770,9 +798,12 @@ export function App() {
             updateStudy(saveStudyPatch(study.id, { loads: study.loads.filter((item) => item.id !== loadId) }, "Load removed.", study))
           }
           onGenerateMesh={(preset) => updateStudy(generateMesh(study.id, preset, study, displayModel), shouldAutoAdvanceAfterMeshGeneration() ? "run" : undefined)}
+          onUpdateSolverSettings={handleUpdateSolverSettings}
           onRunSimulation={handleRunSimulation}
           canRunSimulation={canRunSimulation}
           missingRunItems={missingRunItems}
+          resultFrameIndex={resultFrameIndex}
+          onResultFrameChange={setResultFrameIndex}
           onStepSelect={handleStepSelect}
         /> : null}
         {showBoundaryConditionMenu && study ? (
@@ -785,6 +816,7 @@ export function App() {
         <CreateSimulationModal
           open={showCreateSimulation}
           onCreateStatic={handleCreateStaticSimulation}
+          onCreateDynamic={handleCreateDynamicSimulation}
           onClose={() => setShowCreateSimulation(false)}
         />
       </main>
@@ -891,6 +923,12 @@ function latestCompletedRunId(study: Study | null, activeRunId: string): string 
   if (study.runs.some((run) => run.id === activeRunId && (run.resultRef || run.status === "complete"))) return activeRunId;
   const completed = [...study.runs].reverse().find((run) => run.resultRef || run.status === "complete");
   return completed?.id ?? null;
+}
+
+function fieldsForResultFrame(fields: ResultField[], frameIndex: number): ResultField[] {
+  const hasFrames = fields.some((field) => typeof field.frameIndex === "number");
+  if (!hasFrames) return fields;
+  return fields.filter((field) => (field.frameIndex ?? 0) === frameIndex);
 }
 
 function readinessForStudy(study: Study | null) {

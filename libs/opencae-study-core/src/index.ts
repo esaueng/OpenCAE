@@ -1,4 +1,4 @@
-import type { Diagnostic, Study } from "@opencae/schema";
+import type { Diagnostic, DynamicSolverSettings, Study } from "@opencae/schema";
 
 export type PrintCriticalAxis = "x" | "y" | "z";
 
@@ -26,6 +26,47 @@ export function validateStaticStressStudy(study: Study): Diagnostic[] {
     }
   }
   if (study.meshSettings.status !== "complete") diagnostics.push(issue("validation-mesh", "Generate the mesh before running."));
+  return diagnostics;
+}
+
+export function validateStudy(study: Study): Diagnostic[] {
+  if (study.type === "dynamic_structural") return validateDynamicStructuralStudy(study);
+  return validateStaticStressStudy(study);
+}
+
+export function validateDynamicStructuralStudy(study: Study): Diagnostic[] {
+  const diagnostics: Diagnostic[] = [];
+  const solverSettings = study.solverSettings as DynamicSolverSettings;
+  if (study.materialAssignments.length === 0) diagnostics.push(issue("validation-material", "Choose what the part is made of."));
+  for (const load of study.loads) {
+    const selection = study.namedSelections.find((item) => item.id === load.selectionRef);
+    if (!selection || selection.entityType !== "face") {
+      diagnostics.push(issue(`validation-load-selection-${load.id}`, `Load ${load.id} must reference a face selection.`));
+    }
+    if (!isPositiveFinite(load.parameters.value)) {
+      diagnostics.push(issue(`validation-load-value-${load.id}`, `Load ${load.id} needs a positive finite magnitude.`));
+    }
+    if (!isDirection(load.parameters.direction)) {
+      diagnostics.push(issue(`validation-load-direction-${load.id}`, `Load ${load.id} needs a 3D direction vector.`));
+    }
+  }
+  if (study.loads.length === 0) diagnostics.push(issue("validation-load", "Choose where force, pressure, or payload weight is applied."));
+  if (study.meshSettings.status !== "complete") diagnostics.push(issue("validation-mesh", "Generate the mesh before running."));
+  if (study.constraints.length === 0 && solverSettings.allowFreeMotion !== true) {
+    diagnostics.push(issue("validation-dynamic-support", "Add at least one support or enable free motion for the dynamic run."));
+  }
+  if (!(solverSettings.endTime > solverSettings.startTime)) {
+    diagnostics.push(issue("validation-dynamic-end-time", "Dynamic end time must be greater than start time."));
+  }
+  if (!(solverSettings.timeStep > 0)) {
+    diagnostics.push(issue("validation-dynamic-time-step", "Dynamic time step must be greater than zero."));
+  }
+  if (!(solverSettings.outputInterval > 0 && solverSettings.outputInterval >= solverSettings.timeStep)) {
+    diagnostics.push(issue("validation-dynamic-output-interval", "Dynamic output interval must be greater than zero and no smaller than the time step."));
+  }
+  if (!(solverSettings.dampingRatio >= 0)) {
+    diagnostics.push(issue("validation-dynamic-damping", "Dynamic damping ratio cannot be negative."));
+  }
   return diagnostics;
 }
 

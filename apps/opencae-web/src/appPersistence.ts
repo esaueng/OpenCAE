@@ -56,7 +56,7 @@ interface StorageLike {
 
 const STEPS: StepId[] = ["model", "material", "supports", "loads", "mesh", "run", "results"];
 const VIEW_MODES: ViewMode[] = ["model", "mesh", "results"];
-const RESULT_MODES: ResultMode[] = ["stress", "displacement", "safety_factor"];
+const RESULT_MODES: ResultMode[] = ["stress", "displacement", "safety_factor", "velocity", "acceleration"];
 const THEMES: ThemeMode[] = ["dark", "light"];
 const LOAD_TYPES: LoadType[] = ["force", "pressure", "gravity"];
 const LOAD_DIRECTIONS: LoadDirectionLabel[] = ["-Y", "+Y", "+X", "-X", "+Z", "-Z", "Normal"];
