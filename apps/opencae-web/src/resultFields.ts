@@ -88,7 +88,7 @@ export function interpolatedFieldsForFramePosition(fields: ResultField[], frameP
 }
 
 export function resultSamplesForFaces(faces: DisplayFace[], fields: ResultField[], mode: ResultFieldMode): FaceResultSample[] {
-  const field = fields.find((candidate) => candidate.type === mode && candidate.location === "face");
+  const field = resultFieldForMode(fields, mode);
   const values = faces.map((face, index) => {
     const solved = Number(field?.values[index]);
     return Number.isFinite(solved) ? solved : fallbackValue(face, mode);
@@ -110,7 +110,7 @@ export function resultSamplesForFaces(faces: DisplayFace[], fields: ResultField[
 }
 
 export function resultProbeSamplesForFaces(faces: DisplayFace[], fields: ResultField[], mode: ResultFieldMode): FaceResultProbeSample[] {
-  const field = fields.find((candidate) => candidate.type === mode && candidate.location === "face");
+  const field = resultFieldForMode(fields, mode);
   if (!field?.values.length) return [];
   const samples = resultSamplesForFaces(faces, fields, mode)
     .filter((sample) => Number.isFinite(sample.value))
@@ -131,6 +131,12 @@ export function resultProbeSamplesForFaces(faces: DisplayFace[], fields: ResultF
     label: resultProbeLabel(mode, sample.value, field.units),
     tone
   }));
+}
+
+function resultFieldForMode(fields: ResultField[], mode: ResultFieldMode): ResultField | undefined {
+  return fields.find((candidate) => candidate.type === mode && candidate.location === "face")
+    ?? fields.find((candidate) => candidate.type === mode && candidate.samples?.length)
+    ?? fields.find((candidate) => candidate.type === mode);
 }
 
 function fallbackValue(face: DisplayFace, mode: ResultFieldMode): number {
