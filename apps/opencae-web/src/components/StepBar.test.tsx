@@ -53,9 +53,8 @@ describe("StepBar", () => {
     expect(html).toContain("stepbar collapsed");
     expect(html).toContain("Light");
     expect(html).toContain("Switch to light mode");
-    expect(html).toContain("Feedback");
-    expect(html).toContain('href="https://form.esauengineering.com/opencae-feedback"');
-    expect(html.indexOf("Feedback")).toBeLessThan(html.indexOf("Light"));
+    expect(html).not.toContain("Feedback");
+    expect(html).not.toContain('href="https://form.esauengineering.com/opencae-feedback"');
     expect(html).not.toContain("GitHub");
     expect(html).not.toContain('href="https://github.com/esaueng/OpenCAE"');
     expect(html).toContain("Metric");

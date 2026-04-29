@@ -15,11 +15,16 @@ describe("BottomPanel", () => {
       />
     );
 
-    expect(html).toContain('class="status-github"');
+    expect(html).toContain('class="status-links"');
+    expect(html).toContain('class="status-link"');
+    expect(html).toContain('href="https://form.esauengineering.com/opencae-feedback"');
     expect(html).toContain('href="https://github.com/esaueng/OpenCAE"');
+    expect(html).toContain(">feedback</a>");
     expect(html).toContain(">github</a>");
     expect(html.indexOf("Results ready")).toBeLessThan(html.indexOf("local"));
     expect(html.indexOf("local")).toBeLessThan(html.indexOf("<b>project</b>"));
+    expect(html.indexOf(">feedback</a>")).toBeGreaterThan(html.indexOf("<b>solver</b>"));
+    expect(html.indexOf(">feedback</a>")).toBeLessThan(html.indexOf(">github</a>"));
     expect(html.indexOf(">github</a>")).toBeGreaterThan(html.indexOf("<b>solver</b>"));
   });
 });
