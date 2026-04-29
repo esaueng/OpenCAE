@@ -1881,6 +1881,8 @@ function deformedPointForResults(
 ) {
   if (deformationScale <= 1e-9) return point.clone();
   if (kind === "uploaded") return deformedUploadedPoint(point, stressExaggeration, samples, loadMarkers, supportMarkers, deformationScale, usesResultDeformationScale, bounds);
+  const constrained = deformedPointFromSupportToLoad(point, samples, loadMarkers, supportMarkers, deformationScale, usesResultDeformationScale, stressExaggeration);
+  if (constrained) return constrained;
   if (!loadMarkers.length) return deformedPointForKind(kind, point, stressExaggeration, deformationScale);
   const next = point.clone();
   const span = resultSampleSpan(samples);
@@ -1896,6 +1898,33 @@ function deformedPointForResults(
     deformation.addScaledVector(direction, weight * scale * magnitude * deformationScale);
   }
   return next.add(deformation);
+}
+
+function deformedPointFromSupportToLoad(
+  point: THREE.Vector3,
+  samples: FaceResultSample[],
+  loadMarkers: ViewerLoadMarker[],
+  supportMarkers: ViewerSupportMarker[],
+  deformationScale: number,
+  usesResultDeformationScale: boolean,
+  stressExaggeration: number
+) {
+  const supportCenters = markerCenters(supportMarkers, samples);
+  const loadCenters = markerCenters(loadMarkers, samples);
+  if (!supportCenters.length || !loadCenters.length) return null;
+  const supportCenter = averageVector(supportCenters);
+  const deformation = new THREE.Vector3();
+  const scale = 0.045 + Math.max(0, stressExaggeration - 1) * 0.075;
+  for (const marker of loadMarkers) {
+    const loadCenter = markerCenter(marker.faceId, samples) ?? averageVector(loadCenters);
+    const span = loadCenter.clone().sub(supportCenter);
+    const spanLengthSq = Math.max(span.lengthSq(), 1e-9);
+    const travel = Math.max(0, Math.min(1, point.clone().sub(supportCenter).dot(span) / spanLengthSq));
+    const beamShape = travel * travel * (3 - 2 * travel);
+    const magnitude = usesResultDeformationScale ? 1 : Math.max(0.35, marker.value / 500);
+    deformation.addScaledVector(markerDirectionInModelSpace(marker), beamShape * scale * magnitude / Math.max(loadMarkers.length, 1));
+  }
+  return point.clone().add(deformation);
 }
 
 function deformedUploadedPoint(

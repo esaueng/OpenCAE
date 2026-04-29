@@ -436,6 +436,38 @@ describe("CadViewer result coloring", () => {
     expect(positions.getY(2)).toBeLessThan(positions.getY(1));
   });
 
+  test("keeps the selected cantilever support end anchored during built-in result deformation", () => {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.Float32BufferAttribute([-1, 0, 0, 0, 0, 0, 1, 0, 0], 3));
+    geometry.setIndex([0, 1, 2]);
+    const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color: "#63a9e5" }));
+    const group = new THREE.Group();
+    group.add(mesh);
+
+    colorizeResultObject(group, "cantilever", "displacement", true, 4, samples, [{
+      id: "load-1",
+      faceId: "left",
+      type: "force",
+      value: 500,
+      units: "N",
+      direction: [0, -1, 0],
+      directionLabel: "Normal",
+      labelIndex: 0,
+      stackIndex: 0
+    }], 1, [{
+      id: "support-1",
+      faceId: "right",
+      type: "fixed",
+      displayLabel: "FS 1",
+      label: "Right",
+      stackIndex: 0
+    }]);
+
+    const positions = mesh.geometry.getAttribute("position");
+    expect(positions.getY(2)).toBeCloseTo(0);
+    expect(positions.getY(0)).toBeLessThan(0);
+  });
+
   test("does not stretch low-amplitude dynamic result colors across the full palette", () => {
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute("position", new THREE.Float32BufferAttribute([-1, 0, 0, 0, 0, 0, 1, 0, 0], 3));
