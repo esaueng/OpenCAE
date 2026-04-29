@@ -1,4 +1,5 @@
 import type { AnalysisMesh, ResultField, ResultSummary, Study } from "@opencae/schema";
+import type { PreparedPlaybackFrameCache } from "../resultPlaybackCache";
 
 export interface LocalSolveResult {
   summary: ResultSummary;
@@ -37,6 +38,13 @@ export type PerformanceWorkerPayloads = {
     fields: ResultField[];
     framePosition: number;
   };
+  preparePlaybackFrames: {
+    fields: ResultField[];
+    frameIndexes: number[];
+    playbackFps: number;
+    budgetBytes: number;
+    cacheKey?: string;
+  };
   decodeStl: {
     buffer: ArrayBuffer;
   };
@@ -49,6 +57,7 @@ export type PerformanceWorkerPayloads = {
 export type PerformanceWorkerResults = {
   solveLocalStudy: LocalSolveResult;
   prepareResultFrame: { fields: ResultField[] };
+  preparePlaybackFrames: PreparedPlaybackFrameCache;
   decodeStl: DecodedStlGeometry;
   importStep: ImportedStepPreview;
 };

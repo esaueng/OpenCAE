@@ -82,6 +82,7 @@ interface RightPanelProps {
   onResultFrameChange?: (frameIndex: number) => void;
   resultPlaybackPlaying?: boolean;
   resultPlaybackFps?: number;
+  resultPlaybackCacheLabel?: string;
   onResultPlaybackToggle?: () => void;
   onResultPlaybackFpsChange?: (fps: number) => void;
   onStepSelect: (step: StepId) => void;
@@ -1130,6 +1131,7 @@ function ResultsPanel({
   resultFramePosition = resultFrameIndex,
   resultPlaybackPlaying = false,
   resultPlaybackFps = 12,
+  resultPlaybackCacheLabel = "",
   onResultFrameChange,
   onResultPlaybackToggle,
   onResultPlaybackFpsChange,
@@ -1224,6 +1226,7 @@ function ResultsPanel({
           <button className="secondary wide" type="button" onClick={() => {
             onResultPlaybackToggle?.();
           }}>{resultPlaybackPlaying ? <Pause size={16} /> : <Play size={16} />}{resultPlaybackPlaying ? "Pause" : "Play"}</button>
+          {resultPlaybackCacheLabel && <small className="playback-cache-status">{resultPlaybackCacheLabel}</small>}
           <Info label="Peak displacement" value={peakDisplacement ? `${peakDisplacement.value} ${peakDisplacement.units} at ${peakDisplacement.timeSeconds.toFixed(4)} s` : "Unavailable"} />
         </div>
       )}

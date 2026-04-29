@@ -1,4 +1,5 @@
 import { createResultFrameCache } from "../resultFields";
+import { preparePlaybackFrames, preparedPlaybackTransferables, type PreparedPlaybackFrameCache } from "../resultPlaybackCache";
 import { normalizedStlGeometryFromBuffer } from "../stlPreview";
 import { stepPreviewFromBase64 } from "../stepPreview";
 import { fallbackSolveLocalStudy } from "./localSolve";
@@ -49,6 +50,9 @@ async function runOperation(request: PerformanceWorkerRequest) {
       fields: createResultFrameCache(request.payload.fields).fieldsForFramePosition(request.payload.framePosition)
     };
   }
+  if (request.operation === "preparePlaybackFrames") {
+    return preparePlaybackFrames(request.payload);
+  }
   if (request.operation === "decodeStl") {
     const geometry = normalizedStlGeometryFromBuffer(request.payload.buffer);
     const positions = geometry.getAttribute("position");
@@ -78,8 +82,13 @@ function attributeToFloat32Array(attribute: { array: ArrayLike<number> }): Float
 }
 
 function transferablesFor(result: unknown): Transferable[] {
+  if (isPreparedPlaybackFrameCache(result)) return preparedPlaybackTransferables(result);
   if (!isDecodedStlGeometry(result)) return [];
   return [result.positions.buffer, result.normals.buffer];
+}
+
+function isPreparedPlaybackFrameCache(value: unknown): value is PreparedPlaybackFrameCache {
+  return typeof value === "object" && value !== null && "frames" in value && "actualBytes" in value;
 }
 
 function isDecodedStlGeometry(value: unknown): value is DecodedStlGeometry {

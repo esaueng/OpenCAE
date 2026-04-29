@@ -1904,6 +1904,13 @@ img {
   font-size: var(--fs-xs);
 }
 
+.playback-cache-status {
+  display: block;
+  color: var(--color-text-muted);
+  font-size: var(--fs-xs);
+  line-height: 1.4;
+}
+
 .segmented {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
