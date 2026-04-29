@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { ElementRef, MutableRefObject } from "react";
 import { Billboard, Bounds, Edges, GizmoHelper, Html, Line, OrbitControls, Text, useBounds } from "@react-three/drei";
 import { Canvas, useThree } from "@react-three/fiber";
@@ -51,6 +51,11 @@ export interface ViewerSupportMarker {
   stackIndex: number;
 }
 
+export interface ResultPlaybackFrameStore {
+  subscribe: (listener: () => void) => () => void;
+  getSnapshot: () => ResultField[];
+}
+
 interface CadViewerProps {
   displayModel: DisplayModel;
   activeStep: StepId;
@@ -66,6 +71,7 @@ interface CadViewerProps {
   showDimensions: boolean;
   stressExaggeration: number;
   resultFields: ResultField[];
+  resultPlaybackFrameStore?: ResultPlaybackFrameStore;
   meshSummary?: MeshSummary;
   unitSystem: UnitSystem;
   themeMode: ThemeMode;
@@ -130,26 +136,54 @@ export function CadViewer(props: CadViewerProps) {
   const viewportBackground = isLightTheme ? "#f7f9fc" : "#070b10";
   const modelRotation = useMemo(() => modelRotationRadians(props.displayModel), [props.displayModel]);
   const baseModelRotation = useMemo(() => baseModelRotationRadians(props.displayModel), [props.displayModel]);
+  const storeResultFields = useSyncExternalStore(
+    props.resultPlaybackFrameStore?.subscribe ?? noopPlaybackFrameSubscribe,
+    props.resultPlaybackFrameStore?.getSnapshot ?? (() => props.resultFields),
+    props.resultPlaybackFrameStore?.getSnapshot ?? (() => props.resultFields)
+  );
+  const resultFields = props.resultPlaybackFrameStore ? storeResultFields : props.resultFields;
   useEffect(() => {
     setUploadedPreviewBounds(null);
   }, [props.displayModel.nativeCad?.contentBase64, props.displayModel.visualMesh?.contentBase64]);
   return (
     <section className={`viewer-shell ${effectiveViewMode === "results" ? "results-view" : ""}`} aria-label="3D CAD viewer">
-      <Canvas camera={{ position: [4.8, 4.8, 4.8], up: ISO_CAMERA_UP.toArray(), fov: 42 }} onPointerMissed={props.onViewerMiss}>
+      <Canvas frameloop="demand" dpr={[1, 2]} camera={{ position: [4.8, 4.8, 4.8], up: ISO_CAMERA_UP.toArray(), fov: 42 }} onPointerMissed={props.onViewerMiss}>
+        <ViewerInvalidator
+          activeStep={props.activeStep}
+          displayModel={props.displayModel}
+          effectiveViewMode={effectiveViewMode}
+          fitSignal={props.fitSignal}
+          loadMarkers={props.loadMarkers}
+          printLayerOrientation={props.printLayerOrientation}
+          resultFields={resultFields}
+          resultMode={props.resultMode}
+          resultPlaybackPlaying={props.resultPlaybackPlaying}
+          selectedFaceId={props.selectedFaceId}
+          selectedPayloadObject={props.selectedPayloadObject}
+          showDeformed={props.showDeformed}
+          showDimensions={props.showDimensions}
+          stressExaggeration={props.stressExaggeration}
+          supportMarkers={props.supportMarkers}
+          themeMode={props.themeMode}
+          unitSystem={props.unitSystem}
+          uploadedPreviewBounds={uploadedPreviewBounds}
+          viewAxis={props.viewAxis}
+          viewAxisSignal={props.viewAxisSignal}
+        />
         <color attach="background" args={[viewportBackground]} />
         <ambientLight intensity={effectiveViewMode === "results" || isLightTheme ? 1.4 : 0.75} />
         <directionalLight position={[4, 6, 3]} intensity={effectiveViewMode === "results" || isLightTheme ? 1.45 : 2.2} />
         <Bounds fit clip observe margin={VIEWER_FIT_MARGIN}>
           <group rotation={modelRotation}>
             <group rotation={baseModelRotation}>
-              <BracketModel {...props} viewMode={effectiveViewMode} uploadedPreviewBounds={uploadedPreviewBounds} onUploadedPreviewBounds={setUploadedPreviewBounds} />
+              <BracketModel {...props} resultFields={resultFields} viewMode={effectiveViewMode} uploadedPreviewBounds={uploadedPreviewBounds} onUploadedPreviewBounds={setUploadedPreviewBounds} />
               {showDimensionOverlay && <ModelDimensionOverlay displayModel={props.displayModel} uploadedPreviewBounds={uploadedPreviewBounds} />}
             </group>
           </group>
           <BoundsCameraReset signal={props.fitSignal} viewAxis={props.viewAxis} viewAxisSignal={props.viewAxisSignal} controlsRef={controlsRef} />
           <GizmoCameraReset axis={gizmoViewRequest.axis} signal={gizmoViewRequest.signal} controlsRef={controlsRef} />
         </Bounds>
-        <OrbitControls ref={controlsRef} makeDefault enableDamping dampingFactor={0.08} target={[0, 0, 0.75]} />
+        <DemandOrbitControls controlsRef={controlsRef} />
         <ShiftPanControls controlsRef={controlsRef} />
         <GizmoHelper alignment={VIEWER_GIZMO_ALIGNMENT} margin={[92, 92]}>
           <CleanAxisGizmo
@@ -164,13 +198,95 @@ export function CadViewer(props: CadViewerProps) {
         </button>
       </div>
       <a className="viewer-watermark" href={VIEWER_CREDIT_URL} target="_blank" rel="noreferrer">Built by Esau Engineering</a>
-      {effectiveViewMode === "results" && <ResultLegend resultMode={props.resultMode} resultFields={props.resultFields} unitSystem={props.unitSystem} meshSummary={props.meshSummary} />}
+      {effectiveViewMode === "results" && <ResultLegend resultMode={props.resultMode} resultFields={resultFields} unitSystem={props.unitSystem} meshSummary={props.meshSummary} />}
     </section>
   );
 }
 
+function noopPlaybackFrameSubscribe() {
+  return () => undefined;
+}
+
+function ViewerInvalidator({
+  activeStep,
+  displayModel,
+  effectiveViewMode,
+  fitSignal,
+  loadMarkers,
+  printLayerOrientation,
+  resultFields,
+  resultMode,
+  resultPlaybackPlaying,
+  selectedFaceId,
+  selectedPayloadObject,
+  showDeformed,
+  showDimensions,
+  stressExaggeration,
+  supportMarkers,
+  themeMode,
+  unitSystem,
+  uploadedPreviewBounds,
+  viewAxis,
+  viewAxisSignal
+}: {
+  activeStep: StepId;
+  displayModel: DisplayModel;
+  effectiveViewMode: ViewMode;
+  fitSignal: number;
+  loadMarkers: ViewerLoadMarker[];
+  printLayerOrientation: PrintLayerOrientation | null;
+  resultFields: ResultField[];
+  resultMode: ResultMode;
+  resultPlaybackPlaying: boolean;
+  selectedFaceId: string | null;
+  selectedPayloadObject: PayloadObjectSelection | null;
+  showDeformed: boolean;
+  showDimensions: boolean;
+  stressExaggeration: number;
+  supportMarkers: ViewerSupportMarker[];
+  themeMode: ThemeMode;
+  unitSystem: UnitSystem;
+  uploadedPreviewBounds: THREE.Box3 | null;
+  viewAxis: RotationAxis | null;
+  viewAxisSignal: number;
+}) {
+  const { invalidate } = useThree();
+  useEffect(() => {
+    invalidate();
+  }, [
+    activeStep,
+    displayModel,
+    effectiveViewMode,
+    fitSignal,
+    invalidate,
+    loadMarkers,
+    printLayerOrientation,
+    resultFields,
+    resultMode,
+    resultPlaybackPlaying,
+    selectedFaceId,
+    selectedPayloadObject,
+    showDeformed,
+    showDimensions,
+    stressExaggeration,
+    supportMarkers,
+    themeMode,
+    unitSystem,
+    uploadedPreviewBounds,
+    viewAxis,
+    viewAxisSignal
+  ]);
+  return null;
+}
+
+function DemandOrbitControls({ controlsRef }: { controlsRef: MutableRefObject<ViewerOrbitControls | null> }) {
+  const { invalidate } = useThree();
+  const invalidateViewer = () => invalidate();
+  return <OrbitControls ref={controlsRef} makeDefault enableDamping dampingFactor={0.08} target={[0, 0, 0.75]} onChange={invalidateViewer} />;
+}
+
 function ShiftPanControls({ controlsRef }: { controlsRef: MutableRefObject<ViewerOrbitControls | null> }) {
-  const { camera, gl } = useThree();
+  const { camera, gl, invalidate } = useThree();
 
   useEffect(() => {
     const element = gl.domElement;
@@ -217,6 +333,7 @@ function ShiftPanControls({ controlsRef }: { controlsRef: MutableRefObject<Viewe
       drag.x = event.clientX;
       drag.y = event.clientY;
       panCamera(camera, controls.target, deltaX, deltaY, element.clientHeight || 1);
+      invalidate();
       controls.update();
     }
 
@@ -234,7 +351,7 @@ function ShiftPanControls({ controlsRef }: { controlsRef: MutableRefObject<Viewe
       const controls = controlsRef.current;
       if (controls) controls.enabled = true;
     };
-  }, [camera, controlsRef, gl]);
+  }, [camera, controlsRef, gl, invalidate]);
 
   return null;
 }
@@ -2946,7 +3063,7 @@ function MeshOverlay({ kind }: { kind: SampleModelKind }) {
 
 function BoundsCameraReset({ signal, viewAxis, viewAxisSignal, controlsRef }: { signal: number; viewAxis: RotationAxis | null; viewAxisSignal: number; controlsRef: MutableRefObject<ViewerOrbitControls | null> }) {
   const bounds = useBounds();
-  const { camera, size } = useThree();
+  const { camera, invalidate, size } = useThree();
   useEffect(() => {
     let cancelled = false;
     let frameId = 0;
@@ -2971,6 +3088,7 @@ function BoundsCameraReset({ signal, viewAxis, viewAxisSignal, controlsRef }: { 
         size.width / size.height
       );
       applyViewerCameraPose(camera, controlsRef.current, pose);
+      invalidate();
     }
 
     resetCamera();
@@ -2980,13 +3098,13 @@ function BoundsCameraReset({ signal, viewAxis, viewAxisSignal, controlsRef }: { 
       if (frameId) window.cancelAnimationFrame(frameId);
       if (retryFrameId) window.cancelAnimationFrame(retryFrameId);
     };
-  }, [bounds, camera, controlsRef, signal, size.height, size.width, viewAxis, viewAxisSignal]);
+  }, [bounds, camera, controlsRef, invalidate, signal, size.height, size.width, viewAxis, viewAxisSignal]);
   return null;
 }
 
 function GizmoCameraReset({ axis, signal, controlsRef }: { axis: RotationAxis | null; signal: number; controlsRef: MutableRefObject<ViewerOrbitControls | null> }) {
   const bounds = useBounds();
-  const { camera, size } = useThree();
+  const { camera, invalidate, size } = useThree();
   useEffect(() => {
     if (!axis) return;
     const nextBounds = bounds.refresh().clip();
@@ -3001,7 +3119,8 @@ function GizmoCameraReset({ axis, signal, controlsRef }: { axis: RotationAxis | 
       size.width / size.height
     );
     applyViewerCameraPose(camera, controlsRef.current, pose);
-  }, [axis, bounds, camera, controlsRef, signal, size.height, size.width]);
+    invalidate();
+  }, [axis, bounds, camera, controlsRef, invalidate, signal, size.height, size.width]);
   return null;
 }
 

@@ -9,7 +9,7 @@ import { RightPanel } from "./components/RightPanel";
 import { StartScreen } from "./components/StartScreen";
 import { StepBar, type StepId } from "./components/StepBar";
 import { BoundaryConditionMenu, CreateSimulationScreen } from "./components/SimulationWorkflow";
-import type { PrintLayerOrientation, ResultMode, ViewMode, ViewerLoadMarker, ViewerSupportMarker } from "./components/CadViewer";
+import type { PrintLayerOrientation, ResultMode, ResultPlaybackFrameStore, ViewMode, ViewerLoadMarker, ViewerSupportMarker } from "./components/CadViewer";
 import {
   createViewerLoadMarkers,
   directionVectorForLabel,
@@ -71,7 +71,7 @@ const seededSummary: ResultSummary = {
   reactionForceUnits: "N"
 };
 const MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.005;
-const PLAYBACK_STATE_COMMIT_INTERVAL_MS = 1000 / 60;
+const PLAYBACK_UI_COMMIT_INTERVAL_MS = 250;
 
 type ResultPlaybackCacheState =
   | { status: "idle" }
@@ -79,6 +79,10 @@ type ResultPlaybackCacheState =
   | { status: "ready"; cacheKey: string; cache: PreparedPlaybackFrameCache }
   | { status: "fallback"; cacheKey: string; message: string }
   | { status: "error"; cacheKey: string; message: string };
+
+type MutableResultPlaybackFrameStore = ResultPlaybackFrameStore & {
+  setSnapshot: (fields: ResultField[]) => void;
+};
 
 interface WorkspaceAppProps {
   initialAction?: WorkspaceInitialAction | null;
@@ -139,7 +143,11 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const resultFrameIndexRef = useRef(0);
   const resultPlaybackFramePositionRef = useRef(0);
   const resultPlaybackOrdinalPositionRef = useRef(0);
+  const resultPlaybackFrameStoreRef = useRef<MutableResultPlaybackFrameStore | null>(null);
   const initialActionConsumedRef = useRef(false);
+  if (!resultPlaybackFrameStoreRef.current) {
+    resultPlaybackFrameStoreRef.current = createResultPlaybackFrameStore(restoredResults?.fields ?? []);
+  }
 
   const study = project?.studies[0] ?? null;
   const assignedPrintLayerOrientation = useMemo<PrintLayerOrientation | null>(() => {
@@ -189,6 +197,10 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     },
     [preparedPlaybackFrame, resultFrameCache, resultFrameIndex, resultPlaybackPlaying, resultVisualFramePosition]
   );
+  useEffect(() => {
+    if (resultPlaybackPlaying) return;
+    resultPlaybackFrameStoreRef.current?.setSnapshot(visibleResultFieldsForUi);
+  }, [resultPlaybackPlaying, visibleResultFieldsForUi]);
   const resultPlaybackCacheLabel = useMemo(() => {
     if (resultPlaybackCacheState.status === "preparing") return "Preparing smooth playback";
     if (resultPlaybackCacheState.status === "ready") {
@@ -281,11 +293,9 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   useEffect(() => {
     if (!resultPlaybackPlaying || activeStep !== "results" || playbackFrameIndexes.length < 2) return;
     const frameDurationMs = 1000 / Math.max(1, Math.min(30, resultPlaybackFps));
-    const commitIntervalMs = resultPlaybackCacheState.status === "ready"
-      ? 1000 / Math.max(1, Math.min(60, resultPlaybackCacheState.cache.presentationFps))
-      : PLAYBACK_STATE_COMMIT_INTERVAL_MS;
     let animationFrameId = 0;
     let lastTimestamp: number | null = null;
+    let lastViewerTimestamp = 0;
     let lastCommittedTimestamp = 0;
     let ordinalPosition = resultPlaybackOrdinalPositionRef.current;
     const advancePlaybackFrame = (timestamp: number) => {
@@ -295,7 +305,17 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         const framePosition = solverFramePositionForPlaybackOrdinal(playbackFrameIndexes, ordinalPosition);
         resultPlaybackFramePositionRef.current = framePosition;
         resultPlaybackOrdinalPositionRef.current = ordinalPosition;
-        if (timestamp - lastCommittedTimestamp >= commitIntervalMs) {
+        if (timestamp - lastViewerTimestamp >= frameDurationMs) {
+          lastViewerTimestamp = timestamp;
+          const preparedFrame = resultPlaybackCacheState.status === "ready"
+            ? preparedPlaybackFrameForPosition(resultPlaybackCacheState.cache, framePosition)
+            : null;
+          const nextFields = preparedFrame
+            ? hydratePreparedPlaybackFrame(preparedFrame).fields
+            : resultFrameCache.fieldsForFramePosition(framePosition);
+          resultPlaybackFrameStoreRef.current?.setSnapshot(nextFields);
+        }
+        if (timestamp - lastCommittedTimestamp >= PLAYBACK_UI_COMMIT_INTERVAL_MS) {
           lastCommittedTimestamp = timestamp;
           setResultPlaybackOrdinalPosition((current) => Math.abs(current - ordinalPosition) < 0.0001 ? current : ordinalPosition);
           setResultPlaybackFramePosition((current) => Math.abs(current - framePosition) < 0.0001 ? current : framePosition);
@@ -311,7 +331,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     };
     animationFrameId = window.requestAnimationFrame(advancePlaybackFrame);
     return () => window.cancelAnimationFrame(animationFrameId);
-  }, [activeStep, playbackFrameIndexes, resultPlaybackCacheState, resultPlaybackFps, resultPlaybackPlaying]);
+  }, [activeStep, playbackFrameIndexes, resultFrameCache, resultPlaybackCacheState, resultPlaybackFps, resultPlaybackPlaying]);
 
   const handleMeasureDisplayModelDimensions = useCallback((dimensions: NonNullable<DisplayModel["dimensions"]>) => {
     setDisplayModel((current) => {
@@ -1016,6 +1036,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
             showDimensions={showDimensions}
             stressExaggeration={stressExaggeration}
             resultFields={visibleResultFieldsForUi}
+            resultPlaybackFrameStore={resultPlaybackPlaying ? resultPlaybackFrameStoreRef.current : undefined}
             meshSummary={study.meshSettings.summary}
             unitSystem={displayUnitSystem}
             themeMode={themeMode}
@@ -1230,6 +1251,27 @@ function readinessForStudy(study: Study | null) {
     { label: "Load added", done: Boolean(study?.loads.length) },
     { label: "Mesh generated", done: study?.meshSettings.status === "complete" }
   ];
+}
+
+function createResultPlaybackFrameStore(initialFields: ResultField[]): MutableResultPlaybackFrameStore {
+  let snapshot = initialFields;
+  const listeners = new Set<() => void>();
+  return {
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    getSnapshot() {
+      return snapshot;
+    },
+    setSnapshot(fields) {
+      if (Object.is(snapshot, fields)) return;
+      snapshot = fields;
+      for (const listener of listeners) listener();
+    }
+  };
 }
 
 function namedSelectionForFace(study: Study, face: DisplayFace): NamedSelection {

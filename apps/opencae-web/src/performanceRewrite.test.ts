@@ -42,4 +42,16 @@ describe("Worker UI performance rewrite boundaries", () => {
     expect(viteConfigSource).toContain("cad-import");
     expect(packageJson.scripts["check:bundle"]).toBe("node ../../scripts/check-web-bundle-budget.mjs");
   });
+
+  test("keeps the Three viewer on demand rendering with bounded playback commits", () => {
+    const workspaceSource = readFileSync(resolve(__dirname, "WorkspaceApp.tsx"), "utf8");
+    const viewerSource = readFileSync(resolve(__dirname, "components/CadViewer.tsx"), "utf8");
+
+    expect(viewerSource).toContain('frameloop="demand"');
+    expect(viewerSource).toContain("dpr={[1, 2]}");
+    expect(viewerSource).toContain("invalidate()");
+    expect(viewerSource).toContain("onChange={invalidateViewer}");
+    expect(workspaceSource).toContain("PLAYBACK_UI_COMMIT_INTERVAL_MS = 250");
+    expect(workspaceSource).not.toContain("PLAYBACK_STATE_COMMIT_INTERVAL_MS = 1000 / 60");
+  });
 });
