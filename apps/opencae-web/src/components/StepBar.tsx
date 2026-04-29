@@ -79,6 +79,10 @@ export function StepBar({ activeStep, project, study, hasResults, collapsed, the
       </div>
       <div className="stepbar-footer">
         <div className="stepbar-actions" aria-label="Project links">
+          <a className="stepbar-link" href="https://form.esauengineering.com/opencae-feedback" target="_blank" rel="noreferrer">
+            <MessageSquare size={14} aria-hidden="true" />
+            Feedback
+          </a>
           <button
             className="stepbar-link"
             type="button"
@@ -89,10 +93,6 @@ export function StepBar({ activeStep, project, study, hasResults, collapsed, the
             <ThemeIcon size={14} aria-hidden="true" />
             {themeMode === "dark" ? "Light" : "Dark"}
           </button>
-          <a className="stepbar-link" href="https://form.esauengineering.com/opencae-feedback" target="_blank" rel="noreferrer">
-            <MessageSquare size={14} aria-hidden="true" />
-            Feedback
-          </a>
         </div>
         <div><span>study</span><strong>static</strong></div>
         <div className="unit-switch">
