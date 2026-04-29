@@ -147,8 +147,8 @@ export function CadViewer(props: CadViewerProps) {
               {showDimensionOverlay && <ModelDimensionOverlay displayModel={props.displayModel} uploadedPreviewBounds={uploadedPreviewBounds} />}
             </group>
           </group>
-          <BoundsCameraReset signal={props.fitSignal} viewAxis={props.viewAxis} viewAxisSignal={props.viewAxisSignal} />
-          <GizmoCameraReset axis={gizmoViewRequest.axis} signal={gizmoViewRequest.signal} />
+          <BoundsCameraReset signal={props.fitSignal} viewAxis={props.viewAxis} viewAxisSignal={props.viewAxisSignal} controlsRef={controlsRef} />
+          <GizmoCameraReset axis={gizmoViewRequest.axis} signal={gizmoViewRequest.signal} controlsRef={controlsRef} />
         </Bounds>
         <OrbitControls ref={controlsRef} makeDefault enableDamping dampingFactor={0.08} target={[0, 0, 0.75]} />
         <ShiftPanControls controlsRef={controlsRef} />
@@ -2877,7 +2877,7 @@ function MeshOverlay({ kind }: { kind: SampleModelKind }) {
   );
 }
 
-function BoundsCameraReset({ signal, viewAxis, viewAxisSignal }: { signal: number; viewAxis: RotationAxis | null; viewAxisSignal: number }) {
+function BoundsCameraReset({ signal, viewAxis, viewAxisSignal, controlsRef }: { signal: number; viewAxis: RotationAxis | null; viewAxisSignal: number; controlsRef: MutableRefObject<ViewerOrbitControls | null> }) {
   const bounds = useBounds();
   const { camera, size } = useThree();
   useEffect(() => {
@@ -2894,15 +2894,16 @@ function BoundsCameraReset({ signal, viewAxis, viewAxisSignal }: { signal: numbe
       if (cancelled) return;
       const nextBounds = bounds.refresh().clip();
       const { box, center, distance } = nextBounds.getSize();
-      const view = viewAxis ? cameraViewForAxis(viewAxis) : { direction: ISO_CAMERA_DIRECTION, up: ISO_CAMERA_UP };
-      const target = viewAxis ? center : defaultHomeViewTarget(box, view.direction, view.up);
       const perspectiveCamera = camera as THREE.PerspectiveCamera;
-      const fitMargin = viewAxis ? VIEWER_FIT_MARGIN : DEFAULT_HOME_FIT_MARGIN;
-      const fitDistance = perspectiveCamera.isPerspectiveCamera
-        ? cameraDistanceForBounds(box, view.direction, view.up, perspectiveCamera.fov, size.width / size.height, fitMargin)
-        : distance;
-      const cameraPosition = target.clone().addScaledVector(view.direction, fitDistance);
-      nextBounds.moveTo(cameraPosition).lookAt({ target, up: view.up });
+      const pose = viewerCameraResetPose(
+        box,
+        center,
+        distance,
+        viewAxis,
+        perspectiveCamera.isPerspectiveCamera ? perspectiveCamera.fov : undefined,
+        size.width / size.height
+      );
+      applyViewerCameraPose(camera, controlsRef.current, pose);
     }
 
     resetCamera();
@@ -2912,26 +2913,71 @@ function BoundsCameraReset({ signal, viewAxis, viewAxisSignal }: { signal: numbe
       if (frameId) window.cancelAnimationFrame(frameId);
       if (retryFrameId) window.cancelAnimationFrame(retryFrameId);
     };
-  }, [bounds, camera, signal, size.height, size.width, viewAxis, viewAxisSignal]);
+  }, [bounds, camera, controlsRef, signal, size.height, size.width, viewAxis, viewAxisSignal]);
   return null;
 }
 
-function GizmoCameraReset({ axis, signal }: { axis: RotationAxis | null; signal: number }) {
+function GizmoCameraReset({ axis, signal, controlsRef }: { axis: RotationAxis | null; signal: number; controlsRef: MutableRefObject<ViewerOrbitControls | null> }) {
   const bounds = useBounds();
   const { camera, size } = useThree();
   useEffect(() => {
     if (!axis) return;
     const nextBounds = bounds.refresh().clip();
     const { box, center, distance } = nextBounds.getSize();
-    const view = cameraViewForAxis(axis);
     const perspectiveCamera = camera as THREE.PerspectiveCamera;
-    const fitDistance = perspectiveCamera.isPerspectiveCamera
-      ? cameraDistanceForBounds(box, view.direction, view.up, perspectiveCamera.fov, size.width / size.height, VIEWER_FIT_MARGIN)
-      : distance;
-    const cameraPosition = center.clone().addScaledVector(view.direction, fitDistance);
-    nextBounds.moveTo(cameraPosition).lookAt({ target: center, up: view.up });
-  }, [axis, bounds, camera, signal, size.height, size.width]);
+    const pose = viewerCameraResetPose(
+      box,
+      center,
+      distance,
+      axis,
+      perspectiveCamera.isPerspectiveCamera ? perspectiveCamera.fov : undefined,
+      size.width / size.height
+    );
+    applyViewerCameraPose(camera, controlsRef.current, pose);
+  }, [axis, bounds, camera, controlsRef, signal, size.height, size.width]);
   return null;
+}
+
+export type ViewerCameraResetPose = {
+  position: THREE.Vector3;
+  target: THREE.Vector3;
+  up: THREE.Vector3;
+};
+
+export function viewerCameraResetPose(
+  box: THREE.Box3,
+  center: THREE.Vector3,
+  fallbackDistance: number,
+  viewAxis: RotationAxis | null,
+  fov: number | undefined,
+  aspect: number
+): ViewerCameraResetPose {
+  const view = viewAxis ? cameraViewForAxis(viewAxis) : { direction: ISO_CAMERA_DIRECTION, up: ISO_CAMERA_UP };
+  const target = viewAxis ? center.clone() : defaultHomeViewTarget(box, view.direction, view.up);
+  const fitMargin = viewAxis ? VIEWER_FIT_MARGIN : DEFAULT_HOME_FIT_MARGIN;
+  const fitDistance = fov
+    ? cameraDistanceForBounds(box, view.direction, view.up, fov, aspect, fitMargin)
+    : fallbackDistance;
+  return {
+    position: target.clone().addScaledVector(view.direction, fitDistance),
+    target,
+    up: view.up.clone()
+  };
+}
+
+function applyViewerCameraPose(camera: THREE.Camera, controls: ViewerOrbitControls | null, pose: ViewerCameraResetPose) {
+  camera.position.copy(pose.position);
+  camera.up.copy(pose.up);
+  camera.lookAt(pose.target);
+  camera.updateMatrixWorld();
+  if (camera instanceof THREE.PerspectiveCamera || camera instanceof THREE.OrthographicCamera) camera.updateProjectionMatrix();
+  if (controls) {
+    const previousDamping = controls.enableDamping;
+    controls.enableDamping = false;
+    controls.target.copy(pose.target);
+    controls.update();
+    controls.enableDamping = previousDamping;
+  }
 }
 
 export function axisLabelToViewAxis(label: "X" | "Y" | "Z"): RotationAxis {
