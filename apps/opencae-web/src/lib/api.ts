@@ -264,6 +264,11 @@ export async function runSimulation(studyId: string, currentStudy?: Study, displ
     return await readJson(response);
   } catch (error) {
     if (!currentStudy) throw error;
+    if (simulationBackend(currentStudy) === "cloudflare_fea") {
+      const fallback = runSimulationLocally(currentStudy, displayModel, "local_detailed");
+      const message = error instanceof Error ? error.message : "Cloud FEA request failed.";
+      return { ...fallback, message: `Cloud FEA unavailable: ${message} running locally.` };
+    }
     return runSimulationLocally(currentStudy, displayModel);
   }
 }
@@ -318,7 +323,7 @@ export function subscribeToRun(runId: string, onEvent: (event: RunEvent) => void
   return source;
 }
 
-function runSimulationLocally(study: Study, displayModel?: DisplayModel): { run: StudyRun; streamUrl: string; message: string } {
+function runSimulationLocally(study: Study, displayModel?: DisplayModel, staticBackendOverride?: "local_detailed"): { run: StudyRun; streamUrl: string; message: string } {
   const runId = `run-local-${crypto.randomUUID()}`;
   localResultSolversByRunId.set(runId, () => {
     const analysisMesh = displayModel ? analysisMeshForDisplayModel(displayModel, study.meshSettings.preset) : undefined;
@@ -343,7 +348,7 @@ function runSimulationLocally(study: Study, displayModel?: DisplayModel): { run:
       status: "queued",
       jobId: `job-${runId}`,
       meshRef: study.meshSettings.meshRef,
-      solverBackend: study.type === "dynamic_structural" ? "local-dynamic-newmark" : simulationBackend(study) === "local_detailed" ? "local-detailed-superposition" : "local-static-superposition",
+      solverBackend: study.type === "dynamic_structural" ? "local-dynamic-newmark" : staticBackendOverride === "local_detailed" || simulationBackend(study) === "local_detailed" ? "local-detailed-superposition" : "local-static-superposition",
       solverVersion: "0.1.0",
       startedAt: now,
       diagnostics: []
