@@ -203,6 +203,21 @@ describe("LocalMockComputeBackend", () => {
     }
   });
 
+  test("locks cantilever fixed support displacement to zero", () => {
+    const result = solveStudy(cantileverStudy("mat-aluminum-6061"), "run-cantilever-fixed-displacement", rectangularBeamAnalysisMesh());
+    const displacementField = result.fields.find((field) => field.type === "displacement");
+    const displacementValues = displacementField?.values ?? [];
+    const fixedEndFaceDisplacement = displacementValues[0] ?? Number.NaN;
+    const freeEndFaceDisplacement = displacementValues[1] ?? 0;
+    const fixedEndSampleDisplacement = nearestSampleValue(displacementField?.samples ?? [], [-1.9, 0.18, 0]);
+    const freeEndSampleDisplacement = nearestSampleValue(displacementField?.samples ?? [], [1.9, 0.18, 0]);
+
+    expect(fixedEndFaceDisplacement).toBeCloseTo(0, 6);
+    expect(fixedEndSampleDisplacement).toBeCloseTo(0, 6);
+    expect(freeEndFaceDisplacement).toBeGreaterThan(fixedEndFaceDisplacement);
+    expect(freeEndSampleDisplacement).toBeGreaterThan(fixedEndSampleDisplacement);
+  });
+
   test("solves cantilever transverse bending with max stress at the fixed support", async () => {
     vi.useFakeTimers();
     try {

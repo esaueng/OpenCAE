@@ -114,6 +114,7 @@ type ModelPickHandlers = {
   onClick?: (event: ThreeEvent<MouseEvent>) => void;
 };
 export const VIEWER_GIZMO_ALIGNMENT = "bottom-right";
+export const VIEWER_CREDIT_URL = "https://esauengineering.com/";
 const VIEWER_FIT_MARGIN = 1.28;
 const DEFAULT_HOME_FIT_MARGIN = 1.46;
 const VIEWER_FIT_RETRY_DELAY_MS = 120;
@@ -161,7 +162,7 @@ export function CadViewer(props: CadViewerProps) {
           <span className="visually-hidden">Reset view</span>
         </button>
       </div>
-      <div className="viewer-watermark" aria-hidden="true">Built by Esau Engineering</div>
+      <a className="viewer-watermark" href={VIEWER_CREDIT_URL} target="_blank" rel="noreferrer">Built by Esau Engineering</a>
       {effectiveViewMode === "results" && <ResultLegend resultMode={props.resultMode} resultFields={props.resultFields} unitSystem={props.unitSystem} />}
     </section>
   );
@@ -1276,9 +1277,9 @@ function AnalysisResultModel({
     );
   }
   if (kind === "bracket") {
-    return <BracketResultSolid kind={kind} samples={samples} resultMode={resultMode} showDeformed={showDeformed} stressExaggeration={stressExaggeration} deformationScale={deformationScale} loadMarkers={loadMarkers} />;
+    return <BracketResultSolid kind={kind} samples={samples} resultMode={resultMode} showDeformed={showDeformed} stressExaggeration={stressExaggeration} deformationScale={deformationScale} loadMarkers={loadMarkers} supportMarkers={supportMarkers} />;
   }
-  return <SampleResultSolid kind={kind} samples={samples} resultMode={resultMode} showDeformed={showDeformed} stressExaggeration={stressExaggeration} deformationScale={deformationScale} loadMarkers={loadMarkers} />;
+  return <SampleResultSolid kind={kind} samples={samples} resultMode={resultMode} showDeformed={showDeformed} stressExaggeration={stressExaggeration} deformationScale={deformationScale} loadMarkers={loadMarkers} supportMarkers={supportMarkers} />;
 }
 
 function UploadedResultSolid({
@@ -1476,7 +1477,8 @@ function BracketResultSolid({
   showDeformed,
   stressExaggeration,
   deformationScale,
-  loadMarkers
+  loadMarkers,
+  supportMarkers
 }: {
   kind: SampleModelKind;
   samples: FaceResultSample[];
@@ -1485,16 +1487,17 @@ function BracketResultSolid({
   stressExaggeration: number;
   deformationScale?: number;
   loadMarkers: ViewerLoadMarker[];
+  supportMarkers: ViewerSupportMarker[];
 }) {
   const outlineBodyGeometry = useMemo(() => createBracketBodyGeometry(), []);
   const outlineRibGeometry = useMemo(() => createRibGeometry(), []);
   const bodyGeometry = useMemo(
-    () => colorizeResultGeometry(createBracketBodyGeometry(), kind, resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale),
-    [deformationScale, kind, loadMarkers, resultMode, samples, showDeformed, stressExaggeration]
+    () => colorizeSampleResultGeometry(createBracketBodyGeometry(), kind, resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale, supportMarkers),
+    [deformationScale, kind, loadMarkers, resultMode, samples, showDeformed, stressExaggeration, supportMarkers]
   );
   const ribGeometry = useMemo(
-    () => colorizeResultGeometry(createRibGeometry(), kind, resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale),
-    [deformationScale, kind, loadMarkers, resultMode, samples, showDeformed, stressExaggeration]
+    () => colorizeSampleResultGeometry(createRibGeometry(), kind, resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale, supportMarkers),
+    [deformationScale, kind, loadMarkers, resultMode, samples, showDeformed, stressExaggeration, supportMarkers]
   );
   return (
     <group>
@@ -1524,7 +1527,8 @@ function SampleResultSolid({
   showDeformed,
   stressExaggeration,
   deformationScale,
-  loadMarkers
+  loadMarkers,
+  supportMarkers
 }: {
   kind: SampleModelKind;
   samples: FaceResultSample[];
@@ -1533,18 +1537,19 @@ function SampleResultSolid({
   stressExaggeration: number;
   deformationScale?: number;
   loadMarkers: ViewerLoadMarker[];
+  supportMarkers: ViewerSupportMarker[];
 }) {
   const outlineBeamGeometry = useMemo(() => createBeamGeometry(), []);
   const outlineBeamPayloadGeometry = useMemo(() => createBeamPayloadGeometry(), []);
   const outlineCantileverGeometry = useMemo(() => new THREE.BoxGeometry(3.8, 0.5, 0.72, 40, 8, 8), []);
   const beamGeometry = useMemo(
-    () => colorizeResultGeometry(createBeamGeometry(), kind, resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale),
-    [deformationScale, kind, loadMarkers, resultMode, samples, showDeformed, stressExaggeration]
+    () => colorizeSampleResultGeometry(createBeamGeometry(), kind, resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale, supportMarkers),
+    [deformationScale, kind, loadMarkers, resultMode, samples, showDeformed, stressExaggeration, supportMarkers]
   );
   const beamPayloadGeometry = useMemo(() => createBeamPayloadGeometry(), []);
   const cantileverGeometry = useMemo(
-    () => colorizeResultGeometry(new THREE.BoxGeometry(3.8, 0.5, 0.72, 40, 8, 8), kind, resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale),
-    [deformationScale, kind, loadMarkers, resultMode, samples, showDeformed, stressExaggeration]
+    () => colorizeSampleResultGeometry(new THREE.BoxGeometry(3.8, 0.5, 0.72, 40, 8, 8), kind, resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale, supportMarkers),
+    [deformationScale, kind, loadMarkers, resultMode, samples, showDeformed, stressExaggeration, supportMarkers]
   );
   if (kind === "plate") {
     return (
@@ -1688,6 +1693,20 @@ function colorizeResultGeometry(
   positions.needsUpdate = true;
   geometry.computeVertexNormals();
   return geometry;
+}
+
+export function colorizeSampleResultGeometry(
+  geometry: THREE.BufferGeometry,
+  kind: SampleModelKind,
+  resultMode: ResultMode,
+  showDeformed: boolean,
+  stressExaggeration: number,
+  samples: FaceResultSample[],
+  loadMarkers: ViewerLoadMarker[],
+  deformationScale?: number,
+  supportMarkers: ViewerSupportMarker[] = []
+) {
+  return colorizeResultGeometry(geometry, kind, resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale, undefined, undefined, supportMarkers);
 }
 
 type ResultCoordinateTransform = {

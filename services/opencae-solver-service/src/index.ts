@@ -555,7 +555,7 @@ function loadModelFor(load: Load, faces: FaceModel[], supports: FaceModel[]): Lo
   const direction = vectorOrDefault(load.parameters.direction, load.type === "pressure" ? scale(face.normal, -1) : [0, -1, 0]);
   const magnitude = loadEquivalentForce(load, face);
   const force = scale(direction, magnitude);
-  const applicationPoint = vectorOrDefault(load.parameters.applicationPoint, face.center);
+  const applicationPoint = pointOrDefault(load.parameters.applicationPoint, face.center);
   const nearestSupport = nearestFace(applicationPoint, supports) ?? face;
   const lever = subtract(applicationPoint, nearestSupport.center);
   const momentVector = cross(lever, force);
@@ -635,10 +635,11 @@ function displacementAtFace(face: FaceModel, loads: LoadModel[], faces: FaceMode
     const pathTravel = segmentParameter(face.center, load.nearestSupport.center, load.face.center);
     const bendingAlignment = length(cross(normalize(subtract(load.face.center, load.nearestSupport.center)), load.direction));
     const beamShape = pathTravel * pathTravel * (3 - 2 * pathTravel);
+    const supportLockShape = load.leverArm > 0.001 ? beamShape : 1;
     const localLoad = gaussian(loadDistance, span * 0.24);
     const loadPath = gaussian(pathDistance, span * 0.22);
     const directionalFlex = Math.abs(dot(normalize(subtract(face.center, load.nearestSupport.center)), load.direction));
-    return sum + forceScale * (
+    return sum + forceScale * supportLockShape * (
       0.004 +
       (0.16 + 0.1 * momentScale + 0.08 * bendingAlignment) * beamShape +
       0.025 * localLoad * (0.4 + 0.6 * beamShape) +
@@ -698,12 +699,13 @@ function displacementAtSample(sample: AnalysisSample, loads: LoadModel[], faces:
     const momentScale = load.moment / Math.max(250, 500 * spanLength);
     const travel = segmentParameter(sample.point, load.nearestSupport.center, load.face.center);
     const beamShape = travel * travel * (3 - 2 * travel);
+    const supportLockShape = load.leverArm > 0.001 ? beamShape : 1;
     const loadDistance = distance(sample.point, load.face.center);
     const pathDistance = distancePointToSegment(sample.point, load.nearestSupport.center, load.face.center);
     const fiberDistance = distancePointToLine(sample.point, load.nearestSupport.center, spanDirection);
     const fiberRadius = Math.max(estimatedCrossSectionRadius(analysisMesh, load.nearestSupport.center, spanDirection), 0.001);
     const fiber = clamp(fiberDistance / fiberRadius, 0, 1);
-    return sum + forceScale * (
+    return sum + forceScale * supportLockShape * (
       0.004 +
       (0.14 + 0.11 * momentScale) * beamShape +
       0.018 * gaussian(loadDistance, spanLength * 0.18) +
@@ -845,6 +847,12 @@ function nearestFace(point: Vec3, faces: FaceModel[]): FaceModel | undefined {
 function vectorOrDefault(value: unknown, fallback: Vec3): Vec3 {
   if (!Array.isArray(value) || value.length !== 3) return normalize(fallback);
   return normalize([Number(value[0] ?? 0), Number(value[1] ?? 0), Number(value[2] ?? 0)]);
+}
+
+function pointOrDefault(value: unknown, fallback: Vec3): Vec3 {
+  if (!Array.isArray(value) || value.length !== 3) return fallback;
+  const point: Vec3 = [Number(value[0] ?? fallback[0]), Number(value[1] ?? fallback[1]), Number(value[2] ?? fallback[2])];
+  return point.every(Number.isFinite) ? point : fallback;
 }
 
 function subtract(left: Vec3, right: Vec3): Vec3 {

@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { describe, expect, test } from "vitest";
-import { VIEWER_GIZMO_ALIGNMENT, axisLabelToViewAxis, cameraDistanceForBounds, cameraViewForAxis, cloneResultPreviewObject, colorizeResultObject, createUndeformedResultOutlineObject, defaultHomeViewTarget, displayedLegendTickLabels, legendTickLabels, payloadHighlightObjectId, printLayerVisualizationForBounds, resultProbesForKind, resultValueForPoint, rotatedCameraOrbit, shouldShowDimensionOverlay, shouldShowModelHitLabel, shouldShowResultMarkers, shouldShowUndeformedResultOutline, viewerCameraResetPose } from "./CadViewer";
+import { VIEWER_CREDIT_URL, VIEWER_GIZMO_ALIGNMENT, axisLabelToViewAxis, cameraDistanceForBounds, cameraViewForAxis, cloneResultPreviewObject, colorizeResultObject, colorizeSampleResultGeometry, createUndeformedResultOutlineObject, defaultHomeViewTarget, displayedLegendTickLabels, legendTickLabels, payloadHighlightObjectId, printLayerVisualizationForBounds, resultProbesForKind, resultValueForPoint, rotatedCameraOrbit, shouldShowDimensionOverlay, shouldShowModelHitLabel, shouldShowResultMarkers, shouldShowUndeformedResultOutline, viewerCameraResetPose } from "./CadViewer";
 import type { FaceResultSample } from "../resultFields";
 import type { DisplayFace, ResultField } from "@opencae/schema";
 
@@ -18,6 +18,10 @@ const samples: FaceResultSample[] = [
 ];
 
 describe("CadViewer result coloring", () => {
+  test("links the viewer watermark to the Esau Engineering website", () => {
+    expect(VIEWER_CREDIT_URL).toBe("https://esauengineering.com/");
+  });
+
   test("positions the viewer XYZ axes in the bottom-right corner", () => {
     expect(VIEWER_GIZMO_ALIGNMENT).toBe("bottom-right");
   });
@@ -466,6 +470,49 @@ describe("CadViewer result coloring", () => {
     const positions = mesh.geometry.getAttribute("position");
     expect(positions.getY(2)).toBeCloseTo(0);
     expect(positions.getY(0)).toBeLessThan(0);
+  });
+
+  test("passes support markers through the built-in cantilever result deformation path", () => {
+    const geometry = new THREE.BoxGeometry(3.8, 0.5, 0.72, 4, 1, 1);
+    const originalY = Array.from({ length: geometry.getAttribute("position").count }, (_, index) => geometry.getAttribute("position").getY(index));
+
+    const deformed = colorizeSampleResultGeometry(
+      geometry,
+      "cantilever",
+      "displacement",
+      true,
+      4,
+      samples,
+      [{
+        id: "load-1",
+        faceId: "right",
+        type: "force",
+        value: 500,
+        units: "N",
+        direction: [0, -1, 0],
+        directionLabel: "Normal",
+        labelIndex: 0,
+        stackIndex: 0
+      }],
+      1,
+      [{
+        id: "support-1",
+        faceId: "left",
+        type: "fixed",
+        displayLabel: "FS 1",
+        label: "Left",
+        stackIndex: 0
+      }]
+    );
+
+    const positions = deformed.getAttribute("position");
+    const fixedIndices = Array.from({ length: positions.count }, (_, index) => index).filter((index) => positions.getX(index) < -1.89);
+    const freeIndices = Array.from({ length: positions.count }, (_, index) => index).filter((index) => positions.getX(index) > 1.89);
+    const fixedYOffsets = fixedIndices.map((index) => positions.getY(index) - (originalY[index] ?? 0));
+    const freeYOffsets = freeIndices.map((index) => positions.getY(index) - (originalY[index] ?? 0));
+
+    expect(Math.max(...fixedYOffsets.map(Math.abs))).toBeCloseTo(0, 6);
+    expect(Math.min(...freeYOffsets)).toBeLessThan(-0.01);
   });
 
   test("does not stretch low-amplitude dynamic result colors across the full palette", () => {

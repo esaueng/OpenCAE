@@ -1291,7 +1291,14 @@ img {
   color: rgba(203, 213, 225, 0.58);
   font-size: 11px;
   letter-spacing: 0.01em;
-  pointer-events: none;
+  text-decoration: none;
+  text-underline-offset: 3px;
+}
+
+.viewer-watermark:hover,
+.viewer-watermark:focus-visible {
+  color: var(--color-accent);
+  text-decoration: underline;
 }
 
 .theme-light .viewer-watermark {
