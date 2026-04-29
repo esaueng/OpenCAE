@@ -1971,7 +1971,7 @@ function resultColorForPoint(kind: SampleModelKind, resultMode: ResultMode, stre
 export function resultValueForPoint(kind: SampleModelKind, resultMode: ResultMode, stressExaggeration: number, point: THREE.Vector3, samples: FaceResultSample[]) {
   const fieldSampleValue = resultFractionFromFieldSamples(point, samples);
   const sampleValue = fieldSampleValue ?? resultFractionFromSamples(point, samples);
-  const stress = kind === "cantilever" ? cantileverBendingStressFraction(point) : sampleValue ?? stressFractionForPoint(kind, point);
+  const stress = sampleValue ?? (kind === "cantilever" ? cantileverBendingStressFraction(point) : stressFractionForPoint(kind, point));
   const displacement = sampleValue ?? displacementFractionForPoint(kind, point);
   return resultMode === "displacement" || resultMode === "velocity" || resultMode === "acceleration"
     ? displacement
