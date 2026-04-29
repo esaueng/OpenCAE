@@ -24,6 +24,8 @@ describe("App workflow layout", () => {
 
   test("drives dynamic result playback with animation frames instead of queued intervals", () => {
     expect(appSource).toContain("window.requestAnimationFrame(advancePlaybackFrame)");
+    expect(appSource).toContain("resultPlaybackFramePositionRef.current");
+    expect(appSource).toContain("resultFramePosition={resultVisualFramePosition}");
     expect(appSource).not.toContain("window.setInterval");
   });
 
