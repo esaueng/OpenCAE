@@ -951,22 +951,10 @@ function RunPanel({ study, runProgress, runTiming, onRunSimulation, onCancelSimu
       {dynamic && (
         <>
           <SectionTitle>Dynamic settings</SectionTitle>
-          <label className="field">
-            <span>Start time</span>
-            <span className="input-with-unit"><input type="number" min="0" step={dynamic.timeStep} value={dynamic.startTime} onChange={(event) => updateDynamicNumber("startTime", Number(event.currentTarget.value))} /><span>s</span></span>
-          </label>
-          <label className="field">
-            <span>End time</span>
-            <span className="input-with-unit"><input type="number" min={dynamic.startTime + dynamic.timeStep} step={dynamic.timeStep} value={dynamic.endTime} onChange={(event) => updateDynamicNumber("endTime", Number(event.currentTarget.value))} /><span>s</span></span>
-          </label>
-          <label className="field">
-            <span>Time step</span>
-            <span className="input-with-unit"><input type="number" min="0.0001" step="0.0005" value={dynamic.timeStep} onChange={(event) => updateDynamicNumber("timeStep", Number(event.currentTarget.value))} /><span>s</span></span>
-          </label>
-          <label className="field">
-            <span>Damping ratio</span>
-            <span className="input-with-unit"><input type="number" min="0" step="0.01" value={dynamic.dampingRatio} onChange={(event) => updateDynamicNumber("dampingRatio", Number(event.currentTarget.value))} /><span>ζ</span></span>
-          </label>
+          <DynamicNumberField label="Start time" unit="s" value={dynamic.startTime} min={0} step={dynamic.timeStep} onCommit={(value) => updateDynamicNumber("startTime", value)} />
+          <DynamicNumberField label="End time" unit="s" value={dynamic.endTime} min={dynamic.startTime + dynamic.timeStep} step={dynamic.timeStep} onCommit={(value) => updateDynamicNumber("endTime", value)} />
+          <DynamicNumberField label="Time step" unit="s" value={dynamic.timeStep} min={0.0001} step="0.0005" onCommit={(value) => updateDynamicNumber("timeStep", value)} />
+          <DynamicNumberField label="Damping ratio" unit="ζ" value={dynamic.dampingRatio} min={0} step="0.01" onCommit={(value) => updateDynamicNumber("dampingRatio", value)} />
           <div className="summary-box">
             <Info label="Estimated frames" value={frameEstimate ? frameEstimate.count.toLocaleString() : "--"} />
             <Info label="Output cadence" value={`Every ${formatSeconds(normalizedDynamicOutputInterval(dynamic))}`} />
@@ -1007,6 +995,81 @@ function RunPanel({ study, runProgress, runTiming, onRunSimulation, onCancelSimu
       </div>
     </Panel>
   );
+}
+
+function DynamicNumberField({
+  label,
+  unit,
+  value,
+  min,
+  step,
+  onCommit
+}: {
+  label: string;
+  unit: string;
+  value: number;
+  min: number;
+  step: number | string;
+  onCommit: (value: number) => void;
+}) {
+  const formattedValue = formatEditableNumberValue(value);
+  const [draftValue, setDraftValue] = useState(formattedValue);
+  const [editing, setEditing] = useState(false);
+
+  useEffect(() => {
+    if (!editing) setDraftValue(formattedValue);
+  }, [editing, formattedValue]);
+
+  function commitDraft(rawValue: string) {
+    const parsed = editableNumberCommitValue(rawValue, min);
+    if (parsed === null) return;
+    onCommit(parsed);
+  }
+
+  return (
+    <label className="field">
+      <span>{label}</span>
+      <span className="input-with-unit">
+        <input
+          type="number"
+          inputMode="decimal"
+          min={min}
+          step={step}
+          value={editing ? draftValue : formattedValue}
+          onFocus={() => {
+            setEditing(true);
+            setDraftValue(formattedValue);
+          }}
+          onChange={(event) => {
+            const nextValue = event.currentTarget.value;
+            setDraftValue(nextValue);
+            commitDraft(nextValue);
+          }}
+          onBlur={(event) => {
+            setEditing(false);
+            const parsed = editableNumberCommitValue(event.currentTarget.value, min);
+            setDraftValue(formatEditableNumberValue(parsed ?? value));
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") event.currentTarget.blur();
+          }}
+        />
+        <span>{unit}</span>
+      </span>
+    </label>
+  );
+}
+
+export function editableNumberCommitValue(rawValue: string, min: number): number | null {
+  const trimmed = rawValue.trim();
+  if (!trimmed) return null;
+  const parsed = Number(trimmed);
+  if (!Number.isFinite(parsed) || parsed < min) return null;
+  return parsed;
+}
+
+function formatEditableNumberValue(value: number): string {
+  return Number.isFinite(value) ? String(value) : "";
 }
 
 function meshPresetDescription(preset: MeshQuality) {

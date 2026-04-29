@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test, vi } from "vitest";
 import type { DisplayModel, Project, ResultSummary, Study } from "@opencae/schema";
-import { RightPanel, rangeProgressPercent } from "./RightPanel";
+import { editableNumberCommitValue, RightPanel, rangeProgressPercent } from "./RightPanel";
 import type { StepId } from "./StepBar";
 
 const project: Project = {
@@ -262,6 +262,13 @@ describe("RightPanel payload mass controls", () => {
     expect(dynamicHtml).toContain("Estimated frames");
     expect(dynamicHtml).not.toContain("Output interval");
     expect(renderPanel("run")).not.toContain("Start time");
+  });
+
+  test("keeps partial dynamic number edits from committing a coerced zero", () => {
+    expect(editableNumberCommitValue("0.00", 0.0001)).toBeNull();
+    expect(editableNumberCommitValue("", 0.0001)).toBeNull();
+    expect(editableNumberCommitValue("0.001", 0.0001)).toBe(0.001);
+    expect(editableNumberCommitValue("0.0", 0)).toBe(0);
   });
 
   test("renders backend and fidelity controls for detailed simulation runs", () => {
