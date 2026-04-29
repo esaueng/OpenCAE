@@ -19,6 +19,10 @@ import { forceForUnits, formatDensity, formatMass, formatMaterialStress, formatV
 import { canNavigateToStep } from "../appShellState";
 import { MaterialLibraryModal } from "./SimulationWorkflow";
 import { dynamicPlaybackFrames } from "../resultFields";
+import {
+  frameIndexForRoundedPlaybackOrdinal,
+  playbackOrdinalForSolverFramePosition
+} from "../resultPlaybackTimeline";
 
 const MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.005;
 const STRESS_EXAGGERATION_COMMIT_DELAY_MS = 120;
@@ -79,6 +83,7 @@ interface RightPanelProps {
   missingRunItems: string[];
   resultFrameIndex?: number;
   resultFramePosition?: number;
+  resultFrameOrdinalPosition?: number;
   onResultFrameChange?: (frameIndex: number) => void;
   resultPlaybackPlaying?: boolean;
   resultPlaybackFps?: number;
@@ -1129,6 +1134,7 @@ function ResultsPanel({
   study,
   resultFrameIndex = 0,
   resultFramePosition = resultFrameIndex,
+  resultFrameOrdinalPosition,
   resultPlaybackPlaying = false,
   resultPlaybackFps = 12,
   resultPlaybackCacheLabel = "",
@@ -1152,7 +1158,10 @@ function ResultsPanel({
   const activeFrame = frames.find((frame) => frame.frameIndex === resultFrameIndex) ?? frames[0];
   const activeFramePosition = resultPlaybackPlaying ? resultFramePosition : activeFrame?.frameIndex ?? resultFrameIndex;
   const activeTimeSeconds = interpolatedFrameTimeSeconds(frames, activeFramePosition);
-  const sliderPosition = ordinalFramePositionForPlayback(frames, activeFramePosition);
+  const frameIndexes = frames.map((frame) => frame.frameIndex);
+  const sliderPosition = resultPlaybackPlaying && typeof resultFrameOrdinalPosition === "number"
+    ? resultFrameOrdinalPosition
+    : playbackOrdinalForSolverFramePosition(frameIndexes, activeFramePosition);
   const currentFrameNumber = frames.length ? Math.min(frames.length, Math.max(1, Math.floor(sliderPosition) + 1)) : 0;
   const peakDisplacement = peakDisplacementFrame(resultFields, resultSummary);
 
@@ -1209,7 +1218,7 @@ function ResultsPanel({
               max={Math.max(frames.length - 1, 0)}
               step={resultPlaybackPlaying ? "0.01" : "1"}
               value={sliderPosition}
-              onChange={(event) => onResultFrameChange?.(frameIndexForOrdinalPlaybackPosition(frames, Number(event.currentTarget.value)))}
+              onChange={(event) => onResultFrameChange?.(frameIndexForRoundedPlaybackOrdinal(frameIndexes, Number(event.currentTarget.value)))}
             />
           </label>
           <label className="field range-field">
@@ -1527,30 +1536,6 @@ function interpolatedFrameTimeSeconds(frames: Array<{ frameIndex: number; timeSe
   if (lower.frameIndex === upper.frameIndex) return lower.timeSeconds;
   const blend = (framePosition - lower.frameIndex) / (upper.frameIndex - lower.frameIndex);
   return lower.timeSeconds + (upper.timeSeconds - lower.timeSeconds) * Math.max(0, Math.min(1, blend));
-}
-
-function ordinalFramePositionForPlayback(frames: Array<{ frameIndex: number }>, framePosition: number): number {
-  if (!frames.length) return 0;
-  if (frames.length === 1) return 0;
-  const first = frames[0]!;
-  const last = frames[frames.length - 1]!;
-  if (framePosition <= first.frameIndex) return 0;
-  if (framePosition >= last.frameIndex) return frames.length - 1;
-  for (let index = 0; index < frames.length - 1; index += 1) {
-    const lower = frames[index]!;
-    const upper = frames[index + 1]!;
-    if (framePosition < lower.frameIndex || framePosition > upper.frameIndex) continue;
-    if (upper.frameIndex === lower.frameIndex) return index;
-    const blend = (framePosition - lower.frameIndex) / (upper.frameIndex - lower.frameIndex);
-    return index + Math.max(0, Math.min(1, blend));
-  }
-  return 0;
-}
-
-function frameIndexForOrdinalPlaybackPosition(frames: Array<{ frameIndex: number }>, ordinalPosition: number): number {
-  if (!frames.length) return 0;
-  const index = Math.max(0, Math.min(frames.length - 1, Math.round(ordinalPosition)));
-  return frames[index]?.frameIndex ?? frames[0]?.frameIndex ?? 0;
 }
 
 function peakDisplacementFrame(fields: ResultField[], summary: ResultSummary): { value: number; units: string; timeSeconds: number } | null {
