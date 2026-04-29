@@ -1,21 +1,25 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
+import type { SampleAnalysisType, SampleModelId } from "../lib/api";
 import { OpenCaeLogoMark } from "./OpenCaeLogoMark";
 
 interface StartScreenProps {
-  onLoadSample: () => void;
+  onLoadSample: (sample?: SampleModelId, analysisType?: SampleAnalysisType) => void;
   onCreateProject: () => void;
   onOpenProject: (file: File) => void;
 }
 
 export function StartScreen({ onLoadSample, onCreateProject, onOpenProject }: StartScreenProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [sampleModel, setSampleModel] = useState<SampleModelId>("bracket");
+  const [analysisType, setAnalysisType] = useState<SampleAnalysisType>("static_stress");
+  const sampleCaption = `${sampleModel === "plate" ? "Beam" : capitalize(sampleModel)} ${analysisType === "dynamic_structural" ? "dynamic" : "static"} demo`;
 
   return (
     <main
       className="start-screen"
       tabIndex={0}
       onKeyDown={(event) => {
-        if (event.key === "Enter") onLoadSample();
+        if (event.key === "Enter") onLoadSample(sampleModel, analysisType);
         if (!event.metaKey && !event.ctrlKey && !event.altKey && event.key.toLowerCase() === "n") {
           event.preventDefault();
           onCreateProject();
@@ -39,10 +43,25 @@ export function StartScreen({ onLoadSample, onCreateProject, onOpenProject }: St
             <span>Open local project</span>
             <kbd>O</kbd>
           </button>
-          <button className="start-action primary sample-action" onClick={() => onLoadSample()}>
+          <div className="start-sample-options" aria-label="Sample setup">
+            <span>Sample model</span>
+            <div className="segmented" role="group" aria-label="Sample model">
+              {(["bracket", "plate", "cantilever"] as const).map((sample) => (
+                <button key={sample} className={sampleModel === sample ? "active" : ""} type="button" onClick={() => setSampleModel(sample)}>
+                  {sample === "plate" ? "Beam" : capitalize(sample)}
+                </button>
+              ))}
+            </div>
+            <span>Analysis type</span>
+            <div className="segmented analysis-type" role="group" aria-label="Analysis type">
+              <button className={analysisType === "static_stress" ? "active" : ""} type="button" onClick={() => setAnalysisType("static_stress")}>Static</button>
+              <button className={analysisType === "dynamic_structural" ? "active" : ""} type="button" onClick={() => setAnalysisType("dynamic_structural")}>Dynamic</button>
+            </div>
+          </div>
+          <button className="start-action primary sample-action" onClick={() => onLoadSample(sampleModel, analysisType)}>
             <span>
               <strong>Load sample project</strong>
-              <small>Bracket demo · full workflow preview</small>
+              <small>{sampleCaption} · full workflow preview</small>
             </span>
             <span aria-hidden="true">→</span>
           </button>
@@ -72,4 +91,8 @@ export function StartScreen({ onLoadSample, onCreateProject, onOpenProject }: St
       </footer>
     </main>
   );
+}
+
+function capitalize(value: string) {
+  return value.charAt(0).toUpperCase() + value.slice(1);
 }

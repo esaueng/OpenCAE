@@ -19,7 +19,7 @@ import {
   type Study,
   type StudyRun
 } from "@opencae/schema";
-import { LocalMockComputeBackend } from "@opencae/solver-service";
+import { LocalMockComputeBackend, solveDynamicStudy } from "@opencae/solver-service";
 import { FileSystemObjectStorageProvider } from "@opencae/storage";
 import { validateStaticStressStudy, validateStudy } from "@opencae/study-core";
 import {
@@ -29,6 +29,7 @@ import {
   createDynamicStructuralStudy,
   createSampleProject,
   createStaticStressStudy,
+  normalizeSampleAnalysisType,
   normalizeSampleId,
   sampleDisplayModelFor,
   sampleProjectName,
@@ -65,26 +66,31 @@ api.get("/api/sample-project", async (request) => {
 
 api.post("/api/sample-project/load", async (request) => {
   const sample = normalizeSampleId((request.body as { sample?: string } | undefined)?.sample);
+  const analysisType = normalizeSampleAnalysisType((request.body as { analysisType?: string } | undefined)?.analysisType);
   const now = new Date().toISOString();
   const project = createSampleProject(sample, {
     projectId: bracketDemoProject.id,
     studyId: bracketDemoProject.studies[0]?.id ?? "study-bracket-static",
     now,
-    includeSeedRun: sample === "bracket"
+    includeSeedRun: analysisType === "dynamic_structural" || sample === "bracket",
+    analysisType
   });
+  const dynamicResults = analysisType === "dynamic_structural" ? dynamicSampleResults(project) : undefined;
   db.upsertProject(project);
   await ensureSampleArtifacts();
+  if (dynamicResults) await persistSampleResults(project, dynamicResults);
   return {
-    message: `${sampleProjectName(sample)} loaded.`,
+    message: analysisType === "dynamic_structural" ? `${sampleProjectName(sample)} dynamic sample loaded.` : `${sampleProjectName(sample)} loaded.`,
     project: db.getProject(bracketDemoProject.id),
-    displayModel: sampleDisplayModelFor(sample)
+    displayModel: sampleDisplayModelFor(sample),
+    ...(dynamicResults ? { results: dynamicResults } : {})
   };
 });
 
 api.get("/api/projects", async () => ({ projects: db.listProjects() }));
 
 api.post("/api/projects", async (request) => {
-  const body = request.body as Partial<Project> & { sample?: SampleModelId; mode?: "blank" | "sample" } | undefined;
+  const body = request.body as Partial<Project> & { sample?: SampleModelId; analysisType?: string; mode?: "blank" | "sample" } | undefined;
   const now = new Date().toISOString();
   if (body?.mode !== "sample") {
     const project = createBlankProject({
@@ -98,16 +104,20 @@ api.post("/api/projects", async (request) => {
   }
 
   const sample = normalizeSampleId(body?.sample);
+  const analysisType = normalizeSampleAnalysisType(body?.analysisType);
   const project = createSampleProject(sample, {
     projectId: `project-${crypto.randomUUID()}`,
     studyId: `study-${crypto.randomUUID()}`,
     name: body?.name ?? `Untitled ${sampleProjectName(sample)}`,
     now,
-    includeSeedRun: false
+    includeSeedRun: analysisType === "dynamic_structural",
+    analysisType
   });
+  const dynamicResults = analysisType === "dynamic_structural" ? dynamicSampleResults(project) : undefined;
   db.upsertProject(project);
   await storage.putObject(project.geometryFiles[0]?.artifactKey ?? `${project.id}/geometry/display.json`, JSON.stringify(sampleDisplayModelFor(sample), null, 2));
-  return { project, displayModel: sampleDisplayModelFor(sample), message: "Project created." };
+  if (dynamicResults) await persistSampleResults(project, dynamicResults);
+  return { project, displayModel: sampleDisplayModelFor(sample), ...(dynamicResults ? { results: dynamicResults } : {}), message: "Project created." };
 });
 
 api.post("/api/projects/import", async (request, reply) => {
@@ -583,6 +593,30 @@ async function persistImportedResults(project: Project, results: ImportedResultB
   const reportRef = run?.reportRef ?? `${project.id}/reports/${runId}.html`;
   await storage.putObject(resultRef, JSON.stringify({ summary: results.summary, fields: results.fields }, null, 2));
   await storage.putObject(reportRef, buildHtmlReport(runId, results.summary));
+}
+
+function dynamicSampleResults(project: Project): ImportedResultBundle | undefined {
+  const study = project.studies[0];
+  const run = study?.runs[0];
+  if (!study || !run || study.type !== "dynamic_structural") return undefined;
+  const solved = solveDynamicStudy(study, run.id);
+  return {
+    activeRunId: run.id,
+    completedRunId: run.id,
+    summary: solved.summary,
+    fields: solved.fields
+  };
+}
+
+async function persistSampleResults(project: Project, results: ImportedResultBundle): Promise<void> {
+  const runId = results.completedRunId ?? results.activeRunId ?? results.fields[0]?.runId;
+  if (!runId) return;
+  const run = project.studies.flatMap((study) => study.runs).find((item) => item.id === runId);
+  const resultRef = run?.resultRef ?? `${project.id}/results/${runId}/results.json`;
+  const reportRef = run?.reportRef ?? `${project.id}/reports/${runId}/report.html`;
+  await storage.putObject(resultRef, JSON.stringify({ summary: results.summary, fields: results.fields }, null, 2));
+  await storage.putObject(reportRef, buildHtmlReport(runId, results.summary));
+  await storage.putObject(reportPdfKeyFor(reportRef), buildPdfReport(runId, results.summary));
 }
 
 async function displayModelForProject(project: Project): Promise<DisplayModel> {

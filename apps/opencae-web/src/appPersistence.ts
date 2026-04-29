@@ -11,7 +11,7 @@ import type { LoadDirectionLabel, LoadType } from "./loadPreview";
 import type { LoadApplicationPoint, PayloadObjectSelection } from "./loadPreview";
 import type { ResultMode, ViewMode } from "./components/CadViewer";
 import type { StepId } from "./components/StepBar";
-import type { SampleModelId } from "./lib/api";
+import type { SampleAnalysisType, SampleModelId } from "./lib/api";
 
 export const AUTOSAVE_STORAGE_KEY = "opencae.workspace.autosave.v1";
 
@@ -33,6 +33,7 @@ export interface WorkspaceUiSnapshot {
   draftLoadValue: number;
   draftLoadDirection: LoadDirectionLabel;
   sampleModel: SampleModelId;
+  sampleAnalysisType: SampleAnalysisType;
   activeRunId: string;
   completedRunId: string;
   runProgress: number;
@@ -61,6 +62,7 @@ const THEMES: ThemeMode[] = ["dark", "light"];
 const LOAD_TYPES: LoadType[] = ["force", "pressure", "gravity"];
 const LOAD_DIRECTIONS: LoadDirectionLabel[] = ["-Y", "+Y", "+X", "-X", "+Z", "-Z", "Normal"];
 const SAMPLE_MODELS: SampleModelId[] = ["bracket", "plate", "cantilever"];
+const SAMPLE_ANALYSIS_TYPES: SampleAnalysisType[] = ["static_stress", "dynamic_structural"];
 
 export function buildAutosavedWorkspace({
   project,
@@ -167,6 +169,7 @@ function parseUiSnapshot(value: unknown): WorkspaceUiSnapshot | null {
     draftLoadValue: readFiniteNumber(value.draftLoadValue, 500),
     draftLoadDirection: readEnum(value.draftLoadDirection, LOAD_DIRECTIONS, "-Z"),
     sampleModel: readEnum(value.sampleModel, SAMPLE_MODELS, "bracket"),
+    sampleAnalysisType: readEnum(value.sampleAnalysisType, SAMPLE_ANALYSIS_TYPES, "static_stress"),
     activeRunId: typeof value.activeRunId === "string" ? value.activeRunId : "",
     completedRunId: typeof value.completedRunId === "string" ? value.completedRunId : "",
     runProgress: clamp(readFiniteNumber(value.runProgress, 0), 0, 100),

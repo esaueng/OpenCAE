@@ -15,4 +15,18 @@ describe("StartScreen", () => {
     expect(html).not.toContain("v0.1.0-mvp");
     expect(html).not.toContain("local mode");
   });
+
+  test("renders sample model and analysis selectors", () => {
+    const html = renderToStaticMarkup(
+      <StartScreen onLoadSample={vi.fn()} onCreateProject={vi.fn()} onOpenProject={vi.fn()} />
+    );
+
+    expect(html).toContain("Sample model");
+    expect(html).toContain("Bracket");
+    expect(html).toContain("Beam");
+    expect(html).toContain("Cantilever");
+    expect(html).toContain("Analysis type");
+    expect(html).toContain("Static");
+    expect(html).toContain("Dynamic");
+  });
 });

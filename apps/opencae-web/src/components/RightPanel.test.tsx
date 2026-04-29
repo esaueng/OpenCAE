@@ -71,6 +71,7 @@ function renderPanel(activeStep: StepId, overrides: Partial<Parameters<typeof Ri
       resultSummary={resultSummary}
       runProgress={0}
       sampleModel="bracket"
+      sampleAnalysisType="static_stress"
       draftLoadType="force"
       draftLoadValue={500}
       draftLoadDirection="-Z"
@@ -82,6 +83,7 @@ function renderPanel(activeStep: StepId, overrides: Partial<Parameters<typeof Ri
       onLoadSample={vi.fn()}
       onUploadModel={vi.fn()}
       onSampleModelChange={vi.fn()}
+      onSampleAnalysisTypeChange={vi.fn()}
       onViewModeChange={vi.fn()}
       onResultModeChange={vi.fn()}
       onToggleDeformed={vi.fn()}
@@ -170,6 +172,30 @@ describe("RightPanel payload mass controls", () => {
 
     expect(html).not.toContain("Generate report");
     expect(html).not.toContain("Report");
+  });
+
+  test("renders sample analysis selection for sample projects", () => {
+    const html = renderPanel("model", {
+      project: {
+        ...project,
+        geometryFiles: [{
+          id: "geom-sample",
+          projectId: project.id,
+          filename: "bracket-demo.step",
+          localPath: "examples/bracket-demo/bracket-demo.step",
+          artifactKey: "project-1/geometry/bracket-display.json",
+          status: "ready",
+          metadata: { source: "sample", sampleModel: "bracket", sampleAnalysisType: "dynamic_structural" }
+        }]
+      },
+      sampleAnalysisType: "dynamic_structural"
+    });
+
+    expect(html).toContain("Analysis type");
+    expect(html).toContain("Static");
+    expect(html).toContain("Dynamic");
+    expect(html).toContain("Load dynamic sample");
+    expect(html).toContain("Dynamic Structural");
   });
 
   test("renders dynamic run settings only for dynamic structural studies", () => {
