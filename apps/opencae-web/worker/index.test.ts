@@ -25,12 +25,15 @@ describe("Cloudflare FEA worker orchestration", () => {
       containers?: Array<{ class_name?: string; image?: string }>;
       durable_objects?: { bindings?: Array<{ name?: string; class_name?: string }> };
     };
+    const defaultConfig = JSON.parse(readFileSync(resolve(__dirname, "../../../wrangler.jsonc"), "utf8")) as typeof containerConfig;
 
     expect(packageJson.scripts["deploy:cloudflare"]).toContain("--config wrangler.containers.jsonc");
     expect(packageJson.scripts["deploy:cloudflare:dry-run"]).toContain("--config wrangler.containers.jsonc");
     expect(containerConfig.name).toBe("opencae");
     expect(containerConfig.containers?.[0]).toMatchObject({ class_name: "OpenCaeFeaContainer", image: "opencae/opencae-fea:latest" });
     expect(containerConfig.durable_objects?.bindings).toContainEqual({ name: "FEA_CONTAINER", class_name: "OpenCaeFeaContainer" });
+    expect(defaultConfig.containers?.[0]).toMatchObject({ class_name: "OpenCaeFeaContainer", image: "opencae/opencae-fea:latest" });
+    expect(defaultConfig.durable_objects?.bindings).toContainEqual({ name: "FEA_CONTAINER", class_name: "OpenCaeFeaContainer" });
   });
 
   test("queues cloud FEA runs and stores run artifacts in R2", async () => {
