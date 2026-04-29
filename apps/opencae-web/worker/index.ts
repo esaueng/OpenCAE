@@ -49,6 +49,7 @@ const jsonHeaders = {
   "content-type": "application/json; charset=utf-8",
   "cache-control": "no-store"
 };
+const cloudFeaContainersDisabledMessage = "Cloud FEA containers are not enabled for this deployment. Deploy with pnpm deploy:cloudflare:containers using a Cloudflare token with Containers write access, or switch the study backend to Detailed local.";
 
 export default {
   async fetch(request: Request, env: Env, ctx?: ExecutionContextLike): Promise<Response> {
@@ -107,6 +108,9 @@ export default {
 async function createCloudFeaRun(request: Request, env: Env, ctx?: ExecutionContextLike): Promise<Response> {
   if (!env.FEA_ARTIFACTS) {
     return Response.json({ error: "Cloud FEA is not configured for this deployment." }, { status: 503, headers: jsonHeaders });
+  }
+  if (!env.FEA_CONTAINER) {
+    return Response.json({ error: cloudFeaContainersDisabledMessage }, { status: 503, headers: jsonHeaders });
   }
   const body = await request.json().catch(() => ({})) as Record<string, unknown>;
   const runId = `run-cloud-${crypto.randomUUID()}`;
@@ -235,11 +239,15 @@ async function callFeaContainer(env: Env, payload: Record<string, unknown>): Pro
         ? binding.getRandom()
         : binding.get?.(binding.idFromName ? binding.idFromName(instanceName) as string : instanceName);
   if (!fetcher) throw new Error("Cloud FEA container instance could not be resolved.");
-  return fetcher.fetch(new Request("https://opencae-fea-container/solve", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(payload)
-  }));
+  try {
+    return await fetcher.fetch(new Request("https://opencae-fea-container/solve", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload)
+    }));
+  } catch (error) {
+    throw new Error(normalizeContainerRuntimeError(error));
+  }
 }
 
 async function readContainerFailure(response: Response): Promise<string> {
@@ -399,6 +407,12 @@ function numberOr(value: unknown, fallback: number): number {
 
 function formatNumber(value: number): string {
   return value.toLocaleString(undefined, { maximumFractionDigits: 3 });
+}
+
+function normalizeContainerRuntimeError(error: unknown): string {
+  const message = error instanceof Error ? error.message : "Cloud FEA container solve failed.";
+  if (message.includes("Containers have not been enabled")) return cloudFeaContainersDisabledMessage;
+  return message;
 }
 
 async function putOptionalArtifact(artifacts: R2BucketBinding, key: string, value: unknown): Promise<void> {

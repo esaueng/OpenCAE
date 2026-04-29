@@ -36,6 +36,7 @@ describe("Cloudflare FEA worker orchestration", () => {
       name?: string;
       containers?: Array<{ class_name?: string; image?: string }>;
       durable_objects?: { bindings?: Array<{ name?: string; class_name?: string }> };
+      migrations?: Array<{ new_sqlite_classes?: string[] }>;
     };
     const defaultConfig = JSON.parse(readFileSync(resolve(__dirname, "../../../wrangler.jsonc"), "utf8")) as typeof containerConfig;
 
@@ -45,7 +46,29 @@ describe("Cloudflare FEA worker orchestration", () => {
     expect(containerConfig.containers?.[0]).toMatchObject({ class_name: "OpenCaeFeaContainer", image: "opencae/opencae-fea:latest" });
     expect(containerConfig.durable_objects?.bindings).toContainEqual({ name: "FEA_CONTAINER", class_name: "OpenCaeFeaContainer" });
     expect(defaultConfig.containers).toBeUndefined();
-    expect(defaultConfig.durable_objects?.bindings).toContainEqual({ name: "FEA_CONTAINER", class_name: "OpenCaeFeaContainer" });
+    expect(defaultConfig.durable_objects?.bindings ?? []).not.toContainEqual({ name: "FEA_CONTAINER", class_name: "OpenCaeFeaContainer" });
+    expect(defaultConfig.migrations?.some((migration) => migration.new_sqlite_classes?.includes("OpenCaeFeaContainer")) ?? false).toBe(false);
+  });
+
+  test("rejects new cloud FEA runs when the container binding is absent", async () => {
+    const bucket = new MemoryR2Bucket();
+    const send = vi.fn(async () => undefined);
+    const env = {
+      ASSETS: { fetch: vi.fn(async () => new Response("asset")) },
+      FEA_ARTIFACTS: bucket,
+      FEA_RUN_QUEUE: { send }
+    };
+
+    const response = await worker.fetch(new Request("https://cae.example/api/cloud-fea/runs", {
+      method: "POST",
+      body: JSON.stringify({ projectId: "project-1", studyId: "study-1", fidelity: "ultra", study: { id: "study-1", type: "dynamic_structural" } })
+    }), env);
+    const body = await response.json() as { error: string };
+
+    expect(response.status).toBe(503);
+    expect(body.error).toContain("Cloud FEA containers are not enabled");
+    expect(send).not.toHaveBeenCalled();
+    expect(bucket.objects.size).toBe(0);
   });
 
   test("queues cloud FEA runs and stores run artifacts in R2", async () => {
@@ -283,6 +306,38 @@ describe("Cloudflare FEA worker orchestration", () => {
     expect(message.ack).toHaveBeenCalled();
     expect(events.at(-1)).toMatchObject({ type: "error", message: "Cloud FEA container binding is not configured." });
     expect(await bucket.get("runs/run-cloud-no-container/results.json")).toBeNull();
+  });
+
+  test("queue handler reports container-disabled Durable Object deployments without results", async () => {
+    const bucket = new MemoryR2Bucket();
+    await bucket.put("runs/run-cloud-container-disabled/request.json", JSON.stringify({
+      runId: "run-cloud-container-disabled",
+      studyId: "study-1",
+      analysisType: "dynamic_structural",
+      study: { id: "study-1", type: "dynamic_structural" },
+      geometry: { format: "stl", filename: "cantilever.stl", contentBase64: closedStlBase64() }
+    }));
+    const message = { body: { runId: "run-cloud-container-disabled" }, ack: vi.fn(), retry: vi.fn() };
+    const env = {
+      ASSETS: { fetch: vi.fn(async () => new Response("asset")) },
+      FEA_ARTIFACTS: bucket,
+      FEA_CONTAINER: {
+        fetch: vi.fn(async () => {
+          throw new Error("Containers have not been enabled for this Durable Object class. Have you correctly setup your Wrangler config?");
+        })
+      }
+    };
+
+    await worker.queue({ messages: [message] }, env);
+    const events = JSON.parse(await (await bucket.get("runs/run-cloud-container-disabled/events.json"))!.text()) as Array<{ type: string; message: string }>;
+    const failed = JSON.parse(await (await bucket.get("runs/run-cloud-container-disabled/failed.json"))!.text()) as { error: string };
+
+    expect(message.ack).toHaveBeenCalled();
+    expect(events.at(-1)).toMatchObject({ type: "error" });
+    expect(events.at(-1)?.message).toContain("Cloud FEA containers are not enabled");
+    expect(events.at(-1)?.message).toContain("pnpm deploy:cloudflare:containers");
+    expect(failed.error).toBe(events.at(-1)?.message);
+    expect(await bucket.get("runs/run-cloud-container-disabled/results.json")).toBeNull();
   });
 
   test("queue handler rejects placeholder cloud FEA results instead of publishing fake capacity", async () => {

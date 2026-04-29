@@ -30,20 +30,6 @@
       }
     ]
   },
-  "durable_objects": {
-    "bindings": [
-      {
-        "name": "FEA_CONTAINER",
-        "class_name": "OpenCaeFeaContainer"
-      }
-    ]
-  },
-  "migrations": [
-    {
-      "tag": "v1",
-      "new_sqlite_classes": ["OpenCaeFeaContainer"]
-    }
-  ],
   "observability": {
     "enabled": true,
     "head_sampling_rate": 1

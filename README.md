@@ -32,7 +32,7 @@ pnpm test
 
 ## Cloudflare Worker Deploy
 
-The production Cloudflare target for `cae.esau.app` serves the Vite web app from Workers Static Assets and enables the Cloud FEA queue plus CalculiX container binding. Cloudflare Builds should use the default deploy commands for Worker, asset, queue, R2, and Durable Object updates without attempting a privileged container application rollout.
+The production Cloudflare target for `cae.esau.app` serves the Vite web app from Workers Static Assets. Cloudflare Builds should use the default deploy commands for Worker, asset, queue, and R2 updates without attempting a privileged container application rollout.
 
 ```bash
 pnpm install
@@ -40,7 +40,7 @@ pnpm deploy:cloudflare:dry-run
 pnpm deploy:cloudflare
 ```
 
-Wrangler uses [wrangler.jsonc](wrangler.jsonc). The deploy builds `apps/opencae-web/dist`, serves it through the Worker asset binding, uses SPA fallback routing for browser routes, and binds R2, Queues, and the `FEA_CONTAINER` Durable Object namespace. This config intentionally omits the `containers` section so Cloudflare Builds tokens that cannot update container applications still deploy successfully.
+Wrangler uses [wrangler.jsonc](wrangler.jsonc). The deploy builds `apps/opencae-web/dist`, serves it through the Worker asset binding, uses SPA fallback routing for browser routes, and binds R2 and Queues. This config intentionally omits the `containers` section and the `FEA_CONTAINER` Durable Object binding so Cloudflare Builds tokens that cannot update container applications still deploy successfully.
 
 Container application rollouts require a token with Cloudflare Containers write access. Run that privileged deploy explicitly when the container image or app configuration changes:
 
