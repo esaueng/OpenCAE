@@ -112,4 +112,35 @@ describe("StepBar", () => {
     expect(html).not.toContain("Report");
     expect(html).not.toContain("lucide-file-text");
   });
+
+  test("shows the active study type in the footer", () => {
+    const html = renderToStaticMarkup(
+      <StepBar
+        activeStep="supports"
+        project={project}
+        study={{
+          ...study,
+          name: "Dynamic Structural",
+          type: "dynamic_structural",
+          solverSettings: {
+            startTime: 0,
+            endTime: 0.1,
+            timeStep: 0.005,
+            outputInterval: 0.005,
+            dampingRatio: 0.02,
+            integrationMethod: "newmark_average_acceleration"
+          }
+        }}
+        hasResults={false}
+        collapsed={false}
+        themeMode="dark"
+        onSelect={vi.fn()}
+        onToggleCollapsed={vi.fn()}
+        onToggleTheme={vi.fn()}
+        onUnitSystemChange={vi.fn()}
+      />
+    );
+
+    expect(html).toContain("<span>study</span><strong>dynamic</strong>");
+  });
 });
