@@ -545,22 +545,33 @@ describe("CadViewer result coloring", () => {
     expect(Math.min(...freeYOffsets)).toBeLessThan(-0.01);
   });
 
-  test("does not stretch low-amplitude dynamic result colors across the full palette", () => {
+  test("renders low-amplitude dynamic stress cooler than high-amplitude stress under one global range", () => {
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute("position", new THREE.Float32BufferAttribute([-1, 0, 0, 0, 0, 0, 1, 0, 0], 3));
-    const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color: "#63a9e5" }));
-    const group = new THREE.Group();
-    group.add(mesh);
+    const lowMesh = new THREE.Mesh(geometry.clone(), new THREE.MeshStandardMaterial({ color: "#63a9e5" }));
+    const highMesh = new THREE.Mesh(geometry.clone(), new THREE.MeshStandardMaterial({ color: "#63a9e5" }));
+    const lowGroup = new THREE.Group();
+    const highGroup = new THREE.Group();
+    lowGroup.add(lowMesh);
+    highGroup.add(highMesh);
     const lowAmplitudeSamples: FaceResultSample[] = [
       { ...samples[0]!, value: 1, normalized: 0.02 },
       { ...samples[1]!, value: 2, normalized: 0.04 }
     ];
+    const highAmplitudeSamples: FaceResultSample[] = [
+      { ...samples[0]!, value: 80, normalized: 0.8 },
+      { ...samples[1]!, value: 95, normalized: 0.95 }
+    ];
 
-    colorizeResultObject(group, "uploaded", "stress", false, 1, lowAmplitudeSamples, []);
+    colorizeResultObject(lowGroup, "uploaded", "stress", false, 1, lowAmplitudeSamples, []);
+    colorizeResultObject(highGroup, "uploaded", "stress", false, 1, highAmplitudeSamples, []);
 
-    const colors = Array.from((mesh.geometry as THREE.BufferGeometry).getAttribute("color").array);
-    const highEndColor = new THREE.Color(colors[6]!, colors[7]!, colors[8]!);
-    expect(highEndColor.r).toBeLessThan(0.2);
+    const lowColors = Array.from((lowMesh.geometry as THREE.BufferGeometry).getAttribute("color").array);
+    const highColors = Array.from((highMesh.geometry as THREE.BufferGeometry).getAttribute("color").array);
+    const lowHighEndColor = new THREE.Color(lowColors[6]!, lowColors[7]!, lowColors[8]!);
+    const highHighEndColor = new THREE.Color(highColors[6]!, highColors[7]!, highColors[8]!);
+    expect(lowHighEndColor.r).toBeLessThan(0.2);
+    expect(highHighEndColor.r).toBeGreaterThan(lowHighEndColor.r);
   });
 
   test("clones loaded STEP result previews before frame coloring mutates geometry", () => {
