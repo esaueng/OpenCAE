@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { describe, expect, test } from "vitest";
-import { VIEWER_GIZMO_ALIGNMENT, axisLabelToViewAxis, cameraDistanceForBounds, cameraViewForAxis, cloneResultPreviewObject, colorizeResultObject, createUndeformedResultOutlineObject, defaultHomeViewTarget, displayedLegendTickLabels, legendTickLabels, payloadHighlightObjectId, printLayerVisualizationForBounds, resultProbesForKind, resultValueForPoint, rotatedCameraOrbit, shouldShowDimensionOverlay, shouldShowModelHitLabel, shouldShowUndeformedResultOutline, viewerCameraResetPose } from "./CadViewer";
+import { VIEWER_GIZMO_ALIGNMENT, axisLabelToViewAxis, cameraDistanceForBounds, cameraViewForAxis, cloneResultPreviewObject, colorizeResultObject, createUndeformedResultOutlineObject, defaultHomeViewTarget, displayedLegendTickLabels, legendTickLabels, payloadHighlightObjectId, printLayerVisualizationForBounds, resultProbesForKind, resultValueForPoint, rotatedCameraOrbit, shouldShowDimensionOverlay, shouldShowModelHitLabel, shouldShowResultMarkers, shouldShowUndeformedResultOutline, viewerCameraResetPose } from "./CadViewer";
 import type { FaceResultSample } from "../resultFields";
 import type { DisplayFace, ResultField } from "@opencae/schema";
 
@@ -126,6 +126,12 @@ describe("CadViewer result coloring", () => {
     expect(shouldShowDimensionOverlay(false, "model")).toBe(false);
   });
 
+  test("hides result probes only while dynamic playback is running", () => {
+    expect(shouldShowResultMarkers("results", "results", false)).toBe(true);
+    expect(shouldShowResultMarkers("results", "results", true)).toBe(false);
+    expect(shouldShowResultMarkers("model", "results", true)).toBe(false);
+  });
+
   test("anchors beam result probes to solved faces instead of static fallback points", () => {
     const beamFaces: DisplayFace[] = [
       { id: "face-base-left", label: "Fixed end face", color: "#4da3ff", center: [-1.9, 0.14, 0], normal: [-1, 0, 0], stressValue: 82 },
@@ -209,7 +215,7 @@ describe("CadViewer result coloring", () => {
     expect(highFrameValue).toBeGreaterThan(lowFrameValue + 0.5);
   });
 
-  test("uses face samples instead of dense field samples for built-in dynamic sample coloring", () => {
+  test("uses dense field samples for built-in dynamic sample coloring", () => {
     const dynamicSamples: FaceResultSample[] = [
       {
         face: { id: "low", label: "Low", color: "#4da3ff", center: [0, 0.18, 0], normal: [0, 1, 0], stressValue: 10 },
@@ -221,7 +227,7 @@ describe("CadViewer result coloring", () => {
       }
     ];
 
-    expect(resultValueForPoint("cantilever", "stress", 1, new THREE.Vector3(0, 0.18, 0), dynamicSamples)).toBeLessThan(0.3);
+    expect(resultValueForPoint("cantilever", "stress", 1, new THREE.Vector3(0, 0.18, 0), dynamicSamples)).toBeGreaterThan(0.9);
     expect(resultValueForPoint("uploaded", "stress", 1, new THREE.Vector3(0, 0.18, 0), dynamicSamples)).toBeGreaterThan(0.9);
   });
 

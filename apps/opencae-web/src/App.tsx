@@ -35,7 +35,7 @@ import { displayModelForUnits, loadValueForUnits, resultFieldForUnits, resultSum
 import { supportDisplayLabel } from "./supportLabels";
 import { nextSelectedPayloadObject, shouldClearPayloadSelectionOnViewerMiss } from "./payloadSelection";
 import { createLocalDynamicStructuralStudy, createLocalStaticStressStudy } from "./localProjectFactory";
-import { fieldsForResultFrame, nextLoopedResultFrameIndex, resultFrameIndexes } from "./resultFields";
+import { fieldsForResultFrame, interpolatedFieldsForFramePosition, resultFrameIndexes } from "./resultFields";
 
 interface SaveFilePickerHandle {
   createWritable: () => Promise<{ write: (content: Blob) => Promise<void>; close: () => Promise<void> }>;
@@ -90,6 +90,7 @@ export function App() {
   const [resultSummary, setResultSummary] = useState<ResultSummary>(restoredResults?.summary ?? seededSummary);
   const [resultFields, setResultFields] = useState<ResultField[]>(restoredResults?.fields ?? []);
   const [resultFrameIndex, setResultFrameIndex] = useState(0);
+  const [resultPlaybackFramePosition, setResultPlaybackFramePosition] = useState(0);
   const [resultPlaybackPlaying, setResultPlaybackPlaying] = useState(false);
   const [resultPlaybackFps, setResultPlaybackFps] = useState(12);
   const [draftLoadType, setDraftLoadType] = useState<LoadType>(restoredUi?.draftLoadType ?? "force");
@@ -105,6 +106,7 @@ export function App() {
   const didRequestRestoredHomeView = useRef(false);
   const activeRunSourceRef = useRef<EventSource | null>(null);
   const processingRunIdRef = useRef<string | null>(null);
+  const resultFrameIndexRef = useRef(0);
 
   const study = project?.studies[0] ?? null;
   const assignedPrintLayerOrientation = useMemo<PrintLayerOrientation | null>(() => {
@@ -121,7 +123,11 @@ export function App() {
   const displayModelForUi = useMemo(() => displayModel ? displayModelForUnits(displayModel, displayUnitSystem) : null, [displayModel, displayUnitSystem]);
   const resultSummaryForUi = useMemo(() => resultSummaryForUnits(resultSummary, displayUnitSystem), [displayUnitSystem, resultSummary]);
   const resultFieldsForUi = useMemo(() => resultFields.map((field) => resultFieldForUnits(field, displayUnitSystem)), [displayUnitSystem, resultFields]);
-  const visibleResultFieldsForUi = useMemo(() => fieldsForResultFrame(resultFieldsForUi, resultFrameIndex), [resultFieldsForUi, resultFrameIndex]);
+  const resultVisualFramePosition = resultPlaybackPlaying ? resultPlaybackFramePosition : resultFrameIndex;
+  const visibleResultFieldsForUi = useMemo(
+    () => resultPlaybackPlaying ? interpolatedFieldsForFramePosition(resultFieldsForUi, resultVisualFramePosition) : fieldsForResultFrame(resultFieldsForUi, resultFrameIndex),
+    [resultFieldsForUi, resultFrameIndex, resultPlaybackPlaying, resultVisualFramePosition]
+  );
   const playbackFrameIndexes = useMemo(() => resultFrameIndexes(resultFields), [resultFields]);
   const solverRunning = Boolean(processingRunId) || (runProgress > 0 && runProgress < 100);
   const runReadiness = useMemo(() => readinessForStudy(study), [study]);
@@ -140,6 +146,7 @@ export function App() {
   useEffect(() => {
     if (!playbackFrameIndexes.length) return;
     setResultFrameIndex((current) => playbackFrameIndexes.includes(current) ? current : playbackFrameIndexes[0] ?? 0);
+    setResultPlaybackFramePosition((current) => playbackFrameIndexes.includes(Math.round(current)) ? current : playbackFrameIndexes[0] ?? 0);
   }, [playbackFrameIndexes]);
 
   useEffect(() => {
@@ -153,21 +160,13 @@ export function App() {
     const frameDurationMs = 1000 / Math.max(1, Math.min(30, resultPlaybackFps));
     let animationFrameId = 0;
     let lastTimestamp: number | null = null;
-    let accumulatedMs = 0;
+    let framePosition = resultFrameIndexRef.current;
     const advancePlaybackFrame = (timestamp: number) => {
       if (lastTimestamp !== null) {
-        accumulatedMs += timestamp - lastTimestamp;
-        if (accumulatedMs >= frameDurationMs) {
-          const steps = Math.max(1, Math.floor(accumulatedMs / frameDurationMs));
-          accumulatedMs %= frameDurationMs;
-          setResultFrameIndex((current) => {
-            let next = current;
-            for (let step = 0; step < steps; step += 1) {
-              next = nextLoopedResultFrameIndex(playbackFrameIndexes, next);
-            }
-            return next;
-          });
-        }
+        const frameDelta = (timestamp - lastTimestamp) / frameDurationMs;
+        framePosition = loopedPlaybackFramePosition(playbackFrameIndexes, framePosition + frameDelta);
+        setResultPlaybackFramePosition(framePosition);
+        setResultFrameIndex(Math.floor(framePosition));
       }
       lastTimestamp = timestamp;
       animationFrameId = window.requestAnimationFrame(advancePlaybackFrame);
@@ -200,6 +199,10 @@ export function App() {
   useEffect(() => {
     if (activeStep !== "loads") setPreviewLoadEdit(null);
   }, [activeStep]);
+
+  useEffect(() => {
+    resultFrameIndexRef.current = resultFrameIndex;
+  }, [resultFrameIndex]);
 
   const draftLoadPreview = useMemo<DraftLoadPreview | undefined>(() => {
     if (!study || activeStep !== "loads") return undefined;
@@ -804,6 +807,7 @@ export function App() {
           viewMode={viewMode}
           resultMode={resultMode}
           showDeformed={showDeformed}
+          resultPlaybackPlaying={resultPlaybackPlaying}
           showDimensions={showDimensions}
           stressExaggeration={stressExaggeration}
           resultFields={visibleResultFieldsForUi}
@@ -983,6 +987,15 @@ function latestCompletedRunId(study: Study | null, activeRunId: string): string 
   if (study.runs.some((run) => run.id === activeRunId && (run.resultRef || run.status === "complete"))) return activeRunId;
   const completed = [...study.runs].reverse().find((run) => run.resultRef || run.status === "complete");
   return completed?.id ?? null;
+}
+
+function loopedPlaybackFramePosition(frameIndexes: number[], framePosition: number): number {
+  if (frameIndexes.length < 2) return frameIndexes[0] ?? 0;
+  const first = frameIndexes[0] ?? 0;
+  const last = frameIndexes[frameIndexes.length - 1] ?? first;
+  const span = last - first + 1;
+  if (span <= 0) return first;
+  return first + ((((framePosition - first) % span) + span) % span);
 }
 
 function readinessForStudy(study: Study | null) {

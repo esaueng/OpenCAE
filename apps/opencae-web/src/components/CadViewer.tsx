@@ -62,6 +62,7 @@ interface CadViewerProps {
   viewMode: ViewMode;
   resultMode: ResultMode;
   showDeformed: boolean;
+  resultPlaybackPlaying: boolean;
   showDimensions: boolean;
   stressExaggeration: number;
   resultFields: ResultField[];
@@ -322,6 +323,7 @@ function BracketModel({
   viewMode,
   resultMode,
   showDeformed,
+  resultPlaybackPlaying,
   stressExaggeration,
   resultFields,
   unitSystem,
@@ -337,7 +339,7 @@ function BracketModel({
   const [snapResult, setSnapResult] = useState<SnapResult | null>(null);
   const modelKind = modelKindForDisplayModel(displayModel);
   const materialColor = useMemo(() => colorForResult(displayModel.faces, viewMode, resultMode), [displayModel.faces, resultMode, viewMode]);
-  const showResultMarkers = viewMode === "results" && activeStep === "results";
+  const showResultMarkers = shouldShowResultMarkers(viewMode, activeStep, resultPlaybackPlaying);
   const isResultView = viewMode === "results";
   const showBoundaryMarkers = !isResultView;
   const placementMode = activeStep === "loads" || activeStep === "supports";
@@ -489,6 +491,10 @@ export function shouldShowModelHitLabel(_viewMode: ViewMode, _hasActiveHit: bool
 
 export function shouldShowDimensionOverlay(showDimensions: boolean, viewMode: ViewMode) {
   return showDimensions && viewMode !== "results";
+}
+
+export function shouldShowResultMarkers(viewMode: ViewMode, activeStep: StepId, resultPlaybackPlaying: boolean) {
+  return viewMode === "results" && activeStep === "results" && !resultPlaybackPlaying;
 }
 
 export function payloadHighlightObjectId(payloadObjectSelectionMode: boolean, payloadObject: PayloadObjectSelection | null | undefined) {
@@ -1969,7 +1975,7 @@ function resultColorForPoint(kind: SampleModelKind, resultMode: ResultMode, stre
 }
 
 export function resultValueForPoint(kind: SampleModelKind, resultMode: ResultMode, stressExaggeration: number, point: THREE.Vector3, samples: FaceResultSample[]) {
-  const fieldSampleValue = kind === "uploaded" ? resultFractionFromFieldSamples(point, samples) : null;
+  const fieldSampleValue = resultFractionFromFieldSamples(point, samples);
   const sampleValue = fieldSampleValue ?? resultFractionFromSamples(point, samples);
   const stress = sampleValue ?? (kind === "cantilever" ? cantileverBendingStressFraction(point) : stressFractionForPoint(kind, point));
   const displacement = sampleValue ?? displacementFractionForPoint(kind, point);
