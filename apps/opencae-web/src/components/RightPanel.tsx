@@ -1484,8 +1484,19 @@ function peakDisplacementFrame(fields: ResultField[], summary: ResultSummary): {
       timeSeconds: summary.transient.peakDisplacementTimeSeconds
     };
   }
-  const peak = displacementFields.reduce((best, field) => field.max > best.max ? field : best, displacementFields[0]!);
-  return { value: peak.max, units: peak.units, timeSeconds: peak.timeSeconds ?? summary.transient?.peakDisplacementTimeSeconds ?? 0 };
+  const peak = displacementFields
+    .map((field) => ({ field, value: activeFieldAbsMax(field) }))
+    .reduce((best, item) => item.value > best.value ? item : best, { field: displacementFields[0]!, value: activeFieldAbsMax(displacementFields[0]!) });
+  return { value: peak.value, units: peak.field.units, timeSeconds: peak.field.timeSeconds ?? summary.transient?.peakDisplacementTimeSeconds ?? 0 };
+}
+
+function activeFieldAbsMax(field: ResultField): number {
+  const values = [
+    ...field.values.map((value) => Math.abs(value)).filter(Number.isFinite),
+    ...(field.samples?.map((sample) => Math.abs(sample.value)).filter(Number.isFinite) ?? [])
+  ];
+  if (values.length) return Math.max(...values);
+  return Math.max(Math.abs(Number(field.min) || 0), Math.abs(Number(field.max) || 0));
 }
 
 function dynamicFrameEstimate(settings: DynamicSolverSettings): { count: number; hasFinalPartialStep: boolean } {

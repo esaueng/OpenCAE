@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { describe, expect, test } from "vitest";
-import { VIEWER_CREDIT_URL, VIEWER_GIZMO_ALIGNMENT, axisLabelToViewAxis, cameraDistanceForBounds, cameraViewForAxis, cloneResultPreviewObject, colorizeResultObject, colorizeSampleResultGeometry, createUndeformedResultOutlineObject, defaultHomeViewTarget, displayedLegendTickLabels, legendMeshStats, legendTickLabels, payloadHighlightObjectId, printLayerVisualizationForBounds, resultProbesForKind, resultValueForPoint, rotatedCameraOrbit, shouldShowDimensionOverlay, shouldShowModelHitLabel, shouldShowResultMarkers, shouldShowUndeformedResultOutline, viewerCameraResetPose } from "./CadViewer";
+import { VIEWER_CREDIT_URL, VIEWER_GIZMO_ALIGNMENT, axisLabelToViewAxis, cameraDistanceForBounds, cameraViewForAxis, cloneResultPreviewObject, colorizeResultObject, colorizeSampleResultGeometry, createUndeformedResultOutlineObject, defaultHomeViewTarget, deformationScaleForResultFields, displayedLegendTickLabels, legendMeshStats, legendTickLabels, payloadHighlightObjectId, printLayerVisualizationForBounds, resultProbesForKind, resultValueForPoint, rotatedCameraOrbit, shouldShowDimensionOverlay, shouldShowModelHitLabel, shouldShowResultMarkers, shouldShowUndeformedResultOutline, viewerCameraResetPose } from "./CadViewer";
 import type { FaceResultSample } from "../resultFields";
 import type { DisplayFace, ResultField } from "@opencae/schema";
 
@@ -384,6 +384,29 @@ describe("CadViewer result coloring", () => {
     }]);
 
     expect(Array.from((mesh.geometry as THREE.BufferGeometry).getAttribute("position").array)).toEqual(originalPositions);
+  });
+
+  test("uses active frame displacement values rather than global dynamic range for deformation scale", () => {
+    const zeroFrame: ResultField = {
+      id: "displacement-0",
+      runId: "run-1",
+      type: "displacement",
+      location: "face",
+      values: [0],
+      min: 0,
+      max: 10,
+      units: "mm",
+      samples: [{ point: [0, 0, 0], normal: [0, 1, 0], value: 0 }]
+    };
+    const peakFrame: ResultField = {
+      ...zeroFrame,
+      id: "displacement-1",
+      values: [10],
+      samples: [{ point: [0, 0, 0], normal: [0, 1, 0], value: 10 }]
+    };
+
+    expect(deformationScaleForResultFields([zeroFrame])).toBe(0);
+    expect(deformationScaleForResultFields([peakFrame])).toBeGreaterThan(0);
   });
 
   test("uses result displacement rather than raw load magnitude for uploaded result deformation", () => {

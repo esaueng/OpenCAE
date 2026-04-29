@@ -453,6 +453,17 @@ describe("RightPanel payload mass controls", () => {
     expect(html).toContain("4.25 mm at 0.0450 s");
   });
 
+  test("uses active displacement frame values rather than global dynamic ranges for peak displacement time", () => {
+    const html = renderPanel("results", {
+      resultFields: [
+        { id: "field-displacement-0", runId: "run-1", type: "displacement", location: "face", values: [0], min: 0, max: 4.25, units: "mm", frameIndex: 0, timeSeconds: 0 },
+        { id: "field-displacement-1", runId: "run-1", type: "displacement", location: "face", values: [4.25], min: 0, max: 4.25, units: "mm", frameIndex: 1, timeSeconds: 0.045 }
+      ]
+    });
+
+    expect(html).toContain("4.25 mm at 0.0450 s");
+  });
+
   test("shows pause when dynamic result playback is active", () => {
     const html = renderPanel("results", {
       resultPlaybackPlaying: true,
