@@ -426,8 +426,7 @@ describe("api", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/cloud-fea/runs/run-cloud-1/results");
   });
 
-  test("uses local dynamic frames when Cloud FEA is selected for a dynamic study", async () => {
-    vi.useFakeTimers();
+  test("sends dynamic Cloud FEA studies through cloud orchestration endpoints", async () => {
     const dynamicStudy = {
       ...study,
       name: "Dynamic",
@@ -447,25 +446,74 @@ describe("api", () => {
         integrationMethod: "newmark_average_acceleration"
       }
     } as Study;
-    const fetchMock = vi.fn(async () => new Response("unexpected cloud call", { status: 500 }));
+    const dynamicDisplayModel = {
+      ...displayModel,
+      visualMesh: {
+        format: "stl",
+        filename: "cantilever.stl",
+        contentBase64: btoa(sizedAsciiStl)
+      }
+    } satisfies DisplayModel;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/cloud-fea/runs" && init?.method === "POST") {
+        return new Response(JSON.stringify({
+          run: { id: "run-cloud-dynamic-1", status: "queued" },
+          streamUrl: "/api/cloud-fea/runs/run-cloud-dynamic-1/events",
+          message: "Cloud FEA simulation queued."
+        }), { status: 202, headers: { "content-type": "application/json" } });
+      }
+      if (url === "/api/cloud-fea/runs/run-cloud-dynamic-1/events") {
+        return new Response(JSON.stringify({
+          events: [
+            { runId: "run-cloud-dynamic-1", type: "state", progress: 0, message: "Cloud FEA run queued.", timestamp: "2026-04-29T12:00:00.000Z" },
+            { runId: "run-cloud-dynamic-1", type: "complete", progress: 100, message: "Cloud FEA transient solve complete.", timestamp: "2026-04-29T12:00:01.000Z" }
+          ]
+        }), { headers: { "content-type": "application/json" } });
+      }
+      if (url === "/api/cloud-fea/runs/run-cloud-dynamic-1/results") {
+        return new Response(JSON.stringify({
+          summary: {
+            maxStress: 431400000,
+            maxStressUnits: "Pa",
+            maxDisplacement: 0.000761,
+            maxDisplacementUnits: "m",
+            safetyFactor: 0.64,
+            reactionForce: 500,
+            reactionForceUnits: "N",
+            transient: { startTime: 0, endTime: 0.5, timeStep: 0.005, outputInterval: 0.005, frameCount: 2 }
+          },
+          fields: [
+            { id: "stress-0", runId: "run-cloud-dynamic-1", type: "stress", location: "node", values: [120000], min: 120000, max: 431400000, units: "Pa", frameIndex: 0, time: 0, samples: [{ point: [0, 0, 0], value: 120000, source: "calculix", vonMisesStressPa: 120000 }] },
+            { id: "stress-1", runId: "run-cloud-dynamic-1", type: "stress", location: "node", values: [431400000], min: 120000, max: 431400000, units: "Pa", frameIndex: 1, time: 0.005, samples: [{ point: [1, 0, 0], value: 431400000, source: "calculix", vonMisesStressPa: 431400000 }] },
+            { id: "disp-1", runId: "run-cloud-dynamic-1", type: "displacement", location: "node", values: [0.000761], min: -0.000761, max: 0.000761, units: "m", frameIndex: 1, time: 0.005, samples: [{ point: [1, 0, 0], value: 0.000761, source: "calculix" }] }
+          ]
+        }), { headers: { "content-type": "application/json" } });
+      }
+      return new Response("unexpected cloud call", { status: 500 });
+    });
     vi.stubGlobal("fetch", fetchMock);
 
-    try {
-      const response = await runSimulation("study-1", dynamicStudy);
-      const seen: RunEvent[] = [];
-      const source = subscribeToRun(response.run.id, (event) => seen.push(event));
-      await vi.runAllTimersAsync();
-      source.close();
-      const results = await getResults(response.run.id);
+    const response = await runSimulation("study-1", dynamicStudy, dynamicDisplayModel);
+    const requestBody = JSON.parse((fetchMock.mock.calls[0]?.[1] as RequestInit).body as string) as Record<string, unknown>;
+    const seen: RunEvent[] = [];
+    const source = subscribeToRun(response.run.id, (event) => seen.push(event));
+    await vi.waitFor(() => expect(seen.some((event) => event.type === "complete")).toBe(true));
+    source.close();
+    const results = await getResults(response.run.id);
 
-      expect(fetchMock).not.toHaveBeenCalledWith("/api/cloud-fea/runs", expect.anything());
-      expect(response.message).toContain("Dynamic Cloud FEA is not available yet");
-      expect(seen.some((event) => event.type === "complete")).toBe(true);
-      expect(results.summary.transient?.frameCount).toBeGreaterThan(1);
-      expect(results.fields.some((field) => field.type === "velocity" && typeof field.frameIndex === "number")).toBe(true);
-    } finally {
-      vi.useRealTimers();
-    }
+    expect(requestBody).toMatchObject({
+      projectId: "project-1",
+      studyId: "study-1",
+      fidelity: "ultra",
+      study: { id: "study-1", type: "dynamic_structural" },
+      displayModel: { id: "display-1" },
+      geometry: { format: "stl", filename: "cantilever.stl", contentBase64: dynamicDisplayModel.visualMesh.contentBase64 },
+      dynamicSettings: { endTime: 0.5, timeStep: 0.005, dampingRatio: 0.02 }
+    });
+    expect(response.message).toBe("Cloud FEA simulation queued.");
+    expect(results.summary.transient?.frameCount).toBe(2);
+    expect(results.fields.some((field) => field.type === "stress" && field.frameIndex === 1)).toBe(true);
   });
 
   test("defers local result solving until a queued run is subscribed", () => {
