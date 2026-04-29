@@ -436,6 +436,24 @@ describe("LocalMockComputeBackend", () => {
     ]);
   });
 
+  test("dynamic solve normalizes legacy dense output intervals to bounded local frames", () => {
+    const solved = solveDynamicStudy(
+      dynamicCantileverStudy("mat-aluminum-6061", {
+        endTime: 0.02,
+        timeStep: 0.001,
+        outputInterval: 0.001
+      }),
+      "run-dynamic-normalized-output",
+      rectangularBeamAnalysisMesh()
+    );
+
+    const displacementFrames = solved.fields.filter((field) => field.type === "displacement");
+
+    expect(displacementFrames.map((field) => field.timeSeconds)).toEqual([0, 0.005, 0.01, 0.015, 0.02]);
+    expect(solved.summary.transient?.outputInterval).toBe(0.005);
+    expect(solved.summary.transient?.frameCount).toBe(5);
+  });
+
   test("dynamic solve keeps field ranges stable across animation frames", () => {
     const solved = solveDynamicStudy(
       dynamicCantileverStudy("mat-aluminum-6061", {

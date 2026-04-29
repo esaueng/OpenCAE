@@ -57,6 +57,7 @@ const seededSummary: ResultSummary = {
   reactionForce: 500,
   reactionForceUnits: "N"
 };
+const MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.005;
 
 export function App() {
   const restoredWorkspace = useMemo(() => readAutosavedWorkspace(), []);
@@ -586,7 +587,8 @@ export function App() {
       ...mergedSettings,
       outputInterval: Math.max(
         settings.outputInterval ?? study.solverSettings.outputInterval,
-        mergedSettings.timeStep
+        mergedSettings.timeStep,
+        MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS
       )
     };
     invalidateCompletedRunState();

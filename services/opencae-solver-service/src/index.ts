@@ -7,6 +7,7 @@ import { inferCriticalPrintAxis } from "@opencae/study-core";
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const STANDARD_GRAVITY = 9.80665;
+const MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.005;
 
 export class LocalMockComputeBackend {
   constructor(private readonly storage: ObjectStorageProvider) {}
@@ -306,11 +307,12 @@ export function solveDynamicStudy(study: Study, runId: string, analysisMeshInput
 
 function dynamicSettingsForStudy(study: Study): DynamicSolverSettings {
   const raw = study.solverSettings as Partial<DynamicSolverSettings>;
+  const timeStep = finiteOr(raw.timeStep, 0.005);
   return {
     startTime: finiteOr(raw.startTime, 0),
     endTime: finiteOr(raw.endTime, 0.1),
-    timeStep: finiteOr(raw.timeStep, 0.005),
-    outputInterval: finiteOr(raw.outputInterval, 0.005),
+    timeStep,
+    outputInterval: Math.max(finiteOr(raw.outputInterval, 0.005), timeStep, MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS),
     dampingRatio: finiteOr(raw.dampingRatio, 0.02),
     integrationMethod: "newmark_average_acceleration",
     ...(raw.allowFreeMotion === true ? { allowFreeMotion: true } : {})
