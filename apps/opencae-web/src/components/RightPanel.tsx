@@ -20,6 +20,7 @@ import { canNavigateToStep } from "../appShellState";
 import { MaterialLibraryModal } from "./SimulationWorkflow";
 
 const MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.005;
+const STRESS_EXAGGERATION_COMMIT_DELAY_MS = 120;
 
 interface RightPanelProps {
   activeStep: StepId;
@@ -1018,6 +1019,9 @@ function ResultsPanel({
   onStressExaggerationChange
 }: RightPanelProps) {
   const [targetSafetyFactor, setTargetSafetyFactor] = useState(1.5);
+  const [draftStressExaggeration, setDraftStressExaggeration] = useState(stressExaggeration);
+  const stressExaggerationCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const committedStressExaggerationRef = useRef(stressExaggeration);
   const assessment = resultSummary.failureAssessment ?? assessResultFailure(resultSummary);
   const loadCapacity = estimateAllowableLoadForSafetyFactor(resultSummary, targetSafetyFactor);
   const canEstimateLoad = loadCapacity.status === "available";
@@ -1028,6 +1032,40 @@ function ResultsPanel({
   const activeTimeSeconds = interpolatedFrameTimeSeconds(frames, resultPlaybackPlaying ? resultFramePosition : activeFrame?.frameIndex ?? resultFrameIndex);
   const sliderPosition = resultPlaybackPlaying ? resultFramePosition : frames.findIndex((frame) => frame.frameIndex === (activeFrame?.frameIndex ?? 0));
   const peakDisplacement = peakDisplacementFrame(resultFields, resultSummary);
+
+  useEffect(() => {
+    committedStressExaggerationRef.current = stressExaggeration;
+    setDraftStressExaggeration(stressExaggeration);
+  }, [stressExaggeration]);
+
+  useEffect(() => () => {
+    if (stressExaggerationCommitTimerRef.current) clearTimeout(stressExaggerationCommitTimerRef.current);
+  }, []);
+
+  function commitStressExaggeration(value: number) {
+    const nextValue = Number(value.toFixed(1));
+    if (stressExaggerationCommitTimerRef.current) {
+      clearTimeout(stressExaggerationCommitTimerRef.current);
+      stressExaggerationCommitTimerRef.current = null;
+    }
+    if (Math.abs(nextValue - committedStressExaggerationRef.current) < 0.001) return;
+    committedStressExaggerationRef.current = nextValue;
+    onStressExaggerationChange(nextValue);
+  }
+
+  function scheduleStressExaggerationCommit(value: number) {
+    if (stressExaggerationCommitTimerRef.current) clearTimeout(stressExaggerationCommitTimerRef.current);
+    stressExaggerationCommitTimerRef.current = setTimeout(() => {
+      commitStressExaggeration(value);
+    }, STRESS_EXAGGERATION_COMMIT_DELAY_MS);
+  }
+
+  function updateDraftStressExaggeration(value: number) {
+    const nextValue = Number(value.toFixed(1));
+    setDraftStressExaggeration(nextValue);
+    scheduleStressExaggerationCommit(nextValue);
+  }
+
   return (
     <Panel title="Results" helper="View stress and displacement directly on the 3D model.">
       <div className={`failure-assessment ${assessment.status}`}>
@@ -1079,15 +1117,18 @@ function ResultsPanel({
       </div>
       {resultMode === "stress" && (
         <label className="field range-field">
-          <span className="range-label"><HelpLabel helpId="stressExaggeration">Stress exaggeration</HelpLabel><strong>{stressExaggeration.toFixed(1)}x</strong></span>
+          <span className="range-label"><HelpLabel helpId="stressExaggeration">Stress exaggeration</HelpLabel><strong>{draftStressExaggeration.toFixed(1)}x</strong></span>
           <input
             type="range"
             min="1"
             max="4"
             step="0.1"
-            value={stressExaggeration}
-            style={{ "--range-progress": `${rangeProgressPercent(stressExaggeration, 1, 4)}%` } as CSSProperties}
-            onChange={(event) => onStressExaggerationChange(Number(event.currentTarget.value))}
+            value={draftStressExaggeration}
+            style={{ "--range-progress": `${rangeProgressPercent(draftStressExaggeration, 1, 4)}%` } as CSSProperties}
+            onChange={(event) => updateDraftStressExaggeration(Number(event.currentTarget.value))}
+            onPointerUp={() => commitStressExaggeration(draftStressExaggeration)}
+            onKeyUp={() => commitStressExaggeration(draftStressExaggeration)}
+            onBlur={() => commitStressExaggeration(draftStressExaggeration)}
           />
         </label>
       )}
