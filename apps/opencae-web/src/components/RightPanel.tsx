@@ -18,6 +18,7 @@ import { getViewportTooltipPosition } from "../tooltipPosition";
 import { forceForUnits, formatDensity, formatMass, formatMaterialStress, formatVolume, loadValueForUnits, type UnitSystem } from "../unitDisplay";
 import { canNavigateToStep } from "../appShellState";
 import { MaterialLibraryModal } from "./SimulationWorkflow";
+import { dynamicPlaybackFrames } from "../resultFields";
 
 const MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.005;
 const STRESS_EXAGGERATION_COMMIT_DELAY_MS = 120;
@@ -1081,7 +1082,7 @@ function ResultsPanel({
   const loadCapacity = estimateAllowableLoadForSafetyFactor(resultSummary, targetSafetyFactor);
   const canEstimateLoad = loadCapacity.status === "available";
   const AssessmentIcon = assessment.status === "pass" ? ShieldCheck : AlertTriangle;
-  const frames = resultFrames(resultFields);
+  const frames = dynamicPlaybackFrames(resultFields);
   const hasPlayback = frames.length > 1;
   const activeFrame = frames.find((frame) => frame.frameIndex === resultFrameIndex) ?? frames[0];
   const activeTimeSeconds = interpolatedFrameTimeSeconds(frames, resultPlaybackPlaying ? resultFramePosition : activeFrame?.frameIndex ?? resultFrameIndex);
@@ -1446,18 +1447,6 @@ function formatLoadCapacity(value: number) {
 function formatEquivalentForce(valueNewtons: number, unitSystem: UnitSystem) {
   const converted = forceForUnits(valueNewtons, "N", unitSystem);
   return `${formatNumber(converted.value)} ${converted.units}`;
-}
-
-function resultFrames(fields: ResultField[]): Array<{ frameIndex: number; timeSeconds: number }> {
-  const frames = new Map<number, number>();
-  for (const field of fields) {
-    const frameIndex = field.frameIndex ?? 0;
-    const timeSeconds = field.timeSeconds ?? 0;
-    frames.set(frameIndex, timeSeconds);
-  }
-  return [...frames.entries()]
-    .map(([frameIndex, timeSeconds]) => ({ frameIndex, timeSeconds }))
-    .sort((left, right) => left.frameIndex - right.frameIndex);
 }
 
 function interpolatedFrameTimeSeconds(frames: Array<{ frameIndex: number; timeSeconds: number }>, framePosition: number): number {

@@ -48,6 +48,8 @@ Container application rollouts require a token with Cloudflare Containers write 
 pnpm deploy:cloudflare:containers
 ```
 
+Real Cloud FEA transient animation requires that privileged container application deploy to have succeeded, because dynamic runs are rejected unless the container returns timed multi-frame result fields.
+
 For a local-first/static Worker deploy without Cloud FEA containers, use:
 
 ```bash

@@ -186,7 +186,7 @@ describe("Cloudflare FEA worker orchestration", () => {
 
     await worker.queue({ messages: [message] }, env);
     const resultsResponse = await worker.fetch(new Request("https://cae.example/api/cloud-fea/runs/run-cloud-1/results"), env);
-    const results = await resultsResponse.json() as { summary: { maxStress: number; transient?: { frameCount: number } }; fields: Array<{ frameIndex?: number; samples?: Array<{ source?: string; vonMisesStressPa?: number }> }> };
+    const results = await resultsResponse.json() as { summary: { maxStress: number; transient?: { frameCount: number } }; fields: Array<{ frameIndex?: number; timeSeconds?: number; samples?: Array<{ source?: string; vonMisesStressPa?: number }> }> };
 
     expect(message.ack).toHaveBeenCalled();
     expect(message.retry).not.toHaveBeenCalled();
@@ -199,6 +199,7 @@ describe("Cloudflare FEA worker orchestration", () => {
     expect(results.summary.maxStress).toBe(431400000);
     expect(results.summary.transient?.frameCount).toBe(2);
     expect(results.fields.some((field) => field.frameIndex === 1)).toBe(true);
+    expect(results.fields.some((field) => field.frameIndex === 1 && field.timeSeconds === 0.005)).toBe(true);
     expect(results.fields[0]?.samples?.[0]?.source).toBe("calculix");
     expect(results.fields[0]?.samples?.[0]?.vonMisesStressPa).toBeGreaterThan(0);
   });
@@ -308,6 +309,67 @@ describe("Cloudflare FEA worker orchestration", () => {
     expect(await bucket.get("runs/run-cloud-placeholder/results.json")).toBeNull();
   });
 
+  test("queue handler rejects dynamic cloud FEA results without transient summary", async () => {
+    const bucket = new MemoryR2Bucket();
+    await bucket.put("runs/run-cloud-dynamic-static/request.json", JSON.stringify({
+      runId: "run-cloud-dynamic-static",
+      studyId: "study-1",
+      analysisType: "dynamic_structural",
+      study: { id: "study-1", type: "dynamic_structural" },
+      dynamicSettings: { startTime: 0, endTime: 0.01, timeStep: 0.005, outputInterval: 0.005, dampingRatio: 0.02 },
+      geometry: { format: "stl", filename: "cantilever.stl", contentBase64: closedStlBase64() }
+    }));
+    const message = { body: { runId: "run-cloud-dynamic-static" }, ack: vi.fn(), retry: vi.fn() };
+    const env = {
+      ASSETS: { fetch: vi.fn(async () => new Response("asset")) },
+      FEA_ARTIFACTS: bucket,
+      FEA_CONTAINER: {
+        fetch: vi.fn(async () => Response.json(cloudContainerSolveResponse("run-cloud-dynamic-static", false)))
+      }
+    };
+
+    await worker.queue({ messages: [message] }, env);
+    const events = JSON.parse(await (await bucket.get("runs/run-cloud-dynamic-static/events.json"))!.text()) as Array<{ type: string; message: string }>;
+
+    expect(message.ack).toHaveBeenCalled();
+    expect(events.at(-1)).toMatchObject({ type: "error" });
+    expect(events.at(-1)?.message).toContain("animation frames");
+    expect(await bucket.get("runs/run-cloud-dynamic-static/results.json")).toBeNull();
+    expect(JSON.parse(await (await bucket.get("runs/run-cloud-dynamic-static/failed.json"))!.text()) as { error: string }).toMatchObject({
+      error: expect.stringContaining("animation frames")
+    });
+  });
+
+  test("queue handler rejects dynamic cloud FEA results without multiple timed frame fields", async () => {
+    const bucket = new MemoryR2Bucket();
+    await bucket.put("runs/run-cloud-dynamic-unframed/request.json", JSON.stringify({
+      runId: "run-cloud-dynamic-unframed",
+      studyId: "study-1",
+      analysisType: "dynamic_structural",
+      study: { id: "study-1", type: "dynamic_structural" },
+      dynamicSettings: { startTime: 0, endTime: 0.01, timeStep: 0.005, outputInterval: 0.005, dampingRatio: 0.02 },
+      geometry: { format: "stl", filename: "cantilever.stl", contentBase64: closedStlBase64() }
+    }));
+    const message = { body: { runId: "run-cloud-dynamic-unframed" }, ack: vi.fn(), retry: vi.fn() };
+    const badDynamicResult = cloudContainerSolveResponse("run-cloud-dynamic-unframed", true);
+    badDynamicResult.fields = badDynamicResult.fields.map(({ frameIndex, time, ...field }) => field);
+    const env = {
+      ASSETS: { fetch: vi.fn(async () => new Response("asset")) },
+      FEA_ARTIFACTS: bucket,
+      FEA_CONTAINER: {
+        fetch: vi.fn(async () => Response.json(badDynamicResult))
+      }
+    };
+
+    await worker.queue({ messages: [message] }, env);
+    const events = JSON.parse(await (await bucket.get("runs/run-cloud-dynamic-unframed/events.json"))!.text()) as Array<{ type: string; message: string }>;
+
+    expect(message.ack).toHaveBeenCalled();
+    expect(events.at(-1)).toMatchObject({ type: "error" });
+    expect(events.at(-1)?.message).toContain("animation frames");
+    expect(await bucket.get("runs/run-cloud-dynamic-unframed/results.json")).toBeNull();
+  });
+
   test("container runner emits non-placeholder static and dynamic CalculiX contract results", () => {
     const staticResult = runContainerSolve({ runId: "run-static", geometry: { format: "stl", filename: "beam.stl", contentBase64: closedStlBase64() } });
     const dynamicResult = runContainerSolve({
@@ -322,8 +384,11 @@ describe("Cloudflare FEA worker orchestration", () => {
     expect(staticResult.summary.safetyFactor).toBeLessThan(10);
     expect(staticResult.summary.reactionForce).toBe(500);
     expect(staticResult.artifacts.inputDeck).toContain("*STATIC");
+    expect(staticResult.fields.every((field: { frameIndex?: number; timeSeconds?: number }) => field.frameIndex === undefined && field.timeSeconds === undefined)).toBe(true);
     expect(dynamicResult.summary.transient.frameCount).toBeGreaterThan(1);
-    expect(dynamicResult.fields.some((field: { type: string; frameIndex?: number }) => field.type === "stress" && field.frameIndex === 1)).toBe(true);
+    expect(dynamicResult.fields.some((field: { type: string; frameIndex?: number; timeSeconds?: number }) => field.type === "stress" && field.frameIndex === 1 && field.timeSeconds === 0.005)).toBe(true);
+    expect(dynamicResult.fields.every((field: { frameIndex?: number; timeSeconds?: number }) => typeof field.frameIndex === "number" && typeof field.timeSeconds === "number")).toBe(true);
+    expect(["stress", "displacement", "velocity", "acceleration"].every((type) => dynamicResult.fields.some((field: { type: string; frameIndex?: number }) => field.type === type && field.frameIndex === 1))).toBe(true);
     expect(dynamicResult.artifacts.inputDeck).toContain("*DYNAMIC");
   });
 

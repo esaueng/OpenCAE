@@ -29,6 +29,12 @@ describe("App workflow layout", () => {
     expect(appSource).not.toContain("window.setInterval");
   });
 
+  test("rejects dynamic cloud results that do not contain animation frames before showing Results", () => {
+    expect(appSource).toContain("hasDynamicPlaybackFrames(results.summary, results.fields)");
+    expect(appSource).toContain("Cloud FEA dynamic results did not include animation frames.");
+    expect(appSource).toContain('if (study.type === "dynamic_structural" && !hasDynamicPlaybackFrames(results.summary, results.fields))');
+  });
+
   test("enables deformed result shape when dynamic playback starts", () => {
     expect(appSource).toContain("function handleResultPlaybackToggle()");
     expect(appSource).toContain("if (!playing) setShowDeformed(true);");

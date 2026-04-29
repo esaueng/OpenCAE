@@ -201,6 +201,9 @@ async function runCloudFeaSolve(runId: string, env: Env): Promise<void> {
     }
     const containerResult = await solveResponse.json() as Record<string, unknown>;
     const normalized = normalizeContainerResult(runId, containerResult);
+    if (requestRequiresDynamicFrames(requestArtifact)) {
+      assertDynamicPlaybackResult(normalized);
+    }
     const resultArtifacts = isRecord(containerResult.artifacts) ? containerResult.artifacts : {};
     await putOptionalArtifact(artifacts, `runs/${runId}/input.inp`, resultArtifacts.inputDeck);
     await putOptionalArtifact(artifacts, `runs/${runId}/solver.log`, resultArtifacts.solverLog);
@@ -270,6 +273,34 @@ function normalizeContainerResult(runId: string, result: Record<string, unknown>
     summary: normalizedSummary,
     fields: rawFields.map((field, index) => normalizeField(runId, field, index))
   };
+}
+
+function requestRequiresDynamicFrames(request: Record<string, unknown>): boolean {
+  if (request.analysisType === "dynamic_structural") return true;
+  if (isRecord(request.study) && request.study.type === "dynamic_structural") return true;
+  return isRecord(request.dynamicSettings);
+}
+
+function assertDynamicPlaybackResult(result: { summary: { transient?: unknown }; fields: Array<Record<string, unknown>> }): void {
+  const transient = result.summary.transient;
+  if (!isRecord(transient) || numberOr(transient.frameCount, 0) <= 1) {
+    throw new Error("Cloud FEA dynamic result did not include animation frames.");
+  }
+  const frameIndexes = new Set<number>();
+  for (const field of result.fields) {
+    const frameIndex = field.frameIndex;
+    if (typeof frameIndex !== "number") continue;
+    if (!Number.isFinite(frameIndex)) {
+      throw new Error("Cloud FEA dynamic result did not include animation frames.");
+    }
+    if (typeof field.timeSeconds !== "number" || !Number.isFinite(field.timeSeconds)) {
+      throw new Error("Cloud FEA dynamic result did not include animation frames.");
+    }
+    frameIndexes.add(frameIndex);
+  }
+  if (frameIndexes.size <= 1) {
+    throw new Error("Cloud FEA dynamic result did not include animation frames.");
+  }
 }
 
 function assertFiniteSummary(summary: Record<string, unknown>): void {

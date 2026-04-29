@@ -1,4 +1,4 @@
-import type { DisplayFace, ResultField } from "@opencae/schema";
+import type { DisplayFace, ResultField, ResultSummary } from "@opencae/schema";
 
 export type ResultFieldMode = "stress" | "displacement" | "safety_factor" | "velocity" | "acceleration";
 
@@ -27,6 +27,37 @@ export interface FaceResultProbeSample {
 
 export function resultFrameIndexes(fields: ResultField[]): number[] {
   return [...new Set(fields.map((field) => field.frameIndex ?? 0))].sort((left, right) => left - right);
+}
+
+export interface DynamicPlaybackFrame {
+  frameIndex: number;
+  timeSeconds: number;
+}
+
+export function dynamicPlaybackFrames(fields: ResultField[]): DynamicPlaybackFrame[] {
+  const frames = new Map<number, number>();
+  for (const field of fields) {
+    if (typeof field.frameIndex !== "number" || !Number.isFinite(field.frameIndex)) continue;
+    if (typeof field.timeSeconds !== "number" || !Number.isFinite(field.timeSeconds)) continue;
+    frames.set(field.frameIndex, field.timeSeconds);
+  }
+  return [...frames.entries()]
+    .map(([frameIndex, timeSeconds]) => ({ frameIndex, timeSeconds }))
+    .sort((left, right) => left.frameIndex - right.frameIndex);
+}
+
+export function hasDynamicPlaybackFrames(summary: Pick<ResultSummary, "transient">, fields: ResultField[]): boolean {
+  if (!summary.transient || !Number.isFinite(summary.transient.frameCount) || summary.transient.frameCount <= 1) return false;
+  const framedFields = fields.filter((field) => typeof field.frameIndex === "number");
+  if (!framedFields.length) return false;
+  const frameIndexes = new Set<number>();
+  for (const field of framedFields) {
+    const frameIndex = field.frameIndex;
+    if (typeof frameIndex !== "number" || !Number.isFinite(frameIndex)) return false;
+    if (typeof field.timeSeconds !== "number" || !Number.isFinite(field.timeSeconds)) return false;
+    frameIndexes.add(frameIndex);
+  }
+  return frameIndexes.size > 1 && dynamicPlaybackFrames(fields).length > 1;
 }
 
 export interface ResultFrameCache {
