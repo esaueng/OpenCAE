@@ -111,13 +111,13 @@ export function BottomPanel({ status, logs, projectName, studyName, meshStatus, 
         </div>
         <div className="status-groups" aria-label="Local status">
           <span className={`status-state ${healthy}`}><i />{statusForDisplay(status, solverStatus)}</span>
+          <span className="local-pill"><span aria-hidden="true" />local</span>
           <span><b>project</b>{projectName}</span>
           <span><b>study</b>{studyName}</span>
           <span><b>mesh</b>{meshStatus}</span>
           <span><b>solver</b>{solverStatus}</span>
         </div>
         <a className="status-github" href="https://github.com/esaueng/OpenCAE" target="_blank" rel="noreferrer">github</a>
-        <span className="local-pill"><span aria-hidden="true" />local</span>
       </div>
     </footer>
   );

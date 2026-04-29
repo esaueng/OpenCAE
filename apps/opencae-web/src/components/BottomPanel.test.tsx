@@ -18,5 +18,8 @@ describe("BottomPanel", () => {
     expect(html).toContain('class="status-github"');
     expect(html).toContain('href="https://github.com/esaueng/OpenCAE"');
     expect(html).toContain(">github</a>");
+    expect(html.indexOf("Results ready")).toBeLessThan(html.indexOf("local"));
+    expect(html.indexOf("local")).toBeLessThan(html.indexOf("<b>project</b>"));
+    expect(html.indexOf(">github</a>")).toBeGreaterThan(html.indexOf("<b>solver</b>"));
   });
 });
