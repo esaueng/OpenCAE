@@ -397,7 +397,7 @@ describe("LocalMockComputeBackend", () => {
       expect(accelerationFrames.length).toBe(displacementFrames.length);
       expect(displacementFrames.map((field) => field.frameIndex)).toEqual(displacementFrames.map((_, index) => index));
       expect(displacementFrames.map((field) => field.timeSeconds)).toEqual([...displacementFrames.map((field) => field.timeSeconds)].sort((a, b) => Number(a) - Number(b)));
-      expect(new Set(displacementFrames.map((field) => field.max)).size).toBeGreaterThan(1);
+      expect(new Set(displacementFrames.map((field) => field.values.join(","))).size).toBeGreaterThan(1);
       expect(second.fields.map(({ runId: _runId, id: _id, ...field }) => field)).toEqual(first.fields.map(({ runId: _runId, id: _id, ...field }) => field));
       expect(first.summary.transient).toMatchObject({
         integrationMethod: "newmark_average_acceleration",
@@ -434,6 +434,24 @@ describe("LocalMockComputeBackend", () => {
       ["acceleration", "displacement", "safety_factor", "stress", "velocity"],
       ["acceleration", "displacement", "safety_factor", "stress", "velocity"]
     ]);
+  });
+
+  test("dynamic solve keeps field ranges stable across animation frames", () => {
+    const solved = solveDynamicStudy(
+      dynamicCantileverStudy("mat-aluminum-6061", {
+        endTime: 0.02,
+        timeStep: 0.005
+      }),
+      "run-dynamic-stable-ranges",
+      rectangularBeamAnalysisMesh()
+    );
+
+    const stressFrames = solved.fields.filter((field) => field.type === "stress");
+    const firstStressFrame = stressFrames[0]!;
+    const globalMaxima = new Set(stressFrames.map((field) => field.max));
+
+    expect(globalMaxima.size).toBe(1);
+    expect(firstStressFrame.max).toBeGreaterThan(Math.max(...firstStressFrame.values));
   });
 
   test("dynamic response changes with density and damping", async () => {
