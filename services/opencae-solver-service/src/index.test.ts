@@ -1,7 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 import type { ObjectStorageProvider } from "@opencae/storage";
 import type { AnalysisMesh, Load, Study } from "@opencae/schema";
-import { LocalMockComputeBackend, solveStudy } from "./index";
+import { LocalMockComputeBackend, solveDynamicStudy, solveStudy } from "./index";
 
 class MemoryStorage implements ObjectStorageProvider {
   objects = new Map<string, Buffer>();
@@ -406,6 +406,34 @@ describe("LocalMockComputeBackend", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  test("dynamic solve writes one output frame per time step and includes the final end time", () => {
+    const solved = solveDynamicStudy(
+      dynamicCantileverStudy("mat-aluminum-6061", {
+        endTime: 0.012,
+        timeStep: 0.005,
+        outputInterval: 0.02
+      }),
+      "run-dynamic-time-step",
+      rectangularBeamAnalysisMesh()
+    );
+
+    const fieldsByFrame = new Map<number, Set<string>>();
+    for (const field of solved.fields) {
+      fieldsByFrame.set(field.frameIndex ?? 0, (fieldsByFrame.get(field.frameIndex ?? 0) ?? new Set()).add(field.type));
+    }
+    const displacementFrames = solved.fields.filter((field) => field.type === "displacement");
+
+    expect(displacementFrames.map((field) => field.timeSeconds)).toEqual([0, 0.005, 0.01, 0.012]);
+    expect(displacementFrames.map((field) => field.frameIndex)).toEqual([0, 1, 2, 3]);
+    expect(solved.summary.transient?.frameCount).toBe(4);
+    expect([...fieldsByFrame.values()].map((types) => [...types].sort())).toEqual([
+      ["acceleration", "displacement", "safety_factor", "stress", "velocity"],
+      ["acceleration", "displacement", "safety_factor", "stress", "velocity"],
+      ["acceleration", "displacement", "safety_factor", "stress", "velocity"],
+      ["acceleration", "displacement", "safety_factor", "stress", "velocity"]
+    ]);
   });
 
   test("dynamic response changes with density and damping", async () => {

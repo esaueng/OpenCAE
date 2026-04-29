@@ -332,10 +332,8 @@ function integrateDynamicFrames(settings: DynamicSolverSettings, force: number, 
   const beta = 0.25;
   const gamma = 0.5;
   const dt = Math.max(settings.timeStep, 1e-6);
-  const outputInterval = Math.max(settings.outputInterval, dt);
   const frames: DynamicFrame[] = [];
   let time = settings.startTime;
-  let nextOutput = settings.startTime;
   let u = 0;
   let v = 0;
   let a = (loadScaleAt(time, settings) * force - damping * v - stiffness * u) / mass;
@@ -365,10 +363,7 @@ function integrateDynamicFrames(settings: DynamicSolverSettings, force: number, 
     u = nextU;
     v = nextV;
     a = nextA;
-    if (time >= nextOutput + outputInterval - 1e-12 || time >= settings.endTime - 1e-12) {
-      nextOutput = time;
-      pushFrame();
-    }
+    pushFrame();
   }
   return frames;
 }

@@ -103,6 +103,10 @@ function renderPanel(activeStep: StepId, overrides: Partial<Parameters<typeof Ri
       onCancelSimulation={vi.fn()}
       canRunSimulation={false}
       missingRunItems={[]}
+      resultPlaybackPlaying={false}
+      resultPlaybackFps={12}
+      onResultPlaybackToggle={vi.fn()}
+      onResultPlaybackFpsChange={vi.fn()}
       onStepSelect={vi.fn()}
       {...overrides}
     />
@@ -183,8 +187,30 @@ describe("RightPanel payload mass controls", () => {
       }
     };
 
-    expect(renderPanel("run", { study: dynamicStudy })).toContain("End time");
-    expect(renderPanel("run")).not.toContain("End time");
+    const dynamicHtml = renderPanel("run", { study: dynamicStudy });
+    expect(dynamicHtml).toContain("Start time");
+    expect(dynamicHtml).toContain("End time");
+    expect(dynamicHtml).toContain("Estimated frames");
+    expect(dynamicHtml).not.toContain("Output interval");
+    expect(renderPanel("run")).not.toContain("Start time");
+  });
+
+  test("warns when dynamic settings generate a very large playback frame set", () => {
+    const dynamicStudy: Study = {
+      ...study,
+      name: "Dynamic",
+      type: "dynamic_structural",
+      solverSettings: {
+        startTime: 0,
+        endTime: 10,
+        timeStep: 0.001,
+        outputInterval: 0.001,
+        dampingRatio: 0.02,
+        integrationMethod: "newmark_average_acceleration"
+      }
+    };
+
+    expect(renderPanel("run", { study: dynamicStudy })).toContain("Large frame counts may slow result loading and playback.");
   });
 
   test("renders playback controls for dynamic result frames", () => {
@@ -212,7 +238,21 @@ describe("RightPanel payload mass controls", () => {
 
     expect(html).toContain("Frame");
     expect(html).toContain("Play");
+    expect(html).toContain("Animation speed");
+    expect(html).toContain("12 fps");
     expect(html).toContain("Peak displacement");
+  });
+
+  test("shows pause when dynamic result playback is active", () => {
+    const html = renderPanel("results", {
+      resultPlaybackPlaying: true,
+      resultFields: [
+        { id: "field-stress-0", runId: "run-1", type: "stress", location: "face", values: [1], min: 1, max: 1, units: "MPa", frameIndex: 0, timeSeconds: 0 },
+        { id: "field-stress-1", runId: "run-1", type: "stress", location: "face", values: [2], min: 2, max: 2, units: "MPa", frameIndex: 1, timeSeconds: 0.005 }
+      ]
+    });
+
+    expect(html).toContain("Pause");
   });
 
   test("shows contextual weak X build yield on cantilever material previews", () => {

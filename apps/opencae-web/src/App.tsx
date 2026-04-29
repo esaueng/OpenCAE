@@ -35,6 +35,7 @@ import { displayModelForUnits, loadValueForUnits, resultFieldForUnits, resultSum
 import { supportDisplayLabel } from "./supportLabels";
 import { nextSelectedPayloadObject, shouldClearPayloadSelectionOnViewerMiss } from "./payloadSelection";
 import { createLocalDynamicStructuralStudy, createLocalStaticStressStudy } from "./localProjectFactory";
+import { nextLoopedResultFrameIndex, resultFrameIndexes } from "./resultFields";
 
 interface SaveFilePickerHandle {
   createWritable: () => Promise<{ write: (content: Blob) => Promise<void>; close: () => Promise<void> }>;
@@ -89,6 +90,8 @@ export function App() {
   const [resultSummary, setResultSummary] = useState<ResultSummary>(restoredResults?.summary ?? seededSummary);
   const [resultFields, setResultFields] = useState<ResultField[]>(restoredResults?.fields ?? []);
   const [resultFrameIndex, setResultFrameIndex] = useState(0);
+  const [resultPlaybackPlaying, setResultPlaybackPlaying] = useState(false);
+  const [resultPlaybackFps, setResultPlaybackFps] = useState(12);
   const [draftLoadType, setDraftLoadType] = useState<LoadType>(restoredUi?.draftLoadType ?? "force");
   const [draftLoadValue, setDraftLoadValue] = useState(restoredUi?.draftLoadValue ?? 500);
   const [draftLoadDirection, setDraftLoadDirection] = useState<LoadDirectionLabel>(restoredUi?.draftLoadDirection ?? "-Z");
@@ -119,6 +122,7 @@ export function App() {
   const resultSummaryForUi = useMemo(() => resultSummaryForUnits(resultSummary, displayUnitSystem), [displayUnitSystem, resultSummary]);
   const resultFieldsForUi = useMemo(() => resultFields.map((field) => resultFieldForUnits(field, displayUnitSystem)), [displayUnitSystem, resultFields]);
   const visibleResultFieldsForUi = useMemo(() => fieldsForResultFrame(resultFieldsForUi, resultFrameIndex), [resultFieldsForUi, resultFrameIndex]);
+  const playbackFrameIndexes = useMemo(() => resultFrameIndexes(resultFields), [resultFields]);
   const solverRunning = Boolean(processingRunId) || (runProgress > 0 && runProgress < 100);
   const runReadiness = useMemo(() => readinessForStudy(study), [study]);
   const canRunSimulation = runReadiness.every((item) => item.done) && !solverRunning;
@@ -132,6 +136,26 @@ export function App() {
     didRequestRestoredHomeView.current = true;
     requestDefaultHomeView();
   }, [displayModel, homeRequested, project, restoredProjectFile]);
+
+  useEffect(() => {
+    if (!playbackFrameIndexes.length) return;
+    setResultFrameIndex((current) => playbackFrameIndexes.includes(current) ? current : playbackFrameIndexes[0] ?? 0);
+  }, [playbackFrameIndexes]);
+
+  useEffect(() => {
+    if (activeStep !== "results" || playbackFrameIndexes.length < 2) {
+      setResultPlaybackPlaying(false);
+    }
+  }, [activeStep, playbackFrameIndexes.length]);
+
+  useEffect(() => {
+    if (!resultPlaybackPlaying || activeStep !== "results" || playbackFrameIndexes.length < 2) return;
+    const intervalMs = 1000 / Math.max(1, Math.min(30, resultPlaybackFps));
+    const timer = window.setInterval(() => {
+      setResultFrameIndex((current) => nextLoopedResultFrameIndex(playbackFrameIndexes, current));
+    }, intervalMs);
+    return () => window.clearInterval(timer);
+  }, [activeStep, playbackFrameIndexes, resultPlaybackFps, resultPlaybackPlaying]);
 
   const handleMeasureDisplayModelDimensions = useCallback((dimensions: NonNullable<DisplayModel["dimensions"]>) => {
     setDisplayModel((current) => {
@@ -517,10 +541,15 @@ export function App() {
 
   function handleUpdateSolverSettings(settings: Partial<DynamicSolverSettings>) {
     if (!study || study.type !== "dynamic_structural") return;
+    const nextSettings = {
+      ...study.solverSettings,
+      ...settings,
+      outputInterval: settings.timeStep ?? settings.outputInterval ?? study.solverSettings.timeStep
+    };
     void updateStudy(
       saveStudyPatch(
         study.id,
-        { solverSettings: { ...study.solverSettings, ...settings } },
+        { solverSettings: nextSettings },
         "Dynamic settings updated.",
         study
       )
@@ -604,6 +633,7 @@ export function App() {
       pushMessage(missingRunItems.length ? `Complete before running: ${missingRunItems.join(", ")}.` : "Simulation is already running.");
       return;
     }
+    setResultPlaybackPlaying(false);
     const response = await runSimulation(study.id, study, displayModel ?? undefined);
     setActiveRunId(response.run.id);
     setCompletedRunId("");
@@ -622,6 +652,8 @@ export function App() {
         setResultSummary(results.summary);
         setResultFields(results.fields);
         setResultFrameIndex(0);
+        setResultPlaybackPlaying(false);
+        if (study.type === "dynamic_structural") setResultMode("stress");
         setCompletedRunId(response.run.id);
         setViewMode("results");
         setActiveStep("results");
@@ -630,6 +662,7 @@ export function App() {
         if (activeRunSourceRef.current === source) activeRunSourceRef.current = null;
         if (processingRunIdRef.current === response.run.id) processingRunIdRef.current = null;
         setProcessingRunId(null);
+        setResultPlaybackPlaying(false);
         setRunProgress(0);
       }
     });
@@ -643,6 +676,7 @@ export function App() {
     activeRunSourceRef.current = null;
     processingRunIdRef.current = null;
     setProcessingRunId(null);
+    setResultPlaybackPlaying(false);
     setRunProgress(0);
     if (!runId) {
       pushMessage("Simulation processing stopped.");
@@ -840,6 +874,10 @@ export function App() {
           missingRunItems={missingRunItems}
           resultFrameIndex={resultFrameIndex}
           onResultFrameChange={setResultFrameIndex}
+          resultPlaybackPlaying={resultPlaybackPlaying}
+          resultPlaybackFps={resultPlaybackFps}
+          onResultPlaybackToggle={() => setResultPlaybackPlaying((playing) => !playing)}
+          onResultPlaybackFpsChange={setResultPlaybackFps}
           onStepSelect={handleStepSelect}
         /> : null}
         {showBoundaryConditionMenu && study ? (

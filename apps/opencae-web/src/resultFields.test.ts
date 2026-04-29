@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import type { DisplayFace, ResultField } from "@opencae/schema";
-import { resultProbeSamplesForFaces, resultSamplesForFaces } from "./resultFields";
+import { nextLoopedResultFrameIndex, resultFrameIndexes, resultProbeSamplesForFaces, resultSamplesForFaces } from "./resultFields";
 
 const faces: DisplayFace[] = [
   { id: "face-a", label: "A", color: "#fff", center: [0, 0, 0], normal: [0, 1, 0], stressValue: 10 },
@@ -39,5 +39,22 @@ describe("resultSamplesForFaces", () => {
       ["mid", "face-web-front", "Disp: 4.384 mm"],
       ["min", "face-base-left", "Disp: 0.131 mm"]
     ]);
+  });
+});
+
+describe("dynamic result frames", () => {
+  test("sorts frame indexes and wraps playback to the first frame", () => {
+    const fields: ResultField[] = [
+      { id: "stress-2", runId: "run", type: "stress", location: "face", values: [3], min: 3, max: 3, units: "MPa", frameIndex: 2, timeSeconds: 0.01 },
+      { id: "stress-0", runId: "run", type: "stress", location: "face", values: [1], min: 1, max: 1, units: "MPa", frameIndex: 0, timeSeconds: 0 },
+      { id: "stress-1", runId: "run", type: "stress", location: "face", values: [2], min: 2, max: 2, units: "MPa", frameIndex: 1, timeSeconds: 0.005 }
+    ];
+
+    const indexes = resultFrameIndexes(fields);
+
+    expect(indexes).toEqual([0, 1, 2]);
+    expect(nextLoopedResultFrameIndex(indexes, 0)).toBe(1);
+    expect(nextLoopedResultFrameIndex(indexes, 2)).toBe(0);
+    expect(nextLoopedResultFrameIndex(indexes, 99)).toBe(0);
   });
 });
