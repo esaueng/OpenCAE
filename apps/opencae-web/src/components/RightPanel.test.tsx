@@ -135,6 +135,7 @@ describe("RightPanel payload mass controls", () => {
     expect(markup).toContain('role="progressbar"');
     expect(markup).toContain('aria-valuenow="88"');
     expect(markup).toContain('<strong class="progress-label">88%</strong>');
+    expect(markup).not.toContain('<div class="info-row"><span>Progress</span><strong>88%</strong></div>');
   });
 
   test("shows a stop processing action while a simulation is running", () => {

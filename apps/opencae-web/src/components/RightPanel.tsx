@@ -962,7 +962,6 @@ function RunPanel({ study, runProgress, onRunSimulation, onCancelSimulation, can
         <Info label="Backend" value={study.type === "dynamic_structural" ? "local-dynamic-newmark" : "local-static-superposition"} />
         <Info label="Version" value="0.1.0" />
         <Info label="Runner" value="local-in-memory" />
-        <Info label="Progress" value={`${runProgress}%`} />
       </div>
     </Panel>
   );
