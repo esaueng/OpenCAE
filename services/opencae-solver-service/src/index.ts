@@ -333,12 +333,14 @@ function integrateDynamicFrames(settings: DynamicSolverSettings, force: number, 
   const beta = 0.25;
   const gamma = 0.5;
   const dt = Math.max(settings.timeStep, 1e-6);
+  const outputInterval = Math.max(settings.outputInterval, dt);
   const frames: DynamicFrame[] = [];
   let time = settings.startTime;
   let u = 0;
   let v = 0;
   let a = (loadScaleAt(time, settings) * force - damping * v - stiffness * u) / mass;
   let frameIndex = 0;
+  let nextOutputTime = settings.startTime + outputInterval;
   const maxSteps = Math.ceil((settings.endTime - settings.startTime) / dt) + 2;
   const pushFrame = () => {
     frames.push({ index: frameIndex, time: round(time, 6), displacement: u, velocity: v, acceleration: a });
@@ -364,7 +366,10 @@ function integrateDynamicFrames(settings: DynamicSolverSettings, force: number, 
     u = nextU;
     v = nextV;
     a = nextA;
-    pushFrame();
+    if (time >= nextOutputTime - 1e-12 || time >= settings.endTime - 1e-12) {
+      pushFrame();
+      while (nextOutputTime <= time + 1e-12) nextOutputTime += outputInterval;
+    }
   }
   return frames;
 }

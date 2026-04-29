@@ -903,7 +903,7 @@ function RunPanel({ study, runProgress, onRunSimulation, onCancelSimulation, can
   const dynamic = study.type === "dynamic_structural" ? study.solverSettings : null;
   const updateDynamicNumber = (key: keyof Pick<DynamicSolverSettings, "startTime" | "endTime" | "timeStep" | "dampingRatio">, value: number) => {
     if (!Number.isFinite(value)) return;
-    onUpdateSolverSettings?.(key === "timeStep" ? { timeStep: value, outputInterval: value } : { [key]: value });
+    onUpdateSolverSettings?.({ [key]: value });
   };
   const frameEstimate = dynamic ? dynamicFrameEstimate(dynamic) : null;
   return (
@@ -933,7 +933,7 @@ function RunPanel({ study, runProgress, onRunSimulation, onCancelSimulation, can
           </label>
           <div className="summary-box">
             <Info label="Estimated frames" value={frameEstimate ? frameEstimate.count.toLocaleString() : "--"} />
-            <Info label="Output cadence" value="Every time step" />
+            <Info label="Output cadence" value={`Every ${formatSeconds(Math.max(dynamic.outputInterval, dynamic.timeStep))}`} />
           </div>
           {frameEstimate && frameEstimate.count > 1000 && <p className="panel-copy">Large frame counts may slow result loading and playback.</p>}
           {frameEstimate?.hasFinalPartialStep && <p className="panel-copy">Final frame is clamped to the selected end time.</p>}
@@ -1343,10 +1343,10 @@ function peakDisplacementFrame(fields: ResultField[]): { value: number; units: s
 
 function dynamicFrameEstimate(settings: DynamicSolverSettings): { count: number; hasFinalPartialStep: boolean } {
   const duration = Math.max(0, settings.endTime - settings.startTime);
-  const timeStep = Math.max(settings.timeStep, 1e-9);
-  const wholeSteps = Math.floor(duration / timeStep);
-  const remainder = duration - wholeSteps * timeStep;
-  const hasFinalPartialStep = remainder > timeStep * 1e-9;
+  const outputInterval = Math.max(settings.outputInterval, settings.timeStep, 1e-9);
+  const wholeSteps = Math.floor(duration / outputInterval);
+  const remainder = duration - wholeSteps * outputInterval;
+  const hasFinalPartialStep = remainder > outputInterval * 1e-9;
   return {
     count: Math.max(1, wholeSteps + 1 + (hasFinalPartialStep ? 1 : 0)),
     hasFinalPartialStep
@@ -1356,6 +1356,11 @@ function dynamicFrameEstimate(settings: DynamicSolverSettings): { count: number;
 function formatNumber(value: number) {
   if (!Number.isFinite(value)) return "--";
   return value.toLocaleString(undefined, { maximumFractionDigits: value >= 100 ? 0 : 1 });
+}
+
+function formatSeconds(value: number) {
+  if (!Number.isFinite(value)) return "--";
+  return `${value.toLocaleString(undefined, { maximumFractionDigits: 6 })} s`;
 }
 
 function formatInputValue(value: number) {
