@@ -1863,11 +1863,14 @@ function deformationScaleForSamples(resultMode: ResultMode, samples: FaceResultS
 }
 
 function resultFieldAbsMax(field: ResultField) {
-  return Math.max(
-    Math.abs(Number(field.min) || 0),
-    Math.abs(Number(field.max) || 0),
+  const activeValues = [
     ...field.values.map((value) => Math.abs(value)).filter(Number.isFinite),
     ...(field.samples?.map((sample) => Math.abs(sample.value)).filter(Number.isFinite) ?? [])
+  ];
+  if (activeValues.length) return Math.max(...activeValues);
+  return Math.max(
+    Math.abs(Number(field.min) || 0),
+    Math.abs(Number(field.max) || 0)
   );
 }
 
