@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { VIEWER_CREDIT_URL, VIEWER_GIZMO_ALIGNMENT, axisLabelToViewAxis, cameraDistanceForBounds, cameraViewForAxis, cloneResultPreviewObject, colorizeResultObject, colorizeSampleResultGeometry, createUndeformedResultOutlineObject, defaultHomeViewTarget, deformationScaleForResultFields, displayedLegendTickLabels, legendMeshStats, legendTickLabels, payloadHighlightObjectId, printLayerVisualizationForBounds, resultProbesForKind, resultValueForPoint, rotatedCameraOrbit, shouldShowDimensionOverlay, shouldShowModelHitLabel, shouldShowResultMarkers, shouldShowUndeformedResultOutline, viewerCameraResetPose } from "./CadViewer";
 import type { FaceResultSample } from "../resultFields";
 import type { DisplayFace, ResultField } from "@opencae/schema";
@@ -141,6 +141,27 @@ describe("CadViewer result coloring", () => {
     expect(shouldShowResultMarkers("results", "results", false)).toBe(true);
     expect(shouldShowResultMarkers("results", "results", true)).toBe(false);
     expect(shouldShowResultMarkers("model", "results", true)).toBe(false);
+  });
+
+  test("avoids square-root distance work while blending face samples", () => {
+    const manySamples = Array.from({ length: 24 }, (_, index): FaceResultSample => ({
+      face: {
+        id: `face-${index}`,
+        label: `Face ${index}`,
+        color: "#4da3ff",
+        center: [index % 6, Math.floor(index / 6), index % 3] as [number, number, number],
+        normal: [0, 0, 1],
+        stressValue: index
+      },
+      value: index,
+      normalized: index / 23
+    }));
+    const distanceSpy = vi.spyOn(THREE.Vector3.prototype, "distanceTo");
+
+    resultValueForPoint("bracket", "stress", 1.8, new THREE.Vector3(1, 1, 1), manySamples);
+
+    expect(distanceSpy).not.toHaveBeenCalled();
+    distanceSpy.mockRestore();
   });
 
   test("anchors beam result probes to solved faces instead of static fallback points", () => {

@@ -2029,9 +2029,9 @@ function deformedPointForResults(
   for (const marker of loadMarkers) {
     const sample = samples.find((item) => item.face.id === marker.faceId);
     if (!sample) continue;
-    const center = new THREE.Vector3(...sample.face.center);
     const direction = markerDirectionInModelSpace(marker);
-    const weight = Math.exp(-0.5 * (point.distanceTo(center) / Math.max(span * 0.48, 0.001)) ** 2);
+    const radius = Math.max(span * 0.48, 0.001);
+    const weight = Math.exp(-0.5 * squaredDistanceToPointArray(point, sample.face.center) / (radius * radius));
     const magnitude = usesResultDeformationScale ? 1 : Math.max(0.35, marker.value / 500);
     deformation.addScaledVector(direction, weight * scale * magnitude * deformationScale);
   }
@@ -2166,8 +2166,8 @@ function resultFractionFromSamples(point: THREE.Vector3, samples: FaceResultSamp
   let weighted = 0;
   let totalWeight = 0;
   for (const sample of samples) {
-    const center = new THREE.Vector3(...sample.face.center);
-    const weight = Math.exp(-0.5 * (point.distanceTo(center) / Math.max(span * 0.28, 0.001)) ** 2) + 0.015;
+    const radius = Math.max(span * 0.28, 0.001);
+    const weight = Math.exp(-0.5 * squaredDistanceToPointArray(point, sample.face.center) / (radius * radius)) + 0.015;
     weighted += sample.normalized * weight;
     totalWeight += weight;
   }
@@ -2181,17 +2181,15 @@ function resultFractionFromFieldSamples(point: THREE.Vector3, samples: FaceResul
   let weighted = 0;
   let totalWeight = 0;
   for (const sample of fieldSamples) {
-    const center = new THREE.Vector3(...sample.point);
-    const distance = point.distanceTo(center);
     const radius = Math.max(span * 0.055, 0.001);
-    const weight = Math.exp(-0.5 * (distance / radius) ** 2);
+    const weight = Math.exp(-0.5 * squaredDistanceToPointArray(point, sample.point) / (radius * radius));
     weighted += sample.normalized * weight;
     totalWeight += weight;
   }
   if (totalWeight <= 1e-9) {
     const nearest = fieldSamples.reduce<typeof fieldSamples[number] | undefined>((best, sample) => {
       if (!best) return sample;
-      return point.distanceTo(new THREE.Vector3(...sample.point)) < point.distanceTo(new THREE.Vector3(...best.point)) ? sample : best;
+      return squaredDistanceToPointArray(point, sample.point) < squaredDistanceToPointArray(point, best.point) ? sample : best;
     }, undefined);
     return nearest?.normalized ?? null;
   }
@@ -2206,13 +2204,17 @@ function resultFieldSampleSpan(samples: NonNullable<FaceResultSample["fieldSampl
 }
 
 function resultSampleSpan(samples: FaceResultSample[]): number {
-  let span = 1;
-  for (const left of samples) {
-    for (const right of samples) {
-      span = Math.max(span, new THREE.Vector3(...left.face.center).distanceTo(new THREE.Vector3(...right.face.center)));
-    }
-  }
-  return span;
+  const bounds = new THREE.Box3();
+  for (const sample of samples) bounds.expandByPoint(new THREE.Vector3(...sample.face.center));
+  const size = bounds.getSize(new THREE.Vector3());
+  return Math.max(size.length(), 1);
+}
+
+function squaredDistanceToPointArray(point: THREE.Vector3, target: [number, number, number]) {
+  const dx = point.x - target[0];
+  const dy = point.y - target[1];
+  const dz = point.z - target[2];
+  return dx * dx + dy * dy + dz * dz;
 }
 
 function stressFractionForPoint(kind: SampleModelKind, point: THREE.Vector3) {
