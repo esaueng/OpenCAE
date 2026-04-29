@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import type { DisplayFace, ResultField } from "@opencae/schema";
-import { fieldsForResultFrame, nextLoopedResultFrameIndex, resultFrameIndexes, resultProbeSamplesForFaces, resultSamplesForFaces } from "./resultFields";
+import { fieldsForResultFrame, interpolatedFieldsForFramePosition, nextLoopedResultFrameIndex, resultFrameIndexes, resultProbeSamplesForFaces, resultSamplesForFaces } from "./resultFields";
 
 const faces: DisplayFace[] = [
   { id: "face-a", label: "A", color: "#fff", center: [0, 0, 0], normal: [0, 1, 0], stressValue: 10 },
@@ -68,5 +68,46 @@ describe("dynamic result frames", () => {
 
     expect(visible[0]).toMatchObject({ min: 60.3, max: 327.5 });
     expect(resultSamplesForFaces(faces, visible, "stress").map((sample) => sample.normalized)).toEqual([0, 1]);
+  });
+
+  test("interpolates visual fields between adjacent dynamic frames with current full-range scaling", () => {
+    const fields: ResultField[] = [
+      {
+        id: "stress-0",
+        runId: "run",
+        type: "stress",
+        location: "face",
+        values: [10, 30],
+        min: 0,
+        max: 100,
+        units: "MPa",
+        samples: [{ point: [0, 0, 0], normal: [0, 1, 0], value: 20 }],
+        frameIndex: 0,
+        timeSeconds: 0
+      },
+      {
+        id: "stress-1",
+        runId: "run",
+        type: "stress",
+        location: "face",
+        values: [30, 70],
+        min: 0,
+        max: 100,
+        units: "MPa",
+        samples: [{ point: [0, 0, 0], normal: [0, 1, 0], value: 60 }],
+        frameIndex: 1,
+        timeSeconds: 0.005
+      }
+    ];
+
+    const visible = interpolatedFieldsForFramePosition(fields, 0.5);
+
+    expect(visible[0]).toMatchObject({
+      values: [20, 50],
+      min: 20,
+      max: 50,
+      timeSeconds: 0.0025
+    });
+    expect(visible[0]?.samples?.[0]?.value).toBe(40);
   });
 });

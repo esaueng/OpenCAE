@@ -44,6 +44,22 @@ export function fieldsForResultFrame(fields: ResultField[], frameIndex: number):
     .map((field) => fieldWithOwnValueRange(field));
 }
 
+export function interpolatedFieldsForFramePosition(fields: ResultField[], framePosition: number): ResultField[] {
+  const frameIndexes = resultFrameIndexes(fields);
+  if (frameIndexes.length < 2) return fieldsForResultFrame(fields, Math.round(framePosition));
+  const lowerFrame = [...frameIndexes].reverse().find((frameIndex) => frameIndex <= framePosition) ?? frameIndexes[0]!;
+  const upperFrame = frameIndexes.find((frameIndex) => frameIndex >= framePosition) ?? frameIndexes[frameIndexes.length - 1]!;
+  if (lowerFrame === upperFrame) return fieldsForResultFrame(fields, lowerFrame);
+  const lowerFields = fieldsForResultFrame(fields, lowerFrame);
+  const upperFields = fieldsForResultFrame(fields, upperFrame);
+  const blend = (framePosition - lowerFrame) / (upperFrame - lowerFrame);
+  return lowerFields.map((lowerField) => {
+    const upperField = upperFields.find((candidate) => sameFieldSeries(candidate, lowerField));
+    if (!upperField) return lowerField;
+    return fieldWithOwnValueRange(interpolateField(lowerField, upperField, blend, framePosition));
+  });
+}
+
 export function resultSamplesForFaces(faces: DisplayFace[], fields: ResultField[], mode: ResultFieldMode): FaceResultSample[] {
   const field = fields.find((candidate) => candidate.type === mode && candidate.location === "face");
   const values = faces.map((face, index) => {
@@ -115,6 +131,45 @@ function fieldWithOwnValueRange(field: ResultField): ResultField {
     min: Math.min(...values),
     max: Math.max(...values)
   };
+}
+
+function sameFieldSeries(left: ResultField, right: ResultField): boolean {
+  return left.type === right.type && left.location === right.location && left.runId === right.runId;
+}
+
+function interpolateField(lowerField: ResultField, upperField: ResultField, blend: number, framePosition: number): ResultField {
+  return {
+    ...lowerField,
+    id: `${lowerField.id}-visual-${framePosition.toFixed(3)}`,
+    values: interpolateNumbers(lowerField.values, upperField.values, blend),
+    min: lerp(lowerField.min, upperField.min, blend),
+    max: lerp(lowerField.max, upperField.max, blend),
+    frameIndex: framePosition,
+    timeSeconds: lerp(lowerField.timeSeconds ?? 0, upperField.timeSeconds ?? lowerField.timeSeconds ?? 0, blend),
+    ...(lowerField.samples?.length && upperField.samples?.length
+      ? { samples: interpolateSamples(lowerField.samples, upperField.samples, blend) }
+      : {})
+  };
+}
+
+function interpolateNumbers(lowerValues: number[], upperValues: number[], blend: number): number[] {
+  const count = Math.max(lowerValues.length, upperValues.length);
+  return Array.from({ length: count }, (_, index) => lerp(lowerValues[index] ?? upperValues[index] ?? 0, upperValues[index] ?? lowerValues[index] ?? 0, blend));
+}
+
+function interpolateSamples(lowerSamples: NonNullable<ResultField["samples"]>, upperSamples: NonNullable<ResultField["samples"]>, blend: number): NonNullable<ResultField["samples"]> {
+  return lowerSamples.map((lowerSample, index) => {
+    const upperSample = upperSamples[index];
+    if (!upperSample) return lowerSample;
+    return {
+      ...lowerSample,
+      value: lerp(lowerSample.value, upperSample.value, blend)
+    };
+  });
+}
+
+function lerp(left: number, right: number, blend: number): number {
+  return left + (right - left) * Math.max(0, Math.min(1, blend));
 }
 
 function resultProbeLabel(mode: ResultFieldMode, value: number, units = "") {
