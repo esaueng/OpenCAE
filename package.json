@@ -10,6 +10,8 @@
     "build:cloudflare": "pnpm --filter @opencae/web build",
     "deploy:cloudflare": "pnpm build:cloudflare && wrangler deploy --config wrangler.jsonc",
     "deploy:cloudflare:dry-run": "pnpm build:cloudflare && wrangler deploy --config wrangler.jsonc --dry-run",
+    "deploy:cloudflare:containers": "pnpm build:cloudflare && wrangler deploy --config wrangler.containers.jsonc",
+    "deploy:cloudflare:containers:dry-run": "pnpm build:cloudflare && wrangler deploy --config wrangler.containers.jsonc --dry-run",
     "containers:build": "wrangler containers build services/opencae-fea-container -t opencae/opencae-fea:latest",
     "containers:push": "wrangler containers push opencae/opencae-fea:latest",
     "test": "vitest run",
