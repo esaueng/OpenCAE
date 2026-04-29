@@ -66,6 +66,8 @@ interface RightPanelProps {
   onGenerateMesh: (preset: "coarse" | "medium" | "fine") => void;
   onUpdateSolverSettings?: (settings: Partial<DynamicSolverSettings>) => void;
   onRunSimulation: () => void;
+  onCancelSimulation?: () => void;
+  canCancelSimulation?: boolean;
   canRunSimulation: boolean;
   missingRunItems: string[];
   resultFrameIndex?: number;
@@ -876,8 +878,9 @@ function MeshPanel({ study, onGenerateMesh }: RightPanelProps) {
   );
 }
 
-function RunPanel({ study, runProgress, onRunSimulation, onUpdateSolverSettings, canRunSimulation, missingRunItems }: RightPanelProps) {
+function RunPanel({ study, runProgress, onRunSimulation, onCancelSimulation, canCancelSimulation, onUpdateSolverSettings, canRunSimulation, missingRunItems }: RightPanelProps) {
   const progressPercent = Math.max(0, Math.min(100, Math.round(runProgress)));
+  const isRunning = canCancelSimulation ?? (progressPercent > 0 && progressPercent < 100);
   const checks = [
     ["Material assigned", study.materialAssignments.length > 0],
     ["Support added", study.constraints.length > 0],
@@ -923,6 +926,11 @@ function RunPanel({ study, runProgress, onRunSimulation, onUpdateSolverSettings,
       >
         <Play size={16} />Run simulation
       </button>
+      {isRunning && (
+        <button className="secondary wide" type="button" onClick={onCancelSimulation}>
+          <X size={16} />Stop processing
+        </button>
+      )}
       {missingRunItems.length > 0 && <p className="panel-copy">Complete {missingRunItems.join(", ").toLowerCase()} before running.</p>}
       <div className="progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progressPercent} aria-label="Simulation progress">
         <span style={{ width: `${progressPercent}%` }} />

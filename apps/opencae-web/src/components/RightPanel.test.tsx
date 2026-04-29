@@ -100,6 +100,7 @@ function renderPanel(activeStep: StepId, overrides: Partial<Parameters<typeof Ri
       onRemoveLoad={vi.fn()}
       onGenerateMesh={vi.fn()}
       onRunSimulation={vi.fn()}
+      onCancelSimulation={vi.fn()}
       canRunSimulation={false}
       missingRunItems={[]}
       onStepSelect={vi.fn()}
@@ -128,6 +129,12 @@ describe("RightPanel payload mass controls", () => {
     expect(markup).toContain('role="progressbar"');
     expect(markup).toContain('aria-valuenow="88"');
     expect(markup).toContain('<strong class="progress-label">88%</strong>');
+  });
+
+  test("shows a stop processing action while a simulation is running", () => {
+    const markup = renderPanel("run", { runProgress: 42 });
+
+    expect(markup).toContain("Stop processing");
   });
 
   test("does not show the selected face as a persistent right-panel banner", () => {

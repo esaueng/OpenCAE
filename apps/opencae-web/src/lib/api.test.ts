@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { DisplayModel, Project, RunEvent, Study } from "@opencae/schema";
-import { addLoad, addSupport, assignMaterial, createProject, generateMesh, getResults, importLocalProject, loadSampleProject, renameProject, runSimulation, subscribeToRun, updateStudy, uploadModel } from "./api";
+import { addLoad, addSupport, assignMaterial, cancelRun, createProject, generateMesh, getResults, importLocalProject, loadSampleProject, renameProject, runSimulation, subscribeToRun, updateStudy, uploadModel } from "./api";
 
 const TestFile = globalThis.File ?? class extends Blob {
   name: string;
@@ -343,6 +343,29 @@ describe("api", () => {
     expect(completed.progress).toBe(100);
     expect(results.fields.map((field) => field.runId)).toEqual([response.run.id, response.run.id, response.run.id]);
     expect(results.summary.maxStress).toBeGreaterThan(0);
+  });
+
+  test("cancels a local run so pending local run events stop", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: "Study not found" }), {
+      status: 404,
+      headers: { "content-type": "application/json" }
+    })));
+    const readyStudy = {
+      ...study,
+      materialAssignments: [{ id: "assign-1", materialId: "mat-aluminum-6061", selectionRef: "selection-body-1", status: "complete" }],
+      constraints: [{ id: "constraint-1", type: "fixed", selectionRef: "selection-face-1", parameters: {}, status: "complete" }],
+      loads: [{ id: "load-1", type: "force", selectionRef: "selection-face-1", parameters: { value: 500, units: "N", direction: [0, -1, 0] }, status: "complete" }],
+      meshSettings: { preset: "fine", status: "complete", meshRef: "project-1/mesh/mesh-summary.json" }
+    } as Study;
+
+    const response = await runSimulation("study-1", readyStudy);
+    const seen: RunEvent[] = [];
+    const source = subscribeToRun(response.run.id, (event) => seen.push(event));
+    const cancelled = await cancelRun(response.run.id);
+    source.close();
+
+    expect(cancelled.run.status).toBe("cancelled");
+    expect(cancelled.message).toBe("Simulation cancelled.");
   });
 
   test("updates studies locally when the API is unavailable", async () => {
