@@ -240,7 +240,12 @@ describe("RightPanel payload mass controls", () => {
     expect(html).toContain("Play");
     expect(html).toContain("Animation speed");
     expect(html).toContain("12 fps");
+    expect(html.indexOf("Animation speed")).toBeLessThan(html.indexOf("Play"));
+    expect(html).not.toContain("Loop");
     expect(html).toContain("Peak displacement");
+    expect(html).toContain("Result mode");
+    expect(html).not.toContain("Switches the color plot");
+    expect(html).not.toContain("Von Mises Stress");
   });
 
   test("shows pause when dynamic result playback is active", () => {
