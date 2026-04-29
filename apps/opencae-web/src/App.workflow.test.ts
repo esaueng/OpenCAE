@@ -26,4 +26,10 @@ describe("App workflow layout", () => {
     expect(appSource).toContain("window.requestAnimationFrame(advancePlaybackFrame)");
     expect(appSource).not.toContain("window.setInterval");
   });
+
+  test("invalidates completed results after dynamic solver settings change", () => {
+    expect(appSource).toContain("invalidateCompletedRunState();");
+    expect(appSource).toContain("setRunProgress(0);");
+    expect(appSource).toContain("setResultFields([]);");
+  });
 });
