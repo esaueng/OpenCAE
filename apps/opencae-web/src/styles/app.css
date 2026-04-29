@@ -1019,6 +1019,7 @@ img {
   font-size: var(--fs-xs);
   letter-spacing: 0;
   text-transform: none;
+  text-decoration: none;
   cursor: pointer;
 }
 
@@ -1026,10 +1027,12 @@ img {
   flex: 0 0 auto;
 }
 
-.stepbar-link:hover {
+.stepbar-link:hover,
+.stepbar-link:focus-visible {
   color: var(--color-accent);
   border-color: var(--color-accent-border);
   background: var(--color-accent-dim);
+  text-decoration: none;
 }
 
 .stepbar.collapsed {
