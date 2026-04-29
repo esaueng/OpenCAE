@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from "react";
-import { Activity, Atom, Box, Check, ChevronDown, Circle, Grid3X3, Plus, Search, X } from "lucide-react";
+import { ChevronDown, Grid3X3, Plus, Search, X } from "lucide-react";
 import { starterMaterials } from "@opencae/materials";
 import type { Material, ResultField, Study } from "@opencae/schema";
 import { formatDensity, formatMaterialStress, type UnitSystem } from "../unitDisplay";
@@ -16,7 +16,10 @@ interface CreateSimulationModalProps {
 }
 
 export function CreateSimulationModal({ open, onCreateStatic, onCreateDynamic, onClose }: CreateSimulationModalProps) {
+  const [selectedType, setSelectedType] = useState<"static" | "dynamic">("static");
   if (!open) return null;
+  const selectedAnalysis = selectedType === "static" ? staticAnalysisOption : dynamicAnalysisOption;
+  const handleCreate = selectedType === "static" ? onCreateStatic : onCreateDynamic;
   return (
     <div className="workflow-modal-backdrop" role="presentation">
       <section className="workflow-modal create-simulation-dialog" role="dialog" aria-modal="true" aria-labelledby="create-simulation-title">
@@ -26,75 +29,125 @@ export function CreateSimulationModal({ open, onCreateStatic, onCreateDynamic, o
             <X size={18} />
           </button>
         </header>
-        <div className="simulation-options-layout">
-          <nav className="simulation-option-list" aria-label="Analysis families">
-            <SimulationGroup title="Flow">
-              <DisabledAnalysis label="Incompressible" />
-              <DisabledAnalysis label="Compressible" />
-              <DisabledAnalysis label="Convective Heat Transfer" />
-            </SimulationGroup>
-            <SimulationGroup title="Structural">
-              <button className="analysis-option active" type="button" onClick={onCreateStatic}>
-                <span className="analysis-option-icon"><Activity size={16} /></span>
-                <span>Static</span>
+        <div className="simulation-picker-layout">
+          <section className="simulation-choice-list" aria-label="Choose simulation type">
+            <h3>Choose simulation type</h3>
+            {[staticAnalysisOption, dynamicAnalysisOption].map((option) => (
+              <button
+                key={option.type}
+                className={`simulation-choice-card ${selectedType === option.type ? "active" : ""}`}
+                type="button"
+                aria-pressed={selectedType === option.type}
+                onClick={() => setSelectedType(option.type)}
+              >
+                <img src={option.image} alt={option.imageAlt} />
+                <span>
+                  <strong>{option.title}</strong>
+                  <small>{option.summary}</small>
+                </span>
               </button>
-              <button className="analysis-option" type="button" onClick={onCreateDynamic}>
-                <span className="analysis-option-icon"><Activity size={16} /></span>
-                <span>Dynamic</span>
-              </button>
-              <DisabledAnalysis label="Heat Transfer" />
-              <DisabledAnalysis label="Frequency Analysis" />
-            </SimulationGroup>
-            <SimulationGroup title="Electromagnetic">
-              <DisabledAnalysis label="Electromagnetics" />
-            </SimulationGroup>
-          </nav>
-          <article className="analysis-description">
-            <div className="analysis-preview" aria-hidden="true">
-              <span />
-              <span />
-              <span />
-            </div>
-            <h3>Static Analysis</h3>
-            <p>Determine displacements, stresses, and strains caused by constraints and loads. This local workflow supports linear elastic static stress simulation.</p>
-            <h3>Dynamic Analysis</h3>
-            <p>Time-dependent structural response with inertia, damping, velocity, and acceleration using local Newmark integration.</p>
-            <div className="analysis-tags" aria-label="Static analysis capabilities">
-              <span>Solid</span>
-              <span>Steady loads</span>
-              <span>Linear</span>
-              <span>Local solver</span>
-              <span>Time-dependent</span>
+            ))}
+          </section>
+          <article className="analysis-description selected-analysis-summary">
+            <img className="analysis-example-image" src={selectedAnalysis.image} alt={`${selectedAnalysis.imageAlt} large preview`} />
+            <h3>{selectedAnalysis.title}</h3>
+            <p>{selectedAnalysis.description}</p>
+            <div className="analysis-tags" aria-label={`${selectedAnalysis.title} capabilities`}>
+              {selectedAnalysis.tags.map((tag) => <span key={tag}>{tag}</span>)}
             </div>
           </article>
         </div>
         <footer className="workflow-modal-footer">
           <span><strong>Need Help?</strong> Static handles steady loads; Dynamic handles transient loads with inertia.</span>
-          <button className="primary" type="button" onClick={onCreateStatic}>Create Simulation</button>
-          <button className="secondary" type="button" onClick={onCreateDynamic}>Create Dynamic</button>
+          <button className="primary" type="button" onClick={handleCreate}>Create Simulation</button>
         </footer>
       </section>
     </div>
   );
 }
 
-function SimulationGroup({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <div className="simulation-group">
-      <h3>{title}</h3>
-      {children}
-    </div>
-  );
-}
+type AnalysisChoice = "static" | "dynamic";
 
-function DisabledAnalysis({ label }: { label: string }) {
-  return (
-    <button className="analysis-option disabled" type="button" disabled>
-      <span className="analysis-option-icon"><Circle size={14} /></span>
-      <span>{label}</span>
-      <small>Coming soon</small>
-    </button>
-  );
+const staticAnalysisOption = {
+  type: "static" as AnalysisChoice,
+  title: "Static Analysis",
+  summary: "Steady load stress and deflection",
+  description: "Determine displacements, stresses, and strains caused by constraints and loads. This local workflow supports linear elastic static stress simulation.",
+  imageAlt: "Static stress example",
+  image: svgDataUri(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 360">
+    <rect width="720" height="360" fill="#0b131d"/>
+    <rect x="70" y="106" width="56" height="150" rx="4" fill="#2f4053"/>
+    <path d="M126 132 L592 82 L612 150 L146 212 Z" fill="#8b98a5"/>
+    <path d="M146 212 L612 150 L612 188 L146 250 Z" fill="#66727f"/>
+    <path d="M126 132 L146 212 L146 250 L126 172 Z" fill="#a5b0bb"/>
+    <path d="M128 137 L250 124 L356 112 L470 99 L606 84 L611 145 L470 165 L356 181 L250 197 L142 211 Z" fill="url(#stress)"/>
+    <path d="M120 96 L120 270" stroke="#48a4ff" stroke-width="6"/>
+    <path d="M96 108 L120 84 L144 108" fill="none" stroke="#48a4ff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M96 258 L120 282 L144 258" fill="none" stroke="#48a4ff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M544 42 L544 88" stroke="#ffc233" stroke-width="8" stroke-linecap="round"/>
+    <path d="M518 78 L544 122 L570 78 Z" fill="#ffc233"/>
+    <text x="474" y="42" fill="#ffd36a" font-family="Arial, sans-serif" font-size="26" font-weight="700">500 N</text>
+    <text x="72" y="308" fill="#9fb7d2" font-family="Arial, sans-serif" font-size="22" font-weight="700">Fixed support</text>
+    <text x="392" y="315" fill="#d7e0ea" font-family="Arial, sans-serif" font-size="22" font-weight="700">Static peak stress</text>
+    <defs>
+      <linearGradient id="stress" x1="0" x2="1">
+        <stop offset="0" stop-color="#1a78ff"/>
+        <stop offset="0.28" stop-color="#28d4ff"/>
+        <stop offset="0.5" stop-color="#27d65f"/>
+        <stop offset="0.7" stop-color="#f4df23"/>
+        <stop offset="1" stop-color="#f0472e"/>
+      </linearGradient>
+    </defs>
+  </svg>`),
+  tags: ["Solid", "Steady loads", "Linear", "Local solver"]
+};
+
+const dynamicAnalysisOption = {
+  type: "dynamic" as AnalysisChoice,
+  title: "Dynamic Analysis",
+  summary: "Time-dependent stress response",
+  description: "Time-dependent structural response with inertia, damping, velocity, and acceleration using local Newmark integration.",
+  imageAlt: "Dynamic stress frame sequence example",
+  image: svgDataUri(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 360">
+    <rect width="720" height="360" fill="#0b131d"/>
+    <g opacity="0.28">
+      <path d="M112 104 L574 74 L604 132 L142 184 Z" fill="#6d7783"/>
+      <path d="M142 184 L604 132 L604 165 L142 222 Z" fill="#53606b"/>
+    </g>
+    <path d="M112 112 C252 95 356 88 574 80 L606 144 C384 158 252 180 144 210 Z" fill="url(#frameA)" opacity="0.65"/>
+    <path d="M112 138 C260 132 382 136 582 128 L612 194 C392 178 260 174 144 236 Z" fill="url(#frameB)" opacity="0.8"/>
+    <path d="M80 88 L80 270" stroke="#48a4ff" stroke-width="6"/>
+    <path d="M56 100 L80 76 L104 100" fill="none" stroke="#48a4ff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M56 258 L80 282 L104 258" fill="none" stroke="#48a4ff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M548 42 L548 88" stroke="#ffc233" stroke-width="8" stroke-linecap="round"/>
+    <path d="M522 78 L548 122 L574 78 Z" fill="#ffc233"/>
+    <path d="M256 286 C320 246 402 246 466 286" fill="none" stroke="#4da3ff" stroke-width="6" stroke-linecap="round"/>
+    <circle cx="256" cy="286" r="10" fill="#4da3ff"/>
+    <circle cx="360" cy="254" r="10" fill="#ffce42"/>
+    <circle cx="466" cy="286" r="10" fill="#f15b45"/>
+    <text x="224" y="326" fill="#d7e0ea" font-family="Arial, sans-serif" font-size="22" font-weight="700">Frame 1</text>
+    <text x="330" y="326" fill="#d7e0ea" font-family="Arial, sans-serif" font-size="22" font-weight="700">Frame 2</text>
+    <text x="436" y="326" fill="#d7e0ea" font-family="Arial, sans-serif" font-size="22" font-weight="700">Frame 3</text>
+    <text x="452" y="42" fill="#ffd36a" font-family="Arial, sans-serif" font-size="26" font-weight="700">Impulse load</text>
+    <defs>
+      <linearGradient id="frameA" x1="0" x2="1">
+        <stop offset="0" stop-color="#1a78ff"/>
+        <stop offset="0.46" stop-color="#27d65f"/>
+        <stop offset="1" stop-color="#f0472e"/>
+      </linearGradient>
+      <linearGradient id="frameB" x1="0" x2="1">
+        <stop offset="0" stop-color="#174bdb"/>
+        <stop offset="0.28" stop-color="#25c8ff"/>
+        <stop offset="0.62" stop-color="#f4df23"/>
+        <stop offset="1" stop-color="#ff5d2d"/>
+      </linearGradient>
+    </defs>
+  </svg>`),
+  tags: ["Solid", "Transient loads", "Newmark", "Playback frames"]
+};
+
+function svgDataUri(svg: string) {
+  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
 }
 
 interface StudyTreeProps {
