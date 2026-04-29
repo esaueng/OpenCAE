@@ -2,8 +2,9 @@ import type { DisplayModel, Load, Project } from "@opencae/schema";
 import { ProjectSchema } from "@opencae/schema";
 import { bracketDemoProject, bracketDisplayModel } from "@opencae/db/sample-data";
 import { stlDimensionsFromBase64 } from "@opencae/units";
+import { solveDynamicStudy } from "@opencae/solver-service";
 import type { EmbeddedModelFile, LocalResultBundle } from "./projectFile";
-import type { SampleModelId, SampleProjectResponse } from "./lib/api";
+import type { SampleAnalysisType, SampleModelId, SampleProjectResponse } from "./lib/api";
 
 const SAMPLE_META: Record<SampleModelId, { projectName: string; modelName: string; filename: string; displayName: string; dimensions: DisplayModel["dimensions"] }> = {
   bracket: {
@@ -29,7 +30,9 @@ const SAMPLE_META: Record<SampleModelId, { projectName: string; modelName: strin
   }
 };
 
-export function createLocalSampleProject(sample: SampleModelId = "bracket", now = new Date().toISOString()): SampleProjectResponse {
+export function createLocalSampleProject(sample: SampleModelId = "bracket", analysisTypeOrNow: SampleAnalysisType | string = "static_stress", maybeNow?: string): SampleProjectResponse {
+  const analysisType: SampleAnalysisType = analysisTypeOrNow === "dynamic_structural" ? "dynamic_structural" : "static_stress";
+  const now = analysisTypeOrNow === "dynamic_structural" || analysisTypeOrNow === "static_stress" ? maybeNow ?? new Date().toISOString() : analysisTypeOrNow;
   const meta = SAMPLE_META[sample];
   const templateStudy = bracketDemoProject.studies[0];
   const geometry = bracketDemoProject.geometryFiles[0];
@@ -59,6 +62,49 @@ export function createLocalSampleProject(sample: SampleModelId = "bracket", now 
       fingerprint: `${face.id}-${sample}-v1`
     };
   });
+  const sampleStudyBase = templateStudy
+    ? {
+        ...templateStudy,
+        id: templateStudy.id,
+        projectId: bracketDemoProject.id,
+        geometryScope: templateStudy.geometryScope.map((scope) => ({ ...scope, label: meta.modelName })),
+        namedSelections: [
+          ...(bodySelection
+            ? [{
+                ...bodySelection,
+                name: `${meta.modelName} body`,
+                geometryRefs: bodySelection.geometryRefs.map((ref) => ({ ...ref, label: meta.modelName }))
+              }]
+            : []),
+          ...faceSelections
+        ],
+        loads: sampleLoadsFor(sample, templateStudy.loads, displayModel, meta.displayName)
+      }
+    : undefined;
+  const sampleStudy: Project["studies"][number] | undefined = sampleStudyBase
+    ? analysisType === "dynamic_structural"
+      ? {
+          ...sampleStudyBase,
+          name: "Dynamic Structural",
+          type: "dynamic_structural",
+          solverSettings: {
+            startTime: 0,
+            endTime: 0.1,
+            timeStep: 0.005,
+            outputInterval: 0.005,
+            dampingRatio: 0.02,
+            integrationMethod: "newmark_average_acceleration"
+          },
+          runs: [dynamicSampleRun(sample, bracketDemoProject.id, templateStudy!.id, now)]
+        }
+      : {
+          ...sampleStudyBase,
+          name: "Static Stress",
+          type: "static_stress",
+          solverSettings: sampleStudyBase.solverSettings,
+          runs: sample === "bracket" ? sampleStudyBase.runs : []
+        }
+    : undefined;
 
   const project: Project = {
     ...bracketDemoProject,
@@ -76,37 +122,55 @@ export function createLocalSampleProject(sample: SampleModelId = "bracket", now 
             ...geometry.metadata,
             source: "sample",
             sampleModel: sample,
+            sampleAnalysisType: analysisType,
             displayModelRef: `${bracketDemoProject.id}/geometry/${sample}-display.json`,
             faceCount: displayModel.faces.length
           }
         }]
       : [],
-    studies: templateStudy
-      ? [{
-          ...templateStudy,
-          id: templateStudy.id,
-          projectId: bracketDemoProject.id,
-          name: "Static Stress",
-          geometryScope: templateStudy.geometryScope.map((scope) => ({ ...scope, label: meta.modelName })),
-          namedSelections: [
-            ...(bodySelection
-              ? [{
-                  ...bodySelection,
-                  name: `${meta.modelName} body`,
-                  geometryRefs: bodySelection.geometryRefs.map((ref) => ({ ...ref, label: meta.modelName }))
-                }]
-              : []),
-            ...faceSelections
-          ],
-          loads: sampleLoadsFor(sample, templateStudy.loads, displayModel, meta.displayName),
-          runs: sample === "bracket" ? templateStudy.runs : []
-        }]
-      : [],
+    studies: sampleStudy ? [sampleStudy] : [],
     createdAt: now,
     updatedAt: now
   };
 
-  return { project, displayModel, message: `${meta.projectName} loaded.` };
+  const results = analysisType === "dynamic_structural" ? dynamicSampleResults(project) : undefined;
+  return {
+    project,
+    displayModel,
+    ...(results ? { results } : {}),
+    message: analysisType === "dynamic_structural" ? `${meta.projectName} dynamic sample loaded.` : `${meta.projectName} loaded.`
+  };
+}
+
+function dynamicSampleRun(sample: SampleModelId, projectId: string, studyId: string, now: string) {
+  const runId = `run-${sample}-dynamic-seeded`;
+  return {
+    id: runId,
+    studyId,
+    status: "complete" as const,
+    jobId: `job-${sample}-dynamic-seeded`,
+    meshRef: `${projectId}/mesh/mesh-summary.json`,
+    resultRef: `${projectId}/results/${runId}/results.json`,
+    reportRef: `${projectId}/reports/${runId}/report.html`,
+    solverBackend: "local-dynamic-newmark",
+    solverVersion: "0.1.0",
+    startedAt: now,
+    finishedAt: now,
+    diagnostics: []
+  };
+}
+
+function dynamicSampleResults(project: Project): LocalResultBundle | undefined {
+  const study = project.studies[0];
+  const run = study?.runs[0];
+  if (!study || !run) return undefined;
+  const solved = solveDynamicStudy(study, run.id);
+  return {
+    activeRunId: run.id,
+    completedRunId: run.id,
+    summary: solved.summary,
+    fields: solved.fields
+  };
 }
 
 function sampleLoadsFor(sample: SampleModelId, templateLoads: Load[], displayModel: DisplayModel, payloadLabel: string): Load[] {

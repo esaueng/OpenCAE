@@ -103,6 +103,22 @@ img {
   gap: 10px;
 }
 
+.start-sample-options {
+  display: grid;
+  gap: 7px;
+  padding: 10px;
+  border: var(--border-thin);
+  border-radius: var(--radius-md);
+  background: rgba(17, 24, 33, 0.58);
+}
+
+.start-sample-options > span {
+  color: var(--color-text-subtle);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  text-transform: uppercase;
+}
+
 .start-action {
   width: 100%;
   min-height: 44px;
@@ -1895,6 +1911,10 @@ img {
   background: var(--color-bg);
   border: var(--border-thin);
   border-radius: var(--radius-md);
+}
+
+.segmented.analysis-type {
+  grid-template-columns: repeat(2, 1fr);
 }
 
 .segmented button {

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Constraint, DisplayFace, DisplayModel, DynamicSolverSettings, Load, NamedSelection, Project, ResultField, ResultSummary, RunEvent, Study } from "@opencae/schema";
 import { RotateCcw, Save } from "lucide-react";
-import { addLoad, addSupport, assignMaterial, cancelRun, createProject, generateMesh, getResults, importLocalProject, loadSampleProject, renameProject, runSimulation, subscribeToRun, updateStudy as saveStudyPatch, uploadModel, type SampleModelId } from "./lib/api";
+import { addLoad, addSupport, assignMaterial, cancelRun, createProject, generateMesh, getResults, importLocalProject, loadSampleProject, renameProject, runSimulation, subscribeToRun, updateStudy as saveStudyPatch, uploadModel, type SampleAnalysisType, type SampleModelId } from "./lib/api";
 import { normalizePrintParameters, starterMaterials } from "@opencae/materials";
 import { BottomPanel } from "./components/BottomPanel";
 import { OpenCaeLogoMark } from "./components/OpenCaeLogoMark";
@@ -98,6 +98,7 @@ export function App() {
   const [draftPayloadPreview, setDraftPayloadPreview] = useState<{ value: number; metadata: PayloadLoadMetadata } | null>(null);
   const [previewLoadEdit, setPreviewLoadEdit] = useState<Load | null>(null);
   const [sampleModel, setSampleModel] = useState<SampleModelId>(restoredUi?.sampleModel ?? "bracket");
+  const [sampleAnalysisType, setSampleAnalysisType] = useState<SampleAnalysisType>(restoredUi?.sampleAnalysisType ?? "static_stress");
   const [previewPrintLayerOrientation, setPreviewPrintLayerOrientation] = useState<PrintLayerOrientation | null | undefined>(undefined);
   const [isStepbarCollapsed, setIsStepbarCollapsed] = useState(false);
   const [showBoundaryConditionMenu, setShowBoundaryConditionMenu] = useState(false);
@@ -287,6 +288,7 @@ export function App() {
         draftLoadValue,
         draftLoadDirection,
         sampleModel,
+        sampleAnalysisType,
         activeRunId,
         completedRunId,
         runProgress,
@@ -313,6 +315,7 @@ export function App() {
     resultSummary,
     runProgress,
     sampleModel,
+    sampleAnalysisType,
     selectedLoadPoint,
     selectedPayloadObject,
     selectedFaceId,
@@ -358,9 +361,10 @@ export function App() {
     pushMessage(response.message ?? "Project opened.");
   }
 
-  async function handleLoadSample(nextSample = sampleModel) {
+  async function handleLoadSample(nextSample = sampleModel, nextAnalysisType = sampleAnalysisType) {
     setSampleModel(nextSample);
-    await openProjectResponse(loadSampleProject(nextSample));
+    setSampleAnalysisType(nextAnalysisType);
+    await openProjectResponse(loadSampleProject(nextSample, nextAnalysisType));
   }
 
   function handleCreateProject() {
@@ -802,6 +806,7 @@ export function App() {
           resultFields={resultFieldsForUi}
           runProgress={runProgress}
           sampleModel={sampleModel}
+          sampleAnalysisType={sampleAnalysisType}
           draftLoadType={draftLoadType}
           draftLoadValue={draftLoadValue}
           draftLoadDirection={draftLoadDirection}
@@ -813,6 +818,7 @@ export function App() {
           onLoadSample={handleLoadSample}
           onUploadModel={handleUploadModel}
           onSampleModelChange={handleLoadSample}
+          onSampleAnalysisTypeChange={(analysisType) => void handleLoadSample(sampleModel, analysisType)}
           onViewModeChange={setViewMode}
           onResultModeChange={setResultMode}
           onToggleDeformed={() => setShowDeformed((value) => !value)}

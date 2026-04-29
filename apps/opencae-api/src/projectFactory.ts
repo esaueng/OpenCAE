@@ -3,6 +3,7 @@ import { bracketDemoProject, bracketDisplayModel } from "@opencae/db/sample-data
 import { stlDimensionsFromBase64 } from "@opencae/units";
 
 export type SampleModelId = "bracket" | "plate" | "cantilever";
+export type SampleAnalysisType = "static_stress" | "dynamic_structural";
 
 const SAMPLE_META: Record<SampleModelId, { projectName: string; modelName: string; filename: string; displayName: string; dimensions: DisplayModel["dimensions"] }> = {
   bracket: {
@@ -30,6 +31,10 @@ const SAMPLE_META: Record<SampleModelId, { projectName: string; modelName: strin
 
 export function normalizeSampleId(value: unknown): SampleModelId {
   return value === "plate" || value === "cantilever" ? value : "bracket";
+}
+
+export function normalizeSampleAnalysisType(value: unknown): SampleAnalysisType {
+  return value === "dynamic_structural" ? "dynamic_structural" : "static_stress";
 }
 
 export function createBlankProject(options: { projectId: string; studyId: string; name?: string; now: string }): Project {
@@ -247,8 +252,9 @@ function namedSelectionsForDisplayModel(bodyLabel: string, displayModel: Display
 
 export function createSampleProject(
   sampleId: SampleModelId,
-  options: { projectId: string; studyId: string; name?: string; now: string; includeSeedRun: boolean }
+  options: { projectId: string; studyId: string; name?: string; now: string; includeSeedRun: boolean; analysisType?: SampleAnalysisType }
 ): Project {
+  const analysisType = options.analysisType ?? "static_stress";
   const meta = SAMPLE_META[sampleId];
   const templateStudy = bracketDemoProject.studies[0];
   if (!templateStudy) throw new Error("Bracket demo study template is missing.");
@@ -281,6 +287,45 @@ export function createSampleProject(
       fingerprint: `${face.id}-${sampleId}-v1`
     };
   });
+  const sampleStudyBase = {
+    ...templateStudy,
+    id: studyId,
+    projectId,
+    geometryScope: templateStudy.geometryScope.map((scope) => ({ ...scope, label: meta.modelName })),
+    namedSelections: [
+      ...(bodySelection
+        ? [{
+          ...bodySelection,
+          name: `${meta.modelName} body`,
+          geometryRefs: bodySelection.geometryRefs.map((ref) => ({ ...ref, label: meta.modelName }))
+        }]
+        : []),
+      ...faceSelections
+    ],
+    loads: sampleLoadsFor(sampleId, templateStudy.loads, displayModel, meta.displayName)
+  };
+  const sampleStudy: Project["studies"][number] = analysisType === "dynamic_structural"
+    ? {
+        ...sampleStudyBase,
+        name: "Dynamic Structural",
+        type: "dynamic_structural",
+        solverSettings: {
+          startTime: 0,
+          endTime: 0.1,
+          timeStep: 0.005,
+          outputInterval: 0.005,
+          dampingRatio: 0.02,
+          integrationMethod: "newmark_average_acceleration"
+        },
+        runs: options.includeSeedRun ? sampleRunsFor(sampleId, analysisType, projectId, studyId, templateStudy.runs, options.now) : []
+      }
+    : {
+        ...sampleStudyBase,
+        name: "Static Stress",
+        type: "static_stress",
+        solverSettings: templateStudy.solverSettings,
+        runs: options.includeSeedRun ? sampleRunsFor(sampleId, analysisType, projectId, studyId, templateStudy.runs, options.now) : []
+      };
   return {
     ...bracketDemoProject,
     id: projectId,
@@ -292,31 +337,48 @@ export function createSampleProject(
         projectId,
         filename: meta.filename,
         artifactKey: `${projectId}/geometry/${sampleId}-display.json`,
-        metadata: { ...geometry.metadata, sampleModel: sampleId, displayModelRef: `${projectId}/geometry/${sampleId}-display.json`, faceCount: displayModel.faces.length }
+        metadata: {
+          ...geometry.metadata,
+          source: "sample",
+          sampleModel: sampleId,
+          sampleAnalysisType: analysisType,
+          displayModelRef: `${projectId}/geometry/${sampleId}-display.json`,
+          faceCount: displayModel.faces.length
+        }
       }]
       : [],
-    studies: [{
-      ...templateStudy,
-      id: studyId,
-      projectId,
-      name: "Static Stress",
-      geometryScope: templateStudy.geometryScope.map((scope) => ({ ...scope, label: meta.modelName })),
-      namedSelections: [
-        ...(bodySelection
-          ? [{
-            ...bodySelection,
-            name: `${meta.modelName} body`,
-            geometryRefs: bodySelection.geometryRefs.map((ref) => ({ ...ref, label: meta.modelName }))
-          }]
-          : []),
-        ...faceSelections
-      ],
-      loads: sampleLoadsFor(sampleId, templateStudy.loads, displayModel, meta.displayName),
-      runs: options.includeSeedRun ? templateStudy.runs : []
-    }],
+    studies: [sampleStudy],
     createdAt: options.now,
     updatedAt: options.now
   };
+}
+
+function sampleRunsFor(
+  sampleId: SampleModelId,
+  analysisType: SampleAnalysisType,
+  projectId: string,
+  studyId: string,
+  staticTemplateRuns: NonNullable<Project["studies"][number]>["runs"],
+  now: string
+) {
+  if (analysisType === "static_stress") {
+    return staticTemplateRuns.map((run) => ({ ...run, studyId }));
+  }
+  const runId = `run-${sampleId}-dynamic-seeded`;
+  return [{
+    id: runId,
+    studyId,
+    status: "complete" as const,
+    jobId: `job-${sampleId}-dynamic-seeded`,
+    meshRef: `${projectId}/mesh/mesh-summary.json`,
+    resultRef: `${projectId}/results/${runId}/results.json`,
+    reportRef: `${projectId}/reports/${runId}/report.html`,
+    solverBackend: "local-dynamic-newmark",
+    solverVersion: "0.1.0",
+    startedAt: now,
+    finishedAt: now,
+    diagnostics: []
+  }];
 }
 
 export function sampleDisplayModelFor(sampleId: SampleModelId): DisplayModel {

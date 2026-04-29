@@ -131,6 +131,7 @@ describe("app persistence", () => {
         draftLoadValue: 750,
         draftLoadDirection: "-Z",
         sampleModel: "bracket",
+        sampleAnalysisType: "static_stress",
         activeRunId: "run-1",
         completedRunId: "run-1",
         runProgress: 100,
@@ -171,6 +172,7 @@ describe("app persistence", () => {
         draftLoadValue: 12,
         draftLoadDirection: "+Z",
         sampleModel: "plate",
+        sampleAnalysisType: "dynamic_structural",
         activeRunId: "",
         completedRunId: "",
         runProgress: 0,
@@ -182,6 +184,7 @@ describe("app persistence", () => {
     });
 
     expect(parseAutosavedWorkspacePayload(JSON.stringify(snapshot))?.ui.sampleModel).toBe("plate");
+    expect(parseAutosavedWorkspacePayload(JSON.stringify(snapshot))?.ui.sampleAnalysisType).toBe("dynamic_structural");
     expect(parseAutosavedWorkspacePayload(JSON.stringify(snapshot))?.ui.selectedLoadPoint).toBeNull();
     expect(parseAutosavedWorkspacePayload(JSON.stringify(snapshot))?.ui.selectedPayloadObject).toBeNull();
     expect(parseAutosavedWorkspacePayload("{bad json")).toBeNull();
@@ -210,6 +213,7 @@ describe("app persistence", () => {
         draftLoadValue: 0.159,
         draftLoadDirection: "-Z",
         sampleModel: "bracket",
+        sampleAnalysisType: "static_stress",
         activeRunId: "run-1",
         completedRunId: "run-1",
         runProgress: 100,

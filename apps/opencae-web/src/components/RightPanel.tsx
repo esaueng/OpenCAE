@@ -8,7 +8,7 @@ import { inferCriticalPrintAxis } from "@opencae/study-core";
 import type { ResultMode, ViewMode } from "./CadViewer";
 import type { StepId } from "./StepBar";
 import { applicationPointForLoad, createViewerLoadMarkers, directionLabelForLoad, directionVectorForLabel, equivalentForceForLoad, loadMarkerOrdinalLabel, payloadObjectForLoad, unitsForLoadType, type LoadApplicationPoint, type LoadDirectionLabel, type LoadType, type PayloadLoadMetadata, type PayloadMassMode, type PayloadObjectSelection } from "../loadPreview";
-import type { SampleModelId } from "../lib/api";
+import type { SampleAnalysisType, SampleModelId } from "../lib/api";
 import { dimensionValuesForDisplayModel } from "../modelDimensions";
 import { formatModelOrientation, getModelOrientation, type RotationAxis } from "../modelOrientation";
 import { shouldShowSampleModelPicker } from "../modelPanelState";
@@ -34,6 +34,7 @@ interface RightPanelProps {
   resultFields?: ResultField[];
   runProgress: number;
   sampleModel: SampleModelId;
+  sampleAnalysisType?: SampleAnalysisType;
   draftLoadType: LoadType;
   draftLoadValue: number;
   draftLoadDirection: LoadDirectionLabel;
@@ -42,9 +43,10 @@ interface RightPanelProps {
   onFitView: () => void;
   onRotateModel: (axis: RotationAxis) => void;
   onResetModelOrientation: () => void;
-  onLoadSample: (sample?: SampleModelId) => void;
+  onLoadSample: (sample?: SampleModelId, analysisType?: SampleAnalysisType) => void;
   onUploadModel: (file: File) => void;
   onSampleModelChange: (sample: SampleModelId) => void;
+  onSampleAnalysisTypeChange?: (analysisType: SampleAnalysisType) => void;
   onViewModeChange: (mode: ViewMode) => void;
   onResultModeChange: (mode: ResultMode) => void;
   onToggleDeformed: () => void;
@@ -97,7 +99,7 @@ export function RightPanel(props: RightPanelProps) {
   );
 }
 
-function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sampleModel, onFitView, onRotateModel, onResetModelOrientation, onViewModeChange, onToggleDimensions, onLoadSample, onUploadModel, onSampleModelChange }: RightPanelProps) {
+function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sampleModel, sampleAnalysisType = "static_stress", onFitView, onRotateModel, onResetModelOrientation, onViewModeChange, onToggleDimensions, onLoadSample, onUploadModel, onSampleModelChange, onSampleAnalysisTypeChange }: RightPanelProps) {
   const [confirmSampleLoad, setConfirmSampleLoad] = useState(false);
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const geometry = project.geometryFiles[0];
@@ -109,6 +111,7 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sa
   const faceCount = Number(geometry?.metadata.faceCount ?? 0);
   const bodyCount = Number(geometry?.metadata.bodyCount ?? 0);
   const sampleLabel = sampleModel === "bracket" ? "Bracket Demo" : sampleModel === "plate" ? "Beam Demo" : "Cantilever Demo";
+  const sampleAnalysisLabel = sampleAnalysisType === "dynamic_structural" ? "Dynamic Structural" : "Static Stress";
   const sampleForceLabel = formatEquivalentForce(500, project.unitSystem);
   const sampleSummaryVolumeMm3 = sampleModel === "plate" ? 184_320 : 41_280;
   const sampleSummaryMassG = sampleModel === "plate" ? 498 : 111;
@@ -128,7 +131,7 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sa
       return;
     }
     setConfirmSampleLoad(false);
-    onLoadSample(sampleModel);
+    onLoadSample(sampleModel, sampleAnalysisType);
   }
 
   return (
@@ -143,6 +146,11 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sa
               </button>
             ))}
           </div>
+          <HelpLabel helpId="sampleModel">Analysis type</HelpLabel>
+          <div className="segmented analysis-type" role="group" aria-label="Analysis type">
+            <button className={sampleAnalysisType === "static_stress" ? "active" : ""} type="button" onClick={() => onSampleAnalysisTypeChange?.("static_stress")}>Static</button>
+            <button className={sampleAnalysisType === "dynamic_structural" ? "active" : ""} type="button" onClick={() => onSampleAnalysisTypeChange?.("dynamic_structural")}>Dynamic</button>
+          </div>
           <button
             className={confirmSampleLoad ? "primary wide" : "secondary wide"}
             type="button"
@@ -150,9 +158,9 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sa
             title={confirmSampleLoad ? "Click again to reload the sample project" : "Prepare to reload the sample project"}
           >
             <RotateCcw size={16} />
-            {confirmSampleLoad ? "Click again to load sample" : "Load sample project"}
+            {confirmSampleLoad ? "Click again to load sample" : `Load ${sampleAnalysisType === "dynamic_structural" ? "dynamic" : "static"} sample`}
           </button>
-          {confirmSampleLoad && <span className="panel-copy confirm-copy">This will reload {sampleLabel} and reset the sample setup.</span>}
+          {confirmSampleLoad && <span className="panel-copy confirm-copy">This will reload {sampleLabel} as {sampleAnalysisLabel} and reset the sample setup.</span>}
         </label>
       )}
       <input
@@ -221,6 +229,7 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sa
         </>
       )}
       <Info label="Study" value={study.name} />
+      {showSampleModelPicker && <Info label="Sample analysis" value={sampleAnalysisLabel} />}
     </Panel>
   );
 }

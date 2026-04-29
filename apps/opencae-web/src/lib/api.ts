@@ -12,6 +12,7 @@ export interface SampleProjectResponse {
 }
 
 export type SampleModelId = "bracket" | "plate" | "cantilever";
+export type SampleAnalysisType = "static_stress" | "dynamic_structural";
 
 export interface ResultsResponse {
   summary: ResultSummary;
@@ -21,15 +22,15 @@ export interface ResultsResponse {
 const localResultsByRunId = new Map<string, ResultsResponse>();
 const localEventsByRunId = new Map<string, RunEvent[]>();
 
-export async function loadSampleProject(sample: SampleModelId = "bracket"): Promise<SampleProjectResponse> {
+export async function loadSampleProject(sample: SampleModelId = "bracket", analysisType: SampleAnalysisType = "static_stress"): Promise<SampleProjectResponse> {
   return fetchJsonWithFallback(
     "/api/sample-project/load",
     {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ sample })
+      body: JSON.stringify({ sample, analysisType })
     },
-    () => createLocalSampleProject(sample)
+    () => createLocalSampleProject(sample, analysisType)
   );
 }
 

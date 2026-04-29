@@ -145,6 +145,28 @@ describe("api", () => {
     expect(response.message).toBe("Bracket Demo loaded.");
   });
 
+  test("requests and loads seeded dynamic sample projects locally", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response("missing", { status: 404 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    for (const sample of ["bracket", "plate", "cantilever"] as const) {
+      const response = await loadSampleProject(sample, "dynamic_structural");
+      const requestInit = fetchMock.mock.calls[fetchMock.mock.calls.length - 1]?.[1];
+      const requestBody = JSON.parse(requestInit?.body as string) as Record<string, unknown>;
+
+      expect(requestBody).toEqual({ sample, analysisType: "dynamic_structural" });
+      expect(response.project.studies[0]?.type).toBe("dynamic_structural");
+      expect(response.project.studies[0]?.runs[0]?.id).toBe(`run-${sample}-dynamic-seeded`);
+      expect(response.results?.summary.transient).toMatchObject({
+        analysisType: "dynamic_structural",
+        integrationMethod: "newmark_average_acceleration",
+        frameCount: 21
+      });
+      expect(response.results?.fields.some((field) => field.frameIndex === 1 && field.type === "velocity")).toBe(true);
+      expect(response.results?.completedRunId).toBe(`run-${sample}-dynamic-seeded`);
+    }
+  });
+
   test("loads the beam sample locally with a payload mass sitting on the free end", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("missing", { status: 404 })));
 

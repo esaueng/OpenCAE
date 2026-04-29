@@ -82,6 +82,46 @@ describe("projectFactory", () => {
     }
   });
 
+  test("creates seeded dynamic structural projects from each selectable sample", () => {
+    for (const sampleId of ["bracket", "plate", "cantilever"] as const) {
+      const project = createSampleProject(sampleId, {
+        projectId: `project-${sampleId}`,
+        studyId: `study-${sampleId}`,
+        name: `Test ${sampleId}`,
+        now: "2026-04-24T12:00:00.000Z",
+        includeSeedRun: true,
+        analysisType: "dynamic_structural"
+      });
+      const study = project.studies[0];
+
+      expect(study?.name).toBe("Dynamic Structural");
+      expect(study?.type).toBe("dynamic_structural");
+      expect(study?.solverSettings).toMatchObject({
+        startTime: 0,
+        endTime: 0.1,
+        timeStep: 0.005,
+        outputInterval: 0.005,
+        dampingRatio: 0.02,
+        integrationMethod: "newmark_average_acceleration"
+      });
+      expect(study?.materialAssignments).toHaveLength(1);
+      expect(study?.constraints).toHaveLength(1);
+      expect(study?.loads).toHaveLength(1);
+      expect(study?.meshSettings.status).toBe("complete");
+      expect(study?.runs[0]).toMatchObject({
+        id: `run-${sampleId}-dynamic-seeded`,
+        studyId: `study-${sampleId}`,
+        status: "complete",
+        resultRef: `project-${sampleId}/results/run-${sampleId}-dynamic-seeded/results.json`,
+        reportRef: `project-${sampleId}/reports/run-${sampleId}-dynamic-seeded/report.html`
+      });
+      expect(project.geometryFiles[0]?.metadata).toMatchObject({
+        sampleModel: sampleId,
+        sampleAnalysisType: "dynamic_structural"
+      });
+    }
+  });
+
   test("returns distinct display geometry for each sample", () => {
     const bracket = sampleDisplayModelFor("bracket");
     const plate = sampleDisplayModelFor("plate");
