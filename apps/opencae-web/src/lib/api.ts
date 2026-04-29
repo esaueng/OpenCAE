@@ -244,6 +244,12 @@ export async function addLoad(studyId: string, type: LoadType, value: number, se
 
 export async function runSimulation(studyId: string, currentStudy?: Study, displayModel?: DisplayModel): Promise<{ run: { id: string }; streamUrl: string; message: string }> {
   try {
+    if (currentStudy?.type === "dynamic_structural" && simulationBackend(currentStudy) === "cloudflare_fea") {
+      return {
+        ...runSimulationLocally(currentStudy, displayModel),
+        message: "Dynamic Cloud FEA is not available yet. Running local transient animation."
+      };
+    }
     if (currentStudy && simulationBackend(currentStudy) === "cloudflare_fea") {
       const response = await fetch("/api/cloud-fea/runs", {
         method: "POST",

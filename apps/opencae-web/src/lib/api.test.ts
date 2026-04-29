@@ -426,6 +426,48 @@ describe("api", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/cloud-fea/runs/run-cloud-1/results");
   });
 
+  test("uses local dynamic frames when Cloud FEA is selected for a dynamic study", async () => {
+    vi.useFakeTimers();
+    const dynamicStudy = {
+      ...study,
+      name: "Dynamic",
+      type: "dynamic_structural",
+      materialAssignments: [{ id: "assign-1", materialId: "mat-aluminum-6061", selectionRef: "selection-body-1", status: "complete" }],
+      constraints: [{ id: "constraint-1", type: "fixed", selectionRef: "selection-face-1", parameters: {}, status: "complete" }],
+      loads: [{ id: "load-1", type: "force", selectionRef: "selection-face-1", parameters: { value: 500, units: "N", direction: [0, -1, 0] }, status: "complete" }],
+      meshSettings: { preset: "ultra", status: "complete", meshRef: "project-1/mesh/mesh-summary.json" },
+      solverSettings: {
+        backend: "cloudflare_fea",
+        fidelity: "ultra",
+        startTime: 0,
+        endTime: 0.5,
+        timeStep: 0.005,
+        outputInterval: 0.005,
+        dampingRatio: 0.02,
+        integrationMethod: "newmark_average_acceleration"
+      }
+    } as Study;
+    const fetchMock = vi.fn(async () => new Response("unexpected cloud call", { status: 500 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    try {
+      const response = await runSimulation("study-1", dynamicStudy);
+      const seen: RunEvent[] = [];
+      const source = subscribeToRun(response.run.id, (event) => seen.push(event));
+      await vi.runAllTimersAsync();
+      source.close();
+      const results = await getResults(response.run.id);
+
+      expect(fetchMock).not.toHaveBeenCalledWith("/api/cloud-fea/runs", expect.anything());
+      expect(response.message).toContain("Dynamic Cloud FEA is not available yet");
+      expect(seen.some((event) => event.type === "complete")).toBe(true);
+      expect(results.summary.transient?.frameCount).toBeGreaterThan(1);
+      expect(results.fields.some((field) => field.type === "velocity" && typeof field.frameIndex === "number")).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   test("defers local result solving until a queued run is subscribed", () => {
     expect(apiSource).toContain("localResultSolversByRunId.set(runId");
     expect(apiSource).toContain('if (event.type === "complete")');

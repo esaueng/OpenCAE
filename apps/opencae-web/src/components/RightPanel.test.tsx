@@ -282,6 +282,30 @@ describe("RightPanel payload mass controls", () => {
     expect(meshHtml).toContain("45,000");
   });
 
+  test("shows dynamic studies use local playback when Cloud FEA is selected", () => {
+    const dynamicStudy: Study = {
+      ...study,
+      name: "Dynamic",
+      type: "dynamic_structural",
+      solverSettings: {
+        backend: "cloudflare_fea",
+        fidelity: "ultra",
+        startTime: 0,
+        endTime: 0.5,
+        timeStep: 0.005,
+        outputInterval: 0.005,
+        dampingRatio: 0.02,
+        integrationMethod: "newmark_average_acceleration"
+      }
+    } as Study;
+
+    const runHtml = renderPanel("run", { study: dynamicStudy });
+
+    expect(runHtml).toContain("Cloud FEA is static-only right now");
+    expect(runHtml).toContain("local-dynamic-newmark");
+    expect(runHtml).toContain("local-in-memory");
+  });
+
   test("warns when dynamic settings generate a very large playback frame set", () => {
     const dynamicStudy: Study = {
       ...study,
