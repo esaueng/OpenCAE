@@ -36,8 +36,8 @@ describe("App workflow layout", () => {
   });
 
   test("keeps dynamic output cadence separate from smaller integration time steps", () => {
-    expect(appSource).toContain("const mergedSettings = { ...study.solverSettings, ...settings };");
-    expect(appSource).toContain("settings.outputInterval ?? study.solverSettings.outputInterval");
+    expect(appSource).toContain("normalizedDynamicSolverSettings(study.solverSettings, { ...study.solverSettings, ...settings }, settings)");
+    expect(appSource).toContain("patch.outputInterval ?? currentSettings.outputInterval");
     expect(appSource).not.toContain("outputInterval: settings.timeStep ?? settings.outputInterval");
   });
 

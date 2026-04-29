@@ -149,4 +149,71 @@ describe("ProjectSchema", () => {
       estimatedRemainingMs: 3600
     });
   });
+
+  it("accepts detailed simulation backend settings and ultra mesh quality", () => {
+    const parsed = ProjectSchema.parse({
+      id: "project-detailed",
+      name: "Detailed Project",
+      schemaVersion: "0.1.0",
+      unitSystem: "SI",
+      geometryFiles: [],
+      studies: [
+        {
+          id: "study-detailed",
+          projectId: "project-detailed",
+          name: "Detailed Static",
+          type: "static_stress",
+          geometryScope: [],
+          materialAssignments: [],
+          namedSelections: [],
+          contacts: [],
+          constraints: [],
+          loads: [],
+          meshSettings: { preset: "ultra", status: "complete", summary: { nodes: 182400, elements: 119808, warnings: [], analysisSampleCount: 45000, quality: "ultra" } },
+          solverSettings: { backend: "cloudflare_fea", fidelity: "ultra" },
+          validation: [],
+          runs: []
+        }
+      ],
+      createdAt: "2026-04-24T12:00:00.000Z",
+      updatedAt: "2026-04-24T12:00:00.000Z"
+    });
+
+    expect(parsed.studies[0]?.meshSettings.preset).toBe("ultra");
+    expect(parsed.studies[0]?.solverSettings).toMatchObject({
+      backend: "cloudflare_fea",
+      fidelity: "ultra"
+    });
+  });
+
+  it("accepts rich result sample metadata from local and cloud FEA backends", () => {
+    const parsed = ResultFieldSchema.parse({
+      id: "field-stress-cloud",
+      runId: "run-cloud",
+      type: "stress",
+      location: "node",
+      values: [123100],
+      min: 123100,
+      max: 123100,
+      units: "Pa",
+      samples: [
+        {
+          point: [0, 0, 0],
+          normal: [0, 1, 0],
+          value: 123100,
+          nodeId: "N42",
+          elementId: "E7",
+          source: "calculix",
+          vonMisesStressPa: 123100
+        }
+      ]
+    });
+
+    expect(parsed.samples?.[0]).toMatchObject({
+      nodeId: "N42",
+      elementId: "E7",
+      source: "calculix",
+      vonMisesStressPa: 123100
+    });
+  });
 });

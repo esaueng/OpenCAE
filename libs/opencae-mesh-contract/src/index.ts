@@ -1,5 +1,5 @@
-import type { AnalysisMesh, MeshSummary, Study } from "@opencae/schema";
+import type { AnalysisMesh, MeshQuality, MeshSummary, Study } from "@opencae/schema";
 
 export interface MeshService {
-  generateMesh(study: Study, preset: "coarse" | "medium" | "fine", analysisMesh?: AnalysisMesh): Promise<{ artifactKey: string; summary: MeshSummary }>;
+  generateMesh(study: Study, preset: MeshQuality, analysisMesh?: AnalysisMesh): Promise<{ artifactKey: string; summary: MeshSummary }>;
 }

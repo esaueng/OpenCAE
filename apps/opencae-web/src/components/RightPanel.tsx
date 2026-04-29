@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { AlertTriangle, Anchor, ArrowDown, Check, CircleHelp, Eye, Gauge, Grid3X3, Maximize2, Pause, Play, Plus, RotateCcw, Ruler, ScanLine, ShieldCheck, Upload, Weight, X } from "lucide-react";
 import { defaultPrintParametersFor, effectiveMaterialProperties, massKgForPayloadMaterial, normalizePrintParameters, payloadMaterialForId, payloadMaterials, starterMaterials, type PayloadMaterialCategory, type PrintMaterialParameters } from "@opencae/materials";
 import { assessResultFailure, estimateAllowableLoadForSafetyFactor } from "@opencae/schema";
-import type { Constraint, DisplayFace, DisplayModel, DynamicSolverSettings, Load, Project, ResultField, ResultSummary, RunTimingEstimate, Study } from "@opencae/schema";
+import type { Constraint, DisplayFace, DisplayModel, DynamicSolverSettings, Load, MeshQuality, Project, ResultField, ResultSummary, RunTimingEstimate, SimulationFidelity, SolverBackend, Study } from "@opencae/schema";
 import { inferCriticalPrintAxis } from "@opencae/study-core";
 import type { ResultMode, ViewMode } from "./CadViewer";
 import type { StepId } from "./StepBar";
@@ -69,8 +69,8 @@ interface RightPanelProps {
   onUpdateLoad: (load: Load) => void;
   onPreviewLoadEdit: (load: Load | null) => void;
   onRemoveLoad: (loadId: string) => void;
-  onGenerateMesh: (preset: "coarse" | "medium" | "fine") => void;
-  onUpdateSolverSettings?: (settings: Partial<DynamicSolverSettings>) => void;
+  onGenerateMesh: (preset: MeshQuality) => void;
+  onUpdateSolverSettings?: (settings: SolverSettingsPatch) => void;
   onRunSimulation: () => void;
   onCancelSimulation?: () => void;
   canCancelSimulation?: boolean;
@@ -88,6 +88,10 @@ interface RightPanelProps {
 
 const EMPTY_PARAMETERS: Record<string, unknown> = {};
 const noopDraftPayloadPreviewChange = () => undefined;
+type SolverSettingsPatch = Partial<DynamicSolverSettings> & { backend?: SolverBackend; fidelity?: SimulationFidelity };
+const MESH_PRESETS: MeshQuality[] = ["coarse", "medium", "fine", "ultra"];
+const SIMULATION_FIDELITIES: SimulationFidelity[] = ["standard", "detailed", "ultra"];
+const SOLVER_BACKENDS: SolverBackend[] = ["local_detailed", "cloudflare_fea"];
 
 export function RightPanel(props: RightPanelProps) {
   return (
@@ -872,23 +876,24 @@ function selectionForFace(study: Study, faceId: string) {
 }
 
 function MeshPanel({ study, onGenerateMesh }: RightPanelProps) {
-  const [preset, setPreset] = useState<"coarse" | "medium" | "fine">(study.meshSettings.preset);
+  const [preset, setPreset] = useState<MeshQuality>(study.meshSettings.preset);
   return (
     <Panel title="Mesh" helper="The mesh breaks the model into small pieces so OpenCAE can calculate results.">
       <label className="field">
         <HelpLabel helpId="meshQuality">Quality preset</HelpLabel>
         <div className="segmented" role="group" aria-label="Mesh quality">
-          {(["coarse", "medium", "fine"] as const).map((option) => (
+          {MESH_PRESETS.map((option) => (
             <button key={option} className={preset === option ? "active" : ""} type="button" onClick={() => setPreset(option)}>{capitalize(option)}</button>
           ))}
         </div>
       </label>
       <button className="primary wide" onClick={() => onGenerateMesh(preset)}><Grid3X3 size={18} />Generate mesh</button>
-      <Callout>{capitalize(preset)} creates a {preset === "medium" ? "good balance between accuracy and speed" : preset === "coarse" ? "fast preview mesh for early setup checks" : "denser mesh for more detailed result gradients"}.</Callout>
+      <Callout>{capitalize(preset)} creates a {meshPresetDescription(preset)}.</Callout>
       {study.meshSettings.summary && (
         <div className="summary-box">
           <Info label="Nodes" value={study.meshSettings.summary.nodes.toLocaleString()} />
           <Info label="Elements" value={study.meshSettings.summary.elements.toLocaleString()} />
+          <Info label="Analysis samples" value={(study.meshSettings.summary.analysisSampleCount ?? 0).toLocaleString()} />
           <Info label="Warnings" value={String(study.meshSettings.summary.warnings.length)} />
         </div>
       )}
@@ -908,6 +913,11 @@ function RunPanel({ study, runProgress, runTiming, onRunSimulation, onCancelSimu
     ["Mesh generated", study.meshSettings.status === "complete"]
   ] as const;
   const dynamic = study.type === "dynamic_structural" ? study.solverSettings : null;
+  const backend = solverBackendForStudy(study);
+  const fidelity = solverFidelityForStudy(study);
+  const updateSolverChoice = (settings: SolverSettingsPatch) => {
+    onUpdateSolverSettings?.(settings);
+  };
   const updateDynamicNumber = (key: keyof Pick<DynamicSolverSettings, "startTime" | "endTime" | "timeStep" | "dampingRatio">, value: number) => {
     if (!Number.isFinite(value)) return;
     onUpdateSolverSettings?.({ [key]: value });
@@ -918,6 +928,23 @@ function RunPanel({ study, runProgress, runTiming, onRunSimulation, onCancelSimu
       <SectionTitle helpId="runReadiness">Readiness</SectionTitle>
       <div className="checklist">
         {checks.map(([label, done]) => <span key={label} className={done ? "check done" : "check"}><span>{done ? <Check size={18} /> : null}</span>{label}</span>)}
+      </div>
+      <SectionTitle>Simulation backend</SectionTitle>
+      <label className="field">
+        <span>Backend</span>
+        <select value={backend} onChange={(event) => updateSolverChoice({ backend: event.currentTarget.value as SolverBackend })}>
+          {SOLVER_BACKENDS.map((option) => <option key={option} value={option}>{backendLabel(option)}</option>)}
+        </select>
+      </label>
+      <label className="field">
+        <span>Fidelity</span>
+        <select value={fidelity} onChange={(event) => updateSolverChoice({ fidelity: event.currentTarget.value as SimulationFidelity })}>
+          {SIMULATION_FIDELITIES.map((option) => <option key={option} value={option}>{capitalize(option)}</option>)}
+        </select>
+      </label>
+      <div className="summary-box">
+        <Info label="Expected detail" value={fidelityEstimateLabel(fidelity)} />
+        <Info label="Cloud runtime" value={backend === "cloudflare_fea" ? "CalculiX container" : "Browser local"} />
       </div>
       {dynamic && (
         <>
@@ -972,12 +999,39 @@ function RunPanel({ study, runProgress, runTiming, onRunSimulation, onCancelSimu
       )}
       <SectionTitle helpId="solver">Solver</SectionTitle>
       <div className="summary-box">
-        <Info label="Backend" value={study.type === "dynamic_structural" ? "local-dynamic-newmark" : "local-static-superposition"} />
+        <Info label="Backend" value={backend === "cloudflare_fea" ? "cloudflare-fea-calculix" : study.type === "dynamic_structural" ? "local-dynamic-newmark" : "local-detailed-superposition"} />
         <Info label="Version" value="0.1.0" />
-        <Info label="Runner" value="local-in-memory" />
+        <Info label="Runner" value={backend === "cloudflare_fea" ? "cloudflare-queue-container" : "local-in-memory"} />
       </div>
     </Panel>
   );
+}
+
+function meshPresetDescription(preset: MeshQuality) {
+  if (preset === "coarse") return "fast preview mesh for early setup checks";
+  if (preset === "medium") return "good balance between accuracy and speed";
+  if (preset === "fine") return "denser mesh for more detailed result gradients";
+  return "ultra-dense local analysis samples for granular contour gradients";
+}
+
+function solverBackendForStudy(study: Study): SolverBackend {
+  const backend = (study.solverSettings as { backend?: unknown }).backend;
+  return backend === "cloudflare_fea" ? "cloudflare_fea" : "local_detailed";
+}
+
+function solverFidelityForStudy(study: Study): SimulationFidelity {
+  const fidelity = (study.solverSettings as { fidelity?: unknown }).fidelity;
+  return fidelity === "detailed" || fidelity === "ultra" ? fidelity : "standard";
+}
+
+function backendLabel(backend: SolverBackend) {
+  return backend === "cloudflare_fea" ? "Cloud FEA" : "Detailed local";
+}
+
+function fidelityEstimateLabel(fidelity: SimulationFidelity) {
+  if (fidelity === "ultra") return "Ultra mesh and samples";
+  if (fidelity === "detailed") return "Fine mesh and samples";
+  return "Standard run";
 }
 
 export function formatSimulationEta(remainingMs: number | undefined, isRunning = true): string {

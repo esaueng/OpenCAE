@@ -3,7 +3,7 @@ import type { ElementRef, MutableRefObject } from "react";
 import { Billboard, Bounds, Edges, GizmoHelper, Html, Line, OrbitControls, Text, useBounds } from "@react-three/drei";
 import { Canvas, useThree } from "@react-three/fiber";
 import type { ThreeEvent } from "@react-three/fiber";
-import type { DisplayFace, DisplayModel, ResultField } from "@opencae/schema";
+import type { DisplayFace, DisplayModel, MeshSummary, ResultField } from "@opencae/schema";
 import { meshVolumeM3FromTriangles, type Triangle } from "@opencae/units";
 import { House } from "lucide-react";
 import * as THREE from "three";
@@ -66,6 +66,7 @@ interface CadViewerProps {
   showDimensions: boolean;
   stressExaggeration: number;
   resultFields: ResultField[];
+  meshSummary?: MeshSummary;
   unitSystem: UnitSystem;
   themeMode: ThemeMode;
   fitSignal: number;
@@ -163,7 +164,7 @@ export function CadViewer(props: CadViewerProps) {
         </button>
       </div>
       <a className="viewer-watermark" href={VIEWER_CREDIT_URL} target="_blank" rel="noreferrer">Built by Esau Engineering</a>
-      {effectiveViewMode === "results" && <ResultLegend resultMode={props.resultMode} resultFields={props.resultFields} unitSystem={props.unitSystem} />}
+      {effectiveViewMode === "results" && <ResultLegend resultMode={props.resultMode} resultFields={props.resultFields} unitSystem={props.unitSystem} meshSummary={props.meshSummary} />}
     </section>
   );
 }
@@ -2648,7 +2649,14 @@ export function displayedLegendTickLabels(minValue: number, maxValue: number) {
   return [ticks[0], ticks[2], ticks[4]];
 }
 
-function ResultLegend({ resultMode, resultFields, unitSystem }: { resultMode: ResultMode; resultFields: ResultField[]; unitSystem: UnitSystem }) {
+export function legendMeshStats(meshSummary: MeshSummary | undefined) {
+  return {
+    nodes: (meshSummary?.nodes ?? 42381).toLocaleString(),
+    elements: (meshSummary?.elements ?? 26944).toLocaleString()
+  };
+}
+
+function ResultLegend({ resultMode, resultFields, unitSystem, meshSummary }: { resultMode: ResultMode; resultFields: ResultField[]; unitSystem: UnitSystem; meshSummary?: MeshSummary }) {
   const title = resultMode === "stress" ? "Von Mises Stress" : resultMode === "displacement" ? "Displacement" : resultMode === "velocity" ? "Velocity" : resultMode === "acceleration" ? "Acceleration" : "Safety Factor";
   const field = resultFields.find((candidate) => candidate.type === resultMode && candidate.location === "face");
   const fallbackMin = resultMode === "stress" ? stressForUnits(28, "MPa", unitSystem) : resultMode === "displacement" || resultMode === "velocity" || resultMode === "acceleration" ? lengthForUnits(0, "mm", unitSystem) : { value: 1.8, units: "" };
@@ -2657,10 +2665,11 @@ function ResultLegend({ resultMode, resultFields, unitSystem }: { resultMode: Re
   const minValue = field?.min ?? fallbackMin.value;
   const maxValue = field?.max ?? fallbackMax.value;
   const ticks = displayedLegendTickLabels(minValue, maxValue);
+  const meshStats = legendMeshStats(meshSummary);
   return (
     <div className={`analysis-legend ${resultMode === "safety_factor" ? "safety-scale" : ""}`}>
-      <strong>Nodes: 42,381</strong>
-      <strong>Elements: 26,944</strong>
+      <strong>Nodes: {meshStats.nodes}</strong>
+      <strong>Elements: {meshStats.elements}</strong>
       <span>Type: {title}</span>
       <span>Unit: {unit || "ratio"}</span>
       <div className="legend-scale" />

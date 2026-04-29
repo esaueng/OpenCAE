@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { describe, expect, test } from "vitest";
-import { VIEWER_CREDIT_URL, VIEWER_GIZMO_ALIGNMENT, axisLabelToViewAxis, cameraDistanceForBounds, cameraViewForAxis, cloneResultPreviewObject, colorizeResultObject, colorizeSampleResultGeometry, createUndeformedResultOutlineObject, defaultHomeViewTarget, displayedLegendTickLabels, legendTickLabels, payloadHighlightObjectId, printLayerVisualizationForBounds, resultProbesForKind, resultValueForPoint, rotatedCameraOrbit, shouldShowDimensionOverlay, shouldShowModelHitLabel, shouldShowResultMarkers, shouldShowUndeformedResultOutline, viewerCameraResetPose } from "./CadViewer";
+import { VIEWER_CREDIT_URL, VIEWER_GIZMO_ALIGNMENT, axisLabelToViewAxis, cameraDistanceForBounds, cameraViewForAxis, cloneResultPreviewObject, colorizeResultObject, colorizeSampleResultGeometry, createUndeformedResultOutlineObject, defaultHomeViewTarget, displayedLegendTickLabels, legendMeshStats, legendTickLabels, payloadHighlightObjectId, printLayerVisualizationForBounds, resultProbesForKind, resultValueForPoint, rotatedCameraOrbit, shouldShowDimensionOverlay, shouldShowModelHitLabel, shouldShowResultMarkers, shouldShowUndeformedResultOutline, viewerCameraResetPose } from "./CadViewer";
 import type { FaceResultSample } from "../resultFields";
 import type { DisplayFace, ResultField } from "@opencae/schema";
 
@@ -32,6 +32,13 @@ describe("CadViewer result coloring", () => {
 
   test("shows only min, middle, and max result legend tick labels", () => {
     expect(displayedLegendTickLabels(88.3, 156.6)).toEqual(["88.3", "122.45", "156.6"]);
+  });
+
+  test("uses mesh summary values for result legend mesh stats", () => {
+    expect(legendMeshStats({ nodes: 182400, elements: 119808, warnings: [], analysisSampleCount: 45000, quality: "ultra" })).toEqual({
+      nodes: "182,400",
+      elements: "119,808"
+    });
   });
 
   test("maps gizmo Z clicks to a clockwise square top view", () => {
