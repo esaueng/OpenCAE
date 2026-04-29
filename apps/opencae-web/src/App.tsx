@@ -581,10 +581,13 @@ export function App() {
 
   function handleUpdateSolverSettings(settings: Partial<DynamicSolverSettings>) {
     if (!study || study.type !== "dynamic_structural") return;
+    const mergedSettings = { ...study.solverSettings, ...settings };
     const nextSettings = {
-      ...study.solverSettings,
-      ...settings,
-      outputInterval: settings.timeStep ?? settings.outputInterval ?? study.solverSettings.timeStep
+      ...mergedSettings,
+      outputInterval: Math.max(
+        settings.outputInterval ?? study.solverSettings.outputInterval,
+        mergedSettings.timeStep
+      )
     };
     invalidateCompletedRunState();
     void updateStudy(

@@ -240,6 +240,24 @@ describe("RightPanel payload mass controls", () => {
     expect(renderPanel("run", { study: dynamicStudy })).toContain("Large frame counts may slow result loading and playback.");
   });
 
+  test("estimates dynamic frames from output interval rather than integration time step", () => {
+    const dynamicStudy: Study = {
+      ...study,
+      name: "Dynamic",
+      type: "dynamic_structural",
+      solverSettings: {
+        startTime: 0,
+        endTime: 0.5,
+        timeStep: 0.001,
+        outputInterval: 0.005,
+        dampingRatio: 0.02,
+        integrationMethod: "newmark_average_acceleration"
+      }
+    };
+
+    expect(renderPanel("run", { study: dynamicStudy })).toContain('<strong>101</strong>');
+  });
+
   test("renders playback controls for dynamic result frames", () => {
     const dynamicStudy: Study = {
       ...study,

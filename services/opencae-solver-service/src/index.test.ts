@@ -408,12 +408,12 @@ describe("LocalMockComputeBackend", () => {
     }
   });
 
-  test("dynamic solve writes one output frame per time step and includes the final end time", () => {
+  test("dynamic solve writes output frames by output interval and includes the final end time", () => {
     const solved = solveDynamicStudy(
       dynamicCantileverStudy("mat-aluminum-6061", {
-        endTime: 0.012,
+        endTime: 0.025,
         timeStep: 0.005,
-        outputInterval: 0.02
+        outputInterval: 0.01
       }),
       "run-dynamic-time-step",
       rectangularBeamAnalysisMesh()
@@ -425,7 +425,7 @@ describe("LocalMockComputeBackend", () => {
     }
     const displacementFrames = solved.fields.filter((field) => field.type === "displacement");
 
-    expect(displacementFrames.map((field) => field.timeSeconds)).toEqual([0, 0.005, 0.01, 0.012]);
+    expect(displacementFrames.map((field) => field.timeSeconds)).toEqual([0, 0.01, 0.02, 0.025]);
     expect(displacementFrames.map((field) => field.frameIndex)).toEqual([0, 1, 2, 3]);
     expect(solved.summary.transient?.frameCount).toBe(4);
     expect([...fieldsByFrame.values()].map((types) => [...types].sort())).toEqual([

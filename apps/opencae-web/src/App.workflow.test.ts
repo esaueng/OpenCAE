@@ -32,4 +32,10 @@ describe("App workflow layout", () => {
     expect(appSource).toContain("setRunProgress(0);");
     expect(appSource).toContain("setResultFields([]);");
   });
+
+  test("keeps dynamic output cadence separate from smaller integration time steps", () => {
+    expect(appSource).toContain("const mergedSettings = { ...study.solverSettings, ...settings };");
+    expect(appSource).toContain("settings.outputInterval ?? study.solverSettings.outputInterval");
+    expect(appSource).not.toContain("outputInterval: settings.timeStep ?? settings.outputInterval");
+  });
 });
