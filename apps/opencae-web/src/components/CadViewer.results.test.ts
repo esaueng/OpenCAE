@@ -409,6 +409,85 @@ describe("CadViewer result coloring", () => {
     expect(deformationScaleForResultFields([peakFrame])).toBeGreaterThan(0);
   });
 
+  test("scales support-to-load deformation by the active dynamic displacement", () => {
+    const deformedFreeEndY = (deformationScale: number) => {
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute("position", new THREE.Float32BufferAttribute([-1, 0, 0, 0, 0, 0, 1, 0, 0], 3));
+      geometry.setIndex([0, 1, 2]);
+      const deformed = colorizeSampleResultGeometry(
+        geometry,
+        "cantilever",
+        "displacement",
+        true,
+        1,
+        samples,
+        [{
+          id: "load-1",
+          faceId: "right",
+          type: "force",
+          value: 500,
+          units: "N",
+          direction: [0, -1, 0],
+          directionLabel: "Normal",
+          labelIndex: 0,
+          stackIndex: 0
+        }],
+        deformationScale,
+        [{
+          id: "support-1",
+          faceId: "left",
+          type: "fixed",
+          displayLabel: "FS 1",
+          label: "Left",
+          stackIndex: 0
+        }]
+      );
+      return deformed.getAttribute("position").getY(2);
+    };
+
+    expect(deformedFreeEndY(1)).toBeLessThan(deformedFreeEndY(0.25));
+  });
+
+  test("reverses support-to-load deformation for signed dynamic displacement", () => {
+    const deformedFreeEndY = (deformationScale: number) => {
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute("position", new THREE.Float32BufferAttribute([-1, 0, 0, 0, 0, 0, 1, 0, 0], 3));
+      geometry.setIndex([0, 1, 2]);
+      const deformed = colorizeSampleResultGeometry(
+        geometry,
+        "cantilever",
+        "displacement",
+        true,
+        1,
+        samples,
+        [{
+          id: "load-1",
+          faceId: "right",
+          type: "force",
+          value: 500,
+          units: "N",
+          direction: [0, -1, 0],
+          directionLabel: "Normal",
+          labelIndex: 0,
+          stackIndex: 0
+        }],
+        deformationScale,
+        [{
+          id: "support-1",
+          faceId: "left",
+          type: "fixed",
+          displayLabel: "FS 1",
+          label: "Left",
+          stackIndex: 0
+        }]
+      );
+      return deformed.getAttribute("position").getY(2);
+    };
+
+    expect(deformedFreeEndY(1)).toBeLessThan(0);
+    expect(deformedFreeEndY(-1)).toBeGreaterThan(0);
+  });
+
   test("uses result displacement rather than raw load magnitude for uploaded result deformation", () => {
     const deformedYForLoad = (loadValue: number) => {
       const geometry = new THREE.BufferGeometry();
