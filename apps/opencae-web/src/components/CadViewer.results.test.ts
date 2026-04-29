@@ -209,6 +209,22 @@ describe("CadViewer result coloring", () => {
     expect(highFrameValue).toBeGreaterThan(lowFrameValue + 0.5);
   });
 
+  test("uses face samples instead of dense field samples for built-in dynamic sample coloring", () => {
+    const dynamicSamples: FaceResultSample[] = [
+      {
+        face: { id: "low", label: "Low", color: "#4da3ff", center: [0, 0.18, 0], normal: [0, 1, 0], stressValue: 10 },
+        value: 10,
+        normalized: 0.08,
+        fieldSamples: [
+          { point: [0, 0.18, 0], normal: [0, 1, 0], value: 999, normalized: 1 }
+        ]
+      }
+    ];
+
+    expect(resultValueForPoint("cantilever", "stress", 1, new THREE.Vector3(0, 0.18, 0), dynamicSamples)).toBeLessThan(0.3);
+    expect(resultValueForPoint("uploaded", "stress", 1, new THREE.Vector3(0, 0.18, 0), dynamicSamples)).toBeGreaterThan(0.9);
+  });
+
   test("prefers solver point samples over face fallback when coloring uploaded result geometry", () => {
     const lowFaceSamples: FaceResultSample[] = [
       {
