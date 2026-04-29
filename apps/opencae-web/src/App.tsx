@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Constraint, DisplayFace, DisplayModel, DynamicSolverSettings, Load, NamedSelection, Project, ResultField, ResultSummary, RunEvent, RunTimingEstimate, SimulationFidelity, SolverBackend, Study } from "@opencae/schema";
 import { RotateCcw, Save } from "lucide-react";
 import { addLoad, addSupport, assignMaterial, cancelRun, createProject, generateMesh, getResults, importLocalProject, loadSampleProject, renameProject, runSimulation, subscribeToRun, updateStudy as saveStudyPatch, uploadModel, type SampleAnalysisType, type SampleModelId } from "./lib/api";
@@ -35,7 +35,7 @@ import { displayModelForUnits, loadValueForUnits, resultFieldForUnits, resultSum
 import { supportDisplayLabel } from "./supportLabels";
 import { nextSelectedPayloadObject, shouldClearPayloadSelectionOnViewerMiss } from "./payloadSelection";
 import { createLocalDynamicStructuralStudy, createLocalStaticStressStudy } from "./localProjectFactory";
-import { createResultFrameCache, hasDynamicPlaybackFrames, interpolatedFieldsForFramePosition } from "./resultFields";
+import { createResultFrameCache, hasDynamicPlaybackFrames } from "./resultFields";
 
 interface SaveFilePickerHandle {
   createWritable: () => Promise<{ write: (content: Blob) => Promise<void>; close: () => Promise<void> }>;
@@ -58,6 +58,7 @@ const seededSummary: ResultSummary = {
   reactionForceUnits: "N"
 };
 const MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.005;
+const PLAYBACK_STATE_COMMIT_INTERVAL_MS = 1000 / 60;
 
 export function App() {
   const restoredWorkspace = useMemo(() => readAutosavedWorkspace(), []);
@@ -129,8 +130,8 @@ export function App() {
   const resultFrameCache = useMemo(() => createResultFrameCache(resultFieldsForUi), [resultFieldsForUi]);
   const resultVisualFramePosition = resultPlaybackPlaying ? resultPlaybackFramePosition : resultFrameIndex;
   const visibleResultFieldsForUi = useMemo(
-    () => resultPlaybackPlaying ? interpolatedFieldsForFramePosition(resultFieldsForUi, resultVisualFramePosition) : resultFrameCache.fieldsForFrame(resultFrameIndex),
-    [resultFieldsForUi, resultFrameCache, resultFrameIndex, resultPlaybackPlaying, resultVisualFramePosition]
+    () => resultPlaybackPlaying ? resultFrameCache.fieldsForFramePosition(resultVisualFramePosition) : resultFrameCache.fieldsForFrame(resultFrameIndex),
+    [resultFrameCache, resultFrameIndex, resultPlaybackPlaying, resultVisualFramePosition]
   );
   const playbackFrameIndexes = useMemo(() => resultFrameCache.frameIndexes, [resultFrameCache]);
   const solverRunning = Boolean(processingRunId) || (runProgress > 0 && runProgress < 100);
@@ -164,13 +165,22 @@ export function App() {
     const frameDurationMs = 1000 / Math.max(1, Math.min(30, resultPlaybackFps));
     let animationFrameId = 0;
     let lastTimestamp: number | null = null;
+    let lastCommittedTimestamp = 0;
     let framePosition = resultPlaybackFramePositionRef.current;
     const advancePlaybackFrame = (timestamp: number) => {
       if (lastTimestamp !== null) {
         const frameDelta = (timestamp - lastTimestamp) / frameDurationMs;
         framePosition = loopedPlaybackFramePosition(playbackFrameIndexes, framePosition + frameDelta);
-        setResultPlaybackFramePosition(framePosition);
-        setResultFrameIndex(Math.floor(framePosition));
+        resultPlaybackFramePositionRef.current = framePosition;
+        if (timestamp - lastCommittedTimestamp >= PLAYBACK_STATE_COMMIT_INTERVAL_MS) {
+          lastCommittedTimestamp = timestamp;
+          setResultPlaybackFramePosition((current) => Math.abs(current - framePosition) < 0.0001 ? current : framePosition);
+          const nextFrameIndex = Math.floor(framePosition);
+          if (nextFrameIndex !== resultFrameIndexRef.current) {
+            resultFrameIndexRef.current = nextFrameIndex;
+            startTransition(() => setResultFrameIndex(nextFrameIndex));
+          }
+        }
       }
       lastTimestamp = timestamp;
       animationFrameId = window.requestAnimationFrame(advancePlaybackFrame);

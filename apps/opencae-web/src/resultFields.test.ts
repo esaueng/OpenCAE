@@ -224,4 +224,31 @@ describe("dynamic result frames", () => {
     });
     expect(visible[0]?.samples?.[0]?.value).toBe(40);
   });
+
+  test("interpolates playback fields from the frame cache without changing discrete cached frames", () => {
+    const fields: ResultField[] = [
+      { id: "stress-0", runId: "run", type: "stress", location: "face", values: [10, 30], min: 0, max: 100, units: "MPa", frameIndex: 0, timeSeconds: 0 },
+      { id: "stress-1", runId: "run", type: "stress", location: "face", values: [30, 70], min: 0, max: 100, units: "MPa", frameIndex: 1, timeSeconds: 0.005 }
+    ];
+    const cache = createResultFrameCache(fields);
+
+    const frameOneBefore = cache.fieldsForFrame(1);
+    const visible = cache.fieldsForFramePosition(0.5);
+    const frameOneAfter = cache.fieldsForFrame(1);
+
+    expect(visible[0]).toMatchObject({ values: [20, 50], min: 0, max: 100, timeSeconds: 0.0025 });
+    expect(frameOneAfter).toBe(frameOneBefore);
+  });
+
+  test("interpolates sparse cached frame positions against adjacent available frames", () => {
+    const fields: ResultField[] = [
+      { id: "stress-0", runId: "run", type: "stress", location: "face", values: [0], min: 0, max: 100, units: "MPa", frameIndex: 0, timeSeconds: 0 },
+      { id: "stress-4", runId: "run", type: "stress", location: "face", values: [100], min: 0, max: 100, units: "MPa", frameIndex: 4, timeSeconds: 0.02 }
+    ];
+    const cache = createResultFrameCache(fields);
+
+    expect(cache.frameIndexes).toEqual([0, 4]);
+    expect(cache.fieldsForFramePosition(2)[0]).toMatchObject({ values: [50], timeSeconds: 0.01 });
+    expect(cache.timeForFramePosition(2)).toBe(0.01);
+  });
 });

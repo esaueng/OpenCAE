@@ -26,6 +26,8 @@ describe("App workflow layout", () => {
     expect(appSource).toContain("window.requestAnimationFrame(advancePlaybackFrame)");
     expect(appSource).toContain("resultPlaybackFramePositionRef.current");
     expect(appSource).toContain("resultFramePosition={resultVisualFramePosition}");
+    expect(appSource).toContain("resultFrameCache.fieldsForFramePosition(resultVisualFramePosition)");
+    expect(appSource).not.toContain("interpolatedFieldsForFramePosition(resultFieldsForUi");
     expect(appSource).not.toContain("window.setInterval");
   });
 

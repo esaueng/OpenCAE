@@ -63,27 +63,45 @@ export function hasDynamicPlaybackFrames(summary: Pick<ResultSummary, "transient
 export interface ResultFrameCache {
   frameIndexes: number[];
   fieldsForFrame: (frameIndex: number) => ResultField[];
+  fieldsForFramePosition: (framePosition: number) => ResultField[];
+  timeForFramePosition: (framePosition: number) => number;
 }
 
 export function createResultFrameCache(fields: ResultField[]): ResultFrameCache {
   const frameIndexes = resultFrameIndexes(fields);
   const hasFrames = fields.some((field) => typeof field.frameIndex === "number");
   const fieldsByFrame = new Map<number, ResultField[]>();
+  const fieldMapsByFrame = new Map<number, Map<string, ResultField>>();
+  const frameTimes = new Map<number, number>();
   if (!hasFrames) {
     const visible = fields.map((field) => fieldWithOwnValueRange(field));
     return {
       frameIndexes,
-      fieldsForFrame: () => visible
+      fieldsForFrame: () => visible,
+      fieldsForFramePosition: () => visible,
+      timeForFramePosition: () => 0
     };
   }
-  for (const frameIndex of frameIndexes) {
-    fieldsByFrame.set(frameIndex, fields
-      .filter((field) => (field.frameIndex ?? 0) === frameIndex)
-      .map((field) => fieldWithOwnValueRange(field)));
+  for (const field of fields) {
+    const frameIndex = field.frameIndex ?? 0;
+    const visibleField = fieldWithOwnValueRange(field);
+    const frameFields = fieldsByFrame.get(frameIndex) ?? [];
+    frameFields.push(visibleField);
+    fieldsByFrame.set(frameIndex, frameFields);
+    const frameFieldMap = fieldMapsByFrame.get(frameIndex) ?? new Map<string, ResultField>();
+    frameFieldMap.set(fieldSeriesKey(visibleField), visibleField);
+    fieldMapsByFrame.set(frameIndex, frameFieldMap);
+    if (typeof field.timeSeconds === "number" && Number.isFinite(field.timeSeconds)) {
+      frameTimes.set(frameIndex, field.timeSeconds);
+    }
   }
+  const fallbackFrame = frameIndexes[0] ?? 0;
+  const fieldsForFrame = (frameIndex: number) => fieldsByFrame.get(frameIndex) ?? fieldsByFrame.get(fallbackFrame) ?? [];
   return {
     frameIndexes,
-    fieldsForFrame: (frameIndex) => fieldsByFrame.get(frameIndex) ?? fieldsByFrame.get(frameIndexes[0] ?? 0) ?? []
+    fieldsForFrame,
+    fieldsForFramePosition: (framePosition) => interpolatedFieldsForCachedFramePosition(frameIndexes, fieldsForFrame, fieldMapsByFrame, framePosition),
+    timeForFramePosition: (framePosition) => interpolatedTimeForFramePosition(frameIndexes, frameTimes, framePosition)
   };
 }
 
@@ -103,19 +121,48 @@ export function fieldsForResultFrame(fields: ResultField[], frameIndex: number):
 }
 
 export function interpolatedFieldsForFramePosition(fields: ResultField[], framePosition: number): ResultField[] {
-  const frameIndexes = resultFrameIndexes(fields);
-  if (frameIndexes.length < 2) return fieldsForResultFrame(fields, Math.round(framePosition));
-  const lowerFrame = [...frameIndexes].reverse().find((frameIndex) => frameIndex <= framePosition) ?? frameIndexes[0]!;
-  const upperFrame = frameIndexes.find((frameIndex) => frameIndex >= framePosition) ?? frameIndexes[frameIndexes.length - 1]!;
-  if (lowerFrame === upperFrame) return fieldsForResultFrame(fields, lowerFrame);
-  const lowerFields = fieldsForResultFrame(fields, lowerFrame);
-  const upperFields = fieldsForResultFrame(fields, upperFrame);
-  const blend = (framePosition - lowerFrame) / (upperFrame - lowerFrame);
+  return createResultFrameCache(fields).fieldsForFramePosition(framePosition);
+}
+
+function interpolatedFieldsForCachedFramePosition(
+  frameIndexes: number[],
+  fieldsForFrame: (frameIndex: number) => ResultField[],
+  fieldMapsByFrame: Map<number, Map<string, ResultField>>,
+  framePosition: number
+): ResultField[] {
+  if (frameIndexes.length < 2) return fieldsForFrame(Math.round(framePosition));
+  const { lowerFrame, upperFrame, blend } = interpolationBoundsForFramePosition(frameIndexes, framePosition);
+  if (lowerFrame === upperFrame) return fieldsForFrame(lowerFrame);
+  const lowerFields = fieldsForFrame(lowerFrame);
+  const upperFieldMap = fieldMapsByFrame.get(upperFrame);
   return lowerFields.map((lowerField) => {
-    const upperField = upperFields.find((candidate) => sameFieldSeries(candidate, lowerField));
+    const upperField = upperFieldMap?.get(fieldSeriesKey(lowerField));
     if (!upperField) return lowerField;
     return fieldWithOwnValueRange(interpolateField(lowerField, upperField, blend, framePosition));
   });
+}
+
+function interpolatedTimeForFramePosition(frameIndexes: number[], frameTimes: Map<number, number>, framePosition: number): number {
+  if (!frameIndexes.length) return 0;
+  if (frameIndexes.length < 2) return frameTimes.get(frameIndexes[0] ?? 0) ?? 0;
+  const { lowerFrame, upperFrame, blend } = interpolationBoundsForFramePosition(frameIndexes, framePosition);
+  const lowerTime = frameTimes.get(lowerFrame) ?? 0;
+  const upperTime = frameTimes.get(upperFrame) ?? lowerTime;
+  return lerp(lowerTime, upperTime, blend);
+}
+
+function interpolationBoundsForFramePosition(frameIndexes: number[], framePosition: number) {
+  let lowerFrame = frameIndexes[0]!;
+  let upperFrame = frameIndexes[frameIndexes.length - 1]!;
+  for (const frameIndex of frameIndexes) {
+    if (frameIndex <= framePosition) lowerFrame = frameIndex;
+    if (frameIndex >= framePosition) {
+      upperFrame = frameIndex;
+      break;
+    }
+  }
+  const blend = lowerFrame === upperFrame ? 0 : (framePosition - lowerFrame) / (upperFrame - lowerFrame);
+  return { lowerFrame, upperFrame, blend };
 }
 
 export function resultSamplesForFaces(faces: DisplayFace[], fields: ResultField[], mode: ResultFieldMode): FaceResultSample[] {
@@ -198,8 +245,8 @@ function fieldWithOwnValueRange(field: ResultField): ResultField {
   };
 }
 
-function sameFieldSeries(left: ResultField, right: ResultField): boolean {
-  return left.type === right.type && left.location === right.location && left.runId === right.runId;
+function fieldSeriesKey(field: ResultField): string {
+  return `${field.runId}:${field.type}:${field.location}`;
 }
 
 function interpolateField(lowerField: ResultField, upperField: ResultField, blend: number, framePosition: number): ResultField {
