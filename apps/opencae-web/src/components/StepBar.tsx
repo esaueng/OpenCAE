@@ -1,5 +1,5 @@
 import type { Project, Study } from "@opencae/schema";
-import { Activity, Anchor, Atom, Box, Layers3, MessageSquare, Moon, PanelLeftClose, PanelLeftOpen, Play, Sun, Weight } from "lucide-react";
+import { Activity, Anchor, Atom, Box, Layers3, Moon, PanelLeftClose, PanelLeftOpen, Play, Sun, Weight } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { canNavigateToStep } from "../appShellState";
 import type { UnitSystem } from "../unitDisplay";
@@ -79,10 +79,6 @@ export function StepBar({ activeStep, project, study, hasResults, collapsed, the
       </div>
       <div className="stepbar-footer">
         <div className="stepbar-actions" aria-label="Project links">
-          <a className="stepbar-link" href="https://form.esauengineering.com/opencae-feedback" target="_blank" rel="noreferrer">
-            <MessageSquare size={14} aria-hidden="true" />
-            Feedback
-          </a>
           <button
             className="stepbar-link"
             type="button"

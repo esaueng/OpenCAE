@@ -2493,8 +2493,17 @@ button:disabled {
   font-weight: var(--fw-regular);
 }
 
-.status-github {
+.status-links {
   margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.status-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   color: var(--color-text-subtle);
   font-family: var(--font-mono);
   font-size: var(--fs-mini);
@@ -2502,8 +2511,12 @@ button:disabled {
   text-decoration: none;
 }
 
-.status-github:hover,
-.status-github:focus-visible {
+.status-link svg {
+  flex: 0 0 auto;
+}
+
+.status-link:hover,
+.status-link:focus-visible {
   color: var(--color-accent);
 }
 
