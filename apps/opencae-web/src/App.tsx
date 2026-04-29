@@ -328,7 +328,10 @@ export function App() {
     viewMode
   ]);
 
-  async function openProjectResponse(action: Promise<{ project: Project; displayModel: DisplayModel; message?: string; results?: LocalResultBundle }>) {
+  async function openProjectResponse(
+    action: Promise<{ project: Project; displayModel: DisplayModel; message?: string; results?: LocalResultBundle }>,
+    options?: { nextStep?: StepId }
+  ) {
     const response = await action;
     setHomeRequested(false);
     setProject(response.project);
@@ -346,8 +349,13 @@ export function App() {
       setActiveRunId(response.results.activeRunId ?? restoredRunId);
       setCompletedRunId(restoredRunId);
       setRunProgress(100);
-      setViewMode("results");
-      setActiveStep("results");
+      if (options?.nextStep) {
+        applyStep(options.nextStep);
+        setViewMode("model");
+      } else {
+        setViewMode("results");
+        setActiveStep("results");
+      }
     } else {
       applyStep("model");
       setViewMode("model");
@@ -364,7 +372,7 @@ export function App() {
   async function handleLoadSample(nextSample = sampleModel, nextAnalysisType = sampleAnalysisType) {
     setSampleModel(nextSample);
     setSampleAnalysisType(nextAnalysisType);
-    await openProjectResponse(loadSampleProject(nextSample, nextAnalysisType));
+    await openProjectResponse(loadSampleProject(nextSample, nextAnalysisType), { nextStep: "model" });
   }
 
   function handleCreateProject() {

@@ -16,4 +16,9 @@ describe("App workflow layout", () => {
     expect(appSource).toContain("<CreateSimulationScreen");
     expect(appSource).not.toContain("<NoStudyPanel");
   });
+
+  test("keeps sample model and analysis changes on the model step", () => {
+    expect(appSource).toContain('await openProjectResponse(loadSampleProject(nextSample, nextAnalysisType), { nextStep: "model" });');
+    expect(appSource).toContain("applyStep(options.nextStep);");
+  });
 });
