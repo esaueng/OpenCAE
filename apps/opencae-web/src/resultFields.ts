@@ -148,6 +148,7 @@ function normalizeValue(value: number, min: number, max: number): number {
 }
 
 function fieldWithOwnValueRange(field: ResultField): ResultField {
+  if (typeof field.frameIndex === "number") return field;
   const values = [
     ...field.values,
     ...(field.samples?.map((sample) => sample.value) ?? [])

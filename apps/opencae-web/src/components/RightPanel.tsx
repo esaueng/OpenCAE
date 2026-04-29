@@ -1088,6 +1088,7 @@ function ResultsPanel({
   const activeFrame = frames.find((frame) => frame.frameIndex === resultFrameIndex) ?? frames[0];
   const activeTimeSeconds = interpolatedFrameTimeSeconds(frames, resultPlaybackPlaying ? resultFramePosition : activeFrame?.frameIndex ?? resultFrameIndex);
   const sliderPosition = resultPlaybackPlaying ? resultFramePosition : frames.findIndex((frame) => frame.frameIndex === (activeFrame?.frameIndex ?? 0));
+  const currentFrameNumber = frames.length ? Math.min(frames.length, Math.max(1, Math.round(sliderPosition) + 1)) : 0;
   const peakDisplacement = peakDisplacementFrame(resultFields, resultSummary);
 
   useEffect(() => {
@@ -1136,7 +1137,7 @@ function ResultsPanel({
         <div className="dynamic-playback">
           <SectionTitle>Frame</SectionTitle>
           <label className="field range-field">
-            <span className="range-label"><span>Current time</span><strong>{`${activeTimeSeconds.toFixed(4)} s`}</strong></span>
+            <span className="range-label"><span>Current time</span><strong>{`${activeTimeSeconds.toFixed(4)} s · Frame ${currentFrameNumber} / ${frames.length}`}</strong></span>
             <input
               type="range"
               min="0"

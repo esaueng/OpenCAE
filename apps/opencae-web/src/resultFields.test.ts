@@ -58,7 +58,7 @@ describe("dynamic result frames", () => {
     expect(nextLoopedResultFrameIndex(indexes, 99)).toBe(0);
   });
 
-  test("renormalizes visible dynamic fields to the active frame range", () => {
+  test("preserves global dynamic field ranges for visible playback frames", () => {
     const fields: ResultField[] = [
       { id: "stress-0", runId: "run", type: "stress", location: "face", values: [0, 399.2], min: 0, max: 399.2, units: "MPa", frameIndex: 0, timeSeconds: 0 },
       { id: "stress-1", runId: "run", type: "stress", location: "face", values: [60.3, 327.5], min: 0, max: 399.2, units: "MPa", frameIndex: 1, timeSeconds: 0.025 }
@@ -66,8 +66,21 @@ describe("dynamic result frames", () => {
 
     const visible = fieldsForResultFrame(fields, 1);
 
-    expect(visible[0]).toMatchObject({ min: 60.3, max: 327.5 });
-    expect(resultSamplesForFaces(faces, visible, "stress").map((sample) => sample.normalized)).toEqual([0, 1]);
+    expect(visible[0]).toMatchObject({ min: 0, max: 399.2 });
+    expect(resultSamplesForFaces(faces, visible, "stress").map((sample) => sample.normalized)).toEqual([
+      60.3 / 399.2,
+      327.5 / 399.2
+    ]);
+  });
+
+  test("keeps static fields locally scaled when building a non-framed result cache", () => {
+    const fields: ResultField[] = [
+      { id: "stress", runId: "run", type: "stress", location: "face", values: [5, 15], min: 0, max: 100, units: "MPa" }
+    ];
+
+    const visible = createResultFrameCache(fields).fieldsForFrame(0);
+
+    expect(visible[0]).toMatchObject({ min: 5, max: 15 });
   });
 
   test("caches visible fields by frame to avoid repeat playback allocations", () => {
@@ -84,7 +97,7 @@ describe("dynamic result frames", () => {
     expect(cache.frameIndexes).toEqual([0, 1]);
   });
 
-  test("interpolates visual fields between adjacent dynamic frames with current full-range scaling", () => {
+  test("interpolates visual fields between adjacent dynamic frames with stable global scaling", () => {
     const fields: ResultField[] = [
       {
         id: "stress-0",
@@ -118,8 +131,8 @@ describe("dynamic result frames", () => {
 
     expect(visible[0]).toMatchObject({
       values: [20, 50],
-      min: 20,
-      max: 50,
+      min: 0,
+      max: 100,
       timeSeconds: 0.0025
     });
     expect(visible[0]?.samples?.[0]?.value).toBe(40);
