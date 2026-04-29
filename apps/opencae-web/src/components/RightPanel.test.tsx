@@ -188,6 +188,35 @@ describe("RightPanel payload mass controls", () => {
     expect(html).not.toContain("Report");
   });
 
+  test("hides large contextual tips until the help trigger is opened", () => {
+    const modelHtml = renderPanel("model", {
+      project: {
+        ...project,
+        geometryFiles: [{
+          id: "geom-sample",
+          projectId: project.id,
+          filename: "bracket-demo.step",
+          localPath: "examples/bracket-demo/bracket-demo.step",
+          artifactKey: "project-1/geometry/bracket-display.json",
+          status: "ready",
+          metadata: { source: "sample", sampleModel: "bracket" }
+        }]
+      }
+    });
+    const supportsHtml = renderPanel("supports");
+    const loadsHtml = renderPanel("loads");
+
+    expect(modelHtml).not.toContain("<strong>Overall dimensions</strong>");
+    expect(modelHtml).not.toContain("Shows the model bounding size");
+    expect(supportsHtml).not.toContain("<strong>Support placement</strong>");
+    expect(supportsHtml).not.toContain("Select the actual model face");
+    expect(loadsHtml).not.toContain("<strong>Load placement</strong>");
+    expect(loadsHtml).not.toContain("Click the exact point for force");
+    expect(`${modelHtml}${supportsHtml}${loadsHtml}`).toContain('aria-label="Overall dimensions help"');
+    expect(`${modelHtml}${supportsHtml}${loadsHtml}`).toContain('aria-label="Support placement help"');
+    expect(`${modelHtml}${supportsHtml}${loadsHtml}`).toContain('aria-label="Load placement help"');
+  });
+
   test("renders sample analysis selection for sample projects", () => {
     const html = renderPanel("model", {
       project: {

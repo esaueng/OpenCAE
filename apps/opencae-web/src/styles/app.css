@@ -1623,6 +1623,15 @@ img {
   border-radius: var(--radius-md);
 }
 
+.help-note--collapsed {
+  display: flex;
+  justify-content: flex-end;
+  margin: -4px 0 10px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+}
+
 .help-note strong,
 .help-note small {
   display: block;

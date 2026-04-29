@@ -1228,14 +1228,8 @@ function HelpLabel({ children, helpId }: { children: ReactNode; helpId: SettingH
 }
 
 function HelpNote({ helpId }: { helpId: SettingHelpId }) {
-  const help = SETTING_HELP[helpId];
   return (
-    <div className="help-note">
-      <HelpVisual kind={help.visual} />
-      <span>
-        <strong>{help.title}</strong>
-        <small>{help.body}</small>
-      </span>
+    <div className="help-note help-note--collapsed">
       <SettingHelpTrigger helpId={helpId} />
     </div>
   );
