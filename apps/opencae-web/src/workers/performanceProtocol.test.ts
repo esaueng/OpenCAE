@@ -19,6 +19,20 @@ describe("performance worker protocol", () => {
     expect(request.payload.framePosition).toBe(0.5);
   });
 
+  test("creates typed playback-frame pre-render requests", () => {
+    const request = createPerformanceWorkerRequest("preparePlaybackFrames", {
+      fields: [] as ResultField[],
+      frameIndexes: [0, 1, 2],
+      playbackFps: 30,
+      budgetBytes: 64 * 1024 * 1024,
+      cacheKey: "run-1:stress"
+    });
+
+    expect(request.operation).toBe("preparePlaybackFrames");
+    expect(request.payload.cacheKey).toBe("run-1:stress");
+    expect(request.payload.frameIndexes).toEqual([0, 1, 2]);
+  });
+
   test("narrows success and failure responses", () => {
     const success = {
       id: "perf-1",

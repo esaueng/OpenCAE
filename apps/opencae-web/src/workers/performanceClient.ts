@@ -1,4 +1,5 @@
 import type { ResultField } from "@opencae/schema";
+import type { PreparedPlaybackFrameCache } from "../resultPlaybackCache";
 import {
   createPerformanceWorkerRequest,
   isPerformanceWorkerFailure,
@@ -30,6 +31,10 @@ export async function solveLocalStudyInWorker(
 export async function prepareResultFrameInWorker(fields: ResultField[], framePosition: number): Promise<ResultField[]> {
   const result = await postPerformanceWorkerRequest("prepareResultFrame", { fields, framePosition });
   return result.fields;
+}
+
+export async function preparePlaybackFramesInWorker(payload: PerformanceWorkerPayloads["preparePlaybackFrames"]): Promise<PreparedPlaybackFrameCache> {
+  return postPerformanceWorkerRequest("preparePlaybackFrames", payload);
 }
 
 export async function postPerformanceWorkerRequest<Operation extends PerformanceWorkerOperation>(

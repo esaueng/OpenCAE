@@ -36,6 +36,8 @@ import { supportDisplayLabel } from "./supportLabels";
 import { nextSelectedPayloadObject, shouldClearPayloadSelectionOnViewerMiss } from "./payloadSelection";
 import { createLocalDynamicStructuralStudy, createLocalStaticStressStudy } from "./localProjectFactory";
 import { createResultFrameCache, hasDynamicPlaybackFrames } from "./resultFields";
+import { hydratePreparedPlaybackFrame, playbackMemoryBudgetBytes, preparedPlaybackFrameForPosition, type PreparedPlaybackFrameCache } from "./resultPlaybackCache";
+import { preparePlaybackFramesInWorker } from "./workers/performanceClient";
 import type { WorkspaceInitialAction } from "./App";
 
 const lazyCadViewerImport = () => import("./components/CadViewer").then((module) => ({ default: module.CadViewer }));
@@ -63,6 +65,13 @@ const seededSummary: ResultSummary = {
 };
 const MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.005;
 const PLAYBACK_STATE_COMMIT_INTERVAL_MS = 1000 / 60;
+
+type ResultPlaybackCacheState =
+  | { status: "idle" }
+  | { status: "preparing"; cacheKey: string }
+  | { status: "ready"; cacheKey: string; cache: PreparedPlaybackFrameCache }
+  | { status: "fallback"; cacheKey: string; message: string }
+  | { status: "error"; cacheKey: string; message: string };
 
 interface WorkspaceAppProps {
   initialAction?: WorkspaceInitialAction | null;
@@ -105,6 +114,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const [resultPlaybackFramePosition, setResultPlaybackFramePosition] = useState(0);
   const [resultPlaybackPlaying, setResultPlaybackPlaying] = useState(false);
   const [resultPlaybackFps, setResultPlaybackFps] = useState(12);
+  const [resultPlaybackCacheState, setResultPlaybackCacheState] = useState<ResultPlaybackCacheState>({ status: "idle" });
   const [draftLoadType, setDraftLoadType] = useState<LoadType>(restoredUi?.draftLoadType ?? "force");
   const [draftLoadValue, setDraftLoadValue] = useState(restoredUi?.draftLoadValue ?? 500);
   const [draftLoadDirection, setDraftLoadDirection] = useState<LoadDirectionLabel>(restoredUi?.draftLoadDirection ?? "-Z");
@@ -139,11 +149,42 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const resultFieldsForUi = useMemo(() => resultFields.map((field) => resultFieldForUnits(field, displayUnitSystem)), [displayUnitSystem, resultFields]);
   const resultFrameCache = useMemo(() => createResultFrameCache(resultFieldsForUi), [resultFieldsForUi]);
   const resultVisualFramePosition = resultPlaybackPlaying ? resultPlaybackFramePosition : resultFrameIndex;
+  const resultPlaybackCacheKey = useMemo(() => [
+    completedRunId,
+    activeRunId,
+    displayModelForUi?.id ?? "no-model",
+    displayModelForUi?.nativeCad?.contentBase64?.length ?? displayModelForUi?.visualMesh?.contentBase64?.length ?? 0,
+    resultMode,
+    showDeformed ? "deformed" : "undeformed",
+    stressExaggeration.toFixed(2),
+    study?.meshSettings.preset ?? "no-mesh",
+    displayUnitSystem,
+    resultFieldsForUi.length,
+    resultFrameCache.frameIndexes.join(","),
+    resultPlaybackFps
+  ].join("|"), [activeRunId, completedRunId, displayModelForUi, displayUnitSystem, resultFieldsForUi.length, resultFrameCache.frameIndexes, resultMode, resultPlaybackFps, showDeformed, stressExaggeration, study?.meshSettings.preset]);
+  const preparedPlaybackFrame = useMemo(() => {
+    if (!resultPlaybackPlaying || resultPlaybackCacheState.status !== "ready") return null;
+    return preparedPlaybackFrameForPosition(resultPlaybackCacheState.cache, resultVisualFramePosition);
+  }, [resultPlaybackCacheState, resultPlaybackPlaying, resultVisualFramePosition]);
   const visibleResultFieldsForUi = useMemo(
-    () => resultPlaybackPlaying ? resultFrameCache.fieldsForFramePosition(resultVisualFramePosition) : resultFrameCache.fieldsForFrame(resultFrameIndex),
-    [resultFrameCache, resultFrameIndex, resultPlaybackPlaying, resultVisualFramePosition]
+    () => {
+      if (resultPlaybackPlaying && preparedPlaybackFrame) return hydratePreparedPlaybackFrame(preparedPlaybackFrame).fields;
+      return resultPlaybackPlaying ? resultFrameCache.fieldsForFramePosition(resultVisualFramePosition) : resultFrameCache.fieldsForFrame(resultFrameIndex);
+    },
+    [preparedPlaybackFrame, resultFrameCache, resultFrameIndex, resultPlaybackPlaying, resultVisualFramePosition]
   );
   const playbackFrameIndexes = useMemo(() => resultFrameCache.frameIndexes, [resultFrameCache]);
+  const resultPlaybackCacheLabel = useMemo(() => {
+    if (resultPlaybackCacheState.status === "preparing") return "Preparing smooth playback";
+    if (resultPlaybackCacheState.status === "ready") {
+      if (resultPlaybackCacheState.cache.mode === "full") return `Smooth playback ready · ${resultPlaybackCacheState.cache.frameCount} frames`;
+      if (resultPlaybackCacheState.cache.mode === "reducedFps") return `Smooth playback ready · ${resultPlaybackCacheState.cache.presentationFps} fps cache`;
+      return "Playback cached at solver frames";
+    }
+    if (resultPlaybackCacheState.status === "fallback" || resultPlaybackCacheState.status === "error") return resultPlaybackCacheState.message;
+    return "";
+  }, [resultPlaybackCacheState]);
   const solverRunning = Boolean(processingRunId) || (runProgress > 0 && runProgress < 100);
   const runReadiness = useMemo(() => readinessForStudy(study), [study]);
   const canRunSimulation = runReadiness.every((item) => item.done) && !solverRunning;
@@ -185,8 +226,44 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   }, [activeStep, playbackFrameIndexes.length]);
 
   useEffect(() => {
+    if (activeStep !== "results" || playbackFrameIndexes.length < 2 || !resultFieldsForUi.length) {
+      setResultPlaybackCacheState({ status: "idle" });
+      return;
+    }
+    let cancelled = false;
+    const navigatorWithMemory = typeof navigator === "undefined" ? undefined : navigator as Navigator & { deviceMemory?: number };
+    setResultPlaybackCacheState({ status: "preparing", cacheKey: resultPlaybackCacheKey });
+    void preparePlaybackFramesInWorker({
+      fields: resultFieldsForUi,
+      frameIndexes: playbackFrameIndexes,
+      playbackFps: resultPlaybackFps,
+      budgetBytes: playbackMemoryBudgetBytes(navigatorWithMemory?.deviceMemory),
+      cacheKey: resultPlaybackCacheKey
+    })
+      .then((cache) => {
+        if (cancelled || cache.cacheKey !== resultPlaybackCacheKey) return;
+        if (cache.mode === "fallback" || !cache.frames.length) {
+          setResultPlaybackCacheState({ status: "fallback", cacheKey: resultPlaybackCacheKey, message: "Using live playback for this result size" });
+          return;
+        }
+        setResultPlaybackCacheState({ status: "ready", cacheKey: resultPlaybackCacheKey, cache });
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        const message = error instanceof Error && error.message ? error.message : "Using live playback for this browser";
+        setResultPlaybackCacheState({ status: "error", cacheKey: resultPlaybackCacheKey, message });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeStep, playbackFrameIndexes, resultFieldsForUi, resultPlaybackCacheKey, resultPlaybackFps]);
+
+  useEffect(() => {
     if (!resultPlaybackPlaying || activeStep !== "results" || playbackFrameIndexes.length < 2) return;
     const frameDurationMs = 1000 / Math.max(1, Math.min(30, resultPlaybackFps));
+    const commitIntervalMs = resultPlaybackCacheState.status === "ready"
+      ? 1000 / Math.max(1, Math.min(60, resultPlaybackCacheState.cache.presentationFps))
+      : PLAYBACK_STATE_COMMIT_INTERVAL_MS;
     let animationFrameId = 0;
     let lastTimestamp: number | null = null;
     let lastCommittedTimestamp = 0;
@@ -196,7 +273,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         const frameDelta = (timestamp - lastTimestamp) / frameDurationMs;
         framePosition = loopedPlaybackFramePosition(playbackFrameIndexes, framePosition + frameDelta);
         resultPlaybackFramePositionRef.current = framePosition;
-        if (timestamp - lastCommittedTimestamp >= PLAYBACK_STATE_COMMIT_INTERVAL_MS) {
+        if (timestamp - lastCommittedTimestamp >= commitIntervalMs) {
           lastCommittedTimestamp = timestamp;
           setResultPlaybackFramePosition((current) => Math.abs(current - framePosition) < 0.0001 ? current : framePosition);
           const nextFrameIndex = Math.floor(framePosition);
@@ -211,7 +288,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     };
     animationFrameId = window.requestAnimationFrame(advancePlaybackFrame);
     return () => window.cancelAnimationFrame(animationFrameId);
-  }, [activeStep, playbackFrameIndexes, resultPlaybackFps, resultPlaybackPlaying]);
+  }, [activeStep, playbackFrameIndexes, resultPlaybackCacheState, resultPlaybackFps, resultPlaybackPlaying]);
 
   const handleMeasureDisplayModelDimensions = useCallback((dimensions: NonNullable<DisplayModel["dimensions"]>) => {
     setDisplayModel((current) => {
@@ -1027,6 +1104,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           onResultFrameChange={handleResultFrameChange}
           resultPlaybackPlaying={resultPlaybackPlaying}
           resultPlaybackFps={resultPlaybackFps}
+          resultPlaybackCacheLabel={resultPlaybackCacheLabel}
           onResultPlaybackToggle={handleResultPlaybackToggle}
           onResultPlaybackFpsChange={setResultPlaybackFps}
           onStepSelect={handleStepSelect}
