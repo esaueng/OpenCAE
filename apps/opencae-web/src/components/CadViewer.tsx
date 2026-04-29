@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ElementRef, MutableRefObject } from "react";
-import { Billboard, Bounds, Edges, GizmoHelper, Grid, Html, Line, OrbitControls, Text, useBounds } from "@react-three/drei";
+import { Billboard, Bounds, Edges, GizmoHelper, Html, Line, OrbitControls, Text, useBounds } from "@react-three/drei";
 import { Canvas, useThree } from "@react-three/fiber";
 import type { ThreeEvent } from "@react-three/fiber";
 import type { DisplayFace, DisplayModel, ResultField } from "@opencae/schema";
@@ -126,9 +126,6 @@ export function CadViewer(props: CadViewerProps) {
   const showDimensionOverlay = shouldShowDimensionOverlay(props.showDimensions, effectiveViewMode);
   const isLightTheme = props.themeMode === "light";
   const viewportBackground = isLightTheme ? "#f7f9fc" : "#070b10";
-  const gridCellColor = isLightTheme ? "#d9e0ea" : "#263140";
-  const gridSectionColor = isLightTheme ? "#c2ccd8" : "#3a4654";
-  const gridFloorZ = useMemo(() => gridFloorZForDisplayModel(props.displayModel), [props.displayModel]);
   const modelRotation = useMemo(() => modelRotationRadians(props.displayModel), [props.displayModel]);
   const baseModelRotation = useMemo(() => baseModelRotationRadians(props.displayModel), [props.displayModel]);
   useEffect(() => {
@@ -140,7 +137,6 @@ export function CadViewer(props: CadViewerProps) {
         <color attach="background" args={[viewportBackground]} />
         <ambientLight intensity={effectiveViewMode === "results" || isLightTheme ? 1.4 : 0.75} />
         <directionalLight position={[4, 6, 3]} intensity={effectiveViewMode === "results" || isLightTheme ? 1.45 : 2.2} />
-        <Grid args={[8, 8]} cellColor={gridCellColor} sectionColor={gridSectionColor} fadeDistance={12} fadeStrength={1.2} position={[0, 0, gridFloorZ]} rotation={[Math.PI / 2, 0, 0]} />
         <Bounds fit clip observe margin={VIEWER_FIT_MARGIN}>
           <group rotation={modelRotation}>
             <group rotation={baseModelRotation}>
@@ -507,13 +503,6 @@ function modelKindForDisplayModel(displayModel: DisplayModel): SampleModelKind {
   if (displayModel.id.includes("plate")) return "plate";
   if (displayModel.id.includes("cantilever")) return "cantilever";
   return "bracket";
-}
-
-function gridFloorZForDisplayModel(displayModel: DisplayModel) {
-  const bounds = dimensionBoundsForDisplayModel(displayModel);
-  if (!bounds) return -0.27;
-  const transformedBounds = transformedBox(bounds, modelToViewerMatrix(displayModel));
-  return transformedBounds.min.z - 0.12;
 }
 
 function transformedBox(bounds: THREE.Box3, transform: THREE.Matrix4) {
