@@ -17,7 +17,7 @@ import { supportDisplayLabel } from "../supportLabels";
 import { getViewportTooltipPosition } from "../tooltipPosition";
 import { forceForUnits, formatDensity, formatMass, formatMaterialStress, formatVolume, loadValueForUnits, type UnitSystem } from "../unitDisplay";
 import { canNavigateToStep } from "../appShellState";
-import { MaterialLibraryModal, ResultsFieldSelector } from "./SimulationWorkflow";
+import { MaterialLibraryModal } from "./SimulationWorkflow";
 
 interface RightPanelProps {
   activeStep: StepId;
@@ -960,7 +960,6 @@ function RunPanel({ study, runProgress, onRunSimulation, onCancelSimulation, can
 }
 
 function ResultsPanel({
-  project,
   resultMode,
   showDeformed,
   stressExaggeration,
@@ -988,12 +987,6 @@ function ResultsPanel({
   const peakDisplacement = peakDisplacementFrame(resultFields);
   return (
     <Panel title="Results" helper="View stress and displacement directly on the 3D model.">
-      <ResultsFieldSelector
-        resultMode={resultMode}
-        fields={resultFields}
-        unitSystem={project.unitSystem}
-        onResultModeChange={onResultModeChange}
-      />
       <div className={`failure-assessment ${assessment.status}`}>
         <span className="assessment-icon"><AssessmentIcon size={20} /></span>
         <span>
@@ -1001,7 +994,6 @@ function ResultsPanel({
           <small>{assessment.message}</small>
         </span>
       </div>
-      <HelpNote helpId="resultMode" />
       {hasPlayback && (
         <div className="dynamic-playback">
           <SectionTitle>Frame</SectionTitle>
@@ -1016,9 +1008,6 @@ function ResultsPanel({
               onChange={(event) => onResultFrameChange?.(frames[Number(event.currentTarget.value)]?.frameIndex ?? 0)}
             />
           </label>
-          <button className="secondary wide" type="button" onClick={() => {
-            onResultPlaybackToggle?.();
-          }}>{resultPlaybackPlaying ? <Pause size={16} /> : <Play size={16} />}{resultPlaybackPlaying ? "Pause" : "Play"}</button>
           <label className="field range-field">
             <span className="range-label"><span>Animation speed</span><strong>{Math.round(resultPlaybackFps)} fps</strong></span>
             <input
@@ -1031,10 +1020,13 @@ function ResultsPanel({
               onChange={(event) => onResultPlaybackFpsChange?.(Number(event.currentTarget.value))}
             />
           </label>
-          <Info label="Loop" value="On" />
+          <button className="secondary wide" type="button" onClick={() => {
+            onResultPlaybackToggle?.();
+          }}>{resultPlaybackPlaying ? <Pause size={16} /> : <Play size={16} />}{resultPlaybackPlaying ? "Pause" : "Play"}</button>
           <Info label="Peak displacement" value={peakDisplacement ? `${peakDisplacement.value} ${peakDisplacement.units} at ${peakDisplacement.timeSeconds.toFixed(4)} s` : "Unavailable"} />
         </div>
       )}
+      <SectionTitle helpId="resultMode">Result mode</SectionTitle>
       <div className="result-buttons">
         <button className={resultMode === "stress" ? "primary" : "secondary"} onClick={() => onResultModeChange("stress")}>Stress</button>
         <button className={resultMode === "displacement" ? "primary" : "secondary"} onClick={() => onResultModeChange("displacement")}>Displacement</button>
