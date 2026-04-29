@@ -8,7 +8,7 @@ import { OpenCaeLogoMark } from "./components/OpenCaeLogoMark";
 import { RightPanel } from "./components/RightPanel";
 import { StartScreen } from "./components/StartScreen";
 import { StepBar, type StepId } from "./components/StepBar";
-import { BoundaryConditionMenu, CreateSimulationModal } from "./components/SimulationWorkflow";
+import { BoundaryConditionMenu, CreateSimulationScreen } from "./components/SimulationWorkflow";
 import { CadViewer, type PrintLayerOrientation, type ResultMode, type ViewMode } from "./components/CadViewer";
 import type { ViewerLoadMarker, ViewerSupportMarker } from "./components/CadViewer";
 import {
@@ -100,7 +100,6 @@ export function App() {
   const [sampleModel, setSampleModel] = useState<SampleModelId>(restoredUi?.sampleModel ?? "bracket");
   const [previewPrintLayerOrientation, setPreviewPrintLayerOrientation] = useState<PrintLayerOrientation | null | undefined>(undefined);
   const [isStepbarCollapsed, setIsStepbarCollapsed] = useState(false);
-  const [showCreateSimulation, setShowCreateSimulation] = useState(false);
   const [showBoundaryConditionMenu, setShowBoundaryConditionMenu] = useState(false);
   const didRequestRestoredHomeView = useRef(false);
   const activeRunSourceRef = useRef<EventSource | null>(null);
@@ -336,7 +335,6 @@ export function App() {
     setRedoStack([]);
     setSelectedLoadPoint(null);
     setSelectedPayloadObject(null);
-    setShowCreateSimulation(!response.project.studies.length);
     if (response.results?.fields.length) {
       setResultSummary(response.results.summary);
       setResultFields(response.results.fields);
@@ -523,7 +521,6 @@ export function App() {
     const nextProject = { ...project, studies: [nextStudy], updatedAt: new Date().toISOString() };
     recordUndoSnapshot(project);
     setProject(nextProject);
-    setShowCreateSimulation(false);
     applyStep(displayModel.bodyCount > 0 ? "material" : "model");
     pushMessage("Static simulation created.");
   }
@@ -534,7 +531,6 @@ export function App() {
     const nextProject = { ...project, studies: [nextStudy], updatedAt: new Date().toISOString() };
     recordUndoSnapshot(project);
     setProject(nextProject);
-    setShowCreateSimulation(false);
     applyStep(displayModel.bodyCount > 0 ? "material" : "model");
     pushMessage("Dynamic structural simulation created.");
   }
@@ -694,12 +690,9 @@ export function App() {
     setHomeRequested(true);
   }
 
-  if (shouldShowStartScreen({ homeRequested, hasProject: Boolean(project), hasDisplayModel: Boolean(displayModel), hasStudy: Boolean(study) }) || !project || !displayModel || !displayModelForUi) {
-    return <StartScreen onLoadSample={handleLoadSample} onCreateProject={handleCreateProject} onOpenProject={handleOpenProject} />;
-  }
-
-  return (
-    <div className={`app-shell theme-${themeMode} ${isStepbarCollapsed ? "stepbar-collapsed" : ""}`}>
+  function renderTopbar(showRunButton: boolean) {
+    if (!project) return null;
+    return (
       <header className="topbar">
         <button className="brand brand-button" type="button" onClick={handleOpenStartMenu} title="Back to start menu" aria-label="Back to start menu">
           <OpenCaeLogoMark />OpenCAE <span className="beta-tag">beta</span>
@@ -715,41 +708,60 @@ export function App() {
             <button className="icon-button history-button" type="button" title="Redo last change" aria-label="Redo last change" disabled={!canRedoAction} onClick={handleRedoAction}><RedoIcon /></button>
           </div>
         </div>
-        <button
-          className={`primary topbar-action ${solverRunning ? "running" : ""}`}
-          onClick={study ? handleRunSimulation : handleCreateStaticSimulation}
-          disabled={study ? !canRunSimulation : false}
-          title={missingRunItems.length ? `Complete before running: ${missingRunItems.join(", ")}` : "Run simulation"}
-        >
-          <span aria-hidden="true">▶</span>{study ? (solverRunning ? "Running…" : "Run simulation") : "Create simulation"}
-        </button>
+        {showRunButton ? (
+          <button
+            className={`primary topbar-action ${solverRunning ? "running" : ""}`}
+            onClick={handleRunSimulation}
+            disabled={!canRunSimulation}
+            title={missingRunItems.length ? `Complete before running: ${missingRunItems.join(", ")}` : "Run simulation"}
+          >
+            <span aria-hidden="true">▶</span>{solverRunning ? "Running…" : "Run simulation"}
+          </button>
+        ) : null}
         <button className="secondary topbar-action" type="button" onClick={handleSaveProject} title="Save project to local disk">
           <Save size={16} aria-hidden="true" />
           Save project
         </button>
       </header>
+    );
+  }
+
+  if (shouldShowStartScreen({ homeRequested, hasProject: Boolean(project), hasDisplayModel: Boolean(displayModel), hasStudy: Boolean(study) }) || !project || !displayModel || !displayModelForUi) {
+    return <StartScreen onLoadSample={handleLoadSample} onCreateProject={handleCreateProject} onOpenProject={handleOpenProject} />;
+  }
+
+  if (project && displayModel && displayModelForUi && !study) {
+    return (
+      <div className={`app-shell theme-${themeMode} simulation-type-shell ${isStepbarCollapsed ? "stepbar-collapsed" : ""}`}>
+        {renderTopbar(false)}
+        <CreateSimulationScreen
+          onCreateStatic={handleCreateStaticSimulation}
+          onCreateDynamic={handleCreateDynamicSimulation}
+        />
+        <BottomPanel status={status} logs={logs} projectName={project.name} studyName="No simulation" meshStatus="Not generated" solverStatus="Idle" />
+      </div>
+    );
+  }
+
+  if (!study) return null;
+
+  return (
+    <div className={`app-shell theme-${themeMode} ${isStepbarCollapsed ? "stepbar-collapsed" : ""}`}>
+      {renderTopbar(true)}
 
       <main className="workspace">
-        {study ? (
-          <StepBar
-            activeStep={activeStep}
-            collapsed={isStepbarCollapsed}
-            project={project}
-            themeMode={themeMode}
-            onSelect={handleStepSelect}
-            onToggleCollapsed={() => setIsStepbarCollapsed((collapsed) => !collapsed)}
-            onToggleTheme={() => setThemeMode((mode) => (mode === "dark" ? "light" : "dark"))}
-            onUnitSystemChange={handleUnitSystemChange}
-            study={study}
-            hasResults={viewMode === "results" || resultFields.length > 0}
-          />
-        ) : (
-          <NoStudyPanel
-            hasGeometry={displayModel.bodyCount > 0 || project.geometryFiles.length > 0}
-            onUploadModel={handleUploadModel}
-            onCreateSimulation={() => setShowCreateSimulation(true)}
-          />
-        )}
+        <StepBar
+          activeStep={activeStep}
+          collapsed={isStepbarCollapsed}
+          project={project}
+          themeMode={themeMode}
+          onSelect={handleStepSelect}
+          onToggleCollapsed={() => setIsStepbarCollapsed((collapsed) => !collapsed)}
+          onToggleTheme={() => setThemeMode((mode) => (mode === "dark" ? "light" : "dark"))}
+          onUnitSystemChange={handleUnitSystemChange}
+          study={study}
+          hasResults={viewMode === "results" || resultFields.length > 0}
+        />
         <CadViewer
           displayModel={displayModelForUi}
           activeStep={activeStep}
@@ -775,7 +787,7 @@ export function App() {
           onResetView={handleFitDefaultView}
           onMeasureDisplayModelDimensions={handleMeasureDisplayModelDimensions}
         />
-        {study ? <RightPanel
+        <RightPanel
           activeStep={activeStep}
           project={project}
           displayModel={displayModelForUi}
@@ -879,7 +891,7 @@ export function App() {
           onResultPlaybackToggle={() => setResultPlaybackPlaying((playing) => !playing)}
           onResultPlaybackFpsChange={setResultPlaybackFps}
           onStepSelect={handleStepSelect}
-        /> : null}
+        />
         {showBoundaryConditionMenu && study ? (
           <BoundaryConditionMenu
             open
@@ -887,69 +899,10 @@ export function App() {
             onClose={() => setShowBoundaryConditionMenu(false)}
           />
         ) : null}
-        <CreateSimulationModal
-          open={showCreateSimulation}
-          onCreateStatic={handleCreateStaticSimulation}
-          onCreateDynamic={handleCreateDynamicSimulation}
-          onClose={() => setShowCreateSimulation(false)}
-        />
       </main>
 
       <BottomPanel status={status} logs={logs} projectName={project.name} studyName={study?.name ?? "No simulation"} meshStatus={study?.meshSettings.status === "complete" ? "Ready" : "Not generated"} solverStatus={solverRunning ? "Running" : runProgress >= 100 ? "Complete" : "Idle"} />
     </div>
-  );
-}
-
-function NoStudyPanel({ hasGeometry, onUploadModel, onCreateSimulation }: { hasGeometry: boolean; onUploadModel: (file: File) => void; onCreateSimulation: () => void }) {
-  const uploadInputRef = useRef<HTMLInputElement | null>(null);
-  return (
-    <aside className="study-tree no-study-panel">
-      <section className="study-tree-section">
-        <div className="study-tree-section-header">
-          <span>Geometries</span>
-        </div>
-        <div className="tree-row active">
-          <button type="button">
-            <span className={`setup-status ${hasGeometry ? "complete" : "missing"}`} />
-            Geometry
-          </button>
-        </div>
-      </section>
-      <section className="study-tree-section">
-        <div className="study-tree-section-header">
-          <span>Simulations</span>
-        </div>
-        <button className="outline-action wide" type="button" onClick={onCreateSimulation}>Create Simulation</button>
-        <p className="panel-copy">Create a Static Analysis after loading geometry. Other analysis types are listed in the simulation picker as future options.</p>
-      </section>
-      <section className="study-tree-section">
-        <div className="study-tree-section-header">
-          <span>Model</span>
-        </div>
-        <input
-          ref={uploadInputRef}
-          className="hidden-file-input"
-          type="file"
-          tabIndex={-1}
-          aria-hidden="true"
-          accept=".step,.stp,.stl,.obj"
-          onChange={(event) => {
-            const file = event.currentTarget.files?.[0];
-            event.currentTarget.value = "";
-            if (file) onUploadModel(file);
-          }}
-        />
-        <button className={hasGeometry ? "secondary wide" : "primary wide"} type="button" onClick={() => uploadInputRef.current?.click()}>
-          {hasGeometry ? "Replace model" : "Upload model"}
-        </button>
-      </section>
-      <section className="study-tree-section">
-        <div className="study-tree-section-header">
-          <span>Job status</span>
-        </div>
-        <span className="job-status-row inactive">No active simulation</span>
-      </section>
-    </aside>
   );
 }
 

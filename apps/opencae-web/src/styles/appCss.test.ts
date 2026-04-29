@@ -66,6 +66,14 @@ describe("app CSS", () => {
     expect(startBrand).toMatch(/transform:\s*translate\(-50%,\s*-28px\)/);
   });
 
+  test("uses the start screen background for the required simulation type screen", () => {
+    const simulationTypeScreen = cssRule(".simulation-type-screen");
+    const simulationTypeGrid = cssRule(".simulation-type-screen::before");
+
+    expect(simulationTypeScreen).toMatch(/radial-gradient\(ellipse\s+80%\s+50%\s+at\s+50%\s+0%/);
+    expect(simulationTypeGrid).toMatch(/background-size:\s*42px\s+42px/);
+  });
+
   test("aligns all start screen footer text on one row", () => {
     const startFooter = cssRule(".start-footer");
     const startFooterItems = cssRule(".start-footer > *");

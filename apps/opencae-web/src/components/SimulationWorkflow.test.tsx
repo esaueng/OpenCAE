@@ -4,6 +4,7 @@ import type { ResultField, Study } from "@opencae/schema";
 import {
   BoundaryConditionMenu,
   CreateSimulationModal,
+  CreateSimulationScreen,
   MaterialLibraryModal,
   ResultsFieldSelector,
   StudyTree
@@ -48,6 +49,16 @@ describe("static simulation workflow components", () => {
     expect(html).not.toContain("Frequency Analysis");
     expect(html).not.toContain("Coming soon");
     expect(html).not.toContain("Create Dynamic");
+  });
+
+  test("renders a required simulation type screen without a close action", () => {
+    const html = renderToStaticMarkup(<CreateSimulationScreen onCreateStatic={vi.fn()} onCreateDynamic={vi.fn()} />);
+
+    expect(html).toContain("Choose simulation type");
+    expect(html).toContain("Static Analysis");
+    expect(html).toContain("Dynamic Analysis");
+    expect(html).toContain(">Create Simulation</button>");
+    expect(html).not.toContain("Close create simulation");
   });
 
   test("renders setup tree statuses and plus actions for simulation setup", () => {
