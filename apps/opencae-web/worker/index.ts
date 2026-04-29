@@ -211,7 +211,7 @@ async function runCloudFeaSolve(runId: string, env: Env): Promise<void> {
     await artifacts.put(`runs/${runId}/results.json`, JSON.stringify(normalized, null, 2));
     await artifacts.put(`runs/${runId}/events.json`, JSON.stringify([
       ...events,
-      { runId, type: "complete", progress: 100, message: "Cloud FEA transient solve complete.", timestamp: new Date().toISOString() }
+      { runId, type: "complete", progress: 100, message: normalized.summary.transient ? "Cloud FEA transient solve complete." : "Cloud FEA static solve complete.", timestamp: new Date().toISOString() }
     ], null, 2));
   } catch (error) {
     const message = error instanceof Error ? error.message : "Cloud FEA container solve failed.";
@@ -250,12 +250,127 @@ async function readContainerFailure(response: Response): Promise<string> {
 }
 
 function normalizeContainerResult(runId: string, result: Record<string, unknown>) {
-  const summary = isRecord(result.summary) ? result.summary : {};
-  const fields = Array.isArray(result.fields) ? result.fields : [];
-  return {
-    summary,
-    fields: fields.map((field) => isRecord(field) ? { ...field, runId: typeof field.runId === "string" ? field.runId : runId } : field)
+  const summary = isRecord(result.summary) ? result.summary : undefined;
+  const rawFields = Array.isArray(result.fields) ? result.fields : undefined;
+  if (!summary) throw new Error("Cloud FEA container returned no result summary.");
+  if (!rawFields?.length) throw new Error("Cloud FEA container returned no result fields.");
+  assertFiniteSummary(summary);
+  if (looksLikePlaceholderResult(summary, rawFields)) {
+    throw new Error("Cloud FEA container returned placeholder result values; refusing to publish fake results.");
+  }
+  const normalizedSummary = {
+    maxStress: numberField(summary, "maxStress"),
+    maxStressUnits: stringField(summary, "maxStressUnits"),
+    maxDisplacement: numberField(summary, "maxDisplacement"),
+    maxDisplacementUnits: stringField(summary, "maxDisplacementUnits"),
+    safetyFactor: numberField(summary, "safetyFactor"),
+    reactionForce: numberField(summary, "reactionForce"),
+    reactionForceUnits: stringField(summary, "reactionForceUnits"),
+    failureAssessment: failureAssessmentFor(summary),
+    ...(isRecord(summary.transient) ? { transient: normalizeTransient(summary.transient) } : {})
   };
+  return {
+    summary: normalizedSummary,
+    fields: rawFields.map((field, index) => normalizeField(runId, field, index))
+  };
+}
+
+function assertFiniteSummary(summary: Record<string, unknown>): void {
+  for (const key of ["maxStress", "maxDisplacement", "safetyFactor", "reactionForce"]) {
+    numberField(summary, key);
+  }
+  for (const key of ["maxStressUnits", "maxDisplacementUnits", "reactionForceUnits"]) {
+    stringField(summary, key);
+  }
+}
+
+function looksLikePlaceholderResult(summary: Record<string, unknown>, fields: unknown[]): boolean {
+  if (numberField(summary, "maxStress") === 1_440_000 && numberField(summary, "safetyFactor") === 172) return true;
+  return fields.some((field) => JSON.stringify(field).includes("cloudflare_fea_placeholder"));
+}
+
+function normalizeField(runId: string, rawField: unknown, index: number) {
+  if (!isRecord(rawField)) throw new Error(`Cloud FEA container returned invalid field ${index}.`);
+  const values = Array.isArray(rawField.values) ? rawField.values.filter((value): value is number => typeof value === "number" && Number.isFinite(value)) : [];
+  if (!values.length) throw new Error(`Cloud FEA container returned field ${index} without numeric values.`);
+  const fieldRunId = typeof rawField.runId === "string" ? rawField.runId : runId;
+  return {
+    ...rawField,
+    id: typeof rawField.id === "string" ? rawField.id : `field-${fieldRunId}-${index}`,
+    runId: fieldRunId,
+    values,
+    min: typeof rawField.min === "number" && Number.isFinite(rawField.min) ? rawField.min : Math.min(...values),
+    max: typeof rawField.max === "number" && Number.isFinite(rawField.max) ? rawField.max : Math.max(...values),
+    units: typeof rawField.units === "string" ? rawField.units : "",
+    ...(typeof rawField.timeSeconds === "number" && Number.isFinite(rawField.timeSeconds)
+      ? { timeSeconds: rawField.timeSeconds }
+      : typeof rawField.time === "number" && Number.isFinite(rawField.time)
+        ? { timeSeconds: rawField.time }
+        : {})
+  };
+}
+
+function normalizeTransient(transient: Record<string, unknown>) {
+  const startTime = numberOr(transient.startTime, 0);
+  const endTime = numberOr(transient.endTime, startTime);
+  const timeStep = numberOr(transient.timeStep, 0);
+  const outputInterval = numberOr(transient.outputInterval, timeStep);
+  const frameCount = Math.max(1, Math.round(numberOr(transient.frameCount, 1)));
+  return {
+    analysisType: "dynamic_structural" as const,
+    integrationMethod: "newmark_average_acceleration" as const,
+    startTime,
+    endTime,
+    timeStep,
+    outputInterval,
+    dampingRatio: numberOr(transient.dampingRatio, 0),
+    frameCount,
+    peakDisplacementTimeSeconds: numberOr(transient.peakDisplacementTimeSeconds, endTime),
+    peakDisplacement: numberOr(transient.peakDisplacement, 0)
+  };
+}
+
+function failureAssessmentFor(summary: Record<string, unknown>) {
+  const safetyFactor = numberField(summary, "safetyFactor");
+  if (safetyFactor < 1) {
+    return {
+      status: "fail",
+      title: "Likely to fail",
+      message: `Peak stress is ${formatNumber(numberField(summary, "maxStress"))} ${stringField(summary, "maxStressUnits")}, which exceeds the assigned material yield limit.`
+    };
+  }
+  if (safetyFactor < 1.5) {
+    return {
+      status: "warning",
+      title: "Low safety margin",
+      message: `Safety factor is ${formatNumber(safetyFactor)}. Increase material strength, section size, or reduce load.`
+    };
+  }
+  return {
+    status: "pass",
+    title: "Unlikely to yield",
+    message: `Safety factor is ${formatNumber(safetyFactor)}. Peak stress is below the assigned material yield limit.`
+  };
+}
+
+function numberField(record: Record<string, unknown>, key: string): number {
+  const value = record[key];
+  if (typeof value !== "number" || !Number.isFinite(value)) throw new Error(`Cloud FEA container returned invalid numeric summary field: ${key}.`);
+  return value;
+}
+
+function stringField(record: Record<string, unknown>, key: string): string {
+  const value = record[key];
+  if (typeof value !== "string") throw new Error(`Cloud FEA container returned invalid text summary field: ${key}.`);
+  return value;
+}
+
+function numberOr(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function formatNumber(value: number): string {
+  return value.toLocaleString(undefined, { maximumFractionDigits: 3 });
 }
 
 async function putOptionalArtifact(artifacts: R2BucketBinding, key: string, value: unknown): Promise<void> {

@@ -32,7 +32,7 @@ pnpm test
 
 ## Cloudflare Worker Deploy
 
-The Cloudflare target serves the Vite web app from Workers Static Assets. It is intentionally local-first: API-backed actions return a JSON 503 from the Worker so the web client uses its browser-local fallback behavior.
+The production Cloudflare target for `cae.esau.app` serves the Vite web app from Workers Static Assets and enables the Cloud FEA queue plus CalculiX container binding. Use the default deploy commands for production so queued Cloud FEA runs always have the `FEA_CONTAINER` binding available.
 
 ```bash
 pnpm install
@@ -40,12 +40,19 @@ pnpm deploy:cloudflare:dry-run
 pnpm deploy:cloudflare
 ```
 
-Wrangler uses [wrangler.jsonc](wrangler.jsonc). The deploy builds `apps/opencae-web/dist`, serves it through the Worker asset binding, and uses SPA fallback routing for browser routes.
+Wrangler uses [wrangler.containers.jsonc](wrangler.containers.jsonc). The deploy builds `apps/opencae-web/dist`, serves it through the Worker asset binding, uses SPA fallback routing for browser routes, and binds R2, Queues, and the OpenCAE FEA container.
+
+For a local-first/static Worker deploy without Cloud FEA containers, use:
+
+```bash
+pnpm deploy:cloudflare:local-first:dry-run
+pnpm deploy:cloudflare:local-first
+```
 
 For Cloudflare Builds, set:
 
 - Build command: `pnpm build:cloudflare`
-- Deploy command: `npx wrangler deploy --config wrangler.jsonc`
+- Deploy command: `npx wrangler deploy --config wrangler.containers.jsonc`
 
 ## Workspace Layout
 

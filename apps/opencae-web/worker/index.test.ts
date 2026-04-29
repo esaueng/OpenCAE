@@ -1,3 +1,6 @@
+import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, test, vi } from "vitest";
 import worker from "./index";
 
@@ -15,6 +18,21 @@ class MemoryR2Bucket {
 }
 
 describe("Cloudflare FEA worker orchestration", () => {
+  test("default Cloudflare deploy uses the container-enabled production config", () => {
+    const packageJson = JSON.parse(readFileSync(resolve(__dirname, "../../../package.json"), "utf8")) as { scripts: Record<string, string> };
+    const containerConfig = JSON.parse(readFileSync(resolve(__dirname, "../../../wrangler.containers.jsonc"), "utf8")) as {
+      name?: string;
+      containers?: Array<{ class_name?: string; image?: string }>;
+      durable_objects?: { bindings?: Array<{ name?: string; class_name?: string }> };
+    };
+
+    expect(packageJson.scripts["deploy:cloudflare"]).toContain("--config wrangler.containers.jsonc");
+    expect(packageJson.scripts["deploy:cloudflare:dry-run"]).toContain("--config wrangler.containers.jsonc");
+    expect(containerConfig.name).toBe("opencae");
+    expect(containerConfig.containers?.[0]).toMatchObject({ class_name: "OpenCaeFeaContainer", image: "opencae/opencae-fea:latest" });
+    expect(containerConfig.durable_objects?.bindings).toContainEqual({ name: "FEA_CONTAINER", class_name: "OpenCaeFeaContainer" });
+  });
+
   test("queues cloud FEA runs and stores run artifacts in R2", async () => {
     const bucket = new MemoryR2Bucket();
     const send = vi.fn(async () => undefined);
@@ -196,6 +214,76 @@ describe("Cloudflare FEA worker orchestration", () => {
     expect(await bucket.get("runs/run-cloud-fail/results.json")).toBeNull();
     expect(resultsResponse.status).toBe(404);
   });
+
+  test("queue handler records missing container binding as a run failure without results", async () => {
+    const bucket = new MemoryR2Bucket();
+    await bucket.put("runs/run-cloud-no-container/request.json", JSON.stringify({
+      runId: "run-cloud-no-container",
+      studyId: "study-1",
+      geometry: { format: "stl", filename: "cantilever.stl", contentBase64: closedStlBase64() }
+    }));
+    const message = { body: { runId: "run-cloud-no-container" }, ack: vi.fn(), retry: vi.fn() };
+    const env = {
+      ASSETS: { fetch: vi.fn(async () => new Response("asset")) },
+      FEA_ARTIFACTS: bucket
+    };
+
+    await worker.queue({ messages: [message] }, env);
+    const events = JSON.parse(await (await bucket.get("runs/run-cloud-no-container/events.json"))!.text()) as Array<{ type: string; message: string }>;
+
+    expect(message.ack).toHaveBeenCalled();
+    expect(events.at(-1)).toMatchObject({ type: "error", message: "Cloud FEA container binding is not configured." });
+    expect(await bucket.get("runs/run-cloud-no-container/results.json")).toBeNull();
+  });
+
+  test("queue handler rejects placeholder cloud FEA results instead of publishing fake capacity", async () => {
+    const bucket = new MemoryR2Bucket();
+    await bucket.put("runs/run-cloud-placeholder/request.json", JSON.stringify({
+      runId: "run-cloud-placeholder",
+      studyId: "study-1",
+      geometry: { format: "stl", filename: "cantilever.stl", contentBase64: closedStlBase64() }
+    }));
+    const message = { body: { runId: "run-cloud-placeholder" }, ack: vi.fn(), retry: vi.fn() };
+    const env = {
+      ASSETS: { fetch: vi.fn(async () => new Response("asset")) },
+      FEA_ARTIFACTS: bucket,
+      FEA_CONTAINER: {
+        fetch: vi.fn(async () => Response.json(cloudPlaceholderSolveResponse("run-cloud-placeholder")))
+      }
+    };
+
+    await worker.queue({ messages: [message] }, env);
+    const events = JSON.parse(await (await bucket.get("runs/run-cloud-placeholder/events.json"))!.text()) as Array<{ type: string; message: string }>;
+
+    expect(events.at(-1)?.type).toBe("error");
+    expect(events.at(-1)?.message).toContain("placeholder");
+    expect(await bucket.get("runs/run-cloud-placeholder/results.json")).toBeNull();
+  });
+
+  test("container runner emits non-placeholder static and dynamic CalculiX contract results", () => {
+    const staticResult = runContainerSolve({ runId: "run-static", geometry: { format: "stl", filename: "beam.stl", contentBase64: closedStlBase64() } });
+    const dynamicResult = runContainerSolve({
+      runId: "run-dynamic",
+      analysisType: "dynamic_structural",
+      dynamicSettings: { startTime: 0, endTime: 0.01, timeStep: 0.005, outputInterval: 0.005, dampingRatio: 0.02 },
+      geometry: { format: "stl", filename: "beam.stl", contentBase64: closedStlBase64() }
+    });
+
+    expect(staticResult.summary.maxStress).toBeGreaterThan(100_000_000);
+    expect(staticResult.summary.maxStress).not.toBe(1_440_000);
+    expect(staticResult.summary.safetyFactor).toBeLessThan(10);
+    expect(staticResult.summary.reactionForce).toBe(500);
+    expect(staticResult.artifacts.inputDeck).toContain("*STATIC");
+    expect(dynamicResult.summary.transient.frameCount).toBeGreaterThan(1);
+    expect(dynamicResult.fields.some((field: { type: string; frameIndex?: number }) => field.type === "stress" && field.frameIndex === 1)).toBe(true);
+    expect(dynamicResult.artifacts.inputDeck).toContain("*DYNAMIC");
+  });
+
+  test("container runner rejects invalid open surface geometry", () => {
+    const result = runContainerSolve({ runId: "run-invalid", geometry: { format: "stl", filename: "open.stl", contentBase64: btoa("solid\nendsolid\n") } });
+
+    expect(result.error).toContain("not watertight");
+  });
 });
 
 function cloudContainerSolveResponse(runId: string, dynamic: boolean) {
@@ -242,4 +330,66 @@ function cloudContainerSolveResponse(runId: string, dynamic: boolean) {
       meshSummary: { nodes: 2, elements: 1 }
     }
   };
+}
+
+function cloudPlaceholderSolveResponse(runId: string) {
+  return {
+    summary: {
+      maxStress: 1440000,
+      maxStressUnits: "Pa",
+      maxDisplacement: 0.0038,
+      maxDisplacementUnits: "m",
+      safetyFactor: 172,
+      reactionForce: 500,
+      reactionForceUnits: "N"
+    },
+    fields: [
+      {
+        id: `field-${runId}-placeholder`,
+        runId,
+        type: "stress",
+        location: "node",
+        values: [1440000],
+        min: 120000,
+        max: 1440000,
+        units: "Pa",
+        samples: [{ point: [0, 0, 0], normal: [0, 1, 0], value: 1440000, source: "cloudflare_fea_placeholder", vonMisesStressPa: 1440000 }]
+      }
+    ],
+    artifacts: {
+      inputDeck: "*STATIC\n",
+      solverLog: "placeholder",
+      meshSummary: { nodes: 1, elements: 1 }
+    }
+  };
+}
+
+function runContainerSolve(payload: Record<string, unknown>) {
+  const source = [
+    "import json, sys",
+    "sys.path.insert(0, 'services/opencae-fea-container')",
+    "import runner",
+    "payload = json.loads(sys.stdin.read())",
+    "try:",
+    "    print(json.dumps(runner.solve(payload)))",
+    "except runner.UserFacingSolveError as error:",
+    "    print(json.dumps({'error': str(error), 'status': error.status}))"
+  ].join("\n");
+  const output = execFileSync("python3", ["-c", source], {
+    cwd: resolve(__dirname, "../../.."),
+    input: JSON.stringify(payload),
+    encoding: "utf8"
+  });
+  return JSON.parse(output);
+}
+
+function closedStlBase64() {
+  return btoa([
+    "solid tetra",
+    "facet normal 0 0 1 outer loop vertex 0 0 0 vertex 1 0 0 vertex 0 1 0 endloop endfacet",
+    "facet normal 0 1 0 outer loop vertex 0 0 0 vertex 0 0 1 vertex 1 0 0 endloop endfacet",
+    "facet normal 1 0 0 outer loop vertex 0 0 0 vertex 0 1 0 vertex 0 0 1 endloop endfacet",
+    "facet normal 1 1 1 outer loop vertex 1 0 0 vertex 0 0 1 vertex 0 1 0 endloop endfacet",
+    "endsolid tetra"
+  ].join("\n"));
 }
