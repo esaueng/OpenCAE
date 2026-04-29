@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, test } from "vitest";
 
-const appSource = readFileSync(resolve(__dirname, "App.tsx"), "utf8");
+const appSource = readFileSync(resolve(__dirname, "WorkspaceApp.tsx"), "utf8");
 
 describe("App workflow layout", () => {
   test("uses the step-by-step StepBar as the primary simulation workflow", () => {
