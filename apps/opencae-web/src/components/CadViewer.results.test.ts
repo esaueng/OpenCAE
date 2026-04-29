@@ -231,6 +231,21 @@ describe("CadViewer result coloring", () => {
     expect(resultValueForPoint("uploaded", "stress", 1, new THREE.Vector3(0, 0.18, 0), dynamicSamples)).toBeGreaterThan(0.9);
   });
 
+  test("does not clamp solved stress samples to blue when visual exaggeration is high", () => {
+    const dynamicSamples: FaceResultSample[] = [
+      {
+        face: { id: "mid", label: "Mid", color: "#4da3ff", center: [0, 0.18, 0], normal: [0, 1, 0], stressValue: 35 },
+        value: 35,
+        normalized: 0.35,
+        fieldSamples: [
+          { point: [0, 0.18, 0], normal: [0, 1, 0], value: 35, normalized: 0.35 }
+        ]
+      }
+    ];
+
+    expect(resultValueForPoint("plate", "stress", 4, new THREE.Vector3(0, 0.18, 0), dynamicSamples)).toBeCloseTo(0.35);
+  });
+
   test("prefers solver point samples over face fallback when coloring uploaded result geometry", () => {
     const lowFaceSamples: FaceResultSample[] = [
       {
