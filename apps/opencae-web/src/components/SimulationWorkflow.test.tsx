@@ -33,13 +33,21 @@ const fields: ResultField[] = [
 ];
 
 describe("static simulation workflow components", () => {
-  test("renders a create simulation modal with static and dynamic analysis enabled", () => {
+  test("renders a simplified create simulation modal with only static and dynamic choices", () => {
     const html = renderToStaticMarkup(<CreateSimulationModal open onCreateStatic={vi.fn()} onCreateDynamic={vi.fn()} onClose={vi.fn()} />);
 
     expect(html).toContain("Create Simulation");
     expect(html).toContain("Static Analysis");
     expect(html).toContain("Dynamic Analysis");
+    expect(html).toContain("Static stress example");
+    expect(html).toContain("Dynamic stress frame sequence example");
     expect(html).toContain("Time-dependent");
+    expect(html).toContain("Choose simulation type");
+    expect(html).toContain(">Create Simulation</button>");
+    expect(html).not.toContain("Incompressible");
+    expect(html).not.toContain("Frequency Analysis");
+    expect(html).not.toContain("Coming soon");
+    expect(html).not.toContain("Create Dynamic");
   });
 
   test("renders setup tree statuses and plus actions for simulation setup", () => {

@@ -264,7 +264,7 @@ img {
   font-size: var(--fs-sm);
 }
 
-.simulation-options-layout,
+.simulation-picker-layout,
 .material-library-layout {
   min-height: 0;
   display: grid;
@@ -272,7 +272,7 @@ img {
   overflow: hidden;
 }
 
-.simulation-option-list,
+.simulation-choice-list,
 .material-list-pane {
   min-height: 0;
   overflow: auto;
@@ -280,7 +280,7 @@ img {
   background: var(--color-surface-2);
 }
 
-.simulation-group h3,
+.simulation-choice-list h3,
 .material-list-pane h3 {
   padding: 10px var(--sp-4);
   color: var(--color-text-muted);
@@ -290,15 +290,13 @@ img {
   border-bottom: var(--border-thin);
 }
 
-.analysis-option,
+.simulation-choice-card,
 .material-list button,
 .condition-menu button,
 .result-option {
   width: 100%;
-  min-height: 40px;
   display: flex;
   align-items: center;
-  gap: 10px;
   padding: 9px var(--sp-4);
   color: var(--color-text);
   background: transparent;
@@ -307,21 +305,56 @@ img {
   text-align: left;
 }
 
-.analysis-option.active,
+.simulation-choice-card {
+  min-height: 168px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+  padding: var(--sp-4);
+}
+
+.simulation-choice-card img {
+  width: 100%;
+  aspect-ratio: 16 / 8;
+  object-fit: cover;
+  border: var(--border-thin);
+  border-radius: var(--radius-sm);
+  background: #080d14;
+}
+
+.simulation-choice-card span {
+  display: grid;
+  gap: 4px;
+}
+
+.simulation-choice-card strong {
+  color: var(--color-text);
+  font-size: var(--fs-md);
+}
+
+.simulation-choice-card small {
+  color: var(--color-text-muted);
+  font-size: var(--fs-sm);
+}
+
+.simulation-choice-card.active,
 .material-list button.active,
 .tree-row.active {
   background: color-mix(in srgb, var(--color-accent) 16%, transparent);
   color: var(--color-accent);
 }
 
-.analysis-option.disabled,
+.simulation-choice-card.active img {
+  border-color: color-mix(in srgb, var(--color-accent) 72%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-accent) 36%, transparent);
+}
+
 .condition-menu button.disabled,
 .result-option.disabled {
   color: var(--color-text-muted);
   cursor: not-allowed;
 }
 
-.analysis-option small,
 .condition-menu small {
   margin-left: auto;
   color: var(--color-text-subtle);
@@ -370,6 +403,21 @@ img {
   max-width: 620px;
   color: var(--color-text-muted);
   line-height: var(--lh-loose);
+}
+
+.selected-analysis-summary {
+  display: flex;
+  flex-direction: column;
+}
+
+.analysis-example-image {
+  width: calc(100% + var(--sp-5) * 2);
+  max-height: 300px;
+  aspect-ratio: 16 / 8;
+  object-fit: cover;
+  margin: calc(var(--sp-5) * -1) calc(var(--sp-5) * -1) var(--sp-5);
+  background: #080d14;
+  border-bottom: var(--border-thin);
 }
 
 .analysis-tags {
@@ -599,12 +647,12 @@ img {
 }
 
 @media (max-width: 860px) {
-  .simulation-options-layout,
+  .simulation-picker-layout,
   .material-library-layout {
     grid-template-columns: 1fr;
   }
 
-  .simulation-option-list,
+  .simulation-choice-list,
   .material-list-pane {
     max-height: 280px;
     border-right: 0;
