@@ -428,8 +428,12 @@ function stabilizeDynamicFieldRanges(fields: ResultField[]) {
       ...(field.samples?.map((sample) => sample.value) ?? [])
     ]).filter(Number.isFinite);
     if (!values.length) continue;
-    const min = Math.min(...values);
-    const max = Math.max(...values);
+    let min = Number.POSITIVE_INFINITY;
+    let max = Number.NEGATIVE_INFINITY;
+    for (const value of values) {
+      min = Math.min(min, value);
+      max = Math.max(max, value);
+    }
     for (const field of matchingFields) {
       field.min = round(min, dynamicRangeDigits(type));
       field.max = round(max, dynamicRangeDigits(type));
