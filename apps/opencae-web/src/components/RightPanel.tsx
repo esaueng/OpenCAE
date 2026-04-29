@@ -914,6 +914,8 @@ function RunPanel({ study, runProgress, runTiming, onRunSimulation, onCancelSimu
   ] as const;
   const dynamic = study.type === "dynamic_structural" ? study.solverSettings : null;
   const backend = solverBackendForStudy(study);
+  const cloudDynamicFallback = Boolean(dynamic && backend === "cloudflare_fea");
+  const effectiveRuntimeBackend = cloudDynamicFallback ? "local_detailed" : backend;
   const fidelity = solverFidelityForStudy(study);
   const updateSolverChoice = (settings: SolverSettingsPatch) => {
     onUpdateSolverSettings?.(settings);
@@ -944,8 +946,9 @@ function RunPanel({ study, runProgress, runTiming, onRunSimulation, onCancelSimu
       </label>
       <div className="summary-box">
         <Info label="Expected detail" value={fidelityEstimateLabel(fidelity)} />
-        <Info label="Cloud runtime" value={backend === "cloudflare_fea" ? "CalculiX container" : "Browser local"} />
+        <Info label="Cloud runtime" value={effectiveRuntimeBackend === "cloudflare_fea" ? "CalculiX container" : "Browser local"} />
       </div>
+      {cloudDynamicFallback && <p className="panel-copy">Cloud FEA is static-only right now. Dynamic studies run with local playback frames.</p>}
       {dynamic && (
         <>
           <SectionTitle>Dynamic settings</SectionTitle>
@@ -999,9 +1002,9 @@ function RunPanel({ study, runProgress, runTiming, onRunSimulation, onCancelSimu
       )}
       <SectionTitle helpId="solver">Solver</SectionTitle>
       <div className="summary-box">
-        <Info label="Backend" value={backend === "cloudflare_fea" ? "cloudflare-fea-calculix" : study.type === "dynamic_structural" ? "local-dynamic-newmark" : "local-detailed-superposition"} />
+        <Info label="Backend" value={effectiveRuntimeBackend === "cloudflare_fea" ? "cloudflare-fea-calculix" : study.type === "dynamic_structural" ? "local-dynamic-newmark" : "local-detailed-superposition"} />
         <Info label="Version" value="0.1.0" />
-        <Info label="Runner" value={backend === "cloudflare_fea" ? "cloudflare-queue-container" : "local-in-memory"} />
+        <Info label="Runner" value={effectiveRuntimeBackend === "cloudflare_fea" ? "cloudflare-queue-container" : "local-in-memory"} />
       </div>
     </Panel>
   );
