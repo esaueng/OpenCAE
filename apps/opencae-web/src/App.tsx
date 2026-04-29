@@ -109,6 +109,7 @@ export function App() {
   const activeRunSourceRef = useRef<EventSource | null>(null);
   const processingRunIdRef = useRef<string | null>(null);
   const resultFrameIndexRef = useRef(0);
+  const resultPlaybackFramePositionRef = useRef(0);
 
   const study = project?.studies[0] ?? null;
   const assignedPrintLayerOrientation = useMemo<PrintLayerOrientation | null>(() => {
@@ -163,7 +164,7 @@ export function App() {
     const frameDurationMs = 1000 / Math.max(1, Math.min(30, resultPlaybackFps));
     let animationFrameId = 0;
     let lastTimestamp: number | null = null;
-    let framePosition = resultFrameIndexRef.current;
+    let framePosition = resultPlaybackFramePositionRef.current;
     const advancePlaybackFrame = (timestamp: number) => {
       if (lastTimestamp !== null) {
         const frameDelta = (timestamp - lastTimestamp) / frameDurationMs;
@@ -206,6 +207,17 @@ export function App() {
   useEffect(() => {
     resultFrameIndexRef.current = resultFrameIndex;
   }, [resultFrameIndex]);
+
+  useEffect(() => {
+    resultPlaybackFramePositionRef.current = resultPlaybackFramePosition;
+  }, [resultPlaybackFramePosition]);
+
+  const handleResultFrameChange = useCallback((frameIndex: number) => {
+    setResultFrameIndex(frameIndex);
+    setResultPlaybackFramePosition(frameIndex);
+    resultFrameIndexRef.current = frameIndex;
+    resultPlaybackFramePositionRef.current = frameIndex;
+  }, []);
 
   const draftLoadPreview = useMemo<DraftLoadPreview | undefined>(() => {
     if (!study || activeStep !== "loads") return undefined;
@@ -946,7 +958,8 @@ export function App() {
           canRunSimulation={canRunSimulation}
           missingRunItems={missingRunItems}
           resultFrameIndex={resultFrameIndex}
-          onResultFrameChange={setResultFrameIndex}
+          resultFramePosition={resultVisualFramePosition}
+          onResultFrameChange={handleResultFrameChange}
           resultPlaybackPlaying={resultPlaybackPlaying}
           resultPlaybackFps={resultPlaybackFps}
           onResultPlaybackToggle={() => setResultPlaybackPlaying((playing) => !playing)}

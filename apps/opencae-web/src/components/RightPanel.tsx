@@ -76,6 +76,7 @@ interface RightPanelProps {
   canRunSimulation: boolean;
   missingRunItems: string[];
   resultFrameIndex?: number;
+  resultFramePosition?: number;
   onResultFrameChange?: (frameIndex: number) => void;
   resultPlaybackPlaying?: boolean;
   resultPlaybackFps?: number;
@@ -1006,6 +1007,7 @@ function ResultsPanel({
   resultFields = [],
   study,
   resultFrameIndex = 0,
+  resultFramePosition = resultFrameIndex,
   resultPlaybackPlaying = false,
   resultPlaybackFps = 12,
   onResultFrameChange,
@@ -1023,6 +1025,8 @@ function ResultsPanel({
   const frames = resultFrames(resultFields);
   const hasPlayback = frames.length > 1;
   const activeFrame = frames.find((frame) => frame.frameIndex === resultFrameIndex) ?? frames[0];
+  const activeTimeSeconds = interpolatedFrameTimeSeconds(frames, resultPlaybackPlaying ? resultFramePosition : activeFrame?.frameIndex ?? resultFrameIndex);
+  const sliderPosition = resultPlaybackPlaying ? resultFramePosition : frames.findIndex((frame) => frame.frameIndex === (activeFrame?.frameIndex ?? 0));
   const peakDisplacement = peakDisplacementFrame(resultFields);
   return (
     <Panel title="Results" helper="View stress and displacement directly on the 3D model.">
@@ -1037,14 +1041,14 @@ function ResultsPanel({
         <div className="dynamic-playback">
           <SectionTitle>Frame</SectionTitle>
           <label className="field range-field">
-            <span className="range-label"><span>Current time</span><strong>{activeFrame ? `${activeFrame.timeSeconds.toFixed(4)} s` : "0 s"}</strong></span>
+            <span className="range-label"><span>Current time</span><strong>{`${activeTimeSeconds.toFixed(4)} s`}</strong></span>
             <input
               type="range"
               min="0"
               max={Math.max(frames.length - 1, 0)}
-              step="1"
-              value={frames.findIndex((frame) => frame.frameIndex === (activeFrame?.frameIndex ?? 0))}
-              onChange={(event) => onResultFrameChange?.(frames[Number(event.currentTarget.value)]?.frameIndex ?? 0)}
+              step={resultPlaybackPlaying ? "0.01" : "1"}
+              value={sliderPosition}
+              onChange={(event) => onResultFrameChange?.(frames[Math.round(Number(event.currentTarget.value))]?.frameIndex ?? 0)}
             />
           </label>
           <label className="field range-field">
@@ -1363,6 +1367,19 @@ function resultFrames(fields: ResultField[]): Array<{ frameIndex: number; timeSe
   return [...frames.entries()]
     .map(([frameIndex, timeSeconds]) => ({ frameIndex, timeSeconds }))
     .sort((left, right) => left.frameIndex - right.frameIndex);
+}
+
+function interpolatedFrameTimeSeconds(frames: Array<{ frameIndex: number; timeSeconds: number }>, framePosition: number): number {
+  if (!frames.length) return 0;
+  const first = frames[0]!;
+  const last = frames[frames.length - 1]!;
+  if (framePosition <= first.frameIndex) return first.timeSeconds;
+  if (framePosition >= last.frameIndex) return last.timeSeconds;
+  const lower = [...frames].reverse().find((frame) => frame.frameIndex <= framePosition) ?? first;
+  const upper = frames.find((frame) => frame.frameIndex >= framePosition) ?? last;
+  if (lower.frameIndex === upper.frameIndex) return lower.timeSeconds;
+  const blend = (framePosition - lower.frameIndex) / (upper.frameIndex - lower.frameIndex);
+  return lower.timeSeconds + (upper.timeSeconds - lower.timeSeconds) * Math.max(0, Math.min(1, blend));
 }
 
 function peakDisplacementFrame(fields: ResultField[]): { value: number; units: string; timeSeconds: number } | null {

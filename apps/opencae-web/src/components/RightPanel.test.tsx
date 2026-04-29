@@ -326,6 +326,34 @@ describe("RightPanel payload mass controls", () => {
     expect(html).not.toContain("Von Mises Stress");
   });
 
+  test("shows interpolated playback time instead of jumping between integer frames", () => {
+    const dynamicStudy: Study = {
+      ...study,
+      name: "Dynamic",
+      type: "dynamic_structural",
+      solverSettings: {
+        startTime: 0,
+        endTime: 0.01,
+        timeStep: 0.005,
+        outputInterval: 0.005,
+        dampingRatio: 0.02,
+        integrationMethod: "newmark_average_acceleration"
+      }
+    };
+    const html = renderPanel("results", {
+      study: dynamicStudy,
+      resultFrameIndex: 0,
+      resultFramePosition: 0.5,
+      resultPlaybackPlaying: true,
+      resultFields: [
+        { id: "field-stress-0", runId: "run-1", type: "stress", location: "face", values: [1], min: 1, max: 1, units: "MPa", frameIndex: 0, timeSeconds: 0 },
+        { id: "field-stress-1", runId: "run-1", type: "stress", location: "face", values: [2], min: 2, max: 2, units: "MPa", frameIndex: 1, timeSeconds: 0.005 }
+      ]
+    });
+
+    expect(html).toContain("0.0025 s");
+  });
+
   test("shows pause when dynamic result playback is active", () => {
     const html = renderPanel("results", {
       resultPlaybackPlaying: true,
