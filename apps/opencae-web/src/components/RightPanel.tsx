@@ -1027,7 +1027,7 @@ function ResultsPanel({
   const activeFrame = frames.find((frame) => frame.frameIndex === resultFrameIndex) ?? frames[0];
   const activeTimeSeconds = interpolatedFrameTimeSeconds(frames, resultPlaybackPlaying ? resultFramePosition : activeFrame?.frameIndex ?? resultFrameIndex);
   const sliderPosition = resultPlaybackPlaying ? resultFramePosition : frames.findIndex((frame) => frame.frameIndex === (activeFrame?.frameIndex ?? 0));
-  const peakDisplacement = peakDisplacementFrame(resultFields);
+  const peakDisplacement = peakDisplacementFrame(resultFields, resultSummary);
   return (
     <Panel title="Results" helper="View stress and displacement directly on the 3D model.">
       <div className={`failure-assessment ${assessment.status}`}>
@@ -1382,11 +1382,18 @@ function interpolatedFrameTimeSeconds(frames: Array<{ frameIndex: number; timeSe
   return lower.timeSeconds + (upper.timeSeconds - lower.timeSeconds) * Math.max(0, Math.min(1, blend));
 }
 
-function peakDisplacementFrame(fields: ResultField[]): { value: number; units: string; timeSeconds: number } | null {
+function peakDisplacementFrame(fields: ResultField[], summary: ResultSummary): { value: number; units: string; timeSeconds: number } | null {
   const displacementFields = fields.filter((field) => field.type === "displacement");
-  if (!displacementFields.length) return null;
+  if (!displacementFields.length) {
+    if (!summary.transient || !Number.isFinite(summary.maxDisplacement)) return null;
+    return {
+      value: summary.maxDisplacement,
+      units: summary.maxDisplacementUnits,
+      timeSeconds: summary.transient.peakDisplacementTimeSeconds
+    };
+  }
   const peak = displacementFields.reduce((best, field) => field.max > best.max ? field : best, displacementFields[0]!);
-  return { value: peak.max, units: peak.units, timeSeconds: peak.timeSeconds ?? 0 };
+  return { value: peak.max, units: peak.units, timeSeconds: peak.timeSeconds ?? summary.transient?.peakDisplacementTimeSeconds ?? 0 };
 }
 
 function dynamicFrameEstimate(settings: DynamicSolverSettings): { count: number; hasFinalPartialStep: boolean } {
