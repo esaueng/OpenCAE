@@ -244,12 +244,6 @@ export async function addLoad(studyId: string, type: LoadType, value: number, se
 
 export async function runSimulation(studyId: string, currentStudy?: Study, displayModel?: DisplayModel): Promise<{ run: { id: string }; streamUrl: string; message: string }> {
   try {
-    if (currentStudy?.type === "dynamic_structural" && simulationBackend(currentStudy) === "cloudflare_fea") {
-      return {
-        ...runSimulationLocally(currentStudy, displayModel),
-        message: "Dynamic Cloud FEA is not available yet. Running local transient animation."
-      };
-    }
     if (currentStudy && simulationBackend(currentStudy) === "cloudflare_fea") {
       const response = await fetch("/api/cloud-fea/runs", {
         method: "POST",
@@ -257,7 +251,11 @@ export async function runSimulation(studyId: string, currentStudy?: Study, displ
         body: JSON.stringify({
           projectId: currentStudy.projectId,
           studyId,
-          fidelity: simulationFidelity(currentStudy)
+          fidelity: simulationFidelity(currentStudy),
+          study: currentStudy,
+          displayModel,
+          geometry: cloudFeaGeometryPayload(displayModel),
+          dynamicSettings: currentStudy.type === "dynamic_structural" ? currentStudy.solverSettings : undefined
         })
       });
       return await readJson(response);
@@ -597,6 +595,24 @@ function simulationBackend(study: Study): "local_detailed" | "cloudflare_fea" | 
 function simulationFidelity(study: Study): "standard" | "detailed" | "ultra" {
   const fidelity = (study.solverSettings as { fidelity?: unknown }).fidelity;
   return fidelity === "detailed" || fidelity === "ultra" ? fidelity : "standard";
+}
+
+function cloudFeaGeometryPayload(displayModel?: DisplayModel) {
+  if (displayModel?.nativeCad?.contentBase64) {
+    return {
+      format: displayModel.nativeCad.format,
+      filename: displayModel.nativeCad.filename,
+      contentBase64: displayModel.nativeCad.contentBase64
+    };
+  }
+  if (displayModel?.visualMesh?.contentBase64) {
+    return {
+      format: displayModel.visualMesh.format,
+      filename: displayModel.visualMesh.filename,
+      contentBase64: displayModel.visualMesh.contentBase64
+    };
+  }
+  return undefined;
 }
 
 async function fileToBase64(file: File): Promise<string> {

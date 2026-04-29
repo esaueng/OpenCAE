@@ -914,8 +914,7 @@ function RunPanel({ study, runProgress, runTiming, onRunSimulation, onCancelSimu
   ] as const;
   const dynamic = study.type === "dynamic_structural" ? study.solverSettings : null;
   const backend = solverBackendForStudy(study);
-  const cloudDynamicFallback = Boolean(dynamic && backend === "cloudflare_fea");
-  const effectiveRuntimeBackend = cloudDynamicFallback ? "local_detailed" : backend;
+  const effectiveRuntimeBackend = backend;
   const fidelity = solverFidelityForStudy(study);
   const updateSolverChoice = (settings: SolverSettingsPatch) => {
     onUpdateSolverSettings?.(settings);
@@ -946,9 +945,8 @@ function RunPanel({ study, runProgress, runTiming, onRunSimulation, onCancelSimu
       </label>
       <div className="summary-box">
         <Info label="Expected detail" value={fidelityEstimateLabel(fidelity)} />
-        <Info label="Cloud runtime" value={effectiveRuntimeBackend === "cloudflare_fea" ? "CalculiX container" : "Browser local"} />
+        <Info label="Cloud runtime" value={effectiveRuntimeBackend === "cloudflare_fea" ? dynamic ? "CalculiX transient container" : "CalculiX container" : "Browser local"} />
       </div>
-      {cloudDynamicFallback && <p className="panel-copy">Cloud FEA is static-only right now. Dynamic studies run with local playback frames.</p>}
       {dynamic && (
         <>
           <SectionTitle>Dynamic settings</SectionTitle>

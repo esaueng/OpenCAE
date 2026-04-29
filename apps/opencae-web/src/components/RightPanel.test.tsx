@@ -282,7 +282,7 @@ describe("RightPanel payload mass controls", () => {
     expect(meshHtml).toContain("45,000");
   });
 
-  test("shows dynamic studies use local playback when Cloud FEA is selected", () => {
+  test("shows dynamic Cloud FEA uses the transient CalculiX container", () => {
     const dynamicStudy: Study = {
       ...study,
       name: "Dynamic",
@@ -301,9 +301,11 @@ describe("RightPanel payload mass controls", () => {
 
     const runHtml = renderPanel("run", { study: dynamicStudy });
 
-    expect(runHtml).toContain("Cloud FEA is static-only right now");
-    expect(runHtml).toContain("local-dynamic-newmark");
-    expect(runHtml).toContain("local-in-memory");
+    expect(runHtml).toContain("CalculiX transient container");
+    expect(runHtml).toContain("cloudflare-fea-calculix");
+    expect(runHtml).toContain("cloudflare-queue-container");
+    expect(runHtml).not.toContain("Cloud FEA is static-only right now");
+    expect(runHtml).not.toContain("local-dynamic-newmark");
   });
 
   test("warns when dynamic settings generate a very large playback frame set", () => {

@@ -15,11 +15,22 @@ type QueueBinding = {
   send(message: unknown): Promise<void>;
 };
 
+type ContainerFetchBinding = {
+  startAndWaitForPorts?(): Promise<void>;
+  fetch(request: Request): Promise<Response>;
+};
+
+type ContainerBinding = ContainerFetchBinding | {
+  get?(id?: string): ContainerFetchBinding;
+  getByName?(name: string): ContainerFetchBinding;
+  getRandom?(): ContainerFetchBinding;
+};
+
 type Env = {
   ASSETS: AssetBinding;
   FEA_ARTIFACTS?: R2BucketBinding;
   FEA_RUN_QUEUE?: QueueBinding;
-  FEA_CONTAINER?: unknown;
+  FEA_CONTAINER?: ContainerBinding;
 };
 
 export class OpenCaeFeaContainer {
@@ -86,7 +97,7 @@ export default {
         message.ack();
         continue;
       }
-      await writeCloudFeaResultArtifacts(runId, env.FEA_ARTIFACTS);
+      await runCloudFeaSolve(runId, env);
       message.ack();
     }
   }
@@ -116,6 +127,11 @@ async function createCloudFeaRun(request: Request, env: Env): Promise<Response> 
     fidelity: body.fidelity === "ultra" || body.fidelity === "detailed" ? body.fidelity : "standard",
     backend: "cloudflare_fea",
     solver: "calculix",
+    analysisType: analysisTypeFromBody(body),
+    study: isRecord(body.study) ? body.study : undefined,
+    displayModel: isRecord(body.displayModel) ? body.displayModel : undefined,
+    geometry: isRecord(body.geometry) ? body.geometry : undefined,
+    dynamicSettings: isRecord(body.dynamicSettings) ? body.dynamicSettings : undefined,
     createdAt: now
   };
   const queuedEvents = [
@@ -127,7 +143,7 @@ async function createCloudFeaRun(request: Request, env: Env): Promise<Response> 
   if (env.FEA_RUN_QUEUE) {
     await env.FEA_RUN_QUEUE.send({ runId });
   } else {
-    await writeCloudFeaResultArtifacts(runId, env.FEA_ARTIFACTS);
+    await runCloudFeaSolve(runId, env);
   }
   return Response.json({ run, streamUrl: `/api/cloud-fea/runs/${runId}/events`, message: "Cloud FEA simulation queued." }, { status: 202, headers: jsonHeaders });
 }
@@ -155,75 +171,97 @@ async function getCloudFeaRunResults(runId: string, env: Env): Promise<Response>
   return Response.json(JSON.parse(await object.text()), { headers: jsonHeaders });
 }
 
-function cloudFeaPlaceholderResults(runId: string) {
-  const stressValues = [120000, 325000, 640000, 910000, 1180000, 1440000];
-  const displacementValues = [0, 0.0008, 0.0016, 0.0023, 0.0031, 0.0038];
+async function runCloudFeaSolve(runId: string, env: Env): Promise<void> {
+  const artifacts = env.FEA_ARTIFACTS;
+  if (!artifacts) throw new Error("Cloud FEA artifacts bucket is not configured.");
+  const now = new Date().toISOString();
+  const requestObject = await artifacts.get(`runs/${runId}/request.json`);
+  const requestArtifact = requestObject ? JSON.parse(await requestObject.text()) as Record<string, unknown> : { runId };
+  const events = [
+    { runId, type: "state", progress: 0, message: "Cloud FEA run queued.", timestamp: now },
+    { runId, type: "progress", progress: 15, message: "Meshing geometry for CalculiX.", timestamp: now },
+    { runId, type: "progress", progress: 30, message: "Generating CalculiX transient input deck.", timestamp: now },
+    { runId, type: "progress", progress: 60, message: "Running CalculiX container solve.", timestamp: now },
+    { runId, type: "progress", progress: 90, message: "Post-processing framed nodal and element output.", timestamp: now }
+  ];
+  await artifacts.put(`runs/${runId}/events.json`, JSON.stringify(events, null, 2));
+  try {
+    const solveResponse = await callFeaContainer(env, { ...requestArtifact, runId });
+    if (!solveResponse.ok) {
+      const failure = await readContainerFailure(solveResponse);
+      await artifacts.put(`runs/${runId}/events.json`, JSON.stringify([
+        ...events,
+        { runId, type: "error", progress: 100, message: failure, timestamp: new Date().toISOString() }
+      ], null, 2));
+      await artifacts.put(`runs/${runId}/failed.json`, JSON.stringify({ runId, error: failure, timestamp: new Date().toISOString() }, null, 2));
+      return;
+    }
+    const containerResult = await solveResponse.json() as Record<string, unknown>;
+    const normalized = normalizeContainerResult(runId, containerResult);
+    const resultArtifacts = isRecord(containerResult.artifacts) ? containerResult.artifacts : {};
+    await putOptionalArtifact(artifacts, `runs/${runId}/input.inp`, resultArtifacts.inputDeck);
+    await putOptionalArtifact(artifacts, `runs/${runId}/solver.log`, resultArtifacts.solverLog);
+    await putOptionalArtifact(artifacts, `runs/${runId}/mesh.json`, JSON.stringify(resultArtifacts.meshSummary ?? {}, null, 2));
+    await artifacts.put(`runs/${runId}/results.json`, JSON.stringify(normalized, null, 2));
+    await artifacts.put(`runs/${runId}/events.json`, JSON.stringify([
+      ...events,
+      { runId, type: "complete", progress: 100, message: "Cloud FEA transient solve complete.", timestamp: new Date().toISOString() }
+    ], null, 2));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Cloud FEA container solve failed.";
+    await artifacts.put(`runs/${runId}/events.json`, JSON.stringify([
+      ...events,
+      { runId, type: "error", progress: 100, message, timestamp: new Date().toISOString() }
+    ], null, 2));
+    await artifacts.put(`runs/${runId}/failed.json`, JSON.stringify({ runId, error: message, timestamp: new Date().toISOString() }, null, 2));
+  }
+}
+
+async function callFeaContainer(env: Env, payload: Record<string, unknown>): Promise<Response> {
+  const binding = env.FEA_CONTAINER;
+  if (!binding) throw new Error("Cloud FEA container binding is not configured.");
+  const fetcher = "fetch" in binding
+    ? binding
+    : binding.getByName
+      ? binding.getByName(typeof payload.runId === "string" ? payload.runId : crypto.randomUUID())
+      : binding.getRandom
+        ? binding.getRandom()
+        : binding.get?.(typeof payload.runId === "string" ? payload.runId : undefined);
+  if (!fetcher) throw new Error("Cloud FEA container instance could not be resolved.");
+  await fetcher.startAndWaitForPorts?.();
+  return fetcher.fetch(new Request("https://opencae-fea-container/solve", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload)
+  }));
+}
+
+async function readContainerFailure(response: Response): Promise<string> {
+  const payload = await response.json().catch(() => null) as { error?: unknown; message?: unknown } | null;
+  if (typeof payload?.error === "string") return payload.error;
+  if (typeof payload?.message === "string") return payload.message;
+  return `Cloud FEA container failed with HTTP ${response.status}.`;
+}
+
+function normalizeContainerResult(runId: string, result: Record<string, unknown>) {
+  const summary = isRecord(result.summary) ? result.summary : {};
+  const fields = Array.isArray(result.fields) ? result.fields : [];
   return {
-    summary: {
-      maxStress: 1440000,
-      maxStressUnits: "Pa",
-      maxDisplacement: 0.0038,
-      maxDisplacementUnits: "m",
-      safetyFactor: 172,
-      failureAssessment: {
-        status: "pass",
-        title: "Cloud FEA orchestration scaffold",
-        message: "CalculiX container orchestration is configured; this placeholder result keeps the viewer contract active until native solve post-processing is enabled."
-      },
-      reactionForce: 500,
-      reactionForceUnits: "N"
-    },
-    fields: [
-      {
-        id: `field-${runId}-von-mises`,
-        runId,
-        type: "stress",
-        location: "node",
-        values: stressValues,
-        min: Math.min(...stressValues),
-        max: Math.max(...stressValues),
-        units: "Pa",
-        samples: stressValues.map((value, index) => ({
-          point: [-1.8 + index * 0.72, 0.18, index % 2 === 0 ? -0.06 : 0.06],
-          normal: [0, 1, 0],
-          value,
-          nodeId: `N${index + 1}`,
-          elementId: `E${Math.max(1, index)}`,
-          source: "cloudflare_fea_placeholder",
-          vonMisesStressPa: value
-        }))
-      },
-      {
-        id: `field-${runId}-displacement`,
-        runId,
-        type: "displacement",
-        location: "node",
-        values: displacementValues,
-        min: Math.min(...displacementValues),
-        max: Math.max(...displacementValues),
-        units: "m",
-        samples: displacementValues.map((value, index) => ({
-          point: [-1.8 + index * 0.72, 0.18, 0],
-          normal: [0, 1, 0],
-          value,
-          nodeId: `N${index + 1}`,
-          source: "cloudflare_fea_placeholder"
-        }))
-      }
-    ]
+    summary,
+    fields: fields.map((field) => isRecord(field) ? { ...field, runId: typeof field.runId === "string" ? field.runId : runId } : field)
   };
 }
 
-async function writeCloudFeaResultArtifacts(runId: string, artifacts: R2BucketBinding): Promise<void> {
-  const now = new Date().toISOString();
-  const events = [
-    { runId, type: "state", progress: 0, message: "Cloud FEA run queued.", timestamp: now },
-    { runId, type: "progress", progress: 25, message: "Preparing CalculiX input deck.", timestamp: now },
-    { runId, type: "progress", progress: 60, message: "Waiting for CalculiX container solve.", timestamp: now },
-    { runId, type: "progress", progress: 90, message: "Post-processing nodal Von Mises stress.", timestamp: now },
-    { runId, type: "complete", progress: 100, message: "Cloud FEA orchestration complete.", timestamp: now }
-  ];
-  const results = cloudFeaPlaceholderResults(runId);
-  await artifacts.put(`runs/${runId}/events.json`, JSON.stringify(events, null, 2));
-  await artifacts.put(`runs/${runId}/results.json`, JSON.stringify(results, null, 2));
+async function putOptionalArtifact(artifacts: R2BucketBinding, key: string, value: unknown): Promise<void> {
+  if (typeof value !== "string") return;
+  await artifacts.put(key, value);
+}
+
+function analysisTypeFromBody(body: Record<string, unknown>): string | undefined {
+  if (isRecord(body.study) && typeof body.study.type === "string") return body.study.type;
+  return undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
