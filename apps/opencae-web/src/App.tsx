@@ -574,7 +574,7 @@ export function App() {
       pushMessage(missingRunItems.length ? `Complete before running: ${missingRunItems.join(", ")}.` : "Simulation is already running.");
       return;
     }
-    const response = await runSimulation(study.id, study);
+    const response = await runSimulation(study.id, study, displayModel ?? undefined);
     setActiveRunId(response.run.id);
     setCompletedRunId("");
     setRunProgress(0);
@@ -784,7 +784,7 @@ export function App() {
           onRemoveLoad={(loadId) =>
             updateStudy(saveStudyPatch(study.id, { loads: study.loads.filter((item) => item.id !== loadId) }, "Load removed.", study))
           }
-          onGenerateMesh={(preset) => updateStudy(generateMesh(study.id, preset, study), shouldAutoAdvanceAfterMeshGeneration() ? "run" : undefined)}
+          onGenerateMesh={(preset) => updateStudy(generateMesh(study.id, preset, study, displayModel), shouldAutoAdvanceAfterMeshGeneration() ? "run" : undefined)}
           onRunSimulation={handleRunSimulation}
           canRunSimulation={canRunSimulation}
           missingRunItems={missingRunItems}

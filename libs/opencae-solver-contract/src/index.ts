@@ -1,10 +1,11 @@
-import type { ResultField, ResultSummary, RunEvent, Study } from "@opencae/schema";
+import type { AnalysisMesh, ResultField, ResultSummary, RunEvent, Study } from "@opencae/schema";
 
 export interface ComputeBackend {
   runStaticSolve(args: {
     study: Study;
     runId: string;
     meshRef: string;
+    analysisMesh?: AnalysisMesh;
     publish: (event: RunEvent) => void;
   }): Promise<{ resultRef: string; reportRef: string; summary: ResultSummary; fields: ResultField[] }>;
 }

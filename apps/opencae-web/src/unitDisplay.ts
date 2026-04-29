@@ -90,7 +90,11 @@ export function resultFieldForUnits(field: ResultField, unitSystem: UnitSystem):
     values: convertedValues,
     min: roundDisplayValue(convertedMin.value),
     max: roundDisplayValue(convertedMax.value),
-    units: convertedMax.units
+    units: convertedMax.units,
+    samples: field.samples?.map((sample) => ({
+      ...sample,
+      value: roundDisplayValue(converter(sample.value).value)
+    }))
   };
 }
 

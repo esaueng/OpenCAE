@@ -1,7 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 import type { ObjectStorageProvider } from "@opencae/storage";
-import type { Load, Study } from "@opencae/schema";
-import { LocalMockComputeBackend } from "./index";
+import type { AnalysisMesh, Load, Study } from "@opencae/schema";
+import { LocalMockComputeBackend, solveStudy } from "./index";
 
 class MemoryStorage implements ObjectStorageProvider {
   objects = new Map<string, Buffer>();
@@ -231,6 +231,23 @@ describe("LocalMockComputeBackend", () => {
     }
   });
 
+  test("creates sampled cantilever stress with lower center stress than outer fibers", () => {
+    const result = solveStudy(cantileverStudy("mat-aluminum-6061"), "run-sampled-cantilever", rectangularBeamAnalysisMesh());
+    const stressField = result.fields.find((field) => field.type === "stress");
+
+    const center = nearestSampleValue(stressField?.samples ?? [], [0, 0.18, 0]);
+    const topOuter = nearestSampleValue(stressField?.samples ?? [], [0, 0.43, 0]);
+    const bottomOuter = nearestSampleValue(stressField?.samples ?? [], [0, -0.07, 0]);
+    const fixedOuter = nearestSampleValue(stressField?.samples ?? [], [-1.85, 0.43, 0]);
+    const freeOuter = nearestSampleValue(stressField?.samples ?? [], [1.85, 0.43, 0]);
+
+    expect(stressField?.samples?.length).toBeGreaterThan(20);
+    expect(center).toBeLessThan(topOuter * 0.7);
+    expect(center).toBeLessThan(bottomOuter * 0.7);
+    expect(fixedOuter).toBeGreaterThan(freeOuter * 1.8);
+    expect(stressField?.max).toBeGreaterThanOrEqual(Math.max(...(stressField?.samples ?? []).map((sample) => sample.value)));
+  });
+
   test("makes X build direction much weaker for cantilever bending across layer lines", async () => {
     vi.useFakeTimers();
     try {
@@ -344,6 +361,32 @@ describe("LocalMockComputeBackend", () => {
     }
   });
 });
+
+function rectangularBeamAnalysisMesh(): AnalysisMesh {
+  const samples: AnalysisMesh["samples"] = [];
+  for (let ix = 0; ix <= 24; ix += 1) {
+    const x = -1.9 + (3.8 * ix) / 24;
+    for (const y of [-0.07, 0.18, 0.43]) {
+      samples.push({ point: [x, y, 0], normal: [0, y >= 0.18 ? 1 : -1, 0], weight: 1, sourceId: "beam-y" });
+    }
+    for (const z of [-0.36, 0.36]) {
+      samples.push({ point: [x, 0.18, z], normal: [0, 0, z > 0 ? 1 : -1], weight: 1, sourceId: "beam-z" });
+    }
+  }
+  return {
+    quality: "fine",
+    bounds: { min: [-1.9, -0.07, -0.36], max: [1.9, 0.43, 0.36] },
+    samples
+  };
+}
+
+function nearestSampleValue(samples: NonNullable<ReturnType<typeof solveStudy>["fields"][number]["samples"]>, point: [number, number, number]) {
+  const nearest = samples.reduce<{ value: number; distance: number } | undefined>((best, sample) => {
+    const distance = Math.hypot(sample.point[0] - point[0], sample.point[1] - point[1], sample.point[2] - point[2]);
+    return !best || distance < best.distance ? { value: sample.value, distance } : best;
+  }, undefined);
+  return nearest?.value ?? 0;
+}
 
 function studyWithLoads(loads: Array<{ id: string; type: Load["type"]; value: number; direction: [number, number, number]; selectionRef?: string }>, materialId = "mat-aluminum-6061", materialParameters: Record<string, unknown> = {}): Study {
   return {

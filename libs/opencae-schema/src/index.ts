@@ -59,6 +59,30 @@ export const LoadSchema = z.object({
   status: z.enum(["not_started", "ready", "warning", "complete"])
 });
 
+const Vec3Schema = z.tuple([z.number(), z.number(), z.number()]);
+
+export const AnalysisSampleSchema = z.object({
+  point: Vec3Schema,
+  normal: Vec3Schema,
+  weight: z.number().optional(),
+  sourceId: z.string().optional()
+});
+
+export const AnalysisMeshSchema = z.object({
+  quality: z.enum(["coarse", "medium", "fine"]),
+  bounds: z.object({
+    min: Vec3Schema,
+    max: Vec3Schema
+  }),
+  samples: z.array(AnalysisSampleSchema)
+});
+
+export const ResultSampleSchema = z.object({
+  point: Vec3Schema,
+  normal: Vec3Schema,
+  value: z.number()
+});
+
 export const ResultFieldSchema = z.object({
   id: z.string(),
   runId: z.string(),
@@ -67,7 +91,8 @@ export const ResultFieldSchema = z.object({
   values: z.array(z.number()),
   min: z.number(),
   max: z.number(),
-  units: z.string()
+  units: z.string(),
+  samples: z.array(ResultSampleSchema).optional()
 });
 
 export const GeometryFileSchema = z.object({
@@ -88,7 +113,9 @@ export const MeshSettingsSchema = z.object({
     .object({
       nodes: z.number(),
       elements: z.number(),
-      warnings: z.array(z.string())
+      warnings: z.array(z.string()),
+      analysisSampleCount: z.number().optional(),
+      quality: z.enum(["coarse", "medium", "fine"]).optional()
     })
     .optional()
 });
@@ -147,7 +174,9 @@ export const ProjectSchema = z.object({
 export const MeshSummarySchema = z.object({
   nodes: z.number(),
   elements: z.number(),
-  warnings: z.array(z.string())
+  warnings: z.array(z.string()),
+  analysisSampleCount: z.number().optional(),
+  quality: z.enum(["coarse", "medium", "fine"]).optional()
 });
 
 export const ResultSummarySchema = z.object({
@@ -182,6 +211,9 @@ export type GeometryReference = z.infer<typeof GeometryReferenceSchema>;
 export type NamedSelection = z.infer<typeof NamedSelectionSchema>;
 export type Constraint = z.infer<typeof ConstraintSchema>;
 export type Load = z.infer<typeof LoadSchema>;
+export type AnalysisSample = z.infer<typeof AnalysisSampleSchema>;
+export type AnalysisMesh = z.infer<typeof AnalysisMeshSchema>;
+export type ResultSample = z.infer<typeof ResultSampleSchema>;
 export type ResultField = z.infer<typeof ResultFieldSchema>;
 export type GeometryFile = z.infer<typeof GeometryFileSchema>;
 export type MeshSummary = z.infer<typeof MeshSummarySchema>;
