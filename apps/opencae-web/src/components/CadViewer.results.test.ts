@@ -327,6 +327,25 @@ describe("CadViewer result coloring", () => {
     expect(deformedPositions).not.toEqual([-1, 0, 0, 0, 0, 0, 1, 0, 0]);
   });
 
+  test("keeps native CAD undeformed outline at the imported preview scale", () => {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.Float32BufferAttribute([-100, 0, 0, 0, 0, 0, 100, 0, 0], 3));
+    geometry.setIndex([0, 1, 2]);
+    const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color: "#63a9e5" }));
+    const group = new THREE.Group();
+    group.scale.setScalar(0.01);
+    group.position.set(0.5, 0, 0);
+    group.add(mesh);
+    group.updateMatrixWorld(true);
+
+    const outline = createUndeformedResultOutlineObject(group);
+    const modelBounds = new THREE.Box3().setFromObject(group);
+    const outlineBounds = new THREE.Box3().setFromObject(outline);
+
+    expect(outlineBounds.min.x).toBeCloseTo(modelBounds.min.x);
+    expect(outlineBounds.max.x).toBeCloseTo(modelBounds.max.x);
+  });
+
   test("keeps uploaded result geometry undeformed when the active displacement frame is zero", () => {
     const originalPositions = [-1, 0, 0, 0, 0, 0, 1, 0, 0];
     const geometry = new THREE.BufferGeometry();
