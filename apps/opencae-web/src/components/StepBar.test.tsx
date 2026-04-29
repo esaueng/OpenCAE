@@ -67,6 +67,13 @@ describe("StepBar", () => {
     expect(css).toMatch(/\.stepbar\.collapsed\s+\.stepbar-footer\s*\{[\s\S]*?display:\s*grid;/);
   });
 
+  test("does not underline workflow utility links", () => {
+    const css = readFileSync(resolve(__dirname, "../styles/app.css"), "utf8");
+
+    expect(css).toMatch(/\.stepbar-link\s*\{[\s\S]*?text-decoration:\s*none;/);
+    expect(css).toMatch(/\.stepbar-link:hover,\n\.stepbar-link:focus-visible\s*\{[\s\S]*?text-decoration:\s*none;/);
+  });
+
   test("uses an atom icon for the material step", () => {
     const html = renderToStaticMarkup(
       <StepBar
