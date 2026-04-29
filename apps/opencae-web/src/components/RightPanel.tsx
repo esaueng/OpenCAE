@@ -74,10 +74,8 @@ const EMPTY_PARAMETERS: Record<string, unknown> = {};
 const noopDraftPayloadPreviewChange = () => undefined;
 
 export function RightPanel(props: RightPanelProps) {
-  const selectedPayloadLabel = props.activeStep === "loads" && props.draftLoadType === "gravity" ? props.selectedPayloadObject?.label : undefined;
   return (
     <aside className="side-panel">
-      {selectedPayloadLabel ? <div className="selection-readout">Payload selected: {selectedPayloadLabel}</div> : props.selectedFace && <div className="selection-readout">Face selected: {props.selectedFace.label}</div>}
       {props.activeStep === "model" && <ModelPanel {...props} />}
       {props.activeStep === "material" && <MaterialPanel {...props} />}
       {props.activeStep === "supports" && <SupportsPanel {...props} />}

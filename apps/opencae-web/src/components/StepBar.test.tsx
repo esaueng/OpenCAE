@@ -42,17 +42,21 @@ describe("StepBar", () => {
         study={study}
         hasResults={false}
         collapsed
+        themeMode="dark"
         onSelect={vi.fn()}
         onToggleCollapsed={vi.fn()}
+        onToggleTheme={vi.fn()}
         onUnitSystemChange={vi.fn()}
       />
     );
 
     expect(html).toContain("stepbar collapsed");
+    expect(html).toContain("Light");
+    expect(html).toContain("Switch to light mode");
     expect(html).toContain("Feedback");
     expect(html).toContain('href="https://form.esauengineering.com/opencae-feedback"');
-    expect(html).toContain("GitHub");
-    expect(html).toContain('href="https://github.com/esaueng/OpenCAE"');
+    expect(html).not.toContain("GitHub");
+    expect(html).not.toContain('href="https://github.com/esaueng/OpenCAE"');
     expect(html).toContain("Metric");
   });
 
@@ -71,8 +75,10 @@ describe("StepBar", () => {
         study={study}
         hasResults={false}
         collapsed={false}
+        themeMode="dark"
         onSelect={vi.fn()}
         onToggleCollapsed={vi.fn()}
+        onToggleTheme={vi.fn()}
         onUnitSystemChange={vi.fn()}
       />
     );
@@ -88,8 +94,10 @@ describe("StepBar", () => {
         study={study}
         hasResults={false}
         collapsed={false}
+        themeMode="dark"
         onSelect={vi.fn()}
         onToggleCollapsed={vi.fn()}
+        onToggleTheme={vi.fn()}
         onUnitSystemChange={vi.fn()}
       />
     );

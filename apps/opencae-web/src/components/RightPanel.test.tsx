@@ -122,6 +122,13 @@ describe("RightPanel payload mass controls", () => {
     expect(markup).toContain("--range-progress:100%");
   });
 
+  test("does not show the selected face as a persistent right-panel banner", () => {
+    const markup = renderPanel("results", { selectedFace: displayModel.faces[0] ?? null });
+
+    expect(markup).not.toContain("Face selected:");
+    expect(markup).not.toContain("selection-readout");
+  });
+
   test("places every step title and step number on the same header row", () => {
     const steps: Array<{ id: StepId; title: string; step: number }> = [
       { id: "model", title: "Model", step: 1 },
