@@ -198,6 +198,17 @@ describe("CadViewer result coloring", () => {
     expect(freeDisplacement).toBeGreaterThan(fixedDisplacement);
   });
 
+  test("uses solved cantilever stress samples when coloring dynamic frames", () => {
+    const point = new THREE.Vector3(0, 0.18, 0);
+    const lowFrameSamples: FaceResultSample[] = samples.map((sample) => ({ ...sample, value: 10, normalized: 0.08 }));
+    const highFrameSamples: FaceResultSample[] = samples.map((sample) => ({ ...sample, value: 180, normalized: 0.92 }));
+
+    const lowFrameValue = resultValueForPoint("cantilever", "stress", 1, point, lowFrameSamples);
+    const highFrameValue = resultValueForPoint("cantilever", "stress", 1, point, highFrameSamples);
+
+    expect(highFrameValue).toBeGreaterThan(lowFrameValue + 0.5);
+  });
+
   test("prefers solver point samples over face fallback when coloring uploaded result geometry", () => {
     const lowFaceSamples: FaceResultSample[] = [
       {
