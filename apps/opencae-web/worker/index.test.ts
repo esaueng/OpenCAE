@@ -2,6 +2,9 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, test, vi } from "vitest";
+
+vi.mock("cloudflare:workers", () => ({ DurableObject: class DurableObject {} }));
+
 import worker from "./index";
 
 class MemoryR2Bucket {
@@ -18,6 +21,13 @@ class MemoryR2Bucket {
 }
 
 describe("Cloudflare FEA worker orchestration", () => {
+  test("container Durable Object is declared with the Cloudflare platform base class", () => {
+    const workerSource = readFileSync(resolve(__dirname, "index.ts"), "utf8");
+
+    expect(workerSource).toContain('import { DurableObject } from "cloudflare:workers";');
+    expect(workerSource).toContain("export class OpenCaeFeaContainer extends DurableObject");
+  });
+
   test("default Cloudflare deploy uses the container-enabled production config", () => {
     const packageJson = JSON.parse(readFileSync(resolve(__dirname, "../../../package.json"), "utf8")) as { scripts: Record<string, string> };
     const containerConfig = JSON.parse(readFileSync(resolve(__dirname, "../../../wrangler.containers.jsonc"), "utf8")) as {
@@ -202,7 +212,11 @@ describe("Cloudflare FEA worker orchestration", () => {
     }));
     const message = { body: { runId: "run-cloud-do" }, ack: vi.fn(), retry: vi.fn() };
     const idFromName = vi.fn((name: string) => `id:${name}`);
+    const startAndWaitForPorts = vi.fn(async () => {
+      throw new Error("RPC startAndWaitForPorts should not be invoked on Durable Object stubs.");
+    });
     const get = vi.fn((id: string) => ({
+      startAndWaitForPorts,
       fetch: vi.fn(async () => Response.json(cloudContainerSolveResponse("run-cloud-do", false)))
     }));
     const env = {
@@ -216,6 +230,7 @@ describe("Cloudflare FEA worker orchestration", () => {
 
     expect(idFromName).toHaveBeenCalledWith("run-cloud-do");
     expect(get).toHaveBeenCalledWith("id:run-cloud-do");
+    expect(startAndWaitForPorts).not.toHaveBeenCalled();
     expect(results.summary.maxStress).toBe(431400000);
   });
 

@@ -1,3 +1,5 @@
+import { DurableObject } from "cloudflare:workers";
+
 type AssetBinding = {
   fetch(request: Request): Promise<Response>;
 };
@@ -16,7 +18,6 @@ type QueueBinding = {
 };
 
 type ContainerFetchBinding = {
-  startAndWaitForPorts?(): Promise<void>;
   fetch(request: Request): Promise<Response>;
 };
 
@@ -38,7 +39,7 @@ type ExecutionContextLike = {
   waitUntil(promise: Promise<unknown>): void;
 };
 
-export class OpenCaeFeaContainer {
+export class OpenCaeFeaContainer extends DurableObject {
   async fetch(): Promise<Response> {
     return Response.json(
       {
@@ -236,7 +237,6 @@ async function callFeaContainer(env: Env, payload: Record<string, unknown>): Pro
         ? binding.getRandom()
         : binding.get?.(binding.idFromName ? binding.idFromName(instanceName) as string : instanceName);
   if (!fetcher) throw new Error("Cloud FEA container instance could not be resolved.");
-  await fetcher.startAndWaitForPorts?.();
   return fetcher.fetch(new Request("https://opencae-fea-container/solve", {
     method: "POST",
     headers: { "content-type": "application/json" },
