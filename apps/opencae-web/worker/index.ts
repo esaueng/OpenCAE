@@ -1,21 +1,6 @@
+/// <reference types="./worker-configuration" />
+
 import { Container } from "@cloudflare/containers";
-
-type AssetBinding = {
-  fetch(request: Request): Promise<Response>;
-};
-
-type R2ObjectBody = {
-  text(): Promise<string>;
-};
-
-type R2BucketBinding = {
-  put(key: string, value: string): Promise<unknown>;
-  get(key: string): Promise<R2ObjectBody | null>;
-};
-
-type QueueBinding = {
-  send(message: unknown): Promise<void>;
-};
 
 type ContainerFetchBinding = {
   fetch(request: Request): Promise<Response>;
@@ -28,15 +13,10 @@ type ContainerBinding = ContainerFetchBinding | {
   getRandom?(): ContainerFetchBinding;
 };
 
-type Env = {
-  ASSETS: AssetBinding;
-  FEA_ARTIFACTS?: R2BucketBinding;
-  FEA_RUN_QUEUE?: QueueBinding;
+type RuntimeEnv = Omit<Env, "FEA_ARTIFACTS" | "FEA_RUN_QUEUE" | "FEA_CONTAINER"> & {
+  FEA_ARTIFACTS?: R2Bucket;
+  FEA_RUN_QUEUE?: Queue;
   FEA_CONTAINER?: ContainerBinding;
-};
-
-type ExecutionContextLike = {
-  waitUntil(promise: Promise<unknown>): void;
 };
 
 export class OpenCaeFeaContainer extends Container {
@@ -52,10 +32,11 @@ const jsonHeaders = {
 const cloudFeaContainersDisabledMessage = "Cloud FEA containers are not enabled for this deployment. Deploy with pnpm deploy:cloudflare:containers using a Cloudflare token with Containers write access, or switch the study backend to Detailed local.";
 
 export default {
-  async fetch(request: Request, env: Env, ctx?: ExecutionContextLike): Promise<Response> {
+  async fetch(request: Request, env: RuntimeEnv, ctx?: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
     if (url.pathname === "/health") {
+      logWorkerEvent("health", { method: request.method, pathname: url.pathname });
       return Response.json(
         { ok: true, mode: "cloudflare-worker", service: "opencae-web" },
         { headers: jsonHeaders }
@@ -63,20 +44,24 @@ export default {
     }
 
     if (url.pathname === "/api/cloud-fea/runs" && request.method === "POST") {
+      logWorkerEvent("cloud_fea_run_create", { method: request.method, pathname: url.pathname });
       return createCloudFeaRun(request, env, ctx);
     }
 
     const eventsMatch = url.pathname.match(/^\/api\/cloud-fea\/runs\/([^/]+)\/events$/);
     if (eventsMatch && request.method === "GET") {
+      logWorkerEvent("cloud_fea_run_events", { method: request.method, pathname: url.pathname, runId: eventsMatch[1] });
       return getCloudFeaRunEvents(eventsMatch[1]!, env);
     }
 
     const resultsMatch = url.pathname.match(/^\/api\/cloud-fea\/runs\/([^/]+)\/results$/);
     if (resultsMatch && request.method === "GET") {
+      logWorkerEvent("cloud_fea_run_results", { method: request.method, pathname: url.pathname, runId: resultsMatch[1] });
       return getCloudFeaRunResults(resultsMatch[1]!, env);
     }
 
     if (url.pathname.startsWith("/api/")) {
+      logWorkerEvent("unsupported_api_route", { method: request.method, pathname: url.pathname });
       return Response.json(
         {
           error: "The Cloudflare Worker deployment serves the local-first web app only. API-backed operations fall back to browser-local behavior."
@@ -88,7 +73,7 @@ export default {
     return env.ASSETS.fetch(request);
   },
 
-  async queue(batch: { messages: Array<{ body: unknown; ack(): void; retry(): void }> }, env: Env): Promise<void> {
+  async queue(batch: { messages: Array<{ body: unknown; ack(): void; retry(): void }> }, env: RuntimeEnv): Promise<void> {
     if (!env.FEA_ARTIFACTS) {
       for (const message of batch.messages) message.retry();
       return;
@@ -99,13 +84,14 @@ export default {
         message.ack();
         continue;
       }
+      logWorkerEvent("cloud_fea_queue_solve", { runId });
       await runCloudFeaSolve(runId, env);
       message.ack();
     }
   }
-};
+} satisfies ExportedHandler<Env>;
 
-async function createCloudFeaRun(request: Request, env: Env, ctx?: ExecutionContextLike): Promise<Response> {
+async function createCloudFeaRun(request: Request, env: RuntimeEnv, ctx?: ExecutionContext): Promise<Response> {
   if (!env.FEA_ARTIFACTS) {
     return Response.json({ error: "Cloud FEA is not configured for this deployment." }, { status: 503, headers: jsonHeaders });
   }
@@ -155,7 +141,7 @@ async function createCloudFeaRun(request: Request, env: Env, ctx?: ExecutionCont
   return Response.json({ run, streamUrl: `/api/cloud-fea/runs/${runId}/events`, message: "Cloud FEA simulation queued." }, { status: 202, headers: jsonHeaders });
 }
 
-async function getCloudFeaRunEvents(runId: string, env: Env): Promise<Response> {
+async function getCloudFeaRunEvents(runId: string, env: RuntimeEnv): Promise<Response> {
   if (!env.FEA_ARTIFACTS) {
     return Response.json({ error: "Cloud FEA is not configured for this deployment." }, { status: 503, headers: jsonHeaders });
   }
@@ -167,7 +153,7 @@ async function getCloudFeaRunEvents(runId: string, env: Env): Promise<Response> 
   return Response.json({ events }, { headers: jsonHeaders });
 }
 
-async function getCloudFeaRunResults(runId: string, env: Env): Promise<Response> {
+async function getCloudFeaRunResults(runId: string, env: RuntimeEnv): Promise<Response> {
   if (!env.FEA_ARTIFACTS) {
     return Response.json({ error: "Cloud FEA is not configured for this deployment." }, { status: 503, headers: jsonHeaders });
   }
@@ -178,7 +164,7 @@ async function getCloudFeaRunResults(runId: string, env: Env): Promise<Response>
   return Response.json(JSON.parse(await object.text()), { headers: jsonHeaders });
 }
 
-async function runCloudFeaSolve(runId: string, env: Env): Promise<void> {
+async function runCloudFeaSolve(runId: string, env: RuntimeEnv): Promise<void> {
   const artifacts = env.FEA_ARTIFACTS;
   if (!artifacts) throw new Error("Cloud FEA artifacts bucket is not configured.");
   const now = new Date().toISOString();
@@ -227,7 +213,7 @@ async function runCloudFeaSolve(runId: string, env: Env): Promise<void> {
   }
 }
 
-async function callFeaContainer(env: Env, payload: Record<string, unknown>): Promise<Response> {
+async function callFeaContainer(env: RuntimeEnv, payload: Record<string, unknown>): Promise<Response> {
   const binding = env.FEA_CONTAINER;
   if (!binding) throw new Error("Cloud FEA container binding is not configured.");
   const instanceName = typeof payload.runId === "string" ? payload.runId : crypto.randomUUID();
@@ -415,9 +401,13 @@ function normalizeContainerRuntimeError(error: unknown): string {
   return message;
 }
 
-async function putOptionalArtifact(artifacts: R2BucketBinding, key: string, value: unknown): Promise<void> {
+async function putOptionalArtifact(artifacts: R2Bucket, key: string, value: unknown): Promise<void> {
   if (typeof value !== "string") return;
   await artifacts.put(key, value);
+}
+
+function logWorkerEvent(event: string, details: Record<string, unknown> = {}): void {
+  console.log(JSON.stringify({ event, service: "opencae-web-worker", ...details }));
 }
 
 function analysisTypeFromBody(body: Record<string, unknown>): string | undefined {

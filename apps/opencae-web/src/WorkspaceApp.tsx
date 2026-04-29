@@ -23,6 +23,7 @@ import {
 import { resetDisplayModelOrientation, type RotationAxis } from "./modelOrientation";
 import { buildLocalProjectFile, suggestedProjectFilename, type LocalResultBundle } from "./projectFile";
 import { buildAutosavedWorkspace, readAutosavedWorkspace, writeAutosavedWorkspace, type ThemeMode } from "./appPersistence";
+import type { AutosavedWorkspace } from "./appPersistence";
 import {
   canNavigateToStep,
   printLayerOrientationForViewer,
@@ -35,7 +36,7 @@ import { supportDisplayLabel } from "./supportLabels";
 import { nextSelectedPayloadObject, shouldClearPayloadSelectionOnViewerMiss } from "./payloadSelection";
 import { createLocalDynamicStructuralStudy, createLocalStaticStressStudy } from "./localProjectFactory";
 import { createResultFrameCache, hasDynamicPlaybackFrames } from "./resultFields";
-import type { AutosavedWorkspace, WorkspaceInitialAction } from "./App";
+import type { WorkspaceInitialAction } from "./App";
 
 const lazyCadViewerImport = () => import("./components/CadViewer").then((module) => ({ default: module.CadViewer }));
 const CadViewer = lazy(lazyCadViewerImport);

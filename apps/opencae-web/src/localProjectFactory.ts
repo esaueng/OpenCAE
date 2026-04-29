@@ -2,9 +2,9 @@ import type { DisplayModel, Load, Project } from "@opencae/schema";
 import { ProjectSchema } from "@opencae/schema";
 import { bracketDemoProject, bracketDisplayModel } from "@opencae/db/sample-data";
 import { stlDimensionsFromBase64 } from "@opencae/units";
-import { solveDynamicStudy } from "@opencae/solver-service";
 import type { EmbeddedModelFile, LocalResultBundle } from "./projectFile";
 import type { SampleAnalysisType, SampleModelId, SampleProjectResponse } from "./lib/api";
+import { fallbackSolveLocalStudy } from "./workers/localSolve";
 
 const SAMPLE_META: Record<SampleModelId, { projectName: string; modelName: string; filename: string; displayName: string; dimensions: DisplayModel["dimensions"] }> = {
   bracket: {
@@ -30,7 +30,7 @@ const SAMPLE_META: Record<SampleModelId, { projectName: string; modelName: strin
   }
 };
 
-export function createLocalSampleProject(sample: SampleModelId = "bracket", analysisTypeOrNow: SampleAnalysisType | string = "static_stress", maybeNow?: string): SampleProjectResponse {
+export async function createLocalSampleProject(sample: SampleModelId = "bracket", analysisTypeOrNow: SampleAnalysisType | string = "static_stress", maybeNow?: string): Promise<SampleProjectResponse> {
   const analysisType: SampleAnalysisType = analysisTypeOrNow === "dynamic_structural" ? "dynamic_structural" : "static_stress";
   const now = analysisTypeOrNow === "dynamic_structural" || analysisTypeOrNow === "static_stress" ? maybeNow ?? new Date().toISOString() : analysisTypeOrNow;
   const meta = SAMPLE_META[sample];
@@ -133,7 +133,7 @@ export function createLocalSampleProject(sample: SampleModelId = "bracket", anal
     updatedAt: now
   };
 
-  const results = analysisType === "dynamic_structural" ? dynamicSampleResults(project) : undefined;
+  const results = analysisType === "dynamic_structural" ? await dynamicSampleResults(project) : undefined;
   return {
     project,
     displayModel,
@@ -160,11 +160,11 @@ function dynamicSampleRun(sample: SampleModelId, projectId: string, studyId: str
   };
 }
 
-function dynamicSampleResults(project: Project): LocalResultBundle | undefined {
+async function dynamicSampleResults(project: Project): Promise<LocalResultBundle | undefined> {
   const study = project.studies[0];
   const run = study?.runs[0];
   if (!study || !run) return undefined;
-  const solved = solveDynamicStudy(study, run.id);
+  const solved = await fallbackSolveLocalStudy({ study, runId: run.id });
   return {
     activeRunId: run.id,
     completedRunId: run.id,
