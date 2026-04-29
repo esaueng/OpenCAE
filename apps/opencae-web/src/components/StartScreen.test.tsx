@@ -16,17 +16,15 @@ describe("StartScreen", () => {
     expect(html).not.toContain("local mode");
   });
 
-  test("renders sample model and analysis selectors", () => {
+  test("keeps sample choices out of the start menu", () => {
     const html = renderToStaticMarkup(
       <StartScreen onLoadSample={vi.fn()} onCreateProject={vi.fn()} onOpenProject={vi.fn()} />
     );
 
-    expect(html).toContain("Sample model");
-    expect(html).toContain("Bracket");
-    expect(html).toContain("Beam");
-    expect(html).toContain("Cantilever");
-    expect(html).toContain("Analysis type");
-    expect(html).toContain("Static");
-    expect(html).toContain("Dynamic");
+    expect(html).toContain("Load sample project");
+    expect(html).not.toContain("Sample model");
+    expect(html).not.toContain("Analysis type");
+    expect(html).not.toContain('aria-label="Sample setup"');
+    expect(html).not.toContain("Bracket static demo");
   });
 });
