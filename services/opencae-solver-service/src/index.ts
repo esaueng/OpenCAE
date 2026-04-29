@@ -266,6 +266,7 @@ export function solveDynamicStudy(study: Study, runId: string, analysisMeshInput
     peakStress = Math.max(peakStress, stressFrame.max);
     minSafetyFactor = Math.min(minSafetyFactor, safetyFrame.min);
   }
+  stabilizeDynamicFieldRanges(fields);
 
   const summaryBase = {
     maxStress: round(peakStress, 1),
@@ -409,6 +410,30 @@ function fieldForFrame(runId: string, type: ResultField["type"], values: number[
     frameIndex,
     timeSeconds
   };
+}
+
+function stabilizeDynamicFieldRanges(fields: ResultField[]) {
+  const fieldTypes = [...new Set(fields.map((field) => field.type))];
+  for (const type of fieldTypes) {
+    const matchingFields = fields.filter((field) => field.type === type);
+    const values = matchingFields.flatMap((field) => [
+      ...field.values,
+      ...(field.samples?.map((sample) => sample.value) ?? [])
+    ]).filter(Number.isFinite);
+    if (!values.length) continue;
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    for (const field of matchingFields) {
+      field.min = round(min, dynamicRangeDigits(type));
+      field.max = round(max, dynamicRangeDigits(type));
+    }
+  }
+}
+
+function dynamicRangeDigits(type: ResultField["type"]) {
+  if (type === "stress") return 1;
+  if (type === "displacement" || type === "velocity" || type === "acceleration") return 4;
+  return 3;
 }
 
 function materialForStudy(study: Study): Material {

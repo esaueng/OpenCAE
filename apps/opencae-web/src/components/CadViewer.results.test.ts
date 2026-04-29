@@ -324,6 +324,58 @@ describe("CadViewer result coloring", () => {
     expect(deformedYForLoad(500_000)).toBeCloseTo(deformedYForLoad(500));
   });
 
+  test("keeps the fixed support end anchored during uploaded result deformation", () => {
+    const originalPositions = [-1, 0, 0, 0, 0, 0, 1, 0, 0];
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.Float32BufferAttribute(originalPositions, 3));
+    geometry.setIndex([0, 1, 2]);
+    const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color: "#63a9e5" }));
+    const group = new THREE.Group();
+    group.add(mesh);
+
+    colorizeResultObject(group, "uploaded", "displacement", true, 1, samples, [{
+      id: "load-1",
+      faceId: "right",
+      type: "force",
+      value: 500,
+      units: "N",
+      direction: [0, -1, 0],
+      directionLabel: "Normal",
+      labelIndex: 0,
+      stackIndex: 0
+    }], 1, [{
+      id: "support-1",
+      faceId: "left",
+      type: "fixed",
+      displayLabel: "FS 1",
+      label: "Left",
+      stackIndex: 0
+    }]);
+
+    const positions = mesh.geometry.getAttribute("position");
+    expect(positions.getY(0)).toBeCloseTo(0);
+    expect(positions.getY(1)).toBeLessThan(0);
+    expect(positions.getY(2)).toBeLessThan(positions.getY(1));
+  });
+
+  test("does not stretch low-amplitude dynamic result colors across the full palette", () => {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.Float32BufferAttribute([-1, 0, 0, 0, 0, 0, 1, 0, 0], 3));
+    const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color: "#63a9e5" }));
+    const group = new THREE.Group();
+    group.add(mesh);
+    const lowAmplitudeSamples: FaceResultSample[] = [
+      { ...samples[0]!, value: 1, normalized: 0.02 },
+      { ...samples[1]!, value: 2, normalized: 0.04 }
+    ];
+
+    colorizeResultObject(group, "uploaded", "stress", false, 1, lowAmplitudeSamples, []);
+
+    const colors = Array.from((mesh.geometry as THREE.BufferGeometry).getAttribute("color").array);
+    const highEndColor = new THREE.Color(colors[6]!, colors[7]!, colors[8]!);
+    expect(highEndColor.r).toBeLessThan(0.2);
+  });
+
   test("samples transformed native CAD vertices in normalized result coordinates", () => {
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute("position", new THREE.Float32BufferAttribute([1000, 0, 0, 1050, 0, 0, 1100, 0, 0], 3));

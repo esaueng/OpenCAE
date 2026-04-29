@@ -442,6 +442,7 @@ function BracketModel({
           stressExaggeration={stressExaggeration}
           resultFields={resultFields}
           loadMarkers={loadMarkers}
+          supportMarkers={supportMarkers}
           onMeasureDisplayModelDimensions={onMeasureDisplayModelDimensions}
           onUploadedPreviewBounds={onUploadedPreviewBounds}
         />
@@ -1242,6 +1243,7 @@ function AnalysisResultModel({
   stressExaggeration,
   resultFields,
   loadMarkers,
+  supportMarkers,
   onMeasureDisplayModelDimensions,
   onUploadedPreviewBounds
 }: {
@@ -1252,6 +1254,7 @@ function AnalysisResultModel({
   stressExaggeration: number;
   resultFields: ResultField[];
   loadMarkers: ViewerLoadMarker[];
+  supportMarkers: ViewerSupportMarker[];
   onMeasureDisplayModelDimensions?: (dimensions: NonNullable<DisplayModel["dimensions"]>) => void;
   onUploadedPreviewBounds: (bounds: THREE.Box3) => void;
 }) {
@@ -1271,6 +1274,7 @@ function AnalysisResultModel({
         stressExaggeration={stressExaggeration}
         deformationScale={deformationScale}
         loadMarkers={loadMarkers}
+        supportMarkers={supportMarkers}
         onMeasureDisplayModelDimensions={onMeasureDisplayModelDimensions}
         onUploadedPreviewBounds={onUploadedPreviewBounds}
       />
@@ -1290,6 +1294,7 @@ function UploadedResultSolid({
   stressExaggeration,
   deformationScale,
   loadMarkers,
+  supportMarkers,
   onMeasureDisplayModelDimensions,
   onUploadedPreviewBounds
 }: {
@@ -1300,6 +1305,7 @@ function UploadedResultSolid({
   stressExaggeration: number;
   deformationScale?: number;
   loadMarkers: ViewerLoadMarker[];
+  supportMarkers: ViewerSupportMarker[];
   onMeasureDisplayModelDimensions?: (dimensions: NonNullable<DisplayModel["dimensions"]>) => void;
   onUploadedPreviewBounds: (bounds: THREE.Box3) => void;
 }) {
@@ -1313,6 +1319,7 @@ function UploadedResultSolid({
         stressExaggeration={stressExaggeration}
         deformationScale={deformationScale}
         loadMarkers={loadMarkers}
+        supportMarkers={supportMarkers}
         onMeasureDisplayModelDimensions={onMeasureDisplayModelDimensions}
         onUploadedPreviewBounds={onUploadedPreviewBounds}
       />
@@ -1329,6 +1336,7 @@ function UploadedResultSolid({
         stressExaggeration={stressExaggeration}
         deformationScale={deformationScale}
         loadMarkers={loadMarkers}
+        supportMarkers={supportMarkers}
       />
     );
   }
@@ -1348,6 +1356,7 @@ function UploadedNativeCadResultModel({
   stressExaggeration,
   deformationScale,
   loadMarkers,
+  supportMarkers,
   onMeasureDisplayModelDimensions,
   onUploadedPreviewBounds
 }: {
@@ -1358,6 +1367,7 @@ function UploadedNativeCadResultModel({
   stressExaggeration: number;
   deformationScale?: number;
   loadMarkers: ViewerLoadMarker[];
+  supportMarkers: ViewerSupportMarker[];
   onMeasureDisplayModelDimensions?: (dimensions: NonNullable<DisplayModel["dimensions"]>) => void;
   onUploadedPreviewBounds: (bounds: THREE.Box3) => void;
 }) {
@@ -1371,7 +1381,7 @@ function UploadedNativeCadResultModel({
       .then((nextPreview) => {
         if (cancelled) return;
         const outline = showDeformed ? createUndeformedResultOutlineObject(nextPreview.object) : undefined;
-        colorizeResultObject(nextPreview.object, "uploaded", resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale);
+        colorizeResultObject(nextPreview.object, "uploaded", resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale, supportMarkers);
         setPreview({ status: "ready", object: nextPreview.object, outline });
         onMeasureDisplayModelDimensions?.(nextPreview.dimensions);
         onUploadedPreviewBounds(nextPreview.normalizedBounds);
@@ -1386,6 +1396,7 @@ function UploadedNativeCadResultModel({
   }, [
     displayModel.nativeCad?.contentBase64,
     loadMarkers,
+    supportMarkers,
     onMeasureDisplayModelDimensions,
     onUploadedPreviewBounds,
     resultMode,
@@ -1423,7 +1434,8 @@ function UploadedStlResultModel({
   showDeformed,
   stressExaggeration,
   deformationScale,
-  loadMarkers
+  loadMarkers,
+  supportMarkers
 }: {
   displayModel: DisplayModel;
   samples: FaceResultSample[];
@@ -1432,12 +1444,13 @@ function UploadedStlResultModel({
   stressExaggeration: number;
   deformationScale?: number;
   loadMarkers: ViewerLoadMarker[];
+  supportMarkers: ViewerSupportMarker[];
 }) {
   const outlineGeometry = useMemo(() => normalizedStlGeometryFromBuffer(base64ToArrayBuffer(displayModel.visualMesh?.contentBase64 ?? "")), [displayModel.visualMesh?.contentBase64]);
   const geometry = useMemo(() => {
     const parsed = normalizedStlGeometryFromBuffer(base64ToArrayBuffer(displayModel.visualMesh?.contentBase64 ?? ""));
-    return colorizeResultGeometry(parsed, "uploaded", resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale);
-  }, [deformationScale, displayModel.visualMesh?.contentBase64, loadMarkers, resultMode, samples, showDeformed, stressExaggeration]);
+    return colorizeResultGeometry(parsed, "uploaded", resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale, undefined, undefined, supportMarkers);
+  }, [deformationScale, displayModel.visualMesh?.contentBase64, loadMarkers, resultMode, samples, showDeformed, stressExaggeration, supportMarkers]);
 
   return (
     <group>
@@ -1614,7 +1627,8 @@ function colorizeResultGeometry(
   loadMarkers: ViewerLoadMarker[],
   deformationScale?: number,
   coordinateTransform?: ResultCoordinateTransform,
-  valueRange?: ResultValueRange
+  valueRange?: ResultValueRange,
+  supportMarkers: ViewerSupportMarker[] = []
 ) {
   const colors: number[] = [];
   const positions = geometry.getAttribute("position");
@@ -1631,14 +1645,14 @@ function colorizeResultGeometry(
     resultPoints.push(resultPoint);
     values.push(resultValueForPoint(kind, resultMode, stressExaggeration, resultPoint, samples));
   }
-  const range = valueRange ?? resultValueRange(values);
+  const range = valueRange ?? resultValueRange(values, samples);
   for (let index = 0; index < positions.count; index += 1) {
     const point = new THREE.Vector3(positions.getX(index), positions.getY(index), positions.getZ(index));
     const resultPoint = resultPoints[index] ?? point;
     color.copy(resultColorForValue(resultMode, normalizeResultValue(values[index] ?? 0.5, range)));
     colors.push(color.r, color.g, color.b);
     if (showDeformed) {
-      const deformed = deformedPointForResults(kind, resultPoint, stressExaggeration, samples, loadMarkers, resolvedDeformationScale, usesResultDeformationScale, bounds);
+      const deformed = deformedPointForResults(kind, resultPoint, stressExaggeration, samples, loadMarkers, resolvedDeformationScale, usesResultDeformationScale, bounds, supportMarkers);
       const localDeformed = coordinateTransform?.fromResultPoint(deformed) ?? deformed;
       positions.setXYZ(index, localDeformed.x, localDeformed.y, localDeformed.z);
     }
@@ -1668,7 +1682,8 @@ export function colorizeResultObject(
   stressExaggeration: number,
   samples: FaceResultSample[],
   loadMarkers: ViewerLoadMarker[],
-  deformationScale?: number
+  deformationScale?: number,
+  supportMarkers: ViewerSupportMarker[] = []
 ) {
   object.updateMatrixWorld(true);
   const excludedPayloadObjects = resultPayloadObjectRefs(loadMarkers);
@@ -1690,7 +1705,7 @@ export function colorizeResultObject(
   });
   const bounds = resultBoundsForMeshes(resultMeshes);
   const values = resultMeshes.flatMap((mesh) => resultValuesForMesh(mesh, kind, resultMode, stressExaggeration, samples));
-  const valueRange = resultValueRange(values);
+  const valueRange = resultValueRange(values, samples);
   for (const child of resultMeshes) {
     const toResultMatrix = child.matrixWorld.clone();
     const fromResultMatrix = toResultMatrix.clone().invert();
@@ -1698,7 +1713,7 @@ export function colorizeResultObject(
       bounds,
       toResultPoint: (point) => point.clone().applyMatrix4(toResultMatrix),
       fromResultPoint: (point) => point.clone().applyMatrix4(fromResultMatrix)
-    }, valueRange);
+    }, valueRange, supportMarkers);
     child.material = new THREE.MeshStandardMaterial({
       vertexColors: true,
       metalness: 0.18,
@@ -1768,13 +1783,18 @@ function resultValuesForMesh(
   return values;
 }
 
-function resultValueRange(values: number[]): ResultValueRange {
+function resultValueRange(values: number[], samples: FaceResultSample[] = []): ResultValueRange {
+  if (hasSolvedResultSamples(samples)) return { min: 0, max: 1 };
   const finiteValues = values.filter(Number.isFinite);
   if (!finiteValues.length) return { min: 0, max: 1 };
   return {
     min: Math.min(...finiteValues),
     max: Math.max(...finiteValues)
   };
+}
+
+function hasSolvedResultSamples(samples: FaceResultSample[]) {
+  return samples.some((sample) => Number.isFinite(sample.normalized) || Boolean(sample.fieldSamples?.length));
 }
 
 function normalizeResultValue(value: number, range: ResultValueRange) {
@@ -1818,10 +1838,11 @@ function deformedPointForResults(
   loadMarkers: ViewerLoadMarker[],
   deformationScale: number,
   usesResultDeformationScale: boolean,
-  bounds?: THREE.Box3
+  bounds?: THREE.Box3,
+  supportMarkers: ViewerSupportMarker[] = []
 ) {
   if (deformationScale <= 1e-9) return point.clone();
-  if (kind === "uploaded") return deformedUploadedPoint(point, stressExaggeration, loadMarkers, deformationScale, usesResultDeformationScale, bounds);
+  if (kind === "uploaded") return deformedUploadedPoint(point, stressExaggeration, samples, loadMarkers, supportMarkers, deformationScale, usesResultDeformationScale, bounds);
   if (!loadMarkers.length) return deformedPointForKind(kind, point, stressExaggeration, deformationScale);
   const next = point.clone();
   const span = resultSampleSpan(samples);
@@ -1839,16 +1860,54 @@ function deformedPointForResults(
   return next.add(deformation);
 }
 
-function deformedUploadedPoint(point: THREE.Vector3, stressExaggeration: number, loadMarkers: ViewerLoadMarker[], deformationScale: number, usesResultDeformationScale: boolean, bounds?: THREE.Box3) {
+function deformedUploadedPoint(
+  point: THREE.Vector3,
+  stressExaggeration: number,
+  samples: FaceResultSample[],
+  loadMarkers: ViewerLoadMarker[],
+  supportMarkers: ViewerSupportMarker[],
+  deformationScale: number,
+  usesResultDeformationScale: boolean,
+  bounds?: THREE.Box3
+) {
   const next = point.clone();
   const size = bounds?.getSize(new THREE.Vector3()) ?? new THREE.Vector3(2.4, 2.4, 2.4);
   const maxDimension = Math.max(size.x, size.y, size.z, 1);
-  const direction = resultantLoadDirection(loadMarkers);
   const magnitude = usesResultDeformationScale ? 1 : loadMarkers.length
     ? loadMarkers.reduce((total, marker) => total + Math.max(0.25, marker.value / 500), 0) / loadMarkers.length
     : 1;
   const scale = maxDimension * (0.012 + Math.max(0, stressExaggeration - 1) * 0.012) * magnitude * deformationScale;
-  return next.addScaledVector(direction, scale);
+  const supportCenters = markerCenters(supportMarkers, samples);
+  const loadCenters = markerCenters(loadMarkers, samples);
+  if (supportCenters.length && loadCenters.length) {
+    const supportCenter = averageVector(supportCenters);
+    const deformation = new THREE.Vector3();
+    for (const marker of loadMarkers) {
+      const loadCenter = markerCenter(marker.faceId, samples) ?? averageVector(loadCenters);
+      const span = loadCenter.clone().sub(supportCenter);
+      const spanLengthSq = Math.max(span.lengthSq(), 1e-9);
+      const travel = Math.max(0, Math.min(1, point.clone().sub(supportCenter).dot(span) / spanLengthSq));
+      const beamShape = travel * travel * (3 - 2 * travel);
+      deformation.addScaledVector(markerDirectionInModelSpace(marker), beamShape * scale / Math.max(loadMarkers.length, 1));
+    }
+    return next.add(deformation);
+  }
+  return next.addScaledVector(resultantLoadDirection(loadMarkers), scale);
+}
+
+function markerCenters(markers: Array<{ faceId: string }>, samples: FaceResultSample[]) {
+  return markers.map((marker) => markerCenter(marker.faceId, samples)).filter((center): center is THREE.Vector3 => Boolean(center));
+}
+
+function markerCenter(faceId: string, samples: FaceResultSample[]) {
+  const sample = samples.find((candidate) => candidate.face.id === faceId);
+  return sample ? new THREE.Vector3(...sample.face.center) : null;
+}
+
+function averageVector(points: THREE.Vector3[]) {
+  const average = new THREE.Vector3();
+  for (const point of points) average.add(point);
+  return average.multiplyScalar(1 / Math.max(points.length, 1));
 }
 
 function resultantLoadDirection(loadMarkers: ViewerLoadMarker[]) {
