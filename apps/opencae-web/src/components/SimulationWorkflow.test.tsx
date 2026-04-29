@@ -33,15 +33,13 @@ const fields: ResultField[] = [
 ];
 
 describe("static simulation workflow components", () => {
-  test("renders a create simulation modal with static analysis enabled and future analyses disabled", () => {
-    const html = renderToStaticMarkup(<CreateSimulationModal open onCreateStatic={vi.fn()} onClose={vi.fn()} />);
+  test("renders a create simulation modal with static and dynamic analysis enabled", () => {
+    const html = renderToStaticMarkup(<CreateSimulationModal open onCreateStatic={vi.fn()} onCreateDynamic={vi.fn()} onClose={vi.fn()} />);
 
     expect(html).toContain("Create Simulation");
     expect(html).toContain("Static Analysis");
-    expect(html).toContain("Create Simulation");
-    expect(html).toContain("Dynamic");
-    expect(html).toContain("Coming soon");
-    expect(html).toContain("disabled");
+    expect(html).toContain("Dynamic Analysis");
+    expect(html).toContain("Time-dependent");
   });
 
   test("renders setup tree statuses and plus actions for simulation setup", () => {
@@ -131,5 +129,26 @@ describe("static simulation workflow components", () => {
     expect(html).toContain("Safety factor");
     expect(html).toContain("Pa");
     expect(html).toContain("result-option disabled");
+  });
+
+  test("renders velocity and acceleration as enabled result fields when dynamic frames are present", () => {
+    const html = renderToStaticMarkup(
+      <ResultsFieldSelector
+        resultMode="velocity"
+        fields={[
+          ...fields,
+          { id: "field-velocity", runId: "run-1", type: "velocity", location: "face", values: [1], min: 1, max: 1, units: "mm/s", frameIndex: 1, timeSeconds: 0.005 },
+          { id: "field-acceleration", runId: "run-1", type: "acceleration", location: "face", values: [10], min: 10, max: 10, units: "mm/s^2", frameIndex: 1, timeSeconds: 0.005 }
+        ]}
+        unitSystem="SI"
+        defaultOpen
+        onResultModeChange={vi.fn()}
+      />
+    );
+
+    expect(html).toContain("Velocity");
+    expect(html).toContain("Acceleration");
+    expect(html).toContain("mm/s");
+    expect(html).toContain("mm/s^2");
   });
 });

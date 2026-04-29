@@ -1,6 +1,6 @@
 import type { DisplayFace, ResultField } from "@opencae/schema";
 
-export type ResultFieldMode = "stress" | "displacement" | "safety_factor";
+export type ResultFieldMode = "stress" | "displacement" | "safety_factor" | "velocity" | "acceleration";
 
 export interface FaceResultSample {
   face: DisplayFace;
@@ -73,6 +73,8 @@ export function resultProbeSamplesForFaces(faces: DisplayFace[], fields: ResultF
 
 function fallbackValue(face: DisplayFace, mode: ResultFieldMode): number {
   if (mode === "displacement") return face.stressValue / 770;
+  if (mode === "velocity") return 0;
+  if (mode === "acceleration") return 0;
   if (mode === "safety_factor") return Math.max(0.2, 276 / Math.max(face.stressValue, 0.001));
   return face.stressValue;
 }
@@ -86,6 +88,8 @@ function normalizeValue(value: number, min: number, max: number): number {
 function resultProbeLabel(mode: ResultFieldMode, value: number, units = "") {
   const unit = units ? ` ${units}` : "";
   if (mode === "displacement") return `Disp: ${formatResultValue(value)}${unit}`;
+  if (mode === "velocity") return `Vel: ${formatResultValue(value)}${unit}`;
+  if (mode === "acceleration") return `Accel: ${formatResultValue(value)}${unit}`;
   if (mode === "safety_factor") return `FoS: ${formatResultValue(value)}`;
   return `Stress: ${formatResultValue(value)}${unit}`;
 }

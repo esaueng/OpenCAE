@@ -1,6 +1,6 @@
 import { effectiveMaterialProperties, starterMaterials } from "@opencae/materials";
 import { assessResultFailure } from "@opencae/schema";
-import type { AnalysisMesh, AnalysisSample, Load, Material, ResultField, ResultSample, ResultSummary, RunEvent, Study } from "@opencae/schema";
+import type { AnalysisMesh, AnalysisSample, DynamicSolverSettings, Load, Material, ResultField, ResultSample, ResultSummary, RunEvent, Study } from "@opencae/schema";
 import type { ObjectStorageProvider } from "@opencae/storage";
 import { bracketDisplayModel, bracketResultSummary } from "@opencae/db/sample-data";
 import { inferCriticalPrintAxis } from "@opencae/study-core";
@@ -86,6 +86,82 @@ export class LocalMockComputeBackend {
     await this.storage.putObject(summaryRef, JSON.stringify(summary, null, 2));
     return { resultRef, reportRef, summary, fields };
   }
+
+  async runDynamicSolve(args: {
+    study: Study;
+    runId: string;
+    meshRef: string;
+    analysisMesh?: AnalysisMesh;
+    publish: (event: RunEvent) => void;
+  }): Promise<{ resultRef: string; reportRef: string; summary: ResultSummary; fields: ResultField[] }> {
+    const messages = [
+      [10, "Local dynamic solver started."],
+      [26, "Reading transient structural setup."],
+      [44, "Estimating lumped mass, stiffness, and damping."],
+      [66, "Integrating dynamic response with Newmark average acceleration."],
+      [88, "Writing time-frame result fields."],
+      [100, "Simulation complete."]
+    ] as const;
+
+    const solved = solveDynamicStudy(args.study, args.runId, args.analysisMesh);
+    const settings = dynamicSettingsForStudy(args.study);
+    const solverInput = [
+      "local dynamic structural input",
+      `run=${args.runId}`,
+      `mesh=${args.meshRef}`,
+      `integrationMethod=${settings.integrationMethod}`,
+      `startTime=${settings.startTime}`,
+      `endTime=${settings.endTime}`,
+      `timeStep=${settings.timeStep}`,
+      `outputInterval=${settings.outputInterval}`,
+      `dampingRatio=${settings.dampingRatio}`,
+      `material=${solved.material.id}`,
+      `massKg=${solved.massKg}`,
+      `stiffnessNPerM=${solved.stiffnessNPerM}`,
+      `dampingNsPerM=${solved.dampingNsPerM}`,
+      `frames=${solved.summary.transient?.frameCount ?? 0}`,
+      ...args.study.loads.map((load) => JSON.stringify({ id: load.id, type: load.type, selectionRef: load.selectionRef, parameters: load.parameters }))
+    ].join("\n") + "\n";
+
+    await this.storage.putObject(`${args.study.projectId}/solver/${args.runId}/solver.inp`, solverInput);
+    for (const [progress, message] of messages) {
+      await delay(450);
+      args.publish({
+        runId: args.runId,
+        type: progress === 100 ? "complete" : "progress",
+        progress,
+        message,
+        timestamp: new Date().toISOString()
+      });
+      args.publish({
+        runId: args.runId,
+        type: "log",
+        progress,
+        message: progress === 100 ? "Local dynamic solve complete." : message,
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    const resultRef = `${args.study.projectId}/results/${args.runId}/results.json`;
+    const summaryRef = `${args.study.projectId}/results/${args.runId}/summary.json`;
+    const reportRef = `${args.study.projectId}/reports/${args.runId}/report.html`;
+    await this.storage.putObject(
+      `${args.study.projectId}/solver/${args.runId}/solver.log`,
+      [
+        `Local mesh read: ${solved.analysisSampleCount.toLocaleString()} surface analysis samples.`,
+        "Local dynamic solver: deterministic lumped transient structural model.",
+        `Integration: ${settings.integrationMethod}.`,
+        `Time range: ${settings.startTime}s to ${settings.endTime}s, dt=${settings.timeStep}s, output=${settings.outputInterval}s.`,
+        `Damping ratio: ${settings.dampingRatio}.`,
+        `Frames written: ${solved.summary.transient?.frameCount ?? 0}.`,
+        `Peak displacement: ${solved.summary.maxDisplacement} ${solved.summary.maxDisplacementUnits} at ${solved.summary.transient?.peakDisplacementTimeSeconds ?? 0}s.`,
+        "Dynamic solve complete."
+      ].join("\n") + "\n"
+    );
+    await this.storage.putObject(resultRef, JSON.stringify({ summary: solved.summary, fields: solved.fields }, null, 2));
+    await this.storage.putObject(summaryRef, JSON.stringify(solved.summary, null, 2));
+    return { resultRef, reportRef, summary: solved.summary, fields: solved.fields };
+  }
 }
 
 type Vec3 = [number, number, number];
@@ -149,6 +225,195 @@ export function solveStudy(study: Study, runId: string, analysisMeshInput?: Anal
     failureAssessment: assessResultFailure(summaryBase)
   };
   return { summary, fields, faceCount: faces.length, loadCount: loads.length, totalAppliedLoad: summary.reactionForce, material, effectiveMaterial, materialParameters, analysisSampleCount: analysisMesh.samples.length };
+}
+
+export function solveDynamicStudy(study: Study, runId: string, analysisMeshInput?: AnalysisMesh) {
+  const settings = dynamicSettingsForStudy(study);
+  const staticSolved = solveStudy(study, runId, analysisMeshInput);
+  const stressBase = staticSolved.fields.find((field) => field.type === "stress");
+  const displacementBase = staticSolved.fields.find((field) => field.type === "displacement");
+  const analysisMesh = analysisMeshInput ?? analysisMeshForFaces(faceModelsForStudy(study), study.meshSettings.preset);
+  const totalForce = Math.max(staticSolved.totalAppliedLoad, 0.001);
+  const staticDisplacementMeters = Math.max((displacementBase?.max ?? staticSolved.summary.maxDisplacement) / 1000, 1e-6);
+  const massKg = equivalentMassKg(staticSolved.material, analysisMesh);
+  const stiffnessNPerM = Math.max(totalForce / staticDisplacementMeters, 1);
+  const dampingNsPerM = 2 * settings.dampingRatio * Math.sqrt(stiffnessNPerM * massKg);
+  const frames = integrateDynamicFrames(settings, totalForce, massKg, stiffnessNPerM, dampingNsPerM);
+  const yieldMpa = staticSolved.material.yieldStrength / 1_000_000;
+  const fields: ResultField[] = [];
+  let peakDisplacement = 0;
+  let peakDisplacementTimeSeconds = settings.startTime;
+  let peakStress = 0;
+  let minSafetyFactor = Number.POSITIVE_INFINITY;
+
+  for (const frame of frames) {
+    const displacementScale = Math.abs(frame.displacement / staticDisplacementMeters);
+    const velocityScale = Math.abs(frame.velocity / staticDisplacementMeters);
+    const accelerationScale = Math.abs(frame.acceleration / staticDisplacementMeters);
+    const stressScale = displacementScale;
+    const stressFrame = scaleBaseField(stressBase, runId, "stress", "MPa", stressScale, frame.index, frame.time, 1);
+    const displacementFrame = scaleBaseField(displacementBase, runId, "displacement", "mm", displacementScale, frame.index, frame.time, 4);
+    const velocityFrame = scaleBaseField(displacementBase, runId, "velocity", "mm/s", velocityScale, frame.index, frame.time, 4);
+    const accelerationFrame = scaleBaseField(displacementBase, runId, "acceleration", "mm/s^2", accelerationScale, frame.index, frame.time, 4);
+    const safetyValues = stressFrame.values.map((stress) => round(Math.max(0.05, yieldMpa / Math.max(stress, 0.001)), 2));
+    const safetySamples = stressFrame.samples?.map((sample) => sampleResult(sample, Math.max(0.05, yieldMpa / Math.max(sample.value, 0.001)), 3)) ?? [];
+    const safetyFrame = fieldForFrame(runId, "safety_factor", safetyValues, "", safetySamples, frame.index, frame.time);
+    fields.push(stressFrame, displacementFrame, velocityFrame, accelerationFrame, safetyFrame);
+    if (displacementFrame.max > peakDisplacement) {
+      peakDisplacement = displacementFrame.max;
+      peakDisplacementTimeSeconds = frame.time;
+    }
+    peakStress = Math.max(peakStress, stressFrame.max);
+    minSafetyFactor = Math.min(minSafetyFactor, safetyFrame.min);
+  }
+
+  const summaryBase = {
+    maxStress: round(peakStress, 1),
+    maxStressUnits: "MPa",
+    maxDisplacement: round(peakDisplacement, 3),
+    maxDisplacementUnits: "mm",
+    safetyFactor: round(Number.isFinite(minSafetyFactor) ? minSafetyFactor : 0, 2),
+    reactionForce: staticSolved.summary.reactionForce,
+    reactionForceUnits: "N",
+    transient: {
+      analysisType: "dynamic_structural" as const,
+      integrationMethod: settings.integrationMethod,
+      startTime: settings.startTime,
+      endTime: settings.endTime,
+      timeStep: settings.timeStep,
+      outputInterval: settings.outputInterval,
+      dampingRatio: settings.dampingRatio,
+      frameCount: frames.length,
+      peakDisplacementTimeSeconds: round(peakDisplacementTimeSeconds, 6),
+      peakDisplacement: round(peakDisplacement, 4)
+    }
+  };
+  const summary: ResultSummary = {
+    ...summaryBase,
+    failureAssessment: assessResultFailure(summaryBase)
+  };
+  return {
+    summary,
+    fields,
+    material: staticSolved.material,
+    massKg: round(massKg, 6),
+    stiffnessNPerM: round(stiffnessNPerM, 3),
+    dampingNsPerM: round(dampingNsPerM, 6),
+    analysisSampleCount: analysisMesh.samples.length
+  };
+}
+
+function dynamicSettingsForStudy(study: Study): DynamicSolverSettings {
+  const raw = study.solverSettings as Partial<DynamicSolverSettings>;
+  return {
+    startTime: finiteOr(raw.startTime, 0),
+    endTime: finiteOr(raw.endTime, 0.1),
+    timeStep: finiteOr(raw.timeStep, 0.005),
+    outputInterval: finiteOr(raw.outputInterval, 0.005),
+    dampingRatio: finiteOr(raw.dampingRatio, 0.02),
+    integrationMethod: "newmark_average_acceleration",
+    ...(raw.allowFreeMotion === true ? { allowFreeMotion: true } : {})
+  };
+}
+
+function finiteOr(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+interface DynamicFrame {
+  index: number;
+  time: number;
+  displacement: number;
+  velocity: number;
+  acceleration: number;
+}
+
+function integrateDynamicFrames(settings: DynamicSolverSettings, force: number, mass: number, stiffness: number, damping: number): DynamicFrame[] {
+  const beta = 0.25;
+  const gamma = 0.5;
+  const dt = Math.max(settings.timeStep, 1e-6);
+  const outputInterval = Math.max(settings.outputInterval, dt);
+  const frames: DynamicFrame[] = [];
+  let time = settings.startTime;
+  let nextOutput = settings.startTime;
+  let u = 0;
+  let v = 0;
+  let a = (loadScaleAt(time, settings) * force - damping * v - stiffness * u) / mass;
+  let frameIndex = 0;
+  const maxSteps = Math.ceil((settings.endTime - settings.startTime) / dt) + 2;
+  const pushFrame = () => {
+    frames.push({ index: frameIndex, time: round(time, 6), displacement: u, velocity: v, acceleration: a });
+    frameIndex += 1;
+  };
+  pushFrame();
+  for (let step = 0; step < maxSteps && time < settings.endTime - 1e-12; step += 1) {
+    const nextTime = Math.min(time + dt, settings.endTime);
+    const stepDt = nextTime - time;
+    const a0 = 1 / (beta * stepDt * stepDt);
+    const a1 = gamma / (beta * stepDt);
+    const a2 = 1 / (beta * stepDt);
+    const a3 = 1 / (2 * beta) - 1;
+    const a4 = gamma / beta - 1;
+    const a5 = stepDt * (gamma / (2 * beta) - 1);
+    const effectiveStiffness = stiffness + a0 * mass + a1 * damping;
+    const nextForce = loadScaleAt(nextTime, settings) * force;
+    const effectiveForce = nextForce + mass * (a0 * u + a2 * v + a3 * a) + damping * (a1 * u + a4 * v + a5 * a);
+    const nextU = effectiveForce / effectiveStiffness;
+    const nextA = a0 * (nextU - u) - a2 * v - a3 * a;
+    const nextV = v + stepDt * ((1 - gamma) * a + gamma * nextA);
+    time = nextTime;
+    u = nextU;
+    v = nextV;
+    a = nextA;
+    if (time >= nextOutput + outputInterval - 1e-12 || time >= settings.endTime - 1e-12) {
+      nextOutput = time;
+      pushFrame();
+    }
+  }
+  return frames;
+}
+
+function loadScaleAt(time: number, settings: DynamicSolverSettings): number {
+  const profile = (settings as DynamicSolverSettings & { loadProfile?: string }).loadProfile;
+  if (profile === "ramp") {
+    const duration = Math.max(settings.endTime - settings.startTime, settings.timeStep);
+    return clamp((time - settings.startTime) / duration, 0, 1);
+  }
+  if (profile === "sinusoidal") {
+    const duration = Math.max(settings.endTime - settings.startTime, settings.timeStep);
+    return Math.sin(Math.PI * clamp((time - settings.startTime) / duration, 0, 1));
+  }
+  return 1;
+}
+
+function equivalentMassKg(material: Material, analysisMesh: AnalysisMesh): number {
+  const span = subtract(analysisMesh.bounds.max, analysisMesh.bounds.min);
+  const volumeM3 = Math.max(Math.abs(span[0] * span[1] * span[2]) * 1e-6, 1e-5);
+  return Math.max(material.density * volumeM3, 0.05);
+}
+
+function scaleBaseField(
+  base: ResultField | undefined,
+  runId: string,
+  type: ResultField["type"],
+  units: string,
+  scale: number,
+  frameIndex: number,
+  timeSeconds: number,
+  digits: number
+): ResultField {
+  const values = (base?.values.length ? base.values : [0]).map((value) => round(value * scale, digits));
+  const samples = base?.samples?.map((sample) => sampleResult(sample, sample.value * scale, digits)) ?? [];
+  return fieldForFrame(runId, type, values, units, samples, frameIndex, timeSeconds);
+}
+
+function fieldForFrame(runId: string, type: ResultField["type"], values: number[], units: string, samples: ResultSample[], frameIndex: number, timeSeconds: number): ResultField {
+  return {
+    ...fieldFor(runId, type, values, units, samples),
+    id: `field-${type}-${runId}-frame-${frameIndex}`,
+    frameIndex,
+    timeSeconds
+  };
 }
 
 function materialForStudy(study: Study): Material {

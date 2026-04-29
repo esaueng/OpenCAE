@@ -60,6 +60,17 @@ export const LoadSchema = z.object({
 });
 
 const Vec3Schema = z.tuple([z.number(), z.number(), z.number()]);
+export const StudyAnalysisTypeSchema = z.enum(["static_stress", "dynamic_structural"]);
+
+export const DynamicSolverSettingsSchema = z.object({
+  startTime: z.number().default(0),
+  endTime: z.number().default(0.1),
+  timeStep: z.number().default(0.005),
+  outputInterval: z.number().default(0.005),
+  dampingRatio: z.number().default(0.02),
+  integrationMethod: z.literal("newmark_average_acceleration").default("newmark_average_acceleration"),
+  allowFreeMotion: z.boolean().optional()
+});
 
 export const AnalysisSampleSchema = z.object({
   point: Vec3Schema,
@@ -86,13 +97,15 @@ export const ResultSampleSchema = z.object({
 export const ResultFieldSchema = z.object({
   id: z.string(),
   runId: z.string(),
-  type: z.enum(["stress", "displacement", "safety_factor"]),
+  type: z.enum(["stress", "displacement", "safety_factor", "velocity", "acceleration"]),
   location: z.enum(["node", "element", "face"]),
   values: z.array(z.number()),
   min: z.number(),
   max: z.number(),
   units: z.string(),
-  samples: z.array(ResultSampleSchema).optional()
+  samples: z.array(ResultSampleSchema).optional(),
+  frameIndex: z.number().int().min(0).optional(),
+  timeSeconds: z.number().min(0).optional()
 });
 
 export const GeometryFileSchema = z.object({
@@ -135,30 +148,40 @@ export const StudyRunSchema = z.object({
   diagnostics: z.array(DiagnosticSchema).default([])
 });
 
-export const StudySchema = z.object({
+const MaterialAssignmentSchema = z.object({
+  id: z.string(),
+  materialId: z.string(),
+  selectionRef: z.string(),
+  parameters: z.record(z.unknown()).optional(),
+  status: z.enum(["not_started", "ready", "warning", "complete"])
+});
+
+const StudyBaseSchema = z.object({
   id: z.string(),
   projectId: z.string(),
   name: z.string(),
-  type: z.literal("static_stress"),
   geometryScope: z.array(GeometryReferenceSchema),
-  materialAssignments: z.array(
-    z.object({
-      id: z.string(),
-      materialId: z.string(),
-      selectionRef: z.string(),
-      parameters: z.record(z.unknown()).optional(),
-      status: z.enum(["not_started", "ready", "warning", "complete"])
-    })
-  ),
+  materialAssignments: z.array(MaterialAssignmentSchema),
   namedSelections: z.array(NamedSelectionSchema),
   contacts: z.array(z.unknown()).default([]),
   constraints: z.array(ConstraintSchema),
   loads: z.array(LoadSchema),
   meshSettings: MeshSettingsSchema,
-  solverSettings: z.record(z.unknown()),
   validation: z.array(DiagnosticSchema).default([]),
   runs: z.array(StudyRunSchema).default([])
 });
+
+export const StaticStudySchema = StudyBaseSchema.extend({
+  type: z.literal("static_stress"),
+  solverSettings: z.record(z.unknown())
+});
+
+export const DynamicStudySchema = StudyBaseSchema.extend({
+  type: z.literal("dynamic_structural"),
+  solverSettings: DynamicSolverSettingsSchema
+});
+
+export const StudySchema = z.discriminatedUnion("type", [StaticStudySchema, DynamicStudySchema]);
 
 export const ProjectSchema = z.object({
   id: z.string(),
@@ -193,7 +216,21 @@ export const ResultSummarySchema = z.object({
     })
     .optional(),
   reactionForce: z.number(),
-  reactionForceUnits: z.string()
+  reactionForceUnits: z.string(),
+  transient: z
+    .object({
+      analysisType: z.literal("dynamic_structural"),
+      integrationMethod: z.literal("newmark_average_acceleration"),
+      startTime: z.number(),
+      endTime: z.number(),
+      timeStep: z.number(),
+      outputInterval: z.number(),
+      dampingRatio: z.number(),
+      frameCount: z.number(),
+      peakDisplacementTimeSeconds: z.number(),
+      peakDisplacement: z.number()
+    })
+    .optional()
 });
 
 export const RunEventSchema = z.object({
@@ -206,6 +243,8 @@ export const RunEventSchema = z.object({
 });
 
 export type Diagnostic = z.infer<typeof DiagnosticSchema>;
+export type StudyAnalysisType = z.infer<typeof StudyAnalysisTypeSchema>;
+export type DynamicSolverSettings = z.infer<typeof DynamicSolverSettingsSchema>;
 export type Material = z.infer<typeof MaterialSchema>;
 export type GeometryReference = z.infer<typeof GeometryReferenceSchema>;
 export type NamedSelection = z.infer<typeof NamedSelectionSchema>;

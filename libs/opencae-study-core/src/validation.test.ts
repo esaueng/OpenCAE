@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Study } from "@opencae/schema";
-import { inferCriticalPrintAxis, validateStaticStressStudy } from "./index";
+import { inferCriticalPrintAxis, validateStaticStressStudy, validateStudy } from "./index";
 
 describe("validateStaticStressStudy", () => {
   const readyStudy: Study = {
@@ -99,5 +99,60 @@ describe("validateStaticStressStudy", () => {
       { selectionId: "selection-fixed-face", entityId: "face-base-left", center: [-1.8, 0.18, 0] },
       { selectionId: "selection-load-face", entityId: "face-load-top", center: [1.75, 0.18, 0] }
     ])).toBe("x");
+  });
+
+  it("preserves static validation through the generic validator", () => {
+    expect(validateStudy(readyStudy)).toEqual([]);
+  });
+
+  it("validates dynamic structural time settings and required setup", () => {
+    const dynamicStudy: Study = {
+      ...readyStudy,
+      name: "Dynamic",
+      type: "dynamic_structural",
+      materialAssignments: [],
+      constraints: [],
+      loads: [],
+      meshSettings: { preset: "medium", status: "not_started" },
+      solverSettings: {
+        startTime: 0.1,
+        endTime: 0.1,
+        timeStep: 0,
+        outputInterval: 0,
+        dampingRatio: -0.1,
+        integrationMethod: "newmark_average_acceleration"
+      }
+    };
+
+    expect(validateStudy(dynamicStudy).map((item) => item.message)).toEqual([
+      "Choose what the part is made of.",
+      "Choose where force, pressure, or payload weight is applied.",
+      "Generate the mesh before running.",
+      "Add at least one support or enable free motion for the dynamic run.",
+      "Dynamic end time must be greater than start time.",
+      "Dynamic time step must be greater than zero.",
+      "Dynamic output interval must be greater than zero and no smaller than the time step.",
+      "Dynamic damping ratio cannot be negative."
+    ]);
+  });
+
+  it("allows support-free dynamic runs only when free motion is explicitly enabled", () => {
+    const dynamicStudy: Study = {
+      ...readyStudy,
+      name: "Dynamic",
+      type: "dynamic_structural",
+      constraints: [],
+      solverSettings: {
+        startTime: 0,
+        endTime: 0.1,
+        timeStep: 0.005,
+        outputInterval: 0.005,
+        dampingRatio: 0.02,
+        integrationMethod: "newmark_average_acceleration",
+        allowFreeMotion: true
+      }
+    };
+
+    expect(validateStudy(dynamicStudy)).toEqual([]);
   });
 });

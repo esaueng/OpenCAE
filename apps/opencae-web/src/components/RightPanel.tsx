@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { AlertTriangle, Anchor, ArrowDown, Check, CircleHelp, Eye, Gauge, Grid3X3, Maximize2, Play, Plus, RotateCcw, Ruler, ScanLine, ShieldCheck, Upload, Weight, X } from "lucide-react";
 import { defaultPrintParametersFor, effectiveMaterialProperties, massKgForPayloadMaterial, normalizePrintParameters, payloadMaterialForId, payloadMaterials, starterMaterials, type PayloadMaterialCategory, type PrintMaterialParameters } from "@opencae/materials";
 import { assessResultFailure, estimateAllowableLoadForSafetyFactor } from "@opencae/schema";
-import type { Constraint, DisplayFace, DisplayModel, Load, Project, ResultField, ResultSummary, Study } from "@opencae/schema";
+import type { Constraint, DisplayFace, DisplayModel, DynamicSolverSettings, Load, Project, ResultField, ResultSummary, Study } from "@opencae/schema";
 import { inferCriticalPrintAxis } from "@opencae/study-core";
 import type { ResultMode, ViewMode } from "./CadViewer";
 import type { StepId } from "./StepBar";
@@ -64,9 +64,12 @@ interface RightPanelProps {
   onPreviewLoadEdit: (load: Load | null) => void;
   onRemoveLoad: (loadId: string) => void;
   onGenerateMesh: (preset: "coarse" | "medium" | "fine") => void;
+  onUpdateSolverSettings?: (settings: Partial<DynamicSolverSettings>) => void;
   onRunSimulation: () => void;
   canRunSimulation: boolean;
   missingRunItems: string[];
+  resultFrameIndex?: number;
+  onResultFrameChange?: (frameIndex: number) => void;
   onStepSelect: (step: StepId) => void;
 }
 
@@ -873,19 +876,44 @@ function MeshPanel({ study, onGenerateMesh }: RightPanelProps) {
   );
 }
 
-function RunPanel({ study, runProgress, onRunSimulation, canRunSimulation, missingRunItems }: RightPanelProps) {
+function RunPanel({ study, runProgress, onRunSimulation, onUpdateSolverSettings, canRunSimulation, missingRunItems }: RightPanelProps) {
   const checks = [
     ["Material assigned", study.materialAssignments.length > 0],
     ["Support added", study.constraints.length > 0],
     ["Load added", study.loads.length > 0],
     ["Mesh generated", study.meshSettings.status === "complete"]
   ] as const;
+  const dynamic = study.type === "dynamic_structural" ? study.solverSettings : null;
+  const updateDynamicNumber = (key: keyof Pick<DynamicSolverSettings, "endTime" | "timeStep" | "outputInterval" | "dampingRatio">, value: number) => {
+    if (Number.isFinite(value)) onUpdateSolverSettings?.({ [key]: value });
+  };
   return (
     <Panel title="Run" helper="Run the simulation to estimate stress and displacement.">
       <SectionTitle helpId="runReadiness">Readiness</SectionTitle>
       <div className="checklist">
         {checks.map(([label, done]) => <span key={label} className={done ? "check done" : "check"}><span>{done ? <Check size={18} /> : null}</span>{label}</span>)}
       </div>
+      {dynamic && (
+        <>
+          <SectionTitle>Dynamic settings</SectionTitle>
+          <label className="field">
+            <span>End time</span>
+            <span className="input-with-unit"><input type="number" min={dynamic.timeStep} step={dynamic.timeStep} value={dynamic.endTime} onChange={(event) => updateDynamicNumber("endTime", Number(event.currentTarget.value))} /><span>s</span></span>
+          </label>
+          <label className="field">
+            <span>Time step</span>
+            <span className="input-with-unit"><input type="number" min="0.0001" step="0.0005" value={dynamic.timeStep} onChange={(event) => updateDynamicNumber("timeStep", Number(event.currentTarget.value))} /><span>s</span></span>
+          </label>
+          <label className="field">
+            <span>Output interval</span>
+            <span className="input-with-unit"><input type="number" min={dynamic.timeStep} step={dynamic.timeStep} value={dynamic.outputInterval} onChange={(event) => updateDynamicNumber("outputInterval", Number(event.currentTarget.value))} /><span>s</span></span>
+          </label>
+          <label className="field">
+            <span>Damping ratio</span>
+            <span className="input-with-unit"><input type="number" min="0" step="0.01" value={dynamic.dampingRatio} onChange={(event) => updateDynamicNumber("dampingRatio", Number(event.currentTarget.value))} /><span>ζ</span></span>
+          </label>
+        </>
+      )}
       <button
         className="primary wide"
         onClick={onRunSimulation}
@@ -898,7 +926,7 @@ function RunPanel({ study, runProgress, onRunSimulation, canRunSimulation, missi
       <div className="progress"><span style={{ width: `${runProgress}%` }} /></div>
       <SectionTitle helpId="solver">Solver</SectionTitle>
       <div className="summary-box">
-        <Info label="Backend" value="local-static-superposition" />
+        <Info label="Backend" value={study.type === "dynamic_structural" ? "local-dynamic-newmark" : "local-static-superposition"} />
         <Info label="Version" value="0.1.0" />
         <Info label="Runner" value="local-in-memory" />
         <Info label="Progress" value={`${runProgress}%`} />
@@ -915,6 +943,8 @@ function ResultsPanel({
   resultSummary,
   resultFields = [],
   study,
+  resultFrameIndex = 0,
+  onResultFrameChange,
   onResultModeChange,
   onToggleDeformed,
   onStressExaggerationChange
@@ -924,6 +954,10 @@ function ResultsPanel({
   const loadCapacity = estimateAllowableLoadForSafetyFactor(resultSummary, targetSafetyFactor);
   const canEstimateLoad = loadCapacity.status === "available";
   const AssessmentIcon = assessment.status === "pass" ? ShieldCheck : AlertTriangle;
+  const frames = resultFrames(resultFields);
+  const hasPlayback = frames.length > 1;
+  const activeFrame = frames.find((frame) => frame.frameIndex === resultFrameIndex) ?? frames[0];
+  const peakDisplacement = peakDisplacementFrame(resultFields);
   return (
     <Panel title="Results" helper="View stress and displacement directly on the 3D model.">
       <ResultsFieldSelector
@@ -940,9 +974,32 @@ function ResultsPanel({
         </span>
       </div>
       <HelpNote helpId="resultMode" />
+      {hasPlayback && (
+        <div className="dynamic-playback">
+          <SectionTitle>Frame</SectionTitle>
+          <label className="field range-field">
+            <span className="range-label"><span>Current time</span><strong>{activeFrame ? `${activeFrame.timeSeconds.toFixed(4)} s` : "0 s"}</strong></span>
+            <input
+              type="range"
+              min="0"
+              max={Math.max(frames.length - 1, 0)}
+              step="1"
+              value={frames.findIndex((frame) => frame.frameIndex === (activeFrame?.frameIndex ?? 0))}
+              onChange={(event) => onResultFrameChange?.(frames[Number(event.currentTarget.value)]?.frameIndex ?? 0)}
+            />
+          </label>
+          <button className="secondary wide" type="button" onClick={() => {
+            const currentIndex = frames.findIndex((frame) => frame.frameIndex === (activeFrame?.frameIndex ?? 0));
+            onResultFrameChange?.(frames[(currentIndex + 1) % frames.length]?.frameIndex ?? 0);
+          }}>Play</button>
+          <Info label="Peak displacement" value={peakDisplacement ? `${peakDisplacement.value} ${peakDisplacement.units} at ${peakDisplacement.timeSeconds.toFixed(4)} s` : "Unavailable"} />
+        </div>
+      )}
       <div className="result-buttons">
         <button className={resultMode === "stress" ? "primary" : "secondary"} onClick={() => onResultModeChange("stress")}>Stress</button>
         <button className={resultMode === "displacement" ? "primary" : "secondary"} onClick={() => onResultModeChange("displacement")}>Displacement</button>
+        {resultFields.some((field) => field.type === "velocity") && <button className={resultMode === "velocity" ? "primary" : "secondary"} onClick={() => onResultModeChange("velocity")}>Velocity</button>}
+        {resultFields.some((field) => field.type === "acceleration") && <button className={resultMode === "acceleration" ? "primary" : "secondary"} onClick={() => onResultModeChange("acceleration")}>Acceleration</button>}
         <button className={resultMode === "safety_factor" ? "primary" : "secondary"} onClick={() => onResultModeChange("safety_factor")}>Safety factor</button>
       </div>
       {resultMode === "stress" && (
@@ -1223,6 +1280,25 @@ function formatLoadCapacity(value: number) {
 function formatEquivalentForce(valueNewtons: number, unitSystem: UnitSystem) {
   const converted = forceForUnits(valueNewtons, "N", unitSystem);
   return `${formatNumber(converted.value)} ${converted.units}`;
+}
+
+function resultFrames(fields: ResultField[]): Array<{ frameIndex: number; timeSeconds: number }> {
+  const frames = new Map<number, number>();
+  for (const field of fields) {
+    const frameIndex = field.frameIndex ?? 0;
+    const timeSeconds = field.timeSeconds ?? 0;
+    frames.set(frameIndex, timeSeconds);
+  }
+  return [...frames.entries()]
+    .map(([frameIndex, timeSeconds]) => ({ frameIndex, timeSeconds }))
+    .sort((left, right) => left.frameIndex - right.frameIndex);
+}
+
+function peakDisplacementFrame(fields: ResultField[]): { value: number; units: string; timeSeconds: number } | null {
+  const displacementFields = fields.filter((field) => field.type === "displacement");
+  if (!displacementFields.length) return null;
+  const peak = displacementFields.reduce((best, field) => field.max > best.max ? field : best, displacementFields[0]!);
+  return { value: peak.max, units: peak.units, timeSeconds: peak.timeSeconds ?? 0 };
 }
 
 function formatNumber(value: number) {

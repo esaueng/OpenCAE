@@ -360,6 +360,96 @@ describe("LocalMockComputeBackend", () => {
       vi.useRealTimers();
     }
   });
+
+  test("dynamic solve emits deterministic ordered transient result frames", async () => {
+    vi.useFakeTimers();
+    try {
+      const storage = new MemoryStorage();
+      const backend = new LocalMockComputeBackend(storage);
+      const study = dynamicCantileverStudy("mat-aluminum-6061", { dampingRatio: 0.02 });
+
+      const firstRun = backend.runDynamicSolve({
+        study,
+        runId: "run-dynamic-a",
+        meshRef: "mesh-dynamic",
+        analysisMesh: rectangularBeamAnalysisMesh(),
+        publish: vi.fn()
+      });
+      await vi.runAllTimersAsync();
+      const first = await firstRun;
+
+      const secondRun = backend.runDynamicSolve({
+        study,
+        runId: "run-dynamic-b",
+        meshRef: "mesh-dynamic",
+        analysisMesh: rectangularBeamAnalysisMesh(),
+        publish: vi.fn()
+      });
+      await vi.runAllTimersAsync();
+      const second = await secondRun;
+
+      const displacementFrames = first.fields.filter((field) => field.type === "displacement");
+      const velocityFrames = first.fields.filter((field) => field.type === "velocity");
+      const accelerationFrames = first.fields.filter((field) => field.type === "acceleration");
+
+      expect(displacementFrames.length).toBeGreaterThan(3);
+      expect(velocityFrames.length).toBe(displacementFrames.length);
+      expect(accelerationFrames.length).toBe(displacementFrames.length);
+      expect(displacementFrames.map((field) => field.frameIndex)).toEqual(displacementFrames.map((_, index) => index));
+      expect(displacementFrames.map((field) => field.timeSeconds)).toEqual([...displacementFrames.map((field) => field.timeSeconds)].sort((a, b) => Number(a) - Number(b)));
+      expect(new Set(displacementFrames.map((field) => field.max)).size).toBeGreaterThan(1);
+      expect(second.fields.map(({ runId: _runId, id: _id, ...field }) => field)).toEqual(first.fields.map(({ runId: _runId, id: _id, ...field }) => field));
+      expect(first.summary.transient).toMatchObject({
+        integrationMethod: "newmark_average_acceleration",
+        frameCount: displacementFrames.length
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("dynamic response changes with density and damping", async () => {
+    vi.useFakeTimers();
+    try {
+      const storage = new MemoryStorage();
+      const backend = new LocalMockComputeBackend(storage);
+
+      const aluminumRun = backend.runDynamicSolve({
+        study: dynamicCantileverStudy("mat-aluminum-6061", { dampingRatio: 0 }),
+        runId: "run-dynamic-aluminum",
+        meshRef: "mesh-dynamic",
+        analysisMesh: rectangularBeamAnalysisMesh(),
+        publish: vi.fn()
+      });
+      await vi.runAllTimersAsync();
+      const aluminum = await aluminumRun;
+
+      const titaniumRun = backend.runDynamicSolve({
+        study: dynamicCantileverStudy("mat-titanium-grade-5", { dampingRatio: 0 }),
+        runId: "run-dynamic-titanium",
+        meshRef: "mesh-dynamic",
+        analysisMesh: rectangularBeamAnalysisMesh(),
+        publish: vi.fn()
+      });
+      await vi.runAllTimersAsync();
+      const titanium = await titaniumRun;
+
+      const dampedRun = backend.runDynamicSolve({
+        study: dynamicCantileverStudy("mat-aluminum-6061", { dampingRatio: 0.25 }),
+        runId: "run-dynamic-damped",
+        meshRef: "mesh-dynamic",
+        analysisMesh: rectangularBeamAnalysisMesh(),
+        publish: vi.fn()
+      });
+      await vi.runAllTimersAsync();
+      const damped = await dampedRun;
+
+      expect(titanium.summary.maxDisplacement).not.toBe(aluminum.summary.maxDisplacement);
+      expect(damped.summary.maxDisplacement).toBeLessThan(aluminum.summary.maxDisplacement);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 function rectangularBeamAnalysisMesh(): AnalysisMesh {
@@ -486,5 +576,22 @@ function cantileverStudy(materialId: string, materialParameters: Record<string, 
     solverSettings: {},
     validation: [],
     runs: []
+  };
+}
+
+function dynamicCantileverStudy(materialId: string, solverSettings: Record<string, unknown> = {}): Study {
+  return {
+    ...cantileverStudy(materialId),
+    name: "Dynamic",
+    type: "dynamic_structural",
+    solverSettings: {
+      startTime: 0,
+      endTime: 0.05,
+      timeStep: 0.005,
+      outputInterval: 0.005,
+      dampingRatio: 0.02,
+      integrationMethod: "newmark_average_acceleration",
+      ...solverSettings
+    }
   };
 }

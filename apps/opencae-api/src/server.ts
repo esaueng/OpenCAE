@@ -21,11 +21,12 @@ import {
 } from "@opencae/schema";
 import { LocalMockComputeBackend } from "@opencae/solver-service";
 import { FileSystemObjectStorageProvider } from "@opencae/storage";
-import { validateStaticStressStudy } from "@opencae/study-core";
+import { validateStaticStressStudy, validateStudy } from "@opencae/study-core";
 import {
   attachUploadedModelToProject,
   blankDisplayModel,
   createBlankProject,
+  createDynamicStructuralStudy,
   createSampleProject,
   createStaticStressStudy,
   normalizeSampleId,
@@ -237,8 +238,10 @@ api.post("/api/projects/:projectId/studies", async (request) => {
   const { projectId } = request.params as { projectId: string };
   const project = db.getProject(projectId);
   if (!project) return { error: "Project not found" };
+  const body = request.body as { analysisType?: Study["type"] } | undefined;
   const displayModel = await displayModelForProject(project);
-  const newStudy = createStaticStressStudy(project, displayModel, {
+  const factory = body?.analysisType === "dynamic_structural" ? createDynamicStructuralStudy : createStaticStressStudy;
+  const newStudy = factory(project, displayModel, {
     studyId: `study-${crypto.randomUUID()}`,
     now: new Date().toISOString()
   });
@@ -257,7 +260,7 @@ api.put("/api/studies/:studyId", async (request, reply) => {
   const { studyId } = request.params as { studyId: string };
   const study = db.getStudy(studyId);
   if (!study) return reply.code(404).send({ error: "Study not found" });
-  const next = { ...study, ...(request.body as Partial<Study>) };
+  const next = { ...study, ...(request.body as Partial<Study>) } as Study;
   db.upsertStudy(next);
   return { study: next };
 });
@@ -348,7 +351,7 @@ api.post("/api/studies/:studyId/runs", async (request, reply) => {
   const { studyId } = request.params as { studyId: string };
   const study = db.getStudy(studyId);
   if (!study) return reply.code(404).send({ error: "Study not found" });
-  const runDiagnostics = validateStaticStressStudy(study);
+  const runDiagnostics = validateStudy(study);
   if (runDiagnostics.length) return reply.code(400).send({ error: "Study is not ready.", diagnostics: runDiagnostics });
   const studySnapshot = structuredClone(study);
   const runId = `run-${crypto.randomUUID()}`;
@@ -359,7 +362,7 @@ api.post("/api/studies/:studyId/runs", async (request, reply) => {
     status: "queued",
     jobId,
     meshRef: studySnapshot.meshSettings.meshRef,
-    solverBackend: "local-static-superposition",
+    solverBackend: studySnapshot.type === "dynamic_structural" ? "local-dynamic-newmark" : "local-static-superposition",
     solverVersion: "0.1.0",
     startedAt: new Date().toISOString(),
     diagnostics: []
@@ -368,19 +371,22 @@ api.post("/api/studies/:studyId/runs", async (request, reply) => {
   publish(runId, "state", 0, "Simulation queued.");
   await jobs.enqueue(jobId, async () => {
     publish(runId, "state", 3, "Simulation running.");
-    const result = await compute.runStaticSolve({
+    const solveArgs = {
       study: studySnapshot,
       runId,
       meshRef: studySnapshot.meshSettings.meshRef ?? "mesh-not-generated",
-      publish: (event) => {
+      publish: (event: RunEvent) => {
         if (event.type === "complete") {
           runState.publish(runId, { ...event, type: "progress", progress: 96, message: "Finalizing result artifacts." });
           return;
         }
         runState.publish(runId, event);
       }
-    });
-    const reportRef = await reports.generateReport({ projectId: studySnapshot.projectId, runId, summary: result.summary });
+    };
+    const result = studySnapshot.type === "dynamic_structural"
+      ? await compute.runDynamicSolve(solveArgs)
+      : await compute.runStaticSolve(solveArgs);
+    const reportRef = await reports.generateReport({ projectId: studySnapshot.projectId, runId, summary: result.summary, study: studySnapshot, fields: result.fields });
     db.upsertRun({
       ...run,
       status: "complete",

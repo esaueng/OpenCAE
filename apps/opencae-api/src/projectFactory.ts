@@ -77,6 +77,40 @@ export function createStaticStressStudy(project: Project, displayModel: DisplayM
   };
 }
 
+export function createDynamicStructuralStudy(project: Project, displayModel: DisplayModel, options: { studyId: string; now: string }): Project["studies"][number] {
+  const geometry = project.geometryFiles[0];
+  const modelName = geometry ? baseNameForModel(geometry.filename) : displayModel.name || "model";
+  const bodyLabel = `${modelName} body`;
+  return {
+    id: options.studyId,
+    projectId: project.id,
+    name: "Dynamic Structural",
+    type: "dynamic_structural",
+    geometryScope: displayModel.bodyCount > 0
+      ? [{ bodyId: "body-uploaded", entityType: "body" as const, entityId: "body-uploaded", label: bodyLabel }]
+      : [],
+    materialAssignments: [],
+    namedSelections: displayModel.bodyCount > 0 ? namedSelectionsForDisplayModel(bodyLabel, displayModel) : [],
+    contacts: [],
+    constraints: [],
+    loads: [],
+    meshSettings: {
+      preset: "medium",
+      status: "not_started"
+    },
+    solverSettings: {
+      startTime: 0,
+      endTime: 0.1,
+      timeStep: 0.005,
+      outputInterval: 0.005,
+      dampingRatio: 0.02,
+      integrationMethod: "newmark_average_acceleration"
+    },
+    validation: [],
+    runs: []
+  };
+}
+
 export function blankDisplayModel(): DisplayModel {
   return {
     id: "display-blank",

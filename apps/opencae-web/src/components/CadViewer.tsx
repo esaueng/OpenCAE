@@ -24,7 +24,7 @@ import { isSnapOverlayObject, SnapVisualization } from "../snapping/Visualizatio
 import type { CursorRay, FaceSnapAxis, SnapMeasurement, SnapResult, Vec3 } from "../snapping/types";
 
 export type ViewMode = "model" | "mesh" | "results";
-export type ResultMode = "stress" | "displacement" | "safety_factor";
+export type ResultMode = "stress" | "displacement" | "safety_factor" | "velocity" | "acceleration";
 export type ThemeMode = "dark" | "light";
 export type PrintLayerOrientation = "x" | "y" | "z";
 export interface ViewerLoadMarker {
@@ -1832,7 +1832,7 @@ export function resultValueForPoint(kind: SampleModelKind, resultMode: ResultMod
   const sampleValue = fieldSampleValue ?? resultFractionFromSamples(point, samples);
   const stress = kind === "cantilever" ? cantileverBendingStressFraction(point) : sampleValue ?? stressFractionForPoint(kind, point);
   const displacement = sampleValue ?? displacementFractionForPoint(kind, point);
-  return resultMode === "displacement"
+  return resultMode === "displacement" || resultMode === "velocity" || resultMode === "acceleration"
     ? displacement
     : resultMode === "safety_factor"
       ? kind === "cantilever" ? Math.max(0, Math.min(1, 1 - stress * 0.88)) : sampleValue ?? (1 - stress * 0.88)
@@ -1955,7 +1955,7 @@ function SmoothBracketBody({ resultMode, showDeformed, stressExaggeration }: { r
 }
 
 function ResultMaterial({ resultMode, part, showDeformed, stressExaggeration }: { resultMode: ResultMode; part: "body" | "rib"; showDeformed: boolean; stressExaggeration: number }) {
-  const mode = resultMode === "stress" ? 0 : resultMode === "displacement" ? 1 : 2;
+  const mode = resultMode === "stress" ? 0 : resultMode === "displacement" || resultMode === "velocity" || resultMode === "acceleration" ? 1 : 2;
   const partValue = part === "body" ? 0 : 1;
   const uniforms = useMemo(
     () => ({
@@ -2298,17 +2298,20 @@ function resultProbeLabels(resultMode: ResultMode, resultFields: ResultField[], 
     const max = sorted.at(-1) ?? field.max;
     const unit = field.units ? ` ${field.units}` : "";
     if (resultMode === "displacement") return { max: `Disp: ${formatResultValue(max)}${unit}`, mid: `Disp: ${formatResultValue(mid)}${unit}`, min: `Disp: ${formatResultValue(min)}${unit}` };
+    if (resultMode === "velocity") return { max: `Vel: ${formatResultValue(max)}${unit}`, mid: `Vel: ${formatResultValue(mid)}${unit}`, min: `Vel: ${formatResultValue(min)}${unit}` };
+    if (resultMode === "acceleration") return { max: `Accel: ${formatResultValue(max)}${unit}`, mid: `Accel: ${formatResultValue(mid)}${unit}`, min: `Accel: ${formatResultValue(min)}${unit}` };
     if (resultMode === "safety_factor") return { max: `FoS: ${formatResultValue(min)}`, mid: `FoS: ${formatResultValue(mid)}`, min: `FoS: ${formatResultValue(max)}` };
     return { max: `Stress: ${formatResultValue(max)}${unit}`, mid: `Stress: ${formatResultValue(mid)}${unit}`, min: `Stress: ${formatResultValue(min)}${unit}` };
   }
-  if (resultMode === "displacement") {
+  if (resultMode === "displacement" || resultMode === "velocity" || resultMode === "acceleration") {
     const max = lengthForUnits(0.184, "mm", unitSystem);
     const mid = lengthForUnits(0.092, "mm", unitSystem);
     const min = lengthForUnits(0.012, "mm", unitSystem);
+    const prefix = resultMode === "velocity" ? "Vel" : resultMode === "acceleration" ? "Accel" : "Disp";
     return {
-      max: `Disp: ${formatResultValue(max.value)} ${max.units}`,
-      mid: `Disp: ${formatResultValue(mid.value)} ${mid.units}`,
-      min: `Disp: ${formatResultValue(min.value)} ${min.units}`
+      max: `${prefix}: ${formatResultValue(max.value)} ${max.units}`,
+      mid: `${prefix}: ${formatResultValue(mid.value)} ${mid.units}`,
+      min: `${prefix}: ${formatResultValue(min.value)} ${min.units}`
     };
   }
   if (resultMode === "safety_factor") {
@@ -2459,10 +2462,10 @@ export function displayedLegendTickLabels(minValue: number, maxValue: number) {
 }
 
 function ResultLegend({ resultMode, resultFields, unitSystem }: { resultMode: ResultMode; resultFields: ResultField[]; unitSystem: UnitSystem }) {
-  const title = resultMode === "stress" ? "Von Mises Stress" : resultMode === "displacement" ? "Displacement" : "Safety Factor";
+  const title = resultMode === "stress" ? "Von Mises Stress" : resultMode === "displacement" ? "Displacement" : resultMode === "velocity" ? "Velocity" : resultMode === "acceleration" ? "Acceleration" : "Safety Factor";
   const field = resultFields.find((candidate) => candidate.type === resultMode && candidate.location === "face");
-  const fallbackMin = resultMode === "stress" ? stressForUnits(28, "MPa", unitSystem) : resultMode === "displacement" ? lengthForUnits(0, "mm", unitSystem) : { value: 1.8, units: "" };
-  const fallbackMax = resultMode === "stress" ? stressForUnits(142, "MPa", unitSystem) : resultMode === "displacement" ? lengthForUnits(0.184, "mm", unitSystem) : { value: 7.6, units: "" };
+  const fallbackMin = resultMode === "stress" ? stressForUnits(28, "MPa", unitSystem) : resultMode === "displacement" || resultMode === "velocity" || resultMode === "acceleration" ? lengthForUnits(0, "mm", unitSystem) : { value: 1.8, units: "" };
+  const fallbackMax = resultMode === "stress" ? stressForUnits(142, "MPa", unitSystem) : resultMode === "displacement" || resultMode === "velocity" || resultMode === "acceleration" ? lengthForUnits(0.184, "mm", unitSystem) : { value: 7.6, units: "" };
   const unit = field?.units ?? fallbackMax.units;
   const minValue = field?.min ?? fallbackMin.value;
   const maxValue = field?.max ?? fallbackMax.value;
@@ -2885,14 +2888,14 @@ function colorForResult(faces: DisplayFace[], viewMode: ViewMode, resultMode: Re
     if (viewMode !== "results") return "#9aa7b4";
     const face = byId.get(faceId);
     const value = face?.stressValue ?? 60;
-    if (resultMode === "displacement") return gradient(value, 28, 142, ["#2f80ed", "#4dd0e1", "#d7f75b"]);
+    if (resultMode === "displacement" || resultMode === "velocity" || resultMode === "acceleration") return gradient(value, 28, 142, ["#2f80ed", "#4dd0e1", "#d7f75b"]);
     if (resultMode === "safety_factor") return gradient(142 - value, 0, 114, ["#ef4444", "#f59e0b", "#22c55e"]);
     return gradient(value, 28, 142, ["#2563eb", "#22c55e", "#f59e0b", "#ef4444"]);
   };
 }
 
 function resultPalette(resultMode: ResultMode): { body: string[] } {
-  if (resultMode === "displacement") {
+  if (resultMode === "displacement" || resultMode === "velocity" || resultMode === "acceleration") {
     return {
       body: ["#0759d6", "#0ea5e9", "#10b8f0", "#2ee875", "#f2e94e", "#ff8f1f", "#ef4444"]
     };

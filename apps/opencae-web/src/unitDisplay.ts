@@ -76,7 +76,7 @@ export function resultSummaryForUnits(summary: ResultSummary, unitSystem: UnitSy
 export function resultFieldForUnits(field: ResultField, unitSystem: UnitSystem): ResultField {
   const converter = field.type === "stress"
     ? (value: number) => stressForUnits(value, field.units, unitSystem)
-    : field.type === "displacement"
+    : field.type === "displacement" || field.type === "velocity" || field.type === "acceleration"
       ? (value: number) => lengthForUnits(value, field.units, unitSystem)
       : undefined;
 
@@ -118,6 +118,10 @@ export function displayModelForUnits(displayModel: DisplayModel, unitSystem: Uni
 export function lengthForUnits(value: number, units: string, unitSystem: UnitSystem): { value: number; units: string } {
   if (unitSystem === "US" && units === "mm") return { value: value / MM_PER_INCH, units: "in" };
   if (unitSystem === "SI" && units === "in") return { value: value * MM_PER_INCH, units: "mm" };
+  if (unitSystem === "US" && units === "mm/s") return { value: value / MM_PER_INCH, units: "in/s" };
+  if (unitSystem === "SI" && units === "in/s") return { value: value * MM_PER_INCH, units: "mm/s" };
+  if (unitSystem === "US" && units === "mm/s^2") return { value: value / MM_PER_INCH, units: "in/s^2" };
+  if (unitSystem === "SI" && units === "in/s^2") return { value: value * MM_PER_INCH, units: "mm/s^2" };
   return { value, units };
 }
 

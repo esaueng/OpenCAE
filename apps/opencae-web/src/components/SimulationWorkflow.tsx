@@ -11,10 +11,11 @@ type BoundaryConditionType = "fixed" | "prescribed_displacement" | "force" | "pr
 interface CreateSimulationModalProps {
   open: boolean;
   onCreateStatic: () => void;
+  onCreateDynamic: () => void;
   onClose: () => void;
 }
 
-export function CreateSimulationModal({ open, onCreateStatic, onClose }: CreateSimulationModalProps) {
+export function CreateSimulationModal({ open, onCreateStatic, onCreateDynamic, onClose }: CreateSimulationModalProps) {
   if (!open) return null;
   return (
     <div className="workflow-modal-backdrop" role="presentation">
@@ -37,7 +38,10 @@ export function CreateSimulationModal({ open, onCreateStatic, onClose }: CreateS
                 <span className="analysis-option-icon"><Activity size={16} /></span>
                 <span>Static</span>
               </button>
-              <DisabledAnalysis label="Dynamic" />
+              <button className="analysis-option" type="button" onClick={onCreateDynamic}>
+                <span className="analysis-option-icon"><Activity size={16} /></span>
+                <span>Dynamic</span>
+              </button>
               <DisabledAnalysis label="Heat Transfer" />
               <DisabledAnalysis label="Frequency Analysis" />
             </SimulationGroup>
@@ -53,17 +57,21 @@ export function CreateSimulationModal({ open, onCreateStatic, onClose }: CreateS
             </div>
             <h3>Static Analysis</h3>
             <p>Determine displacements, stresses, and strains caused by constraints and loads. This local workflow supports linear elastic static stress simulation.</p>
+            <h3>Dynamic Analysis</h3>
+            <p>Time-dependent structural response with inertia, damping, velocity, and acceleration using local Newmark integration.</p>
             <div className="analysis-tags" aria-label="Static analysis capabilities">
               <span>Solid</span>
               <span>Steady loads</span>
               <span>Linear</span>
               <span>Local solver</span>
+              <span>Time-dependent</span>
             </div>
           </article>
         </div>
         <footer className="workflow-modal-footer">
-          <span><strong>Need Help?</strong> Start with Static Analysis for a force, pressure, or payload load on a solid part.</span>
+          <span><strong>Need Help?</strong> Static handles steady loads; Dynamic handles transient loads with inertia.</span>
           <button className="primary" type="button" onClick={onCreateStatic}>Create Simulation</button>
+          <button className="secondary" type="button" onClick={onCreateDynamic}>Create Dynamic</button>
         </footer>
       </section>
     </div>
@@ -308,6 +316,7 @@ export function ResultsFieldSelector({ resultMode, fields, unitSystem, defaultOp
         <div className="result-field-menu" role="menu" aria-label="Result fields">
           {resultOptions.map((option) => {
             const enabled = option.mode ? available.has(option.mode) : false;
+            const units = option.mode ? fields.find((field) => field.type === option.mode)?.units : undefined;
             return (
               <button
                 key={option.label}
@@ -320,6 +329,7 @@ export function ResultsFieldSelector({ resultMode, fields, unitSystem, defaultOp
                 }}
               >
                 {option.label}
+                {units ? <small>{units}</small> : null}
                 {option.children ? <ChevronDown size={14} /> : null}
               </button>
             );
@@ -331,7 +341,7 @@ export function ResultsFieldSelector({ resultMode, fields, unitSystem, defaultOp
           {active.label}
           <Grid3X3 size={15} />
         </button>
-        <button className="result-unit-button" type="button">{resultMode === "safety_factor" ? "-" : stressUnits}</button>
+        <button className="result-unit-button" type="button">{activeUnitForResult(resultMode, active.mode ? fields.find((field) => field.type === active.mode)?.units : undefined, stressUnits)}</button>
       </div>
     </div>
   );
@@ -341,6 +351,14 @@ const resultOptions: Array<{ label: string; mode?: ResultMode; children?: boolea
   { label: "Von Mises Stress", mode: "stress" },
   { label: "Total Strain", children: true },
   { label: "Displacement", mode: "displacement", children: true },
+  { label: "Velocity", mode: "velocity" },
+  { label: "Acceleration", mode: "acceleration" },
   { label: "Cauchy Stress", children: true },
   { label: "Safety factor", mode: "safety_factor" }
 ];
+
+function activeUnitForResult(resultMode: ResultMode, units: string | undefined, stressUnits: string): string {
+  if (resultMode === "safety_factor") return "-";
+  if (units) return units;
+  return resultMode === "stress" ? stressUnits : "";
+}
