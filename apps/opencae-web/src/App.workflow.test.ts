@@ -38,4 +38,10 @@ describe("App workflow layout", () => {
     expect(appSource).toContain("settings.outputInterval ?? study.solverSettings.outputInterval");
     expect(appSource).not.toContain("outputInterval: settings.timeStep ?? settings.outputInterval");
   });
+
+  test("normalizes legacy dense dynamic output cadence when settings change", () => {
+    expect(appSource).toContain("MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS");
+    expect(appSource).toContain("mergedSettings.timeStep,");
+    expect(appSource).toContain("MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS");
+  });
 });

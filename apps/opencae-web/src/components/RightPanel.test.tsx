@@ -258,6 +258,26 @@ describe("RightPanel payload mass controls", () => {
     expect(renderPanel("run", { study: dynamicStudy })).toContain('<strong>101</strong>');
   });
 
+  test("normalizes legacy dense dynamic output cadence to avoid huge local frame writes", () => {
+    const dynamicStudy: Study = {
+      ...study,
+      name: "Dynamic",
+      type: "dynamic_structural",
+      solverSettings: {
+        startTime: 0,
+        endTime: 0.5,
+        timeStep: 0.001,
+        outputInterval: 0.001,
+        dampingRatio: 0.02,
+        integrationMethod: "newmark_average_acceleration"
+      }
+    };
+    const html = renderPanel("run", { study: dynamicStudy });
+
+    expect(html).toContain('<strong>101</strong>');
+    expect(html).toContain('<strong>Every 0.005 s</strong>');
+  });
+
   test("renders playback controls for dynamic result frames", () => {
     const dynamicStudy: Study = {
       ...study,

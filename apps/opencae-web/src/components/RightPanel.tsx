@@ -19,6 +19,8 @@ import { forceForUnits, formatDensity, formatMass, formatMaterialStress, formatV
 import { canNavigateToStep } from "../appShellState";
 import { MaterialLibraryModal } from "./SimulationWorkflow";
 
+const MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.005;
+
 interface RightPanelProps {
   activeStep: StepId;
   project: Project;
@@ -933,7 +935,7 @@ function RunPanel({ study, runProgress, onRunSimulation, onCancelSimulation, can
           </label>
           <div className="summary-box">
             <Info label="Estimated frames" value={frameEstimate ? frameEstimate.count.toLocaleString() : "--"} />
-            <Info label="Output cadence" value={`Every ${formatSeconds(Math.max(dynamic.outputInterval, dynamic.timeStep))}`} />
+            <Info label="Output cadence" value={`Every ${formatSeconds(normalizedDynamicOutputInterval(dynamic))}`} />
           </div>
           {frameEstimate && frameEstimate.count > 1000 && <p className="panel-copy">Large frame counts may slow result loading and playback.</p>}
           {frameEstimate?.hasFinalPartialStep && <p className="panel-copy">Final frame is clamped to the selected end time.</p>}
@@ -1343,7 +1345,7 @@ function peakDisplacementFrame(fields: ResultField[]): { value: number; units: s
 
 function dynamicFrameEstimate(settings: DynamicSolverSettings): { count: number; hasFinalPartialStep: boolean } {
   const duration = Math.max(0, settings.endTime - settings.startTime);
-  const outputInterval = Math.max(settings.outputInterval, settings.timeStep, 1e-9);
+  const outputInterval = normalizedDynamicOutputInterval(settings);
   const wholeSteps = Math.floor(duration / outputInterval);
   const remainder = duration - wholeSteps * outputInterval;
   const hasFinalPartialStep = remainder > outputInterval * 1e-9;
@@ -1351,6 +1353,10 @@ function dynamicFrameEstimate(settings: DynamicSolverSettings): { count: number;
     count: Math.max(1, wholeSteps + 1 + (hasFinalPartialStep ? 1 : 0)),
     hasFinalPartialStep
   };
+}
+
+function normalizedDynamicOutputInterval(settings: DynamicSolverSettings) {
+  return Math.max(settings.outputInterval, settings.timeStep, MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS);
 }
 
 function formatNumber(value: number) {
