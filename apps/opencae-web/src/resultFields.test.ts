@@ -1,6 +1,16 @@
 import { describe, expect, test } from "vitest";
-import type { DisplayFace, ResultField } from "@opencae/schema";
-import { createResultFrameCache, fieldsForResultFrame, interpolatedFieldsForFramePosition, nextLoopedResultFrameIndex, resultFrameIndexes, resultProbeSamplesForFaces, resultSamplesForFaces } from "./resultFields";
+import type { DisplayFace, ResultField, ResultSummary } from "@opencae/schema";
+import {
+  createResultFrameCache,
+  dynamicPlaybackFrames,
+  fieldsForResultFrame,
+  hasDynamicPlaybackFrames,
+  interpolatedFieldsForFramePosition,
+  nextLoopedResultFrameIndex,
+  resultFrameIndexes,
+  resultProbeSamplesForFaces,
+  resultSamplesForFaces
+} from "./resultFields";
 
 const faces: DisplayFace[] = [
   { id: "face-a", label: "A", color: "#fff", center: [0, 0, 0], normal: [0, 1, 0], stressValue: 10 },
@@ -67,6 +77,59 @@ describe("resultSamplesForFaces", () => {
 });
 
 describe("dynamic result frames", () => {
+  const dynamicSummary: ResultSummary = {
+    maxStress: 100,
+    maxStressUnits: "MPa",
+    maxDisplacement: 1,
+    maxDisplacementUnits: "mm",
+    safetyFactor: 2,
+    reactionForce: 500,
+    reactionForceUnits: "N",
+    transient: {
+      analysisType: "dynamic_structural",
+      integrationMethod: "newmark_average_acceleration",
+      startTime: 0,
+      endTime: 0.005,
+      timeStep: 0.005,
+      outputInterval: 0.005,
+      dampingRatio: 0.02,
+      frameCount: 2,
+      peakDisplacementTimeSeconds: 0.005,
+      peakDisplacement: 1
+    }
+  };
+
+  test("detects dynamic playback frames only when result fields carry timed frame metadata", () => {
+    const fields: ResultField[] = [
+      { id: "stress-0", runId: "run", type: "stress", location: "face", values: [1], min: 0, max: 2, units: "MPa", frameIndex: 0, timeSeconds: 0 },
+      { id: "stress-1", runId: "run", type: "stress", location: "face", values: [2], min: 0, max: 2, units: "MPa", frameIndex: 1, timeSeconds: 0.005 }
+    ];
+
+    expect(dynamicPlaybackFrames(fields)).toEqual([
+      { frameIndex: 0, timeSeconds: 0 },
+      { frameIndex: 1, timeSeconds: 0.005 }
+    ]);
+    expect(hasDynamicPlaybackFrames(dynamicSummary, fields)).toBe(true);
+  });
+
+  test("rejects static-looking dynamic results without multi-frame timed fields", () => {
+    const unframedFields: ResultField[] = [
+      { id: "stress", runId: "run", type: "stress", location: "face", values: [1], min: 1, max: 1, units: "MPa" }
+    ];
+    const missingTimeFields: ResultField[] = [
+      { id: "stress-0", runId: "run", type: "stress", location: "face", values: [1], min: 0, max: 2, units: "MPa", frameIndex: 0 },
+      { id: "stress-1", runId: "run", type: "stress", location: "face", values: [2], min: 0, max: 2, units: "MPa", frameIndex: 1 }
+    ];
+
+    expect(hasDynamicPlaybackFrames(dynamicSummary, unframedFields)).toBe(false);
+    expect(hasDynamicPlaybackFrames({ ...dynamicSummary, transient: undefined }, missingTimeFields)).toBe(false);
+    expect(hasDynamicPlaybackFrames(dynamicSummary, missingTimeFields)).toBe(false);
+    expect(hasDynamicPlaybackFrames({ ...dynamicSummary, transient: { ...dynamicSummary.transient!, frameCount: 1 } }, [
+      { ...missingTimeFields[0]!, timeSeconds: 0 },
+      { ...missingTimeFields[1]!, timeSeconds: 0.005 }
+    ])).toBe(false);
+  });
+
   test("sorts frame indexes and wraps playback to the first frame", () => {
     const fields: ResultField[] = [
       { id: "stress-2", runId: "run", type: "stress", location: "face", values: [3], min: 3, max: 3, units: "MPa", frameIndex: 2, timeSeconds: 0.01 },

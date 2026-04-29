@@ -35,7 +35,7 @@ import { displayModelForUnits, loadValueForUnits, resultFieldForUnits, resultSum
 import { supportDisplayLabel } from "./supportLabels";
 import { nextSelectedPayloadObject, shouldClearPayloadSelectionOnViewerMiss } from "./payloadSelection";
 import { createLocalDynamicStructuralStudy, createLocalStaticStressStudy } from "./localProjectFactory";
-import { createResultFrameCache, interpolatedFieldsForFramePosition } from "./resultFields";
+import { createResultFrameCache, hasDynamicPlaybackFrames, interpolatedFieldsForFramePosition } from "./resultFields";
 
 interface SaveFilePickerHandle {
   createWritable: () => Promise<{ write: (content: Blob) => Promise<void>; close: () => Promise<void> }>;
@@ -727,15 +727,27 @@ export function App() {
         if (processingRunIdRef.current === response.run.id) processingRunIdRef.current = null;
         setProcessingRunId(null);
         setRunTiming(null);
-        const results = await getResults(response.run.id);
-        setResultSummary(results.summary);
-        setResultFields(results.fields);
-        setResultFrameIndex(0);
-        setResultPlaybackPlaying(false);
-        if (study.type === "dynamic_structural") setResultMode("stress");
-        setCompletedRunId(response.run.id);
-        setViewMode("results");
-        setActiveStep("results");
+        try {
+          const results = await getResults(response.run.id);
+          if (study.type === "dynamic_structural" && !hasDynamicPlaybackFrames(results.summary, results.fields)) {
+            pushMessage("Cloud FEA dynamic results did not include animation frames.");
+            setResultPlaybackPlaying(false);
+            setRunProgress(0);
+            return;
+          }
+          setResultSummary(results.summary);
+          setResultFields(results.fields);
+          setResultFrameIndex(0);
+          setResultPlaybackPlaying(false);
+          if (study.type === "dynamic_structural") setResultMode("stress");
+          setCompletedRunId(response.run.id);
+          setViewMode("results");
+          setActiveStep("results");
+        } catch (error) {
+          pushMessage(error instanceof Error ? error.message : "Could not load simulation results.");
+          setResultPlaybackPlaying(false);
+          setRunProgress(0);
+        }
       } else if (event.type === "cancelled" || event.type === "error") {
         source.close();
         if (activeRunSourceRef.current === source) activeRunSourceRef.current = null;
