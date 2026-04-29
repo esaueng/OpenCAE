@@ -307,13 +307,13 @@ function runSimulationLocally(study: Study, displayModel?: DisplayModel): { run:
     return { summary: solved.summary, fields: solved.fields };
   });
   const now = new Date().toISOString();
-  const events: RunEvent[] = study.type === "dynamic_structural" ? localDynamicRunEvents(runId, study, now) : [
+  const events: RunEvent[] = study.type === "dynamic_structural" ? localDynamicRunEvents(runId, study, now) : addRunTiming([
     { runId, type: "state", progress: 0, message: "Simulation queued locally.", timestamp: now },
     { runId, type: "progress", progress: 10, message: "Local static solver started.", timestamp: now },
     { runId, type: "progress", progress: 46, message: "Assembling local stiffness response.", timestamp: now },
     { runId, type: "progress", progress: 88, message: "Writing local result fields.", timestamp: now },
     { runId, type: "complete", progress: 100, message: "Simulation complete.", timestamp: now }
-  ];
+  ], localRunDurationEstimateMs(study));
   localEventsByRunId.set(runId, events);
   return {
     run: {
@@ -334,6 +334,7 @@ function runSimulationLocally(study: Study, displayModel?: DisplayModel): { run:
 
 function localDynamicRunEvents(runId: string, study: Study, timestamp: string): RunEvent[] {
   const frameCount = dynamicOutputFrameEstimate(study);
+  const estimatedDurationMs = localRunDurationEstimateMs(study, frameCount);
   const milestones = [...new Set([1, Math.ceil(frameCount * 0.2), Math.ceil(frameCount * 0.4), Math.ceil(frameCount * 0.6), Math.ceil(frameCount * 0.8), frameCount])]
     .filter((frame) => frame >= 1 && frame <= frameCount);
   const writeEvents = milestones.map((frame, index) => ({
@@ -343,14 +344,35 @@ function localDynamicRunEvents(runId: string, study: Study, timestamp: string): 
     message: `Writing dynamic result frames ${frame.toLocaleString()} / ${frameCount.toLocaleString()}.`,
     timestamp
   }));
-  return [
+  return addRunTiming([
     { runId, type: "state", progress: 0, message: "Simulation queued locally.", timestamp },
     { runId, type: "progress", progress: 10, message: "Local dynamic solver started.", timestamp },
     { runId, type: "progress", progress: 34, message: "Estimating lumped mass, stiffness, and damping.", timestamp },
     { runId, type: "progress", progress: 62, message: "Integrating dynamic response with Newmark average acceleration.", timestamp },
     ...writeEvents,
     { runId, type: "complete", progress: 100, message: "Simulation complete.", timestamp }
-  ];
+  ], estimatedDurationMs);
+}
+
+function addRunTiming(events: RunEvent[], estimatedDurationMs: number): RunEvent[] {
+  return events.map((event) => {
+    const progress = typeof event.progress === "number" ? Math.max(0, Math.min(100, event.progress)) : 0;
+    const elapsedMs = Math.round((estimatedDurationMs * progress) / 100);
+    const estimatedRemainingMs = event.type === "complete" ? 0 : Math.max(0, estimatedDurationMs - elapsedMs);
+    return {
+      ...event,
+      elapsedMs,
+      estimatedDurationMs,
+      estimatedRemainingMs
+    };
+  });
+}
+
+function localRunDurationEstimateMs(study: Study, frameCount = study.type === "dynamic_structural" ? dynamicOutputFrameEstimate(study) : 1): number {
+  const meshMultiplier = study.meshSettings.preset === "fine" ? 1.9 : study.meshSettings.preset === "medium" ? 1.35 : 1;
+  const dynamicMultiplier = study.type === "dynamic_structural" ? 1.8 : 1;
+  const frameCost = study.type === "dynamic_structural" ? Math.max(frameCount, 1) * 36 : 450;
+  return Math.round((1400 + frameCost) * meshMultiplier * dynamicMultiplier);
 }
 
 function dynamicOutputFrameEstimate(study: Study): number {

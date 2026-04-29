@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import type { DisplayFace, ResultField } from "@opencae/schema";
-import { fieldsForResultFrame, interpolatedFieldsForFramePosition, nextLoopedResultFrameIndex, resultFrameIndexes, resultProbeSamplesForFaces, resultSamplesForFaces } from "./resultFields";
+import { createResultFrameCache, fieldsForResultFrame, interpolatedFieldsForFramePosition, nextLoopedResultFrameIndex, resultFrameIndexes, resultProbeSamplesForFaces, resultSamplesForFaces } from "./resultFields";
 
 const faces: DisplayFace[] = [
   { id: "face-a", label: "A", color: "#fff", center: [0, 0, 0], normal: [0, 1, 0], stressValue: 10 },
@@ -68,6 +68,20 @@ describe("dynamic result frames", () => {
 
     expect(visible[0]).toMatchObject({ min: 60.3, max: 327.5 });
     expect(resultSamplesForFaces(faces, visible, "stress").map((sample) => sample.normalized)).toEqual([0, 1]);
+  });
+
+  test("caches visible fields by frame to avoid repeat playback allocations", () => {
+    const fields: ResultField[] = [
+      { id: "stress-0", runId: "run", type: "stress", location: "face", values: [0, 10], min: 0, max: 10, units: "MPa", frameIndex: 0, timeSeconds: 0 },
+      { id: "stress-1", runId: "run", type: "stress", location: "face", values: [5, 15], min: 0, max: 15, units: "MPa", frameIndex: 1, timeSeconds: 0.005 }
+    ];
+    const cache = createResultFrameCache(fields);
+
+    const first = cache.fieldsForFrame(1);
+    const second = cache.fieldsForFrame(1);
+
+    expect(first).toBe(second);
+    expect(cache.frameIndexes).toEqual([0, 1]);
   });
 
   test("interpolates visual fields between adjacent dynamic frames with current full-range scaling", () => {

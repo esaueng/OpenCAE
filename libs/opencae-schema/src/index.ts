@@ -239,6 +239,9 @@ export const RunEventSchema = z.object({
   progress: z.number().min(0).max(100).optional(),
   message: z.string(),
   diagnostic: DiagnosticSchema.optional(),
+  elapsedMs: z.number().min(0).optional(),
+  estimatedDurationMs: z.number().min(0).optional(),
+  estimatedRemainingMs: z.number().min(0).optional(),
   timestamp: z.string()
 });
 
@@ -262,6 +265,8 @@ export type Study = z.infer<typeof StudySchema>;
 export type Project = z.infer<typeof ProjectSchema>;
 export type RunEvent = z.infer<typeof RunEventSchema>;
 export type FailureAssessment = NonNullable<ResultSummary["failureAssessment"]>;
+
+export type RunTimingEstimate = Pick<RunEvent, "elapsedMs" | "estimatedDurationMs" | "estimatedRemainingMs">;
 
 export interface LoadCapacityEstimate {
   status: "available" | "unknown";

@@ -412,6 +412,8 @@ describe("api", () => {
       expect(writeEvents.length).toBeGreaterThan(1);
       expect(writeEvents.at(-1)?.message).toContain("101 / 101");
       expect(writeEvents.map((event) => event.progress)).toContain(98);
+      expect(writeEvents.every((event) => typeof event.estimatedRemainingMs === "number")).toBe(true);
+      expect(writeEvents.at(-1)?.estimatedRemainingMs).toBeLessThanOrEqual(writeEvents[0]?.estimatedRemainingMs ?? 0);
       expect(seen.at(-1)?.type).toBe("complete");
     } finally {
       vi.useRealTimers();

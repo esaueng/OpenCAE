@@ -305,6 +305,29 @@ export function solveDynamicStudy(study: Study, runId: string, analysisMeshInput
   };
 }
 
+export interface DynamicStudyBenchmark {
+  durationMs: number;
+  frameCount: number;
+  fieldCount: number;
+  jsonBytes: number;
+}
+
+export function benchmarkDynamicStudy(study: Study, runId: string, analysisMeshInput?: AnalysisMesh): DynamicStudyBenchmark {
+  const started = performanceNow();
+  const solved = solveDynamicStudy(study, runId, analysisMeshInput);
+  const durationMs = round(performanceNow() - started, 3);
+  return {
+    durationMs,
+    frameCount: solved.summary.transient?.frameCount ?? 0,
+    fieldCount: solved.fields.length,
+    jsonBytes: new TextEncoder().encode(JSON.stringify({ summary: solved.summary, fields: solved.fields })).byteLength
+  };
+}
+
+function performanceNow(): number {
+  return typeof performance !== "undefined" && typeof performance.now === "function" ? performance.now() : Date.now();
+}
+
 function dynamicSettingsForStudy(study: Study): DynamicSolverSettings {
   const raw = study.solverSettings as Partial<DynamicSolverSettings>;
   const timeStep = finiteOr(raw.timeStep, 0.005);

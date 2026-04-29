@@ -29,6 +29,33 @@ export function resultFrameIndexes(fields: ResultField[]): number[] {
   return [...new Set(fields.map((field) => field.frameIndex ?? 0))].sort((left, right) => left - right);
 }
 
+export interface ResultFrameCache {
+  frameIndexes: number[];
+  fieldsForFrame: (frameIndex: number) => ResultField[];
+}
+
+export function createResultFrameCache(fields: ResultField[]): ResultFrameCache {
+  const frameIndexes = resultFrameIndexes(fields);
+  const hasFrames = fields.some((field) => typeof field.frameIndex === "number");
+  const fieldsByFrame = new Map<number, ResultField[]>();
+  if (!hasFrames) {
+    const visible = fields.map((field) => fieldWithOwnValueRange(field));
+    return {
+      frameIndexes,
+      fieldsForFrame: () => visible
+    };
+  }
+  for (const frameIndex of frameIndexes) {
+    fieldsByFrame.set(frameIndex, fields
+      .filter((field) => (field.frameIndex ?? 0) === frameIndex)
+      .map((field) => fieldWithOwnValueRange(field)));
+  }
+  return {
+    frameIndexes,
+    fieldsForFrame: (frameIndex) => fieldsByFrame.get(frameIndex) ?? fieldsByFrame.get(frameIndexes[0] ?? 0) ?? []
+  };
+}
+
 export function nextLoopedResultFrameIndex(frameIndexes: number[], currentFrameIndex: number): number {
   if (!frameIndexes.length) return 0;
   const currentIndex = frameIndexes.indexOf(currentFrameIndex);
