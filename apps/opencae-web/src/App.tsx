@@ -111,6 +111,7 @@ export function App() {
   const processingRunIdRef = useRef<string | null>(null);
   const resultFrameIndexRef = useRef(0);
   const resultPlaybackFramePositionRef = useRef(0);
+  const viewerInteractingRef = useRef(false);
 
   const study = project?.studies[0] ?? null;
   const assignedPrintLayerOrientation = useMemo<PrintLayerOrientation | null>(() => {
@@ -172,13 +173,16 @@ export function App() {
         const frameDelta = (timestamp - lastTimestamp) / frameDurationMs;
         framePosition = loopedPlaybackFramePosition(playbackFrameIndexes, framePosition + frameDelta);
         resultPlaybackFramePositionRef.current = framePosition;
-        if (timestamp - lastCommittedTimestamp >= PLAYBACK_STATE_COMMIT_INTERVAL_MS) {
+        const playbackCommitIntervalMs = viewerInteractingRef.current ? Number.POSITIVE_INFINITY : PLAYBACK_STATE_COMMIT_INTERVAL_MS;
+        if (timestamp - lastCommittedTimestamp >= playbackCommitIntervalMs) {
           lastCommittedTimestamp = timestamp;
-          setResultPlaybackFramePosition((current) => Math.abs(current - framePosition) < 0.0001 ? current : framePosition);
-          const nextFrameIndex = Math.floor(framePosition);
-          if (nextFrameIndex !== resultFrameIndexRef.current) {
-            resultFrameIndexRef.current = nextFrameIndex;
-            startTransition(() => setResultFrameIndex(nextFrameIndex));
+          if (!viewerInteractingRef.current) {
+            setResultPlaybackFramePosition((current) => Math.abs(current - framePosition) < 0.0001 ? current : framePosition);
+            const nextFrameIndex = Math.floor(framePosition);
+            if (nextFrameIndex !== resultFrameIndexRef.current) {
+              resultFrameIndexRef.current = nextFrameIndex;
+              startTransition(() => setResultFrameIndex(nextFrameIndex));
+            }
           }
         }
       }
@@ -188,6 +192,18 @@ export function App() {
     animationFrameId = window.requestAnimationFrame(advancePlaybackFrame);
     return () => window.cancelAnimationFrame(animationFrameId);
   }, [activeStep, playbackFrameIndexes, resultPlaybackFps, resultPlaybackPlaying]);
+
+  const handleViewerInteractionChange = useCallback((interacting: boolean) => {
+    viewerInteractingRef.current = interacting;
+    if (interacting) return;
+    const framePosition = resultPlaybackFramePositionRef.current;
+    const nextFrameIndex = Math.floor(framePosition);
+    setResultPlaybackFramePosition(framePosition);
+    if (nextFrameIndex !== resultFrameIndexRef.current) {
+      resultFrameIndexRef.current = nextFrameIndex;
+      startTransition(() => setResultFrameIndex(nextFrameIndex));
+    }
+  }, []);
 
   const handleMeasureDisplayModelDimensions = useCallback((dimensions: NonNullable<DisplayModel["dimensions"]>) => {
     setDisplayModel((current) => {
@@ -895,6 +911,7 @@ export function App() {
           printLayerOrientation={printLayerOrientation}
           onResetView={handleFitDefaultView}
           onMeasureDisplayModelDimensions={handleMeasureDisplayModelDimensions}
+          onViewerInteractionChange={handleViewerInteractionChange}
         />
         <RightPanel
           activeStep={activeStep}

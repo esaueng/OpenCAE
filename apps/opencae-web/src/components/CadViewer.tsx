@@ -77,6 +77,7 @@ interface CadViewerProps {
   printLayerOrientation: PrintLayerOrientation | null;
   onResetView: () => void;
   onMeasureDisplayModelDimensions?: (dimensions: NonNullable<DisplayModel["dimensions"]>) => void;
+  onViewerInteractionChange?: (interacting: boolean) => void;
 }
 
 const BRACKET_DEPTH = 1.1;
@@ -149,8 +150,16 @@ export function CadViewer(props: CadViewerProps) {
           <BoundsCameraReset signal={props.fitSignal} viewAxis={props.viewAxis} viewAxisSignal={props.viewAxisSignal} controlsRef={controlsRef} />
           <GizmoCameraReset axis={gizmoViewRequest.axis} signal={gizmoViewRequest.signal} controlsRef={controlsRef} />
         </Bounds>
-        <OrbitControls ref={controlsRef} makeDefault enableDamping dampingFactor={0.08} target={[0, 0, 0.75]} />
-        <ShiftPanControls controlsRef={controlsRef} />
+        <OrbitControls
+          ref={controlsRef}
+          makeDefault
+          enableDamping
+          dampingFactor={0.08}
+          target={[0, 0, 0.75]}
+          onStart={() => props.onViewerInteractionChange?.(true)}
+          onEnd={() => props.onViewerInteractionChange?.(false)}
+        />
+        <ShiftPanControls controlsRef={controlsRef} onInteractionChange={props.onViewerInteractionChange} />
         <GizmoHelper alignment={VIEWER_GIZMO_ALIGNMENT} margin={[92, 92]}>
           <CleanAxisGizmo
             onSelectAxis={(axis) => setGizmoViewRequest((request) => ({ axis, signal: request.signal + 1 }))}
@@ -169,7 +178,7 @@ export function CadViewer(props: CadViewerProps) {
   );
 }
 
-function ShiftPanControls({ controlsRef }: { controlsRef: MutableRefObject<ViewerOrbitControls | null> }) {
+function ShiftPanControls({ controlsRef, onInteractionChange }: { controlsRef: MutableRefObject<ViewerOrbitControls | null>; onInteractionChange?: (interacting: boolean) => void }) {
   const { camera, gl } = useThree();
 
   useEffect(() => {
@@ -184,6 +193,7 @@ function ShiftPanControls({ controlsRef }: { controlsRef: MutableRefObject<Viewe
     function finishPan() {
       if (!drag.active) return;
       drag.active = false;
+      onInteractionChange?.(false);
       const controls = controlsRef.current;
       if (controls) controls.enabled = true;
       if (drag.pointerId >= 0 && element.hasPointerCapture(drag.pointerId)) {
@@ -203,6 +213,7 @@ function ShiftPanControls({ controlsRef }: { controlsRef: MutableRefObject<Viewe
       drag.x = event.clientX;
       drag.y = event.clientY;
       controls.enabled = false;
+      onInteractionChange?.(true);
       element.setPointerCapture(event.pointerId);
     }
 
@@ -234,7 +245,7 @@ function ShiftPanControls({ controlsRef }: { controlsRef: MutableRefObject<Viewe
       const controls = controlsRef.current;
       if (controls) controls.enabled = true;
     };
-  }, [camera, controlsRef, gl]);
+  }, [camera, controlsRef, gl, onInteractionChange]);
 
   return null;
 }
