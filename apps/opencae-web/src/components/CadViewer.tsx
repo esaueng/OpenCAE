@@ -1854,7 +1854,7 @@ export function deformationScaleForResultFields(fields: ResultField[]): number |
   const displacementField = fields.find((field) => field.type === "displacement" && field.location === "face")
     ?? fields.find((field) => field.type === "displacement");
   if (!displacementField) return undefined;
-  return deformationScaleForMagnitude(resultFieldAbsMax(displacementField), displacementField.units);
+  return deformationScaleForMagnitude(resultFieldSignedPeak(displacementField), displacementField.units);
 }
 
 function deformationScaleForSamples(resultMode: ResultMode, samples: FaceResultSample[]) {
@@ -1875,9 +1875,18 @@ function resultFieldAbsMax(field: ResultField) {
 }
 
 function deformationScaleForMagnitude(magnitude: number, units: string) {
-  if (!Number.isFinite(magnitude) || magnitude <= 1e-9) return 0;
+  if (!Number.isFinite(magnitude) || Math.abs(magnitude) <= 1e-9) return 0;
   const reference = units === "in" ? DEFAULT_DEFORMATION_REFERENCE_MM / 25.4 : DEFAULT_DEFORMATION_REFERENCE_MM;
-  return Math.max(0, Math.min(MAX_RESULT_DEFORMATION_SCALE, magnitude / reference));
+  return Math.sign(magnitude) * Math.min(MAX_RESULT_DEFORMATION_SCALE, Math.abs(magnitude) / reference);
+}
+
+function resultFieldSignedPeak(field: ResultField) {
+  const activeValues = [
+    ...field.values.filter(Number.isFinite),
+    ...(field.samples?.map((sample) => sample.value).filter(Number.isFinite) ?? [])
+  ];
+  if (!activeValues.length) return resultFieldAbsMax(field);
+  return activeValues.reduce((peak, value) => Math.abs(value) > Math.abs(peak) ? value : peak, 0);
 }
 
 function deformedPointForResults(
@@ -1891,7 +1900,7 @@ function deformedPointForResults(
   bounds?: THREE.Box3,
   supportMarkers: ViewerSupportMarker[] = []
 ) {
-  if (deformationScale <= 1e-9) return point.clone();
+  if (Math.abs(deformationScale) <= 1e-9) return point.clone();
   if (kind === "uploaded") return deformedUploadedPoint(point, stressExaggeration, samples, loadMarkers, supportMarkers, deformationScale, usesResultDeformationScale, bounds);
   const constrained = deformedPointFromSupportToLoad(point, samples, loadMarkers, supportMarkers, deformationScale, usesResultDeformationScale, stressExaggeration);
   if (constrained) return constrained;
@@ -1934,7 +1943,7 @@ function deformedPointFromSupportToLoad(
     const travel = Math.max(0, Math.min(1, point.clone().sub(supportCenter).dot(span) / spanLengthSq));
     const beamShape = travel * travel * (3 - 2 * travel);
     const magnitude = usesResultDeformationScale ? 1 : Math.max(0.35, marker.value / 500);
-    deformation.addScaledVector(markerDirectionInModelSpace(marker), beamShape * scale * magnitude / Math.max(loadMarkers.length, 1));
+    deformation.addScaledVector(markerDirectionInModelSpace(marker), beamShape * scale * magnitude * deformationScale / Math.max(loadMarkers.length, 1));
   }
   return point.clone().add(deformation);
 }

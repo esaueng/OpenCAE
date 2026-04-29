@@ -29,6 +29,11 @@ describe("App workflow layout", () => {
     expect(appSource).not.toContain("window.setInterval");
   });
 
+  test("enables deformed result shape when dynamic playback starts", () => {
+    expect(appSource).toContain("function handleResultPlaybackToggle()");
+    expect(appSource).toContain("if (!playing) setShowDeformed(true);");
+  });
+
   test("invalidates completed results after dynamic solver settings change", () => {
     expect(appSource).toContain("invalidateCompletedRunState();");
     expect(appSource).toContain("setRunProgress(0);");

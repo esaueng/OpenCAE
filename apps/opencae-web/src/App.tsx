@@ -219,6 +219,13 @@ export function App() {
     resultPlaybackFramePositionRef.current = frameIndex;
   }, []);
 
+  function handleResultPlaybackToggle() {
+    setResultPlaybackPlaying((playing) => {
+      if (!playing) setShowDeformed(true);
+      return !playing;
+    });
+  }
+
   const draftLoadPreview = useMemo<DraftLoadPreview | undefined>(() => {
     if (!study || activeStep !== "loads") return undefined;
     const isPayloadMass = draftLoadType === "gravity";
@@ -972,7 +979,7 @@ export function App() {
           onResultFrameChange={handleResultFrameChange}
           resultPlaybackPlaying={resultPlaybackPlaying}
           resultPlaybackFps={resultPlaybackFps}
-          onResultPlaybackToggle={() => setResultPlaybackPlaying((playing) => !playing)}
+          onResultPlaybackToggle={handleResultPlaybackToggle}
           onResultPlaybackFpsChange={setResultPlaybackFps}
           onStepSelect={handleStepSelect}
         />

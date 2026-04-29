@@ -516,6 +516,32 @@ describe("LocalMockComputeBackend", () => {
     expect(firstStressFrame.max).toBeGreaterThan(Math.max(...firstStressFrame.values));
   });
 
+  test("dynamic solve emits signed displacement frames while stress remains magnitude based", () => {
+    const solved = solveDynamicStudy(
+      dynamicCantileverStudy("mat-aluminum-6061", {
+        endTime: 0.08,
+        timeStep: 0.005,
+        outputInterval: 0.005,
+        dampingRatio: 0,
+        loadProfile: "sinusoidal"
+      }),
+      "run-dynamic-signed-displacement",
+      rectangularBeamAnalysisMesh()
+    );
+
+    const displacementValues = solved.fields
+      .filter((field) => field.type === "displacement")
+      .flatMap((field) => field.values);
+    const stressValues = solved.fields
+      .filter((field) => field.type === "stress")
+      .flatMap((field) => field.values);
+
+    expect(displacementValues.some((value) => value < 0)).toBe(true);
+    expect(displacementValues.some((value) => value > 0)).toBe(true);
+    expect(stressValues.every((value) => value >= 0)).toBe(true);
+    expect(solved.summary.maxDisplacement).toBeGreaterThan(0);
+  });
+
   test("dynamic response changes with density and damping", async () => {
     vi.useFakeTimers();
     try {

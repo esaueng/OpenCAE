@@ -251,10 +251,10 @@ export function solveDynamicStudy(study: Study, runId: string, analysisMeshInput
   let minSafetyFactor = Number.POSITIVE_INFINITY;
 
   for (const frame of frames) {
-    const displacementScale = Math.abs(frame.displacement / staticDisplacementMeters);
-    const velocityScale = Math.abs(frame.velocity / staticDisplacementMeters);
-    const accelerationScale = Math.abs(frame.acceleration / staticDisplacementMeters);
-    const stressScale = displacementScale;
+    const displacementScale = frame.displacement / staticDisplacementMeters;
+    const velocityScale = frame.velocity / staticDisplacementMeters;
+    const accelerationScale = frame.acceleration / staticDisplacementMeters;
+    const stressScale = Math.abs(displacementScale);
     const stressFrame = scaleBaseField(stressBase, runId, "stress", "MPa", stressScale, frame.index, frame.time, 1);
     const displacementFrame = scaleBaseField(displacementBase, runId, "displacement", "mm", displacementScale, frame.index, frame.time, 4);
     const velocityFrame = scaleBaseField(displacementBase, runId, "velocity", "mm/s", velocityScale, frame.index, frame.time, 4);
@@ -263,8 +263,9 @@ export function solveDynamicStudy(study: Study, runId: string, analysisMeshInput
     const safetySamples = stressFrame.samples?.map((sample) => sampleResult(sample, Math.max(0.05, yieldMpa / Math.max(sample.value, 0.001)), 3)) ?? [];
     const safetyFrame = fieldForFrame(runId, "safety_factor", safetyValues, "", safetySamples, frame.index, frame.time);
     fields.push(stressFrame, displacementFrame, velocityFrame, accelerationFrame, safetyFrame);
-    if (displacementFrame.max > peakDisplacement) {
-      peakDisplacement = displacementFrame.max;
+    const framePeakDisplacement = resultFieldAbsMax(displacementFrame);
+    if (framePeakDisplacement > peakDisplacement) {
+      peakDisplacement = framePeakDisplacement;
       peakDisplacementTimeSeconds = frame.time;
     }
     peakStress = Math.max(peakStress, stressFrame.max);
@@ -341,7 +342,10 @@ function dynamicSettingsForStudy(study: Study): DynamicSolverSettings {
     outputInterval: Math.max(finiteOr(raw.outputInterval, 0.005), timeStep, MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS),
     dampingRatio: finiteOr(raw.dampingRatio, 0.02),
     integrationMethod: "newmark_average_acceleration",
-    ...(raw.allowFreeMotion === true ? { allowFreeMotion: true } : {})
+    ...(raw.allowFreeMotion === true ? { allowFreeMotion: true } : {}),
+    ...(typeof (raw as DynamicSolverSettings & { loadProfile?: string }).loadProfile === "string"
+      ? { loadProfile: (raw as DynamicSolverSettings & { loadProfile: string }).loadProfile }
+      : {})
   };
 }
 
@@ -410,7 +414,7 @@ function loadScaleAt(time: number, settings: DynamicSolverSettings): number {
   }
   if (profile === "sinusoidal") {
     const duration = Math.max(settings.endTime - settings.startTime, settings.timeStep);
-    return Math.sin(Math.PI * clamp((time - settings.startTime) / duration, 0, 1));
+    return Math.sin(2 * Math.PI * clamp((time - settings.startTime) / duration, 0, 1));
   }
   return 1;
 }
@@ -443,6 +447,14 @@ function fieldForFrame(runId: string, type: ResultField["type"], values: number[
     frameIndex,
     timeSeconds
   };
+}
+
+function resultFieldAbsMax(field: ResultField) {
+  const values = [
+    ...field.values,
+    ...(field.samples?.map((sample) => sample.value) ?? [])
+  ].map((value) => Math.abs(value)).filter(Number.isFinite);
+  return values.length ? Math.max(...values) : Math.max(Math.abs(field.min), Math.abs(field.max));
 }
 
 function stabilizeDynamicFieldRanges(fields: ResultField[]) {
