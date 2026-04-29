@@ -877,6 +877,7 @@ function MeshPanel({ study, onGenerateMesh }: RightPanelProps) {
 }
 
 function RunPanel({ study, runProgress, onRunSimulation, onUpdateSolverSettings, canRunSimulation, missingRunItems }: RightPanelProps) {
+  const progressPercent = Math.max(0, Math.min(100, Math.round(runProgress)));
   const checks = [
     ["Material assigned", study.materialAssignments.length > 0],
     ["Support added", study.constraints.length > 0],
@@ -923,7 +924,10 @@ function RunPanel({ study, runProgress, onRunSimulation, onUpdateSolverSettings,
         <Play size={16} />Run simulation
       </button>
       {missingRunItems.length > 0 && <p className="panel-copy">Complete {missingRunItems.join(", ").toLowerCase()} before running.</p>}
-      <div className="progress"><span style={{ width: `${runProgress}%` }} /></div>
+      <div className="progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progressPercent} aria-label="Simulation progress">
+        <span style={{ width: `${progressPercent}%` }} />
+        <strong className="progress-label">{progressPercent}%</strong>
+      </div>
       <SectionTitle helpId="solver">Solver</SectionTitle>
       <div className="summary-box">
         <Info label="Backend" value={study.type === "dynamic_structural" ? "local-dynamic-newmark" : "local-static-superposition"} />

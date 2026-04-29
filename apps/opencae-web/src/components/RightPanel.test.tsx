@@ -122,6 +122,14 @@ describe("RightPanel payload mass controls", () => {
     expect(markup).toContain("--range-progress:100%");
   });
 
+  test("shows the run progress percentage inside the progress bar", () => {
+    const markup = renderPanel("run", { runProgress: 88 });
+
+    expect(markup).toContain('role="progressbar"');
+    expect(markup).toContain('aria-valuenow="88"');
+    expect(markup).toContain('<strong class="progress-label">88%</strong>');
+  });
+
   test("does not show the selected face as a persistent right-panel banner", () => {
     const markup = renderPanel("results", { selectedFace: displayModel.faces[0] ?? null });
 
