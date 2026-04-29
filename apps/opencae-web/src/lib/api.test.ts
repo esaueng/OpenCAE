@@ -377,6 +377,47 @@ describe("api", () => {
     expect(apiSource).toContain("await computeLocalResults(event.runId);");
   });
 
+  test("reports dynamic local frame-writing progress before completion", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: "Study not found" }), {
+        status: 404,
+        headers: { "content-type": "application/json" }
+      })));
+      const readyStudy = {
+        ...study,
+        name: "Dynamic",
+        type: "dynamic_structural",
+        materialAssignments: [{ id: "assign-1", materialId: "mat-aluminum-6061", selectionRef: "selection-body-1", status: "complete" }],
+        constraints: [{ id: "constraint-1", type: "fixed", selectionRef: "selection-face-1", parameters: {}, status: "complete" }],
+        loads: [{ id: "load-1", type: "force", selectionRef: "selection-face-1", parameters: { value: 500, units: "N", direction: [0, -1, 0] }, status: "complete" }],
+        meshSettings: { preset: "fine", status: "complete", meshRef: "project-1/mesh/mesh-summary.json" },
+        solverSettings: {
+          startTime: 0,
+          endTime: 0.5,
+          timeStep: 0.001,
+          outputInterval: 0.001,
+          dampingRatio: 0.02,
+          integrationMethod: "newmark_average_acceleration"
+        }
+      } as Study;
+
+      const response = await runSimulation("study-1", readyStudy);
+      const seen: RunEvent[] = [];
+      const source = subscribeToRun(response.run.id, (event) => seen.push(event));
+      await vi.runAllTimersAsync();
+      source.close();
+
+      const writeEvents = seen.filter((event) => event.message.includes("Writing dynamic result frames"));
+      expect(writeEvents.length).toBeGreaterThan(1);
+      expect(writeEvents.at(-1)?.message).toContain("101 / 101");
+      expect(writeEvents.map((event) => event.progress)).toContain(98);
+      expect(seen.at(-1)?.type).toBe("complete");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   test("cancels a local run so pending local run events stop", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: "Study not found" }), {
       status: 404,

@@ -1,5 +1,5 @@
 import { solveDynamicStudy, solveStudy } from "@opencae/solver-service";
-import type { AnalysisMesh, DisplayModel, Project, ResultField, ResultSummary, RunEvent, Study, StudyRun } from "@opencae/schema";
+import type { AnalysisMesh, DisplayModel, DynamicSolverSettings, Project, ResultField, ResultSummary, RunEvent, Study, StudyRun } from "@opencae/schema";
 import type { LoadApplicationPoint, LoadDirection, LoadType, PayloadLoadMetadata, PayloadObjectSelection } from "../loadPreview";
 import { embedUploadedModelFile, type EmbeddedModelFile, type LocalResultBundle } from "../projectFile";
 import { createLocalBlankProject, createLocalSampleProject, createLocalUploadResponse, openLocalProjectPayload } from "../localProjectFactory";
@@ -22,6 +22,7 @@ export interface ResultsResponse {
 const localResultsByRunId = new Map<string, ResultsResponse | Promise<ResultsResponse>>();
 const localResultSolversByRunId = new Map<string, () => ResultsResponse>();
 const localEventsByRunId = new Map<string, RunEvent[]>();
+const MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.005;
 
 export async function loadSampleProject(sample: SampleModelId = "bracket", analysisType: SampleAnalysisType = "static_stress"): Promise<SampleProjectResponse> {
   return fetchJsonWithFallback(
@@ -306,14 +307,7 @@ function runSimulationLocally(study: Study, displayModel?: DisplayModel): { run:
     return { summary: solved.summary, fields: solved.fields };
   });
   const now = new Date().toISOString();
-  const events: RunEvent[] = study.type === "dynamic_structural" ? [
-    { runId, type: "state", progress: 0, message: "Simulation queued locally.", timestamp: now },
-    { runId, type: "progress", progress: 10, message: "Local dynamic solver started.", timestamp: now },
-    { runId, type: "progress", progress: 44, message: "Estimating lumped mass, stiffness, and damping.", timestamp: now },
-    { runId, type: "progress", progress: 66, message: "Integrating dynamic response with Newmark average acceleration.", timestamp: now },
-    { runId, type: "progress", progress: 88, message: "Writing dynamic result frames.", timestamp: now },
-    { runId, type: "complete", progress: 100, message: "Simulation complete.", timestamp: now }
-  ] : [
+  const events: RunEvent[] = study.type === "dynamic_structural" ? localDynamicRunEvents(runId, study, now) : [
     { runId, type: "state", progress: 0, message: "Simulation queued locally.", timestamp: now },
     { runId, type: "progress", progress: 10, message: "Local static solver started.", timestamp: now },
     { runId, type: "progress", progress: 46, message: "Assembling local stiffness response.", timestamp: now },
@@ -336,6 +330,43 @@ function runSimulationLocally(study: Study, displayModel?: DisplayModel): { run:
     streamUrl: `local:${runId}`,
     message: "Simulation running locally."
   };
+}
+
+function localDynamicRunEvents(runId: string, study: Study, timestamp: string): RunEvent[] {
+  const frameCount = dynamicOutputFrameEstimate(study);
+  const milestones = [...new Set([1, Math.ceil(frameCount * 0.2), Math.ceil(frameCount * 0.4), Math.ceil(frameCount * 0.6), Math.ceil(frameCount * 0.8), frameCount])]
+    .filter((frame) => frame >= 1 && frame <= frameCount);
+  const writeEvents = milestones.map((frame, index) => ({
+    runId,
+    type: "progress" as const,
+    progress: Math.min(98, 70 + Math.round(((index + 1) / milestones.length) * 28)),
+    message: `Writing dynamic result frames ${frame.toLocaleString()} / ${frameCount.toLocaleString()}.`,
+    timestamp
+  }));
+  return [
+    { runId, type: "state", progress: 0, message: "Simulation queued locally.", timestamp },
+    { runId, type: "progress", progress: 10, message: "Local dynamic solver started.", timestamp },
+    { runId, type: "progress", progress: 34, message: "Estimating lumped mass, stiffness, and damping.", timestamp },
+    { runId, type: "progress", progress: 62, message: "Integrating dynamic response with Newmark average acceleration.", timestamp },
+    ...writeEvents,
+    { runId, type: "complete", progress: 100, message: "Simulation complete.", timestamp }
+  ];
+}
+
+function dynamicOutputFrameEstimate(study: Study): number {
+  const raw = study.solverSettings as Partial<DynamicSolverSettings>;
+  const startTime = finiteOr(raw.startTime, 0);
+  const endTime = finiteOr(raw.endTime, 0.1);
+  const timeStep = finiteOr(raw.timeStep, 0.005);
+  const outputInterval = Math.max(finiteOr(raw.outputInterval, 0.005), timeStep, MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS);
+  const duration = Math.max(0, endTime - startTime);
+  const wholeSteps = Math.floor(duration / outputInterval);
+  const remainder = duration - wholeSteps * outputInterval;
+  return Math.max(1, wholeSteps + 1 + (remainder > outputInterval * 1e-9 ? 1 : 0));
+}
+
+function finiteOr(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
 function computeLocalResults(runId: string): Promise<ResultsResponse> | null {
@@ -425,7 +456,7 @@ function subscribeToLocalRun(events: RunEvent[], onEvent: (event: RunEvent) => v
       if (closed) return;
     }
     onEvent(event);
-  }, index * 25));
+  }, index * 160));
   return {
     close() {
       closed = true;
