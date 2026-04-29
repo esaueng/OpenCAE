@@ -462,6 +462,36 @@ describe("RightPanel payload mass controls", () => {
     expect(html).toContain("Frame 2 / 2");
   });
 
+  test("shows sparse solver frame indexes as sequential playback frame numbers", () => {
+    const dynamicStudy: Study = {
+      ...study,
+      name: "Dynamic",
+      type: "dynamic_structural",
+      solverSettings: {
+        startTime: 0,
+        endTime: 0.02,
+        timeStep: 0.005,
+        outputInterval: 0.005,
+        dampingRatio: 0.02,
+        integrationMethod: "newmark_average_acceleration"
+      }
+    };
+    const html = renderPanel("results", {
+      study: dynamicStudy,
+      resultFrameIndex: 7,
+      resultFramePosition: 7,
+      resultPlaybackPlaying: true,
+      resultFields: [
+        { id: "field-stress-0", runId: "run-1", type: "stress", location: "face", values: [1], min: 0, max: 3, units: "MPa", frameIndex: 0, timeSeconds: 0 },
+        { id: "field-stress-7", runId: "run-1", type: "stress", location: "face", values: [2], min: 0, max: 3, units: "MPa", frameIndex: 7, timeSeconds: 0.005 },
+        { id: "field-stress-12", runId: "run-1", type: "stress", location: "face", values: [3], min: 0, max: 3, units: "MPa", frameIndex: 12, timeSeconds: 0.01 }
+      ]
+    });
+
+    expect(html).toContain("Frame 2 / 3");
+    expect(html).not.toContain("Frame 3 / 3");
+  });
+
   test("uses transient summary time for peak displacement when displacement frames are not visible", () => {
     const html = renderPanel("results", {
       resultSummary: {
