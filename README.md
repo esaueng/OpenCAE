@@ -32,7 +32,7 @@ pnpm test
 
 ## Cloudflare Worker Deploy
 
-The production Cloudflare target for `cae.esau.app` serves the Vite web app from Workers Static Assets and enables the Cloud FEA queue plus CalculiX container binding. Use the default deploy commands for production so queued Cloud FEA runs always have the `FEA_CONTAINER` binding available.
+The production Cloudflare target for `cae.esau.app` serves the Vite web app from Workers Static Assets and enables the Cloud FEA queue plus CalculiX container binding. Cloudflare Builds should use the default deploy commands so queued Cloud FEA runs have the `FEA_CONTAINER` Durable Object binding without requiring container rollout permissions.
 
 ```bash
 pnpm install
@@ -40,7 +40,13 @@ pnpm deploy:cloudflare:dry-run
 pnpm deploy:cloudflare
 ```
 
-Wrangler uses [wrangler.containers.jsonc](wrangler.containers.jsonc). The default [wrangler.jsonc](wrangler.jsonc) is also container-enabled so manual Wrangler deploys do not omit `FEA_CONTAINER`. The deploy builds `apps/opencae-web/dist`, serves it through the Worker asset binding, uses SPA fallback routing for browser routes, and binds R2, Queues, and the OpenCAE FEA container.
+Wrangler uses [wrangler.jsonc](wrangler.jsonc). The deploy builds `apps/opencae-web/dist`, serves it through the Worker asset binding, uses SPA fallback routing for browser routes, and binds R2, Queues, and the `FEA_CONTAINER` Durable Object namespace.
+
+Container application rollouts require a token with Cloudflare Containers write access. Run that privileged deploy explicitly when the container image or app configuration changes:
+
+```bash
+pnpm deploy:cloudflare:containers
+```
 
 For a local-first/static Worker deploy without Cloud FEA containers, use:
 
@@ -54,7 +60,7 @@ That explicit local-first path uses [wrangler.local-first.jsonc](wrangler.local-
 For Cloudflare Builds, set:
 
 - Build command: `pnpm build:cloudflare`
-- Deploy command: `npx wrangler deploy --config wrangler.containers.jsonc`
+- Deploy command: `npx wrangler deploy`
 
 ## Workspace Layout
 
