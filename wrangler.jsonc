@@ -14,43 +14,6 @@
       "bucket_name": "opencae-fea-artifacts"
     }
   ],
-  "queues": {
-    "producers": [
-      {
-        "binding": "FEA_RUN_QUEUE",
-        "queue": "opencae-fea-runs"
-      }
-    ],
-    "consumers": [
-      {
-        "queue": "opencae-fea-runs",
-        "max_batch_size": 1,
-        "max_retries": 3,
-        "dead_letter_queue": "opencae-fea-runs-dlq"
-      }
-    ]
-  },
-  "containers": [
-    {
-      "class_name": "OpenCaeFeaContainer",
-      "image": "./services/opencae-fea-container/Dockerfile",
-      "max_instances": 2
-    }
-  ],
-  "durable_objects": {
-    "bindings": [
-      {
-        "name": "FEA_CONTAINER",
-        "class_name": "OpenCaeFeaContainer"
-      }
-    ]
-  },
-  "migrations": [
-    {
-      "tag": "v1",
-      "new_sqlite_classes": ["OpenCaeFeaContainer"]
-    }
-  ],
   "observability": {
     "enabled": true,
     "head_sampling_rate": 1
