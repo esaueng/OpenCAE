@@ -1,12 +1,14 @@
 import { describe, expect, test } from "vitest";
 import type { DisplayFace, ResultField, ResultSummary } from "@opencae/schema";
 import {
+  createPackedResultPlaybackCache,
   createResultFrameCache,
   dynamicPlaybackFrames,
   fieldsForResultFrame,
   hasDynamicPlaybackFrames,
   interpolatedFieldsForFramePosition,
   nextLoopedResultFrameIndex,
+  packedResultPlaybackTransferables,
   resultFrameIndexes,
   resultProbeSamplesForFaces,
   resultSamplesForFaces
@@ -250,5 +252,50 @@ describe("dynamic result frames", () => {
     expect(cache.frameIndexes).toEqual([0, 4]);
     expect(cache.fieldsForFramePosition(2)[0]).toMatchObject({ values: [50], timeSeconds: 0.01 });
     expect(cache.timeForFramePosition(2)).toBe(0.01);
+  });
+
+  test("prepares dynamic playback values in a packed Float32Array cache", () => {
+    const fields: ResultField[] = [
+      { id: "stress-0", runId: "run", type: "stress", location: "face", values: [10, 30], min: 0, max: 100, units: "MPa", frameIndex: 0, timeSeconds: 0 },
+      { id: "stress-1", runId: "run", type: "stress", location: "face", values: [30, 70], min: 0, max: 100, units: "MPa", frameIndex: 1, timeSeconds: 0.005 }
+    ];
+
+    const cache = createPackedResultPlaybackCache(fields);
+
+    expect(cache).not.toBeNull();
+    expect(cache?.values).toBeInstanceOf(Float32Array);
+    expect(cache?.frameIndexes).toBeInstanceOf(Int32Array);
+    expect(cache?.times).toBeInstanceOf(Float32Array);
+    expect(cache?.fieldOffsets).toBeInstanceOf(Int32Array);
+    expect(cache?.fieldLengths).toBeInstanceOf(Int32Array);
+    expect(cache?.fieldMins).toBeInstanceOf(Float32Array);
+    expect(cache?.fieldMaxes).toBeInstanceOf(Float32Array);
+    const visible = cache?.fieldsForFramePosition(0.5)[0];
+    expect(visible).toMatchObject({
+      values: [20, 50],
+      min: 0,
+      max: 100
+    });
+    expect(visible?.timeSeconds).toBeCloseTo(0.0025, 8);
+  });
+
+  test("packed playback transferables include every backing buffer", () => {
+    const cache = createPackedResultPlaybackCache([
+      { id: "stress-0", runId: "run", type: "stress", location: "face", values: [10, 30], min: 0, max: 100, units: "MPa", frameIndex: 0, timeSeconds: 0 },
+      { id: "stress-1", runId: "run", type: "stress", location: "face", values: [30, 70], min: 0, max: 100, units: "MPa", frameIndex: 1, timeSeconds: 0.005 }
+    ]);
+
+    expect(cache).not.toBeNull();
+    const transferables = packedResultPlaybackTransferables(cache!);
+
+    expect(transferables).toEqual(expect.arrayContaining([
+      cache!.frameIndexes.buffer,
+      cache!.times.buffer,
+      cache!.fieldOffsets.buffer,
+      cache!.fieldLengths.buffer,
+      cache!.fieldMins.buffer,
+      cache!.fieldMaxes.buffer,
+      cache!.values.buffer
+    ]));
   });
 });

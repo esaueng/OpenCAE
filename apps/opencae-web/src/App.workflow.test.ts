@@ -31,7 +31,11 @@ describe("App workflow layout", () => {
     expect(appSource).toContain("boundedPlaybackOrdinalDelta(");
     expect(appSource).toContain("frameIndexForPlaybackOrdinal(playbackFrameIndexes, ordinalPosition)");
     expect(appSource).toContain("resultFrameCache.fieldsForFramePosition(resultVisualFramePosition)");
+    expect(appSource).toContain("createPackedResultPlaybackCache(resultFieldsForUi)");
+    expect(appSource).toContain("packedResultPlaybackCache?.fieldsForFramePosition(resultVisualFramePosition)");
+    expect(appSource).toContain("const PLAYBACK_UI_COMMIT_INTERVAL_MS = 250;");
     expect(appSource).not.toContain("const nextFrameIndex = Math.floor(framePosition)");
+    expect(appSource).not.toContain("hydratePreparedPlaybackFrame(preparedFrame).fields");
     expect(appSource).not.toContain("interpolatedFieldsForFramePosition(resultFieldsForUi");
     expect(appSource).not.toContain("window.setInterval");
   });
