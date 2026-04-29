@@ -1372,19 +1372,27 @@ function UploadedNativeCadResultModel({
   onUploadedPreviewBounds: (bounds: THREE.Box3) => void;
 }) {
   const filename = displayModel.nativeCad?.filename ?? displayModel.name;
-  const [preview, setPreview] = useState<{ status: "loading" | "ready" | "error"; object?: THREE.Group; outline?: THREE.Group; message?: string }>({ status: "loading" });
+  const contentBase64 = displayModel.nativeCad?.contentBase64 ?? "";
+  const [preview, setPreview] = useState<{
+    status: "loading" | "ready" | "error";
+    sourceObject?: THREE.Group;
+    dimensions?: NonNullable<DisplayModel["dimensions"]>;
+    normalizedBounds?: THREE.Box3;
+    message?: string;
+  }>({ status: "loading" });
 
   useEffect(() => {
     let cancelled = false;
     setPreview({ status: "loading" });
-    stepPreviewFromBase64(displayModel.nativeCad?.contentBase64 ?? "", "#63a9e5")
+    stepPreviewFromBase64(contentBase64, "#63a9e5")
       .then((nextPreview) => {
         if (cancelled) return;
-        const outline = showDeformed ? createUndeformedResultOutlineObject(nextPreview.object) : undefined;
-        colorizeResultObject(nextPreview.object, "uploaded", resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale, supportMarkers);
-        setPreview({ status: "ready", object: nextPreview.object, outline });
-        onMeasureDisplayModelDimensions?.(nextPreview.dimensions);
-        onUploadedPreviewBounds(nextPreview.normalizedBounds);
+        setPreview({
+          status: "ready",
+          sourceObject: nextPreview.object,
+          dimensions: nextPreview.dimensions,
+          normalizedBounds: nextPreview.normalizedBounds
+        });
       })
       .catch((error: unknown) => {
         const message = error instanceof Error ? error.message : "STEP preview could not be generated.";
@@ -1393,18 +1401,21 @@ function UploadedNativeCadResultModel({
     return () => {
       cancelled = true;
     };
-  }, [
-    displayModel.nativeCad?.contentBase64,
-    loadMarkers,
-    supportMarkers,
-    onMeasureDisplayModelDimensions,
-    onUploadedPreviewBounds,
-    resultMode,
-    samples,
-    showDeformed,
-    stressExaggeration,
-    deformationScale
-  ]);
+  }, [contentBase64]);
+
+  useEffect(() => {
+    if (preview.status !== "ready" || !preview.dimensions || !preview.normalizedBounds) return;
+    onMeasureDisplayModelDimensions?.(preview.dimensions);
+    onUploadedPreviewBounds(preview.normalizedBounds);
+  }, [onMeasureDisplayModelDimensions, onUploadedPreviewBounds, preview.dimensions, preview.normalizedBounds, preview.status]);
+
+  const renderedPreview = useMemo(() => {
+    if (preview.status !== "ready" || !preview.sourceObject) return null;
+    const object = cloneResultPreviewObject(preview.sourceObject);
+    const outline = showDeformed ? createUndeformedResultOutlineObject(object) : undefined;
+    colorizeResultObject(object, "uploaded", resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale, supportMarkers);
+    return { object, outline };
+  }, [deformationScale, loadMarkers, preview.sourceObject, preview.status, resultMode, samples, showDeformed, stressExaggeration, supportMarkers]);
 
   if (preview.status === "loading") {
     return (
@@ -1415,14 +1426,14 @@ function UploadedNativeCadResultModel({
     );
   }
 
-  if (preview.status === "error" || !preview.object) {
+  if (preview.status === "error" || !renderedPreview) {
     return <UnsupportedUploadedModelNotice filename={`${filename} ${preview.message ?? ""}`.trim()} />;
   }
 
   return (
     <group>
-      {preview.outline && <primitive object={preview.outline} />}
-      <primitive object={preview.object} />
+      {renderedPreview.outline && <primitive object={renderedPreview.outline} />}
+      <primitive object={renderedPreview.object} />
     </group>
   );
 }
@@ -1615,6 +1626,25 @@ export function createUndeformedResultOutlineObject(object: THREE.Object3D) {
   });
 
   return outline;
+}
+
+export function cloneResultPreviewObject(object: THREE.Group) {
+  const clone = object.clone(true);
+  clone.traverse((child) => {
+    const cloneable = child as THREE.Object3D & {
+      geometry?: THREE.BufferGeometry;
+      material?: THREE.Material | THREE.Material[];
+    };
+    if (cloneable.geometry instanceof THREE.BufferGeometry) {
+      cloneable.geometry = cloneable.geometry.clone();
+    }
+    if (Array.isArray(cloneable.material)) {
+      cloneable.material = cloneable.material.map((material) => material.clone());
+    } else if (cloneable.material instanceof THREE.Material) {
+      cloneable.material = cloneable.material.clone();
+    }
+  });
+  return clone;
 }
 
 function colorizeResultGeometry(

@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { describe, expect, test } from "vitest";
-import { VIEWER_GIZMO_ALIGNMENT, axisLabelToViewAxis, cameraDistanceForBounds, cameraViewForAxis, colorizeResultObject, createUndeformedResultOutlineObject, defaultHomeViewTarget, displayedLegendTickLabels, legendTickLabels, payloadHighlightObjectId, printLayerVisualizationForBounds, resultProbesForKind, resultValueForPoint, rotatedCameraOrbit, shouldShowDimensionOverlay, shouldShowModelHitLabel, shouldShowUndeformedResultOutline } from "./CadViewer";
+import { VIEWER_GIZMO_ALIGNMENT, axisLabelToViewAxis, cameraDistanceForBounds, cameraViewForAxis, cloneResultPreviewObject, colorizeResultObject, createUndeformedResultOutlineObject, defaultHomeViewTarget, displayedLegendTickLabels, legendTickLabels, payloadHighlightObjectId, printLayerVisualizationForBounds, resultProbesForKind, resultValueForPoint, rotatedCameraOrbit, shouldShowDimensionOverlay, shouldShowModelHitLabel, shouldShowUndeformedResultOutline } from "./CadViewer";
 import type { FaceResultSample } from "../resultFields";
 import type { DisplayFace, ResultField } from "@opencae/schema";
 
@@ -374,6 +374,22 @@ describe("CadViewer result coloring", () => {
     const colors = Array.from((mesh.geometry as THREE.BufferGeometry).getAttribute("color").array);
     const highEndColor = new THREE.Color(colors[6]!, colors[7]!, colors[8]!);
     expect(highEndColor.r).toBeLessThan(0.2);
+  });
+
+  test("clones loaded STEP result previews before frame coloring mutates geometry", () => {
+    const source = new THREE.Group();
+    const sourceGeometry = new THREE.BufferGeometry();
+    sourceGeometry.setAttribute("position", new THREE.Float32BufferAttribute([-1, 0, 0, 0, 0, 0, 1, 0, 0], 3));
+    const sourceMesh = new THREE.Mesh(sourceGeometry, new THREE.MeshStandardMaterial({ color: "#63a9e5" }));
+    source.add(sourceMesh);
+
+    const frameObject = cloneResultPreviewObject(source);
+    colorizeResultObject(frameObject, "uploaded", "stress", true, 2, samples, []);
+
+    expect(sourceGeometry.getAttribute("color")).toBeUndefined();
+    expect(sourceMesh.geometry.getAttribute("position").getY(0)).toBeCloseTo(0);
+    expect(frameObject.children[0]).not.toBe(sourceMesh);
+    expect((frameObject.children[0] as THREE.Mesh).geometry).not.toBe(sourceGeometry);
   });
 
   test("samples transformed native CAD vertices in normalized result coordinates", () => {
