@@ -36,6 +36,14 @@ export function nextLoopedResultFrameIndex(frameIndexes: number[], currentFrameI
   return frameIndexes[(currentIndex + 1) % frameIndexes.length] ?? 0;
 }
 
+export function fieldsForResultFrame(fields: ResultField[], frameIndex: number): ResultField[] {
+  const hasFrames = fields.some((field) => typeof field.frameIndex === "number");
+  if (!hasFrames) return fields;
+  return fields
+    .filter((field) => (field.frameIndex ?? 0) === frameIndex)
+    .map((field) => fieldWithOwnValueRange(field));
+}
+
 export function resultSamplesForFaces(faces: DisplayFace[], fields: ResultField[], mode: ResultFieldMode): FaceResultSample[] {
   const field = fields.find((candidate) => candidate.type === mode && candidate.location === "face");
   const values = faces.map((face, index) => {
@@ -94,6 +102,19 @@ function normalizeValue(value: number, min: number, max: number): number {
   const range = max - min;
   if (!Number.isFinite(range) || Math.abs(range) < 1e-9) return 0.5;
   return Math.max(0, Math.min(1, (value - min) / range));
+}
+
+function fieldWithOwnValueRange(field: ResultField): ResultField {
+  const values = [
+    ...field.values,
+    ...(field.samples?.map((sample) => sample.value) ?? [])
+  ].filter(Number.isFinite);
+  if (!values.length) return field;
+  return {
+    ...field,
+    min: Math.min(...values),
+    max: Math.max(...values)
+  };
 }
 
 function resultProbeLabel(mode: ResultFieldMode, value: number, units = "") {

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import type { DisplayFace, ResultField } from "@opencae/schema";
-import { nextLoopedResultFrameIndex, resultFrameIndexes, resultProbeSamplesForFaces, resultSamplesForFaces } from "./resultFields";
+import { fieldsForResultFrame, nextLoopedResultFrameIndex, resultFrameIndexes, resultProbeSamplesForFaces, resultSamplesForFaces } from "./resultFields";
 
 const faces: DisplayFace[] = [
   { id: "face-a", label: "A", color: "#fff", center: [0, 0, 0], normal: [0, 1, 0], stressValue: 10 },
@@ -56,5 +56,17 @@ describe("dynamic result frames", () => {
     expect(nextLoopedResultFrameIndex(indexes, 0)).toBe(1);
     expect(nextLoopedResultFrameIndex(indexes, 2)).toBe(0);
     expect(nextLoopedResultFrameIndex(indexes, 99)).toBe(0);
+  });
+
+  test("renormalizes visible dynamic fields to the active frame range", () => {
+    const fields: ResultField[] = [
+      { id: "stress-0", runId: "run", type: "stress", location: "face", values: [0, 399.2], min: 0, max: 399.2, units: "MPa", frameIndex: 0, timeSeconds: 0 },
+      { id: "stress-1", runId: "run", type: "stress", location: "face", values: [60.3, 327.5], min: 0, max: 399.2, units: "MPa", frameIndex: 1, timeSeconds: 0.025 }
+    ];
+
+    const visible = fieldsForResultFrame(fields, 1);
+
+    expect(visible[0]).toMatchObject({ min: 60.3, max: 327.5 });
+    expect(resultSamplesForFaces(faces, visible, "stress").map((sample) => sample.normalized)).toEqual([0, 1]);
   });
 });

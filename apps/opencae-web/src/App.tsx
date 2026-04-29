@@ -35,7 +35,7 @@ import { displayModelForUnits, loadValueForUnits, resultFieldForUnits, resultSum
 import { supportDisplayLabel } from "./supportLabels";
 import { nextSelectedPayloadObject, shouldClearPayloadSelectionOnViewerMiss } from "./payloadSelection";
 import { createLocalDynamicStructuralStudy, createLocalStaticStressStudy } from "./localProjectFactory";
-import { nextLoopedResultFrameIndex, resultFrameIndexes } from "./resultFields";
+import { fieldsForResultFrame, nextLoopedResultFrameIndex, resultFrameIndexes } from "./resultFields";
 
 interface SaveFilePickerHandle {
   createWritable: () => Promise<{ write: (content: Blob) => Promise<void>; close: () => Promise<void> }>;
@@ -983,12 +983,6 @@ function latestCompletedRunId(study: Study | null, activeRunId: string): string 
   if (study.runs.some((run) => run.id === activeRunId && (run.resultRef || run.status === "complete"))) return activeRunId;
   const completed = [...study.runs].reverse().find((run) => run.resultRef || run.status === "complete");
   return completed?.id ?? null;
-}
-
-function fieldsForResultFrame(fields: ResultField[], frameIndex: number): ResultField[] {
-  const hasFrames = fields.some((field) => typeof field.frameIndex === "number");
-  if (!hasFrames) return fields;
-  return fields.filter((field) => (field.frameIndex ?? 0) === frameIndex);
 }
 
 function readinessForStudy(study: Study | null) {
