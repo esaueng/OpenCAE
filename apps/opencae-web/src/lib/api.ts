@@ -256,6 +256,30 @@ export async function getResults(runId: string): Promise<ResultsResponse> {
   return readJson(response);
 }
 
+export async function cancelRun(runId: string): Promise<{ run: StudyRun; message: string }> {
+  if (localEventsByRunId.has(runId)) {
+    localEventsByRunId.delete(runId);
+    localResultsByRunId.delete(runId);
+    return {
+      run: {
+        id: runId,
+        studyId: "local",
+        status: "cancelled",
+        jobId: `job-${runId}`,
+        solverBackend: "local",
+        solverVersion: "0.1.0",
+        startedAt: new Date().toISOString(),
+        finishedAt: new Date().toISOString(),
+        diagnostics: []
+      },
+      message: "Simulation cancelled."
+    };
+  }
+  const response = await fetch(`/api/runs/${runId}/cancel`, { method: "POST" });
+  const payload = await readJson<{ run: StudyRun }>(response);
+  return { ...payload, message: "Simulation cancelled." };
+}
+
 export function subscribeToRun(runId: string, onEvent: (event: RunEvent) => void): EventSource {
   const localEvents = localEventsByRunId.get(runId);
   if (localEvents) return subscribeToLocalRun(localEvents, onEvent);

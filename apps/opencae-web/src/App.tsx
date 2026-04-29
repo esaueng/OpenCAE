@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Constraint, DisplayFace, DisplayModel, DynamicSolverSettings, Load, NamedSelection, Project, ResultField, ResultSummary, RunEvent, Study } from "@opencae/schema";
 import { RotateCcw, Save } from "lucide-react";
-import { addLoad, addSupport, assignMaterial, createProject, generateMesh, getResults, importLocalProject, loadSampleProject, renameProject, runSimulation, subscribeToRun, updateStudy as saveStudyPatch, uploadModel, type SampleModelId } from "./lib/api";
+import { addLoad, addSupport, assignMaterial, cancelRun, createProject, generateMesh, getResults, importLocalProject, loadSampleProject, renameProject, runSimulation, subscribeToRun, updateStudy as saveStudyPatch, uploadModel, type SampleModelId } from "./lib/api";
 import { normalizePrintParameters, starterMaterials } from "@opencae/materials";
 import { BottomPanel } from "./components/BottomPanel";
 import { OpenCaeLogoMark } from "./components/OpenCaeLogoMark";
@@ -85,6 +85,7 @@ export function App() {
   const [runProgress, setRunProgress] = useState(restoredUi?.runProgress ?? (restoredResults?.fields.length ? 100 : 0));
   const [activeRunId, setActiveRunId] = useState(restoredUi?.activeRunId || restoredResults?.activeRunId || restoredResults?.completedRunId || "run-bracket-demo-seeded");
   const [completedRunId, setCompletedRunId] = useState(restoredUi?.completedRunId || restoredResults?.completedRunId || "run-bracket-demo-seeded");
+  const [processingRunId, setProcessingRunId] = useState<string | null>(null);
   const [resultSummary, setResultSummary] = useState<ResultSummary>(restoredResults?.summary ?? seededSummary);
   const [resultFields, setResultFields] = useState<ResultField[]>(restoredResults?.fields ?? []);
   const [resultFrameIndex, setResultFrameIndex] = useState(0);
@@ -99,6 +100,8 @@ export function App() {
   const [showCreateSimulation, setShowCreateSimulation] = useState(false);
   const [showBoundaryConditionMenu, setShowBoundaryConditionMenu] = useState(false);
   const didRequestRestoredHomeView = useRef(false);
+  const activeRunSourceRef = useRef<EventSource | null>(null);
+  const processingRunIdRef = useRef<string | null>(null);
 
   const study = project?.studies[0] ?? null;
   const assignedPrintLayerOrientation = useMemo<PrintLayerOrientation | null>(() => {
@@ -116,7 +119,7 @@ export function App() {
   const resultSummaryForUi = useMemo(() => resultSummaryForUnits(resultSummary, displayUnitSystem), [displayUnitSystem, resultSummary]);
   const resultFieldsForUi = useMemo(() => resultFields.map((field) => resultFieldForUnits(field, displayUnitSystem)), [displayUnitSystem, resultFields]);
   const visibleResultFieldsForUi = useMemo(() => fieldsForResultFrame(resultFieldsForUi, resultFrameIndex), [resultFieldsForUi, resultFrameIndex]);
-  const solverRunning = runProgress > 0 && runProgress < 100;
+  const solverRunning = Boolean(processingRunId) || (runProgress > 0 && runProgress < 100);
   const runReadiness = useMemo(() => readinessForStudy(study), [study]);
   const canRunSimulation = runReadiness.every((item) => item.done) && !solverRunning;
   const missingRunItems = runReadiness.filter((item) => !item.done).map((item) => item.label);
@@ -604,6 +607,7 @@ export function App() {
     const response = await runSimulation(study.id, study, displayModel ?? undefined);
     setActiveRunId(response.run.id);
     setCompletedRunId("");
+    setProcessingRunId(response.run.id);
     setRunProgress(0);
     pushMessage(response.message);
     const source = subscribeToRun(response.run.id, async (event: RunEvent) => {
@@ -611,6 +615,9 @@ export function App() {
       pushMessage(event.message);
       if (event.type === "complete") {
         source.close();
+        if (activeRunSourceRef.current === source) activeRunSourceRef.current = null;
+        if (processingRunIdRef.current === response.run.id) processingRunIdRef.current = null;
+        setProcessingRunId(null);
         const results = await getResults(response.run.id);
         setResultSummary(results.summary);
         setResultFields(results.fields);
@@ -618,8 +625,35 @@ export function App() {
         setCompletedRunId(response.run.id);
         setViewMode("results");
         setActiveStep("results");
+      } else if (event.type === "cancelled" || event.type === "error") {
+        source.close();
+        if (activeRunSourceRef.current === source) activeRunSourceRef.current = null;
+        if (processingRunIdRef.current === response.run.id) processingRunIdRef.current = null;
+        setProcessingRunId(null);
+        setRunProgress(0);
       }
     });
+    activeRunSourceRef.current = source;
+    processingRunIdRef.current = response.run.id;
+  }
+
+  async function handleCancelSimulation() {
+    const runId = processingRunIdRef.current;
+    activeRunSourceRef.current?.close();
+    activeRunSourceRef.current = null;
+    processingRunIdRef.current = null;
+    setProcessingRunId(null);
+    setRunProgress(0);
+    if (!runId) {
+      pushMessage("Simulation processing stopped.");
+      return;
+    }
+    try {
+      const response = await cancelRun(runId);
+      pushMessage(response.message);
+    } catch (error) {
+      pushMessage(error instanceof Error ? error.message : "Simulation processing stopped locally.");
+    }
   }
 
   function handleOpenStartMenu() {
@@ -800,6 +834,8 @@ export function App() {
           onGenerateMesh={(preset) => updateStudy(generateMesh(study.id, preset, study, displayModel), shouldAutoAdvanceAfterMeshGeneration() ? "run" : undefined)}
           onUpdateSolverSettings={handleUpdateSolverSettings}
           onRunSimulation={handleRunSimulation}
+          onCancelSimulation={handleCancelSimulation}
+          canCancelSimulation={solverRunning}
           canRunSimulation={canRunSimulation}
           missingRunItems={missingRunItems}
           resultFrameIndex={resultFrameIndex}
