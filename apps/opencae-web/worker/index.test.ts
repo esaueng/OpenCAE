@@ -82,6 +82,33 @@ describe("Cloudflare FEA worker orchestration", () => {
     expect(results.summary.maxStress).toBe(431400000);
   });
 
+  test("uses waitUntil background solve when deployed without queue binding", async () => {
+    const bucket = new MemoryR2Bucket();
+    const pending: Array<Promise<unknown>> = [];
+    const env = {
+      ASSETS: { fetch: vi.fn(async () => new Response("asset")) },
+      FEA_ARTIFACTS: bucket,
+      FEA_CONTAINER: {
+        fetch: vi.fn(async () => Response.json(cloudContainerSolveResponse("run-background-1", true)))
+      }
+    };
+    const ctx = { waitUntil: vi.fn((promise: Promise<unknown>) => pending.push(promise)) };
+
+    const response = await worker.fetch(new Request("https://cae.example/api/cloud-fea/runs", {
+      method: "POST",
+      body: JSON.stringify({ projectId: "project-1", studyId: "study-1", fidelity: "ultra", study: { id: "study-1", type: "dynamic_structural" } })
+    }), env, ctx);
+    const body = await response.json() as { run: { id: string } };
+
+    expect(response.status).toBe(202);
+    expect(ctx.waitUntil).toHaveBeenCalledOnce();
+    expect(await bucket.get(`runs/${body.run.id}/results.json`)).toBeNull();
+
+    await Promise.all(pending);
+    const results = JSON.parse(await (await bucket.get(`runs/${body.run.id}/results.json`))!.text()) as { summary: { transient?: { frameCount: number } } };
+    expect(results.summary.transient?.frameCount).toBe(2);
+  });
+
   test("returns stored cloud FEA run events", async () => {
     const bucket = new MemoryR2Bucket();
     await bucket.put("runs/run-1/events.json", JSON.stringify([{ type: "complete", message: "Simulation complete." }]));
