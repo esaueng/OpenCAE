@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { AlertTriangle, Anchor, ArrowDown, Check, CircleHelp, Eye, Gauge, Grid3X3, Maximize2, Pause, Play, Plus, RotateCcw, Ruler, ScanLine, ShieldCheck, Upload, Weight, X } from "lucide-react";
 import { defaultPrintParametersFor, effectiveMaterialProperties, massKgForPayloadMaterial, normalizePrintParameters, payloadMaterialForId, payloadMaterials, starterMaterials, type PayloadMaterialCategory, type PrintMaterialParameters } from "@opencae/materials";
 import { assessResultFailure, estimateAllowableLoadForSafetyFactor } from "@opencae/schema";
-import type { Constraint, DisplayFace, DisplayModel, DynamicSolverSettings, Load, Project, ResultField, ResultSummary, Study } from "@opencae/schema";
+import type { Constraint, DisplayFace, DisplayModel, DynamicSolverSettings, Load, Project, ResultField, ResultSummary, RunTimingEstimate, Study } from "@opencae/schema";
 import { inferCriticalPrintAxis } from "@opencae/study-core";
 import type { ResultMode, ViewMode } from "./CadViewer";
 import type { StepId } from "./StepBar";
@@ -35,6 +35,7 @@ interface RightPanelProps {
   resultSummary: ResultSummary;
   resultFields?: ResultField[];
   runProgress: number;
+  runTiming?: RunTimingEstimate | null;
   sampleModel: SampleModelId;
   sampleAnalysisType?: SampleAnalysisType;
   draftLoadType: LoadType;
@@ -893,9 +894,11 @@ function MeshPanel({ study, onGenerateMesh }: RightPanelProps) {
   );
 }
 
-function RunPanel({ study, runProgress, onRunSimulation, onCancelSimulation, canCancelSimulation, onUpdateSolverSettings, canRunSimulation, missingRunItems }: RightPanelProps) {
+function RunPanel({ study, runProgress, runTiming, onRunSimulation, onCancelSimulation, canCancelSimulation, onUpdateSolverSettings, canRunSimulation, missingRunItems }: RightPanelProps) {
   const progressPercent = Math.max(0, Math.min(100, Math.round(runProgress)));
   const isRunning = canCancelSimulation ?? (progressPercent > 0 && progressPercent < 100);
+  const remainingLabel = formatSimulationEta(runTiming?.estimatedRemainingMs, isRunning);
+  const elapsedLabel = formatSimulationElapsed(runTiming?.elapsedMs);
   const checks = [
     ["Material assigned", study.materialAssignments.length > 0],
     ["Support added", study.constraints.length > 0],
@@ -959,6 +962,12 @@ function RunPanel({ study, runProgress, onRunSimulation, onCancelSimulation, can
         <span style={{ width: `${progressPercent}%` }} />
         <strong className="progress-label">{progressPercent}%</strong>
       </div>
+      {isRunning && (
+        <div className="summary-box">
+          <Info label="Time remaining" value={remainingLabel} />
+          <Info label="Elapsed" value={elapsedLabel} />
+        </div>
+      )}
       <SectionTitle helpId="solver">Solver</SectionTitle>
       <div className="summary-box">
         <Info label="Backend" value={study.type === "dynamic_structural" ? "local-dynamic-newmark" : "local-static-superposition"} />
@@ -967,6 +976,26 @@ function RunPanel({ study, runProgress, onRunSimulation, onCancelSimulation, can
       </div>
     </Panel>
   );
+}
+
+export function formatSimulationEta(remainingMs: number | undefined, isRunning = true): string {
+  if (!isRunning) return "Complete";
+  if (typeof remainingMs !== "number" || !Number.isFinite(remainingMs)) return "Estimating...";
+  if (remainingMs <= 1500) return "Almost done";
+  return `About ${formatDurationSeconds(remainingMs)} remaining`;
+}
+
+function formatSimulationElapsed(elapsedMs: number | undefined): string {
+  if (typeof elapsedMs !== "number" || !Number.isFinite(elapsedMs)) return "--";
+  return formatDurationSeconds(elapsedMs);
+}
+
+function formatDurationSeconds(milliseconds: number): string {
+  const seconds = Math.max(1, Math.round(milliseconds / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  return remainder ? `${minutes}m ${remainder}s` : `${minutes}m`;
 }
 
 function ResultsPanel({

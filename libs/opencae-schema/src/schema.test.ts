@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ProjectSchema, ResultFieldSchema } from "./index";
+import { ProjectSchema, ResultFieldSchema, RunEventSchema } from "./index";
 
 describe("ProjectSchema", () => {
   it("accepts the minimum local project shape", () => {
@@ -129,5 +129,24 @@ describe("ProjectSchema", () => {
       max: 42,
       units: "MPa"
     }).frameIndex).toBeUndefined();
+  });
+
+  it("accepts optional timing estimates on run events", () => {
+    const parsed = RunEventSchema.parse({
+      runId: "run-dynamic",
+      type: "progress",
+      progress: 62,
+      message: "Integrating dynamic response.",
+      timestamp: "2026-04-24T12:00:00.000Z",
+      elapsedMs: 1200,
+      estimatedDurationMs: 4800,
+      estimatedRemainingMs: 3600
+    });
+
+    expect(parsed).toMatchObject({
+      elapsedMs: 1200,
+      estimatedDurationMs: 4800,
+      estimatedRemainingMs: 3600
+    });
   });
 });

@@ -1,7 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 import type { ObjectStorageProvider } from "@opencae/storage";
 import type { AnalysisMesh, Load, Study } from "@opencae/schema";
-import { LocalMockComputeBackend, solveDynamicStudy, solveStudy } from "./index";
+import { benchmarkDynamicStudy, LocalMockComputeBackend, solveDynamicStudy, solveStudy } from "./index";
 
 class MemoryStorage implements ObjectStorageProvider {
   objects = new Map<string, Buffer>();
@@ -434,6 +434,23 @@ describe("LocalMockComputeBackend", () => {
       ["acceleration", "displacement", "safety_factor", "stress", "velocity"],
       ["acceleration", "displacement", "safety_factor", "stress", "velocity"]
     ]);
+  });
+
+  test("benchmarks dynamic frame generation cost and serialized size", () => {
+    const benchmark = benchmarkDynamicStudy(
+      dynamicCantileverStudy("mat-aluminum-6061", {
+        endTime: 0.025,
+        timeStep: 0.005,
+        outputInterval: 0.01
+      }),
+      "run-dynamic-benchmark",
+      rectangularBeamAnalysisMesh()
+    );
+
+    expect(benchmark.frameCount).toBe(4);
+    expect(benchmark.fieldCount).toBe(20);
+    expect(benchmark.jsonBytes).toBeGreaterThan(0);
+    expect(benchmark.durationMs).toBeGreaterThanOrEqual(0);
   });
 
   test("dynamic solve normalizes legacy dense output intervals to bounded local frames", () => {

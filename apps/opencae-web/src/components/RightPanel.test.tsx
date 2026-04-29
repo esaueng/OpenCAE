@@ -70,6 +70,7 @@ function renderPanel(activeStep: StepId, overrides: Partial<Parameters<typeof Ri
       stressExaggeration={1}
       resultSummary={resultSummary}
       runProgress={0}
+      runTiming={null}
       sampleModel="bracket"
       sampleAnalysisType="static_stress"
       draftLoadType="force"
@@ -142,6 +143,18 @@ describe("RightPanel payload mass controls", () => {
     const markup = renderPanel("run", { runProgress: 42 });
 
     expect(markup).toContain("Stop processing");
+  });
+
+  test("shows the estimated simulation calculation time while running", () => {
+    const markup = renderPanel("run", {
+      runProgress: 42,
+      runTiming: { elapsedMs: 1800, estimatedDurationMs: 6200, estimatedRemainingMs: 4400 }
+    });
+
+    expect(markup).toContain("Time remaining");
+    expect(markup).toContain("About 4s remaining");
+    expect(markup).toContain("Elapsed");
+    expect(markup).toContain("2s");
   });
 
   test("does not show the selected face as a persistent right-panel banner", () => {

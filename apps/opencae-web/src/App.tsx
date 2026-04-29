@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Constraint, DisplayFace, DisplayModel, DynamicSolverSettings, Load, NamedSelection, Project, ResultField, ResultSummary, RunEvent, Study } from "@opencae/schema";
+import type { Constraint, DisplayFace, DisplayModel, DynamicSolverSettings, Load, NamedSelection, Project, ResultField, ResultSummary, RunEvent, RunTimingEstimate, Study } from "@opencae/schema";
 import { RotateCcw, Save } from "lucide-react";
 import { addLoad, addSupport, assignMaterial, cancelRun, createProject, generateMesh, getResults, importLocalProject, loadSampleProject, renameProject, runSimulation, subscribeToRun, updateStudy as saveStudyPatch, uploadModel, type SampleAnalysisType, type SampleModelId } from "./lib/api";
 import { normalizePrintParameters, starterMaterials } from "@opencae/materials";
@@ -35,7 +35,7 @@ import { displayModelForUnits, loadValueForUnits, resultFieldForUnits, resultSum
 import { supportDisplayLabel } from "./supportLabels";
 import { nextSelectedPayloadObject, shouldClearPayloadSelectionOnViewerMiss } from "./payloadSelection";
 import { createLocalDynamicStructuralStudy, createLocalStaticStressStudy } from "./localProjectFactory";
-import { fieldsForResultFrame, interpolatedFieldsForFramePosition, resultFrameIndexes } from "./resultFields";
+import { createResultFrameCache, interpolatedFieldsForFramePosition } from "./resultFields";
 
 interface SaveFilePickerHandle {
   createWritable: () => Promise<{ write: (content: Blob) => Promise<void>; close: () => Promise<void> }>;
@@ -85,6 +85,7 @@ export function App() {
   const [status, setStatus] = useState(restoredUi?.status ?? (restoredProjectFile ? "Workspace restored after reload." : "Ready"));
   const [logs, setLogs] = useState<string[]>(restoredUi?.logs.length ? restoredUi.logs : restoredProjectFile ? ["Workspace restored after reload.", "Ready | Local Mode"] : ["Ready | Local Mode"]);
   const [runProgress, setRunProgress] = useState(restoredUi?.runProgress ?? (restoredResults?.fields.length ? 100 : 0));
+  const [runTiming, setRunTiming] = useState<RunTimingEstimate | null>(null);
   const [activeRunId, setActiveRunId] = useState(restoredUi?.activeRunId || restoredResults?.activeRunId || restoredResults?.completedRunId || "run-bracket-demo-seeded");
   const [completedRunId, setCompletedRunId] = useState(restoredUi?.completedRunId || restoredResults?.completedRunId || "run-bracket-demo-seeded");
   const [processingRunId, setProcessingRunId] = useState<string | null>(null);
@@ -124,12 +125,13 @@ export function App() {
   const displayModelForUi = useMemo(() => displayModel ? displayModelForUnits(displayModel, displayUnitSystem) : null, [displayModel, displayUnitSystem]);
   const resultSummaryForUi = useMemo(() => resultSummaryForUnits(resultSummary, displayUnitSystem), [displayUnitSystem, resultSummary]);
   const resultFieldsForUi = useMemo(() => resultFields.map((field) => resultFieldForUnits(field, displayUnitSystem)), [displayUnitSystem, resultFields]);
+  const resultFrameCache = useMemo(() => createResultFrameCache(resultFieldsForUi), [resultFieldsForUi]);
   const resultVisualFramePosition = resultPlaybackPlaying ? resultPlaybackFramePosition : resultFrameIndex;
   const visibleResultFieldsForUi = useMemo(
-    () => resultPlaybackPlaying ? interpolatedFieldsForFramePosition(resultFieldsForUi, resultVisualFramePosition) : fieldsForResultFrame(resultFieldsForUi, resultFrameIndex),
-    [resultFieldsForUi, resultFrameIndex, resultPlaybackPlaying, resultVisualFramePosition]
+    () => resultPlaybackPlaying ? interpolatedFieldsForFramePosition(resultFieldsForUi, resultVisualFramePosition) : resultFrameCache.fieldsForFrame(resultFrameIndex),
+    [resultFieldsForUi, resultFrameCache, resultFrameIndex, resultPlaybackPlaying, resultVisualFramePosition]
   );
-  const playbackFrameIndexes = useMemo(() => resultFrameIndexes(resultFields), [resultFields]);
+  const playbackFrameIndexes = useMemo(() => resultFrameCache.frameIndexes, [resultFrameCache]);
   const solverRunning = Boolean(processingRunId) || (runProgress > 0 && runProgress < 100);
   const runReadiness = useMemo(() => readinessForStudy(study), [study]);
   const canRunSimulation = runReadiness.every((item) => item.done) && !solverRunning;
@@ -685,15 +687,18 @@ export function App() {
     setCompletedRunId("");
     setProcessingRunId(response.run.id);
     setRunProgress(0);
+    setRunTiming(null);
     pushMessage(response.message);
     const source = subscribeToRun(response.run.id, async (event: RunEvent) => {
       if (typeof event.progress === "number") setRunProgress(event.progress);
-      pushMessage(event.message);
+      setRunTiming(timingFromRunEvent(event));
+      pushMessage(messageWithEta(event));
       if (event.type === "complete") {
         source.close();
         if (activeRunSourceRef.current === source) activeRunSourceRef.current = null;
         if (processingRunIdRef.current === response.run.id) processingRunIdRef.current = null;
         setProcessingRunId(null);
+        setRunTiming(null);
         const results = await getResults(response.run.id);
         setResultSummary(results.summary);
         setResultFields(results.fields);
@@ -710,6 +715,7 @@ export function App() {
         setProcessingRunId(null);
         setResultPlaybackPlaying(false);
         setRunProgress(0);
+        setRunTiming(null);
       }
     });
     activeRunSourceRef.current = source;
@@ -724,6 +730,7 @@ export function App() {
     setProcessingRunId(null);
     setResultPlaybackPlaying(false);
     setRunProgress(0);
+    setRunTiming(null);
     if (!runId) {
       pushMessage("Simulation processing stopped.");
       return;
@@ -852,6 +859,7 @@ export function App() {
           resultSummary={resultSummaryForUi}
           resultFields={resultFieldsForUi}
           runProgress={runProgress}
+          runTiming={runTiming}
           sampleModel={sampleModel}
           sampleAnalysisType={sampleAnalysisType}
           draftLoadType={draftLoadType}
@@ -1003,6 +1011,29 @@ function latestCompletedRunId(study: Study | null, activeRunId: string): string 
   if (study.runs.some((run) => run.id === activeRunId && (run.resultRef || run.status === "complete"))) return activeRunId;
   const completed = [...study.runs].reverse().find((run) => run.resultRef || run.status === "complete");
   return completed?.id ?? null;
+}
+
+function timingFromRunEvent(event: RunEvent): RunTimingEstimate | null {
+  const timing: RunTimingEstimate = {};
+  if (typeof event.elapsedMs === "number" && Number.isFinite(event.elapsedMs)) timing.elapsedMs = event.elapsedMs;
+  if (typeof event.estimatedDurationMs === "number" && Number.isFinite(event.estimatedDurationMs)) timing.estimatedDurationMs = event.estimatedDurationMs;
+  if (typeof event.estimatedRemainingMs === "number" && Number.isFinite(event.estimatedRemainingMs)) timing.estimatedRemainingMs = event.estimatedRemainingMs;
+  return Object.keys(timing).length ? timing : null;
+}
+
+function messageWithEta(event: RunEvent): string {
+  if (event.type === "complete" || event.type === "cancelled" || event.type === "error") return event.message;
+  if (typeof event.estimatedRemainingMs !== "number" || !Number.isFinite(event.estimatedRemainingMs)) return event.message;
+  if (event.estimatedRemainingMs <= 1500) return `${event.message} Almost done.`;
+  return `${event.message} About ${formatLogDuration(event.estimatedRemainingMs)} remaining.`;
+}
+
+function formatLogDuration(milliseconds: number): string {
+  const seconds = Math.max(1, Math.round(milliseconds / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  return remainder ? `${minutes}m ${remainder}s` : `${minutes}m`;
 }
 
 function loopedPlaybackFramePosition(frameIndexes: number[], framePosition: number): number {
