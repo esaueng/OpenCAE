@@ -618,23 +618,6 @@ export function App() {
             <button className="icon-button history-button" type="button" title="Undo last change" aria-label="Undo last change" disabled={!canUndoAction} onClick={handleUndoAction}><UndoIcon /></button>
             <button className="icon-button history-button" type="button" title="Redo last change" aria-label="Redo last change" disabled={!canRedoAction} onClick={handleRedoAction}><RedoIcon /></button>
           </div>
-          <button
-            className="icon-button theme-button"
-            type="button"
-            title={themeMode === "dark" ? "Switch to light mode" : "Switch to dark mode"}
-            aria-label={themeMode === "dark" ? "Switch to light mode" : "Switch to dark mode"}
-            onClick={() => setThemeMode((mode) => (mode === "dark" ? "light" : "dark"))}
-          >
-            {themeMode === "dark" ? <SunIcon /> : <MoonIcon />}
-          </button>
-          <button
-            className="unit-topbar-toggle"
-            type="button"
-            title={`Switch to ${displayUnitSystem === "SI" ? "imperial" : "metric"} units`}
-            onClick={() => handleUnitSystemChange(displayUnitSystem === "SI" ? "US" : "SI")}
-          >
-            {displayUnitSystem === "SI" ? "mm" : "in"}
-          </button>
         </div>
         <button
           className={`primary topbar-action ${solverRunning ? "running" : ""}`}
@@ -656,8 +639,10 @@ export function App() {
             activeStep={activeStep}
             collapsed={isStepbarCollapsed}
             project={project}
+            themeMode={themeMode}
             onSelect={handleStepSelect}
             onToggleCollapsed={() => setIsStepbarCollapsed((collapsed) => !collapsed)}
+            onToggleTheme={() => setThemeMode((mode) => (mode === "dark" ? "light" : "dark"))}
             onUnitSystemChange={handleUnitSystemChange}
             study={study}
             hasResults={viewMode === "results" || resultFields.length > 0}
@@ -979,12 +964,4 @@ function UndoIcon() {
 
 function RedoIcon() {
   return <RotateCcw className="redo-icon" size={18} aria-hidden="true" />;
-}
-
-function SunIcon() {
-  return <svg viewBox="0 0 18 18" aria-hidden="true"><path d="M9 5.4a3.6 3.6 0 1 0 0 7.2 3.6 3.6 0 0 0 0-7.2Z" fill="none" stroke="currentColor" strokeWidth="1.4" /><path d="M9 1.5v1.8M9 14.7v1.8M1.5 9h1.8M14.7 9h1.8M3.7 3.7 5 5M13 13l1.3 1.3M14.3 3.7 13 5M5 13l-1.3 1.3" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /></svg>;
-}
-
-function MoonIcon() {
-  return <svg viewBox="0 0 18 18" aria-hidden="true"><path d="M14.7 11.6A6.6 6.6 0 0 1 6.4 3.3a6.2 6.2 0 1 0 8.3 8.3Z" fill="none" stroke="currentColor" strokeWidth="1.45" strokeLinecap="round" strokeLinejoin="round" /></svg>;
 }

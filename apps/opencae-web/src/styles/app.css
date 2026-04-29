@@ -760,29 +760,6 @@ img {
   background: transparent;
 }
 
-.theme-button {
-  border: var(--border-thin);
-  background: var(--color-surface-1);
-}
-
-.unit-topbar-toggle {
-  min-width: 44px;
-  min-height: 34px;
-  padding: 0 10px;
-  color: var(--color-text-muted);
-  background: var(--color-surface-2);
-  border: var(--border-thin);
-  border-radius: var(--radius-md);
-  font-family: var(--font-mono);
-  font-size: var(--fs-xs);
-}
-
-.unit-topbar-toggle:hover,
-.unit-topbar-toggle:focus-visible {
-  color: var(--color-text);
-  border-color: var(--color-accent-border);
-}
-
 .icon-button svg {
   width: 18px;
   height: 18px;
@@ -834,10 +811,6 @@ img {
   border-radius: 999px;
   background: var(--color-success);
   box-shadow: 0 0 10px rgba(34, 197, 94, 0.65);
-}
-
-.status-strip > .local-pill {
-  margin-left: auto;
 }
 
 .workspace {
@@ -1046,6 +1019,7 @@ img {
   font-size: var(--fs-xs);
   letter-spacing: 0;
   text-transform: none;
+  cursor: pointer;
 }
 
 .stepbar-link svg {
@@ -1385,17 +1359,6 @@ img {
   background: var(--color-surface);
   border-left: var(--border-thin);
   overflow: hidden;
-}
-
-.selection-readout {
-  margin: 12px 16px 0;
-  padding: 7px 9px;
-  color: var(--color-accent);
-  background: var(--color-accent-dim);
-  border: 1px solid var(--color-accent-border);
-  border-radius: var(--radius-md);
-  font-family: var(--font-mono);
-  font-size: var(--fs-xs);
 }
 
 .panel-section {
@@ -2528,6 +2491,20 @@ button:disabled {
 .status-groups b {
   color: var(--color-text-subtle);
   font-weight: var(--fw-regular);
+}
+
+.status-github {
+  margin-left: auto;
+  color: var(--color-text-subtle);
+  font-family: var(--font-mono);
+  font-size: var(--fs-mini);
+  text-transform: lowercase;
+  text-decoration: none;
+}
+
+.status-github:hover,
+.status-github:focus-visible {
+  color: var(--color-accent);
 }
 
 .status-state i {

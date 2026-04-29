@@ -1,8 +1,9 @@
 import type { Project, Study } from "@opencae/schema";
-import { Activity, Anchor, Atom, Box, Github, Layers3, MessageSquare, PanelLeftClose, PanelLeftOpen, Play, Weight } from "lucide-react";
+import { Activity, Anchor, Atom, Box, Layers3, MessageSquare, Moon, PanelLeftClose, PanelLeftOpen, Play, Sun, Weight } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { canNavigateToStep } from "../appShellState";
 import type { UnitSystem } from "../unitDisplay";
+import type { ThemeMode } from "../appPersistence";
 
 export type StepId = "model" | "material" | "supports" | "loads" | "mesh" | "run" | "results";
 
@@ -12,8 +13,10 @@ interface StepBarProps {
   study: Study;
   hasResults: boolean;
   collapsed: boolean;
+  themeMode: ThemeMode;
   onSelect: (step: StepId) => void;
   onToggleCollapsed: () => void;
+  onToggleTheme: () => void;
   onUnitSystemChange: (unitSystem: UnitSystem) => void;
 }
 
@@ -27,7 +30,7 @@ const steps: ReadonlyArray<{ id: StepId; label: string; Icon: LucideIcon }> = [
   { id: "results", label: "Results", Icon: Activity }
 ] as const;
 
-export function StepBar({ activeStep, project, study, hasResults, collapsed, onSelect, onToggleCollapsed, onUnitSystemChange }: StepBarProps) {
+export function StepBar({ activeStep, project, study, hasResults, collapsed, themeMode, onSelect, onToggleCollapsed, onToggleTheme, onUnitSystemChange }: StepBarProps) {
   const completed: Record<StepId, boolean> = {
     model: true,
     material: study.materialAssignments.length > 0,
@@ -41,6 +44,7 @@ export function StepBar({ activeStep, project, study, hasResults, collapsed, onS
   const unitShort = project.unitSystem === "SI" ? "mm" : "in";
   const currentUnitLabel = project.unitSystem === "SI" ? "Metric" : "Imperial";
   const nextUnitSystem = project.unitSystem === "SI" ? "US" : "SI";
+  const ThemeIcon = themeMode === "dark" ? Sun : Moon;
 
   return (
     <nav className={`stepbar ${collapsed ? "collapsed" : ""}`} aria-label="Simulation workflow">
@@ -75,13 +79,19 @@ export function StepBar({ activeStep, project, study, hasResults, collapsed, onS
       </div>
       <div className="stepbar-footer">
         <div className="stepbar-actions" aria-label="Project links">
+          <button
+            className="stepbar-link"
+            type="button"
+            onClick={onToggleTheme}
+            title={themeMode === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+            aria-label={themeMode === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+          >
+            <ThemeIcon size={14} aria-hidden="true" />
+            {themeMode === "dark" ? "Light" : "Dark"}
+          </button>
           <a className="stepbar-link" href="https://form.esauengineering.com/opencae-feedback" target="_blank" rel="noreferrer">
             <MessageSquare size={14} aria-hidden="true" />
             Feedback
-          </a>
-          <a className="stepbar-link" href="https://github.com/esaueng/OpenCAE" target="_blank" rel="noreferrer">
-            <Github size={14} aria-hidden="true" />
-            GitHub
           </a>
         </div>
         <div><span>study</span><strong>static</strong></div>
