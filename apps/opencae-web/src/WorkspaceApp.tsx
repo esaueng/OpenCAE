@@ -35,8 +35,8 @@ import { displayModelForUnits, loadValueForUnits, resultFieldForUnits, resultSum
 import { supportDisplayLabel } from "./supportLabels";
 import { nextSelectedPayloadObject, shouldClearPayloadSelectionOnViewerMiss } from "./payloadSelection";
 import { createLocalDynamicStructuralStudy, createLocalStaticStressStudy } from "./localProjectFactory";
-import { createResultFrameCache, hasDynamicPlaybackFrames } from "./resultFields";
-import { hydratePreparedPlaybackFrame, playbackMemoryBudgetBytes, preparedPlaybackFrameForPosition, type PreparedPlaybackFrameCache } from "./resultPlaybackCache";
+import { createPackedResultPlaybackCache, createResultFrameCache, hasDynamicPlaybackFrames } from "./resultFields";
+import { playbackMemoryBudgetBytes, type PreparedPlaybackFrameCache } from "./resultPlaybackCache";
 import {
   boundedPlaybackOrdinalDelta,
   frameIndexForPlaybackOrdinal,
@@ -166,7 +166,11 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const resultSummaryForUi = useMemo(() => resultSummaryForUnits(resultSummary, displayUnitSystem), [displayUnitSystem, resultSummary]);
   const resultFieldsForUi = useMemo(() => resultFields.map((field) => resultFieldForUnits(field, displayUnitSystem)), [displayUnitSystem, resultFields]);
   const resultFrameCache = useMemo(() => createResultFrameCache(resultFieldsForUi), [resultFieldsForUi]);
-  const playbackFrameIndexes = useMemo(() => resultFrameCache.frameIndexes, [resultFrameCache]);
+  const packedResultPlaybackCache = useMemo(() => createPackedResultPlaybackCache(resultFieldsForUi), [resultFieldsForUi]);
+  const playbackFrameIndexes = useMemo(
+    () => packedResultPlaybackCache ? Array.from(packedResultPlaybackCache.frameIndexes) : resultFrameCache.frameIndexes,
+    [packedResultPlaybackCache, resultFrameCache]
+  );
   const resultVisualOrdinalPosition = resultPlaybackPlaying
     ? resultPlaybackOrdinalPosition
     : playbackOrdinalForSolverFramePosition(playbackFrameIndexes, resultFrameIndex);
@@ -187,16 +191,14 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     resultFrameCache.frameIndexes.join(","),
     resultPlaybackFps
   ].join("|"), [activeRunId, completedRunId, displayModelForUi, displayUnitSystem, resultFieldsForUi.length, resultFrameCache.frameIndexes, resultMode, resultPlaybackFps, showDeformed, stressExaggeration, study?.meshSettings.preset]);
-  const preparedPlaybackFrame = useMemo(() => {
-    if (!resultPlaybackPlaying || resultPlaybackCacheState.status !== "ready") return null;
-    return preparedPlaybackFrameForPosition(resultPlaybackCacheState.cache, resultVisualFramePosition);
-  }, [resultPlaybackCacheState, resultPlaybackPlaying, resultVisualFramePosition]);
   const visibleResultFieldsForUi = useMemo(
     () => {
-      if (resultPlaybackPlaying && preparedPlaybackFrame) return hydratePreparedPlaybackFrame(preparedPlaybackFrame).fields;
-      return resultPlaybackPlaying ? resultFrameCache.fieldsForFramePosition(resultVisualFramePosition) : resultFrameCache.fieldsForFrame(resultFrameIndex);
+      if (resultPlaybackPlaying) {
+        return packedResultPlaybackCache?.fieldsForFramePosition(resultVisualFramePosition) ?? resultFrameCache.fieldsForFramePosition(resultVisualFramePosition);
+      }
+      return packedResultPlaybackCache?.fieldsForFrame(resultFrameIndex) ?? resultFrameCache.fieldsForFrame(resultFrameIndex);
     },
-    [preparedPlaybackFrame, resultFrameCache, resultFrameIndex, resultPlaybackPlaying, resultVisualFramePosition]
+    [packedResultPlaybackCache, resultFrameCache, resultFrameIndex, resultPlaybackPlaying, resultVisualFramePosition]
   );
   useEffect(() => {
     if (resultPlaybackPlaying) return;
@@ -308,12 +310,8 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         resultPlaybackOrdinalPositionRef.current = ordinalPosition;
         if (timestamp - lastViewerTimestamp >= frameDurationMs) {
           lastViewerTimestamp = timestamp;
-          const preparedFrame = resultPlaybackCacheState.status === "ready"
-            ? preparedPlaybackFrameForPosition(resultPlaybackCacheState.cache, framePosition)
-            : null;
-          const nextFields = preparedFrame
-            ? hydratePreparedPlaybackFrame(preparedFrame).fields
-            : resultFrameCache.fieldsForFramePosition(framePosition);
+          const nextFields = packedResultPlaybackCache?.fieldsForFramePosition(framePosition)
+            ?? resultFrameCache.fieldsForFramePosition(framePosition);
           resultPlaybackFrameStoreRef.current?.setSnapshot(nextFields);
         }
         const playbackCommitIntervalMs = viewerInteractingRef.current ? Number.POSITIVE_INFINITY : PLAYBACK_UI_COMMIT_INTERVAL_MS;
@@ -335,7 +333,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     };
     animationFrameId = window.requestAnimationFrame(advancePlaybackFrame);
     return () => window.cancelAnimationFrame(animationFrameId);
-  }, [activeStep, playbackFrameIndexes, resultFrameCache, resultPlaybackCacheState, resultPlaybackFps, resultPlaybackPlaying]);
+  }, [activeStep, packedResultPlaybackCache, playbackFrameIndexes, resultFrameCache, resultPlaybackFps, resultPlaybackPlaying]);
 
   const handleViewerInteractionChange = useCallback((interacting: boolean) => {
     viewerInteractingRef.current = interacting;
