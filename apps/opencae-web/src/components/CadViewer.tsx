@@ -1822,7 +1822,8 @@ function resultColorForPoint(kind: SampleModelKind, resultMode: ResultMode, stre
 }
 
 export function resultValueForPoint(kind: SampleModelKind, resultMode: ResultMode, stressExaggeration: number, point: THREE.Vector3, samples: FaceResultSample[]) {
-  const sampleValue = resultFractionFromSamples(point, samples);
+  const fieldSampleValue = resultFractionFromFieldSamples(point, samples);
+  const sampleValue = fieldSampleValue ?? resultFractionFromSamples(point, samples);
   const stress = kind === "cantilever" ? cantileverBendingStressFraction(point) : sampleValue ?? stressFractionForPoint(kind, point);
   const displacement = sampleValue ?? displacementFractionForPoint(kind, point);
   return resultMode === "displacement"
@@ -1848,6 +1849,37 @@ function resultFractionFromSamples(point: THREE.Vector3, samples: FaceResultSamp
     totalWeight += weight;
   }
   return totalWeight > 0 ? Math.max(0, Math.min(1, weighted / totalWeight)) : null;
+}
+
+function resultFractionFromFieldSamples(point: THREE.Vector3, samples: FaceResultSample[]): number | null {
+  const fieldSamples = samples.find((sample) => sample.fieldSamples?.length)?.fieldSamples;
+  if (!fieldSamples?.length) return null;
+  const span = resultFieldSampleSpan(fieldSamples);
+  let weighted = 0;
+  let totalWeight = 0;
+  for (const sample of fieldSamples) {
+    const center = new THREE.Vector3(...sample.point);
+    const distance = point.distanceTo(center);
+    const radius = Math.max(span * 0.055, 0.001);
+    const weight = Math.exp(-0.5 * (distance / radius) ** 2);
+    weighted += sample.normalized * weight;
+    totalWeight += weight;
+  }
+  if (totalWeight <= 1e-9) {
+    const nearest = fieldSamples.reduce<typeof fieldSamples[number] | undefined>((best, sample) => {
+      if (!best) return sample;
+      return point.distanceTo(new THREE.Vector3(...sample.point)) < point.distanceTo(new THREE.Vector3(...best.point)) ? sample : best;
+    }, undefined);
+    return nearest?.normalized ?? null;
+  }
+  return Math.max(0, Math.min(1, weighted / totalWeight));
+}
+
+function resultFieldSampleSpan(samples: NonNullable<FaceResultSample["fieldSamples"]>): number {
+  const bounds = new THREE.Box3();
+  for (const sample of samples) bounds.expandByPoint(new THREE.Vector3(...sample.point));
+  const size = bounds.getSize(new THREE.Vector3());
+  return Math.max(size.x, size.y, size.z, 1);
 }
 
 function resultSampleSpan(samples: FaceResultSample[]): number {

@@ -1,5 +1,5 @@
 import { solveStudy } from "@opencae/solver-service";
-import type { DisplayModel, Project, ResultField, ResultSummary, RunEvent, Study, StudyRun } from "@opencae/schema";
+import type { AnalysisMesh, DisplayModel, Project, ResultField, ResultSummary, RunEvent, Study, StudyRun } from "@opencae/schema";
 import type { LoadApplicationPoint, LoadDirection, LoadType, PayloadLoadMetadata, PayloadObjectSelection } from "../loadPreview";
 import { embedUploadedModelFile, type EmbeddedModelFile, type LocalResultBundle } from "../projectFile";
 import { createLocalBlankProject, createLocalSampleProject, createLocalUploadResponse, openLocalProjectPayload } from "../localProjectFactory";
@@ -107,7 +107,7 @@ export async function renameProject(projectId: string, name: string, currentProj
   );
 }
 
-export async function generateMesh(studyId: string, preset: "coarse" | "medium" | "fine", currentStudy?: Study): Promise<{ study: Study; message: string }> {
+export async function generateMesh(studyId: string, preset: "coarse" | "medium" | "fine", currentStudy?: Study, displayModel?: DisplayModel): Promise<{ study: Study; message: string }> {
   return fetchJsonWithFallback(
     `/api/studies/${studyId}/mesh`,
     {
@@ -117,7 +117,8 @@ export async function generateMesh(studyId: string, preset: "coarse" | "medium" 
     },
     () => {
       if (!currentStudy) throw new Error("Could not generate mesh without an open study.");
-      const summary = meshSummaryForPreset(preset);
+      const analysisMesh = displayModel ? analysisMeshForDisplayModel(displayModel, preset) : undefined;
+      const summary = meshSummaryForPreset(preset, analysisMesh);
       return {
         study: {
           ...currentStudy,
@@ -238,13 +239,13 @@ export async function addLoad(studyId: string, type: LoadType, value: number, se
   );
 }
 
-export async function runSimulation(studyId: string, currentStudy?: Study): Promise<{ run: { id: string }; streamUrl: string; message: string }> {
+export async function runSimulation(studyId: string, currentStudy?: Study, displayModel?: DisplayModel): Promise<{ run: { id: string }; streamUrl: string; message: string }> {
   try {
     const response = await fetch(`/api/studies/${studyId}/runs`, { method: "POST" });
     return await readJson(response);
   } catch (error) {
     if (!currentStudy) throw error;
-    return runSimulationLocally(currentStudy);
+    return runSimulationLocally(currentStudy, displayModel);
   }
 }
 
@@ -266,9 +267,9 @@ export function subscribeToRun(runId: string, onEvent: (event: RunEvent) => void
   return source;
 }
 
-function runSimulationLocally(study: Study): { run: StudyRun; streamUrl: string; message: string } {
+function runSimulationLocally(study: Study, displayModel?: DisplayModel): { run: StudyRun; streamUrl: string; message: string } {
   const runId = `run-local-${crypto.randomUUID()}`;
-  const solved = solveStudy(study, runId);
+  const solved = solveStudy(study, runId, displayModel ? analysisMeshForDisplayModel(displayModel, study.meshSettings.preset) : undefined);
   localResultsByRunId.set(runId, { summary: solved.summary, fields: solved.fields });
   const now = new Date().toISOString();
   const events: RunEvent[] = [
@@ -294,6 +295,69 @@ function runSimulationLocally(study: Study): { run: StudyRun; streamUrl: string;
     streamUrl: `local:${runId}`,
     message: "Simulation running locally."
   };
+}
+
+type Vec3 = [number, number, number];
+
+function analysisMeshForDisplayModel(displayModel: DisplayModel, quality: AnalysisMesh["quality"]): AnalysisMesh {
+  const bounds = boundsForDisplayModel(displayModel);
+  const divisions = quality === "fine" ? 42 : quality === "medium" ? 24 : 12;
+  const samples: AnalysisMesh["samples"] = [];
+  const faces: Array<{ axis: 0 | 1 | 2; value: number; normal: Vec3; sourceId: string }> = [
+    { axis: 0, value: bounds.min[0], normal: [-1, 0, 0], sourceId: "x-min" },
+    { axis: 0, value: bounds.max[0], normal: [1, 0, 0], sourceId: "x-max" },
+    { axis: 1, value: bounds.min[1], normal: [0, -1, 0], sourceId: "y-min" },
+    { axis: 1, value: bounds.max[1], normal: [0, 1, 0], sourceId: "y-max" },
+    { axis: 2, value: bounds.min[2], normal: [0, 0, -1], sourceId: "z-min" },
+    { axis: 2, value: bounds.max[2], normal: [0, 0, 1], sourceId: "z-max" }
+  ];
+  for (const face of displayModel.faces) {
+    samples.push({ point: face.center, normal: normalized(face.normal), weight: 1, sourceId: face.id });
+  }
+  for (const face of faces) {
+    const otherAxes = ([0, 1, 2] as const).filter((axis) => axis !== face.axis);
+    for (let a = 0; a <= divisions; a += 1) {
+      for (let b = 0; b <= divisions; b += 1) {
+        const point: Vec3 = [0, 0, 0];
+        point[face.axis] = face.value;
+        point[otherAxes[0]!] = lerp(bounds.min[otherAxes[0]!], bounds.max[otherAxes[0]!], a / divisions);
+        point[otherAxes[1]!] = lerp(bounds.min[otherAxes[1]!], bounds.max[otherAxes[1]!], b / divisions);
+        samples.push({ point, normal: face.normal, weight: 1, sourceId: face.sourceId });
+      }
+    }
+  }
+  return { quality, bounds, samples };
+}
+
+function boundsForDisplayModel(displayModel: DisplayModel): AnalysisMesh["bounds"] {
+  const min: Vec3 = [Infinity, Infinity, Infinity];
+  const max: Vec3 = [-Infinity, -Infinity, -Infinity];
+  for (const face of displayModel.faces) {
+    for (let axis = 0; axis < 3; axis += 1) {
+      min[axis] = Math.min(min[axis]!, face.center[axis]!);
+      max[axis] = Math.max(max[axis]!, face.center[axis]!);
+    }
+  }
+  if (!displayModel.faces.length) {
+    min[0] = -1.2; min[1] = -0.5; min[2] = -0.5;
+    max[0] = 1.2; max[1] = 0.5; max[2] = 0.5;
+  }
+  for (let axis = 0; axis < 3; axis += 1) {
+    const span = Math.max(max[axis]! - min[axis]!, 0.4);
+    const pad = Math.max(span * 0.08, 0.12);
+    min[axis] = min[axis]! - pad;
+    max[axis] = max[axis]! + pad;
+  }
+  return { min, max };
+}
+
+function normalized(vector: Vec3): Vec3 {
+  const length = Math.hypot(vector[0], vector[1], vector[2]) || 1;
+  return [vector[0] / length, vector[1] / length, vector[2] / length];
+}
+
+function lerp(min: number, max: number, t: number): number {
+  return min + (max - min) * t;
 }
 
 function subscribeToLocalRun(events: RunEvent[], onEvent: (event: RunEvent) => void): EventSource {
@@ -333,11 +397,12 @@ async function fetchJsonWithFallback<T>(input: RequestInfo | URL, init: RequestI
   }
 }
 
-function meshSummaryForPreset(preset: "coarse" | "medium" | "fine") {
+function meshSummaryForPreset(preset: "coarse" | "medium" | "fine", analysisMesh?: AnalysisMesh) {
+  const sampleCount = analysisMesh?.samples.length;
   const summaryByPreset = {
-    coarse: { nodes: 12840, elements: 7320, warnings: [] },
-    medium: { nodes: 42381, elements: 26944, warnings: ["Small feature simplified for the mock mesh."] },
-    fine: { nodes: 88420, elements: 57102, warnings: ["Fine preset is mocked; no native mesher was run."] }
+    coarse: { nodes: 12840, elements: 7320, warnings: [], analysisSampleCount: sampleCount ?? 1200, quality: "coarse" as const },
+    medium: { nodes: 42381, elements: 26944, warnings: ["Small feature curvature represented by surface analysis samples."], analysisSampleCount: sampleCount ?? 4800, quality: "medium" as const },
+    fine: { nodes: 88420, elements: 57102, warnings: ["Fine surface analysis sampling enabled for higher-quality local results."], analysisSampleCount: sampleCount ?? 19200, quality: "fine" as const }
   };
   return summaryByPreset[preset];
 }

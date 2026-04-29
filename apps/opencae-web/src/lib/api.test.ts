@@ -307,7 +307,9 @@ describe("api", () => {
       summary: {
         nodes: 88420,
         elements: 57102,
-        warnings: ["Fine preset is mocked; no native mesher was run."]
+        analysisSampleCount: 19200,
+        quality: "fine",
+        warnings: ["Fine surface analysis sampling enabled for higher-quality local results."]
       }
     });
     expect(response.message).toBe("Mesh generated locally.");

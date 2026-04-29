@@ -1,6 +1,6 @@
 import { effectiveMaterialProperties, starterMaterials } from "@opencae/materials";
 import { assessResultFailure } from "@opencae/schema";
-import type { Load, Material, ResultField, ResultSummary, RunEvent, Study } from "@opencae/schema";
+import type { AnalysisMesh, AnalysisSample, Load, Material, ResultField, ResultSample, ResultSummary, RunEvent, Study } from "@opencae/schema";
 import type { ObjectStorageProvider } from "@opencae/storage";
 import { bracketDisplayModel, bracketResultSummary } from "@opencae/db/sample-data";
 import { inferCriticalPrintAxis } from "@opencae/study-core";
@@ -15,6 +15,7 @@ export class LocalMockComputeBackend {
     study: Study;
     runId: string;
     meshRef: string;
+    analysisMesh?: AnalysisMesh;
     publish: (event: RunEvent) => void;
   }): Promise<{ resultRef: string; reportRef: string; summary: ResultSummary; fields: ResultField[] }> {
     const messages = [
@@ -26,7 +27,7 @@ export class LocalMockComputeBackend {
       [100, "Simulation complete."]
     ] as const;
 
-    const solved = solveStudy(args.study, args.runId);
+    const solved = solveStudy(args.study, args.runId, args.analysisMesh);
     const summary = solved.summary;
     const fields = solved.fields;
     const solverInput = [
@@ -70,12 +71,13 @@ export class LocalMockComputeBackend {
     await this.storage.putObject(
       `${args.study.projectId}/solver/${args.runId}/solver.log`,
       [
-        "Local mesh read: 42,381 nodes, 26,944 tetra elements.",
-        "Local static solver: linear elastic multi-load superposition.",
+        `Local mesh read: ${solved.analysisSampleCount.toLocaleString()} surface analysis samples.`,
+        "Local static solver: high-resolution linear elastic surface bending model.",
         `Material: ${solved.material.name}.`,
         `Effective material: E=${Math.round(solved.effectiveMaterial.youngsModulus / 1_000_000).toLocaleString()} MPa, yield=${Math.round(solved.effectiveMaterial.yieldStrength / 1_000_000).toLocaleString()} MPa.`,
         `Loads evaluated: ${args.study.loads.length}.`,
         `Result faces evaluated: ${solved.faceCount}.`,
+        `Result samples evaluated: ${solved.analysisSampleCount}.`,
         `Total applied load: ${solved.totalAppliedLoad} N.`,
         "Static solve complete."
       ].join("\n") + "\n"
@@ -108,10 +110,11 @@ interface LoadModel {
   moment: number;
 }
 
-export function solveStudy(study: Study, runId: string) {
+export function solveStudy(study: Study, runId: string, analysisMeshInput?: AnalysisMesh) {
   const faces = faceModelsForStudy(study);
   const supports = supportFacesForStudy(study, faces);
   const loads = study.loads.map((load) => loadModelFor(load, faces, supports)).filter((load): load is LoadModel => Boolean(load));
+  const analysisMesh = analysisMeshInput ?? analysisMeshForFaces(faces, study.meshSettings.preset);
   const material = materialForStudy(study);
   const materialParameters = materialParametersForStudy(study);
   const criticalLayerAxis = inferCriticalPrintAxis(study, faces);
@@ -121,12 +124,23 @@ export function solveStudy(study: Study, runId: string) {
   const stressValues = faces.map((face) => round(stressAtFace(face, loads, faces) * response.stressScale, 1));
   const displacementValues = faces.map((face) => round(displacementAtFace(face, loads, faces) * response.displacementScale, 4));
   const safetyValues = stressValues.map((stress) => round(Math.max(0.05, response.yieldMpa / Math.max(stress, 0.001)), 2));
+  const stressSamples = analysisMesh.samples.map((sample) => sampleResult(sample, stressAtSample(sample, loads, faces, analysisMesh) * response.stressScale, 2));
+  const displacementSamples = analysisMesh.samples.map((sample) => sampleResult(sample, displacementAtSample(sample, loads, faces, analysisMesh) * response.displacementScale, 4));
+  const safetySamples = stressSamples.map((sample) => sampleResult(sample, Math.max(0.05, response.yieldMpa / Math.max(sample.value, 0.001)), 3));
+  const fields: ResultField[] = [
+    fieldFor(runId, "stress", stressValues, "MPa", stressSamples),
+    fieldFor(runId, "displacement", displacementValues, "mm", displacementSamples),
+    fieldFor(runId, "safety_factor", safetyValues, "", safetySamples)
+  ];
+  const stressField = fields.find((field) => field.type === "stress");
+  const displacementField = fields.find((field) => field.type === "displacement");
+  const safetyField = fields.find((field) => field.type === "safety_factor");
   const summaryBase = {
-    maxStress: round(Math.max(...stressValues, 0), 1),
+    maxStress: round(stressField?.max ?? Math.max(...stressValues, 0), 1),
     maxStressUnits: bracketResultSummary.maxStressUnits,
-    maxDisplacement: round(Math.max(...displacementValues, 0), 3),
+    maxDisplacement: round(displacementField?.max ?? Math.max(...displacementValues, 0), 3),
     maxDisplacementUnits: bracketResultSummary.maxDisplacementUnits,
-    safetyFactor: round(safetyValues.length ? Math.min(...safetyValues) : bracketResultSummary.safetyFactor, 2),
+    safetyFactor: round(safetyField?.min ?? (safetyValues.length ? Math.min(...safetyValues) : bracketResultSummary.safetyFactor), 2),
     reactionForce: totalAppliedLoad || bracketResultSummary.reactionForce,
     reactionForceUnits: "N"
   };
@@ -134,12 +148,7 @@ export function solveStudy(study: Study, runId: string) {
     ...summaryBase,
     failureAssessment: assessResultFailure(summaryBase)
   };
-  const fields: ResultField[] = [
-    fieldFor(runId, "stress", stressValues, "MPa"),
-    fieldFor(runId, "displacement", displacementValues, "mm"),
-    fieldFor(runId, "safety_factor", safetyValues, "")
-  ];
-  return { summary, fields, faceCount: faces.length, loadCount: loads.length, totalAppliedLoad: summary.reactionForce, material, effectiveMaterial, materialParameters };
+  return { summary, fields, faceCount: faces.length, loadCount: loads.length, totalAppliedLoad: summary.reactionForce, material, effectiveMaterial, materialParameters, analysisSampleCount: analysisMesh.samples.length };
 }
 
 function materialForStudy(study: Study): Material {
@@ -167,9 +176,10 @@ function materialResponse(material: Material, loads: LoadModel[]): { stressScale
   };
 }
 
-function fieldFor(runId: string, type: ResultField["type"], values: number[], units: string): ResultField {
-  const min = values.length ? Math.min(...values) : 0;
-  const max = values.length ? Math.max(...values) : 0;
+function fieldFor(runId: string, type: ResultField["type"], values: number[], units: string, samples: ResultSample[] = []): ResultField {
+  const allValues = [...values, ...samples.map((sample) => sample.value)].filter(Number.isFinite);
+  const min = allValues.length ? Math.min(...allValues) : 0;
+  const max = allValues.length ? Math.max(...allValues) : 0;
   return {
     id: `field-${type}-${runId}`,
     runId,
@@ -178,7 +188,16 @@ function fieldFor(runId: string, type: ResultField["type"], values: number[], un
     values,
     min: round(min, type === "displacement" ? 4 : 2),
     max: round(max, type === "displacement" ? 4 : 2),
-    units
+    units,
+    ...(samples.length ? { samples } : {})
+  };
+}
+
+function sampleResult(sample: AnalysisSample, value: number, digits: number): ResultSample {
+  return {
+    point: sample.point,
+    normal: sample.normal,
+    value: round(value, digits)
   };
 }
 
@@ -310,6 +329,71 @@ function displacementAtFace(face: FaceModel, loads: LoadModel[], faces: FaceMode
   }, 0);
 }
 
+function stressAtSample(sample: AnalysisSample, loads: LoadModel[], faces: FaceModel[], analysisMesh: AnalysisMesh): number {
+  const nearest = nearestFace(sample.point, faces);
+  const baseline = nearest ? 8 + nearest.baselineStress * 0.06 : 8;
+  if (!loads.length) return baseline;
+  const stress = loads.reduce((sum, load) => {
+    const spanVector = subtract(load.face.center, load.nearestSupport.center);
+    const spanLength = Math.max(length(spanVector), 0.001);
+    const spanDirection = normalize(spanVector);
+    const forceScale = load.magnitude / 500;
+    const momentScale = load.moment / Math.max(250, 500 * spanLength);
+    const travel = segmentParameter(sample.point, load.nearestSupport.center, load.face.center);
+    const momentFraction = Math.max(0, 1 - travel);
+    const pathDistance = distancePointToSegment(sample.point, load.nearestSupport.center, load.face.center);
+    const loadDistance = distance(sample.point, load.face.center);
+    const supportDistance = distance(sample.point, load.nearestSupport.center);
+    const fiberDistance = distancePointToLine(sample.point, load.nearestSupport.center, spanDirection);
+    const fiberRadius = Math.max(estimatedCrossSectionRadius(analysisMesh, load.nearestSupport.center, spanDirection), 0.001);
+    const fiber = clamp(fiberDistance / fiberRadius, 0, 1);
+    const surfaceFiber = clamp(0.35 + Math.abs(dot(sample.normal, spanDirection)) * 0.15 + length(cross(sample.normal, spanDirection)) * 0.5, 0.35, 1);
+    const localSupport = gaussian(supportDistance, spanLength * 0.12);
+    const localLoad = gaussian(loadDistance, spanLength * 0.12);
+    const loadPath = gaussian(pathDistance, spanLength * 0.14);
+    const typeFactor = load.load.type === "pressure" ? 1.15 : load.load.type === "gravity" ? 0.72 : 1;
+    if (isTransverseBeamBending(load)) {
+      return sum + typeFactor * forceScale * (
+        4 +
+        momentFraction * (125 + 44 * momentScale) * (0.12 + 0.94 * fiber) * surfaceFiber +
+        localSupport * (16 + 24 * momentScale) * (0.25 + 0.75 * fiber) +
+        loadPath * momentFraction * (8 + 18 * momentScale) * (0.2 + 0.8 * fiber) +
+        localLoad * (4 + 8 * (1 - momentFraction)) * (0.2 + 0.35 * fiber)
+      );
+    }
+    return sum + typeFactor * (
+      forceScale * (localLoad * 44 + localSupport * 28 + loadPath * (18 + 30 * momentScale)) +
+      momentScale * 16 * (0.35 + 0.65 * fiber)
+    );
+  }, baseline);
+  return Math.max(1, stress);
+}
+
+function displacementAtSample(sample: AnalysisSample, loads: LoadModel[], faces: FaceModel[], analysisMesh: AnalysisMesh): number {
+  if (!loads.length) return 0;
+  return loads.reduce((sum, load) => {
+    const spanVector = subtract(load.face.center, load.nearestSupport.center);
+    const spanLength = Math.max(length(spanVector), 0.001);
+    const spanDirection = normalize(spanVector);
+    const forceScale = load.magnitude / 500;
+    const momentScale = load.moment / Math.max(250, 500 * spanLength);
+    const travel = segmentParameter(sample.point, load.nearestSupport.center, load.face.center);
+    const beamShape = travel * travel * (3 - 2 * travel);
+    const loadDistance = distance(sample.point, load.face.center);
+    const pathDistance = distancePointToSegment(sample.point, load.nearestSupport.center, load.face.center);
+    const fiberDistance = distancePointToLine(sample.point, load.nearestSupport.center, spanDirection);
+    const fiberRadius = Math.max(estimatedCrossSectionRadius(analysisMesh, load.nearestSupport.center, spanDirection), 0.001);
+    const fiber = clamp(fiberDistance / fiberRadius, 0, 1);
+    return sum + forceScale * (
+      0.004 +
+      (0.14 + 0.11 * momentScale) * beamShape +
+      0.018 * gaussian(loadDistance, spanLength * 0.18) +
+      0.012 * gaussian(pathDistance, spanLength * 0.18) * travel +
+      0.012 * fiber * beamShape
+    );
+  }, 0);
+}
+
 function loadEquivalentForce(load: Load, face: FaceModel): number {
   const rawValue = Number(load.parameters.value ?? 0);
   const value = Number.isFinite(rawValue) && rawValue > 0 ? rawValue : 0;
@@ -319,6 +403,54 @@ function loadEquivalentForce(load: Load, face: FaceModel): number {
     return Number.isFinite(equivalentForce) && equivalentForce > 0 ? equivalentForce : value * STANDARD_GRAVITY;
   }
   return value;
+}
+
+function analysisMeshForFaces(faces: FaceModel[], quality: AnalysisMesh["quality"] = "medium"): AnalysisMesh {
+  const bounds = boundsForFaces(faces);
+  const divisions = quality === "fine" ? 18 : quality === "medium" ? 10 : 5;
+  const samples: AnalysisSample[] = [];
+  for (const face of faces) {
+    samples.push({ point: face.center, normal: normalize(face.normal), weight: 1, sourceId: face.selectionId });
+  }
+  const axes: Array<{ axis: 0 | 1 | 2; side: "min" | "max"; normal: Vec3 }> = [
+    { axis: 0, side: "min", normal: [-1, 0, 0] },
+    { axis: 0, side: "max", normal: [1, 0, 0] },
+    { axis: 1, side: "min", normal: [0, -1, 0] },
+    { axis: 1, side: "max", normal: [0, 1, 0] },
+    { axis: 2, side: "min", normal: [0, 0, -1] },
+    { axis: 2, side: "max", normal: [0, 0, 1] }
+  ];
+  for (const { axis, side, normal } of axes) {
+    const otherAxes = ([0, 1, 2] as const).filter((candidate) => candidate !== axis);
+    for (let a = 0; a <= divisions; a += 1) {
+      for (let b = 0; b <= divisions; b += 1) {
+        const point: Vec3 = [0, 0, 0];
+        point[axis] = bounds[side][axis];
+        point[otherAxes[0]!] = lerp(bounds.min[otherAxes[0]!], bounds.max[otherAxes[0]!], a / divisions);
+        point[otherAxes[1]!] = lerp(bounds.min[otherAxes[1]!], bounds.max[otherAxes[1]!], b / divisions);
+        samples.push({ point, normal, weight: 1, sourceId: `bounds-${axis}-${side}` });
+      }
+    }
+  }
+  return { quality, bounds, samples };
+}
+
+function boundsForFaces(faces: FaceModel[]): AnalysisMesh["bounds"] {
+  const min: Vec3 = [Infinity, Infinity, Infinity];
+  const max: Vec3 = [-Infinity, -Infinity, -Infinity];
+  for (const face of faces.length ? faces : [{ center: [0, 0, 0] as Vec3 }]) {
+    for (let axis = 0; axis < 3; axis += 1) {
+      min[axis] = Math.min(min[axis]!, face.center[axis]!);
+      max[axis] = Math.max(max[axis]!, face.center[axis]!);
+    }
+  }
+  for (let axis = 0; axis < 3; axis += 1) {
+    const span = Math.max(max[axis]! - min[axis]!, 0.4);
+    const pad = Math.max(span * 0.08, 0.18);
+    min[axis] = min[axis]! - pad;
+    max[axis] = max[axis]! + pad;
+  }
+  return { min, max };
 }
 
 function estimatedFaceArea(face: FaceModel): number {
@@ -435,6 +567,33 @@ function distancePointToSegment(point: Vec3, start: Vec3, end: Vec3): number {
   return distance(point, [start[0] + segment[0] * t, start[1] + segment[1] * t, start[2] + segment[2] * t]);
 }
 
+function distancePointToLine(point: Vec3, linePoint: Vec3, lineDirection: Vec3): number {
+  const offset = subtract(point, linePoint);
+  const projection = scale(lineDirection, dot(offset, lineDirection));
+  return length(subtract(offset, projection));
+}
+
+function estimatedCrossSectionRadius(analysisMesh: AnalysisMesh, linePoint: Vec3, lineDirection: Vec3): number {
+  let radius = 0.001;
+  const corners = boundsCorners(analysisMesh.bounds);
+  for (const corner of corners) {
+    radius = Math.max(radius, distancePointToLine(corner, linePoint, lineDirection));
+  }
+  return radius;
+}
+
+function boundsCorners(bounds: AnalysisMesh["bounds"]): Vec3[] {
+  const corners: Vec3[] = [];
+  for (const x of [bounds.min[0], bounds.max[0]]) {
+    for (const y of [bounds.min[1], bounds.max[1]]) {
+      for (const z of [bounds.min[2], bounds.max[2]]) {
+        corners.push([x, y, z]);
+      }
+    }
+  }
+  return corners;
+}
+
 function segmentParameter(point: Vec3, start: Vec3, end: Vec3): number {
   const segment = subtract(end, start);
   const segmentLengthSquared = dot(segment, segment) || 1;
@@ -445,6 +604,10 @@ function gaussian(value: number, radius: number): number {
   const safeRadius = Math.max(radius, 0.001);
   const x = value / safeRadius;
   return Math.exp(-0.5 * x * x);
+}
+
+function lerp(min: number, max: number, t: number): number {
+  return min + (max - min) * t;
 }
 
 function round(value: number, digits = 1): number {

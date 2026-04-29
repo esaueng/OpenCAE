@@ -6,6 +6,14 @@ export interface FaceResultSample {
   face: DisplayFace;
   value: number;
   normalized: number;
+  fieldSamples?: FieldResultSample[];
+}
+
+export interface FieldResultSample {
+  point: [number, number, number];
+  normal: [number, number, number];
+  value: number;
+  normalized: number;
 }
 
 export type ResultProbeTone = "max" | "mid" | "min";
@@ -25,10 +33,17 @@ export function resultSamplesForFaces(faces: DisplayFace[], fields: ResultField[
   });
   const min = Number.isFinite(field?.min) ? Number(field?.min) : Math.min(...values);
   const max = Number.isFinite(field?.max) ? Number(field?.max) : Math.max(...values);
+  const fieldSamples = field?.samples?.map((sample) => ({
+    point: sample.point,
+    normal: sample.normal,
+    value: sample.value,
+    normalized: normalizeValue(sample.value, min, max)
+  }));
   return faces.map((face, index) => ({
     face,
     value: values[index] ?? fallbackValue(face, mode),
-    normalized: normalizeValue(values[index] ?? fallbackValue(face, mode), min, max)
+    normalized: normalizeValue(values[index] ?? fallbackValue(face, mode), min, max),
+    ...(fieldSamples?.length ? { fieldSamples } : {})
   }));
 }
 

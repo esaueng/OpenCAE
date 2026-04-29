@@ -183,6 +183,26 @@ describe("CadViewer result coloring", () => {
     expect(freeDisplacement).toBeGreaterThan(fixedDisplacement);
   });
 
+  test("prefers solver point samples over face fallback when coloring uploaded result geometry", () => {
+    const lowFaceSamples: FaceResultSample[] = [
+      {
+        face: { id: "left", label: "Left", color: "#4da3ff", center: [-1, 0, 0], normal: [1, 0, 0], stressValue: 10 },
+        value: 10,
+        normalized: 0,
+        fieldSamples: [
+          { point: [-1, 0, 0], normal: [0, 1, 0], value: 10, normalized: 0 },
+          { point: [1, 0, 0], normal: [0, 1, 0], value: 100, normalized: 1 }
+        ]
+      }
+    ];
+
+    const left = resultValueForPoint("uploaded", "stress", 1, new THREE.Vector3(-1, 0, 0), lowFaceSamples);
+    const right = resultValueForPoint("uploaded", "stress", 1, new THREE.Vector3(1, 0, 0), lowFaceSamples);
+
+    expect(left).toBeLessThan(0.1);
+    expect(right).toBeGreaterThan(0.9);
+  });
+
   test("shows undeformed result outlines only while displaying deformed shape", () => {
     expect(shouldShowUndeformedResultOutline(true)).toBe(true);
     expect(shouldShowUndeformedResultOutline(false)).toBe(false);
