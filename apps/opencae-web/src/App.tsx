@@ -150,11 +150,30 @@ export function App() {
 
   useEffect(() => {
     if (!resultPlaybackPlaying || activeStep !== "results" || playbackFrameIndexes.length < 2) return;
-    const intervalMs = 1000 / Math.max(1, Math.min(30, resultPlaybackFps));
-    const timer = window.setInterval(() => {
-      setResultFrameIndex((current) => nextLoopedResultFrameIndex(playbackFrameIndexes, current));
-    }, intervalMs);
-    return () => window.clearInterval(timer);
+    const frameDurationMs = 1000 / Math.max(1, Math.min(30, resultPlaybackFps));
+    let animationFrameId = 0;
+    let lastTimestamp: number | null = null;
+    let accumulatedMs = 0;
+    const advancePlaybackFrame = (timestamp: number) => {
+      if (lastTimestamp !== null) {
+        accumulatedMs += timestamp - lastTimestamp;
+        if (accumulatedMs >= frameDurationMs) {
+          const steps = Math.max(1, Math.floor(accumulatedMs / frameDurationMs));
+          accumulatedMs %= frameDurationMs;
+          setResultFrameIndex((current) => {
+            let next = current;
+            for (let step = 0; step < steps; step += 1) {
+              next = nextLoopedResultFrameIndex(playbackFrameIndexes, next);
+            }
+            return next;
+          });
+        }
+      }
+      lastTimestamp = timestamp;
+      animationFrameId = window.requestAnimationFrame(advancePlaybackFrame);
+    };
+    animationFrameId = window.requestAnimationFrame(advancePlaybackFrame);
+    return () => window.cancelAnimationFrame(animationFrameId);
   }, [activeStep, playbackFrameIndexes, resultPlaybackFps, resultPlaybackPlaying]);
 
   const handleMeasureDisplayModelDimensions = useCallback((dimensions: NonNullable<DisplayModel["dimensions"]>) => {

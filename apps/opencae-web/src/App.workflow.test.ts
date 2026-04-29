@@ -21,4 +21,9 @@ describe("App workflow layout", () => {
     expect(appSource).toContain('await openProjectResponse(loadSampleProject(nextSample, nextAnalysisType), { nextStep: "model" });');
     expect(appSource).toContain("applyStep(options.nextStep);");
   });
+
+  test("drives dynamic result playback with animation frames instead of queued intervals", () => {
+    expect(appSource).toContain("window.requestAnimationFrame(advancePlaybackFrame)");
+    expect(appSource).not.toContain("window.setInterval");
+  });
 });
