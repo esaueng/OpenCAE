@@ -86,4 +86,12 @@ describe("app CSS", () => {
     expect(startFooterItems).toMatch(/font:\s*inherit/);
     expect(localRuntime).toMatch(/color:\s*inherit/);
   });
+
+  test("only underlines start screen footer links on hover", () => {
+    const startFooterLinks = cssRule(".start-footer a");
+    const startFooterLinkHover = cssRule(".start-footer a:hover,\n.start-footer a:focus-visible");
+
+    expect(startFooterLinks).toMatch(/text-decoration:\s*none/);
+    expect(startFooterLinkHover).toMatch(/text-decoration:\s*underline/);
+  });
 });

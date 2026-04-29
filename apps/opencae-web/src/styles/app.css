@@ -225,7 +225,9 @@ img {
 }
 
 .start-footer a {
+  text-decoration: none;
   text-decoration-color: currentColor;
+  text-underline-offset: 3px;
 }
 
 .start-github {
@@ -235,6 +237,7 @@ img {
 .start-footer a:hover,
 .start-footer a:focus-visible {
   color: var(--color-accent);
+  text-decoration: underline;
 }
 
 .workflow-modal-backdrop {
