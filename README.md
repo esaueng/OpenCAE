@@ -40,7 +40,7 @@ pnpm deploy:cloudflare:dry-run
 pnpm deploy:cloudflare
 ```
 
-Wrangler uses [wrangler.containers.jsonc](wrangler.containers.jsonc). The deploy builds `apps/opencae-web/dist`, serves it through the Worker asset binding, uses SPA fallback routing for browser routes, and binds R2, Queues, and the OpenCAE FEA container.
+Wrangler uses [wrangler.containers.jsonc](wrangler.containers.jsonc). The default [wrangler.jsonc](wrangler.jsonc) is also container-enabled so manual Wrangler deploys do not omit `FEA_CONTAINER`. The deploy builds `apps/opencae-web/dist`, serves it through the Worker asset binding, uses SPA fallback routing for browser routes, and binds R2, Queues, and the OpenCAE FEA container.
 
 For a local-first/static Worker deploy without Cloud FEA containers, use:
 
@@ -48,6 +48,8 @@ For a local-first/static Worker deploy without Cloud FEA containers, use:
 pnpm deploy:cloudflare:local-first:dry-run
 pnpm deploy:cloudflare:local-first
 ```
+
+That explicit local-first path uses [wrangler.local-first.jsonc](wrangler.local-first.jsonc).
 
 For Cloudflare Builds, set:
 

@@ -30,28 +30,6 @@
       }
     ]
   },
-  "containers": [
-    {
-      "class_name": "OpenCaeFeaContainer",
-      "image": "opencae/opencae-fea:latest",
-      "instance_type": "standard-1",
-      "max_instances": 5
-    }
-  ],
-  "durable_objects": {
-    "bindings": [
-      {
-        "name": "FEA_CONTAINER",
-        "class_name": "OpenCaeFeaContainer"
-      }
-    ]
-  },
-  "migrations": [
-    {
-      "tag": "v1",
-      "new_sqlite_classes": ["OpenCaeFeaContainer"]
-    }
-  ],
   "observability": {
     "enabled": true,
     "head_sampling_rate": 1
