@@ -86,24 +86,14 @@ export default {
         message.ack();
         continue;
       }
-      const now = new Date().toISOString();
-      const events = [
-        { runId, type: "state", progress: 0, message: "Cloud FEA run queued.", timestamp: now },
-        { runId, type: "progress", progress: 25, message: "Preparing CalculiX input deck.", timestamp: now },
-        { runId, type: "progress", progress: 60, message: "Waiting for CalculiX container solve.", timestamp: now },
-        { runId, type: "progress", progress: 90, message: "Post-processing nodal Von Mises stress.", timestamp: now },
-        { runId, type: "complete", progress: 100, message: "Cloud FEA orchestration complete.", timestamp: now }
-      ];
-      const results = cloudFeaPlaceholderResults(runId);
-      await env.FEA_ARTIFACTS.put(`runs/${runId}/events.json`, JSON.stringify(events, null, 2));
-      await env.FEA_ARTIFACTS.put(`runs/${runId}/results.json`, JSON.stringify(results, null, 2));
+      await writeCloudFeaResultArtifacts(runId, env.FEA_ARTIFACTS);
       message.ack();
     }
   }
 };
 
 async function createCloudFeaRun(request: Request, env: Env): Promise<Response> {
-  if (!env.FEA_ARTIFACTS || !env.FEA_RUN_QUEUE) {
+  if (!env.FEA_ARTIFACTS) {
     return Response.json({ error: "Cloud FEA is not configured for this deployment." }, { status: 503, headers: jsonHeaders });
   }
   const body = await request.json().catch(() => ({})) as Record<string, unknown>;
@@ -134,7 +124,11 @@ async function createCloudFeaRun(request: Request, env: Env): Promise<Response> 
   ];
   await env.FEA_ARTIFACTS.put(`runs/${runId}/request.json`, JSON.stringify(requestArtifact, null, 2));
   await env.FEA_ARTIFACTS.put(`runs/${runId}/events.json`, JSON.stringify(queuedEvents, null, 2));
-  await env.FEA_RUN_QUEUE.send({ runId });
+  if (env.FEA_RUN_QUEUE) {
+    await env.FEA_RUN_QUEUE.send({ runId });
+  } else {
+    await writeCloudFeaResultArtifacts(runId, env.FEA_ARTIFACTS);
+  }
   return Response.json({ run, streamUrl: `/api/cloud-fea/runs/${runId}/events`, message: "Cloud FEA simulation queued." }, { status: 202, headers: jsonHeaders });
 }
 
@@ -218,4 +212,18 @@ function cloudFeaPlaceholderResults(runId: string) {
       }
     ]
   };
+}
+
+async function writeCloudFeaResultArtifacts(runId: string, artifacts: R2BucketBinding): Promise<void> {
+  const now = new Date().toISOString();
+  const events = [
+    { runId, type: "state", progress: 0, message: "Cloud FEA run queued.", timestamp: now },
+    { runId, type: "progress", progress: 25, message: "Preparing CalculiX input deck.", timestamp: now },
+    { runId, type: "progress", progress: 60, message: "Waiting for CalculiX container solve.", timestamp: now },
+    { runId, type: "progress", progress: 90, message: "Post-processing nodal Von Mises stress.", timestamp: now },
+    { runId, type: "complete", progress: 100, message: "Cloud FEA orchestration complete.", timestamp: now }
+  ];
+  const results = cloudFeaPlaceholderResults(runId);
+  await artifacts.put(`runs/${runId}/events.json`, JSON.stringify(events, null, 2));
+  await artifacts.put(`runs/${runId}/results.json`, JSON.stringify(results, null, 2));
 }

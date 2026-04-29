@@ -40,6 +40,28 @@ describe("Cloudflare FEA worker orchestration", () => {
     expect(send).toHaveBeenCalledWith({ runId: body.run.id });
   });
 
+  test("runs cloud FEA inline when queue binding is not provisioned", async () => {
+    const bucket = new MemoryR2Bucket();
+    const env = {
+      ASSETS: { fetch: vi.fn(async () => new Response("asset")) },
+      FEA_ARTIFACTS: bucket,
+      FEA_CONTAINER: { get: vi.fn() }
+    };
+
+    const response = await worker.fetch(new Request("https://cae.example/api/cloud-fea/runs", {
+      method: "POST",
+      body: JSON.stringify({ projectId: "project-1", studyId: "study-1", fidelity: "detailed" })
+    }), env);
+    const body = await response.json() as { run: { id: string }; streamUrl: string };
+    const events = JSON.parse(await (await bucket.get(`runs/${body.run.id}/events.json`))!.text()) as Array<{ type: string }>;
+    const results = JSON.parse(await (await bucket.get(`runs/${body.run.id}/results.json`))!.text()) as { summary: { maxStress: number } };
+
+    expect(response.status).toBe(202);
+    expect(body.streamUrl).toBe(`/api/cloud-fea/runs/${body.run.id}/events`);
+    expect(events.at(-1)?.type).toBe("complete");
+    expect(results.summary.maxStress).toBe(1440000);
+  });
+
   test("returns stored cloud FEA run events", async () => {
     const bucket = new MemoryR2Bucket();
     await bucket.put("runs/run-1/events.json", JSON.stringify([{ type: "complete", message: "Simulation complete." }]));
