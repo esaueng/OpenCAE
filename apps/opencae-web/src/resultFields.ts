@@ -25,6 +25,17 @@ export interface FaceResultProbeSample {
   tone: ResultProbeTone;
 }
 
+export function resultFrameIndexes(fields: ResultField[]): number[] {
+  return [...new Set(fields.map((field) => field.frameIndex ?? 0))].sort((left, right) => left - right);
+}
+
+export function nextLoopedResultFrameIndex(frameIndexes: number[], currentFrameIndex: number): number {
+  if (!frameIndexes.length) return 0;
+  const currentIndex = frameIndexes.indexOf(currentFrameIndex);
+  if (currentIndex < 0) return frameIndexes[0] ?? 0;
+  return frameIndexes[(currentIndex + 1) % frameIndexes.length] ?? 0;
+}
+
 export function resultSamplesForFaces(faces: DisplayFace[], fields: ResultField[], mode: ResultFieldMode): FaceResultSample[] {
   const field = fields.find((candidate) => candidate.type === mode && candidate.location === "face");
   const values = faces.map((face, index) => {

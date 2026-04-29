@@ -1,6 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { AlertTriangle, Anchor, ArrowDown, Check, CircleHelp, Eye, Gauge, Grid3X3, Maximize2, Play, Plus, RotateCcw, Ruler, ScanLine, ShieldCheck, Upload, Weight, X } from "lucide-react";
+import { AlertTriangle, Anchor, ArrowDown, Check, CircleHelp, Eye, Gauge, Grid3X3, Maximize2, Pause, Play, Plus, RotateCcw, Ruler, ScanLine, ShieldCheck, Upload, Weight, X } from "lucide-react";
 import { defaultPrintParametersFor, effectiveMaterialProperties, massKgForPayloadMaterial, normalizePrintParameters, payloadMaterialForId, payloadMaterials, starterMaterials, type PayloadMaterialCategory, type PrintMaterialParameters } from "@opencae/materials";
 import { assessResultFailure, estimateAllowableLoadForSafetyFactor } from "@opencae/schema";
 import type { Constraint, DisplayFace, DisplayModel, DynamicSolverSettings, Load, Project, ResultField, ResultSummary, Study } from "@opencae/schema";
@@ -72,6 +72,10 @@ interface RightPanelProps {
   missingRunItems: string[];
   resultFrameIndex?: number;
   onResultFrameChange?: (frameIndex: number) => void;
+  resultPlaybackPlaying?: boolean;
+  resultPlaybackFps?: number;
+  onResultPlaybackToggle?: () => void;
+  onResultPlaybackFpsChange?: (fps: number) => void;
   onStepSelect: (step: StepId) => void;
 }
 
@@ -888,9 +892,11 @@ function RunPanel({ study, runProgress, onRunSimulation, onCancelSimulation, can
     ["Mesh generated", study.meshSettings.status === "complete"]
   ] as const;
   const dynamic = study.type === "dynamic_structural" ? study.solverSettings : null;
-  const updateDynamicNumber = (key: keyof Pick<DynamicSolverSettings, "endTime" | "timeStep" | "outputInterval" | "dampingRatio">, value: number) => {
-    if (Number.isFinite(value)) onUpdateSolverSettings?.({ [key]: value });
+  const updateDynamicNumber = (key: keyof Pick<DynamicSolverSettings, "startTime" | "endTime" | "timeStep" | "dampingRatio">, value: number) => {
+    if (!Number.isFinite(value)) return;
+    onUpdateSolverSettings?.(key === "timeStep" ? { timeStep: value, outputInterval: value } : { [key]: value });
   };
+  const frameEstimate = dynamic ? dynamicFrameEstimate(dynamic) : null;
   return (
     <Panel title="Run" helper="Run the simulation to estimate stress and displacement.">
       <SectionTitle helpId="runReadiness">Readiness</SectionTitle>
@@ -901,21 +907,27 @@ function RunPanel({ study, runProgress, onRunSimulation, onCancelSimulation, can
         <>
           <SectionTitle>Dynamic settings</SectionTitle>
           <label className="field">
+            <span>Start time</span>
+            <span className="input-with-unit"><input type="number" min="0" step={dynamic.timeStep} value={dynamic.startTime} onChange={(event) => updateDynamicNumber("startTime", Number(event.currentTarget.value))} /><span>s</span></span>
+          </label>
+          <label className="field">
             <span>End time</span>
-            <span className="input-with-unit"><input type="number" min={dynamic.timeStep} step={dynamic.timeStep} value={dynamic.endTime} onChange={(event) => updateDynamicNumber("endTime", Number(event.currentTarget.value))} /><span>s</span></span>
+            <span className="input-with-unit"><input type="number" min={dynamic.startTime + dynamic.timeStep} step={dynamic.timeStep} value={dynamic.endTime} onChange={(event) => updateDynamicNumber("endTime", Number(event.currentTarget.value))} /><span>s</span></span>
           </label>
           <label className="field">
             <span>Time step</span>
             <span className="input-with-unit"><input type="number" min="0.0001" step="0.0005" value={dynamic.timeStep} onChange={(event) => updateDynamicNumber("timeStep", Number(event.currentTarget.value))} /><span>s</span></span>
           </label>
           <label className="field">
-            <span>Output interval</span>
-            <span className="input-with-unit"><input type="number" min={dynamic.timeStep} step={dynamic.timeStep} value={dynamic.outputInterval} onChange={(event) => updateDynamicNumber("outputInterval", Number(event.currentTarget.value))} /><span>s</span></span>
-          </label>
-          <label className="field">
             <span>Damping ratio</span>
             <span className="input-with-unit"><input type="number" min="0" step="0.01" value={dynamic.dampingRatio} onChange={(event) => updateDynamicNumber("dampingRatio", Number(event.currentTarget.value))} /><span>ζ</span></span>
           </label>
+          <div className="summary-box">
+            <Info label="Estimated frames" value={frameEstimate ? frameEstimate.count.toLocaleString() : "--"} />
+            <Info label="Output cadence" value="Every time step" />
+          </div>
+          {frameEstimate && frameEstimate.count > 1000 && <p className="panel-copy">Large frame counts may slow result loading and playback.</p>}
+          {frameEstimate?.hasFinalPartialStep && <p className="panel-copy">Final frame is clamped to the selected end time.</p>}
         </>
       )}
       <button
@@ -956,7 +968,11 @@ function ResultsPanel({
   resultFields = [],
   study,
   resultFrameIndex = 0,
+  resultPlaybackPlaying = false,
+  resultPlaybackFps = 12,
   onResultFrameChange,
+  onResultPlaybackToggle,
+  onResultPlaybackFpsChange,
   onResultModeChange,
   onToggleDeformed,
   onStressExaggerationChange
@@ -1001,9 +1017,21 @@ function ResultsPanel({
             />
           </label>
           <button className="secondary wide" type="button" onClick={() => {
-            const currentIndex = frames.findIndex((frame) => frame.frameIndex === (activeFrame?.frameIndex ?? 0));
-            onResultFrameChange?.(frames[(currentIndex + 1) % frames.length]?.frameIndex ?? 0);
-          }}>Play</button>
+            onResultPlaybackToggle?.();
+          }}>{resultPlaybackPlaying ? <Pause size={16} /> : <Play size={16} />}{resultPlaybackPlaying ? "Pause" : "Play"}</button>
+          <label className="field range-field">
+            <span className="range-label"><span>Animation speed</span><strong>{Math.round(resultPlaybackFps)} fps</strong></span>
+            <input
+              type="range"
+              min="1"
+              max="30"
+              step="1"
+              value={resultPlaybackFps}
+              style={{ "--range-progress": `${rangeProgressPercent(resultPlaybackFps, 1, 30)}%` } as CSSProperties}
+              onChange={(event) => onResultPlaybackFpsChange?.(Number(event.currentTarget.value))}
+            />
+          </label>
+          <Info label="Loop" value="On" />
           <Info label="Peak displacement" value={peakDisplacement ? `${peakDisplacement.value} ${peakDisplacement.units} at ${peakDisplacement.timeSeconds.toFixed(4)} s` : "Unavailable"} />
         </div>
       )}
@@ -1311,6 +1339,18 @@ function peakDisplacementFrame(fields: ResultField[]): { value: number; units: s
   if (!displacementFields.length) return null;
   const peak = displacementFields.reduce((best, field) => field.max > best.max ? field : best, displacementFields[0]!);
   return { value: peak.max, units: peak.units, timeSeconds: peak.timeSeconds ?? 0 };
+}
+
+function dynamicFrameEstimate(settings: DynamicSolverSettings): { count: number; hasFinalPartialStep: boolean } {
+  const duration = Math.max(0, settings.endTime - settings.startTime);
+  const timeStep = Math.max(settings.timeStep, 1e-9);
+  const wholeSteps = Math.floor(duration / timeStep);
+  const remainder = duration - wholeSteps * timeStep;
+  const hasFinalPartialStep = remainder > timeStep * 1e-9;
+  return {
+    count: Math.max(1, wholeSteps + 1 + (hasFinalPartialStep ? 1 : 0)),
+    hasFinalPartialStep
+  };
 }
 
 function formatNumber(value: number) {
