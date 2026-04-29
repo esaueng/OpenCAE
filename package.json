@@ -29,5 +29,8 @@
     "wrangler": "^4.85.0"
   },
   "packageManager": "pnpm@9.15.4",
-  "license": "Apache-2.0"
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@cloudflare/containers": "^0.3.3"
+  }
 }

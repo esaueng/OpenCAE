@@ -23,6 +23,30 @@ describe("resultSamplesForFaces", () => {
     expect(resultSamplesForFaces(faces, [], "stress").map((sample) => sample.value)).toEqual([10, 20]);
   });
 
+  test("uses nodal CalculiX samples when face fields are not present", () => {
+    const fields: ResultField[] = [
+      {
+        id: "stress-node",
+        runId: "run",
+        type: "stress",
+        location: "node",
+        values: [0, 140],
+        min: 0,
+        max: 140,
+        units: "MPa",
+        samples: [
+          { point: [0, 0, 0], normal: [0, 1, 0], value: 0 },
+          { point: [1, 0, 0], normal: [0, 1, 0], value: 140 }
+        ]
+      }
+    ];
+
+    const samples = resultSamplesForFaces(faces, fields, "stress");
+
+    expect(samples.map((sample) => sample.value)).toEqual([0, 140]);
+    expect(samples[0]?.fieldSamples?.map((sample) => sample.value)).toEqual([0, 140]);
+  });
+
   test("ranks displacement probes by solved face value instead of fixed face order", () => {
     const cantileverFaces: DisplayFace[] = [
       { id: "face-base-left", label: "Fixed end face", color: "#fff", center: [-1.8, 0.18, 0], normal: [-1, 0, 0], stressValue: 132 },

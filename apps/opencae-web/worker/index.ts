@@ -1,4 +1,4 @@
-import { DurableObject } from "cloudflare:workers";
+import { Container } from "@cloudflare/containers";
 
 type AssetBinding = {
   fetch(request: Request): Promise<Response>;
@@ -39,15 +39,10 @@ type ExecutionContextLike = {
   waitUntil(promise: Promise<unknown>): void;
 };
 
-export class OpenCaeFeaContainer extends DurableObject {
-  async fetch(): Promise<Response> {
-    return Response.json(
-      {
-        error: "OpenCAE FEA container binding is configured. The CalculiX adapter endpoint is served by the container image."
-      },
-      { status: 501, headers: jsonHeaders }
-    );
-  }
+export class OpenCaeFeaContainer extends Container {
+  defaultPort = 8080;
+  requiredPorts = [8080];
+  sleepAfter = "10m";
 }
 
 const jsonHeaders = {

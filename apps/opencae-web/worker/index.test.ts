@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, test, vi } from "vitest";
 
-vi.mock("cloudflare:workers", () => ({ DurableObject: class DurableObject {} }));
+vi.mock("@cloudflare/containers", () => ({ Container: class Container {} }));
 
 import worker from "./index";
 
@@ -21,11 +21,13 @@ class MemoryR2Bucket {
 }
 
 describe("Cloudflare FEA worker orchestration", () => {
-  test("container Durable Object is declared with the Cloudflare platform base class", () => {
+  test("container Durable Object is declared as a Cloudflare container proxy", () => {
     const workerSource = readFileSync(resolve(__dirname, "index.ts"), "utf8");
 
-    expect(workerSource).toContain('import { DurableObject } from "cloudflare:workers";');
-    expect(workerSource).toContain("export class OpenCaeFeaContainer extends DurableObject");
+    expect(workerSource).toContain('import { Container } from "@cloudflare/containers";');
+    expect(workerSource).toContain("export class OpenCaeFeaContainer extends Container");
+    expect(workerSource).toContain("defaultPort = 8080");
+    expect(workerSource).not.toContain("The CalculiX adapter endpoint is served by the container image.");
   });
 
   test("default Cloudflare deploy uses the container-enabled production config", () => {
@@ -42,7 +44,7 @@ describe("Cloudflare FEA worker orchestration", () => {
     expect(containerConfig.name).toBe("opencae");
     expect(containerConfig.containers?.[0]).toMatchObject({ class_name: "OpenCaeFeaContainer", image: "opencae/opencae-fea:latest" });
     expect(containerConfig.durable_objects?.bindings).toContainEqual({ name: "FEA_CONTAINER", class_name: "OpenCaeFeaContainer" });
-    expect(defaultConfig.containers).toBeUndefined();
+    expect(defaultConfig.containers?.[0]).toMatchObject({ class_name: "OpenCaeFeaContainer", image: "opencae/opencae-fea:latest" });
     expect(defaultConfig.durable_objects?.bindings).toContainEqual({ name: "FEA_CONTAINER", class_name: "OpenCaeFeaContainer" });
   });
 
