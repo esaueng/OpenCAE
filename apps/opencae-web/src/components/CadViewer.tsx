@@ -83,6 +83,12 @@ const BEAM_DEPTH = 0.36;
 const BEAM_HEIGHT = 0.28;
 const BEAM_CENTER_Y = BEAM_HEIGHT / 2;
 const BEAM_TOP_Y = BEAM_HEIGHT;
+const CANTILEVER_HEIGHT = 0.5;
+const CANTILEVER_DEPTH = 0.72;
+const CANTILEVER_CENTER_Y = 0.18;
+const CANTILEVER_TOP_Y = CANTILEVER_CENTER_Y + CANTILEVER_HEIGHT / 2;
+const CANTILEVER_BOTTOM_Y = CANTILEVER_CENTER_Y - CANTILEVER_HEIGHT / 2;
+const CANTILEVER_OUTER_Z = CANTILEVER_DEPTH / 2;
 const BEAM_PAYLOAD_HEIGHT = 0.42;
 const BEAM_PAYLOAD_OBJECT_ID = "payload-display-plate";
 const BEAM_PAYLOAD_LABEL = "end payload mass";
@@ -2239,6 +2245,27 @@ function resultProbeForFace(kind: SampleModelKind, face: DisplayFace, label: str
 function resultProbeSurfaceForFace(kind: SampleModelKind, face: DisplayFace): { center: THREE.Vector3; normal: THREE.Vector3 } {
   const center = new THREE.Vector3(...face.center);
   const normal = new THREE.Vector3(...face.normal).normalize();
+  if (kind === "cantilever") {
+    if (face.id === "face-base-left") {
+      return {
+        center: new THREE.Vector3(center.x, CANTILEVER_TOP_Y, CANTILEVER_OUTER_Z * 0.72),
+        normal: new THREE.Vector3(0, 1, 0)
+      };
+    }
+    if (face.id === "face-load-top" || face.id === "face-web-front") {
+      return {
+        center: new THREE.Vector3(center.x, CANTILEVER_TOP_Y, CANTILEVER_OUTER_Z * 0.55),
+        normal: new THREE.Vector3(0, 1, 0)
+      };
+    }
+    if (face.id === "face-base-bottom") {
+      return {
+        center: new THREE.Vector3(center.x, CANTILEVER_BOTTOM_Y, CANTILEVER_OUTER_Z * 0.55),
+        normal: new THREE.Vector3(0, -1, 0)
+      };
+    }
+    return { center, normal };
+  }
   if (kind !== "plate") return { center, normal };
 
   if (face.id === "face-load-top") {

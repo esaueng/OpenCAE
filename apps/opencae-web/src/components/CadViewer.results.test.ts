@@ -167,6 +167,10 @@ describe("CadViewer result coloring", () => {
 
     expect(probes[0]).toMatchObject({ tone: "max", label: "Stress: 155.1 MPa" });
     expect(probes[0]?.anchor[0]).toBeLessThan(-1.8);
+    expect(probes[0]?.anchor[1]).toBeGreaterThan(0.42);
+    expect(probes[0]?.labelPosition[1]).toBeGreaterThan(probes[0]?.anchor[1] ?? 0);
+    expect(probes[2]?.anchor[1]).toBeLessThan(-0.06);
+    expect(probes[2]?.labelPosition[1]).toBeLessThan(probes[2]?.anchor[1] ?? 0);
   });
 
   test("renders cantilever stress as a fixed-end outer-fiber contour without a free-end hotspot", () => {
