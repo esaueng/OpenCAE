@@ -1609,6 +1609,8 @@ export function createUndeformedResultOutlineObject(object: THREE.Object3D) {
   object.updateMatrixWorld(true);
   const outline = new THREE.Group();
   outline.name = "undeformed-result-outline";
+  outline.matrix.copy(object.matrix);
+  outline.matrixAutoUpdate = false;
   const rootWorldInverse = object.matrixWorld.clone().invert();
 
   object.traverse((child) => {
