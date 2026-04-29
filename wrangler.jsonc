@@ -14,22 +14,6 @@
       "bucket_name": "opencae-fea-artifacts"
     }
   ],
-  "queues": {
-    "producers": [
-      {
-        "binding": "FEA_RUN_QUEUE",
-        "queue": "opencae-fea-runs"
-      }
-    ],
-    "consumers": [
-      {
-        "queue": "opencae-fea-runs",
-        "dead_letter_queue": "opencae-fea-runs-dlq",
-        "max_batch_size": 1,
-        "max_retries": 2
-      }
-    ]
-  },
   "containers": [
     {
       "class_name": "OpenCaeFeaContainer",

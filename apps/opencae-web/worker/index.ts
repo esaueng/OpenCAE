@@ -33,6 +33,10 @@ type Env = {
   FEA_CONTAINER?: ContainerBinding;
 };
 
+type ExecutionContextLike = {
+  waitUntil(promise: Promise<unknown>): void;
+};
+
 export class OpenCaeFeaContainer {
   async fetch(): Promise<Response> {
     return Response.json(
@@ -50,7 +54,7 @@ const jsonHeaders = {
 };
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx?: ExecutionContextLike): Promise<Response> {
     const url = new URL(request.url);
 
     if (url.pathname === "/health") {
@@ -61,7 +65,7 @@ export default {
     }
 
     if (url.pathname === "/api/cloud-fea/runs" && request.method === "POST") {
-      return createCloudFeaRun(request, env);
+      return createCloudFeaRun(request, env, ctx);
     }
 
     const eventsMatch = url.pathname.match(/^\/api\/cloud-fea\/runs\/([^/]+)\/events$/);
@@ -103,7 +107,7 @@ export default {
   }
 };
 
-async function createCloudFeaRun(request: Request, env: Env): Promise<Response> {
+async function createCloudFeaRun(request: Request, env: Env, ctx?: ExecutionContextLike): Promise<Response> {
   if (!env.FEA_ARTIFACTS) {
     return Response.json({ error: "Cloud FEA is not configured for this deployment." }, { status: 503, headers: jsonHeaders });
   }
@@ -142,6 +146,8 @@ async function createCloudFeaRun(request: Request, env: Env): Promise<Response> 
   await env.FEA_ARTIFACTS.put(`runs/${runId}/events.json`, JSON.stringify(queuedEvents, null, 2));
   if (env.FEA_RUN_QUEUE) {
     await env.FEA_RUN_QUEUE.send({ runId });
+  } else if (ctx) {
+    ctx.waitUntil(runCloudFeaSolve(runId, env));
   } else {
     await runCloudFeaSolve(runId, env);
   }
