@@ -1,5 +1,5 @@
 import { solveDynamicStudy, solveStudy } from "@opencae/solver-service";
-import type { AnalysisMesh, DisplayModel, DynamicSolverSettings, Project, ResultField, ResultSummary, RunEvent, Study, StudyRun } from "@opencae/schema";
+import type { AnalysisMesh, DisplayModel, DynamicSolverSettings, MeshQuality, Project, ResultField, ResultSummary, RunEvent, Study, StudyRun } from "@opencae/schema";
 import type { LoadApplicationPoint, LoadDirection, LoadType, PayloadLoadMetadata, PayloadObjectSelection } from "../loadPreview";
 import { embedUploadedModelFile, type EmbeddedModelFile, type LocalResultBundle } from "../projectFile";
 import { createLocalBlankProject, createLocalSampleProject, createLocalUploadResponse, openLocalProjectPayload } from "../localProjectFactory";
@@ -110,7 +110,7 @@ export async function renameProject(projectId: string, name: string, currentProj
   );
 }
 
-export async function generateMesh(studyId: string, preset: "coarse" | "medium" | "fine", currentStudy?: Study, displayModel?: DisplayModel): Promise<{ study: Study; message: string }> {
+export async function generateMesh(studyId: string, preset: MeshQuality, currentStudy?: Study, displayModel?: DisplayModel): Promise<{ study: Study; message: string }> {
   return fetchJsonWithFallback(
     `/api/studies/${studyId}/mesh`,
     {
@@ -244,6 +244,18 @@ export async function addLoad(studyId: string, type: LoadType, value: number, se
 
 export async function runSimulation(studyId: string, currentStudy?: Study, displayModel?: DisplayModel): Promise<{ run: { id: string }; streamUrl: string; message: string }> {
   try {
+    if (currentStudy && simulationBackend(currentStudy) === "cloudflare_fea") {
+      const response = await fetch("/api/cloud-fea/runs", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          projectId: currentStudy.projectId,
+          studyId,
+          fidelity: simulationFidelity(currentStudy)
+        })
+      });
+      return await readJson(response);
+    }
     const response = await fetch(`/api/studies/${studyId}/runs`, { method: "POST" });
     return await readJson(response);
   } catch (error) {
@@ -257,6 +269,10 @@ export async function getResults(runId: string): Promise<ResultsResponse> {
   if (localResults) return localResults;
   const localComputedResults = computeLocalResults(runId);
   if (localComputedResults) return localComputedResults;
+  if (runId.startsWith("run-cloud-")) {
+    const response = await fetch(`/api/cloud-fea/runs/${runId}/results`);
+    return readJson(response);
+  }
   const response = await fetch(`/api/runs/${runId}/results`);
   return readJson(response);
 }
@@ -289,6 +305,7 @@ export async function cancelRun(runId: string): Promise<{ run: StudyRun; message
 export function subscribeToRun(runId: string, onEvent: (event: RunEvent) => void): EventSource {
   const localEvents = localEventsByRunId.get(runId);
   if (localEvents) return subscribeToLocalRun(localEvents, onEvent);
+  if (runId.startsWith("run-cloud-")) return subscribeToCloudFeaRun(runId, onEvent);
   const source = new EventSource(`/api/runs/${runId}/stream`);
   const eventTypes: RunEvent["type"][] = ["state", "progress", "message", "log", "diagnostic", "complete", "cancelled", "error"];
   for (const type of eventTypes) {
@@ -322,7 +339,7 @@ function runSimulationLocally(study: Study, displayModel?: DisplayModel): { run:
       status: "queued",
       jobId: `job-${runId}`,
       meshRef: study.meshSettings.meshRef,
-      solverBackend: study.type === "dynamic_structural" ? "local-dynamic-newmark" : "local-static-superposition",
+      solverBackend: study.type === "dynamic_structural" ? "local-dynamic-newmark" : simulationBackend(study) === "local_detailed" ? "local-detailed-superposition" : "local-static-superposition",
       solverVersion: "0.1.0",
       startedAt: now,
       diagnostics: []
@@ -369,7 +386,7 @@ function addRunTiming(events: RunEvent[], estimatedDurationMs: number): RunEvent
 }
 
 function localRunDurationEstimateMs(study: Study, frameCount = study.type === "dynamic_structural" ? dynamicOutputFrameEstimate(study) : 1): number {
-  const meshMultiplier = study.meshSettings.preset === "fine" ? 1.9 : study.meshSettings.preset === "medium" ? 1.35 : 1;
+  const meshMultiplier = study.meshSettings.preset === "ultra" ? 2.8 : study.meshSettings.preset === "fine" ? 1.9 : study.meshSettings.preset === "medium" ? 1.35 : 1;
   const dynamicMultiplier = study.type === "dynamic_structural" ? 1.8 : 1;
   const frameCost = study.type === "dynamic_structural" ? Math.max(frameCount, 1) * 36 : 450;
   return Math.round((1400 + frameCost) * meshMultiplier * dynamicMultiplier);
@@ -410,7 +427,7 @@ type Vec3 = [number, number, number];
 
 function analysisMeshForDisplayModel(displayModel: DisplayModel, quality: AnalysisMesh["quality"]): AnalysisMesh {
   const bounds = boundsForDisplayModel(displayModel);
-  const divisions = quality === "fine" ? 42 : quality === "medium" ? 24 : 12;
+  const divisions = quality === "ultra" ? 64 : quality === "fine" ? 42 : quality === "medium" ? 24 : 12;
   const samples: AnalysisMesh["samples"] = [];
   const faces: Array<{ axis: 0 | 1 | 2; value: number; normal: Vec3; sourceId: string }> = [
     { axis: 0, value: bounds.min[0], normal: [-1, 0, 0], sourceId: "x-min" },
@@ -487,6 +504,50 @@ function subscribeToLocalRun(events: RunEvent[], onEvent: (event: RunEvent) => v
   } as EventSource;
 }
 
+function subscribeToCloudFeaRun(runId: string, onEvent: (event: RunEvent) => void): EventSource {
+  let closed = false;
+  let seenCount = 0;
+  let timer: ReturnType<typeof globalThis.setInterval> | undefined;
+  const poll = async () => {
+    if (closed) return;
+    try {
+      const response = await fetch(`/api/cloud-fea/runs/${runId}/events`);
+      const payload = await readJson<{ events: RunEvent[] }>(response);
+      const nextEvents = payload.events.slice(seenCount);
+      seenCount = payload.events.length;
+      for (const event of nextEvents) {
+        if (closed) return;
+        onEvent(event);
+        if (event.type === "complete" || event.type === "cancelled" || event.type === "error") {
+          closed = true;
+          if (timer) globalThis.clearInterval(timer);
+          return;
+        }
+      }
+    } catch (error) {
+      if (!closed) {
+        onEvent({
+          runId,
+          type: "error",
+          progress: 100,
+          message: error instanceof Error ? error.message : "Cloud FEA event stream failed.",
+          timestamp: new Date().toISOString()
+        });
+      }
+      closed = true;
+      if (timer) globalThis.clearInterval(timer);
+    }
+  };
+  void poll();
+  timer = globalThis.setInterval(() => void poll(), 750);
+  return {
+    close() {
+      closed = true;
+      if (timer) globalThis.clearInterval(timer);
+    }
+  } as EventSource;
+}
+
 async function readJson<T>(response: Response): Promise<T> {
   if (!response.ok) {
     const text = await response.text();
@@ -511,14 +572,25 @@ async function fetchJsonWithFallback<T>(input: RequestInfo | URL, init: RequestI
   }
 }
 
-function meshSummaryForPreset(preset: "coarse" | "medium" | "fine", analysisMesh?: AnalysisMesh) {
+function meshSummaryForPreset(preset: MeshQuality, analysisMesh?: AnalysisMesh) {
   const sampleCount = analysisMesh?.samples.length;
-  const summaryByPreset = {
+  const summaryByPreset: Record<MeshQuality, NonNullable<Study["meshSettings"]["summary"]>> = {
     coarse: { nodes: 12840, elements: 7320, warnings: [], analysisSampleCount: sampleCount ?? 1200, quality: "coarse" as const },
     medium: { nodes: 42381, elements: 26944, warnings: ["Small feature curvature represented by surface analysis samples."], analysisSampleCount: sampleCount ?? 4800, quality: "medium" as const },
-    fine: { nodes: 88420, elements: 57102, warnings: ["Fine surface analysis sampling enabled for higher-quality local results."], analysisSampleCount: sampleCount ?? 19200, quality: "fine" as const }
+    fine: { nodes: 88420, elements: 57102, warnings: ["Fine surface analysis sampling enabled for higher-quality local results."], analysisSampleCount: sampleCount ?? 19200, quality: "fine" as const },
+    ultra: { nodes: 182400, elements: 119808, warnings: ["Ultra surface analysis sampling enabled for detailed local gradients."], analysisSampleCount: sampleCount ?? 45000, quality: "ultra" as const }
   };
   return summaryByPreset[preset];
+}
+
+function simulationBackend(study: Study): "local_detailed" | "cloudflare_fea" | undefined {
+  const backend = (study.solverSettings as { backend?: unknown }).backend;
+  return backend === "cloudflare_fea" || backend === "local_detailed" ? backend : undefined;
+}
+
+function simulationFidelity(study: Study): "standard" | "detailed" | "ultra" {
+  const fidelity = (study.solverSettings as { fidelity?: unknown }).fidelity;
+  return fidelity === "detailed" || fidelity === "ultra" ? fidelity : "standard";
 }
 
 async function fileToBase64(file: File): Promise<string> {

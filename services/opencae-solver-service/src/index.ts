@@ -201,7 +201,10 @@ export function solveStudy(study: Study, runId: string, analysisMeshInput?: Anal
   const stressValues = faces.map((face) => round(stressAtFace(face, loads, faces) * response.stressScale, 1));
   const displacementValues = faces.map((face) => round(displacementAtFace(face, loads, faces) * response.displacementScale, 4));
   const safetyValues = stressValues.map((stress) => round(Math.max(0.05, response.yieldMpa / Math.max(stress, 0.001)), 2));
-  const stressSamples = analysisMesh.samples.map((sample) => sampleResult(sample, stressAtSample(sample, loads, faces, analysisMesh) * response.stressScale, 2));
+  const stressSamples = analysisMesh.samples.map((sample) => {
+    const value = stressAtSample(sample, loads, faces, analysisMesh) * response.stressScale;
+    return sampleResult(sample, value, 2, { source: "local_detailed", vonMisesStressPa: round(value * 1_000_000, 1) });
+  });
   const displacementSamples = analysisMesh.samples.map((sample) => sampleResult(sample, displacementAtSample(sample, loads, faces, analysisMesh) * response.displacementScale, 4));
   const safetySamples = stressSamples.map((sample) => sampleResult(sample, Math.max(0.05, response.yieldMpa / Math.max(sample.value, 0.001)), 3));
   const fields: ResultField[] = [
@@ -512,11 +515,12 @@ function fieldFor(runId: string, type: ResultField["type"], values: number[], un
   };
 }
 
-function sampleResult(sample: AnalysisSample, value: number, digits: number): ResultSample {
+function sampleResult(sample: AnalysisSample | ResultSample, value: number, digits: number, metadata: Partial<ResultSample> = {}): ResultSample {
   return {
     point: sample.point,
     normal: sample.normal,
-    value: round(value, digits)
+    value: round(value, digits),
+    ...metadata
   };
 }
 
@@ -728,7 +732,7 @@ function loadEquivalentForce(load: Load, face: FaceModel): number {
 
 function analysisMeshForFaces(faces: FaceModel[], quality: AnalysisMesh["quality"] = "medium"): AnalysisMesh {
   const bounds = boundsForFaces(faces);
-  const divisions = quality === "fine" ? 18 : quality === "medium" ? 10 : 5;
+  const divisions = quality === "ultra" ? 36 : quality === "fine" ? 18 : quality === "medium" ? 10 : 5;
   const samples: AnalysisSample[] = [];
   for (const face of faces) {
     samples.push({ point: face.center, normal: normalize(face.normal), weight: 1, sourceId: face.selectionId });

@@ -371,6 +371,61 @@ describe("api", () => {
     expect(results.summary.maxStress).toBeGreaterThan(0);
   });
 
+  test("runs Cloud FEA through cloud orchestration endpoints", async () => {
+    const cloudStudy = {
+      ...study,
+      meshSettings: { preset: "ultra", status: "complete", meshRef: "project-1/mesh/mesh-summary.json" },
+      solverSettings: { backend: "cloudflare_fea", fidelity: "ultra" }
+    } as Study;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/cloud-fea/runs" && init?.method === "POST") {
+        return new Response(JSON.stringify({
+          run: { id: "run-cloud-1", status: "queued" },
+          streamUrl: "/api/cloud-fea/runs/run-cloud-1/events",
+          message: "Cloud FEA simulation queued."
+        }), { status: 202, headers: { "content-type": "application/json" } });
+      }
+      if (url === "/api/cloud-fea/runs/run-cloud-1/events") {
+        return new Response(JSON.stringify({
+          events: [
+            { runId: "run-cloud-1", type: "state", progress: 0, message: "Cloud FEA run queued.", timestamp: "2026-04-29T12:00:00.000Z" },
+            { runId: "run-cloud-1", type: "complete", progress: 100, message: "Cloud FEA orchestration complete.", timestamp: "2026-04-29T12:00:01.000Z" }
+          ]
+        }), { headers: { "content-type": "application/json" } });
+      }
+      if (url === "/api/cloud-fea/runs/run-cloud-1/results") {
+        return new Response(JSON.stringify({
+          summary: {
+            maxStress: 1440000,
+            maxStressUnits: "Pa",
+            maxDisplacement: 0.0038,
+            maxDisplacementUnits: "m",
+            safetyFactor: 172,
+            reactionForce: 500,
+            reactionForceUnits: "N"
+          },
+          fields: []
+        }), { headers: { "content-type": "application/json" } });
+      }
+      return new Response("unexpected", { status: 500 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await runSimulation("study-1", cloudStudy);
+    const requestBody = JSON.parse((fetchMock.mock.calls[0]?.[1] as RequestInit).body as string) as Record<string, unknown>;
+    const seen: RunEvent[] = [];
+    const source = subscribeToRun(response.run.id, (event) => seen.push(event));
+    await vi.waitFor(() => expect(seen.some((event) => event.type === "complete")).toBe(true));
+    source.close();
+    const results = await getResults(response.run.id);
+
+    expect(requestBody).toMatchObject({ projectId: "project-1", studyId: "study-1", fidelity: "ultra" });
+    expect(response.streamUrl).toBe("/api/cloud-fea/runs/run-cloud-1/events");
+    expect(results.summary.maxStress).toBe(1440000);
+    expect(fetchMock).toHaveBeenCalledWith("/api/cloud-fea/runs/run-cloud-1/results");
+  });
+
   test("defers local result solving until a queued run is subscribed", () => {
     expect(apiSource).toContain("localResultSolversByRunId.set(runId");
     expect(apiSource).toContain('if (event.type === "complete")');

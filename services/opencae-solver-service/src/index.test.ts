@@ -263,6 +263,18 @@ describe("LocalMockComputeBackend", () => {
     expect(stressField?.max).toBeGreaterThanOrEqual(Math.max(...(stressField?.samples ?? []).map((sample) => sample.value)));
   });
 
+  test("ultra local solve produces denser surface samples with rich stress metadata", () => {
+    const fine = solveStudy({ ...cantileverStudy("mat-aluminum-6061"), meshSettings: { preset: "fine", status: "complete", meshRef: "mesh", summary: { nodes: 1, elements: 1, warnings: [] } } }, "run-fine");
+    const ultra = solveStudy({ ...cantileverStudy("mat-aluminum-6061"), meshSettings: { preset: "ultra", status: "complete", meshRef: "mesh", summary: { nodes: 1, elements: 1, warnings: [] } } }, "run-ultra");
+    const ultraStressSample = ultra.fields.find((field) => field.type === "stress")?.samples?.[0];
+
+    expect(ultra.analysisSampleCount).toBeGreaterThan(fine.analysisSampleCount);
+    expect(ultraStressSample).toMatchObject({
+      source: "local_detailed"
+    });
+    expect(ultraStressSample?.vonMisesStressPa).toBeGreaterThan(0);
+  });
+
   test("makes X build direction much weaker for cantilever bending across layer lines", async () => {
     vi.useFakeTimers();
     try {

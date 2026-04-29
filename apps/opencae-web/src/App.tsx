@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Constraint, DisplayFace, DisplayModel, DynamicSolverSettings, Load, NamedSelection, Project, ResultField, ResultSummary, RunEvent, RunTimingEstimate, Study } from "@opencae/schema";
+import type { Constraint, DisplayFace, DisplayModel, DynamicSolverSettings, Load, NamedSelection, Project, ResultField, ResultSummary, RunEvent, RunTimingEstimate, SimulationFidelity, SolverBackend, Study } from "@opencae/schema";
 import { RotateCcw, Save } from "lucide-react";
 import { addLoad, addSupport, assignMaterial, cancelRun, createProject, generateMesh, getResults, importLocalProject, loadSampleProject, renameProject, runSimulation, subscribeToRun, updateStudy as saveStudyPatch, uploadModel, type SampleAnalysisType, type SampleModelId } from "./lib/api";
 import { normalizePrintParameters, starterMaterials } from "@opencae/materials";
@@ -594,26 +594,35 @@ export function App() {
     setResultPlaybackPlaying(false);
   }
 
-  function handleUpdateSolverSettings(settings: Partial<DynamicSolverSettings>) {
-    if (!study || study.type !== "dynamic_structural") return;
-    const mergedSettings = { ...study.solverSettings, ...settings };
-    const nextSettings = {
-      ...mergedSettings,
-      outputInterval: Math.max(
-        settings.outputInterval ?? study.solverSettings.outputInterval,
-        mergedSettings.timeStep,
-        MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS
-      )
-    };
+  function handleUpdateSolverSettings(settings: Partial<DynamicSolverSettings> & { backend?: SolverBackend; fidelity?: SimulationFidelity }) {
+    if (!study) return;
+    const nextSettings = study.type === "dynamic_structural"
+      ? normalizedDynamicSolverSettings(study.solverSettings, { ...study.solverSettings, ...settings }, settings)
+      : { ...study.solverSettings, ...settings };
     invalidateCompletedRunState();
     void updateStudy(
       saveStudyPatch(
         study.id,
         { solverSettings: nextSettings },
-        "Dynamic settings updated.",
+        "Solver settings updated.",
         study
       )
     );
+  }
+
+  function normalizedDynamicSolverSettings(
+    currentSettings: DynamicSolverSettings,
+    mergedSettings: DynamicSolverSettings & { backend?: SolverBackend; fidelity?: SimulationFidelity },
+    patch: Partial<DynamicSolverSettings>
+  ) {
+    return {
+      ...mergedSettings,
+      outputInterval: Math.max(
+        patch.outputInterval ?? currentSettings.outputInterval,
+        mergedSettings.timeStep,
+        MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS
+      )
+    };
   }
 
   function handleBoundaryConditionType(type: "fixed" | "prescribed_displacement" | "force" | "pressure" | "gravity") {
@@ -846,6 +855,7 @@ export function App() {
           showDimensions={showDimensions}
           stressExaggeration={stressExaggeration}
           resultFields={visibleResultFieldsForUi}
+          meshSummary={study.meshSettings.summary}
           unitSystem={displayUnitSystem}
           themeMode={themeMode}
           fitSignal={fitSignal}

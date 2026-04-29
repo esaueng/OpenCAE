@@ -61,8 +61,13 @@ export const LoadSchema = z.object({
 
 const Vec3Schema = z.tuple([z.number(), z.number(), z.number()]);
 export const StudyAnalysisTypeSchema = z.enum(["static_stress", "dynamic_structural"]);
+export const MeshQualitySchema = z.enum(["coarse", "medium", "fine", "ultra"]);
+export const SolverBackendSchema = z.enum(["local_detailed", "cloudflare_fea"]);
+export const SimulationFidelitySchema = z.enum(["standard", "detailed", "ultra"]);
 
 export const DynamicSolverSettingsSchema = z.object({
+  backend: SolverBackendSchema.optional(),
+  fidelity: SimulationFidelitySchema.optional(),
   startTime: z.number().default(0),
   endTime: z.number().default(0.1),
   timeStep: z.number().default(0.005),
@@ -80,7 +85,7 @@ export const AnalysisSampleSchema = z.object({
 });
 
 export const AnalysisMeshSchema = z.object({
-  quality: z.enum(["coarse", "medium", "fine"]),
+  quality: MeshQualitySchema,
   bounds: z.object({
     min: Vec3Schema,
     max: Vec3Schema
@@ -91,7 +96,11 @@ export const AnalysisMeshSchema = z.object({
 export const ResultSampleSchema = z.object({
   point: Vec3Schema,
   normal: Vec3Schema,
-  value: z.number()
+  value: z.number(),
+  nodeId: z.string().optional(),
+  elementId: z.string().optional(),
+  source: z.string().optional(),
+  vonMisesStressPa: z.number().optional()
 });
 
 export const ResultFieldSchema = z.object({
@@ -119,7 +128,7 @@ export const GeometryFileSchema = z.object({
 });
 
 export const MeshSettingsSchema = z.object({
-  preset: z.enum(["coarse", "medium", "fine"]),
+  preset: MeshQualitySchema,
   status: z.enum(["not_started", "ready", "warning", "complete"]),
   meshRef: z.string().optional(),
   summary: z
@@ -128,7 +137,7 @@ export const MeshSettingsSchema = z.object({
       elements: z.number(),
       warnings: z.array(z.string()),
       analysisSampleCount: z.number().optional(),
-      quality: z.enum(["coarse", "medium", "fine"]).optional()
+      quality: MeshQualitySchema.optional()
     })
     .optional()
 });
@@ -173,7 +182,10 @@ const StudyBaseSchema = z.object({
 
 export const StaticStudySchema = StudyBaseSchema.extend({
   type: z.literal("static_stress"),
-  solverSettings: z.record(z.unknown())
+  solverSettings: z.record(z.unknown()).and(z.object({
+    backend: SolverBackendSchema.optional(),
+    fidelity: SimulationFidelitySchema.optional()
+  }))
 });
 
 export const DynamicStudySchema = StudyBaseSchema.extend({
@@ -199,7 +211,7 @@ export const MeshSummarySchema = z.object({
   elements: z.number(),
   warnings: z.array(z.string()),
   analysisSampleCount: z.number().optional(),
-  quality: z.enum(["coarse", "medium", "fine"]).optional()
+  quality: MeshQualitySchema.optional()
 });
 
 export const ResultSummarySchema = z.object({
@@ -247,6 +259,9 @@ export const RunEventSchema = z.object({
 
 export type Diagnostic = z.infer<typeof DiagnosticSchema>;
 export type StudyAnalysisType = z.infer<typeof StudyAnalysisTypeSchema>;
+export type MeshQuality = z.infer<typeof MeshQualitySchema>;
+export type SolverBackend = z.infer<typeof SolverBackendSchema>;
+export type SimulationFidelity = z.infer<typeof SimulationFidelitySchema>;
 export type DynamicSolverSettings = z.infer<typeof DynamicSolverSettingsSchema>;
 export type Material = z.infer<typeof MaterialSchema>;
 export type GeometryReference = z.infer<typeof GeometryReferenceSchema>;

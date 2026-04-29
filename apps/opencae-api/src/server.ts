@@ -12,6 +12,7 @@ import {
   ResultSummarySchema,
   type DisplayModel,
   type Load,
+  type MeshQuality,
   type Project,
   type ResultField,
   type ResultSummary,
@@ -346,7 +347,7 @@ api.post("/api/studies/:studyId/mesh", async (request, reply) => {
   const { studyId } = request.params as { studyId: string };
   const study = db.getStudy(studyId);
   if (!study) return reply.code(404).send({ error: "Study not found" });
-  const body = request.body as { preset?: "coarse" | "medium" | "fine" } | undefined;
+  const body = request.body as { preset?: MeshQuality } | undefined;
   const preset = body?.preset ?? "medium";
   const mesh = await meshService.generateMesh(study, preset);
   const next: Study = {

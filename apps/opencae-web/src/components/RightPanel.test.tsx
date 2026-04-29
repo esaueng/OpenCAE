@@ -264,6 +264,24 @@ describe("RightPanel payload mass controls", () => {
     expect(renderPanel("run")).not.toContain("Start time");
   });
 
+  test("renders backend and fidelity controls for detailed simulation runs", () => {
+    const detailedStudy: Study = {
+      ...study,
+      solverSettings: { backend: "cloudflare_fea", fidelity: "ultra" }
+    };
+
+    const runHtml = renderPanel("run", { study: detailedStudy });
+    const meshHtml = renderPanel("mesh", { study: { ...detailedStudy, meshSettings: { preset: "ultra", status: "complete", summary: { nodes: 182400, elements: 119808, warnings: [], analysisSampleCount: 45000, quality: "ultra" } } } });
+
+    expect(runHtml).toContain("Simulation backend");
+    expect(runHtml).toContain("Detailed local");
+    expect(runHtml).toContain("Cloud FEA");
+    expect(runHtml).toContain("Fidelity");
+    expect(meshHtml).toContain("Ultra");
+    expect(meshHtml).toContain("Analysis samples");
+    expect(meshHtml).toContain("45,000");
+  });
+
   test("warns when dynamic settings generate a very large playback frame set", () => {
     const dynamicStudy: Study = {
       ...study,

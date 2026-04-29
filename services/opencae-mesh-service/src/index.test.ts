@@ -36,9 +36,12 @@ describe("MockMeshService", () => {
     const coarse = await service.generateMesh(study, "coarse");
     const medium = await service.generateMesh(study, "medium");
     const fine = await service.generateMesh(study, "fine");
+    const ultra = await service.generateMesh(study, "ultra");
 
     expect(coarse.summary.analysisSampleCount).toBeLessThan(medium.summary.analysisSampleCount ?? 0);
     expect(medium.summary.analysisSampleCount).toBeLessThan(fine.summary.analysisSampleCount ?? 0);
+    expect(fine.summary.analysisSampleCount).toBeLessThan(ultra.summary.analysisSampleCount ?? 0);
+    expect(ultra.summary.quality).toBe("ultra");
     expect(fine.summary.warnings.join(" ")).not.toContain("mocked");
   });
 });
