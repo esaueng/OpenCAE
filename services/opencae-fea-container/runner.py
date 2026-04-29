@@ -9,10 +9,10 @@ import subprocess
 import tempfile
 
 
-LENGTH_MM = 1000.0
-WIDTH_MM = 80.0
-HEIGHT_MM = 120.0
-YIELD_STRESS_PA = 275_000_000.0
+LENGTH_MM = 75.0
+WIDTH_MM = 5.0
+HEIGHT_MM = 15.0
+YIELD_STRESS_PA = 276_000_000.0
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -67,7 +67,7 @@ def solve(payload):
         workdir = Path(tmp)
         validate_or_stage_geometry(payload.get("geometry"), workdir)
         input_deck = generate_input_deck(load_n, material, density_tonne_per_mm3, dynamic_settings, dynamic)
-        deck_path = workdir / "opencae_dynamic.inp"
+        deck_path = workdir / "opencae_solve.inp"
         deck_path.write_text(input_deck)
         solver_log = run_ccx_if_available(workdir, deck_path)
 
@@ -110,7 +110,7 @@ def generate_input_deck(load_n, material, density_tonne_per_mm3, settings, dynam
         duration=max(settings["endTime"] - settings["startTime"], settings["timeStep"])
     ) if dynamic else "*STATIC\n"
     return f"""*HEADING
-OpenCAE Cloud FEA CalculiX transient cantilever adapter
+OpenCAE Cloud FEA CalculiX cantilever adapter
 ** Units: mm, N, s, MPa. Density converted from kg/m^3 to tonne/mm^3.
 *NODE
 1, 0, 0, 0
@@ -186,14 +186,17 @@ def generated_result_fields(run_id, load_n, material, settings, dynamic):
         stress = peak_stress_pa * abs(response)
         velocity = peak_displacement_m * dynamic_velocity_factor(time_value, settings) if dynamic else 0.0
         acceleration = peak_displacement_m * dynamic_acceleration_factor(time_value, settings) if dynamic else 0.0
-        frame = {"frameIndex": index, "time": time_value} if dynamic else {}
+        frame = {"frameIndex": index, "timeSeconds": time_value} if dynamic else {}
         fields.extend([
             result_field(run_id, "stress", "Pa", stress, stress_min, stress_max, index, time_value, frame, stress),
             result_field(run_id, "displacement", "m", signed_displacement, displacement_min, displacement_max, index, time_value, frame),
-            result_field(run_id, "velocity", "m/s", velocity, -velocity_bound, velocity_bound, index, time_value, frame),
-            result_field(run_id, "acceleration", "m/s^2", acceleration, -acceleration_bound, acceleration_bound, index, time_value, frame),
             result_field(run_id, "safety_factor", "", YIELD_STRESS_PA / max(stress, 1.0), 0.0, YIELD_STRESS_PA / max(peak_stress_pa, 1.0), index, time_value, frame)
         ])
+        if dynamic:
+            fields.extend([
+                result_field(run_id, "velocity", "m/s", velocity, -velocity_bound, velocity_bound, index, time_value, frame),
+                result_field(run_id, "acceleration", "m/s^2", acceleration, -acceleration_bound, acceleration_bound, index, time_value, frame)
+            ])
     summary = {
         "maxStress": peak_stress_pa,
         "maxStressUnits": "Pa",
@@ -209,7 +212,18 @@ def generated_result_fields(run_id, load_n, material, settings, dynamic):
         }
     }
     if dynamic:
-        summary["transient"] = {"startTime": settings["startTime"], "endTime": settings["endTime"], "timeStep": settings["timeStep"], "outputInterval": settings["outputInterval"], "frameCount": len(frames)}
+        summary["transient"] = {
+            "analysisType": "dynamic_structural",
+            "integrationMethod": "newmark_average_acceleration",
+            "startTime": settings["startTime"],
+            "endTime": settings["endTime"],
+            "timeStep": settings["timeStep"],
+            "outputInterval": settings["outputInterval"],
+            "dampingRatio": settings["dampingRatio"],
+            "frameCount": len(frames),
+            "peakDisplacementTimeSeconds": peak_displacement_time(frames, settings),
+            "peakDisplacement": peak_displacement_m
+        }
     return {"summary": summary, "fields": fields}
 
 
@@ -287,6 +301,10 @@ def dynamic_acceleration_factor(time_value, settings):
     if normalized <= 0.5:
         return -((math.pi / duration) ** 2) * math.sin(math.pi * normalized) * math.exp(-settings["dampingRatio"] * normalized * 3.0)
     return 0.0
+
+
+def peak_displacement_time(frames, settings):
+    return max(frames, key=lambda time_value: abs(dynamic_response_factor(time_value, settings))) if frames else settings["endTime"]
 
 
 def load_value_n(payload):
