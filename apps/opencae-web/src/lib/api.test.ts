@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import type { DisplayModel, Project, RunEvent, Study } from "@opencae/schema";
 import { addLoad, addSupport, assignMaterial, cancelRun, createProject, generateMesh, getResults, importLocalProject, loadSampleProject, renameProject, runSimulation, subscribeToRun, updateStudy, uploadModel } from "./api";
 
@@ -74,6 +76,8 @@ endloop
 endfacet
 endsolid tray
 `;
+
+const apiSource = readFileSync(resolve(__dirname, "api.ts"), "utf8");
 
 describe("api", () => {
   afterEach(() => {
@@ -365,6 +369,12 @@ describe("api", () => {
     expect(completed.progress).toBe(100);
     expect(results.fields.map((field) => field.runId)).toEqual([response.run.id, response.run.id, response.run.id]);
     expect(results.summary.maxStress).toBeGreaterThan(0);
+  });
+
+  test("defers local result solving until a queued run is subscribed", () => {
+    expect(apiSource).toContain("localResultSolversByRunId.set(runId");
+    expect(apiSource).toContain('if (event.type === "complete")');
+    expect(apiSource).toContain("await computeLocalResults(event.runId);");
   });
 
   test("cancels a local run so pending local run events stop", async () => {

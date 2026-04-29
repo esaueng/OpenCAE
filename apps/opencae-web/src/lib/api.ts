@@ -19,7 +19,8 @@ export interface ResultsResponse {
   fields: ResultField[];
 }
 
-const localResultsByRunId = new Map<string, ResultsResponse>();
+const localResultsByRunId = new Map<string, ResultsResponse | Promise<ResultsResponse>>();
+const localResultSolversByRunId = new Map<string, () => ResultsResponse>();
 const localEventsByRunId = new Map<string, RunEvent[]>();
 
 export async function loadSampleProject(sample: SampleModelId = "bracket", analysisType: SampleAnalysisType = "static_stress"): Promise<SampleProjectResponse> {
@@ -253,6 +254,8 @@ export async function runSimulation(studyId: string, currentStudy?: Study, displ
 export async function getResults(runId: string): Promise<ResultsResponse> {
   const localResults = localResultsByRunId.get(runId);
   if (localResults) return localResults;
+  const localComputedResults = computeLocalResults(runId);
+  if (localComputedResults) return localComputedResults;
   const response = await fetch(`/api/runs/${runId}/results`);
   return readJson(response);
 }
@@ -261,6 +264,7 @@ export async function cancelRun(runId: string): Promise<{ run: StudyRun; message
   if (localEventsByRunId.has(runId)) {
     localEventsByRunId.delete(runId);
     localResultsByRunId.delete(runId);
+    localResultSolversByRunId.delete(runId);
     return {
       run: {
         id: runId,
@@ -294,11 +298,13 @@ export function subscribeToRun(runId: string, onEvent: (event: RunEvent) => void
 
 function runSimulationLocally(study: Study, displayModel?: DisplayModel): { run: StudyRun; streamUrl: string; message: string } {
   const runId = `run-local-${crypto.randomUUID()}`;
-  const analysisMesh = displayModel ? analysisMeshForDisplayModel(displayModel, study.meshSettings.preset) : undefined;
-  const solved = study.type === "dynamic_structural"
-    ? solveDynamicStudy(study, runId, analysisMesh)
-    : solveStudy(study, runId, analysisMesh);
-  localResultsByRunId.set(runId, { summary: solved.summary, fields: solved.fields });
+  localResultSolversByRunId.set(runId, () => {
+    const analysisMesh = displayModel ? analysisMeshForDisplayModel(displayModel, study.meshSettings.preset) : undefined;
+    const solved = study.type === "dynamic_structural"
+      ? solveDynamicStudy(study, runId, analysisMesh)
+      : solveStudy(study, runId, analysisMesh);
+    return { summary: solved.summary, fields: solved.fields };
+  });
   const now = new Date().toISOString();
   const events: RunEvent[] = study.type === "dynamic_structural" ? [
     { runId, type: "state", progress: 0, message: "Simulation queued locally.", timestamp: now },
@@ -330,6 +336,21 @@ function runSimulationLocally(study: Study, displayModel?: DisplayModel): { run:
     streamUrl: `local:${runId}`,
     message: "Simulation running locally."
   };
+}
+
+function computeLocalResults(runId: string): Promise<ResultsResponse> | null {
+  const existing = localResultsByRunId.get(runId);
+  if (existing) return Promise.resolve(existing);
+  const solver = localResultSolversByRunId.get(runId);
+  if (!solver) return null;
+  const task = Promise.resolve().then(() => {
+    const results = solver();
+    localResultsByRunId.set(runId, results);
+    localResultSolversByRunId.delete(runId);
+    return results;
+  });
+  localResultsByRunId.set(runId, task);
+  return task;
 }
 
 type Vec3 = [number, number, number];
@@ -397,8 +418,13 @@ function lerp(min: number, max: number, t: number): number {
 
 function subscribeToLocalRun(events: RunEvent[], onEvent: (event: RunEvent) => void): EventSource {
   let closed = false;
-  const timers = events.map((event, index) => globalThis.setTimeout(() => {
-    if (!closed) onEvent(event);
+  const timers = events.map((event, index) => globalThis.setTimeout(async () => {
+    if (closed) return;
+    if (event.type === "complete") {
+      await computeLocalResults(event.runId);
+      if (closed) return;
+    }
+    onEvent(event);
   }, index * 25));
   return {
     close() {
