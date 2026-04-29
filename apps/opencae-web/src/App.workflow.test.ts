@@ -36,6 +36,13 @@ describe("App workflow layout", () => {
     expect(appSource).not.toContain("window.setInterval");
   });
 
+  test("prioritizes viewer interaction over playback visual commits", () => {
+    expect(appSource).toContain("const viewerInteractingRef = useRef(false);");
+    expect(appSource).toContain("const playbackCommitIntervalMs = viewerInteractingRef.current");
+    expect(appSource).toContain("if (!viewerInteractingRef.current) {");
+    expect(appSource).toContain("onViewerInteractionChange={handleViewerInteractionChange}");
+  });
+
   test("rejects dynamic cloud results that do not contain animation frames before showing Results", () => {
     expect(appSource).toContain("hasDynamicPlaybackFrames(results.summary, results.fields)");
     expect(appSource).toContain("Cloud FEA dynamic results did not include animation frames.");

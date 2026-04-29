@@ -144,6 +144,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const resultPlaybackFramePositionRef = useRef(0);
   const resultPlaybackOrdinalPositionRef = useRef(0);
   const resultPlaybackFrameStoreRef = useRef<MutableResultPlaybackFrameStore | null>(null);
+  const viewerInteractingRef = useRef(false);
   const initialActionConsumedRef = useRef(false);
   if (!resultPlaybackFrameStoreRef.current) {
     resultPlaybackFrameStoreRef.current = createResultPlaybackFrameStore(restoredResults?.fields ?? []);
@@ -315,14 +316,17 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
             : resultFrameCache.fieldsForFramePosition(framePosition);
           resultPlaybackFrameStoreRef.current?.setSnapshot(nextFields);
         }
-        if (timestamp - lastCommittedTimestamp >= PLAYBACK_UI_COMMIT_INTERVAL_MS) {
+        const playbackCommitIntervalMs = viewerInteractingRef.current ? Number.POSITIVE_INFINITY : PLAYBACK_UI_COMMIT_INTERVAL_MS;
+        if (timestamp - lastCommittedTimestamp >= playbackCommitIntervalMs) {
           lastCommittedTimestamp = timestamp;
-          setResultPlaybackOrdinalPosition((current) => Math.abs(current - ordinalPosition) < 0.0001 ? current : ordinalPosition);
-          setResultPlaybackFramePosition((current) => Math.abs(current - framePosition) < 0.0001 ? current : framePosition);
-          const nextFrameIndex = frameIndexForPlaybackOrdinal(playbackFrameIndexes, ordinalPosition);
-          if (nextFrameIndex !== resultFrameIndexRef.current) {
-            resultFrameIndexRef.current = nextFrameIndex;
-            startTransition(() => setResultFrameIndex(nextFrameIndex));
+          if (!viewerInteractingRef.current) {
+            setResultPlaybackOrdinalPosition((current) => Math.abs(current - ordinalPosition) < 0.0001 ? current : ordinalPosition);
+            setResultPlaybackFramePosition((current) => Math.abs(current - framePosition) < 0.0001 ? current : framePosition);
+            const nextFrameIndex = frameIndexForPlaybackOrdinal(playbackFrameIndexes, ordinalPosition);
+            if (nextFrameIndex !== resultFrameIndexRef.current) {
+              resultFrameIndexRef.current = nextFrameIndex;
+              startTransition(() => setResultFrameIndex(nextFrameIndex));
+            }
           }
         }
       }
@@ -332,6 +336,20 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     animationFrameId = window.requestAnimationFrame(advancePlaybackFrame);
     return () => window.cancelAnimationFrame(animationFrameId);
   }, [activeStep, playbackFrameIndexes, resultFrameCache, resultPlaybackCacheState, resultPlaybackFps, resultPlaybackPlaying]);
+
+  const handleViewerInteractionChange = useCallback((interacting: boolean) => {
+    viewerInteractingRef.current = interacting;
+    if (interacting) return;
+    const framePosition = resultPlaybackFramePositionRef.current;
+    const ordinalPosition = resultPlaybackOrdinalPositionRef.current;
+    const nextFrameIndex = frameIndexForPlaybackOrdinal(playbackFrameIndexes, ordinalPosition);
+    setResultPlaybackOrdinalPosition(ordinalPosition);
+    setResultPlaybackFramePosition(framePosition);
+    if (nextFrameIndex !== resultFrameIndexRef.current) {
+      resultFrameIndexRef.current = nextFrameIndex;
+      startTransition(() => setResultFrameIndex(nextFrameIndex));
+    }
+  }, [playbackFrameIndexes]);
 
   const handleMeasureDisplayModelDimensions = useCallback((dimensions: NonNullable<DisplayModel["dimensions"]>) => {
     setDisplayModel((current) => {
@@ -1048,6 +1066,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
             printLayerOrientation={printLayerOrientation}
             onResetView={handleFitDefaultView}
             onMeasureDisplayModelDimensions={handleMeasureDisplayModelDimensions}
+            onViewerInteractionChange={handleViewerInteractionChange}
           />
         </Suspense>
         <RightPanel
