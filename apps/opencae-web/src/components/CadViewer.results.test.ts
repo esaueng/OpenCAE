@@ -3,6 +3,10 @@ import { describe, expect, test, vi } from "vitest";
 import { VIEWER_CREDIT_URL, VIEWER_GIZMO_ALIGNMENT, axisLabelToViewAxis, cameraDistanceForBounds, cameraViewForAxis, cloneResultPreviewObject, colorizeResultObject, colorizeSampleResultGeometry, createUndeformedResultOutlineObject, defaultHomeViewTarget, deformationScaleForResultFields, displayedLegendTickLabels, legendMeshStats, legendTickLabels, payloadHighlightObjectId, printLayerVisualizationForBounds, resultProbesForKind, resultValueForPoint, rotatedCameraOrbit, shouldShowDimensionOverlay, shouldShowModelHitLabel, shouldShowResultMarkers, shouldShowUndeformedResultOutline, viewerCameraResetPose } from "./CadViewer";
 import type { FaceResultSample } from "../resultFields";
 import type { DisplayFace, ResultField } from "@opencae/schema";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
+const cadViewerSource = readFileSync(resolve(__dirname, "CadViewer.tsx"), "utf8");
 
 const samples: FaceResultSample[] = [
   {
@@ -24,6 +28,13 @@ describe("CadViewer result coloring", () => {
 
   test("positions the viewer XYZ axes in the bottom-right corner", () => {
     expect(VIEWER_GIZMO_ALIGNMENT).toBe("bottom-right");
+  });
+
+  test("reports orbit interaction start and end so playback can yield render budget", () => {
+    expect(cadViewerSource).toContain("onViewerInteractionChange?: (interacting: boolean) => void;");
+    expect(cadViewerSource).toContain("onInteractionChange={props.onViewerInteractionChange}");
+    expect(cadViewerSource).toContain("onStart={() => onInteractionChange?.(true)}");
+    expect(cadViewerSource).toContain("onEnd={() => onInteractionChange?.(false)}");
   });
 
   test("keeps result legend extrema labels separate from numeric ticks", () => {
