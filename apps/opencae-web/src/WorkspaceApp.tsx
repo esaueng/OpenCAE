@@ -37,6 +37,13 @@ import { nextSelectedPayloadObject, shouldClearPayloadSelectionOnViewerMiss } fr
 import { createLocalDynamicStructuralStudy, createLocalStaticStressStudy } from "./localProjectFactory";
 import { createResultFrameCache, hasDynamicPlaybackFrames } from "./resultFields";
 import { hydratePreparedPlaybackFrame, playbackMemoryBudgetBytes, preparedPlaybackFrameForPosition, type PreparedPlaybackFrameCache } from "./resultPlaybackCache";
+import {
+  boundedPlaybackOrdinalDelta,
+  frameIndexForPlaybackOrdinal,
+  loopedPlaybackOrdinalPosition,
+  playbackOrdinalForSolverFramePosition,
+  solverFramePositionForPlaybackOrdinal
+} from "./resultPlaybackTimeline";
 import { preparePlaybackFramesInWorker } from "./workers/performanceClient";
 import type { WorkspaceInitialAction } from "./App";
 
@@ -112,6 +119,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const [resultFields, setResultFields] = useState<ResultField[]>(restoredResults?.fields ?? []);
   const [resultFrameIndex, setResultFrameIndex] = useState(0);
   const [resultPlaybackFramePosition, setResultPlaybackFramePosition] = useState(0);
+  const [resultPlaybackOrdinalPosition, setResultPlaybackOrdinalPosition] = useState(0);
   const [resultPlaybackPlaying, setResultPlaybackPlaying] = useState(false);
   const [resultPlaybackFps, setResultPlaybackFps] = useState(12);
   const [resultPlaybackCacheState, setResultPlaybackCacheState] = useState<ResultPlaybackCacheState>({ status: "idle" });
@@ -130,6 +138,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const processingRunIdRef = useRef<string | null>(null);
   const resultFrameIndexRef = useRef(0);
   const resultPlaybackFramePositionRef = useRef(0);
+  const resultPlaybackOrdinalPositionRef = useRef(0);
   const initialActionConsumedRef = useRef(false);
 
   const study = project?.studies[0] ?? null;
@@ -148,7 +157,13 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const resultSummaryForUi = useMemo(() => resultSummaryForUnits(resultSummary, displayUnitSystem), [displayUnitSystem, resultSummary]);
   const resultFieldsForUi = useMemo(() => resultFields.map((field) => resultFieldForUnits(field, displayUnitSystem)), [displayUnitSystem, resultFields]);
   const resultFrameCache = useMemo(() => createResultFrameCache(resultFieldsForUi), [resultFieldsForUi]);
-  const resultVisualFramePosition = resultPlaybackPlaying ? resultPlaybackFramePosition : resultFrameIndex;
+  const playbackFrameIndexes = useMemo(() => resultFrameCache.frameIndexes, [resultFrameCache]);
+  const resultVisualOrdinalPosition = resultPlaybackPlaying
+    ? resultPlaybackOrdinalPosition
+    : playbackOrdinalForSolverFramePosition(playbackFrameIndexes, resultFrameIndex);
+  const resultVisualFramePosition = resultPlaybackPlaying
+    ? resultPlaybackFramePosition
+    : resultFrameIndex;
   const resultPlaybackCacheKey = useMemo(() => [
     completedRunId,
     activeRunId,
@@ -174,7 +189,6 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     },
     [preparedPlaybackFrame, resultFrameCache, resultFrameIndex, resultPlaybackPlaying, resultVisualFramePosition]
   );
-  const playbackFrameIndexes = useMemo(() => resultFrameCache.frameIndexes, [resultFrameCache]);
   const resultPlaybackCacheLabel = useMemo(() => {
     if (resultPlaybackCacheState.status === "preparing") return "Preparing smooth playback";
     if (resultPlaybackCacheState.status === "ready") {
@@ -216,7 +230,13 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   useEffect(() => {
     if (!playbackFrameIndexes.length) return;
     setResultFrameIndex((current) => playbackFrameIndexes.includes(current) ? current : playbackFrameIndexes[0] ?? 0);
-    setResultPlaybackFramePosition((current) => playbackFrameIndexes.includes(Math.round(current)) ? current : playbackFrameIndexes[0] ?? 0);
+    const currentFramePosition = resultPlaybackFramePositionRef.current;
+    const nextFramePosition = playbackFrameIndexes.includes(Math.round(currentFramePosition)) ? currentFramePosition : playbackFrameIndexes[0] ?? 0;
+    const nextOrdinalPosition = playbackOrdinalForSolverFramePosition(playbackFrameIndexes, nextFramePosition);
+    resultPlaybackFramePositionRef.current = nextFramePosition;
+    resultPlaybackOrdinalPositionRef.current = nextOrdinalPosition;
+    setResultPlaybackFramePosition(nextFramePosition);
+    setResultPlaybackOrdinalPosition(nextOrdinalPosition);
   }, [playbackFrameIndexes]);
 
   useEffect(() => {
@@ -267,16 +287,19 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     let animationFrameId = 0;
     let lastTimestamp: number | null = null;
     let lastCommittedTimestamp = 0;
-    let framePosition = resultPlaybackFramePositionRef.current;
+    let ordinalPosition = resultPlaybackOrdinalPositionRef.current;
     const advancePlaybackFrame = (timestamp: number) => {
       if (lastTimestamp !== null) {
-        const frameDelta = (timestamp - lastTimestamp) / frameDurationMs;
-        framePosition = loopedPlaybackFramePosition(playbackFrameIndexes, framePosition + frameDelta);
+        const frameDelta = boundedPlaybackOrdinalDelta(timestamp - lastTimestamp, frameDurationMs);
+        ordinalPosition = loopedPlaybackOrdinalPosition(playbackFrameIndexes.length, ordinalPosition + frameDelta);
+        const framePosition = solverFramePositionForPlaybackOrdinal(playbackFrameIndexes, ordinalPosition);
         resultPlaybackFramePositionRef.current = framePosition;
+        resultPlaybackOrdinalPositionRef.current = ordinalPosition;
         if (timestamp - lastCommittedTimestamp >= commitIntervalMs) {
           lastCommittedTimestamp = timestamp;
+          setResultPlaybackOrdinalPosition((current) => Math.abs(current - ordinalPosition) < 0.0001 ? current : ordinalPosition);
           setResultPlaybackFramePosition((current) => Math.abs(current - framePosition) < 0.0001 ? current : framePosition);
-          const nextFrameIndex = Math.floor(framePosition);
+          const nextFrameIndex = frameIndexForPlaybackOrdinal(playbackFrameIndexes, ordinalPosition);
           if (nextFrameIndex !== resultFrameIndexRef.current) {
             resultFrameIndexRef.current = nextFrameIndex;
             startTransition(() => setResultFrameIndex(nextFrameIndex));
@@ -323,12 +346,19 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     resultPlaybackFramePositionRef.current = resultPlaybackFramePosition;
   }, [resultPlaybackFramePosition]);
 
+  useEffect(() => {
+    resultPlaybackOrdinalPositionRef.current = resultPlaybackOrdinalPosition;
+  }, [resultPlaybackOrdinalPosition]);
+
   const handleResultFrameChange = useCallback((frameIndex: number) => {
     setResultFrameIndex(frameIndex);
     setResultPlaybackFramePosition(frameIndex);
+    const ordinalPosition = playbackOrdinalForSolverFramePosition(playbackFrameIndexes, frameIndex);
+    setResultPlaybackOrdinalPosition(ordinalPosition);
     resultFrameIndexRef.current = frameIndex;
     resultPlaybackFramePositionRef.current = frameIndex;
-  }, []);
+    resultPlaybackOrdinalPositionRef.current = ordinalPosition;
+  }, [playbackFrameIndexes]);
 
   function handleResultPlaybackToggle() {
     setResultPlaybackPlaying((playing) => {
@@ -1101,6 +1131,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           missingRunItems={missingRunItems}
           resultFrameIndex={resultFrameIndex}
           resultFramePosition={resultVisualFramePosition}
+          resultFrameOrdinalPosition={resultVisualOrdinalPosition}
           onResultFrameChange={handleResultFrameChange}
           resultPlaybackPlaying={resultPlaybackPlaying}
           resultPlaybackFps={resultPlaybackFps}
@@ -1190,15 +1221,6 @@ function formatLogDuration(milliseconds: number): string {
   const minutes = Math.floor(seconds / 60);
   const remainder = seconds % 60;
   return remainder ? `${minutes}m ${remainder}s` : `${minutes}m`;
-}
-
-function loopedPlaybackFramePosition(frameIndexes: number[], framePosition: number): number {
-  if (frameIndexes.length < 2) return frameIndexes[0] ?? 0;
-  const first = frameIndexes[0] ?? 0;
-  const last = frameIndexes[frameIndexes.length - 1] ?? first;
-  const span = last - first + 1;
-  if (span <= 0) return first;
-  return first + ((((framePosition - first) % span) + span) % span);
 }
 
 function readinessForStudy(study: Study | null) {
