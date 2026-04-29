@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { describe, expect, test } from "vitest";
-import { VIEWER_GIZMO_ALIGNMENT, axisLabelToViewAxis, cameraDistanceForBounds, cameraViewForAxis, cloneResultPreviewObject, colorizeResultObject, createUndeformedResultOutlineObject, defaultHomeViewTarget, displayedLegendTickLabels, legendTickLabels, payloadHighlightObjectId, printLayerVisualizationForBounds, resultProbesForKind, resultValueForPoint, rotatedCameraOrbit, shouldShowDimensionOverlay, shouldShowModelHitLabel, shouldShowUndeformedResultOutline } from "./CadViewer";
+import { VIEWER_GIZMO_ALIGNMENT, axisLabelToViewAxis, cameraDistanceForBounds, cameraViewForAxis, cloneResultPreviewObject, colorizeResultObject, createUndeformedResultOutlineObject, defaultHomeViewTarget, displayedLegendTickLabels, legendTickLabels, payloadHighlightObjectId, printLayerVisualizationForBounds, resultProbesForKind, resultValueForPoint, rotatedCameraOrbit, shouldShowDimensionOverlay, shouldShowModelHitLabel, shouldShowUndeformedResultOutline, viewerCameraResetPose } from "./CadViewer";
 import type { FaceResultSample } from "../resultFields";
 import type { DisplayFace, ResultField } from "@opencae/schema";
 
@@ -101,6 +101,17 @@ describe("CadViewer result coloring", () => {
 
     expect(target.clone().sub(center).dot(up)).toBeLessThan(0);
     expect(target.clone().sub(center).dot(up)).toBeCloseTo(-1.47, 1);
+  });
+
+  test("computes an idempotent home camera pose for repeated reset clicks", () => {
+    const bounds = new THREE.Box3(new THREE.Vector3(-5, -1, -0.5), new THREE.Vector3(5, 1, 0.5));
+    const center = bounds.getCenter(new THREE.Vector3());
+    const firstPose = viewerCameraResetPose(bounds, center, 10, null, 42, 16 / 9);
+    const secondPose = viewerCameraResetPose(bounds, center, 10, null, 42, 16 / 9);
+
+    expect(firstPose.position.toArray()).toEqual(secondPose.position.toArray());
+    expect(firstPose.target.toArray()).toEqual(secondPose.target.toArray());
+    expect(firstPose.up.toArray()).toEqual(secondPose.up.toArray());
   });
 
   test("hides face selection callouts so snapping markers carry placement feedback", () => {
