@@ -55,6 +55,11 @@ interface StorageLike {
   setItem: (key: string, value: string) => void;
 }
 
+interface IdleCallbackHandle {
+  requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
+  cancelIdleCallback?: (handle: number) => void;
+}
+
 const STEPS: StepId[] = ["model", "material", "supports", "loads", "mesh", "run", "results"];
 const VIEW_MODES: ViewMode[] = ["model", "mesh", "results"];
 const RESULT_MODES: ResultMode[] = ["stress", "displacement", "safety_factor", "velocity", "acceleration"];
@@ -107,6 +112,32 @@ export function writeAutosavedWorkspace(snapshot: AutosavedWorkspace, storage = 
   } catch {
     return false;
   }
+}
+
+export function scheduleAutosavedWorkspaceWrite(
+  snapshot: AutosavedWorkspace,
+  storage = getBrowserStorage(),
+  delayMs = 650
+): () => void {
+  if (!storage) return () => undefined;
+  const idleCallbacks = globalThis as typeof globalThis & IdleCallbackHandle;
+  let idleHandle: number | null = null;
+  const timeoutHandle = globalThis.setTimeout(() => {
+    const write = () => {
+      idleHandle = null;
+      writeAutosavedWorkspace(snapshot, storage);
+    };
+    if (idleCallbacks.requestIdleCallback) {
+      idleHandle = idleCallbacks.requestIdleCallback(write, { timeout: 1500 });
+    } else {
+      write();
+    }
+  }, delayMs);
+
+  return () => {
+    globalThis.clearTimeout(timeoutHandle);
+    if (idleHandle !== null) idleCallbacks.cancelIdleCallback?.(idleHandle);
+  };
 }
 
 function parseAutosavedWorkspace(value: unknown): AutosavedWorkspace | null {

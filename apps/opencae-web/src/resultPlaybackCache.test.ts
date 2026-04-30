@@ -51,7 +51,7 @@ describe("result playback cache", () => {
     expect(planPlaybackFrameCache({ fields, frameIndexes: [0, 1], playbackFps: 30, budgetBytes: 900 }).mode).toBe("fallback");
   });
 
-  test("prepares transferable typed-array frames and hydrates them back to result fields", () => {
+  test("prepares transferable typed-array frames and a packed Float32 playback buffer", () => {
     const prepared = preparePlaybackFrames({
       fields: [resultField(0, [0, 10]), resultField(1, [10, 30])],
       frameIndexes: [0, 1],
@@ -60,7 +60,9 @@ describe("result playback cache", () => {
     });
 
     expect(prepared.mode).toBe("full");
-    expect(prepared.frames[0]?.fields[0]?.values).toBeInstanceOf(Float64Array);
+    expect(prepared.frames[0]?.fields[0]?.values).toBeInstanceOf(Float32Array);
+    expect(prepared.packed?.values).toBeInstanceOf(Float32Array);
+    expect(prepared.packed?.framePositions).toBeInstanceOf(Float32Array);
     expect(prepared.actualBytes).toBeGreaterThan(0);
 
     const halfway = prepared.frames.find((frame) => Math.abs(frame.framePosition - 0.5) < 0.001);

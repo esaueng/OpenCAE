@@ -1,6 +1,6 @@
-import { describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import type { DisplayModel, Project, ResultField, ResultSummary, Study } from "@opencae/schema";
-import { buildAutosavedWorkspace, parseAutosavedWorkspacePayload } from "./appPersistence";
+import { buildAutosavedWorkspace, parseAutosavedWorkspacePayload, scheduleAutosavedWorkspaceWrite } from "./appPersistence";
 
 const project = {
   id: "project-1",
@@ -109,6 +109,11 @@ const studyWithSetup = {
 } satisfies Study;
 
 describe("app persistence", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
   test("builds a reloadable snapshot with project, model, results, and UI state", () => {
     const snapshot = buildAutosavedWorkspace({
       project,
@@ -288,5 +293,53 @@ describe("app persistence", () => {
     });
     expect(parsed?.ui.undoStack[0]?.studies[0]?.loads).toEqual(studyWithSetup.loads);
     expect(parsed?.ui.redoStack[0]?.studies[0]?.constraints).toEqual(studyWithSetup.constraints);
+  });
+
+  test("debounces autosave localStorage writes until idle work is scheduled", () => {
+    vi.useFakeTimers();
+    const storage = {
+      getItem: vi.fn(),
+      setItem: vi.fn()
+    };
+    const snapshot = buildAutosavedWorkspace({
+      project,
+      displayModel,
+      savedAt: "2026-04-24T13:00:00.000Z",
+      ui: {
+        activeStep: "model",
+        homeRequested: false,
+        selectedFaceId: null,
+        selectedLoadPoint: null,
+        selectedPayloadObject: null,
+        viewMode: "model",
+        themeMode: "dark",
+        resultMode: "stress",
+        showDeformed: false,
+        showDimensions: false,
+        stressExaggeration: 1,
+        draftLoadType: "force",
+        draftLoadValue: 500,
+        draftLoadDirection: "-Z",
+        sampleModel: "bracket",
+        sampleAnalysisType: "static_stress",
+        activeRunId: "",
+        completedRunId: "",
+        runProgress: 0,
+        undoStack: [],
+        redoStack: [],
+        status: "Ready",
+        logs: []
+      }
+    });
+
+    const cancel = scheduleAutosavedWorkspaceWrite(snapshot, storage, 650);
+
+    expect(storage.setItem).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(649);
+    expect(storage.setItem).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(storage.setItem).toHaveBeenCalledTimes(1);
+
+    cancel();
   });
 });
