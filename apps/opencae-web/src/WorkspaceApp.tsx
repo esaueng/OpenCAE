@@ -36,7 +36,7 @@ import { supportDisplayLabel } from "./supportLabels";
 import { nextSelectedPayloadObject, shouldClearPayloadSelectionOnViewerMiss } from "./payloadSelection";
 import { createLocalDynamicStructuralStudy, createLocalStaticStressStudy } from "./localProjectFactory";
 import { createPackedResultPlaybackCache, createResultFrameCache, hasDynamicPlaybackFrames } from "./resultFields";
-import { packResultFieldsForPlayback, packedPreparedPlaybackFrameOrdinal, playbackMemoryBudgetBytes, type PackedPreparedPlaybackCache, type PreparedPlaybackFrameCache } from "./resultPlaybackCache";
+import { packResultFieldsForPlayback, packedPreparedPlaybackFrameOrdinal, playbackFieldsForResultMode, playbackMemoryBudgetBytes, type PackedPreparedPlaybackCache, type PreparedPlaybackFrameCache } from "./resultPlaybackCache";
 import {
   boundedPlaybackOrdinalDelta,
   frameIndexForPlaybackOrdinal,
@@ -283,10 +283,11 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     }
     let cancelled = false;
     const navigatorWithMemory = typeof navigator === "undefined" ? undefined : navigator as Navigator & { deviceMemory?: number };
-    const packedFields = packResultFieldsForPlayback(resultFieldsForUi);
+    const playbackFieldsForSelectedMode = playbackFieldsForResultMode(resultFieldsForUi, resultMode);
+    const packedFields = packResultFieldsForPlayback(playbackFieldsForSelectedMode);
     setResultPlaybackCacheState({ status: "preparing", cacheKey: resultPlaybackCacheKey });
     void preparePlaybackFramesInWorker({
-      ...(packedFields ? { packedFields } : { fields: resultFieldsForUi }),
+      ...(packedFields ? { packedFields } : { fields: playbackFieldsForSelectedMode }),
       frameIndexes: playbackFrameIndexes,
       playbackFps: PLAYBACK_CACHE_PREP_FPS,
       budgetBytes: playbackMemoryBudgetBytes(navigatorWithMemory?.deviceMemory),
@@ -307,7 +308,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     return () => {
       cancelled = true;
     };
-  }, [activeStep, playbackFrameIndexes, resultFieldsForUi, resultPlaybackCacheKey]);
+  }, [activeStep, playbackFrameIndexes, resultFieldsForUi, resultMode, resultPlaybackCacheKey]);
 
   useEffect(() => {
     if (!resultPlaybackPlaying || activeStep !== "results" || playbackFrameIndexes.length < 2) return;
