@@ -1886,9 +1886,10 @@ img {
   box-shadow: 0 0 0 1px rgba(8, 12, 16, 0.5);
 }
 
+.range-field input[type="range"]:focus,
 .range-field input[type="range"]:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 3px;
+  outline: none;
+  box-shadow: none;
 }
 
 .range-label {
