@@ -622,8 +622,8 @@ export function shouldShowDimensionOverlay(showDimensions: boolean, viewMode: Vi
   return showDimensions && viewMode !== "results";
 }
 
-export function shouldShowResultMarkers(viewMode: ViewMode, activeStep: StepId, resultPlaybackPlaying: boolean) {
-  return viewMode === "results" && activeStep === "results" && !resultPlaybackPlaying;
+export function shouldShowResultMarkers(_viewMode: ViewMode, _activeStep: StepId, _resultPlaybackPlaying: boolean) {
+  return false;
 }
 
 export function payloadHighlightObjectId(payloadObjectSelectionMode: boolean, payloadObject: PayloadObjectSelection | null | undefined) {

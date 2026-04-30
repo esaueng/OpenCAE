@@ -148,8 +148,8 @@ describe("CadViewer result coloring", () => {
     expect(shouldShowDimensionOverlay(false, "model")).toBe(false);
   });
 
-  test("hides result probes only while dynamic playback is running", () => {
-    expect(shouldShowResultMarkers("results", "results", false)).toBe(true);
+  test("hides result probe callouts on the results page", () => {
+    expect(shouldShowResultMarkers("results", "results", false)).toBe(false);
     expect(shouldShowResultMarkers("results", "results", true)).toBe(false);
     expect(shouldShowResultMarkers("model", "results", true)).toBe(false);
   });
