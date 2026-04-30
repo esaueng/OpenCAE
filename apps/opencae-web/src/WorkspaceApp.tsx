@@ -288,10 +288,9 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         }
         setResultPlaybackCacheState({ status: "ready", cacheKey: resultPlaybackCacheKey, cache });
       })
-      .catch((error: unknown) => {
+      .catch(() => {
         if (cancelled) return;
-        const message = error instanceof Error && error.message ? error.message : "Using live playback for this browser";
-        setResultPlaybackCacheState({ status: "error", cacheKey: resultPlaybackCacheKey, message });
+        setResultPlaybackCacheState({ status: "error", cacheKey: resultPlaybackCacheKey, message: "Using live playback for this browser" });
       });
     return () => {
       cancelled = true;

@@ -49,6 +49,11 @@ describe("App workflow layout", () => {
     expect(appSource).toContain("onViewerInteractionChange={handleViewerInteractionChange}");
   });
 
+  test("keeps playback cache worker failures user-facing", () => {
+    expect(appSource).toContain('setResultPlaybackCacheState({ status: "error", cacheKey: resultPlaybackCacheKey, message: "Using live playback for this browser" });');
+    expect(appSource).not.toContain('error.message ? error.message : "Using live playback for this browser"');
+  });
+
   test("rejects dynamic cloud results that do not contain animation frames before showing Results", () => {
     expect(appSource).toContain("hasDynamicPlaybackFrames(results.summary, results.fields)");
     expect(appSource).toContain("Cloud FEA dynamic results did not include animation frames.");
