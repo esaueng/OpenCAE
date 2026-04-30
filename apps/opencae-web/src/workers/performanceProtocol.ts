@@ -1,5 +1,10 @@
 import type { AnalysisMesh, ResultField, ResultSummary, Study } from "@opencae/schema";
-import type { PreparedPlaybackFrameCache } from "../resultPlaybackCache";
+import {
+  packedResultFieldsForPlaybackTransferables,
+  preparedPlaybackTransferables,
+  type PackedResultFieldsForPlayback,
+  type PreparedPlaybackFrameCache
+} from "../resultPlaybackCache";
 
 export interface LocalSolveResult {
   summary: ResultSummary;
@@ -39,7 +44,8 @@ export type PerformanceWorkerPayloads = {
     framePosition: number;
   };
   preparePlaybackFrames: {
-    fields: ResultField[];
+    fields?: ResultField[];
+    packedFields?: PackedResultFieldsForPlayback;
     frameIndexes: number[];
     playbackFps: number;
     budgetBytes: number;
@@ -137,6 +143,25 @@ export function normalizePerformanceWorkerError(error: unknown): PerformanceWork
   };
 }
 
+export function transferablesForPerformanceWorkerRequest(request: PerformanceWorkerRequest): Transferable[] {
+  if (request.operation !== "preparePlaybackFrames" || !request.payload.packedFields) return [];
+  return packedResultFieldsForPlaybackTransferables(request.payload.packedFields);
+}
+
+export function transferablesForPerformanceWorkerResult(result: unknown): Transferable[] {
+  if (isPreparedPlaybackFrameCache(result)) return preparedPlaybackTransferables(result);
+  if (isDecodedStlGeometry(result)) return [result.positions.buffer, result.normals.buffer];
+  return [];
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function isPreparedPlaybackFrameCache(value: unknown): value is PreparedPlaybackFrameCache {
+  return typeof value === "object" && value !== null && "frames" in value && "actualBytes" in value;
+}
+
+function isDecodedStlGeometry(value: unknown): value is DecodedStlGeometry {
+  return typeof value === "object" && value !== null && "positions" in value && "normals" in value;
 }

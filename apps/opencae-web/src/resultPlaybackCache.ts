@@ -1,5 +1,5 @@
 import type { ResultField } from "@opencae/schema";
-import { createResultFrameCache } from "./resultFields";
+import { createPackedResultPlaybackCache, createResultFrameCache } from "./resultFields";
 
 export type PlaybackFrameCacheMode = "full" | "reducedFps" | "integerFrames" | "fallback";
 
@@ -12,11 +12,26 @@ export interface PlaybackFrameCachePlan {
 }
 
 export interface PlaybackFrameCacheInput {
-  fields: ResultField[];
+  fields?: ResultField[];
+  packedFields?: PackedResultFieldsForPlayback;
   frameIndexes: number[];
   playbackFps: number;
   budgetBytes?: number;
   cacheKey?: string;
+}
+
+export interface PackedResultFieldsForPlayback {
+  frameCount: number;
+  fieldCount: number;
+  valueCount: number;
+  frameIndexes: Int32Array;
+  times: Float32Array;
+  fieldDescriptors: PackedPreparedPlaybackFieldDescriptor[];
+  fieldOffsets: Int32Array;
+  fieldLengths: Int32Array;
+  fieldMins: Float32Array;
+  fieldMaxes: Float32Array;
+  values: Float32Array;
 }
 
 export interface PreparedPlaybackField extends Omit<ResultField, "values"> {
@@ -89,12 +104,13 @@ export function playbackMemoryBudgetBytes(deviceMemoryGb?: number): number {
 }
 
 export function planPlaybackFrameCache(input: PlaybackFrameCacheInput): PlaybackFrameCachePlan {
+  const fields = fieldsForPlaybackInput(input);
   const frameIndexes = normalizedFrameIndexes(input.frameIndexes);
   const budgetBytes = input.budgetBytes ?? playbackMemoryBudgetBytes();
-  if (frameIndexes.length < 2 || !input.fields.length) {
+  if (frameIndexes.length < 2 || !fields.length) {
     return fallbackPlan(budgetBytes);
   }
-  const perFrameBytes = estimatePreparedFrameBytes(input.fields, frameIndexes[0] ?? 0);
+  const perFrameBytes = estimatePreparedFrameBytes(fields, frameIndexes[0] ?? 0);
   for (const presentationFps of PRESENTATION_FPS_CANDIDATES) {
     const framePositions = presentationFramePositions(frameIndexes, input.playbackFps, presentationFps);
     const estimatedBytes = estimateTotalBytes(perFrameBytes, framePositions.length);
@@ -124,6 +140,7 @@ export function planPlaybackFrameCache(input: PlaybackFrameCacheInput): Playback
 }
 
 export function preparePlaybackFrames(input: PlaybackFrameCacheInput): PreparedPlaybackFrameCache {
+  const fields = fieldsForPlaybackInput(input);
   const plan = planPlaybackFrameCache(input);
   if (plan.mode === "fallback") {
     return {
@@ -137,7 +154,7 @@ export function preparePlaybackFrames(input: PlaybackFrameCacheInput): PreparedP
     };
   }
 
-  const frameCache = createResultFrameCache(input.fields);
+  const frameCache = createResultFrameCache(fields);
   let actualBytes = 0;
   const frames = plan.framePositions.map((framePosition) => {
     const fields = frameCache.fieldsForFramePosition(framePosition).map((field) => {
@@ -168,6 +185,77 @@ export function preparePlaybackFrames(input: PlaybackFrameCacheInput): PreparedP
     actualBytes,
     frames,
     ...(packed ? { packed } : {})
+  };
+}
+
+export function packResultFieldsForPlayback(fields: ResultField[]): PackedResultFieldsForPlayback | null {
+  const packed = createPackedResultPlaybackCache(fields);
+  if (!packed) return null;
+  return {
+    frameCount: packed.frameCount,
+    fieldCount: packed.fieldCount,
+    valueCount: packed.valueCount,
+    frameIndexes: packed.frameIndexes,
+    times: packed.times,
+    fieldDescriptors: packed.fieldDescriptors,
+    fieldOffsets: packed.fieldOffsets,
+    fieldLengths: packed.fieldLengths,
+    fieldMins: packed.fieldMins,
+    fieldMaxes: packed.fieldMaxes,
+    values: packed.values
+  };
+}
+
+export function unpackResultFieldsForPlayback(packed: PackedResultFieldsForPlayback): ResultField[] {
+  const fields: ResultField[] = [];
+  for (let frameOrdinal = 0; frameOrdinal < packed.frameCount; frameOrdinal += 1) {
+    const frameIndex = packed.frameIndexes[frameOrdinal] ?? frameOrdinal;
+    const timeSeconds = packed.times[frameOrdinal] ?? 0;
+    for (let fieldOrdinal = 0; fieldOrdinal < packed.fieldCount; fieldOrdinal += 1) {
+      const descriptor = packed.fieldDescriptors[fieldOrdinal];
+      if (!descriptor) continue;
+      const slot = frameOrdinal * packed.fieldCount + fieldOrdinal;
+      fields.push(unpackPackedInputFieldForSlot(
+        descriptor,
+        frameIndex,
+        timeSeconds,
+        slot,
+        packed.fieldOffsets,
+        packed.fieldLengths,
+        packed.fieldMins,
+        packed.fieldMaxes,
+        packed.values
+      ));
+    }
+  }
+  return fields;
+}
+
+function unpackPackedInputFieldForSlot(
+  descriptor: PackedPreparedPlaybackFieldDescriptor,
+  frameIndex: number,
+  timeSeconds: number,
+  slot: number,
+  fieldOffsets: Int32Array,
+  fieldLengths: Int32Array,
+  fieldMins: Float32Array,
+  fieldMaxes: Float32Array,
+  values: Float32Array
+): ResultField {
+  const length = fieldLengths[slot] ?? 0;
+  const offset = fieldOffsets[slot] ?? 0;
+  const fieldValues = new Array<number>(length);
+  for (let index = 0; index < length; index += 1) {
+    fieldValues[index] = values[offset + index] ?? 0;
+  }
+  return {
+    ...descriptor,
+    id: `${descriptor.id}-frame-${frameIndex}`,
+    values: fieldValues,
+    min: fieldMins[slot] ?? 0,
+    max: fieldMaxes[slot] ?? 0,
+    frameIndex,
+    timeSeconds
   };
 }
 
@@ -225,6 +313,18 @@ export function preparedPlaybackTransferables(cache: PreparedPlaybackFrameCache)
     }
   }
   return transferables;
+}
+
+export function packedResultFieldsForPlaybackTransferables(packed: PackedResultFieldsForPlayback): Transferable[] {
+  return [
+    packed.frameIndexes.buffer,
+    packed.times.buffer,
+    packed.fieldOffsets.buffer,
+    packed.fieldLengths.buffer,
+    packed.fieldMins.buffer,
+    packed.fieldMaxes.buffer,
+    packed.values.buffer
+  ];
 }
 
 export function packedPreparedPlaybackFrameOrdinal(cache: PackedPreparedPlaybackCache, framePosition: number): number {
@@ -329,6 +429,11 @@ function packPreparedPlaybackFrames(frames: PreparedPlaybackFrame[]): PackedPrep
 function normalizedFrameIndexes(frameIndexes: number[]): number[] {
   return [...new Set(frameIndexes.filter((frameIndex) => Number.isFinite(frameIndex)).map((frameIndex) => Math.floor(frameIndex)))]
     .sort((left, right) => left - right);
+}
+
+function fieldsForPlaybackInput(input: PlaybackFrameCacheInput): ResultField[] {
+  if (input.packedFields) return unpackResultFieldsForPlayback(input.packedFields);
+  return input.fields ?? [];
 }
 
 function presentationFramePositions(frameIndexes: number[], playbackFps: number, presentationFps: number): number[] {
