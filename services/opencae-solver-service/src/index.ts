@@ -214,7 +214,12 @@ export function solveStudy(study: Study, runId: string, analysisMeshInput?: Anal
       : rawValue;
     return sampleResult(sample, value, 2, { source: "local_detailed", vonMisesStressPa: round(value * 1_000_000, 1) });
   });
-  const displacementSamples = analysisMesh.samples.map((sample) => sampleResult(sample, displacementAtSample(sample, loads, faces, analysisMesh) * response.displacementScale, 4));
+  const displacementSamples = analysisMesh.samples.map((sample) => {
+    const value = displacementAtSample(sample, loads, faces, analysisMesh) * response.displacementScale;
+    return sampleResult(sample, value, 4, {
+      vector: roundVector(displacementVectorAtSample(sample, loads, faces, analysisMesh, response.displacementScale), 4)
+    });
+  });
   const safetySamples = stressSamples.map((sample) => sampleResult(sample, Math.max(0.05, response.yieldMpa / Math.max(sample.value, 0.001)), 3));
   const fields: ResultField[] = [
     fieldFor(runId, "stress", stressValues, "MPa", stressSamples),
@@ -445,7 +450,9 @@ function scaleBaseField(
   digits: number
 ): ResultField {
   const values = (base?.values.length ? base.values : [0]).map((value) => round(value * scale, digits));
-  const samples = base?.samples?.map((sample) => sampleResult(sample, sample.value * scale, digits)) ?? [];
+  const samples = base?.samples?.map((sample) => sampleResult(sample, sample.value * scale, digits, {
+    ...(sample.vector ? { vector: roundVector(scaleVector(sample.vector, scale), digits) } : {})
+  })) ?? [];
   return fieldForFrame(runId, type, values, units, samples, frameIndex, timeSeconds);
 }
 
@@ -740,6 +747,38 @@ function displacementAtSample(sample: AnalysisSample, loads: LoadModel[], faces:
   }, 0);
 }
 
+function displacementVectorAtSample(sample: AnalysisSample, loads: LoadModel[], faces: FaceModel[], analysisMesh: AnalysisMesh, displacementScale: number): Vec3 {
+  if (!loads.length) return [0, 0, 0];
+  return loads.reduce<Vec3>((sum, load) => {
+    const magnitude = displacementAtSampleForLoad(sample, load, faces, analysisMesh) * displacementScale;
+    const contribution = scale(load.direction, magnitude);
+    return [sum[0] + contribution[0], sum[1] + contribution[1], sum[2] + contribution[2]];
+  }, [0, 0, 0]);
+}
+
+function displacementAtSampleForLoad(sample: AnalysisSample, load: LoadModel, _faces: FaceModel[], analysisMesh: AnalysisMesh): number {
+  const spanVector = subtract(load.face.center, load.nearestSupport.center);
+  const spanLength = Math.max(length(spanVector), 0.001);
+  const spanDirection = normalize(spanVector);
+  const forceScale = load.magnitude / 500;
+  const momentScale = load.moment / Math.max(250, 500 * spanLength);
+  const travel = segmentParameter(sample.point, load.nearestSupport.center, load.face.center);
+  const beamShape = travel * travel * (3 - 2 * travel);
+  const supportLockShape = load.leverArm > 0.001 ? beamShape : 1;
+  const loadDistance = distance(sample.point, load.face.center);
+  const pathDistance = distancePointToSegment(sample.point, load.nearestSupport.center, load.face.center);
+  const fiberDistance = distancePointToLine(sample.point, load.nearestSupport.center, spanDirection);
+  const fiberRadius = Math.max(estimatedCrossSectionRadius(analysisMesh, load.nearestSupport.center, spanDirection), 0.001);
+  const fiber = clamp(fiberDistance / fiberRadius, 0, 1);
+  return forceScale * supportLockShape * (
+    0.004 +
+    (0.14 + 0.11 * momentScale) * beamShape +
+    0.018 * gaussian(loadDistance, spanLength * 0.18) +
+    0.012 * gaussian(pathDistance, spanLength * 0.18) * travel +
+    0.012 * fiber * beamShape
+  );
+}
+
 function loadEquivalentForce(load: Load, face: FaceModel): number {
   const rawValue = Number(load.parameters.value ?? 0);
   const value = Number.isFinite(rawValue) && rawValue > 0 ? rawValue : 0;
@@ -887,7 +926,15 @@ function subtract(left: Vec3, right: Vec3): Vec3 {
 }
 
 function scale(vector: Vec3, factor: number): Vec3 {
+  return scaleVector(vector, factor);
+}
+
+function scaleVector(vector: Vec3, factor: number): Vec3 {
   return [vector[0] * factor, vector[1] * factor, vector[2] * factor];
+}
+
+function roundVector(vector: Vec3, digits: number): Vec3 {
+  return [round(vector[0], digits), round(vector[1], digits), round(vector[2], digits)];
 }
 
 function dot(left: Vec3, right: Vec3): number {
