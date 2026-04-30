@@ -32,7 +32,8 @@ describe("CadViewer result coloring", () => {
 
   test("reports orbit interaction start and end so playback can yield render budget", () => {
     expect(cadViewerSource).toContain("onViewerInteractionChange?: (interacting: boolean) => void;");
-    expect(cadViewerSource).toContain("onInteractionChange={props.onViewerInteractionChange}");
+    expect(cadViewerSource).toContain("onInteractionChange={handleViewerInteractionChange}");
+    expect(cadViewerSource).toContain("props.onViewerInteractionChange?.(interacting)");
     expect(cadViewerSource).toContain("onStart={() => onInteractionChange?.(true)}");
     expect(cadViewerSource).toContain("onEnd={() => onInteractionChange?.(false)}");
   });

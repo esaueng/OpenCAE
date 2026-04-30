@@ -132,24 +132,33 @@ export const VIEWER_CREDIT_URL = "https://esauengineering.com/";
 const VIEWER_FIT_MARGIN = 1.28;
 const DEFAULT_HOME_FIT_MARGIN = 1.46;
 const VIEWER_FIT_RETRY_DELAY_MS = 120;
+const VIEWER_IDLE_DPR_RANGE: [number, number] = [1, 2];
+const VIEWER_ACTIVE_DPR_RANGE: [number, number] = [1, 1.25];
 
 export function CadViewer(props: CadViewerProps) {
   const controlsRef = useRef<ViewerOrbitControls | null>(null);
   const [uploadedPreviewBounds, setUploadedPreviewBounds] = useState<THREE.Box3 | null>(null);
   const [gizmoViewRequest, setGizmoViewRequest] = useState<{ axis: RotationAxis | null; signal: number }>({ axis: null, signal: 0 });
+  const [viewerInteracting, setViewerInteracting] = useState(false);
   const effectiveViewMode: ViewMode = props.activeStep === "results" ? props.viewMode : props.viewMode === "mesh" ? "mesh" : "model";
-  const showDimensionOverlay = shouldShowDimensionOverlay(props.showDimensions, effectiveViewMode);
+  const suppressPlaybackOverlays = props.resultPlaybackPlaying;
+  const showDimensionOverlay = shouldShowDimensionOverlay(props.showDimensions, effectiveViewMode) && !suppressPlaybackOverlays;
+  const viewerDpr = props.resultPlaybackPlaying || viewerInteracting ? VIEWER_ACTIVE_DPR_RANGE : VIEWER_IDLE_DPR_RANGE;
   const isLightTheme = props.themeMode === "light";
   const viewportBackground = isLightTheme ? "#f7f9fc" : "#070b10";
   const modelRotation = useMemo(() => modelRotationRadians(props.displayModel), [props.displayModel]);
   const baseModelRotation = useMemo(() => baseModelRotationRadians(props.displayModel), [props.displayModel]);
   const resultFields = props.resultFields;
+  const handleViewerInteractionChange = (interacting: boolean) => {
+    setViewerInteracting(interacting);
+    props.onViewerInteractionChange?.(interacting);
+  };
   useEffect(() => {
     setUploadedPreviewBounds(null);
   }, [props.displayModel.nativeCad?.contentBase64, props.displayModel.visualMesh?.contentBase64]);
   return (
     <section className={`viewer-shell ${effectiveViewMode === "results" ? "results-view" : ""}`} aria-label="3D CAD viewer">
-      <Canvas frameloop="demand" dpr={[1, 2]} camera={{ position: [4.8, 4.8, 4.8], up: ISO_CAMERA_UP.toArray(), fov: 42 }} onPointerMissed={props.onViewerMiss}>
+      <Canvas frameloop="demand" dpr={viewerDpr} camera={{ position: [4.8, 4.8, 4.8], up: ISO_CAMERA_UP.toArray(), fov: 42 }} onPointerMissed={props.onViewerMiss}>
         <ViewerInvalidator
           activeStep={props.activeStep}
           displayModel={props.displayModel}
@@ -186,8 +195,8 @@ export function CadViewer(props: CadViewerProps) {
           <BoundsCameraReset signal={props.fitSignal} viewAxis={props.viewAxis} viewAxisSignal={props.viewAxisSignal} controlsRef={controlsRef} />
           <GizmoCameraReset axis={gizmoViewRequest.axis} signal={gizmoViewRequest.signal} controlsRef={controlsRef} />
         </Bounds>
-        <DemandOrbitControls controlsRef={controlsRef} onInteractionChange={props.onViewerInteractionChange} />
-        <ShiftPanControls controlsRef={controlsRef} onInteractionChange={props.onViewerInteractionChange} />
+        <DemandOrbitControls controlsRef={controlsRef} onInteractionChange={handleViewerInteractionChange} />
+        <ShiftPanControls controlsRef={controlsRef} onInteractionChange={handleViewerInteractionChange} />
         <GizmoHelper alignment={VIEWER_GIZMO_ALIGNMENT} margin={[92, 92]}>
           <CleanAxisGizmo
             onSelectAxis={(axis) => setGizmoViewRequest((request) => ({ axis, signal: request.signal + 1 }))}
@@ -576,6 +585,7 @@ function BracketModel({
           displayModel={displayModel}
           resultMode={resultMode}
           showDeformed={showDeformed}
+          resultPlaybackPlaying={resultPlaybackPlaying}
           stressExaggeration={stressExaggeration}
           resultFields={resultFields}
           resultPlaybackFrameController={resultPlaybackFrameController}
@@ -1375,6 +1385,7 @@ function AnalysisResultModel({
   displayModel,
   resultMode,
   showDeformed,
+  resultPlaybackPlaying,
   stressExaggeration,
   resultFields,
   resultPlaybackFrameController,
@@ -1387,6 +1398,7 @@ function AnalysisResultModel({
   displayModel: DisplayModel;
   resultMode: ResultMode;
   showDeformed: boolean;
+  resultPlaybackPlaying: boolean;
   stressExaggeration: number;
   resultFields: ResultField[];
   resultPlaybackFrameController?: ResultPlaybackFrameController;
@@ -1408,6 +1420,7 @@ function AnalysisResultModel({
         samples={samples}
         resultMode={resultMode}
         showDeformed={showDeformed}
+        resultPlaybackPlaying={resultPlaybackPlaying}
         stressExaggeration={stressExaggeration}
         deformationScale={deformationScale}
         resultPlaybackFrameController={resultPlaybackFrameController}
@@ -1419,9 +1432,9 @@ function AnalysisResultModel({
     );
   }
   if (kind === "bracket") {
-    return <BracketResultSolid kind={kind} samples={samples} resultMode={resultMode} showDeformed={showDeformed} stressExaggeration={stressExaggeration} deformationScale={deformationScale} resultPlaybackFrameController={resultPlaybackFrameController} loadMarkers={loadMarkers} supportMarkers={supportMarkers} />;
+    return <BracketResultSolid kind={kind} samples={samples} resultMode={resultMode} showDeformed={showDeformed} resultPlaybackPlaying={resultPlaybackPlaying} stressExaggeration={stressExaggeration} deformationScale={deformationScale} resultPlaybackFrameController={resultPlaybackFrameController} loadMarkers={loadMarkers} supportMarkers={supportMarkers} />;
   }
-  return <SampleResultSolid kind={kind} samples={samples} resultMode={resultMode} showDeformed={showDeformed} stressExaggeration={stressExaggeration} deformationScale={deformationScale} resultPlaybackFrameController={resultPlaybackFrameController} loadMarkers={loadMarkers} supportMarkers={supportMarkers} />;
+  return <SampleResultSolid kind={kind} samples={samples} resultMode={resultMode} showDeformed={showDeformed} resultPlaybackPlaying={resultPlaybackPlaying} stressExaggeration={stressExaggeration} deformationScale={deformationScale} resultPlaybackFrameController={resultPlaybackFrameController} loadMarkers={loadMarkers} supportMarkers={supportMarkers} />;
 }
 
 function UploadedResultSolid({
@@ -1429,6 +1442,7 @@ function UploadedResultSolid({
   samples,
   resultMode,
   showDeformed,
+  resultPlaybackPlaying,
   stressExaggeration,
   deformationScale,
   resultPlaybackFrameController,
@@ -1441,6 +1455,7 @@ function UploadedResultSolid({
   samples: FaceResultSample[];
   resultMode: ResultMode;
   showDeformed: boolean;
+  resultPlaybackPlaying: boolean;
   stressExaggeration: number;
   deformationScale?: number;
   resultPlaybackFrameController?: ResultPlaybackFrameController;
@@ -1456,6 +1471,7 @@ function UploadedResultSolid({
         samples={samples}
         resultMode={resultMode}
         showDeformed={showDeformed}
+        resultPlaybackPlaying={resultPlaybackPlaying}
         stressExaggeration={stressExaggeration}
         deformationScale={deformationScale}
         resultPlaybackFrameController={resultPlaybackFrameController}
@@ -1474,6 +1490,7 @@ function UploadedResultSolid({
         samples={samples}
         resultMode={resultMode}
         showDeformed={showDeformed}
+        resultPlaybackPlaying={resultPlaybackPlaying}
         stressExaggeration={stressExaggeration}
         deformationScale={deformationScale}
         resultPlaybackFrameController={resultPlaybackFrameController}
@@ -1495,6 +1512,7 @@ function UploadedNativeCadResultModel({
   samples,
   resultMode,
   showDeformed,
+  resultPlaybackPlaying,
   stressExaggeration,
   deformationScale,
   resultPlaybackFrameController,
@@ -1507,6 +1525,7 @@ function UploadedNativeCadResultModel({
   samples: FaceResultSample[];
   resultMode: ResultMode;
   showDeformed: boolean;
+  resultPlaybackPlaying: boolean;
   stressExaggeration: number;
   deformationScale?: number;
   resultPlaybackFrameController?: ResultPlaybackFrameController;
@@ -1556,10 +1575,10 @@ function UploadedNativeCadResultModel({
   const renderedPreview = useMemo(() => {
     if (preview.status !== "ready" || !preview.sourceObject) return null;
     const object = cloneResultPreviewObject(preview.sourceObject);
-    const outline = showDeformed ? createUndeformedResultOutlineObject(object) : undefined;
+    const outline = showDeformed && !resultPlaybackPlaying ? createUndeformedResultOutlineObject(object) : undefined;
     colorizeResultObject(object, "uploaded", resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale, supportMarkers);
     return { object, outline };
-  }, [deformationScale, loadMarkers, preview.sourceObject, preview.status, resultMode, samples, showDeformed, stressExaggeration, supportMarkers]);
+  }, [deformationScale, loadMarkers, preview.sourceObject, preview.status, resultMode, resultPlaybackPlaying, samples, showDeformed, stressExaggeration, supportMarkers]);
 
   if (preview.status === "loading") {
     return (
@@ -1587,6 +1606,7 @@ function UploadedStlResultModel({
   samples,
   resultMode,
   showDeformed,
+  resultPlaybackPlaying,
   stressExaggeration,
   deformationScale,
   resultPlaybackFrameController,
@@ -1597,6 +1617,7 @@ function UploadedStlResultModel({
   samples: FaceResultSample[];
   resultMode: ResultMode;
   showDeformed: boolean;
+  resultPlaybackPlaying: boolean;
   stressExaggeration: number;
   deformationScale?: number;
   resultPlaybackFrameController?: ResultPlaybackFrameController;
@@ -1622,10 +1643,10 @@ function UploadedStlResultModel({
 
   return (
     <group>
-      {shouldShowUndeformedResultOutline(showDeformed) && <UndeformedGeometryOutline geometry={outlineGeometry} />}
+      {shouldShowUndeformedResultOutline(showDeformed) && !resultPlaybackPlaying && <UndeformedGeometryOutline geometry={outlineGeometry} />}
       <mesh geometry={geometry}>
         <meshStandardMaterial vertexColors metalness={0.18} roughness={0.52} side={THREE.DoubleSide} />
-        <Edges color="#43556a" threshold={18} />
+        {!resultPlaybackPlaying && <Edges color="#43556a" threshold={18} />}
       </mesh>
     </group>
   );
@@ -1636,6 +1657,7 @@ function BracketResultSolid({
   samples,
   resultMode,
   showDeformed,
+  resultPlaybackPlaying,
   stressExaggeration,
   deformationScale,
   resultPlaybackFrameController,
@@ -1646,6 +1668,7 @@ function BracketResultSolid({
   samples: FaceResultSample[];
   resultMode: ResultMode;
   showDeformed: boolean;
+  resultPlaybackPlaying: boolean;
   stressExaggeration: number;
   deformationScale?: number;
   resultPlaybackFrameController?: ResultPlaybackFrameController;
@@ -1686,7 +1709,7 @@ function BracketResultSolid({
   });
   return (
     <group>
-      {shouldShowUndeformedResultOutline(showDeformed) && (
+      {shouldShowUndeformedResultOutline(showDeformed) && !resultPlaybackPlaying && (
         <>
           <UndeformedGeometryOutline geometry={outlineBodyGeometry} />
           <UndeformedGeometryOutline geometry={outlineRibGeometry} />
@@ -1694,11 +1717,11 @@ function BracketResultSolid({
       )}
       <mesh geometry={bodyGeometry}>
         <meshStandardMaterial vertexColors metalness={0.18} roughness={0.52} side={THREE.DoubleSide} />
-        <Edges color="#43556a" threshold={18} />
+        {!resultPlaybackPlaying && <Edges color="#43556a" threshold={18} />}
       </mesh>
       <mesh geometry={ribGeometry}>
         <meshStandardMaterial vertexColors metalness={0.18} roughness={0.52} side={THREE.DoubleSide} />
-        <Edges color="#43556a" threshold={18} />
+        {!resultPlaybackPlaying && <Edges color="#43556a" threshold={18} />}
       </mesh>
       <HoleRims kind="bracket" />
     </group>
@@ -1710,6 +1733,7 @@ function SampleResultSolid({
   samples,
   resultMode,
   showDeformed,
+  resultPlaybackPlaying,
   stressExaggeration,
   deformationScale,
   resultPlaybackFrameController,
@@ -1720,6 +1744,7 @@ function SampleResultSolid({
   samples: FaceResultSample[];
   resultMode: ResultMode;
   showDeformed: boolean;
+  resultPlaybackPlaying: boolean;
   stressExaggeration: number;
   deformationScale?: number;
   resultPlaybackFrameController?: ResultPlaybackFrameController;
@@ -1763,7 +1788,7 @@ function SampleResultSolid({
   if (kind === "plate") {
     return (
       <group>
-        {shouldShowUndeformedResultOutline(showDeformed) && (
+        {shouldShowUndeformedResultOutline(showDeformed) && !resultPlaybackPlaying && (
           <>
             <UndeformedGeometryOutline geometry={outlineBeamGeometry} />
             <UndeformedGeometryOutline geometry={outlineBeamPayloadGeometry} />
@@ -1771,11 +1796,11 @@ function SampleResultSolid({
         )}
         <mesh geometry={beamGeometry}>
           <meshStandardMaterial vertexColors metalness={0.18} roughness={0.52} side={THREE.DoubleSide} />
-          <Edges color="#43556a" threshold={18} />
+          {!resultPlaybackPlaying && <Edges color="#43556a" threshold={18} />}
         </mesh>
         <mesh geometry={beamPayloadGeometry}>
           <meshStandardMaterial color={RESULT_PAYLOAD_MATERIAL_COLOR} metalness={0.12} roughness={0.58} />
-          <Edges color="#596472" threshold={18} />
+          {!resultPlaybackPlaying && <Edges color="#596472" threshold={18} />}
         </mesh>
       </group>
     );
@@ -1783,10 +1808,10 @@ function SampleResultSolid({
   if (kind === "cantilever") {
     return (
       <group>
-        {shouldShowUndeformedResultOutline(showDeformed) && <UndeformedGeometryOutline geometry={outlineCantileverGeometry} position={[0, 0.18, 0]} />}
+        {shouldShowUndeformedResultOutline(showDeformed) && !resultPlaybackPlaying && <UndeformedGeometryOutline geometry={outlineCantileverGeometry} position={[0, 0.18, 0]} />}
         <mesh geometry={cantileverGeometry} position={[0, 0.18, 0]}>
           <meshStandardMaterial vertexColors metalness={0.18} roughness={0.52} />
-          <Edges color="#43556a" threshold={18} />
+          {!resultPlaybackPlaying && <Edges color="#43556a" threshold={18} />}
         </mesh>
       </group>
     );
