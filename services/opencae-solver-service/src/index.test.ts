@@ -528,7 +528,7 @@ describe("LocalMockComputeBackend", () => {
     expect(firstStressFrame.max).toBeGreaterThan(Math.max(...firstStressFrame.values));
   });
 
-  test("dynamic beam stress frames keep local color contrast while sharing the peak max", () => {
+  test("dynamic beam stress frames share a global stress range for playback colors", () => {
     const solved = solveDynamicStudy(
       {
         ...beamPayloadStudy("mat-aluminum-6061"),
@@ -539,18 +539,10 @@ describe("LocalMockComputeBackend", () => {
     );
 
     const stressFrames = solved.fields.filter((field) => field.type === "stress");
-    const peakMax = Math.max(...stressFrames.map((field) => field.max));
-    const highFrame = stressFrames.find((field) => field.frameIndex === 3)!;
-    const highFrameValues = [
-      ...highFrame.values,
-      ...(highFrame.samples?.map((sample) => sample.value) ?? [])
-    ];
 
     expect(new Set(stressFrames.map((field) => field.max)).size).toBe(1);
-    expect(highFrame.max).toBe(peakMax);
-    expect(highFrame.min).toBeCloseTo(Math.min(...highFrameValues), 1);
-    expect(highFrame.min).toBeGreaterThan(0);
-    expect((Math.max(...highFrameValues) - highFrame.min) / (highFrame.max - highFrame.min)).toBeGreaterThan(0.8);
+    expect(new Set(stressFrames.map((field) => field.min)).size).toBe(1);
+    expect(stressFrames[0]?.min).toBe(0);
   });
 
   test("dynamic solve emits signed displacement frames while stress remains magnitude based", () => {

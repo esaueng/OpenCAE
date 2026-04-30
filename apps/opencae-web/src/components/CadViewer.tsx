@@ -12,7 +12,7 @@ import type { StepId } from "./StepBar";
 import { faceForModelHit, type SampleModelKind } from "../modelSelection";
 import { baseModelRotationRadians, modelRotationRadians, modelToViewerMatrix, viewerNormalToModelSpace, viewerPointToModelSpace, type RotationAxis } from "../modelOrientation";
 import { dimensionValuesForDisplayModel } from "../modelDimensions";
-import { formatResultValue, resultProbeSamplesForFaces, resultSamplesForFaces, type FaceResultSample, type ResultProbeTone } from "../resultFields";
+import { formatResultValue, resultProbeSamplesForFaces, resultSamplesForFaces, type FaceResultSample, type FieldResultSample, type ResultProbeTone } from "../resultFields";
 import { packedPreparedPlaybackFieldSlot, packedPreparedPlaybackFrameOrdinal, type PackedPreparedPlaybackCache } from "../resultPlaybackCache";
 import { stepPreviewFromBase64 } from "../stepPreview";
 import { normalizedStlGeometryFromBuffer } from "../stlPreview";
@@ -2105,7 +2105,7 @@ function reusablePackedSamples(samples: FaceResultSample[]): FaceResultSample[] 
   }));
 }
 
-function updatePackedSamples(samples: FaceResultSample[], cache: PackedPreparedPlaybackCache, frameOrdinal: number, resultMode: ResultMode): FaceResultSample[] {
+export function updatePackedSamples(samples: FaceResultSample[], cache: PackedPreparedPlaybackCache, frameOrdinal: number, resultMode: ResultMode): FaceResultSample[] {
   const slot = packedPreparedPlaybackFieldSlot(cache, frameOrdinal, resultMode, "face");
   if (!slot) return samples;
   const range = slot.max - slot.min;
@@ -2115,7 +2115,35 @@ function updatePackedSamples(samples: FaceResultSample[], cache: PackedPreparedP
     sample.value = value;
     sample.normalized = Number.isFinite(range) && Math.abs(range) > 1e-9 ? Math.max(0, Math.min(1, (value - slot.min) / range)) : 0.5;
   }
+  updatePackedFieldSamples(samples, slot, range);
   return samples;
+}
+
+function updatePackedFieldSamples(samples: FaceResultSample[], slot: NonNullable<ReturnType<typeof packedPreparedPlaybackFieldSlot>>, range: number) {
+  if (!samples.length || slot.sampleLength <= 0) return;
+  const owner = samples[0]!;
+  if (!owner.fieldSamples || owner.fieldSamples.length !== slot.sampleLength) {
+    owner.fieldSamples = Array.from({ length: slot.sampleLength }, (): FieldResultSample => ({
+      point: [0, 0, 0],
+      normal: [0, 1, 0],
+      value: 0,
+      normalized: 0.5
+    }));
+  }
+  for (let index = 0; index < slot.sampleLength; index += 1) {
+    const sample = owner.fieldSamples[index]!;
+    const packedIndex = slot.sampleOffset + index;
+    const pointOffset = packedIndex * 3;
+    const value = slot.sampleValues[packedIndex] ?? 0;
+    sample.value = value;
+    sample.normalized = Number.isFinite(range) && Math.abs(range) > 1e-9 ? Math.max(0, Math.min(1, (value - slot.min) / range)) : 0.5;
+    sample.point[0] = slot.samplePoints[pointOffset] ?? 0;
+    sample.point[1] = slot.samplePoints[pointOffset + 1] ?? 0;
+    sample.point[2] = slot.samplePoints[pointOffset + 2] ?? 0;
+    sample.normal[0] = slot.sampleNormals[pointOffset] ?? 0;
+    sample.normal[1] = slot.sampleNormals[pointOffset + 1] ?? 0;
+    sample.normal[2] = slot.sampleNormals[pointOffset + 2] ?? 0;
+  }
 }
 
 type ResultCoordinateTransform = {

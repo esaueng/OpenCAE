@@ -1,8 +1,9 @@
 import * as THREE from "three";
 import { describe, expect, test, vi } from "vitest";
-import { VIEWER_CREDIT_URL, VIEWER_GIZMO_ALIGNMENT, axisLabelToViewAxis, cameraDistanceForBounds, cameraViewForAxis, cloneResultPreviewObject, colorizeResultObject, colorizeSampleResultGeometry, createUndeformedResultOutlineObject, defaultHomeViewTarget, deformationScaleForResultFields, displayedLegendTickLabels, legendMeshStats, legendTickLabels, payloadHighlightObjectId, printLayerVisualizationForBounds, resultProbesForKind, resultValueForPoint, rotatedCameraOrbit, shouldShowDimensionOverlay, shouldShowModelHitLabel, shouldShowResultMarkers, shouldShowUndeformedResultOutline, viewerCameraResetPose } from "./CadViewer";
+import { VIEWER_CREDIT_URL, VIEWER_GIZMO_ALIGNMENT, axisLabelToViewAxis, cameraDistanceForBounds, cameraViewForAxis, cloneResultPreviewObject, colorizeResultObject, colorizeSampleResultGeometry, createUndeformedResultOutlineObject, defaultHomeViewTarget, deformationScaleForResultFields, displayedLegendTickLabels, legendMeshStats, legendTickLabels, payloadHighlightObjectId, printLayerVisualizationForBounds, resultProbesForKind, resultValueForPoint, rotatedCameraOrbit, shouldShowDimensionOverlay, shouldShowModelHitLabel, shouldShowResultMarkers, shouldShowUndeformedResultOutline, updatePackedSamples, viewerCameraResetPose } from "./CadViewer";
 import type { FaceResultSample } from "../resultFields";
 import type { DisplayFace, ResultField } from "@opencae/schema";
+import type { PackedPreparedPlaybackCache } from "../resultPlaybackCache";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -311,6 +312,46 @@ describe("CadViewer result coloring", () => {
 
     expect(colors.getZ(0)).toBeGreaterThan(colors.getX(0));
     expect(colors.getX(1)).toBeGreaterThan(colors.getZ(1));
+  });
+
+  test("packed playback updates dense field samples without replacing sample objects", () => {
+    const initialSamples: FaceResultSample[] = [
+      {
+        face: { id: "visible", label: "Visible", color: "#4da3ff", center: [0, 0, 0], normal: [0, 1, 0], stressValue: 60 },
+        value: 0,
+        normalized: 0.5,
+        fieldSamples: [
+          { point: [0, 0, 0], normal: [0, 1, 0], value: 0, normalized: 0.5 },
+          { point: [1, 0, 0], normal: [0, 1, 0], value: 0, normalized: 0.5 }
+        ]
+      }
+    ];
+    const firstFieldSample = initialSamples[0]!.fieldSamples![0]!;
+    const cache: PackedPreparedPlaybackCache = {
+      frameCount: 1,
+      fieldCount: 1,
+      framePositions: new Float32Array([0]),
+      frameIndexes: new Int32Array([0]),
+      times: new Float32Array([0]),
+      fieldDescriptors: [{ id: "stress", runId: "run", type: "stress", location: "face", units: "MPa" }],
+      fieldOffsets: new Int32Array([0]),
+      fieldLengths: new Int32Array([1]),
+      fieldMins: new Float32Array([0]),
+      fieldMaxes: new Float32Array([100]),
+      values: new Float32Array([50]),
+      sampleOffsets: new Int32Array([0]),
+      sampleLengths: new Int32Array([2]),
+      sampleValues: new Float32Array([10, 80]),
+      samplePoints: new Float32Array([0, 0, 0, 1, 0, 0]),
+      sampleNormals: new Float32Array([0, 1, 0, 0, 1, 0]),
+      actualBytes: 0
+    };
+
+    updatePackedSamples(initialSamples, cache, 0, "stress");
+
+    expect(initialSamples[0]?.fieldSamples?.[0]).toBe(firstFieldSample);
+    expect(initialSamples[0]?.fieldSamples?.map((sample) => sample.value)).toEqual([10, 80]);
+    expect(initialSamples[0]?.fieldSamples?.map((sample) => sample.normalized)).toEqual([0.1, 0.8]);
   });
 
   test("prefers solver point samples over face fallback when coloring uploaded result geometry", () => {

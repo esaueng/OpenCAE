@@ -3,6 +3,7 @@ import { describe, expect, test } from "vitest";
 import {
   hydratePreparedPlaybackFrame,
   packResultFieldsForPlayback,
+  packedResultFieldsForPlaybackTransferables,
   planPlaybackFrameCache,
   preparePlaybackFrames,
   playbackFieldsForResultMode,
@@ -105,6 +106,39 @@ describe("result playback cache", () => {
     expect(unpacked.find((field) => field.type === "displacement" && field.frameIndex === 1)?.values).toEqual([3, 4]);
   });
 
+  test("packed playback input preserves dense sample buffers", () => {
+    const fields = [
+      {
+        ...resultField(0, [10, 20]),
+        samples: [
+          { point: [0, 0, 0] as [number, number, number], normal: [0, 1, 0] as [number, number, number], value: 10 },
+          { point: [1, 0, 0] as [number, number, number], normal: [0, 1, 0] as [number, number, number], value: 20 }
+        ]
+      },
+      {
+        ...resultField(1, [20, 40]),
+        samples: [
+          { point: [0, 0, 0] as [number, number, number], normal: [0, 1, 0] as [number, number, number], value: 20 },
+          { point: [1, 0, 0] as [number, number, number], normal: [0, 1, 0] as [number, number, number], value: 40 }
+        ]
+      }
+    ];
+
+    const packed = packResultFieldsForPlayback(fields);
+
+    expect(packed?.sampleValues).toBeInstanceOf(Float32Array);
+    expect(packed?.samplePoints).toBeInstanceOf(Float32Array);
+    expect(packed?.sampleNormals).toBeInstanceOf(Float32Array);
+    expect(unpackResultFieldsForPlayback(packed!)[1]?.samples?.map((sample) => sample.value)).toEqual([20, 40]);
+    expect(packedResultFieldsForPlaybackTransferables(packed!)).toEqual(expect.arrayContaining([
+      packed!.sampleOffsets.buffer,
+      packed!.sampleLengths.buffer,
+      packed!.sampleValues.buffer,
+      packed!.samplePoints.buffer,
+      packed!.sampleNormals.buffer
+    ]));
+  });
+
   test("prepares playback frames from packed worker input while preserving memory budget planning", () => {
     const fields = [resultField(0, [0, 10]), resultField(1, [10, 30])];
     const packedFields = packResultFieldsForPlayback(fields);
@@ -144,7 +178,12 @@ describe("result playback cache", () => {
       prepared.packed!.fieldLengths.buffer,
       prepared.packed!.fieldMins.buffer,
       prepared.packed!.fieldMaxes.buffer,
-      prepared.packed!.values.buffer
+      prepared.packed!.values.buffer,
+      prepared.packed!.sampleOffsets.buffer,
+      prepared.packed!.sampleLengths.buffer,
+      prepared.packed!.sampleValues.buffer,
+      prepared.packed!.samplePoints.buffer,
+      prepared.packed!.sampleNormals.buffer
     ]));
   });
 
