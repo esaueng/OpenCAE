@@ -1,6 +1,16 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { DisplayModel, Project, ResultField, ResultSummary, Study } from "@opencae/schema";
-import { buildAutosavedWorkspace, parseAutosavedWorkspacePayload, scheduleAutosavedWorkspaceWrite } from "./appPersistence";
+import {
+  AUTOSAVE_STORAGE_KEY,
+  AUTOSAVE_UI_STORAGE_KEY,
+  buildAutosavedWorkspace,
+  buildAutosavedWorkspaceUiSnapshot,
+  parseAutosavedWorkspacePayload,
+  readAutosavedWorkspace,
+  scheduleAutosavedUiSnapshotWrite,
+  scheduleAutosavedWorkspaceWrite
+} from "./appPersistence";
+import type { WorkspaceUiSnapshot } from "./appPersistence";
 
 const project = {
   id: "project-1",
@@ -40,6 +50,32 @@ const fields = [{
   max: 12,
   units: "MPa"
 }] satisfies ResultField[];
+
+const baseUi = {
+  activeStep: "model",
+  homeRequested: false,
+  selectedFaceId: null,
+  selectedLoadPoint: null,
+  selectedPayloadObject: null,
+  viewMode: "model",
+  themeMode: "dark",
+  resultMode: "stress",
+  showDeformed: false,
+  showDimensions: false,
+  stressExaggeration: 1,
+  draftLoadType: "force",
+  draftLoadValue: 500,
+  draftLoadDirection: "-Z",
+  sampleModel: "bracket",
+  sampleAnalysisType: "static_stress",
+  activeRunId: "",
+  completedRunId: "",
+  runProgress: 0,
+  undoStack: [],
+  redoStack: [],
+  status: "Ready",
+  logs: []
+} satisfies WorkspaceUiSnapshot;
 
 const studyWithSetup = {
   id: "study-1",
@@ -341,5 +377,100 @@ describe("app persistence", () => {
     expect(storage.setItem).toHaveBeenCalledTimes(1);
 
     cancel();
+  });
+
+  test("defers heavy autosave snapshot construction until the scheduled write", () => {
+    vi.useFakeTimers();
+    const storage = {
+      getItem: vi.fn(),
+      setItem: vi.fn()
+    };
+    let buildCount = 0;
+    const cancel = scheduleAutosavedWorkspaceWrite(() => {
+      buildCount += 1;
+      return buildAutosavedWorkspace({
+        project,
+        displayModel,
+        savedAt: "2026-04-24T13:00:00.000Z",
+        results: { activeRunId: "run-1", completedRunId: "run-1", summary, fields },
+        ui: baseUi
+      });
+    }, storage, 200);
+
+    expect(buildCount).toBe(0);
+    expect(storage.setItem).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(199);
+    expect(buildCount).toBe(0);
+    vi.advanceTimersByTime(1);
+    expect(buildCount).toBe(1);
+    expect(storage.setItem).toHaveBeenCalledWith(AUTOSAVE_STORAGE_KEY, expect.stringContaining('"fields"'));
+
+    cancel();
+  });
+
+  test("writes lightweight UI autosave separately from the heavy workspace snapshot", () => {
+    vi.useFakeTimers();
+    const storage = {
+      getItem: vi.fn(),
+      setItem: vi.fn()
+    };
+    const uiSnapshot = buildAutosavedWorkspaceUiSnapshot({
+      ...baseUi,
+      resultMode: "displacement",
+      stressExaggeration: 3.25,
+      status: "Dragging deformation",
+      logs: ["Dragging deformation"]
+    }, "2026-04-24T13:05:00.000Z");
+
+    const cancel = scheduleAutosavedUiSnapshotWrite(uiSnapshot, storage, 200);
+
+    expect(storage.setItem).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(200);
+    expect(storage.setItem).toHaveBeenCalledTimes(1);
+    expect(storage.setItem).toHaveBeenCalledWith(AUTOSAVE_UI_STORAGE_KEY, JSON.stringify(uiSnapshot));
+    expect(storage.setItem).not.toHaveBeenCalledWith(AUTOSAVE_STORAGE_KEY, expect.any(String));
+
+    cancel();
+  });
+
+  test("overlays the latest lightweight UI autosave onto an existing full autosave payload", () => {
+    const heavySnapshot = buildAutosavedWorkspace({
+      project,
+      displayModel,
+      savedAt: "2026-04-24T13:00:00.000Z",
+      results: { activeRunId: "run-1", completedRunId: "run-1", summary, fields },
+      ui: {
+        ...baseUi,
+        activeStep: "results",
+        viewMode: "results",
+        resultMode: "stress",
+        stressExaggeration: 1,
+        status: "Results ready",
+        logs: ["Results ready"]
+      }
+    });
+    const uiSnapshot = buildAutosavedWorkspaceUiSnapshot({
+      ...heavySnapshot.ui,
+      resultMode: "acceleration",
+      stressExaggeration: 4,
+      status: "Fine tuning view",
+      logs: ["Fine tuning view"]
+    }, "2026-04-24T13:02:00.000Z");
+    const storage = {
+      getItem: vi.fn((key: string) => {
+        if (key === AUTOSAVE_STORAGE_KEY) return JSON.stringify(heavySnapshot);
+        if (key === AUTOSAVE_UI_STORAGE_KEY) return JSON.stringify(uiSnapshot);
+        return null;
+      }),
+      setItem: vi.fn()
+    };
+
+    const restored = readAutosavedWorkspace(storage);
+
+    expect(restored?.projectFile.results?.fields).toBeDefined();
+    expect(restored?.projectFile.displayModel).toEqual(displayModel);
+    expect(restored?.ui.resultMode).toBe("acceleration");
+    expect(restored?.ui.stressExaggeration).toBe(4);
+    expect(restored?.ui.status).toBe("Fine tuning view");
   });
 });

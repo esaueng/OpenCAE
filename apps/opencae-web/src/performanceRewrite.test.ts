@@ -153,10 +153,15 @@ describe("Worker UI performance rewrite boundaries", () => {
     const workspaceSource = readFileSync(resolve(__dirname, "WorkspaceApp.tsx"), "utf8");
     const persistenceSource = readFileSync(resolve(__dirname, "appPersistence.ts"), "utf8");
 
-    expect(workspaceSource).toContain("scheduleAutosavedWorkspaceWrite(buildAutosavedWorkspace");
+    expect(workspaceSource).toContain("scheduleAutosavedUiSnapshotWrite(");
+    expect(workspaceSource).toContain("buildAutosavedWorkspaceUiSnapshot");
+    expect(workspaceSource).toContain("scheduleAutosavedWorkspaceWrite(() => buildAutosavedWorkspace");
     expect(workspaceSource).not.toContain("writeAutosavedWorkspace(buildAutosavedWorkspace");
+    expect(workspaceSource).toContain("AUTOSAVE_HEAVY_WRITE_DELAY_MS");
+    expect(workspaceSource).toContain("AUTOSAVE_UI_WRITE_DELAY_MS");
+    expect(workspaceSource).not.toMatch(/scheduleAutosavedWorkspaceWrite\(buildAutosavedWorkspace\([\s\S]*status,[\s\S]*logs[\s\S]*\),/);
     expect(persistenceSource).toContain("requestIdleCallback");
-    expect(persistenceSource).toContain("delayMs = 650");
+    expect(persistenceSource).toContain("AUTOSAVE_UI_STORAGE_KEY");
   });
 
   test("keeps imported CAD edge overlays optional during result playback", () => {
