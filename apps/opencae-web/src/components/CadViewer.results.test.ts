@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { describe, expect, test, vi } from "vitest";
-import { VIEWER_CREDIT_URL, VIEWER_GIZMO_ALIGNMENT, applyResultFrameToGeometry, axisLabelToViewAxis, cameraDistanceForBounds, cameraViewForAxis, cloneResultPreviewObject, colorizeResultObject, colorizeSampleResultGeometry, createUndeformedResultOutlineObject, defaultHomeViewTarget, deformationScaleForResultFields, displayedLegendTickLabels, legendMeshStats, legendTickLabels, payloadHighlightObjectId, printLayerVisualizationForBounds, resultProbesForKind, resultValueForPoint, rotatedCameraOrbit, shouldShowDimensionOverlay, shouldShowModelHitLabel, shouldShowResultMarkers, shouldShowUndeformedResultOutline, updatePackedSamples, viewerCameraResetPose } from "./CadViewer";
+import { VIEWER_CREDIT_URL, VIEWER_GIZMO_ALIGNMENT, applyResultFrameToGeometry, axisLabelToViewAxis, cameraDistanceForBounds, cameraViewForAxis, cloneResultPreviewObject, colorizeResultObject, colorizeSampleResultGeometry, createUndeformedResultOutlineObject, defaultHomeViewTarget, deformationScaleForResultFields, displayedLegendTickLabels, interpolateDisplacementAtPoint, legendMeshStats, legendTickLabels, payloadHighlightObjectId, printLayerVisualizationForBounds, resultProbesForKind, resultValueForPoint, rotatedCameraOrbit, shouldShowDimensionOverlay, shouldShowModelHitLabel, shouldShowResultMarkers, shouldShowUndeformedResultOutline, updatePackedSamples, viewerCameraResetPose } from "./CadViewer";
 import type { FaceResultSample } from "../resultFields";
 import type { DisplayFace, ResultField } from "@opencae/schema";
 import type { PackedPreparedPlaybackCache } from "../resultPlaybackCache";
@@ -587,6 +587,27 @@ describe("CadViewer result coloring", () => {
     expect(worstCurvatureJump).toBeLessThan(0.004);
   });
 
+  test("interpolates displacement with exact nodal vector matches before smoothing", () => {
+    const field: ResultField = {
+      id: "displacement-exact",
+      runId: "run",
+      type: "displacement",
+      location: "node",
+      values: [1, 0.2, 2, 3],
+      min: 0,
+      max: 3,
+      units: "mm",
+      samples: [
+        { point: [0, 0, 0], normal: [0, 1, 0], value: 1, vector: [0, -1, 0] },
+        { point: [0, 0.2, 0], normal: [0, 1, 0], value: 0.2, vector: [0, -0.2, 0] },
+        { point: [1, 0, 0], normal: [0, 1, 0], value: 2, vector: [0, -2, 0] },
+        { point: [2, 0, 0], normal: [0, 1, 0], value: 3, vector: [0, -3, 0] }
+      ]
+    };
+
+    expect(interpolateDisplacementAtPoint([0, 0, 0], field)).toEqual([0, -1, 0]);
+  });
+
   test("applies changed scalar frames to geometry colors", () => {
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute("position", new THREE.Float32BufferAttribute([0, 0, 0, 1, 0, 0], 3));
@@ -924,6 +945,54 @@ describe("CadViewer result coloring", () => {
     expect((payloadMesh.material as THREE.MeshStandardMaterial).color.getHexString()).toBe("8f9aa5");
     expect(lowColor.b).toBeGreaterThan(lowColor.r);
     expect(highColor.r).toBeGreaterThan(highColor.b);
+  });
+
+  test("translates uploaded payload meshes rigidly with deformed attachment displacement", () => {
+    const simulatedGeometry = new THREE.BufferGeometry();
+    simulatedGeometry.setAttribute("position", new THREE.Float32BufferAttribute([-1, 0, 0, 0, 0, 0, 1, 0, 0], 3));
+    const simulatedMesh = new THREE.Mesh(simulatedGeometry, new THREE.MeshStandardMaterial({ color: "#63a9e5" }));
+    simulatedMesh.userData.opencaeObjectId = "simulated-part";
+
+    const payloadGeometry = new THREE.BufferGeometry();
+    payloadGeometry.setAttribute("position", new THREE.Float32BufferAttribute([1, 0, 0, 1.1, 0, 0, 1.2, 0, 0], 3));
+    const payloadMesh = new THREE.Mesh(payloadGeometry, new THREE.MeshStandardMaterial({ color: "#63a9e5" }));
+    payloadMesh.userData.opencaeObjectId = "payload-part";
+
+    const group = new THREE.Group();
+    group.add(simulatedMesh, payloadMesh);
+    const displacementField: ResultField = {
+      id: "displacement",
+      runId: "run",
+      type: "displacement",
+      location: "node",
+      values: [0, 0.006],
+      min: 0,
+      max: 0.006,
+      units: "mm",
+      samples: [
+        { point: [-1, 0, 0], normal: [0, 1, 0], value: 0, vector: [0, 0, 0] },
+        { point: [1.1, 0, 0], normal: [0, 1, 0], value: 0.006, vector: [0, -0.006, 0] }
+      ]
+    };
+
+    colorizeResultObject(group, "uploaded", "stress", true, 1, samples, [{
+      id: "load-payload",
+      faceId: "right",
+      payloadObject: { id: "payload-part", label: "Payload part", center: [1.1, 0, 0] },
+      type: "gravity",
+      value: 2,
+      units: "kg",
+      direction: [0, 0, -1],
+      directionLabel: "-Z",
+      labelIndex: 0,
+      stackIndex: 0
+    }], 1, [], [displacementField]);
+
+    expect(payloadMesh.position.y).toBeLessThan(-0.05);
+    const payloadPositions = Array.from(payloadGeometry.getAttribute("position").array);
+    [1, 0, 0, 1.1, 0, 0, 1.2, 0, 0].forEach((value, index) => {
+      expect(payloadPositions[index]).toBeCloseTo(value);
+    });
   });
 
   test("keeps split meshes for the same payload-loaded object solid grey", () => {
