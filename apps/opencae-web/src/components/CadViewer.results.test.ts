@@ -290,6 +290,29 @@ describe("CadViewer result coloring", () => {
     expect(resultValueForPoint("plate", "stress", 4, new THREE.Vector3(0, 0.18, 0), dynamicSamples)).toBeCloseTo(0.35);
   });
 
+  test("remaps solved sample colors across the visible built-in result geometry", () => {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.Float32BufferAttribute([-1, 0, 0, 1, 0, 0, -1, 0.1, 0], 3));
+    geometry.setIndex([0, 1, 2]);
+    const highBiasedSamples: FaceResultSample[] = [
+      {
+        face: { id: "visible", label: "Visible", color: "#4da3ff", center: [0, 0, 0], normal: [0, 1, 0], stressValue: 60 },
+        value: 60,
+        normalized: 0.6,
+        fieldSamples: [
+          { point: [-1, 0, 0], normal: [0, 1, 0], value: 60, normalized: 0.6 },
+          { point: [1, 0, 0], normal: [0, 1, 0], value: 90, normalized: 0.9 }
+        ]
+      }
+    ];
+
+    const colorized = colorizeSampleResultGeometry(geometry, "plate", "stress", false, 1, highBiasedSamples, []);
+    const colors = colorized.getAttribute("color");
+
+    expect(colors.getZ(0)).toBeGreaterThan(colors.getX(0));
+    expect(colors.getX(1)).toBeGreaterThan(colors.getZ(1));
+  });
+
   test("prefers solver point samples over face fallback when coloring uploaded result geometry", () => {
     const lowFaceSamples: FaceResultSample[] = [
       {

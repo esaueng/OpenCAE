@@ -2014,7 +2014,6 @@ function resultValueRangeForGeometry(
   samples: FaceResultSample[],
   coordinateTransform?: ResultCoordinateTransform
 ): ResultValueRange {
-  if (hasSolvedResultSamples(samples)) return { min: 0, max: 1 };
   const positions = geometry.getAttribute("position");
   if (!(positions instanceof THREE.BufferAttribute)) return { min: 0, max: 1 };
   const basePositions = basePositionArrayForGeometry(geometry, positions);
@@ -2086,7 +2085,7 @@ function usePackedPlaybackGeometry(
         latest.loadMarkers,
         latest.deformationScale,
         undefined,
-        { min: 0, max: 1 },
+        undefined,
         latest.supportMarkers
       );
       invalidate();
