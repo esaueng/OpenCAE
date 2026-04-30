@@ -42,8 +42,10 @@ describe("App workflow layout", () => {
 
   test("prioritizes viewer interaction over playback visual commits", () => {
     expect(appSource).toContain("const viewerInteractingRef = useRef(false);");
+    expect(appSource).toContain("const playbackViewerFrameIntervalMs = viewerInteractingRef.current");
     expect(appSource).toContain("const playbackCommitIntervalMs = viewerInteractingRef.current");
     expect(appSource).toContain("if (!viewerInteractingRef.current) {");
+    expect(appSource).toContain("commitPlaybackViewerFrame(framePosition);");
     expect(appSource).toContain("onViewerInteractionChange={handleViewerInteractionChange}");
   });
 
