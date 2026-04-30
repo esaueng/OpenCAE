@@ -79,6 +79,7 @@ export interface PackedResultPlaybackCache {
   frameCount: number;
   fieldCount: number;
   valueCount: number;
+  sampleCount: number;
   frameIndexes: Int32Array;
   times: Float32Array;
   fieldDescriptors: PackedResultPlaybackFieldDescriptor[];
@@ -87,6 +88,11 @@ export interface PackedResultPlaybackCache {
   fieldMins: Float32Array;
   fieldMaxes: Float32Array;
   values: Float32Array;
+  sampleOffsets: Int32Array;
+  sampleLengths: Int32Array;
+  sampleValues: Float32Array;
+  samplePoints: Float32Array;
+  sampleNormals: Float32Array;
   estimatedBytes: number;
   fieldsForFrame: (frameIndex: number) => ResultField[];
   fieldsForFramePosition: (framePosition: number) => ResultField[];
@@ -167,8 +173,11 @@ export function createPackedResultPlaybackCache(fields: ResultField[]): PackedRe
   const fieldLengths = new Int32Array(frameCount * fieldCount);
   const fieldMins = new Float32Array(frameCount * fieldCount);
   const fieldMaxes = new Float32Array(frameCount * fieldCount);
+  const sampleOffsets = new Int32Array(frameCount * fieldCount);
+  const sampleLengths = new Int32Array(frameCount * fieldCount);
   const descriptors: PackedResultPlaybackFieldDescriptor[] = [];
   let valueCount = 0;
+  let sampleCount = 0;
 
   for (let frameOrdinal = 0; frameOrdinal < frameCount; frameOrdinal += 1) {
     const frameIndex = frameIndexes[frameOrdinal] ?? 0;
@@ -181,7 +190,10 @@ export function createPackedResultPlaybackCache(fields: ResultField[]): PackedRe
       fieldLengths[slot] = field?.values.length ?? 0;
       fieldMins[slot] = field ? Number(field.min) : 0;
       fieldMaxes[slot] = field ? Number(field.max) : 0;
+      sampleOffsets[slot] = sampleCount;
+      sampleLengths[slot] = field?.samples?.length ?? 0;
       valueCount += field?.values.length ?? 0;
+      sampleCount += field?.samples?.length ?? 0;
       if (frameOrdinal === 0) {
         const descriptorField = field ?? firstFieldForSeries(fieldMapsByFrame, descriptorKeys[fieldOrdinal]!);
         if (descriptorField) {
@@ -198,6 +210,9 @@ export function createPackedResultPlaybackCache(fields: ResultField[]): PackedRe
   }
 
   const values = new Float32Array(valueCount);
+  const sampleValues = new Float32Array(sampleCount);
+  const samplePoints = new Float32Array(sampleCount * 3);
+  const sampleNormals = new Float32Array(sampleCount * 3);
   for (let frameOrdinal = 0; frameOrdinal < frameCount; frameOrdinal += 1) {
     const frameIndex = frameIndexes[frameOrdinal] ?? 0;
     const frameFieldMap = fieldMapsByFrame.get(frameIndex);
@@ -206,6 +221,15 @@ export function createPackedResultPlaybackCache(fields: ResultField[]): PackedRe
       if (!field) continue;
       const slot = frameOrdinal * fieldCount + fieldOrdinal;
       values.set(field.values, fieldOffsets[slot]);
+      const samples = field.samples ?? [];
+      const sampleOffset = sampleOffsets[slot] ?? 0;
+      for (let sampleIndex = 0; sampleIndex < samples.length; sampleIndex += 1) {
+        const sample = samples[sampleIndex]!;
+        const targetIndex = sampleOffset + sampleIndex;
+        sampleValues[targetIndex] = sample.value;
+        samplePoints.set(sample.point, targetIndex * 3);
+        sampleNormals.set(sample.normal, targetIndex * 3);
+      }
     }
   }
 
@@ -221,7 +245,12 @@ export function createPackedResultPlaybackCache(fields: ResultField[]): PackedRe
       fieldLengths,
       fieldMins,
       fieldMaxes,
-      values
+      values,
+      sampleOffsets,
+      sampleLengths,
+      sampleValues,
+      samplePoints,
+      sampleNormals
     ));
   };
 
@@ -245,7 +274,12 @@ export function createPackedResultPlaybackCache(fields: ResultField[]): PackedRe
         fieldLengths,
         fieldMins,
         fieldMaxes,
-        values
+        values,
+        sampleOffsets,
+        sampleLengths,
+        sampleValues,
+        samplePoints,
+        sampleNormals
       );
     });
   };
@@ -254,6 +288,7 @@ export function createPackedResultPlaybackCache(fields: ResultField[]): PackedRe
     frameCount,
     fieldCount,
     valueCount,
+    sampleCount,
     frameIndexes: frameIndexArray,
     times,
     fieldDescriptors: descriptors,
@@ -262,7 +297,12 @@ export function createPackedResultPlaybackCache(fields: ResultField[]): PackedRe
     fieldMins,
     fieldMaxes,
     values,
-    estimatedBytes: frameIndexArray.byteLength + times.byteLength + fieldOffsets.byteLength + fieldLengths.byteLength + fieldMins.byteLength + fieldMaxes.byteLength + values.byteLength,
+    sampleOffsets,
+    sampleLengths,
+    sampleValues,
+    samplePoints,
+    sampleNormals,
+    estimatedBytes: frameIndexArray.byteLength + times.byteLength + fieldOffsets.byteLength + fieldLengths.byteLength + fieldMins.byteLength + fieldMaxes.byteLength + values.byteLength + sampleOffsets.byteLength + sampleLengths.byteLength + sampleValues.byteLength + samplePoints.byteLength + sampleNormals.byteLength,
     fieldsForFrame: (frameIndex) => {
       const ordinal = indexOfFrame(frameIndexArray, frameIndex);
       return fieldsForFrameOrdinal(ordinal >= 0 ? ordinal : 0);
@@ -283,7 +323,12 @@ export function packedResultPlaybackTransferables(cache: PackedResultPlaybackCac
     cache.fieldLengths.buffer,
     cache.fieldMins.buffer,
     cache.fieldMaxes.buffer,
-    cache.values.buffer
+    cache.values.buffer,
+    cache.sampleOffsets.buffer,
+    cache.sampleLengths.buffer,
+    cache.sampleValues.buffer,
+    cache.samplePoints.buffer,
+    cache.sampleNormals.buffer
   ];
 }
 
@@ -374,7 +419,12 @@ function unpackFieldForSlot(
   fieldLengths: Int32Array,
   fieldMins: Float32Array,
   fieldMaxes: Float32Array,
-  values: Float32Array
+  values: Float32Array,
+  sampleOffsets: Int32Array,
+  sampleLengths: Int32Array,
+  sampleValues: Float32Array,
+  samplePoints: Float32Array,
+  sampleNormals: Float32Array
 ): ResultField {
   const length = fieldLengths[slot] ?? 0;
   const offset = fieldOffsets[slot] ?? 0;
@@ -382,6 +432,7 @@ function unpackFieldForSlot(
   for (let index = 0; index < length; index += 1) {
     fieldValues[index] = values[offset + index] ?? 0;
   }
+  const samples = unpackSamplesForSlot(slot, sampleOffsets, sampleLengths, sampleValues, samplePoints, sampleNormals);
   return {
     ...descriptor,
     id: `${descriptor.id}-frame-${frameIndex}`,
@@ -389,7 +440,8 @@ function unpackFieldForSlot(
     min: fieldMins[slot] ?? 0,
     max: fieldMaxes[slot] ?? 0,
     frameIndex,
-    timeSeconds
+    timeSeconds,
+    ...(samples.length ? { samples } : {})
   };
 }
 
@@ -404,7 +456,12 @@ function unpackInterpolatedFieldForSlots(
   fieldLengths: Int32Array,
   fieldMins: Float32Array,
   fieldMaxes: Float32Array,
-  values: Float32Array
+  values: Float32Array,
+  sampleOffsets: Int32Array,
+  sampleLengths: Int32Array,
+  sampleValues: Float32Array,
+  samplePoints: Float32Array,
+  sampleNormals: Float32Array
 ): ResultField {
   const lowerLength = fieldLengths[lowerSlot] ?? 0;
   const upperLength = fieldLengths[upperSlot] ?? 0;
@@ -417,6 +474,9 @@ function unpackInterpolatedFieldForSlots(
     const upperValue = index < upperLength ? values[upperOffset + index] ?? 0 : values[lowerOffset + index] ?? 0;
     fieldValues[index] = lerp(lowerValue, upperValue, blend);
   }
+  const lowerSamples = unpackSamplesForSlot(lowerSlot, sampleOffsets, sampleLengths, sampleValues, samplePoints, sampleNormals);
+  const upperSamples = unpackSamplesForSlot(upperSlot, sampleOffsets, sampleLengths, sampleValues, samplePoints, sampleNormals);
+  const samples = lowerSamples.length && upperSamples.length ? interpolateSamples(lowerSamples, upperSamples, blend) : lowerSamples;
   return {
     ...descriptor,
     id: `${descriptor.id}-visual-${framePositionId(frameIndex)}`,
@@ -424,8 +484,40 @@ function unpackInterpolatedFieldForSlots(
     min: lerp(fieldMins[lowerSlot] ?? 0, fieldMins[upperSlot] ?? fieldMins[lowerSlot] ?? 0, blend),
     max: lerp(fieldMaxes[lowerSlot] ?? 0, fieldMaxes[upperSlot] ?? fieldMaxes[lowerSlot] ?? 0, blend),
     frameIndex,
-    timeSeconds
+    timeSeconds,
+    ...(samples.length ? { samples } : {})
   };
+}
+
+function unpackSamplesForSlot(
+  slot: number,
+  sampleOffsets: Int32Array,
+  sampleLengths: Int32Array,
+  sampleValues: Float32Array,
+  samplePoints: Float32Array,
+  sampleNormals: Float32Array
+): NonNullable<ResultField["samples"]> {
+  const length = sampleLengths[slot] ?? 0;
+  const offset = sampleOffsets[slot] ?? 0;
+  const samples: NonNullable<ResultField["samples"]> = [];
+  for (let index = 0; index < length; index += 1) {
+    const sampleIndex = offset + index;
+    const pointOffset = sampleIndex * 3;
+    samples.push({
+      point: [
+        samplePoints[pointOffset] ?? 0,
+        samplePoints[pointOffset + 1] ?? 0,
+        samplePoints[pointOffset + 2] ?? 0
+      ],
+      normal: [
+        sampleNormals[pointOffset] ?? 0,
+        sampleNormals[pointOffset + 1] ?? 0,
+        sampleNormals[pointOffset + 2] ?? 0
+      ],
+      value: sampleValues[sampleIndex] ?? 0
+    });
+  }
+  return samples;
 }
 
 function framePositionId(framePosition: number): string {
