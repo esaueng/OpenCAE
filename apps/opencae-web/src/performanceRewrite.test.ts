@@ -69,8 +69,9 @@ describe("Worker UI performance rewrite boundaries", () => {
     expect(cacheSource).not.toContain("Array.from(field.values)");
   });
 
-  test("does not hydrate prepared frames inside the playback animation loop", () => {
+  test("keeps packed playback animation out of per-frame React result snapshots", () => {
     const workspaceSource = readFileSync(resolve(__dirname, "WorkspaceApp.tsx"), "utf8");
+    const viewerSource = readFileSync(resolve(__dirname, "components/CadViewer.tsx"), "utf8");
     const callbackStart = workspaceSource.indexOf("const commitPlaybackViewerFrame = useCallback((framePosition: number) => {");
     const callbackEnd = workspaceSource.indexOf("  const solverRunning", callbackStart);
     const playbackCommitCallback = workspaceSource.slice(callbackStart, callbackEnd);
@@ -81,9 +82,25 @@ describe("Worker UI performance rewrite boundaries", () => {
     expect(callbackStart).toBeGreaterThan(-1);
     expect(loopStart).toBeGreaterThan(-1);
     expect(playbackCommitCallback).toContain("setPackedFrame(cache.packed");
+    expect(viewerSource).toContain("resultPlaybackBufferCache?: PackedPreparedPlaybackCache | null");
+    expect(workspaceSource).toContain("resultPlaybackBufferCache={resultPlaybackBufferCacheForViewer}");
     expect(playbackLoop).toContain("commitPlaybackViewerFrame(framePosition)");
+    expect(playbackLoop).not.toContain("setResultFields");
+    expect(playbackLoop).not.toContain("setSnapshot");
+    expect(playbackLoop).not.toContain("fieldsForFramePosition");
     expect(playbackLoop).not.toContain("hydratePreparedPlaybackFrame");
     expect(playbackLoop).not.toContain("Array.from");
+  });
+
+  test("preserves throttled React playback labels while viewer invalidates packed buffer changes", () => {
+    const workspaceSource = readFileSync(resolve(__dirname, "WorkspaceApp.tsx"), "utf8");
+    const viewerSource = readFileSync(resolve(__dirname, "components/CadViewer.tsx"), "utf8");
+
+    expect(workspaceSource).toContain("PLAYBACK_UI_COMMIT_INTERVAL_MS = 250");
+    expect(workspaceSource).toContain("setPackedFrame(cache.packed, framePosition)");
+    expect(viewerSource).toContain("packedPreparedPlaybackFrameOrdinal(snapshot.cache, snapshot.framePosition)");
+    expect(viewerSource).toContain("resultPlaybackBufferCache");
+    expect(viewerSource).toContain("return resultPlaybackFrameController.subscribe(() => invalidate())");
   });
 
   test("idle-schedules autosave instead of writing localStorage synchronously from workspace renders", () => {
