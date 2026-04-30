@@ -24,6 +24,7 @@ describe("App workflow layout", () => {
 
   test("keeps the Ko-fi donation action in the top bar", () => {
     expect(appSource).toContain('href="https://ko-fi.com/petergustafson"');
+    expect(appSource).toContain("donate-action donate-action-intro");
     expect(appSource).toContain("Buy me a coffee");
   });
 

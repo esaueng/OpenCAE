@@ -1030,7 +1030,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
             <button className="icon-button history-button" type="button" title="Redo last change" aria-label="Redo last change" disabled={!canRedoAction} onClick={handleRedoAction}><RedoIcon /></button>
           </div>
         </div>
-        <a className="secondary topbar-action donate-action" href="https://ko-fi.com/petergustafson" target="_blank" rel="noreferrer" title="Support OpenCAE on Ko-fi">
+        <a className="secondary topbar-action donate-action donate-action-intro" href="https://ko-fi.com/petergustafson" target="_blank" rel="noreferrer" title="Support OpenCAE on Ko-fi">
           <Coffee size={16} aria-hidden="true" />
           <span>Buy me a coffee</span>
         </a>
