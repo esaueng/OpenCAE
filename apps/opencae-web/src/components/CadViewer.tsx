@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ElementRef, MutableRefObject } from "react";
 import { Billboard, Bounds, Edges, GizmoHelper, Html, Line, OrbitControls, Text, useBounds } from "@react-three/drei";
 import { Canvas, useThree } from "@react-three/fiber";
@@ -13,6 +13,7 @@ import { faceForModelHit, type SampleModelKind } from "../modelSelection";
 import { baseModelRotationRadians, modelRotationRadians, modelToViewerMatrix, viewerNormalToModelSpace, viewerPointToModelSpace, type RotationAxis } from "../modelOrientation";
 import { dimensionValuesForDisplayModel } from "../modelDimensions";
 import { formatResultValue, resultProbeSamplesForFaces, resultSamplesForFaces, type FaceResultSample, type ResultProbeTone } from "../resultFields";
+import { packedPreparedPlaybackFieldSlot, type PackedPreparedPlaybackCache } from "../resultPlaybackCache";
 import { stepPreviewFromBase64 } from "../stepPreview";
 import { normalizedStlGeometryFromBuffer } from "../stlPreview";
 import { lengthForUnits, stressForUnits, type UnitSystem } from "../unitDisplay";
@@ -51,9 +52,14 @@ export interface ViewerSupportMarker {
   stackIndex: number;
 }
 
-export interface ResultPlaybackFrameStore {
-  subscribe: (listener: () => void) => () => void;
-  getSnapshot: () => ResultField[];
+export interface ResultPlaybackFrameSnapshot {
+  cache: PackedPreparedPlaybackCache;
+  frameOrdinal: number;
+}
+
+export interface ResultPlaybackFrameController {
+  subscribe: (listener: (snapshot: ResultPlaybackFrameSnapshot) => void) => () => void;
+  getSnapshot: () => ResultPlaybackFrameSnapshot | null;
 }
 
 interface CadViewerProps {
@@ -71,7 +77,7 @@ interface CadViewerProps {
   showDimensions: boolean;
   stressExaggeration: number;
   resultFields: ResultField[];
-  resultPlaybackFrameStore?: ResultPlaybackFrameStore;
+  resultPlaybackFrameController?: ResultPlaybackFrameController;
   meshSummary?: MeshSummary;
   unitSystem: UnitSystem;
   themeMode: ThemeMode;
@@ -137,12 +143,7 @@ export function CadViewer(props: CadViewerProps) {
   const viewportBackground = isLightTheme ? "#f7f9fc" : "#070b10";
   const modelRotation = useMemo(() => modelRotationRadians(props.displayModel), [props.displayModel]);
   const baseModelRotation = useMemo(() => baseModelRotationRadians(props.displayModel), [props.displayModel]);
-  const storeResultFields = useSyncExternalStore(
-    props.resultPlaybackFrameStore?.subscribe ?? noopPlaybackFrameSubscribe,
-    props.resultPlaybackFrameStore?.getSnapshot ?? (() => props.resultFields),
-    props.resultPlaybackFrameStore?.getSnapshot ?? (() => props.resultFields)
-  );
-  const resultFields = props.resultPlaybackFrameStore ? storeResultFields : props.resultFields;
+  const resultFields = props.resultFields;
   useEffect(() => {
     setUploadedPreviewBounds(null);
   }, [props.displayModel.nativeCad?.contentBase64, props.displayModel.visualMesh?.contentBase64]);
@@ -157,6 +158,7 @@ export function CadViewer(props: CadViewerProps) {
           loadMarkers={props.loadMarkers}
           printLayerOrientation={props.printLayerOrientation}
           resultFields={resultFields}
+          resultPlaybackFrameController={props.resultPlaybackFrameController}
           resultMode={props.resultMode}
           resultPlaybackPlaying={props.resultPlaybackPlaying}
           selectedFaceId={props.selectedFaceId}
@@ -204,10 +206,6 @@ export function CadViewer(props: CadViewerProps) {
   );
 }
 
-function noopPlaybackFrameSubscribe() {
-  return () => undefined;
-}
-
 function ViewerInvalidator({
   activeStep,
   displayModel,
@@ -216,6 +214,7 @@ function ViewerInvalidator({
   loadMarkers,
   printLayerOrientation,
   resultFields,
+  resultPlaybackFrameController,
   resultMode,
   resultPlaybackPlaying,
   selectedFaceId,
@@ -237,6 +236,7 @@ function ViewerInvalidator({
   loadMarkers: ViewerLoadMarker[];
   printLayerOrientation: PrintLayerOrientation | null;
   resultFields: ResultField[];
+  resultPlaybackFrameController?: ResultPlaybackFrameController;
   resultMode: ResultMode;
   resultPlaybackPlaying: boolean;
   selectedFaceId: string | null;
@@ -253,6 +253,10 @@ function ViewerInvalidator({
 }) {
   const { invalidate } = useThree();
   useEffect(() => {
+    if (!resultPlaybackFrameController) return undefined;
+    return resultPlaybackFrameController.subscribe(() => invalidate());
+  }, [invalidate, resultPlaybackFrameController]);
+  useEffect(() => {
     invalidate();
   }, [
     activeStep,
@@ -263,6 +267,7 @@ function ViewerInvalidator({
     loadMarkers,
     printLayerOrientation,
     resultFields,
+    resultPlaybackFrameController,
     resultMode,
     resultPlaybackPlaying,
     selectedFaceId,
@@ -453,6 +458,7 @@ function BracketModel({
   resultMode,
   showDeformed,
   resultPlaybackPlaying,
+  resultPlaybackFrameController,
   stressExaggeration,
   resultFields,
   unitSystem,
@@ -572,6 +578,7 @@ function BracketModel({
           showDeformed={showDeformed}
           stressExaggeration={stressExaggeration}
           resultFields={resultFields}
+          resultPlaybackFrameController={resultPlaybackFrameController}
           loadMarkers={loadMarkers}
           supportMarkers={supportMarkers}
           onMeasureDisplayModelDimensions={onMeasureDisplayModelDimensions}
@@ -1370,6 +1377,7 @@ function AnalysisResultModel({
   showDeformed,
   stressExaggeration,
   resultFields,
+  resultPlaybackFrameController,
   loadMarkers,
   supportMarkers,
   onMeasureDisplayModelDimensions,
@@ -1381,6 +1389,7 @@ function AnalysisResultModel({
   showDeformed: boolean;
   stressExaggeration: number;
   resultFields: ResultField[];
+  resultPlaybackFrameController?: ResultPlaybackFrameController;
   loadMarkers: ViewerLoadMarker[];
   supportMarkers: ViewerSupportMarker[];
   onMeasureDisplayModelDimensions?: (dimensions: NonNullable<DisplayModel["dimensions"]>) => void;
@@ -1401,6 +1410,7 @@ function AnalysisResultModel({
         showDeformed={showDeformed}
         stressExaggeration={stressExaggeration}
         deformationScale={deformationScale}
+        resultPlaybackFrameController={resultPlaybackFrameController}
         loadMarkers={loadMarkers}
         supportMarkers={supportMarkers}
         onMeasureDisplayModelDimensions={onMeasureDisplayModelDimensions}
@@ -1409,9 +1419,9 @@ function AnalysisResultModel({
     );
   }
   if (kind === "bracket") {
-    return <BracketResultSolid kind={kind} samples={samples} resultMode={resultMode} showDeformed={showDeformed} stressExaggeration={stressExaggeration} deformationScale={deformationScale} loadMarkers={loadMarkers} supportMarkers={supportMarkers} />;
+    return <BracketResultSolid kind={kind} samples={samples} resultMode={resultMode} showDeformed={showDeformed} stressExaggeration={stressExaggeration} deformationScale={deformationScale} resultPlaybackFrameController={resultPlaybackFrameController} loadMarkers={loadMarkers} supportMarkers={supportMarkers} />;
   }
-  return <SampleResultSolid kind={kind} samples={samples} resultMode={resultMode} showDeformed={showDeformed} stressExaggeration={stressExaggeration} deformationScale={deformationScale} loadMarkers={loadMarkers} supportMarkers={supportMarkers} />;
+  return <SampleResultSolid kind={kind} samples={samples} resultMode={resultMode} showDeformed={showDeformed} stressExaggeration={stressExaggeration} deformationScale={deformationScale} resultPlaybackFrameController={resultPlaybackFrameController} loadMarkers={loadMarkers} supportMarkers={supportMarkers} />;
 }
 
 function UploadedResultSolid({
@@ -1421,6 +1431,7 @@ function UploadedResultSolid({
   showDeformed,
   stressExaggeration,
   deformationScale,
+  resultPlaybackFrameController,
   loadMarkers,
   supportMarkers,
   onMeasureDisplayModelDimensions,
@@ -1432,6 +1443,7 @@ function UploadedResultSolid({
   showDeformed: boolean;
   stressExaggeration: number;
   deformationScale?: number;
+  resultPlaybackFrameController?: ResultPlaybackFrameController;
   loadMarkers: ViewerLoadMarker[];
   supportMarkers: ViewerSupportMarker[];
   onMeasureDisplayModelDimensions?: (dimensions: NonNullable<DisplayModel["dimensions"]>) => void;
@@ -1446,6 +1458,7 @@ function UploadedResultSolid({
         showDeformed={showDeformed}
         stressExaggeration={stressExaggeration}
         deformationScale={deformationScale}
+        resultPlaybackFrameController={resultPlaybackFrameController}
         loadMarkers={loadMarkers}
         supportMarkers={supportMarkers}
         onMeasureDisplayModelDimensions={onMeasureDisplayModelDimensions}
@@ -1463,6 +1476,7 @@ function UploadedResultSolid({
         showDeformed={showDeformed}
         stressExaggeration={stressExaggeration}
         deformationScale={deformationScale}
+        resultPlaybackFrameController={resultPlaybackFrameController}
         loadMarkers={loadMarkers}
         supportMarkers={supportMarkers}
       />
@@ -1483,6 +1497,7 @@ function UploadedNativeCadResultModel({
   showDeformed,
   stressExaggeration,
   deformationScale,
+  resultPlaybackFrameController,
   loadMarkers,
   supportMarkers,
   onMeasureDisplayModelDimensions,
@@ -1494,6 +1509,7 @@ function UploadedNativeCadResultModel({
   showDeformed: boolean;
   stressExaggeration: number;
   deformationScale?: number;
+  resultPlaybackFrameController?: ResultPlaybackFrameController;
   loadMarkers: ViewerLoadMarker[];
   supportMarkers: ViewerSupportMarker[];
   onMeasureDisplayModelDimensions?: (dimensions: NonNullable<DisplayModel["dimensions"]>) => void;
@@ -1573,6 +1589,7 @@ function UploadedStlResultModel({
   showDeformed,
   stressExaggeration,
   deformationScale,
+  resultPlaybackFrameController,
   loadMarkers,
   supportMarkers
 }: {
@@ -1582,6 +1599,7 @@ function UploadedStlResultModel({
   showDeformed: boolean;
   stressExaggeration: number;
   deformationScale?: number;
+  resultPlaybackFrameController?: ResultPlaybackFrameController;
   loadMarkers: ViewerLoadMarker[];
   supportMarkers: ViewerSupportMarker[];
 }) {
@@ -1590,6 +1608,17 @@ function UploadedStlResultModel({
     const parsed = normalizedStlGeometryFromBuffer(base64ToArrayBuffer(displayModel.visualMesh?.contentBase64 ?? ""));
     return colorizeResultGeometry(parsed, "uploaded", resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale, undefined, undefined, supportMarkers);
   }, [deformationScale, displayModel.visualMesh?.contentBase64, loadMarkers, resultMode, samples, showDeformed, stressExaggeration, supportMarkers]);
+  usePackedPlaybackGeometry(geometry, {
+    kind: "uploaded",
+    resultMode,
+    showDeformed,
+    stressExaggeration,
+    initialSamples: samples,
+    loadMarkers,
+    deformationScale,
+    supportMarkers,
+    resultPlaybackFrameController
+  });
 
   return (
     <group>
@@ -1609,6 +1638,7 @@ function BracketResultSolid({
   showDeformed,
   stressExaggeration,
   deformationScale,
+  resultPlaybackFrameController,
   loadMarkers,
   supportMarkers
 }: {
@@ -1618,6 +1648,7 @@ function BracketResultSolid({
   showDeformed: boolean;
   stressExaggeration: number;
   deformationScale?: number;
+  resultPlaybackFrameController?: ResultPlaybackFrameController;
   loadMarkers: ViewerLoadMarker[];
   supportMarkers: ViewerSupportMarker[];
 }) {
@@ -1631,6 +1662,28 @@ function BracketResultSolid({
     () => colorizeSampleResultGeometry(createRibGeometry(), kind, resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale, supportMarkers),
     [deformationScale, kind, loadMarkers, resultMode, samples, showDeformed, stressExaggeration, supportMarkers]
   );
+  usePackedPlaybackGeometry(bodyGeometry, {
+    kind,
+    resultMode,
+    showDeformed,
+    stressExaggeration,
+    initialSamples: samples,
+    loadMarkers,
+    deformationScale,
+    supportMarkers,
+    resultPlaybackFrameController
+  });
+  usePackedPlaybackGeometry(ribGeometry, {
+    kind,
+    resultMode,
+    showDeformed,
+    stressExaggeration,
+    initialSamples: samples,
+    loadMarkers,
+    deformationScale,
+    supportMarkers,
+    resultPlaybackFrameController
+  });
   return (
     <group>
       {shouldShowUndeformedResultOutline(showDeformed) && (
@@ -1659,6 +1712,7 @@ function SampleResultSolid({
   showDeformed,
   stressExaggeration,
   deformationScale,
+  resultPlaybackFrameController,
   loadMarkers,
   supportMarkers
 }: {
@@ -1668,6 +1722,7 @@ function SampleResultSolid({
   showDeformed: boolean;
   stressExaggeration: number;
   deformationScale?: number;
+  resultPlaybackFrameController?: ResultPlaybackFrameController;
   loadMarkers: ViewerLoadMarker[];
   supportMarkers: ViewerSupportMarker[];
 }) {
@@ -1683,6 +1738,28 @@ function SampleResultSolid({
     () => colorizeSampleResultGeometry(new THREE.BoxGeometry(3.8, 0.5, 0.72, 40, 8, 8), kind, resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale, supportMarkers),
     [deformationScale, kind, loadMarkers, resultMode, samples, showDeformed, stressExaggeration, supportMarkers]
   );
+  usePackedPlaybackGeometry(beamGeometry, {
+    kind,
+    resultMode,
+    showDeformed,
+    stressExaggeration,
+    initialSamples: samples,
+    loadMarkers,
+    deformationScale,
+    supportMarkers,
+    resultPlaybackFrameController
+  });
+  usePackedPlaybackGeometry(cantileverGeometry, {
+    kind,
+    resultMode,
+    showDeformed,
+    stressExaggeration,
+    initialSamples: samples,
+    loadMarkers,
+    deformationScale,
+    supportMarkers,
+    resultPlaybackFrameController
+  });
   if (kind === "plate") {
     return (
       <group>
@@ -1794,37 +1871,82 @@ function colorizeResultGeometry(
   valueRange?: ResultValueRange,
   supportMarkers: ViewerSupportMarker[] = []
 ) {
-  const colors: number[] = [];
   const positions = geometry.getAttribute("position");
+  if (!(positions instanceof THREE.BufferAttribute)) return geometry;
+  const basePositions = basePositionArrayForGeometry(geometry, positions);
+  resetGeometryPositions(positions, basePositions);
   const color = new THREE.Color();
-  const resultPoints: THREE.Vector3[] = [];
-  const values: number[] = [];
   const resolvedDeformationScale = deformationScale ?? deformationScaleForSamples(resultMode, samples);
   const usesResultDeformationScale = typeof deformationScale === "number";
   geometry.computeBoundingBox();
   const bounds = coordinateTransform?.bounds ?? geometry.boundingBox?.clone();
+  const range = valueRange ?? resultValueRangeForGeometry(geometry, kind, resultMode, stressExaggeration, samples, coordinateTransform);
+  const colorAttribute = colorAttributeForGeometry(geometry, positions.count);
   for (let index = 0; index < positions.count; index += 1) {
-    const point = new THREE.Vector3(positions.getX(index), positions.getY(index), positions.getZ(index));
+    const baseOffset = index * 3;
+    const point = new THREE.Vector3(basePositions[baseOffset] ?? 0, basePositions[baseOffset + 1] ?? 0, basePositions[baseOffset + 2] ?? 0);
     const resultPoint = coordinateTransform?.toResultPoint(point) ?? point;
-    resultPoints.push(resultPoint);
-    values.push(resultValueForPoint(kind, resultMode, stressExaggeration, resultPoint, samples));
-  }
-  const range = valueRange ?? resultValueRange(values, samples);
-  for (let index = 0; index < positions.count; index += 1) {
-    const point = new THREE.Vector3(positions.getX(index), positions.getY(index), positions.getZ(index));
-    const resultPoint = resultPoints[index] ?? point;
-    color.copy(resultColorForValue(resultMode, normalizeResultValue(values[index] ?? 0.5, range)));
-    colors.push(color.r, color.g, color.b);
+    const value = resultValueForPoint(kind, resultMode, stressExaggeration, resultPoint, samples);
+    color.copy(resultColorForValue(resultMode, normalizeResultValue(value, range)));
+    colorAttribute.setXYZ(index, color.r, color.g, color.b);
     if (showDeformed) {
       const deformed = deformedPointForResults(kind, resultPoint, stressExaggeration, samples, loadMarkers, resolvedDeformationScale, usesResultDeformationScale, bounds, supportMarkers);
       const localDeformed = coordinateTransform?.fromResultPoint(deformed) ?? deformed;
       positions.setXYZ(index, localDeformed.x, localDeformed.y, localDeformed.z);
     }
   }
-  geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+  if (geometry.getAttribute("color") !== colorAttribute) geometry.setAttribute("color", colorAttribute);
+  colorAttribute.needsUpdate = true;
   positions.needsUpdate = true;
   geometry.computeVertexNormals();
   return geometry;
+}
+
+function basePositionArrayForGeometry(geometry: THREE.BufferGeometry, positions: THREE.BufferAttribute): Float32Array {
+  const existing = geometry.userData.opencaeBasePositions;
+  if (existing instanceof Float32Array && existing.length === positions.array.length) return existing;
+  const base = new Float32Array(positions.array as ArrayLike<number>);
+  geometry.userData.opencaeBasePositions = base;
+  return base;
+}
+
+function resetGeometryPositions(positions: THREE.BufferAttribute, basePositions: Float32Array) {
+  const target = positions.array;
+  for (let index = 0; index < basePositions.length; index += 1) {
+    target[index] = basePositions[index] ?? 0;
+  }
+}
+
+function colorAttributeForGeometry(geometry: THREE.BufferGeometry, vertexCount: number): THREE.BufferAttribute {
+  const current = geometry.getAttribute("color");
+  if (current instanceof THREE.BufferAttribute && current.array instanceof Float32Array && current.count === vertexCount) return current;
+  return new THREE.BufferAttribute(new Float32Array(vertexCount * 3), 3);
+}
+
+function resultValueRangeForGeometry(
+  geometry: THREE.BufferGeometry,
+  kind: SampleModelKind,
+  resultMode: ResultMode,
+  stressExaggeration: number,
+  samples: FaceResultSample[],
+  coordinateTransform?: ResultCoordinateTransform
+): ResultValueRange {
+  if (hasSolvedResultSamples(samples)) return { min: 0, max: 1 };
+  const positions = geometry.getAttribute("position");
+  if (!(positions instanceof THREE.BufferAttribute)) return { min: 0, max: 1 };
+  const basePositions = basePositionArrayForGeometry(geometry, positions);
+  let min = Number.POSITIVE_INFINITY;
+  let max = Number.NEGATIVE_INFINITY;
+  for (let index = 0; index < positions.count; index += 1) {
+    const offset = index * 3;
+    const point = new THREE.Vector3(basePositions[offset] ?? 0, basePositions[offset + 1] ?? 0, basePositions[offset + 2] ?? 0);
+    const resultPoint = coordinateTransform?.toResultPoint(point) ?? point;
+    const value = resultValueForPoint(kind, resultMode, stressExaggeration, resultPoint, samples);
+    if (!Number.isFinite(value)) continue;
+    min = Math.min(min, value);
+    max = Math.max(max, value);
+  }
+  return Number.isFinite(min) && Number.isFinite(max) ? { min, max } : { min: 0, max: 1 };
 }
 
 export function colorizeSampleResultGeometry(
@@ -1839,6 +1961,78 @@ export function colorizeSampleResultGeometry(
   supportMarkers: ViewerSupportMarker[] = []
 ) {
   return colorizeResultGeometry(geometry, kind, resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale, undefined, undefined, supportMarkers);
+}
+
+function usePackedPlaybackGeometry(
+  geometry: THREE.BufferGeometry,
+  options: {
+    kind: SampleModelKind;
+    resultMode: ResultMode;
+    showDeformed: boolean;
+    stressExaggeration: number;
+    initialSamples: FaceResultSample[];
+    loadMarkers: ViewerLoadMarker[];
+    deformationScale?: number;
+    supportMarkers: ViewerSupportMarker[];
+    resultPlaybackFrameController?: ResultPlaybackFrameController;
+  }
+) {
+  const { invalidate } = useThree();
+  const optionsRef = useRef(options);
+  const samplesRef = useRef<FaceResultSample[]>([]);
+  useEffect(() => {
+    optionsRef.current = options;
+  }, [options]);
+  useEffect(() => {
+    samplesRef.current = reusablePackedSamples(options.initialSamples);
+  }, [options.initialSamples]);
+  useEffect(() => {
+    const controller = options.resultPlaybackFrameController;
+    if (!controller) return undefined;
+    const applySnapshot = (snapshot: ResultPlaybackFrameSnapshot) => {
+      const latest = optionsRef.current;
+      const samples = updatePackedSamples(samplesRef.current, snapshot.cache, snapshot.frameOrdinal, latest.resultMode);
+      colorizeResultGeometry(
+        geometry,
+        latest.kind,
+        latest.resultMode,
+        latest.showDeformed,
+        latest.stressExaggeration,
+        samples,
+        latest.loadMarkers,
+        latest.deformationScale,
+        undefined,
+        { min: 0, max: 1 },
+        latest.supportMarkers
+      );
+      invalidate();
+    };
+    const snapshot = controller.getSnapshot();
+    if (snapshot) applySnapshot(snapshot);
+    return controller.subscribe(applySnapshot);
+  }, [geometry, invalidate, options.resultPlaybackFrameController]);
+}
+
+function reusablePackedSamples(samples: FaceResultSample[]): FaceResultSample[] {
+  return samples.map((sample) => ({
+    face: sample.face,
+    value: sample.value,
+    normalized: sample.normalized,
+    ...(sample.fieldSamples ? { fieldSamples: sample.fieldSamples } : {})
+  }));
+}
+
+function updatePackedSamples(samples: FaceResultSample[], cache: PackedPreparedPlaybackCache, frameOrdinal: number, resultMode: ResultMode): FaceResultSample[] {
+  const slot = packedPreparedPlaybackFieldSlot(cache, frameOrdinal, resultMode, "face");
+  if (!slot) return samples;
+  const range = slot.max - slot.min;
+  for (let index = 0; index < samples.length; index += 1) {
+    const sample = samples[index]!;
+    const value = index < slot.length ? slot.values[slot.offset + index] ?? sample.value : sample.value;
+    sample.value = value;
+    sample.normalized = Number.isFinite(range) && Math.abs(range) > 1e-9 ? Math.max(0, Math.min(1, (value - slot.min) / range)) : 0.5;
+  }
+  return samples;
 }
 
 type ResultCoordinateTransform = {

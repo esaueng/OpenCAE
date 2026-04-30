@@ -54,4 +54,28 @@ describe("Worker UI performance rewrite boundaries", () => {
     expect(workspaceSource).toContain("PLAYBACK_UI_COMMIT_INTERVAL_MS = 250");
     expect(workspaceSource).not.toContain("PLAYBACK_STATE_COMMIT_INTERVAL_MS = 1000 / 60");
   });
+
+  test("keeps playback frame delivery out of React subscriptions and hydrated result arrays", () => {
+    const workspaceSource = readFileSync(resolve(__dirname, "WorkspaceApp.tsx"), "utf8");
+    const viewerSource = readFileSync(resolve(__dirname, "components/CadViewer.tsx"), "utf8");
+    const cacheSource = readFileSync(resolve(__dirname, "resultPlaybackCache.ts"), "utf8");
+
+    expect(workspaceSource).toContain("createResultPlaybackFrameController");
+    expect(workspaceSource).toContain("setPackedFrame(cache.packed");
+    expect(viewerSource).toContain("resultPlaybackFrameController");
+    expect(viewerSource).toContain("usePackedPlaybackGeometry");
+    expect(viewerSource).not.toContain("useSyncExternalStore");
+    expect(cacheSource).toContain("values: Float32Array");
+    expect(cacheSource).not.toContain("Array.from(field.values)");
+  });
+
+  test("idle-schedules autosave instead of writing localStorage synchronously from workspace renders", () => {
+    const workspaceSource = readFileSync(resolve(__dirname, "WorkspaceApp.tsx"), "utf8");
+    const persistenceSource = readFileSync(resolve(__dirname, "appPersistence.ts"), "utf8");
+
+    expect(workspaceSource).toContain("scheduleAutosavedWorkspaceWrite(buildAutosavedWorkspace");
+    expect(workspaceSource).not.toContain("writeAutosavedWorkspace(buildAutosavedWorkspace");
+    expect(persistenceSource).toContain("requestIdleCallback");
+    expect(persistenceSource).toContain("delayMs = 650");
+  });
 });

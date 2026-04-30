@@ -9,7 +9,7 @@ import { RightPanel } from "./components/RightPanel";
 import { StartScreen } from "./components/StartScreen";
 import { StepBar, type StepId } from "./components/StepBar";
 import { BoundaryConditionMenu, CreateSimulationScreen } from "./components/SimulationWorkflow";
-import type { PrintLayerOrientation, ResultMode, ResultPlaybackFrameStore, ViewMode, ViewerLoadMarker, ViewerSupportMarker } from "./components/CadViewer";
+import type { PrintLayerOrientation, ResultMode, ResultPlaybackFrameController, ViewMode, ViewerLoadMarker, ViewerSupportMarker } from "./components/CadViewer";
 import {
   createViewerLoadMarkers,
   directionVectorForLabel,
@@ -22,7 +22,7 @@ import {
 } from "./loadPreview";
 import { resetDisplayModelOrientation, type RotationAxis } from "./modelOrientation";
 import { buildLocalProjectFile, suggestedProjectFilename, type LocalResultBundle } from "./projectFile";
-import { buildAutosavedWorkspace, readAutosavedWorkspace, writeAutosavedWorkspace, type ThemeMode } from "./appPersistence";
+import { buildAutosavedWorkspace, readAutosavedWorkspace, scheduleAutosavedWorkspaceWrite, type ThemeMode } from "./appPersistence";
 import type { AutosavedWorkspace } from "./appPersistence";
 import {
   canNavigateToStep,
@@ -36,7 +36,7 @@ import { supportDisplayLabel } from "./supportLabels";
 import { nextSelectedPayloadObject, shouldClearPayloadSelectionOnViewerMiss } from "./payloadSelection";
 import { createLocalDynamicStructuralStudy, createLocalStaticStressStudy } from "./localProjectFactory";
 import { createPackedResultPlaybackCache, createResultFrameCache, hasDynamicPlaybackFrames } from "./resultFields";
-import { playbackMemoryBudgetBytes, type PreparedPlaybackFrameCache } from "./resultPlaybackCache";
+import { packedPreparedPlaybackFrameOrdinal, playbackMemoryBudgetBytes, type PackedPreparedPlaybackCache, type PreparedPlaybackFrameCache } from "./resultPlaybackCache";
 import {
   boundedPlaybackOrdinalDelta,
   frameIndexForPlaybackOrdinal,
@@ -81,8 +81,8 @@ type ResultPlaybackCacheState =
   | { status: "fallback"; cacheKey: string; message: string }
   | { status: "error"; cacheKey: string; message: string };
 
-type MutableResultPlaybackFrameStore = ResultPlaybackFrameStore & {
-  setSnapshot: (fields: ResultField[]) => void;
+type MutableResultPlaybackFrameController = ResultPlaybackFrameController & {
+  setPackedFrame: (cache: PackedPreparedPlaybackCache, frameOrdinal: number) => void;
 };
 
 interface WorkspaceAppProps {
@@ -144,11 +144,11 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const resultFrameIndexRef = useRef(0);
   const resultPlaybackFramePositionRef = useRef(0);
   const resultPlaybackOrdinalPositionRef = useRef(0);
-  const resultPlaybackFrameStoreRef = useRef<MutableResultPlaybackFrameStore | null>(null);
+  const resultPlaybackFrameControllerRef = useRef<MutableResultPlaybackFrameController | null>(null);
   const viewerInteractingRef = useRef(false);
   const initialActionConsumedRef = useRef(false);
-  if (!resultPlaybackFrameStoreRef.current) {
-    resultPlaybackFrameStoreRef.current = createResultPlaybackFrameStore(restoredResults?.fields ?? []);
+  if (!resultPlaybackFrameControllerRef.current) {
+    resultPlaybackFrameControllerRef.current = createResultPlaybackFrameController();
   }
 
   const study = project?.studies[0] ?? null;
@@ -202,7 +202,9 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   );
   useEffect(() => {
     if (resultPlaybackPlaying) return;
-    resultPlaybackFrameStoreRef.current?.setSnapshot(visibleResultFieldsForUi);
+    const packed = resultPlaybackCacheState.status === "ready" ? resultPlaybackCacheState.cache.packed : undefined;
+    if (!packed) return;
+    resultPlaybackFrameControllerRef.current?.setPackedFrame(packed, packedPreparedPlaybackFrameOrdinal(packed, resultVisualFramePosition));
   }, [resultPlaybackPlaying, visibleResultFieldsForUi]);
   const resultPlaybackCacheLabel = useMemo(() => {
     if (resultPlaybackCacheState.status === "preparing") return "Preparing smooth playback";
@@ -215,10 +217,14 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     return "";
   }, [resultPlaybackCacheState]);
   const commitPlaybackViewerFrame = useCallback((framePosition: number) => {
-    const nextFields = packedResultPlaybackCache?.fieldsForFramePosition(framePosition)
-      ?? resultFrameCache.fieldsForFramePosition(framePosition);
-    resultPlaybackFrameStoreRef.current?.setSnapshot(nextFields);
-  }, [packedResultPlaybackCache, resultFrameCache]);
+    const cache = resultPlaybackCacheState.status === "ready" ? resultPlaybackCacheState.cache : null;
+    if (cache?.packed) {
+      resultPlaybackFrameControllerRef.current?.setPackedFrame(cache.packed, packedPreparedPlaybackFrameOrdinal(cache.packed, framePosition));
+      return;
+    }
+    const nextFields = packedResultPlaybackCache?.fieldsForFramePosition(framePosition) ?? resultFrameCache.fieldsForFramePosition(framePosition);
+    void nextFields;
+  }, [packedResultPlaybackCache, resultFrameCache, resultPlaybackCacheState]);
   const solverRunning = Boolean(processingRunId) || (runProgress > 0 && runProgress < 100);
   const runReadiness = useMemo(() => readinessForStudy(study), [study]);
   const canRunSimulation = runReadiness.every((item) => item.done) && !solverRunning;
@@ -488,7 +494,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
 
   useEffect(() => {
     if (!project || !displayModel) return;
-    writeAutosavedWorkspace(buildAutosavedWorkspace({
+    return scheduleAutosavedWorkspaceWrite(buildAutosavedWorkspace({
       project,
       displayModel,
       results: resultFields.length ? {
@@ -1056,7 +1062,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
             showDimensions={showDimensions}
             stressExaggeration={stressExaggeration}
             resultFields={visibleResultFieldsForUi}
-            resultPlaybackFrameStore={resultPlaybackPlaying ? resultPlaybackFrameStoreRef.current : undefined}
+            resultPlaybackFrameController={resultPlaybackPlaying ? resultPlaybackFrameControllerRef.current : undefined}
             meshSummary={study.meshSettings.summary}
             unitSystem={displayUnitSystem}
             themeMode={themeMode}
@@ -1274,9 +1280,9 @@ function readinessForStudy(study: Study | null) {
   ];
 }
 
-function createResultPlaybackFrameStore(initialFields: ResultField[]): MutableResultPlaybackFrameStore {
-  let snapshot = initialFields;
-  const listeners = new Set<() => void>();
+function createResultPlaybackFrameController(): MutableResultPlaybackFrameController {
+  let snapshot: ReturnType<ResultPlaybackFrameController["getSnapshot"]> = null;
+  const listeners = new Set<(snapshot: NonNullable<ReturnType<ResultPlaybackFrameController["getSnapshot"]>>) => void>();
   return {
     subscribe(listener) {
       listeners.add(listener);
@@ -1287,10 +1293,10 @@ function createResultPlaybackFrameStore(initialFields: ResultField[]): MutableRe
     getSnapshot() {
       return snapshot;
     },
-    setSnapshot(fields) {
-      if (Object.is(snapshot, fields)) return;
-      snapshot = fields;
-      for (const listener of listeners) listener();
+    setPackedFrame(cache, frameOrdinal) {
+      const nextSnapshot = { cache, frameOrdinal };
+      snapshot = nextSnapshot;
+      for (const listener of listeners) listener(nextSnapshot);
     }
   };
 }

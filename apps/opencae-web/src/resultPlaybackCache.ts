@@ -20,7 +20,7 @@ export interface PlaybackFrameCacheInput {
 }
 
 export interface PreparedPlaybackField extends Omit<ResultField, "values"> {
-  values: Float64Array;
+  values: Float32Array;
 }
 
 export interface PreparedPlaybackFrame {
@@ -38,9 +38,42 @@ export interface PreparedPlaybackFrameCache {
   estimatedBytes: number;
   actualBytes: number;
   frames: PreparedPlaybackFrame[];
+  packed?: PackedPreparedPlaybackCache;
 }
 
 const hydratedFrames = new WeakMap<PreparedPlaybackFrame, { framePosition: number; frameIndex: number; timeSeconds: number; fields: ResultField[] }>();
+
+export interface PackedPreparedPlaybackFieldDescriptor {
+  id: string;
+  runId: string;
+  type: ResultField["type"];
+  location: ResultField["location"];
+  units: string;
+}
+
+export interface PackedPreparedPlaybackCache {
+  frameCount: number;
+  fieldCount: number;
+  framePositions: Float32Array;
+  frameIndexes: Int32Array;
+  times: Float32Array;
+  fieldDescriptors: PackedPreparedPlaybackFieldDescriptor[];
+  fieldOffsets: Int32Array;
+  fieldLengths: Int32Array;
+  fieldMins: Float32Array;
+  fieldMaxes: Float32Array;
+  values: Float32Array;
+  actualBytes: number;
+}
+
+export interface PackedPreparedPlaybackFieldSlot {
+  descriptor: PackedPreparedPlaybackFieldDescriptor;
+  offset: number;
+  length: number;
+  min: number;
+  max: number;
+  values: Float32Array;
+}
 
 const DESKTOP_PLAYBACK_BUDGET_BYTES = 192 * 1024 * 1024;
 const CONSTRAINED_PLAYBACK_BUDGET_BYTES = 64 * 1024 * 1024;
@@ -108,7 +141,7 @@ export function preparePlaybackFrames(input: PlaybackFrameCacheInput): PreparedP
   let actualBytes = 0;
   const frames = plan.framePositions.map((framePosition) => {
     const fields = frameCache.fieldsForFramePosition(framePosition).map((field) => {
-      const values = new Float64Array(field.values);
+      const values = new Float32Array(field.values);
       actualBytes += values.byteLength;
       return {
         ...field,
@@ -123,6 +156,9 @@ export function preparePlaybackFrames(input: PlaybackFrameCacheInput): PreparedP
     };
   });
 
+  const packed = packPreparedPlaybackFrames(frames);
+  actualBytes += packed?.actualBytes ?? 0;
+
   return {
     cacheKey: input.cacheKey,
     mode: plan.mode,
@@ -130,7 +166,8 @@ export function preparePlaybackFrames(input: PlaybackFrameCacheInput): PreparedP
     frameCount: frames.length,
     estimatedBytes: plan.estimatedBytes,
     actualBytes,
-    frames
+    frames,
+    ...(packed ? { packed } : {})
   };
 }
 
@@ -143,7 +180,7 @@ export function hydratePreparedPlaybackFrame(frame: PreparedPlaybackFrame): { fr
     timeSeconds: frame.timeSeconds,
     fields: frame.fields.map((field) => ({
       ...field,
-      values: Array.from(field.values)
+      values: Array.prototype.slice.call(field.values) as number[]
     }))
   };
   hydratedFrames.set(frame, hydrated);
@@ -170,12 +207,123 @@ export function preparedPlaybackFrameForPosition(cache: PreparedPlaybackFrameCac
 
 export function preparedPlaybackTransferables(cache: PreparedPlaybackFrameCache): Transferable[] {
   const transferables: Transferable[] = [];
+  if (cache.packed) {
+    transferables.push(
+      cache.packed.framePositions.buffer,
+      cache.packed.frameIndexes.buffer,
+      cache.packed.times.buffer,
+      cache.packed.fieldOffsets.buffer,
+      cache.packed.fieldLengths.buffer,
+      cache.packed.fieldMins.buffer,
+      cache.packed.fieldMaxes.buffer,
+      cache.packed.values.buffer
+    );
+  }
   for (const frame of cache.frames) {
     for (const field of frame.fields) {
       transferables.push(field.values.buffer);
     }
   }
   return transferables;
+}
+
+export function packedPreparedPlaybackFrameOrdinal(cache: PackedPreparedPlaybackCache, framePosition: number): number {
+  if (!cache.frameCount) return 0;
+  let bestOrdinal = 0;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (let ordinal = 0; ordinal < cache.framePositions.length; ordinal += 1) {
+    const distance = Math.abs((cache.framePositions[ordinal] ?? 0) - framePosition);
+    if (distance >= bestDistance) continue;
+    bestDistance = distance;
+    bestOrdinal = ordinal;
+  }
+  return bestOrdinal;
+}
+
+export function packedPreparedPlaybackFieldSlot(
+  cache: PackedPreparedPlaybackCache,
+  frameOrdinal: number,
+  type: ResultField["type"],
+  location: ResultField["location"] = "face"
+): PackedPreparedPlaybackFieldSlot | null {
+  const clampedFrameOrdinal = Math.max(0, Math.min(cache.frameCount - 1, Math.floor(frameOrdinal)));
+  const fieldOrdinal = cache.fieldDescriptors.findIndex((descriptor) => descriptor.type === type && descriptor.location === location);
+  if (fieldOrdinal < 0) return null;
+  const slot = clampedFrameOrdinal * cache.fieldCount + fieldOrdinal;
+  const offset = cache.fieldOffsets[slot] ?? 0;
+  const length = cache.fieldLengths[slot] ?? 0;
+  return {
+    descriptor: cache.fieldDescriptors[fieldOrdinal]!,
+    offset,
+    length,
+    min: cache.fieldMins[slot] ?? 0,
+    max: cache.fieldMaxes[slot] ?? 0,
+    values: cache.values
+  };
+}
+
+function packPreparedPlaybackFrames(frames: PreparedPlaybackFrame[]): PackedPreparedPlaybackCache | undefined {
+  const firstFrame = frames[0];
+  if (!firstFrame?.fields.length) return undefined;
+  const descriptors = firstFrame.fields.map((field) => ({
+    id: field.id,
+    runId: field.runId,
+    type: field.type,
+    location: field.location,
+    units: field.units
+  }));
+  const frameCount = frames.length;
+  const fieldCount = descriptors.length;
+  const framePositions = new Float32Array(frameCount);
+  const frameIndexes = new Int32Array(frameCount);
+  const times = new Float32Array(frameCount);
+  const fieldOffsets = new Int32Array(frameCount * fieldCount);
+  const fieldLengths = new Int32Array(frameCount * fieldCount);
+  const fieldMins = new Float32Array(frameCount * fieldCount);
+  const fieldMaxes = new Float32Array(frameCount * fieldCount);
+  let valueCount = 0;
+
+  for (let frameOrdinal = 0; frameOrdinal < frameCount; frameOrdinal += 1) {
+    const frame = frames[frameOrdinal]!;
+    framePositions[frameOrdinal] = frame.framePosition;
+    frameIndexes[frameOrdinal] = frame.frameIndex;
+    times[frameOrdinal] = frame.timeSeconds;
+    for (let fieldOrdinal = 0; fieldOrdinal < fieldCount; fieldOrdinal += 1) {
+      const field = frame.fields[fieldOrdinal];
+      const slot = frameOrdinal * fieldCount + fieldOrdinal;
+      fieldOffsets[slot] = valueCount;
+      fieldLengths[slot] = field?.values.length ?? 0;
+      fieldMins[slot] = field?.min ?? 0;
+      fieldMaxes[slot] = field?.max ?? 0;
+      valueCount += field?.values.length ?? 0;
+    }
+  }
+
+  const values = new Float32Array(valueCount);
+  for (let frameOrdinal = 0; frameOrdinal < frameCount; frameOrdinal += 1) {
+    const frame = frames[frameOrdinal]!;
+    for (let fieldOrdinal = 0; fieldOrdinal < fieldCount; fieldOrdinal += 1) {
+      const field = frame.fields[fieldOrdinal];
+      if (!field) continue;
+      const slot = frameOrdinal * fieldCount + fieldOrdinal;
+      values.set(field.values, fieldOffsets[slot]);
+    }
+  }
+
+  return {
+    frameCount,
+    fieldCount,
+    framePositions,
+    frameIndexes,
+    times,
+    fieldDescriptors: descriptors,
+    fieldOffsets,
+    fieldLengths,
+    fieldMins,
+    fieldMaxes,
+    values,
+    actualBytes: framePositions.byteLength + frameIndexes.byteLength + times.byteLength + fieldOffsets.byteLength + fieldLengths.byteLength + fieldMins.byteLength + fieldMaxes.byteLength + values.byteLength
+  };
 }
 
 function normalizedFrameIndexes(frameIndexes: number[]): number[] {
