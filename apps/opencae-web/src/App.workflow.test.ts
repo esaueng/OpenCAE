@@ -54,6 +54,20 @@ describe("App workflow layout", () => {
     expect(appSource).not.toContain('error.message ? error.message : "Using live playback for this browser"');
   });
 
+  test("keeps animation speed changes from rebuilding the smooth playback cache", () => {
+    const cacheKeyStart = appSource.indexOf("const resultPlaybackCacheKey = useMemo(");
+    const cacheKeyEnd = appSource.indexOf("  const visibleResultFieldsForUi = useMemo(", cacheKeyStart);
+    const cacheKeyBlock = appSource.slice(cacheKeyStart, cacheKeyEnd);
+    const prepareEffectStart = appSource.indexOf("void preparePlaybackFramesInWorker({");
+    const prepareEffectEnd = appSource.indexOf("  useEffect(() => {\n    if (!resultPlaybackPlaying", prepareEffectStart);
+    const prepareEffectBlock = appSource.slice(prepareEffectStart, prepareEffectEnd);
+
+    expect(appSource).toContain("const PLAYBACK_CACHE_PREP_FPS = 30;");
+    expect(cacheKeyBlock).not.toContain("resultPlaybackFps");
+    expect(prepareEffectBlock).toContain("playbackFps: PLAYBACK_CACHE_PREP_FPS");
+    expect(prepareEffectBlock).not.toContain("resultPlaybackFps");
+  });
+
   test("rejects dynamic cloud results that do not contain animation frames before showing Results", () => {
     expect(appSource).toContain("hasDynamicPlaybackFrames(results.summary, results.fields)");
     expect(appSource).toContain("Cloud FEA dynamic results did not include animation frames.");

@@ -72,6 +72,7 @@ const seededSummary: ResultSummary = {
 };
 const MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.005;
 const PLAYBACK_UI_COMMIT_INTERVAL_MS = 250;
+const PLAYBACK_CACHE_PREP_FPS = 30;
 
 type ResultPlaybackCacheState =
   | { status: "idle" }
@@ -188,9 +189,8 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     study?.meshSettings.preset ?? "no-mesh",
     displayUnitSystem,
     resultFieldsForUi.length,
-    resultFrameCache.frameIndexes.join(","),
-    resultPlaybackFps
-  ].join("|"), [activeRunId, completedRunId, displayModelForUi, displayUnitSystem, resultFieldsForUi.length, resultFrameCache.frameIndexes, resultMode, resultPlaybackFps, showDeformed, stressExaggeration, study?.meshSettings.preset]);
+    resultFrameCache.frameIndexes.join(",")
+  ].join("|"), [activeRunId, completedRunId, displayModelForUi, displayUnitSystem, resultFieldsForUi.length, resultFrameCache.frameIndexes, resultMode, showDeformed, stressExaggeration, study?.meshSettings.preset]);
   const visibleResultFieldsForUi = useMemo(
     () => {
       if (resultPlaybackPlaying) {
@@ -276,7 +276,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     void preparePlaybackFramesInWorker({
       fields: resultFieldsForUi,
       frameIndexes: playbackFrameIndexes,
-      playbackFps: resultPlaybackFps,
+      playbackFps: PLAYBACK_CACHE_PREP_FPS,
       budgetBytes: playbackMemoryBudgetBytes(navigatorWithMemory?.deviceMemory),
       cacheKey: resultPlaybackCacheKey
     })
@@ -295,7 +295,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     return () => {
       cancelled = true;
     };
-  }, [activeStep, playbackFrameIndexes, resultFieldsForUi, resultPlaybackCacheKey, resultPlaybackFps]);
+  }, [activeStep, playbackFrameIndexes, resultFieldsForUi, resultPlaybackCacheKey]);
 
   useEffect(() => {
     if (!resultPlaybackPlaying || activeStep !== "results" || playbackFrameIndexes.length < 2) return;
