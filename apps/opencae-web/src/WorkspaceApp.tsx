@@ -214,6 +214,11 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     if (resultPlaybackCacheState.status === "fallback" || resultPlaybackCacheState.status === "error") return resultPlaybackCacheState.message;
     return "";
   }, [resultPlaybackCacheState]);
+  const commitPlaybackViewerFrame = useCallback((framePosition: number) => {
+    const nextFields = packedResultPlaybackCache?.fieldsForFramePosition(framePosition)
+      ?? resultFrameCache.fieldsForFramePosition(framePosition);
+    resultPlaybackFrameStoreRef.current?.setSnapshot(nextFields);
+  }, [packedResultPlaybackCache, resultFrameCache]);
   const solverRunning = Boolean(processingRunId) || (runProgress > 0 && runProgress < 100);
   const runReadiness = useMemo(() => readinessForStudy(study), [study]);
   const canRunSimulation = runReadiness.every((item) => item.done) && !solverRunning;
@@ -308,11 +313,10 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         const framePosition = solverFramePositionForPlaybackOrdinal(playbackFrameIndexes, ordinalPosition);
         resultPlaybackFramePositionRef.current = framePosition;
         resultPlaybackOrdinalPositionRef.current = ordinalPosition;
-        if (timestamp - lastViewerTimestamp >= frameDurationMs) {
+        const playbackViewerFrameIntervalMs = viewerInteractingRef.current ? Number.POSITIVE_INFINITY : frameDurationMs;
+        if (timestamp - lastViewerTimestamp >= playbackViewerFrameIntervalMs) {
           lastViewerTimestamp = timestamp;
-          const nextFields = packedResultPlaybackCache?.fieldsForFramePosition(framePosition)
-            ?? resultFrameCache.fieldsForFramePosition(framePosition);
-          resultPlaybackFrameStoreRef.current?.setSnapshot(nextFields);
+          commitPlaybackViewerFrame(framePosition);
         }
         const playbackCommitIntervalMs = viewerInteractingRef.current ? Number.POSITIVE_INFINITY : PLAYBACK_UI_COMMIT_INTERVAL_MS;
         if (timestamp - lastCommittedTimestamp >= playbackCommitIntervalMs) {
@@ -333,7 +337,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     };
     animationFrameId = window.requestAnimationFrame(advancePlaybackFrame);
     return () => window.cancelAnimationFrame(animationFrameId);
-  }, [activeStep, packedResultPlaybackCache, playbackFrameIndexes, resultFrameCache, resultPlaybackFps, resultPlaybackPlaying]);
+  }, [activeStep, commitPlaybackViewerFrame, playbackFrameIndexes, resultPlaybackFps, resultPlaybackPlaying]);
 
   const handleViewerInteractionChange = useCallback((interacting: boolean) => {
     viewerInteractingRef.current = interacting;
@@ -341,13 +345,14 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     const framePosition = resultPlaybackFramePositionRef.current;
     const ordinalPosition = resultPlaybackOrdinalPositionRef.current;
     const nextFrameIndex = frameIndexForPlaybackOrdinal(playbackFrameIndexes, ordinalPosition);
+    commitPlaybackViewerFrame(framePosition);
     setResultPlaybackOrdinalPosition(ordinalPosition);
     setResultPlaybackFramePosition(framePosition);
     if (nextFrameIndex !== resultFrameIndexRef.current) {
       resultFrameIndexRef.current = nextFrameIndex;
       startTransition(() => setResultFrameIndex(nextFrameIndex));
     }
-  }, [playbackFrameIndexes]);
+  }, [commitPlaybackViewerFrame, playbackFrameIndexes]);
 
   const handleMeasureDisplayModelDimensions = useCallback((dimensions: NonNullable<DisplayModel["dimensions"]>) => {
     setDisplayModel((current) => {
