@@ -2134,6 +2134,8 @@ function interpolateResultSampleValue(point: THREE.Vector3, samples: NonNullable
 }
 
 function interpolateResultSampleVector(point: THREE.Vector3, samples: NonNullable<ResultField["samples"]>): THREE.Vector3 {
+  const smoothInterpolator = smoothVectorInterpolatorForSamples(samples);
+  if (smoothInterpolator) return smoothInterpolator.interpolate(point);
   const neighbors = nearestResultSamples(point, samples, (sample) => Boolean(sample.vector?.every(Number.isFinite)));
   if (!neighbors.length) return new THREE.Vector3();
   const exact = neighbors.find((entry) => entry.distanceSq <= 1e-18);
@@ -2147,6 +2149,77 @@ function interpolateResultSampleVector(point: THREE.Vector3, samples: NonNullabl
     totalWeight += weight;
   }
   return totalWeight > 0 ? vector.multiplyScalar(1 / totalWeight) : vector;
+}
+
+type SmoothVectorInterpolator = {
+  interpolate: (point: THREE.Vector3) => THREE.Vector3;
+};
+
+const smoothVectorInterpolatorCache = new WeakMap<NonNullable<ResultField["samples"]>, SmoothVectorInterpolator | null>();
+
+function smoothVectorInterpolatorForSamples(samples: NonNullable<ResultField["samples"]>): SmoothVectorInterpolator | null {
+  if (smoothVectorInterpolatorCache.has(samples)) return smoothVectorInterpolatorCache.get(samples) ?? null;
+  const interpolator = createSmoothVectorInterpolator(samples);
+  smoothVectorInterpolatorCache.set(samples, interpolator);
+  return interpolator;
+}
+
+function createSmoothVectorInterpolator(samples: NonNullable<ResultField["samples"]>): SmoothVectorInterpolator | null {
+  const vectorSamples = samples
+    .filter((sample) => sample.vector?.every(Number.isFinite) && sample.point.every(Number.isFinite))
+    .map((sample) => ({ point: sample.point, vector: new THREE.Vector3(...sample.vector!) }));
+  const nonzeroVectors = vectorSamples.filter((sample) => sample.vector.lengthSq() > 1e-18);
+  if (nonzeroVectors.length < 4) return null;
+  const averageDirection = nonzeroVectors.reduce((sum, sample) => sum.add(sample.vector), new THREE.Vector3());
+  if (averageDirection.lengthSq() <= 1e-18) return null;
+  averageDirection.normalize();
+  const alignedCount = nonzeroVectors.filter((sample) => Math.abs(sample.vector.clone().normalize().dot(averageDirection)) > 0.92).length;
+  if (alignedCount / nonzeroVectors.length < 0.82) return null;
+
+  const bounds = new THREE.Box3();
+  for (const sample of vectorSamples) bounds.expandByPoint(new THREE.Vector3(...sample.point));
+  const size = bounds.getSize(new THREE.Vector3());
+  const axis = size.x >= size.y && size.x >= size.z ? 0 : size.y >= size.z ? 1 : 2;
+  const span = [size.x, size.y, size.z][axis] ?? 0;
+  if (!Number.isFinite(span) || span <= 1e-9) return null;
+
+  const tolerance = Math.max(span * 1e-5, 1e-7);
+  const buckets = new Map<number, { coordinate: number; vector: THREE.Vector3; count: number }>();
+  for (const sample of vectorSamples) {
+    const coordinate = sample.point[axis] ?? 0;
+    const key = Math.round(coordinate / tolerance);
+    const bucket = buckets.get(key);
+    if (bucket) {
+      bucket.coordinate += coordinate;
+      bucket.vector.add(sample.vector);
+      bucket.count += 1;
+    } else {
+      buckets.set(key, { coordinate, vector: sample.vector.clone(), count: 1 });
+    }
+  }
+  const stations = [...buckets.values()]
+    .map((bucket) => ({
+      coordinate: bucket.coordinate / bucket.count,
+      vector: bucket.vector.multiplyScalar(1 / bucket.count)
+    }))
+    .sort((left, right) => left.coordinate - right.coordinate);
+  if (stations.length < 3) return null;
+
+  return {
+    interpolate(point) {
+      const coordinate = point.getComponent(axis);
+      if (coordinate <= stations[0]!.coordinate) return stations[0]!.vector.clone();
+      const last = stations[stations.length - 1]!;
+      if (coordinate >= last.coordinate) return last.vector.clone();
+      let upperIndex = 1;
+      while (upperIndex < stations.length && coordinate > stations[upperIndex]!.coordinate) upperIndex += 1;
+      const lower = stations[Math.max(0, upperIndex - 1)]!;
+      const upper = stations[Math.min(stations.length - 1, upperIndex)]!;
+      const width = Math.max(upper.coordinate - lower.coordinate, 1e-12);
+      const t = Math.max(0, Math.min(1, (coordinate - lower.coordinate) / width));
+      return lower.vector.clone().lerp(upper.vector, t);
+    }
+  };
 }
 
 function nearestResultSamples(
