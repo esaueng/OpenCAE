@@ -16,6 +16,11 @@ export interface StepPreview {
   normalizedBounds: THREE.Box3;
 }
 
+export interface StepPreviewOptions {
+  includeEdges?: boolean;
+  shareMaterials?: boolean;
+}
+
 export function geometryFromOcctMesh(mesh: OcctMesh): THREE.BufferGeometry {
   const positions = mesh.attributes?.position?.array;
   if (!positions?.length) {
@@ -41,13 +46,16 @@ export function geometryFromOcctMesh(mesh: OcctMesh): THREE.BufferGeometry {
   return geometry;
 }
 
-export function normalizedStepPreviewFromMeshes(meshes: OcctMesh[], color: string): StepPreview {
+export function normalizedStepPreviewFromMeshes(meshes: OcctMesh[], color: string, options: StepPreviewOptions = {}): StepPreview {
+  const includeEdges = options.includeEdges ?? true;
+  const shareMaterials = options.shareMaterials === true;
   const group = new THREE.Group();
   const material = new THREE.MeshStandardMaterial({ color, metalness: 0.18, roughness: 0.54 });
+  const edgeMaterial = includeEdges ? new THREE.LineBasicMaterial({ color: "#c8d3df", transparent: true, opacity: 0.72 }) : null;
 
   for (const [index, importedMesh] of meshes.entries()) {
     const geometry = geometryFromOcctMesh(importedMesh);
-    const mesh = new THREE.Mesh(geometry, material.clone());
+    const mesh = new THREE.Mesh(geometry, shareMaterials ? material : material.clone());
     const importedName = (importedMesh as { name?: unknown }).name;
     const label = typeof importedName === "string" && importedName.trim() ? importedName.trim() : `Part ${index + 1}`;
     mesh.name = label;
@@ -61,12 +69,9 @@ export function normalizedStepPreviewFromMeshes(meshes: OcctMesh[], color: strin
     }
     mesh.castShadow = true;
     mesh.receiveShadow = true;
-    mesh.add(
-      new THREE.LineSegments(
-        new THREE.EdgesGeometry(geometry, 15),
-        new THREE.LineBasicMaterial({ color: "#c8d3df", transparent: true, opacity: 0.72 })
-      )
-    );
+    if (includeEdges) {
+      mesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(geometry, 15), edgeMaterial!));
+    }
     group.add(mesh);
   }
 
@@ -118,7 +123,7 @@ function vertexAt(positions: THREE.BufferAttribute | THREE.InterleavedBufferAttr
   return [positions.getX(index), positions.getY(index), positions.getZ(index)];
 }
 
-export async function stepPreviewFromBase64(contentBase64: string, color: string): Promise<StepPreview> {
+export async function stepPreviewFromBase64(contentBase64: string, color: string, options?: StepPreviewOptions): Promise<StepPreview> {
   const importer = await getOcctImporter();
   const bytes = base64ToUint8Array(contentBase64);
   const result = importer.ReadStepFile(bytes, null);
@@ -127,7 +132,7 @@ export async function stepPreviewFromBase64(contentBase64: string, color: string
     throw new Error(`STEP import failed${result.errorCode ? ` (${result.errorCode})` : ""}.`);
   }
 
-  return normalizedStepPreviewFromMeshes(result.meshes ?? [], color);
+  return normalizedStepPreviewFromMeshes(result.meshes ?? [], color, options);
 }
 
 function getOcctImporter(): Promise<OcctImporter> {

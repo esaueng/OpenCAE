@@ -66,7 +66,7 @@ async function runOperation(request: PerformanceWorkerRequest) {
     geometry.dispose();
     return decoded;
   }
-  const preview = await stepPreviewFromBase64(request.payload.contentBase64, request.payload.color);
+  const preview = await stepPreviewFromBase64(request.payload.contentBase64, request.payload.color, { includeEdges: false, shareMaterials: true });
   return {
     dimensions: preview.dimensions,
     normalizedBounds: {
