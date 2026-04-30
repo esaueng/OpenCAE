@@ -1,10 +1,11 @@
 import { createResultFrameCache } from "../resultFields";
-import { preparePlaybackFrames, preparedPlaybackTransferables, type PreparedPlaybackFrameCache } from "../resultPlaybackCache";
+import { preparePlaybackFrames } from "../resultPlaybackCache";
 import { normalizedStlGeometryFromBuffer } from "../stlPreview";
 import { stepPreviewFromBase64 } from "../stepPreview";
 import { fallbackSolveLocalStudy } from "./localSolve";
 import {
   normalizePerformanceWorkerError,
+  transferablesForPerformanceWorkerResult,
   type DecodedStlGeometry,
   type PerformanceWorkerRequest,
   type PerformanceWorkerResponse
@@ -30,7 +31,7 @@ async function handleRequest(request: PerformanceWorkerRequest): Promise<void> {
       ok: true,
       result
     } as PerformanceWorkerResponse;
-    workerScope.postMessage(response, transferablesFor(result));
+    workerScope.postMessage(response, transferablesForPerformanceWorkerResult(result));
   } catch (error) {
     workerScope.postMessage({
       id: request.id,
@@ -79,18 +80,4 @@ async function runOperation(request: PerformanceWorkerRequest) {
 
 function attributeToFloat32Array(attribute: { array: ArrayLike<number> }): Float32Array {
   return attribute.array instanceof Float32Array ? attribute.array : new Float32Array(Array.from(attribute.array));
-}
-
-function transferablesFor(result: unknown): Transferable[] {
-  if (isPreparedPlaybackFrameCache(result)) return preparedPlaybackTransferables(result);
-  if (!isDecodedStlGeometry(result)) return [];
-  return [result.positions.buffer, result.normals.buffer];
-}
-
-function isPreparedPlaybackFrameCache(value: unknown): value is PreparedPlaybackFrameCache {
-  return typeof value === "object" && value !== null && "frames" in value && "actualBytes" in value;
-}
-
-function isDecodedStlGeometry(value: unknown): value is DecodedStlGeometry {
-  return typeof value === "object" && value !== null && "positions" in value && "normals" in value;
 }
