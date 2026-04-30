@@ -48,11 +48,28 @@ describe("Worker UI performance rewrite boundaries", () => {
     const viewerSource = readFileSync(resolve(__dirname, "components/CadViewer.tsx"), "utf8");
 
     expect(viewerSource).toContain('frameloop="demand"');
-    expect(viewerSource).toContain("dpr={[1, 2]}");
+    expect(viewerSource).toContain("VIEWER_IDLE_DPR_RANGE");
+    expect(viewerSource).toContain("VIEWER_ACTIVE_DPR_RANGE");
+    expect(viewerSource).toContain("const viewerDpr = props.resultPlaybackPlaying || viewerInteracting ? VIEWER_ACTIVE_DPR_RANGE : VIEWER_IDLE_DPR_RANGE");
+    expect(viewerSource).toContain("dpr={viewerDpr}");
+    expect(viewerSource).not.toContain("dpr={[1, 2]}");
     expect(viewerSource).toContain("invalidate()");
     expect(viewerSource).toContain("onChange={invalidateViewer}");
     expect(workspaceSource).toContain("PLAYBACK_UI_COMMIT_INTERVAL_MS = 250");
     expect(workspaceSource).not.toContain("PLAYBACK_STATE_COMMIT_INTERVAL_MS = 1000 / 60");
+  });
+
+  test("uses a lighter viewer scene while playback or interaction is active", () => {
+    const viewerSource = readFileSync(resolve(__dirname, "components/CadViewer.tsx"), "utf8");
+
+    expect(viewerSource).toContain("const [viewerInteracting, setViewerInteracting] = useState(false)");
+    expect(viewerSource).toContain("handleViewerInteractionChange");
+    expect(viewerSource).toContain("const suppressPlaybackOverlays = props.resultPlaybackPlaying");
+    expect(viewerSource).toContain("const showDimensionOverlay = shouldShowDimensionOverlay(props.showDimensions, effectiveViewMode) && !suppressPlaybackOverlays");
+    expect(viewerSource).toContain("resultPlaybackPlaying={resultPlaybackPlaying}");
+    expect(viewerSource).toContain("{!resultPlaybackPlaying && <Edges");
+    expect(viewerSource).toContain("export function shouldShowResultMarkers(_viewMode: ViewMode, _activeStep: StepId, _resultPlaybackPlaying: boolean)");
+    expect(viewerSource).toContain("return false");
   });
 
   test("keeps playback frame delivery out of React subscriptions and hydrated result arrays", () => {
