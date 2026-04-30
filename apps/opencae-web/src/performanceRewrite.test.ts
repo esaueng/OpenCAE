@@ -81,13 +81,16 @@ describe("Worker UI performance rewrite boundaries", () => {
 
     expect(workspaceSource).toContain("createResultPlaybackFrameController");
     expect(workspaceSource).toContain("setPackedFrame(cache.packed");
-    expect(workspaceSource).toContain("packResultFieldsForPlayback(resultFieldsForUi)");
-    expect(workspaceSource).toContain("...(packedFields ? { packedFields } : { fields: resultFieldsForUi })");
+    expect(workspaceSource).toContain("playbackFieldsForResultMode(resultFieldsForUi, resultMode)");
+    expect(workspaceSource).toContain("packResultFieldsForPlayback(playbackFieldsForSelectedMode)");
+    expect(workspaceSource).toContain("...(packedFields ? { packedFields } : { fields: playbackFieldsForSelectedMode })");
+    expect(workspaceSource).toContain("resultFields={resultFieldsForUi}");
     expect(viewerSource).toContain("resultPlaybackFrameController");
     expect(viewerSource).toContain("usePackedPlaybackGeometry");
     expect(viewerSource).not.toContain("useSyncExternalStore");
     expect(cacheSource).toContain("values: Float32Array");
     expect(cacheSource).toContain("packResultFieldsForPlayback");
+    expect(cacheSource).toContain("playbackFieldsForResultMode");
     expect(cacheSource).not.toContain("Array.from(field.values)");
     expect(clientSource).toContain("transferablesForPerformanceWorkerRequest(request)");
     expect(protocolSource).toContain("packedResultFieldsForPlaybackTransferables");
