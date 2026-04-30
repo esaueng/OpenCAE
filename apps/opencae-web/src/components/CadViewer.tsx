@@ -135,25 +135,34 @@ const DEFAULT_HOME_FIT_MARGIN = 1.46;
 const VIEWER_FIT_RETRY_DELAY_MS = 120;
 const VIEWER_STATS_LOG_INTERVAL_MS = 1000;
 const VIEWER_STATS_STORAGE_KEY = "opencae.perf.viewerStats";
+const VIEWER_IDLE_DPR_RANGE: [number, number] = [1, 2];
+const VIEWER_ACTIVE_DPR_RANGE: [number, number] = [1, 1.25];
 
 export function CadViewer(props: CadViewerProps) {
   const controlsRef = useRef<ViewerOrbitControls | null>(null);
   const [uploadedPreviewBounds, setUploadedPreviewBounds] = useState<THREE.Box3 | null>(null);
   const [gizmoViewRequest, setGizmoViewRequest] = useState<{ axis: RotationAxis | null; signal: number }>({ axis: null, signal: 0 });
+  const [viewerInteracting, setViewerInteracting] = useState(false);
   const effectiveViewMode: ViewMode = props.activeStep === "results" ? props.viewMode : props.viewMode === "mesh" ? "mesh" : "model";
-  const showDimensionOverlay = shouldShowDimensionOverlay(props.showDimensions, effectiveViewMode);
+  const suppressPlaybackOverlays = props.resultPlaybackPlaying;
+  const showDimensionOverlay = shouldShowDimensionOverlay(props.showDimensions, effectiveViewMode) && !suppressPlaybackOverlays;
+  const viewerDpr = props.resultPlaybackPlaying || viewerInteracting ? VIEWER_ACTIVE_DPR_RANGE : VIEWER_IDLE_DPR_RANGE;
   const isLightTheme = props.themeMode === "light";
   const viewportBackground = isLightTheme ? "#f7f9fc" : "#070b10";
   const modelRotation = useMemo(() => modelRotationRadians(props.displayModel), [props.displayModel]);
   const baseModelRotation = useMemo(() => baseModelRotationRadians(props.displayModel), [props.displayModel]);
   const resultFields = props.resultFields;
   const viewerStatsEnabled = isViewerRendererStatsEnabled();
+  const handleViewerInteractionChange = (interacting: boolean) => {
+    setViewerInteracting(interacting);
+    props.onViewerInteractionChange?.(interacting);
+  };
   useEffect(() => {
     setUploadedPreviewBounds(null);
   }, [props.displayModel.nativeCad?.contentBase64, props.displayModel.visualMesh?.contentBase64]);
   return (
     <section className={`viewer-shell ${effectiveViewMode === "results" ? "results-view" : ""}`} aria-label="3D CAD viewer">
-      <Canvas frameloop="demand" dpr={[1, 2]} camera={{ position: [4.8, 4.8, 4.8], up: ISO_CAMERA_UP.toArray(), fov: 42 }} onPointerMissed={props.onViewerMiss}>
+      <Canvas frameloop="demand" dpr={viewerDpr} camera={{ position: [4.8, 4.8, 4.8], up: ISO_CAMERA_UP.toArray(), fov: 42 }} onPointerMissed={props.onViewerMiss}>
         <ViewerInvalidator
           activeStep={props.activeStep}
           displayModel={props.displayModel}
@@ -191,8 +200,8 @@ export function CadViewer(props: CadViewerProps) {
           <BoundsCameraReset signal={props.fitSignal} viewAxis={props.viewAxis} viewAxisSignal={props.viewAxisSignal} controlsRef={controlsRef} />
           <GizmoCameraReset axis={gizmoViewRequest.axis} signal={gizmoViewRequest.signal} controlsRef={controlsRef} />
         </Bounds>
-        <DemandOrbitControls controlsRef={controlsRef} onInteractionChange={props.onViewerInteractionChange} />
-        <ShiftPanControls controlsRef={controlsRef} onInteractionChange={props.onViewerInteractionChange} />
+        <DemandOrbitControls controlsRef={controlsRef} onInteractionChange={handleViewerInteractionChange} />
+        <ShiftPanControls controlsRef={controlsRef} onInteractionChange={handleViewerInteractionChange} />
         <GizmoHelper alignment={VIEWER_GIZMO_ALIGNMENT} margin={[92, 92]}>
           <CleanAxisGizmo
             onSelectAxis={(axis) => setGizmoViewRequest((request) => ({ axis, signal: request.signal + 1 }))}
