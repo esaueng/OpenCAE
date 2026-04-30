@@ -310,6 +310,26 @@ describe("CadViewer result coloring", () => {
     expect(right).toBeGreaterThan(0.9);
   });
 
+  test("does not let low detailed stress samples hide high beam face stress", () => {
+    const beamSamples: FaceResultSample[] = [
+      {
+        face: { id: "fixed", label: "Fixed end", color: "#4da3ff", center: [-1.9, 0.18, 0], normal: [-1, 0, 0], stressValue: 35.9 },
+        value: 35.9,
+        normalized: 1,
+        fieldSamples: [
+          { point: [-1.9, 0.18, 0], normal: [-1, 0, 0], value: 13, normalized: 0.06 }
+        ]
+      },
+      {
+        face: { id: "body", label: "Beam body", color: "#8b949e", center: [0, 0.14, 0], normal: [0, 0, 1], stressValue: 23.6 },
+        value: 23.6,
+        normalized: 0.45
+      }
+    ];
+
+    expect(resultValueForPoint("plate", "stress", 4, new THREE.Vector3(-1.9, 0.18, 0), beamSamples)).toBeGreaterThan(0.9);
+  });
+
   test("shows undeformed result outlines only while displaying deformed shape", () => {
     expect(shouldShowUndeformedResultOutline(true)).toBe(true);
     expect(shouldShowUndeformedResultOutline(false)).toBe(false);
