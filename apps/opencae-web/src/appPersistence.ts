@@ -81,7 +81,7 @@ export function buildAutosavedWorkspace({
     version: 1,
     savedAt,
     projectFile: buildLocalProjectFile(project, displayModel, savedAt, results?.fields.length ? results : undefined),
-    ui
+    ui: normalizeUiRunState(ui)
   };
 }
 
@@ -153,7 +153,7 @@ function parseResultBundle(value: unknown): LocalResultBundle | undefined {
 
 function parseUiSnapshot(value: unknown): WorkspaceUiSnapshot | null {
   if (!isRecord(value)) return null;
-  return {
+  return normalizeUiRunState({
     activeStep: readEnum(value.activeStep, STEPS, "model"),
     homeRequested: value.homeRequested === true,
     selectedFaceId: typeof value.selectedFaceId === "string" ? value.selectedFaceId : null,
@@ -177,7 +177,12 @@ function parseUiSnapshot(value: unknown): WorkspaceUiSnapshot | null {
     redoStack: parseProjectArray(value.redoStack),
     status: typeof value.status === "string" ? value.status : "Ready",
     logs: Array.isArray(value.logs) ? value.logs.filter((item): item is string => typeof item === "string").slice(0, 32) : []
-  };
+  });
+}
+
+function normalizeUiRunState(ui: WorkspaceUiSnapshot): WorkspaceUiSnapshot {
+  const runProgress = ui.runProgress > 0 && ui.runProgress < 100 ? 0 : ui.runProgress;
+  return runProgress === ui.runProgress ? ui : { ...ui, runProgress };
 }
 
 function parseDisplayModel(value: unknown): DisplayModel | null {

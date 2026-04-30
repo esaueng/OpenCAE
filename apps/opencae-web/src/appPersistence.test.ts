@@ -191,6 +191,52 @@ describe("app persistence", () => {
     expect(parseAutosavedWorkspacePayload(JSON.stringify({ ...snapshot, version: 99 }))).toBeNull();
   });
 
+  test("does not restore or persist in-progress simulation state after reload", () => {
+    const runningSnapshot = buildAutosavedWorkspace({
+      project,
+      displayModel,
+      savedAt: "2026-04-24T13:00:00.000Z",
+      ui: {
+        activeStep: "run",
+        homeRequested: false,
+        selectedFaceId: null,
+        selectedLoadPoint: null,
+        selectedPayloadObject: null,
+        viewMode: "model",
+        themeMode: "dark",
+        resultMode: "stress",
+        showDeformed: false,
+        showDimensions: false,
+        stressExaggeration: 1,
+        draftLoadType: "force",
+        draftLoadValue: 500,
+        draftLoadDirection: "-Z",
+        sampleModel: "cantilever",
+        sampleAnalysisType: "dynamic_structural",
+        activeRunId: "run-stale",
+        completedRunId: "",
+        runProgress: 98,
+        undoStack: [],
+        redoStack: [],
+        status: "Running simulation",
+        logs: ["Running simulation"]
+      }
+    });
+
+    expect(runningSnapshot.ui.runProgress).toBe(0);
+
+    const legacySnapshot = {
+      ...runningSnapshot,
+      ui: {
+        ...runningSnapshot.ui,
+        activeRunId: "run-legacy-stale",
+        runProgress: 98
+      }
+    };
+
+    expect(parseAutosavedWorkspacePayload(JSON.stringify(legacySnapshot))?.ui.runProgress).toBe(0);
+  });
+
   test("preserves study setup, fixed supports, loads, payload masses, and mesh after reload", () => {
     const setupProject = { ...project, studies: [studyWithSetup] } satisfies Project;
     const snapshot = buildAutosavedWorkspace({
