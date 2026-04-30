@@ -263,6 +263,16 @@ describe("LocalMockComputeBackend", () => {
     expect(stressField?.max).toBeGreaterThanOrEqual(Math.max(...(stressField?.samples ?? []).map((sample) => sample.value)));
   });
 
+  test("keeps beam demo detailed stress samples aligned with high face stresses", () => {
+    const result = solveStudy(beamPayloadStudy("mat-aluminum-6061"), "run-sampled-beam");
+    const stressField = result.fields.find((field) => field.type === "stress");
+    const sampleMax = Math.max(...(stressField?.samples ?? []).map((sample) => sample.value));
+    const faceMax = Math.max(...(stressField?.values ?? []));
+
+    expect(stressField?.samples?.length).toBeGreaterThan(100);
+    expect(sampleMax).toBeGreaterThan(faceMax * 0.75);
+  });
+
   test("ultra local solve produces denser surface samples with rich stress metadata", () => {
     const fine = solveStudy({ ...cantileverStudy("mat-aluminum-6061"), meshSettings: { preset: "fine", status: "complete", meshRef: "mesh", summary: { nodes: 1, elements: 1, warnings: [] } } }, "run-fine");
     const ultra = solveStudy({ ...cantileverStudy("mat-aluminum-6061"), meshSettings: { preset: "ultra", status: "complete", meshRef: "mesh", summary: { nodes: 1, elements: 1, warnings: [] } } }, "run-ultra");
@@ -706,6 +716,65 @@ function cantileverStudy(materialId: string, materialParameters: Record<string, 
       type: "force",
       selectionRef: "selection-load-face",
       parameters: { value: 500, units: "N", direction: [0, 0, -1] },
+      status: "complete"
+    }],
+    meshSettings: { preset: "medium", status: "complete", meshRef: "mesh", summary: { nodes: 10, elements: 4, warnings: [] } },
+    solverSettings: {},
+    validation: [],
+    runs: []
+  };
+}
+
+function beamPayloadStudy(materialId: string, materialParameters: Record<string, unknown> = {}): Study {
+  return {
+    id: "study-beam",
+    projectId: "project-beam",
+    name: "Static Stress",
+    type: "static_stress",
+    geometryScope: [],
+    materialAssignments: [{ id: "assign", materialId, selectionRef: "selection-body", parameters: materialParameters, status: "complete" }],
+    namedSelections: [
+      {
+        id: "selection-fixed-face",
+        name: "Fixed end face",
+        entityType: "face",
+        geometryRefs: [{ bodyId: "body", entityType: "face", entityId: "face-base-left", label: "Fixed end face" }],
+        fingerprint: "face-base-left-beam"
+      },
+      {
+        id: "selection-load-face",
+        name: "End payload mass",
+        entityType: "face",
+        geometryRefs: [{ bodyId: "body", entityType: "face", entityId: "face-load-top", label: "End payload mass" }],
+        fingerprint: "face-load-top-beam"
+      },
+      {
+        id: "selection-web-face",
+        name: "Beam top face",
+        entityType: "face",
+        geometryRefs: [{ bodyId: "body", entityType: "face", entityId: "face-web-front", label: "Beam top face" }],
+        fingerprint: "face-web-front-beam"
+      },
+      {
+        id: "selection-base-face",
+        name: "Beam body",
+        entityType: "face",
+        geometryRefs: [{ bodyId: "body", entityType: "face", entityId: "face-base-bottom", label: "Beam body" }],
+        fingerprint: "face-base-bottom-beam"
+      }
+    ],
+    contacts: [],
+    constraints: [{ id: "fixed", type: "fixed", selectionRef: "selection-fixed-face", parameters: {}, status: "complete" }],
+    loads: [{
+      id: "load-payload",
+      type: "gravity",
+      selectionRef: "selection-load-face",
+      parameters: {
+        value: 4.9,
+        units: "kg",
+        direction: [0, 0, -1],
+        applicationPoint: [1.48, 0.49, 0]
+      },
       status: "complete"
     }],
     meshSettings: { preset: "medium", status: "complete", meshRef: "mesh", summary: { nodes: 10, elements: 4, warnings: [] } },
