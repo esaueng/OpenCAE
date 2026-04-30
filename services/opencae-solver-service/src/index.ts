@@ -482,7 +482,7 @@ function stabilizeDynamicFieldRanges(fields: ResultField[]) {
       max = Math.max(max, value);
     }
     for (const field of matchingFields) {
-      field.min = round(min, dynamicRangeDigits(type));
+      if (type !== "stress") field.min = round(min, dynamicRangeDigits(type));
       field.max = round(max, dynamicRangeDigits(type));
     }
   }
