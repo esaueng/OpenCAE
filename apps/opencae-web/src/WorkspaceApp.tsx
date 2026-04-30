@@ -36,7 +36,7 @@ import { supportDisplayLabel } from "./supportLabels";
 import { nextSelectedPayloadObject, shouldClearPayloadSelectionOnViewerMiss } from "./payloadSelection";
 import { createLocalDynamicStructuralStudy, createLocalStaticStressStudy } from "./localProjectFactory";
 import { createPackedResultPlaybackCache, createResultFrameCache, hasDynamicPlaybackFrames } from "./resultFields";
-import { packedPreparedPlaybackFrameOrdinal, playbackMemoryBudgetBytes, type PackedPreparedPlaybackCache, type PreparedPlaybackFrameCache } from "./resultPlaybackCache";
+import { packedPreparedPlaybackFrameOrdinal, playbackFieldsForResultMode, playbackMemoryBudgetBytes, type PackedPreparedPlaybackCache, type PreparedPlaybackFrameCache } from "./resultPlaybackCache";
 import {
   boundedPlaybackOrdinalDelta,
   frameIndexForPlaybackOrdinal,
@@ -278,9 +278,10 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     }
     let cancelled = false;
     const navigatorWithMemory = typeof navigator === "undefined" ? undefined : navigator as Navigator & { deviceMemory?: number };
+    const playbackFieldsForSelectedMode = playbackFieldsForResultMode(resultFieldsForUi, resultMode);
     setResultPlaybackCacheState({ status: "preparing", cacheKey: resultPlaybackCacheKey });
     void preparePlaybackFramesInWorker({
-      fields: resultFieldsForUi,
+      fields: playbackFieldsForSelectedMode,
       frameIndexes: playbackFrameIndexes,
       playbackFps: PLAYBACK_CACHE_PREP_FPS,
       budgetBytes: playbackMemoryBudgetBytes(navigatorWithMemory?.deviceMemory),
@@ -301,7 +302,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     return () => {
       cancelled = true;
     };
-  }, [activeStep, playbackFrameIndexes, resultFieldsForUi, resultPlaybackCacheKey]);
+  }, [activeStep, playbackFrameIndexes, resultFieldsForUi, resultMode, resultPlaybackCacheKey]);
 
   useEffect(() => {
     if (!resultPlaybackPlaying || activeStep !== "results" || playbackFrameIndexes.length < 2) return;

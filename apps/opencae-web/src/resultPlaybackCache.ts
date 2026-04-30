@@ -171,6 +171,14 @@ export function preparePlaybackFrames(input: PlaybackFrameCacheInput): PreparedP
   };
 }
 
+export function playbackFieldsForResultMode(fields: ResultField[], resultMode: ResultField["type"]): ResultField[] {
+  const selected = fields.filter((field) => field.type === resultMode);
+  if (!selected.length) return fields;
+  if (resultMode === "displacement") return selected;
+  const displacement = fields.filter((field) => field.type === "displacement");
+  return displacement.length ? [...selected, ...displacement] : selected;
+}
+
 export function hydratePreparedPlaybackFrame(frame: PreparedPlaybackFrame): { framePosition: number; frameIndex: number; timeSeconds: number; fields: ResultField[] } {
   const cached = hydratedFrames.get(frame);
   if (cached) return cached;
