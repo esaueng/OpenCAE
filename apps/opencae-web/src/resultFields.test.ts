@@ -8,6 +8,7 @@ import {
   hasDynamicPlaybackFrames,
   interpolatedFieldsForFramePosition,
   nextLoopedResultFrameIndex,
+  normalizeTransientFieldRanges,
   packedResultPlaybackTransferables,
   resultFrameIndexes,
   resultProbeSamplesForFaces,
@@ -57,6 +58,32 @@ describe("resultSamplesForFaces", () => {
 
     expect(samples.map((sample) => sample.value)).toEqual([0, 140]);
     expect(samples[0]?.fieldSamples?.map((sample) => sample.value)).toEqual([0, 140]);
+  });
+
+  test("does not blindly index a short node field across a larger face array or mix static stress fallback", () => {
+    const manyFaces: DisplayFace[] = [
+      ...faces,
+      { id: "face-c", label: "C", color: "#fff", center: [2, 0, 0], normal: [0, 1, 0], stressValue: 999 },
+      { id: "face-d", label: "D", color: "#fff", center: [3, 0, 0], normal: [0, 1, 0], stressValue: 888 },
+      { id: "face-e", label: "E", color: "#fff", center: [4, 0, 0], normal: [0, 1, 0], stressValue: 777 }
+    ];
+    const fields: ResultField[] = [
+      {
+        id: "stress-node",
+        runId: "run",
+        type: "stress",
+        location: "node",
+        values: [1, 2, 3, 4],
+        min: 0,
+        max: 10,
+        units: "MPa"
+      }
+    ];
+
+    const samples = resultSamplesForFaces(manyFaces, fields, "stress");
+
+    expect(samples.map((sample) => sample.value)).toEqual([0, 0, 0, 0, 0]);
+    expect(samples.map((sample) => sample.normalized)).toEqual([0, 0, 0, 0, 0]);
   });
 
   test("ranks displacement probes by solved face value instead of fixed face order", () => {
@@ -160,6 +187,42 @@ describe("dynamic result frames", () => {
       60.3 / 399.2,
       327.5 / 399.2
     ]);
+  });
+
+  test("normalizeTransientFieldRanges keeps identical min and max for all stress frames", () => {
+    const fields: ResultField[] = [
+      { id: "stress-0", runId: "run", type: "stress", location: "node", values: [0, 20], min: 0, max: 20, units: "MPa", frameIndex: 0, timeSeconds: 0 },
+      { id: "stress-1", runId: "run", type: "stress", location: "node", values: [0, 100], min: 0, max: 100, units: "MPa", frameIndex: 1, timeSeconds: 0.005 },
+      { id: "stress-2", runId: "run", type: "stress", location: "node", values: [0, 50], min: 0, max: 50, units: "MPa", frameIndex: 2, timeSeconds: 0.01 }
+    ];
+
+    const normalized = normalizeTransientFieldRanges(fields);
+
+    expect(normalized.map((field) => [field.min, field.max])).toEqual([[0, 100], [0, 100], [0, 100]]);
+  });
+
+  test("interpolated dynamic fields retain global normalized min and max", () => {
+    const fields = normalizeTransientFieldRanges([
+      { id: "stress-0", runId: "run", type: "stress", location: "node", values: [0, 20], min: 0, max: 20, units: "MPa", frameIndex: 0, timeSeconds: 0 },
+      { id: "stress-1", runId: "run", type: "stress", location: "node", values: [0, 100], min: 0, max: 100, units: "MPa", frameIndex: 1, timeSeconds: 0.005 }
+    ] satisfies ResultField[]);
+
+    const interpolated = interpolatedFieldsForFramePosition(fields, 0.5);
+
+    expect(interpolated[0]).toMatchObject({ values: [0, 60], min: 0, max: 100 });
+  });
+
+  test("same scalar value maps to the same normalized value at every dynamic frame", () => {
+    const fields = normalizeTransientFieldRanges([
+      { id: "stress-0", runId: "run", type: "stress", location: "face", values: [50, 20], min: 0, max: 50, units: "MPa", frameIndex: 0, timeSeconds: 0 },
+      { id: "stress-1", runId: "run", type: "stress", location: "face", values: [50, 100], min: 50, max: 100, units: "MPa", frameIndex: 1, timeSeconds: 0.005 }
+    ] satisfies ResultField[]);
+
+    const first = resultSamplesForFaces(faces, fieldsForResultFrame(fields, 0), "stress")[0]?.normalized;
+    const second = resultSamplesForFaces(faces, fieldsForResultFrame(fields, 1), "stress")[0]?.normalized;
+
+    expect(first).toBe(0.5);
+    expect(second).toBe(0.5);
   });
 
   test("keeps static fields locally scaled when building a non-framed result cache", () => {

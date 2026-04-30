@@ -427,10 +427,10 @@ export function packedPreparedPlaybackFieldSlot(
   cache: PackedPreparedPlaybackCache,
   frameOrdinal: number,
   type: ResultField["type"],
-  location: ResultField["location"] = "face"
+  location?: ResultField["location"]
 ): PackedPreparedPlaybackFieldSlot | null {
   const clampedFrameOrdinal = Math.max(0, Math.min(cache.frameCount - 1, Math.floor(frameOrdinal)));
-  const fieldOrdinal = cache.fieldDescriptors.findIndex((descriptor) => descriptor.type === type && descriptor.location === location);
+  const fieldOrdinal = packedPreparedPlaybackFieldOrdinal(cache.fieldDescriptors, type, location);
   if (fieldOrdinal < 0) return null;
   const slot = clampedFrameOrdinal * cache.fieldCount + fieldOrdinal;
   const offset = cache.fieldOffsets[slot] ?? 0;
@@ -450,6 +450,22 @@ export function packedPreparedPlaybackFieldSlot(
     samplePoints: cache.samplePoints,
     sampleNormals: cache.sampleNormals
   };
+}
+
+function packedPreparedPlaybackFieldOrdinal(
+  descriptors: PackedPreparedPlaybackFieldDescriptor[],
+  type: ResultField["type"],
+  location?: ResultField["location"]
+): number {
+  if (location) {
+    const exact = descriptors.findIndex((descriptor) => descriptor.type === type && descriptor.location === location);
+    if (exact >= 0) return exact;
+  }
+  const face = descriptors.findIndex((descriptor) => descriptor.type === type && descriptor.location === "face");
+  if (face >= 0) return face;
+  const nodeOrSample = descriptors.findIndex((descriptor) => descriptor.type === type && descriptor.location === "node");
+  if (nodeOrSample >= 0) return nodeOrSample;
+  return descriptors.findIndex((descriptor) => descriptor.type === type);
 }
 
 function packPreparedPlaybackFrames(frames: PreparedPlaybackFrame[]): PackedPreparedPlaybackCache | undefined {

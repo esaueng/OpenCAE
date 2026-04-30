@@ -7,6 +7,7 @@ export interface FaceResultSample {
   value: number;
   normalized: number;
   fieldSamples?: FieldResultSample[];
+  diagnostic?: string;
 }
 
 export interface FieldResultSample {
@@ -100,13 +101,14 @@ export interface PackedResultPlaybackCache {
 }
 
 export function createResultFrameCache(fields: ResultField[]): ResultFrameCache {
-  const frameIndexes = resultFrameIndexes(fields);
-  const hasFrames = fields.some((field) => typeof field.frameIndex === "number");
+  const normalizedFields = normalizeTransientFieldRanges(fields);
+  const frameIndexes = resultFrameIndexes(normalizedFields);
+  const hasFrames = normalizedFields.some((field) => typeof field.frameIndex === "number");
   const fieldsByFrame = new Map<number, ResultField[]>();
   const fieldMapsByFrame = new Map<number, Map<string, ResultField>>();
   const frameTimes = new Map<number, number>();
   if (!hasFrames) {
-    const visible = fields.map((field) => fieldWithOwnValueRange(field));
+    const visible = normalizedFields.map((field) => fieldWithOwnValueRange(field));
     return {
       frameIndexes,
       fieldsForFrame: () => visible,
@@ -114,7 +116,7 @@ export function createResultFrameCache(fields: ResultField[]): ResultFrameCache 
       timeForFramePosition: () => 0
     };
   }
-  for (const field of fields) {
+  for (const field of normalizedFields) {
     const frameIndex = field.frameIndex ?? 0;
     const visibleField = fieldWithOwnValueRange(field);
     const frameFields = fieldsByFrame.get(frameIndex) ?? [];
@@ -138,15 +140,16 @@ export function createResultFrameCache(fields: ResultField[]): ResultFrameCache 
 }
 
 export function createPackedResultPlaybackCache(fields: ResultField[]): PackedResultPlaybackCache | null {
-  const frameIndexes = resultFrameIndexes(fields);
-  if (frameIndexes.length < 2 || !fields.some((field) => typeof field.frameIndex === "number")) return null;
+  const normalizedFields = normalizeTransientFieldRanges(fields);
+  const frameIndexes = resultFrameIndexes(normalizedFields);
+  if (frameIndexes.length < 2 || !normalizedFields.some((field) => typeof field.frameIndex === "number")) return null;
 
   const fieldsByFrame = new Map<number, ResultField[]>();
   const fieldMapsByFrame = new Map<number, Map<string, ResultField>>();
   const frameTimes = new Map<number, number>();
   const descriptorKeys: string[] = [];
   const descriptorKeySet = new Set<string>();
-  for (const field of fields) {
+  for (const field of normalizedFields) {
     const frameIndex = field.frameIndex ?? 0;
     const frameFields = fieldsByFrame.get(frameIndex) ?? [];
     frameFields.push(field);
@@ -340,15 +343,43 @@ export function nextLoopedResultFrameIndex(frameIndexes: number[], currentFrameI
 }
 
 export function fieldsForResultFrame(fields: ResultField[], frameIndex: number): ResultField[] {
-  const hasFrames = fields.some((field) => typeof field.frameIndex === "number");
-  if (!hasFrames) return fields;
-  return fields
+  const normalizedFields = normalizeTransientFieldRanges(fields);
+  const hasFrames = normalizedFields.some((field) => typeof field.frameIndex === "number");
+  if (!hasFrames) return normalizedFields;
+  return normalizedFields
     .filter((field) => (field.frameIndex ?? 0) === frameIndex)
     .map((field) => fieldWithOwnValueRange(field));
 }
 
 export function interpolatedFieldsForFramePosition(fields: ResultField[], framePosition: number): ResultField[] {
   return createResultFrameCache(fields).fieldsForFramePosition(framePosition);
+}
+
+export function normalizeTransientFieldRanges(fields: ResultField[]): ResultField[] {
+  const rangesByGroup = new Map<string, { min: number; max: number; transient: boolean; type: ResultField["type"] }>();
+  for (const field of fields) {
+    const transient = isTransientField(field);
+    if (!transient) continue;
+    const key = transientFieldRangeKey(field);
+    const existing = rangesByGroup.get(key) ?? { min: Number.POSITIVE_INFINITY, max: Number.NEGATIVE_INFINITY, transient, type: field.type };
+    for (const value of finiteFieldValues(field)) {
+      existing.min = Math.min(existing.min, value);
+      existing.max = Math.max(existing.max, value);
+    }
+    rangesByGroup.set(key, existing);
+  }
+  return fields.map((field) => {
+    if (!isTransientField(field)) return field;
+    const range = rangesByGroup.get(transientFieldRangeKey(field));
+    if (!range?.transient || !Number.isFinite(range.min) || !Number.isFinite(range.max)) return field;
+    const normalizedRange = normalizedRangeForFieldType(range.type, range.min, range.max);
+    if (field.min === normalizedRange.min && field.max === normalizedRange.max) return field;
+    return {
+      ...field,
+      min: normalizedRange.min,
+      max: normalizedRange.max
+    };
+  });
 }
 
 function interpolatedFieldsForCachedFramePosition(
@@ -540,12 +571,12 @@ function interpolationBoundsForFramePosition(frameIndexes: number[], framePositi
 
 export function resultSamplesForFaces(faces: DisplayFace[], fields: ResultField[], mode: ResultFieldMode): FaceResultSample[] {
   const field = resultFieldForMode(fields, mode);
-  const values = faces.map((face, index) => {
-    const solved = Number(field?.values[index]);
-    return Number.isFinite(solved) ? solved : fallbackValue(face, mode);
-  });
-  const min = Number.isFinite(field?.min) ? Number(field?.min) : Math.min(...values);
-  const max = Number.isFinite(field?.max) ? Number(field?.max) : Math.max(...values);
+  const mapped = field ? mappedValuesForFaces(faces, field, mode) : {
+    values: faces.map((face) => fallbackValue(face, mode)),
+    diagnostic: undefined
+  };
+  const min = Number.isFinite(field?.min) ? Number(field?.min) : Math.min(...mapped.values);
+  const max = Number.isFinite(field?.max) ? Number(field?.max) : Math.max(...mapped.values);
   const fieldSamples = field?.samples?.map((sample) => ({
     point: sample.point,
     normal: sample.normal,
@@ -554,9 +585,10 @@ export function resultSamplesForFaces(faces: DisplayFace[], fields: ResultField[
   }));
   return faces.map((face, index) => ({
     face,
-    value: values[index] ?? fallbackValue(face, mode),
-    normalized: normalizeValue(values[index] ?? fallbackValue(face, mode), min, max),
-    ...(fieldSamples?.length ? { fieldSamples } : {})
+    value: mapped.values[index] ?? 0,
+    normalized: normalizeValue(mapped.values[index] ?? 0, min, max),
+    ...(fieldSamples?.length ? { fieldSamples } : {}),
+    ...(mapped.diagnostic ? { diagnostic: mapped.diagnostic } : {})
   }));
 }
 
@@ -590,12 +622,60 @@ function resultFieldForMode(fields: ResultField[], mode: ResultFieldMode): Resul
     ?? fields.find((candidate) => candidate.type === mode);
 }
 
+function mappedValuesForFaces(faces: DisplayFace[], field: ResultField, mode: ResultFieldMode): { values: number[]; diagnostic?: string } {
+  if (field.location === "face" && field.values.length === faces.length) {
+    return { values: faces.map((_, index) => finiteOrNeutral(field.values[index], mode)) };
+  }
+  if (field.samples?.length) {
+    return { values: faces.map((face) => interpolatedFieldSampleValue(face.center, field.samples!, mode)) };
+  }
+  return {
+    values: faces.map(() => neutralValue(mode)),
+    diagnostic: `Solver ${field.location} ${field.type} field cannot be mapped to display faces without sample coordinates.`
+  };
+}
+
 function fallbackValue(face: DisplayFace, mode: ResultFieldMode): number {
   if (mode === "displacement") return face.stressValue / 770;
   if (mode === "velocity") return 0;
   if (mode === "acceleration") return 0;
   if (mode === "safety_factor") return Math.max(0.2, 276 / Math.max(face.stressValue, 0.001));
   return face.stressValue;
+}
+
+function neutralValue(mode: ResultFieldMode): number {
+  if (mode === "safety_factor") return 1;
+  return 0;
+}
+
+function finiteOrNeutral(value: unknown, mode: ResultFieldMode): number {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : neutralValue(mode);
+}
+
+function interpolatedFieldSampleValue(point: [number, number, number], samples: NonNullable<ResultField["samples"]>, mode: ResultFieldMode): number {
+  const neighbors = samples
+    .map((sample) => ({ sample, distanceSq: squaredDistance(point, sample.point) }))
+    .filter((entry) => Number.isFinite(entry.sample.value) && Number.isFinite(entry.distanceSq))
+    .sort((left, right) => left.distanceSq - right.distanceSq)
+    .slice(0, Math.min(8, Math.max(3, samples.length)));
+  const exact = neighbors.find((entry) => entry.distanceSq <= 1e-18);
+  if (exact) return exact.sample.value;
+  let weighted = 0;
+  let totalWeight = 0;
+  for (const neighbor of neighbors) {
+    const weight = 1 / Math.max(neighbor.distanceSq, 1e-18);
+    weighted += neighbor.sample.value * weight;
+    totalWeight += weight;
+  }
+  return totalWeight > 0 ? weighted / totalWeight : neutralValue(mode);
+}
+
+function squaredDistance(left: [number, number, number], right: [number, number, number]) {
+  const dx = left[0] - right[0];
+  const dy = left[1] - right[1];
+  const dz = left[2] - right[2];
+  return dx * dx + dy * dy + dz * dz;
 }
 
 function normalizeValue(value: number, min: number, max: number): number {
@@ -616,6 +696,34 @@ function fieldWithOwnValueRange(field: ResultField): ResultField {
     min: Math.min(...values),
     max: Math.max(...values)
   };
+}
+
+function transientFieldRangeKey(field: ResultField): string {
+  return `${field.runId}\u0000${field.type}\u0000${field.location}`;
+}
+
+function isTransientField(field: ResultField): boolean {
+  return typeof field.frameIndex === "number" && typeof field.timeSeconds === "number";
+}
+
+function finiteFieldValues(field: ResultField): number[] {
+  return [
+    ...field.values,
+    ...(field.samples?.map((sample) => sample.value) ?? []),
+    field.min,
+    field.max
+  ].filter(Number.isFinite);
+}
+
+function normalizedRangeForFieldType(type: ResultField["type"], min: number, max: number): { min: number; max: number } {
+  if (type === "velocity" || type === "acceleration") {
+    const bound = Math.max(Math.abs(min), Math.abs(max));
+    return { min: -bound, max: bound };
+  }
+  if (type === "stress" || (type === "displacement" && min >= 0)) {
+    return { min: 0, max };
+  }
+  return { min, max };
 }
 
 function fieldSeriesKey(field: ResultField): string {

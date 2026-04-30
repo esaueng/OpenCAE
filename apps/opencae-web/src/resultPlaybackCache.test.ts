@@ -3,6 +3,7 @@ import { describe, expect, test } from "vitest";
 import {
   hydratePreparedPlaybackFrame,
   packResultFieldsForPlayback,
+  packedPreparedPlaybackFieldSlot,
   packedResultFieldsForPlaybackTransferables,
   planPlaybackFrameCache,
   preparePlaybackFrames,
@@ -11,6 +12,8 @@ import {
   unpackResultFieldsForPlayback,
   playbackMemoryBudgetBytes
 } from "./resultPlaybackCache";
+import { resultSamplesForFaces } from "./resultFields";
+import type { DisplayFace } from "@opencae/schema";
 
 function resultField(frameIndex: number, values: number[]): ResultField {
   return {
@@ -212,5 +215,62 @@ describe("result playback cache", () => {
     ]);
 
     expect(playbackFieldsForResultMode(fields, "velocity")).toBe(fields);
+  });
+
+  test("packedPreparedPlaybackFieldSlot retrieves node sample fields when no face field exists", () => {
+    const fields: ResultField[] = [0, 1].map((frameIndex) => ({
+      ...resultField(frameIndex, [frameIndex, frameIndex + 10]),
+      location: "node" as const,
+      samples: [
+        { point: [0, 0, 0] as [number, number, number], normal: [0, 1, 0] as [number, number, number], value: frameIndex },
+        { point: [1, 0, 0] as [number, number, number], normal: [0, 1, 0] as [number, number, number], value: frameIndex + 10 }
+      ]
+    }));
+    const prepared = preparePlaybackFrames({ fields, frameIndexes: [0, 1], playbackFps: 30, budgetBytes: 100_000 });
+
+    const slot = packedPreparedPlaybackFieldSlot(prepared.packed!, 0, "stress");
+
+    expect(slot?.descriptor.location).toBe("node");
+    expect(slot?.sampleLength).toBe(2);
+  });
+
+  test("manual frame and packed frame return the same normalized color values for node samples", () => {
+    const displayFaces: DisplayFace[] = [
+      { id: "left", label: "Left", color: "#fff", center: [0, 0, 0], normal: [0, 1, 0], stressValue: 999 },
+      { id: "right", label: "Right", color: "#fff", center: [1, 0, 0], normal: [0, 1, 0], stressValue: 888 }
+    ];
+    const fields: ResultField[] = [0, 1].map((frameIndex) => ({
+      ...resultField(frameIndex, [0, 100]),
+      location: "node" as const,
+      min: 0,
+      max: 100,
+      samples: [
+        { point: [0, 0, 0] as [number, number, number], normal: [0, 1, 0] as [number, number, number], value: 0 },
+        { point: [1, 0, 0] as [number, number, number], normal: [0, 1, 0] as [number, number, number], value: 100 }
+      ]
+    }));
+    const manual = resultSamplesForFaces(displayFaces, fields.filter((field) => field.frameIndex === 1), "stress");
+    const prepared = preparePlaybackFrames({ fields, frameIndexes: [0, 1], playbackFps: 30, budgetBytes: 100_000 });
+    const slot = packedPreparedPlaybackFieldSlot(prepared.packed!, 1, "stress")!;
+    const packedField: ResultField = {
+      ...slot.descriptor,
+      id: "packed-stress",
+      values: Array.from(slot.values.slice(slot.offset, slot.offset + slot.length)),
+      min: slot.min,
+      max: slot.max,
+      samples: Array.from({ length: slot.sampleLength }, (_, index) => {
+        const packedIndex = slot.sampleOffset + index;
+        const pointOffset = packedIndex * 3;
+        return {
+          point: [slot.samplePoints[pointOffset] ?? 0, slot.samplePoints[pointOffset + 1] ?? 0, slot.samplePoints[pointOffset + 2] ?? 0] as [number, number, number],
+          normal: [slot.sampleNormals[pointOffset] ?? 0, slot.sampleNormals[pointOffset + 1] ?? 0, slot.sampleNormals[pointOffset + 2] ?? 0] as [number, number, number],
+          value: slot.sampleValues[packedIndex] ?? 0
+        };
+      })
+    };
+
+    const packed = resultSamplesForFaces(displayFaces, [packedField], "stress");
+
+    expect(packed.map((sample) => sample.normalized)).toEqual(manual.map((sample) => sample.normalized));
   });
 });
