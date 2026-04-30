@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ElementRef, MutableRefObject } from "react";
 import { Billboard, Bounds, Edges, GizmoHelper, Html, Line, OrbitControls, Text, useBounds } from "@react-three/drei";
-import { Canvas, useThree } from "@react-three/fiber";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import type { ThreeEvent } from "@react-three/fiber";
 import type { DisplayFace, DisplayModel, MeshSummary, ResultField } from "@opencae/schema";
 import { meshVolumeM3FromTriangles, type Triangle } from "@opencae/units";
@@ -132,6 +132,8 @@ export const VIEWER_CREDIT_URL = "https://esauengineering.com/";
 const VIEWER_FIT_MARGIN = 1.28;
 const DEFAULT_HOME_FIT_MARGIN = 1.46;
 const VIEWER_FIT_RETRY_DELAY_MS = 120;
+const VIEWER_STATS_LOG_INTERVAL_MS = 1000;
+const VIEWER_STATS_STORAGE_KEY = "opencae.perf.viewerStats";
 
 export function CadViewer(props: CadViewerProps) {
   const controlsRef = useRef<ViewerOrbitControls | null>(null);
@@ -144,6 +146,7 @@ export function CadViewer(props: CadViewerProps) {
   const modelRotation = useMemo(() => modelRotationRadians(props.displayModel), [props.displayModel]);
   const baseModelRotation = useMemo(() => baseModelRotationRadians(props.displayModel), [props.displayModel]);
   const resultFields = props.resultFields;
+  const viewerStatsEnabled = isViewerRendererStatsEnabled();
   useEffect(() => {
     setUploadedPreviewBounds(null);
   }, [props.displayModel.nativeCad?.contentBase64, props.displayModel.visualMesh?.contentBase64]);
@@ -193,6 +196,7 @@ export function CadViewer(props: CadViewerProps) {
             onSelectAxis={(axis) => setGizmoViewRequest((request) => ({ axis, signal: request.signal + 1 }))}
           />
         </GizmoHelper>
+        {viewerStatsEnabled && <ViewerRendererStatsProbe />}
       </Canvas>
       <div className="viewer-hud">
         <button className="viewer-reset" type="button" onClick={props.onResetView} title="Reset view" aria-label="Reset view">
@@ -204,6 +208,39 @@ export function CadViewer(props: CadViewerProps) {
       {effectiveViewMode === "results" && <ResultLegend resultMode={props.resultMode} resultFields={resultFields} unitSystem={props.unitSystem} meshSummary={props.meshSummary} />}
     </section>
   );
+}
+
+function ViewerRendererStatsProbe() {
+  const { gl } = useThree();
+  const lastLogRef = useRef(0);
+  useFrame(({ clock }) => {
+    const nowMs = clock.elapsedTime * 1000;
+    if (nowMs - lastLogRef.current < VIEWER_STATS_LOG_INTERVAL_MS) return;
+    lastLogRef.current = nowMs;
+    console.debug("[OpenCAE viewer stats]", {
+      calls: gl.info.render.calls,
+      triangles: gl.info.render.triangles,
+      lines: gl.info.render.lines,
+      geometries: gl.info.memory.geometries,
+      textures: gl.info.memory.textures
+    });
+  });
+  return null;
+}
+
+function isViewerRendererStatsEnabled() {
+  if (typeof window === "undefined") return false;
+  const explicitlyEnabled = new URLSearchParams(window.location.search).get("opencaePerf") === "1" || safeViewerStatsStorageFlag() === "1";
+  const productionOptInAllowed = !import.meta.env.DEV && explicitlyEnabled;
+  return (import.meta.env.DEV && explicitlyEnabled) || productionOptInAllowed;
+}
+
+function safeViewerStatsStorageFlag() {
+  try {
+    return window.localStorage.getItem(VIEWER_STATS_STORAGE_KEY);
+  } catch {
+    return null;
+  }
 }
 
 function ViewerInvalidator({

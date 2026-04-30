@@ -78,4 +78,19 @@ describe("Worker UI performance rewrite boundaries", () => {
     expect(persistenceSource).toContain("requestIdleCallback");
     expect(persistenceSource).toContain("delayMs = 650");
   });
+
+  test("keeps viewer renderer stats behind explicit development opt-in flags", () => {
+    const viewerSource = readFileSync(resolve(__dirname, "components/CadViewer.tsx"), "utf8");
+
+    expect(viewerSource).toContain("ViewerRendererStatsProbe");
+    expect(viewerSource).toContain("opencaePerf");
+    expect(viewerSource).toContain("opencae.perf.viewerStats");
+    expect(viewerSource).toContain("import.meta.env.DEV");
+    expect(viewerSource).toContain("gl.info.render.calls");
+    expect(viewerSource).toContain("gl.info.render.triangles");
+    expect(viewerSource).toContain("gl.info.render.lines");
+    expect(viewerSource).toContain("gl.info.memory.geometries");
+    expect(viewerSource).toContain("gl.info.memory.textures");
+    expect(viewerSource).toContain("VIEWER_STATS_LOG_INTERVAL_MS = 1000");
+  });
 });
