@@ -881,6 +881,20 @@ img {
   min-height: 32px;
 }
 
+.donate-action {
+  color: #ffd6a3;
+  border-color: rgba(255, 176, 87, 0.36);
+  background: rgba(255, 176, 87, 0.08);
+  text-decoration: none;
+}
+
+.donate-action:hover,
+.donate-action:focus-visible {
+  color: #ffe2bd;
+  border-color: rgba(255, 176, 87, 0.62);
+  background: rgba(255, 176, 87, 0.14);
+}
+
 .topbar-action.running {
   color: var(--color-accent);
   background: var(--color-surface-2);
@@ -2900,6 +2914,10 @@ button:disabled {
 
   .topbar-action {
     padding: 6px 8px;
+  }
+
+  .donate-action span {
+    display: none;
   }
 
   .workspace {

@@ -22,6 +22,11 @@ describe("App workflow layout", () => {
     expect(appSource).toContain("applyStep(options.nextStep);");
   });
 
+  test("keeps the Ko-fi donation action in the top bar", () => {
+    expect(appSource).toContain('href="https://ko-fi.com/petergustafson"');
+    expect(appSource).toContain("Buy me a coffee");
+  });
+
   test("drives dynamic result playback with animation frames instead of queued intervals", () => {
     expect(appSource).toContain("window.requestAnimationFrame(advancePlaybackFrame)");
     expect(appSource).toContain("resultPlaybackFramePositionRef.current");
