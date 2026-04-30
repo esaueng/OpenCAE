@@ -211,11 +211,15 @@ describe("LocalMockComputeBackend", () => {
     const freeEndFaceDisplacement = displacementValues[1] ?? 0;
     const fixedEndSampleDisplacement = nearestSampleValue(displacementField?.samples ?? [], [-1.9, 0.18, 0]);
     const freeEndSampleDisplacement = nearestSampleValue(displacementField?.samples ?? [], [1.9, 0.18, 0]);
+    const freeEndSample = nearestSample(displacementField?.samples ?? [], [1.9, 0.18, 0]);
 
     expect(fixedEndFaceDisplacement).toBeCloseTo(0, 6);
     expect(fixedEndSampleDisplacement).toBeCloseTo(0, 6);
     expect(freeEndFaceDisplacement).toBeGreaterThan(fixedEndFaceDisplacement);
     expect(freeEndSampleDisplacement).toBeGreaterThan(fixedEndSampleDisplacement);
+    expect(freeEndSample?.vector).toBeTruthy();
+    expect(freeEndSample?.vector?.[2]).toBeLessThan(0);
+    expect(Math.hypot(...freeEndSample!.vector!)).toBeCloseTo(freeEndSample.value, 4);
   });
 
   test("solves cantilever transverse bending with max stress at the fixed support", async () => {
@@ -561,12 +565,19 @@ describe("LocalMockComputeBackend", () => {
     const displacementValues = solved.fields
       .filter((field) => field.type === "displacement")
       .flatMap((field) => field.values);
+    const displacementVectors = solved.fields
+      .filter((field) => field.type === "displacement")
+      .flatMap((field) => field.samples ?? [])
+      .map((sample) => sample.vector)
+      .filter((vector): vector is [number, number, number] => Boolean(vector));
     const stressValues = solved.fields
       .filter((field) => field.type === "stress")
       .flatMap((field) => field.values);
 
     expect(displacementValues.some((value) => value < 0)).toBe(true);
     expect(displacementValues.some((value) => value > 0)).toBe(true);
+    expect(displacementVectors.some((vector) => vector[2] < 0)).toBe(true);
+    expect(displacementVectors.some((vector) => vector[2] > 0)).toBe(true);
     expect(stressValues.every((value) => value >= 0)).toBe(true);
     expect(solved.summary.maxDisplacement).toBeGreaterThan(0);
   });
@@ -634,11 +645,14 @@ function rectangularBeamAnalysisMesh(): AnalysisMesh {
 }
 
 function nearestSampleValue(samples: NonNullable<ReturnType<typeof solveStudy>["fields"][number]["samples"]>, point: [number, number, number]) {
-  const nearest = samples.reduce<{ value: number; distance: number } | undefined>((best, sample) => {
+  return nearestSample(samples, point)?.value ?? 0;
+}
+
+function nearestSample(samples: NonNullable<ReturnType<typeof solveStudy>["fields"][number]["samples"]>, point: [number, number, number]) {
+  return samples.reduce<(NonNullable<ReturnType<typeof solveStudy>["fields"][number]["samples"]>[number] & { distance: number }) | undefined>((best, sample) => {
     const distance = Math.hypot(sample.point[0] - point[0], sample.point[1] - point[1], sample.point[2] - point[2]);
-    return !best || distance < best.distance ? { value: sample.value, distance } : best;
+    return !best || distance < best.distance ? { ...sample, distance } : best;
   }, undefined);
-  return nearest?.value ?? 0;
 }
 
 function studyWithLoads(loads: Array<{ id: string; type: Load["type"]; value: number; direction: [number, number, number]; selectionRef?: string }>, materialId = "mat-aluminum-6061", materialParameters: Record<string, unknown> = {}): Study {
