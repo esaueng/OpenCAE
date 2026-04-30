@@ -14,6 +14,7 @@ import type { StepId } from "./components/StepBar";
 import type { SampleAnalysisType, SampleModelId } from "./lib/api";
 
 export const AUTOSAVE_STORAGE_KEY = "opencae.workspace.autosave.v1";
+export const AUTOSAVE_UI_STORAGE_KEY = "opencae.workspace.ui.autosave.v1";
 
 export type ThemeMode = "dark" | "light";
 
@@ -47,6 +48,12 @@ export interface AutosavedWorkspace {
   version: 1;
   savedAt: string;
   projectFile: LocalProjectFile;
+  ui: WorkspaceUiSnapshot;
+}
+
+export interface AutosavedWorkspaceUiSnapshot {
+  version: 1;
+  savedAt: string;
   ui: WorkspaceUiSnapshot;
 }
 
@@ -90,6 +97,14 @@ export function buildAutosavedWorkspace({
   };
 }
 
+export function buildAutosavedWorkspaceUiSnapshot(ui: WorkspaceUiSnapshot, savedAt = new Date().toISOString()): AutosavedWorkspaceUiSnapshot {
+  return {
+    version: 1,
+    savedAt,
+    ui: normalizeUiRunState(ui)
+  };
+}
+
 export function parseAutosavedWorkspacePayload(payload: string): AutosavedWorkspace | null {
   try {
     return parseAutosavedWorkspace(JSON.parse(payload) as unknown);
@@ -101,43 +116,35 @@ export function parseAutosavedWorkspacePayload(payload: string): AutosavedWorksp
 export function readAutosavedWorkspace(storage = getBrowserStorage()): AutosavedWorkspace | null {
   if (!storage) return null;
   const payload = storage.getItem(AUTOSAVE_STORAGE_KEY);
-  return payload ? parseAutosavedWorkspacePayload(payload) : null;
+  const workspace = payload ? parseAutosavedWorkspacePayload(payload) : null;
+  if (!workspace) return null;
+  const uiPayload = storage.getItem(AUTOSAVE_UI_STORAGE_KEY);
+  const uiSnapshot = uiPayload ? parseAutosavedWorkspaceUiSnapshotPayload(uiPayload) : null;
+  return uiSnapshot && isNewerOrSameTimestamp(uiSnapshot.savedAt, workspace.savedAt) ? { ...workspace, ui: uiSnapshot.ui } : workspace;
 }
 
 export function writeAutosavedWorkspace(snapshot: AutosavedWorkspace, storage = getBrowserStorage()): boolean {
-  if (!storage) return false;
-  try {
-    storage.setItem(AUTOSAVE_STORAGE_KEY, JSON.stringify(snapshot));
-    return true;
-  } catch {
-    return false;
-  }
+  return writeJsonStorageItem(AUTOSAVE_STORAGE_KEY, snapshot, storage);
+}
+
+export function writeAutosavedUiSnapshot(snapshot: AutosavedWorkspaceUiSnapshot, storage = getBrowserStorage()): boolean {
+  return writeJsonStorageItem(AUTOSAVE_UI_STORAGE_KEY, snapshot, storage);
 }
 
 export function scheduleAutosavedWorkspaceWrite(
-  snapshot: AutosavedWorkspace,
+  snapshot: AutosavedWorkspace | (() => AutosavedWorkspace),
+  storage = getBrowserStorage(),
+  delayMs = 5000
+): () => void {
+  return scheduleStorageWrite(() => writeAutosavedWorkspace(readSnapshot(snapshot), storage), storage, delayMs);
+}
+
+export function scheduleAutosavedUiSnapshotWrite(
+  snapshot: AutosavedWorkspaceUiSnapshot | (() => AutosavedWorkspaceUiSnapshot),
   storage = getBrowserStorage(),
   delayMs = 650
 ): () => void {
-  if (!storage) return () => undefined;
-  const idleCallbacks = globalThis as typeof globalThis & IdleCallbackHandle;
-  let idleHandle: number | null = null;
-  const timeoutHandle = globalThis.setTimeout(() => {
-    const write = () => {
-      idleHandle = null;
-      writeAutosavedWorkspace(snapshot, storage);
-    };
-    if (idleCallbacks.requestIdleCallback) {
-      idleHandle = idleCallbacks.requestIdleCallback(write, { timeout: 1500 });
-    } else {
-      write();
-    }
-  }, delayMs);
-
-  return () => {
-    globalThis.clearTimeout(timeoutHandle);
-    if (idleHandle !== null) idleCallbacks.cancelIdleCallback?.(idleHandle);
-  };
+  return scheduleStorageWrite(() => writeAutosavedUiSnapshot(readSnapshot(snapshot), storage), storage, delayMs);
 }
 
 function parseAutosavedWorkspace(value: unknown): AutosavedWorkspace | null {
@@ -149,6 +156,25 @@ function parseAutosavedWorkspace(value: unknown): AutosavedWorkspace | null {
     version: 1,
     savedAt: value.savedAt,
     projectFile,
+    ui
+  };
+}
+
+function parseAutosavedWorkspaceUiSnapshotPayload(payload: string): AutosavedWorkspaceUiSnapshot | null {
+  try {
+    return parseAutosavedWorkspaceUiSnapshot(JSON.parse(payload) as unknown);
+  } catch {
+    return null;
+  }
+}
+
+function parseAutosavedWorkspaceUiSnapshot(value: unknown): AutosavedWorkspaceUiSnapshot | null {
+  if (!isRecord(value) || value.version !== 1 || typeof value.savedAt !== "string") return null;
+  const ui = parseUiSnapshot(value.ui);
+  if (!ui) return null;
+  return {
+    version: 1,
+    savedAt: value.savedAt,
     ui
   };
 }
@@ -273,6 +299,49 @@ function parsePayloadObject(value: unknown): PayloadObjectSelection | null {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object";
+}
+
+function scheduleStorageWrite(write: () => void, storage: StorageLike | null, delayMs: number): () => void {
+  if (!storage) return () => undefined;
+  const idleCallbacks = globalThis as typeof globalThis & IdleCallbackHandle;
+  let idleHandle: number | null = null;
+  const timeoutHandle = globalThis.setTimeout(() => {
+    const runWrite = () => {
+      idleHandle = null;
+      write();
+    };
+    if (idleCallbacks.requestIdleCallback) {
+      idleHandle = idleCallbacks.requestIdleCallback(runWrite, { timeout: 1500 });
+    } else {
+      runWrite();
+    }
+  }, delayMs);
+
+  return () => {
+    globalThis.clearTimeout(timeoutHandle);
+    if (idleHandle !== null) idleCallbacks.cancelIdleCallback?.(idleHandle);
+  };
+}
+
+function writeJsonStorageItem(key: string, snapshot: unknown, storage: StorageLike | null): boolean {
+  if (!storage) return false;
+  try {
+    storage.setItem(key, JSON.stringify(snapshot));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function readSnapshot<T>(snapshot: T | (() => T)): T {
+  return typeof snapshot === "function" ? (snapshot as () => T)() : snapshot;
+}
+
+function isNewerOrSameTimestamp(candidate: string, baseline: string): boolean {
+  const candidateTime = Date.parse(candidate);
+  const baselineTime = Date.parse(baseline);
+  if (!Number.isFinite(candidateTime) || !Number.isFinite(baselineTime)) return true;
+  return candidateTime >= baselineTime;
 }
 
 function getBrowserStorage(): StorageLike | null {
