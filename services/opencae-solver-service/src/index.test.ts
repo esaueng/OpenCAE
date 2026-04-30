@@ -277,6 +277,17 @@ describe("LocalMockComputeBackend", () => {
     expect(sampleMax).toBeGreaterThan(faceMax * 0.75);
   });
 
+  test("emits beam demo payload displacement vectors in the visible bending direction", () => {
+    const result = solveStudy(beamPayloadStudy("mat-aluminum-6061"), "run-beam-visible-vector");
+    const displacementField = result.fields.find((field) => field.type === "displacement");
+    const peakSample = [...(displacementField?.samples ?? [])].sort((left, right) => right.value - left.value)[0];
+
+    expect(peakSample?.vector).toBeTruthy();
+    expect(peakSample?.vector?.[1]).toBeLessThan(0);
+    expect(Math.abs(peakSample?.vector?.[1] ?? 0)).toBeGreaterThan(Math.abs(peakSample?.vector?.[2] ?? 0) * 5);
+    expect(Math.hypot(...peakSample!.vector!)).toBeCloseTo(peakSample.value, 4);
+  });
+
   test("ultra local solve produces denser surface samples with rich stress metadata", () => {
     const fine = solveStudy({ ...cantileverStudy("mat-aluminum-6061"), meshSettings: { preset: "fine", status: "complete", meshRef: "mesh", summary: { nodes: 1, elements: 1, warnings: [] } } }, "run-fine");
     const ultra = solveStudy({ ...cantileverStudy("mat-aluminum-6061"), meshSettings: { preset: "ultra", status: "complete", meshRef: "mesh", summary: { nodes: 1, elements: 1, warnings: [] } } }, "run-ultra");

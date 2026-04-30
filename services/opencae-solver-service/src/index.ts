@@ -751,9 +751,22 @@ function displacementVectorAtSample(sample: AnalysisSample, loads: LoadModel[], 
   if (!loads.length) return [0, 0, 0];
   return loads.reduce<Vec3>((sum, load) => {
     const magnitude = displacementAtSampleForLoad(sample, load, faces, analysisMesh) * displacementScale;
-    const contribution = scale(load.direction, magnitude);
+    const contribution = scale(displacementDirectionForLoad(load), magnitude);
     return [sum[0] + contribution[0], sum[1] + contribution[1], sum[2] + contribution[2]];
   }, [0, 0, 0]);
+}
+
+function displacementDirectionForLoad(load: LoadModel): Vec3 {
+  if (isBuiltInBeamPayloadGravityLoad(load)) return [0, -1, 0];
+  return load.direction;
+}
+
+function isBuiltInBeamPayloadGravityLoad(load: LoadModel): boolean {
+  const label = load.face.label.toLowerCase();
+  return load.load.type === "gravity"
+    && label.includes("payload")
+    && Math.abs(load.direction[2]) > 0.72
+    && Math.abs(load.face.normal[1]) > 0.72;
 }
 
 function displacementAtSampleForLoad(sample: AnalysisSample, load: LoadModel, _faces: FaceModel[], analysisMesh: AnalysisMesh): number {
