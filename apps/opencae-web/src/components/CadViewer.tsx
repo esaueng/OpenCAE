@@ -13,7 +13,7 @@ import { faceForModelHit, type SampleModelKind } from "../modelSelection";
 import { baseModelRotationRadians, modelRotationRadians, modelToViewerMatrix, viewerNormalToModelSpace, viewerPointToModelSpace, type RotationAxis } from "../modelOrientation";
 import { dimensionValuesForDisplayModel } from "../modelDimensions";
 import { formatResultValue, resultProbeSamplesForFaces, resultSamplesForFaces, type FaceResultSample, type ResultProbeTone } from "../resultFields";
-import { packedPreparedPlaybackFieldSlot, type PackedPreparedPlaybackCache } from "../resultPlaybackCache";
+import { packedPreparedPlaybackFieldSlot, packedPreparedPlaybackFrameOrdinal, type PackedPreparedPlaybackCache } from "../resultPlaybackCache";
 import { stepPreviewFromBase64 } from "../stepPreview";
 import { normalizedStlGeometryFromBuffer } from "../stlPreview";
 import { lengthForUnits, stressForUnits, type UnitSystem } from "../unitDisplay";
@@ -54,7 +54,7 @@ export interface ViewerSupportMarker {
 
 export interface ResultPlaybackFrameSnapshot {
   cache: PackedPreparedPlaybackCache;
-  frameOrdinal: number;
+  framePosition: number;
 }
 
 export interface ResultPlaybackFrameController {
@@ -77,6 +77,7 @@ interface CadViewerProps {
   showDimensions: boolean;
   stressExaggeration: number;
   resultFields: ResultField[];
+  resultPlaybackBufferCache?: PackedPreparedPlaybackCache | null;
   resultPlaybackFrameController?: ResultPlaybackFrameController;
   meshSummary?: MeshSummary;
   unitSystem: UnitSystem;
@@ -158,6 +159,7 @@ export function CadViewer(props: CadViewerProps) {
           loadMarkers={props.loadMarkers}
           printLayerOrientation={props.printLayerOrientation}
           resultFields={resultFields}
+          resultPlaybackBufferCache={props.resultPlaybackBufferCache}
           resultPlaybackFrameController={props.resultPlaybackFrameController}
           resultMode={props.resultMode}
           resultPlaybackPlaying={props.resultPlaybackPlaying}
@@ -214,6 +216,7 @@ function ViewerInvalidator({
   loadMarkers,
   printLayerOrientation,
   resultFields,
+  resultPlaybackBufferCache,
   resultPlaybackFrameController,
   resultMode,
   resultPlaybackPlaying,
@@ -236,6 +239,7 @@ function ViewerInvalidator({
   loadMarkers: ViewerLoadMarker[];
   printLayerOrientation: PrintLayerOrientation | null;
   resultFields: ResultField[];
+  resultPlaybackBufferCache?: PackedPreparedPlaybackCache | null;
   resultPlaybackFrameController?: ResultPlaybackFrameController;
   resultMode: ResultMode;
   resultPlaybackPlaying: boolean;
@@ -253,6 +257,9 @@ function ViewerInvalidator({
 }) {
   const { invalidate } = useThree();
   useEffect(() => {
+    if (resultPlaybackBufferCache) invalidate();
+  }, [invalidate, resultPlaybackBufferCache]);
+  useEffect(() => {
     if (!resultPlaybackFrameController) return undefined;
     return resultPlaybackFrameController.subscribe(() => invalidate());
   }, [invalidate, resultPlaybackFrameController]);
@@ -267,6 +274,7 @@ function ViewerInvalidator({
     loadMarkers,
     printLayerOrientation,
     resultFields,
+    resultPlaybackBufferCache,
     resultPlaybackFrameController,
     resultMode,
     resultPlaybackPlaying,
@@ -1991,7 +1999,8 @@ function usePackedPlaybackGeometry(
     if (!controller) return undefined;
     const applySnapshot = (snapshot: ResultPlaybackFrameSnapshot) => {
       const latest = optionsRef.current;
-      const samples = updatePackedSamples(samplesRef.current, snapshot.cache, snapshot.frameOrdinal, latest.resultMode);
+      const frameOrdinal = packedPreparedPlaybackFrameOrdinal(snapshot.cache, snapshot.framePosition);
+      const samples = updatePackedSamples(samplesRef.current, snapshot.cache, frameOrdinal, latest.resultMode);
       colorizeResultGeometry(
         geometry,
         latest.kind,

@@ -36,7 +36,7 @@ import { supportDisplayLabel } from "./supportLabels";
 import { nextSelectedPayloadObject, shouldClearPayloadSelectionOnViewerMiss } from "./payloadSelection";
 import { createLocalDynamicStructuralStudy, createLocalStaticStressStudy } from "./localProjectFactory";
 import { createPackedResultPlaybackCache, createResultFrameCache, hasDynamicPlaybackFrames } from "./resultFields";
-import { packedPreparedPlaybackFrameOrdinal, playbackMemoryBudgetBytes, type PackedPreparedPlaybackCache, type PreparedPlaybackFrameCache } from "./resultPlaybackCache";
+import { playbackMemoryBudgetBytes, type PackedPreparedPlaybackCache, type PreparedPlaybackFrameCache } from "./resultPlaybackCache";
 import {
   boundedPlaybackOrdinalDelta,
   frameIndexForPlaybackOrdinal,
@@ -82,7 +82,7 @@ type ResultPlaybackCacheState =
   | { status: "error"; cacheKey: string; message: string };
 
 type MutableResultPlaybackFrameController = ResultPlaybackFrameController & {
-  setPackedFrame: (cache: PackedPreparedPlaybackCache, frameOrdinal: number) => void;
+  setPackedFrame: (cache: PackedPreparedPlaybackCache, framePosition: number) => void;
 };
 
 interface WorkspaceAppProps {
@@ -200,12 +200,15 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     },
     [packedResultPlaybackCache, resultFrameCache, resultFrameIndex, resultPlaybackPlaying, resultVisualFramePosition]
   );
+  const resultPlaybackBufferCacheForViewer = resultPlaybackCacheState.status === "ready"
+    ? resultPlaybackCacheState.cache.packed ?? null
+    : null;
   useEffect(() => {
     if (resultPlaybackPlaying) return;
     const packed = resultPlaybackCacheState.status === "ready" ? resultPlaybackCacheState.cache.packed : undefined;
     if (!packed) return;
-    resultPlaybackFrameControllerRef.current?.setPackedFrame(packed, packedPreparedPlaybackFrameOrdinal(packed, resultVisualFramePosition));
-  }, [resultPlaybackPlaying, visibleResultFieldsForUi]);
+    resultPlaybackFrameControllerRef.current?.setPackedFrame(packed, resultVisualFramePosition);
+  }, [resultPlaybackCacheState, resultPlaybackPlaying, resultVisualFramePosition, visibleResultFieldsForUi]);
   const resultPlaybackCacheLabel = useMemo(() => {
     if (resultPlaybackCacheState.status === "preparing") return "Preparing smooth playback";
     if (resultPlaybackCacheState.status === "ready") {
@@ -219,7 +222,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const commitPlaybackViewerFrame = useCallback((framePosition: number) => {
     const cache = resultPlaybackCacheState.status === "ready" ? resultPlaybackCacheState.cache : null;
     if (cache?.packed) {
-      resultPlaybackFrameControllerRef.current?.setPackedFrame(cache.packed, packedPreparedPlaybackFrameOrdinal(cache.packed, framePosition));
+      resultPlaybackFrameControllerRef.current?.setPackedFrame(cache.packed, framePosition);
       return;
     }
     const nextFields = packedResultPlaybackCache?.fieldsForFramePosition(framePosition) ?? resultFrameCache.fieldsForFramePosition(framePosition);
@@ -1062,6 +1065,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
             showDimensions={showDimensions}
             stressExaggeration={stressExaggeration}
             resultFields={visibleResultFieldsForUi}
+            resultPlaybackBufferCache={resultPlaybackBufferCacheForViewer}
             resultPlaybackFrameController={resultPlaybackPlaying ? resultPlaybackFrameControllerRef.current : undefined}
             meshSummary={study.meshSettings.summary}
             unitSystem={displayUnitSystem}
@@ -1293,8 +1297,8 @@ function createResultPlaybackFrameController(): MutableResultPlaybackFrameContro
     getSnapshot() {
       return snapshot;
     },
-    setPackedFrame(cache, frameOrdinal) {
-      const nextSnapshot = { cache, frameOrdinal };
+    setPackedFrame(cache, framePosition) {
+      const nextSnapshot = { cache, framePosition };
       snapshot = nextSnapshot;
       for (const listener of listeners) listener(nextSnapshot);
     }
