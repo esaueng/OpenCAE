@@ -76,14 +76,21 @@ describe("Worker UI performance rewrite boundaries", () => {
     const workspaceSource = readFileSync(resolve(__dirname, "WorkspaceApp.tsx"), "utf8");
     const viewerSource = readFileSync(resolve(__dirname, "components/CadViewer.tsx"), "utf8");
     const cacheSource = readFileSync(resolve(__dirname, "resultPlaybackCache.ts"), "utf8");
+    const clientSource = readFileSync(resolve(__dirname, "workers/performanceClient.ts"), "utf8");
+    const protocolSource = readFileSync(resolve(__dirname, "workers/performanceProtocol.ts"), "utf8");
 
     expect(workspaceSource).toContain("createResultPlaybackFrameController");
     expect(workspaceSource).toContain("setPackedFrame(cache.packed");
+    expect(workspaceSource).toContain("packResultFieldsForPlayback(resultFieldsForUi)");
+    expect(workspaceSource).toContain("...(packedFields ? { packedFields } : { fields: resultFieldsForUi })");
     expect(viewerSource).toContain("resultPlaybackFrameController");
     expect(viewerSource).toContain("usePackedPlaybackGeometry");
     expect(viewerSource).not.toContain("useSyncExternalStore");
     expect(cacheSource).toContain("values: Float32Array");
+    expect(cacheSource).toContain("packResultFieldsForPlayback");
     expect(cacheSource).not.toContain("Array.from(field.values)");
+    expect(clientSource).toContain("transferablesForPerformanceWorkerRequest(request)");
+    expect(protocolSource).toContain("packedResultFieldsForPlaybackTransferables");
   });
 
   test("keeps packed playback animation out of per-frame React result snapshots", () => {

@@ -4,6 +4,7 @@ import {
   createPerformanceWorkerRequest,
   isPerformanceWorkerFailure,
   isPerformanceWorkerSuccess,
+  transferablesForPerformanceWorkerRequest,
   type PerformanceWorkerOperation,
   type PerformanceWorkerPayloads,
   type PerformanceWorkerResponse,
@@ -49,7 +50,7 @@ export async function postPerformanceWorkerRequest<Operation extends Performance
   const request = createPerformanceWorkerRequest(operation, payload);
   return new Promise((resolve, reject) => {
     pendingRequests.set(request.id, { operation, resolve, reject } as PendingRequest);
-    worker.postMessage(request, transfer);
+    worker.postMessage(request, transfer.length ? transfer : transferablesForPerformanceWorkerRequest(request));
   });
 }
 
