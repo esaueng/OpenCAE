@@ -69,6 +69,23 @@ describe("Worker UI performance rewrite boundaries", () => {
     expect(cacheSource).not.toContain("Array.from(field.values)");
   });
 
+  test("does not hydrate prepared frames inside the playback animation loop", () => {
+    const workspaceSource = readFileSync(resolve(__dirname, "WorkspaceApp.tsx"), "utf8");
+    const callbackStart = workspaceSource.indexOf("const commitPlaybackViewerFrame = useCallback((framePosition: number) => {");
+    const callbackEnd = workspaceSource.indexOf("  const solverRunning", callbackStart);
+    const playbackCommitCallback = workspaceSource.slice(callbackStart, callbackEnd);
+    const loopStart = workspaceSource.indexOf("const advancePlaybackFrame = (timestamp: number) => {");
+    const loopEnd = workspaceSource.indexOf("animationFrameId = window.requestAnimationFrame(advancePlaybackFrame);", loopStart);
+    const playbackLoop = workspaceSource.slice(loopStart, loopEnd);
+
+    expect(callbackStart).toBeGreaterThan(-1);
+    expect(loopStart).toBeGreaterThan(-1);
+    expect(playbackCommitCallback).toContain("setPackedFrame(cache.packed");
+    expect(playbackLoop).toContain("commitPlaybackViewerFrame(framePosition)");
+    expect(playbackLoop).not.toContain("hydratePreparedPlaybackFrame");
+    expect(playbackLoop).not.toContain("Array.from");
+  });
+
   test("idle-schedules autosave instead of writing localStorage synchronously from workspace renders", () => {
     const workspaceSource = readFileSync(resolve(__dirname, "WorkspaceApp.tsx"), "utf8");
     const persistenceSource = readFileSync(resolve(__dirname, "appPersistence.ts"), "utf8");

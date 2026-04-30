@@ -4,6 +4,7 @@ import {
   hydratePreparedPlaybackFrame,
   planPlaybackFrameCache,
   preparePlaybackFrames,
+  preparedPlaybackTransferables,
   playbackMemoryBudgetBytes
 } from "./resultPlaybackCache";
 
@@ -68,5 +69,29 @@ describe("result playback cache", () => {
     const halfway = prepared.frames.find((frame) => Math.abs(frame.framePosition - 0.5) < 0.001);
     expect(halfway).toBeTruthy();
     expect(hydratePreparedPlaybackFrame(halfway!).fields[0]?.values).toEqual([5, 20]);
+  });
+
+  test("includes every packed playback buffer in worker transferables", () => {
+    const prepared = preparePlaybackFrames({
+      fields: [resultField(0, [0, 10]), resultField(1, [10, 30])],
+      frameIndexes: [0, 1],
+      playbackFps: 30,
+      budgetBytes: 100_000
+    });
+
+    expect(prepared.packed).toBeTruthy();
+
+    const transferables = preparedPlaybackTransferables(prepared);
+
+    expect(transferables).toEqual(expect.arrayContaining([
+      prepared.packed!.framePositions.buffer,
+      prepared.packed!.frameIndexes.buffer,
+      prepared.packed!.times.buffer,
+      prepared.packed!.fieldOffsets.buffer,
+      prepared.packed!.fieldLengths.buffer,
+      prepared.packed!.fieldMins.buffer,
+      prepared.packed!.fieldMaxes.buffer,
+      prepared.packed!.values.buffer
+    ]));
   });
 });
