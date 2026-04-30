@@ -207,14 +207,14 @@ def generated_result_fields(run_id, load_n, material, settings, dynamic):
     fields = []
     for index, time_value in enumerate(frames):
         response = dynamic_response_factor(time_value, settings) if dynamic else 1.0
-        displacement_magnitude = abs(peak_displacement_m * response)
+        displacement = peak_displacement_m * response
         stress = peak_stress_pa * abs(response)
         velocity = peak_displacement_m * dynamic_velocity_factor(time_value, settings) if dynamic else 0.0
         acceleration = peak_displacement_m * dynamic_acceleration_factor(time_value, settings) if dynamic else 0.0
         frame = {"frameIndex": index, "timeSeconds": time_value} if dynamic else {}
         fields.extend([
             result_field(run_id, "stress", "Pa", stress, stress_min, stress_max, index, time_value, frame, stress),
-            result_field(run_id, "displacement", "m", displacement_magnitude, 0.0, displacement_max, index, time_value, frame),
+            result_field(run_id, "displacement", "m", displacement, 0.0, displacement_max, index, time_value, frame),
             result_field(run_id, "safety_factor", "", YIELD_STRESS_PA / max(stress, 1.0), 0.0, YIELD_STRESS_PA / max(peak_stress_pa, 1.0), index, time_value, frame)
         ])
         if dynamic:
@@ -260,7 +260,8 @@ def result_field(run_id, field_type, units, value, min_value, max_value, index, 
             fiber = 0.72 + 0.28 * abs(z) / max(BEAM_DEPTH_DISPLAY / 2.0, 1e-9)
             sample_value = value * max(0.0, min(1.0, (1.0 - travel) * fiber))
         elif field_type == "displacement":
-            sample_value = value * travel * travel
+            vector = displacement_vector_for_sample(value, travel)
+            sample_value = math.sqrt(vector[0] ** 2 + vector[1] ** 2 + vector[2] ** 2)
         else:
             sample_value = value * travel
         sample = {
@@ -273,6 +274,8 @@ def result_field(run_id, field_type, units, value, min_value, max_value, index, 
         }
         if von_mises is not None:
             sample["vonMisesStressPa"] = sample_value
+        if field_type == "displacement":
+            sample["vector"] = vector
         samples.append(sample)
     return {
         "id": f"field-{run_id}-{field_type}-{index}",
@@ -295,6 +298,11 @@ def display_node_points():
         for y in [0.04, 0.32]
         for z in [-BEAM_DEPTH_DISPLAY / 2.0, BEAM_DEPTH_DISPLAY / 2.0]
     ]
+
+
+def displacement_vector_for_sample(tip_displacement_m, travel):
+    magnitude = tip_displacement_m * travel * travel
+    return [0.0, -magnitude, 0.0]
 
 
 def normalized_dynamic_settings(settings):

@@ -15,6 +15,7 @@ export interface FieldResultSample {
   normal: [number, number, number];
   value: number;
   normalized: number;
+  vector?: [number, number, number];
 }
 
 export type ResultProbeTone = "max" | "mid" | "min";
@@ -94,6 +95,7 @@ export interface PackedResultPlaybackCache {
   sampleValues: Float32Array;
   samplePoints: Float32Array;
   sampleNormals: Float32Array;
+  sampleVectors: Float32Array;
   estimatedBytes: number;
   fieldsForFrame: (frameIndex: number) => ResultField[];
   fieldsForFramePosition: (framePosition: number) => ResultField[];
@@ -216,6 +218,7 @@ export function createPackedResultPlaybackCache(fields: ResultField[]): PackedRe
   const sampleValues = new Float32Array(sampleCount);
   const samplePoints = new Float32Array(sampleCount * 3);
   const sampleNormals = new Float32Array(sampleCount * 3);
+  const sampleVectors = new Float32Array(sampleCount * 3);
   for (let frameOrdinal = 0; frameOrdinal < frameCount; frameOrdinal += 1) {
     const frameIndex = frameIndexes[frameOrdinal] ?? 0;
     const frameFieldMap = fieldMapsByFrame.get(frameIndex);
@@ -232,6 +235,7 @@ export function createPackedResultPlaybackCache(fields: ResultField[]): PackedRe
         sampleValues[targetIndex] = sample.value;
         samplePoints.set(sample.point, targetIndex * 3);
         sampleNormals.set(sample.normal, targetIndex * 3);
+        sampleVectors.set(sample.vector ?? [0, 0, 0], targetIndex * 3);
       }
     }
   }
@@ -253,7 +257,8 @@ export function createPackedResultPlaybackCache(fields: ResultField[]): PackedRe
       sampleLengths,
       sampleValues,
       samplePoints,
-      sampleNormals
+      sampleNormals,
+      sampleVectors
     ));
   };
 
@@ -282,7 +287,8 @@ export function createPackedResultPlaybackCache(fields: ResultField[]): PackedRe
         sampleLengths,
         sampleValues,
         samplePoints,
-        sampleNormals
+        sampleNormals,
+        sampleVectors
       );
     });
   };
@@ -305,7 +311,8 @@ export function createPackedResultPlaybackCache(fields: ResultField[]): PackedRe
     sampleValues,
     samplePoints,
     sampleNormals,
-    estimatedBytes: frameIndexArray.byteLength + times.byteLength + fieldOffsets.byteLength + fieldLengths.byteLength + fieldMins.byteLength + fieldMaxes.byteLength + values.byteLength + sampleOffsets.byteLength + sampleLengths.byteLength + sampleValues.byteLength + samplePoints.byteLength + sampleNormals.byteLength,
+    sampleVectors,
+    estimatedBytes: frameIndexArray.byteLength + times.byteLength + fieldOffsets.byteLength + fieldLengths.byteLength + fieldMins.byteLength + fieldMaxes.byteLength + values.byteLength + sampleOffsets.byteLength + sampleLengths.byteLength + sampleValues.byteLength + samplePoints.byteLength + sampleNormals.byteLength + sampleVectors.byteLength,
     fieldsForFrame: (frameIndex) => {
       const ordinal = indexOfFrame(frameIndexArray, frameIndex);
       return fieldsForFrameOrdinal(ordinal >= 0 ? ordinal : 0);
@@ -331,7 +338,8 @@ export function packedResultPlaybackTransferables(cache: PackedResultPlaybackCac
     cache.sampleLengths.buffer,
     cache.sampleValues.buffer,
     cache.samplePoints.buffer,
-    cache.sampleNormals.buffer
+    cache.sampleNormals.buffer,
+    cache.sampleVectors.buffer
   ];
 }
 
@@ -455,7 +463,8 @@ function unpackFieldForSlot(
   sampleLengths: Int32Array,
   sampleValues: Float32Array,
   samplePoints: Float32Array,
-  sampleNormals: Float32Array
+  sampleNormals: Float32Array,
+  sampleVectors: Float32Array
 ): ResultField {
   const length = fieldLengths[slot] ?? 0;
   const offset = fieldOffsets[slot] ?? 0;
@@ -463,7 +472,7 @@ function unpackFieldForSlot(
   for (let index = 0; index < length; index += 1) {
     fieldValues[index] = values[offset + index] ?? 0;
   }
-  const samples = unpackSamplesForSlot(slot, sampleOffsets, sampleLengths, sampleValues, samplePoints, sampleNormals);
+  const samples = unpackSamplesForSlot(slot, sampleOffsets, sampleLengths, sampleValues, samplePoints, sampleNormals, sampleVectors);
   return {
     ...descriptor,
     id: `${descriptor.id}-frame-${frameIndex}`,
@@ -492,7 +501,8 @@ function unpackInterpolatedFieldForSlots(
   sampleLengths: Int32Array,
   sampleValues: Float32Array,
   samplePoints: Float32Array,
-  sampleNormals: Float32Array
+  sampleNormals: Float32Array,
+  sampleVectors: Float32Array
 ): ResultField {
   const lowerLength = fieldLengths[lowerSlot] ?? 0;
   const upperLength = fieldLengths[upperSlot] ?? 0;
@@ -505,8 +515,8 @@ function unpackInterpolatedFieldForSlots(
     const upperValue = index < upperLength ? values[upperOffset + index] ?? 0 : values[lowerOffset + index] ?? 0;
     fieldValues[index] = lerp(lowerValue, upperValue, blend);
   }
-  const lowerSamples = unpackSamplesForSlot(lowerSlot, sampleOffsets, sampleLengths, sampleValues, samplePoints, sampleNormals);
-  const upperSamples = unpackSamplesForSlot(upperSlot, sampleOffsets, sampleLengths, sampleValues, samplePoints, sampleNormals);
+  const lowerSamples = unpackSamplesForSlot(lowerSlot, sampleOffsets, sampleLengths, sampleValues, samplePoints, sampleNormals, sampleVectors);
+  const upperSamples = unpackSamplesForSlot(upperSlot, sampleOffsets, sampleLengths, sampleValues, samplePoints, sampleNormals, sampleVectors);
   const samples = lowerSamples.length && upperSamples.length ? interpolateSamples(lowerSamples, upperSamples, blend) : lowerSamples;
   return {
     ...descriptor,
@@ -526,7 +536,8 @@ function unpackSamplesForSlot(
   sampleLengths: Int32Array,
   sampleValues: Float32Array,
   samplePoints: Float32Array,
-  sampleNormals: Float32Array
+  sampleNormals: Float32Array,
+  sampleVectors: Float32Array
 ): NonNullable<ResultField["samples"]> {
   const length = sampleLengths[slot] ?? 0;
   const offset = sampleOffsets[slot] ?? 0;
@@ -534,6 +545,11 @@ function unpackSamplesForSlot(
   for (let index = 0; index < length; index += 1) {
     const sampleIndex = offset + index;
     const pointOffset = sampleIndex * 3;
+    const vector: [number, number, number] = [
+      sampleVectors[pointOffset] ?? 0,
+      sampleVectors[pointOffset + 1] ?? 0,
+      sampleVectors[pointOffset + 2] ?? 0
+    ];
     samples.push({
       point: [
         samplePoints[pointOffset] ?? 0,
@@ -545,7 +561,8 @@ function unpackSamplesForSlot(
         sampleNormals[pointOffset + 1] ?? 0,
         sampleNormals[pointOffset + 2] ?? 0
       ],
-      value: sampleValues[sampleIndex] ?? 0
+      value: sampleValues[sampleIndex] ?? 0,
+      vector
     });
   }
   return samples;
@@ -581,12 +598,13 @@ export function resultSamplesForFaces(faces: DisplayFace[], fields: ResultField[
     point: sample.point,
     normal: sample.normal,
     value: sample.value,
-    normalized: normalizeValue(sample.value, min, max)
+    normalized: normalizeValueForRender(sample.value, min, max),
+    ...(sample.vector ? { vector: sample.vector } : {})
   }));
   return faces.map((face, index) => ({
     face,
     value: mapped.values[index] ?? 0,
-    normalized: normalizeValue(mapped.values[index] ?? 0, min, max),
+    normalized: normalizeValueForRender(mapped.values[index] ?? 0, min, max),
     ...(fieldSamples?.length ? { fieldSamples } : {}),
     ...(mapped.diagnostic ? { diagnostic: mapped.diagnostic } : {})
   }));
@@ -678,9 +696,15 @@ function squaredDistance(left: [number, number, number], right: [number, number,
   return dx * dx + dy * dy + dz * dz;
 }
 
-function normalizeValue(value: number, min: number, max: number): number {
+export function normalizeValueForLegend(value: number, min: number, max: number): number {
   const range = max - min;
   if (!Number.isFinite(range) || Math.abs(range) < 1e-9) return 0.5;
+  return Math.max(0, Math.min(1, (value - min) / range));
+}
+
+export function normalizeValueForRender(value: number, min: number, max: number): number {
+  const range = max - min;
+  if (!Number.isFinite(value) || !Number.isFinite(range) || Math.abs(range) < 1e-12) return 0;
   return Math.max(0, Math.min(1, (value - min) / range));
 }
 
@@ -756,9 +780,20 @@ function interpolateSamples(lowerSamples: NonNullable<ResultField["samples"]>, u
     if (!upperSample) return lowerSample;
     return {
       ...lowerSample,
-      value: lerp(lowerSample.value, upperSample.value, blend)
+      value: lerp(lowerSample.value, upperSample.value, blend),
+      vector: interpolateVector(lowerSample.vector, upperSample.vector, blend)
     };
   });
+}
+
+function interpolateVector(lowerVector: [number, number, number] | undefined, upperVector: [number, number, number] | undefined, blend: number): [number, number, number] {
+  const lower = lowerVector ?? [0, 0, 0];
+  const upper = upperVector ?? [0, 0, 0];
+  return [
+    lerp(lower[0], upper[0], blend),
+    lerp(lower[1], upper[1], blend),
+    lerp(lower[2], upper[2], blend)
+  ];
 }
 
 function lerp(left: number, right: number, blend: number): number {

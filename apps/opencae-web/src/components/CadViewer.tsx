@@ -12,7 +12,7 @@ import type { StepId } from "./StepBar";
 import { faceForModelHit, type SampleModelKind } from "../modelSelection";
 import { baseModelRotationRadians, modelRotationRadians, modelToViewerMatrix, viewerNormalToModelSpace, viewerPointToModelSpace, type RotationAxis } from "../modelOrientation";
 import { dimensionValuesForDisplayModel } from "../modelDimensions";
-import { formatResultValue, resultProbeSamplesForFaces, resultSamplesForFaces, type FaceResultSample, type FieldResultSample, type ResultProbeTone } from "../resultFields";
+import { formatResultValue, normalizeValueForRender, resultProbeSamplesForFaces, resultSamplesForFaces, type FaceResultSample, type FieldResultSample, type ResultProbeTone } from "../resultFields";
 import { packedPreparedPlaybackFieldSlot, packedPreparedPlaybackFrameOrdinal, type PackedPreparedPlaybackCache } from "../resultPlaybackCache";
 import { stepPreviewFromBase64 } from "../stepPreview";
 import { normalizedStlGeometryFromBuffer } from "../stlPreview";
@@ -1477,9 +1477,9 @@ function AnalysisResultModel({
     );
   }
   if (kind === "bracket") {
-    return <BracketResultSolid kind={kind} samples={samples} resultMode={resultMode} showDeformed={showDeformed} resultPlaybackPlaying={resultPlaybackPlaying} stressExaggeration={stressExaggeration} deformationScale={deformationScale} resultPlaybackFrameController={resultPlaybackFrameController} loadMarkers={loadMarkers} supportMarkers={supportMarkers} />;
+    return <BracketResultSolid kind={kind} samples={samples} resultFields={resultFields} resultMode={resultMode} showDeformed={showDeformed} resultPlaybackPlaying={resultPlaybackPlaying} stressExaggeration={stressExaggeration} deformationScale={deformationScale} resultPlaybackFrameController={resultPlaybackFrameController} loadMarkers={loadMarkers} supportMarkers={supportMarkers} />;
   }
-  return <SampleResultSolid kind={kind} samples={samples} resultMode={resultMode} showDeformed={showDeformed} resultPlaybackPlaying={resultPlaybackPlaying} stressExaggeration={stressExaggeration} deformationScale={deformationScale} resultPlaybackFrameController={resultPlaybackFrameController} loadMarkers={loadMarkers} supportMarkers={supportMarkers} />;
+  return <SampleResultSolid kind={kind} samples={samples} resultFields={resultFields} resultMode={resultMode} showDeformed={showDeformed} resultPlaybackPlaying={resultPlaybackPlaying} stressExaggeration={stressExaggeration} deformationScale={deformationScale} resultPlaybackFrameController={resultPlaybackFrameController} loadMarkers={loadMarkers} supportMarkers={supportMarkers} />;
 }
 
 function useResultSamplesForFaces(faces: DisplayFace[], resultFields: ResultField[], resultMode: ResultMode, enabled: boolean) {
@@ -1713,6 +1713,7 @@ function UploadedStlResultModel({
 function BracketResultSolid({
   kind,
   samples,
+  resultFields,
   resultMode,
   showDeformed,
   resultPlaybackPlaying,
@@ -1724,6 +1725,7 @@ function BracketResultSolid({
 }: {
   kind: SampleModelKind;
   samples: FaceResultSample[];
+  resultFields: ResultField[];
   resultMode: ResultMode;
   showDeformed: boolean;
   resultPlaybackPlaying: boolean;
@@ -1736,12 +1738,12 @@ function BracketResultSolid({
   const outlineBodyGeometry = useMemo(() => createBracketBodyGeometry(), []);
   const outlineRibGeometry = useMemo(() => createRibGeometry(), []);
   const bodyGeometry = useMemo(
-    () => colorizeSampleResultGeometry(createBracketBodyGeometry(), kind, resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale, supportMarkers),
-    [deformationScale, kind, loadMarkers, resultMode, samples, showDeformed, stressExaggeration, supportMarkers]
+    () => colorizeSampleResultGeometry(createBracketBodyGeometry(), kind, resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale, supportMarkers, resultFields),
+    [deformationScale, kind, loadMarkers, resultMode, resultFields, samples, showDeformed, stressExaggeration, supportMarkers]
   );
   const ribGeometry = useMemo(
-    () => colorizeSampleResultGeometry(createRibGeometry(), kind, resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale, supportMarkers),
-    [deformationScale, kind, loadMarkers, resultMode, samples, showDeformed, stressExaggeration, supportMarkers]
+    () => colorizeSampleResultGeometry(createRibGeometry(), kind, resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale, supportMarkers, resultFields),
+    [deformationScale, kind, loadMarkers, resultMode, resultFields, samples, showDeformed, stressExaggeration, supportMarkers]
   );
   usePackedPlaybackGeometry(bodyGeometry, {
     kind,
@@ -1749,6 +1751,7 @@ function BracketResultSolid({
     showDeformed,
     stressExaggeration,
     initialSamples: samples,
+    resultFields,
     loadMarkers,
     deformationScale,
     supportMarkers,
@@ -1760,6 +1763,7 @@ function BracketResultSolid({
     showDeformed,
     stressExaggeration,
     initialSamples: samples,
+    resultFields,
     loadMarkers,
     deformationScale,
     supportMarkers,
@@ -1789,6 +1793,7 @@ function BracketResultSolid({
 function SampleResultSolid({
   kind,
   samples,
+  resultFields,
   resultMode,
   showDeformed,
   resultPlaybackPlaying,
@@ -1800,6 +1805,7 @@ function SampleResultSolid({
 }: {
   kind: SampleModelKind;
   samples: FaceResultSample[];
+  resultFields: ResultField[];
   resultMode: ResultMode;
   showDeformed: boolean;
   resultPlaybackPlaying: boolean;
@@ -1813,13 +1819,13 @@ function SampleResultSolid({
   const outlineBeamPayloadGeometry = useMemo(() => createBeamPayloadGeometry(), []);
   const outlineCantileverGeometry = useMemo(() => new THREE.BoxGeometry(3.8, 0.5, 0.72, 40, 8, 8), []);
   const beamGeometry = useMemo(
-    () => colorizeSampleResultGeometry(createBeamGeometry(), kind, resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale, supportMarkers),
-    [deformationScale, kind, loadMarkers, resultMode, samples, showDeformed, stressExaggeration, supportMarkers]
+    () => colorizeSampleResultGeometry(createBeamGeometry(), kind, resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale, supportMarkers, resultFields),
+    [deformationScale, kind, loadMarkers, resultMode, resultFields, samples, showDeformed, stressExaggeration, supportMarkers]
   );
   const beamPayloadGeometry = useMemo(() => createBeamPayloadGeometry(), []);
   const cantileverGeometry = useMemo(
-    () => colorizeSampleResultGeometry(new THREE.BoxGeometry(3.8, 0.5, 0.72, 40, 8, 8), kind, resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale, supportMarkers),
-    [deformationScale, kind, loadMarkers, resultMode, samples, showDeformed, stressExaggeration, supportMarkers]
+    () => colorizeSampleResultGeometry(new THREE.BoxGeometry(3.8, 0.5, 0.72, 40, 8, 8), kind, resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale, supportMarkers, resultFields),
+    [deformationScale, kind, loadMarkers, resultMode, resultFields, samples, showDeformed, stressExaggeration, supportMarkers]
   );
   usePackedPlaybackGeometry(beamGeometry, {
     kind,
@@ -1827,6 +1833,7 @@ function SampleResultSolid({
     showDeformed,
     stressExaggeration,
     initialSamples: samples,
+    resultFields,
     loadMarkers,
     deformationScale,
     supportMarkers,
@@ -1838,6 +1845,7 @@ function SampleResultSolid({
     showDeformed,
     stressExaggeration,
     initialSamples: samples,
+    resultFields,
     loadMarkers,
     deformationScale,
     supportMarkers,
@@ -1941,6 +1949,70 @@ export function cloneResultPreviewObject(object: THREE.Group) {
   return clone;
 }
 
+export function applyResultFrameToGeometry({
+  geometry,
+  fields,
+  resultMode,
+  showDeformed,
+  deformationScale
+}: {
+  geometry: THREE.BufferGeometry;
+  fields: ResultField[];
+  resultMode: ResultMode;
+  showDeformed: boolean;
+  deformationScale: number;
+}) {
+  const position = geometry.getAttribute("position");
+  if (!(position instanceof THREE.BufferAttribute)) return geometry;
+  const basePositions = basePositionArrayForGeometry(geometry, position);
+  position.setUsage(THREE.DynamicDrawUsage);
+  const colorAttribute = colorAttributeForGeometry(geometry, position.count);
+  colorAttribute.setUsage(THREE.DynamicDrawUsage);
+  if (geometry.getAttribute("color") !== colorAttribute) geometry.setAttribute("color", colorAttribute);
+
+  const scalarField = selectedResultField(fields, resultMode);
+  const displacementField = fields.find((field) => field.type === "displacement" && field.samples?.some((sample) => sample.vector));
+  logResultFieldDiagnostics(scalarField, resultMode);
+  const scalarValues = scalarField?.values ?? [];
+  const modelExtent = basePositionBounds(basePositions).getSize(new THREE.Vector3()).length();
+  const displacementMax = maxDisplacementMagnitude(displacementField);
+  const targetFraction = 0.08;
+  const requestedScale = Math.max(0, deformationScale);
+  const uncappedVisualScale = displacementMax > 0 ? (modelExtent * targetFraction * requestedScale) / displacementMax : 0;
+  const maxVisual = modelExtent * 0.25;
+  const visualScale = Math.min(uncappedVisualScale, maxVisual / Math.max(displacementMax, 1e-12));
+  const color = new THREE.Color();
+
+  for (let index = 0; index < position.count; index += 1) {
+    const offset = index * 3;
+    const point = new THREE.Vector3(basePositions[offset] ?? 0, basePositions[offset + 1] ?? 0, basePositions[offset + 2] ?? 0);
+    const scalar = scalarField?.samples?.length
+      ? interpolateResultSampleValue(point, scalarField.samples, scalarField.values[index] ?? 0)
+      : scalarValues[index] ?? 0;
+    const normalized = scalarField ? normalizeValueForRender(scalar, scalarField.min, scalarField.max) : 0;
+    color.copy(resultColorForValue(resultMode, normalized));
+    colorAttribute.setXYZ(index, color.r, color.g, color.b);
+
+    if (showDeformed && displacementField?.samples?.length && visualScale > 0) {
+      const displacement = interpolateResultSampleVector(point, displacementField.samples);
+      position.setXYZ(
+        index,
+        point.x + displacement.x * visualScale,
+        point.y + displacement.y * visualScale,
+        point.z + displacement.z * visualScale
+      );
+    } else {
+      position.setXYZ(index, point.x, point.y, point.z);
+    }
+  }
+
+  position.needsUpdate = true;
+  colorAttribute.needsUpdate = true;
+  geometry.computeVertexNormals();
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
 function colorizeResultGeometry(
   geometry: THREE.BufferGeometry,
   kind: SampleModelKind,
@@ -1952,10 +2024,20 @@ function colorizeResultGeometry(
   deformationScale?: number,
   coordinateTransform?: ResultCoordinateTransform,
   valueRange?: ResultValueRange,
-  supportMarkers: ViewerSupportMarker[] = []
+  supportMarkers: ViewerSupportMarker[] = [],
+  resultFields: ResultField[] = []
 ) {
   const positions = geometry.getAttribute("position");
   if (!(positions instanceof THREE.BufferAttribute)) return geometry;
+  if (resultFields.length && !coordinateTransform) {
+    return applyResultFrameToGeometry({
+      geometry,
+      fields: resultFields,
+      resultMode,
+      showDeformed,
+      deformationScale: deformationScale ?? 1
+    });
+  }
   const basePositions = basePositionArrayForGeometry(geometry, positions);
   resetGeometryPositions(positions, basePositions);
   const color = new THREE.Color();
@@ -1987,10 +2069,19 @@ function colorizeResultGeometry(
 }
 
 function basePositionArrayForGeometry(geometry: THREE.BufferGeometry, positions: THREE.BufferAttribute): Float32Array {
+  const standard = geometry.userData.basePositions;
+  if (standard instanceof Float32Array && standard.length === positions.array.length) {
+    geometry.userData.opencaeBasePositions = standard;
+    return standard;
+  }
   const existing = geometry.userData.opencaeBasePositions;
-  if (existing instanceof Float32Array && existing.length === positions.array.length) return existing;
+  if (existing instanceof Float32Array && existing.length === positions.array.length) {
+    geometry.userData.basePositions = existing;
+    return existing;
+  }
   const base = new Float32Array(positions.array as ArrayLike<number>);
   geometry.userData.opencaeBasePositions = base;
+  geometry.userData.basePositions = base;
   return base;
 }
 
@@ -2005,6 +2096,95 @@ function colorAttributeForGeometry(geometry: THREE.BufferGeometry, vertexCount: 
   const current = geometry.getAttribute("color");
   if (current instanceof THREE.BufferAttribute && current.array instanceof Float32Array && current.count === vertexCount) return current;
   return new THREE.BufferAttribute(new Float32Array(vertexCount * 3), 3);
+}
+
+function basePositionBounds(basePositions: Float32Array): THREE.Box3 {
+  const bounds = new THREE.Box3();
+  for (let offset = 0; offset + 2 < basePositions.length; offset += 3) {
+    bounds.expandByPoint(new THREE.Vector3(basePositions[offset] ?? 0, basePositions[offset + 1] ?? 0, basePositions[offset + 2] ?? 0));
+  }
+  return bounds.isEmpty() ? new THREE.Box3(new THREE.Vector3(0, 0, 0), new THREE.Vector3(1, 1, 1)) : bounds;
+}
+
+function maxDisplacementMagnitude(field: ResultField | undefined): number {
+  if (!field) return 0;
+  const magnitudes = [
+    Math.abs(Number(field.max)),
+    Math.abs(Number(field.min)),
+    ...field.values.map((value) => Math.abs(value)),
+    ...(field.samples?.map((sample) => Math.abs(sample.value)) ?? []),
+    ...(field.samples?.map((sample) => sample.vector ? Math.hypot(...sample.vector) : 0) ?? [])
+  ].filter(Number.isFinite);
+  return magnitudes.length ? Math.max(...magnitudes) : 0;
+}
+
+function interpolateResultSampleValue(point: THREE.Vector3, samples: NonNullable<ResultField["samples"]>, fallback: number): number {
+  const neighbors = nearestResultSamples(point, samples, (sample) => Number.isFinite(sample.value));
+  if (!neighbors.length) return fallback;
+  const exact = neighbors.find((entry) => entry.distanceSq <= 1e-18);
+  if (exact) return exact.sample.value;
+  let weighted = 0;
+  let totalWeight = 0;
+  for (const neighbor of neighbors) {
+    const weight = 1 / Math.max(neighbor.distanceSq, 1e-18);
+    weighted += neighbor.sample.value * weight;
+    totalWeight += weight;
+  }
+  return totalWeight > 0 ? weighted / totalWeight : fallback;
+}
+
+function interpolateResultSampleVector(point: THREE.Vector3, samples: NonNullable<ResultField["samples"]>): THREE.Vector3 {
+  const neighbors = nearestResultSamples(point, samples, (sample) => Boolean(sample.vector?.every(Number.isFinite)));
+  if (!neighbors.length) return new THREE.Vector3();
+  const exact = neighbors.find((entry) => entry.distanceSq <= 1e-18);
+  if (exact?.sample.vector) return new THREE.Vector3(...exact.sample.vector);
+  const vector = new THREE.Vector3();
+  let totalWeight = 0;
+  for (const neighbor of neighbors) {
+    if (!neighbor.sample.vector) continue;
+    const weight = 1 / Math.max(neighbor.distanceSq, 1e-18);
+    vector.addScaledVector(new THREE.Vector3(...neighbor.sample.vector), weight);
+    totalWeight += weight;
+  }
+  return totalWeight > 0 ? vector.multiplyScalar(1 / totalWeight) : vector;
+}
+
+function nearestResultSamples(
+  point: THREE.Vector3,
+  samples: NonNullable<ResultField["samples"]>,
+  predicate: (sample: NonNullable<ResultField["samples"]>[number]) => boolean
+) {
+  return samples
+    .map((sample) => ({ sample, distanceSq: squaredDistanceToPointArray(point, sample.point) }))
+    .filter((entry) => predicate(entry.sample) && Number.isFinite(entry.distanceSq))
+    .sort((left, right) => left.distanceSq - right.distanceSq)
+    .slice(0, Math.min(8, Math.max(3, samples.length)));
+}
+
+const loggedResultFieldDiagnostics = new Set<string>();
+
+function logResultFieldDiagnostics(field: ResultField | undefined, resultMode: ResultMode) {
+  if (!field) return;
+  const finiteValues = field.values.filter(Number.isFinite);
+  const finiteSamples = field.samples?.map((sample) => sample.value).filter(Number.isFinite) ?? [];
+  const reasons: string[] = [];
+  if (!finiteValues.length) reasons.push("no finite values");
+  if (field.samples && !finiteSamples.length) reasons.push("no finite samples");
+  if (field.min === field.max) reasons.push("min equals max");
+  if (!reasons.length) return;
+  const key = `${field.id}:${field.frameIndex ?? "static"}:${reasons.join(",")}`;
+  if (loggedResultFieldDiagnostics.has(key)) return;
+  loggedResultFieldDiagnostics.add(key);
+  console.debug("[OpenCAE results] scalar field diagnostic", {
+    resultMode,
+    fieldId: field.id,
+    frameIndex: field.frameIndex,
+    type: field.type,
+    location: field.location,
+    min: field.min,
+    max: field.max,
+    reasons
+  });
 }
 
 function resultValueRangeForGeometry(
@@ -2041,9 +2221,10 @@ export function colorizeSampleResultGeometry(
   samples: FaceResultSample[],
   loadMarkers: ViewerLoadMarker[],
   deformationScale?: number,
-  supportMarkers: ViewerSupportMarker[] = []
+  supportMarkers: ViewerSupportMarker[] = [],
+  resultFields: ResultField[] = []
 ) {
-  return colorizeResultGeometry(geometry, kind, resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale, undefined, undefined, supportMarkers);
+  return colorizeResultGeometry(geometry, kind, resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale, undefined, undefined, supportMarkers, resultFields);
 }
 
 function usePackedPlaybackGeometry(
@@ -2054,6 +2235,7 @@ function usePackedPlaybackGeometry(
     showDeformed: boolean;
     stressExaggeration: number;
     initialSamples: FaceResultSample[];
+    resultFields?: ResultField[];
     loadMarkers: ViewerLoadMarker[];
     deformationScale?: number;
     supportMarkers: ViewerSupportMarker[];
@@ -2075,6 +2257,18 @@ function usePackedPlaybackGeometry(
     const applySnapshot = (snapshot: ResultPlaybackFrameSnapshot) => {
       const latest = optionsRef.current;
       const frameOrdinal = packedPreparedPlaybackFrameOrdinal(snapshot.cache, snapshot.framePosition);
+      const fields = resultFieldsForPackedPreparedFrame(snapshot.cache, frameOrdinal);
+      if (fields.length) {
+        applyResultFrameToGeometry({
+          geometry,
+          fields,
+          resultMode: latest.resultMode,
+          showDeformed: latest.showDeformed,
+          deformationScale: latest.deformationScale ?? 1
+        });
+        invalidate();
+        return;
+      }
       const samples = updatePackedSamples(samplesRef.current, snapshot.cache, frameOrdinal, latest.resultMode);
       colorizeResultGeometry(
         geometry,
@@ -2118,8 +2312,7 @@ export function updatePackedSamples(samples: FaceResultSample[], cache: PackedPr
     sample.normalized = mappedSample?.normalized ?? sample.normalized;
     if (mappedSample?.diagnostic) sample.diagnostic = mappedSample.diagnostic;
   }
-  const range = slot.max - slot.min;
-  updatePackedFieldSamples(samples, slot, range);
+  updatePackedFieldSamples(samples, slot);
   return samples;
 }
 
@@ -2144,13 +2337,62 @@ function resultFieldForPackedSlot(slot: NonNullable<ReturnType<typeof packedPrep
           slot.sampleNormals[pointOffset + 1] ?? 0,
           slot.sampleNormals[pointOffset + 2] ?? 0
         ] as [number, number, number],
-        value: slot.sampleValues[packedIndex] ?? 0
+        value: slot.sampleValues[packedIndex] ?? 0,
+        vector: [
+          slot.sampleVectors[pointOffset] ?? 0,
+          slot.sampleVectors[pointOffset + 1] ?? 0,
+          slot.sampleVectors[pointOffset + 2] ?? 0
+        ] as [number, number, number]
       };
     })
   };
 }
 
-function updatePackedFieldSamples(samples: FaceResultSample[], slot: NonNullable<ReturnType<typeof packedPreparedPlaybackFieldSlot>>, range: number) {
+function resultFieldsForPackedPreparedFrame(cache: PackedPreparedPlaybackCache, frameOrdinal: number): ResultField[] {
+  const clampedFrameOrdinal = Math.max(0, Math.min(cache.frameCount - 1, Math.floor(frameOrdinal)));
+  const frameIndex = cache.frameIndexes[clampedFrameOrdinal] ?? clampedFrameOrdinal;
+  const timeSeconds = cache.times[clampedFrameOrdinal] ?? 0;
+  return cache.fieldDescriptors.map((descriptor, fieldOrdinal): ResultField => {
+    const slot = clampedFrameOrdinal * cache.fieldCount + fieldOrdinal;
+    const offset = cache.fieldOffsets[slot] ?? 0;
+    const length = cache.fieldLengths[slot] ?? 0;
+    const sampleOffset = cache.sampleOffsets[slot] ?? 0;
+    const sampleLength = cache.sampleLengths[slot] ?? 0;
+    return {
+      ...descriptor,
+      id: `${descriptor.id}-packed-${frameIndex}`,
+      values: Array.from(cache.values.slice(offset, offset + length)),
+      min: cache.fieldMins[slot] ?? 0,
+      max: cache.fieldMaxes[slot] ?? 0,
+      frameIndex,
+      timeSeconds,
+      samples: Array.from({ length: sampleLength }, (_, index) => {
+        const packedIndex = sampleOffset + index;
+        const pointOffset = packedIndex * 3;
+        return {
+          point: [
+            cache.samplePoints[pointOffset] ?? 0,
+            cache.samplePoints[pointOffset + 1] ?? 0,
+            cache.samplePoints[pointOffset + 2] ?? 0
+          ] as [number, number, number],
+          normal: [
+            cache.sampleNormals[pointOffset] ?? 0,
+            cache.sampleNormals[pointOffset + 1] ?? 0,
+            cache.sampleNormals[pointOffset + 2] ?? 0
+          ] as [number, number, number],
+          value: cache.sampleValues[packedIndex] ?? 0,
+          vector: [
+            cache.sampleVectors[pointOffset] ?? 0,
+            cache.sampleVectors[pointOffset + 1] ?? 0,
+            cache.sampleVectors[pointOffset + 2] ?? 0
+          ] as [number, number, number]
+        };
+      })
+    };
+  });
+}
+
+function updatePackedFieldSamples(samples: FaceResultSample[], slot: NonNullable<ReturnType<typeof packedPreparedPlaybackFieldSlot>>) {
   if (!samples.length || slot.sampleLength <= 0) return;
   const owner = samples[0]!;
   if (!owner.fieldSamples || owner.fieldSamples.length !== slot.sampleLength) {
@@ -2167,13 +2409,18 @@ function updatePackedFieldSamples(samples: FaceResultSample[], slot: NonNullable
     const pointOffset = packedIndex * 3;
     const value = slot.sampleValues[packedIndex] ?? 0;
     sample.value = value;
-    sample.normalized = Number.isFinite(range) && Math.abs(range) > 1e-9 ? Math.max(0, Math.min(1, (value - slot.min) / range)) : 0.5;
+    sample.normalized = normalizeValueForRender(value, slot.min, slot.max);
     sample.point[0] = slot.samplePoints[pointOffset] ?? 0;
     sample.point[1] = slot.samplePoints[pointOffset + 1] ?? 0;
     sample.point[2] = slot.samplePoints[pointOffset + 2] ?? 0;
     sample.normal[0] = slot.sampleNormals[pointOffset] ?? 0;
     sample.normal[1] = slot.sampleNormals[pointOffset + 1] ?? 0;
     sample.normal[2] = slot.sampleNormals[pointOffset + 2] ?? 0;
+    sample.vector = [
+      slot.sampleVectors[pointOffset] ?? 0,
+      slot.sampleVectors[pointOffset + 1] ?? 0,
+      slot.sampleVectors[pointOffset + 2] ?? 0
+    ];
   }
 }
 
@@ -2313,7 +2560,7 @@ function hasSolvedResultSamples(samples: FaceResultSample[]) {
 
 function normalizeResultValue(value: number, range: ResultValueRange) {
   const span = range.max - range.min;
-  if (!Number.isFinite(span) || Math.abs(span) < 1e-9) return 0.5;
+  if (!Number.isFinite(value) || !Number.isFinite(span) || Math.abs(span) < 1e-12) return 0;
   return Math.max(0, Math.min(1, (value - range.min) / span));
 }
 
@@ -2321,7 +2568,7 @@ export function deformationScaleForResultFields(fields: ResultField[]): number |
   const displacementField = fields.find((field) => field.type === "displacement" && field.location === "face")
     ?? fields.find((field) => field.type === "displacement");
   if (!displacementField) return undefined;
-  return deformationScaleForMagnitude(resultFieldSignedPeak(displacementField), displacementField.units);
+  return resultFieldAbsMax(displacementField) > 0 ? 1 : 0;
 }
 
 function deformationScaleForSamples(resultMode: ResultMode, samples: FaceResultSample[]) {
@@ -2331,29 +2578,18 @@ function deformationScaleForSamples(resultMode: ResultMode, samples: FaceResultS
 
 function resultFieldAbsMax(field: ResultField) {
   const activeValues = [
+    Math.abs(Number(field.min) || 0),
+    Math.abs(Number(field.max) || 0),
     ...field.values.map((value) => Math.abs(value)).filter(Number.isFinite),
     ...(field.samples?.map((sample) => Math.abs(sample.value)).filter(Number.isFinite) ?? [])
-  ];
-  if (activeValues.length) return Math.max(...activeValues);
-  return Math.max(
-    Math.abs(Number(field.min) || 0),
-    Math.abs(Number(field.max) || 0)
-  );
+  ].filter(Number.isFinite);
+  return activeValues.length ? Math.max(...activeValues) : 0;
 }
 
 function deformationScaleForMagnitude(magnitude: number, units: string) {
   if (!Number.isFinite(magnitude) || Math.abs(magnitude) <= 1e-9) return 0;
   const reference = units === "in" ? DEFAULT_DEFORMATION_REFERENCE_MM / 25.4 : DEFAULT_DEFORMATION_REFERENCE_MM;
   return Math.sign(magnitude) * Math.min(MAX_RESULT_DEFORMATION_SCALE, Math.abs(magnitude) / reference);
-}
-
-function resultFieldSignedPeak(field: ResultField) {
-  const activeValues = [
-    ...field.values.filter(Number.isFinite),
-    ...(field.samples?.map((sample) => sample.value).filter(Number.isFinite) ?? [])
-  ];
-  if (!activeValues.length) return resultFieldAbsMax(field);
-  return activeValues.reduce((peak, value) => Math.abs(value) > Math.abs(peak) ? value : peak, 0);
 }
 
 function deformedPointForResults(

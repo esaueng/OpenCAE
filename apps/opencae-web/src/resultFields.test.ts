@@ -9,6 +9,7 @@ import {
   interpolatedFieldsForFramePosition,
   nextLoopedResultFrameIndex,
   normalizeTransientFieldRanges,
+  normalizeValueForRender,
   packedResultPlaybackTransferables,
   resultFrameIndexes,
   resultProbeSamplesForFaces,
@@ -290,6 +291,42 @@ describe("dynamic result frames", () => {
     expect(visible[0]?.samples?.[0]?.value).toBe(40);
   });
 
+  test("interpolates displacement sample vectors between adjacent dynamic frames", () => {
+    const fields: ResultField[] = [
+      {
+        id: "displacement-0",
+        runId: "run",
+        type: "displacement",
+        location: "node",
+        values: [0],
+        min: 0,
+        max: 10,
+        units: "mm",
+        samples: [{ point: [0, 0, 0], normal: [0, 1, 0], value: 0, vector: [0, 0, 0] }],
+        frameIndex: 0,
+        timeSeconds: 0
+      },
+      {
+        id: "displacement-1",
+        runId: "run",
+        type: "displacement",
+        location: "node",
+        values: [10],
+        min: 0,
+        max: 10,
+        units: "mm",
+        samples: [{ point: [0, 0, 0], normal: [0, 1, 0], value: 10, vector: [0, -10, 2] }],
+        frameIndex: 1,
+        timeSeconds: 0.005
+      }
+    ];
+
+    const visible = interpolatedFieldsForFramePosition(fields, 0.5);
+
+    expect(visible[0]?.samples?.[0]?.value).toBe(5);
+    expect(visible[0]?.samples?.[0]?.vector).toEqual([0, -5, 1]);
+  });
+
   test("interpolates playback fields from the frame cache without changing discrete cached frames", () => {
     const fields: ResultField[] = [
       { id: "stress-0", runId: "run", type: "stress", location: "face", values: [10, 30], min: 0, max: 100, units: "MPa", frameIndex: 0, timeSeconds: 0 },
@@ -340,6 +377,47 @@ describe("dynamic result frames", () => {
       max: 100
     });
     expect(visible?.timeSeconds).toBeCloseTo(0.0025, 8);
+  });
+
+  test("packed playback cache preserves displacement sample vectors", () => {
+    const cache = createPackedResultPlaybackCache([
+      {
+        id: "displacement-0",
+        runId: "run",
+        type: "displacement",
+        location: "node",
+        values: [0],
+        min: 0,
+        max: 10,
+        units: "mm",
+        samples: [{ point: [0, 0, 0], normal: [0, 1, 0], value: 0, vector: [0, 0, 0] }],
+        frameIndex: 0,
+        timeSeconds: 0
+      },
+      {
+        id: "displacement-1",
+        runId: "run",
+        type: "displacement",
+        location: "node",
+        values: [10],
+        min: 0,
+        max: 10,
+        units: "mm",
+        samples: [{ point: [0, 0, 0], normal: [0, 1, 0], value: 10, vector: [0, -10, 2] }],
+        frameIndex: 1,
+        timeSeconds: 0.005
+      }
+    ]);
+
+    expect(cache).not.toBeNull();
+    expect(cache?.sampleVectors).toBeInstanceOf(Float32Array);
+    expect(cache?.fieldsForFrame(1)[0]?.samples?.[0]?.vector).toEqual([0, -10, 2]);
+    expect(cache?.fieldsForFramePosition(0.5)[0]?.samples?.[0]?.vector).toEqual([0, -5, 1]);
+  });
+
+  test("normalizes zero-range render fields to the low end instead of midpoint yellow", () => {
+    expect(normalizeValueForRender(12, 12, 12)).toBe(0);
+    expect(normalizeValueForRender(Number.NaN, 12, 12)).toBe(0);
   });
 
   test("packed playback transferables include every backing buffer", () => {

@@ -49,6 +49,9 @@ import type { WorkspaceInitialAction } from "./App";
 
 const lazyCadViewerImport = () => import("./components/CadViewer").then((module) => ({ default: module.CadViewer }));
 const CadViewer = lazy(lazyCadViewerImport);
+const DEBUG_RESULT_PARAMS = typeof window === "undefined" ? new URLSearchParams() : new URLSearchParams(window.location.search);
+const DEBUG_RESULTS = import.meta.env.DEV && DEBUG_RESULT_PARAMS.get("debugResults") === "1";
+const DEBUG_RESULT_FRAME_CACHE_ONLY = DEBUG_RESULTS && DEBUG_RESULT_PARAMS.get("bypassPacked") === "1";
 
 interface SaveFilePickerHandle {
   createWritable: () => Promise<{ write: (content: Blob) => Promise<void>; close: () => Promise<void> }>;
@@ -170,6 +173,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const resultFieldsForUi = useMemo(() => resultFields.map((field) => resultFieldForUnits(field, displayUnitSystem)), [displayUnitSystem, resultFields]);
   const resultFrameCache = useMemo(() => createResultFrameCache(resultFieldsForUi), [resultFieldsForUi]);
   const packedResultPlaybackCache = useMemo(() => createPackedResultPlaybackCache(resultFieldsForUi), [resultFieldsForUi]);
+  const resultFieldsSignature = useMemo(() => resultFieldsSignatureForCache(resultFieldsForUi), [resultFieldsForUi]);
   const playbackFrameIndexes = useMemo(
     () => packedResultPlaybackCache ? Array.from(packedResultPlaybackCache.frameIndexes) : resultFrameCache.frameIndexes,
     [packedResultPlaybackCache, resultFrameCache]
@@ -190,11 +194,15 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     stressExaggeration.toFixed(2),
     study?.meshSettings.preset ?? "no-mesh",
     displayUnitSystem,
-    resultFieldsForUi.length,
+    resultFieldsSignature,
     resultFrameCache.frameIndexes.join(",")
-  ].join("|"), [activeRunId, completedRunId, displayModelForUi, displayUnitSystem, resultFieldsForUi.length, resultFrameCache.frameIndexes, resultMode, showDeformed, stressExaggeration, study?.meshSettings.preset]);
+  ].join("|"), [activeRunId, completedRunId, displayModelForUi, displayUnitSystem, resultFieldsSignature, resultFrameCache.frameIndexes, resultMode, showDeformed, stressExaggeration, study?.meshSettings.preset]);
   const visibleResultFieldsForUi = useMemo(
     () => {
+      if (DEBUG_RESULT_FRAME_CACHE_ONLY) {
+        if (resultPlaybackPlaying) return resultFrameCache.fieldsForFramePosition(resultVisualFramePosition);
+        return resultFrameCache.fieldsForFrame(resultFrameIndex);
+      }
       if (resultPlaybackPlaying) {
         return packedResultPlaybackCache?.fieldsForFramePosition(resultVisualFramePosition) ?? resultFrameCache.fieldsForFramePosition(resultVisualFramePosition);
       }
@@ -202,9 +210,20 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     },
     [packedResultPlaybackCache, resultFrameCache, resultFrameIndex, resultPlaybackPlaying, resultVisualFramePosition]
   );
-  const resultPlaybackBufferCacheForViewer = resultPlaybackCacheState.status === "ready"
+  const resultPlaybackBufferCacheForViewer = !DEBUG_RESULT_FRAME_CACHE_ONLY && resultPlaybackCacheState.status === "ready"
     ? resultPlaybackCacheState.cache.packed ?? null
     : null;
+  useEffect(() => {
+    if (!DEBUG_RESULTS) return;
+    const frameField = visibleResultFieldsForUi.find((field) => field.type === "stress")
+      ?? visibleResultFieldsForUi.find((field) => field.type === "displacement");
+    console.debug("[OpenCAE results] visible frame", {
+      frameIndex: resultFrameIndex,
+      timeSeconds: frameField?.timeSeconds,
+      stress: debugResultField(visibleResultFieldsForUi.find((field) => field.type === "stress")),
+      displacement: debugResultField(visibleResultFieldsForUi.find((field) => field.type === "displacement"))
+    });
+  }, [resultFrameIndex, visibleResultFieldsForUi]);
   useEffect(() => {
     if (resultPlaybackPlaying) return;
     const packed = resultPlaybackCacheState.status === "ready" ? resultPlaybackCacheState.cache.packed : undefined;
@@ -225,11 +244,8 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     const cache = resultPlaybackCacheState.status === "ready" ? resultPlaybackCacheState.cache : null;
     if (cache?.packed) {
       resultPlaybackFrameControllerRef.current?.setPackedFrame(cache.packed, framePosition);
-      return;
     }
-    const nextFields = packedResultPlaybackCache?.fieldsForFramePosition(framePosition) ?? resultFrameCache.fieldsForFramePosition(framePosition);
-    void nextFields;
-  }, [packedResultPlaybackCache, resultFrameCache, resultPlaybackCacheState]);
+  }, [resultPlaybackCacheState]);
   const solverRunning = Boolean(processingRunId) || (runProgress > 0 && runProgress < 100);
   const runReadiness = useMemo(() => readinessForStudy(study), [study]);
   const canRunSimulation = runReadiness.every((item) => item.done) && !solverRunning;
@@ -1341,6 +1357,46 @@ function createResultPlaybackFrameController(): MutableResultPlaybackFrameContro
       snapshot = nextSnapshot;
       for (const listener of listeners) listener(nextSnapshot);
     }
+  };
+}
+
+function resultFieldsSignatureForCache(fields: ResultField[]): string {
+  return fields.map((field) => {
+    const firstValue = field.values[0];
+    const lastValue = field.values[field.values.length - 1];
+    const firstSample = field.samples?.[0];
+    const lastSample = field.samples?.[field.samples.length - 1];
+    return [
+      field.type,
+      field.location,
+      field.frameIndex ?? "static",
+      field.timeSeconds ?? "no-time",
+      field.min,
+      field.max,
+      field.values.length,
+      field.samples?.length ?? 0,
+      finiteSignatureValue(firstValue),
+      finiteSignatureValue(lastValue),
+      finiteSignatureValue(firstSample?.value),
+      finiteSignatureValue(lastSample?.value)
+    ].join(":");
+  }).join("|");
+}
+
+function finiteSignatureValue(value: unknown): string {
+  return typeof value === "number" && Number.isFinite(value) ? Number(value).toPrecision(8) : "na";
+}
+
+function debugResultField(field: ResultField | undefined) {
+  if (!field) return null;
+  return {
+    type: field.type,
+    location: field.location,
+    min: field.min,
+    max: field.max,
+    values: field.values.slice(0, 5),
+    sampleValues: field.samples?.slice(0, 5).map((sample) => sample.value) ?? [],
+    sampleVectors: field.samples?.slice(0, 5).map((sample) => sample.vector ?? null) ?? []
   };
 }
 
