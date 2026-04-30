@@ -528,6 +528,31 @@ describe("LocalMockComputeBackend", () => {
     expect(firstStressFrame.max).toBeGreaterThan(Math.max(...firstStressFrame.values));
   });
 
+  test("dynamic beam stress frames keep local color contrast while sharing the peak max", () => {
+    const solved = solveDynamicStudy(
+      {
+        ...beamPayloadStudy("mat-aluminum-6061"),
+        type: "dynamic_structural",
+        solverSettings: { endTime: 0.02, timeStep: 0.005, outputInterval: 0.005 }
+      },
+      "run-dynamic-beam-gradient"
+    );
+
+    const stressFrames = solved.fields.filter((field) => field.type === "stress");
+    const peakMax = Math.max(...stressFrames.map((field) => field.max));
+    const highFrame = stressFrames.find((field) => field.frameIndex === 3)!;
+    const highFrameValues = [
+      ...highFrame.values,
+      ...(highFrame.samples?.map((sample) => sample.value) ?? [])
+    ];
+
+    expect(new Set(stressFrames.map((field) => field.max)).size).toBe(1);
+    expect(highFrame.max).toBe(peakMax);
+    expect(highFrame.min).toBeCloseTo(Math.min(...highFrameValues), 1);
+    expect(highFrame.min).toBeGreaterThan(0);
+    expect((Math.max(...highFrameValues) - highFrame.min) / (highFrame.max - highFrame.min)).toBeGreaterThan(0.8);
+  });
+
   test("dynamic solve emits signed displacement frames while stress remains magnitude based", () => {
     const solved = solveDynamicStudy(
       dynamicCantileverStudy("mat-aluminum-6061", {
