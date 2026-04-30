@@ -4,8 +4,10 @@ import {
   createPerformanceWorkerRequest,
   isPerformanceWorkerFailure,
   isPerformanceWorkerSuccess,
-  normalizePerformanceWorkerError
+  normalizePerformanceWorkerError,
+  transferablesForPerformanceWorkerRequest
 } from "./performanceProtocol";
+import { packResultFieldsForPlayback } from "../resultPlaybackCache";
 
 describe("performance worker protocol", () => {
   test("creates typed requests with stable ids and operation names", () => {
@@ -31,6 +33,33 @@ describe("performance worker protocol", () => {
     expect(request.operation).toBe("preparePlaybackFrames");
     expect(request.payload.cacheKey).toBe("run-1:stress");
     expect(request.payload.frameIndexes).toEqual([0, 1, 2]);
+  });
+
+  test("includes packed playback input buffers as worker request transferables", () => {
+    const packedFields = packResultFieldsForPlayback([
+      { id: "stress-0", runId: "run", type: "stress", location: "face", values: [10, 30], min: 0, max: 100, units: "MPa", frameIndex: 0, timeSeconds: 0 },
+      { id: "stress-1", runId: "run", type: "stress", location: "face", values: [30, 70], min: 0, max: 100, units: "MPa", frameIndex: 1, timeSeconds: 0.005 }
+    ]);
+
+    expect(packedFields).not.toBeNull();
+    const request = createPerformanceWorkerRequest("preparePlaybackFrames", {
+      packedFields: packedFields!,
+      frameIndexes: [0, 1],
+      playbackFps: 30,
+      budgetBytes: 64 * 1024 * 1024,
+      cacheKey: "run-1:stress"
+    });
+
+    expect("fields" in request.payload).toBe(false);
+    expect(transferablesForPerformanceWorkerRequest(request)).toEqual(expect.arrayContaining([
+      packedFields!.frameIndexes.buffer,
+      packedFields!.times.buffer,
+      packedFields!.fieldOffsets.buffer,
+      packedFields!.fieldLengths.buffer,
+      packedFields!.fieldMins.buffer,
+      packedFields!.fieldMaxes.buffer,
+      packedFields!.values.buffer
+    ]));
   });
 
   test("narrows success and failure responses", () => {
