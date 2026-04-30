@@ -418,10 +418,12 @@ describe("LocalMockComputeBackend", () => {
       const displacementFrames = first.fields.filter((field) => field.type === "displacement");
       const velocityFrames = first.fields.filter((field) => field.type === "velocity");
       const accelerationFrames = first.fields.filter((field) => field.type === "acceleration");
+      const dynamicFieldTypes = new Set(first.fields.map((field) => field.type));
 
       expect(displacementFrames.length).toBeGreaterThan(3);
       expect(velocityFrames.length).toBe(displacementFrames.length);
       expect(accelerationFrames.length).toBe(displacementFrames.length);
+      expect(dynamicFieldTypes).toEqual(new Set(["acceleration", "displacement", "safety_factor", "stress", "velocity"]));
       expect(displacementFrames.map((field) => field.frameIndex)).toEqual(displacementFrames.map((_, index) => index));
       expect(displacementFrames.map((field) => field.timeSeconds)).toEqual([...displacementFrames.map((field) => field.timeSeconds)].sort((a, b) => Number(a) - Number(b)));
       expect(new Set(displacementFrames.map((field) => field.values.join(","))).size).toBeGreaterThan(1);

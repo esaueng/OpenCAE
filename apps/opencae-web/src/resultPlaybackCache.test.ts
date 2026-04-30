@@ -4,6 +4,7 @@ import {
   hydratePreparedPlaybackFrame,
   planPlaybackFrameCache,
   preparePlaybackFrames,
+  playbackFieldsForResultMode,
   playbackMemoryBudgetBytes
 } from "./resultPlaybackCache";
 
@@ -19,6 +20,15 @@ function resultField(frameIndex: number, values: number[]): ResultField {
     units: "MPa",
     frameIndex,
     timeSeconds: frameIndex * 0.01
+  };
+}
+
+function typedResultField(frameIndex: number, type: ResultField["type"], values: number[]): ResultField {
+  return {
+    ...resultField(frameIndex, values),
+    id: `${type}-${frameIndex}`,
+    type,
+    units: type === "displacement" ? "mm" : type === "safety_factor" ? "" : "MPa"
   };
 }
 
@@ -68,5 +78,32 @@ describe("result playback cache", () => {
     const halfway = prepared.frames.find((frame) => Math.abs(frame.framePosition - 0.5) < 0.001);
     expect(halfway).toBeTruthy();
     expect(hydratePreparedPlaybackFrame(halfway!).fields[0]?.values).toEqual([5, 20]);
+  });
+
+  test("prepares a smaller playback cache for the selected result mode plus displacement", () => {
+    const fields = [0, 1].flatMap((frameIndex) => [
+      typedResultField(frameIndex, "stress", [10 + frameIndex, 20 + frameIndex]),
+      typedResultField(frameIndex, "displacement", [0.1 + frameIndex, 0.2 + frameIndex]),
+      typedResultField(frameIndex, "velocity", [1 + frameIndex, 2 + frameIndex]),
+      typedResultField(frameIndex, "acceleration", [3 + frameIndex, 4 + frameIndex]),
+      typedResultField(frameIndex, "safety_factor", [5 + frameIndex, 6 + frameIndex])
+    ]);
+
+    const selectedFields = playbackFieldsForResultMode(fields, "stress");
+    const allModeCache = preparePlaybackFrames({ fields, frameIndexes: [0, 1], playbackFps: 30, budgetBytes: 100_000 });
+    const selectedModeCache = preparePlaybackFrames({ fields: selectedFields, frameIndexes: [0, 1], playbackFps: 30, budgetBytes: 100_000 });
+
+    expect(new Set(selectedFields.map((field) => field.type))).toEqual(new Set(["stress", "displacement"]));
+    expect(selectedModeCache.packed?.fieldDescriptors.map((descriptor) => descriptor.type).sort()).toEqual(["displacement", "stress"]);
+    expect(selectedModeCache.actualBytes).toBeLessThan(allModeCache.actualBytes);
+  });
+
+  test("falls back to all playback fields when the selected result mode is unavailable", () => {
+    const fields = [0, 1].flatMap((frameIndex) => [
+      typedResultField(frameIndex, "stress", [10 + frameIndex]),
+      typedResultField(frameIndex, "displacement", [0.1 + frameIndex])
+    ]);
+
+    expect(playbackFieldsForResultMode(fields, "velocity")).toBe(fields);
   });
 });

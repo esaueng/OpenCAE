@@ -62,10 +62,14 @@ describe("Worker UI performance rewrite boundaries", () => {
 
     expect(workspaceSource).toContain("createResultPlaybackFrameController");
     expect(workspaceSource).toContain("setPackedFrame(cache.packed");
+    expect(workspaceSource).toContain("playbackFieldsForResultMode(resultFieldsForUi, resultMode)");
+    expect(workspaceSource).toContain("fields: playbackFieldsForSelectedMode");
+    expect(workspaceSource).toContain("resultFields={resultFieldsForUi}");
     expect(viewerSource).toContain("resultPlaybackFrameController");
     expect(viewerSource).toContain("usePackedPlaybackGeometry");
     expect(viewerSource).not.toContain("useSyncExternalStore");
     expect(cacheSource).toContain("values: Float32Array");
+    expect(cacheSource).toContain("playbackFieldsForResultMode");
     expect(cacheSource).not.toContain("Array.from(field.values)");
   });
 
