@@ -103,6 +103,35 @@ describe("Worker UI performance rewrite boundaries", () => {
     expect(viewerSource).toContain("return resultPlaybackFrameController.subscribe(() => invalidate())");
   });
 
+  test("keeps typed packed playback rendering off object-array result sampling", () => {
+    const viewerSource = readFileSync(resolve(__dirname, "components/CadViewer.tsx"), "utf8");
+    const packedPathStart = viewerSource.indexOf("function usePackedPlaybackGeometry(");
+    const packedPathEnd = viewerSource.indexOf("function reusablePackedSamples", packedPathStart);
+    const packedPath = viewerSource.slice(packedPathStart, packedPathEnd);
+    const analysisStart = viewerSource.indexOf("function AnalysisResultModel(");
+    const analysisEnd = viewerSource.indexOf("function UploadedResultSolid(", analysisStart);
+    const analysisPath = viewerSource.slice(analysisStart, analysisEnd);
+
+    expect(packedPathStart).toBeGreaterThan(-1);
+    expect(analysisStart).toBeGreaterThan(-1);
+    expect(packedPath).toContain("updatePackedSamples");
+    expect(packedPath).not.toContain("resultSamplesForFaces");
+    expect(analysisPath).toContain("usesPackedPlaybackResults");
+    expect(analysisPath).toContain("useResultSamplesForFaces(displayModel.faces, resultFields, resultMode, !usesPackedPlaybackResults)");
+    expect(analysisPath).toContain("initialPackedPlaybackSamplesForFaces(displayModel.faces)");
+  });
+
+  test("hides expensive result overlays during packed playback while preserving fallback rendering", () => {
+    const viewerSource = readFileSync(resolve(__dirname, "components/CadViewer.tsx"), "utf8");
+
+    expect(viewerSource).toContain("shouldShowResultMarkers(viewMode, activeStep, resultPlaybackPlaying)");
+    expect(viewerSource).toContain("export function shouldShowResultMarkers(_viewMode: ViewMode, _activeStep: StepId, _resultPlaybackPlaying: boolean)");
+    expect(viewerSource).toContain("return false");
+    expect(viewerSource).toContain("{!resultPlaybackPlaying && <Edges");
+    expect(viewerSource).toContain("function useResultSamplesForFaces");
+    expect(viewerSource).toContain("resultSamplesForFaces(faces, resultFields, resultMode)");
+  });
+
   test("idle-schedules autosave instead of writing localStorage synchronously from workspace renders", () => {
     const workspaceSource = readFileSync(resolve(__dirname, "WorkspaceApp.tsx"), "utf8");
     const persistenceSource = readFileSync(resolve(__dirname, "appPersistence.ts"), "utf8");
