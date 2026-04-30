@@ -13,6 +13,7 @@ LENGTH_MM = 75.0
 WIDTH_MM = 5.0
 HEIGHT_MM = 15.0
 YIELD_STRESS_PA = 276_000_000.0
+BEAM_DEPTH_DISPLAY = 0.36
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -69,12 +70,17 @@ def solve(payload):
         input_deck = generate_input_deck(load_n, material, density_tonne_per_mm3, dynamic_settings, dynamic)
         deck_path = workdir / "opencae_solve.inp"
         deck_path.write_text(input_deck)
-        solver_log = run_ccx_if_available(workdir, deck_path)
+        solver_output = run_ccx_if_available(workdir, deck_path)
+        parsed_solver_results = parse_calculix_result_files(workdir, run_id)
 
     response = generated_result_fields(run_id, load_n, material, dynamic_settings, dynamic)
+    if parsed_solver_results["available"]:
+        response["summary"]["failureAssessment"]["message"] += " CalculiX result files were detected but are not fully parsed yet; deterministic sampled fields are marked as generated fallback."
     response["artifacts"] = {
         "inputDeck": input_deck,
-        "solverLog": solver_log,
+        "solverLog": solver_output["log"],
+        "solverResultFiles": parsed_solver_results["files"],
+        "solverResultParser": parsed_solver_results["status"],
         "meshSummary": {"nodes": 8, "elements": 1, "source": "generated-cantilever-solid", "units": "mm-N-s-MPa"}
     }
     return response
@@ -156,16 +162,36 @@ S
 def amplitude_table(settings):
     start = settings["startTime"]
     end = settings["endTime"]
+    if settings.get("loadHistoryMode") == "quasi_static":
+        return f"{start:.6g}, 0.0, {end:.6g}, 1.0"
     midpoint = start + (end - start) * 0.5
     return f"{start:.6g}, 0.0, {midpoint:.6g}, 1.0, {end:.6g}, -0.35"
 
 
 def run_ccx_if_available(workdir, deck_path):
     if not shutil.which("ccx"):
-        return "CalculiX executable unavailable; generated input deck and deterministic contract fields only."
+        return {"log": "CalculiX executable unavailable; generated input deck and deterministic contract fields only.", "returnCode": None}
     result = subprocess.run(["ccx", deck_path.stem], cwd=workdir, capture_output=True, text=True, timeout=45, check=False)
     output = (result.stdout or "") + ("\n" + result.stderr if result.stderr else "")
-    return output.strip() or f"CalculiX exited with code {result.returncode}."
+    log = output.strip() or f"CalculiX exited with code {result.returncode}."
+    result_files = sorted(path.name for path in workdir.glob(f"{deck_path.stem}.*") if path.suffix.lower() in {".frd", ".dat", ".sta"})
+    if result.returncode == 0 and result_files:
+        log = f"{log}\nDetected CalculiX result files: {', '.join(result_files)}. Parser fallback is explicit until FRD/DAT extraction is complete."
+    elif result.returncode == 0:
+        log = f"{log}\nCalculiX completed but no FRD/DAT result files were produced; using deterministic fallback fields."
+    return {"log": log, "returnCode": result.returncode}
+
+
+def parse_calculix_result_files(workdir, run_id):
+    files = sorted(path.name for path in workdir.glob("*") if path.suffix.lower() in {".frd", ".dat", ".sta"})
+    # TODO: Parse timed *NODE FILE U output for displacement and *EL FILE/*ELEMENT
+    # OUTPUT S stress output, compute nodal von Mises samples, and preserve frame
+    # time plus node/element IDs. Until then, report generated fallback explicitly.
+    return {
+        "available": any(name.endswith((".frd", ".dat")) for name in files),
+        "files": files,
+        "status": f"generated-fallback-for-{run_id}"
+    }
 
 
 def generated_result_fields(run_id, load_n, material, settings, dynamic):
@@ -174,7 +200,6 @@ def generated_result_fields(run_id, load_n, material, settings, dynamic):
     peak_stress_pa = beam_peak_stress_pa(load_n)
     stress_min = 0.0
     stress_max = peak_stress_pa
-    displacement_min = -peak_displacement_m * 0.35 if dynamic else 0.0
     displacement_max = peak_displacement_m
     duration = max(settings["endTime"] - settings["startTime"], settings["timeStep"])
     velocity_bound = peak_displacement_m * math.pi / duration if dynamic else peak_displacement_m
@@ -182,14 +207,14 @@ def generated_result_fields(run_id, load_n, material, settings, dynamic):
     fields = []
     for index, time_value in enumerate(frames):
         response = dynamic_response_factor(time_value, settings) if dynamic else 1.0
-        signed_displacement = peak_displacement_m * response
+        displacement_magnitude = abs(peak_displacement_m * response)
         stress = peak_stress_pa * abs(response)
         velocity = peak_displacement_m * dynamic_velocity_factor(time_value, settings) if dynamic else 0.0
         acceleration = peak_displacement_m * dynamic_acceleration_factor(time_value, settings) if dynamic else 0.0
         frame = {"frameIndex": index, "timeSeconds": time_value} if dynamic else {}
         fields.extend([
             result_field(run_id, "stress", "Pa", stress, stress_min, stress_max, index, time_value, frame, stress),
-            result_field(run_id, "displacement", "m", signed_displacement, displacement_min, displacement_max, index, time_value, frame),
+            result_field(run_id, "displacement", "m", displacement_magnitude, 0.0, displacement_max, index, time_value, frame),
             result_field(run_id, "safety_factor", "", YIELD_STRESS_PA / max(stress, 1.0), 0.0, YIELD_STRESS_PA / max(peak_stress_pa, 1.0), index, time_value, frame)
         ])
         if dynamic:
@@ -229,16 +254,22 @@ def generated_result_fields(run_id, load_n, material, settings, dynamic):
 
 def result_field(run_id, field_type, units, value, min_value, max_value, index, time_value, frame, von_mises=None):
     samples = []
-    for node_index, x in enumerate([0.0, LENGTH_MM * 0.33, LENGTH_MM * 0.66, LENGTH_MM], start=1):
-        ratio = x / LENGTH_MM
-        sample_value = value * ratio
+    for node_index, (x, y, z) in enumerate(display_node_points(), start=1):
+        travel = max(0.0, min(1.0, (x + 1.9) / 3.8))
+        if field_type == "stress":
+            fiber = 0.72 + 0.28 * abs(z) / max(BEAM_DEPTH_DISPLAY / 2.0, 1e-9)
+            sample_value = value * max(0.0, min(1.0, (1.0 - travel) * fiber))
+        elif field_type == "displacement":
+            sample_value = value * travel * travel
+        else:
+            sample_value = value * travel
         sample = {
-            "point": [x / 1000.0, 0.04, 0.06],
+            "point": [x, y, z],
             "normal": [0, 0, 1],
             "value": sample_value,
             "nodeId": f"N{node_index}",
             "elementId": "E1",
-            "source": "calculix"
+            "source": "generated-cantilever-fallback"
         }
         if von_mises is not None:
             sample["vonMisesStressPa"] = sample_value
@@ -257,6 +288,15 @@ def result_field(run_id, field_type, units, value, min_value, max_value, index, 
     }
 
 
+def display_node_points():
+    return [
+        (x, y, z)
+        for x in [-1.9, -0.633, 0.633, 1.9]
+        for y in [0.04, 0.32]
+        for z in [-BEAM_DEPTH_DISPLAY / 2.0, BEAM_DEPTH_DISPLAY / 2.0]
+    ]
+
+
 def normalized_dynamic_settings(settings):
     start = finite_number(settings.get("startTime"), 0.0)
     end = finite_number(settings.get("endTime"), 0.5)
@@ -265,7 +305,8 @@ def normalized_dynamic_settings(settings):
     damping = max(finite_number(settings.get("dampingRatio"), 0.02), 0.0)
     if end <= start:
         end = start + step
-    return {"startTime": start, "endTime": end, "timeStep": step, "outputInterval": output, "dampingRatio": damping}
+    load_history_mode = "quasi_static" if settings.get("loadHistoryMode") == "quasi_static" or settings.get("quasiStatic") is True else "dynamic_structural"
+    return {"startTime": start, "endTime": end, "timeStep": step, "outputInterval": output, "dampingRatio": damping, "loadHistoryMode": load_history_mode}
 
 
 def frame_times(settings):
@@ -279,6 +320,8 @@ def frame_times(settings):
 def dynamic_response_factor(time_value, settings):
     duration = max(settings["endTime"] - settings["startTime"], settings["timeStep"])
     normalized = (time_value - settings["startTime"]) / duration
+    if settings.get("loadHistoryMode") == "quasi_static":
+        return max(0.0, min(1.0, normalized))
     decay = math.exp(-settings["dampingRatio"] * normalized * 3.0)
     if normalized <= 0.5:
         return math.sin(math.pi * normalized) * decay
@@ -288,6 +331,8 @@ def dynamic_response_factor(time_value, settings):
 
 def dynamic_velocity_factor(time_value, settings):
     duration = max(settings["endTime"] - settings["startTime"], settings["timeStep"])
+    if settings.get("loadHistoryMode") == "quasi_static":
+        return 1.0 / duration
     normalized = (time_value - settings["startTime"]) / duration
     decay = math.exp(-settings["dampingRatio"] * normalized * 3.0)
     if normalized <= 0.5:
@@ -297,6 +342,8 @@ def dynamic_velocity_factor(time_value, settings):
 
 def dynamic_acceleration_factor(time_value, settings):
     duration = max(settings["endTime"] - settings["startTime"], settings["timeStep"])
+    if settings.get("loadHistoryMode") == "quasi_static":
+        return 0.0
     normalized = (time_value - settings["startTime"]) / duration
     if normalized <= 0.5:
         return -((math.pi / duration) ** 2) * math.sin(math.pi * normalized) * math.exp(-settings["dampingRatio"] * normalized * 3.0)

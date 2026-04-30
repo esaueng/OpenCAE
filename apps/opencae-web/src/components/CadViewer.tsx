@@ -1982,6 +1982,7 @@ function colorizeResultGeometry(
   colorAttribute.needsUpdate = true;
   positions.needsUpdate = true;
   geometry.computeVertexNormals();
+  geometry.computeBoundingSphere();
   return geometry;
 }
 
@@ -2106,17 +2107,47 @@ function reusablePackedSamples(samples: FaceResultSample[]): FaceResultSample[] 
 }
 
 export function updatePackedSamples(samples: FaceResultSample[], cache: PackedPreparedPlaybackCache, frameOrdinal: number, resultMode: ResultMode): FaceResultSample[] {
-  const slot = packedPreparedPlaybackFieldSlot(cache, frameOrdinal, resultMode, "face");
+  const slot = packedPreparedPlaybackFieldSlot(cache, frameOrdinal, resultMode);
   if (!slot) return samples;
-  const range = slot.max - slot.min;
+  const field = resultFieldForPackedSlot(slot);
+  const mapped = resultSamplesForFaces(samples.map((sample) => sample.face), [field], resultMode);
   for (let index = 0; index < samples.length; index += 1) {
     const sample = samples[index]!;
-    const value = index < slot.length ? slot.values[slot.offset + index] ?? sample.value : sample.value;
-    sample.value = value;
-    sample.normalized = Number.isFinite(range) && Math.abs(range) > 1e-9 ? Math.max(0, Math.min(1, (value - slot.min) / range)) : 0.5;
+    const mappedSample = mapped[index];
+    sample.value = mappedSample?.value ?? sample.value;
+    sample.normalized = mappedSample?.normalized ?? sample.normalized;
+    if (mappedSample?.diagnostic) sample.diagnostic = mappedSample.diagnostic;
   }
+  const range = slot.max - slot.min;
   updatePackedFieldSamples(samples, slot, range);
   return samples;
+}
+
+function resultFieldForPackedSlot(slot: NonNullable<ReturnType<typeof packedPreparedPlaybackFieldSlot>>): ResultField {
+  return {
+    ...slot.descriptor,
+    id: `${slot.descriptor.id}-packed`,
+    values: Array.from(slot.values.slice(slot.offset, slot.offset + slot.length)),
+    min: slot.min,
+    max: slot.max,
+    samples: Array.from({ length: slot.sampleLength }, (_, index) => {
+      const packedIndex = slot.sampleOffset + index;
+      const pointOffset = packedIndex * 3;
+      return {
+        point: [
+          slot.samplePoints[pointOffset] ?? 0,
+          slot.samplePoints[pointOffset + 1] ?? 0,
+          slot.samplePoints[pointOffset + 2] ?? 0
+        ] as [number, number, number],
+        normal: [
+          slot.sampleNormals[pointOffset] ?? 0,
+          slot.sampleNormals[pointOffset + 1] ?? 0,
+          slot.sampleNormals[pointOffset + 2] ?? 0
+        ] as [number, number, number],
+        value: slot.sampleValues[packedIndex] ?? 0
+      };
+    })
+  };
 }
 
 function updatePackedFieldSamples(samples: FaceResultSample[], slot: NonNullable<ReturnType<typeof packedPreparedPlaybackFieldSlot>>, range: number) {
@@ -2928,9 +2959,13 @@ function resultProbeSurfaceForFace(kind: SampleModelKind, face: DisplayFace): { 
 }
 
 function resultProbeLabels(resultMode: ResultMode, resultFields: ResultField[], unitSystem: UnitSystem) {
-  const field = resultFields.find((candidate) => candidate.type === resultMode && candidate.location === "face");
-  if (field?.values.length) {
-    const sorted = [...field.values].sort((left, right) => left - right);
+  const field = selectedResultField(resultFields, resultMode);
+  const values = field ? [
+    ...field.values,
+    ...(field.samples?.map((sample) => sample.value) ?? [])
+  ].filter(Number.isFinite) : [];
+  if (field && values.length) {
+    const sorted = [...values].sort((left, right) => left - right);
     const min = sorted[0] ?? field.min;
     const mid = sorted[Math.floor(sorted.length / 2)] ?? (field.min + field.max) / 2;
     const max = sorted.at(-1) ?? field.max;
@@ -3108,7 +3143,7 @@ export function legendMeshStats(meshSummary: MeshSummary | undefined) {
 
 function ResultLegend({ resultMode, resultFields, unitSystem, meshSummary }: { resultMode: ResultMode; resultFields: ResultField[]; unitSystem: UnitSystem; meshSummary?: MeshSummary }) {
   const title = resultMode === "stress" ? "Von Mises Stress" : resultMode === "displacement" ? "Displacement" : resultMode === "velocity" ? "Velocity" : resultMode === "acceleration" ? "Acceleration" : "Safety Factor";
-  const field = resultFields.find((candidate) => candidate.type === resultMode && candidate.location === "face");
+  const field = selectedResultField(resultFields, resultMode);
   const fallbackMin = resultMode === "stress" ? stressForUnits(28, "MPa", unitSystem) : resultMode === "displacement" || resultMode === "velocity" || resultMode === "acceleration" ? lengthForUnits(0, "mm", unitSystem) : { value: 1.8, units: "" };
   const fallbackMax = resultMode === "stress" ? stressForUnits(142, "MPa", unitSystem) : resultMode === "displacement" || resultMode === "velocity" || resultMode === "acceleration" ? lengthForUnits(0.184, "mm", unitSystem) : { value: 7.6, units: "" };
   const unit = field?.units ?? fallbackMax.units;
@@ -3134,6 +3169,12 @@ function ResultLegend({ resultMode, resultFields, unitSystem, meshSummary }: { r
       </div>
     </div>
   );
+}
+
+function selectedResultField(resultFields: ResultField[], resultMode: ResultMode): ResultField | undefined {
+  return resultFields.find((candidate) => candidate.type === resultMode && candidate.location === "face")
+    ?? resultFields.find((candidate) => candidate.type === resultMode && candidate.samples?.length)
+    ?? resultFields.find((candidate) => candidate.type === resultMode);
 }
 
 function LoadGlyph({ marker, face, active, labelPosition }: { marker: ViewerLoadMarker; face: DisplayFace; active: boolean; labelPosition?: [number, number, number] }) {
