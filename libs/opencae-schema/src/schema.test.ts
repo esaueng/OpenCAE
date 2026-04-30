@@ -201,6 +201,7 @@ describe("ProjectSchema", () => {
           point: [0, 0, 0],
           normal: [0, 1, 0],
           value: 123100,
+          vector: [0.001, -0.002, 0],
           nodeId: "N42",
           elementId: "E7",
           source: "calculix",
@@ -213,6 +214,7 @@ describe("ProjectSchema", () => {
       nodeId: "N42",
       elementId: "E7",
       source: "calculix",
+      vector: [0.001, -0.002, 0],
       vonMisesStressPa: 123100
     });
   });

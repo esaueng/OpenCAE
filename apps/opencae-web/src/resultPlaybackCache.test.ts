@@ -4,6 +4,7 @@ import {
   hydratePreparedPlaybackFrame,
   packResultFieldsForPlayback,
   packedPreparedPlaybackFieldSlot,
+  packedPreparedPlaybackFrameOrdinal,
   packedResultFieldsForPlaybackTransferables,
   planPlaybackFrameCache,
   preparePlaybackFrames,
@@ -114,15 +115,15 @@ describe("result playback cache", () => {
       {
         ...resultField(0, [10, 20]),
         samples: [
-          { point: [0, 0, 0] as [number, number, number], normal: [0, 1, 0] as [number, number, number], value: 10 },
-          { point: [1, 0, 0] as [number, number, number], normal: [0, 1, 0] as [number, number, number], value: 20 }
+          { point: [0, 0, 0] as [number, number, number], normal: [0, 1, 0] as [number, number, number], value: 10, vector: [0, -1, 0] as [number, number, number] },
+          { point: [1, 0, 0] as [number, number, number], normal: [0, 1, 0] as [number, number, number], value: 20, vector: [0, -2, 0] as [number, number, number] }
         ]
       },
       {
         ...resultField(1, [20, 40]),
         samples: [
-          { point: [0, 0, 0] as [number, number, number], normal: [0, 1, 0] as [number, number, number], value: 20 },
-          { point: [1, 0, 0] as [number, number, number], normal: [0, 1, 0] as [number, number, number], value: 40 }
+          { point: [0, 0, 0] as [number, number, number], normal: [0, 1, 0] as [number, number, number], value: 20, vector: [0, -3, 0] as [number, number, number] },
+          { point: [1, 0, 0] as [number, number, number], normal: [0, 1, 0] as [number, number, number], value: 40, vector: [0, -4, 0] as [number, number, number] }
         ]
       }
     ];
@@ -132,13 +133,16 @@ describe("result playback cache", () => {
     expect(packed?.sampleValues).toBeInstanceOf(Float32Array);
     expect(packed?.samplePoints).toBeInstanceOf(Float32Array);
     expect(packed?.sampleNormals).toBeInstanceOf(Float32Array);
+    expect(packed?.sampleVectors).toBeInstanceOf(Float32Array);
     expect(unpackResultFieldsForPlayback(packed!)[1]?.samples?.map((sample) => sample.value)).toEqual([20, 40]);
+    expect(unpackResultFieldsForPlayback(packed!)[1]?.samples?.map((sample) => sample.vector)).toEqual([[0, -3, 0], [0, -4, 0]]);
     expect(packedResultFieldsForPlaybackTransferables(packed!)).toEqual(expect.arrayContaining([
       packed!.sampleOffsets.buffer,
       packed!.sampleLengths.buffer,
       packed!.sampleValues.buffer,
       packed!.samplePoints.buffer,
-      packed!.sampleNormals.buffer
+      packed!.sampleNormals.buffer,
+      packed!.sampleVectors.buffer
     ]));
   });
 
@@ -186,8 +190,33 @@ describe("result playback cache", () => {
       prepared.packed!.sampleLengths.buffer,
       prepared.packed!.sampleValues.buffer,
       prepared.packed!.samplePoints.buffer,
-      prepared.packed!.sampleNormals.buffer
+      prepared.packed!.sampleNormals.buffer,
+      prepared.packed!.sampleVectors.buffer
     ]));
+  });
+
+  test("prepared playback cache preserves displacement vectors through interpolation and slots", () => {
+    const fields: ResultField[] = [0, 1].map((frameIndex) => ({
+      ...typedResultField(frameIndex, "displacement", [frameIndex * 10]),
+      location: "node" as const,
+      min: 0,
+      max: 10,
+      samples: [
+        {
+          point: [0, 0, 0] as [number, number, number],
+          normal: [0, 1, 0] as [number, number, number],
+          value: frameIndex * 10,
+          vector: [0, -frameIndex * 10, frameIndex * 2] as [number, number, number]
+        }
+      ]
+    }));
+
+    const prepared = preparePlaybackFrames({ fields, frameIndexes: [0, 1], playbackFps: 30, budgetBytes: 100_000 });
+    const halfway = hydratePreparedPlaybackFrame(prepared.frames.find((frame) => Math.abs(frame.framePosition - 0.5) < 0.001)!);
+    const slot = packedPreparedPlaybackFieldSlot(prepared.packed!, packedPreparedPlaybackFrameOrdinal(prepared.packed!, halfway.framePosition), "displacement")!;
+
+    expect(halfway.fields[0]?.samples?.[0]?.vector).toEqual([0, -5, 1]);
+    expect(Array.from(slot.sampleVectors.slice(slot.sampleOffset * 3, slot.sampleOffset * 3 + 3))).toEqual([0, -5, 1]);
   });
 
   test("prepares a smaller playback cache for the selected result mode plus displacement", () => {
