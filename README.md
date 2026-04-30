@@ -1,8 +1,8 @@
 # OpenCAE
 
-OpenCAE is a local-first CAD/CAE simulation scaffold. The current workspace is a Static Stress MVP with a browser CAD workspace, a local Fastify API, SQLite metadata, filesystem artifacts, local jobs, mock CAD/mesh/solver/post services, and built-in sample projects.
+OpenCAE is a local-first CAD/CAE simulation workspace. The current app includes static stress and dynamic structural studies, a browser CAD workspace, a local Fastify API, SQLite metadata, filesystem artifacts, local jobs, deterministic local solver services, Cloud FEA orchestration, and built-in sample projects.
 
-The scaffold is designed around service boundaries that can start as TypeScript mocks and later move to native CAD kernels, meshing tools, solvers, and post-processing services.
+The project is designed around service boundaries so local TypeScript services, browser workers, CAD import, meshing, solver, and post-processing backends can evolve independently.
 
 ## Local Development
 
@@ -48,7 +48,7 @@ Container application rollouts require a token with Cloudflare Containers write 
 pnpm deploy:cloudflare:containers
 ```
 
-Real Cloud FEA transient animation requires that privileged container application deploy to have succeeded, because dynamic runs are rejected unless the container returns timed multi-frame result fields.
+Real Cloud FEA transient animation requires that privileged container application deploy to have succeeded, because dynamic runs are rejected unless the container returns timed multi-frame result fields. The Cloud FEA container currently runs a CalculiX adapter for static and transient structural solves.
 
 For a local-first/static Worker deploy without Cloud FEA containers, use:
 
@@ -69,7 +69,7 @@ For Cloudflare Builds, set:
 - `apps/opencae-web` - React/Vite CAD workspace and static stress workflow.
 - `apps/opencae-api` - Fastify API for projects, jobs, artifacts, and service orchestration.
 - `libs/*` - Shared schema, units, materials, storage, jobs, diagnostics, and service contracts.
-- `services/*` - Mock CAD, mesh, solver, and post-processing service implementations.
+- `services/*` - CAD, mesh, solver, post-processing, and Cloud FEA container service implementations.
 - `runners/opencae-runner-local` - Local runner package for job execution flows.
 - `examples/*` - Sample project documentation and fixtures.
 - `docs/*` - Architecture, local development, file format, validation, and user guide notes.
@@ -78,9 +78,18 @@ For Cloudflare Builds, set:
 
 ## Simulation Flow
 
-The MVP treats CAD entities as the source of truth. Meshes are generated artifacts, while results and reports are immutable study-run artifacts. Loads, supports, contacts, and named selections bind to CAD topology references so the data model can survive future swaps from mocks to real geometry and solver backends.
+OpenCAE treats CAD entities as the source of truth. Meshes are generated artifacts, while results and reports are immutable study-run artifacts. Loads, supports, contacts, and named selections bind to CAD topology references so the data model can survive backend changes without rewriting the user workflow.
 
-The current Bracket Demo includes a placeholder bracket body, Aluminum 6061 material, one fixed support, one load, mock mesh data, mock stress and displacement results, and a generated local report.
+The built-in demos include bracket, beam, and cantilever studies with Aluminum 6061 and 3D-printing material presets, supports, payload/force loads, generated mesh summaries, stress/displacement/safety-factor results, dynamic playback where available, and local report artifacts.
+
+## Solver Attribution
+
+OpenCAE uses two solver paths:
+
+- **Detailed local solver** - a deterministic TypeScript structural solver in `@opencae/solver-service` for fast local/browser estimates, static stress, dynamic structural playback, and responsive demo workflows.
+- **Cloud FEA solver** - a containerized adapter in `services/opencae-fea-container` that generates CalculiX input decks and runs the open-source **CalculiX CrunchiX** executable (`ccx`) when Cloud FEA containers are enabled. The container image installs Debian's `calculix-ccx` package and also includes **Gmsh** for uploaded geometry meshing/staging.
+
+Credit: [CalculiX](http://www.calculix.de/) provides the open-source finite element solver used by the Cloud FEA path. [Gmsh](https://gmsh.info/) is used as the open-source meshing tool in the Cloud FEA container when uploaded geometry needs a generated mesh.
 
 ## Documentation
 
@@ -98,4 +107,4 @@ Copyright 2026 Esau Engineering. The OpenCAE name and logo are trademarks of Esa
 
 ## Scope
 
-This scaffold intentionally does not include real native CAD, meshing, or finite element solver integrations yet. The service contracts and workspace boundaries are in place so those integrations can be added without rewriting the user workflow.
+OpenCAE is still an engineering preview. Local results are fast estimates for product workflow development and should not be treated as certified analysis. The Cloud FEA path provides a CalculiX-backed integration point for higher-fidelity solver work, while native CAD, meshing, and post-processing support continue to evolve behind the existing service boundaries.
