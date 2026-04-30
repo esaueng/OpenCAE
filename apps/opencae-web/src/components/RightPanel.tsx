@@ -1250,7 +1250,7 @@ function ResultsPanel({
       </div>
       {resultMode === "stress" && (
         <label className="field range-field">
-          <span className="range-label"><HelpLabel helpId="stressExaggeration">Stress exaggeration</HelpLabel><strong>{draftStressExaggeration.toFixed(1)}x</strong></span>
+          <span className="range-label"><HelpLabel helpId="stressExaggeration">Deformation scale</HelpLabel><strong>{draftStressExaggeration.toFixed(1)}x</strong></span>
           <input
             type="range"
             min="1"
