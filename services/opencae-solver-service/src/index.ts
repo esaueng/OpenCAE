@@ -201,12 +201,17 @@ export function solveStudy(study: Study, runId: string, analysisMeshInput?: Anal
   const stressValues = faces.map((face) => round(stressAtFace(face, loads, faces) * response.stressScale, 1));
   const displacementValues = faces.map((face) => round(displacementAtFace(face, loads, faces) * response.displacementScale, 4));
   const safetyValues = stressValues.map((stress) => round(Math.max(0.05, response.yieldMpa / Math.max(stress, 0.001)), 2));
-  const faceIndexBySelectionId = new Map(faces.map((face, index) => [face.selectionId, index]));
-  const stressSamples = analysisMesh.samples.map((sample) => {
-    const faceIndex = sample.sourceId ? faceIndexBySelectionId.get(sample.sourceId) : undefined;
-    const value = typeof faceIndex === "number"
-      ? stressValues[faceIndex] ?? stressAtSample(sample, loads, faces, analysisMesh) * response.stressScale
-      : stressAtSample(sample, loads, faces, analysisMesh) * response.stressScale;
+  const rawStressSampleValues = analysisMesh.samples.map((sample) => stressAtSample(sample, loads, faces, analysisMesh) * response.stressScale);
+  const maxStressValue = Math.max(...stressValues, 0);
+  const maxStressSampleValue = Math.max(...rawStressSampleValues, 0);
+  const minStressSampleValue = Math.min(...rawStressSampleValues.filter(Number.isFinite));
+  const stressSampleRange = maxStressSampleValue - minStressSampleValue;
+  const calibratedStressSampleRange = maxStressValue - minStressSampleValue;
+  const stressSamples = analysisMesh.samples.map((sample, index) => {
+    const rawValue = rawStressSampleValues[index] ?? 0;
+    const value = Number.isFinite(minStressSampleValue) && stressSampleRange > 1e-9 && calibratedStressSampleRange > stressSampleRange
+      ? minStressSampleValue + (rawValue - minStressSampleValue) * calibratedStressSampleRange / stressSampleRange
+      : rawValue;
     return sampleResult(sample, value, 2, { source: "local_detailed", vonMisesStressPa: round(value * 1_000_000, 1) });
   });
   const displacementSamples = analysisMesh.samples.map((sample) => sampleResult(sample, displacementAtSample(sample, loads, faces, analysisMesh) * response.displacementScale, 4));
