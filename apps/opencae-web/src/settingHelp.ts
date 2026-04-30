@@ -134,8 +134,8 @@ export const SETTING_HELP: Record<SettingHelpId, SettingHelp> = {
     visual: "results"
   },
   stressExaggeration: {
-    title: "Stress exaggeration",
-    body: "Scales the displayed stress/deformed visualization to make small changes easier to see. It changes the view only, not the numeric result.",
+    title: "Deformation scale",
+    body: "Scales the displayed deformed shape to make small displacements easier to see. It changes the view only, not the numeric result.",
     visual: "results"
   },
   deformedShape: {

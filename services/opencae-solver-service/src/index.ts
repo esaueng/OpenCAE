@@ -666,7 +666,7 @@ function displacementAtFace(face: FaceModel, loads: LoadModel[], faces: FaceMode
     const pathDistance = distancePointToSegment(face.center, load.nearestSupport.center, load.face.center);
     const pathTravel = segmentParameter(face.center, load.nearestSupport.center, load.face.center);
     const bendingAlignment = length(cross(normalize(subtract(load.face.center, load.nearestSupport.center)), load.direction));
-    const beamShape = pathTravel * pathTravel * (3 - 2 * pathTravel);
+    const beamShape = cantileverDisplacementShape(pathTravel);
     const supportLockShape = load.leverArm > 0.001 ? beamShape : 1;
     const localLoad = gaussian(loadDistance, span * 0.24);
     const loadPath = gaussian(pathDistance, span * 0.22);
@@ -726,24 +726,13 @@ function displacementAtSample(sample: AnalysisSample, loads: LoadModel[], faces:
   return loads.reduce((sum, load) => {
     const spanVector = subtract(load.face.center, load.nearestSupport.center);
     const spanLength = Math.max(length(spanVector), 0.001);
-    const spanDirection = normalize(spanVector);
     const forceScale = load.magnitude / 500;
     const momentScale = load.moment / Math.max(250, 500 * spanLength);
     const travel = segmentParameter(sample.point, load.nearestSupport.center, load.face.center);
-    const beamShape = travel * travel * (3 - 2 * travel);
+    const beamShape = cantileverDisplacementShape(travel);
     const supportLockShape = load.leverArm > 0.001 ? beamShape : 1;
-    const loadDistance = distance(sample.point, load.face.center);
-    const pathDistance = distancePointToSegment(sample.point, load.nearestSupport.center, load.face.center);
-    const fiberDistance = distancePointToLine(sample.point, load.nearestSupport.center, spanDirection);
-    const fiberRadius = Math.max(estimatedCrossSectionRadius(analysisMesh, load.nearestSupport.center, spanDirection), 0.001);
-    const fiber = clamp(fiberDistance / fiberRadius, 0, 1);
-    return sum + forceScale * supportLockShape * (
-      0.004 +
-      (0.14 + 0.11 * momentScale) * beamShape +
-      0.018 * gaussian(loadDistance, spanLength * 0.18) +
-      0.012 * gaussian(pathDistance, spanLength * 0.18) * travel +
-      0.012 * fiber * beamShape
-    );
+    const tipDisplacement = forceScale * (0.162 + 0.11 * momentScale);
+    return sum + supportLockShape * tipDisplacement;
   }, 0);
 }
 
@@ -754,6 +743,11 @@ function displacementVectorAtSample(sample: AnalysisSample, loads: LoadModel[], 
     const contribution = scale(displacementDirectionForLoad(load), magnitude);
     return [sum[0] + contribution[0], sum[1] + contribution[1], sum[2] + contribution[2]];
   }, [0, 0, 0]);
+}
+
+function cantileverDisplacementShape(travel: number): number {
+  const s = clamp(travel, 0, 1);
+  return 0.5 * s * s * (3 - s);
 }
 
 function displacementDirectionForLoad(load: LoadModel): Vec3 {
@@ -772,24 +766,13 @@ function isBuiltInBeamPayloadGravityLoad(load: LoadModel): boolean {
 function displacementAtSampleForLoad(sample: AnalysisSample, load: LoadModel, _faces: FaceModel[], analysisMesh: AnalysisMesh): number {
   const spanVector = subtract(load.face.center, load.nearestSupport.center);
   const spanLength = Math.max(length(spanVector), 0.001);
-  const spanDirection = normalize(spanVector);
   const forceScale = load.magnitude / 500;
   const momentScale = load.moment / Math.max(250, 500 * spanLength);
   const travel = segmentParameter(sample.point, load.nearestSupport.center, load.face.center);
-  const beamShape = travel * travel * (3 - 2 * travel);
+  const beamShape = cantileverDisplacementShape(travel);
   const supportLockShape = load.leverArm > 0.001 ? beamShape : 1;
-  const loadDistance = distance(sample.point, load.face.center);
-  const pathDistance = distancePointToSegment(sample.point, load.nearestSupport.center, load.face.center);
-  const fiberDistance = distancePointToLine(sample.point, load.nearestSupport.center, spanDirection);
-  const fiberRadius = Math.max(estimatedCrossSectionRadius(analysisMesh, load.nearestSupport.center, spanDirection), 0.001);
-  const fiber = clamp(fiberDistance / fiberRadius, 0, 1);
-  return forceScale * supportLockShape * (
-    0.004 +
-    (0.14 + 0.11 * momentScale) * beamShape +
-    0.018 * gaussian(loadDistance, spanLength * 0.18) +
-    0.012 * gaussian(pathDistance, spanLength * 0.18) * travel +
-    0.012 * fiber * beamShape
-  );
+  const tipDisplacement = forceScale * (0.162 + 0.11 * momentScale);
+  return supportLockShape * tipDisplacement;
 }
 
 function loadEquivalentForce(load: Load, face: FaceModel): number {

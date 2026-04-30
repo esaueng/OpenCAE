@@ -1467,6 +1467,7 @@ function AnalysisResultModel({
         showDeformed={showDeformed}
         resultPlaybackPlaying={resultPlaybackPlaying}
         stressExaggeration={stressExaggeration}
+        resultFields={resultFields}
         deformationScale={deformationScale}
         resultPlaybackFrameController={resultPlaybackFrameController}
         loadMarkers={loadMarkers}
@@ -1500,6 +1501,7 @@ function UploadedResultSolid({
   showDeformed,
   resultPlaybackPlaying,
   stressExaggeration,
+  resultFields,
   deformationScale,
   resultPlaybackFrameController,
   loadMarkers,
@@ -1513,6 +1515,7 @@ function UploadedResultSolid({
   showDeformed: boolean;
   resultPlaybackPlaying: boolean;
   stressExaggeration: number;
+  resultFields: ResultField[];
   deformationScale?: number;
   resultPlaybackFrameController?: ResultPlaybackFrameController;
   loadMarkers: ViewerLoadMarker[];
@@ -1529,6 +1532,7 @@ function UploadedResultSolid({
         showDeformed={showDeformed}
         resultPlaybackPlaying={resultPlaybackPlaying}
         stressExaggeration={stressExaggeration}
+        resultFields={resultFields}
         deformationScale={deformationScale}
         resultPlaybackFrameController={resultPlaybackFrameController}
         loadMarkers={loadMarkers}
@@ -1548,6 +1552,7 @@ function UploadedResultSolid({
         showDeformed={showDeformed}
         resultPlaybackPlaying={resultPlaybackPlaying}
         stressExaggeration={stressExaggeration}
+        resultFields={resultFields}
         deformationScale={deformationScale}
         resultPlaybackFrameController={resultPlaybackFrameController}
         loadMarkers={loadMarkers}
@@ -1570,6 +1575,7 @@ function UploadedNativeCadResultModel({
   showDeformed,
   resultPlaybackPlaying,
   stressExaggeration,
+  resultFields,
   deformationScale,
   resultPlaybackFrameController,
   loadMarkers,
@@ -1583,6 +1589,7 @@ function UploadedNativeCadResultModel({
   showDeformed: boolean;
   resultPlaybackPlaying: boolean;
   stressExaggeration: number;
+  resultFields: ResultField[];
   deformationScale?: number;
   resultPlaybackFrameController?: ResultPlaybackFrameController;
   loadMarkers: ViewerLoadMarker[];
@@ -1633,9 +1640,9 @@ function UploadedNativeCadResultModel({
     if (preview.status !== "ready" || !preview.sourceObject) return null;
     const object = cloneResultPreviewObject(preview.sourceObject);
     const outline = showDeformed && !lightweightResultPlayback ? createUndeformedResultOutlineObject(object) : undefined;
-    colorizeResultObject(object, "uploaded", resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale, supportMarkers);
+    colorizeResultObject(object, "uploaded", resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale, supportMarkers, resultFields);
     return { object, outline };
-  }, [deformationScale, lightweightResultPlayback, loadMarkers, preview.sourceObject, preview.status, resultMode, samples, showDeformed, stressExaggeration, supportMarkers]);
+  }, [deformationScale, lightweightResultPlayback, loadMarkers, preview.sourceObject, preview.status, resultFields, resultMode, samples, showDeformed, stressExaggeration, supportMarkers]);
 
   if (preview.status === "loading") {
     return (
@@ -1665,6 +1672,7 @@ function UploadedStlResultModel({
   showDeformed,
   resultPlaybackPlaying,
   stressExaggeration,
+  resultFields,
   deformationScale,
   resultPlaybackFrameController,
   loadMarkers,
@@ -1676,6 +1684,7 @@ function UploadedStlResultModel({
   showDeformed: boolean;
   resultPlaybackPlaying: boolean;
   stressExaggeration: number;
+  resultFields: ResultField[];
   deformationScale?: number;
   resultPlaybackFrameController?: ResultPlaybackFrameController;
   loadMarkers: ViewerLoadMarker[];
@@ -1685,8 +1694,8 @@ function UploadedStlResultModel({
   const outlineGeometry = useMemo(() => normalizedStlGeometryFromBuffer(base64ToArrayBuffer(displayModel.visualMesh?.contentBase64 ?? "")), [displayModel.visualMesh?.contentBase64]);
   const geometry = useMemo(() => {
     const parsed = normalizedStlGeometryFromBuffer(base64ToArrayBuffer(displayModel.visualMesh?.contentBase64 ?? ""));
-    return colorizeResultGeometry(parsed, "uploaded", resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale, undefined, undefined, supportMarkers);
-  }, [deformationScale, displayModel.visualMesh?.contentBase64, loadMarkers, resultMode, samples, showDeformed, stressExaggeration, supportMarkers]);
+    return colorizeResultGeometry(parsed, "uploaded", resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale, undefined, undefined, supportMarkers, resultFields);
+  }, [deformationScale, displayModel.visualMesh?.contentBase64, loadMarkers, resultFields, resultMode, samples, showDeformed, stressExaggeration, supportMarkers]);
   usePackedPlaybackGeometry(geometry, {
     kind: "uploaded",
     resultMode,
@@ -1823,6 +1832,10 @@ function SampleResultSolid({
     [deformationScale, kind, loadMarkers, resultMode, resultFields, samples, showDeformed, stressExaggeration, supportMarkers]
   );
   const beamPayloadGeometry = useMemo(() => createBeamPayloadGeometry(), []);
+  const beamPayloadOffset = useMemo(
+    () => resultPayloadOffsetForFields(BEAM_PAYLOAD_CENTER, beamGeometry, resultFields, showDeformed, deformationScale ?? 1),
+    [beamGeometry, deformationScale, resultFields, showDeformed]
+  );
   const cantileverGeometry = useMemo(
     () => colorizeSampleResultGeometry(new THREE.BoxGeometry(3.8, 0.5, 0.72, 40, 8, 8), kind, resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale, supportMarkers, resultFields),
     [deformationScale, kind, loadMarkers, resultMode, resultFields, samples, showDeformed, stressExaggeration, supportMarkers]
@@ -1864,7 +1877,7 @@ function SampleResultSolid({
           <meshStandardMaterial vertexColors metalness={0.18} roughness={0.52} side={THREE.DoubleSide} />
           {!resultPlaybackPlaying && <Edges color="#43556a" threshold={18} />}
         </mesh>
-        <mesh geometry={beamPayloadGeometry}>
+        <mesh geometry={beamPayloadGeometry} position={beamPayloadOffset}>
           <meshStandardMaterial color={RESULT_PAYLOAD_MATERIAL_COLOR} metalness={0.12} roughness={0.58} />
           {!resultPlaybackPlaying && <Edges color="#596472" threshold={18} />}
         </mesh>
@@ -1954,13 +1967,15 @@ export function applyResultFrameToGeometry({
   fields,
   resultMode,
   showDeformed,
-  deformationScale
+  deformationScale,
+  coordinateTransform
 }: {
   geometry: THREE.BufferGeometry;
   fields: ResultField[];
   resultMode: ResultMode;
   showDeformed: boolean;
   deformationScale: number;
+  coordinateTransform?: ResultCoordinateTransform;
 }) {
   const position = geometry.getAttribute("position");
   if (!(position instanceof THREE.BufferAttribute)) return geometry;
@@ -1974,33 +1989,26 @@ export function applyResultFrameToGeometry({
   const displacementField = fields.find((field) => field.type === "displacement" && field.samples?.some((sample) => sample.vector));
   logResultFieldDiagnostics(scalarField, resultMode);
   const scalarValues = scalarField?.values ?? [];
-  const modelExtent = basePositionBounds(basePositions).getSize(new THREE.Vector3()).length();
-  const displacementMax = maxDisplacementMagnitude(displacementField);
-  const targetFraction = 0.08;
-  const requestedScale = Math.max(0, deformationScale);
-  const uncappedVisualScale = displacementMax > 0 ? (modelExtent * targetFraction * requestedScale) / displacementMax : 0;
-  const maxVisual = modelExtent * 0.25;
-  const visualScale = Math.min(uncappedVisualScale, maxVisual / Math.max(displacementMax, 1e-12));
+  const modelExtent = (coordinateTransform?.bounds ?? basePositionBounds(basePositions)).getSize(new THREE.Vector3()).length();
+  const visualScale = visualScaleForDisplacementField(modelExtent, displacementField, deformationScale);
   const color = new THREE.Color();
 
   for (let index = 0; index < position.count; index += 1) {
     const offset = index * 3;
     const point = new THREE.Vector3(basePositions[offset] ?? 0, basePositions[offset + 1] ?? 0, basePositions[offset + 2] ?? 0);
+    const resultPoint = coordinateTransform?.toResultPoint(point) ?? point;
     const scalar = scalarField?.samples?.length
-      ? interpolateResultSampleValue(point, scalarField.samples, scalarField.values[index] ?? 0)
+      ? interpolateResultSampleValue(resultPoint, scalarField.samples, scalarField.values[index] ?? 0)
       : scalarValues[index] ?? 0;
     const normalized = scalarField ? normalizeValueForRender(scalar, scalarField.min, scalarField.max) : 0;
     color.copy(resultColorForValue(resultMode, normalized));
     colorAttribute.setXYZ(index, color.r, color.g, color.b);
 
     if (showDeformed && displacementField?.samples?.length && visualScale > 0) {
-      const displacement = interpolateResultSampleVector(point, displacementField.samples);
-      position.setXYZ(
-        index,
-        point.x + displacement.x * visualScale,
-        point.y + displacement.y * visualScale,
-        point.z + displacement.z * visualScale
-      );
+      const displacement = new THREE.Vector3(...interpolateDisplacementAtPoint([resultPoint.x, resultPoint.y, resultPoint.z], displacementField));
+      const deformedResultPoint = resultPoint.clone().addScaledVector(displacement, visualScale);
+      const localDeformed = coordinateTransform?.fromResultPoint(deformedResultPoint) ?? deformedResultPoint;
+      position.setXYZ(index, localDeformed.x, localDeformed.y, localDeformed.z);
     } else {
       position.setXYZ(index, point.x, point.y, point.z);
     }
@@ -2011,6 +2019,44 @@ export function applyResultFrameToGeometry({
   geometry.computeVertexNormals();
   geometry.computeBoundingSphere();
   return geometry;
+}
+
+export function interpolateDisplacementAtPoint(
+  point: [number, number, number],
+  displacementField: ResultField
+): [number, number, number] {
+  if (displacementField.type !== "displacement") return [0, 0, 0];
+  const samples = displacementField.samples?.filter((sample) => (
+    sample.point.every(Number.isFinite) &&
+    Boolean(sample.vector?.every(Number.isFinite))
+  ));
+  if (!samples?.length) return [0, 0, 0];
+
+  const exact = samples.find((sample) => squaredDistanceArrays(point, sample.point) <= 1e-18);
+  if (exact?.vector) return exact.vector;
+
+  const smoothInterpolator = smoothVectorInterpolatorForSamples(samples);
+  if (smoothInterpolator) return smoothInterpolator.interpolate(new THREE.Vector3(...point)).toArray() as [number, number, number];
+
+  const neighbors = nearestResultSamples(new THREE.Vector3(...point), samples, (sample) => Boolean(sample.vector?.every(Number.isFinite)));
+  if (!neighbors.length) return [0, 0, 0];
+  const vector = new THREE.Vector3();
+  let totalWeight = 0;
+  for (const neighbor of neighbors) {
+    if (!neighbor.sample.vector) continue;
+    const weight = 1 / Math.max(neighbor.distanceSq, 1e-18);
+    vector.addScaledVector(new THREE.Vector3(...neighbor.sample.vector), weight);
+    totalWeight += weight;
+  }
+  return (totalWeight > 0 ? vector.multiplyScalar(1 / totalWeight) : vector).toArray() as [number, number, number];
+}
+
+function visualScaleForDisplacementField(modelExtent: number, displacementField: ResultField | undefined, deformationScale: number): number {
+  const displacementMax = maxDisplacementMagnitude(displacementField);
+  const requestedScale = Math.max(0, deformationScale);
+  const uncappedVisualScale = displacementMax > 0 ? (modelExtent * 0.08 * requestedScale) / displacementMax : 0;
+  const maxVisual = modelExtent * 0.25;
+  return Math.min(uncappedVisualScale, maxVisual / Math.max(displacementMax, 1e-12));
 }
 
 function colorizeResultGeometry(
@@ -2036,6 +2082,16 @@ function colorizeResultGeometry(
       resultMode,
       showDeformed,
       deformationScale: deformationScale ?? 1
+    });
+  }
+  if (resultFields.length && coordinateTransform) {
+    return applyResultFrameToGeometry({
+      geometry,
+      fields: resultFields,
+      resultMode,
+      showDeformed,
+      deformationScale: deformationScale ?? 1,
+      coordinateTransform
     });
   }
   const basePositions = basePositionArrayForGeometry(geometry, positions);
@@ -2134,12 +2190,12 @@ function interpolateResultSampleValue(point: THREE.Vector3, samples: NonNullable
 }
 
 function interpolateResultSampleVector(point: THREE.Vector3, samples: NonNullable<ResultField["samples"]>): THREE.Vector3 {
-  const smoothInterpolator = smoothVectorInterpolatorForSamples(samples);
-  if (smoothInterpolator) return smoothInterpolator.interpolate(point);
   const neighbors = nearestResultSamples(point, samples, (sample) => Boolean(sample.vector?.every(Number.isFinite)));
   if (!neighbors.length) return new THREE.Vector3();
   const exact = neighbors.find((entry) => entry.distanceSq <= 1e-18);
   if (exact?.sample.vector) return new THREE.Vector3(...exact.sample.vector);
+  const smoothInterpolator = smoothVectorInterpolatorForSamples(samples);
+  if (smoothInterpolator) return smoothInterpolator.interpolate(point);
   const vector = new THREE.Vector3();
   let totalWeight = 0;
   for (const neighbor of neighbors) {
@@ -2149,6 +2205,13 @@ function interpolateResultSampleVector(point: THREE.Vector3, samples: NonNullabl
     totalWeight += weight;
   }
   return totalWeight > 0 ? vector.multiplyScalar(1 / totalWeight) : vector;
+}
+
+function squaredDistanceArrays(left: [number, number, number], right: [number, number, number]) {
+  const dx = left[0] - right[0];
+  const dy = left[1] - right[1];
+  const dz = left[2] - right[2];
+  return dx * dx + dy * dy + dz * dz;
 }
 
 type SmoothVectorInterpolator = {
@@ -2517,11 +2580,13 @@ export function colorizeResultObject(
   samples: FaceResultSample[],
   loadMarkers: ViewerLoadMarker[],
   deformationScale?: number,
-  supportMarkers: ViewerSupportMarker[] = []
+  supportMarkers: ViewerSupportMarker[] = [],
+  resultFields: ResultField[] = []
 ) {
   object.updateMatrixWorld(true);
   const excludedPayloadObjects = resultPayloadObjectRefs(loadMarkers);
   const resultMeshes: THREE.Mesh<THREE.BufferGeometry>[] = [];
+  const payloadMeshes: THREE.Mesh<THREE.BufferGeometry>[] = [];
   object.traverse((child) => {
     if (!(child instanceof THREE.Mesh) || !(child.geometry instanceof THREE.BufferGeometry)) return;
     if (isResultPayloadObject(child, excludedPayloadObjects)) {
@@ -2532,6 +2597,7 @@ export function colorizeResultObject(
         roughness: 0.58,
         side: THREE.DoubleSide
       });
+      payloadMeshes.push(child as THREE.Mesh<THREE.BufferGeometry>);
       return;
     }
     child.visible = true;
@@ -2547,7 +2613,7 @@ export function colorizeResultObject(
       bounds,
       toResultPoint: (point) => point.clone().applyMatrix4(toResultMatrix),
       fromResultPoint: (point) => point.clone().applyMatrix4(fromResultMatrix)
-    }, valueRange, supportMarkers);
+    }, valueRange, supportMarkers, resultFields);
     child.material = new THREE.MeshStandardMaterial({
       vertexColors: true,
       metalness: 0.18,
@@ -2555,7 +2621,82 @@ export function colorizeResultObject(
       side: THREE.DoubleSide
     });
   }
+  const displacementField = displacementFieldForResults(resultFields);
+  const visualScale = showDeformed
+    ? visualScaleForDisplacementField((bounds?.getSize(new THREE.Vector3()) ?? new THREE.Vector3(1, 1, 1)).length(), displacementField, deformationScale ?? 1)
+    : 0;
+  for (const payloadMesh of payloadMeshes) {
+    translatePayloadObjectForDeformedResult(payloadMesh, loadMarkers, displacementField, visualScale, samples);
+  }
   return object;
+}
+
+function translatePayloadObjectForDeformedResult(
+  object: THREE.Object3D,
+  loadMarkers: ViewerLoadMarker[],
+  displacementField: ResultField | undefined,
+  visualScale: number,
+  samples: FaceResultSample[]
+) {
+  const basePosition = baseObjectPositionForResult(object);
+  object.position.copy(basePosition);
+  if (!displacementField || visualScale <= 0) return;
+  const attachment = payloadAttachmentPoint(object, loadMarkers, samples);
+  if (!attachment) return;
+  const displacement = new THREE.Vector3(...interpolateDisplacementAtPoint(attachment, displacementField)).multiplyScalar(visualScale);
+  if (displacement.lengthSq() <= 1e-18) return;
+  object.position.add(parentLocalVector(object, displacement));
+  object.updateMatrixWorld(true);
+}
+
+function baseObjectPositionForResult(object: THREE.Object3D): THREE.Vector3 {
+  const existing = object.userData.opencaeResultBasePosition;
+  if (existing instanceof THREE.Vector3) return existing;
+  const base = object.position.clone();
+  object.userData.opencaeResultBasePosition = base;
+  return base;
+}
+
+function payloadAttachmentPoint(object: THREE.Object3D, loadMarkers: ViewerLoadMarker[], samples: FaceResultSample[]): [number, number, number] | null {
+  const marker = loadMarkers.find((candidate) => candidate.payloadObject && isResultPayloadObject(object, resultPayloadObjectRefs([candidate])));
+  const point = marker?.payloadObject?.center ?? marker?.point ?? (marker ? markerCenter(marker.faceId, samples)?.toArray() : undefined);
+  return point && point.every(Number.isFinite) ? point as [number, number, number] : null;
+}
+
+function parentLocalVector(object: THREE.Object3D, vector: THREE.Vector3): THREE.Vector3 {
+  const parent = object.parent;
+  if (!parent) return vector;
+  parent.updateMatrixWorld(true);
+  const localOrigin = parent.worldToLocal(new THREE.Vector3(0, 0, 0));
+  const localTip = parent.worldToLocal(vector.clone());
+  return localTip.sub(localOrigin);
+}
+
+function resultPayloadOffsetForFields(
+  attachmentPoint: [number, number, number],
+  geometry: THREE.BufferGeometry,
+  resultFields: ResultField[],
+  showDeformed: boolean,
+  deformationScale: number
+): [number, number, number] {
+  if (!showDeformed) return [0, 0, 0];
+  const displacementField = displacementFieldForResults(resultFields);
+  if (!displacementField) return [0, 0, 0];
+  const position = geometry.getAttribute("position");
+  if (!(position instanceof THREE.BufferAttribute)) return [0, 0, 0];
+  const modelExtent = basePositionBounds(basePositionArrayForGeometry(geometry, position)).getSize(new THREE.Vector3()).length();
+  const visualScale = visualScaleForDisplacementField(modelExtent, displacementField, deformationScale);
+  if (visualScale <= 0) return [0, 0, 0];
+  const displacement = interpolateDisplacementAtPoint(attachmentPoint, displacementField);
+  return [
+    displacement[0] * visualScale,
+    displacement[1] * visualScale,
+    displacement[2] * visualScale
+  ];
+}
+
+function displacementFieldForResults(fields: ResultField[]): ResultField | undefined {
+  return fields.find((field) => field.type === "displacement" && field.samples?.some((sample) => sample.vector?.every(Number.isFinite)));
 }
 
 type ResultPayloadObjectRefs = {
@@ -2717,7 +2858,7 @@ function deformedPointFromSupportToLoad(
     const span = loadCenter.clone().sub(supportCenter);
     const spanLengthSq = Math.max(span.lengthSq(), 1e-9);
     const travel = Math.max(0, Math.min(1, point.clone().sub(supportCenter).dot(span) / spanLengthSq));
-    const beamShape = travel * travel * (3 - 2 * travel);
+    const beamShape = cantileverDisplacementShape(travel);
     const magnitude = usesResultDeformationScale ? 1 : Math.max(0.35, marker.value / 500);
     deformation.addScaledVector(markerDirectionInModelSpace(marker), beamShape * scale * magnitude * deformationScale / Math.max(loadMarkers.length, 1));
   }
@@ -2751,7 +2892,7 @@ function deformedUploadedPoint(
       const span = loadCenter.clone().sub(supportCenter);
       const spanLengthSq = Math.max(span.lengthSq(), 1e-9);
       const travel = Math.max(0, Math.min(1, point.clone().sub(supportCenter).dot(span) / spanLengthSq));
-      const beamShape = travel * travel * (3 - 2 * travel);
+      const beamShape = cantileverDisplacementShape(travel);
       deformation.addScaledVector(markerDirectionInModelSpace(marker), beamShape * scale / Math.max(loadMarkers.length, 1));
     }
     return next.add(deformation);
@@ -2783,16 +2924,21 @@ function resultantLoadDirection(loadMarkers: ViewerLoadMarker[]) {
   return direction.normalize();
 }
 
+function cantileverDisplacementShape(travel: number) {
+  const s = Math.max(0, Math.min(1, travel));
+  return 0.5 * s * s * (3 - s);
+}
+
 function deformedPointForKind(kind: SampleModelKind, point: THREE.Vector3, stressExaggeration: number, deformationScale: number) {
   const next = point.clone();
   const scale = (0.08 + Math.max(0, stressExaggeration - 1) * 0.12) * deformationScale;
   if (kind === "plate") {
     const span = Math.max(0, Math.min(1, (point.x + 1.9) / 3.8));
-    next.y -= scale * 0.9 * span * span;
+    next.y -= scale * 0.9 * cantileverDisplacementShape(span);
     next.z += scale * 0.22 * span * (point.z >= 0 ? 1 : -1);
   } else if (kind === "cantilever") {
     const span = Math.max(0, Math.min(1, (point.x + 1.9) / 3.8));
-    next.y -= scale * 1.15 * span * span;
+    next.y -= scale * 1.15 * cantileverDisplacementShape(span);
     next.z += scale * 0.28 * span * (point.z >= 0 ? 1 : -1);
   }
   return next;
