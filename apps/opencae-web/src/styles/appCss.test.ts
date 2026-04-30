@@ -87,6 +87,21 @@ describe("app CSS", () => {
     expect(localRuntime).toMatch(/color:\s*inherit/);
   });
 
+  test("centers and animates the Ko-fi topbar action", () => {
+    const topbar = cssRule(".topbar");
+    const donateAction = cssRule(".donate-action");
+    const donateIntro = cssRule(".donate-action-intro");
+
+    expect(topbar).toMatch(/position:\s*relative/);
+    expect(donateAction).toMatch(/position:\s*absolute/);
+    expect(donateAction).toMatch(/left:\s*50%/);
+    expect(donateAction).toMatch(/transform:\s*translateX\(-50%\)/);
+    expect(donateIntro).toMatch(/animation:\s*donate-pop-in/);
+    expect(css).toContain("@keyframes donate-pop-in");
+    expect(css).toContain("@keyframes donate-shimmer");
+    expect(css).toContain("@media (prefers-reduced-motion: reduce)");
+  });
+
   test("only underlines start screen footer links on hover", () => {
     const startFooterLinks = cssRule(".start-footer a");
     const startFooterLinkHover = cssRule(".start-footer a:hover,\n.start-footer a:focus-visible");
