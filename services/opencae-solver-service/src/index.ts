@@ -201,8 +201,12 @@ export function solveStudy(study: Study, runId: string, analysisMeshInput?: Anal
   const stressValues = faces.map((face) => round(stressAtFace(face, loads, faces) * response.stressScale, 1));
   const displacementValues = faces.map((face) => round(displacementAtFace(face, loads, faces) * response.displacementScale, 4));
   const safetyValues = stressValues.map((stress) => round(Math.max(0.05, response.yieldMpa / Math.max(stress, 0.001)), 2));
+  const faceIndexBySelectionId = new Map(faces.map((face, index) => [face.selectionId, index]));
   const stressSamples = analysisMesh.samples.map((sample) => {
-    const value = stressAtSample(sample, loads, faces, analysisMesh) * response.stressScale;
+    const faceIndex = sample.sourceId ? faceIndexBySelectionId.get(sample.sourceId) : undefined;
+    const value = typeof faceIndex === "number"
+      ? stressValues[faceIndex] ?? stressAtSample(sample, loads, faces, analysisMesh) * response.stressScale
+      : stressAtSample(sample, loads, faces, analysisMesh) * response.stressScale;
     return sampleResult(sample, value, 2, { source: "local_detailed", vonMisesStressPa: round(value * 1_000_000, 1) });
   });
   const displacementSamples = analysisMesh.samples.map((sample) => sampleResult(sample, displacementAtSample(sample, loads, faces, analysisMesh) * response.displacementScale, 4));
@@ -813,6 +817,8 @@ function faceGeometry(entityId: string, label: string, index: number, count: num
 const knownFaces: Array<{ match: string; center: Vec3; normal: Vec3; baselineStress: number }> = [
   ...bracketDisplayModel.faces.map((face) => ({ match: face.id.toLowerCase(), center: face.center, normal: normalize(face.normal), baselineStress: face.stressValue })),
   { match: "face-base-left fixed end face", center: [-1.9, 0.18, 0], normal: [-1, 0, 0], baselineStress: 132 },
+  { match: "face-load-top end payload mass", center: [1.48, 0.49, 0], normal: [0, 1, 0], baselineStress: 118 },
+  { match: "face-base-bottom beam body", center: [0, 0.14, 0], normal: [0, 0, 1], baselineStress: 58 },
   { match: "face-load-top free end load face", center: [1.9, 0.18, 0], normal: [1, 0, 0], baselineStress: 96 },
   { match: "face-web-front top beam face", center: [0, 0.42, 0], normal: [0, 1, 0], baselineStress: 74 },
   { match: "face-base-bottom beam bottom face", center: [0, -0.08, 0], normal: [0, -1, 0], baselineStress: 46 },
