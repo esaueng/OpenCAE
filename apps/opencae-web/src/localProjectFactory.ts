@@ -185,7 +185,7 @@ function sampleLoadsFor(sample: SampleModelId, templateLoads: Load[], displayMod
         parameters: {
           value: volumeM3 * 2700,
           units: "kg",
-          direction: [0, 0, -1],
+          direction: [0, -1, 0],
           applicationPoint: center,
           payloadMaterialId: "payload-aluminum-6061",
           payloadVolumeM3: volumeM3,
