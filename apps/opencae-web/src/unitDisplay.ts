@@ -93,7 +93,8 @@ export function resultFieldForUnits(field: ResultField, unitSystem: UnitSystem):
     units: convertedMax.units,
     samples: field.samples?.map((sample) => ({
       ...sample,
-      value: roundDisplayValue(converter(sample.value).value)
+      value: roundDisplayValue(converter(sample.value).value),
+      ...(sample.vector ? { vector: sample.vector.map((component) => roundDisplayValue(converter(component).value)) as [number, number, number] } : {})
     }))
   };
 }

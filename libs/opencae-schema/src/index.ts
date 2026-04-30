@@ -97,6 +97,7 @@ export const ResultSampleSchema = z.object({
   point: Vec3Schema,
   normal: Vec3Schema,
   value: z.number(),
+  vector: Vec3Schema.optional(),
   nodeId: z.string().optional(),
   elementId: z.string().optional(),
   source: z.string().optional(),

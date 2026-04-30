@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { describe, expect, test, vi } from "vitest";
-import { VIEWER_CREDIT_URL, VIEWER_GIZMO_ALIGNMENT, axisLabelToViewAxis, cameraDistanceForBounds, cameraViewForAxis, cloneResultPreviewObject, colorizeResultObject, colorizeSampleResultGeometry, createUndeformedResultOutlineObject, defaultHomeViewTarget, deformationScaleForResultFields, displayedLegendTickLabels, legendMeshStats, legendTickLabels, payloadHighlightObjectId, printLayerVisualizationForBounds, resultProbesForKind, resultValueForPoint, rotatedCameraOrbit, shouldShowDimensionOverlay, shouldShowModelHitLabel, shouldShowResultMarkers, shouldShowUndeformedResultOutline, updatePackedSamples, viewerCameraResetPose } from "./CadViewer";
+import { VIEWER_CREDIT_URL, VIEWER_GIZMO_ALIGNMENT, applyResultFrameToGeometry, axisLabelToViewAxis, cameraDistanceForBounds, cameraViewForAxis, cloneResultPreviewObject, colorizeResultObject, colorizeSampleResultGeometry, createUndeformedResultOutlineObject, defaultHomeViewTarget, deformationScaleForResultFields, displayedLegendTickLabels, legendMeshStats, legendTickLabels, payloadHighlightObjectId, printLayerVisualizationForBounds, resultProbesForKind, resultValueForPoint, rotatedCameraOrbit, shouldShowDimensionOverlay, shouldShowModelHitLabel, shouldShowResultMarkers, shouldShowUndeformedResultOutline, updatePackedSamples, viewerCameraResetPose } from "./CadViewer";
 import type { FaceResultSample } from "../resultFields";
 import type { DisplayFace, ResultField } from "@opencae/schema";
 import type { PackedPreparedPlaybackCache } from "../resultPlaybackCache";
@@ -344,6 +344,7 @@ describe("CadViewer result coloring", () => {
       sampleValues: new Float32Array([10, 80]),
       samplePoints: new Float32Array([0, 0, 0, 1, 0, 0]),
       sampleNormals: new Float32Array([0, 1, 0, 0, 1, 0]),
+      sampleVectors: new Float32Array([0, 0, 0, 0, 0, 0]),
       actualBytes: 0
     };
 
@@ -483,7 +484,7 @@ describe("CadViewer result coloring", () => {
     expect(Array.from((mesh.geometry as THREE.BufferGeometry).getAttribute("position").array)).toEqual(originalPositions);
   });
 
-  test("uses active frame displacement values rather than global dynamic range for deformation scale", () => {
+  test("uses nonzero global displacement range as the auto-scale multiplier", () => {
     const zeroFrame: ResultField = {
       id: "displacement-0",
       runId: "run-1",
@@ -502,8 +503,77 @@ describe("CadViewer result coloring", () => {
       samples: [{ point: [0, 0, 0], normal: [0, 1, 0], value: 10 }]
     };
 
-    expect(deformationScaleForResultFields([zeroFrame])).toBe(0);
-    expect(deformationScaleForResultFields([peakFrame])).toBeGreaterThan(0);
+    expect(deformationScaleForResultFields([{ ...zeroFrame, max: 0 }])).toBe(0);
+    expect(deformationScaleForResultFields([zeroFrame])).toBe(1);
+    expect(deformationScaleForResultFields([peakFrame])).toBe(1);
+  });
+
+  test("applies displacement vectors to geometry positions when deformed results are enabled", () => {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.Float32BufferAttribute([0, 0, 0, 1, 0, 0], 3));
+    const fields: ResultField[] = [
+      {
+        id: "stress-1",
+        runId: "run",
+        type: "stress",
+        location: "node",
+        values: [0, 10],
+        min: 0,
+        max: 10,
+        units: "MPa",
+        samples: [
+          { point: [0, 0, 0], normal: [0, 1, 0], value: 0 },
+          { point: [1, 0, 0], normal: [0, 1, 0], value: 10 }
+        ]
+      },
+      {
+        id: "displacement-1",
+        runId: "run",
+        type: "displacement",
+        location: "node",
+        values: [0, 0.006],
+        min: 0,
+        max: 0.006,
+        units: "mm",
+        samples: [
+          { point: [0, 0, 0], normal: [0, 1, 0], value: 0, vector: [0, 0, 0] },
+          { point: [1, 0, 0], normal: [0, 1, 0], value: 0.006, vector: [0, -0.006, 0] }
+        ]
+      }
+    ];
+
+    applyResultFrameToGeometry({ geometry, fields, resultMode: "stress", showDeformed: true, deformationScale: 1 });
+
+    const positions = geometry.getAttribute("position") as THREE.BufferAttribute;
+    expect(positions.getY(0)).toBeCloseTo(0);
+    expect(positions.getY(1)).toBeLessThan(-0.05);
+    expect(positions.version).toBeGreaterThan(0);
+  });
+
+  test("applies changed scalar frames to geometry colors", () => {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.Float32BufferAttribute([0, 0, 0, 1, 0, 0], 3));
+    const frame = (value: number): ResultField[] => [{
+      id: `stress-${value}`,
+      runId: "run",
+      type: "stress",
+      location: "node",
+      values: [value, value],
+      min: 0,
+      max: 10,
+      units: "MPa",
+      samples: [
+        { point: [0, 0, 0], normal: [0, 1, 0], value },
+        { point: [1, 0, 0], normal: [0, 1, 0], value }
+      ]
+    }];
+
+    applyResultFrameToGeometry({ geometry, fields: frame(0), resultMode: "stress", showDeformed: false, deformationScale: 1 });
+    const lowColors = Array.from(geometry.getAttribute("color").array);
+    applyResultFrameToGeometry({ geometry, fields: frame(10), resultMode: "stress", showDeformed: false, deformationScale: 1 });
+    const highColors = Array.from(geometry.getAttribute("color").array);
+
+    expect(highColors).not.toEqual(lowColors);
   });
 
   test("scales support-to-load deformation by the active dynamic displacement", () => {
