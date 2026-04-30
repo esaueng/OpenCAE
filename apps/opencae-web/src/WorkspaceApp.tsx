@@ -22,8 +22,8 @@ import {
 } from "./loadPreview";
 import { resetDisplayModelOrientation, type RotationAxis } from "./modelOrientation";
 import { buildLocalProjectFile, suggestedProjectFilename, type LocalResultBundle } from "./projectFile";
-import { buildAutosavedWorkspace, readAutosavedWorkspace, scheduleAutosavedWorkspaceWrite, type ThemeMode } from "./appPersistence";
-import type { AutosavedWorkspace } from "./appPersistence";
+import { buildAutosavedWorkspace, buildAutosavedWorkspaceUiSnapshot, readAutosavedWorkspace, scheduleAutosavedUiSnapshotWrite, scheduleAutosavedWorkspaceWrite, type ThemeMode } from "./appPersistence";
+import type { AutosavedWorkspace, WorkspaceUiSnapshot } from "./appPersistence";
 import {
   canNavigateToStep,
   printLayerOrientationForViewer,
@@ -73,6 +73,8 @@ const seededSummary: ResultSummary = {
 const MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.005;
 const PLAYBACK_UI_COMMIT_INTERVAL_MS = 250;
 const PLAYBACK_CACHE_PREP_FPS = 30;
+const AUTOSAVE_UI_WRITE_DELAY_MS = 650;
+const AUTOSAVE_HEAVY_WRITE_DELAY_MS = 5000;
 
 type ResultPlaybackCacheState =
   | { status: "idle" }
@@ -492,9 +494,68 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     return () => window.removeEventListener("keydown", handleShortcut);
   }, [displayModel, project, undoStack, redoStack]);
 
+  const autosaveUiSnapshot = useMemo<WorkspaceUiSnapshot>(() => ({
+    activeStep,
+    homeRequested,
+    selectedFaceId,
+    selectedLoadPoint,
+    selectedPayloadObject,
+    viewMode,
+    themeMode,
+    resultMode,
+    showDeformed,
+    showDimensions,
+    stressExaggeration,
+    draftLoadType,
+    draftLoadValue,
+    draftLoadDirection,
+    sampleModel,
+    sampleAnalysisType,
+    activeRunId,
+    completedRunId,
+    runProgress,
+    undoStack,
+    redoStack,
+    status,
+    logs
+  }), [
+    activeRunId,
+    activeStep,
+    completedRunId,
+    draftLoadDirection,
+    draftLoadType,
+    draftLoadValue,
+    homeRequested,
+    logs,
+    redoStack,
+    resultMode,
+    runProgress,
+    sampleAnalysisType,
+    sampleModel,
+    selectedFaceId,
+    selectedLoadPoint,
+    selectedPayloadObject,
+    showDeformed,
+    showDimensions,
+    status,
+    stressExaggeration,
+    themeMode,
+    undoStack,
+    viewMode
+  ]);
+
   useEffect(() => {
     if (!project || !displayModel) return;
-    return scheduleAutosavedWorkspaceWrite(buildAutosavedWorkspace({
+    return scheduleAutosavedUiSnapshotWrite(
+      () => buildAutosavedWorkspaceUiSnapshot(autosaveUiSnapshot),
+      undefined,
+      AUTOSAVE_UI_WRITE_DELAY_MS
+    );
+  }, [autosaveUiSnapshot, displayModel, project]);
+
+  useEffect(() => {
+    if (!project || !displayModel) return;
+    return scheduleAutosavedWorkspaceWrite(() => buildAutosavedWorkspace({
       project,
       displayModel,
       results: resultFields.length ? {
@@ -503,32 +564,8 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         summary: resultSummary,
         fields: resultFields
       } : undefined,
-      ui: {
-        activeStep,
-        homeRequested,
-        selectedFaceId,
-        selectedLoadPoint,
-        selectedPayloadObject,
-        viewMode,
-        themeMode,
-        resultMode,
-        showDeformed,
-        showDimensions,
-        stressExaggeration,
-        draftLoadType,
-        draftLoadValue,
-        draftLoadDirection,
-        sampleModel,
-        sampleAnalysisType,
-        activeRunId,
-        completedRunId,
-        runProgress,
-        undoStack,
-        redoStack,
-        status,
-        logs
-      }
-    }));
+      ui: autosaveUiSnapshot
+    }), undefined, AUTOSAVE_HEAVY_WRITE_DELAY_MS);
   }, [
     activeRunId,
     activeStep,
@@ -538,22 +575,18 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     draftLoadType,
     draftLoadValue,
     homeRequested,
-    logs,
     project,
     redoStack,
     resultFields,
-    resultMode,
     resultSummary,
     runProgress,
-    sampleModel,
     sampleAnalysisType,
+    sampleModel,
+    selectedFaceId,
     selectedLoadPoint,
     selectedPayloadObject,
-    selectedFaceId,
     showDeformed,
     showDimensions,
-    status,
-    stressExaggeration,
     themeMode,
     undoStack,
     viewMode
