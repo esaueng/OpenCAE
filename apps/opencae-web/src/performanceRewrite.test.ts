@@ -78,4 +78,18 @@ describe("Worker UI performance rewrite boundaries", () => {
     expect(persistenceSource).toContain("requestIdleCallback");
     expect(persistenceSource).toContain("delayMs = 650");
   });
+
+  test("keeps imported CAD edge overlays optional during result playback", () => {
+    const viewerSource = readFileSync(resolve(__dirname, "components/CadViewer.tsx"), "utf8");
+    const stepPreviewSource = readFileSync(resolve(__dirname, "stepPreview.ts"), "utf8");
+    const workerSource = readFileSync(resolve(__dirname, "workers/performanceWorker.ts"), "utf8");
+
+    expect(stepPreviewSource).toContain("includeEdges?: boolean");
+    expect(stepPreviewSource).toContain("if (includeEdges)");
+    expect(stepPreviewSource).toContain("shareMaterials?: boolean");
+    expect(viewerSource).toContain("const lightweightResultPlayback = Boolean(resultPlaybackFrameController)");
+    expect(viewerSource).toContain("stepPreviewFromBase64(contentBase64, \"#63a9e5\", { includeEdges: !lightweightResultPlayback, shareMaterials: lightweightResultPlayback })");
+    expect(viewerSource).toContain("{!lightweightResultPlayback && <Edges color=\"#43556a\" threshold={18} />}");
+    expect(workerSource).toContain("stepPreviewFromBase64(request.payload.contentBase64, request.payload.color, { includeEdges: false, shareMaterials: true })");
+  });
 });

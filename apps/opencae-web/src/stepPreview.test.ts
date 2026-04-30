@@ -65,4 +65,19 @@ describe("STEP preview helpers", () => {
     expect(meshes.map((mesh) => mesh.userData.opencaeObjectId)).toEqual(["step-object-1", "step-object-2"]);
     expect(meshes.map((mesh) => mesh.userData.opencaeObjectLabel)).toEqual(["Rod 1", "Rod 2"]);
   });
+
+  test("can skip imported STEP edge geometry for lightweight playback previews", () => {
+    const preview = normalizedStepPreviewFromMeshes([importedMesh], "#9aa7b4", { includeEdges: false });
+    const mesh = preview.object.children.find((child) => child instanceof THREE.Mesh) as THREE.Mesh | undefined;
+
+    expect(mesh?.children.some((child) => child instanceof THREE.LineSegments)).toBe(false);
+  });
+
+  test("can share imported STEP materials when selection highlighting is not needed", () => {
+    const preview = normalizedStepPreviewFromMeshes([importedMesh, secondImportedMesh], "#9aa7b4", { includeEdges: false, shareMaterials: true });
+    const meshes = preview.object.children.filter((child): child is THREE.Mesh => child instanceof THREE.Mesh);
+
+    expect(meshes).toHaveLength(2);
+    expect(meshes[0]?.material).toBe(meshes[1]?.material);
+  });
 });

@@ -1517,6 +1517,7 @@ function UploadedNativeCadResultModel({
 }) {
   const filename = displayModel.nativeCad?.filename ?? displayModel.name;
   const contentBase64 = displayModel.nativeCad?.contentBase64 ?? "";
+  const lightweightResultPlayback = Boolean(resultPlaybackFrameController);
   const [preview, setPreview] = useState<{
     status: "loading" | "ready" | "error";
     sourceObject?: THREE.Group;
@@ -1528,7 +1529,7 @@ function UploadedNativeCadResultModel({
   useEffect(() => {
     let cancelled = false;
     setPreview({ status: "loading" });
-    stepPreviewFromBase64(contentBase64, "#63a9e5")
+    stepPreviewFromBase64(contentBase64, "#63a9e5", { includeEdges: !lightweightResultPlayback, shareMaterials: lightweightResultPlayback })
       .then((nextPreview) => {
         if (cancelled) return;
         setPreview({
@@ -1545,7 +1546,7 @@ function UploadedNativeCadResultModel({
     return () => {
       cancelled = true;
     };
-  }, [contentBase64]);
+  }, [contentBase64, lightweightResultPlayback]);
 
   useEffect(() => {
     if (preview.status !== "ready" || !preview.dimensions || !preview.normalizedBounds) return;
@@ -1556,10 +1557,10 @@ function UploadedNativeCadResultModel({
   const renderedPreview = useMemo(() => {
     if (preview.status !== "ready" || !preview.sourceObject) return null;
     const object = cloneResultPreviewObject(preview.sourceObject);
-    const outline = showDeformed ? createUndeformedResultOutlineObject(object) : undefined;
+    const outline = showDeformed && !lightweightResultPlayback ? createUndeformedResultOutlineObject(object) : undefined;
     colorizeResultObject(object, "uploaded", resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale, supportMarkers);
     return { object, outline };
-  }, [deformationScale, loadMarkers, preview.sourceObject, preview.status, resultMode, samples, showDeformed, stressExaggeration, supportMarkers]);
+  }, [deformationScale, lightweightResultPlayback, loadMarkers, preview.sourceObject, preview.status, resultMode, samples, showDeformed, stressExaggeration, supportMarkers]);
 
   if (preview.status === "loading") {
     return (
@@ -1603,6 +1604,7 @@ function UploadedStlResultModel({
   loadMarkers: ViewerLoadMarker[];
   supportMarkers: ViewerSupportMarker[];
 }) {
+  const lightweightResultPlayback = Boolean(resultPlaybackFrameController);
   const outlineGeometry = useMemo(() => normalizedStlGeometryFromBuffer(base64ToArrayBuffer(displayModel.visualMesh?.contentBase64 ?? "")), [displayModel.visualMesh?.contentBase64]);
   const geometry = useMemo(() => {
     const parsed = normalizedStlGeometryFromBuffer(base64ToArrayBuffer(displayModel.visualMesh?.contentBase64 ?? ""));
@@ -1622,10 +1624,10 @@ function UploadedStlResultModel({
 
   return (
     <group>
-      {shouldShowUndeformedResultOutline(showDeformed) && <UndeformedGeometryOutline geometry={outlineGeometry} />}
+      {shouldShowUndeformedResultOutline(showDeformed) && !lightweightResultPlayback && <UndeformedGeometryOutline geometry={outlineGeometry} />}
       <mesh geometry={geometry}>
         <meshStandardMaterial vertexColors metalness={0.18} roughness={0.52} side={THREE.DoubleSide} />
-        <Edges color="#43556a" threshold={18} />
+        {!lightweightResultPlayback && <Edges color="#43556a" threshold={18} />}
       </mesh>
     </group>
   );
