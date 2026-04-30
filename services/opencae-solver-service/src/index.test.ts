@@ -288,6 +288,16 @@ describe("LocalMockComputeBackend", () => {
     expect(Math.hypot(...peakSample!.vector!)).toBeCloseTo(peakSample.value, 4);
   });
 
+  test("keeps beam demo displacement vectors smooth across each cross-section", () => {
+    const result = solveStudy(beamPayloadStudy("mat-aluminum-6061"), "run-beam-smooth-vector", rectangularBeamAnalysisMesh());
+    const displacementField = result.fields.find((field) => field.type === "displacement");
+    const sameStationSamples = (displacementField?.samples ?? []).filter((sample) => Math.abs(sample.point[0]) < 1e-9);
+    const magnitudes = sameStationSamples.map((sample) => sample.vector ? Math.hypot(...sample.vector) : 0);
+
+    expect(sameStationSamples.length).toBeGreaterThan(3);
+    expect(Math.max(...magnitudes) - Math.min(...magnitudes)).toBeLessThan(Math.max(...magnitudes) * 0.05);
+  });
+
   test("ultra local solve produces denser surface samples with rich stress metadata", () => {
     const fine = solveStudy({ ...cantileverStudy("mat-aluminum-6061"), meshSettings: { preset: "fine", status: "complete", meshRef: "mesh", summary: { nodes: 1, elements: 1, warnings: [] } } }, "run-fine");
     const ultra = solveStudy({ ...cantileverStudy("mat-aluminum-6061"), meshSettings: { preset: "ultra", status: "complete", meshRef: "mesh", summary: { nodes: 1, elements: 1, warnings: [] } } }, "run-ultra");

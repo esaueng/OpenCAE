@@ -550,6 +550,43 @@ describe("CadViewer result coloring", () => {
     expect(positions.version).toBeGreaterThan(0);
   });
 
+  test("keeps beam-like displacement interpolation smooth between result samples", () => {
+    const geometry = new THREE.BufferGeometry();
+    const basePositions: number[] = [];
+    for (let index = 0; index <= 40; index += 1) {
+      const x = -1 + index / 20;
+      basePositions.push(x, 0, 0);
+    }
+    geometry.setAttribute("position", new THREE.Float32BufferAttribute(basePositions, 3));
+    const displacementSamples = Array.from({ length: 13 }, (_, index) => {
+      const x = -1 + index / 6;
+      const travel = (x + 1) / 2;
+      const offset = index % 2 === 0 ? 0.28 : -0.28;
+      const value = 0.006 * travel * travel * (3 - 2 * travel);
+      return { point: [x, offset, 0] as [number, number, number], normal: [0, 1, 0] as [number, number, number], value, vector: [0, -value, 0] as [number, number, number] };
+    });
+    const fields: ResultField[] = [{
+      id: "displacement-smooth",
+      runId: "run",
+      type: "displacement",
+      location: "node",
+      values: displacementSamples.map((sample) => sample.value),
+      min: 0,
+      max: 0.006,
+      units: "mm",
+      samples: displacementSamples
+    }];
+
+    applyResultFrameToGeometry({ geometry, fields, resultMode: "displacement", showDeformed: true, deformationScale: 1 });
+
+    const positions = geometry.getAttribute("position") as THREE.BufferAttribute;
+    const offsets = Array.from({ length: positions.count }, (_, index) => positions.getY(index));
+    const slopeChanges = offsets.slice(2).map((value, index) => value - 2 * offsets[index + 1]! + offsets[index]!);
+    const worstCurvatureJump = Math.max(...slopeChanges.map(Math.abs));
+
+    expect(worstCurvatureJump).toBeLessThan(0.004);
+  });
+
   test("applies changed scalar frames to geometry colors", () => {
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute("position", new THREE.Float32BufferAttribute([0, 0, 0, 1, 0, 0], 3));
