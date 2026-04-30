@@ -94,4 +94,11 @@ describe("app CSS", () => {
     expect(startFooterLinks).toMatch(/text-decoration:\s*none/);
     expect(startFooterLinkHover).toMatch(/text-decoration:\s*underline/);
   });
+
+  test("hides native focus outlines on range sliders", () => {
+    const rangeFocus = cssRule(".range-field input[type=\"range\"]:focus,\n.range-field input[type=\"range\"]:focus-visible");
+
+    expect(rangeFocus).toMatch(/outline:\s*none/);
+    expect(rangeFocus).toMatch(/box-shadow:\s*none/);
+  });
 });
