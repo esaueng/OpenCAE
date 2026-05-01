@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { ElementRef, MutableRefObject } from "react";
+import type { ElementRef, MutableRefObject, PointerEvent as ReactPointerEvent } from "react";
 import { Billboard, Bounds, Edges, GizmoHelper, Html, Line, OrbitControls, Text, useBounds } from "@react-three/drei";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import type { ThreeEvent } from "@react-three/fiber";
@@ -4304,7 +4304,52 @@ export function legendMeshStats(meshSummary: MeshSummary | undefined) {
   };
 }
 
+const RESULT_LEGEND_MIN_WIDTH = 280;
+const RESULT_LEGEND_MIN_HEIGHT = 176;
+const RESULT_LEGEND_VIEWPORT_INSET = 12;
+
+type ResultLegendSize = { width: number; height: number };
+type ResultLegendResizeDrag = ResultLegendSize & {
+  maxHeight: number;
+  maxWidth: number;
+  pointerId: number;
+  startClientX: number;
+  startClientY: number;
+};
+
+export function resultLegendResizeDimensions({
+  currentClientX,
+  currentClientY,
+  maxHeight,
+  maxWidth,
+  minHeight,
+  minWidth,
+  startClientX,
+  startClientY,
+  startHeight,
+  startWidth
+}: {
+  currentClientX: number;
+  currentClientY: number;
+  maxHeight: number;
+  maxWidth: number;
+  minHeight: number;
+  minWidth: number;
+  startClientX: number;
+  startClientY: number;
+  startHeight: number;
+  startWidth: number;
+}): ResultLegendSize {
+  return {
+    width: Math.round(clampNumber(startWidth + currentClientX - startClientX, minWidth, maxWidth)),
+    height: Math.round(clampNumber(startHeight + startClientY - currentClientY, minHeight, maxHeight))
+  };
+}
+
 function ResultLegend({ resultMode, resultFields, unitSystem, meshSummary }: { resultMode: ResultMode; resultFields: ResultField[]; unitSystem: UnitSystem; meshSummary?: MeshSummary }) {
+  const legendRef = useRef<HTMLDivElement | null>(null);
+  const resizeDragRef = useRef<ResultLegendResizeDrag | null>(null);
+  const [legendSize, setLegendSize] = useState<ResultLegendSize | null>(null);
   const title = resultMode === "stress" ? "Von Mises Stress" : resultMode === "displacement" ? "Displacement" : resultMode === "velocity" ? "Velocity" : resultMode === "acceleration" ? "Acceleration" : "Safety Factor";
   const field = selectedResultField(resultFields, resultMode);
   const fallbackMin = resultMode === "stress" ? stressForUnits(28, "MPa", unitSystem) : resultMode === "displacement" || resultMode === "velocity" || resultMode === "acceleration" ? lengthForUnits(0, "mm", unitSystem) : { value: 1.8, units: "" };
@@ -4314,8 +4359,67 @@ function ResultLegend({ resultMode, resultFields, unitSystem, meshSummary }: { r
   const maxValue = field?.max ?? fallbackMax.value;
   const ticks = displayedLegendTickLabels(minValue, maxValue);
   const meshStats = legendMeshStats(meshSummary);
+  const handleResizePointerDown = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    const legend = legendRef.current;
+    if (!legend) return;
+    const legendRect = legend.getBoundingClientRect();
+    const viewportRect = legend.parentElement?.getBoundingClientRect();
+    const maxWidth = Math.max(RESULT_LEGEND_MIN_WIDTH, (viewportRect?.width ?? window.innerWidth) - RESULT_LEGEND_VIEWPORT_INSET * 2);
+    const maxHeight = Math.max(RESULT_LEGEND_MIN_HEIGHT, (viewportRect?.height ?? window.innerHeight) - RESULT_LEGEND_VIEWPORT_INSET * 2);
+
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    resizeDragRef.current = {
+      height: legendRect.height,
+      maxHeight,
+      maxWidth,
+      pointerId: event.pointerId,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      width: legendRect.width
+    };
+    setLegendSize({ width: Math.round(legendRect.width), height: Math.round(legendRect.height) });
+  };
+  const handleResizePointerMove = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    const drag = resizeDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    setLegendSize(resultLegendResizeDimensions({
+      currentClientX: event.clientX,
+      currentClientY: event.clientY,
+      maxHeight: drag.maxHeight,
+      maxWidth: drag.maxWidth,
+      minHeight: RESULT_LEGEND_MIN_HEIGHT,
+      minWidth: RESULT_LEGEND_MIN_WIDTH,
+      startClientX: drag.startClientX,
+      startClientY: drag.startClientY,
+      startHeight: drag.height,
+      startWidth: drag.width
+    }));
+  };
+  const handleResizePointerEnd = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (resizeDragRef.current?.pointerId !== event.pointerId) return;
+    resizeDragRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+  };
   return (
-    <div className={`analysis-legend ${resultMode === "safety_factor" ? "safety-scale" : ""}`}>
+    <div
+      ref={legendRef}
+      className={`analysis-legend ${resultMode === "safety_factor" ? "safety-scale" : ""}`}
+      style={legendSize ? { width: `${legendSize.width}px`, height: `${legendSize.height}px` } : undefined}
+    >
+      <button
+        className="analysis-legend-resize"
+        type="button"
+        aria-label="Resize results legend"
+        title="Resize results legend"
+        onPointerDown={handleResizePointerDown}
+        onPointerMove={handleResizePointerMove}
+        onPointerUp={handleResizePointerEnd}
+        onPointerCancel={handleResizePointerEnd}
+        onLostPointerCapture={handleResizePointerEnd}
+      />
       <strong>Nodes: {meshStats.nodes}</strong>
       <strong>Elements: {meshStats.elements}</strong>
       <span>Type: {title}</span>
@@ -4338,6 +4442,10 @@ function selectedResultField(resultFields: ResultField[], resultMode: ResultMode
   return resultFields.find((candidate) => candidate.type === resultMode && candidate.location === "face")
     ?? resultFields.find((candidate) => candidate.type === resultMode && candidate.samples?.length)
     ?? resultFields.find((candidate) => candidate.type === resultMode);
+}
+
+function clampNumber(value: number, minValue: number, maxValue: number) {
+  return Math.max(minValue, Math.min(maxValue, value));
 }
 
 function LoadGlyph({ marker, face, active, labelPosition }: { marker: ViewerLoadMarker; face: DisplayFace; active: boolean; labelPosition?: [number, number, number] }) {
