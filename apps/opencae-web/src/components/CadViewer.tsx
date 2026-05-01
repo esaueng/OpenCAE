@@ -147,7 +147,10 @@ export const VIEWER_AXIS_LABEL_OUTLINE_WIDTH = 0.02;
 // X/Y/Z axis labels sit beyond the cube in positive directions.
 export const VIEWER_GIZMO_AXIS_LENGTH = 1.35;
 export const VIEWER_GIZMO_LABEL_DISTANCE = 1.48;
-export const VIEWER_VIEW_CUBE_SIZE = 0.72;
+export const VIEWER_VIEW_CUBE_SIZE = 0.92;
+export const VIEWER_VIEW_CUBE_BODY_OPACITY = 0.3;
+export const VIEWER_VIEW_CUBE_FACE_OPACITY = 0.16;
+export const VIEWER_VIEW_CUBE_FACE_HOVER_OPACITY = 0.38;
 export const VIEWER_VIEW_CUBE_EDGE_COLOR = "#8fb4d8";
 export const VIEWER_VIEW_CUBE_FACE_LABEL_FONT_SIZE = 0.18;
 export const VIEWER_ISOMETRIC_GIZMO_VIEW = "iso";
@@ -648,7 +651,7 @@ function PositiveOctantViewCube({ onSelectView }: { onSelectView: (view: GizmoVi
     <group name="Positive-octant triad view cube">
       <mesh position={[half, half, half]} renderOrder={1}>
         <boxGeometry args={[cubeSize, cubeSize, cubeSize]} />
-        <meshBasicMaterial color="#1d2b3d" depthTest transparent opacity={0.16} depthWrite={false} toneMapped={false} />
+        <meshBasicMaterial color="#1d2b3d" depthTest transparent opacity={VIEWER_VIEW_CUBE_BODY_OPACITY} depthWrite={false} toneMapped={false} />
       </mesh>
       <ViewCubeEdges />
       {faces.map((face) => (
@@ -732,7 +735,7 @@ function ViewCubeFace({
     >
       <mesh renderOrder={3}>
         <planeGeometry args={[VIEWER_VIEW_CUBE_SIZE * 0.82, VIEWER_VIEW_CUBE_SIZE * 0.82]} />
-        <meshBasicMaterial color={hovered ? "#6da4c9" : "#31516b"} depthTest transparent opacity={hovered ? 0.3 : 0.1} depthWrite={false} toneMapped={false} />
+        <meshBasicMaterial color={hovered ? "#6da4c9" : "#31516b"} depthTest transparent opacity={hovered ? VIEWER_VIEW_CUBE_FACE_HOVER_OPACITY : VIEWER_VIEW_CUBE_FACE_OPACITY} depthWrite={false} toneMapped={false} />
       </mesh>
       <Line
         points={[
