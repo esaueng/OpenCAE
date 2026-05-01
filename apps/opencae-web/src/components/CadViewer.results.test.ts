@@ -77,7 +77,7 @@ describe("CadViewer result coloring", () => {
     expect(cadViewerSource).toContain("function IsoOriginButton");
     expect(cadViewerSource).toContain("function GizmoTextLabel");
     expect(cadViewerSource).toContain("<PositiveOctantViewCube onSelectView={onSelectView} />");
-    expect(cadViewerSource).not.toContain("<Billboard position={[0, 0, 0.036]} renderOrder={4}>");
+    expect(cadViewerSource).toContain("<Billboard position={[0, 0, 0.036]} renderOrder={4}>");
     expect(cadViewerSource).toContain("origin is one cube corner, not the cube center.");
     expect(cadViewerSource).toContain("cube bounds are [0, cubeSize] on X/Y/Z.");
     expect(cadViewerSource).toContain("const origin: [number, number, number] = [0, 0, 0];");
