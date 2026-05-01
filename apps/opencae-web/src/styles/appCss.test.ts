@@ -39,10 +39,15 @@ describe("app CSS", () => {
     expect(css).toMatch(/\.theme-light\s+\.viewer-reset\s*\{[\s\S]*?border-color:\s*rgba\(82,\s*103,\s*130,\s*0\.24\)/);
   });
 
-  test("positions the reset view button inside the stationary bottom-right gizmo cluster", () => {
+  test("positions the reset view button next to the bottom-right gizmo without overlapping it", () => {
     const viewerHud = cssRule(".viewer-hud");
 
-    expect(viewerHud).toMatch(/inset:\s*auto\s+52px\s+48px\s+auto/);
+    const inset = viewerHud.match(/inset:\s*auto\s+(?<right>\d+)px\s+(?<bottom>\d+)px\s+auto/);
+    const right = Number(inset?.groups?.right);
+    const bottom = Number(inset?.groups?.bottom);
+
+    expect(right).toBeGreaterThanOrEqual(160);
+    expect(bottom).toBeGreaterThanOrEqual(48);
   });
 
   test("lightens the analysis legend in light mode", () => {
