@@ -832,6 +832,42 @@ describe("CadViewer result coloring", () => {
     expect(positions.getZ(1)).toBeLessThan(0);
   });
 
+  test("uses dense solver cantilever vectors instead of a linear deformation ramp", () => {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.Float32BufferAttribute([0, 0, 0, 1, 0, 0, 2, 0, 0], 3));
+    const fields: ResultField[] = [{
+      id: "displacement-cubic-cantilever",
+      runId: "run",
+      type: "displacement",
+      location: "node",
+      values: [0, 0.3125, 1],
+      min: 0,
+      max: 1,
+      units: "mm",
+      samples: [
+        { point: [0, 0, 0], normal: [0, 1, 0], value: 0, vector: [0, 0, 0] },
+        { point: [1, 0, 0], normal: [0, 1, 0], value: 0.3125, vector: [0, -0.3125, 0] },
+        { point: [2, 0, 0], normal: [0, 1, 0], value: 1, vector: [0, -1, 0] }
+      ]
+    }];
+
+    applyResultFrameToGeometry({
+      geometry,
+      fields,
+      resultMode: "displacement",
+      showDeformed: true,
+      deformationScale: 1,
+      deformationCapFraction: 1
+    });
+
+    const positions = geometry.getAttribute("position") as THREE.BufferAttribute;
+    const midOffset = Math.abs(positions.getY(1));
+    const tipOffset = Math.abs(positions.getY(2));
+
+    expect(midOffset / tipOffset).toBeCloseTo(0.3125, 5);
+    expect(midOffset / tipOffset).not.toBeCloseTo(0.5, 1);
+  });
+
   test("uses stored model-space load marker direction for fallback deformation", () => {
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute("position", new THREE.Float32BufferAttribute([-1.9, 0.18, 0, 1.9, 0.18, 0], 3));

@@ -1,7 +1,15 @@
 import { describe, expect, test } from "vitest";
 import { estimateAllowableLoadForSafetyFactor } from "@opencae/schema";
 import type { Study } from "@opencae/schema";
-import { DEFAULT_BEAM_DEMO_PHYSICAL_MODEL, isBeamDemoStudy, solveBeamDemoStudy } from "./beamDemoSolver";
+import {
+  DEFAULT_BEAM_DEMO_PHYSICAL_MODEL,
+  endLoadCantileverShape,
+  endLoadCantileverSlope,
+  isBeamDemoStudy,
+  normalizedPointLoadCantileverShape,
+  pointLoadCantileverShape,
+  solveBeamDemoStudy
+} from "./beamDemoSolver";
 
 const EXPECTED_PAYLOAD_FORCE_N = 0.497664 * 9.80665;
 const EXPECTED_I_M4 = (0.0151578947368 * 0.0117894736842 ** 3) / 12;
@@ -11,7 +19,7 @@ const EXPECTED_DISPLACEMENT_MM = EXPECTED_PAYLOAD_FORCE_N * 0.16 ** 3 / (3 * 68_
 describe("Beam Demo Euler-Bernoulli solver", () => {
   test("detects the Beam Demo named selections without using the generic surface heuristic", () => {
     expect(isBeamDemoStudy(beamPayloadStudy())).toBe(true);
-    expect(isBeamDemoStudy(cantileverStudy())).toBe(false);
+    expect(isBeamDemoStudy(cantileverStudy())).toBe(true);
   });
 
   test("converts payload mass to Newtons and returns dense displacement vectors", () => {
@@ -109,6 +117,48 @@ describe("Beam Demo Euler-Bernoulli solver", () => {
     expect(result.summary.reactionForce).toBeCloseTo(500, 5);
     expect(result.beamDemoDiagnostics.loadStation).toBeCloseTo(1, 5);
     expect(values.at(-1)).toBe(Math.max(...values));
+  });
+
+  test("exports standard end-load cantilever shape helpers", () => {
+    expect(endLoadCantileverShape(0)).toBeCloseTo(0, 8);
+    expect(endLoadCantileverSlope(0, 12, 160)).toBeCloseTo(0, 8);
+    expect(endLoadCantileverShape(0.25)).toBeCloseTo(0.0859375, 8);
+    expect(endLoadCantileverShape(0.5)).toBeCloseTo(0.3125, 8);
+    expect(endLoadCantileverShape(1)).toBeCloseTo(1, 8);
+  });
+
+  test("uses cubic end-load vectors for the Cantilever Demo force direction", () => {
+    const result = solveBeamDemoStudy(cantileverStudy(), "run-cantilever-force");
+    const displacement = result.fields.find((field) => field.type === "displacement");
+    const centerline = (displacement?.samples ?? [])
+      .filter((sample) => sample.source === "beam-demo-centerline")
+      .sort((left, right) => station(left.nodeId) - station(right.nodeId));
+    const fixed = centerline[0]!;
+    const quarter = centerline[16]!;
+    const mid = centerline[32]!;
+    const tip = centerline[64]!;
+
+    expect(result.beamDemoDiagnostics.loadStation).toBeCloseTo(1, 8);
+    expect(result.beamDemoDiagnostics.freeEnd).toEqual([1.9, 0.14, 0]);
+    expect(displacement?.samples?.length).toBeGreaterThanOrEqual(65 * 5);
+    expect(fixed.value).toBeCloseTo(0, 8);
+    expect(fixed.vector).toEqual([0, 0, 0]);
+    expect(tip.value).toBeCloseTo(result.summary.maxDisplacement, 6);
+    expect(quarter.value / tip.value).toBeCloseTo(0.0859375, 5);
+    expect(mid.value / tip.value).toBeCloseTo(0.3125, 5);
+    expect(mid.value / tip.value).not.toBeCloseTo(0.5, 1);
+    expect(tip.vector?.[2]).toBeLessThan(0);
+    expect(Math.abs(tip.vector?.[2] ?? 0)).toBeGreaterThan(Math.abs(tip.vector?.[1] ?? 0) * 5);
+  });
+
+  test("normalizes point-load cantilever shape when load is not at the free end", () => {
+    const loadStation = 0.75;
+    const freeRaw = pointLoadCantileverShape(1, loadStation);
+
+    expect(normalizedPointLoadCantileverShape(0, loadStation)).toBeCloseTo(0, 8);
+    expect(normalizedPointLoadCantileverShape(1, loadStation)).toBeCloseTo(1, 8);
+    expect(normalizedPointLoadCantileverShape(0.5, loadStation)).toBeCloseTo(pointLoadCantileverShape(0.5, loadStation) / freeRaw, 8);
+    expect(normalizedPointLoadCantileverShape(0.5, loadStation)).not.toBeCloseTo(0.5, 1);
   });
 });
 

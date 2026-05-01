@@ -222,9 +222,9 @@ describe("LocalMockComputeBackend", () => {
 
       const displacementValues = result.fields.find((field) => field.type === "displacement")?.values ?? [];
       const fixedEndDisplacement = displacementValues[0] ?? 0;
-      const freeEndDisplacement = displacementValues[1] ?? 0;
+      const freeEndDisplacement = displacementValues.at(-1) ?? 0;
 
-      expect(displacementValues.indexOf(Math.max(...displacementValues))).toBe(1);
+      expect(displacementValues.indexOf(Math.max(...displacementValues))).toBe(displacementValues.length - 1);
       expect(freeEndDisplacement).toBeGreaterThan(fixedEndDisplacement * 2);
       expect(freeEndDisplacement).toBeGreaterThan(10);
       expect(result.summary.failureAssessment).toMatchObject({
@@ -273,11 +273,11 @@ describe("LocalMockComputeBackend", () => {
       const stressValues = result.fields.find((field) => field.type === "stress")?.values ?? [];
       const displacementValues = result.fields.find((field) => field.type === "displacement")?.values ?? [];
       const fixedEndStress = stressValues[0] ?? 0;
-      const freeEndStress = stressValues[1] ?? 0;
+      const freeEndStress = stressValues.at(-1) ?? 0;
 
       expect(stressValues.indexOf(Math.max(...stressValues))).toBe(0);
       expect(fixedEndStress).toBeGreaterThan(freeEndStress * 1.25);
-      expect(displacementValues.indexOf(Math.max(...displacementValues))).toBe(1);
+      expect(displacementValues.indexOf(Math.max(...displacementValues))).toBe(displacementValues.length - 1);
     } finally {
       vi.useRealTimers();
     }
@@ -337,9 +337,7 @@ describe("LocalMockComputeBackend", () => {
     const ultraStressSample = ultra.fields.find((field) => field.type === "stress")?.samples?.[0];
 
     expect(ultra.analysisSampleCount).toBeGreaterThan(fine.analysisSampleCount);
-    expect(ultraStressSample).toMatchObject({
-      source: "local_detailed"
-    });
+    expect(ultraStressSample?.source).toMatch(/^beam-demo-/);
     expect(ultraStressSample?.vonMisesStressPa).toBeGreaterThan(0);
   });
 
@@ -651,6 +649,30 @@ describe("LocalMockComputeBackend", () => {
       const field = solved.fields.find((candidate) => candidate.type === type && dominantDisplacementAxis([candidate]).axis === "z");
       expect(field, `${type} frame should have a Z-dominant vector`).toBeDefined();
       expect(dominantDisplacementAxis([field!]).sign).not.toBe(0);
+    }
+  });
+
+  test("dynamic vector frames preserve cubic cantilever shape ratios", () => {
+    const solved = solveDynamicStudy(
+      dynamicCantileverStudy("mat-aluminum-6061", {
+        endTime: 0.02,
+        timeStep: 0.005,
+        outputInterval: 0.005
+      }),
+      "run-dynamic-cubic-shape",
+      rectangularBeamAnalysisMesh()
+    );
+
+    for (const type of ["displacement", "velocity", "acceleration"] as const) {
+      const field = solved.fields
+        .filter((candidate) => candidate.type === type)
+        .find((candidate) => Math.abs(nearestSampleValue(candidate.samples ?? [], [1.9, 0.14, 0])) > 1e-9);
+      const midValue = Math.abs(nearestSampleValue(field?.samples ?? [], [0, 0.14, 0]));
+      const tipValue = Math.abs(nearestSampleValue(field?.samples ?? [], [1.9, 0.14, 0]));
+
+      expect(field, `${type} frame should have a nonzero free-end response`).toBeDefined();
+      expect(midValue / tipValue).toBeCloseTo(0.3125, 4);
+      expect(midValue / tipValue).not.toBeCloseTo(0.5, 1);
     }
   });
 
