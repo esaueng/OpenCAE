@@ -140,9 +140,15 @@ export const VIEWER_AXIS_LABEL_FONT_SIZE = 0.21;
 export const VIEWER_AXIS_LABEL_COLOR = "#ffffff";
 export const VIEWER_AXIS_LABEL_OUTLINE_COLOR = "#07111d";
 export const VIEWER_AXIS_LABEL_OUTLINE_WIDTH = 0.02;
-export const VIEWER_GIZMO_AXIS_LENGTH = 1.25;
-export const VIEWER_GIZMO_LABEL_DISTANCE = 1.35;
-export const VIEWER_VIEW_CUBE_SIZE = 0.9;
+// Positive-octant view cube layout:
+// origin = [0, 0, 0]
+// cube bounds = [0, cubeSize] on X/Y/Z
+// cube center = [cubeSize/2, cubeSize/2, cubeSize/2]
+// axis labels sit beyond cube at +axisLength/+labelDistance
+// cube is not centered on the origin
+export const VIEWER_GIZMO_AXIS_LENGTH = 1.35;
+export const VIEWER_GIZMO_LABEL_DISTANCE = 1.45;
+export const VIEWER_VIEW_CUBE_SIZE = 0.72;
 export const VIEWER_VIEW_CUBE_EDGE_COLOR = "#9cc7df";
 export const VIEWER_VIEW_CUBE_FACE_LABEL_FONT_SIZE = 0.13;
 export const VIEWER_ISOMETRIC_GIZMO_VIEW = "iso";
@@ -484,7 +490,7 @@ function CleanAxisGizmo({ onSelectView }: { onSelectView: (view: GizmoViewReques
 
   return (
     <group scale={VIEWER_GIZMO_SCALE}>
-      <ViewCube onSelectView={onSelectView} />
+      <PositiveOctantViewCube onSelectView={onSelectView} />
       {axes.map((axis) => (
         <PositiveAxis key={axis.label} {...axis} onSelectView={onSelectView} />
       ))}
@@ -507,7 +513,7 @@ function PositiveAxis({
   onSelectView: (view: GizmoViewRequest) => void;
 }) {
   const lineEnd = direction.map((value) => value * VIEWER_GIZMO_AXIS_LENGTH) as [number, number, number];
-  const lineStart = direction.map((value) => -value * VIEWER_GIZMO_AXIS_LENGTH) as [number, number, number];
+  const lineStart: [number, number, number] = [0, 0, 0];
   const headPosition = direction.map((value) => value * VIEWER_GIZMO_LABEL_DISTANCE) as [number, number, number];
 
   return (
@@ -586,30 +592,24 @@ function AxisHead({
   );
 }
 
-function ViewCube({ onSelectView }: { onSelectView: (view: GizmoViewRequest) => void }) {
+function PositiveOctantViewCube({ onSelectView }: { onSelectView: (view: GizmoViewRequest) => void }) {
+  const cubeSize = VIEWER_VIEW_CUBE_SIZE;
+  const faceOffset = 0.003;
   const half = VIEWER_VIEW_CUBE_SIZE / 2;
   const faces: Array<{
     label: ViewCubeFaceLabel;
     position: [number, number, number];
     rotation: [number, number, number];
   }> = [
-    { label: "Front", position: [0, half + 0.003, 0], rotation: [-Math.PI / 2, 0, 0] },
-    { label: "Right", position: [half + 0.003, 0, 0], rotation: [0, Math.PI / 2, 0] },
-    { label: "Top", position: [0, 0, half + 0.003], rotation: [0, 0, 0] }
+    { label: "Front", position: [half, cubeSize + faceOffset, half], rotation: [-Math.PI / 2, 0, 0] },
+    { label: "Right", position: [cubeSize + faceOffset, half, half], rotation: [0, Math.PI / 2, 0] },
+    { label: "Top", position: [half, half, cubeSize + faceOffset], rotation: [0, 0, 0] }
   ];
 
   return (
-    <group name="Centered triad view cube">
-      {/*
-        Alignment sanity check:
-        cube center === origin
-        X line: from [-axisLength,0,0] to [axisLength,0,0]
-        Y line: from [0,-axisLength,0] to [0,axisLength,0]
-        Z line: from [0,0,-axisLength] to [0,0,axisLength]
-        cube bounds: [-cubeSize/2, cubeSize/2] on all axes
-      */}
-      <mesh renderOrder={1}>
-        <boxGeometry args={[VIEWER_VIEW_CUBE_SIZE, VIEWER_VIEW_CUBE_SIZE, VIEWER_VIEW_CUBE_SIZE]} />
+    <group name="Positive-octant triad view cube">
+      <mesh position={[half, half, half]} renderOrder={1}>
+        <boxGeometry args={[cubeSize, cubeSize, cubeSize]} />
         <meshBasicMaterial color="#16283c" depthTest transparent opacity={0.34} depthWrite={false} toneMapped={false} />
         <Edges color={VIEWER_VIEW_CUBE_EDGE_COLOR} threshold={1} />
       </mesh>
