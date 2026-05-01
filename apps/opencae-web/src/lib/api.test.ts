@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { estimateAllowableLoadForSafetyFactor } from "@opencae/schema";
 import type { DisplayModel, Project, RunEvent, Study } from "@opencae/schema";
 import { addLoad, addSupport, assignMaterial, cancelRun, createProject, generateMesh, getResults, importLocalProject, loadSampleProject, renameProject, runSimulation, subscribeToRun, updateStudy, uploadModel } from "./api";
 
@@ -398,6 +399,9 @@ describe("api", () => {
     expect(displacement?.samples?.length).toBeGreaterThan(64);
     expect(displacement?.samples?.every((sample) => sample.vector?.every(Number.isFinite))).toBe(true);
     expect(stress?.samples?.length).toBeGreaterThan(64);
+    expect(results.summary.maxStress).toBeCloseTo(2.224, 3);
+    expect(results.summary.maxDisplacement).toBeCloseTo(0.0467, 3);
+    expect(estimateAllowableLoadForSafetyFactor(results.summary, 1.5).allowableLoad).toBeCloseTo(404, 0);
   });
 
   test("runs Cloud FEA through cloud orchestration endpoints", async () => {

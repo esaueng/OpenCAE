@@ -4,7 +4,7 @@ import type { AnalysisMesh, AnalysisSample, DynamicSolverSettings, Load, Materia
 import type { ObjectStorageProvider } from "@opencae/storage";
 import { bracketDisplayModel, bracketResultSummary } from "@opencae/db/sample-data";
 import { inferCriticalPrintAxis } from "@opencae/study-core";
-import { isBeamDemoStudy, solveBeamDemoStudy } from "./beamDemoSolver";
+import { isBeamDemoStudy, solveBeamDemoStudy, type BeamDemoSolveOptions } from "./beamDemoSolver";
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const STANDARD_GRAVITY = 9.80665;
@@ -196,9 +196,12 @@ interface LoadModel {
   moment: number;
 }
 
-export function solveStudy(study: Study, runId: string, analysisMeshInput?: AnalysisMesh) {
-  if (isBeamDemoStudy(study)) return solveBeamDemoStudy(study, runId, analysisMeshInput);
-  return solveHeuristicSurfaceStudy(study, runId, analysisMeshInput);
+export type LocalSolveOptions = AnalysisMesh | BeamDemoSolveOptions;
+
+export function solveStudy(study: Study, runId: string, optionsInput?: LocalSolveOptions) {
+  const options = normalizeLocalSolveOptions(optionsInput);
+  if (isBeamDemoStudy(study)) return solveBeamDemoStudy(study, runId, options);
+  return solveHeuristicSurfaceStudy(study, runId, options.analysisMesh);
 }
 
 export function solveHeuristicSurfaceStudy(study: Study, runId: string, analysisMeshInput?: AnalysisMesh) {
@@ -259,12 +262,13 @@ export function solveHeuristicSurfaceStudy(study: Study, runId: string, analysis
   return { summary, fields, faceCount: faces.length, loadCount: loads.length, totalAppliedLoad: summary.reactionForce, material, effectiveMaterial, materialParameters, analysisSampleCount: analysisMesh.samples.length, solverBackend: "local-heuristic-surface" as const };
 }
 
-export function solveDynamicStudy(study: Study, runId: string, analysisMeshInput?: AnalysisMesh) {
+export function solveDynamicStudy(study: Study, runId: string, optionsInput?: LocalSolveOptions) {
+  const options = normalizeLocalSolveOptions(optionsInput);
   const settings = dynamicSettingsForStudy(study);
-  const staticSolved = solveStudy(study, runId, analysisMeshInput);
+  const staticSolved = solveStudy(study, runId, options);
   const stressBase = staticSolved.fields.find((field) => field.type === "stress");
   const displacementBase = staticSolved.fields.find((field) => field.type === "displacement");
-  const analysisMesh = analysisMeshInput ?? analysisMeshForFaces(faceModelsForStudy(study), study.meshSettings.preset);
+  const analysisMesh = options.analysisMesh ?? analysisMeshForFaces(faceModelsForStudy(study), study.meshSettings.preset);
   const totalForce = Math.max(staticSolved.totalAppliedLoad, 0.001);
   const staticDisplacementMeters = Math.max((displacementBase?.max ?? staticSolved.summary.maxDisplacement) / 1000, 1e-6);
   const massKg = equivalentMassKg(staticSolved.material, analysisMesh);
@@ -335,6 +339,12 @@ export function solveDynamicStudy(study: Study, runId: string, analysisMeshInput
     dampingNsPerM: round(dampingNsPerM, 6),
     analysisSampleCount: analysisMesh.samples.length
   };
+}
+
+function normalizeLocalSolveOptions(optionsInput: LocalSolveOptions | undefined): BeamDemoSolveOptions {
+  if (!optionsInput) return {};
+  if ("samples" in optionsInput) return { analysisMesh: optionsInput };
+  return optionsInput;
 }
 
 export interface DynamicStudyBenchmark {
