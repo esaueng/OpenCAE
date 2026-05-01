@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { describe, expect, test, vi } from "vitest";
-import { VIEWER_AXIS_HEAD_RADIUS, VIEWER_AXIS_LABEL_BADGE_COLOR, VIEWER_AXIS_LABEL_BADGE_RADIUS, VIEWER_AXIS_LABEL_COLOR, VIEWER_AXIS_LABEL_FONT_SIZE, VIEWER_AXIS_LABEL_OUTLINE_COLOR, VIEWER_AXIS_LABEL_OUTLINE_WIDTH, VIEWER_CREDIT_URL, VIEWER_GIZMO_ALIGNMENT, VIEWER_GIZMO_AXIS_LENGTH, VIEWER_GIZMO_LABEL_DISTANCE, VIEWER_GIZMO_MARGIN, VIEWER_GIZMO_SCALE, VIEWER_ISOMETRIC_GIZMO_VIEW, VIEWER_VIEW_CUBE_BODY_OPACITY, VIEWER_VIEW_CUBE_EDGE_COLOR, VIEWER_VIEW_CUBE_FACE_HOVER_OPACITY, VIEWER_VIEW_CUBE_FACE_LABEL_FONT_SIZE, VIEWER_VIEW_CUBE_FACE_OPACITY, VIEWER_VIEW_CUBE_SIZE, applyResultFrameToGeometry, axisLabelToViewAxis, beamDemoDisplacementAtStation, beamDemoPayloadOffset, beamDemoStationForPoint, cameraDistanceForBounds, cameraViewForAxis, cloneResultPreviewObject, colorizeResultObject, colorizeSampleResultGeometry, createBeamDemoCoordinate, createUndeformedResultOutlineObject, defaultHomeViewTarget, deformationScaleForResultFields, displayedLegendTickLabels, finalVisualScaleForDisplacementField, gizmoViewTargetToRequest, interpolateDisplacementAtPoint, legendMeshStats, legendTickLabels, normalizedPointLoadCantileverShape, payloadHighlightObjectId, pointLoadCantileverShape, printLayerVisualizationForBounds, resultLegendContentScale, resultLegendResizeDimensions, resultProbesForKind, resultValueForPoint, rotatedCameraOrbit, shouldShowDimensionOverlay, shouldShowModelHitLabel, shouldShowResultMarkers, shouldShowUndeformedResultOutline, updatePackedSamples, viewCubeFaceToGizmoView, viewerCameraResetPose, viewerGizmoLayout } from "./CadViewer";
+import { VIEWER_AXIS_HEAD_RADIUS, VIEWER_AXIS_LABEL_BADGE_COLOR, VIEWER_AXIS_LABEL_BADGE_RADIUS, VIEWER_AXIS_LABEL_COLOR, VIEWER_AXIS_LABEL_FONT_SIZE, VIEWER_AXIS_LABEL_OUTLINE_COLOR, VIEWER_AXIS_LABEL_OUTLINE_WIDTH, VIEWER_CREDIT_URL, VIEWER_GIZMO_ALIGNMENT, VIEWER_GIZMO_AXIS_LENGTH, VIEWER_GIZMO_LABEL_DISTANCE, VIEWER_GIZMO_MARGIN, VIEWER_GIZMO_SCALE, VIEWER_ISOMETRIC_GIZMO_VIEW, VIEWER_VIEW_CUBE_BODY_OPACITY, VIEWER_VIEW_CUBE_EDGE_COLOR, VIEWER_VIEW_CUBE_FACE_HOVER_OPACITY, VIEWER_VIEW_CUBE_FACE_LABEL_FONT_SIZE, VIEWER_VIEW_CUBE_FACE_OPACITY, VIEWER_VIEW_CUBE_SIZE, applyResultFrameToGeometry, axisLabelToViewAxis, beamDemoDisplacementAtStation, beamDemoPayloadOffset, beamDemoStationForPoint, cameraDistanceForBounds, cameraViewForAxis, cloneResultPreviewObject, colorizeResultObject, colorizeSampleResultGeometry, createBeamDemoCoordinate, createUndeformedResultOutlineObject, defaultHomeViewTarget, deformationScaleForResultFields, displayedLegendTickLabels, finalVisualScaleForDisplacementField, gizmoViewTargetToRequest, interpolateDisplacementAtPoint, legendMeshStats, legendTickLabels, normalizedPointLoadCantileverShape, payloadHighlightObjectId, pointLoadCantileverShape, printLayerVisualizationForBounds, resultLegendContentScale, resultLegendResizeDimensions, resultProbesForKind, resultValueForPoint, rotatedCameraOrbit, shouldShowDimensionOverlay, shouldShowModelHitLabel, shouldShowResultMarkers, shouldShowUndeformedResultOutline, shouldShowViewCubeFaceLabel, updatePackedSamples, viewCubeFaceToGizmoView, viewerCameraResetPose, viewerGizmoLayout } from "./CadViewer";
 import type { FaceResultSample } from "../resultFields";
 import type { DisplayFace, ResultField } from "@opencae/schema";
 import type { PackedPreparedPlaybackCache } from "../resultPlaybackCache";
@@ -53,7 +53,7 @@ describe("CadViewer result coloring", () => {
 
   test("renders a positive-octant triad view cube without negative label clutter", () => {
     expect(VIEWER_VIEW_CUBE_SIZE).toBe(1.12);
-    expect(VIEWER_VIEW_CUBE_BODY_OPACITY).toBe(0.3);
+    expect(VIEWER_VIEW_CUBE_BODY_OPACITY).toBe(0.45);
     expect(VIEWER_VIEW_CUBE_FACE_OPACITY).toBe(0.16);
     expect(VIEWER_VIEW_CUBE_FACE_HOVER_OPACITY).toBe(0.38);
     expect(VIEWER_GIZMO_AXIS_LENGTH).toBe(1.35);
@@ -77,7 +77,11 @@ describe("CadViewer result coloring", () => {
     expect(cadViewerSource).toContain("function IsoOriginButton");
     expect(cadViewerSource).toContain("function GizmoTextLabel");
     expect(cadViewerSource).toContain("<PositiveOctantViewCube onSelectView={onSelectView} />");
-    expect(cadViewerSource).toContain("<Billboard position={[0, 0, 0.036]} renderOrder={4}>");
+    expect(cadViewerSource).not.toContain("<Billboard position={[0, 0, 0.036]} renderOrder={4}>");
+    expect(cadViewerSource).toContain("shouldShowViewCubeFaceLabel");
+    expect(cadViewerSource).toContain("VIEWER_VIEW_CUBE_FACE_VISIBILITY_THRESHOLD = 0.05");
+    expect(cadViewerSource).toContain("camera.position");
+    expect(cadViewerSource).toContain("faceNormalWorld");
     expect(cadViewerSource).toContain("origin is one cube corner, not the cube center.");
     expect(cadViewerSource).toContain("cube bounds are [0, cubeSize] on X/Y/Z.");
     expect(cadViewerSource).toContain("const origin: [number, number, number] = [0, 0, 0];");
@@ -92,10 +96,21 @@ describe("CadViewer result coloring", () => {
     expect(cadViewerSource).not.toContain("-Z");
   });
 
+  test("shows view cube face labels only when their face normal points toward the camera", () => {
+    const faceCenter = new THREE.Vector3(0, 0, 0);
+
+    expect(shouldShowViewCubeFaceLabel(faceCenter, new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0, 3))).toBe(true);
+    expect(shouldShowViewCubeFaceLabel(faceCenter, new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0, -3))).toBe(false);
+    expect(shouldShowViewCubeFaceLabel(faceCenter, new THREE.Vector3(0, 0, 1), new THREE.Vector3(3, 0, 0))).toBe(false);
+  });
+
   test("maps view cube faces and center button to camera reset requests", () => {
     expect(viewCubeFaceToGizmoView("Front")).toBe("y");
+    expect(viewCubeFaceToGizmoView("Back")).toBe("y");
     expect(viewCubeFaceToGizmoView("Right")).toBe("x");
+    expect(viewCubeFaceToGizmoView("Left")).toBe("x");
     expect(viewCubeFaceToGizmoView("Top")).toBe("z");
+    expect(viewCubeFaceToGizmoView("Bottom")).toBe("z");
     expect(gizmoViewTargetToRequest("+x")).toBe("x");
     expect(gizmoViewTargetToRequest("+y")).toBe("y");
     expect(gizmoViewTargetToRequest("+z")).toBe("z");
