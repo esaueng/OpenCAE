@@ -272,7 +272,7 @@ function MaterialPanel({ project, displayModel, study, onAssignMaterial, onPrevi
   const printable = Boolean(selectedMaterial.printProfile);
   const criticalLayerAxis = inferCriticalPrintAxis(study, displayModel.faces.map((face) => ({ entityId: face.id, center: face.center })));
   const effectiveMaterial = effectiveMaterialProperties(selectedMaterial, printable ? { ...printParameters } : {}, { criticalLayerAxis });
-  const assignedPrintParameters = assignedMaterial.printProfile ? normalizePrintParameters(assignedMaterial, currentParameters) : undefined;
+  const assignedPrintParameters = currentAssignment && assignedMaterial.printProfile ? normalizePrintParameters(assignedMaterial, currentParameters) : undefined;
   const assignedDetail = assignedPrintParameters?.printed
     ? `3D printed · ${assignedPrintParameters.infillDensity}% infill`
     : "all bodies";
@@ -381,9 +381,13 @@ function MaterialPanel({ project, displayModel, study, onAssignMaterial, onPrevi
         onClose={() => setShowLibrary(false)}
       />
       <SectionTitle>Assigned</SectionTitle>
-      <div className="concept-card-list">
-        <ConceptCard icon={<Check size={18} />} title={assignedMaterial?.name ?? "Material"} detail={`bracket · ${assignedDetail}`} tone="accent" />
-      </div>
+      {currentAssignment ? (
+        <div className="concept-card-list">
+          <ConceptCard icon={<Check size={18} />} title={assignedMaterial.name} detail={`bracket · ${assignedDetail}`} tone="accent" />
+        </div>
+      ) : (
+        <Callout>No material assigned</Callout>
+      )}
     </Panel>
   );
 }

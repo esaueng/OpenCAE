@@ -174,6 +174,23 @@ async function dynamicSampleResults(project: Project): Promise<LocalResultBundle
 }
 
 function sampleLoadsFor(sample: SampleModelId, templateLoads: Load[], displayModel: DisplayModel, payloadLabel: string): Load[] {
+  if (sample === "cantilever") {
+    const loadFace = displayModel.faces.find((face) => face.id === "face-load-top");
+    return templateLoads.map((load) => load.selectionRef === "selection-load-face"
+      ? {
+          ...load,
+          type: "force",
+          parameters: {
+            ...load.parameters,
+            value: 500,
+            units: "N",
+            direction: [0, 0, -1],
+            applicationPoint: loadFace?.center ?? [1.9, 0.18, 0]
+          },
+          status: "complete"
+        }
+      : load);
+  }
   if (sample !== "plate") return templateLoads;
   const payloadFace = displayModel.faces.find((face) => face.id === "face-load-top");
   const volumeM3 = dimensionsVolumeM3(displayModel.dimensions);

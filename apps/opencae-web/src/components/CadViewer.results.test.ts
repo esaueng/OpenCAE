@@ -700,6 +700,66 @@ describe("CadViewer result coloring", () => {
     expect(interpolateDisplacementAtPoint([0, 0, 0], field)).toEqual([0, -1, 0]);
   });
 
+  test("applies result sample vectors along model Z instead of model Y", () => {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.Float32BufferAttribute([0, 0, 0, 1, 0, 0, 2, 0, 0], 3));
+    const fields: ResultField[] = [{
+      id: "displacement-z",
+      runId: "run",
+      type: "displacement",
+      location: "node",
+      values: [1, 1, 1],
+      min: 0,
+      max: 1,
+      units: "mm",
+      samples: [
+        { point: [0, 0, 0], normal: [0, 1, 0], value: 1, vector: [0, 0, -1] },
+        { point: [1, 0, 0], normal: [0, 1, 0], value: 1, vector: [0, 0, -1] },
+        { point: [2, 0, 0], normal: [0, 1, 0], value: 1, vector: [0, 0, -1] }
+      ]
+    }];
+
+    applyResultFrameToGeometry({ geometry, fields, resultMode: "displacement", showDeformed: true, deformationScale: 1 });
+
+    const positions = geometry.getAttribute("position") as THREE.BufferAttribute;
+    expect(positions.getY(1)).toBeCloseTo(0);
+    expect(positions.getZ(1)).toBeLessThan(0);
+  });
+
+  test("uses stored model-space load marker direction for fallback deformation", () => {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.Float32BufferAttribute([-1.9, 0.18, 0, 1.9, 0.18, 0], 3));
+    const deformed = colorizeSampleResultGeometry(
+      geometry,
+      "cantilever",
+      "displacement",
+      true,
+      1,
+      [
+        { face: { id: "left", label: "Fixed", color: "#4da3ff", center: [-1.9, 0.18, 0], normal: [-1, 0, 0], stressValue: 10 }, value: 0, normalized: 0 },
+        { face: { id: "right", label: "Load", color: "#f59e0b", center: [1.9, 0.18, 0], normal: [1, 0, 0], stressValue: 100 }, value: 1, normalized: 1 }
+      ],
+      [{
+        id: "load-1",
+        faceId: "right",
+        type: "force",
+        value: 500,
+        units: "N",
+        direction: [0, 0, -1],
+        directionLabel: "-Z",
+        labelIndex: 0,
+        stackIndex: 0
+      }],
+      1,
+      [{ id: "support-1", faceId: "left", type: "fixed", displayLabel: "FS 1", label: "Fixed", stackIndex: 0 }],
+      []
+    );
+
+    const positions = deformed.getAttribute("position") as THREE.BufferAttribute;
+    expect(positions.getY(1)).toBeCloseTo(0.18);
+    expect(positions.getZ(1)).toBeLessThan(0);
+  });
+
   test("applies changed scalar frames to geometry colors", () => {
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute("position", new THREE.Float32BufferAttribute([0, 0, 0, 1, 0, 0], 3));

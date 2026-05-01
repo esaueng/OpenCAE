@@ -146,6 +146,28 @@ describe("result playback cache", () => {
     ]));
   });
 
+  test("packed playback preserves Z displacement sample vectors", () => {
+    const packed = packResultFieldsForPlayback([
+      {
+        ...resultField(0, [2]),
+        type: "displacement",
+        samples: [
+          { point: [0, 0, 0] as [number, number, number], normal: [0, 1, 0] as [number, number, number], value: 2, vector: [0, 0, -2] as [number, number, number] }
+        ]
+      },
+      {
+        ...resultField(1, [4]),
+        type: "displacement",
+        samples: [
+          { point: [0, 0, 0] as [number, number, number], normal: [0, 1, 0] as [number, number, number], value: 4, vector: [0, 0, -4] as [number, number, number] }
+        ]
+      }
+    ]);
+
+    expect(unpackResultFieldsForPlayback(packed!)[0]?.samples?.[0]?.vector).toEqual([0, 0, -2]);
+    expect(unpackResultFieldsForPlayback(packed!)[1]?.samples?.[0]?.vector).toEqual([0, 0, -4]);
+  });
+
   test("prepares playback frames from packed worker input while preserving memory budget planning", () => {
     const fields = [resultField(0, [0, 10]), resultField(1, [10, 30])];
     const packedFields = packResultFieldsForPlayback(fields);

@@ -417,6 +417,23 @@ export function sampleDisplayModelFor(sampleId: SampleModelId): DisplayModel {
 }
 
 function sampleLoadsFor(sampleId: SampleModelId, templateLoads: Load[], displayModel: DisplayModel, payloadLabel: string): Load[] {
+  if (sampleId === "cantilever") {
+    const loadFace = displayModel.faces.find((face) => face.id === "face-load-top");
+    return templateLoads.map((load) => load.selectionRef === "selection-load-face"
+      ? {
+          ...load,
+          type: "force",
+          parameters: {
+            ...load.parameters,
+            value: 500,
+            units: "N",
+            direction: [0, 0, -1],
+            applicationPoint: loadFace?.center ?? [1.75, 0.18, 0]
+          },
+          status: "complete"
+        }
+      : load);
+  }
   if (sampleId !== "plate") return templateLoads;
   const payloadFace = displayModel.faces.find((face) => face.id === "face-load-top");
   const volumeM3 = dimensionsVolumeM3(displayModel.dimensions);

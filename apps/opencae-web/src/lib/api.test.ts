@@ -215,10 +215,21 @@ describe("api", () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("missing", { status: 404 })));
 
     const response = await loadSampleProject("cantilever");
+    const load = response.project.studies[0]?.loads[0];
 
     expect(response.project.name).toBe("Cantilever Demo");
     expect(response.displayModel.faces.find((face) => face.id === "face-base-left")?.center).toEqual([-1.9, 0.18, 0]);
     expect(response.displayModel.faces.find((face) => face.id === "face-load-top")?.center).toEqual([1.9, 0.18, 0]);
+    expect(load).toMatchObject({
+      type: "force",
+      selectionRef: "selection-load-face",
+      parameters: {
+        value: 500,
+        units: "N",
+        direction: [0, 0, -1],
+        applicationPoint: [1.9, 0.18, 0]
+      }
+    });
   });
 
   test("creates a blank project locally when the API is unavailable", async () => {

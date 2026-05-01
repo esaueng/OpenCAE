@@ -415,6 +415,40 @@ describe("dynamic result frames", () => {
     expect(cache?.fieldsForFramePosition(0.5)[0]?.samples?.[0]?.vector).toEqual([0, -5, 1]);
   });
 
+  test("packed playback cache preserves Z-dominant dynamic frame vectors", () => {
+    const cache = createPackedResultPlaybackCache([
+      {
+        id: "displacement-0",
+        runId: "run",
+        type: "displacement",
+        location: "node",
+        values: [2],
+        min: 0,
+        max: 4,
+        units: "mm",
+        samples: [{ point: [0, 0, 0], normal: [0, 1, 0], value: 2, vector: [0, 0, -2] }],
+        frameIndex: 0,
+        timeSeconds: 0
+      },
+      {
+        id: "displacement-1",
+        runId: "run",
+        type: "displacement",
+        location: "node",
+        values: [4],
+        min: 0,
+        max: 4,
+        units: "mm",
+        samples: [{ point: [0, 0, 0], normal: [0, 1, 0], value: 4, vector: [0, 0, -4] }],
+        frameIndex: 1,
+        timeSeconds: 0.005
+      }
+    ]);
+
+    expect(cache?.fieldsForFrame(0)[0]?.samples?.[0]?.vector).toEqual([0, 0, -2]);
+    expect(cache?.fieldsForFramePosition(0.5)[0]?.samples?.[0]?.vector).toEqual([0, 0, -3]);
+  });
+
   test("normalizes zero-range render fields to the low end instead of midpoint yellow", () => {
     expect(normalizeValueForRender(12, 12, 12)).toBe(0);
     expect(normalizeValueForRender(Number.NaN, 12, 12)).toBe(0);

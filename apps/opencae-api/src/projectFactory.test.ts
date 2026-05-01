@@ -179,6 +179,27 @@ describe("projectFactory", () => {
     });
   });
 
+  test("configures the cantilever sample with an explicit Z force on the free end", () => {
+    const project = createSampleProject("cantilever", {
+      projectId: "project-cantilever",
+      studyId: "study-cantilever",
+      now: "2026-04-24T12:00:00.000Z",
+      includeSeedRun: false
+    });
+    const load = project.studies[0]?.loads[0];
+
+    expect(load).toMatchObject({
+      type: "force",
+      selectionRef: "selection-load-face",
+      parameters: {
+        value: 500,
+        units: "N",
+        direction: [0, 0, -1],
+        applicationPoint: [1.75, 0.18, 0]
+      }
+    });
+  });
+
   test("adds selectable named selections for bracket display faces", () => {
     const project = createSampleProject("bracket", {
       projectId: "project-bracket",

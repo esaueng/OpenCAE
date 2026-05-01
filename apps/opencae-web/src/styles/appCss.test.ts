@@ -45,6 +45,19 @@ describe("app CSS", () => {
     expect(css).toMatch(/\.theme-light\s+\.analysis-legend\s+\.legend-scale\s*\{[\s\S]*?border-color:\s*rgba\(82,\s*103,\s*130,\s*0\.24\)/);
   });
 
+  test("makes the analysis legend larger by default and user resizable", () => {
+    const analysisLegend = cssRule(".analysis-legend");
+
+    expect(analysisLegend).toMatch(/width:\s*360px/);
+    expect(analysisLegend).toMatch(/min-width:\s*280px/);
+    expect(analysisLegend).toMatch(/min-height:\s*176px/);
+    expect(analysisLegend).toMatch(/max-width:\s*calc\(100%\s*-\s*24px\)/);
+    expect(analysisLegend).toMatch(/max-height:\s*calc\(100%\s*-\s*24px\)/);
+    expect(analysisLegend).toMatch(/overflow:\s*auto/);
+    expect(analysisLegend).toMatch(/resize:\s*both/);
+    expect(analysisLegend).toMatch(/pointer-events:\s*auto/);
+  });
+
   test("keeps light mode shared text colors above contrast requirements", () => {
     const lightSurface = lightToken("--color-surface");
     const textTokens = ["--color-text", "--color-text-muted", "--color-text-subtle", "--color-accent", "--color-warning", "--color-error", "--color-success"];
