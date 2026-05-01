@@ -133,7 +133,7 @@ type ModelPickHandlers = {
   onClick?: (event: ThreeEvent<MouseEvent>) => void;
 };
 export const VIEWER_GIZMO_ALIGNMENT = "bottom-right";
-export const VIEWER_GIZMO_MARGIN: [number, number] = [154, 154];
+export const VIEWER_GIZMO_MARGIN: [number, number] = [130, 130];
 export const VIEWER_GIZMO_SCALE = 34;
 export const VIEWER_AXIS_HEAD_RADIUS = 0.21;
 export const VIEWER_AXIS_LABEL_BADGE_RADIUS = 0.145;
