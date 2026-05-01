@@ -1319,7 +1319,7 @@ img {
 
 .viewer-hud {
   position: absolute;
-  inset: auto 12px 12px auto;
+  inset: auto 52px 48px auto;
   z-index: var(--z-viewer-overlay);
   display: flex;
   align-items: flex-start;

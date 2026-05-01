@@ -147,7 +147,7 @@ export const VIEWER_AXIS_LABEL_OUTLINE_WIDTH = 0.02;
 // X/Y/Z axis labels sit beyond the cube in positive directions.
 export const VIEWER_GIZMO_AXIS_LENGTH = 1.35;
 export const VIEWER_GIZMO_LABEL_DISTANCE = 1.48;
-export const VIEWER_VIEW_CUBE_SIZE = 0.92;
+export const VIEWER_VIEW_CUBE_SIZE = 1.12;
 export const VIEWER_VIEW_CUBE_BODY_OPACITY = 0.3;
 export const VIEWER_VIEW_CUBE_FACE_OPACITY = 0.16;
 export const VIEWER_VIEW_CUBE_FACE_HOVER_OPACITY = 0.38;
