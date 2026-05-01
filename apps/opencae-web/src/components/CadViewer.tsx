@@ -938,8 +938,7 @@ function worldNormalToModelSpace(normal: THREE.Vector3) {
 }
 
 function markerDirectionInModelSpace(marker: ViewerLoadMarker) {
-  const direction = new THREE.Vector3(...marker.direction).normalize();
-  return marker.directionLabel === "Normal" ? direction : worldNormalToModelSpace(direction);
+  return new THREE.Vector3(...marker.direction).normalize();
 }
 
 function labelLaneOffset(index: number) {
@@ -2065,6 +2064,9 @@ export function applyResultFrameToGeometry({
   } else {
     applyLocalResultPositions(position.array as Float32Array, basePositions, displacementField, displacementMapping, smoothDisplacementInterpolator, showDeformed, visualScale);
   }
+  if (DEBUG_RESULTS) {
+    logViewerResultDirectionAudit(position.array as Float32Array, basePositions, displacementField);
+  }
   if (DEBUG_PERF) displacementMs = performance.now() - displacementStart;
 
   position.needsUpdate = true;
@@ -2321,6 +2323,54 @@ function mappedDisplacementVector(
   }
   if (totalWeight <= 0) return [0, 0, 0];
   return [ux / totalWeight, uy / totalWeight, uz / totalWeight];
+}
+
+function logViewerResultDirectionAudit(positionArray: Float32Array, basePositions: Float32Array, displacementField: ResultField | undefined) {
+  const delta = maxVertexDelta(positionArray, basePositions);
+  const vectors = displacementField?.samples?.map((sample) => sample.vector).filter((vector): vector is [number, number, number] => Boolean(vector)) ?? [];
+  console.info("[OpenCAE debugResults] viewer result direction audit", {
+    fieldId: displacementField?.id ?? null,
+    displacementSampleVector: vectors[0] ?? null,
+    displacementSampleDominantAxis: dominantArrayVectorAxis(vectors),
+    deformedVertexDelta: delta,
+    deformedVertexDeltaDominantAxis: delta ? dominantArrayVectorAxis([delta]) : null
+  });
+}
+
+function maxVertexDelta(positionArray: Float32Array, basePositions: Float32Array): [number, number, number] | null {
+  let maxDelta: [number, number, number] | null = null;
+  let maxMagnitude = 0;
+  for (let offset = 0; offset + 2 < basePositions.length; offset += 3) {
+    const delta: [number, number, number] = [
+      (positionArray[offset] ?? 0) - (basePositions[offset] ?? 0),
+      (positionArray[offset + 1] ?? 0) - (basePositions[offset + 1] ?? 0),
+      (positionArray[offset + 2] ?? 0) - (basePositions[offset + 2] ?? 0)
+    ];
+    const magnitude = Math.hypot(...delta);
+    if (magnitude > maxMagnitude) {
+      maxMagnitude = magnitude;
+      maxDelta = delta;
+    }
+  }
+  return maxDelta;
+}
+
+function dominantArrayVectorAxis(vectors: Array<[number, number, number]>): { axis: "x" | "y" | "z"; sign: -1 | 0 | 1 } {
+  const absolute: [number, number, number] = [0, 0, 0];
+  const signed: [number, number, number] = [0, 0, 0];
+  for (const vector of vectors) {
+    absolute[0] += Math.abs(vector[0]);
+    absolute[1] += Math.abs(vector[1]);
+    absolute[2] += Math.abs(vector[2]);
+    signed[0] += vector[0];
+    signed[1] += vector[1];
+    signed[2] += vector[2];
+  }
+  const axisIndex = absolute[0] >= absolute[1] && absolute[0] >= absolute[2] ? 0 : absolute[1] >= absolute[2] ? 1 : 2;
+  return {
+    axis: (["x", "y", "z"] as const)[axisIndex],
+    sign: signed[axisIndex] > 1e-9 ? 1 : signed[axisIndex] < -1e-9 ? -1 : 0
+  };
 }
 
 function ensureResultBoundingSphere(
@@ -4312,6 +4362,17 @@ function LoadGlyph({ marker, face, active, labelPosition }: { marker: ViewerLoad
     .add(new THREE.Vector3(0, payloadOffset.lift, 0));
   const forceLabelPosition = labelPosition ? new THREE.Vector3(...labelPosition) : loadGlyphLabelPosition(marker, face, start, normal, arrowDirection);
   const glyphAnchor = presentation.showArrow ? end.toArray() as [number, number, number] : center.toArray() as [number, number, number];
+  if (DEBUG_RESULTS) {
+    console.info("[OpenCAE debugResults] viewer load marker direction audit", {
+      id: marker.id,
+      type: marker.type,
+      rawDirection: marker.direction,
+      directionLabel: marker.directionLabel,
+      modelDirection: markerDirection.toArray(),
+      faceId: face.id,
+      faceNormal: face.normal
+    });
+  }
 
   return (
     <group>

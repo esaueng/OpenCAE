@@ -139,6 +139,13 @@ describe("RightPanel payload mass controls", () => {
     expect(markup).not.toContain('<div class="info-row"><span>Progress</span><strong>88%</strong></div>');
   });
 
+  test("does not show an assigned material before one is applied", () => {
+    const html = renderPanel("material", { study: { ...study, materialAssignments: [] } });
+
+    expect(html).toContain("No material assigned");
+    expect(html).not.toContain("bracket · all bodies");
+  });
+
   test("shows a stop processing action while a simulation is running", () => {
     const markup = renderPanel("run", { runProgress: 42 });
 

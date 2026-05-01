@@ -1,6 +1,6 @@
 import { describe, expect, test, vi } from "vitest";
 import type { ObjectStorageProvider } from "@opencae/storage";
-import type { AnalysisMesh, Load, Study } from "@opencae/schema";
+import type { AnalysisMesh, Load, ResultField, ResultSample, Study } from "@opencae/schema";
 import { benchmarkDynamicStudy, LocalMockComputeBackend, solveDynamicStudy, solveStudy } from "./index";
 
 class MemoryStorage implements ObjectStorageProvider {
@@ -89,6 +89,39 @@ describe("LocalMockComputeBackend", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  test("uses requested force load direction for displacement vectors", () => {
+    const zSolved = solveStudy(studyWithLoads([{ id: "load-z", type: "force", value: 500, direction: [0, 0, -1] }]), "run-force-z");
+    const ySolved = solveStudy(studyWithLoads([{ id: "load-y", type: "force", value: 500, direction: [0, -1, 0] }]), "run-force-y");
+
+    expect(dominantDisplacementAxis(zSolved.fields)).toEqual({ axis: "z", sign: -1 });
+    expect(dominantDisplacementAxis(ySolved.fields)).toEqual({ axis: "y", sign: -1 });
+  });
+
+  test("uses requested gravity direction for payload displacement vectors", () => {
+    const study = beamPayloadStudy("mat-aluminum-6061");
+    const solved = solveStudy({
+      ...study,
+      loads: study.loads.map((load) => ({
+        ...load,
+        parameters: { ...load.parameters, direction: [0, 0, -1] }
+      }))
+    }, "run-gravity-z");
+
+    expect(dominantDisplacementAxis(solved.fields)).toEqual({ axis: "z", sign: -1 });
+  });
+
+  test("superposes displacement vectors and reports sample magnitude", () => {
+    const solved = solveStudy(studyWithLoads([
+      { id: "load-y", type: "force", value: 500, direction: [0, -1, 0] },
+      { id: "load-z", type: "force", value: 500, direction: [0, 0, -1] }
+    ]), "run-superposed");
+    const sample = displacementSamples(solved.fields).find((candidate) => (candidate.vector?.[1] ?? 0) < 0 && (candidate.vector?.[2] ?? 0) < 0);
+
+    expect(sample?.vector?.[1]).toBeLessThan(0);
+    expect(sample?.vector?.[2]).toBeLessThan(0);
+    expect(sample?.value).toBeCloseTo(Math.hypot(...sample!.vector!), 4);
   });
 
   test("changes the solved stress field when the same total force is moved to a different face", async () => {
@@ -603,6 +636,24 @@ describe("LocalMockComputeBackend", () => {
     expect(solved.summary.maxDisplacement).toBeGreaterThan(0);
   });
 
+  test("dynamic vector frames preserve static displacement direction", () => {
+    const solved = solveDynamicStudy(
+      dynamicCantileverStudy("mat-aluminum-6061", {
+        endTime: 0.02,
+        timeStep: 0.005,
+        outputInterval: 0.005
+      }),
+      "run-dynamic-vector-direction",
+      rectangularBeamAnalysisMesh()
+    );
+
+    for (const type of ["displacement", "velocity", "acceleration"] as const) {
+      const field = solved.fields.find((candidate) => candidate.type === type && dominantDisplacementAxis([candidate]).axis === "z");
+      expect(field, `${type} frame should have a Z-dominant vector`).toBeDefined();
+      expect(dominantDisplacementAxis([field!]).sign).not.toBe(0);
+    }
+  });
+
   test("dynamic response changes with density and damping", async () => {
     vi.useFakeTimers();
     try {
@@ -833,6 +884,33 @@ function beamPayloadStudy(materialId: string, materialParameters: Record<string,
     solverSettings: {},
     validation: [],
     runs: []
+  };
+}
+
+function displacementSamples(fields: ResultField[]): ResultSample[] {
+  return fields.find((field) => field.type === "displacement")?.samples ?? [];
+}
+
+function dominantDisplacementAxis(fields: ResultField[]): { axis: "x" | "y" | "z"; sign: -1 | 0 | 1 } {
+  const samples = fields.length === 1
+    ? fields[0]?.samples ?? []
+    : displacementSamples(fields);
+  const totals = samples.reduce((sum, sample) => {
+    const vector = sample.vector ?? [0, 0, 0];
+    sum.components[0] += Math.abs(vector[0]);
+    sum.components[1] += Math.abs(vector[1]);
+    sum.components[2] += Math.abs(vector[2]);
+    sum.signed[0] += vector[0];
+    sum.signed[1] += vector[1];
+    sum.signed[2] += vector[2];
+    return sum;
+  }, { components: [0, 0, 0], signed: [0, 0, 0] } as { components: [number, number, number]; signed: [number, number, number] });
+  const axisIndex = totals.components[0] >= totals.components[1] && totals.components[0] >= totals.components[2]
+    ? 0
+    : totals.components[1] >= totals.components[2] ? 1 : 2;
+  return {
+    axis: (["x", "y", "z"] as const)[axisIndex],
+    sign: totals.signed[axisIndex] > 1e-9 ? 1 : totals.signed[axisIndex] < -1e-9 ? -1 : 0
   };
 }
 
