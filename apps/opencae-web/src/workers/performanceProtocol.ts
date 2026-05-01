@@ -1,4 +1,4 @@
-import type { AnalysisMesh, ResultField, ResultSummary, Study } from "@opencae/schema";
+import type { AnalysisMesh, DisplayModel, ResultField, ResultSummary, Study } from "@opencae/schema";
 import {
   packedResultFieldsForPlaybackTransferables,
   preparedPlaybackTransferables,
@@ -38,6 +38,8 @@ export type PerformanceWorkerPayloads = {
     runId: string;
     study: Study;
     analysisMesh?: AnalysisMesh;
+    displayModel?: DisplayModel;
+    debugResults?: boolean;
   };
   prepareResultFrame: {
     fields: ResultField[];

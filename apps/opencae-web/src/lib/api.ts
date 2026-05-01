@@ -327,7 +327,7 @@ function runSimulationLocally(study: Study, displayModel?: DisplayModel, staticB
   const runId = `run-local-${crypto.randomUUID()}`;
   localResultSolversByRunId.set(runId, () => {
     const analysisMesh = displayModel ? analysisMeshForDisplayModel(displayModel, study.meshSettings.preset) : undefined;
-    const payload = { study, runId, analysisMesh };
+    const payload = { study, runId, analysisMesh, displayModel, debugResults: debugResultsEnabled() };
     return solveLocalStudyInWorker(payload).catch(() => fallbackSolveLocalStudy(payload));
   });
   const now = new Date().toISOString();
@@ -600,6 +600,10 @@ function localSolverBackendForRun(study: Study, staticBackendOverride?: "local_d
   if (study.type === "dynamic_structural") return "local-dynamic-newmark";
   if (isBeamDemoStudyForLocalRun(study)) return "local-beam-demo-euler-bernoulli";
   return "local-heuristic-surface";
+}
+
+function debugResultsEnabled(): boolean {
+  return typeof window !== "undefined" && new URLSearchParams(window.location.search).get("debugResults") === "1";
 }
 
 function isBeamDemoStudyForLocalRun(study: Study): boolean {
