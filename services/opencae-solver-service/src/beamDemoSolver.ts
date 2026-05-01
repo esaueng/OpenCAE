@@ -1,6 +1,7 @@
 import { effectiveMaterialProperties, starterMaterials } from "@opencae/materials";
 import { assessResultFailure } from "@opencae/schema";
 import type { AnalysisMesh, DisplayModel, Load, Material, ResultField, ResultSample, ResultSummary, Study } from "@opencae/schema";
+import { inferCriticalPrintAxis } from "@opencae/study-core";
 
 type Vec3 = [number, number, number];
 
@@ -97,7 +98,11 @@ export function isBeamDemoStudy(study: Study): boolean {
     .join(" ")
     .toLowerCase();
   const projectText = `${study.projectId} ${study.name}`.toLowerCase();
-  return selectionText.includes("payload") || selectionText.includes("beam body") || projectText.includes("beam");
+  return selectionText.includes("payload")
+    || selectionText.includes("beam body")
+    || selectionText.includes("free end load")
+    || projectText.includes("beam")
+    || projectText.includes("cantilever");
 }
 
 export function solveBeamDemoStudy(study: Study, runId: string, optionsInput?: AnalysisMesh | BeamDemoSolveOptions): BeamDemoSolveResult {
@@ -105,23 +110,26 @@ export function solveBeamDemoStudy(study: Study, runId: string, optionsInput?: A
   const beamModel = options.beamModel ?? DEFAULT_BEAM_DEMO_PHYSICAL_MODEL;
   const material = materialForStudy(study);
   const materialParameters = materialParametersForStudy(study);
-  const effectiveMaterial = effectiveMaterialProperties(material, materialParameters);
+  const effectiveMaterial = effectiveMaterialProperties(material, materialParameters, { criticalLayerAxis: beamCriticalPrintAxis(study) });
   const load = primaryBeamLoad(study);
   if (!load) throw new Error("Beam Demo solver requires a force or gravity payload load.");
   const coordinate = beamDemoCoordinateForStudy(study, beamModel, load);
   const loadForceN = equivalentLoadForce(load, beamModel);
   const loadStation = coordinate.payloadStation;
-  const elementCount = BEAM_ELEMENT_COUNT;
+  const elementCount = beamElementCountForStudy(study);
   const nodeCount = elementCount + 1;
   const lengthM = beamModel.beamLengthMm / 1000;
   const heightM = beamModel.beamHeightMm / 1000;
   const youngsModulusPa = Math.max(effectiveMaterial.youngsModulus, 1);
   const i = secondMomentOfAreaM4(beamModel);
   const c = heightM / 2;
-  const a = clamp01(loadStation) * lengthM;
+  const normalizedLoadStation = isEndLoadStation(loadStation) ? 1 : clamp01(loadStation);
+  const a = normalizedLoadStation * lengthM;
+  const tipDisplacementM = cantileverDisplacementM(loadForceN, lengthM, a, youngsModulusPa, i);
+  const tipDisplacementMm = tipDisplacementM * 1000;
   const displacements = Array.from({ length: nodeCount }, (_, index) => {
-    const x = (index / elementCount) * lengthM;
-    return cantileverDisplacementM(loadForceN, x, a, youngsModulusPa, i);
+    const s = index / elementCount;
+    return (tipDisplacementMm * cantileverShapeForStation(s, normalizedLoadStation)) / 1000;
   });
   const stressMpa = Array.from({ length: nodeCount }, (_, index) => {
     const x = (index / elementCount) * lengthM;
@@ -137,10 +145,13 @@ export function solveBeamDemoStudy(study: Study, runId: string, optionsInput?: A
     value: round(Math.abs(value), 6),
     vector: roundVector(scale(coordinate.loadDirection, value), 6)
   }));
-  const stressSamples = beamSamples(coordinate, stressMpa, (value) => ({
-    value: round(value, 6),
-    vonMisesStressPa: round(value * 1_000_000, 2)
-  }));
+  const stressSamples = beamSamples(coordinate, stressMpa, (value, _index, source) => {
+    const sampleStress = value * stressFiberFactor(source);
+    return {
+      value: round(sampleStress, 6),
+      vonMisesStressPa: round(sampleStress * 1_000_000, 2)
+    };
+  });
   const safetySamples = beamSamples(coordinate, safetyValues, (value) => ({ value: round(value, 6) }));
   const fields: ResultField[] = [
     fieldFor(runId, "stress", stressMpa.map((value) => round(value, 6)), "MPa", stressSamples),
@@ -165,7 +176,7 @@ export function solveBeamDemoStudy(study: Study, runId: string, optionsInput?: A
     beamAxis: coordinate.beamAxis,
     fixedEnd: coordinate.fixedEnd,
     freeEnd: coordinate.beamFreeEnd,
-    loadStation,
+    loadStation: normalizedLoadStation,
     loadForceN: summary.reactionForce,
     elementCount,
     maxDisplacementMm: summary.maxDisplacement,
@@ -183,6 +194,7 @@ export function solveBeamDemoStudy(study: Study, runId: string, optionsInput?: A
   };
   if (options.debugResults) {
     auditBeamDemoInputs(study, options.displayModel, beamModel, { summary, material: effectiveMaterial, loadForceN });
+    auditCantileverDebugResults(coordinate, normalizedLoadStation, tipDisplacementMm);
   }
   return {
     summary,
@@ -206,12 +218,69 @@ function cantileverDisplacementM(loadForceN: number, x: number, loadStationM: nu
   return loadForceN * loadStationM ** 2 * (3 * x - loadStationM) / denominator;
 }
 
+export function endLoadCantileverShape(s: number): number {
+  const t = clamp01(s);
+  return 0.5 * t * t * (3 - t);
+}
+
+export function endLoadCantileverSlope(s: number, tipDisplacement: number, length: number): number {
+  const t = clamp01(s);
+  const safeLength = Math.max(Math.abs(length), 1e-9);
+  return (tipDisplacement / safeLength) * (3 * t - 1.5 * t * t);
+}
+
+export function pointLoadCantileverShape(s: number, a: number): number {
+  const x = clamp01(s);
+  const aa = Math.max(1e-6, Math.min(1, a));
+
+  if (x <= aa) {
+    return x * x * (3 * aa - x);
+  }
+
+  return aa * aa * (3 * x - aa);
+}
+
+export function normalizedPointLoadCantileverShape(s: number, a: number): number {
+  const aa = Math.max(1e-6, Math.min(1, a));
+  const maxRaw = aa * aa * (3 - aa);
+  return pointLoadCantileverShape(s, aa) / Math.max(maxRaw, 1e-9);
+}
+
+function cantileverShapeForStation(s: number, loadStation: number): number {
+  return isEndLoadStation(loadStation)
+    ? endLoadCantileverShape(s)
+    : normalizedPointLoadCantileverShape(s, loadStation);
+}
+
+function isEndLoadStation(station: number): boolean {
+  return station >= 0.95;
+}
+
+function beamElementCountForStudy(study: Study): number {
+  if (study.meshSettings.preset === "ultra") return 128;
+  if (study.meshSettings.preset === "fine") return 96;
+  return BEAM_ELEMENT_COUNT;
+}
+
+function beamCriticalPrintAxis(study: Study) {
+  const faces = [...beamDemoFaces.entries()].map(([entityId, face]) => ({
+    selectionId: study.namedSelections.find((selection) => selection.geometryRefs.some((ref) => ref.entityId === entityId))?.id ?? entityId,
+    entityId,
+    center: face.center,
+    normal: face.normal
+  }));
+  return inferCriticalPrintAxis(study, faces);
+}
+
 function beamDemoCoordinateForStudy(study: Study, beamModel: BeamDemoPhysicalModel, load: Load): BeamDemoCoordinate {
   const fixedSelectionRef = study.constraints.find((constraint) => constraint.type === "fixed")?.selectionRef;
   if (!fixedSelectionRef) throw new Error("Beam Demo solver requires a fixed support on face-base-left.");
   const fixedFace = faceForSelection(study, fixedSelectionRef);
   if (!fixedFace) throw new Error("Beam Demo solver requires the fixed support face-base-left.");
-  const loadPoint = vectorFrom(load?.parameters.applicationPoint) ?? faceForSelection(study, load?.selectionRef)?.center ?? beamDemoFaces.get("face-load-top")!.center;
+  const selectedLoadFace = faceForSelection(study, load?.selectionRef);
+  const loadPoint = freeEndLoadSelection(study, load)
+    ? freeEndPointForBeamModel(study, beamModel)
+    : vectorFrom(load?.parameters.applicationPoint) ?? selectedLoadFace?.center ?? beamDemoFaces.get("face-load-top")!.center;
   const axis = normalized(beamModel.beamAxisViewer);
   const freeEnd = add(fixedFace.center, scale(axis, DISPLAY_BEAM_LENGTH));
   const payloadStation = load.type === "gravity"
@@ -226,6 +295,42 @@ function beamDemoCoordinateForStudy(study: Study, beamModel: BeamDemoPhysicalMod
     payloadStation,
     loadDirection
   };
+}
+
+function freeEndLoadSelection(study: Study, load: Load): boolean {
+  const selection = study.namedSelections.find((candidate) => candidate.id === load.selectionRef);
+  const selectionText = [
+    selection?.name,
+    ...(selection?.geometryRefs.map((ref) => ref.label) ?? [])
+  ].join(" ").toLowerCase();
+  return load.type === "force" && selectionText.includes("free end");
+}
+
+function freeEndPointForBeamModel(study: Study, beamModel: BeamDemoPhysicalModel): Vec3 {
+  const fixedSelectionRef = study.constraints.find((constraint) => constraint.type === "fixed")?.selectionRef;
+  const fixedFace = faceForSelection(study, fixedSelectionRef) ?? beamDemoFaces.get("face-base-left")!;
+  return add(fixedFace.center, scale(normalized(beamModel.beamAxisViewer), DISPLAY_BEAM_LENGTH));
+}
+
+function auditCantileverDebugResults(coordinate: BeamDemoCoordinate, loadStation: number, tipDisplacement: number) {
+  const stations = [0, 0.25, 0.5, 0.75, 1];
+  const audit = {
+    beamAxis: coordinate.beamAxis,
+    fixedEnd: coordinate.fixedEnd,
+    loadEnd: coordinate.beamFreeEnd,
+    loadDirection: coordinate.loadDirection,
+    tipDisplacement: round(Math.abs(tipDisplacement), 6),
+    stationSamples: stations.map((s) => {
+      const displacementMagnitude = Math.abs(tipDisplacement * cantileverShapeForStation(s, loadStation));
+      return {
+        s: round(s, 4),
+        displacementMagnitude: round(displacementMagnitude, 6),
+        normalizedDisplacement: round(displacementMagnitude / Math.max(Math.abs(tipDisplacement), 1e-12), 4)
+      };
+    })
+  };
+  console.info("[OpenCAE debugResults] cantilever deformation audit", audit);
+  return audit;
 }
 
 export function auditBeamDemoInputs(
@@ -286,7 +391,7 @@ function normalizeBeamDemoSolveOptions(optionsInput: AnalysisMesh | BeamDemoSolv
 function beamSamples(
   coordinate: BeamDemoCoordinate,
   nodeValues: number[],
-  valueForNode: (value: number, index: number) => Pick<ResultSample, "value" | "vector" | "vonMisesStressPa">
+  valueForNode: (value: number, index: number, source: string) => Pick<ResultSample, "value" | "vector" | "vonMisesStressPa">
 ): ResultSample[] {
   const side = normalized(cross(coordinate.beamAxis, coordinate.loadDirection));
   const transverse = normalized(cross(side, coordinate.beamAxis));
@@ -307,11 +412,15 @@ function beamSamples(
         normal: [0, 1, 0],
         nodeId: `beam-node-${index}`,
         source,
-        ...valueForNode(nodeValues[index] ?? 0, index)
+        ...valueForNode(nodeValues[index] ?? 0, index, source)
       });
     }
   }
   return samples;
+}
+
+function stressFiberFactor(source: string): number {
+  return source === "beam-demo-centerline" ? 0.4 : 1;
 }
 
 function fieldFor(runId: string, type: ResultField["type"], values: number[], units: string, samples: ResultSample[]): ResultField {
