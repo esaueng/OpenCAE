@@ -201,14 +201,15 @@ export type LocalSolveOptions = AnalysisMesh | BeamDemoSolveOptions;
 export function solveStudy(study: Study, runId: string, optionsInput?: LocalSolveOptions) {
   const options = normalizeLocalSolveOptions(optionsInput);
   if (isBeamDemoStudy(study)) return solveBeamDemoStudy(study, runId, options);
-  return solveHeuristicSurfaceStudy(study, runId, options.analysisMesh);
+  return solveHeuristicSurfaceStudy(study, runId, options);
 }
 
-export function solveHeuristicSurfaceStudy(study: Study, runId: string, analysisMeshInput?: AnalysisMesh) {
+export function solveHeuristicSurfaceStudy(study: Study, runId: string, optionsInput?: LocalSolveOptions) {
+  const options = normalizeLocalSolveOptions(optionsInput);
   const faces = faceModelsForStudy(study);
   const supports = supportFacesForStudy(study, faces);
   const loads = study.loads.map((load) => loadModelFor(load, faces, supports)).filter((load): load is LoadModel => Boolean(load));
-  const analysisMesh = analysisMeshInput ?? analysisMeshForFaces(faces, study.meshSettings.preset);
+  const analysisMesh = options.analysisMesh ?? analysisMeshForFaces(faces, study.meshSettings.preset);
   const material = materialForStudy(study);
   const materialParameters = materialParametersForStudy(study);
   const criticalLayerAxis = inferCriticalPrintAxis(study, faces);
@@ -232,9 +233,10 @@ export function solveHeuristicSurfaceStudy(study: Study, runId: string, analysis
     return sampleResult(sample, value, 2, { source: "local_detailed", vonMisesStressPa: round(value * 1_000_000, 1) });
   });
   const displacementSamples = analysisMesh.samples.map((sample) => {
-    const value = displacementAtSample(sample, loads, faces, analysisMesh) * response.displacementScale;
+    const vector = roundVector(displacementVectorAtSample(sample, loads, faces, analysisMesh, response.displacementScale), 4);
+    const value = length(vector);
     return sampleResult(sample, value, 4, {
-      vector: roundVector(displacementVectorAtSample(sample, loads, faces, analysisMesh, response.displacementScale), 4)
+      vector
     });
   });
   const safetySamples = stressSamples.map((sample) => sampleResult(sample, Math.max(0.05, response.yieldMpa / Math.max(sample.value, 0.001)), 3));
@@ -259,6 +261,7 @@ export function solveHeuristicSurfaceStudy(study: Study, runId: string, analysis
     ...summaryBase,
     failureAssessment: assessResultFailure(summaryBase)
   };
+  if (options.debugResults) logSolverDirectionAudit(study, loads, fields);
   return { summary, fields, faceCount: faces.length, loadCount: loads.length, totalAppliedLoad: summary.reactionForce, material, effectiveMaterial, materialParameters, analysisSampleCount: analysisMesh.samples.length, solverBackend: "local-heuristic-surface" as const };
 }
 
@@ -304,6 +307,7 @@ export function solveDynamicStudy(study: Study, runId: string, optionsInput?: Lo
     minSafetyFactor = Math.min(minSafetyFactor, safetyFrame.min);
   }
   stabilizeDynamicFieldRanges(fields);
+  if (options.debugResults) logSolverDirectionAudit(study, [], fields);
 
   const summaryBase = {
     maxStress: round(peakStress, 1),
@@ -519,6 +523,78 @@ function stabilizeDynamicFieldRanges(fields: ResultField[]) {
   }
 }
 
+function logSolverDirectionAudit(study: Study, loads: LoadModel[], fields: ResultField[]) {
+  const displacementFields = fields.filter((field) => field.type === "displacement" || field.type === "velocity" || field.type === "acceleration");
+  console.info("[OpenCAE debugResults] solver direction audit", {
+    studyId: study.id,
+    studyType: study.type,
+    loads: loads.map((load) => ({
+      id: load.load.id,
+      type: load.load.type,
+      rawDirection: load.load.parameters.direction ?? null,
+      parsedDirection: vectorFromUnknown(load.load.parameters.direction),
+      normalizedDirection: load.direction,
+      applicationPoint: pointOrDefault(load.load.parameters.applicationPoint, load.face.center),
+      selectedLoadFace: {
+        id: load.face.entityId,
+        selectionId: load.face.selectionId,
+        label: load.face.label,
+        center: load.face.center,
+        normal: load.face.normal
+      },
+      selectedSupportFace: {
+        id: load.nearestSupport.entityId,
+        selectionId: load.nearestSupport.selectionId,
+        label: load.nearestSupport.label,
+        center: load.nearestSupport.center,
+        normal: load.nearestSupport.normal
+      }
+    })),
+    fields: displacementFields.map((field) => ({
+      id: field.id,
+      type: field.type,
+      frameIndex: field.frameIndex,
+      timeSeconds: field.timeSeconds,
+      firstSampleVectors: field.samples?.slice(0, 5).map((sample) => sample.vector ?? null) ?? [],
+      maxVector: maxResultSampleVector(field),
+      dominantAxis: dominantVectorAxis(field.samples?.map((sample) => sample.vector).filter((vector): vector is Vec3 => Boolean(vector)) ?? [])
+    }))
+  });
+}
+
+function maxResultSampleVector(field: ResultField): Vec3 | null {
+  const samples = field.samples ?? [];
+  let maxVector: Vec3 | null = null;
+  let maxMagnitude = -1;
+  for (const sample of samples) {
+    if (!sample.vector) continue;
+    const magnitude = length(sample.vector);
+    if (magnitude > maxMagnitude) {
+      maxMagnitude = magnitude;
+      maxVector = sample.vector;
+    }
+  }
+  return maxVector;
+}
+
+function dominantVectorAxis(vectors: Vec3[]): { axis: "x" | "y" | "z"; sign: -1 | 0 | 1 } {
+  const absolute: Vec3 = [0, 0, 0];
+  const signed: Vec3 = [0, 0, 0];
+  for (const vector of vectors) {
+    absolute[0] += Math.abs(vector[0]);
+    absolute[1] += Math.abs(vector[1]);
+    absolute[2] += Math.abs(vector[2]);
+    signed[0] += vector[0];
+    signed[1] += vector[1];
+    signed[2] += vector[2];
+  }
+  const axisIndex = absolute[0] >= absolute[1] && absolute[0] >= absolute[2] ? 0 : absolute[1] >= absolute[2] ? 1 : 2;
+  return {
+    axis: (["x", "y", "z"] as const)[axisIndex],
+    sign: signed[axisIndex] > 1e-9 ? 1 : signed[axisIndex] < -1e-9 ? -1 : 0
+  };
+}
+
 function dynamicRangeDigits(type: ResultField["type"]) {
   if (type === "stress") return 1;
   if (type === "displacement" || type === "velocity" || type === "acceleration") return 4;
@@ -608,7 +684,7 @@ function supportFacesForStudy(study: Study, faces: FaceModel[]): FaceModel[] {
 function loadModelFor(load: Load, faces: FaceModel[], supports: FaceModel[]): LoadModel | undefined {
   const face = faces.find((candidate) => candidate.selectionId === load.selectionRef);
   if (!face) return undefined;
-  const direction = vectorOrDefault(load.parameters.direction, load.type === "pressure" ? scale(face.normal, -1) : [0, -1, 0]);
+  const direction = vectorOrDefault(load.parameters.direction, defaultDirectionForLoad(load, face));
   const magnitude = loadEquivalentForce(load, face);
   const force = scale(direction, magnitude);
   const applicationPoint = pointOrDefault(load.parameters.applicationPoint, face.center);
@@ -625,6 +701,11 @@ function loadModelFor(load: Load, faces: FaceModel[], supports: FaceModel[]): Lo
     leverArm: length(lever),
     moment: length(momentVector)
   };
+}
+
+function defaultDirectionForLoad(load: Load, face: FaceModel): Vec3 {
+  if (load.type === "pressure") return scale(face.normal, -1);
+  return [0, -1, 0];
 }
 
 function stressAtFace(face: FaceModel, loads: LoadModel[], faces: FaceModel[]): number {
@@ -764,7 +845,7 @@ function displacementVectorAtSample(sample: AnalysisSample, loads: LoadModel[], 
   if (!loads.length) return [0, 0, 0];
   return loads.reduce<Vec3>((sum, load) => {
     const magnitude = displacementAtSampleForLoad(sample, load, faces, analysisMesh) * displacementScale;
-    const contribution = scale(displacementDirectionForLoad(load), magnitude);
+    const contribution = scale(load.direction, magnitude);
     return [sum[0] + contribution[0], sum[1] + contribution[1], sum[2] + contribution[2]];
   }, [0, 0, 0]);
 }
@@ -772,19 +853,6 @@ function displacementVectorAtSample(sample: AnalysisSample, loads: LoadModel[], 
 function cantileverDisplacementShape(travel: number): number {
   const s = clamp(travel, 0, 1);
   return 0.5 * s * s * (3 - s);
-}
-
-function displacementDirectionForLoad(load: LoadModel): Vec3 {
-  if (isBuiltInBeamPayloadGravityLoad(load)) return [0, -1, 0];
-  return load.direction;
-}
-
-function isBuiltInBeamPayloadGravityLoad(load: LoadModel): boolean {
-  const label = load.face.label.toLowerCase();
-  return load.load.type === "gravity"
-    && label.includes("payload")
-    && Math.abs(load.direction[2]) > 0.72
-    && Math.abs(load.face.normal[1]) > 0.72;
 }
 
 function displacementAtSampleForLoad(sample: AnalysisSample, load: LoadModel, _faces: FaceModel[], analysisMesh: AnalysisMesh): number {
@@ -931,8 +999,18 @@ function nearestFace(point: Vec3, faces: FaceModel[]): FaceModel | undefined {
 }
 
 function vectorOrDefault(value: unknown, fallback: Vec3): Vec3 {
-  if (!Array.isArray(value) || value.length !== 3) return normalize(fallback);
-  return normalize([Number(value[0] ?? 0), Number(value[1] ?? 0), Number(value[2] ?? 0)]);
+  const parsed = vectorFromUnknown(value);
+  const fallbackDirection = normalize(fallback);
+  if (!parsed) return fallbackDirection;
+  const parsedLength = length(parsed);
+  if (!Number.isFinite(parsedLength) || parsedLength <= 1e-12) return fallbackDirection;
+  return scale(parsed, 1 / parsedLength);
+}
+
+function vectorFromUnknown(value: unknown): Vec3 | null {
+  if (!Array.isArray(value) || value.length !== 3) return null;
+  const vector: Vec3 = [Number(value[0]), Number(value[1]), Number(value[2])];
+  return vector.every(Number.isFinite) ? vector : null;
 }
 
 function pointOrDefault(value: unknown, fallback: Vec3): Vec3 {
