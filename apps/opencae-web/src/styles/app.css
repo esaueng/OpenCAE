@@ -1464,11 +1464,16 @@ img {
   bottom: 12px;
   left: 12px;
   z-index: var(--z-viewer-overlay);
-  width: 220px;
+  box-sizing: border-box;
+  width: 360px;
+  min-width: 280px;
+  min-height: 176px;
+  max-width: calc(100% - 24px);
+  max-height: calc(100% - 24px);
   display: grid;
   grid-template-columns: auto 1fr;
-  gap: 3px 10px;
-  padding: 9px 10px;
+  gap: 6px 12px;
+  padding: 14px 16px;
   color: var(--color-text);
   background: rgba(17, 24, 33, 0.85);
   border: var(--border-thin);
@@ -1476,7 +1481,9 @@ img {
   font-family: var(--font-mono);
   font-size: var(--fs-mini);
   backdrop-filter: blur(8px);
-  pointer-events: none;
+  overflow: auto;
+  resize: both;
+  pointer-events: auto;
 }
 
 .theme-light .analysis-legend {
