@@ -752,14 +752,15 @@ function ViewCubeFace({
         opacity={hovered ? 0.9 : 0.42}
         depthTest={false}
       />
-      <GizmoTextLabel
-        color={hovered ? "#ffffff" : "#e4eef8"}
-        fontSize={VIEWER_VIEW_CUBE_FACE_LABEL_FONT_SIZE}
-        opacity={hovered ? 1 : 0.95}
-        position={[0, 0, 0.036]}
-      >
-        {label}
-      </GizmoTextLabel>
+      <Billboard position={[0, 0, 0.036]} renderOrder={4}>
+        <GizmoTextLabel
+          color={hovered ? "#ffffff" : "#e4eef8"}
+          fontSize={VIEWER_VIEW_CUBE_FACE_LABEL_FONT_SIZE}
+          opacity={hovered ? 1 : 0.95}
+        >
+          {label}
+        </GizmoTextLabel>
+      </Billboard>
     </group>
   );
 }
