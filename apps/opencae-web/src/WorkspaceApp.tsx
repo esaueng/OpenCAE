@@ -455,7 +455,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         parameters: {
           value,
           units: unitsForLoadType(draftLoadType),
-          direction: directionVectorForLabel(draftLoadDirection, face),
+          direction: directionVectorForLabel(draftLoadDirection, face, displayModel ?? undefined),
           applicationPoint: point,
           ...(isPayloadMass && selectedPayloadObject ? { payloadObject: selectedPayloadObject } : {}),
           ...payloadMetadata
@@ -463,15 +463,15 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         status: "complete"
       }
     };
-  }, [activeStep, draftLoadDirection, draftLoadType, draftLoadValue, draftPayloadPreview, selectedFace, selectedLoadPoint, selectedPayloadObject, study]);
+  }, [activeStep, displayModel, draftLoadDirection, draftLoadType, draftLoadValue, draftPayloadPreview, selectedFace, selectedLoadPoint, selectedPayloadObject, study]);
 
   const loadMarkers = useMemo<ViewerLoadMarker[]>(() => {
-    const markers = createViewerLoadMarkers({ study, loadPreviews: previewLoadEdit ? [previewLoadEdit] : [], draftLoadPreview });
+    const markers = createViewerLoadMarkers({ study, loadPreviews: previewLoadEdit ? [previewLoadEdit] : [], draftLoadPreview, displayModel: displayModel ?? undefined });
     return markers.map((marker) => {
       const converted = loadValueForUnits(marker.value, marker.units, displayUnitSystem);
       return { ...marker, value: converted.value, units: converted.units };
     });
-  }, [displayUnitSystem, draftLoadPreview, previewLoadEdit, study]);
+  }, [displayModel, displayUnitSystem, draftLoadPreview, previewLoadEdit, study]);
   const supportMarkers = useMemo<ViewerSupportMarker[]>(() => {
     if (!study) return [];
     const faceCounts = new Map<string, number>();
@@ -761,7 +761,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       id: `load-${crypto.randomUUID()}`,
       type,
       selectionRef: selection.id,
-      parameters: { value, units: unitsForLoadType(type), direction: directionVectorForLabel(direction, face), ...(applicationPoint ? { applicationPoint } : {}), ...(payloadObject ? { payloadObject } : {}), ...(type === "gravity" ? payloadMetadata : {}) },
+      parameters: { value, units: unitsForLoadType(type), direction: directionVectorForLabel(direction, face, displayModel ?? undefined), ...(applicationPoint ? { applicationPoint } : {}), ...(payloadObject ? { payloadObject } : {}), ...(type === "gravity" ? payloadMetadata : {}) },
       status: "complete"
     };
     await updateStudy(
@@ -1210,7 +1210,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
               return;
             }
             if (selection) {
-              updateStudy(addLoad(study.id, type, value, selection.id, directionVectorForLabel(direction, face), applicationPoint, payloadObject, study, payloadMetadata));
+              updateStudy(addLoad(study.id, type, value, selection.id, directionVectorForLabel(direction, face, displayModel ?? undefined), applicationPoint, payloadObject, study, payloadMetadata));
               setSelectedLoadPoint(null);
               if (type === "gravity") setSelectedPayloadObject(null);
               return;

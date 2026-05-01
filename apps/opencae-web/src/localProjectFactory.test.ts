@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { attachUploadedModelToProject, createLocalBlankProject, createLocalStaticStressStudy, uploadedDisplayModelFor } from "./localProjectFactory";
+import { attachUploadedModelToProject, createLocalBlankProject, createLocalSampleProject, createLocalStaticStressStudy, uploadedDisplayModelFor } from "./localProjectFactory";
 
 const sizedAsciiStlBase64 = btoa(`
 solid beam
@@ -42,5 +42,12 @@ describe("local project factory workflow", () => {
     expect(study.constraints).toEqual([]);
     expect(study.loads).toEqual([]);
     expect(study.meshSettings.status).toBe("not_started");
+  });
+
+  test("seeds cantilever loads in model space for viewer global -Z", async () => {
+    const response = await createLocalSampleProject("cantilever", "static_stress", "2026-04-28T12:00:00.000Z");
+    const load = response.project.studies[0]?.loads[0];
+
+    expect(load?.parameters.direction).toEqual([0, -1, 0]);
   });
 });

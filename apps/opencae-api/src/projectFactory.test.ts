@@ -78,7 +78,7 @@ describe("projectFactory", () => {
       expect(sampleDisplayModelFor(sampleId).dimensions?.x).toBeGreaterThan(0);
       expect(project.studies[0]?.geometryScope[0]?.label.toLowerCase()).toContain(expectedSampleName);
       expect(project.studies[0]?.namedSelections.filter((selection) => selection.entityType === "face")).toHaveLength(sampleDisplayModelFor(sampleId).faces.length);
-      expect(project.studies[0]?.loads[0]?.parameters.direction).toEqual(sampleId === "plate" ? [0, -1, 0] : [0, 0, -1]);
+      expect(project.studies[0]?.loads[0]?.parameters.direction).toEqual(sampleId === "bracket" ? [0, 0, -1] : [0, -1, 0]);
     }
   });
 
@@ -194,7 +194,7 @@ describe("projectFactory", () => {
       parameters: {
         value: 500,
         units: "N",
-        direction: [0, 0, -1],
+        direction: [0, -1, 0],
         applicationPoint: [1.75, 0.18, 0]
       }
     });

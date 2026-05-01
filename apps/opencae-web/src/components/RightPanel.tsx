@@ -409,6 +409,7 @@ function SupportsPanel({ selectedFace, study, onAddSupport, onUpdateSupport, onR
 
 function LoadsPanel({
   project,
+  displayModel,
   selectedFace,
   study,
   draftLoadType,
@@ -525,7 +526,7 @@ function LoadsPanel({
       </label>
       <button className="outline-action wide" disabled={!canAddDraftLoad} onClick={() => canAddDraftLoad && onAddLoad(draftLoadType, effectiveDraftValue, selectedFromViewport?.id, draftLoadDirection, payloadMetadata)}><Plus size={18} />{addLabel}</button>
       <SectionTitle>Applied</SectionTitle>
-      <LoadEditorList study={study} unitSystem={project.unitSystem} onUpdateLoad={onUpdateLoad} onPreviewLoadEdit={onPreviewLoadEdit} onRemoveLoad={onRemoveLoad} />
+      <LoadEditorList study={study} displayModel={displayModel} unitSystem={project.unitSystem} onUpdateLoad={onUpdateLoad} onPreviewLoadEdit={onPreviewLoadEdit} onRemoveLoad={onRemoveLoad} />
     </Panel>
   );
 }
@@ -614,10 +615,10 @@ function PayloadMassControls({
   );
 }
 
-function LoadEditorList({ study, unitSystem, onUpdateLoad, onPreviewLoadEdit, onRemoveLoad }: { study: Study; unitSystem: UnitSystem; onUpdateLoad: (load: Load) => void; onPreviewLoadEdit: (load: Load | null) => void; onRemoveLoad: (loadId: string) => void }) {
+function LoadEditorList({ study, displayModel, unitSystem, onUpdateLoad, onPreviewLoadEdit, onRemoveLoad }: { study: Study; displayModel: DisplayModel; unitSystem: UnitSystem; onUpdateLoad: (load: Load) => void; onPreviewLoadEdit: (load: Load | null) => void; onRemoveLoad: (loadId: string) => void }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   if (!study.loads.length) return <EmptyEditableList title="Loads" />;
-  const loadLabelsById = new Map(createViewerLoadMarkers({ study }).map((marker) => [marker.id, loadMarkerOrdinalLabel(marker)]));
+  const loadLabelsById = new Map(createViewerLoadMarkers({ study, displayModel }).map((marker) => [marker.id, loadMarkerOrdinalLabel(marker)]));
 
   return (
     <div className="editable-list">
@@ -654,7 +655,7 @@ function LoadEditorList({ study, unitSystem, onUpdateLoad, onPreviewLoadEdit, on
             <div className="editable-summary">
               <span className={`item-icon load-type-icon ${load.type}`}><LoadTypeIcon type={load.type} /></span>
               <strong>{loadLabel ? `${loadLabel} · ` : ""}{loadTypeLabel(load.type)} · {formatNumber(displayLoad.value)} {displayLoad.units}</strong>
-              <small>{label}{pointLabel} · {directionLabelForLoad(load)} direction{equivalentForce}</small>
+              <small>{label}{pointLabel} · {directionLabelForLoad(load, displayModel)} direction{equivalentForce}</small>
               <button
                 className="remove-glyph"
                 type="button"
@@ -671,6 +672,7 @@ function LoadEditorList({ study, unitSystem, onUpdateLoad, onPreviewLoadEdit, on
               <LoadEditForm
                 load={load}
                 study={study}
+                displayModel={displayModel}
                 unitSystem={unitSystem}
                 onPreviewChange={onPreviewLoadEdit}
                 onCancel={() => setEditingId(null)}
@@ -688,13 +690,13 @@ function LoadEditorList({ study, unitSystem, onUpdateLoad, onPreviewLoadEdit, on
   );
 }
 
-function LoadEditForm({ load, study, unitSystem, onSave, onCancel, onPreviewChange }: { load: Load; study: Study; unitSystem: UnitSystem; onSave: (load: Load) => void; onCancel: () => void; onPreviewChange: (load: Load | null) => void }) {
+function LoadEditForm({ load, study, displayModel, unitSystem, onSave, onCancel, onPreviewChange }: { load: Load; study: Study; displayModel: DisplayModel; unitSystem: UnitSystem; onSave: (load: Load) => void; onCancel: () => void; onPreviewChange: (load: Load | null) => void }) {
   const [type, setType] = useState<"force" | "pressure" | "gravity">(load.type);
   const [value, setValue] = useState(() => {
     const initialUnits = String(load.parameters.units ?? unitsForLoadType(load.type));
     return formatInputValue(loadValueForUnits(Number(load.parameters.value ?? 500), initialUnits, unitSystem).value);
   });
-  const [direction, setDirection] = useState<LoadDirectionLabel>(directionLabelForLoad(load));
+  const [direction, setDirection] = useState<LoadDirectionLabel>(directionLabelForLoad(load, displayModel));
   const [payloadMaterialId, setPayloadMaterialId] = useState(String(load.parameters.payloadMaterialId ?? "payload-steel"));
   const [payloadMassMode, setPayloadMassMode] = useState<PayloadMassMode>(load.parameters.payloadMassMode === "manual" ? "manual" : "material");
   const units = unitsForLoadType(type);
@@ -718,7 +720,7 @@ function LoadEditForm({ load, study, unitSystem, onSave, onCancel, onPreviewChan
     normal: direction === "Normal" && Array.isArray(load.parameters.direction) ? load.parameters.direction as [number, number, number] : [0, 1, 0],
     stressValue: 0
   }), [direction, load.parameters.direction, selectedFace?.entityId, selectedFace?.label]);
-  const previewLoad = useMemo(() => editedLoadForForm(load, type, value, displayUnits, units, direction, directionFace, payloadMetadata, editedValue), [direction, directionFace, displayUnits, editedValue, load, payloadMetadata, type, units, value]);
+  const previewLoad = useMemo(() => editedLoadForForm(load, type, value, displayUnits, units, direction, directionFace, displayModel, payloadMetadata, editedValue), [direction, directionFace, displayModel, displayUnits, editedValue, load, payloadMetadata, type, units, value]);
 
   useEffect(() => {
     onPreviewChange(previewLoad);
@@ -783,7 +785,7 @@ function LoadEditForm({ load, study, unitSystem, onSave, onCancel, onPreviewChan
   );
 }
 
-function editedLoadForForm(load: Load, type: LoadType, value: string, displayUnits: string, units: string, direction: LoadDirectionLabel, directionFace: DisplayFace, payloadMetadata: PayloadLoadMetadata = {}, overrideValue?: number): Load {
+function editedLoadForForm(load: Load, type: LoadType, value: string, displayUnits: string, units: string, direction: LoadDirectionLabel, directionFace: DisplayFace, displayModel: DisplayModel, payloadMetadata: PayloadLoadMetadata = {}, overrideValue?: number): Load {
   return {
     ...load,
     type,
@@ -791,7 +793,7 @@ function editedLoadForForm(load: Load, type: LoadType, value: string, displayUni
       ...load.parameters,
       value: overrideValue ?? loadValueForUnits(Number(value), displayUnits, "SI").value,
       units,
-      direction: directionVectorForLabel(direction, directionFace),
+      direction: directionVectorForLabel(direction, directionFace, displayModel),
       ...(type === "gravity" ? payloadMetadata : {})
     }
   };
