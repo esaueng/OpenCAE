@@ -151,7 +151,7 @@ export const COPY = {
       solverSection: 'Solver',
       solverInfo: {
         backend: 'Backend',
-        backendValue: 'local-static-superposition',
+        backendValue: 'local-heuristic-surface',
         version: 'Version',
         versionValue: '0.1.0',
         runner: 'Runner',

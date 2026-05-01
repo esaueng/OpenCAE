@@ -14,6 +14,7 @@ WIDTH_MM = 5.0
 HEIGHT_MM = 15.0
 YIELD_STRESS_PA = 276_000_000.0
 BEAM_DEPTH_DISPLAY = 0.36
+CLOUD_FEA_ADAPTER_DIAGNOSTIC = "Cloud FEA adapter currently runs a hard-coded cantilever fallback and does not parse CalculiX output."
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -76,9 +77,17 @@ def solve(payload):
     response = generated_result_fields(run_id, load_n, material, dynamic_settings, dynamic)
     if parsed_solver_results["available"]:
         response["summary"]["failureAssessment"]["message"] += " CalculiX result files were detected but are not fully parsed yet; deterministic sampled fields are marked as generated fallback."
+    response["summary"]["failureAssessment"]["message"] += f" {CLOUD_FEA_ADAPTER_DIAGNOSTIC}"
+    response["diagnostics"] = [{
+        "id": "cloud-fea-hard-coded-fallback",
+        "severity": "warning",
+        "source": "solver",
+        "message": CLOUD_FEA_ADAPTER_DIAGNOSTIC,
+        "suggestedActions": ["Use the Beam Demo local Euler-Bernoulli solver for Beam Demo validation until CalculiX parsing is implemented."]
+    }]
     response["artifacts"] = {
         "inputDeck": input_deck,
-        "solverLog": solver_output["log"],
+        "solverLog": solver_output["log"] + "\n" + CLOUD_FEA_ADAPTER_DIAGNOSTIC,
         "solverResultFiles": parsed_solver_results["files"],
         "solverResultParser": parsed_solver_results["status"],
         "meshSummary": {"nodes": 8, "elements": 1, "source": "generated-cantilever-solid", "units": "mm-N-s-MPa"}
