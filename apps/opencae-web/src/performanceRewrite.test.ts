@@ -202,4 +202,18 @@ describe("Worker UI performance rewrite boundaries", () => {
     expect(viewerSource).toContain("gl.info.memory.textures");
     expect(viewerSource).toContain("VIEWER_STATS_LOG_INTERVAL_MS = 1000");
   });
+
+  test("keeps result geometry profiling and static updates demand-driven", () => {
+    const viewerSource = readFileSync(resolve(__dirname, "components/CadViewer.tsx"), "utf8");
+    const packedPathStart = viewerSource.indexOf("function usePackedPlaybackGeometry(");
+    const packedPathEnd = viewerSource.indexOf("function reusablePackedSamples", packedPathStart);
+    const packedPath = viewerSource.slice(packedPathStart, packedPathEnd);
+
+    expect(viewerSource).toContain("const DEBUG_PERF =");
+    expect(viewerSource).toContain('new URLSearchParams(window.location.search).get("debugPerf") === "1"');
+    expect(viewerSource).toContain("createVertexResultMapping");
+    expect(viewerSource).toContain("recomputeDerivedGeometry: false");
+    expect(viewerSource).toContain("observe={!props.resultPlaybackPlaying}");
+    expect(packedPath).not.toContain("useFrame(");
+  });
 });
