@@ -346,7 +346,7 @@ function runSimulationLocally(study: Study, displayModel?: DisplayModel, staticB
       status: "queued",
       jobId: `job-${runId}`,
       meshRef: study.meshSettings.meshRef,
-      solverBackend: study.type === "dynamic_structural" ? "local-dynamic-newmark" : staticBackendOverride === "local_detailed" || simulationBackend(study) === "local_detailed" ? "local-detailed-superposition" : "local-static-superposition",
+      solverBackend: localSolverBackendForRun(study, staticBackendOverride),
       solverVersion: "0.1.0",
       startedAt: now,
       diagnostics: []
@@ -593,6 +593,25 @@ function meshSummaryForPreset(preset: MeshQuality, analysisMesh?: AnalysisMesh) 
 function simulationBackend(study: Study): "local_detailed" | "cloudflare_fea" | undefined {
   const backend = (study.solverSettings as { backend?: unknown }).backend;
   return backend === "cloudflare_fea" || backend === "local_detailed" ? backend : undefined;
+}
+
+function localSolverBackendForRun(study: Study, staticBackendOverride?: "local_detailed"): string {
+  void staticBackendOverride;
+  if (study.type === "dynamic_structural") return "local-dynamic-newmark";
+  if (isBeamDemoStudyForLocalRun(study)) return "local-beam-demo-euler-bernoulli";
+  return "local-heuristic-surface";
+}
+
+function isBeamDemoStudyForLocalRun(study: Study): boolean {
+  const entityIds = new Set(study.namedSelections.flatMap((selection) => selection.geometryRefs.map((ref) => ref.entityId)));
+  const hasBeamFaces = ["face-base-left", "face-load-top", "face-web-front", "face-base-bottom"].every((id) => entityIds.has(id));
+  if (!hasBeamFaces) return false;
+  const selectionText = study.namedSelections
+    .flatMap((selection) => [selection.name, ...selection.geometryRefs.map((ref) => ref.label)])
+    .join(" ")
+    .toLowerCase();
+  const projectText = `${study.projectId} ${study.name}`.toLowerCase();
+  return selectionText.includes("payload") || selectionText.includes("beam body") || projectText.includes("beam");
 }
 
 function simulationFidelity(study: Study): "standard" | "detailed" | "ultra" {

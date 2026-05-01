@@ -824,7 +824,7 @@ function beamPayloadStudy(materialId: string, materialParameters: Record<string,
       parameters: {
         value: 4.9,
         units: "kg",
-        direction: [0, 0, -1],
+        direction: [0, -1, 0],
         applicationPoint: [1.48, 0.49, 0]
       },
       status: "complete"

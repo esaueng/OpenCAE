@@ -4,12 +4,13 @@ import type { AnalysisMesh, AnalysisSample, DynamicSolverSettings, Load, Materia
 import type { ObjectStorageProvider } from "@opencae/storage";
 import { bracketDisplayModel, bracketResultSummary } from "@opencae/db/sample-data";
 import { inferCriticalPrintAxis } from "@opencae/study-core";
+import { isBeamDemoStudy, solveBeamDemoStudy } from "./beamDemoSolver";
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const STANDARD_GRAVITY = 9.80665;
 const MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.005;
 
-export class LocalMockComputeBackend {
+export class LocalHeuristicComputeBackend {
   constructor(private readonly storage: ObjectStorageProvider) {}
 
   async runStaticSolve(args: {
@@ -19,22 +20,24 @@ export class LocalMockComputeBackend {
     analysisMesh?: AnalysisMesh;
     publish: (event: RunEvent) => void;
   }): Promise<{ resultRef: string; reportRef: string; summary: ResultSummary; fields: ResultField[] }> {
+    const solved = solveStudy(args.study, args.runId, args.analysisMesh);
+    const isBeamDemoSolve = solved.solverBackend === "local-beam-demo-euler-bernoulli";
     const messages = [
-      [10, "Local static solver started."],
+      [10, isBeamDemoSolve ? "Beam Demo Euler-Bernoulli solver started." : "Local heuristic surface solver started."],
       [28, "Reading CAD-bound supports and loads."],
-      [46, "Assembling multi-load stiffness response."],
-      [68, "Solving force, moment, stress, and displacement superposition."],
+      [46, isBeamDemoSolve ? "Assembling 1D beam stiffness matrix." : "Assembling heuristic surface response."],
+      [68, isBeamDemoSolve ? "Solving beam displacement and bending stress." : "Solving heuristic force, moment, stress, and displacement superposition."],
       [88, "Writing result fields."],
       [100, "Simulation complete."]
     ] as const;
 
-    const solved = solveStudy(args.study, args.runId, args.analysisMesh);
     const summary = solved.summary;
     const fields = solved.fields;
     const solverInput = [
-      "local linear static multi-load input",
+      isBeamDemoSolve ? "local beam demo Euler-Bernoulli input" : "local heuristic surface static input",
       `run=${args.runId}`,
       `mesh=${args.meshRef}`,
+      `solverBackend=${solved.solverBackend}`,
       `material=${solved.material.id}`,
       `youngsModulus=${solved.material.youngsModulus}`,
       `yieldStrength=${solved.material.yieldStrength}`,
@@ -73,13 +76,17 @@ export class LocalMockComputeBackend {
       `${args.study.projectId}/solver/${args.runId}/solver.log`,
       [
         `Local mesh read: ${solved.analysisSampleCount.toLocaleString()} surface analysis samples.`,
-        "Local static solver: high-resolution linear elastic surface bending model.",
+        isBeamDemoSolve
+          ? "Local static solver: Euler-Bernoulli Beam Demo model."
+          : "Local static solver: heuristic surface bending model.",
+        `Solver backend: ${solved.solverBackend}.`,
         `Material: ${solved.material.name}.`,
         `Effective material: E=${Math.round(solved.effectiveMaterial.youngsModulus / 1_000_000).toLocaleString()} MPa, yield=${Math.round(solved.effectiveMaterial.yieldStrength / 1_000_000).toLocaleString()} MPa.`,
         `Loads evaluated: ${args.study.loads.length}.`,
         `Result faces evaluated: ${solved.faceCount}.`,
         `Result samples evaluated: ${solved.analysisSampleCount}.`,
         `Total applied load: ${solved.totalAppliedLoad} N.`,
+        ...(isBeamDemoSolve ? [`Beam diagnostics: ${JSON.stringify(solved.beamDemoDiagnostics)}.`] : []),
         "Static solve complete."
       ].join("\n") + "\n"
     );
@@ -165,6 +172,8 @@ export class LocalMockComputeBackend {
   }
 }
 
+export class LocalMockComputeBackend extends LocalHeuristicComputeBackend {}
+
 type Vec3 = [number, number, number];
 
 interface FaceModel {
@@ -188,6 +197,11 @@ interface LoadModel {
 }
 
 export function solveStudy(study: Study, runId: string, analysisMeshInput?: AnalysisMesh) {
+  if (isBeamDemoStudy(study)) return solveBeamDemoStudy(study, runId, analysisMeshInput);
+  return solveHeuristicSurfaceStudy(study, runId, analysisMeshInput);
+}
+
+export function solveHeuristicSurfaceStudy(study: Study, runId: string, analysisMeshInput?: AnalysisMesh) {
   const faces = faceModelsForStudy(study);
   const supports = supportFacesForStudy(study, faces);
   const loads = study.loads.map((load) => loadModelFor(load, faces, supports)).filter((load): load is LoadModel => Boolean(load));
@@ -242,7 +256,7 @@ export function solveStudy(study: Study, runId: string, analysisMeshInput?: Anal
     ...summaryBase,
     failureAssessment: assessResultFailure(summaryBase)
   };
-  return { summary, fields, faceCount: faces.length, loadCount: loads.length, totalAppliedLoad: summary.reactionForce, material, effectiveMaterial, materialParameters, analysisSampleCount: analysisMesh.samples.length };
+  return { summary, fields, faceCount: faces.length, loadCount: loads.length, totalAppliedLoad: summary.reactionForce, material, effectiveMaterial, materialParameters, analysisSampleCount: analysisMesh.samples.length, solverBackend: "local-heuristic-surface" as const };
 }
 
 export function solveDynamicStudy(study: Study, runId: string, analysisMeshInput?: AnalysisMesh) {

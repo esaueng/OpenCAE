@@ -3160,9 +3160,10 @@ function resultPayloadOffsetForBeamDemo(
 }
 
 function shouldUseBeamDemoPayloadFallback(kind: SampleModelKind, loadMarkers: ViewerLoadMarker[], resultFields: ResultField[]) {
-  return kind === "plate"
-    && loadMarkers.some((marker) => Boolean(marker.payloadObject))
-    && !displacementFieldForResults(resultFields);
+  void kind;
+  void loadMarkers;
+  void resultFields;
+  return false;
 }
 
 function isResultPayloadObject(object: THREE.Object3D, refs: ResultPayloadObjectRefs) {
