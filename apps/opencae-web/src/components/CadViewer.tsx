@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { ElementRef, MutableRefObject, PointerEvent as ReactPointerEvent } from "react";
+import type { CSSProperties, ElementRef, MutableRefObject, PointerEvent as ReactPointerEvent } from "react";
 import { Billboard, Bounds, Edges, GizmoHelper, Html, Line, OrbitControls, Text, useBounds } from "@react-three/drei";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import type { ThreeEvent } from "@react-three/fiber";
@@ -132,10 +132,14 @@ type ModelPickHandlers = {
 export const VIEWER_GIZMO_ALIGNMENT = "bottom-right";
 export const VIEWER_GIZMO_SCALE = 44;
 export const VIEWER_AXIS_HEAD_RADIUS = 0.25;
+export const VIEWER_AXIS_LABEL_BADGE_RADIUS = 0.18;
+export const VIEWER_AXIS_LABEL_BADGE_COLOR = "#07111d";
 export const VIEWER_AXIS_LABEL_FONT_SIZE = 0.25;
 export const VIEWER_AXIS_LABEL_COLOR = "#ffffff";
 export const VIEWER_AXIS_LABEL_OUTLINE_COLOR = "#07111d";
 export const VIEWER_AXIS_LABEL_OUTLINE_WIDTH = 0.025;
+export const VIEWER_MINI_CUBE_SIZE = 0.36;
+export const VIEWER_MINI_CUBE_EDGE_COLOR = "#dbeafe";
 export const VIEWER_CREDIT_URL = "https://esauengineering.com/";
 const VIEWER_FIT_MARGIN = 1.28;
 const DEFAULT_HOME_FIT_MARGIN = 1.46;
@@ -474,6 +478,7 @@ function CleanAxisGizmo({ onSelectAxis }: { onSelectAxis: (axis: RotationAxis) =
 
   return (
     <group scale={VIEWER_GIZMO_SCALE}>
+      <MiniAxisCube />
       {axes.map((axis) => (
         <group key={axis.label}>
           <Line points={[[0, 0, 0], axis.position]} color={axis.color} lineWidth={4} />
@@ -501,8 +506,12 @@ function AxisHead({ label, color, position, onSelectAxis }: { label: "X" | "Y" |
       }}
     >
       <mesh>
-        <circleGeometry args={[VIEWER_AXIS_HEAD_RADIUS, 36]} />
+        <ringGeometry args={[VIEWER_AXIS_LABEL_BADGE_RADIUS, VIEWER_AXIS_HEAD_RADIUS, 40]} />
         <meshBasicMaterial color={color} depthTest={false} toneMapped={false} />
+      </mesh>
+      <mesh position={[0, 0, 0.004]}>
+        <circleGeometry args={[VIEWER_AXIS_LABEL_BADGE_RADIUS, 36]} />
+        <meshBasicMaterial color={VIEWER_AXIS_LABEL_BADGE_COLOR} depthTest={false} toneMapped={false} />
       </mesh>
       <Text
         anchorX="center"
@@ -517,6 +526,16 @@ function AxisHead({ label, color, position, onSelectAxis }: { label: "X" | "Y" |
         {label}
       </Text>
     </Billboard>
+  );
+}
+
+function MiniAxisCube() {
+  return (
+    <mesh rotation={[0.48, 0.72, -0.18]}>
+      <boxGeometry args={[VIEWER_MINI_CUBE_SIZE, VIEWER_MINI_CUBE_SIZE, VIEWER_MINI_CUBE_SIZE]} />
+      <meshBasicMaterial color="#122338" depthTest={false} transparent opacity={0.92} toneMapped={false} />
+      <Edges color={VIEWER_MINI_CUBE_EDGE_COLOR} threshold={1} />
+    </mesh>
   );
 }
 
@@ -4321,6 +4340,9 @@ export function legendMeshStats(meshSummary: MeshSummary | undefined) {
 
 const RESULT_LEGEND_MIN_WIDTH = 280;
 const RESULT_LEGEND_MIN_HEIGHT = 176;
+const RESULT_LEGEND_DEFAULT_WIDTH = 360;
+const RESULT_LEGEND_DEFAULT_HEIGHT = 176;
+const RESULT_LEGEND_MAX_CONTENT_SCALE = 2.4;
 const RESULT_LEGEND_VIEWPORT_INSET = 12;
 
 type ResultLegendSize = { width: number; height: number };
@@ -4361,6 +4383,14 @@ export function resultLegendResizeDimensions({
   };
 }
 
+export function resultLegendContentScale(size: ResultLegendSize) {
+  return Number(clampNumber(
+    Math.min(size.width / RESULT_LEGEND_DEFAULT_WIDTH, size.height / RESULT_LEGEND_DEFAULT_HEIGHT),
+    1,
+    RESULT_LEGEND_MAX_CONTENT_SCALE
+  ).toFixed(2));
+}
+
 function ResultLegend({ resultMode, resultFields, unitSystem, meshSummary }: { resultMode: ResultMode; resultFields: ResultField[]; unitSystem: UnitSystem; meshSummary?: MeshSummary }) {
   const legendRef = useRef<HTMLDivElement | null>(null);
   const resizeDragRef = useRef<ResultLegendResizeDrag | null>(null);
@@ -4374,6 +4404,13 @@ function ResultLegend({ resultMode, resultFields, unitSystem, meshSummary }: { r
   const maxValue = field?.max ?? fallbackMax.value;
   const ticks = displayedLegendTickLabels(minValue, maxValue);
   const meshStats = legendMeshStats(meshSummary);
+  const legendStyle = legendSize
+    ? ({
+        "--analysis-legend-scale": resultLegendContentScale(legendSize),
+        height: `${legendSize.height}px`,
+        width: `${legendSize.width}px`
+      } as CSSProperties & { "--analysis-legend-scale": number })
+    : undefined;
   const handleResizePointerDown = (event: ReactPointerEvent<HTMLButtonElement>) => {
     const legend = legendRef.current;
     if (!legend) return;
@@ -4422,7 +4459,7 @@ function ResultLegend({ resultMode, resultFields, unitSystem, meshSummary }: { r
     <div
       ref={legendRef}
       className={`analysis-legend ${resultMode === "safety_factor" ? "safety-scale" : ""}`}
-      style={legendSize ? { width: `${legendSize.width}px`, height: `${legendSize.height}px` } : undefined}
+      style={legendStyle}
     >
       <button
         className="analysis-legend-resize"
