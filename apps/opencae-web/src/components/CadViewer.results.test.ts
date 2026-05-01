@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { describe, expect, test, vi } from "vitest";
-import { VIEWER_CREDIT_URL, VIEWER_GIZMO_ALIGNMENT, applyResultFrameToGeometry, axisLabelToViewAxis, beamDemoDisplacementAtStation, beamDemoPayloadOffset, beamDemoStationForPoint, cameraDistanceForBounds, cameraViewForAxis, cloneResultPreviewObject, colorizeResultObject, colorizeSampleResultGeometry, createBeamDemoCoordinate, createUndeformedResultOutlineObject, defaultHomeViewTarget, deformationScaleForResultFields, displayedLegendTickLabels, finalVisualScaleForDisplacementField, interpolateDisplacementAtPoint, legendMeshStats, legendTickLabels, normalizedPointLoadCantileverShape, payloadHighlightObjectId, pointLoadCantileverShape, printLayerVisualizationForBounds, resultProbesForKind, resultValueForPoint, rotatedCameraOrbit, shouldShowDimensionOverlay, shouldShowModelHitLabel, shouldShowResultMarkers, shouldShowUndeformedResultOutline, updatePackedSamples, viewerCameraResetPose } from "./CadViewer";
+import { VIEWER_CREDIT_URL, VIEWER_GIZMO_ALIGNMENT, applyResultFrameToGeometry, axisLabelToViewAxis, beamDemoDisplacementAtStation, beamDemoPayloadOffset, beamDemoStationForPoint, cameraDistanceForBounds, cameraViewForAxis, cloneResultPreviewObject, colorizeResultObject, colorizeSampleResultGeometry, createBeamDemoCoordinate, createUndeformedResultOutlineObject, defaultHomeViewTarget, deformationScaleForResultFields, displayedLegendTickLabels, finalVisualScaleForDisplacementField, interpolateDisplacementAtPoint, legendMeshStats, legendTickLabels, normalizedPointLoadCantileverShape, payloadHighlightObjectId, pointLoadCantileverShape, printLayerVisualizationForBounds, resultLegendResizeDimensions, resultProbesForKind, resultValueForPoint, rotatedCameraOrbit, shouldShowDimensionOverlay, shouldShowModelHitLabel, shouldShowResultMarkers, shouldShowUndeformedResultOutline, updatePackedSamples, viewerCameraResetPose } from "./CadViewer";
 import type { FaceResultSample } from "../resultFields";
 import type { DisplayFace, ResultField } from "@opencae/schema";
 import type { PackedPreparedPlaybackCache } from "../resultPlaybackCache";
@@ -53,6 +53,39 @@ describe("CadViewer result coloring", () => {
       nodes: "182,400",
       elements: "119,808"
     });
+  });
+
+  test("resizes the result legend from a top-right handle", () => {
+    expect(cadViewerSource).toContain("analysis-legend-resize");
+    expect(cadViewerSource).toContain("Resize results legend");
+
+    expect(resultLegendResizeDimensions({
+      currentClientX: 520,
+      currentClientY: 120,
+      maxHeight: 576,
+      maxWidth: 976,
+      minHeight: 176,
+      minWidth: 280,
+      startClientX: 460,
+      startClientY: 180,
+      startHeight: 176,
+      startWidth: 360
+    })).toEqual({ width: 420, height: 236 });
+  });
+
+  test("clamps result legend resize to viewport-safe dimensions", () => {
+    expect(resultLegendResizeDimensions({
+      currentClientX: 80,
+      currentClientY: -800,
+      maxHeight: 576,
+      maxWidth: 976,
+      minHeight: 176,
+      minWidth: 280,
+      startClientX: 460,
+      startClientY: 180,
+      startHeight: 176,
+      startWidth: 360
+    })).toEqual({ width: 280, height: 576 });
   });
 
   test("maps gizmo Z clicks to a clockwise square top view", () => {

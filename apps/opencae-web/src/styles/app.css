@@ -1482,8 +1482,44 @@ img {
   font-size: var(--fs-mini);
   backdrop-filter: blur(8px);
   overflow: auto;
-  resize: both;
+  resize: none;
   pointer-events: auto;
+}
+
+.analysis-legend-resize {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  color: var(--color-accent);
+  background: transparent;
+  border: 0;
+  cursor: nesw-resize;
+  touch-action: none;
+}
+
+.analysis-legend-resize::after {
+  content: "";
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  width: 10px;
+  height: 10px;
+  border-top: 2px solid currentColor;
+  border-right: 2px solid currentColor;
+  opacity: 0.8;
+}
+
+.analysis-legend-resize:hover::after,
+.analysis-legend-resize:focus-visible::after {
+  opacity: 1;
+}
+
+.analysis-legend-resize:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: -3px;
 }
 
 .theme-light .analysis-legend {
