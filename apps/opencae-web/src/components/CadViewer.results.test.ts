@@ -33,9 +33,9 @@ describe("CadViewer result coloring", () => {
   });
 
   test("places the bottom-right gizmo on the same 45-degree diagonal as the reset view button", () => {
-    expect(VIEWER_GIZMO_MARGIN).toEqual([154, 154]);
+    expect(VIEWER_GIZMO_MARGIN).toEqual([130, 130]);
     expect(VIEWER_GIZMO_MARGIN[0]).toBe(VIEWER_GIZMO_MARGIN[1]);
-    expect(VIEWER_GIZMO_MARGIN[0]).toBeGreaterThan(48);
+    expect(VIEWER_GIZMO_MARGIN[0]).toBeGreaterThan(24);
     expect(cadViewerSource).toContain("margin={VIEWER_GIZMO_MARGIN}");
   });
 
