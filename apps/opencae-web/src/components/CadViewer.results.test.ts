@@ -4,6 +4,7 @@ import { VIEWER_CREDIT_URL, VIEWER_GIZMO_ALIGNMENT, applyResultFrameToGeometry, 
 import type { FaceResultSample } from "../resultFields";
 import type { DisplayFace, ResultField } from "@opencae/schema";
 import type { PackedPreparedPlaybackCache } from "../resultPlaybackCache";
+import { resetVertexResultMappingStatsForTests, vertexResultMappingBuildCountForTests } from "../resultVertexMapping";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -632,6 +633,86 @@ describe("CadViewer result coloring", () => {
     const highColors = Array.from(geometry.getAttribute("color").array);
 
     expect(highColors).not.toEqual(lowColors);
+  });
+
+  test("reuses result geometry buffers and cached vertex mappings across frame updates", () => {
+    resetVertexResultMappingStatsForTests();
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.Float32BufferAttribute([0, 0, 0, 1, 0, 0], 3));
+    const fields: ResultField[] = [
+      {
+        id: "stress",
+        runId: "run",
+        type: "stress",
+        location: "node",
+        values: [0, 10],
+        min: 0,
+        max: 10,
+        units: "MPa",
+        samples: [
+          { point: [0, 0, 0], normal: [0, 1, 0], value: 0 },
+          { point: [1, 0, 0], normal: [0, 1, 0], value: 10 }
+        ]
+      },
+      {
+        id: "displacement",
+        runId: "run",
+        type: "displacement",
+        location: "node",
+        values: [0, 0.006],
+        min: 0,
+        max: 0.006,
+        units: "mm",
+        samples: [
+          { point: [0, 0, 0], normal: [0, 1, 0], value: 0, vector: [0, 0, 0] },
+          { point: [1, 0, 0], normal: [0, 1, 0], value: 0.006, vector: [0, -0.006, 0] }
+        ]
+      }
+    ];
+
+    applyResultFrameToGeometry({ geometry, fields, resultMode: "stress", showDeformed: true, deformationScale: 1 });
+    const basePositions = geometry.userData.basePositions;
+    const colorAttribute = geometry.getAttribute("color");
+    const mappingsAfterFirstFrame = vertexResultMappingBuildCountForTests();
+    applyResultFrameToGeometry({ geometry, fields, resultMode: "stress", showDeformed: true, deformationScale: 0.5 });
+
+    expect(geometry.userData.basePositions).toBe(basePositions);
+    expect(geometry.getAttribute("color")).toBe(colorAttribute);
+    expect(mappingsAfterFirstFrame).toBe(2);
+    expect(vertexResultMappingBuildCountForTests()).toBe(mappingsAfterFirstFrame);
+  });
+
+  test("can skip derived geometry recomputation on playback frame updates", () => {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.Float32BufferAttribute([0, 0, 0, 1, 0, 0], 3));
+    const normalsSpy = vi.spyOn(geometry, "computeVertexNormals");
+    const sphereSpy = vi.spyOn(geometry, "computeBoundingSphere");
+    const fields: ResultField[] = [{
+      id: "stress",
+      runId: "run",
+      type: "stress",
+      location: "node",
+      values: [0, 10],
+      min: 0,
+      max: 10,
+      units: "MPa",
+      samples: [
+        { point: [0, 0, 0], normal: [0, 1, 0], value: 0 },
+        { point: [1, 0, 0], normal: [0, 1, 0], value: 10 }
+      ]
+    }];
+
+    applyResultFrameToGeometry({
+      geometry,
+      fields,
+      resultMode: "stress",
+      showDeformed: false,
+      deformationScale: 1,
+      recomputeDerivedGeometry: false
+    });
+
+    expect(normalsSpy).not.toHaveBeenCalled();
+    expect(sphereSpy).not.toHaveBeenCalled();
   });
 
   test("scales support-to-load deformation by the active dynamic displacement", () => {

@@ -14,6 +14,7 @@ import { baseModelRotationRadians, modelRotationRadians, modelToViewerMatrix, vi
 import { dimensionValuesForDisplayModel } from "../modelDimensions";
 import { formatResultValue, normalizeValueForRender, resultProbeSamplesForFaces, resultSamplesForFaces, type FaceResultSample, type FieldResultSample, type ResultProbeTone } from "../resultFields";
 import { packedPreparedPlaybackFieldSlot, packedPreparedPlaybackFrameOrdinal, type PackedPreparedPlaybackCache } from "../resultPlaybackCache";
+import { createVertexResultMapping, type VertexResultMapping } from "../resultVertexMapping";
 import { stepPreviewFromBase64 } from "../stepPreview";
 import { normalizedStlGeometryFromBuffer } from "../stlPreview";
 import { lengthForUnits, stressForUnits, type UnitSystem } from "../unitDisplay";
@@ -137,6 +138,14 @@ const VIEWER_STATS_LOG_INTERVAL_MS = 1000;
 const VIEWER_STATS_STORAGE_KEY = "opencae.perf.viewerStats";
 const VIEWER_IDLE_DPR_RANGE: [number, number] = [1, 2];
 const VIEWER_ACTIVE_DPR_RANGE: [number, number] = [1, 1.25];
+const DEBUG_PERF =
+  import.meta.env.DEV &&
+  typeof window !== "undefined" &&
+  new URLSearchParams(window.location.search).get("debugPerf") === "1";
+const DEBUG_RESULTS =
+  import.meta.env.DEV &&
+  typeof window !== "undefined" &&
+  new URLSearchParams(window.location.search).get("debugResults") === "1";
 
 export function CadViewer(props: CadViewerProps) {
   const controlsRef = useRef<ViewerOrbitControls | null>(null);
@@ -190,7 +199,7 @@ export function CadViewer(props: CadViewerProps) {
         <color attach="background" args={[viewportBackground]} />
         <ambientLight intensity={effectiveViewMode === "results" || isLightTheme ? 1.4 : 0.75} />
         <directionalLight position={[4, 6, 3]} intensity={effectiveViewMode === "results" || isLightTheme ? 1.45 : 2.2} />
-        <Bounds fit clip observe margin={VIEWER_FIT_MARGIN}>
+        <Bounds fit clip observe={!props.resultPlaybackPlaying} margin={VIEWER_FIT_MARGIN}>
           <group rotation={modelRotation}>
             <group rotation={baseModelRotation}>
               <BracketModel {...props} resultFields={resultFields} viewMode={effectiveViewMode} uploadedPreviewBounds={uploadedPreviewBounds} onUploadedPreviewBounds={setUploadedPreviewBounds} />
@@ -1968,7 +1977,8 @@ export function applyResultFrameToGeometry({
   resultMode,
   showDeformed,
   deformationScale,
-  coordinateTransform
+  coordinateTransform,
+  recomputeDerivedGeometry = true
 }: {
   geometry: THREE.BufferGeometry;
   fields: ResultField[];
@@ -1976,49 +1986,326 @@ export function applyResultFrameToGeometry({
   showDeformed: boolean;
   deformationScale: number;
   coordinateTransform?: ResultCoordinateTransform;
+  recomputeDerivedGeometry?: boolean;
 }) {
+  const totalStart = DEBUG_PERF ? performance.now() : 0;
+  let mappingMs = 0;
+  let scalarMs = 0;
+  let displacementMs = 0;
+  let normalsMs = 0;
+  let boundsMs = 0;
   const position = geometry.getAttribute("position");
   if (!(position instanceof THREE.BufferAttribute)) return geometry;
   const basePositions = basePositionArrayForGeometry(geometry, position);
-  position.setUsage(THREE.DynamicDrawUsage);
-  const colorAttribute = colorAttributeForGeometry(geometry, position.count);
-  colorAttribute.setUsage(THREE.DynamicDrawUsage);
-  if (geometry.getAttribute("color") !== colorAttribute) geometry.setAttribute("color", colorAttribute);
+  const { colorAttribute, colorAttributeRecreated } = prepareResultGeometryAttributes(geometry, position);
 
   const scalarField = selectedResultField(fields, resultMode);
   const displacementField = fields.find((field) => field.type === "displacement" && field.samples?.some((sample) => sample.vector));
   logResultFieldDiagnostics(scalarField, resultMode);
-  const scalarValues = scalarField?.values ?? [];
-  const modelExtent = (coordinateTransform?.bounds ?? basePositionBounds(basePositions)).getSize(new THREE.Vector3()).length();
+  const modelExtent = (coordinateTransform?.bounds ?? basePositionBoundsForGeometry(geometry, basePositions)).getSize(new THREE.Vector3()).length();
   const visualScale = visualScaleForDisplacementField(modelExtent, displacementField, deformationScale);
-  const color = new THREE.Color();
+  const mappingStart = DEBUG_PERF ? performance.now() : 0;
+  const resultBasePositions = coordinateTransform
+    ? transformedBasePositionsForResult(geometry, basePositions, coordinateTransform)
+    : basePositions;
+  const scalarMapping = scalarField?.samples?.length
+    ? vertexResultMappingForGeometry(geometry, resultBasePositions, scalarField, "scalar")
+    : null;
+  const displacementMapping = displacementField?.samples?.length
+    ? vertexResultMappingForGeometry(geometry, resultBasePositions, displacementField, "displacement")
+    : null;
+  const smoothDisplacementInterpolator = displacementField?.samples?.length
+    ? smoothVectorInterpolatorForSamples(displacementField.samples)
+    : null;
+  if (DEBUG_PERF) mappingMs = performance.now() - mappingStart;
 
-  for (let index = 0; index < position.count; index += 1) {
-    const offset = index * 3;
-    const point = new THREE.Vector3(basePositions[offset] ?? 0, basePositions[offset + 1] ?? 0, basePositions[offset + 2] ?? 0);
-    const resultPoint = coordinateTransform?.toResultPoint(point) ?? point;
-    const scalar = scalarField?.samples?.length
-      ? interpolateResultSampleValue(resultPoint, scalarField.samples, scalarField.values[index] ?? 0)
-      : scalarValues[index] ?? 0;
-    const normalized = scalarField ? normalizeValueForRender(scalar, scalarField.min, scalarField.max) : 0;
-    color.copy(resultColorForValue(resultMode, normalized));
-    colorAttribute.setXYZ(index, color.r, color.g, color.b);
+  const colorArray = colorAttribute.array as Float32Array;
+  const scalarStart = DEBUG_PERF ? performance.now() : 0;
+  applyResultColorsToArray(colorArray, position.count, scalarField, scalarMapping, resultMode);
+  if (DEBUG_PERF) scalarMs = performance.now() - scalarStart;
 
-    if (showDeformed && displacementField?.samples?.length && visualScale > 0) {
-      const displacement = new THREE.Vector3(...interpolateDisplacementAtPoint([resultPoint.x, resultPoint.y, resultPoint.z], displacementField));
-      const deformedResultPoint = resultPoint.clone().addScaledVector(displacement, visualScale);
-      const localDeformed = coordinateTransform?.fromResultPoint(deformedResultPoint) ?? deformedResultPoint;
-      position.setXYZ(index, localDeformed.x, localDeformed.y, localDeformed.z);
-    } else {
-      position.setXYZ(index, point.x, point.y, point.z);
-    }
+  const displacementStart = DEBUG_PERF ? performance.now() : 0;
+  if (coordinateTransform) {
+    applyTransformedResultPositions(position, basePositions, resultBasePositions, displacementField, displacementMapping, smoothDisplacementInterpolator, showDeformed, visualScale, coordinateTransform);
+  } else {
+    applyLocalResultPositions(position.array as Float32Array, basePositions, displacementField, displacementMapping, smoothDisplacementInterpolator, showDeformed, visualScale);
   }
+  if (DEBUG_PERF) displacementMs = performance.now() - displacementStart;
 
   position.needsUpdate = true;
   colorAttribute.needsUpdate = true;
-  geometry.computeVertexNormals();
-  geometry.computeBoundingSphere();
+  if (recomputeDerivedGeometry) {
+    const normalsStart = DEBUG_PERF ? performance.now() : 0;
+    geometry.computeVertexNormals();
+    if (DEBUG_PERF) normalsMs = performance.now() - normalsStart;
+    const boundsStart = DEBUG_PERF ? performance.now() : 0;
+    geometry.computeBoundingSphere();
+    if (DEBUG_PERF) boundsMs = performance.now() - boundsStart;
+  } else {
+    ensureResultBoundingSphere(geometry, basePositions, modelExtent, visualScale, displacementField);
+  }
+  if (DEBUG_PERF) {
+    console.table([{
+      phase: "applyResultFrameToGeometry",
+      vertices: position.count,
+      samples: fields.reduce((count, field) => count + (field.samples?.length ?? 0), 0),
+      mappingMs: roundPerfMs(mappingMs),
+      scalarMs: roundPerfMs(scalarMs),
+      displacementMs: roundPerfMs(displacementMs),
+      computeVertexNormalsMs: roundPerfMs(normalsMs),
+      computeBoundingSphereMs: roundPerfMs(boundsMs),
+      totalMs: roundPerfMs(performance.now() - totalStart),
+      colorAttributeRecreated,
+      geometryRecreated: false,
+      materialRecreated: false,
+      attributesRecreated: colorAttributeRecreated
+    }]);
+  }
   return geometry;
+}
+
+const vertexResultMappingCache = new WeakMap<THREE.BufferGeometry, Map<string, VertexResultMapping>>();
+
+function prepareResultGeometryAttributes(geometry: THREE.BufferGeometry, position: THREE.BufferAttribute) {
+  const prepared = geometry.userData.opencaeResultAttributesPrepared === true;
+  const colorAttribute = colorAttributeForGeometry(geometry, position.count);
+  const colorAttributeRecreated = geometry.getAttribute("color") !== colorAttribute;
+  if (colorAttributeRecreated) geometry.setAttribute("color", colorAttribute);
+  if (!prepared || colorAttributeRecreated) {
+    position.setUsage(THREE.DynamicDrawUsage);
+    colorAttribute.setUsage(THREE.DynamicDrawUsage);
+    geometry.userData.opencaeResultAttributesPrepared = true;
+  }
+  return { colorAttribute, colorAttributeRecreated };
+}
+
+function vertexResultMappingForGeometry(
+  geometry: THREE.BufferGeometry,
+  basePositions: Float32Array,
+  field: ResultField,
+  purpose: "scalar" | "displacement"
+): VertexResultMapping {
+  let mappings = vertexResultMappingCache.get(geometry);
+  if (!mappings) {
+    mappings = new Map();
+    vertexResultMappingCache.set(geometry, mappings);
+  }
+  const signature = `${purpose}:${resultFieldSampleGeometrySignature(field)}:${basePositions.length}`;
+  const existing = mappings.get(signature);
+  if (existing && existing.vertexCount === Math.floor(basePositions.length / 3)) return existing;
+  const mapping = createVertexResultMapping({ basePositions, samples: field.samples ?? [], maxNeighbors: 8 });
+  mappings.set(signature, mapping);
+  return mapping;
+}
+
+function resultFieldSampleGeometrySignature(field: ResultField) {
+  const samples = field.samples ?? [];
+  let hash = 2166136261;
+  for (const sample of samples) {
+    for (const coordinate of sample.point) {
+      hash ^= Math.round(coordinate * 1_000_000);
+      hash = Math.imul(hash, 16777619);
+    }
+  }
+  return `${field.type}:${field.location}:${samples.length}:${hash >>> 0}`;
+}
+
+function transformedBasePositionsForResult(
+  geometry: THREE.BufferGeometry,
+  basePositions: Float32Array,
+  coordinateTransform: ResultCoordinateTransform
+): Float32Array {
+  const cached = geometry.userData.opencaeResultCoordinateBasePositions;
+  if (cached instanceof Float32Array && cached.length === basePositions.length) return cached;
+  const transformed = new Float32Array(basePositions.length);
+  for (let offset = 0; offset + 2 < basePositions.length; offset += 3) {
+    const point = coordinateTransform.toResultPoint(new THREE.Vector3(basePositions[offset] ?? 0, basePositions[offset + 1] ?? 0, basePositions[offset + 2] ?? 0));
+    transformed[offset] = point.x;
+    transformed[offset + 1] = point.y;
+    transformed[offset + 2] = point.z;
+  }
+  geometry.userData.opencaeResultCoordinateBasePositions = transformed;
+  return transformed;
+}
+
+function applyResultColorsToArray(
+  colorArray: Float32Array,
+  vertexCount: number,
+  scalarField: ResultField | undefined,
+  scalarMapping: VertexResultMapping | null,
+  resultMode: ResultMode
+) {
+  for (let index = 0; index < vertexCount; index += 1) {
+    const scalar = mappedScalarValue(index, scalarField, scalarMapping);
+    const normalized = scalarField ? normalizeScalarValueForResultRender(scalar, scalarField) : 0;
+    writeResultColorForValue(colorArray, index * 3, resultMode, normalized);
+  }
+}
+
+function mappedScalarValue(vertexIndex: number, field: ResultField | undefined, mapping: VertexResultMapping | null) {
+  if (!field) return 0;
+  const samples = field.samples;
+  const weights = mapping?.weightsByVertex[vertexIndex];
+  if (samples?.length && weights?.length) {
+    let value = 0;
+    let totalWeight = 0;
+    for (const sampleWeight of weights) {
+      const sampleValue = samples[sampleWeight.sampleIndex]?.value;
+      if (!Number.isFinite(sampleValue)) continue;
+      value += Number(sampleValue) * sampleWeight.weight;
+      totalWeight += sampleWeight.weight;
+    }
+    if (totalWeight > 0) return value / totalWeight;
+  }
+  return field.values[vertexIndex] ?? 0;
+}
+
+function normalizeScalarValueForResultRender(value: number, field: ResultField) {
+  if (!Number.isFinite(value)) return 0;
+  if (!Number.isFinite(field.min) || !Number.isFinite(field.max) || Math.abs(field.max - field.min) <= 1e-12) return 0;
+  return normalizeValueForRender(value, field.min, field.max);
+}
+
+function writeResultColorForValue(colorArray: Float32Array, offset: number, resultMode: ResultMode, t: number) {
+  const color = reusablePaletteColor(resultMode, t);
+  colorArray[offset] = color.r;
+  colorArray[offset + 1] = color.g;
+  colorArray[offset + 2] = color.b;
+}
+
+const resultColorScratch = new THREE.Color();
+const resultPaletteColorCache = new Map<ResultMode, THREE.Color[]>();
+
+function reusablePaletteColor(resultMode: ResultMode, t: number) {
+  const colors = cachedResultPaletteColors(resultMode);
+  const value = Math.max(0, Math.min(1, t));
+  const index = Math.min(colors.length - 2, Math.floor(value * (colors.length - 1)));
+  const localT = value * (colors.length - 1) - index;
+  return resultColorScratch.lerpColors(colors[index] ?? colors[0]!, colors[index + 1] ?? colors.at(-1)!, localT);
+}
+
+function cachedResultPaletteColors(resultMode: ResultMode) {
+  const cached = resultPaletteColorCache.get(resultMode);
+  if (cached) return cached;
+  const colors = resultPalette(resultMode).body.map((color) => new THREE.Color(color));
+  resultPaletteColorCache.set(resultMode, colors);
+  return colors;
+}
+
+function applyLocalResultPositions(
+  positionArray: Float32Array,
+  basePositions: Float32Array,
+  displacementField: ResultField | undefined,
+  displacementMapping: VertexResultMapping | null,
+  smoothDisplacementInterpolator: SmoothVectorInterpolator | null,
+  showDeformed: boolean,
+  visualScale: number
+) {
+  if (!showDeformed || !displacementField?.samples?.length || !displacementMapping || visualScale <= 0) {
+    for (let index = 0; index < basePositions.length; index += 1) positionArray[index] = basePositions[index] ?? 0;
+    return;
+  }
+  const vertexCount = Math.floor(basePositions.length / 3);
+  for (let vertexIndex = 0; vertexIndex < vertexCount; vertexIndex += 1) {
+    const offset = vertexIndex * 3;
+    const [ux, uy, uz] = displacementVectorForVertex(vertexIndex, offset, basePositions, displacementField, displacementMapping, smoothDisplacementInterpolator);
+    positionArray[offset] = (basePositions[offset] ?? 0) + ux * visualScale;
+    positionArray[offset + 1] = (basePositions[offset + 1] ?? 0) + uy * visualScale;
+    positionArray[offset + 2] = (basePositions[offset + 2] ?? 0) + uz * visualScale;
+  }
+}
+
+function applyTransformedResultPositions(
+  position: THREE.BufferAttribute,
+  basePositions: Float32Array,
+  resultBasePositions: Float32Array,
+  displacementField: ResultField | undefined,
+  displacementMapping: VertexResultMapping | null,
+  smoothDisplacementInterpolator: SmoothVectorInterpolator | null,
+  showDeformed: boolean,
+  visualScale: number,
+  coordinateTransform: ResultCoordinateTransform
+) {
+  if (!showDeformed || !displacementField?.samples?.length || !displacementMapping || visualScale <= 0) {
+    resetGeometryPositions(position, basePositions);
+    return;
+  }
+  const vertexCount = Math.floor(basePositions.length / 3);
+  for (let vertexIndex = 0; vertexIndex < vertexCount; vertexIndex += 1) {
+    const offset = vertexIndex * 3;
+    const [ux, uy, uz] = displacementVectorForVertex(vertexIndex, offset, resultBasePositions, displacementField, displacementMapping, smoothDisplacementInterpolator);
+    const resultPoint = new THREE.Vector3(
+      (resultBasePositions[offset] ?? 0) + ux * visualScale,
+      (resultBasePositions[offset + 1] ?? 0) + uy * visualScale,
+      (resultBasePositions[offset + 2] ?? 0) + uz * visualScale
+    );
+    const local = coordinateTransform.fromResultPoint(resultPoint);
+    position.setXYZ(vertexIndex, local.x, local.y, local.z);
+  }
+}
+
+function displacementVectorForVertex(
+  vertexIndex: number,
+  offset: number,
+  basePositions: Float32Array,
+  field: ResultField,
+  mapping: VertexResultMapping,
+  smoothDisplacementInterpolator: SmoothVectorInterpolator | null
+): [number, number, number] {
+  const weights = mapping.weightsByVertex[vertexIndex];
+  const exact = weights?.length === 1 && Math.abs((weights[0]?.weight ?? 0) - 1) <= 1e-12;
+  if (!exact && smoothDisplacementInterpolator) {
+    return smoothDisplacementInterpolator.interpolateComponents(
+      basePositions[offset] ?? 0,
+      basePositions[offset + 1] ?? 0,
+      basePositions[offset + 2] ?? 0
+    );
+  }
+  return mappedDisplacementVector(vertexIndex, field, mapping);
+}
+
+function mappedDisplacementVector(
+  vertexIndex: number,
+  field: ResultField,
+  mapping: VertexResultMapping
+): [number, number, number] {
+  const weights = mapping.weightsByVertex[vertexIndex];
+  const samples = field.samples ?? [];
+  if (!weights?.length) return [0, 0, 0];
+  let ux = 0;
+  let uy = 0;
+  let uz = 0;
+  let totalWeight = 0;
+  for (const sampleWeight of weights) {
+    const vector = samples[sampleWeight.sampleIndex]?.vector;
+    if (!vector?.every(Number.isFinite)) continue;
+    ux += vector[0] * sampleWeight.weight;
+    uy += vector[1] * sampleWeight.weight;
+    uz += vector[2] * sampleWeight.weight;
+    totalWeight += sampleWeight.weight;
+  }
+  if (totalWeight <= 0) return [0, 0, 0];
+  return [ux / totalWeight, uy / totalWeight, uz / totalWeight];
+}
+
+function ensureResultBoundingSphere(
+  geometry: THREE.BufferGeometry,
+  basePositions: Float32Array,
+  modelExtent: number,
+  visualScale: number,
+  displacementField: ResultField | undefined
+) {
+  if (geometry.boundingSphere && geometry.userData.opencaeResultExpandedBoundingSphere === true) return;
+  const bounds = basePositionBounds(basePositions);
+  const sphere = bounds.getBoundingSphere(new THREE.Sphere());
+  const expansion = Math.min(modelExtent * 0.25, Math.max(0, visualScale * maxDisplacementMagnitude(displacementField)));
+  sphere.radius += expansion;
+  geometry.boundingSphere = sphere;
+  geometry.userData.opencaeResultExpandedBoundingSphere = true;
+}
+
+function roundPerfMs(value: number) {
+  return Math.round(value * 1000) / 1000;
 }
 
 export function interpolateDisplacementAtPoint(
@@ -2071,7 +2358,8 @@ function colorizeResultGeometry(
   coordinateTransform?: ResultCoordinateTransform,
   valueRange?: ResultValueRange,
   supportMarkers: ViewerSupportMarker[] = [],
-  resultFields: ResultField[] = []
+  resultFields: ResultField[] = [],
+  recomputeDerivedGeometry = true
 ) {
   const positions = geometry.getAttribute("position");
   if (!(positions instanceof THREE.BufferAttribute)) return geometry;
@@ -2099,8 +2387,8 @@ function colorizeResultGeometry(
   const color = new THREE.Color();
   const resolvedDeformationScale = deformationScale ?? deformationScaleForSamples(resultMode, samples);
   const usesResultDeformationScale = typeof deformationScale === "number";
-  geometry.computeBoundingBox();
-  const bounds = coordinateTransform?.bounds ?? geometry.boundingBox?.clone();
+  if (recomputeDerivedGeometry || !geometry.boundingBox) geometry.computeBoundingBox();
+  const bounds = coordinateTransform?.bounds ?? geometry.boundingBox?.clone() ?? basePositionBoundsForGeometry(geometry, basePositions);
   const range = valueRange ?? resultValueRangeForGeometry(geometry, kind, resultMode, stressExaggeration, samples, coordinateTransform);
   const colorAttribute = colorAttributeForGeometry(geometry, positions.count);
   for (let index = 0; index < positions.count; index += 1) {
@@ -2119,8 +2407,12 @@ function colorizeResultGeometry(
   if (geometry.getAttribute("color") !== colorAttribute) geometry.setAttribute("color", colorAttribute);
   colorAttribute.needsUpdate = true;
   positions.needsUpdate = true;
-  geometry.computeVertexNormals();
-  geometry.computeBoundingSphere();
+  if (recomputeDerivedGeometry) {
+    geometry.computeVertexNormals();
+    geometry.computeBoundingSphere();
+  } else {
+    ensureResultBoundingSphere(geometry, basePositions, bounds.getSize(new THREE.Vector3()).length(), 0, undefined);
+  }
   return geometry;
 }
 
@@ -2138,6 +2430,7 @@ function basePositionArrayForGeometry(geometry: THREE.BufferGeometry, positions:
   const base = new Float32Array(positions.array as ArrayLike<number>);
   geometry.userData.opencaeBasePositions = base;
   geometry.userData.basePositions = base;
+  delete geometry.userData.opencaeBasePositionBounds;
   return base;
 }
 
@@ -2155,11 +2448,33 @@ function colorAttributeForGeometry(geometry: THREE.BufferGeometry, vertexCount: 
 }
 
 function basePositionBounds(basePositions: Float32Array): THREE.Box3 {
-  const bounds = new THREE.Box3();
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let minZ = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+  let maxZ = Number.NEGATIVE_INFINITY;
   for (let offset = 0; offset + 2 < basePositions.length; offset += 3) {
-    bounds.expandByPoint(new THREE.Vector3(basePositions[offset] ?? 0, basePositions[offset + 1] ?? 0, basePositions[offset + 2] ?? 0));
+    const x = basePositions[offset] ?? 0;
+    const y = basePositions[offset + 1] ?? 0;
+    const z = basePositions[offset + 2] ?? 0;
+    minX = Math.min(minX, x);
+    minY = Math.min(minY, y);
+    minZ = Math.min(minZ, z);
+    maxX = Math.max(maxX, x);
+    maxY = Math.max(maxY, y);
+    maxZ = Math.max(maxZ, z);
   }
-  return bounds.isEmpty() ? new THREE.Box3(new THREE.Vector3(0, 0, 0), new THREE.Vector3(1, 1, 1)) : bounds;
+  if (!Number.isFinite(minX) || !Number.isFinite(maxX)) return new THREE.Box3(new THREE.Vector3(0, 0, 0), new THREE.Vector3(1, 1, 1));
+  return new THREE.Box3(new THREE.Vector3(minX, minY, minZ), new THREE.Vector3(maxX, maxY, maxZ));
+}
+
+function basePositionBoundsForGeometry(geometry: THREE.BufferGeometry, basePositions: Float32Array): THREE.Box3 {
+  const cached = geometry.userData.opencaeBasePositionBounds;
+  if (cached instanceof THREE.Box3) return cached;
+  const bounds = basePositionBounds(basePositions);
+  geometry.userData.opencaeBasePositionBounds = bounds;
+  return bounds;
 }
 
 function maxDisplacementMagnitude(field: ResultField | undefined): number {
@@ -2216,6 +2531,7 @@ function squaredDistanceArrays(left: [number, number, number], right: [number, n
 
 type SmoothVectorInterpolator = {
   interpolate: (point: THREE.Vector3) => THREE.Vector3;
+  interpolateComponents: (x: number, y: number, z: number) => [number, number, number];
 };
 
 const smoothVectorInterpolatorCache = new WeakMap<NonNullable<ResultField["samples"]>, SmoothVectorInterpolator | null>();
@@ -2268,22 +2584,36 @@ function createSmoothVectorInterpolator(samples: NonNullable<ResultField["sample
     .sort((left, right) => left.coordinate - right.coordinate);
   if (stations.length < 3) return null;
 
-  return {
-    interpolate(point) {
-      const coordinate = point.getComponent(axis);
-      if (coordinate <= stations[0]!.coordinate) return stations[0]!.vector.clone();
-      const last = stations[stations.length - 1]!;
-      if (coordinate >= last.coordinate) return last.vector.clone();
+  const interpolateComponents = (x: number, y: number, z: number): [number, number, number] => {
+    const coordinate = axis === 0 ? x : axis === 1 ? y : z;
+    if (coordinate <= stations[0]!.coordinate) return vectorComponents(stations[0]!.vector);
+    const last = stations[stations.length - 1]!;
+    if (coordinate >= last.coordinate) return vectorComponents(last.vector);
       let upperIndex = 1;
       while (upperIndex < stations.length && coordinate > stations[upperIndex]!.coordinate) upperIndex += 1;
       const lower = stations[Math.max(0, upperIndex - 1)]!;
       const upper = stations[Math.min(stations.length - 1, upperIndex)]!;
       const width = Math.max(upper.coordinate - lower.coordinate, 1e-12);
       const t = Math.max(0, Math.min(1, (coordinate - lower.coordinate) / width));
-      return lower.vector.clone().lerp(upper.vector, t);
-    }
+    return [
+      lower.vector.x + (upper.vector.x - lower.vector.x) * t,
+      lower.vector.y + (upper.vector.y - lower.vector.y) * t,
+      lower.vector.z + (upper.vector.z - lower.vector.z) * t
+    ];
+  };
+
+  return {
+    interpolate(point) {
+      const [x, y, z] = interpolateComponents(point.x, point.y, point.z);
+      return new THREE.Vector3(x, y, z);
+    },
+    interpolateComponents
   };
 }
+
+function vectorComponents(vector: THREE.Vector3): [number, number, number] {
+  return [vector.x, vector.y, vector.z];
+    }
 
 function nearestResultSamples(
   point: THREE.Vector3,
@@ -2300,6 +2630,7 @@ function nearestResultSamples(
 const loggedResultFieldDiagnostics = new Set<string>();
 
 function logResultFieldDiagnostics(field: ResultField | undefined, resultMode: ResultMode) {
+  if (!DEBUG_PERF && !DEBUG_RESULTS) return;
   if (!field) return;
   const finiteValues = field.values.filter(Number.isFinite);
   const finiteSamples = field.samples?.map((sample) => sample.value).filter(Number.isFinite) ?? [];
@@ -2400,7 +2731,8 @@ function usePackedPlaybackGeometry(
           fields,
           resultMode: latest.resultMode,
           showDeformed: latest.showDeformed,
-          deformationScale: latest.deformationScale ?? 1
+          deformationScale: latest.deformationScale ?? 1,
+          recomputeDerivedGeometry: false
         });
         invalidate();
         return;
@@ -2417,7 +2749,9 @@ function usePackedPlaybackGeometry(
         latest.deformationScale,
         undefined,
         undefined,
-        latest.supportMarkers
+        latest.supportMarkers,
+        [],
+        false
       );
       invalidate();
     };
@@ -2684,7 +3018,8 @@ function resultPayloadOffsetForFields(
   if (!displacementField) return [0, 0, 0];
   const position = geometry.getAttribute("position");
   if (!(position instanceof THREE.BufferAttribute)) return [0, 0, 0];
-  const modelExtent = basePositionBounds(basePositionArrayForGeometry(geometry, position)).getSize(new THREE.Vector3()).length();
+  const basePositions = basePositionArrayForGeometry(geometry, position);
+  const modelExtent = basePositionBoundsForGeometry(geometry, basePositions).getSize(new THREE.Vector3()).length();
   const visualScale = visualScaleForDisplacementField(modelExtent, displacementField, deformationScale);
   if (visualScale <= 0) return [0, 0, 0];
   const displacement = interpolateDisplacementAtPoint(attachmentPoint, displacementField);
