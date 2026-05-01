@@ -1,7 +1,9 @@
 import { describe, expect, test } from "vitest";
 import {
   canNavigateToStep,
+  isEditableShortcutTarget,
   printLayerOrientationForViewer,
+  workflowStepForShortcut,
   shouldAutoAdvanceAfterMaterialAssignment,
   shouldAutoAdvanceAfterMeshGeneration,
   shouldShowStartScreen
@@ -29,6 +31,24 @@ describe("app shell state", () => {
     expect(canNavigateToStep("run", { meshStatus: "ready" })).toBe(false);
     expect(canNavigateToStep("run", { meshStatus: "complete" })).toBe(true);
     expect(canNavigateToStep("mesh", { meshStatus: "not_started" })).toBe(true);
+  });
+
+  test("maps workflow keyboard shortcuts to adjacent allowed steps", () => {
+    expect(workflowStepForShortcut("n", "model", { meshStatus: "not_started" })).toBe("material");
+    expect(workflowStepForShortcut("b", "material", { meshStatus: "not_started" })).toBe("model");
+    expect(workflowStepForShortcut("n", "mesh", { meshStatus: "complete" })).toBe("run");
+    expect(workflowStepForShortcut("n", "mesh", { meshStatus: "ready" })).toBeNull();
+    expect(workflowStepForShortcut("b", "model", { meshStatus: "complete" })).toBeNull();
+    expect(workflowStepForShortcut("n", "results", { meshStatus: "complete" })).toBeNull();
+  });
+
+  test("ignores single-key shortcuts while editing form fields", () => {
+    expect(isEditableShortcutTarget({ tagName: "INPUT", isContentEditable: false })).toBe(true);
+    expect(isEditableShortcutTarget({ tagName: "TEXTAREA", isContentEditable: false })).toBe(true);
+    expect(isEditableShortcutTarget({ tagName: "SELECT", isContentEditable: false })).toBe(true);
+    expect(isEditableShortcutTarget({ tagName: "DIV", isContentEditable: true })).toBe(true);
+    expect(isEditableShortcutTarget({ tagName: "BUTTON", isContentEditable: false })).toBe(false);
+    expect(isEditableShortcutTarget(null)).toBe(false);
   });
 
   test("uses draft print direction for viewer preview before material is applied", () => {

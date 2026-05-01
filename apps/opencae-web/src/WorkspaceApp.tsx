@@ -26,10 +26,12 @@ import { buildAutosavedWorkspace, buildAutosavedWorkspaceUiSnapshot, readAutosav
 import type { AutosavedWorkspace, WorkspaceUiSnapshot } from "./appPersistence";
 import {
   canNavigateToStep,
+  isEditableShortcutTarget,
   printLayerOrientationForViewer,
   shouldAutoAdvanceAfterMaterialAssignment,
   shouldAutoAdvanceAfterMeshGeneration,
-  shouldShowStartScreen
+  shouldShowStartScreen,
+  workflowStepForShortcut
 } from "./appShellState";
 import { displayModelForUnits, loadValueForUnits, resultFieldForUnits, resultSummaryForUnits, type UnitSystem } from "./unitDisplay";
 import { supportDisplayLabel } from "./supportLabels";
@@ -498,11 +500,12 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   useEffect(() => {
     if (!project || !displayModel) return;
     function handleShortcut(event: KeyboardEvent) {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+      const key = event.key.toLowerCase();
+      if ((event.metaKey || event.ctrlKey) && key === "s") {
         event.preventDefault();
         void handleSaveProject();
       }
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z") {
+      if ((event.metaKey || event.ctrlKey) && key === "z") {
         event.preventDefault();
         if (event.shiftKey) {
           handleRedoAction();
@@ -510,10 +513,20 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           handleUndoAction();
         }
       }
+      if (event.metaKey || event.ctrlKey || event.altKey || isEditableShortcutTarget(event.target as HTMLElement | null)) return;
+      if (key === "h") {
+        event.preventDefault();
+        handleFitDefaultView();
+        return;
+      }
+      const shortcutStep = workflowStepForShortcut(key, activeStep, { meshStatus: study?.meshSettings.status ?? "not_started" });
+      if (!shortcutStep) return;
+      event.preventDefault();
+      navigateToStep(shortcutStep);
     }
     window.addEventListener("keydown", handleShortcut);
     return () => window.removeEventListener("keydown", handleShortcut);
-  }, [displayModel, project, undoStack, redoStack]);
+  }, [activeStep, displayModel, project, redoStack, study, undoStack, viewMode]);
 
   const autosaveUiSnapshot = useMemo<WorkspaceUiSnapshot>(() => ({
     activeStep,
