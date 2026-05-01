@@ -144,7 +144,7 @@ export const VIEWER_GIZMO_AXIS_LENGTH = 1.25;
 export const VIEWER_GIZMO_LABEL_DISTANCE = 1.35;
 export const VIEWER_VIEW_CUBE_SIZE = 0.9;
 export const VIEWER_VIEW_CUBE_EDGE_COLOR = "#9cc7df";
-export const VIEWER_VIEW_CUBE_FACE_LABEL_FONT_SIZE = 0.105;
+export const VIEWER_VIEW_CUBE_FACE_LABEL_FONT_SIZE = 0.13;
 export const VIEWER_ISOMETRIC_GIZMO_VIEW = "iso";
 export const VIEWER_CREDIT_URL = "https://esauengineering.com/";
 const VIEWER_FIT_MARGIN = 1.28;
@@ -660,19 +660,20 @@ function ViewCubeFace({
         <planeGeometry args={[VIEWER_VIEW_CUBE_SIZE * 0.82, VIEWER_VIEW_CUBE_SIZE * 0.82]} />
         <meshBasicMaterial color={hovered ? "#6da4c9" : "#31516b"} depthTest transparent opacity={hovered ? 0.34 : 0.08} depthWrite={false} toneMapped={false} />
       </mesh>
-      <Text
-        anchorX="center"
-        anchorY="middle"
-        color="#c7d7e5"
-        fontSize={VIEWER_VIEW_CUBE_FACE_LABEL_FONT_SIZE}
-        letterSpacing={0}
-        outlineColor="#07111d"
-        outlineWidth={0.01}
-        position={[0, 0, 0.006]}
-        renderOrder={3}
-      >
-        {label}
-      </Text>
+      <Billboard position={[0, 0, 0.018]} renderOrder={3}>
+        <Text
+          anchorX="center"
+          anchorY="middle"
+          color="#e0edf8"
+          fontSize={VIEWER_VIEW_CUBE_FACE_LABEL_FONT_SIZE}
+          letterSpacing={0}
+          outlineColor="#07111d"
+          outlineWidth={0.012}
+          renderOrder={3}
+        >
+          {label}
+        </Text>
+      </Billboard>
     </group>
   );
 }

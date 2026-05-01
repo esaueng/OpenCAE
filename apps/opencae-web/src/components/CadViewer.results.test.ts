@@ -49,7 +49,7 @@ describe("CadViewer result coloring", () => {
     expect(VIEWER_GIZMO_AXIS_LENGTH).toBe(1.25);
     expect(VIEWER_GIZMO_LABEL_DISTANCE).toBe(1.35);
     expect(VIEWER_VIEW_CUBE_EDGE_COLOR).toBe("#9cc7df");
-    expect(VIEWER_VIEW_CUBE_FACE_LABEL_FONT_SIZE).toBe(0.105);
+    expect(VIEWER_VIEW_CUBE_FACE_LABEL_FONT_SIZE).toBe(0.13);
     expect(cadViewerSource).toContain("function ViewCube");
     expect(cadViewerSource).toContain("function ViewCubeFace");
     expect(cadViewerSource).toContain("function IsoCenterButton");
