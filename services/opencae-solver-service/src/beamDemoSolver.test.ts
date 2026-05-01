@@ -1,6 +1,12 @@
 import { describe, expect, test } from "vitest";
+import { estimateAllowableLoadForSafetyFactor } from "@opencae/schema";
 import type { Study } from "@opencae/schema";
-import { isBeamDemoStudy, solveBeamDemoStudy } from "./beamDemoSolver";
+import { DEFAULT_BEAM_DEMO_PHYSICAL_MODEL, isBeamDemoStudy, solveBeamDemoStudy } from "./beamDemoSolver";
+
+const EXPECTED_PAYLOAD_FORCE_N = 0.497664 * 9.80665;
+const EXPECTED_I_M4 = (0.0151578947368 * 0.0117894736842 ** 3) / 12;
+const EXPECTED_STRESS_MPA = EXPECTED_PAYLOAD_FORCE_N * 0.16 * (0.0117894736842 / 2) / EXPECTED_I_M4 / 1_000_000;
+const EXPECTED_DISPLACEMENT_MM = EXPECTED_PAYLOAD_FORCE_N * 0.16 ** 3 / (3 * 68_900_000_000 * EXPECTED_I_M4) * 1000;
 
 describe("Beam Demo Euler-Bernoulli solver", () => {
   test("detects the Beam Demo named selections without using the generic surface heuristic", () => {
@@ -9,14 +15,15 @@ describe("Beam Demo Euler-Bernoulli solver", () => {
   });
 
   test("converts payload mass to Newtons and returns dense displacement vectors", () => {
-    const result = solveBeamDemoStudy(beamPayloadStudy(), "run-beam-payload");
+    const result = solveBeamDemoStudy(beamPayloadStudy(0.497664), "run-beam-payload");
     const displacement = result.fields.find((field) => field.type === "displacement");
     const fixedSample = displacement?.samples?.find((sample) => sample.nodeId === "beam-node-0");
     const peakSample = [...(displacement?.samples ?? [])].sort((left, right) => right.value - left.value)[0];
 
     expect(result.solverBackend).toBe("local-beam-demo-euler-bernoulli");
-    expect(result.summary.reactionForce).toBeCloseTo(4.9 * 9.80665, 5);
-    expect(result.beamDemoDiagnostics.loadForceN).toBeCloseTo(4.9 * 9.80665, 5);
+    expect(result.summary.reactionForce).toBeCloseTo(EXPECTED_PAYLOAD_FORCE_N, 5);
+    expect(result.beamDemoDiagnostics.loadForceN).toBeCloseTo(EXPECTED_PAYLOAD_FORCE_N, 5);
+    expect(result.beamDemoDiagnostics.secondMomentM4).toBeCloseTo(EXPECTED_I_M4, 15);
     expect(result.beamDemoDiagnostics.elementCount).toBeGreaterThanOrEqual(64);
     expect(displacement?.location).toBe("node");
     expect(displacement?.samples?.length).toBeGreaterThan(64);
@@ -28,7 +35,7 @@ describe("Beam Demo Euler-Bernoulli solver", () => {
   });
 
   test("keeps payload displacement smooth across and beyond the load station", () => {
-    const result = solveBeamDemoStudy(beamPayloadStudy(), "run-beam-smooth");
+    const result = solveBeamDemoStudy(beamPayloadStudy(0.497664), "run-beam-smooth");
     const displacement = result.fields.find((field) => field.type === "displacement");
     const centerline = (displacement?.samples ?? [])
       .filter((sample) => sample.source === "beam-demo-centerline")
@@ -43,17 +50,15 @@ describe("Beam Demo Euler-Bernoulli solver", () => {
       return Math.max(maxJump, Math.abs(sample.value - previous.value));
     }, 0);
 
-    expect(result.beamDemoDiagnostics.loadStation).toBeGreaterThan(0);
-    expect(result.beamDemoDiagnostics.loadStation).toBeLessThan(1);
-    expect(beyondLoad.length).toBeGreaterThan(2);
-    expect(new Set(beyondLoad.map((value) => value.toFixed(8))).size).toBeGreaterThan(2);
+    expect(result.beamDemoDiagnostics.loadStation).toBeCloseTo(1, 8);
+    expect(beyondLoad.length).toBe(0);
     expect(fixedValue).toBeCloseTo(0, 8);
     expect(freeValue).toBeGreaterThan(nearFixed);
     expect(maxAdjacentJump).toBeLessThan(freeValue * 0.08);
   });
 
   test("computes physically coherent bending stress and safety factor", () => {
-    const result = solveBeamDemoStudy(beamPayloadStudy(), "run-beam-stress");
+    const result = solveBeamDemoStudy(beamPayloadStudy(0.497664), "run-beam-stress");
     const stress = result.fields.find((field) => field.type === "stress");
     const safety = result.fields.find((field) => field.type === "safety_factor");
     const fixedStress = stress?.samples?.find((sample) => sample.nodeId === "beam-node-0")?.value ?? 0;
@@ -61,11 +66,37 @@ describe("Beam Demo Euler-Bernoulli solver", () => {
     const freeStress = stress?.samples?.find((sample) => sample.nodeId === "beam-node-64")?.value ?? 0;
 
     expect(stress?.samples?.length).toBeGreaterThan(64);
+    expect(result.summary.maxStress).toBeCloseTo(EXPECTED_STRESS_MPA, 3);
+    expect(result.summary.maxDisplacement).toBeCloseTo(EXPECTED_DISPLACEMENT_MM, 4);
     expect(fixedStress).toBeGreaterThan(loadStress);
     expect(fixedStress).toBeGreaterThan(freeStress);
     expect(result.summary.maxStress).toBeCloseTo(stress?.max ?? 0, 4);
     expect(result.summary.safetyFactor).toBeCloseTo(safety?.min ?? 0, 4);
     expect(result.summary.safetyFactor).toBeCloseTo(result.beamDemoDiagnostics.yieldMPa / result.summary.maxStress, 3);
+  });
+
+  test("scales linearly with force and with explicit beam section dimensions", () => {
+    const base = solveBeamDemoStudy(beamPayloadStudy(0.497664), "run-beam-base");
+    const doubledLoad = solveBeamDemoStudy(beamPayloadStudy(0.995328), "run-beam-double-load");
+    const doubledHeight = solveBeamDemoStudy(beamPayloadStudy(0.497664), "run-beam-double-height", {
+      beamModel: {
+        ...DEFAULT_BEAM_DEMO_PHYSICAL_MODEL,
+        beamHeightMm: DEFAULT_BEAM_DEMO_PHYSICAL_MODEL.beamHeightMm * 2
+      }
+    });
+
+    expect(doubledLoad.summary.maxStress / base.summary.maxStress).toBeCloseTo(2, 3);
+    expect(doubledLoad.summary.maxDisplacement / base.summary.maxDisplacement).toBeCloseTo(2, 3);
+    expect(base.summary.maxStress / doubledHeight.summary.maxStress).toBeCloseTo(4, 1);
+    expect(base.summary.maxDisplacement / doubledHeight.summary.maxDisplacement).toBeCloseTo(8, 1);
+  });
+
+  test("keeps reverse load capacity plausible after corrected Beam Demo stress", () => {
+    const result = solveBeamDemoStudy(beamPayloadStudy(0.497664), "run-beam-capacity");
+    const capacity = estimateAllowableLoadForSafetyFactor(result.summary, 1.5);
+
+    expect(capacity.allowableLoad).toBeCloseTo(404, 0);
+    expect(capacity.allowableLoad).toBeLessThan(1000);
   });
 
   test("treats an end force as a standard end-load cantilever", () => {
@@ -85,8 +116,8 @@ function station(nodeId: string | undefined): number {
   return Number(nodeId?.replace("beam-node-", "") ?? 0);
 }
 
-function beamPayloadStudy(): Study {
-  return beamStudy("gravity", 4.9, "kg", [0, -1, 0], [1.48, 0.49, 0]);
+function beamPayloadStudy(massKg = 0.497664): Study {
+  return beamStudy("gravity", massKg, "kg", [0, -1, 0], [1.48, 0.49, 0]);
 }
 
 function beamForceStudy(): Study {
