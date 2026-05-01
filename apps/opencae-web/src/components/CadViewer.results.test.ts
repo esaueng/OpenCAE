@@ -44,16 +44,19 @@ describe("CadViewer result coloring", () => {
     expect(cadViewerSource).toContain("<ringGeometry args={[VIEWER_AXIS_LABEL_BADGE_RADIUS, VIEWER_AXIS_HEAD_RADIUS, 40]}");
   });
 
-  test("renders a centered triad view cube without negative label clutter", () => {
-    expect(VIEWER_VIEW_CUBE_SIZE).toBe(0.9);
-    expect(VIEWER_GIZMO_AXIS_LENGTH).toBe(1.25);
-    expect(VIEWER_GIZMO_LABEL_DISTANCE).toBe(1.35);
+  test("renders a positive-octant triad view cube without negative label clutter", () => {
+    expect(VIEWER_VIEW_CUBE_SIZE).toBe(0.72);
+    expect(VIEWER_GIZMO_AXIS_LENGTH).toBe(1.35);
+    expect(VIEWER_GIZMO_LABEL_DISTANCE).toBe(1.45);
     expect(VIEWER_VIEW_CUBE_EDGE_COLOR).toBe("#9cc7df");
     expect(VIEWER_VIEW_CUBE_FACE_LABEL_FONT_SIZE).toBe(0.13);
-    expect(cadViewerSource).toContain("function ViewCube");
+    expect(cadViewerSource).toContain("function PositiveOctantViewCube");
     expect(cadViewerSource).toContain("function ViewCubeFace");
     expect(cadViewerSource).toContain("function IsoCenterButton");
-    expect(cadViewerSource).toContain("<ViewCube onSelectView={onSelectView} />");
+    expect(cadViewerSource).toContain("<PositiveOctantViewCube onSelectView={onSelectView} />");
+    expect(cadViewerSource).toContain("cube bounds = [0, cubeSize] on X/Y/Z");
+    expect(cadViewerSource).toContain("const lineStart: [number, number, number] = [0, 0, 0];");
+    expect(cadViewerSource).toContain("position={[half, half, half]}");
     expect(cadViewerSource).not.toContain("function MiniAxisCube");
     expect(cadViewerSource).not.toContain("function AxisDot");
     expect(cadViewerSource).not.toContain("-X");
