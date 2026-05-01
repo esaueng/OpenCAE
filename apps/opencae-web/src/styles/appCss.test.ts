@@ -58,12 +58,21 @@ describe("app CSS", () => {
     expect(analysisLegend).toMatch(/overflow:\s*auto/);
     expect(analysisLegend).toMatch(/resize:\s*none/);
     expect(analysisLegend).toMatch(/pointer-events:\s*auto/);
+    expect(analysisLegend).toMatch(/align-content:\s*start/);
+    expect(analysisLegend).toMatch(/font-size:\s*calc\(var\(--fs-mini\)\s*\*\s*var\(--analysis-legend-scale,\s*1\)\)/);
+    expect(analysisLegend).toMatch(/gap:\s*calc\(6px\s*\*\s*var\(--analysis-legend-scale,\s*1\)\)\s+calc\(12px\s*\*\s*var\(--analysis-legend-scale,\s*1\)\)/);
+    expect(analysisLegend).toMatch(/padding:\s*calc\(14px\s*\*\s*var\(--analysis-legend-scale,\s*1\)\)\s+calc\(16px\s*\*\s*var\(--analysis-legend-scale,\s*1\)\)/);
     expect(resizeHandle).toMatch(/position:\s*absolute/);
     expect(resizeHandle).toMatch(/top:\s*0/);
     expect(resizeHandle).toMatch(/right:\s*0/);
     expect(resizeHandle).toMatch(/cursor:\s*nesw-resize/);
     expect(resizeHandleAfter).toMatch(/border-top:\s*2px\s+solid/);
     expect(resizeHandleAfter).toMatch(/border-right:\s*2px\s+solid/);
+  });
+
+  test("scales result legend visual elements with resized content", () => {
+    expect(cssRule(".legend-scale")).toMatch(/height:\s*calc\(10px\s*\*\s*var\(--analysis-legend-scale,\s*1\)\)/);
+    expect(cssRule(".legend-values")).toMatch(/font-size:\s*calc\(var\(--fs-mini\)\s*\*\s*0\.9\s*\*\s*var\(--analysis-legend-scale,\s*1\)\)/);
   });
 
   test("keeps light mode shared text colors above contrast requirements", () => {
