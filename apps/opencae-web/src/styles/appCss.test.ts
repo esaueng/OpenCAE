@@ -141,8 +141,11 @@ describe("app CSS", () => {
   });
 
   test("hides native focus outlines on range sliders", () => {
+    const rangeInput = cssRule(".range-field input[type=\"range\"]");
     const rangeFocus = cssRule(".range-field input[type=\"range\"]:focus,\n.range-field input[type=\"range\"]:focus-visible");
 
+    expect(rangeInput).toMatch(/border:\s*none/);
+    expect(rangeInput).toMatch(/padding:\s*0/);
     expect(rangeFocus).toMatch(/outline:\s*none/);
     expect(rangeFocus).toMatch(/box-shadow:\s*none/);
   });
