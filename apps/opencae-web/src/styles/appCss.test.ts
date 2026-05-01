@@ -39,15 +39,16 @@ describe("app CSS", () => {
     expect(css).toMatch(/\.theme-light\s+\.viewer-reset\s*\{[\s\S]*?border-color:\s*rgba\(82,\s*103,\s*130,\s*0\.24\)/);
   });
 
-  test("anchors the reset view button in the viewer bottom-right corner", () => {
+  test("anchors the reset view button close to the viewer bottom-right corner", () => {
     const viewerHud = cssRule(".viewer-hud");
 
     const inset = viewerHud.match(/inset:\s*auto\s+(?<right>\d+)px\s+(?<bottom>\d+)px\s+auto/);
     const right = Number(inset?.groups?.right);
     const bottom = Number(inset?.groups?.bottom);
 
-    expect(right).toBe(52);
+    expect(right).toBe(48);
     expect(bottom).toBe(48);
+    expect(right).toBe(bottom);
   });
 
   test("lightens the analysis legend in light mode", () => {
