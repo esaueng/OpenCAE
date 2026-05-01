@@ -1842,8 +1842,9 @@ function SampleResultSolid({
   );
   const beamPayloadGeometry = useMemo(() => createBeamPayloadGeometry(), []);
   const beamPayloadOffset = useMemo(
-    () => resultPayloadOffsetForFields(BEAM_PAYLOAD_CENTER, beamGeometry, resultFields, showDeformed, deformationScale ?? 1),
-    [beamGeometry, deformationScale, resultFields, showDeformed]
+    () => resultPayloadOffsetForBeamDemo(beamGeometry, samples, loadMarkers, supportMarkers, resultFields, showDeformed, stressExaggeration, deformationScale ?? 1)
+      ?? resultPayloadOffsetForFields(BEAM_PAYLOAD_CENTER, beamGeometry, resultFields, showDeformed, deformationScale ?? 1),
+    [beamGeometry, deformationScale, loadMarkers, resultFields, samples, showDeformed, stressExaggeration, supportMarkers]
   );
   const cantileverGeometry = useMemo(
     () => colorizeSampleResultGeometry(new THREE.BoxGeometry(3.8, 0.5, 0.72, 40, 8, 8), kind, resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale, supportMarkers, resultFields),
@@ -2363,7 +2364,8 @@ function colorizeResultGeometry(
 ) {
   const positions = geometry.getAttribute("position");
   if (!(positions instanceof THREE.BufferAttribute)) return geometry;
-  if (resultFields.length && !coordinateTransform) {
+  const usesBeamPayloadFallback = shouldUseBeamDemoPayloadFallback(kind, loadMarkers, resultFields);
+  if (resultFields.length && !coordinateTransform && !usesBeamPayloadFallback) {
     return applyResultFrameToGeometry({
       geometry,
       fields: resultFields,
@@ -2389,17 +2391,27 @@ function colorizeResultGeometry(
   const usesResultDeformationScale = typeof deformationScale === "number";
   if (recomputeDerivedGeometry || !geometry.boundingBox) geometry.computeBoundingBox();
   const bounds = coordinateTransform?.bounds ?? geometry.boundingBox?.clone() ?? basePositionBoundsForGeometry(geometry, basePositions);
-  const range = valueRange ?? resultValueRangeForGeometry(geometry, kind, resultMode, stressExaggeration, samples, coordinateTransform);
+  const beamDemoCoordinate = usesBeamPayloadFallback
+    ? createBeamDemoCoordinate({ bounds, samples, loadMarkers, supportMarkers })
+    : null;
+  const beamDemoMaxDisplacement = beamDemoCoordinate
+    ? beamDemoMaxDisplacementForLoads(stressExaggeration, loadMarkers, resolvedDeformationScale, usesResultDeformationScale)
+    : 0;
+  const range = valueRange ?? (beamDemoCoordinate ? { min: 0, max: 1 } : resultValueRangeForGeometry(geometry, kind, resultMode, stressExaggeration, samples, coordinateTransform));
   const colorAttribute = colorAttributeForGeometry(geometry, positions.count);
   for (let index = 0; index < positions.count; index += 1) {
     const baseOffset = index * 3;
     const point = new THREE.Vector3(basePositions[baseOffset] ?? 0, basePositions[baseOffset + 1] ?? 0, basePositions[baseOffset + 2] ?? 0);
     const resultPoint = coordinateTransform?.toResultPoint(point) ?? point;
-    const value = resultValueForPoint(kind, resultMode, stressExaggeration, resultPoint, samples);
+    const value = beamDemoCoordinate
+      ? beamDemoFallbackValueForPoint(resultMode, resultPoint, beamDemoCoordinate)
+      : resultValueForPoint(kind, resultMode, stressExaggeration, resultPoint, samples);
     color.copy(resultColorForValue(resultMode, normalizeResultValue(value, range)));
     colorAttribute.setXYZ(index, color.r, color.g, color.b);
     if (showDeformed) {
-      const deformed = deformedPointForResults(kind, resultPoint, stressExaggeration, samples, loadMarkers, resolvedDeformationScale, usesResultDeformationScale, bounds, supportMarkers);
+      const deformed = beamDemoCoordinate
+        ? deformedBeamDemoPayloadPoint(resultPoint, beamDemoCoordinate, beamDemoMaxDisplacement)
+        : deformedPointForResults(kind, resultPoint, stressExaggeration, samples, loadMarkers, resolvedDeformationScale, usesResultDeformationScale, bounds, supportMarkers);
       const localDeformed = coordinateTransform?.fromResultPoint(deformed) ?? deformed;
       positions.setXYZ(index, localDeformed.x, localDeformed.y, localDeformed.z);
     }
@@ -2905,6 +2917,84 @@ type ResultValueRange = {
   max: number;
 };
 
+export type BeamDemoCoordinate = {
+  fixedEnd: THREE.Vector3;
+  beamFreeEnd: THREE.Vector3;
+  beamAxis: THREE.Vector3;
+  length: number;
+  payloadStation: number;
+  loadDirection: THREE.Vector3;
+};
+
+export function pointLoadCantileverShape(s: number, a: number): number {
+  const ss = clamp01(s);
+  const aa = Math.max(1e-6, Math.min(1, a));
+  if (ss <= aa) {
+    return ss * ss * (3 * aa - ss);
+  }
+  return aa * aa * (3 * ss - aa);
+}
+
+export function normalizedPointLoadCantileverShape(s: number, a: number): number {
+  const aa = Math.max(1e-6, Math.min(1, a));
+  const maxRaw = aa * aa * (3 - aa);
+  return pointLoadCantileverShape(s, aa) / Math.max(maxRaw, 1e-9);
+}
+
+export function beamDemoStationForPoint(point: THREE.Vector3, coordinate: BeamDemoCoordinate): number {
+  if (coordinate.length <= 1e-9) return 0;
+  return clamp01(point.clone().sub(coordinate.fixedEnd).dot(coordinate.beamAxis) / coordinate.length);
+}
+
+export function beamDemoDisplacementAtStation(station: number, coordinate: BeamDemoCoordinate, maxDisplacement: number): THREE.Vector3 {
+  const shape = normalizedPointLoadCantileverShape(station, coordinate.payloadStation);
+  return coordinate.loadDirection.clone().multiplyScalar(maxDisplacement * shape);
+}
+
+export function beamDemoPayloadOffset(coordinate: BeamDemoCoordinate, maxDisplacement: number): THREE.Vector3 {
+  return beamDemoDisplacementAtStation(coordinate.payloadStation, coordinate, maxDisplacement);
+}
+
+export function createBeamDemoCoordinate({
+  bounds,
+  samples,
+  loadMarkers,
+  supportMarkers
+}: {
+  bounds?: THREE.Box3;
+  samples: FaceResultSample[];
+  loadMarkers: ViewerLoadMarker[];
+  supportMarkers: ViewerSupportMarker[];
+}): BeamDemoCoordinate | null {
+  const resolvedBounds = bounds && !bounds.isEmpty()
+    ? bounds
+    : new THREE.Box3(new THREE.Vector3(-1.9, 0, -BEAM_DEPTH / 2), new THREE.Vector3(1.9, BEAM_HEIGHT, BEAM_DEPTH / 2));
+  const payloadPoint = averageMarkerReferencePoint(loadMarkers.filter((marker) => marker.payloadObject), samples)
+    ?? averageMarkerReferencePoint(loadMarkers, samples);
+  const fixedEnd = averageMarkerReferencePoint(supportMarkers, samples)
+    ?? guessedBeamFixedEnd(resolvedBounds, payloadPoint);
+  if (!fixedEnd) return null;
+  const axisIndex = beamAxisIndex(resolvedBounds, fixedEnd, payloadPoint);
+  const beamFreeEnd = farthestBeamExtentPoint(resolvedBounds, fixedEnd, axisIndex);
+  const axisVector = beamFreeEnd.clone().sub(fixedEnd);
+  const length = axisVector.length();
+  if (!Number.isFinite(length) || length <= 1e-9) return null;
+  const beamAxis = axisVector.clone().multiplyScalar(1 / length);
+  const payloadStation = payloadPoint
+    ? clamp01(payloadPoint.clone().sub(fixedEnd).dot(beamAxis) / length)
+    : 1;
+  const coordinate: BeamDemoCoordinate = {
+    fixedEnd,
+    beamFreeEnd,
+    beamAxis,
+    length,
+    payloadStation,
+    loadDirection: resultantLoadDirection(loadMarkers)
+  };
+  logBeamDemoCoordinateDebug(coordinate);
+  return coordinate;
+}
+
 export function colorizeResultObject(
   object: THREE.Object3D,
   kind: SampleModelKind,
@@ -3046,6 +3136,33 @@ function resultPayloadObjectRefs(loadMarkers: ViewerLoadMarker[]): ResultPayload
     addResultPayloadRef(refs.labels, marker.payloadObject?.label);
   }
   return refs;
+}
+
+function resultPayloadOffsetForBeamDemo(
+  geometry: THREE.BufferGeometry,
+  samples: FaceResultSample[],
+  loadMarkers: ViewerLoadMarker[],
+  supportMarkers: ViewerSupportMarker[],
+  resultFields: ResultField[],
+  showDeformed: boolean,
+  stressExaggeration: number,
+  deformationScale: number
+): [number, number, number] | null {
+  if (!showDeformed || !shouldUseBeamDemoPayloadFallback("plate", loadMarkers, resultFields)) return null;
+  const position = geometry.getAttribute("position");
+  if (!(position instanceof THREE.BufferAttribute)) return null;
+  const basePositions = basePositionArrayForGeometry(geometry, position);
+  const bounds = basePositionBoundsForGeometry(geometry, basePositions);
+  const coordinate = createBeamDemoCoordinate({ bounds, samples, loadMarkers, supportMarkers });
+  if (!coordinate) return null;
+  const maxDisplacement = beamDemoMaxDisplacementForLoads(stressExaggeration, loadMarkers, deformationScale, true);
+  return beamDemoPayloadOffset(coordinate, maxDisplacement).toArray() as [number, number, number];
+}
+
+function shouldUseBeamDemoPayloadFallback(kind: SampleModelKind, loadMarkers: ViewerLoadMarker[], resultFields: ResultField[]) {
+  return kind === "plate"
+    && loadMarkers.some((marker) => Boolean(marker.payloadObject))
+    && !displacementFieldForResults(resultFields);
 }
 
 function isResultPayloadObject(object: THREE.Object3D, refs: ResultPayloadObjectRefs) {
@@ -3244,6 +3361,81 @@ function markerCenter(faceId: string, samples: FaceResultSample[]) {
   return sample ? new THREE.Vector3(...sample.face.center) : null;
 }
 
+function averageMarkerReferencePoint(
+  markers: Array<{ faceId: string; point?: [number, number, number]; payloadObject?: PayloadObjectSelection }>,
+  samples: FaceResultSample[]
+) {
+  const points = markers
+    .map((marker) => markerReferencePoint(marker, samples))
+    .filter((point): point is THREE.Vector3 => Boolean(point));
+  return points.length ? averageVector(points) : null;
+}
+
+function markerReferencePoint(
+  marker: { faceId: string; point?: [number, number, number]; payloadObject?: PayloadObjectSelection },
+  samples: FaceResultSample[]
+) {
+  const point = marker.payloadObject?.center ?? marker.point;
+  if (point?.every(Number.isFinite)) return new THREE.Vector3(...point);
+  return markerCenter(marker.faceId, samples);
+}
+
+function guessedBeamFixedEnd(bounds: THREE.Box3, payloadPoint: THREE.Vector3 | null) {
+  const size = bounds.getSize(new THREE.Vector3());
+  const axisIndex = size.x >= size.y && size.x >= size.z ? 0 : size.y >= size.z ? 1 : 2;
+  const min = bounds.min.getComponent(axisIndex);
+  const max = bounds.max.getComponent(axisIndex);
+  const center = bounds.getCenter(new THREE.Vector3());
+  const fixed = center.clone();
+  const payloadCoordinate = payloadPoint?.getComponent(axisIndex) ?? min;
+  fixed.setComponent(axisIndex, Math.abs(payloadCoordinate - min) > Math.abs(payloadCoordinate - max) ? min : max);
+  return fixed;
+}
+
+function beamAxisIndex(bounds: THREE.Box3, fixedEnd: THREE.Vector3, payloadPoint: THREE.Vector3 | null) {
+  const size = bounds.getSize(new THREE.Vector3());
+  const geometryAxis = size.x >= size.y && size.x >= size.z ? 0 : size.y >= size.z ? 1 : 2;
+  if (!payloadPoint) return geometryAxis;
+  const delta = payloadPoint.clone().sub(fixedEnd);
+  const loadAxis = Math.abs(delta.x) >= Math.abs(delta.y) && Math.abs(delta.x) >= Math.abs(delta.z)
+    ? 0
+    : Math.abs(delta.y) >= Math.abs(delta.z)
+      ? 1
+      : 2;
+  return size.getComponent(loadAxis) >= size.getComponent(geometryAxis) * 0.5 ? loadAxis : geometryAxis;
+}
+
+function farthestBeamExtentPoint(bounds: THREE.Box3, fixedEnd: THREE.Vector3, axisIndex: number) {
+  const min = bounds.min.getComponent(axisIndex);
+  const max = bounds.max.getComponent(axisIndex);
+  const fixedCoordinate = fixedEnd.getComponent(axisIndex);
+  const freeCoordinate = Math.abs(fixedCoordinate - min) >= Math.abs(fixedCoordinate - max) ? min : max;
+  return fixedEnd.clone().setComponent(axisIndex, freeCoordinate);
+}
+
+const loggedBeamDemoCoordinateDebug = new Set<string>();
+
+function logBeamDemoCoordinateDebug(coordinate: BeamDemoCoordinate) {
+  if (!DEBUG_RESULTS) return;
+  const key = [
+    coordinate.fixedEnd.toArray().map((value) => value.toFixed(3)).join(","),
+    coordinate.beamFreeEnd.toArray().map((value) => value.toFixed(3)).join(","),
+    coordinate.payloadStation.toFixed(3)
+  ].join("|");
+  if (loggedBeamDemoCoordinateDebug.has(key)) return;
+  loggedBeamDemoCoordinateDebug.add(key);
+  const stations = Array.from({ length: 10 }, (_item, index) => index / 9);
+  console.debug("[OpenCAE results] beam demo coordinate", {
+    fixedEnd: coordinate.fixedEnd.toArray(),
+    beamFreeEnd: coordinate.beamFreeEnd.toArray(),
+    beamAxis: coordinate.beamAxis.toArray(),
+    payloadStation: coordinate.payloadStation,
+    loadDirection: coordinate.loadDirection.toArray(),
+    stations,
+    displacementMagnitudes: stations.map((station) => normalizedPointLoadCantileverShape(station, coordinate.payloadStation))
+  });
+}
+
 function averageVector(points: THREE.Vector3[]) {
   const average = new THREE.Vector3();
   for (const point of points) average.add(point);
@@ -3260,8 +3452,52 @@ function resultantLoadDirection(loadMarkers: ViewerLoadMarker[]) {
 }
 
 function cantileverDisplacementShape(travel: number) {
-  const s = Math.max(0, Math.min(1, travel));
+  const s = clamp01(travel);
   return 0.5 * s * s * (3 - s);
+}
+
+function deformedBeamDemoPayloadPoint(point: THREE.Vector3, coordinate: BeamDemoCoordinate, maxDisplacement: number) {
+  const station = beamDemoStationForPoint(point, coordinate);
+  return point.clone().add(beamDemoDisplacementAtStation(station, coordinate, maxDisplacement));
+}
+
+function beamDemoMaxDisplacementForLoads(
+  stressExaggeration: number,
+  loadMarkers: ViewerLoadMarker[],
+  deformationScale: number,
+  usesResultDeformationScale: boolean
+) {
+  const scale = 0.045 + Math.max(0, stressExaggeration - 1) * 0.075;
+  const magnitude = usesResultDeformationScale ? 1 : loadMarkers.length
+    ? loadMarkers.reduce((total, marker) => total + Math.max(0.35, marker.value / 500), 0) / loadMarkers.length
+    : 1;
+  return scale * magnitude * deformationScale;
+}
+
+function beamDemoFallbackValueForPoint(resultMode: ResultMode, point: THREE.Vector3, coordinate: BeamDemoCoordinate) {
+  const station = beamDemoStationForPoint(point, coordinate);
+  const displacement = normalizedPointLoadCantileverShape(station, coordinate.payloadStation);
+  if (resultMode === "displacement" || resultMode === "velocity" || resultMode === "acceleration") return displacement;
+  const stress = beamDemoPayloadStressFraction(point, coordinate);
+  if (resultMode === "safety_factor") return clamp01(1 - stress * 0.88);
+  return stress;
+}
+
+function beamDemoPayloadStressFraction(point: THREE.Vector3, coordinate: BeamDemoCoordinate) {
+  const station = beamDemoStationForPoint(point, coordinate);
+  const payloadStation = Math.max(coordinate.payloadStation, 1e-6);
+  const momentFactor = Math.max(payloadStation - station, 0) / payloadStation;
+  const fiberY = clamp01(Math.abs(point.y - BEAM_CENTER_Y) / Math.max(BEAM_HEIGHT / 2, 1e-6));
+  const fiberZ = clamp01(Math.abs(point.z) / Math.max(BEAM_DEPTH / 2, 1e-6));
+  const fiberFactor = 0.36 + Math.max(fiberY, fiberZ) * 0.64;
+  const bendingStress = 0.08 + 0.82 * momentFactor * fiberFactor;
+  const contactWidth = 0.075;
+  const contactStress = 0.25 * Math.exp(-0.5 * ((station - coordinate.payloadStation) / contactWidth) ** 2);
+  return clamp01(Math.max(bendingStress, contactStress));
+}
+
+function clamp01(value: number) {
+  return Math.max(0, Math.min(1, value));
 }
 
 function deformedPointForKind(kind: SampleModelKind, point: THREE.Vector3, stressExaggeration: number, deformationScale: number) {
@@ -3600,7 +3836,7 @@ function createBracketShape() {
 }
 
 function createBeamGeometry() {
-  const geometry = new THREE.BoxGeometry(3.8, BEAM_HEIGHT, BEAM_DEPTH, 40, 6, 8);
+  const geometry = new THREE.BoxGeometry(3.8, BEAM_HEIGHT, BEAM_DEPTH, 64, 6, 8);
   geometry.translate(0, BEAM_CENTER_Y, 0);
   geometry.computeVertexNormals();
   return geometry;
