@@ -124,7 +124,7 @@ const BRACKET_HOLES = [
 ];
 type ViewerOrbitControls = ElementRef<typeof OrbitControls>;
 type GizmoViewRequest = RotationAxis | "iso";
-export type ViewCubeFaceLabel = "Front" | "Right" | "Top";
+export type ViewCubeFaceLabel = "Front" | "Back" | "Right" | "Left" | "Top" | "Bottom";
 export type GizmoViewTarget = "+x" | "+y" | "+z" | "front" | "right" | "top" | "iso";
 type ModelSelectionHit = { face: DisplayFace; point: [number, number, number]; payloadObject?: PayloadObjectSelection; snapResult?: SnapResult | null };
 type ModelPickHandlers = {
@@ -149,11 +149,12 @@ export const VIEWER_AXIS_LABEL_OUTLINE_WIDTH = 0.02;
 export const VIEWER_GIZMO_AXIS_LENGTH = 1.35;
 export const VIEWER_GIZMO_LABEL_DISTANCE = 1.48;
 export const VIEWER_VIEW_CUBE_SIZE = 1.12;
-export const VIEWER_VIEW_CUBE_BODY_OPACITY = 0.3;
+export const VIEWER_VIEW_CUBE_BODY_OPACITY = 0.45;
 export const VIEWER_VIEW_CUBE_FACE_OPACITY = 0.16;
 export const VIEWER_VIEW_CUBE_FACE_HOVER_OPACITY = 0.38;
 export const VIEWER_VIEW_CUBE_EDGE_COLOR = "#8fb4d8";
 export const VIEWER_VIEW_CUBE_FACE_LABEL_FONT_SIZE = 0.18;
+const VIEWER_VIEW_CUBE_FACE_VISIBILITY_THRESHOLD = 0.05;
 export const VIEWER_ISOMETRIC_GIZMO_VIEW = "iso";
 export const VIEWER_CREDIT_URL = "https://esauengineering.com/";
 const VIEWER_FIT_MARGIN = 1.28;
@@ -642,10 +643,14 @@ function PositiveOctantViewCube({ onSelectView }: { onSelectView: (view: GizmoVi
     label: ViewCubeFaceLabel;
     position: [number, number, number];
     rotation: [number, number, number];
+    normal: [number, number, number];
   }> = [
-    { label: "Front", position: [half, cubeSize + faceOffset, half], rotation: [-Math.PI / 2, 0, 0] },
-    { label: "Right", position: [cubeSize + faceOffset, half, half], rotation: [0, Math.PI / 2, 0] },
-    { label: "Top", position: [half, half, cubeSize + faceOffset], rotation: [0, 0, 0] }
+    { label: "Front", position: [half, cubeSize + faceOffset, half], rotation: [-Math.PI / 2, 0, 0], normal: [0, 1, 0] },
+    { label: "Back", position: [half, -faceOffset, half], rotation: [Math.PI / 2, 0, 0], normal: [0, -1, 0] },
+    { label: "Right", position: [cubeSize + faceOffset, half, half], rotation: [0, Math.PI / 2, 0], normal: [1, 0, 0] },
+    { label: "Left", position: [-faceOffset, half, half], rotation: [0, -Math.PI / 2, 0], normal: [-1, 0, 0] },
+    { label: "Top", position: [half, half, cubeSize + faceOffset], rotation: [0, 0, 0], normal: [0, 0, 1] },
+    { label: "Bottom", position: [half, half, -faceOffset], rotation: [Math.PI, 0, 0], normal: [0, 0, -1] }
   ];
 
   return (
@@ -702,15 +707,30 @@ function ViewCubeFace({
   label,
   position,
   rotation,
+  normal,
   onSelectView
 }: {
   label: ViewCubeFaceLabel;
   position: [number, number, number];
   rotation: [number, number, number];
+  normal: [number, number, number];
   onSelectView: (view: GizmoViewRequest) => void;
 }) {
   const [hovered, setHovered] = useState(false);
+  const { camera } = useThree();
+  const labelRef = useRef<THREE.Group | null>(null);
+  const localNormal = useMemo(() => new THREE.Vector3(...normal), [normal]);
+  const faceCenterWorldRef = useRef(new THREE.Vector3());
+  const faceNormalWorldRef = useRef(new THREE.Vector3());
+  const normalMatrixRef = useRef(new THREE.Matrix3());
   const title = `${label} view`;
+  useFrame(() => {
+    const labelObject = labelRef.current;
+    if (!labelObject) return;
+    const faceCenterWorld = labelObject.getWorldPosition(faceCenterWorldRef.current);
+    const faceNormalWorld = faceNormalWorldRef.current.copy(localNormal).applyNormalMatrix(normalMatrixRef.current.getNormalMatrix(labelObject.matrixWorld)).normalize();
+    labelObject.visible = shouldShowViewCubeFaceLabel(faceCenterWorld, faceNormalWorld, camera.position);
+  });
 
   return (
     <group
@@ -752,15 +772,16 @@ function ViewCubeFace({
         opacity={hovered ? 0.9 : 0.42}
         depthTest={false}
       />
-      <Billboard position={[0, 0, 0.036]} renderOrder={4}>
+      <group ref={labelRef} position={[0, 0, 0.036]} renderOrder={4}>
         <GizmoTextLabel
           color={hovered ? "#ffffff" : "#e4eef8"}
           fontSize={VIEWER_VIEW_CUBE_FACE_LABEL_FONT_SIZE}
           opacity={hovered ? 1 : 0.95}
+          depthTest
         >
           {label}
         </GizmoTextLabel>
-      </Billboard>
+      </group>
     </group>
   );
 }
@@ -812,12 +833,14 @@ function GizmoTextLabel({
   children,
   color,
   fontSize,
+  depthTest = false,
   opacity = 1,
   position = [0, 0, 0.01]
 }: {
   children: string;
   color: string;
   fontSize: number;
+  depthTest?: boolean;
   opacity?: number;
   position?: [number, number, number];
 }) {
@@ -829,7 +852,8 @@ function GizmoTextLabel({
       fillOpacity={opacity}
       fontSize={fontSize}
       letterSpacing={0}
-      material-depthTest={false}
+      material-depthTest={depthTest}
+      material-side={THREE.FrontSide}
       material-toneMapped={false}
       outlineColor="#07111d"
       outlineOpacity={opacity}
@@ -5159,13 +5183,23 @@ export function axisLabelToViewAxis(label: "X" | "Y" | "Z"): RotationAxis {
 }
 
 function viewCubeFaceToGizmoTarget(label: ViewCubeFaceLabel): GizmoViewTarget {
-  if (label === "Front") return "front";
-  if (label === "Right") return "right";
+  if (label === "Front" || label === "Back") return "front";
+  if (label === "Right" || label === "Left") return "right";
   return "top";
 }
 
 export function viewCubeFaceToGizmoView(label: ViewCubeFaceLabel): RotationAxis {
   return gizmoViewTargetToRequest(viewCubeFaceToGizmoTarget(label)) as RotationAxis;
+}
+
+export function shouldShowViewCubeFaceLabel(
+  faceCenterWorld: THREE.Vector3,
+  faceNormalWorld: THREE.Vector3,
+  cameraPosition: THREE.Vector3,
+  threshold = VIEWER_VIEW_CUBE_FACE_VISIBILITY_THRESHOLD
+) {
+  const toCamera = cameraPosition.clone().sub(faceCenterWorld).normalize();
+  return faceNormalWorld.clone().normalize().dot(toCamera) > threshold;
 }
 
 export function gizmoViewTargetToRequest(target: GizmoViewTarget): GizmoViewRequest {
