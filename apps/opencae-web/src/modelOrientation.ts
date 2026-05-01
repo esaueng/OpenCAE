@@ -66,6 +66,14 @@ export function viewerNormalToModelSpace(normal: THREE.Vector3, displayModel: Di
   return normal.clone().transformDirection(modelToViewerMatrix(displayModel).invert()).normalize();
 }
 
+export function viewerDirectionToModelSpace(direction: THREE.Vector3, displayModel: DisplayModel): THREE.Vector3 {
+  return direction.clone().transformDirection(modelToViewerMatrix(displayModel).invert()).normalize();
+}
+
+export function modelDirectionToViewerSpace(direction: THREE.Vector3, displayModel: DisplayModel): THREE.Vector3 {
+  return direction.clone().transformDirection(modelToViewerMatrix(displayModel)).normalize();
+}
+
 export function formatModelOrientation(displayModel: DisplayModel): string {
   const orientation = getModelOrientation(displayModel);
   return `X ${orientation.x} deg / Y ${orientation.y} deg / Z ${orientation.z} deg`;

@@ -226,7 +226,7 @@ describe("api", () => {
       parameters: {
         value: 500,
         units: "N",
-        direction: [0, 0, -1],
+        direction: [0, -1, 0],
         applicationPoint: [1.9, 0.18, 0]
       }
     });

@@ -133,6 +133,7 @@ type ModelPickHandlers = {
   onClick?: (event: ThreeEvent<MouseEvent>) => void;
 };
 export const VIEWER_GIZMO_ALIGNMENT = "bottom-right";
+export const VIEWER_GIZMO_MARGIN: [number, number] = [92, 154];
 export const VIEWER_GIZMO_SCALE = 34;
 export const VIEWER_AXIS_HEAD_RADIUS = 0.21;
 export const VIEWER_AXIS_LABEL_BADGE_RADIUS = 0.145;
@@ -256,7 +257,7 @@ export function CadViewer(props: CadViewerProps) {
         </Bounds>
         <DemandOrbitControls controlsRef={controlsRef} onInteractionChange={handleViewerInteractionChange} />
         <ShiftPanControls controlsRef={controlsRef} onInteractionChange={handleViewerInteractionChange} />
-        <GizmoHelper alignment={VIEWER_GIZMO_ALIGNMENT} margin={[92, 92]}>
+        <GizmoHelper alignment={VIEWER_GIZMO_ALIGNMENT} margin={VIEWER_GIZMO_MARGIN}>
           <CleanAxisGizmo
             onSelectView={(view) => setGizmoViewRequest((request) => ({ view, signal: request.signal + 1 }))}
           />
