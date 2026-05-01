@@ -130,6 +130,12 @@ type ModelPickHandlers = {
   onClick?: (event: ThreeEvent<MouseEvent>) => void;
 };
 export const VIEWER_GIZMO_ALIGNMENT = "bottom-right";
+export const VIEWER_GIZMO_SCALE = 44;
+export const VIEWER_AXIS_HEAD_RADIUS = 0.25;
+export const VIEWER_AXIS_LABEL_FONT_SIZE = 0.25;
+export const VIEWER_AXIS_LABEL_COLOR = "#ffffff";
+export const VIEWER_AXIS_LABEL_OUTLINE_COLOR = "#07111d";
+export const VIEWER_AXIS_LABEL_OUTLINE_WIDTH = 0.025;
 export const VIEWER_CREDIT_URL = "https://esauengineering.com/";
 const VIEWER_FIT_MARGIN = 1.28;
 const DEFAULT_HOME_FIT_MARGIN = 1.46;
@@ -467,7 +473,7 @@ function CleanAxisGizmo({ onSelectAxis }: { onSelectAxis: (axis: RotationAxis) =
   ];
 
   return (
-    <group scale={38}>
+    <group scale={VIEWER_GIZMO_SCALE}>
       {axes.map((axis) => (
         <group key={axis.label}>
           <Line points={[[0, 0, 0], axis.position]} color={axis.color} lineWidth={4} />
@@ -495,10 +501,19 @@ function AxisHead({ label, color, position, onSelectAxis }: { label: "X" | "Y" |
       }}
     >
       <mesh>
-        <circleGeometry args={[0.22, 36]} />
+        <circleGeometry args={[VIEWER_AXIS_HEAD_RADIUS, 36]} />
         <meshBasicMaterial color={color} depthTest={false} toneMapped={false} />
       </mesh>
-      <Text anchorX="center" anchorY="middle" color="#e6edf3" fontSize={0.21} letterSpacing={0} position={[0, 0, 0.01]}>
+      <Text
+        anchorX="center"
+        anchorY="middle"
+        color={VIEWER_AXIS_LABEL_COLOR}
+        fontSize={VIEWER_AXIS_LABEL_FONT_SIZE}
+        letterSpacing={0}
+        outlineColor={VIEWER_AXIS_LABEL_OUTLINE_COLOR}
+        outlineWidth={VIEWER_AXIS_LABEL_OUTLINE_WIDTH}
+        position={[0, 0, 0.01]}
+      >
         {label}
       </Text>
     </Billboard>

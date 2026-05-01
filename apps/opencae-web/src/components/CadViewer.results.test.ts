@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { describe, expect, test, vi } from "vitest";
-import { VIEWER_CREDIT_URL, VIEWER_GIZMO_ALIGNMENT, applyResultFrameToGeometry, axisLabelToViewAxis, beamDemoDisplacementAtStation, beamDemoPayloadOffset, beamDemoStationForPoint, cameraDistanceForBounds, cameraViewForAxis, cloneResultPreviewObject, colorizeResultObject, colorizeSampleResultGeometry, createBeamDemoCoordinate, createUndeformedResultOutlineObject, defaultHomeViewTarget, deformationScaleForResultFields, displayedLegendTickLabels, finalVisualScaleForDisplacementField, interpolateDisplacementAtPoint, legendMeshStats, legendTickLabels, normalizedPointLoadCantileverShape, payloadHighlightObjectId, pointLoadCantileverShape, printLayerVisualizationForBounds, resultLegendResizeDimensions, resultProbesForKind, resultValueForPoint, rotatedCameraOrbit, shouldShowDimensionOverlay, shouldShowModelHitLabel, shouldShowResultMarkers, shouldShowUndeformedResultOutline, updatePackedSamples, viewerCameraResetPose } from "./CadViewer";
+import { VIEWER_AXIS_HEAD_RADIUS, VIEWER_AXIS_LABEL_COLOR, VIEWER_AXIS_LABEL_FONT_SIZE, VIEWER_AXIS_LABEL_OUTLINE_COLOR, VIEWER_AXIS_LABEL_OUTLINE_WIDTH, VIEWER_CREDIT_URL, VIEWER_GIZMO_ALIGNMENT, VIEWER_GIZMO_SCALE, applyResultFrameToGeometry, axisLabelToViewAxis, beamDemoDisplacementAtStation, beamDemoPayloadOffset, beamDemoStationForPoint, cameraDistanceForBounds, cameraViewForAxis, cloneResultPreviewObject, colorizeResultObject, colorizeSampleResultGeometry, createBeamDemoCoordinate, createUndeformedResultOutlineObject, defaultHomeViewTarget, deformationScaleForResultFields, displayedLegendTickLabels, finalVisualScaleForDisplacementField, interpolateDisplacementAtPoint, legendMeshStats, legendTickLabels, normalizedPointLoadCantileverShape, payloadHighlightObjectId, pointLoadCantileverShape, printLayerVisualizationForBounds, resultLegendResizeDimensions, resultProbesForKind, resultValueForPoint, rotatedCameraOrbit, shouldShowDimensionOverlay, shouldShowModelHitLabel, shouldShowResultMarkers, shouldShowUndeformedResultOutline, updatePackedSamples, viewerCameraResetPose } from "./CadViewer";
 import type { FaceResultSample } from "../resultFields";
 import type { DisplayFace, ResultField } from "@opencae/schema";
 import type { PackedPreparedPlaybackCache } from "../resultPlaybackCache";
@@ -30,6 +30,15 @@ describe("CadViewer result coloring", () => {
 
   test("positions the viewer XYZ axes in the bottom-right corner", () => {
     expect(VIEWER_GIZMO_ALIGNMENT).toBe("bottom-right");
+  });
+
+  test("renders the viewer XYZ axes larger with higher contrast labels", () => {
+    expect(VIEWER_GIZMO_SCALE).toBe(44);
+    expect(VIEWER_AXIS_HEAD_RADIUS).toBe(0.25);
+    expect(VIEWER_AXIS_LABEL_FONT_SIZE).toBe(0.25);
+    expect(VIEWER_AXIS_LABEL_COLOR).toBe("#ffffff");
+    expect(VIEWER_AXIS_LABEL_OUTLINE_COLOR).toBe("#07111d");
+    expect(VIEWER_AXIS_LABEL_OUTLINE_WIDTH).toBe(0.025);
   });
 
   test("reports orbit interaction start and end so playback can yield render budget", () => {
