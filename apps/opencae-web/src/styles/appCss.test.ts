@@ -46,8 +46,8 @@ describe("app CSS", () => {
     const right = Number(inset?.groups?.right);
     const bottom = Number(inset?.groups?.bottom);
 
-    expect(right).toBe(12);
-    expect(bottom).toBe(12);
+    expect(right).toBe(6);
+    expect(bottom).toBe(6);
     expect(right).toBe(bottom);
   });
 
