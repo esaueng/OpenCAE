@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { describe, expect, test, vi } from "vitest";
-import { VIEWER_AXIS_HEAD_RADIUS, VIEWER_AXIS_LABEL_BADGE_COLOR, VIEWER_AXIS_LABEL_BADGE_RADIUS, VIEWER_AXIS_LABEL_COLOR, VIEWER_AXIS_LABEL_FONT_SIZE, VIEWER_AXIS_LABEL_OUTLINE_COLOR, VIEWER_AXIS_LABEL_OUTLINE_WIDTH, VIEWER_CREDIT_URL, VIEWER_GIZMO_ALIGNMENT, VIEWER_GIZMO_AXIS_LENGTH, VIEWER_GIZMO_LABEL_DISTANCE, VIEWER_GIZMO_MARGIN, VIEWER_GIZMO_SCALE, VIEWER_ISOMETRIC_GIZMO_VIEW, VIEWER_VIEW_CUBE_BODY_OPACITY, VIEWER_VIEW_CUBE_EDGE_COLOR, VIEWER_VIEW_CUBE_FACE_HOVER_OPACITY, VIEWER_VIEW_CUBE_FACE_LABEL_FONT_SIZE, VIEWER_VIEW_CUBE_FACE_OPACITY, VIEWER_VIEW_CUBE_SIZE, applyResultFrameToGeometry, axisLabelToViewAxis, beamDemoDisplacementAtStation, beamDemoPayloadOffset, beamDemoStationForPoint, cameraDistanceForBounds, cameraViewForAxis, cloneResultPreviewObject, colorizeResultObject, colorizeSampleResultGeometry, createBeamDemoCoordinate, createUndeformedResultOutlineObject, defaultHomeViewTarget, deformationScaleForResultFields, displayedLegendTickLabels, finalVisualScaleForDisplacementField, gizmoViewTargetToRequest, interpolateDisplacementAtPoint, legendMeshStats, legendTickLabels, normalizedPointLoadCantileverShape, payloadHighlightObjectId, pointLoadCantileverShape, printLayerVisualizationForBounds, resultLegendContentScale, resultLegendResizeDimensions, resultProbesForKind, resultValueForPoint, rotatedCameraOrbit, shouldShowDimensionOverlay, shouldShowModelHitLabel, shouldShowResultMarkers, shouldShowUndeformedResultOutline, shouldShowViewCubeFaceLabel, updatePackedSamples, viewCubeFaceToGizmoView, viewerCameraResetPose, viewerGizmoLayout } from "./CadViewer";
+import { VIEWER_AXIS_HEAD_RADIUS, VIEWER_AXIS_LABEL_BADGE_COLOR, VIEWER_AXIS_LABEL_BADGE_RADIUS, VIEWER_AXIS_LABEL_COLOR, VIEWER_AXIS_LABEL_FONT_SIZE, VIEWER_AXIS_LABEL_OUTLINE_COLOR, VIEWER_AXIS_LABEL_OUTLINE_WIDTH, VIEWER_CREDIT_URL, VIEWER_GIZMO_ALIGNMENT, VIEWER_GIZMO_AXIS_LENGTH, VIEWER_GIZMO_LABEL_DISTANCE, VIEWER_GIZMO_MARGIN, VIEWER_GIZMO_SCALE, VIEWER_ISOMETRIC_GIZMO_VIEW, VIEWER_VIEW_CUBE_BODY_OPACITY, VIEWER_VIEW_CUBE_EDGE_COLOR, VIEWER_VIEW_CUBE_FACE_HOVER_OPACITY, VIEWER_VIEW_CUBE_FACE_LABEL_FONT_SIZE, VIEWER_VIEW_CUBE_FACE_OPACITY, VIEWER_VIEW_CUBE_SIZE, applyResultFrameToGeometry, axisLabelToViewAxis, beamDemoDisplacementAtStation, beamDemoPayloadOffset, beamDemoStationForPoint, cameraDistanceForBounds, cameraViewForAxis, cloneResultPreviewObject, colorizeResultObject, colorizeSampleResultGeometry, createBeamDemoCoordinate, createUndeformedResultOutlineObject, defaultHomeViewTarget, deformationScaleForResultFields, displayedLegendTickLabels, finalVisualScaleForDisplacementField, getViewCubeFaceDescriptors, gizmoViewTargetToRequest, interpolateDisplacementAtPoint, legendMeshStats, legendTickLabels, normalizedPointLoadCantileverShape, payloadHighlightObjectId, pointLoadCantileverShape, printLayerVisualizationForBounds, resultLegendContentScale, resultLegendResizeDimensions, resultProbesForKind, resultValueForPoint, rotatedCameraOrbit, shouldShowDimensionOverlay, shouldShowModelHitLabel, shouldShowResultMarkers, shouldShowUndeformedResultOutline, shouldShowViewCubeFaceLabel, updatePackedSamples, viewCubeFaceToGizmoView, viewerCameraResetPose, viewerGizmoLayout } from "./CadViewer";
 import type { FaceResultSample } from "../resultFields";
 import type { DisplayFace, ResultField } from "@opencae/schema";
 import type { PackedPreparedPlaybackCache } from "../resultPlaybackCache";
@@ -22,6 +22,12 @@ const samples: FaceResultSample[] = [
     normalized: 1
   }
 ];
+
+function expectVectorCloseTo(actual: THREE.Vector3, expected: number[]) {
+  expect(actual.x).toBeCloseTo(expected[0] ?? 0);
+  expect(actual.y).toBeCloseTo(expected[1] ?? 0);
+  expect(actual.z).toBeCloseTo(expected[2] ?? 0);
+}
 
 describe("CadViewer result coloring", () => {
   test("links the viewer watermark to the Esau Engineering website", () => {
@@ -53,7 +59,7 @@ describe("CadViewer result coloring", () => {
 
   test("renders a positive-octant triad view cube without negative label clutter", () => {
     expect(VIEWER_VIEW_CUBE_SIZE).toBe(1.12);
-    expect(VIEWER_VIEW_CUBE_BODY_OPACITY).toBe(0.45);
+    expect(VIEWER_VIEW_CUBE_BODY_OPACITY).toBe(1);
     expect(VIEWER_VIEW_CUBE_FACE_OPACITY).toBe(0.16);
     expect(VIEWER_VIEW_CUBE_FACE_HOVER_OPACITY).toBe(0.38);
     expect(VIEWER_GIZMO_AXIS_LENGTH).toBe(1.35);
@@ -68,7 +74,7 @@ describe("CadViewer result coloring", () => {
     });
     expect(VIEWER_GIZMO_LABEL_DISTANCE).toBeGreaterThan(VIEWER_VIEW_CUBE_SIZE);
     expect(VIEWER_VIEW_CUBE_EDGE_COLOR).toBe("#8fb4d8");
-    expect(VIEWER_VIEW_CUBE_FACE_LABEL_FONT_SIZE).toBe(0.18);
+    expect(VIEWER_VIEW_CUBE_FACE_LABEL_FONT_SIZE).toBe(0.32);
     expect(cadViewerSource).toContain("function PositiveOctantViewCube");
     expect(cadViewerSource).toContain("function GizmoAxis");
     expect(cadViewerSource).toContain("function ViewCubeFace");
@@ -82,6 +88,10 @@ describe("CadViewer result coloring", () => {
     expect(cadViewerSource).toContain("VIEWER_VIEW_CUBE_FACE_VISIBILITY_THRESHOLD = 0.05");
     expect(cadViewerSource).toContain("camera.position");
     expect(cadViewerSource).toContain("faceNormalWorld");
+    expect(cadViewerSource).toContain("transparent={false}");
+    expect(cadViewerSource).toContain("opacity={VIEWER_VIEW_CUBE_BODY_OPACITY}");
+    expect(cadViewerSource).toContain("depthWrite");
+    expect(cadViewerSource).toContain("depthTest");
     expect(cadViewerSource).toContain("origin is one cube corner, not the cube center.");
     expect(cadViewerSource).toContain("cube bounds are [0, cubeSize] on X/Y/Z.");
     expect(cadViewerSource).toContain("const origin: [number, number, number] = [0, 0, 0];");
@@ -94,6 +104,45 @@ describe("CadViewer result coloring", () => {
     expect(cadViewerSource).not.toContain("-X");
     expect(cadViewerSource).not.toContain("-Y");
     expect(cadViewerSource).not.toContain("-Z");
+  });
+
+  test("defines all view cube face labels with outward normals and readable text-up directions", () => {
+    const descriptors = getViewCubeFaceDescriptors();
+
+    expect(descriptors.map((face) => face.label).sort()).toEqual(["Back", "Bottom", "Front", "Left", "Right", "Top"]);
+    expect(new Set(descriptors.map((face) => face.label)).size).toBe(6);
+
+    const expected = new Map([
+      ["Front", { normal: [0, 1, 0], textUp: [0, 0, 1] }],
+      ["Back", { normal: [0, -1, 0], textUp: [0, 0, 1] }],
+      ["Right", { normal: [1, 0, 0], textUp: [0, 0, 1] }],
+      ["Left", { normal: [-1, 0, 0], textUp: [0, 0, 1] }],
+      ["Top", { normal: [0, 0, 1], textUp: [-1, 0, 0] }],
+      ["Bottom", { normal: [0, 0, -1], textUp: [1, 0, 0] }]
+    ]);
+
+    for (const descriptor of descriptors) {
+      const rotation = new THREE.Euler(...descriptor.rotation);
+      const actualNormal = new THREE.Vector3(0, 0, 1).applyEuler(rotation);
+      const actualTextUp = new THREE.Vector3(0, 1, 0).applyEuler(rotation);
+      const faceExpected = expected.get(descriptor.label);
+
+      expectVectorCloseTo(actualNormal, faceExpected?.normal ?? []);
+      expectVectorCloseTo(actualTextUp, faceExpected?.textUp ?? []);
+    }
+  });
+
+  test("rotates the top face label 90 degrees counterclockwise while keeping it flat", () => {
+    const top = getViewCubeFaceDescriptors().find((face) => face.label === "Top");
+
+    expect(top?.rotation).toEqual([0, 0, Math.PI / 2]);
+    expect(new THREE.Vector3(0, 0, 1).applyEuler(new THREE.Euler(...top!.rotation)).toArray()).toEqual([0, 0, 1]);
+  });
+
+  test("uses depth-tested single cube edge rendering instead of per-face outlines", () => {
+    expect(cadViewerSource).toContain("depthTest={true}");
+    expect(cadViewerSource).toContain("edgeInset");
+    expect(cadViewerSource).not.toContain("[-VIEWER_VIEW_CUBE_SIZE * 0.41, -VIEWER_VIEW_CUBE_SIZE * 0.41, 0.004]");
   });
 
   test("shows view cube face labels only when their face normal points toward the camera", () => {
