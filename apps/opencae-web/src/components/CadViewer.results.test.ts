@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { describe, expect, test, vi } from "vitest";
-import { VIEWER_CREDIT_URL, VIEWER_GIZMO_ALIGNMENT, applyResultFrameToGeometry, axisLabelToViewAxis, beamDemoDisplacementAtStation, beamDemoPayloadOffset, beamDemoStationForPoint, cameraDistanceForBounds, cameraViewForAxis, cloneResultPreviewObject, colorizeResultObject, colorizeSampleResultGeometry, createBeamDemoCoordinate, createUndeformedResultOutlineObject, defaultHomeViewTarget, deformationScaleForResultFields, displayedLegendTickLabels, interpolateDisplacementAtPoint, legendMeshStats, legendTickLabels, normalizedPointLoadCantileverShape, payloadHighlightObjectId, pointLoadCantileverShape, printLayerVisualizationForBounds, resultProbesForKind, resultValueForPoint, rotatedCameraOrbit, shouldShowDimensionOverlay, shouldShowModelHitLabel, shouldShowResultMarkers, shouldShowUndeformedResultOutline, updatePackedSamples, viewerCameraResetPose } from "./CadViewer";
+import { VIEWER_CREDIT_URL, VIEWER_GIZMO_ALIGNMENT, applyResultFrameToGeometry, axisLabelToViewAxis, beamDemoDisplacementAtStation, beamDemoPayloadOffset, beamDemoStationForPoint, cameraDistanceForBounds, cameraViewForAxis, cloneResultPreviewObject, colorizeResultObject, colorizeSampleResultGeometry, createBeamDemoCoordinate, createUndeformedResultOutlineObject, defaultHomeViewTarget, deformationScaleForResultFields, displayedLegendTickLabels, finalVisualScaleForDisplacementField, interpolateDisplacementAtPoint, legendMeshStats, legendTickLabels, normalizedPointLoadCantileverShape, payloadHighlightObjectId, pointLoadCantileverShape, printLayerVisualizationForBounds, resultProbesForKind, resultValueForPoint, rotatedCameraOrbit, shouldShowDimensionOverlay, shouldShowModelHitLabel, shouldShowResultMarkers, shouldShowUndeformedResultOutline, updatePackedSamples, viewerCameraResetPose } from "./CadViewer";
 import type { FaceResultSample } from "../resultFields";
 import type { DisplayFace, ResultField } from "@opencae/schema";
 import type { PackedPreparedPlaybackCache } from "../resultPlaybackCache";
@@ -549,6 +549,97 @@ describe("CadViewer result coloring", () => {
     expect(positions.getY(0)).toBeCloseTo(0);
     expect(positions.getY(1)).toBeLessThan(-0.05);
     expect(positions.version).toBeGreaterThan(0);
+  });
+
+  test("multiplies displayed displacement vectors by deformation scale", () => {
+    const fields: ResultField[] = [{
+      id: "displacement-scale",
+      runId: "run",
+      type: "displacement",
+      location: "node",
+      values: [1],
+      min: 0,
+      max: 1,
+      units: "mm",
+      samples: [{ point: [1, 0, 0], normal: [0, 1, 0], value: 1, vector: [0, 1, 0] }]
+    }];
+    const coordinateTransform = {
+      bounds: new THREE.Box3(new THREE.Vector3(0, 0, 0), new THREE.Vector3(12.5, 0, 0)),
+      toResultPoint: (point: THREE.Vector3) => point.clone(),
+      fromResultPoint: (point: THREE.Vector3) => point.clone()
+    };
+    const deformedY = (deformationScale: number) => {
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute("position", new THREE.Float32BufferAttribute([1, 0, 0], 3));
+      applyResultFrameToGeometry({
+        geometry,
+        fields,
+        resultMode: "displacement",
+        showDeformed: true,
+        deformationScale,
+        coordinateTransform,
+        deformationCapFraction: 1
+      });
+      return (geometry.getAttribute("position") as THREE.BufferAttribute).getY(0);
+    };
+
+    expect(deformedY(1)).toBeCloseTo(1);
+    expect(deformedY(4)).toBeCloseTo(4);
+  });
+
+  test("returns to the same deformed position when scale is restored", () => {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.Float32BufferAttribute([1, 0, 0], 3));
+    const fields: ResultField[] = [{
+      id: "displacement-reversible",
+      runId: "run",
+      type: "displacement",
+      location: "node",
+      values: [1],
+      min: 0,
+      max: 1,
+      units: "mm",
+      samples: [{ point: [1, 0, 0], normal: [0, 1, 0], value: 1, vector: [0, 1, 0] }]
+    }];
+    const coordinateTransform = {
+      bounds: new THREE.Box3(new THREE.Vector3(0, 0, 0), new THREE.Vector3(12.5, 0, 0)),
+      toResultPoint: (point: THREE.Vector3) => point.clone(),
+      fromResultPoint: (point: THREE.Vector3) => point.clone()
+    };
+
+    applyResultFrameToGeometry({ geometry, fields, resultMode: "displacement", showDeformed: true, deformationScale: 1, coordinateTransform, deformationCapFraction: 1 });
+    const yAtOne = (geometry.getAttribute("position") as THREE.BufferAttribute).getY(0);
+    const basePositions = geometry.userData.basePositions;
+    applyResultFrameToGeometry({ geometry, fields, resultMode: "displacement", showDeformed: true, deformationScale: 4, coordinateTransform, deformationCapFraction: 1 });
+    applyResultFrameToGeometry({ geometry, fields, resultMode: "displacement", showDeformed: true, deformationScale: 1, coordinateTransform, deformationCapFraction: 1 });
+
+    expect((geometry.getAttribute("position") as THREE.BufferAttribute).getY(0)).toBeCloseTo(yAtOne);
+    expect(geometry.userData.basePositions).toBe(basePositions);
+    expect(Array.from(geometry.userData.basePositions)).toEqual([1, 0, 0]);
+  });
+
+  test("reports final visual scale and cap state separately from user scale", () => {
+    const field: ResultField = {
+      id: "displacement-cap",
+      runId: "run",
+      type: "displacement",
+      location: "node",
+      values: [1],
+      min: 0,
+      max: 1,
+      units: "mm",
+      samples: [{ point: [0, 0, 0], normal: [0, 1, 0], value: 1, vector: [0, 1, 0] }]
+    };
+
+    const oneX = finalVisualScaleForDisplacementField(12.5, field, 1, 1);
+    const fourX = finalVisualScaleForDisplacementField(12.5, field, 4, 1);
+    const capped = finalVisualScaleForDisplacementField(12.5, field, 4, 0.25);
+
+    expect(oneX.finalVisualScale).toBeCloseTo(1);
+    expect(fourX.finalVisualScale).toBeCloseTo(4);
+    expect(fourX.finalVisualScale).toBeGreaterThan(oneX.finalVisualScale);
+    expect(capped.capActive).toBe(true);
+    expect(capped.finalVisualScale).toBeCloseTo(capped.maxFinalScale);
   });
 
   test("keeps beam-like displacement interpolation smooth between result samples", () => {

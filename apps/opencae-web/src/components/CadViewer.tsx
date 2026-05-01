@@ -146,6 +146,12 @@ const DEBUG_RESULTS =
   import.meta.env.DEV &&
   typeof window !== "undefined" &&
   new URLSearchParams(window.location.search).get("debugResults") === "1";
+const DEBUG_FORCE_DEFORMATION_SCALE =
+  import.meta.env.DEV && DEBUG_RESULTS && typeof window !== "undefined"
+    ? Number(new URLSearchParams(window.location.search).get("forceDeformScale"))
+    : Number.NaN;
+const RESULT_DEFORMATION_TARGET_FRACTION = 0.08;
+const RESULT_DEFORMATION_CAP_FRACTION = DEBUG_RESULTS ? 1 : 0.25;
 
 export function CadViewer(props: CadViewerProps) {
   const controlsRef = useRef<ViewerOrbitControls | null>(null);
@@ -1466,7 +1472,22 @@ function AnalysisResultModel({
   const staticSamples = useResultSamplesForFaces(displayModel.faces, resultFields, resultMode, !usesPackedPlaybackResults);
   const packedPlaybackSamples = useMemo(() => initialPackedPlaybackSamplesForFaces(displayModel.faces), [displayModel.faces]);
   const samples = usesPackedPlaybackResults ? packedPlaybackSamples : staticSamples;
-  const deformationScale = useMemo(() => deformationScaleForResultFields(resultFields), [resultFields]);
+  const deformationScale = useMemo(() => {
+    const uiScale = stressExaggeration;
+    const forcedScale = Number.isFinite(DEBUG_FORCE_DEFORMATION_SCALE) ? DEBUG_FORCE_DEFORMATION_SCALE : undefined;
+    const resultModelScale = forcedScale ?? uiScale;
+    const resultFieldAvailabilityScale = deformationScaleForResultFields(resultFields) ?? 1;
+    const finalDisplayScale = resultFieldAvailabilityScale * resultModelScale;
+    if (DEBUG_RESULTS) {
+      console.debug("[OpenCAE deformation scale]", {
+        uiScale,
+        cadViewerPropScale: stressExaggeration,
+        resultModelScale,
+        finalDisplayScale
+      });
+    }
+    return finalDisplayScale;
+  }, [resultFields, stressExaggeration]);
   if (kind === "uploaded") {
     return (
       <UploadedResultSolid
@@ -1979,7 +2000,8 @@ export function applyResultFrameToGeometry({
   showDeformed,
   deformationScale,
   coordinateTransform,
-  recomputeDerivedGeometry = true
+  recomputeDerivedGeometry = true,
+  deformationCapFraction = RESULT_DEFORMATION_CAP_FRACTION
 }: {
   geometry: THREE.BufferGeometry;
   fields: ResultField[];
@@ -1988,6 +2010,7 @@ export function applyResultFrameToGeometry({
   deformationScale: number;
   coordinateTransform?: ResultCoordinateTransform;
   recomputeDerivedGeometry?: boolean;
+  deformationCapFraction?: number;
 }) {
   const totalStart = DEBUG_PERF ? performance.now() : 0;
   let mappingMs = 0;
@@ -2004,7 +2027,18 @@ export function applyResultFrameToGeometry({
   const displacementField = fields.find((field) => field.type === "displacement" && field.samples?.some((sample) => sample.vector));
   logResultFieldDiagnostics(scalarField, resultMode);
   const modelExtent = (coordinateTransform?.bounds ?? basePositionBoundsForGeometry(geometry, basePositions)).getSize(new THREE.Vector3()).length();
-  const visualScale = visualScaleForDisplacementField(modelExtent, displacementField, deformationScale);
+  const visualScaleResult = finalVisualScaleForDisplacementField(modelExtent, displacementField, deformationScale, deformationCapFraction);
+  const visualScale = visualScaleResult.finalVisualScale;
+  if (DEBUG_RESULTS) {
+    console.debug("[OpenCAE final deformation scale]", {
+      deformationScale: visualScaleResult.deformationScale,
+      autoScale: visualScaleResult.autoScale,
+      unclampedFinalScale: visualScaleResult.unclampedFinalScale,
+      maxFinalScale: visualScaleResult.maxFinalScale,
+      finalVisualScale: visualScaleResult.finalVisualScale,
+      capActive: visualScaleResult.capActive
+    });
+  }
   const mappingStart = DEBUG_PERF ? performance.now() : 0;
   const resultBasePositions = coordinateTransform
     ? transformedBasePositionsForResult(geometry, basePositions, coordinateTransform)
@@ -2296,13 +2330,16 @@ function ensureResultBoundingSphere(
   visualScale: number,
   displacementField: ResultField | undefined
 ) {
-  if (geometry.boundingSphere && geometry.userData.opencaeResultExpandedBoundingSphere === true) return;
+  const displacementMax = maxDisplacementMagnitude(displacementField);
+  const key = `${basePositions.length}:${modelExtent}:${visualScale}:${displacementMax}`;
+  if (geometry.boundingSphere && geometry.userData.opencaeResultExpandedBoundingSphereKey === key) return;
   const bounds = basePositionBounds(basePositions);
   const sphere = bounds.getBoundingSphere(new THREE.Sphere());
-  const expansion = Math.min(modelExtent * 0.25, Math.max(0, visualScale * maxDisplacementMagnitude(displacementField)));
+  const expansion = Math.min(modelExtent * RESULT_DEFORMATION_CAP_FRACTION, Math.max(0, visualScale * displacementMax));
   sphere.radius += expansion;
   geometry.boundingSphere = sphere;
   geometry.userData.opencaeResultExpandedBoundingSphere = true;
+  geometry.userData.opencaeResultExpandedBoundingSphereKey = key;
 }
 
 function roundPerfMs(value: number) {
@@ -2339,12 +2376,36 @@ export function interpolateDisplacementAtPoint(
   return (totalWeight > 0 ? vector.multiplyScalar(1 / totalWeight) : vector).toArray() as [number, number, number];
 }
 
-function visualScaleForDisplacementField(modelExtent: number, displacementField: ResultField | undefined, deformationScale: number): number {
+export function finalVisualScaleForDisplacementField(
+  modelExtent: number,
+  displacementField: ResultField | undefined,
+  deformationScale: number,
+  capFraction = RESULT_DEFORMATION_CAP_FRACTION
+) {
   const displacementMax = maxDisplacementMagnitude(displacementField);
   const requestedScale = Math.max(0, deformationScale);
-  const uncappedVisualScale = displacementMax > 0 ? (modelExtent * 0.08 * requestedScale) / displacementMax : 0;
-  const maxVisual = modelExtent * 0.25;
-  return Math.min(uncappedVisualScale, maxVisual / Math.max(displacementMax, 1e-12));
+  const safeExtent = Math.max(0, modelExtent);
+  const autoScale = displacementMax > 1e-12
+    ? (safeExtent * RESULT_DEFORMATION_TARGET_FRACTION) / displacementMax
+    : 0;
+  const unclampedFinalScale = autoScale * requestedScale;
+  const maxVisualDisplacement = safeExtent * Math.max(0, capFraction);
+  const maxFinalScale = displacementMax > 1e-12
+    ? maxVisualDisplacement / displacementMax
+    : 0;
+  const finalVisualScale = Math.min(unclampedFinalScale, maxFinalScale);
+  return {
+    deformationScale: requestedScale,
+    autoScale,
+    unclampedFinalScale,
+    maxFinalScale,
+    finalVisualScale,
+    capActive: unclampedFinalScale > maxFinalScale
+  };
+}
+
+function visualScaleForDisplacementField(modelExtent: number, displacementField: ResultField | undefined, deformationScale: number): number {
+  return finalVisualScaleForDisplacementField(modelExtent, displacementField, deformationScale).finalVisualScale;
 }
 
 function colorizeResultGeometry(
@@ -2430,19 +2491,36 @@ function colorizeResultGeometry(
 
 function basePositionArrayForGeometry(geometry: THREE.BufferGeometry, positions: THREE.BufferAttribute): Float32Array {
   const standard = geometry.userData.basePositions;
-  if (standard instanceof Float32Array && standard.length === positions.array.length) {
+  const sourceArray = positions.array;
+  const storedSourceArray = geometry.userData.opencaeBasePositionSourceArray;
+  if (
+    standard instanceof Float32Array &&
+    standard.length === sourceArray.length &&
+    (storedSourceArray === undefined || storedSourceArray === sourceArray)
+  ) {
     geometry.userData.opencaeBasePositions = standard;
+    geometry.userData.basePositionCount = positions.count;
+    geometry.userData.opencaeBasePositionSourceArray ??= sourceArray;
     return standard;
   }
   const existing = geometry.userData.opencaeBasePositions;
-  if (existing instanceof Float32Array && existing.length === positions.array.length) {
+  if (
+    existing instanceof Float32Array &&
+    existing.length === sourceArray.length &&
+    (storedSourceArray === undefined || storedSourceArray === sourceArray)
+  ) {
     geometry.userData.basePositions = existing;
+    geometry.userData.basePositionCount = positions.count;
+    geometry.userData.opencaeBasePositionSourceArray ??= sourceArray;
     return existing;
   }
-  const base = new Float32Array(positions.array as ArrayLike<number>);
+  const base = new Float32Array(sourceArray as ArrayLike<number>);
   geometry.userData.opencaeBasePositions = base;
   geometry.userData.basePositions = base;
+  geometry.userData.basePositionCount = positions.count;
+  geometry.userData.opencaeBasePositionSourceArray = sourceArray;
   delete geometry.userData.opencaeBasePositionBounds;
+  delete geometry.userData.opencaeResultExpandedBoundingSphereKey;
   return base;
 }
 
@@ -2770,7 +2848,15 @@ function usePackedPlaybackGeometry(
     const snapshot = controller.getSnapshot();
     if (snapshot) applySnapshot(snapshot);
     return controller.subscribe(applySnapshot);
-  }, [geometry, invalidate, options.resultPlaybackFrameController]);
+  }, [
+    geometry,
+    invalidate,
+    options.deformationScale,
+    options.resultMode,
+    options.resultPlaybackFrameController,
+    options.showDeformed,
+    options.stressExaggeration
+  ]);
 }
 
 function reusablePackedSamples(samples: FaceResultSample[]): FaceResultSample[] {
