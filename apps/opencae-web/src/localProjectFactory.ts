@@ -184,7 +184,7 @@ function sampleLoadsFor(sample: SampleModelId, templateLoads: Load[], displayMod
             ...load.parameters,
             value: 500,
             units: "N",
-            direction: [0, 0, -1],
+            direction: [0, -1, 0],
             applicationPoint: loadFace?.center ?? [1.9, 0.18, 0]
           },
           status: "complete"

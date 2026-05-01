@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
-import type { DisplayFace, Load, NamedSelection, Study } from "@opencae/schema";
-import { createViewerLoadMarkers, directionLabelForLoad, directionVectorForLabel, loadMarkerDisplayLabel, loadMarkerFromLoad, loadMarkerViewportPresentation, payloadObjectForLoad, unitsForLoadType } from "./loadPreview";
+import type { DisplayFace, DisplayModel, Load, NamedSelection, Study } from "@opencae/schema";
+import { createViewerLoadMarkers, directionLabelForLoad, directionVectorForLabel, directionLabelForVector, loadMarkerDisplayLabel, loadMarkerFromLoad, loadMarkerViewportPresentation, payloadObjectForLoad, unitsForLoadType } from "./loadPreview";
 
 const face: DisplayFace = {
   id: "face-side",
@@ -32,6 +32,13 @@ const study = {
   namedSelections: [selection, secondSelection]
 } as unknown as Study;
 
+const legacySampleDisplayModel: DisplayModel = {
+  id: "display-sample",
+  name: "Legacy sample",
+  bodyCount: 1,
+  faces: [face]
+};
+
 describe("load preview helpers", () => {
   test("maps direction labels to saved vectors", () => {
     expect(directionVectorForLabel("-Y", face)).toEqual([0, -1, 0]);
@@ -39,6 +46,11 @@ describe("load preview helpers", () => {
     expect(directionVectorForLabel("+Z", face)).toEqual([0, 0, 1]);
     expect(directionVectorForLabel("-Z", face)).toEqual([0, 0, -1]);
     expect(directionVectorForLabel("Normal", face)).toEqual([0, 0, 1]);
+  });
+
+  test("maps viewer global directions through legacy sample orientation when saving", () => {
+    expect(directionVectorForLabel("-Z", face, legacySampleDisplayModel)).toEqual([0, -1, 0]);
+    expect(directionLabelForVector([0, -1, 0], legacySampleDisplayModel)).toBe("-Z");
   });
 
   test("uses a picked face point for saved load markers", () => {
@@ -269,6 +281,22 @@ describe("load preview helpers", () => {
     expect(directionLabelForLoad(load)).toBe("-Z");
   });
 
+  test("labels legacy sample model-space directions by viewer global axes", () => {
+    const load: Load = {
+      id: "load-legacy-z",
+      type: "force",
+      selectionRef: "selection-side",
+      parameters: { value: 250, units: "N", direction: [0, -1, 0] },
+      status: "complete"
+    };
+
+    const marker = loadMarkerFromLoad(load, study, 0, false, legacySampleDisplayModel);
+
+    expect(marker?.direction).toEqual([0, -1, 0]);
+    expect(marker?.directionLabel).toBe("-Z");
+    expect(directionLabelForLoad(load, legacySampleDisplayModel)).toBe("-Z");
+  });
+
   test("returns saved load markers without adding draft markers", () => {
     const savedLoad: Load = {
       id: "load-1",
@@ -278,7 +306,8 @@ describe("load preview helpers", () => {
       status: "complete"
     };
     const markers = createViewerLoadMarkers({
-      study: { ...study, loads: [savedLoad] } as unknown as Study
+      study: { ...study, loads: [savedLoad] } as unknown as Study,
+      displayModel: legacySampleDisplayModel
     });
 
     expect(markers).toHaveLength(1);

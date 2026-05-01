@@ -4,9 +4,11 @@ import * as THREE from "three";
 import {
   baseModelRotationRadians,
   formatModelOrientation,
+  modelDirectionToViewerSpace,
   modelRotationRadians,
   modelToViewerMatrix,
   rotateDisplayModel,
+  viewerDirectionToModelSpace,
   viewerNormalToModelSpace,
   viewerPointToModelSpace
 } from "./modelOrientation";
@@ -71,6 +73,18 @@ describe("model orientation", () => {
     expect(normal.x).toBeCloseTo(0);
     expect(normal.y).toBeCloseTo(1);
     expect(normal.z).toBeCloseTo(0);
+  });
+
+  test("converts viewer global load directions into legacy sample model space", () => {
+    const savedDirection = viewerDirectionToModelSpace(new THREE.Vector3(0, 0, -1), baseModel);
+    const viewerDirection = modelDirectionToViewerSpace(savedDirection, baseModel);
+
+    expect(savedDirection.x).toBeCloseTo(0);
+    expect(savedDirection.y).toBeCloseTo(-1);
+    expect(savedDirection.z).toBeCloseTo(0);
+    expect(viewerDirection.x).toBeCloseTo(0);
+    expect(viewerDirection.y).toBeCloseTo(0);
+    expect(viewerDirection.z).toBeCloseTo(-1);
   });
 
   test("combines user orientation outside the model base transform", () => {
