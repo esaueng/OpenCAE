@@ -1217,7 +1217,9 @@ function ResultsPanel({
           <label className="field range-field">
             <span className="range-label"><span>Current time</span><strong>{`${activeTimeSeconds.toFixed(4)} s · Frame ${currentFrameNumber} / ${frames.length}`}</strong></span>
             <input
+              className="playback-time-range"
               type="range"
+              aria-label="Playback time position"
               min="0"
               max={Math.max(frames.length - 1, 0)}
               step={resultPlaybackPlaying ? "0.01" : "1"}

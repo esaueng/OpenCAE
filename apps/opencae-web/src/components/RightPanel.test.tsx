@@ -405,7 +405,7 @@ describe("RightPanel payload mass controls", () => {
     expect(html).toContain("Play");
     expect(html).toContain("Animation speed");
     expect(html).toContain("12 fps");
-    expect(html.indexOf("Animation speed")).toBeLessThan(html.indexOf("Play"));
+    expect(html.indexOf("Animation speed")).toBeLessThan(html.indexOf(">Play</button>"));
     expect(html).not.toContain("Loop");
     expect(html).toContain("Peak displacement");
     expect(html).toContain("Result mode");
@@ -548,6 +548,18 @@ describe("RightPanel payload mass controls", () => {
     });
 
     expect(html).toContain("Pause");
+  });
+
+  test("marks the current time control as a playback playhead instead of a normal slider", () => {
+    const html = renderPanel("results", {
+      resultFields: [
+        { id: "field-stress-0", runId: "run-1", type: "stress", location: "face", values: [1], min: 1, max: 1, units: "MPa", frameIndex: 0, timeSeconds: 0 },
+        { id: "field-stress-1", runId: "run-1", type: "stress", location: "face", values: [2], min: 2, max: 2, units: "MPa", frameIndex: 1, timeSeconds: 0.005 }
+      ]
+    });
+
+    expect(html).toContain('class="playback-time-range"');
+    expect(html).toContain('aria-label="Playback time position"');
   });
 
   test("shows contextual weak X build yield on cantilever material previews", () => {

@@ -123,6 +123,8 @@ const BRACKET_HOLES = [
   { id: "base-hole-right", center: [1.2, 0] as [number, number], radius: 0.13, supported: true }
 ];
 type ViewerOrbitControls = ElementRef<typeof OrbitControls>;
+type GizmoViewRequest = RotationAxis | "iso";
+export type ViewCubeFaceLabel = "Front" | "Right" | "Top";
 type ModelSelectionHit = { face: DisplayFace; point: [number, number, number]; payloadObject?: PayloadObjectSelection; snapResult?: SnapResult | null };
 type ModelPickHandlers = {
   onPointerMove?: (event: ThreeEvent<PointerEvent>) => void;
@@ -131,15 +133,19 @@ type ModelPickHandlers = {
 };
 export const VIEWER_GIZMO_ALIGNMENT = "bottom-right";
 export const VIEWER_GIZMO_SCALE = 44;
-export const VIEWER_AXIS_HEAD_RADIUS = 0.25;
-export const VIEWER_AXIS_LABEL_BADGE_RADIUS = 0.18;
+export const VIEWER_AXIS_HEAD_RADIUS = 0.21;
+export const VIEWER_AXIS_LABEL_BADGE_RADIUS = 0.145;
 export const VIEWER_AXIS_LABEL_BADGE_COLOR = "#07111d";
-export const VIEWER_AXIS_LABEL_FONT_SIZE = 0.25;
+export const VIEWER_AXIS_LABEL_FONT_SIZE = 0.21;
 export const VIEWER_AXIS_LABEL_COLOR = "#ffffff";
 export const VIEWER_AXIS_LABEL_OUTLINE_COLOR = "#07111d";
-export const VIEWER_AXIS_LABEL_OUTLINE_WIDTH = 0.025;
-export const VIEWER_MINI_CUBE_SIZE = 0.36;
-export const VIEWER_MINI_CUBE_EDGE_COLOR = "#dbeafe";
+export const VIEWER_AXIS_LABEL_OUTLINE_WIDTH = 0.02;
+export const VIEWER_GIZMO_AXIS_LENGTH = 1.25;
+export const VIEWER_GIZMO_LABEL_DISTANCE = 1.35;
+export const VIEWER_VIEW_CUBE_SIZE = 0.9;
+export const VIEWER_VIEW_CUBE_EDGE_COLOR = "#9cc7df";
+export const VIEWER_VIEW_CUBE_FACE_LABEL_FONT_SIZE = 0.105;
+export const VIEWER_ISOMETRIC_GIZMO_VIEW = "iso";
 export const VIEWER_CREDIT_URL = "https://esauengineering.com/";
 const VIEWER_FIT_MARGIN = 1.28;
 const DEFAULT_HOME_FIT_MARGIN = 1.46;
@@ -166,7 +172,7 @@ const RESULT_DEFORMATION_CAP_FRACTION = DEBUG_RESULTS ? 1 : 0.25;
 export function CadViewer(props: CadViewerProps) {
   const controlsRef = useRef<ViewerOrbitControls | null>(null);
   const [uploadedPreviewBounds, setUploadedPreviewBounds] = useState<THREE.Box3 | null>(null);
-  const [gizmoViewRequest, setGizmoViewRequest] = useState<{ axis: RotationAxis | null; signal: number }>({ axis: null, signal: 0 });
+  const [gizmoViewRequest, setGizmoViewRequest] = useState<{ view: GizmoViewRequest | null; signal: number }>({ view: null, signal: 0 });
   const [viewerInteracting, setViewerInteracting] = useState(false);
   const effectiveViewMode: ViewMode = props.activeStep === "results" ? props.viewMode : props.viewMode === "mesh" ? "mesh" : "model";
   const suppressPlaybackOverlays = props.resultPlaybackPlaying;
@@ -223,13 +229,13 @@ export function CadViewer(props: CadViewerProps) {
             </group>
           </group>
           <BoundsCameraReset signal={props.fitSignal} viewAxis={props.viewAxis} viewAxisSignal={props.viewAxisSignal} controlsRef={controlsRef} />
-          <GizmoCameraReset axis={gizmoViewRequest.axis} signal={gizmoViewRequest.signal} controlsRef={controlsRef} />
+          <GizmoCameraReset view={gizmoViewRequest.view} signal={gizmoViewRequest.signal} controlsRef={controlsRef} />
         </Bounds>
         <DemandOrbitControls controlsRef={controlsRef} onInteractionChange={handleViewerInteractionChange} />
         <ShiftPanControls controlsRef={controlsRef} onInteractionChange={handleViewerInteractionChange} />
         <GizmoHelper alignment={VIEWER_GIZMO_ALIGNMENT} margin={[92, 92]}>
           <CleanAxisGizmo
-            onSelectAxis={(axis) => setGizmoViewRequest((request) => ({ axis, signal: request.signal + 1 }))}
+            onSelectView={(view) => setGizmoViewRequest((request) => ({ view, signal: request.signal + 1 }))}
           />
         </GizmoHelper>
         {viewerStatsEnabled && <ViewerRendererStatsProbe />}
@@ -469,42 +475,93 @@ function panCamera(camera: THREE.Camera, target: THREE.Vector3, deltaX: number, 
   target.add(panOffset);
 }
 
-function CleanAxisGizmo({ onSelectAxis }: { onSelectAxis: (axis: RotationAxis) => void }) {
-  const axes: Array<{ label: "X" | "Y" | "Z"; color: string; position: [number, number, number] }> = [
-    { label: "X", color: "#ff4b7d", position: [0.92, 0, 0] },
-    { label: "Y", color: "#2ddc94", position: [0, 0.92, 0] },
-    { label: "Z", color: "#4da3ff", position: [0, 0, 0.92] }
+function CleanAxisGizmo({ onSelectView }: { onSelectView: (view: GizmoViewRequest) => void }) {
+  const axes: Array<{ label: "X" | "Y" | "Z"; color: string; axis: RotationAxis; direction: [number, number, number] }> = [
+    { label: "X", color: "#ff4b7d", axis: "x", direction: [1, 0, 0] },
+    { label: "Y", color: "#2ddc94", axis: "y", direction: [0, 1, 0] },
+    { label: "Z", color: "#4da3ff", axis: "z", direction: [0, 0, 1] }
   ];
 
   return (
     <group scale={VIEWER_GIZMO_SCALE}>
-      <MiniAxisCube />
+      <ViewCube onSelectView={onSelectView} />
       {axes.map((axis) => (
-        <group key={axis.label}>
-          <Line points={[[0, 0, 0], axis.position]} color={axis.color} lineWidth={4} />
-          <AxisHead {...axis} onSelectAxis={onSelectAxis} />
-          <AxisDot color={axis.color} position={axis.position.map((value) => -value * 0.72) as [number, number, number]} />
-        </group>
+        <PositiveAxis key={axis.label} {...axis} onSelectView={onSelectView} />
       ))}
-      <Billboard>
-        <mesh>
-          <sphereGeometry args={[0.065, 18, 18]} />
-          <meshBasicMaterial color="#d9e8f6" toneMapped={false} />
-        </mesh>
-      </Billboard>
+      <IsoCenterButton onSelectView={onSelectView} />
     </group>
   );
 }
 
-function AxisHead({ label, color, position, onSelectAxis }: { label: "X" | "Y" | "Z"; color: string; position: [number, number, number]; onSelectAxis: (axis: RotationAxis) => void }) {
+function PositiveAxis({
+  label,
+  color,
+  axis,
+  direction,
+  onSelectView
+}: {
+  label: "X" | "Y" | "Z";
+  color: string;
+  axis: RotationAxis;
+  direction: [number, number, number];
+  onSelectView: (view: GizmoViewRequest) => void;
+}) {
+  const lineEnd = direction.map((value) => value * VIEWER_GIZMO_AXIS_LENGTH) as [number, number, number];
+  const lineStart = direction.map((value) => -value * VIEWER_GIZMO_AXIS_LENGTH) as [number, number, number];
+  const headPosition = direction.map((value) => value * VIEWER_GIZMO_LABEL_DISTANCE) as [number, number, number];
+
+  return (
+    <group>
+      <Line points={[lineStart, lineEnd]} color={color} lineWidth={3} transparent opacity={0.88} depthTest={false} />
+      <AxisHead label={label} color={color} axis={axis} position={headPosition} onSelectView={onSelectView} />
+    </group>
+  );
+}
+
+function AxisHead({
+  label,
+  color,
+  axis,
+  position,
+  onSelectView
+}: {
+  label: "X" | "Y" | "Z";
+  color: string;
+  axis: RotationAxis;
+  position: [number, number, number];
+  onSelectView: (view: GizmoViewRequest) => void;
+}) {
+  const [hovered, setHovered] = useState(false);
+  const title = `View +${label}`;
+
   return (
     <Billboard
+      name={title}
       position={position}
+      scale={hovered ? 1.08 : 1}
+      userData={{ title, ariaLabel: title }}
       onPointerDown={(event: ThreeEvent<PointerEvent>) => {
         event.stopPropagation();
-        onSelectAxis(axisLabelToViewAxis(label));
+      }}
+      onClick={(event: ThreeEvent<MouseEvent>) => {
+        event.stopPropagation();
+        onSelectView(axis);
+      }}
+      onPointerOver={(event: ThreeEvent<PointerEvent>) => {
+        event.stopPropagation();
+        setHovered(true);
+      }}
+      onPointerOut={(event: ThreeEvent<PointerEvent>) => {
+        event.stopPropagation();
+        setHovered(false);
       }}
     >
+      {hovered && (
+        <mesh position={[0, 0, -0.002]}>
+          <ringGeometry args={[VIEWER_AXIS_HEAD_RADIUS * 1.02, VIEWER_AXIS_HEAD_RADIUS * 1.18, 40]} />
+          <meshBasicMaterial color="#f8fbff" depthTest={false} transparent opacity={0.38} toneMapped={false} />
+        </mesh>
+      )}
       <mesh>
         <ringGeometry args={[VIEWER_AXIS_LABEL_BADGE_RADIUS, VIEWER_AXIS_HEAD_RADIUS, 40]} />
         <meshBasicMaterial color={color} depthTest={false} toneMapped={false} />
@@ -529,22 +586,129 @@ function AxisHead({ label, color, position, onSelectAxis }: { label: "X" | "Y" |
   );
 }
 
-function MiniAxisCube() {
+function ViewCube({ onSelectView }: { onSelectView: (view: GizmoViewRequest) => void }) {
+  const half = VIEWER_VIEW_CUBE_SIZE / 2;
+  const faces: Array<{
+    label: ViewCubeFaceLabel;
+    position: [number, number, number];
+    rotation: [number, number, number];
+  }> = [
+    { label: "Front", position: [0, half + 0.003, 0], rotation: [-Math.PI / 2, 0, 0] },
+    { label: "Right", position: [half + 0.003, 0, 0], rotation: [0, Math.PI / 2, 0] },
+    { label: "Top", position: [0, 0, half + 0.003], rotation: [0, 0, 0] }
+  ];
+
   return (
-    <mesh rotation={[0.48, 0.72, -0.18]}>
-      <boxGeometry args={[VIEWER_MINI_CUBE_SIZE, VIEWER_MINI_CUBE_SIZE, VIEWER_MINI_CUBE_SIZE]} />
-      <meshBasicMaterial color="#122338" depthTest={false} transparent opacity={0.92} toneMapped={false} />
-      <Edges color={VIEWER_MINI_CUBE_EDGE_COLOR} threshold={1} />
-    </mesh>
+    <group name="Centered triad view cube">
+      {/*
+        Alignment sanity check:
+        cube center === origin
+        X line: from [-axisLength,0,0] to [axisLength,0,0]
+        Y line: from [0,-axisLength,0] to [0,axisLength,0]
+        Z line: from [0,0,-axisLength] to [0,0,axisLength]
+        cube bounds: [-cubeSize/2, cubeSize/2] on all axes
+      */}
+      <mesh renderOrder={1}>
+        <boxGeometry args={[VIEWER_VIEW_CUBE_SIZE, VIEWER_VIEW_CUBE_SIZE, VIEWER_VIEW_CUBE_SIZE]} />
+        <meshBasicMaterial color="#16283c" depthTest transparent opacity={0.34} depthWrite={false} toneMapped={false} />
+        <Edges color={VIEWER_VIEW_CUBE_EDGE_COLOR} threshold={1} />
+      </mesh>
+      {faces.map((face) => (
+        <ViewCubeFace key={face.label} {...face} onSelectView={onSelectView} />
+      ))}
+    </group>
   );
 }
 
-function AxisDot({ color, position }: { color: string; position: [number, number, number] }) {
+function ViewCubeFace({
+  label,
+  position,
+  rotation,
+  onSelectView
+}: {
+  label: ViewCubeFaceLabel;
+  position: [number, number, number];
+  rotation: [number, number, number];
+  onSelectView: (view: GizmoViewRequest) => void;
+}) {
+  const [hovered, setHovered] = useState(false);
+  const title = `${label} view`;
+
   return (
-    <Billboard position={position}>
+    <group
+      name={title}
+      position={position}
+      rotation={rotation}
+      userData={{ title, ariaLabel: title }}
+      onPointerDown={(event: ThreeEvent<PointerEvent>) => {
+        event.stopPropagation();
+      }}
+      onClick={(event: ThreeEvent<MouseEvent>) => {
+        event.stopPropagation();
+        onSelectView(viewCubeFaceToGizmoView(label));
+      }}
+      onPointerOver={(event: ThreeEvent<PointerEvent>) => {
+        event.stopPropagation();
+        setHovered(true);
+      }}
+      onPointerOut={(event: ThreeEvent<PointerEvent>) => {
+        event.stopPropagation();
+        setHovered(false);
+      }}
+    >
+      <mesh renderOrder={2}>
+        <planeGeometry args={[VIEWER_VIEW_CUBE_SIZE * 0.82, VIEWER_VIEW_CUBE_SIZE * 0.82]} />
+        <meshBasicMaterial color={hovered ? "#6da4c9" : "#31516b"} depthTest transparent opacity={hovered ? 0.34 : 0.08} depthWrite={false} toneMapped={false} />
+      </mesh>
+      <Text
+        anchorX="center"
+        anchorY="middle"
+        color="#c7d7e5"
+        fontSize={VIEWER_VIEW_CUBE_FACE_LABEL_FONT_SIZE}
+        letterSpacing={0}
+        outlineColor="#07111d"
+        outlineWidth={0.01}
+        position={[0, 0, 0.006]}
+        renderOrder={3}
+      >
+        {label}
+      </Text>
+    </group>
+  );
+}
+
+function IsoCenterButton({ onSelectView }: { onSelectView: (view: GizmoViewRequest) => void }) {
+  const [hovered, setHovered] = useState(false);
+
+  return (
+    <Billboard
+      name="Isometric view"
+      userData={{ title: "Isometric view", ariaLabel: "Isometric view" }}
+      onPointerDown={(event: ThreeEvent<PointerEvent>) => {
+        event.stopPropagation();
+      }}
+      onClick={(event: ThreeEvent<MouseEvent>) => {
+        event.stopPropagation();
+        onSelectView(VIEWER_ISOMETRIC_GIZMO_VIEW);
+      }}
+      onPointerOver={(event: ThreeEvent<PointerEvent>) => {
+        event.stopPropagation();
+        setHovered(true);
+      }}
+      onPointerOut={(event: ThreeEvent<PointerEvent>) => {
+        event.stopPropagation();
+        setHovered(false);
+      }}
+    >
+      {hovered && (
+        <mesh>
+          <ringGeometry args={[0.075, 0.105, 28]} />
+          <meshBasicMaterial color="#f8fbff" depthTest={false} transparent opacity={0.42} toneMapped={false} />
+        </mesh>
+      )}
       <mesh>
-        <circleGeometry args={[0.11, 28]} />
-        <meshBasicMaterial color={color} depthTest={false} transparent opacity={0.78} toneMapped={false} />
+        <sphereGeometry args={[0.065, 18, 18]} />
+        <meshBasicMaterial color="#d9e8f6" depthTest={false} toneMapped={false} />
       </mesh>
     </Billboard>
   );
@@ -4798,11 +4962,11 @@ function BoundsCameraReset({ signal, viewAxis, viewAxisSignal, controlsRef }: { 
   return null;
 }
 
-function GizmoCameraReset({ axis, signal, controlsRef }: { axis: RotationAxis | null; signal: number; controlsRef: MutableRefObject<ViewerOrbitControls | null> }) {
+function GizmoCameraReset({ view, signal, controlsRef }: { view: GizmoViewRequest | null; signal: number; controlsRef: MutableRefObject<ViewerOrbitControls | null> }) {
   const bounds = useBounds();
   const { camera, invalidate, size } = useThree();
   useEffect(() => {
-    if (!axis) return;
+    if (!view || signal === 0) return;
     const nextBounds = bounds.refresh().clip();
     const { box, center, distance } = nextBounds.getSize();
     const perspectiveCamera = camera as THREE.PerspectiveCamera;
@@ -4810,13 +4974,13 @@ function GizmoCameraReset({ axis, signal, controlsRef }: { axis: RotationAxis | 
       box,
       center,
       distance,
-      axis,
+      view === VIEWER_ISOMETRIC_GIZMO_VIEW ? null : view,
       perspectiveCamera.isPerspectiveCamera ? perspectiveCamera.fov : undefined,
       size.width / size.height
     );
     applyViewerCameraPose(camera, controlsRef.current, pose);
     invalidate();
-  }, [axis, bounds, camera, controlsRef, invalidate, signal, size.height, size.width]);
+  }, [bounds, camera, controlsRef, invalidate, signal, size.height, size.width, view]);
   return null;
 }
 
@@ -4864,6 +5028,12 @@ function applyViewerCameraPose(camera: THREE.Camera, controls: ViewerOrbitContro
 
 export function axisLabelToViewAxis(label: "X" | "Y" | "Z"): RotationAxis {
   return label.toLowerCase() as RotationAxis;
+}
+
+export function viewCubeFaceToGizmoView(label: ViewCubeFaceLabel): RotationAxis {
+  if (label === "Front") return "y";
+  if (label === "Right") return "x";
+  return "z";
 }
 
 export function cameraViewForAxis(axis: RotationAxis): { direction: THREE.Vector3; up: THREE.Vector3 } {
