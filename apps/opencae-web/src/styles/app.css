@@ -2021,6 +2021,22 @@ img {
   box-shadow: 0 0 0 1px rgba(8, 12, 16, 0.5);
 }
 
+.range-field input.playback-time-range {
+  cursor: default;
+}
+
+.range-field input.playback-time-range::-webkit-slider-thumb {
+  width: 6px;
+  height: 18px;
+  border-radius: 3px;
+}
+
+.range-field input.playback-time-range::-moz-range-thumb {
+  width: 4px;
+  height: 16px;
+  border-radius: 3px;
+}
+
 .range-field input[type="range"]:focus,
 .range-field input[type="range"]:focus-visible {
   outline: none;

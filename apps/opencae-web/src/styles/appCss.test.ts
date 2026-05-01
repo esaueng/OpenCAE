@@ -149,4 +149,16 @@ describe("app CSS", () => {
     expect(rangeFocus).toMatch(/outline:\s*none/);
     expect(rangeFocus).toMatch(/box-shadow:\s*none/);
   });
+
+  test("styles playback time as a passive playhead instead of a draggable slider", () => {
+    const playbackRange = cssRule(".range-field input.playback-time-range");
+    const playbackWebkitThumb = cssRule(".range-field input.playback-time-range::-webkit-slider-thumb");
+    const playbackMozThumb = cssRule(".range-field input.playback-time-range::-moz-range-thumb");
+
+    expect(playbackRange).toMatch(/cursor:\s*default/);
+    expect(playbackWebkitThumb).toMatch(/width:\s*6px/);
+    expect(playbackWebkitThumb).toMatch(/border-radius:\s*3px/);
+    expect(playbackMozThumb).toMatch(/width:\s*4px/);
+    expect(playbackMozThumb).toMatch(/border-radius:\s*3px/);
+  });
 });
