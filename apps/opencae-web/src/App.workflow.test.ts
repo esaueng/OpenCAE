@@ -85,6 +85,14 @@ describe("App workflow layout", () => {
     expect(appSource).toContain("if (!playing) setShowDeformed(true);");
   });
 
+  test("wires single-key workspace shortcuts for home and step navigation", () => {
+    expect(appSource).toContain('if (key === "h")');
+    expect(appSource).toContain("handleFitDefaultView();");
+    expect(appSource).toContain("workflowStepForShortcut(key, activeStep");
+    expect(appSource).toContain("navigateToStep(shortcutStep);");
+    expect(appSource).toContain("isEditableShortcutTarget(event.target as HTMLElement | null)");
+  });
+
   test("invalidates completed results after dynamic solver settings change", () => {
     expect(appSource).toContain("invalidateCompletedRunState();");
     expect(appSource).toContain("setRunProgress(0);");
