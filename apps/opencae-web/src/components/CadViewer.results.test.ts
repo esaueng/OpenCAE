@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { describe, expect, test, vi } from "vitest";
-import { VIEWER_CREDIT_URL, VIEWER_GIZMO_ALIGNMENT, applyResultFrameToGeometry, axisLabelToViewAxis, cameraDistanceForBounds, cameraViewForAxis, cloneResultPreviewObject, colorizeResultObject, colorizeSampleResultGeometry, createUndeformedResultOutlineObject, defaultHomeViewTarget, deformationScaleForResultFields, displayedLegendTickLabels, interpolateDisplacementAtPoint, legendMeshStats, legendTickLabels, payloadHighlightObjectId, printLayerVisualizationForBounds, resultProbesForKind, resultValueForPoint, rotatedCameraOrbit, shouldShowDimensionOverlay, shouldShowModelHitLabel, shouldShowResultMarkers, shouldShowUndeformedResultOutline, updatePackedSamples, viewerCameraResetPose } from "./CadViewer";
+import { VIEWER_CREDIT_URL, VIEWER_GIZMO_ALIGNMENT, applyResultFrameToGeometry, axisLabelToViewAxis, beamDemoDisplacementAtStation, beamDemoPayloadOffset, beamDemoStationForPoint, cameraDistanceForBounds, cameraViewForAxis, cloneResultPreviewObject, colorizeResultObject, colorizeSampleResultGeometry, createBeamDemoCoordinate, createUndeformedResultOutlineObject, defaultHomeViewTarget, deformationScaleForResultFields, displayedLegendTickLabels, interpolateDisplacementAtPoint, legendMeshStats, legendTickLabels, normalizedPointLoadCantileverShape, payloadHighlightObjectId, pointLoadCantileverShape, printLayerVisualizationForBounds, resultProbesForKind, resultValueForPoint, rotatedCameraOrbit, shouldShowDimensionOverlay, shouldShowModelHitLabel, shouldShowResultMarkers, shouldShowUndeformedResultOutline, updatePackedSamples, viewerCameraResetPose } from "./CadViewer";
 import type { FaceResultSample } from "../resultFields";
 import type { DisplayFace, ResultField } from "@opencae/schema";
 import type { PackedPreparedPlaybackCache } from "../resultPlaybackCache";
@@ -713,6 +713,92 @@ describe("CadViewer result coloring", () => {
 
     expect(normalsSpy).not.toHaveBeenCalled();
     expect(sphereSpy).not.toHaveBeenCalled();
+  });
+
+  test("separates beam fixed end, free end, and payload station for payload-mass fallback", () => {
+    const bounds = new THREE.Box3(new THREE.Vector3(-1.9, 0, -0.18), new THREE.Vector3(1.9, 0.28, 0.18));
+    const payloadMarker = {
+      id: "payload-load",
+      faceId: "load-face",
+      payloadObject: { id: "payload", label: "Payload", center: [0.65, 0.5, 0] as [number, number, number] },
+      type: "gravity",
+      value: 2,
+      units: "kg",
+      direction: [0, -1, 0] as [number, number, number],
+      directionLabel: "Normal",
+      labelIndex: 0,
+      stackIndex: 0
+    };
+    const supportMarker = {
+      id: "fixed-right",
+      faceId: "fixed-face",
+      type: "fixed",
+      displayLabel: "FS 1",
+      label: "Right",
+      stackIndex: 0
+    };
+    const coordinate = createBeamDemoCoordinate({
+      bounds,
+      samples: [
+        { face: { id: "fixed-face", label: "Fixed", color: "#4da3ff", center: [1.9, 0.14, 0], normal: [1, 0, 0], stressValue: 10 }, value: 10, normalized: 0 },
+        { face: { id: "load-face", label: "Payload", color: "#f59e0b", center: [0.65, 0.28, 0], normal: [0, 1, 0], stressValue: 80 }, value: 80, normalized: 1 }
+      ],
+      loadMarkers: [payloadMarker],
+      supportMarkers: [supportMarker]
+    });
+
+    expect(coordinate).not.toBeNull();
+    expect(beamDemoStationForPoint(coordinate!.fixedEnd, coordinate!)).toBeCloseTo(0);
+    expect(beamDemoStationForPoint(coordinate!.beamFreeEnd, coordinate!)).toBeCloseTo(1);
+    expect(coordinate!.payloadStation).toBeGreaterThan(0);
+    expect(coordinate!.payloadStation).toBeLessThan(1);
+    expect(coordinate!.fixedEnd.x).toBeCloseTo(1.9);
+    expect(coordinate!.beamFreeEnd.x).toBeCloseTo(-1.9);
+  });
+
+  test("does not clamp all beam vertices beyond the payload station to identical displacement", () => {
+    const payloadStation = 0.35;
+    const justBeyondPayload = normalizedPointLoadCantileverShape(payloadStation + 0.05, payloadStation);
+    const freeEnd = normalizedPointLoadCantileverShape(1, payloadStation);
+
+    expect(pointLoadCantileverShape(0, payloadStation)).toBeCloseTo(0);
+    expect(justBeyondPayload).toBeGreaterThan(0);
+    expect(freeEnd).toBeCloseTo(1);
+    expect(freeEnd).toBeGreaterThan(justBeyondPayload);
+  });
+
+  test("keeps point-load beam deformation smooth across the payload station", () => {
+    const payloadStation = 0.42;
+    const before = normalizedPointLoadCantileverShape(payloadStation - 0.01, payloadStation);
+    const at = normalizedPointLoadCantileverShape(payloadStation, payloadStation);
+    const after = normalizedPointLoadCantileverShape(payloadStation + 0.01, payloadStation);
+
+    expect(at - before).toBeGreaterThan(0);
+    expect(after - at).toBeGreaterThan(0);
+    expect(Math.abs((at - before) - (after - at))).toBeLessThan(0.01);
+  });
+
+  test("treats an end force load as the standard end-load cantilever shape", () => {
+    for (const station of [0, 0.25, 0.5, 0.75, 1]) {
+      expect(normalizedPointLoadCantileverShape(station, 1)).toBeCloseTo(0.5 * station * station * (3 - station));
+    }
+  });
+
+  test("moves Beam Demo payload mass by the beam displacement at its payload station", () => {
+    const coordinate = {
+      fixedEnd: new THREE.Vector3(1.9, 0.14, 0),
+      beamFreeEnd: new THREE.Vector3(-1.9, 0.14, 0),
+      beamAxis: new THREE.Vector3(-1, 0, 0),
+      length: 3.8,
+      payloadStation: 0.35,
+      loadDirection: new THREE.Vector3(0, -1, 0)
+    };
+
+    const expected = beamDemoDisplacementAtStation(coordinate.payloadStation, coordinate, 0.12);
+    const offset = beamDemoPayloadOffset(coordinate, 0.12);
+
+    expect(offset.toArray()).toEqual(expected.toArray());
+    expect(offset.y).toBeLessThan(0);
   });
 
   test("scales support-to-load deformation by the active dynamic displacement", () => {
