@@ -85,7 +85,7 @@ describe("CadViewer result coloring", () => {
     expect(cadViewerSource).toContain("<PositiveOctantViewCube onSelectView={onSelectView} />");
     expect(cadViewerSource).not.toContain("<Billboard position={[0, 0, 0.036]} renderOrder={4}>");
     expect(cadViewerSource).toContain("shouldShowViewCubeFaceLabel");
-    expect(cadViewerSource).toContain("VIEWER_VIEW_CUBE_FACE_VISIBILITY_THRESHOLD = 0.05");
+    expect(cadViewerSource).toContain("VIEWER_VIEW_CUBE_FACE_VISIBILITY_THRESHOLD = 0");
     expect(cadViewerSource).toContain("camera.position");
     expect(cadViewerSource).toContain("faceNormalWorld");
     expect(cadViewerSource).toContain("transparent={false}");
@@ -149,6 +149,7 @@ describe("CadViewer result coloring", () => {
     const faceCenter = new THREE.Vector3(0, 0, 0);
 
     expect(shouldShowViewCubeFaceLabel(faceCenter, new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0, 3))).toBe(true);
+    expect(shouldShowViewCubeFaceLabel(faceCenter, new THREE.Vector3(0, 0, 1), new THREE.Vector3(10, 0, 0.1))).toBe(true);
     expect(shouldShowViewCubeFaceLabel(faceCenter, new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0, -3))).toBe(false);
     expect(shouldShowViewCubeFaceLabel(faceCenter, new THREE.Vector3(0, 0, 1), new THREE.Vector3(3, 0, 0))).toBe(false);
   });
