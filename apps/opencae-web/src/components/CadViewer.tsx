@@ -149,11 +149,11 @@ export const VIEWER_AXIS_LABEL_OUTLINE_WIDTH = 0.02;
 export const VIEWER_GIZMO_AXIS_LENGTH = 1.35;
 export const VIEWER_GIZMO_LABEL_DISTANCE = 1.48;
 export const VIEWER_VIEW_CUBE_SIZE = 1.12;
-export const VIEWER_VIEW_CUBE_BODY_OPACITY = 0.45;
+export const VIEWER_VIEW_CUBE_BODY_OPACITY = 1;
 export const VIEWER_VIEW_CUBE_FACE_OPACITY = 0.16;
 export const VIEWER_VIEW_CUBE_FACE_HOVER_OPACITY = 0.38;
 export const VIEWER_VIEW_CUBE_EDGE_COLOR = "#8fb4d8";
-export const VIEWER_VIEW_CUBE_FACE_LABEL_FONT_SIZE = 0.18;
+export const VIEWER_VIEW_CUBE_FACE_LABEL_FONT_SIZE = 0.32;
 const VIEWER_VIEW_CUBE_FACE_VISIBILITY_THRESHOLD = 0.05;
 export const VIEWER_ISOMETRIC_GIZMO_VIEW = "iso";
 export const VIEWER_CREDIT_URL = "https://esauengineering.com/";
@@ -637,27 +637,14 @@ function AxisCap({
 
 function PositiveOctantViewCube({ onSelectView }: { onSelectView: (view: GizmoViewRequest) => void }) {
   const cubeSize = VIEWER_VIEW_CUBE_SIZE;
-  const faceOffset = 0.003;
   const half = VIEWER_VIEW_CUBE_SIZE / 2;
-  const faces: Array<{
-    label: ViewCubeFaceLabel;
-    position: [number, number, number];
-    rotation: [number, number, number];
-    normal: [number, number, number];
-  }> = [
-    { label: "Front", position: [half, cubeSize + faceOffset, half], rotation: [-Math.PI / 2, 0, 0], normal: [0, 1, 0] },
-    { label: "Back", position: [half, -faceOffset, half], rotation: [Math.PI / 2, 0, 0], normal: [0, -1, 0] },
-    { label: "Right", position: [cubeSize + faceOffset, half, half], rotation: [0, Math.PI / 2, 0], normal: [1, 0, 0] },
-    { label: "Left", position: [-faceOffset, half, half], rotation: [0, -Math.PI / 2, 0], normal: [-1, 0, 0] },
-    { label: "Top", position: [half, half, cubeSize + faceOffset], rotation: [0, 0, 0], normal: [0, 0, 1] },
-    { label: "Bottom", position: [half, half, -faceOffset], rotation: [Math.PI, 0, 0], normal: [0, 0, -1] }
-  ];
+  const faces = useMemo(() => getViewCubeFaceDescriptors(), []);
 
   return (
     <group name="Positive-octant triad view cube">
       <mesh position={[half, half, half]} renderOrder={1}>
         <boxGeometry args={[cubeSize, cubeSize, cubeSize]} />
-        <meshBasicMaterial color="#1d2b3d" depthTest transparent opacity={VIEWER_VIEW_CUBE_BODY_OPACITY} depthWrite={false} toneMapped={false} />
+        <meshBasicMaterial color="#1d2b3d" depthTest={true} transparent={false} opacity={VIEWER_VIEW_CUBE_BODY_OPACITY} depthWrite toneMapped={false} />
       </mesh>
       <ViewCubeEdges />
       {faces.map((face) => (
@@ -667,10 +654,32 @@ function PositiveOctantViewCube({ onSelectView }: { onSelectView: (view: GizmoVi
   );
 }
 
+export interface ViewCubeFaceDescriptor {
+  label: ViewCubeFaceLabel;
+  position: [number, number, number];
+  rotation: [number, number, number];
+  normal: [number, number, number];
+}
+
+export function getViewCubeFaceDescriptors(): ViewCubeFaceDescriptor[] {
+  const cubeSize = VIEWER_VIEW_CUBE_SIZE;
+  const faceOffset = 0.006;
+  const half = VIEWER_VIEW_CUBE_SIZE / 2;
+  return [
+    { label: "Front", position: [half, cubeSize + faceOffset, half], rotation: [-Math.PI / 2, 0, -Math.PI], normal: [0, 1, 0] },
+    { label: "Back", position: [half, -faceOffset, half], rotation: [Math.PI / 2, 0, 0], normal: [0, -1, 0] },
+    { label: "Right", position: [cubeSize + faceOffset, half, half], rotation: [Math.PI / 2, Math.PI / 2, 0], normal: [1, 0, 0] },
+    { label: "Left", position: [-faceOffset, half, half], rotation: [Math.PI / 2, -Math.PI / 2, 0], normal: [-1, 0, 0] },
+    { label: "Top", position: [half, half, cubeSize + faceOffset], rotation: [0, 0, Math.PI / 2], normal: [0, 0, 1] },
+    { label: "Bottom", position: [half, half, -faceOffset], rotation: [-Math.PI, 0, -Math.PI / 2], normal: [0, 0, -1] }
+  ];
+}
+
 function ViewCubeEdges({ active = false }: { active?: boolean }) {
   const cubeSize = VIEWER_VIEW_CUBE_SIZE;
-  const min = 0;
-  const max = cubeSize;
+  const edgeInset = 0.004;
+  const min = -edgeInset;
+  const max = cubeSize + edgeInset;
   const edgeSegments: Array<[[number, number, number], [number, number, number]]> = [
     [[min, min, min], [max, min, min]],
     [[min, max, min], [max, max, min]],
@@ -696,7 +705,7 @@ function ViewCubeEdges({ active = false }: { active?: boolean }) {
           lineWidth={active ? 2 : 1}
           transparent
           opacity={active ? 0.82 : 0.56}
-          depthTest={false}
+          depthTest={true}
         />
       ))}
     </group>
@@ -707,7 +716,6 @@ function ViewCubeFace({
   label,
   position,
   rotation,
-  normal,
   onSelectView
 }: {
   label: ViewCubeFaceLabel;
@@ -719,7 +727,7 @@ function ViewCubeFace({
   const [hovered, setHovered] = useState(false);
   const { camera } = useThree();
   const labelRef = useRef<THREE.Group | null>(null);
-  const localNormal = useMemo(() => new THREE.Vector3(...normal), [normal]);
+  const localNormal = useMemo(() => new THREE.Vector3(0, 0, 1), []);
   const faceCenterWorldRef = useRef(new THREE.Vector3());
   const faceNormalWorldRef = useRef(new THREE.Vector3());
   const normalMatrixRef = useRef(new THREE.Matrix3());
@@ -758,21 +766,7 @@ function ViewCubeFace({
         <planeGeometry args={[VIEWER_VIEW_CUBE_SIZE * 0.82, VIEWER_VIEW_CUBE_SIZE * 0.82]} />
         <meshBasicMaterial color={hovered ? "#6da4c9" : "#31516b"} depthTest transparent opacity={hovered ? VIEWER_VIEW_CUBE_FACE_HOVER_OPACITY : VIEWER_VIEW_CUBE_FACE_OPACITY} depthWrite={false} toneMapped={false} />
       </mesh>
-      <Line
-        points={[
-          [-VIEWER_VIEW_CUBE_SIZE * 0.41, -VIEWER_VIEW_CUBE_SIZE * 0.41, 0.004],
-          [VIEWER_VIEW_CUBE_SIZE * 0.41, -VIEWER_VIEW_CUBE_SIZE * 0.41, 0.004],
-          [VIEWER_VIEW_CUBE_SIZE * 0.41, VIEWER_VIEW_CUBE_SIZE * 0.41, 0.004],
-          [-VIEWER_VIEW_CUBE_SIZE * 0.41, VIEWER_VIEW_CUBE_SIZE * 0.41, 0.004],
-          [-VIEWER_VIEW_CUBE_SIZE * 0.41, -VIEWER_VIEW_CUBE_SIZE * 0.41, 0.004]
-        ]}
-        color={hovered ? "#d9ecff" : VIEWER_VIEW_CUBE_EDGE_COLOR}
-        lineWidth={hovered ? 2 : 1}
-        transparent
-        opacity={hovered ? 0.9 : 0.42}
-        depthTest={false}
-      />
-      <group ref={labelRef} position={[0, 0, 0.036]} renderOrder={4}>
+      <group ref={labelRef} position={[0, 0, 0.075]} renderOrder={4}>
         <GizmoTextLabel
           color={hovered ? "#ffffff" : "#e4eef8"}
           fontSize={VIEWER_VIEW_CUBE_FACE_LABEL_FONT_SIZE}
@@ -851,9 +845,10 @@ function GizmoTextLabel({
       color={color}
       fillOpacity={opacity}
       fontSize={fontSize}
+      frustumCulled={false}
       letterSpacing={0}
       material-depthTest={depthTest}
-      material-side={THREE.FrontSide}
+      material-side={THREE.DoubleSide}
       material-toneMapped={false}
       outlineColor="#07111d"
       outlineOpacity={opacity}
