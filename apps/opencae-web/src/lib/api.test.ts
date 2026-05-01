@@ -371,6 +371,35 @@ describe("api", () => {
     expect(results.summary.maxStress).toBeGreaterThan(0);
   });
 
+  test("routes the Beam Demo local static solve to dense Euler-Bernoulli result fields", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: "Study not found" }), {
+      status: 404,
+      headers: { "content-type": "application/json" }
+    })));
+    const sample = await loadSampleProject("plate");
+    const beamStudy = sample.project.studies[0]!;
+
+    const response = await runSimulation(beamStudy.id, beamStudy, sample.displayModel);
+    const completed = await new Promise<RunEvent>((resolve) => {
+      const source = subscribeToRun(response.run.id, (event) => {
+        if (event.type === "complete") {
+          source.close();
+          resolve(event);
+        }
+      });
+    });
+    const results = await getResults(response.run.id);
+    const displacement = results.fields.find((field) => field.type === "displacement");
+    const stress = results.fields.find((field) => field.type === "stress");
+
+    expect(completed.progress).toBe(100);
+    expect((response.run as { solverBackend?: string }).solverBackend).toBe("local-beam-demo-euler-bernoulli");
+    expect(displacement?.location).toBe("node");
+    expect(displacement?.samples?.length).toBeGreaterThan(64);
+    expect(displacement?.samples?.every((sample) => sample.vector?.every(Number.isFinite))).toBe(true);
+    expect(stress?.samples?.length).toBeGreaterThan(64);
+  });
+
   test("runs Cloud FEA through cloud orchestration endpoints", async () => {
     const cloudStudy = {
       ...study,
@@ -445,7 +474,7 @@ describe("api", () => {
     const response = await runSimulation("study-1", cloudStudy);
 
     expect(response.run.id).toContain("run-local-");
-    expect((response.run as { solverBackend?: string }).solverBackend).toBe("local-detailed-superposition");
+    expect((response.run as { solverBackend?: string }).solverBackend).toBe("local-heuristic-surface");
     expect(response.message).toContain("Cloud FEA unavailable");
     expect(response.message).toContain("running locally");
   });

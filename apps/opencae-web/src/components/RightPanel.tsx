@@ -995,7 +995,7 @@ function RunPanel({ study, runProgress, runTiming, onRunSimulation, onCancelSimu
       )}
       <SectionTitle helpId="solver">Solver</SectionTitle>
       <div className="summary-box">
-        <Info label="Backend" value={effectiveRuntimeBackend === "cloudflare_fea" ? "cloudflare-fea-calculix" : study.type === "dynamic_structural" ? "local-dynamic-newmark" : "local-detailed-superposition"} />
+        <Info label="Backend" value={effectiveRuntimeBackend === "cloudflare_fea" ? "cloudflare-fea-calculix" : study.type === "dynamic_structural" ? "local-dynamic-newmark" : "local-heuristic-surface"} />
         <Info label="Version" value="0.1.0" />
         <Info label="Runner" value={effectiveRuntimeBackend === "cloudflare_fea" ? "cloudflare-queue-container" : "local-in-memory"} />
       </div>
