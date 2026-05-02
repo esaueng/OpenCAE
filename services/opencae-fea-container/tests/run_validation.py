@@ -8,6 +8,7 @@ This suite runs without Cloudflare. CalculiX-backed checks are skipped when
 from __future__ import annotations
 
 import math
+import base64
 import shutil
 import sys
 import tempfile
@@ -15,6 +16,7 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+FIXTURES = Path(__file__).resolve().parent / "fixtures"
 sys.path.insert(0, str(ROOT))
 
 import runner  # noqa: E402
@@ -131,6 +133,44 @@ class ValidationSuite(unittest.TestCase):
         with self.assertRaises(AssertionError):
             assert_no_generated_fallback(bad_result)
 
+    def test_uploaded_stl_fixture_requires_gmsh_and_never_falls_back_to_block(self):
+        payload = uploaded_block_payload("uploaded-stl", ALUMINUM_6061, [0, 0, -1], 1.0, "standard")
+
+        if shutil.which("gmsh"):
+            self.skipTest("Gmsh is installed; missing-gmsh safe-failure check is not applicable")
+
+        with self.assertRaises(runner.UserFacingSolveError) as context:
+            runner.solve(payload)
+
+        self.assertEqual(context.exception.status, 503)
+        self.assertIn("Gmsh executable unavailable", str(context.exception))
+        artifacts = context.exception.payload["artifacts"]
+        self.assertEqual(artifacts["solverResultParser"], "gmsh-unavailable")
+        self.assertEqual(artifacts["meshSummary"]["source"], "gmsh_uploaded_geometry")
+        self.assertNotIn("*ELEMENT, TYPE=C3D8", artifacts["inputDeck"])
+
+    def test_uploaded_geometry_face_mapping_fixture_and_ambiguous_mapping(self):
+        parsed = runner.parse_payload(uploaded_block_payload("uploaded-map", ALUMINUM_6061, [0, 0, -1], 1.0, "standard"))
+        mesh = runner.parse_gmsh_msh(gmsh_msh_fixture())
+        boundaries = runner.select_uploaded_geometry_boundaries(parsed, mesh)
+
+        self.assertEqual(boundaries["fixedFacetIds"], [101])
+        self.assertEqual(boundaries["loadFacetIds"], [102])
+        self.assertTrue(set(boundaries["fixedNodeIds"]).isdisjoint(boundaries["loadNodeIds"]))
+
+        ambiguous_mesh = runner.parse_gmsh_msh(gmsh_msh_fixture(duplicate_load_face=True))
+        with self.assertRaises(runner.UserFacingSolveError):
+            runner.select_uploaded_geometry_boundaries(parsed, ambiguous_mesh)
+
+    @unittest.skipUnless(shutil.which("gmsh") and shutil.which("ccx"), "Gmsh and CalculiX ccx executables are required")
+    def test_uploaded_stl_block_with_gmsh_and_ccx_matches_cantilever_order_of_magnitude(self):
+        result = runner.solve(uploaded_block_payload("uploaded-stl", ALUMINUM_6061, [0, 0, -1], 1.0, "standard"))
+        self.assertCloudResultIsParsed(result, "gmsh_uploaded_geometry")
+        self.assertGreaterEqual(result["summary"]["maxStress"], 0.05)
+        self.assertLess(result["summary"]["maxStress"], 1.0)
+        self.assertGreaterEqual(result["summary"]["safetyFactor"], 500)
+        self.assertAlmostEqual(result["summary"]["reactionForce"], 1.0, delta=0.05)
+
     @unittest.skipUnless(shutil.which("ccx"), "CalculiX ccx executable is not installed")
     def test_cantilever_benchmark_with_ccx(self):
         result = runner.solve(block_payload("cantilever", ALUMINUM_6061, [0, 0, -1], 1.0, "standard"))
@@ -193,12 +233,12 @@ class ValidationSuite(unittest.TestCase):
         for actual, target in zip(summed, expected):
             self.assertAlmostEqual(actual, target, places=10)
 
-    def assertCloudResultIsParsed(self, result):
+    def assertCloudResultIsParsed(self, result, mesh_source="structured_block"):
         assert_no_generated_fallback(result)
         provenance = result["summary"]["provenance"]
         self.assertEqual(provenance["kind"], "calculix_fea")
         self.assertIn(provenance["resultSource"], {"parsed_dat", "parsed_frd_dat"})
-        self.assertEqual(provenance["meshSource"], "structured_block")
+        self.assertEqual(provenance["meshSource"], mesh_source)
         self.assertEqual(result["artifacts"]["solverResultParser"], "parsed-calculix-dat")
 
 
@@ -235,6 +275,16 @@ def block_payload(case_name, material, direction, force_n, fidelity):
             "solverSettings": {},
         },
     }
+
+
+def uploaded_block_payload(case_name, material, direction, force_n, fidelity):
+    payload = block_payload(case_name, material, direction, force_n, fidelity)
+    payload["geometry"] = {
+        "format": "stl",
+        "filename": "block_100x30x10_ascii.stl",
+        "contentBase64": base64.b64encode((FIXTURES / "block_100x30x10_ascii.stl").read_bytes()).decode("ascii"),
+    }
+    return payload
 
 
 def selection(selection_id, face_id):
@@ -284,6 +334,31 @@ def dat_fixture():
 
        1   2.000000E-01   0.000000E+00   0.000000E+00   0.000000E+00   0.000000E+00   0.000000E+00
 """
+
+
+def gmsh_msh_fixture(duplicate_load_face=False):
+    extra = "\n103 2 2 0 6 2 3 6" if duplicate_load_face else ""
+    return f"""$MeshFormat
+2.2 0 8
+$EndMeshFormat
+$Nodes
+8
+1 0 0 0
+2 100 0 0
+3 100 30 0
+4 0 30 0
+5 0 0 10
+6 100 0 10
+7 100 30 10
+8 0 30 10
+$EndNodes
+$Elements
+3{extra and " + 1"}
+101 2 2 0 1 1 5 4
+102 2 2 0 2 2 3 6{extra}
+201 4 2 0 3 1 2 4 5
+$EndElements
+""".replace("3 + 1", "4")
 
 
 if __name__ == "__main__":

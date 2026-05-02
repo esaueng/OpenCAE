@@ -666,7 +666,7 @@ describe("Cloudflare FEA worker orchestration", () => {
     expect(await bucket.get("runs/run-cloud-dynamic-unframed/results.json")).toBeNull();
   });
 
-  test("container runner refuses unsupported non-block payloads", () => {
+  test("container runner refuses incomplete uploaded-geometry payloads before meshing", () => {
     const staticResult = runContainerSolve({ runId: "run-static", solverMaterial: aluminumSolverMaterial(), geometry: { format: "stl", filename: "beam.stl", contentBase64: closedStlBase64() } });
     const dynamicResult = runContainerSolve({
       runId: "run-dynamic",
@@ -677,15 +677,16 @@ describe("Cloudflare FEA worker orchestration", () => {
     });
 
     expect(staticResult).toMatchObject({ status: 422 });
-    expect(staticResult.error).toContain("block-like single-body");
+    expect(staticResult.error).toContain("requires a force load");
     expect(dynamicResult).toMatchObject({ status: 422 });
     expect(dynamicResult.error).toContain("static stress studies only");
   });
 
-  test("container runner rejects arbitrary geometry without block dimensions", () => {
-    const result = runContainerSolve({ runId: "run-invalid", solverMaterial: aluminumSolverMaterial(), geometry: { format: "stl", filename: "open.stl", contentBase64: btoa("solid\nendsolid\n") } });
+  test("container runner rejects uploaded geometry without gmsh instead of using block fallback", () => {
+    const result = runContainerSolve(uploadedGeometryContainerPayload("run-uploaded-no-gmsh"));
 
-    expect(result.error).toContain("block-like single-body");
+    expect(result).toMatchObject({ status: 503 });
+    expect(result.error).toContain("Gmsh executable unavailable");
   });
 });
 
@@ -928,6 +929,34 @@ function aluminumSolverMaterial() {
     poissonRatio: 0.33,
     densityTonnePerMm3: 2.7e-9,
     yieldMpa: 276
+  };
+}
+
+function uploadedGeometryContainerPayload(runId: string) {
+  return {
+    runId,
+    solverMaterial: aluminumSolverMaterial(),
+    displayModel: {
+      id: "display-uploaded",
+      bodyCount: 1,
+      dimensions: { x: 100, y: 30, z: 10, units: "mm" },
+      faces: [
+        { id: "face-fixed", label: "Fixed", color: "#666", center: [0, 15, 5], normal: [-1, 0, 0], stressValue: 0 },
+        { id: "face-load", label: "Load", color: "#666", center: [100, 15, 5], normal: [1, 0, 0], stressValue: 0 }
+      ]
+    },
+    study: {
+      id: "study-uploaded",
+      type: "static_stress",
+      namedSelections: [
+        { id: "fixed-selection", name: "Fixed", entityType: "face", geometryRefs: [{ bodyId: "body", entityType: "face", entityId: "face-fixed", label: "Fixed" }], fingerprint: "fixed" },
+        { id: "load-selection", name: "Load", entityType: "face", geometryRefs: [{ bodyId: "body", entityType: "face", entityId: "face-load", label: "Load" }], fingerprint: "load" }
+      ],
+      constraints: [{ id: "constraint-fixed", type: "fixed", selectionRef: "fixed-selection", parameters: {}, status: "complete" }],
+      loads: [{ id: "load-end", type: "force", selectionRef: "load-selection", parameters: { value: 1, direction: [0, 0, -1] }, status: "complete" }],
+      solverSettings: {}
+    },
+    geometry: { format: "stl", filename: "beam.stl", contentBase64: closedStlBase64() }
   };
 }
 
