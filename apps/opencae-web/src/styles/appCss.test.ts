@@ -55,7 +55,7 @@ describe("app CSS", () => {
     expect(analysisLegend).toMatch(/min-height:\s*148px/);
     expect(analysisLegend).toMatch(/max-width:\s*calc\(100%\s*-\s*24px\)/);
     expect(analysisLegend).toMatch(/max-height:\s*calc\(100%\s*-\s*24px\)/);
-    expect(analysisLegend).toMatch(/overflow:\s*auto/);
+    expect(analysisLegend).toMatch(/overflow:\s*hidden/);
     expect(analysisLegend).toMatch(/resize:\s*none/);
     expect(analysisLegend).toMatch(/pointer-events:\s*auto/);
     expect(analysisLegend).toMatch(/align-content:\s*start/);

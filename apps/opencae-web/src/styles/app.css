@@ -1430,7 +1430,7 @@ img {
   font-family: var(--font-mono);
   font-size: calc(var(--fs-mini) * var(--analysis-legend-scale, 1));
   backdrop-filter: blur(8px);
-  overflow: auto;
+  overflow: hidden;
   resize: none;
   pointer-events: auto;
 }
