@@ -506,7 +506,75 @@ describe("api", () => {
       headers: { "content-type": "application/json" }
     })));
 
-    await expect(runSimulation("study-1", cloudStudy)).rejects.toThrow("Cloud FEA endpoint is unavailable in this local dev server: POST /api/cloud-fea/runs failed with HTTP 404: Route POST:/api/cloud-fea/runs not found");
+    let thrown: Error | undefined;
+    try {
+      await runSimulation("study-1", cloudStudy);
+    } catch (error) {
+      thrown = error as Error;
+    }
+
+    expect(thrown?.message).toContain("Cloud FEA endpoint is unavailable in this local dev server: POST /api/cloud-fea/runs failed with HTTP 404: Route POST:/api/cloud-fea/runs not found");
+    expect(thrown?.message).toContain("local API bridge exposes /api/cloud-fea/runs");
+  });
+
+  test("explains browser Failed to fetch errors for local Cloud FEA run creation", async () => {
+    const cloudStudy = {
+      ...study,
+      materialAssignments: [{ id: "assign-1", materialId: "mat-aluminum-6061", selectionRef: "selection-body-1", status: "complete" }],
+      constraints: [{ id: "constraint-1", type: "fixed", selectionRef: "selection-face-1", parameters: {}, status: "complete" }],
+      loads: [{ id: "load-1", type: "force", selectionRef: "selection-face-1", parameters: { value: 500, units: "N", direction: [0, -1, 0] }, status: "complete" }],
+      meshSettings: { preset: "ultra", status: "complete", meshRef: "project-1/mesh/mesh-summary.json" },
+      solverSettings: { backend: "cloudflare_fea", fidelity: "ultra" }
+    } as Study;
+    vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new TypeError("Failed to fetch"))));
+
+    let thrown: Error | undefined;
+    try {
+      await runSimulation("study-1", cloudStudy);
+    } catch (error) {
+      thrown = error as Error;
+    }
+
+    expect(thrown?.message).toContain("Cloud FEA local API/proxy is unreachable");
+    expect(thrown?.message).toContain("root pnpm dev");
+    expect(thrown?.message).toContain("OPCAE_FEA_RUNNER_URL");
+  });
+
+  test("uses Cloud FEA event and result endpoints for local cloud run ids", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/cloud-fea/runs/run-cloud-local-1/events") {
+        return new Response(JSON.stringify({
+          events: [{ runId: "run-cloud-local-1", type: "complete", progress: 100, message: "Local Cloud FEA complete.", timestamp: "2026-04-29T12:00:01.000Z" }]
+        }), { headers: { "content-type": "application/json" } });
+      }
+      if (url === "/api/cloud-fea/runs/run-cloud-local-1/results") {
+        return new Response(JSON.stringify({
+          summary: {
+            maxStress: 0.18,
+            maxStressUnits: "MPa",
+            maxDisplacement: 0.0019,
+            maxDisplacementUnits: "mm",
+            safetyFactor: 1533,
+            reactionForce: 1,
+            reactionForceUnits: "N"
+          },
+          fields: []
+        }), { headers: { "content-type": "application/json" } });
+      }
+      return new Response("unexpected", { status: 500 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const seen: RunEvent[] = [];
+
+    const source = subscribeToRun("run-cloud-local-1", (event) => seen.push(event));
+    await vi.waitFor(() => expect(seen.some((event) => event.type === "complete")).toBe(true));
+    source.close();
+    const results = await getResults("run-cloud-local-1");
+
+    expect(results.summary.maxStress).toBe(0.18);
+    expect(fetchMock).toHaveBeenCalledWith("/api/cloud-fea/runs/run-cloud-local-1/events");
+    expect(fetchMock).toHaveBeenCalledWith("/api/cloud-fea/runs/run-cloud-local-1/results");
   });
 
   test("reports Cloud FEA event polling failures with the event endpoint", async () => {

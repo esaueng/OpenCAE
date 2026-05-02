@@ -571,8 +571,11 @@ async function readJson<T>(response: Response, endpoint = response.url || "reque
 
 function cloudFeaRunError(error: unknown): Error {
   const message = error instanceof Error ? error.message : String(error);
+  if (/failed to fetch|networkerror|load failed|fetch failed/i.test(message)) {
+    return new Error(`Cloud FEA local API/proxy is unreachable: ${message}. Start root pnpm dev so the Vite /api proxy can reach the local API on port 4317, and run the CalculiX FEA runner at OPCAE_FEA_RUNNER_URL (default http://localhost:8080/solve).`);
+  }
   if (/route post:\/api\/cloud-fea\/runs not found|unexpected token '<'|not found/i.test(message)) {
-    return new Error(`Cloud FEA endpoint is unavailable in this local dev server: ${message}. Start the Cloudflare Worker/containers deployment, or switch the backend to Detailed local.`);
+    return new Error(`Cloud FEA endpoint is unavailable in this local dev server: ${message}. Start root pnpm dev so the local API bridge exposes /api/cloud-fea/runs, or start the Cloudflare Worker/containers deployment.`);
   }
   return error instanceof Error ? error : new Error(message);
 }

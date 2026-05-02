@@ -42,6 +42,9 @@ importers:
       '@opencae/jobs':
         specifier: workspace:*
         version: link:../../libs/opencae-jobs
+      '@opencae/materials':
+        specifier: workspace:*
+        version: link:../../libs/opencae-materials
       '@opencae/mesh-service':
         specifier: workspace:*
         version: link:../../services/opencae-mesh-service
