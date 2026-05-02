@@ -1,6 +1,9 @@
 /// <reference types="./worker-configuration" />
 
 import { Container } from "@cloudflare/containers";
+import { effectiveMaterialProperties, starterMaterials } from "@opencae/materials";
+import type { Material, Study } from "@opencae/schema";
+import { inferCriticalPrintAxis, type PrintCriticalFace } from "@opencae/study-core";
 
 type ContainerFetchBinding = {
   fetch(request: Request): Promise<Response>;
@@ -32,6 +35,7 @@ const jsonHeaders = {
 const cloudFeaContainersDisabledMessage = "Cloud FEA containers are not enabled for this deployment. Deploy with pnpm deploy:cloudflare:containers using a Cloudflare token with Containers write access, or switch the study backend to Detailed local.";
 const generatedFallbackResultMessage = "Cloud FEA returned generated fallback data instead of parsed CalculiX results; refusing to publish fake solver results.";
 const invalidCloudFeaProvenanceMessage = "Cloud FEA result provenance must identify parsed CalculiX FEA results.";
+const missingCloudFeaMaterialMessage = "Cloud FEA requires an assigned material before a CalculiX run can be queued.";
 const placeholderResultMarkers = [
   "generated-cantilever-fallback",
   "cloud-fea-hard-coded-fallback",
@@ -111,6 +115,15 @@ async function createCloudFeaRun(request: Request, env: RuntimeEnv, ctx?: Execut
     return Response.json({ error: cloudFeaContainersDisabledMessage }, { status: 503, headers: jsonHeaders });
   }
   const body = await request.json().catch(() => ({})) as Record<string, unknown>;
+  const studyArtifact = isRecord(body.study) ? body.study : undefined;
+  const displayModelArtifact = isRecord(body.displayModel) ? body.displayModel : undefined;
+  let solverMaterial: SolverMaterialPayload;
+  try {
+    solverMaterial = solverMaterialForCloudFea(studyArtifact, displayModelArtifact);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : missingCloudFeaMaterialMessage;
+    return Response.json({ error: message }, { status: 422, headers: jsonHeaders });
+  }
   const runId = `run-cloud-${crypto.randomUUID()}`;
   const now = new Date().toISOString();
   const run = {
@@ -131,8 +144,9 @@ async function createCloudFeaRun(request: Request, env: RuntimeEnv, ctx?: Execut
     backend: "cloudflare_fea",
     solver: "calculix",
     analysisType: analysisTypeFromBody(body),
-    study: isRecord(body.study) ? body.study : undefined,
-    displayModel: isRecord(body.displayModel) ? body.displayModel : undefined,
+    study: studyArtifact,
+    displayModel: displayModelArtifact,
+    solverMaterial,
     geometry: isRecord(body.geometry) ? body.geometry : undefined,
     dynamicSettings: isRecord(body.dynamicSettings) ? body.dynamicSettings : undefined,
     createdAt: now
@@ -461,6 +475,88 @@ function logWorkerEvent(event: string, details: Record<string, unknown> = {}): v
 function analysisTypeFromBody(body: Record<string, unknown>): string | undefined {
   if (isRecord(body.study) && typeof body.study.type === "string") return body.study.type;
   return undefined;
+}
+
+interface SolverMaterialPayload {
+  id: string;
+  name: string;
+  category?: string;
+  youngsModulusMpa: number;
+  poissonRatio: number;
+  densityTonnePerMm3: number;
+  yieldMpa: number;
+  original: {
+    youngsModulus: number;
+    poissonRatio: number;
+    densityKgM3: number;
+    yieldStrength: number;
+    effectiveYoungsModulus: number;
+    effectiveDensityKgM3: number;
+    effectiveYieldStrength: number;
+  };
+}
+
+function solverMaterialForCloudFea(study: Record<string, unknown> | undefined, displayModel: Record<string, unknown> | undefined): SolverMaterialPayload {
+  const assignment = firstMaterialAssignment(study);
+  const materialId = typeof assignment?.materialId === "string" ? assignment.materialId : "";
+  const material = starterMaterials.find((candidate) => candidate.id === materialId);
+  if (!material) throw new Error(missingCloudFeaMaterialMessage);
+  const parameters = isRecord(assignment?.parameters) ? assignment.parameters : {};
+  const criticalLayerAxis = inferCriticalPrintAxis(study as Study, printCriticalFaces(displayModel));
+  const effective = effectiveMaterialProperties(material, parameters, { criticalLayerAxis });
+  return solverMaterialPayload(material, effective);
+}
+
+function solverMaterialPayload(material: Material, effective: Material): SolverMaterialPayload {
+  return {
+    id: material.id,
+    name: material.name,
+    ...(typeof material.category === "string" ? { category: material.category } : {}),
+    youngsModulusMpa: effective.youngsModulus / 1_000_000,
+    poissonRatio: effective.poissonRatio,
+    densityTonnePerMm3: finitePrecision(effective.density * 1e-12),
+    yieldMpa: effective.yieldStrength / 1_000_000,
+    original: {
+      youngsModulus: material.youngsModulus,
+      poissonRatio: material.poissonRatio,
+      densityKgM3: material.density,
+      yieldStrength: material.yieldStrength,
+      effectiveYoungsModulus: effective.youngsModulus,
+      effectiveDensityKgM3: effective.density,
+      effectiveYieldStrength: effective.yieldStrength
+    }
+  };
+}
+
+function firstMaterialAssignment(study: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+  const assignments = Array.isArray(study?.materialAssignments) ? study.materialAssignments : [];
+  return assignments.find(isRecord);
+}
+
+function printCriticalFaces(displayModel: Record<string, unknown> | undefined): PrintCriticalFace[] {
+  const faces = Array.isArray(displayModel?.faces) ? displayModel.faces : [];
+  return faces.flatMap((face): PrintCriticalFace[] => {
+    if (!isRecord(face)) return [];
+    const center = vector3(face.center);
+    if (!center) return [];
+    return [{
+      entityId: typeof face.id === "string" ? face.id : undefined,
+      selectionId: typeof face.selectionId === "string" ? face.selectionId : undefined,
+      center
+    }];
+  });
+}
+
+function vector3(value: unknown): [number, number, number] | undefined {
+  return Array.isArray(value)
+    && value.length === 3
+    && value.every((item) => typeof item === "number" && Number.isFinite(item))
+    ? [value[0]!, value[1]!, value[2]!]
+    : undefined;
+}
+
+function finitePrecision(value: number): number {
+  return Number(value.toPrecision(12));
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
