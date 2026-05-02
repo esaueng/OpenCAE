@@ -81,9 +81,15 @@ describe("App workflow layout", () => {
 
   test("surfaces Cloud FEA run creation failures instead of leaving the run button inert", () => {
     expect(appSource).toContain('pushMessage("Starting simulation run.");');
+    expect(appSource).toContain("runDiagnosticsMessage(study)");
+    expect(appSource).toContain('pushMessage("Cloud FEA request started: POST /api/cloud-fea/runs.");');
     expect(appSource).toContain("try {\n      response = await runSimulation(study.id, study, displayModel ?? undefined);");
     expect(appSource).toContain("setRunProgress(0);");
-    expect(appSource).toContain('pushMessage(error instanceof Error ? error.message : "Could not start simulation.");');
+    expect(appSource).toContain('pushMessage(`Cloud FEA run creation failed: ${errorMessage(error, "Could not start simulation.")}`);');
+    expect(appSource).toContain("Cloud FEA run created: runId=");
+    expect(appSource).toContain("Cloud FEA event polling started: GET");
+    expect(appSource).toContain("Cloud FEA results fetch started: GET");
+    expect(appSource).toContain('pushMessage(`Cloud FEA results fetch failed: ${errorMessage(error, "Could not load simulation results.")}`);');
   });
 
   test("enables deformed result shape when dynamic playback starts", () => {

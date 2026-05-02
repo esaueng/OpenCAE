@@ -3056,6 +3056,50 @@ button:disabled {
   white-space: pre-wrap;
 }
 
+.logs-content {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.logs-content pre {
+  height: auto;
+  min-height: 0;
+  padding-top: 12px;
+}
+
+.logs-drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: 12px 12px 10px;
+  color: var(--color-text);
+  border-bottom: var(--border-thin);
+}
+
+.logs-drawer-header span {
+  font-weight: var(--fw-semibold);
+}
+
+.log-copy-button {
+  min-height: 26px;
+  padding: 0 10px;
+  color: var(--color-text-muted);
+  background: rgba(11, 15, 20, 0.32);
+  border: var(--border-thin);
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+}
+
+.log-copy-button:hover,
+.log-copy-button:focus-visible {
+  color: var(--color-text);
+  background: var(--color-surface-2);
+  border-color: var(--color-accent-border);
+  outline: none;
+}
+
 .tips-content {
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);

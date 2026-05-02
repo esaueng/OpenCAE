@@ -8,7 +8,8 @@ import {
   parseAutosavedWorkspacePayload,
   readAutosavedWorkspace,
   scheduleAutosavedUiSnapshotWrite,
-  scheduleAutosavedWorkspaceWrite
+  scheduleAutosavedWorkspaceWrite,
+  WORKSPACE_LOG_LIMIT
 } from "./appPersistence";
 import type { WorkspaceUiSnapshot } from "./appPersistence";
 
@@ -230,6 +231,25 @@ describe("app persistence", () => {
     expect(parseAutosavedWorkspacePayload(JSON.stringify(snapshot))?.ui.selectedPayloadObject).toBeNull();
     expect(parseAutosavedWorkspacePayload("{bad json")).toBeNull();
     expect(parseAutosavedWorkspacePayload(JSON.stringify({ ...snapshot, version: 99 }))).toBeNull();
+  });
+
+  test("preserves enough logs to diagnose Cloud FEA failures after reload", () => {
+    const logs = Array.from({ length: 120 }, (_, index) => `Cloud FEA diagnostic ${index}`);
+    const snapshot = buildAutosavedWorkspace({
+      project,
+      displayModel,
+      savedAt: "2026-04-24T13:00:00.000Z",
+      ui: {
+        ...baseUi,
+        logs
+      }
+    });
+    const parsed = parseAutosavedWorkspacePayload(JSON.stringify(snapshot));
+
+    expect(WORKSPACE_LOG_LIMIT).toBe(100);
+    expect(parsed?.ui.logs).toHaveLength(100);
+    expect(parsed?.ui.logs[0]).toBe("Cloud FEA diagnostic 0");
+    expect(parsed?.ui.logs.at(-1)).toBe("Cloud FEA diagnostic 99");
   });
 
   test("does not restore or persist in-progress simulation state after reload", () => {

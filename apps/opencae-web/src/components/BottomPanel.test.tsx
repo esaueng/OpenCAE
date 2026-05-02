@@ -1,6 +1,10 @@
 import { renderToStaticMarkup } from "react-dom/server";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, test } from "vitest";
 import { BottomPanel, KeyboardShortcutGuide, WORKSPACE_SHORTCUT_GUIDE } from "./BottomPanel";
+
+const bottomPanelSource = readFileSync(resolve(__dirname, "BottomPanel.tsx"), "utf8");
 
 describe("BottomPanel", () => {
   test("keeps the GitHub link in the bottom status area", () => {
@@ -47,6 +51,29 @@ describe("BottomPanel", () => {
 
     expect(html).toContain('class="backend-pill"');
     expect(html).toContain(">cloud</span>");
+  });
+
+  test("shows Cloud FEA errors instead of collapsing them to ready", () => {
+    const html = renderToStaticMarkup(
+      <BottomPanel
+        status="Cloud FEA run creation failed: POST /api/cloud-fea/runs failed with HTTP 404."
+        logs={["Cloud FEA run creation failed: POST /api/cloud-fea/runs failed with HTTP 404."]}
+        projectName="Cantilever Demo"
+        studyName="Static Stress"
+        meshStatus="Ready"
+        solverStatus="Idle"
+        backendStatus="cloud"
+      />
+    );
+
+    expect(html).toContain(">Cloud FEA error</span>");
+    expect(html).not.toContain('class="status-state ready"');
+  });
+
+  test("defines a copy logs control inside the logs drawer", () => {
+    expect(bottomPanelSource).toContain('className="log-copy-button"');
+    expect(bottomPanelSource).toContain("Copy logs");
+    expect(bottomPanelSource).toContain("navigator.clipboard.writeText");
   });
 
   test("defines the active workspace shortcuts shown in the tips drawer", () => {
