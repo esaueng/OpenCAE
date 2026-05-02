@@ -51,6 +51,9 @@ describe("Cloudflare FEA worker orchestration", () => {
 
     expect(packageJson.scripts["deploy:cloudflare"]).toContain("--config wrangler.containers.jsonc");
     expect(packageJson.scripts["deploy:cloudflare"]).toContain("pnpm verify:cloudflare-config");
+    expect(packageJson.scripts["deploy:cloudflare"]).toContain("pnpm containers:build");
+    expect(packageJson.scripts["deploy:cloudflare"]).toContain("pnpm containers:push");
+    expect(packageJson.scripts["deploy:cloudflare"]).toContain("--containers-rollout=immediate");
     expect(packageJson.scripts["deploy:cloudflare:dry-run"]).toContain("--config wrangler.containers.jsonc");
     expect(packageJson.scripts["deploy:cloudflare:static"]).toContain("--config wrangler.jsonc");
     expect(packageJson.scripts["deploy:cloudflare:static:dry-run"]).toContain("--config wrangler.jsonc");
@@ -68,8 +71,7 @@ describe("Cloudflare FEA worker orchestration", () => {
     expect(localFirstConfig.routes ?? []).not.toContainEqual({ pattern: "cae.esau.app", custom_domain: true });
     expect(containerConfig.containers?.[0]).toMatchObject({
       class_name: "OpenCaeFeaContainer",
-      image: "./services/opencae-fea-container/Dockerfile",
-      image_build_context: "./services/opencae-fea-container"
+      image: "registry.cloudflare.com/747b74cbd7d019dd7aeecb2c24a4bf10/opencae/opencae-fea:0.1.0"
     });
     expect(containerConfig.durable_objects?.bindings).toContainEqual({ name: "FEA_CONTAINER", class_name: "OpenCaeFeaContainer" });
     expect(defaultConfig.containers).toBeUndefined();
