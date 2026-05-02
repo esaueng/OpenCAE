@@ -95,6 +95,7 @@ describe("Cloudflare FEA worker orchestration", () => {
     }), env);
     const body = await response.json() as { run: { id: string; status: string; solverBackend: string }; streamUrl: string };
     const stored = JSON.parse(await (await bucket.get(`runs/${body.run.id}/request.json`))!.text()) as Record<string, unknown>;
+    const events = JSON.parse(await (await bucket.get(`runs/${body.run.id}/events.json`))!.text()) as Array<{ message: string }>;
 
     expect(response.status).toBe(202);
     expect(body.run.status).toBe("queued");
@@ -125,6 +126,12 @@ describe("Cloudflare FEA worker orchestration", () => {
       geometry: { format: "stl", filename: "cantilever.stl" },
       dynamicSettings: { endTime: 0.5, timeStep: 0.005 }
     });
+    expect(events[0]?.message).toContain("analysis=dynamic_structural");
+    expect(events[0]?.message).toContain("fidelity=ultra");
+    expect(events[0]?.message).toContain("material=Aluminum 6061 (mat-aluminum-6061)");
+    expect(events[0]?.message).toContain("geometry=uploaded:stl:cantilever.stl");
+    expect(events[0]?.message).toContain("queue=enabled");
+    expect(events[0]?.message).toContain("container=bound");
     expect(send).toHaveBeenCalledWith({ runId: body.run.id });
   });
 
@@ -395,10 +402,13 @@ describe("Cloudflare FEA worker orchestration", () => {
 
     await worker.queue({ messages: [message] }, env);
     const results = JSON.parse(await (await bucket.get("runs/run-cloud-do/results.json"))!.text()) as { summary: { maxStress: number } };
+    const events = JSON.parse(await (await bucket.get("runs/run-cloud-do/events.json"))!.text()) as Array<{ message: string }>;
 
     expect(idFromName).toHaveBeenCalledWith("run-cloud-do");
     expect(get).toHaveBeenCalledWith("id:run-cloud-do");
     expect(startAndWaitForPorts).not.toHaveBeenCalled();
+    expect(events.some((event) => event.message === "Generating CalculiX static input deck.")).toBe(true);
+    expect(events.some((event) => event.message === "Generating CalculiX transient input deck.")).toBe(false);
     expect(results.summary.maxStress).toBe(431400000);
   });
 
@@ -419,6 +429,7 @@ describe("Cloudflare FEA worker orchestration", () => {
           artifacts: {
             inputDeck: "*HEADING\nfailed deck\n",
             solverLog: "solver failed before results",
+            solverResultParser: "missing-results",
             meshSummary: { nodes: 2, elements: 0, source: "structured_block" }
           }
         }, { status: 422 }))
@@ -431,7 +442,11 @@ describe("Cloudflare FEA worker orchestration", () => {
 
     expect(message.ack).toHaveBeenCalled();
     expect(message.retry).not.toHaveBeenCalled();
-    expect(events.at(-1)).toMatchObject({ type: "error", message: "Meshing failed: STL is not watertight." });
+    expect(events.at(-1)?.type).toBe("error");
+    expect(events.at(-1)?.message).toContain("Meshing failed: STL is not watertight.");
+    expect(events.at(-1)?.message).toContain("container HTTP 422");
+    expect(events.at(-1)?.message).toContain("parser=missing-results");
+    expect(events.at(-1)?.message).toContain("artifacts=inputDeck, solverLog, solverResultParser, meshSummary");
     expect(await (await bucket.get("runs/run-cloud-fail/input.inp"))!.text()).toContain("failed deck");
     expect(await (await bucket.get("runs/run-cloud-fail/solver.log"))!.text()).toContain("solver failed");
     expect(await (await bucket.get("runs/run-cloud-fail/mesh.json"))!.text()).toContain("structured_block");

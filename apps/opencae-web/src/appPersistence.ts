@@ -15,6 +15,7 @@ import type { SampleAnalysisType, SampleModelId } from "./lib/api";
 
 export const AUTOSAVE_STORAGE_KEY = "opencae.workspace.autosave.v1";
 export const AUTOSAVE_UI_STORAGE_KEY = "opencae.workspace.ui.autosave.v1";
+export const WORKSPACE_LOG_LIMIT = 100;
 
 export type ThemeMode = "dark" | "light";
 
@@ -233,13 +234,14 @@ function parseUiSnapshot(value: unknown): WorkspaceUiSnapshot | null {
     undoStack: parseProjectArray(value.undoStack),
     redoStack: parseProjectArray(value.redoStack),
     status: typeof value.status === "string" ? value.status : "Ready",
-    logs: Array.isArray(value.logs) ? value.logs.filter((item): item is string => typeof item === "string").slice(0, 32) : []
+    logs: Array.isArray(value.logs) ? value.logs.filter((item): item is string => typeof item === "string").slice(0, WORKSPACE_LOG_LIMIT) : []
   });
 }
 
 function normalizeUiRunState(ui: WorkspaceUiSnapshot): WorkspaceUiSnapshot {
   const runProgress = ui.runProgress > 0 && ui.runProgress < 100 ? 0 : ui.runProgress;
-  return runProgress === ui.runProgress ? ui : { ...ui, runProgress };
+  const logs = ui.logs.slice(0, WORKSPACE_LOG_LIMIT);
+  return runProgress === ui.runProgress && logs.length === ui.logs.length ? ui : { ...ui, runProgress, logs };
 }
 
 function parseDisplayModel(value: unknown): DisplayModel | null {

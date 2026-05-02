@@ -506,7 +506,25 @@ describe("api", () => {
       headers: { "content-type": "application/json" }
     })));
 
-    await expect(runSimulation("study-1", cloudStudy)).rejects.toThrow("Cloud FEA endpoint is unavailable");
+    await expect(runSimulation("study-1", cloudStudy)).rejects.toThrow("Cloud FEA endpoint is unavailable in this local dev server: POST /api/cloud-fea/runs failed with HTTP 404: Route POST:/api/cloud-fea/runs not found");
+  });
+
+  test("reports Cloud FEA event polling failures with the event endpoint", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      error: "Cloud FEA is not configured for this deployment."
+    }), {
+      status: 503,
+      headers: { "content-type": "application/json" }
+    })));
+    const seen: RunEvent[] = [];
+
+    const source = subscribeToRun("run-cloud-events-fail", (event) => seen.push(event));
+    await vi.waitFor(() => expect(seen.some((event) => event.type === "error")).toBe(true));
+    source.close();
+
+    expect(seen.at(-1)?.message).toContain("Cloud FEA event polling failed");
+    expect(seen.at(-1)?.message).toContain("GET /api/cloud-fea/runs/run-cloud-events-fail/events");
+    expect(seen.at(-1)?.message).toContain("HTTP 503");
   });
 
   test("sends dynamic Cloud FEA studies through cloud orchestration endpoints", async () => {

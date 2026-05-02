@@ -26,7 +26,9 @@ export function BottomPanel({ status, logs, projectName, studyName, meshStatus, 
   const [drawerHeight, setDrawerHeight] = useState(320);
   const dragStart = useRef<{ y: number; height: number } | null>(null);
   const expanded = tab !== null;
-  const healthy = solverStatus === "Running" ? "running" : meshStatus === "Ready" ? "ready" : "warning";
+  const displayStatus = statusForDisplay(status, solverStatus);
+  const healthy = solverStatus === "Running" ? "running" : displayStatus === "Cloud FEA error" ? "warning" : meshStatus === "Ready" ? "ready" : "warning";
+  const formattedLogs = logs.map(formatLogEntry);
 
   function selectTab(nextTab: NonNullable<typeof tab>, event: MouseEvent<HTMLButtonElement>) {
     if (tab === nextTab) {
@@ -57,10 +59,15 @@ export function BottomPanel({ status, logs, projectName, studyName, meshStatus, 
     }
   }
 
+  function copyLogs() {
+    if (typeof navigator === "undefined" || !navigator.clipboard) return;
+    void navigator.clipboard.writeText(formattedLogs.join("\n"));
+  }
+
   return (
     <footer className={`bottom-panel ${expanded ? "expanded" : ""}`}>
       {expanded && tab === "logs" && (
-        <div className="bottom-content" style={{ height: drawerHeight }}>
+        <div className="bottom-content logs-content" style={{ height: drawerHeight }}>
           <button
             type="button"
             className="bottom-resize-handle"
@@ -71,12 +78,11 @@ export function BottomPanel({ status, logs, projectName, studyName, meshStatus, 
             onPointerUp={stopDrawerResize}
             onPointerCancel={stopDrawerResize}
           />
-          <pre>
-            {logs.map((entry, index) => {
-              const level = entry.toLowerCase().includes("complete") || entry.toLowerCase().includes("generated") ? "OK" : "INFO";
-              return `${new Date(Date.now() - index * 15000).toLocaleTimeString([], { hour12: false })} ${level.padEnd(4, " ")} ${entry}`;
-            }).join("\n")}
-          </pre>
+          <div className="logs-drawer-header">
+            <span>Run logs</span>
+            <button type="button" className="log-copy-button" onClick={copyLogs}>Copy logs</button>
+          </div>
+          <pre>{formattedLogs.join("\n")}</pre>
         </div>
       )}
       {expanded && tab === "tips" && (
@@ -122,7 +128,7 @@ export function BottomPanel({ status, logs, projectName, studyName, meshStatus, 
           ))}
         </div>
         <div className="status-groups" aria-label="Simulation status">
-          <span className={`status-state ${healthy}`}><i />{statusForDisplay(status, solverStatus)}</span>
+          <span className={`status-state ${healthy}`}><i />{displayStatus}</span>
           <span className="backend-pill"><span aria-hidden="true" />{backendStatus}</span>
           <span><b>project</b>{projectName}</span>
           <span><b>study</b>{studyName}</span>
@@ -185,7 +191,20 @@ export function KeyboardShortcutGuide() {
 }
 
 function statusForDisplay(status: string, solverStatus: string) {
+  const normalized = status.toLowerCase();
+  if (normalized.includes("cloud fea") && /(error|fail|failed|unavailable|not configured|not enabled|not ready)/.test(normalized)) return "Cloud FEA error";
   if (solverStatus === "Running") return "Simulating";
   if (status.toLowerCase().includes("complete")) return "Results ready";
+  if (normalized.includes("cloud fea")) return "Cloud FEA active";
   return "Ready";
+}
+
+function formatLogEntry(entry: string, index: number) {
+  const normalized = entry.toLowerCase();
+  const level = normalized.includes("complete") || normalized.includes("generated")
+    ? "OK"
+    : /(error|fail|failed|unavailable|not configured|not enabled)/.test(normalized)
+      ? "ERR"
+      : "INFO";
+  return `${new Date(Date.now() - index * 15000).toLocaleTimeString([], { hour12: false })} ${level.padEnd(4, " ")} ${entry}`;
 }

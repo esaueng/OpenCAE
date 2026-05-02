@@ -22,7 +22,7 @@ import {
 } from "./loadPreview";
 import { resetDisplayModelOrientation, type RotationAxis } from "./modelOrientation";
 import { buildLocalProjectFile, suggestedProjectFilename, type LocalResultBundle } from "./projectFile";
-import { buildAutosavedWorkspace, buildAutosavedWorkspaceUiSnapshot, readAutosavedWorkspace, scheduleAutosavedUiSnapshotWrite, scheduleAutosavedWorkspaceWrite, type ThemeMode } from "./appPersistence";
+import { buildAutosavedWorkspace, buildAutosavedWorkspaceUiSnapshot, readAutosavedWorkspace, scheduleAutosavedUiSnapshotWrite, scheduleAutosavedWorkspaceWrite, WORKSPACE_LOG_LIMIT, type ThemeMode } from "./appPersistence";
 import type { AutosavedWorkspace, WorkspaceUiSnapshot } from "./appPersistence";
 import {
   canNavigateToStep,
@@ -709,7 +709,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
 
   function pushMessage(message: string) {
     setStatus(message);
-    setLogs((current) => [message, ...current].slice(0, 32));
+    setLogs((current) => [message, ...current].slice(0, WORKSPACE_LOG_LIMIT));
   }
 
   async function updateStudy(action: Promise<{ study: Study; message: string }>, nextStep?: StepId) {
@@ -965,6 +965,9 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     }
     setResultPlaybackPlaying(false);
     pushMessage("Starting simulation run.");
+    pushMessage(runDiagnosticsMessage(study));
+    const cloudFeaRun = isCloudFeaStudy(study);
+    if (cloudFeaRun) pushMessage("Cloud FEA request started: POST /api/cloud-fea/runs.");
     let response: Awaited<ReturnType<typeof runSimulation>>;
     try {
       response = await runSimulation(study.id, study, displayModel ?? undefined);
@@ -973,7 +976,11 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       setRunProgress(0);
       setRunTiming(null);
       setResultPlaybackPlaying(false);
-      pushMessage(error instanceof Error ? error.message : "Could not start simulation.");
+      if (cloudFeaRun) {
+        pushMessage(`Cloud FEA run creation failed: ${errorMessage(error, "Could not start simulation.")}`);
+      } else {
+        pushMessage(errorMessage(error, "Could not start simulation."));
+      }
       return;
     }
     setActiveRunId(response.run.id);
@@ -981,7 +988,11 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     setProcessingRunId(response.run.id);
     setRunProgress(0);
     setRunTiming(null);
+    if (cloudFeaRun) {
+      pushMessage(`Cloud FEA run created: runId=${response.run.id}; events=${response.streamUrl}; results=${cloudFeaResultsEndpoint(response.run.id)}.`);
+    }
     pushMessage(response.message);
+    if (cloudFeaRun) pushMessage(`Cloud FEA event polling started: GET ${response.streamUrl}.`);
     const source = subscribeToRun(response.run.id, async (event: RunEvent) => {
       if (typeof event.progress === "number") setRunProgress(event.progress);
       setRunTiming(timingFromRunEvent(event));
@@ -993,6 +1004,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         setProcessingRunId(null);
         setRunTiming(null);
         try {
+          if (cloudFeaRun) pushMessage(`Cloud FEA results fetch started: GET ${cloudFeaResultsEndpoint(response.run.id)}.`);
           const results = await getResults(response.run.id);
           if (study.type === "dynamic_structural" && !hasDynamicPlaybackFrames(results.summary, results.fields)) {
             pushMessage("Cloud FEA dynamic results did not include animation frames.");
@@ -1009,11 +1021,16 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           setViewMode("results");
           setActiveStep("results");
         } catch (error) {
-          pushMessage(error instanceof Error ? error.message : "Could not load simulation results.");
+          if (cloudFeaRun) {
+            pushMessage(`Cloud FEA results fetch failed: ${errorMessage(error, "Could not load simulation results.")}`);
+          } else {
+            pushMessage(errorMessage(error, "Could not load simulation results."));
+          }
           setResultPlaybackPlaying(false);
           setRunProgress(0);
         }
       } else if (event.type === "cancelled" || event.type === "error") {
+        if (cloudFeaRun && event.type === "error") pushMessage(`Cloud FEA event stream ended with error: ${event.message}`);
         source.close();
         if (activeRunSourceRef.current === source) activeRunSourceRef.current = null;
         if (processingRunIdRef.current === response.run.id) processingRunIdRef.current = null;
@@ -1332,6 +1349,37 @@ function latestCompletedRunId(study: Study | null, activeRunId: string): string 
   if (study.runs.some((run) => run.id === activeRunId && (run.resultRef || run.status === "complete"))) return activeRunId;
   const completed = [...study.runs].reverse().find((run) => run.resultRef || run.status === "complete");
   return completed?.id ?? null;
+}
+
+function isCloudFeaStudy(study: Study): boolean {
+  return (study.solverSettings as { backend?: unknown }).backend === "cloudflare_fea";
+}
+
+function runDiagnosticsMessage(study: Study): string {
+  const backend = isCloudFeaStudy(study) ? "cloudflare_fea" : "local_detailed";
+  const fidelity = solverFidelityForDiagnostics(study);
+  return [
+    `Run diagnostics: backend=${backend}`,
+    `fidelity=${fidelity}`,
+    `analysis=${study.type}`,
+    `materials=${study.materialAssignments.length}`,
+    `supports=${study.constraints.length}`,
+    `loads=${study.loads.length}`,
+    `mesh=${study.meshSettings.status}`
+  ].join("; ") + ".";
+}
+
+function solverFidelityForDiagnostics(study: Study): SimulationFidelity {
+  const fidelity = (study.solverSettings as { fidelity?: unknown }).fidelity;
+  return fidelity === "detailed" || fidelity === "ultra" || fidelity === "standard" ? fidelity : "standard";
+}
+
+function cloudFeaResultsEndpoint(runId: string): string {
+  return `/api/cloud-fea/runs/${runId}/results`;
+}
+
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : typeof error === "string" ? error : fallback;
 }
 
 function timingFromRunEvent(event: RunEvent): RunTimingEstimate | null {

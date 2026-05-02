@@ -151,8 +151,12 @@ async function createCloudFeaRun(request: Request, env: RuntimeEnv, ctx?: Execut
     dynamicSettings: isRecord(body.dynamicSettings) ? body.dynamicSettings : undefined,
     createdAt: now
   };
+  const queuedMessage = cloudFeaQueueMessage(requestArtifact, solverMaterial, {
+    queueEnabled: Boolean(env.FEA_RUN_QUEUE),
+    containerBound: Boolean(env.FEA_CONTAINER)
+  });
   const queuedEvents = [
-    { runId, type: "state", progress: 0, message: "Cloud FEA run queued.", timestamp: now },
+    { runId, type: "state", progress: 0, message: queuedMessage, timestamp: now },
     { runId, type: "progress", progress: 5, message: "Waiting for CalculiX container worker.", timestamp: now }
   ];
   await env.FEA_ARTIFACTS.put(`runs/${runId}/request.json`, JSON.stringify(requestArtifact, null, 2));
@@ -196,10 +200,12 @@ async function runCloudFeaSolve(runId: string, env: RuntimeEnv): Promise<void> {
   const now = new Date().toISOString();
   const requestObject = await artifacts.get(`runs/${runId}/request.json`);
   const requestArtifact = requestObject ? JSON.parse(await requestObject.text()) as Record<string, unknown> : { runId };
+  const analysisType = analysisTypeFromRequest(requestArtifact);
+  const deckMessage = analysisType === "dynamic_structural" ? "Generating CalculiX transient input deck." : "Generating CalculiX static input deck.";
   const events = [
-    { runId, type: "state", progress: 0, message: "Cloud FEA run queued.", timestamp: now },
+    { runId, type: "state", progress: 0, message: `Cloud FEA worker started: ${requestDiagnosticSummary(requestArtifact)}.`, timestamp: now },
     { runId, type: "progress", progress: 15, message: "Meshing geometry for CalculiX.", timestamp: now },
-    { runId, type: "progress", progress: 30, message: "Generating CalculiX transient input deck.", timestamp: now },
+    { runId, type: "progress", progress: 30, message: deckMessage, timestamp: now },
     { runId, type: "progress", progress: 60, message: "Running CalculiX container solve.", timestamp: now },
     { runId, type: "progress", progress: 90, message: "Post-processing framed nodal and element output.", timestamp: now }
   ];
@@ -269,14 +275,18 @@ async function callFeaContainer(env: RuntimeEnv, payload: Record<string, unknown
 
 async function readContainerFailure(response: Response): Promise<{ message: string; artifacts: Record<string, unknown> }> {
   const payload = await response.json().catch(() => null) as { error?: unknown; message?: unknown; artifacts?: unknown } | null;
-  const message = typeof payload?.error === "string"
+  const baseMessage = typeof payload?.error === "string"
     ? payload.error
     : typeof payload?.message === "string"
       ? payload.message
       : `Cloud FEA container failed with HTTP ${response.status}.`;
+  const artifacts = isRecord(payload?.artifacts) ? payload.artifacts : {};
+  const artifactKeys = Object.keys(artifacts);
+  const parserStatus = typeof artifacts.solverResultParser === "string" ? artifacts.solverResultParser : "missing";
+  const message = `${baseMessage} (container HTTP ${response.status}; parser=${parserStatus}; artifacts=${artifactKeys.length ? artifactKeys.join(", ") : "none"}).`;
   return {
     message,
-    artifacts: isRecord(payload?.artifacts) ? payload.artifacts : {}
+    artifacts
   };
 }
 
@@ -481,6 +491,52 @@ async function putOptionalArtifact(artifacts: R2Bucket, key: string, value: unkn
 
 function logWorkerEvent(event: string, details: Record<string, unknown> = {}): void {
   console.log(JSON.stringify({ event, service: "opencae-web-worker", ...details }));
+}
+
+function cloudFeaQueueMessage(
+  requestArtifact: Record<string, unknown>,
+  solverMaterial: SolverMaterialPayload,
+  bindings: { queueEnabled: boolean; containerBound: boolean }
+): string {
+  return `Cloud FEA run queued: ${[
+    `analysis=${analysisTypeFromRequest(requestArtifact)}`,
+    `fidelity=${typeof requestArtifact.fidelity === "string" ? requestArtifact.fidelity : "standard"}`,
+    `material=${solverMaterial.name} (${solverMaterial.id})`,
+    `geometry=${geometrySourceLabel(requestArtifact)}`,
+    `queue=${bindings.queueEnabled ? "enabled" : "inline"}`,
+    `container=${bindings.containerBound ? "bound" : "missing"}`
+  ].join("; ")}.`;
+}
+
+function requestDiagnosticSummary(requestArtifact: Record<string, unknown>): string {
+  const material = isRecord(requestArtifact.solverMaterial)
+    ? `${typeof requestArtifact.solverMaterial.name === "string" ? requestArtifact.solverMaterial.name : "unknown"} (${typeof requestArtifact.solverMaterial.id === "string" ? requestArtifact.solverMaterial.id : "unknown"})`
+    : "unknown";
+  return [
+    `analysis=${analysisTypeFromRequest(requestArtifact)}`,
+    `fidelity=${typeof requestArtifact.fidelity === "string" ? requestArtifact.fidelity : "standard"}`,
+    `material=${material}`,
+    `geometry=${geometrySourceLabel(requestArtifact)}`
+  ].join("; ");
+}
+
+function analysisTypeFromRequest(requestArtifact: Record<string, unknown>): string {
+  if (typeof requestArtifact.analysisType === "string") return requestArtifact.analysisType;
+  if (isRecord(requestArtifact.study) && typeof requestArtifact.study.type === "string") return requestArtifact.study.type;
+  return "static_stress";
+}
+
+function geometrySourceLabel(requestArtifact: Record<string, unknown>): string {
+  const geometry = isRecord(requestArtifact.geometry) ? requestArtifact.geometry : undefined;
+  if (geometry) {
+    const format = typeof geometry.format === "string" ? geometry.format : "unknown";
+    const filename = typeof geometry.filename === "string" ? geometry.filename : "unnamed";
+    return `uploaded:${format}:${filename}`;
+  }
+  const displayModel = isRecord(requestArtifact.displayModel) ? requestArtifact.displayModel : undefined;
+  if (isRecord(displayModel?.dimensions)) return "display-model-dimensions";
+  if (Array.isArray(displayModel?.faces) && displayModel.faces.length > 0) return "display-model-faces";
+  return "unknown";
 }
 
 function analysisTypeFromBody(body: Record<string, unknown>): string | undefined {
