@@ -250,19 +250,21 @@ describe("CadViewer result coloring", () => {
   test("resizes the result legend from a top-right handle", () => {
     expect(cadViewerSource).toContain("analysis-legend-resize");
     expect(cadViewerSource).toContain("Resize results legend");
+    expect(cadViewerSource).toContain("const RESULT_LEGEND_MIN_HEIGHT = 154");
+    expect(cadViewerSource).toContain("const RESULT_LEGEND_DEFAULT_HEIGHT = 154");
 
     expect(resultLegendResizeDimensions({
       currentClientX: 520,
       currentClientY: 120,
       maxHeight: 576,
       maxWidth: 976,
-      minHeight: 148,
+      minHeight: 154,
       minWidth: 280,
       startClientX: 460,
       startClientY: 180,
-      startHeight: 148,
+      startHeight: 154,
       startWidth: 360
-    })).toEqual({ width: 420, height: 208 });
+    })).toEqual({ width: 420, height: 214 });
   });
 
   test("clamps result legend resize to viewport-safe dimensions", () => {
@@ -271,19 +273,19 @@ describe("CadViewer result coloring", () => {
       currentClientY: -800,
       maxHeight: 576,
       maxWidth: 976,
-      minHeight: 148,
+      minHeight: 154,
       minWidth: 280,
       startClientX: 460,
       startClientY: 180,
-      startHeight: 148,
+      startHeight: 154,
       startWidth: 360
     })).toEqual({ width: 280, height: 576 });
   });
 
   test("scales result legend content as the legend is resized", () => {
-    expect(resultLegendContentScale({ width: 360, height: 148 })).toBe(1);
-    expect(resultLegendContentScale({ width: 720, height: 296 })).toBe(1.68);
-    expect(resultLegendContentScale({ width: 280, height: 148 })).toBe(0.78);
+    expect(resultLegendContentScale({ width: 360, height: 154 })).toBe(1);
+    expect(resultLegendContentScale({ width: 720, height: 308 })).toBe(1.75);
+    expect(resultLegendContentScale({ width: 280, height: 154 })).toBe(0.78);
     expect(resultLegendContentScale({ width: 1240, height: 720 })).toBe(2.4);
   });
 
