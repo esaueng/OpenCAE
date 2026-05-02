@@ -982,7 +982,20 @@ describe("RightPanel payload mass controls", () => {
       />
     );
 
-    expect(html).toContain('<button class="primary" type="button" disabled="">Next: Run</button>');
+    expect(html).toContain('title="Next workflow step (N)"');
+    expect(html).toContain('aria-label="Next workflow step: Run. Shortcut N"');
+    expect(html).toContain('<span class="workflow-nav-label">Next: Run</span><kbd>N</kbd>');
+  });
+
+  test("shows Back and Next hotkey hints on workflow navigation buttons", () => {
+    const html = renderPanel("loads", { study: { ...study, meshSettings: { preset: "medium", status: "complete" } } });
+
+    expect(html).toContain('title="Previous workflow step (B)"');
+    expect(html).toContain('aria-label="Previous workflow step: Supports. Shortcut B"');
+    expect(html).toContain('<span class="workflow-nav-label">Back: Supports</span><kbd>B</kbd>');
+    expect(html).toContain('title="Next workflow step (N)"');
+    expect(html).toContain('aria-label="Next workflow step: Mesh. Shortcut N"');
+    expect(html).toContain('<span class="workflow-nav-label">Next: Mesh</span><kbd>N</kbd>');
   });
 
   test("requires a picked model point before adding a force load", () => {

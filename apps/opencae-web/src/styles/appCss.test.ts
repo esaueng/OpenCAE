@@ -75,6 +75,22 @@ describe("app CSS", () => {
     expect(cssRule(".legend-values")).toMatch(/font-size:\s*calc\(var\(--fs-mini\)\s*\*\s*0\.9\s*\*\s*var\(--analysis-legend-scale,\s*1\)\)/);
   });
 
+  test("styles workspace keyboard shortcut hints", () => {
+    const workflowNavButton = cssRule(".workflow-nav button");
+    const workflowNavKbd = cssRule(".workflow-nav kbd");
+    const shortcutGuide = cssRule(".shortcut-guide");
+    const shortcutItem = cssRule(".shortcut-item");
+    const shortcutKey = cssRule(".shortcut-key");
+
+    expect(workflowNavButton).toMatch(/display:\s*flex/);
+    expect(workflowNavButton).toMatch(/justify-content:\s*space-between/);
+    expect(workflowNavKbd).toMatch(/font-family:\s*var\(--font-mono\)/);
+    expect(workflowNavKbd).toMatch(/border:\s*var\(--border-thin\)/);
+    expect(shortcutGuide).toMatch(/border:\s*var\(--border-thin\)/);
+    expect(shortcutItem).toMatch(/grid-template-columns:\s*minmax\(120px,\s*auto\)\s+minmax\(0,\s*1fr\)/);
+    expect(shortcutKey).toMatch(/font-family:\s*var\(--font-mono\)/);
+  });
+
   test("keeps light mode shared text colors above contrast requirements", () => {
     const lightSurface = lightToken("--color-surface");
     const textTokens = ["--color-text", "--color-text-muted", "--color-text-subtle", "--color-accent", "--color-warning", "--color-error", "--color-success"];
