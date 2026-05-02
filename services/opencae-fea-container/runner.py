@@ -15,6 +15,8 @@ HEIGHT_MM = 15.0
 YIELD_STRESS_PA = 276_000_000.0
 BEAM_DEPTH_DISPLAY = 0.36
 CLOUD_FEA_ADAPTER_DIAGNOSTIC = "Cloud FEA adapter currently runs a hard-coded cantilever fallback and does not parse CalculiX output."
+GENERATED_FALLBACK_FLAG = "OPCAE_ALLOW_GENERATED_FEA_FALLBACK"
+UNPARSED_RESULTS_ERROR = "CalculiX output was not parsed into real result fields; refusing to publish generated fallback results."
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -74,25 +76,43 @@ def solve(payload):
         solver_output = run_ccx_if_available(workdir, deck_path)
         parsed_solver_results = parse_calculix_result_files(workdir, run_id)
 
+    if not is_parsed_calculix_status(parsed_solver_results["status"]):
+        if not allow_generated_fea_fallback():
+            raise UserFacingSolveError(UNPARSED_RESULTS_ERROR, 422)
+        return generated_fallback_response(run_id, load_n, material, dynamic_settings, dynamic, input_deck, solver_output, parsed_solver_results)
+
+    raise UserFacingSolveError("CalculiX parser reported parsed status but did not provide result fields.", 500)
+
+
+def generated_fallback_response(run_id, load_n, material, dynamic_settings, dynamic, input_deck, solver_output, parsed_solver_results):
     response = generated_result_fields(run_id, load_n, material, dynamic_settings, dynamic)
+    response["resultSource"] = "generated_fallback"
     if parsed_solver_results["available"]:
         response["summary"]["failureAssessment"]["message"] += " CalculiX result files were detected but are not fully parsed yet; deterministic sampled fields are marked as generated fallback."
     response["summary"]["failureAssessment"]["message"] += f" {CLOUD_FEA_ADAPTER_DIAGNOSTIC}"
     response["diagnostics"] = [{
-        "id": "cloud-fea-hard-coded-fallback",
+        "id": "cloud-fea-generated-fallback",
         "severity": "warning",
         "source": "solver",
         "message": CLOUD_FEA_ADAPTER_DIAGNOSTIC,
-        "suggestedActions": ["Use the Beam Demo local Euler-Bernoulli solver for Beam Demo validation until CalculiX parsing is implemented."]
+        "suggestedActions": [f"Unset {GENERATED_FALLBACK_FLAG} before publishing Cloud FEA results."]
     }]
     response["artifacts"] = {
         "inputDeck": input_deck,
-        "solverLog": solver_output["log"] + "\n" + CLOUD_FEA_ADAPTER_DIAGNOSTIC,
+        "solverLog": solver_output["log"] + "\ncloud-fea-generated-fallback\n" + CLOUD_FEA_ADAPTER_DIAGNOSTIC,
         "solverResultFiles": parsed_solver_results["files"],
         "solverResultParser": parsed_solver_results["status"],
         "meshSummary": {"nodes": 8, "elements": 1, "source": "generated-cantilever-solid", "units": "mm-N-s-MPa"}
     }
     return response
+
+
+def allow_generated_fea_fallback():
+    return os.environ.get(GENERATED_FALLBACK_FLAG) == "1"
+
+
+def is_parsed_calculix_status(status):
+    return isinstance(status, str) and status.lower().startswith("parsed-calculix")
 
 
 def validate_or_stage_geometry(geometry, workdir):
@@ -179,15 +199,15 @@ def amplitude_table(settings):
 
 def run_ccx_if_available(workdir, deck_path):
     if not shutil.which("ccx"):
-        return {"log": "CalculiX executable unavailable; generated input deck and deterministic contract fields only.", "returnCode": None}
+        return {"log": "CalculiX executable unavailable; generated input deck only.", "returnCode": None}
     result = subprocess.run(["ccx", deck_path.stem], cwd=workdir, capture_output=True, text=True, timeout=45, check=False)
     output = (result.stdout or "") + ("\n" + result.stderr if result.stderr else "")
     log = output.strip() or f"CalculiX exited with code {result.returncode}."
     result_files = sorted(path.name for path in workdir.glob(f"{deck_path.stem}.*") if path.suffix.lower() in {".frd", ".dat", ".sta"})
     if result.returncode == 0 and result_files:
-        log = f"{log}\nDetected CalculiX result files: {', '.join(result_files)}. Parser fallback is explicit until FRD/DAT extraction is complete."
+        log = f"{log}\nDetected CalculiX result files: {', '.join(result_files)}. FRD/DAT extraction is required before publishing result fields."
     elif result.returncode == 0:
-        log = f"{log}\nCalculiX completed but no FRD/DAT result files were produced; using deterministic fallback fields."
+        log = f"{log}\nCalculiX completed but no FRD/DAT result files were produced."
     return {"log": log, "returnCode": result.returncode}
 
 
@@ -195,7 +215,8 @@ def parse_calculix_result_files(workdir, run_id):
     files = sorted(path.name for path in workdir.glob("*") if path.suffix.lower() in {".frd", ".dat", ".sta"})
     # TODO: Parse timed *NODE FILE U output for displacement and *EL FILE/*ELEMENT
     # OUTPUT S stress output, compute nodal von Mises samples, and preserve frame
-    # time plus node/element IDs. Until then, report generated fallback explicitly.
+    # time plus node/element IDs. Until then, Cloud FEA refuses to publish fields
+    # unless the explicit development fallback flag is set.
     return {
         "available": any(name.endswith((".frd", ".dat")) for name in files),
         "files": files,
