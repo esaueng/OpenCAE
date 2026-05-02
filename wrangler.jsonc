@@ -1,7 +1,7 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   // Static/local-first Worker. Do not deploy to cae.esau.app.
-  "name": "opencae-static",
+  "name": "opencae",
   "main": "apps/opencae-web/worker/index.ts",
   "compatibility_date": "2026-04-27",
   "compatibility_flags": ["nodejs_compat"],
