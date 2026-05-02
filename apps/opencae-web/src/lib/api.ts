@@ -44,6 +44,8 @@ interface CloudFeaRouteHealth {
 const localResultsByRunId = new Map<string, ResultsResponse | Promise<ResultsResponse>>();
 const localResultSolversByRunId = new Map<string, () => Promise<ResultsResponse>>();
 const localEventsByRunId = new Map<string, RunEvent[]>();
+const cloudFeaApiBaseByRunId = new Map<string, string>();
+const LOCAL_CLOUD_FEA_API_BASE = "http://localhost:4317";
 const MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.005;
 
 export async function loadSampleProject(sample: SampleModelId = "bracket", analysisType: SampleAnalysisType = "static_stress"): Promise<SampleProjectResponse> {
@@ -267,10 +269,10 @@ export async function addLoad(studyId: string, type: LoadType, value: number, se
 export async function runSimulation(studyId: string, currentStudy?: Study, displayModel?: DisplayModel, options: RunSimulationOptions = {}): Promise<{ run: { id: string }; streamUrl: string; message: string }> {
   try {
     if (currentStudy && simulationBackend(currentStudy) === "cloudflare_fea") {
-      const routeHealth = await fetchCloudFeaRouteHealth();
-      options.onCloudFeaHealth?.(cloudFeaRouteHealthMessage(routeHealth));
-      assertCloudFeaRouteCanCreateRun(routeHealth);
-      const response = await fetch("/api/cloud-fea/runs", {
+      const route = await resolveCloudFeaApiBase(options);
+      const endpoint = cloudFeaApiUrl(route.apiBase, "/api/cloud-fea/runs");
+      options.onCloudFeaHealth?.(`Cloud FEA request started: POST ${endpoint}.`);
+      const response = await fetch(endpoint, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -283,7 +285,9 @@ export async function runSimulation(studyId: string, currentStudy?: Study, displ
           dynamicSettings: currentStudy.type === "dynamic_structural" ? currentStudy.solverSettings : undefined
         })
       });
-      return await readJson(response, "POST /api/cloud-fea/runs");
+      const payload = await readJson<{ run: { id: string }; streamUrl: string; message: string }>(response, `POST ${endpoint}`);
+      cloudFeaApiBaseByRunId.set(payload.run.id, route.apiBase);
+      return payload;
     }
     const response = await fetch(`/api/studies/${studyId}/runs`, { method: "POST" });
     return await readJson(response, `POST /api/studies/${studyId}/runs`);
@@ -302,8 +306,9 @@ export async function getResults(runId: string): Promise<ResultsResponse> {
   const localComputedResults = computeLocalResults(runId);
   if (localComputedResults) return localComputedResults;
   if (runId.startsWith("run-cloud-")) {
-    const response = await fetch(`/api/cloud-fea/runs/${runId}/results`);
-    return readJson(response, `GET /api/cloud-fea/runs/${runId}/results`);
+    const endpoint = cloudFeaApiUrl(cloudFeaApiBaseByRunId.get(runId) ?? "", `/api/cloud-fea/runs/${runId}/results`);
+    const response = await fetch(endpoint);
+    return readJson(response, `GET ${endpoint}`);
   }
   const response = await fetch(`/api/runs/${runId}/results`);
   return readJson(response, `GET /api/runs/${runId}/results`);
@@ -538,9 +543,10 @@ function subscribeToCloudFeaRun(runId: string, onEvent: (event: RunEvent) => voi
   let closed = false;
   let seenCount = 0;
   let timer: ReturnType<typeof globalThis.setInterval> | undefined;
+  const apiBase = cloudFeaApiBaseByRunId.get(runId) ?? "";
+  const endpoint = cloudFeaApiUrl(apiBase, `/api/cloud-fea/runs/${runId}/events`);
   const poll = async () => {
     if (closed) return;
-    const endpoint = `/api/cloud-fea/runs/${runId}/events`;
     try {
       const response = await fetch(endpoint);
       const payload = await readJson<{ events: RunEvent[] }>(response, `GET ${endpoint}`);
@@ -608,9 +614,39 @@ function cloudFeaRunError(error: unknown): Error {
   return error instanceof Error ? error : new Error(message);
 }
 
-async function fetchCloudFeaRouteHealth(): Promise<CloudFeaRouteHealth> {
-  const response = await fetch("/api/cloud-fea/health");
-  return readJson(response, "GET /api/cloud-fea/health");
+interface CloudFeaRouteResolution {
+  apiBase: string;
+}
+
+async function resolveCloudFeaApiBase(options: RunSimulationOptions): Promise<CloudFeaRouteResolution> {
+  const sameOriginHealth = await fetchCloudFeaRouteHealth("");
+  options.onCloudFeaHealth?.(cloudFeaRouteHealthMessage(sameOriginHealth));
+  if (sameOriginHealth.mode === "cloudflare-worker" && sameOriginHealth.containerBound !== true && isLocalBrowserHost()) {
+    const localBridgeHealth = await fetchCloudFeaRouteHealth(LOCAL_CLOUD_FEA_API_BASE);
+    if (localBridgeHealth.mode === "local-cloud-fea-bridge") {
+      options.onCloudFeaHealth?.(`Cloud FEA local bridge selected: ${LOCAL_CLOUD_FEA_API_BASE}.`);
+      options.onCloudFeaHealth?.(cloudFeaRouteHealthMessage(localBridgeHealth));
+      return { apiBase: LOCAL_CLOUD_FEA_API_BASE };
+    }
+  }
+  assertCloudFeaRouteCanCreateRun(sameOriginHealth);
+  return { apiBase: "" };
+}
+
+async function fetchCloudFeaRouteHealth(apiBase: string): Promise<CloudFeaRouteHealth> {
+  const endpoint = cloudFeaApiUrl(apiBase, "/api/cloud-fea/health");
+  const response = await fetch(endpoint);
+  return readJson(response, `GET ${endpoint}`);
+}
+
+function cloudFeaApiUrl(apiBase: string, path: string): string {
+  return apiBase ? `${apiBase}${path}` : path;
+}
+
+function isLocalBrowserHost(): boolean {
+  if (typeof window === "undefined") return false;
+  const hostname = window.location?.hostname;
+  return hostname === "localhost" || hostname === "127.0.0.1";
 }
 
 function assertCloudFeaRouteCanCreateRun(routeHealth: CloudFeaRouteHealth): void {
@@ -628,6 +664,7 @@ function cloudFeaRouteHealthMessage(routeHealth: CloudFeaRouteHealth): string {
 
 function cloudFeaContainerBindingMessage(originalMessage?: string): string {
   const action = "Cloud FEA is routed to a Cloudflare Worker without a FEA_CONTAINER binding. For local dev, run root pnpm dev and open the Vite URL shown there, usually http://localhost:5173/. For deployed Cloud FEA, deploy with wrangler.containers.jsonc using pnpm deploy:cloudflare:containers.";
+  if (originalMessage?.includes(action)) return action;
   return originalMessage ? `${action} Original response: ${originalMessage}` : action;
 }
 
