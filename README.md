@@ -1,8 +1,8 @@
 # OpenCAE
 
-OpenCAE is a local-first CAD/CAE simulation workspace. The current app includes static stress and dynamic structural studies, a browser CAD workspace, a local Fastify API, SQLite metadata, filesystem artifacts, local jobs, deterministic local solver services, Cloud FEA orchestration, and built-in sample projects.
+OpenCAE is a local-first CAD/CAE simulation workspace for structural study setup, fast local solves, and browser-based result review. The current app supports static stress and dynamic structural studies, sample projects, local project files, uploaded geometry previews, deterministic local solver paths, Cloud FEA orchestration, and report export.
 
-The project is designed around service boundaries so local TypeScript services, browser workers, CAD import, meshing, solver, and post-processing backends can evolve independently.
+The project is organized around service boundaries so the React workspace, Fastify API, CAD import, meshing, local solvers, Cloud FEA containers, post-processing, storage, and job runners can evolve independently.
 
 ## Local Development
 
@@ -18,7 +18,22 @@ pnpm dev
 - API: `http://localhost:4317`
 - Web: `http://localhost:5173`
 
-The API creates and seeds the local SQLite database if needed. The web app can load the Bracket Demo without uploads, then walk through Model, Material, Supports, Loads, Mesh, Run, Results, and Report steps.
+The API creates and seeds the local SQLite database if needed. The web app can create a blank project, open a local `.opencae.json` project file, load bracket/beam/cantilever samples, or upload STEP, STP, STL, and OBJ models for the local viewer.
+
+## Current Workflow
+
+OpenCAE guides a study through Model, Material, Supports, Loads, Mesh, Run, Results, and Report steps:
+
+- Choose a static stress or dynamic structural study when creating a project.
+- Load built-in bracket, beam, or cantilever samples in static or dynamic mode.
+- Upload geometry, inspect selectable faces, show dimensions, and adjust model orientation.
+- Assign starter materials, including additive-manufacturing print settings that affect effective material properties.
+- Add fixed supports and force, pressure, or payload-weight loads.
+- Generate coarse, medium, fine, or ultra mesh summaries for local analysis sampling.
+- Run local simulations with progress events, logs, cancellation, result artifacts, HTML reports, and PDF reports.
+- Inspect stress, displacement, safety factor, velocity, and acceleration fields where available.
+- Play dynamic result frames with cached playback preparation for smoother browser rendering.
+- Save a self-contained local project file with embedded uploaded model data and completed results.
 
 ## Useful Commands
 
@@ -28,11 +43,12 @@ pnpm db:seed
 pnpm reset:local
 pnpm build
 pnpm test
+pnpm verify:perf
 ```
 
 ## Cloudflare Worker Deploy
 
-The production Cloudflare target for `cae.esau.app` serves the Vite web app from Workers Static Assets. Cloudflare Builds should use the default deploy commands for Worker, asset, queue, and R2 updates without attempting a privileged container application rollout.
+The production Cloudflare target for `cae.esau.app` serves the Vite web app from Workers Static Assets. The default deploy path builds the web app, deploys the Worker asset binding, enables SPA fallback routing, and binds R2 and Queues without changing the privileged Cloud FEA container application.
 
 ```bash
 pnpm install
@@ -40,15 +56,16 @@ pnpm deploy:cloudflare:dry-run
 pnpm deploy:cloudflare
 ```
 
-Wrangler uses [wrangler.jsonc](wrangler.jsonc). The deploy builds `apps/opencae-web/dist`, serves it through the Worker asset binding, uses SPA fallback routing for browser routes, and binds R2 and Queues. This config intentionally omits the `containers` section and the `FEA_CONTAINER` Durable Object binding so Cloudflare Builds tokens that cannot update container applications still deploy successfully.
+Wrangler uses [wrangler.jsonc](wrangler.jsonc). This default config intentionally omits the `containers` section and the `FEA_CONTAINER` Durable Object binding so Cloudflare Builds tokens that cannot update container applications can still deploy the static app and Worker shell.
 
-Container application rollouts require a token with Cloudflare Containers write access. Run that privileged deploy explicitly when the container image or app configuration changes:
+Container application rollouts require a token with Cloudflare Containers write access. Run the privileged deploy explicitly when the container image or container app configuration changes:
 
 ```bash
+pnpm deploy:cloudflare:containers:dry-run
 pnpm deploy:cloudflare:containers
 ```
 
-Real Cloud FEA transient animation requires that privileged container application deploy to have succeeded, because dynamic runs are rejected unless the container returns timed multi-frame result fields. The Cloud FEA container currently runs a CalculiX adapter for static and transient structural solves.
+Real Cloud FEA transient animation requires a successful container deploy because dynamic Cloud FEA runs are rejected unless the container returns timed multi-frame result fields. The Cloud FEA container generates CalculiX input decks and uses the open-source CalculiX CrunchiX executable (`ccx`) for static and transient structural solves when the container runtime is available.
 
 For a local-first/static Worker deploy without Cloud FEA containers, use:
 
@@ -66,15 +83,15 @@ For Cloudflare Builds, set:
 
 ## Workspace Layout
 
-- `apps/opencae-web` - React/Vite CAD workspace and static stress workflow.
-- `apps/opencae-api` - Fastify API for projects, jobs, artifacts, and service orchestration.
-- `libs/*` - Shared schema, units, materials, storage, jobs, diagnostics, and service contracts.
+- `apps/opencae-web` - React/Vite CAD workspace for static and dynamic structural workflows.
+- `apps/opencae-api` - Fastify API for projects, uploads, studies, jobs, artifacts, reports, and service orchestration.
+- `libs/*` - Shared schema, units, materials, storage, jobs, diagnostics, validation, selection, result format, and service contracts.
 - `services/*` - CAD, mesh, solver, post-processing, and Cloud FEA container service implementations.
 - `runners/opencae-runner-local` - Local runner package for job execution flows.
 - `examples/*` - Sample project documentation and fixtures.
 - `docs/*` - Architecture, local development, file format, validation, and user guide notes.
 - `infra/local/*` - Local SQLite, storage, and jobs setup notes.
-- `data/*` - Local runtime data directories for artifacts, logs, and reports.
+- `data/*` - Local runtime data directories for artifacts, logs, reports, uploads, and SQLite state.
 
 ## Simulation Flow
 
@@ -84,9 +101,9 @@ The built-in demos include bracket, beam, and cantilever studies with Aluminum 6
 
 ## Solver Attribution
 
-OpenCAE uses two solver paths:
+OpenCAE uses two solver families:
 
-- **Detailed local solver** - a deterministic TypeScript structural solver in `@opencae/solver-service` for fast local/browser estimates, static stress, dynamic structural playback, and responsive demo workflows.
+- **Detailed local solver** - deterministic TypeScript local solvers in `@opencae/solver-service`. Static studies use a heuristic surface-response path, the Beam Demo can use an Euler-Bernoulli beam path, and dynamic studies use Newmark average-acceleration integration for transient playback frames.
 - **Cloud FEA solver** - a containerized adapter in `services/opencae-fea-container` that generates CalculiX input decks and runs the open-source **CalculiX CrunchiX** executable (`ccx`) when Cloud FEA containers are enabled. The container image installs Debian's `calculix-ccx` package and also includes **Gmsh** for uploaded geometry meshing/staging. CalculiX and Gmsh are separately licensed third-party components and are not relicensed under Apache-2.0.
 
 Credit: [CalculiX](http://www.calculix.de/) provides the open-source finite element solver used by the Cloud FEA path. [Gmsh](https://gmsh.info/) is used as the open-source meshing tool in the Cloud FEA container when uploaded geometry needs a generated mesh.
@@ -112,4 +129,4 @@ Copyright 2026 Esau Engineering. The OpenCAE name and logo are trademarks of Esa
 
 ## Scope
 
-OpenCAE is still an engineering preview. Local results are fast estimates for product workflow development and should not be treated as certified analysis. The Cloud FEA path provides a CalculiX-backed integration point for higher-fidelity solver work, while native CAD, meshing, and post-processing support continue to evolve behind the existing service boundaries.
+OpenCAE is still an engineering preview. Local results are deterministic estimates for product workflow development and should not be treated as certified analysis. The Cloud FEA path provides a CalculiX-backed integration point for higher-fidelity solver work, while native CAD, meshing, and post-processing support continue to evolve behind the existing service boundaries.
