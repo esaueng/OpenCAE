@@ -16,12 +16,35 @@ describe("StartScreen", () => {
     expect(html).not.toContain("local mode");
   });
 
-  test("renders visual sample choices and analysis controls", () => {
+  test("keeps sample choices inside the load sample submenu", () => {
     const html = renderToStaticMarkup(
       <StartScreen onLoadSample={vi.fn()} onCreateProject={vi.fn()} onOpenProject={vi.fn()} />
     );
 
     expect(html).toContain("Load sample project");
+    expect(html).toContain('aria-label="Open sample menu"');
+    expect(html).not.toContain("Sample model");
+    expect(html).not.toContain('aria-label="Sample setup"');
+    expect(html).not.toContain("Bracket Demo");
+    expect(html).not.toContain("Beam Demo");
+    expect(html).not.toContain("Cantilever Demo");
+  });
+});
+
+describe("SampleProjectMenu", () => {
+  test("renders visual sample choices and analysis controls in the submenu", async () => {
+    const { SampleProjectMenu } = await import("./StartScreen");
+    const html = renderToStaticMarkup(
+      <SampleProjectMenu
+        selectedSample="bracket"
+        selectedAnalysisType="static_stress"
+        onBack={vi.fn()}
+        onLoadSample={vi.fn()}
+        onSelectAnalysisType={vi.fn()}
+        onSelectSample={vi.fn()}
+      />
+    );
+
     expect(html).toContain("Sample model");
     expect(html).toContain("Analysis type");
     expect(html).toContain('aria-label="Sample setup"');
