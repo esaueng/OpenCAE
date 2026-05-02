@@ -210,6 +210,7 @@ async function runCloudFeaSolve(runId: string, env: RuntimeEnv): Promise<void> {
       const failure = await readContainerFailure(solveResponse);
       await putOptionalArtifact(artifacts, `runs/${runId}/input.inp`, failure.artifacts.inputDeck);
       await putOptionalArtifact(artifacts, `runs/${runId}/solver.log`, failure.artifacts.solverLog);
+      await putOptionalArtifact(artifacts, `runs/${runId}/solver-result-parser.txt`, failure.artifacts.solverResultParser);
       await putOptionalArtifact(artifacts, `runs/${runId}/mesh.json`, JSON.stringify(failure.artifacts.meshSummary ?? {}, null, 2));
       await artifacts.put(`runs/${runId}/events.json`, JSON.stringify([
         ...events,
@@ -226,6 +227,7 @@ async function runCloudFeaSolve(runId: string, env: RuntimeEnv): Promise<void> {
     const resultArtifacts = isRecord(containerResult.artifacts) ? containerResult.artifacts : {};
     await putOptionalArtifact(artifacts, `runs/${runId}/input.inp`, resultArtifacts.inputDeck);
     await putOptionalArtifact(artifacts, `runs/${runId}/solver.log`, resultArtifacts.solverLog);
+    await putOptionalArtifact(artifacts, `runs/${runId}/solver-result-parser.txt`, resultArtifacts.solverResultParser);
     await putOptionalArtifact(artifacts, `runs/${runId}/mesh.json`, JSON.stringify(resultArtifacts.meshSummary ?? {}, null, 2));
     await artifacts.put(`runs/${runId}/results.json`, JSON.stringify(normalized, null, 2));
     await artifacts.put(`runs/${runId}/events.json`, JSON.stringify([

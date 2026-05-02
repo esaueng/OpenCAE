@@ -321,6 +321,7 @@ describe("Cloudflare FEA worker orchestration", () => {
     expect(JSON.parse(await (await bucket.get("runs/run-cloud-1/events.json"))!.text()).at(-1).type).toBe("complete");
     expect(await (await bucket.get("runs/run-cloud-1/input.inp"))!.text()).toContain("*DYNAMIC");
     expect(await (await bucket.get("runs/run-cloud-1/solver.log"))!.text()).toContain("CalculiX");
+    expect(await (await bucket.get("runs/run-cloud-1/solver-result-parser.txt"))!.text()).toBe("parsed-calculix-frd");
     expect(await bucket.get("runs/run-cloud-1/mesh.json")).not.toBeNull();
     expect(resultsResponse.status).toBe(200);
     expect(results.summary.maxStress).toBe(431400000);
@@ -329,6 +330,43 @@ describe("Cloudflare FEA worker orchestration", () => {
     expect(results.fields.some((field) => field.frameIndex === 1 && field.timeSeconds === 0.005)).toBe(true);
     expect(results.fields[0]?.samples?.[0]?.source).toBe("calculix");
     expect(results.fields[0]?.samples?.[0]?.vonMisesStressPa).toBeGreaterThan(0);
+  });
+
+  test("queue handler preserves parsed structured block MPa and mm result units", async () => {
+    const bucket = new MemoryR2Bucket();
+    await bucket.put("runs/run-cloud-block/request.json", JSON.stringify({
+      runId: "run-cloud-block",
+      projectId: "project-1",
+      studyId: "study-1",
+      fidelity: "standard",
+      study: { id: "study-1", type: "static_stress" }
+    }));
+    const message = { body: { runId: "run-cloud-block" }, ack: vi.fn(), retry: vi.fn() };
+    const env = {
+      ASSETS: { fetch: vi.fn(async () => new Response("asset")) },
+      FEA_ARTIFACTS: bucket,
+      FEA_CONTAINER: {
+        fetch: vi.fn(async () => Response.json(cloudParsedBlockSolveResponse("run-cloud-block")))
+      }
+    };
+
+    await worker.queue({ messages: [message] }, env);
+    const results = JSON.parse(await (await bucket.get("runs/run-cloud-block/results.json"))!.text()) as {
+      summary: { maxStress: number; maxStressUnits: string; maxDisplacement: number; maxDisplacementUnits: string; provenance: { resultSource: string } };
+      fields: Array<{ type: string; location: string; units: string; samples?: Array<{ source?: string }> }>;
+    };
+
+    expect(results.summary).toMatchObject({
+      maxStress: 0.18,
+      maxStressUnits: "MPa",
+      maxDisplacement: 0.0019,
+      maxDisplacementUnits: "mm",
+      provenance: { resultSource: "parsed_dat" }
+    });
+    expect(results.fields.find((field) => field.type === "stress")).toMatchObject({ location: "element", units: "MPa" });
+    expect(results.fields.find((field) => field.type === "displacement")).toMatchObject({ location: "node", units: "mm" });
+    expect(JSON.stringify(results)).not.toContain("generated-cantilever-fallback");
+    expect(await (await bucket.get("runs/run-cloud-block/solver-result-parser.txt"))!.text()).toBe("parsed-calculix-dat");
   });
 
   test("queue handler resolves standard Durable Object namespace container bindings by name", async () => {
@@ -718,6 +756,73 @@ function cloudContainerSolveResponse(runId: string, dynamic: boolean) {
       solverLog: "CalculiX completed transient run.",
       solverResultParser: "parsed-calculix-frd",
       meshSummary: { nodes: 2, elements: 1 }
+    }
+  };
+}
+
+function cloudParsedBlockSolveResponse(runId: string) {
+  const provenance = {
+    kind: "calculix_fea",
+    solver: "calculix-ccx",
+    solverVersion: "2.21",
+    meshSource: "structured_block",
+    resultSource: "parsed_dat",
+    units: "mm-N-s-MPa"
+  };
+  return {
+    summary: {
+      maxStress: 0.18,
+      maxStressUnits: "MPa",
+      maxDisplacement: 0.0019,
+      maxDisplacementUnits: "mm",
+      safetyFactor: 1533.3,
+      reactionForce: 1,
+      reactionForceUnits: "N",
+      provenance
+    },
+    fields: [
+      {
+        id: `field-${runId}-stress-0`,
+        runId,
+        type: "stress",
+        location: "element",
+        values: [0.12, 0.18],
+        min: 0.12,
+        max: 0.18,
+        units: "MPa",
+        provenance,
+        samples: [{ point: [50, 15, 5], normal: [0, 0, 1], value: 0.18, elementId: "E1", source: "calculix-dat", vonMisesStressPa: 180000 }]
+      },
+      {
+        id: `field-${runId}-displacement-0`,
+        runId,
+        type: "displacement",
+        location: "node",
+        values: [0, 0.0019],
+        min: 0,
+        max: 0.0019,
+        units: "mm",
+        provenance,
+        samples: [{ point: [100, 15, 10], normal: [0, 0, 1], value: 0.0019, vector: [0, 0, -0.0019], nodeId: "N2", source: "calculix-dat" }]
+      },
+      {
+        id: `field-${runId}-safety_factor-0`,
+        runId,
+        type: "safety_factor",
+        location: "element",
+        values: [1533.3],
+        min: 1533.3,
+        max: 1533.3,
+        units: "",
+        provenance,
+        samples: [{ point: [50, 15, 5], normal: [0, 0, 1], value: 1533.3, elementId: "E1", source: "calculix-dat" }]
+      }
+    ],
+    artifacts: {
+      inputDeck: "*STATIC\n*NODE PRINT, NSET=NALL\nU\n*EL PRINT, ELSET=SOLID\nS\n",
+      solverLog: "CalculiX completed structured block solve.",
+      solverResultParser: "parsed-calculix-dat",
+      meshSummary: { nodes: 735, elements: 480, source: "structured_block" }
     }
   };
 }
