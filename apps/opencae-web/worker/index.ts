@@ -59,6 +59,11 @@ export default {
       );
     }
 
+    if (url.pathname === "/api/cloud-fea/health" && request.method === "GET") {
+      logWorkerEvent("cloud_fea_health", { method: request.method, pathname: url.pathname });
+      return cloudFeaHealth(env);
+    }
+
     if (url.pathname === "/api/cloud-fea/runs" && request.method === "POST") {
       logWorkerEvent("cloud_fea_run_create", { method: request.method, pathname: url.pathname });
       return createCloudFeaRun(request, env, ctx);
@@ -106,6 +111,22 @@ export default {
     }
   }
 } satisfies ExportedHandler<Env>;
+
+function cloudFeaHealth(env: RuntimeEnv): Response {
+  const containerBound = Boolean(env.FEA_CONTAINER);
+  return Response.json(
+    {
+      ok: true,
+      mode: "cloudflare-worker",
+      service: "opencae-web",
+      artifactsBound: Boolean(env.FEA_ARTIFACTS),
+      queueBound: Boolean(env.FEA_RUN_QUEUE),
+      containerBound,
+      containersEnabled: containerBound
+    },
+    { headers: jsonHeaders }
+  );
+}
 
 async function createCloudFeaRun(request: Request, env: RuntimeEnv, ctx?: ExecutionContext): Promise<Response> {
   if (!env.FEA_ARTIFACTS) {
