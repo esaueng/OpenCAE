@@ -106,12 +106,13 @@ describe("app CSS", () => {
     expect(cssRule(".panel-section h2")).toMatch(/color:\s*var\(--color-text\)/);
   });
 
-  test("places the start screen logo on the grid rhythm above center", () => {
+  test("lays out the start screen as a wide sample picker", () => {
     const startBrand = cssRule(".start-brand");
+    const sampleGrid = cssRule(".start-sample-grid");
 
-    expect(startBrand).toMatch(/position:\s*absolute/);
-    expect(startBrand).toMatch(/top:\s*calc\(50%\s*-\s*126px\)/);
-    expect(startBrand).toMatch(/transform:\s*translate\(-50%,\s*-28px\)/);
+    expect(startBrand).toMatch(/position:\s*relative/);
+    expect(startBrand).toMatch(/width:\s*min\(980px,\s*100%\)/);
+    expect(sampleGrid).toMatch(/grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/);
   });
 
   test("uses the start screen background for the required simulation type screen", () => {

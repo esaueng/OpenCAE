@@ -18,6 +18,8 @@ import { getViewportTooltipPosition } from "../tooltipPosition";
 import { forceForUnits, formatDensity, formatMass, formatMaterialStress, formatVolume, loadValueForUnits, type UnitSystem } from "../unitDisplay";
 import { canNavigateToStep } from "../appShellState";
 import { MaterialLibraryModal } from "./SimulationWorkflow";
+import { SampleOptionCard } from "./SampleOptionCard";
+import { SAMPLE_OPTIONS, sampleOptionFor } from "./sampleOptions";
 import { dynamicPlaybackFrames } from "../resultFields";
 import {
   frameIndexForRoundedPlaybackOrdinal,
@@ -117,7 +119,11 @@ export function RightPanel(props: RightPanelProps) {
 
 function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sampleModel, sampleAnalysisType = "static_stress", onFitView, onRotateModel, onResetModelOrientation, onViewModeChange, onToggleDimensions, onLoadSample, onUploadModel, onSampleModelChange, onSampleAnalysisTypeChange }: RightPanelProps) {
   const [confirmSampleLoad, setConfirmSampleLoad] = useState(false);
+  const [pendingSampleModel, setPendingSampleModel] = useState<SampleModelId>(sampleModel);
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
+  useEffect(() => {
+    setPendingSampleModel(sampleModel);
+  }, [sampleModel]);
   const geometry = project.geometryFiles[0];
   const isBlankProject = !geometry;
   const isUploadedProject = geometry?.metadata.source === "local-upload";
@@ -126,18 +132,18 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sa
   const isNativeCadImport = Boolean(geometry?.metadata.nativeCadImport);
   const faceCount = Number(geometry?.metadata.faceCount ?? 0);
   const bodyCount = Number(geometry?.metadata.bodyCount ?? 0);
-  const sampleLabel = sampleModel === "bracket" ? "Bracket Demo" : sampleModel === "plate" ? "Beam Demo" : "Cantilever Demo";
+  const sampleLabel = sampleOptionFor(pendingSampleModel).title;
   const sampleAnalysisLabel = sampleAnalysisType === "dynamic_structural" ? "Dynamic Structural" : "Static Stress";
   const sampleForceLabel = formatEquivalentForce(500, project.unitSystem);
-  const sampleSummaryVolumeMm3 = sampleModel === "plate" ? 184_320 : 41_280;
-  const sampleSummaryMassG = sampleModel === "plate" ? 498 : 111;
-  const sampleLoadTitle = sampleModel === "plate" ? `Payload mass · ${formatMass(0.497664, "kg", project.unitSystem)}` : `Force · ${sampleForceLabel}`;
+  const sampleSummaryVolumeMm3 = pendingSampleModel === "plate" ? 184_320 : 41_280;
+  const sampleSummaryMassG = pendingSampleModel === "plate" ? 498 : 111;
+  const sampleLoadTitle = pendingSampleModel === "plate" ? `Payload mass · ${formatMass(0.497664, "kg", project.unitSystem)}` : `Force · ${sampleForceLabel}`;
   const orientation = getModelOrientation(displayModel);
   const hasCustomOrientation = orientation.x !== 0 || orientation.y !== 0 || orientation.z !== 0;
   const preconfigured =
-    sampleModel === "bracket"
+    pendingSampleModel === "bracket"
       ? { support: "2 mounting holes · flange", load: "top face · -Z direction", callout: "An L-bracket is bolted at the flange; a vertical load on the top face creates a peak stress at the inside corner, reduced by the gusset rib." }
-      : sampleModel === "plate"
+      : pendingSampleModel === "plate"
         ? { support: "fixed end face", load: "end payload mass · -Y direction", callout: "A simple beam is fixed at one end and carries a payload mass sitting on the free end, producing bending stress along the span." }
         : { support: "fixed end face", load: "free end face · -Z direction", callout: "A cantilever beam is fixed at one end and loaded at the free end, producing bending stress along the beam span." };
 
@@ -147,7 +153,18 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sa
       return;
     }
     setConfirmSampleLoad(false);
-    onLoadSample(sampleModel, sampleAnalysisType);
+    onLoadSample(pendingSampleModel, sampleAnalysisType);
+  }
+
+  function handleSampleSelect(sample: SampleModelId) {
+    setPendingSampleModel(sample);
+    setConfirmSampleLoad(false);
+  }
+
+  function handleSampleOpen(sample: SampleModelId) {
+    setPendingSampleModel(sample);
+    setConfirmSampleLoad(false);
+    onLoadSample(sample, sampleAnalysisType);
   }
 
   return (
@@ -155,11 +172,16 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sa
       {showSampleModelPicker && (
         <label className="field">
           <HelpLabel helpId="sampleModel">Sample model</HelpLabel>
-          <div className="segmented" role="group" aria-label="Sample model">
-            {(["bracket", "plate", "cantilever"] as const).map((sample) => (
-              <button key={sample} className={sampleModel === sample ? "active" : ""} type="button" onClick={() => onSampleModelChange(sample)}>
-                {sample === "plate" ? "Beam" : capitalize(sample)}
-              </button>
+          <div className="sample-option-grid panel-sample-grid" role="list" aria-label="Sample model">
+            {SAMPLE_OPTIONS.map((option) => (
+              <SampleOptionCard
+                key={option.id}
+                option={option}
+                selected={pendingSampleModel === option.id}
+                compact
+                onSelect={handleSampleSelect}
+                onOpen={handleSampleOpen}
+              />
             ))}
           </div>
           <HelpLabel helpId="sampleModel">Analysis type</HelpLabel>
