@@ -1,4 +1,4 @@
-import type { DisplayModel, Project, ResultField, ResultSummary } from "@opencae/schema";
+import type { DisplayModel, Project, ResultField, ResultProvenance, ResultSummary } from "@opencae/schema";
 
 export type UnitSystem = Project["unitSystem"];
 
@@ -97,6 +97,12 @@ export function resultFieldForUnits(field: ResultField, unitSystem: UnitSystem):
       ...(sample.vector ? { vector: sample.vector.map((component) => roundDisplayValue(converter(component).value)) as [number, number, number] } : {})
     }))
   };
+}
+
+export function formatResultProvenanceLabel(provenance: ResultProvenance | undefined): string {
+  if (provenance?.kind === "calculix_fea") return "CalculiX FEA";
+  if (provenance?.kind === "analytical_benchmark") return "Analytical benchmark";
+  return "Local estimate";
 }
 
 export function displayModelForUnits(displayModel: DisplayModel, unitSystem: UnitSystem): DisplayModel {

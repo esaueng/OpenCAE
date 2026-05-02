@@ -1,6 +1,6 @@
 import { effectiveMaterialProperties, starterMaterials } from "@opencae/materials";
 import { assessResultFailure } from "@opencae/schema";
-import type { AnalysisMesh, AnalysisSample, DynamicSolverSettings, Load, Material, ResultField, ResultSample, ResultSummary, RunEvent, Study } from "@opencae/schema";
+import type { AnalysisMesh, AnalysisSample, DynamicSolverSettings, Load, Material, ResultField, ResultProvenance, ResultSample, ResultSummary, RunEvent, Study } from "@opencae/schema";
 import type { ObjectStorageProvider } from "@opencae/storage";
 import { bracketDisplayModel, bracketResultSummary } from "@opencae/db/sample-data";
 import { inferCriticalPrintAxis } from "@opencae/study-core";
@@ -9,6 +9,22 @@ import { isBeamDemoStudy, solveBeamDemoStudy, type BeamDemoSolveOptions } from "
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const STANDARD_GRAVITY = 9.80665;
 const MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.005;
+const LOCAL_HEURISTIC_PROVENANCE: ResultProvenance = {
+  kind: "local_estimate",
+  solver: "opencae-local-heuristic-surface",
+  solverVersion: "0.1.0",
+  meshSource: "mock",
+  resultSource: "generated",
+  units: "mm-N-s-MPa"
+};
+const LOCAL_DYNAMIC_PROVENANCE: ResultProvenance = {
+  kind: "local_estimate",
+  solver: "opencae-local-dynamic-newmark",
+  solverVersion: "0.1.0",
+  meshSource: "mock",
+  resultSource: "generated",
+  units: "mm-N-s-MPa"
+};
 
 export class LocalHeuristicComputeBackend {
   constructor(private readonly storage: ObjectStorageProvider) {}
@@ -259,7 +275,8 @@ export function solveHeuristicSurfaceStudy(study: Study, runId: string, optionsI
   };
   const summary: ResultSummary = {
     ...summaryBase,
-    failureAssessment: assessResultFailure(summaryBase)
+    failureAssessment: assessResultFailure(summaryBase),
+    provenance: LOCAL_HEURISTIC_PROVENANCE
   };
   if (options.debugResults) logSolverDirectionAudit(study, loads, fields);
   return { summary, fields, faceCount: faces.length, loadCount: loads.length, totalAppliedLoad: summary.reactionForce, material, effectiveMaterial, materialParameters, analysisSampleCount: analysisMesh.samples.length, solverBackend: "local-heuristic-surface" as const };
@@ -296,7 +313,7 @@ export function solveDynamicStudy(study: Study, runId: string, optionsInput?: Lo
     const accelerationFrame = scaleBaseField(displacementBase, runId, "acceleration", "mm/s^2", accelerationScale, frame.index, frame.time, 4);
     const safetyValues = stressFrame.values.map((stress) => round(Math.max(0.05, yieldMpa / Math.max(stress, 0.001)), 2));
     const safetySamples = stressFrame.samples?.map((sample) => sampleResult(sample, Math.max(0.05, yieldMpa / Math.max(sample.value, 0.001)), 3)) ?? [];
-    const safetyFrame = fieldForFrame(runId, "safety_factor", safetyValues, "", safetySamples, frame.index, frame.time);
+    const safetyFrame = fieldForFrame(runId, "safety_factor", safetyValues, "", safetySamples, frame.index, frame.time, LOCAL_DYNAMIC_PROVENANCE);
     fields.push(stressFrame, displacementFrame, velocityFrame, accelerationFrame, safetyFrame);
     const framePeakDisplacement = resultFieldAbsMax(displacementFrame);
     if (framePeakDisplacement > peakDisplacement) {
@@ -332,7 +349,8 @@ export function solveDynamicStudy(study: Study, runId: string, optionsInput?: Lo
   };
   const summary: ResultSummary = {
     ...summaryBase,
-    failureAssessment: assessResultFailure(summaryBase)
+    failureAssessment: assessResultFailure(summaryBase),
+    provenance: LOCAL_DYNAMIC_PROVENANCE
   };
   return {
     summary,
@@ -481,12 +499,12 @@ function scaleBaseField(
   const samples = base?.samples?.map((sample) => sampleResult(sample, sample.value * scale, digits, {
     ...(sample.vector ? { vector: roundVector(scaleVector(sample.vector, scale), digits) } : {})
   })) ?? [];
-  return fieldForFrame(runId, type, values, units, samples, frameIndex, timeSeconds);
+  return fieldForFrame(runId, type, values, units, samples, frameIndex, timeSeconds, LOCAL_DYNAMIC_PROVENANCE);
 }
 
-function fieldForFrame(runId: string, type: ResultField["type"], values: number[], units: string, samples: ResultSample[], frameIndex: number, timeSeconds: number): ResultField {
+function fieldForFrame(runId: string, type: ResultField["type"], values: number[], units: string, samples: ResultSample[], frameIndex: number, timeSeconds: number, provenance = LOCAL_HEURISTIC_PROVENANCE): ResultField {
   return {
-    ...fieldFor(runId, type, values, units, samples),
+    ...fieldFor(runId, type, values, units, samples, provenance),
     id: `field-${type}-${runId}-frame-${frameIndex}`,
     frameIndex,
     timeSeconds
@@ -626,7 +644,7 @@ function materialResponse(material: Material, loads: LoadModel[]): { stressScale
   };
 }
 
-function fieldFor(runId: string, type: ResultField["type"], values: number[], units: string, samples: ResultSample[] = []): ResultField {
+function fieldFor(runId: string, type: ResultField["type"], values: number[], units: string, samples: ResultSample[] = [], provenance = LOCAL_HEURISTIC_PROVENANCE): ResultField {
   const allValues = [...values, ...samples.map((sample) => sample.value)].filter(Number.isFinite);
   const min = allValues.length ? Math.min(...allValues) : 0;
   const max = allValues.length ? Math.max(...allValues) : 0;
@@ -639,6 +657,7 @@ function fieldFor(runId: string, type: ResultField["type"], values: number[], un
     min: round(min, type === "displacement" ? 4 : 2),
     max: round(max, type === "displacement" ? 4 : 2),
     units,
+    provenance,
     ...(samples.length ? { samples } : {})
   };
 }

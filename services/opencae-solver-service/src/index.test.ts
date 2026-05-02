@@ -99,6 +99,17 @@ describe("LocalMockComputeBackend", () => {
     expect(dominantDisplacementAxis(ySolved.fields)).toEqual({ axis: "y", sign: -1 });
   });
 
+  test("marks heuristic surface results as local estimates", () => {
+    const solved = solveStudy(studyWithLoads([{ id: "load-y", type: "force", value: 500, direction: [0, -1, 0] }]), "run-local-estimate");
+
+    expect(solved.summary.provenance).toMatchObject({
+      kind: "local_estimate",
+      solver: "opencae-local-heuristic-surface",
+      resultSource: "generated"
+    });
+    expect(solved.fields.every((field) => field.provenance?.kind === "local_estimate")).toBe(true);
+  });
+
   test("uses requested gravity direction for payload displacement vectors", () => {
     const study = beamPayloadStudy("mat-aluminum-6061");
     const solved = solveStudy({

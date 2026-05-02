@@ -31,6 +31,7 @@ const jsonHeaders = {
 };
 const cloudFeaContainersDisabledMessage = "Cloud FEA containers are not enabled for this deployment. Deploy with pnpm deploy:cloudflare:containers using a Cloudflare token with Containers write access, or switch the study backend to Detailed local.";
 const generatedFallbackResultMessage = "Cloud FEA returned generated fallback data instead of parsed CalculiX results; refusing to publish fake solver results.";
+const invalidCloudFeaProvenanceMessage = "Cloud FEA result provenance must identify parsed CalculiX FEA results.";
 const placeholderResultMarkers = [
   "generated-cantilever-fallback",
   "cloud-fea-hard-coded-fallback",
@@ -265,6 +266,7 @@ function normalizeContainerResult(runId: string, result: Record<string, unknown>
     throw new Error(generatedFallbackResultMessage);
   }
   assertParsedCalculixArtifacts(resultArtifacts);
+  const provenance = normalizeCloudFeaProvenance(summary);
   const normalizedSummary = {
     maxStress: numberField(summary, "maxStress"),
     maxStressUnits: stringField(summary, "maxStressUnits"),
@@ -274,11 +276,12 @@ function normalizeContainerResult(runId: string, result: Record<string, unknown>
     reactionForce: numberField(summary, "reactionForce"),
     reactionForceUnits: stringField(summary, "reactionForceUnits"),
     failureAssessment: failureAssessmentFor(summary),
+    provenance,
     ...(isRecord(summary.transient) ? { transient: normalizeTransient(summary.transient) } : {})
   };
   return {
     summary: normalizedSummary,
-    fields: rawFields.map((field, index) => normalizeField(runId, field, index))
+    fields: rawFields.map((field, index) => normalizeField(runId, field, index, provenance))
   };
 }
 
@@ -336,7 +339,26 @@ function assertParsedCalculixArtifacts(artifacts: Record<string, unknown>): void
   }
 }
 
-function normalizeField(runId: string, rawField: unknown, index: number) {
+function normalizeCloudFeaProvenance(summary: Record<string, unknown>) {
+  const provenance = summary.provenance;
+  if (!isRecord(provenance)) throw new Error(invalidCloudFeaProvenanceMessage);
+  const kind = provenance.kind;
+  const resultSource = provenance.resultSource;
+  const solver = typeof provenance.solver === "string" ? provenance.solver : "";
+  if (kind !== "calculix_fea") throw new Error(invalidCloudFeaProvenanceMessage);
+  if (typeof resultSource !== "string" || !resultSource.startsWith("parsed_")) throw new Error(generatedFallbackResultMessage);
+  if (!/(calculix|ccx)/i.test(solver)) throw new Error(invalidCloudFeaProvenanceMessage);
+  return {
+    kind,
+    solver,
+    solverVersion: typeof provenance.solverVersion === "string" ? provenance.solverVersion : "unknown",
+    meshSource: typeof provenance.meshSource === "string" ? provenance.meshSource : "unknown",
+    resultSource,
+    units: typeof provenance.units === "string" ? provenance.units : "unknown"
+  };
+}
+
+function normalizeField(runId: string, rawField: unknown, index: number, provenance: ReturnType<typeof normalizeCloudFeaProvenance>) {
   if (!isRecord(rawField)) throw new Error(`Cloud FEA container returned invalid field ${index}.`);
   const values = Array.isArray(rawField.values) ? rawField.values.filter((value): value is number => typeof value === "number" && Number.isFinite(value)) : [];
   if (!values.length) throw new Error(`Cloud FEA container returned field ${index} without numeric values.`);
@@ -349,6 +371,7 @@ function normalizeField(runId: string, rawField: unknown, index: number) {
     min: typeof rawField.min === "number" && Number.isFinite(rawField.min) ? rawField.min : Math.min(...values),
     max: typeof rawField.max === "number" && Number.isFinite(rawField.max) ? rawField.max : Math.max(...values),
     units: typeof rawField.units === "string" ? rawField.units : "",
+    provenance,
     ...(typeof rawField.timeSeconds === "number" && Number.isFinite(rawField.timeSeconds)
       ? { timeSeconds: rawField.timeSeconds }
       : typeof rawField.time === "number" && Number.isFinite(rawField.time)

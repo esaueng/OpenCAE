@@ -1,6 +1,6 @@
 import { effectiveMaterialProperties, starterMaterials } from "@opencae/materials";
 import { assessResultFailure } from "@opencae/schema";
-import type { AnalysisMesh, DisplayModel, Load, Material, ResultField, ResultSample, ResultSummary, Study } from "@opencae/schema";
+import type { AnalysisMesh, DisplayModel, Load, Material, ResultField, ResultProvenance, ResultSample, ResultSummary, Study } from "@opencae/schema";
 import { inferCriticalPrintAxis } from "@opencae/study-core";
 
 type Vec3 = [number, number, number];
@@ -71,6 +71,14 @@ const DISPLAY_BEAM_LENGTH = 3.8;
 const BEAM_DISPLAY_HEIGHT = 0.32;
 const BEAM_DISPLAY_WIDTH = 0.72;
 const REQUIRED_BEAM_FACE_IDS = ["face-base-left", "face-load-top", "face-web-front", "face-base-bottom"] as const;
+const BEAM_DEMO_PROVENANCE: ResultProvenance = {
+  kind: "analytical_benchmark",
+  solver: "opencae-euler-bernoulli",
+  solverVersion: "0.1.0",
+  meshSource: "structured_block",
+  resultSource: "generated",
+  units: "mm-N-s-MPa"
+};
 
 export const DEFAULT_BEAM_DEMO_PHYSICAL_MODEL: BeamDemoPhysicalModel = {
   beamLengthMm: 160,
@@ -170,7 +178,8 @@ export function solveBeamDemoStudy(study: Study, runId: string, optionsInput?: A
   };
   const summary: ResultSummary = {
     ...summaryBase,
-    failureAssessment: assessResultFailure(summaryBase)
+    failureAssessment: assessResultFailure(summaryBase),
+    provenance: BEAM_DEMO_PROVENANCE
   };
   const diagnostics = {
     beamAxis: coordinate.beamAxis,
@@ -435,6 +444,7 @@ function fieldFor(runId: string, type: ResultField["type"], values: number[], un
     min: round(Math.min(...allValues), 6),
     max: round(Math.max(...allValues, 0), 6),
     units,
+    provenance: BEAM_DEMO_PROVENANCE,
     samples
   };
 }

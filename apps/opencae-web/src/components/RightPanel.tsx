@@ -15,7 +15,7 @@ import { shouldShowSampleModelPicker } from "../modelPanelState";
 import { SETTING_HELP, type SettingHelpId, type SettingHelpVisual } from "../settingHelp";
 import { supportDisplayLabel } from "../supportLabels";
 import { getViewportTooltipPosition } from "../tooltipPosition";
-import { forceForUnits, formatDensity, formatMass, formatMaterialStress, formatVolume, loadValueForUnits, type UnitSystem } from "../unitDisplay";
+import { forceForUnits, formatDensity, formatMass, formatMaterialStress, formatResultProvenanceLabel, formatVolume, loadValueForUnits, type UnitSystem } from "../unitDisplay";
 import { canNavigateToStep } from "../appShellState";
 import { MaterialLibraryModal } from "./SimulationWorkflow";
 import { SampleOptionCard } from "./SampleOptionCard";
@@ -1313,6 +1313,7 @@ function ResultsPanel({
       <label className="toggle"><input type="checkbox" checked={showDeformed} onChange={onToggleDeformed} /> <HelpLabel helpId="deformedShape">Deformed shape</HelpLabel></label>
       <p className="panel-copy">Red areas have higher stress. Blue areas have lower stress.</p>
       <div className="summary-box">
+        <Info label="Result source" value={formatResultProvenanceLabel(resultSummary.provenance)} />
         <Info label="Max stress" value={`${resultSummary.maxStress} ${resultSummary.maxStressUnits}`} />
         <Info label="Max displacement" value={`${resultSummary.maxDisplacement} ${resultSummary.maxDisplacementUnits}`} />
         <Info label="Safety factor" value={String(resultSummary.safetyFactor)} />
