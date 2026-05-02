@@ -3081,7 +3081,15 @@ button:disabled {
   font-weight: var(--fw-semibold);
 }
 
-.log-copy-button {
+.logs-drawer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+}
+
+.log-copy-button,
+.log-clear-button {
   min-height: 26px;
   padding: 0 10px;
   color: var(--color-text-muted);
@@ -3093,11 +3101,24 @@ button:disabled {
 }
 
 .log-copy-button:hover,
-.log-copy-button:focus-visible {
+.log-copy-button:focus-visible,
+.log-clear-button:hover,
+.log-clear-button:focus-visible {
   color: var(--color-text);
   background: var(--color-surface-2);
   border-color: var(--color-accent-border);
   outline: none;
+}
+
+.log-clear-button {
+  color: #e7b25a;
+  border-color: rgba(231, 178, 90, 0.35);
+}
+
+.log-clear-button:disabled {
+  color: var(--color-text-faint);
+  cursor: not-allowed;
+  border-color: var(--color-border);
 }
 
 .tips-content {

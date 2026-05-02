@@ -1,4 +1,4 @@
-import { useRef, useState, type MouseEvent, type PointerEvent } from "react";
+import { useEffect, useRef, useState, type MouseEvent, type PointerEvent } from "react";
 import { Coffee, Github, MessageSquare } from "lucide-react";
 import { REQUIRED_SETTING_HELP_IDS, SETTING_HELP, type SettingHelpVisual } from "../settingHelp";
 
@@ -10,6 +10,7 @@ interface BottomPanelProps {
   meshStatus: string;
   solverStatus: string;
   backendStatus: "local" | "cloud";
+  onClearLogs: () => void;
 }
 
 export const WORKSPACE_SHORTCUT_GUIDE: Array<{ keys: string[]; label: string }> = [
@@ -21,14 +22,21 @@ export const WORKSPACE_SHORTCUT_GUIDE: Array<{ keys: string[]; label: string }> 
   { keys: ["Shift", "Ctrl/Cmd", "Z"], label: "Redo" }
 ];
 
-export function BottomPanel({ status, logs, projectName, studyName, meshStatus, solverStatus, backendStatus }: BottomPanelProps) {
+export function BottomPanel({ status, logs, projectName, studyName, meshStatus, solverStatus, backendStatus, onClearLogs }: BottomPanelProps) {
   const [tab, setTab] = useState<"tips" | "logs" | null>(null);
   const [drawerHeight, setDrawerHeight] = useState(320);
+  const [clearPromptVisible, setClearPromptVisible] = useState(false);
   const dragStart = useRef<{ y: number; height: number } | null>(null);
   const expanded = tab !== null;
   const displayStatus = statusForDisplay(status, solverStatus);
   const healthy = solverStatus === "Running" ? "running" : displayStatus === "Cloud FEA error" ? "warning" : meshStatus === "Ready" ? "ready" : "warning";
   const formattedLogs = logs.map(formatLogEntry);
+
+  useEffect(() => {
+    if (!clearPromptVisible) return undefined;
+    const timeoutId = window.setTimeout(() => setClearPromptVisible(false), 2200);
+    return () => window.clearTimeout(timeoutId);
+  }, [clearPromptVisible]);
 
   function selectTab(nextTab: NonNullable<typeof tab>, event: MouseEvent<HTMLButtonElement>) {
     if (tab === nextTab) {
@@ -64,6 +72,17 @@ export function BottomPanel({ status, logs, projectName, studyName, meshStatus, 
     void navigator.clipboard.writeText(formattedLogs.join("\n"));
   }
 
+  function clearLogs(event: MouseEvent<HTMLButtonElement>) {
+    if (!logs.length) return;
+    if (resolveLogClearIntent(event.detail, clearPromptVisible) === "clear") {
+      setClearPromptVisible(false);
+      onClearLogs();
+      event.currentTarget.blur();
+      return;
+    }
+    setClearPromptVisible(true);
+  }
+
   return (
     <footer className={`bottom-panel ${expanded ? "expanded" : ""}`}>
       {expanded && tab === "logs" && (
@@ -80,7 +99,19 @@ export function BottomPanel({ status, logs, projectName, studyName, meshStatus, 
           />
           <div className="logs-drawer-header">
             <span>Run logs</span>
-            <button type="button" className="log-copy-button" onClick={copyLogs}>Copy logs</button>
+            <div className="logs-drawer-actions">
+              <button type="button" className="log-copy-button" onClick={copyLogs}>Copy logs</button>
+              <button
+                type="button"
+                className="log-clear-button"
+                disabled={!logs.length}
+                title="Double-click to clear run logs"
+                aria-label="Clear logs. Double-click to clear."
+                onClick={clearLogs}
+              >
+                {clearPromptVisible ? "Double-click to clear" : "Clear logs"}
+              </button>
+            </div>
           </div>
           <pre>{formattedLogs.join("\n")}</pre>
         </div>
@@ -197,6 +228,10 @@ function statusForDisplay(status: string, solverStatus: string) {
   if (status.toLowerCase().includes("complete")) return "Results ready";
   if (normalized.includes("cloud fea")) return "Cloud FEA active";
   return "Ready";
+}
+
+export function resolveLogClearIntent(clickDetail: number, armed: boolean): "confirm" | "clear" {
+  return armed || clickDetail >= 2 ? "clear" : "confirm";
 }
 
 function formatLogEntry(entry: string, index: number) {
