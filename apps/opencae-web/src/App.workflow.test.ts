@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { describe, expect, test } from "vitest";
 
 const appSource = readFileSync(resolve(__dirname, "WorkspaceApp.tsx"), "utf8");
+const apiSource = readFileSync(resolve(__dirname, "lib/api.ts"), "utf8");
 
 describe("App workflow layout", () => {
   test("uses the step-by-step StepBar as the primary simulation workflow", () => {
@@ -82,7 +83,9 @@ describe("App workflow layout", () => {
   test("surfaces Cloud FEA run creation failures instead of leaving the run button inert", () => {
     expect(appSource).toContain('pushMessage("Starting simulation run.");');
     expect(appSource).toContain("runDiagnosticsMessage(study)");
-    expect(appSource).toContain('pushMessage("Cloud FEA request started: POST /api/cloud-fea/runs.");');
+    expect(appSource).not.toContain('pushMessage("Cloud FEA request started: POST /api/cloud-fea/runs.");');
+    expect(apiSource).toContain("Cloud FEA request started: POST");
+    expect(apiSource).toContain("Cloud FEA local bridge selected:");
     expect(appSource).toContain("try {\n      response = await runSimulation(study.id, study, displayModel ?? undefined, { onCloudFeaHealth: pushMessage });");
     expect(appSource).toContain("setRunProgress(0);");
     expect(appSource).toContain('pushMessage(`Cloud FEA run creation failed: ${errorMessage(error, "Could not start simulation.")}`);');

@@ -967,7 +967,6 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     pushMessage("Starting simulation run.");
     pushMessage(runDiagnosticsMessage(study));
     const cloudFeaRun = isCloudFeaStudy(study);
-    if (cloudFeaRun) pushMessage("Cloud FEA request started: POST /api/cloud-fea/runs.");
     let response: Awaited<ReturnType<typeof runSimulation>>;
     try {
       response = await runSimulation(study.id, study, displayModel ?? undefined, { onCloudFeaHealth: pushMessage });
