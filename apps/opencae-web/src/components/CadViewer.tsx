@@ -4745,6 +4745,8 @@ const RESULT_LEGEND_MIN_WIDTH = 280;
 const RESULT_LEGEND_MIN_HEIGHT = 148;
 const RESULT_LEGEND_DEFAULT_WIDTH = 360;
 const RESULT_LEGEND_DEFAULT_HEIGHT = 148;
+const RESULT_LEGEND_GROW_HEIGHT = 176;
+const RESULT_LEGEND_MIN_CONTENT_SCALE = 0.72;
 const RESULT_LEGEND_MAX_CONTENT_SCALE = 2.4;
 const RESULT_LEGEND_VIEWPORT_INSET = 12;
 
@@ -4787,9 +4789,16 @@ export function resultLegendResizeDimensions({
 }
 
 export function resultLegendContentScale(size: ResultLegendSize) {
+  const widthScale = size.width / RESULT_LEGEND_DEFAULT_WIDTH;
+  const compactHeightScale = size.height / RESULT_LEGEND_DEFAULT_HEIGHT;
+  const growHeightScale = size.height / RESULT_LEGEND_GROW_HEIGHT;
+  const scale = widthScale < 1 || compactHeightScale < 1
+    ? Math.min(widthScale, compactHeightScale)
+    : Math.max(1, Math.min(widthScale, growHeightScale));
+
   return Number(clampNumber(
-    Math.min(size.width / RESULT_LEGEND_DEFAULT_WIDTH, size.height / RESULT_LEGEND_DEFAULT_HEIGHT),
-    1,
+    scale,
+    RESULT_LEGEND_MIN_CONTENT_SCALE,
     RESULT_LEGEND_MAX_CONTENT_SCALE
   ).toFixed(2));
 }

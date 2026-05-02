@@ -282,7 +282,8 @@ describe("CadViewer result coloring", () => {
 
   test("scales result legend content as the legend is resized", () => {
     expect(resultLegendContentScale({ width: 360, height: 148 })).toBe(1);
-    expect(resultLegendContentScale({ width: 720, height: 296 })).toBe(2);
+    expect(resultLegendContentScale({ width: 720, height: 296 })).toBe(1.68);
+    expect(resultLegendContentScale({ width: 280, height: 148 })).toBe(0.78);
     expect(resultLegendContentScale({ width: 1240, height: 720 })).toBe(2.4);
   });
 
