@@ -34,9 +34,10 @@ describe("Cloudflare FEA worker orchestration", () => {
     const packageJson = JSON.parse(readFileSync(resolve(__dirname, "../../../package.json"), "utf8")) as { scripts: Record<string, string> };
     const containerConfig = JSON.parse(readFileSync(resolve(__dirname, "../../../wrangler.containers.jsonc"), "utf8")) as {
       name?: string;
+      account_id?: string;
       workers_dev?: boolean;
       routes?: Array<{ pattern?: string; custom_domain?: boolean }>;
-      containers?: Array<{ class_name?: string; image?: string }>;
+      containers?: Array<{ class_name?: string; image?: string; image_build_context?: string }>;
       durable_objects?: { bindings?: Array<{ name?: string; class_name?: string }> };
       migrations?: Array<{ new_sqlite_classes?: string[] }>;
     };
@@ -46,10 +47,17 @@ describe("Cloudflare FEA worker orchestration", () => {
     expect(packageJson.scripts["deploy:cloudflare:dry-run"]).toContain("--config wrangler.containers.jsonc");
     expect(packageJson.scripts["deploy:cloudflare:static"]).toContain("--config wrangler.jsonc");
     expect(packageJson.scripts["deploy:cloudflare:static:dry-run"]).toContain("--config wrangler.jsonc");
+    expect(packageJson.scripts["containers:build"]).toContain("--config wrangler.containers.jsonc");
+    expect(packageJson.scripts["containers:push"]).toContain("--config wrangler.containers.jsonc");
     expect(containerConfig.name).toBe("opencae");
+    expect(containerConfig.account_id).toBe("747b74cbd7d019dd7aeecb2c24a4bf10");
     expect(containerConfig.workers_dev).toBe(false);
     expect(containerConfig.routes).toContainEqual({ pattern: "cae.esau.app", custom_domain: true });
-    expect(containerConfig.containers?.[0]).toMatchObject({ class_name: "OpenCaeFeaContainer", image: "opencae/opencae-fea:latest" });
+    expect(containerConfig.containers?.[0]).toMatchObject({
+      class_name: "OpenCaeFeaContainer",
+      image: "./services/opencae-fea-container/Dockerfile",
+      image_build_context: "./services/opencae-fea-container"
+    });
     expect(containerConfig.durable_objects?.bindings).toContainEqual({ name: "FEA_CONTAINER", class_name: "OpenCaeFeaContainer" });
     expect(defaultConfig.containers).toBeUndefined();
     expect(defaultConfig.durable_objects?.bindings ?? []).not.toContainEqual({ name: "FEA_CONTAINER", class_name: "OpenCaeFeaContainer" });

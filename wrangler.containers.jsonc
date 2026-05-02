@@ -1,6 +1,7 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "opencae",
+  "account_id": "747b74cbd7d019dd7aeecb2c24a4bf10",
   "main": "apps/opencae-web/worker/index.ts",
   "compatibility_date": "2026-04-27",
   "compatibility_flags": ["nodejs_compat"],
@@ -42,7 +43,8 @@
   "containers": [
     {
       "class_name": "OpenCaeFeaContainer",
-      "image": "opencae/opencae-fea:latest",
+      "image": "./services/opencae-fea-container/Dockerfile",
+      "image_build_context": "./services/opencae-fea-container",
       "instance_type": "standard-1",
       "max_instances": 5
     }
