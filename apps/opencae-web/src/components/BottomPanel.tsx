@@ -11,6 +11,15 @@ interface BottomPanelProps {
   solverStatus: string;
 }
 
+export const WORKSPACE_SHORTCUT_GUIDE: Array<{ keys: string[]; label: string }> = [
+  { keys: ["N"], label: "Next workflow step" },
+  { keys: ["B"], label: "Previous workflow step" },
+  { keys: ["H"], label: "Fit view / home view" },
+  { keys: ["Ctrl/Cmd", "S"], label: "Save project" },
+  { keys: ["Ctrl/Cmd", "Z"], label: "Undo" },
+  { keys: ["Shift", "Ctrl/Cmd", "Z"], label: "Redo" }
+];
+
 export function BottomPanel({ status, logs, projectName, studyName, meshStatus, solverStatus }: BottomPanelProps) {
   const [tab, setTab] = useState<"tips" | "logs" | null>(null);
   const [drawerHeight, setDrawerHeight] = useState(320);
@@ -85,6 +94,7 @@ export function BottomPanel({ status, logs, projectName, studyName, meshStatus, 
             <span>Settings tips</span>
             <strong>{REQUIRED_SETTING_HELP_IDS.length} guides</strong>
           </div>
+          <KeyboardShortcutGuide />
           <div className="tips-grid">
             {REQUIRED_SETTING_HELP_IDS.map((helpId) => {
               const help = SETTING_HELP[helpId];
@@ -140,6 +150,32 @@ function TipVisual({ kind }: { kind: SettingHelpVisual }) {
       <span className="help-force" />
       <span className="help-grid" />
     </span>
+  );
+}
+
+export function KeyboardShortcutGuide() {
+  return (
+    <section className="shortcut-guide" aria-labelledby="shortcut-guide-title">
+      <div className="shortcut-guide-header">
+        <strong id="shortcut-guide-title">Keyboard shortcuts</strong>
+        <span>Workspace</span>
+      </div>
+      <div className="shortcut-list">
+        {WORKSPACE_SHORTCUT_GUIDE.map((shortcut) => (
+          <div className="shortcut-item" key={`${shortcut.keys.join("+")}-${shortcut.label}`}>
+            <span className="shortcut-keys">
+              {shortcut.keys.map((key, index) => (
+                <span className="shortcut-key" key={`${shortcut.label}-${key}-${index}`}>
+                  {index > 0 && <span aria-hidden="true">+</span>}
+                  <kbd>{key}</kbd>
+                </span>
+              ))}
+            </span>
+            <span>{shortcut.label}</span>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 
