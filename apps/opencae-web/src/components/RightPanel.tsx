@@ -1381,13 +1381,20 @@ function WorkflowNav({ activeStep, study, onStepSelect }: { activeStep: StepId; 
   const previousStep = index > 0 ? WORKFLOW_STEPS[index - 1] : undefined;
   const nextStep = index >= 0 && index < WORKFLOW_STEPS.length - 1 ? WORKFLOW_STEPS[index + 1] : undefined;
   const canGoNext = Boolean(nextStep && canNavigateToStep(nextStep.id, { meshStatus: study.meshSettings.status }));
+  const backLabel = previousStep ? `Back: ${previousStep.label}` : "Back";
+  const nextLabel = nextStep ? `Next: ${nextStep.label}` : "Next";
+  const backAriaLabel = previousStep ? `Previous workflow step: ${previousStep.label}. Shortcut B` : "Previous workflow step. Shortcut B";
+  const nextAriaLabel = nextStep ? `Next workflow step: ${nextStep.label}. Shortcut N` : "Next workflow step. Shortcut N";
+
   return (
     <div className="workflow-nav" aria-label="Workflow navigation">
-      <button className="secondary" type="button" disabled={!previousStep} onClick={() => previousStep && onStepSelect(previousStep.id)}>
-        {previousStep ? `Back: ${previousStep.label}` : "Back"}
+      <button className="secondary" type="button" title="Previous workflow step (B)" aria-label={backAriaLabel} disabled={!previousStep} onClick={() => previousStep && onStepSelect(previousStep.id)}>
+        <span className="workflow-nav-label">{backLabel}</span>
+        <kbd>B</kbd>
       </button>
-      <button className="primary" type="button" disabled={!canGoNext} onClick={() => nextStep && canGoNext && onStepSelect(nextStep.id)}>
-        {nextStep ? `Next: ${nextStep.label}` : "Next"}
+      <button className="primary" type="button" title="Next workflow step (N)" aria-label={nextAriaLabel} disabled={!canGoNext} onClick={() => nextStep && canGoNext && onStepSelect(nextStep.id)}>
+        <span className="workflow-nav-label">{nextLabel}</span>
+        <kbd>N</kbd>
       </button>
     </div>
   );
