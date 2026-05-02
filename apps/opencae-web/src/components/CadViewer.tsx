@@ -145,8 +145,8 @@ export const VIEWER_AXIS_LABEL_OUTLINE_WIDTH = 0.02;
 // origin is one cube corner, not the cube center.
 // cube bounds are [0, cubeSize] on X/Y/Z.
 // X/Y/Z axis labels sit beyond the cube in positive directions.
-export const VIEWER_GIZMO_AXIS_LENGTH = 1.55;
-export const VIEWER_GIZMO_LABEL_DISTANCE = 1.68;
+export const VIEWER_GIZMO_AXIS_LENGTH = 1.75;
+export const VIEWER_GIZMO_LABEL_DISTANCE = 1.9;
 export const VIEWER_VIEW_CUBE_SIZE = 1.2;
 export const VIEWER_VIEW_CUBE_BODY_OPACITY = 1;
 export const VIEWER_VIEW_CUBE_FACE_OPACITY = 0.62;
