@@ -1,3 +1,15 @@
 OpenCAE is licensed under the Apache License 2.0.
 
 Copyright 2026 Esau Engineering. The OpenCAE name and logo are trademarks of Esau Engineering.
+
+Third-party components
+
+OpenCAE source code is licensed under the Apache License 2.0.
+
+OpenCAE may interoperate with or distribute separately licensed third-party
+tools and libraries, including finite-element solvers, meshing tools, CAD
+import libraries, and JavaScript dependencies. Those third-party components
+are not relicensed under Apache-2.0. Their respective licenses apply when
+installed, invoked, linked, bundled, or distributed.
+
+See THIRD_PARTY_NOTICES.md for third-party attribution and license details.

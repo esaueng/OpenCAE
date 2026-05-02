@@ -87,7 +87,7 @@ The built-in demos include bracket, beam, and cantilever studies with Aluminum 6
 OpenCAE uses two solver paths:
 
 - **Detailed local solver** - a deterministic TypeScript structural solver in `@opencae/solver-service` for fast local/browser estimates, static stress, dynamic structural playback, and responsive demo workflows.
-- **Cloud FEA solver** - a containerized adapter in `services/opencae-fea-container` that generates CalculiX input decks and runs the open-source **CalculiX CrunchiX** executable (`ccx`) when Cloud FEA containers are enabled. The container image installs Debian's `calculix-ccx` package and also includes **Gmsh** for uploaded geometry meshing/staging.
+- **Cloud FEA solver** - a containerized adapter in `services/opencae-fea-container` that generates CalculiX input decks and runs the open-source **CalculiX CrunchiX** executable (`ccx`) when Cloud FEA containers are enabled. The container image installs Debian's `calculix-ccx` package and also includes **Gmsh** for uploaded geometry meshing/staging. CalculiX and Gmsh are separately licensed third-party components and are not relicensed under Apache-2.0.
 
 Credit: [CalculiX](http://www.calculix.de/) provides the open-source finite element solver used by the Cloud FEA path. [Gmsh](https://gmsh.info/) is used as the open-source meshing tool in the Cloud FEA container when uploaded geometry needs a generated mesh.
 
@@ -101,7 +101,12 @@ Credit: [CalculiX](http://www.calculix.de/) provides the open-source finite elem
 
 ## License
 
-OpenCAE is licensed under the Apache License 2.0.
+OpenCAE source code is licensed under the Apache License 2.0.
+
+OpenCAE may invoke or distribute separately licensed third-party tools and
+libraries, including CalculiX, Gmsh, and OCCT/occt-import-js components. Those
+components are not relicensed under Apache-2.0. See [NOTICE](NOTICE) and
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for details.
 
 Copyright 2026 Esau Engineering. The OpenCAE name and logo are trademarks of Esau Engineering.
 
