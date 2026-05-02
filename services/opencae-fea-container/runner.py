@@ -8,6 +8,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import traceback
 
 
 UNPARSED_RESULTS_ERROR = "CalculiX output was not parsed into real result fields; refusing to publish generated fallback results."
@@ -47,7 +48,13 @@ class Handler(BaseHTTPRequestHandler):
             payload.update(error.payload)
             self._json(error.status, payload)
         except Exception as error:
-            self._json(500, {"error": f"CalculiX adapter failed: {error}"})
+            self._json(500, {
+                "error": f"CalculiX adapter failed: {error}",
+                "artifacts": {
+                    "solverResultParser": "python-exception",
+                    "solverLog": traceback.format_exc()
+                }
+            })
 
     def log_message(self, format, *args):
         return
@@ -710,7 +717,11 @@ def format_cload_lines(nodal_loads):
 
 
 def parse_calculix_results(workdir, parsed, mesh, boundaries, input_deck, solver_output):
-    parsed_files = parse_calculix_result_files(workdir, parsed["runId"], mesh)
+    parsed_files = parse_calculix_result_files(workdir, parsed["runId"], {
+        "mesh": mesh,
+        "boundaries": boundaries,
+        "parsed": parsed
+    })
     if is_parsed_calculix_status(parsed_files["status"]):
         return response_from_parsed_dat(parsed, mesh, boundaries, input_deck, solver_output, parsed_files)
     return {
@@ -736,11 +747,15 @@ def run_ccx_if_available(workdir, deck_path):
     return {"log": log, "returnCode": result.returncode}
 
 
-def parse_calculix_result_files(workdir, run_id):
+def parse_calculix_result_files(workdir, run_id, context=None):
+    context = context if isinstance(context, dict) else {}
+    mesh = context.get("mesh")
+    if not (isinstance(mesh, dict) and isinstance(mesh.get("nodes"), list) and isinstance(mesh.get("elements"), list)):
+        mesh = None
     files = sorted(path.name for path in workdir.glob("*") if path.suffix.lower() in {".frd", ".dat", ".sta"})
     dat_files = [workdir / name for name in files if name.endswith(".dat")]
     for dat_path in dat_files:
-        parsed = parse_dat_result(dat_path.read_text(errors="ignore"))
+        parsed = parse_dat_result(dat_path.read_text(errors="ignore"), mesh)
         if parsed["displacements"] and parsed["stresses"]:
             has_frd = any(name.endswith(".frd") for name in files)
             return {
