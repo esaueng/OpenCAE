@@ -747,8 +747,10 @@ def run_ccx_if_available(workdir, deck_path):
     return {"log": log, "returnCode": result.returncode}
 
 
-def parse_calculix_result_files(workdir, run_id, context=None):
-    context = context if isinstance(context, dict) else {}
+def parse_calculix_result_files(workdir, run_id, context=None, *_, **__):
+    context = context or {}
+    if not isinstance(context, dict):
+        context = {}
     mesh = context.get("mesh")
     if not (isinstance(mesh, dict) and isinstance(mesh.get("nodes"), list) and isinstance(mesh.get("elements"), list)):
         mesh = None

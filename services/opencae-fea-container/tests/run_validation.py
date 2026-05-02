@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import math
 import base64
+import io
 import shutil
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
@@ -88,11 +90,42 @@ class ValidationSuite(unittest.TestCase):
 
             legacy_result = runner.parse_calculix_result_files(workdir, "validation-parser")
             context_result = runner.parse_calculix_result_files(workdir, "validation-parser", {"mesh": {}, "boundaries": {}})
+            extra_args_result = runner.parse_calculix_result_files(
+                workdir,
+                "validation-parser",
+                {"mesh": {}, "boundaries": {}},
+                "ignored",
+                ignored=True,
+            )
 
         self.assertEqual(legacy_result["status"], "parsed-calculix-dat")
         self.assertEqual(context_result["status"], "parsed-calculix-dat")
+        self.assertEqual(extra_args_result["status"], "parsed-calculix-dat")
         self.assertAlmostEqual(legacy_result["stresses"][0]["vonMises"], 0.2)
-        self.assertAlmostEqual(context_result["stresses"][0]["vonMises"], 0.2)
+        self.assertAlmostEqual(context_result["stresses"][0]["vonMises"], legacy_result["stresses"][0]["vonMises"])
+        self.assertAlmostEqual(extra_args_result["stresses"][0]["vonMises"], legacy_result["stresses"][0]["vonMises"])
+
+    def test_handler_generic_exception_returns_python_exception_artifacts(self):
+        class CapturingHandler(runner.Handler):
+            def __init__(self):
+                self.path = "/solve"
+                self.headers = {"content-length": "2"}
+                self.rfile = io.BytesIO(b"{}")
+                self.status = None
+                self.payload = None
+
+            def _json(self, status, payload):
+                self.status = status
+                self.payload = payload
+
+        handler = CapturingHandler()
+        with mock.patch.object(runner, "solve", side_effect=RuntimeError("boom")):
+            handler.do_POST()
+
+        self.assertEqual(handler.status, 500)
+        self.assertEqual(handler.payload["artifacts"]["solverResultParser"], "python-exception")
+        self.assertIn("Traceback", handler.payload["artifacts"]["solverLog"])
+        self.assertIn("RuntimeError: boom", handler.payload["artifacts"]["solverLog"])
 
     def test_axial_tension_f_over_a_units_and_load_distribution(self):
         parsed = runner.parse_payload(block_payload("axial", ALUMINUM_6061, [1, 0, 0], 1.0, "standard"))
