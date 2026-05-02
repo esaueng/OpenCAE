@@ -256,13 +256,13 @@ describe("CadViewer result coloring", () => {
       currentClientY: 120,
       maxHeight: 576,
       maxWidth: 976,
-      minHeight: 176,
+      minHeight: 148,
       minWidth: 280,
       startClientX: 460,
       startClientY: 180,
-      startHeight: 176,
+      startHeight: 148,
       startWidth: 360
-    })).toEqual({ width: 420, height: 236 });
+    })).toEqual({ width: 420, height: 208 });
   });
 
   test("clamps result legend resize to viewport-safe dimensions", () => {
@@ -271,18 +271,18 @@ describe("CadViewer result coloring", () => {
       currentClientY: -800,
       maxHeight: 576,
       maxWidth: 976,
-      minHeight: 176,
+      minHeight: 148,
       minWidth: 280,
       startClientX: 460,
       startClientY: 180,
-      startHeight: 176,
+      startHeight: 148,
       startWidth: 360
     })).toEqual({ width: 280, height: 576 });
   });
 
   test("scales result legend content as the legend is resized", () => {
-    expect(resultLegendContentScale({ width: 360, height: 176 })).toBe(1);
-    expect(resultLegendContentScale({ width: 720, height: 352 })).toBe(2);
+    expect(resultLegendContentScale({ width: 360, height: 148 })).toBe(1);
+    expect(resultLegendContentScale({ width: 720, height: 296 })).toBe(2);
     expect(resultLegendContentScale({ width: 1240, height: 720 })).toBe(2.4);
   });
 
