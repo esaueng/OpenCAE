@@ -83,6 +83,8 @@ interface RightPanelProps {
   canCancelSimulation?: boolean;
   canRunSimulation: boolean;
   missingRunItems: string[];
+  cloudFeaAvailable?: boolean;
+  cloudFeaEndpoint?: string;
   resultFrameIndex?: number;
   resultFramePosition?: number;
   resultFrameOrdinalPosition?: number;
@@ -936,7 +938,7 @@ function MeshPanel({ study, onGenerateMesh }: RightPanelProps) {
   );
 }
 
-function RunPanel({ study, runProgress, runTiming, onRunSimulation, onCancelSimulation, canCancelSimulation, onUpdateSolverSettings, canRunSimulation, missingRunItems }: RightPanelProps) {
+function RunPanel({ study, runProgress, runTiming, onRunSimulation, onCancelSimulation, canCancelSimulation, onUpdateSolverSettings, canRunSimulation, missingRunItems, cloudFeaAvailable, cloudFeaEndpoint }: RightPanelProps) {
   const progressPercent = Math.max(0, Math.min(100, Math.round(runProgress)));
   const isRunning = canCancelSimulation ?? (progressPercent > 0 && progressPercent < 100);
   const remainingLabel = formatSimulationEta(runTiming?.estimatedRemainingMs, isRunning);
@@ -950,6 +952,9 @@ function RunPanel({ study, runProgress, runTiming, onRunSimulation, onCancelSimu
   const dynamic = study.type === "dynamic_structural" ? study.solverSettings : null;
   const backend = solverBackendForStudy(study);
   const effectiveRuntimeBackend = backend;
+  const cloudFeaSelected = effectiveRuntimeBackend === "cloudflare_fea";
+  const cloudFeaUnavailable = cloudFeaSelected && cloudFeaAvailable === false;
+  const runButtonEnabled = canRunSimulation && !cloudFeaUnavailable;
   const fidelity = solverFidelityForStudy(study);
   const updateSolverChoice = (settings: SolverSettingsPatch) => {
     onUpdateSolverSettings?.(settings);
@@ -980,8 +985,10 @@ function RunPanel({ study, runProgress, runTiming, onRunSimulation, onCancelSimu
       </label>
       <div className="summary-box">
         <Info label="Expected detail" value={fidelityEstimateLabel(fidelity)} />
-        <Info label="Cloud runtime" value={effectiveRuntimeBackend === "cloudflare_fea" ? dynamic ? "CalculiX transient container" : "CalculiX container" : "Browser local"} />
+        <Info label="Cloud runtime" value={cloudFeaSelected ? dynamic ? "CalculiX transient container" : "CalculiX container" : "Browser local"} />
+        {cloudFeaSelected && cloudFeaEndpoint ? <Info label="Cloud FEA endpoint" value={cloudFeaEndpoint} /> : null}
       </div>
+      {cloudFeaUnavailable ? <Callout>Cloud FEA is unavailable on this app domain because this Worker was deployed without FEA_CONTAINER. Deploy with wrangler.containers.jsonc.</Callout> : null}
       {dynamic && (
         <>
           <SectionTitle>Dynamic settings</SectionTitle>
@@ -1000,8 +1007,8 @@ function RunPanel({ study, runProgress, runTiming, onRunSimulation, onCancelSimu
       <button
         className="primary wide"
         onClick={onRunSimulation}
-        disabled={!canRunSimulation}
-        title={missingRunItems.length ? `Complete before running: ${missingRunItems.join(", ")}` : "Run simulation"}
+        disabled={!runButtonEnabled}
+        title={cloudFeaUnavailable ? "Cloud FEA is unavailable on this app domain." : missingRunItems.length ? `Complete before running: ${missingRunItems.join(", ")}` : "Run simulation"}
       >
         <Play size={16} />Run simulation
       </button>
@@ -1023,9 +1030,9 @@ function RunPanel({ study, runProgress, runTiming, onRunSimulation, onCancelSimu
       )}
       <SectionTitle helpId="solver">Solver</SectionTitle>
       <div className="summary-box">
-        <Info label="Backend" value={effectiveRuntimeBackend === "cloudflare_fea" ? "cloudflare-fea-calculix" : study.type === "dynamic_structural" ? "local-dynamic-newmark" : "local-heuristic-surface"} />
+        <Info label="Backend" value={cloudFeaSelected ? "cloudflare-fea-calculix" : study.type === "dynamic_structural" ? "local-dynamic-newmark" : "local-heuristic-surface"} />
         <Info label="Version" value="0.1.0" />
-        <Info label="Runner" value={effectiveRuntimeBackend === "cloudflare_fea" ? "cloudflare-queue-container" : "local-in-memory"} />
+        <Info label="Runner" value={cloudFeaSelected ? "cloudflare-queue-container" : "local-in-memory"} />
       </div>
     </Panel>
   );

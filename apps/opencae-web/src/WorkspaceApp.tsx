@@ -1,7 +1,7 @@
 import { lazy, startTransition, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Constraint, DisplayFace, DisplayModel, DynamicSolverSettings, Load, NamedSelection, Project, ResultField, ResultSummary, RunEvent, RunTimingEstimate, SimulationFidelity, SolverBackend, Study } from "@opencae/schema";
 import { RotateCcw, Save } from "lucide-react";
-import { addLoad, addSupport, assignMaterial, cancelRun, createProject, generateMesh, getResults, importLocalProject, loadSampleProject, renameProject, runSimulation, subscribeToRun, updateStudy as saveStudyPatch, uploadModel, type SampleAnalysisType, type SampleModelId } from "./lib/api";
+import { addLoad, addSupport, assignMaterial, cancelRun, createProject, generateMesh, getCloudFeaHealth, getResults, importLocalProject, loadSampleProject, renameProject, runSimulation, subscribeToRun, updateStudy as saveStudyPatch, uploadModel, type CloudFeaRouteHealth, type SampleAnalysisType, type SampleModelId } from "./lib/api";
 import { normalizePrintParameters, starterMaterials } from "@opencae/materials";
 import { BottomPanel } from "./components/BottomPanel";
 import { OpenCaeLogoMark } from "./components/OpenCaeLogoMark";
@@ -145,6 +145,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const [previewPrintLayerOrientation, setPreviewPrintLayerOrientation] = useState<PrintLayerOrientation | null | undefined>(undefined);
   const [isStepbarCollapsed, setIsStepbarCollapsed] = useState(false);
   const [showBoundaryConditionMenu, setShowBoundaryConditionMenu] = useState(false);
+  const [cloudFeaHealth, setCloudFeaHealth] = useState<CloudFeaRouteHealth | null>(null);
   const didRequestRestoredHomeView = useRef(false);
   const activeRunSourceRef = useRef<EventSource | null>(null);
   const processingRunIdRef = useRef<string | null>(null);
@@ -252,8 +253,29 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const runReadiness = useMemo(() => readinessForStudy(study), [study]);
   const canRunSimulation = runReadiness.every((item) => item.done) && !solverRunning;
   const missingRunItems = runReadiness.filter((item) => !item.done).map((item) => item.label);
+  const cloudFeaEndpoint = cloudFeaHealth?.cloudFeaEndpoint ?? cloudFeaRunsEndpointForCurrentOrigin();
+  const cloudFeaUnavailable = isCloudFeaStudy(study) && cloudFeaHealth?.cloudFeaAvailable === false;
+  const effectiveCanRunSimulation = canRunSimulation && !cloudFeaUnavailable;
   const canUndoAction = undoStack.length > 0;
   const canRedoAction = redoStack.length > 0;
+
+  useEffect(() => {
+    if (!isCloudFeaStudy(study)) {
+      setCloudFeaHealth(null);
+      return undefined;
+    }
+    let cancelled = false;
+    void getCloudFeaHealth()
+      .then((health) => {
+        if (!cancelled) setCloudFeaHealth(health);
+      })
+      .catch(() => {
+        if (!cancelled) setCloudFeaHealth(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [study?.id, study?.solverSettings]);
 
   useEffect(() => {
     if (!initialAction || initialActionConsumedRef.current) return;
@@ -963,7 +985,11 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
 
   async function handleRunSimulation() {
     if (!study) return;
-    if (!canRunSimulation) {
+    if (!effectiveCanRunSimulation) {
+      if (cloudFeaUnavailable) {
+        pushMessage("Cloud FEA is unavailable on this app domain because this Worker was deployed without FEA_CONTAINER. Deploy with wrangler.containers.jsonc.");
+        return;
+      }
       pushMessage(missingRunItems.length ? `Complete before running: ${missingRunItems.join(", ")}.` : "Simulation is already running.");
       return;
     }
@@ -1094,8 +1120,8 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           <button
             className={`primary topbar-action ${solverRunning ? "running" : ""}`}
             onClick={handleRunSimulation}
-            disabled={!canRunSimulation}
-            title={missingRunItems.length ? `Complete before running: ${missingRunItems.join(", ")}` : "Run simulation"}
+            disabled={!effectiveCanRunSimulation}
+            title={cloudFeaUnavailable ? "Cloud FEA is unavailable on this app domain." : missingRunItems.length ? `Complete before running: ${missingRunItems.join(", ")}` : "Run simulation"}
           >
             <span aria-hidden="true">▶</span>{solverRunning ? "Running…" : "Run simulation"}
           </button>
@@ -1273,8 +1299,10 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           onRunSimulation={handleRunSimulation}
           onCancelSimulation={handleCancelSimulation}
           canCancelSimulation={solverRunning}
-          canRunSimulation={canRunSimulation}
+          canRunSimulation={effectiveCanRunSimulation}
           missingRunItems={missingRunItems}
+          cloudFeaAvailable={isCloudFeaStudy(study) ? cloudFeaHealth?.cloudFeaAvailable : undefined}
+          cloudFeaEndpoint={isCloudFeaStudy(study) ? cloudFeaEndpoint : undefined}
           resultFrameIndex={resultFrameIndex}
           resultFramePosition={resultVisualFramePosition}
           resultFrameOrdinalPosition={resultVisualOrdinalPosition}
@@ -1355,8 +1383,8 @@ function latestCompletedRunId(study: Study | null, activeRunId: string): string 
   return completed?.id ?? null;
 }
 
-function isCloudFeaStudy(study: Study): boolean {
-  return (study.solverSettings as { backend?: unknown }).backend === "cloudflare_fea";
+function isCloudFeaStudy(study: Study | null): boolean {
+  return (study?.solverSettings as { backend?: unknown } | undefined)?.backend === "cloudflare_fea";
 }
 
 function runDiagnosticsMessage(study: Study): string {
@@ -1380,6 +1408,11 @@ function solverFidelityForDiagnostics(study: Study): SimulationFidelity {
 
 function cloudFeaResultsEndpoint(runId: string): string {
   return `/api/cloud-fea/runs/${runId}/results`;
+}
+
+function cloudFeaRunsEndpointForCurrentOrigin(): string {
+  if (typeof window === "undefined" || !window.location?.origin) return "/api/cloud-fea/runs";
+  return `${window.location.origin}/api/cloud-fea/runs`;
 }
 
 function errorMessage(error: unknown, fallback: string): string {
