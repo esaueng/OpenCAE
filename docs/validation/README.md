@@ -25,7 +25,7 @@ or:
 pnpm test:fea-container
 ```
 
-The container validation command always runs analytical, mesh, deck, load-sum, parser, and provenance checks. CalculiX integration checks are skipped when `ccx` is not installed.
+The container validation command always runs analytical, mesh, deck, load-sum, parser, uploaded-geometry safe-failure, face-mapping, and provenance checks. CalculiX integration checks are skipped when `ccx` is not installed. Gmsh-backed uploaded-geometry solves are allowed only after the structured block baseline remains green; missing or ambiguous Gmsh paths must return a clear error instead of falling back to generated values.
 
 ## Benchmark Matrix
 
@@ -36,6 +36,7 @@ The container validation command always runs analytical, mesh, deck, load-sum, p
 | Material swap | Same cantilever block | Aluminum 6061 vs PETG, `E=2100 MPa`, `yield=50 MPa` | Same 1 N bending load/support | Force-controlled linear static stress should be mostly independent of `E`; displacement scales approximately as `1/E` | PETG/aluminum displacement ratio must be broadly near `68900/2100 = 32.8`, accepted `[20, 45]` for parsed solver checks and `[25, 40]` for analytical checks | Analytical displacement ratio `32.8x` |
 | Load scaling | Same cantilever block | Aluminum 6061 | Same support; compare 1 N vs 2 N | Linear static response: `sigma` and `delta` scale with load; safety factor scales as `1/load` | 2 N / 1 N stress and displacement ratios accepted `[1.7, 2.3]`; safety-factor ratio accepted `[0.43, 0.58]` | Analytical ratio exactly `2x`, safety factor `0.5x` |
 | Mesh convergence | Same cantilever block | Aluminum 6061 | Same 1 N bending load/support | Structured mesh densities: standard `20x6x4`, detailed `40x10x6`, ultra `80x16x10` | Node and element counts must increase by fidelity; parsed displacement should not vary by more than `2.5x`; stress must remain `< 1 MPa`; safety factor must remain `>= 500` | Initial tolerance is broad until more benchmark data is collected |
+| Uploaded STL block mapping | `services/opencae-fea-container/tests/fixtures/block_100x30x10_ascii.stl` | Aluminum 6061 | Same fixed/load face descriptors as the cantilever block | Gmsh boundary facets are matched from face center, normal, and plane tolerance; force loads are area-distributed over mapped facets | Missing `gmsh` returns HTTP `503`; ambiguous face mapping returns HTTP `422`; no structured-block or generated fallback is allowed | Compared against the structured block benchmark once `gmsh` and `ccx` are both available |
 
 ## Hard Failure Rules
 
@@ -46,7 +47,8 @@ Validation fails if any of these conditions are found:
 - The 1 N aluminum cantilever reports stress greater than `1 MPa`.
 - The 1 N aluminum cantilever reports safety factor below `500`.
 - The solver publishes fields without parsed CalculiX provenance (`parsed_dat` or `parsed_frd_dat`).
+- Uploaded STEP/STL/OBJ geometry cannot be meshed or mapped to selected support/load faces confidently.
 
 ## Notes
 
-The current trusted Cloud FEA path is the structured hexahedral block path in the CalculiX container. Arbitrary STEP/Gmsh meshing is intentionally outside this validation scope until a separate meshing benchmark set is available.
+The trusted Cloud FEA baseline remains the structured hexahedral block path in the CalculiX container. Uploaded STEP/STL/OBJ support is a separate Gmsh path with stricter refusal behavior: it must either produce parsed CalculiX results with `gmsh_uploaded_geometry` mesh provenance or fail with diagnostics. Local heuristic results remain estimates and are not valid Cloud FEA evidence.

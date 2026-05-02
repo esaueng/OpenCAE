@@ -1,4 +1,5 @@
 import math
+import base64
 import shutil
 import tempfile
 import unittest
@@ -118,6 +119,47 @@ class StructuredBlockSolveTest(unittest.TestCase):
         self.assertEqual(result["artifacts"]["solverResultParser"], "parsed-calculix-dat")
 
 
+class UploadedGeometrySolveTest(unittest.TestCase):
+    def test_uploaded_geometry_refuses_missing_gmsh_before_structured_block_or_ccx(self):
+        payload = uploaded_geometry_payload()
+        with mock.patch.object(runner.shutil, "which", side_effect=lambda command: None if command == "gmsh" else "/usr/bin/ccx"):
+            with self.assertRaises(runner.UserFacingSolveError) as context:
+                runner.solve(payload)
+
+        self.assertEqual(context.exception.status, 503)
+        self.assertIn("Gmsh executable unavailable", str(context.exception))
+        artifacts = context.exception.payload["artifacts"]
+        self.assertEqual(artifacts["solverResultParser"], "gmsh-unavailable")
+        self.assertEqual(artifacts["meshSummary"]["source"], "gmsh_uploaded_geometry")
+        self.assertEqual(artifacts["geometry"]["filename"], "uploaded-block.stl")
+        self.assertNotIn("*ELEMENT, TYPE=C3D8", artifacts["inputDeck"])
+
+    def test_parse_gmsh_mesh_and_map_uploaded_face_selections(self):
+        parsed = runner.parse_payload(uploaded_geometry_payload())
+        mesh = runner.parse_gmsh_msh(gmsh_msh_fixture())
+        boundaries = runner.select_uploaded_geometry_boundaries(parsed, mesh)
+
+        self.assertEqual(mesh["source"], "gmsh_uploaded_geometry")
+        self.assertEqual(len(mesh["nodes"]), 8)
+        self.assertEqual(len(mesh["elements"]), 1)
+        self.assertEqual(mesh["elements"][0]["type"], "C3D4")
+        self.assertEqual(boundaries["fixedFacetIds"], [101])
+        self.assertEqual(boundaries["loadFacetIds"], [102])
+        self.assertEqual(boundaries["fixedNodeIds"], [1, 4, 5])
+        self.assertEqual(boundaries["loadNodeIds"], [2, 3, 6])
+
+    def test_uploaded_geometry_ambiguous_face_mapping_fails_cleanly(self):
+        parsed = runner.parse_payload(uploaded_geometry_payload())
+        mesh = runner.parse_gmsh_msh(gmsh_msh_fixture(duplicate_load_face=True))
+
+        with self.assertRaises(runner.UserFacingSolveError) as context:
+            runner.select_uploaded_geometry_boundaries(parsed, mesh)
+
+        self.assertEqual(context.exception.status, 422)
+        self.assertIn("could not be mapped confidently", str(context.exception))
+        self.assertEqual(context.exception.payload["diagnostics"][0]["id"], "cloud-fea-uploaded-face-mapping-failed")
+
+
 class GeneratedDynamicFieldsTest(unittest.TestCase):
     def test_solve_refuses_unsupported_non_block_payloads(self):
         with self.assertRaises(runner.UserFacingSolveError) as context:
@@ -221,6 +263,43 @@ def block_benchmark_payload(fidelity="standard"):
             "solverSettings": {},
         }
     }
+
+
+def uploaded_geometry_payload():
+    payload = block_benchmark_payload("standard")
+    fixture = Path(__file__).parent / "tests" / "fixtures" / "block_100x30x10_ascii.stl"
+    payload["runId"] = "run-uploaded-geometry"
+    payload["geometry"] = {
+        "format": "stl",
+        "filename": "uploaded-block.stl",
+        "contentBase64": base64.b64encode(fixture.read_bytes()).decode("ascii")
+    }
+    return payload
+
+
+def gmsh_msh_fixture(duplicate_load_face=False):
+    extra = "\n103 2 2 0 6 2 3 6" if duplicate_load_face else ""
+    return f"""$MeshFormat
+2.2 0 8
+$EndMeshFormat
+$Nodes
+8
+1 0 0 0
+2 100 0 0
+3 100 30 0
+4 0 30 0
+5 0 0 10
+6 100 0 10
+7 100 30 10
+8 0 30 10
+$EndNodes
+$Elements
+3{extra and " + 1"}
+101 2 2 0 1 1 5 4
+102 2 2 0 2 2 3 6{extra}
+201 4 2 0 3 1 2 4 5
+$EndElements
+""".replace("3 + 1", "4")
 
 
 if __name__ == "__main__":
