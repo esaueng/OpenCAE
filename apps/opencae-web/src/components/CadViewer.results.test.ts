@@ -46,9 +46,9 @@ describe("CadViewer result coloring", () => {
   });
 
   test("renders compact positive viewer XYZ axis labels", () => {
-    expect(VIEWER_GIZMO_SCALE).toBe(34);
-    expect(VIEWER_AXIS_HEAD_RADIUS).toBe(0.21);
-    expect(VIEWER_AXIS_LABEL_BADGE_RADIUS).toBe(0.145);
+    expect(VIEWER_GIZMO_SCALE).toBe(40);
+    expect(VIEWER_AXIS_HEAD_RADIUS).toBe(0.26);
+    expect(VIEWER_AXIS_LABEL_BADGE_RADIUS).toBe(0.18);
     expect(VIEWER_AXIS_LABEL_BADGE_COLOR).toBe("#07111d");
     expect(VIEWER_AXIS_LABEL_FONT_SIZE).toBe(0.21);
     expect(VIEWER_AXIS_LABEL_COLOR).toBe("#ffffff");
