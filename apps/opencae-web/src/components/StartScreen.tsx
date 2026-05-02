@@ -1,6 +1,8 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import type { SampleAnalysisType, SampleModelId } from "../lib/api";
 import { OpenCaeLogoMark } from "./OpenCaeLogoMark";
+import { SampleOptionCard } from "./SampleOptionCard";
+import { SAMPLE_OPTIONS } from "./sampleOptions";
 
 interface StartScreenProps {
   onLoadSample: (sample?: SampleModelId, analysisType?: SampleAnalysisType) => void;
@@ -10,13 +12,19 @@ interface StartScreenProps {
 
 export function StartScreen({ onLoadSample, onCreateProject, onOpenProject }: StartScreenProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [selectedSample, setSelectedSample] = useState<SampleModelId>("bracket");
+  const [selectedAnalysisType, setSelectedAnalysisType] = useState<SampleAnalysisType>("static_stress");
+
+  function loadSelectedSample(sample = selectedSample) {
+    onLoadSample(sample, selectedAnalysisType);
+  }
 
   return (
     <main
       className="start-screen"
       tabIndex={0}
       onKeyDown={(event) => {
-        if (event.key === "Enter") onLoadSample();
+        if (event.key === "Enter" && event.target === event.currentTarget) loadSelectedSample();
         if (!event.metaKey && !event.ctrlKey && !event.altKey && event.key.toLowerCase() === "n") {
           event.preventDefault();
           onCreateProject();
@@ -31,6 +39,26 @@ export function StartScreen({ onLoadSample, onCreateProject, onOpenProject }: St
         <OpenCaeLogoMark className="start-mark" title="OpenCAE mark" />
         <h1 id="opencae-title">OpenCAE</h1>
         <p className="start-tagline">open structural simulation</p>
+        <div className="start-sample-setup" aria-label="Sample setup">
+          <div className="start-sample-header">
+            <span>Sample model</span>
+            <div className="segmented analysis-type start-analysis-type" role="group" aria-label="Analysis type">
+              <button className={selectedAnalysisType === "static_stress" ? "active" : ""} type="button" onClick={() => setSelectedAnalysisType("static_stress")}>Static</button>
+              <button className={selectedAnalysisType === "dynamic_structural" ? "active" : ""} type="button" onClick={() => setSelectedAnalysisType("dynamic_structural")}>Dynamic</button>
+            </div>
+          </div>
+          <div className="sample-option-grid start-sample-grid" role="list" aria-label="Sample model">
+            {SAMPLE_OPTIONS.map((option) => (
+              <SampleOptionCard
+                key={option.id}
+                option={option}
+                selected={selectedSample === option.id}
+                onSelect={setSelectedSample}
+                onOpen={(sample) => loadSelectedSample(sample)}
+              />
+            ))}
+          </div>
+        </div>
         <div className="start-actions">
           <button className="start-action secondary" onClick={() => onCreateProject()}>
             <span>Create new project</span>
@@ -40,10 +68,10 @@ export function StartScreen({ onLoadSample, onCreateProject, onOpenProject }: St
             <span>Open local project</span>
             <kbd>O</kbd>
           </button>
-          <button className="start-action primary sample-action" onClick={() => onLoadSample()}>
+          <button className="start-action primary sample-action" onClick={() => loadSelectedSample()}>
             <span>
               <strong>Load sample project</strong>
-              <small>Choose sample and analysis type next</small>
+              <small>Use selected model and analysis type</small>
             </span>
             <span aria-hidden="true">→</span>
           </button>

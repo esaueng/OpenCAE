@@ -242,6 +242,9 @@ describe("RightPanel payload mass controls", () => {
     });
 
     expect(html).toContain("Analysis type");
+    expect(html).toContain("Bracket Demo");
+    expect(html).toContain("Beam Demo");
+    expect(html).toContain("Cantilever Demo");
     expect(html).toContain("Static");
     expect(html).toContain("Dynamic");
     expect(html).toContain("Load dynamic sample");
