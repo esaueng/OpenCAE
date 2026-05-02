@@ -153,7 +153,8 @@ export const VIEWER_VIEW_CUBE_FACE_OPACITY = 0.62;
 export const VIEWER_VIEW_CUBE_FACE_HOVER_OPACITY = 0.78;
 export const VIEWER_VIEW_CUBE_EDGE_COLOR = "#8fb4d8";
 export const VIEWER_VIEW_CUBE_FACE_LABEL_FONT_SIZE = 0.32;
-const VIEWER_VIEW_CUBE_CORNER_RADIUS = 0.082;
+export const VIEWER_VIEW_CUBE_CORNER_RADIUS = 0.082;
+export const VIEWER_VIEW_CUBE_CORNER_HIT_RADIUS = 0.19;
 const VIEWER_VIEW_CUBE_FACE_VISIBILITY_THRESHOLD = 0;
 export const VIEWER_ISOMETRIC_GIZMO_VIEW = "iso";
 export const VIEWER_CREDIT_URL = "https://esauengineering.com/";
@@ -838,6 +839,10 @@ function ViewCubeCorner({
         setHovered(false);
       }}
     >
+      <mesh renderOrder={3}>
+        <sphereGeometry args={[VIEWER_VIEW_CUBE_CORNER_HIT_RADIUS, 18, 18]} />
+        <meshBasicMaterial color="#ffffff" depthTest={false} transparent opacity={0} toneMapped={false} />
+      </mesh>
       <mesh renderOrder={5}>
         <sphereGeometry args={[VIEWER_VIEW_CUBE_CORNER_RADIUS, 18, 18]} />
         <meshBasicMaterial color={hovered ? "#f8fbff" : "#a9c9e8"} depthTest={false} transparent opacity={hovered ? 0.96 : 0.78} toneMapped={false} />
