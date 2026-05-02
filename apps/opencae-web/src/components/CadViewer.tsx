@@ -142,7 +142,7 @@ export const VIEWER_AXIS_LABEL_COLOR = "#ffffff";
 export const VIEWER_AXIS_LABEL_OUTLINE_COLOR = "#07111d";
 export const VIEWER_AXIS_LABEL_OUTLINE_WIDTH = 0.02;
 // Positive-octant view cube layout:
-// axis origin is the cube center.
+// axis origin is one cube corner.
 // cube bounds are [0, cubeSize] on X/Y/Z.
 // X/Y/Z axis labels sit beyond the cube in positive directions.
 export const VIEWER_GIZMO_AXIS_LENGTH = 1.75;
@@ -182,26 +182,25 @@ const RESULT_DEFORMATION_CAP_FRACTION = DEBUG_RESULTS ? 1 : 0.25;
 
 export function viewerGizmoLayout() {
   const cubeSize = VIEWER_VIEW_CUBE_SIZE;
-  const origin: [number, number, number] = [cubeSize / 2, cubeSize / 2, cubeSize / 2];
+  const origin: [number, number, number] = [0, 0, 0];
+  const contentCenter: [number, number, number] = [
+    VIEWER_GIZMO_LABEL_DISTANCE / 2,
+    VIEWER_GIZMO_LABEL_DISTANCE / 2,
+    VIEWER_GIZMO_LABEL_DISTANCE / 2
+  ];
   return {
     origin,
     cubeMin: [0, 0, 0] as [number, number, number],
     cubeMax: [cubeSize, cubeSize, cubeSize] as [number, number, number],
     cubeCenter: [cubeSize / 2, cubeSize / 2, cubeSize / 2] as [number, number, number],
+    contentCenter,
+    contentOffset: contentCenter.map((value) => -value) as [number, number, number],
     axisCapPositions: {
-      x: offsetGizmoPoint(origin, [1, 0, 0], VIEWER_GIZMO_LABEL_DISTANCE),
-      y: offsetGizmoPoint(origin, [0, 1, 0], VIEWER_GIZMO_LABEL_DISTANCE),
-      z: offsetGizmoPoint(origin, [0, 0, 1], VIEWER_GIZMO_LABEL_DISTANCE)
+      x: [VIEWER_GIZMO_LABEL_DISTANCE, 0, 0] as [number, number, number],
+      y: [0, VIEWER_GIZMO_LABEL_DISTANCE, 0] as [number, number, number],
+      z: [0, 0, VIEWER_GIZMO_LABEL_DISTANCE] as [number, number, number]
     }
   };
-}
-
-function offsetGizmoPoint(origin: [number, number, number], direction: [number, number, number], distance: number): [number, number, number] {
-  return [
-    origin[0] + direction[0] * distance,
-    origin[1] + direction[1] * distance,
-    origin[2] + direction[2] * distance
-  ];
 }
 
 export function CadViewer(props: CadViewerProps) {
@@ -505,13 +504,17 @@ function panCamera(camera: THREE.Camera, target: THREE.Vector3, deltaX: number, 
 }
 
 function CleanAxisGizmo({ onSelectView }: { onSelectView: (view: GizmoViewRequest) => void }) {
+  const layout = viewerGizmoLayout();
+
   return (
     <group scale={VIEWER_GIZMO_SCALE}>
-      <PositiveOctantViewCube onSelectView={onSelectView} />
-      {GIZMO_AXES.map((axis) => (
-        <GizmoAxis key={axis.label} {...axis} onSelectView={onSelectView} />
-      ))}
-      <IsoOriginButton onSelectView={onSelectView} />
+      <group position={layout.contentOffset}>
+        <PositiveOctantViewCube onSelectView={onSelectView} />
+        {GIZMO_AXES.map((axis) => (
+          <GizmoAxis key={axis.label} {...axis} onSelectView={onSelectView} />
+        ))}
+        <IsoOriginButton onSelectView={onSelectView} />
+      </group>
     </group>
   );
 }
@@ -537,8 +540,8 @@ function GizmoAxis({
 }) {
   const [hovered, setHovered] = useState(false);
   const origin = viewerGizmoLayout().origin;
-  const lineEnd = offsetGizmoPoint(origin, direction, VIEWER_GIZMO_AXIS_LENGTH);
-  const capPosition = offsetGizmoPoint(origin, direction, VIEWER_GIZMO_LABEL_DISTANCE);
+  const lineEnd = direction.map((value) => value * VIEWER_GIZMO_AXIS_LENGTH) as [number, number, number];
+  const capPosition = direction.map((value) => value * VIEWER_GIZMO_LABEL_DISTANCE) as [number, number, number];
 
   return (
     <group>

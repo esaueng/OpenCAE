@@ -64,13 +64,16 @@ describe("CadViewer result coloring", () => {
     expect(VIEWER_VIEW_CUBE_FACE_HOVER_OPACITY).toBe(0.78);
     expect(VIEWER_GIZMO_AXIS_LENGTH).toBe(1.75);
     expect(VIEWER_GIZMO_LABEL_DISTANCE).toBe(1.9);
-    expect(viewerGizmoLayout().origin).toEqual([0.6, 0.6, 0.6]);
+    expect(viewerGizmoLayout().origin).toEqual([0, 0, 0]);
     expect(viewerGizmoLayout().cubeMin).toEqual([0, 0, 0]);
+    expect(viewerGizmoLayout().cubeMax).toEqual([1.2, 1.2, 1.2]);
     expect(viewerGizmoLayout().cubeCenter).toEqual([0.6, 0.6, 0.6]);
+    expect(viewerGizmoLayout().contentCenter).toEqual([0.95, 0.95, 0.95]);
+    expect(viewerGizmoLayout().contentOffset).toEqual([-0.95, -0.95, -0.95]);
     expect(viewerGizmoLayout().axisCapPositions).toEqual({
-      x: [2.5, 0.6, 0.6],
-      y: [0.6, 2.5, 0.6],
-      z: [0.6, 0.6, 2.5]
+      x: [1.9, 0, 0],
+      y: [0, 1.9, 0],
+      z: [0, 0, 1.9]
     });
     expect(VIEWER_GIZMO_LABEL_DISTANCE).toBeGreaterThan(VIEWER_VIEW_CUBE_SIZE);
     expect(VIEWER_VIEW_CUBE_EDGE_COLOR).toBe("#8fb4d8");
@@ -92,10 +95,11 @@ describe("CadViewer result coloring", () => {
     expect(cadViewerSource).toContain("opacity={VIEWER_VIEW_CUBE_BODY_OPACITY}");
     expect(cadViewerSource).toContain("depthWrite");
     expect(cadViewerSource).toContain("depthTest");
-    expect(cadViewerSource).toContain("axis origin is the cube center.");
+    expect(cadViewerSource).toContain("axis origin is one cube corner.");
     expect(cadViewerSource).toContain("cube bounds are [0, cubeSize] on X/Y/Z.");
-    expect(cadViewerSource).not.toContain("origin is one cube corner, not the cube center.");
-    expect(cadViewerSource).toContain("const origin = viewerGizmoLayout().origin;");
+    expect(cadViewerSource).toContain("const origin: [number, number, number] = [0, 0, 0];");
+    expect(cadViewerSource).toContain("const layout = viewerGizmoLayout();");
+    expect(cadViewerSource).toContain("position={layout.contentOffset}");
     expect(cadViewerSource).toContain("position={[half, half, half]}");
     expect(cadViewerSource).not.toContain("function MiniAxisCube");
     expect(cadViewerSource).not.toContain("function AxisDot");
