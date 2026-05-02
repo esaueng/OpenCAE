@@ -1144,7 +1144,6 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
             loadMarkers={loadMarkers}
             supportMarkers={supportMarkers}
             printLayerOrientation={printLayerOrientation}
-            onResetView={handleFitDefaultView}
             onMeasureDisplayModelDimensions={handleMeasureDisplayModelDimensions}
             onViewerInteractionChange={handleViewerInteractionChange}
           />
