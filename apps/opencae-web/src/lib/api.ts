@@ -258,10 +258,10 @@ export async function runSimulation(studyId: string, currentStudy?: Study, displ
           dynamicSettings: currentStudy.type === "dynamic_structural" ? currentStudy.solverSettings : undefined
         })
       });
-      return await readJson(response);
+      return await readJson(response, "POST /api/cloud-fea/runs");
     }
     const response = await fetch(`/api/studies/${studyId}/runs`, { method: "POST" });
-    return await readJson(response);
+    return await readJson(response, `POST /api/studies/${studyId}/runs`);
   } catch (error) {
     if (!currentStudy) throw error;
     if (simulationBackend(currentStudy) === "cloudflare_fea") {
@@ -278,10 +278,10 @@ export async function getResults(runId: string): Promise<ResultsResponse> {
   if (localComputedResults) return localComputedResults;
   if (runId.startsWith("run-cloud-")) {
     const response = await fetch(`/api/cloud-fea/runs/${runId}/results`);
-    return readJson(response);
+    return readJson(response, `GET /api/cloud-fea/runs/${runId}/results`);
   }
   const response = await fetch(`/api/runs/${runId}/results`);
-  return readJson(response);
+  return readJson(response, `GET /api/runs/${runId}/results`);
 }
 
 export async function cancelRun(runId: string): Promise<{ run: StudyRun; message: string }> {
@@ -305,7 +305,7 @@ export async function cancelRun(runId: string): Promise<{ run: StudyRun; message
     };
   }
   const response = await fetch(`/api/runs/${runId}/cancel`, { method: "POST" });
-  const payload = await readJson<{ run: StudyRun }>(response);
+  const payload = await readJson<{ run: StudyRun }>(response, `POST /api/runs/${runId}/cancel`);
   return { ...payload, message: "Simulation cancelled." };
 }
 
@@ -515,9 +515,10 @@ function subscribeToCloudFeaRun(runId: string, onEvent: (event: RunEvent) => voi
   let timer: ReturnType<typeof globalThis.setInterval> | undefined;
   const poll = async () => {
     if (closed) return;
+    const endpoint = `/api/cloud-fea/runs/${runId}/events`;
     try {
-      const response = await fetch(`/api/cloud-fea/runs/${runId}/events`);
-      const payload = await readJson<{ events: RunEvent[] }>(response);
+      const response = await fetch(endpoint);
+      const payload = await readJson<{ events: RunEvent[] }>(response, `GET ${endpoint}`);
       const nextEvents = payload.events.slice(seenCount);
       seenCount = payload.events.length;
       for (const event of nextEvents) {
@@ -535,7 +536,7 @@ function subscribeToCloudFeaRun(runId: string, onEvent: (event: RunEvent) => voi
           runId,
           type: "error",
           progress: 100,
-          message: error instanceof Error ? error.message : "Cloud FEA event stream failed.",
+          message: `Cloud FEA event polling failed: ${requestErrorMessage(error, `GET ${endpoint}`)}`,
           timestamp: new Date().toISOString()
         });
       }
@@ -553,7 +554,7 @@ function subscribeToCloudFeaRun(runId: string, onEvent: (event: RunEvent) => voi
   } as EventSource;
 }
 
-async function readJson<T>(response: Response): Promise<T> {
+async function readJson<T>(response: Response, endpoint = response.url || "request"): Promise<T> {
   if (!response.ok) {
     const text = await response.text();
     let message = text;
@@ -563,7 +564,7 @@ async function readJson<T>(response: Response): Promise<T> {
     } catch {
       // Use the raw response body when the server did not return JSON.
     }
-    throw new Error(message);
+    throw new Error(formatHttpError(endpoint, response.status, response.statusText, message));
   }
   return response.json() as Promise<T>;
 }
@@ -571,15 +572,31 @@ async function readJson<T>(response: Response): Promise<T> {
 function cloudFeaRunError(error: unknown): Error {
   const message = error instanceof Error ? error.message : String(error);
   if (/route post:\/api\/cloud-fea\/runs not found|unexpected token '<'|not found/i.test(message)) {
-    return new Error("Cloud FEA endpoint is unavailable in this local dev server. Start the Cloudflare Worker/containers deployment, or switch the backend to Detailed local.");
+    return new Error(`Cloud FEA endpoint is unavailable in this local dev server: ${message}. Start the Cloudflare Worker/containers deployment, or switch the backend to Detailed local.`);
   }
   return error instanceof Error ? error : new Error(message);
+}
+
+function requestErrorMessage(error: unknown, endpoint: string): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes(endpoint) ? message : `${endpoint}: ${message}`;
+}
+
+function formatHttpError(endpoint: string, status: number, statusText: string, message: string): string {
+  const compactMessage = compactResponseMessage(message);
+  const statusLabel = statusText ? `HTTP ${status} ${statusText}` : `HTTP ${status}`;
+  return compactMessage ? `${endpoint} failed with ${statusLabel}: ${compactMessage}` : `${endpoint} failed with ${statusLabel}.`;
+}
+
+function compactResponseMessage(message: string): string {
+  const compact = message.replace(/\s+/g, " ").trim();
+  return compact.length > 500 ? `${compact.slice(0, 497)}...` : compact;
 }
 
 async function fetchJsonWithFallback<T>(input: RequestInfo | URL, init: RequestInit, fallback: () => T | Promise<T>): Promise<T> {
   try {
     const response = await fetch(input, init);
-    return await readJson<T>(response);
+    return await readJson<T>(response, typeof input === "string" ? `${init.method ?? "GET"} ${input}` : undefined);
   } catch {
     return fallback();
   }
