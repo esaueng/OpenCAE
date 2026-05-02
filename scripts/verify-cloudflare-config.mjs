@@ -9,6 +9,7 @@ const productionDomain = "cae.esau.app";
 const productionWorkerName = "opencae";
 const containerClassName = "OpenCaeFeaContainer";
 const containerBindingName = "FEA_CONTAINER";
+const productionContainerImage = "registry.cloudflare.com/747b74cbd7d019dd7aeecb2c24a4bf10/opencae/opencae-fea:0.1.0";
 
 export function parseJsonc(source, label = "JSONC input") {
   try {
@@ -43,6 +44,10 @@ export function validateCloudflareConfigs({ containersConfig, staticConfig, loca
 
   if (containersConfig.containers?.[0]?.class_name !== containerClassName) {
     failures.push(`production config containers[0].class_name must be "${containerClassName}"`);
+  }
+
+  if (containersConfig.containers?.[0]?.image !== productionContainerImage) {
+    failures.push(`production config containers[0].image must be "${productionContainerImage}"`);
   }
 
   if (!hasCustomDomainRoute(containersConfig, productionDomain)) {
