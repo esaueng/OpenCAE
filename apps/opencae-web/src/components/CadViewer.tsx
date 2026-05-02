@@ -134,9 +134,9 @@ type ModelPickHandlers = {
 };
 export const VIEWER_GIZMO_ALIGNMENT = "bottom-right";
 export const VIEWER_GIZMO_MARGIN: [number, number] = [83, 83];
-export const VIEWER_GIZMO_SCALE = 34;
-export const VIEWER_AXIS_HEAD_RADIUS = 0.21;
-export const VIEWER_AXIS_LABEL_BADGE_RADIUS = 0.145;
+export const VIEWER_GIZMO_SCALE = 40;
+export const VIEWER_AXIS_HEAD_RADIUS = 0.26;
+export const VIEWER_AXIS_LABEL_BADGE_RADIUS = 0.18;
 export const VIEWER_AXIS_LABEL_BADGE_COLOR = "#07111d";
 export const VIEWER_AXIS_LABEL_FONT_SIZE = 0.21;
 export const VIEWER_AXIS_LABEL_COLOR = "#ffffff";
