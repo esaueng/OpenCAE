@@ -65,4 +65,14 @@ describe("Cloudflare deployment config guard", () => {
       /production config must route cae\.esau\.app as a custom domain/
     );
   });
+
+  test("fails when the production container image is not the pushed Cloudflare registry image", () => {
+    const containersConfig = clone(readConfig("wrangler.containers.jsonc"));
+    const staticConfig = readConfig("wrangler.jsonc");
+    containersConfig.containers[0].image = "./services/opencae-fea-container/Dockerfile";
+
+    expect(() => validateCloudflareConfigs({ containersConfig, staticConfig })).toThrow(
+      /production config containers\[0\]\.image must be/
+    );
+  });
 });
