@@ -67,6 +67,20 @@ describe("StepBar", () => {
     expect(css).toMatch(/\.stepbar\.collapsed\s+\.stepbar-footer\s*\{[\s\S]*?display:\s*grid;/);
   });
 
+  test("keeps mobile workflow utility controls visible", () => {
+    const css = readFileSync(resolve(__dirname, "../styles/app.css"), "utf8");
+    const mobileStart = css.indexOf("@media (max-width: 640px)");
+    const mobileCss = css.slice(mobileStart);
+
+    expect(mobileStart).toBeGreaterThanOrEqual(0);
+    expect(mobileCss).toMatch(/\.stepbar-footer\s*\{[\s\S]*?display:\s*flex;/);
+    expect(mobileCss).toMatch(/\.stepbar-footer\s*>\s*\.unit-switch\s*\{[\s\S]*?display:\s*inline-grid;/);
+    expect(mobileCss).toMatch(/\.stepbar-actions\s*\{[\s\S]*?display:\s*flex;/);
+    expect(mobileCss).toMatch(/\.unit-switch\s+\.unit-toggle\s*\{[\s\S]*?min-height:\s*32px;/);
+    expect(mobileCss).toMatch(/\.stepbar\.collapsed\s+\.step\s*>\s*span:not\(\.step-icon\)\s*\{[\s\S]*?position:\s*static;/);
+    expect(mobileCss).toMatch(/\.stepbar\.collapsed\s+\.stepbar-footer\s*\{[\s\S]*?display:\s*flex;/);
+  });
+
   test("does not underline workflow utility links", () => {
     const css = readFileSync(resolve(__dirname, "../styles/app.css"), "utf8");
 
