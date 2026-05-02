@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, ElementRef, MutableRefObject, PointerEvent as ReactPointerEvent } from "react";
+import type { CSSProperties, ElementRef, MouseEvent as ReactMouseEvent, MutableRefObject, PointerEvent as ReactPointerEvent } from "react";
 import { Billboard, Bounds, Edges, GizmoHelper, Html, Line, OrbitControls, Text, useBounds } from "@react-three/drei";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import type { ThreeEvent } from "@react-three/fiber";
@@ -4867,11 +4867,19 @@ function ResultLegend({ resultMode, resultFields, unitSystem, meshSummary }: { r
     resizeDragRef.current = null;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   };
+  function resetResultLegendSize(event: ReactMouseEvent<HTMLDivElement>) {
+    event.stopPropagation();
+    resizeDragRef.current = null;
+    setLegendSize(null);
+  }
+
   return (
     <div
       ref={legendRef}
       className={`analysis-legend ${resultMode === "safety_factor" ? "safety-scale" : ""}`}
       style={legendStyle}
+      title="Double-click to reset legend size"
+      onDoubleClick={resetResultLegendSize}
     >
       <button
         className="analysis-legend-resize"
