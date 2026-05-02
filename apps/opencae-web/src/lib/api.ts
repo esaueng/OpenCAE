@@ -265,7 +265,7 @@ export async function runSimulation(studyId: string, currentStudy?: Study, displ
   } catch (error) {
     if (!currentStudy) throw error;
     if (simulationBackend(currentStudy) === "cloudflare_fea") {
-      throw error;
+      throw cloudFeaRunError(error);
     }
     return runSimulationLocally(currentStudy, displayModel);
   }
@@ -558,14 +558,22 @@ async function readJson<T>(response: Response): Promise<T> {
     const text = await response.text();
     let message = text;
     try {
-      const parsed = JSON.parse(text) as { error?: string };
-      message = parsed.error ?? text;
+      const parsed = JSON.parse(text) as { error?: string; message?: string };
+      message = parsed.error === "Not Found" && parsed.message ? parsed.message : parsed.error ?? parsed.message ?? text;
     } catch {
       // Use the raw response body when the server did not return JSON.
     }
     throw new Error(message);
   }
   return response.json() as Promise<T>;
+}
+
+function cloudFeaRunError(error: unknown): Error {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/route post:\/api\/cloud-fea\/runs not found|unexpected token '<'|not found/i.test(message)) {
+    return new Error("Cloud FEA endpoint is unavailable in this local dev server. Start the Cloudflare Worker/containers deployment, or switch the backend to Detailed local.");
+  }
+  return error instanceof Error ? error : new Error(message);
 }
 
 async function fetchJsonWithFallback<T>(input: RequestInfo | URL, init: RequestInit, fallback: () => T | Promise<T>): Promise<T> {

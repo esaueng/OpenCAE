@@ -143,4 +143,26 @@ describe("StepBar", () => {
 
     expect(html).toContain("<span>study</span><strong>dynamic</strong>");
   });
+
+  test("shows the selected solver backend in the footer", () => {
+    const html = renderToStaticMarkup(
+      <StepBar
+        activeStep="run"
+        project={project}
+        study={{
+          ...study,
+          solverSettings: { backend: "cloudflare_fea" }
+        }}
+        hasResults={false}
+        collapsed={false}
+        themeMode="dark"
+        onSelect={vi.fn()}
+        onToggleCollapsed={vi.fn()}
+        onToggleTheme={vi.fn()}
+        onUnitSystemChange={vi.fn()}
+      />
+    );
+
+    expect(html).toContain("<span>backend</span><strong>cloud</strong>");
+  });
 });

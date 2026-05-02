@@ -964,7 +964,18 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       return;
     }
     setResultPlaybackPlaying(false);
-    const response = await runSimulation(study.id, study, displayModel ?? undefined);
+    pushMessage("Starting simulation run.");
+    let response: Awaited<ReturnType<typeof runSimulation>>;
+    try {
+      response = await runSimulation(study.id, study, displayModel ?? undefined);
+    } catch (error) {
+      setProcessingRunId(null);
+      setRunProgress(0);
+      setRunTiming(null);
+      setResultPlaybackPlaying(false);
+      pushMessage(error instanceof Error ? error.message : "Could not start simulation.");
+      return;
+    }
     setActiveRunId(response.run.id);
     setCompletedRunId("");
     setProcessingRunId(response.run.id);
@@ -1089,7 +1100,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           onCreateStatic={handleCreateStaticSimulation}
           onCreateDynamic={handleCreateDynamicSimulation}
         />
-        <BottomPanel status={status} logs={logs} projectName={project.name} studyName="No simulation" meshStatus="Not generated" solverStatus="Idle" />
+        <BottomPanel status={status} logs={logs} projectName={project.name} studyName="No simulation" meshStatus="Not generated" solverStatus="Idle" backendStatus="local" />
       </div>
     );
   }
@@ -1264,7 +1275,15 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         ) : null}
       </main>
 
-      <BottomPanel status={status} logs={logs} projectName={project.name} studyName={study?.name ?? "No simulation"} meshStatus={study?.meshSettings.status === "complete" ? "Ready" : "Not generated"} solverStatus={solverRunning ? "Running" : runProgress >= 100 ? "Complete" : "Idle"} />
+      <BottomPanel
+        status={status}
+        logs={logs}
+        projectName={project.name}
+        studyName={study?.name ?? "No simulation"}
+        meshStatus={study?.meshSettings.status === "complete" ? "Ready" : "Not generated"}
+        solverStatus={solverRunning ? "Running" : runProgress >= 100 ? "Complete" : "Idle"}
+        backendStatus={(study.solverSettings as { backend?: unknown }).backend === "cloudflare_fea" ? "cloud" : "local"}
+      />
     </div>
   );
 }

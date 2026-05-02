@@ -79,6 +79,13 @@ describe("App workflow layout", () => {
     expect(appSource).toContain('if (study.type === "dynamic_structural" && !hasDynamicPlaybackFrames(results.summary, results.fields))');
   });
 
+  test("surfaces Cloud FEA run creation failures instead of leaving the run button inert", () => {
+    expect(appSource).toContain('pushMessage("Starting simulation run.");');
+    expect(appSource).toContain("try {\n      response = await runSimulation(study.id, study, displayModel ?? undefined);");
+    expect(appSource).toContain("setRunProgress(0);");
+    expect(appSource).toContain('pushMessage(error instanceof Error ? error.message : "Could not start simulation.");');
+  });
+
   test("enables deformed result shape when dynamic playback starts", () => {
     expect(appSource).toContain("function handleResultPlaybackToggle()");
     expect(appSource).toContain("if (!playing) setShowDeformed(true);");

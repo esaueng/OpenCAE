@@ -9,6 +9,7 @@ interface BottomPanelProps {
   studyName: string;
   meshStatus: string;
   solverStatus: string;
+  backendStatus: "local" | "cloud";
 }
 
 export const WORKSPACE_SHORTCUT_GUIDE: Array<{ keys: string[]; label: string }> = [
@@ -20,7 +21,7 @@ export const WORKSPACE_SHORTCUT_GUIDE: Array<{ keys: string[]; label: string }> 
   { keys: ["Shift", "Ctrl/Cmd", "Z"], label: "Redo" }
 ];
 
-export function BottomPanel({ status, logs, projectName, studyName, meshStatus, solverStatus }: BottomPanelProps) {
+export function BottomPanel({ status, logs, projectName, studyName, meshStatus, solverStatus, backendStatus }: BottomPanelProps) {
   const [tab, setTab] = useState<"tips" | "logs" | null>(null);
   const [drawerHeight, setDrawerHeight] = useState(320);
   const dragStart = useRef<{ y: number; height: number } | null>(null);
@@ -120,9 +121,9 @@ export function BottomPanel({ status, logs, projectName, studyName, meshStatus, 
             </button>
           ))}
         </div>
-        <div className="status-groups" aria-label="Local status">
+        <div className="status-groups" aria-label="Simulation status">
           <span className={`status-state ${healthy}`}><i />{statusForDisplay(status, solverStatus)}</span>
-          <span className="local-pill"><span aria-hidden="true" />local</span>
+          <span className="backend-pill"><span aria-hidden="true" />{backendStatus}</span>
           <span><b>project</b>{projectName}</span>
           <span><b>study</b>{studyName}</span>
           <span><b>mesh</b>{meshStatus}</span>
