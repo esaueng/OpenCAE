@@ -71,6 +71,48 @@ describe("Cloudflare FEA worker orchestration", () => {
     expect(bucket.objects.size).toBe(0);
   });
 
+  test("reports Cloud FEA health when the container binding is absent", async () => {
+    const bucket = new MemoryR2Bucket();
+    const env = {
+      ASSETS: { fetch: vi.fn(async () => new Response("asset")) },
+      FEA_ARTIFACTS: bucket,
+      FEA_RUN_QUEUE: { send: vi.fn(async () => undefined) }
+    };
+
+    const response = await worker.fetch(new Request("https://cae.example/api/cloud-fea/health"), env);
+    const body = await response.json() as Record<string, unknown>;
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({
+      ok: true,
+      mode: "cloudflare-worker",
+      artifactsBound: true,
+      queueBound: true,
+      containerBound: false,
+      containersEnabled: false
+    });
+  });
+
+  test("reports Cloud FEA health when the container binding is present", async () => {
+    const env = {
+      ASSETS: { fetch: vi.fn(async () => new Response("asset")) },
+      FEA_ARTIFACTS: new MemoryR2Bucket(),
+      FEA_RUN_QUEUE: { send: vi.fn(async () => undefined) },
+      FEA_CONTAINER: { get: vi.fn() }
+    };
+
+    const response = await worker.fetch(new Request("https://cae.example/api/cloud-fea/health"), env);
+    const body = await response.json() as Record<string, unknown>;
+
+    expect(body).toMatchObject({
+      mode: "cloudflare-worker",
+      artifactsBound: true,
+      queueBound: true,
+      containerBound: true,
+      containersEnabled: true
+    });
+  });
+
   test("queues cloud FEA runs and stores run artifacts in R2", async () => {
     const bucket = new MemoryR2Bucket();
     const send = vi.fn(async () => undefined);

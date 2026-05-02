@@ -19,6 +19,28 @@ export interface ResultsResponse {
   fields: ResultField[];
 }
 
+export interface RunSimulationOptions {
+  onCloudFeaHealth?: (message: string) => void;
+}
+
+interface CloudFeaRouteHealth {
+  ok?: boolean;
+  mode?: string;
+  service?: string;
+  runnerUrl?: string;
+  runnerHealthUrl?: string;
+  runner?: {
+    reachable?: boolean;
+    ccx?: unknown;
+    gmsh?: unknown;
+    error?: string;
+  };
+  artifactsBound?: boolean;
+  queueBound?: boolean;
+  containerBound?: boolean;
+  containersEnabled?: boolean;
+}
+
 const localResultsByRunId = new Map<string, ResultsResponse | Promise<ResultsResponse>>();
 const localResultSolversByRunId = new Map<string, () => Promise<ResultsResponse>>();
 const localEventsByRunId = new Map<string, RunEvent[]>();
@@ -242,9 +264,12 @@ export async function addLoad(studyId: string, type: LoadType, value: number, se
   );
 }
 
-export async function runSimulation(studyId: string, currentStudy?: Study, displayModel?: DisplayModel): Promise<{ run: { id: string }; streamUrl: string; message: string }> {
+export async function runSimulation(studyId: string, currentStudy?: Study, displayModel?: DisplayModel, options: RunSimulationOptions = {}): Promise<{ run: { id: string }; streamUrl: string; message: string }> {
   try {
     if (currentStudy && simulationBackend(currentStudy) === "cloudflare_fea") {
+      const routeHealth = await fetchCloudFeaRouteHealth();
+      options.onCloudFeaHealth?.(cloudFeaRouteHealthMessage(routeHealth));
+      assertCloudFeaRouteCanCreateRun(routeHealth);
       const response = await fetch("/api/cloud-fea/runs", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -574,10 +599,36 @@ function cloudFeaRunError(error: unknown): Error {
   if (/failed to fetch|networkerror|load failed|fetch failed/i.test(message)) {
     return new Error(`Cloud FEA local API/proxy is unreachable: ${message}. Start root pnpm dev so the Vite /api proxy can reach the local API on port 4317, and run the CalculiX FEA runner at OPCAE_FEA_RUNNER_URL (default http://localhost:8080/solve).`);
   }
+  if (/cloud fea containers are not enabled|fea_container/i.test(message)) {
+    return new Error(cloudFeaContainerBindingMessage(message));
+  }
   if (/route post:\/api\/cloud-fea\/runs not found|unexpected token '<'|not found/i.test(message)) {
     return new Error(`Cloud FEA endpoint is unavailable in this local dev server: ${message}. Start root pnpm dev so the local API bridge exposes /api/cloud-fea/runs, or start the Cloudflare Worker/containers deployment.`);
   }
   return error instanceof Error ? error : new Error(message);
+}
+
+async function fetchCloudFeaRouteHealth(): Promise<CloudFeaRouteHealth> {
+  const response = await fetch("/api/cloud-fea/health");
+  return readJson(response, "GET /api/cloud-fea/health");
+}
+
+function assertCloudFeaRouteCanCreateRun(routeHealth: CloudFeaRouteHealth): void {
+  if (routeHealth.mode === "cloudflare-worker" && routeHealth.containerBound !== true) {
+    throw new Error(cloudFeaContainerBindingMessage());
+  }
+}
+
+function cloudFeaRouteHealthMessage(routeHealth: CloudFeaRouteHealth): string {
+  const containerBound = typeof routeHealth.containerBound === "boolean" ? String(routeHealth.containerBound) : "n/a";
+  const runner = typeof routeHealth.runnerUrl === "string" ? routeHealth.runnerUrl : "n/a";
+  const ccx = routeHealth.runner && routeHealth.runner.ccx !== undefined ? String(routeHealth.runner.ccx) : "n/a";
+  return `Cloud FEA route health: mode=${routeHealth.mode ?? "unknown"}; containerBound=${containerBound}; runner=${runner}; ccx=${ccx}.`;
+}
+
+function cloudFeaContainerBindingMessage(originalMessage?: string): string {
+  const action = "Cloud FEA is routed to a Cloudflare Worker without a FEA_CONTAINER binding. For local dev, run root pnpm dev and open the Vite URL shown there, usually http://localhost:5173/. For deployed Cloud FEA, deploy with wrangler.containers.jsonc using pnpm deploy:cloudflare:containers.";
+  return originalMessage ? `${action} Original response: ${originalMessage}` : action;
 }
 
 function requestErrorMessage(error: unknown, endpoint: string): string {
