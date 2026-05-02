@@ -22,11 +22,12 @@ export function parseJsonc(source, label = "JSONC input") {
 export function readCloudflareConfigs(baseDir = rootDir) {
   return {
     containersConfig: readWranglerConfig(resolve(baseDir, "wrangler.containers.jsonc")),
-    staticConfig: readWranglerConfig(resolve(baseDir, "wrangler.jsonc"))
+    staticConfig: readWranglerConfig(resolve(baseDir, "wrangler.jsonc")),
+    localFirstConfig: readWranglerConfig(resolve(baseDir, "wrangler.local-first.jsonc"))
   };
 }
 
-export function validateCloudflareConfigs({ containersConfig, staticConfig }) {
+export function validateCloudflareConfigs({ containersConfig, staticConfig, localFirstConfig }) {
   const failures = [];
 
   if (containersConfig.name !== productionWorkerName) {
@@ -58,16 +59,21 @@ export function validateCloudflareConfigs({ containersConfig, staticConfig }) {
     failures.push('production config assets.run_worker_first must include "/api/*" and "/health"');
   }
 
-  if (staticConfig.name === containersConfig.name) {
-    failures.push(`static config must not share the production Worker name "${containersConfig.name}"`);
-  }
-
-  if (hasRoutePattern(staticConfig, productionDomain)) {
-    failures.push(`static config must not route ${productionDomain}`);
-  }
+  validateNonProductionConfig("static", staticConfig, containersConfig, failures);
+  if (localFirstConfig) validateNonProductionConfig("local-first", localFirstConfig, containersConfig, failures);
 
   if (failures.length > 0) {
     throw new Error(`Cloudflare config verification failed:\n- ${failures.join("\n- ")}`);
+  }
+}
+
+function validateNonProductionConfig(label, config, containersConfig, failures) {
+  if (config.name === containersConfig.name || config.name === productionWorkerName) {
+    failures.push(`${label} config must not share the production Worker name "${containersConfig.name}"`);
+  }
+
+  if (hasRoutePattern(config, productionDomain)) {
+    failures.push(`${label} config must not route ${productionDomain}`);
   }
 }
 

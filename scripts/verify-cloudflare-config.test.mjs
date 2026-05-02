@@ -17,8 +17,10 @@ describe("Cloudflare deployment config guard", () => {
   test("passes with the corrected production and static configs", () => {
     const containersConfig = readConfig("wrangler.containers.jsonc");
     const staticConfig = readConfig("wrangler.jsonc");
+    const localFirstConfig = readConfig("wrangler.local-first.jsonc");
 
-    expect(() => validateCloudflareConfigs({ containersConfig, staticConfig })).not.toThrow();
+    expect(localFirstConfig.name).toBe("opencae-local-first");
+    expect(() => validateCloudflareConfigs({ containersConfig, staticConfig, localFirstConfig })).not.toThrow();
   });
 
   test("fails when static and production configs share a Worker name", () => {
@@ -28,6 +30,17 @@ describe("Cloudflare deployment config guard", () => {
 
     expect(() => validateCloudflareConfigs({ containersConfig, staticConfig })).toThrow(
       /static config must not share the production Worker name/
+    );
+  });
+
+  test("fails when local-first and production configs share a Worker name", () => {
+    const containersConfig = readConfig("wrangler.containers.jsonc");
+    const staticConfig = readConfig("wrangler.jsonc");
+    const localFirstConfig = clone(readConfig("wrangler.local-first.jsonc"));
+    localFirstConfig.name = containersConfig.name;
+
+    expect(() => validateCloudflareConfigs({ containersConfig, staticConfig, localFirstConfig })).toThrow(
+      /local-first config must not share the production Worker name/
     );
   });
 

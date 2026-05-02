@@ -47,6 +47,7 @@ describe("Cloudflare FEA worker orchestration", () => {
       migrations?: Array<{ new_sqlite_classes?: string[] }>;
     };
     const defaultConfig = readJsonc("../../../wrangler.jsonc") as typeof containerConfig;
+    const localFirstConfig = readJsonc("../../../wrangler.local-first.jsonc") as typeof containerConfig;
 
     expect(packageJson.scripts["deploy:cloudflare"]).toContain("--config wrangler.containers.jsonc");
     expect(packageJson.scripts["deploy:cloudflare"]).toContain("pnpm verify:cloudflare-config");
@@ -61,7 +62,10 @@ describe("Cloudflare FEA worker orchestration", () => {
     expect(containerConfig.routes).toContainEqual({ pattern: "cae.esau.app", custom_domain: true });
     expect(defaultConfig.name).toBe("opencae-static");
     expect(defaultConfig.name).not.toBe(containerConfig.name);
+    expect(localFirstConfig.name).toBe("opencae-local-first");
+    expect(localFirstConfig.name).not.toBe(containerConfig.name);
     expect(defaultConfig.routes ?? []).not.toContainEqual({ pattern: "cae.esau.app", custom_domain: true });
+    expect(localFirstConfig.routes ?? []).not.toContainEqual({ pattern: "cae.esau.app", custom_domain: true });
     expect(containerConfig.containers?.[0]).toMatchObject({
       class_name: "OpenCaeFeaContainer",
       image: "./services/opencae-fea-container/Dockerfile",
