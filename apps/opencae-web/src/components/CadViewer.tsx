@@ -123,7 +123,8 @@ const BRACKET_HOLES = [
   { id: "base-hole-right", center: [1.2, 0] as [number, number], radius: 0.13, supported: true }
 ];
 type ViewerOrbitControls = ElementRef<typeof OrbitControls>;
-type GizmoViewRequest = RotationAxis | "iso";
+type ViewCubeCornerDirection = [number, number, number];
+type GizmoViewRequest = RotationAxis | "iso" | { kind: "corner"; direction: ViewCubeCornerDirection };
 export type ViewCubeFaceLabel = "Front" | "Back" | "Right" | "Left" | "Top" | "Bottom";
 export type GizmoViewTarget = "+x" | "+y" | "+z" | "front" | "right" | "top" | "iso";
 type ModelSelectionHit = { face: DisplayFace; point: [number, number, number]; payloadObject?: PayloadObjectSelection; snapResult?: SnapResult | null };
@@ -154,6 +155,7 @@ export const VIEWER_VIEW_CUBE_FACE_OPACITY = 0.62;
 export const VIEWER_VIEW_CUBE_FACE_HOVER_OPACITY = 0.78;
 export const VIEWER_VIEW_CUBE_EDGE_COLOR = "#8fb4d8";
 export const VIEWER_VIEW_CUBE_FACE_LABEL_FONT_SIZE = 0.32;
+const VIEWER_VIEW_CUBE_CORNER_RADIUS = 0.082;
 const VIEWER_VIEW_CUBE_FACE_VISIBILITY_THRESHOLD = 0;
 export const VIEWER_ISOMETRIC_GIZMO_VIEW = "iso";
 export const VIEWER_CREDIT_URL = "https://esauengineering.com/";
@@ -639,6 +641,7 @@ function PositiveOctantViewCube({ onSelectView }: { onSelectView: (view: GizmoVi
   const cubeSize = VIEWER_VIEW_CUBE_SIZE;
   const half = VIEWER_VIEW_CUBE_SIZE / 2;
   const faces = useMemo(() => getViewCubeFaceDescriptors(), []);
+  const corners = useMemo(() => getViewCubeCornerDescriptors(), []);
 
   return (
     <group name="Positive-octant triad view cube">
@@ -649,6 +652,9 @@ function PositiveOctantViewCube({ onSelectView }: { onSelectView: (view: GizmoVi
       <ViewCubeEdges />
       {faces.map((face) => (
         <ViewCubeFace key={face.label} {...face} onSelectView={onSelectView} />
+      ))}
+      {corners.map((corner) => (
+        <ViewCubeCorner key={corner.title} {...corner} onSelectView={onSelectView} />
       ))}
     </group>
   );
@@ -673,6 +679,27 @@ export function getViewCubeFaceDescriptors(): ViewCubeFaceDescriptor[] {
     { label: "Top", position: [half, half, cubeSize + faceOffset], rotation: [0, 0, Math.PI / 2], normal: [0, 0, 1] },
     { label: "Bottom", position: [half, half, -faceOffset], rotation: [-Math.PI, 0, -Math.PI / 2], normal: [0, 0, -1] }
   ];
+}
+
+export interface ViewCubeCornerDescriptor {
+  title: string;
+  position: [number, number, number];
+  direction: ViewCubeCornerDirection;
+}
+
+export function getViewCubeCornerDescriptors(): ViewCubeCornerDescriptor[] {
+  const cubeSize = VIEWER_VIEW_CUBE_SIZE;
+  const signs = [-1, 1] as const;
+  const axisTitle = (axis: "X" | "Y" | "Z", sign: -1 | 1) => `${sign > 0 ? "+" : "-"}${axis}`;
+  return signs.flatMap((x) =>
+    signs.flatMap((y) =>
+      signs.map((z) => ({
+        title: `View ${axisTitle("X", x)} ${axisTitle("Y", y)} ${axisTitle("Z", z)}`,
+        position: [x > 0 ? cubeSize : 0, y > 0 ? cubeSize : 0, z > 0 ? cubeSize : 0] as [number, number, number],
+        direction: [x, y, z] as ViewCubeCornerDirection
+      }))
+    )
+  );
 }
 
 function ViewCubeEdges({ active = false }: { active?: boolean }) {
@@ -784,13 +811,63 @@ function ViewCubeFace({
   );
 }
 
-function IsoOriginButton({ onSelectView }: { onSelectView: (view: GizmoViewRequest) => void }) {
+function ViewCubeCorner({
+  title,
+  position,
+  direction,
+  onSelectView
+}: {
+  title: string;
+  position: [number, number, number];
+  direction: ViewCubeCornerDirection;
+  onSelectView: (view: GizmoViewRequest) => void;
+}) {
   const [hovered, setHovered] = useState(false);
 
   return (
     <Billboard
+      name={title}
+      position={position}
+      scale={hovered ? 1.22 : 1}
+      userData={{ title, ariaLabel: title }}
+      onPointerDown={(event: ThreeEvent<PointerEvent>) => {
+        event.stopPropagation();
+      }}
+      onClick={(event: ThreeEvent<MouseEvent>) => {
+        event.stopPropagation();
+        onSelectView({ kind: "corner", direction });
+      }}
+      onPointerOver={(event: ThreeEvent<PointerEvent>) => {
+        event.stopPropagation();
+        setHovered(true);
+      }}
+      onPointerOut={(event: ThreeEvent<PointerEvent>) => {
+        event.stopPropagation();
+        setHovered(false);
+      }}
+    >
+      <mesh renderOrder={5}>
+        <sphereGeometry args={[VIEWER_VIEW_CUBE_CORNER_RADIUS, 18, 18]} />
+        <meshBasicMaterial color={hovered ? "#f8fbff" : "#a9c9e8"} depthTest={false} transparent opacity={hovered ? 0.96 : 0.78} toneMapped={false} />
+      </mesh>
+      {hovered && (
+        <mesh renderOrder={4}>
+          <sphereGeometry args={[VIEWER_VIEW_CUBE_CORNER_RADIUS * 1.7, 18, 18]} />
+          <meshBasicMaterial color="#f8fbff" depthTest={false} transparent opacity={0.22} toneMapped={false} />
+        </mesh>
+      )}
+    </Billboard>
+  );
+}
+
+function IsoOriginButton({ onSelectView }: { onSelectView: (view: GizmoViewRequest) => void }) {
+  const [hovered, setHovered] = useState(false);
+  const half = VIEWER_VIEW_CUBE_SIZE / 2;
+
+  return (
+    <Billboard
       name="Isometric view"
-      position={[0, 0, 0]}
+      position={[half, half, half]}
       userData={{ title: "Isometric view", ariaLabel: "Isometric view" }}
       onPointerDown={(event: ThreeEvent<PointerEvent>) => {
         event.stopPropagation();
@@ -5145,13 +5222,13 @@ export function viewerCameraResetPose(
   box: THREE.Box3,
   center: THREE.Vector3,
   fallbackDistance: number,
-  viewAxis: RotationAxis | null,
+  viewRequest: GizmoViewRequest | null,
   fov: number | undefined,
   aspect: number
 ): ViewerCameraResetPose {
-  const view = viewAxis ? cameraViewForAxis(viewAxis) : { direction: ISO_CAMERA_DIRECTION, up: ISO_CAMERA_UP };
-  const target = viewAxis ? center.clone() : defaultHomeViewTarget(box, view.direction, view.up);
-  const fitMargin = viewAxis ? VIEWER_FIT_MARGIN : DEFAULT_HOME_FIT_MARGIN;
+  const view = cameraViewForRequest(viewRequest);
+  const target = viewRequest ? center.clone() : defaultHomeViewTarget(box, view.direction, view.up);
+  const fitMargin = viewRequest ? VIEWER_FIT_MARGIN : DEFAULT_HOME_FIT_MARGIN;
   const fitDistance = fov
     ? cameraDistanceForBounds(box, view.direction, view.up, fov, aspect, fitMargin)
     : fallbackDistance;
@@ -5160,6 +5237,20 @@ export function viewerCameraResetPose(
     target,
     up: view.up.clone()
   };
+}
+
+function cameraViewForRequest(viewRequest: GizmoViewRequest | null): { direction: THREE.Vector3; up: THREE.Vector3 } {
+  if (!viewRequest) return { direction: ISO_CAMERA_DIRECTION, up: ISO_CAMERA_UP };
+  if (viewRequest === VIEWER_ISOMETRIC_GIZMO_VIEW) return { direction: ISO_CAMERA_DIRECTION, up: ISO_CAMERA_UP };
+  if (isCornerGizmoViewRequest(viewRequest)) {
+    const direction = new THREE.Vector3(...viewRequest.direction).normalize();
+    return { direction, up: WORLD_UP.clone().projectOnPlane(direction).normalize() };
+  }
+  return cameraViewForAxis(viewRequest);
+}
+
+function isCornerGizmoViewRequest(viewRequest: GizmoViewRequest): viewRequest is { kind: "corner"; direction: ViewCubeCornerDirection } {
+  return typeof viewRequest === "object" && viewRequest.kind === "corner";
 }
 
 function applyViewerCameraPose(camera: THREE.Camera, controls: ViewerOrbitControls | null, pose: ViewerCameraResetPose) {
