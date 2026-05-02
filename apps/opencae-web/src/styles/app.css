@@ -1414,7 +1414,7 @@ img {
   box-sizing: border-box;
   width: 360px;
   min-width: 280px;
-  min-height: 176px;
+  min-height: 148px;
   max-width: calc(100% - 24px);
   max-height: calc(100% - 24px);
   display: grid;
@@ -1422,7 +1422,7 @@ img {
   align-content: start;
   grid-auto-rows: min-content;
   gap: calc(6px * var(--analysis-legend-scale, 1)) calc(12px * var(--analysis-legend-scale, 1));
-  padding: calc(14px * var(--analysis-legend-scale, 1)) calc(16px * var(--analysis-legend-scale, 1)) calc(4px * var(--analysis-legend-scale, 1));
+  padding: calc(12px * var(--analysis-legend-scale, 1)) calc(14px * var(--analysis-legend-scale, 1)) calc(2px * var(--analysis-legend-scale, 1));
   color: var(--color-text);
   background: rgba(17, 24, 33, 0.85);
   border: var(--border-thin);
