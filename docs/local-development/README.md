@@ -32,10 +32,12 @@ pnpm verify:perf
 ```bash
 pnpm deploy:cloudflare:dry-run
 pnpm deploy:cloudflare
+pnpm deploy:cloudflare:static:dry-run
+pnpm deploy:cloudflare:static
 pnpm deploy:cloudflare:local-first:dry-run
 pnpm deploy:cloudflare:local-first
 pnpm deploy:cloudflare:containers:dry-run
 pnpm deploy:cloudflare:containers
 ```
 
-Use the default Cloudflare deploy for the Worker/static assets path. Use the local-first deploy when Cloud FEA containers are intentionally omitted. Use the containers deploy only with a token allowed to update Cloudflare Container applications.
+Use the default Cloudflare deploy for the production app domain and Cloud FEA container binding. It uses `wrangler.containers.jsonc` and requires a token allowed to update Cloudflare Container applications. Use the static or local-first deploy only when Cloud FEA containers are intentionally omitted.
