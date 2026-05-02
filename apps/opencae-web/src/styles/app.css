@@ -1972,6 +1972,29 @@ img {
   cursor: default;
 }
 
+.playback-time-track {
+  position: relative;
+  display: block;
+}
+
+.playback-time-track .playback-time-range {
+  display: block;
+}
+
+.playback-peak-marker {
+  position: absolute;
+  top: 1px;
+  left: var(--playback-peak-position);
+  width: 0;
+  height: 0;
+  border-right: 4px solid transparent;
+  border-bottom: 6px solid var(--color-warning);
+  border-left: 4px solid transparent;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.45));
+  pointer-events: none;
+  transform: translateX(-50%);
+}
+
 .range-field input.playback-time-range::-webkit-slider-thumb {
   width: 6px;
   height: 18px;
