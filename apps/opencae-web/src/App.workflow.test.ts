@@ -83,7 +83,7 @@ describe("App workflow layout", () => {
     expect(appSource).toContain('pushMessage("Starting simulation run.");');
     expect(appSource).toContain("runDiagnosticsMessage(study)");
     expect(appSource).toContain('pushMessage("Cloud FEA request started: POST /api/cloud-fea/runs.");');
-    expect(appSource).toContain("try {\n      response = await runSimulation(study.id, study, displayModel ?? undefined);");
+    expect(appSource).toContain("try {\n      response = await runSimulation(study.id, study, displayModel ?? undefined, { onCloudFeaHealth: pushMessage });");
     expect(appSource).toContain("setRunProgress(0);");
     expect(appSource).toContain('pushMessage(`Cloud FEA run creation failed: ${errorMessage(error, "Could not start simulation.")}`);');
     expect(appSource).toContain("Cloud FEA run created: runId=");

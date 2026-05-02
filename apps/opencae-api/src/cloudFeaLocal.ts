@@ -29,6 +29,22 @@ interface LocalCloudFeaResultBundle {
   fields: ResultField[];
 }
 
+interface LocalCloudFeaHealth {
+  ok: true;
+  mode: "local-cloud-fea-bridge";
+  service: "opencae-api";
+  runnerUrl: string;
+  runnerHealthUrl: string;
+  runner: {
+    reachable: boolean;
+    ok?: unknown;
+    solver?: unknown;
+    ccx?: unknown;
+    gmsh?: unknown;
+    error?: string;
+  };
+}
+
 interface SolverMaterialPayload {
   id: string;
   name: string;
@@ -83,12 +99,15 @@ export class LocalCloudFeaBridge {
     this.fetchImpl = options.fetchImpl ?? globalThis.fetch.bind(globalThis);
   }
 
-  health() {
+  async health(): Promise<LocalCloudFeaHealth> {
+    const runnerHealthUrl = runnerHealthUrlFor(this.runnerUrl);
     return {
       ok: true,
       mode: "local-cloud-fea-bridge",
       service: "opencae-api",
-      runnerUrl: this.runnerUrl
+      runnerUrl: this.runnerUrl,
+      runnerHealthUrl,
+      runner: await this.probeRunnerHealth(runnerHealthUrl)
     };
   }
 
@@ -164,6 +183,27 @@ export class LocalCloudFeaBridge {
     await this.pendingByRunId.get(runId);
   }
 
+  private async probeRunnerHealth(runnerHealthUrl: string): Promise<LocalCloudFeaHealth["runner"]> {
+    try {
+      const response = await this.fetchImpl(runnerHealthUrl, { method: "GET" });
+      const payload = await readJsonPayload(response);
+      const record = isRecord(payload) ? payload : {};
+      return {
+        reachable: response.ok,
+        ...(record.ok !== undefined ? { ok: record.ok } : {}),
+        ...(record.solver !== undefined ? { solver: record.solver } : {}),
+        ...(record.ccx !== undefined ? { ccx: record.ccx } : {}),
+        ...(record.gmsh !== undefined ? { gmsh: record.gmsh } : {}),
+        ...(!response.ok ? { error: runnerPayloadMessage(record) ?? `HTTP ${response.status}` } : {})
+      };
+    } catch (error) {
+      return {
+        reachable: false,
+        error: error instanceof Error ? compact(error.message) : compact(String(error))
+      };
+    }
+  }
+
   private async solveRun(runId: string, requestArtifact: Record<string, unknown>): Promise<void> {
     this.markRun(runId, "running");
     let response: Response;
@@ -229,6 +269,18 @@ function normalizeRunnerResults(payload: unknown): LocalCloudFeaResultBundle {
   validateCloudFeaProvenance(summary);
   validateSolverResultParser(record.artifacts);
   return { summary, fields };
+}
+
+function runnerHealthUrlFor(runnerUrl: string): string {
+  try {
+    const url = new URL(runnerUrl);
+    url.pathname = "/health";
+    url.search = "";
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return runnerUrl.replace(/\/solve\/?$/, "/health");
+  }
 }
 
 function validateCloudFeaProvenance(summary: ResultSummary): void {

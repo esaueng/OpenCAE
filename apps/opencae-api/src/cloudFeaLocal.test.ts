@@ -53,6 +53,42 @@ const baseStudy = {
 } satisfies Study;
 
 describe("LocalCloudFeaBridge", () => {
+  test("health reports local bridge mode and runner probe details", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      expect(String(input)).toBe("http://runner.test/health");
+      return new Response(JSON.stringify({ ok: true, solver: "calculix", ccx: "available", gmsh: "unavailable" }), {
+        headers: { "content-type": "application/json" }
+      });
+    });
+    const bridge = new LocalCloudFeaBridge({ runnerUrl: "http://runner.test/solve", fetchImpl: fetchMock });
+
+    const health = await bridge.health();
+
+    expect(health).toMatchObject({
+      ok: true,
+      mode: "local-cloud-fea-bridge",
+      runnerUrl: "http://runner.test/solve",
+      runnerHealthUrl: "http://runner.test/health",
+      runner: { reachable: true, ccx: "available", gmsh: "unavailable" }
+    });
+  });
+
+  test("health summarizes unreachable runner without starting a solve", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Promise.reject(new TypeError("Failed to fetch")));
+    const bridge = new LocalCloudFeaBridge({ runnerUrl: "http://localhost:8080/solve", fetchImpl: fetchMock });
+
+    const health = await bridge.health();
+
+    expect(health).toMatchObject({
+      mode: "local-cloud-fea-bridge",
+      runnerUrl: "http://localhost:8080/solve",
+      runnerHealthUrl: "http://localhost:8080/health",
+      runner: { reachable: false, error: "Failed to fetch" }
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ method: "GET" });
+  });
+
   test("creates a local Cloud FEA run and stores parsed runner results", async () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       const body = JSON.parse(init?.body as string) as { runId: string };
