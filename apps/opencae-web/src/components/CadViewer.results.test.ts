@@ -60,8 +60,8 @@ describe("CadViewer result coloring", () => {
   test("renders a positive-octant triad view cube without negative label clutter", () => {
     expect(VIEWER_VIEW_CUBE_SIZE).toBe(1.12);
     expect(VIEWER_VIEW_CUBE_BODY_OPACITY).toBe(1);
-    expect(VIEWER_VIEW_CUBE_FACE_OPACITY).toBe(0.36);
-    expect(VIEWER_VIEW_CUBE_FACE_HOVER_OPACITY).toBe(0.58);
+    expect(VIEWER_VIEW_CUBE_FACE_OPACITY).toBe(0.62);
+    expect(VIEWER_VIEW_CUBE_FACE_HOVER_OPACITY).toBe(0.78);
     expect(VIEWER_GIZMO_AXIS_LENGTH).toBe(1.35);
     expect(VIEWER_GIZMO_LABEL_DISTANCE).toBe(1.48);
     expect(viewerGizmoLayout().origin).toEqual([0, 0, 0]);
