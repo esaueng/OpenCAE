@@ -33,6 +33,14 @@ function cssRule(selector: string) {
   return css.match(new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\{(?<body>[\\s\\S]*?)\\n\\}`))?.groups?.body ?? "";
 }
 
+function mediaRule(query: string, selector: string) {
+  const mediaStart = css.indexOf(`@media (${query})`);
+  if (mediaStart < 0) return "";
+  const nextMedia = css.indexOf("\n@media", mediaStart + 1);
+  const mediaBody = css.slice(mediaStart, nextMedia < 0 ? undefined : nextMedia);
+  return mediaBody.match(new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\{(?<body>[\\s\\S]*?)\\n\\s*\\}`))?.groups?.body ?? "";
+}
+
 describe("app CSS", () => {
   test("does not ship the removed viewer reset HUD button styles", () => {
     expect(css).not.toContain(".viewer-hud");
@@ -180,5 +188,60 @@ describe("app CSS", () => {
     expect(playbackWebkitThumb).toMatch(/border-radius:\s*3px/);
     expect(playbackMozThumb).toMatch(/width:\s*4px/);
     expect(playbackMozThumb).toMatch(/border-radius:\s*3px/);
+  });
+
+  test("uses a viewer-first vertical workspace on phone screens", () => {
+    const mobileShell = mediaRule("max-width: 640px", ".app-shell");
+    const mobileWorkspace = mediaRule("max-width: 640px", ".workspace");
+    const mobileViewer = mediaRule("max-width: 640px", ".viewer-shell");
+    const mobilePanel = mediaRule("max-width: 640px", ".side-panel");
+    const mobilePanelBody = mediaRule("max-width: 640px", ".panel-body");
+
+    expect(mobileShell).toMatch(/height:\s*100dvh/);
+    expect(mobileWorkspace).toMatch(/display:\s*grid/);
+    expect(mobileWorkspace).toMatch(/grid-template-columns:\s*minmax\(0,\s*1fr\)/);
+    expect(mobileWorkspace).toMatch(/grid-template-rows:\s*minmax\(260px,\s*46dvh\)\s+auto\s+auto/);
+    expect(mobileWorkspace).toMatch(/overflow-y:\s*auto/);
+    expect(mobileViewer).toMatch(/grid-row:\s*1/);
+    expect(mobileViewer).toMatch(/min-height:\s*260px/);
+    expect(mobileViewer).toMatch(/height:\s*46dvh/);
+    expect(mobilePanel).toMatch(/grid-row:\s*2/);
+    expect(mobilePanel).toMatch(/width:\s*100%/);
+    expect(mobilePanel).toMatch(/overflow:\s*visible/);
+    expect(mobilePanelBody).toMatch(/overflow:\s*visible/);
+  });
+
+  test("keeps workflow and utility controls reachable on phone screens", () => {
+    const mobileStepbar = mediaRule("max-width: 640px", ".stepbar");
+    const mobileStepList = mediaRule("max-width: 640px", ".step-list");
+    const mobileStepFooter = mediaRule("max-width: 640px", ".stepbar-footer");
+    const mobileTools = mediaRule("max-width: 640px", ".topbar-tools");
+    const mobileActionLabel = mediaRule("max-width: 640px", ".topbar-action-label");
+
+    expect(mobileStepbar).toMatch(/grid-row:\s*3/);
+    expect(mobileStepbar).toMatch(/position:\s*sticky/);
+    expect(mobileStepbar).toMatch(/bottom:\s*0/);
+    expect(mobileStepbar).toMatch(/overflow-x:\s*auto/);
+    expect(mobileStepList).toMatch(/grid-auto-flow:\s*column/);
+    expect(mobileStepList).toMatch(/overflow-x:\s*auto/);
+    expect(mobileStepFooter).toMatch(/display:\s*flex/);
+    expect(mobileTools).toMatch(/display:\s*flex/);
+    expect(mobileActionLabel).toMatch(/position:\s*absolute/);
+  });
+
+  test("constrains drawers and modals to the phone viewport", () => {
+    const mobileBottomContent = mediaRule("max-width: 640px", ".bottom-content");
+    const mobileWorkflowModal = mediaRule("max-width: 640px", ".workflow-modal");
+    const mobileMaterialLayout = mediaRule("max-width: 640px", ".material-library-layout");
+    const mobileSimulationScreen = mediaRule("max-width: 640px", ".simulation-type-screen");
+
+    expect(mobileBottomContent).toMatch(/left:\s*0/);
+    expect(mobileBottomContent).toMatch(/right:\s*0/);
+    expect(mobileBottomContent).toMatch(/max-height:\s*calc\(100dvh\s*-\s*var\(--statusbar-h\)\s*-\s*12px\)/);
+    expect(mobileBottomContent).toMatch(/overflow:\s*hidden/);
+    expect(mobileWorkflowModal).toMatch(/max-height:\s*calc\(100dvh\s*-\s*24px\)/);
+    expect(mobileWorkflowModal).toMatch(/overflow:\s*auto/);
+    expect(mobileMaterialLayout).toMatch(/min-height:\s*0/);
+    expect(mobileSimulationScreen).toMatch(/overflow:\s*auto/);
   });
 });

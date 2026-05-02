@@ -1121,14 +1121,15 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
             className={`primary topbar-action ${solverRunning ? "running" : ""}`}
             onClick={handleRunSimulation}
             disabled={!effectiveCanRunSimulation}
+            aria-label={solverRunning ? "Simulation running" : "Run simulation"}
             title={cloudFeaUnavailable ? "Cloud FEA is unavailable on this app domain." : missingRunItems.length ? `Complete before running: ${missingRunItems.join(", ")}` : "Run simulation"}
           >
-            <span aria-hidden="true">▶</span>{solverRunning ? "Running…" : "Run simulation"}
+            <span aria-hidden="true">▶</span><span className="topbar-action-label">{solverRunning ? "Running…" : "Run simulation"}</span>
           </button>
         ) : null}
-        <button className="secondary topbar-action" type="button" onClick={handleSaveProject} title="Save project to local disk">
+        <button className="secondary topbar-action" type="button" onClick={handleSaveProject} title="Save project to local disk" aria-label="Save project to local disk">
           <Save size={16} aria-hidden="true" />
-          Save project
+          <span className="topbar-action-label">Save project</span>
         </button>
       </header>
     );
