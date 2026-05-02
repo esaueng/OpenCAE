@@ -81,6 +81,19 @@ class ValidationSuite(unittest.TestCase):
         self.assertEqual(parsed_results["status"], "parsed-calculix-dat")
         self.assertAlmostEqual(parsed_results["stresses"][0]["vonMises"], 0.2)
 
+    def test_calculix_dat_parser_accepts_legacy_and_context_signatures(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = Path(tmp)
+            (workdir / "opencae_solve.dat").write_text(dat_fixture())
+
+            legacy_result = runner.parse_calculix_result_files(workdir, "validation-parser")
+            context_result = runner.parse_calculix_result_files(workdir, "validation-parser", {"mesh": {}, "boundaries": {}})
+
+        self.assertEqual(legacy_result["status"], "parsed-calculix-dat")
+        self.assertEqual(context_result["status"], "parsed-calculix-dat")
+        self.assertAlmostEqual(legacy_result["stresses"][0]["vonMises"], 0.2)
+        self.assertAlmostEqual(context_result["stresses"][0]["vonMises"], 0.2)
+
     def test_axial_tension_f_over_a_units_and_load_distribution(self):
         parsed = runner.parse_payload(block_payload("axial", ALUMINUM_6061, [1, 0, 0], 1.0, "standard"))
         mesh = runner.generate_structured_hex_mesh(parsed["dimensions"], parsed["meshDensity"])
