@@ -52,7 +52,7 @@ describe("app CSS", () => {
 
     expect(analysisLegend).toMatch(/width:\s*360px/);
     expect(analysisLegend).toMatch(/min-width:\s*280px/);
-    expect(analysisLegend).toMatch(/min-height:\s*148px/);
+    expect(analysisLegend).toMatch(/min-height:\s*154px/);
     expect(analysisLegend).toMatch(/max-width:\s*calc\(100%\s*-\s*24px\)/);
     expect(analysisLegend).toMatch(/max-height:\s*calc\(100%\s*-\s*24px\)/);
     expect(analysisLegend).toMatch(/overflow:\s*hidden/);
@@ -61,7 +61,7 @@ describe("app CSS", () => {
     expect(analysisLegend).toMatch(/align-content:\s*start/);
     expect(analysisLegend).toMatch(/font-size:\s*calc\(var\(--fs-mini\)\s*\*\s*var\(--analysis-legend-scale,\s*1\)\)/);
     expect(analysisLegend).toMatch(/gap:\s*calc\(6px\s*\*\s*var\(--analysis-legend-scale,\s*1\)\)\s+calc\(12px\s*\*\s*var\(--analysis-legend-scale,\s*1\)\)/);
-    expect(analysisLegend).toMatch(/padding:\s*calc\(12px\s*\*\s*var\(--analysis-legend-scale,\s*1\)\)\s+calc\(14px\s*\*\s*var\(--analysis-legend-scale,\s*1\)\)\s+calc\(2px\s*\*\s*var\(--analysis-legend-scale,\s*1\)\)/);
+    expect(analysisLegend).toMatch(/padding:\s*calc\(12px\s*\*\s*var\(--analysis-legend-scale,\s*1\)\)\s+calc\(14px\s*\*\s*var\(--analysis-legend-scale,\s*1\)\)\s+calc\(8px\s*\*\s*var\(--analysis-legend-scale,\s*1\)\)/);
     expect(resizeHandle).toMatch(/position:\s*absolute/);
     expect(resizeHandle).toMatch(/top:\s*0/);
     expect(resizeHandle).toMatch(/right:\s*0/);
