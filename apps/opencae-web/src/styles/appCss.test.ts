@@ -61,7 +61,7 @@ describe("app CSS", () => {
     expect(analysisLegend).toMatch(/align-content:\s*start/);
     expect(analysisLegend).toMatch(/font-size:\s*calc\(var\(--fs-mini\)\s*\*\s*var\(--analysis-legend-scale,\s*1\)\)/);
     expect(analysisLegend).toMatch(/gap:\s*calc\(6px\s*\*\s*var\(--analysis-legend-scale,\s*1\)\)\s+calc\(12px\s*\*\s*var\(--analysis-legend-scale,\s*1\)\)/);
-    expect(analysisLegend).toMatch(/padding:\s*calc\(14px\s*\*\s*var\(--analysis-legend-scale,\s*1\)\)\s+calc\(16px\s*\*\s*var\(--analysis-legend-scale,\s*1\)\)\s+calc\(8px\s*\*\s*var\(--analysis-legend-scale,\s*1\)\)/);
+    expect(analysisLegend).toMatch(/padding:\s*calc\(14px\s*\*\s*var\(--analysis-legend-scale,\s*1\)\)\s+calc\(16px\s*\*\s*var\(--analysis-legend-scale,\s*1\)\)\s+calc\(4px\s*\*\s*var\(--analysis-legend-scale,\s*1\)\)/);
     expect(resizeHandle).toMatch(/position:\s*absolute/);
     expect(resizeHandle).toMatch(/top:\s*0/);
     expect(resizeHandle).toMatch(/right:\s*0/);

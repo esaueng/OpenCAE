@@ -1422,7 +1422,7 @@ img {
   align-content: start;
   grid-auto-rows: min-content;
   gap: calc(6px * var(--analysis-legend-scale, 1)) calc(12px * var(--analysis-legend-scale, 1));
-  padding: calc(14px * var(--analysis-legend-scale, 1)) calc(16px * var(--analysis-legend-scale, 1)) calc(8px * var(--analysis-legend-scale, 1));
+  padding: calc(14px * var(--analysis-legend-scale, 1)) calc(16px * var(--analysis-legend-scale, 1)) calc(4px * var(--analysis-legend-scale, 1));
   color: var(--color-text);
   background: rgba(17, 24, 33, 0.85);
   border: var(--border-thin);
