@@ -208,11 +208,14 @@ async function runCloudFeaSolve(runId: string, env: RuntimeEnv): Promise<void> {
     const solveResponse = await callFeaContainer(env, { ...requestArtifact, runId });
     if (!solveResponse.ok) {
       const failure = await readContainerFailure(solveResponse);
+      await putOptionalArtifact(artifacts, `runs/${runId}/input.inp`, failure.artifacts.inputDeck);
+      await putOptionalArtifact(artifacts, `runs/${runId}/solver.log`, failure.artifacts.solverLog);
+      await putOptionalArtifact(artifacts, `runs/${runId}/mesh.json`, JSON.stringify(failure.artifacts.meshSummary ?? {}, null, 2));
       await artifacts.put(`runs/${runId}/events.json`, JSON.stringify([
         ...events,
-        { runId, type: "error", progress: 100, message: failure, timestamp: new Date().toISOString() }
+        { runId, type: "error", progress: 100, message: failure.message, timestamp: new Date().toISOString() }
       ], null, 2));
-      await artifacts.put(`runs/${runId}/failed.json`, JSON.stringify({ runId, error: failure, timestamp: new Date().toISOString() }, null, 2));
+      await artifacts.put(`runs/${runId}/failed.json`, JSON.stringify({ runId, error: failure.message, timestamp: new Date().toISOString() }, null, 2));
       return;
     }
     const containerResult = await solveResponse.json() as Record<string, unknown>;
@@ -262,11 +265,17 @@ async function callFeaContainer(env: RuntimeEnv, payload: Record<string, unknown
   }
 }
 
-async function readContainerFailure(response: Response): Promise<string> {
-  const payload = await response.json().catch(() => null) as { error?: unknown; message?: unknown } | null;
-  if (typeof payload?.error === "string") return payload.error;
-  if (typeof payload?.message === "string") return payload.message;
-  return `Cloud FEA container failed with HTTP ${response.status}.`;
+async function readContainerFailure(response: Response): Promise<{ message: string; artifacts: Record<string, unknown> }> {
+  const payload = await response.json().catch(() => null) as { error?: unknown; message?: unknown; artifacts?: unknown } | null;
+  const message = typeof payload?.error === "string"
+    ? payload.error
+    : typeof payload?.message === "string"
+      ? payload.message
+      : `Cloud FEA container failed with HTTP ${response.status}.`;
+  return {
+    message,
+    artifacts: isRecord(payload?.artifacts) ? payload.artifacts : {}
+  };
 }
 
 function normalizeContainerResult(runId: string, result: Record<string, unknown>) {

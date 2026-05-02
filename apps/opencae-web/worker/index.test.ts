@@ -376,7 +376,14 @@ describe("Cloudflare FEA worker orchestration", () => {
       ASSETS: { fetch: vi.fn(async () => new Response("asset")) },
       FEA_ARTIFACTS: bucket,
       FEA_CONTAINER: {
-        fetch: vi.fn(async () => Response.json({ error: "Meshing failed: STL is not watertight." }, { status: 422 }))
+        fetch: vi.fn(async () => Response.json({
+          error: "Meshing failed: STL is not watertight.",
+          artifacts: {
+            inputDeck: "*HEADING\nfailed deck\n",
+            solverLog: "solver failed before results",
+            meshSummary: { nodes: 2, elements: 0, source: "structured_block" }
+          }
+        }, { status: 422 }))
       }
     };
 
@@ -387,6 +394,9 @@ describe("Cloudflare FEA worker orchestration", () => {
     expect(message.ack).toHaveBeenCalled();
     expect(message.retry).not.toHaveBeenCalled();
     expect(events.at(-1)).toMatchObject({ type: "error", message: "Meshing failed: STL is not watertight." });
+    expect(await (await bucket.get("runs/run-cloud-fail/input.inp"))!.text()).toContain("failed deck");
+    expect(await (await bucket.get("runs/run-cloud-fail/solver.log"))!.text()).toContain("solver failed");
+    expect(await (await bucket.get("runs/run-cloud-fail/mesh.json"))!.text()).toContain("structured_block");
     expect(await bucket.get("runs/run-cloud-fail/results.json")).toBeNull();
     expect(resultsResponse.status).toBe(404);
   });
@@ -618,7 +628,7 @@ describe("Cloudflare FEA worker orchestration", () => {
     expect(await bucket.get("runs/run-cloud-dynamic-unframed/results.json")).toBeNull();
   });
 
-  test("container runner refuses unparsed CalculiX output by default", () => {
+  test("container runner refuses unsupported non-block payloads", () => {
     const staticResult = runContainerSolve({ runId: "run-static", solverMaterial: aluminumSolverMaterial(), geometry: { format: "stl", filename: "beam.stl", contentBase64: closedStlBase64() } });
     const dynamicResult = runContainerSolve({
       runId: "run-dynamic",
@@ -629,15 +639,15 @@ describe("Cloudflare FEA worker orchestration", () => {
     });
 
     expect(staticResult).toMatchObject({ status: 422 });
-    expect(staticResult.error).toContain("CalculiX output was not parsed");
+    expect(staticResult.error).toContain("block-like single-body");
     expect(dynamicResult).toMatchObject({ status: 422 });
-    expect(dynamicResult.error).toContain("CalculiX output was not parsed");
+    expect(dynamicResult.error).toContain("static stress studies only");
   });
 
-  test("container runner rejects invalid open surface geometry", () => {
+  test("container runner rejects arbitrary geometry without block dimensions", () => {
     const result = runContainerSolve({ runId: "run-invalid", solverMaterial: aluminumSolverMaterial(), geometry: { format: "stl", filename: "open.stl", contentBase64: btoa("solid\nendsolid\n") } });
 
-    expect(result.error).toContain("not watertight");
+    expect(result.error).toContain("block-like single-body");
   });
 });
 
