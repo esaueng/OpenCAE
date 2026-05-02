@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { describe, expect, test, vi } from "vitest";
-import { VIEWER_AXIS_HEAD_RADIUS, VIEWER_AXIS_LABEL_BADGE_COLOR, VIEWER_AXIS_LABEL_BADGE_RADIUS, VIEWER_AXIS_LABEL_COLOR, VIEWER_AXIS_LABEL_FONT_SIZE, VIEWER_AXIS_LABEL_OUTLINE_COLOR, VIEWER_AXIS_LABEL_OUTLINE_WIDTH, VIEWER_CREDIT_URL, VIEWER_GIZMO_ALIGNMENT, VIEWER_GIZMO_AXIS_LENGTH, VIEWER_GIZMO_LABEL_DISTANCE, VIEWER_GIZMO_MARGIN, VIEWER_GIZMO_SCALE, VIEWER_ISOMETRIC_GIZMO_VIEW, VIEWER_VIEW_CUBE_BODY_OPACITY, VIEWER_VIEW_CUBE_EDGE_COLOR, VIEWER_VIEW_CUBE_FACE_HOVER_OPACITY, VIEWER_VIEW_CUBE_FACE_LABEL_FONT_SIZE, VIEWER_VIEW_CUBE_FACE_OPACITY, VIEWER_VIEW_CUBE_SIZE, applyResultFrameToGeometry, axisLabelToViewAxis, beamDemoDisplacementAtStation, beamDemoPayloadOffset, beamDemoStationForPoint, cameraDistanceForBounds, cameraViewForAxis, cloneResultPreviewObject, colorizeResultObject, colorizeSampleResultGeometry, createBeamDemoCoordinate, createUndeformedResultOutlineObject, defaultHomeViewTarget, deformationScaleForResultFields, displayedLegendTickLabels, finalVisualScaleForDisplacementField, getViewCubeFaceDescriptors, gizmoViewTargetToRequest, interpolateDisplacementAtPoint, legendMeshStats, legendTickLabels, normalizedPointLoadCantileverShape, payloadHighlightObjectId, pointLoadCantileverShape, printLayerVisualizationForBounds, resultLegendContentScale, resultLegendResizeDimensions, resultProbesForKind, resultValueForPoint, rotatedCameraOrbit, shouldShowDimensionOverlay, shouldShowModelHitLabel, shouldShowResultMarkers, shouldShowUndeformedResultOutline, shouldShowViewCubeFaceLabel, updatePackedSamples, viewCubeFaceToGizmoView, viewerCameraResetPose, viewerGizmoLayout } from "./CadViewer";
+import { VIEWER_AXIS_HEAD_RADIUS, VIEWER_AXIS_LABEL_BADGE_COLOR, VIEWER_AXIS_LABEL_BADGE_RADIUS, VIEWER_AXIS_LABEL_COLOR, VIEWER_AXIS_LABEL_FONT_SIZE, VIEWER_AXIS_LABEL_OUTLINE_COLOR, VIEWER_AXIS_LABEL_OUTLINE_WIDTH, VIEWER_CREDIT_URL, VIEWER_GIZMO_ALIGNMENT, VIEWER_GIZMO_AXIS_LENGTH, VIEWER_GIZMO_LABEL_DISTANCE, VIEWER_GIZMO_MARGIN, VIEWER_GIZMO_SCALE, VIEWER_ISOMETRIC_GIZMO_VIEW, VIEWER_VIEW_CUBE_BODY_OPACITY, VIEWER_VIEW_CUBE_EDGE_COLOR, VIEWER_VIEW_CUBE_FACE_HOVER_OPACITY, VIEWER_VIEW_CUBE_FACE_LABEL_FONT_SIZE, VIEWER_VIEW_CUBE_FACE_OPACITY, VIEWER_VIEW_CUBE_SIZE, applyResultFrameToGeometry, axisLabelToViewAxis, beamDemoDisplacementAtStation, beamDemoPayloadOffset, beamDemoStationForPoint, cameraDistanceForBounds, cameraViewForAxis, cloneResultPreviewObject, colorizeResultObject, colorizeSampleResultGeometry, createBeamDemoCoordinate, createUndeformedResultOutlineObject, defaultHomeViewTarget, deformationScaleForResultFields, displayedLegendTickLabels, finalVisualScaleForDisplacementField, getViewCubeCornerDescriptors, getViewCubeFaceDescriptors, gizmoViewTargetToRequest, interpolateDisplacementAtPoint, legendMeshStats, legendTickLabels, normalizedPointLoadCantileverShape, payloadHighlightObjectId, pointLoadCantileverShape, printLayerVisualizationForBounds, resultLegendContentScale, resultLegendResizeDimensions, resultProbesForKind, resultValueForPoint, rotatedCameraOrbit, shouldShowDimensionOverlay, shouldShowModelHitLabel, shouldShowResultMarkers, shouldShowUndeformedResultOutline, shouldShowViewCubeFaceLabel, updatePackedSamples, viewCubeFaceToGizmoView, viewerCameraResetPose, viewerGizmoLayout } from "./CadViewer";
 import type { FaceResultSample } from "../resultFields";
 import type { DisplayFace, ResultField } from "@opencae/schema";
 import type { PackedPreparedPlaybackCache } from "../resultPlaybackCache";
@@ -130,6 +130,38 @@ describe("CadViewer result coloring", () => {
       expectVectorCloseTo(actualNormal, faceExpected?.normal ?? []);
       expectVectorCloseTo(actualTextUp, faceExpected?.textUp ?? []);
     }
+  });
+
+  test("defines clickable view cube corners for every signed diagonal", () => {
+    const descriptors = getViewCubeCornerDescriptors();
+    const cubeSize = VIEWER_VIEW_CUBE_SIZE;
+
+    expect(descriptors).toHaveLength(8);
+    expect(new Set(descriptors.map((corner) => corner.title)).size).toBe(8);
+    expect(new Set(descriptors.map((corner) => corner.position.join(","))).size).toBe(8);
+    expect(descriptors.map((corner) => corner.position.join(",")).sort()).toEqual([
+      `0,0,0`,
+      `0,0,${cubeSize}`,
+      `0,${cubeSize},0`,
+      `0,${cubeSize},${cubeSize}`,
+      `${cubeSize},0,0`,
+      `${cubeSize},0,${cubeSize}`,
+      `${cubeSize},${cubeSize},0`,
+      `${cubeSize},${cubeSize},${cubeSize}`
+    ]);
+    expect(descriptors.map((corner) => corner.direction.join(",")).sort()).toEqual([
+      "-1,-1,-1",
+      "-1,-1,1",
+      "-1,1,-1",
+      "-1,1,1",
+      "1,-1,-1",
+      "1,-1,1",
+      "1,1,-1",
+      "1,1,1"
+    ]);
+    expect(descriptors.find((corner) => corner.direction.join(",") === "1,1,1")?.title).toBe("View +X +Y +Z");
+    expect(cadViewerSource).toContain("function ViewCubeCorner");
+    expect(cadViewerSource).toContain("<ViewCubeCorner");
   });
 
   test("rotates the top face label 90 degrees counterclockwise while keeping it flat", () => {
@@ -321,6 +353,20 @@ describe("CadViewer result coloring", () => {
     expect(firstPose.position.toArray()).toEqual(secondPose.position.toArray());
     expect(firstPose.target.toArray()).toEqual(secondPose.target.toArray());
     expect(firstPose.up.toArray()).toEqual(secondPose.up.toArray());
+  });
+
+  test("computes corner gizmo camera poses from signed diagonal directions", () => {
+    const bounds = new THREE.Box3(new THREE.Vector3(-5, -5, -5), new THREE.Vector3(5, 5, 5));
+    const center = bounds.getCenter(new THREE.Vector3());
+    const pose = viewerCameraResetPose(bounds, center, 10, { kind: "corner", direction: [-1, 1, 1] }, 42, 1);
+    const direction = pose.position.clone().sub(pose.target).normalize();
+    const expectedDirection = new THREE.Vector3(-1, 1, 1).normalize();
+    const expectedUp = new THREE.Vector3(0, 0, 1).projectOnPlane(expectedDirection).normalize();
+
+    expectVectorCloseTo(direction, expectedDirection.toArray());
+    expectVectorCloseTo(pose.up, expectedUp.toArray());
+    expect(pose.target.toArray()).toEqual(center.toArray());
+    expect(pose.position.distanceTo(pose.target)).toBeCloseTo(cameraDistanceForBounds(bounds, expectedDirection, expectedUp, 42, 1, 1.28));
   });
 
   test("hides face selection callouts so snapping markers carry placement feedback", () => {
