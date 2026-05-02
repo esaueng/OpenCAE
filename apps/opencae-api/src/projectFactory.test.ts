@@ -229,7 +229,7 @@ describe("projectFactory", () => {
       displayModel
     });
 
-    expect(project.name).toBe("Untitled Project");
+    expect(project.name).toBe("mounting-plate");
     expect(project.geometryFiles[0]?.filename).toBe("mounting-plate.stl");
     expect(project.geometryFiles[0]?.metadata.source).toBe("local-upload");
     expect(project.geometryFiles[0]?.metadata.previewFormat).toBe("stl");
@@ -268,5 +268,44 @@ describe("projectFactory", () => {
     expect(project.geometryFiles[0]?.metadata.nativeCadImport).toBe(true);
     expect(project.geometryFiles[0]?.metadata.previewFormat).toBe("step");
     expect(project.studies).toEqual([]);
+  });
+
+  test("uses the uploaded file name as the default project name", () => {
+    const blank = createBlankProject({
+      projectId: "project-step-upload",
+      studyId: "study-step-upload",
+      now: "2026-04-24T12:00:00.000Z"
+    });
+    const displayModel = uploadedDisplayModelFor("Force Sample v1.step", "U1RFUA==");
+    const project = attachUploadedModelToProject(blank, {
+      geometryId: "geom-step",
+      filename: "Force Sample v1.step",
+      artifactKey: "project-step-upload/geometry/uploaded-display.json",
+      now: "2026-04-24T12:05:00.000Z",
+      displayModel
+    });
+
+    expect(project.name).toBe("Force Sample v1");
+  });
+
+  test("keeps a user-edited project name when replacing an uploaded model", () => {
+    const customProject = {
+      ...createBlankProject({
+        projectId: "project-step-upload",
+        studyId: "study-step-upload",
+        now: "2026-04-24T12:00:00.000Z"
+      }),
+      name: "Payload Calibration"
+    };
+    const displayModel = uploadedDisplayModelFor("Force Sample v1.step", "U1RFUA==");
+    const project = attachUploadedModelToProject(customProject, {
+      geometryId: "geom-step",
+      filename: "Force Sample v1.step",
+      artifactKey: "project-step-upload/geometry/uploaded-display.json",
+      now: "2026-04-24T12:05:00.000Z",
+      displayModel
+    });
+
+    expect(project.name).toBe("Payload Calibration");
   });
 });

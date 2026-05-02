@@ -211,6 +211,7 @@ export function attachUploadedModelToProject(
   }));
   return {
     ...project,
+    name: projectNameForUploadedModel(project, options.filename),
     geometryFiles: [{
       id: options.geometryId,
       projectId: project.id,
@@ -230,6 +231,21 @@ export function attachUploadedModelToProject(
     studies,
     updatedAt: options.now
   };
+}
+
+function projectNameForUploadedModel(project: Project, filename: string): string {
+  const modelName = baseNameForModel(filename);
+  const projectName = normalizeProjectName(project.name);
+  if (!projectName || projectName === "Untitled Project") return modelName;
+
+  const previousUpload = project.geometryFiles.find((geometry) => geometry.metadata.source === "local-upload");
+  if (previousUpload && projectName === normalizeProjectName(baseNameForModel(previousUpload.filename))) return modelName;
+
+  return project.name;
+}
+
+function normalizeProjectName(name: string): string {
+  return name.trim().replace(/\s+/g, " ");
 }
 
 function namedSelectionsForDisplayModel(bodyLabel: string, displayModel: DisplayModel) {
