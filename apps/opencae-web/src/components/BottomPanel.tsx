@@ -1,5 +1,5 @@
 import { useRef, useState, type MouseEvent, type PointerEvent } from "react";
-import { Github, MessageSquare } from "lucide-react";
+import { Coffee, Github, MessageSquare } from "lucide-react";
 import { REQUIRED_SETTING_HELP_IDS, SETTING_HELP, type SettingHelpVisual } from "../settingHelp";
 
 interface BottomPanelProps {
@@ -132,6 +132,10 @@ export function BottomPanel({ status, logs, projectName, studyName, meshStatus, 
           <a className="status-link" href="https://form.esauengineering.com/opencae-feedback" target="_blank" rel="noreferrer">
             <MessageSquare size={13} aria-hidden="true" />
             feedback
+          </a>
+          <a className="status-link donate-link" href="https://ko-fi.com/petergustafson" target="_blank" rel="noreferrer" title="Support OpenCAE on Ko-fi">
+            <Coffee size={13} aria-hidden="true" />
+            Buy me a coffee
           </a>
           <a className="status-link" href="https://github.com/esaueng/OpenCAE" target="_blank" rel="noreferrer">
             <Github size={13} aria-hidden="true" />

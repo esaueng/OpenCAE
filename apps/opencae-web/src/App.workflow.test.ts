@@ -22,10 +22,9 @@ describe("App workflow layout", () => {
     expect(appSource).toContain("applyStep(options.nextStep);");
   });
 
-  test("keeps the Ko-fi donation action in the top bar", () => {
-    expect(appSource).toContain('href="https://ko-fi.com/petergustafson"');
-    expect(appSource).toContain("donate-action donate-action-intro");
-    expect(appSource).toContain("Buy me a coffee");
+  test("keeps the workspace top bar focused on project controls", () => {
+    expect(appSource).not.toContain('href="https://ko-fi.com/petergustafson"');
+    expect(appSource).not.toContain("Buy me a coffee");
   });
 
   test("drives dynamic result playback with animation frames instead of queued intervals", () => {

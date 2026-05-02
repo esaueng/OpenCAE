@@ -1,6 +1,6 @@
 import { lazy, startTransition, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Constraint, DisplayFace, DisplayModel, DynamicSolverSettings, Load, NamedSelection, Project, ResultField, ResultSummary, RunEvent, RunTimingEstimate, SimulationFidelity, SolverBackend, Study } from "@opencae/schema";
-import { Coffee, RotateCcw, Save } from "lucide-react";
+import { RotateCcw, Save } from "lucide-react";
 import { addLoad, addSupport, assignMaterial, cancelRun, createProject, generateMesh, getResults, importLocalProject, loadSampleProject, renameProject, runSimulation, subscribeToRun, updateStudy as saveStudyPatch, uploadModel, type SampleAnalysisType, type SampleModelId } from "./lib/api";
 import { normalizePrintParameters, starterMaterials } from "@opencae/materials";
 import { BottomPanel } from "./components/BottomPanel";
@@ -1059,10 +1059,6 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
             <button className="icon-button history-button" type="button" title="Redo last change" aria-label="Redo last change" disabled={!canRedoAction} onClick={handleRedoAction}><RedoIcon /></button>
           </div>
         </div>
-        <a className="secondary topbar-action donate-action donate-action-intro" href="https://ko-fi.com/petergustafson" target="_blank" rel="noreferrer" title="Support OpenCAE on Ko-fi">
-          <Coffee size={16} aria-hidden="true" />
-          <span>Buy me a coffee</span>
-        </a>
         {showRunButton ? (
           <button
             className={`primary topbar-action ${solverRunning ? "running" : ""}`}
