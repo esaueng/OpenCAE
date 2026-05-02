@@ -106,12 +106,14 @@ describe("app CSS", () => {
     expect(cssRule(".panel-section h2")).toMatch(/color:\s*var\(--color-text\)/);
   });
 
-  test("lays out the start screen as a wide sample picker", () => {
+  test("keeps the main start screen compact and expands the sample submenu", () => {
     const startBrand = cssRule(".start-brand");
+    const startBrandMenu = cssRule(".start-brand.sample-menu-open");
     const sampleGrid = cssRule(".start-sample-grid");
 
     expect(startBrand).toMatch(/position:\s*relative/);
-    expect(startBrand).toMatch(/width:\s*min\(980px,\s*100%\)/);
+    expect(startBrand).toMatch(/width:\s*min\(340px,\s*100%\)/);
+    expect(startBrandMenu).toMatch(/width:\s*min\(980px,\s*100%\)/);
     expect(sampleGrid).toMatch(/grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/);
   });
 
