@@ -1,10 +1,59 @@
 import math
-import os
 import shutil
+import tempfile
 import unittest
+from pathlib import Path
 from unittest import mock
 
 import runner
+
+
+class CalculixDatParserTest(unittest.TestCase):
+    def test_von_mises_uses_six_stress_components(self):
+        value = runner.von_mises([0.20, 0.02, -0.01, 0.03, 0.04, -0.02])
+
+        expected = math.sqrt(0.5 * ((0.20 - 0.02) ** 2 + (0.02 + 0.01) ** 2 + (-0.01 - 0.20) ** 2) + 3 * (0.03 ** 2 + 0.04 ** 2 + (-0.02) ** 2))
+        self.assertAlmostEqual(value, expected)
+
+    def test_parse_calculix_result_files_reads_dat_displacements_reactions_and_integration_stresses(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = Path(tmp)
+            (workdir / "opencae_solve.dat").write_text(calculix_dat_fixture())
+            (workdir / "opencae_solve.frd").write_text("frd placeholder")
+
+            parsed = runner.parse_calculix_result_files(workdir, "run-fixture")
+
+        self.assertEqual(parsed["status"], "parsed-calculix-dat")
+        self.assertEqual(parsed["resultSource"], "parsed_frd_dat")
+        self.assertEqual(parsed["files"], ["opencae_solve.dat", "opencae_solve.frd"])
+        self.assertEqual(parsed["displacements"][2], [0.0, 0.0, -0.0015])
+        self.assertEqual(parsed["reactions"][1], [0.0, 0.0, 1.0])
+        self.assertEqual(len(parsed["stresses"]), 2)
+        self.assertEqual(parsed["stresses"][1]["elementId"], 2)
+        self.assertAlmostEqual(parsed["stresses"][1]["vonMises"], runner.von_mises([0.20, 0.02, -0.01, 0.03, 0.04, -0.02]))
+
+    def test_response_uses_parsed_integration_stress_and_no_generated_sources(self):
+        parsed_payload = runner.parse_payload(block_benchmark_payload("standard"))
+        mesh = runner.generate_structured_hex_mesh(parsed_payload["dimensions"], parsed_payload["meshDensity"])
+        boundaries = runner.select_boundary_nodes(parsed_payload, mesh)
+        parsed_files = {
+            **runner.parse_dat_result(calculix_dat_fixture(), mesh),
+            "files": ["opencae_solve.dat"],
+            "status": "parsed-calculix-dat",
+            "resultSource": "parsed_dat"
+        }
+
+        result = runner.response_from_parsed_dat(parsed_payload, mesh, boundaries, "input deck", {"log": "solver log"}, parsed_files)
+
+        expected_stress = runner.von_mises([0.20, 0.02, -0.01, 0.03, 0.04, -0.02])
+        self.assertAlmostEqual(result["summary"]["maxStress"], expected_stress)
+        self.assertEqual(result["summary"]["maxStressUnits"], "MPa")
+        self.assertEqual(result["summary"]["maxDisplacement"], 0.0015)
+        self.assertEqual(result["summary"]["maxDisplacementUnits"], "mm")
+        self.assertAlmostEqual(result["summary"]["safetyFactor"], 276.0 / expected_stress)
+        for field in result["fields"]:
+            for sample in field["samples"]:
+                self.assertNotIn("generated-cantilever-fallback", sample.get("source", ""))
 
 
 class StructuredBlockSolveTest(unittest.TestCase):
@@ -65,7 +114,7 @@ class StructuredBlockSolveTest(unittest.TestCase):
         self.assertLessEqual(result["summary"]["maxDisplacement"], 0.004)
         self.assertAlmostEqual(result["summary"]["reactionForce"], 1.0, delta=0.02)
         self.assertGreaterEqual(result["summary"]["safetyFactor"], 900)
-        self.assertEqual(result["summary"]["provenance"]["resultSource"], "parsed_dat")
+        self.assertIn(result["summary"]["provenance"]["resultSource"], {"parsed_dat", "parsed_frd_dat"})
         self.assertEqual(result["artifacts"]["solverResultParser"], "parsed-calculix-dat")
 
 
@@ -77,47 +126,10 @@ class GeneratedDynamicFieldsTest(unittest.TestCase):
         self.assertEqual(context.exception.status, 422)
         self.assertIn("block-like single-body", str(context.exception))
 
-    def test_dev_fallback_flag_does_not_bypass_structured_block_validation(self):
-        previous = os.environ.get(runner.GENERATED_FALLBACK_FLAG)
-        os.environ[runner.GENERATED_FALLBACK_FLAG] = "1"
-        try:
-            with self.assertRaises(runner.UserFacingSolveError) as context:
-                runner.solve({"runId": "run-test", "solverMaterial": aluminum_solver_material()})
-        finally:
-            if previous is None:
-                os.environ.pop(runner.GENERATED_FALLBACK_FLAG, None)
-            else:
-                os.environ[runner.GENERATED_FALLBACK_FLAG] = previous
+    def test_generated_fallback_functions_are_not_exposed_as_solver_result_path(self):
+        self.assertFalse(hasattr(runner, "generated_result_fields"))
+        self.assertFalse(hasattr(runner, "generated_fallback_response"))
 
-        self.assertEqual(context.exception.status, 422)
-        self.assertIn("block-like single-body", str(context.exception))
-
-    def test_generated_fallback_helper_marks_dev_results_with_obvious_provenance(self):
-        settings = runner.normalized_dynamic_settings({})
-        result = runner.generated_fallback_response(
-            "run-test",
-            500.0,
-            aluminum_solver_material(),
-            settings,
-            False,
-            "input deck",
-            {"log": "solver log"},
-            {"available": False, "files": [], "status": "generated-fallback-for-run-test"}
-        )
-
-        self.assertEqual(result["resultSource"], "generated_fallback")
-        self.assertEqual(result["diagnostics"][0]["id"], "cloud-fea-generated-fallback")
-        self.assertTrue(result["artifacts"]["solverResultParser"].startswith("generated-fallback-for-"))
-        self.assertEqual(result["summary"]["maxStressUnits"], "MPa")
-        self.assertEqual(result["summary"]["maxDisplacementUnits"], "mm")
-        self.assertAlmostEqual(result["summary"]["safetyFactor"], 276.0 / result["summary"]["maxStress"])
-        for field in result["fields"]:
-            if field["type"] == "stress":
-                self.assertEqual(field["units"], "MPa")
-            if field["type"] == "displacement":
-                self.assertEqual(field["units"], "mm")
-            for sample in field["samples"]:
-                self.assertIn("generated-cantilever-fallback", sample["source"])
 
     def test_material_properties_reads_solver_material(self):
         material = runner.material_properties({
@@ -149,67 +161,6 @@ class GeneratedDynamicFieldsTest(unittest.TestCase):
                 with self.assertRaises(runner.UserFacingSolveError):
                     runner.material_properties(payload)
 
-    def test_generated_dynamic_stress_frames_use_global_range_and_finite_samples(self):
-        settings = runner.normalized_dynamic_settings({
-            "startTime": 0.0,
-            "endTime": 0.02,
-            "timeStep": 0.005,
-            "outputInterval": 0.005,
-            "dampingRatio": 0.02,
-        })
-
-        result = runner.generated_result_fields("run-test", 500.0, aluminum_solver_material(), settings, True)
-        stress_frames = [field for field in result["fields"] if field["type"] == "stress"]
-
-        self.assertGreater(len(stress_frames), 1)
-        self.assertEqual({field["min"] for field in stress_frames}, {0.0})
-        self.assertEqual(len({field["max"] for field in stress_frames}), 1)
-        self.assertEqual(stress_frames[0]["max"], result["summary"]["maxStress"])
-
-        frame_indexes = [field["frameIndex"] for field in stress_frames]
-        times = [field["timeSeconds"] for field in stress_frames]
-        self.assertEqual(frame_indexes, sorted(frame_indexes))
-        self.assertEqual(times, sorted(times))
-
-        for field in stress_frames:
-            self.assertEqual(field["location"], "node")
-            self.assertGreaterEqual(len(field.get("samples", [])), 8)
-            for sample in field["samples"]:
-                self.assertTrue(math.isfinite(sample["value"]))
-                self.assertTrue(math.isfinite(sample["point"][0]))
-                self.assertIn("nodeId", sample)
-
-    def test_generated_dynamic_displacement_samples_include_changing_vectors(self):
-        settings = runner.normalized_dynamic_settings({
-            "startTime": 0.0,
-            "endTime": 0.02,
-            "timeStep": 0.005,
-            "outputInterval": 0.005,
-            "dampingRatio": 0.02,
-        })
-
-        result = runner.generated_result_fields("run-test", 500.0, aluminum_solver_material(), settings, True)
-        displacement_frames = [field for field in result["fields"] if field["type"] == "displacement"]
-        first_frame = displacement_frames[0]
-        peak_frame = max(displacement_frames, key=lambda field: max(sample["value"] for sample in field["samples"]))
-
-        self.assertGreater(len(displacement_frames), 1)
-        self.assertEqual({field["min"] for field in displacement_frames}, {0.0})
-        self.assertEqual(len({field["max"] for field in displacement_frames}), 1)
-
-        first_magnitudes = [math.sqrt(sum(component * component for component in sample["vector"])) for sample in first_frame["samples"]]
-        peak_magnitudes = [math.sqrt(sum(component * component for component in sample["vector"])) for sample in peak_frame["samples"]]
-
-        self.assertLess(max(first_magnitudes), 1e-12)
-        self.assertGreater(max(peak_magnitudes), 0)
-        for sample in peak_frame["samples"]:
-            self.assertIn("vector", sample)
-            self.assertEqual(len(sample["vector"]), 3)
-            for component in sample["vector"]:
-                self.assertTrue(math.isfinite(component))
-            self.assertAlmostEqual(sample["value"], math.sqrt(sum(component * component for component in sample["vector"])))
-
-
 def aluminum_solver_material():
     return {
         "id": "mat-aluminum-6061",
@@ -219,6 +170,25 @@ def aluminum_solver_material():
         "densityTonnePerMm3": 2.7e-9,
         "yieldMpa": 276.0
     }
+
+
+def calculix_dat_fixture():
+    return """
+ displacements (vx,vy,vz) for set NALL and time  0.1000000E+01
+
+       1   0.000000E+00   0.000000E+00   0.000000E+00
+       2   0.000000E+00   0.000000E+00  -1.500000E-03
+       3   1.000000E-04   0.000000E+00  -9.000000E-04
+
+ forces (fx,fy,fz) for set FIXED and time  0.1000000E+01
+
+       1   0.000000E+00   0.000000E+00   1.000000E+00
+
+ stresses (sxx,syy,szz,sxy,sxz,syz) for set SOLID and time  0.1000000E+01
+
+       1   1.000000E-01   0.000000E+00   0.000000E+00   0.000000E+00   0.000000E+00   0.000000E+00
+       2   2.000000E-01   2.000000E-02  -1.000000E-02   3.000000E-02   4.000000E-02  -2.000000E-02
+"""
 
 
 def block_benchmark_payload(fidelity="standard"):

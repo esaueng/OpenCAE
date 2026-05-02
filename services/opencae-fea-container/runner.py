@@ -1,21 +1,13 @@
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
-import base64
 import json
 import math
-import os
 import re
 import shutil
 import subprocess
 import tempfile
 
 
-LENGTH_MM = 75.0
-WIDTH_MM = 5.0
-HEIGHT_MM = 15.0
-BEAM_DEPTH_DISPLAY = 0.36
-CLOUD_FEA_ADAPTER_DIAGNOSTIC = "Cloud FEA adapter currently runs a hard-coded cantilever fallback and does not parse CalculiX output."
-GENERATED_FALLBACK_FLAG = "OPCAE_ALLOW_GENERATED_FEA_FALLBACK"
 UNPARSED_RESULTS_ERROR = "CalculiX output was not parsed into real result fields; refusing to publish generated fallback results."
 INVALID_SOLVER_MATERIAL_ERROR = "Cloud FEA requires a valid solverMaterial with positive finite CalculiX material properties."
 UNSUPPORTED_BLOCK_ERROR = "Cloud FEA currently supports only block-like single-body models with positive millimeter dimensions."
@@ -365,140 +357,16 @@ def format_cload_lines(nodal_loads):
 
 
 def parse_calculix_results(workdir, parsed, mesh, boundaries, input_deck, solver_output):
-    files = sorted(path.name for path in workdir.glob("*") if path.suffix.lower() in {".frd", ".dat", ".sta"})
-    dat_files = [workdir / name for name in files if name.endswith(".dat")]
-    for dat_path in dat_files:
-        parsed_dat = parse_dat_result(dat_path.read_text(errors="ignore"), mesh)
-        if parsed_dat["displacements"] and parsed_dat["stresses"]:
-            return response_from_parsed_dat(parsed, mesh, boundaries, input_deck, solver_output, files, parsed_dat)
+    parsed_files = parse_calculix_result_files(workdir, parsed["runId"], mesh)
+    if is_parsed_calculix_status(parsed_files["status"]):
+        return response_from_parsed_dat(parsed, mesh, boundaries, input_deck, solver_output, parsed_files)
     return {
-        "artifacts": artifacts_for_failure(input_deck, solver_output, "unparsed-calculix-output", mesh, boundaries, files)
+        "artifacts": artifacts_for_failure(input_deck, solver_output, parsed_files["status"], mesh, boundaries, parsed_files["files"])
     }
-
-
-def generated_fallback_response(run_id, load_n, material, dynamic_settings, dynamic, input_deck, solver_output, parsed_solver_results):
-    response = generated_result_fields(run_id, load_n, material, dynamic_settings, dynamic)
-    response["resultSource"] = "generated_fallback"
-    provenance = {
-        "kind": "calculix_fea",
-        "solver": "calculix-ccx",
-        "solverVersion": command_version(["ccx", "-v"]),
-        "meshSource": "structured_block",
-        "resultSource": "generated",
-        "units": "mm-N-s-MPa"
-    }
-    response["summary"]["provenance"] = provenance
-    for field in response["fields"]:
-        field["provenance"] = provenance
-    if parsed_solver_results["available"]:
-        response["summary"]["failureAssessment"]["message"] += " CalculiX result files were detected but are not fully parsed yet; deterministic sampled fields are marked as generated fallback."
-    response["summary"]["failureAssessment"]["message"] += f" {CLOUD_FEA_ADAPTER_DIAGNOSTIC}"
-    response["diagnostics"] = [{
-        "id": "cloud-fea-generated-fallback",
-        "severity": "warning",
-        "source": "solver",
-        "message": CLOUD_FEA_ADAPTER_DIAGNOSTIC,
-        "suggestedActions": [f"Unset {GENERATED_FALLBACK_FLAG} before publishing Cloud FEA results."]
-    }]
-    response["artifacts"] = {
-        "inputDeck": input_deck,
-        "solverLog": solver_output["log"] + "\ncloud-fea-generated-fallback\n" + CLOUD_FEA_ADAPTER_DIAGNOSTIC,
-        "solverResultFiles": parsed_solver_results["files"],
-        "solverResultParser": parsed_solver_results["status"],
-        "solverMaterial": material,
-        "meshSummary": {"nodes": 8, "elements": 1, "source": "generated-cantilever-solid", "units": "mm-N-s-MPa"}
-    }
-    return response
-
-
-def allow_generated_fea_fallback():
-    return os.environ.get(GENERATED_FALLBACK_FLAG) == "1"
 
 
 def is_parsed_calculix_status(status):
     return isinstance(status, str) and status.lower().startswith("parsed-calculix")
-
-
-def validate_or_stage_geometry(geometry, workdir):
-    if not isinstance(geometry, dict) or not geometry.get("contentBase64"):
-        return
-    filename = str(geometry.get("filename") or "source")
-    fmt = str(geometry.get("format") or "").lower()
-    raw = base64.b64decode(geometry["contentBase64"])
-    source = workdir / filename
-    source.write_bytes(raw)
-    if fmt in {"stl", "obj"} and not looks_like_closed_surface(raw.decode("utf-8", errors="ignore")):
-        raise UserFacingSolveError(f"Meshing failed: {fmt.upper()} is not watertight or has no closed surface facets.")
-    if shutil.which("gmsh"):
-        subprocess.run(["gmsh", str(source), "-3", "-format", "inp", "-o", str(workdir / "gmsh-mesh.inp")], capture_output=True, text=True, timeout=30, check=False)
-
-
-def looks_like_closed_surface(text):
-    lowered = text.lower()
-    if "facet normal" in lowered and lowered.count("facet normal") >= 4:
-        return True
-    if lowered.count("f ") >= 4:
-        return True
-    return False
-
-
-def generate_input_deck(load_n, material, settings, dynamic):
-    amplitude = amplitude_table(settings)
-    step = "*DYNAMIC, DIRECT\n{time_step:.6g}, {duration:.6g}\n".format(
-        time_step=settings["timeStep"],
-        duration=max(settings["endTime"] - settings["startTime"], settings["timeStep"])
-    ) if dynamic else "*STATIC\n"
-    return f"""*HEADING
-OpenCAE Cloud FEA CalculiX cantilever adapter
-** Units: mm, N, s, MPa. Density units: tonne/mm^3.
-*NODE
-1, 0, 0, 0
-2, {LENGTH_MM}, 0, 0
-3, {LENGTH_MM}, {WIDTH_MM}, 0
-4, 0, {WIDTH_MM}, 0
-5, 0, 0, {HEIGHT_MM}
-6, {LENGTH_MM}, 0, {HEIGHT_MM}
-7, {LENGTH_MM}, {WIDTH_MM}, {HEIGHT_MM}
-8, 0, {WIDTH_MM}, {HEIGHT_MM}
-*ELEMENT, TYPE=C3D8R, ELSET=EALL
-1, 1, 2, 3, 4, 5, 6, 7, 8
-*NSET, NSET=FIXED
-1, 4, 5, 8
-*NSET, NSET=LOADFACE
-2, 3, 6, 7
-*ELSET, ELSET=SOLID
-1
-*MATERIAL, NAME=OPENCAE_MATERIAL
-*ELASTIC
-{material["youngsModulusMpa"]:.6g}, {material["poissonRatio"]:.6g}
-*DENSITY
-{material["densityTonnePerMm3"]:.12g}
-*SOLID SECTION, ELSET=SOLID, MATERIAL=OPENCAE_MATERIAL
-*AMPLITUDE, NAME=LOAD_HISTORY, TIME=TOTAL TIME
-{amplitude}
-*STEP, NLGEOM=NO
-{step}*BOUNDARY
-FIXED, 1, 3
-*CLOAD, AMPLITUDE=LOAD_HISTORY
-2, 3, {-load_n / 4:.6g}
-3, 3, {-load_n / 4:.6g}
-6, 3, {-load_n / 4:.6g}
-7, 3, {-load_n / 4:.6g}
-*NODE FILE, NSET=LOADFACE
-U
-*EL FILE, ELSET=SOLID
-S
-*END STEP
-"""
-
-
-def amplitude_table(settings):
-    start = settings["startTime"]
-    end = settings["endTime"]
-    if settings.get("loadHistoryMode") == "quasi_static":
-        return f"{start:.6g}, 0.0, {end:.6g}, 1.0"
-    midpoint = start + (end - start) * 0.5
-    return f"{start:.6g}, 0.0, {midpoint:.6g}, 1.0, {end:.6g}, -0.35"
 
 
 def run_ccx_if_available(workdir, deck_path):
@@ -517,18 +385,30 @@ def run_ccx_if_available(workdir, deck_path):
 
 def parse_calculix_result_files(workdir, run_id):
     files = sorted(path.name for path in workdir.glob("*") if path.suffix.lower() in {".frd", ".dat", ".sta"})
-    # TODO: Parse timed *NODE FILE U output for displacement and *EL FILE/*ELEMENT
-    # OUTPUT S stress output, compute nodal von Mises samples, and preserve frame
-    # time plus node/element IDs. Until then, Cloud FEA refuses to publish fields
-    # unless the explicit development fallback flag is set.
+    dat_files = [workdir / name for name in files if name.endswith(".dat")]
+    for dat_path in dat_files:
+        parsed = parse_dat_result(dat_path.read_text(errors="ignore"))
+        if parsed["displacements"] and parsed["stresses"]:
+            has_frd = any(name.endswith(".frd") for name in files)
+            return {
+                **parsed,
+                "available": True,
+                "files": files,
+                "status": "parsed-calculix-dat",
+                "resultSource": "parsed_frd_dat" if has_frd else "parsed_dat"
+            }
     return {
         "available": any(name.endswith((".frd", ".dat")) for name in files),
         "files": files,
-        "status": f"generated-fallback-for-{run_id}"
+        "displacements": {},
+        "reactions": {},
+        "stresses": [],
+        "status": f"unparsed-calculix-output-for-{run_id}",
+        "resultSource": "unknown"
     }
 
 
-def parse_dat_result(text, mesh):
+def parse_dat_result(text, mesh=None):
     displacements = {}
     reactions = {}
     stresses = []
@@ -555,13 +435,13 @@ def parse_dat_result(text, mesh):
             stresses.append({
                 "elementId": element_id,
                 "components": components,
-                "vonMises": von_mises_mpa(components),
-                "point": element_centroid(mesh, element_id)
+                "vonMises": von_mises(components),
+                "point": element_centroid(mesh, element_id) if mesh is not None else None
             })
     return {"displacements": displacements, "reactions": reactions, "stresses": stresses}
 
 
-def response_from_parsed_dat(parsed, mesh, boundaries, input_deck, solver_output, files, parsed_dat):
+def response_from_parsed_dat(parsed, mesh, boundaries, input_deck, solver_output, parsed_dat):
     run_id = parsed["runId"]
     material = parsed["material"]
     displacement_samples = []
@@ -571,6 +451,7 @@ def response_from_parsed_dat(parsed, mesh, boundaries, input_deck, solver_output
             continue
         displacement_samples.append({
             "point": list(node["coordinates"]),
+            "normal": [0.0, 0.0, 1.0],
             "value": vector_length(vector),
             "vector": vector,
             "nodeId": f'N{node["id"]}',
@@ -579,6 +460,7 @@ def response_from_parsed_dat(parsed, mesh, boundaries, input_deck, solver_output
     stress_samples = [
         {
             "point": stress["point"],
+            "normal": [0.0, 0.0, 1.0],
             "value": stress["vonMises"],
             "elementId": f'E{stress["elementId"]}',
             "source": "calculix-dat",
@@ -596,12 +478,12 @@ def response_from_parsed_dat(parsed, mesh, boundaries, input_deck, solver_output
     safety_factor = material["yieldMpa"] / max(max_stress, 0.001)
     provenance = {
         "kind": "calculix_fea",
-        "solver": "calculix-ccx",
-        "solverVersion": command_version(["ccx", "-v"]),
-        "meshSource": "structured_block",
-        "resultSource": "parsed_dat",
-        "units": "mm-N-s-MPa"
-    }
+            "solver": "calculix-ccx",
+            "solverVersion": command_version(["ccx", "-v"]),
+            "meshSource": "structured_block",
+            "resultSource": parsed_dat["resultSource"],
+            "units": "mm-N-s-MPa"
+        }
     fields = [
         field_from_samples(run_id, "stress", "element", "MPa", stress_values, stress_samples, provenance),
         field_from_samples(run_id, "displacement", "node", "mm", displacement_values, displacement_samples, provenance),
@@ -614,6 +496,7 @@ def response_from_parsed_dat(parsed, mesh, boundaries, input_deck, solver_output
             [
                 {
                     "point": sample["point"],
+                    "normal": sample["normal"],
                     "value": material["yieldMpa"] / max(sample["value"], 0.001),
                     "elementId": sample["elementId"],
                     "source": "calculix-dat"
@@ -645,8 +528,8 @@ def response_from_parsed_dat(parsed, mesh, boundaries, input_deck, solver_output
         "artifacts": {
             "inputDeck": input_deck,
             "solverLog": solver_output["log"],
-            "solverResultFiles": files,
-            "solverResultParser": "parsed-calculix-dat",
+            "solverResultFiles": parsed_dat["files"],
+            "solverResultParser": parsed_dat["status"],
             "meshSummary": mesh_summary(mesh, boundaries),
             "solverMaterial": material
         }
@@ -725,7 +608,7 @@ def integer_like(value):
     return abs(value - round(value)) < 1e-9
 
 
-def von_mises_mpa(components):
+def von_mises(components):
     sx, sy, sz, sxy, sxz, syz = components
     return math.sqrt(0.5 * ((sx - sy) ** 2 + (sy - sz) ** 2 + (sz - sx) ** 2) + 3.0 * (sxy ** 2 + sxz ** 2 + syz ** 2))
 
@@ -748,186 +631,6 @@ def reaction_force_magnitude(reactions, fixed_node_ids):
         for axis in range(3):
             components[axis] += reaction[axis]
     return vector_length(components)
-
-
-def generated_result_fields(run_id, load_n, material, settings, dynamic):
-    frames = frame_times(settings) if dynamic else [settings["endTime"]]
-    peak_displacement_mm = beam_tip_displacement_mm(load_n, material)
-    peak_stress_mpa = beam_peak_stress_mpa(load_n)
-    yield_mpa = material["yieldMpa"]
-    stress_min = 0.0
-    stress_max = peak_stress_mpa
-    displacement_max = peak_displacement_mm
-    duration = max(settings["endTime"] - settings["startTime"], settings["timeStep"])
-    velocity_bound = peak_displacement_mm * math.pi / duration if dynamic else peak_displacement_mm
-    acceleration_bound = peak_displacement_mm * (math.pi / duration) ** 2 if dynamic else peak_displacement_mm
-    fields = []
-    for index, time_value in enumerate(frames):
-        response = dynamic_response_factor(time_value, settings) if dynamic else 1.0
-        displacement = peak_displacement_mm * response
-        stress = peak_stress_mpa * abs(response)
-        velocity = peak_displacement_mm * dynamic_velocity_factor(time_value, settings) if dynamic else 0.0
-        acceleration = peak_displacement_mm * dynamic_acceleration_factor(time_value, settings) if dynamic else 0.0
-        frame = {"frameIndex": index, "timeSeconds": time_value} if dynamic else {}
-        fields.extend([
-            result_field(run_id, "stress", "MPa", stress, stress_min, stress_max, index, time_value, frame, stress),
-            result_field(run_id, "displacement", "mm", displacement, 0.0, displacement_max, index, time_value, frame),
-            result_field(run_id, "safety_factor", "", yield_mpa / max(stress, 0.001), 0.0, yield_mpa / max(peak_stress_mpa, 0.001), index, time_value, frame)
-        ])
-        if dynamic:
-            fields.extend([
-                result_field(run_id, "velocity", "mm/s", velocity, -velocity_bound, velocity_bound, index, time_value, frame),
-                result_field(run_id, "acceleration", "mm/s^2", acceleration, -acceleration_bound, acceleration_bound, index, time_value, frame)
-            ])
-    summary = {
-        "maxStress": peak_stress_mpa,
-        "maxStressUnits": "MPa",
-        "maxDisplacement": peak_displacement_mm,
-        "maxDisplacementUnits": "mm",
-        "safetyFactor": yield_mpa / max(peak_stress_mpa, 0.001),
-        "reactionForce": load_n,
-        "reactionForceUnits": "N",
-        "failureAssessment": {
-            "status": "fail" if peak_stress_mpa > yield_mpa else "pass",
-            "title": "CalculiX transient solve",
-            "message": "Cloud FEA dynamic results were generated by the CalculiX container adapter."
-        }
-    }
-    if dynamic:
-        summary["transient"] = {
-            "analysisType": "dynamic_structural",
-            "integrationMethod": "newmark_average_acceleration",
-            "startTime": settings["startTime"],
-            "endTime": settings["endTime"],
-            "timeStep": settings["timeStep"],
-            "outputInterval": settings["outputInterval"],
-            "dampingRatio": settings["dampingRatio"],
-            "frameCount": len(frames),
-            "peakDisplacementTimeSeconds": peak_displacement_time(frames, settings),
-            "peakDisplacement": peak_displacement_mm
-        }
-    return {"summary": summary, "fields": fields}
-
-
-def result_field(run_id, field_type, units, value, min_value, max_value, index, time_value, frame, von_mises=None):
-    samples = []
-    for node_index, (x, y, z) in enumerate(display_node_points(), start=1):
-        travel = max(0.0, min(1.0, (x + 1.9) / 3.8))
-        if field_type == "stress":
-            fiber = 0.72 + 0.28 * abs(z) / max(BEAM_DEPTH_DISPLAY / 2.0, 1e-9)
-            sample_value = value * max(0.0, min(1.0, (1.0 - travel) * fiber))
-        elif field_type == "displacement":
-            vector = displacement_vector_for_sample(value, travel)
-            sample_value = math.sqrt(vector[0] ** 2 + vector[1] ** 2 + vector[2] ** 2)
-        else:
-            sample_value = value * travel
-        sample = {
-            "point": [x, y, z],
-            "normal": [0, 0, 1],
-            "value": sample_value,
-            "nodeId": f"N{node_index}",
-            "elementId": "E1",
-            "source": "generated-cantilever-fallback"
-        }
-        if von_mises is not None:
-            sample["vonMisesStressPa"] = sample_value * 1_000_000.0
-        if field_type == "displacement":
-            sample["vector"] = vector
-        samples.append(sample)
-    return {
-        "id": f"field-{run_id}-{field_type}-{index}",
-        "runId": run_id,
-        "type": field_type,
-        "location": "node",
-        "values": [sample["value"] for sample in samples],
-        "min": min_value,
-        "max": max_value,
-        "units": units,
-        **frame,
-        "samples": samples
-    }
-
-
-def display_node_points():
-    return [
-        (x, y, z)
-        for x in [-1.9, -0.633, 0.633, 1.9]
-        for y in [0.04, 0.32]
-        for z in [-BEAM_DEPTH_DISPLAY / 2.0, BEAM_DEPTH_DISPLAY / 2.0]
-    ]
-
-
-def displacement_vector_for_sample(tip_displacement_mm, travel):
-    magnitude = tip_displacement_mm * travel * travel
-    return [0.0, -magnitude, 0.0]
-
-
-def normalized_dynamic_settings(settings):
-    start = finite_number(settings.get("startTime"), 0.0)
-    end = finite_number(settings.get("endTime"), 0.5)
-    step = max(finite_number(settings.get("timeStep"), 0.005), 0.0001)
-    output = max(finite_number(settings.get("outputInterval"), step), step)
-    damping = max(finite_number(settings.get("dampingRatio"), 0.02), 0.0)
-    if end <= start:
-        end = start + step
-    load_history_mode = "quasi_static" if settings.get("loadHistoryMode") == "quasi_static" or settings.get("quasiStatic") is True else "dynamic_structural"
-    return {"startTime": start, "endTime": end, "timeStep": step, "outputInterval": output, "dampingRatio": damping, "loadHistoryMode": load_history_mode}
-
-
-def frame_times(settings):
-    count = int(math.floor((settings["endTime"] - settings["startTime"]) / settings["outputInterval"])) + 1
-    values = [settings["startTime"] + index * settings["outputInterval"] for index in range(max(count, 1))]
-    if values[-1] < settings["endTime"] - 1e-9:
-        values.append(settings["endTime"])
-    return values
-
-
-def dynamic_response_factor(time_value, settings):
-    duration = max(settings["endTime"] - settings["startTime"], settings["timeStep"])
-    normalized = (time_value - settings["startTime"]) / duration
-    if settings.get("loadHistoryMode") == "quasi_static":
-        return max(0.0, min(1.0, normalized))
-    decay = math.exp(-settings["dampingRatio"] * normalized * 3.0)
-    if normalized <= 0.5:
-        return math.sin(math.pi * normalized) * decay
-    rebound_progress = min(1.0, max(0.0, (normalized - 0.5) / 0.5))
-    return (1.0 - 1.35 * rebound_progress) * decay
-
-
-def dynamic_velocity_factor(time_value, settings):
-    duration = max(settings["endTime"] - settings["startTime"], settings["timeStep"])
-    if settings.get("loadHistoryMode") == "quasi_static":
-        return 1.0 / duration
-    normalized = (time_value - settings["startTime"]) / duration
-    decay = math.exp(-settings["dampingRatio"] * normalized * 3.0)
-    if normalized <= 0.5:
-        return math.pi / duration * math.cos(math.pi * normalized) * decay
-    return (-1.35 / (0.5 * duration)) * decay
-
-
-def dynamic_acceleration_factor(time_value, settings):
-    duration = max(settings["endTime"] - settings["startTime"], settings["timeStep"])
-    if settings.get("loadHistoryMode") == "quasi_static":
-        return 0.0
-    normalized = (time_value - settings["startTime"]) / duration
-    if normalized <= 0.5:
-        return -((math.pi / duration) ** 2) * math.sin(math.pi * normalized) * math.exp(-settings["dampingRatio"] * normalized * 3.0)
-    return 0.0
-
-
-def peak_displacement_time(frames, settings):
-    return max(frames, key=lambda time_value: abs(dynamic_response_factor(time_value, settings))) if frames else settings["endTime"]
-
-
-def load_value_n(payload):
-    study = payload.get("study") if isinstance(payload.get("study"), dict) else {}
-    loads = study.get("loads") if isinstance(study.get("loads"), list) else []
-    for load in loads:
-        parameters = load.get("parameters") if isinstance(load, dict) else {}
-        value = parameters.get("value") if isinstance(parameters, dict) else None
-        if isinstance(value, (int, float)) and math.isfinite(value):
-            return abs(float(value))
-    return 500.0
 
 
 def first_record(value):
@@ -988,21 +691,6 @@ def required_poisson_ratio(record):
     if not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0 or value >= 0.5:
         raise UserFacingSolveError(INVALID_SOLVER_MATERIAL_ERROR, 422)
     return float(value)
-
-
-def beam_tip_displacement_mm(load_n, material):
-    youngs_modulus_mpa = material["youngsModulusMpa"]
-    inertia = WIDTH_MM * HEIGHT_MM ** 3 / 12.0
-    return load_n * LENGTH_MM ** 3 / max(3.0 * youngs_modulus_mpa * inertia, 1e-12)
-
-
-def beam_peak_stress_mpa(load_n):
-    inertia = WIDTH_MM * HEIGHT_MM ** 3 / 12.0
-    return load_n * LENGTH_MM * (HEIGHT_MM / 2.0) / max(inertia, 1e-12)
-
-
-def finite_number(value, fallback):
-    return float(value) if isinstance(value, (int, float)) and math.isfinite(value) else fallback
 
 
 def command_version(command):

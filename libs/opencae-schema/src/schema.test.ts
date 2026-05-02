@@ -266,4 +266,52 @@ describe("ProjectSchema", () => {
       provenance
     }).provenance).toEqual(provenance);
   });
+
+  it("accepts parsed CalculiX DAT result summaries and element/node fields", () => {
+    const provenance = {
+      kind: "calculix_fea",
+      solver: "calculix-ccx",
+      solverVersion: "2.21",
+      meshSource: "structured_block",
+      resultSource: "parsed_dat",
+      units: "mm-N-s-MPa"
+    } as const;
+
+    expect(ResultSummarySchema.parse({
+      maxStress: 0.18,
+      maxStressUnits: "MPa",
+      maxDisplacement: 0.0014,
+      maxDisplacementUnits: "mm",
+      safetyFactor: 1533.33,
+      reactionForce: 1,
+      reactionForceUnits: "N",
+      provenance
+    }).provenance).toEqual(provenance);
+
+    expect(ResultFieldSchema.parse({
+      id: "field-run-cloud-stress-0",
+      runId: "run-cloud",
+      type: "stress",
+      location: "element",
+      values: [0.18],
+      min: 0.18,
+      max: 0.18,
+      units: "MPa",
+      provenance,
+      samples: [{ point: [50, 15, 5], normal: [0, 0, 1], value: 0.18, elementId: "E1", source: "calculix-dat", vonMisesStressPa: 180000 }]
+    }).samples?.[0]?.source).toBe("calculix-dat");
+
+    expect(ResultFieldSchema.parse({
+      id: "field-run-cloud-displacement-0",
+      runId: "run-cloud",
+      type: "displacement",
+      location: "node",
+      values: [0.0014],
+      min: 0,
+      max: 0.0014,
+      units: "mm",
+      provenance,
+      samples: [{ point: [100, 15, 10], normal: [0, 0, 1], value: 0.0014, vector: [0, 0, -0.0014], nodeId: "N2", source: "calculix-dat" }]
+    }).samples?.[0]?.vector).toEqual([0, 0, -0.0014]);
+  });
 });
