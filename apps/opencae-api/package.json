@@ -12,6 +12,7 @@
     "@opencae/cad-service": "workspace:*",
     "@opencae/db": "workspace:*",
     "@opencae/jobs": "workspace:*",
+    "@opencae/materials": "workspace:*",
     "@opencae/mesh-service": "workspace:*",
     "@opencae/post-service": "workspace:*",
     "@opencae/schema": "workspace:*",
