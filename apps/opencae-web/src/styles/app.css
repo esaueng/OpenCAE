@@ -882,91 +882,14 @@ img {
   min-height: 32px;
 }
 
-.donate-action {
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-  overflow: hidden;
+.status-link.donate-link {
   color: #ffd6a3;
-  border-color: rgba(255, 176, 87, 0.36);
-  background: rgba(255, 176, 87, 0.08);
-  text-decoration: none;
-  box-shadow: 0 0 0 rgba(255, 176, 87, 0);
-  z-index: 2;
+  text-transform: none;
 }
 
-.donate-action::before {
-  content: "";
-  position: absolute;
-  inset: -60% auto -60% -35%;
-  width: 34%;
-  transform: rotate(18deg);
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.58), transparent);
-  opacity: 0;
-  pointer-events: none;
-}
-
-.donate-action > * {
-  position: relative;
-  z-index: 1;
-}
-
-.donate-action-intro {
-  animation: donate-pop-in 1200ms cubic-bezier(0.18, 0.9, 0.22, 1.15) 260ms both;
-}
-
-.donate-action-intro::before {
-  animation: donate-shimmer 900ms ease-out 560ms both;
-}
-
-.donate-action:hover,
-.donate-action:focus-visible {
+.status-link.donate-link:hover,
+.status-link.donate-link:focus-visible {
   color: #ffe2bd;
-  border-color: rgba(255, 176, 87, 0.62);
-  background: rgba(255, 176, 87, 0.14);
-}
-
-@keyframes donate-pop-in {
-  0% {
-    opacity: 0;
-    transform: translateX(-50%) translateY(-16px) scale(0.86);
-    box-shadow: 0 0 0 rgba(255, 176, 87, 0);
-  }
-  42% {
-    opacity: 1;
-    transform: translateX(-50%) translateY(2px) scale(1.08);
-    box-shadow: 0 0 24px rgba(255, 176, 87, 0.38);
-  }
-  68% {
-    transform: translateX(-50%) translateY(0) scale(0.98);
-    box-shadow: 0 0 16px rgba(255, 176, 87, 0.24);
-  }
-  100% {
-    opacity: 1;
-    transform: translateX(-50%) translateY(0) scale(1);
-    box-shadow: 0 0 0 rgba(255, 176, 87, 0);
-  }
-}
-
-@keyframes donate-shimmer {
-  0% {
-    opacity: 0;
-    left: -35%;
-  }
-  20% {
-    opacity: 0.85;
-  }
-  100% {
-    opacity: 0;
-    left: 118%;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .donate-action-intro,
-  .donate-action-intro::before {
-    animation: none;
-  }
 }
 
 .topbar-action.running {
@@ -3116,10 +3039,6 @@ button:disabled {
 
   .topbar-action {
     padding: 6px 8px;
-  }
-
-  .donate-action span {
-    display: none;
   }
 
   .workspace {
