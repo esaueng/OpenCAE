@@ -130,6 +130,32 @@ describe("RightPanel payload mass controls", () => {
     expect(markup).toContain("--range-progress:100%");
   });
 
+  test("shows result provenance labels in result metadata", () => {
+    const localHtml = renderPanel("results", {
+      resultSummary: {
+        ...resultSummary,
+        provenance: { kind: "local_estimate", solver: "opencae-local-heuristic-surface", solverVersion: "0.1.0", meshSource: "mock", resultSource: "generated", units: "mm-N-s-MPa" }
+      }
+    });
+    const beamHtml = renderPanel("results", {
+      resultSummary: {
+        ...resultSummary,
+        provenance: { kind: "analytical_benchmark", solver: "opencae-euler-bernoulli", solverVersion: "0.1.0", meshSource: "structured_block", resultSource: "generated", units: "mm-N-s-MPa" }
+      }
+    });
+    const cloudHtml = renderPanel("results", {
+      resultSummary: {
+        ...resultSummary,
+        provenance: { kind: "calculix_fea", solver: "calculix-ccx", solverVersion: "2.21", meshSource: "gmsh", resultSource: "parsed_frd", units: "mm-N-s-MPa" }
+      }
+    });
+
+    expect(localHtml).toContain("Local estimate");
+    expect(localHtml).not.toContain("Local FEA");
+    expect(beamHtml).toContain("Analytical benchmark");
+    expect(cloudHtml).toContain("CalculiX FEA");
+  });
+
   test("shows the run progress percentage inside the progress bar", () => {
     const markup = renderPanel("run", { runProgress: 88 });
 

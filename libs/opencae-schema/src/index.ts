@@ -104,6 +104,15 @@ export const ResultSampleSchema = z.object({
   vonMisesStressPa: z.number().optional()
 });
 
+export const ResultProvenanceSchema = z.object({
+  kind: z.enum(["local_estimate", "analytical_benchmark", "calculix_fea"]),
+  solver: z.string(),
+  solverVersion: z.string(),
+  meshSource: z.enum(["mock", "structured_block", "gmsh", "uploaded_inp", "unknown"]),
+  resultSource: z.enum(["generated", "parsed_dat", "parsed_frd", "parsed_frd_dat"]),
+  units: z.string()
+});
+
 export const ResultFieldSchema = z.object({
   id: z.string(),
   runId: z.string(),
@@ -115,7 +124,8 @@ export const ResultFieldSchema = z.object({
   units: z.string(),
   samples: z.array(ResultSampleSchema).optional(),
   frameIndex: z.number().int().min(0).optional(),
-  timeSeconds: z.number().min(0).optional()
+  timeSeconds: z.number().min(0).optional(),
+  provenance: ResultProvenanceSchema.optional()
 });
 
 export const GeometryFileSchema = z.object({
@@ -230,6 +240,7 @@ export const ResultSummarySchema = z.object({
     .optional(),
   reactionForce: z.number(),
   reactionForceUnits: z.string(),
+  provenance: ResultProvenanceSchema.optional(),
   transient: z
     .object({
       analysisType: z.literal("dynamic_structural"),
@@ -272,6 +283,7 @@ export type Load = z.infer<typeof LoadSchema>;
 export type AnalysisSample = z.infer<typeof AnalysisSampleSchema>;
 export type AnalysisMesh = z.infer<typeof AnalysisMeshSchema>;
 export type ResultSample = z.infer<typeof ResultSampleSchema>;
+export type ResultProvenance = z.infer<typeof ResultProvenanceSchema>;
 export type ResultField = z.infer<typeof ResultFieldSchema>;
 export type GeometryFile = z.infer<typeof GeometryFileSchema>;
 export type MeshSummary = z.infer<typeof MeshSummarySchema>;

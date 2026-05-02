@@ -399,6 +399,60 @@ describe("Cloudflare FEA worker orchestration", () => {
     expect(await bucket.get("runs/run-cloud-generated-fallback/results.json")).toBeNull();
   });
 
+  test("queue handler rejects Cloud FEA results without calculix_fea provenance", async () => {
+    const bucket = new MemoryR2Bucket();
+    await bucket.put("runs/run-cloud-local-provenance/request.json", JSON.stringify({
+      runId: "run-cloud-local-provenance",
+      studyId: "study-1"
+    }));
+    const message = { body: { runId: "run-cloud-local-provenance" }, ack: vi.fn(), retry: vi.fn() };
+    const result = cloudContainerSolveResponse("run-cloud-local-provenance", false);
+    result.summary.provenance = { ...result.summary.provenance, kind: "local_estimate" };
+    const env = {
+      ASSETS: { fetch: vi.fn(async () => new Response("asset")) },
+      FEA_ARTIFACTS: bucket,
+      FEA_CONTAINER: {
+        fetch: vi.fn(async () => Response.json(result))
+      }
+    };
+
+    await worker.queue({ messages: [message] }, env);
+    const events = JSON.parse(await (await bucket.get("runs/run-cloud-local-provenance/events.json"))!.text()) as Array<{ type: string; message: string }>;
+
+    expect(events.at(-1)).toMatchObject({
+      type: "error",
+      message: "Cloud FEA result provenance must identify parsed CalculiX FEA results."
+    });
+    expect(await bucket.get("runs/run-cloud-local-provenance/results.json")).toBeNull();
+  });
+
+  test("queue handler rejects Cloud FEA results with generated provenance result source", async () => {
+    const bucket = new MemoryR2Bucket();
+    await bucket.put("runs/run-cloud-generated-provenance/request.json", JSON.stringify({
+      runId: "run-cloud-generated-provenance",
+      studyId: "study-1"
+    }));
+    const message = { body: { runId: "run-cloud-generated-provenance" }, ack: vi.fn(), retry: vi.fn() };
+    const result = cloudContainerSolveResponse("run-cloud-generated-provenance", false);
+    result.summary.provenance = { ...result.summary.provenance, resultSource: "generated" };
+    const env = {
+      ASSETS: { fetch: vi.fn(async () => new Response("asset")) },
+      FEA_ARTIFACTS: bucket,
+      FEA_CONTAINER: {
+        fetch: vi.fn(async () => Response.json(result))
+      }
+    };
+
+    await worker.queue({ messages: [message] }, env);
+    const events = JSON.parse(await (await bucket.get("runs/run-cloud-generated-provenance/events.json"))!.text()) as Array<{ type: string; message: string }>;
+
+    expect(events.at(-1)).toMatchObject({
+      type: "error",
+      message: "Cloud FEA returned generated fallback data instead of parsed CalculiX results; refusing to publish fake solver results."
+    });
+    expect(await bucket.get("runs/run-cloud-generated-provenance/results.json")).toBeNull();
+  });
+
   test("queue handler rejects dynamic cloud FEA results without transient summary", async () => {
     const bucket = new MemoryR2Bucket();
     await bucket.put("runs/run-cloud-dynamic-static/request.json", JSON.stringify({
@@ -492,6 +546,14 @@ function cloudContainerSolveResponse(runId: string, dynamic: boolean) {
       safetyFactor: 0.64,
       reactionForce: 500,
       reactionForceUnits: "N",
+      provenance: {
+        kind: "calculix_fea",
+        solver: "calculix-ccx",
+        solverVersion: "2.21",
+        meshSource: "gmsh",
+        resultSource: "parsed_frd",
+        units: "mm-N-s-MPa"
+      },
       ...(dynamic ? { transient: { startTime: 0, endTime: 0.005, timeStep: 0.005, outputInterval: 0.005, frameCount: 2 } } : {})
     },
     fields: [
@@ -504,6 +566,14 @@ function cloudContainerSolveResponse(runId: string, dynamic: boolean) {
         min: 120000,
         max: 431400000,
         units: "Pa",
+        provenance: {
+          kind: "calculix_fea",
+          solver: "calculix-ccx",
+          solverVersion: "2.21",
+          meshSource: "gmsh",
+          resultSource: "parsed_frd",
+          units: "mm-N-s-MPa"
+        },
         ...(dynamic ? { frameIndex: 0, time: 0 } : {}),
         samples: [{ point: [0, 0, 0], value: 120000, nodeId: "N1", elementId: "E1", source: "calculix", vonMisesStressPa: 120000 }]
       },
@@ -516,6 +586,14 @@ function cloudContainerSolveResponse(runId: string, dynamic: boolean) {
         min: 120000,
         max: 431400000,
         units: "Pa",
+        provenance: {
+          kind: "calculix_fea",
+          solver: "calculix-ccx",
+          solverVersion: "2.21",
+          meshSource: "gmsh",
+          resultSource: "parsed_frd",
+          units: "mm-N-s-MPa"
+        },
         ...(dynamic ? { frameIndex: 1, time: 0.005 } : {}),
         samples: [{ point: [1, 0, 0], value: 431400000, nodeId: "N2", elementId: "E1", source: "calculix", vonMisesStressPa: 431400000 }]
       }

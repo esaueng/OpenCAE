@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { displayModelForUnits, formatDensity, formatForce, formatLength, formatMass, formatMaterialStress, formatStress, formatUnitSystemLabel, formatVolume, loadValueForUnits, resultFieldForUnits, resultSummaryForUnits } from "./unitDisplay";
+import { displayModelForUnits, formatDensity, formatForce, formatLength, formatMass, formatMaterialStress, formatResultProvenanceLabel, formatStress, formatUnitSystemLabel, formatVolume, loadValueForUnits, resultFieldForUnits, resultSummaryForUnits } from "./unitDisplay";
 
 describe("unit display formatting", () => {
   test("labels project unit systems for the workspace footer", () => {
@@ -53,6 +53,12 @@ describe("unit display formatting", () => {
 
     expect(field.units).toBe("in");
     expect(field.max).toBeCloseTo(0.01);
+  });
+
+  test("formats result provenance labels without calling local estimates FEA", () => {
+    expect(formatResultProvenanceLabel({ kind: "local_estimate", solver: "opencae-local-heuristic-surface", solverVersion: "0.1.0", meshSource: "mock", resultSource: "generated", units: "mm-N-s-MPa" })).toBe("Local estimate");
+    expect(formatResultProvenanceLabel({ kind: "analytical_benchmark", solver: "opencae-euler-bernoulli", solverVersion: "0.1.0", meshSource: "structured_block", resultSource: "generated", units: "mm-N-s-MPa" })).toBe("Analytical benchmark");
+    expect(formatResultProvenanceLabel({ kind: "calculix_fea", solver: "calculix-ccx", solverVersion: "2.21", meshSource: "gmsh", resultSource: "parsed_frd", units: "mm-N-s-MPa" })).toBe("CalculiX FEA");
   });
 
   test("converts display model dimensions", () => {

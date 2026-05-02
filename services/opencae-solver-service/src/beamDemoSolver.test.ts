@@ -29,6 +29,12 @@ describe("Beam Demo Euler-Bernoulli solver", () => {
     const peakSample = [...(displacement?.samples ?? [])].sort((left, right) => right.value - left.value)[0];
 
     expect(result.solverBackend).toBe("local-beam-demo-euler-bernoulli");
+    expect(result.summary.provenance).toMatchObject({
+      kind: "analytical_benchmark",
+      solver: "opencae-euler-bernoulli",
+      resultSource: "generated"
+    });
+    expect(result.fields.every((field) => field.provenance?.kind === "analytical_benchmark")).toBe(true);
     expect(result.summary.reactionForce).toBeCloseTo(EXPECTED_PAYLOAD_FORCE_N, 5);
     expect(result.beamDemoDiagnostics.loadForceN).toBeCloseTo(EXPECTED_PAYLOAD_FORCE_N, 5);
     expect(result.beamDemoDiagnostics.secondMomentM4).toBeCloseTo(EXPECTED_I_M4, 15);

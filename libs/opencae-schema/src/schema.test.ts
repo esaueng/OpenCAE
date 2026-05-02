@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ProjectSchema, ResultFieldSchema, RunEventSchema } from "./index";
+import { ProjectSchema, ResultFieldSchema, ResultSummarySchema, RunEventSchema } from "./index";
 
 describe("ProjectSchema", () => {
   it("accepts the minimum local project shape", () => {
@@ -217,5 +217,53 @@ describe("ProjectSchema", () => {
       vector: [0.001, -0.002, 0],
       vonMisesStressPa: 123100
     });
+  });
+
+  it("accepts old result summaries without provenance", () => {
+    const parsed = ResultSummarySchema.parse({
+      maxStress: 142,
+      maxStressUnits: "MPa",
+      maxDisplacement: 0.184,
+      maxDisplacementUnits: "mm",
+      safetyFactor: 1.8,
+      reactionForce: 500,
+      reactionForceUnits: "N"
+    });
+
+    expect(parsed.provenance).toBeUndefined();
+  });
+
+  it("accepts result summaries and fields with explicit provenance", () => {
+    const provenance = {
+      kind: "calculix_fea",
+      solver: "calculix-ccx",
+      solverVersion: "2.21",
+      meshSource: "gmsh",
+      resultSource: "parsed_frd_dat",
+      units: "mm-N-s-MPa"
+    } as const;
+
+    expect(ResultSummarySchema.parse({
+      maxStress: 123100,
+      maxStressUnits: "Pa",
+      maxDisplacement: 0.001,
+      maxDisplacementUnits: "m",
+      safetyFactor: 2.1,
+      reactionForce: 500,
+      reactionForceUnits: "N",
+      provenance
+    }).provenance).toEqual(provenance);
+
+    expect(ResultFieldSchema.parse({
+      id: "field-stress-cloud",
+      runId: "run-cloud",
+      type: "stress",
+      location: "node",
+      values: [123100],
+      min: 123100,
+      max: 123100,
+      units: "Pa",
+      provenance
+    }).provenance).toEqual(provenance);
   });
 });

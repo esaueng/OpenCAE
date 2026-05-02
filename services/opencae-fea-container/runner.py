@@ -87,6 +87,17 @@ def solve(payload):
 def generated_fallback_response(run_id, load_n, material, dynamic_settings, dynamic, input_deck, solver_output, parsed_solver_results):
     response = generated_result_fields(run_id, load_n, material, dynamic_settings, dynamic)
     response["resultSource"] = "generated_fallback"
+    provenance = {
+        "kind": "calculix_fea",
+        "solver": "calculix-ccx",
+        "solverVersion": command_version(["ccx", "-v"]),
+        "meshSource": "structured_block",
+        "resultSource": "generated",
+        "units": "mm-N-s-MPa"
+    }
+    response["summary"]["provenance"] = provenance
+    for field in response["fields"]:
+        field["provenance"] = provenance
     if parsed_solver_results["available"]:
         response["summary"]["failureAssessment"]["message"] += " CalculiX result files were detected but are not fully parsed yet; deterministic sampled fields are marked as generated fallback."
     response["summary"]["failureAssessment"]["message"] += f" {CLOUD_FEA_ADAPTER_DIAGNOSTIC}"
