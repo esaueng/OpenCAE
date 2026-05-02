@@ -1,9 +1,10 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, test } from "vitest";
+import { parseJsonc } from "../../../scripts/verify-cloudflare-config.mjs";
 
 function readJson(path: string) {
-  return JSON.parse(readFileSync(resolve(__dirname, path), "utf8")) as {
+  return parseJsonc(readFileSync(resolve(__dirname, path), "utf8"), path) as {
     compatibility_flags?: string[];
     assets?: { run_worker_first?: string[] };
   };

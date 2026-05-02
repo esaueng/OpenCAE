@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, test, vi } from "vitest";
+import { parseJsonc } from "../../../scripts/verify-cloudflare-config.mjs";
 
 vi.mock("@cloudflare/containers", () => ({ Container: class Container {} }));
 
@@ -20,6 +21,10 @@ class MemoryR2Bucket {
   }
 }
 
+function readJsonc(path: string) {
+  return parseJsonc(readFileSync(resolve(__dirname, path), "utf8"), path);
+}
+
 describe("Cloudflare FEA worker orchestration", () => {
   test("container Durable Object is declared as a Cloudflare container proxy", () => {
     const workerSource = readFileSync(resolve(__dirname, "index.ts"), "utf8");
@@ -32,7 +37,7 @@ describe("Cloudflare FEA worker orchestration", () => {
 
   test("default Cloudflare deploy uses the container binding config", () => {
     const packageJson = JSON.parse(readFileSync(resolve(__dirname, "../../../package.json"), "utf8")) as { scripts: Record<string, string> };
-    const containerConfig = JSON.parse(readFileSync(resolve(__dirname, "../../../wrangler.containers.jsonc"), "utf8")) as {
+    const containerConfig = readJsonc("../../../wrangler.containers.jsonc") as {
       name?: string;
       account_id?: string;
       workers_dev?: boolean;
@@ -41,9 +46,10 @@ describe("Cloudflare FEA worker orchestration", () => {
       durable_objects?: { bindings?: Array<{ name?: string; class_name?: string }> };
       migrations?: Array<{ new_sqlite_classes?: string[] }>;
     };
-    const defaultConfig = JSON.parse(readFileSync(resolve(__dirname, "../../../wrangler.jsonc"), "utf8")) as typeof containerConfig;
+    const defaultConfig = readJsonc("../../../wrangler.jsonc") as typeof containerConfig;
 
     expect(packageJson.scripts["deploy:cloudflare"]).toContain("--config wrangler.containers.jsonc");
+    expect(packageJson.scripts["deploy:cloudflare"]).toContain("pnpm verify:cloudflare-config");
     expect(packageJson.scripts["deploy:cloudflare:dry-run"]).toContain("--config wrangler.containers.jsonc");
     expect(packageJson.scripts["deploy:cloudflare:static"]).toContain("--config wrangler.jsonc");
     expect(packageJson.scripts["deploy:cloudflare:static:dry-run"]).toContain("--config wrangler.jsonc");
@@ -53,6 +59,9 @@ describe("Cloudflare FEA worker orchestration", () => {
     expect(containerConfig.account_id).toBe("747b74cbd7d019dd7aeecb2c24a4bf10");
     expect(containerConfig.workers_dev).toBe(false);
     expect(containerConfig.routes).toContainEqual({ pattern: "cae.esau.app", custom_domain: true });
+    expect(defaultConfig.name).toBe("opencae-static");
+    expect(defaultConfig.name).not.toBe(containerConfig.name);
+    expect(defaultConfig.routes ?? []).not.toContainEqual({ pattern: "cae.esau.app", custom_domain: true });
     expect(containerConfig.containers?.[0]).toMatchObject({
       class_name: "OpenCaeFeaContainer",
       image: "./services/opencae-fea-container/Dockerfile",
@@ -106,6 +115,7 @@ describe("Cloudflare FEA worker orchestration", () => {
       containersEnabled: false,
       cloudFeaAvailable: false,
       requiredDeployConfig: "wrangler.containers.jsonc",
+      deploymentHint: "The current Worker version has no FEA_CONTAINER binding. This usually means the app was deployed with wrangler.jsonc instead of wrangler.containers.jsonc, or Cloudflare Builds is still running plain wrangler deploy.",
       requestOrigin: "https://cae.example",
       cloudFeaEndpoint: "https://cae.example/api/cloud-fea/runs"
     });
@@ -132,6 +142,7 @@ describe("Cloudflare FEA worker orchestration", () => {
       requestOrigin: "https://cae.example",
       cloudFeaEndpoint: "https://cae.example/api/cloud-fea/runs"
     });
+    expect(body.deploymentHint).toBeUndefined();
   });
 
   test("queues cloud FEA runs and stores run artifacts in R2", async () => {
