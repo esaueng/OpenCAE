@@ -30,6 +30,17 @@ const jsonHeaders = {
   "cache-control": "no-store"
 };
 const cloudFeaContainersDisabledMessage = "Cloud FEA containers are not enabled for this deployment. Deploy with pnpm deploy:cloudflare:containers using a Cloudflare token with Containers write access, or switch the study backend to Detailed local.";
+const generatedFallbackResultMessage = "Cloud FEA returned generated fallback data instead of parsed CalculiX results; refusing to publish fake solver results.";
+const placeholderResultMarkers = [
+  "generated-cantilever-fallback",
+  "cloud-fea-hard-coded-fallback",
+  "cloud-fea-generated-fallback",
+  "fallback-for-",
+  "cloudflare_fea_placeholder",
+  "heuristic",
+  "local_detailed",
+  "generated_fallback"
+];
 
 export default {
   async fetch(request: Request, env: RuntimeEnv, ctx?: ExecutionContext): Promise<Response> {
@@ -246,12 +257,14 @@ async function readContainerFailure(response: Response): Promise<string> {
 function normalizeContainerResult(runId: string, result: Record<string, unknown>) {
   const summary = isRecord(result.summary) ? result.summary : undefined;
   const rawFields = Array.isArray(result.fields) ? result.fields : undefined;
+  const resultArtifacts = isRecord(result.artifacts) ? result.artifacts : {};
   if (!summary) throw new Error("Cloud FEA container returned no result summary.");
   if (!rawFields?.length) throw new Error("Cloud FEA container returned no result fields.");
   assertFiniteSummary(summary);
-  if (looksLikePlaceholderResult(summary, rawFields)) {
-    throw new Error("Cloud FEA container returned placeholder result values; refusing to publish fake results.");
+  if (looksLikePlaceholderResult(summary, rawFields, resultArtifacts)) {
+    throw new Error(generatedFallbackResultMessage);
   }
+  assertParsedCalculixArtifacts(resultArtifacts);
   const normalizedSummary = {
     maxStress: numberField(summary, "maxStress"),
     maxStressUnits: stringField(summary, "maxStressUnits"),
@@ -306,9 +319,21 @@ function assertFiniteSummary(summary: Record<string, unknown>): void {
   }
 }
 
-function looksLikePlaceholderResult(summary: Record<string, unknown>, fields: unknown[]): boolean {
+export function looksLikePlaceholderResult(summary: Record<string, unknown>, fields: unknown[], artifacts: Record<string, unknown> = {}): boolean {
   if (numberField(summary, "maxStress") === 1_440_000 && numberField(summary, "safetyFactor") === 172) return true;
-  return fields.some((field) => JSON.stringify(field).includes("cloudflare_fea_placeholder"));
+  const resultText = JSON.stringify([summary, fields, artifacts]).toLowerCase();
+  return placeholderResultMarkers.some((marker) => resultText.includes(marker));
+}
+
+function assertParsedCalculixArtifacts(artifacts: Record<string, unknown>): void {
+  const parserStatus = artifacts.solverResultParser;
+  if (typeof parserStatus !== "string") {
+    throw new Error("Cloud FEA container did not report parsed CalculiX result parser status.");
+  }
+  const normalized = parserStatus.toLowerCase();
+  if (normalized.startsWith("generated-fallback-") || !normalized.startsWith("parsed-calculix")) {
+    throw new Error(generatedFallbackResultMessage);
+  }
 }
 
 function normalizeField(runId: string, rawField: unknown, index: number) {

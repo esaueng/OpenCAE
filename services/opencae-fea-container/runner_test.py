@@ -1,10 +1,36 @@
 import math
+import os
 import unittest
 
 import runner
 
 
 class GeneratedDynamicFieldsTest(unittest.TestCase):
+    def test_solve_refuses_generated_fallback_by_default_when_results_are_unparsed(self):
+        with self.assertRaises(runner.UserFacingSolveError) as context:
+            runner.solve({"runId": "run-test"})
+
+        self.assertEqual(context.exception.status, 422)
+        self.assertIn("CalculiX output was not parsed", str(context.exception))
+
+    def test_solve_allows_generated_fallback_only_with_dev_flag_and_obvious_provenance(self):
+        previous = os.environ.get(runner.GENERATED_FALLBACK_FLAG)
+        os.environ[runner.GENERATED_FALLBACK_FLAG] = "1"
+        try:
+            result = runner.solve({"runId": "run-test"})
+        finally:
+            if previous is None:
+                os.environ.pop(runner.GENERATED_FALLBACK_FLAG, None)
+            else:
+                os.environ[runner.GENERATED_FALLBACK_FLAG] = previous
+
+        self.assertEqual(result["resultSource"], "generated_fallback")
+        self.assertEqual(result["diagnostics"][0]["id"], "cloud-fea-generated-fallback")
+        self.assertTrue(result["artifacts"]["solverResultParser"].startswith("generated-fallback-for-"))
+        for field in result["fields"]:
+            for sample in field["samples"]:
+                self.assertIn("generated-cantilever-fallback", sample["source"])
+
     def test_generated_dynamic_stress_frames_use_global_range_and_finite_samples(self):
         settings = runner.normalized_dynamic_settings({
             "startTime": 0.0,

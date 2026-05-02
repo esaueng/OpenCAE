@@ -470,7 +470,7 @@ describe("api", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/cloud-fea/runs/run-cloud-1/results");
   });
 
-  test("falls back to local solver with a clear message when Cloud FEA containers are unavailable", async () => {
+  test("returns Cloud FEA request errors instead of masking them with local results", async () => {
     const cloudStudy = {
       ...study,
       materialAssignments: [{ id: "assign-1", materialId: "mat-aluminum-6061", selectionRef: "selection-body-1", status: "complete" }],
@@ -486,12 +486,7 @@ describe("api", () => {
       headers: { "content-type": "application/json" }
     })));
 
-    const response = await runSimulation("study-1", cloudStudy);
-
-    expect(response.run.id).toContain("run-local-");
-    expect((response.run as { solverBackend?: string }).solverBackend).toBe("local-heuristic-surface");
-    expect(response.message).toContain("Cloud FEA unavailable");
-    expect(response.message).toContain("running locally");
+    await expect(runSimulation("study-1", cloudStudy)).rejects.toThrow("Cloud FEA containers are not enabled for this deployment.");
   });
 
   test("sends dynamic Cloud FEA studies through cloud orchestration endpoints", async () => {

@@ -5,7 +5,7 @@ import { describe, expect, test, vi } from "vitest";
 
 vi.mock("@cloudflare/containers", () => ({ Container: class Container {} }));
 
-import worker from "./index";
+import worker, { looksLikePlaceholderResult } from "./index";
 
 class MemoryR2Bucket {
   objects = new Map<string, string>();
@@ -360,8 +360,43 @@ describe("Cloudflare FEA worker orchestration", () => {
     const events = JSON.parse(await (await bucket.get("runs/run-cloud-placeholder/events.json"))!.text()) as Array<{ type: string; message: string }>;
 
     expect(events.at(-1)?.type).toBe("error");
-    expect(events.at(-1)?.message).toContain("placeholder");
+    expect(events.at(-1)?.message).toBe("Cloud FEA returned generated fallback data instead of parsed CalculiX results; refusing to publish fake solver results.");
     expect(await bucket.get("runs/run-cloud-placeholder/results.json")).toBeNull();
+  });
+
+  test("looksLikePlaceholderResult rejects generated cantilever fallback provenance", () => {
+    expect(looksLikePlaceholderResult(
+      { maxStress: 431400000, safetyFactor: 0.64 },
+      [{ samples: [{ source: "generated-cantilever-fallback" }] }],
+      {}
+    )).toBe(true);
+  });
+
+  test("queue handler rejects generated fallback Cloud FEA results instead of publishing fake solver fields", async () => {
+    const bucket = new MemoryR2Bucket();
+    await bucket.put("runs/run-cloud-generated-fallback/request.json", JSON.stringify({
+      runId: "run-cloud-generated-fallback",
+      studyId: "study-1",
+      geometry: { format: "stl", filename: "cantilever.stl", contentBase64: closedStlBase64() }
+    }));
+    const message = { body: { runId: "run-cloud-generated-fallback" }, ack: vi.fn(), retry: vi.fn() };
+    const env = {
+      ASSETS: { fetch: vi.fn(async () => new Response("asset")) },
+      FEA_ARTIFACTS: bucket,
+      FEA_CONTAINER: {
+        fetch: vi.fn(async () => Response.json(cloudGeneratedFallbackSolveResponse("run-cloud-generated-fallback")))
+      }
+    };
+
+    await worker.queue({ messages: [message] }, env);
+    const events = JSON.parse(await (await bucket.get("runs/run-cloud-generated-fallback/events.json"))!.text()) as Array<{ type: string; message: string }>;
+
+    expect(message.ack).toHaveBeenCalled();
+    expect(events.at(-1)).toMatchObject({
+      type: "error",
+      message: "Cloud FEA returned generated fallback data instead of parsed CalculiX results; refusing to publish fake solver results."
+    });
+    expect(await bucket.get("runs/run-cloud-generated-fallback/results.json")).toBeNull();
   });
 
   test("queue handler rejects dynamic cloud FEA results without transient summary", async () => {
@@ -425,7 +460,7 @@ describe("Cloudflare FEA worker orchestration", () => {
     expect(await bucket.get("runs/run-cloud-dynamic-unframed/results.json")).toBeNull();
   });
 
-  test("container runner emits non-placeholder static and dynamic CalculiX contract results", () => {
+  test("container runner refuses unparsed CalculiX output by default", () => {
     const staticResult = runContainerSolve({ runId: "run-static", geometry: { format: "stl", filename: "beam.stl", contentBase64: closedStlBase64() } });
     const dynamicResult = runContainerSolve({
       runId: "run-dynamic",
@@ -434,17 +469,10 @@ describe("Cloudflare FEA worker orchestration", () => {
       geometry: { format: "stl", filename: "beam.stl", contentBase64: closedStlBase64() }
     });
 
-    expect(staticResult.summary.maxStress).toBeGreaterThan(100_000_000);
-    expect(staticResult.summary.maxStress).not.toBe(1_440_000);
-    expect(staticResult.summary.safetyFactor).toBeLessThan(10);
-    expect(staticResult.summary.reactionForce).toBe(500);
-    expect(staticResult.artifacts.inputDeck).toContain("*STATIC");
-    expect(staticResult.fields.every((field: { frameIndex?: number; timeSeconds?: number }) => field.frameIndex === undefined && field.timeSeconds === undefined)).toBe(true);
-    expect(dynamicResult.summary.transient.frameCount).toBeGreaterThan(1);
-    expect(dynamicResult.fields.some((field: { type: string; frameIndex?: number; timeSeconds?: number }) => field.type === "stress" && field.frameIndex === 1 && field.timeSeconds === 0.005)).toBe(true);
-    expect(dynamicResult.fields.every((field: { frameIndex?: number; timeSeconds?: number }) => typeof field.frameIndex === "number" && typeof field.timeSeconds === "number")).toBe(true);
-    expect(["stress", "displacement", "velocity", "acceleration"].every((type) => dynamicResult.fields.some((field: { type: string; frameIndex?: number }) => field.type === type && field.frameIndex === 1))).toBe(true);
-    expect(dynamicResult.artifacts.inputDeck).toContain("*DYNAMIC");
+    expect(staticResult).toMatchObject({ status: 422 });
+    expect(staticResult.error).toContain("CalculiX output was not parsed");
+    expect(dynamicResult).toMatchObject({ status: 422 });
+    expect(dynamicResult.error).toContain("CalculiX output was not parsed");
   });
 
   test("container runner rejects invalid open surface geometry", () => {
@@ -495,6 +523,7 @@ function cloudContainerSolveResponse(runId: string, dynamic: boolean) {
     artifacts: {
       inputDeck: "*DYNAMIC\n*NODE FILE\nU\n*EL FILE\nS\n",
       solverLog: "CalculiX completed transient run.",
+      solverResultParser: "parsed-calculix-frd",
       meshSummary: { nodes: 2, elements: 1 }
     }
   };
@@ -527,6 +556,47 @@ function cloudPlaceholderSolveResponse(runId: string) {
     artifacts: {
       inputDeck: "*STATIC\n",
       solverLog: "placeholder",
+      solverResultParser: "parsed-calculix-frd",
+      meshSummary: { nodes: 1, elements: 1 }
+    }
+  };
+}
+
+function cloudGeneratedFallbackSolveResponse(runId: string) {
+  return {
+    resultSource: "generated_fallback",
+    summary: {
+      maxStress: 431400000,
+      maxStressUnits: "Pa",
+      maxDisplacement: 0.000761,
+      maxDisplacementUnits: "m",
+      safetyFactor: 0.64,
+      reactionForce: 500,
+      reactionForceUnits: "N",
+      failureAssessment: {
+        status: "fail",
+        title: "CalculiX transient solve",
+        message: "Cloud FEA generated fallback-for-run fields."
+      }
+    },
+    fields: [
+      {
+        id: `field-${runId}-stress-0`,
+        runId,
+        type: "stress",
+        location: "node",
+        values: [431400000],
+        min: 0,
+        max: 431400000,
+        units: "Pa",
+        samples: [{ point: [0, 0, 0], value: 431400000, source: "generated-cantilever-fallback", vonMisesStressPa: 431400000 }]
+      }
+    ],
+    diagnostics: [{ id: "cloud-fea-generated-fallback", severity: "warning" }],
+    artifacts: {
+      inputDeck: "*STATIC\n",
+      solverLog: "cloud-fea-hard-coded-fallback",
+      solverResultParser: `generated-fallback-for-${runId}`,
       meshSummary: { nodes: 1, elements: 1 }
     }
   };

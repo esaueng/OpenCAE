@@ -265,9 +265,7 @@ export async function runSimulation(studyId: string, currentStudy?: Study, displ
   } catch (error) {
     if (!currentStudy) throw error;
     if (simulationBackend(currentStudy) === "cloudflare_fea") {
-      const fallback = runSimulationLocally(currentStudy, displayModel, "local_detailed");
-      const message = error instanceof Error ? error.message : "Cloud FEA request failed.";
-      return { ...fallback, message: `Cloud FEA unavailable: ${message} running locally.` };
+      throw error;
     }
     return runSimulationLocally(currentStudy, displayModel);
   }
