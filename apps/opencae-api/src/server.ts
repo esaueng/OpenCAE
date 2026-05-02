@@ -23,6 +23,7 @@ import {
 import { LocalMockComputeBackend, solveDynamicStudy } from "@opencae/solver-service";
 import { FileSystemObjectStorageProvider } from "@opencae/storage";
 import { validateStaticStressStudy, validateStudy } from "@opencae/study-core";
+import { LocalCloudFeaBridge, LocalCloudFeaBridgeError } from "./cloudFeaLocal";
 import {
   attachUploadedModelToProject,
   blankDisplayModel,
@@ -48,12 +49,40 @@ const runState = new LocalRunStateProvider();
 const meshService = new MockMeshService(storage);
 const compute = new LocalMockComputeBackend(storage);
 const reports = new LocalReportProvider(storage);
+const cloudFea = new LocalCloudFeaBridge();
 
 db.migrate();
 db.seed();
 await ensureSampleArtifacts();
 
 api.get("/health", async () => ({ ok: true, mode: "local", service: "opencae-api" }));
+
+api.get("/api/cloud-fea/health", async () => cloudFea.health());
+
+api.post("/api/cloud-fea/runs", async (request, reply) => {
+  try {
+    const body = isRecord(request.body) ? request.body : {};
+    const response = await cloudFea.createRun(body);
+    return reply.code(202).send(response);
+  } catch (error) {
+    if (error instanceof LocalCloudFeaBridgeError) {
+      return reply.code(error.status).send({ error: error.message });
+    }
+    throw error;
+  }
+});
+
+api.get("/api/cloud-fea/runs/:runId/events", async (request) => {
+  const { runId } = request.params as { runId: string };
+  return { events: cloudFea.getEvents(runId) };
+});
+
+api.get("/api/cloud-fea/runs/:runId/results", async (request, reply) => {
+  const { runId } = request.params as { runId: string };
+  const results = cloudFea.getResults(runId);
+  if (!results) return reply.code(404).send({ error: "Cloud FEA results are not ready." });
+  return results;
+});
 
 api.get("/api/sample-project", async (request) => {
   const sample = normalizeSampleId((request.query as { sample?: string }).sample);
@@ -648,6 +677,10 @@ function parseDisplayModel(value: unknown): DisplayModel | undefined {
     return candidate as DisplayModel;
   }
   return undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function isDisplayFace(value: unknown): boolean {
