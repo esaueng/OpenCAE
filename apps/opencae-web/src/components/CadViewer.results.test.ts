@@ -287,6 +287,14 @@ describe("CadViewer result coloring", () => {
     expect(resultLegendContentScale({ width: 1240, height: 720 })).toBe(2.4);
   });
 
+  test("resets the result legend to default size on double click", () => {
+    expect(cadViewerSource).toContain("function resetResultLegendSize");
+    expect(cadViewerSource).toContain("setLegendSize(null)");
+    expect(cadViewerSource).toContain("onDoubleClick={resetResultLegendSize}");
+    expect(cadViewerSource).toContain('title="Double-click to reset legend size"');
+    expect(cadViewerSource).not.toContain("setLegendSize({ width: RESULT_LEGEND_DEFAULT_WIDTH, height: RESULT_LEGEND_DEFAULT_HEIGHT })");
+  });
+
   test("maps gizmo Z clicks to a clockwise square top view", () => {
     const topView = cameraViewForAxis(axisLabelToViewAxis("Z"));
 
