@@ -716,6 +716,7 @@ function ViewCubeFace({
   label,
   position,
   rotation,
+  normal,
   onSelectView
 }: {
   label: ViewCubeFaceLabel;
@@ -726,22 +727,25 @@ function ViewCubeFace({
 }) {
   const [hovered, setHovered] = useState(false);
   const { camera } = useThree();
+  const faceRef = useRef<THREE.Group | null>(null);
   const labelRef = useRef<THREE.Group | null>(null);
-  const localNormal = useMemo(() => new THREE.Vector3(0, 0, 1), []);
-  const faceCenterWorldRef = useRef(new THREE.Vector3());
+  const localNormal = useMemo(() => new THREE.Vector3(...normal), [normal]);
   const faceNormalWorldRef = useRef(new THREE.Vector3());
+  const toCameraWorldRef = useRef(new THREE.Vector3());
   const normalMatrixRef = useRef(new THREE.Matrix3());
   const title = `${label} view`;
   useFrame(() => {
     const labelObject = labelRef.current;
-    if (!labelObject) return;
-    const faceCenterWorld = labelObject.getWorldPosition(faceCenterWorldRef.current);
-    const faceNormalWorld = faceNormalWorldRef.current.copy(localNormal).applyNormalMatrix(normalMatrixRef.current.getNormalMatrix(labelObject.matrixWorld)).normalize();
-    labelObject.visible = shouldShowViewCubeFaceLabel(faceCenterWorld, faceNormalWorld, camera.position);
+    const cubeRootObject = faceRef.current?.parent;
+    if (!labelObject || !cubeRootObject) return;
+    const faceNormalWorld = faceNormalWorldRef.current.copy(localNormal).applyNormalMatrix(normalMatrixRef.current.getNormalMatrix(cubeRootObject.matrixWorld)).normalize();
+    const toCameraWorld = camera.getWorldDirection(toCameraWorldRef.current).negate().normalize();
+    labelObject.visible = shouldShowViewCubeFaceLabel(faceNormalWorld, toCameraWorld);
   });
 
   return (
     <group
+      ref={faceRef}
       name={title}
       position={position}
       rotation={rotation}
@@ -5188,13 +5192,11 @@ export function viewCubeFaceToGizmoView(label: ViewCubeFaceLabel): RotationAxis 
 }
 
 export function shouldShowViewCubeFaceLabel(
-  faceCenterWorld: THREE.Vector3,
   faceNormalWorld: THREE.Vector3,
-  cameraPosition: THREE.Vector3,
+  toCameraWorld: THREE.Vector3,
   threshold = VIEWER_VIEW_CUBE_FACE_VISIBILITY_THRESHOLD
 ) {
-  const toCamera = cameraPosition.clone().sub(faceCenterWorld).normalize();
-  return faceNormalWorld.clone().normalize().dot(toCamera) > threshold;
+  return faceNormalWorld.clone().normalize().dot(toCameraWorld.clone().normalize()) > threshold;
 }
 
 export function gizmoViewTargetToRequest(target: GizmoViewTarget): GizmoViewRequest {
