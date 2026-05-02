@@ -83,6 +83,7 @@ const apiSource = readFileSync(resolve(__dirname, "api.ts"), "utf8");
 describe("api", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
   });
 
   test("keeps uploaded model bytes on the project returned from upload", async () => {
@@ -423,10 +424,13 @@ describe("api", () => {
     } as Study;
     const cloudHealth = {
       ok: true,
-      mode: "local-cloud-fea-bridge",
-      runnerUrl: "http://localhost:8080/solve",
-      runnerHealthUrl: "http://localhost:8080/health",
-      runner: { reachable: true, ccx: "unavailable", gmsh: "unavailable" }
+      mode: "cloudflare-worker",
+      artifactsBound: true,
+      queueBound: true,
+      containerBound: true,
+      containersEnabled: true,
+      cloudFeaAvailable: true,
+      cloudFeaEndpoint: "https://cae.example/api/cloud-fea/runs"
     };
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
@@ -478,7 +482,7 @@ describe("api", () => {
 
     expect(requestBody).toMatchObject({ projectId: "project-1", studyId: "study-1", fidelity: "ultra" });
     expect(healthLogs).toEqual([
-      "Cloud FEA route health: mode=local-cloud-fea-bridge; containerBound=n/a; runner=http://localhost:8080/solve; ccx=unavailable.",
+      "Cloud FEA route health: mode=cloudflare-worker; containerBound=true; runner=n/a; ccx=n/a.",
       "Cloud FEA request started: POST /api/cloud-fea/runs."
     ]);
     expect(response.streamUrl).toBe("/api/cloud-fea/runs/run-cloud-1/events");
@@ -497,7 +501,7 @@ describe("api", () => {
     } as Study;
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (String(input) === "/api/cloud-fea/health") {
-        return new Response(JSON.stringify({ ok: true, mode: "local-cloud-fea-bridge", runnerUrl: "http://localhost:8080/solve", runner: { reachable: false, ccx: "unavailable" } }), {
+        return new Response(JSON.stringify({ ok: true, mode: "cloudflare-worker", containerBound: true, cloudFeaAvailable: true }), {
           headers: { "content-type": "application/json" }
         });
       }
@@ -512,7 +516,7 @@ describe("api", () => {
       return new Response("unexpected", { status: 500 });
     }));
 
-    await expect(runSimulation("study-1", cloudStudy)).rejects.toThrow("Cloud FEA is routed to a Cloudflare Worker without a FEA_CONTAINER binding");
+    await expect(runSimulation("study-1", cloudStudy)).rejects.toThrow("Cloud FEA is unavailable on this deployment because the app Worker has no FEA_CONTAINER binding");
     await expect(runSimulation("study-1", cloudStudy)).rejects.toThrow("pnpm deploy:cloudflare:containers");
   });
 
@@ -541,13 +545,14 @@ describe("api", () => {
     vi.stubGlobal("fetch", fetchMock);
     const healthLogs: string[] = [];
 
-    await expect(runSimulation("study-1", cloudStudy, undefined, { onCloudFeaHealth: (message) => healthLogs.push(message) })).rejects.toThrow("Cloud FEA is routed to a Cloudflare Worker without a FEA_CONTAINER binding");
+    await expect(runSimulation("study-1", cloudStudy, undefined, { onCloudFeaHealth: (message) => healthLogs.push(message) })).rejects.toThrow("Cloud FEA is unavailable on this deployment because the app Worker has no FEA_CONTAINER binding");
 
     expect(healthLogs).toEqual(["Cloud FEA route health: mode=cloudflare-worker; containerBound=false; runner=n/a; ccx=n/a."]);
     expect(fetchMock).not.toHaveBeenCalledWith("/api/cloud-fea/runs", expect.anything());
+    expect(fetchMock).not.toHaveBeenCalledWith("http://localhost:4317/api/cloud-fea/health");
   });
 
-  test("auto-routes localhost Worker Cloud FEA requests to the local API bridge", async () => {
+  test("does not auto-route localhost Worker Cloud FEA requests to the local API bridge without dev opt-in", async () => {
     const cloudStudy = {
       ...study,
       materialAssignments: [{ id: "assign-1", materialId: "mat-aluminum-6061", selectionRef: "selection-body-1", status: "complete" }],
@@ -556,6 +561,33 @@ describe("api", () => {
       meshSettings: { preset: "ultra", status: "complete", meshRef: "project-1/mesh/mesh-summary.json" },
       solverSettings: { backend: "cloudflare_fea", fidelity: "ultra" }
     } as Study;
+    vi.stubGlobal("window", { location: { hostname: "localhost" } });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === "/api/cloud-fea/health") {
+        return new Response(JSON.stringify({ ok: true, mode: "cloudflare-worker", artifactsBound: true, queueBound: true, containerBound: false, containersEnabled: false }), {
+          headers: { "content-type": "application/json" }
+        });
+      }
+      return new Response("run should not be posted", { status: 500 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(runSimulation("study-1", cloudStudy)).rejects.toThrow("Cloud FEA is unavailable on this deployment because the app Worker has no FEA_CONTAINER binding");
+
+    expect(fetchMock).not.toHaveBeenCalledWith("http://localhost:4317/api/cloud-fea/health");
+    expect(fetchMock).not.toHaveBeenCalledWith("/api/cloud-fea/runs", expect.anything());
+  });
+
+  test("allows the local Cloud FEA bridge only with the explicit dev opt-in", async () => {
+    const cloudStudy = {
+      ...study,
+      materialAssignments: [{ id: "assign-1", materialId: "mat-aluminum-6061", selectionRef: "selection-body-1", status: "complete" }],
+      constraints: [{ id: "constraint-1", type: "fixed", selectionRef: "selection-face-1", parameters: {}, status: "complete" }],
+      loads: [{ id: "load-1", type: "force", selectionRef: "selection-face-1", parameters: { value: 500, units: "N", direction: [0, -1, 0] }, status: "complete" }],
+      meshSettings: { preset: "ultra", status: "complete", meshRef: "project-1/mesh/mesh-summary.json" },
+      solverSettings: { backend: "cloudflare_fea", fidelity: "ultra" }
+    } as Study;
+    vi.stubEnv("VITE_OPCAE_LOCAL_CLOUD_FEA_BRIDGE", "1");
     vi.stubGlobal("window", { location: { hostname: "localhost" } });
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
@@ -621,7 +653,7 @@ describe("api", () => {
     expect(fetchMock).toHaveBeenCalledWith("http://localhost:4317/api/cloud-fea/runs/run-cloud-local-bridge-1/results");
   });
 
-  test("does not auto-route non-localhost Worker Cloud FEA requests", async () => {
+  test("production mode never tries the local Cloud FEA bridge", async () => {
     const cloudStudy = {
       ...study,
       materialAssignments: [{ id: "assign-1", materialId: "mat-aluminum-6061", selectionRef: "selection-body-1", status: "complete" }],
@@ -630,6 +662,8 @@ describe("api", () => {
       meshSettings: { preset: "ultra", status: "complete", meshRef: "project-1/mesh/mesh-summary.json" },
       solverSettings: { backend: "cloudflare_fea", fidelity: "ultra" }
     } as Study;
+    vi.stubEnv("DEV", false);
+    vi.stubEnv("VITE_OPCAE_LOCAL_CLOUD_FEA_BRIDGE", "1");
     vi.stubGlobal("window", { location: { hostname: "cae.example" } });
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       if (String(input) === "/api/cloud-fea/health") {
@@ -641,7 +675,7 @@ describe("api", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(runSimulation("study-1", cloudStudy)).rejects.toThrow("Cloud FEA is routed to a Cloudflare Worker without a FEA_CONTAINER binding");
+    await expect(runSimulation("study-1", cloudStudy)).rejects.toThrow("Cloud FEA is unavailable on this deployment because the app Worker has no FEA_CONTAINER binding");
 
     expect(fetchMock).not.toHaveBeenCalledWith("http://localhost:4317/api/cloud-fea/health");
     expect(fetchMock).not.toHaveBeenCalledWith("/api/cloud-fea/runs", expect.anything());
@@ -668,7 +702,7 @@ describe("api", () => {
       thrown = error as Error;
     }
 
-    expect(thrown?.message).toContain("Cloud FEA is routed to a Cloudflare Worker without a FEA_CONTAINER binding");
+    expect(thrown?.message).toContain("Cloud FEA is unavailable on this deployment because the app Worker has no FEA_CONTAINER binding");
     expect(thrown?.message).not.toContain("Original response");
   });
 
@@ -701,8 +735,8 @@ describe("api", () => {
       thrown = error as Error;
     }
 
-    expect(thrown?.message).toContain("Cloud FEA endpoint is unavailable in this local dev server: GET /api/cloud-fea/health failed with HTTP 404: Route GET:/api/cloud-fea/health not found");
-    expect(thrown?.message).toContain("local API bridge exposes /api/cloud-fea/runs");
+    expect(thrown?.message).toContain("Cloud FEA endpoint is unavailable on this app domain: GET /api/cloud-fea/health failed with HTTP 404: Route GET:/api/cloud-fea/health not found");
+    expect(thrown?.message).not.toContain("local API bridge exposes /api/cloud-fea/runs");
   });
 
   test("explains browser Failed to fetch errors for local Cloud FEA run creation", async () => {
@@ -723,9 +757,9 @@ describe("api", () => {
       thrown = error as Error;
     }
 
-    expect(thrown?.message).toContain("Cloud FEA local API/proxy is unreachable");
-    expect(thrown?.message).toContain("root pnpm dev");
-    expect(thrown?.message).toContain("OPCAE_FEA_RUNNER_URL");
+    expect(thrown?.message).toContain("Cloud FEA endpoint is unreachable on this app domain");
+    expect(thrown?.message).not.toContain("root pnpm dev");
+    expect(thrown?.message).not.toContain("OPCAE_FEA_RUNNER_URL");
   });
 
   test("uses Cloud FEA event and result endpoints for local cloud run ids", async () => {

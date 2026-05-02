@@ -23,10 +23,14 @@ export interface RunSimulationOptions {
   onCloudFeaHealth?: (message: string) => void;
 }
 
-interface CloudFeaRouteHealth {
+export interface CloudFeaRouteHealth {
   ok?: boolean;
   mode?: string;
   service?: string;
+  requestOrigin?: string;
+  cloudFeaEndpoint?: string;
+  cloudFeaAvailable?: boolean;
+  requiredDeployConfig?: string;
   runnerUrl?: string;
   runnerHealthUrl?: string;
   runner?: {
@@ -45,7 +49,8 @@ const localResultsByRunId = new Map<string, ResultsResponse | Promise<ResultsRes
 const localResultSolversByRunId = new Map<string, () => Promise<ResultsResponse>>();
 const localEventsByRunId = new Map<string, RunEvent[]>();
 const cloudFeaApiBaseByRunId = new Map<string, string>();
-const LOCAL_CLOUD_FEA_API_BASE = "http://localhost:4317";
+const CLOUD_FEA_API_BASE = "";
+const DEV_LOCAL_CLOUD_FEA_BRIDGE_API_BASE = "http://localhost:4317";
 const MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.005;
 
 export async function loadSampleProject(sample: SampleModelId = "bracket", analysisType: SampleAnalysisType = "static_stress"): Promise<SampleProjectResponse> {
@@ -298,6 +303,10 @@ export async function runSimulation(studyId: string, currentStudy?: Study, displ
     }
     return runSimulationLocally(currentStudy, displayModel);
   }
+}
+
+export async function getCloudFeaHealth(): Promise<CloudFeaRouteHealth> {
+  return fetchCloudFeaRouteHealth(CLOUD_FEA_API_BASE);
 }
 
 export async function getResults(runId: string): Promise<ResultsResponse> {
@@ -603,13 +612,13 @@ async function readJson<T>(response: Response, endpoint = response.url || "reque
 function cloudFeaRunError(error: unknown): Error {
   const message = error instanceof Error ? error.message : String(error);
   if (/failed to fetch|networkerror|load failed|fetch failed/i.test(message)) {
-    return new Error(`Cloud FEA local API/proxy is unreachable: ${message}. Start root pnpm dev so the Vite /api proxy can reach the local API on port 4317, and run the CalculiX FEA runner at OPCAE_FEA_RUNNER_URL (default http://localhost:8080/solve).`);
+    return new Error(`Cloud FEA endpoint is unreachable on this app domain: ${message}. ${cloudFeaEndpointActionMessage()}`);
   }
   if (/cloud fea containers are not enabled|fea_container/i.test(message)) {
     return new Error(cloudFeaContainerBindingMessage(message));
   }
   if (/route post:\/api\/cloud-fea\/runs not found|unexpected token '<'|not found/i.test(message)) {
-    return new Error(`Cloud FEA endpoint is unavailable in this local dev server: ${message}. Start root pnpm dev so the local API bridge exposes /api/cloud-fea/runs, or start the Cloudflare Worker/containers deployment.`);
+    return new Error(`Cloud FEA endpoint is unavailable on this app domain: ${message}. ${cloudFeaEndpointActionMessage()}`);
   }
   return error instanceof Error ? error : new Error(message);
 }
@@ -619,18 +628,25 @@ interface CloudFeaRouteResolution {
 }
 
 async function resolveCloudFeaApiBase(options: RunSimulationOptions): Promise<CloudFeaRouteResolution> {
-  const sameOriginHealth = await fetchCloudFeaRouteHealth("");
+  const sameOriginHealth = await fetchCloudFeaRouteHealth(CLOUD_FEA_API_BASE);
   options.onCloudFeaHealth?.(cloudFeaRouteHealthMessage(sameOriginHealth));
-  if (sameOriginHealth.mode === "cloudflare-worker" && sameOriginHealth.containerBound !== true && isLocalBrowserHost()) {
-    const localBridgeHealth = await fetchCloudFeaRouteHealth(LOCAL_CLOUD_FEA_API_BASE);
+  if (sameOriginHealth.mode === "cloudflare-worker" && sameOriginHealth.containerBound === true) {
+    return { apiBase: CLOUD_FEA_API_BASE };
+  }
+  if (sameOriginHealth.mode === "local-cloud-fea-bridge") {
+    if (!isDevLocalCloudFeaBridgeEnabled()) throw new Error(localCloudFeaBridgeDisabledMessage());
+    return { apiBase: CLOUD_FEA_API_BASE };
+  }
+  if (isDevLocalCloudFeaBridgeEnabled()) {
+    const localBridgeHealth = await fetchCloudFeaRouteHealth(DEV_LOCAL_CLOUD_FEA_BRIDGE_API_BASE);
     if (localBridgeHealth.mode === "local-cloud-fea-bridge") {
-      options.onCloudFeaHealth?.(`Cloud FEA local bridge selected: ${LOCAL_CLOUD_FEA_API_BASE}.`);
+      options.onCloudFeaHealth?.(`Cloud FEA local bridge selected: ${DEV_LOCAL_CLOUD_FEA_BRIDGE_API_BASE}.`);
       options.onCloudFeaHealth?.(cloudFeaRouteHealthMessage(localBridgeHealth));
-      return { apiBase: LOCAL_CLOUD_FEA_API_BASE };
+      return { apiBase: DEV_LOCAL_CLOUD_FEA_BRIDGE_API_BASE };
     }
   }
   assertCloudFeaRouteCanCreateRun(sameOriginHealth);
-  return { apiBase: "" };
+  return { apiBase: CLOUD_FEA_API_BASE };
 }
 
 async function fetchCloudFeaRouteHealth(apiBase: string): Promise<CloudFeaRouteHealth> {
@@ -643,16 +659,14 @@ function cloudFeaApiUrl(apiBase: string, path: string): string {
   return apiBase ? `${apiBase}${path}` : path;
 }
 
-function isLocalBrowserHost(): boolean {
-  if (typeof window === "undefined") return false;
-  const hostname = window.location?.hostname;
-  return hostname === "localhost" || hostname === "127.0.0.1";
-}
-
 function assertCloudFeaRouteCanCreateRun(routeHealth: CloudFeaRouteHealth): void {
   if (routeHealth.mode === "cloudflare-worker" && routeHealth.containerBound !== true) {
     throw new Error(cloudFeaContainerBindingMessage());
   }
+}
+
+function isDevLocalCloudFeaBridgeEnabled(): boolean {
+  return import.meta.env.DEV && import.meta.env.VITE_OPCAE_LOCAL_CLOUD_FEA_BRIDGE === "1";
 }
 
 function cloudFeaRouteHealthMessage(routeHealth: CloudFeaRouteHealth): string {
@@ -663,9 +677,17 @@ function cloudFeaRouteHealthMessage(routeHealth: CloudFeaRouteHealth): string {
 }
 
 function cloudFeaContainerBindingMessage(originalMessage?: string): string {
-  const action = "Cloud FEA is routed to a Cloudflare Worker without a FEA_CONTAINER binding. For local dev, run root pnpm dev and open the Vite URL shown there, usually http://localhost:5173/. For deployed Cloud FEA, deploy with wrangler.containers.jsonc using pnpm deploy:cloudflare:containers.";
+  const action = `Cloud FEA is unavailable on this deployment because the app Worker has no FEA_CONTAINER binding. Deploy with pnpm deploy:cloudflare:containers, which uses wrangler.containers.jsonc, or switch Backend to Detailed local.${import.meta.env.DEV ? " For local bridge testing, set VITE_OPCAE_LOCAL_CLOUD_FEA_BRIDGE=1 and run the local API/runner." : ""}`;
   if (originalMessage?.includes(action)) return action;
   return originalMessage ? `${action} Original response: ${originalMessage}` : action;
+}
+
+function cloudFeaEndpointActionMessage(): string {
+  return "Deploy with pnpm deploy:cloudflare:containers, which uses wrangler.containers.jsonc, or switch Backend to Detailed local.";
+}
+
+function localCloudFeaBridgeDisabledMessage(): string {
+  return "Cloud FEA local bridge routing is disabled. Set VITE_OPCAE_LOCAL_CLOUD_FEA_BRIDGE=1 in a dev build to test the local API/runner, or use the same-origin Cloudflare Worker endpoint.";
 }
 
 function requestErrorMessage(error: unknown, endpoint: string): string {
