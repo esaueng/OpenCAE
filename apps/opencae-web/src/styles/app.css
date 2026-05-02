@@ -1154,7 +1154,7 @@ img {
   border-color: var(--color-accent-border);
 }
 
-.local-pill {
+.backend-pill {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -1164,7 +1164,7 @@ img {
   text-transform: lowercase;
 }
 
-.local-pill span {
+.backend-pill span {
   width: 7px;
   height: 7px;
   border-radius: 999px;
@@ -3265,7 +3265,7 @@ button:disabled {
   .topbar-tools,
   .breadcrumb-sep,
   .breadcrumb > span:last-child,
-  .topbar .local-pill {
+  .topbar .backend-pill {
     display: none;
   }
 

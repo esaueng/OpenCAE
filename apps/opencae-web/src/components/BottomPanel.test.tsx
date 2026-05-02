@@ -12,6 +12,7 @@ describe("BottomPanel", () => {
         studyName="Static Stress"
         meshStatus="Ready"
         solverStatus="Complete"
+        backendStatus="local"
       />
     );
 
@@ -29,6 +30,23 @@ describe("BottomPanel", () => {
     expect(html.indexOf("Buy me a coffee</a>")).toBeLessThan(html.indexOf(">feedback</a>"));
     expect(html.indexOf("Buy me a coffee</a>")).toBeLessThan(html.indexOf(">github</a>"));
     expect(html.indexOf(">github</a>")).toBeGreaterThan(html.indexOf("<b>solver</b>"));
+  });
+
+  test("shows cloud backend status when Cloud FEA is selected", () => {
+    const html = renderToStaticMarkup(
+      <BottomPanel
+        status="Ready"
+        logs={["Ready"]}
+        projectName="Cantilever Demo"
+        studyName="Static Stress"
+        meshStatus="Ready"
+        solverStatus="Idle"
+        backendStatus="cloud"
+      />
+    );
+
+    expect(html).toContain('class="backend-pill"');
+    expect(html).toContain(">cloud</span>");
   });
 
   test("defines the active workspace shortcuts shown in the tips drawer", () => {
