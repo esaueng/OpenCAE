@@ -1,5 +1,7 @@
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+import base64
+import binascii
 import json
 import math
 import re
@@ -12,6 +14,8 @@ UNPARSED_RESULTS_ERROR = "CalculiX output was not parsed into real result fields
 INVALID_SOLVER_MATERIAL_ERROR = "Cloud FEA requires a valid solverMaterial with positive finite CalculiX material properties."
 UNSUPPORTED_BLOCK_ERROR = "Cloud FEA currently supports only block-like single-body models with positive millimeter dimensions."
 CCX_UNAVAILABLE_ERROR = "CalculiX executable unavailable; refusing to publish Cloud FEA results without a real solver run."
+GMSH_UNAVAILABLE_ERROR = "Gmsh executable unavailable; refusing to mesh uploaded geometry for Cloud FEA."
+UNSUPPORTED_UPLOADED_GEOMETRY_ERROR = "Cloud FEA uploaded geometry support requires STEP, STL, or OBJ model bytes and confident face mapping."
 AXES = ("x", "y", "z")
 DOFS = (1, 2, 3)
 FIDELITY_MESH_DENSITY = {
@@ -66,8 +70,13 @@ class UserFacingSolveError(Exception):
 
 def solve(payload):
     parsed = parse_payload(payload)
+    if parsed.get("geometry"):
+        return solve_uploaded_geometry(parsed)
+    return solve_structured_block(parsed)
+
+
+def solve_structured_block(parsed):
     run_id = parsed["runId"]
-    material = parsed["material"]
     mesh = generate_structured_hex_mesh(parsed["dimensions"], parsed["meshDensity"])
     boundaries = select_boundary_nodes(parsed, mesh)
     nodal_loads = distribute_total_force_to_nodes(mesh, boundaries["loadNodeIds"], parsed["loadVector"])
@@ -92,22 +101,63 @@ def solve(payload):
     })
 
 
+def solve_uploaded_geometry(parsed):
+    run_id = parsed["runId"]
+    with tempfile.TemporaryDirectory(prefix=f"{run_id}-") as tmp:
+        workdir = Path(tmp)
+        staged_geometry = stage_uploaded_geometry(workdir, parsed["geometry"])
+        if not shutil.which("gmsh"):
+            raise UserFacingSolveError(GMSH_UNAVAILABLE_ERROR, 503, {
+                "artifacts": uploaded_geometry_failure_artifacts(parsed, "gmsh-unavailable", "", {"log": GMSH_UNAVAILABLE_ERROR})
+            })
+        gmsh_output = run_gmsh_if_available(workdir, staged_geometry, parsed)
+        if gmsh_output["returnCode"] != 0:
+            raise UserFacingSolveError("Gmsh failed to generate a usable 3D mesh for uploaded geometry.", 422, {
+                "artifacts": uploaded_geometry_failure_artifacts(parsed, "gmsh-failed", "", {"log": gmsh_output["log"]})
+            })
+        mesh_path = workdir / "opencae_mesh.msh"
+        if not mesh_path.exists():
+            raise UserFacingSolveError("Gmsh completed but did not produce a mesh file for uploaded geometry.", 422, {
+                "artifacts": uploaded_geometry_failure_artifacts(parsed, "gmsh-mesh-missing", "", {"log": gmsh_output["log"]})
+            })
+        mesh = parse_gmsh_msh(mesh_path.read_text(errors="ignore"))
+        boundaries = select_uploaded_geometry_boundaries(parsed, mesh)
+        nodal_loads = distribute_total_force_over_facets(mesh, boundaries["loadFacetIds"], parsed["loadVector"])
+        input_deck = write_calculix_input_deck(parsed, mesh, boundaries, nodal_loads)
+        deck_path = workdir / "opencae_solve.inp"
+        deck_path.write_text(input_deck)
+        solver_output = run_ccx_if_available(workdir, deck_path)
+        if solver_output["returnCode"] is None:
+            raise UserFacingSolveError(CCX_UNAVAILABLE_ERROR, 503, {
+                "artifacts": artifacts_for_failure(input_deck, solver_output, "ccx-unavailable", mesh, boundaries)
+            })
+        parsed_solver_results = parse_calculix_results(workdir, parsed, mesh, boundaries, input_deck, solver_output)
+
+    if is_parsed_calculix_status(parsed_solver_results["artifacts"]["solverResultParser"]):
+        return parsed_solver_results
+
+    raise UserFacingSolveError(UNPARSED_RESULTS_ERROR, 422, {
+        "artifacts": artifacts_for_failure(input_deck, solver_output, parsed_solver_results["artifacts"]["solverResultParser"], mesh, boundaries)
+    })
+
+
 def parse_payload(payload):
     run_id = payload.get("runId") if isinstance(payload.get("runId"), str) else "run-cloud-container"
     study = payload.get("study") if isinstance(payload.get("study"), dict) else {}
     if payload.get("analysisType") == "dynamic_structural" or study.get("type") == "dynamic_structural" or payload.get("dynamicSettings"):
-        raise UserFacingSolveError("Structured block Cloud FEA currently supports static stress studies only.", 422)
+        raise UserFacingSolveError("Cloud FEA currently supports static stress studies only.", 422)
     material = material_properties(payload)
-    dimensions = resolve_block_dimensions(payload)
+    geometry = uploaded_geometry_payload(payload)
+    dimensions = None if geometry else resolve_block_dimensions(payload)
     load = first_record(study.get("loads"))
     constraint = first_record(study.get("constraints"))
     if not load or load.get("type") != "force":
-        raise UserFacingSolveError("Structured block Cloud FEA requires a force load.", 422)
+        raise UserFacingSolveError("Cloud FEA requires a force load.", 422)
     if not constraint:
-        raise UserFacingSolveError("Structured block Cloud FEA requires a fixed support.", 422)
+        raise UserFacingSolveError("Cloud FEA requires a fixed support.", 422)
     load_value = required_positive_number(load.get("parameters") if isinstance(load.get("parameters"), dict) else {}, "value")
     load_direction = unit_vector((load.get("parameters") or {}).get("direction"))
-    return {
+    parsed = {
         "runId": run_id,
         "study": study,
         "displayModel": payload.get("displayModel") if isinstance(payload.get("displayModel"), dict) else {},
@@ -117,8 +167,10 @@ def parse_payload(payload):
         "load": load,
         "constraint": constraint,
         "loadVector": [load_value * component for component in load_direction],
-        "loadMagnitude": load_value
+        "loadMagnitude": load_value,
+        "geometry": geometry
     }
+    return parsed
 
 
 def resolve_block_dimensions(payload):
@@ -158,6 +210,40 @@ def mesh_density_for(fidelity):
     return FIDELITY_MESH_DENSITY.get(fidelity if isinstance(fidelity, str) else "standard", FIDELITY_MESH_DENSITY["standard"])
 
 
+def uploaded_geometry_payload(payload):
+    geometry = payload.get("geometry")
+    if not isinstance(geometry, dict):
+        return None
+    geometry_format = str(geometry.get("format") or "").lower()
+    filename = str(geometry.get("filename") or f"uploaded.{geometry_format}")
+    content_base64 = geometry.get("contentBase64")
+    if geometry_format == "stp":
+        geometry_format = "step"
+    if geometry_format not in {"step", "stl", "obj"} or not isinstance(content_base64, str) or not content_base64.strip():
+        raise UserFacingSolveError(UNSUPPORTED_UPLOADED_GEOMETRY_ERROR, 422)
+    extension = ".stp" if geometry_format == "step" and filename.lower().endswith(".stp") else f".{geometry_format}"
+    safe_filename = re.sub(r"[^A-Za-z0-9_.-]+", "_", Path(filename).name) or f"uploaded{extension}"
+    if Path(safe_filename).suffix.lower() not in {".step", ".stp", ".stl", ".obj"}:
+        safe_filename = f"{safe_filename}{extension}"
+    return {
+        "format": geometry_format,
+        "filename": safe_filename,
+        "contentBase64": content_base64
+    }
+
+
+def stage_uploaded_geometry(workdir, geometry):
+    try:
+        content = base64.b64decode(geometry["contentBase64"], validate=True)
+    except (binascii.Error, ValueError) as error:
+        raise UserFacingSolveError(f"{UNSUPPORTED_UPLOADED_GEOMETRY_ERROR} Invalid base64 geometry content.", 422) from error
+    if not content:
+        raise UserFacingSolveError(UNSUPPORTED_UPLOADED_GEOMETRY_ERROR, 422)
+    geometry_path = workdir / geometry["filename"]
+    geometry_path.write_bytes(content)
+    return geometry_path
+
+
 def generate_structured_hex_mesh(dimensions, density):
     nx = int(density["nx"])
     ny = int(density["ny"])
@@ -191,7 +277,7 @@ def generate_structured_hex_mesh(dimensions, density):
                 ]
                 elements.append({"id": element_id, "ijk": (i, j, k), "nodeIds": node_order})
                 element_id += 1
-    return {"nodes": nodes, "elements": elements, "dimensions": dimensions, "density": {"nx": nx, "ny": ny, "nz": nz}}
+    return {"nodes": nodes, "elements": elements, "dimensions": dimensions, "density": {"nx": nx, "ny": ny, "nz": nz}, "source": "structured_block", "elementType": "C3D8"}
 
 
 def select_boundary_nodes(parsed, mesh):
@@ -296,15 +382,282 @@ def constant_axis_for_nodes(nodes):
     return min(range(3), key=lambda axis: ranges[axis])
 
 
+def distribute_total_force_over_facets(mesh, load_facet_ids, total_force):
+    facets_by_id = {facet["id"]: facet for facet in mesh.get("boundaryFacets", [])}
+    nodal_weights = {}
+    total_area = 0.0
+    for facet_id in load_facet_ids:
+        facet = facets_by_id.get(facet_id)
+        if not facet:
+            continue
+        area = facet["area"]
+        if area <= 0:
+            continue
+        share = area / len(facet["nodeIds"])
+        for node_id in facet["nodeIds"]:
+            nodal_weights[node_id] = nodal_weights.get(node_id, 0.0) + share
+        total_area += area
+    if total_area <= 0 or not nodal_weights:
+        raise UserFacingSolveError("Cannot distribute uploaded-geometry load over an empty mapped face.", 422)
+    return [
+        {
+            "nodeId": node_id,
+            "components": [component * weight / total_area for component in total_force]
+        }
+        for node_id, weight in sorted(nodal_weights.items())
+    ]
+
+
+def run_gmsh_if_available(workdir, geometry_path, parsed):
+    if not shutil.which("gmsh"):
+        return {"log": GMSH_UNAVAILABLE_ERROR, "returnCode": None}
+    mesh_size = gmsh_mesh_size(parsed)
+    geo_path = workdir / "opencae_mesh.geo"
+    mesh_path = workdir / "opencae_mesh.msh"
+    geo_path.write_text(gmsh_geo_script(geometry_path.name, parsed["geometry"]["format"], mesh_size))
+    result = subprocess.run(["gmsh", str(geo_path), "-3", "-format", "msh2", "-o", str(mesh_path)], cwd=workdir, capture_output=True, text=True, timeout=90, check=False)
+    output = (result.stdout or "") + ("\n" + result.stderr if result.stderr else "")
+    log = output.strip() or f"Gmsh exited with code {result.returncode}."
+    return {"log": log, "returnCode": result.returncode}
+
+
+def gmsh_mesh_size(parsed):
+    display_model = parsed.get("displayModel") if isinstance(parsed.get("displayModel"), dict) else {}
+    dimensions = display_model.get("dimensions") if isinstance(display_model.get("dimensions"), dict) else {}
+    values = [dimensions.get(axis) for axis in AXES]
+    spans = [float(value) for value in values if is_positive_finite(value)]
+    span = max(spans) if spans else 100.0
+    fidelity = parsed["meshDensity"]
+    divisions = max(fidelity["nx"], fidelity["ny"], fidelity["nz"])
+    return max(span / divisions, span * 0.01, 0.25)
+
+
+def gmsh_geo_script(filename, geometry_format, mesh_size):
+    escaped = filename.replace("\\", "\\\\").replace('"', '\\"')
+    common = [
+        'SetFactory("OpenCASCADE");',
+        f'Merge "{escaped}";',
+        f"Mesh.CharacteristicLengthMin = {mesh_size:.12g};",
+        f"Mesh.CharacteristicLengthMax = {mesh_size:.12g};",
+        "Mesh.ElementOrder = 1;"
+    ]
+    if geometry_format in {"stl", "obj"}:
+        common.extend([
+            "ClassifySurfaces{40*Pi/180, 1, 1, Pi};",
+            "CreateGeometry;",
+            "Surface Loop(1) = Surface{:};",
+            "Volume(1) = {1};"
+        ])
+    common.extend([
+        'Physical Volume("SOLID") = Volume{:};',
+        "Mesh 3;",
+        'Save "opencae_mesh.msh";',
+        ""
+    ])
+    return "\n".join(common)
+
+
+def parse_gmsh_msh(text):
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    nodes = []
+    node_lookup = {}
+    elements = []
+    boundary_facets = []
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        if line == "$Nodes":
+            count = int(lines[index + 1])
+            for offset in range(count):
+                parts = lines[index + 2 + offset].split()
+                node = {"id": int(parts[0]), "coordinates": (float(parts[1]), float(parts[2]), float(parts[3]))}
+                nodes.append(node)
+                node_lookup[node["id"]] = node
+            index += count + 3
+            continue
+        if line == "$Elements":
+            count = int(lines[index + 1])
+            for offset in range(count):
+                parts = lines[index + 2 + offset].split()
+                element_id = int(parts[0])
+                gmsh_type = int(parts[1])
+                tag_count = int(parts[2])
+                node_ids = [int(value) for value in parts[3 + tag_count:]]
+                if gmsh_type == 2:
+                    boundary_facets.append(boundary_facet(element_id, node_ids[:3], node_lookup))
+                elif gmsh_type == 4:
+                    elements.append({"id": element_id, "nodeIds": node_ids[:4], "type": "C3D4"})
+                elif gmsh_type == 11:
+                    elements.append({"id": element_id, "nodeIds": node_ids[:10], "type": "C3D10"})
+            index += count + 3
+            continue
+        index += 1
+    if not nodes or not elements:
+        raise UserFacingSolveError("Gmsh mesh did not contain nodes and supported tetrahedral volume elements.", 422)
+    element_types = {element["type"] for element in elements}
+    if len(element_types) != 1:
+        raise UserFacingSolveError("Gmsh mesh mixed tetrahedral element orders; refusing ambiguous CalculiX deck generation.", 422)
+    return {
+        "nodes": sorted(nodes, key=lambda node: node["id"]),
+        "elements": sorted(elements, key=lambda element: element["id"]),
+        "boundaryFacets": sorted(boundary_facets, key=lambda facet: facet["id"]),
+        "source": "gmsh_uploaded_geometry",
+        "elementType": next(iter(element_types)),
+        "density": {}
+    }
+
+
+def boundary_facet(facet_id, node_ids, node_lookup):
+    points = [node_lookup[node_id]["coordinates"] for node_id in node_ids]
+    normal_vector = cross(subtract(points[1], points[0]), subtract(points[2], points[0]))
+    area = 0.5 * vector_length(normal_vector)
+    normal = normalize_vector(normal_vector)
+    center = tuple(sum(point[axis] for point in points) / len(points) for axis in range(3))
+    return {
+        "id": facet_id,
+        "nodeIds": node_ids,
+        "center": center,
+        "normal": normal,
+        "area": area,
+        "bbox": {
+            "min": tuple(min(point[axis] for point in points) for axis in range(3)),
+            "max": tuple(max(point[axis] for point in points) for axis in range(3))
+        }
+    }
+
+
+def select_uploaded_geometry_boundaries(parsed, mesh):
+    fixed = uploaded_face_mapping(parsed, mesh, parsed["constraint"].get("selectionRef"), "Fixed support")
+    load = uploaded_face_mapping(parsed, mesh, parsed["load"].get("selectionRef"), "Applied load")
+    fixed_nodes = sorted({node_id for facet in fixed["facets"] for node_id in facet["nodeIds"]})
+    load_nodes = sorted({node_id for facet in load["facets"] for node_id in facet["nodeIds"]})
+    if not fixed_nodes or not load_nodes or not set(fixed_nodes).isdisjoint(load_nodes):
+        raise uploaded_face_mapping_error("Mapped uploaded-geometry support and load faces must be non-empty and disjoint.", parsed, mesh)
+    return {
+        "fixedNodeIds": fixed_nodes,
+        "loadNodeIds": load_nodes,
+        "fixedFacetIds": [facet["id"] for facet in fixed["facets"]],
+        "loadFacetIds": [facet["id"] for facet in load["facets"]],
+        "fixedPlane": fixed["plane"],
+        "loadPlane": load["plane"],
+        "diagnostics": [
+            uploaded_boundary_diagnostic("cloud-fea-uploaded-fixed-face", "Fixed support", fixed, len(fixed_nodes)),
+            uploaded_boundary_diagnostic("cloud-fea-uploaded-load-face", "Applied load", load, len(load_nodes), parsed["loadVector"])
+        ]
+    }
+
+
+def uploaded_face_mapping(parsed, mesh, selection_ref, label):
+    face = face_for_selection(parsed["study"], parsed["displayModel"], selection_ref)
+    if not face or not is_vec3(face.get("center")) or not is_vec3(face.get("normal")):
+        raise uploaded_face_mapping_error(f"{label} selection {selection_ref} could not be mapped confidently to uploaded geometry; missing face center or normal.", parsed, mesh)
+    target_center = face["center"]
+    target_normal = normalize_vector(face["normal"])
+    target_bbox = face_bbox(face)
+    target_area = face_area(face)
+    if vector_length(target_normal) <= 1e-12:
+        raise uploaded_face_mapping_error(f"{label} selection {selection_ref} has a zero normal.", parsed, mesh)
+    spans = mesh_spans(mesh)
+    tolerance = max(max(spans) * 0.02, 1e-5)
+    plane_coordinate = dot(target_center, target_normal)
+    candidates = []
+    duplicate_keys = set()
+    seen_keys = set()
+    for facet in mesh.get("boundaryFacets", []):
+        normal_alignment = dot(facet["normal"], target_normal)
+        if normal_alignment < 0.70:
+            continue
+        plane_distance = abs(dot(facet["center"], target_normal) - plane_coordinate)
+        if plane_distance > tolerance:
+            continue
+        key = (
+            round(facet["center"][0], 8),
+            round(facet["center"][1], 8),
+            round(facet["center"][2], 8),
+            round(facet["normal"][0], 8),
+            round(facet["normal"][1], 8),
+            round(facet["normal"][2], 8)
+        )
+        if key in seen_keys:
+            duplicate_keys.add(key)
+        seen_keys.add(key)
+        center_distance = vector_length(subtract(facet["center"], target_center))
+        bbox_score = bbox_overlap_score(target_bbox, facet["bbox"]) if target_bbox else 0.0
+        area_penalty = area_mismatch(target_area, facet["area"]) if target_area else 0.0
+        score = normal_alignment + bbox_score - area_penalty - (center_distance / max(max(spans), 1e-9)) - (plane_distance / tolerance)
+        candidates.append((score, facet))
+    if not candidates or duplicate_keys:
+        raise uploaded_face_mapping_error(f"{label} selection {selection_ref} could not be mapped confidently to uploaded geometry.", parsed, mesh)
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    best_score = candidates[0][0]
+    facets = [facet for score, facet in candidates if best_score - score <= 1.25]
+    if not facets:
+        raise uploaded_face_mapping_error(f"{label} selection {selection_ref} could not be mapped confidently to uploaded geometry.", parsed, mesh)
+    return {
+        "face": face,
+        "facets": sorted(facets, key=lambda facet: facet["id"]),
+        "plane": {"axis": dominant_axis(target_normal), "coordinate": plane_coordinate, "normal": target_normal},
+        "score": best_score
+    }
+
+
+def uploaded_face_mapping_error(message, parsed, mesh):
+    diagnostics = [{
+        "id": "cloud-fea-uploaded-face-mapping-failed",
+        "severity": "error",
+        "source": "mesh",
+        "message": message,
+        "suggestedActions": ["Select clearer support and load faces on the uploaded model, or use the validated structured block workflow for benchmark cases."],
+        "details": {
+            "boundaryFacetCount": len(mesh.get("boundaryFacets", [])) if isinstance(mesh, dict) else 0,
+            "displayFaceCount": len(parsed.get("displayModel", {}).get("faces", [])) if isinstance(parsed.get("displayModel"), dict) else 0
+        }
+    }]
+    return UserFacingSolveError(message, 422, {"diagnostics": diagnostics})
+
+
+def face_area(face):
+    value = face.get("area") if isinstance(face, dict) else None
+    return float(value) if is_positive_finite(value) else None
+
+
+def face_bbox(face):
+    for key in ("bbox", "boundingBox", "bounds"):
+        value = face.get(key) if isinstance(face, dict) else None
+        if not isinstance(value, dict):
+            continue
+        minimum = value.get("min")
+        maximum = value.get("max")
+        if is_vec3(minimum) and is_vec3(maximum):
+            return {"min": minimum, "max": maximum}
+    return None
+
+
+def bbox_overlap_score(target, candidate):
+    overlap_volume = 1.0
+    target_volume = 1.0
+    for axis in range(3):
+        overlap = max(0.0, min(target["max"][axis], candidate["max"][axis]) - max(target["min"][axis], candidate["min"][axis]))
+        target_span = max(target["max"][axis] - target["min"][axis], 1e-9)
+        overlap_volume *= overlap
+        target_volume *= target_span
+    return overlap_volume / max(target_volume, 1e-9)
+
+
+def area_mismatch(target_area, candidate_area):
+    return abs(target_area - candidate_area) / max(target_area, candidate_area, 1e-9)
+
+
 def write_calculix_input_deck(parsed, mesh, boundaries, nodal_loads):
     material = parsed["material"]
+    element_type = mesh.get("elementType", "C3D8")
     return "\n".join([
         "*HEADING",
-        "OpenCAE structured block CalculiX solve",
+        f'OpenCAE {mesh.get("source", "structured_block")} CalculiX solve',
         "** Units: mm, N, s, MPa. Density units: tonne/mm^3.",
         "*NODE",
         *[f'{node["id"]}, {node["coordinates"][0]:.12g}, {node["coordinates"][1]:.12g}, {node["coordinates"][2]:.12g}' for node in mesh["nodes"]],
-        "*ELEMENT, TYPE=C3D8, ELSET=SOLID",
+        f"*ELEMENT, TYPE={element_type}, ELSET=SOLID",
         *[f'{element["id"]}, {", ".join(str(node_id) for node_id in element["nodeIds"])}' for element in mesh["elements"]],
         "*NSET, NSET=NALL",
         *format_id_lines([node["id"] for node in mesh["nodes"]]),
@@ -480,7 +833,7 @@ def response_from_parsed_dat(parsed, mesh, boundaries, input_deck, solver_output
         "kind": "calculix_fea",
             "solver": "calculix-ccx",
             "solverVersion": command_version(["ccx", "-v"]),
-            "meshSource": "structured_block",
+            "meshSource": mesh.get("source", "structured_block"),
             "resultSource": parsed_dat["resultSource"],
             "units": "mm-N-s-MPa"
         }
@@ -561,22 +914,49 @@ def artifacts_for_failure(input_deck, solver_output, parser_status, mesh, bounda
     }
 
 
-def mesh_summary(mesh, boundaries):
+def uploaded_geometry_failure_artifacts(parsed, parser_status, input_deck, solver_output):
+    geometry = parsed.get("geometry") or {}
     return {
+        "inputDeck": input_deck,
+        "solverLog": solver_output["log"],
+        "solverResultFiles": [],
+        "solverResultParser": parser_status,
+        "meshSummary": {
+            "nodes": 0,
+            "elements": 0,
+            "source": "gmsh_uploaded_geometry",
+            "units": "mm-N-s-MPa",
+            "boundaryFacets": 0
+        },
+        "geometry": {
+            "filename": geometry.get("filename"),
+            "format": geometry.get("format")
+        }
+    }
+
+
+def mesh_summary(mesh, boundaries):
+    summary = {
         "nodes": len(mesh["nodes"]),
         "elements": len(mesh["elements"]),
-        "source": "structured_block",
+        "source": mesh.get("source", "structured_block"),
         "units": "mm-N-s-MPa",
-        "density": mesh["density"],
+        "density": mesh.get("density", {}),
         "fixed": {
-            "plane": boundaries["fixedPlane"],
+            "plane": boundaries.get("fixedPlane"),
             "nodeCount": len(boundaries["fixedNodeIds"])
         },
         "load": {
-            "plane": boundaries["loadPlane"],
+            "plane": boundaries.get("loadPlane"),
             "nodeCount": len(boundaries["loadNodeIds"])
         }
     }
+    if mesh.get("boundaryFacets") is not None:
+        summary["boundaryFacets"] = len(mesh["boundaryFacets"])
+        summary["elementType"] = mesh.get("elementType")
+        summary["fixed"]["facetCount"] = len(boundaries.get("fixedFacetIds", []))
+        summary["load"]["facetCount"] = len(boundaries.get("loadFacetIds", []))
+    return summary
 
 
 def boundary_diagnostic(diagnostic_id, label, plane, node_count, total_force=None):
@@ -586,6 +966,18 @@ def boundary_diagnostic(diagnostic_id, label, plane, node_count, total_force=Non
         "severity": "info",
         "source": "solver",
         "message": f'{label} resolved to {plane["axis"]}-{plane["side"]} block plane with {node_count} nodes{force_text}.',
+        "suggestedActions": []
+    }
+
+
+def uploaded_boundary_diagnostic(diagnostic_id, label, mapping, node_count, total_force=None):
+    force_text = f", total force {format_vector(total_force)} N" if total_force else ""
+    face = mapping["face"]
+    return {
+        "id": diagnostic_id,
+        "severity": "info",
+        "source": "mesh",
+        "message": f'{label} mapped uploaded face {face.get("id", "unknown")} to {len(mapping["facets"])} mesh boundary facets and {node_count} nodes{force_text}.',
         "suggestedActions": []
     }
 
@@ -644,10 +1036,10 @@ def first_record(value):
 
 def unit_vector(value):
     if not is_vec3(value):
-        raise UserFacingSolveError("Structured block force load requires a finite 3D direction vector.", 422)
+        raise UserFacingSolveError("Cloud FEA force load requires a finite 3D direction vector.", 422)
     magnitude = vector_length(value)
     if magnitude <= 1e-12:
-        raise UserFacingSolveError("Structured block force load direction cannot be zero.", 422)
+        raise UserFacingSolveError("Cloud FEA force load direction cannot be zero.", 422)
     return [component / magnitude for component in value]
 
 
@@ -657,6 +1049,45 @@ def is_vec3(value):
 
 def vector_length(vector):
     return math.sqrt(sum(component * component for component in vector))
+
+
+def normalize_vector(vector):
+    magnitude = vector_length(vector)
+    if magnitude <= 1e-12:
+        return [0.0, 0.0, 0.0]
+    return [component / magnitude for component in vector]
+
+
+def subtract(a, b):
+    return [a[index] - b[index] for index in range(3)]
+
+
+def dot(a, b):
+    return sum(a[index] * b[index] for index in range(3))
+
+
+def cross(a, b):
+    return [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0]
+    ]
+
+
+def dominant_axis(normal):
+    axis_index = max(range(3), key=lambda index: abs(normal[index]))
+    return AXES[axis_index]
+
+
+def mesh_spans(mesh):
+    nodes = mesh.get("nodes", [])
+    if not nodes:
+        return [1.0, 1.0, 1.0]
+    spans = []
+    for axis in range(3):
+        values = [node["coordinates"][axis] for node in nodes]
+        spans.append(max(values) - min(values))
+    return [span if span > 0 else 1.0 for span in spans]
 
 
 def is_positive_finite(value):
