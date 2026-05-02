@@ -12,11 +12,11 @@ import tempfile
 LENGTH_MM = 75.0
 WIDTH_MM = 5.0
 HEIGHT_MM = 15.0
-YIELD_STRESS_PA = 276_000_000.0
 BEAM_DEPTH_DISPLAY = 0.36
 CLOUD_FEA_ADAPTER_DIAGNOSTIC = "Cloud FEA adapter currently runs a hard-coded cantilever fallback and does not parse CalculiX output."
 GENERATED_FALLBACK_FLAG = "OPCAE_ALLOW_GENERATED_FEA_FALLBACK"
 UNPARSED_RESULTS_ERROR = "CalculiX output was not parsed into real result fields; refusing to publish generated fallback results."
+INVALID_SOLVER_MATERIAL_ERROR = "Cloud FEA requires a valid solverMaterial with positive finite CalculiX material properties."
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -65,12 +65,11 @@ def solve(payload):
     dynamic_settings = normalized_dynamic_settings(payload.get("dynamicSettings") or (payload.get("study") or {}).get("solverSettings") or {})
     load_n = load_value_n(payload)
     material = material_properties(payload)
-    density_tonne_per_mm3 = material["densityKgM3"] * 1e-12
 
     with tempfile.TemporaryDirectory(prefix=f"{run_id}-") as tmp:
         workdir = Path(tmp)
         validate_or_stage_geometry(payload.get("geometry"), workdir)
-        input_deck = generate_input_deck(load_n, material, density_tonne_per_mm3, dynamic_settings, dynamic)
+        input_deck = generate_input_deck(load_n, material, dynamic_settings, dynamic)
         deck_path = workdir / "opencae_solve.inp"
         deck_path.write_text(input_deck)
         solver_output = run_ccx_if_available(workdir, deck_path)
@@ -113,6 +112,7 @@ def generated_fallback_response(run_id, load_n, material, dynamic_settings, dyna
         "solverLog": solver_output["log"] + "\ncloud-fea-generated-fallback\n" + CLOUD_FEA_ADAPTER_DIAGNOSTIC,
         "solverResultFiles": parsed_solver_results["files"],
         "solverResultParser": parsed_solver_results["status"],
+        "solverMaterial": material,
         "meshSummary": {"nodes": 8, "elements": 1, "source": "generated-cantilever-solid", "units": "mm-N-s-MPa"}
     }
     return response
@@ -149,7 +149,7 @@ def looks_like_closed_surface(text):
     return False
 
 
-def generate_input_deck(load_n, material, density_tonne_per_mm3, settings, dynamic):
+def generate_input_deck(load_n, material, settings, dynamic):
     amplitude = amplitude_table(settings)
     step = "*DYNAMIC, DIRECT\n{time_step:.6g}, {duration:.6g}\n".format(
         time_step=settings["timeStep"],
@@ -157,7 +157,7 @@ def generate_input_deck(load_n, material, density_tonne_per_mm3, settings, dynam
     ) if dynamic else "*STATIC\n"
     return f"""*HEADING
 OpenCAE Cloud FEA CalculiX cantilever adapter
-** Units: mm, N, s, MPa. Density converted from kg/m^3 to tonne/mm^3.
+** Units: mm, N, s, MPa. Density units: tonne/mm^3.
 *NODE
 1, 0, 0, 0
 2, {LENGTH_MM}, 0, 0
@@ -179,7 +179,7 @@ OpenCAE Cloud FEA CalculiX cantilever adapter
 *ELASTIC
 {material["youngsModulusMpa"]:.6g}, {material["poissonRatio"]:.6g}
 *DENSITY
-{density_tonne_per_mm3:.12g}
+{material["densityTonnePerMm3"]:.12g}
 *SOLID SECTION, ELSET=SOLID, MATERIAL=OPENCAE_MATERIAL
 *AMPLITUDE, NAME=LOAD_HISTORY, TIME=TOTAL TIME
 {amplitude}
@@ -237,42 +237,43 @@ def parse_calculix_result_files(workdir, run_id):
 
 def generated_result_fields(run_id, load_n, material, settings, dynamic):
     frames = frame_times(settings) if dynamic else [settings["endTime"]]
-    peak_displacement_m = beam_tip_displacement_m(load_n, material)
-    peak_stress_pa = beam_peak_stress_pa(load_n)
+    peak_displacement_mm = beam_tip_displacement_mm(load_n, material)
+    peak_stress_mpa = beam_peak_stress_mpa(load_n)
+    yield_mpa = material["yieldMpa"]
     stress_min = 0.0
-    stress_max = peak_stress_pa
-    displacement_max = peak_displacement_m
+    stress_max = peak_stress_mpa
+    displacement_max = peak_displacement_mm
     duration = max(settings["endTime"] - settings["startTime"], settings["timeStep"])
-    velocity_bound = peak_displacement_m * math.pi / duration if dynamic else peak_displacement_m
-    acceleration_bound = peak_displacement_m * (math.pi / duration) ** 2 if dynamic else peak_displacement_m
+    velocity_bound = peak_displacement_mm * math.pi / duration if dynamic else peak_displacement_mm
+    acceleration_bound = peak_displacement_mm * (math.pi / duration) ** 2 if dynamic else peak_displacement_mm
     fields = []
     for index, time_value in enumerate(frames):
         response = dynamic_response_factor(time_value, settings) if dynamic else 1.0
-        displacement = peak_displacement_m * response
-        stress = peak_stress_pa * abs(response)
-        velocity = peak_displacement_m * dynamic_velocity_factor(time_value, settings) if dynamic else 0.0
-        acceleration = peak_displacement_m * dynamic_acceleration_factor(time_value, settings) if dynamic else 0.0
+        displacement = peak_displacement_mm * response
+        stress = peak_stress_mpa * abs(response)
+        velocity = peak_displacement_mm * dynamic_velocity_factor(time_value, settings) if dynamic else 0.0
+        acceleration = peak_displacement_mm * dynamic_acceleration_factor(time_value, settings) if dynamic else 0.0
         frame = {"frameIndex": index, "timeSeconds": time_value} if dynamic else {}
         fields.extend([
-            result_field(run_id, "stress", "Pa", stress, stress_min, stress_max, index, time_value, frame, stress),
-            result_field(run_id, "displacement", "m", displacement, 0.0, displacement_max, index, time_value, frame),
-            result_field(run_id, "safety_factor", "", YIELD_STRESS_PA / max(stress, 1.0), 0.0, YIELD_STRESS_PA / max(peak_stress_pa, 1.0), index, time_value, frame)
+            result_field(run_id, "stress", "MPa", stress, stress_min, stress_max, index, time_value, frame, stress),
+            result_field(run_id, "displacement", "mm", displacement, 0.0, displacement_max, index, time_value, frame),
+            result_field(run_id, "safety_factor", "", yield_mpa / max(stress, 0.001), 0.0, yield_mpa / max(peak_stress_mpa, 0.001), index, time_value, frame)
         ])
         if dynamic:
             fields.extend([
-                result_field(run_id, "velocity", "m/s", velocity, -velocity_bound, velocity_bound, index, time_value, frame),
-                result_field(run_id, "acceleration", "m/s^2", acceleration, -acceleration_bound, acceleration_bound, index, time_value, frame)
+                result_field(run_id, "velocity", "mm/s", velocity, -velocity_bound, velocity_bound, index, time_value, frame),
+                result_field(run_id, "acceleration", "mm/s^2", acceleration, -acceleration_bound, acceleration_bound, index, time_value, frame)
             ])
     summary = {
-        "maxStress": peak_stress_pa,
-        "maxStressUnits": "Pa",
-        "maxDisplacement": peak_displacement_m,
-        "maxDisplacementUnits": "m",
-        "safetyFactor": YIELD_STRESS_PA / max(peak_stress_pa, 1.0),
+        "maxStress": peak_stress_mpa,
+        "maxStressUnits": "MPa",
+        "maxDisplacement": peak_displacement_mm,
+        "maxDisplacementUnits": "mm",
+        "safetyFactor": yield_mpa / max(peak_stress_mpa, 0.001),
         "reactionForce": load_n,
         "reactionForceUnits": "N",
         "failureAssessment": {
-            "status": "fail" if peak_stress_pa > YIELD_STRESS_PA else "pass",
+            "status": "fail" if peak_stress_mpa > yield_mpa else "pass",
             "title": "CalculiX transient solve",
             "message": "Cloud FEA dynamic results were generated by the CalculiX container adapter."
         }
@@ -288,7 +289,7 @@ def generated_result_fields(run_id, load_n, material, settings, dynamic):
             "dampingRatio": settings["dampingRatio"],
             "frameCount": len(frames),
             "peakDisplacementTimeSeconds": peak_displacement_time(frames, settings),
-            "peakDisplacement": peak_displacement_m
+            "peakDisplacement": peak_displacement_mm
         }
     return {"summary": summary, "fields": fields}
 
@@ -314,7 +315,7 @@ def result_field(run_id, field_type, units, value, min_value, max_value, index, 
             "source": "generated-cantilever-fallback"
         }
         if von_mises is not None:
-            sample["vonMisesStressPa"] = sample_value
+            sample["vonMisesStressPa"] = sample_value * 1_000_000.0
         if field_type == "displacement":
             sample["vector"] = vector
         samples.append(sample)
@@ -341,8 +342,8 @@ def display_node_points():
     ]
 
 
-def displacement_vector_for_sample(tip_displacement_m, travel):
-    magnitude = tip_displacement_m * travel * travel
+def displacement_vector_for_sample(tip_displacement_mm, travel):
+    magnitude = tip_displacement_mm * travel * travel
     return [0.0, -magnitude, 0.0]
 
 
@@ -415,24 +416,44 @@ def load_value_n(payload):
 
 
 def material_properties(payload):
-    return {"youngsModulusMpa": 68_900.0, "poissonRatio": 0.33, "densityKgM3": 2700.0}
+    solver_material = payload.get("solverMaterial")
+    if not isinstance(solver_material, dict):
+        raise UserFacingSolveError(INVALID_SOLVER_MATERIAL_ERROR, 422)
+    material = {
+        "id": str(solver_material.get("id") or "assigned-material"),
+        "name": str(solver_material.get("name") or "Assigned material"),
+        "category": str(solver_material.get("category") or "unknown"),
+        "youngsModulusMpa": required_positive_number(solver_material, "youngsModulusMpa"),
+        "poissonRatio": required_poisson_ratio(solver_material),
+        "densityTonnePerMm3": required_positive_number(solver_material, "densityTonnePerMm3"),
+        "yieldMpa": required_positive_number(solver_material, "yieldMpa")
+    }
+    return material
 
 
-def beam_tip_displacement_m(load_n, material):
-    youngs_modulus_pa = material["youngsModulusMpa"] * 1_000_000.0
-    width_m = WIDTH_MM / 1000.0
-    height_m = HEIGHT_MM / 1000.0
-    length_m = LENGTH_MM / 1000.0
-    inertia = width_m * height_m ** 3 / 12.0
-    return load_n * length_m ** 3 / max(3.0 * youngs_modulus_pa * inertia, 1e-12)
+def required_positive_number(record, key):
+    value = record.get(key)
+    if not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
+        raise UserFacingSolveError(INVALID_SOLVER_MATERIAL_ERROR, 422)
+    return float(value)
 
 
-def beam_peak_stress_pa(load_n):
-    width_m = WIDTH_MM / 1000.0
-    height_m = HEIGHT_MM / 1000.0
-    length_m = LENGTH_MM / 1000.0
-    inertia = width_m * height_m ** 3 / 12.0
-    return load_n * length_m * (height_m / 2.0) / max(inertia, 1e-12)
+def required_poisson_ratio(record):
+    value = record.get("poissonRatio")
+    if not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0 or value >= 0.5:
+        raise UserFacingSolveError(INVALID_SOLVER_MATERIAL_ERROR, 422)
+    return float(value)
+
+
+def beam_tip_displacement_mm(load_n, material):
+    youngs_modulus_mpa = material["youngsModulusMpa"]
+    inertia = WIDTH_MM * HEIGHT_MM ** 3 / 12.0
+    return load_n * LENGTH_MM ** 3 / max(3.0 * youngs_modulus_mpa * inertia, 1e-12)
+
+
+def beam_peak_stress_mpa(load_n):
+    inertia = WIDTH_MM * HEIGHT_MM ** 3 / 12.0
+    return load_n * LENGTH_MM * (HEIGHT_MM / 2.0) / max(inertia, 1e-12)
 
 
 def finite_number(value, fallback):

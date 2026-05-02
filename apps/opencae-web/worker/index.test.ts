@@ -87,7 +87,7 @@ describe("Cloudflare FEA worker orchestration", () => {
         projectId: "project-1",
         studyId: "study-1",
         fidelity: "ultra",
-        study: { id: "study-1", type: "dynamic_structural" },
+        study: cloudStudyWithMaterial("mat-aluminum-6061", {}, "dynamic_structural"),
         displayModel: { id: "display-1", faces: [] },
         geometry: { format: "stl", filename: "cantilever.stl", contentBase64: "c29saWQKZW5kc29saWQK" },
         dynamicSettings: { startTime: 0, endTime: 0.5, timeStep: 0.005, outputInterval: 0.005, dampingRatio: 0.02 }
@@ -107,11 +107,115 @@ describe("Cloudflare FEA worker orchestration", () => {
       solver: "calculix",
       analysisType: "dynamic_structural",
       study: { id: "study-1", type: "dynamic_structural" },
+      solverMaterial: {
+        id: "mat-aluminum-6061",
+        name: "Aluminum 6061",
+        category: "metal",
+        youngsModulusMpa: 68900,
+        poissonRatio: 0.33,
+        densityTonnePerMm3: 2.7e-9,
+        yieldMpa: 276,
+        original: {
+          youngsModulus: 68900000000,
+          densityKgM3: 2700,
+          yieldStrength: 276000000
+        }
+      },
       displayModel: { id: "display-1" },
       geometry: { format: "stl", filename: "cantilever.stl" },
       dynamicSettings: { endTime: 0.5, timeStep: 0.005 }
     });
     expect(send).toHaveBeenCalledWith({ runId: body.run.id });
+  });
+
+  test("stores PETG solver material in CalculiX units without print reductions when not printed", async () => {
+    const bucket = new MemoryR2Bucket();
+    const env = {
+      ASSETS: { fetch: vi.fn(async () => new Response("asset")) },
+      FEA_ARTIFACTS: bucket,
+      FEA_RUN_QUEUE: { send: vi.fn(async () => undefined) },
+      FEA_CONTAINER: { get: vi.fn() }
+    };
+
+    const response = await worker.fetch(new Request("https://cae.example/api/cloud-fea/runs", {
+      method: "POST",
+      body: JSON.stringify({
+        projectId: "project-1",
+        studyId: "study-1",
+        study: cloudStudyWithMaterial("mat-petg", { printed: false })
+      })
+    }), env);
+    const body = await response.json() as { run: { id: string } };
+    const stored = JSON.parse(await (await bucket.get(`runs/${body.run.id}/request.json`))!.text()) as { solverMaterial: Record<string, unknown> };
+
+    expect(response.status).toBe(202);
+    expect(stored.solverMaterial).toMatchObject({
+      id: "mat-petg",
+      name: "PETG",
+      category: "plastic",
+      youngsModulusMpa: 2100,
+      poissonRatio: 0.38,
+      densityTonnePerMm3: 1.27e-9,
+      yieldMpa: 50
+    });
+  });
+
+  test("stores printed PETG effective solver material from infill wall and layer settings", async () => {
+    const bucket = new MemoryR2Bucket();
+    const env = {
+      ASSETS: { fetch: vi.fn(async () => new Response("asset")) },
+      FEA_ARTIFACTS: bucket,
+      FEA_RUN_QUEUE: { send: vi.fn(async () => undefined) },
+      FEA_CONTAINER: { get: vi.fn() }
+    };
+
+    const strong = await worker.fetch(new Request("https://cae.example/api/cloud-fea/runs", {
+      method: "POST",
+      body: JSON.stringify({
+        projectId: "project-1",
+        studyId: "study-strong",
+        study: cloudStudyWithMaterial("mat-petg", { printed: true, infillDensity: 100, wallCount: 8, layerOrientation: "z" })
+      })
+    }), env);
+    const weak = await worker.fetch(new Request("https://cae.example/api/cloud-fea/runs", {
+      method: "POST",
+      body: JSON.stringify({
+        projectId: "project-1",
+        studyId: "study-weak",
+        study: cloudStudyWithMaterial("mat-petg", { printed: true, infillDensity: 20, wallCount: 1, layerOrientation: "x" })
+      })
+    }), env);
+    const strongBody = await strong.json() as { run: { id: string } };
+    const weakBody = await weak.json() as { run: { id: string } };
+    const strongMaterial = (JSON.parse(await (await bucket.get(`runs/${strongBody.run.id}/request.json`))!.text()) as { solverMaterial: Record<string, number> }).solverMaterial;
+    const weakMaterial = (JSON.parse(await (await bucket.get(`runs/${weakBody.run.id}/request.json`))!.text()) as { solverMaterial: Record<string, number> }).solverMaterial;
+
+    expect(weak.status).toBe(202);
+    expect(weakMaterial.youngsModulusMpa).toBeLessThan(strongMaterial.youngsModulusMpa);
+    expect(weakMaterial.yieldMpa).toBeLessThan(strongMaterial.yieldMpa);
+    expect(weakMaterial.densityTonnePerMm3).toBeLessThan(strongMaterial.densityTonnePerMm3);
+  });
+
+  test("rejects Cloud FEA requests without an assigned material", async () => {
+    const bucket = new MemoryR2Bucket();
+    const send = vi.fn(async () => undefined);
+    const env = {
+      ASSETS: { fetch: vi.fn(async () => new Response("asset")) },
+      FEA_ARTIFACTS: bucket,
+      FEA_RUN_QUEUE: { send },
+      FEA_CONTAINER: { get: vi.fn() }
+    };
+
+    const response = await worker.fetch(new Request("https://cae.example/api/cloud-fea/runs", {
+      method: "POST",
+      body: JSON.stringify({ projectId: "project-1", studyId: "study-1", study: { id: "study-1", type: "static_stress", materialAssignments: [] } })
+    }), env);
+    const body = await response.json() as { error: string };
+
+    expect(response.status).toBe(422);
+    expect(body.error).toContain("Cloud FEA requires an assigned material");
+    expect(send).not.toHaveBeenCalled();
+    expect(bucket.objects.size).toBe(0);
   });
 
   test("runs cloud FEA inline when queue binding is not provisioned", async () => {
@@ -126,7 +230,7 @@ describe("Cloudflare FEA worker orchestration", () => {
 
     const response = await worker.fetch(new Request("https://cae.example/api/cloud-fea/runs", {
       method: "POST",
-      body: JSON.stringify({ projectId: "project-1", studyId: "study-1", fidelity: "detailed" })
+      body: JSON.stringify({ projectId: "project-1", studyId: "study-1", fidelity: "detailed", study: cloudStudyWithMaterial("mat-aluminum-6061") })
     }), env);
     const body = await response.json() as { run: { id: string }; streamUrl: string };
     const events = JSON.parse(await (await bucket.get(`runs/${body.run.id}/events.json`))!.text()) as Array<{ type: string }>;
@@ -152,7 +256,7 @@ describe("Cloudflare FEA worker orchestration", () => {
 
     const response = await worker.fetch(new Request("https://cae.example/api/cloud-fea/runs", {
       method: "POST",
-      body: JSON.stringify({ projectId: "project-1", studyId: "study-1", fidelity: "ultra", study: { id: "study-1", type: "dynamic_structural" } })
+      body: JSON.stringify({ projectId: "project-1", studyId: "study-1", fidelity: "ultra", study: cloudStudyWithMaterial("mat-aluminum-6061", {}, "dynamic_structural") })
     }), env, ctx);
     const body = await response.json() as { run: { id: string } };
 
@@ -515,9 +619,10 @@ describe("Cloudflare FEA worker orchestration", () => {
   });
 
   test("container runner refuses unparsed CalculiX output by default", () => {
-    const staticResult = runContainerSolve({ runId: "run-static", geometry: { format: "stl", filename: "beam.stl", contentBase64: closedStlBase64() } });
+    const staticResult = runContainerSolve({ runId: "run-static", solverMaterial: aluminumSolverMaterial(), geometry: { format: "stl", filename: "beam.stl", contentBase64: closedStlBase64() } });
     const dynamicResult = runContainerSolve({
       runId: "run-dynamic",
+      solverMaterial: aluminumSolverMaterial(),
       analysisType: "dynamic_structural",
       dynamicSettings: { startTime: 0, endTime: 0.01, timeStep: 0.005, outputInterval: 0.005, dampingRatio: 0.02 },
       geometry: { format: "stl", filename: "beam.stl", contentBase64: closedStlBase64() }
@@ -530,7 +635,7 @@ describe("Cloudflare FEA worker orchestration", () => {
   });
 
   test("container runner rejects invalid open surface geometry", () => {
-    const result = runContainerSolve({ runId: "run-invalid", geometry: { format: "stl", filename: "open.stl", contentBase64: btoa("solid\nendsolid\n") } });
+    const result = runContainerSolve({ runId: "run-invalid", solverMaterial: aluminumSolverMaterial(), geometry: { format: "stl", filename: "open.stl", contentBase64: btoa("solid\nendsolid\n") } });
 
     expect(result.error).toContain("not watertight");
   });
@@ -697,6 +802,45 @@ function runContainerSolve(payload: Record<string, unknown>) {
     encoding: "utf8"
   });
   return JSON.parse(output);
+}
+
+function aluminumSolverMaterial() {
+  return {
+    id: "mat-aluminum-6061",
+    name: "Aluminum 6061",
+    category: "metal",
+    youngsModulusMpa: 68900,
+    poissonRatio: 0.33,
+    densityTonnePerMm3: 2.7e-9,
+    yieldMpa: 276
+  };
+}
+
+function cloudStudyWithMaterial(materialId: string, parameters: Record<string, unknown> = {}, type: "static_stress" | "dynamic_structural" = "static_stress") {
+  return {
+    id: "study-1",
+    projectId: "project-1",
+    name: "Cloud Study",
+    type,
+    geometryScope: [],
+    materialAssignments: [{
+      id: "assign-1",
+      materialId,
+      selectionRef: "selection-body",
+      parameters,
+      status: "complete"
+    }],
+    namedSelections: [],
+    contacts: [],
+    constraints: [],
+    loads: [],
+    meshSettings: { preset: "ultra", status: "complete" },
+    solverSettings: type === "dynamic_structural"
+      ? { startTime: 0, endTime: 0.5, timeStep: 0.005, outputInterval: 0.005, dampingRatio: 0.02, integrationMethod: "newmark_average_acceleration" }
+      : {},
+    validation: [],
+    runs: []
+  };
 }
 
 function closedStlBase64() {
