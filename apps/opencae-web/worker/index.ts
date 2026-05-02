@@ -33,6 +33,7 @@ const jsonHeaders = {
   "cache-control": "no-store"
 };
 const cloudFeaContainersDisabledMessage = "Cloud FEA containers are not enabled for this deployment. Deploy with pnpm deploy:cloudflare:containers using a Cloudflare token with Containers write access, or switch the study backend to Detailed local.";
+const cloudFeaQueueContainerMissingMessage = "Cloud FEA queue consumer does not have FEA_CONTAINER. Queue dispatch is disabled for Cloud FEA; rerun the simulation.";
 const generatedFallbackResultMessage = "Cloud FEA returned generated fallback data instead of parsed CalculiX results; refusing to publish fake solver results.";
 const invalidCloudFeaProvenanceMessage = "Cloud FEA result provenance must identify parsed CalculiX FEA results.";
 const missingCloudFeaMaterialMessage = "Cloud FEA requires an assigned material before a CalculiX run can be queued.";
@@ -102,6 +103,11 @@ export default {
     for (const message of batch.messages) {
       const runId = typeof (message.body as { runId?: unknown }).runId === "string" ? (message.body as { runId: string }).runId : undefined;
       if (!runId) {
+        message.ack();
+        continue;
+      }
+      if (!env.FEA_CONTAINER) {
+        await markCloudFeaRunFailed(runId, env, cloudFeaQueueContainerMissingMessage);
         message.ack();
         continue;
       }
@@ -180,8 +186,9 @@ async function createCloudFeaRun(request: Request, env: RuntimeEnv, ctx?: Execut
     dynamicSettings: isRecord(body.dynamicSettings) ? body.dynamicSettings : undefined,
     createdAt: now
   };
-  const queuedMessage = cloudFeaQueueMessage(requestArtifact, solverMaterial, {
-    queueEnabled: Boolean(env.FEA_RUN_QUEUE),
+  const dispatchMode = ctx ? "waitUntil" : "inline";
+  const queuedMessage = cloudFeaDispatchMessage(requestArtifact, solverMaterial, {
+    dispatchMode,
     containerBound: Boolean(env.FEA_CONTAINER)
   });
   const queuedEvents = [
@@ -190,9 +197,7 @@ async function createCloudFeaRun(request: Request, env: RuntimeEnv, ctx?: Execut
   ];
   await env.FEA_ARTIFACTS.put(`runs/${runId}/request.json`, JSON.stringify(requestArtifact, null, 2));
   await env.FEA_ARTIFACTS.put(`runs/${runId}/events.json`, JSON.stringify(queuedEvents, null, 2));
-  if (env.FEA_RUN_QUEUE) {
-    await env.FEA_RUN_QUEUE.send({ runId });
-  } else if (ctx) {
+  if (ctx) {
     ctx.waitUntil(runCloudFeaSolve(runId, env));
   } else {
     await runCloudFeaSolve(runId, env);
@@ -277,6 +282,27 @@ async function runCloudFeaSolve(runId: string, env: RuntimeEnv): Promise<void> {
     ], null, 2));
     await artifacts.put(`runs/${runId}/failed.json`, JSON.stringify({ runId, error: message, timestamp: new Date().toISOString() }, null, 2));
   }
+}
+
+async function markCloudFeaRunFailed(runId: string, env: RuntimeEnv, message: string): Promise<void> {
+  const artifacts = env.FEA_ARTIFACTS;
+  if (!artifacts) return;
+  const timestamp = new Date().toISOString();
+  const event = {
+    runId,
+    type: "error",
+    progress: 100,
+    message,
+    timestamp
+  };
+  const existing = await artifacts.get(`runs/${runId}/events.json`);
+  const events = existing ? JSON.parse(await existing.text()) as unknown[] : [];
+  await artifacts.put(`runs/${runId}/events.json`, JSON.stringify([...events, event], null, 2));
+  await artifacts.put(`runs/${runId}/failed.json`, JSON.stringify({
+    runId,
+    error: message,
+    timestamp
+  }, null, 2));
 }
 
 async function callFeaContainer(env: RuntimeEnv, payload: Record<string, unknown>): Promise<Response> {
@@ -522,17 +548,19 @@ function logWorkerEvent(event: string, details: Record<string, unknown> = {}): v
   console.log(JSON.stringify({ event, service: "opencae-web-worker", ...details }));
 }
 
-function cloudFeaQueueMessage(
+type CloudFeaDispatchMode = "waitUntil" | "inline" | "queue";
+
+function cloudFeaDispatchMessage(
   requestArtifact: Record<string, unknown>,
   solverMaterial: SolverMaterialPayload,
-  bindings: { queueEnabled: boolean; containerBound: boolean }
+  bindings: { dispatchMode: CloudFeaDispatchMode; containerBound: boolean }
 ): string {
   return `Cloud FEA run queued: ${[
     `analysis=${analysisTypeFromRequest(requestArtifact)}`,
     `fidelity=${typeof requestArtifact.fidelity === "string" ? requestArtifact.fidelity : "standard"}`,
     `material=${solverMaterial.name} (${solverMaterial.id})`,
     `geometry=${geometrySourceLabel(requestArtifact)}`,
-    `queue=${bindings.queueEnabled ? "enabled" : "inline"}`,
+    `dispatch=${bindings.dispatchMode}`,
     `container=${bindings.containerBound ? "bound" : "missing"}`
   ].join("; ")}.`;
 }

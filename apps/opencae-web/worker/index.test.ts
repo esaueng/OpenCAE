@@ -145,15 +145,28 @@ describe("Cloudflare FEA worker orchestration", () => {
     expect(body.deploymentHint).toBeUndefined();
   });
 
-  test("queues cloud FEA runs and stores run artifacts in R2", async () => {
+  test("dispatches cloud FEA runs with waitUntil even when queue binding exists", async () => {
     const bucket = new MemoryR2Bucket();
+    const originalGet = bucket.get.bind(bucket);
+    let blockBackgroundRequestRead = true;
+    bucket.get = vi.fn(async (key: string) => {
+      if (blockBackgroundRequestRead && key.endsWith("/request.json")) {
+        blockBackgroundRequestRead = false;
+        return await new Promise<null>(() => undefined);
+      }
+      return originalGet(key);
+    });
     const send = vi.fn(async () => undefined);
+    const pending: Array<Promise<unknown>> = [];
     const env = {
       ASSETS: { fetch: vi.fn(async () => new Response("asset")) },
       FEA_ARTIFACTS: bucket,
       FEA_RUN_QUEUE: { send },
-      FEA_CONTAINER: { get: vi.fn() }
+      FEA_CONTAINER: {
+        fetch: vi.fn(async () => Response.json(cloudContainerSolveResponse("run-waituntil-queued-binding", true)))
+      }
     };
+    const ctx = { waitUntil: vi.fn((promise: Promise<unknown>) => pending.push(promise)) };
 
     const response = await worker.fetch(new Request("https://cae.example/api/cloud-fea/runs", {
       method: "POST",
@@ -166,7 +179,7 @@ describe("Cloudflare FEA worker orchestration", () => {
         geometry: { format: "stl", filename: "cantilever.stl", contentBase64: "c29saWQKZW5kc29saWQK" },
         dynamicSettings: { startTime: 0, endTime: 0.5, timeStep: 0.005, outputInterval: 0.005, dampingRatio: 0.02 }
       })
-    }), env);
+    }), env, ctx);
     const body = await response.json() as { run: { id: string; status: string; solverBackend: string }; streamUrl: string };
     const stored = JSON.parse(await (await bucket.get(`runs/${body.run.id}/request.json`))!.text()) as Record<string, unknown>;
     const events = JSON.parse(await (await bucket.get(`runs/${body.run.id}/events.json`))!.text()) as Array<{ message: string }>;
@@ -204,9 +217,12 @@ describe("Cloudflare FEA worker orchestration", () => {
     expect(events[0]?.message).toContain("fidelity=ultra");
     expect(events[0]?.message).toContain("material=Aluminum 6061 (mat-aluminum-6061)");
     expect(events[0]?.message).toContain("geometry=uploaded:stl:cantilever.stl");
-    expect(events[0]?.message).toContain("queue=enabled");
+    expect(events[0]?.message).toContain("dispatch=waitUntil");
+    expect(events[0]?.message).not.toContain("queue=enabled");
     expect(events[0]?.message).toContain("container=bound");
-    expect(send).toHaveBeenCalledWith({ runId: body.run.id });
+    expect(send).not.toHaveBeenCalled();
+    expect(ctx.waitUntil).toHaveBeenCalledOnce();
+    expect(pending).toHaveLength(1);
   });
 
   test("stores PETG solver material in CalculiX units without print reductions when not printed", async () => {
@@ -545,7 +561,13 @@ describe("Cloudflare FEA worker orchestration", () => {
     const events = JSON.parse(await (await bucket.get("runs/run-cloud-no-container/events.json"))!.text()) as Array<{ type: string; message: string }>;
 
     expect(message.ack).toHaveBeenCalled();
-    expect(events.at(-1)).toMatchObject({ type: "error", message: "Cloud FEA container binding is not configured." });
+    expect(events.at(-1)).toMatchObject({
+      type: "error",
+      message: "Cloud FEA queue consumer does not have FEA_CONTAINER. Queue dispatch is disabled for Cloud FEA; rerun the simulation."
+    });
+    expect(JSON.parse(await (await bucket.get("runs/run-cloud-no-container/failed.json"))!.text()) as { error: string }).toMatchObject({
+      error: "Cloud FEA queue consumer does not have FEA_CONTAINER. Queue dispatch is disabled for Cloud FEA; rerun the simulation."
+    });
     expect(await bucket.get("runs/run-cloud-no-container/results.json")).toBeNull();
   });
 
