@@ -34,21 +34,9 @@ function cssRule(selector: string) {
 }
 
 describe("app CSS", () => {
-  test("lightens the reset view button in light mode", () => {
-    expect(css).toMatch(/\.theme-light\s+\.viewer-reset\s*\{[\s\S]*?background:\s*rgba\(255,\s*255,\s*255,\s*0\.9\)/);
-    expect(css).toMatch(/\.theme-light\s+\.viewer-reset\s*\{[\s\S]*?border-color:\s*rgba\(82,\s*103,\s*130,\s*0\.24\)/);
-  });
-
-  test("anchors the reset view button close to the viewer bottom-right corner", () => {
-    const viewerHud = cssRule(".viewer-hud");
-
-    const inset = viewerHud.match(/inset:\s*auto\s+(?<right>\d+)px\s+(?<bottom>\d+)px\s+auto/);
-    const right = Number(inset?.groups?.right);
-    const bottom = Number(inset?.groups?.bottom);
-
-    expect(right).toBe(6);
-    expect(bottom).toBe(6);
-    expect(right).toBe(bottom);
+  test("does not ship the removed viewer reset HUD button styles", () => {
+    expect(css).not.toContain(".viewer-hud");
+    expect(css).not.toContain(".viewer-reset");
   });
 
   test("lightens the analysis legend in light mode", () => {

@@ -5,7 +5,6 @@ import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import type { ThreeEvent } from "@react-three/fiber";
 import type { DisplayFace, DisplayModel, MeshSummary, ResultField } from "@opencae/schema";
 import { meshVolumeM3FromTriangles, type Triangle } from "@opencae/units";
-import { House } from "lucide-react";
 import * as THREE from "three";
 import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
 import type { StepId } from "./StepBar";
@@ -89,7 +88,6 @@ interface CadViewerProps {
   loadMarkers: ViewerLoadMarker[];
   supportMarkers: ViewerSupportMarker[];
   printLayerOrientation: PrintLayerOrientation | null;
-  onResetView: () => void;
   onMeasureDisplayModelDimensions?: (dimensions: NonNullable<DisplayModel["dimensions"]>) => void;
   onViewerInteractionChange?: (interacting: boolean) => void;
 }
@@ -267,12 +265,6 @@ export function CadViewer(props: CadViewerProps) {
         </GizmoHelper>
         {viewerStatsEnabled && <ViewerRendererStatsProbe />}
       </Canvas>
-      <div className="viewer-hud">
-        <button className="viewer-reset" type="button" onClick={props.onResetView} title="Reset view" aria-label="Reset view">
-          <House size={14} aria-hidden="true" />
-          <span className="visually-hidden">Reset view</span>
-        </button>
-      </div>
       <a className="viewer-watermark" href={VIEWER_CREDIT_URL} target="_blank" rel="noreferrer">Built by Esau Engineering</a>
       {effectiveViewMode === "results" && <ResultLegend resultMode={props.resultMode} resultFields={resultFields} unitSystem={props.unitSystem} meshSummary={props.meshSummary} />}
     </section>
