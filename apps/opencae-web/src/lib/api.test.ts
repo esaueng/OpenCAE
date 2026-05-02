@@ -489,6 +489,26 @@ describe("api", () => {
     await expect(runSimulation("study-1", cloudStudy)).rejects.toThrow("Cloud FEA containers are not enabled for this deployment.");
   });
 
+  test("explains when the local dev API does not expose Cloud FEA endpoints", async () => {
+    const cloudStudy = {
+      ...study,
+      materialAssignments: [{ id: "assign-1", materialId: "mat-aluminum-6061", selectionRef: "selection-body-1", status: "complete" }],
+      constraints: [{ id: "constraint-1", type: "fixed", selectionRef: "selection-face-1", parameters: {}, status: "complete" }],
+      loads: [{ id: "load-1", type: "force", selectionRef: "selection-face-1", parameters: { value: 500, units: "N", direction: [0, -1, 0] }, status: "complete" }],
+      meshSettings: { preset: "ultra", status: "complete", meshRef: "project-1/mesh/mesh-summary.json" },
+      solverSettings: { backend: "cloudflare_fea", fidelity: "ultra" }
+    } as Study;
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      error: "Not Found",
+      message: "Route POST:/api/cloud-fea/runs not found"
+    }), {
+      status: 404,
+      headers: { "content-type": "application/json" }
+    })));
+
+    await expect(runSimulation("study-1", cloudStudy)).rejects.toThrow("Cloud FEA endpoint is unavailable");
+  });
+
   test("sends dynamic Cloud FEA studies through cloud orchestration endpoints", async () => {
     const dynamicStudy = {
       ...study,
