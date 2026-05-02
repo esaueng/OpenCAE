@@ -2,9 +2,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, test } from "vitest";
-import { BottomPanel, KeyboardShortcutGuide, WORKSPACE_SHORTCUT_GUIDE } from "./BottomPanel";
+import { BottomPanel, KeyboardShortcutGuide, WORKSPACE_SHORTCUT_GUIDE, resolveLogClearIntent } from "./BottomPanel";
 
 const bottomPanelSource = readFileSync(resolve(__dirname, "BottomPanel.tsx"), "utf8");
+const workspaceSource = readFileSync(resolve(__dirname, "../WorkspaceApp.tsx"), "utf8");
 
 describe("BottomPanel", () => {
   test("keeps the GitHub link in the bottom status area", () => {
@@ -17,6 +18,7 @@ describe("BottomPanel", () => {
         meshStatus="Ready"
         solverStatus="Complete"
         backendStatus="local"
+        onClearLogs={() => undefined}
       />
     );
 
@@ -46,6 +48,7 @@ describe("BottomPanel", () => {
         meshStatus="Ready"
         solverStatus="Idle"
         backendStatus="cloud"
+        onClearLogs={() => undefined}
       />
     );
 
@@ -63,6 +66,7 @@ describe("BottomPanel", () => {
         meshStatus="Ready"
         solverStatus="Idle"
         backendStatus="cloud"
+        onClearLogs={() => undefined}
       />
     );
 
@@ -74,6 +78,22 @@ describe("BottomPanel", () => {
     expect(bottomPanelSource).toContain('className="log-copy-button"');
     expect(bottomPanelSource).toContain("Copy logs");
     expect(bottomPanelSource).toContain("navigator.clipboard.writeText");
+  });
+
+  test("requires two clicks before clearing run logs", () => {
+    expect(resolveLogClearIntent(0, false)).toBe("confirm");
+    expect(resolveLogClearIntent(1, false)).toBe("confirm");
+    expect(resolveLogClearIntent(2, false)).toBe("clear");
+    expect(resolveLogClearIntent(0, true)).toBe("clear");
+    expect(resolveLogClearIntent(1, true)).toBe("clear");
+  });
+
+  test("defines a double-click clear logs control wired to workspace logs", () => {
+    expect(bottomPanelSource).toContain('className="log-clear-button"');
+    expect(bottomPanelSource).toContain("Clear logs");
+    expect(bottomPanelSource).toContain("Double-click to clear");
+    expect(bottomPanelSource).toContain("onClearLogs");
+    expect(workspaceSource).toContain("onClearLogs={clearLogs}");
   });
 
   test("defines the active workspace shortcuts shown in the tips drawer", () => {

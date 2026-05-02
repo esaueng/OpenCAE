@@ -712,6 +712,10 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     setLogs((current) => [message, ...current].slice(0, WORKSPACE_LOG_LIMIT));
   }
 
+  function clearLogs() {
+    setLogs([]);
+  }
+
   async function updateStudy(action: Promise<{ study: Study; message: string }>, nextStep?: StepId) {
     const response = await action;
     if (project) {
@@ -1116,7 +1120,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           onCreateStatic={handleCreateStaticSimulation}
           onCreateDynamic={handleCreateDynamicSimulation}
         />
-        <BottomPanel status={status} logs={logs} projectName={project.name} studyName="No simulation" meshStatus="Not generated" solverStatus="Idle" backendStatus="local" />
+        <BottomPanel status={status} logs={logs} projectName={project.name} studyName="No simulation" meshStatus="Not generated" solverStatus="Idle" backendStatus="local" onClearLogs={clearLogs} />
       </div>
     );
   }
@@ -1299,6 +1303,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         meshStatus={study?.meshSettings.status === "complete" ? "Ready" : "Not generated"}
         solverStatus={solverRunning ? "Running" : runProgress >= 100 ? "Complete" : "Idle"}
         backendStatus={(study.solverSettings as { backend?: unknown }).backend === "cloudflare_fea" ? "cloud" : "local"}
+        onClearLogs={clearLogs}
       />
     </div>
   );
