@@ -2867,14 +2867,14 @@ button:disabled {
 
 .shortcut-list {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 6px 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px 18px;
 }
 
 .shortcut-item {
   display: grid;
-  grid-template-columns: minmax(120px, auto) minmax(0, 1fr);
-  gap: 10px;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
   align-items: center;
   min-width: 0;
   font-size: var(--fs-xs);
@@ -3017,6 +3017,10 @@ button:disabled {
     right: 0;
     left: var(--stepbar-w);
   }
+
+  .shortcut-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 640px) {
@@ -3064,6 +3068,10 @@ button:disabled {
 
   .bottom-content {
     left: var(--stepbar-w);
+  }
+
+  .shortcut-list {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .mock-backend,

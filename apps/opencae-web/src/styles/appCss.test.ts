@@ -79,6 +79,7 @@ describe("app CSS", () => {
     const workflowNavButton = cssRule(".workflow-nav button");
     const workflowNavKbd = cssRule(".workflow-nav kbd");
     const shortcutGuide = cssRule(".shortcut-guide");
+    const shortcutList = cssRule(".shortcut-list");
     const shortcutItem = cssRule(".shortcut-item");
     const shortcutKey = cssRule(".shortcut-key");
 
@@ -87,7 +88,8 @@ describe("app CSS", () => {
     expect(workflowNavKbd).toMatch(/font-family:\s*var\(--font-mono\)/);
     expect(workflowNavKbd).toMatch(/border:\s*var\(--border-thin\)/);
     expect(shortcutGuide).toMatch(/border:\s*var\(--border-thin\)/);
-    expect(shortcutItem).toMatch(/grid-template-columns:\s*minmax\(120px,\s*auto\)\s+minmax\(0,\s*1fr\)/);
+    expect(shortcutList).toMatch(/grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/);
+    expect(shortcutItem).toMatch(/grid-template-columns:\s*auto\s+minmax\(0,\s*1fr\)/);
     expect(shortcutKey).toMatch(/font-family:\s*var\(--font-mono\)/);
   });
 

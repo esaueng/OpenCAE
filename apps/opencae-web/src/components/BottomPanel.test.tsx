@@ -25,8 +25,8 @@ describe("BottomPanel", () => {
     expect(html).toContain(">github</a>");
     expect(html.indexOf("Results ready")).toBeLessThan(html.indexOf("local"));
     expect(html.indexOf("local")).toBeLessThan(html.indexOf("<b>project</b>"));
-    expect(html.indexOf(">feedback</a>")).toBeGreaterThan(html.indexOf("<b>solver</b>"));
-    expect(html.indexOf(">feedback</a>")).toBeLessThan(html.indexOf("Buy me a coffee</a>"));
+    expect(html.indexOf("Buy me a coffee</a>")).toBeGreaterThan(html.indexOf("<b>solver</b>"));
+    expect(html.indexOf("Buy me a coffee</a>")).toBeLessThan(html.indexOf(">feedback</a>"));
     expect(html.indexOf("Buy me a coffee</a>")).toBeLessThan(html.indexOf(">github</a>"));
     expect(html.indexOf(">github</a>")).toBeGreaterThan(html.indexOf("<b>solver</b>"));
   });
