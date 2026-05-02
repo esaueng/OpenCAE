@@ -127,7 +127,10 @@ function cloudFeaHealth(request: Request, env: RuntimeEnv): Response {
       containerBound,
       containersEnabled: containerBound,
       cloudFeaAvailable: containerBound,
-      ...(containerBound ? {} : { requiredDeployConfig: "wrangler.containers.jsonc" })
+      ...(containerBound ? {} : {
+        requiredDeployConfig: "wrangler.containers.jsonc",
+        deploymentHint: "The current Worker version has no FEA_CONTAINER binding. This usually means the app was deployed with wrangler.jsonc instead of wrangler.containers.jsonc, or Cloudflare Builds is still running plain wrangler deploy."
+      })
     },
     { headers: jsonHeaders }
   );

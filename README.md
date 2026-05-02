@@ -52,11 +52,14 @@ The production Cloudflare target for `cae.esau.app` serves the Vite web app from
 
 ```bash
 pnpm install
-pnpm deploy:cloudflare:dry-run
 pnpm deploy:cloudflare
 ```
 
 Wrangler uses [wrangler.containers.jsonc](wrangler.containers.jsonc) for the production app domain. Cloud FEA browser calls stay on the app domain at `/api/cloud-fea/*`; the Worker reaches the container through the `FEA_CONTAINER` binding.
+
+Do not use plain `npx wrangler deploy` for production. Plain Wrangler deploys with [wrangler.jsonc](wrangler.jsonc), which targets the static/non-container `opencae-static` Worker and intentionally has no `FEA_CONTAINER` binding.
+
+After production deploy, `https://cae.esau.app/api/cloud-fea/health` must report `containerBound=true`.
 
 Container application rollouts require a token with Cloudflare Containers write access. The explicit container scripts are kept as aliases for the default production deploy path:
 
@@ -74,7 +77,7 @@ pnpm deploy:cloudflare:static:dry-run
 pnpm deploy:cloudflare:static
 ```
 
-That static path uses [wrangler.jsonc](wrangler.jsonc), which intentionally omits the `containers` section and the `FEA_CONTAINER` Durable Object binding. A deployment made with this config disables Cloud FEA and should use the Detailed local backend.
+That static path uses [wrangler.jsonc](wrangler.jsonc), which targets `opencae-static` and intentionally omits the `containers` section, the production custom domain route, and the `FEA_CONTAINER` Durable Object binding. It must not be attached to `cae.esau.app`; static deployments should use the Detailed local backend.
 
 For a local-first/static Worker deploy without Cloud FEA containers, use:
 
@@ -85,10 +88,17 @@ pnpm deploy:cloudflare:local-first
 
 That explicit local-first path uses [wrangler.local-first.jsonc](wrangler.local-first.jsonc).
 
-For Cloudflare Builds, set:
+For Cloudflare Builds, the deploy command must be one of:
 
-- Build command: `pnpm build:cloudflare`
-- Deploy command: `npx wrangler deploy --config wrangler.containers.jsonc`
+```bash
+pnpm deploy:cloudflare
+```
+
+or:
+
+```bash
+pnpm build:cloudflare && npx wrangler deploy --config wrangler.containers.jsonc
+```
 
 ## Workspace Layout
 

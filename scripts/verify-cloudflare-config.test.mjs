@@ -1,0 +1,55 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { describe, expect, test } from "vitest";
+import { parseJsonc, validateCloudflareConfigs } from "./verify-cloudflare-config.mjs";
+
+const rootDir = resolve(import.meta.dirname, "..");
+
+function readConfig(path) {
+  return parseJsonc(readFileSync(resolve(rootDir, path), "utf8"), path);
+}
+
+function clone(value) {
+  return structuredClone(value);
+}
+
+describe("Cloudflare deployment config guard", () => {
+  test("passes with the corrected production and static configs", () => {
+    const containersConfig = readConfig("wrangler.containers.jsonc");
+    const staticConfig = readConfig("wrangler.jsonc");
+
+    expect(() => validateCloudflareConfigs({ containersConfig, staticConfig })).not.toThrow();
+  });
+
+  test("fails when static and production configs share a Worker name", () => {
+    const containersConfig = readConfig("wrangler.containers.jsonc");
+    const staticConfig = clone(readConfig("wrangler.jsonc"));
+    staticConfig.name = containersConfig.name;
+
+    expect(() => validateCloudflareConfigs({ containersConfig, staticConfig })).toThrow(
+      /static config must not share the production Worker name/
+    );
+  });
+
+  test("fails when the production config loses FEA_CONTAINER", () => {
+    const containersConfig = clone(readConfig("wrangler.containers.jsonc"));
+    const staticConfig = readConfig("wrangler.jsonc");
+    containersConfig.durable_objects.bindings = containersConfig.durable_objects.bindings.filter(
+      (binding) => binding.name !== "FEA_CONTAINER"
+    );
+
+    expect(() => validateCloudflareConfigs({ containersConfig, staticConfig })).toThrow(
+      /production config must bind durable object FEA_CONTAINER/
+    );
+  });
+
+  test("fails when the production config loses cae.esau.app", () => {
+    const containersConfig = clone(readConfig("wrangler.containers.jsonc"));
+    const staticConfig = readConfig("wrangler.jsonc");
+    containersConfig.routes = containersConfig.routes.filter((route) => route.pattern !== "cae.esau.app");
+
+    expect(() => validateCloudflareConfigs({ containersConfig, staticConfig })).toThrow(
+      /production config must route cae\.esau\.app as a custom domain/
+    );
+  });
+});
