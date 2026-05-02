@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test, vi } from "vitest";
 import type { DisplayModel, Project, ResultSummary, Study } from "@opencae/schema";
-import { editableNumberCommitValue, RightPanel, rangeProgressPercent } from "./RightPanel";
+import { editableNumberCommitValue, playbackPeakMarkerPercent, RightPanel, rangeProgressPercent } from "./RightPanel";
 import type { StepId } from "./StepBar";
 
 const project: Project = {
@@ -439,6 +439,30 @@ describe("RightPanel payload mass controls", () => {
     });
 
     expect(html).toContain("0.0025 s");
+  });
+
+  test("marks peak displacement on the playback time slider", () => {
+    const html = renderPanel("results", {
+      resultFields: [
+        { id: "field-stress-0", runId: "run-1", type: "stress", location: "face", values: [1], min: 0, max: 3, units: "MPa", frameIndex: 0, timeSeconds: 0 },
+        { id: "field-stress-1", runId: "run-1", type: "stress", location: "face", values: [2], min: 0, max: 3, units: "MPa", frameIndex: 1, timeSeconds: 0.005 },
+        { id: "field-stress-2", runId: "run-1", type: "stress", location: "face", values: [3], min: 0, max: 3, units: "MPa", frameIndex: 2, timeSeconds: 0.01 },
+        { id: "field-displacement-1", runId: "run-1", type: "displacement", location: "face", values: [4.25], min: 0, max: 4.25, units: "mm", frameIndex: 1, timeSeconds: 0.005 }
+      ]
+    });
+
+    expect(html).toContain('class="playback-time-track"');
+    expect(html).toContain('class="playback-peak-marker"');
+    expect(html).toContain("--playback-peak-position:50%");
+    expect(html).toContain('aria-label="Peak displacement at 0.0050 s"');
+  });
+
+  test("maps peak displacement time to the playback slider position", () => {
+    expect(playbackPeakMarkerPercent([
+      { frameIndex: 0, timeSeconds: 0 },
+      { frameIndex: 7, timeSeconds: 0.005 },
+      { frameIndex: 12, timeSeconds: 0.015 }
+    ], 0.01)).toBeCloseTo(75);
   });
 
   test("shows the current playback frame count next to the dynamic time", () => {

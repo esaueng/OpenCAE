@@ -1170,6 +1170,8 @@ function ResultsPanel({
     : playbackOrdinalForSolverFramePosition(frameIndexes, activeFramePosition);
   const currentFrameNumber = frames.length ? Math.min(frames.length, Math.max(1, Math.floor(sliderPosition) + 1)) : 0;
   const peakDisplacement = peakDisplacementFrame(resultFields, resultSummary);
+  const peakMarkerPercent = peakDisplacement && hasPlayback ? playbackPeakMarkerPercent(frames, peakDisplacement.timeSeconds) : null;
+  const peakMarkerLabel = peakDisplacement ? `Peak displacement at ${peakDisplacement.timeSeconds.toFixed(4)} s` : "";
 
   useEffect(() => {
     committedStressExaggerationRef.current = stressExaggeration;
@@ -1218,16 +1220,29 @@ function ResultsPanel({
           <SectionTitle>Frame</SectionTitle>
           <label className="field range-field">
             <span className="range-label"><span>Current time</span><strong>{`${activeTimeSeconds.toFixed(4)} s · Frame ${currentFrameNumber} / ${frames.length}`}</strong></span>
-            <input
-              className="playback-time-range"
-              type="range"
-              aria-label="Playback time position"
-              min="0"
-              max={Math.max(frames.length - 1, 0)}
-              step={resultPlaybackPlaying ? "0.01" : "1"}
-              value={sliderPosition}
-              onChange={(event) => onResultFrameChange?.(frameIndexForRoundedPlaybackOrdinal(frameIndexes, Number(event.currentTarget.value)))}
-            />
+            <span
+              className="playback-time-track"
+              style={peakMarkerPercent !== null ? ({ "--playback-peak-position": `${peakMarkerPercent}%` } as CSSProperties) : undefined}
+            >
+              <input
+                className="playback-time-range"
+                type="range"
+                aria-label="Playback time position"
+                min="0"
+                max={Math.max(frames.length - 1, 0)}
+                step={resultPlaybackPlaying ? "0.01" : "1"}
+                value={sliderPosition}
+                onChange={(event) => onResultFrameChange?.(frameIndexForRoundedPlaybackOrdinal(frameIndexes, Number(event.currentTarget.value)))}
+              />
+              {peakMarkerPercent !== null && (
+                <span
+                  className="playback-peak-marker"
+                  role="img"
+                  aria-label={peakMarkerLabel}
+                  title={peakMarkerLabel}
+                />
+              )}
+            </span>
           </label>
           <label className="field range-field">
             <span className="range-label"><span>Animation speed</span><strong>{Math.round(resultPlaybackFps)} fps</strong></span>
@@ -1314,6 +1329,25 @@ function ResultsPanel({
 export function rangeProgressPercent(value: number, min: number, max: number) {
   if (max <= min) return 0;
   return Math.min(100, Math.max(0, ((value - min) / (max - min)) * 100));
+}
+
+export function playbackPeakMarkerPercent(frames: Array<{ frameIndex: number; timeSeconds: number }>, peakTimeSeconds: number) {
+  const finiteFrames = frames.filter((frame) => Number.isFinite(frame.timeSeconds));
+  if (!Number.isFinite(peakTimeSeconds) || finiteFrames.length < 2) return 0;
+  const first = finiteFrames[0]!;
+  const last = finiteFrames[finiteFrames.length - 1]!;
+  if (peakTimeSeconds <= first.timeSeconds) return 0;
+  if (peakTimeSeconds >= last.timeSeconds) return 100;
+  for (let index = 0; index < finiteFrames.length - 1; index += 1) {
+    const lower = finiteFrames[index]!;
+    const upper = finiteFrames[index + 1]!;
+    if (peakTimeSeconds < lower.timeSeconds || peakTimeSeconds > upper.timeSeconds) continue;
+    const blend = upper.timeSeconds === lower.timeSeconds
+      ? 0
+      : (peakTimeSeconds - lower.timeSeconds) / (upper.timeSeconds - lower.timeSeconds);
+    return rangeProgressPercent(index + Math.max(0, Math.min(1, blend)), 0, finiteFrames.length - 1);
+  }
+  return 0;
 }
 
 function Panel({ title, helper, children }: { title: string; helper: string; children: ReactNode }) {

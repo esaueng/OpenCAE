@@ -152,10 +152,15 @@ describe("app CSS", () => {
 
   test("styles playback time as a passive playhead instead of a draggable slider", () => {
     const playbackRange = cssRule(".range-field input.playback-time-range");
+    const playbackTrack = cssRule(".playback-time-track");
+    const peakMarker = cssRule(".playback-peak-marker");
     const playbackWebkitThumb = cssRule(".range-field input.playback-time-range::-webkit-slider-thumb");
     const playbackMozThumb = cssRule(".range-field input.playback-time-range::-moz-range-thumb");
 
     expect(playbackRange).toMatch(/cursor:\s*default/);
+    expect(playbackTrack).toMatch(/position:\s*relative/);
+    expect(peakMarker).toMatch(/left:\s*var\(--playback-peak-position\)/);
+    expect(peakMarker).toMatch(/border-bottom:\s*6px\s+solid\s+var\(--color-warning\)/);
     expect(playbackWebkitThumb).toMatch(/width:\s*6px/);
     expect(playbackWebkitThumb).toMatch(/border-radius:\s*3px/);
     expect(playbackMozThumb).toMatch(/width:\s*4px/);
