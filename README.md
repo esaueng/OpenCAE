@@ -48,7 +48,7 @@ pnpm verify:perf
 
 ## Cloudflare Worker Deploy
 
-The production Cloudflare target for `cae.esau.app` serves the Vite web app from Workers Static Assets. The default deploy path builds the web app, deploys the Worker asset binding, enables SPA fallback routing, and binds R2 and Queues without changing the privileged Cloud FEA container application.
+The production Cloudflare target for `cae.esau.app` serves the Vite web app from Workers Static Assets. The default deploy path builds the web app, deploys the Worker asset binding, enables SPA fallback routing, binds R2 and Queues, and binds the Cloud FEA container application through `FEA_CONTAINER`.
 
 ```bash
 pnpm install
@@ -56,9 +56,9 @@ pnpm deploy:cloudflare:dry-run
 pnpm deploy:cloudflare
 ```
 
-Wrangler uses [wrangler.jsonc](wrangler.jsonc). This default config intentionally omits the `containers` section and the `FEA_CONTAINER` Durable Object binding so Cloudflare Builds tokens that cannot update container applications can still deploy the static app and Worker shell.
+Wrangler uses [wrangler.containers.jsonc](wrangler.containers.jsonc) for the production app domain. Cloud FEA browser calls stay on the app domain at `/api/cloud-fea/*`; the Worker reaches the container through the `FEA_CONTAINER` binding.
 
-Container application rollouts require a token with Cloudflare Containers write access. Run the privileged deploy explicitly when the container image or container app configuration changes:
+Container application rollouts require a token with Cloudflare Containers write access. The explicit container scripts are kept as aliases for the default production deploy path:
 
 ```bash
 pnpm deploy:cloudflare:containers:dry-run
@@ -66,6 +66,15 @@ pnpm deploy:cloudflare:containers
 ```
 
 Real Cloud FEA transient animation requires a successful container deploy because dynamic Cloud FEA runs are rejected unless the container returns timed multi-frame result fields. The Cloud FEA container generates CalculiX input decks and uses the open-source CalculiX CrunchiX executable (`ccx`) for static and transient structural solves when the container runtime is available.
+
+For a static Worker deploy without Cloud FEA containers, use the explicit static path:
+
+```bash
+pnpm deploy:cloudflare:static:dry-run
+pnpm deploy:cloudflare:static
+```
+
+That static path uses [wrangler.jsonc](wrangler.jsonc), which intentionally omits the `containers` section and the `FEA_CONTAINER` Durable Object binding. A deployment made with this config disables Cloud FEA and should use the Detailed local backend.
 
 For a local-first/static Worker deploy without Cloud FEA containers, use:
 
@@ -79,7 +88,7 @@ That explicit local-first path uses [wrangler.local-first.jsonc](wrangler.local-
 For Cloudflare Builds, set:
 
 - Build command: `pnpm build:cloudflare`
-- Deploy command: `npx wrangler deploy`
+- Deploy command: `npx wrangler deploy --config wrangler.containers.jsonc`
 
 ## Workspace Layout
 

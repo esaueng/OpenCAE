@@ -4,6 +4,13 @@
   "main": "apps/opencae-web/worker/index.ts",
   "compatibility_date": "2026-04-27",
   "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "routes": [
+    {
+      "pattern": "cae.esau.app",
+      "custom_domain": true
+    }
+  ],
   "assets": {
     "directory": "apps/opencae-web/dist",
     "binding": "ASSETS",

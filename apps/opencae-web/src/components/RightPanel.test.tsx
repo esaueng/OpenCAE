@@ -325,6 +325,41 @@ describe("RightPanel payload mass controls", () => {
     expect(meshHtml).toContain("45,000");
   });
 
+  test("disables Cloud FEA runs when the app Worker lacks the container binding", () => {
+    const detailedStudy: Study = {
+      ...study,
+      solverSettings: { backend: "cloudflare_fea", fidelity: "ultra" }
+    };
+
+    const runHtml = renderPanel("run", {
+      study: detailedStudy,
+      canRunSimulation: true,
+      cloudFeaAvailable: false,
+      cloudFeaEndpoint: "https://cae.esau.app/api/cloud-fea/runs"
+    });
+
+    expect(runHtml).toContain("Cloud FEA is unavailable on this app domain because this Worker was deployed without FEA_CONTAINER. Deploy with wrangler.containers.jsonc.");
+    expect(runHtml).toContain("Cloud FEA endpoint");
+    expect(runHtml).toContain("https://cae.esau.app/api/cloud-fea/runs");
+    expect(runHtml).toContain('<button class="primary wide" disabled=""');
+  });
+
+  test("shows the dynamic same-origin Cloud FEA endpoint", () => {
+    const detailedStudy: Study = {
+      ...study,
+      solverSettings: { backend: "cloudflare_fea", fidelity: "ultra" }
+    };
+
+    const runHtml = renderPanel("run", {
+      study: detailedStudy,
+      cloudFeaEndpoint: "https://cae.example/api/cloud-fea/runs"
+    });
+
+    expect(runHtml).toContain("Cloud FEA endpoint");
+    expect(runHtml).toContain("https://cae.example/api/cloud-fea/runs");
+    expect(runHtml).not.toContain("http://localhost:4317");
+  });
+
   test("shows dynamic Cloud FEA uses the transient CalculiX container", () => {
     const dynamicStudy: Study = {
       ...study,

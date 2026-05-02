@@ -61,7 +61,7 @@ export default {
 
     if (url.pathname === "/api/cloud-fea/health" && request.method === "GET") {
       logWorkerEvent("cloud_fea_health", { method: request.method, pathname: url.pathname });
-      return cloudFeaHealth(env);
+      return cloudFeaHealth(request, env);
     }
 
     if (url.pathname === "/api/cloud-fea/runs" && request.method === "POST") {
@@ -112,17 +112,22 @@ export default {
   }
 } satisfies ExportedHandler<Env>;
 
-function cloudFeaHealth(env: RuntimeEnv): Response {
+function cloudFeaHealth(request: Request, env: RuntimeEnv): Response {
+  const origin = new URL(request.url).origin;
   const containerBound = Boolean(env.FEA_CONTAINER);
   return Response.json(
     {
       ok: true,
       mode: "cloudflare-worker",
       service: "opencae-web",
+      requestOrigin: origin,
+      cloudFeaEndpoint: `${origin}/api/cloud-fea/runs`,
       artifactsBound: Boolean(env.FEA_ARTIFACTS),
       queueBound: Boolean(env.FEA_RUN_QUEUE),
       containerBound,
-      containersEnabled: containerBound
+      containersEnabled: containerBound,
+      cloudFeaAvailable: containerBound,
+      ...(containerBound ? {} : { requiredDeployConfig: "wrangler.containers.jsonc" })
     },
     { headers: jsonHeaders }
   );

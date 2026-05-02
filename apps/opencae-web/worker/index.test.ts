@@ -30,19 +30,25 @@ describe("Cloudflare FEA worker orchestration", () => {
     expect(workerSource).not.toContain("The CalculiX adapter endpoint is served by the container image.");
   });
 
-  test("default Cloudflare deploy avoids privileged container rollouts", () => {
+  test("default Cloudflare deploy uses the container binding config", () => {
     const packageJson = JSON.parse(readFileSync(resolve(__dirname, "../../../package.json"), "utf8")) as { scripts: Record<string, string> };
     const containerConfig = JSON.parse(readFileSync(resolve(__dirname, "../../../wrangler.containers.jsonc"), "utf8")) as {
       name?: string;
+      workers_dev?: boolean;
+      routes?: Array<{ pattern?: string; custom_domain?: boolean }>;
       containers?: Array<{ class_name?: string; image?: string }>;
       durable_objects?: { bindings?: Array<{ name?: string; class_name?: string }> };
       migrations?: Array<{ new_sqlite_classes?: string[] }>;
     };
     const defaultConfig = JSON.parse(readFileSync(resolve(__dirname, "../../../wrangler.jsonc"), "utf8")) as typeof containerConfig;
 
-    expect(packageJson.scripts["deploy:cloudflare"]).toContain("--config wrangler.jsonc");
-    expect(packageJson.scripts["deploy:cloudflare:dry-run"]).toContain("--config wrangler.jsonc");
+    expect(packageJson.scripts["deploy:cloudflare"]).toContain("--config wrangler.containers.jsonc");
+    expect(packageJson.scripts["deploy:cloudflare:dry-run"]).toContain("--config wrangler.containers.jsonc");
+    expect(packageJson.scripts["deploy:cloudflare:static"]).toContain("--config wrangler.jsonc");
+    expect(packageJson.scripts["deploy:cloudflare:static:dry-run"]).toContain("--config wrangler.jsonc");
     expect(containerConfig.name).toBe("opencae");
+    expect(containerConfig.workers_dev).toBe(false);
+    expect(containerConfig.routes).toContainEqual({ pattern: "cae.esau.app", custom_domain: true });
     expect(containerConfig.containers?.[0]).toMatchObject({ class_name: "OpenCaeFeaContainer", image: "opencae/opencae-fea:latest" });
     expect(containerConfig.durable_objects?.bindings).toContainEqual({ name: "FEA_CONTAINER", class_name: "OpenCaeFeaContainer" });
     expect(defaultConfig.containers).toBeUndefined();
@@ -89,7 +95,11 @@ describe("Cloudflare FEA worker orchestration", () => {
       artifactsBound: true,
       queueBound: true,
       containerBound: false,
-      containersEnabled: false
+      containersEnabled: false,
+      cloudFeaAvailable: false,
+      requiredDeployConfig: "wrangler.containers.jsonc",
+      requestOrigin: "https://cae.example",
+      cloudFeaEndpoint: "https://cae.example/api/cloud-fea/runs"
     });
   });
 
@@ -109,7 +119,10 @@ describe("Cloudflare FEA worker orchestration", () => {
       artifactsBound: true,
       queueBound: true,
       containerBound: true,
-      containersEnabled: true
+      containersEnabled: true,
+      cloudFeaAvailable: true,
+      requestOrigin: "https://cae.example",
+      cloudFeaEndpoint: "https://cae.example/api/cloud-fea/runs"
     });
   });
 
