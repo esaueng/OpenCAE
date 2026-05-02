@@ -145,13 +145,18 @@ describe("CadViewer result coloring", () => {
     expect(cadViewerSource).not.toContain("[-VIEWER_VIEW_CUBE_SIZE * 0.41, -VIEWER_VIEW_CUBE_SIZE * 0.41, 0.004]");
   });
 
-  test("shows view cube face labels only when their face normal points toward the camera", () => {
-    const faceCenter = new THREE.Vector3(0, 0, 0);
+  test("shows view cube face labels for any camera-facing normal half-space", () => {
+    expect(shouldShowViewCubeFaceLabel(new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0, 1))).toBe(true);
+    expect(shouldShowViewCubeFaceLabel(new THREE.Vector3(0, 0, 1), new THREE.Vector3(10, 0, 0.1))).toBe(true);
+    expect(shouldShowViewCubeFaceLabel(new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0, -1))).toBe(false);
+    expect(shouldShowViewCubeFaceLabel(new THREE.Vector3(0, 0, 1), new THREE.Vector3(1, 0, 0))).toBe(false);
+  });
 
-    expect(shouldShowViewCubeFaceLabel(faceCenter, new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0, 3))).toBe(true);
-    expect(shouldShowViewCubeFaceLabel(faceCenter, new THREE.Vector3(0, 0, 1), new THREE.Vector3(10, 0, 0.1))).toBe(true);
-    expect(shouldShowViewCubeFaceLabel(faceCenter, new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0, -3))).toBe(false);
-    expect(shouldShowViewCubeFaceLabel(faceCenter, new THREE.Vector3(0, 0, 1), new THREE.Vector3(3, 0, 0))).toBe(false);
+  test("culls view cube face labels from camera direction rather than HUD face position", () => {
+    expect(cadViewerSource).toContain("camera.getWorldDirection");
+    expect(cadViewerSource).toContain("labelObject.visible = shouldShowViewCubeFaceLabel(faceNormalWorld, toCameraWorld)");
+    expect(cadViewerSource).not.toContain("camera.position)");
+    expect(cadViewerSource).not.toContain("faceCenterWorld");
   });
 
   test("maps view cube faces and center button to camera reset requests", () => {
