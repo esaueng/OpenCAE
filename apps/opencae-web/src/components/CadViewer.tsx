@@ -137,10 +137,11 @@ export const VIEWER_GIZMO_SCALE = 40;
 export const VIEWER_AXIS_HEAD_RADIUS = 0.26;
 export const VIEWER_AXIS_LABEL_BADGE_RADIUS = 0.18;
 export const VIEWER_AXIS_LABEL_BADGE_COLOR = "#07111d";
-export const VIEWER_AXIS_LABEL_FONT_SIZE = 0.21;
+export const VIEWER_AXIS_LABEL_FONT_SIZE = 0.24;
+export const VIEWER_AXIS_LABEL_FONT_WEIGHT = 800;
 export const VIEWER_AXIS_LABEL_COLOR = "#ffffff";
 export const VIEWER_AXIS_LABEL_OUTLINE_COLOR = "#07111d";
-export const VIEWER_AXIS_LABEL_OUTLINE_WIDTH = 0.02;
+export const VIEWER_AXIS_LABEL_OUTLINE_WIDTH = 0.028;
 // Positive-octant view cube layout:
 // axis origin is one cube corner.
 // cube bounds are [0, cubeSize] on X/Y/Z.
@@ -619,6 +620,7 @@ function AxisCap({
         anchorY="middle"
         color={VIEWER_AXIS_LABEL_COLOR}
         fontSize={VIEWER_AXIS_LABEL_FONT_SIZE}
+        fontWeight={VIEWER_AXIS_LABEL_FONT_WEIGHT}
         letterSpacing={0}
         outlineColor={VIEWER_AXIS_LABEL_OUTLINE_COLOR}
         outlineWidth={VIEWER_AXIS_LABEL_OUTLINE_WIDTH}
