@@ -9,7 +9,7 @@ const productionDomain = "cae.esau.app";
 const productionWorkerName = "opencae";
 const containerClassName = "OpenCaeFeaContainer";
 const containerBindingName = "FEA_CONTAINER";
-const productionContainerImage = "registry.cloudflare.com/747b74cbd7d019dd7aeecb2c24a4bf10/opencae/opencae-fea:0.1.2-dynamic-v1";
+const productionContainerImage = "./services/opencae-fea-container/Dockerfile";
 
 export function parseJsonc(source, label = "JSONC input") {
   try {
