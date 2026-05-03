@@ -17,6 +17,7 @@ UNSUPPORTED_BLOCK_ERROR = "Cloud FEA currently supports only block-like single-b
 CCX_UNAVAILABLE_ERROR = "CalculiX executable unavailable; refusing to publish Cloud FEA results without a real solver run."
 GMSH_UNAVAILABLE_ERROR = "Gmsh executable unavailable; refusing to mesh uploaded geometry for Cloud FEA."
 UNSUPPORTED_UPLOADED_GEOMETRY_ERROR = "Cloud FEA uploaded geometry support requires STEP, STL, or OBJ model bytes and confident face mapping."
+RUNNER_VERSION = "2026-05-03-http-500-diagnostics"
 AXES = ("x", "y", "z")
 DOFS = (1, 2, 3)
 FIDELITY_MESH_DENSITY = {
@@ -38,30 +39,43 @@ MAX_SOLVER_LOG_ARTIFACT_BYTES = 256 * 1024
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/health":
-            self._json(200, {"ok": True, "solver": "calculix", "ccx": command_version(["ccx", "-v"]), "gmsh": command_version(["gmsh", "--version"])})
+            self._json(200, {"ok": True, "solver": "calculix", "runnerVersion": RUNNER_VERSION, "ccx": command_version(["ccx", "-v"]), "gmsh": command_version(["gmsh", "--version"])})
             return
         self._json(404, {"error": "Not found"})
 
     def do_POST(self):
+        phase = "request-routing"
         if self.path != "/solve":
             self._json(404, {"error": "Not found"})
             return
-        length = int(self.headers.get("content-length", "0") or "0")
-        body = self.rfile.read(length).decode("utf-8") if length else "{}"
         try:
+            phase = "request-body"
+            length = int(self.headers.get("content-length", "0") or "0")
+            body = self.rfile.read(length).decode("utf-8") if length else "{}"
+            phase = "payload-parse"
             payload = json.loads(body)
+            phase = "solve"
             result = solve(payload)
+            phase = "response-serialization"
             self._json(200, result)
         except UserFacingSolveError as error:
             payload = {"error": str(error)}
-            payload.update(error.payload)
+            safe_payload = safe_json_value(error.payload)
+            if isinstance(safe_payload, dict):
+                payload.update(safe_payload)
+            artifacts = payload.setdefault("artifacts", {})
+            if isinstance(artifacts, dict):
+                artifacts.setdefault("exceptionPhase", getattr(error, "exception_phase", phase))
+                artifacts.setdefault("runnerVersion", RUNNER_VERSION)
             self._json(error.status, payload)
         except Exception as error:
             self._json(500, {
                 "error": f"CalculiX adapter failed: {error}",
                 "artifacts": {
                     "solverResultParser": "python-exception",
-                    "solverLog": traceback.format_exc()
+                    "solverLog": traceback.format_exc(),
+                    "exceptionPhase": getattr(error, "exception_phase", phase),
+                    "runnerVersion": RUNNER_VERSION
                 }
             })
 
@@ -69,8 +83,21 @@ class Handler(BaseHTTPRequestHandler):
         return
 
     def _json(self, status, payload):
-        data = json.dumps(payload).encode("utf-8")
-        self.send_response(status)
+        response_status = status
+        try:
+            data = json.dumps(payload).encode("utf-8")
+        except Exception as error:
+            response_status = 500
+            data = json.dumps({
+                "error": f"Cloud FEA response failed to serialize: {error}",
+                "artifacts": {
+                    "solverResultParser": "python-response-serialization-exception",
+                    "solverLog": traceback.format_exc(),
+                    "exceptionPhase": "response-serialization",
+                    "runnerVersion": RUNNER_VERSION
+                }
+            }).encode("utf-8")
+        self.send_response(response_status)
         self.send_header("content-type", "application/json; charset=utf-8")
         self.send_header("content-length", str(len(data)))
         self.end_headers()
@@ -84,8 +111,30 @@ class UserFacingSolveError(Exception):
         self.payload = payload or {}
 
 
+def safe_json_value(value):
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, dict):
+        return {str(key): safe_json_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [safe_json_value(item) for item in value]
+    return str(value)
+
+
+def annotate_exception_phase(error, phase):
+    if not hasattr(error, "exception_phase"):
+        try:
+            setattr(error, "exception_phase", phase)
+        except Exception:
+            pass
+    return error
+
+
 def solve(payload):
-    parsed = parse_payload(payload)
+    try:
+        parsed = parse_payload(payload)
+    except Exception as error:
+        raise annotate_exception_phase(error, "payload-parse")
     if parsed.get("geometry"):
         return solve_uploaded_geometry(parsed)
     return solve_structured_block(parsed)
@@ -93,21 +142,33 @@ def solve(payload):
 
 def solve_structured_block(parsed):
     run_id = parsed["runId"]
-    mesh = generate_structured_hex_mesh(parsed["dimensions"], parsed["meshDensity"])
-    boundaries = select_boundary_nodes(parsed, mesh)
-    nodal_loads = distribute_total_force_to_nodes(mesh, boundaries["loadNodeIds"], parsed["loadVector"])
+    try:
+        mesh = generate_structured_hex_mesh(parsed["dimensions"], parsed["meshDensity"])
+        boundaries = select_boundary_nodes(parsed, mesh)
+        nodal_loads = distribute_total_force_to_nodes(mesh, boundaries["loadNodeIds"], parsed["loadVector"])
+    except Exception as error:
+        raise annotate_exception_phase(error, "mesh-generation")
 
     with tempfile.TemporaryDirectory(prefix=f"{run_id}-") as tmp:
         workdir = Path(tmp)
-        input_deck = write_calculix_input_deck(parsed, mesh, boundaries, nodal_loads)
-        deck_path = workdir / "opencae_solve.inp"
-        deck_path.write_text(input_deck)
-        solver_output = run_ccx_if_available(workdir, deck_path)
+        try:
+            input_deck = write_calculix_input_deck(parsed, mesh, boundaries, nodal_loads)
+            deck_path = workdir / "opencae_solve.inp"
+            deck_path.write_text(input_deck)
+        except Exception as error:
+            raise annotate_exception_phase(error, "input-deck")
+        try:
+            solver_output = run_ccx_if_available(workdir, deck_path)
+        except Exception as error:
+            raise annotate_exception_phase(error, "solver-run")
         if solver_output["returnCode"] is None:
             raise UserFacingSolveError(CCX_UNAVAILABLE_ERROR, 503, {
                 "artifacts": artifacts_for_failure(input_deck, solver_output, "ccx-unavailable", mesh, boundaries)
             })
-        parsed_solver_results = parse_calculix_results(workdir, parsed, mesh, boundaries, input_deck, solver_output)
+        try:
+            parsed_solver_results = parse_calculix_results(workdir, parsed, mesh, boundaries, input_deck, solver_output)
+        except Exception as error:
+            raise annotate_exception_phase(error, "result-parsing")
 
     if is_parsed_calculix_status(parsed_solver_results["artifacts"]["solverResultParser"]):
         return parsed_solver_results
@@ -121,12 +182,18 @@ def solve_uploaded_geometry(parsed):
     run_id = parsed["runId"]
     with tempfile.TemporaryDirectory(prefix=f"{run_id}-") as tmp:
         workdir = Path(tmp)
-        staged_geometry = stage_uploaded_geometry(workdir, parsed["geometry"])
+        try:
+            staged_geometry = stage_uploaded_geometry(workdir, parsed["geometry"])
+        except Exception as error:
+            raise annotate_exception_phase(error, "geometry-stage")
         if not shutil.which("gmsh"):
             raise UserFacingSolveError(GMSH_UNAVAILABLE_ERROR, 503, {
                 "artifacts": uploaded_geometry_failure_artifacts(parsed, "gmsh-unavailable", "", {"log": GMSH_UNAVAILABLE_ERROR})
             })
-        gmsh_output = run_gmsh_if_available(workdir, staged_geometry, parsed)
+        try:
+            gmsh_output = run_gmsh_if_available(workdir, staged_geometry, parsed)
+        except Exception as error:
+            raise annotate_exception_phase(error, "mesh-generation")
         if gmsh_output["returnCode"] != 0:
             raise UserFacingSolveError("Gmsh failed to generate a usable 3D mesh for uploaded geometry.", 422, {
                 "artifacts": uploaded_geometry_failure_artifacts(parsed, "gmsh-failed", "", {"log": gmsh_output["log"]})
@@ -136,18 +203,30 @@ def solve_uploaded_geometry(parsed):
             raise UserFacingSolveError("Gmsh completed but did not produce a mesh file for uploaded geometry.", 422, {
                 "artifacts": uploaded_geometry_failure_artifacts(parsed, "gmsh-mesh-missing", "", {"log": gmsh_output["log"]})
             })
-        mesh = parse_gmsh_msh(mesh_path.read_text(errors="ignore"))
-        boundaries = select_uploaded_geometry_boundaries(parsed, mesh)
-        nodal_loads = distribute_total_force_over_facets(mesh, boundaries["loadFacetIds"], parsed["loadVector"])
-        input_deck = write_calculix_input_deck(parsed, mesh, boundaries, nodal_loads)
-        deck_path = workdir / "opencae_solve.inp"
-        deck_path.write_text(input_deck)
-        solver_output = run_ccx_if_available(workdir, deck_path)
+        try:
+            mesh = parse_gmsh_msh(mesh_path.read_text(errors="ignore"))
+            boundaries = select_uploaded_geometry_boundaries(parsed, mesh)
+            nodal_loads = distribute_total_force_over_facets(mesh, boundaries["loadFacetIds"], parsed["loadVector"])
+        except Exception as error:
+            raise annotate_exception_phase(error, "mesh-generation")
+        try:
+            input_deck = write_calculix_input_deck(parsed, mesh, boundaries, nodal_loads)
+            deck_path = workdir / "opencae_solve.inp"
+            deck_path.write_text(input_deck)
+        except Exception as error:
+            raise annotate_exception_phase(error, "input-deck")
+        try:
+            solver_output = run_ccx_if_available(workdir, deck_path)
+        except Exception as error:
+            raise annotate_exception_phase(error, "solver-run")
         if solver_output["returnCode"] is None:
             raise UserFacingSolveError(CCX_UNAVAILABLE_ERROR, 503, {
                 "artifacts": artifacts_for_failure(input_deck, solver_output, "ccx-unavailable", mesh, boundaries)
             })
-        parsed_solver_results = parse_calculix_results(workdir, parsed, mesh, boundaries, input_deck, solver_output)
+        try:
+            parsed_solver_results = parse_calculix_results(workdir, parsed, mesh, boundaries, input_deck, solver_output)
+        except Exception as error:
+            raise annotate_exception_phase(error, "result-parsing")
 
     if is_parsed_calculix_status(parsed_solver_results["artifacts"]["solverResultParser"]):
         return parsed_solver_results
@@ -957,11 +1036,15 @@ def response_from_parsed_dat(parsed, mesh, boundaries, input_deck, solver_output
             **compact_text_artifact(solver_output["log"], MAX_SOLVER_LOG_ARTIFACT_BYTES, "solverLogPreview", keep_tail=True),
             "solverResultFiles": parsed_dat["files"],
             "solverResultParser": parsed_dat["status"],
+            "runnerVersion": RUNNER_VERSION,
             "meshSummary": mesh_summary(mesh, boundaries, sample_coordinate_space),
             "solverMaterial": material
         }
     }
-    return compact_cloud_fea_result(result)
+    try:
+        return compact_cloud_fea_result(result)
+    except Exception as error:
+        raise annotate_exception_phase(error, "result-compaction")
 
 
 def field_from_samples(run_id, field_type, location, units, values, samples, provenance):
@@ -1078,6 +1161,7 @@ def artifacts_for_failure(input_deck, solver_output, parser_status, mesh, bounda
         **compact_text_artifact(solver_output["log"], MAX_SOLVER_LOG_ARTIFACT_BYTES, "solverLogPreview", keep_tail=True),
         "solverResultFiles": files or [],
         "solverResultParser": parser_status,
+        "runnerVersion": RUNNER_VERSION,
         "meshSummary": mesh_summary(mesh, boundaries)
     }
 
@@ -1089,6 +1173,7 @@ def uploaded_geometry_failure_artifacts(parsed, parser_status, input_deck, solve
         **compact_text_artifact(solver_output["log"], MAX_SOLVER_LOG_ARTIFACT_BYTES, "solverLogPreview", keep_tail=True),
         "solverResultFiles": [],
         "solverResultParser": parser_status,
+        "runnerVersion": RUNNER_VERSION,
         "meshSummary": {
             "nodes": 0,
             "elements": 0,

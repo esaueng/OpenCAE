@@ -10,6 +10,7 @@ from __future__ import annotations
 import math
 import base64
 import io
+import json
 import shutil
 import sys
 import tempfile
@@ -126,6 +127,34 @@ class ValidationSuite(unittest.TestCase):
         self.assertEqual(handler.payload["artifacts"]["solverResultParser"], "python-exception")
         self.assertIn("Traceback", handler.payload["artifacts"]["solverLog"])
         self.assertIn("RuntimeError: boom", handler.payload["artifacts"]["solverLog"])
+        self.assertEqual(handler.payload["artifacts"]["exceptionPhase"], "solve")
+
+    def test_handler_json_writer_serializes_success_and_error_payloads(self):
+        handler = JsonCapturingHandler()
+
+        handler._json(200, {"ok": True, "runnerVersion": "test-runner"})
+        success = json_payload_from_handler(handler)
+        self.assertEqual(handler.status, 200)
+        self.assertEqual(success["ok"], True)
+        self.assertEqual(success["runnerVersion"], "test-runner")
+
+        handler = JsonCapturingHandler()
+        handler._json(422, {"error": "bad input", "artifacts": {"solverResultParser": "validation-error"}})
+        error = json_payload_from_handler(handler)
+        self.assertEqual(handler.status, 422)
+        self.assertEqual(error["error"], "bad input")
+        self.assertEqual(error["artifacts"]["solverResultParser"], "validation-error")
+
+    def test_handler_json_writer_falls_back_for_non_serializable_payloads(self):
+        handler = JsonCapturingHandler()
+
+        handler._json(200, {"ok": True, "bad": object()})
+        payload = json_payload_from_handler(handler)
+
+        self.assertEqual(handler.status, 500)
+        self.assertIn("failed to serialize", payload["error"])
+        self.assertEqual(payload["artifacts"]["solverResultParser"], "python-response-serialization-exception")
+        self.assertEqual(payload["artifacts"]["exceptionPhase"], "response-serialization")
 
     def test_axial_tension_f_over_a_units_and_load_distribution(self):
         parsed = runner.parse_payload(block_payload("axial", ALUMINUM_6061, [1, 0, 0], 1.0, "standard"))
@@ -477,6 +506,26 @@ def assert_no_generated_fallback(result):
     assert "fallback" not in text
     assert result["summary"]["provenance"]["kind"] == "calculix_fea"
     assert result["summary"]["provenance"]["resultSource"].startswith("parsed_")
+
+
+class JsonCapturingHandler(runner.Handler):
+    def __init__(self):
+        self.status = None
+        self.headers_sent = []
+        self.wfile = io.BytesIO()
+
+    def send_response(self, status):
+        self.status = status
+
+    def send_header(self, name, value):
+        self.headers_sent.append((name, value))
+
+    def end_headers(self):
+        return None
+
+
+def json_payload_from_handler(handler):
+    return json.loads(handler.wfile.getvalue().decode("utf-8"))
 
 
 def dat_fixture():
