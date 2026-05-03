@@ -1173,6 +1173,7 @@ img {
 }
 
 .workspace {
+  grid-row: 2;
   min-height: 0;
   display: grid;
   grid-template-columns: var(--stepbar-w) minmax(360px, 1fr) var(--context-w);
@@ -2877,6 +2878,9 @@ button:disabled {
 }
 
 .bottom-panel {
+  grid-row: 3;
+  height: var(--statusbar-h);
+  min-height: var(--statusbar-h);
   position: relative;
   background: var(--color-surface);
   border-top: var(--border-thin);
