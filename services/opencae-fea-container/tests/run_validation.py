@@ -179,6 +179,51 @@ class ValidationSuite(unittest.TestCase):
         with self.assertRaises(AssertionError):
             assert_no_generated_fallback(bad_result)
 
+    def test_structured_block_solver_points_map_to_display_space(self):
+        dimensions = {"x": 180.0, "y": 30.0, "z": 24.0}
+        payload = viewer_space_block_payload(dimensions)
+        parsed = runner.parse_payload(payload)
+        bounds = runner.display_bounds_for_model(parsed["displayModel"], parsed["dimensions"])
+
+        self.assertEqual(runner.solver_point_to_display([0.0, 15.0, 12.0], dimensions, bounds), [-1.9, 0.0, 0.0])
+        self.assertEqual(runner.solver_point_to_display([180.0, 15.0, 12.0], dimensions, bounds), [1.9, 0.0, 0.0])
+        self.assertEqual(runner.solver_point_to_display([90.0, 15.0, 12.0], dimensions, bounds), [0.0, 0.0, 0.0])
+
+    def test_structured_block_result_samples_are_display_space_without_changing_values(self):
+        dimensions = {"x": 180.0, "y": 30.0, "z": 24.0}
+        parsed = runner.parse_payload(viewer_space_block_payload(dimensions))
+        mesh = runner.generate_structured_hex_mesh(parsed["dimensions"], parsed["meshDensity"])
+        boundaries = runner.select_boundary_nodes(parsed, mesh)
+        parsed_files = {
+            **runner.parse_dat_result(dat_fixture(), mesh),
+            "files": ["opencae_solve.dat"],
+            "status": "parsed-calculix-dat",
+            "resultSource": "parsed_dat"
+        }
+
+        result = runner.response_from_parsed_dat(parsed, mesh, boundaries, "input deck", {"log": "solver log"}, parsed_files)
+
+        self.assertCloudResultIsParsed(result)
+        self.assertAlmostEqual(result["summary"]["maxStress"], 0.2)
+        self.assertAlmostEqual(result["summary"]["maxDisplacement"], 0.0019)
+        self.assertAlmostEqual(result["summary"]["reactionForce"], 1.0)
+        self.assertAlmostEqual(result["summary"]["safetyFactor"], ALUMINUM_6061["yieldMpa"] / 0.2)
+        self.assertEqual(result["summary"]["provenance"]["renderCoordinateSpace"], "display_model")
+        self.assertEqual(result["artifacts"]["meshSummary"]["solverCoordinateSpace"], "mm")
+        self.assertEqual(result["artifacts"]["meshSummary"]["resultSampleCoordinateSpace"], "display_model")
+
+        display_min = [-1.9, -0.36, -0.16]
+        display_max = [1.9, 0.36, 0.16]
+        for field in result["fields"]:
+            for sample in field["samples"]:
+                self.assertNotIn("generated", sample.get("source", "").lower())
+                self.assertNotIn("fallback", sample.get("source", "").lower())
+                for axis, coordinate in enumerate(sample["point"]):
+                    self.assertGreaterEqual(coordinate, display_min[axis] - 1e-9)
+                    self.assertLessEqual(coordinate, display_max[axis] + 1e-9)
+        all_coordinates = [abs(coordinate) for field in result["fields"] for sample in field["samples"] for coordinate in sample["point"]]
+        self.assertLessEqual(max(all_coordinates), 1.9)
+
     def test_uploaded_stl_fixture_requires_gmsh_and_never_falls_back_to_block(self):
         payload = uploaded_block_payload("uploaded-stl", ALUMINUM_6061, [0, 0, -1], 1.0, "standard")
 
@@ -321,6 +366,20 @@ def block_payload(case_name, material, direction, force_n, fidelity):
             "solverSettings": {},
         },
     }
+
+
+def viewer_space_block_payload(dimensions):
+    payload = block_payload("cantilever", ALUMINUM_6061, [0, 0, -1], 1.0, "standard")
+    payload["displayModel"]["dimensions"] = {**dimensions, "units": "mm"}
+    payload["displayModel"]["faces"] = [
+        {"id": "face-fixed", "label": "Fixed X min", "center": [-1.9, 0.0, 0.0], "normal": [-1.0, 0.0, 0.0]},
+        {"id": "face-load-x", "label": "X max", "center": [1.9, 0.0, 0.0], "normal": [1.0, 0.0, 0.0]},
+        {"id": "face-load-z", "label": "Top", "center": [0.0, 0.0, 0.16], "normal": [0.0, 0.0, 1.0]},
+        {"id": "face-bottom", "label": "Bottom", "center": [0.0, 0.0, -0.16], "normal": [0.0, 0.0, -1.0]},
+        {"id": "face-front", "label": "Front", "center": [0.0, -0.36, 0.0], "normal": [0.0, -1.0, 0.0]},
+        {"id": "face-back", "label": "Back", "center": [0.0, 0.36, 0.0], "normal": [0.0, 1.0, 0.0]},
+    ]
+    return payload
 
 
 def uploaded_block_payload(case_name, material, direction, force_n, fidelity):
