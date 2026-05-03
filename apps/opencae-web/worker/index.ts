@@ -47,6 +47,10 @@ const placeholderResultMarkers = [
   "local_detailed",
   "generated_fallback"
 ];
+export const MAX_CLOUD_FEA_RESULT_JSON_BYTES = 8 * 1024 * 1024;
+export const MAX_CLOUD_FEA_FIELD_VALUES = 25_000;
+export const MAX_CLOUD_FEA_FIELD_SAMPLES = 25_000;
+const cloudFeaResultBudgetExceededMessage = "Cloud FEA result payload exceeded the UI result budget. Reduce fidelity or enable result decimation.";
 
 export default {
   async fetch(request: Request, env: RuntimeEnv, ctx?: ExecutionContext): Promise<Response> {
@@ -256,8 +260,8 @@ async function runCloudFeaSolve(runId: string, env: RuntimeEnv): Promise<void> {
     const solveResponse = await callFeaContainer(env, { ...requestArtifact, runId });
     if (!solveResponse.ok) {
       const failure = await readContainerFailure(solveResponse);
-      await putOptionalArtifact(artifacts, `runs/${runId}/input.inp`, failure.artifacts.inputDeck);
-      await putOptionalArtifact(artifacts, `runs/${runId}/solver.log`, failure.artifacts.solverLog);
+      await putOptionalArtifact(artifacts, `runs/${runId}/input.inp`, failure.artifacts.inputDeck ?? failure.artifacts.inputDeckPreview);
+      await putOptionalArtifact(artifacts, `runs/${runId}/solver.log`, failure.artifacts.solverLog ?? failure.artifacts.solverLogPreview);
       await putOptionalArtifact(artifacts, `runs/${runId}/solver-result-parser.txt`, failure.artifacts.solverResultParser);
       await putOptionalArtifact(artifacts, `runs/${runId}/mesh.json`, JSON.stringify(failure.artifacts.meshSummary ?? {}, null, 2));
       await artifacts.put(`runs/${runId}/events.json`, JSON.stringify([
@@ -272,12 +276,13 @@ async function runCloudFeaSolve(runId: string, env: RuntimeEnv): Promise<void> {
     if (requestRequiresDynamicFrames(requestArtifact)) {
       assertDynamicPlaybackResult(normalized);
     }
+    const resultJson = serializeCloudFeaResultForUi(normalized);
     const resultArtifacts = isRecord(containerResult.artifacts) ? containerResult.artifacts : {};
-    await putOptionalArtifact(artifacts, `runs/${runId}/input.inp`, resultArtifacts.inputDeck);
-    await putOptionalArtifact(artifacts, `runs/${runId}/solver.log`, resultArtifacts.solverLog);
+    await putOptionalArtifact(artifacts, `runs/${runId}/input.inp`, resultArtifacts.inputDeck ?? resultArtifacts.inputDeckPreview);
+    await putOptionalArtifact(artifacts, `runs/${runId}/solver.log`, resultArtifacts.solverLog ?? resultArtifacts.solverLogPreview);
     await putOptionalArtifact(artifacts, `runs/${runId}/solver-result-parser.txt`, resultArtifacts.solverResultParser);
     await putOptionalArtifact(artifacts, `runs/${runId}/mesh.json`, JSON.stringify(resultArtifacts.meshSummary ?? {}, null, 2));
-    await artifacts.put(`runs/${runId}/results.json`, JSON.stringify(normalized, null, 2));
+    await artifacts.put(`runs/${runId}/results.json`, resultJson);
     await artifacts.put(`runs/${runId}/events.json`, JSON.stringify([
       ...events,
       { runId, type: "complete", progress: 100, message: normalized.summary.transient ? "Cloud FEA transient solve complete." : "Cloud FEA static solve complete.", timestamp: new Date().toISOString() }
@@ -427,8 +432,69 @@ function assertFiniteSummary(summary: Record<string, unknown>): void {
 
 export function looksLikePlaceholderResult(summary: Record<string, unknown>, fields: unknown[], artifacts: Record<string, unknown> = {}): boolean {
   if (numberField(summary, "maxStress") === 1_440_000 && numberField(summary, "safetyFactor") === 172) return true;
-  const resultText = JSON.stringify([summary, fields, artifacts]).toLowerCase();
-  return placeholderResultMarkers.some((marker) => resultText.includes(marker));
+  return (
+    containsPlaceholderMarker(summary) ||
+    containsPlaceholderMarker(fields) ||
+    containsPlaceholderMarker({
+      solverResultParser: artifacts.solverResultParser,
+      meshSummary: artifacts.meshSummary
+    })
+  );
+}
+
+function containsPlaceholderMarker(value: unknown, maxVisited = 50_000): boolean {
+  const stack: unknown[] = [value];
+  let visited = 0;
+  while (stack.length && visited < maxVisited) {
+    visited += 1;
+    const current = stack.pop();
+    if (typeof current === "string") {
+      const normalized = current.toLowerCase();
+      if (placeholderResultMarkers.some((marker) => normalized.includes(marker))) return true;
+      continue;
+    }
+    if (Array.isArray(current)) {
+      if (isNumericArrayLike(current)) continue;
+      const maxItems = 200;
+      const headCount = Math.min(current.length, maxItems);
+      for (let index = 0; index < headCount; index += 1) {
+        stack.push(current[index]);
+      }
+      if (current.length > maxItems) {
+        const tailStart = Math.max(maxItems, current.length - 50);
+        for (let index = tailStart; index < current.length; index += 1) {
+          stack.push(current[index]);
+        }
+      }
+      continue;
+    }
+    if (!isRecord(current)) continue;
+    for (const [key, item] of Object.entries(current)) {
+      if (key === "values" && Array.isArray(item)) continue;
+      if (key === "samples" && Array.isArray(item)) {
+        for (const sample of item.slice(0, 500)) {
+          if (!isRecord(sample)) continue;
+          stack.push({
+            source: sample.source,
+            nodeId: sample.nodeId,
+            elementId: sample.elementId
+          });
+        }
+        continue;
+      }
+      stack.push(item);
+    }
+  }
+  return false;
+}
+
+function isNumericArrayLike(value: unknown[]): boolean {
+  if (!value.length) return false;
+  const indexes = new Set([0, Math.floor(value.length / 2), value.length - 1]);
+  for (const index of indexes) {
+    if (typeof value[index] !== "number") return false;
+  }
+  return true;
 }
 
 function assertParsedCalculixArtifacts(artifacts: Record<string, unknown>): void {
@@ -482,8 +548,36 @@ function normalizeField(runId: string, rawField: unknown, index: number, provena
       ? { timeSeconds: rawField.timeSeconds }
       : typeof rawField.time === "number" && Number.isFinite(rawField.time)
         ? { timeSeconds: rawField.time }
-        : {})
+      : {})
   };
+}
+
+function serializeCloudFeaResultForUi(result: { fields: Array<Record<string, unknown>> }): string {
+  assertCloudFeaResultWithinUiFieldBudget(result);
+  let resultJson: string;
+  try {
+    resultJson = JSON.stringify(result);
+  } catch (error) {
+    if (error instanceof RangeError || (error instanceof Error && /invalid string length/i.test(error.message))) {
+      throw new Error(cloudFeaResultBudgetExceededMessage);
+    }
+    throw error;
+  }
+  if (new TextEncoder().encode(resultJson).byteLength > MAX_CLOUD_FEA_RESULT_JSON_BYTES) {
+    throw new Error(cloudFeaResultBudgetExceededMessage);
+  }
+  return resultJson;
+}
+
+function assertCloudFeaResultWithinUiFieldBudget(result: { fields: Array<Record<string, unknown>> }): void {
+  for (const field of result.fields) {
+    if (Array.isArray(field.values) && field.values.length > MAX_CLOUD_FEA_FIELD_VALUES) {
+      throw new Error(cloudFeaResultBudgetExceededMessage);
+    }
+    if (Array.isArray(field.samples) && field.samples.length > MAX_CLOUD_FEA_FIELD_SAMPLES) {
+      throw new Error(cloudFeaResultBudgetExceededMessage);
+    }
+  }
 }
 
 function normalizeTransient(transient: Record<string, unknown>) {

@@ -224,6 +224,61 @@ class ValidationSuite(unittest.TestCase):
         all_coordinates = [abs(coordinate) for field in result["fields"] for sample in field["samples"] for coordinate in sample["point"]]
         self.assertLessEqual(max(all_coordinates), 1.9)
 
+    def test_ultra_structured_block_result_is_compacted_without_changing_summary(self):
+        parsed = runner.parse_payload(block_payload("cantilever", ALUMINUM_6061, [0, 0, -1], 1.0, "ultra"))
+        mesh = runner.generate_structured_hex_mesh(parsed["dimensions"], parsed["meshDensity"])
+        boundaries = runner.select_boundary_nodes(parsed, mesh)
+        displacement_scale = 0.0042 / max(node["coordinates"][0] for node in mesh["nodes"])
+        displacements = {
+            node["id"]: [0.0, 0.0, -node["coordinates"][0] * displacement_scale]
+            for node in mesh["nodes"]
+        }
+        stress_count = 30_000
+        full_max_stress = 12.5
+        stresses = []
+        for index in range(stress_count):
+            element = mesh["elements"][index % len(mesh["elements"])]
+            stresses.append({
+                "elementId": element["id"],
+                "point": runner.element_centroid(mesh, element["id"]),
+                "vonMises": full_max_stress * (index + 1) / stress_count,
+            })
+        parsed_files = {
+            "displacements": displacements,
+            "reactions": {boundaries["fixedNodeIds"][0]: [0.0, 0.0, 1.0]},
+            "stresses": stresses,
+            "files": ["opencae_solve.dat"],
+            "status": "parsed-calculix-dat",
+            "resultSource": "parsed_dat",
+        }
+
+        result = runner.response_from_parsed_dat(
+            parsed,
+            mesh,
+            boundaries,
+            "input deck",
+            {"log": "solver log"},
+            parsed_files,
+        )
+        fields = {field["type"]: field for field in result["fields"]}
+
+        self.assertCloudResultIsParsed(result)
+        self.assertLessEqual(len(fields["stress"]["values"]), 25_000)
+        self.assertLessEqual(len(fields["stress"]["samples"]), 20_000)
+        self.assertLessEqual(len(fields["displacement"]["samples"]), 15_000)
+        self.assertAlmostEqual(result["summary"]["maxStress"], full_max_stress)
+        self.assertAlmostEqual(result["summary"]["maxDisplacement"], 0.0042)
+        self.assertAlmostEqual(result["summary"]["safetyFactor"], ALUMINUM_6061["yieldMpa"] / full_max_stress)
+        self.assertAlmostEqual(result["summary"]["reactionForce"], 1.0)
+        self.assertEqual(result["artifacts"]["solverResultParser"], "parsed-calculix-dat")
+        self.assertTrue(result["artifacts"]["resultCompaction"]["enabled"])
+        self.assertEqual(result["artifacts"]["resultCompaction"]["originalStressSampleCount"], stress_count)
+        self.assertEqual(result["artifacts"]["resultCompaction"]["returnedStressSampleCount"], len(fields["stress"]["samples"]))
+        for field in result["fields"]:
+            for sample in field["samples"]:
+                self.assertNotIn("generated", sample.get("source", "").lower())
+                self.assertNotIn("fallback", sample.get("source", "").lower())
+
     def test_uploaded_stl_fixture_requires_gmsh_and_never_falls_back_to_block(self):
         payload = uploaded_block_payload("uploaded-stl", ALUMINUM_6061, [0, 0, -1], 1.0, "standard")
 
