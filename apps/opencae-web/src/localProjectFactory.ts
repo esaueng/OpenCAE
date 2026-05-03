@@ -93,7 +93,8 @@ export async function createLocalSampleProject(sample: SampleModelId = "bracket"
             timeStep: 0.005,
             outputInterval: 0.005,
             dampingRatio: 0.02,
-            integrationMethod: "newmark_average_acceleration"
+            integrationMethod: "newmark_average_acceleration",
+            loadProfile: "ramp"
           },
           runs: [dynamicSampleRun(sample, bracketDemoProject.id, templateStudy!.id, now)]
         }
@@ -503,7 +504,8 @@ function createDynamicStructuralStudyForProject(project: Project, displayModel: 
       timeStep: 0.005,
       outputInterval: 0.005,
       dampingRatio: 0.02,
-      integrationMethod: "newmark_average_acceleration"
+      integrationMethod: "newmark_average_acceleration",
+      loadProfile: "ramp"
     },
     validation: [],
     runs: []

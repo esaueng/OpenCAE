@@ -870,7 +870,8 @@ describe("api", () => {
         timeStep: 0.005,
         outputInterval: 0.005,
         dampingRatio: 0.02,
-        integrationMethod: "newmark_average_acceleration"
+        integrationMethod: "newmark_average_acceleration",
+        loadProfile: "ramp"
       }
     } as Study;
     const dynamicDisplayModel = {
@@ -976,7 +977,8 @@ describe("api", () => {
           timeStep: 0.001,
           outputInterval: 0.001,
           dampingRatio: 0.02,
-          integrationMethod: "newmark_average_acceleration"
+          integrationMethod: "newmark_average_acceleration",
+          loadProfile: "ramp"
         }
       } as Study;
 
