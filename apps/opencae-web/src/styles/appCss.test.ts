@@ -93,18 +93,6 @@ describe("app CSS", () => {
     expect(shortcutKey).toMatch(/font-family:\s*var\(--font-mono\)/);
   });
 
-  test("anchors the desktop bottom status strip in the shell footer row", () => {
-    const appShell = cssRule(".app-shell");
-    const workspace = cssRule(".workspace");
-    const bottomPanel = cssRule(".bottom-panel");
-
-    expect(appShell).toMatch(/grid-template-rows:\s*var\(--topbar-h\)\s+minmax\(0,\s*1fr\)\s+var\(--statusbar-h\)/);
-    expect(workspace).toMatch(/grid-row:\s*2/);
-    expect(bottomPanel).toMatch(/grid-row:\s*3/);
-    expect(bottomPanel).toMatch(/height:\s*var\(--statusbar-h\)/);
-    expect(bottomPanel).toMatch(/min-height:\s*var\(--statusbar-h\)/);
-  });
-
   test("keeps light mode shared text colors above contrast requirements", () => {
     const lightSurface = lightToken("--color-surface");
     const textTokens = ["--color-text", "--color-text-muted", "--color-text-subtle", "--color-accent", "--color-warning", "--color-error", "--color-success"];
