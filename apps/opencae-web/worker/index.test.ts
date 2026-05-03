@@ -159,17 +159,8 @@ describe("Cloudflare FEA worker orchestration", () => {
     expect(body.deploymentHint).toBeUndefined();
   });
 
-  test("dispatches cloud FEA runs with waitUntil even when queue binding exists", async () => {
+  test("dispatches cloud FEA runs through the queue when queue binding exists", async () => {
     const bucket = new MemoryR2Bucket();
-    const originalGet = bucket.get.bind(bucket);
-    let blockBackgroundRequestRead = true;
-    bucket.get = vi.fn(async (key: string) => {
-      if (blockBackgroundRequestRead && key.endsWith("/request.json")) {
-        blockBackgroundRequestRead = false;
-        return await new Promise<null>(() => undefined);
-      }
-      return originalGet(key);
-    });
     const send = vi.fn(async () => undefined);
     const pending: Array<Promise<unknown>> = [];
     const env = {
@@ -197,6 +188,7 @@ describe("Cloudflare FEA worker orchestration", () => {
     const body = await response.json() as { run: { id: string; status: string; solverBackend: string }; streamUrl: string };
     const stored = JSON.parse(await (await bucket.get(`runs/${body.run.id}/request.json`))!.text()) as Record<string, unknown>;
     const events = JSON.parse(await (await bucket.get(`runs/${body.run.id}/events.json`))!.text()) as Array<{ message: string }>;
+    const results = await bucket.get(`runs/${body.run.id}/results.json`);
 
     expect(response.status).toBe(202);
     expect(body.run.status).toBe("queued");
@@ -231,12 +223,50 @@ describe("Cloudflare FEA worker orchestration", () => {
     expect(events[0]?.message).toContain("fidelity=ultra");
     expect(events[0]?.message).toContain("material=Aluminum 6061 (mat-aluminum-6061)");
     expect(events[0]?.message).toContain("geometry=uploaded:stl:cantilever.stl");
-    expect(events[0]?.message).toContain("dispatch=waitUntil");
-    expect(events[0]?.message).not.toContain("queue=enabled");
+    expect(events[0]?.message).toContain("dispatch=queue");
     expect(events[0]?.message).toContain("container=bound");
-    expect(send).not.toHaveBeenCalled();
-    expect(ctx.waitUntil).toHaveBeenCalledOnce();
-    expect(pending).toHaveLength(1);
+    expect(send).toHaveBeenCalledWith({ runId: body.run.id });
+    expect(ctx.waitUntil).not.toHaveBeenCalled();
+    expect(pending).toHaveLength(0);
+    expect(results).toBeNull();
+  });
+
+  test("records a terminal error event when Cloud FEA queue dispatch fails", async () => {
+    const bucket = new MemoryR2Bucket();
+    const send = vi.fn(async () => {
+      throw new Error("queue unavailable");
+    });
+    const env = {
+      ASSETS: { fetch: vi.fn(async () => new Response("asset")) },
+      FEA_ARTIFACTS: bucket,
+      FEA_RUN_QUEUE: { send },
+      FEA_CONTAINER: { get: vi.fn() }
+    };
+    const ctx = { waitUntil: vi.fn() };
+
+    const response = await worker.fetch(new Request("https://cae.example/api/cloud-fea/runs", {
+      method: "POST",
+      body: JSON.stringify({
+        projectId: "project-1",
+        studyId: "study-1",
+        fidelity: "ultra",
+        study: cloudStudyWithMaterial("mat-aluminum-6061", {}, "dynamic_structural")
+      })
+    }), env, ctx);
+    const body = await response.json() as { error: string; runId?: string };
+    const eventsKey = Array.from(bucket.objects.keys()).find((key) => key.endsWith("/events.json"));
+    const events = eventsKey ? JSON.parse(await (await bucket.get(eventsKey))!.text()) as Array<{ type: string; progress: number; message: string }> : [];
+
+    expect(response.status).toBe(503);
+    expect(body.error).toContain("Cloud FEA queue dispatch failed");
+    expect(body.error).toContain("queue unavailable");
+    expect(body.runId).toBeDefined();
+    expect(events.at(-1)).toMatchObject({
+      type: "error",
+      progress: 100,
+      message: "Cloud FEA queue dispatch failed: queue unavailable."
+    });
+    expect(ctx.waitUntil).not.toHaveBeenCalled();
   });
 
   test("stores PETG solver material in CalculiX units without print reductions when not printed", async () => {
