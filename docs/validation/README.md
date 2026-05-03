@@ -37,6 +37,23 @@ Cloud FEA preflights static studies before a run is queued. Supported UI load ty
 
 Multiple loads are summed by node and degree of freedom before deck generation. Multiple fixed supports are unioned into one `FIXED` node set. Unsupported loads, missing payload mass, invalid units, missing fixed supports, or unsupported geometry must fail preflight with diagnostics instead of starting a CalculiX run.
 
+## Cloud FEA Dynamic Load Support
+
+Cloud FEA also supports first-release `dynamic_structural` studies for linear elastic, small-displacement transient stress runs. The container uses CalculiX implicit `*DYNAMIC` with explicit `*AMPLITUDE` load histories and `*TIME POINTS` output, then returns framed `stress`, `displacement`, `velocity`, `acceleration`, and `safety_factor` result fields.
+
+Supported dynamic load profiles:
+
+- `ramp`: amplitude is `0` at `startTime` and `1` at `endTime`.
+- `step`: amplitude is `1` for the whole step.
+- `sinusoidal`: first release uses a half-sine pulse, starting at `0`, rising to `1`, and returning to `0` without reversing load direction.
+- `quasi_static`: same load history as `ramp`, marked in provenance as a quasi-static dynamic run.
+
+Dynamic output is bounded to 250 frames. If `startTime`, `endTime`, and `outputInterval` would exceed that budget, preflight must fail with: `Dynamic Cloud FEA output would exceed frame budget; increase outputInterval or reduce endTime.`
+
+`dampingRatio` is retained as metadata only in Cloud FEA dynamic runs. Physical damping is written only when `rayleighAlpha` or `rayleighBeta` is provided, using CalculiX Rayleigh damping. The default `*DYNAMIC, ALPHA=-0.05` is numerical high-frequency damping for the implicit integration algorithm and should not be treated as material damping.
+
+Choose `timeStep` small enough to resolve the fastest meaningful load or response change. Choose `outputInterval` for playback density and payload size; it must be at least `timeStep`, and larger intervals reduce frames and UI payload.
+
 ## Benchmark Matrix
 
 | Case | Model | Material | Load and support | Expected equations | OpenCAE tolerance | External comparison |

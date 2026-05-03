@@ -84,6 +84,86 @@ class ValidationSuite(unittest.TestCase):
         self.assertEqual(parsed_results["status"], "parsed-calculix-dat")
         self.assertAlmostEqual(parsed_results["stresses"][0]["vonMises"], 0.2)
 
+    def test_dynamic_payload_normalizes_settings_instead_of_rejecting(self):
+        payload = dynamic_block_payload()
+
+        parsed = runner.parse_payload(payload)
+
+        self.assertEqual(parsed["analysisType"], "dynamic_structural")
+        self.assertTrue(parsed["dynamic"])
+        self.assertEqual(parsed["dynamicSettings"]["startTime"], 0.0)
+        self.assertEqual(parsed["dynamicSettings"]["endTime"], 0.02)
+        self.assertEqual(parsed["dynamicSettings"]["timeStep"], 0.005)
+        self.assertEqual(parsed["dynamicSettings"]["outputInterval"], 0.01)
+        self.assertEqual(parsed["dynamicSettings"]["dampingRatio"], 0.02)
+        self.assertEqual(parsed["dynamicSettings"]["loadProfile"], "ramp")
+        self.assertEqual(parsed["dynamicSettings"]["frameCount"], 3)
+
+    def test_dynamic_settings_frame_budget_returns_422(self):
+        payload = dynamic_block_payload()
+        payload["dynamicSettings"]["endTime"] = 2.0
+        payload["dynamicSettings"]["timeStep"] = 0.001
+        payload["dynamicSettings"]["outputInterval"] = 0.005
+
+        with self.assertRaises(runner.UserFacingSolveError) as context:
+            runner.parse_payload(payload)
+
+        self.assertEqual(context.exception.status, 422)
+        self.assertIn("Dynamic Cloud FEA output would exceed frame budget", str(context.exception))
+
+    def test_dynamic_deck_contains_transient_step_and_time_point_output(self):
+        parsed = runner.parse_payload(dynamic_block_payload())
+        mesh = runner.generate_structured_hex_mesh(parsed["dimensions"], parsed["meshDensity"])
+        boundaries = runner.select_boundary_nodes(parsed, mesh)
+        nodal_loads = runner.distribute_normalized_loads_to_nodes(parsed, mesh, boundaries)
+        deck = runner.write_calculix_input_deck(parsed, mesh, boundaries, nodal_loads)
+
+        self.assertIn("*TIME POINTS, NAME=OUTPUT_TIMES, GENERATE", deck)
+        self.assertIn("*AMPLITUDE, NAME=LOAD_HISTORY, TIME=TOTAL TIME", deck)
+        self.assertIn("*DYNAMIC, ALPHA=-0.05", deck)
+        self.assertIn("*CLOAD, AMPLITUDE=LOAD_HISTORY", deck)
+        self.assertIn("*NODE FILE, NSET=NALL, TIME POINTS=OUTPUT_TIMES", deck)
+        self.assertIn("U,V", deck)
+        self.assertIn("*EL FILE, ELSET=SOLID, TIME POINTS=OUTPUT_TIMES", deck)
+        self.assertIn("*EL PRINT, ELSET=SOLID, TIME POINTS=OUTPUT_TIMES", deck)
+        self.assertIn("S", deck)
+        self.assertNotIn("*STATIC", deck)
+
+    def test_dynamic_amplitude_profiles(self):
+        ramp = runner.amplitude_table_for_dynamic({"startTime": 0.0, "endTime": 0.1, "timeStep": 0.01, "loadProfile": "ramp"})
+        step = runner.amplitude_table_for_dynamic({"startTime": 0.0, "endTime": 0.1, "timeStep": 0.01, "loadProfile": "step"})
+        sine = runner.amplitude_table_for_dynamic({"startTime": 0.0, "endTime": 0.1, "timeStep": 0.01, "loadProfile": "sinusoidal"})
+
+        self.assertEqual(ramp[0], (0.0, 0.0))
+        self.assertEqual(ramp[-1], (0.1, 1.0))
+        self.assertEqual(step[0], (0.0, 1.0))
+        self.assertEqual(step[-1], (0.1, 1.0))
+        self.assertGreater(len(sine), 3)
+        self.assertAlmostEqual(sine[0][1], 0.0)
+        self.assertAlmostEqual(max(value for _, value in sine), 1.0)
+        self.assertAlmostEqual(sine[-1][1], 0.0, places=10)
+
+    def test_dynamic_response_builds_framed_fields_and_summary_from_all_frames(self):
+        parsed = runner.parse_payload(dynamic_block_payload())
+        mesh = runner.generate_structured_hex_mesh(parsed["dimensions"], parsed["meshDensity"])
+        boundaries = runner.select_boundary_nodes(parsed, mesh)
+        parsed_files = dynamic_parsed_fixture(mesh, boundaries)
+
+        result = runner.response_from_parsed_dat(parsed, mesh, boundaries, "input deck", {"log": "solver log"}, parsed_files)
+        fields = result["fields"]
+
+        self.assertCloudResultIsParsed(result)
+        self.assertEqual(result["summary"]["transient"]["analysisType"], "dynamic_structural")
+        self.assertEqual(result["summary"]["transient"]["integrationMethod"], "calculix_dynamic_direct")
+        self.assertEqual(result["summary"]["transient"]["frameCount"], 3)
+        self.assertAlmostEqual(result["summary"]["maxStress"], 0.3)
+        self.assertAlmostEqual(result["summary"]["maxDisplacement"], 0.003)
+        self.assertAlmostEqual(result["summary"]["transient"]["peakDisplacementTimeSeconds"], 0.02)
+        self.assertEqual({field["frameIndex"] for field in fields}, {0, 1, 2})
+        self.assertEqual({field["timeSeconds"] for field in fields}, {0.0, 0.01, 0.02})
+        self.assertTrue(all(field["type"] in {"stress", "displacement", "velocity", "acceleration", "safety_factor"} for field in fields))
+        self.assertTrue(any(field["type"] == "acceleration" and field["provenance"].get("accelerationSource") == "derived_from_velocity" for field in fields))
+
     def test_calculix_dat_parser_accepts_legacy_and_context_signatures(self):
         with tempfile.TemporaryDirectory() as tmp:
             workdir = Path(tmp)
@@ -524,7 +604,7 @@ class ValidationSuite(unittest.TestCase):
         self.assertAlmostEqual(result["summary"]["maxDisplacement"], 0.0042)
         self.assertAlmostEqual(result["summary"]["safetyFactor"], ALUMINUM_6061["yieldMpa"] / full_max_stress)
         self.assertAlmostEqual(result["summary"]["reactionForce"], 1.0)
-        self.assertEqual(result["artifacts"]["solverResultParser"], "parsed-calculix-dat")
+        self.assertIn(result["artifacts"]["solverResultParser"], {"parsed-calculix-dat", "parsed-calculix-framed"})
         self.assertTrue(result["artifacts"]["resultCompaction"]["enabled"])
         self.assertEqual(result["artifacts"]["resultCompaction"]["originalStressSampleCount"], len(fields["stress"]["samples"]))
         self.assertEqual(result["artifacts"]["resultCompaction"]["returnedStressSampleCount"], len(fields["stress"]["samples"]))
@@ -643,7 +723,7 @@ class ValidationSuite(unittest.TestCase):
         self.assertEqual(provenance["kind"], "calculix_fea")
         self.assertIn(provenance["resultSource"], {"parsed_dat", "parsed_frd_dat"})
         self.assertEqual(provenance["meshSource"], mesh_source)
-        self.assertEqual(result["artifacts"]["solverResultParser"], "parsed-calculix-dat")
+        self.assertIn(result["artifacts"]["solverResultParser"], {"parsed-calculix-dat", "parsed-calculix-framed"})
 
 
 def block_payload(case_name, material, direction, force_n, fidelity):
@@ -679,6 +759,21 @@ def block_payload(case_name, material, direction, force_n, fidelity):
             "solverSettings": {},
         },
     }
+
+
+def dynamic_block_payload():
+    payload = block_payload("cantilever", ALUMINUM_6061, [0, 0, -1], 1.0, "standard")
+    payload["analysisType"] = "dynamic_structural"
+    payload["study"]["type"] = "dynamic_structural"
+    payload["study"]["solverSettings"] = {
+        "startTime": 0.0,
+        "endTime": 0.02,
+        "timeStep": 0.005,
+        "outputInterval": 0.01,
+        "dampingRatio": 0.02,
+    }
+    payload["dynamicSettings"] = dict(payload["study"]["solverSettings"])
+    return payload
 
 
 def viewer_space_block_payload(dimensions):
@@ -793,6 +888,55 @@ def dat_fixture_with_element_gradient():
         value = 0.02 + 0.18 * element_id / element_count
         lines.append(f"       {element_id}   {value:.6E}   0.000000E+00   0.000000E+00   0.000000E+00   0.000000E+00   0.000000E+00")
     return "\n".join(lines)
+
+
+def dynamic_parsed_fixture(mesh, boundaries):
+    frames = []
+    for frame_index, time_seconds, stress, displacement, velocity in [
+        (0, 0.0, 0.1, 0.0, 0.0),
+        (1, 0.01, 0.2, 0.001, -0.1),
+        (2, 0.02, 0.3, 0.003, -0.2),
+    ]:
+        displacements = {
+            node["id"]: [0.0, 0.0, -displacement * (node["coordinates"][0] / DIMENSIONS["x"])]
+            for node in mesh["nodes"]
+        }
+        velocities = {
+            node["id"]: [0.0, 0.0, velocity * (node["coordinates"][0] / DIMENSIONS["x"])]
+            for node in mesh["nodes"]
+        }
+        frames.append({
+            "frameIndex": frame_index,
+            "timeSeconds": time_seconds,
+            "displacements": displacements,
+            "velocities": velocities,
+            "reactions": {boundaries["fixedNodeIds"][0]: [0.0, 0.0, 1.0]},
+            "stresses": [
+                {
+                    "elementId": element["id"],
+                    "point": runner.element_centroid(mesh, element["id"]),
+                    "components": [stress, 0.0, 0.0, 0.0, 0.0, 0.0],
+                    "vonMises": stress,
+                }
+                for element in mesh["elements"]
+            ],
+            "nodalStresses": [
+                {
+                    "nodeId": node["id"],
+                    "point": node["coordinates"],
+                    "components": [stress, 0.0, 0.0, 0.0, 0.0, 0.0],
+                    "vonMises": stress,
+                }
+                for node in mesh["nodes"]
+            ],
+        })
+    return {
+        "frames": frames,
+        "files": ["opencae_solve.dat", "opencae_solve.frd"],
+        "status": "parsed-calculix-framed",
+        "resultSource": "parsed_frd_dat",
+        "visualizationSource": "frd_nodal_stress",
+    }
 
 
 def frd_fixture():

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ProjectSchema, ResultFieldSchema, ResultSummarySchema, RunEventSchema } from "./index";
+import { DynamicSolverSettingsSchema, ProjectSchema, ResultFieldSchema, ResultSummarySchema, RunEventSchema } from "./index";
 
 describe("ProjectSchema", () => {
   it("accepts the minimum local project shape", () => {
@@ -116,7 +116,18 @@ describe("ProjectSchema", () => {
       max: 1.25,
       units: "mm/s",
       frameIndex: 1,
-      timeSeconds: 0.005
+      timeSeconds: 0.005,
+      provenance: {
+        kind: "calculix_fea",
+        solver: "calculix-ccx",
+        solverVersion: "2.21",
+        meshSource: "structured_block",
+        resultSource: "parsed_frd_dat",
+        units: "mm-N-s-MPa",
+        integrationMethod: "calculix_dynamic_direct",
+        loadProfile: "ramp",
+        accelerationSource: "derived_from_velocity"
+      }
     })).toMatchObject({ frameIndex: 1, timeSeconds: 0.005 });
 
     expect(ResultFieldSchema.parse({
@@ -129,6 +140,47 @@ describe("ProjectSchema", () => {
       max: 42,
       units: "MPa"
     }).frameIndex).toBeUndefined();
+  });
+
+  it("accepts CalculiX direct dynamic settings and transient metadata", () => {
+    expect(DynamicSolverSettingsSchema.parse({
+      startTime: 0,
+      endTime: 0.1,
+      timeStep: 0.005,
+      outputInterval: 0.01,
+      dampingRatio: 0.02,
+      integrationMethod: "calculix_dynamic_direct",
+      loadProfile: "sinusoidal",
+      rayleighAlpha: 0.1,
+      rayleighBeta: 0.0002
+    })).toMatchObject({
+      integrationMethod: "calculix_dynamic_direct",
+      loadProfile: "sinusoidal",
+      rayleighAlpha: 0.1,
+      rayleighBeta: 0.0002
+    });
+
+    expect(ResultSummarySchema.parse({
+      maxStress: 0.3,
+      maxStressUnits: "MPa",
+      maxDisplacement: 0.003,
+      maxDisplacementUnits: "mm",
+      safetyFactor: 920,
+      reactionForce: 1,
+      reactionForceUnits: "N",
+      transient: {
+        analysisType: "dynamic_structural",
+        integrationMethod: "calculix_dynamic_direct",
+        startTime: 0,
+        endTime: 0.1,
+        timeStep: 0.005,
+        outputInterval: 0.01,
+        dampingRatio: 0.02,
+        frameCount: 11,
+        peakDisplacementTimeSeconds: 0.1,
+        peakDisplacement: 0.003
+      }
+    }).transient?.integrationMethod).toBe("calculix_dynamic_direct");
   });
 
   it("accepts optional timing estimates on run events", () => {

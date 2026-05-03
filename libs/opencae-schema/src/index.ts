@@ -73,7 +73,10 @@ export const DynamicSolverSettingsSchema = z.object({
   timeStep: z.number().default(0.005),
   outputInterval: z.number().default(0.005),
   dampingRatio: z.number().default(0.02),
-  integrationMethod: z.literal("newmark_average_acceleration").default("newmark_average_acceleration"),
+  integrationMethod: z.enum(["newmark_average_acceleration", "calculix_dynamic_direct"]).default("newmark_average_acceleration"),
+  loadProfile: z.enum(["ramp", "step", "sinusoidal", "quasi_static"]).default("ramp"),
+  rayleighAlpha: z.number().nonnegative().optional(),
+  rayleighBeta: z.number().nonnegative().optional(),
   allowFreeMotion: z.boolean().optional()
 });
 
@@ -111,7 +114,11 @@ export const ResultProvenanceSchema = z.object({
   meshSource: z.enum(["mock", "structured_block", "gmsh", "uploaded_inp", "unknown"]),
   resultSource: z.enum(["generated", "parsed_dat", "parsed_frd", "parsed_frd_dat"]),
   units: z.string(),
-  renderCoordinateSpace: z.string().optional()
+  renderCoordinateSpace: z.string().optional(),
+  integrationMethod: z.string().optional(),
+  loadProfile: z.string().optional(),
+  dynamicProfile: z.string().optional(),
+  accelerationSource: z.string().optional()
 });
 
 export const ResultFieldSchema = z.object({
@@ -250,7 +257,7 @@ export const ResultSummarySchema = z.object({
   transient: z
     .object({
       analysisType: z.literal("dynamic_structural"),
-      integrationMethod: z.literal("newmark_average_acceleration"),
+      integrationMethod: z.enum(["newmark_average_acceleration", "calculix_dynamic_direct"]),
       startTime: z.number(),
       endTime: z.number(),
       timeStep: z.number(),
