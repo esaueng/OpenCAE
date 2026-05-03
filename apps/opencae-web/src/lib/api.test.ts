@@ -471,7 +471,12 @@ describe("api", () => {
     vi.stubGlobal("fetch", fetchMock);
     const healthLogs: string[] = [];
 
-    const response = await runSimulation("study-1", cloudStudy, undefined, { onCloudFeaHealth: (message) => healthLogs.push(message) });
+    const resultRenderBounds = {
+      min: [-1.9, -0.25, -0.36] as [number, number, number],
+      max: [1.9, 0.25, 0.36] as [number, number, number],
+      coordinateSpace: "display_model" as const
+    };
+    const response = await runSimulation("study-1", cloudStudy, undefined, { onCloudFeaHealth: (message) => healthLogs.push(message), resultRenderBounds });
     const runCall = fetchMock.mock.calls.find(([input, init]) => String(input) === "/api/cloud-fea/runs" && init?.method === "POST");
     const requestBody = JSON.parse((runCall?.[1] as RequestInit).body as string) as Record<string, unknown>;
     const seen: RunEvent[] = [];
@@ -480,7 +485,7 @@ describe("api", () => {
     source.close();
     const results = await getResults(response.run.id);
 
-    expect(requestBody).toMatchObject({ projectId: "project-1", studyId: "study-1", fidelity: "ultra" });
+    expect(requestBody).toMatchObject({ projectId: "project-1", studyId: "study-1", fidelity: "ultra", resultRenderBounds });
     expect(healthLogs).toEqual([
       "Cloud FEA route health: mode=cloudflare-worker; containerBound=true; runner=n/a; ccx=n/a.",
       "Cloud FEA request started: POST /api/cloud-fea/runs."

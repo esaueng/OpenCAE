@@ -3,7 +3,7 @@ import type { CSSProperties, ElementRef, MouseEvent as ReactMouseEvent, MutableR
 import { Billboard, Bounds, Edges, GizmoHelper, Html, Line, OrbitControls, Text, useBounds } from "@react-three/drei";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import type { ThreeEvent } from "@react-three/fiber";
-import type { DisplayFace, DisplayModel, MeshSummary, ResultField } from "@opencae/schema";
+import type { DisplayFace, DisplayModel, MeshSummary, ResultField, ResultRenderBounds } from "@opencae/schema";
 import { meshVolumeM3FromTriangles, type Triangle } from "@opencae/units";
 import * as THREE from "three";
 import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
@@ -89,6 +89,7 @@ interface CadViewerProps {
   supportMarkers: ViewerSupportMarker[];
   printLayerOrientation: PrintLayerOrientation | null;
   onMeasureDisplayModelDimensions?: (dimensions: NonNullable<DisplayModel["dimensions"]>) => void;
+  onResultRenderBoundsChange?: (bounds: ResultRenderBounds | null) => void;
   onViewerInteractionChange?: (interacting: boolean) => void;
 }
 
@@ -226,6 +227,11 @@ export function CadViewer(props: CadViewerProps) {
   useEffect(() => {
     setUploadedPreviewBounds(null);
   }, [props.displayModel.nativeCad?.contentBase64, props.displayModel.visualMesh?.contentBase64]);
+  useEffect(() => {
+    const kind = modelKindForDisplayModel(props.displayModel);
+    const bounds = kind === "uploaded" && uploadedPreviewBounds ? uploadedPreviewBounds : dimensionBoundsForDisplayModel(props.displayModel);
+    props.onResultRenderBoundsChange?.(bounds ? resultRenderBoundsForBox(bounds) : null);
+  }, [props.displayModel, props.onResultRenderBoundsChange, uploadedPreviewBounds]);
   return (
     <section className={`viewer-shell ${effectiveViewMode === "results" ? "results-view" : ""}`} aria-label="3D CAD viewer">
       <Canvas frameloop="demand" dpr={viewerDpr} camera={{ position: [4.8, 4.8, 4.8], up: ISO_CAMERA_UP.toArray(), fov: 42 }} onPointerMissed={props.onViewerMiss}>
@@ -1191,6 +1197,14 @@ function boxToLabelBounds(bounds: THREE.Box3) {
   return {
     min: bounds.min.toArray() as [number, number, number],
     max: bounds.max.toArray() as [number, number, number]
+  };
+}
+
+function resultRenderBoundsForBox(bounds: THREE.Box3): ResultRenderBounds {
+  return {
+    min: bounds.min.toArray() as [number, number, number],
+    max: bounds.max.toArray() as [number, number, number],
+    coordinateSpace: "display_model"
   };
 }
 

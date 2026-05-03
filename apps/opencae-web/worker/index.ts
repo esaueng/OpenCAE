@@ -195,6 +195,7 @@ async function createCloudFeaRun(request: Request, env: RuntimeEnv, ctx?: Execut
     analysisType: analysisTypeFromBody(body),
     study: studyArtifact,
     displayModel: displayModelArtifact,
+    resultRenderBounds: isRecord(body.resultRenderBounds) ? body.resultRenderBounds : undefined,
     solverMaterial,
     geometry: isRecord(body.geometry) ? body.geometry : undefined,
     dynamicSettings: isRecord(body.dynamicSettings) ? body.dynamicSettings : undefined,

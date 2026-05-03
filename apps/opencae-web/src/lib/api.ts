@@ -1,4 +1,4 @@
-import type { AnalysisMesh, DisplayModel, DynamicSolverSettings, MeshQuality, Project, ResultField, ResultSummary, RunEvent, Study, StudyRun } from "@opencae/schema";
+import type { AnalysisMesh, DisplayModel, DynamicSolverSettings, MeshQuality, Project, ResultField, ResultRenderBounds, ResultSummary, RunEvent, Study, StudyRun } from "@opencae/schema";
 import type { LoadApplicationPoint, LoadDirection, LoadType, PayloadLoadMetadata, PayloadObjectSelection } from "../loadPreview";
 import { embedUploadedModelFile, type EmbeddedModelFile, type LocalResultBundle } from "../projectFile";
 import { createLocalBlankProject, createLocalSampleProject, createLocalUploadResponse, openLocalProjectPayload } from "../localProjectFactory";
@@ -21,6 +21,7 @@ export interface ResultsResponse {
 
 export interface RunSimulationOptions {
   onCloudFeaHealth?: (message: string) => void;
+  resultRenderBounds?: ResultRenderBounds | null;
 }
 
 export interface CloudFeaRouteHealth {
@@ -286,6 +287,7 @@ export async function runSimulation(studyId: string, currentStudy?: Study, displ
           fidelity: simulationFidelity(currentStudy),
           study: currentStudy,
           displayModel,
+          resultRenderBounds: options.resultRenderBounds ?? undefined,
           geometry: cloudFeaGeometryPayload(displayModel),
           dynamicSettings: currentStudy.type === "dynamic_structural" ? currentStudy.solverSettings : undefined
         })

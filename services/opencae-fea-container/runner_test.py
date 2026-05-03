@@ -100,7 +100,7 @@ class CalculixDatParserTest(unittest.TestCase):
         self.assertAlmostEqual(result["summary"]["maxStress"], expected_summary_stress)
         self.assertAlmostEqual(fields["stress"]["max"], 0.18)
         self.assertEqual(fields["stress"]["location"], "node")
-        self.assertEqual(fields["stress"]["samples"][0]["source"], "calculix-frd")
+        self.assertEqual(fields["stress"]["samples"][0]["source"], "calculix-nodal-surface")
         self.assertEqual(fields["safety_factor"]["location"], "node")
         self.assertEqual(result["artifacts"]["resultCoordinateMapping"]["resultSampleCoordinateSpace"], "display_model")
         self.assertGreater(len({sample["value"] for sample in fields["stress"]["samples"]}), 2)
