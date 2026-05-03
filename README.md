@@ -55,7 +55,7 @@ pnpm install
 pnpm deploy:cloudflare
 ```
 
-Wrangler uses [wrangler.jsonc](wrangler.jsonc) for the production app domain by default. It is intentionally kept container-bound so Cloudflare Builds or plain Wrangler deploys for Worker `opencae` cannot drop `FEA_CONTAINER`. [wrangler.containers.jsonc](wrangler.containers.jsonc) is kept as an explicit production mirror for container deploy commands. Cloud FEA browser calls stay on the app domain at `/api/cloud-fea/*`; the Worker reaches the container through the `FEA_CONTAINER` binding.
+Wrangler uses [wrangler.containers.jsonc](wrangler.containers.jsonc) for the production app domain by default. It is intentionally kept container-bound so Cloudflare Builds or plain Wrangler deploys for Worker `opencae` cannot drop `FEA_CONTAINER`. [wrangler.jsonc](wrangler.jsonc) is kept as the same production container-bound config. Cloud FEA browser calls stay on the app domain at `/api/cloud-fea/*`; the Worker reaches the container through the `FEA_CONTAINER` binding.
 
 Do not change production `wrangler.jsonc` to a non-container Worker. The production Worker name is `opencae`, and every deploy to that Worker must include `FEA_CONTAINER`.
 
@@ -69,6 +69,8 @@ pnpm deploy:cloudflare:containers
 ```
 
 Real Cloud FEA transient animation requires a successful container deploy because dynamic Cloud FEA runs are rejected unless the container returns timed multi-frame result fields. The Cloud FEA container generates CalculiX input decks and uses the open-source CalculiX CrunchiX executable (`ccx`) for static and transient structural solves when the container runtime is available.
+
+Changing `services/opencae-fea-container/runner.py` requires redeploying the container-enabled Worker with `pnpm deploy:cloudflare`; rebuilding or deploying web assets alone will not update the Cloud FEA runner image.
 
 For a static Worker deploy without Cloud FEA containers, use the explicit static path:
 
@@ -92,12 +94,6 @@ For Cloudflare Builds, the deploy command must be one of:
 
 ```bash
 pnpm deploy:cloudflare
-```
-
-or:
-
-```bash
-pnpm build:cloudflare && npx wrangler deploy
 ```
 
 ## Workspace Layout

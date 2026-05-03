@@ -49,6 +49,20 @@ DIMENSIONS = {"x": 100.0, "y": 30.0, "z": 10.0}
 
 
 class ValidationSuite(unittest.TestCase):
+    def test_health_reports_dynamic_support(self):
+        handler = JsonCapturingHandler()
+        handler.path = "/health"
+
+        handler.do_GET()
+        payload = json_payload_from_handler(handler)
+
+        self.assertEqual(handler.status, 200)
+        self.assertEqual(payload["runnerVersion"], runner.RUNNER_VERSION)
+        self.assertIn("dynamic_structural", payload["supportedAnalysisTypes"])
+        self.assertEqual(payload["dynamicSupport"]["enabled"], True)
+        self.assertEqual(payload["dynamicSupport"]["integrationMethod"], "calculix_dynamic_direct")
+        self.assertEqual(payload["dynamicSupport"]["maxFrames"], runner.MAX_DYNAMIC_FRAMES)
+
     def test_cantilever_hand_estimate_guards_against_28mpa_regression(self):
         stress = cantilever_bending_stress_mpa(1.0, DIMENSIONS)
         displacement = cantilever_tip_displacement_mm(1.0, DIMENSIONS, ALUMINUM_6061["youngsModulusMpa"])
@@ -98,6 +112,21 @@ class ValidationSuite(unittest.TestCase):
         self.assertEqual(parsed["dynamicSettings"]["dampingRatio"], 0.02)
         self.assertEqual(parsed["dynamicSettings"]["loadProfile"], "ramp")
         self.assertEqual(parsed["dynamicSettings"]["frameCount"], 3)
+
+    def test_dynamic_payload_uses_study_type_without_static_only_rejection(self):
+        payload = dynamic_block_payload()
+        payload.pop("analysisType")
+
+        parsed = runner.parse_payload(payload)
+
+        self.assertEqual(parsed["analysisType"], "dynamic_structural")
+        self.assertTrue(parsed["dynamic"])
+        self.assertIsInstance(parsed["dynamicSettings"], dict)
+
+    def test_runner_source_does_not_contain_legacy_static_only_error(self):
+        source = Path(runner.__file__).read_text()
+
+        self.assertNotIn("Cloud FEA currently supports static stress studies only", source)
 
     def test_dynamic_settings_frame_budget_returns_422(self):
         payload = dynamic_block_payload()

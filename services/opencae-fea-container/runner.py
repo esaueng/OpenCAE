@@ -17,7 +17,7 @@ UNSUPPORTED_BLOCK_ERROR = "Cloud FEA currently supports only block-like single-b
 CCX_UNAVAILABLE_ERROR = "CalculiX executable unavailable; refusing to publish Cloud FEA results without a real solver run."
 GMSH_UNAVAILABLE_ERROR = "Gmsh executable unavailable; refusing to mesh uploaded geometry for Cloud FEA."
 UNSUPPORTED_UPLOADED_GEOMETRY_ERROR = "Cloud FEA uploaded geometry support requires STEP, STL, or OBJ model bytes and confident face mapping."
-RUNNER_VERSION = "2026-05-03-load-normalization"
+RUNNER_VERSION = "2026-05-03-dynamic-v1"
 AXES = ("x", "y", "z")
 DOFS = (1, 2, 3)
 FIDELITY_MESH_DENSITY = {
@@ -45,7 +45,19 @@ STANDARD_GRAVITY = 9.80665
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/health":
-            self._json(200, {"ok": True, "solver": "calculix", "runnerVersion": RUNNER_VERSION, "ccx": command_version(["ccx", "-v"]), "gmsh": command_version(["gmsh", "--version"])})
+            self._json(200, {
+                "ok": True,
+                "solver": "calculix",
+                "runnerVersion": RUNNER_VERSION,
+                "supportedAnalysisTypes": ["static_stress", "dynamic_structural"],
+                "dynamicSupport": {
+                    "enabled": True,
+                    "integrationMethod": "calculix_dynamic_direct",
+                    "maxFrames": MAX_DYNAMIC_FRAMES,
+                },
+                "ccx": command_version(["ccx", "-v"]),
+                "gmsh": command_version(["gmsh", "--version"]),
+            })
             return
         self._json(404, {"error": "Not found"})
 

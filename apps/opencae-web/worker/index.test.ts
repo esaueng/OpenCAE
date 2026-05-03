@@ -8,9 +8,9 @@ vi.mock("@cloudflare/containers", () => ({ Container: class Container {} }));
 
 import worker, { MAX_CLOUD_FEA_RESULT_JSON_BYTES, looksLikePlaceholderResult } from "./index";
 
-const expectedCloudFeaRunnerVersion = "2026-05-03-load-normalization";
-const expectedCloudFeaContainerImage = "registry.cloudflare.com/747b74cbd7d019dd7aeecb2c24a4bf10/opencae/opencae-fea:0.1.1-load-normalization";
-const expectedCloudFeaContainerInstanceName = "opencae-fea-solver-load-normalization-v1";
+const expectedCloudFeaRunnerVersion = "2026-05-03-dynamic-v1";
+const expectedCloudFeaContainerImage = "registry.cloudflare.com/747b74cbd7d019dd7aeecb2c24a4bf10/opencae/opencae-fea:0.1.2-dynamic-v1";
+const expectedCloudFeaContainerInstanceName = "opencae-fea-solver-dynamic-v1";
 
 class MemoryR2Bucket {
   objects = new Map<string, string>();
@@ -29,10 +29,27 @@ function healthyContainerFetch(result: Record<string, unknown>) {
   return vi.fn(async (request: Request) => {
     const url = new URL(request.url);
     if (url.pathname === "/health") {
-      return Response.json({ ok: true, runnerVersion: expectedCloudFeaRunnerVersion, ccx: "ccx-test", gmsh: "gmsh-test" });
+      return Response.json(dynamicContainerHealth());
     }
     return Response.json(result);
   });
+}
+
+function dynamicContainerHealth(overrides: Record<string, unknown> = {}) {
+  return {
+    ok: true,
+    solver: "calculix",
+    runnerVersion: expectedCloudFeaRunnerVersion,
+    supportedAnalysisTypes: ["static_stress", "dynamic_structural"],
+    dynamicSupport: {
+      enabled: true,
+      integrationMethod: "calculix_dynamic_direct",
+      maxFrames: 250
+    },
+    ccx: "ccx-test",
+    gmsh: "gmsh-test",
+    ...overrides
+  };
 }
 
 function readJsonc(path: string) {
@@ -64,7 +81,7 @@ describe("Cloudflare FEA worker orchestration", () => {
     const staticConfig = readJsonc("../../../wrangler.static.jsonc") as typeof containerConfig;
     const localFirstConfig = readJsonc("../../../wrangler.local-first.jsonc") as typeof containerConfig;
 
-    expect(packageJson.scripts["deploy:cloudflare"]).toContain("--config wrangler.jsonc");
+    expect(packageJson.scripts["deploy:cloudflare"]).toContain("--config wrangler.containers.jsonc");
     expect(packageJson.scripts["deploy:cloudflare"]).toContain("pnpm verify:cloudflare-config");
     expect(packageJson.scripts["deploy:cloudflare"]).toContain("pnpm containers:build");
     expect(packageJson.scripts["deploy:cloudflare"]).toContain("pnpm containers:push");
@@ -150,11 +167,12 @@ describe("Cloudflare FEA worker orchestration", () => {
   });
 
   test("reports Cloud FEA health when the container binding is present", async () => {
+    const fetch = vi.fn(async () => Response.json(dynamicContainerHealth()));
     const env = {
       ASSETS: { fetch: vi.fn(async () => new Response("asset")) },
       FEA_ARTIFACTS: new MemoryR2Bucket(),
       FEA_RUN_QUEUE: { send: vi.fn(async () => undefined) },
-      FEA_CONTAINER: { get: vi.fn() }
+      FEA_CONTAINER: { fetch }
     };
 
     const response = await worker.fetch(new Request("https://cae.example/api/cloud-fea/health"), env);
@@ -171,10 +189,87 @@ describe("Cloudflare FEA worker orchestration", () => {
         supported: true,
         maxFrames: 250
       },
+      containerRunnerVersion: expectedCloudFeaRunnerVersion,
+      supportedAnalysisTypes: ["static_stress", "dynamic_structural"],
+      dynamicCloudFeaAvailable: true,
+      expectedRunnerVersion: expectedCloudFeaRunnerVersion,
       requestOrigin: "https://cae.example",
       cloudFeaEndpoint: "https://cae.example/api/cloud-fea/runs"
     });
+    expect(fetch).toHaveBeenCalledOnce();
     expect(body.deploymentHint).toBeUndefined();
+  });
+
+  test("rejects dynamic run creation before writing artifacts when container lacks dynamic support", async () => {
+    const bucket = new MemoryR2Bucket();
+    const send = vi.fn(async () => undefined);
+    const fetch = vi.fn(async (request: Request) => {
+      const url = new URL(request.url);
+      if (url.pathname === "/health") {
+        return Response.json(dynamicContainerHealth({
+          supportedAnalysisTypes: ["static_stress"],
+          dynamicSupport: { enabled: false, integrationMethod: "calculix_static_only", maxFrames: 0 }
+        }));
+      }
+      return Response.json(cloudContainerSolveResponse("run-should-not-start", true));
+    });
+    const env = {
+      ASSETS: { fetch: vi.fn(async () => new Response("asset")) },
+      FEA_ARTIFACTS: bucket,
+      FEA_RUN_QUEUE: { send },
+      FEA_CONTAINER: { fetch }
+    };
+
+    const response = await worker.fetch(new Request("https://cae.example/api/cloud-fea/runs", {
+      method: "POST",
+      body: JSON.stringify({
+        projectId: "project-1",
+        studyId: "study-1",
+        fidelity: "ultra",
+        study: cloudStudyWithMaterial("mat-aluminum-6061", {}, "dynamic_structural")
+      })
+    }), env);
+    const body = await response.json() as { error: string };
+
+    expect(response.status).toBe(503);
+    expect(body.error).toBe(`Cloud FEA dynamic requires runner ${expectedCloudFeaRunnerVersion} or newer, but the deployed container is stale. Rebuild/redeploy the Cloud FEA container.`);
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(send).not.toHaveBeenCalled();
+    expect(bucket.objects.size).toBe(0);
+  });
+
+  test("allows dynamic run creation after current container health proves dynamic support", async () => {
+    const bucket = new MemoryR2Bucket();
+    const send = vi.fn(async () => undefined);
+    const fetch = vi.fn(async (request: Request) => {
+      const url = new URL(request.url);
+      if (url.pathname === "/health") {
+        return Response.json(dynamicContainerHealth());
+      }
+      return Response.json(cloudContainerSolveResponse("run-current-container", true));
+    });
+    const env = {
+      ASSETS: { fetch: vi.fn(async () => new Response("asset")) },
+      FEA_ARTIFACTS: bucket,
+      FEA_RUN_QUEUE: { send },
+      FEA_CONTAINER: { fetch }
+    };
+
+    const response = await worker.fetch(new Request("https://cae.example/api/cloud-fea/runs", {
+      method: "POST",
+      body: JSON.stringify({
+        projectId: "project-1",
+        studyId: "study-1",
+        fidelity: "ultra",
+        study: cloudStudyWithMaterial("mat-aluminum-6061", {}, "dynamic_structural")
+      })
+    }), env);
+    const body = await response.json() as { run: { id: string; status: string } };
+
+    expect(response.status).toBe(202);
+    expect(body.run.status).toBe("queued");
+    expect(await bucket.get(`runs/${body.run.id}/request.json`)).not.toBeNull();
+    expect(send).toHaveBeenCalledWith({ runId: body.run.id });
   });
 
   test("preflights force, pressure, and payload mass loads", async () => {
@@ -263,7 +358,7 @@ describe("Cloudflare FEA worker orchestration", () => {
       FEA_ARTIFACTS: bucket,
       FEA_RUN_QUEUE: { send },
       FEA_CONTAINER: {
-        fetch: vi.fn(async () => Response.json(cloudContainerSolveResponse("run-waituntil-queued-binding", true)))
+        fetch: healthyContainerFetch(cloudContainerSolveResponse("run-waituntil-queued-binding", true))
       }
     };
     const ctx = { waitUntil: vi.fn((promise: Promise<unknown>) => pending.push(promise)) };
@@ -337,7 +432,9 @@ describe("Cloudflare FEA worker orchestration", () => {
       ASSETS: { fetch: vi.fn(async () => new Response("asset")) },
       FEA_ARTIFACTS: bucket,
       FEA_RUN_QUEUE: { send },
-      FEA_CONTAINER: { get: vi.fn() }
+      FEA_CONTAINER: {
+        fetch: healthyContainerFetch(cloudContainerSolveResponse("run-queue-dispatch-failure", true))
+      }
     };
     const ctx = { waitUntil: vi.fn() };
 
@@ -540,7 +637,7 @@ describe("Cloudflare FEA worker orchestration", () => {
       const url = new URL(request.url);
       if (url.pathname === "/health") {
         expect(request.method).toBe("GET");
-        return Response.json({ ok: true, runnerVersion: expectedCloudFeaRunnerVersion, ccx: "ccx-test", gmsh: "gmsh-test" });
+        return Response.json(dynamicContainerHealth());
       }
       expect(request.method).toBe("POST");
       expect(url.pathname).toBe("/solve");
@@ -611,7 +708,7 @@ describe("Cloudflare FEA worker orchestration", () => {
     expect(message.ack).toHaveBeenCalled();
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(events.at(-1)).toMatchObject({ type: "error" });
-    expect(events.at(-1)?.message).toContain(`Cloud FEA container is stale: expected runner ${expectedCloudFeaRunnerVersion}, got 2026-05-03-http-500-diagnostics.`);
+    expect(events.at(-1)?.message).toContain(`Cloud FEA container is stale: expected runner ${expectedCloudFeaRunnerVersion} or newer, got 2026-05-03-http-500-diagnostics.`);
     expect(failed.error).toBe(events.at(-1)?.message);
     expect(await bucket.get("runs/run-cloud-stale-runner/results.json")).toBeNull();
   });
@@ -705,7 +802,7 @@ describe("Cloudflare FEA worker orchestration", () => {
         fetch: vi.fn(async (request: Request) => {
           const url = new URL(request.url);
           if (url.pathname === "/health") {
-            return Response.json({ ok: true, runnerVersion: expectedCloudFeaRunnerVersion, ccx: "ccx-test", gmsh: "gmsh-test" });
+            return Response.json(dynamicContainerHealth());
           }
           return Response.json({
             error: "Meshing failed: STL is not watertight.",
@@ -753,7 +850,7 @@ describe("Cloudflare FEA worker orchestration", () => {
         fetch: vi.fn(async (request: Request) => {
           const url = new URL(request.url);
           if (url.pathname === "/health") {
-            return Response.json({ ok: true, runnerVersion: expectedCloudFeaRunnerVersion, ccx: "ccx-test", gmsh: "gmsh-test" });
+            return Response.json(dynamicContainerHealth());
           }
           return new Response("container process crashed before JSON diagnostics", {
             status: 500,
@@ -791,7 +888,7 @@ describe("Cloudflare FEA worker orchestration", () => {
         fetch: vi.fn(async (request: Request) => {
           const url = new URL(request.url);
           if (url.pathname === "/health") {
-            return Response.json({ ok: true, runnerVersion: expectedCloudFeaRunnerVersion, ccx: "ccx-test", gmsh: "gmsh-test" });
+            return Response.json(dynamicContainerHealth());
           }
           return Response.json({
             error: "CalculiX adapter failed: boom",

@@ -44,6 +44,10 @@ export interface CloudFeaRouteHealth {
   queueBound?: boolean;
   containerBound?: boolean;
   containersEnabled?: boolean;
+  containerRunnerVersion?: string;
+  supportedAnalysisTypes?: string[];
+  dynamicCloudFeaAvailable?: boolean;
+  expectedRunnerVersion?: string;
   dynamicStructural?: {
     supported?: boolean;
     maxFrames?: number;
