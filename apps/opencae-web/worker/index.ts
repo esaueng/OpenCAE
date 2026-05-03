@@ -25,7 +25,7 @@ type RuntimeEnv = Omit<Env, "FEA_ARTIFACTS" | "FEA_RUN_QUEUE" | "FEA_CONTAINER">
 export class OpenCaeFeaContainer extends Container {
   defaultPort = 8080;
   requiredPorts = [8080];
-  sleepAfter = "10m";
+  sleepAfter = "1m";
 }
 
 const jsonHeaders = {
@@ -51,6 +51,7 @@ export const MAX_CLOUD_FEA_RESULT_JSON_BYTES = 8 * 1024 * 1024;
 export const MAX_CLOUD_FEA_FIELD_VALUES = 25_000;
 export const MAX_CLOUD_FEA_FIELD_SAMPLES = 25_000;
 const MAX_CONTAINER_FAILURE_BODY_PREVIEW = 2_000;
+const cloudFeaContainerInstanceName = "opencae-fea-solver-shared";
 const cloudFeaResultBudgetExceededMessage = "Cloud FEA result payload exceeded the UI result budget. Reduce fidelity or enable result decimation.";
 
 export default {
@@ -144,7 +145,7 @@ async function cloudFeaHealth(request: Request, env: RuntimeEnv): Promise<Respon
   };
   if (containerBound && new URL(request.url).searchParams.get("probeContainer") === "1") {
     try {
-      body.containerHealth = await probeFeaContainerHealth(env, "health-check");
+      body.containerHealth = await probeFeaContainerHealth(env, cloudFeaContainerInstanceName);
     } catch (error) {
       body.containerHealthError = error instanceof Error ? error.message : String(error);
     }
@@ -264,7 +265,7 @@ async function runCloudFeaSolve(runId: string, env: RuntimeEnv): Promise<void> {
   ];
   await artifacts.put(`runs/${runId}/events.json`, JSON.stringify(events, null, 2));
   try {
-    const containerHealth = await probeFeaContainerHealth(env, runId);
+    const containerHealth = await probeFeaContainerHealth(env, cloudFeaContainerInstanceName);
     events.push({
       runId,
       type: "progress",
@@ -364,8 +365,7 @@ async function fetchFeaContainer(env: RuntimeEnv, instanceName: string, path: "/
 }
 
 async function callFeaContainer(env: RuntimeEnv, payload: Record<string, unknown>): Promise<Response> {
-  const instanceName = typeof payload.runId === "string" ? payload.runId : crypto.randomUUID();
-  return fetchFeaContainer(env, instanceName, "/solve", {
+  return fetchFeaContainer(env, cloudFeaContainerInstanceName, "/solve", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload)
