@@ -348,7 +348,15 @@ def normalized_dynamic_settings(raw):
         diagnostics.append(dynamic_diagnostic("cloud-fea-dynamic-damping-ratio", "Cloud FEA dynamic dampingRatio must be a finite non-negative number."))
     frame_count = dynamic_frame_count(start_time, end_time, output_interval) if not diagnostics else 0
     if frame_count > MAX_DYNAMIC_FRAMES:
-        diagnostics.append(dynamic_diagnostic("cloud-fea-dynamic-frame-budget", "Dynamic Cloud FEA output would exceed frame budget; increase outputInterval or reduce endTime."))
+        diagnostics.append(dynamic_diagnostic(
+            "cloud-fea-dynamic-frame-budget",
+            "Dynamic Cloud FEA output would exceed frame budget; increase output interval or reduce end time.",
+            {
+                "requestedOutputInterval": float(output_interval),
+                "estimatedFrameCount": frame_count,
+                "maxFrames": MAX_DYNAMIC_FRAMES,
+            },
+        ))
     if diagnostics:
         raise UserFacingSolveError(diagnostics[0]["message"], 422, {"diagnostics": diagnostics})
     settings = {
@@ -377,14 +385,17 @@ def dynamic_frame_count(start_time, end_time, output_interval):
     return int(math.floor(duration / output_interval + 1e-9)) + 1
 
 
-def dynamic_diagnostic(diagnostic_id, message):
-    return {
+def dynamic_diagnostic(diagnostic_id, message, details=None):
+    diagnostic = {
         "id": diagnostic_id,
         "severity": "error",
         "source": "preflight",
         "message": message,
         "suggestedActions": [],
     }
+    if isinstance(details, dict):
+        diagnostic["details"] = details
+    return diagnostic
 
 
 def fixed_support_constraints(study):

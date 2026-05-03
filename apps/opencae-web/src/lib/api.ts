@@ -90,7 +90,9 @@ const localEventsByRunId = new Map<string, RunEvent[]>();
 const cloudFeaApiBaseByRunId = new Map<string, string>();
 const CLOUD_FEA_API_BASE = "";
 const DEV_LOCAL_CLOUD_FEA_BRIDGE_API_BASE = "http://localhost:4317";
-const MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.005;
+const DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.005;
+const MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.001;
+const MIN_CLOUD_FEA_OUTPUT_INTERVAL_SECONDS = 0.0005;
 
 export async function loadSampleProject(sample: SampleModelId = "bracket", analysisType: SampleAnalysisType = "static_stress"): Promise<SampleProjectResponse> {
   return fetchJsonWithFallback(
@@ -489,12 +491,15 @@ function localRunDurationEstimateMs(study: Study, frameCount = study.type === "d
   return Math.round((1400 + frameCost) * meshMultiplier * dynamicMultiplier);
 }
 
-function dynamicOutputFrameEstimate(study: Study): number {
+export function dynamicOutputFrameEstimate(study: Study, options: { backend?: "cloudflare_fea" | "local_detailed" } = {}): number {
   const raw = study.solverSettings as Partial<DynamicSolverSettings>;
   const startTime = finiteOr(raw.startTime, 0);
   const endTime = finiteOr(raw.endTime, 0.1);
-  const timeStep = finiteOr(raw.timeStep, 0.005);
-  const outputInterval = Math.max(finiteOr(raw.outputInterval, 0.005), timeStep, MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS);
+  const timeStep = finiteOr(raw.timeStep, DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS);
+  const requestedOutputInterval = finiteOr(raw.outputInterval, DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS);
+  const backend = options.backend ?? simulationBackend(study) ?? "local_detailed";
+  const backendMinimum = backend === "cloudflare_fea" ? MIN_CLOUD_FEA_OUTPUT_INTERVAL_SECONDS : Math.max(DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS, MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS);
+  const outputInterval = Math.max(requestedOutputInterval, timeStep, backendMinimum);
   const duration = Math.max(0, endTime - startTime);
   const wholeSteps = Math.floor(duration / outputInterval);
   const remainder = duration - wholeSteps * outputInterval;

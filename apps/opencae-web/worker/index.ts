@@ -1142,7 +1142,8 @@ function validateDynamicPreflightSettings(
   const startTime = finiteNumber(rawSettings.startTime, 0);
   const endTime = finiteNumber(rawSettings.endTime, 0.1);
   const timeStep = finiteNumber(rawSettings.timeStep, 0.005);
-  const outputInterval = finiteNumber(rawSettings.outputInterval, Math.max(timeStep, 0.005));
+  const requestedOutputInterval = finiteNumber(rawSettings.outputInterval, Math.max(timeStep, 0.005));
+  const outputInterval = requestedOutputInterval;
   const dampingRatio = finiteNumber(rawSettings.dampingRatio, 0.02);
   let ok = true;
   if (startTime < 0 || endTime <= startTime || timeStep <= 0 || outputInterval <= 0 || outputInterval < timeStep || dampingRatio < 0) {
@@ -1151,7 +1152,11 @@ function validateDynamicPreflightSettings(
   }
   const frameCount = Math.floor((endTime - startTime) / outputInterval + 1e-9) + 1;
   if (Number.isFinite(frameCount) && frameCount > MAX_CLOUD_FEA_DYNAMIC_FRAMES) {
-    diagnostics.push(preflightDiagnostic("cloud-fea-dynamic-frame-budget", "Dynamic Cloud FEA output would exceed frame budget; increase outputInterval or reduce endTime."));
+    diagnostics.push(preflightDiagnostic("cloud-fea-dynamic-frame-budget", "Dynamic Cloud FEA output would exceed frame budget; increase output interval or reduce end time.", {
+      requestedOutputInterval,
+      estimatedFrameCount: frameCount,
+      maxFrames: MAX_CLOUD_FEA_DYNAMIC_FRAMES
+    }));
     ok = false;
   }
   return ok;

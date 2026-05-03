@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { estimateAllowableLoadForSafetyFactor } from "@opencae/schema";
 import type { DisplayModel, Project, RunEvent, Study } from "@opencae/schema";
-import { addLoad, addSupport, assignMaterial, cancelRun, createProject, generateMesh, getCloudFeaPreflight, getResults, importLocalProject, loadSampleProject, renameProject, runSimulation, subscribeToRun, updateStudy, uploadModel } from "./api";
+import { addLoad, addSupport, assignMaterial, cancelRun, createProject, dynamicOutputFrameEstimate, generateMesh, getCloudFeaPreflight, getResults, importLocalProject, loadSampleProject, renameProject, runSimulation, subscribeToRun, updateStudy, uploadModel } from "./api";
 
 const TestFile = globalThis.File ?? class extends Blob {
   name: string;
@@ -866,9 +866,9 @@ describe("api", () => {
         backend: "cloudflare_fea",
         fidelity: "ultra",
         startTime: 0,
-        endTime: 0.5,
-        timeStep: 0.005,
-        outputInterval: 0.005,
+        endTime: 0.1,
+        timeStep: 0.001,
+        outputInterval: 0.001,
         dampingRatio: 0.02,
         integrationMethod: "newmark_average_acceleration",
         loadProfile: "ramp"
@@ -914,12 +914,12 @@ describe("api", () => {
             safetyFactor: 0.64,
             reactionForce: 500,
             reactionForceUnits: "N",
-            transient: { startTime: 0, endTime: 0.5, timeStep: 0.005, outputInterval: 0.005, frameCount: 2 }
+            transient: { startTime: 0, endTime: 0.1, timeStep: 0.001, outputInterval: 0.001, frameCount: 101 }
           },
           fields: [
             { id: "stress-0", runId: "run-cloud-dynamic-1", type: "stress", location: "node", values: [120000], min: 120000, max: 431400000, units: "Pa", frameIndex: 0, time: 0, samples: [{ point: [0, 0, 0], value: 120000, source: "calculix", vonMisesStressPa: 120000 }] },
-            { id: "stress-1", runId: "run-cloud-dynamic-1", type: "stress", location: "node", values: [431400000], min: 120000, max: 431400000, units: "Pa", frameIndex: 1, time: 0.005, samples: [{ point: [1, 0, 0], value: 431400000, source: "calculix", vonMisesStressPa: 431400000 }] },
-            { id: "disp-1", runId: "run-cloud-dynamic-1", type: "displacement", location: "node", values: [0.000761], min: -0.000761, max: 0.000761, units: "m", frameIndex: 1, time: 0.005, samples: [{ point: [1, 0, 0], value: 0.000761, source: "calculix" }] }
+            { id: "stress-1", runId: "run-cloud-dynamic-1", type: "stress", location: "node", values: [431400000], min: 120000, max: 431400000, units: "Pa", frameIndex: 100, time: 0.1, samples: [{ point: [1, 0, 0], value: 431400000, source: "calculix", vonMisesStressPa: 431400000 }] },
+            { id: "disp-1", runId: "run-cloud-dynamic-1", type: "displacement", location: "node", values: [0.000761], min: -0.000761, max: 0.000761, units: "m", frameIndex: 100, time: 0.1, samples: [{ point: [1, 0, 0], value: 0.000761, source: "calculix" }] }
           ]
         }), { headers: { "content-type": "application/json" } });
       }
@@ -943,11 +943,30 @@ describe("api", () => {
       study: { id: "study-1", type: "dynamic_structural" },
       displayModel: { id: "display-1" },
       geometry: { format: "stl", filename: "cantilever.stl", contentBase64: dynamicDisplayModel.visualMesh.contentBase64 },
-      dynamicSettings: { endTime: 0.5, timeStep: 0.005, dampingRatio: 0.02 }
+      dynamicSettings: { endTime: 0.1, timeStep: 0.001, outputInterval: 0.001, dampingRatio: 0.02 }
     });
     expect(response.message).toBe("Cloud FEA simulation queued.");
-    expect(results.summary.transient?.frameCount).toBe(2);
-    expect(results.fields.some((field) => field.type === "stress" && field.frameIndex === 1)).toBe(true);
+    expect(results.summary.transient?.frameCount).toBe(101);
+    expect(results.fields.some((field) => field.type === "stress" && field.frameIndex === 100)).toBe(true);
+  });
+
+  test("estimates fine dynamic Cloud FEA output frames from requested output interval", () => {
+    const dynamicStudy = {
+      ...study,
+      type: "dynamic_structural",
+      solverSettings: {
+        backend: "cloudflare_fea",
+        startTime: 0,
+        endTime: 0.1,
+        timeStep: 0.001,
+        outputInterval: 0.001,
+        dampingRatio: 0.02,
+        integrationMethod: "newmark_average_acceleration",
+        loadProfile: "ramp"
+      }
+    } as Study;
+
+    expect(dynamicOutputFrameEstimate(dynamicStudy, { backend: "cloudflare_fea" })).toBe(101);
   });
 
   test("defers local result solving until a queued run is subscribed", () => {
