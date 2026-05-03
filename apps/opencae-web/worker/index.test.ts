@@ -1263,6 +1263,85 @@ describe("Cloudflare FEA worker orchestration", () => {
     expect(await bucket.get("runs/run-cloud-dynamic-unframed/results.json")).toBeNull();
   });
 
+  test("queue handler recovers field values from numeric samples", async () => {
+    const bucket = new MemoryR2Bucket();
+    await bucket.put("runs/run-cloud-sample-values/request.json", JSON.stringify({
+      runId: "run-cloud-sample-values",
+      studyId: "study-1",
+      analysisType: "static_stress",
+      study: { id: "study-1", type: "static_stress" }
+    }));
+    const result = cloudContainerSolveResponse("run-cloud-sample-values", false);
+    result.fields[0] = {
+      ...result.fields[0],
+      values: [],
+      samples: [{ point: [0, 0, 0], value: 123.4, nodeId: "N1", source: "calculix" }]
+    };
+    const message = { body: { runId: "run-cloud-sample-values" }, ack: vi.fn(), retry: vi.fn() };
+    const env = {
+      ASSETS: { fetch: vi.fn(async () => new Response("asset")) },
+      FEA_ARTIFACTS: bucket,
+      FEA_CONTAINER: { fetch: healthyContainerFetch(result) }
+    };
+
+    await worker.queue({ messages: [message] }, env);
+    const stored = JSON.parse(await (await bucket.get("runs/run-cloud-sample-values/results.json"))!.text()) as { fields: Array<{ values: number[] }> };
+
+    expect(message.ack).toHaveBeenCalled();
+    expect(stored.fields[0]?.values).toEqual([123.4]);
+  });
+
+  test("queue handler reports empty dynamic field metadata", async () => {
+    const bucket = new MemoryR2Bucket();
+    await bucket.put("runs/run-cloud-empty-field/request.json", JSON.stringify({
+      runId: "run-cloud-empty-field",
+      studyId: "study-1",
+      analysisType: "dynamic_structural",
+      study: { id: "study-1", type: "dynamic_structural" },
+      dynamicSettings: { startTime: 0, endTime: 0.01, timeStep: 0.005, outputInterval: 0.005, dampingRatio: 0.02 }
+    }));
+    const result = cloudContainerSolveResponse("run-cloud-empty-field", true);
+    result.fields = [
+      ...result.fields,
+      ...Array.from({ length: 4 }, (_, index) => ({
+        ...result.fields[index % result.fields.length],
+        id: `field-padding-${index}`,
+        type: "stress" as const,
+        values: [index + 1],
+        samples: [{ point: [0, 0, 0], value: index + 1, source: "calculix" }]
+      })),
+      {
+        id: "field-displacement-frame-1",
+        runId: "run-cloud-empty-field",
+        type: "displacement",
+        location: "node",
+        values: [],
+        min: 0,
+        max: 0,
+        units: "mm",
+        frameIndex: 1,
+        timeSeconds: 0.005,
+        samples: []
+      }
+    ];
+    const message = { body: { runId: "run-cloud-empty-field" }, ack: vi.fn(), retry: vi.fn() };
+    const env = {
+      ASSETS: { fetch: vi.fn(async () => new Response("asset")) },
+      FEA_ARTIFACTS: bucket,
+      FEA_CONTAINER: { fetch: healthyContainerFetch(result) }
+    };
+
+    await worker.queue({ messages: [message] }, env);
+    const events = JSON.parse(await (await bucket.get("runs/run-cloud-empty-field/events.json"))!.text()) as Array<{ type: string; message: string }>;
+    const messageText = events.at(-1)?.message ?? "";
+
+    expect(message.ack).toHaveBeenCalled();
+    expect(events.at(-1)).toMatchObject({ type: "error" });
+    expect(messageText).toContain("Cloud FEA container returned field 6 (displacement, id=field-displacement-frame-1, frame=1, time=0.005, location=node) without numeric values.");
+    expect(messageText).not.toContain("Cloud FEA container returned field 6 without numeric values.");
+    expect(await bucket.get("runs/run-cloud-empty-field/results.json")).toBeNull();
+  });
+
   test("container runner refuses incomplete uploaded-geometry payloads before meshing", () => {
     const staticResult = runContainerSolve({ runId: "run-static", solverMaterial: aluminumSolverMaterial(), geometry: { format: "stl", filename: "beam.stl", contentBase64: closedStlBase64() } });
     const dynamicResult = runContainerSolve({
