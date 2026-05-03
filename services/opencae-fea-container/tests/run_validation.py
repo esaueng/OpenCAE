@@ -22,6 +22,7 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
+RUNNER_VERSION_FILE = ROOT / "RUNNER_VERSION"
 sys.path.insert(0, str(ROOT))
 
 import runner  # noqa: E402
@@ -59,7 +60,7 @@ class ValidationSuite(unittest.TestCase):
         payload = json_payload_from_handler(handler)
 
         self.assertEqual(handler.status, 200)
-        self.assertEqual(payload["runnerVersion"], runner.RUNNER_VERSION)
+        self.assertEqual(payload["runnerVersion"], RUNNER_VERSION_FILE.read_text().strip())
         self.assertIn("dynamic_structural", payload["supportedAnalysisTypes"])
         self.assertEqual(payload["dynamicSupport"]["enabled"], True)
         self.assertEqual(payload["dynamicSupport"]["integrationMethod"], "calculix_dynamic_direct")
