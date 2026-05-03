@@ -844,16 +844,30 @@ def parse_calculix_result_files(workdir, run_id, context=None, *_, **__):
         mesh = None
     files = sorted(path.name for path in workdir.glob("*") if path.suffix.lower() in {".frd", ".dat", ".sta"})
     dat_files = [workdir / name for name in files if name.endswith(".dat")]
+    frd_files = [workdir / name for name in files if name.endswith(".frd")]
+    nodal_stresses = []
+    frd_displacements = {}
+    parser_diagnostics = []
+    for frd_path in frd_files:
+        text = frd_path.read_text(errors="ignore")
+        nodal_stresses.extend(parse_frd_nodal_stresses(text, mesh))
+        frd_displacements.update(parse_frd_nodal_displacements(text))
+    if frd_files and not nodal_stresses:
+        parser_diagnostics.append("frd-nodal-stress-unparsed")
     for dat_path in dat_files:
         parsed = parse_dat_result(dat_path.read_text(errors="ignore"), mesh)
         if parsed["displacements"] and parsed["stresses"]:
-            has_frd = any(name.endswith(".frd") for name in files)
+            has_frd_visualization = bool(nodal_stresses)
             return {
                 **parsed,
+                "nodalStresses": nodal_stresses,
+                "frdDisplacements": frd_displacements,
+                "parserDiagnostics": parser_diagnostics,
                 "available": True,
                 "files": files,
                 "status": "parsed-calculix-dat",
-                "resultSource": "parsed_frd_dat" if has_frd else "parsed_dat"
+                "resultSource": "parsed_frd_dat" if has_frd_visualization else "parsed_dat",
+                "visualizationSource": "frd_nodal_stress" if has_frd_visualization else "dat_integration_points"
             }
     return {
         "available": any(name.endswith((".frd", ".dat")) for name in files),
@@ -861,15 +875,24 @@ def parse_calculix_result_files(workdir, run_id, context=None, *_, **__):
         "displacements": {},
         "reactions": {},
         "stresses": [],
+        "nodalStresses": nodal_stresses,
+        "frdDisplacements": frd_displacements,
+        "parserDiagnostics": parser_diagnostics,
         "status": f"unparsed-calculix-output-for-{run_id}",
-        "resultSource": "unknown"
+        "resultSource": "unknown",
+        "visualizationSource": "unknown"
     }
 
 
 def parse_dat_result(text, mesh=None):
+    parsed = parse_dat_nodal_displacements_and_reactions(text)
+    parsed["stresses"] = parse_dat_integration_point_stresses(text, mesh)
+    return parsed
+
+
+def parse_dat_nodal_displacements_and_reactions(text):
     displacements = {}
     reactions = {}
-    stresses = []
     section = None
     for line in text.splitlines():
         lowered = line.lower()
@@ -887,7 +910,25 @@ def parse_dat_result(text, mesh=None):
             displacements[int(round(values[0]))] = values[-3:]
         elif section == "rf" and len(values) >= 4 and integer_like(values[0]):
             reactions[int(round(values[0]))] = values[-3:]
-        elif section == "s" and len(values) >= 7 and integer_like(values[0]):
+    return {"displacements": displacements, "reactions": reactions}
+
+
+def parse_dat_integration_point_stresses(text, mesh=None):
+    stresses = []
+    section = None
+    for line in text.splitlines():
+        lowered = line.lower()
+        if "displacements" in lowered:
+            section = "u"
+            continue
+        if "stresses" in lowered:
+            section = "s"
+            continue
+        if "forces" in lowered or "reaction" in lowered:
+            section = "rf"
+            continue
+        values = floats_from_line(line)
+        if section == "s" and len(values) >= 7 and integer_like(values[0]):
             element_id = int(round(values[0]))
             components = values[-6:]
             stresses.append({
@@ -896,7 +937,85 @@ def parse_dat_result(text, mesh=None):
                 "vonMises": von_mises(components),
                 "point": element_centroid(mesh, element_id) if mesh is not None else None
             })
-    return {"displacements": displacements, "reactions": reactions, "stresses": stresses}
+    return stresses
+
+
+def parse_frd_nodal_stresses(text, mesh=None):
+    records = parse_frd_nodal_result_records(text)
+    coordinates = records["coordinates"]
+    mesh_nodes = node_coordinates_by_id(mesh)
+    stresses = []
+    for node_id, components in records["stresses"].items():
+        if len(components) < 6:
+            continue
+        point = coordinates.get(node_id) or mesh_nodes.get(node_id)
+        if point is None:
+            continue
+        stress_components = components[:6]
+        stresses.append({
+            "nodeId": node_id,
+            "components": stress_components,
+            "vonMises": von_mises(stress_components),
+            "point": point
+        })
+    return sorted(stresses, key=lambda stress: stress["nodeId"])
+
+
+def parse_frd_nodal_displacements(text):
+    records = parse_frd_nodal_result_records(text)
+    return {node_id: values[:3] for node_id, values in records["displacements"].items() if len(values) >= 3}
+
+
+def parse_frd_nodal_result_records(text):
+    coordinates = {}
+    displacements = {}
+    stresses = {}
+    section = None
+    for line in text.splitlines():
+        stripped = line.strip()
+        upper = stripped.upper()
+        if not stripped:
+            continue
+        if upper.startswith("2C"):
+            section = "coordinates"
+            continue
+        if upper.startswith("-3"):
+            section = None
+            continue
+        if upper.startswith("-4"):
+            if "STRESS" in upper and "STRESSI" not in upper:
+                section = "stress"
+            elif "DISP" in upper:
+                section = "displacement"
+            else:
+                section = "other"
+            continue
+        if upper.startswith("-5"):
+            continue
+        if not upper.startswith("-1"):
+            continue
+        values = floats_from_line(line)
+        if len(values) < 2 or not integer_like(values[1]):
+            continue
+        node_id = int(round(values[1]))
+        payload = values[2:]
+        if section == "coordinates" and len(payload) >= 3:
+            coordinates[node_id] = payload[:3]
+        elif section == "displacement" and len(payload) >= 3:
+            displacements[node_id] = payload[:3]
+        elif section == "stress" and len(payload) >= 6:
+            stresses[node_id] = payload[:6]
+    return {"coordinates": coordinates, "displacements": displacements, "stresses": stresses}
+
+
+def node_coordinates_by_id(mesh):
+    if not isinstance(mesh, dict) or not isinstance(mesh.get("nodes"), list):
+        return {}
+    return {
+        node["id"]: node["coordinates"]
+        for node in mesh["nodes"]
+        if isinstance(node, dict) and isinstance(node.get("id"), int) and is_vec3(node.get("coordinates"))
+    }
 
 
 def display_bounds_for_model(display_model, dimensions):
@@ -948,9 +1067,28 @@ def response_from_parsed_dat(parsed, mesh, boundaries, input_deck, solver_output
     structured_block = mesh.get("source", "structured_block") == "structured_block"
     display_bounds = display_bounds_for_model(parsed.get("displayModel", {}), parsed["dimensions"]) if structured_block else None
     sample_coordinate_space = "display_model" if display_bounds is not None else "mm"
+    diagnostics = list(boundaries["diagnostics"])
+    if structured_block and display_bounds is None:
+        diagnostics.append({
+            "id": "cloud-fea-result-coordinate-transform-unavailable",
+            "severity": "warning",
+            "source": "solver",
+            "message": "Cloud FEA result samples could not be transformed to display-model coordinates.",
+            "suggestedActions": []
+        })
+    if mesh.get("elementType", "C3D8") == "C3D8" and parsed.get("fidelity") in {"detailed", "ultra"}:
+        diagnostics.append({
+            "id": "cloud-fea-quadratic-elements-recommended",
+            "severity": "info",
+            "source": "solver",
+            "message": "C3D20R recommended for higher-quality bending stress visualization.",
+            "suggestedActions": []
+        })
+    displacement_vectors = parsed_dat.get("frdDisplacements") or parsed_dat["displacements"]
+    displacement_source = "calculix-frd" if parsed_dat.get("frdDisplacements") else "calculix-dat"
     displacement_samples = []
     for node in mesh["nodes"]:
-        vector = parsed_dat["displacements"].get(node["id"])
+        vector = displacement_vectors.get(node["id"])
         if vector is None:
             continue
         displacement_samples.append({
@@ -959,22 +1097,37 @@ def response_from_parsed_dat(parsed, mesh, boundaries, input_deck, solver_output
             "value": vector_length(vector),
             "vector": solver_vector_to_display(vector, parsed["dimensions"], display_bounds),
             "nodeId": f'N{node["id"]}',
-            "source": "calculix-dat"
+            "source": displacement_source
         })
-    stress_samples = [
-        {
-            "point": solver_point_to_display(stress["point"], parsed["dimensions"], display_bounds),
-            "normal": [0.0, 0.0, 1.0],
-            "value": stress["vonMises"],
-            "elementId": f'E{stress["elementId"]}',
-            "source": "calculix-dat",
-            "vonMisesStressPa": stress["vonMises"] * 1_000_000.0
-        }
-        for stress in parsed_dat["stresses"]
-    ]
+    nodal_visualization_stresses = parsed_dat.get("nodalStresses") if isinstance(parsed_dat.get("nodalStresses"), list) else []
+    use_frd_stress_visualization = bool(nodal_visualization_stresses)
+    stress_samples = []
+    if use_frd_stress_visualization:
+        for stress in nodal_visualization_stresses:
+            stress_samples.append({
+                "point": solver_point_to_display(stress["point"], parsed["dimensions"], display_bounds),
+                "normal": [0.0, 0.0, 1.0],
+                "value": stress["vonMises"],
+                "nodeId": f'N{stress["nodeId"]}',
+                "source": "calculix-frd",
+                "vonMisesStressPa": stress["vonMises"] * 1_000_000.0
+            })
+    else:
+        for stress in parsed_dat["stresses"]:
+            if not is_vec3(stress.get("point")):
+                continue
+            stress_samples.append({
+                "point": solver_point_to_display(stress["point"], parsed["dimensions"], display_bounds),
+                "normal": [0.0, 0.0, 1.0],
+                "value": stress["vonMises"],
+                "elementId": f'E{stress["elementId"]}',
+                "source": "calculix-dat",
+                "vonMisesStressPa": stress["vonMises"] * 1_000_000.0
+            })
     stress_values = [sample["value"] for sample in stress_samples]
     displacement_values = [sample["value"] for sample in displacement_samples]
-    max_stress = max(stress_values)
+    engineering_stress_values = [stress["vonMises"] for stress in parsed_dat["stresses"] if isinstance(stress.get("vonMises"), (int, float)) and math.isfinite(stress["vonMises"])]
+    max_stress = max(engineering_stress_values)
     max_displacement = max(displacement_values)
     reaction_force = reaction_force_magnitude(parsed_dat["reactions"], boundaries["fixedNodeIds"])
     if reaction_force <= 0:
@@ -990,13 +1143,14 @@ def response_from_parsed_dat(parsed, mesh, boundaries, input_deck, solver_output
         }
     if display_bounds is not None:
         provenance["renderCoordinateSpace"] = "display_model"
+    stress_location = "node" if use_frd_stress_visualization else "element"
     fields = [
-        field_from_samples(run_id, "stress", "element", "MPa", stress_values, stress_samples, provenance),
+        field_from_samples(run_id, "stress", stress_location, "MPa", stress_values, stress_samples, provenance),
         field_from_samples(run_id, "displacement", "node", "mm", displacement_values, displacement_samples, provenance),
         field_from_samples(
             run_id,
             "safety_factor",
-            "element",
+            stress_location,
             "",
             [material["yieldMpa"] / max(value, 0.001) for value in stress_values],
             [
@@ -1004,8 +1158,9 @@ def response_from_parsed_dat(parsed, mesh, boundaries, input_deck, solver_output
                     "point": sample["point"],
                     "normal": sample["normal"],
                     "value": material["yieldMpa"] / max(sample["value"], 0.001),
-                    "elementId": sample["elementId"],
-                    "source": "calculix-dat"
+                    **({"nodeId": sample["nodeId"]} if sample.get("nodeId") else {}),
+                    **({"elementId": sample["elementId"]} if sample.get("elementId") else {}),
+                    "source": sample["source"]
                 }
                 for sample in stress_samples
             ],
@@ -1023,19 +1178,27 @@ def response_from_parsed_dat(parsed, mesh, boundaries, input_deck, solver_output
         "failureAssessment": {
             "status": "fail" if safety_factor < 1 else "pass",
             "title": "CalculiX FEA",
-            "message": "Cloud FEA results were parsed from CalculiX DAT output."
+            "message": "Cloud FEA results were parsed from CalculiX output."
         },
         "provenance": provenance
+    }
+    coordinate_mapping = {
+        "solverCoordinateSpace": "mm",
+        "resultSampleCoordinateSpace": sample_coordinate_space,
+        "displayBounds": display_bounds,
+        "solverDimensionsMm": parsed["dimensions"]
     }
     result = {
         "summary": summary,
         "fields": fields,
-        "diagnostics": boundaries["diagnostics"],
+        "diagnostics": diagnostics,
         "artifacts": {
             **compact_text_artifact(input_deck, MAX_INPUT_DECK_ARTIFACT_BYTES, "inputDeckPreview"),
             **compact_text_artifact(solver_output["log"], MAX_SOLVER_LOG_ARTIFACT_BYTES, "solverLogPreview", keep_tail=True),
             "solverResultFiles": parsed_dat["files"],
             "solverResultParser": parsed_dat["status"],
+            "solverResultParserDiagnostics": parsed_dat.get("parserDiagnostics", []),
+            "resultCoordinateMapping": coordinate_mapping,
             "runnerVersion": RUNNER_VERSION,
             "meshSummary": mesh_summary(mesh, boundaries, sample_coordinate_space),
             "solverMaterial": material

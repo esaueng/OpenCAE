@@ -106,6 +106,23 @@ class ValidationSuite(unittest.TestCase):
         self.assertAlmostEqual(context_result["stresses"][0]["vonMises"], legacy_result["stresses"][0]["vonMises"])
         self.assertAlmostEqual(extra_args_result["stresses"][0]["vonMises"], legacy_result["stresses"][0]["vonMises"])
 
+    def test_calculix_frd_parser_supplies_nodal_stress_visualization_samples(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = Path(tmp)
+            (workdir / "opencae_solve.dat").write_text(dat_fixture())
+            (workdir / "opencae_solve.frd").write_text(frd_fixture())
+
+            parsed_results = runner.parse_calculix_result_files(workdir, "validation-frd-parser")
+
+        self.assertEqual(parsed_results["status"], "parsed-calculix-dat")
+        self.assertEqual(parsed_results["resultSource"], "parsed_frd_dat")
+        self.assertEqual(parsed_results["visualizationSource"], "frd_nodal_stress")
+        self.assertEqual(len(parsed_results["nodalStresses"]), 5)
+        self.assertEqual(parsed_results["nodalStresses"][0]["nodeId"], 1)
+        self.assertEqual(parsed_results["nodalStresses"][0]["point"], [0.0, 15.0, 12.0])
+        self.assertAlmostEqual(parsed_results["nodalStresses"][-1]["vonMises"], 0.15)
+        self.assertEqual(parsed_results["frdDisplacements"][5], [0.0, 0.0, -0.002])
+
     def test_handler_generic_exception_returns_python_exception_artifacts(self):
         class CapturingHandler(runner.Handler):
             def __init__(self):
@@ -252,6 +269,40 @@ class ValidationSuite(unittest.TestCase):
                     self.assertLessEqual(coordinate, display_max[axis] + 1e-9)
         all_coordinates = [abs(coordinate) for field in result["fields"] for sample in field["samples"] for coordinate in sample["point"]]
         self.assertLessEqual(max(all_coordinates), 1.9)
+
+    def test_structured_block_uses_frd_nodal_stress_field_without_changing_dat_summary(self):
+        dimensions = {"x": 180.0, "y": 30.0, "z": 24.0}
+        parsed = runner.parse_payload(viewer_space_block_payload(dimensions))
+        mesh = runner.generate_structured_hex_mesh(parsed["dimensions"], parsed["meshDensity"])
+        boundaries = runner.select_boundary_nodes(parsed, mesh)
+        parsed_files = {
+            **runner.parse_dat_result(dat_fixture(), mesh),
+            "nodalStresses": runner.parse_frd_nodal_stresses(frd_fixture(), mesh),
+            "frdDisplacements": runner.parse_frd_nodal_displacements(frd_fixture()),
+            "parserDiagnostics": [],
+            "files": ["opencae_solve.dat", "opencae_solve.frd"],
+            "status": "parsed-calculix-dat",
+            "resultSource": "parsed_frd_dat",
+            "visualizationSource": "frd_nodal_stress"
+        }
+
+        result = runner.response_from_parsed_dat(parsed, mesh, boundaries, "input deck", {"log": "solver log"}, parsed_files)
+        fields = {field["type"]: field for field in result["fields"]}
+        stress_samples = fields["stress"]["samples"]
+
+        self.assertAlmostEqual(result["summary"]["maxStress"], 0.2)
+        self.assertAlmostEqual(fields["stress"]["max"], 0.15)
+        self.assertEqual(fields["stress"]["location"], "node")
+        self.assertEqual(fields["safety_factor"]["location"], "node")
+        self.assertEqual(fields["stress"]["samples"][0]["source"], "calculix-frd")
+        self.assertEqual(result["artifacts"]["resultCoordinateMapping"]["resultSampleCoordinateSpace"], "display_model")
+        self.assertGreater(len({round(sample["value"], 6) for sample in stress_samples}), 3)
+        self.assertGreater(len({round(sample["point"][0], 6) for sample in stress_samples}), 3)
+        for sample in stress_samples:
+            self.assertGreaterEqual(sample["point"][0], -1.9 - 1e-9)
+            self.assertLessEqual(sample["point"][0], 1.9 + 1e-9)
+            self.assertNotIn("generated", sample.get("source", "").lower())
+            self.assertNotIn("fallback", sample.get("source", "").lower())
 
     def test_ultra_structured_block_result_is_compacted_without_changing_summary(self):
         parsed = runner.parse_payload(block_payload("cantilever", ALUMINUM_6061, [0, 0, -1], 1.0, "ultra"))
@@ -542,6 +593,42 @@ def dat_fixture():
  stresses (sxx,syy,szz,sxy,sxz,syz) for set SOLID and time  0.1000000E+01
 
        1   2.000000E-01   0.000000E+00   0.000000E+00   0.000000E+00   0.000000E+00   0.000000E+00
+"""
+
+
+def frd_fixture():
+    return """
+    2C
+ -1    1 0.000000E+00 1.500000E+01 1.200000E+01
+ -1    2 4.500000E+01 1.500000E+01 1.200000E+01
+ -1    3 9.000000E+01 1.500000E+01 1.200000E+01
+ -1    4 1.350000E+02 1.500000E+01 1.200000E+01
+ -1    5 1.800000E+02 1.500000E+01 1.200000E+01
+ -3
+    1PSTEP
+ -4  DISP
+ -5  D1
+ -5  D2
+ -5  D3
+ -1    1 0.000000E+00 0.000000E+00 0.000000E+00
+ -1    2 0.000000E+00 0.000000E+00-5.000000E-04
+ -1    3 0.000000E+00 0.000000E+00-1.000000E-03
+ -1    4 0.000000E+00 0.000000E+00-1.500000E-03
+ -1    5 0.000000E+00 0.000000E+00-2.000000E-03
+ -3
+ -4  STRESS
+ -5  SXX
+ -5  SYY
+ -5  SZZ
+ -5  SXY
+ -5  SXZ
+ -5  SYZ
+ -1    1 1.000000E-02 0.000000E+00 0.000000E+00 0.000000E+00 0.000000E+00 0.000000E+00
+ -1    2 3.000000E-02 0.000000E+00 0.000000E+00 0.000000E+00 0.000000E+00 0.000000E+00
+ -1    3 6.000000E-02 0.000000E+00 0.000000E+00 0.000000E+00 0.000000E+00 0.000000E+00
+ -1    4 1.000000E-01 0.000000E+00 0.000000E+00 0.000000E+00 0.000000E+00 0.000000E+00
+ -1    5 1.500000E-01 0.000000E+00 0.000000E+00 0.000000E+00 0.000000E+00 0.000000E+00
+ -3
 """
 
 
