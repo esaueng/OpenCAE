@@ -8,7 +8,7 @@ vi.mock("@cloudflare/containers", () => ({ Container: class Container {} }));
 
 import worker, { MAX_CLOUD_FEA_RESULT_JSON_BYTES, looksLikePlaceholderResult } from "./index";
 
-const expectedCloudFeaRunnerVersion = "2026-05-03-dynamic-v1";
+const expectedCloudFeaRunnerVersion = "2026-05-03-solver-timeout-v1";
 const expectedCloudFeaContainerImage = "./services/opencae-fea-container/Dockerfile";
 const expectedCloudFeaContainerInstanceName = "opencae-fea-solver-dynamic-v1";
 
@@ -45,6 +45,10 @@ function dynamicContainerHealth(overrides: Record<string, unknown> = {}) {
       enabled: true,
       integrationMethod: "calculix_dynamic_direct",
       maxFrames: 250
+    },
+    solverTimeouts: {
+      staticStress: 60,
+      dynamicStructural: 300
     },
     ccx: "ccx-test",
     gmsh: "gmsh-test",
@@ -195,6 +199,10 @@ describe("Cloudflare FEA worker orchestration", () => {
       supportedAnalysisTypes: ["static_stress", "dynamic_structural"],
       dynamicCloudFeaAvailable: true,
       expectedRunnerVersion: expectedCloudFeaRunnerVersion,
+      solverTimeouts: {
+        staticStress: 60,
+        dynamicStructural: 300
+      },
       requestOrigin: "https://cae.example",
       cloudFeaEndpoint: "https://cae.example/api/cloud-fea/runs"
     });
@@ -915,6 +923,53 @@ describe("Cloudflare FEA worker orchestration", () => {
     expect(await (await bucket.get("runs/run-cloud-python-exception/solver.log"))!.text()).toContain("RuntimeError: boom");
     expect(await (await bucket.get("runs/run-cloud-python-exception/solver-result-parser.txt"))!.text()).toBe("python-exception");
     expect(await bucket.get("runs/run-cloud-python-exception/results.json")).toBeNull();
+  });
+
+  test("queue handler preserves ccx timeout artifacts from JSON container HTTP 504 failures", async () => {
+    const bucket = new MemoryR2Bucket();
+    await bucket.put("runs/run-cloud-ccx-timeout/request.json", JSON.stringify({
+      runId: "run-cloud-ccx-timeout",
+      studyId: "study-1",
+      fidelity: "ultra",
+      analysisType: "dynamic_structural",
+      study: { type: "dynamic_structural" }
+    }));
+    const message = { body: { runId: "run-cloud-ccx-timeout" }, ack: vi.fn(), retry: vi.fn() };
+    const env = {
+      ASSETS: { fetch: vi.fn(async () => new Response("asset")) },
+      FEA_ARTIFACTS: bucket,
+      FEA_CONTAINER: {
+        fetch: vi.fn(async (request: Request) => {
+          const url = new URL(request.url);
+          if (url.pathname === "/health") {
+            return Response.json(dynamicContainerHealth());
+          }
+          return Response.json({
+            error: "CalculiX solve timed out after 300 seconds. Reduce mesh fidelity, shorten dynamic duration, increase output interval, or retry with a longer solver timeout.",
+            artifacts: {
+              solverResultParser: "ccx-timeout",
+              solverTimeoutSeconds: 300,
+              solverLog: "partial stdout\npartial stderr\nCalculiX solve timed out after 300 seconds.",
+              exceptionPhase: "solver-run",
+              runnerVersion: expectedCloudFeaRunnerVersion
+            }
+          }, { status: 504 });
+        })
+      }
+    };
+
+    await worker.queue({ messages: [message] }, env);
+    const events = JSON.parse(await (await bucket.get("runs/run-cloud-ccx-timeout/events.json"))!.text()) as Array<{ type: string; message: string }>;
+
+    expect(message.ack).toHaveBeenCalled();
+    expect(events.at(-1)?.type).toBe("error");
+    expect(events.at(-1)?.message).toContain("CalculiX solve timed out after 300 seconds");
+    expect(events.at(-1)?.message).toContain("container HTTP 504");
+    expect(events.at(-1)?.message).toContain("parser=ccx-timeout");
+    expect(events.at(-1)?.message).toContain("artifacts=solverResultParser, solverTimeoutSeconds, solverLog, exceptionPhase, runnerVersion");
+    expect(await (await bucket.get("runs/run-cloud-ccx-timeout/solver.log"))!.text()).toContain("partial stderr");
+    expect(await (await bucket.get("runs/run-cloud-ccx-timeout/solver-result-parser.txt"))!.text()).toBe("ccx-timeout");
+    expect(await bucket.get("runs/run-cloud-ccx-timeout/results.json")).toBeNull();
   });
 
   test("queue handler reports failed container health probes before solve", async () => {

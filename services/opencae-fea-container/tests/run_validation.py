@@ -13,6 +13,7 @@ import copy
 import io
 import json
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -63,6 +64,8 @@ class ValidationSuite(unittest.TestCase):
         self.assertEqual(payload["dynamicSupport"]["enabled"], True)
         self.assertEqual(payload["dynamicSupport"]["integrationMethod"], "calculix_dynamic_direct")
         self.assertEqual(payload["dynamicSupport"]["maxFrames"], runner.MAX_DYNAMIC_FRAMES)
+        self.assertEqual(payload["solverTimeouts"]["staticStress"], 60)
+        self.assertEqual(payload["solverTimeouts"]["dynamicStructural"], 300)
 
     def test_cantilever_hand_estimate_guards_against_28mpa_regression(self):
         stress = cantilever_bending_stress_mpa(1.0, DIMENSIONS)
@@ -140,6 +143,72 @@ class ValidationSuite(unittest.TestCase):
 
         self.assertEqual(context.exception.status, 422)
         self.assertIn("Dynamic Cloud FEA output would exceed frame budget", str(context.exception))
+
+    def test_ccx_timeout_defaults_and_environment_precedence(self):
+        static_parsed = runner.parse_payload(block_payload("cantilever", ALUMINUM_6061, [0, 0, -1], 1.0, "standard"))
+        dynamic_parsed = runner.parse_payload(dynamic_block_payload())
+
+        with mock.patch.dict(runner.os.environ, {}, clear=True):
+            self.assertEqual(runner.ccx_timeout_seconds_for(static_parsed), 60)
+            self.assertEqual(runner.ccx_timeout_seconds_for(dynamic_parsed), 300)
+
+        with mock.patch.dict(runner.os.environ, {
+            "OPENCAE_CCX_TIMEOUT_SECONDS": "120",
+            "OPENCAE_CCX_STATIC_TIMEOUT_SECONDS": "45",
+            "OPENCAE_CCX_DYNAMIC_TIMEOUT_SECONDS": "240",
+        }, clear=True):
+            self.assertEqual(runner.ccx_timeout_seconds_for(static_parsed), 45)
+            self.assertEqual(runner.ccx_timeout_seconds_for(dynamic_parsed), 240)
+
+        with mock.patch.dict(runner.os.environ, {
+            "OPENCAE_CCX_TIMEOUT_SECONDS": "0.4",
+            "OPENCAE_CCX_DYNAMIC_TIMEOUT_SECONDS": "not-a-number",
+        }, clear=True):
+            self.assertEqual(runner.ccx_timeout_seconds_for(dynamic_parsed), 1)
+
+    def test_dynamic_ccx_run_uses_300_second_timeout(self):
+        parsed = runner.parse_payload(dynamic_block_payload())
+        completed = subprocess.CompletedProcess(["ccx", "opencae_solve"], 0, stdout="done", stderr="")
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = Path(tmp)
+            deck_path = workdir / "opencae_solve.inp"
+            deck_path.write_text("*HEADING\n")
+            (workdir / "opencae_solve.dat").write_text("")
+            with mock.patch.object(runner.shutil, "which", return_value="/usr/bin/ccx"), \
+                 mock.patch.object(runner.subprocess, "run", return_value=completed) as run:
+                output = runner.run_ccx_if_available(workdir, deck_path, parsed)
+
+        self.assertEqual(output["returnCode"], 0)
+        run.assert_called_once()
+        self.assertEqual(run.call_args.kwargs["timeout"], 300)
+
+    def test_solve_timeout_returns_504_with_ccx_timeout_artifacts(self):
+        class CapturingHandler(runner.Handler):
+            def __init__(self):
+                self.path = "/solve"
+                body = json.dumps(dynamic_block_payload()).encode("utf-8")
+                self.headers = {"content-length": str(len(body))}
+                self.rfile = io.BytesIO(body)
+                self.status = None
+                self.payload = None
+
+            def _json(self, status, payload):
+                self.status = status
+                self.payload = payload
+
+        timeout = subprocess.TimeoutExpired(["ccx", "opencae_solve"], 300, output="partial stdout", stderr="partial stderr")
+        handler = CapturingHandler()
+        with mock.patch.object(runner.shutil, "which", return_value="/usr/bin/ccx"), \
+             mock.patch.object(runner.subprocess, "run", side_effect=timeout):
+            handler.do_POST()
+
+        self.assertEqual(handler.status, 504)
+        self.assertIn("CalculiX solve timed out after 300 seconds", handler.payload["error"])
+        self.assertEqual(handler.payload["artifacts"]["solverResultParser"], "ccx-timeout")
+        self.assertEqual(handler.payload["artifacts"]["solverTimeoutSeconds"], 300)
+        self.assertEqual(handler.payload["artifacts"]["exceptionPhase"], "solver-run")
+        self.assertIn("partial stdout", handler.payload["artifacts"]["solverLog"])
+        self.assertIn("partial stderr", handler.payload["artifacts"]["solverLog"])
 
     def test_dynamic_deck_contains_transient_step_and_time_point_output(self):
         parsed = runner.parse_payload(dynamic_block_payload())

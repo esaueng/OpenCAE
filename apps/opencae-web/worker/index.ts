@@ -58,8 +58,8 @@ const WORKER_MIN_COMPACTED_FIELD_SAMPLES = 64;
 const MAX_CONTAINER_FAILURE_BODY_PREVIEW = 2_000;
 const cloudFeaContainerInstanceName = "opencae-fea-solver-dynamic-v1";
 const cloudFeaResultBudgetExceededMessage = "Cloud FEA result payload exceeded the UI result budget. Reduce fidelity or enable result decimation.";
-const EXPECTED_FEA_RUNNER_VERSION = "2026-05-03-dynamic-v1";
-const cloudFeaWorkerDeploymentFingerprint = "opencae-worker-dynamic-v1";
+const EXPECTED_FEA_RUNNER_VERSION = "2026-05-03-solver-timeout-v1";
+const cloudFeaWorkerDeploymentFingerprint = "opencae-worker-solver-timeout-v1";
 const staleDynamicContainerMessage = `Cloud FEA dynamic requires runner ${EXPECTED_FEA_RUNNER_VERSION} or newer, but the deployed container is stale. Rebuild/redeploy the Cloud FEA container.`;
 
 export default {
@@ -151,6 +151,7 @@ async function cloudFeaHealth(request: Request, env: RuntimeEnv): Promise<Respon
   }
   const supportedAnalysisTypes = supportedAnalysisTypesFromHealth(containerHealth);
   const containerRunnerVersion = containerRunnerVersionFromHealth(containerHealth);
+  const solverTimeouts = solverTimeoutsFromHealth(containerHealth);
   const dynamicCloudFeaAvailable = containerSupportsDynamic(containerHealth)
     && containerRunnerVersionIsExpectedOrNewer(containerRunnerVersion);
   const body: Record<string, unknown> = {
@@ -168,6 +169,7 @@ async function cloudFeaHealth(request: Request, env: RuntimeEnv): Promise<Respon
     supportedAnalysisTypes,
     dynamicCloudFeaAvailable,
     expectedRunnerVersion: EXPECTED_FEA_RUNNER_VERSION,
+    solverTimeouts,
     dynamicStructural: cloudFeaDynamicSupportMetadata(),
     ...(containerBound ? {} : {
       requiredDeployConfig: "wrangler.containers.jsonc",
@@ -504,6 +506,17 @@ function containerRunnerVersionFromHealth(health: Record<string, unknown> | unde
   return typeof health?.runnerVersion === "string" && health.runnerVersion.trim()
     ? health.runnerVersion
     : undefined;
+}
+
+function solverTimeoutsFromHealth(health: Record<string, unknown> | undefined): Record<string, number> | undefined {
+  const solverTimeouts = isRecord(health?.solverTimeouts) ? health.solverTimeouts : undefined;
+  if (!solverTimeouts) return undefined;
+  const staticStress = finitePositive(solverTimeouts.staticStress);
+  const dynamicStructural = finitePositive(solverTimeouts.dynamicStructural);
+  return {
+    ...(staticStress === undefined ? {} : { staticStress }),
+    ...(dynamicStructural === undefined ? {} : { dynamicStructural })
+  };
 }
 
 function containerSupportsDynamic(health: Record<string, unknown> | undefined): boolean {
