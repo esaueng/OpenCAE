@@ -24,6 +24,15 @@ FIDELITY_MESH_DENSITY = {
     "detailed": {"nx": 40, "ny": 10, "nz": 6},
     "ultra": {"nx": 80, "ny": 16, "nz": 10}
 }
+MAX_RESULT_VALUES = 25_000
+MAX_RESULT_SAMPLES = 25_000
+MAX_FIELD_SAMPLES_PER_TYPE = {
+    "stress": 20_000,
+    "displacement": 15_000,
+    "safety_factor": 20_000,
+}
+MAX_INPUT_DECK_ARTIFACT_BYTES = 1024 * 1024
+MAX_SOLVER_LOG_ARTIFACT_BYTES = 256 * 1024
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -939,19 +948,20 @@ def response_from_parsed_dat(parsed, mesh, boundaries, input_deck, solver_output
         },
         "provenance": provenance
     }
-    return {
+    result = {
         "summary": summary,
         "fields": fields,
         "diagnostics": boundaries["diagnostics"],
         "artifacts": {
-            "inputDeck": input_deck,
-            "solverLog": solver_output["log"],
+            **compact_text_artifact(input_deck, MAX_INPUT_DECK_ARTIFACT_BYTES, "inputDeckPreview"),
+            **compact_text_artifact(solver_output["log"], MAX_SOLVER_LOG_ARTIFACT_BYTES, "solverLogPreview", keep_tail=True),
             "solverResultFiles": parsed_dat["files"],
             "solverResultParser": parsed_dat["status"],
             "meshSummary": mesh_summary(mesh, boundaries, sample_coordinate_space),
             "solverMaterial": material
         }
     }
+    return compact_cloud_fea_result(result)
 
 
 def field_from_samples(run_id, field_type, location, units, values, samples, provenance):
@@ -969,10 +979,103 @@ def field_from_samples(run_id, field_type, location, units, values, samples, pro
     }
 
 
+def decimate_sequence(items, max_count, key=None):
+    if not isinstance(items, list) or max_count <= 0:
+        return []
+    if len(items) <= max_count:
+        return list(items)
+    last_index = len(items) - 1
+    indexes = {0, last_index}
+    if key is not None:
+        keyed = []
+        for index, item in enumerate(items):
+            value = key(item)
+            if isinstance(value, (int, float)) and math.isfinite(value):
+                keyed.append((value, index))
+        if keyed:
+            indexes.add(min(keyed, key=lambda pair: pair[0])[1])
+            indexes.add(max(keyed, key=lambda pair: pair[0])[1])
+    slots = max(1, max_count)
+    for slot in range(slots):
+        if len(indexes) >= max_count:
+            break
+        index = round(slot * last_index / max(slots - 1, 1))
+        indexes.add(index)
+    return [items[index] for index in sorted(indexes)[:max_count]]
+
+
+def compact_result_field(field, max_values, max_samples):
+    compacted = dict(field)
+    values = field.get("values") if isinstance(field.get("values"), list) else []
+    samples = field.get("samples") if isinstance(field.get("samples"), list) else []
+    compacted["values"] = decimate_sequence(values, max_values, key=lambda value: value)
+    compacted["samples"] = decimate_sequence(samples, max_samples, key=lambda sample: sample.get("value") if isinstance(sample, dict) else None)
+    return compacted
+
+
+def compact_cloud_fea_result(result):
+    fields = []
+    compaction_fields = []
+    original_stress_sample_count = 0
+    returned_stress_sample_count = 0
+    for field in result.get("fields", []):
+        if not isinstance(field, dict):
+            continue
+        field_type = field.get("type")
+        max_samples = MAX_FIELD_SAMPLES_PER_TYPE.get(field_type, MAX_RESULT_SAMPLES)
+        values = field.get("values") if isinstance(field.get("values"), list) else []
+        samples = field.get("samples") if isinstance(field.get("samples"), list) else []
+        compacted = compact_result_field(field, MAX_RESULT_VALUES, max_samples)
+        fields.append(compacted)
+        returned_samples = compacted.get("samples") if isinstance(compacted.get("samples"), list) else []
+        returned_values = compacted.get("values") if isinstance(compacted.get("values"), list) else []
+        compaction_fields.append({
+            "type": field_type,
+            "originalValueCount": len(values),
+            "returnedValueCount": len(returned_values),
+            "originalSampleCount": len(samples),
+            "returnedSampleCount": len(returned_samples),
+            "maxSamples": max_samples,
+        })
+        if field_type == "stress":
+            original_stress_sample_count += len(samples)
+            returned_stress_sample_count += len(returned_samples)
+    compacted_result = dict(result)
+    compacted_result["fields"] = fields
+    artifacts = dict(result.get("artifacts", {})) if isinstance(result.get("artifacts"), dict) else {}
+    artifacts["resultCompaction"] = {
+        "enabled": True,
+        "maxFieldValues": MAX_RESULT_VALUES,
+        "maxFieldSamples": MAX_RESULT_SAMPLES,
+        "originalStressSampleCount": original_stress_sample_count,
+        "returnedStressSampleCount": returned_stress_sample_count,
+        "fields": compaction_fields,
+    }
+    compacted_result["artifacts"] = artifacts
+    return compacted_result
+
+
+def compact_text_artifact(text, max_bytes, preview_key_name, keep_tail=False):
+    if not isinstance(text, str):
+        text = ""
+    base_key = preview_key_name[:-7] if preview_key_name.endswith("Preview") else preview_key_name
+    encoded = text.encode("utf-8")
+    metadata = {
+        f"{base_key}Bytes": len(encoded),
+        f"{base_key}Truncated": len(encoded) > max_bytes,
+    }
+    if len(encoded) <= max_bytes:
+        metadata[base_key] = text
+        return metadata
+    chunk = encoded[-max_bytes:] if keep_tail else encoded[:max_bytes]
+    metadata[preview_key_name] = chunk.decode("utf-8", errors="ignore")
+    return metadata
+
+
 def artifacts_for_failure(input_deck, solver_output, parser_status, mesh, boundaries, files=None):
     return {
-        "inputDeck": input_deck,
-        "solverLog": solver_output["log"],
+        **compact_text_artifact(input_deck, MAX_INPUT_DECK_ARTIFACT_BYTES, "inputDeckPreview"),
+        **compact_text_artifact(solver_output["log"], MAX_SOLVER_LOG_ARTIFACT_BYTES, "solverLogPreview", keep_tail=True),
         "solverResultFiles": files or [],
         "solverResultParser": parser_status,
         "meshSummary": mesh_summary(mesh, boundaries)
@@ -982,8 +1085,8 @@ def artifacts_for_failure(input_deck, solver_output, parser_status, mesh, bounda
 def uploaded_geometry_failure_artifacts(parsed, parser_status, input_deck, solver_output):
     geometry = parsed.get("geometry") or {}
     return {
-        "inputDeck": input_deck,
-        "solverLog": solver_output["log"],
+        **compact_text_artifact(input_deck, MAX_INPUT_DECK_ARTIFACT_BYTES, "inputDeckPreview"),
+        **compact_text_artifact(solver_output["log"], MAX_SOLVER_LOG_ARTIFACT_BYTES, "solverLogPreview", keep_tail=True),
         "solverResultFiles": [],
         "solverResultParser": parser_status,
         "meshSummary": {

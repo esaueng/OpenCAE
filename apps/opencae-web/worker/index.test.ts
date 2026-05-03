@@ -6,7 +6,7 @@ import { parseJsonc } from "../../../scripts/verify-cloudflare-config.mjs";
 
 vi.mock("@cloudflare/containers", () => ({ Container: class Container {} }));
 
-import worker, { looksLikePlaceholderResult } from "./index";
+import worker, { MAX_CLOUD_FEA_RESULT_JSON_BYTES, looksLikePlaceholderResult } from "./index";
 
 class MemoryR2Bucket {
   objects = new Map<string, string>();
@@ -679,6 +679,90 @@ describe("Cloudflare FEA worker orchestration", () => {
     )).toBe(true);
   });
 
+  test("looksLikePlaceholderResult scans bounded metadata without stringifying full result bundles", () => {
+    const originalStringify = JSON.stringify;
+    const summary = { maxStress: 431400000, safetyFactor: 0.64 };
+    const fields = [{
+      values: Array.from({ length: 100_000 }, (_, index) => index),
+      samples: Array.from({ length: 10_000 }, (_, index) => ({
+        point: [index, index % 7, index % 11],
+        value: index,
+        source: index === 250 ? "generated-cantilever-fallback" : "calculix-dat",
+        elementId: `E${index}`
+      }))
+    }];
+    const artifacts = { solverResultParser: "parsed-calculix-dat", meshSummary: { nodes: 100_000 } };
+    const stringifySpy = vi.spyOn(JSON, "stringify").mockImplementation((value, ...args) => {
+      if (Array.isArray(value) && value[0] === summary && value[1] === fields && value[2] === artifacts) {
+        throw new RangeError("Invalid string length");
+      }
+      return originalStringify(value, ...args);
+    });
+
+    expect(() => looksLikePlaceholderResult(summary, fields, artifacts)).not.toThrow();
+    expect(looksLikePlaceholderResult(summary, fields, artifacts)).toBe(true);
+    expect(stringifySpy).not.toHaveBeenCalledWith([summary, fields, artifacts]);
+
+    stringifySpy.mockRestore();
+  });
+
+  test("queue handler stores compact Cloud FEA results under the UI payload budget", async () => {
+    const bucket = new MemoryR2Bucket();
+    await bucket.put("runs/run-cloud-compact-ultra/request.json", JSON.stringify({
+      runId: "run-cloud-compact-ultra",
+      studyId: "study-1",
+      fidelity: "ultra"
+    }));
+    const message = { body: { runId: "run-cloud-compact-ultra" }, ack: vi.fn(), retry: vi.fn() };
+    const result = cloudUltraSolveResponse("run-cloud-compact-ultra", 1200, 900);
+    const env = {
+      ASSETS: { fetch: vi.fn(async () => new Response("asset")) },
+      FEA_ARTIFACTS: bucket,
+      FEA_CONTAINER: {
+        fetch: vi.fn(async () => Response.json(result))
+      }
+    };
+
+    await worker.queue({ messages: [message] }, env);
+    const stored = await bucket.get("runs/run-cloud-compact-ultra/results.json");
+    const events = JSON.parse(await (await bucket.get("runs/run-cloud-compact-ultra/events.json"))!.text()) as Array<{ type: string; message: string }>;
+
+    expect(message.ack).toHaveBeenCalled();
+    expect(events.at(-1)).toMatchObject({ type: "complete" });
+    expect(stored).not.toBeNull();
+    const text = await stored!.text();
+    expect(new TextEncoder().encode(text).byteLength).toBeLessThanOrEqual(MAX_CLOUD_FEA_RESULT_JSON_BYTES);
+    expect(text).not.toContain("\n  ");
+  });
+
+  test("queue handler rejects Cloud FEA results that exceed the UI payload budget", async () => {
+    const bucket = new MemoryR2Bucket();
+    await bucket.put("runs/run-cloud-over-budget/request.json", JSON.stringify({
+      runId: "run-cloud-over-budget",
+      studyId: "study-1",
+      fidelity: "ultra"
+    }));
+    const message = { body: { runId: "run-cloud-over-budget" }, ack: vi.fn(), retry: vi.fn() };
+    const result = cloudUltraSolveResponse("run-cloud-over-budget", 25_001, 10);
+    const env = {
+      ASSETS: { fetch: vi.fn(async () => new Response("asset")) },
+      FEA_ARTIFACTS: bucket,
+      FEA_CONTAINER: {
+        fetch: vi.fn(async () => Response.json(result))
+      }
+    };
+
+    await worker.queue({ messages: [message] }, env);
+    const events = JSON.parse(await (await bucket.get("runs/run-cloud-over-budget/events.json"))!.text()) as Array<{ type: string; message: string }>;
+
+    expect(message.ack).toHaveBeenCalled();
+    expect(events.at(-1)).toMatchObject({
+      type: "error",
+      message: "Cloud FEA result payload exceeded the UI result budget. Reduce fidelity or enable result decimation."
+    });
+    expect(await bucket.get("runs/run-cloud-over-budget/results.json")).toBeNull();
+  });
+
   test("queue handler rejects generated fallback Cloud FEA results instead of publishing fake solver fields", async () => {
     const bucket = new MemoryR2Bucket();
     await bucket.put("runs/run-cloud-generated-fallback/request.json", JSON.stringify({
@@ -979,6 +1063,69 @@ function cloudParsedBlockSolveResponse(runId: string) {
       solverLog: "CalculiX completed structured block solve.",
       solverResultParser: "parsed-calculix-dat",
       meshSummary: { nodes: 735, elements: 480, source: "structured_block" }
+    }
+  };
+}
+
+function cloudUltraSolveResponse(runId: string, valueCount: number, sampleCount: number) {
+  const provenance = {
+    kind: "calculix_fea",
+    solver: "calculix-ccx",
+    solverVersion: "2.21",
+    meshSource: "structured_block",
+    resultSource: "parsed_dat",
+    units: "mm-N-s-MPa"
+  };
+  return {
+    summary: {
+      maxStress: 12.5,
+      maxStressUnits: "MPa",
+      maxDisplacement: 0.0042,
+      maxDisplacementUnits: "mm",
+      safetyFactor: 22.08,
+      reactionForce: 1,
+      reactionForceUnits: "N",
+      provenance
+    },
+    fields: [
+      {
+        id: `field-${runId}-stress-0`,
+        runId,
+        type: "stress",
+        location: "element",
+        values: Array.from({ length: valueCount }, (_, index) => index / 1000),
+        min: 0,
+        max: 12.5,
+        units: "MPa",
+        provenance,
+        samples: Array.from({ length: sampleCount }, (_, index) => ({
+          point: [index / Math.max(sampleCount, 1), 0, 0],
+          normal: [0, 0, 1],
+          value: index / 1000,
+          elementId: `E${index}`,
+          source: "calculix-dat",
+          vonMisesStressPa: index * 1000
+        }))
+      },
+      {
+        id: `field-${runId}-displacement-0`,
+        runId,
+        type: "displacement",
+        location: "node",
+        values: [0, 0.0042],
+        min: 0,
+        max: 0.0042,
+        units: "mm",
+        provenance,
+        samples: [{ point: [1, 0, 0], normal: [0, 0, 1], value: 0.0042, vector: [0, 0, -0.0042], nodeId: "N2", source: "calculix-dat" }]
+      }
+    ],
+    artifacts: {
+      inputDeck: "*STATIC\n*NODE PRINT, NSET=NALL\nU\n*EL PRINT, ELSET=SOLID\nS\n",
+      solverLog: "CalculiX completed structured block solve.",
+      solverResultParser: "parsed-calculix-dat",
+      meshSummary: { nodes: 14_277, elements: 12_800, source: "structured_block" },
+      resultCompaction: { enabled: true, maxFieldValues: 25000, maxFieldSamples: 25000, originalStressSampleCount: sampleCount, returnedStressSampleCount: sampleCount }
     }
   };
 }
