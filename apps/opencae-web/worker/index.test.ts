@@ -1557,7 +1557,7 @@ function cloudStudyWithMaterial(materialId: string, parameters: Record<string, u
     loads: [],
     meshSettings: { preset: "ultra", status: "complete" },
     solverSettings: type === "dynamic_structural"
-      ? { startTime: 0, endTime: 0.5, timeStep: 0.005, outputInterval: 0.005, dampingRatio: 0.02, integrationMethod: "newmark_average_acceleration" }
+      ? { startTime: 0, endTime: 0.5, timeStep: 0.005, outputInterval: 0.005, dampingRatio: 0.02, integrationMethod: "newmark_average_acceleration", loadProfile: "ramp" }
       : {},
     validation: [],
     runs: []
