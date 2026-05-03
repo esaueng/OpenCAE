@@ -256,6 +256,7 @@ def parse_payload(payload):
         "runId": run_id,
         "study": study,
         "displayModel": payload.get("displayModel") if isinstance(payload.get("displayModel"), dict) else {},
+        "resultRenderBounds": payload.get("resultRenderBounds") if isinstance(payload.get("resultRenderBounds"), dict) else None,
         "material": material,
         "dimensions": dimensions,
         "meshDensity": mesh_density_for(payload.get("fidelity")),
@@ -1018,6 +1019,36 @@ def node_coordinates_by_id(mesh):
     }
 
 
+def solver_bounds_for_structured_block(dimensions):
+    return {
+        "min": [0.0, 0.0, 0.0],
+        "max": [float(dimensions[axis]) for axis in AXES],
+    }
+
+
+def display_bounds_for_payload(parsed):
+    render_bounds = parsed.get("resultRenderBounds") if isinstance(parsed, dict) else None
+    normalized = normalize_display_bounds(render_bounds)
+    if normalized is not None:
+        return normalized
+    return display_bounds_for_model(parsed.get("displayModel", {}), parsed.get("dimensions")) if isinstance(parsed, dict) else None
+
+
+def normalize_display_bounds(bounds):
+    if not isinstance(bounds, dict):
+        return None
+    if bounds.get("coordinateSpace") != "display_model":
+        return None
+    minimum = bounds.get("min")
+    maximum = bounds.get("max")
+    if not is_vec3(minimum) or not is_vec3(maximum):
+        return None
+    spans = [maximum[index] - minimum[index] for index in range(3)]
+    if not all(is_positive_finite(span) for span in spans):
+        return None
+    return {"min": [float(value) for value in minimum], "max": [float(value) for value in maximum], "coordinateSpace": "display_model"}
+
+
 def display_bounds_for_model(display_model, dimensions):
     faces = display_model.get("faces") if isinstance(display_model, dict) and isinstance(display_model.get("faces"), list) else []
     points = [face.get("center") for face in faces if isinstance(face, dict) and is_vec3(face.get("center"))]
@@ -1033,39 +1064,94 @@ def display_bounds_for_model(display_model, dimensions):
         return None
     if not all(is_positive_finite(span) for span in dimension_spans):
         return None
-    return {"min": mins, "max": maxs}
+    return {"min": mins, "max": maxs, "coordinateSpace": "display_model"}
 
 
-def solver_point_to_display(point_mm, dimensions, display_bounds):
+def solver_point_to_display(point_mm, solver_bounds, display_bounds):
     if display_bounds is None:
         return list(point_mm)
     mapped = []
-    for axis_index, axis in enumerate(AXES):
-        span = dimensions[axis]
-        t = point_mm[axis_index] / span if span > 0 else 0.0
+    for axis_index in range(3):
+        solver_min = solver_bounds["min"][axis_index]
+        solver_max = solver_bounds["max"][axis_index]
+        solver_span = solver_max - solver_min
+        t = (point_mm[axis_index] - solver_min) / solver_span if solver_span > 0 else 0.0
         lo = display_bounds["min"][axis_index]
         hi = display_bounds["max"][axis_index]
         mapped.append(lo + t * (hi - lo))
     return mapped
 
 
-def solver_vector_to_display(vector_mm, dimensions, display_bounds):
+def solver_vector_to_display(vector_mm, solver_bounds, display_bounds):
     if display_bounds is None:
         return list(vector_mm)
     mapped = []
-    for axis_index, axis in enumerate(AXES):
-        solver_span = dimensions[axis]
+    for axis_index in range(3):
+        solver_span = solver_bounds["max"][axis_index] - solver_bounds["min"][axis_index]
         display_span = display_bounds["max"][axis_index] - display_bounds["min"][axis_index]
         scale = display_span / solver_span if solver_span > 0 else 1.0
         mapped.append(vector_mm[axis_index] * scale)
     return mapped
 
 
+def surface_node_ids(mesh):
+    if mesh.get("source") == "structured_block" and isinstance(mesh.get("density"), dict):
+        density = mesh["density"]
+        surface_ids = set()
+        for node in mesh["nodes"]:
+            ijk = node.get("ijk")
+            if not isinstance(ijk, tuple) or len(ijk) != 3:
+                continue
+            if (
+                ijk[0] in {0, density["nx"]}
+                or ijk[1] in {0, density["ny"]}
+                or ijk[2] in {0, density["nz"]}
+            ):
+                surface_ids.add(node["id"])
+        return surface_ids
+    return {node["id"] for node in mesh.get("nodes", []) if isinstance(node, dict) and isinstance(node.get("id"), int)}
+
+
+def surface_nodal_stresses_from_dat(mesh, stresses):
+    stress_by_element_id = {
+        stress["elementId"]: stress["vonMises"]
+        for stress in stresses
+        if isinstance(stress, dict)
+        and isinstance(stress.get("elementId"), int)
+        and isinstance(stress.get("vonMises"), (int, float))
+        and math.isfinite(stress["vonMises"])
+    }
+    if not stress_by_element_id:
+        return []
+    values_by_node_id = {}
+    for element in mesh.get("elements", []):
+        value = stress_by_element_id.get(element.get("id"))
+        if value is None:
+            continue
+        for node_id in element.get("nodeIds", []):
+            values_by_node_id.setdefault(node_id, []).append(value)
+    surface_ids = surface_node_ids(mesh)
+    nodes_by_id = node_coordinates_by_id(mesh)
+    samples = []
+    for node_id in sorted(surface_ids):
+        values = values_by_node_id.get(node_id)
+        point = nodes_by_id.get(node_id)
+        if not values or point is None:
+            continue
+        samples.append({
+            "nodeId": node_id,
+            "point": point,
+            "vonMises": sum(values) / len(values),
+        })
+    return samples
+
+
 def response_from_parsed_dat(parsed, mesh, boundaries, input_deck, solver_output, parsed_dat):
     run_id = parsed["runId"]
     material = parsed["material"]
     structured_block = mesh.get("source", "structured_block") == "structured_block"
-    display_bounds = display_bounds_for_model(parsed.get("displayModel", {}), parsed["dimensions"]) if structured_block else None
+    solver_bounds = solver_bounds_for_structured_block(parsed["dimensions"]) if structured_block else None
+    display_bounds = display_bounds_for_payload(parsed) if structured_block else None
     sample_coordinate_space = "display_model" if display_bounds is not None else "mm"
     diagnostics = list(boundaries["diagnostics"])
     if structured_block and display_bounds is None:
@@ -1092,24 +1178,28 @@ def response_from_parsed_dat(parsed, mesh, boundaries, input_deck, solver_output
         if vector is None:
             continue
         displacement_samples.append({
-            "point": solver_point_to_display(node["coordinates"], parsed["dimensions"], display_bounds),
+            "point": solver_point_to_display(node["coordinates"], solver_bounds, display_bounds),
             "normal": [0.0, 0.0, 1.0],
             "value": vector_length(vector),
-            "vector": solver_vector_to_display(vector, parsed["dimensions"], display_bounds),
+            "vector": solver_vector_to_display(vector, solver_bounds, display_bounds),
             "nodeId": f'N{node["id"]}',
             "source": displacement_source
         })
     nodal_visualization_stresses = parsed_dat.get("nodalStresses") if isinstance(parsed_dat.get("nodalStresses"), list) else []
-    use_frd_stress_visualization = bool(nodal_visualization_stresses)
+    if structured_block and nodal_visualization_stresses:
+        surface_ids = surface_node_ids(mesh)
+        nodal_visualization_stresses = [stress for stress in nodal_visualization_stresses if stress.get("nodeId") in surface_ids]
+    if not nodal_visualization_stresses and structured_block:
+        nodal_visualization_stresses = surface_nodal_stresses_from_dat(mesh, parsed_dat["stresses"])
     stress_samples = []
-    if use_frd_stress_visualization:
+    if nodal_visualization_stresses:
         for stress in nodal_visualization_stresses:
             stress_samples.append({
-                "point": solver_point_to_display(stress["point"], parsed["dimensions"], display_bounds),
+                "point": solver_point_to_display(stress["point"], solver_bounds, display_bounds),
                 "normal": [0.0, 0.0, 1.0],
                 "value": stress["vonMises"],
                 "nodeId": f'N{stress["nodeId"]}',
-                "source": "calculix-frd",
+                "source": "calculix-nodal-surface",
                 "vonMisesStressPa": stress["vonMises"] * 1_000_000.0
             })
     else:
@@ -1117,7 +1207,7 @@ def response_from_parsed_dat(parsed, mesh, boundaries, input_deck, solver_output
             if not is_vec3(stress.get("point")):
                 continue
             stress_samples.append({
-                "point": solver_point_to_display(stress["point"], parsed["dimensions"], display_bounds),
+                "point": solver_point_to_display(stress["point"], solver_bounds, display_bounds),
                 "normal": [0.0, 0.0, 1.0],
                 "value": stress["vonMises"],
                 "elementId": f'E{stress["elementId"]}',
@@ -1135,15 +1225,15 @@ def response_from_parsed_dat(parsed, mesh, boundaries, input_deck, solver_output
     safety_factor = material["yieldMpa"] / max(max_stress, 0.001)
     provenance = {
         "kind": "calculix_fea",
-            "solver": "calculix-ccx",
-            "solverVersion": command_version(["ccx", "-v"]),
-            "meshSource": mesh.get("source", "structured_block"),
-            "resultSource": parsed_dat["resultSource"],
-            "units": "mm-N-s-MPa"
-        }
+        "solver": "calculix-ccx",
+        "solverVersion": command_version(["ccx", "-v"]),
+        "meshSource": mesh.get("source", "structured_block"),
+        "resultSource": parsed_dat["resultSource"],
+        "units": "mm-N-s-MPa"
+    }
     if display_bounds is not None:
         provenance["renderCoordinateSpace"] = "display_model"
-    stress_location = "node" if use_frd_stress_visualization else "element"
+    stress_location = "node" if stress_samples and stress_samples[0].get("nodeId") else "element"
     fields = [
         field_from_samples(run_id, "stress", stress_location, "MPa", stress_values, stress_samples, provenance),
         field_from_samples(run_id, "displacement", "node", "mm", displacement_values, displacement_samples, provenance),
@@ -1185,8 +1275,8 @@ def response_from_parsed_dat(parsed, mesh, boundaries, input_deck, solver_output
     coordinate_mapping = {
         "solverCoordinateSpace": "mm",
         "resultSampleCoordinateSpace": sample_coordinate_space,
-        "displayBounds": display_bounds,
-        "solverDimensionsMm": parsed["dimensions"]
+        "solverBoundsMm": solver_bounds,
+        "displayBounds": display_bounds
     }
     result = {
         "summary": summary,
@@ -1462,7 +1552,7 @@ def unit_vector(value):
 
 
 def is_vec3(value):
-    return isinstance(value, list) and len(value) == 3 and all(isinstance(component, (int, float)) and math.isfinite(component) for component in value)
+    return isinstance(value, (list, tuple)) and len(value) == 3 and all(isinstance(component, (int, float)) and math.isfinite(component) for component in value)
 
 
 def vector_length(vector):

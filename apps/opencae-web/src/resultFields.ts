@@ -715,6 +715,8 @@ function logDebugResultMapping(
   console.info("[OpenCAE debugResults] result sample face mapping", {
     mode,
     fieldId: field.id,
+    fieldType: field.type,
+    fieldLocation: field.location,
     sampleBounds: bounds,
     displayFaceBounds: faceBounds,
     fieldMin: field.min,

@@ -181,6 +181,7 @@ describe("Cloudflare FEA worker orchestration", () => {
         fidelity: "ultra",
         study: cloudStudyWithMaterial("mat-aluminum-6061", {}, "dynamic_structural"),
         displayModel: { id: "display-1", faces: [] },
+        resultRenderBounds: { min: [-1.9, -0.25, -0.36], max: [1.9, 0.25, 0.36], coordinateSpace: "display_model" },
         geometry: { format: "stl", filename: "cantilever.stl", contentBase64: "c29saWQKZW5kc29saWQK" },
         dynamicSettings: { startTime: 0, endTime: 0.5, timeStep: 0.005, outputInterval: 0.005, dampingRatio: 0.02 }
       })
@@ -201,6 +202,7 @@ describe("Cloudflare FEA worker orchestration", () => {
       solver: "calculix",
       analysisType: "dynamic_structural",
       study: { id: "study-1", type: "dynamic_structural" },
+      resultRenderBounds: { min: [-1.9, -0.25, -0.36], max: [1.9, 0.25, 0.36], coordinateSpace: "display_model" },
       solverMaterial: {
         id: "mat-aluminum-6061",
         name: "Aluminum 6061",
@@ -435,6 +437,7 @@ describe("Cloudflare FEA worker orchestration", () => {
       studyId: "study-1",
       fidelity: "ultra",
       study: { id: "study-1", type: "dynamic_structural" },
+      resultRenderBounds: { min: [-1.9, -0.25, -0.36], max: [1.9, 0.25, 0.36], coordinateSpace: "display_model" },
       dynamicSettings: { startTime: 0, endTime: 0.5, timeStep: 0.005, outputInterval: 0.005, dampingRatio: 0.02 }
     }));
     const message = { body: { runId: "run-cloud-1" }, ack: vi.fn(), retry: vi.fn() };
@@ -447,7 +450,11 @@ describe("Cloudflare FEA worker orchestration", () => {
       expect(request.method).toBe("POST");
       expect(url.pathname).toBe("/solve");
       const payload = await request.json() as Record<string, unknown>;
-      expect(payload).toMatchObject({ runId: "run-cloud-1", studyId: "study-1" });
+      expect(payload).toMatchObject({
+        runId: "run-cloud-1",
+        studyId: "study-1",
+        resultRenderBounds: { min: [-1.9, -0.25, -0.36], max: [1.9, 0.25, 0.36], coordinateSpace: "display_model" }
+      });
       return Response.json(cloudContainerSolveResponse("run-cloud-1", true));
     });
     const env = {
