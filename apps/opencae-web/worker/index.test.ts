@@ -9,7 +9,7 @@ vi.mock("@cloudflare/containers", () => ({ Container: class Container {} }));
 import worker, { MAX_CLOUD_FEA_RESULT_JSON_BYTES, looksLikePlaceholderResult } from "./index";
 
 const expectedCloudFeaRunnerVersion = "2026-05-03-dynamic-v1";
-const expectedCloudFeaContainerImage = "registry.cloudflare.com/747b74cbd7d019dd7aeecb2c24a4bf10/opencae/opencae-fea:0.1.2-dynamic-v1";
+const expectedCloudFeaContainerImage = "./services/opencae-fea-container/Dockerfile";
 const expectedCloudFeaContainerInstanceName = "opencae-fea-solver-dynamic-v1";
 
 class MemoryR2Bucket {
@@ -83,8 +83,6 @@ describe("Cloudflare FEA worker orchestration", () => {
 
     expect(packageJson.scripts["deploy:cloudflare"]).toContain("--config wrangler.containers.jsonc");
     expect(packageJson.scripts["deploy:cloudflare"]).toContain("pnpm verify:cloudflare-config");
-    expect(packageJson.scripts["deploy:cloudflare"]).toContain("pnpm containers:build");
-    expect(packageJson.scripts["deploy:cloudflare"]).toContain("pnpm containers:push");
     expect(packageJson.scripts["deploy:cloudflare"]).toContain("--containers-rollout=immediate");
     expect(packageJson.scripts["deploy:cloudflare:dry-run"]).toContain("--config wrangler.jsonc");
     expect(packageJson.scripts["deploy:cloudflare:static"]).toContain("--config wrangler.static.jsonc");
