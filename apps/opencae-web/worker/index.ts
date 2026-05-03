@@ -47,10 +47,14 @@ const placeholderResultMarkers = [
   "local_detailed",
   "generated_fallback"
 ];
-export const MAX_CLOUD_FEA_RESULT_JSON_BYTES = 8 * 1024 * 1024;
+export const MAX_CLOUD_FEA_RESULT_JSON_BYTES = 16 * 1024 * 1024;
 export const MAX_CLOUD_FEA_FIELD_VALUES = 25_000;
 export const MAX_CLOUD_FEA_FIELD_SAMPLES = 25_000;
 export const MAX_CLOUD_FEA_DYNAMIC_FRAMES = 250;
+const WORKER_COMPACTED_FIELD_VALUES = 2_000;
+const WORKER_COMPACTED_FIELD_SAMPLES = 750;
+const WORKER_MIN_COMPACTED_FIELD_VALUES = 64;
+const WORKER_MIN_COMPACTED_FIELD_SAMPLES = 64;
 const MAX_CONTAINER_FAILURE_BODY_PREVIEW = 2_000;
 const cloudFeaContainerInstanceName = "opencae-fea-solver-dynamic-v1";
 const cloudFeaResultBudgetExceededMessage = "Cloud FEA result payload exceeded the UI result budget. Reduce fidelity or enable result decimation.";
@@ -588,7 +592,8 @@ function normalizeContainerResult(runId: string, result: Record<string, unknown>
   };
   return {
     summary: normalizedSummary,
-    fields: rawFields.map((field, index) => normalizeField(runId, field, index, provenance))
+    fields: rawFields.map((field, index) => normalizeField(runId, field, index, provenance)),
+    ...(isRecord(resultArtifacts.resultCompaction) ? { artifacts: { resultCompaction: resultArtifacts.resultCompaction } } : {})
   };
 }
 
@@ -786,21 +791,115 @@ function normalizeField(runId: string, rawField: unknown, index: number, provena
   };
 }
 
-function serializeCloudFeaResultForUi(result: { fields: Array<Record<string, unknown>> }): string {
+function serializeCloudFeaResultForUi(result: { fields: Array<Record<string, unknown>>; artifacts?: Record<string, unknown> }): string {
   assertCloudFeaResultWithinUiFieldBudget(result);
   let resultJson: string;
   try {
     resultJson = JSON.stringify(result);
   } catch (error) {
     if (error instanceof RangeError || (error instanceof Error && /invalid string length/i.test(error.message))) {
-      throw new Error(cloudFeaResultBudgetExceededMessage);
+      return serializeCompactedCloudFeaResultForUi(result);
     }
     throw error;
   }
   if (new TextEncoder().encode(resultJson).byteLength > MAX_CLOUD_FEA_RESULT_JSON_BYTES) {
-    throw new Error(cloudFeaResultBudgetExceededMessage);
+    return serializeCompactedCloudFeaResultForUi(result, resultJson);
   }
   return resultJson;
+}
+
+function serializeCompactedCloudFeaResultForUi(result: { fields: Array<Record<string, unknown>>; artifacts?: Record<string, unknown> }, originalJson?: string): string {
+  const originalJsonBytes = originalJson === undefined ? undefined : byteLength(originalJson);
+  let maxValues = WORKER_COMPACTED_FIELD_VALUES;
+  let maxSamples = WORKER_COMPACTED_FIELD_SAMPLES;
+  let pass = 0;
+  while (true) {
+    pass += 1;
+    const compacted = compactCloudFeaResultForUi(result, maxValues, maxSamples, pass, originalJsonBytes);
+    const compactedJson = JSON.stringify(compacted);
+    const compactedJsonBytes = byteLength(compactedJson);
+    if (compactedJsonBytes <= MAX_CLOUD_FEA_RESULT_JSON_BYTES) {
+      compacted.artifacts = {
+        ...(isRecord(compacted.artifacts) ? compacted.artifacts : {}),
+        workerResultCompaction: {
+          ...(isRecord(compacted.artifacts?.workerResultCompaction) ? compacted.artifacts.workerResultCompaction : {}),
+          jsonBytes: compactedJsonBytes
+        }
+      };
+      return JSON.stringify(compacted);
+    }
+    const nextMaxValues = Math.max(WORKER_MIN_COMPACTED_FIELD_VALUES, Math.floor(maxValues / 2));
+    const nextMaxSamples = Math.max(WORKER_MIN_COMPACTED_FIELD_SAMPLES, Math.floor(maxSamples / 2));
+    if (nextMaxValues === maxValues && nextMaxSamples === maxSamples) break;
+    maxValues = nextMaxValues;
+    maxSamples = nextMaxSamples;
+  }
+  throw new Error(cloudFeaResultBudgetExceededMessage);
+}
+
+function compactCloudFeaResultForUi(
+  result: { fields: Array<Record<string, unknown>>; artifacts?: Record<string, unknown> },
+  maxValues: number,
+  maxSamples: number,
+  budgetPasses: number,
+  originalJsonBytes?: number
+) {
+  const fields = result.fields.map((field) => {
+    const values = Array.isArray(field.values) ? field.values : [];
+    const samples = Array.isArray(field.samples) ? field.samples : [];
+    return {
+      ...field,
+      values: decimateSequence(values, Math.max(1, maxValues), (value) => typeof value === "number" ? value : undefined),
+      samples: decimateSequence(samples, Math.max(1, maxSamples), (sample) => isRecord(sample) && typeof sample.value === "number" ? sample.value : undefined)
+    };
+  });
+  return {
+    ...result,
+    fields,
+    artifacts: {
+      ...(isRecord(result.artifacts) ? result.artifacts : {}),
+      workerResultCompaction: {
+        enabled: true,
+        jsonBudgetBytes: MAX_CLOUD_FEA_RESULT_JSON_BYTES,
+        originalJsonBytes,
+        budgetPasses,
+        maxFieldValues: maxValues,
+        maxFieldSamples: maxSamples,
+        fields: result.fields.map((field, index) => ({
+          id: typeof field.id === "string" ? field.id : `field-${index}`,
+          type: typeof field.type === "string" ? field.type : "unknown",
+          frameIndex: typeof field.frameIndex === "number" ? field.frameIndex : undefined,
+          originalValueCount: Array.isArray(field.values) ? field.values.length : 0,
+          returnedValueCount: Array.isArray(fields[index]?.values) ? fields[index]!.values.length : 0,
+          originalSampleCount: Array.isArray(field.samples) ? field.samples.length : 0,
+          returnedSampleCount: Array.isArray(fields[index]?.samples) ? fields[index]!.samples.length : 0
+        }))
+      }
+    }
+  };
+}
+
+function decimateSequence<T>(items: T[], maxCount: number, key?: (item: T) => number | undefined): T[] {
+  if (!Array.isArray(items) || maxCount <= 0) return [];
+  if (items.length <= maxCount) return [...items];
+  const indexes = new Set<number>([0, items.length - 1]);
+  if (key) {
+    const keyed = items
+      .map((item, index) => ({ index, value: key(item) }))
+      .filter((item): item is { index: number; value: number } => typeof item.value === "number" && Number.isFinite(item.value));
+    if (keyed.length) {
+      indexes.add(keyed.reduce((best, item) => item.value < best.value ? item : best, keyed[0]!).index);
+      indexes.add(keyed.reduce((best, item) => item.value > best.value ? item : best, keyed[0]!).index);
+    }
+  }
+  for (let slot = 0; indexes.size < maxCount && slot < maxCount; slot += 1) {
+    indexes.add(Math.round(slot * (items.length - 1) / Math.max(maxCount - 1, 1)));
+  }
+  return [...indexes].sort((left, right) => left - right).slice(0, maxCount).map((index) => items[index]!);
+}
+
+function byteLength(value: string): number {
+  return new TextEncoder().encode(value).byteLength;
 }
 
 function assertCloudFeaResultWithinUiFieldBudget(result: { fields: Array<Record<string, unknown>> }): void {

@@ -30,6 +30,9 @@ MAX_RESULT_SAMPLES = 25_000
 MAX_DYNAMIC_FRAMES = 250
 MAX_DYNAMIC_FIELD_VALUES_PER_FRAME = 10_000
 MAX_DYNAMIC_FIELD_SAMPLES_PER_FRAME = 5_000
+CLOUD_FEA_RESULT_JSON_BUDGET_BYTES = 15 * 1024 * 1024
+MIN_DYNAMIC_FIELD_VALUES_PER_FRAME = 64
+MIN_DYNAMIC_FIELD_SAMPLES_PER_FRAME = 64
 MAX_FIELD_SAMPLES_PER_TYPE = {
     "stress": 20_000,
     "displacement": 15_000,
@@ -2283,12 +2286,32 @@ def compact_result_field(field, max_values, max_samples):
     compacted = dict(field)
     values = field.get("values") if isinstance(field.get("values"), list) else []
     samples = field.get("samples") if isinstance(field.get("samples"), list) else []
-    compacted["values"] = decimate_sequence(values, max_values, key=lambda value: value)
+    compacted["values"] = decimate_sequence(values, max(1, max_values), key=lambda value: value)
     compacted["samples"] = decimate_sequence(samples, max_samples, key=lambda sample: sample.get("value") if isinstance(sample, dict) else None)
     return compacted
 
 
 def compact_cloud_fea_result(result):
+    dynamic_max_values = MAX_DYNAMIC_FIELD_VALUES_PER_FRAME
+    dynamic_max_samples = MAX_DYNAMIC_FIELD_SAMPLES_PER_FRAME
+    budget_passes = 0
+    while True:
+        budget_passes += 1
+        compacted = compact_cloud_fea_result_with_caps(result, dynamic_max_values, dynamic_max_samples, budget_passes)
+        json_bytes = compacted_result_json_bytes(compacted)
+        compaction = compacted["artifacts"]["resultCompaction"]
+        compaction["jsonBytes"] = json_bytes
+        if json_bytes <= CLOUD_FEA_RESULT_JSON_BUDGET_BYTES:
+            return compacted
+        next_dynamic_max_values = max(MIN_DYNAMIC_FIELD_VALUES_PER_FRAME, dynamic_max_values // 2)
+        next_dynamic_max_samples = max(MIN_DYNAMIC_FIELD_SAMPLES_PER_FRAME, dynamic_max_samples // 2)
+        if next_dynamic_max_values == dynamic_max_values and next_dynamic_max_samples == dynamic_max_samples:
+            return compacted
+        dynamic_max_values = next_dynamic_max_values
+        dynamic_max_samples = next_dynamic_max_samples
+
+
+def compact_cloud_fea_result_with_caps(result, dynamic_max_values, dynamic_max_samples, budget_passes):
     fields = []
     compaction_fields = []
     original_stress_sample_count = 0
@@ -2298,8 +2321,8 @@ def compact_cloud_fea_result(result):
             continue
         field_type = field.get("type")
         is_dynamic_frame = isinstance(field.get("frameIndex"), int)
-        max_samples = MAX_DYNAMIC_FIELD_SAMPLES_PER_FRAME if is_dynamic_frame else MAX_FIELD_SAMPLES_PER_TYPE.get(field_type, MAX_RESULT_SAMPLES)
-        max_values = MAX_DYNAMIC_FIELD_VALUES_PER_FRAME if is_dynamic_frame else MAX_RESULT_VALUES
+        max_samples = dynamic_max_samples if is_dynamic_frame else MAX_FIELD_SAMPLES_PER_TYPE.get(field_type, MAX_RESULT_SAMPLES)
+        max_values = dynamic_max_values if is_dynamic_frame else MAX_RESULT_VALUES
         values = field.get("values") if isinstance(field.get("values"), list) else []
         samples = field.get("samples") if isinstance(field.get("samples"), list) else []
         compacted = compact_result_field(field, max_values, max_samples)
@@ -2307,7 +2330,9 @@ def compact_cloud_fea_result(result):
         returned_samples = compacted.get("samples") if isinstance(compacted.get("samples"), list) else []
         returned_values = compacted.get("values") if isinstance(compacted.get("values"), list) else []
         compaction_fields.append({
+            "id": field.get("id"),
             "type": field_type,
+            "frameIndex": field.get("frameIndex"),
             "originalValueCount": len(values),
             "returnedValueCount": len(returned_values),
             "originalSampleCount": len(samples),
@@ -2325,15 +2350,23 @@ def compact_cloud_fea_result(result):
         "enabled": True,
         "maxFieldValues": MAX_RESULT_VALUES,
         "maxFieldSamples": MAX_RESULT_SAMPLES,
+        "jsonBudgetBytes": CLOUD_FEA_RESULT_JSON_BUDGET_BYTES,
+        "budgetPasses": budget_passes,
         "maxDynamicFrames": MAX_DYNAMIC_FRAMES,
         "maxDynamicFieldValuesPerFrame": MAX_DYNAMIC_FIELD_VALUES_PER_FRAME,
         "maxDynamicFieldSamplesPerFrame": MAX_DYNAMIC_FIELD_SAMPLES_PER_FRAME,
+        "finalDynamicFieldValuesPerFrame": dynamic_max_values,
+        "finalDynamicFieldSamplesPerFrame": dynamic_max_samples,
         "originalStressSampleCount": original_stress_sample_count,
         "returnedStressSampleCount": returned_stress_sample_count,
         "fields": compaction_fields,
     }
     compacted_result["artifacts"] = artifacts
     return compacted_result
+
+
+def compacted_result_json_bytes(result):
+    return len(json.dumps(result, separators=(",", ":")).encode("utf-8"))
 
 
 def compact_text_artifact(text, max_bytes, preview_key_name, keep_tail=False):
