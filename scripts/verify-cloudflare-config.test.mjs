@@ -4,7 +4,7 @@ import { describe, expect, test } from "vitest";
 import { parseJsonc, validateCloudflareConfigs } from "./verify-cloudflare-config.mjs";
 
 const rootDir = resolve(import.meta.dirname, "..");
-const expectedContainerImage = "registry.cloudflare.com/747b74cbd7d019dd7aeecb2c24a4bf10/opencae/opencae-fea:0.1.2-dynamic-v1";
+const expectedContainerImage = "./services/opencae-fea-container/Dockerfile";
 
 function readConfig(path) {
   return parseJsonc(readFileSync(resolve(rootDir, path), "utf8"), path);
@@ -29,11 +29,11 @@ describe("Cloudflare deployment config guard", () => {
     expect(() => validateCloudflareConfigs({ defaultConfig, containersConfig, staticConfig, localFirstConfig })).not.toThrow();
   });
 
-  test("package scripts build and push the bumped immutable container image tag", () => {
+  test("default Workers Builds deploy can build and push the container image", () => {
     const packageJson = JSON.parse(readFileSync(resolve(rootDir, "package.json"), "utf8"));
 
-    expect(packageJson.scripts["containers:build"]).toContain("opencae/opencae-fea:0.1.2-dynamic-v1");
-    expect(packageJson.scripts["containers:push"]).toContain("opencae/opencae-fea:0.1.2-dynamic-v1");
+    expect(packageJson.scripts.build).toBe("pnpm --filter @opencae/api build && pnpm --filter @opencae/web build");
+    expect(packageJson.scripts["deploy:cloudflare"]).toContain("wrangler deploy --config wrangler.containers.jsonc");
   });
 
   test("fails when static and production configs share a Worker name", () => {
@@ -79,10 +79,10 @@ describe("Cloudflare deployment config guard", () => {
     );
   });
 
-  test("fails when the production container image is not the pushed Cloudflare registry image", () => {
+  test("fails when the production container image is not the Dockerfile path for Workers Builds", () => {
     const containersConfig = clone(readConfig("wrangler.containers.jsonc"));
     const staticConfig = readConfig("wrangler.static.jsonc");
-    containersConfig.containers[0].image = "./services/opencae-fea-container/Dockerfile";
+    containersConfig.containers[0].image = "registry.cloudflare.com/747b74cbd7d019dd7aeecb2c24a4bf10/opencae/opencae-fea:0.1.2-dynamic-v1";
 
     expect(() => validateCloudflareConfigs({ containersConfig, staticConfig })).toThrow(
       /production config containers\[0\]\.image must be/

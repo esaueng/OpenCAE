@@ -55,13 +55,13 @@ pnpm install
 pnpm deploy:cloudflare
 ```
 
-Wrangler uses [wrangler.containers.jsonc](wrangler.containers.jsonc) for the production app domain by default. It is intentionally kept container-bound so Cloudflare Builds or plain Wrangler deploys for Worker `opencae` cannot drop `FEA_CONTAINER`. [wrangler.jsonc](wrangler.jsonc) is kept as the same production container-bound config. Cloud FEA browser calls stay on the app domain at `/api/cloud-fea/*`; the Worker reaches the container through the `FEA_CONTAINER` binding.
+Wrangler uses [wrangler.containers.jsonc](wrangler.containers.jsonc) for the production app domain by default. It is intentionally kept container-bound so Cloudflare Builds or plain Wrangler deploys for Worker `opencae` cannot drop `FEA_CONTAINER`. [wrangler.jsonc](wrangler.jsonc) is kept as the same production container-bound config. Both production configs point `containers[0].image` at `./services/opencae-fea-container/Dockerfile`, so `wrangler deploy` builds and pushes the current container image before rollout. Cloud FEA browser calls stay on the app domain at `/api/cloud-fea/*`; the Worker reaches the container through the `FEA_CONTAINER` binding.
 
 Do not change production `wrangler.jsonc` to a non-container Worker. The production Worker name is `opencae`, and every deploy to that Worker must include `FEA_CONTAINER`.
 
 After production deploy, `https://cae.esau.app/api/cloud-fea/health` must report `containerBound=true`.
 
-Container application rollouts require a token with Cloudflare Containers write access. The explicit container scripts are kept as aliases for the default production deploy path:
+Container application rollouts require a token with Cloudflare Containers write access. The explicit container deploy scripts are kept as aliases for the default production deploy path:
 
 ```bash
 pnpm deploy:cloudflare:containers:dry-run
@@ -70,7 +70,7 @@ pnpm deploy:cloudflare:containers
 
 Real Cloud FEA transient animation requires a successful container deploy because dynamic Cloud FEA runs are rejected unless the container returns timed multi-frame result fields. The Cloud FEA container generates CalculiX input decks and uses the open-source CalculiX CrunchiX executable (`ccx`) for static and transient structural solves when the container runtime is available.
 
-Changing `services/opencae-fea-container/runner.py` requires redeploying the container-enabled Worker with `pnpm deploy:cloudflare`; rebuilding or deploying web assets alone will not update the Cloud FEA runner image.
+Changing `services/opencae-fea-container/runner.py` requires redeploying the container-enabled Worker with `pnpm deploy:cloudflare` or `npx wrangler deploy`; rebuilding or deploying web assets alone will not update the Cloud FEA runner image. Do not replace the production Dockerfile image path with a registry tag unless the deploy command first builds and pushes that exact tag.
 
 For a static Worker deploy without Cloud FEA containers, use the explicit static path:
 
@@ -90,11 +90,14 @@ pnpm deploy:cloudflare:local-first
 
 That explicit local-first path uses [wrangler.local-first.jsonc](wrangler.local-first.jsonc).
 
-For Cloudflare Builds, the deploy command must be one of:
+For Cloudflare Builds, use:
 
 ```bash
-pnpm deploy:cloudflare
+Build command: pnpm run build
+Deploy command: npx wrangler deploy
 ```
+
+`pnpm deploy:cloudflare` is also valid as a deploy command, but do not use a web-assets-only deploy command for the production Worker.
 
 ## Workspace Layout
 
