@@ -1,7 +1,7 @@
 import { lazy, startTransition, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Constraint, DisplayFace, DisplayModel, DynamicSolverSettings, Load, NamedSelection, Project, ResultField, ResultRenderBounds, ResultSummary, RunEvent, RunTimingEstimate, SimulationFidelity, SolverBackend, Study } from "@opencae/schema";
 import { RotateCcw, Save } from "lucide-react";
-import { addLoad, addSupport, assignMaterial, cancelRun, createProject, generateMesh, getCloudFeaHealth, getResults, importLocalProject, loadSampleProject, renameProject, runSimulation, subscribeToRun, updateStudy as saveStudyPatch, uploadModel, type CloudFeaRouteHealth, type SampleAnalysisType, type SampleModelId } from "./lib/api";
+import { addLoad, addSupport, assignMaterial, cancelRun, createProject, generateMesh, getCloudFeaHealth, getCloudFeaPreflight, getResults, importLocalProject, loadSampleProject, renameProject, runSimulation, subscribeToRun, updateStudy as saveStudyPatch, uploadModel, type CloudFeaPreflightResponse, type CloudFeaRouteHealth, type SampleAnalysisType, type SampleModelId } from "./lib/api";
 import { normalizePrintParameters, starterMaterials } from "@opencae/materials";
 import { BottomPanel } from "./components/BottomPanel";
 import { OpenCaeLogoMark } from "./components/OpenCaeLogoMark";
@@ -147,6 +147,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const [isStepbarCollapsed, setIsStepbarCollapsed] = useState(false);
   const [showBoundaryConditionMenu, setShowBoundaryConditionMenu] = useState(false);
   const [cloudFeaHealth, setCloudFeaHealth] = useState<CloudFeaRouteHealth | null>(null);
+  const [cloudFeaPreflight, setCloudFeaPreflight] = useState<CloudFeaPreflightResponse | null>(null);
   const didRequestRestoredHomeView = useRef(false);
   const activeRunSourceRef = useRef<EventSource | null>(null);
   const processingRunIdRef = useRef<string | null>(null);
@@ -256,13 +257,18 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const missingRunItems = runReadiness.filter((item) => !item.done).map((item) => item.label);
   const cloudFeaEndpoint = cloudFeaHealth?.cloudFeaEndpoint ?? cloudFeaRunsEndpointForCurrentOrigin();
   const cloudFeaUnavailable = isCloudFeaStudy(study) && cloudFeaHealth?.cloudFeaAvailable === false;
-  const effectiveCanRunSimulation = canRunSimulation && !cloudFeaUnavailable;
+  const cloudFeaPreflightError = isCloudFeaStudy(study) && cloudFeaPreflight?.ready === false
+    ? cloudFeaPreflight.diagnostics.find((diagnostic) => diagnostic.severity === "error")?.message ?? "Cloud FEA preflight failed."
+    : null;
+  const effectiveMissingRunItems = cloudFeaPreflightError ? [...missingRunItems, "Cloud FEA preflight"] : missingRunItems;
+  const effectiveCanRunSimulation = canRunSimulation && !cloudFeaUnavailable && !cloudFeaPreflightError;
   const canUndoAction = undoStack.length > 0;
   const canRedoAction = redoStack.length > 0;
 
   useEffect(() => {
     if (!isCloudFeaStudy(study)) {
       setCloudFeaHealth(null);
+      setCloudFeaPreflight(null);
       return undefined;
     }
     let cancelled = false;
@@ -277,6 +283,25 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       cancelled = true;
     };
   }, [study?.id, study?.solverSettings]);
+
+  useEffect(() => {
+    if (!study || !isCloudFeaStudy(study) || !displayModel) {
+      setCloudFeaPreflight(null);
+      return undefined;
+    }
+    const currentStudy = study;
+    let cancelled = false;
+    void getCloudFeaPreflight({ study: currentStudy, displayModel, resultRenderBounds })
+      .then((preflight) => {
+        if (!cancelled) setCloudFeaPreflight(preflight);
+      })
+      .catch(() => {
+        if (!cancelled) setCloudFeaPreflight(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [displayModel, resultRenderBounds, study]);
 
   useEffect(() => {
     if (!initialAction || initialActionConsumedRef.current) return;
@@ -991,7 +1016,11 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         pushMessage("Cloud FEA is unavailable on this app domain because this Worker was deployed without FEA_CONTAINER. Deploy with wrangler.containers.jsonc.");
         return;
       }
-      pushMessage(missingRunItems.length ? `Complete before running: ${missingRunItems.join(", ")}.` : "Simulation is already running.");
+      if (cloudFeaPreflightError) {
+        pushMessage(`Cloud FEA preflight failed: ${cloudFeaPreflightError}`);
+        return;
+      }
+      pushMessage(effectiveMissingRunItems.length ? `Complete before running: ${effectiveMissingRunItems.join(", ")}.` : "Simulation is already running.");
       return;
     }
     setResultPlaybackPlaying(false);
@@ -1122,7 +1151,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
             className={`primary topbar-action ${solverRunning ? "running" : ""}`}
             onClick={handleRunSimulation}
             disabled={!effectiveCanRunSimulation}
-            title={cloudFeaUnavailable ? "Cloud FEA is unavailable on this app domain." : missingRunItems.length ? `Complete before running: ${missingRunItems.join(", ")}` : "Run simulation"}
+            title={cloudFeaUnavailable ? "Cloud FEA is unavailable on this app domain." : effectiveMissingRunItems.length ? `Complete before running: ${effectiveMissingRunItems.join(", ")}` : "Run simulation"}
           >
             <span aria-hidden="true">▶</span>{solverRunning ? "Running…" : "Run simulation"}
           </button>
@@ -1302,7 +1331,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           onCancelSimulation={handleCancelSimulation}
           canCancelSimulation={solverRunning}
           canRunSimulation={effectiveCanRunSimulation}
-          missingRunItems={missingRunItems}
+          missingRunItems={effectiveMissingRunItems}
           cloudFeaAvailable={isCloudFeaStudy(study) ? cloudFeaHealth?.cloudFeaAvailable : undefined}
           cloudFeaEndpoint={isCloudFeaStudy(study) ? cloudFeaEndpoint : undefined}
           resultFrameIndex={resultFrameIndex}

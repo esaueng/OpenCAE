@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { estimateAllowableLoadForSafetyFactor } from "@opencae/schema";
 import type { DisplayModel, Project, RunEvent, Study } from "@opencae/schema";
-import { addLoad, addSupport, assignMaterial, cancelRun, createProject, generateMesh, getResults, importLocalProject, loadSampleProject, renameProject, runSimulation, subscribeToRun, updateStudy, uploadModel } from "./api";
+import { addLoad, addSupport, assignMaterial, cancelRun, createProject, generateMesh, getCloudFeaPreflight, getResults, importLocalProject, loadSampleProject, renameProject, runSimulation, subscribeToRun, updateStudy, uploadModel } from "./api";
 
 const TestFile = globalThis.File ?? class extends Blob {
   name: string;
@@ -493,6 +493,37 @@ describe("api", () => {
     expect(response.streamUrl).toBe("/api/cloud-fea/runs/run-cloud-1/events");
     expect(results.summary.maxStress).toBe(1440000);
     expect(fetchMock).toHaveBeenCalledWith("/api/cloud-fea/runs/run-cloud-1/results");
+  });
+
+  test("requests Cloud FEA preflight diagnostics", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === "/api/cloud-fea/preflight" && init?.method === "POST") {
+        const requestBody = JSON.parse(init.body as string) as Record<string, unknown>;
+        expect(requestBody).toMatchObject({
+          study: { id: "study-1" },
+          displayModel: { id: "display-1" },
+          resultRenderBounds: { coordinateSpace: "display_model" }
+        });
+        return new Response(JSON.stringify({
+          ready: true,
+          solver: "calculix",
+          supported: { geometry: true, materials: true, constraints: true, loads: true },
+          normalizedLoads: [{ sourceLoadId: "load-1", kind: "surface_force", totalForceN: [0, 0, -500] }],
+          diagnostics: []
+        }), { headers: { "content-type": "application/json" } });
+      }
+      return new Response("unexpected", { status: 500 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await getCloudFeaPreflight({
+      study,
+      displayModel,
+      resultRenderBounds: { min: [-1, -1, -1], max: [1, 1, 1], coordinateSpace: "display_model" }
+    });
+
+    expect(result.ready).toBe(true);
+    expect(result.normalizedLoads[0]).toMatchObject({ kind: "surface_force", totalForceN: [0, 0, -500] });
   });
 
   test("returns Cloud FEA request errors instead of masking them with local results", async () => {
