@@ -43,7 +43,7 @@
   "containers": [
     {
       "class_name": "OpenCaeFeaContainer",
-      "image": "registry.cloudflare.com/747b74cbd7d019dd7aeecb2c24a4bf10/opencae/opencae-fea:0.1.0",
+      "image": "registry.cloudflare.com/747b74cbd7d019dd7aeecb2c24a4bf10/opencae/opencae-fea:0.1.1-load-normalization",
       "instance_type": "standard-1",
       "max_instances": 10
     }
