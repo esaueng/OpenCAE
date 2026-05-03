@@ -22,53 +22,59 @@ export function parseJsonc(source, label = "JSONC input") {
 
 export function readCloudflareConfigs(baseDir = rootDir) {
   return {
+    defaultConfig: readWranglerConfig(resolve(baseDir, "wrangler.jsonc")),
     containersConfig: readWranglerConfig(resolve(baseDir, "wrangler.containers.jsonc")),
-    staticConfig: readWranglerConfig(resolve(baseDir, "wrangler.jsonc")),
+    staticConfig: readWranglerConfig(resolve(baseDir, "wrangler.static.jsonc")),
     localFirstConfig: readWranglerConfig(resolve(baseDir, "wrangler.local-first.jsonc"))
   };
 }
 
-export function validateCloudflareConfigs({ containersConfig, staticConfig, localFirstConfig }) {
+export function validateCloudflareConfigs({ defaultConfig, containersConfig, staticConfig, localFirstConfig }) {
   const failures = [];
 
-  if (containersConfig.name !== productionWorkerName) {
-    failures.push(`production config name must be "${productionWorkerName}", got "${String(containersConfig.name)}"`);
-  }
-
-  const durableBindings = Array.isArray(containersConfig.durable_objects?.bindings)
-    ? containersConfig.durable_objects.bindings
-    : [];
-  if (!durableBindings.some((binding) => binding?.name === containerBindingName && binding?.class_name === containerClassName)) {
-    failures.push(`production config must bind durable object ${containerBindingName} to ${containerClassName}`);
-  }
-
-  if (containersConfig.containers?.[0]?.class_name !== containerClassName) {
-    failures.push(`production config containers[0].class_name must be "${containerClassName}"`);
-  }
-
-  if (containersConfig.containers?.[0]?.image !== productionContainerImage) {
-    failures.push(`production config containers[0].image must be "${productionContainerImage}"`);
-  }
-
-  if (!hasCustomDomainRoute(containersConfig, productionDomain)) {
-    failures.push(`production config must route ${productionDomain} as a custom domain`);
-  }
-
-  const migrations = Array.isArray(containersConfig.migrations) ? containersConfig.migrations : [];
-  if (!migrations.some((migration) => migration?.new_sqlite_classes?.includes(containerClassName))) {
-    failures.push(`production config migrations must include ${containerClassName}`);
-  }
-
-  const runWorkerFirst = containersConfig.assets?.run_worker_first;
-  if (!Array.isArray(runWorkerFirst) || !runWorkerFirst.includes("/api/*") || !runWorkerFirst.includes("/health")) {
-    failures.push('production config assets.run_worker_first must include "/api/*" and "/health"');
-  }
+  if (defaultConfig) validateProductionConfig("default", defaultConfig, failures);
+  validateProductionConfig("production", containersConfig, failures);
 
   validateNonProductionConfig("static", staticConfig, containersConfig, failures);
   if (localFirstConfig) validateNonProductionConfig("local-first", localFirstConfig, containersConfig, failures);
 
   if (failures.length > 0) {
     throw new Error(`Cloudflare config verification failed:\n- ${failures.join("\n- ")}`);
+  }
+}
+
+function validateProductionConfig(label, config, failures) {
+  if (config.name !== productionWorkerName) {
+    failures.push(`${label} config name must be "${productionWorkerName}", got "${String(config.name)}"`);
+  }
+
+  const durableBindings = Array.isArray(config.durable_objects?.bindings)
+    ? config.durable_objects.bindings
+    : [];
+  if (!durableBindings.some((binding) => binding?.name === containerBindingName && binding?.class_name === containerClassName)) {
+    failures.push(`${label} config must bind durable object ${containerBindingName} to ${containerClassName}`);
+  }
+
+  if (config.containers?.[0]?.class_name !== containerClassName) {
+    failures.push(`${label} config containers[0].class_name must be "${containerClassName}"`);
+  }
+
+  if (config.containers?.[0]?.image !== productionContainerImage) {
+    failures.push(`${label} config containers[0].image must be "${productionContainerImage}"`);
+  }
+
+  if (!hasCustomDomainRoute(config, productionDomain)) {
+    failures.push(`${label} config must route ${productionDomain} as a custom domain`);
+  }
+
+  const migrations = Array.isArray(config.migrations) ? config.migrations : [];
+  if (!migrations.some((migration) => migration?.new_sqlite_classes?.includes(containerClassName))) {
+    failures.push(`${label} config migrations must include ${containerClassName}`);
+  }
+
+  const runWorkerFirst = config.assets?.run_worker_first;
+  if (!Array.isArray(runWorkerFirst) || !runWorkerFirst.includes("/api/*") || !runWorkerFirst.includes("/health")) {
+    failures.push(`${label} config assets.run_worker_first must include "/api/*" and "/health"`);
   }
 }
 

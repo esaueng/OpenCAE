@@ -47,36 +47,44 @@ describe("Cloudflare FEA worker orchestration", () => {
       migrations?: Array<{ new_sqlite_classes?: string[] }>;
     };
     const defaultConfig = readJsonc("../../../wrangler.jsonc") as typeof containerConfig;
+    const staticConfig = readJsonc("../../../wrangler.static.jsonc") as typeof containerConfig;
     const localFirstConfig = readJsonc("../../../wrangler.local-first.jsonc") as typeof containerConfig;
 
-    expect(packageJson.scripts["deploy:cloudflare"]).toContain("--config wrangler.containers.jsonc");
+    expect(packageJson.scripts["deploy:cloudflare"]).toContain("--config wrangler.jsonc");
     expect(packageJson.scripts["deploy:cloudflare"]).toContain("pnpm verify:cloudflare-config");
     expect(packageJson.scripts["deploy:cloudflare"]).toContain("pnpm containers:build");
     expect(packageJson.scripts["deploy:cloudflare"]).toContain("pnpm containers:push");
     expect(packageJson.scripts["deploy:cloudflare"]).toContain("--containers-rollout=immediate");
-    expect(packageJson.scripts["deploy:cloudflare:dry-run"]).toContain("--config wrangler.containers.jsonc");
-    expect(packageJson.scripts["deploy:cloudflare:static"]).toContain("--config wrangler.jsonc");
-    expect(packageJson.scripts["deploy:cloudflare:static:dry-run"]).toContain("--config wrangler.jsonc");
+    expect(packageJson.scripts["deploy:cloudflare:dry-run"]).toContain("--config wrangler.jsonc");
+    expect(packageJson.scripts["deploy:cloudflare:static"]).toContain("--config wrangler.static.jsonc");
+    expect(packageJson.scripts["deploy:cloudflare:static:dry-run"]).toContain("--config wrangler.static.jsonc");
     expect(packageJson.scripts["containers:build"]).toContain("--config wrangler.containers.jsonc");
     expect(packageJson.scripts["containers:push"]).toContain("--config wrangler.containers.jsonc");
     expect(containerConfig.name).toBe("opencae");
     expect(containerConfig.account_id).toBe("747b74cbd7d019dd7aeecb2c24a4bf10");
     expect(containerConfig.workers_dev).toBe(false);
     expect(containerConfig.routes).toContainEqual({ pattern: "cae.esau.app", custom_domain: true });
-    expect(defaultConfig.name).toBe("opencae-static");
-    expect(defaultConfig.name).not.toBe(containerConfig.name);
+    expect(defaultConfig.name).toBe(containerConfig.name);
+    expect(defaultConfig.routes).toContainEqual({ pattern: "cae.esau.app", custom_domain: true });
+    expect(defaultConfig.containers?.[0]).toMatchObject({
+      class_name: "OpenCaeFeaContainer",
+      image: "registry.cloudflare.com/747b74cbd7d019dd7aeecb2c24a4bf10/opencae/opencae-fea:0.1.0"
+    });
+    expect(defaultConfig.durable_objects?.bindings).toContainEqual({ name: "FEA_CONTAINER", class_name: "OpenCaeFeaContainer" });
+    expect(staticConfig.name).toBe("opencae-static");
+    expect(staticConfig.name).not.toBe(containerConfig.name);
     expect(localFirstConfig.name).toBe("opencae-local-first");
     expect(localFirstConfig.name).not.toBe(containerConfig.name);
-    expect(defaultConfig.routes ?? []).not.toContainEqual({ pattern: "cae.esau.app", custom_domain: true });
+    expect(staticConfig.routes ?? []).not.toContainEqual({ pattern: "cae.esau.app", custom_domain: true });
     expect(localFirstConfig.routes ?? []).not.toContainEqual({ pattern: "cae.esau.app", custom_domain: true });
     expect(containerConfig.containers?.[0]).toMatchObject({
       class_name: "OpenCaeFeaContainer",
       image: "registry.cloudflare.com/747b74cbd7d019dd7aeecb2c24a4bf10/opencae/opencae-fea:0.1.0"
     });
     expect(containerConfig.durable_objects?.bindings).toContainEqual({ name: "FEA_CONTAINER", class_name: "OpenCaeFeaContainer" });
-    expect(defaultConfig.containers).toBeUndefined();
-    expect(defaultConfig.durable_objects?.bindings ?? []).not.toContainEqual({ name: "FEA_CONTAINER", class_name: "OpenCaeFeaContainer" });
-    expect(defaultConfig.migrations?.some((migration) => migration.new_sqlite_classes?.includes("OpenCaeFeaContainer")) ?? false).toBe(false);
+    expect(staticConfig.containers).toBeUndefined();
+    expect(staticConfig.durable_objects?.bindings ?? []).not.toContainEqual({ name: "FEA_CONTAINER", class_name: "OpenCaeFeaContainer" });
+    expect(staticConfig.migrations?.some((migration) => migration.new_sqlite_classes?.includes("OpenCaeFeaContainer")) ?? false).toBe(false);
   });
 
   test("rejects new cloud FEA runs when the container binding is absent", async () => {
@@ -121,7 +129,7 @@ describe("Cloudflare FEA worker orchestration", () => {
       containersEnabled: false,
       cloudFeaAvailable: false,
       requiredDeployConfig: "wrangler.containers.jsonc",
-      deploymentHint: "The current Worker version has no FEA_CONTAINER binding. This usually means the app was deployed with wrangler.jsonc instead of wrangler.containers.jsonc, or Cloudflare Builds is still running plain wrangler deploy.",
+      deploymentHint: "The current Worker version has no FEA_CONTAINER binding. This usually means a stale or non-container deployment was promoted to Worker opencae. Deploy with wrangler.jsonc or wrangler.containers.jsonc after confirming the config includes FEA_CONTAINER.",
       requestOrigin: "https://cae.example",
       cloudFeaEndpoint: "https://cae.example/api/cloud-fea/runs"
     });

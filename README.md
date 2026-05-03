@@ -55,9 +55,9 @@ pnpm install
 pnpm deploy:cloudflare
 ```
 
-Wrangler uses [wrangler.containers.jsonc](wrangler.containers.jsonc) for the production app domain. Cloud FEA browser calls stay on the app domain at `/api/cloud-fea/*`; the Worker reaches the container through the `FEA_CONTAINER` binding.
+Wrangler uses [wrangler.jsonc](wrangler.jsonc) for the production app domain by default. It is intentionally kept container-bound so Cloudflare Builds or plain Wrangler deploys for Worker `opencae` cannot drop `FEA_CONTAINER`. [wrangler.containers.jsonc](wrangler.containers.jsonc) is kept as an explicit production mirror for container deploy commands. Cloud FEA browser calls stay on the app domain at `/api/cloud-fea/*`; the Worker reaches the container through the `FEA_CONTAINER` binding.
 
-Do not use plain `npx wrangler deploy` for production. Plain Wrangler deploys with [wrangler.jsonc](wrangler.jsonc), which targets the static/non-container `opencae-static` Worker and intentionally has no `FEA_CONTAINER` binding.
+Do not change production `wrangler.jsonc` to a non-container Worker. The production Worker name is `opencae`, and every deploy to that Worker must include `FEA_CONTAINER`.
 
 After production deploy, `https://cae.esau.app/api/cloud-fea/health` must report `containerBound=true`.
 
@@ -77,7 +77,7 @@ pnpm deploy:cloudflare:static:dry-run
 pnpm deploy:cloudflare:static
 ```
 
-That static path uses [wrangler.jsonc](wrangler.jsonc), which targets `opencae-static` and intentionally omits the `containers` section, the production custom domain route, and the `FEA_CONTAINER` Durable Object binding. It must not be attached to `cae.esau.app`; static deployments should use the Detailed local backend.
+That static path uses [wrangler.static.jsonc](wrangler.static.jsonc), which targets `opencae-static` and intentionally omits the `containers` section, the production custom domain route, and the `FEA_CONTAINER` Durable Object binding. It must not be attached to `cae.esau.app`; static deployments should use the Detailed local backend.
 
 For a local-first/static Worker deploy without Cloud FEA containers, use:
 
@@ -97,7 +97,7 @@ pnpm deploy:cloudflare
 or:
 
 ```bash
-pnpm build:cloudflare && npx wrangler deploy --config wrangler.containers.jsonc
+pnpm build:cloudflare && npx wrangler deploy
 ```
 
 ## Workspace Layout

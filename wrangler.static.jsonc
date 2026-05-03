@@ -1,17 +1,10 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "opencae",
-  "account_id": "747b74cbd7d019dd7aeecb2c24a4bf10",
+  // Static/local-first Worker. Do not deploy to cae.esau.app.
+  "name": "opencae-static",
   "main": "apps/opencae-web/worker/index.ts",
   "compatibility_date": "2026-04-27",
   "compatibility_flags": ["nodejs_compat"],
-  "workers_dev": false,
-  "routes": [
-    {
-      "pattern": "cae.esau.app",
-      "custom_domain": true
-    }
-  ],
   "assets": {
     "directory": "apps/opencae-web/dist",
     "binding": "ASSETS",
@@ -40,28 +33,6 @@
       }
     ]
   },
-  "containers": [
-    {
-      "class_name": "OpenCaeFeaContainer",
-      "image": "registry.cloudflare.com/747b74cbd7d019dd7aeecb2c24a4bf10/opencae/opencae-fea:0.1.0",
-      "instance_type": "standard-1",
-      "max_instances": 5
-    }
-  ],
-  "durable_objects": {
-    "bindings": [
-      {
-        "name": "FEA_CONTAINER",
-        "class_name": "OpenCaeFeaContainer"
-      }
-    ]
-  },
-  "migrations": [
-    {
-      "tag": "v1",
-      "new_sqlite_classes": ["OpenCaeFeaContainer"]
-    }
-  ],
   "observability": {
     "enabled": false,
     "head_sampling_rate": 1,

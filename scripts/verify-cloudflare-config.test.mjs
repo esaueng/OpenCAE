@@ -15,17 +15,20 @@ function clone(value) {
 
 describe("Cloudflare deployment config guard", () => {
   test("passes with the corrected production and static configs", () => {
+    const defaultConfig = readConfig("wrangler.jsonc");
     const containersConfig = readConfig("wrangler.containers.jsonc");
-    const staticConfig = readConfig("wrangler.jsonc");
+    const staticConfig = readConfig("wrangler.static.jsonc");
     const localFirstConfig = readConfig("wrangler.local-first.jsonc");
 
+    expect(defaultConfig.name).toBe("opencae");
+    expect(staticConfig.name).toBe("opencae-static");
     expect(localFirstConfig.name).toBe("opencae-local-first");
-    expect(() => validateCloudflareConfigs({ containersConfig, staticConfig, localFirstConfig })).not.toThrow();
+    expect(() => validateCloudflareConfigs({ defaultConfig, containersConfig, staticConfig, localFirstConfig })).not.toThrow();
   });
 
   test("fails when static and production configs share a Worker name", () => {
     const containersConfig = readConfig("wrangler.containers.jsonc");
-    const staticConfig = clone(readConfig("wrangler.jsonc"));
+    const staticConfig = clone(readConfig("wrangler.static.jsonc"));
     staticConfig.name = containersConfig.name;
 
     expect(() => validateCloudflareConfigs({ containersConfig, staticConfig })).toThrow(
@@ -35,7 +38,7 @@ describe("Cloudflare deployment config guard", () => {
 
   test("fails when local-first and production configs share a Worker name", () => {
     const containersConfig = readConfig("wrangler.containers.jsonc");
-    const staticConfig = readConfig("wrangler.jsonc");
+    const staticConfig = readConfig("wrangler.static.jsonc");
     const localFirstConfig = clone(readConfig("wrangler.local-first.jsonc"));
     localFirstConfig.name = containersConfig.name;
 
@@ -46,7 +49,7 @@ describe("Cloudflare deployment config guard", () => {
 
   test("fails when the production config loses FEA_CONTAINER", () => {
     const containersConfig = clone(readConfig("wrangler.containers.jsonc"));
-    const staticConfig = readConfig("wrangler.jsonc");
+    const staticConfig = readConfig("wrangler.static.jsonc");
     containersConfig.durable_objects.bindings = containersConfig.durable_objects.bindings.filter(
       (binding) => binding.name !== "FEA_CONTAINER"
     );
@@ -58,7 +61,7 @@ describe("Cloudflare deployment config guard", () => {
 
   test("fails when the production config loses cae.esau.app", () => {
     const containersConfig = clone(readConfig("wrangler.containers.jsonc"));
-    const staticConfig = readConfig("wrangler.jsonc");
+    const staticConfig = readConfig("wrangler.static.jsonc");
     containersConfig.routes = containersConfig.routes.filter((route) => route.pattern !== "cae.esau.app");
 
     expect(() => validateCloudflareConfigs({ containersConfig, staticConfig })).toThrow(
@@ -68,7 +71,7 @@ describe("Cloudflare deployment config guard", () => {
 
   test("fails when the production container image is not the pushed Cloudflare registry image", () => {
     const containersConfig = clone(readConfig("wrangler.containers.jsonc"));
-    const staticConfig = readConfig("wrangler.jsonc");
+    const staticConfig = readConfig("wrangler.static.jsonc");
     containersConfig.containers[0].image = "./services/opencae-fea-container/Dockerfile";
 
     expect(() => validateCloudflareConfigs({ containersConfig, staticConfig })).toThrow(
