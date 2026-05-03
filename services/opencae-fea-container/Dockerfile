@@ -11,6 +11,7 @@ RUN apt-get update \
 
 WORKDIR /opencae
 COPY runner.py /opencae/runner.py
+COPY RUNNER_VERSION /opencae/RUNNER_VERSION
 
 EXPOSE 8080
 CMD ["python3", "/opencae/runner.py"]

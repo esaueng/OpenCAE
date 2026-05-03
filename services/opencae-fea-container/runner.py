@@ -18,7 +18,17 @@ UNSUPPORTED_BLOCK_ERROR = "Cloud FEA currently supports only block-like single-b
 CCX_UNAVAILABLE_ERROR = "CalculiX executable unavailable; refusing to publish Cloud FEA results without a real solver run."
 GMSH_UNAVAILABLE_ERROR = "Gmsh executable unavailable; refusing to mesh uploaded geometry for Cloud FEA."
 UNSUPPORTED_UPLOADED_GEOMETRY_ERROR = "Cloud FEA uploaded geometry support requires STEP, STL, or OBJ model bytes and confident face mapping."
-RUNNER_VERSION = "2026-05-03-solver-timeout-v1"
+
+
+def read_runner_version():
+    try:
+        version = Path(__file__).resolve().with_name("RUNNER_VERSION").read_text(encoding="utf-8").strip()
+        return version or "unknown-dev"
+    except Exception:
+        return "unknown-dev"
+
+
+RUNNER_VERSION = read_runner_version()
 AXES = ("x", "y", "z")
 DOFS = (1, 2, 3)
 FIDELITY_MESH_DENSITY = {

@@ -10,7 +10,7 @@ import worker, { MAX_CLOUD_FEA_RESULT_JSON_BYTES, looksLikePlaceholderResult } f
 
 const expectedCloudFeaRunnerVersion = "2026-05-03-solver-timeout-v1";
 const expectedCloudFeaContainerImage = "./services/opencae-fea-container/Dockerfile";
-const expectedCloudFeaContainerInstanceName = "opencae-fea-solver-dynamic-v1";
+const expectedCloudFeaContainerInstanceName = `opencae-fea-${expectedCloudFeaRunnerVersion}`;
 
 class MemoryR2Bucket {
   objects = new Map<string, string>();
@@ -198,6 +198,9 @@ describe("Cloudflare FEA worker orchestration", () => {
       containerRunnerVersion: expectedCloudFeaRunnerVersion,
       supportedAnalysisTypes: ["static_stress", "dynamic_structural"],
       dynamicCloudFeaAvailable: true,
+      containerRunnerVersionMatches: true,
+      containerInstanceName: expectedCloudFeaContainerInstanceName,
+      staleContainer: false,
       expectedRunnerVersion: expectedCloudFeaRunnerVersion,
       solverTimeouts: {
         staticStress: 60,
@@ -208,6 +211,31 @@ describe("Cloudflare FEA worker orchestration", () => {
     });
     expect(fetch).toHaveBeenCalledOnce();
     expect(body.deploymentHint).toBeUndefined();
+  });
+
+  test("reports stale Cloud FEA container health when runner version is older than expected", async () => {
+    const fetch = vi.fn(async () => Response.json(dynamicContainerHealth({
+      runnerVersion: "2026-05-02-previous-runner"
+    })));
+    const env = {
+      ASSETS: { fetch: vi.fn(async () => new Response("asset")) },
+      FEA_ARTIFACTS: new MemoryR2Bucket(),
+      FEA_RUN_QUEUE: { send: vi.fn(async () => undefined) },
+      FEA_CONTAINER: { fetch }
+    };
+
+    const response = await worker.fetch(new Request("https://cae.example/api/cloud-fea/health"), env);
+    const body = await response.json() as Record<string, unknown>;
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({
+      containerRunnerVersion: "2026-05-02-previous-runner",
+      expectedRunnerVersion: expectedCloudFeaRunnerVersion,
+      containerRunnerVersionMatches: false,
+      containerInstanceName: expectedCloudFeaContainerInstanceName,
+      dynamicCloudFeaAvailable: false,
+      staleContainer: true
+    });
   });
 
   test("rejects dynamic run creation before writing artifacts when container lacks dynamic support", async () => {
@@ -239,10 +267,75 @@ describe("Cloudflare FEA worker orchestration", () => {
         study: cloudStudyWithMaterial("mat-aluminum-6061", {}, "dynamic_structural")
       })
     }), env);
-    const body = await response.json() as { error: string };
+    const body = await response.json() as {
+      error: string;
+      expectedRunnerVersion: string;
+      actualRunnerVersion?: string;
+      containerInstanceName: string;
+      deployCommand: string;
+      note: string;
+    };
 
     expect(response.status).toBe(503);
-    expect(body.error).toBe(`Cloud FEA dynamic requires runner ${expectedCloudFeaRunnerVersion} or newer, but the deployed container is stale. Rebuild/redeploy the Cloud FEA container.`);
+    expect(body).toMatchObject({
+      error: `Cloud FEA dynamic requires runner ${expectedCloudFeaRunnerVersion} or newer, but the deployed container is stale.`,
+      expectedRunnerVersion: expectedCloudFeaRunnerVersion,
+      actualRunnerVersion: expectedCloudFeaRunnerVersion,
+      containerInstanceName: expectedCloudFeaContainerInstanceName,
+      deployCommand: "pnpm deploy:cloudflare"
+    });
+    expect(body.note).toContain("Make sure Docker is running");
+    expect(body.note).toContain("wrangler.containers.jsonc uses a Dockerfile image path");
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(send).not.toHaveBeenCalled();
+    expect(bucket.objects.size).toBe(0);
+  });
+
+  test("dynamic run creation reports stale runner version diagnostics", async () => {
+    const bucket = new MemoryR2Bucket();
+    const send = vi.fn(async () => undefined);
+    const fetch = vi.fn(async (request: Request) => {
+      const url = new URL(request.url);
+      if (url.pathname === "/health") {
+        return Response.json(dynamicContainerHealth({ runnerVersion: "2026-05-02-previous-runner" }));
+      }
+      return Response.json(cloudContainerSolveResponse("run-should-not-start", true));
+    });
+    const env = {
+      ASSETS: { fetch: vi.fn(async () => new Response("asset")) },
+      FEA_ARTIFACTS: bucket,
+      FEA_RUN_QUEUE: { send },
+      FEA_CONTAINER: { fetch }
+    };
+
+    const response = await worker.fetch(new Request("https://cae.example/api/cloud-fea/runs", {
+      method: "POST",
+      body: JSON.stringify({
+        projectId: "project-1",
+        studyId: "study-1",
+        fidelity: "ultra",
+        study: cloudStudyWithMaterial("mat-aluminum-6061", {}, "dynamic_structural")
+      })
+    }), env);
+    const body = await response.json() as {
+      error: string;
+      expectedRunnerVersion: string;
+      actualRunnerVersion: string;
+      containerInstanceName: string;
+      deployCommand: string;
+      note: string;
+    };
+
+    expect(response.status).toBe(503);
+    expect(body).toMatchObject({
+      error: `Cloud FEA dynamic requires runner ${expectedCloudFeaRunnerVersion} or newer, but the deployed container is stale.`,
+      expectedRunnerVersion: expectedCloudFeaRunnerVersion,
+      actualRunnerVersion: "2026-05-02-previous-runner",
+      containerInstanceName: expectedCloudFeaContainerInstanceName,
+      deployCommand: "pnpm deploy:cloudflare"
+    });
+    expect(body.note).toContain("Make sure Docker is running");
+    expect(body.note).toContain("deploy must rebuild/push the image");
     expect(fetch).toHaveBeenCalledOnce();
     expect(send).not.toHaveBeenCalled();
     expect(bucket.objects.size).toBe(0);
@@ -821,6 +914,30 @@ describe("Cloudflare FEA worker orchestration", () => {
     expect(events.some((event) => event.message === "Generating CalculiX static input deck.")).toBe(true);
     expect(events.some((event) => event.message === "Generating CalculiX transient input deck.")).toBe(false);
     expect(results.summary.maxStress).toBe(431400000);
+  });
+
+  test("queue handler resolves Cloudflare container bindings with getByName using the versioned instance name", async () => {
+    const bucket = new MemoryR2Bucket();
+    await bucket.put("runs/run-cloud-get-by-name/request.json", JSON.stringify({
+      runId: "run-cloud-get-by-name",
+      projectId: "project-1",
+      studyId: "study-1",
+      fidelity: "ultra",
+      study: { id: "study-1", type: "static_stress" }
+    }));
+    const message = { body: { runId: "run-cloud-get-by-name" }, ack: vi.fn(), retry: vi.fn() };
+    const getByName = vi.fn((name: string) => ({
+      fetch: healthyContainerFetch(cloudContainerSolveResponse("run-cloud-get-by-name", false))
+    }));
+    const env = {
+      ASSETS: { fetch: vi.fn(async () => new Response("asset")) },
+      FEA_ARTIFACTS: bucket,
+      FEA_CONTAINER: { getByName }
+    };
+
+    await worker.queue({ messages: [message] }, env);
+
+    expect(getByName).toHaveBeenCalledWith(expectedCloudFeaContainerInstanceName);
   });
 
   test("queue handler records failed container diagnostics without fake results", async () => {

@@ -34,6 +34,7 @@ describe("Cloudflare deployment config guard", () => {
 
     expect(packageJson.scripts.build).toBe("pnpm --filter @opencae/api build && pnpm --filter @opencae/web build");
     expect(packageJson.scripts["deploy:cloudflare"]).toContain("wrangler deploy --config wrangler.containers.jsonc");
+    expect(packageJson.scripts["deploy:cloudflare"]).toContain("pnpm verify:runner-version");
   });
 
   test("fails when static and production configs share a Worker name", () => {
