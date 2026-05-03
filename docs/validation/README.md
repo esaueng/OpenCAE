@@ -27,6 +27,16 @@ pnpm test:fea-container
 
 The container validation command always runs analytical, mesh, deck, load-sum, parser, uploaded-geometry safe-failure, face-mapping, and provenance checks. CalculiX integration checks are skipped when `ccx` is not installed. Gmsh-backed uploaded-geometry solves are allowed only after the structured block baseline remains green; missing or ambiguous Gmsh paths must return a clear error instead of falling back to generated values.
 
+## Cloud FEA Static Load Support
+
+Cloud FEA preflights static studies before a run is queued. Supported UI load types are normalized into solver-ready surface nodal loads:
+
+- `force`: total force in `N` is distributed across the selected face.
+- `pressure`: `Pa`, `kPa`, `MPa`, or `N/mm^2` is converted to `N/mm^2`, then to equivalent nodal `*CLOAD` entries using selected face area. Native `*DLOAD` pressure remains a future improvement after face-element mapping is validated.
+- `gravity`: face-assigned payload mass in `kg` is converted to equivalent force with `massKg * 9.80665`.
+
+Multiple loads are summed by node and degree of freedom before deck generation. Multiple fixed supports are unioned into one `FIXED` node set. Unsupported loads, missing payload mass, invalid units, missing fixed supports, or unsupported geometry must fail preflight with diagnostics instead of starting a CalculiX run.
+
 ## Benchmark Matrix
 
 | Case | Model | Material | Load and support | Expected equations | OpenCAE tolerance | External comparison |

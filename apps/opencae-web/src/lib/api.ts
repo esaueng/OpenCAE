@@ -46,6 +46,25 @@ export interface CloudFeaRouteHealth {
   containersEnabled?: boolean;
 }
 
+export interface CloudFeaPreflightRequest {
+  study: Study;
+  displayModel?: DisplayModel | null;
+  resultRenderBounds?: ResultRenderBounds | null;
+}
+
+export interface CloudFeaPreflightResponse {
+  ready: boolean;
+  solver: string;
+  supported: {
+    geometry: boolean;
+    materials: boolean;
+    constraints: boolean;
+    loads: boolean;
+  };
+  normalizedLoads: Array<Record<string, unknown>>;
+  diagnostics: Array<{ id?: string; severity?: string; source?: string; message: string; details?: Record<string, unknown> }>;
+}
+
 const localResultsByRunId = new Map<string, ResultsResponse | Promise<ResultsResponse>>();
 const localResultSolversByRunId = new Map<string, () => Promise<ResultsResponse>>();
 const localEventsByRunId = new Map<string, RunEvent[]>();
@@ -309,6 +328,19 @@ export async function runSimulation(studyId: string, currentStudy?: Study, displ
 
 export async function getCloudFeaHealth(): Promise<CloudFeaRouteHealth> {
   return fetchCloudFeaRouteHealth(CLOUD_FEA_API_BASE);
+}
+
+export async function getCloudFeaPreflight(request: CloudFeaPreflightRequest): Promise<CloudFeaPreflightResponse> {
+  const response = await fetch("/api/cloud-fea/preflight", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      study: request.study,
+      displayModel: request.displayModel ?? undefined,
+      resultRenderBounds: request.resultRenderBounds ?? undefined
+    })
+  });
+  return readJson(response, "POST /api/cloud-fea/preflight");
 }
 
 export async function getResults(runId: string): Promise<ResultsResponse> {

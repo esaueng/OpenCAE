@@ -17,7 +17,7 @@ UNSUPPORTED_BLOCK_ERROR = "Cloud FEA currently supports only block-like single-b
 CCX_UNAVAILABLE_ERROR = "CalculiX executable unavailable; refusing to publish Cloud FEA results without a real solver run."
 GMSH_UNAVAILABLE_ERROR = "Gmsh executable unavailable; refusing to mesh uploaded geometry for Cloud FEA."
 UNSUPPORTED_UPLOADED_GEOMETRY_ERROR = "Cloud FEA uploaded geometry support requires STEP, STL, or OBJ model bytes and confident face mapping."
-RUNNER_VERSION = "2026-05-03-http-500-diagnostics"
+RUNNER_VERSION = "2026-05-03-load-normalization"
 AXES = ("x", "y", "z")
 DOFS = (1, 2, 3)
 FIDELITY_MESH_DENSITY = {
@@ -34,6 +34,7 @@ MAX_FIELD_SAMPLES_PER_TYPE = {
 }
 MAX_INPUT_DECK_ARTIFACT_BYTES = 1024 * 1024
 MAX_SOLVER_LOG_ARTIFACT_BYTES = 256 * 1024
+STANDARD_GRAVITY = 9.80665
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -145,7 +146,7 @@ def solve_structured_block(parsed):
     try:
         mesh = generate_structured_hex_mesh(parsed["dimensions"], parsed["meshDensity"])
         boundaries = select_boundary_nodes(parsed, mesh)
-        nodal_loads = distribute_total_force_to_nodes(mesh, boundaries["loadNodeIds"], parsed["loadVector"])
+        nodal_loads = distribute_normalized_loads_to_nodes(parsed, mesh, boundaries)
     except Exception as error:
         raise annotate_exception_phase(error, "mesh-generation")
 
@@ -206,7 +207,7 @@ def solve_uploaded_geometry(parsed):
         try:
             mesh = parse_gmsh_msh(mesh_path.read_text(errors="ignore"))
             boundaries = select_uploaded_geometry_boundaries(parsed, mesh)
-            nodal_loads = distribute_total_force_over_facets(mesh, boundaries["loadFacetIds"], parsed["loadVector"])
+            nodal_loads = distribute_normalized_loads_to_nodes(parsed, mesh, boundaries)
         except Exception as error:
             raise annotate_exception_phase(error, "mesh-generation")
         try:
@@ -244,14 +245,14 @@ def parse_payload(payload):
     material = material_properties(payload)
     geometry = uploaded_geometry_payload(payload)
     dimensions = None if geometry else resolve_block_dimensions(payload)
-    load = first_record(study.get("loads"))
-    constraint = first_record(study.get("constraints"))
-    if not load or load.get("type") != "force":
-        raise UserFacingSolveError("Cloud FEA requires a force load.", 422)
-    if not constraint:
+    normalized_loads = normalize_loads(study, payload)
+    if not normalized_loads:
+        raise diagnostic_error("Cloud FEA requires at least one supported load.", "cloud-fea-load-missing")
+    fixed_constraints = fixed_support_constraints(study)
+    if not fixed_constraints:
         raise UserFacingSolveError("Cloud FEA requires a fixed support.", 422)
-    load_value = required_positive_number(load.get("parameters") if isinstance(load.get("parameters"), dict) else {}, "value")
-    load_direction = unit_vector((load.get("parameters") or {}).get("direction"))
+    force_load_vectors = [load["totalForceN"] for load in normalized_loads if load["kind"] == "surface_force"]
+    legacy_load_vector = vector_sum(force_load_vectors) if force_load_vectors else [0.0, 0.0, 0.0]
     parsed = {
         "runId": run_id,
         "study": study,
@@ -260,13 +261,164 @@ def parse_payload(payload):
         "material": material,
         "dimensions": dimensions,
         "meshDensity": mesh_density_for(payload.get("fidelity")),
-        "load": load,
-        "constraint": constraint,
-        "loadVector": [load_value * component for component in load_direction],
-        "loadMagnitude": load_value,
+        "loads": normalized_loads,
+        "fixedConstraints": fixed_constraints,
+        "load": first_record(study.get("loads")),
+        "constraint": fixed_constraints[0],
+        "loadVector": legacy_load_vector,
+        "loadMagnitude": vector_length(legacy_load_vector),
         "geometry": geometry
     }
     return parsed
+
+
+def fixed_support_constraints(study):
+    constraints = study.get("constraints") if isinstance(study.get("constraints"), list) else []
+    return [
+        constraint
+        for constraint in constraints
+        if isinstance(constraint, dict) and constraint.get("type") == "fixed" and isinstance(constraint.get("selectionRef"), str)
+    ]
+
+
+def normalize_loads(study, payload=None):
+    loads = study.get("loads") if isinstance(study.get("loads"), list) else []
+    normalized = []
+    unsupported = []
+    for load in loads:
+        if not isinstance(load, dict):
+            continue
+        load_type = load.get("type")
+        try:
+            if load_type == "force":
+                normalized.append(normalize_force_load(load))
+            elif load_type == "gravity":
+                normalized.append(normalize_gravity_load(load, payload or {}))
+            elif load_type == "pressure":
+                normalized.append(normalize_pressure_load(load))
+            else:
+                unsupported.append(str(load_type or "unknown"))
+        except UserFacingSolveError:
+            raise
+        except Exception as error:
+            raise diagnostic_error(str(error), "cloud-fea-load-normalization-failed") from error
+    if unsupported:
+        raise diagnostic_error(
+            f"Cloud FEA does not support load type(s): {', '.join(unsupported)}.",
+            "cloud-fea-load-unsupported",
+            {"unsupportedLoadTypes": unsupported, "supportedLoadTypes": ["force", "pressure", "gravity"]},
+        )
+    return normalized
+
+
+def normalize_force_load(load):
+    params = load_parameters(load)
+    value = load_value(params, "Cloud FEA force load requires a positive finite force value.")
+    units = str(params.get("units") or "N")
+    if units != "N":
+        raise diagnostic_error(f"Cloud FEA force load units must be N; received {units}.", "cloud-fea-force-unit-unsupported")
+    direction = unit_vector(params.get("direction"))
+    return {
+        "kind": "surface_force",
+        "sourceLoadId": load_id(load),
+        "selectionRef": load_selection_ref(load),
+        "totalForceN": [value * component for component in direction],
+        "units": "N",
+    }
+
+
+def normalize_gravity_load(load, payload):
+    params = load_parameters(load)
+    mass_kg = payload_mass_kg(params, payload)
+    if mass_kg is None:
+        raise diagnostic_error(
+            "Payload mass load could not be converted to an equivalent force because mass is missing.",
+            "cloud-fea-payload-mass-missing",
+        )
+    direction = unit_vector(params.get("direction") if is_vec3(params.get("direction")) else [0.0, 0.0, -1.0])
+    return {
+        "kind": "surface_force",
+        "sourceLoadId": load_id(load),
+        "selectionRef": load_selection_ref(load),
+        "totalForceN": [mass_kg * STANDARD_GRAVITY * component for component in direction],
+        "units": "N",
+    }
+
+
+def normalize_pressure_load(load):
+    params = load_parameters(load)
+    value = load_value(params, "Cloud FEA pressure load requires a positive finite pressure value.")
+    units = str(params.get("units") or "kPa")
+    pressure = pressure_to_n_per_mm2(value, units)
+    normalized = {
+        "kind": "surface_pressure",
+        "sourceLoadId": load_id(load),
+        "selectionRef": load_selection_ref(load),
+        "pressureNPerMm2": pressure,
+        "units": "N/mm^2",
+    }
+    if is_vec3(params.get("direction")):
+        normalized["direction"] = unit_vector(params.get("direction"))
+    return normalized
+
+
+def load_parameters(load):
+    params = load.get("parameters")
+    return params if isinstance(params, dict) else {}
+
+
+def load_id(load):
+    return str(load.get("id") or f"load-{len(str(load))}")
+
+
+def load_selection_ref(load):
+    selection_ref = load.get("selectionRef")
+    if not isinstance(selection_ref, str) or not selection_ref:
+        raise diagnostic_error("Cloud FEA load selectionRef is missing.", "cloud-fea-load-selection-missing")
+    return selection_ref
+
+
+def load_value(params, message):
+    value = params.get("value")
+    if not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
+        raise diagnostic_error(message, "cloud-fea-load-value-invalid")
+    return float(value)
+
+
+def payload_mass_kg(params, payload):
+    candidates = [
+        params.get("payloadMassKg"),
+        params.get("value") if params.get("units") == "kg" else None,
+    ]
+    metadata = payload.get("payloadMetadata") if isinstance(payload, dict) and isinstance(payload.get("payloadMetadata"), dict) else {}
+    candidates.append(metadata.get("payloadMassKg"))
+    for candidate in candidates:
+        if isinstance(candidate, (int, float)) and math.isfinite(candidate) and candidate > 0:
+            return float(candidate)
+    return None
+
+
+def pressure_to_n_per_mm2(value, units):
+    if units == "Pa":
+        return value / 1_000_000.0
+    if units == "kPa":
+        return value / 1000.0
+    if units in {"MPa", "N/mm^2", "N/mm2"}:
+        return value
+    raise diagnostic_error(f"Cloud FEA pressure load units are unsupported: {units}.", "cloud-fea-pressure-unit-unsupported")
+
+
+def diagnostic_error(message, diagnostic_id, details=None):
+    return UserFacingSolveError(message, 422, {
+        "diagnostics": [{
+            "id": diagnostic_id,
+            "severity": "error",
+            "source": "preflight",
+            "message": message,
+            "suggestedActions": [],
+            **({"details": details} if details else {}),
+        }]
+    })
 
 
 def resolve_block_dimensions(payload):
@@ -377,20 +529,47 @@ def generate_structured_hex_mesh(dimensions, density):
 
 
 def select_boundary_nodes(parsed, mesh):
-    fixed_plane = plane_for_selection(parsed, parsed["constraint"].get("selectionRef"))
-    load_plane = plane_for_selection(parsed, parsed["load"].get("selectionRef"))
-    fixed_node_ids = node_ids_on_plane(mesh, fixed_plane)
-    load_node_ids = node_ids_on_plane(mesh, load_plane)
+    fixed_mappings = []
+    fixed_node_set = set()
+    for constraint in parsed.get("fixedConstraints", [parsed.get("constraint")]):
+        if not isinstance(constraint, dict):
+            continue
+        plane = plane_for_selection(parsed, constraint.get("selectionRef"))
+        node_ids = node_ids_on_plane(mesh, plane)
+        if node_ids:
+            fixed_mappings.append({"constraint": constraint, "plane": plane, "nodeIds": node_ids})
+            fixed_node_set.update(node_ids)
+    load_boundaries = []
+    load_node_set = set()
+    for load in parsed.get("loads", []):
+        plane = plane_for_selection(parsed, load.get("selectionRef"))
+        node_ids = node_ids_on_plane(mesh, plane)
+        if node_ids:
+            area = structured_plane_area(mesh, plane)
+            load_boundaries.append({"load": load, "plane": plane, "nodeIds": node_ids, "area": area, "normal": plane_normal(plane)})
+            load_node_set.update(node_ids)
+    fixed_node_ids = sorted(fixed_node_set)
+    load_node_ids = sorted(load_node_set)
     if not fixed_node_ids or not load_node_ids:
         raise UserFacingSolveError("Structured block boundary selection did not resolve to non-empty node sets.", 422)
     return {
-        "fixedPlane": fixed_plane,
-        "loadPlane": load_plane,
+        "fixedPlane": fixed_mappings[0]["plane"] if fixed_mappings else None,
+        "loadPlane": load_boundaries[0]["plane"] if load_boundaries else None,
         "fixedNodeIds": fixed_node_ids,
         "loadNodeIds": load_node_ids,
+        "fixedBoundaries": fixed_mappings,
+        "loadBoundaries": load_boundaries,
+        "appliedLoadVector": vector_sum([load["totalForceN"] for load in parsed.get("loads", []) if load.get("kind") == "surface_force"]),
+        "appliedLoadMagnitude": sum(vector_length(load["totalForceN"]) for load in parsed.get("loads", []) if load.get("kind") == "surface_force"),
         "diagnostics": [
-            boundary_diagnostic("cloud-fea-fixed-plane", "Fixed support", fixed_plane, len(fixed_node_ids)),
-            boundary_diagnostic("cloud-fea-load-plane", "Applied load", load_plane, len(load_node_ids), parsed["loadVector"])
+            *[
+                boundary_diagnostic("cloud-fea-fixed-plane", "Fixed support", item["plane"], len(item["nodeIds"]))
+                for item in fixed_mappings
+            ],
+            *[
+                boundary_diagnostic("cloud-fea-load-plane", "Applied load", item["plane"], len(item["nodeIds"]), load_total_force_preview(item["load"], item))
+                for item in load_boundaries
+            ],
         ]
     }
 
@@ -442,6 +621,23 @@ def node_ids_on_plane(mesh, plane):
     ]
 
 
+def structured_plane_area(mesh, plane):
+    dimensions = mesh.get("dimensions") if isinstance(mesh.get("dimensions"), dict) else {}
+    axis = plane["axis"]
+    other_axes = [item for item in AXES if item != axis]
+    spans = [dimensions.get(item) for item in other_axes]
+    if all(is_positive_finite(span) for span in spans):
+        return float(spans[0]) * float(spans[1])
+    return 0.0
+
+
+def plane_normal(plane):
+    normal = [0.0, 0.0, 0.0]
+    axis_index = AXES.index(plane["axis"])
+    normal[axis_index] = 1.0 if plane.get("side") == "max" else -1.0
+    return normal
+
+
 def distribute_total_force_to_nodes(mesh, load_node_ids, total_force):
     load_node_set = set(load_node_ids)
     load_nodes = [node for node in mesh["nodes"] if node["id"] in load_node_set]
@@ -467,6 +663,66 @@ def distribute_total_force_to_nodes(mesh, load_node_ids, total_force):
             "components": [component * weight / total_weight for component in total_force]
         }
         for node, weight in weighted
+    ]
+
+
+def distribute_normalized_loads_to_nodes(parsed, mesh, boundaries):
+    nodal_loads = []
+    applied_vectors = []
+    applied_magnitude = 0.0
+    for boundary in boundaries.get("loadBoundaries", []):
+        load = boundary.get("load")
+        if not isinstance(load, dict):
+            continue
+        if load.get("kind") == "surface_force":
+            total_force = load.get("totalForceN")
+        elif load.get("kind") == "surface_pressure":
+            pressure = load.get("pressureNPerMm2")
+            area = boundary.get("area")
+            if not is_positive_finite(pressure) or not is_positive_finite(area):
+                raise UserFacingSolveError("Cloud FEA pressure load could not be converted because selected face area is unavailable.", 422)
+            direction = load.get("direction") if is_vec3(load.get("direction")) else boundary.get("normal")
+            total_force = [float(pressure) * float(area) * component for component in unit_vector(direction)]
+        else:
+            continue
+        if not is_vec3(total_force):
+            raise UserFacingSolveError("Cloud FEA normalized load did not contain a finite force vector.", 422)
+        applied_vectors.append(total_force)
+        applied_magnitude += vector_length(total_force)
+        if mesh.get("source") == "gmsh_uploaded_geometry":
+            nodal_loads.extend(distribute_total_force_over_facets(mesh, boundary.get("facetIds", []), total_force))
+        else:
+            nodal_loads.extend(distribute_total_force_to_nodes(mesh, boundary.get("nodeIds", []), total_force))
+    combined = combine_nodal_loads(nodal_loads)
+    boundaries["appliedLoadVector"] = vector_sum(applied_vectors)
+    boundaries["appliedLoadMagnitude"] = applied_magnitude
+    return combined
+
+
+def load_total_force_preview(load, boundary):
+    if load.get("kind") == "surface_force":
+        return load.get("totalForceN")
+    if load.get("kind") == "surface_pressure" and is_positive_finite(load.get("pressureNPerMm2")) and is_positive_finite(boundary.get("area")):
+        direction = load.get("direction") if is_vec3(load.get("direction")) else boundary.get("normal")
+        if is_vec3(direction):
+            return [load["pressureNPerMm2"] * boundary["area"] * component for component in unit_vector(direction)]
+    return None
+
+
+def combine_nodal_loads(nodal_loads):
+    combined = {}
+    for load in nodal_loads:
+        node_id = load.get("nodeId")
+        components = load.get("components")
+        if not isinstance(node_id, int) or not is_vec3(components):
+            continue
+        current = combined.setdefault(node_id, [0.0, 0.0, 0.0])
+        for axis in range(3):
+            current[axis] += components[axis]
+    return [
+        {"nodeId": node_id, "components": components}
+        for node_id, components in sorted(combined.items())
+        if vector_length(components) > 1e-14
     ]
 
 
@@ -623,22 +879,61 @@ def boundary_facet(facet_id, node_ids, node_lookup):
 
 
 def select_uploaded_geometry_boundaries(parsed, mesh):
-    fixed = uploaded_face_mapping(parsed, mesh, parsed["constraint"].get("selectionRef"), "Fixed support")
-    load = uploaded_face_mapping(parsed, mesh, parsed["load"].get("selectionRef"), "Applied load")
-    fixed_nodes = sorted({node_id for facet in fixed["facets"] for node_id in facet["nodeIds"]})
-    load_nodes = sorted({node_id for facet in load["facets"] for node_id in facet["nodeIds"]})
+    fixed_mappings = []
+    for constraint in parsed.get("fixedConstraints", [parsed.get("constraint")]):
+        if not isinstance(constraint, dict):
+            continue
+        fixed_mappings.append(uploaded_face_mapping(parsed, mesh, constraint.get("selectionRef"), "Fixed support"))
+    load_mappings = []
+    for load in parsed.get("loads", []):
+        mapping = uploaded_face_mapping(parsed, mesh, load.get("selectionRef"), "Applied load")
+        load_mappings.append({
+            "load": load,
+            "mapping": mapping,
+            "facetIds": [facet["id"] for facet in mapping["facets"]],
+            "nodeIds": sorted({node_id for facet in mapping["facets"] for node_id in facet["nodeIds"]}),
+            "area": sum(facet["area"] for facet in mapping["facets"]),
+            "normal": mapping["plane"].get("normal"),
+        })
+    fixed_nodes = sorted({node_id for mapping in fixed_mappings for facet in mapping["facets"] for node_id in facet["nodeIds"]})
+    load_nodes = sorted({node_id for mapping in load_mappings for node_id in mapping["nodeIds"]})
     if not fixed_nodes or not load_nodes or not set(fixed_nodes).isdisjoint(load_nodes):
         raise uploaded_face_mapping_error("Mapped uploaded-geometry support and load faces must be non-empty and disjoint.", parsed, mesh)
     return {
         "fixedNodeIds": fixed_nodes,
         "loadNodeIds": load_nodes,
-        "fixedFacetIds": [facet["id"] for facet in fixed["facets"]],
-        "loadFacetIds": [facet["id"] for facet in load["facets"]],
-        "fixedPlane": fixed["plane"],
-        "loadPlane": load["plane"],
+        "fixedFacetIds": sorted({facet["id"] for mapping in fixed_mappings for facet in mapping["facets"]}),
+        "loadFacetIds": sorted({facet_id for mapping in load_mappings for facet_id in mapping["facetIds"]}),
+        "fixedPlane": fixed_mappings[0]["plane"] if fixed_mappings else None,
+        "loadPlane": load_mappings[0]["mapping"]["plane"] if load_mappings else None,
+        "fixedBoundaries": fixed_mappings,
+        "loadBoundaries": [
+            {
+                "load": item["load"],
+                "plane": item["mapping"]["plane"],
+                "nodeIds": item["nodeIds"],
+                "facetIds": item["facetIds"],
+                "area": item["area"],
+                "normal": item["normal"],
+            }
+            for item in load_mappings
+        ],
+        "appliedLoadVector": vector_sum([load["totalForceN"] for load in parsed.get("loads", []) if load.get("kind") == "surface_force"]),
+        "appliedLoadMagnitude": sum(vector_length(load["totalForceN"]) for load in parsed.get("loads", []) if load.get("kind") == "surface_force"),
         "diagnostics": [
-            uploaded_boundary_diagnostic("cloud-fea-uploaded-fixed-face", "Fixed support", fixed, len(fixed_nodes)),
-            uploaded_boundary_diagnostic("cloud-fea-uploaded-load-face", "Applied load", load, len(load_nodes), parsed["loadVector"])
+            *[
+                uploaded_boundary_diagnostic(
+                    "cloud-fea-uploaded-fixed-face",
+                    "Fixed support",
+                    mapping,
+                    len({node_id for facet in mapping["facets"] for node_id in facet["nodeIds"]}),
+                )
+                for mapping in fixed_mappings
+            ],
+            *[
+                uploaded_boundary_diagnostic("cloud-fea-uploaded-load-face", "Applied load", item["mapping"], len(item["nodeIds"]), load_total_force_preview(item["load"], item))
+                for item in load_mappings
+            ],
         ]
     }
 
@@ -797,7 +1092,7 @@ def format_id_lines(ids):
 
 def format_cload_lines(nodal_loads):
     lines = []
-    for load in nodal_loads:
+    for load in combine_nodal_loads(nodal_loads):
         for axis, dof in enumerate(DOFS):
             component = load["components"][axis]
             if abs(component) > 1e-14:
@@ -1221,7 +1516,7 @@ def response_from_parsed_dat(parsed, mesh, boundaries, input_deck, solver_output
     max_displacement = max(displacement_values)
     reaction_force = reaction_force_magnitude(parsed_dat["reactions"], boundaries["fixedNodeIds"])
     if reaction_force <= 0:
-        reaction_force = vector_length(parsed["loadVector"])
+        reaction_force = vector_length(boundaries.get("appliedLoadVector") or parsed.get("loadVector") or [0.0, 0.0, 0.0])
     safety_factor = material["yieldMpa"] / max(max_stress, 0.001)
     provenance = {
         "kind": "calculix_fea",
@@ -1492,6 +1787,16 @@ def uploaded_boundary_diagnostic(diagnostic_id, label, mapping, node_count, tota
 
 def format_vector(vector):
     return "[" + ", ".join(f"{component:.6g}" for component in vector) + "]"
+
+
+def vector_sum(vectors):
+    total = [0.0, 0.0, 0.0]
+    for vector in vectors:
+        if not is_vec3(vector):
+            continue
+        for axis in range(3):
+            total[axis] += vector[axis]
+    return total
 
 
 def floats_from_line(line):

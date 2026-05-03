@@ -65,7 +65,7 @@ class ValidationSuite(unittest.TestCase):
         parsed = runner.parse_payload(block_payload("cantilever", ALUMINUM_6061, [0, 0, -1], 1.0, "standard"))
         mesh = runner.generate_structured_hex_mesh(parsed["dimensions"], parsed["meshDensity"])
         boundaries = runner.select_boundary_nodes(parsed, mesh)
-        nodal_loads = runner.distribute_total_force_to_nodes(mesh, boundaries["loadNodeIds"], parsed["loadVector"])
+        nodal_loads = runner.distribute_normalized_loads_to_nodes(parsed, mesh, boundaries)
         deck = runner.write_calculix_input_deck(parsed, mesh, boundaries, nodal_loads)
 
         self.assertEqual(len(mesh["nodes"]), (20 + 1) * (6 + 1) * (4 + 1))
@@ -177,10 +177,116 @@ class ValidationSuite(unittest.TestCase):
         parsed = runner.parse_payload(block_payload("axial", ALUMINUM_6061, [1, 0, 0], 1.0, "standard"))
         mesh = runner.generate_structured_hex_mesh(parsed["dimensions"], parsed["meshDensity"])
         boundaries = runner.select_boundary_nodes(parsed, mesh)
-        nodal_loads = runner.distribute_total_force_to_nodes(mesh, boundaries["loadNodeIds"], parsed["loadVector"])
+        nodal_loads = runner.distribute_normalized_loads_to_nodes(parsed, mesh, boundaries)
 
         self.assertAlmostEqual(axial_stress_mpa(1.0, DIMENSIONS), 1.0 / (30.0 * 10.0))
         self.assertLoadSums(nodal_loads, [1.0, 0.0, 0.0])
+
+    def test_force_load_normalizes_to_surface_force_vector(self):
+        payload = block_payload("cantilever", ALUMINUM_6061, [0, 0, -1], 500.0, "standard")
+        normalized = runner.normalize_loads(payload["study"], payload)
+
+        self.assertEqual(len(normalized), 1)
+        self.assertEqual(normalized[0]["kind"], "surface_force")
+        self.assertEqual(normalized[0]["sourceLoadId"], "load-main")
+        self.assertEqual(normalized[0]["selectionRef"], "load-x-selection")
+        self.assertEqual(normalized[0]["units"], "N")
+        self.assertLoadVectorAlmostEqual(normalized[0]["totalForceN"], [0.0, 0.0, -500.0])
+
+    def test_payload_mass_gravity_load_normalizes_to_equivalent_force(self):
+        payload = block_payload("cantilever", ALUMINUM_6061, [0, 0, -1], 10.0, "standard")
+        payload["study"]["loads"][0] = {
+            "id": "load-payload",
+            "type": "gravity",
+            "selectionRef": "load-x-selection",
+            "parameters": {"value": 10.0, "units": "kg", "direction": [0, 0, -1]},
+            "status": "complete",
+        }
+
+        parsed = runner.parse_payload(payload)
+
+        self.assertEqual(parsed["loads"][0]["kind"], "surface_force")
+        self.assertLoadVectorAlmostEqual(parsed["loads"][0]["totalForceN"], [0.0, 0.0, -98.0665])
+
+    def test_beam_demo_payload_mass_creates_deck_with_equivalent_cload(self):
+        payload = block_payload("cantilever", ALUMINUM_6061, [0, -1, 0], 0.497664, "standard")
+        payload["study"]["loads"][0] = {
+            "id": "load-end-payload",
+            "type": "gravity",
+            "selectionRef": "load-x-selection",
+            "parameters": {"value": 0.497664, "units": "kg", "direction": [0, -1, 0]},
+            "status": "complete",
+        }
+        parsed = runner.parse_payload(payload)
+        mesh = runner.generate_structured_hex_mesh(parsed["dimensions"], parsed["meshDensity"])
+        boundaries = runner.select_boundary_nodes(parsed, mesh)
+        nodal_loads = runner.distribute_normalized_loads_to_nodes(parsed, mesh, boundaries)
+        deck = runner.write_calculix_input_deck(parsed, mesh, boundaries, nodal_loads)
+
+        self.assertIn("*CLOAD", deck)
+        self.assertLoadSums(nodal_loads, [0.0, -0.497664 * runner.STANDARD_GRAVITY, 0.0])
+
+    def test_pressure_load_converts_to_equivalent_nodal_force(self):
+        payload = block_payload("cantilever", ALUMINUM_6061, [0, 0, -1], 100.0, "standard")
+        payload["displayModel"]["dimensions"] = {"x": 100.0, "y": 24.0, "z": 24.0, "units": "mm"}
+        for face in payload["displayModel"]["faces"]:
+            if face["id"] == "face-fixed":
+                face["center"] = [0.0, 12.0, 12.0]
+            elif face["id"] == "face-load-x":
+                face["center"] = [100.0, 12.0, 12.0]
+        payload["study"]["loads"][0] = {
+            "id": "load-pressure",
+            "type": "pressure",
+            "selectionRef": "load-x-selection",
+            "parameters": {"value": 100.0, "units": "kPa", "direction": [0, 0, -1]},
+            "status": "complete",
+        }
+        parsed = runner.parse_payload(payload)
+        mesh = runner.generate_structured_hex_mesh(parsed["dimensions"], parsed["meshDensity"])
+        boundaries = runner.select_boundary_nodes(parsed, mesh)
+        nodal_loads = runner.distribute_normalized_loads_to_nodes(parsed, mesh, boundaries)
+
+        self.assertEqual(parsed["loads"][0]["kind"], "surface_pressure")
+        self.assertAlmostEqual(parsed["loads"][0]["pressureNPerMm2"], 0.1)
+        self.assertLoadSums(nodal_loads, [0.0, 0.0, -57.6])
+
+    def test_multiple_loads_and_fixed_supports_are_combined(self):
+        payload = block_payload("cantilever", ALUMINUM_6061, [0, 0, -1], 10.0, "standard")
+        payload["study"]["constraints"] = [
+            {"id": "constraint-fixed-x", "type": "fixed", "selectionRef": "fixed-selection", "parameters": {}, "status": "complete"},
+            {"id": "constraint-fixed-bottom", "type": "fixed", "selectionRef": "bottom-selection", "parameters": {}, "status": "complete"},
+        ]
+        payload["study"]["namedSelections"].append(selection("bottom-selection", "face-bottom"))
+        payload["study"]["loads"] = [
+            {"id": "load-z", "type": "force", "selectionRef": "load-x-selection", "parameters": {"value": 10.0, "direction": [0, 0, -1]}, "status": "complete"},
+            {"id": "load-y", "type": "force", "selectionRef": "load-x-selection", "parameters": {"value": 5.0, "direction": [0, -1, 0]}, "status": "complete"},
+        ]
+        parsed = runner.parse_payload(payload)
+        mesh = runner.generate_structured_hex_mesh(parsed["dimensions"], parsed["meshDensity"])
+        boundaries = runner.select_boundary_nodes(parsed, mesh)
+        nodal_loads = runner.distribute_normalized_loads_to_nodes(parsed, mesh, boundaries)
+
+        fixed_x = set(runner.node_ids_on_plane(mesh, {"axis": "x", "side": "min", "coordinate": 0.0}))
+        fixed_bottom = set(runner.node_ids_on_plane(mesh, {"axis": "z", "side": "min", "coordinate": 0.0}))
+        self.assertEqual(set(boundaries["fixedNodeIds"]), fixed_x | fixed_bottom)
+        self.assertLoadSums(nodal_loads, [0.0, -5.0, -10.0])
+
+    def test_unsupported_loads_fail_with_clear_diagnostics(self):
+        payload = block_payload("cantilever", ALUMINUM_6061, [0, 0, -1], 1.0, "standard")
+        payload["study"]["loads"][0] = {
+            "id": "load-payload",
+            "type": "gravity",
+            "selectionRef": "load-x-selection",
+            "parameters": {"units": "kg", "direction": [0, 0, -1]},
+            "status": "complete",
+        }
+
+        with self.assertRaises(runner.UserFacingSolveError) as context:
+            runner.parse_payload(payload)
+
+        self.assertEqual(context.exception.status, 422)
+        self.assertIn("Payload mass load could not be converted", str(context.exception))
+        self.assertIn("diagnostics", context.exception.payload)
 
     def test_material_swap_displacement_scales_with_inverse_youngs_modulus(self):
         aluminum_displacement = cantilever_tip_displacement_mm(1.0, DIMENSIONS, ALUMINUM_6061["youngsModulusMpa"])
@@ -526,6 +632,10 @@ class ValidationSuite(unittest.TestCase):
         summed = [sum(load["components"][axis] for load in nodal_loads) for axis in range(3)]
         for actual, target in zip(summed, expected):
             self.assertAlmostEqual(actual, target, places=10)
+
+    def assertLoadVectorAlmostEqual(self, actual, expected):
+        for actual_component, expected_component in zip(actual, expected):
+            self.assertAlmostEqual(actual_component, expected_component, places=10)
 
     def assertCloudResultIsParsed(self, result, mesh_source="structured_block"):
         assert_no_generated_fallback(result)

@@ -71,6 +71,11 @@ export default {
       return cloudFeaHealth(request, env);
     }
 
+    if (url.pathname === "/api/cloud-fea/preflight" && request.method === "POST") {
+      logWorkerEvent("cloud_fea_preflight", { method: request.method, pathname: url.pathname });
+      return cloudFeaPreflight(request);
+    }
+
     if (url.pathname === "/api/cloud-fea/runs" && request.method === "POST") {
       logWorkerEvent("cloud_fea_run_create", { method: request.method, pathname: url.pathname });
       return createCloudFeaRun(request, env, ctx);
@@ -154,6 +159,44 @@ async function cloudFeaHealth(request: Request, env: RuntimeEnv): Promise<Respon
     body,
     { headers: jsonHeaders }
   );
+}
+
+async function cloudFeaPreflight(request: Request): Promise<Response> {
+  const body = await request.json().catch(() => ({})) as Record<string, unknown>;
+  const study = isRecord(body.study) ? body.study : undefined;
+  const displayModel = isRecord(body.displayModel) ? body.displayModel : undefined;
+  const diagnostics: Array<{ id: string; severity: "error" | "warning" | "info"; source: string; message: string; details?: Record<string, unknown> }> = [];
+  let materials = true;
+  let geometry = true;
+  let constraints = true;
+  let loads = true;
+  try {
+    solverMaterialForCloudFea(study, displayModel);
+  } catch (error) {
+    materials = false;
+    diagnostics.push(preflightDiagnostic("cloud-fea-material-missing", error instanceof Error ? error.message : missingCloudFeaMaterialMessage));
+  }
+  if (!isSupportedPreflightGeometry(displayModel, isRecord(body.geometry) ? body.geometry : undefined)) {
+    geometry = false;
+    diagnostics.push(preflightDiagnostic("cloud-fea-geometry-unsupported", "Cloud FEA requires block-like display dimensions or uploaded STEP, STL, or OBJ geometry."));
+  }
+  const fixedConstraints = fixedSupportConstraintsForPreflight(study);
+  if (!fixedConstraints.length) {
+    constraints = false;
+    diagnostics.push(preflightDiagnostic("cloud-fea-fixed-support-missing", "Cloud FEA requires at least one fixed support."));
+  }
+  const normalizedLoads = normalizeLoadsForPreflight(study, diagnostics);
+  if (!normalizedLoads.length || diagnostics.some((diagnostic) => diagnostic.id.startsWith("cloud-fea-load"))) {
+    loads = false;
+  }
+  const ready = materials && geometry && constraints && loads && !diagnostics.some((diagnostic) => diagnostic.severity === "error");
+  return Response.json({
+    ready,
+    solver: "calculix",
+    supported: { geometry, materials, constraints, loads },
+    normalizedLoads,
+    diagnostics
+  }, { headers: jsonHeaders });
 }
 
 async function createCloudFeaRun(request: Request, env: RuntimeEnv, ctx?: ExecutionContext): Promise<Response> {
@@ -777,6 +820,111 @@ function geometrySourceLabel(requestArtifact: Record<string, unknown>): string {
 
 function analysisTypeFromBody(body: Record<string, unknown>): string | undefined {
   if (isRecord(body.study) && typeof body.study.type === "string") return body.study.type;
+  return undefined;
+}
+
+type PreflightNormalizedLoad =
+  | { sourceLoadId: string; kind: "surface_force"; totalForceN: [number, number, number] }
+  | { sourceLoadId: string; kind: "surface_pressure"; pressureNPerMm2: number };
+
+const STANDARD_GRAVITY = 9.80665;
+
+function normalizeLoadsForPreflight(study: Record<string, unknown> | undefined, diagnostics: Array<{ id: string; severity: "error" | "warning" | "info"; source: string; message: string; details?: Record<string, unknown> }>): PreflightNormalizedLoad[] {
+  const loads = Array.isArray(study?.loads) ? study.loads.filter(isRecord) : [];
+  if (!loads.length) {
+    diagnostics.push(preflightDiagnostic("cloud-fea-load-missing", "Cloud FEA requires at least one supported load."));
+    return [];
+  }
+  const normalized: PreflightNormalizedLoad[] = [];
+  for (const load of loads) {
+    const type = typeof load.type === "string" ? load.type : "";
+    const sourceLoadId = typeof load.id === "string" ? load.id : "load";
+    const selectionRef = typeof load.selectionRef === "string" ? load.selectionRef : "";
+    const parameters = isRecord(load.parameters) ? load.parameters : {};
+    if (!selectionRef) {
+      diagnostics.push(preflightDiagnostic("cloud-fea-load-selection-missing", "Cloud FEA load selectionRef is missing.", { sourceLoadId }));
+      continue;
+    }
+    if (type === "force") {
+      const value = finitePositive(parameters.value);
+      const direction = unitVector(vector3(parameters.direction));
+      const units = typeof parameters.units === "string" ? parameters.units : "N";
+      if (value === undefined || !direction || units !== "N") {
+        diagnostics.push(preflightDiagnostic("cloud-fea-load-force-invalid", "Cloud FEA force load requires a positive finite value in N and a finite direction.", { sourceLoadId }));
+        continue;
+      }
+      normalized.push({ sourceLoadId, kind: "surface_force", totalForceN: scaleVector(direction, value) });
+      continue;
+    }
+    if (type === "gravity") {
+      const massKg = payloadMassKgForPreflight(parameters);
+      const direction = unitVector(vector3(parameters.direction) ?? [0, 0, -1]);
+      if (massKg === undefined) {
+        diagnostics.push(preflightDiagnostic("cloud-fea-load-payload-mass-missing", "Payload mass load could not be converted to an equivalent force because mass is missing.", { sourceLoadId }));
+        continue;
+      }
+      normalized.push({ sourceLoadId, kind: "surface_force", totalForceN: scaleVector(direction, massKg * STANDARD_GRAVITY) });
+      continue;
+    }
+    if (type === "pressure") {
+      const value = finitePositive(parameters.value);
+      const units = typeof parameters.units === "string" ? parameters.units : "kPa";
+      const pressure = value === undefined ? undefined : pressureToNPerMm2ForPreflight(value, units);
+      if (pressure === undefined) {
+        diagnostics.push(preflightDiagnostic("cloud-fea-load-pressure-invalid", "Cloud FEA pressure load requires a positive finite value in Pa, kPa, MPa, or N/mm^2.", { sourceLoadId }));
+        continue;
+      }
+      normalized.push({ sourceLoadId, kind: "surface_pressure", pressureNPerMm2: pressure });
+      continue;
+    }
+    diagnostics.push(preflightDiagnostic("cloud-fea-load-unsupported", `Cloud FEA does not support load type: ${type || "unknown"}.`, { sourceLoadId, supportedLoadTypes: ["force", "pressure", "gravity"] }));
+  }
+  return normalized;
+}
+
+function fixedSupportConstraintsForPreflight(study: Record<string, unknown> | undefined): Record<string, unknown>[] {
+  const constraints = Array.isArray(study?.constraints) ? study.constraints.filter(isRecord) : [];
+  return constraints.filter((constraint) => constraint.type === "fixed" && typeof constraint.selectionRef === "string");
+}
+
+function isSupportedPreflightGeometry(displayModel: Record<string, unknown> | undefined, geometry: Record<string, unknown> | undefined): boolean {
+  if (geometry) {
+    const format = typeof geometry.format === "string" ? geometry.format.toLowerCase() : "";
+    return ["step", "stp", "stl", "obj"].includes(format);
+  }
+  const dimensions = isRecord(displayModel?.dimensions) ? displayModel.dimensions : undefined;
+  return ["x", "y", "z"].every((axis) => finitePositive(dimensions?.[axis]) !== undefined);
+}
+
+function preflightDiagnostic(id: string, message: string, details?: Record<string, unknown>) {
+  return { id, severity: "error" as const, source: "preflight", message, ...(details ? { details } : {}) };
+}
+
+function finitePositive(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+function unitVector(vector: [number, number, number] | undefined): [number, number, number] | undefined {
+  if (!vector) return undefined;
+  const length = Math.hypot(vector[0], vector[1], vector[2]);
+  if (!Number.isFinite(length) || length <= 1e-12) return undefined;
+  return [vector[0] / length, vector[1] / length, vector[2] / length];
+}
+
+function scaleVector(vector: [number, number, number], scale: number): [number, number, number] {
+  return vector.map((component) => finitePrecision(component * scale)) as [number, number, number];
+}
+
+function payloadMassKgForPreflight(parameters: Record<string, unknown>): number | undefined {
+  const payloadMass = finitePositive(parameters.payloadMassKg);
+  if (payloadMass !== undefined) return payloadMass;
+  return parameters.units === "kg" ? finitePositive(parameters.value) : undefined;
+}
+
+function pressureToNPerMm2ForPreflight(value: number, units: string): number | undefined {
+  if (units === "Pa") return finitePrecision(value / 1_000_000);
+  if (units === "kPa") return finitePrecision(value / 1000);
+  if (units === "MPa" || units === "N/mm^2" || units === "N/mm2") return finitePrecision(value);
   return undefined;
 }
 
