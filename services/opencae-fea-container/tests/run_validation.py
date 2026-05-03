@@ -743,6 +743,87 @@ class ValidationSuite(unittest.TestCase):
                 self.assertNotIn("generated", sample.get("source", "").lower())
                 self.assertNotIn("fallback", sample.get("source", "").lower())
 
+    def test_dynamic_result_global_compaction_fits_container_json_budget(self):
+        frame_count = 12
+        sample_count = 5_000
+        fields = []
+        for frame_index in range(frame_count):
+            time_seconds = frame_index * 0.005
+            stress_samples = [
+                {
+                    "point": [index * 0.01, index % 17, frame_index],
+                    "normal": [0.0, 0.0, 1.0],
+                    "value": frame_index + index / sample_count,
+                    "nodeId": f"N{index}",
+                    "source": "calculix-nodal-surface",
+                    "vonMisesStressPa": (frame_index + index + 1) * 1000.0,
+                }
+                for index in range(sample_count)
+            ]
+            displacement_samples = [
+                {
+                    "point": [index * 0.01, index % 19, frame_index],
+                    "normal": [0.0, 0.0, 1.0],
+                    "value": frame_index * 0.001 + index / 1_000_000.0,
+                    "vector": [0.0, 0.0, -(frame_index * 0.001 + index / 1_000_000.0)],
+                    "nodeId": f"N{index}",
+                    "source": "calculix-dat",
+                }
+                for index in range(sample_count)
+            ]
+            safety_samples = [
+                {
+                    "point": sample["point"],
+                    "normal": sample["normal"],
+                    "value": ALUMINUM_6061["yieldMpa"] / max(sample["value"], 0.001),
+                    "nodeId": sample["nodeId"],
+                    "source": sample["source"],
+                }
+                for sample in stress_samples
+            ]
+            for field_type, units, samples in [
+                ("stress", "MPa", stress_samples),
+                ("displacement", "mm", displacement_samples),
+                ("safety_factor", "", safety_samples),
+            ]:
+                values = [sample["value"] for sample in samples]
+                fields.append({
+                    "id": f"field-large-{field_type}-{frame_index}",
+                    "runId": "run-large-dynamic",
+                    "type": field_type,
+                    "location": "node",
+                    "values": values,
+                    "min": min(values),
+                    "max": max(values),
+                    "units": units,
+                    "samples": samples,
+                    "frameIndex": frame_index,
+                    "timeSeconds": time_seconds,
+                })
+        result = {
+            "summary": {"provenance": {"kind": "calculix_fea"}},
+            "fields": fields,
+            "artifacts": {"solverResultParser": "parsed-calculix-framed"},
+        }
+        original_bytes = len(json.dumps(result, separators=(",", ":")).encode("utf-8"))
+
+        compacted = runner.compact_cloud_fea_result(result)
+        compacted_bytes = len(json.dumps(compacted, separators=(",", ":")).encode("utf-8"))
+        compaction = compacted["artifacts"]["resultCompaction"]
+
+        self.assertGreater(original_bytes, runner.CLOUD_FEA_RESULT_JSON_BUDGET_BYTES)
+        self.assertLessEqual(compacted_bytes, runner.CLOUD_FEA_RESULT_JSON_BUDGET_BYTES)
+        self.assertLessEqual(compaction["jsonBytes"], runner.CLOUD_FEA_RESULT_JSON_BUDGET_BYTES)
+        self.assertEqual(compaction["jsonBudgetBytes"], runner.CLOUD_FEA_RESULT_JSON_BUDGET_BYTES)
+        self.assertGreaterEqual(compaction["budgetPasses"], 1)
+        self.assertLessEqual(compaction["finalDynamicFieldSamplesPerFrame"], runner.MAX_DYNAMIC_FIELD_SAMPLES_PER_FRAME)
+        self.assertLessEqual(compaction["finalDynamicFieldValuesPerFrame"], runner.MAX_DYNAMIC_FIELD_VALUES_PER_FRAME)
+        for field in compacted["fields"]:
+            self.assertGreater(len(field["values"]), 0)
+            self.assertTrue(all(isinstance(value, (int, float)) and math.isfinite(value) for value in field["values"]))
+        displacement_fields = [field for field in compacted["fields"] if field["type"] == "displacement"]
+        self.assertTrue(any(sample.get("vector") for field in displacement_fields for sample in field["samples"]))
+
     def test_uploaded_stl_fixture_requires_gmsh_and_never_falls_back_to_block(self):
         payload = uploaded_block_payload("uploaded-stl", ALUMINUM_6061, [0, 0, -1], 1.0, "standard")
 

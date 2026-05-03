@@ -57,6 +57,10 @@ function readJsonc(path: string) {
 }
 
 describe("Cloudflare FEA worker orchestration", () => {
+  test("uses a 16 MiB UI result JSON budget", () => {
+    expect(MAX_CLOUD_FEA_RESULT_JSON_BYTES).toBe(16 * 1024 * 1024);
+  });
+
   test("container Durable Object is declared as a Cloudflare container proxy", () => {
     const workerSource = readFileSync(resolve(__dirname, "index.ts"), "utf8");
 
@@ -1093,6 +1097,75 @@ describe("Cloudflare FEA worker orchestration", () => {
     expect(text).not.toContain("\n  ");
   });
 
+  test("queue handler stores dynamic results above the old 8 MiB budget", async () => {
+    const bucket = new MemoryR2Bucket();
+    await bucket.put("runs/run-cloud-dynamic-16m/request.json", JSON.stringify({
+      runId: "run-cloud-dynamic-16m",
+      studyId: "study-1",
+      analysisType: "dynamic_structural",
+      study: { id: "study-1", type: "dynamic_structural" },
+      dynamicSettings: { startTime: 0, endTime: 0.04, timeStep: 0.005, outputInterval: 0.005, dampingRatio: 0.02 }
+    }));
+    const message = { body: { runId: "run-cloud-dynamic-16m" }, ack: vi.fn(), retry: vi.fn() };
+    const result = cloudLargeDynamicSolveResponse("run-cloud-dynamic-16m", 8, 4300);
+    const payloadBytes = new TextEncoder().encode(JSON.stringify(result)).byteLength;
+    expect(payloadBytes).toBeGreaterThan(8 * 1024 * 1024);
+    expect(payloadBytes).toBeLessThan(16 * 1024 * 1024);
+    const env = {
+      ASSETS: { fetch: vi.fn(async () => new Response("asset")) },
+      FEA_ARTIFACTS: bucket,
+      FEA_CONTAINER: { fetch: healthyContainerFetch(result) }
+    };
+
+    await worker.queue({ messages: [message] }, env);
+    const stored = await bucket.get("runs/run-cloud-dynamic-16m/results.json");
+    const events = JSON.parse(await (await bucket.get("runs/run-cloud-dynamic-16m/events.json"))!.text()) as Array<{ type: string; message: string }>;
+
+    expect(message.ack).toHaveBeenCalled();
+    expect(events.at(-1)).toMatchObject({ type: "complete" });
+    expect(stored).not.toBeNull();
+    expect(new TextEncoder().encode(await stored!.text()).byteLength).toBeLessThanOrEqual(MAX_CLOUD_FEA_RESULT_JSON_BYTES);
+  });
+
+  test("queue handler compacts oversized dynamic results before rejecting valid solves", async () => {
+    const bucket = new MemoryR2Bucket();
+    await bucket.put("runs/run-cloud-dynamic-worker-compact/request.json", JSON.stringify({
+      runId: "run-cloud-dynamic-worker-compact",
+      studyId: "study-1",
+      analysisType: "dynamic_structural",
+      study: { id: "study-1", type: "dynamic_structural" },
+      dynamicSettings: { startTime: 0, endTime: 0.04, timeStep: 0.005, outputInterval: 0.005, dampingRatio: 0.02 }
+    }));
+    const message = { body: { runId: "run-cloud-dynamic-worker-compact" }, ack: vi.fn(), retry: vi.fn() };
+    const result = cloudLargeDynamicSolveResponse("run-cloud-dynamic-worker-compact", 8, 9000);
+    expect(new TextEncoder().encode(JSON.stringify(result)).byteLength).toBeGreaterThan(16 * 1024 * 1024);
+    const env = {
+      ASSETS: { fetch: vi.fn(async () => new Response("asset")) },
+      FEA_ARTIFACTS: bucket,
+      FEA_CONTAINER: { fetch: healthyContainerFetch(result) }
+    };
+
+    await worker.queue({ messages: [message] }, env);
+    const stored = await bucket.get("runs/run-cloud-dynamic-worker-compact/results.json");
+    const events = JSON.parse(await (await bucket.get("runs/run-cloud-dynamic-worker-compact/events.json"))!.text()) as Array<{ type: string; message: string }>;
+
+    expect(message.ack).toHaveBeenCalled();
+    expect(events.at(-1)).toMatchObject({ type: "complete" });
+    expect(stored).not.toBeNull();
+    const text = await stored!.text();
+    expect(new TextEncoder().encode(text).byteLength).toBeLessThanOrEqual(MAX_CLOUD_FEA_RESULT_JSON_BYTES);
+    const parsed = JSON.parse(text) as {
+      artifacts?: { workerResultCompaction?: { enabled?: boolean } };
+      fields: Array<{ type: string; values: number[]; frameIndex?: number; samples?: Array<{ vector?: number[] }> }>;
+    };
+    expect(parsed.artifacts?.workerResultCompaction).toMatchObject({ enabled: true });
+    expect(new Set(parsed.fields.map((field) => field.frameIndex))).toEqual(new Set([0, 1, 2, 3, 4, 5, 6, 7]));
+    for (const field of parsed.fields) {
+      expect(field.values.length).toBeGreaterThan(0);
+    }
+    expect(parsed.fields.some((field) => field.type === "displacement" && field.samples?.some((sample) => sample.vector?.length === 3))).toBe(true);
+  });
+
   test("queue handler rejects Cloud FEA results that exceed the UI payload budget", async () => {
     const bucket = new MemoryR2Bucket();
     await bucket.put("runs/run-cloud-over-budget/request.json", JSON.stringify({
@@ -1563,6 +1636,119 @@ function cloudUltraSolveResponse(runId: string, valueCount: number, sampleCount:
       solverResultParser: "parsed-calculix-dat",
       meshSummary: { nodes: 14_277, elements: 12_800, source: "structured_block" },
       resultCompaction: { enabled: true, maxFieldValues: 25000, maxFieldSamples: 25000, originalStressSampleCount: sampleCount, returnedStressSampleCount: sampleCount }
+    }
+  };
+}
+
+function cloudLargeDynamicSolveResponse(runId: string, frameCount: number, sampleCount: number) {
+  const provenance = {
+    kind: "calculix_fea",
+    solver: "calculix-ccx",
+    solverVersion: "2.21",
+    meshSource: "structured_block",
+    resultSource: "parsed_frd_dat",
+    units: "mm-N-s-MPa",
+    integrationMethod: "calculix_dynamic_direct"
+  };
+  const fields = Array.from({ length: frameCount }, (_, frameIndex) => {
+    const timeSeconds = frameIndex * 0.005;
+    const stressSamples = Array.from({ length: sampleCount }, (_, index) => ({
+      point: [index * 0.01, index % 31, frameIndex],
+      normal: [0, 0, 1],
+      value: frameIndex + index / Math.max(sampleCount, 1),
+      nodeId: `N${index}`,
+      source: "calculix-nodal-surface",
+      vonMisesStressPa: (frameIndex + index + 1) * 1000
+    }));
+    const displacementSamples = Array.from({ length: sampleCount }, (_, index) => ({
+      point: [index * 0.01, index % 29, frameIndex],
+      normal: [0, 0, 1],
+      value: frameIndex * 0.001 + index / Math.max(sampleCount, 1_000_000),
+      vector: [0, 0, -(frameIndex * 0.001 + index / Math.max(sampleCount, 1_000_000))],
+      nodeId: `N${index}`,
+      source: "calculix-dat"
+    }));
+    const safetySamples = stressSamples.map((sample) => ({
+      point: sample.point,
+      normal: sample.normal,
+      value: 276 / Math.max(sample.value, 0.001),
+      nodeId: sample.nodeId,
+      source: sample.source
+    }));
+    return [
+      {
+        id: `field-${runId}-stress-${frameIndex}`,
+        runId,
+        type: "stress",
+        location: "node",
+        values: stressSamples.map((sample) => sample.value),
+        min: 0,
+        max: frameIndex + 1,
+        units: "MPa",
+        provenance,
+        frameIndex,
+        timeSeconds,
+        samples: stressSamples
+      },
+      {
+        id: `field-${runId}-displacement-${frameIndex}`,
+        runId,
+        type: "displacement",
+        location: "node",
+        values: displacementSamples.map((sample) => sample.value),
+        min: 0,
+        max: frameIndex * 0.001 + 0.01,
+        units: "mm",
+        provenance,
+        frameIndex,
+        timeSeconds,
+        samples: displacementSamples
+      },
+      {
+        id: `field-${runId}-safety_factor-${frameIndex}`,
+        runId,
+        type: "safety_factor",
+        location: "node",
+        values: safetySamples.map((sample) => sample.value),
+        min: 1,
+        max: 1_000_000,
+        units: "",
+        provenance,
+        frameIndex,
+        timeSeconds,
+        samples: safetySamples
+      }
+    ];
+  }).flat();
+  return {
+    summary: {
+      maxStress: 12.5,
+      maxStressUnits: "MPa",
+      maxDisplacement: 0.0042,
+      maxDisplacementUnits: "mm",
+      safetyFactor: 22.08,
+      reactionForce: 1,
+      reactionForceUnits: "N",
+      transient: {
+        analysisType: "dynamic_structural",
+        integrationMethod: "calculix_dynamic_direct",
+        startTime: 0,
+        endTime: (frameCount - 1) * 0.005,
+        timeStep: 0.005,
+        outputInterval: 0.005,
+        dampingRatio: 0.02,
+        frameCount,
+        peakDisplacementTimeSeconds: (frameCount - 1) * 0.005,
+        peakDisplacement: 0.0042
+      },
+      provenance
+    },
+    fields,
+    artifacts: {
+      inputDeck: "*DYNAMIC\n*NODE PRINT, NSET=NALL, TIME POINTS=OUTPUT_TIMES\nU\n",
+      solverLog: "CalculiX completed transient run.",
+      solverResultParser: "parsed-calculix-framed",
+      meshSummary: { nodes: sampleCount, elements: Math.max(1, Math.floor(sampleCount / 4)), source: "structured_block" }
     }
   };
 }
