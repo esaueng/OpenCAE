@@ -159,6 +159,58 @@ describe("Cloudflare FEA worker orchestration", () => {
     expect(body.deploymentHint).toBeUndefined();
   });
 
+  test("preflights force, pressure, and payload mass loads", async () => {
+    const study = cloudStudyWithMaterial("mat-aluminum-6061");
+    study.namedSelections = [
+      { id: "fixed-selection", name: "Fixed", entityType: "face", geometryRefs: [{ bodyId: "body", entityType: "face", entityId: "face-fixed", label: "Fixed" }], fingerprint: "fixed" },
+      { id: "load-selection", name: "Load", entityType: "face", geometryRefs: [{ bodyId: "body", entityType: "face", entityId: "face-load", label: "Load" }], fingerprint: "load" }
+    ];
+    study.constraints = [{ id: "constraint-fixed", type: "fixed", selectionRef: "fixed-selection", parameters: {}, status: "complete" }];
+    study.loads = [
+      { id: "force-load", type: "force", selectionRef: "load-selection", parameters: { value: 500, units: "N", direction: [0, 0, -1] }, status: "complete" },
+      { id: "pressure-load", type: "pressure", selectionRef: "load-selection", parameters: { value: 100, units: "kPa", direction: [0, 0, -1] }, status: "complete" },
+      { id: "payload-load", type: "gravity", selectionRef: "load-selection", parameters: { value: 10, units: "kg", direction: [0, -1, 0] }, status: "complete" }
+    ];
+    const response = await worker.fetch(new Request("https://cae.example/api/cloud-fea/preflight", {
+      method: "POST",
+      body: JSON.stringify({ study, displayModel: cloudBlockDisplayModel() })
+    }), { ASSETS: { fetch: vi.fn(async () => new Response("asset")) } });
+    const body = await response.json() as Record<string, unknown>;
+
+    expect(response.status).toBe(200);
+    expect(body.ready).toBe(true);
+    expect(body.supported).toMatchObject({ geometry: true, materials: true, constraints: true, loads: true });
+    expect(body.normalizedLoads).toEqual([
+      { sourceLoadId: "force-load", kind: "surface_force", totalForceN: [0, 0, -500] },
+      { sourceLoadId: "pressure-load", kind: "surface_pressure", pressureNPerMm2: 0.1 },
+      { sourceLoadId: "payload-load", kind: "surface_force", totalForceN: [0, -98.0665, 0] }
+    ]);
+    expect(body.diagnostics).toEqual([]);
+  });
+
+  test("preflight reports missing payload mass before run creation", async () => {
+    const study = cloudStudyWithMaterial("mat-aluminum-6061");
+    study.namedSelections = [
+      { id: "fixed-selection", name: "Fixed", entityType: "face", geometryRefs: [{ bodyId: "body", entityType: "face", entityId: "face-fixed", label: "Fixed" }], fingerprint: "fixed" },
+      { id: "load-selection", name: "Load", entityType: "face", geometryRefs: [{ bodyId: "body", entityType: "face", entityId: "face-load", label: "Load" }], fingerprint: "load" }
+    ];
+    study.constraints = [{ id: "constraint-fixed", type: "fixed", selectionRef: "fixed-selection", parameters: {}, status: "complete" }];
+    study.loads = [{ id: "payload-load", type: "gravity", selectionRef: "load-selection", parameters: { units: "kg", direction: [0, -1, 0] }, status: "complete" }];
+
+    const response = await worker.fetch(new Request("https://cae.example/api/cloud-fea/preflight", {
+      method: "POST",
+      body: JSON.stringify({ study, displayModel: cloudBlockDisplayModel() })
+    }), { ASSETS: { fetch: vi.fn(async () => new Response("asset")) } });
+    const body = await response.json() as { ready: boolean; diagnostics: Array<{ severity: string; message: string }> };
+
+    expect(response.status).toBe(200);
+    expect(body.ready).toBe(false);
+    expect(body.diagnostics).toContainEqual(expect.objectContaining({
+      severity: "error",
+      message: "Payload mass load could not be converted to an equivalent force because mass is missing."
+    }));
+  });
+
   test("dispatches cloud FEA runs through the queue when queue binding exists", async () => {
     const bucket = new MemoryR2Bucket();
     const send = vi.fn(async () => undefined);
@@ -1048,7 +1100,7 @@ describe("Cloudflare FEA worker orchestration", () => {
     });
 
     expect(staticResult).toMatchObject({ status: 422 });
-    expect(staticResult.error).toContain("requires a force load");
+    expect(staticResult.error).toContain("requires at least one supported load");
     expect(dynamicResult).toMatchObject({ status: 422 });
     expect(dynamicResult.error).toContain("static stress studies only");
   });
@@ -1391,6 +1443,18 @@ function uploadedGeometryContainerPayload(runId: string) {
       solverSettings: {}
     },
     geometry: { format: "stl", filename: "beam.stl", contentBase64: closedStlBase64() }
+  };
+}
+
+function cloudBlockDisplayModel() {
+  return {
+    id: "display-cloud-block",
+    bodyCount: 1,
+    dimensions: { x: 100, y: 24, z: 24, units: "mm" },
+    faces: [
+      { id: "face-fixed", label: "Fixed", center: [0, 12, 12], normal: [-1, 0, 0] },
+      { id: "face-load", label: "Load", center: [100, 12, 12], normal: [1, 0, 0] }
+    ]
   };
 }
 
