@@ -50,6 +50,7 @@ const placeholderResultMarkers = [
 export const MAX_CLOUD_FEA_RESULT_JSON_BYTES = 8 * 1024 * 1024;
 export const MAX_CLOUD_FEA_FIELD_VALUES = 25_000;
 export const MAX_CLOUD_FEA_FIELD_SAMPLES = 25_000;
+const MAX_CONTAINER_FAILURE_BODY_PREVIEW = 2_000;
 const cloudFeaResultBudgetExceededMessage = "Cloud FEA result payload exceeded the UI result budget. Reduce fidelity or enable result decimation.";
 
 export default {
@@ -122,26 +123,34 @@ export default {
   }
 } satisfies ExportedHandler<Env>;
 
-function cloudFeaHealth(request: Request, env: RuntimeEnv): Response {
+async function cloudFeaHealth(request: Request, env: RuntimeEnv): Promise<Response> {
   const origin = new URL(request.url).origin;
   const containerBound = Boolean(env.FEA_CONTAINER);
+  const body: Record<string, unknown> = {
+    ok: true,
+    mode: "cloudflare-worker",
+    service: "opencae-web",
+    requestOrigin: origin,
+    cloudFeaEndpoint: `${origin}/api/cloud-fea/runs`,
+    artifactsBound: Boolean(env.FEA_ARTIFACTS),
+    queueBound: Boolean(env.FEA_RUN_QUEUE),
+    containerBound,
+    containersEnabled: containerBound,
+    cloudFeaAvailable: containerBound,
+    ...(containerBound ? {} : {
+      requiredDeployConfig: "wrangler.containers.jsonc",
+      deploymentHint: "The current Worker version has no FEA_CONTAINER binding. This usually means a stale or non-container deployment was promoted to Worker opencae. Deploy with wrangler.jsonc or wrangler.containers.jsonc after confirming the config includes FEA_CONTAINER."
+    })
+  };
+  if (containerBound && new URL(request.url).searchParams.get("probeContainer") === "1") {
+    try {
+      body.containerHealth = await probeFeaContainerHealth(env, "health-check");
+    } catch (error) {
+      body.containerHealthError = error instanceof Error ? error.message : String(error);
+    }
+  }
   return Response.json(
-    {
-      ok: true,
-      mode: "cloudflare-worker",
-      service: "opencae-web",
-      requestOrigin: origin,
-      cloudFeaEndpoint: `${origin}/api/cloud-fea/runs`,
-      artifactsBound: Boolean(env.FEA_ARTIFACTS),
-      queueBound: Boolean(env.FEA_RUN_QUEUE),
-      containerBound,
-      containersEnabled: containerBound,
-      cloudFeaAvailable: containerBound,
-      ...(containerBound ? {} : {
-        requiredDeployConfig: "wrangler.containers.jsonc",
-        deploymentHint: "The current Worker version has no FEA_CONTAINER binding. This usually means a stale or non-container deployment was promoted to Worker opencae. Deploy with wrangler.jsonc or wrangler.containers.jsonc after confirming the config includes FEA_CONTAINER."
-      })
-    },
+    body,
     { headers: jsonHeaders }
   );
 }
@@ -251,12 +260,19 @@ async function runCloudFeaSolve(runId: string, env: RuntimeEnv): Promise<void> {
   const events = [
     { runId, type: "state", progress: 0, message: `Cloud FEA worker started: ${requestDiagnosticSummary(requestArtifact)}.`, timestamp: now },
     { runId, type: "progress", progress: 15, message: "Meshing geometry for CalculiX.", timestamp: now },
-    { runId, type: "progress", progress: 30, message: deckMessage, timestamp: now },
-    { runId, type: "progress", progress: 60, message: "Running CalculiX container solve.", timestamp: now },
-    { runId, type: "progress", progress: 90, message: "Post-processing framed nodal and element output.", timestamp: now }
+    { runId, type: "progress", progress: 30, message: deckMessage, timestamp: now }
   ];
   await artifacts.put(`runs/${runId}/events.json`, JSON.stringify(events, null, 2));
   try {
+    const containerHealth = await probeFeaContainerHealth(env, runId);
+    events.push({
+      runId,
+      type: "progress",
+      progress: 45,
+      message: containerHealthMessage(containerHealth),
+      timestamp: new Date().toISOString()
+    });
+    events.push({ runId, type: "progress", progress: 60, message: "Running CalculiX container solve.", timestamp: new Date().toISOString() });
     const solveResponse = await callFeaContainer(env, { ...requestArtifact, runId });
     if (!solveResponse.ok) {
       const failure = await readContainerFailure(solveResponse);
@@ -272,6 +288,7 @@ async function runCloudFeaSolve(runId: string, env: RuntimeEnv): Promise<void> {
       return;
     }
     const containerResult = await solveResponse.json() as Record<string, unknown>;
+    events.push({ runId, type: "progress", progress: 90, message: "Post-processing framed nodal and element output.", timestamp: new Date().toISOString() });
     const normalized = normalizeContainerResult(runId, containerResult);
     if (requestRequiresDynamicFrames(requestArtifact)) {
       assertDynamicPlaybackResult(normalized);
@@ -323,10 +340,9 @@ function cloudFeaQueueDispatchFailureMessage(error: unknown): string {
   return `Cloud FEA queue dispatch failed: ${detail.replace(/\.+$/, "")}.`;
 }
 
-async function callFeaContainer(env: RuntimeEnv, payload: Record<string, unknown>): Promise<Response> {
+function feaContainerFetcher(env: RuntimeEnv, instanceName: string): ContainerFetchBinding {
   const binding = env.FEA_CONTAINER;
   if (!binding) throw new Error("Cloud FEA container binding is not configured.");
-  const instanceName = typeof payload.runId === "string" ? payload.runId : crypto.randomUUID();
   const fetcher = "fetch" in binding
     ? binding
     : binding.getByName
@@ -335,19 +351,47 @@ async function callFeaContainer(env: RuntimeEnv, payload: Record<string, unknown
         ? binding.getRandom()
         : binding.get?.(binding.idFromName ? binding.idFromName(instanceName) as string : instanceName);
   if (!fetcher) throw new Error("Cloud FEA container instance could not be resolved.");
+  return fetcher;
+}
+
+async function fetchFeaContainer(env: RuntimeEnv, instanceName: string, path: "/health" | "/solve", init?: RequestInit): Promise<Response> {
+  const fetcher = feaContainerFetcher(env, instanceName);
   try {
-    return await fetcher.fetch(new Request("https://opencae-fea-container/solve", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(payload)
-    }));
+    return await fetcher.fetch(new Request(`https://opencae-fea-container${path}`, init));
   } catch (error) {
     throw new Error(normalizeContainerRuntimeError(error));
   }
 }
 
+async function callFeaContainer(env: RuntimeEnv, payload: Record<string, unknown>): Promise<Response> {
+  const instanceName = typeof payload.runId === "string" ? payload.runId : crypto.randomUUID();
+  return fetchFeaContainer(env, instanceName, "/solve", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+
+async function probeFeaContainerHealth(env: RuntimeEnv, instanceName: string): Promise<Record<string, unknown>> {
+  const response = await fetchFeaContainer(env, instanceName, "/health", { method: "GET" });
+  if (!response.ok) {
+    const failure = await readContainerFailure(response);
+    throw new Error(`Cloud FEA container health check failed before solve: ${failure.message}`);
+  }
+  const text = await response.text();
+  return parseJsonRecord(text) ?? { ok: true };
+}
+
+function containerHealthMessage(health: Record<string, unknown>): string {
+  const runner = typeof health.runnerVersion === "string" ? health.runnerVersion : "unknown";
+  const ccx = typeof health.ccx === "string" ? health.ccx : "unknown";
+  const gmsh = typeof health.gmsh === "string" ? health.gmsh : "unknown";
+  return `Cloud FEA container health: runner=${runner}; ccx=${ccx}; gmsh=${gmsh}.`;
+}
+
 async function readContainerFailure(response: Response): Promise<{ message: string; artifacts: Record<string, unknown> }> {
-  const payload = await response.json().catch(() => null) as { error?: unknown; message?: unknown; artifacts?: unknown } | null;
+  const text = await response.text().catch(() => "");
+  const payload = parseJsonRecord(text);
   const baseMessage = typeof payload?.error === "string"
     ? payload.error
     : typeof payload?.message === "string"
@@ -356,11 +400,35 @@ async function readContainerFailure(response: Response): Promise<{ message: stri
   const artifacts = isRecord(payload?.artifacts) ? payload.artifacts : {};
   const artifactKeys = Object.keys(artifacts);
   const parserStatus = typeof artifacts.solverResultParser === "string" ? artifacts.solverResultParser : "missing";
-  const message = `${baseMessage} (container HTTP ${response.status}; parser=${parserStatus}; artifacts=${artifactKeys.length ? artifactKeys.join(", ") : "none"}).`;
+  const bodyPreview = payload ? "" : compactBodyPreview(text);
+  const details = [
+    `container HTTP ${response.status}`,
+    `parser=${parserStatus}`,
+    `artifacts=${artifactKeys.length ? artifactKeys.join(", ") : "none"}`,
+    ...(bodyPreview ? [`bodyPreview=${bodyPreview}`] : [])
+  ];
+  const message = `${baseMessage} (${details.join("; ")}).`;
   return {
     message,
     artifacts
   };
+}
+
+function parseJsonRecord(text: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    return isRecord(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function compactBodyPreview(text: string): string {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (!normalized) return "";
+  return normalized.length > MAX_CONTAINER_FAILURE_BODY_PREVIEW
+    ? `${normalized.slice(0, MAX_CONTAINER_FAILURE_BODY_PREVIEW)}...`
+    : normalized;
 }
 
 function normalizeContainerResult(runId: string, result: Record<string, unknown>) {
