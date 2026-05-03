@@ -8,6 +8,10 @@ vi.mock("@cloudflare/containers", () => ({ Container: class Container {} }));
 
 import worker, { MAX_CLOUD_FEA_RESULT_JSON_BYTES, looksLikePlaceholderResult } from "./index";
 
+const expectedCloudFeaRunnerVersion = "2026-05-03-load-normalization";
+const expectedCloudFeaContainerImage = "registry.cloudflare.com/747b74cbd7d019dd7aeecb2c24a4bf10/opencae/opencae-fea:0.1.1-load-normalization";
+const expectedCloudFeaContainerInstanceName = "opencae-fea-solver-load-normalization-v1";
+
 class MemoryR2Bucket {
   objects = new Map<string, string>();
 
@@ -19,6 +23,16 @@ class MemoryR2Bucket {
     const value = this.objects.get(key);
     return value === undefined ? null : { async text() { return value; } };
   }
+}
+
+function healthyContainerFetch(result: Record<string, unknown>) {
+  return vi.fn(async (request: Request) => {
+    const url = new URL(request.url);
+    if (url.pathname === "/health") {
+      return Response.json({ ok: true, runnerVersion: expectedCloudFeaRunnerVersion, ccx: "ccx-test", gmsh: "gmsh-test" });
+    }
+    return Response.json(result);
+  });
 }
 
 function readJsonc(path: string) {
@@ -68,7 +82,7 @@ describe("Cloudflare FEA worker orchestration", () => {
     expect(defaultConfig.routes).toContainEqual({ pattern: "cae.esau.app", custom_domain: true });
     expect(defaultConfig.containers?.[0]).toMatchObject({
       class_name: "OpenCaeFeaContainer",
-      image: "registry.cloudflare.com/747b74cbd7d019dd7aeecb2c24a4bf10/opencae/opencae-fea:0.1.0"
+      image: expectedCloudFeaContainerImage
     });
     expect(defaultConfig.durable_objects?.bindings).toContainEqual({ name: "FEA_CONTAINER", class_name: "OpenCaeFeaContainer" });
     expect(staticConfig.name).toBe("opencae-static");
@@ -79,7 +93,7 @@ describe("Cloudflare FEA worker orchestration", () => {
     expect(localFirstConfig.routes ?? []).not.toContainEqual({ pattern: "cae.esau.app", custom_domain: true });
     expect(containerConfig.containers?.[0]).toMatchObject({
       class_name: "OpenCaeFeaContainer",
-      image: "registry.cloudflare.com/747b74cbd7d019dd7aeecb2c24a4bf10/opencae/opencae-fea:0.1.0"
+      image: expectedCloudFeaContainerImage
     });
     expect(containerConfig.durable_objects?.bindings).toContainEqual({ name: "FEA_CONTAINER", class_name: "OpenCaeFeaContainer" });
     expect(staticConfig.containers).toBeUndefined();
@@ -419,7 +433,7 @@ describe("Cloudflare FEA worker orchestration", () => {
       ASSETS: { fetch: vi.fn(async () => new Response("asset")) },
       FEA_ARTIFACTS: bucket,
       FEA_CONTAINER: {
-        fetch: vi.fn(async () => Response.json(cloudContainerSolveResponse("run-inline-1", false)))
+        fetch: healthyContainerFetch(cloudContainerSolveResponse("run-inline-1", false))
       }
     };
 
@@ -444,7 +458,7 @@ describe("Cloudflare FEA worker orchestration", () => {
       ASSETS: { fetch: vi.fn(async () => new Response("asset")) },
       FEA_ARTIFACTS: bucket,
       FEA_CONTAINER: {
-        fetch: vi.fn(async () => Response.json(cloudContainerSolveResponse("run-background-1", true)))
+        fetch: healthyContainerFetch(cloudContainerSolveResponse("run-background-1", true))
       }
     };
     const ctx = { waitUntil: vi.fn((promise: Promise<unknown>) => pending.push(promise)) };
@@ -497,7 +511,7 @@ describe("Cloudflare FEA worker orchestration", () => {
       const url = new URL(request.url);
       if (url.pathname === "/health") {
         expect(request.method).toBe("GET");
-        return Response.json({ ok: true, runnerVersion: "test-runner", ccx: "ccx-test", gmsh: "gmsh-test" });
+        return Response.json({ ok: true, runnerVersion: expectedCloudFeaRunnerVersion, ccx: "ccx-test", gmsh: "gmsh-test" });
       }
       expect(request.method).toBe("POST");
       expect(url.pathname).toBe("/solve");
@@ -537,6 +551,41 @@ describe("Cloudflare FEA worker orchestration", () => {
     expect(results.fields[0]?.samples?.[0]?.vonMisesStressPa).toBeGreaterThan(0);
   });
 
+  test("queue handler rejects stale Cloud FEA container runners before solve", async () => {
+    const bucket = new MemoryR2Bucket();
+    await bucket.put("runs/run-cloud-stale-runner/request.json", JSON.stringify({
+      runId: "run-cloud-stale-runner",
+      projectId: "project-1",
+      studyId: "study-1",
+      fidelity: "standard",
+      study: { id: "study-1", type: "static_stress" }
+    }));
+    const message = { body: { runId: "run-cloud-stale-runner" }, ack: vi.fn(), retry: vi.fn() };
+    const fetch = vi.fn(async (request: Request) => {
+      const url = new URL(request.url);
+      if (url.pathname === "/health") {
+        return Response.json({ ok: true, runnerVersion: "2026-05-03-http-500-diagnostics", ccx: "ccx-test", gmsh: "gmsh-test" });
+      }
+      return Response.json(cloudParsedBlockSolveResponse("run-cloud-stale-runner"));
+    });
+    const env = {
+      ASSETS: { fetch: vi.fn(async () => new Response("asset")) },
+      FEA_ARTIFACTS: bucket,
+      FEA_CONTAINER: { fetch }
+    };
+
+    await worker.queue({ messages: [message] }, env);
+    const events = JSON.parse(await (await bucket.get("runs/run-cloud-stale-runner/events.json"))!.text()) as Array<{ type: string; message: string }>;
+    const failed = JSON.parse(await (await bucket.get("runs/run-cloud-stale-runner/failed.json"))!.text()) as { error: string };
+
+    expect(message.ack).toHaveBeenCalled();
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(events.at(-1)).toMatchObject({ type: "error" });
+    expect(events.at(-1)?.message).toContain(`Cloud FEA container is stale: expected runner ${expectedCloudFeaRunnerVersion}, got 2026-05-03-http-500-diagnostics.`);
+    expect(failed.error).toBe(events.at(-1)?.message);
+    expect(await bucket.get("runs/run-cloud-stale-runner/results.json")).toBeNull();
+  });
+
   test("queue handler preserves parsed structured block MPa and mm result units", async () => {
     const bucket = new MemoryR2Bucket();
     await bucket.put("runs/run-cloud-block/request.json", JSON.stringify({
@@ -551,7 +600,7 @@ describe("Cloudflare FEA worker orchestration", () => {
       ASSETS: { fetch: vi.fn(async () => new Response("asset")) },
       FEA_ARTIFACTS: bucket,
       FEA_CONTAINER: {
-        fetch: vi.fn(async () => Response.json(cloudParsedBlockSolveResponse("run-cloud-block")))
+        fetch: healthyContainerFetch(cloudParsedBlockSolveResponse("run-cloud-block"))
       }
     };
 
@@ -590,7 +639,7 @@ describe("Cloudflare FEA worker orchestration", () => {
     });
     const get = vi.fn((id: string) => ({
       startAndWaitForPorts,
-      fetch: vi.fn(async () => Response.json(cloudContainerSolveResponse("run-cloud-do", false)))
+      fetch: healthyContainerFetch(cloudContainerSolveResponse("run-cloud-do", false))
     }));
     const env = {
       ASSETS: { fetch: vi.fn(async () => new Response("asset")) },
@@ -602,9 +651,9 @@ describe("Cloudflare FEA worker orchestration", () => {
     const results = JSON.parse(await (await bucket.get("runs/run-cloud-do/results.json"))!.text()) as { summary: { maxStress: number } };
     const events = JSON.parse(await (await bucket.get("runs/run-cloud-do/events.json"))!.text()) as Array<{ message: string }>;
 
-    expect(idFromName).toHaveBeenCalledWith("opencae-fea-solver-shared");
+    expect(idFromName).toHaveBeenCalledWith(expectedCloudFeaContainerInstanceName);
     expect(idFromName).not.toHaveBeenCalledWith("run-cloud-do");
-    expect(get).toHaveBeenCalledWith("id:opencae-fea-solver-shared");
+    expect(get).toHaveBeenCalledWith(`id:${expectedCloudFeaContainerInstanceName}`);
     expect(startAndWaitForPorts).not.toHaveBeenCalled();
     expect(events.some((event) => event.message === "Generating CalculiX static input deck.")).toBe(true);
     expect(events.some((event) => event.message === "Generating CalculiX transient input deck.")).toBe(false);
@@ -626,7 +675,7 @@ describe("Cloudflare FEA worker orchestration", () => {
         fetch: vi.fn(async (request: Request) => {
           const url = new URL(request.url);
           if (url.pathname === "/health") {
-            return Response.json({ ok: true, runnerVersion: "test-runner", ccx: "ccx-test", gmsh: "gmsh-test" });
+            return Response.json({ ok: true, runnerVersion: expectedCloudFeaRunnerVersion, ccx: "ccx-test", gmsh: "gmsh-test" });
           }
           return Response.json({
             error: "Meshing failed: STL is not watertight.",
@@ -674,7 +723,7 @@ describe("Cloudflare FEA worker orchestration", () => {
         fetch: vi.fn(async (request: Request) => {
           const url = new URL(request.url);
           if (url.pathname === "/health") {
-            return Response.json({ ok: true, runnerVersion: "test-runner", ccx: "ccx-test", gmsh: "gmsh-test" });
+            return Response.json({ ok: true, runnerVersion: expectedCloudFeaRunnerVersion, ccx: "ccx-test", gmsh: "gmsh-test" });
           }
           return new Response("container process crashed before JSON diagnostics", {
             status: 500,
@@ -688,7 +737,7 @@ describe("Cloudflare FEA worker orchestration", () => {
     const events = JSON.parse(await (await bucket.get("runs/run-cloud-non-json-500/events.json"))!.text()) as Array<{ type: string; message: string }>;
 
     expect(message.ack).toHaveBeenCalled();
-    expect(events.some((event) => event.message.includes("Cloud FEA container health: runner=test-runner; ccx=ccx-test; gmsh=gmsh-test."))).toBe(true);
+    expect(events.some((event) => event.message.includes(`Cloud FEA container health: runner=${expectedCloudFeaRunnerVersion}; ccx=ccx-test; gmsh=gmsh-test.`))).toBe(true);
     expect(events.at(-1)?.type).toBe("error");
     expect(events.at(-1)?.message).toContain("Cloud FEA container failed with HTTP 500.");
     expect(events.at(-1)?.message).toContain("parser=missing");
@@ -712,7 +761,7 @@ describe("Cloudflare FEA worker orchestration", () => {
         fetch: vi.fn(async (request: Request) => {
           const url = new URL(request.url);
           if (url.pathname === "/health") {
-            return Response.json({ ok: true, runnerVersion: "test-runner", ccx: "ccx-test", gmsh: "gmsh-test" });
+            return Response.json({ ok: true, runnerVersion: expectedCloudFeaRunnerVersion, ccx: "ccx-test", gmsh: "gmsh-test" });
           }
           return Response.json({
             error: "CalculiX adapter failed: boom",
@@ -843,7 +892,7 @@ describe("Cloudflare FEA worker orchestration", () => {
       ASSETS: { fetch: vi.fn(async () => new Response("asset")) },
       FEA_ARTIFACTS: bucket,
       FEA_CONTAINER: {
-        fetch: vi.fn(async () => Response.json(cloudPlaceholderSolveResponse("run-cloud-placeholder")))
+        fetch: healthyContainerFetch(cloudPlaceholderSolveResponse("run-cloud-placeholder"))
       }
     };
 
@@ -903,7 +952,7 @@ describe("Cloudflare FEA worker orchestration", () => {
       ASSETS: { fetch: vi.fn(async () => new Response("asset")) },
       FEA_ARTIFACTS: bucket,
       FEA_CONTAINER: {
-        fetch: vi.fn(async () => Response.json(result))
+        fetch: healthyContainerFetch(result)
       }
     };
 
@@ -932,7 +981,7 @@ describe("Cloudflare FEA worker orchestration", () => {
       ASSETS: { fetch: vi.fn(async () => new Response("asset")) },
       FEA_ARTIFACTS: bucket,
       FEA_CONTAINER: {
-        fetch: vi.fn(async () => Response.json(result))
+        fetch: healthyContainerFetch(result)
       }
     };
 
@@ -959,7 +1008,7 @@ describe("Cloudflare FEA worker orchestration", () => {
       ASSETS: { fetch: vi.fn(async () => new Response("asset")) },
       FEA_ARTIFACTS: bucket,
       FEA_CONTAINER: {
-        fetch: vi.fn(async () => Response.json(cloudGeneratedFallbackSolveResponse("run-cloud-generated-fallback")))
+        fetch: healthyContainerFetch(cloudGeneratedFallbackSolveResponse("run-cloud-generated-fallback"))
       }
     };
 
@@ -987,7 +1036,7 @@ describe("Cloudflare FEA worker orchestration", () => {
       ASSETS: { fetch: vi.fn(async () => new Response("asset")) },
       FEA_ARTIFACTS: bucket,
       FEA_CONTAINER: {
-        fetch: vi.fn(async () => Response.json(result))
+        fetch: healthyContainerFetch(result)
       }
     };
 
@@ -1014,7 +1063,7 @@ describe("Cloudflare FEA worker orchestration", () => {
       ASSETS: { fetch: vi.fn(async () => new Response("asset")) },
       FEA_ARTIFACTS: bucket,
       FEA_CONTAINER: {
-        fetch: vi.fn(async () => Response.json(result))
+        fetch: healthyContainerFetch(result)
       }
     };
 
@@ -1043,7 +1092,7 @@ describe("Cloudflare FEA worker orchestration", () => {
       ASSETS: { fetch: vi.fn(async () => new Response("asset")) },
       FEA_ARTIFACTS: bucket,
       FEA_CONTAINER: {
-        fetch: vi.fn(async () => Response.json(cloudContainerSolveResponse("run-cloud-dynamic-static", false)))
+        fetch: healthyContainerFetch(cloudContainerSolveResponse("run-cloud-dynamic-static", false))
       }
     };
 
@@ -1076,7 +1125,7 @@ describe("Cloudflare FEA worker orchestration", () => {
       ASSETS: { fetch: vi.fn(async () => new Response("asset")) },
       FEA_ARTIFACTS: bucket,
       FEA_CONTAINER: {
-        fetch: vi.fn(async () => Response.json(badDynamicResult))
+        fetch: healthyContainerFetch(badDynamicResult)
       }
     };
 

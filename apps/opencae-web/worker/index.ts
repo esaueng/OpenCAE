@@ -51,8 +51,9 @@ export const MAX_CLOUD_FEA_RESULT_JSON_BYTES = 8 * 1024 * 1024;
 export const MAX_CLOUD_FEA_FIELD_VALUES = 25_000;
 export const MAX_CLOUD_FEA_FIELD_SAMPLES = 25_000;
 const MAX_CONTAINER_FAILURE_BODY_PREVIEW = 2_000;
-const cloudFeaContainerInstanceName = "opencae-fea-solver-shared";
+const cloudFeaContainerInstanceName = "opencae-fea-solver-load-normalization-v1";
 const cloudFeaResultBudgetExceededMessage = "Cloud FEA result payload exceeded the UI result budget. Reduce fidelity or enable result decimation.";
+const expectedCloudFeaRunnerVersion = "2026-05-03-load-normalization";
 
 export default {
   async fetch(request: Request, env: RuntimeEnv, ctx?: ExecutionContext): Promise<Response> {
@@ -317,6 +318,7 @@ async function runCloudFeaSolve(runId: string, env: RuntimeEnv): Promise<void> {
       message: containerHealthMessage(containerHealth),
       timestamp: new Date().toISOString()
     });
+    assertExpectedContainerRunnerVersion(containerHealth);
     events.push({ runId, type: "progress", progress: 60, message: "Running CalculiX container solve.", timestamp: new Date().toISOString() });
     const solveResponse = await callFeaContainer(env, { ...requestArtifact, runId });
     if (!solveResponse.ok) {
@@ -431,6 +433,15 @@ function containerHealthMessage(health: Record<string, unknown>): string {
   const ccx = typeof health.ccx === "string" ? health.ccx : "unknown";
   const gmsh = typeof health.gmsh === "string" ? health.gmsh : "unknown";
   return `Cloud FEA container health: runner=${runner}; ccx=${ccx}; gmsh=${gmsh}.`;
+}
+
+function assertExpectedContainerRunnerVersion(health: Record<string, unknown>): void {
+  const actual = typeof health.runnerVersion === "string" && health.runnerVersion.trim()
+    ? health.runnerVersion
+    : "missing";
+  if (actual !== expectedCloudFeaRunnerVersion) {
+    throw new Error(`Cloud FEA container is stale: expected runner ${expectedCloudFeaRunnerVersion}, got ${actual}. Rebuild and redeploy the container image.`);
+  }
 }
 
 async function readContainerFailure(response: Response): Promise<{ message: string; artifacts: Record<string, unknown> }> {
