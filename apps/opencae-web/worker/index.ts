@@ -56,11 +56,13 @@ const WORKER_COMPACTED_FIELD_SAMPLES = 750;
 const WORKER_MIN_COMPACTED_FIELD_VALUES = 64;
 const WORKER_MIN_COMPACTED_FIELD_SAMPLES = 64;
 const MAX_CONTAINER_FAILURE_BODY_PREVIEW = 2_000;
-const cloudFeaContainerInstanceName = "opencae-fea-solver-dynamic-v1";
 const cloudFeaResultBudgetExceededMessage = "Cloud FEA result payload exceeded the UI result budget. Reduce fidelity or enable result decimation.";
+// Must match services/opencae-fea-container/RUNNER_VERSION.
 const EXPECTED_FEA_RUNNER_VERSION = "2026-05-03-solver-timeout-v1";
+const cloudFeaContainerInstanceName = `opencae-fea-${EXPECTED_FEA_RUNNER_VERSION}`;
 const cloudFeaWorkerDeploymentFingerprint = "opencae-worker-solver-timeout-v1";
-const staleDynamicContainerMessage = `Cloud FEA dynamic requires runner ${EXPECTED_FEA_RUNNER_VERSION} or newer, but the deployed container is stale. Rebuild/redeploy the Cloud FEA container.`;
+const staleDynamicContainerMessage = `Cloud FEA dynamic requires runner ${EXPECTED_FEA_RUNNER_VERSION} or newer, but the deployed container is stale.`;
+const staleDynamicContainerNote = "Make sure Docker is running; wrangler.containers.jsonc uses a Dockerfile image path and deploy must rebuild/push the image.";
 
 export default {
   async fetch(request: Request, env: RuntimeEnv, ctx?: ExecutionContext): Promise<Response> {
@@ -151,9 +153,11 @@ async function cloudFeaHealth(request: Request, env: RuntimeEnv): Promise<Respon
   }
   const supportedAnalysisTypes = supportedAnalysisTypesFromHealth(containerHealth);
   const containerRunnerVersion = containerRunnerVersionFromHealth(containerHealth);
+  const containerRunnerVersionMatches = containerRunnerVersionIsExpectedOrNewer(containerRunnerVersion);
   const solverTimeouts = solverTimeoutsFromHealth(containerHealth);
   const dynamicCloudFeaAvailable = containerSupportsDynamic(containerHealth)
-    && containerRunnerVersionIsExpectedOrNewer(containerRunnerVersion);
+    && containerRunnerVersionMatches;
+  const staleContainer = containerBound && !containerHealthError && !containerRunnerVersionMatches;
   const body: Record<string, unknown> = {
     ok: true,
     mode: "cloudflare-worker",
@@ -165,9 +169,12 @@ async function cloudFeaHealth(request: Request, env: RuntimeEnv): Promise<Respon
     containerBound,
     containersEnabled: containerBound,
     cloudFeaAvailable: containerBound,
+    containerInstanceName: cloudFeaContainerInstanceName,
     containerRunnerVersion,
+    containerRunnerVersionMatches,
     supportedAnalysisTypes,
     dynamicCloudFeaAvailable,
+    staleContainer,
     expectedRunnerVersion: EXPECTED_FEA_RUNNER_VERSION,
     solverTimeouts,
     dynamicStructural: cloudFeaDynamicSupportMetadata(),
@@ -239,11 +246,12 @@ async function createCloudFeaRun(request: Request, env: RuntimeEnv, ctx?: Execut
   if (requestedAnalysisType === "dynamic_structural") {
     try {
       createTimeContainerHealth = await callFeaContainerHealth(env);
-    } catch {
-      return Response.json({ error: staleDynamicContainerMessage }, { status: 503, headers: jsonHeaders });
+    } catch (error) {
+      const containerHealthError = error instanceof Error ? error.message : String(error);
+      return staleDynamicContainerResponse(undefined, containerHealthError);
     }
     if (!containerSupportsDynamic(createTimeContainerHealth) || !containerRunnerVersionIsExpectedOrNewer(containerRunnerVersionFromHealth(createTimeContainerHealth))) {
-      return Response.json({ error: staleDynamicContainerMessage }, { status: 503, headers: jsonHeaders });
+      return staleDynamicContainerResponse(containerRunnerVersionFromHealth(createTimeContainerHealth));
     }
   }
   const studyArtifact = isRecord(body.study) ? body.study : undefined;
@@ -434,6 +442,18 @@ async function markCloudFeaRunFailed(runId: string, env: RuntimeEnv, message: st
 function cloudFeaQueueDispatchFailureMessage(error: unknown): string {
   const detail = error instanceof Error ? error.message : String(error || "unknown error");
   return `Cloud FEA queue dispatch failed: ${detail.replace(/\.+$/, "")}.`;
+}
+
+function staleDynamicContainerResponse(actualRunnerVersion?: string, containerHealthError?: string): Response {
+  return Response.json({
+    error: staleDynamicContainerMessage,
+    expectedRunnerVersion: EXPECTED_FEA_RUNNER_VERSION,
+    actualRunnerVersion: actualRunnerVersion ?? "unavailable",
+    containerInstanceName: cloudFeaContainerInstanceName,
+    deployCommand: "pnpm deploy:cloudflare",
+    note: staleDynamicContainerNote,
+    ...(containerHealthError ? { containerHealthError } : {})
+  }, { status: 503, headers: jsonHeaders });
 }
 
 function feaContainerFetcher(env: RuntimeEnv, instanceName: string): ContainerFetchBinding {
