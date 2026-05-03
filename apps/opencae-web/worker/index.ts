@@ -186,7 +186,7 @@ async function createCloudFeaRun(request: Request, env: RuntimeEnv, ctx?: Execut
     dynamicSettings: isRecord(body.dynamicSettings) ? body.dynamicSettings : undefined,
     createdAt: now
   };
-  const dispatchMode = ctx ? "waitUntil" : "inline";
+  const dispatchMode = env.FEA_RUN_QUEUE ? "queue" : ctx ? "waitUntil" : "inline";
   const queuedMessage = cloudFeaDispatchMessage(requestArtifact, solverMaterial, {
     dispatchMode,
     containerBound: Boolean(env.FEA_CONTAINER)
@@ -197,7 +197,15 @@ async function createCloudFeaRun(request: Request, env: RuntimeEnv, ctx?: Execut
   ];
   await env.FEA_ARTIFACTS.put(`runs/${runId}/request.json`, JSON.stringify(requestArtifact, null, 2));
   await env.FEA_ARTIFACTS.put(`runs/${runId}/events.json`, JSON.stringify(queuedEvents, null, 2));
-  if (ctx) {
+  if (env.FEA_RUN_QUEUE) {
+    try {
+      await env.FEA_RUN_QUEUE.send({ runId });
+    } catch (error) {
+      const message = cloudFeaQueueDispatchFailureMessage(error);
+      await markCloudFeaRunFailed(runId, env, message);
+      return Response.json({ error: message, runId }, { status: 503, headers: jsonHeaders });
+    }
+  } else if (ctx) {
     ctx.waitUntil(runCloudFeaSolve(runId, env));
   } else {
     await runCloudFeaSolve(runId, env);
@@ -303,6 +311,11 @@ async function markCloudFeaRunFailed(runId: string, env: RuntimeEnv, message: st
     error: message,
     timestamp
   }, null, 2));
+}
+
+function cloudFeaQueueDispatchFailureMessage(error: unknown): string {
+  const detail = error instanceof Error ? error.message : String(error || "unknown error");
+  return `Cloud FEA queue dispatch failed: ${detail.replace(/\.+$/, "")}.`;
 }
 
 async function callFeaContainer(env: RuntimeEnv, payload: Record<string, unknown>): Promise<Response> {
