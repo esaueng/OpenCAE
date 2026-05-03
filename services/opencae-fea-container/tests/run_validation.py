@@ -226,18 +226,49 @@ class ValidationSuite(unittest.TestCase):
             assert_no_generated_fallback(bad_result)
 
     def test_structured_block_solver_points_map_to_display_space(self):
-        dimensions = {"x": 180.0, "y": 30.0, "z": 24.0}
+        dimensions = {"x": 180.0, "y": 24.0, "z": 24.0}
         payload = viewer_space_block_payload(dimensions)
         parsed = runner.parse_payload(payload)
-        bounds = runner.display_bounds_for_model(parsed["displayModel"], parsed["dimensions"])
+        solver_bounds = runner.solver_bounds_for_structured_block(parsed["dimensions"])
+        display_bounds = {
+            "min": [-1.9, -0.25, -0.36],
+            "max": [1.9, 0.25, 0.36],
+            "coordinateSpace": "display_model",
+        }
 
-        self.assertEqual(runner.solver_point_to_display([0.0, 15.0, 12.0], dimensions, bounds), [-1.9, 0.0, 0.0])
-        self.assertEqual(runner.solver_point_to_display([180.0, 15.0, 12.0], dimensions, bounds), [1.9, 0.0, 0.0])
-        self.assertEqual(runner.solver_point_to_display([90.0, 15.0, 12.0], dimensions, bounds), [0.0, 0.0, 0.0])
+        self.assertEqual(runner.solver_point_to_display([0.0, 12.0, 12.0], solver_bounds, display_bounds), [-1.9, 0.0, 0.0])
+        self.assertEqual(runner.solver_point_to_display([180.0, 12.0, 12.0], solver_bounds, display_bounds), [1.9, 0.0, 0.0])
+        self.assertEqual(runner.solver_point_to_display([90.0, 12.0, 12.0], solver_bounds, display_bounds), [0.0, 0.0, 0.0])
+
+    def test_result_render_bounds_are_preferred_over_sparse_face_centers(self):
+        dimensions = {"x": 180.0, "y": 24.0, "z": 24.0}
+        payload = viewer_space_block_payload(dimensions)
+        payload["displayModel"]["faces"] = [
+            {"id": "face-fixed", "label": "Fixed X min", "center": [-1.9, 0.0, 0.0], "normal": [-1.0, 0.0, 0.0]},
+            {"id": "face-load-x", "label": "X max", "center": [1.9, 0.0, 0.0], "normal": [1.0, 0.0, 0.0]},
+        ]
+        payload["resultRenderBounds"] = {
+            "min": [-1.9, -0.25, -0.36],
+            "max": [1.9, 0.25, 0.36],
+            "coordinateSpace": "display_model",
+        }
+        parsed = runner.parse_payload(payload)
+
+        bounds = runner.display_bounds_for_payload(parsed)
+
+        self.assertEqual(bounds["min"], [-1.9, -0.25, -0.36])
+        self.assertEqual(bounds["max"], [1.9, 0.25, 0.36])
+        self.assertEqual(bounds["coordinateSpace"], "display_model")
 
     def test_structured_block_result_samples_are_display_space_without_changing_values(self):
-        dimensions = {"x": 180.0, "y": 30.0, "z": 24.0}
-        parsed = runner.parse_payload(viewer_space_block_payload(dimensions))
+        dimensions = {"x": 180.0, "y": 24.0, "z": 24.0}
+        payload = viewer_space_block_payload(dimensions)
+        payload["resultRenderBounds"] = {
+            "min": [-1.9, -0.25, -0.36],
+            "max": [1.9, 0.25, 0.36],
+            "coordinateSpace": "display_model",
+        }
+        parsed = runner.parse_payload(payload)
         mesh = runner.generate_structured_hex_mesh(parsed["dimensions"], parsed["meshDensity"])
         boundaries = runner.select_boundary_nodes(parsed, mesh)
         parsed_files = {
@@ -258,8 +289,8 @@ class ValidationSuite(unittest.TestCase):
         self.assertEqual(result["artifacts"]["meshSummary"]["solverCoordinateSpace"], "mm")
         self.assertEqual(result["artifacts"]["meshSummary"]["resultSampleCoordinateSpace"], "display_model")
 
-        display_min = [-1.9, -0.36, -0.16]
-        display_max = [1.9, 0.36, 0.16]
+        display_min = [-1.9, -0.25, -0.36]
+        display_max = [1.9, 0.25, 0.36]
         for field in result["fields"]:
             for sample in field["samples"]:
                 self.assertNotIn("generated", sample.get("source", "").lower())
@@ -269,6 +300,43 @@ class ValidationSuite(unittest.TestCase):
                     self.assertLessEqual(coordinate, display_max[axis] + 1e-9)
         all_coordinates = [abs(coordinate) for field in result["fields"] for sample in field["samples"] for coordinate in sample["point"]]
         self.assertLessEqual(max(all_coordinates), 1.9)
+
+    def test_dat_stress_fallback_returns_surface_nodal_visualization_field(self):
+        dimensions = {"x": 180.0, "y": 24.0, "z": 24.0}
+        payload = viewer_space_block_payload(dimensions)
+        payload["resultRenderBounds"] = {
+            "min": [-1.9, -0.25, -0.36],
+            "max": [1.9, 0.25, 0.36],
+            "coordinateSpace": "display_model",
+        }
+        parsed = runner.parse_payload(payload)
+        mesh = runner.generate_structured_hex_mesh(parsed["dimensions"], parsed["meshDensity"])
+        boundaries = runner.select_boundary_nodes(parsed, mesh)
+        parsed_files = {
+            **runner.parse_dat_result(dat_fixture_with_element_gradient(), mesh),
+            "files": ["opencae_solve.dat"],
+            "status": "parsed-calculix-dat",
+            "resultSource": "parsed_dat",
+        }
+
+        result = runner.response_from_parsed_dat(parsed, mesh, boundaries, "input deck", {"log": "solver log"}, parsed_files)
+        fields = {field["type"]: field for field in result["fields"]}
+        stress = fields["stress"]
+
+        self.assertEqual(stress["location"], "node")
+        self.assertEqual(stress["samples"][0]["source"], "calculix-nodal-surface")
+        self.assertEqual(stress["min"], min(sample["value"] for sample in stress["samples"]))
+        self.assertEqual(stress["max"], max(sample["value"] for sample in stress["samples"]))
+        self.assertGreater(len(stress["samples"]), 100)
+        self.assertGreater(len({round(sample["value"], 6) for sample in stress["samples"]}), 3)
+        self.assertAlmostEqual(result["summary"]["maxStress"], 0.2)
+        for sample in stress["samples"]:
+            self.assertGreaterEqual(sample["point"][0], -1.9 - 1e-9)
+            self.assertLessEqual(sample["point"][0], 1.9 + 1e-9)
+            self.assertNotIn("generated", sample.get("source", "").lower())
+            self.assertNotIn("fallback", sample.get("source", "").lower())
+            self.assertNotIn("heuristic", sample.get("source", "").lower())
+            self.assertNotIn("local_detailed", sample.get("source", "").lower())
 
     def test_structured_block_uses_frd_nodal_stress_field_without_changing_dat_summary(self):
         dimensions = {"x": 180.0, "y": 30.0, "z": 24.0}
@@ -294,7 +362,7 @@ class ValidationSuite(unittest.TestCase):
         self.assertAlmostEqual(fields["stress"]["max"], 0.15)
         self.assertEqual(fields["stress"]["location"], "node")
         self.assertEqual(fields["safety_factor"]["location"], "node")
-        self.assertEqual(fields["stress"]["samples"][0]["source"], "calculix-frd")
+        self.assertEqual(fields["stress"]["samples"][0]["source"], "calculix-nodal-surface")
         self.assertEqual(result["artifacts"]["resultCoordinateMapping"]["resultSampleCoordinateSpace"], "display_model")
         self.assertGreater(len({round(sample["value"], 6) for sample in stress_samples}), 3)
         self.assertGreater(len({round(sample["point"][0], 6) for sample in stress_samples}), 3)
@@ -352,7 +420,7 @@ class ValidationSuite(unittest.TestCase):
         self.assertAlmostEqual(result["summary"]["reactionForce"], 1.0)
         self.assertEqual(result["artifacts"]["solverResultParser"], "parsed-calculix-dat")
         self.assertTrue(result["artifacts"]["resultCompaction"]["enabled"])
-        self.assertEqual(result["artifacts"]["resultCompaction"]["originalStressSampleCount"], stress_count)
+        self.assertEqual(result["artifacts"]["resultCompaction"]["originalStressSampleCount"], len(fields["stress"]["samples"]))
         self.assertEqual(result["artifacts"]["resultCompaction"]["returnedStressSampleCount"], len(fields["stress"]["samples"]))
         for field in result["fields"]:
             for sample in field["samples"]:
@@ -594,6 +662,27 @@ def dat_fixture():
 
        1   2.000000E-01   0.000000E+00   0.000000E+00   0.000000E+00   0.000000E+00   0.000000E+00
 """
+
+
+def dat_fixture_with_element_gradient():
+    lines = [
+        " displacements (vx,vy,vz) for set NALL and time  0.1000000E+01",
+        "",
+        "       1   0.000000E+00   0.000000E+00   0.000000E+00",
+        "       2   0.000000E+00   0.000000E+00  -1.900000E-03",
+        "",
+        " forces (fx,fy,fz) for set FIXED and time  0.1000000E+01",
+        "",
+        "       1   0.000000E+00   0.000000E+00   1.000000E+00",
+        "",
+        " stresses (sxx,syy,szz,sxy,sxz,syz) for set SOLID and time  0.1000000E+01",
+        "",
+    ]
+    element_count = 20 * 6 * 4
+    for element_id in range(1, element_count + 1):
+        value = 0.02 + 0.18 * element_id / element_count
+        lines.append(f"       {element_id}   {value:.6E}   0.000000E+00   0.000000E+00   0.000000E+00   0.000000E+00   0.000000E+00")
+    return "\n".join(lines)
 
 
 def frd_fixture():

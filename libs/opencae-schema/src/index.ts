@@ -419,3 +419,9 @@ export interface DisplayModel {
     contentBase64: string;
   };
 }
+
+export interface ResultRenderBounds {
+  min: [number, number, number];
+  max: [number, number, number];
+  coordinateSpace: "display_model";
+}

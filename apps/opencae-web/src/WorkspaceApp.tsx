@@ -1,5 +1,5 @@
 import { lazy, startTransition, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Constraint, DisplayFace, DisplayModel, DynamicSolverSettings, Load, NamedSelection, Project, ResultField, ResultSummary, RunEvent, RunTimingEstimate, SimulationFidelity, SolverBackend, Study } from "@opencae/schema";
+import type { Constraint, DisplayFace, DisplayModel, DynamicSolverSettings, Load, NamedSelection, Project, ResultField, ResultRenderBounds, ResultSummary, RunEvent, RunTimingEstimate, SimulationFidelity, SolverBackend, Study } from "@opencae/schema";
 import { RotateCcw, Save } from "lucide-react";
 import { addLoad, addSupport, assignMaterial, cancelRun, createProject, generateMesh, getCloudFeaHealth, getResults, importLocalProject, loadSampleProject, renameProject, runSimulation, subscribeToRun, updateStudy as saveStudyPatch, uploadModel, type CloudFeaRouteHealth, type SampleAnalysisType, type SampleModelId } from "./lib/api";
 import { normalizePrintParameters, starterMaterials } from "@opencae/materials";
@@ -114,6 +114,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const [viewMode, setViewMode] = useState<ViewMode>(restoredUi?.viewMode ?? (restoredResults?.fields.length ? "results" : "model"));
   const [themeMode, setThemeMode] = useState<ThemeMode>(restoredUi?.themeMode ?? "dark");
   const [resultMode, setResultMode] = useState<ResultMode>(restoredUi?.resultMode ?? "stress");
+  const [resultRenderBounds, setResultRenderBounds] = useState<ResultRenderBounds | null>(null);
   const [showDeformed, setShowDeformed] = useState(restoredUi?.showDeformed ?? false);
   const [showDimensions, setShowDimensions] = useState(restoredUi?.showDimensions ?? false);
   const [stressExaggeration, setStressExaggeration] = useState(restoredUi?.stressExaggeration ?? 1.8);
@@ -999,7 +1000,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     const cloudFeaRun = isCloudFeaStudy(study);
     let response: Awaited<ReturnType<typeof runSimulation>>;
     try {
-      response = await runSimulation(study.id, study, displayModel ?? undefined, { onCloudFeaHealth: pushMessage });
+      response = await runSimulation(study.id, study, displayModel ?? undefined, { onCloudFeaHealth: pushMessage, resultRenderBounds });
     } catch (error) {
       setProcessingRunId(null);
       setRunProgress(0);
@@ -1198,6 +1199,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
             supportMarkers={supportMarkers}
             printLayerOrientation={printLayerOrientation}
             onMeasureDisplayModelDimensions={handleMeasureDisplayModelDimensions}
+            onResultRenderBoundsChange={setResultRenderBounds}
             onViewerInteractionChange={handleViewerInteractionChange}
           />
         </Suspense>
