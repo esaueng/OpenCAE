@@ -1,10 +1,13 @@
 import math
 import base64
 import shutil
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import runner
 
@@ -16,7 +19,7 @@ class CalculixDatParserTest(unittest.TestCase):
         expected = math.sqrt(0.5 * ((0.20 - 0.02) ** 2 + (0.02 + 0.01) ** 2 + (-0.01 - 0.20) ** 2) + 3 * (0.03 ** 2 + 0.04 ** 2 + (-0.02) ** 2))
         self.assertAlmostEqual(value, expected)
 
-    def test_parse_calculix_result_files_reads_dat_displacements_reactions_and_integration_stresses(self):
+    def test_parse_calculix_result_files_does_not_treat_placeholder_frd_as_visualization_stress(self):
         with tempfile.TemporaryDirectory() as tmp:
             workdir = Path(tmp)
             (workdir / "opencae_solve.dat").write_text(calculix_dat_fixture())
@@ -25,13 +28,32 @@ class CalculixDatParserTest(unittest.TestCase):
             parsed = runner.parse_calculix_result_files(workdir, "run-fixture")
 
         self.assertEqual(parsed["status"], "parsed-calculix-dat")
-        self.assertEqual(parsed["resultSource"], "parsed_frd_dat")
+        self.assertEqual(parsed["resultSource"], "parsed_dat")
+        self.assertEqual(parsed["visualizationSource"], "dat_integration_points")
+        self.assertIn("frd-nodal-stress-unparsed", parsed["parserDiagnostics"])
         self.assertEqual(parsed["files"], ["opencae_solve.dat", "opencae_solve.frd"])
         self.assertEqual(parsed["displacements"][2], [0.0, 0.0, -0.0015])
         self.assertEqual(parsed["reactions"][1], [0.0, 0.0, 1.0])
         self.assertEqual(len(parsed["stresses"]), 2)
         self.assertEqual(parsed["stresses"][1]["elementId"], 2)
         self.assertAlmostEqual(parsed["stresses"][1]["vonMises"], runner.von_mises([0.20, 0.02, -0.01, 0.03, 0.04, -0.02]))
+
+    def test_parse_calculix_result_files_reads_frd_nodal_stresses_for_visualization(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = Path(tmp)
+            (workdir / "opencae_solve.dat").write_text(calculix_dat_fixture())
+            (workdir / "opencae_solve.frd").write_text(calculix_frd_fixture())
+
+            parsed = runner.parse_calculix_result_files(workdir, "run-fixture")
+
+        self.assertEqual(parsed["status"], "parsed-calculix-dat")
+        self.assertEqual(parsed["resultSource"], "parsed_frd_dat")
+        self.assertEqual(parsed["visualizationSource"], "frd_nodal_stress")
+        self.assertEqual(parsed["frdDisplacements"][2], [0.0, 0.0, -0.0016])
+        self.assertEqual(len(parsed["nodalStresses"]), 3)
+        self.assertEqual(parsed["nodalStresses"][0]["nodeId"], 1)
+        self.assertEqual(parsed["nodalStresses"][0]["point"], [0.0, 15.0, 5.0])
+        self.assertAlmostEqual(parsed["nodalStresses"][1]["vonMises"], 0.06)
 
     def test_response_uses_parsed_integration_stress_and_no_generated_sources(self):
         parsed_payload = runner.parse_payload(block_benchmark_payload("standard"))
@@ -55,6 +77,33 @@ class CalculixDatParserTest(unittest.TestCase):
         for field in result["fields"]:
             for sample in field["samples"]:
                 self.assertNotIn("generated-cantilever-fallback", sample.get("source", ""))
+
+    def test_response_uses_frd_nodal_stress_for_visualization_and_dat_for_summary(self):
+        parsed_payload = runner.parse_payload(block_benchmark_payload("standard"))
+        mesh = runner.generate_structured_hex_mesh(parsed_payload["dimensions"], parsed_payload["meshDensity"])
+        boundaries = runner.select_boundary_nodes(parsed_payload, mesh)
+        parsed_files = {
+            **runner.parse_dat_result(calculix_dat_fixture(), mesh),
+            "nodalStresses": runner.parse_frd_nodal_stresses(calculix_frd_fixture(), mesh),
+            "frdDisplacements": runner.parse_frd_nodal_displacements(calculix_frd_fixture()),
+            "parserDiagnostics": [],
+            "files": ["opencae_solve.dat", "opencae_solve.frd"],
+            "status": "parsed-calculix-dat",
+            "resultSource": "parsed_frd_dat",
+            "visualizationSource": "frd_nodal_stress"
+        }
+
+        result = runner.response_from_parsed_dat(parsed_payload, mesh, boundaries, "input deck", {"log": "solver log"}, parsed_files)
+        fields = {field["type"]: field for field in result["fields"]}
+
+        expected_summary_stress = runner.von_mises([0.20, 0.02, -0.01, 0.03, 0.04, -0.02])
+        self.assertAlmostEqual(result["summary"]["maxStress"], expected_summary_stress)
+        self.assertAlmostEqual(fields["stress"]["max"], 0.18)
+        self.assertEqual(fields["stress"]["location"], "node")
+        self.assertEqual(fields["stress"]["samples"][0]["source"], "calculix-frd")
+        self.assertEqual(fields["safety_factor"]["location"], "node")
+        self.assertEqual(result["artifacts"]["resultCoordinateMapping"]["resultSampleCoordinateSpace"], "display_model")
+        self.assertGreater(len({sample["value"] for sample in fields["stress"]["samples"]}), 2)
 
 
 class StructuredBlockSolveTest(unittest.TestCase):
@@ -230,6 +279,36 @@ def calculix_dat_fixture():
 
        1   1.000000E-01   0.000000E+00   0.000000E+00   0.000000E+00   0.000000E+00   0.000000E+00
        2   2.000000E-01   2.000000E-02  -1.000000E-02   3.000000E-02   4.000000E-02  -2.000000E-02
+"""
+
+
+def calculix_frd_fixture():
+    return """
+    2C
+ -1    1 0.000000E+00 1.500000E+01 5.000000E+00
+ -1    2 1.000000E+02 1.500000E+01 5.000000E+00
+ -1    3 5.000000E+01 1.500000E+01 1.000000E+01
+ -3
+    1PSTEP
+ -4  DISP
+ -5  D1
+ -5  D2
+ -5  D3
+ -1    1 0.000000E+00 0.000000E+00 0.000000E+00
+ -1    2 0.000000E+00 0.000000E+00-1.600000E-03
+ -1    3 1.000000E-04 0.000000E+00-9.500000E-04
+ -3
+ -4  STRESS
+ -5  SXX
+ -5  SYY
+ -5  SZZ
+ -5  SXY
+ -5  SXZ
+ -5  SYZ
+ -1    1 2.000000E-02 0.000000E+00 0.000000E+00 0.000000E+00 0.000000E+00 0.000000E+00
+ -1    2 6.000000E-02 0.000000E+00 0.000000E+00 0.000000E+00 0.000000E+00 0.000000E+00
+ -1    3 1.800000E-01 0.000000E+00 0.000000E+00 0.000000E+00 0.000000E+00 0.000000E+00
+ -3
 """
 
 
