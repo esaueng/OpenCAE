@@ -402,10 +402,8 @@ function dynamicSettingsForStudy(study: Study): DynamicSolverSettings {
     outputInterval: Math.max(finiteOr(raw.outputInterval, 0.005), timeStep, MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS),
     dampingRatio: finiteOr(raw.dampingRatio, 0.02),
     integrationMethod: "newmark_average_acceleration",
+    loadProfile: typeof raw.loadProfile === "string" ? raw.loadProfile : "step",
     ...(raw.allowFreeMotion === true ? { allowFreeMotion: true } : {}),
-    ...(typeof (raw as DynamicSolverSettings & { loadProfile?: string }).loadProfile === "string"
-      ? { loadProfile: (raw as DynamicSolverSettings & { loadProfile: string }).loadProfile }
-      : {})
   };
 }
 

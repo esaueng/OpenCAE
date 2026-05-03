@@ -109,7 +109,8 @@ export function createDynamicStructuralStudy(project: Project, displayModel: Dis
       timeStep: 0.005,
       outputInterval: 0.005,
       dampingRatio: 0.02,
-      integrationMethod: "newmark_average_acceleration"
+      integrationMethod: "newmark_average_acceleration",
+      loadProfile: "ramp"
     },
     validation: [],
     runs: []
@@ -331,7 +332,8 @@ export function createSampleProject(
           timeStep: 0.005,
           outputInterval: 0.005,
           dampingRatio: 0.02,
-          integrationMethod: "newmark_average_acceleration"
+          integrationMethod: "newmark_average_acceleration",
+          loadProfile: "ramp"
         },
         runs: options.includeSeedRun ? sampleRunsFor(sampleId, analysisType, projectId, studyId, templateStudy.runs, options.now) : []
       }
