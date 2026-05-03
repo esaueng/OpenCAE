@@ -645,12 +645,82 @@ function mappedValuesForFaces(faces: DisplayFace[], field: ResultField, mode: Re
     return { values: faces.map((_, index) => finiteOrNeutral(field.values[index], mode)) };
   }
   if (field.samples?.length) {
-    return { values: faces.map((face) => interpolatedFieldSampleValue(face.center, field.samples!, mode)) };
+    const values = faces.map((face) => interpolatedFieldSampleValue(face.center, field.samples!, mode));
+    const faceBounds = displayFaceBounds(faces);
+    const bounds = sampleBounds(field.samples);
+    const diagnostic = coordinateSpaceDiagnostic(bounds, faceBounds);
+    logDebugResultMapping(field, mode, bounds, faceBounds, values);
+    return { values, ...(diagnostic ? { diagnostic } : {}) };
   }
   return {
     values: faces.map(() => neutralValue(mode)),
     diagnostic: `Solver ${field.location} ${field.type} field cannot be mapped to display faces without sample coordinates.`
   };
+}
+
+function sampleBounds(samples: NonNullable<ResultField["samples"]>) {
+  const min: [number, number, number] = [Infinity, Infinity, Infinity];
+  const max: [number, number, number] = [-Infinity, -Infinity, -Infinity];
+  for (const sample of samples) {
+    for (const axis of [0, 1, 2] as const) {
+      const coordinate = sample.point[axis] ?? 0;
+      min[axis] = Math.min(min[axis], coordinate);
+      max[axis] = Math.max(max[axis], coordinate);
+    }
+  }
+  return { min, max };
+}
+
+function displayFaceBounds(faces: DisplayFace[]) {
+  const min: [number, number, number] = [Infinity, Infinity, Infinity];
+  const max: [number, number, number] = [-Infinity, -Infinity, -Infinity];
+  for (const face of faces) {
+    for (const axis of [0, 1, 2] as const) {
+      const coordinate = face.center[axis] ?? 0;
+      min[axis] = Math.min(min[axis], coordinate);
+      max[axis] = Math.max(max[axis], coordinate);
+    }
+  }
+  return { min, max };
+}
+
+function coordinateSpaceDiagnostic(
+  sample: { min: [number, number, number]; max: [number, number, number] },
+  face: { min: [number, number, number]; max: [number, number, number] }
+) {
+  const sampleExtent = boundsExtent(sample);
+  const faceExtent = boundsExtent(face);
+  if (!Number.isFinite(sampleExtent) || !Number.isFinite(faceExtent) || sampleExtent <= 1e-12 || faceExtent <= 1e-12) return undefined;
+  const ratio = Math.max(sampleExtent / faceExtent, faceExtent / sampleExtent);
+  return ratio > 25 ? "Result samples appear to be in a different coordinate space than the display model." : undefined;
+}
+
+function boundsExtent(bounds: { min: [number, number, number]; max: [number, number, number] }) {
+  return Math.max(
+    bounds.max[0] - bounds.min[0],
+    bounds.max[1] - bounds.min[1],
+    bounds.max[2] - bounds.min[2]
+  );
+}
+
+function logDebugResultMapping(
+  field: ResultField,
+  mode: ResultFieldMode,
+  bounds: { min: [number, number, number]; max: [number, number, number] },
+  faceBounds: { min: [number, number, number]; max: [number, number, number] },
+  values: number[]
+) {
+  if (typeof window === "undefined") return;
+  if (new URLSearchParams(window.location.search).get("debugResults") !== "1") return;
+  console.info("[OpenCAE debugResults] result sample face mapping", {
+    mode,
+    fieldId: field.id,
+    sampleBounds: bounds,
+    displayFaceBounds: faceBounds,
+    fieldMin: field.min,
+    fieldMax: field.max,
+    mappedFaceValues: values.slice(0, 8)
+  });
 }
 
 function fallbackValue(face: DisplayFace, mode: ResultFieldMode): number {

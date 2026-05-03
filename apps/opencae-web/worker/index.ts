@@ -457,7 +457,10 @@ function normalizeCloudFeaProvenance(summary: Record<string, unknown>) {
     solverVersion: typeof provenance.solverVersion === "string" ? provenance.solverVersion : "unknown",
     meshSource: typeof provenance.meshSource === "string" ? provenance.meshSource : "unknown",
     resultSource,
-    units: typeof provenance.units === "string" ? provenance.units : "unknown"
+    units: typeof provenance.units === "string" ? provenance.units : "unknown",
+    ...(typeof provenance.renderCoordinateSpace === "string"
+      ? { renderCoordinateSpace: provenance.renderCoordinateSpace }
+      : {})
   };
 }
 
