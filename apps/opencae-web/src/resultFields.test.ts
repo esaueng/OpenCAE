@@ -61,6 +61,30 @@ describe("resultSamplesForFaces", () => {
     expect(samples[0]?.fieldSamples?.map((sample) => sample.value)).toEqual([0, 140]);
   });
 
+  test("diagnoses sampled fields whose coordinates do not match display face bounds", () => {
+    const fields: ResultField[] = [
+      {
+        id: "stress-node",
+        runId: "run",
+        type: "stress",
+        location: "node",
+        values: [0, 140],
+        min: 0,
+        max: 140,
+        units: "MPa",
+        samples: [
+          { point: [0, 0, 0], normal: [0, 1, 0], value: 0 },
+          { point: [180, 30, 24], normal: [0, 1, 0], value: 140 }
+        ]
+      }
+    ];
+
+    const samples = resultSamplesForFaces(faces, fields, "stress");
+
+    expect(samples.map((sample) => sample.value)).toEqual([0, expect.any(Number)]);
+    expect(samples[0]?.diagnostic).toBe("Result samples appear to be in a different coordinate space than the display model.");
+  });
+
   test("does not blindly index a short node field across a larger face array or mix static stress fallback", () => {
     const manyFaces: DisplayFace[] = [
       ...faces,

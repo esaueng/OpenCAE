@@ -110,7 +110,8 @@ export const ResultProvenanceSchema = z.object({
   solverVersion: z.string(),
   meshSource: z.enum(["mock", "structured_block", "gmsh", "uploaded_inp", "unknown"]),
   resultSource: z.enum(["generated", "parsed_dat", "parsed_frd", "parsed_frd_dat"]),
-  units: z.string()
+  units: z.string(),
+  renderCoordinateSpace: z.string().optional()
 });
 
 export const ResultFieldSchema = z.object({
@@ -222,7 +223,12 @@ export const MeshSummarySchema = z.object({
   elements: z.number(),
   warnings: z.array(z.string()),
   analysisSampleCount: z.number().optional(),
-  quality: MeshQualitySchema.optional()
+  quality: MeshQualitySchema.optional(),
+  source: z.string().optional(),
+  units: z.string().optional(),
+  density: z.record(z.unknown()).optional(),
+  solverCoordinateSpace: z.string().optional(),
+  resultSampleCoordinateSpace: z.string().optional()
 });
 
 export const ResultSummarySchema = z.object({

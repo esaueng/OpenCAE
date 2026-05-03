@@ -811,25 +811,71 @@ def parse_dat_result(text, mesh=None):
     return {"displacements": displacements, "reactions": reactions, "stresses": stresses}
 
 
+def display_bounds_for_model(display_model, dimensions):
+    faces = display_model.get("faces") if isinstance(display_model, dict) and isinstance(display_model.get("faces"), list) else []
+    points = [face.get("center") for face in faces if isinstance(face, dict) and is_vec3(face.get("center"))]
+    if len(points) < 2:
+        return None
+    mins = [min(point[index] for point in points) for index in range(3)]
+    maxs = [max(point[index] for point in points) for index in range(3)]
+    spans = [maxs[index] - mins[index] for index in range(3)]
+    dimension_spans = [dimensions.get(axis) for axis in AXES] if isinstance(dimensions, dict) else []
+    if len(dimension_spans) != 3:
+        return None
+    if not all(is_positive_finite(span) for span in spans):
+        return None
+    if not all(is_positive_finite(span) for span in dimension_spans):
+        return None
+    return {"min": mins, "max": maxs}
+
+
+def solver_point_to_display(point_mm, dimensions, display_bounds):
+    if display_bounds is None:
+        return list(point_mm)
+    mapped = []
+    for axis_index, axis in enumerate(AXES):
+        span = dimensions[axis]
+        t = point_mm[axis_index] / span if span > 0 else 0.0
+        lo = display_bounds["min"][axis_index]
+        hi = display_bounds["max"][axis_index]
+        mapped.append(lo + t * (hi - lo))
+    return mapped
+
+
+def solver_vector_to_display(vector_mm, dimensions, display_bounds):
+    if display_bounds is None:
+        return list(vector_mm)
+    mapped = []
+    for axis_index, axis in enumerate(AXES):
+        solver_span = dimensions[axis]
+        display_span = display_bounds["max"][axis_index] - display_bounds["min"][axis_index]
+        scale = display_span / solver_span if solver_span > 0 else 1.0
+        mapped.append(vector_mm[axis_index] * scale)
+    return mapped
+
+
 def response_from_parsed_dat(parsed, mesh, boundaries, input_deck, solver_output, parsed_dat):
     run_id = parsed["runId"]
     material = parsed["material"]
+    structured_block = mesh.get("source", "structured_block") == "structured_block"
+    display_bounds = display_bounds_for_model(parsed.get("displayModel", {}), parsed["dimensions"]) if structured_block else None
+    sample_coordinate_space = "display_model" if display_bounds is not None else "mm"
     displacement_samples = []
     for node in mesh["nodes"]:
         vector = parsed_dat["displacements"].get(node["id"])
         if vector is None:
             continue
         displacement_samples.append({
-            "point": list(node["coordinates"]),
+            "point": solver_point_to_display(node["coordinates"], parsed["dimensions"], display_bounds),
             "normal": [0.0, 0.0, 1.0],
             "value": vector_length(vector),
-            "vector": vector,
+            "vector": solver_vector_to_display(vector, parsed["dimensions"], display_bounds),
             "nodeId": f'N{node["id"]}',
             "source": "calculix-dat"
         })
     stress_samples = [
         {
-            "point": stress["point"],
+            "point": solver_point_to_display(stress["point"], parsed["dimensions"], display_bounds),
             "normal": [0.0, 0.0, 1.0],
             "value": stress["vonMises"],
             "elementId": f'E{stress["elementId"]}',
@@ -854,6 +900,8 @@ def response_from_parsed_dat(parsed, mesh, boundaries, input_deck, solver_output
             "resultSource": parsed_dat["resultSource"],
             "units": "mm-N-s-MPa"
         }
+    if display_bounds is not None:
+        provenance["renderCoordinateSpace"] = "display_model"
     fields = [
         field_from_samples(run_id, "stress", "element", "MPa", stress_values, stress_samples, provenance),
         field_from_samples(run_id, "displacement", "node", "mm", displacement_values, displacement_samples, provenance),
@@ -900,7 +948,7 @@ def response_from_parsed_dat(parsed, mesh, boundaries, input_deck, solver_output
             "solverLog": solver_output["log"],
             "solverResultFiles": parsed_dat["files"],
             "solverResultParser": parsed_dat["status"],
-            "meshSummary": mesh_summary(mesh, boundaries),
+            "meshSummary": mesh_summary(mesh, boundaries, sample_coordinate_space),
             "solverMaterial": material
         }
     }
@@ -952,12 +1000,14 @@ def uploaded_geometry_failure_artifacts(parsed, parser_status, input_deck, solve
     }
 
 
-def mesh_summary(mesh, boundaries):
+def mesh_summary(mesh, boundaries, result_sample_coordinate_space=None):
     summary = {
         "nodes": len(mesh["nodes"]),
         "elements": len(mesh["elements"]),
         "source": mesh.get("source", "structured_block"),
         "units": "mm-N-s-MPa",
+        "solverCoordinateSpace": "mm",
+        "resultSampleCoordinateSpace": result_sample_coordinate_space or "mm",
         "density": mesh.get("density", {}),
         "fixed": {
             "plane": boundaries.get("fixedPlane"),
