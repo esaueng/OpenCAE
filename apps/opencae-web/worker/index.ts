@@ -50,6 +50,7 @@ const placeholderResultMarkers = [
 export const MAX_CLOUD_FEA_RESULT_JSON_BYTES = 8 * 1024 * 1024;
 export const MAX_CLOUD_FEA_FIELD_VALUES = 25_000;
 export const MAX_CLOUD_FEA_FIELD_SAMPLES = 25_000;
+export const MAX_CLOUD_FEA_DYNAMIC_FRAMES = 250;
 const MAX_CONTAINER_FAILURE_BODY_PREVIEW = 2_000;
 const cloudFeaContainerInstanceName = "opencae-fea-solver-load-normalization-v1";
 const cloudFeaResultBudgetExceededMessage = "Cloud FEA result payload exceeded the UI result budget. Reduce fidelity or enable result decimation.";
@@ -144,6 +145,7 @@ async function cloudFeaHealth(request: Request, env: RuntimeEnv): Promise<Respon
     containerBound,
     containersEnabled: containerBound,
     cloudFeaAvailable: containerBound,
+    dynamicStructural: cloudFeaDynamicSupportMetadata(),
     ...(containerBound ? {} : {
       requiredDeployConfig: "wrangler.containers.jsonc",
       deploymentHint: "The current Worker version has no FEA_CONTAINER binding. This usually means a stale or non-container deployment was promoted to Worker opencae. Deploy with wrangler.jsonc or wrangler.containers.jsonc after confirming the config includes FEA_CONTAINER."
@@ -190,11 +192,15 @@ async function cloudFeaPreflight(request: Request): Promise<Response> {
   if (!normalizedLoads.length || diagnostics.some((diagnostic) => diagnostic.id.startsWith("cloud-fea-load"))) {
     loads = false;
   }
+  if (requestRequiresDynamicFrames(body)) {
+    validateDynamicPreflightSettings(body, study, diagnostics);
+  }
   const ready = materials && geometry && constraints && loads && !diagnostics.some((diagnostic) => diagnostic.severity === "error");
   return Response.json({
     ready,
     solver: "calculix",
-    supported: { geometry, materials, constraints, loads },
+    supported: { geometry, materials, constraints, loads, dynamicStructural: true },
+    dynamicStructural: cloudFeaDynamicSupportMetadata(),
     normalizedLoads,
     diagnostics
   }, { headers: jsonHeaders });
@@ -522,6 +528,21 @@ function requestRequiresDynamicFrames(request: Record<string, unknown>): boolean
   return isRecord(request.dynamicSettings);
 }
 
+function cloudFeaDynamicSupportMetadata() {
+  return {
+    supported: true,
+    maxFrames: MAX_CLOUD_FEA_DYNAMIC_FRAMES,
+    limitations: [
+      "linear elastic material only",
+      "small-displacement implicit dynamic response",
+      "fixed supports and normalized force/pressure/payload loads only",
+      "no contact or nonlinear plasticity initially",
+      "dampingRatio is metadata unless rayleighAlpha/rayleighBeta are provided",
+      "bounded frame count"
+    ]
+  };
+}
+
 function assertDynamicPlaybackResult(result: { summary: { transient?: unknown }; fields: Array<Record<string, unknown>> }): void {
   const transient = result.summary.transient;
   if (!isRecord(transient) || numberOr(transient.frameCount, 0) <= 1) {
@@ -709,9 +730,12 @@ function normalizeTransient(transient: Record<string, unknown>) {
   const timeStep = numberOr(transient.timeStep, 0);
   const outputInterval = numberOr(transient.outputInterval, timeStep);
   const frameCount = Math.max(1, Math.round(numberOr(transient.frameCount, 1)));
+  const integrationMethod = transient.integrationMethod === "calculix_dynamic_direct"
+    ? "calculix_dynamic_direct"
+    : "newmark_average_acceleration";
   return {
     analysisType: "dynamic_structural" as const,
-    integrationMethod: "newmark_average_acceleration" as const,
+    integrationMethod,
     startTime,
     endTime,
     timeStep,
@@ -893,6 +917,34 @@ function normalizeLoadsForPreflight(study: Record<string, unknown> | undefined, 
   return normalized;
 }
 
+function validateDynamicPreflightSettings(
+  body: Record<string, unknown>,
+  study: Record<string, unknown> | undefined,
+  diagnostics: Array<{ id: string; severity: "error" | "warning" | "info"; source: string; message: string; details?: Record<string, unknown> }>
+): boolean {
+  const rawSettings = isRecord(body.dynamicSettings)
+    ? body.dynamicSettings
+    : isRecord(study?.solverSettings)
+      ? study.solverSettings
+      : {};
+  const startTime = finiteNumber(rawSettings.startTime, 0);
+  const endTime = finiteNumber(rawSettings.endTime, 0.1);
+  const timeStep = finiteNumber(rawSettings.timeStep, 0.005);
+  const outputInterval = finiteNumber(rawSettings.outputInterval, Math.max(timeStep, 0.005));
+  const dampingRatio = finiteNumber(rawSettings.dampingRatio, 0.02);
+  let ok = true;
+  if (startTime < 0 || endTime <= startTime || timeStep <= 0 || outputInterval <= 0 || outputInterval < timeStep || dampingRatio < 0) {
+    diagnostics.push(preflightDiagnostic("cloud-fea-dynamic-settings-invalid", "Cloud FEA dynamic settings require endTime > startTime, timeStep > 0, outputInterval >= timeStep, and dampingRatio >= 0."));
+    ok = false;
+  }
+  const frameCount = Math.floor((endTime - startTime) / outputInterval + 1e-9) + 1;
+  if (Number.isFinite(frameCount) && frameCount > MAX_CLOUD_FEA_DYNAMIC_FRAMES) {
+    diagnostics.push(preflightDiagnostic("cloud-fea-dynamic-frame-budget", "Dynamic Cloud FEA output would exceed frame budget; increase outputInterval or reduce endTime."));
+    ok = false;
+  }
+  return ok;
+}
+
 function fixedSupportConstraintsForPreflight(study: Record<string, unknown> | undefined): Record<string, unknown>[] {
   const constraints = Array.isArray(study?.constraints) ? study.constraints.filter(isRecord) : [];
   return constraints.filter((constraint) => constraint.type === "fixed" && typeof constraint.selectionRef === "string");
@@ -913,6 +965,10 @@ function preflightDiagnostic(id: string, message: string, details?: Record<strin
 
 function finitePositive(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+function finiteNumber(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
 function unitVector(vector: [number, number, number] | undefined): [number, number, number] | undefined {

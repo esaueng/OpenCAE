@@ -44,6 +44,11 @@ export interface CloudFeaRouteHealth {
   queueBound?: boolean;
   containerBound?: boolean;
   containersEnabled?: boolean;
+  dynamicStructural?: {
+    supported?: boolean;
+    maxFrames?: number;
+    limitations?: string[];
+  };
 }
 
 export interface CloudFeaPreflightRequest {
@@ -60,6 +65,12 @@ export interface CloudFeaPreflightResponse {
     materials: boolean;
     constraints: boolean;
     loads: boolean;
+    dynamicStructural?: boolean;
+  };
+  dynamicStructural?: {
+    supported?: boolean;
+    maxFrames?: number;
+    limitations?: string[];
   };
   normalizedLoads: Array<Record<string, unknown>>;
   diagnostics: Array<{ id?: string; severity?: string; source?: string; message: string; details?: Record<string, unknown> }>;

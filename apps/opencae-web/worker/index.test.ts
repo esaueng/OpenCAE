@@ -167,6 +167,10 @@ describe("Cloudflare FEA worker orchestration", () => {
       containerBound: true,
       containersEnabled: true,
       cloudFeaAvailable: true,
+      dynamicStructural: {
+        supported: true,
+        maxFrames: 250
+      },
       requestOrigin: "https://cae.example",
       cloudFeaEndpoint: "https://cae.example/api/cloud-fea/runs"
     });
@@ -200,6 +204,31 @@ describe("Cloudflare FEA worker orchestration", () => {
       { sourceLoadId: "payload-load", kind: "surface_force", totalForceN: [0, -98.0665, 0] }
     ]);
     expect(body.diagnostics).toEqual([]);
+  });
+
+  test("preflight reports dynamic support and rejects over-budget output frames", async () => {
+    const study = cloudStudyWithMaterial("mat-aluminum-6061", {}, "dynamic_structural");
+    study.namedSelections = [
+      { id: "fixed-selection", name: "Fixed", entityType: "face", geometryRefs: [{ bodyId: "body", entityType: "face", entityId: "face-fixed", label: "Fixed" }], fingerprint: "fixed" },
+      { id: "load-selection", name: "Load", entityType: "face", geometryRefs: [{ bodyId: "body", entityType: "face", entityId: "face-load", label: "Load" }], fingerprint: "load" }
+    ];
+    study.constraints = [{ id: "constraint-fixed", type: "fixed", selectionRef: "fixed-selection", parameters: {}, status: "complete" }];
+    study.loads = [{ id: "force-load", type: "force", selectionRef: "load-selection", parameters: { value: 500, units: "N", direction: [0, 0, -1] }, status: "complete" }];
+    study.solverSettings = { startTime: 0, endTime: 2, timeStep: 0.001, outputInterval: 0.001, dampingRatio: 0.02, integrationMethod: "calculix_dynamic_direct", loadProfile: "ramp" };
+
+    const response = await worker.fetch(new Request("https://cae.example/api/cloud-fea/preflight", {
+      method: "POST",
+      body: JSON.stringify({ study, displayModel: cloudBlockDisplayModel(), dynamicSettings: study.solverSettings })
+    }), { ASSETS: { fetch: vi.fn(async () => new Response("asset")) } });
+    const body = await response.json() as { ready: boolean; supported: Record<string, unknown>; diagnostics: Array<{ id: string; message: string }> };
+
+    expect(response.status).toBe(200);
+    expect(body.ready).toBe(false);
+    expect(body.supported).toMatchObject({ dynamicStructural: true });
+    expect(body.diagnostics).toContainEqual(expect.objectContaining({
+      id: "cloud-fea-dynamic-frame-budget",
+      message: "Dynamic Cloud FEA output would exceed frame budget; increase outputInterval or reduce endTime."
+    }));
   });
 
   test("preflight reports missing payload mass before run creation", async () => {
@@ -532,7 +561,7 @@ describe("Cloudflare FEA worker orchestration", () => {
 
     await worker.queue({ messages: [message] }, env);
     const resultsResponse = await worker.fetch(new Request("https://cae.example/api/cloud-fea/runs/run-cloud-1/results"), env);
-    const results = await resultsResponse.json() as { summary: { maxStress: number; transient?: { frameCount: number } }; fields: Array<{ frameIndex?: number; timeSeconds?: number; samples?: Array<{ source?: string; vonMisesStressPa?: number }> }> };
+    const results = await resultsResponse.json() as { summary: { maxStress: number; transient?: { frameCount: number; integrationMethod?: string } }; fields: Array<{ frameIndex?: number; timeSeconds?: number; samples?: Array<{ source?: string; vonMisesStressPa?: number }> }> };
 
     expect(message.ack).toHaveBeenCalled();
     expect(message.retry).not.toHaveBeenCalled();
@@ -545,6 +574,7 @@ describe("Cloudflare FEA worker orchestration", () => {
     expect(resultsResponse.status).toBe(200);
     expect(results.summary.maxStress).toBe(431400000);
     expect(results.summary.transient?.frameCount).toBe(2);
+    expect(results.summary.transient?.integrationMethod).toBe("calculix_dynamic_direct");
     expect(results.fields.some((field) => field.frameIndex === 1)).toBe(true);
     expect(results.fields.some((field) => field.frameIndex === 1 && field.timeSeconds === 0.005)).toBe(true);
     expect(results.fields[0]?.samples?.[0]?.source).toBe("calculix");
@@ -1151,7 +1181,7 @@ describe("Cloudflare FEA worker orchestration", () => {
     expect(staticResult).toMatchObject({ status: 422 });
     expect(staticResult.error).toContain("requires at least one supported load");
     expect(dynamicResult).toMatchObject({ status: 422 });
-    expect(dynamicResult.error).toContain("static stress studies only");
+    expect(dynamicResult.error).toContain("requires at least one supported load");
   });
 
   test("container runner rejects uploaded geometry without gmsh instead of using block fallback", () => {
@@ -1180,7 +1210,7 @@ function cloudContainerSolveResponse(runId: string, dynamic: boolean) {
         resultSource: "parsed_frd",
         units: "mm-N-s-MPa"
       },
-      ...(dynamic ? { transient: { startTime: 0, endTime: 0.005, timeStep: 0.005, outputInterval: 0.005, frameCount: 2 } } : {})
+      ...(dynamic ? { transient: { startTime: 0, endTime: 0.005, timeStep: 0.005, outputInterval: 0.005, dampingRatio: 0.02, frameCount: 2, integrationMethod: "calculix_dynamic_direct" } } : {})
     },
     fields: [
       {

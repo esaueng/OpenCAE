@@ -27,10 +27,15 @@ FIDELITY_MESH_DENSITY = {
 }
 MAX_RESULT_VALUES = 25_000
 MAX_RESULT_SAMPLES = 25_000
+MAX_DYNAMIC_FRAMES = 250
+MAX_DYNAMIC_FIELD_VALUES_PER_FRAME = 10_000
+MAX_DYNAMIC_FIELD_SAMPLES_PER_FRAME = 5_000
 MAX_FIELD_SAMPLES_PER_TYPE = {
     "stress": 20_000,
     "displacement": 15_000,
     "safety_factor": 20_000,
+    "velocity": 15_000,
+    "acceleration": 15_000,
 }
 MAX_INPUT_DECK_ARTIFACT_BYTES = 1024 * 1024
 MAX_SOLVER_LOG_ARTIFACT_BYTES = 256 * 1024
@@ -240,8 +245,9 @@ def solve_uploaded_geometry(parsed):
 def parse_payload(payload):
     run_id = payload.get("runId") if isinstance(payload.get("runId"), str) else "run-cloud-container"
     study = payload.get("study") if isinstance(payload.get("study"), dict) else {}
-    if payload.get("analysisType") == "dynamic_structural" or study.get("type") == "dynamic_structural" or payload.get("dynamicSettings"):
-        raise UserFacingSolveError("Cloud FEA currently supports static stress studies only.", 422)
+    analysis_type = resolved_analysis_type(payload, study)
+    dynamic = analysis_type == "dynamic_structural"
+    dynamic_settings = normalized_dynamic_settings(dynamic_settings_payload(payload, study)) if dynamic else None
     material = material_properties(payload)
     geometry = uploaded_geometry_payload(payload)
     dimensions = None if geometry else resolve_block_dimensions(payload)
@@ -258,9 +264,13 @@ def parse_payload(payload):
         "study": study,
         "displayModel": payload.get("displayModel") if isinstance(payload.get("displayModel"), dict) else {},
         "resultRenderBounds": payload.get("resultRenderBounds") if isinstance(payload.get("resultRenderBounds"), dict) else None,
+        "analysisType": analysis_type,
+        "dynamic": dynamic,
+        "dynamicSettings": dynamic_settings,
         "material": material,
         "dimensions": dimensions,
         "meshDensity": mesh_density_for(payload.get("fidelity")),
+        "fidelity": payload.get("fidelity") if isinstance(payload.get("fidelity"), str) else "standard",
         "loads": normalized_loads,
         "fixedConstraints": fixed_constraints,
         "load": first_record(study.get("loads")),
@@ -270,6 +280,85 @@ def parse_payload(payload):
         "geometry": geometry
     }
     return parsed
+
+
+def resolved_analysis_type(payload, study):
+    if payload.get("analysisType") == "dynamic_structural" or study.get("type") == "dynamic_structural":
+        return "dynamic_structural"
+    if isinstance(payload.get("dynamicSettings"), dict):
+        return "dynamic_structural"
+    return "static_stress"
+
+
+def dynamic_settings_payload(payload, study):
+    if isinstance(payload.get("dynamicSettings"), dict):
+        return payload["dynamicSettings"]
+    solver_settings = study.get("solverSettings") if isinstance(study.get("solverSettings"), dict) else {}
+    return solver_settings
+
+
+def normalized_dynamic_settings(raw):
+    raw = raw if isinstance(raw, dict) else {}
+    start_time = finite_number_or(raw.get("startTime"), 0.0)
+    end_time = finite_number_or(raw.get("endTime"), 0.1)
+    time_step = finite_number_or(raw.get("timeStep"), 0.005)
+    output_interval = finite_number_or(raw.get("outputInterval"), max(time_step, 0.005))
+    damping_ratio = finite_number_or(raw.get("dampingRatio"), 0.02)
+    load_profile = str(raw.get("loadProfile") or "ramp")
+    diagnostics = []
+    if load_profile not in {"ramp", "step", "sinusoidal", "quasi_static"}:
+        diagnostics.append(dynamic_diagnostic("cloud-fea-dynamic-load-profile", "Cloud FEA dynamic loadProfile must be ramp, step, sinusoidal, or quasi_static."))
+    if not math.isfinite(start_time) or start_time < 0:
+        diagnostics.append(dynamic_diagnostic("cloud-fea-dynamic-start-time", "Cloud FEA dynamic startTime must be a finite non-negative number."))
+    if not math.isfinite(end_time) or end_time <= start_time:
+        diagnostics.append(dynamic_diagnostic("cloud-fea-dynamic-end-time", "Cloud FEA dynamic endTime must be greater than startTime."))
+    if not math.isfinite(time_step) or time_step <= 0:
+        diagnostics.append(dynamic_diagnostic("cloud-fea-dynamic-time-step", "Cloud FEA dynamic timeStep must be a finite positive number."))
+    if not math.isfinite(output_interval) or output_interval <= 0:
+        diagnostics.append(dynamic_diagnostic("cloud-fea-dynamic-output-interval", "Cloud FEA dynamic outputInterval must be a finite positive number."))
+    if math.isfinite(time_step) and math.isfinite(output_interval) and output_interval < time_step:
+        diagnostics.append(dynamic_diagnostic("cloud-fea-dynamic-output-interval", "Cloud FEA dynamic outputInterval must be greater than or equal to timeStep."))
+    if not math.isfinite(damping_ratio) or damping_ratio < 0:
+        diagnostics.append(dynamic_diagnostic("cloud-fea-dynamic-damping-ratio", "Cloud FEA dynamic dampingRatio must be a finite non-negative number."))
+    frame_count = dynamic_frame_count(start_time, end_time, output_interval) if not diagnostics else 0
+    if frame_count > MAX_DYNAMIC_FRAMES:
+        diagnostics.append(dynamic_diagnostic("cloud-fea-dynamic-frame-budget", "Dynamic Cloud FEA output would exceed frame budget; increase outputInterval or reduce endTime."))
+    if diagnostics:
+        raise UserFacingSolveError(diagnostics[0]["message"], 422, {"diagnostics": diagnostics})
+    settings = {
+        "startTime": float(start_time),
+        "endTime": float(end_time),
+        "timeStep": float(time_step),
+        "outputInterval": float(output_interval),
+        "dampingRatio": float(damping_ratio),
+        "loadProfile": load_profile,
+        "integrationMethod": "calculix_dynamic_direct",
+        "frameCount": frame_count,
+    }
+    for key in ("rayleighAlpha", "rayleighBeta"):
+        value = raw.get(key)
+        if isinstance(value, (int, float)) and math.isfinite(value) and value >= 0:
+            settings[key] = float(value)
+    return settings
+
+
+def finite_number_or(value, fallback):
+    return float(value) if isinstance(value, (int, float)) and math.isfinite(value) else float(fallback)
+
+
+def dynamic_frame_count(start_time, end_time, output_interval):
+    duration = max(end_time - start_time, 0.0)
+    return int(math.floor(duration / output_interval + 1e-9)) + 1
+
+
+def dynamic_diagnostic(diagnostic_id, message):
+    return {
+        "id": diagnostic_id,
+        "severity": "error",
+        "source": "preflight",
+        "message": message,
+        "suggestedActions": [],
+    }
 
 
 def fixed_support_constraints(study):
@@ -1042,9 +1131,9 @@ def area_mismatch(target_area, candidate_area):
 def write_calculix_input_deck(parsed, mesh, boundaries, nodal_loads):
     material = parsed["material"]
     element_type = mesh.get("elementType", "C3D8")
-    return "\n".join([
+    header = [
         "*HEADING",
-        f'OpenCAE {mesh.get("source", "structured_block")} CalculiX solve',
+        f'OpenCAE {mesh.get("source", "structured_block")} CalculiX {"dynamic structural" if parsed.get("dynamic") else "static structural"} solve',
         "** Units: mm, N, s, MPa. Density units: tonne/mm^3.",
         "*NODE",
         *[f'{node["id"]}, {node["coordinates"][0]:.12g}, {node["coordinates"][1]:.12g}, {node["coordinates"][2]:.12g}' for node in mesh["nodes"]],
@@ -1064,6 +1153,14 @@ def write_calculix_input_deck(parsed, mesh, boundaries, nodal_loads):
         "*DENSITY",
         f'{material["densityTonnePerMm3"]:.12g}',
         "*SOLID SECTION, ELSET=SOLID, MATERIAL=OPENCAE_MATERIAL",
+    ]
+    if parsed.get("dynamic"):
+        return "\n".join([*header, *write_dynamic_step(parsed, nodal_loads), ""])
+    return "\n".join([*header, *write_static_step(nodal_loads), ""])
+
+
+def write_static_step(nodal_loads):
+    return [
         "*STEP, NLGEOM=NO",
         "*STATIC",
         "*BOUNDARY",
@@ -1081,8 +1178,77 @@ def write_calculix_input_deck(parsed, mesh, boundaries, nodal_loads):
         "*EL FILE, ELSET=SOLID",
         "S",
         "*END STEP",
-        ""
+    ]
+
+
+def write_dynamic_step(parsed, nodal_loads):
+    settings = parsed["dynamicSettings"]
+    start_time = settings["startTime"]
+    end_time = settings["endTime"]
+    duration = end_time - start_time
+    time_step = settings["timeStep"]
+    output_interval = settings["outputInterval"]
+    min_time_step = max(min(time_step / 100.0, duration * 1e-6), 1e-12)
+    max_time_step = min(time_step, output_interval)
+    lines = []
+    damping_args = []
+    if "rayleighAlpha" in settings:
+        damping_args.append(f'ALPHA={settings["rayleighAlpha"]:.12g}')
+    if "rayleighBeta" in settings:
+        damping_args.append(f'BETA={settings["rayleighBeta"]:.12g}')
+    if damping_args:
+        lines.append(f"*DAMPING, {', '.join(damping_args)}")
+    lines.extend([
+        "*TIME POINTS, NAME=OUTPUT_TIMES, GENERATE",
+        f"{start_time:.12g}, {end_time:.12g}, {output_interval:.12g}",
+        "*AMPLITUDE, NAME=LOAD_HISTORY, TIME=TOTAL TIME",
+        *format_amplitude_lines(amplitude_table_for_dynamic(settings)),
+        "*STEP, NLGEOM=NO",
+        "*DYNAMIC, ALPHA=-0.05",
+        f"{time_step:.12g}, {duration:.12g}, {min_time_step:.12g}, {max_time_step:.12g}",
+        "*BOUNDARY",
+        "FIXED, 1, 3",
+        "*CLOAD, AMPLITUDE=LOAD_HISTORY",
+        *format_cload_lines(nodal_loads),
+        "*NODE FILE, NSET=NALL, TIME POINTS=OUTPUT_TIMES",
+        "U,V",
+        "*EL FILE, ELSET=SOLID, TIME POINTS=OUTPUT_TIMES",
+        "S",
+        "*NODE PRINT, NSET=FIXED, TIME POINTS=OUTPUT_TIMES",
+        "RF",
+        "*EL PRINT, ELSET=SOLID, TIME POINTS=OUTPUT_TIMES",
+        "S",
+        "*END STEP",
     ])
+    return lines
+
+
+def amplitude_table_for_dynamic(settings):
+    start_time = float(settings["startTime"])
+    end_time = float(settings["endTime"])
+    duration = end_time - start_time
+    profile = settings.get("loadProfile") or "ramp"
+    if profile == "step":
+        return [(start_time, 1.0), (end_time, 1.0)]
+    if profile in {"ramp", "quasi_static"}:
+        return [(start_time, 0.0), (end_time, 1.0)]
+    if profile == "sinusoidal":
+        time_step = float(settings.get("timeStep") or duration / 20.0)
+        segment_count = max(8, min(80, int(math.ceil(duration / max(time_step, 1e-12))) * 2))
+        table = []
+        for index in range(segment_count + 1):
+            fraction = index / segment_count
+            table.append((start_time + duration * fraction, math.sin(math.pi * fraction)))
+        return table
+    return [(start_time, 0.0), (end_time, 1.0)]
+
+
+def format_amplitude_lines(table):
+    lines = []
+    pairs = [f"{time:.12g}, {value:.12g}" for time, value in table]
+    for index in range(0, len(pairs), 4):
+        lines.append(", ".join(pairs[index:index + 4]))
+    return lines
 
 
 def format_id_lines(ids):
@@ -1141,6 +1307,39 @@ def parse_calculix_result_files(workdir, run_id, context=None, *_, **__):
     files = sorted(path.name for path in workdir.glob("*") if path.suffix.lower() in {".frd", ".dat", ".sta"})
     dat_files = [workdir / name for name in files if name.endswith(".dat")]
     frd_files = [workdir / name for name in files if name.endswith(".frd")]
+    parsed = context.get("parsed") if isinstance(context.get("parsed"), dict) else {}
+    if parsed.get("dynamic"):
+        dynamic_frames = []
+        parser_diagnostics = []
+        for dat_path in dat_files:
+            dynamic_frames.extend(parse_dat_result_frames(dat_path.read_text(errors="ignore"), mesh))
+        for frd_path in frd_files:
+            merge_frd_frames(dynamic_frames, parse_frd_result_frames(frd_path.read_text(errors="ignore"), mesh))
+        dynamic_frames = normalize_dynamic_frames(dynamic_frames)
+        if dynamic_frames and any(frame.get("displacements") for frame in dynamic_frames) and any(frame.get("stresses") for frame in dynamic_frames):
+            return {
+                "frames": dynamic_frames,
+                "available": True,
+                "files": files,
+                "status": "parsed-calculix-framed",
+                "resultSource": "parsed_frd_dat" if frd_files and dat_files else "parsed_frd" if frd_files else "parsed_dat",
+                "visualizationSource": "frd_nodal_stress" if any(frame.get("nodalStresses") for frame in dynamic_frames) else "dat_integration_points",
+                "parserDiagnostics": parser_diagnostics,
+            }
+        return {
+            "available": any(name.endswith((".frd", ".dat")) for name in files),
+            "files": files,
+            "frames": dynamic_frames,
+            "displacements": {},
+            "reactions": {},
+            "stresses": [],
+            "nodalStresses": [],
+            "frdDisplacements": {},
+            "parserDiagnostics": parser_diagnostics or ["dynamic-frames-unparsed"],
+            "status": f"unparsed-calculix-output-for-{run_id}",
+            "resultSource": "unknown",
+            "visualizationSource": "unknown"
+        }
     nodal_stresses = []
     frd_displacements = {}
     parser_diagnostics = []
@@ -1184,6 +1383,123 @@ def parse_dat_result(text, mesh=None):
     parsed = parse_dat_nodal_displacements_and_reactions(text)
     parsed["stresses"] = parse_dat_integration_point_stresses(text, mesh)
     return parsed
+
+
+def parse_dat_result_frames(text, mesh=None):
+    frames_by_time = {}
+    section = None
+    current = None
+    for line in text.splitlines():
+        lowered = line.lower()
+        if "displacements" in lowered:
+            current = dat_frame_for_line(frames_by_time, line)
+            section = "u"
+            continue
+        if "velocities" in lowered:
+            current = dat_frame_for_line(frames_by_time, line)
+            section = "v"
+            continue
+        if "stresses" in lowered:
+            current = dat_frame_for_line(frames_by_time, line)
+            section = "s"
+            continue
+        if "forces" in lowered or "reaction" in lowered:
+            current = dat_frame_for_line(frames_by_time, line)
+            section = "rf"
+            continue
+        values = floats_from_line(line)
+        if current is None:
+            continue
+        if section in {"u", "v", "rf"} and len(values) >= 4 and integer_like(values[0]):
+            target = current["displacements"] if section == "u" else current["velocities"] if section == "v" else current["reactions"]
+            target[int(round(values[0]))] = values[-3:]
+        elif section == "s" and len(values) >= 7 and integer_like(values[0]):
+            element_id = int(round(values[0]))
+            components = values[-6:]
+            current["stresses"].append({
+                "elementId": element_id,
+                "components": components,
+                "vonMises": von_mises(components),
+                "point": element_centroid(mesh, element_id) if mesh is not None else None
+            })
+    return list(frames_by_time.values())
+
+
+def dat_frame_for_line(frames_by_time, line):
+    time_seconds = time_from_result_header(line)
+    key = round(time_seconds, 12)
+    frame = frames_by_time.get(key)
+    if frame is None:
+        frame = {
+            "timeSeconds": time_seconds,
+            "displacements": {},
+            "velocities": {},
+            "reactions": {},
+            "stresses": [],
+            "nodalStresses": [],
+        }
+        frames_by_time[key] = frame
+    return frame
+
+
+def time_from_result_header(line):
+    match = re.search(r"\btime\s+([-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[EeDd][-+]?\d+)?)", line, re.IGNORECASE)
+    if match:
+        try:
+            return float(match.group(1).replace("D", "E").replace("d", "E"))
+        except ValueError:
+            return 0.0
+    values = floats_from_line(line)
+    return values[-1] if values else 0.0
+
+
+def parse_frd_result_frames(text, mesh=None):
+    records = parse_frd_nodal_result_records(text)
+    displacements = {node_id: values[:3] for node_id, values in records["displacements"].items() if len(values) >= 3}
+    velocities = {node_id: values[:3] for node_id, values in records.get("velocities", {}).items() if len(values) >= 3}
+    stresses = parse_frd_nodal_stresses(text, mesh)
+    if not displacements and not velocities and not stresses:
+        return []
+    return [{
+        "timeSeconds": 0.0,
+        "displacements": displacements,
+        "velocities": velocities,
+        "reactions": {},
+        "stresses": [],
+        "nodalStresses": stresses,
+    }]
+
+
+def merge_frd_frames(target_frames, frd_frames):
+    if not frd_frames:
+        return target_frames
+    if not target_frames:
+        target_frames.extend(frd_frames)
+        return target_frames
+    for index, frd_frame in enumerate(frd_frames):
+        target = target_frames[min(index, len(target_frames) - 1)]
+        if frd_frame.get("displacements"):
+            target["displacements"] = frd_frame["displacements"]
+        if frd_frame.get("velocities"):
+            target["velocities"] = frd_frame["velocities"]
+        if frd_frame.get("nodalStresses"):
+            target["nodalStresses"] = frd_frame["nodalStresses"]
+    return target_frames
+
+
+def normalize_dynamic_frames(frames):
+    normalized = []
+    for index, frame in enumerate(sorted(frames, key=lambda item: item.get("timeSeconds", 0.0))):
+        item = dict(frame)
+        item.setdefault("displacements", {})
+        item.setdefault("velocities", {})
+        item.setdefault("reactions", {})
+        item.setdefault("stresses", [])
+        item.setdefault("nodalStresses", [])
+        item["frameIndex"] = index
+        item["timeSeconds"] = float(item.get("timeSeconds", 0.0))
+        normalized.append(item)
+    return normalized
 
 
 def parse_dat_nodal_displacements_and_reactions(text):
@@ -1265,6 +1581,7 @@ def parse_frd_nodal_displacements(text):
 def parse_frd_nodal_result_records(text):
     coordinates = {}
     displacements = {}
+    velocities = {}
     stresses = {}
     section = None
     for line in text.splitlines():
@@ -1283,6 +1600,8 @@ def parse_frd_nodal_result_records(text):
                 section = "stress"
             elif "DISP" in upper:
                 section = "displacement"
+            elif upper.startswith("-4") and re.search(r"\bV(?:ELOCITY|ELOC)?\b", upper):
+                section = "velocity"
             else:
                 section = "other"
             continue
@@ -1299,9 +1618,11 @@ def parse_frd_nodal_result_records(text):
             coordinates[node_id] = payload[:3]
         elif section == "displacement" and len(payload) >= 3:
             displacements[node_id] = payload[:3]
+        elif section == "velocity" and len(payload) >= 3:
+            velocities[node_id] = payload[:3]
         elif section == "stress" and len(payload) >= 6:
             stresses[node_id] = payload[:6]
-    return {"coordinates": coordinates, "displacements": displacements, "stresses": stresses}
+    return {"coordinates": coordinates, "displacements": displacements, "velocities": velocities, "stresses": stresses}
 
 
 def node_coordinates_by_id(mesh):
@@ -1442,6 +1763,8 @@ def surface_nodal_stresses_from_dat(mesh, stresses):
 
 
 def response_from_parsed_dat(parsed, mesh, boundaries, input_deck, solver_output, parsed_dat):
+    if parsed.get("dynamic") or parsed_dat.get("frames"):
+        return response_from_parsed_dynamic(parsed, mesh, boundaries, input_deck, solver_output, parsed_dat)
     run_id = parsed["runId"]
     material = parsed["material"]
     structured_block = mesh.get("source", "structured_block") == "structured_block"
@@ -1595,9 +1918,251 @@ def response_from_parsed_dat(parsed, mesh, boundaries, input_deck, solver_output
         raise annotate_exception_phase(error, "result-compaction")
 
 
-def field_from_samples(run_id, field_type, location, units, values, samples, provenance):
-    return {
-        "id": f"field-{run_id}-{field_type}-0",
+def response_from_parsed_dynamic(parsed, mesh, boundaries, input_deck, solver_output, parsed_dat):
+    run_id = parsed["runId"]
+    material = parsed["material"]
+    settings = parsed["dynamicSettings"]
+    structured_block = mesh.get("source", "structured_block") == "structured_block"
+    solver_bounds = solver_bounds_for_structured_block(parsed["dimensions"]) if structured_block else None
+    display_bounds = display_bounds_for_payload(parsed) if structured_block else None
+    sample_coordinate_space = "display_model" if display_bounds is not None else "mm"
+    diagnostics = list(boundaries["diagnostics"])
+    if structured_block and display_bounds is None:
+        diagnostics.append({
+            "id": "cloud-fea-result-coordinate-transform-unavailable",
+            "severity": "warning",
+            "source": "solver",
+            "message": "Cloud FEA result samples could not be transformed to display-model coordinates.",
+            "suggestedActions": []
+        })
+    if settings.get("dampingRatio", 0) > 0 and "rayleighAlpha" not in settings and "rayleighBeta" not in settings:
+        diagnostics.append({
+            "id": "cloud-fea-dynamic-damping-ratio-metadata-only",
+            "severity": "warning",
+            "source": "solver",
+            "message": "Cloud FEA dynamic dampingRatio is not yet mapped to Rayleigh damping; use rayleighAlpha/rayleighBeta for physical damping.",
+            "suggestedActions": []
+        })
+    frames = normalize_dynamic_frames(parsed_dat.get("frames", []))
+    if len(frames) <= 1:
+        raise UserFacingSolveError("Cloud FEA dynamic result did not include animation frames.", 422)
+    provenance = {
+        "kind": "calculix_fea",
+        "solver": "calculix-ccx",
+        "solverVersion": command_version(["ccx", "-v"]),
+        "meshSource": mesh.get("source", "structured_block"),
+        "resultSource": parsed_dat["resultSource"],
+        "units": "mm-N-s-MPa",
+        "integrationMethod": "calculix_dynamic_direct",
+        "loadProfile": settings.get("loadProfile", "ramp"),
+    }
+    if settings.get("loadProfile") == "quasi_static":
+        provenance["dynamicProfile"] = "quasi_static_dynamic"
+    if display_bounds is not None:
+        provenance["renderCoordinateSpace"] = "display_model"
+    fields = []
+    max_stress = 0.0
+    max_displacement = 0.0
+    peak_displacement_time = settings["startTime"]
+    min_safety_factor = math.inf
+    peak_reaction_force = 0.0
+    previous_velocity_vectors = None
+    previous_time = None
+    for frame in frames:
+        frame_index = frame["frameIndex"]
+        time_seconds = frame["timeSeconds"]
+        displacement_vectors = frame.get("displacements", {})
+        velocity_vectors = frame.get("velocities") or derived_velocity_vectors(frame, frames, frame_index)
+        acceleration_vectors = derived_acceleration_vectors(velocity_vectors, previous_velocity_vectors, time_seconds, previous_time)
+        previous_velocity_vectors = velocity_vectors
+        previous_time = time_seconds
+        displacement_samples = vector_samples_for_nodes(mesh, displacement_vectors, solver_bounds, display_bounds, "calculix-frd" if parsed_dat.get("visualizationSource") == "frd_nodal_stress" else "calculix-dat")
+        velocity_samples = vector_samples_for_nodes(mesh, velocity_vectors, solver_bounds, display_bounds, "calculix-frd")
+        acceleration_samples = vector_samples_for_nodes(mesh, acceleration_vectors, solver_bounds, display_bounds, "derived-from-velocity")
+        nodal_visualization_stresses = frame.get("nodalStresses") if isinstance(frame.get("nodalStresses"), list) else []
+        if structured_block and nodal_visualization_stresses:
+            surface_ids = surface_node_ids(mesh)
+            nodal_visualization_stresses = [stress for stress in nodal_visualization_stresses if stress.get("nodeId") in surface_ids]
+        if not nodal_visualization_stresses and structured_block:
+            nodal_visualization_stresses = surface_nodal_stresses_from_dat(mesh, frame.get("stresses", []))
+        stress_samples = stress_samples_for_frame(nodal_visualization_stresses, frame.get("stresses", []), solver_bounds, display_bounds)
+        stress_values = [sample["value"] for sample in stress_samples]
+        displacement_values = [sample["value"] for sample in displacement_samples]
+        velocity_values = [sample["value"] for sample in velocity_samples]
+        acceleration_values = [sample["value"] for sample in acceleration_samples]
+        engineering_stress_values = [
+            stress["vonMises"]
+            for stress in frame.get("stresses", [])
+            if isinstance(stress.get("vonMises"), (int, float)) and math.isfinite(stress["vonMises"])
+        ]
+        frame_max_stress = max(engineering_stress_values or stress_values or [0.0])
+        frame_max_displacement = max(displacement_values or [0.0])
+        frame_safety_factor = material["yieldMpa"] / max(frame_max_stress, 0.001)
+        frame_reaction = reaction_force_magnitude(frame.get("reactions", {}), boundaries["fixedNodeIds"])
+        max_stress = max(max_stress, frame_max_stress)
+        if frame_max_displacement >= max_displacement:
+            max_displacement = frame_max_displacement
+            peak_displacement_time = time_seconds
+        min_safety_factor = min(min_safety_factor, frame_safety_factor)
+        peak_reaction_force = max(peak_reaction_force, frame_reaction)
+        stress_location = "node" if stress_samples and stress_samples[0].get("nodeId") else "element"
+        safety_values = [material["yieldMpa"] / max(value, 0.001) for value in stress_values]
+        safety_samples = [
+            {
+                "point": sample["point"],
+                "normal": sample["normal"],
+                "value": material["yieldMpa"] / max(sample["value"], 0.001),
+                **({"nodeId": sample["nodeId"]} if sample.get("nodeId") else {}),
+                **({"elementId": sample["elementId"]} if sample.get("elementId") else {}),
+                "source": sample["source"]
+            }
+            for sample in stress_samples
+        ]
+        fields.extend([
+            field_from_samples(run_id, "stress", stress_location, "MPa", stress_values, stress_samples, provenance, frame_index, time_seconds),
+            field_from_samples(run_id, "displacement", "node", "mm", displacement_values, displacement_samples, provenance, frame_index, time_seconds),
+            field_from_samples(run_id, "velocity", "node", "mm/s", velocity_values, velocity_samples, provenance, frame_index, time_seconds),
+            field_from_samples(run_id, "acceleration", "node", "mm/s^2", acceleration_values, acceleration_samples, {**provenance, "accelerationSource": "derived_from_velocity"}, frame_index, time_seconds),
+            field_from_samples(run_id, "safety_factor", stress_location, "", safety_values, safety_samples, provenance, frame_index, time_seconds),
+        ])
+    if peak_reaction_force <= 0:
+        peak_reaction_force = vector_length(boundaries.get("appliedLoadVector") or parsed.get("loadVector") or [0.0, 0.0, 0.0])
+    safety_factor = min_safety_factor if math.isfinite(min_safety_factor) else material["yieldMpa"] / max(max_stress, 0.001)
+    summary = {
+        "maxStress": max_stress,
+        "maxStressUnits": "MPa",
+        "maxDisplacement": max_displacement,
+        "maxDisplacementUnits": "mm",
+        "safetyFactor": safety_factor,
+        "reactionForce": peak_reaction_force,
+        "reactionForceUnits": "N",
+        "failureAssessment": {
+            "status": "fail" if safety_factor < 1 else "pass",
+            "title": "CalculiX transient FEA",
+            "message": "Cloud FEA transient results were parsed from CalculiX output."
+        },
+        "provenance": provenance,
+        "transient": {
+            "analysisType": "dynamic_structural",
+            "integrationMethod": "calculix_dynamic_direct",
+            "startTime": settings["startTime"],
+            "endTime": settings["endTime"],
+            "timeStep": settings["timeStep"],
+            "outputInterval": settings["outputInterval"],
+            "dampingRatio": settings["dampingRatio"],
+            "frameCount": len(frames),
+            "peakDisplacementTimeSeconds": peak_displacement_time,
+            "peakDisplacement": max_displacement,
+        }
+    }
+    coordinate_mapping = {
+        "solverCoordinateSpace": "mm",
+        "resultSampleCoordinateSpace": sample_coordinate_space,
+        "solverBoundsMm": solver_bounds,
+        "displayBounds": display_bounds
+    }
+    result = {
+        "summary": summary,
+        "fields": fields,
+        "diagnostics": diagnostics,
+        "artifacts": {
+            **compact_text_artifact(input_deck, MAX_INPUT_DECK_ARTIFACT_BYTES, "inputDeckPreview"),
+            **compact_text_artifact(solver_output["log"], MAX_SOLVER_LOG_ARTIFACT_BYTES, "solverLogPreview", keep_tail=True),
+            "solverResultFiles": parsed_dat["files"],
+            "solverResultParser": parsed_dat["status"],
+            "solverResultParserDiagnostics": parsed_dat.get("parserDiagnostics", []),
+            "resultCoordinateMapping": coordinate_mapping,
+            "runnerVersion": RUNNER_VERSION,
+            "meshSummary": mesh_summary(mesh, boundaries, sample_coordinate_space),
+            "solverMaterial": material,
+            "dynamicSettings": settings,
+        }
+    }
+    try:
+        return compact_cloud_fea_result(result)
+    except Exception as error:
+        raise annotate_exception_phase(error, "result-compaction")
+
+
+def vector_samples_for_nodes(mesh, vectors, solver_bounds, display_bounds, source):
+    samples = []
+    for node in mesh["nodes"]:
+        vector = vectors.get(node["id"]) if isinstance(vectors, dict) else None
+        if vector is None:
+            continue
+        samples.append({
+            "point": solver_point_to_display(node["coordinates"], solver_bounds, display_bounds),
+            "normal": [0.0, 0.0, 1.0],
+            "value": vector_length(vector),
+            "vector": solver_vector_to_display(vector, solver_bounds, display_bounds),
+            "nodeId": f'N{node["id"]}',
+            "source": source
+        })
+    return samples
+
+
+def stress_samples_for_frame(nodal_stresses, stresses, solver_bounds, display_bounds):
+    samples = []
+    if nodal_stresses:
+        for stress in nodal_stresses:
+            samples.append({
+                "point": solver_point_to_display(stress["point"], solver_bounds, display_bounds),
+                "normal": [0.0, 0.0, 1.0],
+                "value": stress["vonMises"],
+                "nodeId": f'N{stress["nodeId"]}',
+                "source": "calculix-nodal-surface",
+                "vonMisesStressPa": stress["vonMises"] * 1_000_000.0
+            })
+        return samples
+    for stress in stresses:
+        if not is_vec3(stress.get("point")):
+            continue
+        samples.append({
+            "point": solver_point_to_display(stress["point"], solver_bounds, display_bounds),
+            "normal": [0.0, 0.0, 1.0],
+            "value": stress["vonMises"],
+            "elementId": f'E{stress["elementId"]}',
+            "source": "calculix-dat",
+            "vonMisesStressPa": stress["vonMises"] * 1_000_000.0
+        })
+    return samples
+
+
+def derived_velocity_vectors(frame, frames, frame_index):
+    if frame.get("velocities"):
+        return frame["velocities"]
+    if frame_index <= 0:
+        return {node_id: [0.0, 0.0, 0.0] for node_id in frame.get("displacements", {})}
+    previous = frames[frame_index - 1]
+    dt = frame.get("timeSeconds", 0.0) - previous.get("timeSeconds", 0.0)
+    if dt <= 0:
+        return {node_id: [0.0, 0.0, 0.0] for node_id in frame.get("displacements", {})}
+    velocities = {}
+    for node_id, vector in frame.get("displacements", {}).items():
+        previous_vector = previous.get("displacements", {}).get(node_id, [0.0, 0.0, 0.0])
+        velocities[node_id] = [(vector[axis] - previous_vector[axis]) / dt for axis in range(3)]
+    return velocities
+
+
+def derived_acceleration_vectors(velocity_vectors, previous_velocity_vectors, time_seconds, previous_time):
+    if not velocity_vectors:
+        return {}
+    if previous_velocity_vectors is None or previous_time is None:
+        return {node_id: [0.0, 0.0, 0.0] for node_id in velocity_vectors}
+    dt = time_seconds - previous_time
+    if dt <= 0:
+        return {node_id: [0.0, 0.0, 0.0] for node_id in velocity_vectors}
+    accelerations = {}
+    for node_id, vector in velocity_vectors.items():
+        previous_vector = previous_velocity_vectors.get(node_id, [0.0, 0.0, 0.0])
+        accelerations[node_id] = [(vector[axis] - previous_vector[axis]) / dt for axis in range(3)]
+    return accelerations
+
+
+def field_from_samples(run_id, field_type, location, units, values, samples, provenance, frame_index=None, time_seconds=None):
+    frame_suffix = f"-{frame_index}" if frame_index is not None else "-0"
+    field = {
+        "id": f"field-{run_id}-{field_type}{frame_suffix}",
         "runId": run_id,
         "type": field_type,
         "location": location,
@@ -1608,6 +2173,11 @@ def field_from_samples(run_id, field_type, location, units, values, samples, pro
         "samples": samples,
         "provenance": provenance
     }
+    if frame_index is not None:
+        field["frameIndex"] = int(frame_index)
+    if time_seconds is not None:
+        field["timeSeconds"] = float(time_seconds)
+    return field
 
 
 def decimate_sequence(items, max_count, key=None):
@@ -1653,10 +2223,12 @@ def compact_cloud_fea_result(result):
         if not isinstance(field, dict):
             continue
         field_type = field.get("type")
-        max_samples = MAX_FIELD_SAMPLES_PER_TYPE.get(field_type, MAX_RESULT_SAMPLES)
+        is_dynamic_frame = isinstance(field.get("frameIndex"), int)
+        max_samples = MAX_DYNAMIC_FIELD_SAMPLES_PER_FRAME if is_dynamic_frame else MAX_FIELD_SAMPLES_PER_TYPE.get(field_type, MAX_RESULT_SAMPLES)
+        max_values = MAX_DYNAMIC_FIELD_VALUES_PER_FRAME if is_dynamic_frame else MAX_RESULT_VALUES
         values = field.get("values") if isinstance(field.get("values"), list) else []
         samples = field.get("samples") if isinstance(field.get("samples"), list) else []
-        compacted = compact_result_field(field, MAX_RESULT_VALUES, max_samples)
+        compacted = compact_result_field(field, max_values, max_samples)
         fields.append(compacted)
         returned_samples = compacted.get("samples") if isinstance(compacted.get("samples"), list) else []
         returned_values = compacted.get("values") if isinstance(compacted.get("values"), list) else []
@@ -1666,6 +2238,7 @@ def compact_cloud_fea_result(result):
             "returnedValueCount": len(returned_values),
             "originalSampleCount": len(samples),
             "returnedSampleCount": len(returned_samples),
+            "maxValues": max_values,
             "maxSamples": max_samples,
         })
         if field_type == "stress":
@@ -1678,6 +2251,9 @@ def compact_cloud_fea_result(result):
         "enabled": True,
         "maxFieldValues": MAX_RESULT_VALUES,
         "maxFieldSamples": MAX_RESULT_SAMPLES,
+        "maxDynamicFrames": MAX_DYNAMIC_FRAMES,
+        "maxDynamicFieldValuesPerFrame": MAX_DYNAMIC_FIELD_VALUES_PER_FRAME,
+        "maxDynamicFieldSamplesPerFrame": MAX_DYNAMIC_FIELD_SAMPLES_PER_FRAME,
         "originalStressSampleCount": original_stress_sample_count,
         "returnedStressSampleCount": returned_stress_sample_count,
         "fields": compaction_fields,
