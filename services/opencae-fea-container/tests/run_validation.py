@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import math
 import base64
+import copy
 import io
 import json
 import shutil
@@ -151,6 +152,7 @@ class ValidationSuite(unittest.TestCase):
         self.assertIn("*AMPLITUDE, NAME=LOAD_HISTORY, TIME=TOTAL TIME", deck)
         self.assertIn("*DYNAMIC, ALPHA=-0.05", deck)
         self.assertIn("*CLOAD, AMPLITUDE=LOAD_HISTORY", deck)
+        self.assertIn("*NODE PRINT, NSET=NALL, TIME POINTS=OUTPUT_TIMES\nU", deck)
         self.assertIn("*NODE FILE, NSET=NALL, TIME POINTS=OUTPUT_TIMES", deck)
         self.assertIn("U,V", deck)
         self.assertIn("*EL FILE, ELSET=SOLID, TIME POINTS=OUTPUT_TIMES", deck)
@@ -193,12 +195,13 @@ class ValidationSuite(unittest.TestCase):
         self.assertTrue(all(field["type"] in {"stress", "displacement", "velocity", "acceleration", "safety_factor"} for field in fields))
         self.assertTrue(any(field["type"] == "acceleration" and field["provenance"].get("accelerationSource") == "derived_from_velocity" for field in fields))
 
-    def test_finalize_result_fields_derives_values_from_samples(self):
+    def test_finalize_result_fields_derives_displacement_values_from_samples(self):
         fields = [{
             "id": "field-sample-only",
-            "type": "stress",
+            "type": "displacement",
+            "location": "node",
             "values": [],
-            "samples": [{"value": 1.2}, {"value": "bad"}, {"value": 2.4}],
+            "samples": [{"value": 1.2, "vector": [1.2, 0.0, 0.0]}, {"value": "bad"}, {"value": 2.4, "vector": [0.0, 2.4, 0.0]}],
         }]
 
         finalized = runner.finalize_result_fields(fields)
@@ -207,21 +210,31 @@ class ValidationSuite(unittest.TestCase):
         self.assertEqual(finalized[0]["min"], 1.2)
         self.assertEqual(finalized[0]["max"], 2.4)
 
-    def test_finalize_result_fields_omits_empty_velocity_and_acceleration(self):
-        fields = [
-            {"id": "field-empty-velocity", "type": "velocity", "values": [], "samples": []},
-            {"id": "field-empty-acceleration", "type": "acceleration", "values": [], "samples": []},
-            {"id": "field-stress", "type": "stress", "values": [0.1], "samples": [{"value": 0.1}]},
-        ]
+    def test_finalize_result_fields_rejects_empty_displacement_field(self):
+        fields = [{
+            "id": "field-empty-displacement-frame-1",
+            "type": "displacement",
+            "location": "node",
+            "frameIndex": 1,
+            "timeSeconds": 0.01,
+            "values": [],
+            "samples": [],
+        }]
 
-        finalized = runner.finalize_result_fields(fields)
+        with self.assertRaises(runner.UserFacingSolveError) as context:
+            runner.finalize_result_fields(fields)
 
-        self.assertEqual([field["id"] for field in finalized], ["field-stress"])
+        self.assertEqual(context.exception.status, 422)
+        self.assertEqual(context.exception.payload["artifacts"]["solverResultParser"], "dynamic-empty-field")
+        self.assertEqual(context.exception.payload["artifacts"]["emptyField"]["type"], "displacement")
+        self.assertEqual(context.exception.payload["artifacts"]["emptyField"]["location"], "node")
+        self.assertEqual(context.exception.payload["artifacts"]["emptyField"]["frameIndex"], 1)
 
     def test_finalize_result_fields_rejects_empty_required_non_initial_field(self):
         fields = [{
             "id": "field-empty-stress-frame-1",
             "type": "stress",
+            "location": "element",
             "frameIndex": 1,
             "timeSeconds": 0.005,
             "values": [],
@@ -236,6 +249,7 @@ class ValidationSuite(unittest.TestCase):
         self.assertEqual(context.exception.payload["artifacts"]["emptyField"], {
             "id": "field-empty-stress-frame-1",
             "type": "stress",
+            "location": "element",
             "frameIndex": 1,
             "timeSeconds": 0.005,
         })
@@ -256,6 +270,29 @@ class ValidationSuite(unittest.TestCase):
             required_by_frame.setdefault(field["frameIndex"], set()).add(field["type"])
         for field_types in required_by_frame.values():
             self.assertTrue({"stress", "displacement", "safety_factor"}.issubset(field_types))
+        for field in [field for field in result["fields"] if field["type"] == "displacement"]:
+            self.assertGreater(len(field["values"]), 0)
+            self.assertTrue(all(isinstance(value, (int, float)) and math.isfinite(value) for value in field["values"]))
+            self.assertTrue(all(isinstance(sample.get("vector"), list) and len(sample["vector"]) == 3 for sample in field["samples"]))
+            self.assertIn("frameIndex", field)
+            self.assertIn("timeSeconds", field)
+
+    def test_dynamic_response_rejects_frame_missing_displacement(self):
+        parsed = runner.parse_payload(dynamic_block_payload())
+        mesh = runner.generate_structured_hex_mesh(parsed["dimensions"], parsed["meshDensity"])
+        boundaries = runner.select_boundary_nodes(parsed, mesh)
+        parsed_files = dynamic_parsed_fixture(mesh, boundaries)
+        parsed_files["frames"] = copy.deepcopy(parsed_files["frames"])
+        parsed_files["frames"][1]["displacements"] = {}
+
+        with self.assertRaises(runner.UserFacingSolveError) as context:
+            runner.response_from_parsed_dat(parsed, mesh, boundaries, "input deck", {"log": "solver log"}, parsed_files)
+
+        self.assertEqual(context.exception.status, 422)
+        self.assertEqual(context.exception.payload["artifacts"]["solverResultParser"], "dynamic-empty-field")
+        self.assertEqual(context.exception.payload["artifacts"]["emptyField"]["type"], "displacement")
+        self.assertEqual(context.exception.payload["artifacts"]["emptyField"]["location"], "node")
+        self.assertEqual(context.exception.payload["artifacts"]["emptyField"]["frameIndex"], 1)
 
     def test_calculix_dat_parser_accepts_legacy_and_context_signatures(self):
         with tempfile.TemporaryDirectory() as tmp:

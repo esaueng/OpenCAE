@@ -1222,6 +1222,8 @@ def write_dynamic_step(parsed, nodal_loads):
         "FIXED, 1, 3",
         "*CLOAD, AMPLITUDE=LOAD_HISTORY",
         *format_cload_lines(nodal_loads),
+        "*NODE PRINT, NSET=NALL, TIME POINTS=OUTPUT_TIMES",
+        "U",
         "*NODE FILE, NSET=NALL, TIME POINTS=OUTPUT_TIMES",
         "U,V",
         "*EL FILE, ELSET=SOLID, TIME POINTS=OUTPUT_TIMES",
@@ -1990,6 +1992,8 @@ def response_from_parsed_dynamic(parsed, mesh, boundaries, input_deck, solver_ou
         previous_velocity_vectors = velocity_vectors
         previous_time = time_seconds
         displacement_samples = vector_samples_for_nodes(mesh, displacement_vectors, solver_bounds, display_bounds, "calculix-frd" if parsed_dat.get("visualizationSource") == "frd_nodal_stress" else "calculix-dat")
+        if not displacement_samples:
+            raise_dynamic_empty_field_error("displacement", "node", frame_index, time_seconds, f"field-{run_id}-displacement-{frame_index}")
         velocity_samples = vector_samples_for_nodes(mesh, velocity_vectors, solver_bounds, display_bounds, "calculix-frd")
         acceleration_samples = vector_samples_for_nodes(mesh, acceleration_vectors, solver_bounds, display_bounds, "derived-from-velocity")
         nodal_visualization_stresses = frame.get("nodalStresses") if isinstance(frame.get("nodalStresses"), list) else []
@@ -1999,6 +2003,9 @@ def response_from_parsed_dynamic(parsed, mesh, boundaries, input_deck, solver_ou
         if not nodal_visualization_stresses and structured_block:
             nodal_visualization_stresses = surface_nodal_stresses_from_dat(mesh, frame.get("stresses", []))
         stress_samples = stress_samples_for_frame(nodal_visualization_stresses, frame.get("stresses", []), solver_bounds, display_bounds)
+        stress_location = "node" if stress_samples and stress_samples[0].get("nodeId") else "element"
+        if not stress_samples:
+            raise_dynamic_empty_field_error("stress", stress_location, frame_index, time_seconds, f"field-{run_id}-stress-{frame_index}")
         stress_values = [sample["value"] for sample in stress_samples]
         displacement_values = [sample["value"] for sample in displacement_samples]
         velocity_values = [sample["value"] for sample in velocity_samples]
@@ -2018,7 +2025,6 @@ def response_from_parsed_dynamic(parsed, mesh, boundaries, input_deck, solver_ou
             peak_displacement_time = time_seconds
         min_safety_factor = min(min_safety_factor, frame_safety_factor)
         peak_reaction_force = max(peak_reaction_force, frame_reaction)
-        stress_location = "node" if stress_samples and stress_samples[0].get("nodeId") else "element"
         safety_values = [material["yieldMpa"] / max(value, 0.001) for value in stress_values]
         safety_samples = [
             {
@@ -2031,13 +2037,16 @@ def response_from_parsed_dynamic(parsed, mesh, boundaries, input_deck, solver_ou
             }
             for sample in stress_samples
         ]
-        fields.extend([
+        frame_fields = [
             field_from_samples(run_id, "stress", stress_location, "MPa", stress_values, stress_samples, provenance, frame_index, time_seconds),
             field_from_samples(run_id, "displacement", "node", "mm", displacement_values, displacement_samples, provenance, frame_index, time_seconds),
-            field_from_samples(run_id, "velocity", "node", "mm/s", velocity_values, velocity_samples, provenance, frame_index, time_seconds),
-            field_from_samples(run_id, "acceleration", "node", "mm/s^2", acceleration_values, acceleration_samples, {**provenance, "accelerationSource": "derived_from_velocity"}, frame_index, time_seconds),
             field_from_samples(run_id, "safety_factor", stress_location, "", safety_values, safety_samples, provenance, frame_index, time_seconds),
-        ])
+        ]
+        if velocity_samples:
+            frame_fields.append(field_from_samples(run_id, "velocity", "node", "mm/s", velocity_values, velocity_samples, provenance, frame_index, time_seconds))
+        if acceleration_samples:
+            frame_fields.append(field_from_samples(run_id, "acceleration", "node", "mm/s^2", acceleration_values, acceleration_samples, {**provenance, "accelerationSource": "derived_from_velocity"}, frame_index, time_seconds))
+        fields.extend(frame_fields)
     if peak_reaction_force <= 0:
         peak_reaction_force = vector_length(boundaries.get("appliedLoadVector") or parsed.get("loadVector") or [0.0, 0.0, 0.0])
     safety_factor = min_safety_factor if math.isfinite(min_safety_factor) else material["yieldMpa"] / max(max_stress, 0.001)
@@ -2194,6 +2203,25 @@ def field_from_samples(run_id, field_type, location, units, values, samples, pro
     return field
 
 
+def raise_dynamic_empty_field_error(field_type, location, frame_index, time_seconds, field_id=None):
+    raise UserFacingSolveError(
+        f"Cloud FEA dynamic parser produced empty {field_type or 'unknown'} field at frame={frame_index}, time={time_seconds}.",
+        422,
+        {
+            "artifacts": {
+                "solverResultParser": "dynamic-empty-field",
+                "emptyField": {
+                    "id": field_id,
+                    "type": field_type,
+                    "location": location,
+                    "frameIndex": frame_index,
+                    "timeSeconds": time_seconds,
+                },
+            }
+        },
+    )
+
+
 def finalize_result_fields(fields, parsed=None, mesh=None):
     finalized = []
     for raw_field in fields if isinstance(fields, list) else []:
@@ -2205,29 +2233,13 @@ def finalize_result_fields(fields, parsed=None, mesh=None):
         samples = field.get("samples") if isinstance(field.get("samples"), list) else []
         if not values and samples:
             values = finite_values([sample.get("value") for sample in samples if isinstance(sample, dict)])
-        if not values and field_type == "stress" and is_initial_zero_load_frame(field, parsed):
-            values = [0.0]
-            field["samples"] = zero_value_samples(samples)
-        if not values and field_type == "safety_factor" and is_initial_zero_load_frame(field, parsed):
-            values = [1_000_000.0]
-            field["samples"] = zero_value_samples(samples, value=1_000_000.0)
-        if not values and field_type in {"velocity", "acceleration"}:
-            continue
         if not values:
-            raise UserFacingSolveError(
-                f"Cloud FEA dynamic parser produced empty {field_type or 'unknown'} field at frame={field.get('frameIndex')}, time={field.get('timeSeconds')}.",
-                422,
-                {
-                    "artifacts": {
-                        "solverResultParser": "dynamic-empty-field",
-                        "emptyField": {
-                            "id": field.get("id"),
-                            "type": field_type,
-                            "frameIndex": field.get("frameIndex"),
-                            "timeSeconds": field.get("timeSeconds"),
-                        },
-                    }
-                },
+            raise_dynamic_empty_field_error(
+                field_type,
+                field.get("location"),
+                field.get("frameIndex"),
+                field.get("timeSeconds"),
+                field.get("id"),
             )
         field["values"] = values
         field["min"] = min(values)
@@ -2240,36 +2252,6 @@ def finite_values(values):
     if not isinstance(values, list):
         return []
     return [float(value) for value in values if isinstance(value, (int, float)) and math.isfinite(value)]
-
-
-def is_initial_zero_load_frame(field, parsed):
-    if not isinstance(parsed, dict) or not parsed.get("dynamic"):
-        return False
-    settings = parsed.get("dynamicSettings") if isinstance(parsed.get("dynamicSettings"), dict) else {}
-    profile = settings.get("loadProfile", "ramp")
-    if profile not in {"ramp", "quasi_static", "sinusoidal"}:
-        return False
-    start_time = settings.get("startTime", 0.0)
-    frame_index = field.get("frameIndex")
-    time_seconds = field.get("timeSeconds")
-    if frame_index == 0:
-        return True
-    return (
-        isinstance(time_seconds, (int, float))
-        and isinstance(start_time, (int, float))
-        and math.isfinite(time_seconds)
-        and math.isfinite(start_time)
-        and abs(float(time_seconds) - float(start_time)) <= 1e-12
-    )
-
-
-def zero_value_samples(samples, value=0.0):
-    repaired = []
-    for sample in samples if isinstance(samples, list) else []:
-        if not isinstance(sample, dict):
-            continue
-        repaired.append({**sample, "value": value, **({"vonMisesStressPa": 0.0} if "vonMisesStressPa" in sample else {})})
-    return repaired
 
 
 def decimate_sequence(items, max_count, key=None):
