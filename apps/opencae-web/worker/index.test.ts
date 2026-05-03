@@ -439,8 +439,13 @@ describe("Cloudflare FEA worker orchestration", () => {
     }));
     const message = { body: { runId: "run-cloud-1" }, ack: vi.fn(), retry: vi.fn() };
     const containerFetch = vi.fn(async (request: Request) => {
+      const url = new URL(request.url);
+      if (url.pathname === "/health") {
+        expect(request.method).toBe("GET");
+        return Response.json({ ok: true, runnerVersion: "test-runner", ccx: "ccx-test", gmsh: "gmsh-test" });
+      }
       expect(request.method).toBe("POST");
-      expect(new URL(request.url).pathname).toBe("/solve");
+      expect(url.pathname).toBe("/solve");
       const payload = await request.json() as Record<string, unknown>;
       expect(payload).toMatchObject({ runId: "run-cloud-1", studyId: "study-1" });
       return Response.json(cloudContainerSolveResponse("run-cloud-1", true));
@@ -558,15 +563,21 @@ describe("Cloudflare FEA worker orchestration", () => {
       ASSETS: { fetch: vi.fn(async () => new Response("asset")) },
       FEA_ARTIFACTS: bucket,
       FEA_CONTAINER: {
-        fetch: vi.fn(async () => Response.json({
-          error: "Meshing failed: STL is not watertight.",
-          artifacts: {
-            inputDeck: "*HEADING\nfailed deck\n",
-            solverLog: "solver failed before results",
-            solverResultParser: "missing-results",
-            meshSummary: { nodes: 2, elements: 0, source: "structured_block" }
+        fetch: vi.fn(async (request: Request) => {
+          const url = new URL(request.url);
+          if (url.pathname === "/health") {
+            return Response.json({ ok: true, runnerVersion: "test-runner", ccx: "ccx-test", gmsh: "gmsh-test" });
           }
-        }, { status: 422 }))
+          return Response.json({
+            error: "Meshing failed: STL is not watertight.",
+            artifacts: {
+              inputDeck: "*HEADING\nfailed deck\n",
+              solverLog: "solver failed before results",
+              solverResultParser: "missing-results",
+              meshSummary: { nodes: 2, elements: 0, source: "structured_block" }
+            }
+          }, { status: 422 });
+        })
       }
     };
 
@@ -586,6 +597,119 @@ describe("Cloudflare FEA worker orchestration", () => {
     expect(await (await bucket.get("runs/run-cloud-fail/mesh.json"))!.text()).toContain("structured_block");
     expect(await bucket.get("runs/run-cloud-fail/results.json")).toBeNull();
     expect(resultsResponse.status).toBe(404);
+  });
+
+  test("queue handler includes a body preview for non-JSON container HTTP 500 failures", async () => {
+    const bucket = new MemoryR2Bucket();
+    await bucket.put("runs/run-cloud-non-json-500/request.json", JSON.stringify({
+      runId: "run-cloud-non-json-500",
+      studyId: "study-1",
+      fidelity: "ultra"
+    }));
+    const message = { body: { runId: "run-cloud-non-json-500" }, ack: vi.fn(), retry: vi.fn() };
+    const env = {
+      ASSETS: { fetch: vi.fn(async () => new Response("asset")) },
+      FEA_ARTIFACTS: bucket,
+      FEA_CONTAINER: {
+        fetch: vi.fn(async (request: Request) => {
+          const url = new URL(request.url);
+          if (url.pathname === "/health") {
+            return Response.json({ ok: true, runnerVersion: "test-runner", ccx: "ccx-test", gmsh: "gmsh-test" });
+          }
+          return new Response("container process crashed before JSON diagnostics", {
+            status: 500,
+            headers: { "content-type": "text/plain" }
+          });
+        })
+      }
+    };
+
+    await worker.queue({ messages: [message] }, env);
+    const events = JSON.parse(await (await bucket.get("runs/run-cloud-non-json-500/events.json"))!.text()) as Array<{ type: string; message: string }>;
+
+    expect(message.ack).toHaveBeenCalled();
+    expect(events.some((event) => event.message.includes("Cloud FEA container health: runner=test-runner; ccx=ccx-test; gmsh=gmsh-test."))).toBe(true);
+    expect(events.at(-1)?.type).toBe("error");
+    expect(events.at(-1)?.message).toContain("Cloud FEA container failed with HTTP 500.");
+    expect(events.at(-1)?.message).toContain("parser=missing");
+    expect(events.at(-1)?.message).toContain("artifacts=none");
+    expect(events.at(-1)?.message).toContain("bodyPreview=container process crashed before JSON diagnostics");
+    expect(await bucket.get("runs/run-cloud-non-json-500/results.json")).toBeNull();
+  });
+
+  test("queue handler preserves python-exception artifacts from JSON container HTTP 500 failures", async () => {
+    const bucket = new MemoryR2Bucket();
+    await bucket.put("runs/run-cloud-python-exception/request.json", JSON.stringify({
+      runId: "run-cloud-python-exception",
+      studyId: "study-1",
+      fidelity: "ultra"
+    }));
+    const message = { body: { runId: "run-cloud-python-exception" }, ack: vi.fn(), retry: vi.fn() };
+    const env = {
+      ASSETS: { fetch: vi.fn(async () => new Response("asset")) },
+      FEA_ARTIFACTS: bucket,
+      FEA_CONTAINER: {
+        fetch: vi.fn(async (request: Request) => {
+          const url = new URL(request.url);
+          if (url.pathname === "/health") {
+            return Response.json({ ok: true, runnerVersion: "test-runner", ccx: "ccx-test", gmsh: "gmsh-test" });
+          }
+          return Response.json({
+            error: "CalculiX adapter failed: boom",
+            artifacts: {
+              solverResultParser: "python-exception",
+              solverLog: "Traceback\nRuntimeError: boom",
+              exceptionPhase: "result-compaction"
+            }
+          }, { status: 500 });
+        })
+      }
+    };
+
+    await worker.queue({ messages: [message] }, env);
+    const events = JSON.parse(await (await bucket.get("runs/run-cloud-python-exception/events.json"))!.text()) as Array<{ type: string; message: string }>;
+
+    expect(message.ack).toHaveBeenCalled();
+    expect(events.at(-1)?.type).toBe("error");
+    expect(events.at(-1)?.message).toContain("CalculiX adapter failed: boom");
+    expect(events.at(-1)?.message).toContain("parser=python-exception");
+    expect(events.at(-1)?.message).toContain("artifacts=solverResultParser, solverLog, exceptionPhase");
+    expect(await (await bucket.get("runs/run-cloud-python-exception/solver.log"))!.text()).toContain("RuntimeError: boom");
+    expect(await (await bucket.get("runs/run-cloud-python-exception/solver-result-parser.txt"))!.text()).toBe("python-exception");
+    expect(await bucket.get("runs/run-cloud-python-exception/results.json")).toBeNull();
+  });
+
+  test("queue handler reports failed container health probes before solve", async () => {
+    const bucket = new MemoryR2Bucket();
+    await bucket.put("runs/run-cloud-health-fail/request.json", JSON.stringify({
+      runId: "run-cloud-health-fail",
+      studyId: "study-1",
+      fidelity: "ultra"
+    }));
+    const message = { body: { runId: "run-cloud-health-fail" }, ack: vi.fn(), retry: vi.fn() };
+    const fetch = vi.fn(async (request: Request) => {
+      const url = new URL(request.url);
+      if (url.pathname === "/health") {
+        return new Response("container boot failed", { status: 500, headers: { "content-type": "text/plain" } });
+      }
+      return Response.json(cloudContainerSolveResponse("run-cloud-health-fail", false));
+    });
+    const env = {
+      ASSETS: { fetch: vi.fn(async () => new Response("asset")) },
+      FEA_ARTIFACTS: bucket,
+      FEA_CONTAINER: { fetch }
+    };
+
+    await worker.queue({ messages: [message] }, env);
+    const events = JSON.parse(await (await bucket.get("runs/run-cloud-health-fail/events.json"))!.text()) as Array<{ type: string; message: string }>;
+
+    expect(message.ack).toHaveBeenCalled();
+    expect(events.at(-1)).toMatchObject({ type: "error" });
+    expect(events.at(-1)?.message).toContain("Cloud FEA container health check failed before solve");
+    expect(events.at(-1)?.message).toContain("container HTTP 500");
+    expect(events.at(-1)?.message).toContain("bodyPreview=container boot failed");
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(await bucket.get("runs/run-cloud-health-fail/results.json")).toBeNull();
   });
 
   test("queue handler records missing container binding as a run failure without results", async () => {
