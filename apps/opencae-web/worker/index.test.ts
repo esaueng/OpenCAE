@@ -543,8 +543,9 @@ describe("Cloudflare FEA worker orchestration", () => {
     const results = JSON.parse(await (await bucket.get("runs/run-cloud-do/results.json"))!.text()) as { summary: { maxStress: number } };
     const events = JSON.parse(await (await bucket.get("runs/run-cloud-do/events.json"))!.text()) as Array<{ message: string }>;
 
-    expect(idFromName).toHaveBeenCalledWith("run-cloud-do");
-    expect(get).toHaveBeenCalledWith("id:run-cloud-do");
+    expect(idFromName).toHaveBeenCalledWith("opencae-fea-solver-shared");
+    expect(idFromName).not.toHaveBeenCalledWith("run-cloud-do");
+    expect(get).toHaveBeenCalledWith("id:opencae-fea-solver-shared");
     expect(startAndWaitForPorts).not.toHaveBeenCalled();
     expect(events.some((event) => event.message === "Generating CalculiX static input deck.")).toBe(true);
     expect(events.some((event) => event.message === "Generating CalculiX transient input deck.")).toBe(false);

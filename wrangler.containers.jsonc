@@ -45,7 +45,7 @@
       "class_name": "OpenCaeFeaContainer",
       "image": "registry.cloudflare.com/747b74cbd7d019dd7aeecb2c24a4bf10/opencae/opencae-fea:0.1.0",
       "instance_type": "standard-1",
-      "max_instances": 5
+      "max_instances": 10
     }
   ],
   "durable_objects": {

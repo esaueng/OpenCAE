@@ -36,7 +36,7 @@
     {
       "class_name": "OpenCaeFeaContainer",
       "image": "./services/opencae-fea-container/Dockerfile",
-      "max_instances": 2
+      "max_instances": 10
     }
   ],
   "durable_objects": {
