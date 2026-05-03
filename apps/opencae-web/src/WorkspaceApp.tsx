@@ -935,12 +935,17 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     const requestedOutputInterval = patch.outputInterval ?? currentSettings.outputInterval ?? DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS;
     return {
       ...mergedSettings,
+      loadProfile: isDynamicLoadProfile(mergedSettings.loadProfile) ? mergedSettings.loadProfile : "ramp",
       outputInterval: Math.max(
         requestedOutputInterval,
         mergedSettings.timeStep,
         minimumOutputInterval
       )
     };
+  }
+
+  function isDynamicLoadProfile(value: unknown): value is DynamicSolverSettings["loadProfile"] {
+    return value === "ramp" || value === "step" || value === "quasi_static" || value === "sinusoidal";
   }
 
   function handleBoundaryConditionType(type: "fixed" | "prescribed_displacement" | "force" | "pressure" | "gravity") {

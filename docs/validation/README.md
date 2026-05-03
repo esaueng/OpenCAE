@@ -41,12 +41,14 @@ Multiple loads are summed by node and degree of freedom before deck generation. 
 
 Cloud FEA also supports first-release `dynamic_structural` studies for linear elastic, small-displacement transient stress runs. The container uses CalculiX implicit `*DYNAMIC` with explicit `*AMPLITUDE` load histories and `*TIME POINTS` output, then returns framed `stress`, `displacement`, `velocity`, `acceleration`, and `safety_factor` result fields.
 
+CalculiX applies dynamic loads as step loads when no amplitude is attached. OpenCAE therefore always writes `*AMPLITUDE, NAME=LOAD_HISTORY, TIME=TOTAL TIME` for Cloud FEA dynamic studies and every dynamic `*CLOAD` references `AMPLITUDE=LOAD_HISTORY`, including step-load runs. Output is also requested with explicit `*TIME POINTS, NAME=OUTPUT_TIMES, TIME=TOTAL TIME` values so the requested start time, end time, and animation cadence are visible in the solver artifact.
+
 Supported dynamic load profiles:
 
 - `ramp`: amplitude is `0` at `startTime` and `1` at `endTime`.
 - `step`: amplitude is `1` for the whole step.
-- `sinusoidal`: first release uses a half-sine pulse, starting at `0`, rising to `1`, and returning to `0` without reversing load direction.
-- `quasi_static`: same load history as `ramp`, marked in provenance as a quasi-static dynamic run.
+- `quasi_static`: a smooth cubic ramp, `3*s^2 - 2*s^3`, with 21 amplitude points intended to reduce inertial effects.
+- `sinusoidal`: a 33-point half-sine pulse, `sin(pi*s)`, starting at `0`, rising to `1`, and returning to `0` without reversing load direction.
 
 Dynamic output is bounded to 250 frames by default. If `startTime`, `endTime`, and `outputInterval` would exceed that budget, preflight must fail with: `Dynamic Cloud FEA output would exceed frame budget; increase output interval or reduce end time.`
 
@@ -62,6 +64,8 @@ Frame count is computed as `floor((endTime - startTime) / outputInterval) + 1`. 
 | `0.001 s` | 101 | Accepted |
 | `0.0005 s` | 201 | Accepted |
 | `0.00025 s` | 401 | Rejected unless the frame budget is increased |
+
+Dynamic result summaries compute `peakDisplacementTimeSeconds` from each parsed frame's displacement maximum. A peak at the first nonzero output frame can be physically plausible for `step`, but is suspicious for `ramp` and `quasi_static`; OpenCAE records a warning diagnostic in that case. It also warns when ramped displacement fields appear identical across frames, which can indicate parser frame reuse. Inspect the `displacement` fields by `frameIndex`/`timeSeconds`, `summary.transient`, `artifacts.dynamicAmplitudeTable`, and `artifacts.outputTimePointsPreview` when validating load history behavior.
 
 ## Benchmark Matrix
 

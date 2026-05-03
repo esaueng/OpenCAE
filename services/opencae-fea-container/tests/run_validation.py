@@ -271,11 +271,13 @@ class ValidationSuite(unittest.TestCase):
         nodal_loads = runner.distribute_normalized_loads_to_nodes(parsed, mesh, boundaries)
         deck = runner.write_calculix_input_deck(parsed, mesh, boundaries, nodal_loads)
 
-        self.assertIn("*TIME POINTS, NAME=OUTPUT_TIMES, GENERATE", deck)
-        self.assertIn("0, 0.1, 0.001", deck)
+        self.assertIn("*TIME POINTS, NAME=OUTPUT_TIMES, TIME=TOTAL TIME", deck)
+        self.assertIn("0, 0.001, 0.002, 0.003", deck)
+        self.assertIn("0.097, 0.098, 0.099, 0.1", deck)
         self.assertIn("*AMPLITUDE, NAME=LOAD_HISTORY, TIME=TOTAL TIME", deck)
         self.assertIn("*DYNAMIC, ALPHA=-0.05", deck)
         self.assertIn("*CLOAD, AMPLITUDE=LOAD_HISTORY", deck)
+        self.assertNotIn("\n*CLOAD\n", deck)
         self.assertIn("*NODE PRINT, NSET=NALL, TIME POINTS=OUTPUT_TIMES\nU", deck)
         self.assertIn("*NODE FILE, NSET=NALL, TIME POINTS=OUTPUT_TIMES", deck)
         self.assertIn("U,V", deck)
@@ -287,16 +289,32 @@ class ValidationSuite(unittest.TestCase):
     def test_dynamic_amplitude_profiles(self):
         ramp = runner.amplitude_table_for_dynamic({"startTime": 0.0, "endTime": 0.1, "timeStep": 0.01, "loadProfile": "ramp"})
         step = runner.amplitude_table_for_dynamic({"startTime": 0.0, "endTime": 0.1, "timeStep": 0.01, "loadProfile": "step"})
+        quasi_static = runner.amplitude_table_for_dynamic({"startTime": 0.0, "endTime": 0.1, "timeStep": 0.01, "loadProfile": "quasi_static"})
         sine = runner.amplitude_table_for_dynamic({"startTime": 0.0, "endTime": 0.1, "timeStep": 0.01, "loadProfile": "sinusoidal"})
 
         self.assertEqual(ramp[0], (0.0, 0.0))
         self.assertEqual(ramp[-1], (0.1, 1.0))
         self.assertEqual(step[0], (0.0, 1.0))
         self.assertEqual(step[-1], (0.1, 1.0))
-        self.assertGreater(len(sine), 3)
+        self.assertEqual(len(quasi_static), 21)
+        self.assertEqual(quasi_static[0], (0.0, 0.0))
+        self.assertEqual(quasi_static[-1], (0.1, 1.0))
+        self.assertTrue(all(quasi_static[index][1] <= quasi_static[index + 1][1] for index in range(len(quasi_static) - 1)))
+        self.assertEqual(len(sine), 33)
         self.assertAlmostEqual(sine[0][1], 0.0)
         self.assertAlmostEqual(max(value for _, value in sine), 1.0)
         self.assertAlmostEqual(sine[-1][1], 0.0, places=10)
+
+    def test_dynamic_output_time_points_include_exact_start_and_end(self):
+        fine = runner.output_time_points({"startTime": 0.0, "endTime": 0.1, "outputInterval": 0.001})
+        default = runner.output_time_points({"startTime": 0.0, "endTime": 0.1, "outputInterval": 0.005})
+        partial = runner.output_time_points({"startTime": 0.0, "endTime": 0.1, "outputInterval": 0.03})
+
+        self.assertEqual(fine[0], 0.0)
+        self.assertEqual(fine[-1], 0.1)
+        self.assertEqual(len(fine), 101)
+        self.assertEqual(len(default), 21)
+        self.assertEqual(partial, [0.0, 0.03, 0.06, 0.09, 0.1])
 
     def test_dynamic_response_builds_framed_fields_and_summary_from_all_frames(self):
         parsed = runner.parse_payload(dynamic_block_payload())
@@ -314,10 +332,76 @@ class ValidationSuite(unittest.TestCase):
         self.assertAlmostEqual(result["summary"]["maxStress"], 0.3)
         self.assertAlmostEqual(result["summary"]["maxDisplacement"], 0.003)
         self.assertAlmostEqual(result["summary"]["transient"]["peakDisplacementTimeSeconds"], 0.02)
+        self.assertEqual(result["summary"]["transient"]["loadProfile"], "ramp")
+        self.assertEqual(result["summary"]["transient"]["amplitudeName"], "LOAD_HISTORY")
+        self.assertEqual(result["summary"]["transient"]["outputTimeCount"], 3)
+        self.assertEqual(result["summary"]["transient"]["firstOutputTime"], 0.0)
+        self.assertEqual(result["summary"]["transient"]["lastOutputTime"], 0.02)
+        self.assertEqual(result["summary"]["transient"]["initialFrameSynthesized"], False)
+        self.assertIn("dynamicAmplitudeTable", result["artifacts"])
+        self.assertIn("outputTimePointsPreview", result["artifacts"])
+        self.assertEqual(result["artifacts"]["outputTimePointsCount"], 3)
         self.assertEqual({field["frameIndex"] for field in fields}, {0, 1, 2})
         self.assertEqual({field["timeSeconds"] for field in fields}, {0.0, 0.01, 0.02})
         self.assertTrue(all(field["type"] in {"stress", "displacement", "velocity", "acceleration", "safety_factor"} for field in fields))
         self.assertTrue(any(field["type"] == "acceleration" and field["provenance"].get("accelerationSource") == "derived_from_velocity" for field in fields))
+
+    def test_dynamic_response_warns_for_identical_ramp_displacement_frames(self):
+        parsed = runner.parse_payload(dynamic_block_payload())
+        mesh = runner.generate_structured_hex_mesh(parsed["dimensions"], parsed["meshDensity"])
+        boundaries = runner.select_boundary_nodes(parsed, mesh)
+        parsed_files = dynamic_parsed_fixture(mesh, boundaries)
+        reused = copy.deepcopy(parsed_files["frames"][1]["displacements"])
+        for frame in parsed_files["frames"]:
+            frame["displacements"] = copy.deepcopy(reused)
+
+        result = runner.response_from_parsed_dat(parsed, mesh, boundaries, "input deck", {"log": "solver log"}, parsed_files)
+
+        self.assertIn("Dynamic displacement fields appear identical across frames; parser may be reusing one frame.", [diagnostic["message"] for diagnostic in result["diagnostics"]])
+
+    def test_dynamic_response_warns_for_early_ramp_peak_but_not_step(self):
+        parsed = runner.parse_payload(dynamic_block_payload())
+        mesh = runner.generate_structured_hex_mesh(parsed["dimensions"], parsed["meshDensity"])
+        boundaries = runner.select_boundary_nodes(parsed, mesh)
+        parsed_files = dynamic_parsed_fixture(mesh, boundaries)
+        parsed_files["frames"] = copy.deepcopy(parsed_files["frames"])
+        parsed_files["frames"][1], parsed_files["frames"][2] = parsed_files["frames"][2], parsed_files["frames"][1]
+        parsed_files["frames"][1]["timeSeconds"] = 0.01
+        parsed_files["frames"][2]["timeSeconds"] = 0.02
+
+        ramp_result = runner.response_from_parsed_dat(parsed, mesh, boundaries, "input deck", {"log": "solver log"}, parsed_files)
+        self.assertIn("Peak displacement occurred at the first nonzero output frame for a ramped load; verify load amplitude and parser frame ordering.", [diagnostic["message"] for diagnostic in ramp_result["diagnostics"]])
+
+        parsed["dynamicSettings"]["loadProfile"] = "step"
+        step_result = runner.response_from_parsed_dat(parsed, mesh, boundaries, "input deck", {"log": "solver log"}, parsed_files)
+        self.assertNotIn("Peak displacement occurred at the first nonzero output frame for a ramped load; verify load amplitude and parser frame ordering.", [diagnostic["message"] for diagnostic in step_result["diagnostics"]])
+
+    def test_dynamic_response_synthesizes_initial_zero_frame_for_ramp_when_missing(self):
+        parsed = runner.parse_payload(dynamic_block_payload())
+        mesh = runner.generate_structured_hex_mesh(parsed["dimensions"], parsed["meshDensity"])
+        boundaries = runner.select_boundary_nodes(parsed, mesh)
+        parsed_files = dynamic_parsed_fixture(mesh, boundaries)
+        parsed_files["frames"] = copy.deepcopy(parsed_files["frames"][1:])
+
+        result = runner.response_from_parsed_dat(parsed, mesh, boundaries, "input deck", {"log": "solver log"}, parsed_files)
+
+        self.assertEqual(result["summary"]["transient"]["initialFrameSynthesized"], True)
+        self.assertEqual(result["fields"][0]["frameIndex"], 0)
+        self.assertEqual(result["fields"][0]["timeSeconds"], 0.0)
+        self.assertEqual(result["fields"][0]["provenance"].get("frameSource"), "initial-zero-state")
+
+    def test_dynamic_frd_untimed_frame_does_not_overwrite_time_tagged_dat_frames(self):
+        frames = [
+            {"timeSeconds": 0.0, "displacements": {1: [0.0, 0.0, 0.0]}, "velocities": {}, "reactions": {}, "stresses": [], "nodalStresses": []},
+            {"timeSeconds": 0.01, "displacements": {1: [0.0, 0.0, -0.001]}, "velocities": {}, "reactions": {}, "stresses": [], "nodalStresses": []},
+        ]
+        diagnostics = []
+
+        runner.merge_frd_frames(frames, [{"timeSeconds": 0.0, "displacements": {1: [0.0, 0.0, -0.1]}, "velocities": {}, "nodalStresses": []}], diagnostics)
+
+        self.assertEqual(frames[0]["displacements"][1], [0.0, 0.0, 0.0])
+        self.assertEqual(frames[1]["displacements"][1], [0.0, 0.0, -0.001])
+        self.assertIn("dynamic-frd-untimed-frame-skipped", diagnostics)
 
     def test_finalize_result_fields_derives_displacement_values_from_samples(self):
         fields = [{
