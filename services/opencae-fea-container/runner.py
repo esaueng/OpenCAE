@@ -4,6 +4,7 @@ import base64
 import binascii
 import json
 import math
+import os
 import re
 import shutil
 import subprocess
@@ -17,7 +18,7 @@ UNSUPPORTED_BLOCK_ERROR = "Cloud FEA currently supports only block-like single-b
 CCX_UNAVAILABLE_ERROR = "CalculiX executable unavailable; refusing to publish Cloud FEA results without a real solver run."
 GMSH_UNAVAILABLE_ERROR = "Gmsh executable unavailable; refusing to mesh uploaded geometry for Cloud FEA."
 UNSUPPORTED_UPLOADED_GEOMETRY_ERROR = "Cloud FEA uploaded geometry support requires STEP, STL, or OBJ model bytes and confident face mapping."
-RUNNER_VERSION = "2026-05-03-dynamic-v1"
+RUNNER_VERSION = "2026-05-03-solver-timeout-v1"
 AXES = ("x", "y", "z")
 DOFS = (1, 2, 3)
 FIDELITY_MESH_DENSITY = {
@@ -43,6 +44,8 @@ MAX_FIELD_SAMPLES_PER_TYPE = {
 MAX_INPUT_DECK_ARTIFACT_BYTES = 1024 * 1024
 MAX_SOLVER_LOG_ARTIFACT_BYTES = 256 * 1024
 STANDARD_GRAVITY = 9.80665
+DEFAULT_CCX_STATIC_TIMEOUT_SECONDS = 60
+DEFAULT_CCX_DYNAMIC_TIMEOUT_SECONDS = 300
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -57,6 +60,10 @@ class Handler(BaseHTTPRequestHandler):
                     "enabled": True,
                     "integrationMethod": "calculix_dynamic_direct",
                     "maxFrames": MAX_DYNAMIC_FRAMES,
+                },
+                "solverTimeouts": {
+                    "staticStress": ccx_timeout_seconds_for({"dynamic": False}),
+                    "dynamicStructural": ccx_timeout_seconds_for({"dynamic": True}),
                 },
                 "ccx": command_version(["ccx", "-v"]),
                 "gmsh": command_version(["gmsh", "--version"]),
@@ -179,7 +186,9 @@ def solve_structured_block(parsed):
         except Exception as error:
             raise annotate_exception_phase(error, "input-deck")
         try:
-            solver_output = run_ccx_if_available(workdir, deck_path)
+            solver_output = run_ccx_if_available(workdir, deck_path, parsed)
+        except subprocess.TimeoutExpired as error:
+            raise annotate_exception_phase(ccx_timeout_error(input_deck, error, parsed, mesh, boundaries), "solver-run")
         except Exception as error:
             raise annotate_exception_phase(error, "solver-run")
         if solver_output["returnCode"] is None:
@@ -237,7 +246,9 @@ def solve_uploaded_geometry(parsed):
         except Exception as error:
             raise annotate_exception_phase(error, "input-deck")
         try:
-            solver_output = run_ccx_if_available(workdir, deck_path)
+            solver_output = run_ccx_if_available(workdir, deck_path, parsed)
+        except subprocess.TimeoutExpired as error:
+            raise annotate_exception_phase(ccx_timeout_error(input_deck, error, parsed, mesh, boundaries), "solver-run")
         except Exception as error:
             raise annotate_exception_phase(error, "solver-run")
         if solver_output["returnCode"] is None:
@@ -1300,10 +1311,33 @@ def is_parsed_calculix_status(status):
     return isinstance(status, str) and status.lower().startswith("parsed-calculix")
 
 
-def run_ccx_if_available(workdir, deck_path):
+def ccx_timeout_seconds_for(parsed):
+    dynamic = bool(parsed.get("dynamic")) if isinstance(parsed, dict) else False
+    specific_key = "OPENCAE_CCX_DYNAMIC_TIMEOUT_SECONDS" if dynamic else "OPENCAE_CCX_STATIC_TIMEOUT_SECONDS"
+    fallback = DEFAULT_CCX_DYNAMIC_TIMEOUT_SECONDS if dynamic else DEFAULT_CCX_STATIC_TIMEOUT_SECONDS
+    for key in (specific_key, "OPENCAE_CCX_TIMEOUT_SECONDS"):
+        timeout = configured_timeout_seconds(os.environ.get(key))
+        if timeout is not None:
+            return timeout
+    return fallback
+
+
+def configured_timeout_seconds(value):
+    if value is None:
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(parsed) or parsed <= 0:
+        return None
+    return max(1, int(math.ceil(parsed)))
+
+
+def run_ccx_if_available(workdir, deck_path, parsed=None):
     if not shutil.which("ccx"):
         return {"log": "CalculiX executable unavailable; input deck produced for debugging only.", "returnCode": None}
-    result = subprocess.run(["ccx", deck_path.stem], cwd=workdir, capture_output=True, text=True, timeout=45, check=False)
+    result = subprocess.run(["ccx", deck_path.stem], cwd=workdir, capture_output=True, text=True, timeout=ccx_timeout_seconds_for(parsed or {}), check=False)
     output = (result.stdout or "") + ("\n" + result.stderr if result.stderr else "")
     log = output.strip() or f"CalculiX exited with code {result.returncode}."
     result_files = sorted(path.name for path in workdir.glob(f"{deck_path.stem}.*") if path.suffix.lower() in {".frd", ".dat", ".sta"})
@@ -1312,6 +1346,36 @@ def run_ccx_if_available(workdir, deck_path):
     elif result.returncode == 0:
         log = f"{log}\nCalculiX completed but no FRD/DAT result files were produced."
     return {"log": log, "returnCode": result.returncode}
+
+
+def ccx_timeout_error(input_deck, error, parsed, mesh, boundaries):
+    timeout_seconds = ccx_timeout_seconds_for(parsed)
+    solver_output = {"log": ccx_timeout_log(error, timeout_seconds), "returnCode": "timeout"}
+    artifacts = artifacts_for_failure(input_deck, solver_output, "ccx-timeout", mesh, boundaries)
+    artifacts["solverLog"] = solver_output["log"]
+    artifacts["solverTimeoutSeconds"] = timeout_seconds
+    return UserFacingSolveError(ccx_timeout_message(timeout_seconds), 504, {"artifacts": artifacts})
+
+
+def ccx_timeout_message(timeout_seconds):
+    return f"CalculiX solve timed out after {timeout_seconds} seconds. Reduce mesh fidelity, shorten dynamic duration, increase output interval, or retry with a longer solver timeout."
+
+
+def ccx_timeout_log(error, timeout_seconds):
+    parts = [
+        stream_text(getattr(error, "output", None)),
+        stream_text(getattr(error, "stderr", None)),
+        f"CalculiX solve timed out after {timeout_seconds} seconds.",
+    ]
+    return "\n".join(part for part in parts if part).strip()
+
+
+def stream_text(value):
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="ignore")
+    return str(value)
 
 
 def parse_calculix_result_files(workdir, run_id, context=None, *_, **__):

@@ -48,6 +48,10 @@ export interface CloudFeaRouteHealth {
   supportedAnalysisTypes?: string[];
   dynamicCloudFeaAvailable?: boolean;
   expectedRunnerVersion?: string;
+  solverTimeouts?: {
+    staticStress?: number;
+    dynamicStructural?: number;
+  };
   dynamicStructural?: {
     supported?: boolean;
     maxFrames?: number;
