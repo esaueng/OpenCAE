@@ -325,15 +325,41 @@ describe("Cloudflare FEA worker orchestration", () => {
       method: "POST",
       body: JSON.stringify({ study, displayModel: cloudBlockDisplayModel(), dynamicSettings: study.solverSettings })
     }), { ASSETS: { fetch: vi.fn(async () => new Response("asset")) } });
-    const body = await response.json() as { ready: boolean; supported: Record<string, unknown>; diagnostics: Array<{ id: string; message: string }> };
+    const body = await response.json() as { ready: boolean; supported: Record<string, unknown>; diagnostics: Array<{ id: string; message: string; details?: Record<string, unknown> }> };
 
     expect(response.status).toBe(200);
     expect(body.ready).toBe(false);
     expect(body.supported).toMatchObject({ dynamicStructural: true });
     expect(body.diagnostics).toContainEqual(expect.objectContaining({
       id: "cloud-fea-dynamic-frame-budget",
-      message: "Dynamic Cloud FEA output would exceed frame budget; increase outputInterval or reduce endTime."
+      message: "Dynamic Cloud FEA output would exceed frame budget; increase output interval or reduce end time.",
+      details: {
+        requestedOutputInterval: 0.001,
+        estimatedFrameCount: 2001,
+        maxFrames: 250
+      }
     }));
+  });
+
+  test("preflight accepts fine Cloud FEA dynamic output within frame budget", async () => {
+    const study = cloudStudyWithMaterial("mat-aluminum-6061", {}, "dynamic_structural");
+    study.namedSelections = [
+      { id: "fixed-selection", name: "Fixed", entityType: "face", geometryRefs: [{ bodyId: "body", entityType: "face", entityId: "face-fixed", label: "Fixed" }], fingerprint: "fixed" },
+      { id: "load-selection", name: "Load", entityType: "face", geometryRefs: [{ bodyId: "body", entityType: "face", entityId: "face-load", label: "Load" }], fingerprint: "load" }
+    ];
+    study.constraints = [{ id: "constraint-fixed", type: "fixed", selectionRef: "fixed-selection", parameters: {}, status: "complete" }];
+    study.loads = [{ id: "force-load", type: "force", selectionRef: "load-selection", parameters: { value: 500, units: "N", direction: [0, 0, -1] }, status: "complete" }];
+    study.solverSettings = { startTime: 0, endTime: 0.1, timeStep: 0.001, outputInterval: 0.001, dampingRatio: 0.02, integrationMethod: "calculix_dynamic_direct", loadProfile: "ramp" };
+
+    const response = await worker.fetch(new Request("https://cae.example/api/cloud-fea/preflight", {
+      method: "POST",
+      body: JSON.stringify({ study, displayModel: cloudBlockDisplayModel(), dynamicSettings: study.solverSettings })
+    }), { ASSETS: { fetch: vi.fn(async () => new Response("asset")) } });
+    const body = await response.json() as { ready: boolean; diagnostics: Array<{ id: string; message: string }> };
+
+    expect(response.status).toBe(200);
+    expect(body.ready).toBe(true);
+    expect(body.diagnostics).not.toContainEqual(expect.objectContaining({ id: "cloud-fea-dynamic-frame-budget" }));
   });
 
   test("preflight reports missing payload mass before run creation", async () => {
