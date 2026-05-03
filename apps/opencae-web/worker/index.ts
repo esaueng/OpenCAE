@@ -1165,7 +1165,12 @@ function validateDynamicPreflightSettings(
   const requestedOutputInterval = finiteNumber(rawSettings.outputInterval, Math.max(timeStep, 0.005));
   const outputInterval = requestedOutputInterval;
   const dampingRatio = finiteNumber(rawSettings.dampingRatio, 0.02);
+  const loadProfile = typeof rawSettings.loadProfile === "string" ? rawSettings.loadProfile : "ramp";
   let ok = true;
+  if (!["ramp", "step", "sinusoidal", "quasi_static"].includes(loadProfile)) {
+    diagnostics.push(preflightDiagnostic("cloud-fea-dynamic-load-profile", "Cloud FEA dynamic loadProfile must be ramp, step, sinusoidal, or quasi_static.", { requestedLoadProfile: loadProfile }));
+    ok = false;
+  }
   if (startTime < 0 || endTime <= startTime || timeStep <= 0 || outputInterval <= 0 || outputInterval < timeStep || dampingRatio < 0) {
     diagnostics.push(preflightDiagnostic("cloud-fea-dynamic-settings-invalid", "Cloud FEA dynamic settings require endTime > startTime, timeStep > 0, outputInterval >= timeStep, and dampingRatio >= 0."));
     ok = false;

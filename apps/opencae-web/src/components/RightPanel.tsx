@@ -31,6 +31,13 @@ const MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.001;
 const MIN_CLOUD_FEA_OUTPUT_INTERVAL_SECONDS = 0.0005;
 const MAX_CLOUD_FEA_DYNAMIC_FRAMES = 250;
 const STRESS_EXAGGERATION_COMMIT_DELAY_MS = 120;
+const DYNAMIC_LOAD_PROFILE_OPTIONS: Array<{ value: DynamicSolverSettings["loadProfile"]; label: string; helper: string }> = [
+  { value: "ramp", label: "Ramp to full load", helper: "Ramp: load starts at 0 and reaches full value at end time." },
+  { value: "step", label: "Step load", helper: "Step: full load is applied immediately." },
+  { value: "quasi_static", label: "Quasi-static ramp", helper: "Quasi-static ramp: slow ramp profile intended to reduce inertial effects." },
+  { value: "sinusoidal", label: "Sinusoidal", helper: "Sinusoidal: load varies sinusoidally over the time window." }
+];
+const DEFAULT_DYNAMIC_LOAD_PROFILE_HELPER = DYNAMIC_LOAD_PROFILE_OPTIONS[0]?.helper ?? "Ramp: load starts at 0 and reaches full value at end time.";
 
 interface RightPanelProps {
   activeStep: StepId;
@@ -966,9 +973,15 @@ function RunPanel({ study, runProgress, runTiming, onRunSimulation, onCancelSimu
     if (!Number.isFinite(value)) return;
     onUpdateSolverSettings?.({ [key]: value });
   };
+  const updateDynamicLoadProfile = (value: string) => {
+    if (!isDynamicLoadProfile(value)) return;
+    onUpdateSolverSettings?.({ loadProfile: value });
+  };
   const frameEstimate = dynamic ? dynamicFrameEstimate(dynamic, cloudFeaSelected ? "cloudflare_fea" : "local_detailed") : null;
   const outputIntervalMinimum = cloudFeaSelected ? MIN_CLOUD_FEA_OUTPUT_INTERVAL_SECONDS : MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS;
   const outputIntervalValue = dynamic?.outputInterval ?? DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS;
+  const loadProfile = isDynamicLoadProfile(dynamic?.loadProfile) ? dynamic.loadProfile : "ramp";
+  const loadProfileHelper = DYNAMIC_LOAD_PROFILE_OPTIONS.find((option) => option.value === loadProfile)?.helper ?? DEFAULT_DYNAMIC_LOAD_PROFILE_HELPER;
   return (
     <Panel title="Run" helper="Run the simulation to estimate stress and displacement.">
       <SectionTitle helpId="runReadiness">Readiness</SectionTitle>
@@ -1001,6 +1014,13 @@ function RunPanel({ study, runProgress, runTiming, onRunSimulation, onCancelSimu
           <DynamicNumberField label="End time" unit="s" value={dynamic.endTime} min={dynamic.startTime + dynamic.timeStep} step={dynamic.timeStep} onCommit={(value) => updateDynamicNumber("endTime", value)} />
           <DynamicNumberField label="Time step" unit="s" value={dynamic.timeStep} min={0.0001} step="0.0005" onCommit={(value) => updateDynamicNumber("timeStep", value)} />
           <DynamicNumberField label="Output interval" unit="s" value={outputIntervalValue} min={outputIntervalMinimum} step={outputIntervalMinimum} onCommit={(value) => updateDynamicNumber("outputInterval", value)} />
+          <label className="field">
+            <span>Load profile</span>
+            <select value={loadProfile} onChange={(event) => updateDynamicLoadProfile(event.currentTarget.value)}>
+              {DYNAMIC_LOAD_PROFILE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
+          </label>
+          <p className="panel-copy">{loadProfileHelper}</p>
           <DynamicNumberField label="Damping ratio" unit="ζ" value={dynamic.dampingRatio} min={0} step="0.01" onCommit={(value) => updateDynamicNumber("dampingRatio", value)} />
           <div className="summary-box">
             <Info label="Estimated frames" value={frameEstimate ? frameEstimate.count.toLocaleString() : "--"} />
@@ -1665,6 +1685,10 @@ function normalizedDynamicOutputInterval(settings: DynamicSolverSettings, backen
   const requestedOutputInterval = Number.isFinite(settings.outputInterval) ? settings.outputInterval : DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS;
   const backendMinimum = backend === "cloudflare_fea" ? MIN_CLOUD_FEA_OUTPUT_INTERVAL_SECONDS : Math.max(DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS, MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS);
   return Math.max(requestedOutputInterval, settings.timeStep, backendMinimum);
+}
+
+function isDynamicLoadProfile(value: unknown): value is DynamicSolverSettings["loadProfile"] {
+  return value === "ramp" || value === "step" || value === "quasi_static" || value === "sinusoidal";
 }
 
 function formatNumber(value: number) {

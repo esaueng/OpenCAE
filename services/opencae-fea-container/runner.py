@@ -391,8 +391,27 @@ def finite_number_or(value, fallback):
 
 
 def dynamic_frame_count(start_time, end_time, output_interval):
-    duration = max(end_time - start_time, 0.0)
-    return int(math.floor(duration / output_interval + 1e-9)) + 1
+    return len(output_time_points({"startTime": start_time, "endTime": end_time, "outputInterval": output_interval}))
+
+
+def output_time_points(settings):
+    start_time = float(settings["startTime"])
+    end_time = float(settings["endTime"])
+    output_interval = float(settings["outputInterval"])
+    tolerance = 1e-12
+    if not math.isfinite(start_time) or not math.isfinite(end_time) or not math.isfinite(output_interval) or output_interval <= 0 or end_time < start_time:
+        return []
+    points = [start_time]
+    next_time = start_time + output_interval
+    while next_time < end_time - tolerance:
+        if abs(next_time - points[-1]) > tolerance:
+            points.append(next_time)
+        next_time += output_interval
+    if abs(end_time - points[-1]) > tolerance:
+        points.append(end_time)
+    else:
+        points[-1] = end_time
+    return [float(f"{point:.12g}") for point in points]
 
 
 def dynamic_diagnostic(diagnostic_id, message, details=None):
@@ -1246,8 +1265,8 @@ def write_dynamic_step(parsed, nodal_loads):
     if damping_args:
         lines.append(f"*DAMPING, {', '.join(damping_args)}")
     lines.extend([
-        "*TIME POINTS, NAME=OUTPUT_TIMES, GENERATE",
-        f"{start_time:.12g}, {end_time:.12g}, {output_interval:.12g}",
+        "*TIME POINTS, NAME=OUTPUT_TIMES, TIME=TOTAL TIME",
+        *format_number_lines(output_time_points(settings)),
         "*AMPLITUDE, NAME=LOAD_HISTORY, TIME=TOTAL TIME",
         *format_amplitude_lines(amplitude_table_for_dynamic(settings)),
         "*STEP, NLGEOM=NO",
@@ -1279,15 +1298,25 @@ def amplitude_table_for_dynamic(settings):
     profile = settings.get("loadProfile") or "ramp"
     if profile == "step":
         return [(start_time, 1.0), (end_time, 1.0)]
-    if profile in {"ramp", "quasi_static"}:
+    if profile == "ramp":
         return [(start_time, 0.0), (end_time, 1.0)]
+    if profile == "quasi_static":
+        table = []
+        for index in range(21):
+            fraction = index / 20
+            amplitude = 3 * fraction * fraction - 2 * fraction * fraction * fraction
+            table.append((start_time + duration * fraction, amplitude))
+        table[0] = (start_time, 0.0)
+        table[-1] = (end_time, 1.0)
+        return table
     if profile == "sinusoidal":
-        time_step = float(settings.get("timeStep") or duration / 20.0)
-        segment_count = max(8, min(80, int(math.ceil(duration / max(time_step, 1e-12))) * 2))
+        segment_count = 32
         table = []
         for index in range(segment_count + 1):
             fraction = index / segment_count
             table.append((start_time + duration * fraction, math.sin(math.pi * fraction)))
+        table[0] = (start_time, 0.0)
+        table[-1] = (end_time, 0.0)
         return table
     return [(start_time, 0.0), (end_time, 1.0)]
 
@@ -1298,6 +1327,11 @@ def format_amplitude_lines(table):
     for index in range(0, len(pairs), 4):
         lines.append(", ".join(pairs[index:index + 4]))
     return lines
+
+
+def format_number_lines(values):
+    entries = [f"{value:.12g}" for value in values]
+    return [", ".join(entries[index:index + 8]) for index in range(0, len(entries), 8)]
 
 
 def format_id_lines(ids):
@@ -1416,7 +1450,7 @@ def parse_calculix_result_files(workdir, run_id, context=None, *_, **__):
         for dat_path in dat_files:
             dynamic_frames.extend(parse_dat_result_frames(dat_path.read_text(errors="ignore"), mesh))
         for frd_path in frd_files:
-            merge_frd_frames(dynamic_frames, parse_frd_result_frames(frd_path.read_text(errors="ignore"), mesh))
+            merge_frd_frames(dynamic_frames, parse_frd_result_frames(frd_path.read_text(errors="ignore"), mesh), parser_diagnostics)
         dynamic_frames = normalize_dynamic_frames(dynamic_frames)
         if dynamic_frames and any(frame.get("displacements") for frame in dynamic_frames) and any(frame.get("stresses") for frame in dynamic_frames):
             return {
@@ -1572,11 +1606,15 @@ def parse_frd_result_frames(text, mesh=None):
     }]
 
 
-def merge_frd_frames(target_frames, frd_frames):
+def merge_frd_frames(target_frames, frd_frames, parser_diagnostics=None):
     if not frd_frames:
         return target_frames
     if not target_frames:
         target_frames.extend(frd_frames)
+        return target_frames
+    if len(target_frames) > 1 and len(frd_frames) == 1 and abs(float(frd_frames[0].get("timeSeconds", 0.0))) <= 1e-12:
+        if parser_diagnostics is not None:
+            parser_diagnostics.append("dynamic-frd-untimed-frame-skipped")
         return target_frames
     for index, frd_frame in enumerate(frd_frames):
         target = target_frames[min(index, len(target_frames) - 1)]
@@ -1602,6 +1640,42 @@ def normalize_dynamic_frames(frames):
         item["timeSeconds"] = float(item.get("timeSeconds", 0.0))
         normalized.append(item)
     return normalized
+
+
+def ensure_initial_dynamic_frame(frames, settings, mesh):
+    normalized = normalize_dynamic_frames(frames)
+    start_time = float(settings.get("startTime", 0.0))
+    profile = settings.get("loadProfile", "ramp")
+    if abs(start_time) > 1e-12 or profile not in {"ramp", "quasi_static"}:
+        return normalized, False
+    if any(abs(frame.get("timeSeconds", 0.0) - start_time) <= 1e-12 for frame in normalized):
+        return normalized, False
+    zero_frame = {
+        "timeSeconds": start_time,
+        "source": "initial-zero-state",
+        "displacements": {node["id"]: [0.0, 0.0, 0.0] for node in mesh.get("nodes", [])},
+        "velocities": {node["id"]: [0.0, 0.0, 0.0] for node in mesh.get("nodes", [])},
+        "reactions": {},
+        "stresses": [
+            {
+                "elementId": element["id"],
+                "point": element_centroid(mesh, element["id"]),
+                "components": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                "vonMises": 0.0,
+            }
+            for element in mesh.get("elements", [])
+        ],
+        "nodalStresses": [
+            {
+                "nodeId": node["id"],
+                "point": node["coordinates"],
+                "components": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                "vonMises": 0.0,
+            }
+            for node in mesh.get("nodes", [])
+        ],
+    }
+    return normalize_dynamic_frames([zero_frame, *normalized]), True
 
 
 def parse_dat_nodal_displacements_and_reactions(text):
@@ -2046,9 +2120,10 @@ def response_from_parsed_dynamic(parsed, mesh, boundaries, input_deck, solver_ou
             "message": "Cloud FEA dynamic dampingRatio is not yet mapped to Rayleigh damping; use rayleighAlpha/rayleighBeta for physical damping.",
             "suggestedActions": []
         })
-    frames = normalize_dynamic_frames(parsed_dat.get("frames", []))
+    frames, initial_frame_synthesized = ensure_initial_dynamic_frame(parsed_dat.get("frames", []), settings, mesh)
     if len(frames) <= 1:
         raise UserFacingSolveError("Cloud FEA dynamic result did not include animation frames.", 422)
+    append_dynamic_frame_diagnostics(diagnostics, frames, settings)
     provenance = {
         "kind": "calculix_fea",
         "solver": "calculix-ccx",
@@ -2074,6 +2149,7 @@ def response_from_parsed_dynamic(parsed, mesh, boundaries, input_deck, solver_ou
     for frame in frames:
         frame_index = frame["frameIndex"]
         time_seconds = frame["timeSeconds"]
+        frame_source = frame.get("source")
         displacement_vectors = frame.get("displacements", {})
         velocity_vectors = frame.get("velocities") or derived_velocity_vectors(frame, frames, frame_index)
         acceleration_vectors = derived_acceleration_vectors(velocity_vectors, previous_velocity_vectors, time_seconds, previous_time)
@@ -2108,7 +2184,7 @@ def response_from_parsed_dynamic(parsed, mesh, boundaries, input_deck, solver_ou
         frame_safety_factor = material["yieldMpa"] / max(frame_max_stress, 0.001)
         frame_reaction = reaction_force_magnitude(frame.get("reactions", {}), boundaries["fixedNodeIds"])
         max_stress = max(max_stress, frame_max_stress)
-        if frame_max_displacement >= max_displacement:
+        if frame_max_displacement > max_displacement + 1e-12:
             max_displacement = frame_max_displacement
             peak_displacement_time = time_seconds
         min_safety_factor = min(min_safety_factor, frame_safety_factor)
@@ -2126,18 +2202,19 @@ def response_from_parsed_dynamic(parsed, mesh, boundaries, input_deck, solver_ou
             for sample in stress_samples
         ]
         frame_fields = [
-            field_from_samples(run_id, "stress", stress_location, "MPa", stress_values, stress_samples, provenance, frame_index, time_seconds),
-            field_from_samples(run_id, "displacement", "node", "mm", displacement_values, displacement_samples, provenance, frame_index, time_seconds),
-            field_from_samples(run_id, "safety_factor", stress_location, "", safety_values, safety_samples, provenance, frame_index, time_seconds),
+            field_from_samples(run_id, "stress", stress_location, "MPa", stress_values, stress_samples, frame_provenance(provenance, frame_source), frame_index, time_seconds),
+            field_from_samples(run_id, "displacement", "node", "mm", displacement_values, displacement_samples, frame_provenance(provenance, frame_source), frame_index, time_seconds),
+            field_from_samples(run_id, "safety_factor", stress_location, "", safety_values, safety_samples, frame_provenance(provenance, frame_source), frame_index, time_seconds),
         ]
         if velocity_samples:
-            frame_fields.append(field_from_samples(run_id, "velocity", "node", "mm/s", velocity_values, velocity_samples, provenance, frame_index, time_seconds))
+            frame_fields.append(field_from_samples(run_id, "velocity", "node", "mm/s", velocity_values, velocity_samples, frame_provenance(provenance, frame_source), frame_index, time_seconds))
         if acceleration_samples:
-            frame_fields.append(field_from_samples(run_id, "acceleration", "node", "mm/s^2", acceleration_values, acceleration_samples, {**provenance, "accelerationSource": "derived_from_velocity"}, frame_index, time_seconds))
+            frame_fields.append(field_from_samples(run_id, "acceleration", "node", "mm/s^2", acceleration_values, acceleration_samples, {**frame_provenance(provenance, frame_source), "accelerationSource": "derived_from_velocity"}, frame_index, time_seconds))
         fields.extend(frame_fields)
     if peak_reaction_force <= 0:
         peak_reaction_force = vector_length(boundaries.get("appliedLoadVector") or parsed.get("loadVector") or [0.0, 0.0, 0.0])
     safety_factor = min_safety_factor if math.isfinite(min_safety_factor) else material["yieldMpa"] / max(max_stress, 0.001)
+    output_times = output_time_points(settings)
     summary = {
         "maxStress": max_stress,
         "maxStressUnits": "MPa",
@@ -2163,6 +2240,12 @@ def response_from_parsed_dynamic(parsed, mesh, boundaries, input_deck, solver_ou
             "frameCount": len(frames),
             "peakDisplacementTimeSeconds": peak_displacement_time,
             "peakDisplacement": max_displacement,
+            "loadProfile": settings.get("loadProfile", "ramp"),
+            "amplitudeName": "LOAD_HISTORY",
+            "outputTimeCount": len(output_times),
+            "firstOutputTime": output_times[0] if output_times else settings["startTime"],
+            "lastOutputTime": output_times[-1] if output_times else settings["endTime"],
+            "initialFrameSynthesized": initial_frame_synthesized,
         }
     }
     coordinate_mapping = {
@@ -2186,6 +2269,9 @@ def response_from_parsed_dynamic(parsed, mesh, boundaries, input_deck, solver_ou
             "meshSummary": mesh_summary(mesh, boundaries, sample_coordinate_space),
             "solverMaterial": material,
             "dynamicSettings": settings,
+            "dynamicAmplitudeTable": amplitude_table_for_dynamic(settings),
+            "outputTimePointsPreview": output_times[:20],
+            "outputTimePointsCount": len(output_times),
         }
     }
     result["fields"] = finalize_result_fields(result["fields"], parsed, mesh)
@@ -2193,6 +2279,60 @@ def response_from_parsed_dynamic(parsed, mesh, boundaries, input_deck, solver_ou
         return compact_cloud_fea_result(result)
     except Exception as error:
         raise annotate_exception_phase(error, "result-compaction")
+
+
+def frame_provenance(provenance, frame_source):
+    if frame_source:
+        return {**provenance, "frameSource": frame_source}
+    return provenance
+
+
+def append_dynamic_frame_diagnostics(diagnostics, frames, settings):
+    profile = settings.get("loadProfile", "ramp")
+    if profile not in {"ramp", "quasi_static"}:
+        return
+    signatures = [dynamic_displacement_signature(frame.get("displacements", {})) for frame in frames]
+    non_empty_signatures = [signature for signature in signatures if signature]
+    if len(non_empty_signatures) > 1 and all(signature == non_empty_signatures[0] for signature in non_empty_signatures[1:]):
+        diagnostics.append({
+            "id": "cloud-fea-dynamic-identical-displacement-frames",
+            "severity": "warning",
+            "source": "solver",
+            "message": "Dynamic displacement fields appear identical across frames; parser may be reusing one frame.",
+            "suggestedActions": []
+        })
+    first_nonzero_frame = next((frame for frame in frames if frame.get("timeSeconds", 0.0) > settings.get("startTime", 0.0) + 1e-12), None)
+    if first_nonzero_frame is None:
+        return
+    maxima = [(frame, max_displacement_magnitude(frame.get("displacements", {}))) for frame in frames]
+    peak_frame, peak_value = max(maxima, key=lambda item: item[1])
+    if peak_value > 1e-12 and abs(peak_frame.get("timeSeconds", 0.0) - first_nonzero_frame.get("timeSeconds", 0.0)) <= 1e-12:
+        diagnostics.append({
+            "id": "cloud-fea-dynamic-early-ramp-peak",
+            "severity": "warning",
+            "source": "solver",
+            "message": "Peak displacement occurred at the first nonzero output frame for a ramped load; verify load amplitude and parser frame ordering.",
+            "suggestedActions": []
+        })
+
+
+def dynamic_displacement_signature(displacements):
+    if not isinstance(displacements, dict) or not displacements:
+        return ()
+    return tuple(
+        (node_id, tuple(round(float(component), 12) for component in vector[:3]))
+        for node_id, vector in sorted(displacements.items())
+        if isinstance(vector, list) and len(vector) >= 3
+    )
+
+
+def max_displacement_magnitude(displacements):
+    values = [
+        vector_length(vector[:3])
+        for vector in displacements.values()
+        if isinstance(vector, list) and len(vector) >= 3
+    ]
+    return max(values or [0.0])
 
 
 def vector_samples_for_nodes(mesh, vectors, solver_bounds, display_bounds, source):

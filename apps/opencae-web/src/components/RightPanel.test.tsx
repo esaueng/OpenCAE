@@ -297,8 +297,35 @@ describe("RightPanel payload mass controls", () => {
     expect(dynamicHtml).toContain("Start time");
     expect(dynamicHtml).toContain("End time");
     expect(dynamicHtml).toContain("Output interval");
+    expect(dynamicHtml).toContain("Load profile");
+    expect(dynamicHtml).toContain("Ramp to full load");
+    expect(dynamicHtml).toContain("Step load");
+    expect(dynamicHtml).toContain("Quasi-static ramp");
+    expect(dynamicHtml).toContain("Sinusoidal");
+    expect(dynamicHtml).toContain("Ramp: load starts at 0 and reaches full value at end time.");
     expect(dynamicHtml).toContain("Estimated frames");
     expect(renderPanel("run")).not.toContain("Start time");
+  });
+
+  test("renders selected dynamic load profile helper text", () => {
+    const dynamicStudy: Study = {
+      ...study,
+      name: "Dynamic",
+      type: "dynamic_structural",
+      solverSettings: {
+        startTime: 0,
+        endTime: 0.1,
+        timeStep: 0.005,
+        outputInterval: 0.005,
+        dampingRatio: 0.02,
+        integrationMethod: "newmark_average_acceleration",
+        loadProfile: "quasi_static"
+      }
+    };
+
+    const dynamicHtml = renderPanel("run", { study: dynamicStudy });
+
+    expect(dynamicHtml).toContain("Quasi-static ramp: slow ramp profile intended to reduce inertial effects.");
   });
 
   test("keeps partial dynamic number edits from committing a coerced zero", () => {

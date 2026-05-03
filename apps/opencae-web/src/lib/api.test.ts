@@ -943,7 +943,7 @@ describe("api", () => {
       study: { id: "study-1", type: "dynamic_structural" },
       displayModel: { id: "display-1" },
       geometry: { format: "stl", filename: "cantilever.stl", contentBase64: dynamicDisplayModel.visualMesh.contentBase64 },
-      dynamicSettings: { endTime: 0.1, timeStep: 0.001, outputInterval: 0.001, dampingRatio: 0.02 }
+      dynamicSettings: { endTime: 0.1, timeStep: 0.001, outputInterval: 0.001, dampingRatio: 0.02, loadProfile: "ramp" }
     });
     expect(response.message).toBe("Cloud FEA simulation queued.");
     expect(results.summary.transient?.frameCount).toBe(101);
