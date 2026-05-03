@@ -1924,6 +1924,7 @@ def response_from_parsed_dat(parsed, mesh, boundaries, input_deck, solver_output
             "solverMaterial": material
         }
     }
+    result["fields"] = finalize_result_fields(result["fields"], parsed, mesh)
     try:
         return compact_cloud_fea_result(result)
     except Exception as error:
@@ -2090,6 +2091,7 @@ def response_from_parsed_dynamic(parsed, mesh, boundaries, input_deck, solver_ou
             "dynamicSettings": settings,
         }
     }
+    result["fields"] = finalize_result_fields(result["fields"], parsed, mesh)
     try:
         return compact_cloud_fea_result(result)
     except Exception as error:
@@ -2190,6 +2192,84 @@ def field_from_samples(run_id, field_type, location, units, values, samples, pro
     if time_seconds is not None:
         field["timeSeconds"] = float(time_seconds)
     return field
+
+
+def finalize_result_fields(fields, parsed=None, mesh=None):
+    finalized = []
+    for raw_field in fields if isinstance(fields, list) else []:
+        if not isinstance(raw_field, dict):
+            continue
+        field = dict(raw_field)
+        field_type = field.get("type")
+        values = finite_values(field.get("values"))
+        samples = field.get("samples") if isinstance(field.get("samples"), list) else []
+        if not values and samples:
+            values = finite_values([sample.get("value") for sample in samples if isinstance(sample, dict)])
+        if not values and field_type == "stress" and is_initial_zero_load_frame(field, parsed):
+            values = [0.0]
+            field["samples"] = zero_value_samples(samples)
+        if not values and field_type == "safety_factor" and is_initial_zero_load_frame(field, parsed):
+            values = [1_000_000.0]
+            field["samples"] = zero_value_samples(samples, value=1_000_000.0)
+        if not values and field_type in {"velocity", "acceleration"}:
+            continue
+        if not values:
+            raise UserFacingSolveError(
+                f"Cloud FEA dynamic parser produced empty {field_type or 'unknown'} field at frame={field.get('frameIndex')}, time={field.get('timeSeconds')}.",
+                422,
+                {
+                    "artifacts": {
+                        "solverResultParser": "dynamic-empty-field",
+                        "emptyField": {
+                            "id": field.get("id"),
+                            "type": field_type,
+                            "frameIndex": field.get("frameIndex"),
+                            "timeSeconds": field.get("timeSeconds"),
+                        },
+                    }
+                },
+            )
+        field["values"] = values
+        field["min"] = min(values)
+        field["max"] = max(values)
+        finalized.append(field)
+    return finalized
+
+
+def finite_values(values):
+    if not isinstance(values, list):
+        return []
+    return [float(value) for value in values if isinstance(value, (int, float)) and math.isfinite(value)]
+
+
+def is_initial_zero_load_frame(field, parsed):
+    if not isinstance(parsed, dict) or not parsed.get("dynamic"):
+        return False
+    settings = parsed.get("dynamicSettings") if isinstance(parsed.get("dynamicSettings"), dict) else {}
+    profile = settings.get("loadProfile", "ramp")
+    if profile not in {"ramp", "quasi_static", "sinusoidal"}:
+        return False
+    start_time = settings.get("startTime", 0.0)
+    frame_index = field.get("frameIndex")
+    time_seconds = field.get("timeSeconds")
+    if frame_index == 0:
+        return True
+    return (
+        isinstance(time_seconds, (int, float))
+        and isinstance(start_time, (int, float))
+        and math.isfinite(time_seconds)
+        and math.isfinite(start_time)
+        and abs(float(time_seconds) - float(start_time)) <= 1e-12
+    )
+
+
+def zero_value_samples(samples, value=0.0):
+    repaired = []
+    for sample in samples if isinstance(samples, list) else []:
+        if not isinstance(sample, dict):
+            continue
+        repaired.append({**sample, "value": value, **({"vonMisesStressPa": 0.0} if "vonMisesStressPa" in sample else {})})
+    return repaired
 
 
 def decimate_sequence(items, max_count, key=None):

@@ -746,16 +746,36 @@ function normalizeCloudFeaProvenance(summary: Record<string, unknown>) {
 
 function normalizeField(runId: string, rawField: unknown, index: number, provenance: ReturnType<typeof normalizeCloudFeaProvenance>) {
   if (!isRecord(rawField)) throw new Error(`Cloud FEA container returned invalid field ${index}.`);
-  const values = Array.isArray(rawField.values) ? rawField.values.filter((value): value is number => typeof value === "number" && Number.isFinite(value)) : [];
-  if (!values.length) throw new Error(`Cloud FEA container returned field ${index} without numeric values.`);
+  let values = Array.isArray(rawField.values) ? rawField.values.filter((value): value is number => typeof value === "number" && Number.isFinite(value)) : [];
+  const valuesFromRawField = values.length > 0;
+  const samples = Array.isArray(rawField.samples) ? rawField.samples : [];
+  if (!values.length && samples.length) {
+    values = samples
+      .map((sample) => isRecord(sample) ? sample.value : undefined)
+      .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+  }
+  if (!values.length) {
+    const fieldType = typeof rawField.type === "string" ? rawField.type : "unknown";
+    const frameIndex = typeof rawField.frameIndex === "number" && Number.isFinite(rawField.frameIndex) ? rawField.frameIndex : "none";
+    const timeSeconds = typeof rawField.timeSeconds === "number" && Number.isFinite(rawField.timeSeconds)
+      ? rawField.timeSeconds
+      : typeof rawField.time === "number" && Number.isFinite(rawField.time)
+        ? rawField.time
+        : "none";
+    const fieldId = typeof rawField.id === "string" ? rawField.id : `index-${index}`;
+    const location = typeof rawField.location === "string" ? rawField.location : "unknown";
+    throw new Error(`Cloud FEA container returned field ${index} (${fieldType}, id=${fieldId}, frame=${frameIndex}, time=${timeSeconds}, location=${location}) without numeric values.`);
+  }
   const fieldRunId = typeof rawField.runId === "string" ? rawField.runId : runId;
+  const min = valuesFromRawField && typeof rawField.min === "number" && Number.isFinite(rawField.min) ? rawField.min : Math.min(...values);
+  const max = valuesFromRawField && typeof rawField.max === "number" && Number.isFinite(rawField.max) ? rawField.max : Math.max(...values);
   return {
     ...rawField,
     id: typeof rawField.id === "string" ? rawField.id : `field-${fieldRunId}-${index}`,
     runId: fieldRunId,
     values,
-    min: typeof rawField.min === "number" && Number.isFinite(rawField.min) ? rawField.min : Math.min(...values),
-    max: typeof rawField.max === "number" && Number.isFinite(rawField.max) ? rawField.max : Math.max(...values),
+    min,
+    max,
     units: typeof rawField.units === "string" ? rawField.units : "",
     provenance,
     ...(typeof rawField.timeSeconds === "number" && Number.isFinite(rawField.timeSeconds)
