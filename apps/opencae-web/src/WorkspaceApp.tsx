@@ -75,7 +75,9 @@ const seededSummary: ResultSummary = {
   reactionForce: 500,
   reactionForceUnits: "N"
 };
-const MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.005;
+const DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.005;
+const MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.001;
+const MIN_CLOUD_FEA_OUTPUT_INTERVAL_SECONDS = 0.0005;
 const PLAYBACK_UI_COMMIT_INTERVAL_MS = 250;
 const PLAYBACK_CACHE_PREP_FPS = 30;
 const AUTOSAVE_UI_WRITE_DELAY_MS = 650;
@@ -928,12 +930,15 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     mergedSettings: DynamicSolverSettings & { backend?: SolverBackend; fidelity?: SimulationFidelity },
     patch: Partial<DynamicSolverSettings>
   ) {
+    const backend = mergedSettings.backend === "cloudflare_fea" ? "cloudflare_fea" : "local_detailed";
+    const minimumOutputInterval = backend === "cloudflare_fea" ? MIN_CLOUD_FEA_OUTPUT_INTERVAL_SECONDS : Math.max(DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS, MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS);
+    const requestedOutputInterval = patch.outputInterval ?? currentSettings.outputInterval ?? DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS;
     return {
       ...mergedSettings,
       outputInterval: Math.max(
-        patch.outputInterval ?? currentSettings.outputInterval,
+        requestedOutputInterval,
         mergedSettings.timeStep,
-        MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS
+        minimumOutputInterval
       )
     };
   }

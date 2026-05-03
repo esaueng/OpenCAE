@@ -144,6 +144,55 @@ class ValidationSuite(unittest.TestCase):
         self.assertEqual(context.exception.status, 422)
         self.assertIn("Dynamic Cloud FEA output would exceed frame budget", str(context.exception))
 
+    def test_dynamic_settings_accept_fine_output_interval_within_budget(self):
+        payload = dynamic_block_payload()
+        payload["dynamicSettings"]["endTime"] = 0.1
+        payload["dynamicSettings"]["timeStep"] = 0.001
+        payload["dynamicSettings"]["outputInterval"] = 0.001
+
+        parsed = runner.parse_payload(payload)
+
+        self.assertEqual(parsed["dynamicSettings"]["outputInterval"], 0.001)
+        self.assertEqual(parsed["dynamicSettings"]["frameCount"], 101)
+
+    def test_dynamic_settings_accept_half_millisecond_output_within_budget(self):
+        payload = dynamic_block_payload()
+        payload["dynamicSettings"]["endTime"] = 0.1
+        payload["dynamicSettings"]["timeStep"] = 0.0005
+        payload["dynamicSettings"]["outputInterval"] = 0.0005
+
+        parsed = runner.parse_payload(payload)
+
+        self.assertEqual(parsed["dynamicSettings"]["outputInterval"], 0.0005)
+        self.assertEqual(parsed["dynamicSettings"]["frameCount"], 201)
+
+    def test_dynamic_settings_reject_too_fine_output_over_budget(self):
+        payload = dynamic_block_payload()
+        payload["dynamicSettings"]["endTime"] = 0.1
+        payload["dynamicSettings"]["timeStep"] = 0.00025
+        payload["dynamicSettings"]["outputInterval"] = 0.00025
+
+        with self.assertRaises(runner.UserFacingSolveError) as context:
+            runner.parse_payload(payload)
+
+        diagnostics = context.exception.payload["diagnostics"]
+        self.assertEqual(context.exception.status, 422)
+        self.assertIn("Dynamic Cloud FEA output would exceed frame budget", str(context.exception))
+        self.assertEqual(diagnostics[0]["details"]["requestedOutputInterval"], 0.00025)
+        self.assertEqual(diagnostics[0]["details"]["estimatedFrameCount"], 401)
+        self.assertEqual(diagnostics[0]["details"]["maxFrames"], runner.MAX_DYNAMIC_FRAMES)
+
+    def test_dynamic_settings_reject_output_interval_below_time_step(self):
+        payload = dynamic_block_payload()
+        payload["dynamicSettings"]["timeStep"] = 0.001
+        payload["dynamicSettings"]["outputInterval"] = 0.0005
+
+        with self.assertRaises(runner.UserFacingSolveError) as context:
+            runner.parse_payload(payload)
+
+        self.assertEqual(context.exception.status, 422)
+        self.assertIn("outputInterval must be greater than or equal to timeStep", str(context.exception))
+
     def test_ccx_timeout_defaults_and_environment_precedence(self):
         static_parsed = runner.parse_payload(block_payload("cantilever", ALUMINUM_6061, [0, 0, -1], 1.0, "standard"))
         dynamic_parsed = runner.parse_payload(dynamic_block_payload())
@@ -211,13 +260,18 @@ class ValidationSuite(unittest.TestCase):
         self.assertIn("partial stderr", handler.payload["artifacts"]["solverLog"])
 
     def test_dynamic_deck_contains_transient_step_and_time_point_output(self):
-        parsed = runner.parse_payload(dynamic_block_payload())
+        payload = dynamic_block_payload()
+        payload["dynamicSettings"]["endTime"] = 0.1
+        payload["dynamicSettings"]["timeStep"] = 0.001
+        payload["dynamicSettings"]["outputInterval"] = 0.001
+        parsed = runner.parse_payload(payload)
         mesh = runner.generate_structured_hex_mesh(parsed["dimensions"], parsed["meshDensity"])
         boundaries = runner.select_boundary_nodes(parsed, mesh)
         nodal_loads = runner.distribute_normalized_loads_to_nodes(parsed, mesh, boundaries)
         deck = runner.write_calculix_input_deck(parsed, mesh, boundaries, nodal_loads)
 
         self.assertIn("*TIME POINTS, NAME=OUTPUT_TIMES, GENERATE", deck)
+        self.assertIn("0, 0.1, 0.001", deck)
         self.assertIn("*AMPLITUDE, NAME=LOAD_HISTORY, TIME=TOTAL TIME", deck)
         self.assertIn("*DYNAMIC, ALPHA=-0.05", deck)
         self.assertIn("*CLOAD, AMPLITUDE=LOAD_HISTORY", deck)

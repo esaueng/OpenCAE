@@ -296,8 +296,8 @@ describe("RightPanel payload mass controls", () => {
     const dynamicHtml = renderPanel("run", { study: dynamicStudy });
     expect(dynamicHtml).toContain("Start time");
     expect(dynamicHtml).toContain("End time");
+    expect(dynamicHtml).toContain("Output interval");
     expect(dynamicHtml).toContain("Estimated frames");
-    expect(dynamicHtml).not.toContain("Output interval");
     expect(renderPanel("run")).not.toContain("Start time");
   });
 
@@ -445,6 +445,54 @@ describe("RightPanel payload mass controls", () => {
 
     expect(html).toContain('<strong>101</strong>');
     expect(html).toContain('<strong>Every 0.005 s</strong>');
+  });
+
+  test("shows fine Cloud FEA dynamic output cadence and frame budget warning", () => {
+    const dynamicStudy: Study = {
+      ...study,
+      name: "Dynamic",
+      type: "dynamic_structural",
+      solverSettings: {
+        backend: "cloudflare_fea",
+        startTime: 0,
+        endTime: 0.1,
+        timeStep: 0.001,
+        outputInterval: 0.001,
+        dampingRatio: 0.02,
+        integrationMethod: "newmark_average_acceleration",
+        loadProfile: "ramp"
+      }
+    };
+
+    const html = renderPanel("run", { study: dynamicStudy });
+
+    expect(html).toContain("Output interval");
+    expect(html).toContain('<strong>101</strong>');
+    expect(html).toContain('<strong>Every 0.001 s</strong>');
+    expect(html).not.toContain("Cloud FEA dynamic output would exceed frame budget");
+  });
+
+  test("warns when Cloud FEA dynamic output exceeds frame budget", () => {
+    const dynamicStudy: Study = {
+      ...study,
+      name: "Dynamic",
+      type: "dynamic_structural",
+      solverSettings: {
+        backend: "cloudflare_fea",
+        startTime: 0,
+        endTime: 0.2,
+        timeStep: 0.0005,
+        outputInterval: 0.0005,
+        dampingRatio: 0.02,
+        integrationMethod: "newmark_average_acceleration",
+        loadProfile: "ramp"
+      }
+    };
+
+    const html = renderPanel("run", { study: dynamicStudy });
+
+    expect(html).toContain('<strong>401</strong>');
+    expect(html).toContain("Cloud FEA dynamic output would exceed frame budget; increase output interval or reduce end time.");
   });
 
   test("renders playback controls for dynamic result frames", () => {

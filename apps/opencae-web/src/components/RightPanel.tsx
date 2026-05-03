@@ -26,7 +26,10 @@ import {
   playbackOrdinalForSolverFramePosition
 } from "../resultPlaybackTimeline";
 
-const MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.005;
+const DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.005;
+const MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.001;
+const MIN_CLOUD_FEA_OUTPUT_INTERVAL_SECONDS = 0.0005;
+const MAX_CLOUD_FEA_DYNAMIC_FRAMES = 250;
 const STRESS_EXAGGERATION_COMMIT_DELAY_MS = 120;
 
 interface RightPanelProps {
@@ -959,11 +962,13 @@ function RunPanel({ study, runProgress, runTiming, onRunSimulation, onCancelSimu
   const updateSolverChoice = (settings: SolverSettingsPatch) => {
     onUpdateSolverSettings?.(settings);
   };
-  const updateDynamicNumber = (key: keyof Pick<DynamicSolverSettings, "startTime" | "endTime" | "timeStep" | "dampingRatio">, value: number) => {
+  const updateDynamicNumber = (key: keyof Pick<DynamicSolverSettings, "startTime" | "endTime" | "timeStep" | "outputInterval" | "dampingRatio">, value: number) => {
     if (!Number.isFinite(value)) return;
     onUpdateSolverSettings?.({ [key]: value });
   };
-  const frameEstimate = dynamic ? dynamicFrameEstimate(dynamic) : null;
+  const frameEstimate = dynamic ? dynamicFrameEstimate(dynamic, cloudFeaSelected ? "cloudflare_fea" : "local_detailed") : null;
+  const outputIntervalMinimum = cloudFeaSelected ? MIN_CLOUD_FEA_OUTPUT_INTERVAL_SECONDS : MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS;
+  const outputIntervalValue = dynamic?.outputInterval ?? DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS;
   return (
     <Panel title="Run" helper="Run the simulation to estimate stress and displacement.">
       <SectionTitle helpId="runReadiness">Readiness</SectionTitle>
@@ -995,11 +1000,13 @@ function RunPanel({ study, runProgress, runTiming, onRunSimulation, onCancelSimu
           <DynamicNumberField label="Start time" unit="s" value={dynamic.startTime} min={0} step={dynamic.timeStep} onCommit={(value) => updateDynamicNumber("startTime", value)} />
           <DynamicNumberField label="End time" unit="s" value={dynamic.endTime} min={dynamic.startTime + dynamic.timeStep} step={dynamic.timeStep} onCommit={(value) => updateDynamicNumber("endTime", value)} />
           <DynamicNumberField label="Time step" unit="s" value={dynamic.timeStep} min={0.0001} step="0.0005" onCommit={(value) => updateDynamicNumber("timeStep", value)} />
+          <DynamicNumberField label="Output interval" unit="s" value={outputIntervalValue} min={outputIntervalMinimum} step={outputIntervalMinimum} onCommit={(value) => updateDynamicNumber("outputInterval", value)} />
           <DynamicNumberField label="Damping ratio" unit="ζ" value={dynamic.dampingRatio} min={0} step="0.01" onCommit={(value) => updateDynamicNumber("dampingRatio", value)} />
           <div className="summary-box">
             <Info label="Estimated frames" value={frameEstimate ? frameEstimate.count.toLocaleString() : "--"} />
-            <Info label="Output cadence" value={`Every ${formatSeconds(normalizedDynamicOutputInterval(dynamic))}`} />
+            <Info label="Output cadence" value={`Every ${formatSeconds(normalizedDynamicOutputInterval(dynamic, cloudFeaSelected ? "cloudflare_fea" : "local_detailed"))}`} />
           </div>
+          {cloudFeaSelected && frameEstimate && frameEstimate.count > MAX_CLOUD_FEA_DYNAMIC_FRAMES && <p className="panel-copy">Cloud FEA dynamic output would exceed frame budget; increase output interval or reduce end time.</p>}
           {frameEstimate && frameEstimate.count > 1000 && <p className="panel-copy">Large frame counts may slow result loading and playback.</p>}
           {frameEstimate?.hasFinalPartialStep && <p className="panel-copy">Final frame is clamped to the selected end time.</p>}
         </>
@@ -1642,9 +1649,9 @@ function activeFieldAbsMax(field: ResultField): number {
   return Math.max(Math.abs(Number(field.min) || 0), Math.abs(Number(field.max) || 0));
 }
 
-function dynamicFrameEstimate(settings: DynamicSolverSettings): { count: number; hasFinalPartialStep: boolean } {
+function dynamicFrameEstimate(settings: DynamicSolverSettings, backend: SolverBackend = "local_detailed"): { count: number; hasFinalPartialStep: boolean } {
   const duration = Math.max(0, settings.endTime - settings.startTime);
-  const outputInterval = normalizedDynamicOutputInterval(settings);
+  const outputInterval = normalizedDynamicOutputInterval(settings, backend);
   const wholeSteps = Math.floor(duration / outputInterval);
   const remainder = duration - wholeSteps * outputInterval;
   const hasFinalPartialStep = remainder > outputInterval * 1e-9;
@@ -1654,8 +1661,10 @@ function dynamicFrameEstimate(settings: DynamicSolverSettings): { count: number;
   };
 }
 
-function normalizedDynamicOutputInterval(settings: DynamicSolverSettings) {
-  return Math.max(settings.outputInterval, settings.timeStep, MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS);
+function normalizedDynamicOutputInterval(settings: DynamicSolverSettings, backend: SolverBackend = "local_detailed") {
+  const requestedOutputInterval = Number.isFinite(settings.outputInterval) ? settings.outputInterval : DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS;
+  const backendMinimum = backend === "cloudflare_fea" ? MIN_CLOUD_FEA_OUTPUT_INTERVAL_SECONDS : Math.max(DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS, MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS);
+  return Math.max(requestedOutputInterval, settings.timeStep, backendMinimum);
 }
 
 function formatNumber(value: number) {
