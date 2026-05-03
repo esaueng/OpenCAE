@@ -4,6 +4,7 @@ import { describe, expect, test } from "vitest";
 import { parseJsonc, validateCloudflareConfigs } from "./verify-cloudflare-config.mjs";
 
 const rootDir = resolve(import.meta.dirname, "..");
+const expectedContainerImage = "registry.cloudflare.com/747b74cbd7d019dd7aeecb2c24a4bf10/opencae/opencae-fea:0.1.1-load-normalization";
 
 function readConfig(path) {
   return parseJsonc(readFileSync(resolve(rootDir, path), "utf8"), path);
@@ -23,7 +24,16 @@ describe("Cloudflare deployment config guard", () => {
     expect(defaultConfig.name).toBe("opencae");
     expect(staticConfig.name).toBe("opencae-static");
     expect(localFirstConfig.name).toBe("opencae-local-first");
+    expect(defaultConfig.containers?.[0]?.image).toBe(expectedContainerImage);
+    expect(containersConfig.containers?.[0]?.image).toBe(expectedContainerImage);
     expect(() => validateCloudflareConfigs({ defaultConfig, containersConfig, staticConfig, localFirstConfig })).not.toThrow();
+  });
+
+  test("package scripts build and push the bumped immutable container image tag", () => {
+    const packageJson = JSON.parse(readFileSync(resolve(rootDir, "package.json"), "utf8"));
+
+    expect(packageJson.scripts["containers:build"]).toContain("opencae/opencae-fea:0.1.1-load-normalization");
+    expect(packageJson.scripts["containers:push"]).toContain("opencae/opencae-fea:0.1.1-load-normalization");
   });
 
   test("fails when static and production configs share a Worker name", () => {
