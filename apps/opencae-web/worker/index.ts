@@ -52,9 +52,11 @@ export const MAX_CLOUD_FEA_FIELD_VALUES = 25_000;
 export const MAX_CLOUD_FEA_FIELD_SAMPLES = 25_000;
 export const MAX_CLOUD_FEA_DYNAMIC_FRAMES = 250;
 const MAX_CONTAINER_FAILURE_BODY_PREVIEW = 2_000;
-const cloudFeaContainerInstanceName = "opencae-fea-solver-load-normalization-v1";
+const cloudFeaContainerInstanceName = "opencae-fea-solver-dynamic-v1";
 const cloudFeaResultBudgetExceededMessage = "Cloud FEA result payload exceeded the UI result budget. Reduce fidelity or enable result decimation.";
-const expectedCloudFeaRunnerVersion = "2026-05-03-load-normalization";
+const EXPECTED_FEA_RUNNER_VERSION = "2026-05-03-dynamic-v1";
+const cloudFeaWorkerDeploymentFingerprint = "opencae-worker-dynamic-v1";
+const staleDynamicContainerMessage = `Cloud FEA dynamic requires runner ${EXPECTED_FEA_RUNNER_VERSION} or newer, but the deployed container is stale. Rebuild/redeploy the Cloud FEA container.`;
 
 export default {
   async fetch(request: Request, env: RuntimeEnv, ctx?: ExecutionContext): Promise<Response> {
@@ -134,6 +136,19 @@ export default {
 async function cloudFeaHealth(request: Request, env: RuntimeEnv): Promise<Response> {
   const origin = new URL(request.url).origin;
   const containerBound = Boolean(env.FEA_CONTAINER);
+  let containerHealth: Record<string, unknown> | undefined;
+  let containerHealthError: string | undefined;
+  if (containerBound) {
+    try {
+      containerHealth = await callFeaContainerHealth(env);
+    } catch (error) {
+      containerHealthError = error instanceof Error ? error.message : String(error);
+    }
+  }
+  const supportedAnalysisTypes = supportedAnalysisTypesFromHealth(containerHealth);
+  const containerRunnerVersion = containerRunnerVersionFromHealth(containerHealth);
+  const dynamicCloudFeaAvailable = containerSupportsDynamic(containerHealth)
+    && containerRunnerVersionIsExpectedOrNewer(containerRunnerVersion);
   const body: Record<string, unknown> = {
     ok: true,
     mode: "cloudflare-worker",
@@ -145,19 +160,18 @@ async function cloudFeaHealth(request: Request, env: RuntimeEnv): Promise<Respon
     containerBound,
     containersEnabled: containerBound,
     cloudFeaAvailable: containerBound,
+    containerRunnerVersion,
+    supportedAnalysisTypes,
+    dynamicCloudFeaAvailable,
+    expectedRunnerVersion: EXPECTED_FEA_RUNNER_VERSION,
     dynamicStructural: cloudFeaDynamicSupportMetadata(),
     ...(containerBound ? {} : {
       requiredDeployConfig: "wrangler.containers.jsonc",
       deploymentHint: "The current Worker version has no FEA_CONTAINER binding. This usually means a stale or non-container deployment was promoted to Worker opencae. Deploy with wrangler.jsonc or wrangler.containers.jsonc after confirming the config includes FEA_CONTAINER."
     })
   };
-  if (containerBound && new URL(request.url).searchParams.get("probeContainer") === "1") {
-    try {
-      body.containerHealth = await probeFeaContainerHealth(env, cloudFeaContainerInstanceName);
-    } catch (error) {
-      body.containerHealthError = error instanceof Error ? error.message : String(error);
-    }
-  }
+  if (containerHealth) body.containerHealth = containerHealth;
+  if (containerHealthError) body.containerHealthError = containerHealthError;
   return Response.json(
     body,
     { headers: jsonHeaders }
@@ -214,6 +228,18 @@ async function createCloudFeaRun(request: Request, env: RuntimeEnv, ctx?: Execut
     return Response.json({ error: cloudFeaContainersDisabledMessage }, { status: 503, headers: jsonHeaders });
   }
   const body = await request.json().catch(() => ({})) as Record<string, unknown>;
+  const requestedAnalysisType = analysisTypeFromBody(body);
+  let createTimeContainerHealth: Record<string, unknown> | undefined;
+  if (requestedAnalysisType === "dynamic_structural") {
+    try {
+      createTimeContainerHealth = await callFeaContainerHealth(env);
+    } catch {
+      return Response.json({ error: staleDynamicContainerMessage }, { status: 503, headers: jsonHeaders });
+    }
+    if (!containerSupportsDynamic(createTimeContainerHealth) || !containerRunnerVersionIsExpectedOrNewer(containerRunnerVersionFromHealth(createTimeContainerHealth))) {
+      return Response.json({ error: staleDynamicContainerMessage }, { status: 503, headers: jsonHeaders });
+    }
+  }
   const studyArtifact = isRecord(body.study) ? body.study : undefined;
   const displayModelArtifact = isRecord(body.displayModel) ? body.displayModel : undefined;
   let solverMaterial: SolverMaterialPayload;
@@ -242,7 +268,7 @@ async function createCloudFeaRun(request: Request, env: RuntimeEnv, ctx?: Execut
     fidelity: body.fidelity === "ultra" || body.fidelity === "detailed" ? body.fidelity : "standard",
     backend: "cloudflare_fea",
     solver: "calculix",
-    analysisType: analysisTypeFromBody(body),
+    analysisType: requestedAnalysisType,
     study: studyArtifact,
     displayModel: displayModelArtifact,
     resultRenderBounds: isRecord(body.resultRenderBounds) ? body.resultRenderBounds : undefined,
@@ -254,7 +280,10 @@ async function createCloudFeaRun(request: Request, env: RuntimeEnv, ctx?: Execut
   const dispatchMode = env.FEA_RUN_QUEUE ? "queue" : ctx ? "waitUntil" : "inline";
   const queuedMessage = cloudFeaDispatchMessage(requestArtifact, solverMaterial, {
     dispatchMode,
-    containerBound: Boolean(env.FEA_CONTAINER)
+    containerBound: Boolean(env.FEA_CONTAINER),
+    runnerVersion: containerRunnerVersionFromHealth(createTimeContainerHealth),
+    dynamicSupported: createTimeContainerHealth ? containerSupportsDynamic(createTimeContainerHealth) : undefined,
+    deployment: cloudFeaWorkerDeploymentFingerprint
   });
   const queuedEvents = [
     { runId, type: "state", progress: 0, message: queuedMessage, timestamp: now },
@@ -262,6 +291,14 @@ async function createCloudFeaRun(request: Request, env: RuntimeEnv, ctx?: Execut
   ];
   await env.FEA_ARTIFACTS.put(`runs/${runId}/request.json`, JSON.stringify(requestArtifact, null, 2));
   await env.FEA_ARTIFACTS.put(`runs/${runId}/events.json`, JSON.stringify(queuedEvents, null, 2));
+  logWorkerEvent("cloud_fea_run_queued", {
+    runId,
+    analysisType: analysisTypeFromRequest(requestArtifact),
+    runnerVersion: containerRunnerVersionFromHealth(createTimeContainerHealth) ?? "not-probed",
+    dynamicSupported: createTimeContainerHealth ? containerSupportsDynamic(createTimeContainerHealth) : false,
+    deployment: cloudFeaWorkerDeploymentFingerprint,
+    dispatchMode
+  });
   if (env.FEA_RUN_QUEUE) {
     try {
       await env.FEA_RUN_QUEUE.send({ runId });
@@ -424,6 +461,10 @@ async function callFeaContainer(env: RuntimeEnv, payload: Record<string, unknown
   });
 }
 
+async function callFeaContainerHealth(env: RuntimeEnv): Promise<Record<string, unknown>> {
+  return probeFeaContainerHealth(env, cloudFeaContainerInstanceName);
+}
+
 async function probeFeaContainerHealth(env: RuntimeEnv, instanceName: string): Promise<Record<string, unknown>> {
   const response = await fetchFeaContainer(env, instanceName, "/health", { method: "GET" });
   if (!response.ok) {
@@ -442,12 +483,41 @@ function containerHealthMessage(health: Record<string, unknown>): string {
 }
 
 function assertExpectedContainerRunnerVersion(health: Record<string, unknown>): void {
-  const actual = typeof health.runnerVersion === "string" && health.runnerVersion.trim()
-    ? health.runnerVersion
-    : "missing";
-  if (actual !== expectedCloudFeaRunnerVersion) {
-    throw new Error(`Cloud FEA container is stale: expected runner ${expectedCloudFeaRunnerVersion}, got ${actual}. Rebuild and redeploy the container image.`);
+  const actual = containerRunnerVersionFromHealth(health) ?? "missing";
+  if (!containerRunnerVersionIsExpectedOrNewer(actual)) {
+    throw new Error(`Cloud FEA container is stale: expected runner ${EXPECTED_FEA_RUNNER_VERSION} or newer, got ${actual}. Rebuild and redeploy the container image.`);
   }
+}
+
+function supportedAnalysisTypesFromHealth(health: Record<string, unknown> | undefined): string[] {
+  const supportedAnalysisTypes = health?.supportedAnalysisTypes;
+  return Array.isArray(supportedAnalysisTypes)
+    ? supportedAnalysisTypes.filter((value): value is string => typeof value === "string")
+    : [];
+}
+
+function containerRunnerVersionFromHealth(health: Record<string, unknown> | undefined): string | undefined {
+  return typeof health?.runnerVersion === "string" && health.runnerVersion.trim()
+    ? health.runnerVersion
+    : undefined;
+}
+
+function containerSupportsDynamic(health: Record<string, unknown> | undefined): boolean {
+  const dynamicSupport = isRecord(health?.dynamicSupport) ? health.dynamicSupport : undefined;
+  return supportedAnalysisTypesFromHealth(health).includes("dynamic_structural")
+    && (!dynamicSupport || dynamicSupport.enabled === true);
+}
+
+function containerRunnerVersionIsExpectedOrNewer(actual: string | undefined): boolean {
+  if (!actual) return false;
+  if (actual === EXPECTED_FEA_RUNNER_VERSION) return true;
+  const actualDate = runnerVersionDatePrefix(actual);
+  const expectedDate = runnerVersionDatePrefix(EXPECTED_FEA_RUNNER_VERSION);
+  return Boolean(actualDate && expectedDate && actualDate > expectedDate);
+}
+
+function runnerVersionDatePrefix(version: string): string | undefined {
+  return /^\d{4}-\d{2}-\d{2}-/.test(version) ? version.slice(0, 10) : undefined;
 }
 
 async function readContainerFailure(response: Response): Promise<{ message: string; artifacts: Record<string, unknown> }> {
@@ -810,7 +880,13 @@ type CloudFeaDispatchMode = "waitUntil" | "inline" | "queue";
 function cloudFeaDispatchMessage(
   requestArtifact: Record<string, unknown>,
   solverMaterial: SolverMaterialPayload,
-  bindings: { dispatchMode: CloudFeaDispatchMode; containerBound: boolean }
+  bindings: {
+    dispatchMode: CloudFeaDispatchMode;
+    containerBound: boolean;
+    runnerVersion?: string;
+    dynamicSupported?: boolean;
+    deployment: string;
+  }
 ): string {
   return `Cloud FEA run queued: ${[
     `analysis=${analysisTypeFromRequest(requestArtifact)}`,
@@ -818,7 +894,10 @@ function cloudFeaDispatchMessage(
     `material=${solverMaterial.name} (${solverMaterial.id})`,
     `geometry=${geometrySourceLabel(requestArtifact)}`,
     `dispatch=${bindings.dispatchMode}`,
-    `container=${bindings.containerBound ? "bound" : "missing"}`
+    `container=${bindings.containerBound ? "bound" : "missing"}`,
+    `runnerVersion=${bindings.runnerVersion ?? "not-probed"}`,
+    `dynamicSupported=${bindings.dynamicSupported === true ? "true" : "false"}`,
+    `deployment=${bindings.deployment}`
   ].join("; ")}.`;
 }
 
@@ -854,6 +933,7 @@ function geometrySourceLabel(requestArtifact: Record<string, unknown>): string {
 }
 
 function analysisTypeFromBody(body: Record<string, unknown>): string | undefined {
+  if (typeof body.analysisType === "string") return body.analysisType;
   if (isRecord(body.study) && typeof body.study.type === "string") return body.study.type;
   return undefined;
 }
