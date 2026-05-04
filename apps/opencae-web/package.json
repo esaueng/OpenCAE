@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@opencae/db": "workspace:*",
+    "@opencae/core": "workspace:*",
     "@opencae/materials": "workspace:*",
     "@opencae/schema": "workspace:*",
     "@opencae/solver-cpu": "workspace:*",
