@@ -25,7 +25,7 @@ describe("BottomPanel", () => {
     expect(html).toContain('class="status-links"');
     expect(html).toContain('class="status-link"');
     expect(html).toContain('href="https://form.esauengineering.com/opencae-feedback"');
-    expect(html).toContain('href="https://ko-fi.com/petergustafson"');
+    expect(html).toContain('href="https://ko-fi.com/petergn"');
     expect(html).toContain('href="https://github.com/esaueng/OpenCAE"');
     expect(html).toContain(">feedback</a>");
     expect(html).toContain("Buy me a coffee</a>");

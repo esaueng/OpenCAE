@@ -122,8 +122,8 @@ describe("CadViewer result coloring", () => {
     const expected = new Map([
       ["Front", { normal: [0, 1, 0], textUp: [0, 0, 1] }],
       ["Back", { normal: [0, -1, 0], textUp: [0, 0, 1] }],
-      ["Right", { normal: [1, 0, 0], textUp: [0, 0, 1] }],
-      ["Left", { normal: [-1, 0, 0], textUp: [0, 0, 1] }],
+      ["Left", { normal: [1, 0, 0], textUp: [0, 0, 1] }],
+      ["Right", { normal: [-1, 0, 0], textUp: [0, 0, 1] }],
       ["Top", { normal: [0, 0, 1], textUp: [-1, 0, 0] }],
       ["Bottom", { normal: [0, 0, -1], textUp: [1, 0, 0] }]
     ]);

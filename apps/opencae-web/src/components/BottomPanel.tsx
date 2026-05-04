@@ -167,7 +167,7 @@ export function BottomPanel({ status, logs, projectName, studyName, meshStatus, 
           <span><b>solver</b>{solverStatus}</span>
         </div>
         <div className="status-links" aria-label="Project links">
-          <a className="status-link donate-link" href="https://ko-fi.com/petergustafson" target="_blank" rel="noreferrer" title="Support OpenCAE on Ko-fi">
+          <a className="status-link donate-link" href="https://ko-fi.com/petergn" target="_blank" rel="noreferrer" title="Support OpenCAE on Ko-fi">
             <Coffee size={13} aria-hidden="true" />
             Buy me a coffee
           </a>

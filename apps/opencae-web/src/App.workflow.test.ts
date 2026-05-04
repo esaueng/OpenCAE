@@ -24,7 +24,7 @@ describe("App workflow layout", () => {
   });
 
   test("keeps the workspace top bar focused on project controls", () => {
-    expect(appSource).not.toContain('href="https://ko-fi.com/petergustafson"');
+    expect(appSource).not.toContain('href="https://ko-fi.com/petergn"');
     expect(appSource).not.toContain("Buy me a coffee");
   });
 
