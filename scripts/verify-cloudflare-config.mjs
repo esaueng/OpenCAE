@@ -6,7 +6,7 @@ import { pathToFileURL } from "node:url";
 
 const rootDir = resolve(import.meta.dirname, "..");
 const productionDomain = "cae.esau.app";
-const productionWorkerName = "opencae";
+const productionWorkerName = "opencae-alpha";
 
 export function parseJsonc(source, label = "JSONC input") {
   try {
