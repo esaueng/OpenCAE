@@ -948,7 +948,7 @@ function MeshPanel({ study, onGenerateMesh }: RightPanelProps) {
   );
 }
 
-function RunPanel({ study, runProgress, runTiming, onRunSimulation, onCancelSimulation, canCancelSimulation, onUpdateSolverSettings, canRunSimulation, missingRunItems, cloudFeaAvailable, cloudFeaEndpoint }: RightPanelProps) {
+function RunPanel({ study, runProgress, runTiming, onRunSimulation, onCancelSimulation, canCancelSimulation, onUpdateSolverSettings, canRunSimulation, missingRunItems, cloudFeaAvailable }: RightPanelProps) {
   const progressPercent = Math.max(0, Math.min(100, Math.round(runProgress)));
   const isRunning = canCancelSimulation ?? (progressPercent > 0 && progressPercent < 100);
   const remainingLabel = formatSimulationEta(runTiming?.estimatedRemainingMs, isRunning);
@@ -1001,11 +1001,6 @@ function RunPanel({ study, runProgress, runTiming, onRunSimulation, onCancelSimu
           {SIMULATION_FIDELITIES.map((option) => <option key={option} value={option}>{capitalize(option)}</option>)}
         </select>
       </label>
-      <div className="summary-box">
-        <Info label="Expected detail" value={fidelityEstimateLabel(fidelity)} />
-        <Info label="Cloud runtime" value={cloudFeaSelected ? dynamic ? "CalculiX transient container" : "CalculiX container" : "Browser local"} />
-        {cloudFeaSelected && cloudFeaEndpoint ? <Info label="Cloud FEA endpoint" value={cloudFeaEndpoint} /> : null}
-      </div>
       {cloudFeaUnavailable ? <Callout>Cloud FEA is unavailable on this app domain because this Worker was deployed without FEA_CONTAINER. Deploy with wrangler.containers.jsonc.</Callout> : null}
       {dynamic && (
         <>
@@ -1159,12 +1154,6 @@ function solverFidelityForStudy(study: Study): SimulationFidelity {
 
 function backendLabel(backend: SolverBackend) {
   return backend === "cloudflare_fea" ? "Cloud FEA" : "Detailed local";
-}
-
-function fidelityEstimateLabel(fidelity: SimulationFidelity) {
-  if (fidelity === "ultra") return "Ultra mesh and samples";
-  if (fidelity === "detailed") return "Fine mesh and samples";
-  return "Standard run";
 }
 
 export function formatSimulationEta(remainingMs: number | undefined, isRunning = true): string {
