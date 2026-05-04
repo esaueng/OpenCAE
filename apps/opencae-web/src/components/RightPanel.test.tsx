@@ -143,17 +143,17 @@ describe("RightPanel payload mass controls", () => {
         provenance: { kind: "analytical_benchmark", solver: "opencae-euler-bernoulli", solverVersion: "0.1.0", meshSource: "structured_block", resultSource: "generated", units: "mm-N-s-MPa" }
       }
     });
-    const cloudHtml = renderPanel("results", {
+    const coreHtml = renderPanel("results", {
       resultSummary: {
         ...resultSummary,
-        provenance: { kind: "calculix_fea", solver: "calculix-ccx", solverVersion: "2.21", meshSource: "gmsh", resultSource: "parsed_frd", units: "mm-N-s-MPa" }
+        provenance: { kind: "opencae_core_fea", solver: "opencae-core-cpu-tet4", solverVersion: "0.1.0", meshSource: "opencae_core_tet4", resultSource: "computed", units: "mm-N-s-MPa" }
       }
     });
 
     expect(localHtml).toContain("Local estimate");
     expect(localHtml).not.toContain("Local FEA");
     expect(beamHtml).toContain("Analytical benchmark");
-    expect(cloudHtml).toContain("CalculiX FEA");
+    expect(coreHtml).toContain("OpenCAE Core");
   });
 
   test("shows the run progress percentage inside the progress bar", () => {
@@ -338,7 +338,7 @@ describe("RightPanel payload mass controls", () => {
   test("renders backend and fidelity controls for detailed simulation runs", () => {
     const detailedStudy: Study = {
       ...study,
-      solverSettings: { backend: "cloudflare_fea", fidelity: "ultra" }
+      solverSettings: { backend: "opencae_core", fidelity: "ultra" }
     };
 
     const runHtml = renderPanel("run", { study: detailedStudy });
@@ -346,17 +346,17 @@ describe("RightPanel payload mass controls", () => {
 
     expect(runHtml).toContain("Simulation backend");
     expect(runHtml).toContain("Detailed local");
-    expect(runHtml).toContain("Cloud FEA");
+    expect(runHtml).toContain("OpenCAE Core");
     expect(runHtml).toContain("Fidelity");
     expect(meshHtml).toContain("Ultra");
     expect(meshHtml).toContain("Analysis samples");
     expect(meshHtml).toContain("45,000");
   });
 
-  test("disables Cloud FEA runs when the app Worker lacks the container binding", () => {
+  test("keeps OpenCAE Core runs browser-local without container endpoint copy", () => {
     const detailedStudy: Study = {
       ...study,
-      solverSettings: { backend: "cloudflare_fea", fidelity: "ultra" }
+      solverSettings: { backend: "opencae_core", fidelity: "ultra" }
     };
 
     const runHtml = renderPanel("run", {
@@ -366,13 +366,17 @@ describe("RightPanel payload mass controls", () => {
       cloudFeaEndpoint: "https://cae.esau.app/api/cloud-fea/runs"
     });
 
-    expect(runHtml).toContain("Cloud FEA is unavailable on this app domain because this Worker was deployed without FEA_CONTAINER. Deploy with wrangler.containers.jsonc.");
-    expect(runHtml).toContain("Cloud FEA endpoint");
-    expect(runHtml).toContain("https://cae.esau.app/api/cloud-fea/runs");
-    expect(runHtml).toContain('<button class="primary wide" disabled=""');
+    expect(runHtml).toContain("OpenCAE Core");
+    expect(runHtml).toContain("opencae-core-cpu-tet4");
+    expect(runHtml).not.toContain("Expected detail");
+    expect(runHtml).not.toContain("Browser OpenCAE Core CPU");
+    expect(runHtml).not.toContain("FEA_CONTAINER");
+    expect(runHtml).not.toContain("Cloud FEA endpoint");
+    expect(runHtml).not.toContain("https://cae.esau.app/api/cloud-fea/runs");
+    expect(runHtml).not.toContain('<button class="primary wide" disabled=""');
   });
 
-  test("shows the dynamic same-origin Cloud FEA endpoint", () => {
+  test("normalizes legacy Cloud FEA selections to OpenCAE Core", () => {
     const detailedStudy: Study = {
       ...study,
       solverSettings: { backend: "cloudflare_fea", fidelity: "ultra" }
@@ -383,18 +387,21 @@ describe("RightPanel payload mass controls", () => {
       cloudFeaEndpoint: "https://cae.example/api/cloud-fea/runs"
     });
 
-    expect(runHtml).toContain("Cloud FEA endpoint");
-    expect(runHtml).toContain("https://cae.example/api/cloud-fea/runs");
+    expect(runHtml).toContain("OpenCAE Core");
+    expect(runHtml).not.toContain("Expected detail");
+    expect(runHtml).not.toContain("Browser OpenCAE Core CPU");
+    expect(runHtml).not.toContain("Cloud FEA endpoint");
+    expect(runHtml).not.toContain("https://cae.example/api/cloud-fea/runs");
     expect(runHtml).not.toContain("http://localhost:4317");
   });
 
-  test("shows dynamic Cloud FEA uses the transient CalculiX container", () => {
+  test("shows dynamic OpenCAE Core runs fall back to Detailed local", () => {
     const dynamicStudy: Study = {
       ...study,
       name: "Dynamic",
       type: "dynamic_structural",
       solverSettings: {
-        backend: "cloudflare_fea",
+        backend: "opencae_core",
         fidelity: "ultra",
         startTime: 0,
         endTime: 0.5,
@@ -408,11 +415,14 @@ describe("RightPanel payload mass controls", () => {
 
     const runHtml = renderPanel("run", { study: dynamicStudy });
 
-    expect(runHtml).toContain("CalculiX transient container");
-    expect(runHtml).toContain("cloudflare-fea-calculix");
-    expect(runHtml).toContain("cloudflare-queue-container");
-    expect(runHtml).not.toContain("Cloud FEA is static-only right now");
-    expect(runHtml).not.toContain("local-dynamic-newmark");
+    expect(runHtml).toContain("OpenCAE Core");
+    expect(runHtml).not.toContain("Expected detail");
+    expect(runHtml).not.toContain("Browser OpenCAE Core CPU");
+    expect(runHtml).toContain("Dynamic OpenCAE Core runs fall back to Detailed local until transient Core support is available.");
+    expect(runHtml).toContain("opencae-core-cpu-tet4");
+    expect(runHtml).not.toContain("CalculiX transient container");
+    expect(runHtml).not.toContain("cloudflare-fea-calculix");
+    expect(runHtml).not.toContain("cloudflare-queue-container");
   });
 
   test("warns when dynamic settings generate a very large playback frame set", () => {
@@ -474,13 +484,13 @@ describe("RightPanel payload mass controls", () => {
     expect(html).toContain('<strong>Every 0.005 s</strong>');
   });
 
-  test("shows fine Cloud FEA dynamic output cadence and frame budget warning", () => {
+  test("normalizes fine OpenCAE Core dynamic output cadence to local fallback limits", () => {
     const dynamicStudy: Study = {
       ...study,
       name: "Dynamic",
       type: "dynamic_structural",
       solverSettings: {
-        backend: "cloudflare_fea",
+        backend: "opencae_core",
         startTime: 0,
         endTime: 0.1,
         timeStep: 0.001,
@@ -494,18 +504,18 @@ describe("RightPanel payload mass controls", () => {
     const html = renderPanel("run", { study: dynamicStudy });
 
     expect(html).toContain("Output interval");
-    expect(html).toContain('<strong>101</strong>');
-    expect(html).toContain('<strong>Every 0.001 s</strong>');
-    expect(html).not.toContain("Cloud FEA dynamic output would exceed frame budget");
+    expect(html).toContain('<strong>21</strong>');
+    expect(html).toContain('<strong>Every 0.005 s</strong>');
+    expect(html).toContain("Dynamic OpenCAE Core runs fall back to Detailed local until transient Core support is available.");
   });
 
-  test("warns when Cloud FEA dynamic output exceeds frame budget", () => {
+  test("normalizes dense OpenCAE Core dynamic output before estimating frame budget", () => {
     const dynamicStudy: Study = {
       ...study,
       name: "Dynamic",
       type: "dynamic_structural",
       solverSettings: {
-        backend: "cloudflare_fea",
+        backend: "opencae_core",
         startTime: 0,
         endTime: 0.2,
         timeStep: 0.0005,
@@ -518,8 +528,9 @@ describe("RightPanel payload mass controls", () => {
 
     const html = renderPanel("run", { study: dynamicStudy });
 
-    expect(html).toContain('<strong>401</strong>');
-    expect(html).toContain("Cloud FEA dynamic output would exceed frame budget; increase output interval or reduce end time.");
+    expect(html).toContain('<strong>41</strong>');
+    expect(html).toContain('<strong>Every 0.005 s</strong>');
+    expect(html).not.toContain("dynamic output would exceed frame budget");
   });
 
   test("renders playback controls for dynamic result frames", () => {

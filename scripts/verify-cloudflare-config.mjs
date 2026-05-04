@@ -7,9 +7,6 @@ import { pathToFileURL } from "node:url";
 const rootDir = resolve(import.meta.dirname, "..");
 const productionDomain = "cae.esau.app";
 const productionWorkerName = "opencae";
-const containerClassName = "OpenCaeFeaContainer";
-const containerBindingName = "FEA_CONTAINER";
-const productionContainerImage = "./services/opencae-fea-container/Dockerfile";
 
 export function parseJsonc(source, label = "JSONC input") {
   try {
@@ -33,10 +30,10 @@ export function validateCloudflareConfigs({ defaultConfig, containersConfig, sta
   const failures = [];
 
   if (defaultConfig) validateProductionConfig("default", defaultConfig, failures);
-  validateProductionConfig("production", containersConfig, failures);
 
-  validateNonProductionConfig("static", staticConfig, containersConfig, failures);
-  if (localFirstConfig) validateNonProductionConfig("local-first", localFirstConfig, containersConfig, failures);
+  validateNonProductionConfig("static", staticConfig, defaultConfig, failures);
+  if (localFirstConfig) validateNonProductionConfig("local-first", localFirstConfig, defaultConfig, failures);
+  if (containersConfig) validateReferenceContainerConfig("legacy containers", containersConfig, failures);
 
   if (failures.length > 0) {
     throw new Error(`Cloudflare config verification failed:\n- ${failures.join("\n- ")}`);
@@ -48,28 +45,12 @@ function validateProductionConfig(label, config, failures) {
     failures.push(`${label} config name must be "${productionWorkerName}", got "${String(config.name)}"`);
   }
 
-  const durableBindings = Array.isArray(config.durable_objects?.bindings)
-    ? config.durable_objects.bindings
-    : [];
-  if (!durableBindings.some((binding) => binding?.name === containerBindingName && binding?.class_name === containerClassName)) {
-    failures.push(`${label} config must bind durable object ${containerBindingName} to ${containerClassName}`);
-  }
-
-  if (config.containers?.[0]?.class_name !== containerClassName) {
-    failures.push(`${label} config containers[0].class_name must be "${containerClassName}"`);
-  }
-
-  if (config.containers?.[0]?.image !== productionContainerImage) {
-    failures.push(`${label} config containers[0].image must be "${productionContainerImage}"`);
+  if (config.durable_objects || config.containers || config.migrations) {
+    failures.push(`${label} config must not bind Cloud FEA containers; browser OpenCAE Core is the default runtime`);
   }
 
   if (!hasCustomDomainRoute(config, productionDomain)) {
     failures.push(`${label} config must route ${productionDomain} as a custom domain`);
-  }
-
-  const migrations = Array.isArray(config.migrations) ? config.migrations : [];
-  if (!migrations.some((migration) => migration?.new_sqlite_classes?.includes(containerClassName))) {
-    failures.push(`${label} config migrations must include ${containerClassName}`);
   }
 
   const runWorkerFirst = config.assets?.run_worker_first;
@@ -78,14 +59,19 @@ function validateProductionConfig(label, config, failures) {
   }
 }
 
-function validateNonProductionConfig(label, config, containersConfig, failures) {
-  if (config.name === containersConfig.name || config.name === productionWorkerName) {
-    failures.push(`${label} config must not share the production Worker name "${containersConfig.name}"`);
+function validateNonProductionConfig(label, config, productionConfig, failures) {
+  if (config.name === productionConfig?.name || config.name === productionWorkerName) {
+    failures.push(`${label} config must not share the production Worker name "${productionConfig?.name ?? productionWorkerName}"`);
   }
 
   if (hasRoutePattern(config, productionDomain)) {
     failures.push(`${label} config must not route ${productionDomain}`);
   }
+}
+
+function validateReferenceContainerConfig(_label, _config, _failures) {
+  // Legacy container config is kept as a reference artifact only. The default
+  // production deploy is intentionally validated by wrangler.jsonc.
 }
 
 function readWranglerConfig(path) {
