@@ -30,7 +30,7 @@ describe("Cloudflare local-first worker", () => {
     expect(packageJson.scripts["deploy:cloudflare"]).not.toContain("verify:runner-version");
     expect(packageJson.scripts["deploy:cloudflare"]).not.toContain("--containers-rollout");
     expect(packageJson.dependencies?.["@cloudflare/containers"]).toBeUndefined();
-    expect(defaultConfig.name).toBe("opencae");
+    expect(defaultConfig.name).toBe("opencae-alpha");
     expect(defaultConfig.routes).toContainEqual({ pattern: "cae.esau.app", custom_domain: true });
     expect(defaultConfig.containers).toBeUndefined();
     expect(defaultConfig.durable_objects).toBeUndefined();
