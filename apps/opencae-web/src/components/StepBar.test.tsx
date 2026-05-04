@@ -152,7 +152,7 @@ describe("StepBar", () => {
         project={project}
         study={{
           ...study,
-          solverSettings: { backend: "opencae_core" }
+          solverSettings: { backend: "cloudflare_fea" }
         }}
         hasResults={false}
         collapsed={false}
@@ -164,6 +164,6 @@ describe("StepBar", () => {
       />
     );
 
-    expect(html).toContain("<span>backend</span><strong>core</strong>");
+    expect(html).toContain("<span>backend</span><strong>cloud</strong>");
   });
 });
