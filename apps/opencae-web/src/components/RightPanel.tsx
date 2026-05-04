@@ -28,6 +28,8 @@ import {
 
 const DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.005;
 const MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.001;
+const MIN_CLOUD_FEA_OUTPUT_INTERVAL_SECONDS = 0.0005;
+const MAX_CLOUD_FEA_DYNAMIC_FRAMES = 250;
 const STRESS_EXAGGERATION_COMMIT_DELAY_MS = 120;
 const DYNAMIC_LOAD_PROFILE_OPTIONS: Array<{ value: DynamicSolverSettings["loadProfile"]; label: string; helper: string }> = [
   { value: "ramp", label: "Ramp to full load", helper: "Ramp: load starts at 0 and reaches full value at end time." },
@@ -946,7 +948,7 @@ function MeshPanel({ study, onGenerateMesh }: RightPanelProps) {
   );
 }
 
-function RunPanel({ study, runProgress, runTiming, onRunSimulation, onCancelSimulation, canCancelSimulation, onUpdateSolverSettings, canRunSimulation, missingRunItems }: RightPanelProps) {
+function RunPanel({ study, runProgress, runTiming, onRunSimulation, onCancelSimulation, canCancelSimulation, onUpdateSolverSettings, canRunSimulation, missingRunItems, cloudFeaAvailable, cloudFeaEndpoint }: RightPanelProps) {
   const progressPercent = Math.max(0, Math.min(100, Math.round(runProgress)));
   const isRunning = canCancelSimulation ?? (progressPercent > 0 && progressPercent < 100);
   const remainingLabel = formatSimulationEta(runTiming?.estimatedRemainingMs, isRunning);
@@ -961,6 +963,8 @@ function RunPanel({ study, runProgress, runTiming, onRunSimulation, onCancelSimu
   const backend = solverBackendForStudy(study);
   const effectiveRuntimeBackend = backend;
   const openCaeCoreSelected = effectiveRuntimeBackend === "opencae_core";
+  const cloudFeaUnavailable = false;
+  const runButtonEnabled = canRunSimulation && !cloudFeaUnavailable;
   const fidelity = solverFidelityForStudy(study);
   const updateSolverChoice = (settings: SolverSettingsPatch) => {
     onUpdateSolverSettings?.(settings);
@@ -997,6 +1001,10 @@ function RunPanel({ study, runProgress, runTiming, onRunSimulation, onCancelSimu
           {SIMULATION_FIDELITIES.map((option) => <option key={option} value={option}>{capitalize(option)}</option>)}
         </select>
       </label>
+      <div className="summary-box">
+        <Info label="Expected detail" value={fidelityEstimateLabel(fidelity)} />
+        <Info label="Runtime" value={openCaeCoreSelected ? "Browser OpenCAE Core CPU" : "Browser local"} />
+      </div>
       {dynamic && (
         <>
           <SectionTitle>Dynamic settings</SectionTitle>
@@ -1024,7 +1032,7 @@ function RunPanel({ study, runProgress, runTiming, onRunSimulation, onCancelSimu
       <button
         className="primary wide"
         onClick={onRunSimulation}
-        disabled={!canRunSimulation}
+        disabled={!runButtonEnabled}
         title={missingRunItems.length ? `Complete before running: ${missingRunItems.join(", ")}` : "Run simulation"}
       >
         <Play size={16} />Run simulation
@@ -1149,6 +1157,12 @@ function solverFidelityForStudy(study: Study): SimulationFidelity {
 
 function backendLabel(backend: SolverBackend) {
   return backend === "opencae_core" ? "OpenCAE Core" : "Detailed local";
+}
+
+function fidelityEstimateLabel(fidelity: SimulationFidelity) {
+  if (fidelity === "ultra") return "Ultra mesh and samples";
+  if (fidelity === "detailed") return "Fine mesh and samples";
+  return "Standard run";
 }
 
 export function formatSimulationEta(remainingMs: number | undefined, isRunning = true): string {
