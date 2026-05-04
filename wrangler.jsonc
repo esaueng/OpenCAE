@@ -8,7 +8,7 @@
   "workers_dev": false,
   "routes": [
     {
-      "pattern": "cae.esau.app",
+      "pattern": "alpha-cae.esau.app",
       "custom_domain": true
     }
   ],

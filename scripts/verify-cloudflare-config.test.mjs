@@ -82,13 +82,13 @@ describe("Cloudflare deployment config guard", () => {
     );
   });
 
-  test("fails when the production config loses cae.esau.app", () => {
+  test("fails when the production config loses alpha-cae.esau.app", () => {
     const defaultConfig = clone(readConfig("wrangler.jsonc"));
     const staticConfig = readConfig("wrangler.static.jsonc");
-    defaultConfig.routes = defaultConfig.routes.filter((route) => route.pattern !== "cae.esau.app");
+    defaultConfig.routes = defaultConfig.routes.filter((route) => route.pattern !== "alpha-cae.esau.app");
 
     expect(() => validateCloudflareConfigs({ defaultConfig, staticConfig })).toThrow(
-      /default config must route cae\.esau\.app as a custom domain/
+      /default config must route alpha-cae\.esau\.app as a custom domain/
     );
   });
 });

@@ -32,14 +32,14 @@ describe("Cloudflare local-first worker", () => {
     expect(packageJson.scripts["deploy:cloudflare"]).not.toContain("--containers-rollout");
     expect(packageJson.dependencies?.["@cloudflare/containers"]).toBeUndefined();
     expect(defaultConfig.name).toBe("opencae-alpha");
-    expect(defaultConfig.routes).toContainEqual({ pattern: "cae.esau.app", custom_domain: true });
+    expect(defaultConfig.routes).toContainEqual({ pattern: "alpha-cae.esau.app", custom_domain: true });
     expect(defaultConfig.containers).toBeUndefined();
     expect(defaultConfig.durable_objects).toBeUndefined();
     expect(defaultConfig.migrations).toEqual([{ tag: "v2-delete-cloud-fea-container", deleted_classes: ["OpenCaeFeaContainer"] }]);
   });
 
   test("health advertises browser OpenCAE Core runtime", async () => {
-    const response = await worker.fetch(new Request("https://cae.esau.app/health"), {
+    const response = await worker.fetch(new Request("https://alpha-cae.esau.app/health"), {
       ASSETS: { fetch: async () => new Response("asset") }
     } as Env);
 
@@ -50,7 +50,7 @@ describe("Cloudflare local-first worker", () => {
   });
 
   test("api routes explain browser-local simulation handling", async () => {
-    const response = await worker.fetch(new Request("https://cae.esau.app/api/cloud-fea/runs"), {
+    const response = await worker.fetch(new Request("https://alpha-cae.esau.app/api/cloud-fea/runs"), {
       ASSETS: { fetch: async () => new Response("asset") }
     } as Env);
 
