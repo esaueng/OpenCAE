@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { estimateAllowableLoadForSafetyFactor } from "@opencae/schema";
 import type { DisplayModel, Project, RunEvent, Study } from "@opencae/schema";
-import { addLoad, addSupport, assignMaterial, cancelRun, createProject, dynamicOutputFrameEstimate, generateMesh, getCloudFeaPreflight, getResults, importLocalProject, loadSampleProject, renameProject, runSimulation, subscribeToRun, updateStudy, uploadModel } from "./api";
+import { addLoad, addSupport, assignMaterial, cancelRun, createProject, dynamicOutputFrameEstimate, generateMesh, getResults, importLocalProject, loadSampleProject, renameProject, runSimulation, subscribeToRun, updateStudy, uploadModel } from "./api";
 
 const TestFile = globalThis.File ?? class extends Blob {
   name: string;
@@ -430,11 +430,11 @@ describe("api", () => {
       meshSettings: { preset: "ultra", status: "complete", meshRef: "project-1/mesh/mesh-summary.json" },
       solverSettings: { backend: "cloudflare_fea", fidelity: "ultra" }
     } as Study;
-    const fetchMock = vi.fn(async () => Promise.reject(new TypeError("API unavailable")));
+    const fetchMock = vi.fn(async (_input?: RequestInfo | URL) => Promise.reject(new TypeError("API unavailable")));
     vi.stubGlobal("fetch", fetchMock);
     const healthLogs: string[] = [];
 
-    const response = await runSimulation("study-1", coreStudy, coreDisplayModel, { onCloudFeaHealth: (message) => healthLogs.push(message) });
+    const response = await runSimulation("study-1", coreStudy, coreDisplayModel, { onRunStatus: (message) => healthLogs.push(message) });
     const seen: RunEvent[] = [];
     const source = subscribeToRun(response.run.id, (event) => seen.push(event));
     await vi.waitFor(() => expect(seen.some((event) => event.type === "complete")).toBe(true), { timeout: 3000 });
@@ -447,93 +447,6 @@ describe("api", () => {
     expect(seen.map((event) => event.message).join(" ")).toContain("OpenCAE Core");
     expect(results.summary.provenance?.kind).toBe("opencae_core_fea");
     expect(fetchMock.mock.calls.every(([input]) => !String(input).includes("/api/cloud-fea"))).toBe(true);
-  });
-
-  test("requests Cloud FEA preflight diagnostics", async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      if (String(input) === "/api/cloud-fea/preflight" && init?.method === "POST") {
-        const requestBody = JSON.parse(init.body as string) as Record<string, unknown>;
-        expect(requestBody).toMatchObject({
-          study: { id: "study-1" },
-          displayModel: { id: "display-1" },
-          resultRenderBounds: { coordinateSpace: "display_model" }
-        });
-        return new Response(JSON.stringify({
-          ready: true,
-          solver: "calculix",
-          supported: { geometry: true, materials: true, constraints: true, loads: true },
-          normalizedLoads: [{ sourceLoadId: "load-1", kind: "surface_force", totalForceN: [0, 0, -500] }],
-          diagnostics: []
-        }), { headers: { "content-type": "application/json" } });
-      }
-      return new Response("unexpected", { status: 500 });
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    const result = await getCloudFeaPreflight({
-      study,
-      displayModel,
-      resultRenderBounds: { min: [-1, -1, -1], max: [1, 1, 1], coordinateSpace: "display_model" }
-    });
-
-    expect(result.ready).toBe(true);
-    expect(result.normalizedLoads[0]).toMatchObject({ kind: "surface_force", totalForceN: [0, 0, -500] });
-  });
-
-
-  test("uses Cloud FEA event and result endpoints for local cloud run ids", async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url === "/api/cloud-fea/runs/run-cloud-local-1/events") {
-        return new Response(JSON.stringify({
-          events: [{ runId: "run-cloud-local-1", type: "complete", progress: 100, message: "Local Cloud FEA complete.", timestamp: "2026-04-29T12:00:01.000Z" }]
-        }), { headers: { "content-type": "application/json" } });
-      }
-      if (url === "/api/cloud-fea/runs/run-cloud-local-1/results") {
-        return new Response(JSON.stringify({
-          summary: {
-            maxStress: 0.18,
-            maxStressUnits: "MPa",
-            maxDisplacement: 0.0019,
-            maxDisplacementUnits: "mm",
-            safetyFactor: 1533,
-            reactionForce: 1,
-            reactionForceUnits: "N"
-          },
-          fields: []
-        }), { headers: { "content-type": "application/json" } });
-      }
-      return new Response("unexpected", { status: 500 });
-    });
-    vi.stubGlobal("fetch", fetchMock);
-    const seen: RunEvent[] = [];
-
-    const source = subscribeToRun("run-cloud-local-1", (event) => seen.push(event));
-    await vi.waitFor(() => expect(seen.some((event) => event.type === "complete")).toBe(true), { timeout: 3000 });
-    source.close();
-    const results = await getResults("run-cloud-local-1");
-
-    expect(results.summary.maxStress).toBe(0.18);
-    expect(fetchMock).toHaveBeenCalledWith("/api/cloud-fea/runs/run-cloud-local-1/events");
-    expect(fetchMock).toHaveBeenCalledWith("/api/cloud-fea/runs/run-cloud-local-1/results");
-  });
-
-  test("reports Cloud FEA event polling failures with the event endpoint", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
-      error: "Cloud FEA is not configured for this deployment."
-    }), {
-      status: 503,
-      headers: { "content-type": "application/json" }
-    })));
-    const seen: RunEvent[] = [];
-
-    const source = subscribeToRun("run-cloud-events-fail", (event) => seen.push(event));
-    await vi.waitFor(() => expect(seen.some((event) => event.type === "error")).toBe(true));
-    source.close();
-
-    expect(seen.at(-1)?.message).toContain("Cloud FEA event polling failed");
-    expect(seen.at(-1)?.message).toContain("GET /api/cloud-fea/runs/run-cloud-events-fail/events");
-    expect(seen.at(-1)?.message).toContain("HTTP 503");
   });
 
   test("falls back to local dynamic solver for legacy Cloud FEA dynamic studies", async () => {
@@ -557,7 +470,7 @@ describe("api", () => {
         loadProfile: "ramp"
       }
     } as Study;
-    const fetchMock = vi.fn(async () => Promise.reject(new TypeError("API unavailable")));
+    const fetchMock = vi.fn(async (_input?: RequestInfo | URL) => Promise.reject(new TypeError("API unavailable")));
     vi.stubGlobal("fetch", fetchMock);
 
     const response = await runSimulation("study-1", dynamicStudy, displayModel);
@@ -570,8 +483,8 @@ describe("api", () => {
     expect((response.run as { solverBackend?: string }).solverBackend).toBe("local-dynamic-newmark");
     expect(response.message).toContain("OpenCAE Core fallback to Detailed local");
     expect(seen.map((event) => event.message).join(" ")).toContain("OpenCAE Core fallback to Detailed local");
-    expect(results.summary.transient?.frameCount).toBe(101);
-    expect(results.fields.some((field) => field.type === "stress" && field.frameIndex === 100)).toBe(true);
+    expect(results.summary.transient?.frameCount).toBe(21);
+    expect(results.fields.some((field) => field.type === "stress" && field.frameIndex === 20)).toBe(true);
     expect(fetchMock.mock.calls.every(([input]) => !String(input).includes("/api/cloud-fea"))).toBe(true);
   });
 

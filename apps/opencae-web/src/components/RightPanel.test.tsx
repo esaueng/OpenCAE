@@ -361,9 +361,7 @@ describe("RightPanel payload mass controls", () => {
 
     const runHtml = renderPanel("run", {
       study: detailedStudy,
-      canRunSimulation: true,
-      cloudFeaAvailable: false,
-      cloudFeaEndpoint: "https://cae.esau.app/api/cloud-fea/runs"
+      canRunSimulation: true
     });
 
     expect(runHtml).toContain("OpenCAE Core");
@@ -372,7 +370,6 @@ describe("RightPanel payload mass controls", () => {
     expect(runHtml).not.toContain("Browser OpenCAE Core CPU");
     expect(runHtml).not.toContain("FEA_CONTAINER");
     expect(runHtml).not.toContain("Cloud FEA endpoint");
-    expect(runHtml).not.toContain("https://cae.esau.app/api/cloud-fea/runs");
     expect(runHtml).not.toContain('<button class="primary wide" disabled=""');
   });
 
@@ -383,15 +380,13 @@ describe("RightPanel payload mass controls", () => {
     };
 
     const runHtml = renderPanel("run", {
-      study: detailedStudy,
-      cloudFeaEndpoint: "https://cae.example/api/cloud-fea/runs"
+      study: detailedStudy
     });
 
     expect(runHtml).toContain("OpenCAE Core");
     expect(runHtml).not.toContain("Expected detail");
     expect(runHtml).not.toContain("Browser OpenCAE Core CPU");
     expect(runHtml).not.toContain("Cloud FEA endpoint");
-    expect(runHtml).not.toContain("https://cae.example/api/cloud-fea/runs");
     expect(runHtml).not.toContain("http://localhost:4317");
   });
 

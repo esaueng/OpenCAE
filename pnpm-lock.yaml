@@ -72,6 +72,9 @@ importers:
 
   apps/opencae-web:
     dependencies:
+      '@opencae/core':
+        specifier: workspace:*
+        version: link:../../libs/opencae-core
       '@opencae/db':
         specifier: workspace:*
         version: link:../../libs/opencae-db

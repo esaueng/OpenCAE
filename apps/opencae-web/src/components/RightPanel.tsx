@@ -91,8 +91,6 @@ interface RightPanelProps {
   canCancelSimulation?: boolean;
   canRunSimulation: boolean;
   missingRunItems: string[];
-  cloudFeaAvailable?: boolean;
-  cloudFeaEndpoint?: string;
   resultFrameIndex?: number;
   resultFramePosition?: number;
   resultFrameOrdinalPosition?: number;

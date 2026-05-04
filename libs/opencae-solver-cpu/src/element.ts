@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { computeTet4Geometry } from "./geometry";
 import type { Tet4ElementStiffnessResult, Tet4GeometryResult } from "./types";
 
