@@ -367,12 +367,14 @@ describe("RightPanel payload mass controls", () => {
     });
 
     expect(runHtml).toContain("Cloud FEA is unavailable on this app domain because this Worker was deployed without FEA_CONTAINER. Deploy with wrangler.containers.jsonc.");
-    expect(runHtml).toContain("Cloud FEA endpoint");
-    expect(runHtml).toContain("https://cae.esau.app/api/cloud-fea/runs");
+    expect(runHtml).not.toContain("Expected detail");
+    expect(runHtml).not.toContain("Cloud runtime");
+    expect(runHtml).not.toContain("Cloud FEA endpoint");
+    expect(runHtml).not.toContain("https://cae.esau.app/api/cloud-fea/runs");
     expect(runHtml).toContain('<button class="primary wide" disabled=""');
   });
 
-  test("shows the dynamic same-origin Cloud FEA endpoint", () => {
+  test("omits the dynamic same-origin Cloud FEA endpoint from the run panel", () => {
     const detailedStudy: Study = {
       ...study,
       solverSettings: { backend: "cloudflare_fea", fidelity: "ultra" }
@@ -383,8 +385,10 @@ describe("RightPanel payload mass controls", () => {
       cloudFeaEndpoint: "https://cae.example/api/cloud-fea/runs"
     });
 
-    expect(runHtml).toContain("Cloud FEA endpoint");
-    expect(runHtml).toContain("https://cae.example/api/cloud-fea/runs");
+    expect(runHtml).not.toContain("Expected detail");
+    expect(runHtml).not.toContain("Cloud runtime");
+    expect(runHtml).not.toContain("Cloud FEA endpoint");
+    expect(runHtml).not.toContain("https://cae.example/api/cloud-fea/runs");
     expect(runHtml).not.toContain("http://localhost:4317");
   });
 
@@ -408,7 +412,7 @@ describe("RightPanel payload mass controls", () => {
 
     const runHtml = renderPanel("run", { study: dynamicStudy });
 
-    expect(runHtml).toContain("CalculiX transient container");
+    expect(runHtml).not.toContain("CalculiX transient container");
     expect(runHtml).toContain("cloudflare-fea-calculix");
     expect(runHtml).toContain("cloudflare-queue-container");
     expect(runHtml).not.toContain("Cloud FEA is static-only right now");
