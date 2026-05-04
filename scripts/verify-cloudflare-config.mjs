@@ -5,7 +5,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const productionDomain = "cae.esau.app";
+const productionDomain = "alpha-cae.esau.app";
 const productionWorkerName = "opencae-alpha";
 const productionDeletionMigration = { tag: "v2-delete-cloud-fea-container", deleted_classes: ["OpenCaeFeaContainer"] };
 
