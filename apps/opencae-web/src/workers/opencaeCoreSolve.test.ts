@@ -57,11 +57,12 @@ const staticStudy = {
 } satisfies Study;
 
 describe("OpenCAE Core browser solver adapter", () => {
-  test("normalizes legacy cloud FEA backend selections to OpenCAE Core", () => {
+  test("normalizes omitted and legacy cloud FEA backend selections to OpenCAE Core", () => {
     expect(normalizeSolverBackend({ solverSettings: { backend: "cloudflare_fea" } })).toBe("opencae_core");
     expect(normalizeSolverBackend({ solverSettings: { backend: "opencae_core" } })).toBe("opencae_core");
     expect(normalizeSolverBackend({ solverSettings: { backend: "local_detailed" } })).toBe("local_detailed");
-    expect(normalizeSolverBackend({ solverSettings: {} })).toBe("local_detailed");
+    expect(normalizeSolverBackend({ solverSettings: {} })).toBe("opencae_core");
+    expect(normalizeSolverBackend(undefined)).toBe("opencae_core");
   });
 
   test("accepts static force studies with usable block dimensions", () => {

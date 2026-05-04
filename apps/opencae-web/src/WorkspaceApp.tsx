@@ -1355,7 +1355,7 @@ function latestCompletedRunId(study: Study | null, activeRunId: string): string 
 
 function isOpenCaeCoreStudy(study: Study | null): boolean {
   const backend = (study?.solverSettings as { backend?: unknown } | undefined)?.backend;
-  return backend === "opencae_core" || backend === "cloudflare_fea";
+  return backend !== "local_detailed";
 }
 
 function runDiagnosticsMessage(study: Study): string {
