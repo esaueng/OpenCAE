@@ -1,16 +1,12 @@
 /// <reference types="./worker-configuration" />
 
-type RuntimeEnv = Omit<Env, "ASSETS"> & {
-  ASSETS: Fetcher;
-};
-
 const jsonHeaders = {
   "content-type": "application/json; charset=utf-8",
   "cache-control": "no-store"
 };
 
 export default {
-  async fetch(request: Request, env: RuntimeEnv): Promise<Response> {
+  async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
 
     if (url.pathname === "/health") {
@@ -36,4 +32,4 @@ export default {
 
     return env.ASSETS.fetch(request);
   }
-};
+} satisfies ExportedHandler<Env>;
