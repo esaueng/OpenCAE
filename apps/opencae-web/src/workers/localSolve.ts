@@ -1,4 +1,5 @@
 import type { AnalysisMesh, DisplayModel, Study } from "@opencae/schema";
+import { normalizeSolverBackend, trySolveOpenCaeCoreStudy } from "./opencaeCoreSolve";
 import type { LocalSolveResult } from "./performanceProtocol";
 
 export async function fallbackSolveLocalStudy({
@@ -14,6 +15,11 @@ export async function fallbackSolveLocalStudy({
   displayModel?: DisplayModel;
   debugResults?: boolean;
 }): Promise<LocalSolveResult> {
+  if (normalizeSolverBackend(study) === "opencae_core") {
+    const coreSolved = trySolveOpenCaeCoreStudy({ study, runId, displayModel });
+    if (coreSolved.ok) return coreSolved.result;
+    if (debugResults) console.info("[OpenCAE Core] falling back to Detailed local", { studyId: study.id, reason: coreSolved.reason });
+  }
   const solver = await import("@opencae/solver-service");
   const options = { analysisMesh, displayModel, debugResults };
   const solved = study.type === "dynamic_structural"

@@ -38,7 +38,7 @@ describe("BottomPanel", () => {
     expect(html.indexOf(">github</a>")).toBeGreaterThan(html.indexOf("<b>solver</b>"));
   });
 
-  test("shows cloud backend status when Cloud FEA is selected", () => {
+  test("shows core backend status when OpenCAE Core is selected", () => {
     const html = renderToStaticMarkup(
       <BottomPanel
         status="Ready"
@@ -47,30 +47,30 @@ describe("BottomPanel", () => {
         studyName="Static Stress"
         meshStatus="Ready"
         solverStatus="Idle"
-        backendStatus="cloud"
+        backendStatus="core"
         onClearLogs={() => undefined}
       />
     );
 
     expect(html).toContain('class="backend-pill"');
-    expect(html).toContain(">cloud</span>");
+    expect(html).toContain(">core</span>");
   });
 
-  test("shows Cloud FEA errors instead of collapsing them to ready", () => {
+  test("shows OpenCAE Core errors instead of collapsing them to ready", () => {
     const html = renderToStaticMarkup(
       <BottomPanel
-        status="Cloud FEA run creation failed: POST /api/cloud-fea/runs failed with HTTP 404."
-        logs={["Cloud FEA run creation failed: POST /api/cloud-fea/runs failed with HTTP 404."]}
+        status="OpenCAE Core solve failed: singular matrix."
+        logs={["OpenCAE Core solve failed: singular matrix."]}
         projectName="Cantilever Demo"
         studyName="Static Stress"
         meshStatus="Ready"
         solverStatus="Idle"
-        backendStatus="cloud"
+        backendStatus="core"
         onClearLogs={() => undefined}
       />
     );
 
-    expect(html).toContain(">Cloud FEA error</span>");
+    expect(html).toContain(">OpenCAE Core error</span>");
     expect(html).not.toContain('class="status-state ready"');
   });
 

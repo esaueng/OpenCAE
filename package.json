@@ -11,8 +11,8 @@
     "verify:perf": "pnpm --filter @opencae/web build && node scripts/verify-web-performance.mjs",
     "verify:cloudflare-config": "node scripts/verify-cloudflare-config.mjs",
     "verify:runner-version": "node scripts/verify-runner-version.mjs",
-    "deploy:cloudflare": "pnpm verify:cloudflare-config && pnpm verify:runner-version && pnpm build:cloudflare && wrangler deploy --config wrangler.containers.jsonc --containers-rollout=immediate",
-    "deploy:cloudflare:dry-run": "pnpm verify:cloudflare-config && pnpm verify:runner-version && pnpm build:cloudflare && wrangler deploy --config wrangler.jsonc --dry-run",
+    "deploy:cloudflare": "pnpm verify:cloudflare-config && pnpm build:cloudflare && wrangler deploy --config wrangler.jsonc",
+    "deploy:cloudflare:dry-run": "pnpm verify:cloudflare-config && pnpm build:cloudflare && wrangler deploy --config wrangler.jsonc --dry-run",
     "deploy:cloudflare:static": "pnpm build:cloudflare && wrangler deploy --config wrangler.static.jsonc",
     "deploy:cloudflare:static:dry-run": "pnpm build:cloudflare && wrangler deploy --config wrangler.static.jsonc --dry-run",
     "deploy:cloudflare:local-first": "pnpm build:cloudflare && wrangler deploy --config wrangler.local-first.jsonc",
@@ -35,8 +35,5 @@
     "wrangler": "^4.85.0"
   },
   "packageManager": "pnpm@9.15.4",
-  "license": "Apache-2.0",
-  "dependencies": {
-    "@cloudflare/containers": "^0.3.3"
-  }
+  "license": "Apache-2.0"
 }

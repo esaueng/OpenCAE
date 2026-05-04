@@ -13,6 +13,7 @@
     "@opencae/db": "workspace:*",
     "@opencae/materials": "workspace:*",
     "@opencae/schema": "workspace:*",
+    "@opencae/solver-cpu": "workspace:*",
     "@opencae/solver-service": "workspace:*",
     "@opencae/study-core": "workspace:*",
     "@opencae/units": "workspace:*",

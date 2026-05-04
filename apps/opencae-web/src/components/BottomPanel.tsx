@@ -9,7 +9,7 @@ interface BottomPanelProps {
   studyName: string;
   meshStatus: string;
   solverStatus: string;
-  backendStatus: "local" | "cloud";
+  backendStatus: "local" | "core";
   onClearLogs: () => void;
 }
 
@@ -29,7 +29,7 @@ export function BottomPanel({ status, logs, projectName, studyName, meshStatus, 
   const dragStart = useRef<{ y: number; height: number } | null>(null);
   const expanded = tab !== null;
   const displayStatus = statusForDisplay(status, solverStatus);
-  const healthy = solverStatus === "Running" ? "running" : displayStatus === "Cloud FEA error" ? "warning" : meshStatus === "Ready" ? "ready" : "warning";
+  const healthy = solverStatus === "Running" ? "running" : displayStatus === "OpenCAE Core error" ? "warning" : meshStatus === "Ready" ? "ready" : "warning";
   const formattedLogs = logs.map(formatLogEntry);
 
   useEffect(() => {
@@ -223,10 +223,10 @@ export function KeyboardShortcutGuide() {
 
 function statusForDisplay(status: string, solverStatus: string) {
   const normalized = status.toLowerCase();
-  if (normalized.includes("cloud fea") && /(error|fail|failed|unavailable|not configured|not enabled|not ready)/.test(normalized)) return "Cloud FEA error";
+  if (normalized.includes("opencae core") && /(error|fail|failed|unavailable|not configured|not enabled|not ready)/.test(normalized)) return "OpenCAE Core error";
   if (solverStatus === "Running") return "Simulating";
   if (status.toLowerCase().includes("complete")) return "Results ready";
-  if (normalized.includes("cloud fea")) return "Cloud FEA active";
+  if (normalized.includes("opencae core")) return "OpenCAE Core active";
   return "Ready";
 }
 

@@ -4,7 +4,6 @@ import { describe, expect, test } from "vitest";
 import { parseJsonc, validateCloudflareConfigs } from "./verify-cloudflare-config.mjs";
 
 const rootDir = resolve(import.meta.dirname, "..");
-const expectedContainerImage = "./services/opencae-fea-container/Dockerfile";
 
 function readConfig(path) {
   return parseJsonc(readFileSync(resolve(rootDir, path), "utf8"), path);
@@ -15,7 +14,7 @@ function clone(value) {
 }
 
 describe("Cloudflare deployment config guard", () => {
-  test("passes with the corrected production and static configs", () => {
+  test("passes with browser-local production and static configs", () => {
     const defaultConfig = readConfig("wrangler.jsonc");
     const containersConfig = readConfig("wrangler.containers.jsonc");
     const staticConfig = readConfig("wrangler.static.jsonc");
@@ -24,69 +23,59 @@ describe("Cloudflare deployment config guard", () => {
     expect(defaultConfig.name).toBe("opencae");
     expect(staticConfig.name).toBe("opencae-static");
     expect(localFirstConfig.name).toBe("opencae-local-first");
-    expect(defaultConfig.containers?.[0]?.image).toBe(expectedContainerImage);
-    expect(containersConfig.containers?.[0]?.image).toBe(expectedContainerImage);
+    expect(defaultConfig.containers).toBeUndefined();
+    expect(defaultConfig.durable_objects).toBeUndefined();
     expect(() => validateCloudflareConfigs({ defaultConfig, containersConfig, staticConfig, localFirstConfig })).not.toThrow();
   });
 
-  test("default Workers Builds deploy can build and push the container image", () => {
+  test("default Workers deploy no longer builds or pushes a container image", () => {
     const packageJson = JSON.parse(readFileSync(resolve(rootDir, "package.json"), "utf8"));
 
     expect(packageJson.scripts.build).toBe("pnpm --filter @opencae/api build && pnpm --filter @opencae/web build");
-    expect(packageJson.scripts["deploy:cloudflare"]).toContain("wrangler deploy --config wrangler.containers.jsonc");
-    expect(packageJson.scripts["deploy:cloudflare"]).toContain("pnpm verify:runner-version");
+    expect(packageJson.scripts["deploy:cloudflare"]).toContain("wrangler deploy --config wrangler.jsonc");
+    expect(packageJson.scripts["deploy:cloudflare"]).not.toContain("verify:runner-version");
+    expect(packageJson.scripts["deploy:cloudflare"]).not.toContain("--containers-rollout");
+    expect(packageJson.dependencies?.["@cloudflare/containers"]).toBeUndefined();
   });
 
   test("fails when static and production configs share a Worker name", () => {
-    const containersConfig = readConfig("wrangler.containers.jsonc");
+    const defaultConfig = readConfig("wrangler.jsonc");
     const staticConfig = clone(readConfig("wrangler.static.jsonc"));
-    staticConfig.name = containersConfig.name;
+    staticConfig.name = defaultConfig.name;
 
-    expect(() => validateCloudflareConfigs({ containersConfig, staticConfig })).toThrow(
+    expect(() => validateCloudflareConfigs({ defaultConfig, staticConfig })).toThrow(
       /static config must not share the production Worker name/
     );
   });
 
   test("fails when local-first and production configs share a Worker name", () => {
-    const containersConfig = readConfig("wrangler.containers.jsonc");
+    const defaultConfig = readConfig("wrangler.jsonc");
     const staticConfig = readConfig("wrangler.static.jsonc");
     const localFirstConfig = clone(readConfig("wrangler.local-first.jsonc"));
-    localFirstConfig.name = containersConfig.name;
+    localFirstConfig.name = defaultConfig.name;
 
-    expect(() => validateCloudflareConfigs({ containersConfig, staticConfig, localFirstConfig })).toThrow(
+    expect(() => validateCloudflareConfigs({ defaultConfig, staticConfig, localFirstConfig })).toThrow(
       /local-first config must not share the production Worker name/
     );
   });
 
-  test("fails when the production config loses FEA_CONTAINER", () => {
-    const containersConfig = clone(readConfig("wrangler.containers.jsonc"));
+  test("fails when the default production config regains a container binding", () => {
+    const defaultConfig = clone(readConfig("wrangler.jsonc"));
     const staticConfig = readConfig("wrangler.static.jsonc");
-    containersConfig.durable_objects.bindings = containersConfig.durable_objects.bindings.filter(
-      (binding) => binding.name !== "FEA_CONTAINER"
-    );
+    defaultConfig.durable_objects = { bindings: [{ name: "FEA_CONTAINER", class_name: "OpenCaeFeaContainer" }] };
 
-    expect(() => validateCloudflareConfigs({ containersConfig, staticConfig })).toThrow(
-      /production config must bind durable object FEA_CONTAINER/
+    expect(() => validateCloudflareConfigs({ defaultConfig, staticConfig })).toThrow(
+      /must not bind Cloud FEA containers/
     );
   });
 
   test("fails when the production config loses cae.esau.app", () => {
-    const containersConfig = clone(readConfig("wrangler.containers.jsonc"));
+    const defaultConfig = clone(readConfig("wrangler.jsonc"));
     const staticConfig = readConfig("wrangler.static.jsonc");
-    containersConfig.routes = containersConfig.routes.filter((route) => route.pattern !== "cae.esau.app");
+    defaultConfig.routes = defaultConfig.routes.filter((route) => route.pattern !== "cae.esau.app");
 
-    expect(() => validateCloudflareConfigs({ containersConfig, staticConfig })).toThrow(
-      /production config must route cae\.esau\.app as a custom domain/
-    );
-  });
-
-  test("fails when the production container image is not the Dockerfile path for Workers Builds", () => {
-    const containersConfig = clone(readConfig("wrangler.containers.jsonc"));
-    const staticConfig = readConfig("wrangler.static.jsonc");
-    containersConfig.containers[0].image = "registry.cloudflare.com/747b74cbd7d019dd7aeecb2c24a4bf10/opencae/opencae-fea:0.1.2-dynamic-v1";
-
-    expect(() => validateCloudflareConfigs({ containersConfig, staticConfig })).toThrow(
-      /production config containers\[0\]\.image must be/
+    expect(() => validateCloudflareConfigs({ defaultConfig, staticConfig })).toThrow(
+      /default config must route cae\.esau\.app as a custom domain/
     );
   });
 });

@@ -258,51 +258,22 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const canRunSimulation = runReadiness.every((item) => item.done) && !solverRunning;
   const missingRunItems = runReadiness.filter((item) => !item.done).map((item) => item.label);
   const cloudFeaEndpoint = cloudFeaHealth?.cloudFeaEndpoint ?? cloudFeaRunsEndpointForCurrentOrigin();
-  const cloudFeaUnavailable = isCloudFeaStudy(study) && cloudFeaHealth?.cloudFeaAvailable === false;
-  const cloudFeaPreflightError = isCloudFeaStudy(study) && cloudFeaPreflight?.ready === false
-    ? cloudFeaPreflight.diagnostics.find((diagnostic) => diagnostic.severity === "error")?.message ?? "Cloud FEA preflight failed."
-    : null;
-  const effectiveMissingRunItems = cloudFeaPreflightError ? [...missingRunItems, "Cloud FEA preflight"] : missingRunItems;
-  const effectiveCanRunSimulation = canRunSimulation && !cloudFeaUnavailable && !cloudFeaPreflightError;
+  const cloudFeaUnavailable = false;
+  const cloudFeaPreflightError = null;
+  const effectiveMissingRunItems = missingRunItems;
+  const effectiveCanRunSimulation = canRunSimulation;
   const canUndoAction = undoStack.length > 0;
   const canRedoAction = redoStack.length > 0;
 
   useEffect(() => {
-    if (!isCloudFeaStudy(study)) {
-      setCloudFeaHealth(null);
-      setCloudFeaPreflight(null);
-      return undefined;
-    }
-    let cancelled = false;
-    void getCloudFeaHealth()
-      .then((health) => {
-        if (!cancelled) setCloudFeaHealth(health);
-      })
-      .catch(() => {
-        if (!cancelled) setCloudFeaHealth(null);
-      });
-    return () => {
-      cancelled = true;
-    };
+    setCloudFeaHealth(null);
+    setCloudFeaPreflight(null);
+    return undefined;
   }, [study?.id, study?.solverSettings]);
 
   useEffect(() => {
-    if (!study || !isCloudFeaStudy(study) || !displayModel) {
-      setCloudFeaPreflight(null);
-      return undefined;
-    }
-    const currentStudy = study;
-    let cancelled = false;
-    void getCloudFeaPreflight({ study: currentStudy, displayModel, resultRenderBounds })
-      .then((preflight) => {
-        if (!cancelled) setCloudFeaPreflight(preflight);
-      })
-      .catch(() => {
-        if (!cancelled) setCloudFeaPreflight(null);
-      });
-    return () => {
-      cancelled = true;
-    };
+    setCloudFeaPreflight(null);
+    return undefined;
   }, [displayModel, resultRenderBounds, study]);
 
   useEffect(() => {
@@ -930,8 +901,8 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     mergedSettings: DynamicSolverSettings & { backend?: SolverBackend; fidelity?: SimulationFidelity },
     patch: Partial<DynamicSolverSettings>
   ) {
-    const backend = mergedSettings.backend === "cloudflare_fea" ? "cloudflare_fea" : "local_detailed";
-    const minimumOutputInterval = backend === "cloudflare_fea" ? MIN_CLOUD_FEA_OUTPUT_INTERVAL_SECONDS : Math.max(DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS, MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS);
+    const backend = mergedSettings.backend === "opencae_core" || mergedSettings.backend === "cloudflare_fea" ? "opencae_core" : "local_detailed";
+    const minimumOutputInterval = Math.max(DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS, MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS);
     const requestedOutputInterval = patch.outputInterval ?? currentSettings.outputInterval ?? DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS;
     return {
       ...mergedSettings,
@@ -1036,7 +1007,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     setResultPlaybackPlaying(false);
     pushMessage("Starting simulation run.");
     pushMessage(runDiagnosticsMessage(study));
-    const cloudFeaRun = isCloudFeaStudy(study);
+    const cloudFeaRun = false;
     let response: Awaited<ReturnType<typeof runSimulation>>;
     try {
       response = await runSimulation(study.id, study, displayModel ?? undefined, { onCloudFeaHealth: pushMessage, resultRenderBounds });
@@ -1342,8 +1313,8 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           canCancelSimulation={solverRunning}
           canRunSimulation={effectiveCanRunSimulation}
           missingRunItems={effectiveMissingRunItems}
-          cloudFeaAvailable={isCloudFeaStudy(study) ? cloudFeaHealth?.cloudFeaAvailable : undefined}
-          cloudFeaEndpoint={isCloudFeaStudy(study) ? cloudFeaEndpoint : undefined}
+          cloudFeaAvailable={undefined}
+          cloudFeaEndpoint={undefined}
           resultFrameIndex={resultFrameIndex}
           resultFramePosition={resultVisualFramePosition}
           resultFrameOrdinalPosition={resultVisualOrdinalPosition}
@@ -1371,7 +1342,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         studyName={study?.name ?? "No simulation"}
         meshStatus={study?.meshSettings.status === "complete" ? "Ready" : "Not generated"}
         solverStatus={solverRunning ? "Running" : runProgress >= 100 ? "Complete" : "Idle"}
-        backendStatus={(study.solverSettings as { backend?: unknown }).backend === "cloudflare_fea" ? "cloud" : "local"}
+        backendStatus={isOpenCaeCoreStudy(study) ? "core" : "local"}
         onClearLogs={clearLogs}
       />
     </div>
@@ -1424,12 +1395,13 @@ function latestCompletedRunId(study: Study | null, activeRunId: string): string 
   return completed?.id ?? null;
 }
 
-function isCloudFeaStudy(study: Study | null): boolean {
-  return (study?.solverSettings as { backend?: unknown } | undefined)?.backend === "cloudflare_fea";
+function isOpenCaeCoreStudy(study: Study | null): boolean {
+  const backend = (study?.solverSettings as { backend?: unknown } | undefined)?.backend;
+  return backend === "opencae_core" || backend === "cloudflare_fea";
 }
 
 function runDiagnosticsMessage(study: Study): string {
-  const backend = isCloudFeaStudy(study) ? "cloudflare_fea" : "local_detailed";
+  const backend = isOpenCaeCoreStudy(study) ? "opencae_core" : "local_detailed";
   const fidelity = solverFidelityForDiagnostics(study);
   return [
     `Run diagnostics: backend=${backend}`,
