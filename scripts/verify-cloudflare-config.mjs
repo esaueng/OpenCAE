@@ -45,8 +45,11 @@ function validateProductionConfig(label, config, failures) {
     failures.push(`${label} config name must be "${productionWorkerName}", got "${String(config.name)}"`);
   }
 
-  if (config.durable_objects || config.containers || config.migrations) {
+  if (config.durable_objects || config.containers) {
     failures.push(`${label} config must not bind Cloud FEA containers; browser OpenCAE Core is the default runtime`);
+  }
+  if (!hasOnlyLegacyContainerDeletionMigration(config)) {
+    failures.push(`${label} config may only keep the delete migration for legacy OpenCaeFeaContainer`);
   }
 
   if (!hasCustomDomainRoute(config, productionDomain)) {
@@ -72,6 +75,16 @@ function validateNonProductionConfig(label, config, productionConfig, failures) 
 function validateReferenceContainerConfig(_label, _config, _failures) {
   // Legacy container config is kept as a reference artifact only. The default
   // production deploy is intentionally validated by wrangler.jsonc.
+}
+
+function hasOnlyLegacyContainerDeletionMigration(config) {
+  if (config.migrations === undefined) return true;
+  return Array.isArray(config.migrations) &&
+    config.migrations.length === 1 &&
+    config.migrations[0]?.tag === "v2-delete-legacy-fea-container" &&
+    Array.isArray(config.migrations[0]?.deleted_classes) &&
+    config.migrations[0].deleted_classes.length === 1 &&
+    config.migrations[0].deleted_classes[0] === "OpenCaeFeaContainer";
 }
 
 function readWranglerConfig(path) {

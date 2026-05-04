@@ -25,6 +25,10 @@ describe("Cloudflare deployment config guard", () => {
     expect(localFirstConfig.name).toBe("opencae-local-first");
     expect(defaultConfig.containers).toBeUndefined();
     expect(defaultConfig.durable_objects).toBeUndefined();
+    expect(defaultConfig.migrations).toEqual([{
+      tag: "v2-delete-legacy-fea-container",
+      deleted_classes: ["OpenCaeFeaContainer"]
+    }]);
     expect(() => validateCloudflareConfigs({ defaultConfig, containersConfig, staticConfig, localFirstConfig })).not.toThrow();
   });
 
@@ -66,6 +70,16 @@ describe("Cloudflare deployment config guard", () => {
 
     expect(() => validateCloudflareConfigs({ defaultConfig, staticConfig })).toThrow(
       /must not bind Cloud FEA containers/
+    );
+  });
+
+  test("fails when the default production config adds a non-deletion Durable Object migration", () => {
+    const defaultConfig = clone(readConfig("wrangler.jsonc"));
+    const staticConfig = readConfig("wrangler.static.jsonc");
+    defaultConfig.migrations = [{ tag: "v3", new_sqlite_classes: ["SomeOtherClass"] }];
+
+    expect(() => validateCloudflareConfigs({ defaultConfig, staticConfig })).toThrow(
+      /may only keep the delete migration/
     );
   });
 
