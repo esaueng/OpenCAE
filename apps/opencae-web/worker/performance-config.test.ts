@@ -34,6 +34,6 @@ describe("Cloudflare Worker performance config", () => {
 
     expect(workerSource).toContain("/// <reference types=\"./worker-configuration\"");
     expect(workerSource).not.toContain("type Env = {");
-    expect(workerSource).toContain("satisfies ExportedHandler<Env>");
+    expect(workerSource).toContain("satisfies ExportedHandler<RuntimeEnv>");
   });
 });
