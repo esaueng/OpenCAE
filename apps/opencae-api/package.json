@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@fastify/cors": "^10.0.2",
+    "@fastify/rate-limit": "^10.3.0",
     "@opencae/cad-service": "workspace:*",
     "@opencae/db": "workspace:*",
     "@opencae/jobs": "workspace:*",

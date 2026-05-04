@@ -92,22 +92,18 @@ function binaryStlTriangles(bytes: Uint8Array): Triangle[] {
 }
 
 function asciiStlBounds(bytes: Uint8Array) {
-  const text = new TextDecoder().decode(bytes);
-  const vertexPattern = /^\s*vertex\s+([-+]?\d*\.?\d+(?:e[-+]?\d+)?)\s+([-+]?\d*\.?\d+(?:e[-+]?\d+)?)\s+([-+]?\d*\.?\d+(?:e[-+]?\d+)?)/gim;
+  const vertices = asciiStlVertices(bytes);
+  if (!vertices.length) return undefined;
   const min: [number, number, number] = [Infinity, Infinity, Infinity];
   const max: [number, number, number] = [-Infinity, -Infinity, -Infinity];
-  let match: RegExpExecArray | null;
-  let vertexCount = 0;
-  while ((match = vertexPattern.exec(text))) {
-    vertexCount += 1;
+  for (const vertex of vertices) {
     for (let axis = 0; axis < 3; axis += 1) {
-      const value = Number(match[axis + 1]);
-      if (!Number.isFinite(value)) return undefined;
+      const value = vertex[axis]!;
       min[axis] = Math.min(min[axis]!, value);
       max[axis] = Math.max(max[axis]!, value);
     }
   }
-  return vertexCount ? { min, max } : undefined;
+  return { min, max };
 }
 
 function asciiStlTriangles(bytes: Uint8Array): Triangle[] {
@@ -121,15 +117,34 @@ function asciiStlTriangles(bytes: Uint8Array): Triangle[] {
 
 function asciiStlVertices(bytes: Uint8Array): Array<[number, number, number]> {
   const text = new TextDecoder().decode(bytes);
-  const vertexPattern = /^\s*vertex\s+([-+]?\d*\.?\d+(?:e[-+]?\d+)?)\s+([-+]?\d*\.?\d+(?:e[-+]?\d+)?)\s+([-+]?\d*\.?\d+(?:e[-+]?\d+)?)/gim;
   const vertices: Array<[number, number, number]> = [];
-  let match: RegExpExecArray | null;
-  while ((match = vertexPattern.exec(text))) {
-    const vertex = [Number(match[1]), Number(match[2]), Number(match[3])] as [number, number, number];
+  for (const line of text.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("vertex ")) continue;
+    const parts = splitAsciiWhitespace(trimmed);
+    if (parts.length !== 4) return [];
+    const vertex = [Number(parts[1]), Number(parts[2]), Number(parts[3])] as [number, number, number];
     if (!vertex.every((value) => Number.isFinite(value))) return [];
     vertices.push(vertex);
   }
   return vertices;
+}
+
+function splitAsciiWhitespace(value: string): string[] {
+  const parts: string[] = [];
+  let current = "";
+  for (const char of value) {
+    if (char === " " || char === "\t" || char === "\r" || char === "\n" || char === "\f") {
+      if (current) {
+        parts.push(current);
+        current = "";
+      }
+    } else {
+      current += char;
+    }
+  }
+  if (current) parts.push(current);
+  return parts;
 }
 
 function dot(a: [number, number, number], b: [number, number, number]) {

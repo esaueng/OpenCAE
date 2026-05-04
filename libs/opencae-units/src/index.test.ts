@@ -54,6 +54,29 @@ endsolid part
       units: "mm"
     });
   });
+
+  test("ignores long malformed ASCII STL content without regex parsing", () => {
+    const malformedLines = Array.from({ length: 20_000 }, (_, index) => `not-a-vertex ${index} ${"x".repeat(20)}`).join("\n");
+    const bytes = new TextEncoder().encode(`solid malformed\n${malformedLines}\nendsolid malformed`);
+
+    expect(stlDimensionsFromBytes(bytes)).toBeUndefined();
+  });
+
+  test("rejects ASCII STL vertices with non-finite coordinates", () => {
+    const bytes = new TextEncoder().encode(`
+solid invalid
+facet normal 0 0 1
+outer loop
+vertex 0 0 0
+vertex Infinity 0 0
+vertex 0 1 0
+endloop
+endfacet
+endsolid invalid
+`);
+
+    expect(stlDimensionsFromBytes(bytes)).toBeUndefined();
+  });
 });
 
 describe("mesh volume", () => {

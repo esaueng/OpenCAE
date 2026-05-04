@@ -1,5 +1,7 @@
 import cors from "@fastify/cors";
+import rateLimit from "@fastify/rate-limit";
 import Fastify from "fastify";
+import { fileURLToPath } from "node:url";
 import { inspectStepFile } from "@opencae/cad-service";
 import { SQLiteDatabaseProvider } from "@opencae/db";
 import { bracketDemoMaterial, bracketDemoProject, bracketDisplayModel, bracketResultFields, bracketResultSummary } from "@opencae/db/sample-data";
@@ -41,6 +43,13 @@ import {
 
 const api = Fastify({ logger: true });
 await api.register(cors, { origin: true });
+await api.register(rateLimit, {
+  global: false,
+  errorResponseBuilder: () => ({
+    statusCode: 429,
+    error: "Too many project creation requests. Please try again later."
+  })
+});
 
 const db = new SQLiteDatabaseProvider();
 const storage = new FileSystemObjectStorageProvider();
@@ -119,7 +128,14 @@ api.post("/api/sample-project/load", async (request) => {
 
 api.get("/api/projects", async () => ({ projects: db.listProjects() }));
 
-api.post("/api/projects", async (request) => {
+api.post("/api/projects", {
+  config: {
+    rateLimit: {
+      max: 30,
+      timeWindow: "1 minute"
+    }
+  }
+}, async (request) => {
   const body = request.body as Partial<Project> & { sample?: SampleModelId; analysisType?: string; mode?: "blank" | "sample" } | undefined;
   const now = new Date().toISOString();
   if (body?.mode !== "sample") {
@@ -537,8 +553,37 @@ function latestCompletedRunForProject(project: Project): StudyRun | undefined {
 }
 
 function pdfFilename(name: string): string {
-  const base = name.replace(/[^\w.-]+/g, "-").replace(/^-+|-+$/g, "").toLowerCase() || "opencae";
+  const base = safeSlug(name, "opencae");
   return `${base}-report.pdf`;
+}
+
+function safeSlug(value: string, fallback: string): string {
+  const chars: string[] = [];
+  let previousDash = false;
+  for (const char of value.toLowerCase()) {
+    if ((char >= "a" && char <= "z") || (char >= "0" && char <= "9") || char === "_" || char === ".") {
+      chars.push(char);
+      previousDash = false;
+    } else if (!previousDash && chars.length > 0) {
+      chars.push("-");
+      previousDash = true;
+    }
+    if (chars.length >= 96) break;
+  }
+  const slug = trimSlugBoundaries(chars.join(""));
+  return slug || fallback;
+}
+
+function trimSlugBoundaries(value: string): string {
+  let start = 0;
+  let end = value.length;
+  while (start < end && isSlugBoundary(value[start]!)) start += 1;
+  while (end > start && isSlugBoundary(value[end - 1]!)) end -= 1;
+  return value.slice(start, end);
+}
+
+function isSlugBoundary(char: string): boolean {
+  return char === "-" || char === "_" || char === ".";
 }
 
 async function pdfForReport(run: StudyRun | undefined, reportRef: string): Promise<Buffer> {
@@ -702,7 +747,7 @@ function isVector3(value: unknown): value is [number, number, number] {
 
 function sanitizeFilename(filename: unknown): string | undefined {
   if (typeof filename !== "string") return undefined;
-  const cleaned = filename.trim().split(/[\\/]/).pop()?.replace(/[^\w .-]/g, "_") ?? "";
+  const cleaned = safeFilenameComponent(pathBasename(filename.trim()));
   if (!cleaned) return undefined;
   const extension = cleaned.split(".").pop()?.toLowerCase();
   if (!extension || !["step", "stp", "stl", "obj"].includes(extension)) return undefined;
@@ -711,8 +756,47 @@ function sanitizeFilename(filename: unknown): string | undefined {
 
 function sanitizeProjectName(name: unknown): string | undefined {
   if (typeof name !== "string") return undefined;
-  const cleaned = name.trim().replace(/\s+/g, " ");
+  const cleaned = collapseWhitespace(name.trim());
   return cleaned || undefined;
+}
+
+function pathBasename(value: string): string {
+  let start = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index];
+    if (char === "/" || char === "\\") start = index + 1;
+  }
+  return value.slice(start);
+}
+
+function safeFilenameComponent(value: string): string {
+  let cleaned = "";
+  for (const char of value) {
+    if ((char >= "a" && char <= "z") || (char >= "A" && char <= "Z") || (char >= "0" && char <= "9") || char === "_" || char === " " || char === "." || char === "-") {
+      cleaned += char;
+    } else {
+      cleaned += "_";
+    }
+    if (cleaned.length >= 128) break;
+  }
+  return cleaned.trim();
+}
+
+function collapseWhitespace(value: string): string {
+  let cleaned = "";
+  let previousSpace = false;
+  for (const char of value) {
+    const isSpace = char === " " || char === "\t" || char === "\n" || char === "\r" || char === "\f";
+    if (isSpace) {
+      if (!previousSpace && cleaned) cleaned += " ";
+      previousSpace = true;
+    } else {
+      cleaned += char;
+      previousSpace = false;
+    }
+    if (cleaned.length >= 128) break;
+  }
+  return cleaned.trim();
 }
 
 async function ensureSampleArtifacts(): Promise<void> {
@@ -736,5 +820,11 @@ async function ensureSampleArtifacts(): Promise<void> {
   );
 }
 
-const port = Number(process.env.PORT ?? 4317);
-await api.listen({ port, host: "0.0.0.0" });
+export async function buildApi() {
+  return api;
+}
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  const port = Number(process.env.PORT ?? 4317);
+  await api.listen({ port, host: "0.0.0.0" });
+}

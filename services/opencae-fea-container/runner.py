@@ -56,6 +56,7 @@ MAX_SOLVER_LOG_ARTIFACT_BYTES = 256 * 1024
 STANDARD_GRAVITY = 9.80665
 DEFAULT_CCX_STATIC_TIMEOUT_SECONDS = 60
 DEFAULT_CCX_DYNAMIC_TIMEOUT_SECONDS = 300
+MAX_SAFE_FILE_COMPONENT_LENGTH = 96
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -159,6 +160,28 @@ def safe_json_value(value):
     return str(value)
 
 
+def safe_file_component(value, fallback):
+    source = str(value or "")
+    safe_chars = []
+    previous_separator = False
+    for char in source:
+        if char.isalnum() or char in {"_", "."}:
+            safe_chars.append(char)
+            previous_separator = False
+        elif char in {"-", " ", "/", "\\"}:
+            if safe_chars and not previous_separator:
+                safe_chars.append("-")
+                previous_separator = True
+        else:
+            if safe_chars and not previous_separator:
+                safe_chars.append("_")
+                previous_separator = True
+        if len(safe_chars) >= MAX_SAFE_FILE_COMPONENT_LENGTH:
+            break
+    safe = "".join(safe_chars).strip("-_.")
+    return safe or fallback
+
+
 def annotate_exception_phase(error, phase):
     if not hasattr(error, "exception_phase"):
         try:
@@ -179,7 +202,7 @@ def solve(payload):
 
 
 def solve_structured_block(parsed):
-    run_id = parsed["runId"]
+    run_id = safe_file_component(parsed["runId"], "run-cloud-container")
     try:
         mesh = generate_structured_hex_mesh(parsed["dimensions"], parsed["meshDensity"])
         boundaries = select_boundary_nodes(parsed, mesh)
@@ -219,7 +242,7 @@ def solve_structured_block(parsed):
 
 
 def solve_uploaded_geometry(parsed):
-    run_id = parsed["runId"]
+    run_id = safe_file_component(parsed["runId"], "run-cloud-container")
     with tempfile.TemporaryDirectory(prefix=f"{run_id}-") as tmp:
         workdir = Path(tmp)
         try:
@@ -279,7 +302,7 @@ def solve_uploaded_geometry(parsed):
 
 
 def parse_payload(payload):
-    run_id = payload.get("runId") if isinstance(payload.get("runId"), str) else "run-cloud-container"
+    run_id = safe_file_component(payload.get("runId") if isinstance(payload.get("runId"), str) else "", "run-cloud-container")
     study = payload.get("study") if isinstance(payload.get("study"), dict) else {}
     analysis_type = resolved_analysis_type(payload, study)
     dynamic = analysis_type == "dynamic_structural"
@@ -625,7 +648,7 @@ def uploaded_geometry_payload(payload):
     if geometry_format not in {"step", "stl", "obj"} or not isinstance(content_base64, str) or not content_base64.strip():
         raise UserFacingSolveError(UNSUPPORTED_UPLOADED_GEOMETRY_ERROR, 422)
     extension = ".stp" if geometry_format == "step" and filename.lower().endswith(".stp") else f".{geometry_format}"
-    safe_filename = re.sub(r"[^A-Za-z0-9_.-]+", "_", Path(filename).name) or f"uploaded{extension}"
+    safe_filename = safe_file_component(Path(filename).name, f"uploaded{extension}")
     if Path(safe_filename).suffix.lower() not in {".step", ".stp", ".stl", ".obj"}:
         safe_filename = f"{safe_filename}{extension}"
     return {
@@ -642,7 +665,13 @@ def stage_uploaded_geometry(workdir, geometry):
         raise UserFacingSolveError(f"{UNSUPPORTED_UPLOADED_GEOMETRY_ERROR} Invalid base64 geometry content.", 422) from error
     if not content:
         raise UserFacingSolveError(UNSUPPORTED_UPLOADED_GEOMETRY_ERROR, 422)
-    geometry_path = workdir / geometry["filename"]
+    root = workdir.resolve()
+    filename = safe_file_component(geometry.get("filename"), "uploaded.geometry")
+    geometry_path = (root / filename).resolve()
+    try:
+        geometry_path.relative_to(root)
+    except ValueError as error:
+        raise UserFacingSolveError(UNSUPPORTED_UPLOADED_GEOMETRY_ERROR, 422) from error
     geometry_path.write_bytes(content)
     return geometry_path
 
