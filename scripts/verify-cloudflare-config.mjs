@@ -70,8 +70,17 @@ function validateNonProductionConfig(label, config, productionConfig, failures) 
 }
 
 function validateReferenceContainerConfig(_label, _config, _failures) {
-  // Legacy container config is kept as a reference artifact only. The default
-  // production deploy is intentionally validated by wrangler.jsonc.
+  if (_config.name !== productionWorkerName) {
+    _failures.push(`${_label} config name must match "${productionWorkerName}" when deployed from the alpha Workers project`);
+  }
+
+  const containerName = _config.containers?.[0]?.name;
+  if (containerName !== `${productionWorkerName}-opencaefeacontainer`) {
+    _failures.push(`${_label} container application name must be "${productionWorkerName}-opencaefeacontainer", got "${String(containerName)}"`);
+  }
+
+  // Legacy container config is kept as a reference/manual experiment artifact.
+  // The default production deploy is intentionally validated by wrangler.jsonc.
 }
 
 function readWranglerConfig(path) {

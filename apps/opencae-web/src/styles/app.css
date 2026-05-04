@@ -1018,9 +1018,9 @@ img {
   align-items: center;
   min-height: 16px;
   padding: 0 5px;
-  color: var(--color-accent);
-  background: var(--color-accent-dim);
-  border: 1px solid var(--color-accent-border);
+  color: #ffb15f;
+  background: rgb(255 139 38 / 14%);
+  border: 1px solid rgb(255 139 38 / 42%);
   border-radius: var(--radius-sm);
   font-family: var(--font-mono);
   font-size: 10px;

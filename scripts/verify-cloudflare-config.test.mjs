@@ -21,6 +21,8 @@ describe("Cloudflare deployment config guard", () => {
     const localFirstConfig = readConfig("wrangler.local-first.jsonc");
 
     expect(defaultConfig.name).toBe("opencae-alpha");
+    expect(containersConfig.name).toBe("opencae-alpha");
+    expect(containersConfig.containers?.[0]?.name).toBe("opencae-alpha-opencaefeacontainer");
     expect(staticConfig.name).toBe("opencae-static");
     expect(localFirstConfig.name).toBe("opencae-local-first");
     expect(defaultConfig.containers).toBeUndefined();
