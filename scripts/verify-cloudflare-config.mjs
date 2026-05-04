@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
-const rootDir = resolve(import.meta.dirname, "..");
+const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const productionDomain = "cae.esau.app";
 const productionWorkerName = "opencae-alpha";
+const productionDeletionMigration = { tag: "v2-delete-cloud-fea-container", deleted_classes: ["OpenCaeFeaContainer"] };
 
 export function parseJsonc(source, label = "JSONC input") {
   try {
@@ -45,8 +46,12 @@ function validateProductionConfig(label, config, failures) {
     failures.push(`${label} config name must be "${productionWorkerName}", got "${String(config.name)}"`);
   }
 
-  if (config.durable_objects || config.containers || config.migrations) {
+  if (config.durable_objects || config.containers) {
     failures.push(`${label} config must not bind Cloud FEA containers; browser OpenCAE Core is the default runtime`);
+  }
+
+  if (!isAllowedProductionMigration(config.migrations)) {
+    failures.push(`${label} config may only include the Cloud FEA container deletion migration`);
   }
 
   if (!hasCustomDomainRoute(config, productionDomain)) {
@@ -93,6 +98,23 @@ function hasCustomDomainRoute(config, pattern) {
 
 function hasRoutePattern(config, pattern) {
   return Array.isArray(config.routes) && config.routes.some((route) => route?.pattern === pattern);
+}
+
+function isAllowedProductionMigration(migrations) {
+  if (migrations === undefined) return true;
+  if (!Array.isArray(migrations) || migrations.length !== 1) return false;
+
+  const migration = migrations[0];
+  const keys = Object.keys(migration ?? {}).sort();
+  return (
+    keys.length === 2 &&
+    keys[0] === "deleted_classes" &&
+    keys[1] === "tag" &&
+    migration.tag === productionDeletionMigration.tag &&
+    Array.isArray(migration.deleted_classes) &&
+    migration.deleted_classes.length === 1 &&
+    migration.deleted_classes[0] === productionDeletionMigration.deleted_classes[0]
+  );
 }
 
 function stripJsoncComments(source) {
