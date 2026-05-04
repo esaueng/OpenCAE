@@ -1001,10 +1001,6 @@ function RunPanel({ study, runProgress, runTiming, onRunSimulation, onCancelSimu
           {SIMULATION_FIDELITIES.map((option) => <option key={option} value={option}>{capitalize(option)}</option>)}
         </select>
       </label>
-      <div className="summary-box">
-        <Info label="Expected detail" value={fidelityEstimateLabel(fidelity)} />
-        <Info label="Runtime" value={openCaeCoreSelected ? "Browser OpenCAE Core CPU" : "Browser local"} />
-      </div>
       {dynamic && (
         <>
           <SectionTitle>Dynamic settings</SectionTitle>
@@ -1157,12 +1153,6 @@ function solverFidelityForStudy(study: Study): SimulationFidelity {
 
 function backendLabel(backend: SolverBackend) {
   return backend === "opencae_core" ? "OpenCAE Core" : "Detailed local";
-}
-
-function fidelityEstimateLabel(fidelity: SimulationFidelity) {
-  if (fidelity === "ultra") return "Ultra mesh and samples";
-  if (fidelity === "detailed") return "Fine mesh and samples";
-  return "Standard run";
 }
 
 export function formatSimulationEta(remainingMs: number | undefined, isRunning = true): string {

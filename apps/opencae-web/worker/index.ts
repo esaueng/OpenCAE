@@ -7,7 +7,7 @@ type RuntimeEnv = Omit<Env, "ASSETS"> & {
 const jsonHeaders = {
   "content-type": "application/json; charset=utf-8",
   "cache-control": "no-store"
-};
+} satisfies ExportedHandler<RuntimeEnv>;
 
 export default {
   async fetch(request: Request, env: RuntimeEnv): Promise<Response> {
