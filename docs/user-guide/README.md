@@ -15,7 +15,7 @@ Work through the Model, Material, Supports, Loads, Mesh, Run, Results, and Repor
 - Supports: select model faces and add fixed supports.
 - Loads: add force, pressure, or payload-weight loads. Payload loads can use selected payload objects and material density to calculate mass.
 - Mesh: choose coarse, medium, fine, or ultra sampling. The generated mesh summary is stored as a study artifact.
-- Run: pick the local detailed backend or Cloud FEA where available, review readiness messages, start a run, watch progress/log events, or cancel an active local run.
+- Run: pick Detailed local or OpenCAE Core, review readiness messages, start a run, watch progress/log events, or cancel an active local run. Unsupported OpenCAE Core cases fall back to Detailed local automatically.
 
 ## Results And Reports
 
