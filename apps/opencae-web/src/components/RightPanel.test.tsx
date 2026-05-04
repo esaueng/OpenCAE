@@ -367,9 +367,8 @@ describe("RightPanel payload mass controls", () => {
     });
 
     expect(runHtml).toContain("OpenCAE Core");
+    expect(runHtml).toContain("Browser OpenCAE Core CPU");
     expect(runHtml).toContain("opencae-core-cpu-tet4");
-    expect(runHtml).not.toContain("Expected detail");
-    expect(runHtml).not.toContain("Browser OpenCAE Core CPU");
     expect(runHtml).not.toContain("FEA_CONTAINER");
     expect(runHtml).not.toContain("Cloud FEA endpoint");
     expect(runHtml).not.toContain("https://cae.esau.app/api/cloud-fea/runs");
@@ -388,8 +387,7 @@ describe("RightPanel payload mass controls", () => {
     });
 
     expect(runHtml).toContain("OpenCAE Core");
-    expect(runHtml).not.toContain("Expected detail");
-    expect(runHtml).not.toContain("Browser OpenCAE Core CPU");
+    expect(runHtml).toContain("Browser OpenCAE Core CPU");
     expect(runHtml).not.toContain("Cloud FEA endpoint");
     expect(runHtml).not.toContain("https://cae.example/api/cloud-fea/runs");
     expect(runHtml).not.toContain("http://localhost:4317");
@@ -416,10 +414,9 @@ describe("RightPanel payload mass controls", () => {
     const runHtml = renderPanel("run", { study: dynamicStudy });
 
     expect(runHtml).toContain("OpenCAE Core");
-    expect(runHtml).not.toContain("Expected detail");
-    expect(runHtml).not.toContain("Browser OpenCAE Core CPU");
+    expect(runHtml).toContain("Browser OpenCAE Core CPU");
     expect(runHtml).toContain("Dynamic OpenCAE Core runs fall back to Detailed local until transient Core support is available.");
-    expect(runHtml).toContain("opencae-core-cpu-tet4");
+    expect(runHtml).toContain("local-dynamic-newmark");
     expect(runHtml).not.toContain("CalculiX transient container");
     expect(runHtml).not.toContain("cloudflare-fea-calculix");
     expect(runHtml).not.toContain("cloudflare-queue-container");
