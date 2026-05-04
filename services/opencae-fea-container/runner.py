@@ -179,7 +179,6 @@ def solve(payload):
 
 
 def solve_structured_block(parsed):
-    run_id = parsed["runId"]
     try:
         mesh = generate_structured_hex_mesh(parsed["dimensions"], parsed["meshDensity"])
         boundaries = select_boundary_nodes(parsed, mesh)
@@ -187,7 +186,7 @@ def solve_structured_block(parsed):
     except Exception as error:
         raise annotate_exception_phase(error, "mesh-generation")
 
-    with tempfile.TemporaryDirectory(prefix=f"{run_id}-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="opencae-run-") as tmp:
         workdir = Path(tmp)
         try:
             input_deck = write_calculix_input_deck(parsed, mesh, boundaries, nodal_loads)
@@ -219,8 +218,7 @@ def solve_structured_block(parsed):
 
 
 def solve_uploaded_geometry(parsed):
-    run_id = parsed["runId"]
-    with tempfile.TemporaryDirectory(prefix=f"{run_id}-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="opencae-run-") as tmp:
         workdir = Path(tmp)
         try:
             staged_geometry = stage_uploaded_geometry(workdir, parsed["geometry"])
@@ -279,7 +277,7 @@ def solve_uploaded_geometry(parsed):
 
 
 def parse_payload(payload):
-    run_id = payload.get("runId") if isinstance(payload.get("runId"), str) else "run-cloud-container"
+    run_id = safe_identifier(payload.get("runId") if isinstance(payload.get("runId"), str) else "run-cloud-container", "run-cloud-container")
     study = payload.get("study") if isinstance(payload.get("study"), dict) else {}
     analysis_type = resolved_analysis_type(payload, study)
     dynamic = analysis_type == "dynamic_structural"
@@ -625,9 +623,7 @@ def uploaded_geometry_payload(payload):
     if geometry_format not in {"step", "stl", "obj"} or not isinstance(content_base64, str) or not content_base64.strip():
         raise UserFacingSolveError(UNSUPPORTED_UPLOADED_GEOMETRY_ERROR, 422)
     extension = ".stp" if geometry_format == "step" and filename.lower().endswith(".stp") else f".{geometry_format}"
-    safe_filename = re.sub(r"[^A-Za-z0-9_.-]+", "_", Path(filename).name) or f"uploaded{extension}"
-    if Path(safe_filename).suffix.lower() not in {".step", ".stp", ".stl", ".obj"}:
-        safe_filename = f"{safe_filename}{extension}"
+    safe_filename = safe_uploaded_geometry_filename(filename, extension)
     return {
         "format": geometry_format,
         "filename": safe_filename,
@@ -642,9 +638,53 @@ def stage_uploaded_geometry(workdir, geometry):
         raise UserFacingSolveError(f"{UNSUPPORTED_UPLOADED_GEOMETRY_ERROR} Invalid base64 geometry content.", 422) from error
     if not content:
         raise UserFacingSolveError(UNSUPPORTED_UPLOADED_GEOMETRY_ERROR, 422)
-    geometry_path = workdir / geometry["filename"]
+    filename = geometry.get("filename") if isinstance(geometry.get("filename"), str) else ""
+    extension = f".{geometry.get('format')}" if isinstance(geometry.get("format"), str) else ""
+    safe_filename = safe_uploaded_geometry_filename(filename, extension)
+    if filename != safe_filename:
+        raise UserFacingSolveError(UNSUPPORTED_UPLOADED_GEOMETRY_ERROR, 422)
+    geometry_path = workdir / safe_filename
+    resolved_geometry_path = geometry_path.resolve()
+    resolved_workdir = workdir.resolve()
+    try:
+        resolved_geometry_path.relative_to(resolved_workdir)
+    except ValueError as error:
+        raise UserFacingSolveError(UNSUPPORTED_UPLOADED_GEOMETRY_ERROR, 422) from error
     geometry_path.write_bytes(content)
     return geometry_path
+
+
+def safe_identifier(value, fallback):
+    chars = []
+    previous_dash = False
+    for char in str(value):
+        if char.isalnum() or char in {"_", "."}:
+            chars.append(char)
+            previous_dash = False
+        elif not previous_dash and chars:
+            chars.append("-")
+            previous_dash = True
+    cleaned = "".join(chars).strip("._-")
+    return cleaned or fallback
+
+
+def safe_uploaded_geometry_filename(filename, extension):
+    basename = last_path_component(str(filename))
+    chars = []
+    for char in basename:
+        chars.append(char if char.isalnum() or char in {"_", ".", "-"} else "_")
+    safe_filename = "".join(chars).strip("._") or f"uploaded{extension}"
+    if Path(safe_filename).suffix.lower() not in {".step", ".stp", ".stl", ".obj"}:
+        safe_filename = f"{safe_filename}{extension}"
+    return safe_filename
+
+
+def last_path_component(filename):
+    start = 0
+    for index, char in enumerate(filename):
+        if char in {"/", "\\"}:
+            start = index + 1
+    return filename[start:]
 
 
 def generate_structured_hex_mesh(dimensions, density):
