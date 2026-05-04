@@ -182,6 +182,18 @@ def safe_file_component(value, fallback):
     return safe or fallback
 
 
+def basename_text(value):
+    return str(value or "").replace("\\", "/").rsplit("/", 1)[-1]
+
+
+def filename_suffix_text(value):
+    filename = str(value or "")
+    dot_index = filename.rfind(".")
+    if dot_index <= 0 or dot_index == len(filename) - 1:
+        return ""
+    return filename[dot_index:].lower()
+
+
 def annotate_exception_phase(error, phase):
     if not hasattr(error, "exception_phase"):
         try:
@@ -648,8 +660,8 @@ def uploaded_geometry_payload(payload):
     if geometry_format not in {"step", "stl", "obj"} or not isinstance(content_base64, str) or not content_base64.strip():
         raise UserFacingSolveError(UNSUPPORTED_UPLOADED_GEOMETRY_ERROR, 422)
     extension = ".stp" if geometry_format == "step" and filename.lower().endswith(".stp") else f".{geometry_format}"
-    safe_filename = safe_file_component(Path(filename).name, f"uploaded{extension}")
-    if Path(safe_filename).suffix.lower() not in {".step", ".stp", ".stl", ".obj"}:
+    safe_filename = safe_file_component(basename_text(filename), f"uploaded{extension}")
+    if filename_suffix_text(safe_filename) not in {".step", ".stp", ".stl", ".obj"}:
         safe_filename = f"{safe_filename}{extension}"
     return {
         "format": geometry_format,
