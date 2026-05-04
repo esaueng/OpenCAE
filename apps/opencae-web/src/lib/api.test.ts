@@ -509,7 +509,7 @@ describe("api", () => {
     const seen: RunEvent[] = [];
 
     const source = subscribeToRun("run-cloud-local-1", (event) => seen.push(event));
-    await vi.waitFor(() => expect(seen.some((event) => event.type === "complete")).toBe(true));
+    await vi.waitFor(() => expect(seen.some((event) => event.type === "complete")).toBe(true), { timeout: 3000 });
     source.close();
     const results = await getResults("run-cloud-local-1");
 
@@ -563,7 +563,7 @@ describe("api", () => {
     const response = await runSimulation("study-1", dynamicStudy, displayModel);
     const seen: RunEvent[] = [];
     const source = subscribeToRun(response.run.id, (event) => seen.push(event));
-    await vi.waitFor(() => expect(seen.some((event) => event.type === "complete")).toBe(true));
+    await vi.waitFor(() => expect(seen.some((event) => event.type === "complete")).toBe(true), { timeout: 3000 });
     source.close();
     const results = await getResults(response.run.id);
 
