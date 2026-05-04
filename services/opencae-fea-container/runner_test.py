@@ -1,5 +1,7 @@
 import math
 import base64
+import ast
+import inspect
 import shutil
 import sys
 import tempfile
@@ -169,6 +171,16 @@ class StructuredBlockSolveTest(unittest.TestCase):
 
 
 class UploadedGeometrySolveTest(unittest.TestCase):
+    def test_uploaded_geometry_payload_does_not_parse_user_filename_as_path(self):
+        source = inspect.getsource(runner.uploaded_geometry_payload)
+        tree = ast.parse(source)
+        path_calls = [
+            node for node in ast.walk(tree)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "Path"
+        ]
+
+        self.assertEqual(path_calls, [])
+
     def test_parse_payload_sanitizes_run_id_for_temporary_paths(self):
         payload = uploaded_geometry_payload()
         payload["runId"] = "../../run upload/evil"
