@@ -353,6 +353,17 @@ describe("RightPanel payload mass controls", () => {
     expect(meshHtml).toContain("45,000");
   });
 
+  test("selects OpenCAE Core when solver backend is omitted", () => {
+    const runHtml = renderPanel("run", {
+      study: {
+        ...study,
+        solverSettings: {}
+      }
+    });
+
+    expect(runHtml).toContain('<option value="opencae_core" selected="">OpenCAE Core</option>');
+  });
+
   test("keeps OpenCAE Core runs browser-local without container endpoint copy", () => {
     const detailedStudy: Study = {
       ...study,
