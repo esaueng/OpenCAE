@@ -108,7 +108,7 @@ const noopDraftPayloadPreviewChange = () => undefined;
 type SolverSettingsPatch = Partial<DynamicSolverSettings> & { backend?: SolverBackend; fidelity?: SimulationFidelity };
 const MESH_PRESETS: MeshQuality[] = ["coarse", "medium", "fine", "ultra"];
 const SIMULATION_FIDELITIES: SimulationFidelity[] = ["standard", "detailed", "ultra"];
-const SOLVER_BACKENDS: SolverBackend[] = ["local_detailed", "opencae_core"];
+const SOLVER_BACKENDS: SolverBackend[] = ["opencae_core", "local_detailed"];
 
 export function RightPanel(props: RightPanelProps) {
   return (
@@ -1137,7 +1137,7 @@ function meshPresetDescription(preset: MeshQuality) {
 
 function solverBackendForStudy(study: Study): SolverBackend {
   const backend = (study.solverSettings as { backend?: unknown }).backend;
-  return backend === "opencae_core" || backend === "cloudflare_fea" ? "opencae_core" : "local_detailed";
+  return backend === "local_detailed" ? "local_detailed" : "opencae_core";
 }
 
 function solverFidelityForStudy(study: Study): SimulationFidelity {

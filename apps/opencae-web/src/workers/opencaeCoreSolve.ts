@@ -28,7 +28,7 @@ const OPENCAE_CORE_PROVENANCE: ResultProvenance = {
 
 export function normalizeSolverBackend(value: { solverSettings?: { backend?: unknown } } | Study | undefined): NormalizedBrowserSolverBackend {
   const backend = value?.solverSettings?.backend;
-  return backend === "opencae_core" || backend === "cloudflare_fea" ? "opencae_core" : "local_detailed";
+  return backend === "local_detailed" ? "local_detailed" : "opencae_core";
 }
 
 export function openCaeCoreEligibility(study: Study, displayModel?: DisplayModel): OpenCaeCoreEligibility {

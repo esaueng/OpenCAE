@@ -378,7 +378,8 @@ describe("api", () => {
     });
     const results = await getResults(response.run.id);
 
-    expect(response.message).toBe("Simulation running locally.");
+    expect(response.message).toContain("OpenCAE Core fallback to Detailed local");
+    expect((response.run as { solverBackend?: string }).solverBackend).toBe("local-heuristic-surface");
     expect(completed.progress).toBe(100);
     expect(results.fields.map((field) => field.runId)).toEqual([response.run.id, response.run.id, response.run.id]);
     expect(results.summary.maxStress).toBeGreaterThan(0);
