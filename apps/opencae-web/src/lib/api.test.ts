@@ -430,7 +430,7 @@ describe("api", () => {
       meshSettings: { preset: "ultra", status: "complete", meshRef: "project-1/mesh/mesh-summary.json" },
       solverSettings: { backend: "cloudflare_fea", fidelity: "ultra" }
     } as Study;
-    const fetchMock = vi.fn(async () => Promise.reject(new TypeError("API unavailable")));
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => Promise.reject(new TypeError("API unavailable")));
     vi.stubGlobal("fetch", fetchMock);
     const healthLogs: string[] = [];
 
@@ -446,7 +446,7 @@ describe("api", () => {
     expect((response.run as { solverBackend?: string }).solverBackend).toBe("opencae-core-cpu-tet4");
     expect(seen.map((event) => event.message).join(" ")).toContain("OpenCAE Core");
     expect(results.summary.provenance?.kind).toBe("opencae_core_fea");
-    expect(fetchMock.mock.calls.every(([input]) => !String(input).includes("/api/cloud-fea"))).toBe(true);
+    expect(fetchMock.mock.calls.every((call) => !String(call[0]).includes("/api/cloud-fea"))).toBe(true);
   });
 
   test("requests Cloud FEA preflight diagnostics", async () => {
@@ -557,7 +557,7 @@ describe("api", () => {
         loadProfile: "ramp"
       }
     } as Study;
-    const fetchMock = vi.fn(async () => Promise.reject(new TypeError("API unavailable")));
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => Promise.reject(new TypeError("API unavailable")));
     vi.stubGlobal("fetch", fetchMock);
 
     const response = await runSimulation("study-1", dynamicStudy, displayModel);
@@ -572,7 +572,7 @@ describe("api", () => {
     expect(seen.map((event) => event.message).join(" ")).toContain("OpenCAE Core fallback to Detailed local");
     expect(results.summary.transient?.frameCount).toBe(21);
     expect(results.fields.some((field) => field.type === "stress" && field.frameIndex === 20)).toBe(true);
-    expect(fetchMock.mock.calls.every(([input]) => !String(input).includes("/api/cloud-fea"))).toBe(true);
+    expect(fetchMock.mock.calls.every((call) => !String(call[0]).includes("/api/cloud-fea"))).toBe(true);
   });
 
   test("estimates fine dynamic OpenCAE Core fallback output frames from requested output interval", () => {

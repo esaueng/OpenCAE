@@ -315,35 +315,10 @@ export async function addLoad(studyId: string, type: LoadType, value: number, se
 
 export async function runSimulation(studyId: string, currentStudy?: Study, displayModel?: DisplayModel, options: RunSimulationOptions = {}): Promise<{ run: { id: string }; streamUrl: string; message: string }> {
   try {
-    if (currentStudy && simulationBackend(currentStudy) === "cloudflare_fea") {
-      const route = await resolveCloudFeaApiBase(options);
-      const endpoint = cloudFeaApiUrl(route.apiBase, "/api/cloud-fea/runs");
-      options.onCloudFeaHealth?.(`Cloud FEA request started: POST ${endpoint}.`);
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          projectId: currentStudy.projectId,
-          studyId,
-          fidelity: simulationFidelity(currentStudy),
-          study: currentStudy,
-          displayModel,
-          resultRenderBounds: options.resultRenderBounds ?? undefined,
-          geometry: cloudFeaGeometryPayload(displayModel),
-          dynamicSettings: currentStudy.type === "dynamic_structural" ? currentStudy.solverSettings : undefined
-        })
-      });
-      const payload = await readJson<{ run: { id: string }; streamUrl: string; message: string }>(response, `POST ${endpoint}`);
-      cloudFeaApiBaseByRunId.set(payload.run.id, route.apiBase);
-      return payload;
-    }
     const response = await fetch(`/api/studies/${studyId}/runs`, { method: "POST" });
     return await readJson(response, `POST /api/studies/${studyId}/runs`);
   } catch (error) {
     if (!currentStudy) throw error;
-    if ((currentStudy.solverSettings as { backend?: unknown }).backend === "cloudflare_fea" && simulationBackend(currentStudy) !== "opencae_core") {
-      throw cloudFeaRunError(error);
-    }
     return runSimulationLocally(currentStudy, displayModel);
   }
 }
@@ -823,7 +798,7 @@ function meshSummaryForPreset(preset: MeshQuality, analysisMesh?: AnalysisMesh) 
   return summaryByPreset[preset];
 }
 
-function simulationBackend(study: Study): NormalizedBrowserSolverBackend | "cloudflare_fea" | undefined {
+function simulationBackend(study: Study): NormalizedBrowserSolverBackend {
   return normalizeSolverBackend(study);
 }
 

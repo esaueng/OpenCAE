@@ -98,7 +98,7 @@ describe("App workflow layout", () => {
     expect(appSource).toContain("onResultRenderBoundsChange={setResultRenderBounds}");
     expect(appSource).toContain("resultRenderBounds");
     expect(apiSource).toContain("resultRenderBounds?: ResultRenderBounds | null;");
-    expect(apiSource).toContain("resultRenderBounds: options.resultRenderBounds ?? undefined");
+    expect(apiSource).not.toContain("resultRenderBounds: options.resultRenderBounds ?? undefined");
   });
 
   test("enables deformed result shape when dynamic playback starts", () => {
