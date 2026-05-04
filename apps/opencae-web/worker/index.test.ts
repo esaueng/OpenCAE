@@ -24,6 +24,7 @@ describe("Cloudflare local-first worker", () => {
       routes?: Array<{ pattern?: string; custom_domain?: boolean }>;
       containers?: unknown;
       durable_objects?: unknown;
+      migrations?: unknown;
     };
 
     expect(packageJson.scripts["deploy:cloudflare"]).toContain("--config wrangler.jsonc");
@@ -34,6 +35,7 @@ describe("Cloudflare local-first worker", () => {
     expect(defaultConfig.routes).toContainEqual({ pattern: "cae.esau.app", custom_domain: true });
     expect(defaultConfig.containers).toBeUndefined();
     expect(defaultConfig.durable_objects).toBeUndefined();
+    expect(defaultConfig.migrations).toEqual([{ tag: "v2-delete-cloud-fea-container", deleted_classes: ["OpenCaeFeaContainer"] }]);
   });
 
   test("health advertises browser OpenCAE Core runtime", async () => {
