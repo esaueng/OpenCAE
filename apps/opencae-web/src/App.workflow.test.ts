@@ -74,31 +74,33 @@ describe("App workflow layout", () => {
     expect(prepareEffectBlock).not.toContain("resultPlaybackFps");
   });
 
-  test("rejects dynamic results that do not contain animation frames before showing Results", () => {
+  test("rejects dynamic cloud results that do not contain animation frames before showing Results", () => {
     expect(appSource).toContain("hasDynamicPlaybackFrames(results.summary, results.fields)");
-    expect(appSource).toContain("Dynamic results did not include animation frames.");
+    expect(appSource).toContain("Cloud FEA dynamic results did not include animation frames.");
     expect(appSource).toContain('if (study.type === "dynamic_structural" && !hasDynamicPlaybackFrames(results.summary, results.fields))');
   });
 
-  test("surfaces run creation failures instead of leaving the run button inert", () => {
+  test("surfaces Cloud FEA run creation failures instead of leaving the run button inert", () => {
     expect(appSource).toContain('pushMessage("Starting simulation run.");');
     expect(appSource).toContain("runDiagnosticsMessage(study)");
     expect(appSource).not.toContain('pushMessage("Cloud FEA request started: POST /api/cloud-fea/runs.");');
+    expect(apiSource).toContain("Cloud FEA request started: POST");
+    expect(apiSource).toContain("Cloud FEA local bridge selected:");
     expect(appSource).toContain("try {\n      response = await runSimulation(study.id, study, displayModel ?? undefined, { onCloudFeaHealth: pushMessage, resultRenderBounds });");
     expect(appSource).toContain("setRunProgress(0);");
-    expect(appSource).toContain('pushMessage(errorMessage(error, "Could not start simulation."));');
-    expect(appSource).toContain('pushMessage(errorMessage(error, "Could not load simulation results."));');
-    expect(appSource).not.toContain("Cloud FEA run created: runId=");
-    expect(appSource).not.toContain("Cloud FEA event polling started: GET");
-    expect(appSource).not.toContain("Cloud FEA results fetch started: GET");
+    expect(appSource).toContain('pushMessage(`Cloud FEA run creation failed: ${errorMessage(error, "Could not start simulation.")}`);');
+    expect(appSource).toContain("Cloud FEA run created: runId=");
+    expect(appSource).toContain("Cloud FEA event polling started: GET");
+    expect(appSource).toContain("Cloud FEA results fetch started: GET");
+    expect(appSource).toContain('pushMessage(`Cloud FEA results fetch failed: ${errorMessage(error, "Could not load simulation results.")}`);');
   });
 
-  test("passes measured viewer render bounds into simulation runs", () => {
+  test("passes measured viewer render bounds into Cloud FEA runs", () => {
     expect(appSource).toContain("const [resultRenderBounds, setResultRenderBounds] = useState<ResultRenderBounds | null>(null);");
     expect(appSource).toContain("onResultRenderBoundsChange={setResultRenderBounds}");
     expect(appSource).toContain("resultRenderBounds");
     expect(apiSource).toContain("resultRenderBounds?: ResultRenderBounds | null;");
-    expect(apiSource).not.toContain("resultRenderBounds: options.resultRenderBounds ?? undefined");
+    expect(apiSource).toContain("resultRenderBounds: options.resultRenderBounds ?? undefined");
   });
 
   test("enables deformed result shape when dynamic playback starts", () => {

@@ -3,7 +3,6 @@ import type { LoadApplicationPoint, LoadDirection, LoadType, PayloadLoadMetadata
 import { embedUploadedModelFile, type EmbeddedModelFile, type LocalResultBundle } from "../projectFile";
 import { createLocalBlankProject, createLocalSampleProject, createLocalUploadResponse, openLocalProjectPayload } from "../localProjectFactory";
 import { fallbackSolveLocalStudy, solveLocalStudyInWorker } from "../workers/performanceClient";
-import { normalizeSolverBackend, openCaeCoreEligibility, type NormalizedBrowserSolverBackend } from "../workers/opencaeCoreSolve";
 
 export interface SampleProjectResponse {
   message?: string;
@@ -315,10 +314,35 @@ export async function addLoad(studyId: string, type: LoadType, value: number, se
 
 export async function runSimulation(studyId: string, currentStudy?: Study, displayModel?: DisplayModel, options: RunSimulationOptions = {}): Promise<{ run: { id: string }; streamUrl: string; message: string }> {
   try {
+    if (currentStudy && simulationBackend(currentStudy) === "cloudflare_fea") {
+      const route = await resolveCloudFeaApiBase(options);
+      const endpoint = cloudFeaApiUrl(route.apiBase, "/api/cloud-fea/runs");
+      options.onCloudFeaHealth?.(`Cloud FEA request started: POST ${endpoint}.`);
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          projectId: currentStudy.projectId,
+          studyId,
+          fidelity: simulationFidelity(currentStudy),
+          study: currentStudy,
+          displayModel,
+          resultRenderBounds: options.resultRenderBounds ?? undefined,
+          geometry: cloudFeaGeometryPayload(displayModel),
+          dynamicSettings: currentStudy.type === "dynamic_structural" ? currentStudy.solverSettings : undefined
+        })
+      });
+      const payload = await readJson<{ run: { id: string }; streamUrl: string; message: string }>(response, `POST ${endpoint}`);
+      cloudFeaApiBaseByRunId.set(payload.run.id, route.apiBase);
+      return payload;
+    }
     const response = await fetch(`/api/studies/${studyId}/runs`, { method: "POST" });
     return await readJson(response, `POST /api/studies/${studyId}/runs`);
   } catch (error) {
     if (!currentStudy) throw error;
+    if (simulationBackend(currentStudy) === "cloudflare_fea") {
+      throw cloudFeaRunError(error);
+    }
     return runSimulationLocally(currentStudy, displayModel);
   }
 }
@@ -393,17 +417,19 @@ export function subscribeToRun(runId: string, onEvent: (event: RunEvent) => void
 
 function runSimulationLocally(study: Study, displayModel?: DisplayModel, staticBackendOverride?: "local_detailed"): { run: StudyRun; streamUrl: string; message: string } {
   const runId = `run-local-${crypto.randomUUID()}`;
-  const backend = staticBackendOverride ?? simulationBackend(study) ?? "local_detailed";
-  const coreEligibility = backend === "opencae_core" ? openCaeCoreEligibility(study, displayModel) : undefined;
   localResultSolversByRunId.set(runId, () => {
     const analysisMesh = displayModel ? analysisMeshForDisplayModel(displayModel, study.meshSettings.preset) : undefined;
     const payload = { study, runId, analysisMesh, displayModel, debugResults: debugResultsEnabled() };
     return solveLocalStudyInWorker(payload).catch(() => fallbackSolveLocalStudy(payload));
   });
   const now = new Date().toISOString();
-  const events: RunEvent[] = study.type === "dynamic_structural"
-    ? localDynamicRunEvents(runId, study, now, backend)
-    : localStaticRunEvents(runId, study, now, backend, coreEligibility);
+  const events: RunEvent[] = study.type === "dynamic_structural" ? localDynamicRunEvents(runId, study, now) : addRunTiming([
+    { runId, type: "state", progress: 0, message: "Simulation queued locally.", timestamp: now },
+    { runId, type: "progress", progress: 10, message: "Local static solver started.", timestamp: now },
+    { runId, type: "progress", progress: 46, message: "Assembling local stiffness response.", timestamp: now },
+    { runId, type: "progress", progress: 88, message: "Writing local result fields.", timestamp: now },
+    { runId, type: "complete", progress: 100, message: "Simulation complete.", timestamp: now }
+  ], localRunDurationEstimateMs(study));
   localEventsByRunId.set(runId, events);
   return {
     run: {
@@ -412,50 +438,17 @@ function runSimulationLocally(study: Study, displayModel?: DisplayModel, staticB
       status: "queued",
       jobId: `job-${runId}`,
       meshRef: study.meshSettings.meshRef,
-      solverBackend: localSolverBackendForRun(study, backend, coreEligibility),
+      solverBackend: localSolverBackendForRun(study, staticBackendOverride),
       solverVersion: "0.1.0",
       startedAt: now,
       diagnostics: []
     },
     streamUrl: `local:${runId}`,
-    message: backend === "opencae_core" && coreEligibility?.ok
-      ? "OpenCAE Core simulation running locally."
-      : backend === "opencae_core" && coreEligibility && !coreEligibility.ok
-        ? `OpenCAE Core fallback to Detailed local: ${coreEligibility.reason}`
-        : "Simulation running locally."
+    message: "Simulation running locally."
   };
 }
 
-function localStaticRunEvents(
-  runId: string,
-  study: Study,
-  timestamp: string,
-  backend: NormalizedBrowserSolverBackend,
-  coreEligibility?: ReturnType<typeof openCaeCoreEligibility>
-): RunEvent[] {
-  if (backend === "opencae_core" && coreEligibility?.ok) {
-    return addRunTiming([
-      { runId, type: "state", progress: 0, message: "OpenCAE Core solve queued in browser.", timestamp },
-      { runId, type: "progress", progress: 10, message: "OpenCAE Core CPU Tet4 solver started.", timestamp },
-      { runId, type: "progress", progress: 46, message: "Building OpenCAE Core model and stiffness matrix.", timestamp },
-      { runId, type: "progress", progress: 88, message: "Writing OpenCAE Core result fields.", timestamp },
-      { runId, type: "complete", progress: 100, message: "OpenCAE Core simulation complete.", timestamp }
-    ], localRunDurationEstimateMs(study));
-  }
-  const fallbackPrefix = backend === "opencae_core" && coreEligibility && !coreEligibility.ok
-    ? [{ runId, type: "message" as const, progress: 4, message: `OpenCAE Core fallback to Detailed local: ${coreEligibility.reason}`, timestamp }]
-    : [];
-  return addRunTiming([
-    { runId, type: "state", progress: 0, message: "Simulation queued locally.", timestamp },
-    ...fallbackPrefix,
-    { runId, type: "progress", progress: 10, message: "Local static solver started.", timestamp },
-    { runId, type: "progress", progress: 46, message: "Assembling local stiffness response.", timestamp },
-    { runId, type: "progress", progress: 88, message: "Writing local result fields.", timestamp },
-    { runId, type: "complete", progress: 100, message: "Simulation complete.", timestamp }
-  ], localRunDurationEstimateMs(study));
-}
-
-function localDynamicRunEvents(runId: string, study: Study, timestamp: string, backend: NormalizedBrowserSolverBackend = "local_detailed"): RunEvent[] {
+function localDynamicRunEvents(runId: string, study: Study, timestamp: string): RunEvent[] {
   const frameCount = dynamicOutputFrameEstimate(study);
   const estimatedDurationMs = localRunDurationEstimateMs(study, frameCount);
   const milestones = [...new Set([1, Math.ceil(frameCount * 0.2), Math.ceil(frameCount * 0.4), Math.ceil(frameCount * 0.6), Math.ceil(frameCount * 0.8), frameCount])]
@@ -469,18 +462,11 @@ function localDynamicRunEvents(runId: string, study: Study, timestamp: string, b
   }));
   return addRunTiming([
     { runId, type: "state", progress: 0, message: "Simulation queued locally.", timestamp },
-    ...(backend === "opencae_core" ? [{ runId, type: "message" as const, progress: 4, message: "OpenCAE Core fallback to Detailed local: OpenCAE Core browser solve currently supports static stress studies only.", timestamp }] : []),
     { runId, type: "progress", progress: 10, message: "Local dynamic solver started.", timestamp },
     { runId, type: "progress", progress: 34, message: "Estimating lumped mass, stiffness, and damping.", timestamp },
     { runId, type: "progress", progress: 62, message: "Integrating dynamic response with Newmark average acceleration.", timestamp },
     ...writeEvents,
-    {
-      runId,
-      type: "complete",
-      progress: 100,
-      message: backend === "opencae_core" ? "OpenCAE Core fallback to Detailed local simulation complete." : "Simulation complete.",
-      timestamp
-    }
+    { runId, type: "complete", progress: 100, message: "Simulation complete.", timestamp }
   ], estimatedDurationMs);
 }
 
@@ -505,7 +491,7 @@ function localRunDurationEstimateMs(study: Study, frameCount = study.type === "d
   return Math.round((1400 + frameCost) * meshMultiplier * dynamicMultiplier);
 }
 
-export function dynamicOutputFrameEstimate(study: Study, options: { backend?: "cloudflare_fea" | "opencae_core" | "local_detailed" } = {}): number {
+export function dynamicOutputFrameEstimate(study: Study, options: { backend?: "cloudflare_fea" | "local_detailed" } = {}): number {
   const raw = study.solverSettings as Partial<DynamicSolverSettings>;
   const startTime = finiteOr(raw.startTime, 0);
   const endTime = finiteOr(raw.endTime, 0.1);
@@ -798,12 +784,13 @@ function meshSummaryForPreset(preset: MeshQuality, analysisMesh?: AnalysisMesh) 
   return summaryByPreset[preset];
 }
 
-function simulationBackend(study: Study): NormalizedBrowserSolverBackend {
-  return normalizeSolverBackend(study);
+function simulationBackend(study: Study): "local_detailed" | "cloudflare_fea" | undefined {
+  const backend = (study.solverSettings as { backend?: unknown }).backend;
+  return backend === "cloudflare_fea" || backend === "local_detailed" ? backend : undefined;
 }
 
-function localSolverBackendForRun(study: Study, backend: NormalizedBrowserSolverBackend, coreEligibility?: ReturnType<typeof openCaeCoreEligibility>): string {
-  if (backend === "opencae_core" && coreEligibility?.ok) return "opencae-core-cpu-tet4";
+function localSolverBackendForRun(study: Study, staticBackendOverride?: "local_detailed"): string {
+  void staticBackendOverride;
   if (study.type === "dynamic_structural") return "local-dynamic-newmark";
   if (isBeamDemoStudyForLocalRun(study)) return "local-beam-demo-euler-bernoulli";
   return "local-heuristic-surface";

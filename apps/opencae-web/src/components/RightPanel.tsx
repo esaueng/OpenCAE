@@ -112,7 +112,7 @@ const noopDraftPayloadPreviewChange = () => undefined;
 type SolverSettingsPatch = Partial<DynamicSolverSettings> & { backend?: SolverBackend; fidelity?: SimulationFidelity };
 const MESH_PRESETS: MeshQuality[] = ["coarse", "medium", "fine", "ultra"];
 const SIMULATION_FIDELITIES: SimulationFidelity[] = ["standard", "detailed", "ultra"];
-const SOLVER_BACKENDS: SolverBackend[] = ["local_detailed", "opencae_core"];
+const SOLVER_BACKENDS: SolverBackend[] = ["local_detailed", "cloudflare_fea"];
 
 export function RightPanel(props: RightPanelProps) {
   return (
@@ -962,8 +962,8 @@ function RunPanel({ study, runProgress, runTiming, onRunSimulation, onCancelSimu
   const dynamic = study.type === "dynamic_structural" ? study.solverSettings : null;
   const backend = solverBackendForStudy(study);
   const effectiveRuntimeBackend = backend;
-  const openCaeCoreSelected = effectiveRuntimeBackend === "opencae_core";
-  const cloudFeaUnavailable = false;
+  const cloudFeaSelected = effectiveRuntimeBackend === "cloudflare_fea";
+  const cloudFeaUnavailable = cloudFeaSelected && cloudFeaAvailable === false;
   const runButtonEnabled = canRunSimulation && !cloudFeaUnavailable;
   const fidelity = solverFidelityForStudy(study);
   const updateSolverChoice = (settings: SolverSettingsPatch) => {
@@ -977,8 +977,8 @@ function RunPanel({ study, runProgress, runTiming, onRunSimulation, onCancelSimu
     if (!isDynamicLoadProfile(value)) return;
     onUpdateSolverSettings?.({ loadProfile: value });
   };
-  const frameEstimate = dynamic ? dynamicFrameEstimate(dynamic, openCaeCoreSelected ? "opencae_core" : "local_detailed") : null;
-  const outputIntervalMinimum = MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS;
+  const frameEstimate = dynamic ? dynamicFrameEstimate(dynamic, cloudFeaSelected ? "cloudflare_fea" : "local_detailed") : null;
+  const outputIntervalMinimum = cloudFeaSelected ? MIN_CLOUD_FEA_OUTPUT_INTERVAL_SECONDS : MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS;
   const outputIntervalValue = dynamic?.outputInterval ?? DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS;
   const loadProfile = isDynamicLoadProfile(dynamic?.loadProfile) ? dynamic.loadProfile : "ramp";
   const loadProfileHelper = DYNAMIC_LOAD_PROFILE_OPTIONS.find((option) => option.value === loadProfile)?.helper ?? DEFAULT_DYNAMIC_LOAD_PROFILE_HELPER;
@@ -1001,6 +1001,12 @@ function RunPanel({ study, runProgress, runTiming, onRunSimulation, onCancelSimu
           {SIMULATION_FIDELITIES.map((option) => <option key={option} value={option}>{capitalize(option)}</option>)}
         </select>
       </label>
+      <div className="summary-box">
+        <Info label="Expected detail" value={fidelityEstimateLabel(fidelity)} />
+        <Info label="Cloud runtime" value={cloudFeaSelected ? dynamic ? "CalculiX transient container" : "CalculiX container" : "Browser local"} />
+        {cloudFeaSelected && cloudFeaEndpoint ? <Info label="Cloud FEA endpoint" value={cloudFeaEndpoint} /> : null}
+      </div>
+      {cloudFeaUnavailable ? <Callout>Cloud FEA is unavailable on this app domain because this Worker was deployed without FEA_CONTAINER. Deploy with wrangler.containers.jsonc.</Callout> : null}
       {dynamic && (
         <>
           <SectionTitle>Dynamic settings</SectionTitle>
@@ -1018,9 +1024,9 @@ function RunPanel({ study, runProgress, runTiming, onRunSimulation, onCancelSimu
           <DynamicNumberField label="Damping ratio" unit="ζ" value={dynamic.dampingRatio} min={0} step="0.01" onCommit={(value) => updateDynamicNumber("dampingRatio", value)} />
           <div className="summary-box">
             <Info label="Estimated frames" value={frameEstimate ? frameEstimate.count.toLocaleString() : "--"} />
-            <Info label="Output cadence" value={`Every ${formatSeconds(normalizedDynamicOutputInterval(dynamic, openCaeCoreSelected ? "opencae_core" : "local_detailed"))}`} />
+            <Info label="Output cadence" value={`Every ${formatSeconds(normalizedDynamicOutputInterval(dynamic, cloudFeaSelected ? "cloudflare_fea" : "local_detailed"))}`} />
           </div>
-          {openCaeCoreSelected && <p className="panel-copy">Dynamic OpenCAE Core runs fall back to Detailed local until transient Core support is available.</p>}
+          {cloudFeaSelected && frameEstimate && frameEstimate.count > MAX_CLOUD_FEA_DYNAMIC_FRAMES && <p className="panel-copy">Cloud FEA dynamic output would exceed frame budget; increase output interval or reduce end time.</p>}
           {frameEstimate && frameEstimate.count > 1000 && <p className="panel-copy">Large frame counts may slow result loading and playback.</p>}
           {frameEstimate?.hasFinalPartialStep && <p className="panel-copy">Final frame is clamped to the selected end time.</p>}
         </>
@@ -1029,7 +1035,7 @@ function RunPanel({ study, runProgress, runTiming, onRunSimulation, onCancelSimu
         className="primary wide"
         onClick={onRunSimulation}
         disabled={!runButtonEnabled}
-        title={missingRunItems.length ? `Complete before running: ${missingRunItems.join(", ")}` : "Run simulation"}
+        title={cloudFeaUnavailable ? "Cloud FEA is unavailable on this app domain." : missingRunItems.length ? `Complete before running: ${missingRunItems.join(", ")}` : "Run simulation"}
       >
         <Play size={16} />Run simulation
       </button>
@@ -1051,9 +1057,9 @@ function RunPanel({ study, runProgress, runTiming, onRunSimulation, onCancelSimu
       )}
       <SectionTitle helpId="solver">Solver</SectionTitle>
       <div className="summary-box">
-        <Info label="Backend" value={openCaeCoreSelected ? "opencae-core-cpu-tet4" : study.type === "dynamic_structural" ? "local-dynamic-newmark" : "local-heuristic-surface"} />
+        <Info label="Backend" value={cloudFeaSelected ? "cloudflare-fea-calculix" : study.type === "dynamic_structural" ? "local-dynamic-newmark" : "local-heuristic-surface"} />
         <Info label="Version" value="0.1.0" />
-        <Info label="Runner" value={openCaeCoreSelected ? "browser-worker" : "local-in-memory"} />
+        <Info label="Runner" value={cloudFeaSelected ? "cloudflare-queue-container" : "local-in-memory"} />
       </div>
     </Panel>
   );
@@ -1143,7 +1149,7 @@ function meshPresetDescription(preset: MeshQuality) {
 
 function solverBackendForStudy(study: Study): SolverBackend {
   const backend = (study.solverSettings as { backend?: unknown }).backend;
-  return backend === "opencae_core" || backend === "cloudflare_fea" ? "opencae_core" : "local_detailed";
+  return backend === "cloudflare_fea" ? "cloudflare_fea" : "local_detailed";
 }
 
 function solverFidelityForStudy(study: Study): SimulationFidelity {
@@ -1152,7 +1158,13 @@ function solverFidelityForStudy(study: Study): SimulationFidelity {
 }
 
 function backendLabel(backend: SolverBackend) {
-  return backend === "opencae_core" ? "OpenCAE Core" : "Detailed local";
+  return backend === "cloudflare_fea" ? "Cloud FEA" : "Detailed local";
+}
+
+function fidelityEstimateLabel(fidelity: SimulationFidelity) {
+  if (fidelity === "ultra") return "Ultra mesh and samples";
+  if (fidelity === "detailed") return "Fine mesh and samples";
+  return "Standard run";
 }
 
 export function formatSimulationEta(remainingMs: number | undefined, isRunning = true): string {
@@ -1671,7 +1683,7 @@ function dynamicFrameEstimate(settings: DynamicSolverSettings, backend: SolverBa
 
 function normalizedDynamicOutputInterval(settings: DynamicSolverSettings, backend: SolverBackend = "local_detailed") {
   const requestedOutputInterval = Number.isFinite(settings.outputInterval) ? settings.outputInterval : DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS;
-  const backendMinimum = Math.max(DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS, MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS);
+  const backendMinimum = backend === "cloudflare_fea" ? MIN_CLOUD_FEA_OUTPUT_INTERVAL_SECONDS : Math.max(DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS, MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS);
   return Math.max(requestedOutputInterval, settings.timeStep, backendMinimum);
 }
 

@@ -1,7 +1,7 @@
 import { lazy, startTransition, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Constraint, DisplayFace, DisplayModel, DynamicSolverSettings, Load, NamedSelection, Project, ResultField, ResultRenderBounds, ResultSummary, RunEvent, RunTimingEstimate, SimulationFidelity, SolverBackend, Study } from "@opencae/schema";
 import { RotateCcw, Save } from "lucide-react";
-import { addLoad, addSupport, assignMaterial, cancelRun, createProject, generateMesh, getResults, importLocalProject, loadSampleProject, renameProject, runSimulation, subscribeToRun, updateStudy as saveStudyPatch, uploadModel, type SampleAnalysisType, type SampleModelId } from "./lib/api";
+import { addLoad, addSupport, assignMaterial, cancelRun, createProject, generateMesh, getCloudFeaHealth, getCloudFeaPreflight, getResults, importLocalProject, loadSampleProject, renameProject, runSimulation, subscribeToRun, updateStudy as saveStudyPatch, uploadModel, type CloudFeaPreflightResponse, type CloudFeaRouteHealth, type SampleAnalysisType, type SampleModelId } from "./lib/api";
 import { normalizePrintParameters, starterMaterials } from "@opencae/materials";
 import { BottomPanel } from "./components/BottomPanel";
 import { OpenCaeLogoMark } from "./components/OpenCaeLogoMark";
@@ -148,6 +148,8 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const [previewPrintLayerOrientation, setPreviewPrintLayerOrientation] = useState<PrintLayerOrientation | null | undefined>(undefined);
   const [isStepbarCollapsed, setIsStepbarCollapsed] = useState(false);
   const [showBoundaryConditionMenu, setShowBoundaryConditionMenu] = useState(false);
+  const [cloudFeaHealth, setCloudFeaHealth] = useState<CloudFeaRouteHealth | null>(null);
+  const [cloudFeaPreflight, setCloudFeaPreflight] = useState<CloudFeaPreflightResponse | null>(null);
   const didRequestRestoredHomeView = useRef(false);
   const activeRunSourceRef = useRef<EventSource | null>(null);
   const processingRunIdRef = useRef<string | null>(null);
@@ -255,10 +257,53 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const runReadiness = useMemo(() => readinessForStudy(study), [study]);
   const canRunSimulation = runReadiness.every((item) => item.done) && !solverRunning;
   const missingRunItems = runReadiness.filter((item) => !item.done).map((item) => item.label);
-  const effectiveMissingRunItems = missingRunItems;
-  const effectiveCanRunSimulation = canRunSimulation;
+  const cloudFeaEndpoint = cloudFeaHealth?.cloudFeaEndpoint ?? cloudFeaRunsEndpointForCurrentOrigin();
+  const cloudFeaUnavailable = isCloudFeaStudy(study) && cloudFeaHealth?.cloudFeaAvailable === false;
+  const cloudFeaPreflightError = isCloudFeaStudy(study) && cloudFeaPreflight?.ready === false
+    ? cloudFeaPreflight.diagnostics.find((diagnostic) => diagnostic.severity === "error")?.message ?? "Cloud FEA preflight failed."
+    : null;
+  const effectiveMissingRunItems = cloudFeaPreflightError ? [...missingRunItems, "Cloud FEA preflight"] : missingRunItems;
+  const effectiveCanRunSimulation = canRunSimulation && !cloudFeaUnavailable && !cloudFeaPreflightError;
   const canUndoAction = undoStack.length > 0;
   const canRedoAction = redoStack.length > 0;
+
+  useEffect(() => {
+    if (!isCloudFeaStudy(study)) {
+      setCloudFeaHealth(null);
+      setCloudFeaPreflight(null);
+      return undefined;
+    }
+    let cancelled = false;
+    void getCloudFeaHealth()
+      .then((health) => {
+        if (!cancelled) setCloudFeaHealth(health);
+      })
+      .catch(() => {
+        if (!cancelled) setCloudFeaHealth(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [study?.id, study?.solverSettings]);
+
+  useEffect(() => {
+    if (!study || !isCloudFeaStudy(study) || !displayModel) {
+      setCloudFeaPreflight(null);
+      return undefined;
+    }
+    const currentStudy = study;
+    let cancelled = false;
+    void getCloudFeaPreflight({ study: currentStudy, displayModel, resultRenderBounds })
+      .then((preflight) => {
+        if (!cancelled) setCloudFeaPreflight(preflight);
+      })
+      .catch(() => {
+        if (!cancelled) setCloudFeaPreflight(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [displayModel, resultRenderBounds, study]);
 
   useEffect(() => {
     if (!initialAction || initialActionConsumedRef.current) return;
@@ -885,8 +930,8 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     mergedSettings: DynamicSolverSettings & { backend?: SolverBackend; fidelity?: SimulationFidelity },
     patch: Partial<DynamicSolverSettings>
   ) {
-    const backend = mergedSettings.backend === "opencae_core" || mergedSettings.backend === "cloudflare_fea" ? "opencae_core" : "local_detailed";
-    const minimumOutputInterval = Math.max(DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS, MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS);
+    const backend = mergedSettings.backend === "cloudflare_fea" ? "cloudflare_fea" : "local_detailed";
+    const minimumOutputInterval = backend === "cloudflare_fea" ? MIN_CLOUD_FEA_OUTPUT_INTERVAL_SECONDS : Math.max(DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS, MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS);
     const requestedOutputInterval = patch.outputInterval ?? currentSettings.outputInterval ?? DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS;
     return {
       ...mergedSettings,
@@ -977,12 +1022,21 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   async function handleRunSimulation() {
     if (!study) return;
     if (!effectiveCanRunSimulation) {
+      if (cloudFeaUnavailable) {
+        pushMessage("Cloud FEA is unavailable on this app domain because this Worker was deployed without FEA_CONTAINER. Deploy with wrangler.containers.jsonc.");
+        return;
+      }
+      if (cloudFeaPreflightError) {
+        pushMessage(`Cloud FEA preflight failed: ${cloudFeaPreflightError}`);
+        return;
+      }
       pushMessage(effectiveMissingRunItems.length ? `Complete before running: ${effectiveMissingRunItems.join(", ")}.` : "Simulation is already running.");
       return;
     }
     setResultPlaybackPlaying(false);
     pushMessage("Starting simulation run.");
     pushMessage(runDiagnosticsMessage(study));
+    const cloudFeaRun = isCloudFeaStudy(study);
     let response: Awaited<ReturnType<typeof runSimulation>>;
     try {
       response = await runSimulation(study.id, study, displayModel ?? undefined, { onCloudFeaHealth: pushMessage, resultRenderBounds });
@@ -991,7 +1045,11 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       setRunProgress(0);
       setRunTiming(null);
       setResultPlaybackPlaying(false);
-      pushMessage(errorMessage(error, "Could not start simulation."));
+      if (cloudFeaRun) {
+        pushMessage(`Cloud FEA run creation failed: ${errorMessage(error, "Could not start simulation.")}`);
+      } else {
+        pushMessage(errorMessage(error, "Could not start simulation."));
+      }
       return;
     }
     setActiveRunId(response.run.id);
@@ -999,7 +1057,11 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     setProcessingRunId(response.run.id);
     setRunProgress(0);
     setRunTiming(null);
+    if (cloudFeaRun) {
+      pushMessage(`Cloud FEA run created: runId=${response.run.id}; events=${response.streamUrl}; results=${cloudFeaResultsEndpoint(response.run.id)}.`);
+    }
     pushMessage(response.message);
+    if (cloudFeaRun) pushMessage(`Cloud FEA event polling started: GET ${response.streamUrl}.`);
     const source = subscribeToRun(response.run.id, async (event: RunEvent) => {
       if (typeof event.progress === "number") setRunProgress(event.progress);
       setRunTiming(timingFromRunEvent(event));
@@ -1011,9 +1073,10 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         setProcessingRunId(null);
         setRunTiming(null);
         try {
+          if (cloudFeaRun) pushMessage(`Cloud FEA results fetch started: GET ${cloudFeaResultsEndpoint(response.run.id)}.`);
           const results = await getResults(response.run.id);
           if (study.type === "dynamic_structural" && !hasDynamicPlaybackFrames(results.summary, results.fields)) {
-            pushMessage("Dynamic results did not include animation frames.");
+            pushMessage("Cloud FEA dynamic results did not include animation frames.");
             setResultPlaybackPlaying(false);
             setRunProgress(0);
             return;
@@ -1027,11 +1090,16 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           setViewMode("results");
           setActiveStep("results");
         } catch (error) {
-          pushMessage(errorMessage(error, "Could not load simulation results."));
+          if (cloudFeaRun) {
+            pushMessage(`Cloud FEA results fetch failed: ${errorMessage(error, "Could not load simulation results.")}`);
+          } else {
+            pushMessage(errorMessage(error, "Could not load simulation results."));
+          }
           setResultPlaybackPlaying(false);
           setRunProgress(0);
         }
       } else if (event.type === "cancelled" || event.type === "error") {
+        if (cloudFeaRun && event.type === "error") pushMessage(`Cloud FEA event stream ended with error: ${event.message}`);
         source.close();
         if (activeRunSourceRef.current === source) activeRunSourceRef.current = null;
         if (processingRunIdRef.current === response.run.id) processingRunIdRef.current = null;
@@ -1093,7 +1161,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
             className={`primary topbar-action ${solverRunning ? "running" : ""}`}
             onClick={handleRunSimulation}
             disabled={!effectiveCanRunSimulation}
-            title={effectiveMissingRunItems.length ? `Complete before running: ${effectiveMissingRunItems.join(", ")}` : "Run simulation"}
+            title={cloudFeaUnavailable ? "Cloud FEA is unavailable on this app domain." : effectiveMissingRunItems.length ? `Complete before running: ${effectiveMissingRunItems.join(", ")}` : "Run simulation"}
           >
             <span aria-hidden="true">▶</span>{solverRunning ? "Running…" : "Run simulation"}
           </button>
@@ -1274,8 +1342,8 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           canCancelSimulation={solverRunning}
           canRunSimulation={effectiveCanRunSimulation}
           missingRunItems={effectiveMissingRunItems}
-          cloudFeaAvailable={undefined}
-          cloudFeaEndpoint={undefined}
+          cloudFeaAvailable={isCloudFeaStudy(study) ? cloudFeaHealth?.cloudFeaAvailable : undefined}
+          cloudFeaEndpoint={isCloudFeaStudy(study) ? cloudFeaEndpoint : undefined}
           resultFrameIndex={resultFrameIndex}
           resultFramePosition={resultVisualFramePosition}
           resultFrameOrdinalPosition={resultVisualOrdinalPosition}
@@ -1303,7 +1371,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         studyName={study?.name ?? "No simulation"}
         meshStatus={study?.meshSettings.status === "complete" ? "Ready" : "Not generated"}
         solverStatus={solverRunning ? "Running" : runProgress >= 100 ? "Complete" : "Idle"}
-        backendStatus={isOpenCaeCoreStudy(study) ? "core" : "local"}
+        backendStatus={(study.solverSettings as { backend?: unknown }).backend === "cloudflare_fea" ? "cloud" : "local"}
         onClearLogs={clearLogs}
       />
     </div>
@@ -1356,13 +1424,12 @@ function latestCompletedRunId(study: Study | null, activeRunId: string): string 
   return completed?.id ?? null;
 }
 
-function isOpenCaeCoreStudy(study: Study | null): boolean {
-  const backend = (study?.solverSettings as { backend?: unknown } | undefined)?.backend;
-  return backend === "opencae_core" || backend === "cloudflare_fea";
+function isCloudFeaStudy(study: Study | null): boolean {
+  return (study?.solverSettings as { backend?: unknown } | undefined)?.backend === "cloudflare_fea";
 }
 
 function runDiagnosticsMessage(study: Study): string {
-  const backend = isOpenCaeCoreStudy(study) ? "opencae_core" : "local_detailed";
+  const backend = isCloudFeaStudy(study) ? "cloudflare_fea" : "local_detailed";
   const fidelity = solverFidelityForDiagnostics(study);
   return [
     `Run diagnostics: backend=${backend}`,
@@ -1378,6 +1445,15 @@ function runDiagnosticsMessage(study: Study): string {
 function solverFidelityForDiagnostics(study: Study): SimulationFidelity {
   const fidelity = (study.solverSettings as { fidelity?: unknown }).fidelity;
   return fidelity === "detailed" || fidelity === "ultra" || fidelity === "standard" ? fidelity : "standard";
+}
+
+function cloudFeaResultsEndpoint(runId: string): string {
+  return `/api/cloud-fea/runs/${runId}/results`;
+}
+
+function cloudFeaRunsEndpointForCurrentOrigin(): string {
+  if (typeof window === "undefined" || !window.location?.origin) return "/api/cloud-fea/runs";
+  return `${window.location.origin}/api/cloud-fea/runs`;
 }
 
 function errorMessage(error: unknown, fallback: string): string {

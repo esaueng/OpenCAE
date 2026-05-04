@@ -3,8 +3,7 @@
 OpenCAE uses two different result classes:
 
 - Local heuristic results are estimates for interactive setup and workflow feedback.
-- Browser OpenCAE Core results are trusted only when they carry explicit `opencae_core_fea` provenance with computed Tet4 fields.
-- Legacy Cloud FEA container results are trusted only when they are parsed from CalculiX output with explicit `calculix_fea` provenance.
+- Cloud FEA results are trusted only when they are parsed from CalculiX output with explicit `calculix_fea` provenance.
 
 The validation suite exists to prevent unit, provenance, and fallback regressions. In particular, the 100 mm x 30 mm x 10 mm cantilever with a 1 N load must stay near the hand estimate and SimScale comparison range, not a fallback-scale value such as 28.7 MPa.
 
@@ -14,7 +13,7 @@ Run the normal TypeScript suite with:
 pnpm test
 ```
 
-Run the legacy Cloud FEA container validation suite without Cloudflare with:
+Run the Cloud FEA container validation suite without Cloudflare with:
 
 ```sh
 python3 services/opencae-fea-container/tests/run_validation.py
@@ -28,9 +27,9 @@ pnpm test:fea-container
 
 The container validation command always runs analytical, mesh, deck, load-sum, parser, uploaded-geometry safe-failure, face-mapping, and provenance checks. CalculiX integration checks are skipped when `ccx` is not installed. Gmsh-backed uploaded-geometry solves are allowed only after the structured block baseline remains green; missing or ambiguous Gmsh paths must return a clear error instead of falling back to generated values.
 
-## Legacy Cloud FEA Static Load Support
+## Cloud FEA Static Load Support
 
-The legacy Cloud FEA container preflights static studies before a run is queued. Supported UI load types are normalized into solver-ready surface nodal loads:
+Cloud FEA preflights static studies before a run is queued. Supported UI load types are normalized into solver-ready surface nodal loads:
 
 - `force`: total force in `N` is distributed across the selected face.
 - `pressure`: `Pa`, `kPa`, `MPa`, or `N/mm^2` is converted to `N/mm^2`, then to equivalent nodal `*CLOAD` entries using selected face area. Native `*DLOAD` pressure remains a future improvement after face-element mapping is validated.
@@ -38,9 +37,9 @@ The legacy Cloud FEA container preflights static studies before a run is queued.
 
 Multiple loads are summed by node and degree of freedom before deck generation. Multiple fixed supports are unioned into one `FIXED` node set. Unsupported loads, missing payload mass, invalid units, missing fixed supports, or unsupported geometry must fail preflight with diagnostics instead of starting a CalculiX run.
 
-## Legacy Cloud FEA Dynamic Load Support
+## Cloud FEA Dynamic Load Support
 
-The legacy Cloud FEA container also supports first-release `dynamic_structural` studies for linear elastic, small-displacement transient stress runs. The container uses CalculiX implicit `*DYNAMIC` with explicit `*AMPLITUDE` load histories and `*TIME POINTS` output, then returns framed `stress`, `displacement`, `velocity`, `acceleration`, and `safety_factor` result fields.
+Cloud FEA also supports first-release `dynamic_structural` studies for linear elastic, small-displacement transient stress runs. The container uses CalculiX implicit `*DYNAMIC` with explicit `*AMPLITUDE` load histories and `*TIME POINTS` output, then returns framed `stress`, `displacement`, `velocity`, `acceleration`, and `safety_factor` result fields.
 
 CalculiX applies dynamic loads as step loads when no amplitude is attached. OpenCAE therefore always writes `*AMPLITUDE, NAME=LOAD_HISTORY, TIME=TOTAL TIME` for Cloud FEA dynamic studies and every dynamic `*CLOAD` references `AMPLITUDE=LOAD_HISTORY`, including step-load runs. Output is also requested with explicit `*TIME POINTS, NAME=OUTPUT_TIMES, TIME=TOTAL TIME` values so the requested start time, end time, and animation cadence are visible in the solver artifact.
 
@@ -92,4 +91,4 @@ Validation fails if any of these conditions are found:
 
 ## Notes
 
-The trusted browser FEA baseline is the OpenCAE Core Tet4 path for eligible static block-like studies. The legacy Cloud FEA baseline remains the structured hexahedral block path in the CalculiX container. Uploaded STEP/STL/OBJ support in the legacy container is a separate Gmsh path with stricter refusal behavior: it must either produce parsed CalculiX results with `gmsh_uploaded_geometry` mesh provenance or fail with diagnostics. Local heuristic results remain estimates and are not valid FEA evidence.
+The trusted Cloud FEA baseline remains the structured hexahedral block path in the CalculiX container. Uploaded STEP/STL/OBJ support is a separate Gmsh path with stricter refusal behavior: it must either produce parsed CalculiX results with `gmsh_uploaded_geometry` mesh provenance or fail with diagnostics. Local heuristic results remain estimates and are not valid Cloud FEA evidence.
