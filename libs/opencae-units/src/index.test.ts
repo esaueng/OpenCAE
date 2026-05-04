@@ -54,6 +54,33 @@ endsolid part
       units: "mm"
     });
   });
+
+  test("reads ASCII STL extents from uppercase vertex lines and scientific notation", () => {
+    const bytes = new TextEncoder().encode(`
+solid part
+facet normal 0 0 1
+outer loop
+VERTEX -1E1 0 0
+Vertex 2.5e1 0 0
+vertex 0 5.08e1 7.62e1
+endloop
+endfacet
+endsolid part
+`);
+
+    expect(stlDimensionsFromBytes(bytes)).toEqual({
+      x: 35,
+      y: 76.2,
+      z: 50.8,
+      units: "mm"
+    });
+  });
+
+  test("ignores long malformed ASCII STL lines without regex backtracking", () => {
+    const malformed = `solid part\n${" ".repeat(20_000)}vertex ${"1".repeat(20_000)} nope nope\nendsolid part`;
+
+    expect(stlDimensionsFromBytes(new TextEncoder().encode(malformed))).toBeUndefined();
+  });
 });
 
 describe("mesh volume", () => {

@@ -10,7 +10,11 @@ export interface ObjectStorageProvider {
 }
 
 export class FileSystemObjectStorageProvider implements ObjectStorageProvider {
-  constructor(private readonly rootDir = path.resolve(process.cwd(), "data/artifacts")) {}
+  private readonly rootDir: string;
+
+  constructor(rootDir = path.resolve(process.cwd(), "data/artifacts")) {
+    this.rootDir = path.resolve(rootDir);
+  }
 
   async putObject(key: string, data: string | Buffer | Uint8Array): Promise<string> {
     const target = this.getLocalPath(key);
@@ -39,8 +43,16 @@ export class FileSystemObjectStorageProvider implements ObjectStorageProvider {
   }
 
   getLocalPath(key: string): string {
-    const cleanKey = key.replace(/^\/+/, "");
-    return path.resolve(this.rootDir, cleanKey);
+    if (path.isAbsolute(key) || hasWindowsDrivePrefix(key)) {
+      throw new Error("Object storage key resolves outside the storage root.");
+    }
+    const cleanKey = key.replaceAll("\\", "/");
+    const target = path.resolve(this.rootDir, cleanKey);
+    const relative = path.relative(this.rootDir, target);
+    if (relative && (relative.startsWith("..") || path.isAbsolute(relative))) {
+      throw new Error("Object storage key resolves outside the storage root.");
+    }
+    return target;
   }
 
   private async walk(dir: string, prefix: string): Promise<string[]> {
@@ -57,4 +69,10 @@ export class FileSystemObjectStorageProvider implements ObjectStorageProvider {
     }
     return results;
   }
+}
+
+function hasWindowsDrivePrefix(value: string): boolean {
+  if (value.length < 2 || value[1] !== ":") return false;
+  const code = value.charCodeAt(0);
+  return (code >= 65 && code <= 90) || (code >= 97 && code <= 122);
 }
