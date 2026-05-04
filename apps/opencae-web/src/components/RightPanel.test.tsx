@@ -190,6 +190,17 @@ describe("RightPanel payload mass controls", () => {
     expect(markup).toContain("2s");
   });
 
+  test("shows fallback run timing while running without server timing", () => {
+    const markup = renderPanel("run", {
+      runProgress: 30,
+      runTiming: { elapsedMs: 9000, estimatedRemainingMs: 21000 }
+    });
+
+    expect(markup).toContain("About 21s remaining");
+    expect(markup).toContain("9s");
+    expect(markup).not.toContain("--");
+  });
+
   test("does not show the selected face as a persistent right-panel banner", () => {
     const markup = renderPanel("results", { selectedFace: displayModel.faces[0] ?? null });
 
@@ -351,6 +362,20 @@ describe("RightPanel payload mass controls", () => {
     expect(meshHtml).toContain("Ultra");
     expect(meshHtml).toContain("Analysis samples");
     expect(meshHtml).toContain("45,000");
+  });
+
+  test("omits solver version from the run panel solver summary", () => {
+    const runHtml = renderPanel("run", {
+      study: {
+        ...study,
+        solverSettings: { backend: "cloudflare_fea", fidelity: "standard" }
+      }
+    });
+
+    expect(runHtml).toContain("cloudflare-fea-calculix");
+    expect(runHtml).toContain("cloudflare-queue-container");
+    expect(runHtml).not.toContain("Version");
+    expect(runHtml).not.toContain("0.1.0");
   });
 
   test("disables Cloud FEA runs when the app Worker lacks the container binding", () => {
@@ -736,6 +761,18 @@ describe("RightPanel payload mass controls", () => {
 
     expect(html).toContain('class="playback-time-range"');
     expect(html).toContain('aria-label="Playback time position"');
+  });
+
+  test("shows the assigned material in the results summary", () => {
+    const html = renderPanel("results", {
+      study: {
+        ...study,
+        materialAssignments: [{ id: "assign", materialId: "mat-aluminum-7075", selectionRef: "selection-body", parameters: {}, status: "complete" }]
+      }
+    });
+
+    expect(html).toContain("Material");
+    expect(html).toContain("Aluminum 7075");
   });
 
   test("shows contextual weak X build yield on cantilever material previews", () => {

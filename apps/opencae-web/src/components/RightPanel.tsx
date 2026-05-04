@@ -1053,7 +1053,6 @@ function RunPanel({ study, runProgress, runTiming, onRunSimulation, onCancelSimu
       <SectionTitle helpId="solver">Solver</SectionTitle>
       <div className="summary-box">
         <Info label="Backend" value={cloudFeaSelected ? "cloudflare-fea-calculix" : study.type === "dynamic_structural" ? "local-dynamic-newmark" : "local-heuristic-surface"} />
-        <Info label="Version" value="0.1.0" />
         <Info label="Runner" value={cloudFeaSelected ? "cloudflare-queue-container" : "local-in-memory"} />
       </div>
     </Panel>
@@ -1217,6 +1216,7 @@ function ResultsPanel({
   const peakDisplacement = peakDisplacementFrame(resultFields, resultSummary);
   const peakMarkerPercent = peakDisplacement && hasPlayback ? playbackPeakMarkerPercent(frames, peakDisplacement.timeSeconds) : null;
   const peakMarkerLabel = peakDisplacement ? `Peak displacement at ${peakDisplacement.timeSeconds.toFixed(4)} s` : "";
+  const assignedMaterial = study.materialAssignments[0] ? materialForId(study.materialAssignments[0].materialId) : null;
 
   useEffect(() => {
     committedStressExaggerationRef.current = stressExaggeration;
@@ -1337,6 +1337,7 @@ function ResultsPanel({
       <p className="panel-copy">Red areas have higher stress. Blue areas have lower stress.</p>
       <div className="summary-box">
         <Info label="Result source" value={formatResultProvenanceLabel(resultSummary.provenance)} />
+        {assignedMaterial ? <Info label="Material" value={assignedMaterial.name} /> : null}
         <Info label="Max stress" value={`${resultSummary.maxStress} ${resultSummary.maxStressUnits}`} />
         <Info label="Max displacement" value={`${resultSummary.maxDisplacement} ${resultSummary.maxDisplacementUnits}`} />
         <Info label="Safety factor" value={String(resultSummary.safetyFactor)} />

@@ -47,6 +47,7 @@ import {
   solverFramePositionForPlaybackOrdinal
 } from "./resultPlaybackTimeline";
 import { preparePlaybackFramesInWorker } from "./workers/performanceClient";
+import { deriveRunTiming } from "./runTiming";
 import type { WorkspaceInitialAction } from "./App";
 
 const lazyCadViewerImport = () => import("./components/CadViewer").then((module) => ({ default: module.CadViewer }));
@@ -127,6 +128,8 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const [logs, setLogs] = useState<string[]>(restoredUi?.logs.length ? restoredUi.logs : restoredProjectFile ? ["Workspace restored after reload.", "Ready | Local Mode"] : ["Ready | Local Mode"]);
   const [runProgress, setRunProgress] = useState(restoredUi?.runProgress ?? (restoredResults?.fields.length ? 100 : 0));
   const [runTiming, setRunTiming] = useState<RunTimingEstimate | null>(null);
+  const [runStartedAtMs, setRunStartedAtMs] = useState<number | null>(null);
+  const [runClockNowMs, setRunClockNowMs] = useState(() => Date.now());
   const [activeRunId, setActiveRunId] = useState(restoredUi?.activeRunId || restoredResults?.activeRunId || restoredResults?.completedRunId || "run-bracket-demo-seeded");
   const [completedRunId, setCompletedRunId] = useState(restoredUi?.completedRunId || restoredResults?.completedRunId || "run-bracket-demo-seeded");
   const [processingRunId, setProcessingRunId] = useState<string | null>(null);
@@ -178,6 +181,12 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const displayModelForUi = useMemo(() => displayModel ? displayModelForUnits(displayModel, displayUnitSystem) : null, [displayModel, displayUnitSystem]);
   const resultSummaryForUi = useMemo(() => resultSummaryForUnits(resultSummary, displayUnitSystem), [displayUnitSystem, resultSummary]);
   const resultFieldsForUi = useMemo(() => resultFields.map((field) => resultFieldForUnits(field, displayUnitSystem)), [displayUnitSystem, resultFields]);
+  const displayRunTiming = useMemo(() => deriveRunTiming({
+    progress: runProgress,
+    eventTiming: runTiming,
+    startedAtMs: runStartedAtMs,
+    nowMs: runClockNowMs
+  }), [runClockNowMs, runProgress, runStartedAtMs, runTiming]);
   const resultFrameCache = useMemo(() => createResultFrameCache(resultFieldsForUi), [resultFieldsForUi]);
   const packedResultPlaybackCache = useMemo(() => createPackedResultPlaybackCache(resultFieldsForUi), [resultFieldsForUi]);
   const resultFieldsSignature = useMemo(() => resultFieldsSignatureForCache(resultFieldsForUi), [resultFieldsForUi]);
@@ -638,6 +647,13 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   }, [autosaveUiSnapshot, displayModel, project]);
 
   useEffect(() => {
+    if (!processingRunId || typeof runStartedAtMs !== "number") return undefined;
+    setRunClockNowMs(Date.now());
+    const timer = globalThis.setInterval(() => setRunClockNowMs(Date.now()), 1000);
+    return () => globalThis.clearInterval(timer);
+  }, [processingRunId, runStartedAtMs]);
+
+  useEffect(() => {
     if (!project || !displayModel) return;
     return scheduleAutosavedWorkspaceWrite(() => buildAutosavedWorkspace({
       project,
@@ -1044,6 +1060,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       setProcessingRunId(null);
       setRunProgress(0);
       setRunTiming(null);
+      setRunStartedAtMs(null);
       setResultPlaybackPlaying(false);
       if (cloudFeaRun) {
         pushMessage(`Cloud FEA run creation failed: ${errorMessage(error, "Could not start simulation.")}`);
@@ -1057,6 +1074,9 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     setProcessingRunId(response.run.id);
     setRunProgress(0);
     setRunTiming(null);
+    const runStartMs = Date.now();
+    setRunStartedAtMs(runStartMs);
+    setRunClockNowMs(runStartMs);
     if (cloudFeaRun) {
       pushMessage(`Cloud FEA run created: runId=${response.run.id}; events=${response.streamUrl}; results=${cloudFeaResultsEndpoint(response.run.id)}.`);
     }
@@ -1064,7 +1084,8 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     if (cloudFeaRun) pushMessage(`Cloud FEA event polling started: GET ${response.streamUrl}.`);
     const source = subscribeToRun(response.run.id, async (event: RunEvent) => {
       if (typeof event.progress === "number") setRunProgress(event.progress);
-      setRunTiming(timingFromRunEvent(event));
+      const eventTiming = timingFromRunEvent(event);
+      if (eventTiming) setRunTiming(eventTiming);
       pushMessage(messageWithEta(event));
       if (event.type === "complete") {
         source.close();
@@ -1072,6 +1093,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         if (processingRunIdRef.current === response.run.id) processingRunIdRef.current = null;
         setProcessingRunId(null);
         setRunTiming(null);
+        setRunStartedAtMs(null);
         try {
           if (cloudFeaRun) pushMessage(`Cloud FEA results fetch started: GET ${cloudFeaResultsEndpoint(response.run.id)}.`);
           const results = await getResults(response.run.id);
@@ -1107,6 +1129,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         setResultPlaybackPlaying(false);
         setRunProgress(0);
         setRunTiming(null);
+        setRunStartedAtMs(null);
       }
     });
     activeRunSourceRef.current = source;
@@ -1122,6 +1145,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     setResultPlaybackPlaying(false);
     setRunProgress(0);
     setRunTiming(null);
+    setRunStartedAtMs(null);
     if (!runId) {
       pushMessage("Simulation processing stopped.");
       return;
@@ -1256,7 +1280,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           resultSummary={resultSummaryForUi}
           resultFields={resultFieldsForUi}
           runProgress={runProgress}
-          runTiming={runTiming}
+          runTiming={displayRunTiming}
           sampleModel={sampleModel}
           sampleAnalysisType={sampleAnalysisType}
           draftLoadType={draftLoadType}
