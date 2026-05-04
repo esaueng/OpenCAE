@@ -1074,7 +1074,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     return (
       <header className="topbar">
         <button className="brand brand-button" type="button" onClick={handleOpenStartMenu} title="Back to start menu" aria-label="Back to start menu">
-          <OpenCaeLogoMark />OpenCAE <span className="beta-tag">beta</span>
+          <OpenCaeLogoMark />OpenCAE <span className="beta-tag">Alpha</span>
         </button>
         <div className="topbar-divider topbar-divider-project" />
         <div className="breadcrumb">

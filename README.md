@@ -86,7 +86,7 @@ For Cloudflare Builds, use:
 
 ```bash
 Build command: pnpm run build
-Deploy command: npx wrangler deploy
+Deploy command: npx wrangler deploy --config wrangler.jsonc
 ```
 
 `pnpm deploy:cloudflare` is also valid as a deploy command, but do not use a web-assets-only deploy command for the production Worker.

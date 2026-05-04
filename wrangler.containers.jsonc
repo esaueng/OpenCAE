@@ -1,6 +1,6 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "opencae",
+  "name": "opencae-alpha",
   "account_id": "747b74cbd7d019dd7aeecb2c24a4bf10",
   "main": "apps/opencae-web/worker/index.ts",
   "compatibility_date": "2026-04-27",
@@ -42,6 +42,7 @@
   },
   "containers": [
     {
+      "name": "opencae-alpha-opencaefeacontainer",
       "class_name": "OpenCaeFeaContainer",
       "image": "./services/opencae-fea-container/Dockerfile",
       "instance_type": "standard-1",
