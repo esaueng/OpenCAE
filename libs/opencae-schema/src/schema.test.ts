@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DynamicSolverSettingsSchema, ProjectSchema, ResultFieldSchema, ResultSummarySchema, RunEventSchema, SolverBackendSchema } from "./index";
+import { DynamicSolverSettingsSchema, ProjectSchema, ResultFieldSchema, ResultSummarySchema, RunEventSchema } from "./index";
 
 describe("ProjectSchema", () => {
   it("accepts the minimum local project shape", () => {
@@ -203,7 +203,7 @@ describe("ProjectSchema", () => {
     });
   });
 
-  it("accepts OpenCAE Core simulation backend settings and ultra mesh quality", () => {
+  it("accepts detailed simulation backend settings and ultra mesh quality", () => {
     const parsed = ProjectSchema.parse({
       id: "project-detailed",
       name: "Detailed Project",
@@ -223,7 +223,7 @@ describe("ProjectSchema", () => {
           constraints: [],
           loads: [],
           meshSettings: { preset: "ultra", status: "complete", summary: { nodes: 182400, elements: 119808, warnings: [], analysisSampleCount: 45000, quality: "ultra" } },
-          solverSettings: { backend: "opencae_core", fidelity: "ultra" },
+          solverSettings: { backend: "cloudflare_fea", fidelity: "ultra" },
           validation: [],
           runs: []
         }
@@ -234,15 +234,9 @@ describe("ProjectSchema", () => {
 
     expect(parsed.studies[0]?.meshSettings.preset).toBe("ultra");
     expect(parsed.studies[0]?.solverSettings).toMatchObject({
-      backend: "opencae_core",
+      backend: "cloudflare_fea",
       fidelity: "ultra"
     });
-  });
-
-  it("accepts legacy cloud FEA backend settings for imported project compatibility", () => {
-    const parsed = SolverBackendSchema.parse("cloudflare_fea");
-
-    expect(parsed).toBe("cloudflare_fea");
   });
 
   it("accepts rich result sample metadata from local and cloud FEA backends", () => {
@@ -294,11 +288,11 @@ describe("ProjectSchema", () => {
 
   it("accepts result summaries and fields with explicit provenance", () => {
     const provenance = {
-      kind: "opencae_core_fea",
-      solver: "opencae-core-cpu-tet4",
+      kind: "calculix_fea",
+      solver: "calculix-ccx",
       solverVersion: "2.21",
-      meshSource: "opencae_core_tet4",
-      resultSource: "computed",
+      meshSource: "gmsh",
+      resultSource: "parsed_frd_dat",
       units: "mm-N-s-MPa"
     } as const;
 

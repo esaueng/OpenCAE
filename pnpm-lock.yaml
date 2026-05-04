@@ -7,6 +7,10 @@ settings:
 importers:
 
   .:
+    dependencies:
+      '@cloudflare/containers':
+        specifier: ^0.3.3
+        version: 0.3.3
     devDependencies:
       concurrently:
         specifier: ^9.1.2
@@ -72,9 +76,6 @@ importers:
 
   apps/opencae-web:
     dependencies:
-      '@opencae/core':
-        specifier: workspace:*
-        version: link:../../libs/opencae-core
       '@opencae/db':
         specifier: workspace:*
         version: link:../../libs/opencae-db
@@ -84,9 +85,6 @@ importers:
       '@opencae/schema':
         specifier: workspace:*
         version: link:../../libs/opencae-schema
-      '@opencae/solver-cpu':
-        specifier: workspace:*
-        version: link:../../libs/opencae-solver-cpu
       '@opencae/solver-service':
         specifier: workspace:*
         version: link:../../services/opencae-solver-service
@@ -133,8 +131,6 @@ importers:
       vite:
         specifier: ^6.0.7
         version: 6.4.2(@types/node@22.19.17)(tsx@4.21.0)
-
-  libs/opencae-core: {}
 
   libs/opencae-db:
     dependencies:
@@ -208,14 +204,6 @@ importers:
       '@opencae/schema':
         specifier: workspace:*
         version: link:../opencae-schema
-
-  libs/opencae-solver-cpu:
-    dependencies:
-      '@opencae/core':
-        specifier: workspace:*
-        version: link:../opencae-core
-
-  libs/opencae-solver-webgpu: {}
 
   libs/opencae-storage:
     dependencies:
@@ -379,6 +367,9 @@ packages:
   '@babel/types@7.29.0':
     resolution: {integrity: sha512-LwdZHpScM4Qz8Xw2iKSzS+cfglZzJGvofQICy7W7v4caru4EaAmyUuO6BGrbyQ2mYV11W0U8j5mBhd14dd3B0A==}
     engines: {node: '>=6.9.0'}
+
+  '@cloudflare/containers@0.3.3':
+    resolution: {integrity: sha512-ZSXmArCoo5bVTp8pGAJdl5WKmwtZDcffJqr4JcZEbSmMIFjU+AlBqgysuxXMgu03Rp239cOdqerbjK7H0K2krQ==}
 
   '@cloudflare/kv-asset-handler@0.4.2':
     resolution: {integrity: sha512-SIOD2DxrRRwQ+jgzlXCqoEFiKOFqaPjhnNTGKXSRLvp1HiOvapLaFG2kEr9dYQTYe8rKrd9uvDUzmAITeNyaHQ==}
@@ -2516,6 +2507,8 @@ snapshots:
     dependencies:
       '@babel/helper-string-parser': 7.27.1
       '@babel/helper-validator-identifier': 7.28.5
+
+  '@cloudflare/containers@0.3.3': {}
 
   '@cloudflare/kv-asset-handler@0.4.2': {}
 

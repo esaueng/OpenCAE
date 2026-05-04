@@ -15,6 +15,4 @@ CAD entities remain the source of truth. Mesh entities are generated artifacts. 
 
 Local static studies run through deterministic TypeScript solver paths. General static studies use a heuristic surface-response model, while the Beam Demo can use a 1D Euler-Bernoulli path. Dynamic structural studies use Newmark average-acceleration integration and write timed result frames for playback.
 
-OpenCAE Core is the user-facing FEA path for eligible static stress studies. The web worker builds a small Tet4 block model from display bounds and study loads/supports, solves it with the vendored CPU package, and publishes computed provenance. Unsupported cases fall back to Detailed local.
-
-The old CalculiX/Gmsh container path is isolated in `services/opencae-fea-container` for reference. It is not used by the default browser runtime or production Worker deploy.
+The Cloud FEA path is isolated in `services/opencae-fea-container`. When deployed with the required Cloudflare Containers privileges, it generates CalculiX input decks and returns static or transient structural result fields through the Worker orchestration layer.

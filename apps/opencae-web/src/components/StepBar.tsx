@@ -45,8 +45,7 @@ export function StepBar({ activeStep, project, study, hasResults, collapsed, the
   const currentUnitLabel = project.unitSystem === "SI" ? "Metric" : "Imperial";
   const nextUnitSystem = project.unitSystem === "SI" ? "US" : "SI";
   const studyTypeLabel = study.type === "dynamic_structural" ? "dynamic" : "static";
-  const backend = (study.solverSettings as { backend?: unknown }).backend;
-  const backendLabel = backend === "opencae_core" || backend === "cloudflare_fea" ? "core" : "local";
+  const backendLabel = (study.solverSettings as { backend?: unknown }).backend === "cloudflare_fea" ? "cloud" : "local";
   const ThemeIcon = themeMode === "dark" ? Sun : Moon;
 
   return (

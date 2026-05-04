@@ -18,10 +18,48 @@
     "not_found_handling": "single-page-application",
     "run_worker_first": ["/api/*", "/health"]
   },
+  "r2_buckets": [
+    {
+      "binding": "FEA_ARTIFACTS",
+      "bucket_name": "opencae-fea-artifacts"
+    }
+  ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "FEA_RUN_QUEUE",
+        "queue": "opencae-fea-runs"
+      }
+    ],
+    "consumers": [
+      {
+        "queue": "opencae-fea-runs",
+        "dead_letter_queue": "opencae-fea-runs-dlq",
+        "max_batch_size": 1,
+        "max_retries": 2
+      }
+    ]
+  },
+  "containers": [
+    {
+      "class_name": "OpenCaeFeaContainer",
+      "image": "./services/opencae-fea-container/Dockerfile",
+      "instance_type": "standard-1",
+      "max_instances": 10
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "FEA_CONTAINER",
+        "class_name": "OpenCaeFeaContainer"
+      }
+    ]
+  },
   "migrations": [
     {
-      "tag": "v2-delete-legacy-fea-container",
-      "deleted_classes": ["OpenCaeFeaContainer"]
+      "tag": "v1",
+      "new_sqlite_classes": ["OpenCaeFeaContainer"]
     }
   ],
   "observability": {

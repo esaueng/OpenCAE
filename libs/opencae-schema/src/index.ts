@@ -62,7 +62,7 @@ export const LoadSchema = z.object({
 const Vec3Schema = z.tuple([z.number(), z.number(), z.number()]);
 export const StudyAnalysisTypeSchema = z.enum(["static_stress", "dynamic_structural"]);
 export const MeshQualitySchema = z.enum(["coarse", "medium", "fine", "ultra"]);
-export const SolverBackendSchema = z.enum(["local_detailed", "opencae_core", "cloudflare_fea"]);
+export const SolverBackendSchema = z.enum(["local_detailed", "cloudflare_fea"]);
 export const SimulationFidelitySchema = z.enum(["standard", "detailed", "ultra"]);
 
 export const DynamicSolverSettingsSchema = z.object({
@@ -108,11 +108,11 @@ export const ResultSampleSchema = z.object({
 });
 
 export const ResultProvenanceSchema = z.object({
-  kind: z.enum(["local_estimate", "analytical_benchmark", "calculix_fea", "opencae_core_fea"]),
+  kind: z.enum(["local_estimate", "analytical_benchmark", "calculix_fea"]),
   solver: z.string(),
   solverVersion: z.string(),
-  meshSource: z.enum(["mock", "structured_block", "gmsh", "uploaded_inp", "opencae_core_tet4", "unknown"]),
-  resultSource: z.enum(["generated", "parsed_dat", "parsed_frd", "parsed_frd_dat", "computed"]),
+  meshSource: z.enum(["mock", "structured_block", "gmsh", "uploaded_inp", "unknown"]),
+  resultSource: z.enum(["generated", "parsed_dat", "parsed_frd", "parsed_frd_dat"]),
   units: z.string(),
   renderCoordinateSpace: z.string().optional(),
   integrationMethod: z.string().optional(),
