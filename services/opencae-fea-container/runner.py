@@ -56,6 +56,11 @@ MAX_SOLVER_LOG_ARTIFACT_BYTES = 256 * 1024
 STANDARD_GRAVITY = 9.80665
 DEFAULT_CCX_STATIC_TIMEOUT_SECONDS = 60
 DEFAULT_CCX_DYNAMIC_TIMEOUT_SECONDS = 300
+STAGED_UPLOADED_GEOMETRY_FILENAMES = {
+    "step": "uploaded_geometry.step",
+    "stl": "uploaded_geometry.stl",
+    "obj": "uploaded_geometry.obj",
+}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -639,19 +644,27 @@ def stage_uploaded_geometry(workdir, geometry):
     if not content:
         raise UserFacingSolveError(UNSUPPORTED_UPLOADED_GEOMETRY_ERROR, 422)
     filename = geometry.get("filename") if isinstance(geometry.get("filename"), str) else ""
-    extension = f".{geometry.get('format')}" if isinstance(geometry.get("format"), str) else ""
+    geometry_format = geometry.get("format") if isinstance(geometry.get("format"), str) else ""
+    extension = f".{geometry_format}" if geometry_format else ""
     safe_filename = safe_uploaded_geometry_filename(filename, extension)
     if filename != safe_filename:
         raise UserFacingSolveError(UNSUPPORTED_UPLOADED_GEOMETRY_ERROR, 422)
-    geometry_path = workdir / safe_filename
-    resolved_geometry_path = geometry_path.resolve()
-    resolved_workdir = workdir.resolve()
-    try:
-        resolved_geometry_path.relative_to(resolved_workdir)
-    except ValueError as error:
-        raise UserFacingSolveError(UNSUPPORTED_UPLOADED_GEOMETRY_ERROR, 422) from error
-    geometry_path.write_bytes(content)
+    staged_filename = STAGED_UPLOADED_GEOMETRY_FILENAMES.get(geometry_format)
+    if not staged_filename:
+        raise UserFacingSolveError(UNSUPPORTED_UPLOADED_GEOMETRY_ERROR, 422)
+    geometry_path = workdir / staged_filename
+    write_uploaded_geometry_bytes(geometry_path, content)
     return geometry_path
+
+
+def write_uploaded_geometry_bytes(path, content):
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(path, flags, 0o600)
+    except OSError as error:
+        raise UserFacingSolveError(UNSUPPORTED_UPLOADED_GEOMETRY_ERROR, 422) from error
+    with os.fdopen(fd, "wb") as geometry_file:
+        geometry_file.write(content)
 
 
 def safe_identifier(value, fallback):

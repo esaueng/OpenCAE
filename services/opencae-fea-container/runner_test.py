@@ -230,16 +230,31 @@ class UploadedGeometrySolveTest(unittest.TestCase):
             with self.assertRaises(runner.UserFacingSolveError):
                 runner.stage_uploaded_geometry(Path(tmp), payload)
 
-    def test_stage_uploaded_geometry_writes_sanitized_valid_filename_inside_workdir(self):
+    def test_stage_uploaded_geometry_uses_fixed_filename_for_valid_upload(self):
         payload = uploaded_geometry_payload()["geometry"]
-        payload["filename"] = "uploaded-block.stl"
+        payload["filename"] = "customer-supplied-name.stl"
         with tempfile.TemporaryDirectory() as tmp:
             workdir = Path(tmp)
 
             staged = runner.stage_uploaded_geometry(workdir, payload)
 
-            self.assertEqual(staged, workdir / "uploaded-block.stl")
+            self.assertEqual(staged, workdir / "uploaded_geometry.stl")
             self.assertTrue(staged.exists())
+
+    def test_stage_uploaded_geometry_refuses_existing_staging_symlink(self):
+        payload = uploaded_geometry_payload()["geometry"]
+        payload["filename"] = "uploaded-block.stl"
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = Path(tmp)
+            outside = workdir.parent / "outside-upload-target.stl"
+            outside.write_text("outside")
+            (workdir / "uploaded_geometry.stl").symlink_to(outside)
+            try:
+                with self.assertRaises(runner.UserFacingSolveError):
+                    runner.stage_uploaded_geometry(workdir, payload)
+                self.assertEqual(outside.read_text(), "outside")
+            finally:
+                outside.unlink(missing_ok=True)
 
 
 class GeneratedDynamicFieldsTest(unittest.TestCase):
