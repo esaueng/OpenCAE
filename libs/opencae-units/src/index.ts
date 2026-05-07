@@ -119,40 +119,32 @@ function asciiStlVertices(bytes: Uint8Array): Array<[number, number, number]> {
   const text = new TextDecoder().decode(bytes);
   const vertices: Array<[number, number, number]> = [];
   for (const line of text.split("\n")) {
-    const vertex = asciiStlVertexFromLine(line);
-    if (vertex === "invalid") return [];
-    if (vertex) vertices.push(vertex);
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("vertex ")) continue;
+    const parts = splitAsciiWhitespace(trimmed);
+    if (parts.length !== 4) return [];
+    const vertex = [Number(parts[1]), Number(parts[2]), Number(parts[3])] as [number, number, number];
+    if (!vertex.every((value) => Number.isFinite(value))) return [];
+    vertices.push(vertex);
   }
   return vertices;
 }
 
-function asciiStlVertexFromLine(line: string): [number, number, number] | "invalid" | undefined {
-  const tokens = whitespaceTokens(line);
-  if (tokens[0]?.toLowerCase() !== "vertex") return undefined;
-  if (tokens.length < 4) return "invalid";
-  const vertex = [Number(tokens[1]), Number(tokens[2]), Number(tokens[3])] as [number, number, number];
-  return vertex.every((value) => Number.isFinite(value)) ? vertex : "invalid";
-}
-
-function whitespaceTokens(value: string): string[] {
-  const tokens: string[] = [];
-  let start: number | undefined;
-  for (let index = 0; index < value.length; index += 1) {
-    if (isWhitespace(value[index]!)) {
-      if (start !== undefined) {
-        tokens.push(value.slice(start, index));
-        start = undefined;
+function splitAsciiWhitespace(value: string): string[] {
+  const parts: string[] = [];
+  let current = "";
+  for (const char of value) {
+    if (char === " " || char === "\t" || char === "\r" || char === "\n" || char === "\f") {
+      if (current) {
+        parts.push(current);
+        current = "";
       }
-    } else if (start === undefined) {
-      start = index;
+    } else {
+      current += char;
     }
   }
-  if (start !== undefined) tokens.push(value.slice(start));
-  return tokens;
-}
-
-function isWhitespace(char: string): boolean {
-  return char === " " || char === "\t" || char === "\r" || char === "\n" || char === "\f";
+  if (current) parts.push(current);
+  return parts;
 }
 
 function dot(a: [number, number, number], b: [number, number, number]) {

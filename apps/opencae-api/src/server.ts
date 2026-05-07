@@ -1,6 +1,7 @@
 import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
 import Fastify from "fastify";
+import { fileURLToPath } from "node:url";
 import { inspectStepFile } from "@opencae/cad-service";
 import { SQLiteDatabaseProvider } from "@opencae/db";
 import { bracketDemoMaterial, bracketDemoProject, bracketDisplayModel, bracketResultFields, bracketResultSummary } from "@opencae/db/sample-data";
@@ -39,11 +40,16 @@ import {
   uploadedDisplayModelFor,
   type SampleModelId
 } from "./projectFactory";
-import { mutatingRateLimit, pdfFilename, projectsReadRateLimit, sanitizeFilename, sanitizeProjectName } from "./security";
 
 const api = Fastify({ logger: true });
 await api.register(cors, { origin: true });
-await api.register(rateLimit, { global: false, max: 300, timeWindow: "1 minute" });
+await api.register(rateLimit, {
+  global: false,
+  errorResponseBuilder: () => ({
+    statusCode: 429,
+    error: "Too many project creation requests. Please try again later."
+  })
+});
 
 const db = new SQLiteDatabaseProvider();
 const storage = new FileSystemObjectStorageProvider();
@@ -62,7 +68,7 @@ api.get("/health", async () => ({ ok: true, mode: "local", service: "opencae-api
 
 api.get("/api/cloud-fea/health", async () => cloudFea.health());
 
-api.post("/api/cloud-fea/runs", mutatingRateLimit, async (request, reply) => {
+api.post("/api/cloud-fea/runs", async (request, reply) => {
   try {
     const body = isRecord(request.body) ? request.body : {};
     const response = await cloudFea.createRun(body);
@@ -97,7 +103,7 @@ api.get("/api/sample-project", async (request) => {
 };
 });
 
-api.post("/api/sample-project/load", mutatingRateLimit, async (request) => {
+api.post("/api/sample-project/load", async (request) => {
   const sample = normalizeSampleId((request.body as { sample?: string } | undefined)?.sample);
   const analysisType = normalizeSampleAnalysisType((request.body as { analysisType?: string } | undefined)?.analysisType);
   const now = new Date().toISOString();
@@ -120,9 +126,16 @@ api.post("/api/sample-project/load", mutatingRateLimit, async (request) => {
   };
 });
 
-api.get("/api/projects", projectsReadRateLimit, async () => ({ projects: db.listProjects() }));
+api.get("/api/projects", async () => ({ projects: db.listProjects() }));
 
-api.post("/api/projects", mutatingRateLimit, async (request) => {
+api.post("/api/projects", {
+  config: {
+    rateLimit: {
+      max: 30,
+      timeWindow: "1 minute"
+    }
+  }
+}, async (request) => {
   const body = request.body as Partial<Project> & { sample?: SampleModelId; analysisType?: string; mode?: "blank" | "sample" } | undefined;
   const now = new Date().toISOString();
   if (body?.mode !== "sample") {
@@ -153,7 +166,7 @@ api.post("/api/projects", mutatingRateLimit, async (request) => {
   return { project, displayModel: sampleDisplayModelFor(sample), ...(dynamicResults ? { results: dynamicResults } : {}), message: "Project created." };
 });
 
-api.post("/api/projects/import", mutatingRateLimit, async (request, reply) => {
+api.post("/api/projects/import", async (request, reply) => {
   const body = request.body as { project?: unknown; displayModel?: unknown; results?: unknown } | Project | undefined;
   const candidate = body && "project" in body ? body.project : body;
   const parsed = ProjectSchema.safeParse(candidate);
@@ -176,7 +189,7 @@ api.get("/api/projects/:projectId", async (request, reply) => {
   return { project, displayModel: await displayModelForProject(project) };
 });
 
-api.put("/api/projects/:projectId", mutatingRateLimit, async (request, reply) => {
+api.put("/api/projects/:projectId", async (request, reply) => {
   const { projectId } = request.params as { projectId: string };
   const project = db.getProject(projectId);
   if (!project) return reply.code(404).send({ error: "Project not found" });
@@ -192,7 +205,7 @@ api.put("/api/projects/:projectId", mutatingRateLimit, async (request, reply) =>
   return { project: nextProject, message: "Project renamed." };
 });
 
-api.post("/api/projects/:projectId/uploads", mutatingRateLimit, async (request, reply) => {
+api.post("/api/projects/:projectId/uploads", async (request, reply) => {
   const { projectId } = request.params as { projectId: string };
   const project = db.getProject(projectId);
   if (!project) return reply.code(404).send({ error: "Project not found" });
@@ -277,7 +290,7 @@ api.get("/api/projects/:projectId/studies", async (request) => {
   return { studies: db.getProject(projectId)?.studies ?? [] };
 });
 
-api.post("/api/projects/:projectId/studies", mutatingRateLimit, async (request) => {
+api.post("/api/projects/:projectId/studies", async (request) => {
   const { projectId } = request.params as { projectId: string };
   const project = db.getProject(projectId);
   if (!project) return { error: "Project not found" };
@@ -299,7 +312,7 @@ api.get("/api/studies/:studyId", async (request, reply) => {
   return { study };
 });
 
-api.put("/api/studies/:studyId", mutatingRateLimit, async (request, reply) => {
+api.put("/api/studies/:studyId", async (request, reply) => {
   const { studyId } = request.params as { studyId: string };
   const study = db.getStudy(studyId);
   if (!study) return reply.code(404).send({ error: "Study not found" });
@@ -308,7 +321,7 @@ api.put("/api/studies/:studyId", mutatingRateLimit, async (request, reply) => {
   return { study: next };
 });
 
-api.post("/api/studies/:studyId/validate", mutatingRateLimit, async (request, reply) => {
+api.post("/api/studies/:studyId/validate", async (request, reply) => {
   const { studyId } = request.params as { studyId: string };
   const study = db.getStudy(studyId);
   if (!study) return reply.code(404).send({ error: "Study not found" });
@@ -316,7 +329,7 @@ api.post("/api/studies/:studyId/validate", mutatingRateLimit, async (request, re
   return { ready: diagnostics.length === 0, diagnostics };
 });
 
-api.post("/api/studies/:studyId/materials", mutatingRateLimit, async (request, reply) => {
+api.post("/api/studies/:studyId/materials", async (request, reply) => {
   const { studyId } = request.params as { studyId: string };
   const study = db.getStudy(studyId);
   if (!study) return reply.code(404).send({ error: "Study not found" });
@@ -334,7 +347,7 @@ api.post("/api/studies/:studyId/materials", mutatingRateLimit, async (request, r
   return { study: next, message: `Material assigned to ${bodySelection?.name ?? "model"}.` };
 });
 
-api.post("/api/studies/:studyId/supports", mutatingRateLimit, async (request, reply) => {
+api.post("/api/studies/:studyId/supports", async (request, reply) => {
   const { studyId } = request.params as { studyId: string };
   const study = db.getStudy(studyId);
   if (!study) return reply.code(404).send({ error: "Study not found" });
@@ -351,7 +364,7 @@ api.post("/api/studies/:studyId/supports", mutatingRateLimit, async (request, re
   return { study: next, message: "Fixed support added." };
 });
 
-api.post("/api/studies/:studyId/loads", mutatingRateLimit, async (request, reply) => {
+api.post("/api/studies/:studyId/loads", async (request, reply) => {
   const { studyId } = request.params as { studyId: string };
   const study = db.getStudy(studyId);
   if (!study) return reply.code(404).send({ error: "Study not found" });
@@ -375,7 +388,7 @@ api.post("/api/studies/:studyId/loads", mutatingRateLimit, async (request, reply
   return { study: next, message: "Load added." };
 });
 
-api.post("/api/studies/:studyId/mesh", mutatingRateLimit, async (request, reply) => {
+api.post("/api/studies/:studyId/mesh", async (request, reply) => {
   const { studyId } = request.params as { studyId: string };
   const study = db.getStudy(studyId);
   if (!study) return reply.code(404).send({ error: "Study not found" });
@@ -390,7 +403,7 @@ api.post("/api/studies/:studyId/mesh", mutatingRateLimit, async (request, reply)
   return { study: next, mesh, message: "Mesh generated." };
 });
 
-api.post("/api/studies/:studyId/runs", mutatingRateLimit, async (request, reply) => {
+api.post("/api/studies/:studyId/runs", async (request, reply) => {
   const { studyId } = request.params as { studyId: string };
   const study = db.getStudy(studyId);
   if (!study) return reply.code(404).send({ error: "Study not found" });
@@ -471,7 +484,7 @@ api.get("/api/runs/:runId/stream", async (request, reply) => {
   request.raw.on("close", unsubscribe);
 });
 
-api.post("/api/runs/:runId/cancel", mutatingRateLimit, async (request, reply) => {
+api.post("/api/runs/:runId/cancel", async (request, reply) => {
   const { runId } = request.params as { runId: string };
   const run = db.getRun(runId);
   if (!run) return reply.code(404).send({ error: "Run not found" });
@@ -537,6 +550,40 @@ function latestCompletedRunForProject(project: Project): StudyRun | undefined {
       const rightTime = Date.parse(right.finishedAt ?? right.startedAt ?? "");
       return (rightTime || 0) - (leftTime || 0);
     })[0];
+}
+
+function pdfFilename(name: string): string {
+  const base = safeSlug(name, "opencae");
+  return `${base}-report.pdf`;
+}
+
+function safeSlug(value: string, fallback: string): string {
+  const chars: string[] = [];
+  let previousDash = false;
+  for (const char of value.toLowerCase()) {
+    if ((char >= "a" && char <= "z") || (char >= "0" && char <= "9") || char === "_" || char === ".") {
+      chars.push(char);
+      previousDash = false;
+    } else if (!previousDash && chars.length > 0) {
+      chars.push("-");
+      previousDash = true;
+    }
+    if (chars.length >= 96) break;
+  }
+  const slug = trimSlugBoundaries(chars.join(""));
+  return slug || fallback;
+}
+
+function trimSlugBoundaries(value: string): string {
+  let start = 0;
+  let end = value.length;
+  while (start < end && isSlugBoundary(value[start]!)) start += 1;
+  while (end > start && isSlugBoundary(value[end - 1]!)) end -= 1;
+  return value.slice(start, end);
+}
+
+function isSlugBoundary(char: string): boolean {
+  return char === "-" || char === "_" || char === ".";
 }
 
 async function pdfForReport(run: StudyRun | undefined, reportRef: string): Promise<Buffer> {
@@ -698,6 +745,60 @@ function isVector3(value: unknown): value is [number, number, number] {
   return Array.isArray(value) && value.length === 3 && value.every((item) => typeof item === "number" && Number.isFinite(item));
 }
 
+function sanitizeFilename(filename: unknown): string | undefined {
+  if (typeof filename !== "string") return undefined;
+  const cleaned = safeFilenameComponent(pathBasename(filename.trim()));
+  if (!cleaned) return undefined;
+  const extension = cleaned.split(".").pop()?.toLowerCase();
+  if (!extension || !["step", "stp", "stl", "obj"].includes(extension)) return undefined;
+  return cleaned;
+}
+
+function sanitizeProjectName(name: unknown): string | undefined {
+  if (typeof name !== "string") return undefined;
+  const cleaned = collapseWhitespace(name.trim());
+  return cleaned || undefined;
+}
+
+function pathBasename(value: string): string {
+  let start = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index];
+    if (char === "/" || char === "\\") start = index + 1;
+  }
+  return value.slice(start);
+}
+
+function safeFilenameComponent(value: string): string {
+  let cleaned = "";
+  for (const char of value) {
+    if ((char >= "a" && char <= "z") || (char >= "A" && char <= "Z") || (char >= "0" && char <= "9") || char === "_" || char === " " || char === "." || char === "-") {
+      cleaned += char;
+    } else {
+      cleaned += "_";
+    }
+    if (cleaned.length >= 128) break;
+  }
+  return cleaned.trim();
+}
+
+function collapseWhitespace(value: string): string {
+  let cleaned = "";
+  let previousSpace = false;
+  for (const char of value) {
+    const isSpace = char === " " || char === "\t" || char === "\n" || char === "\r" || char === "\f";
+    if (isSpace) {
+      if (!previousSpace && cleaned) cleaned += " ";
+      previousSpace = true;
+    } else {
+      cleaned += char;
+      previousSpace = false;
+    }
+    if (cleaned.length >= 128) break;
+  }
+  return cleaned.trim();
+}
+
 async function ensureSampleArtifacts(): Promise<void> {
   await inspectStepFile(storage);
   await storage.putObject("project-bracket-demo/geometry/bracket-display.json", JSON.stringify(bracketDisplayModel, null, 2));
@@ -719,5 +820,11 @@ async function ensureSampleArtifacts(): Promise<void> {
   );
 }
 
-const port = Number(process.env.PORT ?? 4317);
-await api.listen({ port, host: "0.0.0.0" });
+export async function buildApi() {
+  return api;
+}
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  const port = Number(process.env.PORT ?? 4317);
+  await api.listen({ port, host: "0.0.0.0" });
+}
