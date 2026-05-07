@@ -613,15 +613,6 @@ img {
   padding: var(--sp-4);
 }
 
-.simulation-choice-card img {
-  width: 100%;
-  aspect-ratio: 16 / 8;
-  object-fit: cover;
-  border: var(--border-thin);
-  border-radius: var(--radius-sm);
-  background: #080d14;
-}
-
 .simulation-choice-card span {
   display: grid;
   gap: 4px;
@@ -644,11 +635,6 @@ img {
   color: var(--color-accent);
 }
 
-.simulation-choice-card.active img {
-  border-color: color-mix(in srgb, var(--color-accent) 72%, transparent);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-accent) 36%, transparent);
-}
-
 .condition-menu button.disabled,
 .result-option.disabled {
   color: var(--color-text-muted);
@@ -668,35 +654,124 @@ img {
   padding: var(--sp-5);
 }
 
-.analysis-preview {
-  height: 220px;
+.analysis-showcase {
   position: relative;
+  width: 100%;
+  aspect-ratio: 2 / 1;
   overflow: hidden;
-  margin: calc(var(--sp-5) * -1) calc(var(--sp-5) * -1) var(--sp-5);
-  background:
-    linear-gradient(100deg, #0646d9 0%, #00b6ff 22%, #17d15d 45%, #f3e600 64%, #ff8a00 80%, #e71e1e 100%);
+  margin: 0;
+  background: #080d14;
+  border: var(--border-thin);
+  border-radius: var(--radius-sm);
 }
 
-.analysis-preview span {
+.simulation-choice-card.active .analysis-showcase {
+  border-color: color-mix(in srgb, var(--color-accent) 72%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-accent) 36%, transparent);
+}
+
+.analysis-showcase::after {
+  content: "";
   position: absolute;
-  inset: 42% -10% auto;
-  height: 38px;
-  background: rgba(255, 255, 255, 0.55);
-  transform: rotate(-10deg);
+  inset: 0;
+  background:
+    linear-gradient(180deg, rgba(5, 9, 16, 0.52), transparent 31%, transparent 64%, rgba(5, 9, 16, 0.64)),
+    linear-gradient(90deg, rgba(5, 9, 16, 0.2), transparent 25%, transparent 70%, rgba(5, 9, 16, 0.24));
+  pointer-events: none;
 }
 
-.analysis-preview span:nth-child(2) {
-  inset: 35% 8% auto 20%;
-  height: 74px;
-  border-radius: 999px;
-  background: rgba(4, 10, 18, 0.28);
+.analysis-showcase img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
-.analysis-preview span:nth-child(3) {
-  inset: auto 10% 18% 58%;
-  height: 58px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.35);
+.analysis-showcase-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.showcase-support-line,
+.showcase-support-arrow,
+.showcase-load-line,
+.showcase-frame-arc {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.showcase-support-line,
+.showcase-support-arrow {
+  stroke: #55aaff;
+  stroke-width: 5;
+  filter: drop-shadow(0 2px 7px rgba(72, 164, 255, 0.42));
+}
+
+.showcase-load-line {
+  stroke: #ffc13b;
+  stroke-width: 7;
+  filter: drop-shadow(0 2px 8px rgba(255, 193, 59, 0.46));
+}
+
+.showcase-load-head {
+  fill: #ffc13b;
+  filter: drop-shadow(0 2px 8px rgba(255, 193, 59, 0.46));
+}
+
+.showcase-frame-arc {
+  stroke: #55aaff;
+  stroke-width: 5;
+  filter: drop-shadow(0 2px 7px rgba(72, 164, 255, 0.42));
+}
+
+.showcase-frame-dot--one {
+  fill: #55aaff;
+}
+
+.showcase-frame-dot--two {
+  fill: #ffd05c;
+}
+
+.showcase-frame-dot--three {
+  fill: #ff6b52;
+}
+
+.showcase-load-label,
+.showcase-caption,
+.showcase-frame-label {
+  font-family: var(--font-ui);
+  font-weight: 700;
+  letter-spacing: 0;
+  paint-order: stroke;
+  stroke: rgba(5, 9, 16, 0.72);
+  stroke-width: 5px;
+  stroke-linejoin: round;
+}
+
+.showcase-load-label {
+  fill: #ffd05c;
+  font-size: 28px;
+}
+
+.showcase-caption {
+  fill: #dce8f7;
+  font-size: 22px;
+}
+
+.showcase-caption--support {
+  fill: #b7cbe3;
+}
+
+.showcase-frame-label {
+  fill: #dce8f7;
+  font-size: 20px;
 }
 
 .analysis-description p {
@@ -710,14 +785,14 @@ img {
   flex-direction: column;
 }
 
-.analysis-example-image {
+.selected-analysis-summary .analysis-showcase--large {
   width: calc(100% + var(--sp-5) * 2);
-  max-height: 300px;
-  aspect-ratio: 16 / 8;
-  object-fit: cover;
   margin: calc(var(--sp-5) * -1) calc(var(--sp-5) * -1) var(--sp-5);
-  background: #080d14;
+  border-top: 0;
+  border-right: 0;
   border-bottom: var(--border-thin);
+  border-left: 0;
+  border-radius: 0;
 }
 
 .analysis-tags {

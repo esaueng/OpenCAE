@@ -3,6 +3,8 @@ import { ChevronDown, Grid3X3, Plus, Search, X } from "lucide-react";
 import { starterMaterials } from "@opencae/materials";
 import type { Material, ResultField, Study } from "@opencae/schema";
 import { formatDensity, formatMaterialStress, type UnitSystem } from "../unitDisplay";
+import dynamicAnalysisImage from "../assets/simulation-showcase/dynamic-analysis.png";
+import staticAnalysisImage from "../assets/simulation-showcase/static-analysis.png";
 import type { ResultMode } from "./CadViewer";
 import type { StepId } from "./StepBar";
 
@@ -67,7 +69,7 @@ function SimulationTypePicker({ onCreateStatic, onCreateDynamic }: Omit<CreateSi
               aria-pressed={selectedType === option.type}
               onClick={() => setSelectedType(option.type)}
             >
-              <img src={option.image} alt={option.imageAlt} />
+              <AnalysisShowcase option={option} variant="compact" />
               <span>
                 <strong>{option.title}</strong>
                 <small>{option.summary}</small>
@@ -76,7 +78,7 @@ function SimulationTypePicker({ onCreateStatic, onCreateDynamic }: Omit<CreateSi
           ))}
         </section>
         <article className="analysis-description selected-analysis-summary">
-          <img className="analysis-example-image" src={selectedAnalysis.image} alt={`${selectedAnalysis.imageAlt} large preview`} />
+          <AnalysisShowcase option={selectedAnalysis} variant="large" />
           <h3>{selectedAnalysis.title}</h3>
           <p>{selectedAnalysis.description}</p>
           <div className="analysis-tags" aria-label={`${selectedAnalysis.title} capabilities`}>
@@ -92,39 +94,69 @@ function SimulationTypePicker({ onCreateStatic, onCreateDynamic }: Omit<CreateSi
   );
 }
 
+interface AnalysisOption {
+  type: AnalysisChoice;
+  title: string;
+  summary: string;
+  description: string;
+  imageAlt: string;
+  image: string;
+  tags: string[];
+}
+
+function AnalysisShowcase({ option, variant }: { option: AnalysisOption; variant: "compact" | "large" }) {
+  return (
+    <figure className={`analysis-showcase analysis-showcase--${variant} analysis-showcase--${option.type}`}>
+      <img src={option.image} alt={variant === "large" ? `${option.imageAlt} large preview` : option.imageAlt} />
+      {option.type === "static" ? <StaticShowcaseOverlay /> : <DynamicShowcaseOverlay />}
+    </figure>
+  );
+}
+
+function StaticShowcaseOverlay() {
+  return (
+    <svg className="analysis-showcase-overlay" viewBox="0 0 720 360" aria-hidden="true" focusable="false">
+      <path className="showcase-support-line" d="M112 108 L112 272" />
+      <path className="showcase-support-arrow" d="M88 122 L112 96 L136 122" />
+      <path className="showcase-support-arrow" d="M88 258 L112 284 L136 258" />
+      <path className="showcase-load-line" d="M616 56 L616 116" />
+      <path className="showcase-load-head" d="M584 108 L616 164 L648 108 Z" />
+      <text className="showcase-load-label" x="560" y="48">500 N</text>
+      <text className="showcase-caption showcase-caption--support" x="76" y="324">Fixed support</text>
+      <text className="showcase-caption showcase-caption--result" x="424" y="324">Static peak stress</text>
+    </svg>
+  );
+}
+
+function DynamicShowcaseOverlay() {
+  return (
+    <svg className="analysis-showcase-overlay" viewBox="0 0 720 360" aria-hidden="true" focusable="false">
+      <path className="showcase-support-line" d="M92 98 L92 276" />
+      <path className="showcase-support-arrow" d="M68 112 L92 86 L116 112" />
+      <path className="showcase-support-arrow" d="M68 262 L92 288 L116 262" />
+      <path className="showcase-load-line" d="M612 52 L612 112" />
+      <path className="showcase-load-head" d="M580 104 L612 160 L644 104 Z" />
+      <text className="showcase-load-label" x="532" y="46">Impulse load</text>
+      <path className="showcase-frame-arc" d="M270 284 C330 244 420 244 480 284" />
+      <circle className="showcase-frame-dot showcase-frame-dot--one" cx="270" cy="284" r="8" />
+      <circle className="showcase-frame-dot showcase-frame-dot--two" cx="374" cy="252" r="8" />
+      <circle className="showcase-frame-dot showcase-frame-dot--three" cx="480" cy="284" r="8" />
+      <text className="showcase-frame-label" x="236" y="324">Frame 1</text>
+      <text className="showcase-frame-label" x="340" y="324">Frame 2</text>
+      <text className="showcase-frame-label" x="444" y="324">Frame 3</text>
+    </svg>
+  );
+}
+
 const staticAnalysisOption = {
   type: "static" as AnalysisChoice,
   title: "Static Analysis",
   summary: "Steady load stress and deflection",
   description: "Determine displacements, stresses, and strains caused by constraints and loads. This local workflow supports linear elastic static stress simulation.",
   imageAlt: "Static stress example",
-  image: svgDataUri(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 360">
-    <rect width="720" height="360" fill="#0b131d"/>
-    <rect x="70" y="106" width="56" height="150" rx="4" fill="#2f4053"/>
-    <path d="M126 132 L592 82 L612 150 L146 212 Z" fill="#8b98a5"/>
-    <path d="M146 212 L612 150 L612 188 L146 250 Z" fill="#66727f"/>
-    <path d="M126 132 L146 212 L146 250 L126 172 Z" fill="#a5b0bb"/>
-    <path d="M128 137 L250 124 L356 112 L470 99 L606 84 L611 145 L470 165 L356 181 L250 197 L142 211 Z" fill="url(#stress)"/>
-    <path d="M120 96 L120 270" stroke="#48a4ff" stroke-width="6"/>
-    <path d="M96 108 L120 84 L144 108" fill="none" stroke="#48a4ff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
-    <path d="M96 258 L120 282 L144 258" fill="none" stroke="#48a4ff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
-    <path d="M544 42 L544 88" stroke="#ffc233" stroke-width="8" stroke-linecap="round"/>
-    <path d="M518 78 L544 122 L570 78 Z" fill="#ffc233"/>
-    <text x="474" y="42" fill="#ffd36a" font-family="Arial, sans-serif" font-size="26" font-weight="700">500 N</text>
-    <text x="72" y="308" fill="#9fb7d2" font-family="Arial, sans-serif" font-size="22" font-weight="700">Fixed support</text>
-    <text x="392" y="315" fill="#d7e0ea" font-family="Arial, sans-serif" font-size="22" font-weight="700">Static peak stress</text>
-    <defs>
-      <linearGradient id="stress" x1="0" x2="1">
-        <stop offset="0" stop-color="#1a78ff"/>
-        <stop offset="0.28" stop-color="#28d4ff"/>
-        <stop offset="0.5" stop-color="#27d65f"/>
-        <stop offset="0.7" stop-color="#f4df23"/>
-        <stop offset="1" stop-color="#f0472e"/>
-      </linearGradient>
-    </defs>
-  </svg>`),
+  image: staticAnalysisImage,
   tags: ["Solid", "Steady loads", "Linear", "Local solver"]
-};
+} satisfies AnalysisOption;
 
 const dynamicAnalysisOption = {
   type: "dynamic" as AnalysisChoice,
@@ -132,47 +164,9 @@ const dynamicAnalysisOption = {
   summary: "Time-dependent stress response",
   description: "Time-dependent structural response with inertia, damping, velocity, and acceleration using local Newmark integration.",
   imageAlt: "Dynamic stress frame sequence example",
-  image: svgDataUri(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 360">
-    <rect width="720" height="360" fill="#0b131d"/>
-    <g opacity="0.28">
-      <path d="M112 104 L574 74 L604 132 L142 184 Z" fill="#6d7783"/>
-      <path d="M142 184 L604 132 L604 165 L142 222 Z" fill="#53606b"/>
-    </g>
-    <path d="M112 112 C252 95 356 88 574 80 L606 144 C384 158 252 180 144 210 Z" fill="url(#frameA)" opacity="0.65"/>
-    <path d="M112 138 C260 132 382 136 582 128 L612 194 C392 178 260 174 144 236 Z" fill="url(#frameB)" opacity="0.8"/>
-    <path d="M80 88 L80 270" stroke="#48a4ff" stroke-width="6"/>
-    <path d="M56 100 L80 76 L104 100" fill="none" stroke="#48a4ff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
-    <path d="M56 258 L80 282 L104 258" fill="none" stroke="#48a4ff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
-    <path d="M548 42 L548 88" stroke="#ffc233" stroke-width="8" stroke-linecap="round"/>
-    <path d="M522 78 L548 122 L574 78 Z" fill="#ffc233"/>
-    <path d="M256 286 C320 246 402 246 466 286" fill="none" stroke="#4da3ff" stroke-width="6" stroke-linecap="round"/>
-    <circle cx="256" cy="286" r="10" fill="#4da3ff"/>
-    <circle cx="360" cy="254" r="10" fill="#ffce42"/>
-    <circle cx="466" cy="286" r="10" fill="#f15b45"/>
-    <text x="224" y="326" fill="#d7e0ea" font-family="Arial, sans-serif" font-size="22" font-weight="700">Frame 1</text>
-    <text x="330" y="326" fill="#d7e0ea" font-family="Arial, sans-serif" font-size="22" font-weight="700">Frame 2</text>
-    <text x="436" y="326" fill="#d7e0ea" font-family="Arial, sans-serif" font-size="22" font-weight="700">Frame 3</text>
-    <text x="452" y="42" fill="#ffd36a" font-family="Arial, sans-serif" font-size="26" font-weight="700">Impulse load</text>
-    <defs>
-      <linearGradient id="frameA" x1="0" x2="1">
-        <stop offset="0" stop-color="#1a78ff"/>
-        <stop offset="0.46" stop-color="#27d65f"/>
-        <stop offset="1" stop-color="#f0472e"/>
-      </linearGradient>
-      <linearGradient id="frameB" x1="0" x2="1">
-        <stop offset="0" stop-color="#174bdb"/>
-        <stop offset="0.28" stop-color="#25c8ff"/>
-        <stop offset="0.62" stop-color="#f4df23"/>
-        <stop offset="1" stop-color="#ff5d2d"/>
-      </linearGradient>
-    </defs>
-  </svg>`),
+  image: dynamicAnalysisImage,
   tags: ["Solid", "Transient loads", "Newmark", "Playback frames"]
-};
-
-function svgDataUri(svg: string) {
-  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
-}
+} satisfies AnalysisOption;
 
 interface StudyTreeProps {
   activeStep: StepId;
