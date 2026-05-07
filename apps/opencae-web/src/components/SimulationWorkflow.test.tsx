@@ -51,6 +51,24 @@ describe("static simulation workflow components", () => {
     expect(html).not.toContain("Create Dynamic");
   });
 
+  test("renders simulation showcase renders with native overlays instead of inline SVG images", () => {
+    const html = renderToStaticMarkup(<CreateSimulationModal open onCreateStatic={vi.fn()} onCreateDynamic={vi.fn()} onClose={vi.fn()} />);
+
+    expect(html).toContain("analysis-showcase analysis-showcase--compact analysis-showcase--static");
+    expect(html).toContain("analysis-showcase analysis-showcase--large analysis-showcase--static");
+    expect(html).toContain("analysis-showcase analysis-showcase--compact analysis-showcase--dynamic");
+    expect(html).toContain("Static stress example");
+    expect(html).toContain("Dynamic stress frame sequence example");
+    expect(html).toContain("500 N");
+    expect(html).toContain("Fixed support");
+    expect(html).toContain("Static peak stress");
+    expect(html).toContain("Impulse load");
+    expect(html).toContain("Frame 1");
+    expect(html).toContain("Frame 2");
+    expect(html).toContain("Frame 3");
+    expect(html).not.toContain("data:image/svg+xml");
+  });
+
   test("renders a required simulation type screen without a close action", () => {
     const html = renderToStaticMarkup(<CreateSimulationScreen onCreateStatic={vi.fn()} onCreateDynamic={vi.fn()} />);
 
