@@ -2,10 +2,21 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, test } from "vitest";
-import { BottomPanel, KeyboardShortcutGuide, WORKSPACE_SHORTCUT_GUIDE, resolveLogClearIntent } from "./BottomPanel";
+import {
+  BottomPanel,
+  COFFEE_ANIMATION_REPLAY_DELAY_MS,
+  KeyboardShortcutGuide,
+  WORKSPACE_SHORTCUT_GUIDE,
+  coffeeAnimationReplayDelayMs,
+  resolveLogClearIntent
+} from "./BottomPanel";
 
 const bottomPanelSource = readFileSync(resolve(__dirname, "BottomPanel.tsx"), "utf8");
 const workspaceSource = readFileSync(resolve(__dirname, "../WorkspaceApp.tsx"), "utf8");
+
+function textContent(html: string) {
+  return html.replace(/<[^>]+>/g, "");
+}
 
 describe("BottomPanel", () => {
   test("keeps the GitHub link in the bottom status area", () => {
@@ -28,17 +39,57 @@ describe("BottomPanel", () => {
     expect(html).toContain('href="https://ko-fi.com/petergn"');
     expect(html).toContain('href="https://github.com/esaueng/OpenCAE"');
     expect(html).toContain(">feedback</a>");
-    expect(html).toContain("Buy me a coffee</a>");
+    expect(textContent(html)).toContain("Buy me a coffee");
     expect(html).toContain(">github</a>");
     expect(html.indexOf("Results ready")).toBeLessThan(html.indexOf("local"));
     expect(html.indexOf("local")).toBeLessThan(html.indexOf("<b>project</b>"));
-    expect(html.indexOf("Buy me a coffee</a>")).toBeGreaterThan(html.indexOf("<b>solver</b>"));
-    expect(html.indexOf("Buy me a coffee</a>")).toBeLessThan(html.indexOf(">feedback</a>"));
-    expect(html.indexOf("Buy me a coffee</a>")).toBeLessThan(html.indexOf(">github</a>"));
+    expect(html.indexOf('href="https://ko-fi.com/petergn"')).toBeGreaterThan(html.indexOf("<b>solver</b>"));
+    expect(html.indexOf('href="https://ko-fi.com/petergn"')).toBeLessThan(html.indexOf('href="https://form.esauengineering.com/opencae-feedback"'));
+    expect(html.indexOf('href="https://ko-fi.com/petergn"')).toBeLessThan(html.indexOf('href="https://github.com/esaueng/OpenCAE"'));
     expect(html.indexOf(">github</a>")).toBeGreaterThan(html.indexOf("<b>solver</b>"));
   });
 
-  test("shows cloud backend status when Cloud FEA is selected", () => {
+  test("renders decorative coffee animation elements and wave text without changing link copy", () => {
+    const html = renderToStaticMarkup(
+      <BottomPanel
+        status="Results ready"
+        logs={["Ready"]}
+        projectName="Cantilever Demo"
+        studyName="Static Stress"
+        meshStatus="Ready"
+        solverStatus="Complete"
+        backendStatus="local"
+        onClearLogs={() => undefined}
+      />
+    );
+
+    expect(html).toContain('class="coffee-mark"');
+    expect(html).toContain('class="coffee-steam coffee-steam-one"');
+    expect(html).toContain('class="coffee-steam coffee-steam-two"');
+    expect(html).toContain('class="coffee-sparkle"');
+    expect(html).toContain('class="coffee-label"');
+    expect(html).toContain('class="coffee-letter"');
+    expect(html).toContain("--coffee-letter-index:0");
+    expect(html).toContain("--coffee-letter-index:14");
+    expect(textContent(html)).toContain("Buy me a coffee");
+  });
+
+  test("wires hover to play the coffee animation once", () => {
+    expect(bottomPanelSource).toContain("function runCoffeeAnimation()");
+    expect(bottomPanelSource).toContain("onMouseEnter={runCoffeeAnimation}");
+    expect(bottomPanelSource).toContain("window.clearTimeout(animationTimeoutRef.current)");
+  });
+
+  test("bounds the randomized coffee animation replay delay", () => {
+    expect(COFFEE_ANIMATION_REPLAY_DELAY_MS).toEqual({ min: 18000, max: 45000 });
+    expect(coffeeAnimationReplayDelayMs(0)).toBe(18000);
+    expect(coffeeAnimationReplayDelayMs(0.5)).toBe(31500);
+    expect(coffeeAnimationReplayDelayMs(1)).toBe(45000);
+    expect(coffeeAnimationReplayDelayMs(-1)).toBe(18000);
+    expect(coffeeAnimationReplayDelayMs(2)).toBe(45000);
+  });
+
+  test("shows core backend status when OpenCAE Core is selected", () => {
     const html = renderToStaticMarkup(
       <BottomPanel
         status="Ready"
@@ -47,30 +98,30 @@ describe("BottomPanel", () => {
         studyName="Static Stress"
         meshStatus="Ready"
         solverStatus="Idle"
-        backendStatus="cloud"
+        backendStatus="core"
         onClearLogs={() => undefined}
       />
     );
 
     expect(html).toContain('class="backend-pill"');
-    expect(html).toContain(">cloud</span>");
+    expect(html).toContain(">core</span>");
   });
 
-  test("shows Cloud FEA errors instead of collapsing them to ready", () => {
+  test("shows OpenCAE Core errors instead of collapsing them to ready", () => {
     const html = renderToStaticMarkup(
       <BottomPanel
-        status="Cloud FEA run creation failed: POST /api/cloud-fea/runs failed with HTTP 404."
-        logs={["Cloud FEA run creation failed: POST /api/cloud-fea/runs failed with HTTP 404."]}
+        status="OpenCAE Core solve failed: singular matrix."
+        logs={["OpenCAE Core solve failed: singular matrix."]}
         projectName="Cantilever Demo"
         studyName="Static Stress"
         meshStatus="Ready"
         solverStatus="Idle"
-        backendStatus="cloud"
+        backendStatus="core"
         onClearLogs={() => undefined}
       />
     );
 
-    expect(html).toContain(">Cloud FEA error</span>");
+    expect(html).toContain(">OpenCAE Core error</span>");
     expect(html).not.toContain('class="status-state ready"');
   });
 

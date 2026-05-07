@@ -3,6 +3,7 @@ import type { LoadApplicationPoint, LoadDirection, LoadType, PayloadLoadMetadata
 import { embedUploadedModelFile, type EmbeddedModelFile, type LocalResultBundle } from "../projectFile";
 import { createLocalBlankProject, createLocalSampleProject, createLocalUploadResponse, openLocalProjectPayload } from "../localProjectFactory";
 import { fallbackSolveLocalStudy, solveLocalStudyInWorker } from "../workers/performanceClient";
+import { normalizeSolverBackend, openCaeCoreEligibility, trySolveOpenCaeCoreStudy, type NormalizedBrowserSolverBackend } from "../workers/opencaeCoreSolve";
 
 export interface SampleProjectResponse {
   message?: string;
@@ -20,79 +21,15 @@ export interface ResultsResponse {
 }
 
 export interface RunSimulationOptions {
-  onCloudFeaHealth?: (message: string) => void;
+  onRunStatus?: (message: string) => void;
   resultRenderBounds?: ResultRenderBounds | null;
-}
-
-export interface CloudFeaRouteHealth {
-  ok?: boolean;
-  mode?: string;
-  service?: string;
-  requestOrigin?: string;
-  cloudFeaEndpoint?: string;
-  cloudFeaAvailable?: boolean;
-  requiredDeployConfig?: string;
-  runnerUrl?: string;
-  runnerHealthUrl?: string;
-  runner?: {
-    reachable?: boolean;
-    ccx?: unknown;
-    gmsh?: unknown;
-    error?: string;
-  };
-  artifactsBound?: boolean;
-  queueBound?: boolean;
-  containerBound?: boolean;
-  containersEnabled?: boolean;
-  containerRunnerVersion?: string;
-  supportedAnalysisTypes?: string[];
-  dynamicCloudFeaAvailable?: boolean;
-  expectedRunnerVersion?: string;
-  solverTimeouts?: {
-    staticStress?: number;
-    dynamicStructural?: number;
-  };
-  dynamicStructural?: {
-    supported?: boolean;
-    maxFrames?: number;
-    limitations?: string[];
-  };
-}
-
-export interface CloudFeaPreflightRequest {
-  study: Study;
-  displayModel?: DisplayModel | null;
-  resultRenderBounds?: ResultRenderBounds | null;
-}
-
-export interface CloudFeaPreflightResponse {
-  ready: boolean;
-  solver: string;
-  supported: {
-    geometry: boolean;
-    materials: boolean;
-    constraints: boolean;
-    loads: boolean;
-    dynamicStructural?: boolean;
-  };
-  dynamicStructural?: {
-    supported?: boolean;
-    maxFrames?: number;
-    limitations?: string[];
-  };
-  normalizedLoads: Array<Record<string, unknown>>;
-  diagnostics: Array<{ id?: string; severity?: string; source?: string; message: string; details?: Record<string, unknown> }>;
 }
 
 const localResultsByRunId = new Map<string, ResultsResponse | Promise<ResultsResponse>>();
 const localResultSolversByRunId = new Map<string, () => Promise<ResultsResponse>>();
 const localEventsByRunId = new Map<string, RunEvent[]>();
-const cloudFeaApiBaseByRunId = new Map<string, string>();
-const CLOUD_FEA_API_BASE = "";
-const DEV_LOCAL_CLOUD_FEA_BRIDGE_API_BASE = "http://localhost:4317";
 const DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.005;
 const MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.001;
-const MIN_CLOUD_FEA_OUTPUT_INTERVAL_SECONDS = 0.0005;
 
 export async function loadSampleProject(sample: SampleModelId = "bracket", analysisType: SampleAnalysisType = "static_stress"): Promise<SampleProjectResponse> {
   return fetchJsonWithFallback(
@@ -314,54 +251,13 @@ export async function addLoad(studyId: string, type: LoadType, value: number, se
 
 export async function runSimulation(studyId: string, currentStudy?: Study, displayModel?: DisplayModel, options: RunSimulationOptions = {}): Promise<{ run: { id: string }; streamUrl: string; message: string }> {
   try {
-    if (currentStudy && simulationBackend(currentStudy) === "cloudflare_fea") {
-      const route = await resolveCloudFeaApiBase(options);
-      const endpoint = cloudFeaApiUrl(route.apiBase, "/api/cloud-fea/runs");
-      options.onCloudFeaHealth?.(`Cloud FEA request started: POST ${endpoint}.`);
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          projectId: currentStudy.projectId,
-          studyId,
-          fidelity: simulationFidelity(currentStudy),
-          study: currentStudy,
-          displayModel,
-          resultRenderBounds: options.resultRenderBounds ?? undefined,
-          geometry: cloudFeaGeometryPayload(displayModel),
-          dynamicSettings: currentStudy.type === "dynamic_structural" ? currentStudy.solverSettings : undefined
-        })
-      });
-      const payload = await readJson<{ run: { id: string }; streamUrl: string; message: string }>(response, `POST ${endpoint}`);
-      cloudFeaApiBaseByRunId.set(payload.run.id, route.apiBase);
-      return payload;
-    }
+    void options;
     const response = await fetch(`/api/studies/${studyId}/runs`, { method: "POST" });
     return await readJson(response, `POST /api/studies/${studyId}/runs`);
   } catch (error) {
     if (!currentStudy) throw error;
-    if (simulationBackend(currentStudy) === "cloudflare_fea") {
-      throw cloudFeaRunError(error);
-    }
     return runSimulationLocally(currentStudy, displayModel);
   }
-}
-
-export async function getCloudFeaHealth(): Promise<CloudFeaRouteHealth> {
-  return fetchCloudFeaRouteHealth(CLOUD_FEA_API_BASE);
-}
-
-export async function getCloudFeaPreflight(request: CloudFeaPreflightRequest): Promise<CloudFeaPreflightResponse> {
-  const response = await fetch("/api/cloud-fea/preflight", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      study: request.study,
-      displayModel: request.displayModel ?? undefined,
-      resultRenderBounds: request.resultRenderBounds ?? undefined
-    })
-  });
-  return readJson(response, "POST /api/cloud-fea/preflight");
 }
 
 export async function getResults(runId: string): Promise<ResultsResponse> {
@@ -369,11 +265,6 @@ export async function getResults(runId: string): Promise<ResultsResponse> {
   if (localResults) return localResults;
   const localComputedResults = computeLocalResults(runId);
   if (localComputedResults) return localComputedResults;
-  if (runId.startsWith("run-cloud-")) {
-    const endpoint = cloudFeaApiUrl(cloudFeaApiBaseByRunId.get(runId) ?? "", `/api/cloud-fea/runs/${runId}/results`);
-    const response = await fetch(endpoint);
-    return readJson(response, `GET ${endpoint}`);
-  }
   const response = await fetch(`/api/runs/${runId}/results`);
   return readJson(response, `GET /api/runs/${runId}/results`);
 }
@@ -406,7 +297,6 @@ export async function cancelRun(runId: string): Promise<{ run: StudyRun; message
 export function subscribeToRun(runId: string, onEvent: (event: RunEvent) => void): EventSource {
   const localEvents = localEventsByRunId.get(runId);
   if (localEvents) return subscribeToLocalRun(localEvents, onEvent);
-  if (runId.startsWith("run-cloud-")) return subscribeToCloudFeaRun(runId, onEvent);
   const source = new EventSource(`/api/runs/${runId}/stream`);
   const eventTypes: RunEvent["type"][] = ["state", "progress", "message", "log", "diagnostic", "complete", "cancelled", "error"];
   for (const type of eventTypes) {
@@ -417,19 +307,21 @@ export function subscribeToRun(runId: string, onEvent: (event: RunEvent) => void
 
 function runSimulationLocally(study: Study, displayModel?: DisplayModel, staticBackendOverride?: "local_detailed"): { run: StudyRun; streamUrl: string; message: string } {
   const runId = `run-local-${crypto.randomUUID()}`;
+  const backend = staticBackendOverride ?? simulationBackend(study) ?? "local_detailed";
+  const coreEligibility = backend === "opencae_core" ? openCaeCoreEligibility(study, displayModel) : undefined;
   localResultSolversByRunId.set(runId, () => {
+    if (backend === "opencae_core" && coreEligibility?.ok) {
+      const coreSolve = trySolveOpenCaeCoreStudy({ study, runId, displayModel });
+      if (coreSolve.ok) return Promise.resolve(coreSolve.result);
+    }
     const analysisMesh = displayModel ? analysisMeshForDisplayModel(displayModel, study.meshSettings.preset) : undefined;
     const payload = { study, runId, analysisMesh, displayModel, debugResults: debugResultsEnabled() };
     return solveLocalStudyInWorker(payload).catch(() => fallbackSolveLocalStudy(payload));
   });
   const now = new Date().toISOString();
-  const events: RunEvent[] = study.type === "dynamic_structural" ? localDynamicRunEvents(runId, study, now) : addRunTiming([
-    { runId, type: "state", progress: 0, message: "Simulation queued locally.", timestamp: now },
-    { runId, type: "progress", progress: 10, message: "Local static solver started.", timestamp: now },
-    { runId, type: "progress", progress: 46, message: "Assembling local stiffness response.", timestamp: now },
-    { runId, type: "progress", progress: 88, message: "Writing local result fields.", timestamp: now },
-    { runId, type: "complete", progress: 100, message: "Simulation complete.", timestamp: now }
-  ], localRunDurationEstimateMs(study));
+  const events: RunEvent[] = study.type === "dynamic_structural"
+    ? localDynamicRunEvents(runId, study, now, backend)
+    : localStaticRunEvents(runId, study, now, backend, coreEligibility);
   localEventsByRunId.set(runId, events);
   return {
     run: {
@@ -438,17 +330,50 @@ function runSimulationLocally(study: Study, displayModel?: DisplayModel, staticB
       status: "queued",
       jobId: `job-${runId}`,
       meshRef: study.meshSettings.meshRef,
-      solverBackend: localSolverBackendForRun(study, staticBackendOverride),
+      solverBackend: localSolverBackendForRun(study, backend, coreEligibility),
       solverVersion: "0.1.0",
       startedAt: now,
       diagnostics: []
     },
     streamUrl: `local:${runId}`,
-    message: "Simulation running locally."
+    message: backend === "opencae_core" && coreEligibility?.ok
+      ? "OpenCAE Core simulation running locally."
+      : backend === "opencae_core" && coreEligibility && !coreEligibility.ok
+        ? `OpenCAE Core fallback to Detailed local: ${coreEligibility.reason}`
+        : "Simulation running locally."
   };
 }
 
-function localDynamicRunEvents(runId: string, study: Study, timestamp: string): RunEvent[] {
+function localStaticRunEvents(
+  runId: string,
+  study: Study,
+  timestamp: string,
+  backend: NormalizedBrowserSolverBackend,
+  coreEligibility?: ReturnType<typeof openCaeCoreEligibility>
+): RunEvent[] {
+  if (backend === "opencae_core" && coreEligibility?.ok) {
+    return addRunTiming([
+      { runId, type: "state", progress: 0, message: "OpenCAE Core solve queued in browser.", timestamp },
+      { runId, type: "progress", progress: 10, message: "OpenCAE Core CPU Tet4 solver started.", timestamp },
+      { runId, type: "progress", progress: 46, message: "Building OpenCAE Core model and stiffness matrix.", timestamp },
+      { runId, type: "progress", progress: 88, message: "Writing OpenCAE Core result fields.", timestamp },
+      { runId, type: "complete", progress: 100, message: "OpenCAE Core simulation complete.", timestamp }
+    ], localRunDurationEstimateMs(study));
+  }
+  const fallbackPrefix = backend === "opencae_core" && coreEligibility && !coreEligibility.ok
+    ? [{ runId, type: "message" as const, progress: 4, message: `OpenCAE Core fallback to Detailed local: ${coreEligibility.reason}`, timestamp }]
+    : [];
+  return addRunTiming([
+    { runId, type: "state", progress: 0, message: "Simulation queued locally.", timestamp },
+    ...fallbackPrefix,
+    { runId, type: "progress", progress: 10, message: "Local static solver started.", timestamp },
+    { runId, type: "progress", progress: 46, message: "Assembling local stiffness response.", timestamp },
+    { runId, type: "progress", progress: 88, message: "Writing local result fields.", timestamp },
+    { runId, type: "complete", progress: 100, message: "Simulation complete.", timestamp }
+  ], localRunDurationEstimateMs(study));
+}
+
+function localDynamicRunEvents(runId: string, study: Study, timestamp: string, backend: NormalizedBrowserSolverBackend = "local_detailed"): RunEvent[] {
   const frameCount = dynamicOutputFrameEstimate(study);
   const estimatedDurationMs = localRunDurationEstimateMs(study, frameCount);
   const milestones = [...new Set([1, Math.ceil(frameCount * 0.2), Math.ceil(frameCount * 0.4), Math.ceil(frameCount * 0.6), Math.ceil(frameCount * 0.8), frameCount])]
@@ -462,11 +387,18 @@ function localDynamicRunEvents(runId: string, study: Study, timestamp: string): 
   }));
   return addRunTiming([
     { runId, type: "state", progress: 0, message: "Simulation queued locally.", timestamp },
+    ...(backend === "opencae_core" ? [{ runId, type: "message" as const, progress: 4, message: "OpenCAE Core fallback to Detailed local: OpenCAE Core browser solve currently supports static stress studies only.", timestamp }] : []),
     { runId, type: "progress", progress: 10, message: "Local dynamic solver started.", timestamp },
     { runId, type: "progress", progress: 34, message: "Estimating lumped mass, stiffness, and damping.", timestamp },
     { runId, type: "progress", progress: 62, message: "Integrating dynamic response with Newmark average acceleration.", timestamp },
     ...writeEvents,
-    { runId, type: "complete", progress: 100, message: "Simulation complete.", timestamp }
+    {
+      runId,
+      type: "complete",
+      progress: 100,
+      message: backend === "opencae_core" ? "OpenCAE Core fallback to Detailed local simulation complete." : "Simulation complete.",
+      timestamp
+    }
   ], estimatedDurationMs);
 }
 
@@ -491,14 +423,14 @@ function localRunDurationEstimateMs(study: Study, frameCount = study.type === "d
   return Math.round((1400 + frameCost) * meshMultiplier * dynamicMultiplier);
 }
 
-export function dynamicOutputFrameEstimate(study: Study, options: { backend?: "cloudflare_fea" | "local_detailed" } = {}): number {
+export function dynamicOutputFrameEstimate(study: Study, options: { backend?: "cloudflare_fea" | "opencae_core" | "local_detailed" } = {}): number {
   const raw = study.solverSettings as Partial<DynamicSolverSettings>;
   const startTime = finiteOr(raw.startTime, 0);
   const endTime = finiteOr(raw.endTime, 0.1);
   const timeStep = finiteOr(raw.timeStep, DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS);
   const requestedOutputInterval = finiteOr(raw.outputInterval, DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS);
-  const backend = options.backend ?? simulationBackend(study) ?? "local_detailed";
-  const backendMinimum = backend === "cloudflare_fea" ? MIN_CLOUD_FEA_OUTPUT_INTERVAL_SECONDS : Math.max(DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS, MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS);
+  void options;
+  const backendMinimum = Math.max(DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS, MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS);
   const outputInterval = Math.max(requestedOutputInterval, timeStep, backendMinimum);
   const duration = Math.max(0, endTime - startTime);
   const wholeSteps = Math.floor(duration / outputInterval);
@@ -606,52 +538,6 @@ function subscribeToLocalRun(events: RunEvent[], onEvent: (event: RunEvent) => v
   } as EventSource;
 }
 
-function subscribeToCloudFeaRun(runId: string, onEvent: (event: RunEvent) => void): EventSource {
-  let closed = false;
-  let seenCount = 0;
-  let timer: ReturnType<typeof globalThis.setInterval> | undefined;
-  const apiBase = cloudFeaApiBaseByRunId.get(runId) ?? "";
-  const endpoint = cloudFeaApiUrl(apiBase, `/api/cloud-fea/runs/${runId}/events`);
-  const poll = async () => {
-    if (closed) return;
-    try {
-      const response = await fetch(endpoint);
-      const payload = await readJson<{ events: RunEvent[] }>(response, `GET ${endpoint}`);
-      const nextEvents = payload.events.slice(seenCount);
-      seenCount = payload.events.length;
-      for (const event of nextEvents) {
-        if (closed) return;
-        onEvent(event);
-        if (event.type === "complete" || event.type === "cancelled" || event.type === "error") {
-          closed = true;
-          if (timer) globalThis.clearInterval(timer);
-          return;
-        }
-      }
-    } catch (error) {
-      if (!closed) {
-        onEvent({
-          runId,
-          type: "error",
-          progress: 100,
-          message: `Cloud FEA event polling failed: ${requestErrorMessage(error, `GET ${endpoint}`)}`,
-          timestamp: new Date().toISOString()
-        });
-      }
-      closed = true;
-      if (timer) globalThis.clearInterval(timer);
-    }
-  };
-  void poll();
-  timer = globalThis.setInterval(() => void poll(), 750);
-  return {
-    close() {
-      closed = true;
-      if (timer) globalThis.clearInterval(timer);
-    }
-  } as EventSource;
-}
-
 async function readJson<T>(response: Response, endpoint = response.url || "request"): Promise<T> {
   if (!response.ok) {
     const text = await response.text();
@@ -665,92 +551,6 @@ async function readJson<T>(response: Response, endpoint = response.url || "reque
     throw new Error(formatHttpError(endpoint, response.status, response.statusText, message));
   }
   return response.json() as Promise<T>;
-}
-
-function cloudFeaRunError(error: unknown): Error {
-  const message = error instanceof Error ? error.message : String(error);
-  if (/failed to fetch|networkerror|load failed|fetch failed/i.test(message)) {
-    return new Error(`Cloud FEA endpoint is unreachable on this app domain: ${message}. ${cloudFeaEndpointActionMessage()}`);
-  }
-  if (/cloud fea containers are not enabled|fea_container/i.test(message)) {
-    return new Error(cloudFeaContainerBindingMessage(message));
-  }
-  if (/route post:\/api\/cloud-fea\/runs not found|unexpected token '<'|not found/i.test(message)) {
-    return new Error(`Cloud FEA endpoint is unavailable on this app domain: ${message}. ${cloudFeaEndpointActionMessage()}`);
-  }
-  return error instanceof Error ? error : new Error(message);
-}
-
-interface CloudFeaRouteResolution {
-  apiBase: string;
-}
-
-async function resolveCloudFeaApiBase(options: RunSimulationOptions): Promise<CloudFeaRouteResolution> {
-  const sameOriginHealth = await fetchCloudFeaRouteHealth(CLOUD_FEA_API_BASE);
-  options.onCloudFeaHealth?.(cloudFeaRouteHealthMessage(sameOriginHealth));
-  if (sameOriginHealth.mode === "cloudflare-worker" && sameOriginHealth.containerBound === true) {
-    return { apiBase: CLOUD_FEA_API_BASE };
-  }
-  if (sameOriginHealth.mode === "local-cloud-fea-bridge") {
-    if (!isDevLocalCloudFeaBridgeEnabled()) throw new Error(localCloudFeaBridgeDisabledMessage());
-    return { apiBase: CLOUD_FEA_API_BASE };
-  }
-  if (isDevLocalCloudFeaBridgeEnabled()) {
-    const localBridgeHealth = await fetchCloudFeaRouteHealth(DEV_LOCAL_CLOUD_FEA_BRIDGE_API_BASE);
-    if (localBridgeHealth.mode === "local-cloud-fea-bridge") {
-      options.onCloudFeaHealth?.(`Cloud FEA local bridge selected: ${DEV_LOCAL_CLOUD_FEA_BRIDGE_API_BASE}.`);
-      options.onCloudFeaHealth?.(cloudFeaRouteHealthMessage(localBridgeHealth));
-      return { apiBase: DEV_LOCAL_CLOUD_FEA_BRIDGE_API_BASE };
-    }
-  }
-  assertCloudFeaRouteCanCreateRun(sameOriginHealth);
-  return { apiBase: CLOUD_FEA_API_BASE };
-}
-
-async function fetchCloudFeaRouteHealth(apiBase: string): Promise<CloudFeaRouteHealth> {
-  const endpoint = cloudFeaApiUrl(apiBase, "/api/cloud-fea/health");
-  const response = await fetch(endpoint);
-  return readJson(response, `GET ${endpoint}`);
-}
-
-function cloudFeaApiUrl(apiBase: string, path: string): string {
-  return apiBase ? `${apiBase}${path}` : path;
-}
-
-function assertCloudFeaRouteCanCreateRun(routeHealth: CloudFeaRouteHealth): void {
-  if (routeHealth.mode === "cloudflare-worker" && routeHealth.containerBound !== true) {
-    throw new Error(cloudFeaContainerBindingMessage());
-  }
-}
-
-function isDevLocalCloudFeaBridgeEnabled(): boolean {
-  return import.meta.env.DEV && import.meta.env.VITE_OPCAE_LOCAL_CLOUD_FEA_BRIDGE === "1";
-}
-
-function cloudFeaRouteHealthMessage(routeHealth: CloudFeaRouteHealth): string {
-  const containerBound = typeof routeHealth.containerBound === "boolean" ? String(routeHealth.containerBound) : "n/a";
-  const runner = typeof routeHealth.runnerUrl === "string" ? routeHealth.runnerUrl : "n/a";
-  const ccx = routeHealth.runner && routeHealth.runner.ccx !== undefined ? String(routeHealth.runner.ccx) : "n/a";
-  return `Cloud FEA route health: mode=${routeHealth.mode ?? "unknown"}; containerBound=${containerBound}; runner=${runner}; ccx=${ccx}.`;
-}
-
-function cloudFeaContainerBindingMessage(originalMessage?: string): string {
-  const action = `Cloud FEA is unavailable on this deployment because the app Worker has no FEA_CONTAINER binding. Deploy with pnpm deploy:cloudflare:containers, which uses wrangler.containers.jsonc, or switch Backend to Detailed local.${import.meta.env.DEV ? " For local bridge testing, set VITE_OPCAE_LOCAL_CLOUD_FEA_BRIDGE=1 and run the local API/runner." : ""}`;
-  if (originalMessage?.includes(action)) return action;
-  return originalMessage ? `${action} Original response: ${originalMessage}` : action;
-}
-
-function cloudFeaEndpointActionMessage(): string {
-  return "Deploy with pnpm deploy:cloudflare:containers, which uses wrangler.containers.jsonc, or switch Backend to Detailed local.";
-}
-
-function localCloudFeaBridgeDisabledMessage(): string {
-  return "Cloud FEA local bridge routing is disabled. Set VITE_OPCAE_LOCAL_CLOUD_FEA_BRIDGE=1 in a dev build to test the local API/runner, or use the same-origin Cloudflare Worker endpoint.";
-}
-
-function requestErrorMessage(error: unknown, endpoint: string): string {
-  const message = error instanceof Error ? error.message : String(error);
-  return message.includes(endpoint) ? message : `${endpoint}: ${message}`;
 }
 
 function formatHttpError(endpoint: string, status: number, statusText: string, message: string): string {
@@ -784,13 +584,12 @@ function meshSummaryForPreset(preset: MeshQuality, analysisMesh?: AnalysisMesh) 
   return summaryByPreset[preset];
 }
 
-function simulationBackend(study: Study): "local_detailed" | "cloudflare_fea" | undefined {
-  const backend = (study.solverSettings as { backend?: unknown }).backend;
-  return backend === "cloudflare_fea" || backend === "local_detailed" ? backend : undefined;
+function simulationBackend(study: Study): NormalizedBrowserSolverBackend | undefined {
+  return normalizeSolverBackend(study);
 }
 
-function localSolverBackendForRun(study: Study, staticBackendOverride?: "local_detailed"): string {
-  void staticBackendOverride;
+function localSolverBackendForRun(study: Study, backend: NormalizedBrowserSolverBackend, coreEligibility?: ReturnType<typeof openCaeCoreEligibility>): string {
+  if (backend === "opencae_core" && coreEligibility?.ok) return "opencae-core-cpu-tet4";
   if (study.type === "dynamic_structural") return "local-dynamic-newmark";
   if (isBeamDemoStudyForLocalRun(study)) return "local-beam-demo-euler-bernoulli";
   return "local-heuristic-surface";
@@ -810,29 +609,6 @@ function isBeamDemoStudyForLocalRun(study: Study): boolean {
     .toLowerCase();
   const projectText = `${study.projectId} ${study.name}`.toLowerCase();
   return selectionText.includes("payload") || selectionText.includes("beam body") || projectText.includes("beam");
-}
-
-function simulationFidelity(study: Study): "standard" | "detailed" | "ultra" {
-  const fidelity = (study.solverSettings as { fidelity?: unknown }).fidelity;
-  return fidelity === "detailed" || fidelity === "ultra" ? fidelity : "standard";
-}
-
-function cloudFeaGeometryPayload(displayModel?: DisplayModel) {
-  if (displayModel?.nativeCad?.contentBase64) {
-    return {
-      format: displayModel.nativeCad.format,
-      filename: displayModel.nativeCad.filename,
-      contentBase64: displayModel.nativeCad.contentBase64
-    };
-  }
-  if (displayModel?.visualMesh?.contentBase64) {
-    return {
-      format: displayModel.visualMesh.format,
-      filename: displayModel.visualMesh.filename,
-      contentBase64: displayModel.visualMesh.contentBase64
-    };
-  }
-  return undefined;
 }
 
 async function fileToBase64(file: File): Promise<string> {

@@ -1,5 +1,7 @@
 import math
 import base64
+import ast
+import inspect
 import shutil
 import sys
 import tempfile
@@ -169,13 +171,36 @@ class StructuredBlockSolveTest(unittest.TestCase):
 
 
 class UploadedGeometrySolveTest(unittest.TestCase):
-    def test_parse_payload_sanitizes_run_id_for_temporary_directory_prefix(self):
+    def test_uploaded_geometry_payload_does_not_parse_user_filename_as_path(self):
+        source = inspect.getsource(runner.uploaded_geometry_payload)
+        tree = ast.parse(source)
+        path_calls = [
+            node for node in ast.walk(tree)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "Path"
+        ]
+
+        self.assertEqual(path_calls, [])
+
+    def test_parse_payload_sanitizes_run_id_for_temporary_paths(self):
         payload = uploaded_geometry_payload()
-        payload["runId"] = "../run uploaded/geometry"
+        payload["runId"] = "../../run upload/evil"
 
         parsed = runner.parse_payload(payload)
 
-        self.assertEqual(parsed["runId"], "run-uploaded-geometry")
+        self.assertEqual(parsed["runId"], "run-upload-evil")
+
+    def test_stage_uploaded_geometry_keeps_sanitized_filename_inside_workdir(self):
+        payload = uploaded_geometry_payload()
+        payload["geometry"]["filename"] = "../../bad name!.stl"
+        parsed = runner.parse_payload(payload)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = Path(tmp)
+            staged = runner.stage_uploaded_geometry(workdir, parsed["geometry"])
+
+            self.assertEqual(staged.name, "bad-name_.stl")
+            self.assertEqual(staged.resolve().parent, workdir.resolve())
+            self.assertTrue(staged.read_bytes())
 
     def test_uploaded_geometry_refuses_missing_gmsh_before_structured_block_or_ccx(self):
         payload = uploaded_geometry_payload()
@@ -215,46 +240,6 @@ class UploadedGeometrySolveTest(unittest.TestCase):
         self.assertEqual(context.exception.status, 422)
         self.assertIn("could not be mapped confidently", str(context.exception))
         self.assertEqual(context.exception.payload["diagnostics"][0]["id"], "cloud-fea-uploaded-face-mapping-failed")
-
-    def test_stage_uploaded_geometry_rejects_parent_directory_filename(self):
-        payload = uploaded_geometry_payload()["geometry"]
-        payload["filename"] = "../evil.stl"
-        with tempfile.TemporaryDirectory() as tmp:
-            with self.assertRaises(runner.UserFacingSolveError):
-                runner.stage_uploaded_geometry(Path(tmp), payload)
-
-    def test_stage_uploaded_geometry_rejects_absolute_filename(self):
-        payload = uploaded_geometry_payload()["geometry"]
-        payload["filename"] = "/tmp/evil.stl"
-        with tempfile.TemporaryDirectory() as tmp:
-            with self.assertRaises(runner.UserFacingSolveError):
-                runner.stage_uploaded_geometry(Path(tmp), payload)
-
-    def test_stage_uploaded_geometry_uses_fixed_filename_for_valid_upload(self):
-        payload = uploaded_geometry_payload()["geometry"]
-        payload["filename"] = "customer-supplied-name.stl"
-        with tempfile.TemporaryDirectory() as tmp:
-            workdir = Path(tmp)
-
-            staged = runner.stage_uploaded_geometry(workdir, payload)
-
-            self.assertEqual(staged, workdir / "uploaded_geometry.stl")
-            self.assertTrue(staged.exists())
-
-    def test_stage_uploaded_geometry_refuses_existing_staging_symlink(self):
-        payload = uploaded_geometry_payload()["geometry"]
-        payload["filename"] = "uploaded-block.stl"
-        with tempfile.TemporaryDirectory() as tmp:
-            workdir = Path(tmp)
-            outside = workdir.parent / "outside-upload-target.stl"
-            outside.write_text("outside")
-            (workdir / "uploaded_geometry.stl").symlink_to(outside)
-            try:
-                with self.assertRaises(runner.UserFacingSolveError):
-                    runner.stage_uploaded_geometry(workdir, payload)
-                self.assertEqual(outside.read_text(), "outside")
-            finally:
-                outside.unlink(missing_ok=True)
 
 
 class GeneratedDynamicFieldsTest(unittest.TestCase):

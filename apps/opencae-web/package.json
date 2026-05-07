@@ -10,12 +10,15 @@
     "preview": "vite preview --host 0.0.0.0 --port 5173"
   },
   "dependencies": {
+    "@opencae/core": "workspace:*",
     "@opencae/db": "workspace:*",
     "@opencae/materials": "workspace:*",
     "@opencae/schema": "workspace:*",
+    "@opencae/solver-cpu": "workspace:*",
     "@opencae/solver-service": "workspace:*",
     "@opencae/study-core": "workspace:*",
     "@opencae/units": "workspace:*",
+    "@plausible-analytics/tracker": "^0.4.5",
     "@react-three/drei": "^9.122.0",
     "@react-three/fiber": "^8.17.10",
     "lucide-react": "^0.468.0",
