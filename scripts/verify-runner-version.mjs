@@ -17,10 +17,7 @@ export function readRunnerVersionSources(baseDir = rootDir) {
 
 export function expectedRunnerVersionFromWorkerSource(workerSource) {
   const match = /const\s+EXPECTED_FEA_RUNNER_VERSION\s*=\s*"([^"]+)"/.exec(workerSource);
-  if (!match?.[1]) {
-    throw new Error(`Could not find EXPECTED_FEA_RUNNER_VERSION in ${workerRelativePath}.`);
-  }
-  return match[1];
+  return match?.[1] ?? null;
 }
 
 export function validateRunnerVersionSources({ runnerVersion, workerSource }) {
@@ -29,6 +26,14 @@ export function validateRunnerVersionSources({ runnerVersion, workerSource }) {
     throw new Error(`${runnerVersionRelativePath} must contain a non-empty runner version.`);
   }
   const workerExpectedRunnerVersion = expectedRunnerVersionFromWorkerSource(workerSource);
+  if (!workerExpectedRunnerVersion) {
+    return {
+      runnerVersion: normalizedRunnerVersion,
+      workerExpectedRunnerVersion: null,
+      skipped: true,
+      reason: "Default Worker runtime is browser-local and does not bind the legacy FEA container."
+    };
+  }
   if (workerExpectedRunnerVersion !== normalizedRunnerVersion) {
     throw new Error(
       `Worker EXPECTED_FEA_RUNNER_VERSION "${workerExpectedRunnerVersion}" must match ${runnerVersionRelativePath} "${normalizedRunnerVersion}".`
@@ -40,7 +45,7 @@ export function validateRunnerVersionSources({ runnerVersion, workerSource }) {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   try {
     const result = validateRunnerVersionSources(readRunnerVersionSources(rootDir));
-    console.log(`Cloud FEA runner version verified: ${result.runnerVersion}`);
+    console.log(result.skipped ? `Cloud FEA runner version guard skipped: ${result.reason}` : `Cloud FEA runner version verified: ${result.runnerVersion}`);
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;

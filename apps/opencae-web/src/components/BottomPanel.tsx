@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type MouseEvent, type PointerEvent } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent } from "react";
 import { Coffee, Github, MessageSquare } from "lucide-react";
 import { REQUIRED_SETTING_HELP_IDS, SETTING_HELP, type SettingHelpVisual } from "../settingHelp";
 
@@ -9,7 +9,7 @@ interface BottomPanelProps {
   studyName: string;
   meshStatus: string;
   solverStatus: string;
-  backendStatus: "local" | "cloud";
+  backendStatus: "local" | "cloud" | "core";
   onClearLogs: () => void;
 }
 
@@ -22,21 +22,69 @@ export const WORKSPACE_SHORTCUT_GUIDE: Array<{ keys: string[]; label: string }> 
   { keys: ["Shift", "Ctrl/Cmd", "Z"], label: "Redo" }
 ];
 
+export const COFFEE_ANIMATION_DURATION_MS = 1800;
+export const COFFEE_ANIMATION_REPLAY_DELAY_MS = { min: 18000, max: 45000 } as const;
+const COFFEE_LINK_TEXT = "Buy me a coffee";
+
+export function coffeeAnimationReplayDelayMs(randomValue = Math.random()) {
+  const safeRandomValue = Number.isFinite(randomValue) ? randomValue : 0;
+  const boundedRandomValue = Math.min(1, Math.max(0, safeRandomValue));
+  const delayRange = COFFEE_ANIMATION_REPLAY_DELAY_MS.max - COFFEE_ANIMATION_REPLAY_DELAY_MS.min;
+  return Math.round(COFFEE_ANIMATION_REPLAY_DELAY_MS.min + delayRange * boundedRandomValue);
+}
+
 export function BottomPanel({ status, logs, projectName, studyName, meshStatus, solverStatus, backendStatus, onClearLogs }: BottomPanelProps) {
   const [tab, setTab] = useState<"tips" | "logs" | null>(null);
   const [drawerHeight, setDrawerHeight] = useState(320);
   const [clearPromptVisible, setClearPromptVisible] = useState(false);
+  const [coffeeAnimating, setCoffeeAnimating] = useState(false);
+  const [coffeeAnimationRun, setCoffeeAnimationRun] = useState(0);
   const dragStart = useRef<{ y: number; height: number } | null>(null);
+  const animationTimeoutRef = useRef(0);
+  const replayTimeoutRef = useRef(0);
   const expanded = tab !== null;
   const displayStatus = statusForDisplay(status, solverStatus);
-  const healthy = solverStatus === "Running" ? "running" : displayStatus === "Cloud FEA error" ? "warning" : meshStatus === "Ready" ? "ready" : "warning";
+  const healthy = solverStatus === "Running" ? "running" : displayStatus.endsWith("error") ? "warning" : meshStatus === "Ready" ? "ready" : "warning";
   const formattedLogs = logs.map(formatLogEntry);
+  const donateLinkClassName = `status-link donate-link${coffeeAnimating ? " coffee-animating" : ""}`;
 
   useEffect(() => {
     if (!clearPromptVisible) return undefined;
     const timeoutId = window.setTimeout(() => setClearPromptVisible(false), 2200);
     return () => window.clearTimeout(timeoutId);
   }, [clearPromptVisible]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    if (prefersReducedCoffeeMotion()) return undefined;
+
+    function scheduleCoffeeAnimation() {
+      replayTimeoutRef.current = window.setTimeout(() => {
+        runCoffeeAnimation();
+        scheduleCoffeeAnimation();
+      }, coffeeAnimationReplayDelayMs());
+    }
+
+    runCoffeeAnimation();
+    scheduleCoffeeAnimation();
+
+    return () => {
+      window.clearTimeout(animationTimeoutRef.current);
+      window.clearTimeout(replayTimeoutRef.current);
+    };
+  }, []);
+
+  function prefersReducedCoffeeMotion() {
+    return window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches === true;
+  }
+
+  function runCoffeeAnimation() {
+    if (typeof window === "undefined" || prefersReducedCoffeeMotion()) return;
+    setCoffeeAnimationRun((run) => run + 1);
+    setCoffeeAnimating(true);
+    window.clearTimeout(animationTimeoutRef.current);
+    animationTimeoutRef.current = window.setTimeout(() => setCoffeeAnimating(false), COFFEE_ANIMATION_DURATION_MS);
+  }
 
   function selectTab(nextTab: NonNullable<typeof tab>, event: MouseEvent<HTMLButtonElement>) {
     if (tab === nextTab) {
@@ -167,9 +215,24 @@ export function BottomPanel({ status, logs, projectName, studyName, meshStatus, 
           <span><b>solver</b>{solverStatus}</span>
         </div>
         <div className="status-links" aria-label="Project links">
-          <a className="status-link donate-link" href="https://ko-fi.com/petergn" target="_blank" rel="noreferrer" title="Support OpenCAE on Ko-fi">
-            <Coffee size={13} aria-hidden="true" />
-            Buy me a coffee
+          <a className={donateLinkClassName} href="https://ko-fi.com/petergn" target="_blank" rel="noreferrer" title="Support OpenCAE on Ko-fi" onMouseEnter={runCoffeeAnimation}>
+            <span className="coffee-mark" aria-hidden="true" key={`coffee-mark-${coffeeAnimationRun}`}>
+              <span className="coffee-steam coffee-steam-one" />
+              <span className="coffee-steam coffee-steam-two" />
+              <Coffee size={13} aria-hidden="true" />
+              <span className="coffee-sparkle" />
+            </span>
+            <span className="coffee-label" key={`coffee-label-${coffeeAnimationRun}`}>
+              {COFFEE_LINK_TEXT.split("").map((letter, index) => (
+                <span
+                  className={letter === " " ? "coffee-letter coffee-letter-space" : "coffee-letter"}
+                  key={`${letter}-${index}`}
+                  style={{ "--coffee-letter-index": index } as CSSProperties}
+                >
+                  {letter}
+                </span>
+              ))}
+            </span>
           </a>
           <a className="status-link" href="https://form.esauengineering.com/opencae-feedback" target="_blank" rel="noreferrer">
             <MessageSquare size={13} aria-hidden="true" />
@@ -224,9 +287,11 @@ export function KeyboardShortcutGuide() {
 function statusForDisplay(status: string, solverStatus: string) {
   const normalized = status.toLowerCase();
   if (normalized.includes("cloud fea") && /(error|fail|failed|unavailable|not configured|not enabled|not ready)/.test(normalized)) return "Cloud FEA error";
+  if (normalized.includes("opencae core") && /(error|fail|failed|unavailable|not configured|not enabled|not ready)/.test(normalized)) return "OpenCAE Core error";
   if (solverStatus === "Running") return "Simulating";
   if (status.toLowerCase().includes("complete")) return "Results ready";
   if (normalized.includes("cloud fea")) return "Cloud FEA active";
+  if (normalized.includes("opencae core")) return "OpenCAE Core active";
   return "Ready";
 }
 

@@ -152,7 +152,7 @@ describe("StepBar", () => {
         project={project}
         study={{
           ...study,
-          solverSettings: { backend: "cloudflare_fea" }
+          solverSettings: { backend: "opencae_core" }
         }}
         hasResults={false}
         collapsed={false}
@@ -164,6 +164,25 @@ describe("StepBar", () => {
       />
     );
 
-    expect(html).toContain("<span>backend</span><strong>cloud</strong>");
+    expect(html).toContain("<span>backend</span><strong>core</strong>");
+  });
+
+  test("shows OpenCAE Core as the default solver backend", () => {
+    const html = renderToStaticMarkup(
+      <StepBar
+        activeStep="run"
+        project={project}
+        study={{ ...study, solverSettings: {} }}
+        hasResults={false}
+        collapsed={false}
+        themeMode="dark"
+        onSelect={vi.fn()}
+        onToggleCollapsed={vi.fn()}
+        onToggleTheme={vi.fn()}
+        onUnitSystemChange={vi.fn()}
+      />
+    );
+
+    expect(html).toContain("<span>backend</span><strong>core</strong>");
   });
 });

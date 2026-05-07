@@ -1,7 +1,7 @@
 import { lazy, startTransition, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Constraint, DisplayFace, DisplayModel, DynamicSolverSettings, Load, NamedSelection, Project, ResultField, ResultRenderBounds, ResultSummary, RunEvent, RunTimingEstimate, SimulationFidelity, SolverBackend, Study } from "@opencae/schema";
 import { RotateCcw, Save } from "lucide-react";
-import { addLoad, addSupport, assignMaterial, cancelRun, createProject, generateMesh, getCloudFeaHealth, getCloudFeaPreflight, getResults, importLocalProject, loadSampleProject, renameProject, runSimulation, subscribeToRun, updateStudy as saveStudyPatch, uploadModel, type CloudFeaPreflightResponse, type CloudFeaRouteHealth, type SampleAnalysisType, type SampleModelId } from "./lib/api";
+import { addLoad, addSupport, assignMaterial, cancelRun, createProject, generateMesh, getResults, importLocalProject, loadSampleProject, renameProject, runSimulation, subscribeToRun, updateStudy as saveStudyPatch, uploadModel, type SampleAnalysisType, type SampleModelId } from "./lib/api";
 import { normalizePrintParameters, starterMaterials } from "@opencae/materials";
 import { BottomPanel } from "./components/BottomPanel";
 import { OpenCaeLogoMark } from "./components/OpenCaeLogoMark";
@@ -40,14 +40,14 @@ import { createLocalDynamicStructuralStudy, createLocalStaticStressStudy } from 
 import { createPackedResultPlaybackCache, createResultFrameCache, hasDynamicPlaybackFrames } from "./resultFields";
 import { packResultFieldsForPlayback, packedPreparedPlaybackFrameOrdinal, playbackFieldsForResultMode, playbackMemoryBudgetBytes, type PackedPreparedPlaybackCache, type PreparedPlaybackFrameCache } from "./resultPlaybackCache";
 import {
-  boundedPlaybackOrdinalDelta,
+  advancePlaybackTimeline,
   frameIndexForPlaybackOrdinal,
-  loopedPlaybackOrdinalPosition,
   playbackOrdinalForSolverFramePosition,
+  PLAYBACK_ENDPOINT_HOLD_MS,
+  type PlaybackDirection,
   solverFramePositionForPlaybackOrdinal
 } from "./resultPlaybackTimeline";
 import { preparePlaybackFramesInWorker } from "./workers/performanceClient";
-import { deriveRunTiming } from "./runTiming";
 import type { WorkspaceInitialAction } from "./App";
 
 const lazyCadViewerImport = () => import("./components/CadViewer").then((module) => ({ default: module.CadViewer }));
@@ -78,9 +78,9 @@ const seededSummary: ResultSummary = {
 };
 const DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.005;
 const MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.001;
-const MIN_CLOUD_FEA_OUTPUT_INTERVAL_SECONDS = 0.0005;
 const PLAYBACK_UI_COMMIT_INTERVAL_MS = 250;
 const PLAYBACK_CACHE_PREP_FPS = 30;
+const PLAYBACK_ENDPOINT_EPSILON = 0.0001;
 const AUTOSAVE_UI_WRITE_DELAY_MS = 650;
 const AUTOSAVE_HEAVY_WRITE_DELAY_MS = 5000;
 
@@ -128,8 +128,6 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const [logs, setLogs] = useState<string[]>(restoredUi?.logs.length ? restoredUi.logs : restoredProjectFile ? ["Workspace restored after reload.", "Ready | Local Mode"] : ["Ready | Local Mode"]);
   const [runProgress, setRunProgress] = useState(restoredUi?.runProgress ?? (restoredResults?.fields.length ? 100 : 0));
   const [runTiming, setRunTiming] = useState<RunTimingEstimate | null>(null);
-  const [runStartedAtMs, setRunStartedAtMs] = useState<number | null>(null);
-  const [runClockNowMs, setRunClockNowMs] = useState(() => Date.now());
   const [activeRunId, setActiveRunId] = useState(restoredUi?.activeRunId || restoredResults?.activeRunId || restoredResults?.completedRunId || "run-bracket-demo-seeded");
   const [completedRunId, setCompletedRunId] = useState(restoredUi?.completedRunId || restoredResults?.completedRunId || "run-bracket-demo-seeded");
   const [processingRunId, setProcessingRunId] = useState<string | null>(null);
@@ -140,6 +138,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const [resultPlaybackOrdinalPosition, setResultPlaybackOrdinalPosition] = useState(0);
   const [resultPlaybackPlaying, setResultPlaybackPlaying] = useState(false);
   const [resultPlaybackFps, setResultPlaybackFps] = useState(12);
+  const [resultPlaybackReverseLoop, setResultPlaybackReverseLoop] = useState(false);
   const [resultPlaybackCacheState, setResultPlaybackCacheState] = useState<ResultPlaybackCacheState>({ status: "idle" });
   const [draftLoadType, setDraftLoadType] = useState<LoadType>(restoredUi?.draftLoadType ?? "force");
   const [draftLoadValue, setDraftLoadValue] = useState(restoredUi?.draftLoadValue ?? 500);
@@ -151,14 +150,14 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const [previewPrintLayerOrientation, setPreviewPrintLayerOrientation] = useState<PrintLayerOrientation | null | undefined>(undefined);
   const [isStepbarCollapsed, setIsStepbarCollapsed] = useState(false);
   const [showBoundaryConditionMenu, setShowBoundaryConditionMenu] = useState(false);
-  const [cloudFeaHealth, setCloudFeaHealth] = useState<CloudFeaRouteHealth | null>(null);
-  const [cloudFeaPreflight, setCloudFeaPreflight] = useState<CloudFeaPreflightResponse | null>(null);
   const didRequestRestoredHomeView = useRef(false);
   const activeRunSourceRef = useRef<EventSource | null>(null);
   const processingRunIdRef = useRef<string | null>(null);
   const resultFrameIndexRef = useRef(0);
   const resultPlaybackFramePositionRef = useRef(0);
   const resultPlaybackOrdinalPositionRef = useRef(0);
+  const resultPlaybackDirectionRef = useRef<PlaybackDirection>(1);
+  const resultPlaybackEndpointHoldRemainingMsRef = useRef(0);
   const resultPlaybackFrameControllerRef = useRef<MutableResultPlaybackFrameController | null>(null);
   const viewerInteractingRef = useRef(false);
   const initialActionConsumedRef = useRef(false);
@@ -181,12 +180,6 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const displayModelForUi = useMemo(() => displayModel ? displayModelForUnits(displayModel, displayUnitSystem) : null, [displayModel, displayUnitSystem]);
   const resultSummaryForUi = useMemo(() => resultSummaryForUnits(resultSummary, displayUnitSystem), [displayUnitSystem, resultSummary]);
   const resultFieldsForUi = useMemo(() => resultFields.map((field) => resultFieldForUnits(field, displayUnitSystem)), [displayUnitSystem, resultFields]);
-  const displayRunTiming = useMemo(() => deriveRunTiming({
-    progress: runProgress,
-    eventTiming: runTiming,
-    startedAtMs: runStartedAtMs,
-    nowMs: runClockNowMs
-  }), [runClockNowMs, runProgress, runStartedAtMs, runTiming]);
   const resultFrameCache = useMemo(() => createResultFrameCache(resultFieldsForUi), [resultFieldsForUi]);
   const packedResultPlaybackCache = useMemo(() => createPackedResultPlaybackCache(resultFieldsForUi), [resultFieldsForUi]);
   const resultFieldsSignature = useMemo(() => resultFieldsSignatureForCache(resultFieldsForUi), [resultFieldsForUi]);
@@ -266,53 +259,10 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const runReadiness = useMemo(() => readinessForStudy(study), [study]);
   const canRunSimulation = runReadiness.every((item) => item.done) && !solverRunning;
   const missingRunItems = runReadiness.filter((item) => !item.done).map((item) => item.label);
-  const cloudFeaEndpoint = cloudFeaHealth?.cloudFeaEndpoint ?? cloudFeaRunsEndpointForCurrentOrigin();
-  const cloudFeaUnavailable = isCloudFeaStudy(study) && cloudFeaHealth?.cloudFeaAvailable === false;
-  const cloudFeaPreflightError = isCloudFeaStudy(study) && cloudFeaPreflight?.ready === false
-    ? cloudFeaPreflight.diagnostics.find((diagnostic) => diagnostic.severity === "error")?.message ?? "Cloud FEA preflight failed."
-    : null;
-  const effectiveMissingRunItems = cloudFeaPreflightError ? [...missingRunItems, "Cloud FEA preflight"] : missingRunItems;
-  const effectiveCanRunSimulation = canRunSimulation && !cloudFeaUnavailable && !cloudFeaPreflightError;
+  const effectiveMissingRunItems = missingRunItems;
+  const effectiveCanRunSimulation = canRunSimulation;
   const canUndoAction = undoStack.length > 0;
   const canRedoAction = redoStack.length > 0;
-
-  useEffect(() => {
-    if (!isCloudFeaStudy(study)) {
-      setCloudFeaHealth(null);
-      setCloudFeaPreflight(null);
-      return undefined;
-    }
-    let cancelled = false;
-    void getCloudFeaHealth()
-      .then((health) => {
-        if (!cancelled) setCloudFeaHealth(health);
-      })
-      .catch(() => {
-        if (!cancelled) setCloudFeaHealth(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [study?.id, study?.solverSettings]);
-
-  useEffect(() => {
-    if (!study || !isCloudFeaStudy(study) || !displayModel) {
-      setCloudFeaPreflight(null);
-      return undefined;
-    }
-    const currentStudy = study;
-    let cancelled = false;
-    void getCloudFeaPreflight({ study: currentStudy, displayModel, resultRenderBounds })
-      .then((preflight) => {
-        if (!cancelled) setCloudFeaPreflight(preflight);
-      })
-      .catch(() => {
-        if (!cancelled) setCloudFeaPreflight(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [displayModel, resultRenderBounds, study]);
 
   useEffect(() => {
     if (!initialAction || initialActionConsumedRef.current) return;
@@ -343,9 +293,11 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     const nextOrdinalPosition = playbackOrdinalForSolverFramePosition(playbackFrameIndexes, nextFramePosition);
     resultPlaybackFramePositionRef.current = nextFramePosition;
     resultPlaybackOrdinalPositionRef.current = nextOrdinalPosition;
+    resultPlaybackDirectionRef.current = playbackDirectionForLoopStart(nextOrdinalPosition, playbackFrameIndexes.length, resultPlaybackReverseLoop);
+    resultPlaybackEndpointHoldRemainingMsRef.current = 0;
     setResultPlaybackFramePosition(nextFramePosition);
     setResultPlaybackOrdinalPosition(nextOrdinalPosition);
-  }, [playbackFrameIndexes]);
+  }, [playbackFrameIndexes, resultPlaybackReverseLoop]);
 
   useEffect(() => {
     if (activeStep !== "results" || playbackFrameIndexes.length < 2) {
@@ -395,13 +347,25 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     let lastViewerTimestamp = 0;
     let lastCommittedTimestamp = 0;
     let ordinalPosition = resultPlaybackOrdinalPositionRef.current;
+    let direction = resultPlaybackDirectionRef.current;
+    let endpointHoldRemainingMs = resultPlaybackEndpointHoldRemainingMsRef.current;
     const advancePlaybackFrame = (timestamp: number) => {
       if (lastTimestamp !== null) {
-        const frameDelta = boundedPlaybackOrdinalDelta(timestamp - lastTimestamp, frameDurationMs);
-        ordinalPosition = loopedPlaybackOrdinalPosition(playbackFrameIndexes.length, ordinalPosition + frameDelta);
+        const playbackState = advancePlaybackTimeline({
+          frameCount: playbackFrameIndexes.length,
+          frameDurationMs,
+          elapsedMs: timestamp - lastTimestamp,
+          mode: resultPlaybackReverseLoop ? "reverse" : "restart",
+          state: { ordinalPosition, direction, endpointHoldRemainingMs }
+        });
+        ordinalPosition = playbackState.ordinalPosition;
+        direction = playbackState.direction;
+        endpointHoldRemainingMs = playbackState.endpointHoldRemainingMs;
         const framePosition = solverFramePositionForPlaybackOrdinal(playbackFrameIndexes, ordinalPosition);
         resultPlaybackFramePositionRef.current = framePosition;
         resultPlaybackOrdinalPositionRef.current = ordinalPosition;
+        resultPlaybackDirectionRef.current = direction;
+        resultPlaybackEndpointHoldRemainingMsRef.current = endpointHoldRemainingMs;
         const playbackViewerFrameIntervalMs = viewerInteractingRef.current ? Number.POSITIVE_INFINITY : frameDurationMs;
         if (timestamp - lastViewerTimestamp >= playbackViewerFrameIntervalMs) {
           lastViewerTimestamp = timestamp;
@@ -426,7 +390,12 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     };
     animationFrameId = window.requestAnimationFrame(advancePlaybackFrame);
     return () => window.cancelAnimationFrame(animationFrameId);
-  }, [activeStep, commitPlaybackViewerFrame, playbackFrameIndexes, resultPlaybackFps, resultPlaybackPlaying]);
+  }, [activeStep, commitPlaybackViewerFrame, playbackFrameIndexes, resultPlaybackFps, resultPlaybackPlaying, resultPlaybackReverseLoop]);
+
+  useEffect(() => {
+    const ordinalPosition = resultPlaybackOrdinalPositionRef.current;
+    resultPlaybackDirectionRef.current = playbackDirectionForLoopStart(ordinalPosition, playbackFrameIndexes.length, resultPlaybackReverseLoop);
+  }, [playbackFrameIndexes.length, resultPlaybackReverseLoop]);
 
   const handleViewerInteractionChange = useCallback((interacting: boolean) => {
     viewerInteractingRef.current = interacting;
@@ -488,11 +457,18 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     resultFrameIndexRef.current = frameIndex;
     resultPlaybackFramePositionRef.current = frameIndex;
     resultPlaybackOrdinalPositionRef.current = ordinalPosition;
-  }, [playbackFrameIndexes]);
+    resultPlaybackDirectionRef.current = playbackDirectionForLoopStart(ordinalPosition, playbackFrameIndexes.length, resultPlaybackReverseLoop);
+    resultPlaybackEndpointHoldRemainingMsRef.current = endpointHoldForPlaybackOrdinal(ordinalPosition, playbackFrameIndexes.length);
+  }, [playbackFrameIndexes, resultPlaybackReverseLoop]);
 
   function handleResultPlaybackToggle() {
     setResultPlaybackPlaying((playing) => {
       if (!playing) setShowDeformed(true);
+      if (!playing) {
+        const ordinalPosition = resultPlaybackOrdinalPositionRef.current;
+        resultPlaybackDirectionRef.current = playbackDirectionForLoopStart(ordinalPosition, playbackFrameIndexes.length, resultPlaybackReverseLoop);
+        resultPlaybackEndpointHoldRemainingMsRef.current = endpointHoldForPlaybackOrdinal(ordinalPosition, playbackFrameIndexes.length);
+      }
       return !playing;
     });
   }
@@ -645,13 +621,6 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       AUTOSAVE_UI_WRITE_DELAY_MS
     );
   }, [autosaveUiSnapshot, displayModel, project]);
-
-  useEffect(() => {
-    if (!processingRunId || typeof runStartedAtMs !== "number") return undefined;
-    setRunClockNowMs(Date.now());
-    const timer = globalThis.setInterval(() => setRunClockNowMs(Date.now()), 1000);
-    return () => globalThis.clearInterval(timer);
-  }, [processingRunId, runStartedAtMs]);
 
   useEffect(() => {
     if (!project || !displayModel) return;
@@ -946,8 +915,8 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     mergedSettings: DynamicSolverSettings & { backend?: SolverBackend; fidelity?: SimulationFidelity },
     patch: Partial<DynamicSolverSettings>
   ) {
-    const backend = mergedSettings.backend === "cloudflare_fea" ? "cloudflare_fea" : "local_detailed";
-    const minimumOutputInterval = backend === "cloudflare_fea" ? MIN_CLOUD_FEA_OUTPUT_INTERVAL_SECONDS : Math.max(DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS, MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS);
+    const backend = mergedSettings.backend === "opencae_core" || mergedSettings.backend === "cloudflare_fea" ? "opencae_core" : "local_detailed";
+    const minimumOutputInterval = Math.max(DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS, MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS);
     const requestedOutputInterval = patch.outputInterval ?? currentSettings.outputInterval ?? DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS;
     return {
       ...mergedSettings,
@@ -1038,35 +1007,21 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   async function handleRunSimulation() {
     if (!study) return;
     if (!effectiveCanRunSimulation) {
-      if (cloudFeaUnavailable) {
-        pushMessage("Cloud FEA is unavailable on this app domain because this Worker was deployed without FEA_CONTAINER. Deploy with wrangler.containers.jsonc.");
-        return;
-      }
-      if (cloudFeaPreflightError) {
-        pushMessage(`Cloud FEA preflight failed: ${cloudFeaPreflightError}`);
-        return;
-      }
       pushMessage(effectiveMissingRunItems.length ? `Complete before running: ${effectiveMissingRunItems.join(", ")}.` : "Simulation is already running.");
       return;
     }
     setResultPlaybackPlaying(false);
     pushMessage("Starting simulation run.");
     pushMessage(runDiagnosticsMessage(study));
-    const cloudFeaRun = isCloudFeaStudy(study);
     let response: Awaited<ReturnType<typeof runSimulation>>;
     try {
-      response = await runSimulation(study.id, study, displayModel ?? undefined, { onCloudFeaHealth: pushMessage, resultRenderBounds });
+      response = await runSimulation(study.id, study, displayModel ?? undefined, { onRunStatus: pushMessage, resultRenderBounds });
     } catch (error) {
       setProcessingRunId(null);
       setRunProgress(0);
       setRunTiming(null);
-      setRunStartedAtMs(null);
       setResultPlaybackPlaying(false);
-      if (cloudFeaRun) {
-        pushMessage(`Cloud FEA run creation failed: ${errorMessage(error, "Could not start simulation.")}`);
-      } else {
-        pushMessage(errorMessage(error, "Could not start simulation."));
-      }
+      pushMessage(errorMessage(error, "Could not start simulation."));
       return;
     }
     setActiveRunId(response.run.id);
@@ -1074,18 +1029,10 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     setProcessingRunId(response.run.id);
     setRunProgress(0);
     setRunTiming(null);
-    const runStartMs = Date.now();
-    setRunStartedAtMs(runStartMs);
-    setRunClockNowMs(runStartMs);
-    if (cloudFeaRun) {
-      pushMessage(`Cloud FEA run created: runId=${response.run.id}; events=${response.streamUrl}; results=${cloudFeaResultsEndpoint(response.run.id)}.`);
-    }
     pushMessage(response.message);
-    if (cloudFeaRun) pushMessage(`Cloud FEA event polling started: GET ${response.streamUrl}.`);
     const source = subscribeToRun(response.run.id, async (event: RunEvent) => {
       if (typeof event.progress === "number") setRunProgress(event.progress);
-      const eventTiming = timingFromRunEvent(event);
-      if (eventTiming) setRunTiming(eventTiming);
+      setRunTiming(timingFromRunEvent(event));
       pushMessage(messageWithEta(event));
       if (event.type === "complete") {
         source.close();
@@ -1093,12 +1040,10 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         if (processingRunIdRef.current === response.run.id) processingRunIdRef.current = null;
         setProcessingRunId(null);
         setRunTiming(null);
-        setRunStartedAtMs(null);
         try {
-          if (cloudFeaRun) pushMessage(`Cloud FEA results fetch started: GET ${cloudFeaResultsEndpoint(response.run.id)}.`);
           const results = await getResults(response.run.id);
           if (study.type === "dynamic_structural" && !hasDynamicPlaybackFrames(results.summary, results.fields)) {
-            pushMessage("Cloud FEA dynamic results did not include animation frames.");
+            pushMessage("Dynamic results did not include animation frames.");
             setResultPlaybackPlaying(false);
             setRunProgress(0);
             return;
@@ -1112,16 +1057,11 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           setViewMode("results");
           setActiveStep("results");
         } catch (error) {
-          if (cloudFeaRun) {
-            pushMessage(`Cloud FEA results fetch failed: ${errorMessage(error, "Could not load simulation results.")}`);
-          } else {
-            pushMessage(errorMessage(error, "Could not load simulation results."));
-          }
+          pushMessage(errorMessage(error, "Could not load simulation results."));
           setResultPlaybackPlaying(false);
           setRunProgress(0);
         }
       } else if (event.type === "cancelled" || event.type === "error") {
-        if (cloudFeaRun && event.type === "error") pushMessage(`Cloud FEA event stream ended with error: ${event.message}`);
         source.close();
         if (activeRunSourceRef.current === source) activeRunSourceRef.current = null;
         if (processingRunIdRef.current === response.run.id) processingRunIdRef.current = null;
@@ -1129,7 +1069,6 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         setResultPlaybackPlaying(false);
         setRunProgress(0);
         setRunTiming(null);
-        setRunStartedAtMs(null);
       }
     });
     activeRunSourceRef.current = source;
@@ -1145,7 +1084,6 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     setResultPlaybackPlaying(false);
     setRunProgress(0);
     setRunTiming(null);
-    setRunStartedAtMs(null);
     if (!runId) {
       pushMessage("Simulation processing stopped.");
       return;
@@ -1167,7 +1105,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     return (
       <header className="topbar">
         <button className="brand brand-button" type="button" onClick={handleOpenStartMenu} title="Back to start menu" aria-label="Back to start menu">
-          <OpenCaeLogoMark />OpenCAE <span className="beta-tag">beta</span>
+          <OpenCaeLogoMark />OpenCAE <span className="beta-tag">Alpha</span>
         </button>
         <div className="topbar-divider topbar-divider-project" />
         <div className="breadcrumb">
@@ -1185,7 +1123,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
             className={`primary topbar-action ${solverRunning ? "running" : ""}`}
             onClick={handleRunSimulation}
             disabled={!effectiveCanRunSimulation}
-            title={cloudFeaUnavailable ? "Cloud FEA is unavailable on this app domain." : effectiveMissingRunItems.length ? `Complete before running: ${effectiveMissingRunItems.join(", ")}` : "Run simulation"}
+            title={effectiveMissingRunItems.length ? `Complete before running: ${effectiveMissingRunItems.join(", ")}` : "Run simulation"}
           >
             <span aria-hidden="true">▶</span>{solverRunning ? "Running…" : "Run simulation"}
           </button>
@@ -1280,7 +1218,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           resultSummary={resultSummaryForUi}
           resultFields={resultFieldsForUi}
           runProgress={runProgress}
-          runTiming={displayRunTiming}
+          runTiming={runTiming}
           sampleModel={sampleModel}
           sampleAnalysisType={sampleAnalysisType}
           draftLoadType={draftLoadType}
@@ -1366,17 +1304,17 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           canCancelSimulation={solverRunning}
           canRunSimulation={effectiveCanRunSimulation}
           missingRunItems={effectiveMissingRunItems}
-          cloudFeaAvailable={isCloudFeaStudy(study) ? cloudFeaHealth?.cloudFeaAvailable : undefined}
-          cloudFeaEndpoint={isCloudFeaStudy(study) ? cloudFeaEndpoint : undefined}
           resultFrameIndex={resultFrameIndex}
           resultFramePosition={resultVisualFramePosition}
           resultFrameOrdinalPosition={resultVisualOrdinalPosition}
           onResultFrameChange={handleResultFrameChange}
           resultPlaybackPlaying={resultPlaybackPlaying}
           resultPlaybackFps={resultPlaybackFps}
+          resultPlaybackReverseLoop={resultPlaybackReverseLoop}
           resultPlaybackCacheLabel={resultPlaybackCacheLabel}
           onResultPlaybackToggle={handleResultPlaybackToggle}
           onResultPlaybackFpsChange={setResultPlaybackFps}
+          onResultPlaybackReverseLoopChange={setResultPlaybackReverseLoop}
           onStepSelect={handleStepSelect}
         />
         {showBoundaryConditionMenu && study ? (
@@ -1395,7 +1333,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         studyName={study?.name ?? "No simulation"}
         meshStatus={study?.meshSettings.status === "complete" ? "Ready" : "Not generated"}
         solverStatus={solverRunning ? "Running" : runProgress >= 100 ? "Complete" : "Idle"}
-        backendStatus={(study.solverSettings as { backend?: unknown }).backend === "cloudflare_fea" ? "cloud" : "local"}
+        backendStatus={isOpenCaeCoreStudy(study) ? "core" : "local"}
         onClearLogs={clearLogs}
       />
     </div>
@@ -1448,12 +1386,13 @@ function latestCompletedRunId(study: Study | null, activeRunId: string): string 
   return completed?.id ?? null;
 }
 
-function isCloudFeaStudy(study: Study | null): boolean {
-  return (study?.solverSettings as { backend?: unknown } | undefined)?.backend === "cloudflare_fea";
+function isOpenCaeCoreStudy(study: Study | null): boolean {
+  const backend = (study?.solverSettings as { backend?: unknown } | undefined)?.backend;
+  return backend !== "local_detailed";
 }
 
 function runDiagnosticsMessage(study: Study): string {
-  const backend = isCloudFeaStudy(study) ? "cloudflare_fea" : "local_detailed";
+  const backend = isOpenCaeCoreStudy(study) ? "opencae_core" : "local_detailed";
   const fidelity = solverFidelityForDiagnostics(study);
   return [
     `Run diagnostics: backend=${backend}`,
@@ -1469,15 +1408,6 @@ function runDiagnosticsMessage(study: Study): string {
 function solverFidelityForDiagnostics(study: Study): SimulationFidelity {
   const fidelity = (study.solverSettings as { fidelity?: unknown }).fidelity;
   return fidelity === "detailed" || fidelity === "ultra" || fidelity === "standard" ? fidelity : "standard";
-}
-
-function cloudFeaResultsEndpoint(runId: string): string {
-  return `/api/cloud-fea/runs/${runId}/results`;
-}
-
-function cloudFeaRunsEndpointForCurrentOrigin(): string {
-  if (typeof window === "undefined" || !window.location?.origin) return "/api/cloud-fea/runs";
-  return `${window.location.origin}/api/cloud-fea/runs`;
 }
 
 function errorMessage(error: unknown, fallback: string): string {
@@ -1505,6 +1435,20 @@ function formatLogDuration(milliseconds: number): string {
   const minutes = Math.floor(seconds / 60);
   const remainder = seconds % 60;
   return remainder ? `${minutes}m ${remainder}s` : `${minutes}m`;
+}
+
+function endpointHoldForPlaybackOrdinal(ordinalPosition: number, frameCount: number): number {
+  if (!Number.isFinite(ordinalPosition) || frameCount < 2) return 0;
+  const lastOrdinal = frameCount - 1;
+  return ordinalPosition <= PLAYBACK_ENDPOINT_EPSILON || ordinalPosition >= lastOrdinal - PLAYBACK_ENDPOINT_EPSILON
+    ? PLAYBACK_ENDPOINT_HOLD_MS
+    : 0;
+}
+
+function playbackDirectionForLoopStart(ordinalPosition: number, frameCount: number, reverseLoop: boolean): PlaybackDirection {
+  if (!reverseLoop || frameCount < 2) return 1;
+  const lastOrdinal = frameCount - 1;
+  return ordinalPosition >= lastOrdinal - PLAYBACK_ENDPOINT_EPSILON ? -1 : 1;
 }
 
 function readinessForStudy(study: Study | null) {
