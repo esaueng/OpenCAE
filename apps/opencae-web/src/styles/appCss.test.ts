@@ -141,19 +141,27 @@ describe("app CSS", () => {
   test("styles the Ko-fi action as a bottom status link", () => {
     const donateLink = cssRule(".status-link.donate-link");
     const coffeeMark = cssRule(".coffee-mark");
+    const coffeeLabel = cssRule(".coffee-label");
+    const coffeeLetter = cssRule(".coffee-letter");
     const activeMug = cssRule(".donate-link.coffee-animating .coffee-mark svg");
     const activeSteam = cssRule(".donate-link.coffee-animating .coffee-steam");
     const activeSparkle = cssRule(".donate-link.coffee-animating .coffee-sparkle");
+    const activeLetter = cssRule(".donate-link.coffee-animating .coffee-letter");
 
     expect(donateLink).toMatch(/color:\s*#ffd6a3/);
     expect(donateLink).toMatch(/text-transform:\s*none/);
     expect(coffeeMark).toMatch(/position:\s*relative/);
+    expect(coffeeLabel).toMatch(/display:\s*inline-flex/);
+    expect(coffeeLetter).toMatch(/--coffee-letter-index:\s*0/);
     expect(activeMug).toMatch(/animation:\s*coffee-mug-lift/);
     expect(activeSteam).toMatch(/animation:\s*coffee-steam-rise/);
     expect(activeSparkle).toMatch(/animation:\s*coffee-sparkle-pop/);
+    expect(activeLetter).toMatch(/animation:\s*coffee-letter-wave/);
+    expect(activeLetter).toMatch(/animation-delay:\s*calc\(var\(--coffee-letter-index\)\s*\*\s*28ms\)/);
     expect(css).toContain("@keyframes coffee-mug-lift");
     expect(css).toContain("@keyframes coffee-steam-rise");
     expect(css).toContain("@keyframes coffee-sparkle-pop");
+    expect(css).toContain("@keyframes coffee-letter-wave");
   });
 
   test("only underlines start screen footer links on hover", () => {

@@ -1158,6 +1158,22 @@ img {
   transform-origin: 50% 80%;
 }
 
+.coffee-label {
+  display: inline-flex;
+  align-items: baseline;
+}
+
+.coffee-letter {
+  --coffee-letter-index: 0;
+  display: inline-block;
+  transform: translateY(0);
+  transform-origin: 50% 80%;
+}
+
+.coffee-letter-space {
+  width: 0.55ch;
+}
+
 .coffee-steam {
   position: absolute;
   bottom: 10px;
@@ -1225,6 +1241,11 @@ img {
   animation: coffee-sparkle-pop 1800ms ease-out both;
 }
 
+.donate-link.coffee-animating .coffee-letter {
+  animation: coffee-letter-wave 900ms cubic-bezier(0.19, 1, 0.22, 1) both;
+  animation-delay: calc(var(--coffee-letter-index) * 28ms);
+}
+
 .status-link.donate-link:hover,
 .status-link.donate-link:focus-visible {
   color: #ffe2bd;
@@ -1286,6 +1307,21 @@ img {
   100% {
     opacity: 0;
     transform: scale(0.35) rotate(45deg);
+  }
+}
+
+@keyframes coffee-letter-wave {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+
+  36% {
+    transform: translateY(-3px);
+  }
+
+  58% {
+    transform: translateY(1px);
   }
 }
 

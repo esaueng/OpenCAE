@@ -14,6 +14,10 @@ import {
 const bottomPanelSource = readFileSync(resolve(__dirname, "BottomPanel.tsx"), "utf8");
 const workspaceSource = readFileSync(resolve(__dirname, "../WorkspaceApp.tsx"), "utf8");
 
+function textContent(html: string) {
+  return html.replace(/<[^>]+>/g, "");
+}
+
 describe("BottomPanel", () => {
   test("keeps the GitHub link in the bottom status area", () => {
     const html = renderToStaticMarkup(
@@ -35,17 +39,17 @@ describe("BottomPanel", () => {
     expect(html).toContain('href="https://ko-fi.com/petergn"');
     expect(html).toContain('href="https://github.com/esaueng/OpenCAE"');
     expect(html).toContain(">feedback</a>");
-    expect(html).toContain("Buy me a coffee</a>");
+    expect(textContent(html)).toContain("Buy me a coffee");
     expect(html).toContain(">github</a>");
     expect(html.indexOf("Results ready")).toBeLessThan(html.indexOf("local"));
     expect(html.indexOf("local")).toBeLessThan(html.indexOf("<b>project</b>"));
-    expect(html.indexOf("Buy me a coffee</a>")).toBeGreaterThan(html.indexOf("<b>solver</b>"));
-    expect(html.indexOf("Buy me a coffee</a>")).toBeLessThan(html.indexOf(">feedback</a>"));
-    expect(html.indexOf("Buy me a coffee</a>")).toBeLessThan(html.indexOf(">github</a>"));
+    expect(html.indexOf('href="https://ko-fi.com/petergn"')).toBeGreaterThan(html.indexOf("<b>solver</b>"));
+    expect(html.indexOf('href="https://ko-fi.com/petergn"')).toBeLessThan(html.indexOf('href="https://form.esauengineering.com/opencae-feedback"'));
+    expect(html.indexOf('href="https://ko-fi.com/petergn"')).toBeLessThan(html.indexOf('href="https://github.com/esaueng/OpenCAE"'));
     expect(html.indexOf(">github</a>")).toBeGreaterThan(html.indexOf("<b>solver</b>"));
   });
 
-  test("renders decorative coffee animation elements without changing link copy", () => {
+  test("renders decorative coffee animation elements and wave text without changing link copy", () => {
     const html = renderToStaticMarkup(
       <BottomPanel
         status="Results ready"
@@ -63,7 +67,17 @@ describe("BottomPanel", () => {
     expect(html).toContain('class="coffee-steam coffee-steam-one"');
     expect(html).toContain('class="coffee-steam coffee-steam-two"');
     expect(html).toContain('class="coffee-sparkle"');
-    expect(html).toContain("Buy me a coffee</a>");
+    expect(html).toContain('class="coffee-label"');
+    expect(html).toContain('class="coffee-letter"');
+    expect(html).toContain("--coffee-letter-index:0");
+    expect(html).toContain("--coffee-letter-index:14");
+    expect(textContent(html)).toContain("Buy me a coffee");
+  });
+
+  test("wires hover to play the coffee animation once", () => {
+    expect(bottomPanelSource).toContain("function runCoffeeAnimation()");
+    expect(bottomPanelSource).toContain("onMouseEnter={runCoffeeAnimation}");
+    expect(bottomPanelSource).toContain("window.clearTimeout(animationTimeoutRef.current)");
   });
 
   test("bounds the randomized coffee animation replay delay", () => {
