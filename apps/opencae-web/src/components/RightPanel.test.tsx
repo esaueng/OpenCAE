@@ -108,8 +108,10 @@ function renderPanel(activeStep: StepId, overrides: Partial<Parameters<typeof Ri
       missingRunItems={[]}
       resultPlaybackPlaying={false}
       resultPlaybackFps={12}
+      resultPlaybackReverseLoop={false}
       onResultPlaybackToggle={vi.fn()}
       onResultPlaybackFpsChange={vi.fn()}
+      onResultPlaybackReverseLoopChange={vi.fn()}
       onStepSelect={vi.fn()}
       {...overrides}
     />
@@ -567,8 +569,8 @@ describe("RightPanel payload mass controls", () => {
     expect(html).toContain("Play");
     expect(html).toContain("Animation speed");
     expect(html).toContain("12 fps");
+    expect(html).toContain("Reverse loop");
     expect(html.indexOf("Animation speed")).toBeLessThan(html.indexOf(">Play</button>"));
-    expect(html).not.toContain("Loop");
     expect(html).toContain("Peak displacement");
     expect(html).toContain("Result mode");
     expect(html).not.toContain("Switches the color plot");
@@ -737,6 +739,20 @@ describe("RightPanel payload mass controls", () => {
     });
 
     expect(html).toContain("Pause");
+  });
+
+  test("shows reverse loop as checked when ping-pong playback is enabled", () => {
+    const html = renderPanel("results", {
+      resultPlaybackReverseLoop: true,
+      resultFields: [
+        { id: "field-stress-0", runId: "run-1", type: "stress", location: "face", values: [1], min: 1, max: 1, units: "MPa", frameIndex: 0, timeSeconds: 0 },
+        { id: "field-stress-1", runId: "run-1", type: "stress", location: "face", values: [2], min: 2, max: 2, units: "MPa", frameIndex: 1, timeSeconds: 0.005 }
+      ]
+    });
+
+    expect(html).toContain('class="toggle playback-loop-toggle"');
+    expect(html).toContain('<input type="checkbox" checked=""/>');
+    expect(html).toContain("Reverse loop");
   });
 
   test("marks the current time control as a playback playhead instead of a normal slider", () => {
