@@ -125,6 +125,21 @@ describe("app CSS", () => {
     expect(simulationTypeGrid).toMatch(/background-size:\s*42px\s+42px/);
   });
 
+  test("frames simulation showcase renders with native overlays", () => {
+    const showcase = cssRule(".analysis-showcase");
+    const showcaseImg = cssRule(".analysis-showcase img");
+    const overlay = cssRule(".analysis-showcase-overlay");
+    const activeShowcase = cssRule(".simulation-choice-card.active .analysis-showcase");
+
+    expect(showcase).toMatch(/position:\s*relative/);
+    expect(showcase).toMatch(/aspect-ratio:\s*2\s*\/\s*1/);
+    expect(showcase).toMatch(/overflow:\s*hidden/);
+    expect(showcaseImg).toMatch(/object-fit:\s*cover/);
+    expect(overlay).toMatch(/position:\s*absolute/);
+    expect(overlay).toMatch(/pointer-events:\s*none/);
+    expect(activeShowcase).toMatch(/border-color:\s*color-mix\(in srgb,\s*var\(--color-accent\)\s*72%,\s*transparent\)/);
+  });
+
   test("aligns all start screen footer text on one row", () => {
     const startFooter = cssRule(".start-footer");
     const startFooterItems = cssRule(".start-footer > *");
