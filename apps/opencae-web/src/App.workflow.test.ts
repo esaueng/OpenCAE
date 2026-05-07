@@ -32,9 +32,12 @@ describe("App workflow layout", () => {
     expect(appSource).toContain("window.requestAnimationFrame(advancePlaybackFrame)");
     expect(appSource).toContain("resultPlaybackFramePositionRef.current");
     expect(appSource).toContain("resultPlaybackOrdinalPositionRef.current");
+    expect(appSource).toContain("resultPlaybackDirectionRef.current");
+    expect(appSource).toContain("resultPlaybackEndpointHoldRemainingMsRef.current");
     expect(appSource).toContain("resultFramePosition={resultVisualFramePosition}");
     expect(appSource).toContain("resultFrameOrdinalPosition={resultVisualOrdinalPosition}");
-    expect(appSource).toContain("boundedPlaybackOrdinalDelta(");
+    expect(appSource).toContain("advancePlaybackTimeline({");
+    expect(appSource).toContain("PLAYBACK_ENDPOINT_HOLD_MS");
     expect(appSource).toContain("frameIndexForPlaybackOrdinal(playbackFrameIndexes, ordinalPosition)");
     expect(appSource).toContain("resultFrameCache.fieldsForFramePosition(resultVisualFramePosition)");
     expect(appSource).toContain("createPackedResultPlaybackCache(resultFieldsForUi)");
@@ -70,8 +73,10 @@ describe("App workflow layout", () => {
 
     expect(appSource).toContain("const PLAYBACK_CACHE_PREP_FPS = 30;");
     expect(cacheKeyBlock).not.toContain("resultPlaybackFps");
+    expect(cacheKeyBlock).not.toContain("resultPlaybackReverseLoop");
     expect(prepareEffectBlock).toContain("playbackFps: PLAYBACK_CACHE_PREP_FPS");
     expect(prepareEffectBlock).not.toContain("resultPlaybackFps");
+    expect(prepareEffectBlock).not.toContain("resultPlaybackReverseLoop");
   });
 
   test("rejects dynamic results that do not contain animation frames before showing Results", () => {
@@ -105,6 +110,13 @@ describe("App workflow layout", () => {
   test("enables deformed result shape when dynamic playback starts", () => {
     expect(appSource).toContain("function handleResultPlaybackToggle()");
     expect(appSource).toContain("if (!playing) setShowDeformed(true);");
+  });
+
+  test("wires reverse loop playback controls into the results panel", () => {
+    expect(appSource).toContain("const [resultPlaybackReverseLoop, setResultPlaybackReverseLoop] = useState(false);");
+    expect(appSource).toContain("resultPlaybackReverseLoop={resultPlaybackReverseLoop}");
+    expect(appSource).toContain("onResultPlaybackReverseLoopChange={setResultPlaybackReverseLoop}");
+    expect(appSource).toContain('mode: resultPlaybackReverseLoop ? "reverse" : "restart"');
   });
 
   test("wires single-key workspace shortcuts for home and step navigation", () => {

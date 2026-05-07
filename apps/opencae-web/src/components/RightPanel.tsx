@@ -97,9 +97,11 @@ interface RightPanelProps {
   onResultFrameChange?: (frameIndex: number) => void;
   resultPlaybackPlaying?: boolean;
   resultPlaybackFps?: number;
+  resultPlaybackReverseLoop?: boolean;
   resultPlaybackCacheLabel?: string;
   onResultPlaybackToggle?: () => void;
   onResultPlaybackFpsChange?: (fps: number) => void;
+  onResultPlaybackReverseLoopChange?: (enabled: boolean) => void;
   onStepSelect: (step: StepId) => void;
 }
 
@@ -1181,10 +1183,12 @@ function ResultsPanel({
   resultFrameOrdinalPosition,
   resultPlaybackPlaying = false,
   resultPlaybackFps = 12,
+  resultPlaybackReverseLoop = false,
   resultPlaybackCacheLabel = "",
   onResultFrameChange,
   onResultPlaybackToggle,
   onResultPlaybackFpsChange,
+  onResultPlaybackReverseLoopChange,
   onResultModeChange,
   onToggleDeformed,
   onStressExaggerationChange
@@ -1293,6 +1297,14 @@ function ResultsPanel({
               style={{ "--range-progress": `${rangeProgressPercent(resultPlaybackFps, 1, 30)}%` } as CSSProperties}
               onChange={(event) => onResultPlaybackFpsChange?.(Number(event.currentTarget.value))}
             />
+          </label>
+          <label className="toggle playback-loop-toggle">
+            <input
+              type="checkbox"
+              checked={resultPlaybackReverseLoop}
+              onChange={(event) => onResultPlaybackReverseLoopChange?.(event.currentTarget.checked)}
+            />
+            <span>Reverse loop</span>
           </label>
           <button className="secondary wide" type="button" onClick={() => {
             onResultPlaybackToggle?.();

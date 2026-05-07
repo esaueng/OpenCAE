@@ -40,10 +40,11 @@ import { createLocalDynamicStructuralStudy, createLocalStaticStressStudy } from 
 import { createPackedResultPlaybackCache, createResultFrameCache, hasDynamicPlaybackFrames } from "./resultFields";
 import { packResultFieldsForPlayback, packedPreparedPlaybackFrameOrdinal, playbackFieldsForResultMode, playbackMemoryBudgetBytes, type PackedPreparedPlaybackCache, type PreparedPlaybackFrameCache } from "./resultPlaybackCache";
 import {
-  boundedPlaybackOrdinalDelta,
+  advancePlaybackTimeline,
   frameIndexForPlaybackOrdinal,
-  loopedPlaybackOrdinalPosition,
   playbackOrdinalForSolverFramePosition,
+  PLAYBACK_ENDPOINT_HOLD_MS,
+  type PlaybackDirection,
   solverFramePositionForPlaybackOrdinal
 } from "./resultPlaybackTimeline";
 import { preparePlaybackFramesInWorker } from "./workers/performanceClient";
@@ -79,6 +80,7 @@ const DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.005;
 const MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.001;
 const PLAYBACK_UI_COMMIT_INTERVAL_MS = 250;
 const PLAYBACK_CACHE_PREP_FPS = 30;
+const PLAYBACK_ENDPOINT_EPSILON = 0.0001;
 const AUTOSAVE_UI_WRITE_DELAY_MS = 650;
 const AUTOSAVE_HEAVY_WRITE_DELAY_MS = 5000;
 
@@ -136,6 +138,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const [resultPlaybackOrdinalPosition, setResultPlaybackOrdinalPosition] = useState(0);
   const [resultPlaybackPlaying, setResultPlaybackPlaying] = useState(false);
   const [resultPlaybackFps, setResultPlaybackFps] = useState(12);
+  const [resultPlaybackReverseLoop, setResultPlaybackReverseLoop] = useState(false);
   const [resultPlaybackCacheState, setResultPlaybackCacheState] = useState<ResultPlaybackCacheState>({ status: "idle" });
   const [draftLoadType, setDraftLoadType] = useState<LoadType>(restoredUi?.draftLoadType ?? "force");
   const [draftLoadValue, setDraftLoadValue] = useState(restoredUi?.draftLoadValue ?? 500);
@@ -153,6 +156,8 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const resultFrameIndexRef = useRef(0);
   const resultPlaybackFramePositionRef = useRef(0);
   const resultPlaybackOrdinalPositionRef = useRef(0);
+  const resultPlaybackDirectionRef = useRef<PlaybackDirection>(1);
+  const resultPlaybackEndpointHoldRemainingMsRef = useRef(0);
   const resultPlaybackFrameControllerRef = useRef<MutableResultPlaybackFrameController | null>(null);
   const viewerInteractingRef = useRef(false);
   const initialActionConsumedRef = useRef(false);
@@ -288,9 +293,11 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     const nextOrdinalPosition = playbackOrdinalForSolverFramePosition(playbackFrameIndexes, nextFramePosition);
     resultPlaybackFramePositionRef.current = nextFramePosition;
     resultPlaybackOrdinalPositionRef.current = nextOrdinalPosition;
+    resultPlaybackDirectionRef.current = playbackDirectionForLoopStart(nextOrdinalPosition, playbackFrameIndexes.length, resultPlaybackReverseLoop);
+    resultPlaybackEndpointHoldRemainingMsRef.current = 0;
     setResultPlaybackFramePosition(nextFramePosition);
     setResultPlaybackOrdinalPosition(nextOrdinalPosition);
-  }, [playbackFrameIndexes]);
+  }, [playbackFrameIndexes, resultPlaybackReverseLoop]);
 
   useEffect(() => {
     if (activeStep !== "results" || playbackFrameIndexes.length < 2) {
@@ -340,13 +347,25 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     let lastViewerTimestamp = 0;
     let lastCommittedTimestamp = 0;
     let ordinalPosition = resultPlaybackOrdinalPositionRef.current;
+    let direction = resultPlaybackDirectionRef.current;
+    let endpointHoldRemainingMs = resultPlaybackEndpointHoldRemainingMsRef.current;
     const advancePlaybackFrame = (timestamp: number) => {
       if (lastTimestamp !== null) {
-        const frameDelta = boundedPlaybackOrdinalDelta(timestamp - lastTimestamp, frameDurationMs);
-        ordinalPosition = loopedPlaybackOrdinalPosition(playbackFrameIndexes.length, ordinalPosition + frameDelta);
+        const playbackState = advancePlaybackTimeline({
+          frameCount: playbackFrameIndexes.length,
+          frameDurationMs,
+          elapsedMs: timestamp - lastTimestamp,
+          mode: resultPlaybackReverseLoop ? "reverse" : "restart",
+          state: { ordinalPosition, direction, endpointHoldRemainingMs }
+        });
+        ordinalPosition = playbackState.ordinalPosition;
+        direction = playbackState.direction;
+        endpointHoldRemainingMs = playbackState.endpointHoldRemainingMs;
         const framePosition = solverFramePositionForPlaybackOrdinal(playbackFrameIndexes, ordinalPosition);
         resultPlaybackFramePositionRef.current = framePosition;
         resultPlaybackOrdinalPositionRef.current = ordinalPosition;
+        resultPlaybackDirectionRef.current = direction;
+        resultPlaybackEndpointHoldRemainingMsRef.current = endpointHoldRemainingMs;
         const playbackViewerFrameIntervalMs = viewerInteractingRef.current ? Number.POSITIVE_INFINITY : frameDurationMs;
         if (timestamp - lastViewerTimestamp >= playbackViewerFrameIntervalMs) {
           lastViewerTimestamp = timestamp;
@@ -371,7 +390,12 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     };
     animationFrameId = window.requestAnimationFrame(advancePlaybackFrame);
     return () => window.cancelAnimationFrame(animationFrameId);
-  }, [activeStep, commitPlaybackViewerFrame, playbackFrameIndexes, resultPlaybackFps, resultPlaybackPlaying]);
+  }, [activeStep, commitPlaybackViewerFrame, playbackFrameIndexes, resultPlaybackFps, resultPlaybackPlaying, resultPlaybackReverseLoop]);
+
+  useEffect(() => {
+    const ordinalPosition = resultPlaybackOrdinalPositionRef.current;
+    resultPlaybackDirectionRef.current = playbackDirectionForLoopStart(ordinalPosition, playbackFrameIndexes.length, resultPlaybackReverseLoop);
+  }, [playbackFrameIndexes.length, resultPlaybackReverseLoop]);
 
   const handleViewerInteractionChange = useCallback((interacting: boolean) => {
     viewerInteractingRef.current = interacting;
@@ -433,11 +457,18 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     resultFrameIndexRef.current = frameIndex;
     resultPlaybackFramePositionRef.current = frameIndex;
     resultPlaybackOrdinalPositionRef.current = ordinalPosition;
-  }, [playbackFrameIndexes]);
+    resultPlaybackDirectionRef.current = playbackDirectionForLoopStart(ordinalPosition, playbackFrameIndexes.length, resultPlaybackReverseLoop);
+    resultPlaybackEndpointHoldRemainingMsRef.current = endpointHoldForPlaybackOrdinal(ordinalPosition, playbackFrameIndexes.length);
+  }, [playbackFrameIndexes, resultPlaybackReverseLoop]);
 
   function handleResultPlaybackToggle() {
     setResultPlaybackPlaying((playing) => {
       if (!playing) setShowDeformed(true);
+      if (!playing) {
+        const ordinalPosition = resultPlaybackOrdinalPositionRef.current;
+        resultPlaybackDirectionRef.current = playbackDirectionForLoopStart(ordinalPosition, playbackFrameIndexes.length, resultPlaybackReverseLoop);
+        resultPlaybackEndpointHoldRemainingMsRef.current = endpointHoldForPlaybackOrdinal(ordinalPosition, playbackFrameIndexes.length);
+      }
       return !playing;
     });
   }
@@ -1279,9 +1310,11 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           onResultFrameChange={handleResultFrameChange}
           resultPlaybackPlaying={resultPlaybackPlaying}
           resultPlaybackFps={resultPlaybackFps}
+          resultPlaybackReverseLoop={resultPlaybackReverseLoop}
           resultPlaybackCacheLabel={resultPlaybackCacheLabel}
           onResultPlaybackToggle={handleResultPlaybackToggle}
           onResultPlaybackFpsChange={setResultPlaybackFps}
+          onResultPlaybackReverseLoopChange={setResultPlaybackReverseLoop}
           onStepSelect={handleStepSelect}
         />
         {showBoundaryConditionMenu && study ? (
@@ -1402,6 +1435,20 @@ function formatLogDuration(milliseconds: number): string {
   const minutes = Math.floor(seconds / 60);
   const remainder = seconds % 60;
   return remainder ? `${minutes}m ${remainder}s` : `${minutes}m`;
+}
+
+function endpointHoldForPlaybackOrdinal(ordinalPosition: number, frameCount: number): number {
+  if (!Number.isFinite(ordinalPosition) || frameCount < 2) return 0;
+  const lastOrdinal = frameCount - 1;
+  return ordinalPosition <= PLAYBACK_ENDPOINT_EPSILON || ordinalPosition >= lastOrdinal - PLAYBACK_ENDPOINT_EPSILON
+    ? PLAYBACK_ENDPOINT_HOLD_MS
+    : 0;
+}
+
+function playbackDirectionForLoopStart(ordinalPosition: number, frameCount: number, reverseLoop: boolean): PlaybackDirection {
+  if (!reverseLoop || frameCount < 2) return 1;
+  const lastOrdinal = frameCount - 1;
+  return ordinalPosition >= lastOrdinal - PLAYBACK_ENDPOINT_EPSILON ? -1 : 1;
 }
 
 function readinessForStudy(study: Study | null) {
