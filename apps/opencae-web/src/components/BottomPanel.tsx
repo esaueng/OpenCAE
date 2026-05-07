@@ -22,21 +22,63 @@ export const WORKSPACE_SHORTCUT_GUIDE: Array<{ keys: string[]; label: string }> 
   { keys: ["Shift", "Ctrl/Cmd", "Z"], label: "Redo" }
 ];
 
+export const COFFEE_ANIMATION_DURATION_MS = 1800;
+export const COFFEE_ANIMATION_REPLAY_DELAY_MS = { min: 18000, max: 45000 } as const;
+
+export function coffeeAnimationReplayDelayMs(randomValue = Math.random()) {
+  const safeRandomValue = Number.isFinite(randomValue) ? randomValue : 0;
+  const boundedRandomValue = Math.min(1, Math.max(0, safeRandomValue));
+  const delayRange = COFFEE_ANIMATION_REPLAY_DELAY_MS.max - COFFEE_ANIMATION_REPLAY_DELAY_MS.min;
+  return Math.round(COFFEE_ANIMATION_REPLAY_DELAY_MS.min + delayRange * boundedRandomValue);
+}
+
 export function BottomPanel({ status, logs, projectName, studyName, meshStatus, solverStatus, backendStatus, onClearLogs }: BottomPanelProps) {
   const [tab, setTab] = useState<"tips" | "logs" | null>(null);
   const [drawerHeight, setDrawerHeight] = useState(320);
   const [clearPromptVisible, setClearPromptVisible] = useState(false);
+  const [coffeeAnimating, setCoffeeAnimating] = useState(false);
   const dragStart = useRef<{ y: number; height: number } | null>(null);
   const expanded = tab !== null;
   const displayStatus = statusForDisplay(status, solverStatus);
   const healthy = solverStatus === "Running" ? "running" : displayStatus === "OpenCAE Core error" ? "warning" : meshStatus === "Ready" ? "ready" : "warning";
   const formattedLogs = logs.map(formatLogEntry);
+  const donateLinkClassName = `status-link donate-link${coffeeAnimating ? " coffee-animating" : ""}`;
 
   useEffect(() => {
     if (!clearPromptVisible) return undefined;
     const timeoutId = window.setTimeout(() => setClearPromptVisible(false), 2200);
     return () => window.clearTimeout(timeoutId);
   }, [clearPromptVisible]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const reduceMotionQuery = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+    if (reduceMotionQuery?.matches) return undefined;
+
+    let animationTimeoutId = 0;
+    let replayTimeoutId = 0;
+
+    function runCoffeeAnimation() {
+      setCoffeeAnimating(true);
+      window.clearTimeout(animationTimeoutId);
+      animationTimeoutId = window.setTimeout(() => setCoffeeAnimating(false), COFFEE_ANIMATION_DURATION_MS);
+    }
+
+    function scheduleCoffeeAnimation() {
+      replayTimeoutId = window.setTimeout(() => {
+        runCoffeeAnimation();
+        scheduleCoffeeAnimation();
+      }, coffeeAnimationReplayDelayMs());
+    }
+
+    runCoffeeAnimation();
+    scheduleCoffeeAnimation();
+
+    return () => {
+      window.clearTimeout(animationTimeoutId);
+      window.clearTimeout(replayTimeoutId);
+    };
+  }, []);
 
   function selectTab(nextTab: NonNullable<typeof tab>, event: MouseEvent<HTMLButtonElement>) {
     if (tab === nextTab) {
@@ -167,8 +209,13 @@ export function BottomPanel({ status, logs, projectName, studyName, meshStatus, 
           <span><b>solver</b>{solverStatus}</span>
         </div>
         <div className="status-links" aria-label="Project links">
-          <a className="status-link donate-link" href="https://ko-fi.com/petergn" target="_blank" rel="noreferrer" title="Support OpenCAE on Ko-fi">
-            <Coffee size={13} aria-hidden="true" />
+          <a className={donateLinkClassName} href="https://ko-fi.com/petergn" target="_blank" rel="noreferrer" title="Support OpenCAE on Ko-fi">
+            <span className="coffee-mark" aria-hidden="true">
+              <span className="coffee-steam coffee-steam-one" />
+              <span className="coffee-steam coffee-steam-two" />
+              <Coffee size={13} aria-hidden="true" />
+              <span className="coffee-sparkle" />
+            </span>
             Buy me a coffee
           </a>
           <a className="status-link" href="https://form.esauengineering.com/opencae-feedback" target="_blank" rel="noreferrer">
