@@ -2,7 +2,14 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, test } from "vitest";
-import { BottomPanel, KeyboardShortcutGuide, WORKSPACE_SHORTCUT_GUIDE, resolveLogClearIntent } from "./BottomPanel";
+import {
+  BottomPanel,
+  COFFEE_ANIMATION_REPLAY_DELAY_MS,
+  KeyboardShortcutGuide,
+  WORKSPACE_SHORTCUT_GUIDE,
+  coffeeAnimationReplayDelayMs,
+  resolveLogClearIntent
+} from "./BottomPanel";
 
 const bottomPanelSource = readFileSync(resolve(__dirname, "BottomPanel.tsx"), "utf8");
 const workspaceSource = readFileSync(resolve(__dirname, "../WorkspaceApp.tsx"), "utf8");
@@ -36,6 +43,36 @@ describe("BottomPanel", () => {
     expect(html.indexOf("Buy me a coffee</a>")).toBeLessThan(html.indexOf(">feedback</a>"));
     expect(html.indexOf("Buy me a coffee</a>")).toBeLessThan(html.indexOf(">github</a>"));
     expect(html.indexOf(">github</a>")).toBeGreaterThan(html.indexOf("<b>solver</b>"));
+  });
+
+  test("renders decorative coffee animation elements without changing link copy", () => {
+    const html = renderToStaticMarkup(
+      <BottomPanel
+        status="Results ready"
+        logs={["Ready"]}
+        projectName="Cantilever Demo"
+        studyName="Static Stress"
+        meshStatus="Ready"
+        solverStatus="Complete"
+        backendStatus="local"
+        onClearLogs={() => undefined}
+      />
+    );
+
+    expect(html).toContain('class="coffee-mark"');
+    expect(html).toContain('class="coffee-steam coffee-steam-one"');
+    expect(html).toContain('class="coffee-steam coffee-steam-two"');
+    expect(html).toContain('class="coffee-sparkle"');
+    expect(html).toContain("Buy me a coffee</a>");
+  });
+
+  test("bounds the randomized coffee animation replay delay", () => {
+    expect(COFFEE_ANIMATION_REPLAY_DELAY_MS).toEqual({ min: 18000, max: 45000 });
+    expect(coffeeAnimationReplayDelayMs(0)).toBe(18000);
+    expect(coffeeAnimationReplayDelayMs(0.5)).toBe(31500);
+    expect(coffeeAnimationReplayDelayMs(1)).toBe(45000);
+    expect(coffeeAnimationReplayDelayMs(-1)).toBe(18000);
+    expect(coffeeAnimationReplayDelayMs(2)).toBe(45000);
   });
 
   test("shows core backend status when OpenCAE Core is selected", () => {
