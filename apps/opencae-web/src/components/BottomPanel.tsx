@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type MouseEvent, type PointerEvent } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent } from "react";
 import { Coffee, Github, MessageSquare } from "lucide-react";
 import { REQUIRED_SETTING_HELP_IDS, SETTING_HELP, type SettingHelpVisual } from "../settingHelp";
 
@@ -24,6 +24,7 @@ export const WORKSPACE_SHORTCUT_GUIDE: Array<{ keys: string[]; label: string }> 
 
 export const COFFEE_ANIMATION_DURATION_MS = 1800;
 export const COFFEE_ANIMATION_REPLAY_DELAY_MS = { min: 18000, max: 45000 } as const;
+const COFFEE_LINK_TEXT = "Buy me a coffee";
 
 export function coffeeAnimationReplayDelayMs(randomValue = Math.random()) {
   const safeRandomValue = Number.isFinite(randomValue) ? randomValue : 0;
@@ -37,7 +38,10 @@ export function BottomPanel({ status, logs, projectName, studyName, meshStatus, 
   const [drawerHeight, setDrawerHeight] = useState(320);
   const [clearPromptVisible, setClearPromptVisible] = useState(false);
   const [coffeeAnimating, setCoffeeAnimating] = useState(false);
+  const [coffeeAnimationRun, setCoffeeAnimationRun] = useState(0);
   const dragStart = useRef<{ y: number; height: number } | null>(null);
+  const animationTimeoutRef = useRef(0);
+  const replayTimeoutRef = useRef(0);
   const expanded = tab !== null;
   const displayStatus = statusForDisplay(status, solverStatus);
   const healthy = solverStatus === "Running" ? "running" : displayStatus === "OpenCAE Core error" ? "warning" : meshStatus === "Ready" ? "ready" : "warning";
@@ -52,20 +56,10 @@ export function BottomPanel({ status, logs, projectName, studyName, meshStatus, 
 
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
-    const reduceMotionQuery = window.matchMedia?.("(prefers-reduced-motion: reduce)");
-    if (reduceMotionQuery?.matches) return undefined;
-
-    let animationTimeoutId = 0;
-    let replayTimeoutId = 0;
-
-    function runCoffeeAnimation() {
-      setCoffeeAnimating(true);
-      window.clearTimeout(animationTimeoutId);
-      animationTimeoutId = window.setTimeout(() => setCoffeeAnimating(false), COFFEE_ANIMATION_DURATION_MS);
-    }
+    if (prefersReducedCoffeeMotion()) return undefined;
 
     function scheduleCoffeeAnimation() {
-      replayTimeoutId = window.setTimeout(() => {
+      replayTimeoutRef.current = window.setTimeout(() => {
         runCoffeeAnimation();
         scheduleCoffeeAnimation();
       }, coffeeAnimationReplayDelayMs());
@@ -75,10 +69,22 @@ export function BottomPanel({ status, logs, projectName, studyName, meshStatus, 
     scheduleCoffeeAnimation();
 
     return () => {
-      window.clearTimeout(animationTimeoutId);
-      window.clearTimeout(replayTimeoutId);
+      window.clearTimeout(animationTimeoutRef.current);
+      window.clearTimeout(replayTimeoutRef.current);
     };
   }, []);
+
+  function prefersReducedCoffeeMotion() {
+    return window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches === true;
+  }
+
+  function runCoffeeAnimation() {
+    if (typeof window === "undefined" || prefersReducedCoffeeMotion()) return;
+    setCoffeeAnimationRun((run) => run + 1);
+    setCoffeeAnimating(true);
+    window.clearTimeout(animationTimeoutRef.current);
+    animationTimeoutRef.current = window.setTimeout(() => setCoffeeAnimating(false), COFFEE_ANIMATION_DURATION_MS);
+  }
 
   function selectTab(nextTab: NonNullable<typeof tab>, event: MouseEvent<HTMLButtonElement>) {
     if (tab === nextTab) {
@@ -209,14 +215,24 @@ export function BottomPanel({ status, logs, projectName, studyName, meshStatus, 
           <span><b>solver</b>{solverStatus}</span>
         </div>
         <div className="status-links" aria-label="Project links">
-          <a className={donateLinkClassName} href="https://ko-fi.com/petergn" target="_blank" rel="noreferrer" title="Support OpenCAE on Ko-fi">
-            <span className="coffee-mark" aria-hidden="true">
+          <a className={donateLinkClassName} href="https://ko-fi.com/petergn" target="_blank" rel="noreferrer" title="Support OpenCAE on Ko-fi" onMouseEnter={runCoffeeAnimation}>
+            <span className="coffee-mark" aria-hidden="true" key={`coffee-mark-${coffeeAnimationRun}`}>
               <span className="coffee-steam coffee-steam-one" />
               <span className="coffee-steam coffee-steam-two" />
               <Coffee size={13} aria-hidden="true" />
               <span className="coffee-sparkle" />
             </span>
-            Buy me a coffee
+            <span className="coffee-label" key={`coffee-label-${coffeeAnimationRun}`}>
+              {COFFEE_LINK_TEXT.split("").map((letter, index) => (
+                <span
+                  className={letter === " " ? "coffee-letter coffee-letter-space" : "coffee-letter"}
+                  key={`${letter}-${index}`}
+                  style={{ "--coffee-letter-index": index } as CSSProperties}
+                >
+                  {letter}
+                </span>
+              ))}
+            </span>
           </a>
           <a className="status-link" href="https://form.esauengineering.com/opencae-feedback" target="_blank" rel="noreferrer">
             <MessageSquare size={13} aria-hidden="true" />
