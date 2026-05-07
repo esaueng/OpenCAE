@@ -18,6 +18,7 @@
     "@opencae/solver-service": "workspace:*",
     "@opencae/study-core": "workspace:*",
     "@opencae/units": "workspace:*",
+    "@plausible-analytics/tracker": "^0.4.5",
     "@react-three/drei": "^9.122.0",
     "@react-three/fiber": "^8.17.10",
     "lucide-react": "^0.468.0",
