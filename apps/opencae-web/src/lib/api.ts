@@ -3,7 +3,7 @@ import type { LoadApplicationPoint, LoadDirection, LoadType, PayloadLoadMetadata
 import { embedUploadedModelFile, type EmbeddedModelFile, type LocalResultBundle } from "../projectFile";
 import { createLocalBlankProject, createLocalSampleProject, createLocalUploadResponse, openLocalProjectPayload } from "../localProjectFactory";
 import { solveLocalStudyInWorker } from "../workers/performanceClient";
-import { hasActualCoreVolumeMesh, normalizeSolverBackend, openCaeCoreEligibility, trySolveOpenCaeCoreStudy, type NormalizedBrowserSolverBackend } from "../workers/opencaeCoreSolve";
+import { buildOpenCaeCoreCloudModelForStudy, hasActualCoreVolumeMesh, normalizeSolverBackend, openCaeCoreEligibility, trySolveOpenCaeCoreStudy, type NormalizedBrowserSolverBackend } from "../workers/opencaeCoreSolve";
 
 export interface SampleProjectResponse {
   message?: string;
@@ -340,12 +340,13 @@ async function runOpenCaeCoreCloudSimulation(study: Study, displayModel: Display
 }
 
 function openCaeCoreCloudSolveRequest(runId: string, study: Study, displayModel: DisplayModel | undefined) {
-  const artifacts = study.meshSettings.summary?.artifacts;
+  const coreBuild = buildOpenCaeCoreCloudModelForStudy(study, displayModel);
   return {
     runId,
+    analysisType: study.type,
     study,
-    coreModel: artifacts?.actualCoreModel ?? artifacts?.coreModel ?? null,
-    coreVolumeMesh: artifacts?.volumeMesh ?? null,
+    coreModel: coreBuild.model,
+    coreVolumeMesh: null,
     solverSettings: {
       ...study.solverSettings,
       backend: "opencae_core_cloud"
@@ -355,7 +356,7 @@ function openCaeCoreCloudSolveRequest(runId: string, study: Study, displayModel:
         kind: "opencae_core_fea",
         solver: "opencae-core-cloud",
         resultSource: "computed",
-        meshSource: artifacts?.volumeMesh || artifacts?.actualCoreModel ? "actual_volume_mesh" : "structured_block_core"
+        meshSource: coreBuild.meshSource
       },
       renderBounds: displayModel?.dimensions ?? null
     }

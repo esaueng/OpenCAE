@@ -197,6 +197,7 @@ export const MeshSettingsSchema = z.object({
             .optional(),
           actualCoreModel: z.unknown().optional(),
           coreModel: z.unknown().optional(),
+          actualCoreVolumeMeshRef: z.string().optional(),
           volumeMesh: z.unknown().optional()
         })
         .passthrough()
