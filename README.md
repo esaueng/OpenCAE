@@ -6,7 +6,14 @@ The project is organized around service boundaries so the React workspace, Fasti
 
 ## Local Development
 
-Install dependencies and start the API and web app:
+OpenCAE consumes the live OpenCAE Core workspace from a sibling checkout. Keep the repos beside each other:
+
+```text
+/Users/userzero/codex/opencae-alpha
+/Users/userzero/codex/opencae-core
+```
+
+Install dependencies and start the API and web app from `opencae-alpha`:
 
 ```bash
 pnpm install
@@ -55,6 +62,8 @@ pnpm install
 pnpm deploy:cloudflare
 ```
 
+Build and deploy environments must check out `https://github.com/esaueng/OpenCAE-Core` as `../opencae-core` before running `pnpm install` in this repo. `pnpm` resolves `@opencae/core`, `@opencae/solver-cpu`, and other OpenCAE Core packages from that sibling workspace; there is no runtime network lookup.
+
 Wrangler uses [wrangler.jsonc](wrangler.jsonc) for the production app domains by default. That config intentionally omits container bindings and returns a local-first API message for `/api/*` routes because the browser app owns simulation execution.
 
 For a separate static Worker deploy, use:
@@ -77,7 +86,8 @@ That explicit local-first path uses [wrangler.local-first.jsonc](wrangler.local-
 
 For Cloudflare Builds, use:
 
-```bash
+```text
+Prerequisite checkout: ../opencae-core from https://github.com/esaueng/OpenCAE-Core
 Build command: pnpm run build
 Deploy command: npx wrangler deploy --config wrangler.jsonc
 ```
@@ -88,6 +98,7 @@ Deploy command: npx wrangler deploy --config wrangler.jsonc
 
 - `apps/opencae-web` - React/Vite CAD workspace for static and dynamic structural workflows.
 - `apps/opencae-api` - Fastify API for projects, uploads, studies, jobs, artifacts, reports, and service orchestration.
+- `../opencae-core/packages/*` - Live sibling OpenCAE Core packages consumed through the pnpm workspace.
 - `libs/*` - Shared schema, units, materials, storage, jobs, diagnostics, validation, selection, result format, and service contracts.
 - `services/*` - CAD, mesh, solver, post-processing, and legacy container reference implementations.
 - `runners/opencae-runner-local` - Local runner package for job execution flows.
@@ -104,7 +115,7 @@ The built-in demos include bracket, beam, and cantilever studies with Aluminum 6
 
 ## Solver Attribution
 
-OpenCAE uses OpenCAE Core as its only solver runtime. The vendored `@opencae/core` and `@opencae/solver-cpu` packages run static stress and dynamic structural studies with a Tet4 CPU model. Results are marked with `opencae_core_fea`, `opencae_core_tet4`, and `computed` provenance.
+OpenCAE uses OpenCAE Core as its only solver runtime. The live sibling `@opencae/core` and `@opencae/solver-cpu` workspace packages run static stress and dynamic structural studies with a Tet4 CPU model. Results are marked with `opencae_core_fea`, `opencae_core_tet4`, and `computed` provenance.
 
 ## Documentation
 

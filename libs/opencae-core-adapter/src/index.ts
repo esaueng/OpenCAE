@@ -248,17 +248,17 @@ function dynamicResultBundleForOpenCaeCore(
   let minSafetyFactor = Number.POSITIVE_INFINITY;
 
   for (const frame of frames) {
-    const stressFrame = withFrame(stressFieldForOpenCaeCore(runId, coreModel, frame.vonMises, study, OPENCAE_CORE_DYNAMIC_PROVENANCE), frame.index, frame.time);
-    const displacementFrame = withFrame(vectorFieldForOpenCaeCore(runId, "displacement", coreModel, frame.displacement, "mm", 1000, 8, OPENCAE_CORE_DYNAMIC_PROVENANCE), frame.index, frame.time);
-    const velocityFrame = withFrame(vectorFieldForOpenCaeCore(runId, "velocity", coreModel, frame.velocity, "mm/s", 1000, 8, OPENCAE_CORE_DYNAMIC_PROVENANCE), frame.index, frame.time);
-    const accelerationFrame = withFrame(vectorFieldForOpenCaeCore(runId, "acceleration", coreModel, frame.acceleration, "mm/s^2", 1000, 8, OPENCAE_CORE_DYNAMIC_PROVENANCE), frame.index, frame.time);
-    const safetyFrame = withFrame(safetyFieldForOpenCaeCore(runId, stressFrame, study, OPENCAE_CORE_DYNAMIC_PROVENANCE), frame.index, frame.time);
+    const stressFrame = withFrame(stressFieldForOpenCaeCore(runId, coreModel, frame.vonMises.values, study, OPENCAE_CORE_DYNAMIC_PROVENANCE), frame.frameIndex, frame.timeSeconds);
+    const displacementFrame = withFrame(vectorFieldForOpenCaeCore(runId, "displacement", coreModel, frame.displacement.values, "mm", 1000, 8, OPENCAE_CORE_DYNAMIC_PROVENANCE), frame.frameIndex, frame.timeSeconds);
+    const velocityFrame = withFrame(vectorFieldForOpenCaeCore(runId, "velocity", coreModel, frame.velocity.values, "mm/s", 1000, 8, OPENCAE_CORE_DYNAMIC_PROVENANCE), frame.frameIndex, frame.timeSeconds);
+    const accelerationFrame = withFrame(vectorFieldForOpenCaeCore(runId, "acceleration", coreModel, frame.acceleration.values, "mm/s^2", 1000, 8, OPENCAE_CORE_DYNAMIC_PROVENANCE), frame.frameIndex, frame.timeSeconds);
+    const safetyFrame = withFrame(safetyFieldForOpenCaeCore(runId, stressFrame, study, OPENCAE_CORE_DYNAMIC_PROVENANCE), frame.frameIndex, frame.timeSeconds);
     fields.push(stressFrame, displacementFrame, velocityFrame, accelerationFrame, safetyFrame);
 
     const framePeakDisplacement = resultFieldAbsMax(displacementFrame);
     if (framePeakDisplacement > peakDisplacement) {
       peakDisplacement = framePeakDisplacement;
-      peakDisplacementTimeSeconds = frame.time;
+      peakDisplacementTimeSeconds = frame.timeSeconds;
     }
     peakStress = Math.max(peakStress, stressFrame.max);
     minSafetyFactor = Math.min(minSafetyFactor, safetyFrame.min);

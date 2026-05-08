@@ -1,5 +1,14 @@
 # Local Development
 
+This repo requires a sibling OpenCAE Core checkout for every install and build:
+
+```text
+/Users/userzero/codex/opencae-alpha
+/Users/userzero/codex/opencae-core
+```
+
+Clone `https://github.com/esaueng/OpenCAE-Core` into `../opencae-core` before running `pnpm install`. The pnpm workspace resolves `@opencae/core`, `@opencae/solver-cpu`, and other Core packages from that live checkout, so rebuilding this repo picks up local Core changes.
+
 Install dependencies and run the local API plus web app:
 
 ```bash
@@ -39,3 +48,5 @@ pnpm deploy:cloudflare:local-first
 ```
 
 Use the default Cloudflare deploy for the production app domains. It uses `wrangler.jsonc`, targets `opencae`, and intentionally omits container solver bindings because production simulations run in the browser through OpenCAE Core.
+
+Deploy and CI runners must also check out `OpenCAE-Core` as `../opencae-core` before `pnpm install`; a standalone `opencae-alpha` checkout is no longer sufficient.

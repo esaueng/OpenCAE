@@ -1,4 +1,5 @@
 packages:
+  - "../opencae-core/packages/*"
   - "packages/*"
   - "apps/*"
   - "libs/*"

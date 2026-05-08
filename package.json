@@ -6,9 +6,10 @@
   "type": "module",
   "scripts": {
     "dev": "concurrently -n api,web -c cyan,blue \"pnpm --filter @opencae/api dev\" \"pnpm --filter @opencae/web dev\"",
-    "build": "pnpm --filter @opencae/core build && pnpm --filter @opencae/solver-cpu build && pnpm --filter @opencae/api build && pnpm --filter @opencae/web build",
-    "build:cloudflare": "pnpm --filter @opencae/web build",
-    "verify:perf": "pnpm --filter @opencae/web build && node scripts/verify-web-performance.mjs",
+    "build": "pnpm build:core && pnpm --filter @opencae/api build && pnpm --filter @opencae/web build",
+    "build:core": "pnpm --dir ../opencae-core build",
+    "build:cloudflare": "pnpm build:core && pnpm --filter @opencae/web build",
+    "verify:perf": "pnpm build:core && pnpm --filter @opencae/web build && node scripts/verify-web-performance.mjs",
     "verify:cloudflare-config": "node scripts/verify-cloudflare-config.mjs",
     "deploy:cloudflare": "pnpm verify:cloudflare-config && pnpm build:cloudflare && wrangler deploy --config wrangler.jsonc",
     "deploy:cloudflare:dry-run": "pnpm verify:cloudflare-config && pnpm build:cloudflare && wrangler deploy --config wrangler.jsonc --dry-run",
