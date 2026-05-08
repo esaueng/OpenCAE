@@ -42,12 +42,13 @@ import {
 } from "./projectFactory";
 
 const api = Fastify({ logger: true });
+const RATE_LIMIT_ERROR_MESSAGE = "Too many API requests. Please try again later.";
 await api.register(cors, { origin: true });
 await api.register(rateLimit, {
   global: false,
   errorResponseBuilder: () => ({
     statusCode: 429,
-    error: "Too many project creation requests. Please try again later."
+    error: RATE_LIMIT_ERROR_MESSAGE
   })
 });
 
@@ -126,7 +127,14 @@ api.post("/api/sample-project/load", async (request) => {
   };
 });
 
-api.get("/api/projects", async () => ({ projects: db.listProjects() }));
+api.get("/api/projects", {
+  config: {
+    rateLimit: {
+      max: 60,
+      timeWindow: "1 minute"
+    }
+  }
+}, async () => ({ projects: db.listProjects() }));
 
 api.post("/api/projects", {
   config: {

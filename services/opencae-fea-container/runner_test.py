@@ -189,6 +189,40 @@ class UploadedGeometrySolveTest(unittest.TestCase):
 
         self.assertEqual(parsed["runId"], "run-upload-evil")
 
+    def test_structured_block_tempdir_uses_fixed_prefix_not_request_run_id(self):
+        payload = block_benchmark_payload("standard")
+        payload["runId"] = "customer-request-run"
+        parsed = runner.parse_payload(payload)
+        prefixes = []
+        real_tempdir = tempfile.TemporaryDirectory
+
+        def capture_tempdir(*args, **kwargs):
+            prefixes.append(kwargs.get("prefix") if "prefix" in kwargs else args[0] if args else None)
+            return real_tempdir(*args, **kwargs)
+
+        with mock.patch.object(runner.tempfile, "TemporaryDirectory", side_effect=capture_tempdir):
+            with mock.patch.object(runner, "run_ccx_if_available", return_value={"log": "missing", "returnCode": None}):
+                with self.assertRaises(runner.UserFacingSolveError):
+                    runner.solve_structured_block(parsed)
+
+        self.assertEqual(prefixes, ["opencae-run-"])
+
+    def test_uploaded_geometry_tempdir_uses_fixed_prefix_not_request_run_id(self):
+        parsed = runner.parse_payload(uploaded_geometry_payload())
+        prefixes = []
+        real_tempdir = tempfile.TemporaryDirectory
+
+        def capture_tempdir(*args, **kwargs):
+            prefixes.append(kwargs.get("prefix") if "prefix" in kwargs else args[0] if args else None)
+            return real_tempdir(*args, **kwargs)
+
+        with mock.patch.object(runner.tempfile, "TemporaryDirectory", side_effect=capture_tempdir):
+            with mock.patch.object(runner.shutil, "which", return_value=None):
+                with self.assertRaises(runner.UserFacingSolveError):
+                    runner.solve_uploaded_geometry(parsed)
+
+        self.assertEqual(prefixes, ["opencae-run-"])
+
     def test_stage_uploaded_geometry_keeps_sanitized_filename_inside_workdir(self):
         payload = uploaded_geometry_payload()
         payload["geometry"]["filename"] = "../../bad name!.stl"
@@ -198,7 +232,8 @@ class UploadedGeometrySolveTest(unittest.TestCase):
             workdir = Path(tmp)
             staged = runner.stage_uploaded_geometry(workdir, parsed["geometry"])
 
-            self.assertEqual(staged.name, "bad-name_.stl")
+            self.assertEqual(parsed["geometry"]["filename"], "bad-name_.stl")
+            self.assertEqual(staged.name, "opencae_uploaded_geometry.stl")
             self.assertEqual(staged.resolve().parent, workdir.resolve())
             self.assertTrue(staged.read_bytes())
 

@@ -11,7 +11,19 @@ describe("OpenCAE API server", () => {
 
     expect(responses.slice(0, 30).every((response) => response.statusCode === 200)).toBe(true);
     expect(responses[30]?.statusCode).toBe(429);
-    expect(responses[30]?.json()).toMatchObject({ error: "Too many project creation requests. Please try again later." });
+    expect(responses[30]?.json()).toMatchObject({ error: "Too many API requests. Please try again later." });
+  });
+
+  test("rate limits project listing", async () => {
+    const api = await buildApi();
+    const responses = [];
+    for (let index = 0; index < 61; index += 1) {
+      responses.push(await api.inject({ method: "GET", url: "/api/projects", remoteAddress: "203.0.113.11" }));
+    }
+
+    expect(responses.slice(0, 60).every((response) => response.statusCode === 200)).toBe(true);
+    expect(responses[60]?.statusCode).toBe(429);
+    expect(responses[60]?.json()).toMatchObject({ error: "Too many API requests. Please try again later." });
   });
 
   test("sanitizes report download filenames without regex replacement", async () => {

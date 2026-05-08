@@ -15,7 +15,20 @@ const bottomPanelSource = readFileSync(resolve(__dirname, "BottomPanel.tsx"), "u
 const workspaceSource = readFileSync(resolve(__dirname, "../WorkspaceApp.tsx"), "utf8");
 
 function textContent(html: string) {
-  return html.replace(/<[^>]+>/g, "");
+  let text = "";
+  let insideTag = false;
+  for (const char of html) {
+    if (char === "<") {
+      insideTag = true;
+      continue;
+    }
+    if (char === ">") {
+      insideTag = false;
+      continue;
+    }
+    if (!insideTag) text += char;
+  }
+  return text;
 }
 
 describe("BottomPanel", () => {
