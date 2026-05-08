@@ -8,7 +8,7 @@
     "dev": "concurrently -n api,web -c cyan,blue \"pnpm --filter @opencae/api dev\" \"pnpm --filter @opencae/web dev\"",
     "build": "pnpm build:core && pnpm --filter @opencae/api build && pnpm --filter @opencae/web build",
     "ensure:core": "node scripts/ensure-opencae-core.mjs",
-    "build:core": "pnpm ensure:core && pnpm install --frozen-lockfile && pnpm --dir ../opencae-core build",
+    "build:core": "pnpm ensure:core && pnpm install --frozen-lockfile && pnpm --filter @opencae/core build && pnpm --filter @opencae/examples build && pnpm --filter @opencae/solver-cpu build && pnpm --filter @opencae/solver-wasm build && pnpm --filter @opencae/solver-webgpu build && pnpm --filter @opencae/viewer build",
     "build:cloudflare": "pnpm build:core && pnpm --filter @opencae/web build",
     "verify:perf": "pnpm build:core && pnpm --filter @opencae/web build && node scripts/verify-web-performance.mjs",
     "verify:cloudflare-config": "node scripts/verify-cloudflare-config.mjs",
