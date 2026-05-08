@@ -449,6 +449,23 @@ describe("RightPanel payload mass controls", () => {
     expect(runHtml).not.toContain("Local estimate");
   });
 
+  test("warns when an invalid Core mesh blocks a cloud run without legacy labels", () => {
+    const runHtml = renderPanel("run", {
+      study: {
+        ...study,
+        solverSettings: { backend: "opencae_core_cloud" },
+        meshSettings: { preset: "medium", status: "warning", summary: { nodes: 8, elements: 2, warnings: ["Disconnected mesh"], quality: "medium" } } as Study["meshSettings"]
+      },
+      canRunSimulation: false,
+      missingRunItems: ["Valid Core volume mesh"]
+    });
+
+    expect(runHtml).toContain("OpenCAE Core Cloud");
+    expect(runHtml).toContain("Complete valid core volume mesh before running.");
+    expect(runHtml).not.toContain("Local estimate");
+    expect(runHtml).not.toContain("CalculiX");
+  });
+
   test("normalizes legacy backend selections to OpenCAE Core Cloud", () => {
     const detailedStudy = {
       ...study,

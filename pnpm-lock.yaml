@@ -305,6 +305,9 @@ importers:
         specifier: workspace:*
         version: link:../../../opencae-core/packages/solver-cpu
     devDependencies:
+      '@opencae/examples':
+        specifier: workspace:*
+        version: link:../../../opencae-core/packages/examples
       '@types/node':
         specifier: ^22.10.5
         version: 22.19.17
