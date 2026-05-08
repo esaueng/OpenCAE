@@ -55,7 +55,7 @@ pnpm verify:perf
 
 ## Cloudflare Worker Deploy
 
-The production Cloudflare target for `cae.esau.app` serves the Vite web app from Workers Static Assets. The default deploy path builds the web app, deploys the Worker asset binding, enables SPA fallback routing, and does not require `FEA_CONTAINER` or `@cloudflare/containers`. Simulations run in the browser through OpenCAE Core CPU Tet4.
+The production Cloudflare target for `cae.esau.app` serves the Vite web app from Workers Static Assets and routes production solves through OpenCAE Core Cloud. The default deploy path builds the web app, deploys the Worker asset binding, enables SPA fallback routing, and binds the versioned Core Cloud container, Durable Object, and R2 artifact bucket.
 
 ```bash
 pnpm install
@@ -64,7 +64,7 @@ pnpm deploy:cloudflare
 
 Build and deploy environments use `pnpm build:core` to ensure `https://github.com/esaueng/OpenCAE-Core` exists as `../opencae-core`, rerun `pnpm install --frozen-lockfile`, and then build the live Core packages consumed through this workspace. `pnpm` resolves `@opencae/core`, `@opencae/solver-cpu`, and other OpenCAE Core packages from that sibling workspace; there is no runtime network lookup.
 
-Wrangler uses [wrangler.jsonc](wrangler.jsonc) for the production app domains by default. That config intentionally omits container bindings and returns a local-first API message for `/api/*` routes because the browser app owns simulation execution.
+Production deploy scripts use [wrangler.containers.jsonc](wrangler.containers.jsonc) for the app domain and container rollout. [wrangler.jsonc](wrangler.jsonc) mirrors the Core Cloud production bindings so a default production config cannot publish an unbound Worker.
 
 For a separate static Worker deploy, use:
 
@@ -82,16 +82,16 @@ pnpm deploy:cloudflare:local-first:dry-run
 pnpm deploy:cloudflare:local-first
 ```
 
-That explicit local-first path uses [wrangler.local-first.jsonc](wrangler.local-first.jsonc).
+That explicit local-first path uses [wrangler.local-first.jsonc](wrangler.local-first.jsonc) and is not routed to the production custom domain.
 
 For Cloudflare Builds, use:
 
 ```text
 Build command: pnpm run build
-Deploy command: npx wrangler deploy --config wrangler.jsonc
+Deploy command: npx wrangler deploy --config wrangler.containers.jsonc --containers-rollout=immediate
 ```
 
-`pnpm deploy:cloudflare` is also valid as a deploy command, but do not use a web-assets-only deploy command for the production Worker.
+`pnpm deploy:cloudflare` is also valid as a deploy command. Do not use a web-assets-only, static, or local-first deploy command for the production Worker.
 
 ## Workspace Layout
 

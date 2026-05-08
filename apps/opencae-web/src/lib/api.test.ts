@@ -551,6 +551,9 @@ describe("api", () => {
   test("does not fall back to local estimates when OpenCAE Core Cloud fails", async () => {
     const cloudStudy = {
       ...study,
+      materialAssignments: [{ id: "assign-1", materialId: "mat-aluminum-6061", selectionRef: "selection-body-1", status: "complete" }],
+      constraints: [{ id: "constraint-1", type: "fixed", selectionRef: "selection-face-1", parameters: {}, status: "complete" }],
+      loads: [{ id: "load-1", type: "force", selectionRef: "selection-face-1", parameters: { value: 500, units: "N", direction: [0, -1, 0] }, status: "complete" }],
       meshSettings: { preset: "ultra", status: "complete", meshRef: "project-1/mesh/mesh-summary.json" },
       solverSettings: { backend: "opencae_core_cloud", fidelity: "ultra" }
     } as unknown as Study;
@@ -560,7 +563,9 @@ describe("api", () => {
       headers: { "content-type": "application/json" }
     })));
 
-    await expect(runSimulation("study-1", cloudStudy, coreDisplayModel)).rejects.toThrow("OpenCAE Core Cloud solve failed. No local estimate fallback was used.");
+    await expect(runSimulation("study-1", cloudStudy, coreDisplayModel)).rejects.toThrow(
+      "POST /api/cloud-core/runs failed with HTTP 503 Service Unavailable: container unavailable. No local estimate fallback was used."
+    );
   });
 
   test("fails explicit local OpenCAE Core runs for complex geometry instead of falling back silently", async () => {
