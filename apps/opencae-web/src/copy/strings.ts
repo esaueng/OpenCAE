@@ -151,11 +151,11 @@ export const COPY = {
       solverSection: 'Solver',
       solverInfo: {
         backend: 'Backend',
-        backendValue: 'opencae-core-cloud',
+        backendValue: 'OpenCAE Core Cloud',
         version: 'Version',
         versionValue: '0.1.0',
         runner: 'Runner',
-        runnerValue: 'cloud-core',
+        runnerValue: 'cloud container',
       },
     },
 
