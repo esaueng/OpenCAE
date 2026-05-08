@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "concurrently -n api,web -c cyan,blue \"pnpm --filter @opencae/api dev\" \"pnpm --filter @opencae/web dev\"",
-    "build": "pnpm --filter @opencae/api build && pnpm --filter @opencae/web build",
+    "build": "pnpm --filter @opencae/core build && pnpm --filter @opencae/solver-cpu build && pnpm --filter @opencae/api build && pnpm --filter @opencae/web build",
     "build:cloudflare": "pnpm --filter @opencae/web build",
     "verify:perf": "pnpm --filter @opencae/web build && node scripts/verify-web-performance.mjs",
     "verify:cloudflare-config": "node scripts/verify-cloudflare-config.mjs",

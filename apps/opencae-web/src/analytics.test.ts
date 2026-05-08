@@ -21,7 +21,7 @@ describe("initPlausibleAnalytics", () => {
     initPlausibleAnalytics();
 
     expect(initMock).toHaveBeenCalledWith({
-      domain: "alpha-cae.esau.app",
+      domain: "cae.esau.app",
       fileDownloads: true,
       outboundLinks: true
     });
@@ -29,12 +29,12 @@ describe("initPlausibleAnalytics", () => {
 
   test("allows the Plausible domain to be configured by Vite env", () => {
     vi.stubGlobal("window", {});
-    vi.stubEnv("VITE_PLAUSIBLE_DOMAIN", "preview.alpha-cae.esau.app");
+    vi.stubEnv("VITE_PLAUSIBLE_DOMAIN", "preview.cae.esau.app");
 
     initPlausibleAnalytics();
 
     expect(initMock).toHaveBeenCalledWith({
-      domain: "preview.alpha-cae.esau.app",
+      domain: "preview.cae.esau.app",
       fileDownloads: true,
       outboundLinks: true
     });
