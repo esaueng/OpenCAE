@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { DisplayModel, Project, RunEvent, Study } from "@opencae/schema";
+import { validateModelJson } from "@opencae/core";
 import { addLoad, addSupport, assignMaterial, cancelRun, createProject, dynamicOutputFrameEstimate, generateMesh, getResults, importLocalProject, loadSampleProject, renameProject, runSimulation, subscribeToRun, updateStudy, uploadModel } from "./api";
 
 const TestFile = globalThis.File ?? class extends Blob {
@@ -464,9 +465,22 @@ describe("api", () => {
       const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
       expect(body).toMatchObject({
         study: expect.objectContaining({ id: cloudStudy.id }),
+        analysisType: "static_stress",
         solverSettings: expect.objectContaining({ backend: "opencae_core_cloud" }),
+        coreVolumeMesh: null,
         resultSettings: expect.any(Object)
       });
+      const coreModel = body.coreModel as {
+        schemaVersion?: string;
+        loads?: Array<{ type?: string; surfaceSet?: string }>;
+        surfaceFacets?: unknown[];
+        surfaceSets?: Array<{ name?: string }>;
+      };
+      expect(coreModel.schemaVersion).toBe("0.2.0");
+      expect(validateModelJson(coreModel).ok).toBe(true);
+      expect(coreModel.surfaceFacets?.length).toBeGreaterThan(0);
+      expect(coreModel.surfaceSets?.map((set) => set.name)).toContain("selection-face-1");
+      expect(coreModel.loads?.[0]).toMatchObject({ type: "surfaceForce", surfaceSet: "selection-face-1" });
       expect(JSON.stringify(body).toLowerCase()).not.toMatch(/calculix|cloudflare-fea-calculix|\.inp|\.dat|\.frd/);
       return new Response(JSON.stringify({
         run: { id: "run-cloud-core", solverBackend: "opencae-core-cloud" },
@@ -507,6 +521,15 @@ describe("api", () => {
       const body = JSON.parse(String(init?.body)) as Record<string, { [key: string]: unknown }>;
       expect(body.solverSettings).toMatchObject({
         backend: "opencae_core_cloud",
+        timeStep: 0.002,
+        outputInterval: 0.01,
+        dampingRatio: 0.04,
+        loadProfile: "sinusoidal"
+      });
+      const coreModel = body.coreModel as { steps?: Array<Record<string, unknown>> };
+      expect(validateModelJson(coreModel).ok).toBe(true);
+      expect(coreModel.steps?.[0]).toMatchObject({
+        type: "dynamicLinear",
         timeStep: 0.002,
         outputInterval: 0.01,
         dampingRatio: 0.04,

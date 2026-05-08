@@ -1,7 +1,9 @@
 import { describe, expect, test } from "vitest";
 import type { DisplayModel, Study } from "@opencae/schema";
 import { bracketDemoProject, bracketDisplayModel } from "@opencae/db/sample-data";
+import { validateModelJson } from "@opencae/core";
 import {
+  buildOpenCaeCoreCloudModelForStudy,
   hasActualCoreVolumeMesh,
   isComplexGeometry,
   isSimpleBlockLikeDisplayModel,
@@ -186,6 +188,98 @@ describe("OpenCAE Core browser solver adapter", () => {
       resultSource: "computed"
     });
     expect(outcome.result.artifacts?.meshConnectivity?.connectedComponents).toBe(1);
+  });
+
+  test("builds a valid v0.2 Core Cloud model for a simple block study", () => {
+    const result = buildOpenCaeCoreCloudModelForStudy(staticStudy, displayModel);
+
+    expect(result.model.schemaVersion).toBe("0.2.0");
+    expect(validateModelJson(result.model).ok).toBe(true);
+    expect(result.model.meshProvenance?.meshSource).toBe("structured_block_core");
+    expect(result.model.surfaceFacets?.length).toBeGreaterThan(0);
+    expect(result.model.surfaceSets?.map((set) => set.name)).toEqual(expect.arrayContaining(["selection-fixed", "selection-load"]));
+    expect(result.model.boundaryConditions[0]).toMatchObject({ type: "fixed", nodeSet: "fixedNodes0" });
+    expect(result.model.loads[0]).toMatchObject({ type: "surfaceForce", surfaceSet: "selection-load", totalForce: [0, 0, -100] });
+    expect(result.model.materials[0]).toMatchObject({ density: 2700, yieldStrength: 276000000 });
+  });
+
+  test("builds a valid dynamic Core Cloud model with dynamic solver settings", () => {
+    const dynamicStudy = {
+      ...staticStudy,
+      type: "dynamic_structural",
+      solverSettings: {
+        backend: "opencae_core_cloud",
+        fidelity: "standard",
+        startTime: 0,
+        endTime: 0.25,
+        timeStep: 0.002,
+        outputInterval: 0.01,
+        dampingRatio: 0.04,
+        integrationMethod: "newmark_average_acceleration",
+        loadProfile: "sinusoidal"
+      }
+    } satisfies Study;
+
+    const result = buildOpenCaeCoreCloudModelForStudy(dynamicStudy, displayModel);
+
+    expect(validateModelJson(result.model).ok).toBe(true);
+    expect(result.model.steps[0]).toMatchObject({
+      type: "dynamicLinear",
+      startTime: 0,
+      endTime: 0.25,
+      timeStep: 0.002,
+      outputInterval: 0.01,
+      dampingRatio: 0.04,
+      loadProfile: "sinusoidal"
+    });
+  });
+
+  test("converts pressure loads to Core pressure loads", () => {
+    const pressureStudy = {
+      ...staticStudy,
+      loads: [{ id: "load-pressure", type: "pressure", selectionRef: "selection-load", parameters: { value: 12, units: "kPa", direction: [0, 0, -1] }, status: "complete" }]
+    } satisfies Study;
+
+    const result = buildOpenCaeCoreCloudModelForStudy(pressureStudy, displayModel);
+
+    expect(validateModelJson(result.model).ok).toBe(true);
+    expect(result.model.loads[0]).toMatchObject({ type: "pressure", surfaceSet: "selection-load", pressure: 12000, direction: [0, 0, -1] });
+  });
+
+  test("converts payload gravity loads to equivalent Core surface force loads", () => {
+    const payloadStudy = {
+      ...staticStudy,
+      loads: [{
+        id: "load-payload",
+        type: "gravity",
+        selectionRef: "selection-load",
+        parameters: { value: 2.5, units: "kg", direction: [0, -1, 0], payloadMassMode: "manual" },
+        status: "complete"
+      }]
+    } satisfies Study;
+
+    const result = buildOpenCaeCoreCloudModelForStudy(payloadStudy, displayModel);
+
+    expect(validateModelJson(result.model).ok).toBe(true);
+    expect(result.model.loads[0]).toMatchObject({ type: "surfaceForce", surfaceSet: "selection-load", totalForce: [0, -24.516625, 0] });
+  });
+
+  test("applies effective printed material properties to the Core material", () => {
+    const printedStudy = {
+      ...staticStudy,
+      materialAssignments: [{ id: "mat-assignment", materialId: "mat-pla", selectionRef: "selection-body", parameters: { printed: true, infillDensity: 50, wallCount: 2, layerOrientation: "z" }, status: "complete" }]
+    } satisfies Study;
+
+    const result = buildOpenCaeCoreCloudModelForStudy(printedStudy, displayModel);
+
+    expect(validateModelJson(result.model).ok).toBe(true);
+    expect(result.model.materials[0]?.density).toBeGreaterThan(0);
+    expect(result.model.materials[0]?.density).toBeLessThan(1240);
+    expect(result.model.materials[0]?.yieldStrength).toBeLessThan(60000000);
+  });
+
+  test("fails complex geometry before cloud run when no actual mesh is present", () => {
+    expect(() => buildOpenCaeCoreCloudModelForStudy(bracketDemoProject.studies[0]!, bracketDisplayModel)).toThrow(/actual Core volume mesh|OpenCAE Core Cloud/i);
   });
 });
 

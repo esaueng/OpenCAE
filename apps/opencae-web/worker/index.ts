@@ -240,8 +240,8 @@ function preflightCoreCloudRequest(request: CoreCloudRunRequest): string | undef
   if (serialized.includes("local_estimate") || serialized.includes("computed_preview")) {
     return "OpenCAE Core Cloud requests cannot use preview or local estimate provenance.";
   }
-  if (!request.coreModel && !request.coreVolumeMesh && !request.study) {
-    return "OpenCAE Core Cloud requires a study, coreModel, or coreVolumeMesh.";
+  if (!request.coreModel && !request.coreVolumeMesh) {
+    return "OpenCAE Core Cloud requires a generated OpenCAE Core model or actual Core volume mesh before dispatch. No local estimate fallback was used.";
   }
   return undefined;
 }
