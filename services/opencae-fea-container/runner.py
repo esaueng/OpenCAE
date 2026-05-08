@@ -57,6 +57,7 @@ STANDARD_GRAVITY = 9.80665
 DEFAULT_CCX_STATIC_TIMEOUT_SECONDS = 60
 DEFAULT_CCX_DYNAMIC_TIMEOUT_SECONDS = 300
 MAX_SAFE_FILE_COMPONENT_LENGTH = 96
+TEMP_WORKDIR_PREFIX = "opencae-run-"
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -214,7 +215,6 @@ def solve(payload):
 
 
 def solve_structured_block(parsed):
-    run_id = safe_file_component(parsed["runId"], "run-cloud-container")
     try:
         mesh = generate_structured_hex_mesh(parsed["dimensions"], parsed["meshDensity"])
         boundaries = select_boundary_nodes(parsed, mesh)
@@ -222,7 +222,7 @@ def solve_structured_block(parsed):
     except Exception as error:
         raise annotate_exception_phase(error, "mesh-generation")
 
-    with tempfile.TemporaryDirectory(prefix=f"{run_id}-") as tmp:
+    with tempfile.TemporaryDirectory(prefix=TEMP_WORKDIR_PREFIX) as tmp:
         workdir = Path(tmp)
         try:
             input_deck = write_calculix_input_deck(parsed, mesh, boundaries, nodal_loads)
@@ -254,8 +254,7 @@ def solve_structured_block(parsed):
 
 
 def solve_uploaded_geometry(parsed):
-    run_id = safe_file_component(parsed["runId"], "run-cloud-container")
-    with tempfile.TemporaryDirectory(prefix=f"{run_id}-") as tmp:
+    with tempfile.TemporaryDirectory(prefix=TEMP_WORKDIR_PREFIX) as tmp:
         workdir = Path(tmp)
         try:
             staged_geometry = stage_uploaded_geometry(workdir, parsed["geometry"])
@@ -678,8 +677,15 @@ def stage_uploaded_geometry(workdir, geometry):
     if not content:
         raise UserFacingSolveError(UNSUPPORTED_UPLOADED_GEOMETRY_ERROR, 422)
     root = workdir.resolve()
-    filename = safe_file_component(geometry.get("filename"), "uploaded.geometry")
-    geometry_path = (root / filename).resolve()
+    geometry_format = geometry.get("format")
+    if geometry_format == "step":
+        geometry_path = (root / "opencae_uploaded_geometry.step").resolve()
+    elif geometry_format == "stl":
+        geometry_path = (root / "opencae_uploaded_geometry.stl").resolve()
+    elif geometry_format == "obj":
+        geometry_path = (root / "opencae_uploaded_geometry.obj").resolve()
+    else:
+        raise UserFacingSolveError(UNSUPPORTED_UPLOADED_GEOMETRY_ERROR, 422)
     try:
         geometry_path.relative_to(root)
     except ValueError as error:
