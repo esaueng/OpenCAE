@@ -6,6 +6,8 @@ export type VertexSampleWeight = {
 export type VertexResultMapping = {
   vertexCount: number;
   weightsByVertex: VertexSampleWeight[][];
+  nearestDistanceSqByVertex: Float64Array;
+  sampleSpan: number;
 };
 
 type ResultSamplePoint = {
@@ -25,6 +27,11 @@ type SpatialGrid = {
   cells: Map<string, number[]>;
 };
 
+type NearestSampleWeightsResult = {
+  weights: VertexSampleWeight[];
+  nearestDistanceSq: number;
+};
+
 let vertexResultMappingBuildCount = 0;
 
 export function createVertexResultMapping({
@@ -36,11 +43,13 @@ export function createVertexResultMapping({
   const vertexCount = Math.floor(basePositions.length / 3);
   const neighborCount = Math.max(1, Math.floor(maxNeighbors));
   const weightsByVertex: VertexSampleWeight[][] = Array.from({ length: vertexCount });
+  const nearestDistanceSqByVertex = new Float64Array(vertexCount);
+  const sampleSpan = resultSampleSpan(samples);
   const grid = samples.length > 512 ? createSampleSpatialGrid(samples) : null;
 
   for (let vertexIndex = 0; vertexIndex < vertexCount; vertexIndex += 1) {
     const offset = vertexIndex * 3;
-    weightsByVertex[vertexIndex] = nearestSampleWeights(
+    const nearest = nearestSampleWeights(
       basePositions[offset] ?? 0,
       basePositions[offset + 1] ?? 0,
       basePositions[offset + 2] ?? 0,
@@ -48,9 +57,11 @@ export function createVertexResultMapping({
       neighborCount,
       grid
     );
+    weightsByVertex[vertexIndex] = nearest.weights;
+    nearestDistanceSqByVertex[vertexIndex] = nearest.nearestDistanceSq;
   }
 
-  return { vertexCount, weightsByVertex };
+  return { vertexCount, weightsByVertex, nearestDistanceSqByVertex, sampleSpan };
 }
 
 export function resetVertexResultMappingStatsForTests() {
@@ -68,8 +79,8 @@ function nearestSampleWeights(
   samples: readonly ResultSamplePoint[],
   maxNeighbors: number,
   grid: SpatialGrid | null
-): VertexSampleWeight[] {
-  if (!samples.length) return [];
+): NearestSampleWeightsResult {
+  if (!samples.length) return { weights: [], nearestDistanceSq: Number.POSITIVE_INFINITY };
   const candidates = grid ? nearbyGridSampleIndexes(x, y, z, samples, grid, maxNeighbors) : null;
   const nearest: { sampleIndex: number; distanceSq: number }[] = [];
   const scanCount = candidates?.length ?? samples.length;
@@ -79,7 +90,7 @@ function nearestSampleWeights(
     if (!sample) continue;
     const distanceSq = squaredDistanceToPoint(x, y, z, sample.point);
     if (!Number.isFinite(distanceSq)) continue;
-    if (distanceSq <= 1e-18) return [{ sampleIndex, weight: 1 }];
+    if (distanceSq <= 1e-18) return { weights: [{ sampleIndex, weight: 1 }], nearestDistanceSq: 0 };
     insertNearestSample(nearest, { sampleIndex, distanceSq }, maxNeighbors);
   }
   if (!nearest.length && candidates) {
@@ -91,9 +102,30 @@ function nearestSampleWeights(
     totalWeight += weight;
     return { sampleIndex: entry.sampleIndex, weight };
   });
-  if (totalWeight <= 0) return [];
+  if (totalWeight <= 0) return { weights: [], nearestDistanceSq: Number.POSITIVE_INFINITY };
   for (const entry of weights) entry.weight /= totalWeight;
-  return weights;
+  return { weights, nearestDistanceSq: nearest[0]?.distanceSq ?? Number.POSITIVE_INFINITY };
+}
+
+function resultSampleSpan(samples: readonly ResultSamplePoint[]): number {
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let minZ = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+  let maxZ = Number.NEGATIVE_INFINITY;
+  for (const sample of samples) {
+    const [x, y, z] = sample.point;
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) continue;
+    minX = Math.min(minX, x);
+    minY = Math.min(minY, y);
+    minZ = Math.min(minZ, z);
+    maxX = Math.max(maxX, x);
+    maxY = Math.max(maxY, y);
+    maxZ = Math.max(maxZ, z);
+  }
+  const span = Math.hypot(maxX - minX, maxY - minY, maxZ - minZ);
+  return Number.isFinite(span) ? span : 0;
 }
 
 function insertNearestSample(
