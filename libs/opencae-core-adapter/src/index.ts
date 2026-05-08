@@ -1,4 +1,14 @@
-import { connectedComponents, type OpenCAEModelJson } from "@opencae/core";
+import {
+  connectedComponents,
+  deriveFixedSupportNodeSetFromSurface,
+  validateModelJson,
+  volumeMeshToModelJson,
+  type LoadJson,
+  type OpenCAEModelJson,
+  type StepJson,
+  type SurfaceFacetJson,
+  type SurfaceSetJson
+} from "@opencae/core";
 import {
   solveDynamicTet4Cpu,
   solveStaticLinearTet4Cpu,
@@ -205,6 +215,155 @@ export function trySolveOpenCaeCoreStudy({ study, runId, displayModel }: {
   }
 }
 
+export function buildOpenCaeCoreCloudModelForStudy(study: Study, displayModel: DisplayModel | undefined): CoreStudyModel {
+  if (!displayModel?.dimensions) throw new Error("OpenCAE Core Cloud requires display dimensions before generating a Core model.");
+  const actualMesh = actualCoreVolumeMeshArtifact(study);
+  const material = materialForStudy(study);
+  const effective = effectiveMaterialProperties(material.material, material.parameters, {
+    criticalLayerAxis: inferCriticalPrintAxis(study, displayModel.faces)
+  });
+  const coreMaterial = {
+    name: effective.id,
+    type: "isotropicLinearElastic" as const,
+    youngModulus: effective.youngsModulus,
+    poissonRatio: effective.poissonRatio,
+    yieldStrength: effective.yieldStrength ?? material.material.yieldStrength,
+    density: effective.density ?? material.material.density
+  };
+
+  let model: OpenCAEModelJson;
+  let renderNodePoints: Vec3[];
+  let meshSource: ResultProvenance["meshSource"];
+  let meshConnectivity: CoreStudyModel["meshConnectivity"];
+
+  if (actualMesh?.model) {
+    if (!hasActualCoreVolumeMesh(study, displayModel)) {
+      throw new Error("OpenCAE Core Cloud requires an actual Core volume mesh with actual_volume_mesh provenance and one connected component.");
+    }
+    model = cloneModelForCloud(actualMesh.model);
+    renderNodePoints = actualMesh.renderNodePoints?.length ? actualMesh.renderNodePoints : renderNodePointsForModel(model);
+    meshSource = "actual_volume_mesh";
+    meshConnectivity = connectedComponentCountForActualArtifact(actualMesh)
+      ? { connectedComponents: connectedComponentCountForActualArtifact(actualMesh)! }
+      : undefined;
+  } else {
+    if (isComplexGeometry(displayModel, study)) {
+      throw new Error("OpenCAE Core Cloud requires an actual Core volume mesh for complex geometry before dispatch.");
+    }
+    const mesh = tetMeshForDisplayModel(displayModel, study.meshSettings.preset);
+    model = volumeMeshToModelJson({
+      nodes: { coordinates: mesh.solverCoordinates },
+      materials: [coreMaterial],
+      elementBlocks: [{
+        name: "structured-block-tet4",
+        type: "Tet4",
+        material: coreMaterial.name,
+        connectivity: mesh.connectivity
+      }],
+      coordinateSystem: { solverUnits: "m-N-s-Pa", renderCoordinateSpace: "display_model" },
+      meshProvenance: {
+        kind: "opencae_core_fea",
+        solver: "opencae-core-cloud",
+        resultSource: "computed",
+        meshSource: "structured_block_core"
+      }
+    });
+    renderNodePoints = mesh.renderNodePoints;
+    meshSource = "structured_block_core";
+  }
+
+  model = {
+    ...model,
+    schemaVersion: "0.2.0",
+    materials: [coreMaterial],
+    meshProvenance: {
+      kind: "opencae_core_fea",
+      solver: "opencae-core-cloud",
+      resultSource: "computed",
+      meshSource
+    },
+    coordinateSystem: model.coordinateSystem ?? { solverUnits: "m-N-s-Pa", renderCoordinateSpace: meshSource === "structured_block_core" ? "display_model" : "solver" }
+  };
+
+  const surfaceSets = [...(model.surfaceSets ?? [])];
+  const nodeSets = [...model.nodeSets.filter((set) => !/^fixedNodes\d+$/.test(set.name))];
+  const boundaryConditions: OpenCAEModelJson["boundaryConditions"] = [];
+  const loads: LoadJson[] = [];
+
+  for (const [index, constraint] of study.constraints.entries()) {
+    if (constraint.type !== "fixed") continue;
+    const surfaceSet = ensureSurfaceSetForSelection({
+      model,
+      renderNodePoints,
+      displayModel,
+      study,
+      selectionRef: constraint.selectionRef,
+      surfaceSets
+    });
+    const nodeSet = deriveFixedSupportNodeSetFromSurface(`fixedNodes${index}`, surfaceSet.name, { ...model, surfaceSets });
+    if (!nodeSet.nodes.length) throw new Error(`OpenCAE Core Cloud could not map fixed support ${constraint.selectionRef} to mesh nodes.`);
+    nodeSets.push(nodeSet);
+    boundaryConditions.push({ name: `fixedSupport${index}`, type: "fixed", nodeSet: nodeSet.name, components: ["x", "y", "z"] });
+  }
+
+  const density = coreMaterial.density ?? material.material.density;
+  for (const [index, load] of study.loads.entries()) {
+    const surfaceSet = ensureSurfaceSetForSelection({
+      model,
+      renderNodePoints,
+      displayModel,
+      study,
+      selectionRef: load.selectionRef,
+      surfaceSets
+    });
+    if (load.type === "pressure") {
+      const pressure = pressurePascals(load);
+      if (pressure <= 0) continue;
+      loads.push({
+        name: `pressure${index}`,
+        type: "pressure",
+        surfaceSet: surfaceSet.name,
+        pressure,
+        ...(normalize(vector3(load.parameters.direction) ?? [0, 0, -1]) ? { direction: normalize(vector3(load.parameters.direction) ?? [0, 0, -1])! } : {})
+      });
+      continue;
+    }
+
+    const force = forceVectorForLoad(load, displayModel, density);
+    if (Math.hypot(...force) <= 1e-12) continue;
+    loads.push({
+      name: load.type === "gravity" ? `payloadGravity${index}` : `appliedForce${index}`,
+      type: "surfaceForce",
+      surfaceSet: surfaceSet.name,
+      totalForce: roundVector(force, 9)
+    });
+  }
+
+  if (!boundaryConditions.length) throw new Error("OpenCAE Core Cloud requires at least one mapped fixed support.");
+  if (!loads.length) throw new Error("OpenCAE Core Cloud requires at least one mapped load.");
+
+  model = {
+    ...model,
+    surfaceSets,
+    nodeSets,
+    boundaryConditions,
+    loads,
+    steps: [coreCloudStepForStudy(study, boundaryConditions.map((condition) => condition.name), loads.map((load) => load.name))]
+  };
+  const validation = validateModelJson(model);
+  if (!validation.ok) {
+    const first = validation.errors[0];
+    throw new Error(`OpenCAE Core Cloud generated an invalid Core model: ${first?.message ?? "validation failed"}`);
+  }
+
+  return {
+    model,
+    renderNodePoints,
+    meshSource,
+    ...(meshConnectivity ? { meshConnectivity } : {})
+  };
+}
+
 function openCaeCoreModelForStudy(study: Study, displayModel: DisplayModel | undefined): CoreStudyModel {
   if (!displayModel?.dimensions) throw new Error("OpenCAE Core requires display dimensions.");
   const actualMesh = actualCoreVolumeMeshArtifact(study);
@@ -295,6 +454,122 @@ function coreStudyModelForActualMeshArtifact(artifact: ActualCoreVolumeMeshArtif
     meshSource: "actual_volume_mesh",
     meshConnectivity: connectedComponents ? { connectedComponents } : undefined
   };
+}
+
+function cloneModelForCloud(model: OpenCAEModelJson): OpenCAEModelJson {
+  return {
+    ...model,
+    nodes: { coordinates: [...model.nodes.coordinates] },
+    materials: model.materials.map((material) => ({ ...material })),
+    elementBlocks: model.elementBlocks.map((block) => ({ ...block, connectivity: [...block.connectivity] })),
+    nodeSets: model.nodeSets.map((set) => ({ name: set.name, nodes: [...set.nodes] })),
+    elementSets: model.elementSets.map((set) => ({ name: set.name, elements: [...set.elements] })),
+    surfaceFacets: model.surfaceFacets?.map((facet) => ({ ...facet, nodes: [...facet.nodes] })) ?? [],
+    surfaceSets: model.surfaceSets?.map((set) => ({ name: set.name, facets: [...set.facets] })) ?? [],
+    boundaryConditions: [],
+    loads: [],
+    steps: []
+  };
+}
+
+function ensureSurfaceSetForSelection({
+  model,
+  renderNodePoints,
+  displayModel,
+  study,
+  selectionRef,
+  surfaceSets
+}: {
+  model: OpenCAEModelJson;
+  renderNodePoints: Vec3[];
+  displayModel: DisplayModel;
+  study: Study;
+  selectionRef: string;
+  surfaceSets: SurfaceSetJson[];
+}): SurfaceSetJson {
+  const existing = surfaceSets.find((set) => set.name === selectionRef);
+  if (existing?.facets.length) return existing;
+
+  const selection = study.namedSelections.find((candidate) => candidate.id === selectionRef);
+  const selectionNames = new Set([
+    selectionRef,
+    ...(selection?.geometryRefs.map((ref) => ref.entityId) ?? [])
+  ]);
+  const sourceMatches = (model.surfaceFacets ?? [])
+    .filter((facet) => selectionNames.has(facet.sourceSelectionRef ?? "") || selectionNames.has(facet.sourceFaceId ?? ""))
+    .map((facet) => facet.id);
+  const facets = sourceMatches.length
+    ? sourceMatches
+    : facetsForDisplaySelection(model.surfaceFacets ?? [], renderNodePoints, displayModel, study, selectionRef);
+  if (!facets.length) throw new Error(`OpenCAE Core Cloud could not map selection ${selectionRef} to Core surface facets.`);
+  const next = { name: selectionRef, facets: [...new Set(facets)].sort((left, right) => left - right) };
+  surfaceSets.push(next);
+  return next;
+}
+
+function facetsForDisplaySelection(
+  surfaceFacets: SurfaceFacetJson[],
+  renderNodePoints: Vec3[],
+  displayModel: DisplayModel,
+  study: Study,
+  selectionRef: string
+): number[] {
+  const selection = study.namedSelections.find((candidate) => candidate.id === selectionRef);
+  const faceIds = new Set([
+    selectionRef,
+    ...(selection?.geometryRefs.filter((ref) => ref.entityType === "face").map((ref) => ref.entityId) ?? [])
+  ]);
+  const faces = displayModel.faces.filter((face) => faceIds.has(face.id));
+  if (!faces.length) return [];
+
+  const bounds = renderBoundsForPoints(renderNodePoints);
+  const result = new Set<number>();
+  for (const face of faces) {
+    const normal = normalize(face.normal);
+    if (!normal) continue;
+    const axis = dominantAxis(normal);
+    const target = normal[axis] >= 0 ? bounds.max[axis] : bounds.min[axis];
+    const span = Math.max(bounds.max[axis] - bounds.min[axis], 1);
+    const tolerance = Math.max(span * 1e-5, 1e-8);
+    const matching = surfaceFacets
+      .filter((facet) => Math.abs(facetCenterFromRenderNodes(facet, renderNodePoints)[axis] - target) <= tolerance)
+      .map((facet) => facet.id);
+    for (const facetId of matching.length ? matching : nearestSurfaceFacets(surfaceFacets, renderNodePoints, [face.center], 8)) {
+      result.add(facetId);
+    }
+  }
+  return [...result];
+}
+
+function coreCloudStepForStudy(study: Study, boundaryConditions: string[], loads: string[]): StepJson {
+  if (study.type !== "dynamic_structural") {
+    return { name: "loadStep", type: "staticLinear", boundaryConditions, loads };
+  }
+  const settings = dynamicSettingsForStudy(study);
+  return {
+    name: "dynamicStep",
+    type: "dynamicLinear",
+    boundaryConditions,
+    loads,
+    startTime: settings.startTime,
+    endTime: settings.endTime,
+    timeStep: settings.timeStep,
+    outputInterval: settings.outputInterval,
+    loadProfile: settings.loadProfile,
+    dampingRatio: settings.dampingRatio,
+    ...("rayleighAlpha" in settings && typeof settings.rayleighAlpha === "number" ? { rayleighAlpha: settings.rayleighAlpha } : {}),
+    ...("rayleighBeta" in settings && typeof settings.rayleighBeta === "number" ? { rayleighBeta: settings.rayleighBeta } : {})
+  };
+}
+
+function pressurePascals(load: Study["loads"][number]): number {
+  const value = Number(load.parameters.value);
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  const units = typeof load.parameters.units === "string" ? load.parameters.units.toLowerCase() : "pa";
+  if (units === "kpa") return value * 1000;
+  if (units === "mpa") return value * 1_000_000;
+  if (units === "psi") return value * 6894.757293168;
+  return value;
 }
 
 function resultBundleForOpenCaeCore(
@@ -724,6 +999,49 @@ function nearestMeshNodes(points: Vec3[], centers: Vec3[], count: number): numbe
   return ranked.slice(0, Math.max(1, count)).map((entry) => entry.index);
 }
 
+function nearestSurfaceFacets(surfaceFacets: SurfaceFacetJson[], renderNodePoints: Vec3[], centers: Vec3[], count: number): number[] {
+  const ranked = surfaceFacets
+    .map((facet) => ({
+      id: facet.id,
+      distanceSq: Math.min(...centers.map((center) => squaredDistance(facetCenterFromRenderNodes(facet, renderNodePoints), center)))
+    }))
+    .sort((left, right) => left.distanceSq - right.distanceSq);
+  return ranked.slice(0, Math.max(1, count)).map((entry) => entry.id);
+}
+
+function facetCenterFromRenderNodes(facet: SurfaceFacetJson, renderNodePoints: Vec3[]): Vec3 {
+  const sum: Vec3 = [0, 0, 0];
+  for (const node of facet.nodes) {
+    const point = renderNodePoints[node] ?? [0, 0, 0];
+    sum[0] += point[0];
+    sum[1] += point[1];
+    sum[2] += point[2];
+  }
+  const count = Math.max(facet.nodes.length, 1);
+  return [sum[0] / count, sum[1] / count, sum[2] / count];
+}
+
+function renderBoundsForPoints(points: Vec3[]): { min: Vec3; max: Vec3 } {
+  const min: Vec3 = [Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY];
+  const max: Vec3 = [Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY];
+  for (const point of points) {
+    for (let axis = 0; axis < 3; axis += 1) {
+      min[axis] = Math.min(min[axis]!, point[axis]!);
+      max[axis] = Math.max(max[axis]!, point[axis]!);
+    }
+  }
+  return {
+    min: min.map((value) => Number.isFinite(value) ? value : 0) as Vec3,
+    max: max.map((value) => Number.isFinite(value) ? value : 0) as Vec3
+  };
+}
+
+function dominantAxis(vector: Vec3): 0 | 1 | 2 {
+  const absolutes = vector.map(Math.abs) as Vec3;
+  if (absolutes[0] >= absolutes[1] && absolutes[0] >= absolutes[2]) return 0;
+  return absolutes[1] >= absolutes[2] ? 1 : 2;
+}
+
 function signedTetVolume(coordinates: number[], a: number, b: number, c: number, d: number): number {
   const ax = coordinates[a * 3] ?? 0;
   const ay = coordinates[a * 3 + 1] ?? 0;
@@ -753,6 +1071,10 @@ function squaredDistance(left: Vec3, right: Vec3): number {
 
 function scaleVector(vector: Vec3, scale: number): Vec3 {
   return [vector[0] * scale, vector[1] * scale, vector[2] * scale];
+}
+
+function roundVector(vector: Vec3, decimals: number): Vec3 {
+  return [round(vector[0], decimals), round(vector[1], decimals), round(vector[2], decimals)];
 }
 
 function lerp(a: number, b: number, t: number): number {

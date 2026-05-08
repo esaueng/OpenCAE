@@ -1,4 +1,5 @@
 export {
+  buildOpenCaeCoreCloudModelForStudy,
   hasActualCoreVolumeMesh,
   isComplexGeometry,
   isSimpleBlockLikeDisplayModel,
