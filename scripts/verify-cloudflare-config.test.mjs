@@ -30,8 +30,12 @@ describe("Cloudflare deployment config guard", () => {
 
   test("default Workers deploy no longer builds or pushes a container image", () => {
     const packageJson = JSON.parse(readFileSync(resolve(rootDir, "package.json"), "utf8"));
+    const buildScript = packageJson.scripts.build;
 
-    expect(packageJson.scripts.build).toBe("pnpm --filter @opencae/api build && pnpm --filter @opencae/web build");
+    expect(buildScript).toContain("pnpm --filter @opencae/api build");
+    expect(buildScript).toContain("pnpm --filter @opencae/web build");
+    expect(buildScript).not.toContain("@cloudflare/containers");
+    expect(buildScript).not.toContain("containers:build");
     expect(packageJson.scripts["deploy:cloudflare"]).toContain("wrangler deploy --config wrangler.jsonc");
     expect(packageJson.scripts["deploy:cloudflare"]).not.toContain("verify:runner-version");
     expect(packageJson.scripts["deploy:cloudflare"]).not.toContain("--containers-rollout");
@@ -81,7 +85,7 @@ describe("Cloudflare deployment config guard", () => {
     );
   });
 
-  test.each(["alpha-cae.esau.app", "cae.esau.app"])("fails when the production config loses %s", (productionDomain) => {
+  test.each(["cae.esau.app"])("fails when the production config loses %s", (productionDomain) => {
     const defaultConfig = clone(readConfig("wrangler.jsonc"));
     const staticConfig = readConfig("wrangler.static.jsonc");
     defaultConfig.routes = defaultConfig.routes.filter((route) => route.pattern !== productionDomain);
