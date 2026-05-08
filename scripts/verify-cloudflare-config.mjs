@@ -6,7 +6,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const productionDomains = ["alpha-cae.esau.app", "cae.esau.app"];
-const productionWorkerName = "opencae-alpha";
+const productionWorkerName = "opencae";
 const productionDeletionMigration = { tag: "v2-delete-cloud-fea-container", deleted_classes: ["OpenCaeFeaContainer"] };
 
 export function parseJsonc(source, label = "JSONC input") {
