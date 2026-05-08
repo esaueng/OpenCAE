@@ -111,11 +111,11 @@ export const ResultSampleSchema = z.object({
 });
 
 export const ResultProvenanceSchema = z.object({
-  kind: z.literal("opencae_core_fea"),
+  kind: z.enum(["opencae_core_fea", "local_estimate", "analytical_benchmark"]),
   solver: z.string(),
   solverVersion: z.string(),
-  meshSource: z.enum(["opencae_core_tet4", "unknown"]),
-  resultSource: z.literal("computed"),
+  meshSource: z.enum(["opencae_core_tet4", "structured_block", "mock", "unknown"]),
+  resultSource: z.enum(["computed", "generated"]),
   units: z.string(),
   renderCoordinateSpace: z.string().optional(),
   integrationMethod: z.string().optional(),

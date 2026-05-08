@@ -10,6 +10,7 @@ import {
   type PerformanceWorkerResponse,
   type PerformanceWorkerResults
 } from "./performanceProtocol";
+import { fallbackSolveLocalStudy } from "./localSolve";
 
 type PendingRequest<Operation extends PerformanceWorkerOperation = PerformanceWorkerOperation> = {
   operation: Operation;
@@ -19,6 +20,14 @@ type PendingRequest<Operation extends PerformanceWorkerOperation = PerformanceWo
 
 let workerInstance: Worker | null = null;
 const pendingRequests = new Map<string, PendingRequest>();
+
+export { fallbackSolveLocalStudy };
+
+export async function solveLocalStudyInWorker(
+  payload: PerformanceWorkerPayloads["solveLocalStudy"]
+): Promise<PerformanceWorkerResults["solveLocalStudy"]> {
+  return postPerformanceWorkerRequest("solveLocalStudy", payload);
+}
 
 export async function prepareResultFrameInWorker(fields: ResultField[], framePosition: number): Promise<ResultField[]> {
   const result = await postPerformanceWorkerRequest("prepareResultFrame", { fields, framePosition });

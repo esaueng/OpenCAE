@@ -26,7 +26,7 @@ export type LocalSolveResult = {
   fields: ResultField[];
 };
 
-export type NormalizedBrowserSolverBackend = "opencae_core";
+export type NormalizedBrowserSolverBackend = "local_detailed" | "opencae_core";
 
 export type OpenCaeCoreEligibility =
   | { ok: true }
@@ -55,12 +55,13 @@ const OPENCAE_CORE_DYNAMIC_PROVENANCE: ResultProvenance = {
   integrationMethod: "newmark_average_acceleration"
 };
 
-export function normalizeSolverBackend(value: { solverSettings?: { backend?: unknown } } | Study | undefined): "opencae_core" {
-  void value;
-  return "opencae_core";
+export function normalizeSolverBackend(value: { solverSettings?: { backend?: unknown } } | Study | undefined): NormalizedBrowserSolverBackend {
+  const backend = value?.solverSettings?.backend;
+  return backend === "local_detailed" ? "local_detailed" : "opencae_core";
 }
 
 export function openCaeCoreEligibility(study: Study, displayModel?: DisplayModel): OpenCaeCoreEligibility {
+  if (study.type !== "static_stress") return { ok: false, reason: "OpenCAE Core browser solve currently supports static stress studies only." };
   if (study.meshSettings.status !== "complete") return { ok: false, reason: "OpenCAE Core requires a completed mesh step." };
   if (!displayModel?.dimensions || !positiveDimensions(displayModel.dimensions)) {
     return { ok: false, reason: "OpenCAE Core requires usable block-like display dimensions." };
@@ -69,11 +70,13 @@ export function openCaeCoreEligibility(study: Study, displayModel?: DisplayModel
   if (!study.constraints.some((constraint) => constraint.type === "fixed")) {
     return { ok: false, reason: "OpenCAE Core requires at least one fixed support." };
   }
-  if (!study.loads.length) return { ok: false, reason: "OpenCAE Core requires at least one load." };
+  const unsupportedLoad = study.loads.find((load) => load.type !== "force");
+  if (unsupportedLoad) return { ok: false, reason: `OpenCAE Core supports force loads only; ${unsupportedLoad.type} loads use Detailed local.` };
+  if (!study.loads.length) return { ok: false, reason: "OpenCAE Core requires at least one force load." };
   const material = materialForStudy(study).material;
   const force = totalForceVector(study, displayModel, material.density);
   if (Math.hypot(...force) <= 1e-12) {
-    return { ok: false, reason: "OpenCAE Core requires a finite nonzero load direction and value." };
+    return { ok: false, reason: "OpenCAE Core requires a force load with a finite positive value and direction." };
   }
   return { ok: true };
 }
