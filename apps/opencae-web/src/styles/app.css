@@ -2052,6 +2052,17 @@ img {
   line-height: 1.55;
 }
 
+.panel-warning {
+  margin: 0;
+  padding: 8px 10px;
+  color: var(--color-warning);
+  background: color-mix(in srgb, var(--color-warning) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-warning) 35%, transparent);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+}
+
 .confirm-copy {
   margin-top: 8px;
 }

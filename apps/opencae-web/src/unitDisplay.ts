@@ -100,10 +100,14 @@ export function resultFieldForUnits(field: ResultField, unitSystem: UnitSystem):
 }
 
 export function formatResultProvenanceLabel(provenance: ResultProvenance | undefined): string {
+  if (provenance?.solver === "opencae-core-preview-sdof" || provenance?.solver === "opencae-core-preview-tet4" || provenance?.resultSource === "computed_preview" || provenance?.meshSource === "structured_block_proxy" || provenance?.meshSource === "display_bounds_proxy") {
+    return "OpenCAE Core preview";
+  }
+  if (provenance?.kind === "opencae_core_fea" && provenance.meshSource === "actual_volume_mesh" && provenance.resultSource === "computed") return "OpenCAE Core FEA";
   if (provenance?.kind === "opencae_core_fea") return "OpenCAE Core";
   if (provenance?.kind === "analytical_benchmark") return "Analytical benchmark";
   if (provenance?.kind === "local_estimate") return "Detailed local";
-  return "OpenCAE Core";
+  return "Unknown result source";
 }
 
 export function displayModelForUnits(displayModel: DisplayModel, unitSystem: UnitSystem): DisplayModel {

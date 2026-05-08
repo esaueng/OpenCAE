@@ -31,7 +31,15 @@ export const bracketResultSummary: ResultSummary = {
   maxDisplacementUnits: "mm",
   safetyFactor: 1.8,
   reactionForce: 500,
-  reactionForceUnits: "N"
+  reactionForceUnits: "N",
+  provenance: {
+    kind: "local_estimate",
+    solver: "sample-bracket-reference",
+    solverVersion: "0.1.0",
+    meshSource: "mock",
+    resultSource: "generated",
+    units: "mm-N-s-MPa"
+  }
 };
 
 export const bracketResultFields: ResultField[] = [
@@ -182,7 +190,7 @@ export const bracketDemoProject: Project = {
           meshRef: "project-bracket-demo/mesh/mesh-summary.json",
           resultRef: "project-bracket-demo/results/results.json",
           reportRef: "project-bracket-demo/reports/report.html",
-          solverBackend: "opencae-core-cpu-tet4",
+          solverBackend: "sample-bracket-reference",
           solverVersion: "0.1.0",
           startedAt: now,
           finishedAt: now,

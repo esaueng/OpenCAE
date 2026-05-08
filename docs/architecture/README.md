@@ -14,4 +14,4 @@ CAD entities remain the source of truth. Mesh entities are generated artifacts. 
 
 ## Solver Boundaries
 
-Static and dynamic structural studies run through OpenCAE Core. The `@opencae/solver-cpu` package adapts study data to a Tet4 CPU model, emits computed Core provenance, and writes timed dynamic result frames for playback.
+Static and dynamic structural studies run through OpenCAE Core with explicit attribution. Simple block or beam-like studies may use a structured proxy mesh and are labeled preview-only. Complex geometry is blocked from that path unless an actual connected Core volume mesh artifact is available, in which case the result can carry actual-volume-mesh FEA provenance.
