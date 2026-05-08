@@ -22,7 +22,7 @@ import { SampleOptionCard } from "./SampleOptionCard";
 import { SAMPLE_OPTIONS, sampleOptionFor } from "./sampleOptions";
 import { dynamicPlaybackFrames } from "../resultFields";
 import { INVALID_REACTION_WARNING, PREVIEW_GEOMETRY_WARNING, canShowReverseLoadCapacity, hasInvalidReactionForce, hasUnavailableReactionDiagnostic, shouldBlockPreviewResultsForDisplayModel } from "../resultProvenance";
-import { hasActualCoreVolumeMesh } from "../workers/opencaeCoreSolve";
+import { hasActualCoreVolumeMesh, normalizeSolverBackend } from "../workers/opencaeCoreSolve";
 import {
   frameIndexForRoundedPlaybackOrdinal,
   playbackOrdinalForSolverFramePosition
@@ -984,7 +984,7 @@ function RunPanel({ study, displayModel, runProgress, runTiming, onRunSimulation
       </div>
       <SectionTitle>Simulation backend</SectionTitle>
       <div className="summary-box">
-        <Info label="Backend" value="OpenCAE Core" />
+        <Info label="Backend" value={simulationBackendDisplayLabel(study)} />
       </div>
       <label className="field">
         <span>Fidelity</span>
@@ -1043,7 +1043,7 @@ function RunPanel({ study, displayModel, runProgress, runTiming, onRunSimulation
       <div className="summary-box">
         <Info label="Backend" value={solverBackendLabelForRunPanel(study, displayModel)} />
         <Info label="Version" value="0.1.0" />
-        <Info label="Runner" value="browser-worker" />
+        <Info label="Runner" value={normalizeSolverBackend(study) === "opencae_core_cloud" ? "cloud-core" : "browser-worker"} />
       </div>
     </Panel>
   );
@@ -1137,10 +1137,15 @@ function solverFidelityForStudy(study: Study): SimulationFidelity {
 }
 
 function solverBackendLabelForRunPanel(study: Study, displayModel: DisplayModel): string {
+  if (normalizeSolverBackend(study) === "opencae_core_cloud") return "opencae-core-cloud";
   if (hasActualCoreVolumeMesh(study, displayModel)) {
     return study.type === "dynamic_structural" ? "opencae-core-mdof-tet" : "opencae-core-sparse-tet";
   }
   return study.type === "dynamic_structural" ? "opencae-core-preview-sdof" : "opencae-core-preview-tet4";
+}
+
+function simulationBackendDisplayLabel(study: Study): string {
+  return normalizeSolverBackend(study) === "opencae_core_cloud" ? "OpenCAE Core Cloud" : "OpenCAE Core Local";
 }
 
 export function formatSimulationEta(remainingMs: number | undefined, isRunning = true): string {

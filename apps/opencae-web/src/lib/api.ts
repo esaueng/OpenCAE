@@ -2,8 +2,8 @@ import type { AnalysisMesh, DisplayModel, DynamicSolverSettings, MeshQuality, Pr
 import type { LoadApplicationPoint, LoadDirection, LoadType, PayloadLoadMetadata, PayloadObjectSelection } from "../loadPreview";
 import { embedUploadedModelFile, type EmbeddedModelFile, type LocalResultBundle } from "../projectFile";
 import { createLocalBlankProject, createLocalSampleProject, createLocalUploadResponse, openLocalProjectPayload } from "../localProjectFactory";
-import { fallbackSolveLocalStudy, solveLocalStudyInWorker } from "../workers/performanceClient";
-import { hasActualCoreVolumeMesh, isComplexGeometry, normalizeSolverBackend, openCaeCoreEligibility, trySolveOpenCaeCoreStudy, type NormalizedBrowserSolverBackend } from "../workers/opencaeCoreSolve";
+import { solveLocalStudyInWorker } from "../workers/performanceClient";
+import { hasActualCoreVolumeMesh, normalizeSolverBackend, openCaeCoreEligibility, trySolveOpenCaeCoreStudy, type NormalizedBrowserSolverBackend } from "../workers/opencaeCoreSolve";
 
 export interface SampleProjectResponse {
   message?: string;
@@ -28,8 +28,11 @@ export interface RunSimulationOptions {
 const localResultsByRunId = new Map<string, ResultsResponse | Promise<ResultsResponse>>();
 const localResultSolversByRunId = new Map<string, () => Promise<ResultsResponse>>();
 const localEventsByRunId = new Map<string, RunEvent[]>();
+const cloudResultsUrlByRunId = new Map<string, string>();
+const cloudEventsUrlByRunId = new Map<string, string>();
 const DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.005;
 const MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.001;
+const OPENCAE_CORE_CLOUD_FAILURE_MESSAGE = "OpenCAE Core Cloud solve failed. No local estimate fallback was used.";
 
 export async function loadSampleProject(sample: SampleModelId = "bracket", analysisType: SampleAnalysisType = "static_stress"): Promise<SampleProjectResponse> {
   return fetchJsonWithFallback(
@@ -250,6 +253,9 @@ export async function addLoad(studyId: string, type: LoadType, value: number, se
 }
 
 export async function runSimulation(studyId: string, currentStudy?: Study, displayModel?: DisplayModel, options: RunSimulationOptions = {}): Promise<{ run: { id: string }; streamUrl: string; message: string }> {
+  if (currentStudy && simulationBackend(currentStudy) === "opencae_core_cloud") {
+    return runOpenCaeCoreCloudSimulation(currentStudy, displayModel, options);
+  }
   try {
     void options;
     const response = await fetch(`/api/studies/${studyId}/runs`, { method: "POST" });
@@ -265,6 +271,11 @@ export async function getResults(runId: string): Promise<ResultsResponse> {
   if (localResults) return localResults;
   const localComputedResults = computeLocalResults(runId);
   if (localComputedResults) return localComputedResults;
+  const cloudResultsUrl = cloudResultsUrlByRunId.get(runId);
+  if (cloudResultsUrl) {
+    const response = await fetch(cloudResultsUrl);
+    return readJson(response, `GET ${cloudResultsUrl}`);
+  }
   const response = await fetch(`/api/runs/${runId}/results`);
   return readJson(response, `GET /api/runs/${runId}/results`);
 }
@@ -297,7 +308,7 @@ export async function cancelRun(runId: string): Promise<{ run: StudyRun; message
 export function subscribeToRun(runId: string, onEvent: (event: RunEvent) => void): EventSource {
   const localEvents = localEventsByRunId.get(runId);
   if (localEvents) return subscribeToLocalRun(localEvents, onEvent);
-  const source = new EventSource(`/api/runs/${runId}/stream`);
+  const source = new EventSource(cloudEventsUrlByRunId.get(runId) ?? `/api/runs/${runId}/stream`);
   const eventTypes: RunEvent["type"][] = ["state", "progress", "message", "log", "diagnostic", "complete", "cancelled", "error"];
   for (const type of eventTypes) {
     source.addEventListener(type, (message) => onEvent(JSON.parse((message as MessageEvent).data) as RunEvent));
@@ -305,15 +316,60 @@ export function subscribeToRun(runId: string, onEvent: (event: RunEvent) => void
   return source;
 }
 
-function runSimulationLocally(study: Study, displayModel?: DisplayModel, staticBackendOverride?: "local_detailed"): { run: StudyRun; streamUrl: string; message: string } {
+async function runOpenCaeCoreCloudSimulation(study: Study, displayModel: DisplayModel | undefined, options: RunSimulationOptions): Promise<{ run: { id: string }; streamUrl: string; message: string }> {
+  void options;
+  const runId = `run-cloud-core-${crypto.randomUUID()}`;
+  try {
+    const response = await fetch("/api/cloud-core/runs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(openCaeCoreCloudSolveRequest(runId, study, displayModel))
+    });
+    const payload = await readJson<{ run: { id: string }; streamUrl?: string; message?: string }>(response, "POST /api/cloud-core/runs");
+    const responseRunId = payload.run.id;
+    cloudResultsUrlByRunId.set(responseRunId, `/api/cloud-core/runs/${responseRunId}/results`);
+    cloudEventsUrlByRunId.set(responseRunId, payload.streamUrl ?? `/api/cloud-core/runs/${responseRunId}/events`);
+    return {
+      run: payload.run,
+      streamUrl: payload.streamUrl ?? `/api/cloud-core/runs/${responseRunId}/events`,
+      message: payload.message ?? "OpenCAE Core Cloud simulation running."
+    };
+  } catch (error) {
+    throw new Error(OPENCAE_CORE_CLOUD_FAILURE_MESSAGE, { cause: error });
+  }
+}
+
+function openCaeCoreCloudSolveRequest(runId: string, study: Study, displayModel: DisplayModel | undefined) {
+  const artifacts = study.meshSettings.summary?.artifacts;
+  return {
+    runId,
+    study,
+    coreModel: artifacts?.actualCoreModel ?? artifacts?.coreModel ?? null,
+    coreVolumeMesh: artifacts?.volumeMesh ?? null,
+    solverSettings: {
+      ...study.solverSettings,
+      backend: "opencae_core_cloud"
+    },
+    resultSettings: {
+      provenance: {
+        kind: "opencae_core_fea",
+        solver: "opencae-core-cloud",
+        resultSource: "computed",
+        meshSource: artifacts?.volumeMesh || artifacts?.actualCoreModel ? "actual_volume_mesh" : "structured_block_core"
+      },
+      renderBounds: displayModel?.dimensions ?? null
+    }
+  };
+}
+
+function runSimulationLocally(study: Study, displayModel?: DisplayModel): { run: StudyRun; streamUrl: string; message: string } {
   const runId = `run-local-${crypto.randomUUID()}`;
-  const backend = staticBackendOverride ?? simulationBackend(study) ?? "local_detailed";
-  const coreEligibility = backend === "opencae_core" ? openCaeCoreEligibility(study, displayModel) : undefined;
-  const coreComplexIneligible = backend === "opencae_core" && coreEligibility && !coreEligibility.ok && isComplexGeometry(displayModel, study);
-  if (coreComplexIneligible) {
+  const backend = simulationBackend(study);
+  const coreEligibility = openCaeCoreEligibility(study, displayModel);
+  if (!coreEligibility.ok) {
     const now = new Date().toISOString();
     localEventsByRunId.set(runId, addRunTiming([
-      { runId, type: "state", progress: 0, message: "OpenCAE Core solve blocked.", timestamp: now },
+      { runId, type: "state", progress: 0, message: "OpenCAE Core Local solve blocked.", timestamp: now },
       { runId, type: "error", progress: 100, message: coreEligibility.reason, timestamp: now }
     ], 1));
     return {
@@ -323,7 +379,7 @@ function runSimulationLocally(study: Study, displayModel?: DisplayModel, staticB
         status: "failed",
         jobId: `job-${runId}`,
         meshRef: study.meshSettings.meshRef,
-        solverBackend: "opencae_core",
+        solverBackend: "opencae_core_local",
         solverVersion: "0.1.0",
         startedAt: now,
         finishedAt: now,
@@ -342,7 +398,11 @@ function runSimulationLocally(study: Study, displayModel?: DisplayModel, staticB
   localResultSolversByRunId.set(runId, () => {
     const analysisMesh = displayModel ? analysisMeshForDisplayModel(displayModel, study.meshSettings.preset) : undefined;
     const payload = { study, runId, analysisMesh, displayModel, debugResults: debugResultsEnabled() };
-    return solveLocalStudyInWorker(payload).catch(() => fallbackSolveLocalStudy(payload));
+    return solveLocalStudyInWorker(payload).catch((error) => {
+      const coreSolved = trySolveOpenCaeCoreStudy({ study, runId, displayModel });
+      if (coreSolved.ok) return coreSolved.result;
+      throw error;
+    });
   });
   const now = new Date().toISOString();
   const events: RunEvent[] = study.type === "dynamic_structural"
@@ -362,11 +422,9 @@ function runSimulationLocally(study: Study, displayModel?: DisplayModel, staticB
       diagnostics: []
     },
     streamUrl: `local:${runId}`,
-    message: backend === "opencae_core" && coreEligibility?.ok
-      ? "OpenCAE Core simulation running locally."
-      : backend === "opencae_core" && coreEligibility && !coreEligibility.ok
-        ? `OpenCAE Core fallback to Detailed local: ${coreEligibility.reason}`
-        : "Simulation running locally."
+    message: backend === "opencae_core_local" && coreEligibility.ok
+      ? "OpenCAE Core Local simulation running."
+      : "OpenCAE Core Local simulation running."
   };
 }
 
@@ -377,7 +435,7 @@ function localStaticRunEvents(
   backend: NormalizedBrowserSolverBackend,
   coreEligibility?: ReturnType<typeof openCaeCoreEligibility>
 ): RunEvent[] {
-  if (backend === "opencae_core" && coreEligibility?.ok) {
+  if (backend === "opencae_core_local" && coreEligibility?.ok) {
     return addRunTiming([
       { runId, type: "state", progress: 0, message: "OpenCAE Core solve queued in browser.", timestamp },
       { runId, type: "progress", progress: 10, message: "OpenCAE Core CPU Tet4 solver started.", timestamp },
@@ -386,12 +444,8 @@ function localStaticRunEvents(
       { runId, type: "complete", progress: 100, message: "OpenCAE Core simulation complete.", timestamp }
     ], localRunDurationEstimateMs(study));
   }
-  const fallbackPrefix = backend === "opencae_core" && coreEligibility && !coreEligibility.ok
-    ? [{ runId, type: "message" as const, progress: 4, message: `OpenCAE Core fallback to Detailed local: ${coreEligibility.reason}`, timestamp }]
-    : [];
   return addRunTiming([
     { runId, type: "state", progress: 0, message: "Simulation queued locally.", timestamp },
-    ...fallbackPrefix,
     { runId, type: "progress", progress: 10, message: "Local static solver started.", timestamp },
     { runId, type: "progress", progress: 46, message: "Assembling local stiffness response.", timestamp },
     { runId, type: "progress", progress: 88, message: "Writing local result fields.", timestamp },
@@ -403,15 +457,12 @@ function localDynamicRunEvents(
   runId: string,
   study: Study,
   timestamp: string,
-  backend: NormalizedBrowserSolverBackend = "local_detailed",
+  backend: NormalizedBrowserSolverBackend = "opencae_core_local",
   coreEligibility?: ReturnType<typeof openCaeCoreEligibility>
 ): RunEvent[] {
   const frameCount = dynamicOutputFrameEstimate(study);
   const estimatedDurationMs = localRunDurationEstimateMs(study, frameCount);
-  const useCore = backend === "opencae_core" && coreEligibility?.ok;
-  const fallbackMessage = backend === "opencae_core" && coreEligibility && !coreEligibility.ok
-    ? `OpenCAE Core fallback to Detailed local: ${coreEligibility.reason}`
-    : undefined;
+  const useCore = backend === "opencae_core_local" && coreEligibility?.ok;
   const milestones = [...new Set([1, Math.ceil(frameCount * 0.2), Math.ceil(frameCount * 0.4), Math.ceil(frameCount * 0.6), Math.ceil(frameCount * 0.8), frameCount])]
     .filter((frame) => frame >= 1 && frame <= frameCount);
   const writeEvents = milestones.map((frame, index) => ({
@@ -423,7 +474,6 @@ function localDynamicRunEvents(
   }));
   return addRunTiming([
     { runId, type: "state", progress: 0, message: useCore ? "OpenCAE Core dynamic solve queued in browser." : "Simulation queued locally.", timestamp },
-    ...(fallbackMessage ? [{ runId, type: "message" as const, progress: 4, message: fallbackMessage, timestamp }] : []),
     { runId, type: "progress", progress: 10, message: useCore ? "OpenCAE Core dynamic Tet4 solver started." : "Local dynamic solver started.", timestamp },
     { runId, type: "progress", progress: 34, message: useCore ? "Building OpenCAE Core mass, damping, and stiffness response." : "Estimating lumped mass, stiffness, and damping.", timestamp },
     { runId, type: "progress", progress: 62, message: "Integrating dynamic response with Newmark average acceleration.", timestamp },
@@ -432,7 +482,7 @@ function localDynamicRunEvents(
       runId,
       type: "complete",
       progress: 100,
-      message: useCore ? "OpenCAE Core dynamic simulation complete." : fallbackMessage ? "OpenCAE Core fallback to Detailed local simulation complete." : "Simulation complete.",
+      message: useCore ? "OpenCAE Core dynamic simulation complete." : "Simulation complete.",
       timestamp
     }
   ], estimatedDurationMs);
@@ -459,7 +509,7 @@ function localRunDurationEstimateMs(study: Study, frameCount = study.type === "d
   return Math.round((1400 + frameCost) * meshMultiplier * dynamicMultiplier);
 }
 
-export function dynamicOutputFrameEstimate(study: Study, options: { backend?: "cloudflare_fea" | "opencae_core" | "local_detailed" } = {}): number {
+export function dynamicOutputFrameEstimate(study: Study, options: { backend?: "opencae_core_cloud" | "opencae_core_local" | "cloudflare_fea" | "opencae_core" | "local_detailed" } = {}): number {
   const raw = study.solverSettings as Partial<DynamicSolverSettings>;
   const startTime = finiteOr(raw.startTime, 0);
   const endTime = finiteOr(raw.endTime, 0.1);
@@ -625,7 +675,7 @@ function simulationBackend(study: Study): NormalizedBrowserSolverBackend {
 }
 
 function localSolverBackendForRun(study: Study, backend: NormalizedBrowserSolverBackend, coreEligibility?: ReturnType<typeof openCaeCoreEligibility>): string {
-  if (backend === "opencae_core" && coreEligibility?.ok) {
+  if (backend === "opencae_core_local" && coreEligibility?.ok) {
     const actualMesh = hasActualCoreVolumeMesh(study);
     if (actualMesh) return study.type === "dynamic_structural" ? "opencae-core-mdof-tet" : "opencae-core-sparse-tet";
     return study.type === "dynamic_structural" ? "opencae-core-preview-sdof" : "opencae-core-preview-tet4";

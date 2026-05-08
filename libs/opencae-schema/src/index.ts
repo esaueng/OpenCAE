@@ -63,8 +63,13 @@ const Vec3Schema = z.tuple([z.number(), z.number(), z.number()]);
 export const StudyAnalysisTypeSchema = z.enum(["static_stress", "dynamic_structural"]);
 export const MeshQualitySchema = z.enum(["coarse", "medium", "fine", "ultra"]);
 export const SolverBackendSchema = z.preprocess(
-  (value) => value === "local_detailed" || value === "cloudflare_fea" ? "opencae_core" : value,
-  z.literal("opencae_core")
+  (value) => {
+    if (value === "cloudflare_fea" || value === "cloudflare-fea-calculix" || value === "opencae_core" || value === "local_detailed") {
+      return "opencae_core_cloud";
+    }
+    return value;
+  },
+  z.enum(["opencae_core_cloud", "opencae_core_local"])
 );
 export const SimulationFidelitySchema = z.enum(["standard", "detailed", "ultra"]);
 
@@ -114,7 +119,7 @@ export const ResultProvenanceSchema = z.object({
   kind: z.enum(["opencae_core_fea", "local_estimate", "analytical_benchmark"]),
   solver: z.string(),
   solverVersion: z.string(),
-  meshSource: z.enum(["opencae_core_tet4", "actual_volume_mesh", "structured_block", "structured_block_proxy", "display_bounds_proxy", "mock", "unknown"]),
+  meshSource: z.enum(["opencae_core_tet4", "actual_volume_mesh", "structured_block_core", "structured_block", "structured_block_proxy", "display_bounds_proxy", "mock", "unknown"]),
   resultSource: z.enum(["computed", "computed_preview", "generated"]),
   units: z.string(),
   renderCoordinateSpace: z.string().optional(),
@@ -122,6 +127,24 @@ export const ResultProvenanceSchema = z.object({
   loadProfile: z.string().optional(),
   dynamicProfile: z.string().optional(),
   accelerationSource: z.string().optional()
+});
+
+export const CoreCloudResultProvenanceSchema = ResultProvenanceSchema.superRefine((provenance, context) => {
+  if (/calculix/i.test(provenance.solver)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: "OpenCAE Core Cloud results cannot use CalculiX solver provenance." });
+  }
+  if (provenance.kind !== "opencae_core_fea") {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: "OpenCAE Core Cloud results must use opencae_core_fea provenance." });
+  }
+  if (provenance.solver !== "opencae-core-cloud") {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: "OpenCAE Core Cloud results must use the opencae-core-cloud solver." });
+  }
+  if (provenance.resultSource !== "computed") {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: "OpenCAE Core Cloud results must use computed result provenance." });
+  }
+  if (provenance.meshSource !== "actual_volume_mesh" && provenance.meshSource !== "structured_block_core") {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: "OpenCAE Core Cloud results must use actual_volume_mesh or structured_block_core mesh provenance." });
+  }
 });
 
 export const ResultFieldSchema = z.object({
@@ -223,10 +246,10 @@ const StudyBaseSchema = z.object({
 
 export const StaticStudySchema = StudyBaseSchema.extend({
   type: z.literal("static_stress"),
-  solverSettings: z.record(z.unknown()).and(z.object({
+  solverSettings: z.object({
     backend: SolverBackendSchema.optional(),
     fidelity: SimulationFidelitySchema.optional()
-  }))
+  }).passthrough()
 });
 
 export const DynamicStudySchema = StudyBaseSchema.extend({

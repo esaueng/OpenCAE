@@ -55,18 +55,19 @@ const staticStudy = {
   constraints: [{ id: "constraint-fixed", type: "fixed", selectionRef: "selection-fixed", parameters: {}, status: "complete" }],
   loads: [{ id: "load-force", type: "force", selectionRef: "selection-load", parameters: { value: 100, units: "N", direction: [0, 0, -1] }, status: "complete" }],
   meshSettings: { preset: "medium", status: "complete", meshRef: "project-1/mesh/mesh-summary.json" },
-  solverSettings: { backend: "opencae_core", fidelity: "standard" },
+  solverSettings: { backend: "opencae_core_local", fidelity: "standard" },
   validation: [],
   runs: []
 } satisfies Study;
 
 describe("OpenCAE Core browser solver adapter", () => {
-  test("normalizes omitted and legacy cloud FEA backend selections to OpenCAE Core", () => {
-    expect(normalizeSolverBackend({ solverSettings: { backend: "cloudflare_fea" } })).toBe("opencae_core");
-    expect(normalizeSolverBackend({ solverSettings: { backend: "opencae_core" } })).toBe("opencae_core");
-    expect(normalizeSolverBackend({ solverSettings: { backend: "local_detailed" } })).toBe("local_detailed");
-    expect(normalizeSolverBackend({ solverSettings: {} })).toBe("opencae_core");
-    expect(normalizeSolverBackend(undefined)).toBe("opencae_core");
+  test("normalizes omitted and legacy backend selections to OpenCAE Core Cloud", () => {
+    expect(normalizeSolverBackend({ solverSettings: { backend: "cloudflare_fea" } })).toBe("opencae_core_cloud");
+    expect(normalizeSolverBackend({ solverSettings: { backend: "opencae_core" } })).toBe("opencae_core_cloud");
+    expect(normalizeSolverBackend({ solverSettings: { backend: "local_detailed" } })).toBe("opencae_core_cloud");
+    expect(normalizeSolverBackend({ solverSettings: { backend: "opencae_core_local" } })).toBe("opencae_core_local");
+    expect(normalizeSolverBackend({ solverSettings: {} })).toBe("opencae_core_cloud");
+    expect(normalizeSolverBackend(undefined)).toBe("opencae_core_cloud");
   });
 
   test("accepts static force studies with usable block dimensions", () => {
@@ -84,7 +85,7 @@ describe("OpenCAE Core browser solver adapter", () => {
     expect(hasActualCoreVolumeMesh(bracketStudy, bracketDisplayModel)).toBe(false);
     expect(eligibility.ok).toBe(false);
     if (eligibility.ok) throw new Error("Bracket should not be Core-preview eligible.");
-    expect(eligibility.reason).toMatch(/actual Core volume mesh|Cloud FEA/i);
+    expect(eligibility.reason).toMatch(/actual Core volume mesh|OpenCAE Core Cloud/i);
   });
 
   test("solves eligible static studies as OpenCAE Core preview provenance", () => {
@@ -114,7 +115,7 @@ describe("OpenCAE Core browser solver adapter", () => {
       ...staticStudy,
       type: "dynamic_structural",
       solverSettings: {
-        backend: "opencae_core",
+        backend: "opencae_core_local",
         fidelity: "standard",
         startTime: 0,
         endTime: 0.1,

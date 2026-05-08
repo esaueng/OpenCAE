@@ -170,7 +170,7 @@ describe("RightPanel payload mass controls", () => {
       }]
     });
 
-    expect(html).toContain("OpenCAE Core preview");
+    expect(html).toContain("Preview");
     expect(html).toContain("Preview solver mesh does not match this geometry; deformed shape disabled.");
     expect(html).toContain("Reaction force unavailable or invalid for this result.");
     expect(html).toContain('type="checkbox" disabled=""');
@@ -359,7 +359,7 @@ describe("RightPanel payload mass controls", () => {
   test("renders OpenCAE Core backend and fidelity controls for simulation runs", () => {
     const detailedStudy: Study = {
       ...study,
-      solverSettings: { backend: "opencae_core", fidelity: "ultra" }
+      solverSettings: { backend: "opencae_core_cloud", fidelity: "ultra" }
     };
 
     const runHtml = renderPanel("run", { study: detailedStudy });
@@ -388,7 +388,7 @@ describe("RightPanel payload mass controls", () => {
   test("keeps OpenCAE Core runs browser-local without container endpoint copy", () => {
     const detailedStudy: Study = {
       ...study,
-      solverSettings: { backend: "opencae_core", fidelity: "ultra" }
+      solverSettings: { backend: "opencae_core_local", fidelity: "ultra" }
     };
 
     const runHtml = renderPanel("run", {
@@ -397,6 +397,7 @@ describe("RightPanel payload mass controls", () => {
     });
 
     expect(runHtml).toContain("OpenCAE Core");
+    expect(runHtml).toContain("OpenCAE Core Local");
     expect(runHtml).toContain("opencae-core-preview-tet4");
     expect(runHtml).not.toContain("Expected detail");
     expect(runHtml).not.toContain("Browser OpenCAE Core CPU");
@@ -405,7 +406,24 @@ describe("RightPanel payload mass controls", () => {
     expect(runHtml).not.toContain('<button class="primary wide" disabled=""');
   });
 
-  test("normalizes legacy backend selections to OpenCAE Core", () => {
+  test("labels the production simulation backend as OpenCAE Core Cloud", () => {
+    const cloudStudy = {
+      ...study,
+      solverSettings: { backend: "opencae_core_cloud", fidelity: "ultra" }
+    } as unknown as Study;
+
+    const runHtml = renderPanel("run", {
+      study: cloudStudy,
+      canRunSimulation: true
+    });
+
+    expect(runHtml).toContain("OpenCAE Core Cloud");
+    expect(runHtml).not.toContain("CalculiX FEA");
+    expect(runHtml).not.toContain("Detailed local");
+    expect(runHtml).not.toContain("Local estimate");
+  });
+
+  test("normalizes legacy backend selections to OpenCAE Core Cloud", () => {
     const detailedStudy = {
       ...study,
       solverSettings: { backend: "cloudflare_fea", fidelity: "ultra" }
@@ -415,7 +433,8 @@ describe("RightPanel payload mass controls", () => {
       study: detailedStudy
     });
 
-    expect(runHtml).toContain("OpenCAE Core");
+    expect(runHtml).toContain("OpenCAE Core Cloud");
+    expect(runHtml).toContain("opencae-core-cloud");
     expect(runHtml).not.toContain("Expected detail");
     expect(runHtml).not.toContain("Browser OpenCAE Core CPU");
     expect(runHtml).not.toContain("cloud solver endpoint");
@@ -428,7 +447,7 @@ describe("RightPanel payload mass controls", () => {
       name: "Dynamic",
       type: "dynamic_structural",
       solverSettings: {
-        backend: "opencae_core",
+        backend: "opencae_core_local",
         fidelity: "ultra",
         startTime: 0,
         endTime: 0.5,
@@ -443,6 +462,7 @@ describe("RightPanel payload mass controls", () => {
     const runHtml = renderPanel("run", { study: dynamicStudy });
 
     expect(runHtml).toContain("OpenCAE Core");
+    expect(runHtml).toContain("OpenCAE Core Local");
     expect(runHtml).not.toContain("Expected detail");
     expect(runHtml).not.toContain("Browser OpenCAE Core CPU");
     expect(runHtml).toContain("opencae-core-preview-sdof");
@@ -516,7 +536,7 @@ describe("RightPanel payload mass controls", () => {
       name: "Dynamic",
       type: "dynamic_structural",
       solverSettings: {
-        backend: "opencae_core",
+        backend: "opencae_core_cloud",
         startTime: 0,
         endTime: 0.1,
         timeStep: 0.001,
@@ -540,7 +560,7 @@ describe("RightPanel payload mass controls", () => {
       name: "Dynamic",
       type: "dynamic_structural",
       solverSettings: {
-        backend: "opencae_core",
+        backend: "opencae_core_cloud",
         startTime: 0,
         endTime: 0.2,
         timeStep: 0.0005,

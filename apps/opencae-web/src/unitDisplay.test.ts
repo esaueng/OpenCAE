@@ -56,9 +56,10 @@ describe("unit display formatting", () => {
   });
 
   test("formats result provenance labels with Core FEA and preview separated", () => {
+    expect(formatResultProvenanceLabel({ kind: "opencae_core_fea", solver: "opencae-core-cloud", solverVersion: "0.1.0", meshSource: "actual_volume_mesh", resultSource: "computed", units: "mm-N-s-MPa" })).toBe("OpenCAE Core Cloud");
     expect(formatResultProvenanceLabel({ kind: "opencae_core_fea", solver: "opencae-core-sparse-tet", solverVersion: "0.1.0", meshSource: "actual_volume_mesh", resultSource: "computed", units: "mm-N-s-MPa" })).toBe("OpenCAE Core FEA");
-    expect(formatResultProvenanceLabel({ kind: "local_estimate", solver: "opencae-core-preview-sdof", solverVersion: "0.1.0", meshSource: "structured_block_proxy", resultSource: "computed_preview", units: "mm-N-s-MPa" })).toBe("OpenCAE Core preview");
-    expect(formatResultProvenanceLabel({ kind: "local_estimate", solver: "opencae-local-dynamic-newmark", solverVersion: "0.1.0", meshSource: "mock", resultSource: "generated", units: "mm-N-s-MPa" })).toBe("Detailed local");
+    expect(formatResultProvenanceLabel({ kind: "local_estimate", solver: "opencae-core-preview-sdof", solverVersion: "0.1.0", meshSource: "structured_block_proxy", resultSource: "computed_preview", units: "mm-N-s-MPa" })).toBe("Preview");
+    expect(formatResultProvenanceLabel({ kind: "local_estimate", solver: "opencae-local-dynamic-newmark", solverVersion: "0.1.0", meshSource: "mock", resultSource: "generated", units: "mm-N-s-MPa" })).toBe("Preview");
     expect(formatResultProvenanceLabel({ kind: "analytical_benchmark", solver: "opencae-euler-bernoulli", solverVersion: "0.1.0", meshSource: "structured_block", resultSource: "generated", units: "mm-N-s-MPa" })).toBe("Analytical benchmark");
     expect(formatResultProvenanceLabel(undefined)).toBe("Unknown result source");
   });
