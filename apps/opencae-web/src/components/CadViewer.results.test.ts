@@ -571,6 +571,77 @@ describe("CadViewer result coloring", () => {
     expect(colors.getX(1)).toBeGreaterThan(colors.getZ(1));
   });
 
+  test("uses Core displacement samples directly for separate meshes that share a joint", () => {
+    const fields: ResultField[] = [{
+      id: "field-displacement-core",
+      runId: "run-core",
+      type: "displacement",
+      location: "node",
+      values: [0.1, 0.1, 0.2, 0.2],
+      min: 0,
+      max: 0.2,
+      units: "mm",
+      samples: [
+        { point: [-1, 0, 0], normal: [0, 1, 0], value: 0.1, vector: [0, 0.1, 0], nodeId: "N0", source: "opencae_core" },
+        { point: [0, 0, 0], normal: [0, 1, 0], value: 0.1, vector: [0, 0.1, 0], nodeId: "N1", source: "opencae_core" },
+        { point: [1, 0, 0], normal: [0, 1, 0], value: 0.2, vector: [0, 0.2, 0], nodeId: "N2", source: "opencae_core" },
+        { point: [0, 1, 0], normal: [0, 1, 0], value: 0.2, vector: [0, 0.2, 0], nodeId: "N3", source: "opencae_core" }
+      ],
+      provenance: {
+        kind: "opencae_core_fea",
+        solver: "opencae-core-cpu-tet4",
+        solverVersion: "0.1.0",
+        meshSource: "opencae_core_tet4",
+        resultSource: "computed",
+        units: "m-N-s-Pa"
+      }
+    }];
+    const body = new THREE.BufferGeometry();
+    body.setAttribute("position", new THREE.Float32BufferAttribute([-1, 0, 0, 0, 0, 0, -1, 0.1, 0], 3));
+    body.setIndex([0, 1, 2]);
+    const rib = new THREE.BufferGeometry();
+    rib.setAttribute("position", new THREE.Float32BufferAttribute([0, 0, 0, 1, 0, 0, 0, 1, 0], 3));
+    rib.setIndex([0, 1, 2]);
+
+    colorizeSampleResultGeometry(body, "bracket", "displacement", true, 1, [], [], 1, [], fields);
+    colorizeSampleResultGeometry(rib, "bracket", "displacement", true, 1, [], [], 1, [], fields);
+
+    const bodyPositions = body.getAttribute("position") as THREE.BufferAttribute;
+    const ribPositions = rib.getAttribute("position") as THREE.BufferAttribute;
+    expect(bodyPositions.getX(1)).toBeCloseTo(ribPositions.getX(0), 6);
+    expect(bodyPositions.getY(1)).toBeCloseTo(ribPositions.getY(0), 6);
+    expect(bodyPositions.getZ(1)).toBeCloseTo(ribPositions.getZ(0), 6);
+  });
+
+  test("does not extrapolate Core displacement spikes far outside the sample cloud", () => {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.Float32BufferAttribute([0, 0, 0, 0, 6, 0, 0.05, 6, 0], 3));
+    geometry.setIndex([0, 1, 2]);
+    const fields: ResultField[] = [{
+      id: "field-displacement-core-sparse",
+      runId: "run-core",
+      type: "displacement",
+      location: "node",
+      values: [0, 0.1, 0.2, 0.3],
+      min: 0,
+      max: 0.3,
+      units: "mm",
+      samples: [
+        { point: [-1, 0, 0], normal: [0, 1, 0], value: 0, vector: [0, 0, 0], nodeId: "N0", source: "opencae_core" },
+        { point: [0, 0, 0], normal: [0, 1, 0], value: 0.1, vector: [0, 0.1, 0], nodeId: "N1", source: "opencae_core" },
+        { point: [1, 0, 0], normal: [0, 1, 0], value: 0.2, vector: [0, 0.2, 0], nodeId: "N2", source: "opencae_core" },
+        { point: [2, 0, 0], normal: [0, 1, 0], value: 0.3, vector: [0, 0.3, 0], nodeId: "N3", source: "opencae_core" }
+      ]
+    }];
+
+    colorizeSampleResultGeometry(geometry, "bracket", "displacement", true, 1, [], [], 1, [], fields);
+
+    const positions = geometry.getAttribute("position") as THREE.BufferAttribute;
+    expect(Number.isFinite(positions.getY(1))).toBe(true);
+    expect(Math.abs(positions.getY(1) - 6)).toBeLessThan(0.05);
+    expect(Math.abs(positions.getY(2) - 6)).toBeLessThan(0.05);
+  });
+
   test("packed playback updates dense field samples without replacing sample objects", () => {
     const initialSamples: FaceResultSample[] = [
       {

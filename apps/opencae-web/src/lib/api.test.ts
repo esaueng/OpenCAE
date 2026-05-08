@@ -459,7 +459,7 @@ describe("api", () => {
     expect(fetchMock.mock.calls.every(([input]) => !String(input).includes("/api/cloud-fea"))).toBe(true);
   });
 
-  test("falls back to local dynamic solver for legacy Cloud FEA dynamic studies", async () => {
+  test("routes legacy Cloud FEA dynamic studies to OpenCAE Core dynamic locally", async () => {
     const dynamicStudy = {
       ...study,
       name: "Dynamic",
@@ -490,11 +490,12 @@ describe("api", () => {
     source.close();
     const results = await getResults(response.run.id);
 
-    expect((response.run as { solverBackend?: string }).solverBackend).toBe("local-dynamic-newmark");
-    expect(response.message).toContain("OpenCAE Core fallback to Detailed local");
-    expect(seen.map((event) => event.message).join(" ")).toContain("OpenCAE Core fallback to Detailed local");
+    expect((response.run as { solverBackend?: string }).solverBackend).toBe("opencae-core-dynamic-tet4");
+    expect(response.message).toContain("OpenCAE Core simulation running locally");
+    expect(seen.map((event) => event.message).join(" ")).toContain("OpenCAE Core dynamic");
     expect(results.summary.transient?.frameCount).toBe(21);
     expect(results.fields.some((field) => field.type === "stress" && field.frameIndex === 20)).toBe(true);
+    expect(results.summary.provenance?.solver).toBe("opencae-core-dynamic-tet4");
     expect(fetchMock.mock.calls.every(([input]) => !String(input).includes("/api/cloud-fea"))).toBe(true);
   });
 

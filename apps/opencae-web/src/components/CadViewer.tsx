@@ -2476,7 +2476,8 @@ export function applyResultFrameToGeometry({
   const scalarField = selectedResultField(fields, resultMode);
   const displacementField = fields.find((field) => field.type === "displacement" && field.samples?.some((sample) => sample.vector));
   logResultFieldDiagnostics(scalarField, resultMode);
-  const modelExtent = (coordinateTransform?.bounds ?? basePositionBoundsForGeometry(geometry, basePositions)).getSize(new THREE.Vector3()).length();
+  const geometryExtent = (coordinateTransform?.bounds ?? basePositionBoundsForGeometry(geometry, basePositions)).getSize(new THREE.Vector3()).length();
+  const modelExtent = Math.max(geometryExtent, resultFieldPointExtent(displacementField));
   const visualScaleResult = finalVisualScaleForDisplacementField(modelExtent, displacementField, deformationScale, deformationCapFraction);
   const visualScale = visualScaleResult.finalVisualScale;
   if (DEBUG_RESULTS) {
@@ -2742,6 +2743,9 @@ function displacementVectorForVertex(
 ): [number, number, number] {
   const weights = mapping.weightsByVertex[vertexIndex];
   const exact = weights?.length === 1 && Math.abs((weights[0]?.weight ?? 0) - 1) <= 1e-12;
+  if (!exact && isExtrapolatedResultVertex(vertexIndex, mapping)) {
+    return [0, 0, 0];
+  }
   if (!exact && smoothDisplacementInterpolator) {
     return smoothDisplacementInterpolator.interpolateComponents(
       basePositions[offset] ?? 0,
@@ -2760,6 +2764,7 @@ function mappedDisplacementVector(
   const weights = mapping.weightsByVertex[vertexIndex];
   const samples = field.samples ?? [];
   if (!weights?.length) return [0, 0, 0];
+  if (isExtrapolatedResultVertex(vertexIndex, mapping)) return [0, 0, 0];
   let ux = 0;
   let uy = 0;
   let uz = 0;
@@ -2774,6 +2779,13 @@ function mappedDisplacementVector(
   }
   if (totalWeight <= 0) return [0, 0, 0];
   return [ux / totalWeight, uy / totalWeight, uz / totalWeight];
+}
+
+function isExtrapolatedResultVertex(vertexIndex: number, mapping: VertexResultMapping): boolean {
+  const nearestDistanceSq = mapping.nearestDistanceSqByVertex[vertexIndex] ?? 0;
+  if (nearestDistanceSq <= 1e-18) return false;
+  const maxDistance = Math.max(mapping.sampleSpan * 0.75, 1e-6);
+  return nearestDistanceSq > maxDistance * maxDistance;
 }
 
 function logViewerResultDirectionAudit(positionArray: Float32Array, basePositions: Float32Array, displacementField: ResultField | undefined) {
@@ -3078,6 +3090,17 @@ function maxDisplacementMagnitude(field: ResultField | undefined): number {
     ...(field.samples?.map((sample) => sample.vector ? Math.hypot(...sample.vector) : 0) ?? [])
   ].filter(Number.isFinite);
   return magnitudes.length ? Math.max(...magnitudes) : 0;
+}
+
+function resultFieldPointExtent(field: ResultField | undefined): number {
+  const samples = field?.samples;
+  if (!samples?.length) return 0;
+  const bounds = new THREE.Box3();
+  for (const sample of samples) {
+    if (sample.point.every(Number.isFinite)) bounds.expandByPoint(new THREE.Vector3(...sample.point));
+  }
+  if (bounds.isEmpty()) return 0;
+  return bounds.getSize(new THREE.Vector3()).length();
 }
 
 function interpolateResultSampleValue(point: THREE.Vector3, samples: NonNullable<ResultField["samples"]>, fallback: number): number {

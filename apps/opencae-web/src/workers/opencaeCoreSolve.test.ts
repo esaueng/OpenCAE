@@ -76,6 +76,8 @@ describe("OpenCAE Core browser solver adapter", () => {
 
     expect(outcome.ok).toBe(true);
     if (!outcome.ok) throw new Error(outcome.reason);
+    const displacement = outcome.result.fields.find((field) => field.type === "displacement");
+    const stress = outcome.result.fields.find((field) => field.type === "stress");
     expect(outcome.result.summary.provenance).toMatchObject({
       kind: "opencae_core_fea",
       solver: "opencae-core-cpu-tet4",
@@ -86,9 +88,12 @@ describe("OpenCAE Core browser solver adapter", () => {
     expect(outcome.result.summary.maxDisplacement).toBeGreaterThan(0);
     expect(outcome.result.fields.map((field) => field.type)).toEqual(["stress", "displacement", "safety_factor"]);
     expect(outcome.result.fields.every((field) => field.provenance?.kind === "opencae_core_fea")).toBe(true);
+    expect(displacement?.samples?.length).toBeGreaterThan(24);
+    expect(stress?.samples?.length).toBeGreaterThan(24);
+    expect(displacement?.samples?.every((sample) => sample.vector?.every(Number.isFinite))).toBe(true);
   });
 
-  test("falls back for dynamic studies instead of pretending OpenCAE Core support", () => {
+  test("solves dynamic studies with OpenCAE Core transient fields", () => {
     const dynamicStudy = {
       ...staticStudy,
       type: "dynamic_structural",
@@ -106,9 +111,20 @@ describe("OpenCAE Core browser solver adapter", () => {
     } satisfies Study;
 
     const eligibility = openCaeCoreEligibility(dynamicStudy, displayModel);
+    const outcome = trySolveOpenCaeCoreStudy({ study: dynamicStudy, runId: "run-core-dynamic-1", displayModel });
 
-    expect(eligibility.ok).toBe(false);
-    if (eligibility.ok) throw new Error("dynamic study unexpectedly eligible");
-    expect(eligibility.reason).toContain("static stress");
+    expect(eligibility).toEqual({ ok: true });
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) throw new Error(outcome.reason);
+    expect(outcome.solverBackend).toBe("opencae-core-dynamic-tet4");
+    expect(outcome.result.summary.provenance).toMatchObject({
+      kind: "opencae_core_fea",
+      solver: "opencae-core-dynamic-tet4",
+      integrationMethod: "newmark_average_acceleration"
+    });
+    expect(outcome.result.summary.transient?.frameCount).toBeGreaterThan(1);
+    expect(outcome.result.fields.some((field) => field.type === "displacement" && field.frameIndex === 1)).toBe(true);
+    expect(outcome.result.fields.some((field) => field.type === "velocity")).toBe(true);
+    expect(outcome.result.fields.some((field) => field.type === "acceleration")).toBe(true);
   });
 });
