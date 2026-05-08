@@ -106,6 +106,14 @@ describe("app CSS", () => {
     expect(cssRule(".panel-section h2")).toMatch(/color:\s*var\(--color-text\)/);
   });
 
+  test("styles the beta release tag with blue accent colors", () => {
+    const betaTag = cssRule(".beta-tag");
+
+    expect(betaTag).toMatch(/color:\s*var\(--color-accent\)/);
+    expect(betaTag).toMatch(/background:\s*var\(--color-accent-dim\)/);
+    expect(betaTag).toMatch(/border:\s*1px\s+solid\s+var\(--color-accent-border\)/);
+  });
+
   test("keeps the main start screen compact and expands the sample submenu", () => {
     const startBrand = cssRule(".start-brand");
     const startBrandMenu = cssRule(".start-brand.sample-menu-open");
