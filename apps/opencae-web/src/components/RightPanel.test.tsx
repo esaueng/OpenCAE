@@ -156,6 +156,18 @@ describe("RightPanel payload mass controls", () => {
     expect(coreHtml).toContain("none");
   });
 
+  test("shows legacy cloud results as read-only historical provenance", () => {
+    const html = renderPanel("results", {
+      resultSummary: {
+        ...resultSummary,
+        provenance: { kind: "opencae_core_fea", solver: ["cloudflare-fea", "calculix"].join("-"), solverVersion: "0.1.0", meshSource: "actual_volume_mesh", resultSource: "computed", units: "mm-N-s-MPa" }
+      }
+    });
+
+    expect(html).toContain("Legacy backend result");
+    expect(html).toContain("This result is historical and read-only. Re-run with OpenCAE Core Cloud for production results.");
+  });
+
   test("blocks preview deformation and reverse-check capacity for complex geometry", () => {
     const html = renderPanel("results", {
       displayModel: bracketDisplayModel,

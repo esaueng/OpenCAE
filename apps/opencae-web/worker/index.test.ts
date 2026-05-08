@@ -50,8 +50,9 @@ describe("Cloudflare local-first worker", () => {
     expect(packageJson.scripts["deploy:cloudflare"]).toContain("--config wrangler.jsonc");
     expect(packageJson.scripts["deploy:cloudflare"]).not.toContain("verify:runner-version");
     expect(packageJson.scripts["deploy:cloudflare"]).not.toContain("--containers-rollout");
-    expect(packageJson.scripts["deploy:cloudflare:containers"]).toContain("--config wrangler.containers.jsonc");
-    expect(packageJson.scripts["containers:build"]).toContain("services/opencae-core-cloud");
+    expect(packageJson.scripts["deploy:core-cloud"]).toContain("--config wrangler.containers.jsonc");
+    expect(packageJson.scripts["containers:build:core-cloud"]).toContain("services/opencae-core-cloud");
+    expect(packageJson.scripts["test:core-cloud-container"]).toBe("pnpm --filter @opencae/core-cloud test");
     expect(packageJson.dependencies?.["@cloudflare/containers"]).toBeDefined();
     expect(defaultConfig.name).toBe("opencae");
     expect(defaultConfig.routes).toEqual([{ pattern: "cae.esau.app", custom_domain: true }]);
@@ -60,7 +61,7 @@ describe("Cloudflare local-first worker", () => {
     expect(defaultConfig.migrations).toEqual([{ tag: "v2-delete-cloud-fea-container", deleted_classes: ["OpenCaeFeaContainer"] }]);
   });
 
-  test("container config wires OpenCAE Core Cloud instead of CalculiX FEA", () => {
+  test("container config wires OpenCAE Core Cloud instead of legacy FEA", () => {
     const containerConfig = readJsonc("../../../wrangler.containers.jsonc") as {
       routes?: Array<{ pattern?: string; custom_domain?: boolean }>;
       containers?: Array<{ name?: string; class_name?: string; image?: string }>;
@@ -102,7 +103,7 @@ describe("Cloudflare local-first worker", () => {
     });
   });
 
-  test("health reports Core Cloud availability and no CalculiX/local fallback flags", async () => {
+  test("health reports Core Cloud availability and no legacy/local fallback flags", async () => {
     containerMock.fetch.mockResolvedValueOnce(Response.json({
       ok: true,
       service: "opencae-core-cloud",
@@ -231,7 +232,7 @@ describe("Cloudflare local-first worker", () => {
     });
   });
 
-  test("CalculiX and preview provenance are rejected", async () => {
+  test("legacy and preview provenance are rejected", async () => {
     const calculixEnv = createEnv();
     const calculixCtx = createExecutionContext();
     containerMock.fetch
@@ -243,7 +244,7 @@ describe("Cloudflare local-first worker", () => {
 
     const calculixEvents = await calculixEnv.CORE_CLOUD_ARTIFACTS.readJson("cloud-core/runs/run-calculix/events.json");
     expect(calculixEvents).toEqual(expect.arrayContaining([
-      expect.objectContaining({ type: "error", message: expect.stringContaining("CalculiX") })
+      expect.objectContaining({ type: "error", message: expect.stringContaining("legacy solver") })
     ]));
 
     containerMock.fetch.mockReset();

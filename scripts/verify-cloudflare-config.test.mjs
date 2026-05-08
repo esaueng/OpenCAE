@@ -40,8 +40,9 @@ describe("Cloudflare deployment config guard", () => {
     expect(packageJson.scripts["deploy:cloudflare"]).toContain("wrangler deploy --config wrangler.jsonc");
     expect(packageJson.scripts["deploy:cloudflare"]).not.toContain("verify:runner-version");
     expect(packageJson.scripts["deploy:cloudflare"]).not.toContain("--containers-rollout");
-    expect(packageJson.scripts["deploy:cloudflare:containers"]).toContain("wrangler deploy --config wrangler.containers.jsonc");
-    expect(packageJson.scripts["containers:build"]).toContain("services/opencae-core-cloud");
+    expect(packageJson.scripts["deploy:core-cloud"]).toContain("wrangler deploy --config wrangler.containers.jsonc");
+    expect(packageJson.scripts["containers:build:core-cloud"]).toContain("services/opencae-core-cloud");
+    expect(packageJson.scripts["test:core-cloud-container"]).toBe("pnpm --filter @opencae/core-cloud test");
     expect(packageJson.dependencies?.["@cloudflare/containers"]).toBeDefined();
   });
 

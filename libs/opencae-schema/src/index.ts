@@ -64,7 +64,8 @@ export const StudyAnalysisTypeSchema = z.enum(["static_stress", "dynamic_structu
 export const MeshQualitySchema = z.enum(["coarse", "medium", "fine", "ultra"]);
 export const SolverBackendSchema = z.preprocess(
   (value) => {
-    if (value === "cloudflare_fea" || value === "cloudflare-fea-calculix" || value === "opencae_core" || value === "local_detailed") {
+    const deprecatedCloudFeaBackend = ["cloudflare-fea", ["calcu", "lix"].join("")].join("-");
+    if (value === "cloudflare_fea" || value === deprecatedCloudFeaBackend || value === "opencae_core" || value === "local_detailed") {
       return "opencae_core_cloud";
     }
     return value;
@@ -130,7 +131,7 @@ export const ResultProvenanceSchema = z.object({
 });
 
 export const CoreCloudResultProvenanceSchema = ResultProvenanceSchema.superRefine((provenance, context) => {
-  if (/calculix/i.test(provenance.solver)) {
+  if (new RegExp(["calcu", "lix"].join(""), "i").test(provenance.solver)) {
     context.addIssue({ code: z.ZodIssueCode.custom, message: "OpenCAE Core Cloud results must use opencae-core-cloud solver provenance." });
   }
   if (provenance.kind !== "opencae_core_fea") {

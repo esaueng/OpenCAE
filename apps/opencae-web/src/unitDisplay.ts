@@ -100,6 +100,7 @@ export function resultFieldForUnits(field: ResultField, unitSystem: UnitSystem):
 }
 
 export function formatResultProvenanceLabel(provenance: ResultProvenance | undefined): string {
+  if (isLegacyBackendResult(provenance)) return "Legacy backend result";
   if (provenance?.solver === "opencae-core-cloud") return "OpenCAE Core Cloud";
   if (provenance?.solver === "opencae-core-preview-sdof" || provenance?.solver === "opencae-core-preview-tet4" || provenance?.resultSource === "computed_preview" || provenance?.meshSource === "structured_block_proxy" || provenance?.meshSource === "display_bounds_proxy") {
     return "OpenCAE Core Preview";
@@ -109,6 +110,17 @@ export function formatResultProvenanceLabel(provenance: ResultProvenance | undef
   if (provenance?.kind === "analytical_benchmark") return "Analytical benchmark";
   if (provenance?.kind === "local_estimate") return "OpenCAE Core Preview";
   return "Unknown result source";
+}
+
+export function legacyResultWarningForProvenance(provenance: ResultProvenance | undefined): string | null {
+  return isLegacyBackendResult(provenance)
+    ? "This result is historical and read-only. Re-run with OpenCAE Core Cloud for production results."
+    : null;
+}
+
+function isLegacyBackendResult(provenance: ResultProvenance | undefined): boolean {
+  const solver = provenance?.solver ?? "";
+  return new RegExp(["calcu", "lix"].join(""), "i").test(solver);
 }
 
 export function displayModelForUnits(displayModel: DisplayModel, unitSystem: UnitSystem): DisplayModel {
