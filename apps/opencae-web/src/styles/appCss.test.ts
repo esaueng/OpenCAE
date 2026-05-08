@@ -114,15 +114,21 @@ describe("app CSS", () => {
     expect(betaTag).toMatch(/border:\s*1px\s+solid\s+var\(--color-accent-border\)/);
   });
 
-  test("keeps the main start screen compact and expands the sample submenu", () => {
+  test("keeps the main start screen compact and stacks the sample submenu vertically", () => {
+    const startScreen = cssRule(".start-screen");
     const startBrand = cssRule(".start-brand");
     const startBrandMenu = cssRule(".start-brand.sample-menu-open");
+    const sampleMenuFooter = cssRule(".start-brand.sample-menu-open + .start-footer");
     const sampleGrid = cssRule(".start-sample-grid");
+    const sampleGridCard = cssRule(".start-sample-grid .sample-option-card");
 
+    expect(startScreen).toMatch(/overflow:\s*auto/);
     expect(startBrand).toMatch(/position:\s*relative/);
     expect(startBrand).toMatch(/width:\s*min\(340px,\s*100%\)/);
-    expect(startBrandMenu).toMatch(/width:\s*min\(980px,\s*100%\)/);
-    expect(sampleGrid).toMatch(/grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/);
+    expect(startBrandMenu).toMatch(/width:\s*min\(640px,\s*100%\)/);
+    expect(sampleMenuFooter).toMatch(/display:\s*none/);
+    expect(sampleGrid).toMatch(/grid-template-columns:\s*minmax\(0,\s*1fr\)/);
+    expect(sampleGridCard).toMatch(/min-height:\s*112px/);
   });
 
   test("uses the start screen background for the required simulation type screen", () => {
