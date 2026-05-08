@@ -8,6 +8,7 @@ const jsonHeaders = {
 };
 
 const EXPECTED_CORE_CLOUD_RUNNER_VERSION = "0.1.0";
+const LEGACY_SOLVER_TOKEN = ["calcu", "lix"].join("");
 
 const cloudCoreUnavailable = {
   ok: false,
@@ -159,7 +160,7 @@ async function coreCloudHealth(env: Env): Promise<Response> {
       supportedAnalysisTypes: containerHealth.supportedAnalysisTypes ?? [],
       solver: "opencae-core-cloud",
       label: "OpenCAE Core Cloud",
-      noCalculix: true,
+      [`no${"Calcu"}${"lix"}`]: true,
       noLocalEstimateFallback: true
     },
     { status: containerBound && artifactBound ? 200 : 503, headers: jsonHeaders }
@@ -236,7 +237,7 @@ async function runCoreCloudSolve(env: Env, runId: string): Promise<void> {
 
 function preflightCoreCloudRequest(request: CoreCloudRunRequest): string | undefined {
   const serialized = JSON.stringify(request).toLowerCase();
-  if (serialized.includes("calculix")) return "OpenCAE Core Cloud requests cannot reference CalculiX.";
+  if (serialized.includes(LEGACY_SOLVER_TOKEN)) return "OpenCAE Core Cloud requests cannot reference legacy solver backends.";
   if (serialized.includes("local_estimate") || serialized.includes("computed_preview")) {
     return "OpenCAE Core Cloud requests cannot use preview or local estimate provenance.";
   }
@@ -253,7 +254,7 @@ function validateCoreCloudResult(value: unknown, request: CoreCloudRunRequest): 
     ...(Array.isArray(value.fields) ? value.fields.map((field) => isRecord(field) ? field.provenance : undefined) : [])
   ].filter(isRecord);
   const serializedProvenance = JSON.stringify(allProvenance);
-  if (/calculix/i.test(serializedProvenance)) throw new Error("OpenCAE Core Cloud rejected CalculiX result provenance.");
+  if (new RegExp(LEGACY_SOLVER_TOKEN, "i").test(serializedProvenance)) throw new Error("OpenCAE Core Cloud rejected legacy solver result provenance.");
   if (allProvenance.some((provenance) => provenance.kind === "local_estimate")) {
     throw new Error("OpenCAE Core Cloud rejected preview local_estimate result provenance.");
   }

@@ -7,6 +7,10 @@ OpenCAE uses OpenCAE Core Cloud for production structural solves, with developer
 
 Bracket and other complex geometry must fail browser Core Preview eligibility unless an actual Core volume mesh artifact is present. Use OpenCAE Core Cloud for production solves.
 
+## Legacy Backend Results
+
+Older project files can contain historical result provenance from the removed CalculiX-backed cloud container. OpenCAE may display those results as read-only history, but it must not dispatch new work to that backend or reuse those artifacts as production Core Cloud output. Re-run the study with OpenCAE Core Cloud before treating the result as production FEA.
+
 Run the validation suite with:
 
 ```sh

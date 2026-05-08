@@ -63,7 +63,7 @@ describe("LocalMockComputeBackend", () => {
       expect(second.summary.reactionForce).toBeGreaterThan(first.summary.reactionForce);
       expect(second.summary.maxStress).toBeGreaterThan(first.summary.maxStress);
       expect(second.fields.every((field) => field.runId === "run-b")).toBe(true);
-      expect(await storage.getObject("project-test/solver/run-b/solver.inp").then((buffer) => buffer.toString("utf8"))).toContain("load-b");
+      expect(await storage.getObject("project-test/solver/run-b/solver-input.txt").then((buffer) => buffer.toString("utf8"))).toContain("load-b");
     } finally {
       vi.useRealTimers();
     }
@@ -387,7 +387,7 @@ describe("LocalMockComputeBackend", () => {
 
       expect(x.summary.safetyFactor).toBeLessThan(y.summary.safetyFactor * 0.7);
       expect(x.summary.safetyFactor).toBeLessThan(z.summary.safetyFactor * 0.5);
-      expect(await storage.getObject("project-cantilever/solver/run-cantilever-petg-x/solver.inp").then((buffer) => buffer.toString("utf8"))).toContain("layerOrientation=x");
+      expect(await storage.getObject("project-cantilever/solver/run-cantilever-petg-x/solver-input.txt").then((buffer) => buffer.toString("utf8"))).toContain("layerOrientation=x");
     } finally {
       vi.useRealTimers();
     }
@@ -459,7 +459,7 @@ describe("LocalMockComputeBackend", () => {
       expect(printed.fields.find((field) => field.type === "stress")?.values).not.toEqual(
         solid.fields.find((field) => field.type === "stress")?.values
       );
-      expect(await storage.getObject("project-test/solver/run-petg-printed/solver.inp").then((buffer) => buffer.toString("utf8"))).toContain("infillDensity=35");
+      expect(await storage.getObject("project-test/solver/run-petg-printed/solver-input.txt").then((buffer) => buffer.toString("utf8"))).toContain("infillDensity=35");
     } finally {
       vi.useRealTimers();
     }

@@ -15,7 +15,7 @@ import { shouldShowSampleModelPicker } from "../modelPanelState";
 import { SETTING_HELP, type SettingHelpId, type SettingHelpVisual } from "../settingHelp";
 import { supportDisplayLabel } from "../supportLabels";
 import { getViewportTooltipPosition } from "../tooltipPosition";
-import { forceForUnits, formatDensity, formatMass, formatMaterialStress, formatResultProvenanceLabel, formatVolume, loadValueForUnits, type UnitSystem } from "../unitDisplay";
+import { forceForUnits, formatDensity, formatMass, formatMaterialStress, formatResultProvenanceLabel, formatVolume, legacyResultWarningForProvenance, loadValueForUnits, type UnitSystem } from "../unitDisplay";
 import { canNavigateToStep } from "../appShellState";
 import { MaterialLibraryModal } from "./SimulationWorkflow";
 import { SampleOptionCard } from "./SampleOptionCard";
@@ -1223,6 +1223,7 @@ function ResultsPanel({
   const peakMarkerPercent = peakDisplacement && hasPlayback ? playbackPeakMarkerPercent(frames, peakDisplacement.timeSeconds) : null;
   const peakMarkerLabel = peakDisplacement ? `Peak displacement at ${peakDisplacement.timeSeconds.toFixed(4)} s` : "";
   const resultProvenance = resultSummary.provenance;
+  const legacyResultWarning = legacyResultWarningForProvenance(resultProvenance);
 
   useEffect(() => {
     committedStressExaggerationRef.current = stressExaggeration;
@@ -1349,6 +1350,7 @@ function ResultsPanel({
       )}
       <label className="toggle"><input type="checkbox" checked={showDeformed && !blockPreviewResults} disabled={blockPreviewResults} onChange={onToggleDeformed} /> <HelpLabel helpId="deformedShape">Deformed shape</HelpLabel></label>
       {blockPreviewResults && <p className="panel-warning">{PREVIEW_GEOMETRY_WARNING}</p>}
+      {legacyResultWarning && <p className="panel-warning">{legacyResultWarning}</p>}
       {reactionForceInvalid && <p className="panel-warning">{INVALID_REACTION_WARNING}</p>}
       <p className="panel-copy">Red areas have higher stress. Blue areas have lower stress.</p>
       <div className="summary-box">

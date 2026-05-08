@@ -66,7 +66,7 @@ export class LocalHeuristicComputeBackend {
       ...args.study.loads.map((load) => JSON.stringify({ id: load.id, type: load.type, selectionRef: load.selectionRef, parameters: load.parameters }))
     ].join("\n") + "\n";
 
-    await this.storage.putObject(`${args.study.projectId}/solver/${args.runId}/solver.inp`, solverInput);
+    await this.storage.putObject(`${args.study.projectId}/solver/${args.runId}/solver-input.txt`, solverInput);
     for (const [progress, message] of messages) {
       await delay(450);
       args.publish({
@@ -147,7 +147,7 @@ export class LocalHeuristicComputeBackend {
       ...args.study.loads.map((load) => JSON.stringify({ id: load.id, type: load.type, selectionRef: load.selectionRef, parameters: load.parameters }))
     ].join("\n") + "\n";
 
-    await this.storage.putObject(`${args.study.projectId}/solver/${args.runId}/solver.inp`, solverInput);
+    await this.storage.putObject(`${args.study.projectId}/solver/${args.runId}/solver-input.txt`, solverInput);
     for (const [progress, message] of messages) {
       await delay(450);
       args.publish({
