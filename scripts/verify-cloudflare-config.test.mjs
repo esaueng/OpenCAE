@@ -4,6 +4,8 @@ import { describe, expect, test } from "vitest";
 import { parseJsonc, validateCloudflareConfigs } from "./verify-cloudflare-config.mjs";
 
 const rootDir = resolve(import.meta.dirname, "..");
+const expectedRunnerVersion = "0.1.0";
+const expectedContainerInstanceName = `opencae-core-cloud-${expectedRunnerVersion}`;
 
 function readConfig(path) {
   return parseJsonc(readFileSync(resolve(rootDir, path), "utf8"), path);
@@ -41,9 +43,22 @@ describe("Cloudflare deployment config guard", () => {
     expect(packageJson.scripts["deploy:cloudflare"]).not.toContain("verify:runner-version");
     expect(packageJson.scripts["deploy:cloudflare"]).not.toContain("--containers-rollout");
     expect(packageJson.scripts["deploy:core-cloud"]).toContain("wrangler deploy --config wrangler.containers.jsonc");
+    expect(packageJson.scripts["deploy:core-cloud"]).toContain("verify:runner-version");
     expect(packageJson.scripts["containers:build:core-cloud"]).toContain("services/opencae-core-cloud");
+    expect(packageJson.scripts["containers:build:core-cloud"]).toContain(`opencae/opencae-core-cloud:${expectedRunnerVersion}`);
     expect(packageJson.scripts["test:core-cloud-container"]).toBe("pnpm --filter @opencae/core-cloud test");
     expect(packageJson.dependencies?.["@cloudflare/containers"]).toBeDefined();
+  });
+
+  test("Core Cloud runner version file controls deploy checks", () => {
+    const versionPath = resolve(rootDir, "services/opencae-core-cloud/RUNNER_VERSION");
+    const workerSource = readFileSync(resolve(rootDir, "apps/opencae-web/worker/index.ts"), "utf8");
+    const verifyRunnerSource = readFileSync(resolve(rootDir, "scripts/verify-runner-version.mjs"), "utf8");
+
+    expect(readFileSync(versionPath, "utf8").trim()).toBe(expectedRunnerVersion);
+    expect(workerSource).toContain(`EXPECTED_CORE_CLOUD_RUNNER_VERSION = "${expectedRunnerVersion}"`);
+    expect(verifyRunnerSource).toContain("RUNNER_VERSION");
+    expect(verifyRunnerSource).toContain("services/opencae-core-cloud/RUNNER_VERSION");
   });
 
   test("fails when container config references the legacy FEA container", () => {
@@ -54,6 +69,32 @@ describe("Cloudflare deployment config guard", () => {
 
     expect(() => validateCloudflareConfigs({ defaultConfig, staticConfig, containerConfig })).toThrow(
       /CORE_CLOUD_CONTAINER/
+    );
+  });
+
+  test("fails when container instance name is not versioned", () => {
+    const defaultConfig = readConfig("wrangler.jsonc");
+    const staticConfig = readConfig("wrangler.static.jsonc");
+    const containerConfig = clone(readConfig("wrangler.containers.jsonc"));
+    containerConfig.containers[0].name = "opencae-core-cloud";
+
+    expect(() => validateCloudflareConfigs({ defaultConfig, staticConfig, containerConfig })).toThrow(
+      new RegExp(expectedContainerInstanceName)
+    );
+  });
+
+  test("fails when Core Cloud deploy scripts lose the expected versioned image", () => {
+    const defaultConfig = readConfig("wrangler.jsonc");
+    const staticConfig = readConfig("wrangler.static.jsonc");
+    const containerConfig = readConfig("wrangler.containers.jsonc");
+    const packageJson = clone(JSON.parse(readFileSync(resolve(rootDir, "package.json"), "utf8")));
+    packageJson.scripts["containers:build:core-cloud"] = packageJson.scripts["containers:build:core-cloud"].replace(
+      `opencae/opencae-core-cloud:${expectedRunnerVersion}`,
+      "opencae/opencae-core-cloud:stale"
+    );
+
+    expect(() => validateCloudflareConfigs({ defaultConfig, staticConfig, containerConfig, packageJson })).toThrow(
+      new RegExp(`opencae/opencae-core-cloud:${expectedRunnerVersion}`)
     );
   });
 

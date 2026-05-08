@@ -9,6 +9,8 @@ const productionDomains = ["cae.esau.app"];
 const productionWorkerName = "opencae";
 const productionDeletionMigration = { tag: "v2-delete-cloud-fea-container", deleted_classes: ["OpenCaeFeaContainer"] };
 const legacySolverToken = ["calcu", "lix"].join("");
+const expectedCoreCloudRunnerVersion = readFileSync(resolve(rootDir, "services/opencae-core-cloud/RUNNER_VERSION"), "utf8").trim();
+const expectedCoreCloudContainerName = `opencae-core-cloud-${expectedCoreCloudRunnerVersion}`;
 
 export function parseJsonc(source, label = "JSONC input") {
   try {
@@ -24,21 +26,43 @@ export function readCloudflareConfigs(baseDir = rootDir) {
     defaultConfig: readWranglerConfig(resolve(baseDir, "wrangler.jsonc")),
     staticConfig: readWranglerConfig(resolve(baseDir, "wrangler.static.jsonc")),
     localFirstConfig: readWranglerConfig(resolve(baseDir, "wrangler.local-first.jsonc")),
-    containerConfig: readWranglerConfig(resolve(baseDir, "wrangler.containers.jsonc"))
+    containerConfig: readWranglerConfig(resolve(baseDir, "wrangler.containers.jsonc")),
+    packageJson: JSON.parse(readFileSync(resolve(baseDir, "package.json"), "utf8"))
   };
 }
 
-export function validateCloudflareConfigs({ defaultConfig, staticConfig, localFirstConfig, containerConfig }) {
+export function validateCloudflareConfigs({ defaultConfig, staticConfig, localFirstConfig, containerConfig, packageJson }) {
   const failures = [];
 
   if (defaultConfig) validateProductionConfig("default", defaultConfig, failures);
   if (containerConfig) validateCoreCloudContainerConfig("container", containerConfig, failures);
+  if (packageJson) validateCoreCloudScripts(packageJson, failures);
 
   validateNonProductionConfig("static", staticConfig, defaultConfig, failures);
   if (localFirstConfig) validateNonProductionConfig("local-first", localFirstConfig, defaultConfig, failures);
 
   if (failures.length > 0) {
     throw new Error(`Cloudflare config verification failed:\n- ${failures.join("\n- ")}`);
+  }
+}
+
+function validateCoreCloudScripts(packageJson, failures) {
+  const scripts = packageJson?.scripts ?? {};
+  const expectedImageTag = `opencae/opencae-core-cloud:${expectedCoreCloudRunnerVersion}`;
+  if (!String(scripts["deploy:core-cloud"] ?? "").includes("verify:runner-version")) {
+    failures.push("deploy:core-cloud must run verify:runner-version before deployment");
+  }
+  if (!String(scripts["deploy:core-cloud"] ?? "").includes("wrangler.containers.jsonc")) {
+    failures.push("deploy:core-cloud must deploy with wrangler.containers.jsonc");
+  }
+  if (!String(scripts["containers:build:core-cloud"] ?? "").includes(expectedImageTag)) {
+    failures.push(`containers:build:core-cloud must build ${expectedImageTag}`);
+  }
+  if (!String(scripts["containers:push:core-cloud"] ?? "").includes(expectedImageTag)) {
+    failures.push(`containers:push:core-cloud must push ${expectedImageTag}`);
+  }
+  if (scripts["test:core-cloud-container"] !== "pnpm --filter @opencae/core-cloud test") {
+    failures.push("test:core-cloud-container must run the OpenCAE Core Cloud service tests");
   }
 }
 
@@ -55,11 +79,11 @@ function validateCoreCloudContainerConfig(label, config, failures) {
   const container = Array.isArray(config.containers) ? config.containers[0] : undefined;
   if (
     !container ||
-    container.name !== "opencae-core-cloud" ||
+    container.name !== expectedCoreCloudContainerName ||
     container.class_name !== "OpenCaeCoreCloudContainer" ||
     container.image !== "./services/opencae-core-cloud/Dockerfile"
   ) {
-    failures.push(`${label} config must define the opencae-core-cloud container image and class`);
+    failures.push(`${label} config must define the ${expectedCoreCloudContainerName} container image and class`);
   }
   const binding = config.durable_objects?.bindings?.[0];
   if (!binding || binding.name !== "CORE_CLOUD_CONTAINER" || binding.class_name !== "OpenCaeCoreCloudContainer") {

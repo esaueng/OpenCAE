@@ -1,10 +1,19 @@
 import { describe, expect, test } from "vitest";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { OpenCAEModelJson } from "@opencae/core";
 import { handleRequest } from "./index";
 
 describe("OpenCAE Core Cloud service", () => {
+  test("defines runner version in the service version file", () => {
+    const versionPath = resolve(__dirname, "../RUNNER_VERSION");
+    const source = readFileSync(resolve(__dirname, "index.ts"), "utf8");
+
+    expect(existsSync(versionPath)).toBe(true);
+    expect(source).toContain("RUNNER_VERSION");
+    expect(source).not.toContain('const RUNNER_VERSION = "0.1.0"');
+  });
+
   test("does not import preview or local estimate solvers", () => {
     const source = readFileSync(resolve(__dirname, "index.ts"), "utf8");
 
@@ -15,15 +24,20 @@ describe("OpenCAE Core Cloud service", () => {
 
   test("health reports static and dynamic Core support without preview", async () => {
     const response = await handleRequest(new Request("http://core-cloud/health"));
+    const runnerVersion = readFileSync(resolve(__dirname, "../RUNNER_VERSION"), "utf8").trim();
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
       ok: true,
       service: "opencae-core-cloud",
+      runnerVersion,
       supportedAnalysisTypes: ["static_stress", "dynamic_structural"],
       supportedSolvers: ["sparse_static", "mdof_dynamic"],
+      supportedSolverMethods: ["sparse_static", "mdof_dynamic"],
       supportsActualVolumeMesh: true,
-      supportsPreview: false
+      supportsPreview: false,
+      noCalculix: true,
+      noLocalEstimateFallback: true
     });
   });
 

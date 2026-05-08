@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { parseJsonc } from "../../../scripts/verify-cloudflare-config.mjs";
@@ -17,6 +17,8 @@ vi.mock("@cloudflare/containers", () => ({
 }));
 
 const { default: worker } = await import("./index");
+const expectedRunnerVersion = "0.1.0";
+const expectedContainerInstanceName = `opencae-core-cloud-${expectedRunnerVersion}`;
 
 function readJsonc(path: string) {
   return parseJsonc(readFileSync(resolve(__dirname, path), "utf8"), path);
@@ -76,7 +78,7 @@ describe("Cloudflare local-first worker", () => {
     expect(containerConfig.routes).toEqual([{ pattern: "cae.esau.app", custom_domain: true }]);
     expect(containerConfig.containers).toEqual([
       expect.objectContaining({
-        name: "opencae-core-cloud",
+        name: expectedContainerInstanceName,
         class_name: "OpenCaeCoreCloudContainer",
         image: "./services/opencae-core-cloud/Dockerfile"
       })
@@ -90,6 +92,16 @@ describe("Cloudflare local-first worker", () => {
     expect(containerConfig.migrations).toEqual([
       { tag: "v3-opencae-core-cloud-container", new_sqlite_classes: ["OpenCaeCoreCloudContainer"] }
     ]);
+  });
+
+  test("Core Cloud runner version is file backed and used in container instance names", () => {
+    const versionPath = resolve(__dirname, "../../../services/opencae-core-cloud/RUNNER_VERSION");
+    const workerSource = readFileSync(resolve(__dirname, "index.ts"), "utf8");
+
+    expect(existsSync(versionPath)).toBe(true);
+    expect(readFileSync(versionPath, "utf8").trim()).toBe(expectedRunnerVersion);
+    expect(workerSource).toContain(`EXPECTED_CORE_CLOUD_RUNNER_VERSION = "${expectedRunnerVersion}"`);
+    expect(workerSource).toContain("coreCloudContainerInstanceName");
   });
 
   test("health advertises browser OpenCAE Core runtime", async () => {
@@ -107,8 +119,11 @@ describe("Cloudflare local-first worker", () => {
     containerMock.fetch.mockResolvedValueOnce(Response.json({
       ok: true,
       service: "opencae-core-cloud",
-      runnerVersion: "0.1.0",
-      supportedAnalysisTypes: ["static_stress", "dynamic_structural"]
+      runnerVersion: expectedRunnerVersion,
+      coreVersion: "0.1.0",
+      solverCpuVersion: "0.1.0",
+      supportedAnalysisTypes: ["static_stress", "dynamic_structural"],
+      supportedSolverMethods: ["sparse_static", "mdof_dynamic"]
     }));
 
     const response = await worker.fetch(new Request("https://cae.esau.app/api/cloud-core/health"), createEnv());
@@ -119,8 +134,11 @@ describe("Cloudflare local-first worker", () => {
       service: "opencae-web",
       coreCloudAvailable: true,
       containerBound: true,
-      containerRunnerVersion: "0.1.0",
+      containerRunnerVersion: expectedRunnerVersion,
+      coreVersion: "0.1.0",
+      solverCpuVersion: "0.1.0",
       supportedAnalysisTypes: ["static_stress", "dynamic_structural"],
+      supportedSolverMethods: ["sparse_static", "mdof_dynamic"],
       solver: "opencae-core-cloud",
       noCalculix: true,
       noLocalEstimateFallback: true
@@ -155,7 +173,7 @@ describe("Cloudflare local-first worker", () => {
     const ctx = createExecutionContext();
     const result = coreResult();
     containerMock.fetch
-      .mockResolvedValueOnce(Response.json({ ok: true, runnerVersion: "0.1.0", supportedAnalysisTypes: ["static_stress"] }))
+      .mockResolvedValueOnce(Response.json({ ok: true, runnerVersion: expectedRunnerVersion, supportedAnalysisTypes: ["static_stress"] }))
       .mockResolvedValueOnce(Response.json(result));
 
     const response = await worker.fetch(coreRunRequest({ runId: "run-core-1" }), env, ctx);
@@ -165,7 +183,7 @@ describe("Cloudflare local-first worker", () => {
     expect(response.status).toBe(202);
     expect(body.run.id).toBe("run-core-1");
     expect(body.streamUrl).toBe("/api/cloud-core/runs/run-core-1/events");
-    expect(containerMock.requestedNames).toEqual(["opencae-core-cloud", "opencae-core-cloud"]);
+    expect(containerMock.requestedNames).toEqual([expectedContainerInstanceName, expectedContainerInstanceName]);
     expect(containerMock.fetch).toHaveBeenCalledTimes(2);
     expect(String(containerMock.fetch.mock.calls[1]?.[0].url)).toBe("https://container.local/solve");
     expect(await env.CORE_CLOUD_ARTIFACTS.readJson("cloud-core/runs/run-core-1/request.json")).toMatchObject({ runId: "run-core-1" });
@@ -181,7 +199,7 @@ describe("Cloudflare local-first worker", () => {
     const env = createEnv();
     const ctx = createExecutionContext();
     containerMock.fetch
-      .mockResolvedValueOnce(Response.json({ ok: true, runnerVersion: "0.1.0", supportedAnalysisTypes: ["static_stress"] }))
+      .mockResolvedValueOnce(Response.json({ ok: true, runnerVersion: expectedRunnerVersion, supportedAnalysisTypes: ["static_stress"] }))
       .mockResolvedValueOnce(Response.json(coreResult()));
 
     const response = await worker.fetch(coreRunRequest({ runId: "run-alias", path: "/api/cloud-fea/runs" }), env, ctx);
@@ -215,7 +233,7 @@ describe("Cloudflare local-first worker", () => {
     const env = createEnv();
     const ctx = createExecutionContext();
     containerMock.fetch
-      .mockResolvedValueOnce(Response.json({ ok: true, runnerVersion: "0.1.0" }))
+      .mockResolvedValueOnce(Response.json({ ok: true, runnerVersion: expectedRunnerVersion }))
       .mockResolvedValueOnce(Response.json(coreResult({
         summary: { transient: { analysisType: "dynamic_structural", frameCount: 2, startTime: 0, endTime: 0.01, timeStep: 0.01, outputInterval: 0.01, peakDisplacement: 0.001, peakDisplacementTimeSeconds: 0.01 } },
         fields: [
@@ -236,7 +254,7 @@ describe("Cloudflare local-first worker", () => {
     const calculixEnv = createEnv();
     const calculixCtx = createExecutionContext();
     containerMock.fetch
-      .mockResolvedValueOnce(Response.json({ ok: true, runnerVersion: "0.1.0" }))
+      .mockResolvedValueOnce(Response.json({ ok: true, runnerVersion: expectedRunnerVersion }))
       .mockResolvedValueOnce(Response.json(coreResult({ provenance: { solver: "calculix", kind: "opencae_core_fea", resultSource: "computed" } })));
 
     await worker.fetch(coreRunRequest({ runId: "run-calculix" }), calculixEnv, calculixCtx);
@@ -251,7 +269,7 @@ describe("Cloudflare local-first worker", () => {
     const previewEnv = createEnv();
     const previewCtx = createExecutionContext();
     containerMock.fetch
-      .mockResolvedValueOnce(Response.json({ ok: true, runnerVersion: "0.1.0" }))
+      .mockResolvedValueOnce(Response.json({ ok: true, runnerVersion: expectedRunnerVersion }))
       .mockResolvedValueOnce(Response.json(coreResult({ provenance: { solver: "opencae-core-cloud", kind: "local_estimate", resultSource: "computed_preview" } })));
 
     await worker.fetch(coreRunRequest({ runId: "run-preview" }), previewEnv, previewCtx);

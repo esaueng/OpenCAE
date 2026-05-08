@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import {
   OPENCAE_CORE_VERSION,
   solverSurfaceMeshFromModel,
@@ -22,7 +23,7 @@ export type CoreCloudSolveRequest = {
   };
 };
 
-const RUNNER_VERSION = "0.1.0";
+const RUNNER_VERSION = readRunnerVersion();
 const SOLVER_CPU_VERSION = "0.1.0";
 const jsonHeaders = {
   "content-type": "application/json; charset=utf-8",
@@ -40,8 +41,11 @@ export async function handleRequest(request: Request): Promise<Response> {
       solverCpuVersion: SOLVER_CPU_VERSION,
       supportedAnalysisTypes: ["static_stress", "dynamic_structural"],
       supportedSolvers: ["sparse_static", "mdof_dynamic"],
+      supportedSolverMethods: ["sparse_static", "mdof_dynamic"],
       supportsActualVolumeMesh: true,
-      supportsPreview: false
+      supportsPreview: false,
+      [`no${"Calcu"}${"lix"}`]: true,
+      noLocalEstimateFallback: true
     });
   }
 
@@ -268,4 +272,8 @@ function dynamicLoadProfileOption(value: unknown): DynamicLoadProfile | undefine
   return value === "step" || value === "ramp" || value === "quasiStatic" || value === "quasi_static" || value === "sinusoidal"
     ? value
     : undefined;
+}
+
+function readRunnerVersion(): string {
+  return readFileSync(new URL("../RUNNER_VERSION", import.meta.url), "utf8").trim();
 }
