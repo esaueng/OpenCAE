@@ -316,7 +316,7 @@ function runSimulationLocally(study: Study, displayModel?: DisplayModel, staticB
   });
   const now = new Date().toISOString();
   const events: RunEvent[] = study.type === "dynamic_structural"
-    ? localDynamicRunEvents(runId, study, now, backend)
+    ? localDynamicRunEvents(runId, study, now, backend, coreEligibility)
     : localStaticRunEvents(runId, study, now, backend, coreEligibility);
   localEventsByRunId.set(runId, events);
   return {
@@ -369,9 +369,19 @@ function localStaticRunEvents(
   ], localRunDurationEstimateMs(study));
 }
 
-function localDynamicRunEvents(runId: string, study: Study, timestamp: string, backend: NormalizedBrowserSolverBackend = "local_detailed"): RunEvent[] {
+function localDynamicRunEvents(
+  runId: string,
+  study: Study,
+  timestamp: string,
+  backend: NormalizedBrowserSolverBackend = "local_detailed",
+  coreEligibility?: ReturnType<typeof openCaeCoreEligibility>
+): RunEvent[] {
   const frameCount = dynamicOutputFrameEstimate(study);
   const estimatedDurationMs = localRunDurationEstimateMs(study, frameCount);
+  const useCore = backend === "opencae_core" && coreEligibility?.ok;
+  const fallbackMessage = backend === "opencae_core" && coreEligibility && !coreEligibility.ok
+    ? `OpenCAE Core fallback to Detailed local: ${coreEligibility.reason}`
+    : undefined;
   const milestones = [...new Set([1, Math.ceil(frameCount * 0.2), Math.ceil(frameCount * 0.4), Math.ceil(frameCount * 0.6), Math.ceil(frameCount * 0.8), frameCount])]
     .filter((frame) => frame >= 1 && frame <= frameCount);
   const writeEvents = milestones.map((frame, index) => ({
@@ -382,17 +392,17 @@ function localDynamicRunEvents(runId: string, study: Study, timestamp: string, b
     timestamp
   }));
   return addRunTiming([
-    { runId, type: "state", progress: 0, message: "Simulation queued locally.", timestamp },
-    ...(backend === "opencae_core" ? [{ runId, type: "message" as const, progress: 4, message: "OpenCAE Core fallback to Detailed local: OpenCAE Core browser solve currently supports static stress studies only.", timestamp }] : []),
-    { runId, type: "progress", progress: 10, message: "Local dynamic solver started.", timestamp },
-    { runId, type: "progress", progress: 34, message: "Estimating lumped mass, stiffness, and damping.", timestamp },
+    { runId, type: "state", progress: 0, message: useCore ? "OpenCAE Core dynamic solve queued in browser." : "Simulation queued locally.", timestamp },
+    ...(fallbackMessage ? [{ runId, type: "message" as const, progress: 4, message: fallbackMessage, timestamp }] : []),
+    { runId, type: "progress", progress: 10, message: useCore ? "OpenCAE Core dynamic Tet4 solver started." : "Local dynamic solver started.", timestamp },
+    { runId, type: "progress", progress: 34, message: useCore ? "Building OpenCAE Core mass, damping, and stiffness response." : "Estimating lumped mass, stiffness, and damping.", timestamp },
     { runId, type: "progress", progress: 62, message: "Integrating dynamic response with Newmark average acceleration.", timestamp },
     ...writeEvents,
     {
       runId,
       type: "complete",
       progress: 100,
-      message: backend === "opencae_core" ? "OpenCAE Core fallback to Detailed local simulation complete." : "Simulation complete.",
+      message: useCore ? "OpenCAE Core dynamic simulation complete." : fallbackMessage ? "OpenCAE Core fallback to Detailed local simulation complete." : "Simulation complete.",
       timestamp
     }
   ], estimatedDurationMs);
@@ -585,7 +595,7 @@ function simulationBackend(study: Study): NormalizedBrowserSolverBackend {
 }
 
 function localSolverBackendForRun(study: Study, backend: NormalizedBrowserSolverBackend, coreEligibility?: ReturnType<typeof openCaeCoreEligibility>): string {
-  if (backend === "opencae_core" && coreEligibility?.ok) return "opencae-core-cpu-tet4";
+  if (backend === "opencae_core" && coreEligibility?.ok) return study.type === "dynamic_structural" ? "opencae-core-dynamic-tet4" : "opencae-core-cpu-tet4";
   if (study.type === "dynamic_structural") return "local-dynamic-newmark";
   if (isBeamDemoStudyForLocalRun(study)) return "local-beam-demo-euler-bernoulli";
   return "local-heuristic-surface";
