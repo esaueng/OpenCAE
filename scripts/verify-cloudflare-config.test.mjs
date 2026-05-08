@@ -18,6 +18,7 @@ describe("Cloudflare deployment config guard", () => {
     const defaultConfig = readConfig("wrangler.jsonc");
     const staticConfig = readConfig("wrangler.static.jsonc");
     const localFirstConfig = readConfig("wrangler.local-first.jsonc");
+    const containerConfig = readConfig("wrangler.containers.jsonc");
 
     expect(defaultConfig.name).toBe("opencae");
     expect(staticConfig.name).toBe("opencae-static");
@@ -25,10 +26,10 @@ describe("Cloudflare deployment config guard", () => {
     expect(defaultConfig.containers).toBeUndefined();
     expect(defaultConfig.durable_objects).toBeUndefined();
     expect(defaultConfig.migrations).toEqual([{ tag: "v2-delete-cloud-fea-container", deleted_classes: ["OpenCaeFeaContainer"] }]);
-    expect(() => validateCloudflareConfigs({ defaultConfig, staticConfig, localFirstConfig })).not.toThrow();
+    expect(() => validateCloudflareConfigs({ defaultConfig, staticConfig, localFirstConfig, containerConfig })).not.toThrow();
   });
 
-  test("default Workers deploy no longer builds or pushes a container image", () => {
+  test("default Workers deploy stays local-first while container deploy targets Core Cloud", () => {
     const packageJson = JSON.parse(readFileSync(resolve(rootDir, "package.json"), "utf8"));
     const buildScript = packageJson.scripts.build;
 
@@ -39,9 +40,20 @@ describe("Cloudflare deployment config guard", () => {
     expect(packageJson.scripts["deploy:cloudflare"]).toContain("wrangler deploy --config wrangler.jsonc");
     expect(packageJson.scripts["deploy:cloudflare"]).not.toContain("verify:runner-version");
     expect(packageJson.scripts["deploy:cloudflare"]).not.toContain("--containers-rollout");
-    expect(packageJson.scripts["deploy:cloudflare:containers"]).toBeUndefined();
-    expect(packageJson.scripts["containers:build"]).toBeUndefined();
-    expect(packageJson.dependencies?.["@cloudflare/containers"]).toBeUndefined();
+    expect(packageJson.scripts["deploy:cloudflare:containers"]).toContain("wrangler deploy --config wrangler.containers.jsonc");
+    expect(packageJson.scripts["containers:build"]).toContain("services/opencae-core-cloud");
+    expect(packageJson.dependencies?.["@cloudflare/containers"]).toBeDefined();
+  });
+
+  test("fails when container config references the legacy FEA container", () => {
+    const defaultConfig = readConfig("wrangler.jsonc");
+    const staticConfig = readConfig("wrangler.static.jsonc");
+    const containerConfig = clone(readConfig("wrangler.containers.jsonc"));
+    containerConfig.durable_objects.bindings[0].name = "FEA_CONTAINER";
+
+    expect(() => validateCloudflareConfigs({ defaultConfig, staticConfig, containerConfig })).toThrow(
+      /CORE_CLOUD_CONTAINER/
+    );
   });
 
   test("fails when static and production configs share a Worker name", () => {

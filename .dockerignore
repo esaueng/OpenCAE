@@ -1,0 +1,11 @@
+node_modules
+**/node_modules
+dist
+**/dist
+.git
+.wrangler
+.pnpm-store
+data/artifacts
+data/logs
+data/reports
+data/sqlite
