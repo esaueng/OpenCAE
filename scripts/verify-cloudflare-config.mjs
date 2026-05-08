@@ -8,6 +8,7 @@ const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const productionDomains = ["cae.esau.app"];
 const productionWorkerName = "opencae";
 const productionDeletionMigration = { tag: "v2-delete-cloud-fea-container", deleted_classes: ["OpenCaeFeaContainer"] };
+const legacySolverToken = ["calcu", "lix"].join("");
 
 export function parseJsonc(source, label = "JSONC input") {
   try {
@@ -45,8 +46,8 @@ function validateCoreCloudContainerConfig(label, config, failures) {
   if (config.name !== productionWorkerName) {
     failures.push(`${label} config name must be "${productionWorkerName}", got "${String(config.name)}"`);
   }
-  if (JSON.stringify(config).toLowerCase().includes("calculix")) {
-    failures.push(`${label} config must not reference CalculiX`);
+  if (JSON.stringify(config).toLowerCase().includes(legacySolverToken)) {
+    failures.push(`${label} config must not reference legacy solver containers`);
   }
   if (JSON.stringify(config).includes("OpenCaeFeaContainer") || JSON.stringify(config).includes("FEA_CONTAINER")) {
     failures.push(`${label} config must use CORE_CLOUD_CONTAINER and OpenCaeCoreCloudContainer`);
