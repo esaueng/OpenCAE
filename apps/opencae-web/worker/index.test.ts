@@ -39,28 +39,38 @@ describe("Cloudflare local-first worker", () => {
     expect(workerSource).not.toContain("FEA_CONTAINER");
   });
 
-  test("default Cloudflare deploy uses the local-first production config", () => {
+  test("default Cloudflare deploy uses the Core Cloud production config", () => {
     const packageJson = JSON.parse(readFileSync(resolve(__dirname, "../../../package.json"), "utf8")) as { scripts: Record<string, string>; dependencies?: Record<string, string> };
     const defaultConfig = readJsonc("../../../wrangler.jsonc") as {
       name?: string;
       routes?: Array<{ pattern?: string; custom_domain?: boolean }>;
-      containers?: unknown;
-      durable_objects?: unknown;
+      containers?: Array<{ name?: string; class_name?: string; image?: string }>;
+      durable_objects?: { bindings?: Array<{ name?: string; class_name?: string }> };
       migrations?: unknown;
     };
 
-    expect(packageJson.scripts["deploy:cloudflare"]).toContain("--config wrangler.jsonc");
-    expect(packageJson.scripts["deploy:cloudflare"]).not.toContain("verify:runner-version");
-    expect(packageJson.scripts["deploy:cloudflare"]).not.toContain("--containers-rollout");
+    expect(packageJson.scripts["deploy:cloudflare"]).toContain("--config wrangler.containers.jsonc");
+    expect(packageJson.scripts["deploy:cloudflare"]).toContain("verify:runner-version");
+    expect(packageJson.scripts["deploy:cloudflare"]).toContain("--containers-rollout=immediate");
     expect(packageJson.scripts["deploy:core-cloud"]).toContain("--config wrangler.containers.jsonc");
     expect(packageJson.scripts["containers:build:core-cloud"]).toContain("services/opencae-core-cloud");
     expect(packageJson.scripts["test:core-cloud-container"]).toBe("pnpm --filter @opencae/core-cloud test");
     expect(packageJson.dependencies?.["@cloudflare/containers"]).toBeDefined();
     expect(defaultConfig.name).toBe("opencae");
     expect(defaultConfig.routes).toEqual([{ pattern: "cae.esau.app", custom_domain: true }]);
-    expect(defaultConfig.containers).toBeUndefined();
-    expect(defaultConfig.durable_objects).toBeUndefined();
-    expect(defaultConfig.migrations).toEqual([{ tag: "v2-delete-cloud-fea-container", deleted_classes: ["OpenCaeFeaContainer"] }]);
+    expect(defaultConfig.containers).toEqual([
+      expect.objectContaining({
+        name: expectedContainerInstanceName,
+        class_name: "OpenCaeCoreCloudContainer",
+        image: "./services/opencae-core-cloud/Dockerfile"
+      })
+    ]);
+    expect(defaultConfig.durable_objects?.bindings).toEqual([
+      { name: "CORE_CLOUD_CONTAINER", class_name: "OpenCaeCoreCloudContainer" }
+    ]);
+    expect(defaultConfig.migrations).toEqual([
+      { tag: "v3-opencae-core-cloud-container", new_sqlite_classes: ["OpenCaeCoreCloudContainer"] }
+    ]);
   });
 
   test("container config wires OpenCAE Core Cloud instead of legacy FEA", () => {

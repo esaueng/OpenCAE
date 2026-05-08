@@ -49,6 +49,6 @@ pnpm deploy:cloudflare:local-first:dry-run
 pnpm deploy:cloudflare:local-first
 ```
 
-Use the default Cloudflare deploy for the production app domains. It uses `wrangler.jsonc`, targets `opencae`, and intentionally omits container solver bindings because production simulations run in the browser through OpenCAE Core.
+Use the default Cloudflare deploy for the production app domains. It deploys the Core Cloud production Worker with `wrangler.containers.jsonc`, targets `opencae`, and binds `CORE_CLOUD_CONTAINER`, `CORE_CLOUD_ARTIFACTS`, and the versioned OpenCAE Core Cloud container. Use the static and local-first commands only for explicitly non-production Workers.
 
 Deploy and CI runners may start from a standalone `opencae-alpha` checkout as long as their build command is `pnpm run build` or another script that runs `pnpm build:core`; that script creates `../opencae-core` before compiling.

@@ -7,7 +7,6 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const productionDomains = ["cae.esau.app"];
 const productionWorkerName = "opencae";
-const productionDeletionMigration = { tag: "v2-delete-cloud-fea-container", deleted_classes: ["OpenCaeFeaContainer"] };
 const legacySolverToken = ["calcu", "lix"].join("");
 const expectedCoreCloudRunnerVersion = readFileSync(resolve(rootDir, "services/opencae-core-cloud/RUNNER_VERSION"), "utf8").trim();
 const expectedCoreCloudContainerName = `opencae-core-cloud-${expectedCoreCloudRunnerVersion}`;
@@ -49,6 +48,18 @@ export function validateCloudflareConfigs({ defaultConfig, staticConfig, localFi
 function validateCoreCloudScripts(packageJson, failures) {
   const scripts = packageJson?.scripts ?? {};
   const expectedImageTag = `opencae/opencae-core-cloud:${expectedCoreCloudRunnerVersion}`;
+  if (!String(scripts["deploy:cloudflare"] ?? "").includes("verify:runner-version")) {
+    failures.push("deploy:cloudflare must run verify:runner-version before production deployment");
+  }
+  if (!String(scripts["deploy:cloudflare"] ?? "").includes("wrangler.containers.jsonc")) {
+    failures.push("deploy:cloudflare must deploy production with wrangler.containers.jsonc");
+  }
+  if (!String(scripts["deploy:cloudflare"] ?? "").includes("--containers-rollout=immediate")) {
+    failures.push("deploy:cloudflare must roll out the Core Cloud container immediately");
+  }
+  if (!String(scripts["deploy:cloudflare:dry-run"] ?? "").includes("wrangler.containers.jsonc --dry-run")) {
+    failures.push("deploy:cloudflare:dry-run must dry-run the Core Cloud production config");
+  }
   if (!String(scripts["deploy:core-cloud"] ?? "").includes("verify:runner-version")) {
     failures.push("deploy:core-cloud must run verify:runner-version before deployment");
   }
@@ -104,17 +115,7 @@ function validateCoreCloudContainerConfig(label, config, failures) {
 }
 
 function validateProductionConfig(label, config, failures) {
-  if (config.name !== productionWorkerName) {
-    failures.push(`${label} config name must be "${productionWorkerName}", got "${String(config.name)}"`);
-  }
-
-  if (config.durable_objects || config.containers) {
-    failures.push(`${label} config must not bind container solvers; browser OpenCAE Core is the runtime`);
-  }
-
-  if (!isAllowedProductionMigration(config.migrations)) {
-    failures.push(`${label} config may only include the legacy container deletion migration`);
-  }
+  validateCoreCloudContainerConfig(label, config, failures);
 
   for (const productionDomain of productionDomains) {
     if (!hasCustomDomainRoute(config, productionDomain)) {
@@ -150,23 +151,6 @@ function hasCustomDomainRoute(config, pattern) {
 
 function hasRoutePattern(config, pattern) {
   return Array.isArray(config.routes) && config.routes.some((route) => route?.pattern === pattern);
-}
-
-function isAllowedProductionMigration(migrations) {
-  if (migrations === undefined) return true;
-  if (!Array.isArray(migrations) || migrations.length !== 1) return false;
-
-  const migration = migrations[0];
-  const keys = Object.keys(migration ?? {}).sort();
-  return (
-    keys.length === 2 &&
-    keys[0] === "deleted_classes" &&
-    keys[1] === "tag" &&
-    migration.tag === productionDeletionMigration.tag &&
-    Array.isArray(migration.deleted_classes) &&
-    migration.deleted_classes.length === 1 &&
-    migration.deleted_classes[0] === productionDeletionMigration.deleted_classes[0]
-  );
 }
 
 function stripJsoncComments(source) {
