@@ -5,7 +5,6 @@ import type { LocalSolveResult } from "./performanceProtocol";
 export async function fallbackSolveLocalStudy({
   study,
   runId,
-  analysisMesh,
   displayModel,
   debugResults
 }: {
@@ -15,19 +14,16 @@ export async function fallbackSolveLocalStudy({
   displayModel?: DisplayModel;
   debugResults?: boolean;
 }): Promise<LocalSolveResult> {
-  if (normalizeSolverBackend(study) === "opencae_core") {
-    const coreSolved = trySolveOpenCaeCoreStudy({ study, runId, displayModel });
-    if (coreSolved.ok) return coreSolved.result;
-    if (isComplexGeometry(displayModel, study)) throw new Error(coreSolved.reason);
-    if (debugResults) console.info("[OpenCAE Core] falling back to Detailed local", { studyId: study.id, reason: coreSolved.reason });
+  if (normalizeSolverBackend(study) !== "opencae_core_local") {
+    throw new Error("OpenCAE Core Cloud solves must run through /api/cloud-core/runs.");
   }
-  const solver = await import("@opencae/solver-service");
-  const options = { analysisMesh, displayModel, debugResults };
-  const solved = study.type === "dynamic_structural"
-    ? solver.solveDynamicStudy(study, runId, options)
-    : solver.solveStudy(study, runId, options);
-  if (debugResults) logLocalSolveDirectionAudit(study, solved.fields);
-  return { summary: solved.summary, fields: solved.fields };
+  const coreSolved = trySolveOpenCaeCoreStudy({ study, runId, displayModel });
+  if (coreSolved.ok) {
+    if (debugResults) logLocalSolveDirectionAudit(study, coreSolved.result.fields);
+    return coreSolved.result;
+  }
+  if (isComplexGeometry(displayModel, study)) throw new Error(coreSolved.reason);
+  throw new Error(coreSolved.reason);
 }
 
 function logLocalSolveDirectionAudit(study: Study, fields: LocalSolveResult["fields"]) {

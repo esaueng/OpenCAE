@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DynamicSolverSettingsSchema, ProjectSchema, ResultFieldSchema, ResultSummarySchema, RunEventSchema, SolverBackendSchema } from "./index";
+import { CoreCloudResultProvenanceSchema, DynamicSolverSettingsSchema, ProjectSchema, ResultFieldSchema, ResultSummarySchema, RunEventSchema, SolverBackendSchema } from "./index";
 
 describe("ProjectSchema", () => {
   it("accepts the minimum local project shape", () => {
@@ -234,7 +234,7 @@ describe("ProjectSchema", () => {
 
     expect(parsed.studies[0]?.meshSettings.preset).toBe("ultra");
     expect(parsed.studies[0]?.solverSettings).toMatchObject({
-      backend: "opencae_core",
+      backend: "opencae_core_cloud",
       fidelity: "ultra"
     });
   });
@@ -242,7 +242,37 @@ describe("ProjectSchema", () => {
   it("normalizes legacy solver backend settings for imported project compatibility", () => {
     const parsed = SolverBackendSchema.parse("cloudflare_fea");
 
-    expect(parsed).toBe("opencae_core");
+    expect(parsed).toBe("opencae_core_cloud");
+    expect(SolverBackendSchema.parse("cloudflare-fea-calculix")).toBe("opencae_core_cloud");
+    expect(SolverBackendSchema.parse("opencae_core")).toBe("opencae_core_cloud");
+  });
+
+  it("requires production Core Cloud provenance and rejects CalculiX or preview sources", () => {
+    expect(CoreCloudResultProvenanceSchema.parse({
+      kind: "opencae_core_fea",
+      solver: "opencae-core-cloud",
+      solverVersion: "0.1.0",
+      meshSource: "actual_volume_mesh",
+      resultSource: "computed",
+      units: "mm-N-s-MPa"
+    }).solver).toBe("opencae-core-cloud");
+
+    expect(() => CoreCloudResultProvenanceSchema.parse({
+      kind: "opencae_core_fea",
+      solver: "cloudflare-fea-calculix",
+      solverVersion: "0.1.0",
+      meshSource: "actual_volume_mesh",
+      resultSource: "computed",
+      units: "mm-N-s-MPa"
+    })).toThrow();
+    expect(() => CoreCloudResultProvenanceSchema.parse({
+      kind: "local_estimate",
+      solver: "opencae-core-preview-sdof",
+      solverVersion: "0.1.0",
+      meshSource: "structured_block_proxy",
+      resultSource: "computed_preview",
+      units: "mm-N-s-MPa"
+    })).toThrow();
   });
 
   it("accepts rich OpenCAE Core result sample metadata", () => {

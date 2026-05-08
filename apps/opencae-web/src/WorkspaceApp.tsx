@@ -1388,7 +1388,7 @@ function latestCompletedRunId(study: Study | null, activeRunId: string): string 
 function runDiagnosticsMessage(study: Study): string {
   const fidelity = solverFidelityForDiagnostics(study);
   return [
-    "Run diagnostics: backend=opencae_core",
+    "Run diagnostics: backend=opencae_core_cloud",
     `fidelity=${fidelity}`,
     `analysis=${study.type}`,
     `materials=${study.materialAssignments.length}`,

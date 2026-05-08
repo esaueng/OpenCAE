@@ -246,7 +246,7 @@ export function solveHeuristicSurfaceStudy(study: Study, runId: string, optionsI
     const value = Number.isFinite(minStressSampleValue) && stressSampleRange > 1e-9 && calibratedStressSampleRange > stressSampleRange
       ? minStressSampleValue + (rawValue - minStressSampleValue) * calibratedStressSampleRange / stressSampleRange
       : rawValue;
-    return sampleResult(sample, value, 2, { source: "local_detailed", vonMisesStressPa: round(value * 1_000_000, 1) });
+    return sampleResult(sample, value, 2, { source: "opencae_core_local_preview", vonMisesStressPa: round(value * 1_000_000, 1) });
   });
   const displacementSamples = analysisMesh.samples.map((sample) => {
     const vector = roundVector(displacementVectorAtSample(sample, loads, faces, analysisMesh, response.displacementScale), 4);
