@@ -62,7 +62,7 @@ pnpm install
 pnpm deploy:cloudflare
 ```
 
-Build and deploy environments use `pnpm build:core` to ensure `https://github.com/esaueng/OpenCAE-Core` exists as `../opencae-core`, rerun `pnpm install --frozen-lockfile`, and then build the live Core workspace. `pnpm` resolves `@opencae/core`, `@opencae/solver-cpu`, and other OpenCAE Core packages from that sibling workspace; there is no runtime network lookup.
+Build and deploy environments use `pnpm build:core` to ensure `https://github.com/esaueng/OpenCAE-Core` exists as `../opencae-core`, rerun `pnpm install --frozen-lockfile`, and then build the live Core packages consumed through this workspace. `pnpm` resolves `@opencae/core`, `@opencae/solver-cpu`, and other OpenCAE Core packages from that sibling workspace; there is no runtime network lookup.
 
 Wrangler uses [wrangler.jsonc](wrangler.jsonc) for the production app domains by default. That config intentionally omits container bindings and returns a local-first API message for `/api/*` routes because the browser app owns simulation execution.
 
