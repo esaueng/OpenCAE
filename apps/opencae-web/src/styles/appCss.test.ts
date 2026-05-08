@@ -125,7 +125,7 @@ describe("app CSS", () => {
     expect(startScreen).toMatch(/overflow:\s*auto/);
     expect(startBrand).toMatch(/position:\s*relative/);
     expect(startBrand).toMatch(/width:\s*min\(340px,\s*100%\)/);
-    expect(startBrandMenu).toMatch(/width:\s*min\(640px,\s*100%\)/);
+    expect(startBrandMenu).toMatch(/width:\s*min\(430px,\s*100%\)/);
     expect(sampleMenuFooter).toMatch(/display:\s*none/);
     expect(sampleGrid).toMatch(/grid-template-columns:\s*minmax\(0,\s*1fr\)/);
     expect(sampleGridCard).toMatch(/min-height:\s*112px/);

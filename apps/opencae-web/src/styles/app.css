@@ -70,7 +70,7 @@ img {
 }
 
 .start-brand.sample-menu-open {
-  width: min(640px, 100%);
+  width: min(430px, 100%);
 }
 
 .start-mark {
@@ -110,10 +110,10 @@ img {
 }
 
 .start-sample-menu-bar {
-  width: min(640px, 100%);
+  width: min(430px, 100%);
   margin: 0 auto 10px;
   display: grid;
-  grid-template-columns: 90px minmax(0, 1fr) 90px;
+  grid-template-columns: 70px minmax(0, 1fr) 70px;
   align-items: center;
   color: var(--color-text-subtle);
   font-family: var(--font-mono);
@@ -142,12 +142,12 @@ img {
 }
 
 .start-menu-load {
-  width: 320px;
+  width: min(430px, 100%);
   max-width: 100%;
 }
 
 .start-sample-header {
-  width: min(640px, 100%);
+  width: min(430px, 100%);
   margin: 0 auto 10px;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 180px;
@@ -260,7 +260,7 @@ img {
 
 .start-sample-grid {
   grid-template-columns: minmax(0, 1fr);
-  width: min(560px, 100%);
+  width: min(430px, 100%);
   margin: 0 auto;
 }
 
@@ -303,7 +303,7 @@ img {
 
 .start-sample-grid .sample-option-card {
   min-height: 112px;
-  grid-template-columns: 150px minmax(0, 1fr);
+  grid-template-columns: 126px minmax(0, 1fr);
   grid-template-rows: auto auto;
   align-items: center;
   gap: 8px 12px;
