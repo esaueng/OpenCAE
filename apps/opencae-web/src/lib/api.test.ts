@@ -483,6 +483,48 @@ describe("api", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  test("sends dynamic solver settings to OpenCAE Core Cloud", async () => {
+    const dynamicCloudStudy = {
+      ...study,
+      type: "dynamic_structural",
+      materialAssignments: [{ id: "assign-1", materialId: "mat-aluminum-6061", selectionRef: "selection-body-1", status: "complete" }],
+      constraints: [{ id: "constraint-1", type: "fixed", selectionRef: "selection-face-1", parameters: {}, status: "complete" }],
+      loads: [{ id: "load-1", type: "force", selectionRef: "selection-face-1", parameters: { value: 500, units: "N", direction: [0, -1, 0] }, status: "complete" }],
+      meshSettings: { preset: "ultra", status: "complete", meshRef: "project-1/mesh/mesh-summary.json" },
+      solverSettings: {
+        backend: "opencae_core_cloud",
+        fidelity: "ultra",
+        startTime: 0,
+        endTime: 0.5,
+        timeStep: 0.002,
+        outputInterval: 0.01,
+        dampingRatio: 0.04,
+        integrationMethod: "newmark_average_acceleration",
+        loadProfile: "sinusoidal"
+      }
+    } as unknown as Study;
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, { [key: string]: unknown }>;
+      expect(body.solverSettings).toMatchObject({
+        backend: "opencae_core_cloud",
+        timeStep: 0.002,
+        outputInterval: 0.01,
+        dampingRatio: 0.04,
+        loadProfile: "sinusoidal"
+      });
+      return new Response(JSON.stringify({
+        run: { id: "run-cloud-core-dynamic", solverBackend: "opencae-core-cloud" },
+        streamUrl: "/api/cloud-core/runs/run-cloud-core-dynamic/events",
+        message: "OpenCAE Core Cloud simulation running."
+      }), { headers: { "content-type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await runSimulation("study-1", dynamicCloudStudy, coreDisplayModel);
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/cloud-core/runs", expect.any(Object));
+  });
+
   test("does not fall back to local estimates when OpenCAE Core Cloud fails", async () => {
     const cloudStudy = {
       ...study,

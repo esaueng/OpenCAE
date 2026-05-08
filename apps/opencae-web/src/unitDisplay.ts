@@ -102,12 +102,12 @@ export function resultFieldForUnits(field: ResultField, unitSystem: UnitSystem):
 export function formatResultProvenanceLabel(provenance: ResultProvenance | undefined): string {
   if (provenance?.solver === "opencae-core-cloud") return "OpenCAE Core Cloud";
   if (provenance?.solver === "opencae-core-preview-sdof" || provenance?.solver === "opencae-core-preview-tet4" || provenance?.resultSource === "computed_preview" || provenance?.meshSource === "structured_block_proxy" || provenance?.meshSource === "display_bounds_proxy") {
-    return "Preview";
+    return "OpenCAE Core Preview";
   }
-  if (provenance?.kind === "opencae_core_fea" && provenance.meshSource === "actual_volume_mesh" && provenance.resultSource === "computed") return "OpenCAE Core FEA";
-  if (provenance?.kind === "opencae_core_fea") return "OpenCAE Core";
+  if (provenance?.kind === "opencae_core_fea" && provenance.meshSource === "actual_volume_mesh" && provenance.resultSource === "computed") return "OpenCAE Core Local";
+  if (provenance?.kind === "opencae_core_fea") return "OpenCAE Core Local";
   if (provenance?.kind === "analytical_benchmark") return "Analytical benchmark";
-  if (provenance?.kind === "local_estimate") return "Preview";
+  if (provenance?.kind === "local_estimate") return "OpenCAE Core Preview";
   return "Unknown result source";
 }
 

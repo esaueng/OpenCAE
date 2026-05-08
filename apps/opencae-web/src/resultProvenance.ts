@@ -1,7 +1,7 @@
 import type { DisplayModel, ResultField, ResultProvenance, ResultSummary, Study } from "@opencae/schema";
 import { isComplexGeometry } from "./workers/opencaeCoreSolve";
 
-export const PREVIEW_GEOMETRY_WARNING = "Preview solver mesh does not match this geometry; deformed shape disabled.";
+export const PREVIEW_GEOMETRY_WARNING = "OpenCAE Core Preview mesh does not match this geometry; deformed shape disabled.";
 export const INVALID_REACTION_WARNING = "Reaction force unavailable or invalid for this result.";
 
 export function isPreviewResultProvenance(provenance: ResultProvenance | undefined): boolean {
