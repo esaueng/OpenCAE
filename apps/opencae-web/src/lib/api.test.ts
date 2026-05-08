@@ -363,7 +363,7 @@ describe("api", () => {
     expect(response.message).toBe("Mesh generated locally.");
   });
 
-  test("runs simulations locally when the API does not know the restored study", async () => {
+  test("falls back to detailed local static solve when OpenCAE Core is not eligible", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: "Study not found" }), {
       status: 404,
       headers: { "content-type": "application/json" }
@@ -376,11 +376,7 @@ describe("api", () => {
       meshSettings: { preset: "fine", status: "complete", meshRef: "project-1/mesh/mesh-summary.json" }
     } as unknown as Study;
 
-    const response = await runSimulation("study-1", readyStudy, {
-      ...displayModel,
-      bodyCount: 1,
-      dimensions: { x: 120, y: 40, z: 20, units: "mm" }
-    });
+    const response = await runSimulation("study-1", readyStudy);
     const completed = await new Promise<RunEvent>((resolve) => {
       const source = subscribeToRun(response.run.id, (event) => {
         if (event.type === "complete") {
@@ -391,14 +387,14 @@ describe("api", () => {
     });
     const results = await getResults(response.run.id);
 
-    expect(response.message).toContain("OpenCAE Core simulation running locally");
-    expect((response.run as { solverBackend?: string }).solverBackend).toBe("opencae-core-cpu-tet4");
+    expect(response.message).toContain("OpenCAE Core fallback to Detailed local");
+    expect((response.run as { solverBackend?: string }).solverBackend).toBe("local-heuristic-surface");
     expect(completed.progress).toBe(100);
     expect(results.fields.map((field) => field.runId)).toEqual([response.run.id, response.run.id, response.run.id]);
     expect(results.summary.maxStress).toBeGreaterThan(0);
   });
 
-  test("routes the Beam Demo sample through OpenCAE Core", async () => {
+  test("routes the Beam Demo local static solve to dense Euler-Bernoulli result fields", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: "Study not found" }), {
       status: 404,
       headers: { "content-type": "application/json" }
@@ -420,14 +416,13 @@ describe("api", () => {
     const stress = results.fields.find((field) => field.type === "stress");
 
     expect(completed.progress).toBe(100);
-    expect((response.run as { solverBackend?: string }).solverBackend).toBe("opencae-core-cpu-tet4");
+    expect((response.run as { solverBackend?: string }).solverBackend).toBe("local-beam-demo-euler-bernoulli");
     expect(displacement?.location).toBe("node");
-    expect(displacement?.samples?.length).toBeGreaterThan(0);
+    expect(displacement?.samples?.length).toBeGreaterThan(64);
     expect(displacement?.samples?.every((sample) => sample.vector?.every(Number.isFinite))).toBe(true);
-    expect(stress?.samples?.length).toBeGreaterThan(0);
-    expect(results.summary.provenance?.solver).toBe("opencae-core-cpu-tet4");
-    expect(results.summary.maxStress).toBeGreaterThan(0);
-    expect(results.summary.maxDisplacement).toBeGreaterThan(0);
+    expect(stress?.samples?.length).toBeGreaterThan(64);
+    expect(results.summary.maxStress).toBeCloseTo(2.224, 3);
+    expect(results.summary.maxDisplacement).toBeCloseTo(0.0467, 3);
   });
 
   test("normalizes legacy backend selections to browser OpenCAE Core without cloud route calls", async () => {
@@ -463,7 +458,7 @@ describe("api", () => {
     expect(fetchMock.mock.calls.every(([input]) => !String(input).includes("/api/cloud-fea"))).toBe(true);
   });
 
-  test("normalizes legacy dynamic selections to OpenCAE Core dynamic solves", async () => {
+  test("falls back to local dynamic solver for legacy Cloud FEA dynamic studies", async () => {
     const dynamicStudy = {
       ...study,
       name: "Dynamic",
@@ -494,16 +489,15 @@ describe("api", () => {
     source.close();
     const results = await getResults(response.run.id);
 
-    expect((response.run as { solverBackend?: string }).solverBackend).toBe("opencae-core-dynamic-tet4");
-    expect(response.message).toContain("OpenCAE Core simulation running locally");
-    expect(seen.map((event) => event.message).join(" ")).toContain("OpenCAE Core dynamic");
-    expect(results.summary.provenance?.solver).toBe("opencae-core-dynamic-tet4");
+    expect((response.run as { solverBackend?: string }).solverBackend).toBe("local-dynamic-newmark");
+    expect(response.message).toContain("OpenCAE Core fallback to Detailed local");
+    expect(seen.map((event) => event.message).join(" ")).toContain("OpenCAE Core fallback to Detailed local");
     expect(results.summary.transient?.frameCount).toBe(21);
     expect(results.fields.some((field) => field.type === "stress" && field.frameIndex === 20)).toBe(true);
     expect(fetchMock.mock.calls.every(([input]) => !String(input).includes("/api/cloud-fea"))).toBe(true);
   });
 
-  test("estimates fine dynamic OpenCAE Core output frames from requested output interval", () => {
+  test("estimates fine dynamic OpenCAE Core fallback output frames from requested output interval", () => {
     const dynamicStudy = {
       ...study,
       type: "dynamic_structural",
@@ -519,7 +513,7 @@ describe("api", () => {
       }
     } as Study;
 
-    expect(dynamicOutputFrameEstimate(dynamicStudy)).toBe(21);
+    expect(dynamicOutputFrameEstimate(dynamicStudy, { backend: "opencae_core" })).toBe(21);
   });
 
   test("defers local result solving until a queued run is subscribed", () => {

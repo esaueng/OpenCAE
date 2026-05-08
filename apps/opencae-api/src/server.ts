@@ -8,6 +8,7 @@ import { bracketDemoMaterial, bracketDemoProject, bracketDisplayModel, bracketRe
 import { InMemoryJobQueueProvider, LocalRunStateProvider } from "@opencae/jobs";
 import { MockMeshService } from "@opencae/mesh-service";
 import { buildHtmlReport, buildPdfReport, LocalReportProvider, reportPdfKeyFor } from "@opencae/post-service";
+import { solveDynamicStudy } from "@opencae/solver-service";
 import {
   ProjectSchema,
   ResultFieldSchema,
@@ -662,13 +663,12 @@ function dynamicSampleResults(project: Project): ImportedResultBundle | undefine
   const run = study?.runs[0];
   if (!study || !run || study.type !== "dynamic_structural") return undefined;
   const sample = normalizeSampleId(project.geometryFiles[0]?.metadata.sampleModel);
-  const solved = trySolveOpenCaeCoreStudy({ study, runId: run.id, displayModel: sampleDisplayModelFor(sample) });
-  if (!solved.ok) return undefined;
+  const solved = solveDynamicStudy(study, run.id, { displayModel: sampleDisplayModelFor(sample) });
   return {
     activeRunId: run.id,
     completedRunId: run.id,
-    summary: solved.result.summary,
-    fields: solved.result.fields
+    summary: solved.summary,
+    fields: solved.fields
   };
 }
 

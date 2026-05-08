@@ -60,7 +60,7 @@ describe("OpenCAE Core browser solver adapter", () => {
   test("normalizes omitted and legacy cloud FEA backend selections to OpenCAE Core", () => {
     expect(normalizeSolverBackend({ solverSettings: { backend: "cloudflare_fea" } })).toBe("opencae_core");
     expect(normalizeSolverBackend({ solverSettings: { backend: "opencae_core" } })).toBe("opencae_core");
-    expect(normalizeSolverBackend({ solverSettings: { backend: "local_detailed" } })).toBe("opencae_core");
+    expect(normalizeSolverBackend({ solverSettings: { backend: "local_detailed" } })).toBe("local_detailed");
     expect(normalizeSolverBackend({ solverSettings: {} })).toBe("opencae_core");
     expect(normalizeSolverBackend(undefined)).toBe("opencae_core");
   });
@@ -88,7 +88,7 @@ describe("OpenCAE Core browser solver adapter", () => {
     expect(outcome.result.fields.every((field) => field.provenance?.kind === "opencae_core_fea")).toBe(true);
   });
 
-  test("solves dynamic studies with OpenCAE Core instead of falling back", () => {
+  test("falls back for dynamic studies instead of pretending OpenCAE Core support", () => {
     const dynamicStudy = {
       ...staticStudy,
       type: "dynamic_structural",
@@ -106,13 +106,9 @@ describe("OpenCAE Core browser solver adapter", () => {
     } satisfies Study;
 
     const eligibility = openCaeCoreEligibility(dynamicStudy, displayModel);
-    const outcome = trySolveOpenCaeCoreStudy({ study: dynamicStudy, runId: "run-core-dynamic", displayModel });
 
-    expect(eligibility).toEqual({ ok: true });
-    expect(outcome.ok).toBe(true);
-    if (!outcome.ok) throw new Error(outcome.reason);
-    expect(outcome.solverBackend).toBe("opencae-core-dynamic-tet4");
-    expect(outcome.result.summary.provenance?.solver).toBe("opencae-core-dynamic-tet4");
-    expect(outcome.result.summary.transient?.frameCount).toBeGreaterThan(1);
+    expect(eligibility.ok).toBe(false);
+    if (eligibility.ok) throw new Error("dynamic study unexpectedly eligible");
+    expect(eligibility.reason).toContain("static stress");
   });
 });

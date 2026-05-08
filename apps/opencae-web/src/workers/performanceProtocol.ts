@@ -1,4 +1,4 @@
-import type { ResultField, ResultSummary } from "@opencae/schema";
+import type { AnalysisMesh, DisplayModel, ResultField, ResultSummary, Study } from "@opencae/schema";
 import {
   packedResultFieldsForPlaybackTransferables,
   preparedPlaybackTransferables,
@@ -34,6 +34,13 @@ export interface ImportedStepPreview {
 }
 
 export type PerformanceWorkerPayloads = {
+  solveLocalStudy: {
+    runId: string;
+    study: Study;
+    analysisMesh?: AnalysisMesh;
+    displayModel?: DisplayModel;
+    debugResults?: boolean;
+  };
   prepareResultFrame: {
     fields: ResultField[];
     framePosition: number;
@@ -56,6 +63,7 @@ export type PerformanceWorkerPayloads = {
 };
 
 export type PerformanceWorkerResults = {
+  solveLocalStudy: LocalSolveResult;
   prepareResultFrame: { fields: ResultField[] };
   preparePlaybackFrames: PreparedPlaybackFrameCache;
   decodeStl: DecodedStlGeometry;

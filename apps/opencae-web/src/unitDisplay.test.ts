@@ -57,6 +57,8 @@ describe("unit display formatting", () => {
 
   test("formats result provenance labels as OpenCAE Core", () => {
     expect(formatResultProvenanceLabel({ kind: "opencae_core_fea", solver: "opencae-core-cpu-tet4", solverVersion: "0.1.0", meshSource: "opencae_core_tet4", resultSource: "computed", units: "mm-N-s-MPa" })).toBe("OpenCAE Core");
+    expect(formatResultProvenanceLabel({ kind: "local_estimate", solver: "opencae-local-dynamic-newmark", solverVersion: "0.1.0", meshSource: "mock", resultSource: "generated", units: "mm-N-s-MPa" })).toBe("Detailed local");
+    expect(formatResultProvenanceLabel({ kind: "analytical_benchmark", solver: "opencae-euler-bernoulli", solverVersion: "0.1.0", meshSource: "structured_block", resultSource: "generated", units: "mm-N-s-MPa" })).toBe("Analytical benchmark");
     expect(formatResultProvenanceLabel(undefined)).toBe("OpenCAE Core");
   });
 

@@ -101,6 +101,8 @@ export function resultFieldForUnits(field: ResultField, unitSystem: UnitSystem):
 
 export function formatResultProvenanceLabel(provenance: ResultProvenance | undefined): string {
   if (provenance?.kind === "opencae_core_fea") return "OpenCAE Core";
+  if (provenance?.kind === "analytical_benchmark") return "Analytical benchmark";
+  if (provenance?.kind === "local_estimate") return "Detailed local";
   return "OpenCAE Core";
 }
 

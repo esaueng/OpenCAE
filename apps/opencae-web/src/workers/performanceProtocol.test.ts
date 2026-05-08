@@ -35,6 +35,33 @@ describe("performance worker protocol", () => {
     expect(request.payload.frameIndexes).toEqual([0, 1, 2]);
   });
 
+  test("creates typed local solve requests for the performance worker", () => {
+    const request = createPerformanceWorkerRequest("solveLocalStudy", {
+      runId: "run-local-1",
+      study: {
+        id: "study-1",
+        projectId: "project-1",
+        name: "Static Stress",
+        type: "static_stress",
+        geometryScope: [],
+        materialAssignments: [],
+        namedSelections: [],
+        contacts: [],
+        constraints: [],
+        loads: [],
+        meshSettings: { preset: "medium", status: "complete" },
+        solverSettings: {},
+        validation: [],
+        runs: []
+      },
+      debugResults: true
+    });
+
+    expect(request.operation).toBe("solveLocalStudy");
+    expect(request.payload.runId).toBe("run-local-1");
+    expect(request.payload.debugResults).toBe(true);
+  });
+
   test("includes packed playback input buffers as worker request transferables", () => {
     const packedFields = packResultFieldsForPlayback([
       { id: "stress-0", runId: "run", type: "stress", location: "face", values: [10, 30], min: 0, max: 100, units: "MPa", frameIndex: 0, timeSeconds: 0 },
