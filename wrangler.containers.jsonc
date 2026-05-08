@@ -20,7 +20,7 @@
   },
   "containers": [
     {
-      "name": "opencae-core-cloud",
+      "name": "opencae-core-cloud-0.1.0",
       "class_name": "OpenCaeCoreCloudContainer",
       "image": "./services/opencae-core-cloud/Dockerfile",
       "image_build_context": ".",

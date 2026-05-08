@@ -157,7 +157,11 @@ async function coreCloudHealth(env: Env): Promise<Response> {
       coreCloudAvailable: coreCloudAvailable && artifactBound,
       containerBound,
       containerRunnerVersion: containerHealth.runnerVersion,
+      coreVersion: containerHealth.coreVersion,
+      solverCpuVersion: containerHealth.solverCpuVersion,
       supportedAnalysisTypes: containerHealth.supportedAnalysisTypes ?? [],
+      supportedSolverMethods: containerHealth.supportedSolverMethods ?? containerHealth.supportedSolvers ?? [],
+      supportedSolvers: containerHealth.supportedSolvers ?? containerHealth.supportedSolverMethods ?? [],
       solver: "opencae-core-cloud",
       label: "OpenCAE Core Cloud",
       [`no${"Calcu"}${"lix"}`]: true,
@@ -280,8 +284,12 @@ function hasCoreCloudBindings(env: Env): boolean {
 function fetchCoreCloudContainer(env: Env, pathname: string, init?: RequestInit): Promise<Response> {
   const binding = (env as CoreCloudEnv).CORE_CLOUD_CONTAINER;
   if (!binding) throw new Error("CORE_CLOUD_CONTAINER is not bound.");
-  const coreCloudContainer = getContainer(binding, "opencae-core-cloud");
+  const coreCloudContainer = getContainer(binding, coreCloudContainerInstanceName());
   return coreCloudContainer.fetch(new Request(`https://container.local${pathname}`, init));
+}
+
+function coreCloudContainerInstanceName(): string {
+  return `opencae-core-cloud-${EXPECTED_CORE_CLOUD_RUNNER_VERSION}`;
 }
 
 async function readCoreCloudArtifact(env: Env, key: string, fallback?: unknown): Promise<Response> {
