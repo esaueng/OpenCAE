@@ -22,20 +22,55 @@ export function readCloudflareConfigs(baseDir = rootDir) {
   return {
     defaultConfig: readWranglerConfig(resolve(baseDir, "wrangler.jsonc")),
     staticConfig: readWranglerConfig(resolve(baseDir, "wrangler.static.jsonc")),
-    localFirstConfig: readWranglerConfig(resolve(baseDir, "wrangler.local-first.jsonc"))
+    localFirstConfig: readWranglerConfig(resolve(baseDir, "wrangler.local-first.jsonc")),
+    containerConfig: readWranglerConfig(resolve(baseDir, "wrangler.containers.jsonc"))
   };
 }
 
-export function validateCloudflareConfigs({ defaultConfig, staticConfig, localFirstConfig }) {
+export function validateCloudflareConfigs({ defaultConfig, staticConfig, localFirstConfig, containerConfig }) {
   const failures = [];
 
   if (defaultConfig) validateProductionConfig("default", defaultConfig, failures);
+  if (containerConfig) validateCoreCloudContainerConfig("container", containerConfig, failures);
 
   validateNonProductionConfig("static", staticConfig, defaultConfig, failures);
   if (localFirstConfig) validateNonProductionConfig("local-first", localFirstConfig, defaultConfig, failures);
 
   if (failures.length > 0) {
     throw new Error(`Cloudflare config verification failed:\n- ${failures.join("\n- ")}`);
+  }
+}
+
+function validateCoreCloudContainerConfig(label, config, failures) {
+  if (config.name !== productionWorkerName) {
+    failures.push(`${label} config name must be "${productionWorkerName}", got "${String(config.name)}"`);
+  }
+  if (JSON.stringify(config).toLowerCase().includes("calculix")) {
+    failures.push(`${label} config must not reference CalculiX`);
+  }
+  if (JSON.stringify(config).includes("OpenCaeFeaContainer") || JSON.stringify(config).includes("FEA_CONTAINER")) {
+    failures.push(`${label} config must use CORE_CLOUD_CONTAINER and OpenCaeCoreCloudContainer`);
+  }
+  const container = Array.isArray(config.containers) ? config.containers[0] : undefined;
+  if (
+    !container ||
+    container.name !== "opencae-core-cloud" ||
+    container.class_name !== "OpenCaeCoreCloudContainer" ||
+    container.image !== "./services/opencae-core-cloud/Dockerfile"
+  ) {
+    failures.push(`${label} config must define the opencae-core-cloud container image and class`);
+  }
+  const binding = config.durable_objects?.bindings?.[0];
+  if (!binding || binding.name !== "CORE_CLOUD_CONTAINER" || binding.class_name !== "OpenCaeCoreCloudContainer") {
+    failures.push(`${label} config must bind CORE_CLOUD_CONTAINER to OpenCaeCoreCloudContainer`);
+  }
+  if (!Array.isArray(config.migrations) || !config.migrations.some((migration) => Array.isArray(migration?.new_sqlite_classes) && migration.new_sqlite_classes.includes("OpenCaeCoreCloudContainer"))) {
+    failures.push(`${label} config must add an OpenCaeCoreCloudContainer Durable Object migration`);
+  }
+  for (const productionDomain of productionDomains) {
+    if (!hasCustomDomainRoute(config, productionDomain)) {
+      failures.push(`${label} config must route ${productionDomain} as a custom domain`);
+    }
   }
 }
 

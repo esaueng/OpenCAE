@@ -1,5 +1,7 @@
 /// <reference types="./worker-configuration" />
 
+import { Container, getContainer } from "@cloudflare/containers";
+
 const jsonHeaders = {
   "content-type": "application/json; charset=utf-8",
   "cache-control": "no-store"
@@ -11,6 +13,16 @@ const cloudCoreUnavailable = {
   label: "OpenCAE Core Cloud",
   error: "OpenCAE Core Cloud is not provisioned in this Worker build."
 };
+
+export class OpenCaeCoreCloudContainer extends Container {
+  defaultPort = 8080;
+  sleepAfter = "10m";
+  envVars = {
+    NODE_ENV: "production"
+  };
+  enableInternet = false;
+  pingEndpoint = "/health";
+}
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -29,10 +41,14 @@ export default {
     }
 
     if (url.pathname === "/api/cloud-core/health" || url.pathname === "/api/cloud-fea/health") {
+      const proxied = proxyCoreCloudRequest(request, env, "/health");
+      if (proxied) return proxied;
       return Response.json(cloudCoreUnavailable, { status: 503, headers: jsonHeaders });
     }
 
     if (isCloudCoreRoute(url.pathname) || isLegacyCloudFeaRoute(url.pathname)) {
+      const proxied = proxyCoreCloudRequest(request, env, containerPathForCloudRoute(url.pathname));
+      if (proxied) return proxied;
       return Response.json(
         {
           ...cloudCoreUnavailable,
@@ -67,4 +83,18 @@ function isCloudCoreRoute(pathname: string): boolean {
 function isLegacyCloudFeaRoute(pathname: string): boolean {
   return pathname === "/api/cloud-fea/runs" ||
     /^\/api\/cloud-fea\/runs\/[^/]+\/(?:events|results)$/.test(pathname);
+}
+
+function proxyCoreCloudRequest(request: Request, env: Env, pathname: string): Promise<Response> | undefined {
+  const binding = (env as Env & { CORE_CLOUD_CONTAINER?: DurableObjectNamespace<OpenCaeCoreCloudContainer> }).CORE_CLOUD_CONTAINER;
+  if (!binding) return undefined;
+  const target = new URL(request.url);
+  target.pathname = pathname;
+  target.search = "";
+  return getContainer(binding, "opencae-core-cloud").fetch(new Request(target, request));
+}
+
+function containerPathForCloudRoute(pathname: string): string {
+  if (pathname === "/api/cloud-core/runs" || pathname === "/api/cloud-fea/runs") return "/solve";
+  return pathname.replace(/^\/api\/cloud-(?:core|fea)/, "");
 }
