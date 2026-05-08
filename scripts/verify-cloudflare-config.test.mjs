@@ -56,6 +56,17 @@ describe("Cloudflare deployment config guard", () => {
     );
   });
 
+  test("fails when container config loses the Core Cloud artifacts bucket", () => {
+    const defaultConfig = readConfig("wrangler.jsonc");
+    const staticConfig = readConfig("wrangler.static.jsonc");
+    const containerConfig = clone(readConfig("wrangler.containers.jsonc"));
+    delete containerConfig.r2_buckets;
+
+    expect(() => validateCloudflareConfigs({ defaultConfig, staticConfig, containerConfig })).toThrow(
+      /CORE_CLOUD_ARTIFACTS/
+    );
+  });
+
   test("fails when static and production configs share a Worker name", () => {
     const defaultConfig = readConfig("wrangler.jsonc");
     const staticConfig = clone(readConfig("wrangler.static.jsonc"));

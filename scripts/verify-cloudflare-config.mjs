@@ -64,6 +64,10 @@ function validateCoreCloudContainerConfig(label, config, failures) {
   if (!binding || binding.name !== "CORE_CLOUD_CONTAINER" || binding.class_name !== "OpenCaeCoreCloudContainer") {
     failures.push(`${label} config must bind CORE_CLOUD_CONTAINER to OpenCaeCoreCloudContainer`);
   }
+  const r2Binding = Array.isArray(config.r2_buckets) ? config.r2_buckets.find((bucket) => bucket?.binding === "CORE_CLOUD_ARTIFACTS") : undefined;
+  if (!r2Binding) {
+    failures.push(`${label} config must bind CORE_CLOUD_ARTIFACTS for run requests, events, and results`);
+  }
   if (!Array.isArray(config.migrations) || !config.migrations.some((migration) => Array.isArray(migration?.new_sqlite_classes) && migration.new_sqlite_classes.includes("OpenCaeCoreCloudContainer"))) {
     failures.push(`${label} config must add an OpenCaeCoreCloudContainer Durable Object migration`);
   }
