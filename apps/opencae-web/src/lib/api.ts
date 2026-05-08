@@ -335,8 +335,19 @@ async function runOpenCaeCoreCloudSimulation(study: Study, displayModel: Display
       message: payload.message ?? "OpenCAE Core Cloud simulation running."
     };
   } catch (error) {
-    throw new Error(OPENCAE_CORE_CLOUD_FAILURE_MESSAGE, { cause: error });
+    throw new Error(coreCloudFailureMessage(error), { cause: error });
   }
+}
+
+function coreCloudFailureMessage(error: unknown): string {
+  const message = messageFromUnknownError(error);
+  if (!message) return OPENCAE_CORE_CLOUD_FAILURE_MESSAGE;
+  if (message.includes("No local estimate fallback was used.")) return message;
+  return `${message.replace(/\.+$/, "")}. No local estimate fallback was used.`;
+}
+
+function messageFromUnknownError(error: unknown): string {
+  return error instanceof Error ? error.message : typeof error === "string" ? error : "";
 }
 
 function openCaeCoreCloudSolveRequest(runId: string, study: Study, displayModel: DisplayModel | undefined) {

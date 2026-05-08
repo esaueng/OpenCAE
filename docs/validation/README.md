@@ -35,7 +35,7 @@ Before deploying, verify the Cloudflare/Core Cloud configuration and runner vers
 ```sh
 pnpm verify:runner-version
 pnpm verify:cloudflare-config
-pnpm deploy:core-cloud:dry-run
+pnpm deploy:cloudflare:dry-run
 ```
 
 After deployment, validate the live Worker endpoints:

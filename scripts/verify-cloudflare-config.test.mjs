@@ -16,7 +16,7 @@ function clone(value) {
 }
 
 describe("Cloudflare deployment config guard", () => {
-  test("passes with browser-local production and static configs", () => {
+  test("passes with Core Cloud production and non-production static configs", () => {
     const defaultConfig = readConfig("wrangler.jsonc");
     const staticConfig = readConfig("wrangler.static.jsonc");
     const localFirstConfig = readConfig("wrangler.local-first.jsonc");
@@ -25,13 +25,13 @@ describe("Cloudflare deployment config guard", () => {
     expect(defaultConfig.name).toBe("opencae");
     expect(staticConfig.name).toBe("opencae-static");
     expect(localFirstConfig.name).toBe("opencae-local-first");
-    expect(defaultConfig.containers).toBeUndefined();
-    expect(defaultConfig.durable_objects).toBeUndefined();
-    expect(defaultConfig.migrations).toEqual([{ tag: "v2-delete-cloud-fea-container", deleted_classes: ["OpenCaeFeaContainer"] }]);
+    expect(defaultConfig.containers[0].name).toBe(expectedContainerInstanceName);
+    expect(defaultConfig.durable_objects.bindings[0]).toEqual({ name: "CORE_CLOUD_CONTAINER", class_name: "OpenCaeCoreCloudContainer" });
+    expect(defaultConfig.migrations).toEqual([{ tag: "v3-opencae-core-cloud-container", new_sqlite_classes: ["OpenCaeCoreCloudContainer"] }]);
     expect(() => validateCloudflareConfigs({ defaultConfig, staticConfig, localFirstConfig, containerConfig })).not.toThrow();
   });
 
-  test("default Workers deploy stays local-first while container deploy targets Core Cloud", () => {
+  test("default Workers deploy targets Core Cloud while local-first stays explicit", () => {
     const packageJson = JSON.parse(readFileSync(resolve(rootDir, "package.json"), "utf8"));
     const buildScript = packageJson.scripts.build;
 
@@ -39,9 +39,11 @@ describe("Cloudflare deployment config guard", () => {
     expect(buildScript).toContain("pnpm --filter @opencae/web build");
     expect(buildScript).not.toContain("@cloudflare/containers");
     expect(buildScript).not.toContain("containers:build");
-    expect(packageJson.scripts["deploy:cloudflare"]).toContain("wrangler deploy --config wrangler.jsonc");
-    expect(packageJson.scripts["deploy:cloudflare"]).not.toContain("verify:runner-version");
-    expect(packageJson.scripts["deploy:cloudflare"]).not.toContain("--containers-rollout");
+    expect(packageJson.scripts["deploy:cloudflare"]).toContain("wrangler deploy --config wrangler.containers.jsonc");
+    expect(packageJson.scripts["deploy:cloudflare"]).toContain("verify:runner-version");
+    expect(packageJson.scripts["deploy:cloudflare"]).toContain("--containers-rollout=immediate");
+    expect(packageJson.scripts["deploy:cloudflare:dry-run"]).toContain("wrangler deploy --config wrangler.containers.jsonc --dry-run");
+    expect(packageJson.scripts["deploy:cloudflare:local-first"]).toContain("wrangler.local-first.jsonc");
     expect(packageJson.scripts["deploy:core-cloud"]).toContain("wrangler deploy --config wrangler.containers.jsonc");
     expect(packageJson.scripts["deploy:core-cloud"]).toContain("verify:runner-version");
     expect(packageJson.scripts["containers:build:core-cloud"]).toContain("services/opencae-core-cloud");
@@ -59,6 +61,44 @@ describe("Cloudflare deployment config guard", () => {
     expect(workerSource).toContain(`EXPECTED_CORE_CLOUD_RUNNER_VERSION = "${expectedRunnerVersion}"`);
     expect(verifyRunnerSource).toContain("RUNNER_VERSION");
     expect(verifyRunnerSource).toContain("services/opencae-core-cloud/RUNNER_VERSION");
+  });
+
+  test("Core Cloud Docker build installs git before cloning Core", () => {
+    const dockerfile = readFileSync(resolve(rootDir, "services/opencae-core-cloud/Dockerfile"), "utf8");
+    const installGitIndex = dockerfile.indexOf("apt-get install -y --no-install-recommends git");
+    const ensureCoreIndex = dockerfile.indexOf("RUN pnpm ensure:core");
+    const coreInstallIndex = dockerfile.indexOf("RUN pnpm --dir /opencae-core install --frozen-lockfile --prod=false");
+    const nodeTypesIndex = dockerfile.indexOf("RUN pnpm --dir /opencae-core add -Dw @types/node@22.19.17");
+    const linkBuildToolsIndex = dockerfile.indexOf("ln -s /opencae-core/node_modules/.bin/tsc services/opencae-core-cloud/node_modules/.bin/tsc");
+    const linkTypescriptIndex = dockerfile.indexOf("ln -s /opencae-core/node_modules/typescript services/opencae-core-cloud/node_modules/typescript");
+    const linkCoreIndex = dockerfile.indexOf("ln -s /opencae-core/packages/core services/opencae-core-cloud/node_modules/@opencae/core");
+    const linkSolverIndex = dockerfile.indexOf("ln -s /opencae-core/packages/solver-cpu services/opencae-core-cloud/node_modules/@opencae/solver-cpu");
+    const coreBuildIndex = dockerfile.indexOf("RUN pnpm --dir /opencae-core --filter @opencae/core build");
+    const serviceInstallIndex = dockerfile.indexOf("RUN pnpm install --frozen-lockfile --prod=false");
+    const serviceBuildIndex = dockerfile.indexOf("RUN pnpm --filter @opencae/core-cloud build");
+    const runtimeNodeModulesIndex = dockerfile.indexOf("ln -s /opencae-core/packages/core node_modules/@opencae/core");
+
+    expect(installGitIndex).toBeGreaterThanOrEqual(0);
+    expect(ensureCoreIndex).toBeGreaterThan(installGitIndex);
+    expect(coreInstallIndex).toBeGreaterThan(ensureCoreIndex);
+    expect(nodeTypesIndex).toBeGreaterThan(coreInstallIndex);
+    expect(linkBuildToolsIndex).toBeGreaterThan(nodeTypesIndex);
+    expect(linkTypescriptIndex).toBeGreaterThan(nodeTypesIndex);
+    expect(linkCoreIndex).toBeGreaterThan(nodeTypesIndex);
+    expect(linkSolverIndex).toBeGreaterThan(nodeTypesIndex);
+    expect(coreBuildIndex).toBeGreaterThan(coreInstallIndex);
+    expect(serviceInstallIndex).toBeGreaterThan(coreInstallIndex);
+    expect(serviceBuildIndex).toBeGreaterThan(linkBuildToolsIndex);
+    expect(runtimeNodeModulesIndex).toBeGreaterThan(serviceBuildIndex);
+  });
+
+  test("Core Cloud service declares its TypeScript build dependency", () => {
+    const packageJson = JSON.parse(readFileSync(resolve(rootDir, "services/opencae-core-cloud/package.json"), "utf8"));
+    const tsconfig = JSON.parse(readFileSync(resolve(rootDir, "services/opencae-core-cloud/tsconfig.json"), "utf8"));
+
+    expect(packageJson.scripts.build).toBe("tsc -p tsconfig.json");
+    expect(packageJson.devDependencies?.typescript).toBeDefined();
+    expect(tsconfig.include).toEqual(["src/index.ts", "src/server.ts"]);
   });
 
   test("fails when container config references the legacy FEA container", () => {
@@ -130,23 +170,23 @@ describe("Cloudflare deployment config guard", () => {
     );
   });
 
-  test("fails when the default production config regains a container binding", () => {
+  test("fails when the default production config loses the Core Cloud container binding", () => {
     const defaultConfig = clone(readConfig("wrangler.jsonc"));
     const staticConfig = readConfig("wrangler.static.jsonc");
-    defaultConfig.durable_objects = { bindings: [{ name: "FEA_CONTAINER", class_name: "OpenCaeFeaContainer" }] };
+    delete defaultConfig.durable_objects;
 
     expect(() => validateCloudflareConfigs({ defaultConfig, staticConfig })).toThrow(
-      /must not bind container solvers/
+      /CORE_CLOUD_CONTAINER/
     );
   });
 
-  test("fails when the default production config adds a non-deletion durable object migration", () => {
+  test("fails when the default production config loses the Core Cloud durable object migration", () => {
     const defaultConfig = clone(readConfig("wrangler.jsonc"));
     const staticConfig = readConfig("wrangler.static.jsonc");
     defaultConfig.migrations = [{ tag: "v3", new_sqlite_classes: ["OtherClass"] }];
 
     expect(() => validateCloudflareConfigs({ defaultConfig, staticConfig })).toThrow(
-      /only include the legacy container deletion migration/
+      /OpenCaeCoreCloudContainer Durable Object migration/
     );
   });
 
