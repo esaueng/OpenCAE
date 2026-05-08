@@ -171,6 +171,7 @@ describe("api", () => {
 
       expect(requestBody).toEqual({ sample, analysisType: "dynamic_structural" });
       expect(response.project.studies[0]?.type).toBe("dynamic_structural");
+      expect(response.project.studies[0]?.loads[0]?.parameters.direction).toEqual([0, -1, 0]);
       expect(response.project.studies[0]?.runs[0]?.id).toBe(`run-${sample}-dynamic-seeded`);
       expect(response.results?.summary.transient).toMatchObject({
         analysisType: "dynamic_structural",
