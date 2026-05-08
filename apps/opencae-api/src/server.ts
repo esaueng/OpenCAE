@@ -23,7 +23,7 @@ import {
   type Study,
   type StudyRun
 } from "@opencae/schema";
-import { trySolveOpenCaeCoreStudy } from "@opencae/core-adapter";
+import { hasActualCoreVolumeMesh, openCaeCoreEligibility, trySolveOpenCaeCoreStudy } from "@opencae/core-adapter";
 import { FileSystemObjectStorageProvider } from "@opencae/storage";
 import { validateStaticStressStudy, validateStudy } from "@opencae/study-core";
 import {
@@ -391,6 +391,7 @@ api.post("/api/studies/:studyId/runs", async (request, reply) => {
   const studySnapshot = structuredClone(study);
   const project = db.getProject(studySnapshot.projectId);
   const displayModel = project ? await displayModelForProject(project) : blankDisplayModel();
+  const eligibility = openCaeCoreEligibility(studySnapshot, displayModel);
   const runId = `run-${crypto.randomUUID()}`;
   const jobId = `job-${crypto.randomUUID()}`;
   const run: StudyRun = {
@@ -399,7 +400,7 @@ api.post("/api/studies/:studyId/runs", async (request, reply) => {
     status: "queued",
     jobId,
     meshRef: studySnapshot.meshSettings.meshRef,
-    solverBackend: studySnapshot.type === "dynamic_structural" ? "opencae-core-dynamic-tet4" : "opencae-core-cpu-tet4",
+    solverBackend: coreSolverBackendForRun(studySnapshot, displayModel, eligibility),
     solverVersion: "0.1.0",
     startedAt: new Date().toISOString(),
     diagnostics: []
@@ -786,6 +787,14 @@ function collapseWhitespace(value: string): string {
     if (cleaned.length >= 128) break;
   }
   return cleaned.trim();
+}
+
+function coreSolverBackendForRun(study: Study, displayModel: DisplayModel, eligibility: ReturnType<typeof openCaeCoreEligibility>): string {
+  if (!eligibility.ok) return "opencae-core-ineligible";
+  if (hasActualCoreVolumeMesh(study, displayModel)) {
+    return study.type === "dynamic_structural" ? "opencae-core-mdof-tet" : "opencae-core-sparse-tet";
+  }
+  return study.type === "dynamic_structural" ? "opencae-core-preview-sdof" : "opencae-core-preview-tet4";
 }
 
 async function ensureSampleArtifacts(): Promise<void> {

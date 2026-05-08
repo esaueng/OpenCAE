@@ -453,10 +453,41 @@ describe("api", () => {
 
     expect(healthLogs).toEqual([]);
     expect(response.streamUrl).toMatch(/^local:run-local-/);
-    expect((response.run as { solverBackend?: string }).solverBackend).toBe("opencae-core-cpu-tet4");
+    expect((response.run as { solverBackend?: string }).solverBackend).toBe("opencae-core-preview-tet4");
     expect(seen.map((event) => event.message).join(" ")).toContain("OpenCAE Core");
-    expect(results.summary.provenance?.kind).toBe("opencae_core_fea");
+    expect(results.summary.provenance?.solver).toBe("opencae-core-preview-tet4");
     expect(fetchMock.mock.calls.every(([input]) => !String(input).includes("/api/cloud-fea"))).toBe(true);
+  });
+
+  test("fails local OpenCAE Core runs for complex geometry instead of falling back silently", async () => {
+    const complexDisplayModel: DisplayModel = {
+      ...coreDisplayModel,
+      id: "display-bracket-demo",
+      name: "Bracket demo body",
+      faces: [
+        { id: "selection-face-1", label: "Base mounting holes", color: "#94a3b8", center: [0, 0, 0], normal: [0, 0, 1], stressValue: 0 },
+        { id: "selection-face-2", label: "Rib side face", color: "#94a3b8", center: [1, 1, 0], normal: [0, 0, 1], stressValue: 0 }
+      ]
+    };
+    const coreStudy = {
+      ...study,
+      materialAssignments: [{ id: "assign-1", materialId: "mat-aluminum-6061", selectionRef: "selection-body-1", status: "complete" }],
+      constraints: [{ id: "constraint-1", type: "fixed", selectionRef: "selection-face-1", parameters: {}, status: "complete" }],
+      loads: [{ id: "load-1", type: "force", selectionRef: "selection-face-2", parameters: { value: 500, units: "N", direction: [0, -1, 0] }, status: "complete" }],
+      meshSettings: { preset: "medium", status: "complete", meshRef: "project-1/mesh/mesh-summary.json" },
+      solverSettings: { backend: "opencae_core", fidelity: "standard" }
+    } as unknown as Study;
+    vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new TypeError("API unavailable"))));
+
+    const response = await runSimulation("study-1", coreStudy, complexDisplayModel);
+    const seen: RunEvent[] = [];
+    const source = subscribeToRun(response.run.id, (event) => seen.push(event));
+    await vi.waitFor(() => expect(seen.some((event) => event.type === "error")).toBe(true), { timeout: 1000 });
+    source.close();
+
+    expect((response.run as { status?: string }).status).toBe("failed");
+    expect(response.message).toMatch(/actual Core volume mesh|Cloud FEA/i);
+    expect(seen.map((event) => event.message).join(" ")).toMatch(/actual Core volume mesh|Cloud FEA/i);
   });
 
   test("routes legacy Cloud FEA dynamic studies to OpenCAE Core dynamic locally", async () => {
@@ -490,12 +521,12 @@ describe("api", () => {
     source.close();
     const results = await getResults(response.run.id);
 
-    expect((response.run as { solverBackend?: string }).solverBackend).toBe("opencae-core-dynamic-tet4");
+    expect((response.run as { solverBackend?: string }).solverBackend).toBe("opencae-core-preview-sdof");
     expect(response.message).toContain("OpenCAE Core simulation running locally");
     expect(seen.map((event) => event.message).join(" ")).toContain("OpenCAE Core dynamic");
     expect(results.summary.transient?.frameCount).toBe(21);
     expect(results.fields.some((field) => field.type === "stress" && field.frameIndex === 20)).toBe(true);
-    expect(results.summary.provenance?.solver).toBe("opencae-core-dynamic-tet4");
+    expect(results.summary.provenance?.solver).toBe("opencae-core-preview-sdof");
     expect(fetchMock.mock.calls.every(([input]) => !String(input).includes("/api/cloud-fea"))).toBe(true);
   });
 

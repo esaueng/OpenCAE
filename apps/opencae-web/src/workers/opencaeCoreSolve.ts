@@ -1,4 +1,7 @@
 export {
+  hasActualCoreVolumeMesh,
+  isComplexGeometry,
+  isSimpleBlockLikeDisplayModel,
   normalizeSolverBackend,
   openCaeCoreEligibility,
   trySolveOpenCaeCoreStudy,

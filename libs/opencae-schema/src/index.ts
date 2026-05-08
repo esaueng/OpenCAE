@@ -114,8 +114,8 @@ export const ResultProvenanceSchema = z.object({
   kind: z.enum(["opencae_core_fea", "local_estimate", "analytical_benchmark"]),
   solver: z.string(),
   solverVersion: z.string(),
-  meshSource: z.enum(["opencae_core_tet4", "structured_block", "mock", "unknown"]),
-  resultSource: z.enum(["computed", "generated"]),
+  meshSource: z.enum(["opencae_core_tet4", "actual_volume_mesh", "structured_block", "structured_block_proxy", "display_bounds_proxy", "mock", "unknown"]),
+  resultSource: z.enum(["computed", "computed_preview", "generated"]),
   units: z.string(),
   renderCoordinateSpace: z.string().optional(),
   integrationMethod: z.string().optional(),
@@ -159,8 +159,27 @@ export const MeshSettingsSchema = z.object({
       elements: z.number(),
       warnings: z.array(z.string()),
       analysisSampleCount: z.number().optional(),
-      quality: MeshQualitySchema.optional()
+      quality: MeshQualitySchema.optional(),
+      source: z.string().optional(),
+      units: z.string().optional(),
+      density: z.record(z.unknown()).optional(),
+      solverCoordinateSpace: z.string().optional(),
+      resultSampleCoordinateSpace: z.string().optional(),
+      artifacts: z
+        .object({
+          meshConnectivity: z
+            .object({
+              connectedComponents: z.number().int().positive().optional()
+            })
+            .optional(),
+          actualCoreModel: z.unknown().optional(),
+          coreModel: z.unknown().optional(),
+          volumeMesh: z.unknown().optional()
+        })
+        .passthrough()
+        .optional()
     })
+    .passthrough()
     .optional()
 });
 
@@ -257,6 +276,15 @@ export const ResultSummarySchema = z.object({
   reactionForce: z.number(),
   reactionForceUnits: z.string(),
   provenance: ResultProvenanceSchema.optional(),
+  diagnostics: z.array(DiagnosticSchema).default([]).optional(),
+  loadSummary: z
+    .object({
+      appliedLoadMagnitude: z.number().optional(),
+      peakReactionForce: z.number().optional(),
+      currentFrameReactionForce: z.number().optional(),
+      reactionForceSource: z.enum(["computed", "applied_load_estimate", "unavailable"]).optional()
+    })
+    .optional(),
   transient: z
     .object({
       analysisType: z.literal("dynamic_structural"),
