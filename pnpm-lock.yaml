@@ -56,6 +56,9 @@ importers:
       '@opencae/schema':
         specifier: workspace:*
         version: link:../../libs/opencae-schema
+      '@opencae/solver-service':
+        specifier: workspace:*
+        version: link:../../services/opencae-solver-service
       '@opencae/storage':
         specifier: workspace:*
         version: link:../../libs/opencae-storage
@@ -90,6 +93,9 @@ importers:
       '@opencae/schema':
         specifier: workspace:*
         version: link:../../libs/opencae-schema
+      '@opencae/solver-service':
+        specifier: workspace:*
+        version: link:../../services/opencae-solver-service
       '@opencae/study-core':
         specifier: workspace:*
         version: link:../../libs/opencae-study-core
@@ -290,6 +296,27 @@ importers:
       '@opencae/storage':
         specifier: workspace:*
         version: link:../../libs/opencae-storage
+
+  services/opencae-solver-service:
+    dependencies:
+      '@opencae/db':
+        specifier: workspace:*
+        version: link:../../libs/opencae-db
+      '@opencae/materials':
+        specifier: workspace:*
+        version: link:../../libs/opencae-materials
+      '@opencae/schema':
+        specifier: workspace:*
+        version: link:../../libs/opencae-schema
+      '@opencae/solver-contract':
+        specifier: workspace:*
+        version: link:../../libs/opencae-solver-contract
+      '@opencae/storage':
+        specifier: workspace:*
+        version: link:../../libs/opencae-storage
+      '@opencae/study-core':
+        specifier: workspace:*
+        version: link:../../libs/opencae-study-core
 
 packages:
 

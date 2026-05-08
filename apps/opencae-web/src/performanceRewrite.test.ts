@@ -33,11 +33,11 @@ describe("Worker UI performance rewrite boundaries", () => {
     expect(workspaceSource).not.toContain('import { CadViewer');
   });
 
-  test("keeps legacy local solver code out of the browser API path", () => {
+  test("keeps detailed local solver code behind worker helpers in the browser API path", () => {
     expect(apiSource).not.toContain(`from "${removedSolverPackage}"`);
     expect(apiSource).toContain("trySolveOpenCaeCoreStudy");
-    expect(apiSource).not.toContain(removedWorkerSolver);
-    expect(apiSource).not.toContain(removedFallbackSolver);
+    expect(apiSource).toContain(removedWorkerSolver);
+    expect(apiSource).toContain(removedFallbackSolver);
   });
 
   test("keeps OpenCAE Core dynamic integration in the Core solver package", () => {

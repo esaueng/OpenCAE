@@ -1,10 +1,10 @@
 import type { DisplayModel, Load, Project } from "@opencae/schema";
 import { ProjectSchema } from "@opencae/schema";
 import { bracketDemoProject, bracketDisplayModel } from "@opencae/db/sample-data";
-import { trySolveOpenCaeCoreStudy } from "@opencae/core-adapter";
 import { stlDimensionsFromBase64 } from "@opencae/units";
 import type { EmbeddedModelFile, LocalResultBundle } from "./projectFile";
 import type { SampleAnalysisType, SampleModelId, SampleProjectResponse } from "./lib/api";
+import { fallbackSolveLocalStudy } from "./workers/localSolve";
 
 const SAMPLE_META: Record<SampleModelId, { projectName: string; modelName: string; filename: string; displayName: string; dimensions: DisplayModel["dimensions"] }> = {
   bracket: {
@@ -153,7 +153,7 @@ function dynamicSampleRun(sample: SampleModelId, projectId: string, studyId: str
     meshRef: `${projectId}/mesh/mesh-summary.json`,
     resultRef: `${projectId}/results/${runId}/results.json`,
     reportRef: `${projectId}/reports/${runId}/report.html`,
-    solverBackend: "opencae-core-dynamic-tet4",
+    solverBackend: "local-dynamic-newmark",
     solverVersion: "0.1.0",
     startedAt: now,
     finishedAt: now,
@@ -165,14 +165,12 @@ async function dynamicSampleResults(project: Project): Promise<LocalResultBundle
   const study = project.studies[0];
   const run = study?.runs[0];
   if (!study || !run) return undefined;
-  const displayModel = sampleDisplayModelFor((project.geometryFiles[0]?.metadata.sampleModel as SampleModelId | undefined) ?? "bracket");
-  const solved = trySolveOpenCaeCoreStudy({ study, runId: run.id, displayModel });
-  if (!solved.ok) return undefined;
+  const solved = await fallbackSolveLocalStudy({ study, runId: run.id });
   return {
     activeRunId: run.id,
     completedRunId: run.id,
-    summary: solved.result.summary,
-    fields: solved.result.fields
+    summary: solved.summary,
+    fields: solved.fields
   };
 }
 

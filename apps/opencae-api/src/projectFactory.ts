@@ -391,7 +391,7 @@ function sampleRunsFor(
     meshRef: `${projectId}/mesh/mesh-summary.json`,
     resultRef: `${projectId}/results/${runId}/results.json`,
     reportRef: `${projectId}/reports/${runId}/report.html`,
-    solverBackend: "opencae-core-dynamic-tet4",
+    solverBackend: "local-dynamic-newmark",
     solverVersion: "0.1.0",
     startedAt: now,
     finishedAt: now,
