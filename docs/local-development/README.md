@@ -9,7 +9,7 @@ This repo requires a sibling OpenCAE Core checkout for every install and build:
 
 Clone `https://github.com/esaueng/OpenCAE-Core` into `../opencae-core` before running `pnpm install` for the first local setup. The pnpm workspace resolves `@opencae/core`, `@opencae/solver-cpu`, and other Core packages from that live checkout, so rebuilding this repo picks up local Core changes.
 
-If `../opencae-core` is missing in a build environment, `pnpm build:core` clones it, reruns `pnpm install --frozen-lockfile`, and builds the sibling Core workspace.
+If `../opencae-core` is missing in a build environment, `pnpm build:core` clones it, reruns `pnpm install --frozen-lockfile`, and builds the sibling Core packages consumed through this workspace.
 
 Install dependencies and run the local API plus web app:
 
