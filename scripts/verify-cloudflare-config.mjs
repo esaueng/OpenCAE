@@ -5,7 +5,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const productionDomain = "alpha-cae.esau.app";
+const productionDomains = ["alpha-cae.esau.app", "cae.esau.app"];
 const productionWorkerName = "opencae-alpha";
 const productionDeletionMigration = { tag: "v2-delete-cloud-fea-container", deleted_classes: ["OpenCaeFeaContainer"] };
 
@@ -54,8 +54,10 @@ function validateProductionConfig(label, config, failures) {
     failures.push(`${label} config may only include the Cloud FEA container deletion migration`);
   }
 
-  if (!hasCustomDomainRoute(config, productionDomain)) {
-    failures.push(`${label} config must route ${productionDomain} as a custom domain`);
+  for (const productionDomain of productionDomains) {
+    if (!hasCustomDomainRoute(config, productionDomain)) {
+      failures.push(`${label} config must route ${productionDomain} as a custom domain`);
+    }
   }
 
   const runWorkerFirst = config.assets?.run_worker_first;
@@ -69,8 +71,10 @@ function validateNonProductionConfig(label, config, productionConfig, failures) 
     failures.push(`${label} config must not share the production Worker name "${productionConfig?.name ?? productionWorkerName}"`);
   }
 
-  if (hasRoutePattern(config, productionDomain)) {
-    failures.push(`${label} config must not route ${productionDomain}`);
+  for (const productionDomain of productionDomains) {
+    if (hasRoutePattern(config, productionDomain)) {
+      failures.push(`${label} config must not route ${productionDomain}`);
+    }
   }
 }
 

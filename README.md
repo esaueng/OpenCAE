@@ -48,14 +48,14 @@ pnpm verify:perf
 
 ## Cloudflare Worker Deploy
 
-The production Cloudflare target for `alpha-cae.esau.app` serves the Vite web app from Workers Static Assets. The default deploy path builds the web app, deploys the Worker asset binding, enables SPA fallback routing, and does not require `FEA_CONTAINER` or `@cloudflare/containers`. Simulations run in the browser through OpenCAE Core CPU Tet4 where eligible, with Detailed local fallback for unsupported cases.
+The production Cloudflare targets for `alpha-cae.esau.app` and `cae.esau.app` serve the Vite web app from Workers Static Assets. The default deploy path builds the web app, deploys the Worker asset binding, enables SPA fallback routing, and does not require `FEA_CONTAINER` or `@cloudflare/containers`. Simulations run in the browser through OpenCAE Core CPU Tet4 where eligible, with Detailed local fallback for unsupported cases.
 
 ```bash
 pnpm install
 pnpm deploy:cloudflare
 ```
 
-Wrangler uses [wrangler.jsonc](wrangler.jsonc) for the production app domain by default. That config intentionally omits container bindings and returns a local-first API message for `/api/*` routes because the browser app owns simulation execution.
+Wrangler uses [wrangler.jsonc](wrangler.jsonc) for the production app domains by default. That config intentionally omits container bindings and returns a local-first API message for `/api/*` routes because the browser app owns simulation execution.
 
 The legacy container config remains available for reference and manual experiments:
 
@@ -71,7 +71,7 @@ pnpm deploy:cloudflare:static:dry-run
 pnpm deploy:cloudflare:static
 ```
 
-That static path uses [wrangler.static.jsonc](wrangler.static.jsonc), which targets `opencae-static` and intentionally omits the `containers` section and the production custom domain route.
+That static path uses [wrangler.static.jsonc](wrangler.static.jsonc), which targets `opencae-static` and intentionally omits the `containers` section and the production custom domain routes.
 
 For a local-first/static Worker deploy under a separate config, use:
 

@@ -31,5 +31,9 @@ export default {
     }
 
     return env.ASSETS.fetch(request);
+  },
+
+  async queue(): Promise<void> {
+    return undefined;
   }
 } satisfies ExportedHandler<Env>;
