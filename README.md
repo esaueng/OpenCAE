@@ -48,7 +48,7 @@ pnpm verify:perf
 
 ## Cloudflare Worker Deploy
 
-The production Cloudflare targets for `alpha-cae.esau.app` and `cae.esau.app` serve the Vite web app from Workers Static Assets. The default deploy path builds the web app, deploys the Worker asset binding, enables SPA fallback routing, and does not require `FEA_CONTAINER` or `@cloudflare/containers`. Simulations run in the browser through OpenCAE Core CPU Tet4.
+The production Cloudflare target for `cae.esau.app` serves the Vite web app from Workers Static Assets. The default deploy path builds the web app, deploys the Worker asset binding, enables SPA fallback routing, and does not require `FEA_CONTAINER` or `@cloudflare/containers`. Simulations run in the browser through OpenCAE Core CPU Tet4.
 
 ```bash
 pnpm install

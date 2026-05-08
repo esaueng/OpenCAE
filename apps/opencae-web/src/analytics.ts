@@ -1,6 +1,6 @@
 import { init } from "@plausible-analytics/tracker/plausible.js";
 
-const DEFAULT_PLAUSIBLE_DOMAIN = "alpha-cae.esau.app";
+const DEFAULT_PLAUSIBLE_DOMAIN = "cae.esau.app";
 
 export function initPlausibleAnalytics() {
   if (typeof window === "undefined") return;

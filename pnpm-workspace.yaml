@@ -1,7 +1,5 @@
 packages:
-  - "../opencae-core/packages/core"
-  - "../opencae-core/packages/examples"
-  - "../opencae-core/packages/solver-cpu"
+  - "packages/*"
   - "apps/*"
   - "libs/*"
   - "services/*"
