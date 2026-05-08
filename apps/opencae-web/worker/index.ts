@@ -24,7 +24,7 @@ export default {
     if (url.pathname.startsWith("/api/")) {
       return Response.json(
         {
-          error: "The Cloudflare Worker serves the local-first web app only. Simulations run in the browser with OpenCAE Core or Detailed local fallback."
+          error: "The Cloudflare Worker serves the local-first web app only. Simulations run in the browser with OpenCAE Core."
         },
         { status: 503, headers: jsonHeaders }
       );

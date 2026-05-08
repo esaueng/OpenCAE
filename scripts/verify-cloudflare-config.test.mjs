@@ -16,19 +16,16 @@ function clone(value) {
 describe("Cloudflare deployment config guard", () => {
   test("passes with browser-local production and static configs", () => {
     const defaultConfig = readConfig("wrangler.jsonc");
-    const containersConfig = readConfig("wrangler.containers.jsonc");
     const staticConfig = readConfig("wrangler.static.jsonc");
     const localFirstConfig = readConfig("wrangler.local-first.jsonc");
 
     expect(defaultConfig.name).toBe("opencae");
-    expect(containersConfig.name).toBe("opencae");
-    expect(containersConfig.containers?.[0]?.name).toBe("opencae-opencaefeacontainer");
     expect(staticConfig.name).toBe("opencae-static");
     expect(localFirstConfig.name).toBe("opencae-local-first");
     expect(defaultConfig.containers).toBeUndefined();
     expect(defaultConfig.durable_objects).toBeUndefined();
     expect(defaultConfig.migrations).toEqual([{ tag: "v2-delete-cloud-fea-container", deleted_classes: ["OpenCaeFeaContainer"] }]);
-    expect(() => validateCloudflareConfigs({ defaultConfig, containersConfig, staticConfig, localFirstConfig })).not.toThrow();
+    expect(() => validateCloudflareConfigs({ defaultConfig, staticConfig, localFirstConfig })).not.toThrow();
   });
 
   test("default Workers deploy no longer builds or pushes a container image", () => {
@@ -38,6 +35,8 @@ describe("Cloudflare deployment config guard", () => {
     expect(packageJson.scripts["deploy:cloudflare"]).toContain("wrangler deploy --config wrangler.jsonc");
     expect(packageJson.scripts["deploy:cloudflare"]).not.toContain("verify:runner-version");
     expect(packageJson.scripts["deploy:cloudflare"]).not.toContain("--containers-rollout");
+    expect(packageJson.scripts["deploy:cloudflare:containers"]).toBeUndefined();
+    expect(packageJson.scripts["containers:build"]).toBeUndefined();
     expect(packageJson.dependencies?.["@cloudflare/containers"]).toBeUndefined();
   });
 
@@ -68,7 +67,7 @@ describe("Cloudflare deployment config guard", () => {
     defaultConfig.durable_objects = { bindings: [{ name: "FEA_CONTAINER", class_name: "OpenCaeFeaContainer" }] };
 
     expect(() => validateCloudflareConfigs({ defaultConfig, staticConfig })).toThrow(
-      /must not bind Cloud FEA containers/
+      /must not bind container solvers/
     );
   });
 
@@ -78,7 +77,7 @@ describe("Cloudflare deployment config guard", () => {
     defaultConfig.migrations = [{ tag: "v3", new_sqlite_classes: ["OtherClass"] }];
 
     expect(() => validateCloudflareConfigs({ defaultConfig, staticConfig })).toThrow(
-      /only include the Cloud FEA container deletion migration/
+      /only include the legacy container deletion migration/
     );
   });
 

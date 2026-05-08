@@ -21,20 +21,18 @@ export function parseJsonc(source, label = "JSONC input") {
 export function readCloudflareConfigs(baseDir = rootDir) {
   return {
     defaultConfig: readWranglerConfig(resolve(baseDir, "wrangler.jsonc")),
-    containersConfig: readWranglerConfig(resolve(baseDir, "wrangler.containers.jsonc")),
     staticConfig: readWranglerConfig(resolve(baseDir, "wrangler.static.jsonc")),
     localFirstConfig: readWranglerConfig(resolve(baseDir, "wrangler.local-first.jsonc"))
   };
 }
 
-export function validateCloudflareConfigs({ defaultConfig, containersConfig, staticConfig, localFirstConfig }) {
+export function validateCloudflareConfigs({ defaultConfig, staticConfig, localFirstConfig }) {
   const failures = [];
 
   if (defaultConfig) validateProductionConfig("default", defaultConfig, failures);
 
   validateNonProductionConfig("static", staticConfig, defaultConfig, failures);
   if (localFirstConfig) validateNonProductionConfig("local-first", localFirstConfig, defaultConfig, failures);
-  if (containersConfig) validateReferenceContainerConfig("legacy containers", containersConfig, failures);
 
   if (failures.length > 0) {
     throw new Error(`Cloudflare config verification failed:\n- ${failures.join("\n- ")}`);
@@ -47,11 +45,11 @@ function validateProductionConfig(label, config, failures) {
   }
 
   if (config.durable_objects || config.containers) {
-    failures.push(`${label} config must not bind Cloud FEA containers; browser OpenCAE Core is the default runtime`);
+    failures.push(`${label} config must not bind container solvers; browser OpenCAE Core is the runtime`);
   }
 
   if (!isAllowedProductionMigration(config.migrations)) {
-    failures.push(`${label} config may only include the Cloud FEA container deletion migration`);
+    failures.push(`${label} config may only include the legacy container deletion migration`);
   }
 
   for (const productionDomain of productionDomains) {
@@ -76,20 +74,6 @@ function validateNonProductionConfig(label, config, productionConfig, failures) 
       failures.push(`${label} config must not route ${productionDomain}`);
     }
   }
-}
-
-function validateReferenceContainerConfig(_label, _config, _failures) {
-  if (_config.name !== productionWorkerName) {
-    _failures.push(`${_label} config name must match "${productionWorkerName}" when deployed from the alpha Workers project`);
-  }
-
-  const containerName = _config.containers?.[0]?.name;
-  if (containerName !== `${productionWorkerName}-opencaefeacontainer`) {
-    _failures.push(`${_label} container application name must be "${productionWorkerName}-opencaefeacontainer", got "${String(containerName)}"`);
-  }
-
-  // Legacy container config is kept as a reference/manual experiment artifact.
-  // The default production deploy is intentionally validated by wrangler.jsonc.
 }
 
 function readWranglerConfig(path) {

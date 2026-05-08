@@ -133,18 +133,6 @@ describe("RightPanel payload mass controls", () => {
   });
 
   test("shows result provenance labels in result metadata", () => {
-    const localHtml = renderPanel("results", {
-      resultSummary: {
-        ...resultSummary,
-        provenance: { kind: "local_estimate", solver: "opencae-local-heuristic-surface", solverVersion: "0.1.0", meshSource: "mock", resultSource: "generated", units: "mm-N-s-MPa" }
-      }
-    });
-    const beamHtml = renderPanel("results", {
-      resultSummary: {
-        ...resultSummary,
-        provenance: { kind: "analytical_benchmark", solver: "opencae-euler-bernoulli", solverVersion: "0.1.0", meshSource: "structured_block", resultSource: "generated", units: "mm-N-s-MPa" }
-      }
-    });
     const coreHtml = renderPanel("results", {
       resultSummary: {
         ...resultSummary,
@@ -152,9 +140,6 @@ describe("RightPanel payload mass controls", () => {
       }
     });
 
-    expect(localHtml).toContain("Local estimate");
-    expect(localHtml).not.toContain("Local FEA");
-    expect(beamHtml).toContain("Analytical benchmark");
     expect(coreHtml).toContain("OpenCAE Core");
   });
 
@@ -337,7 +322,7 @@ describe("RightPanel payload mass controls", () => {
     expect(editableNumberCommitValue("0.0", 0)).toBe(0);
   });
 
-  test("renders backend and fidelity controls for detailed simulation runs", () => {
+  test("renders OpenCAE Core backend and fidelity controls for simulation runs", () => {
     const detailedStudy: Study = {
       ...study,
       solverSettings: { backend: "opencae_core", fidelity: "ultra" }
@@ -347,7 +332,6 @@ describe("RightPanel payload mass controls", () => {
     const meshHtml = renderPanel("mesh", { study: { ...detailedStudy, meshSettings: { preset: "ultra", status: "complete", summary: { nodes: 182400, elements: 119808, warnings: [], analysisSampleCount: 45000, quality: "ultra" } } } });
 
     expect(runHtml).toContain("Simulation backend");
-    expect(runHtml).toContain("Detailed local");
     expect(runHtml).toContain("OpenCAE Core");
     expect(runHtml).toContain("Fidelity");
     expect(meshHtml).toContain("Ultra");
@@ -355,7 +339,7 @@ describe("RightPanel payload mass controls", () => {
     expect(meshHtml).toContain("45,000");
   });
 
-  test("selects OpenCAE Core when solver backend is omitted", () => {
+  test("shows OpenCAE Core when solver backend is omitted", () => {
     const runHtml = renderPanel("run", {
       study: {
         ...study,
@@ -363,7 +347,8 @@ describe("RightPanel payload mass controls", () => {
       }
     });
 
-    expect(runHtml).toContain('<option value="opencae_core" selected="">OpenCAE Core</option>');
+    expect(runHtml).toContain("OpenCAE Core");
+    expect(runHtml).not.toContain("legacy backend");
   });
 
   test("keeps OpenCAE Core runs browser-local without container endpoint copy", () => {
@@ -382,15 +367,15 @@ describe("RightPanel payload mass controls", () => {
     expect(runHtml).not.toContain("Expected detail");
     expect(runHtml).not.toContain("Browser OpenCAE Core CPU");
     expect(runHtml).not.toContain("FEA_CONTAINER");
-    expect(runHtml).not.toContain("Cloud FEA endpoint");
+    expect(runHtml).not.toContain("cloud solver endpoint");
     expect(runHtml).not.toContain('<button class="primary wide" disabled=""');
   });
 
-  test("normalizes legacy Cloud FEA selections to OpenCAE Core", () => {
-    const detailedStudy: Study = {
+  test("normalizes legacy backend selections to OpenCAE Core", () => {
+    const detailedStudy = {
       ...study,
       solverSettings: { backend: "cloudflare_fea", fidelity: "ultra" }
-    };
+    } as unknown as Study;
 
     const runHtml = renderPanel("run", {
       study: detailedStudy
@@ -399,11 +384,11 @@ describe("RightPanel payload mass controls", () => {
     expect(runHtml).toContain("OpenCAE Core");
     expect(runHtml).not.toContain("Expected detail");
     expect(runHtml).not.toContain("Browser OpenCAE Core CPU");
-    expect(runHtml).not.toContain("Cloud FEA endpoint");
+    expect(runHtml).not.toContain("cloud solver endpoint");
     expect(runHtml).not.toContain("http://localhost:4317");
   });
 
-  test("shows dynamic OpenCAE Core runs fall back to Detailed local", () => {
+  test("shows dynamic OpenCAE Core solver details", () => {
     const dynamicStudy: Study = {
       ...study,
       name: "Dynamic",
@@ -426,9 +411,8 @@ describe("RightPanel payload mass controls", () => {
     expect(runHtml).toContain("OpenCAE Core");
     expect(runHtml).not.toContain("Expected detail");
     expect(runHtml).not.toContain("Browser OpenCAE Core CPU");
-    expect(runHtml).toContain("Dynamic OpenCAE Core runs fall back to Detailed local until transient Core support is available.");
-    expect(runHtml).toContain("opencae-core-cpu-tet4");
-    expect(runHtml).not.toContain("CalculiX transient container");
+    expect(runHtml).toContain("opencae-core-dynamic-tet4");
+    expect(runHtml).not.toContain("external transient container");
     expect(runHtml).not.toContain("cloudflare-fea-calculix");
     expect(runHtml).not.toContain("cloudflare-queue-container");
   });
@@ -492,7 +476,7 @@ describe("RightPanel payload mass controls", () => {
     expect(html).toContain('<strong>Every 0.005 s</strong>');
   });
 
-  test("normalizes fine OpenCAE Core dynamic output cadence to local fallback limits", () => {
+  test("normalizes fine OpenCAE Core dynamic output cadence", () => {
     const dynamicStudy: Study = {
       ...study,
       name: "Dynamic",
@@ -514,7 +498,6 @@ describe("RightPanel payload mass controls", () => {
     expect(html).toContain("Output interval");
     expect(html).toContain('<strong>21</strong>');
     expect(html).toContain('<strong>Every 0.005 s</strong>');
-    expect(html).toContain("Dynamic OpenCAE Core runs fall back to Detailed local until transient Core support is available.");
   });
 
   test("normalizes dense OpenCAE Core dynamic output before estimating frame budget", () => {

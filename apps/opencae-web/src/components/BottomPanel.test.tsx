@@ -41,7 +41,7 @@ describe("BottomPanel", () => {
         studyName="Static Stress"
         meshStatus="Ready"
         solverStatus="Complete"
-        backendStatus="local"
+        backendStatus="core"
         onClearLogs={() => undefined}
       />
     );
@@ -54,8 +54,8 @@ describe("BottomPanel", () => {
     expect(html).toContain(">feedback</a>");
     expect(textContent(html)).toContain("Buy me a coffee");
     expect(html).toContain(">github</a>");
-    expect(html.indexOf("Results ready")).toBeLessThan(html.indexOf("local"));
-    expect(html.indexOf("local")).toBeLessThan(html.indexOf("<b>project</b>"));
+    expect(html.indexOf("Results ready")).toBeLessThan(html.indexOf("core"));
+    expect(html.indexOf("core")).toBeLessThan(html.indexOf("<b>project</b>"));
     expect(html.indexOf('href="https://ko-fi.com/petergn"')).toBeGreaterThan(html.indexOf("<b>solver</b>"));
     expect(html.indexOf('href="https://ko-fi.com/petergn"')).toBeLessThan(html.indexOf('href="https://form.esauengineering.com/opencae-feedback"'));
     expect(html.indexOf('href="https://ko-fi.com/petergn"')).toBeLessThan(html.indexOf('href="https://github.com/esaueng/OpenCAE"'));
@@ -71,7 +71,7 @@ describe("BottomPanel", () => {
         studyName="Static Stress"
         meshStatus="Ready"
         solverStatus="Complete"
-        backendStatus="local"
+        backendStatus="core"
         onClearLogs={() => undefined}
       />
     );

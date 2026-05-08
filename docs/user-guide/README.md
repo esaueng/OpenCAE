@@ -11,11 +11,11 @@ OpenCAE starts on a local workspace screen with three paths:
 Work through the Model, Material, Supports, Loads, Mesh, Run, Results, and Report steps.
 
 - Model: inspect the part, upload STEP, STP, STL, or OBJ files, show dimensions, rotate the model, and switch between model and mesh views.
-- Material: assign starter materials and configure print parameters for 3D-printing materials. Print layer orientation changes the effective material properties used by local solves.
+- Material: assign starter materials and configure print parameters for 3D-printing materials. Print layer orientation changes the effective material properties used by OpenCAE Core.
 - Supports: select model faces and add fixed supports.
 - Loads: add force, pressure, or payload-weight loads. Payload loads can use selected payload objects and material density to calculate mass.
 - Mesh: choose coarse, medium, fine, or ultra sampling. The generated mesh summary is stored as a study artifact.
-- Run: pick the local detailed backend or Cloud FEA where available, review readiness messages, start a run, watch progress/log events, or cancel an active local run.
+- Run: review readiness messages, start an OpenCAE Core run, watch progress/log events, or cancel an active local run.
 
 ## Results And Reports
 

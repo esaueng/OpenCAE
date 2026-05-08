@@ -233,8 +233,8 @@ describe("app persistence", () => {
     expect(parseAutosavedWorkspacePayload(JSON.stringify({ ...snapshot, version: 99 }))).toBeNull();
   });
 
-  test("preserves enough logs to diagnose Cloud FEA failures after reload", () => {
-    const logs = Array.from({ length: 120 }, (_, index) => `Cloud FEA diagnostic ${index}`);
+  test("preserves enough logs to diagnose OpenCAE Core failures after reload", () => {
+    const logs = Array.from({ length: 120 }, (_, index) => `OpenCAE Core diagnostic ${index}`);
     const snapshot = buildAutosavedWorkspace({
       project,
       displayModel,
@@ -248,8 +248,8 @@ describe("app persistence", () => {
 
     expect(WORKSPACE_LOG_LIMIT).toBe(100);
     expect(parsed?.ui.logs).toHaveLength(100);
-    expect(parsed?.ui.logs[0]).toBe("Cloud FEA diagnostic 0");
-    expect(parsed?.ui.logs.at(-1)).toBe("Cloud FEA diagnostic 99");
+    expect(parsed?.ui.logs[0]).toBe("OpenCAE Core diagnostic 0");
+    expect(parsed?.ui.logs.at(-1)).toBe("OpenCAE Core diagnostic 99");
   });
 
   test("does not restore or persist in-progress simulation state after reload", () => {

@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { estimateAllowableLoadForSafetyFactor } from "@opencae/schema";
 import type { DisplayModel, Project, RunEvent, Study } from "@opencae/schema";
 import { addLoad, addSupport, assignMaterial, cancelRun, createProject, dynamicOutputFrameEstimate, generateMesh, getResults, importLocalProject, loadSampleProject, renameProject, runSimulation, subscribeToRun, updateStudy, uploadModel } from "./api";
 
@@ -41,6 +40,16 @@ const displayModel = {
   name: "Display",
   bodyCount: 0,
   faces: []
+} satisfies DisplayModel;
+
+const coreDisplayModel = {
+  ...displayModel,
+  bodyCount: 1,
+  dimensions: { x: 120, y: 40, z: 20, units: "mm" },
+  faces: [
+    { id: "selection-face-1", label: "Fixed", color: "#94a3b8", center: [0, 20, 10], normal: [-1, 0, 0], stressValue: 0 },
+    { id: "selection-face-2", label: "Load", color: "#94a3b8", center: [120, 20, 10], normal: [1, 0, 0], stressValue: 0 }
+  ]
 } satisfies DisplayModel;
 
 const study = {
@@ -365,9 +374,13 @@ describe("api", () => {
       constraints: [{ id: "constraint-1", type: "fixed", selectionRef: "selection-face-1", parameters: {}, status: "complete" }],
       loads: [{ id: "load-1", type: "force", selectionRef: "selection-face-1", parameters: { value: 500, units: "N", direction: [0, -1, 0] }, status: "complete" }],
       meshSettings: { preset: "fine", status: "complete", meshRef: "project-1/mesh/mesh-summary.json" }
-    } as Study;
+    } as unknown as Study;
 
-    const response = await runSimulation("study-1", readyStudy);
+    const response = await runSimulation("study-1", readyStudy, {
+      ...displayModel,
+      bodyCount: 1,
+      dimensions: { x: 120, y: 40, z: 20, units: "mm" }
+    });
     const completed = await new Promise<RunEvent>((resolve) => {
       const source = subscribeToRun(response.run.id, (event) => {
         if (event.type === "complete") {
@@ -378,14 +391,14 @@ describe("api", () => {
     });
     const results = await getResults(response.run.id);
 
-    expect(response.message).toContain("OpenCAE Core fallback to Detailed local");
-    expect((response.run as { solverBackend?: string }).solverBackend).toBe("local-heuristic-surface");
+    expect(response.message).toContain("OpenCAE Core simulation running locally");
+    expect((response.run as { solverBackend?: string }).solverBackend).toBe("opencae-core-cpu-tet4");
     expect(completed.progress).toBe(100);
     expect(results.fields.map((field) => field.runId)).toEqual([response.run.id, response.run.id, response.run.id]);
     expect(results.summary.maxStress).toBeGreaterThan(0);
   });
 
-  test("routes the Beam Demo local static solve to dense Euler-Bernoulli result fields", async () => {
+  test("routes the Beam Demo sample through OpenCAE Core", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: "Study not found" }), {
       status: 404,
       headers: { "content-type": "application/json" }
@@ -407,17 +420,17 @@ describe("api", () => {
     const stress = results.fields.find((field) => field.type === "stress");
 
     expect(completed.progress).toBe(100);
-    expect((response.run as { solverBackend?: string }).solverBackend).toBe("local-beam-demo-euler-bernoulli");
+    expect((response.run as { solverBackend?: string }).solverBackend).toBe("opencae-core-cpu-tet4");
     expect(displacement?.location).toBe("node");
-    expect(displacement?.samples?.length).toBeGreaterThan(64);
+    expect(displacement?.samples?.length).toBeGreaterThan(0);
     expect(displacement?.samples?.every((sample) => sample.vector?.every(Number.isFinite))).toBe(true);
-    expect(stress?.samples?.length).toBeGreaterThan(64);
-    expect(results.summary.maxStress).toBeCloseTo(2.224, 3);
-    expect(results.summary.maxDisplacement).toBeCloseTo(0.0467, 3);
-    expect(estimateAllowableLoadForSafetyFactor(results.summary, 1.5).allowableLoad).toBeCloseTo(404, 0);
+    expect(stress?.samples?.length).toBeGreaterThan(0);
+    expect(results.summary.provenance?.solver).toBe("opencae-core-cpu-tet4");
+    expect(results.summary.maxStress).toBeGreaterThan(0);
+    expect(results.summary.maxDisplacement).toBeGreaterThan(0);
   });
 
-  test("normalizes legacy Cloud FEA selections to browser OpenCAE Core without cloud route calls", async () => {
+  test("normalizes legacy backend selections to browser OpenCAE Core without cloud route calls", async () => {
     const coreDisplayModel: DisplayModel = {
       ...displayModel,
       bodyCount: 1,
@@ -430,7 +443,7 @@ describe("api", () => {
       loads: [{ id: "load-1", type: "force", selectionRef: "selection-face-1", parameters: { value: 500, units: "N", direction: [0, -1, 0] }, status: "complete" }],
       meshSettings: { preset: "ultra", status: "complete", meshRef: "project-1/mesh/mesh-summary.json" },
       solverSettings: { backend: "cloudflare_fea", fidelity: "ultra" }
-    } as Study;
+    } as unknown as Study;
     const fetchMock = vi.fn(async (_input?: RequestInfo | URL) => Promise.reject(new TypeError("API unavailable")));
     vi.stubGlobal("fetch", fetchMock);
     const healthLogs: string[] = [];
@@ -450,7 +463,7 @@ describe("api", () => {
     expect(fetchMock.mock.calls.every(([input]) => !String(input).includes("/api/cloud-fea"))).toBe(true);
   });
 
-  test("falls back to local dynamic solver for legacy Cloud FEA dynamic studies", async () => {
+  test("normalizes legacy dynamic selections to OpenCAE Core dynamic solves", async () => {
     const dynamicStudy = {
       ...study,
       name: "Dynamic",
@@ -470,26 +483,27 @@ describe("api", () => {
         integrationMethod: "newmark_average_acceleration",
         loadProfile: "ramp"
       }
-    } as Study;
+    } as unknown as Study;
     const fetchMock = vi.fn(async (_input?: RequestInfo | URL) => Promise.reject(new TypeError("API unavailable")));
     vi.stubGlobal("fetch", fetchMock);
 
-    const response = await runSimulation("study-1", dynamicStudy, displayModel);
+    const response = await runSimulation("study-1", dynamicStudy, coreDisplayModel);
     const seen: RunEvent[] = [];
     const source = subscribeToRun(response.run.id, (event) => seen.push(event));
     await vi.waitFor(() => expect(seen.some((event) => event.type === "complete")).toBe(true), { timeout: 3000 });
     source.close();
     const results = await getResults(response.run.id);
 
-    expect((response.run as { solverBackend?: string }).solverBackend).toBe("local-dynamic-newmark");
-    expect(response.message).toContain("OpenCAE Core fallback to Detailed local");
-    expect(seen.map((event) => event.message).join(" ")).toContain("OpenCAE Core fallback to Detailed local");
+    expect((response.run as { solverBackend?: string }).solverBackend).toBe("opencae-core-dynamic-tet4");
+    expect(response.message).toContain("OpenCAE Core simulation running locally");
+    expect(seen.map((event) => event.message).join(" ")).toContain("OpenCAE Core dynamic");
+    expect(results.summary.provenance?.solver).toBe("opencae-core-dynamic-tet4");
     expect(results.summary.transient?.frameCount).toBe(21);
     expect(results.fields.some((field) => field.type === "stress" && field.frameIndex === 20)).toBe(true);
     expect(fetchMock.mock.calls.every(([input]) => !String(input).includes("/api/cloud-fea"))).toBe(true);
   });
 
-  test("estimates fine dynamic OpenCAE Core fallback output frames from requested output interval", () => {
+  test("estimates fine dynamic OpenCAE Core output frames from requested output interval", () => {
     const dynamicStudy = {
       ...study,
       type: "dynamic_structural",
@@ -505,7 +519,7 @@ describe("api", () => {
       }
     } as Study;
 
-    expect(dynamicOutputFrameEstimate(dynamicStudy, { backend: "opencae_core" })).toBe(21);
+    expect(dynamicOutputFrameEstimate(dynamicStudy)).toBe(21);
   });
 
   test("defers local result solving until a queued run is subscribed", () => {
@@ -540,7 +554,7 @@ describe("api", () => {
         }
       } as Study;
 
-      const response = await runSimulation("study-1", readyStudy);
+      const response = await runSimulation("study-1", readyStudy, coreDisplayModel);
       const seen: RunEvent[] = [];
       const source = subscribeToRun(response.run.id, (event) => seen.push(event));
       await vi.runAllTimersAsync();

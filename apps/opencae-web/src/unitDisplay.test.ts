@@ -55,10 +55,9 @@ describe("unit display formatting", () => {
     expect(field.max).toBeCloseTo(0.01);
   });
 
-  test("formats result provenance labels without calling local estimates FEA", () => {
-    expect(formatResultProvenanceLabel({ kind: "local_estimate", solver: "opencae-local-heuristic-surface", solverVersion: "0.1.0", meshSource: "mock", resultSource: "generated", units: "mm-N-s-MPa" })).toBe("Local estimate");
-    expect(formatResultProvenanceLabel({ kind: "analytical_benchmark", solver: "opencae-euler-bernoulli", solverVersion: "0.1.0", meshSource: "structured_block", resultSource: "generated", units: "mm-N-s-MPa" })).toBe("Analytical benchmark");
-    expect(formatResultProvenanceLabel({ kind: "calculix_fea", solver: "calculix-ccx", solverVersion: "2.21", meshSource: "gmsh", resultSource: "parsed_frd", units: "mm-N-s-MPa" })).toBe("CalculiX FEA");
+  test("formats result provenance labels as OpenCAE Core", () => {
+    expect(formatResultProvenanceLabel({ kind: "opencae_core_fea", solver: "opencae-core-cpu-tet4", solverVersion: "0.1.0", meshSource: "opencae_core_tet4", resultSource: "computed", units: "mm-N-s-MPa" })).toBe("OpenCAE Core");
+    expect(formatResultProvenanceLabel(undefined)).toBe("OpenCAE Core");
   });
 
   test("converts display model dimensions", () => {

@@ -22,10 +22,9 @@ import {
   type Study,
   type StudyRun
 } from "@opencae/schema";
-import { LocalMockComputeBackend, solveDynamicStudy } from "@opencae/solver-service";
+import { solveOpenCaeCoreStudy } from "@opencae/solver-cpu";
 import { FileSystemObjectStorageProvider } from "@opencae/storage";
 import { validateStaticStressStudy, validateStudy } from "@opencae/study-core";
-import { LocalCloudFeaBridge, LocalCloudFeaBridgeError } from "./cloudFeaLocal";
 import {
   attachUploadedModelToProject,
   blankDisplayModel,
@@ -57,42 +56,13 @@ const storage = new FileSystemObjectStorageProvider();
 const jobs = new InMemoryJobQueueProvider();
 const runState = new LocalRunStateProvider();
 const meshService = new MockMeshService(storage);
-const compute = new LocalMockComputeBackend(storage);
 const reports = new LocalReportProvider(storage);
-const cloudFea = new LocalCloudFeaBridge();
 
 db.migrate();
 db.seed();
 await ensureSampleArtifacts();
 
 api.get("/health", async () => ({ ok: true, mode: "local", service: "opencae-api" }));
-
-api.get("/api/cloud-fea/health", async () => cloudFea.health());
-
-api.post("/api/cloud-fea/runs", async (request, reply) => {
-  try {
-    const body = isRecord(request.body) ? request.body : {};
-    const response = await cloudFea.createRun(body);
-    return reply.code(202).send(response);
-  } catch (error) {
-    if (error instanceof LocalCloudFeaBridgeError) {
-      return reply.code(error.status).send({ error: error.message });
-    }
-    throw error;
-  }
-});
-
-api.get("/api/cloud-fea/runs/:runId/events", async (request) => {
-  const { runId } = request.params as { runId: string };
-  return { events: cloudFea.getEvents(runId) };
-});
-
-api.get("/api/cloud-fea/runs/:runId/results", async (request, reply) => {
-  const { runId } = request.params as { runId: string };
-  const results = cloudFea.getResults(runId);
-  if (!results) return reply.code(404).send({ error: "Cloud FEA results are not ready." });
-  return results;
-});
 
 api.get("/api/sample-project", async (request) => {
   const sample = normalizeSampleId((request.query as { sample?: string }).sample);
@@ -418,6 +388,8 @@ api.post("/api/studies/:studyId/runs", async (request, reply) => {
   const runDiagnostics = validateStudy(study);
   if (runDiagnostics.length) return reply.code(400).send({ error: "Study is not ready.", diagnostics: runDiagnostics });
   const studySnapshot = structuredClone(study);
+  const project = db.getProject(studySnapshot.projectId);
+  const displayModel = project ? await displayModelForProject(project) : blankDisplayModel();
   const runId = `run-${crypto.randomUUID()}`;
   const jobId = `job-${crypto.randomUUID()}`;
   const run: StudyRun = {
@@ -426,7 +398,7 @@ api.post("/api/studies/:studyId/runs", async (request, reply) => {
     status: "queued",
     jobId,
     meshRef: studySnapshot.meshSettings.meshRef,
-    solverBackend: studySnapshot.type === "dynamic_structural" ? "local-dynamic-newmark" : "local-static-superposition",
+    solverBackend: studySnapshot.type === "dynamic_structural" ? "opencae-core-dynamic-tet4" : "opencae-core-cpu-tet4",
     solverVersion: "0.1.0",
     startedAt: new Date().toISOString(),
     diagnostics: []
@@ -434,33 +406,40 @@ api.post("/api/studies/:studyId/runs", async (request, reply) => {
   db.upsertRun(run);
   publish(runId, "state", 0, "Simulation queued.");
   await jobs.enqueue(jobId, async () => {
-    publish(runId, "state", 3, "Simulation running.");
-    const solveArgs = {
-      study: studySnapshot,
-      runId,
-      meshRef: studySnapshot.meshSettings.meshRef ?? "mesh-not-generated",
-      publish: (event: RunEvent) => {
-        if (event.type === "complete") {
-          runState.publish(runId, { ...event, type: "progress", progress: 96, message: "Finalizing result artifacts." });
-          return;
-        }
-        runState.publish(runId, event);
-      }
-    };
-    const result = studySnapshot.type === "dynamic_structural"
-      ? await compute.runDynamicSolve(solveArgs)
-      : await compute.runStaticSolve(solveArgs);
-    const reportRef = await reports.generateReport({ projectId: studySnapshot.projectId, runId, summary: result.summary, study: studySnapshot, fields: result.fields });
+    publish(runId, "state", 3, "OpenCAE Core simulation running.");
+    publish(runId, "progress", 18, studySnapshot.type === "dynamic_structural" ? "OpenCAE Core dynamic Tet4 solver started." : "OpenCAE Core CPU Tet4 solver started.");
+    const solved = solveOpenCaeCoreStudy({ study: studySnapshot, runId, displayModel });
+    if (!solved.ok) {
+      const failed = {
+        ...run,
+        status: "failed" as const,
+        finishedAt: new Date().toISOString(),
+        diagnostics: [{
+          id: "opencae-core-solve-failed",
+          severity: "error" as const,
+          source: "solver" as const,
+          message: solved.reason,
+          suggestedActions: []
+        }]
+      };
+      db.upsertRun(failed);
+      publish(runId, "error", 100, solved.reason);
+      return;
+    }
+    publish(runId, "progress", 68, studySnapshot.type === "dynamic_structural" ? "Writing OpenCAE Core dynamic result frames." : "Writing OpenCAE Core result fields.");
+    const resultRef = `${studySnapshot.projectId}/results/${runId}/results.json`;
+    await storage.putObject(resultRef, JSON.stringify(solved.result, null, 2));
+    const reportRef = await reports.generateReport({ projectId: studySnapshot.projectId, runId, summary: solved.result.summary, study: studySnapshot, fields: solved.result.fields });
     db.upsertRun({
       ...run,
       status: "complete",
-      resultRef: result.resultRef,
+      resultRef,
       reportRef,
       finishedAt: new Date().toISOString()
     });
-    publish(runId, "complete", 100, "Simulation complete.");
+    publish(runId, "complete", 100, "OpenCAE Core simulation complete.");
   });
-  return { run, streamUrl: `/api/runs/${runId}/stream`, message: "Simulation running." };
+  return { run, streamUrl: `/api/runs/${runId}/stream`, message: "OpenCAE Core simulation running." };
 });
 
 api.get("/api/runs/:runId", async (request, reply) => {
@@ -682,12 +661,14 @@ function dynamicSampleResults(project: Project): ImportedResultBundle | undefine
   const study = project.studies[0];
   const run = study?.runs[0];
   if (!study || !run || study.type !== "dynamic_structural") return undefined;
-  const solved = solveDynamicStudy(study, run.id);
+  const sample = normalizeSampleId(project.geometryFiles[0]?.metadata.sampleModel);
+  const solved = solveOpenCaeCoreStudy({ study, runId: run.id, displayModel: sampleDisplayModelFor(sample) });
+  if (!solved.ok) return undefined;
   return {
     activeRunId: run.id,
     completedRunId: run.id,
-    summary: solved.summary,
-    fields: solved.fields
+    summary: solved.result.summary,
+    fields: solved.result.fields
   };
 }
 

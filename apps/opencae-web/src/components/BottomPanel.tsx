@@ -9,7 +9,7 @@ interface BottomPanelProps {
   studyName: string;
   meshStatus: string;
   solverStatus: string;
-  backendStatus: "local" | "cloud" | "core";
+  backendStatus: "core";
   onClearLogs: () => void;
 }
 
@@ -286,11 +286,9 @@ export function KeyboardShortcutGuide() {
 
 function statusForDisplay(status: string, solverStatus: string) {
   const normalized = status.toLowerCase();
-  if (normalized.includes("cloud fea") && /(error|fail|failed|unavailable|not configured|not enabled|not ready)/.test(normalized)) return "Cloud FEA error";
   if (normalized.includes("opencae core") && /(error|fail|failed|unavailable|not configured|not enabled|not ready)/.test(normalized)) return "OpenCAE Core error";
   if (solverStatus === "Running") return "Simulating";
   if (status.toLowerCase().includes("complete")) return "Results ready";
-  if (normalized.includes("cloud fea")) return "Cloud FEA active";
   if (normalized.includes("opencae core")) return "OpenCAE Core active";
   return "Ready";
 }

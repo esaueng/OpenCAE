@@ -45,8 +45,7 @@ export function StepBar({ activeStep, project, study, hasResults, collapsed, the
   const currentUnitLabel = project.unitSystem === "SI" ? "Metric" : "Imperial";
   const nextUnitSystem = project.unitSystem === "SI" ? "US" : "SI";
   const studyTypeLabel = study.type === "dynamic_structural" ? "dynamic" : "static";
-  const backend = (study.solverSettings as { backend?: unknown }).backend;
-  const backendLabel = backend === "local_detailed" ? "local" : "core";
+  const backendLabel = "core";
   const ThemeIcon = themeMode === "dark" ? Sun : Moon;
 
   return (

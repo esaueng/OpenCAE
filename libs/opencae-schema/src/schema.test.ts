@@ -119,13 +119,13 @@ describe("ProjectSchema", () => {
       frameIndex: 1,
       timeSeconds: 0.005,
       provenance: {
-        kind: "calculix_fea",
-        solver: "calculix-ccx",
-        solverVersion: "2.21",
-        meshSource: "structured_block",
-        resultSource: "parsed_frd_dat",
+        kind: "opencae_core_fea",
+        solver: "opencae-core-dynamic-tet4",
+        solverVersion: "0.1.0",
+        meshSource: "opencae_core_tet4",
+        resultSource: "computed",
         units: "mm-N-s-MPa",
-        integrationMethod: "calculix_dynamic_direct",
+        integrationMethod: "newmark_average_acceleration",
         loadProfile: "ramp",
         accelerationSource: "derived_from_velocity"
       }
@@ -143,19 +143,19 @@ describe("ProjectSchema", () => {
     }).frameIndex).toBeUndefined();
   });
 
-  it("accepts CalculiX direct dynamic settings and transient metadata", () => {
+  it("accepts OpenCAE Core dynamic settings and transient metadata", () => {
     expect(DynamicSolverSettingsSchema.parse({
       startTime: 0,
       endTime: 0.1,
       timeStep: 0.005,
       outputInterval: 0.01,
       dampingRatio: 0.02,
-      integrationMethod: "calculix_dynamic_direct",
+      integrationMethod: "newmark_average_acceleration",
       loadProfile: "sinusoidal",
       rayleighAlpha: 0.1,
       rayleighBeta: 0.0002
     })).toMatchObject({
-      integrationMethod: "calculix_dynamic_direct",
+      integrationMethod: "newmark_average_acceleration",
       loadProfile: "sinusoidal",
       rayleighAlpha: 0.1,
       rayleighBeta: 0.0002
@@ -171,7 +171,7 @@ describe("ProjectSchema", () => {
       reactionForceUnits: "N",
       transient: {
         analysisType: "dynamic_structural",
-        integrationMethod: "calculix_dynamic_direct",
+        integrationMethod: "newmark_average_acceleration",
         startTime: 0,
         endTime: 0.1,
         timeStep: 0.005,
@@ -181,7 +181,7 @@ describe("ProjectSchema", () => {
         peakDisplacementTimeSeconds: 0.1,
         peakDisplacement: 0.003
       }
-    }).transient?.integrationMethod).toBe("calculix_dynamic_direct");
+    }).transient?.integrationMethod).toBe("newmark_average_acceleration");
   });
 
   it("accepts optional timing estimates on run events", () => {
@@ -239,13 +239,13 @@ describe("ProjectSchema", () => {
     });
   });
 
-  it("accepts legacy cloud FEA backend settings for imported project compatibility", () => {
+  it("normalizes legacy solver backend settings for imported project compatibility", () => {
     const parsed = SolverBackendSchema.parse("cloudflare_fea");
 
-    expect(parsed).toBe("cloudflare_fea");
+    expect(parsed).toBe("opencae_core");
   });
 
-  it("accepts rich result sample metadata from local and cloud FEA backends", () => {
+  it("accepts rich OpenCAE Core result sample metadata", () => {
     const parsed = ResultFieldSchema.parse({
       id: "field-stress-cloud",
       runId: "run-cloud",
@@ -263,7 +263,7 @@ describe("ProjectSchema", () => {
           vector: [0.001, -0.002, 0],
           nodeId: "N42",
           elementId: "E7",
-          source: "calculix",
+          source: "opencae_core",
           vonMisesStressPa: 123100
         }
       ]
@@ -272,7 +272,7 @@ describe("ProjectSchema", () => {
     expect(parsed.samples?.[0]).toMatchObject({
       nodeId: "N42",
       elementId: "E7",
-      source: "calculix",
+      source: "opencae_core",
       vector: [0.001, -0.002, 0],
       vonMisesStressPa: 123100
     });
@@ -326,13 +326,13 @@ describe("ProjectSchema", () => {
     }).provenance).toEqual(provenance);
   });
 
-  it("accepts parsed CalculiX DAT result summaries and element/node fields", () => {
+  it("accepts OpenCAE Core result summaries and element/node fields", () => {
     const provenance = {
-      kind: "calculix_fea",
-      solver: "calculix-ccx",
-      solverVersion: "2.21",
-      meshSource: "structured_block",
-      resultSource: "parsed_dat",
+      kind: "opencae_core_fea",
+      solver: "opencae-core-cpu-tet4",
+      solverVersion: "0.1.0",
+      meshSource: "opencae_core_tet4",
+      resultSource: "computed",
       units: "mm-N-s-MPa"
     } as const;
 
@@ -357,8 +357,8 @@ describe("ProjectSchema", () => {
       max: 0.18,
       units: "MPa",
       provenance,
-      samples: [{ point: [50, 15, 5], normal: [0, 0, 1], value: 0.18, elementId: "E1", source: "calculix-dat", vonMisesStressPa: 180000 }]
-    }).samples?.[0]?.source).toBe("calculix-dat");
+      samples: [{ point: [50, 15, 5], normal: [0, 0, 1], value: 0.18, elementId: "E1", source: "opencae_core", vonMisesStressPa: 180000 }]
+    }).samples?.[0]?.source).toBe("opencae_core");
 
     expect(ResultFieldSchema.parse({
       id: "field-run-cloud-displacement-0",
@@ -370,7 +370,7 @@ describe("ProjectSchema", () => {
       max: 0.0014,
       units: "mm",
       provenance,
-      samples: [{ point: [100, 15, 10], normal: [0, 0, 1], value: 0.0014, vector: [0, 0, -0.0014], nodeId: "N2", source: "calculix-dat" }]
+      samples: [{ point: [100, 15, 10], normal: [0, 0, 1], value: 0.0014, vector: [0, 0, -0.0014], nodeId: "N2", source: "opencae_core" }]
     }).samples?.[0]?.vector).toEqual([0, 0, -0.0014]);
   });
 });

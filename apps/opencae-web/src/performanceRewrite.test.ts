@@ -8,6 +8,9 @@ const viteConfigSource = readFileSync(resolve(__dirname, "../vite.config.ts"), "
 const packageJson = JSON.parse(readFileSync(resolve(__dirname, "../package.json"), "utf8")) as {
   scripts: Record<string, string>;
 };
+const removedSolverPackage = ["@opencae", "solver-service"].join("/");
+const removedWorkerSolver = ["solve", "Local", "Study", "In", "Worker"].join("");
+const removedFallbackSolver = ["fallback", "Solve", "Local", "Study"].join("");
 
 describe("Worker UI performance rewrite boundaries", () => {
   test("keeps the first app shell free of workspace, viewer, and solver imports", () => {
@@ -18,7 +21,7 @@ describe("Worker UI performance rewrite boundaries", () => {
     expect(appSource).not.toContain('from "./lib/api"');
     expect(appSource).not.toContain("@react-three");
     expect(appSource).not.toContain("three");
-    expect(appSource).not.toContain("@opencae/solver-service");
+    expect(appSource).not.toContain(removedSolverPackage);
   });
 
   test("loads the viewer through a lazy boundary inside the workspace", () => {
@@ -29,10 +32,11 @@ describe("Worker UI performance rewrite boundaries", () => {
     expect(workspaceSource).not.toContain('import { CadViewer');
   });
 
-  test("keeps local solver code behind the browser performance worker", () => {
-    expect(apiSource).not.toContain('from "@opencae/solver-service"');
-    expect(apiSource).toContain("solveLocalStudyInWorker");
-    expect(apiSource).toContain("fallbackSolveLocalStudy");
+  test("keeps legacy local solver code out of the browser API path", () => {
+    expect(apiSource).not.toContain(`from "${removedSolverPackage}"`);
+    expect(apiSource).toContain("trySolveOpenCaeCoreStudy");
+    expect(apiSource).not.toContain(removedWorkerSolver);
+    expect(apiSource).not.toContain(removedFallbackSolver);
   });
 
   test("declares explicit chunks and a bundle budget command", () => {
