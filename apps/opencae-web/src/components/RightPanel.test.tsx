@@ -137,11 +137,23 @@ describe("RightPanel payload mass controls", () => {
     const coreHtml = renderPanel("results", {
       resultSummary: {
         ...resultSummary,
-        provenance: { kind: "opencae_core_fea", solver: "opencae-core-sparse-tet", solverVersion: "0.1.0", meshSource: "actual_volume_mesh", resultSource: "computed", units: "mm-N-s-MPa" }
+        provenance: { kind: "opencae_core_fea", solver: "opencae-core-cloud", solverVersion: "0.1.0", meshSource: "actual_volume_mesh", resultSource: "computed", units: "mm-N-s-MPa" }
       }
     });
 
-    expect(coreHtml).toContain("OpenCAE Core FEA");
+    expect(coreHtml).toContain("OpenCAE Core Cloud");
+    expect(coreHtml).toContain("Core solver version");
+    expect(coreHtml).toContain("0.1.0");
+    expect(coreHtml).toContain("Core model schema version");
+    expect(coreHtml).toContain(project.schemaVersion);
+    expect(coreHtml).toContain("Mesh source");
+    expect(coreHtml).toContain("Actual volume mesh");
+    expect(coreHtml).toContain("Solver method");
+    expect(coreHtml).toContain("sparse_static");
+    expect(coreHtml).toContain("Runner");
+    expect(coreHtml).toContain("cloud container");
+    expect(coreHtml).toContain("Local fallback");
+    expect(coreHtml).toContain("none");
   });
 
   test("blocks preview deformation and reverse-check capacity for complex geometry", () => {
@@ -170,8 +182,8 @@ describe("RightPanel payload mass controls", () => {
       }]
     });
 
-    expect(html).toContain("Preview");
-    expect(html).toContain("Preview solver mesh does not match this geometry; deformed shape disabled.");
+    expect(html).toContain("OpenCAE Core Preview");
+    expect(html).toContain("OpenCAE Core Preview mesh does not match this geometry; deformed shape disabled.");
     expect(html).toContain("Reaction force unavailable or invalid for this result.");
     expect(html).toContain('type="checkbox" disabled=""');
     expect(html).not.toContain("Max total load");
@@ -381,7 +393,7 @@ describe("RightPanel payload mass controls", () => {
       }
     });
 
-    expect(runHtml).toContain("OpenCAE Core");
+    expect(runHtml).toContain("OpenCAE Core Cloud");
     expect(runHtml).not.toContain("legacy backend");
   });
 
@@ -398,10 +410,12 @@ describe("RightPanel payload mass controls", () => {
 
     expect(runHtml).toContain("OpenCAE Core");
     expect(runHtml).toContain("OpenCAE Core Local");
-    expect(runHtml).toContain("opencae-core-preview-tet4");
+    expect(runHtml).not.toContain("opencae-core-preview");
     expect(runHtml).not.toContain("Expected detail");
     expect(runHtml).not.toContain("Browser OpenCAE Core CPU");
     expect(runHtml).not.toContain("FEA_CONTAINER");
+    expect(runHtml).not.toContain("CalculiX");
+    expect(runHtml).not.toContain("Local estimate");
     expect(runHtml).not.toContain("cloud solver endpoint");
     expect(runHtml).not.toContain('<button class="primary wide" disabled=""');
   });
@@ -434,7 +448,7 @@ describe("RightPanel payload mass controls", () => {
     });
 
     expect(runHtml).toContain("OpenCAE Core Cloud");
-    expect(runHtml).toContain("opencae-core-cloud");
+    expect(runHtml).toContain("sparse_static");
     expect(runHtml).not.toContain("Expected detail");
     expect(runHtml).not.toContain("Browser OpenCAE Core CPU");
     expect(runHtml).not.toContain("cloud solver endpoint");
@@ -465,7 +479,8 @@ describe("RightPanel payload mass controls", () => {
     expect(runHtml).toContain("OpenCAE Core Local");
     expect(runHtml).not.toContain("Expected detail");
     expect(runHtml).not.toContain("Browser OpenCAE Core CPU");
-    expect(runHtml).toContain("opencae-core-preview-sdof");
+    expect(runHtml).toContain("mdof_dynamic");
+    expect(runHtml).not.toContain("opencae-core-preview");
     expect(runHtml).not.toContain("external transient container");
     expect(runHtml).not.toContain("cloudflare-fea-calculix");
     expect(runHtml).not.toContain("cloudflare-queue-container");

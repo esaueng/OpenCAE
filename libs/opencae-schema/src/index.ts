@@ -131,7 +131,7 @@ export const ResultProvenanceSchema = z.object({
 
 export const CoreCloudResultProvenanceSchema = ResultProvenanceSchema.superRefine((provenance, context) => {
   if (/calculix/i.test(provenance.solver)) {
-    context.addIssue({ code: z.ZodIssueCode.custom, message: "OpenCAE Core Cloud results cannot use CalculiX solver provenance." });
+    context.addIssue({ code: z.ZodIssueCode.custom, message: "OpenCAE Core Cloud results must use opencae-core-cloud solver provenance." });
   }
   if (provenance.kind !== "opencae_core_fea") {
     context.addIssue({ code: z.ZodIssueCode.custom, message: "OpenCAE Core Cloud results must use opencae_core_fea provenance." });

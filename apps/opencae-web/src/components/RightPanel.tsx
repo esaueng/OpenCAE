@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { AlertTriangle, Anchor, ArrowDown, Check, CircleHelp, Eye, Gauge, Grid3X3, Maximize2, Pause, Play, Plus, RotateCcw, Ruler, ScanLine, ShieldCheck, Upload, Weight, X } from "lucide-react";
 import { defaultPrintParametersFor, effectiveMaterialProperties, massKgForPayloadMaterial, normalizePrintParameters, payloadMaterialForId, payloadMaterials, starterMaterials, type PayloadMaterialCategory, type PrintMaterialParameters } from "@opencae/materials";
 import { assessResultFailure, estimateAllowableLoadForSafetyFactor } from "@opencae/schema";
-import type { Constraint, DisplayFace, DisplayModel, DynamicSolverSettings, Load, MeshQuality, Project, ResultField, ResultSummary, RunTimingEstimate, SimulationFidelity, Study } from "@opencae/schema";
+import type { Constraint, DisplayFace, DisplayModel, DynamicSolverSettings, Load, MeshQuality, Project, ResultField, ResultProvenance, ResultSummary, RunTimingEstimate, SimulationFidelity, Study } from "@opencae/schema";
 import { inferCriticalPrintAxis } from "@opencae/study-core";
 import type { ResultMode, ViewMode } from "./CadViewer";
 import type { StepId } from "./StepBar";
@@ -22,7 +22,7 @@ import { SampleOptionCard } from "./SampleOptionCard";
 import { SAMPLE_OPTIONS, sampleOptionFor } from "./sampleOptions";
 import { dynamicPlaybackFrames } from "../resultFields";
 import { INVALID_REACTION_WARNING, PREVIEW_GEOMETRY_WARNING, canShowReverseLoadCapacity, hasInvalidReactionForce, hasUnavailableReactionDiagnostic, shouldBlockPreviewResultsForDisplayModel } from "../resultProvenance";
-import { hasActualCoreVolumeMesh, normalizeSolverBackend } from "../workers/opencaeCoreSolve";
+import { normalizeSolverBackend } from "../workers/opencaeCoreSolve";
 import {
   frameIndexForRoundedPlaybackOrdinal,
   playbackOrdinalForSolverFramePosition
@@ -1043,7 +1043,9 @@ function RunPanel({ study, displayModel, runProgress, runTiming, onRunSimulation
       <div className="summary-box">
         <Info label="Backend" value={solverBackendLabelForRunPanel(study, displayModel)} />
         <Info label="Version" value="0.1.0" />
-        <Info label="Runner" value={normalizeSolverBackend(study) === "opencae_core_cloud" ? "cloud-core" : "browser-worker"} />
+        <Info label="Solver method" value={solverMethodForStudy(study)} />
+        <Info label="Runner" value={solverRunnerLabelForStudy(study)} />
+        <Info label="Local fallback" value="none" />
       </div>
     </Panel>
   );
@@ -1136,16 +1138,21 @@ function solverFidelityForStudy(study: Study): SimulationFidelity {
   return fidelity === "detailed" || fidelity === "ultra" ? fidelity : "standard";
 }
 
-function solverBackendLabelForRunPanel(study: Study, displayModel: DisplayModel): string {
-  if (normalizeSolverBackend(study) === "opencae_core_cloud") return "opencae-core-cloud";
-  if (hasActualCoreVolumeMesh(study, displayModel)) {
-    return study.type === "dynamic_structural" ? "opencae-core-mdof-tet" : "opencae-core-sparse-tet";
-  }
-  return study.type === "dynamic_structural" ? "opencae-core-preview-sdof" : "opencae-core-preview-tet4";
+function solverBackendLabelForRunPanel(study: Study, _displayModel: DisplayModel): string {
+  if (normalizeSolverBackend(study) === "opencae_core_cloud") return "OpenCAE Core Cloud";
+  return "OpenCAE Core Local";
 }
 
 function simulationBackendDisplayLabel(study: Study): string {
   return normalizeSolverBackend(study) === "opencae_core_cloud" ? "OpenCAE Core Cloud" : "OpenCAE Core Local";
+}
+
+function solverMethodForStudy(study: Study): "sparse_static" | "mdof_dynamic" {
+  return study.type === "dynamic_structural" ? "mdof_dynamic" : "sparse_static";
+}
+
+function solverRunnerLabelForStudy(study: Study): string {
+  return normalizeSolverBackend(study) === "opencae_core_cloud" ? "cloud container" : "local core worker";
 }
 
 export function formatSimulationEta(remainingMs: number | undefined, isRunning = true): string {
@@ -1169,6 +1176,7 @@ function formatDurationSeconds(milliseconds: number): string {
 }
 
 function ResultsPanel({
+  project,
   displayModel,
   resultMode,
   showDeformed,
@@ -1214,6 +1222,7 @@ function ResultsPanel({
   const peakDisplacement = peakDisplacementFrame(resultFields, resultSummary);
   const peakMarkerPercent = peakDisplacement && hasPlayback ? playbackPeakMarkerPercent(frames, peakDisplacement.timeSeconds) : null;
   const peakMarkerLabel = peakDisplacement ? `Peak displacement at ${peakDisplacement.timeSeconds.toFixed(4)} s` : "";
+  const resultProvenance = resultSummary.provenance;
 
   useEffect(() => {
     committedStressExaggerationRef.current = stressExaggeration;
@@ -1344,6 +1353,12 @@ function ResultsPanel({
       <p className="panel-copy">Red areas have higher stress. Blue areas have lower stress.</p>
       <div className="summary-box">
         <Info label="Result source" value={formatResultProvenanceLabel(resultSummary.provenance)} />
+        <Info label="Core solver version" value={resultProvenance?.solverVersion ?? "--"} />
+        <Info label="Core model schema version" value={project.schemaVersion} />
+        <Info label="Mesh source" value={formatMeshSourceLabel(resultProvenance?.meshSource)} />
+        <Info label="Solver method" value={solverMethodForResult(resultSummary, study)} />
+        <Info label="Runner" value={solverRunnerLabelForResult(resultProvenance)} />
+        <Info label="Local fallback" value="none" />
         <Info label="Max stress" value={`${resultSummary.maxStress} ${resultSummary.maxStressUnits}`} />
         <Info label="Max displacement" value={`${resultSummary.maxDisplacement} ${resultSummary.maxDisplacementUnits}`} />
         <Info label="Safety factor" value={String(resultSummary.safetyFactor)} />
@@ -1381,6 +1396,26 @@ function ResultsPanel({
       <div className="legend"><span /> <small>Low</small><small>High</small></div>
     </Panel>
   );
+}
+
+function solverMethodForResult(resultSummary: ResultSummary, study: Study): string {
+  const provenanceMethod = (resultSummary.provenance as Record<string, unknown> | undefined)?.coreSolver;
+  if (typeof provenanceMethod === "string" && provenanceMethod) return provenanceMethod;
+  if (resultSummary.transient || study.type === "dynamic_structural") return "mdof_dynamic";
+  return "sparse_static";
+}
+
+function solverRunnerLabelForResult(provenance: ResultProvenance | undefined): string {
+  return provenance?.solver === "opencae-core-cloud" ? "cloud container" : "local core worker";
+}
+
+function formatMeshSourceLabel(meshSource: ResultProvenance["meshSource"] | undefined): string {
+  if (meshSource === "actual_volume_mesh") return "Actual volume mesh";
+  if (meshSource === "structured_block_core") return "Structured block Core";
+  if (meshSource === "opencae_core_tet4") return "OpenCAE Core Tet4";
+  if (meshSource === "structured_block_proxy" || meshSource === "display_bounds_proxy") return "OpenCAE Core Preview";
+  if (typeof meshSource === "string" && meshSource) return meshSource.replaceAll("_", " ");
+  return "--";
 }
 
 export function rangeProgressPercent(value: number, min: number, max: number) {
