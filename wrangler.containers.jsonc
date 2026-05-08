@@ -28,6 +28,12 @@
       "max_instances": 10
     }
   ],
+  "r2_buckets": [
+    {
+      "binding": "CORE_CLOUD_ARTIFACTS",
+      "bucket_name": "opencae-core-cloud-artifacts"
+    }
+  ],
   "durable_objects": {
     "bindings": [
       {
