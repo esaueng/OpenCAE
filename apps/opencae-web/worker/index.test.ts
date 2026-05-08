@@ -195,6 +195,39 @@ describe("Cloudflare local-first worker", () => {
     );
   });
 
+  test("cloud core run routes expose progress events and stored production results", async () => {
+    const env = createEnv();
+    const ctx = createExecutionContext();
+    containerMock.fetch
+      .mockResolvedValueOnce(Response.json({ ok: true, runnerVersion: expectedRunnerVersion, supportedAnalysisTypes: ["static_stress"] }))
+      .mockResolvedValueOnce(Response.json(coreResult()));
+
+    const response = await worker.fetch(coreRunRequest({ runId: "run-e2e" }), env, ctx);
+    await ctx.flush();
+    const eventsResponse = await worker.fetch(new Request("https://cae.esau.app/api/cloud-core/runs/run-e2e/events"), env);
+    const resultsResponse = await worker.fetch(new Request("https://cae.esau.app/api/cloud-core/runs/run-e2e/results"), env);
+    const events = await eventsResponse.json() as Array<{ type: string; message: string; progress?: number }>;
+    const results = await resultsResponse.json() as { provenance?: Record<string, unknown>; fields?: unknown[] };
+    const serialized = JSON.stringify({ events, results }).toLowerCase();
+
+    expect(response.status).toBe(202);
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "state", message: "OpenCAE Core Cloud solve queued.", progress: 0 }),
+      expect.objectContaining({ type: "progress", message: "OpenCAE Core Cloud solve running.", progress: 25 }),
+      expect.objectContaining({ type: "complete", message: "OpenCAE Core Cloud solve complete.", progress: 100 })
+    ]));
+    expect(results.provenance).toMatchObject({
+      kind: "opencae_core_fea",
+      solver: "opencae-core-cloud",
+      resultSource: "computed",
+      meshSource: "actual_volume_mesh"
+    });
+    expect(results.fields?.length).toBeGreaterThan(0);
+    expect(serialized).not.toContain("local_estimate");
+    expect(serialized).not.toContain("computed_preview");
+    expect(serialized).not.toContain("calculix");
+  });
+
   test("legacy cloud-fea run alias is only a Core Cloud alias", async () => {
     const env = createEnv();
     const ctx = createExecutionContext();
