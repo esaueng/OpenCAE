@@ -11,10 +11,10 @@
   },
   "dependencies": {
     "@opencae/core": "workspace:*",
+    "@opencae/core-adapter": "workspace:*",
     "@opencae/db": "workspace:*",
     "@opencae/materials": "workspace:*",
     "@opencae/schema": "workspace:*",
-    "@opencae/solver-cpu": "workspace:*",
     "@opencae/study-core": "workspace:*",
     "@opencae/units": "workspace:*",
     "@plausible-analytics/tracker": "^0.4.5",

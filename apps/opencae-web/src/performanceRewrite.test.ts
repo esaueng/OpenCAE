@@ -4,6 +4,7 @@ import { describe, expect, test } from "vitest";
 
 const appSource = readFileSync(resolve(__dirname, "App.tsx"), "utf8");
 const apiSource = readFileSync(resolve(__dirname, "lib/api.ts"), "utf8");
+const coreAdapterSource = readFileSync(resolve(__dirname, "../../../libs/opencae-core-adapter/src/index.ts"), "utf8");
 const viteConfigSource = readFileSync(resolve(__dirname, "../vite.config.ts"), "utf8");
 const packageJson = JSON.parse(readFileSync(resolve(__dirname, "../package.json"), "utf8")) as {
   scripts: Record<string, string>;
@@ -37,6 +38,13 @@ describe("Worker UI performance rewrite boundaries", () => {
     expect(apiSource).toContain("trySolveOpenCaeCoreStudy");
     expect(apiSource).not.toContain(removedWorkerSolver);
     expect(apiSource).not.toContain(removedFallbackSolver);
+  });
+
+  test("keeps OpenCAE Core dynamic integration in the Core solver package", () => {
+    expect(coreAdapterSource).toContain("solveDynamicTet4Cpu");
+    expect(coreAdapterSource).not.toContain("integrateDynamicFrames");
+    expect(coreAdapterSource).not.toContain("function loadScaleAt");
+    expect(coreAdapterSource).not.toContain("Newmark");
   });
 
   test("declares explicit chunks and a bundle budget command", () => {
