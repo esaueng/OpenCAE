@@ -28,6 +28,11 @@ describe("App workflow layout", () => {
     expect(appSource).not.toContain("Buy me a coffee");
   });
 
+  test("shows the beta release tag in the workspace brand", () => {
+    expect(appSource).toContain('<span className="beta-tag">Beta</span>');
+    expect(appSource).not.toContain('<span className="beta-tag">Alpha</span>');
+  });
+
   test("drives dynamic result playback with animation frames instead of queued intervals", () => {
     expect(appSource).toContain("window.requestAnimationFrame(advancePlaybackFrame)");
     expect(appSource).toContain("resultPlaybackFramePositionRef.current");
