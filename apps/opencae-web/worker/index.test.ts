@@ -33,6 +33,7 @@ describe("Cloudflare local-first worker", () => {
     expect(packageJson.dependencies?.["@cloudflare/containers"]).toBeUndefined();
     expect(defaultConfig.name).toBe("opencae-alpha");
     expect(defaultConfig.routes).toContainEqual({ pattern: "alpha-cae.esau.app", custom_domain: true });
+    expect(defaultConfig.routes).toContainEqual({ pattern: "cae.esau.app", custom_domain: true });
     expect(defaultConfig.containers).toBeUndefined();
     expect(defaultConfig.durable_objects).toBeUndefined();
     expect(defaultConfig.migrations).toEqual([{ tag: "v2-delete-cloud-fea-container", deleted_classes: ["OpenCaeFeaContainer"] }]);
@@ -58,5 +59,12 @@ describe("Cloudflare local-first worker", () => {
       error: expect.stringContaining("Simulations run in the browser with OpenCAE Core")
     });
     expect(response.status).toBe(503);
+  });
+
+  test("includes an inert queue handler for stale legacy Workers Builds consumers", async () => {
+    const queueHandler = (worker as ExportedHandler<Env>).queue;
+
+    expect(typeof queueHandler).toBe("function");
+    await expect(queueHandler?.({ messages: [] } as unknown as MessageBatch<unknown>, {} as Env, {} as ExecutionContext)).resolves.toBeUndefined();
   });
 });

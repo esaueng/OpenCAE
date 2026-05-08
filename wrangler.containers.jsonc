@@ -10,6 +10,10 @@
     {
       "pattern": "alpha-cae.esau.app",
       "custom_domain": true
+    },
+    {
+      "pattern": "cae.esau.app",
+      "custom_domain": true
     }
   ],
   "assets": {
