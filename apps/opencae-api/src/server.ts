@@ -22,7 +22,7 @@ import {
   type Study,
   type StudyRun
 } from "@opencae/schema";
-import { solveOpenCaeCoreStudy } from "@opencae/solver-cpu";
+import { trySolveOpenCaeCoreStudy } from "@opencae/core-adapter";
 import { FileSystemObjectStorageProvider } from "@opencae/storage";
 import { validateStaticStressStudy, validateStudy } from "@opencae/study-core";
 import {
@@ -408,7 +408,7 @@ api.post("/api/studies/:studyId/runs", async (request, reply) => {
   await jobs.enqueue(jobId, async () => {
     publish(runId, "state", 3, "OpenCAE Core simulation running.");
     publish(runId, "progress", 18, studySnapshot.type === "dynamic_structural" ? "OpenCAE Core dynamic Tet4 solver started." : "OpenCAE Core CPU Tet4 solver started.");
-    const solved = solveOpenCaeCoreStudy({ study: studySnapshot, runId, displayModel });
+    const solved = trySolveOpenCaeCoreStudy({ study: studySnapshot, runId, displayModel });
     if (!solved.ok) {
       const failed = {
         ...run,
@@ -662,7 +662,7 @@ function dynamicSampleResults(project: Project): ImportedResultBundle | undefine
   const run = study?.runs[0];
   if (!study || !run || study.type !== "dynamic_structural") return undefined;
   const sample = normalizeSampleId(project.geometryFiles[0]?.metadata.sampleModel);
-  const solved = solveOpenCaeCoreStudy({ study, runId: run.id, displayModel: sampleDisplayModelFor(sample) });
+  const solved = trySolveOpenCaeCoreStudy({ study, runId: run.id, displayModel: sampleDisplayModelFor(sample) });
   if (!solved.ok) return undefined;
   return {
     activeRunId: run.id,

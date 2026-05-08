@@ -1,4 +1,11 @@
 import type { OpenCAEModelJson } from "@opencae/core";
+import {
+  solveDynamicTet4Cpu,
+  solveStaticLinearTet4Cpu,
+  type DynamicLoadProfile,
+  type DynamicTet4CpuFrame,
+  type StaticLinearTet4CpuResult
+} from "@opencae/solver-cpu";
 import { effectiveMaterialProperties, starterMaterials } from "@opencae/materials";
 import {
   assessResultFailure,
@@ -11,21 +18,22 @@ import {
   type Study
 } from "@opencae/schema";
 import { inferCriticalPrintAxis } from "@opencae/study-core";
-import { solveStaticLinearTet4Cpu } from "./solver";
 
 type Vec3 = [number, number, number];
+
+export type LocalSolveResult = {
+  summary: ResultSummary;
+  fields: ResultField[];
+};
+
+export type NormalizedBrowserSolverBackend = "opencae_core";
 
 export type OpenCaeCoreEligibility =
   | { ok: true }
   | { ok: false; reason: string };
 
-export type OpenCaeCoreStudySolveResult = {
-  summary: ResultSummary;
-  fields: ResultField[];
-};
-
-export type OpenCaeCoreStudySolveOutcome =
-  | { ok: true; result: OpenCaeCoreStudySolveResult; solverBackend: "opencae-core-cpu-tet4" | "opencae-core-dynamic-tet4" }
+export type OpenCaeCoreSolveOutcome =
+  | { ok: true; result: LocalSolveResult; solverBackend: "opencae-core-cpu-tet4" | "opencae-core-dynamic-tet4" }
   | { ok: false; reason: string };
 
 const STANDARD_GRAVITY = 9.80665;
@@ -70,30 +78,43 @@ export function openCaeCoreEligibility(study: Study, displayModel?: DisplayModel
   return { ok: true };
 }
 
-export function solveOpenCaeCoreStudy({ study, runId, displayModel }: {
+export function trySolveOpenCaeCoreStudy({ study, runId, displayModel }: {
   study: Study;
   runId: string;
   displayModel?: DisplayModel;
-}): OpenCaeCoreStudySolveOutcome {
+}): OpenCaeCoreSolveOutcome {
   const eligibility = openCaeCoreEligibility(study, displayModel);
   if (!eligibility.ok) return eligibility;
 
   try {
     const model = openCaeCoreModelForStudy(study, displayModel);
-    const solved = solveStaticLinearTet4Cpu(model, { maxDofs: 300 });
-    if (!solved.ok) return { ok: false, reason: `OpenCAE Core solve failed: ${solved.error.message}` };
-    const staticResult = resultBundleForOpenCaeCore(runId, model, solved.result, study, OPENCAE_CORE_STATIC_PROVENANCE);
     if (study.type === "dynamic_structural") {
+      const material = materialForStudy(study).material;
+      const settings = dynamicSettingsForStudy(study);
+      const solved = solveDynamicTet4Cpu(model, {
+        maxDofs: 300,
+        startTime: settings.startTime,
+        endTime: settings.endTime,
+        timeStep: settings.timeStep,
+        outputInterval: settings.outputInterval,
+        dampingRatio: settings.dampingRatio,
+        loadProfile: dynamicLoadProfileForCore(settings.loadProfile),
+        massDensity: material.density
+      });
+      if (!solved.ok) return { ok: false, reason: `OpenCAE Core solve failed: ${solved.error.message}` };
       return {
         ok: true,
         solverBackend: "opencae-core-dynamic-tet4",
-        result: dynamicResultBundleForOpenCaeCore(runId, study, displayModel!, staticResult)
+        result: dynamicResultBundleForOpenCaeCore(runId, model, solved.result.frames, study, settings)
       };
     }
+
+    const solved = solveStaticLinearTet4Cpu(model, { maxDofs: 300 });
+    if (!solved.ok) return { ok: false, reason: `OpenCAE Core solve failed: ${solved.error.message}` };
     return {
       ok: true,
       solverBackend: "opencae-core-cpu-tet4",
-      result: staticResult
+      result: resultBundleForOpenCaeCore(runId, model, solved.result, study, OPENCAE_CORE_STATIC_PROVENANCE)
     };
   } catch (error) {
     return { ok: false, reason: error instanceof Error ? error.message : "OpenCAE Core solve failed." };
@@ -150,87 +171,39 @@ function openCaeCoreModelForStudy(study: Study, displayModel: DisplayModel | und
 function resultBundleForOpenCaeCore(
   runId: string,
   model: OpenCAEModelJson,
-  result: {
-    displacement: Float64Array;
-    reactionForce: Float64Array;
-    vonMises: Float64Array;
-  },
+  result: Pick<StaticLinearTet4CpuResult, "displacement" | "reactionForce" | "vonMises">,
   study: Study,
   provenance: ResultProvenance
-): OpenCaeCoreStudySolveResult {
-  const nodePoints = pointsFromCoordinates(model.nodes.coordinates);
-  const displacementValuesMm = vectorMagnitudes(result.displacement).map((value) => round(value * 1000, 6));
-  const stressValuesMpa = Array.from(result.vonMises, (value) => round(Math.abs(value) / 1_000_000, 6));
-  const material = materialForStudy(study).material;
-  const yieldMpa = Math.max(material.yieldStrength / 1_000_000, 1e-9);
-  const safetyValues = stressValuesMpa.map((stress) => round(Math.max(0.05, yieldMpa / Math.max(stress, 1e-9)), 4));
-  const displacementSamples = nodePoints.map((point, node) => {
-    const vector = displacementVectorMm(result.displacement, node);
-    return {
-      point,
-      normal: [0, 0, 1] as Vec3,
-      value: round(Math.hypot(...vector), 6),
-      vector,
-      nodeId: `N${node}`,
-      source: "opencae_core"
-    };
-  });
-  const stressSamples = stressValuesMpa.map((value, element) => ({
-    point: elementCentroid(model, element),
-    normal: [0, 0, 1] as Vec3,
-    value,
-    elementId: `E${element}`,
-    source: "opencae_core",
-    vonMisesStressPa: round(value * 1_000_000, 3)
-  }));
-  const safetySamples = stressSamples.map((sample, index) => ({
-    ...sample,
-    value: safetyValues[index] ?? 0,
-    vonMisesStressPa: undefined
-  }));
-  const fields: ResultField[] = [
-    fieldFor(runId, "stress", "element", stressValuesMpa, "MPa", stressSamples, provenance),
-    fieldFor(runId, "displacement", "node", displacementValuesMm, "mm", displacementSamples, provenance),
-    fieldFor(runId, "safety_factor", "element", safetyValues, "", safetySamples, provenance)
-  ];
-  const maxStress = max(stressValuesMpa);
-  const maxDisplacement = max(displacementValuesMm);
-  const safetyFactor = Math.min(...safetyValues);
-  const reactionForce = round(vectorMagnitudes(result.reactionForce).reduce((sum, value) => sum + value, 0), 6);
+): LocalSolveResult {
+  const stressFrame = stressFieldForOpenCaeCore(runId, model, result.vonMises, study, provenance);
+  const displacementFrame = vectorFieldForOpenCaeCore(runId, "displacement", model, result.displacement, "mm", 1000, 6, provenance);
+  const safetyFrame = safetyFieldForOpenCaeCore(runId, stressFrame, study, provenance);
   const summaryBase = {
-    maxStress,
+    maxStress: stressFrame.max,
     maxStressUnits: "MPa",
-    maxDisplacement,
+    maxDisplacement: displacementFrame.max,
     maxDisplacementUnits: "mm",
-    safetyFactor,
-    reactionForce,
+    safetyFactor: safetyFrame.min,
+    reactionForce: round(vectorMagnitudes(result.reactionForce).reduce((sum, value) => sum + value, 0), 6),
     reactionForceUnits: "N"
   };
-  const summary: ResultSummary = {
-    ...summaryBase,
-    failureAssessment: assessResultFailure(summaryBase),
-    provenance
+  return {
+    summary: {
+      ...summaryBase,
+      failureAssessment: assessResultFailure(summaryBase),
+      provenance
+    },
+    fields: [stressFrame, displacementFrame, safetyFrame]
   };
-  return { summary, fields };
 }
 
 function dynamicResultBundleForOpenCaeCore(
   runId: string,
+  model: OpenCAEModelJson,
+  frames: DynamicTet4CpuFrame[],
   study: Study,
-  displayModel: DisplayModel,
-  staticResult: OpenCaeCoreStudySolveResult
-): OpenCaeCoreStudySolveResult {
-  const settings = dynamicSettingsForStudy(study);
-  const staticStress = staticResult.fields.find((field) => field.type === "stress");
-  const staticDisplacement = staticResult.fields.find((field) => field.type === "displacement");
-  const material = materialForStudy(study).material;
-  const force = Math.max(staticResult.summary.reactionForce, 0.001);
-  const staticDisplacementMeters = Math.max(staticResult.summary.maxDisplacement / 1000, 1e-6);
-  const massKg = equivalentMassKg(material.density, displayModel);
-  const stiffnessNPerM = Math.max(force / staticDisplacementMeters, 1);
-  const dampingNsPerM = 2 * settings.dampingRatio * Math.sqrt(stiffnessNPerM * massKg);
-  const frames = integrateDynamicFrames(settings, force, massKg, stiffnessNPerM, dampingNsPerM);
-  const yieldMpa = Math.max(material.yieldStrength / 1_000_000, 1e-9);
+  settings: DynamicSolverSettings
+): LocalSolveResult {
   const fields: ResultField[] = [];
   let peakDisplacement = 0;
   let peakDisplacementTimeSeconds = settings.startTime;
@@ -238,22 +211,13 @@ function dynamicResultBundleForOpenCaeCore(
   let minSafetyFactor = Number.POSITIVE_INFINITY;
 
   for (const frame of frames) {
-    const displacementScale = frame.displacement / staticDisplacementMeters;
-    const velocityScale = frame.velocity / staticDisplacementMeters;
-    const accelerationScale = frame.acceleration / staticDisplacementMeters;
-    const stressScale = Math.abs(displacementScale);
-    const stressFrame = scaleBaseField(staticStress, runId, "stress", "MPa", stressScale, frame.index, frame.time, 1);
-    const displacementFrame = scaleBaseField(staticDisplacement, runId, "displacement", "mm", displacementScale, frame.index, frame.time, 8);
-    const velocityFrame = scaleBaseField(staticDisplacement, runId, "velocity", "mm/s", velocityScale, frame.index, frame.time, 8);
-    const accelerationFrame = scaleBaseField(staticDisplacement, runId, "acceleration", "mm/s^2", accelerationScale, frame.index, frame.time, 8);
-    const safetyValues = stressFrame.values.map((stress) => round(Math.max(0.05, yieldMpa / Math.max(stress, 0.001)), 2));
-    const safetySamples = stressFrame.samples?.map((sample) => ({
-      ...sample,
-      value: round(Math.max(0.05, yieldMpa / Math.max(sample.value, 0.001)), 3),
-      vonMisesStressPa: undefined
-    })) ?? [];
-    const safetyFrame = fieldForFrame(runId, "safety_factor", safetyValues, "", safetySamples, frame.index, frame.time);
+    const stressFrame = withFrame(stressFieldForOpenCaeCore(runId, model, frame.vonMises, study, OPENCAE_CORE_DYNAMIC_PROVENANCE), frame.index, frame.time);
+    const displacementFrame = withFrame(vectorFieldForOpenCaeCore(runId, "displacement", model, frame.displacement, "mm", 1000, 8, OPENCAE_CORE_DYNAMIC_PROVENANCE), frame.index, frame.time);
+    const velocityFrame = withFrame(vectorFieldForOpenCaeCore(runId, "velocity", model, frame.velocity, "mm/s", 1000, 8, OPENCAE_CORE_DYNAMIC_PROVENANCE), frame.index, frame.time);
+    const accelerationFrame = withFrame(vectorFieldForOpenCaeCore(runId, "acceleration", model, frame.acceleration, "mm/s^2", 1000, 8, OPENCAE_CORE_DYNAMIC_PROVENANCE), frame.index, frame.time);
+    const safetyFrame = withFrame(safetyFieldForOpenCaeCore(runId, stressFrame, study, OPENCAE_CORE_DYNAMIC_PROVENANCE), frame.index, frame.time);
     fields.push(stressFrame, displacementFrame, velocityFrame, accelerationFrame, safetyFrame);
+
     const framePeakDisplacement = resultFieldAbsMax(displacementFrame);
     if (framePeakDisplacement > peakDisplacement) {
       peakDisplacement = framePeakDisplacement;
@@ -262,6 +226,7 @@ function dynamicResultBundleForOpenCaeCore(
     peakStress = Math.max(peakStress, stressFrame.max);
     minSafetyFactor = Math.min(minSafetyFactor, safetyFrame.min);
   }
+
   stabilizeDynamicFieldRanges(fields);
   const summaryBase = {
     maxStress: round(peakStress, 1),
@@ -269,7 +234,7 @@ function dynamicResultBundleForOpenCaeCore(
     maxDisplacement: round(peakDisplacement, 8),
     maxDisplacementUnits: "mm",
     safetyFactor: round(Number.isFinite(minSafetyFactor) ? minSafetyFactor : 0, 2),
-    reactionForce: staticResult.summary.reactionForce,
+    reactionForce: 0,
     reactionForceUnits: "N",
     transient: {
       analysisType: "dynamic_structural" as const,
@@ -292,6 +257,62 @@ function dynamicResultBundleForOpenCaeCore(
     },
     fields
   };
+}
+
+function stressFieldForOpenCaeCore(
+  runId: string,
+  model: OpenCAEModelJson,
+  vonMises: Float64Array,
+  study: Study,
+  provenance: ResultProvenance
+): ResultField {
+  const values = Array.from(vonMises, (value) => round(Math.abs(value) / 1_000_000, 6));
+  const samples = values.map((value, element) => ({
+    point: elementCentroid(model, element),
+    normal: [0, 0, 1] as Vec3,
+    value,
+    elementId: `E${element}`,
+    source: "opencae_core",
+    vonMisesStressPa: round(value * 1_000_000, 3)
+  }));
+  return fieldFor(runId, "stress", "element", values, "MPa", samples, provenance);
+}
+
+function vectorFieldForOpenCaeCore(
+  runId: string,
+  type: ResultField["type"],
+  model: OpenCAEModelJson,
+  vectors: Float64Array,
+  units: string,
+  unitScale: number,
+  digits: number,
+  provenance: ResultProvenance
+): ResultField {
+  const nodePoints = pointsFromCoordinates(model.nodes.coordinates);
+  const samples = nodePoints.map((point, node) => {
+    const vector = vectorForNode(vectors, node, unitScale, digits);
+    return {
+      point,
+      normal: [0, 0, 1] as Vec3,
+      value: round(Math.hypot(...vector), digits),
+      vector,
+      nodeId: `N${node}`,
+      source: "opencae_core"
+    };
+  });
+  return fieldFor(runId, type, "node", samples.map((sample) => sample.value), units, samples, provenance);
+}
+
+function safetyFieldForOpenCaeCore(runId: string, stressFrame: ResultField, study: Study, provenance: ResultProvenance): ResultField {
+  const material = materialForStudy(study).material;
+  const yieldMpa = Math.max(material.yieldStrength / 1_000_000, 1e-9);
+  const values = stressFrame.values.map((stress) => round(Math.max(0.05, yieldMpa / Math.max(stress, 1e-9)), 4));
+  const samples = stressFrame.samples?.map((sample, index) => ({
+    ...sample,
+    value: values[index] ?? 0,
+    vonMisesStressPa: undefined
+  })) ?? [];
+  return fieldFor(runId, "safety_factor", "element", values, "", samples, provenance);
 }
 
 function fieldFor(
@@ -317,40 +338,13 @@ function fieldFor(
   };
 }
 
-function fieldForFrame(runId: string, type: ResultField["type"], values: number[], units: string, samples: ResultSample[], frameIndex: number, timeSeconds: number): ResultField {
+function withFrame(field: ResultField, frameIndex: number, timeSeconds: number): ResultField {
   return {
-    id: `field-${type}-${runId}-frame-${frameIndex}`,
-    runId,
-    type,
-    location: type === "stress" || type === "safety_factor" ? "element" : "node",
-    values,
-    min: Math.min(...values),
-    max: Math.max(...values),
-    units,
-    samples,
+    ...field,
+    id: `field-${field.type}-${field.runId}-frame-${frameIndex}`,
     frameIndex,
-    timeSeconds,
-    provenance: OPENCAE_CORE_DYNAMIC_PROVENANCE
+    timeSeconds
   };
-}
-
-function scaleBaseField(
-  base: ResultField | undefined,
-  runId: string,
-  type: ResultField["type"],
-  units: string,
-  scale: number,
-  frameIndex: number,
-  timeSeconds: number,
-  digits: number
-): ResultField {
-  const values = (base?.values.length ? base.values : [0]).map((value) => round(value * scale, digits));
-  const samples = base?.samples?.map((sample) => ({
-    ...sample,
-    value: round(sample.value * scale, digits),
-    ...(sample.vector ? { vector: roundVector(scaleVector(sample.vector, scale), digits) } : {})
-  })) ?? [];
-  return fieldForFrame(runId, type, values, units, samples, frameIndex, timeSeconds);
 }
 
 function dynamicSettingsForStudy(study: Study): DynamicSolverSettings {
@@ -370,69 +364,8 @@ function dynamicSettingsForStudy(study: Study): DynamicSolverSettings {
   };
 }
 
-type DynamicFrame = {
-  index: number;
-  time: number;
-  displacement: number;
-  velocity: number;
-  acceleration: number;
-};
-
-function integrateDynamicFrames(settings: DynamicSolverSettings, force: number, mass: number, stiffness: number, damping: number): DynamicFrame[] {
-  const beta = 0.25;
-  const gamma = 0.5;
-  const dt = Math.max(settings.timeStep, 1e-6);
-  const outputInterval = Math.max(settings.outputInterval, dt);
-  const frames: DynamicFrame[] = [];
-  let time = settings.startTime;
-  let u = 0;
-  let v = 0;
-  let a = (loadScaleAt(time, settings) * force - damping * v - stiffness * u) / mass;
-  let frameIndex = 0;
-  let nextOutputTime = settings.startTime + outputInterval;
-  const maxSteps = Math.ceil((settings.endTime - settings.startTime) / dt) + 2;
-  const pushFrame = () => {
-    frames.push({ index: frameIndex, time: round(time, 6), displacement: u, velocity: v, acceleration: a });
-    frameIndex += 1;
-  };
-  pushFrame();
-  for (let step = 0; step < maxSteps && time < settings.endTime - 1e-12; step += 1) {
-    const nextTime = Math.min(time + dt, settings.endTime);
-    const stepDt = nextTime - time;
-    const a0 = 1 / (beta * stepDt * stepDt);
-    const a1 = gamma / (beta * stepDt);
-    const a2 = 1 / (beta * stepDt);
-    const a3 = 1 / (2 * beta) - 1;
-    const a4 = gamma / beta - 1;
-    const a5 = stepDt * (gamma / (2 * beta) - 1);
-    const effectiveStiffness = stiffness + a0 * mass + a1 * damping;
-    const nextForce = loadScaleAt(nextTime, settings) * force;
-    const effectiveForce = nextForce + mass * (a0 * u + a2 * v + a3 * a) + damping * (a1 * u + a4 * v + a5 * a);
-    const nextU = effectiveForce / effectiveStiffness;
-    const nextA = a0 * (nextU - u) - a2 * v - a3 * a;
-    const nextV = v + stepDt * ((1 - gamma) * a + gamma * nextA);
-    time = nextTime;
-    u = nextU;
-    v = nextV;
-    a = nextA;
-    if (time >= nextOutputTime - 1e-12 || time >= settings.endTime - 1e-12) {
-      pushFrame();
-      while (nextOutputTime <= time + 1e-12) nextOutputTime += outputInterval;
-    }
-  }
-  return frames;
-}
-
-function loadScaleAt(time: number, settings: DynamicSolverSettings): number {
-  if (settings.loadProfile === "ramp") {
-    const duration = Math.max(settings.endTime - settings.startTime, settings.timeStep);
-    return clamp((time - settings.startTime) / duration, 0, 1);
-  }
-  if (settings.loadProfile === "sinusoidal") {
-    const duration = Math.max(settings.endTime - settings.startTime, settings.timeStep);
-    return Math.sin(2 * Math.PI * clamp((time - settings.startTime) / duration, 0, 1));
-  }
-  return 1;
+function dynamicLoadProfileForCore(value: DynamicSolverSettings["loadProfile"]): DynamicLoadProfile {
+  return value === "quasi_static" ? "quasiStatic" : value;
 }
 
 function materialForStudy(study: Study) {
@@ -530,11 +463,11 @@ function vectorMagnitudes(values: Float64Array): number[] {
   return magnitudes;
 }
 
-function displacementVectorMm(displacement: Float64Array, node: number): Vec3 {
+function vectorForNode(values: Float64Array, node: number, unitScale: number, digits: number): Vec3 {
   return [
-    round((displacement[node * 3] ?? 0) * 1000, 6),
-    round((displacement[node * 3 + 1] ?? 0) * 1000, 6),
-    round((displacement[node * 3 + 2] ?? 0) * 1000, 6)
+    round((values[node * 3] ?? 0) * unitScale, digits),
+    round((values[node * 3 + 1] ?? 0) * unitScale, digits),
+    round((values[node * 3 + 2] ?? 0) * unitScale, digits)
   ];
 }
 
@@ -593,24 +526,8 @@ function normalize(vector: Vec3 | null): Vec3 | null {
   return length > 1e-12 ? [vector[0] / length, vector[1] / length, vector[2] / length] : null;
 }
 
-function scaleVector(vector: Vec3, scale: number): Vec3 {
-  return [vector[0] * scale, vector[1] * scale, vector[2] * scale];
-}
-
-function roundVector(vector: Vec3, decimals: number): Vec3 {
-  return [round(vector[0], decimals), round(vector[1], decimals), round(vector[2], decimals)];
-}
-
 function isDynamicLoadProfile(value: unknown): value is DynamicSolverSettings["loadProfile"] {
   return value === "ramp" || value === "step" || value === "quasi_static" || value === "sinusoidal";
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value));
-}
-
-function max(values: number[]): number {
-  return values.reduce((best, value) => Math.max(best, value), 0);
 }
 
 function round(value: number, decimals: number): number {
