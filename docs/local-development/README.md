@@ -40,6 +40,6 @@ pnpm deploy:cloudflare:containers:dry-run
 pnpm deploy:cloudflare:containers
 ```
 
-Use the default Cloudflare deploy for the production app domains. It uses `wrangler.jsonc`, targets `opencae-alpha`, and intentionally omits Cloud FEA container bindings because production simulations run in the browser through OpenCAE Core.
+Use the default Cloudflare deploy for the production app domains. It uses `wrangler.jsonc`, targets `opencae`, and intentionally omits Cloud FEA container bindings because production simulations run in the browser through OpenCAE Core.
 
 Use `pnpm deploy:cloudflare:containers` only for manual Cloud FEA container experiments. That command uses `wrangler.containers.jsonc`, includes `FEA_CONTAINER`, and points `containers[0].image` at the Cloud FEA Dockerfile so Wrangler builds and pushes the current container image.
