@@ -110,11 +110,11 @@ Deploy command: npx wrangler deploy --config wrangler.jsonc
 
 OpenCAE treats CAD entities as the source of truth. Meshes are generated artifacts, while results and reports are immutable study-run artifacts. Loads, supports, contacts, and named selections bind to CAD topology references so the data model can survive backend changes without rewriting the user workflow.
 
-The built-in demos include bracket, beam, and cantilever studies with Aluminum 6061 and 3D-printing material presets, supports, payload/force loads, generated mesh summaries, stress/displacement/safety-factor results, dynamic playback where available, and local report artifacts.
+The built-in demos include bracket, beam, and cantilever studies with Aluminum 6061 and 3D-printing material presets, supports, payload/force loads, generated mesh summaries, and local report artifacts.
 
 ## Solver Attribution
 
-OpenCAE separates browser-local Core previews from actual Core FEA. Simple block and beam-like studies may run the structured proxy preview path and are labeled `OpenCAE Core preview` with `structured_block_proxy` and `computed_preview` provenance. Complex geometry such as the Bracket Demo must use an actual connected volume mesh before it can be labeled `OpenCAE Core FEA` with `actual_volume_mesh` and `computed` provenance.
+Production solving is attributed to `OpenCAE Core Cloud`. Production results must carry `opencae_core_fea`, solver `opencae-core-cloud`, `computed` result provenance, and `actual_volume_mesh` or `structured_block_core` mesh provenance. Browser-local Core previews remain explicit development/demo behavior and must not be displayed as production FEA.
 
 ## Documentation
 

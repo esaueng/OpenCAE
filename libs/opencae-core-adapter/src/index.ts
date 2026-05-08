@@ -54,7 +54,7 @@ export type LocalSolveResult = {
   };
 };
 
-export type NormalizedBrowserSolverBackend = "local_detailed" | "opencae_core";
+export type NormalizedBrowserSolverBackend = "opencae_core_cloud" | "opencae_core_local";
 
 export type OpenCaeCoreEligibility =
   | { ok: true }
@@ -68,7 +68,7 @@ const STANDARD_GRAVITY = 9.80665;
 const DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.005;
 const MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.005;
 
-const COMPLEX_CORE_PREVIEW_REJECTION_REASON = "OpenCAE Core preview supports simple block/beam geometry only. Bracket/complex geometry requires an actual Core volume mesh or Cloud FEA.";
+const COMPLEX_CORE_PREVIEW_REJECTION_REASON = "OpenCAE Core Local requires simple block/beam geometry or an actual Core volume mesh. Use OpenCAE Core Cloud for complex production geometry.";
 
 const OPENCAE_CORE_ACTUAL_STATIC_PROVENANCE: ResultProvenance = {
   kind: "opencae_core_fea",
@@ -102,7 +102,7 @@ const OPENCAE_CORE_PREVIEW_DYNAMIC_PROVENANCE: ResultProvenance = {
 
 export function normalizeSolverBackend(value: { solverSettings?: { backend?: unknown } } | Study | undefined): NormalizedBrowserSolverBackend {
   const backend = value?.solverSettings?.backend;
-  return backend === "local_detailed" ? "local_detailed" : "opencae_core";
+  return backend === "opencae_core_local" ? "opencae_core_local" : "opencae_core_cloud";
 }
 
 export function isSimpleBlockLikeDisplayModel(displayModel: DisplayModel | undefined): boolean {
@@ -149,7 +149,7 @@ export function openCaeCoreEligibility(study: Study, displayModel?: DisplayModel
     return { ok: false, reason: "OpenCAE Core requires at least one fixed support." };
   }
   const unsupportedLoad = study.loads.find((load) => load.type !== "force");
-  if (unsupportedLoad) return { ok: false, reason: `OpenCAE Core supports force loads only; ${unsupportedLoad.type} loads use Detailed local.` };
+  if (unsupportedLoad) return { ok: false, reason: `OpenCAE Core Local supports force loads only; ${unsupportedLoad.type} loads require OpenCAE Core Cloud.` };
   if (!study.loads.length) return { ok: false, reason: "OpenCAE Core requires at least one force load." };
   const material = materialForStudy(study).material;
   const force = totalForceVector(study, displayModel, material.density);
@@ -503,7 +503,7 @@ function dynamicSettingsForStudy(study: Study): DynamicSolverSettings {
   const raw = study.solverSettings as Partial<DynamicSolverSettings>;
   const timeStep = finiteOr(raw.timeStep, DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS);
   return {
-    backend: "opencae_core",
+    backend: "opencae_core_local",
     fidelity: raw.fidelity ?? "standard",
     startTime: finiteOr(raw.startTime, 0),
     endTime: finiteOr(raw.endTime, 0.1),

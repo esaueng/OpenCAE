@@ -5,6 +5,13 @@ const jsonHeaders = {
   "cache-control": "no-store"
 };
 
+const cloudCoreUnavailable = {
+  ok: false,
+  solver: "opencae-core-cloud",
+  label: "OpenCAE Core Cloud",
+  error: "OpenCAE Core Cloud is not provisioned in this Worker build."
+};
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
@@ -18,6 +25,20 @@ export default {
           solverRuntime: "browser-opencae-core"
         },
         { headers: jsonHeaders }
+      );
+    }
+
+    if (url.pathname === "/api/cloud-core/health" || url.pathname === "/api/cloud-fea/health") {
+      return Response.json(cloudCoreUnavailable, { status: 503, headers: jsonHeaders });
+    }
+
+    if (isCloudCoreRoute(url.pathname) || isLegacyCloudFeaRoute(url.pathname)) {
+      return Response.json(
+        {
+          ...cloudCoreUnavailable,
+          route: url.pathname
+        },
+        { status: 503, headers: jsonHeaders }
       );
     }
 
@@ -37,3 +58,13 @@ export default {
     return undefined;
   }
 } satisfies ExportedHandler<Env>;
+
+function isCloudCoreRoute(pathname: string): boolean {
+  return pathname === "/api/cloud-core/runs" ||
+    /^\/api\/cloud-core\/runs\/[^/]+\/(?:events|results)$/.test(pathname);
+}
+
+function isLegacyCloudFeaRoute(pathname: string): boolean {
+  return pathname === "/api/cloud-fea/runs" ||
+    /^\/api\/cloud-fea\/runs\/[^/]+\/(?:events|results)$/.test(pathname);
+}

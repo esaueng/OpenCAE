@@ -4,7 +4,6 @@ import { bracketDemoProject, bracketDisplayModel } from "@opencae/db/sample-data
 import { stlDimensionsFromBase64 } from "@opencae/units";
 import type { EmbeddedModelFile, LocalResultBundle } from "./projectFile";
 import type { SampleAnalysisType, SampleModelId, SampleProjectResponse } from "./lib/api";
-import { fallbackSolveLocalStudy } from "./workers/localSolve";
 
 const SAMPLE_META: Record<SampleModelId, { projectName: string; modelName: string; filename: string; displayName: string; dimensions: DisplayModel["dimensions"] }> = {
   bracket: {
@@ -153,7 +152,7 @@ function dynamicSampleRun(sample: SampleModelId, projectId: string, studyId: str
     meshRef: `${projectId}/mesh/mesh-summary.json`,
     resultRef: `${projectId}/results/${runId}/results.json`,
     reportRef: `${projectId}/reports/${runId}/report.html`,
-    solverBackend: "local-dynamic-newmark",
+    solverBackend: "opencae-core-preview-sdof",
     solverVersion: "0.1.0",
     startedAt: now,
     finishedAt: now,
@@ -162,19 +161,8 @@ function dynamicSampleRun(sample: SampleModelId, projectId: string, studyId: str
 }
 
 async function dynamicSampleResults(project: Project): Promise<LocalResultBundle | undefined> {
-  const study = project.studies[0];
-  const run = study?.runs[0];
-  if (!study || !run) return undefined;
-  const solved = await fallbackSolveLocalStudy({
-    study: { ...study, solverSettings: { ...study.solverSettings, backend: "local_detailed" } } as unknown as Project["studies"][number],
-    runId: run.id
-  });
-  return {
-    activeRunId: run.id,
-    completedRunId: run.id,
-    summary: solved.summary,
-    fields: solved.fields
-  };
+  void project;
+  return undefined;
 }
 
 function sampleLoadsFor(sample: SampleModelId, templateLoads: Load[], displayModel: DisplayModel, payloadLabel: string): Load[] {

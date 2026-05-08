@@ -57,9 +57,21 @@ describe("Cloudflare local-first worker", () => {
     } as Env);
 
     await expect(response.json()).resolves.toMatchObject({
-      error: expect.stringContaining("Simulations run in the browser with OpenCAE Core")
+      solver: "opencae-core-cloud",
+      label: "OpenCAE Core Cloud"
     });
     expect(response.status).toBe(503);
+  });
+
+  test("cloud core routes and legacy cloud fea aliases identify OpenCAE Core Cloud", async () => {
+    const env = { ASSETS: { fetch: async () => new Response("asset") } } as Env;
+    const health = await worker.fetch(new Request("https://cae.esau.app/api/cloud-core/health"), env);
+    const runs = await worker.fetch(new Request("https://cae.esau.app/api/cloud-core/runs"), env);
+    const legacy = await worker.fetch(new Request("https://cae.esau.app/api/cloud-fea/runs/run-1/results"), env);
+
+    await expect(health.json()).resolves.toMatchObject({ ok: false, solver: "opencae-core-cloud", label: "OpenCAE Core Cloud" });
+    await expect(runs.json()).resolves.toMatchObject({ solver: "opencae-core-cloud", label: "OpenCAE Core Cloud" });
+    await expect(legacy.json()).resolves.toMatchObject({ solver: "opencae-core-cloud", label: "OpenCAE Core Cloud" });
   });
 
   test("includes an inert queue handler for stale legacy Workers Builds consumers", async () => {
