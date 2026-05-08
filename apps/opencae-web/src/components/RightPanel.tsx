@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { AlertTriangle, Anchor, ArrowDown, Check, CircleHelp, Eye, Gauge, Grid3X3, Maximize2, Pause, Play, Plus, RotateCcw, Ruler, ScanLine, ShieldCheck, Upload, Weight, X } from "lucide-react";
 import { defaultPrintParametersFor, effectiveMaterialProperties, massKgForPayloadMaterial, normalizePrintParameters, payloadMaterialForId, payloadMaterials, starterMaterials, type PayloadMaterialCategory, type PrintMaterialParameters } from "@opencae/materials";
 import { assessResultFailure, estimateAllowableLoadForSafetyFactor } from "@opencae/schema";
-import type { Constraint, DisplayFace, DisplayModel, DynamicSolverSettings, Load, MeshQuality, Project, ResultField, ResultSummary, RunTimingEstimate, SimulationFidelity, SolverBackend, Study } from "@opencae/schema";
+import type { Constraint, DisplayFace, DisplayModel, DynamicSolverSettings, Load, MeshQuality, Project, ResultField, ResultSummary, RunTimingEstimate, SimulationFidelity, Study } from "@opencae/schema";
 import { inferCriticalPrintAxis } from "@opencae/study-core";
 import type { ResultMode, ViewMode } from "./CadViewer";
 import type { StepId } from "./StepBar";
@@ -107,10 +107,9 @@ interface RightPanelProps {
 
 const EMPTY_PARAMETERS: Record<string, unknown> = {};
 const noopDraftPayloadPreviewChange = () => undefined;
-type SolverSettingsPatch = Partial<DynamicSolverSettings> & { backend?: SolverBackend; fidelity?: SimulationFidelity };
+type SolverSettingsPatch = Partial<DynamicSolverSettings> & { fidelity?: SimulationFidelity };
 const MESH_PRESETS: MeshQuality[] = ["coarse", "medium", "fine", "ultra"];
 const SIMULATION_FIDELITIES: SimulationFidelity[] = ["standard", "detailed", "ultra"];
-const SOLVER_BACKENDS: SolverBackend[] = ["opencae_core", "local_detailed"];
 
 export function RightPanel(props: RightPanelProps) {
   return (
@@ -958,9 +957,6 @@ function RunPanel({ study, runProgress, runTiming, onRunSimulation, onCancelSimu
     ["Mesh generated", study.meshSettings.status === "complete"]
   ] as const;
   const dynamic = study.type === "dynamic_structural" ? study.solverSettings : null;
-  const backend = solverBackendForStudy(study);
-  const effectiveRuntimeBackend = backend;
-  const openCaeCoreSelected = effectiveRuntimeBackend === "opencae_core";
   const fidelity = solverFidelityForStudy(study);
   const updateSolverChoice = (settings: SolverSettingsPatch) => {
     onUpdateSolverSettings?.(settings);
@@ -973,7 +969,7 @@ function RunPanel({ study, runProgress, runTiming, onRunSimulation, onCancelSimu
     if (!isDynamicLoadProfile(value)) return;
     onUpdateSolverSettings?.({ loadProfile: value });
   };
-  const frameEstimate = dynamic ? dynamicFrameEstimate(dynamic, openCaeCoreSelected ? "opencae_core" : "local_detailed") : null;
+  const frameEstimate = dynamic ? dynamicFrameEstimate(dynamic) : null;
   const outputIntervalMinimum = MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS;
   const outputIntervalValue = dynamic?.outputInterval ?? DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS;
   const loadProfile = isDynamicLoadProfile(dynamic?.loadProfile) ? dynamic.loadProfile : "ramp";
@@ -985,12 +981,9 @@ function RunPanel({ study, runProgress, runTiming, onRunSimulation, onCancelSimu
         {checks.map(([label, done]) => <span key={label} className={done ? "check done" : "check"}><span>{done ? <Check size={18} /> : null}</span>{label}</span>)}
       </div>
       <SectionTitle>Simulation backend</SectionTitle>
-      <label className="field">
-        <span>Backend</span>
-        <select value={backend} onChange={(event) => updateSolverChoice({ backend: event.currentTarget.value as SolverBackend })}>
-          {SOLVER_BACKENDS.map((option) => <option key={option} value={option}>{backendLabel(option)}</option>)}
-        </select>
-      </label>
+      <div className="summary-box">
+        <Info label="Backend" value="OpenCAE Core" />
+      </div>
       <label className="field">
         <span>Fidelity</span>
         <select value={fidelity} onChange={(event) => updateSolverChoice({ fidelity: event.currentTarget.value as SimulationFidelity })}>
@@ -1014,9 +1007,8 @@ function RunPanel({ study, runProgress, runTiming, onRunSimulation, onCancelSimu
           <DynamicNumberField label="Damping ratio" unit="ζ" value={dynamic.dampingRatio} min={0} step="0.01" onCommit={(value) => updateDynamicNumber("dampingRatio", value)} />
           <div className="summary-box">
             <Info label="Estimated frames" value={frameEstimate ? frameEstimate.count.toLocaleString() : "--"} />
-            <Info label="Output cadence" value={`Every ${formatSeconds(normalizedDynamicOutputInterval(dynamic, openCaeCoreSelected ? "opencae_core" : "local_detailed"))}`} />
+            <Info label="Output cadence" value={`Every ${formatSeconds(normalizedDynamicOutputInterval(dynamic))}`} />
           </div>
-          {openCaeCoreSelected && <p className="panel-copy">Dynamic OpenCAE Core runs fall back to Detailed local until transient Core support is available.</p>}
           {frameEstimate && frameEstimate.count > 1000 && <p className="panel-copy">Large frame counts may slow result loading and playback.</p>}
           {frameEstimate?.hasFinalPartialStep && <p className="panel-copy">Final frame is clamped to the selected end time.</p>}
         </>
@@ -1047,9 +1039,9 @@ function RunPanel({ study, runProgress, runTiming, onRunSimulation, onCancelSimu
       )}
       <SectionTitle helpId="solver">Solver</SectionTitle>
       <div className="summary-box">
-        <Info label="Backend" value={openCaeCoreSelected ? "opencae-core-cpu-tet4" : study.type === "dynamic_structural" ? "local-dynamic-newmark" : "local-heuristic-surface"} />
+        <Info label="Backend" value={study.type === "dynamic_structural" ? "opencae-core-dynamic-tet4" : "opencae-core-cpu-tet4"} />
         <Info label="Version" value="0.1.0" />
-        <Info label="Runner" value={openCaeCoreSelected ? "browser-worker" : "local-in-memory"} />
+        <Info label="Runner" value="browser-worker" />
       </div>
     </Panel>
   );
@@ -1137,18 +1129,9 @@ function meshPresetDescription(preset: MeshQuality) {
   return "ultra-dense local analysis samples for granular contour gradients";
 }
 
-function solverBackendForStudy(study: Study): SolverBackend {
-  const backend = (study.solverSettings as { backend?: unknown }).backend;
-  return backend === "local_detailed" ? "local_detailed" : "opencae_core";
-}
-
 function solverFidelityForStudy(study: Study): SimulationFidelity {
   const fidelity = (study.solverSettings as { fidelity?: unknown }).fidelity;
   return fidelity === "detailed" || fidelity === "ultra" ? fidelity : "standard";
-}
-
-function backendLabel(backend: SolverBackend) {
-  return backend === "opencae_core" ? "OpenCAE Core" : "Detailed local";
 }
 
 export function formatSimulationEta(remainingMs: number | undefined, isRunning = true): string {
@@ -1663,9 +1646,9 @@ function activeFieldAbsMax(field: ResultField): number {
   return Math.max(Math.abs(Number(field.min) || 0), Math.abs(Number(field.max) || 0));
 }
 
-function dynamicFrameEstimate(settings: DynamicSolverSettings, backend: SolverBackend = "local_detailed"): { count: number; hasFinalPartialStep: boolean } {
+function dynamicFrameEstimate(settings: DynamicSolverSettings): { count: number; hasFinalPartialStep: boolean } {
   const duration = Math.max(0, settings.endTime - settings.startTime);
-  const outputInterval = normalizedDynamicOutputInterval(settings, backend);
+  const outputInterval = normalizedDynamicOutputInterval(settings);
   const wholeSteps = Math.floor(duration / outputInterval);
   const remainder = duration - wholeSteps * outputInterval;
   const hasFinalPartialStep = remainder > outputInterval * 1e-9;
@@ -1675,7 +1658,7 @@ function dynamicFrameEstimate(settings: DynamicSolverSettings, backend: SolverBa
   };
 }
 
-function normalizedDynamicOutputInterval(settings: DynamicSolverSettings, backend: SolverBackend = "local_detailed") {
+function normalizedDynamicOutputInterval(settings: DynamicSolverSettings) {
   const requestedOutputInterval = Number.isFinite(settings.outputInterval) ? settings.outputInterval : DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS;
   const backendMinimum = Math.max(DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS, MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS);
   return Math.max(requestedOutputInterval, settings.timeStep, backendMinimum);

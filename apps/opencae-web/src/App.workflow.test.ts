@@ -93,14 +93,14 @@ describe("App workflow layout", () => {
   test("surfaces run creation failures instead of leaving the run button inert", () => {
     expect(appSource).toContain('pushMessage("Starting simulation run.");');
     expect(appSource).toContain("runDiagnosticsMessage(study)");
-    expect(apiSource).not.toContain("Cloud FEA request started: POST");
-    expect(apiSource).not.toContain("Cloud FEA local bridge selected:");
+    expect(apiSource).not.toContain("external solver request started: POST");
+    expect(apiSource).not.toContain("external solver bridge selected:");
     expect(appSource).toContain("try {\n      response = await runSimulation(study.id, study, displayModel ?? undefined, { onRunStatus: pushMessage, resultRenderBounds });");
     expect(appSource).toContain("setRunProgress(0);");
     expect(appSource).toContain('pushMessage(errorMessage(error, "Could not start simulation."));');
-    expect(appSource).not.toContain("Cloud FEA run created: runId=");
-    expect(appSource).not.toContain("Cloud FEA event polling started: GET");
-    expect(appSource).not.toContain("Cloud FEA results fetch started: GET");
+    expect(appSource).not.toContain("external solver run created: runId=");
+    expect(appSource).not.toContain("external solver event polling started: GET");
+    expect(appSource).not.toContain("external solver results fetch started: GET");
     expect(appSource).toContain('pushMessage(errorMessage(error, "Could not load simulation results."));');
   });
 

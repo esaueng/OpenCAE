@@ -18,3 +18,11 @@ export {
 } from "./element";
 export { solveDenseLinearSystem } from "./linear-solve";
 export { solveStaticLinearTet4Cpu } from "./solver";
+export {
+  normalizeSolverBackend,
+  openCaeCoreEligibility,
+  solveOpenCaeCoreStudy,
+  type OpenCaeCoreEligibility,
+  type OpenCaeCoreStudySolveOutcome,
+  type OpenCaeCoreStudySolveResult
+} from "./study";
