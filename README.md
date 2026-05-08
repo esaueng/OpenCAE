@@ -114,7 +114,7 @@ The built-in demos include bracket, beam, and cantilever studies with Aluminum 6
 
 ## Solver Attribution
 
-OpenCAE uses OpenCAE Core as its only solver runtime. The live sibling `@opencae/core` and `@opencae/solver-cpu` workspace packages run static stress and dynamic structural studies with a Tet4 CPU model. Results are marked with `opencae_core_fea`, `opencae_core_tet4`, and `computed` provenance.
+OpenCAE separates browser-local Core previews from actual Core FEA. Simple block and beam-like studies may run the structured proxy preview path and are labeled `OpenCAE Core preview` with `structured_block_proxy` and `computed_preview` provenance. Complex geometry such as the Bracket Demo must use an actual connected volume mesh before it can be labeled `OpenCAE Core FEA` with `actual_volume_mesh` and `computed` provenance.
 
 ## Documentation
 

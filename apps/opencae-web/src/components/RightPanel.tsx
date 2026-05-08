@@ -21,6 +21,8 @@ import { MaterialLibraryModal } from "./SimulationWorkflow";
 import { SampleOptionCard } from "./SampleOptionCard";
 import { SAMPLE_OPTIONS, sampleOptionFor } from "./sampleOptions";
 import { dynamicPlaybackFrames } from "../resultFields";
+import { INVALID_REACTION_WARNING, PREVIEW_GEOMETRY_WARNING, canShowReverseLoadCapacity, hasInvalidReactionForce, hasUnavailableReactionDiagnostic, shouldBlockPreviewResultsForDisplayModel } from "../resultProvenance";
+import { hasActualCoreVolumeMesh } from "../workers/opencaeCoreSolve";
 import {
   frameIndexForRoundedPlaybackOrdinal,
   playbackOrdinalForSolverFramePosition
@@ -945,7 +947,7 @@ function MeshPanel({ study, onGenerateMesh }: RightPanelProps) {
   );
 }
 
-function RunPanel({ study, runProgress, runTiming, onRunSimulation, onCancelSimulation, canCancelSimulation, onUpdateSolverSettings, canRunSimulation, missingRunItems }: RightPanelProps) {
+function RunPanel({ study, displayModel, runProgress, runTiming, onRunSimulation, onCancelSimulation, canCancelSimulation, onUpdateSolverSettings, canRunSimulation, missingRunItems }: RightPanelProps) {
   const progressPercent = Math.max(0, Math.min(100, Math.round(runProgress)));
   const isRunning = canCancelSimulation ?? (progressPercent > 0 && progressPercent < 100);
   const remainingLabel = formatSimulationEta(runTiming?.estimatedRemainingMs, isRunning);
@@ -1039,7 +1041,7 @@ function RunPanel({ study, runProgress, runTiming, onRunSimulation, onCancelSimu
       )}
       <SectionTitle helpId="solver">Solver</SectionTitle>
       <div className="summary-box">
-        <Info label="Backend" value={study.type === "dynamic_structural" ? "opencae-core-dynamic-tet4" : "opencae-core-cpu-tet4"} />
+        <Info label="Backend" value={solverBackendLabelForRunPanel(study, displayModel)} />
         <Info label="Version" value="0.1.0" />
         <Info label="Runner" value="browser-worker" />
       </div>
@@ -1134,6 +1136,13 @@ function solverFidelityForStudy(study: Study): SimulationFidelity {
   return fidelity === "detailed" || fidelity === "ultra" ? fidelity : "standard";
 }
 
+function solverBackendLabelForRunPanel(study: Study, displayModel: DisplayModel): string {
+  if (hasActualCoreVolumeMesh(study, displayModel)) {
+    return study.type === "dynamic_structural" ? "opencae-core-mdof-tet" : "opencae-core-sparse-tet";
+  }
+  return study.type === "dynamic_structural" ? "opencae-core-preview-sdof" : "opencae-core-preview-tet4";
+}
+
 export function formatSimulationEta(remainingMs: number | undefined, isRunning = true): string {
   if (!isRunning) return "Complete";
   if (typeof remainingMs !== "number" || !Number.isFinite(remainingMs)) return "Estimating...";
@@ -1155,6 +1164,7 @@ function formatDurationSeconds(milliseconds: number): string {
 }
 
 function ResultsPanel({
+  displayModel,
   resultMode,
   showDeformed,
   stressExaggeration,
@@ -1182,7 +1192,9 @@ function ResultsPanel({
   const committedStressExaggerationRef = useRef(stressExaggeration);
   const assessment = resultSummary.failureAssessment ?? assessResultFailure(resultSummary);
   const loadCapacity = estimateAllowableLoadForSafetyFactor(resultSummary, targetSafetyFactor);
-  const canEstimateLoad = loadCapacity.status === "available";
+  const blockPreviewResults = shouldBlockPreviewResultsForDisplayModel(displayModel, resultSummary, resultFields, study);
+  const reactionForceInvalid = hasInvalidReactionForce(resultSummary, study) || hasUnavailableReactionDiagnostic(resultSummary);
+  const canEstimateLoad = loadCapacity.status === "available" && canShowReverseLoadCapacity(resultSummary, displayModel, resultFields, study);
   const AssessmentIcon = assessment.status === "pass" ? ShieldCheck : AlertTriangle;
   const frames = dynamicPlaybackFrames(resultFields);
   const hasPlayback = frames.length > 1;
@@ -1321,7 +1333,9 @@ function ResultsPanel({
           />
         </label>
       )}
-      <label className="toggle"><input type="checkbox" checked={showDeformed} onChange={onToggleDeformed} /> <HelpLabel helpId="deformedShape">Deformed shape</HelpLabel></label>
+      <label className="toggle"><input type="checkbox" checked={showDeformed && !blockPreviewResults} disabled={blockPreviewResults} onChange={onToggleDeformed} /> <HelpLabel helpId="deformedShape">Deformed shape</HelpLabel></label>
+      {blockPreviewResults && <p className="panel-warning">{PREVIEW_GEOMETRY_WARNING}</p>}
+      {reactionForceInvalid && <p className="panel-warning">{INVALID_REACTION_WARNING}</p>}
       <p className="panel-copy">Red areas have higher stress. Blue areas have lower stress.</p>
       <div className="summary-box">
         <Info label="Result source" value={formatResultProvenanceLabel(resultSummary.provenance)} />
@@ -1331,30 +1345,34 @@ function ResultsPanel({
         <Info label="Failure check" value={assessment.title} />
         <Info label="Reaction force" value={`${resultSummary.reactionForce} ${resultSummary.reactionForceUnits}`} />
       </div>
-      <SectionTitle helpId="targetSafetyFactor">Reverse Check</SectionTitle>
-      <div className="load-capacity-tool">
-        <label className="field">
-          <HelpLabel helpId="targetSafetyFactor">Target factor of safety</HelpLabel>
-          <span className="input-with-unit">
-            <input
-              type="number"
-              min="0.1"
-              step="0.1"
-              value={targetSafetyFactor}
-              onChange={(event) => {
-                const next = Number(event.currentTarget.value);
-                setTargetSafetyFactor(Number.isFinite(next) && next > 0 ? next : 1.5);
-              }}
-            />
-            <span>FoS</span>
-          </span>
-        </label>
-        <div className="capacity-readout">
-          <span>Max total load</span>
-          <strong>{canEstimateLoad ? `${formatLoadCapacity(loadCapacity.allowableLoad)} ${loadCapacity.loadUnits}` : "Unavailable"}</strong>
-          <small>{canEstimateLoad ? `Current ${formatLoadCapacity(loadCapacity.currentLoad)} ${loadCapacity.loadUnits} · ${formatLoadCapacity(loadCapacity.loadScale)}x` : "Run a valid simulation first."}</small>
-        </div>
-      </div>
+      {canEstimateLoad && (
+        <>
+          <SectionTitle helpId="targetSafetyFactor">Reverse Check</SectionTitle>
+          <div className="load-capacity-tool">
+            <label className="field">
+              <HelpLabel helpId="targetSafetyFactor">Target factor of safety</HelpLabel>
+              <span className="input-with-unit">
+                <input
+                  type="number"
+                  min="0.1"
+                  step="0.1"
+                  value={targetSafetyFactor}
+                  onChange={(event) => {
+                    const next = Number(event.currentTarget.value);
+                    setTargetSafetyFactor(Number.isFinite(next) && next > 0 ? next : 1.5);
+                  }}
+                />
+                <span>FoS</span>
+              </span>
+            </label>
+            <div className="capacity-readout">
+              <span>Max total load</span>
+              <strong>{`${formatLoadCapacity(loadCapacity.allowableLoad)} ${loadCapacity.loadUnits}`}</strong>
+              <small>{`Current ${formatLoadCapacity(loadCapacity.currentLoad)} ${loadCapacity.loadUnits} · ${formatLoadCapacity(loadCapacity.loadScale)}x`}</small>
+            </div>
+          </div>
+        </>
+      )}
       <div className="legend"><span /> <small>Low</small><small>High</small></div>
     </Panel>
   );

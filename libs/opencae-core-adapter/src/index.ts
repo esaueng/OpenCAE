@@ -1,4 +1,4 @@
-import type { OpenCAEModelJson } from "@opencae/core";
+import { connectedComponents, type OpenCAEModelJson } from "@opencae/core";
 import {
   solveDynamicTet4Cpu,
   solveStaticLinearTet4Cpu,
@@ -24,6 +24,10 @@ type Vec3 = [number, number, number];
 type CoreStudyModel = {
   model: OpenCAEModelJson;
   renderNodePoints: Vec3[];
+  meshSource: ResultProvenance["meshSource"];
+  meshConnectivity?: {
+    connectedComponents: number;
+  };
 };
 
 type CoreTetMesh = {
@@ -32,9 +36,22 @@ type CoreTetMesh = {
   connectivity: number[];
 };
 
+type ActualCoreVolumeMeshArtifact = {
+  model: OpenCAEModelJson;
+  renderNodePoints?: Vec3[];
+  meshConnectivity?: {
+    connectedComponents?: number;
+  };
+};
+
 export type LocalSolveResult = {
   summary: ResultSummary;
   fields: ResultField[];
+  artifacts?: {
+    meshConnectivity?: {
+      connectedComponents: number;
+    };
+  };
 };
 
 export type NormalizedBrowserSolverBackend = "local_detailed" | "opencae_core";
@@ -44,31 +61,76 @@ export type OpenCaeCoreEligibility =
   | { ok: false; reason: string };
 
 export type OpenCaeCoreSolveOutcome =
-  | { ok: true; result: LocalSolveResult; solverBackend: "opencae-core-cpu-tet4" | "opencae-core-dynamic-tet4" }
+  | { ok: true; result: LocalSolveResult; solverBackend: "opencae-core-preview-tet4" | "opencae-core-preview-sdof" | "opencae-core-sparse-tet" | "opencae-core-mdof-tet" }
   | { ok: false; reason: string };
 
 const STANDARD_GRAVITY = 9.80665;
 const DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.005;
 const MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.005;
 
-const OPENCAE_CORE_STATIC_PROVENANCE: ResultProvenance = {
+const COMPLEX_CORE_PREVIEW_REJECTION_REASON = "OpenCAE Core preview supports simple block/beam geometry only. Bracket/complex geometry requires an actual Core volume mesh or Cloud FEA.";
+
+const OPENCAE_CORE_ACTUAL_STATIC_PROVENANCE: ResultProvenance = {
   kind: "opencae_core_fea",
-  solver: "opencae-core-cpu-tet4",
+  solver: "opencae-core-sparse-tet",
   solverVersion: "0.1.0",
-  meshSource: "opencae_core_tet4",
+  meshSource: "actual_volume_mesh",
   resultSource: "computed",
   units: "m-N-s-Pa"
 };
 
-const OPENCAE_CORE_DYNAMIC_PROVENANCE: ResultProvenance = {
-  ...OPENCAE_CORE_STATIC_PROVENANCE,
-  solver: "opencae-core-dynamic-tet4",
+const OPENCAE_CORE_ACTUAL_DYNAMIC_PROVENANCE: ResultProvenance = {
+  ...OPENCAE_CORE_ACTUAL_STATIC_PROVENANCE,
+  solver: "opencae-core-mdof-tet",
+  integrationMethod: "newmark_average_acceleration"
+};
+
+const OPENCAE_CORE_PREVIEW_STATIC_PROVENANCE: ResultProvenance = {
+  kind: "local_estimate",
+  solver: "opencae-core-preview-tet4",
+  solverVersion: "0.1.0",
+  meshSource: "structured_block_proxy",
+  resultSource: "computed_preview",
+  units: "m-N-s-Pa"
+};
+
+const OPENCAE_CORE_PREVIEW_DYNAMIC_PROVENANCE: ResultProvenance = {
+  ...OPENCAE_CORE_PREVIEW_STATIC_PROVENANCE,
+  solver: "opencae-core-preview-sdof",
   integrationMethod: "newmark_average_acceleration"
 };
 
 export function normalizeSolverBackend(value: { solverSettings?: { backend?: unknown } } | Study | undefined): NormalizedBrowserSolverBackend {
   const backend = value?.solverSettings?.backend;
   return backend === "local_detailed" ? "local_detailed" : "opencae_core";
+}
+
+export function isSimpleBlockLikeDisplayModel(displayModel: DisplayModel | undefined): boolean {
+  if (!displayModel?.dimensions || !positiveDimensions(displayModel.dimensions)) return false;
+  if (displayModel.bodyCount !== 1) return false;
+  if (displayModel.nativeCad || displayModel.visualMesh) return false;
+  const text = displayModelText(displayModel);
+  if (/\b(bracket|hole|holes|rib|gusset|upright|fillet|web[- ]front|mounting)\b/i.test(text)) return false;
+  if (/\b(cantilever|beam|block|rectangular|plate)\b/i.test(text)) return true;
+  return displayModel.faces.length > 0 && displayModel.faces.length <= 6;
+}
+
+export function hasActualCoreVolumeMesh(study: Study, displayModel?: DisplayModel): boolean {
+  void displayModel;
+  const artifact = actualCoreVolumeMeshArtifact(study);
+  if (!artifact?.model) return false;
+  if (meshSourceForActualArtifact(artifact) !== "actual_volume_mesh") return false;
+  return connectedComponentCountForActualArtifact(artifact) === 1;
+}
+
+export function isComplexGeometry(displayModel: DisplayModel | undefined, study?: Study): boolean {
+  if (!displayModel) return false;
+  if (hasActualCoreVolumeMeshForDisplay(displayModel)) return true;
+  if (isSimpleBlockLikeDisplayModel(displayModel)) return false;
+  const text = `${displayModelText(displayModel)} ${study?.geometryScope.map((scope) => scope.label).join(" ") ?? ""}`;
+  if (/\b(bracket|hole|holes|rib|gusset|upright|uploaded|step|stl|obj|mounting)\b/i.test(text)) return true;
+  if (displayModel.nativeCad || displayModel.visualMesh) return true;
+  return displayModel.faces.length > 6;
 }
 
 export function openCaeCoreEligibility(study: Study, displayModel?: DisplayModel): OpenCaeCoreEligibility {
@@ -78,6 +140,9 @@ export function openCaeCoreEligibility(study: Study, displayModel?: DisplayModel
   if (study.meshSettings.status !== "complete") return { ok: false, reason: "OpenCAE Core requires a completed mesh step." };
   if (!displayModel?.dimensions || !positiveDimensions(displayModel.dimensions)) {
     return { ok: false, reason: "OpenCAE Core requires usable block-like display dimensions." };
+  }
+  if (isComplexGeometry(displayModel, study) && !hasActualCoreVolumeMesh(study, displayModel)) {
+    return { ok: false, reason: COMPLEX_CORE_PREVIEW_REJECTION_REASON };
   }
   if (!study.materialAssignments.length) return { ok: false, reason: "OpenCAE Core requires an assigned material." };
   if (!study.constraints.some((constraint) => constraint.type === "fixed")) {
@@ -104,9 +169,11 @@ export function trySolveOpenCaeCoreStudy({ study, runId, displayModel }: {
 
   try {
     const coreModel = openCaeCoreModelForStudy(study, displayModel);
+    const isActualMesh = coreModel.meshSource === "actual_volume_mesh";
     if (study.type === "dynamic_structural") {
       const material = materialForStudy(study).material;
       const settings = dynamicSettingsForStudy(study);
+      const provenance = isActualMesh ? OPENCAE_CORE_ACTUAL_DYNAMIC_PROVENANCE : OPENCAE_CORE_PREVIEW_DYNAMIC_PROVENANCE;
       const solved = solveDynamicTet4Cpu(coreModel.model, {
         maxDofs: maxDofsForMeshPreset(study.meshSettings.preset),
         startTime: settings.startTime,
@@ -120,17 +187,18 @@ export function trySolveOpenCaeCoreStudy({ study, runId, displayModel }: {
       if (!solved.ok) return { ok: false, reason: `OpenCAE Core solve failed: ${solved.error.message}` };
       return {
         ok: true,
-        solverBackend: "opencae-core-dynamic-tet4",
-        result: dynamicResultBundleForOpenCaeCore(runId, coreModel, solved.result.frames, study, settings)
+        solverBackend: isActualMesh ? "opencae-core-mdof-tet" : "opencae-core-preview-sdof",
+        result: dynamicResultBundleForOpenCaeCore(runId, coreModel, solved.result.frames, study, displayModel, settings, provenance)
       };
     }
 
     const solved = solveStaticLinearTet4Cpu(coreModel.model, { maxDofs: maxDofsForMeshPreset(study.meshSettings.preset) });
     if (!solved.ok) return { ok: false, reason: `OpenCAE Core solve failed: ${solved.error.message}` };
+    const provenance = isActualMesh ? OPENCAE_CORE_ACTUAL_STATIC_PROVENANCE : OPENCAE_CORE_PREVIEW_STATIC_PROVENANCE;
     return {
       ok: true,
-      solverBackend: "opencae-core-cpu-tet4",
-      result: resultBundleForOpenCaeCore(runId, coreModel, solved.result, study, OPENCAE_CORE_STATIC_PROVENANCE)
+      solverBackend: isActualMesh ? "opencae-core-sparse-tet" : "opencae-core-preview-tet4",
+      result: resultBundleForOpenCaeCore(runId, coreModel, solved.result, study, provenance)
     };
   } catch (error) {
     return { ok: false, reason: error instanceof Error ? error.message : "OpenCAE Core solve failed." };
@@ -139,6 +207,16 @@ export function trySolveOpenCaeCoreStudy({ study, runId, displayModel }: {
 
 function openCaeCoreModelForStudy(study: Study, displayModel: DisplayModel | undefined): CoreStudyModel {
   if (!displayModel?.dimensions) throw new Error("OpenCAE Core requires display dimensions.");
+  const actualMesh = actualCoreVolumeMeshArtifact(study);
+  if (actualMesh?.model) {
+    if (!hasActualCoreVolumeMesh(study, displayModel)) {
+      throw new Error("OpenCAE Core actual mesh artifacts must use actual_volume_mesh provenance and one connected component.");
+    }
+    return coreStudyModelForActualMeshArtifact(actualMesh);
+  }
+  if (isComplexGeometry(displayModel, study)) {
+    throw new Error(COMPLEX_CORE_PREVIEW_REJECTION_REASON);
+  }
   const material = materialForStudy(study);
   const effective = effectiveMaterialProperties(material.material, material.parameters, {
     criticalLayerAxis: inferCriticalPrintAxis(study, displayModel.faces)
@@ -202,7 +280,21 @@ function openCaeCoreModelForStudy(study: Study, displayModel: DisplayModel | und
       loads: loads.map((load) => load.name)
     }]
   };
-  return { model, renderNodePoints: mesh.renderNodePoints };
+  return { model, renderNodePoints: mesh.renderNodePoints, meshSource: "structured_block_proxy" };
+}
+
+function coreStudyModelForActualMeshArtifact(artifact: ActualCoreVolumeMeshArtifact): CoreStudyModel {
+  const model = artifact.model;
+  const renderNodePoints = artifact.renderNodePoints?.length
+    ? artifact.renderNodePoints
+    : renderNodePointsForModel(model);
+  const connectedComponents = connectedComponentCountForActualArtifact(artifact);
+  return {
+    model,
+    renderNodePoints,
+    meshSource: "actual_volume_mesh",
+    meshConnectivity: connectedComponents ? { connectedComponents } : undefined
+  };
 }
 
 function resultBundleForOpenCaeCore(
@@ -230,7 +322,8 @@ function resultBundleForOpenCaeCore(
       failureAssessment: assessResultFailure(summaryBase),
       provenance
     },
-    fields: [stressFrame, displacementFrame, safetyFrame]
+    fields: [stressFrame, displacementFrame, safetyFrame],
+    ...(coreModel.meshConnectivity ? { artifacts: { meshConnectivity: coreModel.meshConnectivity } } : {})
   };
 }
 
@@ -239,20 +332,28 @@ function dynamicResultBundleForOpenCaeCore(
   coreModel: CoreStudyModel,
   frames: DynamicTet4CpuFrame[],
   study: Study,
-  settings: DynamicSolverSettings
+  displayModel: DisplayModel | undefined,
+  settings: DynamicSolverSettings,
+  provenance: ResultProvenance
 ): LocalSolveResult {
   const fields: ResultField[] = [];
   let peakDisplacement = 0;
   let peakDisplacementTimeSeconds = settings.startTime;
   let peakStress = 0;
   let minSafetyFactor = Number.POSITIVE_INFINITY;
+  const material = materialForStudy(study).material;
+  const appliedLoadMagnitude = displayModel
+    ? round(Math.hypot(...totalForceVector(study, displayModel, material.density)), 6)
+    : 0;
+  const peakLoadScale = Math.max(...frames.map((frame) => Number.isFinite(frame.loadScale) ? Math.abs(frame.loadScale) : 0), 0);
+  const peakAppliedLoad = round(appliedLoadMagnitude * Math.max(peakLoadScale, 1), 6);
 
   for (const frame of frames) {
-    const stressFrame = withFrame(stressFieldForOpenCaeCore(runId, coreModel, frame.vonMises.values, study, OPENCAE_CORE_DYNAMIC_PROVENANCE), frame.frameIndex, frame.timeSeconds);
-    const displacementFrame = withFrame(vectorFieldForOpenCaeCore(runId, "displacement", coreModel, frame.displacement.values, "mm", 1000, 8, OPENCAE_CORE_DYNAMIC_PROVENANCE), frame.frameIndex, frame.timeSeconds);
-    const velocityFrame = withFrame(vectorFieldForOpenCaeCore(runId, "velocity", coreModel, frame.velocity.values, "mm/s", 1000, 8, OPENCAE_CORE_DYNAMIC_PROVENANCE), frame.frameIndex, frame.timeSeconds);
-    const accelerationFrame = withFrame(vectorFieldForOpenCaeCore(runId, "acceleration", coreModel, frame.acceleration.values, "mm/s^2", 1000, 8, OPENCAE_CORE_DYNAMIC_PROVENANCE), frame.frameIndex, frame.timeSeconds);
-    const safetyFrame = withFrame(safetyFieldForOpenCaeCore(runId, stressFrame, study, OPENCAE_CORE_DYNAMIC_PROVENANCE), frame.frameIndex, frame.timeSeconds);
+    const stressFrame = withFrame(stressFieldForOpenCaeCore(runId, coreModel, frame.vonMises.values, study, provenance), frame.frameIndex, frame.timeSeconds);
+    const displacementFrame = withFrame(vectorFieldForOpenCaeCore(runId, "displacement", coreModel, frame.displacement.values, "mm", 1000, 8, provenance), frame.frameIndex, frame.timeSeconds);
+    const velocityFrame = withFrame(vectorFieldForOpenCaeCore(runId, "velocity", coreModel, frame.velocity.values, "mm/s", 1000, 8, provenance), frame.frameIndex, frame.timeSeconds);
+    const accelerationFrame = withFrame(vectorFieldForOpenCaeCore(runId, "acceleration", coreModel, frame.acceleration.values, "mm/s^2", 1000, 8, provenance), frame.frameIndex, frame.timeSeconds);
+    const safetyFrame = withFrame(safetyFieldForOpenCaeCore(runId, stressFrame, study, provenance), frame.frameIndex, frame.timeSeconds);
     fields.push(stressFrame, displacementFrame, velocityFrame, accelerationFrame, safetyFrame);
 
     const framePeakDisplacement = resultFieldAbsMax(displacementFrame);
@@ -271,8 +372,21 @@ function dynamicResultBundleForOpenCaeCore(
     maxDisplacement: round(peakDisplacement, 8),
     maxDisplacementUnits: "mm",
     safetyFactor: round(Number.isFinite(minSafetyFactor) ? minSafetyFactor : 0, 2),
-    reactionForce: 0,
+    reactionForce: peakAppliedLoad,
     reactionForceUnits: "N",
+    diagnostics: [{
+      id: "dynamic-reaction-force-unavailable",
+      severity: "warning" as const,
+      source: "solver" as const,
+      message: provenance.resultSource === "computed_preview"
+        ? "Reaction force unavailable from this preview solver."
+        : "Reaction force unavailable from this dynamic solver.",
+      suggestedActions: []
+    }],
+    loadSummary: {
+      appliedLoadMagnitude,
+      reactionForceSource: "applied_load_estimate" as const
+    },
     transient: {
       analysisType: "dynamic_structural" as const,
       integrationMethod: settings.integrationMethod,
@@ -290,9 +404,10 @@ function dynamicResultBundleForOpenCaeCore(
     summary: {
       ...summaryBase,
       failureAssessment: assessResultFailure(summaryBase),
-      provenance: OPENCAE_CORE_DYNAMIC_PROVENANCE
+      provenance
     },
-    fields
+    fields,
+    ...(coreModel.meshConnectivity ? { artifacts: { meshConnectivity: coreModel.meshConnectivity } } : {})
   };
 }
 
@@ -689,6 +804,82 @@ function dynamicRangeDigits(type: ResultField["type"]): number {
   if (type === "stress") return 1;
   if (type === "displacement" || type === "velocity" || type === "acceleration") return 8;
   return 3;
+}
+
+function displayModelText(displayModel: DisplayModel): string {
+  return [
+    displayModel.id,
+    displayModel.name,
+    ...displayModel.faces.flatMap((face) => [face.id, face.label])
+  ].join(" ").toLowerCase();
+}
+
+function hasActualCoreVolumeMeshForDisplay(displayModel: DisplayModel): boolean {
+  const candidate = (displayModel as DisplayModel & { actualCoreMesh?: unknown }).actualCoreMesh;
+  return Boolean(candidate);
+}
+
+function actualCoreVolumeMeshArtifact(study: Study): ActualCoreVolumeMeshArtifact | null {
+  const summary = study.meshSettings.summary as (Study["meshSettings"]["summary"] & {
+    source?: string;
+    meshSource?: string;
+    artifacts?: {
+      meshConnectivity?: { connectedComponents?: number };
+      actualCoreModel?: unknown;
+      coreModel?: unknown;
+      volumeMesh?: unknown;
+    };
+  }) | undefined;
+  const artifacts = summary?.artifacts;
+  const raw = artifacts?.actualCoreModel ?? artifacts?.coreModel ?? artifacts?.volumeMesh;
+  if (!raw || typeof raw !== "object") return null;
+  const model = "model" in raw ? (raw as { model?: unknown }).model : raw;
+  if (!isOpenCaeModelJson(model)) return null;
+  return {
+    model,
+    ...(isVec3Array((raw as { renderNodePoints?: unknown }).renderNodePoints) ? { renderNodePoints: (raw as { renderNodePoints: Vec3[] }).renderNodePoints } : {}),
+    ...(artifacts?.meshConnectivity ? { meshConnectivity: artifacts.meshConnectivity } : {})
+  };
+}
+
+function meshSourceForActualArtifact(artifact: ActualCoreVolumeMeshArtifact): string | undefined {
+  return artifact.model.meshProvenance?.meshSource;
+}
+
+function connectedComponentCountForActualArtifact(artifact: ActualCoreVolumeMeshArtifact): number | undefined {
+  const explicit = artifact.meshConnectivity?.connectedComponents;
+  if (typeof explicit === "number" && Number.isInteger(explicit) && explicit > 0) return explicit;
+  const components = connectedComponents({ elementBlocks: artifact.model.elementBlocks });
+  return components.componentCount;
+}
+
+function renderNodePointsForModel(model: OpenCAEModelJson): Vec3[] {
+  const points: Vec3[] = [];
+  for (let index = 0; index < model.nodes.coordinates.length; index += 3) {
+    points.push([
+      model.nodes.coordinates[index] ?? 0,
+      model.nodes.coordinates[index + 1] ?? 0,
+      model.nodes.coordinates[index + 2] ?? 0
+    ]);
+  }
+  return points;
+}
+
+function isOpenCaeModelJson(value: unknown): value is OpenCAEModelJson {
+  if (!value || typeof value !== "object") return false;
+  const model = value as Partial<OpenCAEModelJson>;
+  return model.schema === "opencae.model" &&
+    Array.isArray(model.nodes?.coordinates) &&
+    Array.isArray(model.materials) &&
+    Array.isArray(model.elementBlocks) &&
+    Array.isArray(model.nodeSets) &&
+    Array.isArray(model.boundaryConditions) &&
+    Array.isArray(model.loads) &&
+    Array.isArray(model.steps);
+}
+
+function isVec3Array(value: unknown): value is Vec3[] {
+  return Array.isArray(value) && value.every((item) => Array.isArray(item) && item.length === 3 && item.every((component) => typeof component === "number" && Number.isFinite(component)));
 }
 
 function positiveDimensions(dimensions: DisplayModel["dimensions"]): boolean {

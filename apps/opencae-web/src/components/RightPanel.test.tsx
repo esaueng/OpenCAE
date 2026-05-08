@@ -1,5 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test, vi } from "vitest";
+import { bracketDisplayModel } from "@opencae/db/sample-data";
 import type { DisplayModel, Project, ResultSummary, Study } from "@opencae/schema";
 import { editableNumberCommitValue, playbackPeakMarkerPercent, RightPanel, rangeProgressPercent } from "./RightPanel";
 import type { StepId } from "./StepBar";
@@ -136,11 +137,44 @@ describe("RightPanel payload mass controls", () => {
     const coreHtml = renderPanel("results", {
       resultSummary: {
         ...resultSummary,
-        provenance: { kind: "opencae_core_fea", solver: "opencae-core-cpu-tet4", solverVersion: "0.1.0", meshSource: "opencae_core_tet4", resultSource: "computed", units: "mm-N-s-MPa" }
+        provenance: { kind: "opencae_core_fea", solver: "opencae-core-sparse-tet", solverVersion: "0.1.0", meshSource: "actual_volume_mesh", resultSource: "computed", units: "mm-N-s-MPa" }
       }
     });
 
-    expect(coreHtml).toContain("OpenCAE Core");
+    expect(coreHtml).toContain("OpenCAE Core FEA");
+  });
+
+  test("blocks preview deformation and reverse-check capacity for complex geometry", () => {
+    const html = renderPanel("results", {
+      displayModel: bracketDisplayModel,
+      showDeformed: true,
+      study: {
+        ...study,
+        loads: [{ id: "load-1", type: "force", selectionRef: "selection-top", parameters: { value: 500, units: "N", direction: [0, -1, 0] }, status: "complete" }]
+      },
+      resultSummary: {
+        ...resultSummary,
+        reactionForce: 0,
+        provenance: { kind: "local_estimate", solver: "opencae-core-preview-sdof", solverVersion: "0.1.0", meshSource: "structured_block_proxy", resultSource: "computed_preview", units: "mm-N-s-MPa" }
+      },
+      resultFields: [{
+        id: "field-displacement",
+        runId: "run-preview",
+        type: "displacement",
+        location: "node",
+        values: [0, 0.1],
+        min: 0,
+        max: 0.1,
+        units: "mm",
+        provenance: { kind: "local_estimate", solver: "opencae-core-preview-sdof", solverVersion: "0.1.0", meshSource: "structured_block_proxy", resultSource: "computed_preview", units: "mm-N-s-MPa" }
+      }]
+    });
+
+    expect(html).toContain("OpenCAE Core preview");
+    expect(html).toContain("Preview solver mesh does not match this geometry; deformed shape disabled.");
+    expect(html).toContain("Reaction force unavailable or invalid for this result.");
+    expect(html).toContain('type="checkbox" disabled=""');
+    expect(html).not.toContain("Max total load");
   });
 
   test("shows the run progress percentage inside the progress bar", () => {
@@ -363,7 +397,7 @@ describe("RightPanel payload mass controls", () => {
     });
 
     expect(runHtml).toContain("OpenCAE Core");
-    expect(runHtml).toContain("opencae-core-cpu-tet4");
+    expect(runHtml).toContain("opencae-core-preview-tet4");
     expect(runHtml).not.toContain("Expected detail");
     expect(runHtml).not.toContain("Browser OpenCAE Core CPU");
     expect(runHtml).not.toContain("FEA_CONTAINER");
@@ -411,7 +445,7 @@ describe("RightPanel payload mass controls", () => {
     expect(runHtml).toContain("OpenCAE Core");
     expect(runHtml).not.toContain("Expected detail");
     expect(runHtml).not.toContain("Browser OpenCAE Core CPU");
-    expect(runHtml).toContain("opencae-core-dynamic-tet4");
+    expect(runHtml).toContain("opencae-core-preview-sdof");
     expect(runHtml).not.toContain("external transient container");
     expect(runHtml).not.toContain("cloudflare-fea-calculix");
     expect(runHtml).not.toContain("cloudflare-queue-container");

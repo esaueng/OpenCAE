@@ -151,7 +151,7 @@ export const COPY = {
       solverSection: 'Solver',
       solverInfo: {
         backend: 'Backend',
-        backendValue: 'opencae-core-cpu-tet4',
+        backendValue: 'opencae-core-preview-tet4',
         version: 'Version',
         versionValue: '0.1.0',
         runner: 'Runner',

@@ -14,6 +14,7 @@ import { dimensionValuesForDisplayModel } from "../modelDimensions";
 import { formatResultValue, normalizeValueForRender, resultProbeSamplesForFaces, resultSamplesForFaces, type FaceResultSample, type FieldResultSample, type ResultProbeTone } from "../resultFields";
 import { packedPreparedPlaybackFieldSlot, packedPreparedPlaybackFrameOrdinal, type PackedPreparedPlaybackCache } from "../resultPlaybackCache";
 import { createVertexResultMapping, type VertexResultMapping } from "../resultVertexMapping";
+import { shouldBlockPreviewResultsForDisplayModel } from "../resultProvenance";
 import { stepPreviewFromBase64 } from "../stepPreview";
 import { normalizedStlGeometryFromBuffer } from "../stlPreview";
 import { lengthForUnits, stressForUnits, type UnitSystem } from "../unitDisplay";
@@ -219,6 +220,7 @@ export function CadViewer(props: CadViewerProps) {
   const modelRotation = useMemo(() => modelRotationRadians(props.displayModel), [props.displayModel]);
   const baseModelRotation = useMemo(() => baseModelRotationRadians(props.displayModel), [props.displayModel]);
   const resultFields = props.resultFields;
+  const effectiveShowDeformed = props.showDeformed && !shouldDisableResultDeformation(props.displayModel, resultFields);
   const viewerStatsEnabled = isViewerRendererStatsEnabled();
   const handleViewerInteractionChange = (interacting: boolean) => {
     setViewerInteracting(interacting);
@@ -249,7 +251,7 @@ export function CadViewer(props: CadViewerProps) {
           resultPlaybackPlaying={props.resultPlaybackPlaying}
           selectedFaceId={props.selectedFaceId}
           selectedPayloadObject={props.selectedPayloadObject}
-          showDeformed={props.showDeformed}
+          showDeformed={effectiveShowDeformed}
           showDimensions={props.showDimensions}
           stressExaggeration={props.stressExaggeration}
           supportMarkers={props.supportMarkers}
@@ -265,7 +267,7 @@ export function CadViewer(props: CadViewerProps) {
         <Bounds fit clip observe={!props.resultPlaybackPlaying} margin={VIEWER_FIT_MARGIN}>
           <group rotation={modelRotation}>
             <group rotation={baseModelRotation}>
-              <BracketModel {...props} resultFields={resultFields} viewMode={effectiveViewMode} uploadedPreviewBounds={uploadedPreviewBounds} onUploadedPreviewBounds={setUploadedPreviewBounds} />
+              <BracketModel {...props} showDeformed={effectiveShowDeformed} resultFields={resultFields} viewMode={effectiveViewMode} uploadedPreviewBounds={uploadedPreviewBounds} onUploadedPreviewBounds={setUploadedPreviewBounds} />
               {showDimensionOverlay && <ModelDimensionOverlay displayModel={props.displayModel} uploadedPreviewBounds={uploadedPreviewBounds} />}
             </group>
           </group>
@@ -2381,6 +2383,10 @@ function SampleResultSolid({
 
 export function shouldShowUndeformedResultOutline(showDeformed: boolean) {
   return showDeformed;
+}
+
+export function shouldDisableResultDeformation(displayModel: DisplayModel, resultFields: ResultField[]) {
+  return shouldBlockPreviewResultsForDisplayModel(displayModel, undefined, resultFields);
 }
 
 function UndeformedGeometryOutline({ geometry, position }: { geometry: THREE.BufferGeometry; position?: [number, number, number] }) {

@@ -165,7 +165,10 @@ async function dynamicSampleResults(project: Project): Promise<LocalResultBundle
   const study = project.studies[0];
   const run = study?.runs[0];
   if (!study || !run) return undefined;
-  const solved = await fallbackSolveLocalStudy({ study, runId: run.id });
+  const solved = await fallbackSolveLocalStudy({
+    study: { ...study, solverSettings: { ...study.solverSettings, backend: "local_detailed" } } as unknown as Project["studies"][number],
+    runId: run.id
+  });
   return {
     activeRunId: run.id,
     completedRunId: run.id,

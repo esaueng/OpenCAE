@@ -3,7 +3,7 @@ import type { LoadApplicationPoint, LoadDirection, LoadType, PayloadLoadMetadata
 import { embedUploadedModelFile, type EmbeddedModelFile, type LocalResultBundle } from "../projectFile";
 import { createLocalBlankProject, createLocalSampleProject, createLocalUploadResponse, openLocalProjectPayload } from "../localProjectFactory";
 import { fallbackSolveLocalStudy, solveLocalStudyInWorker } from "../workers/performanceClient";
-import { normalizeSolverBackend, openCaeCoreEligibility, trySolveOpenCaeCoreStudy, type NormalizedBrowserSolverBackend } from "../workers/opencaeCoreSolve";
+import { hasActualCoreVolumeMesh, isComplexGeometry, normalizeSolverBackend, openCaeCoreEligibility, trySolveOpenCaeCoreStudy, type NormalizedBrowserSolverBackend } from "../workers/opencaeCoreSolve";
 
 export interface SampleProjectResponse {
   message?: string;
@@ -309,6 +309,36 @@ function runSimulationLocally(study: Study, displayModel?: DisplayModel, staticB
   const runId = `run-local-${crypto.randomUUID()}`;
   const backend = staticBackendOverride ?? simulationBackend(study) ?? "local_detailed";
   const coreEligibility = backend === "opencae_core" ? openCaeCoreEligibility(study, displayModel) : undefined;
+  const coreComplexIneligible = backend === "opencae_core" && coreEligibility && !coreEligibility.ok && isComplexGeometry(displayModel, study);
+  if (coreComplexIneligible) {
+    const now = new Date().toISOString();
+    localEventsByRunId.set(runId, addRunTiming([
+      { runId, type: "state", progress: 0, message: "OpenCAE Core solve blocked.", timestamp: now },
+      { runId, type: "error", progress: 100, message: coreEligibility.reason, timestamp: now }
+    ], 1));
+    return {
+      run: {
+        id: runId,
+        studyId: study.id,
+        status: "failed",
+        jobId: `job-${runId}`,
+        meshRef: study.meshSettings.meshRef,
+        solverBackend: "opencae_core",
+        solverVersion: "0.1.0",
+        startedAt: now,
+        finishedAt: now,
+        diagnostics: [{
+          id: "opencae-core-ineligible",
+          severity: "error",
+          source: "solver",
+          message: coreEligibility.reason,
+          suggestedActions: []
+        }]
+      },
+      streamUrl: `local:${runId}`,
+      message: coreEligibility.reason
+    };
+  }
   localResultSolversByRunId.set(runId, () => {
     const analysisMesh = displayModel ? analysisMeshForDisplayModel(displayModel, study.meshSettings.preset) : undefined;
     const payload = { study, runId, analysisMesh, displayModel, debugResults: debugResultsEnabled() };
@@ -595,7 +625,11 @@ function simulationBackend(study: Study): NormalizedBrowserSolverBackend {
 }
 
 function localSolverBackendForRun(study: Study, backend: NormalizedBrowserSolverBackend, coreEligibility?: ReturnType<typeof openCaeCoreEligibility>): string {
-  if (backend === "opencae_core" && coreEligibility?.ok) return study.type === "dynamic_structural" ? "opencae-core-dynamic-tet4" : "opencae-core-cpu-tet4";
+  if (backend === "opencae_core" && coreEligibility?.ok) {
+    const actualMesh = hasActualCoreVolumeMesh(study);
+    if (actualMesh) return study.type === "dynamic_structural" ? "opencae-core-mdof-tet" : "opencae-core-sparse-tet";
+    return study.type === "dynamic_structural" ? "opencae-core-preview-sdof" : "opencae-core-preview-tet4";
+  }
   if (study.type === "dynamic_structural") return "local-dynamic-newmark";
   if (isBeamDemoStudyForLocalRun(study)) return "local-beam-demo-euler-bernoulli";
   return "local-heuristic-surface";
