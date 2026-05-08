@@ -2,7 +2,6 @@ import { createResultFrameCache } from "../resultFields";
 import { preparePlaybackFrames } from "../resultPlaybackCache";
 import { normalizedStlGeometryFromBuffer } from "../stlPreview";
 import { stepPreviewFromBase64 } from "../stepPreview";
-import { fallbackSolveLocalStudy } from "./localSolve";
 import {
   normalizePerformanceWorkerError,
   transferablesForPerformanceWorkerResult,
@@ -43,9 +42,6 @@ async function handleRequest(request: PerformanceWorkerRequest): Promise<void> {
 }
 
 async function runOperation(request: PerformanceWorkerRequest) {
-  if (request.operation === "solveLocalStudy") {
-    return fallbackSolveLocalStudy(request.payload);
-  }
   if (request.operation === "prepareResultFrame") {
     return {
       fields: createResultFrameCache(request.payload.fields).fieldsForFramePosition(request.payload.framePosition)

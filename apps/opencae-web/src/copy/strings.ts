@@ -63,7 +63,7 @@ export const COPY = {
     footer: {
       study: { key: 'study', value: 'static' },
       units: { key: 'units', value: 'SI · mm' },
-      backend: { key: 'backend', value: 'mock' },
+      backend: { key: 'backend', value: 'core' },
     },
   },
 
@@ -151,11 +151,11 @@ export const COPY = {
       solverSection: 'Solver',
       solverInfo: {
         backend: 'Backend',
-        backendValue: 'local-heuristic-surface',
+        backendValue: 'opencae-core-cpu-tet4',
         version: 'Version',
         versionValue: '0.1.0',
         runner: 'Runner',
-        runnerValue: 'local-in-memory',
+        runnerValue: 'browser-worker',
       },
     },
 
@@ -204,7 +204,7 @@ export const COPY = {
       study: 'study',
       mesh: 'mesh',
       solver: 'solver',
-      mockBackend: 'local solver',
+      mockBackend: 'OpenCAE Core',
     },
     values: {
       meshNone: 'Not generated',

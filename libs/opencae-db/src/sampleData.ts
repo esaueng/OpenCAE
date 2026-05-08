@@ -182,7 +182,7 @@ export const bracketDemoProject: Project = {
           meshRef: "project-bracket-demo/mesh/mesh-summary.json",
           resultRef: "project-bracket-demo/results/results.json",
           reportRef: "project-bracket-demo/reports/report.html",
-          solverBackend: "local-mock",
+          solverBackend: "opencae-core-cpu-tet4",
           solverVersion: "0.1.0",
           startedAt: now,
           finishedAt: now,

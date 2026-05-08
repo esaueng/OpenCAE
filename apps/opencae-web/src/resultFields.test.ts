@@ -37,7 +37,7 @@ describe("resultSamplesForFaces", () => {
     expect(resultSamplesForFaces(faces, [], "stress").map((sample) => sample.value)).toEqual([10, 20]);
   });
 
-  test("uses nodal CalculiX samples when face fields are not present", () => {
+  test("uses nodal OpenCAE Core samples when face fields are not present", () => {
     const fields: ResultField[] = [
       {
         id: "stress-node",

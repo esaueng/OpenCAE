@@ -62,7 +62,10 @@ export const LoadSchema = z.object({
 const Vec3Schema = z.tuple([z.number(), z.number(), z.number()]);
 export const StudyAnalysisTypeSchema = z.enum(["static_stress", "dynamic_structural"]);
 export const MeshQualitySchema = z.enum(["coarse", "medium", "fine", "ultra"]);
-export const SolverBackendSchema = z.enum(["local_detailed", "opencae_core", "cloudflare_fea"]);
+export const SolverBackendSchema = z.preprocess(
+  (value) => value === "local_detailed" || value === "cloudflare_fea" ? "opencae_core" : value,
+  z.literal("opencae_core")
+);
 export const SimulationFidelitySchema = z.enum(["standard", "detailed", "ultra"]);
 
 export const DynamicSolverSettingsSchema = z.object({
@@ -73,7 +76,7 @@ export const DynamicSolverSettingsSchema = z.object({
   timeStep: z.number().default(0.005),
   outputInterval: z.number().default(0.005),
   dampingRatio: z.number().default(0.02),
-  integrationMethod: z.enum(["newmark_average_acceleration", "calculix_dynamic_direct"]).default("newmark_average_acceleration"),
+  integrationMethod: z.literal("newmark_average_acceleration").default("newmark_average_acceleration"),
   loadProfile: z.enum(["ramp", "step", "sinusoidal", "quasi_static"]).default("ramp"),
   rayleighAlpha: z.number().nonnegative().optional(),
   rayleighBeta: z.number().nonnegative().optional(),
@@ -108,11 +111,11 @@ export const ResultSampleSchema = z.object({
 });
 
 export const ResultProvenanceSchema = z.object({
-  kind: z.enum(["local_estimate", "analytical_benchmark", "calculix_fea", "opencae_core_fea"]),
+  kind: z.literal("opencae_core_fea"),
   solver: z.string(),
   solverVersion: z.string(),
-  meshSource: z.enum(["mock", "structured_block", "gmsh", "uploaded_inp", "opencae_core_tet4", "unknown"]),
-  resultSource: z.enum(["generated", "parsed_dat", "parsed_frd", "parsed_frd_dat", "computed"]),
+  meshSource: z.enum(["opencae_core_tet4", "unknown"]),
+  resultSource: z.literal("computed"),
   units: z.string(),
   renderCoordinateSpace: z.string().optional(),
   integrationMethod: z.string().optional(),
@@ -257,7 +260,7 @@ export const ResultSummarySchema = z.object({
   transient: z
     .object({
       analysisType: z.literal("dynamic_structural"),
-      integrationMethod: z.enum(["newmark_average_acceleration", "calculix_dynamic_direct"]),
+      integrationMethod: z.literal("newmark_average_acceleration"),
       startTime: z.number(),
       endTime: z.number(),
       timeStep: z.number(),

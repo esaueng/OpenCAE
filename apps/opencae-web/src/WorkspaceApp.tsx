@@ -1,5 +1,5 @@
 import { lazy, startTransition, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Constraint, DisplayFace, DisplayModel, DynamicSolverSettings, Load, NamedSelection, Project, ResultField, ResultRenderBounds, ResultSummary, RunEvent, RunTimingEstimate, SimulationFidelity, SolverBackend, Study } from "@opencae/schema";
+import type { Constraint, DisplayFace, DisplayModel, DynamicSolverSettings, Load, NamedSelection, Project, ResultField, ResultRenderBounds, ResultSummary, RunEvent, RunTimingEstimate, SimulationFidelity, Study } from "@opencae/schema";
 import { RotateCcw, Save } from "lucide-react";
 import { addLoad, addSupport, assignMaterial, cancelRun, createProject, generateMesh, getResults, importLocalProject, loadSampleProject, renameProject, runSimulation, subscribeToRun, updateStudy as saveStudyPatch, uploadModel, type SampleAnalysisType, type SampleModelId } from "./lib/api";
 import { normalizePrintParameters, starterMaterials } from "@opencae/materials";
@@ -894,7 +894,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     setResultPlaybackPlaying(false);
   }
 
-  function handleUpdateSolverSettings(settings: Partial<DynamicSolverSettings> & { backend?: SolverBackend; fidelity?: SimulationFidelity }) {
+  function handleUpdateSolverSettings(settings: Partial<DynamicSolverSettings> & { fidelity?: SimulationFidelity }) {
     if (!study) return;
     const nextSettings = study.type === "dynamic_structural"
       ? normalizedDynamicSolverSettings(study.solverSettings, { ...study.solverSettings, ...settings }, settings)
@@ -912,10 +912,9 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
 
   function normalizedDynamicSolverSettings(
     currentSettings: DynamicSolverSettings,
-    mergedSettings: DynamicSolverSettings & { backend?: SolverBackend; fidelity?: SimulationFidelity },
+    mergedSettings: DynamicSolverSettings & { fidelity?: SimulationFidelity },
     patch: Partial<DynamicSolverSettings>
   ) {
-    const backend = mergedSettings.backend === "opencae_core" || mergedSettings.backend === "cloudflare_fea" ? "opencae_core" : "local_detailed";
     const minimumOutputInterval = Math.max(DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS, MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS);
     const requestedOutputInterval = patch.outputInterval ?? currentSettings.outputInterval ?? DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS;
     return {
@@ -1148,7 +1147,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           onCreateStatic={handleCreateStaticSimulation}
           onCreateDynamic={handleCreateDynamicSimulation}
         />
-        <BottomPanel status={status} logs={logs} projectName={project.name} studyName="No simulation" meshStatus="Not generated" solverStatus="Idle" backendStatus="local" onClearLogs={clearLogs} />
+        <BottomPanel status={status} logs={logs} projectName={project.name} studyName="No simulation" meshStatus="Not generated" solverStatus="Idle" backendStatus="core" onClearLogs={clearLogs} />
       </div>
     );
   }
@@ -1333,7 +1332,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         studyName={study?.name ?? "No simulation"}
         meshStatus={study?.meshSettings.status === "complete" ? "Ready" : "Not generated"}
         solverStatus={solverRunning ? "Running" : runProgress >= 100 ? "Complete" : "Idle"}
-        backendStatus={isOpenCaeCoreStudy(study) ? "core" : "local"}
+        backendStatus="core"
         onClearLogs={clearLogs}
       />
     </div>
@@ -1386,16 +1385,10 @@ function latestCompletedRunId(study: Study | null, activeRunId: string): string 
   return completed?.id ?? null;
 }
 
-function isOpenCaeCoreStudy(study: Study | null): boolean {
-  const backend = (study?.solverSettings as { backend?: unknown } | undefined)?.backend;
-  return backend !== "local_detailed";
-}
-
 function runDiagnosticsMessage(study: Study): string {
-  const backend = isOpenCaeCoreStudy(study) ? "opencae_core" : "local_detailed";
   const fidelity = solverFidelityForDiagnostics(study);
   return [
-    `Run diagnostics: backend=${backend}`,
+    "Run diagnostics: backend=opencae_core",
     `fidelity=${fidelity}`,
     `analysis=${study.type}`,
     `materials=${study.materialAssignments.length}`,

@@ -1,4 +1,4 @@
-import type { ResultField, Study } from "@opencae/schema";
+import type { ResultField } from "@opencae/schema";
 import { describe, expect, test } from "vitest";
 import {
   createPerformanceWorkerRequest,
@@ -65,13 +65,13 @@ describe("performance worker protocol", () => {
   test("narrows success and failure responses", () => {
     const success = {
       id: "perf-1",
-      operation: "solveLocalStudy",
+      operation: "prepareResultFrame",
       ok: true,
-      result: { summary: {}, fields: [] }
+      result: { fields: [] }
     };
     const failure = {
       id: "perf-2",
-      operation: "solveLocalStudy",
+      operation: "prepareResultFrame",
       ok: false,
       error: { message: "cancelled", name: "AbortError" }
     };
@@ -87,16 +87,5 @@ describe("performance worker protocol", () => {
 
     expect(error).toMatchObject({ name: "TypeError", message: "bad mesh" });
     expect(normalizePerformanceWorkerError("plain")).toEqual({ name: "Error", message: "plain" });
-  });
-
-  test("types solve requests without changing the study contract", () => {
-    const study = { id: "study-1", type: "static_stress" } as Study;
-    const request = createPerformanceWorkerRequest("solveLocalStudy", {
-      runId: "run-1",
-      study,
-      analysisMesh: undefined
-    });
-
-    expect(request.payload.study).toBe(study);
   });
 });

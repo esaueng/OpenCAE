@@ -17,7 +17,7 @@
     "@opencae/mesh-service": "workspace:*",
     "@opencae/post-service": "workspace:*",
     "@opencae/schema": "workspace:*",
-    "@opencae/solver-service": "workspace:*",
+    "@opencae/solver-cpu": "workspace:*",
     "@opencae/study-core": "workspace:*",
     "@opencae/storage": "workspace:*",
     "@opencae/units": "workspace:*",

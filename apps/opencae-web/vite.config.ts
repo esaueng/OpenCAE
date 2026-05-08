@@ -17,7 +17,6 @@ export default defineConfig({
           }
           if (id.includes("occt-import-js")) return "cad-import";
           if (id.includes("@react-three") || id.includes("/node_modules/.pnpm/three@") || id.includes("three/examples")) return "viewer-three";
-          if (id.includes("@opencae/solver-service")) return "local-solver";
           return undefined;
         }
       }
