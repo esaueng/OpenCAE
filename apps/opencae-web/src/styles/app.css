@@ -14,7 +14,7 @@ img {
   display: flex;
   align-items: center;
   justify-content: center;
-  overflow: hidden;
+  overflow: auto;
   background:
     radial-gradient(ellipse 80% 50% at 50% 0%, rgba(77, 163, 255, 0.06), transparent 70%),
     linear-gradient(#0b0f14, #080c10);
@@ -70,7 +70,7 @@ img {
 }
 
 .start-brand.sample-menu-open {
-  width: min(980px, 100%);
+  width: min(640px, 100%);
 }
 
 .start-mark {
@@ -259,7 +259,9 @@ img {
 }
 
 .start-sample-grid {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
+  width: min(560px, 100%);
+  margin: 0 auto;
 }
 
 .panel-sample-grid {
@@ -297,6 +299,27 @@ img {
   background: linear-gradient(180deg, rgba(77, 163, 255, 0.18), rgba(17, 24, 33, 0.9));
   border-color: var(--color-accent);
   box-shadow: inset 0 0 0 1px rgba(77, 163, 255, 0.32), 0 14px 32px rgba(0, 0, 0, 0.22);
+}
+
+.start-sample-grid .sample-option-card {
+  min-height: 112px;
+  grid-template-columns: 150px minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.start-sample-grid .sample-thumbnail {
+  grid-row: 1 / span 2;
+  height: 72px;
+}
+
+.start-sample-grid .sample-option-copy {
+  align-self: end;
+}
+
+.start-sample-grid .sample-option-meta {
+  align-self: start;
 }
 
 .sample-option-card.compact {
@@ -468,6 +491,10 @@ img {
   font-family: var(--font-mono);
   font-size: var(--fs-mini);
   line-height: 1;
+}
+
+.start-brand.sample-menu-open + .start-footer {
+  display: none;
 }
 
 .local-runtime {
