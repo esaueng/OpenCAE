@@ -75,7 +75,7 @@ async function solve(request: Request): Promise<Response> {
   if (previewIssue) return diagnosticResponse(422, [previewIssue]);
 
   const result = analysisType === "dynamic_structural"
-    ? solveCoreDynamic(model, dynamicOptions(solveRequest))
+    ? solveCoreDynamic(model, dynamicOptions(solveRequest, model))
     : solveCoreStatic(model, { method: "sparse", solverMode: "sparse" });
 
   if (!result.ok) return diagnosticResponse(422, [solverIssue(result.error.code, result.error.message)]);
@@ -149,10 +149,10 @@ function previewRejection(model: OpenCAEModelJson, request: CoreCloudSolveReques
   return undefined;
 }
 
-function dynamicOptions(request: CoreCloudSolveRequest) {
+function dynamicOptions(request: CoreCloudSolveRequest, model: OpenCAEModelJson) {
   const settings = request.solverSettings ?? {};
-  const resultSettings = request.resultSettings ?? {};
   return {
+    stepIndex: nonnegativeIntegerOption(settings.stepIndex) ?? firstDynamicStepIndex(model),
     startTime: numberOption(settings.startTime),
     endTime: numberOption(settings.endTime),
     timeStep: numberOption(settings.timeStep),
@@ -160,8 +160,7 @@ function dynamicOptions(request: CoreCloudSolveRequest) {
     dampingRatio: numberOption(settings.dampingRatio),
     rayleighAlpha: numberOption(settings.rayleighAlpha),
     rayleighBeta: numberOption(settings.rayleighBeta),
-    loadProfile: dynamicLoadProfileOption(settings.loadProfile),
-    maxFrames: numberOption(resultSettings.maxFrames)
+    loadProfile: dynamicLoadProfileOption(settings.loadProfile)
   };
 }
 
@@ -266,6 +265,15 @@ function numberOption(value: unknown): number | undefined {
 
 function integerOption(value: unknown): number | undefined {
   return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : undefined;
+}
+
+function nonnegativeIntegerOption(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : undefined;
+}
+
+function firstDynamicStepIndex(model: OpenCAEModelJson): number | undefined {
+  const index = model.steps.findIndex((step) => step.type === "dynamicLinear");
+  return index >= 0 ? index : undefined;
 }
 
 function dynamicLoadProfileOption(value: unknown): DynamicLoadProfile | undefined {

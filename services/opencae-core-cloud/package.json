@@ -13,13 +13,14 @@
     "@opencae/solver-cpu": "workspace:*"
   },
   "devDependencies": {
+    "@opencae/examples": "workspace:*",
     "@types/node": "^22.10.5"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "tsx src/server.ts",
     "start": "node dist/server.js",
-    "test": "vitest run src/index.test.ts",
+    "test": "vitest run src/index.test.ts tests/*.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "license": "Apache-2.0"
