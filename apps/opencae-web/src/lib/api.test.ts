@@ -461,6 +461,10 @@ describe("api", () => {
       solverSettings: { backend: "cloudflare_fea", fidelity: "ultra" }
     } as unknown as Study;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === "/api/cloud-core/runs/run-cloud-core/start") {
+        expect(init?.method).toBe("POST");
+        return new Response(JSON.stringify({ ok: true }), { headers: { "content-type": "application/json" } });
+      }
       expect(String(input)).toBe("/api/cloud-core/runs");
       const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
       expect(body).toMatchObject({
@@ -485,6 +489,7 @@ describe("api", () => {
       return new Response(JSON.stringify({
         run: { id: "run-cloud-core", solverBackend: "opencae-core-cloud" },
         streamUrl: "/api/cloud-core/runs/run-cloud-core/events",
+        startUrl: "/api/cloud-core/runs/run-cloud-core/start",
         message: "OpenCAE Core Cloud simulation running."
       }), { headers: { "content-type": "application/json" } });
     });
@@ -494,7 +499,7 @@ describe("api", () => {
 
     expect(response.message).toContain("OpenCAE Core Cloud");
     expect((response.run as { solverBackend?: string }).solverBackend).toBe("opencae-core-cloud");
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   test("sends dynamic solver settings to OpenCAE Core Cloud", async () => {
@@ -517,7 +522,11 @@ describe("api", () => {
         loadProfile: "sinusoidal"
       }
     } as unknown as Study;
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === "/api/cloud-core/runs/run-cloud-core-dynamic/start") {
+        expect(init?.method).toBe("POST");
+        return new Response(JSON.stringify({ ok: true }), { headers: { "content-type": "application/json" } });
+      }
       const body = JSON.parse(String(init?.body)) as Record<string, { [key: string]: unknown }>;
       expect(body.solverSettings).toMatchObject({
         backend: "opencae_core_cloud",
@@ -538,6 +547,7 @@ describe("api", () => {
       return new Response(JSON.stringify({
         run: { id: "run-cloud-core-dynamic", solverBackend: "opencae-core-cloud" },
         streamUrl: "/api/cloud-core/runs/run-cloud-core-dynamic/events",
+        startUrl: "/api/cloud-core/runs/run-cloud-core-dynamic/start",
         message: "OpenCAE Core Cloud simulation running."
       }), { headers: { "content-type": "application/json" } });
     });
