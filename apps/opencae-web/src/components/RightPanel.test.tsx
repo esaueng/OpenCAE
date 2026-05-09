@@ -425,6 +425,19 @@ describe("RightPanel payload mass controls", () => {
     expect(meshHtml).toContain("45,000");
   });
 
+  test("lets simulation runs choose OpenCAE Core Local or Cloud", () => {
+    const runHtml = renderPanel("run", {
+      study: {
+        ...study,
+        solverSettings: { backend: "opencae_core_cloud", fidelity: "standard" }
+      }
+    });
+
+    expect(runHtml).toContain("name=\"solver-backend\"");
+    expect(runHtml).toContain("OpenCAE Core Cloud");
+    expect(runHtml).toContain("OpenCAE Core Local");
+  });
+
   test("shows OpenCAE Core when solver backend is omitted", () => {
     const runHtml = renderPanel("run", {
       study: {

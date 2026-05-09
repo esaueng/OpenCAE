@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { AlertTriangle, Anchor, ArrowDown, Check, CircleHelp, Eye, Gauge, Grid3X3, Maximize2, Pause, Play, Plus, RotateCcw, Ruler, ScanLine, ShieldCheck, Upload, Weight, X } from "lucide-react";
 import { defaultPrintParametersFor, effectiveMaterialProperties, massKgForPayloadMaterial, normalizePrintParameters, payloadMaterialForId, payloadMaterials, starterMaterials, type PayloadMaterialCategory, type PrintMaterialParameters } from "@opencae/materials";
 import { assessResultFailure, estimateAllowableLoadForSafetyFactor } from "@opencae/schema";
-import type { Constraint, DisplayFace, DisplayModel, DynamicSolverSettings, Load, MeshQuality, Project, ResultField, ResultProvenance, ResultSummary, RunTimingEstimate, SimulationFidelity, Study } from "@opencae/schema";
+import type { Constraint, DisplayFace, DisplayModel, DynamicSolverSettings, Load, MeshQuality, Project, ResultField, ResultProvenance, ResultSummary, RunTimingEstimate, SimulationFidelity, SolverBackend, Study } from "@opencae/schema";
 import { inferCriticalPrintAxis } from "@opencae/study-core";
 import type { ResultMode, ViewMode } from "./CadViewer";
 import type { StepId } from "./StepBar";
@@ -112,6 +112,10 @@ const noopDraftPayloadPreviewChange = () => undefined;
 type SolverSettingsPatch = Partial<DynamicSolverSettings> & { fidelity?: SimulationFidelity };
 const MESH_PRESETS: MeshQuality[] = ["coarse", "medium", "fine", "ultra"];
 const SIMULATION_FIDELITIES: SimulationFidelity[] = ["standard", "detailed", "ultra"];
+const SOLVER_BACKEND_OPTIONS: Array<{ value: SolverBackend; label: string }> = [
+  { value: "opencae_core_cloud", label: "OpenCAE Core Cloud" },
+  { value: "opencae_core_local", label: "OpenCAE Core Local" }
+];
 
 export function RightPanel(props: RightPanelProps) {
   return (
@@ -960,8 +964,13 @@ function RunPanel({ study, displayModel, runProgress, runTiming, onRunSimulation
   ] as const;
   const dynamic = study.type === "dynamic_structural" ? study.solverSettings : null;
   const fidelity = solverFidelityForStudy(study);
+  const solverBackend = normalizeSolverBackend(study);
   const updateSolverChoice = (settings: SolverSettingsPatch) => {
     onUpdateSolverSettings?.(settings);
+  };
+  const updateSolverBackend = (value: string) => {
+    if (!isSolverBackend(value)) return;
+    onUpdateSolverSettings?.({ backend: value });
   };
   const updateDynamicNumber = (key: keyof Pick<DynamicSolverSettings, "startTime" | "endTime" | "timeStep" | "outputInterval" | "dampingRatio">, value: number) => {
     if (!Number.isFinite(value)) return;
@@ -983,9 +992,12 @@ function RunPanel({ study, displayModel, runProgress, runTiming, onRunSimulation
         {checks.map(([label, done]) => <span key={label} className={done ? "check done" : "check"}><span>{done ? <Check size={18} /> : null}</span>{label}</span>)}
       </div>
       <SectionTitle>Simulation backend</SectionTitle>
-      <div className="summary-box">
-        <Info label="Backend" value={simulationBackendDisplayLabel(study)} />
-      </div>
+      <label className="field">
+        <span>Backend</span>
+        <select name="solver-backend" value={solverBackend} onChange={(event) => updateSolverBackend(event.currentTarget.value)}>
+          {SOLVER_BACKEND_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+        </select>
+      </label>
       <label className="field">
         <span>Fidelity</span>
         <select value={fidelity} onChange={(event) => updateSolverChoice({ fidelity: event.currentTarget.value as SimulationFidelity })}>
@@ -1138,13 +1150,13 @@ function solverFidelityForStudy(study: Study): SimulationFidelity {
   return fidelity === "detailed" || fidelity === "ultra" ? fidelity : "standard";
 }
 
+function isSolverBackend(value: string): value is SolverBackend {
+  return value === "opencae_core_cloud" || value === "opencae_core_local";
+}
+
 function solverBackendLabelForRunPanel(study: Study, _displayModel: DisplayModel): string {
   if (normalizeSolverBackend(study) === "opencae_core_cloud") return "OpenCAE Core Cloud";
   return "OpenCAE Core Local";
-}
-
-function simulationBackendDisplayLabel(study: Study): string {
-  return normalizeSolverBackend(study) === "opencae_core_cloud" ? "OpenCAE Core Cloud" : "OpenCAE Core Local";
 }
 
 function solverMethodForStudy(study: Study): "sparse_static" | "mdof_dynamic" {
