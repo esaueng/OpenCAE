@@ -20,6 +20,7 @@ RUN pnpm install --frozen-lockfile --prod=false
 RUN pnpm --dir /opencae-core add -Dw @types/node@22.19.17
 RUN mkdir -p services/opencae-core-cloud/node_modules/.bin services/opencae-core-cloud/node_modules/@types services/opencae-core-cloud/node_modules/@opencae \
   && ln -s /opencae-core/node_modules/.bin/tsc services/opencae-core-cloud/node_modules/.bin/tsc \
+  && ln -s /opencae-core/node_modules/.pnpm/esbuild@0.25.12/node_modules/esbuild/bin/esbuild services/opencae-core-cloud/node_modules/.bin/esbuild \
   && ln -s /opencae-core/node_modules/typescript services/opencae-core-cloud/node_modules/typescript \
   && ln -s /opencae-core/node_modules/@types/node services/opencae-core-cloud/node_modules/@types/node \
   && ln -s /opencae-core/packages/core services/opencae-core-cloud/node_modules/@opencae/core \
@@ -47,4 +48,4 @@ COPY --from=build /opencae-core/packages/solver-cpu /opencae-core/packages/solve
 
 EXPOSE 8080
 
-CMD ["node", "services/opencae-core-cloud/dist/server.js"]
+CMD ["node", "services/opencae-core-cloud/dist/server.bundle.js"]
