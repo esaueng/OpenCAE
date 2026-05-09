@@ -325,10 +325,11 @@ async function runOpenCaeCoreCloudSimulation(study: Study, displayModel: Display
       headers: { "content-type": "application/json" },
       body: JSON.stringify(openCaeCoreCloudSolveRequest(runId, study, displayModel))
     });
-    const payload = await readJson<{ run: { id: string }; streamUrl?: string; message?: string }>(response, "POST /api/cloud-core/runs");
+    const payload = await readJson<{ run: { id: string }; streamUrl?: string; startUrl?: string; message?: string }>(response, "POST /api/cloud-core/runs");
     const responseRunId = payload.run.id;
     cloudResultsUrlByRunId.set(responseRunId, `/api/cloud-core/runs/${responseRunId}/results`);
     cloudEventsUrlByRunId.set(responseRunId, payload.streamUrl ?? `/api/cloud-core/runs/${responseRunId}/events`);
+    void startOpenCaeCoreCloudRun(payload.startUrl ?? `/api/cloud-core/runs/${responseRunId}/start`);
     return {
       run: payload.run,
       streamUrl: payload.streamUrl ?? `/api/cloud-core/runs/${responseRunId}/events`,
@@ -336,6 +337,17 @@ async function runOpenCaeCoreCloudSimulation(study: Study, displayModel: Display
     };
   } catch (error) {
     throw new Error(coreCloudFailureMessage(error), { cause: error });
+  }
+}
+
+async function startOpenCaeCoreCloudRun(startUrl: string): Promise<void> {
+  try {
+    const response = await fetch(startUrl, { method: "POST" });
+    if (!response.ok) {
+      console.warn(await response.text());
+    }
+  } catch (error) {
+    console.warn(coreCloudFailureMessage(error));
   }
 }
 

@@ -60,7 +60,10 @@ export default {
         );
       }
       if (request.method === "POST" && cloudRoute.action === "runs") {
-        return createCoreCloudRun(request, env, ctx);
+        return createCoreCloudRun(request, env);
+      }
+      if (request.method === "POST" && cloudRoute.action === "start" && cloudRoute.runId) {
+        return startCoreCloudRun(env, cloudRoute.runId);
       }
       if (request.method === "GET" && cloudRoute.action === "events" && cloudRoute.runId) {
         if (request.headers.get("accept")?.includes("text/event-stream")) {
@@ -93,12 +96,12 @@ export default {
 
 function isCloudCoreRoute(pathname: string): boolean {
   return pathname === "/api/cloud-core/runs" ||
-    /^\/api\/cloud-core\/runs\/[^/]+\/(?:events|results)$/.test(pathname);
+    /^\/api\/cloud-core\/runs\/[^/]+\/(?:start|events|results)$/.test(pathname);
 }
 
 function isLegacyCloudFeaRoute(pathname: string): boolean {
   return pathname === "/api/cloud-fea/runs" ||
-    /^\/api\/cloud-fea\/runs\/[^/]+\/(?:events|results)$/.test(pathname);
+    /^\/api\/cloud-fea\/runs\/[^/]+\/(?:start|events|results)$/.test(pathname);
 }
 
 type CoreCloudEnv = Env & {
@@ -108,7 +111,7 @@ type CoreCloudEnv = Env & {
 
 type CloudRoute =
   | { action: "runs"; runId?: undefined }
-  | { action: "events" | "results"; runId: string };
+  | { action: "start" | "events" | "results"; runId: string };
 
 type CoreCloudRunRequest = {
   runId?: string;
@@ -131,9 +134,9 @@ type RunEvent = {
 function parseCloudCoreRoute(pathname: string): CloudRoute | undefined {
   if (!isCloudCoreRoute(pathname) && !isLegacyCloudFeaRoute(pathname)) return undefined;
   if (pathname === "/api/cloud-core/runs" || pathname === "/api/cloud-fea/runs") return { action: "runs" };
-  const match = pathname.match(/^\/api\/cloud-(?:core|fea)\/runs\/([^/]+)\/(events|results)$/);
+  const match = pathname.match(/^\/api\/cloud-(?:core|fea)\/runs\/([^/]+)\/(start|events|results)$/);
   if (!match) return undefined;
-  return { runId: match[1]!, action: match[2] as "events" | "results" };
+  return { runId: match[1]!, action: match[2] as "start" | "events" | "results" };
 }
 
 async function coreCloudHealth(env: Env): Promise<Response> {
@@ -172,7 +175,7 @@ async function coreCloudHealth(env: Env): Promise<Response> {
   );
 }
 
-async function createCoreCloudRun(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+async function createCoreCloudRun(request: Request, env: Env): Promise<Response> {
   const payload = await readJson(request) as CoreCloudRunRequest;
   const runId = payload.runId || `run-cloud-core-${crypto.randomUUID()}`;
   const requestArtifact = {
@@ -193,7 +196,7 @@ async function createCoreCloudRun(request: Request, env: Env, ctx: ExecutionCont
   await writeCoreCloudEvents(env, runId, [
     event(runId, "state", "OpenCAE Core Cloud solve queued.", 0)
   ]);
-  ctx.waitUntil(runCoreCloudSolve(env, runId));
+  const startUrl = `/api/cloud-core/runs/${runId}/start`;
   return Response.json(
     {
       run: {
@@ -207,10 +210,28 @@ async function createCoreCloudRun(request: Request, env: Env, ctx: ExecutionCont
         diagnostics: []
       },
       streamUrl: `/api/cloud-core/runs/${runId}/events`,
+      startUrl,
       message: "OpenCAE Core Cloud simulation queued."
     },
     { status: 202, headers: jsonHeaders }
   );
+}
+
+async function startCoreCloudRun(env: Env, runId: string): Promise<Response> {
+  const existingEvents = await readEvents(env, runId);
+  if (existingEvents.some((item) => item.type === "complete")) {
+    return Response.json({ ok: true, runId, status: "complete" }, { headers: jsonHeaders });
+  }
+  if (existingEvents.some((item) => item.type === "error")) {
+    return Response.json({ ok: false, runId, status: "error" }, { status: 409, headers: jsonHeaders });
+  }
+  await runCoreCloudSolve(env, runId);
+  const events = await readEvents(env, runId);
+  const failed = events.find((item) => item.type === "error");
+  if (failed) {
+    return Response.json({ ok: false, runId, status: "error", error: failed.message }, { status: 500, headers: jsonHeaders });
+  }
+  return Response.json({ ok: true, runId, status: "complete" }, { headers: jsonHeaders });
 }
 
 async function runCoreCloudSolve(env: Env, runId: string): Promise<void> {
