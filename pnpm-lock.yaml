@@ -50,7 +50,18 @@ importers:
 
   ../opencae-core/packages/solver-webgpu: {}
 
-  ../opencae-core/packages/viewer: {}
+  ../opencae-core/packages/viewer:
+    dependencies:
+      '@opencae/core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      '@opencae/examples':
+        specifier: workspace:*
+        version: link:../examples
+      '@opencae/solver-cpu':
+        specifier: workspace:*
+        version: link:../solver-cpu
 
   apps/opencae-api:
     dependencies:
