@@ -8,7 +8,7 @@ import {
   type OpenCAEModelJson,
   type ValidationIssue
 } from "@opencae/core";
-import { solveCoreDynamic, solveCoreStatic, type DynamicLoadProfile } from "@opencae/solver-cpu";
+import { SOLVER_CPU_VERSION, solveCoreDynamic, solveCoreStatic, type DynamicLoadProfile } from "@opencae/solver-cpu";
 
 export type CoreCloudSolveRequest = {
   runId?: string;
@@ -24,7 +24,6 @@ export type CoreCloudSolveRequest = {
 };
 
 const RUNNER_VERSION = readRunnerVersion();
-const SOLVER_CPU_VERSION = "0.1.0";
 const jsonHeaders = {
   "content-type": "application/json; charset=utf-8",
   "cache-control": "no-store"
