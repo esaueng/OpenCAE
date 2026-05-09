@@ -10,7 +10,7 @@ import {
   type SurfaceSetJson
 } from "@opencae/core";
 import {
-  solveDynamicTet4Cpu,
+  solveDynamicMdofTet4Cpu,
   solveStaticLinearTet4Cpu,
   type DynamicLoadProfile,
   type DynamicTet4CpuFrame,
@@ -184,7 +184,7 @@ export function trySolveOpenCaeCoreStudy({ study, runId, displayModel }: {
       const material = materialForStudy(study).material;
       const settings = dynamicSettingsForStudy(study);
       const provenance = isActualMesh ? OPENCAE_CORE_ACTUAL_DYNAMIC_PROVENANCE : OPENCAE_CORE_PREVIEW_DYNAMIC_PROVENANCE;
-      const solved = solveDynamicTet4Cpu(coreModel.model, {
+      const solved = solveDynamicMdofTet4Cpu(coreModel.model, {
         maxDofs: maxDofsForMeshPreset(study.meshSettings.preset),
         startTime: settings.startTime,
         endTime: settings.endTime,
@@ -420,7 +420,9 @@ function openCaeCoreModelForStudy(study: Study, displayModel: DisplayModel | und
       name: effective.id,
       type: "isotropicLinearElastic",
       youngModulus: effective.youngsModulus,
-      poissonRatio: effective.poissonRatio
+      poissonRatio: effective.poissonRatio,
+      density: effective.density ?? material.material.density,
+      yieldStrength: effective.yieldStrength ?? material.material.yieldStrength
     }],
     elementBlocks: [{
       name: "block-tet4",

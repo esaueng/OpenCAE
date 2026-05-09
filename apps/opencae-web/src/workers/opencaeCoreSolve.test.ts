@@ -134,8 +134,8 @@ describe("OpenCAE Core browser solver adapter", () => {
     const outcome = trySolveOpenCaeCoreStudy({ study: dynamicStudy, runId: "run-core-dynamic-1", displayModel });
 
     expect(eligibility).toEqual({ ok: true });
-    expect(outcome.ok).toBe(true);
     if (!outcome.ok) throw new Error(outcome.reason);
+    expect(outcome.ok).toBe(true);
     expect(outcome.solverBackend).toBe("opencae-core-preview-sdof");
     expect(outcome.result.summary.provenance).toMatchObject({
       kind: "local_estimate",

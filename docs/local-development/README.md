@@ -18,6 +18,8 @@ pnpm install
 pnpm dev
 ```
 
+`pnpm build:core` refreshes the sibling checkout from `https://github.com/esaueng/OpenCAE-Core` before building Core packages. The ref comes from `services/opencae-core-cloud/OPENCAE_CORE_REF`, which defaults to `main` so local and Cloudflare container builds use the latest OpenCAE Core branch state. If the sibling Core checkout has local changes or local-only commits, the refresh fails instead of overwriting work or producing a Cloudflare container that cannot be reproduced from the remote Core repo.
+
 `pnpm dev` starts the Fastify API on `http://localhost:4317` and the Vite web app on `http://localhost:5173`. The API creates and seeds the SQLite database if needed.
 
 ## Commands

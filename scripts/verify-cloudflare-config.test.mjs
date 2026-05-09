@@ -34,11 +34,13 @@ describe("Cloudflare deployment config guard", () => {
   test("default Workers deploy targets Core Cloud while local-first stays explicit", () => {
     const packageJson = JSON.parse(readFileSync(resolve(rootDir, "package.json"), "utf8"));
     const buildScript = packageJson.scripts.build;
+    const buildCoreScript = packageJson.scripts["build:core"];
 
     expect(buildScript).toContain("pnpm --filter @opencae/api build");
     expect(buildScript).toContain("pnpm --filter @opencae/web build");
     expect(buildScript).not.toContain("@cloudflare/containers");
     expect(buildScript).not.toContain("containers:build");
+    expect(buildCoreScript).toContain("pnpm install --no-frozen-lockfile");
     expect(packageJson.scripts["deploy:cloudflare"]).toContain("wrangler deploy --config wrangler.containers.jsonc");
     expect(packageJson.scripts["deploy:cloudflare"]).toContain("verify:runner-version");
     expect(packageJson.scripts["deploy:cloudflare"]).toContain("--containers-rollout=immediate");
@@ -63,14 +65,17 @@ describe("Cloudflare deployment config guard", () => {
     expect(verifyRunnerSource).toContain("services/opencae-core-cloud/RUNNER_VERSION");
   });
 
-  test("Core Cloud build pins the external OpenCAE Core ref", () => {
+  test("Core Cloud build tracks the latest external OpenCAE Core branch", () => {
     const coreRefPath = resolve(rootDir, "services/opencae-core-cloud/OPENCAE_CORE_REF");
     const coreRef = readFileSync(coreRefPath, "utf8").trim();
     const ensureCoreSource = readFileSync(resolve(rootDir, "scripts/ensure-opencae-core.mjs"), "utf8");
 
-    expect(coreRef).toMatch(/^[0-9a-f]{40}$/);
+    expect(coreRef).toBe("main");
     expect(ensureCoreSource).toContain("OPENCAE_CORE_REF");
     expect(ensureCoreSource).toContain("services/opencae-core-cloud/OPENCAE_CORE_REF");
+    expect(ensureCoreSource).toContain("updateExistingCoreWorkspace");
+    expect(ensureCoreSource).toContain("git\", [\"-C\", directory, \"fetch\", \"--depth\", \"1\", \"origin\", ref]");
+    expect(ensureCoreSource).toContain("merge\", \"--ff-only\", \"FETCH_HEAD");
     expect(ensureCoreSource).toContain("checkout");
     expect(ensureCoreSource).toContain("FETCH_HEAD");
   });
@@ -86,7 +91,7 @@ describe("Cloudflare deployment config guard", () => {
     const linkCoreIndex = dockerfile.indexOf("ln -s /opencae-core/packages/core services/opencae-core-cloud/node_modules/@opencae/core");
     const linkSolverIndex = dockerfile.indexOf("ln -s /opencae-core/packages/solver-cpu services/opencae-core-cloud/node_modules/@opencae/solver-cpu");
     const coreBuildIndex = dockerfile.indexOf("RUN pnpm --dir /opencae-core --filter @opencae/core build");
-    const serviceInstallIndex = dockerfile.indexOf("RUN pnpm install --frozen-lockfile --prod=false");
+    const serviceInstallIndex = dockerfile.indexOf("RUN pnpm install --no-frozen-lockfile --prod=false");
     const serviceBuildIndex = dockerfile.indexOf("RUN pnpm --filter @opencae/core-cloud build");
     const runtimeNodeModulesIndex = dockerfile.indexOf("ln -s /opencae-core/packages/core node_modules/@opencae/core");
 

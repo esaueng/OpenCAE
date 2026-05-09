@@ -16,7 +16,7 @@ COPY runners ./runners
 
 RUN pnpm ensure:core
 RUN pnpm --dir /opencae-core install --frozen-lockfile --prod=false
-RUN pnpm install --frozen-lockfile --prod=false
+RUN pnpm install --no-frozen-lockfile --prod=false
 RUN pnpm --dir /opencae-core add -Dw @types/node@22.19.17
 RUN mkdir -p services/opencae-core-cloud/node_modules/.bin services/opencae-core-cloud/node_modules/@types services/opencae-core-cloud/node_modules/@opencae \
   && ln -s /opencae-core/node_modules/.bin/tsc services/opencae-core-cloud/node_modules/.bin/tsc \

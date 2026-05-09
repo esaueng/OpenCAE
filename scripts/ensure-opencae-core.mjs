@@ -13,7 +13,8 @@ const pinnedCoreRefPath = resolve(repoRoot, "services/opencae-core-cloud/OPENCAE
 const coreRef = process.env.OPENCAE_CORE_REF ?? readPinnedCoreRef() ?? "main";
 
 if (existsSync(resolve(coreDir, "package.json"))) {
-  console.log(`OpenCAE Core workspace found at ${coreDir}`);
+  updateExistingCoreWorkspace(coreDir, coreRef);
+  console.log(`OpenCAE Core workspace updated to ${describeHead(coreDir)} at ${coreDir}`);
   process.exit(0);
 }
 
@@ -32,6 +33,44 @@ if (isGitCommitRef(coreRef)) {
 }
 console.log(`OpenCAE Core workspace cloned to ${coreDir}`);
 
+function updateExistingCoreWorkspace(directory, ref) {
+  const insideGitWorkTree = spawnSync("git", ["-C", directory, "rev-parse", "--is-inside-work-tree"], { encoding: "utf8" });
+  if (insideGitWorkTree.status !== 0 || insideGitWorkTree.stdout.trim() !== "true") {
+    console.error(`OpenCAE Core path exists but is not a git checkout: ${directory}`);
+    process.exit(1);
+  }
+
+  const status = spawnSync("git", ["-C", directory, "status", "--porcelain"], { encoding: "utf8" });
+  if (status.error) throw status.error;
+  if (status.status !== 0) process.exit(status.status ?? 1);
+  if (status.stdout.trim().length > 0) {
+    console.error(`OpenCAE Core checkout has local changes and cannot be updated safely: ${directory}`);
+    console.error("Commit, stash, or move those changes before building OpenCAE.");
+    process.exit(1);
+  }
+
+  run("git", ["-C", directory, "fetch", "--depth", "1", "origin", ref]);
+  if (isGitCommitRef(ref)) {
+    run("git", ["-C", directory, "checkout", "--detach", "FETCH_HEAD"]);
+    return;
+  }
+
+  if (localBranchExists(directory, ref)) {
+    run("git", ["-C", directory, "checkout", ref]);
+    run("git", ["-C", directory, "merge", "--ff-only", "FETCH_HEAD"]);
+  } else {
+    run("git", ["-C", directory, "checkout", "-B", ref, "FETCH_HEAD"]);
+  }
+
+  const head = gitOutput(directory, ["rev-parse", "HEAD"]);
+  const fetchedHead = gitOutput(directory, ["rev-parse", "FETCH_HEAD"]);
+  if (head !== fetchedHead) {
+    console.error(`OpenCAE Core checkout did not update exactly to origin/${ref}.`);
+    console.error("Push or remove local ahead commits before building a Cloudflare-matching container.");
+    process.exit(1);
+  }
+}
+
 function readPinnedCoreRef() {
   if (!existsSync(pinnedCoreRefPath)) return undefined;
   const value = readFileSync(pinnedCoreRefPath, "utf8").trim();
@@ -40,6 +79,21 @@ function readPinnedCoreRef() {
 
 function isGitCommitRef(ref) {
   return /^[0-9a-f]{7,40}$/i.test(ref);
+}
+
+function localBranchExists(directory, branch) {
+  return spawnSync("git", ["-C", directory, "show-ref", "--verify", "--quiet", `refs/heads/${branch}`]).status === 0;
+}
+
+function describeHead(directory) {
+  return gitOutput(directory, ["rev-parse", "--short", "HEAD"]);
+}
+
+function gitOutput(directory, args) {
+  const result = spawnSync("git", ["-C", directory, ...args], { encoding: "utf8" });
+  if (result.error) throw result.error;
+  if (result.status !== 0) process.exit(result.status ?? 1);
+  return result.stdout.trim();
 }
 
 function run(command, args) {
