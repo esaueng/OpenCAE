@@ -82,11 +82,11 @@ async function solve(request: Request): Promise<Response> {
 
   const validationReport = validateCoreResult(result.result);
   if (!validationReport.ok) return diagnosticResponse(422, validationReport.errors);
-  const coreResult = withCloudProvenance({
+  const coreResult = normalizeCoreCloudResultForUi(withCloudProvenance({
     ...result.result,
     surfaceMesh: result.result.surfaceMesh ?? solverSurfaceMeshFromModel(model),
     diagnostics: [...result.result.diagnostics, result.diagnostics]
-  }, model, analysisType);
+  }, model, analysisType), solveRequest.runId);
 
   return json(compactVisualizationPayload(coreResult, solveRequest.resultSettings));
 }
@@ -166,13 +166,18 @@ function dynamicOptions(request: CoreCloudSolveRequest, model: OpenCAEModelJson)
 
 function withCloudProvenance(result: Record<string, unknown>, model: OpenCAEModelJson, analysisType: "static_stress" | "dynamic_structural") {
   const meshSource = model.meshProvenance?.meshSource === "structured_block_core" ? "structured_block_core" : "actual_volume_mesh";
+  const provenance = cloudProvenance(meshSource, analysisType);
   const fields = Array.isArray(result.fields)
-    ? result.fields.map((field) => ({ ...field, provenance: cloudProvenance(meshSource, analysisType) }))
+    ? result.fields.map((field) => ({ ...field, provenance }))
     : [];
   return {
     ...result,
+    summary: {
+      ...(isRecord(result.summary) ? result.summary : {}),
+      provenance
+    },
     fields,
-    provenance: cloudProvenance(meshSource, analysisType)
+    provenance
   };
 }
 
@@ -189,6 +194,113 @@ function cloudProvenance(meshSource: "actual_volume_mesh" | "structured_block_co
   };
 }
 
+export function normalizeCoreCloudResultForUi(coreResult: Record<string, unknown>, runId = "opencae-core-cloud-run"): Record<string, unknown> {
+  const rawProvenance = isRecord(coreResult.provenance) ? coreResult.provenance : undefined;
+  const rawUnits = typeof rawProvenance?.units === "string" ? rawProvenance.units : undefined;
+  const provenance = rawProvenance ? { ...rawProvenance, units: "mm-N-s-MPa" } : undefined;
+  const summary = isRecord(coreResult.summary) ? coreResult.summary : {};
+  const surfaceMesh = isRecord(coreResult.surfaceMesh) ? coreResult.surfaceMesh : undefined;
+  const fields = Array.isArray(coreResult.fields)
+    ? coreResult.fields.map((field) => normalizeCoreCloudFieldForUi(field, runId, provenance, surfaceMesh))
+    : [];
+  const maxStressUnits = stringOr(summary.maxStressUnits, rawUnits === "mm-N-s-MPa" ? "MPa" : "Pa");
+  const maxDisplacementUnits = stringOr(summary.maxDisplacementUnits, rawUnits === "mm-N-s-MPa" ? "mm" : "m");
+  const normalizedSummary = {
+    ...summary,
+    maxStress: convertStress(numberOr(summary.maxStress, 0), maxStressUnits).value,
+    maxStressUnits: "MPa",
+    maxDisplacement: convertDisplacement(numberOr(summary.maxDisplacement, 0), maxDisplacementUnits).value,
+    maxDisplacementUnits: "mm",
+    safetyFactor: numberOr(summary.safetyFactor, 0),
+    reactionForce: numberOr(summary.reactionForce, 0),
+    reactionForceUnits: "N",
+    provenance,
+    ...(isRecord(summary.transient)
+      ? {
+          transient: {
+            ...summary.transient,
+            peakDisplacement: convertDisplacement(
+              numberOr(summary.transient.peakDisplacement, numberOr(summary.maxDisplacement, 0)),
+              maxDisplacementUnits
+            ).value
+          }
+        }
+      : {})
+  };
+  return {
+    ...coreResult,
+    summary: normalizedSummary,
+    fields,
+    artifacts: {
+      ...(isRecord(coreResult.artifacts) ? coreResult.artifacts : {}),
+      ...(rawUnits ? { rawUnits } : {})
+    },
+    provenance
+  };
+}
+
+function normalizeCoreCloudFieldForUi(field: unknown, runId: string, provenance: Record<string, unknown> | undefined, surfaceMesh: Record<string, unknown> | undefined): unknown {
+  if (!isRecord(field)) return field;
+  const type = field.type;
+  const originalValues = Array.isArray(field.values) ? field.values.map((value) => numberOr(value, 0)) : [];
+  const sourceUnits = stringOr(field.units, unitsForFieldType(type));
+  const converted = converterForField(type, sourceUnits);
+  const fullConvertedValues = originalValues.map((value) => converted(value));
+  const isVectorField = (type === "displacement" || type === "velocity" || type === "acceleration") && originalValues.length % 3 === 0;
+  const values = isVectorField ? vectorMagnitudes(fullConvertedValues) : fullConvertedValues;
+  const samples = normalizeSamplesForField(field, values, fullConvertedValues, converted, surfaceMesh);
+  const finiteValues = [...values, ...samples.map((sample) => sample.value)].filter(Number.isFinite);
+  return {
+    ...field,
+    runId: typeof field.runId === "string" ? field.runId : runId,
+    values,
+    min: finiteValues.length ? Math.min(...finiteValues) : 0,
+    max: finiteValues.length ? Math.max(...finiteValues) : 0,
+    units: displayUnitsForField(type, sourceUnits),
+    samples,
+    provenance
+  };
+}
+
+function normalizeSamplesForField(
+  field: Record<string, unknown>,
+  values: number[],
+  convertedComponents: number[],
+  convert: (value: number) => number,
+  surfaceMesh: Record<string, unknown> | undefined
+): Array<Record<string, unknown> & { value: number }> {
+  if (Array.isArray(field.samples) && field.samples.every(isRecord)) {
+    return field.samples.map((sample, index) => ({
+      ...sample,
+      value: convert(numberOr(sample.value, values[index] ?? 0)),
+      ...(Array.isArray(sample.vector) && sample.vector.length === 3
+        ? { vector: sample.vector.map((component) => convert(numberOr(component, 0))) }
+        : {})
+    }));
+  }
+  const type = field.type;
+  if ((type === "displacement" || type === "velocity" || type === "acceleration") && convertedComponents.length === values.length * 3) {
+    return values.map((value, node) => ({
+      point: surfaceNodePoint(surfaceMesh, node),
+      normal: [0, 0, 1],
+      value,
+      vector: [
+        convertedComponents[node * 3] ?? 0,
+        convertedComponents[node * 3 + 1] ?? 0,
+        convertedComponents[node * 3 + 2] ?? 0
+      ],
+      nodeId: `N${node}`,
+      source: "opencae_core_cloud"
+    }));
+  }
+  return values.map((value, index) => ({
+    point: surfaceNodePoint(surfaceMesh, index),
+    normal: [0, 0, 1],
+    value,
+    source: "opencae_core_cloud"
+  }));
+}
+
 function compactVisualizationPayload(result: Record<string, unknown>, settings: CoreCloudSolveRequest["resultSettings"]): Record<string, unknown> {
   const maxFieldValues = integerOption(settings?.maxFieldValues);
   const maxFrames = integerOption(settings?.maxFrames);
@@ -197,9 +309,31 @@ function compactVisualizationPayload(result: Record<string, unknown>, settings: 
   if (maxFieldValues && maxFieldValues > 1) {
     fields = fields.map((field) => {
       if (!field || typeof field !== "object" || !Array.isArray((field as { values?: unknown }).values)) return field;
+      const current = field as { values: number[]; samples?: unknown[] };
+      const originalValueCount = current.values.length;
+      const originalSampleCount = Array.isArray(current.samples) ? current.samples.length : 0;
+      if (!Array.isArray(current.samples) || current.samples.length !== current.values.length) {
+        return {
+          ...field,
+          compaction: {
+            originalValueCount,
+            returnedValueCount: originalValueCount,
+            originalSampleCount,
+            returnedSampleCount: originalSampleCount
+          }
+        };
+      }
+      const indexes = downsampleIndexes(current.values.length, maxFieldValues);
       return {
         ...field,
-        values: downsample((field as { values: number[] }).values, maxFieldValues)
+        values: indexes.map((index) => current.values[index]!),
+        samples: indexes.map((index) => current.samples![index]!),
+        compaction: {
+          originalValueCount,
+          returnedValueCount: indexes.length,
+          originalSampleCount,
+          returnedSampleCount: indexes.length
+        }
       };
     });
   }
@@ -220,13 +354,86 @@ function compactFrames(fields: unknown[], maxFrames: number): unknown[] {
 }
 
 function downsample<T>(values: T[], maxValues: number): T[] {
-  if (values.length <= maxValues) return values;
-  const output: T[] = [];
-  const last = values.length - 1;
+  return downsampleIndexes(values.length, maxValues).map((index) => values[index]!);
+}
+
+function downsampleIndexes(length: number, maxValues: number): number[] {
+  if (length <= maxValues) return Array.from({ length }, (_value, index) => index);
+  const output: number[] = [];
+  const last = length - 1;
   for (let index = 0; index < maxValues; index += 1) {
-    output.push(values[Math.round((index / (maxValues - 1)) * last)]!);
+    output.push(Math.round((index / (maxValues - 1)) * last));
   }
   return output;
+}
+
+function converterForField(type: unknown, units: string): (value: number) => number {
+  if (type === "stress") return (value) => convertStress(value, units).value;
+  if (type === "displacement") return (value) => convertDisplacement(value, units).value;
+  if (type === "velocity") return (value) => convertVelocity(value, units).value;
+  if (type === "acceleration") return (value) => convertAcceleration(value, units).value;
+  return (value) => value;
+}
+
+function displayUnitsForField(type: unknown, units: string): string {
+  if (type === "stress") return "MPa";
+  if (type === "displacement") return "mm";
+  if (type === "velocity") return "mm/s";
+  if (type === "acceleration") return "mm/s^2";
+  return units || "ratio";
+}
+
+function unitsForFieldType(type: unknown): string {
+  if (type === "stress") return "Pa";
+  if (type === "displacement") return "m";
+  if (type === "velocity") return "m/s";
+  if (type === "acceleration") return "m/s^2";
+  return "ratio";
+}
+
+function convertStress(value: number, units: string): { value: number; units: "MPa" } {
+  return { value: units === "Pa" ? value / 1_000_000 : value, units: "MPa" };
+}
+
+function convertDisplacement(value: number, units: string): { value: number; units: "mm" } {
+  return { value: units === "m" ? value * 1000 : value, units: "mm" };
+}
+
+function convertVelocity(value: number, units: string): { value: number; units: "mm/s" } {
+  return { value: units === "m/s" ? value * 1000 : value, units: "mm/s" };
+}
+
+function convertAcceleration(value: number, units: string): { value: number; units: "mm/s^2" } {
+  return { value: units === "m/s^2" ? value * 1000 : value, units: "mm/s^2" };
+}
+
+function vectorMagnitudes(values: number[]): number[] {
+  const magnitudes: number[] = [];
+  for (let index = 0; index < values.length; index += 3) {
+    magnitudes.push(Math.hypot(values[index] ?? 0, values[index + 1] ?? 0, values[index + 2] ?? 0));
+  }
+  return magnitudes;
+}
+
+function surfaceNodePoint(surfaceMesh: Record<string, unknown> | undefined, index: number): [number, number, number] {
+  const nodes = Array.isArray(surfaceMesh?.nodes) ? surfaceMesh.nodes : [];
+  const node = nodes[index % Math.max(nodes.length, 1)];
+  if (Array.isArray(node) && node.length >= 3) {
+    return [numberOr(node[0], 0), numberOr(node[1], 0), numberOr(node[2], 0)];
+  }
+  return [0, 0, 0];
+}
+
+function numberOr(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function stringOr(value: unknown, fallback: string): string {
+  return typeof value === "string" && value.length > 0 ? value : fallback;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 async function readJsonBody(request: Request): Promise<{ ok: true; value: unknown } | { ok: false; error: string }> {

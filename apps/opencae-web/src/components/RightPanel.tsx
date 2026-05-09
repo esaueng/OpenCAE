@@ -1207,7 +1207,9 @@ function ResultsPanel({
   const loadCapacity = estimateAllowableLoadForSafetyFactor(resultSummary, targetSafetyFactor);
   const blockPreviewResults = shouldBlockPreviewResultsForDisplayModel(displayModel, resultSummary, resultFields, study);
   const reactionForceInvalid = hasInvalidReactionForce(resultSummary, study) || hasUnavailableReactionDiagnostic(resultSummary);
-  const canEstimateLoad = loadCapacity.status === "available" && canShowReverseLoadCapacity(resultSummary, displayModel, resultFields, study);
+  const resultContractInvalid = resultContractHasMissingUnits(resultSummary, resultFields);
+  const unitMissingDiagnostic = resultContractInvalid ? "Unit missing" : null;
+  const canEstimateLoad = !resultContractInvalid && loadCapacity.status === "available" && canShowReverseLoadCapacity(resultSummary, displayModel, resultFields, study);
   const AssessmentIcon = assessment.status === "pass" ? ShieldCheck : AlertTriangle;
   const frames = dynamicPlaybackFrames(resultFields);
   const hasPlayback = frames.length > 1;
@@ -1352,6 +1354,7 @@ function ResultsPanel({
       {blockPreviewResults && <p className="panel-warning">{PREVIEW_GEOMETRY_WARNING}</p>}
       {legacyResultWarning && <p className="panel-warning">{legacyResultWarning}</p>}
       {reactionForceInvalid && <p className="panel-warning">{INVALID_REACTION_WARNING}</p>}
+      {unitMissingDiagnostic && <p className="panel-warning">{unitMissingDiagnostic}</p>}
       <p className="panel-copy">Red areas have higher stress. Blue areas have lower stress.</p>
       <div className="summary-box">
         <Info label="Result source" value={formatResultProvenanceLabel(resultSummary.provenance)} />
@@ -1361,11 +1364,11 @@ function ResultsPanel({
         <Info label="Solver method" value={solverMethodForResult(resultSummary, study)} />
         <Info label="Runner" value={solverRunnerLabelForResult(resultProvenance)} />
         <Info label="Local fallback" value="none" />
-        <Info label="Max stress" value={`${resultSummary.maxStress} ${resultSummary.maxStressUnits}`} />
-        <Info label="Max displacement" value={`${resultSummary.maxDisplacement} ${resultSummary.maxDisplacementUnits}`} />
+        <Info label="Max stress" value={formatResultMetric(resultSummary.maxStress, resultSummary.maxStressUnits)} />
+        <Info label="Max displacement" value={formatResultMetric(resultSummary.maxDisplacement, resultSummary.maxDisplacementUnits)} />
         <Info label="Safety factor" value={String(resultSummary.safetyFactor)} />
         <Info label="Failure check" value={assessment.title} />
-        <Info label="Reaction force" value={`${resultSummary.reactionForce} ${resultSummary.reactionForceUnits}`} />
+        <Info label="Reaction force" value={formatResultMetric(resultSummary.reactionForce, resultSummary.reactionForceUnits)} />
       </div>
       {canEstimateLoad && (
         <>
@@ -1405,6 +1408,21 @@ function solverMethodForResult(resultSummary: ResultSummary, study: Study): stri
   if (typeof provenanceMethod === "string" && provenanceMethod) return provenanceMethod;
   if (resultSummary.transient || study.type === "dynamic_structural") return "mdof_dynamic";
   return "sparse_static";
+}
+
+function resultContractHasMissingUnits(summary: ResultSummary, fields: ResultField[]): boolean {
+  return !hasResultUnit(summary.maxStressUnits) ||
+    !hasResultUnit(summary.maxDisplacementUnits) ||
+    !hasResultUnit(summary.reactionForceUnits) ||
+    fields.some((field) => !hasResultUnit(field.units));
+}
+
+function hasResultUnit(units: string | undefined): units is string {
+  return typeof units === "string" && units.length > 0 && units !== "undefined";
+}
+
+function formatResultMetric(value: number, units: string | undefined): string {
+  return hasResultUnit(units) ? `${value} ${units}` : "Unit missing";
 }
 
 function solverRunnerLabelForResult(provenance: ResultProvenance | undefined): string {
