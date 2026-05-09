@@ -92,13 +92,18 @@ describe("Cloudflare deployment config guard", () => {
     expect(runtimeNodeModulesIndex).toBeGreaterThan(serviceBuildIndex);
   });
 
-  test("Core Cloud service declares its TypeScript build dependency", () => {
+  test("Core Cloud service declares its bundled Node runtime build", () => {
     const packageJson = JSON.parse(readFileSync(resolve(rootDir, "services/opencae-core-cloud/package.json"), "utf8"));
     const tsconfig = JSON.parse(readFileSync(resolve(rootDir, "services/opencae-core-cloud/tsconfig.json"), "utf8"));
+    const dockerfile = readFileSync(resolve(rootDir, "services/opencae-core-cloud/Dockerfile"), "utf8");
 
-    expect(packageJson.scripts.build).toBe("tsc -p tsconfig.json");
+    expect(packageJson.scripts.build).toContain("tsc -p tsconfig.json");
+    expect(packageJson.scripts.build).toContain("esbuild src/server.ts --bundle --platform=node --format=esm");
+    expect(packageJson.scripts.start).toBe("node dist/server.bundle.js");
     expect(packageJson.devDependencies?.typescript).toBeDefined();
+    expect(packageJson.devDependencies?.esbuild).toBeDefined();
     expect(tsconfig.include).toEqual(["src/index.ts", "src/server.ts"]);
+    expect(dockerfile).toContain("node\", \"services/opencae-core-cloud/dist/server.bundle.js");
   });
 
   test("fails when container config references the legacy FEA container", () => {

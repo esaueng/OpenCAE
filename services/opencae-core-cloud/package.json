@@ -15,12 +15,13 @@
   "devDependencies": {
     "@opencae/examples": "workspace:*",
     "@types/node": "^22.10.5",
+    "esbuild": "^0.27.7",
     "typescript": "^5.7.3"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && esbuild src/server.ts --bundle --platform=node --format=esm --outfile=dist/server.bundle.js --sourcemap",
     "dev": "tsx src/server.ts",
-    "start": "node dist/server.js",
+    "start": "node dist/server.bundle.js",
     "test": "vitest run src/index.test.ts tests/*.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
