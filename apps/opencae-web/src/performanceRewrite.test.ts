@@ -41,7 +41,7 @@ describe("Worker UI performance rewrite boundaries", () => {
   });
 
   test("keeps OpenCAE Core dynamic integration in the Core solver package", () => {
-    expect(coreAdapterSource).toContain("solveDynamicTet4Cpu");
+    expect(coreAdapterSource).toContain("solveDynamicMdofTet4Cpu");
     expect(coreAdapterSource).not.toContain("integrateDynamicFrames");
     expect(coreAdapterSource).not.toContain("function loadScaleAt");
     expect(coreAdapterSource).not.toContain("Newmark");
