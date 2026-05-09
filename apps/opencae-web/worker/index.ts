@@ -228,10 +228,11 @@ async function runCoreCloudSolve(env: Env, runId: string): Promise<void> {
       headers: { "content-type": "application/json" },
       body: JSON.stringify(requestArtifact)
     });
-    const solveResult = await solveResponse.json();
+    const solvePayload = await solveResponse.json();
     if (!solveResponse.ok) {
-      throw new Error(errorMessage(solveResult, "OpenCAE Core Cloud solve failed. No local estimate fallback was used."));
+      throw new Error(errorMessage(solvePayload, "OpenCAE Core Cloud solve failed. No local estimate fallback was used."));
     }
+    const solveResult = coreCloudResultFromPayload(solvePayload);
     validateCoreCloudResult(solveResult, requestArtifact);
     await writeJson(env, resultsKey(runId), solveResult);
     await appendCoreCloudEvent(env, runId, event(runId, "complete", "OpenCAE Core Cloud solve complete.", 100));
@@ -250,6 +251,11 @@ function preflightCoreCloudRequest(request: CoreCloudRunRequest): string | undef
     return "OpenCAE Core Cloud requires a generated OpenCAE Core model or actual Core volume mesh before dispatch. No local estimate fallback was used.";
   }
   return undefined;
+}
+
+function coreCloudResultFromPayload(value: unknown): unknown {
+  if (isRecord(value) && isRecord(value.result)) return value.result;
+  return value;
 }
 
 function validateCoreCloudResult(value: unknown, request: CoreCloudRunRequest): void {

@@ -205,6 +205,27 @@ describe("Cloudflare local-first worker", () => {
     );
   });
 
+  test("unwraps older Core Cloud result envelopes before validation", async () => {
+    const env = createEnv();
+    const ctx = createExecutionContext();
+    containerMock.fetch
+      .mockResolvedValueOnce(Response.json({ ok: true, runnerVersion: expectedRunnerVersion, supportedAnalysisTypes: ["static_stress"] }))
+      .mockResolvedValueOnce(Response.json({ ok: true, runId: "run-envelope", result: coreResult(), diagnostics: [] }));
+
+    const response = await worker.fetch(coreRunRequest({ runId: "run-envelope" }), env, ctx);
+    await ctx.flush();
+
+    expect(response.status).toBe(202);
+    await expect(env.CORE_CLOUD_ARTIFACTS.readJson("cloud-core/runs/run-envelope/results.json")).resolves.toMatchObject({
+      provenance: { solver: "opencae-core-cloud", kind: "opencae_core_fea" },
+      fields: expect.any(Array)
+    });
+    const events = await env.CORE_CLOUD_ARTIFACTS.readJson("cloud-core/runs/run-envelope/events.json");
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "complete", message: "OpenCAE Core Cloud solve complete." })
+    ]));
+  });
+
   test("cloud core run routes expose progress events and stored production results", async () => {
     const env = createEnv();
     const ctx = createExecutionContext();
