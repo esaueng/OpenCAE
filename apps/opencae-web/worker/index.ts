@@ -7,7 +7,7 @@ const jsonHeaders = {
   "cache-control": "no-store"
 };
 
-const EXPECTED_CORE_CLOUD_RUNNER_VERSION = "0.1.0";
+const EXPECTED_CORE_CLOUD_RUNNER_VERSION = "0.1.1";
 const LEGACY_SOLVER_TOKEN = ["calcu", "lix"].join("");
 const INCOMPLETE_CORE_CLOUD_RESULT_MESSAGE = "OpenCAE Core Cloud returned an incomplete result contract.";
 

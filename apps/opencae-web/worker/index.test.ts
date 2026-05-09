@@ -17,7 +17,7 @@ vi.mock("@cloudflare/containers", () => ({
 }));
 
 const { default: worker } = await import("./index");
-const expectedRunnerVersion = "0.1.0";
+const expectedRunnerVersion = "0.1.1";
 const expectedContainerInstanceName = `opencae-core-cloud-${expectedRunnerVersion}`;
 
 function readJsonc(path: string) {
@@ -130,8 +130,8 @@ describe("Cloudflare local-first worker", () => {
       ok: true,
       service: "opencae-core-cloud",
       runnerVersion: expectedRunnerVersion,
-      coreVersion: "0.1.0",
-      solverCpuVersion: "0.1.0",
+      coreVersion: "0.1.1",
+      solverCpuVersion: "0.1.1",
       supportedAnalysisTypes: ["static_stress", "dynamic_structural"],
       supportedSolverMethods: ["sparse_static", "mdof_dynamic"]
     }));
@@ -145,8 +145,8 @@ describe("Cloudflare local-first worker", () => {
       coreCloudAvailable: true,
       containerBound: true,
       containerRunnerVersion: expectedRunnerVersion,
-      coreVersion: "0.1.0",
-      solverCpuVersion: "0.1.0",
+      coreVersion: "0.1.1",
+      solverCpuVersion: "0.1.1",
       supportedAnalysisTypes: ["static_stress", "dynamic_structural"],
       supportedSolverMethods: ["sparse_static", "mdof_dynamic"],
       solver: "opencae-core-cloud",

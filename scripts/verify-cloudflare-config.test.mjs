@@ -4,7 +4,7 @@ import { describe, expect, test } from "vitest";
 import { parseJsonc, validateCloudflareConfigs } from "./verify-cloudflare-config.mjs";
 
 const rootDir = resolve(import.meta.dirname, "..");
-const expectedRunnerVersion = "0.1.0";
+const expectedRunnerVersion = "0.1.1";
 const expectedContainerInstanceName = `opencae-core-cloud-${expectedRunnerVersion}`;
 
 function readConfig(path) {
