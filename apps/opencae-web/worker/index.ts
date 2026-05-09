@@ -9,6 +9,7 @@ const jsonHeaders = {
 
 const EXPECTED_CORE_CLOUD_RUNNER_VERSION = "0.1.0";
 const LEGACY_SOLVER_TOKEN = ["calcu", "lix"].join("");
+const INCOMPLETE_CORE_CLOUD_RESULT_MESSAGE = "OpenCAE Core Cloud returned an incomplete result contract.";
 
 const cloudCoreUnavailable = {
   ok: false,
@@ -255,6 +256,7 @@ function validateCoreCloudResult(value: unknown, request: CoreCloudRunRequest): 
   if (!isRecord(value)) throw new Error("OpenCAE Core Cloud result must be an object.");
   const allProvenance = [
     value.provenance,
+    isRecord(value.summary) ? value.summary.provenance : undefined,
     ...(Array.isArray(value.fields) ? value.fields.map((field) => isRecord(field) ? field.provenance : undefined) : [])
   ].filter(isRecord);
   const serializedProvenance = JSON.stringify(allProvenance);
@@ -268,12 +270,54 @@ function validateCoreCloudResult(value: unknown, request: CoreCloudRunRequest): 
   if (!Array.isArray(value.fields) || value.fields.length === 0) {
     throw new Error("OpenCAE Core Cloud result fields cannot be empty.");
   }
+  if (isIncompleteCoreCloudContract(value, request, allProvenance)) {
+    throw new Error(INCOMPLETE_CORE_CLOUD_RESULT_MESSAGE);
+  }
   if (analysisTypeFor(request) === "dynamic_structural" && !value.fields.some((field) => isRecord(field) && Number.isInteger(field.frameIndex) && Number.isFinite(field.timeSeconds))) {
     throw new Error("OpenCAE Core Cloud dynamic results must include frame metadata.");
   }
   if (hasNonzeroLoad(request) && !hasValidReactionForce(value) && !hasReactionUnavailableDiagnostic(value)) {
     throw new Error("OpenCAE Core Cloud result reaction force is invalid for a nonzero load.");
   }
+}
+
+function isIncompleteCoreCloudContract(
+  result: Record<string, unknown>,
+  request: CoreCloudRunRequest,
+  allProvenance: Record<string, unknown>[]
+): boolean {
+  const summary = isRecord(result.summary) ? result.summary : undefined;
+  if (!summary || !isRecord(summary.provenance)) return true;
+  if (!hasText(summary.maxStressUnits) || !hasText(summary.maxDisplacementUnits) || !hasText(summary.reactionForceUnits)) return true;
+  if (!Array.isArray(result.fields) || result.fields.some((field) => !isRecord(field) || !hasText(field.units))) return true;
+  const summaryProvenance = summary.provenance;
+  if (summaryProvenance.resultSource !== "computed") return true;
+  if (!isApprovedCoreCloudSolver(summaryProvenance.solver)) return true;
+  if (!hasText(summaryProvenance.meshSource)) return true;
+  if (allProvenance.some((provenance) => provenance.resultSource !== "computed" || !isApprovedCoreCloudSolver(provenance.solver) || !hasText(provenance.meshSource))) return true;
+  if (hasNonzeroLoad(request) && numberOr(summary.maxDisplacement, 0) === 0) {
+    const displacementFields = result.fields.filter((field): field is Record<string, unknown> => isRecord(field) && field.type === "displacement");
+    if (
+      displacementFields.length === 0 ||
+      displacementFields.some((field) => !Array.isArray(field.values)) ||
+      displacementFields.some((field) => Array.isArray(field.values) && field.values.some((value) => typeof value === "number" && Number.isFinite(value) && Math.abs(value) > 1e-12))
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isApprovedCoreCloudSolver(value: unknown): boolean {
+  return value === "opencae-core-cloud" || value === "opencae-core-sparse-tet" || value === "opencae-core-mdof-tet";
+}
+
+function hasText(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0;
+}
+
+function numberOr(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
 function hasCoreCloudBindings(env: Env): boolean {

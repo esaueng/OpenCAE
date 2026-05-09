@@ -293,6 +293,36 @@ describe("Cloudflare local-first worker", () => {
     });
   });
 
+  test("rejects incomplete Core Cloud result contracts before storing results", async () => {
+    const env = createEnv();
+    const ctx = createExecutionContext();
+    containerMock.fetch
+      .mockResolvedValueOnce(Response.json({ ok: true, runnerVersion: expectedRunnerVersion }))
+      .mockResolvedValueOnce(Response.json(coreResult({
+        summary: {
+          provenance: undefined,
+          maxStressUnits: undefined,
+          maxDisplacementUnits: undefined,
+          reactionForceUnits: undefined
+        },
+        fields: [
+          { id: "stress", type: "stress", location: "element", values: [123], min: 123, max: 123, units: undefined }
+        ]
+      })));
+
+    await worker.fetch(coreRunRequest({ runId: "run-incomplete" }), env, ctx);
+    await ctx.flush();
+
+    const events = await env.CORE_CLOUD_ARTIFACTS.readJson("cloud-core/runs/run-incomplete/events.json");
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: "error",
+        message: "OpenCAE Core Cloud returned an incomplete result contract."
+      })
+    ]));
+    expect(await env.CORE_CLOUD_ARTIFACTS.get("cloud-core/runs/run-incomplete/results.json")).toBeNull();
+  });
+
   test("legacy and preview provenance are rejected", async () => {
     const calculixEnv = createEnv();
     const calculixCtx = createExecutionContext();
@@ -350,12 +380,24 @@ function coreRunRequest(options: { runId: string; path?: string; analysisType?: 
 }
 
 function coreResult(overrides: { summary?: Record<string, unknown>; fields?: Array<Record<string, unknown>>; provenance?: Record<string, unknown>; diagnostics?: Array<Record<string, unknown>> } = {}) {
+  const provenance = {
+    kind: "opencae_core_fea",
+    solver: "opencae-core-cloud",
+    resultSource: "computed",
+    meshSource: "actual_volume_mesh",
+    units: "mm-N-s-MPa",
+    ...overrides.provenance
+  };
   return {
     summary: {
       maxStress: 123,
+      maxStressUnits: "MPa",
       maxDisplacement: 0.002,
+      maxDisplacementUnits: "mm",
       safetyFactor: 2.1,
       reactionForce: 100,
+      reactionForceUnits: "N",
+      provenance,
       ...overrides.summary
     },
     fields: overrides.fields ?? [
@@ -364,14 +406,7 @@ function coreResult(overrides: { summary?: Record<string, unknown>; fields?: Arr
     ],
     surfaceMesh: { id: "surface", nodes: [[0, 0, 0]], triangles: [], coordinateSpace: "solver", source: "opencae_core_volume_mesh" },
     diagnostics: overrides.diagnostics ?? [],
-    provenance: {
-      kind: "opencae_core_fea",
-      solver: "opencae-core-cloud",
-      resultSource: "computed",
-      meshSource: "actual_volume_mesh",
-      units: "m-N-s-Pa",
-      ...overrides.provenance
-    }
+    provenance
   };
 }
 
