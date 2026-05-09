@@ -53,7 +53,19 @@ describe("OpenCAE Core Cloud service", () => {
     expect(body.summary.maxStress).toBeGreaterThan(0);
     expect(body.summary.maxDisplacement).toBeGreaterThan(0);
     expect(body.summary.reactionForce).toBeGreaterThan(0);
+    expect(body.summary).toMatchObject({
+      maxStressUnits: "MPa",
+      maxDisplacementUnits: "mm",
+      reactionForceUnits: "N",
+      provenance: {
+        kind: "opencae_core_fea",
+        solver: "opencae-core-cloud",
+        resultSource: "computed",
+        meshSource: "actual_volume_mesh"
+      }
+    });
     expect(body.fields.length).toBeGreaterThan(0);
+    expect(body.fields.every((field: { units?: string }) => typeof field.units === "string" && field.units.length > 0)).toBe(true);
     expect(body.surfaceMesh.nodes.length).toBeGreaterThan(0);
     expect(body.provenance).toMatchObject({
       kind: "opencae_core_fea",
@@ -61,6 +73,35 @@ describe("OpenCAE Core Cloud service", () => {
       resultSource: "computed",
       meshSource: "actual_volume_mesh"
     });
+    expect(JSON.stringify(body)).not.toContain("undefined");
+  });
+
+  test("normalizes app-facing values and keeps compacted values aligned with samples", async () => {
+    const response = await solve({
+      runId: "run-static-compacted",
+      analysisType: "static_stress",
+      coreModel: blockModel("static_stress"),
+      resultSettings: { maxFieldValues: 2 }
+    });
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    const displacement = body.fields.find((field: { type: string }) => field.type === "displacement");
+
+    expect(body.summary.maxStressUnits).toBe("MPa");
+    expect(body.summary.maxDisplacementUnits).toBe("mm");
+    expect(body.summary.reactionForceUnits).toBe("N");
+    expect(displacement.values).toHaveLength(2);
+    expect(displacement.samples).toHaveLength(2);
+    expect(displacement.compaction).toMatchObject({
+      originalValueCount: expect.any(Number),
+      returnedValueCount: 2,
+      originalSampleCount: expect.any(Number),
+      returnedSampleCount: 2
+    });
+    expect(displacement.samples.every((sample: { value: number; vector?: number[] }) =>
+      Number.isFinite(sample.value) && (!sample.vector || sample.vector.every(Number.isFinite))
+    )).toBe(true);
   });
 
   test("solves a dynamic Core block model with MDOF fields", async () => {

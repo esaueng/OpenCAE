@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test, vi } from "vitest";
 import { bracketDisplayModel } from "@opencae/db/sample-data";
-import type { DisplayModel, Project, ResultSummary, Study } from "@opencae/schema";
+import type { DisplayModel, Project, ResultField, ResultSummary, Study } from "@opencae/schema";
 import { editableNumberCommitValue, playbackPeakMarkerPercent, RightPanel, rangeProgressPercent } from "./RightPanel";
 import type { StepId } from "./StepBar";
 
@@ -154,6 +154,34 @@ describe("RightPanel payload mass controls", () => {
     expect(coreHtml).toContain("cloud container");
     expect(coreHtml).toContain("Local fallback");
     expect(coreHtml).toContain("none");
+  });
+
+  test("renders a missing-unit diagnostic instead of undefined result units", () => {
+    const html = renderPanel("results", {
+      resultSummary: {
+        ...resultSummary,
+        maxStress: 39,
+        maxStressUnits: undefined,
+        maxDisplacement: 0.5,
+        maxDisplacementUnits: undefined,
+        reactionForce: 500,
+        reactionForceUnits: undefined
+      } as unknown as ResultSummary,
+      resultFields: [{
+        id: "field-stress",
+        runId: "run-missing-units",
+        type: "stress",
+        location: "element",
+        values: [39],
+        min: 39,
+        max: 39,
+        units: undefined
+      } as unknown as ResultField]
+    });
+
+    expect(html).toContain("Unit missing");
+    expect(html).not.toContain("undefined");
+    expect(html).not.toContain("Max total load");
   });
 
   test("shows legacy cloud results as read-only historical provenance", () => {
