@@ -63,6 +63,18 @@ describe("Cloudflare deployment config guard", () => {
     expect(verifyRunnerSource).toContain("services/opencae-core-cloud/RUNNER_VERSION");
   });
 
+  test("Core Cloud build pins the external OpenCAE Core ref", () => {
+    const coreRefPath = resolve(rootDir, "services/opencae-core-cloud/OPENCAE_CORE_REF");
+    const coreRef = readFileSync(coreRefPath, "utf8").trim();
+    const ensureCoreSource = readFileSync(resolve(rootDir, "scripts/ensure-opencae-core.mjs"), "utf8");
+
+    expect(coreRef).toMatch(/^[0-9a-f]{40}$/);
+    expect(ensureCoreSource).toContain("OPENCAE_CORE_REF");
+    expect(ensureCoreSource).toContain("services/opencae-core-cloud/OPENCAE_CORE_REF");
+    expect(ensureCoreSource).toContain("checkout");
+    expect(ensureCoreSource).toContain("FETCH_HEAD");
+  });
+
   test("Core Cloud Docker build installs git before cloning Core", () => {
     const dockerfile = readFileSync(resolve(rootDir, "services/opencae-core-cloud/Dockerfile"), "utf8");
     const installGitIndex = dockerfile.indexOf("apt-get install -y --no-install-recommends git");
