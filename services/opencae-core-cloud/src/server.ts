@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { handleRequest } from "./index";
+import { handleRequest } from "./index.js";
 
 const port = Number(process.env.PORT ?? 8080);
 
