@@ -1,8 +1,8 @@
 import { describe, expect, test } from "vitest";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import type { OpenCAEModelJson } from "@opencae/core";
-import { handleRequest } from "./index";
+import { solverSurfaceMeshFromModel, type OpenCAEModelJson } from "@opencae/core";
+import { handleRequest, normalizeCoreCloudResultForUi } from "./index";
 
 describe("OpenCAE Core Cloud service", () => {
   test("defines runner version in the service version file", () => {
@@ -31,8 +31,8 @@ describe("OpenCAE Core Cloud service", () => {
       ok: true,
       service: "opencae-core-cloud",
       runnerVersion,
-      coreVersion: "0.1.1",
-      solverCpuVersion: "0.1.1",
+      coreVersion: "0.1.2",
+      solverCpuVersion: "0.1.2",
       supportedAnalysisTypes: ["static_stress", "dynamic_structural"],
       supportedSolvers: ["sparse_static", "mdof_dynamic"],
       supportedSolverMethods: ["sparse_static", "mdof_dynamic"],
@@ -78,7 +78,7 @@ describe("OpenCAE Core Cloud service", () => {
     expect(JSON.stringify(body)).not.toContain("undefined");
   });
 
-  test("normalizes app-facing values and keeps compacted values aligned with samples", async () => {
+  test("normalizes app-facing values and does not compact solver surface fields independently", async () => {
     const response = await solve({
       runId: "run-static-compacted",
       analysisType: "static_stress",
@@ -89,21 +89,48 @@ describe("OpenCAE Core Cloud service", () => {
     expect(response.status).toBe(200);
     const body = await response.json();
     const displacement = body.fields.find((field: { type: string }) => field.type === "displacement");
+    const stress = body.fields.find((field: { type: string }) => field.type === "stress");
 
     expect(body.summary.maxStressUnits).toBe("MPa");
     expect(body.summary.maxDisplacementUnits).toBe("mm");
     expect(body.summary.reactionForceUnits).toBe("N");
-    expect(displacement.values).toHaveLength(2);
-    expect(displacement.samples).toHaveLength(2);
+    expect(displacement.surfaceMeshRef).toBe(body.surfaceMesh.id);
+    expect(displacement.values).toHaveLength(body.surfaceMesh.nodes.length);
+    expect(displacement.vectors).toHaveLength(body.surfaceMesh.nodes.length);
+    expect(displacement.samples).toBeUndefined();
+    expect(stress.surfaceMeshRef).toBe(body.surfaceMesh.id);
+    expect(stress.values).toHaveLength(body.surfaceMesh.nodes.length);
+    expect(stress.samples).toBeUndefined();
     expect(displacement.compaction).toMatchObject({
       originalValueCount: expect.any(Number),
-      returnedValueCount: 2,
+      returnedValueCount: body.surfaceMesh.nodes.length,
       originalSampleCount: expect.any(Number),
-      returnedSampleCount: 2
+      returnedSampleCount: 0
     });
-    expect(displacement.samples.every((sample: { value: number; vector?: number[] }) =>
-      Number.isFinite(sample.value) && (!sample.vector || sample.vector.every(Number.isFinite))
-    )).toBe(true);
+    expect(displacement.vectors.every((vector: number[]) => vector.every(Number.isFinite))).toBe(true);
+  });
+
+  test("rejects solver surface fields with mismatched value length and has no modulo node fallback", () => {
+    const model = blockModel("static_stress");
+    const surfaceMesh = solverSurfaceMeshFromModel(model);
+    const source = readFileSync(resolve(__dirname, "index.ts"), "utf8");
+
+    expect(() => normalizeCoreCloudResultForUi({
+      summary: { maxStress: 1, maxStressUnits: "MPa", maxDisplacement: 1, maxDisplacementUnits: "mm", safetyFactor: 1, reactionForce: 1, reactionForceUnits: "N" },
+      fields: [{
+        id: "stress-surface",
+        type: "stress",
+        location: "node",
+        values: [1],
+        min: 1,
+        max: 1,
+        units: "MPa",
+        surfaceMeshRef: surfaceMesh.id
+      }],
+      surfaceMesh,
+      provenance: { kind: "opencae_core_fea", solver: "opencae-core-cloud", resultSource: "computed", meshSource: "actual_volume_mesh", units: "mm-N-s-MPa" }
+    })).toThrow(/does not match solver surface node count/i);
+    expect(source).not.toMatch(/nodes\s*\[\s*index\s*%/);
   });
 
   test("solves a dynamic Core block model with MDOF fields", async () => {

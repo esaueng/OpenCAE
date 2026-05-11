@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { describe, expect, test, vi } from "vitest";
-import { VIEWER_AXIS_HEAD_RADIUS, VIEWER_AXIS_LABEL_BADGE_COLOR, VIEWER_AXIS_LABEL_BADGE_RADIUS, VIEWER_AXIS_LABEL_COLOR, VIEWER_AXIS_LABEL_FONT_SIZE, VIEWER_AXIS_LABEL_FONT_WEIGHT, VIEWER_AXIS_LABEL_OUTLINE_COLOR, VIEWER_AXIS_LABEL_OUTLINE_WIDTH, VIEWER_CREDIT_URL, VIEWER_GIZMO_ALIGNMENT, VIEWER_GIZMO_AXIS_LENGTH, VIEWER_GIZMO_LABEL_DISTANCE, VIEWER_GIZMO_MARGIN, VIEWER_GIZMO_SCALE, VIEWER_ISOMETRIC_GIZMO_VIEW, VIEWER_VIEW_CUBE_BODY_OPACITY, VIEWER_VIEW_CUBE_CORNER_HIT_RADIUS, VIEWER_VIEW_CUBE_CORNER_RADIUS, VIEWER_VIEW_CUBE_EDGE_COLOR, VIEWER_VIEW_CUBE_FACE_HOVER_OPACITY, VIEWER_VIEW_CUBE_FACE_LABEL_FONT_SIZE, VIEWER_VIEW_CUBE_FACE_OPACITY, VIEWER_VIEW_CUBE_SIZE, applyResultFrameToGeometry, axisLabelToViewAxis, beamDemoDisplacementAtStation, beamDemoPayloadOffset, beamDemoStationForPoint, cameraDistanceForBounds, cameraViewForAxis, cloneResultPreviewObject, colorizeResultObject, colorizeSampleResultGeometry, createBeamDemoCoordinate, createUndeformedResultOutlineObject, defaultHomeViewTarget, deformationScaleForResultFields, displayedLegendTickLabels, finalVisualScaleForDisplacementField, getViewCubeCornerDescriptors, getViewCubeFaceDescriptors, gizmoViewTargetToRequest, interpolateDisplacementAtPoint, legendMeshStats, legendTickLabels, normalizedPointLoadCantileverShape, payloadHighlightObjectId, pointLoadCantileverShape, printLayerVisualizationForBounds, resultLegendContentScale, resultLegendResizeDimensions, resultProbesForKind, resultValueForPoint, rotatedCameraOrbit, shouldDisableResultDeformation, shouldShowDimensionOverlay, shouldShowModelHitLabel, shouldShowResultMarkers, shouldShowUndeformedResultOutline, shouldShowViewCubeFaceLabel, updatePackedSamples, viewCubeFaceToGizmoView, viewerCameraResetPose, viewerGizmoLayout } from "./CadViewer";
+import { VIEWER_AXIS_HEAD_RADIUS, VIEWER_AXIS_LABEL_BADGE_COLOR, VIEWER_AXIS_LABEL_BADGE_RADIUS, VIEWER_AXIS_LABEL_COLOR, VIEWER_AXIS_LABEL_FONT_SIZE, VIEWER_AXIS_LABEL_FONT_WEIGHT, VIEWER_AXIS_LABEL_OUTLINE_COLOR, VIEWER_AXIS_LABEL_OUTLINE_WIDTH, VIEWER_CREDIT_URL, VIEWER_GIZMO_ALIGNMENT, VIEWER_GIZMO_AXIS_LENGTH, VIEWER_GIZMO_LABEL_DISTANCE, VIEWER_GIZMO_MARGIN, VIEWER_GIZMO_SCALE, VIEWER_ISOMETRIC_GIZMO_VIEW, VIEWER_VIEW_CUBE_BODY_OPACITY, VIEWER_VIEW_CUBE_CORNER_HIT_RADIUS, VIEWER_VIEW_CUBE_CORNER_RADIUS, VIEWER_VIEW_CUBE_EDGE_COLOR, VIEWER_VIEW_CUBE_FACE_HOVER_OPACITY, VIEWER_VIEW_CUBE_FACE_LABEL_FONT_SIZE, VIEWER_VIEW_CUBE_FACE_OPACITY, VIEWER_VIEW_CUBE_SIZE, applyResultFrameToGeometry, axisLabelToViewAxis, beamDemoDisplacementAtStation, beamDemoPayloadOffset, beamDemoStationForPoint, buildSolverSurfaceResultGeometry, cameraDistanceForBounds, cameraViewForAxis, cloneResultPreviewObject, colorizeResultObject, colorizeSampleResultGeometry, createBeamDemoCoordinate, createUndeformedResultOutlineObject, defaultHomeViewTarget, deformationScaleForResultFields, displayedLegendTickLabels, finalVisualScaleForDisplacementField, getViewCubeCornerDescriptors, getViewCubeFaceDescriptors, gizmoViewTargetToRequest, interpolateDisplacementAtPoint, legendMeshStats, legendTickLabels, normalizedPointLoadCantileverShape, payloadHighlightObjectId, pointLoadCantileverShape, printLayerVisualizationForBounds, resultLegendContentScale, resultLegendResizeDimensions, resultProbesForKind, resultValueForPoint, rotatedCameraOrbit, shouldDisableResultDeformation, shouldShowDimensionOverlay, shouldShowModelHitLabel, shouldShowResultMarkers, shouldShowUndeformedResultOutline, shouldShowViewCubeFaceLabel, updatePackedSamples, viewCubeFaceToGizmoView, viewerCameraResetPose, viewerGizmoLayout } from "./CadViewer";
 import type { FaceResultSample } from "../resultFields";
 import type { DisplayFace, DisplayModel, ResultField } from "@opencae/schema";
 import type { PackedPreparedPlaybackCache } from "../resultPlaybackCache";
@@ -58,6 +58,67 @@ describe("CadViewer result coloring", () => {
     };
 
     expect(shouldDisableResultDeformation(bracketLikeDisplayModel, [previewField])).toBe(true);
+  });
+
+  test("builds solver-surface result geometry with direct vertex colors and vectors by index", () => {
+    resetVertexResultMappingStatsForTests();
+    const surfaceMesh = {
+      id: "solver-surface",
+      nodes: [
+        [0, 0, 0],
+        [1, 0, 0],
+        [0, 1, 0],
+        [0, 0, 1]
+      ] as [number, number, number][],
+      triangles: [[0, 1, 2], [0, 2, 3]] as [number, number, number][],
+      nodeMap: [0, 1, 2, 3]
+    };
+    const stressField: ResultField = {
+      id: "stress-surface",
+      runId: "run-surface",
+      type: "stress",
+      location: "node",
+      values: [0, 10, 20, 30],
+      min: 0,
+      max: 30,
+      units: "MPa",
+      surfaceMeshRef: "solver-surface"
+    };
+    const displacementField: ResultField = {
+      id: "displacement-surface",
+      runId: "run-surface",
+      type: "displacement",
+      location: "node",
+      values: [0.1, 0, 0, 0],
+      vectors: [[0, 0, 0.1], [0, 0, 0], [0, 0, 0], [0, 0, 0]],
+      min: 0,
+      max: 0.1,
+      units: "mm",
+      surfaceMeshRef: "solver-surface"
+    };
+
+    const geometry = buildSolverSurfaceResultGeometry({
+      surfaceMesh,
+      scalarField: stressField,
+      displacementField,
+      resultMode: "stress",
+      showDeformed: true,
+      deformationScale: 1
+    });
+    const position = geometry.getAttribute("position") as THREE.BufferAttribute;
+    const color = geometry.getAttribute("color") as THREE.BufferAttribute;
+    const minColor = new THREE.Color("#0759d6");
+    const maxColor = new THREE.Color("#ef4444");
+
+    expect(vertexResultMappingBuildCountForTests()).toBe(0);
+    expect(geometry.index?.array).toEqual(new Uint32Array([0, 1, 2, 0, 2, 3]));
+    expect(position.getZ(0)).toBeGreaterThan(0);
+    expect(color.getX(0)).toBeCloseTo(minColor.r, 5);
+    expect(color.getY(0)).toBeCloseTo(minColor.g, 5);
+    expect(color.getZ(0)).toBeCloseTo(minColor.b, 5);
+    expect(color.getX(3)).toBeCloseTo(maxColor.r, 5);
+    expect(color.getY(3)).toBeCloseTo(maxColor.g, 5);
+    expect(color.getZ(3)).toBeCloseTo(maxColor.b, 5);
   });
 
   test("positions the viewer XYZ axes in the bottom-right corner", () => {
