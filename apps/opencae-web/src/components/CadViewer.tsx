@@ -22,6 +22,7 @@ import { loadMarkerViewportPresentation, type PayloadObjectSelection } from "../
 import { highlightPayloadObjectMeshes } from "../payloadObjectHighlight";
 import { layoutOutsideModelLabels, payloadMassLabelOffset, type LabelAnchor } from "../calloutLabelLayout";
 import { getSnapSuggestion } from "../snapping/snapController";
+import type { SolverSurfaceMesh } from "../projectFile";
 import { isSnapOverlayObject, SnapVisualization } from "../snapping/Visualization";
 import type { CursorRay, FaceSnapAxis, SnapMeasurement, SnapResult, Vec3 } from "../snapping/types";
 
@@ -78,6 +79,7 @@ interface CadViewerProps {
   showDimensions: boolean;
   stressExaggeration: number;
   resultFields: ResultField[];
+  surfaceMesh?: SolverSurfaceMesh;
   resultPlaybackBufferCache?: PackedPreparedPlaybackCache | null;
   resultPlaybackFrameController?: ResultPlaybackFrameController;
   meshSummary?: MeshSummary;
@@ -221,6 +223,7 @@ export function CadViewer(props: CadViewerProps) {
   const baseModelRotation = useMemo(() => baseModelRotationRadians(props.displayModel), [props.displayModel]);
   const resultFields = props.resultFields;
   const effectiveShowDeformed = props.showDeformed && !shouldDisableResultDeformation(props.displayModel, resultFields);
+  const solverSurfaceResult = solverSurfaceResultFields(props.surfaceMesh, resultFields, props.resultMode);
   const viewerStatsEnabled = isViewerRendererStatsEnabled();
   const handleViewerInteractionChange = (interacting: boolean) => {
     setViewerInteracting(interacting);
@@ -267,7 +270,18 @@ export function CadViewer(props: CadViewerProps) {
         <Bounds fit clip observe={!props.resultPlaybackPlaying} margin={VIEWER_FIT_MARGIN}>
           <group rotation={modelRotation}>
             <group rotation={baseModelRotation}>
-              <BracketModel {...props} showDeformed={effectiveShowDeformed} resultFields={resultFields} viewMode={effectiveViewMode} uploadedPreviewBounds={uploadedPreviewBounds} onUploadedPreviewBounds={setUploadedPreviewBounds} />
+              {effectiveViewMode === "results" && solverSurfaceResult ? (
+                <SolverSurfaceResultMesh
+                  surfaceMesh={props.surfaceMesh!}
+                  scalarField={solverSurfaceResult.scalarField}
+                  displacementField={solverSurfaceResult.displacementField}
+                  resultMode={props.resultMode}
+                  showDeformed={effectiveShowDeformed}
+                  deformationScale={props.stressExaggeration}
+                />
+              ) : (
+                <BracketModel {...props} showDeformed={effectiveShowDeformed} resultFields={resultFields} viewMode={effectiveViewMode} uploadedPreviewBounds={uploadedPreviewBounds} onUploadedPreviewBounds={setUploadedPreviewBounds} />
+              )}
               {showDimensionOverlay && <ModelDimensionOverlay displayModel={props.displayModel} uploadedPreviewBounds={uploadedPreviewBounds} />}
             </group>
           </group>
@@ -2389,6 +2403,130 @@ export function shouldDisableResultDeformation(displayModel: DisplayModel, resul
   return shouldBlockPreviewResultsForDisplayModel(displayModel, undefined, resultFields);
 }
 
+type SolverSurfaceResultFields = {
+  scalarField: ResultField;
+  displacementField?: ResultField;
+};
+
+function solverSurfaceResultFields(surfaceMesh: SolverSurfaceMesh | undefined, fields: ResultField[], resultMode: ResultMode): SolverSurfaceResultFields | null {
+  if (!surfaceMesh || !surfaceMesh.nodes.length || !surfaceMesh.triangles.length) return null;
+  const scalarField = fields.find((field) => isSolverSurfaceNodeField(field, surfaceMesh, resultMode));
+  if (!scalarField) return null;
+  const displacementField = fields.find((field) => isSolverSurfaceNodeField(field, surfaceMesh, "displacement"));
+  return { scalarField, displacementField };
+}
+
+function isSolverSurfaceNodeField(field: ResultField, surfaceMesh: SolverSurfaceMesh, resultMode: ResultMode): boolean {
+  return (
+    field.type === resultMode &&
+    field.location === "node" &&
+    field.surfaceMeshRef === surfaceMesh.id &&
+    field.values.length === surfaceMesh.nodes.length
+  );
+}
+
+function SolverSurfaceResultMesh({
+  surfaceMesh,
+  scalarField,
+  displacementField,
+  resultMode,
+  showDeformed,
+  deformationScale
+}: {
+  surfaceMesh: SolverSurfaceMesh;
+  scalarField: ResultField;
+  displacementField?: ResultField;
+  resultMode: ResultMode;
+  showDeformed: boolean;
+  deformationScale: number;
+}) {
+  const geometry = useMemo(
+    () => buildSolverSurfaceResultGeometry({ surfaceMesh, scalarField, displacementField, resultMode, showDeformed, deformationScale }),
+    [deformationScale, displacementField, resultMode, scalarField, showDeformed, surfaceMesh]
+  );
+  return (
+    <mesh geometry={geometry}>
+      <meshStandardMaterial vertexColors metalness={0.18} roughness={0.52} side={THREE.DoubleSide} />
+      <Edges color="#43556a" threshold={18} />
+    </mesh>
+  );
+}
+
+export function buildSolverSurfaceResultGeometry({
+  surfaceMesh,
+  scalarField,
+  displacementField,
+  resultMode,
+  showDeformed,
+  deformationScale
+}: {
+  surfaceMesh: SolverSurfaceMesh;
+  scalarField: ResultField;
+  displacementField?: ResultField;
+  resultMode: ResultMode;
+  showDeformed: boolean;
+  deformationScale: number;
+}): THREE.BufferGeometry {
+  assertSolverSurfaceRenderInputs(surfaceMesh, scalarField, displacementField);
+  const positions = new Float32Array(surfaceMesh.nodes.length * 3);
+  const colors = new Float32Array(surfaceMesh.nodes.length * 3);
+  const baseBounds = new THREE.Box3();
+  for (const node of surfaceMesh.nodes) baseBounds.expandByPoint(new THREE.Vector3(...node));
+  const modelExtent = baseBounds.isEmpty() ? 1 : baseBounds.getSize(new THREE.Vector3()).length();
+  const visualScale = showDeformed && displacementField?.vectors?.length
+    ? finalVisualScaleForDisplacementField(modelExtent, displacementField, deformationScale).finalVisualScale
+    : 0;
+
+  for (let index = 0; index < surfaceMesh.nodes.length; index += 1) {
+    const node = surfaceMesh.nodes[index]!;
+    const vector = displacementField?.vectors?.[index] ?? [0, 0, 0];
+    const offset = index * 3;
+    positions[offset] = node[0] + vector[0] * visualScale;
+    positions[offset + 1] = node[1] + vector[1] * visualScale;
+    positions[offset + 2] = node[2] + vector[2] * visualScale;
+    const normalized = normalizeScalarValueForResultRender(scalarField.values[index] ?? 0, scalarField);
+    writeResultColorForValue(colors, offset, resultMode, normalized);
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+  geometry.setIndex(new THREE.BufferAttribute(new Uint32Array(surfaceMesh.triangles.flat()), 1));
+  geometry.computeVertexNormals();
+  geometry.computeBoundingSphere();
+  geometry.userData.opencaeSolverSurfaceDirect = true;
+  geometry.userData.opencaeSolverSurfaceMeshId = surfaceMesh.id;
+  geometry.userData.opencaeSolverSurfaceFieldId = scalarField.id;
+  return geometry;
+}
+
+function assertSolverSurfaceRenderInputs(
+  surfaceMesh: SolverSurfaceMesh,
+  scalarField: ResultField,
+  displacementField: ResultField | undefined
+): void {
+  if (!surfaceMesh.nodes.length) throw new Error("Solver surface mesh has no nodes.");
+  if (!surfaceMesh.triangles.length) throw new Error("Solver surface mesh has no triangles.");
+  if (scalarField.location !== "node" || scalarField.surfaceMeshRef !== surfaceMesh.id || scalarField.values.length !== surfaceMesh.nodes.length) {
+    throw new Error("Solver surface scalar field is not aligned to surface mesh nodes.");
+  }
+  if (displacementField) {
+    if (displacementField.location !== "node" || displacementField.surfaceMeshRef !== surfaceMesh.id || displacementField.values.length !== surfaceMesh.nodes.length) {
+      throw new Error("Solver surface displacement field is not aligned to surface mesh nodes.");
+    }
+    if (displacementField.vectors && displacementField.vectors.length !== surfaceMesh.nodes.length) {
+      throw new Error("Solver surface displacement vectors are not aligned to surface mesh nodes.");
+    }
+  }
+  for (const triangle of surfaceMesh.triangles) {
+    for (const index of triangle) {
+      if (!Number.isInteger(index) || index < 0 || index >= surfaceMesh.nodes.length) {
+        throw new Error("Solver surface triangle references a missing surface node.");
+      }
+    }
+  }
+}
+
 function UndeformedGeometryOutline({ geometry, position }: { geometry: THREE.BufferGeometry; position?: [number, number, number] }) {
   const edgeGeometry = useMemo(() => new THREE.EdgesGeometry(geometry, 18), [geometry]);
 
@@ -3092,6 +3230,7 @@ function maxDisplacementMagnitude(field: ResultField | undefined): number {
     Math.abs(Number(field.max)),
     Math.abs(Number(field.min)),
     ...field.values.map((value) => Math.abs(value)),
+    ...(field.vectors?.map((vector) => Math.hypot(...vector)) ?? []),
     ...(field.samples?.map((sample) => Math.abs(sample.value)) ?? []),
     ...(field.samples?.map((sample) => sample.vector ? Math.hypot(...sample.vector) : 0) ?? [])
   ].filter(Number.isFinite);

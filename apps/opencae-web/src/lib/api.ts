@@ -1,6 +1,6 @@
 import type { AnalysisMesh, DisplayModel, DynamicSolverSettings, MeshQuality, Project, ResultField, ResultRenderBounds, ResultSummary, RunEvent, Study, StudyRun } from "@opencae/schema";
 import type { LoadApplicationPoint, LoadDirection, LoadType, PayloadLoadMetadata, PayloadObjectSelection } from "../loadPreview";
-import { embedUploadedModelFile, type EmbeddedModelFile, type LocalResultBundle } from "../projectFile";
+import { embedUploadedModelFile, type EmbeddedModelFile, type LocalResultBundle, type SolverSurfaceMesh } from "../projectFile";
 import { createLocalBlankProject, createLocalSampleProject, createLocalUploadResponse, openLocalProjectPayload } from "../localProjectFactory";
 import { solveLocalStudyInWorker } from "../workers/performanceClient";
 import { buildOpenCaeCoreCloudModelForStudy, hasActualCoreVolumeMesh, normalizeSolverBackend, openCaeCoreEligibility, trySolveOpenCaeCoreStudy, type NormalizedBrowserSolverBackend } from "../workers/opencaeCoreSolve";
@@ -18,6 +18,7 @@ export type SampleAnalysisType = "static_stress" | "dynamic_structural";
 export interface ResultsResponse {
   summary: ResultSummary;
   fields: ResultField[];
+  surfaceMesh?: SolverSurfaceMesh;
 }
 
 export interface RunSimulationOptions {

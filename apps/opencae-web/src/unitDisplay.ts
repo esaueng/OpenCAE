@@ -91,6 +91,7 @@ export function resultFieldForUnits(field: ResultField, unitSystem: UnitSystem):
     min: roundDisplayValue(convertedMin.value),
     max: roundDisplayValue(convertedMax.value),
     units: convertedMax.units,
+    vectors: field.vectors?.map((vector) => vector.map((component) => roundDisplayValue(converter(component).value)) as [number, number, number]),
     samples: field.samples?.map((sample) => ({
       ...sample,
       value: roundDisplayValue(converter(sample.value).value),

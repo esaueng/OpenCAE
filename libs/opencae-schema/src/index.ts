@@ -158,6 +158,10 @@ export const ResultFieldSchema = z.object({
   max: z.number(),
   units: z.string(),
   samples: z.array(ResultSampleSchema).optional(),
+  vectors: z.array(Vec3Schema).optional(),
+  surfaceMeshRef: z.string().optional(),
+  visualizationSource: z.string().optional(),
+  engineeringSource: z.string().optional(),
   frameIndex: z.number().int().min(0).optional(),
   timeSeconds: z.number().min(0).optional(),
   provenance: ResultProvenanceSchema.optional()

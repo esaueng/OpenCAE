@@ -245,6 +245,24 @@ function normalizeCoreCloudFieldForUi(field: unknown, runId: string, provenance:
   const sourceUnits = stringOr(field.units, unitsForFieldType(type));
   const converted = converterForField(type, sourceUnits);
   const fullConvertedValues = originalValues.map((value) => converted(value));
+  if (typeof field.surfaceMeshRef === "string") {
+    const values = fullConvertedValues;
+    assertSolverSurfaceFieldAlignment(field, values, surfaceMesh);
+    const vectors = normalizeSurfaceFieldVectors(field, converted, surfaceMesh);
+    const finiteValues = values.filter(Number.isFinite);
+    const normalized = {
+      ...field,
+      runId: typeof field.runId === "string" ? field.runId : runId,
+      values,
+      min: finiteValues.length ? Math.min(...finiteValues) : 0,
+      max: finiteValues.length ? Math.max(...finiteValues) : 0,
+      units: displayUnitsForField(type, sourceUnits),
+      ...(vectors ? { vectors } : {}),
+      provenance
+    };
+    delete (normalized as { samples?: unknown }).samples;
+    return normalized;
+  }
   const isVectorField = (type === "displacement" || type === "velocity" || type === "acceleration") && originalValues.length % 3 === 0;
   const values = isVectorField ? vectorMagnitudes(fullConvertedValues) : fullConvertedValues;
   const samples = normalizeSamplesForField(field, values, fullConvertedValues, converted, surfaceMesh);
@@ -259,6 +277,51 @@ function normalizeCoreCloudFieldForUi(field: unknown, runId: string, provenance:
     samples,
     provenance
   };
+}
+
+function assertSolverSurfaceFieldAlignment(
+  field: Record<string, unknown>,
+  values: number[],
+  surfaceMesh: Record<string, unknown> | undefined
+): void {
+  if (!surfaceMesh) {
+    throw new Error(`Core Cloud field ${String(field.id ?? "unknown")} references a solver surface mesh, but no surfaceMesh was returned.`);
+  }
+  if (field.location !== "node") {
+    throw new Error(`Core Cloud field ${String(field.id ?? "unknown")} must be a node field for solver surface rendering.`);
+  }
+  if (field.surfaceMeshRef !== surfaceMesh.id) {
+    throw new Error(`Core Cloud field ${String(field.id ?? "unknown")} surfaceMeshRef does not match result surfaceMesh.id.`);
+  }
+  const surfaceNodeCount = surfaceMeshNodeCount(surfaceMesh);
+  if (surfaceNodeCount <= 0) {
+    throw new Error("Core Cloud surfaceMesh must include at least one solver surface node.");
+  }
+  if (values.length !== surfaceNodeCount) {
+    throw new Error(`Core Cloud field ${String(field.id ?? "unknown")} length ${values.length} does not match solver surface node count ${surfaceNodeCount}.`);
+  }
+}
+
+function normalizeSurfaceFieldVectors(
+  field: Record<string, unknown>,
+  convert: (value: number) => number,
+  surfaceMesh: Record<string, unknown> | undefined
+): [number, number, number][] | undefined {
+  if (!Array.isArray(field.vectors)) return undefined;
+  const surfaceNodeCount = surfaceMeshNodeCount(surfaceMesh);
+  if (field.vectors.length !== surfaceNodeCount) {
+    throw new Error(`Core Cloud field ${String(field.id ?? "unknown")} vectors length ${field.vectors.length} does not match solver surface node count ${surfaceNodeCount}.`);
+  }
+  return field.vectors.map((vector, index) => {
+    if (!Array.isArray(vector) || vector.length < 3) {
+      throw new Error(`Core Cloud field ${String(field.id ?? "unknown")} has invalid vector at surface node ${index}.`);
+    }
+    return [
+      convert(numberOr(vector[0], 0)),
+      convert(numberOr(vector[1], 0)),
+      convert(numberOr(vector[2], 0))
+    ];
+  });
 }
 
 function normalizeSamplesForField(
@@ -311,6 +374,17 @@ function compactVisualizationPayload(result: Record<string, unknown>, settings: 
       const current = field as { values: number[]; samples?: unknown[] };
       const originalValueCount = current.values.length;
       const originalSampleCount = Array.isArray(current.samples) ? current.samples.length : 0;
+      if (typeof (field as { surfaceMeshRef?: unknown }).surfaceMeshRef === "string") {
+        return {
+          ...field,
+          compaction: {
+            originalValueCount,
+            returnedValueCount: originalValueCount,
+            originalSampleCount,
+            returnedSampleCount: originalSampleCount
+          }
+        };
+      }
       if (!Array.isArray(current.samples) || current.samples.length !== current.values.length) {
         return {
           ...field,
@@ -416,11 +490,15 @@ function vectorMagnitudes(values: number[]): number[] {
 
 function surfaceNodePoint(surfaceMesh: Record<string, unknown> | undefined, index: number): [number, number, number] {
   const nodes = Array.isArray(surfaceMesh?.nodes) ? surfaceMesh.nodes : [];
-  const node = nodes[index % Math.max(nodes.length, 1)];
+  const node = nodes[index];
   if (Array.isArray(node) && node.length >= 3) {
     return [numberOr(node[0], 0), numberOr(node[1], 0), numberOr(node[2], 0)];
   }
   return [0, 0, 0];
+}
+
+function surfaceMeshNodeCount(surfaceMesh: Record<string, unknown> | undefined): number {
+  return Array.isArray(surfaceMesh?.nodes) ? surfaceMesh.nodes.length : 0;
 }
 
 function numberOr(value: unknown, fallback: number): number {

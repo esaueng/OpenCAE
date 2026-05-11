@@ -1,5 +1,15 @@
 import type { DisplayModel, Project, ResultField, ResultSummary } from "@opencae/schema";
 
+export interface SolverSurfaceMesh {
+  id: string;
+  nodes: [number, number, number][];
+  triangles: [number, number, number][];
+  coordinateSpace?: string;
+  source?: string;
+  nodeMap?: number[];
+  volumeNodeCount?: number;
+}
+
 export interface EmbeddedModelFile {
   filename: string;
   contentType: string;
@@ -12,6 +22,7 @@ export interface LocalResultBundle {
   completedRunId?: string;
   summary: ResultSummary;
   fields: ResultField[];
+  surfaceMesh?: SolverSurfaceMesh;
 }
 
 export interface LocalProjectFile {
