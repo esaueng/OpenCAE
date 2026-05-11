@@ -21,7 +21,7 @@ import {
   type LoadType
 } from "./loadPreview";
 import { resetDisplayModelOrientation, type RotationAxis } from "./modelOrientation";
-import { buildLocalProjectFile, suggestedProjectFilename, type LocalResultBundle } from "./projectFile";
+import { buildLocalProjectFile, suggestedProjectFilename, type LocalResultBundle, type SolverSurfaceMesh } from "./projectFile";
 import { buildAutosavedWorkspace, buildAutosavedWorkspaceUiSnapshot, readAutosavedWorkspace, scheduleAutosavedUiSnapshotWrite, scheduleAutosavedWorkspaceWrite, WORKSPACE_LOG_LIMIT, type ThemeMode } from "./appPersistence";
 import type { AutosavedWorkspace, WorkspaceUiSnapshot } from "./appPersistence";
 import {
@@ -133,6 +133,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const [processingRunId, setProcessingRunId] = useState<string | null>(null);
   const [resultSummary, setResultSummary] = useState<ResultSummary>(restoredResults?.summary ?? seededSummary);
   const [resultFields, setResultFields] = useState<ResultField[]>(restoredResults?.fields ?? []);
+  const [resultSurfaceMesh, setResultSurfaceMesh] = useState<SolverSurfaceMesh | undefined>(restoredResults?.surfaceMesh);
   const [resultFrameIndex, setResultFrameIndex] = useState(0);
   const [resultPlaybackFramePosition, setResultPlaybackFramePosition] = useState(0);
   const [resultPlaybackOrdinalPosition, setResultPlaybackOrdinalPosition] = useState(0);
@@ -204,8 +205,9 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     study?.meshSettings.preset ?? "no-mesh",
     displayUnitSystem,
     resultFieldsSignature,
+    resultSurfaceMesh?.id ?? "no-surface",
     resultFrameCache.frameIndexes.join(",")
-  ].join("|"), [activeRunId, completedRunId, displayModelForUi, displayUnitSystem, resultFieldsSignature, resultFrameCache.frameIndexes, resultMode, showDeformed, stressExaggeration, study?.meshSettings.preset]);
+  ].join("|"), [activeRunId, completedRunId, displayModelForUi, displayUnitSystem, resultFieldsSignature, resultSurfaceMesh?.id, resultFrameCache.frameIndexes, resultMode, showDeformed, stressExaggeration, study?.meshSettings.preset]);
   const visibleResultFieldsForUi = useMemo(
     () => {
       if (DEBUG_RESULT_FRAME_CACHE_ONLY) {
@@ -631,7 +633,8 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         activeRunId,
         completedRunId,
         summary: resultSummary,
-        fields: resultFields
+        fields: resultFields,
+        ...(resultSurfaceMesh ? { surfaceMesh: resultSurfaceMesh } : {})
       } : undefined,
       ui: autosaveUiSnapshot
     }), undefined, AUTOSAVE_HEAVY_WRITE_DELAY_MS);
@@ -647,6 +650,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     project,
     redoStack,
     resultFields,
+    resultSurfaceMesh,
     resultSummary,
     runProgress,
     sampleAnalysisType,
@@ -677,6 +681,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     if (response.results?.fields.length) {
       setResultSummary(response.results.summary);
       setResultFields(response.results.fields);
+      setResultSurfaceMesh(response.results.surfaceMesh);
       setResultFrameIndex(0);
       const restoredRunId = response.results.completedRunId ?? response.results.activeRunId ?? latestCompletedRunId(response.project.studies[0] ?? null, "") ?? "";
       setActiveRunId(response.results.activeRunId ?? restoredRunId);
@@ -693,6 +698,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       applyStep("model");
       setViewMode("model");
       setResultFields([]);
+      setResultSurfaceMesh(undefined);
       setResultFrameIndex(0);
       setRunProgress(0);
       const nextCompletedRunId = latestCompletedRunId(response.project.studies[0] ?? null, "") ?? "";
@@ -732,7 +738,8 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         activeRunId,
         completedRunId,
         summary: resultSummary,
-        fields: resultFields
+        fields: resultFields,
+        ...(resultSurfaceMesh ? { surfaceMesh: resultSurfaceMesh } : {})
       });
       setProject({ ...project, updatedAt: savedAt });
       pushMessage("Project saved to local disk.");
@@ -1049,6 +1056,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           }
           setResultSummary(results.summary);
           setResultFields(results.fields);
+          setResultSurfaceMesh(results.surfaceMesh);
           setResultFrameIndex(0);
           setResultPlaybackPlaying(false);
           if (study.type === "dynamic_structural") setResultMode("stress");
@@ -1187,6 +1195,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
             showDimensions={showDimensions}
             stressExaggeration={stressExaggeration}
             resultFields={visibleResultFieldsForUi}
+            surfaceMesh={resultSurfaceMesh}
             resultPlaybackBufferCache={resultPlaybackBufferCacheForViewer}
             resultPlaybackFrameController={resultPlaybackPlaying ? resultPlaybackFrameControllerRef.current : undefined}
             meshSummary={study.meshSettings.summary}

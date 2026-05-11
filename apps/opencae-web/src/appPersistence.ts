@@ -200,12 +200,40 @@ function parseResultBundle(value: unknown): LocalResultBundle | undefined {
   if (!isRecord(value)) return undefined;
   const summary = ResultSummarySchema.safeParse(value.summary);
   const fields = ResultFieldSchema.array().safeParse(value.fields);
+  const surfaceMesh = parseSolverSurfaceMesh(value.surfaceMesh);
   if (!summary.success || !fields.success || fields.data.length === 0) return undefined;
   return {
     activeRunId: typeof value.activeRunId === "string" ? value.activeRunId : undefined,
     completedRunId: typeof value.completedRunId === "string" ? value.completedRunId : undefined,
     summary: summary.data,
-    fields: fields.data
+    fields: fields.data,
+    ...(surfaceMesh ? { surfaceMesh } : {})
+  };
+}
+
+function parseSolverSurfaceMesh(value: unknown): LocalResultBundle["surfaceMesh"] | undefined {
+  if (!isRecord(value)) return undefined;
+  if (typeof value.id !== "string") return undefined;
+  if (!Array.isArray(value.nodes) || !Array.isArray(value.triangles)) return undefined;
+  const nodes = value.nodes.filter(isVector3);
+  const triangles = value.triangles.filter((triangle): triangle is [number, number, number] =>
+    Array.isArray(triangle) &&
+    triangle.length === 3 &&
+    triangle.every((node) => Number.isInteger(node) && node >= 0)
+  );
+  if (nodes.length !== value.nodes.length || triangles.length !== value.triangles.length) return undefined;
+  return {
+    id: value.id,
+    nodes,
+    triangles,
+    coordinateSpace: typeof value.coordinateSpace === "string" ? value.coordinateSpace : undefined,
+    source: typeof value.source === "string" ? value.source : undefined,
+    nodeMap: Array.isArray(value.nodeMap) && value.nodeMap.every((node) => Number.isInteger(node) && node >= 0)
+      ? value.nodeMap
+      : undefined,
+    volumeNodeCount: typeof value.volumeNodeCount === "number" && Number.isFinite(value.volumeNodeCount)
+      ? value.volumeNodeCount
+      : undefined
   };
 }
 

@@ -169,7 +169,8 @@ describe("OpenCAE Core Cloud end-to-end validation", () => {
     expect(body.summary.reactionForce).toBeCloseTo(10, 8);
     expect(body.summary.transient.frameCount).toBeGreaterThan(2);
     expect(dynamicFrameIndexes(body.fields)).toEqual([0, body.summary.transient.frameCount - 1]);
-    expect(body.fields.every((field) => field.values.length <= 3)).toBe(true);
+    expect(body.fields.filter((field) => !field.surfaceMeshRef).every((field) => field.values.length <= 3)).toBe(true);
+    expect(body.fields.filter((field) => field.surfaceMeshRef).every((field) => field.values.length === body.surfaceMesh.nodes.length)).toBe(true);
   });
 });
 
@@ -385,6 +386,7 @@ type CoreCloudResult = {
   fields: Array<{
     type: string;
     values: number[];
+    surfaceMeshRef?: string;
     frameIndex?: number;
     timeSeconds?: number;
   }>;
