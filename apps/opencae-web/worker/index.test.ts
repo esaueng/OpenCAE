@@ -268,6 +268,39 @@ describe("Cloudflare local-first worker", () => {
     expect(serialized).not.toContain("calculix");
   });
 
+  test("cloud core run routes store and forward geometry-only requests", async () => {
+    const env = createEnv();
+    const ctx = createExecutionContext();
+    containerMock.fetch
+      .mockResolvedValueOnce(Response.json({ ok: true, runnerVersion: expectedRunnerVersion, supportedAnalysisTypes: ["static_stress"] }))
+      .mockImplementationOnce(async (request: Request) => {
+        const body = await request.json() as Record<string, unknown>;
+        expect(body).toMatchObject({
+          runId: "run-geometry",
+          geometry: { kind: "sample_procedural", sampleId: "bracket" }
+        });
+        expect(body.coreModel).toBeUndefined();
+        return Response.json(coreResult());
+      });
+
+    const response = await worker.fetch(coreRunRequest({ runId: "run-geometry", geometryOnly: true }), env, ctx);
+    await ctx.flush();
+    const startResponse = await startCoreRun(env, "run-geometry");
+    const requestArtifact = await env.CORE_CLOUD_ARTIFACTS.readJson("cloud-core/runs/run-geometry/request.json");
+    const events = await env.CORE_CLOUD_ARTIFACTS.readJson("cloud-core/runs/run-geometry/events.json");
+
+    expect(response.status).toBe(202);
+    expect(startResponse.status).toBe(200);
+    expect(requestArtifact).toMatchObject({
+      geometry: { kind: "sample_procedural", sampleId: "bracket" },
+      solverSettings: { backend: "opencae_core_cloud" }
+    });
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "progress", message: "Dispatching geometry to OpenCAE Core Cloud for meshing." }),
+      expect.objectContaining({ type: "complete", message: "OpenCAE Core Cloud solve complete." })
+    ]));
+  });
+
   test("legacy cloud-fea run alias is only a Core Cloud alias", async () => {
     const env = createEnv();
     const ctx = createExecutionContext();
@@ -404,11 +437,22 @@ describe("Cloudflare local-first worker", () => {
   });
 });
 
-function coreRunRequest(options: { runId: string; path?: string; analysisType?: string }) {
+function coreRunRequest(options: { runId: string; path?: string; analysisType?: string; geometryOnly?: boolean }) {
   return new Request(`https://cae.esau.app${options.path ?? "/api/cloud-core/runs"}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({
+    body: JSON.stringify(options.geometryOnly ? {
+      runId: options.runId,
+      analysisType: options.analysisType ?? "static_stress",
+      study: { id: "study-bracket", type: "static_stress", loads: [{ type: "force", parameters: { value: 100 } }] },
+      geometry: {
+        kind: "sample_procedural",
+        sampleId: "bracket",
+        units: "mm",
+        descriptor: { meshSize: 24 }
+      },
+      solverSettings: { backend: "opencae_core_cloud" }
+    } : {
       runId: options.runId,
       analysisType: options.analysisType ?? "static_stress",
       coreModel: {

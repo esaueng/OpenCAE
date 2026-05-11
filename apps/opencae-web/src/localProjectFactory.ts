@@ -29,6 +29,30 @@ const SAMPLE_META: Record<SampleModelId, { projectName: string; modelName: strin
   }
 };
 
+const BRACKET_CORE_CLOUD_GEOMETRY = {
+  kind: "sample_procedural" as const,
+  sampleId: "bracket" as const,
+  units: "mm" as const,
+  descriptor: {
+    base: { length: 120, width: 34, height: 10 },
+    upright: { height: 88, width: 18, thickness: 34 },
+    gusset: { length: 72, height: 58, thickness: 34 },
+    rib: { length: 72, height: 58, thickness: 34 },
+    holes: [
+      { id: "hole-base-1", center: [32, 17, 5], diameter: 12 },
+      { id: "hole-base-2", center: [88, 17, 5], diameter: 12 },
+      { id: "hole-upright-1", center: [9, 17, 56], diameter: 10 }
+    ],
+    surfaces: {
+      fixedSupport: { selectionRef: "selection-fixed-face", sourceSelectionRef: "FS1", sourceFaceId: "face-base-left", name: "fixed_support" },
+      loadSurface: { selectionRef: "selection-load-face", sourceSelectionRef: "L1", sourceFaceId: "face-load-top", name: "load_surface" }
+    },
+    supportFaceId: "face-base-left",
+    loadFaceId: "face-load-top",
+    meshSize: 18
+  }
+};
+
 export async function createLocalSampleProject(sample: SampleModelId = "bracket", analysisTypeOrNow: SampleAnalysisType | string = "static_stress", maybeNow?: string): Promise<SampleProjectResponse> {
   const analysisType: SampleAnalysisType = analysisTypeOrNow === "dynamic_structural" ? "dynamic_structural" : "static_stress";
   const now = analysisTypeOrNow === "dynamic_structural" || analysisTypeOrNow === "static_stress" ? maybeNow ?? new Date().toISOString() : analysisTypeOrNow;
@@ -124,7 +148,8 @@ export async function createLocalSampleProject(sample: SampleModelId = "bracket"
             sampleModel: sample,
             sampleAnalysisType: analysisType,
             displayModelRef: `${bracketDemoProject.id}/geometry/${sample}-display.json`,
-            faceCount: displayModel.faces.length
+            faceCount: displayModel.faces.length,
+            ...(displayModel.coreCloudGeometry ? { coreCloudGeometry: displayModel.coreCloudGeometry } : {})
           }
         }]
       : [],
@@ -328,7 +353,28 @@ function sampleDisplayModelFor(sample: SampleModelId): DisplayModel {
     id: `display-${sample}`,
     name: meta.displayName,
     dimensions: meta.dimensions,
-    faces: facesBySample[sample]
+    faces: facesBySample[sample],
+    ...(sample === "bracket"
+      ? { coreCloudGeometry: BRACKET_CORE_CLOUD_GEOMETRY }
+      : { coreCloudGeometry: structuredBlockGeometryForSample(meta.dimensions, sample) })
+  };
+}
+
+function structuredBlockGeometryForSample(dimensions: DisplayModel["dimensions"], sample: SampleModelId): NonNullable<DisplayModel["coreCloudGeometry"]> | undefined {
+  if (!dimensions || sample === "bracket") return undefined;
+  return {
+    kind: "structured_block",
+    sampleId: sample === "cantilever" ? "cantilever" : "beam",
+    units: dimensions.units === "m" ? "m" : "mm",
+    descriptor: {
+      length: dimensions.x,
+      width: dimensions.z,
+      height: dimensions.y,
+      surfaces: {
+        fixedSupport: { selectionRef: "selection-fixed-face", sourceFaceId: "face-base-left", name: "fixed_support" },
+        loadSurface: { selectionRef: "selection-load-face", sourceFaceId: "face-load-top", name: "load_surface" }
+      }
+    }
   };
 }
 

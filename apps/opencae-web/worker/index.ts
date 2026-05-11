@@ -117,6 +117,7 @@ type CoreCloudRunRequest = {
   runId?: string;
   analysisType?: string;
   study?: { type?: string; loads?: unknown[] };
+  geometry?: unknown;
   coreModel?: unknown;
   coreVolumeMesh?: unknown;
   solverSettings?: unknown;
@@ -243,6 +244,9 @@ async function runCoreCloudSolve(env: Env, runId: string): Promise<void> {
     if (!healthResponse.ok || health.runnerVersion !== EXPECTED_CORE_CLOUD_RUNNER_VERSION) {
       throw new Error(`OpenCAE Core Cloud runner version mismatch: expected ${EXPECTED_CORE_CLOUD_RUNNER_VERSION}, got ${health.runnerVersion ?? "unknown"}. No local estimate fallback was used.`);
     }
+    if (requestArtifact.geometry && !requestArtifact.coreModel && !requestArtifact.coreVolumeMesh) {
+      await appendCoreCloudEvent(env, runId, event(runId, "progress", "Dispatching geometry to OpenCAE Core Cloud for meshing.", 20));
+    }
     await appendCoreCloudEvent(env, runId, event(runId, "progress", "OpenCAE Core Cloud solve running.", 25));
     const solveResponse = await fetchCoreCloudContainer(env, "/solve", {
       method: "POST",
@@ -268,8 +272,8 @@ function preflightCoreCloudRequest(request: CoreCloudRunRequest): string | undef
   if (serialized.includes("local_estimate") || serialized.includes("computed_preview")) {
     return "OpenCAE Core Cloud requests cannot use preview or local estimate provenance.";
   }
-  if (!request.coreModel && !request.coreVolumeMesh) {
-    return "OpenCAE Core Cloud requires a generated OpenCAE Core model or actual Core volume mesh before dispatch. No local estimate fallback was used.";
+  if (!request.coreModel && !request.coreVolumeMesh && !request.geometry) {
+    return "OpenCAE Core Cloud requires a generated OpenCAE Core model, actual Core volume mesh, or procedural/uploaded geometry source before dispatch. No local estimate fallback was used.";
   }
   return undefined;
 }

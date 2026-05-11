@@ -4,10 +4,13 @@ import { bracketDemoProject, bracketDisplayModel } from "@opencae/db/sample-data
 import { validateModelJson } from "@opencae/core";
 import {
   buildOpenCaeCoreCloudModelForStudy,
+  cloudGeometrySourceForStudy,
   hasActualCoreVolumeMesh,
+  hasCloudMeshableGeometry,
   isComplexGeometry,
   isSimpleBlockLikeDisplayModel,
   normalizeSolverBackend,
+  OPENCAE_CORE_CLOUD_GEOMETRY_REQUIRED_REASON,
   openCaeCoreEligibility,
   trySolveOpenCaeCoreStudy
 } from "./opencaeCoreSolve";
@@ -88,6 +91,26 @@ describe("OpenCAE Core browser solver adapter", () => {
     expect(eligibility.ok).toBe(false);
     if (eligibility.ok) throw new Error("Bracket should not be Core-preview eligible.");
     expect(eligibility.reason).toMatch(/actual Core volume mesh|OpenCAE Core Cloud/i);
+  });
+
+  test("treats the Bracket Demo as cloud-meshable without an actual Core volume mesh", () => {
+    const bracketStudy = bracketDemoProject.studies[0]!;
+    const geometry = cloudGeometrySourceForStudy(bracketStudy, bracketDisplayModel);
+
+    expect(hasActualCoreVolumeMesh(bracketStudy, bracketDisplayModel)).toBe(false);
+    expect(hasCloudMeshableGeometry(bracketStudy, bracketDisplayModel)).toBe(true);
+    expect(geometry).toMatchObject({
+      kind: "sample_procedural",
+      sampleId: "bracket",
+      units: "mm",
+      descriptor: expect.objectContaining({
+        base: expect.any(Object),
+        upright: expect.any(Object),
+        gusset: expect.any(Object),
+        holes: expect.any(Array),
+        surfaces: expect.any(Object)
+      })
+    });
   });
 
   test("solves eligible static studies as OpenCAE Core preview provenance", () => {
@@ -278,8 +301,28 @@ describe("OpenCAE Core browser solver adapter", () => {
     expect(result.model.materials[0]?.yieldStrength).toBeLessThan(60000000);
   });
 
-  test("fails complex geometry before cloud run when no actual mesh is present", () => {
-    expect(() => buildOpenCaeCoreCloudModelForStudy(bracketDemoProject.studies[0]!, bracketDisplayModel)).toThrow(/actual Core volume mesh|OpenCAE Core Cloud/i);
+  test("does not build a local Core Cloud model for bracket geometry that should be meshed in the container", () => {
+    expect(() => buildOpenCaeCoreCloudModelForStudy(bracketDemoProject.studies[0]!, bracketDisplayModel)).toThrow(/dispatch this complex geometry source/i);
+  });
+
+  test("fails complex Core Cloud model building when no geometry source exists", () => {
+    const complexDisplayModel = {
+      ...displayModel,
+      id: "display-complex-casting",
+      name: "complex casting",
+      faces: Array.from({ length: 8 }, (_value, index) => ({
+        id: `face-complex-${index}`,
+        label: `Casting face ${index}`,
+        color: "#94a3b8",
+        center: [index, 0, 0] as [number, number, number],
+        normal: [1, 0, 0] as [number, number, number],
+        stressValue: 0
+      }))
+    } satisfies DisplayModel;
+
+    expect(isComplexGeometry(complexDisplayModel, staticStudy)).toBe(true);
+    expect(hasCloudMeshableGeometry(staticStudy, complexDisplayModel)).toBe(false);
+    expect(() => buildOpenCaeCoreCloudModelForStudy(staticStudy, complexDisplayModel)).toThrow(OPENCAE_CORE_CLOUD_GEOMETRY_REQUIRED_REASON);
   });
 });
 
