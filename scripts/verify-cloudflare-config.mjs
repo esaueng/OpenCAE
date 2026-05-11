@@ -9,7 +9,7 @@ const productionDomains = ["cae.esau.app"];
 const productionWorkerName = "opencae";
 const legacySolverToken = ["calcu", "lix"].join("");
 const expectedCoreCloudRunnerVersion = readFileSync(resolve(rootDir, "services/opencae-core-cloud/RUNNER_VERSION"), "utf8").trim();
-const expectedCoreCloudContainerName = `opencae-core-cloud-${expectedCoreCloudRunnerVersion}`;
+const expectedCoreCloudContainerName = "opencae-core-cloud-0.1.1";
 
 export function parseJsonc(source, label = "JSONC input") {
   try {

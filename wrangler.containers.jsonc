@@ -25,7 +25,7 @@
       "image": "./services/opencae-core-cloud/Dockerfile",
       "image_build_context": ".",
       "instance_type": "standard-1",
-      "max_instances": 10
+      "max_instances": 12
     }
   ],
   "r2_buckets": [
