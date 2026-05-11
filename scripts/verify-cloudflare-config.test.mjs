@@ -4,8 +4,8 @@ import { describe, expect, test } from "vitest";
 import { parseJsonc, validateCloudflareConfigs } from "./verify-cloudflare-config.mjs";
 
 const rootDir = resolve(import.meta.dirname, "..");
-const expectedRunnerVersion = "0.1.1";
-const expectedContainerInstanceName = `opencae-core-cloud-${expectedRunnerVersion}`;
+const expectedRunnerVersion = "0.1.3";
+const expectedContainerApplicationName = "opencae-core-cloud-0.1.1";
 
 function readConfig(path) {
   return parseJsonc(readFileSync(resolve(rootDir, path), "utf8"), path);
@@ -25,7 +25,7 @@ describe("Cloudflare deployment config guard", () => {
     expect(defaultConfig.name).toBe("opencae");
     expect(staticConfig.name).toBe("opencae-static");
     expect(localFirstConfig.name).toBe("opencae-local-first");
-    expect(defaultConfig.containers[0].name).toBe(expectedContainerInstanceName);
+    expect(defaultConfig.containers[0].name).toBe(expectedContainerApplicationName);
     expect(defaultConfig.durable_objects.bindings[0]).toEqual({ name: "CORE_CLOUD_CONTAINER", class_name: "OpenCaeCoreCloudContainer" });
     expect(defaultConfig.migrations).toEqual([{ tag: "v3-opencae-core-cloud-container", new_sqlite_classes: ["OpenCaeCoreCloudContainer"] }]);
     expect(() => validateCloudflareConfigs({ defaultConfig, staticConfig, localFirstConfig, containerConfig })).not.toThrow();
@@ -80,33 +80,27 @@ describe("Cloudflare deployment config guard", () => {
     expect(ensureCoreSource).toContain("FETCH_HEAD");
   });
 
-  test("Core Cloud Docker build installs git before cloning Core", () => {
+  test("Core Cloud Docker build installs git before cloning Core and gmsh before runtime", () => {
     const dockerfile = readFileSync(resolve(rootDir, "services/opencae-core-cloud/Dockerfile"), "utf8");
     const installGitIndex = dockerfile.indexOf("apt-get install -y --no-install-recommends git");
-    const ensureCoreIndex = dockerfile.indexOf("RUN pnpm ensure:core");
+    const ensureCoreIndex = dockerfile.indexOf("pnpm ensure:core");
     const coreInstallIndex = dockerfile.indexOf("RUN pnpm --dir /opencae-core install --frozen-lockfile --prod=false");
-    const nodeTypesIndex = dockerfile.indexOf("RUN pnpm --dir /opencae-core add -Dw @types/node@22.19.17");
-    const linkBuildToolsIndex = dockerfile.indexOf("ln -s /opencae-core/node_modules/.bin/tsc services/opencae-core-cloud/node_modules/.bin/tsc");
-    const linkTypescriptIndex = dockerfile.indexOf("ln -s /opencae-core/node_modules/typescript services/opencae-core-cloud/node_modules/typescript");
-    const linkCoreIndex = dockerfile.indexOf("ln -s /opencae-core/packages/core services/opencae-core-cloud/node_modules/@opencae/core");
-    const linkSolverIndex = dockerfile.indexOf("ln -s /opencae-core/packages/solver-cpu services/opencae-core-cloud/node_modules/@opencae/solver-cpu");
     const coreBuildIndex = dockerfile.indexOf("RUN pnpm --dir /opencae-core --filter @opencae/core build");
-    const serviceInstallIndex = dockerfile.indexOf("RUN pnpm install --no-frozen-lockfile --prod=false");
-    const serviceBuildIndex = dockerfile.indexOf("RUN pnpm --filter @opencae/core-cloud build");
-    const runtimeNodeModulesIndex = dockerfile.indexOf("ln -s /opencae-core/packages/core node_modules/@opencae/core");
+    const solverBuildIndex = dockerfile.indexOf("RUN pnpm --dir /opencae-core --filter @opencae/solver-cpu build");
+    const serviceBuildIndex = dockerfile.indexOf("RUN pnpm --dir /opencae-core --filter @opencae/core-cloud build");
+    const runtimeGmshInstallIndex = dockerfile.indexOf("apt-get install -y --no-install-recommends gmsh");
+    const gmshVersionIndex = dockerfile.indexOf("gmsh --version");
+    const runtimeCopyIndex = dockerfile.indexOf("COPY --from=build /opencae-core/services/opencae-core-cloud/dist");
 
     expect(installGitIndex).toBeGreaterThanOrEqual(0);
     expect(ensureCoreIndex).toBeGreaterThan(installGitIndex);
     expect(coreInstallIndex).toBeGreaterThan(ensureCoreIndex);
-    expect(nodeTypesIndex).toBeGreaterThan(coreInstallIndex);
-    expect(linkBuildToolsIndex).toBeGreaterThan(nodeTypesIndex);
-    expect(linkTypescriptIndex).toBeGreaterThan(nodeTypesIndex);
-    expect(linkCoreIndex).toBeGreaterThan(nodeTypesIndex);
-    expect(linkSolverIndex).toBeGreaterThan(nodeTypesIndex);
     expect(coreBuildIndex).toBeGreaterThan(coreInstallIndex);
-    expect(serviceInstallIndex).toBeGreaterThan(coreInstallIndex);
-    expect(serviceBuildIndex).toBeGreaterThan(linkBuildToolsIndex);
-    expect(runtimeNodeModulesIndex).toBeGreaterThan(serviceBuildIndex);
+    expect(solverBuildIndex).toBeGreaterThan(coreBuildIndex);
+    expect(serviceBuildIndex).toBeGreaterThan(solverBuildIndex);
+    expect(runtimeGmshInstallIndex).toBeGreaterThan(serviceBuildIndex);
+    expect(gmshVersionIndex).toBeGreaterThan(runtimeGmshInstallIndex);
+    expect(runtimeCopyIndex).toBeGreaterThan(gmshVersionIndex);
   });
 
   test("Core Cloud service declares its bundled Node runtime build", () => {
@@ -141,7 +135,7 @@ describe("Cloudflare deployment config guard", () => {
     containerConfig.containers[0].name = "opencae-core-cloud";
 
     expect(() => validateCloudflareConfigs({ defaultConfig, staticConfig, containerConfig })).toThrow(
-      new RegExp(expectedContainerInstanceName)
+      new RegExp(expectedContainerApplicationName)
     );
   });
 
