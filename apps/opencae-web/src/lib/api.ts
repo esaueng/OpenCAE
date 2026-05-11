@@ -3,7 +3,7 @@ import type { LoadApplicationPoint, LoadDirection, LoadType, PayloadLoadMetadata
 import { embedUploadedModelFile, type EmbeddedModelFile, type LocalResultBundle, type SolverSurfaceMesh } from "../projectFile";
 import { createLocalBlankProject, createLocalSampleProject, createLocalUploadResponse, openLocalProjectPayload } from "../localProjectFactory";
 import { solveLocalStudyInWorker } from "../workers/performanceClient";
-import { buildOpenCaeCoreCloudModelForStudy, hasActualCoreVolumeMesh, normalizeSolverBackend, openCaeCoreEligibility, trySolveOpenCaeCoreStudy, type NormalizedBrowserSolverBackend } from "../workers/opencaeCoreSolve";
+import { buildOpenCaeCoreCloudModelForStudy, cloudGeometrySourceForStudy, hasActualCoreVolumeMesh, isComplexGeometry, normalizeSolverBackend, openCaeCoreEligibility, trySolveOpenCaeCoreStudy, OPENCAE_CORE_CLOUD_GEOMETRY_REQUIRED_REASON, type NormalizedBrowserSolverBackend } from "../workers/opencaeCoreSolve";
 
 export interface SampleProjectResponse {
   message?: string;
@@ -364,6 +364,35 @@ function messageFromUnknownError(error: unknown): string {
 }
 
 function openCaeCoreCloudSolveRequest(runId: string, study: Study, displayModel: DisplayModel | undefined) {
+  const actualMesh = hasActualCoreVolumeMesh(study, displayModel);
+  const geometry = actualMesh ? null : cloudGeometrySourceForStudy(study, displayModel);
+  if (!actualMesh && !geometry && isComplexGeometry(displayModel, study)) {
+    throw new Error(OPENCAE_CORE_CLOUD_GEOMETRY_REQUIRED_REASON);
+  }
+  if (geometry) {
+    return {
+      runId,
+      analysisType: study.type,
+      study,
+      displayModel,
+      geometry,
+      coreVolumeMesh: null,
+      solverSettings: {
+        ...study.solverSettings,
+        backend: "opencae_core_cloud"
+      },
+      resultSettings: {
+        provenance: {
+          kind: "opencae_core_fea",
+          solver: "opencae-core-cloud",
+          resultSource: "computed",
+          meshSource: "actual_volume_mesh"
+        },
+        renderBounds: displayModel?.dimensions ?? null
+      }
+    };
+  }
+
   const coreBuild = buildOpenCaeCoreCloudModelForStudy(study, displayModel);
   return {
     runId,

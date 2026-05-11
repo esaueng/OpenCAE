@@ -2,7 +2,6 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { DisplayModel, Project, RunEvent, Study } from "@opencae/schema";
-import { validateModelJson } from "@opencae/core";
 import { addLoad, addSupport, assignMaterial, cancelRun, createProject, dynamicOutputFrameEstimate, generateMesh, getResults, importLocalProject, loadSampleProject, renameProject, runSimulation, subscribeToRun, updateStudy, uploadModel } from "./api";
 
 const TestFile = globalThis.File ?? class extends Blob {
@@ -472,19 +471,17 @@ describe("api", () => {
         analysisType: "static_stress",
         solverSettings: expect.objectContaining({ backend: "opencae_core_cloud" }),
         coreVolumeMesh: null,
+        geometry: expect.objectContaining({
+          kind: "structured_block",
+          descriptor: expect.objectContaining({
+            length: 120,
+            width: 20,
+            height: 40
+          })
+        }),
         resultSettings: expect.any(Object)
       });
-      const coreModel = body.coreModel as {
-        schemaVersion?: string;
-        loads?: Array<{ type?: string; surfaceSet?: string }>;
-        surfaceFacets?: unknown[];
-        surfaceSets?: Array<{ name?: string }>;
-      };
-      expect(coreModel.schemaVersion).toBe("0.2.0");
-      expect(validateModelJson(coreModel).ok).toBe(true);
-      expect(coreModel.surfaceFacets?.length).toBeGreaterThan(0);
-      expect(coreModel.surfaceSets?.map((set) => set.name)).toContain("selection-face-1");
-      expect(coreModel.loads?.[0]).toMatchObject({ type: "surfaceForce", surfaceSet: "selection-face-1" });
+      expect(body.coreModel).toBeUndefined();
       expect(JSON.stringify(body).toLowerCase()).not.toMatch(/calculix|cloudflare-fea-calculix|\.inp|\.dat|\.frd/);
       return new Response(JSON.stringify({
         run: { id: "run-cloud-core", solverBackend: "opencae-core-cloud" },
@@ -499,6 +496,49 @@ describe("api", () => {
 
     expect(response.message).toContain("OpenCAE Core Cloud");
     expect((response.run as { solverBackend?: string }).solverBackend).toBe("opencae-core-cloud");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  test("dispatches Bracket Demo geometry to OpenCAE Core Cloud for container meshing", async () => {
+    const sample = await loadSampleProject("bracket");
+    const bracketStudy = {
+      ...sample.project.studies[0]!,
+      solverSettings: { ...sample.project.studies[0]!.solverSettings, backend: "opencae_core_cloud" }
+    } as Study;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === "/api/cloud-core/runs/run-cloud-core-bracket/start") {
+        return new Response(JSON.stringify({ ok: true }), { headers: { "content-type": "application/json" } });
+      }
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      expect(body).toMatchObject({
+        analysisType: "static_stress",
+        coreVolumeMesh: null,
+        geometry: {
+          kind: "sample_procedural",
+          sampleId: "bracket",
+          units: "mm",
+          descriptor: expect.objectContaining({
+            base: expect.any(Object),
+            upright: expect.any(Object),
+            gusset: expect.any(Object),
+            holes: expect.any(Array),
+            surfaces: expect.any(Object)
+          })
+        }
+      });
+      expect(body.coreModel).toBeUndefined();
+      expect(JSON.stringify(body).toLowerCase()).not.toMatch(/local_estimate|computed_preview|calculix|display_bounds_proxy/);
+      return new Response(JSON.stringify({
+        run: { id: "run-cloud-core-bracket", solverBackend: "opencae-core-cloud" },
+        streamUrl: "/api/cloud-core/runs/run-cloud-core-bracket/events",
+        startUrl: "/api/cloud-core/runs/run-cloud-core-bracket/start",
+        message: "OpenCAE Core Cloud simulation running."
+      }), { headers: { "content-type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await runSimulation(bracketStudy.id, bracketStudy, sample.displayModel);
+
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
@@ -535,14 +575,14 @@ describe("api", () => {
         dampingRatio: 0.04,
         loadProfile: "sinusoidal"
       });
-      const coreModel = body.coreModel as { steps?: Array<Record<string, unknown>> };
-      expect(validateModelJson(coreModel).ok).toBe(true);
-      expect(coreModel.steps?.[0]).toMatchObject({
-        type: "dynamicLinear",
-        timeStep: 0.002,
-        outputInterval: 0.01,
-        dampingRatio: 0.04,
-        loadProfile: "sinusoidal"
+      expect(body.coreModel).toBeUndefined();
+      expect(body.geometry).toMatchObject({
+        kind: "structured_block",
+        descriptor: expect.objectContaining({
+          length: 120,
+          width: 20,
+          height: 40
+        })
       });
       return new Response(JSON.stringify({
         run: { id: "run-cloud-core-dynamic", solverBackend: "opencae-core-cloud" },

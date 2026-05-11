@@ -485,6 +485,16 @@ export interface DisplayModel {
     filename: string;
     contentBase64: string;
   };
+  coreCloudGeometry?: {
+    kind: "sample_procedural" | "uploaded_cad" | "uploaded_mesh" | "structured_block";
+    sampleId?: "cantilever" | "beam" | "bracket";
+    format?: "step" | "stl" | "obj" | "msh" | "json";
+    filename?: string;
+    contentBase64?: string;
+    units?: "mm" | "m";
+    descriptor?: Record<string, unknown>;
+    geometryDescriptor?: Record<string, unknown>;
+  };
 }
 
 export interface ResultRenderBounds {

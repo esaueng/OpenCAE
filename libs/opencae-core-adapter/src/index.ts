@@ -54,6 +54,17 @@ type ActualCoreVolumeMeshArtifact = {
   };
 };
 
+export type CoreCloudGeometrySource = {
+  kind: "sample_procedural" | "uploaded_cad" | "uploaded_mesh" | "structured_block";
+  sampleId?: "cantilever" | "beam" | "bracket";
+  format?: "step" | "stl" | "obj" | "msh" | "json";
+  filename?: string;
+  contentBase64?: string;
+  units?: "mm" | "m";
+  descriptor?: Record<string, unknown>;
+  geometryDescriptor?: Record<string, unknown>;
+};
+
 export type LocalSolveResult = {
   summary: ResultSummary;
   fields: ResultField[];
@@ -79,6 +90,7 @@ const DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.005;
 const MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.005;
 
 const COMPLEX_CORE_PREVIEW_REJECTION_REASON = "OpenCAE Core Local requires simple block/beam geometry or an actual Core volume mesh. Use OpenCAE Core Cloud for complex production geometry.";
+export const OPENCAE_CORE_CLOUD_GEOMETRY_REQUIRED_REASON = "OpenCAE Core Cloud requires a procedural or uploaded geometry source so the cloud container can generate a Core volume mesh.";
 
 const OPENCAE_CORE_ACTUAL_STATIC_PROVENANCE: ResultProvenance = {
   kind: "opencae_core_fea",
@@ -131,6 +143,66 @@ export function hasActualCoreVolumeMesh(study: Study, displayModel?: DisplayMode
   if (!artifact?.model) return false;
   if (meshSourceForActualArtifact(artifact) !== "actual_volume_mesh") return false;
   return connectedComponentCountForActualArtifact(artifact) === 1;
+}
+
+export function hasCloudMeshableGeometry(study: Study, displayModel?: DisplayModel): boolean {
+  return Boolean(cloudGeometrySourceForStudy(study, displayModel));
+}
+
+export function cloudGeometrySourceForStudy(study: Study, displayModel?: DisplayModel): CoreCloudGeometrySource | null {
+  const explicit = coreCloudGeometryFromUnknown((displayModel as { coreCloudGeometry?: unknown } | undefined)?.coreCloudGeometry)
+    ?? coreCloudGeometryFromUnknown((study.meshSettings.summary as { artifacts?: { coreCloudGeometry?: unknown; geometry?: unknown } } | undefined)?.artifacts?.coreCloudGeometry)
+    ?? coreCloudGeometryFromUnknown((study.meshSettings.summary as { artifacts?: { coreCloudGeometry?: unknown; geometry?: unknown } } | undefined)?.artifacts?.geometry);
+  if (explicit) return explicit;
+
+  if (displayModel?.nativeCad) {
+    return {
+      kind: "uploaded_cad",
+      format: displayModel.nativeCad.format,
+      filename: displayModel.nativeCad.filename,
+      contentBase64: displayModel.nativeCad.contentBase64,
+      units: displayModel.dimensions?.units === "m" ? "m" : "mm"
+    };
+  }
+
+  if (displayModel?.visualMesh) {
+    return {
+      kind: "uploaded_cad",
+      format: displayModel.visualMesh.format,
+      filename: displayModel.visualMesh.filename,
+      contentBase64: displayModel.visualMesh.contentBase64,
+      units: displayModel.dimensions?.units === "m" ? "m" : "mm"
+    };
+  }
+
+  if (displayModel && isBracketDemoGeometry(study, displayModel)) {
+    return {
+      kind: "sample_procedural",
+      sampleId: "bracket",
+      units: "mm",
+      descriptor: bracketProceduralGeometryDescriptor()
+    };
+  }
+
+  if (displayModel && isSimpleBlockLikeDisplayModel(displayModel)) {
+    const dimensions = displayModel.dimensions;
+    if (!dimensions) return null;
+    return {
+      kind: "structured_block",
+      units: dimensions.units === "m" ? "m" : "mm",
+      descriptor: {
+        length: dimensions.x,
+        width: dimensions.z,
+        height: dimensions.y,
+        surfaces: {
+          fixedSupport: selectionSurfaceDescriptor(study, "fixed", "FS1"),
+          loadSurface: selectionSurfaceDescriptor(study, "load", "L1")
+        }
+      }
+    };
+  }
+
+  return null;
 }
 
 export function isComplexGeometry(displayModel: DisplayModel | undefined, study?: Study): boolean {
@@ -248,7 +320,10 @@ export function buildOpenCaeCoreCloudModelForStudy(study: Study, displayModel: D
       : undefined;
   } else {
     if (isComplexGeometry(displayModel, study)) {
-      throw new Error("OpenCAE Core Cloud requires an actual Core volume mesh for complex geometry before dispatch.");
+      if (hasCloudMeshableGeometry(study, displayModel)) {
+        throw new Error("OpenCAE Core Cloud should dispatch this complex geometry source to the cloud container for meshing.");
+      }
+      throw new Error(OPENCAE_CORE_CLOUD_GEOMETRY_REQUIRED_REASON);
     }
     const mesh = tetMeshForDisplayModel(displayModel, study.meshSettings.preset);
     model = volumeMeshToModelJson({
@@ -1128,6 +1203,79 @@ function dynamicRangeDigits(type: ResultField["type"]): number {
   if (type === "stress") return 1;
   if (type === "displacement" || type === "velocity" || type === "acceleration") return 8;
   return 3;
+}
+
+function coreCloudGeometryFromUnknown(value: unknown): CoreCloudGeometrySource | null {
+  if (!value || typeof value !== "object") return null;
+  const raw = value as Partial<CoreCloudGeometrySource>;
+  if (!isCoreCloudGeometryKind(raw.kind)) return null;
+  const descriptor = recordOrUndefined(raw.descriptor) ?? recordOrUndefined(raw.geometryDescriptor);
+  return {
+    kind: raw.kind,
+    ...(isCoreCloudSampleId(raw.sampleId) ? { sampleId: raw.sampleId } : {}),
+    ...(isCoreCloudGeometryFormat(raw.format) ? { format: raw.format } : {}),
+    ...(typeof raw.filename === "string" && raw.filename ? { filename: raw.filename } : {}),
+    ...(typeof raw.contentBase64 === "string" && raw.contentBase64 ? { contentBase64: raw.contentBase64 } : {}),
+    ...(raw.units === "m" ? { units: "m" as const } : { units: "mm" as const }),
+    ...(descriptor ? { descriptor } : {})
+  };
+}
+
+function isCoreCloudGeometryKind(value: unknown): value is CoreCloudGeometrySource["kind"] {
+  return value === "sample_procedural" || value === "uploaded_cad" || value === "uploaded_mesh" || value === "structured_block";
+}
+
+function isCoreCloudSampleId(value: unknown): value is NonNullable<CoreCloudGeometrySource["sampleId"]> {
+  return value === "cantilever" || value === "beam" || value === "bracket";
+}
+
+function isCoreCloudGeometryFormat(value: unknown): value is NonNullable<CoreCloudGeometrySource["format"]> {
+  return value === "step" || value === "stl" || value === "obj" || value === "msh" || value === "json";
+}
+
+function recordOrUndefined(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+}
+
+function isBracketDemoGeometry(study: Study, displayModel: DisplayModel): boolean {
+  const text = `${displayModelText(displayModel)} ${study.geometryScope.map((scope) => scope.label).join(" ")}`;
+  return /\bbracket\b/i.test(text) && /\b(gusset|rib|upright|mounting|hole|holes)\b/i.test(text);
+}
+
+function bracketProceduralGeometryDescriptor(): Record<string, unknown> {
+  return {
+    base: { length: 120, width: 34, height: 10 },
+    upright: { height: 88, width: 18, thickness: 34 },
+    gusset: { length: 72, height: 58, thickness: 34 },
+    rib: { length: 72, height: 58, thickness: 34 },
+    holes: [
+      { id: "hole-base-1", center: [32, 17, 5], diameter: 12 },
+      { id: "hole-base-2", center: [88, 17, 5], diameter: 12 },
+      { id: "hole-upright-1", center: [9, 17, 56], diameter: 10 }
+    ],
+    surfaces: {
+      fixedSupport: { selectionRef: "FS1", sourceSelectionRef: "selection-fixed-face", sourceFaceId: "face-base-left", name: "fixed_support" },
+      loadSurface: { selectionRef: "L1", sourceSelectionRef: "selection-load-face", sourceFaceId: "face-load-top", name: "load_surface" }
+    },
+    supportFaceId: "face-base-left",
+    loadFaceId: "face-load-top",
+    meshSize: 18
+  };
+}
+
+function selectionSurfaceDescriptor(study: Study, role: "fixed" | "load", fallbackSelectionRef: string): Record<string, unknown> {
+  const item = role === "fixed"
+    ? study.constraints.find((constraint) => constraint.type === "fixed")
+    : study.loads[0];
+  const selection = item?.selectionRef
+    ? study.namedSelections.find((candidate) => candidate.id === item.selectionRef)
+    : undefined;
+  const face = selection?.geometryRefs.find((ref) => ref.entityType === "face");
+  return {
+    selectionRef: item?.selectionRef ?? fallbackSelectionRef,
+    sourceFaceId: face?.entityId,
+    name: role === "fixed" ? "fixed_support" : "load_surface"
+  };
 }
 
 function displayModelText(displayModel: DisplayModel): string {
