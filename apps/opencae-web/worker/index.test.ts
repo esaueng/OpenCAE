@@ -17,8 +17,9 @@ vi.mock("@cloudflare/containers", () => ({
 }));
 
 const { default: worker } = await import("./index");
-const expectedRunnerVersion = "0.1.1";
+const expectedRunnerVersion = "0.1.3";
 const expectedContainerInstanceName = `opencae-core-cloud-${expectedRunnerVersion}`;
+const expectedContainerApplicationName = "opencae-core-cloud-0.1.1";
 
 function readJsonc(path: string) {
   return parseJsonc(readFileSync(resolve(__dirname, path), "utf8"), path);
@@ -60,7 +61,7 @@ describe("Cloudflare local-first worker", () => {
     expect(defaultConfig.routes).toEqual([{ pattern: "cae.esau.app", custom_domain: true }]);
     expect(defaultConfig.containers).toEqual([
       expect.objectContaining({
-        name: expectedContainerInstanceName,
+        name: expectedContainerApplicationName,
         class_name: "OpenCaeCoreCloudContainer",
         image: "./services/opencae-core-cloud/Dockerfile"
       })
@@ -88,7 +89,7 @@ describe("Cloudflare local-first worker", () => {
     expect(containerConfig.routes).toEqual([{ pattern: "cae.esau.app", custom_domain: true }]);
     expect(containerConfig.containers).toEqual([
       expect.objectContaining({
-        name: expectedContainerInstanceName,
+        name: expectedContainerApplicationName,
         class_name: "OpenCaeCoreCloudContainer",
         image: "./services/opencae-core-cloud/Dockerfile"
       })
@@ -130,8 +131,8 @@ describe("Cloudflare local-first worker", () => {
       ok: true,
       service: "opencae-core-cloud",
       runnerVersion: expectedRunnerVersion,
-      coreVersion: "0.1.1",
-      solverCpuVersion: "0.1.1",
+      coreVersion: "0.1.2",
+      solverCpuVersion: "0.1.2",
       supportedAnalysisTypes: ["static_stress", "dynamic_structural"],
       supportedSolverMethods: ["sparse_static", "mdof_dynamic"]
     }));
@@ -145,8 +146,8 @@ describe("Cloudflare local-first worker", () => {
       coreCloudAvailable: true,
       containerBound: true,
       containerRunnerVersion: expectedRunnerVersion,
-      coreVersion: "0.1.1",
-      solverCpuVersion: "0.1.1",
+      coreVersion: "0.1.2",
+      solverCpuVersion: "0.1.2",
       supportedAnalysisTypes: ["static_stress", "dynamic_structural"],
       supportedSolverMethods: ["sparse_static", "mdof_dynamic"],
       solver: "opencae-core-cloud",
