@@ -28,6 +28,7 @@ const jsonHeaders = {
   "content-type": "application/json; charset=utf-8",
   "cache-control": "no-store"
 };
+const MAX_SOLVE_REQUEST_BYTES = 5_000_000;
 
 export async function handleRequest(request: Request): Promise<Response> {
   const url = new URL(request.url);
@@ -56,8 +57,11 @@ export async function handleRequest(request: Request): Promise<Response> {
 }
 
 async function solve(request: Request): Promise<Response> {
+  if (requestBodyTooLarge(request, MAX_SOLVE_REQUEST_BYTES)) {
+    return diagnosticResponse(413, [{ code: "request-too-large", message: "OpenCAE Core Cloud solve request body is too large.", path: "$" }]);
+  }
   const payload = await readJsonBody(request);
-  if (!payload.ok) return diagnosticResponse(400, [{ code: "invalid-json", message: payload.error, path: "$" }]);
+  if (!payload.ok) return diagnosticResponse(payload.status, [{ code: payload.code, message: payload.error, path: "$" }]);
 
   const solveRequest = payload.value as CoreCloudSolveRequest;
   const analysisType = analysisTypeForRequest(solveRequest);
@@ -513,12 +517,44 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
-async function readJsonBody(request: Request): Promise<{ ok: true; value: unknown } | { ok: false; error: string }> {
+async function readJsonBody(request: Request): Promise<{ ok: true; value: unknown } | { ok: false; status: number; code: string; error: string }> {
   try {
-    return { ok: true, value: await request.json() };
-  } catch {
-    return { ok: false, error: "Request body must be valid JSON." };
+    return { ok: true, value: JSON.parse(await readBoundedText(request, MAX_SOLVE_REQUEST_BYTES)) };
+  } catch (error) {
+    if (error instanceof Error && error.message === "Request body is too large.") {
+      return { ok: false, status: 413, code: "request-too-large", error: "OpenCAE Core Cloud solve request body is too large." };
+    }
+    return { ok: false, status: 400, code: "invalid-json", error: "Request body must be valid JSON." };
   }
+}
+
+async function readBoundedText(request: Request, maxBytes: number): Promise<string> {
+  const body = request.body;
+  if (!body) return "";
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value) {
+      size += value.byteLength;
+      if (size > maxBytes) throw new Error("Request body is too large.");
+      chunks.push(value);
+    }
+  }
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(bytes);
+}
+
+function requestBodyTooLarge(request: Request, maxBytes: number): boolean {
+  const contentLength = Number(request.headers.get("content-length"));
+  return Number.isFinite(contentLength) && contentLength > maxBytes;
 }
 
 function diagnosticResponse(status: number, issues: ValidationIssue[]): Response {
