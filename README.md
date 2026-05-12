@@ -1,5 +1,7 @@
 # OpenCAE
 
+[![Production health](https://img.shields.io/website?url=https%3A%2F%2Fcae.esau.app%2Fhealth&label=production%20health)](https://cae.esau.app/health)
+
 OpenCAE is a local-first CAD/CAE simulation workspace for structural study setup, fast OpenCAE Core solves, and browser-based result review. The current app supports static stress and dynamic structural studies, sample projects, local project files, uploaded geometry previews, browser-local OpenCAE Core CPU solves, and report export.
 
 The project is organized around service boundaries so the React workspace, Fastify API, CAD import, meshing, OpenCAE Core solver, post-processing, storage, and job runners can evolve independently.
@@ -92,6 +94,22 @@ Deploy command: npx wrangler deploy --config wrangler.containers.jsonc --contain
 ```
 
 `pnpm deploy:cloudflare` is also valid as a deploy command. Do not use a web-assets-only, static, or local-first deploy command for the production Worker.
+
+## Production Uptime
+
+The live app runs at `https://cae.esau.app`. Uptime monitors should check the Worker health endpoint:
+
+```bash
+curl -fsS https://cae.esau.app/health
+```
+
+Solver readiness checks should use the Core Cloud health endpoint:
+
+```bash
+curl -fsS https://cae.esau.app/api/cloud-core/health
+```
+
+The `/health` route verifies the production Worker is reachable. The `/api/cloud-core/health` route verifies the bound OpenCAE Core Cloud service reports the expected solver, runner version, supported analysis types, and fail-closed production constraints.
 
 ## Workspace Layout
 

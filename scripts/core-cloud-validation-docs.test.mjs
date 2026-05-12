@@ -27,4 +27,12 @@ describe("Core Cloud validation documentation", () => {
     expect(readme).toContain("opencae-core-cloud");
     expect(readme).toContain("No local estimate fallback");
   });
+
+  test("documents production uptime checks in the root README", () => {
+    const readme = readFileSync(resolve(rootDir, "README.md"), "utf8");
+
+    expect(readme).toContain("## Production Uptime");
+    expect(readme).toContain("https://cae.esau.app/health");
+    expect(readme).toContain("https://cae.esau.app/api/cloud-core/health");
+  });
 });
