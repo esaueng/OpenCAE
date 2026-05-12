@@ -1,7 +1,21 @@
 import { describe, expect, test } from "vitest";
-import { buildApi } from "./server";
+import { API_LISTEN_HOST, buildApi } from "./server";
 
 describe("OpenCAE API server", () => {
+  test("only allows local development origins through CORS", async () => {
+    const api = await buildApi();
+
+    const allowed = await api.inject({ method: "GET", url: "/health", headers: { origin: "http://localhost:5173" } });
+    const blocked = await api.inject({ method: "GET", url: "/health", headers: { origin: "https://attacker.example" } });
+
+    expect(allowed.headers["access-control-allow-origin"]).toBe("http://localhost:5173");
+    expect(blocked.headers["access-control-allow-origin"]).toBeUndefined();
+  });
+
+  test("listens on loopback by default", () => {
+    expect(API_LISTEN_HOST).toBe("127.0.0.1");
+  });
+
   test("rate limits project creation", async () => {
     const api = await buildApi();
     const responses = [];

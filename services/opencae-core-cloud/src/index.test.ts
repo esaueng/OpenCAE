@@ -43,6 +43,19 @@ describe("OpenCAE Core Cloud service", () => {
     });
   });
 
+  test("rejects oversized solve request bodies before parsing", async () => {
+    const response = await handleRequest(new Request("http://core-cloud/solve", {
+      method: "POST",
+      headers: { "content-type": "application/json", "content-length": "5000001" },
+      body: "{}"
+    }));
+
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toMatchObject({
+      diagnostics: [expect.objectContaining({ id: "request-too-large" })]
+    });
+  });
+
   test("solves a static Core block model", async () => {
     const response = await solve({
       runId: "run-static",
