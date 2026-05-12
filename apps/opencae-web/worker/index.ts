@@ -4,12 +4,14 @@ import { Container, getContainer } from "@cloudflare/containers";
 
 const jsonHeaders = {
   "content-type": "application/json; charset=utf-8",
-  "cache-control": "no-store"
+  "cache-control": "no-store",
+  ...securityHeaders()
 };
 
 const EXPECTED_CORE_CLOUD_RUNNER_VERSION = "0.1.3";
 const LEGACY_SOLVER_TOKEN = ["calcu", "lix"].join("");
 const INCOMPLETE_CORE_CLOUD_RESULT_MESSAGE = "OpenCAE Core Cloud returned an incomplete result contract.";
+const MAX_CORE_CLOUD_REQUEST_BYTES = 5_000_000;
 
 const cloudCoreUnavailable = {
   ok: false,
@@ -63,15 +65,21 @@ export default {
         return createCoreCloudRun(request, env);
       }
       if (request.method === "POST" && cloudRoute.action === "start" && cloudRoute.runId) {
+        const authorization = await authorizeCoreCloudRun(request, env, cloudRoute.runId);
+        if (authorization) return authorization;
         return startCoreCloudRun(env, cloudRoute.runId);
       }
       if (request.method === "GET" && cloudRoute.action === "events" && cloudRoute.runId) {
+        const authorization = await authorizeCoreCloudRun(request, env, cloudRoute.runId);
+        if (authorization) return authorization;
         if (request.headers.get("accept")?.includes("text/event-stream")) {
           return readCoreCloudEventsStream(env, cloudRoute.runId);
         }
         return readCoreCloudArtifact(env, eventsKey(cloudRoute.runId), { events: [] });
       }
       if (request.method === "GET" && cloudRoute.action === "results" && cloudRoute.runId) {
+        const authorization = await authorizeCoreCloudRun(request, env, cloudRoute.runId);
+        if (authorization) return authorization;
         return readCoreCloudArtifact(env, resultsKey(cloudRoute.runId));
       }
       return Response.json({ error: "OpenCAE Core Cloud route not found." }, { status: 404, headers: jsonHeaders });
@@ -86,7 +94,7 @@ export default {
       );
     }
 
-    return env.ASSETS.fetch(request);
+    return withSecurityHeaders(await env.ASSETS.fetch(request));
   },
 
   async queue(): Promise<void> {
@@ -177,8 +185,14 @@ async function coreCloudHealth(env: Env): Promise<Response> {
 }
 
 async function createCoreCloudRun(request: Request, env: Env): Promise<Response> {
-  const payload = await readJson(request) as CoreCloudRunRequest;
-  const runId = payload.runId || `run-cloud-core-${crypto.randomUUID()}`;
+  if (requestBodyTooLarge(request, MAX_CORE_CLOUD_REQUEST_BYTES)) {
+    return Response.json({ error: "OpenCAE Core Cloud request body is too large." }, { status: 413, headers: jsonHeaders });
+  }
+  const body = await readJson(request);
+  if (!body.ok) return Response.json({ error: body.error }, { status: body.status, headers: jsonHeaders });
+  const payload = body.value as CoreCloudRunRequest;
+  const runId = `run-cloud-core-${crypto.randomUUID()}`;
+  const runToken = createRunToken();
   const requestArtifact = {
     ...payload,
     runId,
@@ -193,11 +207,14 @@ async function createCoreCloudRun(request: Request, env: Env): Promise<Response>
     await writeCoreCloudEvents(env, runId, [event(runId, "error", preflight, 100)]);
     return Response.json({ error: preflight, solver: "opencae-core-cloud" }, { status: 422, headers: jsonHeaders });
   }
+  await writeJson(env, runAuthKey(runId), { token: runToken, createdAt: new Date().toISOString() });
   await writeJson(env, requestKey(runId), requestArtifact);
   await writeCoreCloudEvents(env, runId, [
     event(runId, "state", "OpenCAE Core Cloud solve queued.", 0)
   ]);
-  const startUrl = `/api/cloud-core/runs/${runId}/start`;
+  const startUrl = tokenizedRunUrl(`/api/cloud-core/runs/${runId}/start`, runToken);
+  const streamUrl = tokenizedRunUrl(`/api/cloud-core/runs/${runId}/events`, runToken);
+  const resultsUrl = tokenizedRunUrl(`/api/cloud-core/runs/${runId}/results`, runToken);
   return Response.json(
     {
       run: {
@@ -210,8 +227,10 @@ async function createCoreCloudRun(request: Request, env: Env): Promise<Response>
         startedAt: new Date().toISOString(),
         diagnostics: []
       },
-      streamUrl: `/api/cloud-core/runs/${runId}/events`,
+      runToken,
+      streamUrl,
       startUrl,
+      resultsUrl,
       message: "OpenCAE Core Cloud simulation queued."
     },
     { status: 202, headers: jsonHeaders }
@@ -363,6 +382,39 @@ function fetchCoreCloudContainer(env: Env, pathname: string, init?: RequestInit)
   return coreCloudContainer.fetch(new Request(`https://container.local${pathname}`, init));
 }
 
+async function authorizeCoreCloudRun(request: Request, env: Env, runId: string): Promise<Response | undefined> {
+  const token = runTokenFromRequest(request);
+  if (!token) return Response.json({ error: "OpenCAE Core Cloud run token is required." }, { status: 403, headers: jsonHeaders });
+  const object = await (env as CoreCloudEnv).CORE_CLOUD_ARTIFACTS?.get(runAuthKey(runId));
+  if (!object) return Response.json({ error: "OpenCAE Core Cloud run not found." }, { status: 404, headers: jsonHeaders });
+  const auth = await object.json() as { token?: unknown };
+  if (typeof auth.token !== "string" || !sameToken(auth.token, token)) {
+    return Response.json({ error: "OpenCAE Core Cloud run token is invalid." }, { status: 403, headers: jsonHeaders });
+  }
+  return undefined;
+}
+
+function runTokenFromRequest(request: Request): string | undefined {
+  const url = new URL(request.url);
+  const token = url.searchParams.get("token") ?? request.headers.get("x-opencae-run-token") ?? bearerToken(request.headers.get("authorization"));
+  return token && token.length <= 256 ? token : undefined;
+}
+
+function bearerToken(value: string | null): string | undefined {
+  if (!value) return undefined;
+  const prefix = "Bearer ";
+  return value.startsWith(prefix) ? value.slice(prefix.length) : undefined;
+}
+
+function sameToken(expected: string, actual: string): boolean {
+  if (expected.length !== actual.length) return false;
+  let diff = 0;
+  for (let index = 0; index < expected.length; index += 1) {
+    diff |= expected.charCodeAt(index) ^ actual.charCodeAt(index);
+  }
+  return diff === 0;
+}
+
 function coreCloudContainerInstanceName(): string {
   return `opencae-core-cloud-${EXPECTED_CORE_CLOUD_RUNNER_VERSION}`;
 }
@@ -404,12 +456,44 @@ async function readEvents(env: Env, runId: string): Promise<RunEvent[]> {
   return Array.isArray(events) ? events as RunEvent[] : [];
 }
 
-async function readJson(request: Request): Promise<unknown> {
+async function readJson(request: Request): Promise<{ ok: true; value: unknown } | { ok: false; status: number; error: string }> {
   try {
-    return await request.json();
-  } catch {
-    throw new Error("Request body must be valid JSON.");
+    return { ok: true, value: JSON.parse(await readBoundedText(request, MAX_CORE_CLOUD_REQUEST_BYTES)) };
+  } catch (error) {
+    if (error instanceof Error && error.message === "Request body is too large.") {
+      return { ok: false, status: 413, error: "OpenCAE Core Cloud request body is too large." };
+    }
+    return { ok: false, status: 400, error: "Request body must be valid JSON." };
   }
+}
+
+async function readBoundedText(request: Request, maxBytes: number): Promise<string> {
+  const body = request.body;
+  if (!body) return "";
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value) {
+      size += value.byteLength;
+      if (size > maxBytes) throw new Error("Request body is too large.");
+      chunks.push(value);
+    }
+  }
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(bytes);
+}
+
+function requestBodyTooLarge(request: Request, maxBytes: number): boolean {
+  const contentLength = Number(request.headers.get("content-length"));
+  return Number.isFinite(contentLength) && contentLength > maxBytes;
 }
 
 function event(runId: string, type: RunEvent["type"], message: string, progress?: number): RunEvent {
@@ -426,12 +510,53 @@ function requestKey(runId: string): string {
   return `cloud-core/runs/${runId}/request.json`;
 }
 
+function runAuthKey(runId: string): string {
+  return `cloud-core/runs/${runId}/auth.json`;
+}
+
 function eventsKey(runId: string): string {
   return `cloud-core/runs/${runId}/events.json`;
 }
 
 function resultsKey(runId: string): string {
   return `cloud-core/runs/${runId}/results.json`;
+}
+
+function createRunToken(): string {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function tokenizedRunUrl(path: string, token: string): string {
+  return `${path}?token=${encodeURIComponent(token)}`;
+}
+
+function withSecurityHeaders(response: Response): Response {
+  const secured = new Response(response.body, response);
+  for (const [key, value] of Object.entries(securityHeaders())) {
+    secured.headers.set(key, value);
+  }
+  return secured;
+}
+
+function securityHeaders(): Record<string, string> {
+  return {
+    "content-security-policy": [
+      "default-src 'self'",
+      "script-src 'self'",
+      "style-src 'self' 'unsafe-inline'",
+      "img-src 'self' data: blob:",
+      "connect-src 'self' https://plausible.io",
+      "worker-src 'self' blob:",
+      "object-src 'none'",
+      "base-uri 'self'",
+      "frame-ancestors 'none'"
+    ].join("; "),
+    "x-content-type-options": "nosniff",
+    "referrer-policy": "strict-origin-when-cross-origin",
+    "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=()"
+  };
 }
 
 function errorMessage(value: unknown, fallback: string): string {

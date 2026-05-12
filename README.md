@@ -64,7 +64,7 @@ pnpm install
 pnpm deploy:cloudflare
 ```
 
-Build and deploy environments use `pnpm build:core` to ensure `https://github.com/esaueng/OpenCAE-Core` exists as `../opencae-core`, update that checkout to the ref in `services/opencae-core-cloud/OPENCAE_CORE_REF`, rerun `pnpm install --no-frozen-lockfile`, and then build the live Core packages consumed through this workspace. The default ref is `main`, so each build picks up the latest OpenCAE Core branch state unless `OPENCAE_CORE_REF` is overridden for a pinned release. `pnpm` resolves `@opencae/core`, `@opencae/solver-cpu`, and other OpenCAE Core packages from that sibling workspace; there is no runtime network lookup.
+Build and deploy environments use `pnpm build:core` to ensure `https://github.com/esaueng/OpenCAE-Core` exists as `../opencae-core`, update that checkout to the pinned commit in `services/opencae-core-cloud/OPENCAE_CORE_REF`, rerun `pnpm install --no-frozen-lockfile`, and then build the live Core packages consumed through this workspace. Production builds require that ref to be a full commit SHA so container artifacts are reproducible. `pnpm` resolves `@opencae/core`, `@opencae/solver-cpu`, and other OpenCAE Core packages from that sibling workspace; there is no runtime network lookup.
 
 Production deploy scripts use [wrangler.containers.jsonc](wrangler.containers.jsonc) for the app domain and container rollout. [wrangler.jsonc](wrangler.jsonc) mirrors the Core Cloud production bindings so a default production config cannot publish an unbound Worker.
 

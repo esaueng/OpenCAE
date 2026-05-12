@@ -65,17 +65,17 @@ describe("Cloudflare deployment config guard", () => {
     expect(verifyRunnerSource).toContain("services/opencae-core-cloud/RUNNER_VERSION");
   });
 
-  test("Core Cloud build tracks the latest external OpenCAE Core branch", () => {
+  test("Core Cloud build pins the external OpenCAE Core ref to an immutable commit", () => {
     const coreRefPath = resolve(rootDir, "services/opencae-core-cloud/OPENCAE_CORE_REF");
     const coreRef = readFileSync(coreRefPath, "utf8").trim();
     const ensureCoreSource = readFileSync(resolve(rootDir, "scripts/ensure-opencae-core.mjs"), "utf8");
 
-    expect(coreRef).toBe("main");
+    expect(coreRef).toMatch(/^[0-9a-f]{40}$/);
     expect(ensureCoreSource).toContain("OPENCAE_CORE_REF");
     expect(ensureCoreSource).toContain("services/opencae-core-cloud/OPENCAE_CORE_REF");
     expect(ensureCoreSource).toContain("updateExistingCoreWorkspace");
     expect(ensureCoreSource).toContain("git\", [\"-C\", directory, \"fetch\", \"--depth\", \"1\", \"origin\", ref]");
-    expect(ensureCoreSource).toContain("merge\", \"--ff-only\", \"FETCH_HEAD");
+    expect(ensureCoreSource).toContain("Production OpenCAE Core builds must pin OPENCAE_CORE_REF to a full commit SHA.");
     expect(ensureCoreSource).toContain("checkout");
     expect(ensureCoreSource).toContain("FETCH_HEAD");
   });

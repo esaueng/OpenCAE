@@ -11,6 +11,11 @@ const coreDir = resolve(process.env.OPENCAE_CORE_DIR ?? resolve(repoRoot, "../op
 const coreRepo = process.env.OPENCAE_CORE_REPO ?? "https://github.com/esaueng/OpenCAE-Core.git";
 const pinnedCoreRefPath = resolve(repoRoot, "services/opencae-core-cloud/OPENCAE_CORE_REF");
 const coreRef = process.env.OPENCAE_CORE_REF ?? readPinnedCoreRef() ?? "main";
+if (isProductionBuild() && !isFullGitCommitRef(coreRef)) {
+  console.error("Production OpenCAE Core builds must pin OPENCAE_CORE_REF to a full commit SHA.");
+  console.error(`Got "${coreRef}". Update services/opencae-core-cloud/OPENCAE_CORE_REF before building production artifacts.`);
+  process.exit(1);
+}
 
 if (existsSync(resolve(coreDir, "package.json"))) {
   updateExistingCoreWorkspace(coreDir, coreRef);
@@ -79,6 +84,14 @@ function readPinnedCoreRef() {
 
 function isGitCommitRef(ref) {
   return /^[0-9a-f]{7,40}$/i.test(ref);
+}
+
+function isFullGitCommitRef(ref) {
+  return /^[0-9a-f]{40}$/i.test(ref);
+}
+
+function isProductionBuild() {
+  return process.env.CI === "true" || process.env.NODE_ENV === "production" || process.env.OPENCAE_REQUIRE_PINNED_CORE === "1";
 }
 
 function localBranchExists(directory, branch) {

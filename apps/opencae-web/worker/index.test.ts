@@ -126,6 +126,16 @@ describe("Cloudflare local-first worker", () => {
     });
   });
 
+  test("asset responses include browser security headers", async () => {
+    const response = await worker.fetch(new Request("https://cae.esau.app/"), {
+      ASSETS: { fetch: async () => new Response("<html></html>", { headers: { "content-type": "text/html" } }) }
+    } as Env);
+
+    expect(response.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(response.headers.get("referrer-policy")).toBe("strict-origin-when-cross-origin");
+  });
+
   test("health reports Core Cloud availability and no legacy/local fallback flags", async () => {
     containerMock.fetch.mockResolvedValueOnce(Response.json({
       ok: true,
@@ -192,22 +202,54 @@ describe("Cloudflare local-first worker", () => {
     await ctx.flush();
 
     expect(response.status).toBe(202);
-    expect(body.run.id).toBe("run-core-1");
-    expect(body.streamUrl).toBe("/api/cloud-core/runs/run-core-1/events");
-    expect(body.startUrl).toBe("/api/cloud-core/runs/run-core-1/start");
+    expect(body.run.id).toMatch(/^run-cloud-core-/);
+    expect(body.run.id).not.toBe("run-core-1");
+    expect(body.streamUrl).toMatch(new RegExp(`/api/cloud-core/runs/${body.run.id}/events\\?token=.+`));
+    expect(body.startUrl).toMatch(new RegExp(`/api/cloud-core/runs/${body.run.id}/start\\?token=.+`));
     expect(containerMock.fetch).not.toHaveBeenCalled();
-    const startResponse = await startCoreRun(env, "run-core-1");
+    const unauthenticatedStart = await startCoreRun(env, body.run.id);
+    expect(unauthenticatedStart.status).toBe(403);
+    const startResponse = await worker.fetch(new Request(`https://cae.esau.app${body.startUrl}`, { method: "POST" }), env);
     expect(startResponse.status).toBe(200);
     expect(containerMock.requestedNames).toEqual([expectedContainerInstanceName, expectedContainerInstanceName]);
     expect(containerMock.fetch).toHaveBeenCalledTimes(2);
     expect(String(containerMock.fetch.mock.calls[1]?.[0].url)).toBe("https://container.local/solve");
-    expect(await env.CORE_CLOUD_ARTIFACTS.readJson("cloud-core/runs/run-core-1/request.json")).toMatchObject({ runId: "run-core-1" });
-    expect(await env.CORE_CLOUD_ARTIFACTS.readJson("cloud-core/runs/run-core-1/results.json")).toMatchObject({
+    expect(await env.CORE_CLOUD_ARTIFACTS.readJson(`cloud-core/runs/${body.run.id}/request.json`)).toMatchObject({ runId: body.run.id });
+    expect(await env.CORE_CLOUD_ARTIFACTS.readJson(`cloud-core/runs/${body.run.id}/results.json`)).toMatchObject({
       provenance: { solver: "opencae-core-cloud", kind: "opencae_core_fea" }
     });
-    expect(await env.CORE_CLOUD_ARTIFACTS.readJson("cloud-core/runs/run-core-1/events.json")).toEqual(
+    expect(await env.CORE_CLOUD_ARTIFACTS.readJson(`cloud-core/runs/${body.run.id}/events.json`)).toEqual(
       expect.arrayContaining([expect.objectContaining({ type: "complete", message: "OpenCAE Core Cloud solve complete." })])
     );
+  });
+
+  test("cloud run artifacts require the per-run token", async () => {
+    const env = createEnv();
+    const ctx = createExecutionContext();
+
+    const response = await worker.fetch(coreRunRequest({ runId: "run-token-test" }), env, ctx);
+    const body = await response.json() as { run: { id: string }; streamUrl: string };
+    await ctx.flush();
+
+    const eventsWithoutToken = await worker.fetch(new Request(`https://cae.esau.app/api/cloud-core/runs/${body.run.id}/events`), env);
+    const resultsWithoutToken = await worker.fetch(new Request(`https://cae.esau.app/api/cloud-core/runs/${body.run.id}/results`), env);
+    const eventsWithToken = await worker.fetch(new Request(`https://cae.esau.app${body.streamUrl}`), env);
+
+    expect(eventsWithoutToken.status).toBe(403);
+    expect(resultsWithoutToken.status).toBe(403);
+    expect(eventsWithToken.status).toBe(200);
+  });
+
+  test("rejects oversized Core Cloud request bodies before JSON parsing", async () => {
+    const env = createEnv();
+    const response = await worker.fetch(new Request("https://cae.esau.app/api/cloud-core/runs", {
+      method: "POST",
+      headers: { "content-type": "application/json", "content-length": "5000001" },
+      body: "{}"
+    }), env);
+
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toMatchObject({ error: "OpenCAE Core Cloud request body is too large." });
   });
 
   test("unwraps older Core Cloud result envelopes before validation", async () => {
@@ -218,16 +260,17 @@ describe("Cloudflare local-first worker", () => {
       .mockResolvedValueOnce(Response.json({ ok: true, runId: "run-envelope", result: coreResult(), diagnostics: [] }));
 
     const response = await worker.fetch(coreRunRequest({ runId: "run-envelope" }), env, ctx);
+    const body = await response.json() as CoreRunResponse;
     await ctx.flush();
 
     expect(response.status).toBe(202);
-    const startResponse = await startCoreRun(env, "run-envelope");
+    const startResponse = await worker.fetch(new Request(`https://cae.esau.app${body.startUrl}`, { method: "POST" }), env);
     expect(startResponse.status).toBe(200);
-    await expect(env.CORE_CLOUD_ARTIFACTS.readJson("cloud-core/runs/run-envelope/results.json")).resolves.toMatchObject({
+    await expect(env.CORE_CLOUD_ARTIFACTS.readJson(`cloud-core/runs/${body.run.id}/results.json`)).resolves.toMatchObject({
       provenance: { solver: "opencae-core-cloud", kind: "opencae_core_fea" },
       fields: expect.any(Array)
     });
-    const events = await env.CORE_CLOUD_ARTIFACTS.readJson("cloud-core/runs/run-envelope/events.json");
+    const events = await env.CORE_CLOUD_ARTIFACTS.readJson(`cloud-core/runs/${body.run.id}/events.json`);
     expect(events).toEqual(expect.arrayContaining([
       expect.objectContaining({ type: "complete", message: "OpenCAE Core Cloud solve complete." })
     ]));
@@ -241,11 +284,12 @@ describe("Cloudflare local-first worker", () => {
       .mockResolvedValueOnce(Response.json(coreResult()));
 
     const response = await worker.fetch(coreRunRequest({ runId: "run-e2e" }), env, ctx);
+    const body = await response.json() as CoreRunResponse;
     await ctx.flush();
-    const startResponse = await startCoreRun(env, "run-e2e");
+    const startResponse = await worker.fetch(new Request(`https://cae.esau.app${body.startUrl}`, { method: "POST" }), env);
     expect(startResponse.status).toBe(200);
-    const eventsResponse = await worker.fetch(new Request("https://cae.esau.app/api/cloud-core/runs/run-e2e/events"), env);
-    const resultsResponse = await worker.fetch(new Request("https://cae.esau.app/api/cloud-core/runs/run-e2e/results"), env);
+    const eventsResponse = await worker.fetch(new Request(`https://cae.esau.app${body.streamUrl}`), env);
+    const resultsResponse = await worker.fetch(new Request(`https://cae.esau.app${body.resultsUrl}`), env);
     const events = await eventsResponse.json() as Array<{ type: string; message: string; progress?: number }>;
     const results = await resultsResponse.json() as { provenance?: Record<string, unknown>; fields?: unknown[] };
     const serialized = JSON.stringify({ events, results }).toLowerCase();
@@ -276,18 +320,19 @@ describe("Cloudflare local-first worker", () => {
       .mockImplementationOnce(async (request: Request) => {
         const body = await request.json() as Record<string, unknown>;
         expect(body).toMatchObject({
-          runId: "run-geometry",
           geometry: { kind: "sample_procedural", sampleId: "bracket" }
         });
+        expect(body.runId).toMatch(/^run-cloud-core-/);
         expect(body.coreModel).toBeUndefined();
         return Response.json(coreResult());
       });
 
     const response = await worker.fetch(coreRunRequest({ runId: "run-geometry", geometryOnly: true }), env, ctx);
+    const body = await response.json() as CoreRunResponse;
     await ctx.flush();
-    const startResponse = await startCoreRun(env, "run-geometry");
-    const requestArtifact = await env.CORE_CLOUD_ARTIFACTS.readJson("cloud-core/runs/run-geometry/request.json");
-    const events = await env.CORE_CLOUD_ARTIFACTS.readJson("cloud-core/runs/run-geometry/events.json");
+    const startResponse = await worker.fetch(new Request(`https://cae.esau.app${body.startUrl}`, { method: "POST" }), env);
+    const requestArtifact = await env.CORE_CLOUD_ARTIFACTS.readJson(`cloud-core/runs/${body.run.id}/request.json`);
+    const events = await env.CORE_CLOUD_ARTIFACTS.readJson(`cloud-core/runs/${body.run.id}/events.json`);
 
     expect(response.status).toBe(202);
     expect(startResponse.status).toBe(200);
@@ -309,12 +354,13 @@ describe("Cloudflare local-first worker", () => {
       .mockResolvedValueOnce(Response.json(coreResult()));
 
     const response = await worker.fetch(coreRunRequest({ runId: "run-alias", path: "/api/cloud-fea/runs" }), env, ctx);
+    const body = await response.json() as CoreRunResponse;
     await ctx.flush();
-    const startResponse = await startCoreRun(env, "run-alias", "/api/cloud-fea/runs");
+    const startResponse = await worker.fetch(new Request(`https://cae.esau.app${body.startUrl.replace("/api/cloud-core/runs", "/api/cloud-fea/runs")}`, { method: "POST" }), env);
     expect(startResponse.status).toBe(200);
 
-    await expect(response.json()).resolves.toMatchObject({
-      run: { id: "run-alias", solverBackend: "opencae-core-cloud" },
+    expect(body).toMatchObject({
+      run: { solverBackend: "opencae-core-cloud" },
       message: "OpenCAE Core Cloud simulation queued."
     });
     expect(String(containerMock.fetch.mock.calls[1]?.[0].url)).toBe("https://container.local/solve");
@@ -326,16 +372,17 @@ describe("Cloudflare local-first worker", () => {
     containerMock.fetch.mockResolvedValueOnce(Response.json({ ok: true, runnerVersion: "0.0.1" }));
 
     const response = await worker.fetch(coreRunRequest({ runId: "run-stale" }), env, ctx);
+    const body = await response.json() as CoreRunResponse;
     await ctx.flush();
 
     expect(response.status).toBe(202);
-    const startResponse = await startCoreRun(env, "run-stale");
+    const startResponse = await worker.fetch(new Request(`https://cae.esau.app${body.startUrl}`, { method: "POST" }), env);
     expect(startResponse.status).toBe(500);
-    const events = await env.CORE_CLOUD_ARTIFACTS.readJson("cloud-core/runs/run-stale/events.json");
+    const events = await env.CORE_CLOUD_ARTIFACTS.readJson(`cloud-core/runs/${body.run.id}/events.json`);
     expect(events).toEqual(expect.arrayContaining([
       expect.objectContaining({ type: "error", message: expect.stringContaining("runner version") })
     ]));
-    expect(await env.CORE_CLOUD_ARTIFACTS.get("cloud-core/runs/run-stale/results.json")).toBeNull();
+    expect(await env.CORE_CLOUD_ARTIFACTS.get(`cloud-core/runs/${body.run.id}/results.json`)).toBeNull();
     expect(containerMock.fetch).toHaveBeenCalledTimes(1);
   });
 
@@ -352,12 +399,13 @@ describe("Cloudflare local-first worker", () => {
         ]
       })));
 
-    await worker.fetch(coreRunRequest({ runId: "run-dynamic", analysisType: "dynamic_structural" }), env, ctx);
+    const response = await worker.fetch(coreRunRequest({ runId: "run-dynamic", analysisType: "dynamic_structural" }), env, ctx);
+    const body = await response.json() as CoreRunResponse;
     await ctx.flush();
-    const startResponse = await startCoreRun(env, "run-dynamic");
+    const startResponse = await worker.fetch(new Request(`https://cae.esau.app${body.startUrl}`, { method: "POST" }), env);
     expect(startResponse.status).toBe(200);
 
-    await expect(env.CORE_CLOUD_ARTIFACTS.readJson("cloud-core/runs/run-dynamic/results.json")).resolves.toMatchObject({
+    await expect(env.CORE_CLOUD_ARTIFACTS.readJson(`cloud-core/runs/${body.run.id}/results.json`)).resolves.toMatchObject({
       summary: { transient: { frameCount: 2 } }
     });
   });
@@ -379,19 +427,20 @@ describe("Cloudflare local-first worker", () => {
         ]
       })));
 
-    await worker.fetch(coreRunRequest({ runId: "run-incomplete" }), env, ctx);
+    const response = await worker.fetch(coreRunRequest({ runId: "run-incomplete" }), env, ctx);
+    const body = await response.json() as CoreRunResponse;
     await ctx.flush();
-    const startResponse = await startCoreRun(env, "run-incomplete");
+    const startResponse = await worker.fetch(new Request(`https://cae.esau.app${body.startUrl}`, { method: "POST" }), env);
     expect(startResponse.status).toBe(500);
 
-    const events = await env.CORE_CLOUD_ARTIFACTS.readJson("cloud-core/runs/run-incomplete/events.json");
+    const events = await env.CORE_CLOUD_ARTIFACTS.readJson(`cloud-core/runs/${body.run.id}/events.json`);
     expect(events).toEqual(expect.arrayContaining([
       expect.objectContaining({
         type: "error",
         message: "OpenCAE Core Cloud returned an incomplete result contract."
       })
     ]));
-    expect(await env.CORE_CLOUD_ARTIFACTS.get("cloud-core/runs/run-incomplete/results.json")).toBeNull();
+    expect(await env.CORE_CLOUD_ARTIFACTS.get(`cloud-core/runs/${body.run.id}/results.json`)).toBeNull();
   });
 
   test("legacy and preview provenance are rejected", async () => {
@@ -401,12 +450,13 @@ describe("Cloudflare local-first worker", () => {
       .mockResolvedValueOnce(Response.json({ ok: true, runnerVersion: expectedRunnerVersion }))
       .mockResolvedValueOnce(Response.json(coreResult({ provenance: { solver: "calculix", kind: "opencae_core_fea", resultSource: "computed" } })));
 
-    await worker.fetch(coreRunRequest({ runId: "run-calculix" }), calculixEnv, calculixCtx);
+    const calculixResponse = await worker.fetch(coreRunRequest({ runId: "run-calculix" }), calculixEnv, calculixCtx);
+    const calculixBody = await calculixResponse.json() as CoreRunResponse;
     await calculixCtx.flush();
-    const calculixStart = await startCoreRun(calculixEnv, "run-calculix");
-    expect(calculixStart.status).toBe(409);
+    const calculixStart = await worker.fetch(new Request(`https://cae.esau.app${calculixBody.startUrl}`, { method: "POST" }), calculixEnv);
+    expect(calculixStart.status).toBe(500);
 
-    const calculixEvents = await calculixEnv.CORE_CLOUD_ARTIFACTS.readJson("cloud-core/runs/run-calculix/events.json");
+    const calculixEvents = await calculixEnv.CORE_CLOUD_ARTIFACTS.readJson(`cloud-core/runs/${calculixBody.run.id}/events.json`);
     expect(calculixEvents).toEqual(expect.arrayContaining([
       expect.objectContaining({ type: "error", message: expect.stringContaining("legacy solver") })
     ]));
@@ -418,12 +468,13 @@ describe("Cloudflare local-first worker", () => {
       .mockResolvedValueOnce(Response.json({ ok: true, runnerVersion: expectedRunnerVersion }))
       .mockResolvedValueOnce(Response.json(coreResult({ provenance: { solver: "opencae-core-cloud", kind: "local_estimate", resultSource: "computed_preview" } })));
 
-    await worker.fetch(coreRunRequest({ runId: "run-preview" }), previewEnv, previewCtx);
+    const previewResponse = await worker.fetch(coreRunRequest({ runId: "run-preview" }), previewEnv, previewCtx);
+    const previewBody = await previewResponse.json() as CoreRunResponse;
     await previewCtx.flush();
-    const previewStart = await startCoreRun(previewEnv, "run-preview");
+    const previewStart = await worker.fetch(new Request(`https://cae.esau.app${previewBody.startUrl}`, { method: "POST" }), previewEnv);
     expect(previewStart.status).toBe(500);
 
-    const previewEvents = await previewEnv.CORE_CLOUD_ARTIFACTS.readJson("cloud-core/runs/run-preview/events.json");
+    const previewEvents = await previewEnv.CORE_CLOUD_ARTIFACTS.readJson(`cloud-core/runs/${previewBody.run.id}/events.json`);
     expect(previewEvents).toEqual(expect.arrayContaining([
       expect.objectContaining({ type: "error", message: expect.stringContaining("preview") })
     ]));
@@ -436,6 +487,13 @@ describe("Cloudflare local-first worker", () => {
     await expect(queueHandler?.({ messages: [] } as unknown as MessageBatch<unknown>, {} as Env, {} as ExecutionContext)).resolves.toBeUndefined();
   });
 });
+
+type CoreRunResponse = {
+  run: { id: string; solverBackend?: string };
+  streamUrl: string;
+  startUrl: string;
+  resultsUrl: string;
+};
 
 function coreRunRequest(options: { runId: string; path?: string; analysisType?: string; geometryOnly?: boolean }) {
   return new Request(`https://cae.esau.app${options.path ?? "/api/cloud-core/runs"}`, {

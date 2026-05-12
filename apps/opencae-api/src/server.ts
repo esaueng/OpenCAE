@@ -41,9 +41,20 @@ import {
   type SampleModelId
 } from "./projectFactory";
 
-const api = Fastify({ logger: true });
+export const API_LISTEN_HOST = process.env.OPENCAE_API_HOST ?? "127.0.0.1";
+
+const allowedCorsOrigins = new Set([
+  "http://localhost:5173",
+  "http://127.0.0.1:5173"
+]);
+
+const api = Fastify({ logger: true, bodyLimit: 5_000_000 });
 const RATE_LIMIT_ERROR_MESSAGE = "Too many API requests. Please try again later.";
-await api.register(cors, { origin: true });
+await api.register(cors, {
+  origin(origin, callback) {
+    callback(null, !origin || allowedCorsOrigins.has(origin));
+  }
+});
 await api.register(rateLimit, {
   global: false,
   errorResponseBuilder: () => ({
@@ -824,5 +835,5 @@ export async function buildApi() {
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const port = Number(process.env.PORT ?? 4317);
-  await api.listen({ port, host: "0.0.0.0" });
+  await api.listen({ port, host: API_LISTEN_HOST });
 }
