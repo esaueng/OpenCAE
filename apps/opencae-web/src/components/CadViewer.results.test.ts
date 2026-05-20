@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { describe, expect, test, vi } from "vitest";
 import { VIEWER_AXIS_HEAD_RADIUS, VIEWER_AXIS_LABEL_BADGE_COLOR, VIEWER_AXIS_LABEL_BADGE_RADIUS, VIEWER_AXIS_LABEL_COLOR, VIEWER_AXIS_LABEL_FONT_SIZE, VIEWER_AXIS_LABEL_FONT_WEIGHT, VIEWER_AXIS_LABEL_OUTLINE_COLOR, VIEWER_AXIS_LABEL_OUTLINE_WIDTH, VIEWER_CREDIT_URL, VIEWER_GIZMO_ALIGNMENT, VIEWER_GIZMO_AXIS_LENGTH, VIEWER_GIZMO_LABEL_DISTANCE, VIEWER_GIZMO_MARGIN, VIEWER_GIZMO_SCALE, VIEWER_ISOMETRIC_GIZMO_VIEW, VIEWER_VIEW_CUBE_BODY_OPACITY, VIEWER_VIEW_CUBE_CORNER_HIT_RADIUS, VIEWER_VIEW_CUBE_CORNER_RADIUS, VIEWER_VIEW_CUBE_EDGE_COLOR, VIEWER_VIEW_CUBE_FACE_HOVER_OPACITY, VIEWER_VIEW_CUBE_FACE_LABEL_FONT_SIZE, VIEWER_VIEW_CUBE_FACE_OPACITY, VIEWER_VIEW_CUBE_SIZE, applyResultFrameToGeometry, axisLabelToViewAxis, beamDemoDisplacementAtStation, beamDemoPayloadOffset, beamDemoStationForPoint, buildSolverSurfaceOutlineGeometry, buildSolverSurfaceResultGeometry, cameraDistanceForBounds, cameraViewForAxis, cloneResultPreviewObject, colorizeResultObject, colorizeSampleResultGeometry, createBeamDemoCoordinate, createUndeformedResultOutlineObject, defaultHomeViewTarget, deformationScaleForResultFields, displayedLegendTickLabels, finalVisualScaleForDisplacementField, getViewCubeCornerDescriptors, getViewCubeFaceDescriptors, gizmoViewTargetToRequest, interpolateDisplacementAtPoint, legendMeshStats, legendTickLabels, normalizedPointLoadCantileverShape, payloadHighlightObjectId, pointLoadCantileverShape, printLayerVisualizationForBounds, resultLegendContentScale, resultLegendResizeDimensions, resultProbesForKind, resultValueForPoint, rotatedCameraOrbit, shouldDisableResultDeformation, shouldShowDimensionOverlay, shouldShowModelHitLabel, shouldShowResultMarkers, shouldShowUndeformedResultOutline, shouldShowViewCubeFaceLabel, updatePackedSamples, viewCubeFaceToGizmoView, viewerCameraResetPose, viewerGizmoLayout } from "./CadViewer";
-import type { FaceResultSample } from "../resultFields";
+import { createPackedResultPlaybackCache, type FaceResultSample } from "../resultFields";
 import type { DisplayFace, DisplayModel, ResultField } from "@opencae/schema";
 import type { PackedPreparedPlaybackCache } from "../resultPlaybackCache";
 import { resetVertexResultMappingStatsForTests, vertexResultMappingBuildCountForTests } from "../resultVertexMapping";
@@ -175,6 +175,92 @@ describe("CadViewer result coloring", () => {
     expect(Array.from(outlinePosition.array)).toEqual(surfaceMesh.nodes.flat());
     expect(cadViewerSource).toContain("const outlineGeometry = useMemo(() => buildSolverSurfaceOutlineGeometry(surfaceMesh), [surfaceMesh]);");
     expect(cadViewerSource).toContain("{shouldShowUndeformedResultOutline(showDeformed) && <UndeformedGeometryOutline geometry={outlineGeometry} />}");
+  });
+
+  test("renders packed dynamic solver-surface fields with direct surface deformation", () => {
+    const surfaceMesh = {
+      id: "solver-surface",
+      nodes: [
+        [0, 0, 0],
+        [1, 0, 0],
+        [0, 1, 0]
+      ] as [number, number, number][],
+      triangles: [[0, 1, 2]] as [number, number, number][],
+      nodeMap: [0, 1, 2]
+    };
+    const cache = createPackedResultPlaybackCache([
+      {
+        id: "stress-surface-0",
+        runId: "run-surface",
+        type: "stress",
+        location: "node",
+        values: [0, 10, 20],
+        min: 0,
+        max: 30,
+        units: "MPa",
+        surfaceMeshRef: "solver-surface",
+        frameIndex: 0,
+        timeSeconds: 0
+      },
+      {
+        id: "displacement-surface-0",
+        runId: "run-surface",
+        type: "displacement",
+        location: "node",
+        values: [0, 0, 0],
+        vectors: [[0, 0, 0], [0, 0, 0], [0, 0, 0]],
+        min: 0,
+        max: 0.2,
+        units: "mm",
+        surfaceMeshRef: "solver-surface",
+        frameIndex: 0,
+        timeSeconds: 0
+      },
+      {
+        id: "stress-surface-1",
+        runId: "run-surface",
+        type: "stress",
+        location: "node",
+        values: [0, 20, 30],
+        min: 0,
+        max: 30,
+        units: "MPa",
+        surfaceMeshRef: "solver-surface",
+        frameIndex: 1,
+        timeSeconds: 0.005
+      },
+      {
+        id: "displacement-surface-1",
+        runId: "run-surface",
+        type: "displacement",
+        location: "node",
+        values: [0.2, 0, 0],
+        vectors: [[0, 0, 0.2], [0, 0, 0], [0, 0, 0]],
+        min: 0,
+        max: 0.2,
+        units: "mm",
+        surfaceMeshRef: "solver-surface",
+        frameIndex: 1,
+        timeSeconds: 0.005
+      }
+    ] satisfies ResultField[]);
+    const fields = cache!.fieldsForFrame(1);
+    const stressField = fields.find((field) => field.type === "stress")!;
+    const displacementField = fields.find((field) => field.type === "displacement")!;
+
+    const geometry = buildSolverSurfaceResultGeometry({
+      surfaceMesh,
+      scalarField: stressField,
+      displacementField,
+      resultMode: "stress",
+      showDeformed: true,
+      deformationScale: 1
+    });
+    const position = geometry.getAttribute("position") as THREE.BufferAttribute;
+
+    expect(stressField.surfaceMeshRef).toBe("solver-surface");
+    expect(displacementField.vectors?.[0]?.[2]).toBeCloseTo(0.2);
+    expect(position.getZ(0)).toBeGreaterThan(0);
   });
 
   test("refits the camera when result geometry replaces the model geometry", () => {
@@ -815,6 +901,9 @@ describe("CadViewer result coloring", () => {
       fieldMins: new Float32Array([0]),
       fieldMaxes: new Float32Array([100]),
       values: new Float32Array([50]),
+      vectorOffsets: new Int32Array([0]),
+      vectorLengths: new Int32Array([0]),
+      vectors: new Float32Array([]),
       sampleOffsets: new Int32Array([0]),
       sampleLengths: new Int32Array([2]),
       sampleValues: new Float32Array([10, 80]),

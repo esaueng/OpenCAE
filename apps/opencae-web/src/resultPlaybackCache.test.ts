@@ -168,6 +168,41 @@ describe("result playback cache", () => {
     expect(unpackResultFieldsForPlayback(packed!)[1]?.samples?.[0]?.vector).toEqual([0, 0, -4]);
   });
 
+  test("packed playback preserves solver-surface refs and top-level displacement vectors", () => {
+    const fields: ResultField[] = [0, 1].flatMap((frameIndex) => [
+      {
+        ...typedResultField(frameIndex, "stress", [0, 10 + frameIndex]),
+        location: "node" as const,
+        surfaceMeshRef: "surface-1",
+        visualizationSource: "stress-surface"
+      },
+      {
+        ...typedResultField(frameIndex, "displacement", [0, 2 + frameIndex]),
+        location: "node" as const,
+        surfaceMeshRef: "surface-1",
+        vectors: [[0, 0, 0], [0, -(2 + frameIndex), 0]] as [number, number, number][]
+      }
+    ]);
+
+    const packed = packResultFieldsForPlayback(fields);
+    const unpacked = unpackResultFieldsForPlayback(packed!);
+    const prepared = preparePlaybackFrames({ packedFields: packed!, frameIndexes: [0, 1], playbackFps: 30, budgetBytes: 100_000 });
+    const slot = packedPreparedPlaybackFieldSlot(
+      prepared.packed!,
+      packedPreparedPlaybackFrameOrdinal(prepared.packed!, 1),
+      "displacement",
+      "node"
+    )!;
+
+    expect(packed?.fieldDescriptors.find((descriptor) => descriptor.type === "stress")).toMatchObject({
+      surfaceMeshRef: "surface-1",
+      visualizationSource: "stress-surface"
+    });
+    expect(unpacked.find((field) => field.type === "displacement" && field.frameIndex === 1)?.vectors).toEqual([[0, 0, 0], [0, -3, 0]]);
+    expect(prepared.packed?.fieldDescriptors.find((descriptor) => descriptor.type === "displacement")?.surfaceMeshRef).toBe("surface-1");
+    expect(Array.from(slot.vectors.slice(slot.vectorOffset * 3, slot.vectorOffset * 3 + 6))).toEqual([0, 0, 0, 0, -3, 0]);
+  });
+
   test("prepares playback frames from packed worker input while preserving memory budget planning", () => {
     const fields = [resultField(0, [0, 10]), resultField(1, [10, 30])];
     const packedFields = packResultFieldsForPlayback(fields);
@@ -208,6 +243,9 @@ describe("result playback cache", () => {
       prepared.packed!.fieldMins.buffer,
       prepared.packed!.fieldMaxes.buffer,
       prepared.packed!.values.buffer,
+      prepared.packed!.vectorOffsets.buffer,
+      prepared.packed!.vectorLengths.buffer,
+      prepared.packed!.vectors.buffer,
       prepared.packed!.sampleOffsets.buffer,
       prepared.packed!.sampleLengths.buffer,
       prepared.packed!.sampleValues.buffer,

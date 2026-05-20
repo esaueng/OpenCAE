@@ -3615,6 +3615,7 @@ function resultFieldForPackedSlot(slot: NonNullable<ReturnType<typeof packedPrep
     values: Array.from(slot.values.slice(slot.offset, slot.offset + slot.length)),
     min: slot.min,
     max: slot.max,
+    vectors: vectorsForPackedPreparedSlot(slot),
     samples: Array.from({ length: slot.sampleLength }, (_, index) => {
       const packedIndex = slot.sampleOffset + index;
       const pointOffset = packedIndex * 3;
@@ -3658,6 +3659,7 @@ function resultFieldsForPackedPreparedFrame(cache: PackedPreparedPlaybackCache, 
       max: cache.fieldMaxes[slot] ?? 0,
       frameIndex,
       timeSeconds,
+      vectors: vectorsForPackedPreparedCacheSlot(cache, slot),
       samples: Array.from({ length: sampleLength }, (_, index) => {
         const packedIndex = sampleOffset + index;
         const pointOffset = packedIndex * 3;
@@ -3682,6 +3684,32 @@ function resultFieldsForPackedPreparedFrame(cache: PackedPreparedPlaybackCache, 
       })
     };
   });
+}
+
+function vectorsForPackedPreparedSlot(slot: NonNullable<ReturnType<typeof packedPreparedPlaybackFieldSlot>>): NonNullable<ResultField["vectors"]> | undefined {
+  const vectors = Array.from({ length: slot.vectorLength }, (_, index) => {
+    const vectorOffset = (slot.vectorOffset + index) * 3;
+    return [
+      slot.vectors[vectorOffset] ?? 0,
+      slot.vectors[vectorOffset + 1] ?? 0,
+      slot.vectors[vectorOffset + 2] ?? 0
+    ] as [number, number, number];
+  });
+  return vectors.length ? vectors : undefined;
+}
+
+function vectorsForPackedPreparedCacheSlot(cache: PackedPreparedPlaybackCache, slot: number): NonNullable<ResultField["vectors"]> | undefined {
+  const vectorOffset = cache.vectorOffsets[slot] ?? 0;
+  const vectorLength = cache.vectorLengths[slot] ?? 0;
+  const vectors = Array.from({ length: vectorLength }, (_, index) => {
+    const componentOffset = (vectorOffset + index) * 3;
+    return [
+      cache.vectors[componentOffset] ?? 0,
+      cache.vectors[componentOffset + 1] ?? 0,
+      cache.vectors[componentOffset + 2] ?? 0
+    ] as [number, number, number];
+  });
+  return vectors.length ? vectors : undefined;
 }
 
 function updatePackedFieldSamples(samples: FaceResultSample[], slot: NonNullable<ReturnType<typeof packedPreparedPlaybackFieldSlot>>) {
