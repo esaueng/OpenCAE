@@ -473,6 +473,78 @@ describe("dynamic result frames", () => {
     expect(cache?.fieldsForFramePosition(0.5)[0]?.samples?.[0]?.vector).toEqual([0, 0, -3]);
   });
 
+  test("packed playback cache preserves solver-surface refs and top-level displacement vectors", () => {
+    const fields: ResultField[] = [
+      {
+        id: "stress-surface-0",
+        runId: "run",
+        type: "stress",
+        location: "node",
+        values: [0, 10],
+        min: 0,
+        max: 20,
+        units: "MPa",
+        surfaceMeshRef: "surface-1",
+        visualizationSource: "stress-surface",
+        frameIndex: 0,
+        timeSeconds: 0
+      },
+      {
+        id: "displacement-surface-0",
+        runId: "run",
+        type: "displacement",
+        location: "node",
+        values: [0, 2],
+        vectors: [[0, 0, 0], [0, -2, 0]],
+        min: 0,
+        max: 4,
+        units: "mm",
+        surfaceMeshRef: "surface-1",
+        frameIndex: 0,
+        timeSeconds: 0
+      },
+      {
+        id: "stress-surface-1",
+        runId: "run",
+        type: "stress",
+        location: "node",
+        values: [0, 20],
+        min: 0,
+        max: 20,
+        units: "MPa",
+        surfaceMeshRef: "surface-1",
+        visualizationSource: "stress-surface",
+        frameIndex: 1,
+        timeSeconds: 0.005
+      },
+      {
+        id: "displacement-surface-1",
+        runId: "run",
+        type: "displacement",
+        location: "node",
+        values: [0, 4],
+        vectors: [[0, 0, 0], [0, -4, 0]],
+        min: 0,
+        max: 4,
+        units: "mm",
+        surfaceMeshRef: "surface-1",
+        frameIndex: 1,
+        timeSeconds: 0.005
+      }
+    ];
+
+    const cache = createPackedResultPlaybackCache(fields);
+    const frameOne = cache?.fieldsForFrame(1);
+    const halfway = cache?.fieldsForFramePosition(0.5);
+
+    expect(frameOne?.find((field) => field.type === "stress")).toMatchObject({
+      surfaceMeshRef: "surface-1",
+      visualizationSource: "stress-surface"
+    });
+    expect(frameOne?.find((field) => field.type === "displacement")?.vectors).toEqual([[0, 0, 0], [0, -4, 0]]);
+    expect(halfway?.find((field) => field.type === "displacement")?.vectors).toEqual([[0, 0, 0], [0, -3, 0]]);
+  });
+
   test("normalizes zero-range render fields to the low end instead of midpoint yellow", () => {
     expect(normalizeValueForRender(12, 12, 12)).toBe(0);
     expect(normalizeValueForRender(Number.NaN, 12, 12)).toBe(0);
@@ -494,7 +566,10 @@ describe("dynamic result frames", () => {
       cache!.fieldLengths.buffer,
       cache!.fieldMins.buffer,
       cache!.fieldMaxes.buffer,
-      cache!.values.buffer
+      cache!.values.buffer,
+      cache!.vectorOffsets.buffer,
+      cache!.vectorLengths.buffer,
+      cache!.vectors.buffer
     ]));
   });
 });
