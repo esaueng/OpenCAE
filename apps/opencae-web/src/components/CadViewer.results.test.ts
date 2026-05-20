@@ -121,6 +121,11 @@ describe("CadViewer result coloring", () => {
     expect(color.getZ(3)).toBeCloseTo(maxColor.b, 5);
   });
 
+  test("refits the camera when result geometry replaces the model geometry", () => {
+    expect(cadViewerSource).toContain("contentFitKey={viewerContentFitKey");
+    expect(cadViewerSource).toContain("contentFitKey,");
+  });
+
   test("positions the viewer XYZ axes in the bottom-right corner", () => {
     expect(VIEWER_GIZMO_ALIGNMENT).toBe("bottom-right");
   });

@@ -224,6 +224,19 @@ export function CadViewer(props: CadViewerProps) {
   const resultFields = props.resultFields;
   const effectiveShowDeformed = props.showDeformed && !shouldDisableResultDeformation(props.displayModel, resultFields);
   const solverSurfaceResult = solverSurfaceResultFields(props.surfaceMesh, resultFields, props.resultMode);
+  const viewerContentFitKey = [
+    props.activeStep,
+    effectiveViewMode,
+    props.displayModel.id,
+    modelKindForDisplayModel(props.displayModel),
+    props.displayModel.nativeCad?.filename ?? props.displayModel.visualMesh?.filename ?? "builtin",
+    props.surfaceMesh?.id ?? "no-surface",
+    props.surfaceMesh?.nodes.length ?? 0,
+    props.surfaceMesh?.triangles.length ?? 0,
+    solverSurfaceResult?.scalarField.runId ?? resultFields[0]?.runId ?? "no-run",
+    resultFields.length,
+    uploadedPreviewBounds ? boxFitKey(uploadedPreviewBounds) : "no-uploaded-bounds"
+  ].join("|");
   const viewerStatsEnabled = isViewerRendererStatsEnabled();
   const handleViewerInteractionChange = (interacting: boolean) => {
     setViewerInteracting(interacting);
@@ -285,7 +298,7 @@ export function CadViewer(props: CadViewerProps) {
               {showDimensionOverlay && <ModelDimensionOverlay displayModel={props.displayModel} uploadedPreviewBounds={uploadedPreviewBounds} />}
             </group>
           </group>
-          <BoundsCameraReset signal={props.fitSignal} viewAxis={props.viewAxis} viewAxisSignal={props.viewAxisSignal} controlsRef={controlsRef} />
+          <BoundsCameraReset contentFitKey={viewerContentFitKey} signal={props.fitSignal} viewAxis={props.viewAxis} viewAxisSignal={props.viewAxisSignal} controlsRef={controlsRef} />
           <GizmoCameraReset view={gizmoViewRequest.view} signal={gizmoViewRequest.signal} controlsRef={controlsRef} />
         </Bounds>
         <DemandOrbitControls controlsRef={controlsRef} onInteractionChange={handleViewerInteractionChange} />
@@ -301,6 +314,17 @@ export function CadViewer(props: CadViewerProps) {
       {effectiveViewMode === "results" && <ResultLegend resultMode={props.resultMode} resultFields={resultFields} unitSystem={props.unitSystem} meshSummary={props.meshSummary} />}
     </section>
   );
+}
+
+function boxFitKey(bounds: THREE.Box3) {
+  return [
+    bounds.min.x,
+    bounds.min.y,
+    bounds.min.z,
+    bounds.max.x,
+    bounds.max.y,
+    bounds.max.z
+  ].map((value) => Number.isFinite(value) ? value.toPrecision(8) : String(value)).join(",");
 }
 
 function ViewerRendererStatsProbe() {
@@ -5359,7 +5383,7 @@ function MeshOverlay({ kind }: { kind: SampleModelKind }) {
   );
 }
 
-function BoundsCameraReset({ signal, viewAxis, viewAxisSignal, controlsRef }: { signal: number; viewAxis: RotationAxis | null; viewAxisSignal: number; controlsRef: MutableRefObject<ViewerOrbitControls | null> }) {
+function BoundsCameraReset({ contentFitKey, signal, viewAxis, viewAxisSignal, controlsRef }: { contentFitKey: string; signal: number; viewAxis: RotationAxis | null; viewAxisSignal: number; controlsRef: MutableRefObject<ViewerOrbitControls | null> }) {
   const bounds = useBounds();
   const { camera, invalidate, size } = useThree();
   useEffect(() => {
@@ -5396,7 +5420,7 @@ function BoundsCameraReset({ signal, viewAxis, viewAxisSignal, controlsRef }: { 
       if (frameId) window.cancelAnimationFrame(frameId);
       if (retryFrameId) window.cancelAnimationFrame(retryFrameId);
     };
-  }, [bounds, camera, controlsRef, invalidate, signal, size.height, size.width, viewAxis, viewAxisSignal]);
+  }, [bounds, camera, contentFitKey, controlsRef, invalidate, signal, size.height, size.width, viewAxis, viewAxisSignal]);
   return null;
 }
 
