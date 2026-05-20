@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { describe, expect, test, vi } from "vitest";
-import { VIEWER_AXIS_HEAD_RADIUS, VIEWER_AXIS_LABEL_BADGE_COLOR, VIEWER_AXIS_LABEL_BADGE_RADIUS, VIEWER_AXIS_LABEL_COLOR, VIEWER_AXIS_LABEL_FONT_SIZE, VIEWER_AXIS_LABEL_FONT_WEIGHT, VIEWER_AXIS_LABEL_OUTLINE_COLOR, VIEWER_AXIS_LABEL_OUTLINE_WIDTH, VIEWER_CREDIT_URL, VIEWER_GIZMO_ALIGNMENT, VIEWER_GIZMO_AXIS_LENGTH, VIEWER_GIZMO_LABEL_DISTANCE, VIEWER_GIZMO_MARGIN, VIEWER_GIZMO_SCALE, VIEWER_ISOMETRIC_GIZMO_VIEW, VIEWER_VIEW_CUBE_BODY_OPACITY, VIEWER_VIEW_CUBE_CORNER_HIT_RADIUS, VIEWER_VIEW_CUBE_CORNER_RADIUS, VIEWER_VIEW_CUBE_EDGE_COLOR, VIEWER_VIEW_CUBE_FACE_HOVER_OPACITY, VIEWER_VIEW_CUBE_FACE_LABEL_FONT_SIZE, VIEWER_VIEW_CUBE_FACE_OPACITY, VIEWER_VIEW_CUBE_SIZE, applyResultFrameToGeometry, axisLabelToViewAxis, beamDemoDisplacementAtStation, beamDemoPayloadOffset, beamDemoStationForPoint, buildSolverSurfaceResultGeometry, cameraDistanceForBounds, cameraViewForAxis, cloneResultPreviewObject, colorizeResultObject, colorizeSampleResultGeometry, createBeamDemoCoordinate, createUndeformedResultOutlineObject, defaultHomeViewTarget, deformationScaleForResultFields, displayedLegendTickLabels, finalVisualScaleForDisplacementField, getViewCubeCornerDescriptors, getViewCubeFaceDescriptors, gizmoViewTargetToRequest, interpolateDisplacementAtPoint, legendMeshStats, legendTickLabels, normalizedPointLoadCantileverShape, payloadHighlightObjectId, pointLoadCantileverShape, printLayerVisualizationForBounds, resultLegendContentScale, resultLegendResizeDimensions, resultProbesForKind, resultValueForPoint, rotatedCameraOrbit, shouldDisableResultDeformation, shouldShowDimensionOverlay, shouldShowModelHitLabel, shouldShowResultMarkers, shouldShowUndeformedResultOutline, shouldShowViewCubeFaceLabel, updatePackedSamples, viewCubeFaceToGizmoView, viewerCameraResetPose, viewerGizmoLayout } from "./CadViewer";
+import { VIEWER_AXIS_HEAD_RADIUS, VIEWER_AXIS_LABEL_BADGE_COLOR, VIEWER_AXIS_LABEL_BADGE_RADIUS, VIEWER_AXIS_LABEL_COLOR, VIEWER_AXIS_LABEL_FONT_SIZE, VIEWER_AXIS_LABEL_FONT_WEIGHT, VIEWER_AXIS_LABEL_OUTLINE_COLOR, VIEWER_AXIS_LABEL_OUTLINE_WIDTH, VIEWER_CREDIT_URL, VIEWER_GIZMO_ALIGNMENT, VIEWER_GIZMO_AXIS_LENGTH, VIEWER_GIZMO_LABEL_DISTANCE, VIEWER_GIZMO_MARGIN, VIEWER_GIZMO_SCALE, VIEWER_ISOMETRIC_GIZMO_VIEW, VIEWER_VIEW_CUBE_BODY_OPACITY, VIEWER_VIEW_CUBE_CORNER_HIT_RADIUS, VIEWER_VIEW_CUBE_CORNER_RADIUS, VIEWER_VIEW_CUBE_EDGE_COLOR, VIEWER_VIEW_CUBE_FACE_HOVER_OPACITY, VIEWER_VIEW_CUBE_FACE_LABEL_FONT_SIZE, VIEWER_VIEW_CUBE_FACE_OPACITY, VIEWER_VIEW_CUBE_SIZE, applyResultFrameToGeometry, axisLabelToViewAxis, beamDemoDisplacementAtStation, beamDemoPayloadOffset, beamDemoStationForPoint, buildSolverSurfaceOutlineGeometry, buildSolverSurfaceResultGeometry, cameraDistanceForBounds, cameraViewForAxis, cloneResultPreviewObject, colorizeResultObject, colorizeSampleResultGeometry, createBeamDemoCoordinate, createUndeformedResultOutlineObject, defaultHomeViewTarget, deformationScaleForResultFields, displayedLegendTickLabels, finalVisualScaleForDisplacementField, getViewCubeCornerDescriptors, getViewCubeFaceDescriptors, gizmoViewTargetToRequest, interpolateDisplacementAtPoint, legendMeshStats, legendTickLabels, normalizedPointLoadCantileverShape, payloadHighlightObjectId, pointLoadCantileverShape, printLayerVisualizationForBounds, resultLegendContentScale, resultLegendResizeDimensions, resultProbesForKind, resultValueForPoint, rotatedCameraOrbit, shouldDisableResultDeformation, shouldShowDimensionOverlay, shouldShowModelHitLabel, shouldShowResultMarkers, shouldShowUndeformedResultOutline, shouldShowViewCubeFaceLabel, updatePackedSamples, viewCubeFaceToGizmoView, viewerCameraResetPose, viewerGizmoLayout } from "./CadViewer";
 import type { FaceResultSample } from "../resultFields";
 import type { DisplayFace, DisplayModel, ResultField } from "@opencae/schema";
 import type { PackedPreparedPlaybackCache } from "../resultPlaybackCache";
@@ -119,6 +119,62 @@ describe("CadViewer result coloring", () => {
     expect(color.getX(3)).toBeCloseTo(maxColor.r, 5);
     expect(color.getY(3)).toBeCloseTo(maxColor.g, 5);
     expect(color.getZ(3)).toBeCloseTo(maxColor.b, 5);
+  });
+
+  test("keeps solver-surface undeformed outline geometry on original nodes", () => {
+    const surfaceMesh = {
+      id: "solver-surface",
+      nodes: [
+        [0, 0, 0],
+        [1, 0, 0],
+        [0, 1, 0]
+      ] as [number, number, number][],
+      triangles: [[0, 1, 2]] as [number, number, number][],
+      nodeMap: [0, 1, 2]
+    };
+    const stressField: ResultField = {
+      id: "stress-surface",
+      runId: "run-surface",
+      type: "stress",
+      location: "node",
+      values: [0, 10, 20],
+      min: 0,
+      max: 20,
+      units: "MPa",
+      surfaceMeshRef: "solver-surface"
+    };
+    const displacementField: ResultField = {
+      id: "displacement-surface",
+      runId: "run-surface",
+      type: "displacement",
+      location: "node",
+      values: [0.1, 0, 0],
+      vectors: [[0, 0, 0.1], [0, 0, 0], [0, 0, 0]],
+      min: 0,
+      max: 0.1,
+      units: "mm",
+      surfaceMeshRef: "solver-surface"
+    };
+
+    const deformedGeometry = buildSolverSurfaceResultGeometry({
+      surfaceMesh,
+      scalarField: stressField,
+      displacementField,
+      resultMode: "stress",
+      showDeformed: true,
+      deformationScale: 1
+    });
+    const outlineGeometry = buildSolverSurfaceOutlineGeometry(surfaceMesh);
+    const deformedPosition = deformedGeometry.getAttribute("position") as THREE.BufferAttribute;
+    const outlinePosition = outlineGeometry.getAttribute("position") as THREE.BufferAttribute;
+
+    expect(outlineGeometry.userData.opencaeSolverSurfaceOutline).toBe(true);
+    expect(outlineGeometry.index?.array).toEqual(new Uint32Array([0, 1, 2]));
+    expect(outlinePosition.getZ(0)).toBe(0);
+    expect(deformedPosition.getZ(0)).toBeGreaterThan(outlinePosition.getZ(0));
+    expect(Array.from(outlinePosition.array)).toEqual(surfaceMesh.nodes.flat());
+    expect(cadViewerSource).toContain("const outlineGeometry = useMemo(() => buildSolverSurfaceOutlineGeometry(surfaceMesh), [surfaceMesh]);");
+    expect(cadViewerSource).toContain("{shouldShowUndeformedResultOutline(showDeformed) && <UndeformedGeometryOutline geometry={outlineGeometry} />}");
   });
 
   test("refits the camera when result geometry replaces the model geometry", () => {
