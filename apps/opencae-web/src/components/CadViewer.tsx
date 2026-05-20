@@ -2468,12 +2468,36 @@ function SolverSurfaceResultMesh({
     () => buildSolverSurfaceResultGeometry({ surfaceMesh, scalarField, displacementField, resultMode, showDeformed, deformationScale }),
     [deformationScale, displacementField, resultMode, scalarField, showDeformed, surfaceMesh]
   );
+  const outlineGeometry = useMemo(() => buildSolverSurfaceOutlineGeometry(surfaceMesh), [surfaceMesh]);
   return (
-    <mesh geometry={geometry}>
-      <meshStandardMaterial vertexColors metalness={0.18} roughness={0.52} side={THREE.DoubleSide} />
-      <Edges color="#43556a" threshold={18} />
-    </mesh>
+    <group>
+      {shouldShowUndeformedResultOutline(showDeformed) && <UndeformedGeometryOutline geometry={outlineGeometry} />}
+      <mesh geometry={geometry}>
+        <meshStandardMaterial vertexColors metalness={0.18} roughness={0.52} side={THREE.DoubleSide} />
+        <Edges color="#43556a" threshold={18} />
+      </mesh>
+    </group>
   );
+}
+
+export function buildSolverSurfaceOutlineGeometry(surfaceMesh: SolverSurfaceMesh): THREE.BufferGeometry {
+  assertSolverSurfaceMeshTopology(surfaceMesh);
+  const positions = new Float32Array(surfaceMesh.nodes.length * 3);
+  for (let index = 0; index < surfaceMesh.nodes.length; index += 1) {
+    const node = surfaceMesh.nodes[index]!;
+    const offset = index * 3;
+    positions[offset] = node[0];
+    positions[offset + 1] = node[1];
+    positions[offset + 2] = node[2];
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  geometry.setIndex(new THREE.BufferAttribute(new Uint32Array(surfaceMesh.triangles.flat()), 1));
+  geometry.computeBoundingSphere();
+  geometry.userData.opencaeSolverSurfaceOutline = true;
+  geometry.userData.opencaeSolverSurfaceMeshId = surfaceMesh.id;
+  return geometry;
 }
 
 export function buildSolverSurfaceResultGeometry({
@@ -2529,8 +2553,7 @@ function assertSolverSurfaceRenderInputs(
   scalarField: ResultField,
   displacementField: ResultField | undefined
 ): void {
-  if (!surfaceMesh.nodes.length) throw new Error("Solver surface mesh has no nodes.");
-  if (!surfaceMesh.triangles.length) throw new Error("Solver surface mesh has no triangles.");
+  assertSolverSurfaceMeshTopology(surfaceMesh);
   if (scalarField.location !== "node" || scalarField.surfaceMeshRef !== surfaceMesh.id || scalarField.values.length !== surfaceMesh.nodes.length) {
     throw new Error("Solver surface scalar field is not aligned to surface mesh nodes.");
   }
@@ -2542,7 +2565,15 @@ function assertSolverSurfaceRenderInputs(
       throw new Error("Solver surface displacement vectors are not aligned to surface mesh nodes.");
     }
   }
+}
+
+function assertSolverSurfaceMeshTopology(surfaceMesh: SolverSurfaceMesh): void {
+  if (!surfaceMesh.nodes.length) throw new Error("Solver surface mesh has no nodes.");
+  if (!surfaceMesh.triangles.length) throw new Error("Solver surface mesh has no triangles.");
   for (const triangle of surfaceMesh.triangles) {
+    if (triangle.length !== 3) {
+      throw new Error("Solver surface triangle is malformed.");
+    }
     for (const index of triangle) {
       if (!Number.isInteger(index) || index < 0 || index >= surfaceMesh.nodes.length) {
         throw new Error("Solver surface triangle references a missing surface node.");
