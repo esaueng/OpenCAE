@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CoreCloudResultProvenanceSchema, DynamicSolverSettingsSchema, MaterialSchema, ProjectSchema, ResultFieldSchema, ResultSummarySchema, RunEventSchema, SolverBackendSchema } from "./index";
+import { CoreCloudResultProvenanceSchema, DynamicSolverSettingsSchema, MaterialSchema, ProjectSchema, ResultFieldSchema, ResultSummarySchema, RunEventSchema, SolverBackendSchema, StudyRunSchema, classifyResultProvenance, runStatusForResultProvenance } from "./index";
 
 describe("ProjectSchema", () => {
   it("accepts the minimum local project shape", () => {
@@ -273,6 +273,70 @@ describe("ProjectSchema", () => {
       resultSource: "computed_preview",
       units: "mm-N-s-MPa"
     })).toThrow();
+  });
+
+  it("classifies result provenance into load-bearing run statuses", () => {
+    expect(runStatusForResultProvenance({
+      kind: "opencae_core_fea",
+      solver: "opencae-core-cloud",
+      solverVersion: "0.1.0",
+      meshSource: "actual_volume_mesh",
+      resultSource: "computed",
+      units: "mm-N-s-MPa"
+    })).toBe("complete");
+    expect(runStatusForResultProvenance({
+      kind: "local_estimate",
+      solver: "opencae-core-preview-tet4",
+      solverVersion: "0.1.0",
+      meshSource: "structured_block_proxy",
+      resultSource: "computed_preview",
+      units: "mm-N-s-MPa"
+    })).toBe("complete_preview");
+    expect(runStatusForResultProvenance({
+      kind: "local_estimate",
+      solver: "opencae-local-heuristic-surface",
+      solverVersion: "0.1.0",
+      meshSource: "mock",
+      resultSource: "generated",
+      units: "mm-N-s-MPa"
+    })).toBe("complete_estimate");
+    expect(runStatusForResultProvenance({
+      kind: "analytical_benchmark",
+      solver: "opencae-euler-bernoulli",
+      solverVersion: "0.1.0",
+      meshSource: "structured_block",
+      resultSource: "generated",
+      units: "mm-N-s-MPa"
+    })).toBe("complete_benchmark");
+    expect(classifyResultProvenance({
+      kind: "opencae_core_fea",
+      solver: ["cloudflare-fea", "calculix"].join("-"),
+      solverVersion: "0.1.0",
+      meshSource: "actual_volume_mesh",
+      resultSource: "computed",
+      units: "mm-N-s-MPa"
+    })).toBe("imported_legacy");
+  });
+
+  it("accepts explicit non-production terminal run statuses", () => {
+    expect(StudyRunSchema.parse({
+      id: "run-preview",
+      studyId: "study-test",
+      status: "complete_preview",
+      jobId: "job-preview",
+      solverBackend: "opencae_core_local",
+      solverVersion: "0.1.0",
+      diagnostics: []
+    }).status).toBe("complete_preview");
+    expect(StudyRunSchema.parse({
+      id: "run-estimate",
+      studyId: "study-test",
+      status: "complete_estimate",
+      jobId: "job-estimate",
+      solverBackend: "local",
+      solverVersion: "0.1.0",
+      diagnostics: []
+    }).status).toBe("complete_estimate");
   });
 
   it("accepts rich OpenCAE Core result sample metadata", () => {
