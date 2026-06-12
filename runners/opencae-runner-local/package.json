@@ -6,8 +6,5 @@
   "exports": {
     ".": "./src/index.ts"
   },
-  "dependencies": {
-    "@opencae/solver-contract": "workspace:*"
-  },
   "license": "Apache-2.0"
 }

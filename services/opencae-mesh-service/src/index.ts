@@ -12,7 +12,7 @@ export class MockMeshService {
       ultra: { nodes: 182400, elements: 119808, warnings: ["Ultra surface analysis sampling enabled for detailed local gradients."], analysisSampleCount: analysisMesh?.samples.length ?? 45000, quality: "ultra" }
     };
     const summary = summaryByPreset[preset];
-    const artifactKey = `${study.projectId}/mesh/mesh-summary.json`;
+    const artifactKey = `${study.projectId}/mesh/${study.id}/mesh-summary.json`;
     await this.storage.putObject(artifactKey, JSON.stringify(summary, null, 2));
     return { artifactKey, summary };
   }
