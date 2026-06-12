@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "opencae-web",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@opencae/web", "dev"],
+      "port": 5173
+    },
+    {
+      "name": "opencae-web-cloud",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": ["-c", "OPENCAE_CLOUD_PROXY_TARGET=https://cae.esau.app pnpm --filter @opencae/web dev"],
+      "port": 5173
+    }
+  ]
+}

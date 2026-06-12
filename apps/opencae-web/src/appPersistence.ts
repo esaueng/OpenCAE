@@ -201,14 +201,24 @@ function parseResultBundle(value: unknown): LocalResultBundle | undefined {
   const summary = ResultSummarySchema.safeParse(value.summary);
   const fields = ResultFieldSchema.array().safeParse(value.fields);
   const surfaceMesh = parseSolverSurfaceMesh(value.surfaceMesh);
+  const meshStats = parseResultMeshStats(value.meshStats);
   if (!summary.success || !fields.success || fields.data.length === 0) return undefined;
   return {
     activeRunId: typeof value.activeRunId === "string" ? value.activeRunId : undefined,
     completedRunId: typeof value.completedRunId === "string" ? value.completedRunId : undefined,
     summary: summary.data,
     fields: fields.data,
-    ...(surfaceMesh ? { surfaceMesh } : {})
+    ...(surfaceMesh ? { surfaceMesh } : {}),
+    ...(meshStats ? { meshStats } : {})
   };
+}
+
+function parseResultMeshStats(value: unknown): LocalResultBundle["meshStats"] | undefined {
+  if (!isRecord(value)) return undefined;
+  const nodes = Number(value.nodes);
+  const elements = Number(value.elements);
+  if (!Number.isFinite(nodes) || !Number.isFinite(elements) || nodes <= 0 || elements <= 0) return undefined;
+  return { nodes, elements };
 }
 
 function parseSolverSurfaceMesh(value: unknown): LocalResultBundle["surfaceMesh"] | undefined {
