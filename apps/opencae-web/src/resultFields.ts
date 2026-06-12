@@ -660,7 +660,7 @@ function interpolationBoundsForFramePosition(frameIndexes: number[], framePositi
 export function resultSamplesForFaces(faces: DisplayFace[], fields: ResultField[], mode: ResultFieldMode): FaceResultSample[] {
   const field = resultFieldForMode(fields, mode);
   const mapped = field ? mappedValuesForFaces(faces, field, mode) : {
-    values: faces.map((face) => fallbackValue(face, mode)),
+    values: faces.map(() => neutralValue(mode)),
     diagnostic: undefined
   };
   const min = Number.isFinite(field?.min) ? Number(field?.min) : Math.min(...mapped.values);
@@ -794,14 +794,6 @@ function logDebugResultMapping(
     fieldMax: field.max,
     mappedFaceValues: values.slice(0, 8)
   });
-}
-
-function fallbackValue(face: DisplayFace, mode: ResultFieldMode): number {
-  if (mode === "displacement") return face.stressValue / 770;
-  if (mode === "velocity") return 0;
-  if (mode === "acceleration") return 0;
-  if (mode === "safety_factor") return Math.max(0.2, 276 / Math.max(face.stressValue, 0.001));
-  return face.stressValue;
 }
 
 function neutralValue(mode: ResultFieldMode): number {

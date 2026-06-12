@@ -165,4 +165,106 @@ describe("OpenCAE API server", () => {
       if (run.reportRef) expect(run.reportRef.startsWith("project-hostile-import/")).toBe(true);
     }
   });
+
+  test("imported local estimate results are not marked as complete production runs", async () => {
+    const api = await buildApi();
+    const sample = await api.inject({ method: "GET", url: "/api/sample-project" });
+    const template = sample.json().project as Record<string, unknown>;
+    const project = structuredClone(template) as {
+      studies: Array<{ runs: Array<{ id: string; status: string }> }>;
+    };
+    const runId = project.studies[0]!.runs[0]!.id;
+    project.studies[0]!.runs[0]!.status = "queued";
+
+    const response = await api.inject({
+      method: "POST",
+      url: "/api/projects/import",
+      remoteAddress: "203.0.113.25",
+      payload: {
+        project,
+        results: {
+          completedRunId: runId,
+          summary: {
+            maxStress: 100,
+            maxStressUnits: "MPa",
+            maxDisplacement: 0.2,
+            maxDisplacementUnits: "mm",
+            safetyFactor: 2,
+            reactionForce: 500,
+            reactionForceUnits: "N",
+            provenance: {
+              kind: "local_estimate",
+              solver: "opencae-local-heuristic-surface",
+              solverVersion: "0.1.0",
+              meshSource: "mock",
+              resultSource: "generated",
+              units: "mm-N-s-MPa"
+            }
+          },
+          fields: [{
+            id: "stress",
+            runId,
+            type: "stress",
+            location: "face",
+            values: [100],
+            min: 100,
+            max: 100,
+            units: "MPa",
+            provenance: {
+              kind: "local_estimate",
+              solver: "opencae-local-heuristic-surface",
+              solverVersion: "0.1.0",
+              meshSource: "mock",
+              resultSource: "generated",
+              units: "mm-N-s-MPa"
+            }
+          }]
+        }
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    const imported = response.json().project as { studies: Array<{ runs: Array<{ id: string; status: string }> }> };
+    expect(imported.studies[0]!.runs.find((run) => run.id === runId)?.status).toBe("complete_estimate");
+  });
+
+  test("local Core preview runs finish with complete_preview instead of complete", async () => {
+    const api = await buildApi();
+    const create = await api.inject({
+      method: "POST",
+      url: "/api/projects",
+      remoteAddress: "203.0.113.26",
+      payload: { mode: "sample", sample: "cantilever" }
+    });
+    const studyId = (create.json().project as { studies: Array<{ id: string }> }).studies[0]!.id;
+    const mesh = await api.inject({
+      method: "POST",
+      url: `/api/studies/${studyId}/mesh`,
+      remoteAddress: "203.0.113.26",
+      payload: { preset: "medium" }
+    });
+    expect(mesh.statusCode).toBe(200);
+
+    const start = await api.inject({
+      method: "POST",
+      url: `/api/studies/${studyId}/runs`,
+      remoteAddress: "203.0.113.26"
+    });
+
+    expect(start.statusCode).toBe(200);
+    const runId = (start.json().run as { id: string }).id;
+    const run = await waitForTerminalRun(api, runId);
+    expect(run.status).toBe("complete_preview");
+  });
 });
+
+async function waitForTerminalRun(api: Awaited<ReturnType<typeof buildApi>>, runId: string): Promise<{ status: string }> {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const response = await api.inject({ method: "GET", url: `/api/runs/${runId}` });
+    const run = response.json().run as { status: string };
+    if (!["queued", "running"].includes(run.status)) return run;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  const response = await api.inject({ method: "GET", url: `/api/runs/${runId}` });
+  return response.json().run as { status: string };
+}

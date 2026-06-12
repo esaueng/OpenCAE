@@ -36,8 +36,10 @@ describe("resultSamplesForFaces", () => {
     ]);
   });
 
-  test("falls back to face stress values before a solved field is available", () => {
-    expect(resultSamplesForFaces(faces, [], "stress").map((sample) => sample.value)).toEqual([10, 20]);
+  test("uses neutral values before a solved field is available", () => {
+    expect(resultSamplesForFaces(faces, [], "stress").map((sample) => sample.value)).toEqual([0, 0]);
+    expect(resultSamplesForFaces(faces, [], "displacement").map((sample) => sample.value)).toEqual([0, 0]);
+    expect(resultSamplesForFaces(faces, [], "safety_factor").map((sample) => sample.value)).toEqual([1, 1]);
   });
 
   test("uses nodal OpenCAE Core samples when face fields are not present", () => {

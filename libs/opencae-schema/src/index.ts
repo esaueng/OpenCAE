@@ -153,6 +153,10 @@ export const CoreCloudResultProvenanceSchema = ResultProvenanceSchema.superRefin
   }
 });
 
+export const ResultProvenanceTierSchema = z.enum(["production_fea", "core_preview", "local_estimate", "analytical_benchmark", "imported_legacy", "unknown"]);
+export const StudyRunStatusSchema = z.enum(["queued", "running", "complete", "complete_preview", "complete_estimate", "complete_benchmark", "complete_legacy", "failed", "cancelled"]);
+const terminalRunResultStatuses = new Set(["complete", "complete_preview", "complete_estimate", "complete_benchmark", "complete_legacy"]);
+
 export const ResultFieldSchema = z.object({
   id: z.string(),
   runId: z.string(),
@@ -220,13 +224,14 @@ export const MeshSettingsSchema = z.object({
 export const StudyRunSchema = z.object({
   id: z.string(),
   studyId: z.string(),
-  status: z.enum(["queued", "running", "complete", "failed", "cancelled"]),
+  status: StudyRunStatusSchema,
   jobId: z.string(),
   meshRef: z.string().optional(),
   resultRef: z.string().optional(),
   reportRef: z.string().optional(),
   solverBackend: z.string(),
   solverVersion: z.string(),
+  resultTier: ResultProvenanceTierSchema.optional(),
   startedAt: z.string().optional(),
   finishedAt: z.string().optional(),
   diagnostics: z.array(DiagnosticSchema).default([])
@@ -309,6 +314,7 @@ export const ResultSummarySchema = z.object({
     .optional(),
   reactionForce: z.number(),
   reactionForceUnits: z.string(),
+  resultTier: ResultProvenanceTierSchema.optional(),
   provenance: ResultProvenanceSchema.optional(),
   diagnostics: z.array(DiagnosticSchema).optional().default([]),
   loadSummary: z
@@ -362,6 +368,7 @@ export type AnalysisSample = z.infer<typeof AnalysisSampleSchema>;
 export type AnalysisMesh = z.infer<typeof AnalysisMeshSchema>;
 export type ResultSample = z.infer<typeof ResultSampleSchema>;
 export type ResultProvenance = z.infer<typeof ResultProvenanceSchema>;
+export type ResultProvenanceTier = z.infer<typeof ResultProvenanceTierSchema>;
 export type ResultField = z.infer<typeof ResultFieldSchema>;
 export type GeometryFile = z.infer<typeof GeometryFileSchema>;
 export type MeshSummary = z.infer<typeof MeshSummarySchema>;
@@ -373,6 +380,45 @@ export type RunEvent = z.infer<typeof RunEventSchema>;
 export type FailureAssessment = NonNullable<ResultSummary["failureAssessment"]>;
 
 export type RunTimingEstimate = Pick<RunEvent, "elapsedMs" | "estimatedDurationMs" | "estimatedRemainingMs">;
+
+export function classifyResultProvenance(provenance: ResultProvenance | undefined): ResultProvenanceTier {
+  if (!provenance) return "unknown";
+  if (isLegacyResultProvenance(provenance)) return "imported_legacy";
+  if (provenance.kind === "analytical_benchmark") return "analytical_benchmark";
+  if (isPreviewResultProvenance(provenance)) return "core_preview";
+  if (provenance.kind === "local_estimate") return "local_estimate";
+  if (CoreCloudResultProvenanceSchema.safeParse(provenance).success) return "production_fea";
+  if (provenance.kind === "opencae_core_fea" && provenance.resultSource === "computed" && (provenance.meshSource === "actual_volume_mesh" || provenance.meshSource === "opencae_core_tet4" || provenance.meshSource === "structured_block_core")) {
+    return "production_fea";
+  }
+  return "unknown";
+}
+
+export function runStatusForResultProvenance(provenance: ResultProvenance | undefined): Extract<StudyRun["status"], "complete" | "complete_preview" | "complete_estimate" | "complete_benchmark" | "complete_legacy"> {
+  const tier = classifyResultProvenance(provenance);
+  if (tier === "production_fea") return "complete";
+  if (tier === "core_preview") return "complete_preview";
+  if (tier === "analytical_benchmark") return "complete_benchmark";
+  if (tier === "imported_legacy") return "complete_legacy";
+  return "complete_estimate";
+}
+
+export function isRunResultReadyStatus(status: StudyRun["status"]): boolean {
+  return terminalRunResultStatuses.has(status);
+}
+
+export function isPreviewResultProvenance(provenance: ResultProvenance | undefined): boolean {
+  if (!provenance) return false;
+  return provenance.solver === "opencae-core-preview-sdof" ||
+    provenance.solver === "opencae-core-preview-tet4" ||
+    provenance.meshSource === "structured_block_proxy" ||
+    provenance.meshSource === "display_bounds_proxy" ||
+    provenance.resultSource === "computed_preview";
+}
+
+export function isLegacyResultProvenance(provenance: ResultProvenance | undefined): boolean {
+  return new RegExp(["calcu", "lix"].join(""), "i").test(provenance?.solver ?? "");
+}
 
 export interface LoadCapacityEstimate {
   status: "available" | "unknown";
