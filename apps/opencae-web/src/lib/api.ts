@@ -3,8 +3,7 @@ import type { LoadApplicationPoint, LoadDirection, LoadType, PayloadLoadMetadata
 import { embedUploadedModelFile, type EmbeddedModelFile, type LocalResultBundle, type SolverSurfaceMesh } from "../projectFile";
 import { createLocalBlankProject, createLocalSampleProject, createLocalUploadResponse, openLocalProjectPayload } from "../localProjectFactory";
 import { solveLocalStudyInWorker } from "../workers/performanceClient";
-import { buildOpenCaeCoreCloudModelForStudy, cloudGeometrySourceForStudy, hasActualCoreVolumeMesh, isComplexGeometry, normalizeSolverBackend, openCaeCoreEligibility, trySolveOpenCaeCoreStudy, OPENCAE_CORE_CLOUD_GEOMETRY_REQUIRED_REASON, type NormalizedBrowserSolverBackend } from "../workers/opencaeCoreSolve";
-import { modelDirectionToGlobalCadFrame } from "../modelOrientation";
+import { buildOpenCaeCoreCloudModelForStudy, cloudGeometrySourceForStudy, hasActualCoreVolumeMesh, isComplexGeometry, normalizeSolverBackend, openCaeCoreEligibility, studyForCoreCloudGeometryDispatch, trySolveOpenCaeCoreStudy, OPENCAE_CORE_CLOUD_GEOMETRY_REQUIRED_REASON, type NormalizedBrowserSolverBackend } from "../workers/opencaeCoreSolve";
 
 export interface SampleProjectResponse {
   message?: string;
@@ -551,20 +550,6 @@ const CLOUD_PROCEDURAL_MESH_SIZE_MM: Record<MeshQuality, number> = {
   ultra: 6
 };
 
-export function studyForCoreCloudGeometrySolve(study: Study, displayModel: DisplayModel | undefined): Study {
-  if (!displayModel) return study;
-  let changed = false;
-  const loads = study.loads.map((load) => {
-    const direction = load.parameters.direction;
-    if (!Array.isArray(direction) || direction.length !== 3 || !direction.every((component) => Number.isFinite(Number(component)))) return load;
-    const mapped = modelDirectionToGlobalCadFrame([Number(direction[0]), Number(direction[1]), Number(direction[2])], displayModel);
-    if (mapped === direction) return load;
-    changed = true;
-    return { ...load, parameters: { ...load.parameters, direction: mapped } };
-  });
-  return changed ? { ...study, loads } : study;
-}
-
 export function geometryWithMeshPreset(geometry: NonNullable<ReturnType<typeof cloudGeometrySourceForStudy>>, study: Study) {
   if (geometry.kind !== "sample_procedural" || !geometry.descriptor) return geometry;
   const meshSize = CLOUD_PROCEDURAL_MESH_SIZE_MM[study.meshSettings.preset] ?? CLOUD_PROCEDURAL_MESH_SIZE_MM.medium;
@@ -581,7 +566,9 @@ function openCaeCoreCloudSolveRequest(runId: string, study: Study, displayModel:
     return {
       runId,
       analysisType: study.type,
-      study: studyForCoreCloudGeometrySolve(study, displayModel),
+      // The cloud container meshes dispatched geometry in the upright solver frame and
+      // applies study load directions verbatim, so hand it a solver-frame study.
+      study: studyForCoreCloudGeometryDispatch(study, displayModel),
       displayModel,
       geometry: geometryWithMeshPreset(geometry, study),
       coreVolumeMesh: null,

@@ -523,6 +523,10 @@ describe("api", () => {
         }),
         resultSettings: expect.any(Object)
       });
+      // The display-space "-Y" (down) load must reach the upright cloud solver frame
+      // as -Z so the solved deformation matches the viewer load arrow.
+      const dispatchedStudy = body.study as { loads: Array<{ parameters: { direction?: unknown } }> };
+      expect(dispatchedStudy.loads[0]?.parameters.direction).toEqual([0, 0, -1]);
       expect(body.coreModel).toBeUndefined();
       expect(JSON.stringify(body).toLowerCase()).not.toMatch(/calculix|cloudflare-fea-calculix|\.inp|\.dat|\.frd/);
       return new Response(JSON.stringify({
@@ -626,6 +630,7 @@ describe("api", () => {
           height: 40
         })
       });
+      expect((body.study as { loads: Array<{ parameters: { direction?: unknown } }> }).loads[0]?.parameters.direction).toEqual([0, 0, -1]);
       return new Response(JSON.stringify({
         run: { id: "run-cloud-core-dynamic", solverBackend: "opencae-core-cloud" },
         streamUrl: "/api/cloud-core/runs/run-cloud-core-dynamic/events",
