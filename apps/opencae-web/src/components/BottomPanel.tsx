@@ -2,9 +2,14 @@ import { useEffect, useRef, useState, type CSSProperties, type MouseEvent, type 
 import { Coffee, Github, MessageSquare } from "lucide-react";
 import { REQUIRED_SETTING_HELP_IDS, SETTING_HELP, type SettingHelpVisual } from "../settingHelp";
 
+export interface WorkspaceLogEntry {
+  message: string;
+  at: number;
+}
+
 interface BottomPanelProps {
   status: string;
-  logs: string[];
+  logs: WorkspaceLogEntry[];
   projectName: string;
   studyName: string;
   meshStatus: string;
@@ -44,7 +49,7 @@ export function BottomPanel({ status, logs, projectName, studyName, meshStatus, 
   const replayTimeoutRef = useRef(0);
   const expanded = tab !== null;
   const displayStatus = statusForDisplay(status, solverStatus);
-  const healthy = solverStatus === "Running" ? "running" : displayStatus.endsWith("error") ? "warning" : meshStatus === "Ready" ? "ready" : "warning";
+  const healthy = solverStatus === "Running" ? "running" : displayStatus.endsWith("error") || displayStatus === "Needs attention" ? "warning" : meshStatus === "Ready" ? "ready" : "warning";
   const formattedLogs = logs.map(formatLogEntry);
   const donateLinkClassName = `status-link donate-link${coffeeAnimating ? " coffee-animating" : ""}`;
 
@@ -287,6 +292,7 @@ export function KeyboardShortcutGuide() {
 function statusForDisplay(status: string, solverStatus: string) {
   const normalized = status.toLowerCase();
   if (normalized.includes("opencae core") && /(error|fail|failed|unavailable|not configured|not enabled|not ready)/.test(normalized)) return "OpenCAE Core error";
+  if (/(could not|failed)/.test(normalized)) return "Needs attention";
   if (solverStatus === "Running") return "Simulating";
   if (status.toLowerCase().includes("complete")) return "Results ready";
   if (normalized.includes("opencae core")) return "OpenCAE Core active";
@@ -297,12 +303,12 @@ export function resolveLogClearIntent(clickDetail: number, armed: boolean): "con
   return armed || clickDetail >= 2 ? "clear" : "confirm";
 }
 
-function formatLogEntry(entry: string, index: number) {
-  const normalized = entry.toLowerCase();
+function formatLogEntry(entry: WorkspaceLogEntry) {
+  const normalized = entry.message.toLowerCase();
   const level = normalized.includes("complete") || normalized.includes("generated")
     ? "OK"
     : /(error|fail|failed|unavailable|not configured|not enabled)/.test(normalized)
       ? "ERR"
       : "INFO";
-  return `${new Date(Date.now() - index * 15000).toLocaleTimeString([], { hour12: false })} ${level.padEnd(4, " ")} ${entry}`;
+  return `${new Date(entry.at).toLocaleTimeString([], { hour12: false })} ${level.padEnd(4, " ")} ${entry.message}`;
 }

@@ -86,9 +86,6 @@ importers:
       '@opencae/jobs':
         specifier: workspace:*
         version: link:../../libs/opencae-jobs
-      '@opencae/materials':
-        specifier: workspace:*
-        version: link:../../libs/opencae-materials
       '@opencae/mesh-service':
         specifier: workspace:*
         version: link:../../services/opencae-mesh-service
@@ -117,9 +114,15 @@ importers:
       '@types/node':
         specifier: ^22.10.5
         version: 22.19.17
+      tsx:
+        specifier: ^4.19.2
+        version: 4.21.0
 
   apps/opencae-web:
     dependencies:
+      '@cloudflare/containers':
+        specifier: ^0.3.3
+        version: 0.3.3
       '@opencae/core':
         specifier: workspace:*
         version: link:../../../opencae-core/packages/core
@@ -135,9 +138,6 @@ importers:
       '@opencae/schema':
         specifier: workspace:*
         version: link:../../libs/opencae-schema
-      '@opencae/solver-service':
-        specifier: workspace:*
-        version: link:../../services/opencae-solver-service
       '@opencae/study-core':
         specifier: workspace:*
         version: link:../../libs/opencae-study-core
@@ -228,12 +228,6 @@ importers:
         specifier: ^22.10.5
         version: 22.19.17
 
-  libs/opencae-diagnostics:
-    dependencies:
-      '@opencae/schema':
-        specifier: workspace:*
-        version: link:../opencae-schema
-
   libs/opencae-jobs:
     dependencies:
       '@opencae/schema':
@@ -246,40 +240,14 @@ importers:
         specifier: workspace:*
         version: link:../opencae-schema
 
-  libs/opencae-mesh-contract:
-    dependencies:
-      '@opencae/schema':
-        specifier: workspace:*
-        version: link:../opencae-schema
-
-  libs/opencae-result-format:
-    dependencies:
-      '@opencae/schema':
-        specifier: workspace:*
-        version: link:../opencae-schema
-
   libs/opencae-schema:
     dependencies:
       zod:
         specifier: ^3.24.1
         version: 3.25.76
 
-  libs/opencae-selection:
-    dependencies:
-      '@opencae/schema':
-        specifier: workspace:*
-        version: link:../opencae-schema
-
-  libs/opencae-solver-contract:
-    dependencies:
-      '@opencae/schema':
-        specifier: workspace:*
-        version: link:../opencae-schema
-
-  libs/opencae-solver-webgpu: {}
-
   libs/opencae-storage:
-    dependencies:
+    devDependencies:
       '@types/node':
         specifier: ^22.10.5
         version: 22.19.17
@@ -292,11 +260,7 @@ importers:
 
   libs/opencae-units: {}
 
-  runners/opencae-runner-local:
-    dependencies:
-      '@opencae/solver-contract':
-        specifier: workspace:*
-        version: link:../../libs/opencae-solver-contract
+  runners/opencae-runner-local: {}
 
   services/opencae-cad-service:
     dependencies:
@@ -334,9 +298,6 @@ importers:
 
   services/opencae-mesh-service:
     dependencies:
-      '@opencae/mesh-contract':
-        specifier: workspace:*
-        version: link:../../libs/opencae-mesh-contract
       '@opencae/schema':
         specifier: workspace:*
         version: link:../../libs/opencae-schema
@@ -364,9 +325,6 @@ importers:
       '@opencae/schema':
         specifier: workspace:*
         version: link:../../libs/opencae-schema
-      '@opencae/solver-contract':
-        specifier: workspace:*
-        version: link:../../libs/opencae-solver-contract
       '@opencae/storage':
         specifier: workspace:*
         version: link:../../libs/opencae-storage

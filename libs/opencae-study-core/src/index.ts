@@ -2,6 +2,8 @@ import type { Diagnostic, DynamicSolverSettings, Study } from "@opencae/schema";
 
 export type PrintCriticalAxis = "x" | "y" | "z";
 
+export const MAX_DYNAMIC_INTEGRATION_STEPS = 2_000_000;
+
 export interface PrintCriticalFace {
   selectionId?: string;
   entityId?: string;
@@ -60,6 +62,8 @@ export function validateDynamicStructuralStudy(study: Study): Diagnostic[] {
   }
   if (!(solverSettings.timeStep > 0)) {
     diagnostics.push(issue("validation-dynamic-time-step", "Dynamic time step must be greater than zero."));
+  } else if (solverSettings.endTime > solverSettings.startTime && (solverSettings.endTime - solverSettings.startTime) / solverSettings.timeStep > MAX_DYNAMIC_INTEGRATION_STEPS) {
+    diagnostics.push(issue("validation-dynamic-step-count", `Dynamic run would need more than ${MAX_DYNAMIC_INTEGRATION_STEPS.toLocaleString("en-US")} integration steps. Increase the time step or shorten the time range.`));
   }
   if (!(solverSettings.outputInterval > 0 && solverSettings.outputInterval >= solverSettings.timeStep)) {
     diagnostics.push(issue("validation-dynamic-output-interval", "Dynamic output interval must be greater than zero and no smaller than the time step."));

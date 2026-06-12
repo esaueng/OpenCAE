@@ -8,14 +8,16 @@ The project is organized around service boundaries so the React workspace, Fasti
 
 ## Local Development
 
-OpenCAE consumes the live OpenCAE Core workspace from a sibling checkout. Keep the repos beside each other:
+OpenCAE consumes the live OpenCAE Core workspace from a sibling checkout. Keep the repos beside each other (only the relative layout matters):
 
 ```text
-/Users/userzero/codex/opencae-alpha
-/Users/userzero/codex/opencae-core
+<workspace>/open-cae
+<workspace>/opencae-core
 ```
 
-Install dependencies and start the API and web app from `opencae-alpha`:
+Run `pnpm ensure:core` (or any build command) to clone `https://github.com/esaueng/OpenCAE-Core` into the sibling path at the commit pinned in [services/opencae-core-cloud/OPENCAE_CORE_REF](services/opencae-core-cloud/OPENCAE_CORE_REF). Set `OPENCAE_CORE_DIR` to use a different location.
+
+Install dependencies and start the API and web app from the repo root:
 
 ```bash
 pnpm install
@@ -51,6 +53,7 @@ pnpm db:migrate
 pnpm db:seed
 pnpm reset:local
 pnpm build
+pnpm typecheck
 pnpm test
 pnpm verify:perf
 ```
@@ -116,8 +119,8 @@ The `/health` route verifies the production Worker is reachable. The `/api/cloud
 - `apps/opencae-web` - React/Vite CAD workspace for static and dynamic structural workflows.
 - `apps/opencae-api` - Fastify API for projects, uploads, studies, jobs, artifacts, reports, and service orchestration.
 - `../opencae-core/packages/*` - Live sibling OpenCAE Core packages consumed through the pnpm workspace.
-- `libs/*` - Shared schema, units, materials, storage, jobs, diagnostics, validation, selection, result format, and service contracts.
-- `services/*` - CAD, mesh, solver, post-processing, and legacy container reference implementations.
+- `libs/*` - Shared schema, units, materials, storage, jobs, validation (study-core), database, and core-adapter packages.
+- `services/*` - CAD, mesh, solver, post-processing, and legacy container reference implementations. `services/opencae-core-cloud` is a contract mirror of the deployed OpenCAE Core Cloud service; the production container image is built from the sibling OpenCAE-Core checkout at the pinned ref (see the Dockerfile), and `pnpm verify:runner-version` cross-checks the two.
 - `runners/opencae-runner-local` - Local runner package for job execution flows.
 - `examples/*` - Sample project documentation and fixtures.
 - `docs/*` - Architecture, local development, file format, validation, and user guide notes.

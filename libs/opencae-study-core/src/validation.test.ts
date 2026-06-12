@@ -136,6 +136,26 @@ describe("validateStaticStressStudy", () => {
     ]);
   });
 
+  it("rejects dynamic time settings that request an excessive number of integration steps", () => {
+    const dynamicStudy: Study = {
+      ...readyStudy,
+      name: "Dynamic",
+      type: "dynamic_structural",
+      solverSettings: {
+        startTime: 0,
+        endTime: 1_000_000_000,
+        timeStep: 0.005,
+        outputInterval: 0.005,
+        dampingRatio: 0.02,
+        integrationMethod: "newmark_average_acceleration"
+      }
+    };
+
+    expect(validateStudy(dynamicStudy).map((item) => item.message)).toEqual([
+      "Dynamic run would need more than 2,000,000 integration steps. Increase the time step or shorten the time range."
+    ]);
+  });
+
   it("allows support-free dynamic runs only when free motion is explicitly enabled", () => {
     const dynamicStudy: Study = {
       ...readyStudy,

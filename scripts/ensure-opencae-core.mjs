@@ -18,8 +18,14 @@ if (isProductionBuild() && !isFullGitCommitRef(coreRef)) {
 }
 
 if (existsSync(resolve(coreDir, "package.json"))) {
+  const before = describeHead(coreDir);
   updateExistingCoreWorkspace(coreDir, coreRef);
-  console.log(`OpenCAE Core workspace updated to ${describeHead(coreDir)} at ${coreDir}`);
+  const after = describeHead(coreDir);
+  if (before !== after) {
+    console.log(`OpenCAE Core workspace moved from ${before} to ${after} at ${coreDir} (set OPENCAE_CORE_REF to pin a different ref).`);
+  } else {
+    console.log(`OpenCAE Core workspace already at ${after} at ${coreDir}`);
+  }
   process.exit(0);
 }
 

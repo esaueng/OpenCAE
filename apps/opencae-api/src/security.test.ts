@@ -25,7 +25,13 @@ describe("API security helpers", () => {
   });
 
   test("defines explicit route rate limits for CodeQL-covered reads and mutations", () => {
-    expect(projectsReadRateLimit.config.rateLimit).toEqual({ max: 300, timeWindow: "1 minute" });
-    expect(mutatingRateLimit.config.rateLimit).toEqual({ max: 60, timeWindow: "1 minute" });
+    expect(projectsReadRateLimit.config.rateLimit).toEqual({ max: 60, timeWindow: "1 minute" });
+    expect(mutatingRateLimit.config.rateLimit).toEqual({ max: 30, timeWindow: "1 minute" });
+  });
+
+  test("caps sanitized filename and slug lengths", () => {
+    expect(sanitizeFilename(`${"a".repeat(300)}.step`)).toBeUndefined();
+    expect(sanitizeFilename(`${"a".repeat(100)}.step`)?.length).toBeLessThanOrEqual(128);
+    expect(pdfFilename("b".repeat(300)).length).toBeLessThanOrEqual(96 + "-report.pdf".length);
   });
 });

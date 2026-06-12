@@ -76,7 +76,7 @@ describe("LocalMockComputeBackend", () => {
       const backend = new LocalMockComputeBackend(storage);
 
       const run = backend.runStaticSolve({
-        study: studyWithLoads([{ id: "payload-mass", type: "gravity", value: 10, direction: [0, 0, -1] }]),
+        study: studyWithLoads([{ id: "payload-mass", type: "gravity", value: 10, units: "kg", direction: [0, 0, -1] }]),
         runId: "run-payload",
         meshRef: "mesh-payload",
         publish: vi.fn()
@@ -89,6 +89,36 @@ describe("LocalMockComputeBackend", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  test("passes gravity loads expressed in Newtons through without unit conversion", () => {
+    const solved = solveStudy(studyWithLoads([{ id: "payload-force", type: "gravity", value: 10, units: "N", direction: [0, 0, -1] }]), "run-payload-newtons");
+
+    expect(solved.summary.reactionForce).toBe(10);
+    expect(solved.summary.reactionForceUnits).toBe("N");
+  });
+
+  test("throws a clear error when an assigned material id is unknown", () => {
+    const load = { id: "load-a", type: "force" as const, value: 500, direction: [0, -1, 0] as [number, number, number] };
+
+    expect(() => solveStudy(studyWithLoads([load], "mat-unobtanium"), "run-unknown-material")).toThrow(/Unknown material "mat-unobtanium"/);
+    expect(() => solveStudy(beamPayloadStudy("mat-unobtanium"), "run-unknown-beam-material")).toThrow(/Unknown material "mat-unobtanium"/);
+  });
+
+  test("falls back to the default material only when no material is assigned", () => {
+    const load = { id: "load-a", type: "force" as const, value: 500, direction: [0, -1, 0] as [number, number, number] };
+    const solved = solveStudy({ ...studyWithLoads([load]), materialAssignments: [] }, "run-no-material");
+
+    expect(solved.material.id).toBe("mat-aluminum-6061");
+  });
+
+  test("reports zero reaction force and a diagnostic when no loads resolve", () => {
+    const solved = solveStudy(studyWithLoads([]), "run-no-loads");
+
+    expect(solved.summary.reactionForce).toBe(0);
+    expect(solved.summary.diagnostics).toEqual([
+      expect.objectContaining({ id: "solver-no-resolvable-loads", severity: "warning", source: "solver" })
+    ]);
   });
 
   test("uses requested force load direction for displacement vectors", () => {
@@ -577,6 +607,38 @@ describe("LocalMockComputeBackend", () => {
     expect(solved.summary.transient?.frameCount).toBe(5);
   });
 
+  test("clamps runaway dynamic time settings and reports the clamps as diagnostics", () => {
+    const study: Study = {
+      ...studyWithLoads([{ id: "load-a", type: "force", value: 500, direction: [0, -1, 0] }]),
+      type: "dynamic_structural",
+      solverSettings: {
+        startTime: 0,
+        endTime: 1_000_000_000,
+        timeStep: 0.005,
+        outputInterval: 0.005,
+        dampingRatio: 0.02,
+        integrationMethod: "newmark_average_acceleration"
+      }
+    };
+
+    const solved = solveDynamicStudy(study, "run-dynamic-clamped", {
+      quality: "coarse",
+      bounds: { min: [-1.9, -0.07, -0.36], max: [1.9, 0.43, 0.36] },
+      samples: [
+        { point: [-1.9, 0.18, 0], normal: [-1, 0, 0], weight: 1, sourceId: "tiny" },
+        { point: [1.9, 0.18, 0], normal: [1, 0, 0], weight: 1, sourceId: "tiny" }
+      ]
+    });
+
+    expect(solved.summary.transient?.timeStep).toBe(500);
+    expect(solved.summary.transient?.outputInterval).toBe(500000);
+    expect(solved.summary.transient?.frameCount).toBeLessThanOrEqual(2002);
+    expect(solved.summary.diagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "solver-dynamic-step-clamp", severity: "warning" }),
+      expect.objectContaining({ id: "solver-dynamic-frame-clamp", severity: "warning" })
+    ]));
+  });
+
   test("dynamic solve keeps field ranges stable across animation frames", () => {
     const solved = solveDynamicStudy(
       dynamicCantileverStudy("mat-aluminum-6061", {
@@ -687,6 +749,16 @@ describe("LocalMockComputeBackend", () => {
     }
   });
 
+  test("defaults the dynamic load profile to ramp", () => {
+    const settings = { endTime: 0.02, timeStep: 0.005, outputInterval: 0.005 };
+    const defaulted = solveDynamicStudy(dynamicCantileverStudy("mat-aluminum-6061", settings), "run-default-profile", rectangularBeamAnalysisMesh());
+    const ramp = solveDynamicStudy(dynamicCantileverStudy("mat-aluminum-6061", { ...settings, loadProfile: "ramp" }), "run-ramp-profile", rectangularBeamAnalysisMesh());
+    const step = solveDynamicStudy(dynamicCantileverStudy("mat-aluminum-6061", { ...settings, loadProfile: "step" }), "run-step-profile", rectangularBeamAnalysisMesh());
+
+    expect(defaulted.summary.maxDisplacement).toBe(ramp.summary.maxDisplacement);
+    expect(defaulted.summary.maxDisplacement).not.toBe(step.summary.maxDisplacement);
+  });
+
   test("dynamic response changes with density and damping", async () => {
     vi.useFakeTimers();
     try {
@@ -694,7 +766,7 @@ describe("LocalMockComputeBackend", () => {
       const backend = new LocalMockComputeBackend(storage);
 
       const aluminumRun = backend.runDynamicSolve({
-        study: dynamicCantileverStudy("mat-aluminum-6061", { dampingRatio: 0 }),
+        study: dynamicCantileverStudy("mat-aluminum-6061", { dampingRatio: 0, loadProfile: "step" }),
         runId: "run-dynamic-aluminum",
         meshRef: "mesh-dynamic",
         analysisMesh: rectangularBeamAnalysisMesh(),
@@ -704,7 +776,7 @@ describe("LocalMockComputeBackend", () => {
       const aluminum = await aluminumRun;
 
       const titaniumRun = backend.runDynamicSolve({
-        study: dynamicCantileverStudy("mat-titanium-grade-5", { dampingRatio: 0 }),
+        study: dynamicCantileverStudy("mat-titanium-grade-5", { dampingRatio: 0, loadProfile: "step" }),
         runId: "run-dynamic-titanium",
         meshRef: "mesh-dynamic",
         analysisMesh: rectangularBeamAnalysisMesh(),
@@ -714,7 +786,7 @@ describe("LocalMockComputeBackend", () => {
       const titanium = await titaniumRun;
 
       const dampedRun = backend.runDynamicSolve({
-        study: dynamicCantileverStudy("mat-aluminum-6061", { dampingRatio: 0.25 }),
+        study: dynamicCantileverStudy("mat-aluminum-6061", { dampingRatio: 0.25, loadProfile: "step" }),
         runId: "run-dynamic-damped",
         meshRef: "mesh-dynamic",
         analysisMesh: rectangularBeamAnalysisMesh(),
@@ -760,7 +832,7 @@ function nearestSample(samples: NonNullable<ReturnType<typeof solveStudy>["field
   }, undefined);
 }
 
-function studyWithLoads(loads: Array<{ id: string; type: Load["type"]; value: number; direction: [number, number, number]; selectionRef?: string }>, materialId = "mat-aluminum-6061", materialParameters: Record<string, unknown> = {}): Study {
+function studyWithLoads(loads: Array<{ id: string; type: Load["type"]; value: number; direction: [number, number, number]; selectionRef?: string; units?: string }>, materialId = "mat-aluminum-6061", materialParameters: Record<string, unknown> = {}): Study {
   return {
     id: "study-test",
     projectId: "project-test",
@@ -797,7 +869,7 @@ function studyWithLoads(loads: Array<{ id: string; type: Load["type"]; value: nu
       id: load.id,
       type: load.type,
       selectionRef: load.selectionRef ?? "selection-load-face",
-      parameters: { value: load.value, units: load.type === "pressure" ? "kPa" : "N", direction: load.direction },
+      parameters: { value: load.value, units: load.units ?? (load.type === "pressure" ? "kPa" : "N"), direction: load.direction },
       status: "complete"
     })),
     meshSettings: { preset: "medium", status: "complete", meshRef: "mesh", summary: { nodes: 10, elements: 4, warnings: [] } },
