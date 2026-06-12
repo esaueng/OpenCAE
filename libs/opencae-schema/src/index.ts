@@ -119,7 +119,12 @@ export const ResultSampleSchema = z.object({
 export const ResultProvenanceSchema = z.object({
   kind: z.enum(["opencae_core_fea", "local_estimate", "analytical_benchmark"]),
   solver: z.string(),
-  solverVersion: z.string(),
+  // Core Cloud results report coreVersion/solverCpuVersion/runnerVersion instead
+  // of solverVersion; requiring it made every cloud result fail restore parsing.
+  solverVersion: z.string().optional(),
+  coreVersion: z.string().optional(),
+  solverCpuVersion: z.string().optional(),
+  runnerVersion: z.string().optional(),
   meshSource: z.enum(["opencae_core_tet4", "actual_volume_mesh", "structured_block_core", "structured_block", "structured_block_proxy", "display_bounds_proxy", "mock", "unknown"]),
   resultSource: z.enum(["computed", "computed_preview", "generated"]),
   units: z.string(),

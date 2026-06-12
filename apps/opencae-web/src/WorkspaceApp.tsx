@@ -48,6 +48,7 @@ import {
   solverFramePositionForPlaybackOrdinal
 } from "./resultPlaybackTimeline";
 import { preparePlaybackFramesInWorker } from "./workers/performanceClient";
+import { meshStatsFromResultDiagnostics, type ResultMeshStats } from "./resultProvenance";
 import type { WorkspaceInitialAction } from "./App";
 
 const lazyCadViewerImport = () => import("./components/CadViewer").then((module) => ({ default: module.CadViewer }));
@@ -128,12 +129,14 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const [logs, setLogs] = useState<string[]>(restoredUi?.logs.length ? restoredUi.logs : restoredProjectFile ? ["Workspace restored after reload.", "Ready | Local Mode"] : ["Ready | Local Mode"]);
   const [runProgress, setRunProgress] = useState(restoredUi?.runProgress ?? (restoredResults?.fields.length ? 100 : 0));
   const [runTiming, setRunTiming] = useState<RunTimingEstimate | null>(null);
+  const [runError, setRunError] = useState<string | null>(null);
   const [activeRunId, setActiveRunId] = useState(restoredUi?.activeRunId || restoredResults?.activeRunId || restoredResults?.completedRunId || "run-bracket-demo-seeded");
   const [completedRunId, setCompletedRunId] = useState(restoredUi?.completedRunId || restoredResults?.completedRunId || "run-bracket-demo-seeded");
   const [processingRunId, setProcessingRunId] = useState<string | null>(null);
   const [resultSummary, setResultSummary] = useState<ResultSummary>(restoredResults?.summary ?? seededSummary);
   const [resultFields, setResultFields] = useState<ResultField[]>(restoredResults?.fields ?? []);
   const [resultSurfaceMesh, setResultSurfaceMesh] = useState<SolverSurfaceMesh | undefined>(restoredResults?.surfaceMesh);
+  const [resultMeshStats, setResultMeshStats] = useState<ResultMeshStats | undefined>(restoredResults?.meshStats);
   const [resultFrameIndex, setResultFrameIndex] = useState(0);
   const [resultPlaybackFramePosition, setResultPlaybackFramePosition] = useState(0);
   const [resultPlaybackOrdinalPosition, setResultPlaybackOrdinalPosition] = useState(0);
@@ -634,7 +637,8 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         completedRunId,
         summary: resultSummary,
         fields: resultFields,
-        ...(resultSurfaceMesh ? { surfaceMesh: resultSurfaceMesh } : {})
+        ...(resultSurfaceMesh ? { surfaceMesh: resultSurfaceMesh } : {}),
+        ...(resultMeshStats ? { meshStats: resultMeshStats } : {})
       } : undefined,
       ui: autosaveUiSnapshot
     }), undefined, AUTOSAVE_HEAVY_WRITE_DELAY_MS);
@@ -650,6 +654,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     project,
     redoStack,
     resultFields,
+    resultMeshStats,
     resultSurfaceMesh,
     resultSummary,
     runProgress,
@@ -682,6 +687,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       setResultSummary(response.results.summary);
       setResultFields(response.results.fields);
       setResultSurfaceMesh(response.results.surfaceMesh);
+      setResultMeshStats(response.results.meshStats);
       setResultFrameIndex(0);
       const restoredRunId = response.results.completedRunId ?? response.results.activeRunId ?? latestCompletedRunId(response.project.studies[0] ?? null, "") ?? "";
       setActiveRunId(response.results.activeRunId ?? restoredRunId);
@@ -699,6 +705,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       setViewMode("model");
       setResultFields([]);
       setResultSurfaceMesh(undefined);
+      setResultMeshStats(undefined);
       setResultFrameIndex(0);
       setRunProgress(0);
       const nextCompletedRunId = latestCompletedRunId(response.project.studies[0] ?? null, "") ?? "";
@@ -739,7 +746,8 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         completedRunId,
         summary: resultSummary,
         fields: resultFields,
-        ...(resultSurfaceMesh ? { surfaceMesh: resultSurfaceMesh } : {})
+        ...(resultSurfaceMesh ? { surfaceMesh: resultSurfaceMesh } : {}),
+        ...(resultMeshStats ? { meshStats: resultMeshStats } : {})
       });
       setProject({ ...project, updatedAt: savedAt });
       pushMessage("Project saved to local disk.");
@@ -763,6 +771,12 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     if (project) {
       recordUndoSnapshot(project);
       setProject({ ...project, studies: project.studies.map((item) => (item.id === response.study.id ? response.study : item)) });
+    }
+    // Any study change (loads, supports, materials, mesh, solver settings)
+    // makes the previous run's results stale; never keep showing them.
+    if (resultFields.length) {
+      invalidateCompletedRunState();
+      pushMessage("Previous results cleared: the study changed since the last run.");
     }
     pushMessage(response.message);
     if (nextStep) navigateToStep(nextStep);
@@ -896,6 +910,8 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     setActiveRunId("");
     setRunProgress(0);
     setResultFields([]);
+    setResultSurfaceMesh(undefined);
+    setResultMeshStats(undefined);
     setResultFrameIndex(0);
     setResultPlaybackFramePosition(0);
     setResultPlaybackPlaying(false);
@@ -1017,6 +1033,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       return;
     }
     setResultPlaybackPlaying(false);
+    setRunError(null);
     pushMessage("Starting simulation run.");
     pushMessage(runDiagnosticsMessage(study));
     let response: Awaited<ReturnType<typeof runSimulation>>;
@@ -1027,7 +1044,9 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       setRunProgress(0);
       setRunTiming(null);
       setResultPlaybackPlaying(false);
-      pushMessage(errorMessage(error, "Could not start simulation."));
+      const message = errorMessage(error, "Could not start simulation.");
+      setRunError(message);
+      pushMessage(message);
       return;
     }
     setActiveRunId(response.run.id);
@@ -1057,6 +1076,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           setResultSummary(results.summary);
           setResultFields(results.fields);
           setResultSurfaceMesh(results.surfaceMesh);
+          setResultMeshStats(meshStatsFromResultDiagnostics(results.diagnostics));
           setResultFrameIndex(0);
           setResultPlaybackPlaying(false);
           if (study.type === "dynamic_structural") setResultMode("stress");
@@ -1064,7 +1084,9 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           setViewMode("results");
           setActiveStep("results");
         } catch (error) {
-          pushMessage(errorMessage(error, "Could not load simulation results."));
+          const message = errorMessage(error, "Could not load simulation results.");
+          setRunError(message);
+          pushMessage(message);
           setResultPlaybackPlaying(false);
           setRunProgress(0);
         }
@@ -1076,6 +1098,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         setResultPlaybackPlaying(false);
         setRunProgress(0);
         setRunTiming(null);
+        if (event.type === "error") setRunError(event.message || "Simulation run failed.");
       }
     });
     activeRunSourceRef.current = source;
@@ -1198,7 +1221,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
             surfaceMesh={resultSurfaceMesh}
             resultPlaybackBufferCache={resultPlaybackBufferCacheForViewer}
             resultPlaybackFrameController={resultPlaybackPlaying ? resultPlaybackFrameControllerRef.current : undefined}
-            meshSummary={study.meshSettings.summary}
+            meshSummary={resultMeshStats}
             unitSystem={displayUnitSystem}
             themeMode={themeMode}
             fitSignal={fitSignal}
@@ -1226,6 +1249,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           resultSummary={resultSummaryForUi}
           resultFields={resultFieldsForUi}
           runProgress={runProgress}
+          runError={runError}
           runTiming={runTiming}
           sampleModel={sampleModel}
           sampleAnalysisType={sampleAnalysisType}

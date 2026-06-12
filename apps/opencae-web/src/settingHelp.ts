@@ -140,7 +140,7 @@ export const SETTING_HELP: Record<SettingHelpId, SettingHelp> = {
   },
   deformedShape: {
     title: "Deformed shape",
-    body: "Overlays the estimated displaced shape on the model so you can see the bending pattern. The visual can be exaggerated for inspection.",
+    body: "Overlays the displaced shape so you can see the bending pattern. The deformation is automatically exaggerated to be visible (the factor is shown in the legend); the white outline is the original undeformed shape. Real displacements are usually far too small to see.",
     visual: "results"
   },
   targetSafetyFactor: {

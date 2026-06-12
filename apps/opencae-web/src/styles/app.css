@@ -1941,6 +1941,11 @@ img {
   grid-column: 1 / -1;
 }
 
+.analysis-legend .legend-deformation-note {
+  color: var(--color-warning, #f59e0b);
+  font-weight: 600;
+}
+
 .legend-scale {
   grid-column: 1 / -1;
   width: 100%;
@@ -2721,6 +2726,8 @@ button:disabled {
   font-family: var(--font-mono);
   font-weight: var(--fw-regular);
   text-align: right;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .summary-box,
