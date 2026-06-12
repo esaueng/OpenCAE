@@ -605,6 +605,11 @@ function securityHeaders(): Record<string, string> {
 
 function errorMessage(value: unknown, fallback: string): string {
   if (isRecord(value) && typeof value.error === "string") return value.error;
+  // The Core Cloud container reports errors as { error: { code, message } }.
+  if (isRecord(value) && isRecord(value.error) && typeof value.error.message === "string") {
+    const code = typeof value.error.code === "string" ? `${value.error.code}: ` : "";
+    return `${code}${value.error.message}`;
+  }
   if (isRecord(value) && Array.isArray(value.diagnostics) && isRecord(value.diagnostics[0]) && typeof value.diagnostics[0].message === "string") {
     return value.diagnostics[0].message;
   }

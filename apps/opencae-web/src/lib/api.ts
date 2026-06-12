@@ -4,6 +4,7 @@ import { embedUploadedModelFile, type EmbeddedModelFile, type LocalResultBundle,
 import { createLocalBlankProject, createLocalSampleProject, createLocalUploadResponse, openLocalProjectPayload } from "../localProjectFactory";
 import { solveLocalStudyInWorker } from "../workers/performanceClient";
 import { buildOpenCaeCoreCloudModelForStudy, cloudGeometrySourceForStudy, hasActualCoreVolumeMesh, isComplexGeometry, normalizeSolverBackend, openCaeCoreEligibility, trySolveOpenCaeCoreStudy, OPENCAE_CORE_CLOUD_GEOMETRY_REQUIRED_REASON, type NormalizedBrowserSolverBackend } from "../workers/opencaeCoreSolve";
+import { modelDirectionToGlobalCadFrame } from "../modelOrientation";
 
 export interface SampleProjectResponse {
   message?: string;
@@ -303,10 +304,61 @@ export async function getResults(runId: string): Promise<ResultsResponse> {
   if (cloudResultsUrl) {
     const request = headerTokenRequest(cloudResultsUrl);
     const response = await fetch(request.url, { headers: request.headers });
-    return readJson(response, `GET ${request.url}`);
+    return withFieldRunIds(runId, await readJson(response, `GET ${request.url}`));
   }
   const response = await fetch(`/api/runs/${runId}/results`);
-  return readJson(response, `GET /api/runs/${runId}/results`);
+  return withFieldRunIds(runId, await readJson(response, `GET /api/runs/${runId}/results`));
+}
+
+// Deployed Core Cloud runners omit runId on result fields; the schema (and
+// autosave restore) requires it, so stamp the owning run before use.
+export function withFieldRunIds(runId: string, results: ResultsResponse): ResultsResponse {
+  const stamped = !Array.isArray(results.fields) || results.fields.every((field) => typeof field.runId === "string" && field.runId)
+    ? results
+    : {
+        ...results,
+        fields: results.fields.map((field) => (typeof field.runId === "string" && field.runId ? field : { ...field, runId }))
+      };
+  return withDerivedSafetyFactorSurfaceField(stamped);
+}
+
+const DERIVED_SAFETY_FACTOR_CAP = 1000;
+
+// Cloud results carry safety factor only as an element field with no surface
+// alignment, so Safety Factor mode used to fall back to demo geometry. Derive a
+// per-node field from the surface stress field and the summary yield margin.
+export function withDerivedSafetyFactorSurfaceField(results: ResultsResponse): ResultsResponse {
+  const surfaceMesh = results.surfaceMesh;
+  if (!surfaceMesh) return results;
+  const aligned = (field: ResultField) => field.location === "node" && field.surfaceMeshRef === surfaceMesh.id && field.values.length === surfaceMesh.nodes.length;
+  if (results.fields.some((field) => field.type === "safety_factor" && aligned(field))) return results;
+  const stressField = results.fields.find((field) => field.type === "stress" && aligned(field));
+  const safetyFactor = Number(results.summary?.safetyFactor);
+  const maxStress = Number(results.summary?.maxStress);
+  if (!stressField || !Number.isFinite(safetyFactor) || !Number.isFinite(maxStress) || safetyFactor <= 0 || maxStress <= 0) return results;
+  const yieldStrength = safetyFactor * maxStress;
+  const values = stressField.values.map((stress) =>
+    Math.min(DERIVED_SAFETY_FACTOR_CAP, yieldStrength / Math.max(Math.abs(stress), yieldStrength / DERIVED_SAFETY_FACTOR_CAP))
+  );
+  const finiteValues = values.filter(Number.isFinite);
+  if (!finiteValues.length) return results;
+  return {
+    ...results,
+    fields: [
+      ...results.fields,
+      {
+        ...stressField,
+        id: `${stressField.id}-derived-safety-factor`,
+        type: "safety_factor",
+        values,
+        min: Math.min(...finiteValues),
+        max: Math.max(...finiteValues),
+        units: "ratio",
+        vectors: undefined,
+        samples: undefined
+      }
+    ]
+  };
 }
 
 function releaseLocalRunBookkeeping(runId: string): void {
@@ -490,6 +542,35 @@ function messageFromUnknownError(error: unknown): string {
   return error instanceof Error ? error.message : typeof error === "string" ? error : "";
 }
 
+// Gmsh characteristic length (mm) for cloud-meshed procedural sample geometry.
+// The container caps solves at 30k DOFs; 6mm on the bracket stays well below it.
+const CLOUD_PROCEDURAL_MESH_SIZE_MM: Record<MeshQuality, number> = {
+  coarse: 18,
+  medium: 12,
+  fine: 8,
+  ultra: 6
+};
+
+export function studyForCoreCloudGeometrySolve(study: Study, displayModel: DisplayModel | undefined): Study {
+  if (!displayModel) return study;
+  let changed = false;
+  const loads = study.loads.map((load) => {
+    const direction = load.parameters.direction;
+    if (!Array.isArray(direction) || direction.length !== 3 || !direction.every((component) => Number.isFinite(Number(component)))) return load;
+    const mapped = modelDirectionToGlobalCadFrame([Number(direction[0]), Number(direction[1]), Number(direction[2])], displayModel);
+    if (mapped === direction) return load;
+    changed = true;
+    return { ...load, parameters: { ...load.parameters, direction: mapped } };
+  });
+  return changed ? { ...study, loads } : study;
+}
+
+export function geometryWithMeshPreset(geometry: NonNullable<ReturnType<typeof cloudGeometrySourceForStudy>>, study: Study) {
+  if (geometry.kind !== "sample_procedural" || !geometry.descriptor) return geometry;
+  const meshSize = CLOUD_PROCEDURAL_MESH_SIZE_MM[study.meshSettings.preset] ?? CLOUD_PROCEDURAL_MESH_SIZE_MM.medium;
+  return { ...geometry, descriptor: { ...geometry.descriptor, meshSize } };
+}
+
 function openCaeCoreCloudSolveRequest(runId: string, study: Study, displayModel: DisplayModel | undefined) {
   const actualMesh = hasActualCoreVolumeMesh(study, displayModel);
   const geometry = actualMesh ? null : cloudGeometrySourceForStudy(study, displayModel);
@@ -500,9 +581,9 @@ function openCaeCoreCloudSolveRequest(runId: string, study: Study, displayModel:
     return {
       runId,
       analysisType: study.type,
-      study,
+      study: studyForCoreCloudGeometrySolve(study, displayModel),
       displayModel,
-      geometry,
+      geometry: geometryWithMeshPreset(geometry, study),
       coreVolumeMesh: null,
       solverSettings: {
         ...study.solverSettings,
