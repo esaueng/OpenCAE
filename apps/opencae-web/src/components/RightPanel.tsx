@@ -53,6 +53,7 @@ interface RightPanelProps {
   resultSummary: ResultSummary | null;
   resultFields?: ResultField[];
   runProgress: number;
+  runError?: string | null;
   runTiming?: RunTimingEstimate | null;
   sampleModel: SampleModelId;
   sampleAnalysisType?: SampleAnalysisType;
@@ -961,11 +962,12 @@ function MeshPanel({ study, onGenerateMesh }: RightPanelProps) {
           <Info label="Warnings" value={String(study.meshSettings.summary.warnings.length)} />
         </div>
       )}
+      <p className="panel-copy">Cloud solves mesh the part on the server at the selected quality; final node and element counts appear with the results.</p>
     </Panel>
   );
 }
 
-function RunPanel({ study, displayModel, runProgress, runTiming, onRunSimulation, onCancelSimulation, canCancelSimulation, onUpdateSolverSettings, canRunSimulation, missingRunItems }: RightPanelProps) {
+function RunPanel({ study, displayModel, runProgress, runError, runTiming, onRunSimulation, onCancelSimulation, canCancelSimulation, onUpdateSolverSettings, canRunSimulation, missingRunItems }: RightPanelProps) {
   const progressPercent = Math.max(0, Math.min(100, Math.round(runProgress)));
   const isRunning = canCancelSimulation ?? (progressPercent > 0 && progressPercent < 100);
   const remainingLabel = formatSimulationEta(runTiming?.estimatedRemainingMs, isRunning);
@@ -1055,6 +1057,7 @@ function RunPanel({ study, displayModel, runProgress, runTiming, onRunSimulation
         </button>
       )}
       {missingRunItems.length > 0 && <p className="panel-copy">Complete {missingRunItems.join(", ").toLowerCase()} before running.</p>}
+      {runError && !isRunning && <p className="panel-warning" role="alert">{runError}</p>}
       <div className="progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progressPercent} aria-label="Simulation progress">
         <span style={{ width: `${progressPercent}%` }} />
         <strong className="progress-label">{progressPercent}%</strong>
@@ -1395,9 +1398,9 @@ function ResultsPanelContent({
       <p className="panel-copy">Red areas have higher stress. Blue areas have lower stress.</p>
       <div className="summary-box">
         <Info label="Result source" value={formatResultProvenanceLabel(resultSummary.provenance)} />
-        <Info label="Core solver version" value={resultProvenance?.solverVersion ?? "--"} />
+        <Info label="Core solver version" value={resultProvenance?.solverVersion ?? resultProvenance?.solverCpuVersion ?? resultProvenance?.coreVersion ?? "--"} />
         <Info label="Core model schema version" value={project.schemaVersion} />
-        <Info label="Mesh source" value={formatMeshSourceLabel(resultProvenance?.meshSource)} />
+        <Info label="Mesh source" value={formatMeshSourceLabel(resultProvenance?.meshSource, displayModel)} />
         <Info label="Solver method" value={solverMethodForResult(resultSummary, study)} />
         <Info label="Runner" value={solverRunnerLabelForResult(resultProvenance)} />
         <Info label="Local fallback" value="none" />
@@ -1466,8 +1469,13 @@ function solverRunnerLabelForResult(provenance: ResultProvenance | undefined): s
   return provenance?.solver === "opencae-core-cloud" ? "cloud container" : "local core worker";
 }
 
-function formatMeshSourceLabel(meshSource: ResultProvenance["meshSource"] | undefined): string {
-  if (meshSource === "actual_volume_mesh") return "Actual volume mesh";
+function formatMeshSourceLabel(meshSource: ResultProvenance["meshSource"] | undefined, displayModel?: DisplayModel): string {
+  if (meshSource === "actual_volume_mesh") {
+    // Sample projects are meshed in the cloud from a simplified procedural
+    // descriptor (no hole features); claiming "actual" would overstate fidelity.
+    if (displayModel?.coreCloudGeometry?.kind === "sample_procedural") return "Procedural sample mesh (simplified)";
+    return "Actual volume mesh";
+  }
   if (meshSource === "structured_block_core") return "Structured block Core";
   if (meshSource === "opencae_core_tet4") return "OpenCAE Core Tet4";
   if (meshSource === "structured_block_proxy" || meshSource === "display_bounds_proxy") return "OpenCAE Core Preview";
