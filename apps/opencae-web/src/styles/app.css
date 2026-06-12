@@ -2774,6 +2774,92 @@ button:disabled {
   line-height: var(--lh-loose);
 }
 
+.collapsible-section {
+  margin: 14px 0 0;
+  border: var(--border-thin);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-2);
+}
+
+.collapsible-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  color: var(--color-text);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.collapsible-summary::-webkit-details-marker {
+  display: none;
+}
+
+.collapsible-subtitle {
+  margin-left: auto;
+  color: var(--color-text-subtle);
+  font-family: var(--font-mono);
+  font-size: var(--fs-mini);
+  letter-spacing: var(--ls-eyebrow);
+  text-transform: uppercase;
+}
+
+.collapsible-chevron {
+  flex: none;
+  margin-left: 4px;
+  color: var(--color-text-subtle);
+  transition: transform 0.15s ease;
+}
+
+.collapsible-section[open] .collapsible-chevron {
+  transform: rotate(180deg);
+}
+
+.collapsible-body {
+  padding: 0 12px 12px;
+}
+
+.parametric-part-summary {
+  margin: 0 0 12px;
+}
+
+.parametric-part-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.parametric-part-fields .field {
+  margin: 0;
+}
+
+.parametric-part-problems {
+  margin: 10px 0 0;
+  padding: 8px 12px 8px 26px;
+  color: var(--color-text);
+  background: rgba(239, 68, 68, 0.12);
+  border-left: 2px solid var(--color-error);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-loose);
+}
+
+.parametric-part-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 0;
+  color: var(--color-text-subtle);
+  font-size: var(--fs-mini);
+}
+
+.parametric-part-note svg {
+  flex: none;
+}
+
 .failure-assessment {
   margin-top: 14px;
   display: grid;

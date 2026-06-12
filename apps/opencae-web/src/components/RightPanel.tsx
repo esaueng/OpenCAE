@@ -1,6 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { AlertTriangle, Anchor, ArrowDown, Check, CircleHelp, Eye, Gauge, Grid3X3, Maximize2, Pause, Play, Plus, RotateCcw, Ruler, ScanLine, ShieldCheck, Upload, Weight, X } from "lucide-react";
+import { AlertTriangle, Anchor, ArrowDown, Check, ChevronDown, CircleHelp, Eye, Gauge, Grid3X3, Maximize2, Pause, Play, Plus, RotateCcw, Ruler, ScanLine, ShieldCheck, Upload, Weight, X } from "lucide-react";
 import { defaultPrintParametersFor, effectiveMaterialProperties, massKgForPayloadMaterial, normalizePrintParameters, payloadMaterialForId, payloadMaterials, starterMaterials, type PayloadMaterialCategory, type PrintMaterialParameters } from "@opencae/materials";
 import { assessResultFailure, estimateAllowableLoadForSafetyFactor } from "@opencae/schema";
 import type { Constraint, DisplayFace, DisplayModel, DynamicSolverSettings, Load, MeshQuality, Project, ResultField, ResultProvenance, ResultSummary, RunTimingEstimate, SimulationFidelity, SolverBackend, Study } from "@opencae/schema";
@@ -18,6 +18,7 @@ import { getViewportTooltipPosition } from "../tooltipPosition";
 import { forceForUnits, formatDensity, formatMass, formatMaterialStress, formatResultProvenanceLabel, formatVolume, legacyResultWarningForProvenance, loadValueForUnits, type UnitSystem } from "../unitDisplay";
 import { canNavigateToStep } from "../appShellState";
 import { MaterialLibraryModal } from "./SimulationWorkflow";
+import { ParametricPartBuilder } from "./ParametricPartBuilder";
 import { SampleOptionCard } from "./SampleOptionCard";
 import { SAMPLE_OPTIONS, sampleOptionFor } from "./sampleOptions";
 import { dynamicPlaybackFrames } from "../resultFields";
@@ -240,6 +241,9 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sa
       ) : isUploadedProject ? (
         <Callout>{isNativeCadImport ? `${geometry.filename} is loaded as a selectable STEP import.` : uploadPreviewFormat ? `${geometry.filename} is loaded with a ${uploadPreviewFormat} viewport preview.` : `${geometry.filename} cannot be previewed in this local viewer. Replace it with STEP, STP, or STL.`}</Callout>
       ) : null}
+      <Collapsible title="Create parametric part" subtitle="Analytic STEP solid" defaultOpen={isBlankProject}>
+        <ParametricPartBuilder onCreatePart={onUploadModel} />
+      </Collapsible>
       <div className="summary-box">
         <Info label="Project" value={project.name} />
         <Info label="Model" value={geometry?.filename ?? "No model loaded"} />
@@ -1678,6 +1682,19 @@ function SectionTitle({ children, helpId }: { children: ReactNode; helpId?: Sett
 
 function Callout({ children }: { children: ReactNode }) {
   return <p className="callout">{children}</p>;
+}
+
+function Collapsible({ title, subtitle, defaultOpen = false, children }: { title: string; subtitle?: string; defaultOpen?: boolean; children: ReactNode }) {
+  return (
+    <details className="collapsible-section" open={defaultOpen}>
+      <summary className="collapsible-summary">
+        <span className="collapsible-title">{title}</span>
+        {subtitle && <span className="collapsible-subtitle">{subtitle}</span>}
+        <ChevronDown className="collapsible-chevron" size={16} aria-hidden="true" />
+      </summary>
+      <div className="collapsible-body">{children}</div>
+    </details>
+  );
 }
 
 function ConceptCard({ icon, title, detail, tone = "accent" }: { icon: ReactNode; title: string; detail: string; tone?: "accent" | "warning" }) {
