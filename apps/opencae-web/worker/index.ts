@@ -588,10 +588,10 @@ function securityHeaders(): Record<string, string> {
   return {
     "content-security-policy": [
       "default-src 'self'",
-      "script-src 'self'",
+      "script-src 'self' 'wasm-unsafe-eval'",
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data: blob:",
-      "connect-src 'self' https://plausible.io",
+      "connect-src 'self' https://plausible.io https://cdn.jsdelivr.net",
       "worker-src 'self' blob:",
       "object-src 'none'",
       "base-uri 'self'",
