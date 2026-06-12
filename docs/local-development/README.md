@@ -1,15 +1,15 @@
 # Local Development
 
-This repo requires a sibling OpenCAE Core checkout for every install and build:
+This repo requires a sibling OpenCAE Core checkout for every install and build (only the relative layout matters):
 
 ```text
-/Users/userzero/codex/opencae-alpha
-/Users/userzero/codex/opencae-core
+<workspace>/open-cae
+<workspace>/opencae-core
 ```
 
-Clone `https://github.com/esaueng/OpenCAE-Core` into `../opencae-core` before running `pnpm install` for the first local setup. The pnpm workspace resolves `@opencae/core`, `@opencae/solver-cpu`, and other Core packages from that live checkout, so rebuilding this repo picks up local Core changes.
+Run `pnpm ensure:core` (or clone `https://github.com/esaueng/OpenCAE-Core` into `../opencae-core`) before running `pnpm install` for the first local setup. The pnpm workspace resolves `@opencae/core`, `@opencae/solver-cpu`, and other Core packages from that live checkout, so rebuilding this repo picks up local Core changes. Set `OPENCAE_CORE_DIR` to use a different sibling path.
 
-If `../opencae-core` is missing in a build environment, `pnpm build:core` clones it, reruns `pnpm install --frozen-lockfile`, and builds the sibling Core packages consumed through this workspace.
+If `../opencae-core` is missing in a build environment, `pnpm build:core` clones it, reruns `pnpm install --no-frozen-lockfile` (so dependency resolution can pick up sibling workspace changes), and builds the sibling Core packages consumed through this workspace. CI installs with `--frozen-lockfile` against the pinned Core ref.
 
 Install dependencies and run the local API plus web app:
 
@@ -53,4 +53,4 @@ pnpm deploy:cloudflare:local-first
 
 Use the default Cloudflare deploy for the production app domains. It deploys the Core Cloud production Worker with `wrangler.containers.jsonc`, targets `opencae`, and binds `CORE_CLOUD_CONTAINER`, `CORE_CLOUD_ARTIFACTS`, and the versioned OpenCAE Core Cloud container. Use the static and local-first commands only for explicitly non-production Workers.
 
-Deploy and CI runners may start from a standalone `opencae-alpha` checkout as long as their build command is `pnpm run build` or another script that runs `pnpm build:core`; that script creates `../opencae-core` before compiling.
+Deploy and CI runners may start from a standalone checkout of this repo as long as their build command is `pnpm run build` or another script that runs `pnpm build:core`; that script creates `../opencae-core` before compiling.

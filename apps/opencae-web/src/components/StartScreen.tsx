@@ -134,6 +134,7 @@ export function SampleProjectMenu({ selectedSample, selectedAnalysisType, onBack
               key={option.id}
               option={option}
               selected={selectedSample === option.id}
+              analysisType={selectedAnalysisType}
               onSelect={onSelectSample}
               onOpen={onLoadSample}
             />

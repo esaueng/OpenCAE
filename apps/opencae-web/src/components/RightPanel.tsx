@@ -50,7 +50,7 @@ interface RightPanelProps {
   showDeformed: boolean;
   showDimensions: boolean;
   stressExaggeration: number;
-  resultSummary: ResultSummary;
+  resultSummary: ResultSummary | null;
   resultFields?: ResultField[];
   runProgress: number;
   runError?: string | null;
@@ -75,7 +75,8 @@ interface RightPanelProps {
   onToggleDimensions: () => void;
   onStressExaggerationChange: (value: number) => void;
   onAssignMaterial: (materialId: string, parameters?: Record<string, unknown>) => void;
-  onPreviewPrintLayerOrientation?: (orientation: "x" | "y" | "z" | null) => void;
+  /** null suppresses the preview while editing; undefined clears the preview so the assigned orientation shows again. */
+  onPreviewPrintLayerOrientation?: (orientation: "x" | "y" | "z" | null | undefined) => void;
   onAddSupport: (selectionRef?: string) => void;
   onUpdateSupport: (support: Constraint) => void;
   onRemoveSupport: (supportId: string) => void;
@@ -195,6 +196,7 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sa
                 option={option}
                 selected={pendingSampleModel === option.id}
                 compact
+                analysisType={sampleAnalysisType}
                 onSelect={handleSampleSelect}
                 onOpen={handleSampleOpen}
               />
@@ -244,8 +246,12 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sa
         <Info label="Model" value={geometry?.filename ?? "No model loaded"} />
         <Info label="Bodies" value={String(bodyCount)} />
         <Info label="Faces" value={String(faceCount)} />
-        <Info label="Volume" value={formatVolume(sampleSummaryVolumeMm3, "mm^3", project.unitSystem)} />
-        <Info label="Mass" value={formatMass(sampleSummaryMassG, "g", project.unitSystem)} />
+        {showSampleModelPicker && (
+          <>
+            <Info label="Volume" value={formatVolume(sampleSummaryVolumeMm3, "mm^3", project.unitSystem)} />
+            <Info label="Mass" value={formatMass(sampleSummaryMassG, "g", project.unitSystem)} />
+          </>
+        )}
         <Info label="Units" value={project.unitSystem === "US" ? "in" : "mm"} />
       </div>
       <button className={showDimensions ? "primary wide" : "secondary wide"} type="button" onClick={onToggleDimensions}>
@@ -317,6 +323,7 @@ function MaterialPanel({ project, displayModel, study, onAssignMaterial, onPrevi
 
   useEffect(() => {
     onPreviewPrintLayerOrientation?.(printable && printParameters.printed ? printParameters.layerOrientation ?? "z" : null);
+    return () => onPreviewPrintLayerOrientation?.(undefined);
   }, [onPreviewPrintLayerOrientation, printable, printParameters.layerOrientation, printParameters.printed]);
 
   function handleMaterialChange(materialId: string) {
@@ -744,9 +751,10 @@ function LoadEditForm({ load, study, displayModel, unitSystem, onSave, onCancel,
   const calculatedPayloadMass = payloadVolumeM3 ? massKgForPayloadMaterial(payloadMaterialId, payloadVolumeM3) : 0;
   const manualMassKg = loadValueForUnits(Number(value), displayUnits, "SI").value;
   const editedValue = type === "gravity" && payloadMassMode === "material" && calculatedPayloadMass > 0 ? calculatedPayloadMass : manualMassKg;
-  const payloadMetadata: PayloadLoadMetadata = type === "gravity"
+  // Memoized on scalar inputs: a fresh object here would retrigger the preview effect every render and loop with the parent setState.
+  const payloadMetadata = useMemo<PayloadLoadMetadata>(() => type === "gravity"
     ? { payloadMaterialId, ...(payloadVolumeM3 ? { payloadVolumeM3 } : {}), payloadMassMode }
-    : {};
+    : {}, [payloadMassMode, payloadMaterialId, payloadVolumeM3, type]);
   const selectedPayloadMaterial = payloadMaterialForId(payloadMaterialId);
   const selectedRef = study.namedSelections.find((selection) => selection.id === load.selectionRef);
   const selectedFace = selectedRef?.geometryRefs[0];
@@ -942,8 +950,14 @@ function MeshPanel({ study, onGenerateMesh }: RightPanelProps) {
       <Callout>{capitalize(preset)} creates a {meshPresetDescription(preset)}.</Callout>
       {study.meshSettings.summary && (
         <div className="summary-box">
-          <Info label="Nodes (estimate)" value={study.meshSettings.summary.nodes.toLocaleString()} />
-          <Info label="Elements (estimate)" value={study.meshSettings.summary.elements.toLocaleString()} />
+          <Info
+            label={study.meshSettings.summary.source === "core_solver" ? "Nodes" : "Nodes (est.)"}
+            value={study.meshSettings.summary.nodes.toLocaleString()}
+          />
+          <Info
+            label={study.meshSettings.summary.source === "core_solver" ? "Elements" : "Elements (est.)"}
+            value={study.meshSettings.summary.elements.toLocaleString()}
+          />
           <Info label="Analysis samples" value={(study.meshSettings.summary.analysisSampleCount ?? 0).toLocaleString()} />
           <Info label="Warnings" value={String(study.meshSettings.summary.warnings.length)} />
         </div>
@@ -1190,7 +1204,18 @@ function formatDurationSeconds(milliseconds: number): string {
   return remainder ? `${minutes}m ${remainder}s` : `${minutes}m`;
 }
 
-function ResultsPanel({
+function ResultsPanel(props: RightPanelProps) {
+  if (!props.resultSummary) {
+    return (
+      <Panel title="Results" helper="View stress and displacement directly on the 3D model.">
+        <Callout>Run a simulation to see results.</Callout>
+      </Panel>
+    );
+  }
+  return <ResultsPanelContent {...props} resultSummary={props.resultSummary} />;
+}
+
+function ResultsPanelContent({
   project,
   displayModel,
   resultMode,
@@ -1213,7 +1238,7 @@ function ResultsPanel({
   onResultModeChange,
   onToggleDeformed,
   onStressExaggerationChange
-}: RightPanelProps) {
+}: RightPanelProps & { resultSummary: ResultSummary }) {
   const [targetSafetyFactor, setTargetSafetyFactor] = useState(1.5);
   const [draftStressExaggeration, setDraftStressExaggeration] = useState(stressExaggeration);
   const stressExaggerationCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);

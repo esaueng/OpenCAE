@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { describe, expect, test } from "vitest";
-import { normalizedStlGeometryFromBuffer } from "./stlPreview";
+import { normalizedStlGeometryFromBuffer, tryNormalizedStlGeometryFromBuffer } from "./stlPreview";
 
 function asciiStlBuffer(text: string): ArrayBuffer {
   const encoded = new TextEncoder().encode(text);
@@ -36,5 +36,42 @@ endsolid part_b
     expect(geometry.groups).toHaveLength(2);
     geometry.computeBoundingBox();
     expect(geometry.boundingBox?.getSize(new THREE.Vector3()).x).toBeCloseTo(2.4);
+  });
+
+  test("throws on STL input without renderable triangles", () => {
+    const stl = asciiStlBuffer(`solid empty_model_without_any_facets_padded_past_the_binary_stl_header_size
+endsolid empty_model_without_any_facets_padded_past_the_binary_stl_header_size
+`);
+
+    expect(() => normalizedStlGeometryFromBuffer(stl)).toThrow("STL file did not contain renderable triangles.");
+  });
+
+  test("tryNormalizedStlGeometryFromBuffer returns null instead of throwing on invalid input", () => {
+    const emptySolid = asciiStlBuffer(`solid empty_model_without_any_facets_padded_past_the_binary_stl_header_size
+endsolid empty_model_without_any_facets_padded_past_the_binary_stl_header_size
+`);
+    const garbage = new Uint8Array([1, 2, 3, 4, 5]).buffer;
+
+    expect(tryNormalizedStlGeometryFromBuffer(emptySolid)).toBeNull();
+    expect(tryNormalizedStlGeometryFromBuffer(garbage)).toBeNull();
+  });
+
+  test("tryNormalizedStlGeometryFromBuffer returns parsed geometry for valid STL input", () => {
+    const stl = asciiStlBuffer(`
+solid part
+  facet normal 0 0 1
+    outer loop
+      vertex 0 0 0
+      vertex 10 0 0
+      vertex 0 10 0
+    endloop
+  endfacet
+endsolid part
+`);
+
+    const geometry = tryNormalizedStlGeometryFromBuffer(stl);
+
+    expect(geometry).not.toBeNull();
+    expect(geometry?.getAttribute("position").count).toBe(3);
   });
 });

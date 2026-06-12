@@ -15,3 +15,5 @@ data/reports/**
 !data/artifacts/.gitkeep
 !data/logs/.gitkeep
 !data/reports/.gitkeep
+.wrangler/
+.claude/

@@ -1,5 +1,6 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
 
 const distAssetsDir = new URL("../apps/opencae-web/dist/assets/", import.meta.url);
@@ -8,7 +9,7 @@ const INITIAL_JS_GZIP_BUDGET_BYTES = 175 * 1024;
 function jsFiles(directoryUrl) {
   return readdirSync(directoryUrl)
     .filter((name) => name.endsWith(".js"))
-    .map((name) => join(directoryUrl.pathname, name));
+    .map((name) => join(fileURLToPath(directoryUrl), name));
 }
 
 const distDir = new URL("../apps/opencae-web/dist/", import.meta.url);
@@ -19,7 +20,7 @@ if (!initialScriptMatch?.groups?.src) {
   process.exit(1);
 }
 
-const initialBundle = join(distDir.pathname, initialScriptMatch.groups.src.replace(/^\//, ""));
+const initialBundle = join(fileURLToPath(distDir), initialScriptMatch.groups.src.replace(/^\//, ""));
 const initialFiles = collectStaticImports(initialBundle, new Set());
 const gzipBytes = [...initialFiles].reduce((total, file) => total + gzipSync(readFileSync(file)).byteLength, 0);
 if (gzipBytes > INITIAL_JS_GZIP_BUDGET_BYTES) {
@@ -38,7 +39,7 @@ function collectStaticImports(file, visited) {
   for (const match of source.matchAll(importPattern)) {
     const specifier = match.groups?.specifier;
     if (!specifier) continue;
-    collectStaticImports(join(distAssetsDir.pathname, specifier.replace(/^\.\//, "")), visited);
+    collectStaticImports(join(fileURLToPath(distAssetsDir), specifier.replace(/^\.\//, "")), visited);
   }
   return visited;
 }
