@@ -556,6 +556,10 @@ export function geometryWithMeshPreset(geometry: NonNullable<ReturnType<typeof c
   return { ...geometry, descriptor: { ...geometry.descriptor, meshSize } };
 }
 
+export function studyForCoreCloudGeometrySolve(study: Study, displayModel: DisplayModel | undefined): Study {
+  return studyForCoreCloudGeometryDispatch(study, displayModel);
+}
+
 function openCaeCoreCloudSolveRequest(runId: string, study: Study, displayModel: DisplayModel | undefined) {
   const actualMesh = hasActualCoreVolumeMesh(study, displayModel);
   const geometry = actualMesh ? null : cloudGeometrySourceForStudy(study, displayModel);
