@@ -6,9 +6,10 @@ import {
   type DisplayModel,
   type Project
 } from "@opencae/schema";
-import { buildLocalProjectFile, type LocalProjectFile, type LocalResultBundle } from "./projectFile";
+import { buildLocalProjectFile, type EmbeddedModelFile, type LocalProjectFile, type LocalResultBundle } from "./projectFile";
 import type { LoadDirectionLabel, LoadType } from "./loadPreview";
 import type { LoadApplicationPoint, PayloadObjectSelection } from "./loadPreview";
+import type { WorkspaceLogEntry } from "./components/BottomPanel";
 import type { ResultMode, ViewMode } from "./components/CadViewer";
 import type { StepId } from "./components/StepBar";
 import type { SampleAnalysisType, SampleModelId } from "./lib/api";
@@ -42,7 +43,7 @@ export interface WorkspaceUiSnapshot {
   undoStack: Project[];
   redoStack: Project[];
   status: string;
-  logs: string[];
+  logs: WorkspaceLogEntry[];
 }
 
 export interface AutosavedWorkspace {
@@ -94,7 +95,7 @@ export function buildAutosavedWorkspace({
     version: 1,
     savedAt,
     projectFile: buildLocalProjectFile(project, displayModel, savedAt, results?.fields.length ? results : undefined),
-    ui: normalizeUiRunState(ui)
+    ui: stripEmbeddedModelsFromUiSnapshot(normalizeUiRunState(ui))
   };
 }
 
@@ -102,7 +103,7 @@ export function buildAutosavedWorkspaceUiSnapshot(ui: WorkspaceUiSnapshot, saved
   return {
     version: 1,
     savedAt,
-    ui: normalizeUiRunState(ui)
+    ui: stripEmbeddedModelsFromUiSnapshot(normalizeUiRunState(ui))
   };
 }
 
@@ -121,7 +122,8 @@ export function readAutosavedWorkspace(storage = getBrowserStorage()): Autosaved
   if (!workspace) return null;
   const uiPayload = storage.getItem(AUTOSAVE_UI_STORAGE_KEY);
   const uiSnapshot = uiPayload ? parseAutosavedWorkspaceUiSnapshotPayload(uiPayload) : null;
-  return uiSnapshot && isNewerOrSameTimestamp(uiSnapshot.savedAt, workspace.savedAt) ? { ...workspace, ui: uiSnapshot.ui } : workspace;
+  const merged = uiSnapshot && isNewerOrSameTimestamp(uiSnapshot.savedAt, workspace.savedAt) ? { ...workspace, ui: uiSnapshot.ui } : workspace;
+  return { ...merged, ui: reattachEmbeddedModelsToUiSnapshot(merged.ui, merged.projectFile.project) };
 }
 
 export function writeAutosavedWorkspace(snapshot: AutosavedWorkspace, storage = getBrowserStorage()): boolean {
@@ -135,17 +137,68 @@ export function writeAutosavedUiSnapshot(snapshot: AutosavedWorkspaceUiSnapshot,
 export function scheduleAutosavedWorkspaceWrite(
   snapshot: AutosavedWorkspace | (() => AutosavedWorkspace),
   storage = getBrowserStorage(),
-  delayMs = 5000
+  delayMs = 5000,
+  onWriteFailed?: () => void
 ): () => void {
-  return scheduleStorageWrite(() => writeAutosavedWorkspace(readSnapshot(snapshot), storage), storage, delayMs);
+  return scheduleStorageWrite(() => writeAutosavedWorkspace(readSnapshot(snapshot), storage), storage, delayMs, onWriteFailed);
 }
 
 export function scheduleAutosavedUiSnapshotWrite(
   snapshot: AutosavedWorkspaceUiSnapshot | (() => AutosavedWorkspaceUiSnapshot),
   storage = getBrowserStorage(),
-  delayMs = 650
+  delayMs = 650,
+  onWriteFailed?: () => void
 ): () => void {
-  return scheduleStorageWrite(() => writeAutosavedUiSnapshot(readSnapshot(snapshot), storage), storage, delayMs);
+  return scheduleStorageWrite(() => writeAutosavedUiSnapshot(readSnapshot(snapshot), storage), storage, delayMs, onWriteFailed);
+}
+
+function stripEmbeddedModelsFromUiSnapshot(ui: WorkspaceUiSnapshot): WorkspaceUiSnapshot {
+  const undoStack = ui.undoStack.map(stripEmbeddedModelsFromProject);
+  const redoStack = ui.redoStack.map(stripEmbeddedModelsFromProject);
+  const unchanged = undoStack.every((item, index) => item === ui.undoStack[index]) && redoStack.every((item, index) => item === ui.redoStack[index]);
+  return unchanged ? ui : { ...ui, undoStack, redoStack };
+}
+
+function stripEmbeddedModelsFromProject(project: Project): Project {
+  if (!project.geometryFiles.some((geometry) => geometry.metadata.embeddedModel)) return project;
+  return {
+    ...project,
+    geometryFiles: project.geometryFiles.map((geometry) => {
+      if (!geometry.metadata.embeddedModel) return geometry;
+      const { embeddedModel: _embeddedModel, ...metadata } = geometry.metadata;
+      return { ...geometry, metadata };
+    })
+  };
+}
+
+function reattachEmbeddedModelsToUiSnapshot(ui: WorkspaceUiSnapshot, project: Project): WorkspaceUiSnapshot {
+  const embeddedModelsByGeometryId = new Map<string, EmbeddedModelFile>(
+    project.geometryFiles.flatMap((geometry) => {
+      const embeddedModel = geometry.metadata.embeddedModel;
+      return isEmbeddedModelFile(embeddedModel) ? [[geometry.id, embeddedModel] as const] : [];
+    })
+  );
+  if (!embeddedModelsByGeometryId.size) return ui;
+  const reattach = (stack: Project[]) => stack.map((item) => ({
+    ...item,
+    geometryFiles: item.geometryFiles.map((geometry) => {
+      if (geometry.metadata.embeddedModel) return geometry;
+      const embeddedModel = embeddedModelsByGeometryId.get(geometry.id);
+      return embeddedModel ? { ...geometry, metadata: { ...geometry.metadata, embeddedModel } } : geometry;
+    })
+  }));
+  return { ...ui, undoStack: reattach(ui.undoStack), redoStack: reattach(ui.redoStack) };
+}
+
+function isEmbeddedModelFile(value: unknown): value is EmbeddedModelFile {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.filename === "string" &&
+    typeof value.contentType === "string" &&
+    typeof value.size === "number" &&
+    typeof value.contentBase64 === "string" &&
+    value.contentBase64.length > 0
+  );
 }
 
 function parseAutosavedWorkspace(value: unknown): AutosavedWorkspace | null {
@@ -196,12 +249,12 @@ function parseProjectFile(value: unknown): LocalProjectFile | null {
   };
 }
 
-function parseResultBundle(value: unknown): LocalResultBundle | undefined {
+export function parseResultBundle(value: unknown): LocalResultBundle | undefined {
   if (!isRecord(value)) return undefined;
   const summary = ResultSummarySchema.safeParse(value.summary);
   const fields = ResultFieldSchema.array().safeParse(value.fields);
   const surfaceMesh = parseSolverSurfaceMesh(value.surfaceMesh);
-  const meshStats = parseResultMeshStats(value.meshStats);
+  const solverMeshSummary = parseSolverMeshSummary(value.solverMeshSummary);
   if (!summary.success || !fields.success || fields.data.length === 0) return undefined;
   return {
     activeRunId: typeof value.activeRunId === "string" ? value.activeRunId : undefined,
@@ -209,16 +262,20 @@ function parseResultBundle(value: unknown): LocalResultBundle | undefined {
     summary: summary.data,
     fields: fields.data,
     ...(surfaceMesh ? { surfaceMesh } : {}),
-    ...(meshStats ? { meshStats } : {})
+    ...(solverMeshSummary ? { solverMeshSummary } : {})
   };
 }
 
-function parseResultMeshStats(value: unknown): LocalResultBundle["meshStats"] | undefined {
-  if (!isRecord(value)) return undefined;
-  const nodes = Number(value.nodes);
-  const elements = Number(value.elements);
-  if (!Number.isFinite(nodes) || !Number.isFinite(elements) || nodes <= 0 || elements <= 0) return undefined;
-  return { nodes, elements };
+function parseSolverMeshSummary(value: unknown): LocalResultBundle["solverMeshSummary"] | undefined {
+  if (!isRecord(value) || value.source !== "core_solver") return undefined;
+  if (typeof value.nodes !== "number" || !Number.isInteger(value.nodes) || value.nodes <= 0) return undefined;
+  if (typeof value.elements !== "number" || !Number.isInteger(value.elements) || value.elements <= 0) return undefined;
+  return {
+    nodes: value.nodes,
+    elements: value.elements,
+    warnings: Array.isArray(value.warnings) ? value.warnings.filter((warning): warning is string => typeof warning === "string") : [],
+    source: "core_solver"
+  };
 }
 
 function parseSolverSurfaceMesh(value: unknown): LocalResultBundle["surfaceMesh"] | undefined {
@@ -272,7 +329,7 @@ function parseUiSnapshot(value: unknown): WorkspaceUiSnapshot | null {
     undoStack: parseProjectArray(value.undoStack),
     redoStack: parseProjectArray(value.redoStack),
     status: typeof value.status === "string" ? value.status : "Ready",
-    logs: Array.isArray(value.logs) ? value.logs.filter((item): item is string => typeof item === "string").slice(0, WORKSPACE_LOG_LIMIT) : []
+    logs: parseLogEntries(value.logs)
   });
 }
 
@@ -282,7 +339,7 @@ function normalizeUiRunState(ui: WorkspaceUiSnapshot): WorkspaceUiSnapshot {
   return runProgress === ui.runProgress && logs.length === ui.logs.length ? ui : { ...ui, runProgress, logs };
 }
 
-function parseDisplayModel(value: unknown): DisplayModel | null {
+export function parseDisplayModel(value: unknown): DisplayModel | null {
   if (!isRecord(value)) return null;
   if (typeof value.id !== "string" || typeof value.name !== "string" || typeof value.bodyCount !== "number" || !Array.isArray(value.faces)) return null;
   if (!value.faces.every(isDisplayFace)) return null;
@@ -299,6 +356,17 @@ function isDisplayFace(value: unknown): value is DisplayFace {
     isVector3(value.center) &&
     isVector3(value.normal)
   );
+}
+
+function parseLogEntries(value: unknown): WorkspaceLogEntry[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item): WorkspaceLogEntry[] => {
+    if (typeof item === "string") return [{ message: item, at: Date.now() }];
+    if (isRecord(item) && typeof item.message === "string") {
+      return [{ message: item.message, at: readFiniteNumber(item.at, Date.now()) }];
+    }
+    return [];
+  }).slice(0, WORKSPACE_LOG_LIMIT);
 }
 
 function parseProjectArray(value: unknown): Project[] {
@@ -341,14 +409,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object";
 }
 
-function scheduleStorageWrite(write: () => void, storage: StorageLike | null, delayMs: number): () => void {
+function scheduleStorageWrite(write: () => boolean, storage: StorageLike | null, delayMs: number, onWriteFailed?: () => void): () => void {
   if (!storage) return () => undefined;
   const idleCallbacks = globalThis as typeof globalThis & IdleCallbackHandle;
   let idleHandle: number | null = null;
   const timeoutHandle = globalThis.setTimeout(() => {
     const runWrite = () => {
       idleHandle = null;
-      write();
+      if (!write()) onWriteFailed?.();
     };
     if (idleCallbacks.requestIdleCallback) {
       idleHandle = idleCallbacks.requestIdleCallback(runWrite, { timeout: 1500 });
