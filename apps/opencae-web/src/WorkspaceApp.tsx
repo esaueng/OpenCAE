@@ -141,6 +141,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     : (restoredProjectFile ? ["Workspace restored after reload.", "Ready | Local Mode"] : ["Ready | Local Mode"]).map((message) => ({ message, at: Date.now() })));
   const [runProgress, setRunProgress] = useState(restoredUi?.runProgress ?? (restoredResults?.fields.length ? 100 : 0));
   const [runTiming, setRunTiming] = useState<RunTimingEstimate | null>(null);
+  const [runError, setRunError] = useState<string | null>(null);
   const [activeRunId, setActiveRunId] = useState(restoredUi?.activeRunId || restoredResults?.activeRunId || restoredResults?.completedRunId || "run-bracket-demo-seeded");
   const [completedRunId, setCompletedRunId] = useState(restoredUi?.completedRunId || restoredResults?.completedRunId || "run-bracket-demo-seeded");
   const [processingRunId, setProcessingRunId] = useState<string | null>(null);
@@ -825,6 +826,12 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         ? { ...current, studies: current.studies.map((item) => (item.id === response.study.id ? response.study : item)) }
         : current);
     }
+    // Any study change (loads, supports, materials, mesh, solver settings)
+    // makes the previous run's results stale; never keep showing them.
+    if (resultFields.length) {
+      invalidateCompletedRunState();
+      pushMessage("Previous results cleared: the study changed since the last run.");
+    }
     pushMessage(response.message);
     if (nextStep) navigateToStep(nextStep);
   }
@@ -957,6 +964,8 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     setActiveRunId("");
     setRunProgress(0);
     setResultFields([]);
+    setResultSurfaceMesh(undefined);
+    setSolverMeshSummary(null);
     setResultFrameIndex(0);
     setResultPlaybackFramePosition(0);
     setResultPlaybackPlaying(false);
@@ -1078,6 +1087,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       return;
     }
     setResultPlaybackPlaying(false);
+    setRunError(null);
     pushMessage("Starting simulation run.");
     pushMessage(runDiagnosticsMessage(study));
     let response: Awaited<ReturnType<typeof runSimulation>>;
@@ -1088,7 +1098,9 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       setRunProgress(0);
       setRunTiming(null);
       setResultPlaybackPlaying(false);
-      pushMessage(errorMessage(error, "Could not start simulation."));
+      const message = errorMessage(error, "Could not start simulation.");
+      setRunError(message);
+      pushMessage(message);
       return;
     }
     setActiveRunId(response.run.id);
@@ -1126,7 +1138,9 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           setViewMode("results");
           setActiveStep("results");
         } catch (error) {
-          pushMessage(errorMessage(error, "Could not load simulation results."));
+          const message = errorMessage(error, "Could not load simulation results.");
+          setRunError(message);
+          pushMessage(message);
           setResultPlaybackPlaying(false);
           setRunProgress(0);
         }
@@ -1138,6 +1152,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         setResultPlaybackPlaying(false);
         setRunProgress(0);
         setRunTiming(null);
+        if (event.type === "error") setRunError(event.message || "Simulation run failed.");
       }
     });
     activeRunSourceRef.current = source;
@@ -1288,6 +1303,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           resultSummary={resultSummaryForUi}
           resultFields={resultFieldsForUi}
           runProgress={runProgress}
+          runError={runError}
           runTiming={runTiming}
           sampleModel={sampleModel}
           sampleAnalysisType={sampleAnalysisType}
