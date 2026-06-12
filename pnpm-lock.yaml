@@ -138,6 +138,9 @@ importers:
       '@opencae/schema':
         specifier: workspace:*
         version: link:../../libs/opencae-schema
+      '@opencae/step':
+        specifier: workspace:*
+        version: link:../../libs/opencae-step
       '@opencae/study-core':
         specifier: workspace:*
         version: link:../../libs/opencae-study-core
@@ -248,6 +251,12 @@ importers:
       zod:
         specifier: ^3.24.1
         version: 3.25.76
+
+  libs/opencae-step:
+    devDependencies:
+      occt-import-js:
+        specifier: ^0.0.23
+        version: 0.0.23
 
   libs/opencae-storage:
     devDependencies:

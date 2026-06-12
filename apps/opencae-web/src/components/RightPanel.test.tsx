@@ -1367,4 +1367,11 @@ describe("RightPanel payload mass controls", () => {
     expect(sampleHtml).toContain("<span>Volume</span>");
     expect(sampleHtml).toContain("<span>Mass</span>");
   });
+
+  test("offers the parametric part builder in the model panel", () => {
+    const html = renderPanel("model");
+    expect(html).toContain("Create parametric part");
+    expect(html).toContain("Add to project");
+    expect(html).toContain("Download .step");
+  });
 });
