@@ -195,6 +195,7 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sa
                 option={option}
                 selected={pendingSampleModel === option.id}
                 compact
+                analysisType={sampleAnalysisType}
                 onSelect={handleSampleSelect}
                 onOpen={handleSampleOpen}
               />
