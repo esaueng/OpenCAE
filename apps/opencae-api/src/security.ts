@@ -38,6 +38,15 @@ export function sanitizeFilename(filename: unknown): string | undefined {
   return cleaned;
 }
 
+// Identifiers that become object-storage key segments (project ids, run ids).
+// Must start alphanumeric — which also rules out "." and ".." segments — and
+// contain no path separators, so a crafted import cannot steer storage writes.
+const SAFE_ARTIFACT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$/;
+
+export function isSafeArtifactId(value: unknown): value is string {
+  return typeof value === "string" && SAFE_ARTIFACT_ID_PATTERN.test(value);
+}
+
 export function sanitizeProjectName(name: unknown): string | undefined {
   if (typeof name !== "string") return undefined;
   const cleaned = collapseWhitespace(name);

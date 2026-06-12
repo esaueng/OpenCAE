@@ -283,6 +283,78 @@ describe("Cloudflare local-first worker", () => {
     expect(containerMock.fetch).not.toHaveBeenCalled();
   });
 
+  test("events stream tags SSE ids and serves only new events after Last-Event-ID", async () => {
+    const env = createEnv();
+    const ctx = createExecutionContext();
+
+    const response = await dispatchWorker(coreRunRequest({ runId: "run-sse-ids" }), env, ctx);
+    const body = await response.json() as { run: { id: string }; streamUrl: string };
+    await ctx.flush();
+    await env.CORE_CLOUD_ARTIFACTS.put(`cloud-core/runs/${body.run.id}/events.json`, JSON.stringify([
+      { runId: body.run.id, type: "state", message: "queued", timestamp: "t0" },
+      { runId: body.run.id, type: "progress", message: "running", timestamp: "t1" },
+      { runId: body.run.id, type: "complete", message: "done", timestamp: "t2" }
+    ]));
+
+    const full = await dispatchWorker(
+      new Request(`https://cae.esau.app${body.streamUrl}`, { headers: { accept: "text/event-stream" } }),
+      env
+    );
+    const fullText = await full.text();
+    expect(fullText).toContain("id: 0\nevent: state");
+    expect(fullText).toContain("id: 1\nevent: progress");
+    expect(fullText).toContain("id: 2\nevent: complete");
+
+    const incremental = await dispatchWorker(
+      new Request(`https://cae.esau.app${body.streamUrl}`, { headers: { accept: "text/event-stream", "last-event-id": "1" } }),
+      env
+    );
+    const incrementalText = await incremental.text();
+    expect(incrementalText).not.toContain("id: 0");
+    expect(incrementalText).not.toContain("id: 1\n");
+    expect(incrementalText).toContain("id: 2\nevent: complete");
+
+    const caughtUp = await dispatchWorker(
+      new Request(`https://cae.esau.app${body.streamUrl}`, { headers: { accept: "text/event-stream", "last-event-id": "2" } }),
+      env
+    );
+    expect(await caughtUp.text()).toBe("");
+  });
+
+  test("a stale start claim with no terminal event is reclaimed and re-dispatched", async () => {
+    const env = createEnv();
+    const ctx = createExecutionContext();
+    const result = coreResult();
+
+    const response = await dispatchWorker(coreRunRequest({ runId: "run-stale-claim" }), env, ctx);
+    const body = await response.json() as { run: { id: string }; startUrl: string };
+    await ctx.flush();
+
+    // Simulate an interrupted earlier start: claim exists, no terminal event.
+    const staleStartedAt = new Date(Date.now() - 10 * 60_000).toISOString();
+    await env.CORE_CLOUD_ARTIFACTS.put(`cloud-core/runs/${body.run.id}/started.json`, JSON.stringify({ startedAt: staleStartedAt }));
+
+    containerMock.fetch
+      .mockResolvedValueOnce(Response.json({ ok: true, runnerVersion: expectedRunnerVersion }))
+      .mockResolvedValueOnce(Response.json(result));
+    const retry = await dispatchWorker(new Request(`https://cae.esau.app${body.startUrl}`, { method: "POST" }), env);
+    expect(retry.status).toBe(200);
+    expect(containerMock.fetch).toHaveBeenCalledTimes(2);
+    const events = await env.CORE_CLOUD_ARTIFACTS.readJson(`cloud-core/runs/${body.run.id}/events.json`) as Array<{ type: string; message: string }>;
+    expect(events.some((item) => /interrupted/.test(item.message))).toBe(true);
+    expect(events.some((item) => item.type === "complete")).toBe(true);
+
+    // A fresh (non-stale) claim still blocks duplicate starts.
+    containerMock.fetch.mockClear();
+    await env.CORE_CLOUD_ARTIFACTS.put(`cloud-core/runs/${body.run.id}/events.json`, JSON.stringify([
+      { runId: body.run.id, type: "state", message: "queued", timestamp: "t" }
+    ]));
+    await env.CORE_CLOUD_ARTIFACTS.put(`cloud-core/runs/${body.run.id}/started.json`, JSON.stringify({ startedAt: new Date().toISOString() }));
+    const blocked = await dispatchWorker(new Request(`https://cae.esau.app${body.startUrl}`, { method: "POST" }), env);
+    expect(blocked.status).toBe(409);
+    expect(containerMock.fetch).not.toHaveBeenCalled();
+  });
+
   test("cancel marks a queued run cancelled and blocks a later start", async () => {
     const env = createEnv();
     const ctx = createExecutionContext();
@@ -645,7 +717,10 @@ function createEnv() {
 function createR2Bucket() {
   const objects = new Map<string, string>();
   return {
-    async put(key: string, value: string) {
+    async put(key: string, value: string, options?: { onlyIf?: { etagDoesNotMatch?: string } }) {
+      // Mirror R2 conditional create: resolve null without writing when the
+      // object already exists and the precondition fails.
+      if (options?.onlyIf?.etagDoesNotMatch === "*" && objects.has(key)) return null;
       objects.set(key, value);
       return {} as R2Object;
     },

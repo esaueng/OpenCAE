@@ -24,7 +24,7 @@ import {
   type Study,
   type StudyRun
 } from "@opencae/schema";
-import { mutatingRateLimit, pdfFilename, projectsReadRateLimit, sanitizeFilename, sanitizeProjectName } from "./security";
+import { isSafeArtifactId, mutatingRateLimit, pdfFilename, projectsReadRateLimit, sanitizeFilename, sanitizeProjectName } from "./security";
 import { hasActualCoreVolumeMesh, openCaeCoreEligibility, trySolveOpenCaeCoreStudy } from "@opencae/core-adapter";
 import { FileSystemObjectStorageProvider } from "@opencae/storage";
 import { validateStaticStressStudy, validateStudy } from "@opencae/study-core";
@@ -165,6 +165,10 @@ api.post("/api/projects/import", mutatingRateLimit, async (request, reply) => {
   const candidate = body && "project" in body ? body.project : body;
   const parsed = ProjectSchema.safeParse(candidate);
   if (!parsed.success) return reply.code(400).send({ error: "The selected file is not a valid OpenCAE project JSON." });
+  // The project id becomes the root segment of every artifact storage key.
+  if (!isSafeArtifactId(parsed.data.id)) {
+    return reply.code(400).send({ error: "The project file has an unsupported project id." });
+  }
 
   const project = withCanonicalArtifactRefs(parsed.data);
   const displayModel = parseDisplayModel(body && "displayModel" in body ? body.displayModel : undefined) ?? await displayModelForProject(project);
@@ -649,6 +653,8 @@ function parseLocalResults(value: unknown, project: Project): ImportedResultBund
   const activeRunId = typeof candidate.activeRunId === "string" ? candidate.activeRunId : undefined;
   const fieldRunId = fields.data[0]?.runId;
   const runId = completedRunId ?? activeRunId ?? fieldRunId;
+  // The run id becomes part of result/report storage keys.
+  if (runId && !isSafeArtifactId(runId)) return undefined;
   if (runId && projectRunIds.size > 0 && !projectRunIds.has(runId)) return undefined;
   return {
     activeRunId,

@@ -165,4 +165,72 @@ describe("OpenCAE API server", () => {
       if (run.reportRef) expect(run.reportRef.startsWith("project-hostile-import/")).toBe(true);
     }
   });
+
+  test("import rejects project ids that could steer storage keys", async () => {
+    const api = await buildApi();
+    const sample = await api.inject({ method: "GET", url: "/api/sample-project" });
+    const template = sample.json().project as { id: string };
+
+    for (const hostileId of ["../project-bracket-demo", "nested/escape", "..", ".hidden", "a\\b"]) {
+      const hostile = structuredClone(template) as Record<string, unknown>;
+      hostile.id = hostileId;
+      const response = await api.inject({
+        method: "POST",
+        url: "/api/projects/import",
+        remoteAddress: "203.0.113.25",
+        payload: { project: hostile }
+      });
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error).toMatch(/project id/i);
+    }
+  });
+
+  test("import drops result bundles whose run id could steer storage keys", async () => {
+    const api = await buildApi();
+    const sample = await api.inject({ method: "GET", url: "/api/sample-project" });
+    const template = sample.json().project as { id: string };
+    const hostile = structuredClone(template) as Record<string, unknown>;
+    hostile.id = "project-runid-traversal";
+
+    const summary = {
+      maxStress: 1,
+      maxStressUnits: "MPa",
+      maxDisplacement: 0.1,
+      maxDisplacementUnits: "mm",
+      safetyFactor: 10,
+      reactionForce: 500,
+      reactionForceUnits: "N"
+    };
+    const response = await api.inject({
+      method: "POST",
+      url: "/api/projects/import",
+      remoteAddress: "203.0.113.26",
+      payload: {
+        project: hostile,
+        results: {
+          completedRunId: "../../project-bracket-demo/reports/run",
+          summary,
+          fields: [{
+            id: "stress",
+            runId: "../../project-bracket-demo/reports/run",
+            type: "stress",
+            location: "node",
+            values: [1],
+            min: 1,
+            max: 1,
+            units: "MPa"
+          }]
+        }
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().results).toBeUndefined();
+    const refs = (response.json().project as { studies: Array<{ runs: Array<{ resultRef?: string; reportRef?: string }> }> })
+      .studies.flatMap((study) => study.runs).flatMap((run) => [run.resultRef, run.reportRef]).filter(Boolean) as string[];
+    for (const ref of refs) {
+      expect(ref.includes("..")).toBe(false);
+      expect(ref.startsWith("project-runid-traversal/")).toBe(true);
+    }
+  });
 });

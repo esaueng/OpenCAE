@@ -78,7 +78,7 @@ export default {
         const authorization = await authorizeCoreCloudRun(request, env, cloudRoute.runId);
         if (authorization) return authorization;
         if (request.headers.get("accept")?.includes("text/event-stream")) {
-          return readCoreCloudEventsStream(env, cloudRoute.runId);
+          return readCoreCloudEventsStream(env, cloudRoute.runId, request);
         }
         return readCoreCloudArtifact(env, eventsKey(cloudRoute.runId), { events: [] });
       }
@@ -253,9 +253,15 @@ async function startCoreCloudRun(env: Env, runId: string): Promise<Response> {
   if (existingEvents.some((item) => item.type === "cancelled")) {
     return Response.json({ ok: false, runId, status: "cancelled" }, { status: 409, headers: jsonHeaders });
   }
-  const claimed = await claimCoreCloudRunStart(env, runId);
-  if (!claimed) {
+  const claim = await claimCoreCloudRunStart(env, runId);
+  if (claim === "running") {
     return Response.json({ ok: false, runId, status: "running", error: "OpenCAE Core Cloud run is already started." }, { status: 409, headers: jsonHeaders });
+  }
+  if (claim === "stale") {
+    // A previous start claimed the run but never reached a terminal event
+    // (worker eviction, lost invocation). Re-dispatch instead of wedging the
+    // run in "running" forever.
+    await appendCoreCloudEvent(env, runId, event(runId, "state", "Previous OpenCAE Core Cloud start was interrupted; retrying the solve.", 5));
   }
   await runCoreCloudSolve(env, runId);
   const events = await readEvents(env, runId);
@@ -266,14 +272,25 @@ async function startCoreCloudRun(env: Env, runId: string): Promise<Response> {
   return Response.json({ ok: true, runId, status: "complete" }, { headers: jsonHeaders });
 }
 
-async function claimCoreCloudRunStart(env: Env, runId: string): Promise<boolean> {
+async function claimCoreCloudRunStart(env: Env, runId: string): Promise<"claimed" | "running" | "stale"> {
+  // A claim older than the solve timeout (plus margin) with no terminal event
+  // means the claiming invocation died; allow the run to be restarted.
+  const staleClaimMs = CONTAINER_SOLVE_TIMEOUT_MS + 60_000;
   const bucket = (env as CoreCloudEnv).CORE_CLOUD_ARTIFACTS;
   if (!bucket) throw new Error("CORE_CLOUD_ARTIFACTS is not bound.");
   const startKey = runStartedKey(runId);
-  const existing = await bucket.head(startKey);
-  if (existing) return false;
-  await bucket.put(startKey, JSON.stringify({ startedAt: new Date().toISOString() }));
-  return true;
+  const claimBody = JSON.stringify({ startedAt: new Date().toISOString() });
+  // Conditional create: R2 resolves null (without writing) when the object
+  // already exists, making the claim atomic across concurrent starts.
+  const created = await bucket.put(startKey, claimBody, { onlyIf: { etagDoesNotMatch: "*" } });
+  if (created) return "claimed";
+  const existing = await bucket.get(startKey);
+  const startedAt = Date.parse(String(((await existing?.json().catch(() => undefined)) as { startedAt?: unknown } | undefined)?.startedAt ?? ""));
+  if (Number.isFinite(startedAt) && Date.now() - startedAt > staleClaimMs) {
+    await bucket.put(startKey, claimBody);
+    return "stale";
+  }
+  return "running";
 }
 
 async function cancelCoreCloudRun(env: Env, runId: string): Promise<Response> {
@@ -650,10 +667,16 @@ function numbersIn(value: unknown): number[] {
   return [];
 }
 
-async function readCoreCloudEventsStream(env: Env, runId: string): Promise<Response> {
+async function readCoreCloudEventsStream(env: Env, runId: string, request?: Request): Promise<Response> {
   const events = await readEvents(env, runId);
+  // Each event carries its index as the SSE id. EventSource resends it as
+  // Last-Event-ID on reconnect, so reconnect polls only deliver new events
+  // instead of replaying the whole log every ~3 seconds.
+  const lastEventIdHeader = request?.headers.get("last-event-id");
+  const lastEventId = lastEventIdHeader === null || lastEventIdHeader === undefined ? -1 : Number(lastEventIdHeader);
+  const startIndex = Number.isInteger(lastEventId) && lastEventId >= 0 ? lastEventId + 1 : 0;
   return new Response(
-    events.map((item) => `event: ${item.type}\ndata: ${JSON.stringify(item)}\n\n`).join(""),
+    events.slice(startIndex).map((item, offset) => `id: ${startIndex + offset}\nevent: ${item.type}\ndata: ${JSON.stringify(item)}\n\n`).join(""),
     {
       headers: {
         "content-type": "text/event-stream",
