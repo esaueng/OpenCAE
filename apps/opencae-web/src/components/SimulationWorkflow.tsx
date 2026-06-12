@@ -1,6 +1,7 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { ChevronDown, Grid3X3, Plus, Search, X } from "lucide-react";
 import { starterMaterials } from "@opencae/materials";
+import { isRunResultReadyStatus } from "@opencae/schema";
 import type { Material, ResultField, Study } from "@opencae/schema";
 import { formatDensity, formatMaterialStress, type UnitSystem } from "../unitDisplay";
 import dynamicAnalysisImage from "../assets/simulation-showcase/dynamic-analysis.png";
@@ -197,8 +198,8 @@ export function StudyTree({ activeStep, study, hasGeometry, hasResults, runProgr
           <TreeButton label="Mesh" step="mesh" activeStep={activeStep} status={status.mesh} onSelect={onSelect} />
           <TreeButton label="Simulation runs" step="run" activeStep={activeStep} status={status.runs} onSelect={onSelect} />
           {study.runs.map((run, index) => (
-            <button key={run.id} className="tree-run-item" type="button" onClick={() => onSelect(run.status === "complete" ? "results" : "run")}>
-              <span className={`setup-status ${run.status === "complete" ? "complete" : run.status === "failed" ? "missing" : "running"}`} />
+            <button key={run.id} className="tree-run-item" type="button" onClick={() => onSelect(isRunResultReadyStatus(run.status) ? "results" : "run")}>
+              <span className={`setup-status ${isRunResultReadyStatus(run.status) ? "complete" : run.status === "failed" ? "missing" : "running"}`} />
               Run {index + 1}
             </button>
           ))}
@@ -231,7 +232,7 @@ function workflowStatus(study: Study, hasGeometry: boolean, hasResults: boolean,
     simulationControl: study.meshSettings.status === "complete" ? "complete" : "inactive",
     resultControl: "complete",
     mesh: running ? "running" : study.meshSettings.status === "complete" ? "complete" : "missing",
-    runs: running ? "running" : hasResults || study.runs.some((run) => run.status === "complete") ? "complete" : "missing"
+    runs: running ? "running" : hasResults || study.runs.some((run) => isRunResultReadyStatus(run.status)) ? "complete" : "missing"
   };
 }
 

@@ -1,5 +1,5 @@
-import { assessResultFailure } from "@opencae/schema";
-import type { ResultField, ResultSummary, Study } from "@opencae/schema";
+import { assessResultFailure, classifyResultProvenance } from "@opencae/schema";
+import type { ResultField, ResultProvenanceTier, ResultSummary, Study } from "@opencae/schema";
 import type { ObjectStorageProvider } from "@opencae/storage";
 
 export class LocalReportProvider {
@@ -27,6 +27,10 @@ export function buildHtmlReport(runId: string, summary: ResultSummary): string {
   const assessment = summary.failureAssessment ?? assessResultFailure(summary);
   const assessmentStatusClass = ASSESSMENT_STATUSES.includes(assessment.status) ? assessment.status : "unknown";
   const analysisLabel = summary.transient ? "Dynamic structural" : "Static stress";
+  const provenanceTier = resultTierForSummary(summary);
+  const provenanceLabel = resultTierLabel(provenanceTier);
+  const provenance = summary.provenance;
+  const banner = nonProductionBanner(provenanceTier);
   const transientRows = summary.transient
     ? `
             <tr><td>Integration method</td><td>${escapeHtml(summary.transient.integrationMethod)}</td></tr>
@@ -71,6 +75,9 @@ export function buildHtmlReport(runId: string, summary: ResultSummary): string {
       .assessment.warning { border-left-color: var(--amber); background: #fffbeb; }
       .assessment.pass { border-left-color: var(--green); background: #f0fdf4; }
       .assessment strong { display: block; font-size: 18px; }
+      .provenance-banner { margin: 0; padding: 18px 48px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: #fffbeb; color: #7c2d12; }
+      .provenance-banner strong { display: block; font-size: 18px; letter-spacing: .04em; }
+      .provenance-banner p { margin: 4px 0 0; }
       .note { color: var(--muted); margin: 12px 0 0; }
       .footer { color: var(--muted); font-size: 12px; display: flex; justify-content: space-between; }
     </style>
@@ -83,6 +90,7 @@ export function buildHtmlReport(runId: string, summary: ResultSummary): string {
         <h1>Structural Analysis Report</h1>
         <div class="run">Run ${escapeHtml(runId)}</div>
       </header>
+      ${banner ? `<section class="provenance-banner"><strong>${escapeHtml(banner.title)}</strong><p>${escapeHtml(banner.message)}</p></section>` : ""}
       <section>
         <div class="kpis">
           <div class="kpi"><span>Max stress</span><strong>${format(summary.maxStress)} ${escapeHtml(summary.maxStressUnits)}</strong></div>
@@ -95,11 +103,17 @@ export function buildHtmlReport(runId: string, summary: ResultSummary): string {
         <div class="card">
           <h2>Stress Field Preview</h2>
           ${stressFieldSvg(summary)}
-          <p class="note">The colored contour image highlights the expected high-gradient regions and callout locations from the solved result summary.</p>
+          <p class="note">Schematic illustration - not model geometry. Colors are normalized from the result summary and are not a rendered solver field.</p>
         </div>
         <div class="card">
           <h2>Result Summary</h2>
           <table>
+            <tr><td>Run ID</td><td>${escapeHtml(runId)}</td></tr>
+            <tr><td>Result source</td><td>${escapeHtml(provenanceLabel)}</td></tr>
+            <tr><td>Solver</td><td>${escapeHtml(provenance?.solver ?? "unknown")}</td></tr>
+            <tr><td>Mesh source</td><td>${escapeHtml(provenance?.meshSource ?? "unknown")}</td></tr>
+            <tr><td>Result provenance</td><td>${escapeHtml(provenance?.resultSource ?? "unknown")}</td></tr>
+            <tr><td>Units basis</td><td>${escapeHtml(provenance?.units ?? "unknown")}</td></tr>
             <tr><td>Analysis type</td><td>${escapeHtml(analysisLabel)}</td></tr>
             <tr><td>Stress result</td><td>Von Mises</td></tr>
             <tr><td>Max stress</td><td>${format(summary.maxStress)} ${escapeHtml(summary.maxStressUnits)}</td></tr>
@@ -128,6 +142,14 @@ export function buildHtmlReport(runId: string, summary: ResultSummary): string {
 export function buildPdfReport(runId: string, summary: ResultSummary): Buffer {
   const assessment = summary.failureAssessment ?? assessResultFailure(summary);
   const analysisLabel = summary.transient ? "Dynamic structural" : "Static stress";
+  const provenanceTier = resultTierForSummary(summary);
+  const provenanceLabel = resultTierLabel(provenanceTier);
+  const provenance = summary.provenance;
+  const banner = nonProductionBanner(provenanceTier);
+  const bannerCommands = banner ? [
+    text(banner.title, 48, 654, 13, "F1", [1, 0.76, 0.22]),
+    text(banner.message, 48, 636, 10, "F2", [1, 0.86, 0.5])
+  ] : [];
   const commands = [
     "q",
     "0.95 0.97 1 rg 0 0 612 792 re f",
@@ -136,6 +158,7 @@ export function buildPdfReport(runId: string, summary: ResultSummary): Buffer {
     text(`OpenCAE ${analysisLabel.toUpperCase()} SIMULATION`, 48, 744, 10, "F2", [0.75, 0.85, 1]),
     text("Structural Analysis Report", 48, 704, 26, "F1", [1, 1, 1]),
     text(`Run ${runId}`, 48, 680, 10, "F2", [0.78, 0.86, 0.96]),
+    ...bannerCommands,
     text("Key Results", 48, 586, 18, "F1"),
     kpiBox(48, 510, "MAX STRESS", `${format(summary.maxStress)} ${summary.maxStressUnits}`, [0.91, 0.25, 0.21]),
     kpiBox(186, 510, "DISPLACEMENT", `${format(summary.maxDisplacement)} ${summary.maxDisplacementUnits}`, [0.12, 0.45, 0.95]),
@@ -151,13 +174,17 @@ export function buildPdfReport(runId: string, summary: ResultSummary): Buffer {
     tableRow(384, 314, "Factor of safety", format(summary.safetyFactor)),
     tableRow(384, 286, "Reaction force", `${format(summary.reactionForce)} ${summary.reactionForceUnits}`),
     tableRow(384, 258, "Failure check", assessment.title),
-    text("Engineering Notes", 48, 184, 16, "F1"),
+    tableRow(384, 230, "Result source", provenanceLabel),
+    tableRow(384, 202, "Solver", provenance?.solver ?? "unknown"),
+    tableRow(384, 174, "Mesh source", provenance?.meshSource ?? "unknown"),
+    tableRow(384, 146, "Provenance", provenance?.resultSource ?? "unknown"),
+    text("Engineering Notes", 48, 112, 16, "F1"),
     wrappedText(
-      `${assessment.title}: ${assessment.message} This report summarizes the local OpenCAE static stress run. Confirm material properties, boundary conditions, load placement, and mesh quality before using the values for design release.`,
+      `${assessment.title}: ${assessment.message} Result source: ${provenanceLabel}. This report summarizes the local OpenCAE static stress run. The contour image is a schematic illustration, not model geometry. Confirm material properties, boundary conditions, load placement, and mesh quality before using these values for design release.`,
       48,
-      158,
+      90,
       500,
-      11
+      9
     ),
     text("Generated by OpenCAE local mode", 48, 42, 9, "F2", [0.36, 0.42, 0.5]),
     "Q"
@@ -352,7 +379,52 @@ function coverSvg(): string {
 }
 
 function stressFieldSvg(summary: ResultSummary): string {
-  return `<svg class="visual result-model" viewBox="0 0 560 320" role="img" aria-label="Stress contour preview on the analyzed model"><defs><linearGradient id="beamStress" x1="0" x2="1"><stop stop-color="#2563eb"/><stop offset=".36" stop-color="#22d3ee"/><stop offset=".64" stop-color="#facc15"/><stop offset="1" stop-color="#ef4444"/></linearGradient><linearGradient id="sideShade" x1="0" x2="1"><stop stop-color="#334155"/><stop offset="1" stop-color="#64748b"/></linearGradient></defs><rect width="560" height="320" fill="#0b1220"/><g stroke="#172033" stroke-width="1">${Array.from({ length: 15 }, (_, index) => `<path d="M${-80 + index * 48} 288 260 74" />`).join("")}${Array.from({ length: 15 }, (_, index) => `<path d="M${44 + index * 48} 72 392 290" />`).join("")}</g><g transform="translate(54 18)"><path d="M66 194 392 154 462 196 128 244Z" fill="url(#beamStress)"/><path d="M392 154 462 196 430 242 360 202Z" fill="url(#sideShade)"/><path d="M128 244 462 196 430 242 98 290Z" fill="#475569"/><path d="M66 194 392 154 462 196 128 244Z" fill="none" stroke="#cbd5e1" stroke-width="3"/><path d="M128 244 98 290 430 242 462 196M392 154 360 202 430 242" fill="none" stroke="#94a3b8" stroke-width="2"/><circle cx="116" cy="222" r="16" fill="#0b1220" stroke="#bfdbfe" stroke-width="6"/><circle cx="166" cy="214" r="16" fill="#0b1220" stroke="#bfdbfe" stroke-width="6"/><path d="M384 64 384 142" stroke="#f59e0b" stroke-width="10" stroke-linecap="round"/><path d="M384 152 368 120 400 120Z" fill="#f59e0b"/><rect x="324" y="40" width="128" height="28" rx="3" fill="#0f172a" stroke="#f59e0b"/><text x="388" y="59" fill="#e5e7eb" text-anchor="middle" font-size="12" font-family="ui-monospace, monospace">Load</text><g fill="#38bdf8"><path d="M88 256 100 278 76 278Z"/><path d="M132 250 144 272 120 272Z"/><path d="M176 244 188 266 164 266Z"/></g><path d="M260 94 330 116 286 190 218 168Z" fill="#ffffff" opacity=".18" stroke="#e2e8f0" stroke-width="2"/></g><g transform="translate(28 270)" font-family="ui-monospace, monospace" font-size="12" fill="#cbd5e1"><rect x="0" y="0" width="270" height="10" rx="5" fill="url(#beamStress)"/><text x="0" y="28">Max stress ${escapeHtml(format(summary.maxStress))} ${escapeHtml(summary.maxStressUnits)}</text><text x="0" y="46">Max displacement ${escapeHtml(format(summary.maxDisplacement))} ${escapeHtml(summary.maxDisplacementUnits)}</text></g></svg>`;
+  return `<svg class="visual result-model" viewBox="0 0 560 320" role="img" aria-label="Schematic stress contour illustration, not model geometry"><defs><linearGradient id="beamStress" x1="0" x2="1"><stop stop-color="#2563eb"/><stop offset=".36" stop-color="#22d3ee"/><stop offset=".64" stop-color="#facc15"/><stop offset="1" stop-color="#ef4444"/></linearGradient><linearGradient id="sideShade" x1="0" x2="1"><stop stop-color="#334155"/><stop offset="1" stop-color="#64748b"/></linearGradient></defs><rect width="560" height="320" fill="#0b1220"/><g stroke="#172033" stroke-width="1">${Array.from({ length: 15 }, (_, index) => `<path d="M${-80 + index * 48} 288 260 74" />`).join("")}${Array.from({ length: 15 }, (_, index) => `<path d="M${44 + index * 48} 72 392 290" />`).join("")}</g><g transform="translate(54 18)"><path d="M66 194 392 154 462 196 128 244Z" fill="url(#beamStress)"/><path d="M392 154 462 196 430 242 360 202Z" fill="url(#sideShade)"/><path d="M128 244 462 196 430 242 98 290Z" fill="#475569"/><path d="M66 194 392 154 462 196 128 244Z" fill="none" stroke="#cbd5e1" stroke-width="3"/><path d="M128 244 98 290 430 242 462 196M392 154 360 202 430 242" fill="none" stroke="#94a3b8" stroke-width="2"/><circle cx="116" cy="222" r="16" fill="#0b1220" stroke="#bfdbfe" stroke-width="6"/><circle cx="166" cy="214" r="16" fill="#0b1220" stroke="#bfdbfe" stroke-width="6"/><path d="M384 64 384 142" stroke="#f59e0b" stroke-width="10" stroke-linecap="round"/><path d="M384 152 368 120 400 120Z" fill="#f59e0b"/><rect x="324" y="40" width="128" height="28" rx="3" fill="#0f172a" stroke="#f59e0b"/><text x="388" y="59" fill="#e5e7eb" text-anchor="middle" font-size="12" font-family="ui-monospace, monospace">Load</text><g fill="#38bdf8"><path d="M88 256 100 278 76 278Z"/><path d="M132 250 144 272 120 272Z"/><path d="M176 244 188 266 164 266Z"/></g><path d="M260 94 330 116 286 190 218 168Z" fill="#ffffff" opacity=".18" stroke="#e2e8f0" stroke-width="2"/></g><g transform="translate(28 270)" font-family="ui-monospace, monospace" font-size="12" fill="#cbd5e1"><rect x="0" y="0" width="270" height="10" rx="5" fill="url(#beamStress)"/><text x="0" y="28">Max stress ${escapeHtml(format(summary.maxStress))} ${escapeHtml(summary.maxStressUnits)}</text><text x="0" y="46">Max displacement ${escapeHtml(format(summary.maxDisplacement))} ${escapeHtml(summary.maxDisplacementUnits)}</text></g></svg>`;
+}
+
+function resultTierForSummary(summary: ResultSummary): ResultProvenanceTier {
+  return summary.resultTier ?? classifyResultProvenance(summary.provenance);
+}
+
+function resultTierLabel(tier: ResultProvenanceTier): string {
+  if (tier === "production_fea") return "Production FEA";
+  if (tier === "core_preview") return "OpenCAE Core Preview (coarse block proxy)";
+  if (tier === "local_estimate") return "Estimate (not FEA)";
+  if (tier === "analytical_benchmark") return "Analytical benchmark";
+  if (tier === "imported_legacy") return "Legacy backend result";
+  return "Unknown result source";
+}
+
+function nonProductionBanner(tier: ResultProvenanceTier): { title: string; message: string } | null {
+  if (tier === "production_fea") return null;
+  if (tier === "core_preview") {
+    return {
+      title: "PREVIEW ONLY",
+      message: "This result used a coarse block proxy of the model bounds and is not production FEA."
+    };
+  }
+  if (tier === "local_estimate") {
+    return {
+      title: "NOT ANALYSIS",
+      message: "This result is an estimate or generated demo value, not finite-element analysis."
+    };
+  }
+  if (tier === "analytical_benchmark") {
+    return {
+      title: "BENCHMARK RESULT",
+      message: "This result comes from an analytical benchmark path, not a general model solve."
+    };
+  }
+  if (tier === "imported_legacy") {
+    return {
+      title: "LEGACY RESULT",
+      message: "This historical result is read-only. Re-run with OpenCAE Core Cloud for production FEA."
+    };
+  }
+  return {
+    title: "UNKNOWN PROVENANCE",
+    message: "This result is missing production provenance and should not be treated as validated FEA."
+  };
 }
 
 function clamp(value: number, min: number, max: number): number {

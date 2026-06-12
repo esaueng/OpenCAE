@@ -1,4 +1,5 @@
 import { lazy, startTransition, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { isRunResultReadyStatus } from "@opencae/schema";
 import type { Constraint, DisplayFace, DisplayModel, DynamicSolverSettings, Load, NamedSelection, Project, ResultField, ResultRenderBounds, ResultSummary, RunEvent, RunTimingEstimate, SimulationFidelity, Study } from "@opencae/schema";
 import { RotateCcw, Save } from "lucide-react";
 import { addLoad, addSupport, assignMaterial, cancelRun, createProject, generateMesh, getResults, importLocalProject, loadSampleProject, renameProject, runSimulation, subscribeToRun, updateStudy as saveStudyPatch, uploadModel, type SampleAnalysisType, type SampleModelId } from "./lib/api";
@@ -1467,7 +1468,7 @@ function ProjectNameChip({ name, onRename }: { name: string; onRename: (name: st
 
 function hasSeededBracketDemoRun(project: Project | undefined): boolean {
   const study = project?.studies[0];
-  return Boolean(study?.runs.some((run) => run.id === "run-bracket-demo-seeded" && (run.resultRef || run.status === "complete")));
+  return Boolean(study?.runs.some((run) => run.id === "run-bracket-demo-seeded" && (run.resultRef || isRunResultReadyStatus(run.status))));
 }
 
 function cloneProjectSharingEmbeddedModels(project: Project): Project {
@@ -1483,8 +1484,8 @@ function cloneProjectSharingEmbeddedModels(project: Project): Project {
 
 function latestCompletedRunId(study: Study | null, activeRunId: string): string | null {
   if (!study) return null;
-  if (study.runs.some((run) => run.id === activeRunId && (run.resultRef || run.status === "complete"))) return activeRunId;
-  const completed = [...study.runs].reverse().find((run) => run.resultRef || run.status === "complete");
+  if (study.runs.some((run) => run.id === activeRunId && (run.resultRef || isRunResultReadyStatus(run.status)))) return activeRunId;
+  const completed = [...study.runs].reverse().find((run) => run.resultRef || isRunResultReadyStatus(run.status));
   return completed?.id ?? null;
 }
 

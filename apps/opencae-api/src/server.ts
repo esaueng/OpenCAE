@@ -14,11 +14,15 @@ import {
   ResultFieldSchema,
   ResultSummarySchema,
   StudySchema,
+  classifyResultProvenance,
+  isRunResultReadyStatus,
+  runStatusForResultProvenance,
   type DisplayModel,
   type Load,
   type MeshQuality,
   type Project,
   type ResultField,
+  type ResultProvenanceTier,
   type ResultSummary,
   type RunEvent,
   type Study,
@@ -452,17 +456,27 @@ api.post("/api/studies/:studyId/runs", mutatingRateLimit, async (request, reply)
       }
       publish(runId, "progress", 68, studySnapshot.type === "dynamic_structural" ? "Writing OpenCAE Core dynamic result frames." : "Writing OpenCAE Core result fields.");
       const resultRef = `${studySnapshot.projectId}/results/${runId}/results.json`;
-      await storage.putObject(resultRef, JSON.stringify(solved.result, null, 2));
-      const reportRef = await reports.generateReport({ projectId: studySnapshot.projectId, runId, summary: solved.result.summary, study: studySnapshot, fields: solved.result.fields });
+      const resultTier = classifyResultProvenance(solved.result.summary.provenance);
+      const resultStatus = runStatusForResultProvenance(solved.result.summary.provenance);
+      const result = {
+        ...solved.result,
+        summary: {
+          ...solved.result.summary,
+          resultTier
+        }
+      };
+      await storage.putObject(resultRef, JSON.stringify(result, null, 2));
+      const reportRef = await reports.generateReport({ projectId: studySnapshot.projectId, runId, summary: result.summary, study: studySnapshot, fields: result.fields });
       if (runCancelled()) return;
       db.upsertRun({
         ...run,
-        status: "complete",
+        status: resultStatus,
+        resultTier,
         resultRef,
         reportRef,
         finishedAt: new Date().toISOString()
       });
-      publish(runId, "complete", 100, "OpenCAE Core simulation complete.");
+      publish(runId, "complete", 100, completeRunMessage(resultTier));
     } catch (error) {
       api.log.error({ err: error, runId }, "Run worker failed");
       if (runCancelled()) return;
@@ -596,6 +610,14 @@ function publish(runId: string, type: RunEvent["type"], progress: number | undef
   runState.publish(runId, { runId, type, progress, message, timestamp: new Date().toISOString() });
 }
 
+function completeRunMessage(resultTier: ResultProvenanceTier): string {
+  if (resultTier === "production_fea") return "OpenCAE Core simulation complete.";
+  if (resultTier === "core_preview") return "OpenCAE Core preview complete.";
+  if (resultTier === "analytical_benchmark") return "Analytical benchmark result complete.";
+  if (resultTier === "imported_legacy") return "Legacy result restored.";
+  return "Estimate result complete.";
+}
+
 function isLoadType(type: unknown): type is Load["type"] {
   return type === "force" || type === "pressure" || type === "gravity";
 }
@@ -609,7 +631,7 @@ function unitsForLoadType(type: Load["type"]) {
 function latestCompletedRunForProject(project: Project): StudyRun | undefined {
   return project.studies
     .flatMap((study) => study.runs)
-    .filter((run) => run.reportRef || run.resultRef || run.status === "complete")
+    .filter((run) => run.reportRef || run.resultRef || isRunResultReadyStatus(run.status))
     .sort((left, right) => {
       const leftTime = Date.parse(left.finishedAt ?? left.startedAt ?? "");
       const rightTime = Date.parse(right.finishedAt ?? right.startedAt ?? "");
@@ -636,6 +658,7 @@ interface ImportedResultBundle {
   completedRunId?: string;
   summary: ResultSummary;
   fields: ResultField[];
+  resultTier: ResultProvenanceTier;
 }
 
 function parseLocalResults(value: unknown, project: Project): ImportedResultBundle | undefined {
@@ -654,7 +677,8 @@ function parseLocalResults(value: unknown, project: Project): ImportedResultBund
     activeRunId,
     completedRunId: completedRunId ?? runId,
     summary: summary.data,
-    fields: fields.data
+    fields: fields.data,
+    resultTier: classifyResultProvenance(summary.data.provenance)
   };
 }
 
@@ -669,7 +693,8 @@ function projectWithImportedResultRefs(project: Project, results: ImportedResult
         run.id === runId
           ? {
               ...run,
-              status: "complete",
+              status: runStatusForResultProvenance(results.summary.provenance),
+              resultTier: results.resultTier,
               resultRef: run.resultRef ?? `${project.id}/results/${runId}/results.json`,
               reportRef: run.reportRef ?? `${project.id}/reports/${runId}.html`
             }
@@ -725,8 +750,9 @@ async function persistImportedResults(project: Project, results: ImportedResultB
   const run = project.studies.flatMap((study) => study.runs).find((item) => item.id === runId);
   const resultRef = run?.resultRef ?? `${project.id}/results/${runId}/results.json`;
   const reportRef = run?.reportRef ?? `${project.id}/reports/${runId}.html`;
-  await storage.putObject(resultRef, JSON.stringify({ summary: results.summary, fields: results.fields }, null, 2));
-  await storage.putObject(reportRef, buildHtmlReport(runId, results.summary));
+  const summary = { ...results.summary, resultTier: results.resultTier };
+  await storage.putObject(resultRef, JSON.stringify({ summary, fields: results.fields }, null, 2));
+  await storage.putObject(reportRef, buildHtmlReport(runId, summary));
 }
 
 function dynamicSampleResults(project: Project): ImportedResultBundle | undefined {
@@ -739,7 +765,8 @@ function dynamicSampleResults(project: Project): ImportedResultBundle | undefine
     activeRunId: run.id,
     completedRunId: run.id,
     summary: solved.summary,
-    fields: solved.fields
+    fields: solved.fields,
+    resultTier: classifyResultProvenance(solved.summary.provenance)
   };
 }
 
@@ -749,9 +776,10 @@ async function persistSampleResults(project: Project, results: ImportedResultBun
   const run = project.studies.flatMap((study) => study.runs).find((item) => item.id === runId);
   const resultRef = run?.resultRef ?? `${project.id}/results/${runId}/results.json`;
   const reportRef = run?.reportRef ?? `${project.id}/reports/${runId}/report.html`;
-  await storage.putObject(resultRef, JSON.stringify({ summary: results.summary, fields: results.fields }, null, 2));
-  await storage.putObject(reportRef, buildHtmlReport(runId, results.summary));
-  await storage.putObject(reportPdfKeyFor(reportRef), buildPdfReport(runId, results.summary));
+  const summary = { ...results.summary, resultTier: results.resultTier };
+  await storage.putObject(resultRef, JSON.stringify({ summary, fields: results.fields }, null, 2));
+  await storage.putObject(reportRef, buildHtmlReport(runId, summary));
+  await storage.putObject(reportPdfKeyFor(reportRef), buildPdfReport(runId, summary));
 }
 
 async function displayModelForProject(project: Project): Promise<DisplayModel> {

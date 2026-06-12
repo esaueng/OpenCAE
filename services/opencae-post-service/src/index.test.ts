@@ -50,8 +50,34 @@ describe("LocalReportProvider", () => {
     const html = buildHtmlReport("run-a", summary(500));
 
     expect(html).toContain("class=\"visual result-model\"");
-    expect(html).toContain("Stress contour preview on the analyzed model");
+    expect(html).toContain("Schematic stress contour illustration, not model geometry");
+    expect(html).toContain("Schematic illustration - not model geometry");
     expect(html).not.toContain("feGaussianBlur");
+  });
+
+  test("prints result provenance and marks local estimates as not analysis", () => {
+    const estimateSummary: ResultSummary = {
+      ...summary(500),
+      provenance: {
+        kind: "local_estimate",
+        solver: "opencae-local-heuristic-surface",
+        solverVersion: "0.1.0",
+        meshSource: "mock",
+        resultSource: "generated",
+        units: "mm-N-s-MPa"
+      }
+    };
+
+    const html = buildHtmlReport("run-estimate", estimateSummary);
+    const pdf = buildPdfReport("run-estimate", estimateSummary).toString("latin1");
+
+    expect(html).toContain("Estimate (not FEA)");
+    expect(html).toContain("NOT ANALYSIS");
+    expect(html).toContain("opencae-local-heuristic-surface");
+    expect(html).toContain("mock");
+    expect(html).toContain("generated");
+    expect(pdf).toContain("NOT ANALYSIS");
+    expect(pdf).toContain("Estimate \\(not FEA\\)");
   });
 
   test("includes a failure assessment for low safety-factor results", () => {
