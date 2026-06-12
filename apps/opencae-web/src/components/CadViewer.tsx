@@ -289,21 +289,23 @@ export function CadViewer(props: CadViewerProps) {
         <directionalLight position={[4, 6, 3]} intensity={effectiveViewMode === "results" || isLightTheme ? 1.45 : 2.2} />
         <Bounds fit clip observe={!props.resultPlaybackPlaying} margin={VIEWER_FIT_MARGIN}>
           <group rotation={modelRotation}>
-            <group rotation={baseModelRotation}>
-              {effectiveViewMode === "results" && solverSurfaceResult ? (
-                <SolverSurfaceResultMesh
-                  surfaceMesh={props.surfaceMesh!}
-                  scalarField={solverSurfaceResult.scalarField}
-                  displacementField={solverSurfaceResult.displacementField}
-                  resultMode={props.resultMode}
-                  showDeformed={effectiveShowDeformed}
-                  deformationScale={props.stressExaggeration}
-                />
-              ) : (
+            {/* Solver surface meshes arrive in solver model space (Z-up), so they must not
+                inherit the legacy Y-up sample base rotation applied to procedural models. */}
+            {effectiveViewMode === "results" && solverSurfaceResult ? (
+              <SolverSurfaceResultMesh
+                surfaceMesh={props.surfaceMesh!}
+                scalarField={solverSurfaceResult.scalarField}
+                displacementField={solverSurfaceResult.displacementField}
+                resultMode={props.resultMode}
+                showDeformed={effectiveShowDeformed}
+                deformationScale={props.stressExaggeration}
+              />
+            ) : (
+              <group rotation={baseModelRotation}>
                 <BracketModel {...props} showDeformed={effectiveShowDeformed} resultFields={resultFields} viewMode={effectiveViewMode} uploadedPreviewBounds={uploadedPreviewBounds} onUploadedPreviewBounds={setUploadedPreviewBounds} />
-              )}
-              {showDimensionOverlay && <ModelDimensionOverlay displayModel={props.displayModel} uploadedPreviewBounds={uploadedPreviewBounds} />}
-            </group>
+                {showDimensionOverlay && <ModelDimensionOverlay displayModel={props.displayModel} uploadedPreviewBounds={uploadedPreviewBounds} />}
+              </group>
+            )}
           </group>
           <BoundsCameraReset contentFitKey={viewerContentFitKey} signal={props.fitSignal} viewAxis={props.viewAxis} viewAxisSignal={props.viewAxisSignal} controlsRef={controlsRef} />
           <GizmoCameraReset view={gizmoViewRequest.view} signal={gizmoViewRequest.signal} controlsRef={controlsRef} />
@@ -4901,9 +4903,12 @@ export function displayedLegendTickLabels(minValue: number, maxValue: number) {
 }
 
 export function legendMeshStats(meshSummary: MeshSummary | undefined) {
+  if (!meshSummary) return { nodes: "--", elements: "--" };
+  // Preset summaries are planning estimates; only solver-reported statistics are exact.
+  const suffix = meshSummary.source === "core_solver" ? "" : " (est.)";
   return {
-    nodes: (meshSummary?.nodes ?? 42381).toLocaleString(),
-    elements: (meshSummary?.elements ?? 26944).toLocaleString()
+    nodes: `${meshSummary.nodes.toLocaleString()}${suffix}`,
+    elements: `${meshSummary.elements.toLocaleString()}${suffix}`
   };
 }
 

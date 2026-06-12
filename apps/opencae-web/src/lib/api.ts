@@ -19,6 +19,12 @@ export interface ResultsResponse {
   summary: ResultSummary;
   fields: ResultField[];
   surfaceMesh?: SolverSurfaceMesh;
+  /** Solver diagnostics entries (e.g. core-solve-diagnostics with real mesh counts). */
+  diagnostics?: unknown[];
+  artifacts?: {
+    meshConnectivity?: { connectedComponents: number };
+    meshStatistics?: { nodes: number; elements: number };
+  };
 }
 
 export interface RunSimulationOptions {
@@ -409,7 +415,6 @@ function syntheticRunErrorEvent(runId: string, message: string): RunEvent {
 }
 
 async function runOpenCaeCoreCloudSimulation(study: Study, displayModel: DisplayModel | undefined, options: RunSimulationOptions): Promise<{ run: { id: string }; streamUrl: string; message: string }> {
-  void options;
   const runId = `run-cloud-core-${crypto.randomUUID()}`;
   try {
     const response = await fetch("/api/cloud-core/runs", {
@@ -428,8 +433,26 @@ async function runOpenCaeCoreCloudSimulation(study: Study, displayModel: Display
       message: payload.message ?? "OpenCAE Core Cloud simulation running."
     };
   } catch (error) {
+    // A deployment without Core Cloud (local dev API, static/local-first Worker)
+    // cannot serve this route at all. Run the real in-browser OpenCAE Core solver
+    // instead; its provenance stays honestly labeled as a browser solve. This is
+    // not a result fallback: cloud solve failures from a provisioned deployment
+    // still surface as errors below.
+    if (isCloudCoreUnavailableInDeployment(error)) {
+      options.onRunStatus?.("OpenCAE Core Cloud is not available in this deployment. Running the OpenCAE Core Local browser solver instead.");
+      const localStudy: Study = study.type === "dynamic_structural"
+        ? { ...study, solverSettings: { ...study.solverSettings, backend: "opencae_core_local" } }
+        : { ...study, solverSettings: { ...study.solverSettings, backend: "opencae_core_local" } };
+      return runSimulationLocally(localStudy, displayModel);
+    }
     throw new Error(coreCloudFailureMessage(error), { cause: error });
   }
+}
+
+function isCloudCoreUnavailableInDeployment(error: unknown): boolean {
+  const message = messageFromUnknownError(error);
+  if (!message.startsWith("POST /api/cloud-core/runs failed with HTTP")) return false;
+  return message.includes("HTTP 404") || message.includes("not provisioned in this Worker build");
 }
 
 async function startOpenCaeCoreCloudRun(runId: string, startUrl: string): Promise<void> {
@@ -823,13 +846,15 @@ async function fetchJsonWithFallback<T>(input: RequestInfo | URL, init: RequestI
   }
 }
 
+const MESH_PRESET_ESTIMATE_WARNING = "Node and element counts are preset planning estimates. The solver reports actual mesh statistics with the results.";
+
 function meshSummaryForPreset(preset: MeshQuality, analysisMesh?: AnalysisMesh) {
   const sampleCount = analysisMesh?.samples.length;
   const summaryByPreset: Record<MeshQuality, NonNullable<Study["meshSettings"]["summary"]>> = {
-    coarse: { nodes: 12840, elements: 7320, warnings: [], analysisSampleCount: sampleCount ?? 1200, quality: "coarse" as const },
-    medium: { nodes: 42381, elements: 26944, warnings: ["Small feature curvature represented by surface analysis samples."], analysisSampleCount: sampleCount ?? 4800, quality: "medium" as const },
-    fine: { nodes: 88420, elements: 57102, warnings: ["Fine surface analysis sampling enabled for higher-quality local results."], analysisSampleCount: sampleCount ?? 19200, quality: "fine" as const },
-    ultra: { nodes: 182400, elements: 119808, warnings: ["Ultra surface analysis sampling enabled for detailed local gradients."], analysisSampleCount: sampleCount ?? 45000, quality: "ultra" as const }
+    coarse: { nodes: 12840, elements: 7320, warnings: [MESH_PRESET_ESTIMATE_WARNING], analysisSampleCount: sampleCount ?? 1200, quality: "coarse" as const, source: "preset_estimate" },
+    medium: { nodes: 42381, elements: 26944, warnings: [MESH_PRESET_ESTIMATE_WARNING, "Small feature curvature represented by surface analysis samples."], analysisSampleCount: sampleCount ?? 4800, quality: "medium" as const, source: "preset_estimate" },
+    fine: { nodes: 88420, elements: 57102, warnings: [MESH_PRESET_ESTIMATE_WARNING, "Fine surface analysis sampling enabled for higher-quality local results."], analysisSampleCount: sampleCount ?? 19200, quality: "fine" as const, source: "preset_estimate" },
+    ultra: { nodes: 182400, elements: 119808, warnings: [MESH_PRESET_ESTIMATE_WARNING, "Ultra surface analysis sampling enabled for detailed local gradients."], analysisSampleCount: sampleCount ?? 45000, quality: "ultra" as const, source: "preset_estimate" }
   };
   return summaryByPreset[preset];
 }
