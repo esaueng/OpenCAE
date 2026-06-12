@@ -976,3 +976,112 @@ function resultProbeLabel(mode: ResultFieldMode, value: number, units = "") {
 export function formatResultValue(value: number) {
   return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(3)));
 }
+
+const SAFETY_FACTOR_DISPLAY_CAP = 10000;
+const SAFETY_FACTOR_DISPLAY_FLOOR = 0.01;
+
+type SolverResultBundle = {
+  summary?: Pick<ResultSummary, "maxStress" | "safetyFactor"> | null;
+  fields: ResultField[];
+};
+
+/**
+ * Core solves return surface-node fields for stress and displacement, but the
+ * safety-factor field is element-located with no surfaceMeshRef. Without a
+ * surface-node safety field the viewer falls back to the heuristic sample
+ * rendering when the user switches to Safety factor mode, so the displayed
+ * geometry would no longer match the solver mesh. Derive the missing surface
+ * field from the surface stress field and the solver-reported yield point
+ * (yield = maxStress x minSafetyFactor for linear results).
+ */
+export function withDerivedSurfaceSafetyFactorFields(results: SolverResultBundle): ResultField[] {
+  const fields = results.fields;
+  const yieldMpa = solverYieldStressMpa(results.summary);
+  if (!yieldMpa) return fields;
+  const surfaceStressFields = fields.filter((field) =>
+    field.type === "stress" && field.location === "node" && typeof field.surfaceMeshRef === "string" && field.values.length > 0);
+  if (!surfaceStressFields.length) return fields;
+  const derived: ResultField[] = [];
+  for (const stressField of surfaceStressFields) {
+    const frameIndex = stressField.frameIndex;
+    const alreadyPresent = fields.some((field) =>
+      field.type === "safety_factor" &&
+      field.location === "node" &&
+      field.surfaceMeshRef === stressField.surfaceMeshRef &&
+      (field.frameIndex ?? 0) === (frameIndex ?? 0));
+    if (alreadyPresent) continue;
+    const values = stressField.values.map((stress) => clampSafetyFactor(yieldMpa / Math.max(Math.abs(stress), 1e-9)));
+    derived.push({
+      id: frameIndex === undefined ? `${stressField.id}-derived-safety-factor` : `${stressField.id}-derived-safety-factor-frame-${frameIndex}`,
+      runId: stressField.runId,
+      type: "safety_factor",
+      location: "node",
+      values,
+      min: Math.min(...values),
+      max: Math.max(...values),
+      units: "ratio",
+      surfaceMeshRef: stressField.surfaceMeshRef,
+      ...(frameIndex === undefined ? {} : { frameIndex }),
+      ...(stressField.timeSeconds === undefined ? {} : { timeSeconds: stressField.timeSeconds }),
+      ...(stressField.provenance ? { provenance: stressField.provenance } : {})
+    });
+  }
+  return derived.length ? [...fields, ...derived] : fields;
+}
+
+function clampSafetyFactor(value: number): number {
+  if (!Number.isFinite(value)) return SAFETY_FACTOR_DISPLAY_CAP;
+  return Math.min(SAFETY_FACTOR_DISPLAY_CAP, Math.max(SAFETY_FACTOR_DISPLAY_FLOOR, value));
+}
+
+function solverYieldStressMpa(summary: SolverResultBundle["summary"]): number | null {
+  const maxStress = Number(summary?.maxStress);
+  const safetyFactor = Number(summary?.safetyFactor);
+  if (!Number.isFinite(maxStress) || maxStress <= 0) return null;
+  if (!Number.isFinite(safetyFactor) || safetyFactor <= 0) return null;
+  return maxStress * safetyFactor;
+}
+
+export type SolverMeshSummary = {
+  nodes: number;
+  elements: number;
+  warnings: string[];
+  source: "core_solver";
+};
+
+/**
+ * Extract the actual solver mesh statistics from a result payload. Core solves
+ * report node/element counts in a "core-solve-diagnostics" diagnostics entry;
+ * local adapter solves report them in artifacts.meshStatistics. Preset mesh
+ * summaries are planning estimates and should be replaced by these counts in
+ * the results view whenever they are available.
+ */
+export function solverMeshSummaryFromResults(results: {
+  summary?: { diagnostics?: unknown } | null;
+  diagnostics?: unknown;
+  artifacts?: { meshStatistics?: unknown } | null;
+}): SolverMeshSummary | null {
+  const fromArtifacts = meshCountsFromUnknown(results.artifacts?.meshStatistics);
+  if (fromArtifacts) return { ...fromArtifacts, warnings: [], source: "core_solver" };
+  const diagnosticEntries = [
+    ...(Array.isArray(results.diagnostics) ? results.diagnostics : []),
+    ...(Array.isArray(results.summary?.diagnostics) ? results.summary.diagnostics : [])
+  ].flat();
+  for (const entry of diagnosticEntries) {
+    if (!entry || typeof entry !== "object") continue;
+    const candidate = entry as { id?: unknown; nodeCount?: unknown; elementCount?: unknown };
+    if (candidate.id !== "core-solve-diagnostics") continue;
+    const counts = meshCountsFromUnknown({ nodes: candidate.nodeCount, elements: candidate.elementCount });
+    if (counts) return { ...counts, warnings: [], source: "core_solver" };
+  }
+  return null;
+}
+
+function meshCountsFromUnknown(value: unknown): { nodes: number; elements: number } | null {
+  if (!value || typeof value !== "object") return null;
+  const candidate = value as { nodes?: unknown; elements?: unknown };
+  const nodes = Number(candidate.nodes);
+  const elements = Number(candidate.elements);
+  if (!Number.isInteger(nodes) || nodes <= 0 || !Number.isInteger(elements) || elements <= 0) return null;
+  return { nodes, elements };
+}

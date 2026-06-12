@@ -949,8 +949,14 @@ function MeshPanel({ study, onGenerateMesh }: RightPanelProps) {
       <Callout>{capitalize(preset)} creates a {meshPresetDescription(preset)}.</Callout>
       {study.meshSettings.summary && (
         <div className="summary-box">
-          <Info label="Nodes" value={study.meshSettings.summary.nodes.toLocaleString()} />
-          <Info label="Elements" value={study.meshSettings.summary.elements.toLocaleString()} />
+          <Info
+            label={study.meshSettings.summary.source === "core_solver" ? "Nodes" : "Nodes (est.)"}
+            value={study.meshSettings.summary.nodes.toLocaleString()}
+          />
+          <Info
+            label={study.meshSettings.summary.source === "core_solver" ? "Elements" : "Elements (est.)"}
+            value={study.meshSettings.summary.elements.toLocaleString()}
+          />
           <Info label="Analysis samples" value={(study.meshSettings.summary.analysisSampleCount ?? 0).toLocaleString()} />
           <Info label="Warnings" value={String(study.meshSettings.summary.warnings.length)} />
         </div>

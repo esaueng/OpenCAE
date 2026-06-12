@@ -37,7 +37,7 @@ import { displayModelForUnits, loadValueForUnits, resultFieldForUnits, resultSum
 import { supportDisplayLabel } from "./supportLabels";
 import { nextSelectedPayloadObject, shouldClearPayloadSelectionOnViewerMiss } from "./payloadSelection";
 import { createLocalDynamicStructuralStudy, createLocalStaticStressStudy } from "./localProjectFactory";
-import { createPackedResultPlaybackCache, createResultFrameCache, hasDynamicPlaybackFrames } from "./resultFields";
+import { createPackedResultPlaybackCache, createResultFrameCache, hasDynamicPlaybackFrames, solverMeshSummaryFromResults, withDerivedSurfaceSafetyFactorFields, type SolverMeshSummary } from "./resultFields";
 import { packResultFieldsForPlayback, packedPreparedPlaybackFrameOrdinal, playbackFieldsForResultMode, playbackMemoryBudgetBytes, type PackedPreparedPlaybackCache, type PreparedPlaybackFrameCache } from "./resultPlaybackCache";
 import {
   advancePlaybackTimeline,
@@ -67,6 +67,9 @@ interface SaveFilePickerWindow extends Window {
   }) => Promise<SaveFilePickerHandle>;
 }
 
+// Reference numbers shown for the pre-seeded bracket demo before any solve runs.
+// The provenance marks them as generated sample values so the Results panel
+// never presents them as computed solver output.
 const seededSummary: ResultSummary = {
   maxStress: 142,
   maxStressUnits: "MPa",
@@ -74,7 +77,15 @@ const seededSummary: ResultSummary = {
   maxDisplacementUnits: "mm",
   safetyFactor: 1.8,
   reactionForce: 500,
-  reactionForceUnits: "N"
+  reactionForceUnits: "N",
+  provenance: {
+    kind: "local_estimate",
+    solver: "sample-bracket-reference",
+    solverVersion: "0.1.0",
+    meshSource: "mock",
+    resultSource: "generated",
+    units: "mm-N-s-MPa"
+  }
 };
 const DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.005;
 const MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.001;
@@ -135,8 +146,11 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const [processingRunId, setProcessingRunId] = useState<string | null>(null);
   const [resultSummary, setResultSummary] = useState<ResultSummary | null>(() =>
     restoredResults?.summary ?? (hasSeededBracketDemoRun(restoredProjectFile?.project) ? seededSummary : null));
-  const [resultFields, setResultFields] = useState<ResultField[]>(restoredResults?.fields ?? []);
+  const [resultFields, setResultFields] = useState<ResultField[]>(() => restoredResults
+    ? withDerivedSurfaceSafetyFactorFields(restoredResults)
+    : []);
   const [resultSurfaceMesh, setResultSurfaceMesh] = useState<SolverSurfaceMesh | undefined>(restoredResults?.surfaceMesh);
+  const [solverMeshSummary, setSolverMeshSummary] = useState<SolverMeshSummary | null>(restoredResults?.solverMeshSummary ?? null);
   const [resultFrameIndex, setResultFrameIndex] = useState(0);
   const [resultPlaybackFramePosition, setResultPlaybackFramePosition] = useState(0);
   const [resultPlaybackOrdinalPosition, setResultPlaybackOrdinalPosition] = useState(0);
@@ -664,7 +678,8 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         completedRunId,
         summary: resultSummary,
         fields: resultFields,
-        ...(resultSurfaceMesh ? { surfaceMesh: resultSurfaceMesh } : {})
+        ...(resultSurfaceMesh ? { surfaceMesh: resultSurfaceMesh } : {}),
+        ...(solverMeshSummary ? { solverMeshSummary } : {})
       } : undefined,
       ui: autosaveUiSnapshot
     }), undefined, AUTOSAVE_HEAVY_WRITE_DELAY_MS, notifyAutosaveWriteFailure);
@@ -690,6 +705,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     selectedPayloadObject,
     showDeformed,
     showDimensions,
+    solverMeshSummary,
     themeMode,
     undoStack,
     viewMode
@@ -716,8 +732,9 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     setSelectedPayloadObject(null);
     if (response.results?.fields.length) {
       setResultSummary(response.results.summary);
-      setResultFields(response.results.fields);
+      setResultFields(withDerivedSurfaceSafetyFactorFields(response.results));
       setResultSurfaceMesh(response.results.surfaceMesh);
+      setSolverMeshSummary(response.results.solverMeshSummary ?? null);
       setResultFrameIndex(0);
       const restoredRunId = response.results.completedRunId ?? response.results.activeRunId ?? latestCompletedRunId(response.project.studies[0] ?? null, "") ?? "";
       setActiveRunId(response.results.activeRunId ?? restoredRunId);
@@ -736,6 +753,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       setResultSummary(null);
       setResultFields([]);
       setResultSurfaceMesh(undefined);
+      setSolverMeshSummary(null);
       setResultFrameIndex(0);
       setRunProgress(0);
       const nextCompletedRunId = latestCompletedRunId(response.project.studies[0] ?? null, "") ?? "";
@@ -776,7 +794,8 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         completedRunId,
         summary: resultSummary,
         fields: resultFields,
-        ...(resultSurfaceMesh ? { surfaceMesh: resultSurfaceMesh } : {})
+        ...(resultSurfaceMesh ? { surfaceMesh: resultSurfaceMesh } : {}),
+        ...(solverMeshSummary ? { solverMeshSummary } : {})
       } : undefined);
       setProject((current) => current ? { ...current, updatedAt: savedAt } : current);
       pushMessage("Project saved to local disk.");
@@ -1097,8 +1116,9 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
             return;
           }
           setResultSummary(results.summary);
-          setResultFields(results.fields);
+          setResultFields(withDerivedSurfaceSafetyFactorFields(results));
           setResultSurfaceMesh(results.surfaceMesh);
+          setSolverMeshSummary(solverMeshSummaryFromResults(results));
           setResultFrameIndex(0);
           setResultPlaybackPlaying(false);
           if (study.type === "dynamic_structural") setResultMode("stress");
@@ -1240,7 +1260,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
             surfaceMesh={resultSurfaceMesh}
             resultPlaybackBufferCache={resultPlaybackBufferCacheForViewer}
             resultPlaybackFrameController={resultPlaybackPlaying ? resultPlaybackFrameControllerRef.current : undefined}
-            meshSummary={study.meshSettings.summary}
+            meshSummary={solverMeshSummary ?? study.meshSettings.summary}
             unitSystem={displayUnitSystem}
             themeMode={themeMode}
             fitSignal={fitSignal}

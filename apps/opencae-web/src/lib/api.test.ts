@@ -352,7 +352,11 @@ describe("api", () => {
         elements: 57102,
         analysisSampleCount: 19200,
         quality: "fine",
-        warnings: ["Fine surface analysis sampling enabled for higher-quality local results."]
+        source: "preset_estimate",
+        warnings: [
+          "Node and element counts are preset planning estimates. The solver reports actual mesh statistics with the results.",
+          "Fine surface analysis sampling enabled for higher-quality local results."
+        ]
       }
     });
     expect(response.message).toBe("Mesh generated locally.");
@@ -389,6 +393,44 @@ describe("api", () => {
     expect(results.fields.map((field) => field.runId)).toEqual([response.run.id, response.run.id, response.run.id]);
     expect(results.summary.provenance?.solver).toBe("opencae-core-preview-tet4");
     expect(results.summary.maxStress).toBeGreaterThanOrEqual(0);
+  });
+
+  test("runs the in-browser core solver when the deployment has no Core Cloud route", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === "/api/cloud-core/runs") {
+        return new Response(JSON.stringify({ message: "Route POST:/api/cloud-core/runs not found", error: "Not Found", statusCode: 404 }), {
+          status: 404,
+          headers: { "content-type": "application/json" }
+        });
+      }
+      return new Response(JSON.stringify({ error: "Study not found" }), { status: 404, headers: { "content-type": "application/json" } });
+    }));
+    const readyStudy = {
+      ...study,
+      materialAssignments: [{ id: "assign-1", materialId: "mat-aluminum-6061", selectionRef: "selection-body-1", status: "complete" }],
+      constraints: [{ id: "constraint-1", type: "fixed", selectionRef: "selection-face-1", parameters: {}, status: "complete" }],
+      loads: [{ id: "load-1", type: "force", selectionRef: "selection-face-1", parameters: { value: 500, units: "N", direction: [0, -1, 0] }, status: "complete" }],
+      meshSettings: { preset: "fine", status: "complete", meshRef: "project-1/mesh/mesh-summary.json" },
+      // No explicit backend: samples default to opencae_core_cloud.
+      solverSettings: { fidelity: "standard" }
+    } as unknown as Study;
+    const statusMessages: string[] = [];
+
+    const response = await runSimulation("study-1", readyStudy, coreDisplayModel, { onRunStatus: (message) => statusMessages.push(message) });
+    const completed = await new Promise<RunEvent>((resolve) => {
+      const source = subscribeToRun(response.run.id, (event) => {
+        if (event.type === "complete" || event.type === "error") {
+          source.close();
+          resolve(event);
+        }
+      });
+    });
+    const results = await getResults(response.run.id);
+
+    expect(statusMessages.some((message) => message.includes("not available in this deployment"))).toBe(true);
+    expect(completed.type).toBe("complete");
+    expect(results.summary.provenance?.solver).toBe("opencae-core-preview-tet4");
+    expect(results.summary.provenance?.resultSource).toBe("computed_preview");
   });
 
   test("does not route explicit local sample static solves through legacy beam estimates", async () => {
