@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, test } from "vitest";
@@ -41,6 +41,17 @@ describe("FileSystemObjectStorageProvider", () => {
     const storage = new FileSystemObjectStorageProvider(root);
 
     expect(() => storage.getLocalPath("/tmp/opencae-escape.txt")).toThrow(/outside the storage root/);
+  });
+
+  test("writes objects atomically without leaving temp files behind", async () => {
+    const root = await tempStorageRoot();
+    const storage = new FileSystemObjectStorageProvider(root);
+
+    await storage.putObject("project-a/results/run-1.json", "first");
+    const target = await storage.putObject("project-a/results/run-1.json", "second");
+
+    expect((await readFile(target)).toString("utf8")).toBe("second");
+    expect(await readdir(join(root, "project-a/results"))).toEqual(["run-1.json"]);
   });
 
   test("lists objects from the storage root for an empty prefix", async () => {

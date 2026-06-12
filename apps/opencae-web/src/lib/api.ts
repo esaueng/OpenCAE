@@ -31,9 +31,23 @@ const localResultSolversByRunId = new Map<string, () => Promise<ResultsResponse>
 const localEventsByRunId = new Map<string, RunEvent[]>();
 const cloudResultsUrlByRunId = new Map<string, string>();
 const cloudEventsUrlByRunId = new Map<string, string>();
+const failedCloudRunStartsByRunId = new Map<string, string>();
+const cloudRunStartFailureListenersByRunId = new Map<string, (message: string) => void>();
+const RUN_BOOKKEEPING_LIMIT = 4;
+const EVENT_SOURCE_CLOSED_READY_STATE = 2;
 const DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.005;
 const MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.001;
 const OPENCAE_CORE_CLOUD_FAILURE_MESSAGE = "OpenCAE Core Cloud solve failed. No local estimate fallback was used.";
+
+function setCappedRunEntry<T>(cache: Map<string, T>, runId: string, value: T, limit = RUN_BOOKKEEPING_LIMIT): void {
+  cache.delete(runId);
+  cache.set(runId, value);
+  while (cache.size > limit) {
+    const oldestRunId = cache.keys().next().value as string | undefined;
+    if (oldestRunId === undefined) return;
+    cache.delete(oldestRunId);
+  }
+}
 
 export async function loadSampleProject(sample: SampleModelId = "bracket", analysisType: SampleAnalysisType = "static_stress"): Promise<SampleProjectResponse> {
   return fetchJsonWithFallback(
@@ -61,7 +75,12 @@ export async function createProject(): Promise<SampleProjectResponse> {
 
 export async function importLocalProject(file: File): Promise<SampleProjectResponse> {
   const text = await file.text();
-  const payload = JSON.parse(text) as unknown;
+  let payload: unknown;
+  try {
+    payload = JSON.parse(text);
+  } catch {
+    throw new Error("The selected file is not a valid OpenCAE project file.");
+  }
   return fetchJsonWithFallback(
     "/api/projects/import",
     {
@@ -268,17 +287,25 @@ export async function runSimulation(studyId: string, currentStudy?: Study, displ
 }
 
 export async function getResults(runId: string): Promise<ResultsResponse> {
-  const localResults = localResultsByRunId.get(runId);
-  if (localResults) return localResults;
-  const localComputedResults = computeLocalResults(runId);
-  if (localComputedResults) return localComputedResults;
+  const localResults = localResultsByRunId.get(runId) ?? computeLocalResults(runId);
+  if (localResults) {
+    const results = await localResults;
+    releaseLocalRunBookkeeping(runId);
+    return results;
+  }
   const cloudResultsUrl = cloudResultsUrlByRunId.get(runId);
   if (cloudResultsUrl) {
-    const response = await fetch(cloudResultsUrl);
-    return readJson(response, `GET ${cloudResultsUrl}`);
+    const request = headerTokenRequest(cloudResultsUrl);
+    const response = await fetch(request.url, { headers: request.headers });
+    return readJson(response, `GET ${request.url}`);
   }
   const response = await fetch(`/api/runs/${runId}/results`);
   return readJson(response, `GET /api/runs/${runId}/results`);
+}
+
+function releaseLocalRunBookkeeping(runId: string): void {
+  localEventsByRunId.delete(runId);
+  localResultSolversByRunId.delete(runId);
 }
 
 export async function cancelRun(runId: string): Promise<{ run: StudyRun; message: string }> {
@@ -287,34 +314,98 @@ export async function cancelRun(runId: string): Promise<{ run: StudyRun; message
     localResultsByRunId.delete(runId);
     localResultSolversByRunId.delete(runId);
     return {
-      run: {
-        id: runId,
-        studyId: "local",
-        status: "cancelled",
-        jobId: `job-${runId}`,
-        solverBackend: "local",
-        solverVersion: "0.1.0",
-        startedAt: new Date().toISOString(),
-        finishedAt: new Date().toISOString(),
-        diagnostics: []
-      },
+      run: cancelledStudyRun(runId, "local"),
       message: "Simulation cancelled."
     };
+  }
+  const cloudEventsUrl = cloudEventsUrlByRunId.get(runId);
+  if (cloudEventsUrl) {
+    const cancelRequest = headerTokenRequest(cloudCancelUrlFromEventsUrl(cloudEventsUrl));
+    const cancelUrl = cancelRequest.url;
+    try {
+      const response = await fetch(cancelUrl, { method: "POST", headers: cancelRequest.headers });
+      const payload = await readJson<{ run?: StudyRun; message?: string }>(response, `POST ${cancelUrl}`);
+      return { run: payload.run ?? cancelledStudyRun(runId, "opencae-core-cloud"), message: payload.message ?? "Simulation cancelled." };
+    } catch {
+      return {
+        run: cancelledStudyRun(runId, "opencae-core-cloud"),
+        message: "Stopped watching the cloud run; the solve may still finish server-side."
+      };
+    }
   }
   const response = await fetch(`/api/runs/${runId}/cancel`, { method: "POST" });
   const payload = await readJson<{ run: StudyRun }>(response, `POST /api/runs/${runId}/cancel`);
   return { ...payload, message: "Simulation cancelled." };
 }
 
+function cancelledStudyRun(runId: string, solverBackend: string): StudyRun {
+  return {
+    id: runId,
+    studyId: "local",
+    status: "cancelled",
+    jobId: `job-${runId}`,
+    solverBackend,
+    solverVersion: "0.1.0",
+    startedAt: new Date().toISOString(),
+    finishedAt: new Date().toISOString(),
+    diagnostics: []
+  };
+}
+
+function cloudCancelUrlFromEventsUrl(eventsUrl: string): string {
+  const queryIndex = eventsUrl.indexOf("?");
+  const path = queryIndex >= 0 ? eventsUrl.slice(0, queryIndex) : eventsUrl;
+  const query = queryIndex >= 0 ? eventsUrl.slice(queryIndex) : "";
+  return `${path.replace(/\/events$/, "/cancel")}${query}`;
+}
+
+// Run tokens travel in the x-opencae-run-token header for fetch calls so they
+// stay out of access logs and browser history. EventSource cannot set headers,
+// so the events stream URL keeps its token query parameter.
+function headerTokenRequest(url: string): { url: string; headers: Record<string, string> } {
+  const queryIndex = url.indexOf("?");
+  if (queryIndex < 0) return { url, headers: {} };
+  const params = new URLSearchParams(url.slice(queryIndex + 1));
+  const token = params.get("token");
+  if (!token) return { url, headers: {} };
+  params.delete("token");
+  const rest = params.toString();
+  return { url: `${url.slice(0, queryIndex)}${rest ? `?${rest}` : ""}`, headers: { "x-opencae-run-token": token } };
+}
+
 export function subscribeToRun(runId: string, onEvent: (event: RunEvent) => void): EventSource {
   const localEvents = localEventsByRunId.get(runId);
   if (localEvents) return subscribeToLocalRun(localEvents, onEvent);
+  const deliverFailure = (message: string) => onEvent(syntheticRunErrorEvent(runId, message));
+  const failedStartMessage = failedCloudRunStartsByRunId.get(runId);
+  if (failedStartMessage) {
+    globalThis.setTimeout(() => deliverFailure(failedStartMessage), 0);
+  } else if (cloudEventsUrlByRunId.has(runId)) {
+    setCappedRunEntry(cloudRunStartFailureListenersByRunId, runId, deliverFailure);
+  }
   const source = new EventSource(cloudEventsUrlByRunId.get(runId) ?? `/api/runs/${runId}/stream`);
   const eventTypes: RunEvent["type"][] = ["state", "progress", "message", "log", "diagnostic", "complete", "cancelled", "error"];
   for (const type of eventTypes) {
-    source.addEventListener(type, (message) => onEvent(JSON.parse((message as MessageEvent).data) as RunEvent));
+    source.addEventListener(type, (message) => {
+      let event: RunEvent;
+      try {
+        event = JSON.parse((message as MessageEvent).data) as RunEvent;
+      } catch {
+        return; // Ignore stream messages that are not valid JSON run events.
+      }
+      onEvent(event);
+    });
   }
+  source.onerror = () => {
+    // EventSource reconnects on transient errors; only a CLOSED stream is terminal.
+    if (source.readyState !== EVENT_SOURCE_CLOSED_READY_STATE) return;
+    deliverFailure("Lost the connection to the solver event stream.");
+  };
   return source;
+}
+
+function syntheticRunErrorEvent(runId: string, message: string): RunEvent {
+  return { runId, type: "error", progress: 100, message, timestamp: new Date().toISOString() };
 }
 
 async function runOpenCaeCoreCloudSimulation(study: Study, displayModel: DisplayModel | undefined, options: RunSimulationOptions): Promise<{ run: { id: string }; streamUrl: string; message: string }> {
@@ -328,9 +419,9 @@ async function runOpenCaeCoreCloudSimulation(study: Study, displayModel: Display
     });
     const payload = await readJson<{ run: { id: string }; streamUrl?: string; startUrl?: string; resultsUrl?: string; message?: string }>(response, "POST /api/cloud-core/runs");
     const responseRunId = payload.run.id;
-    cloudResultsUrlByRunId.set(responseRunId, payload.resultsUrl ?? `/api/cloud-core/runs/${responseRunId}/results`);
-    cloudEventsUrlByRunId.set(responseRunId, payload.streamUrl ?? `/api/cloud-core/runs/${responseRunId}/events`);
-    void startOpenCaeCoreCloudRun(payload.startUrl ?? `/api/cloud-core/runs/${responseRunId}/start`);
+    setCappedRunEntry(cloudResultsUrlByRunId, responseRunId, payload.resultsUrl ?? `/api/cloud-core/runs/${responseRunId}/results`);
+    setCappedRunEntry(cloudEventsUrlByRunId, responseRunId, payload.streamUrl ?? `/api/cloud-core/runs/${responseRunId}/events`);
+    void startOpenCaeCoreCloudRun(responseRunId, payload.startUrl ?? `/api/cloud-core/runs/${responseRunId}/start`);
     return {
       run: payload.run,
       streamUrl: payload.streamUrl ?? `/api/cloud-core/runs/${responseRunId}/events`,
@@ -341,15 +432,28 @@ async function runOpenCaeCoreCloudSimulation(study: Study, displayModel: Display
   }
 }
 
-async function startOpenCaeCoreCloudRun(startUrl: string): Promise<void> {
+async function startOpenCaeCoreCloudRun(runId: string, startUrl: string): Promise<void> {
+  const request = headerTokenRequest(startUrl);
   try {
-    const response = await fetch(startUrl, { method: "POST" });
+    const response = await fetch(request.url, { method: "POST", headers: request.headers });
     if (!response.ok) {
-      console.warn(await response.text());
+      const text = await response.text();
+      console.warn(text);
+      recordCloudRunStartFailure(runId, coreCloudFailureMessage(formatHttpError(`POST ${request.url}`, response.status, response.statusText, text)));
     }
   } catch (error) {
-    console.warn(coreCloudFailureMessage(error));
+    const message = coreCloudFailureMessage(error);
+    console.warn(message);
+    recordCloudRunStartFailure(runId, message);
   }
+}
+
+function recordCloudRunStartFailure(runId: string, message: string): void {
+  setCappedRunEntry(failedCloudRunStartsByRunId, runId, message);
+  const listener = cloudRunStartFailureListenersByRunId.get(runId);
+  if (!listener) return;
+  cloudRunStartFailureListenersByRunId.delete(runId);
+  listener(message);
 }
 
 function coreCloudFailureMessage(error: unknown): string {
@@ -422,7 +526,7 @@ function runSimulationLocally(study: Study, displayModel?: DisplayModel): { run:
   const coreEligibility = openCaeCoreEligibility(study, displayModel);
   if (!coreEligibility.ok) {
     const now = new Date().toISOString();
-    localEventsByRunId.set(runId, addRunTiming([
+    setCappedRunEntry(localEventsByRunId, runId, addRunTiming([
       { runId, type: "state", progress: 0, message: "OpenCAE Core Local solve blocked.", timestamp: now },
       { runId, type: "error", progress: 100, message: coreEligibility.reason, timestamp: now }
     ], 1));
@@ -449,7 +553,7 @@ function runSimulationLocally(study: Study, displayModel?: DisplayModel): { run:
       message: coreEligibility.reason
     };
   }
-  localResultSolversByRunId.set(runId, () => {
+  setCappedRunEntry(localResultSolversByRunId, runId, () => {
     const analysisMesh = displayModel ? analysisMeshForDisplayModel(displayModel, study.meshSettings.preset) : undefined;
     const payload = { study, runId, analysisMesh, displayModel, debugResults: debugResultsEnabled() };
     return solveLocalStudyInWorker(payload).catch((error) => {
@@ -462,7 +566,7 @@ function runSimulationLocally(study: Study, displayModel?: DisplayModel): { run:
   const events: RunEvent[] = study.type === "dynamic_structural"
     ? localDynamicRunEvents(runId, study, now, backend, coreEligibility)
     : localStaticRunEvents(runId, study, now, backend, coreEligibility);
-  localEventsByRunId.set(runId, events);
+  setCappedRunEntry(localEventsByRunId, runId, events);
   return {
     run: {
       id: runId,
@@ -476,9 +580,7 @@ function runSimulationLocally(study: Study, displayModel?: DisplayModel): { run:
       diagnostics: []
     },
     streamUrl: `local:${runId}`,
-    message: backend === "opencae_core_local" && coreEligibility.ok
-      ? "OpenCAE Core Local simulation running."
-      : "OpenCAE Core Local simulation running."
+    message: "OpenCAE Core Local simulation running."
   };
 }
 
@@ -589,11 +691,11 @@ function computeLocalResults(runId: string): Promise<ResultsResponse> | null {
   if (!solver) return null;
   const task = Promise.resolve().then(() => {
     const results = solver();
-    localResultsByRunId.set(runId, results);
+    setCappedRunEntry(localResultsByRunId, runId, results);
     localResultSolversByRunId.delete(runId);
     return results;
   });
-  localResultsByRunId.set(runId, task);
+  setCappedRunEntry(localResultsByRunId, runId, task);
   return task;
 }
 
@@ -665,7 +767,15 @@ function subscribeToLocalRun(events: RunEvent[], onEvent: (event: RunEvent) => v
   const timers = events.map((event, index) => globalThis.setTimeout(async () => {
     if (closed) return;
     if (event.type === "complete") {
-      await computeLocalResults(event.runId);
+      try {
+        await computeLocalResults(event.runId);
+      } catch (error) {
+        // Drop the rejected cached promise so a retry can solve again, then fail the run.
+        localResultsByRunId.delete(event.runId);
+        if (closed) return;
+        onEvent(syntheticRunErrorEvent(event.runId, messageFromUnknownError(error) || "Local solve failed."));
+        return;
+      }
       if (closed) return;
     }
     onEvent(event);

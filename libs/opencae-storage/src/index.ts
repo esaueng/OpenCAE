@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
@@ -19,7 +20,14 @@ export class FileSystemObjectStorageProvider implements ObjectStorageProvider {
   async putObject(key: string, data: string | Buffer | Uint8Array): Promise<string> {
     const target = this.getLocalPath(key);
     await fs.mkdir(path.dirname(target), { recursive: true });
-    await fs.writeFile(target, data);
+    const tempTarget = `${target}.tmp-${process.pid}-${randomBytes(6).toString("hex")}`;
+    try {
+      await fs.writeFile(tempTarget, data);
+      await fs.rename(tempTarget, target);
+    } catch (error) {
+      await fs.rm(tempTarget, { force: true });
+      throw error;
+    }
     return target;
   }
 

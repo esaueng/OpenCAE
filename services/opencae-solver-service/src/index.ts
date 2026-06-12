@@ -1,14 +1,16 @@
 import { effectiveMaterialProperties, starterMaterials } from "@opencae/materials";
 import { assessResultFailure } from "@opencae/schema";
-import type { AnalysisMesh, AnalysisSample, DynamicSolverSettings, Load, Material, ResultField, ResultProvenance, ResultSample, ResultSummary, RunEvent, Study } from "@opencae/schema";
+import type { AnalysisMesh, AnalysisSample, Diagnostic, DynamicSolverSettings, Load, Material, ResultField, ResultProvenance, ResultSample, ResultSummary, RunEvent, Study } from "@opencae/schema";
 import type { ObjectStorageProvider } from "@opencae/storage";
 import { bracketDisplayModel, bracketResultSummary } from "@opencae/db/sample-data";
 import { inferCriticalPrintAxis } from "@opencae/study-core";
 import { isBeamDemoStudy, solveBeamDemoStudy, type BeamDemoSolveOptions } from "./beamDemoSolver";
+import { loadForceNewtons, materialForStudy, materialParametersForStudy } from "./studyInputs";
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-const STANDARD_GRAVITY = 9.80665;
 const MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.005;
+const MAX_DYNAMIC_INTEGRATION_STEPS = 2_000_000;
+const MAX_DYNAMIC_OUTPUT_FRAMES = 2_000;
 const LOCAL_HEURISTIC_PROVENANCE: ResultProvenance = {
   kind: "local_estimate",
   solver: "opencae-local-heuristic-surface",
@@ -35,7 +37,7 @@ export class LocalHeuristicComputeBackend {
     meshRef: string;
     analysisMesh?: AnalysisMesh;
     publish: (event: RunEvent) => void;
-  }): Promise<{ resultRef: string; reportRef: string; summary: ResultSummary; fields: ResultField[] }> {
+  }): Promise<{ resultRef: string; summary: ResultSummary; fields: ResultField[] }> {
     const solved = solveStudy(args.study, args.runId, args.analysisMesh);
     const isBeamDemoSolve = solved.solverBackend === "local-beam-demo-euler-bernoulli";
     const messages = [
@@ -87,7 +89,6 @@ export class LocalHeuristicComputeBackend {
 
     const resultRef = `${args.study.projectId}/results/${args.runId}/results.json`;
     const summaryRef = `${args.study.projectId}/results/${args.runId}/summary.json`;
-    const reportRef = `${args.study.projectId}/reports/${args.runId}/report.html`;
     await this.storage.putObject(
       `${args.study.projectId}/solver/${args.runId}/solver.log`,
       [
@@ -108,7 +109,7 @@ export class LocalHeuristicComputeBackend {
     );
     await this.storage.putObject(resultRef, JSON.stringify({ summary, fields }, null, 2));
     await this.storage.putObject(summaryRef, JSON.stringify(summary, null, 2));
-    return { resultRef, reportRef, summary, fields };
+    return { resultRef, summary, fields };
   }
 
   async runDynamicSolve(args: {
@@ -117,7 +118,7 @@ export class LocalHeuristicComputeBackend {
     meshRef: string;
     analysisMesh?: AnalysisMesh;
     publish: (event: RunEvent) => void;
-  }): Promise<{ resultRef: string; reportRef: string; summary: ResultSummary; fields: ResultField[] }> {
+  }): Promise<{ resultRef: string; summary: ResultSummary; fields: ResultField[] }> {
     const messages = [
       [10, "Local dynamic solver started."],
       [26, "Reading transient structural setup."],
@@ -168,7 +169,6 @@ export class LocalHeuristicComputeBackend {
 
     const resultRef = `${args.study.projectId}/results/${args.runId}/results.json`;
     const summaryRef = `${args.study.projectId}/results/${args.runId}/summary.json`;
-    const reportRef = `${args.study.projectId}/reports/${args.runId}/report.html`;
     await this.storage.putObject(
       `${args.study.projectId}/solver/${args.runId}/solver.log`,
       [
@@ -184,7 +184,7 @@ export class LocalHeuristicComputeBackend {
     );
     await this.storage.putObject(resultRef, JSON.stringify({ summary: solved.summary, fields: solved.fields }, null, 2));
     await this.storage.putObject(summaryRef, JSON.stringify(solved.summary, null, 2));
-    return { resultRef, reportRef, summary: solved.summary, fields: solved.fields };
+    return { resultRef, summary: solved.summary, fields: solved.fields };
   }
 }
 
@@ -236,9 +236,9 @@ export function solveHeuristicSurfaceStudy(study: Study, runId: string, optionsI
   const displacementValues = faces.map((face) => round(displacementAtFace(face, loads, faces) * response.displacementScale, 4));
   const safetyValues = stressValues.map((stress) => round(Math.max(0.05, response.yieldMpa / Math.max(stress, 0.001)), 2));
   const rawStressSampleValues = analysisMesh.samples.map((sample) => stressAtSample(sample, loads, faces, analysisMesh) * response.stressScale);
-  const maxStressValue = Math.max(...stressValues, 0);
-  const maxStressSampleValue = Math.max(...rawStressSampleValues, 0);
-  const minStressSampleValue = Math.min(...rawStressSampleValues.filter(Number.isFinite));
+  const maxStressValue = Math.max(maxOf(stressValues), 0);
+  const maxStressSampleValue = Math.max(maxOf(rawStressSampleValues), 0);
+  const minStressSampleValue = minOf(rawStressSampleValues);
   const stressSampleRange = maxStressSampleValue - minStressSampleValue;
   const calibratedStressSampleRange = maxStressValue - minStressSampleValue;
   const stressSamples = analysisMesh.samples.map((sample, index) => {
@@ -249,7 +249,7 @@ export function solveHeuristicSurfaceStudy(study: Study, runId: string, optionsI
     return sampleResult(sample, value, 2, { source: "opencae_core_local_preview", vonMisesStressPa: round(value * 1_000_000, 1) });
   });
   const displacementSamples = analysisMesh.samples.map((sample) => {
-    const vector = roundVector(displacementVectorAtSample(sample, loads, faces, analysisMesh, response.displacementScale), 4);
+    const vector = roundVector(displacementVectorAtSample(sample, loads, response.displacementScale), 4);
     const value = length(vector);
     return sampleResult(sample, value, 4, {
       vector
@@ -265,18 +265,26 @@ export function solveHeuristicSurfaceStudy(study: Study, runId: string, optionsI
   const displacementField = fields.find((field) => field.type === "displacement");
   const safetyField = fields.find((field) => field.type === "safety_factor");
   const summaryBase = {
-    maxStress: round(stressField?.max ?? Math.max(...stressValues, 0), 1),
+    maxStress: round(stressField?.max ?? Math.max(maxOf(stressValues), 0), 1),
     maxStressUnits: bracketResultSummary.maxStressUnits,
-    maxDisplacement: round(displacementField?.max ?? Math.max(...displacementValues, 0), 3),
+    maxDisplacement: round(displacementField?.max ?? Math.max(maxOf(displacementValues), 0), 3),
     maxDisplacementUnits: bracketResultSummary.maxDisplacementUnits,
-    safetyFactor: round(safetyField?.min ?? (safetyValues.length ? Math.min(...safetyValues) : bracketResultSummary.safetyFactor), 2),
-    reactionForce: totalAppliedLoad || bracketResultSummary.reactionForce,
+    safetyFactor: round(safetyField?.min ?? (safetyValues.length ? minOf(safetyValues) : 0), 2),
+    reactionForce: totalAppliedLoad,
     reactionForceUnits: "N"
   };
+  const diagnostics: Diagnostic[] = loads.length ? [] : [{
+    id: "solver-no-resolvable-loads",
+    severity: "warning",
+    source: "solver",
+    message: "No resolvable loads were found; reaction force reported as 0.",
+    suggestedActions: []
+  }];
   const summary: ResultSummary = {
     ...summaryBase,
     failureAssessment: assessResultFailure(summaryBase),
-    provenance: LOCAL_HEURISTIC_PROVENANCE
+    provenance: LOCAL_HEURISTIC_PROVENANCE,
+    diagnostics
   };
   if (options.debugResults) logSolverDirectionAudit(study, loads, fields);
   return { summary, fields, faceCount: faces.length, loadCount: loads.length, totalAppliedLoad: summary.reactionForce, material, effectiveMaterial, materialParameters, analysisSampleCount: analysisMesh.samples.length, solverBackend: "local-heuristic-surface" as const };
@@ -284,7 +292,7 @@ export function solveHeuristicSurfaceStudy(study: Study, runId: string, optionsI
 
 export function solveDynamicStudy(study: Study, runId: string, optionsInput?: LocalSolveOptions) {
   const options = normalizeLocalSolveOptions(optionsInput);
-  const settings = dynamicSettingsForStudy(study);
+  const { settings, diagnostics: clampDiagnostics } = clampedDynamicSettingsForStudy(study);
   const staticSolved = solveStudy(study, runId, options);
   const stressBase = staticSolved.fields.find((field) => field.type === "stress");
   const displacementBase = staticSolved.fields.find((field) => field.type === "displacement");
@@ -350,7 +358,8 @@ export function solveDynamicStudy(study: Study, runId: string, optionsInput?: Lo
   const summary: ResultSummary = {
     ...summaryBase,
     failureAssessment: assessResultFailure(summaryBase),
-    provenance: LOCAL_DYNAMIC_PROVENANCE
+    provenance: LOCAL_DYNAMIC_PROVENANCE,
+    diagnostics: [...(staticSolved.summary.diagnostics ?? []), ...clampDiagnostics]
   };
   return {
     summary,
@@ -393,18 +402,48 @@ function performanceNow(): number {
 }
 
 function dynamicSettingsForStudy(study: Study): DynamicSolverSettings {
+  return clampedDynamicSettingsForStudy(study).settings;
+}
+
+function clampedDynamicSettingsForStudy(study: Study): { settings: DynamicSolverSettings; diagnostics: Diagnostic[] } {
   const raw = study.solverSettings as Partial<DynamicSolverSettings>;
-  const timeStep = finiteOr(raw.timeStep, 0.005);
+  const diagnostics: Diagnostic[] = [];
+  const startTime = finiteOr(raw.startTime, 0);
+  const endTime = finiteOr(raw.endTime, 0.1);
+  const duration = endTime - startTime;
+  let timeStep = Math.max(finiteOr(raw.timeStep, 0.005), 1e-6);
+  if (duration > 0 && duration / timeStep > MAX_DYNAMIC_INTEGRATION_STEPS) {
+    timeStep = duration / MAX_DYNAMIC_INTEGRATION_STEPS;
+    diagnostics.push(clampDiagnostic(
+      "solver-dynamic-step-clamp",
+      `Dynamic time step increased to ${timeStep}s to keep the run within ${MAX_DYNAMIC_INTEGRATION_STEPS.toLocaleString("en-US")} integration steps.`
+    ));
+  }
+  let outputInterval = Math.max(finiteOr(raw.outputInterval, 0.005), timeStep, MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS);
+  if (duration > 0 && duration / outputInterval > MAX_DYNAMIC_OUTPUT_FRAMES) {
+    outputInterval = duration / MAX_DYNAMIC_OUTPUT_FRAMES;
+    diagnostics.push(clampDiagnostic(
+      "solver-dynamic-frame-clamp",
+      `Dynamic output interval increased to ${outputInterval}s to keep the run within ${MAX_DYNAMIC_OUTPUT_FRAMES.toLocaleString("en-US")} output frames.`
+    ));
+  }
   return {
-    startTime: finiteOr(raw.startTime, 0),
-    endTime: finiteOr(raw.endTime, 0.1),
-    timeStep,
-    outputInterval: Math.max(finiteOr(raw.outputInterval, 0.005), timeStep, MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS),
-    dampingRatio: finiteOr(raw.dampingRatio, 0.02),
-    integrationMethod: "newmark_average_acceleration",
-    loadProfile: typeof raw.loadProfile === "string" ? raw.loadProfile : "step",
-    ...(raw.allowFreeMotion === true ? { allowFreeMotion: true } : {}),
+    settings: {
+      startTime,
+      endTime,
+      timeStep,
+      outputInterval,
+      dampingRatio: finiteOr(raw.dampingRatio, 0.02),
+      integrationMethod: "newmark_average_acceleration",
+      loadProfile: typeof raw.loadProfile === "string" ? raw.loadProfile : "ramp",
+      ...(raw.allowFreeMotion === true ? { allowFreeMotion: true } : {}),
+    },
+    diagnostics
   };
+}
+
+function clampDiagnostic(id: string, message: string): Diagnostic {
+  return { id, severity: "warning", source: "solver", message, suggestedActions: [] };
 }
 
 function finiteOr(value: unknown, fallback: number): number {
@@ -510,33 +549,50 @@ function fieldForFrame(runId: string, type: ResultField["type"], values: number[
 }
 
 function resultFieldAbsMax(field: ResultField) {
-  const values = [
-    ...field.values,
-    ...(field.samples?.map((sample) => sample.value) ?? [])
-  ].map((value) => Math.abs(value)).filter(Number.isFinite);
-  return values.length ? Math.max(...values) : Math.max(Math.abs(field.min), Math.abs(field.max));
+  let max = -1;
+  for (const value of field.values) {
+    const magnitude = Math.abs(value);
+    if (Number.isFinite(magnitude) && magnitude > max) max = magnitude;
+  }
+  for (const sample of field.samples ?? []) {
+    const magnitude = Math.abs(sample.value);
+    if (Number.isFinite(magnitude) && magnitude > max) max = magnitude;
+  }
+  return max >= 0 ? max : Math.max(Math.abs(field.min), Math.abs(field.max));
 }
 
 function stabilizeDynamicFieldRanges(fields: ResultField[]) {
   const fieldTypes = [...new Set(fields.map((field) => field.type))];
   for (const type of fieldTypes) {
     const matchingFields = fields.filter((field) => field.type === type);
-    const values = matchingFields.flatMap((field) => [
-      ...field.values,
-      ...(field.samples?.map((sample) => sample.value) ?? [])
-    ]).filter(Number.isFinite);
-    if (!values.length) continue;
     let min = Number.POSITIVE_INFINITY;
     let max = Number.NEGATIVE_INFINITY;
-    for (const value of values) {
-      min = Math.min(min, value);
-      max = Math.max(max, value);
+    for (const field of matchingFields) {
+      min = Math.min(min, minOf(field.values), minOf(field.samples?.map((sample) => sample.value) ?? []));
+      max = Math.max(max, maxOf(field.values), maxOf(field.samples?.map((sample) => sample.value) ?? []));
     }
+    if (!Number.isFinite(min) || !Number.isFinite(max)) continue;
     for (const field of matchingFields) {
       field.min = round(min, dynamicRangeDigits(type));
       field.max = round(max, dynamicRangeDigits(type));
     }
   }
+}
+
+function minOf(values: number[]): number {
+  let min = Number.POSITIVE_INFINITY;
+  for (const value of values) {
+    if (Number.isFinite(value) && value < min) min = value;
+  }
+  return min;
+}
+
+function maxOf(values: number[]): number {
+  let max = Number.NEGATIVE_INFINITY;
+  for (const value of values) {
+    if (Number.isFinite(value) && value > max) max = value;
+  }
+  return max;
 }
 
 function logSolverDirectionAudit(study: Study, loads: LoadModel[], fields: ResultField[]) {
@@ -617,15 +673,6 @@ function dynamicRangeDigits(type: ResultField["type"]) {
   return 3;
 }
 
-function materialForStudy(study: Study): Material {
-  const materialId = study.materialAssignments[0]?.materialId;
-  return starterMaterials.find((material) => material.id === materialId) ?? starterMaterials[0]!;
-}
-
-function materialParametersForStudy(study: Study): Record<string, unknown> {
-  return study.materialAssignments[0]?.parameters ?? {};
-}
-
 function materialResponse(material: Material, loads: LoadModel[]): { stressScale: number; displacementScale: number; yieldMpa: number } {
   const reference = starterMaterials[0]!;
   const baseMaterial = starterMaterials.find((candidate) => candidate.id === material.id) ?? material;
@@ -643,9 +690,10 @@ function materialResponse(material: Material, loads: LoadModel[]): { stressScale
 }
 
 function fieldFor(runId: string, type: ResultField["type"], values: number[], units: string, samples: ResultSample[] = [], provenance = LOCAL_HEURISTIC_PROVENANCE): ResultField {
-  const allValues = [...values, ...samples.map((sample) => sample.value)].filter(Number.isFinite);
-  const min = allValues.length ? Math.min(...allValues) : 0;
-  const max = allValues.length ? Math.max(...allValues) : 0;
+  const rawMin = Math.min(minOf(values), minOf(samples.map((sample) => sample.value)));
+  const rawMax = Math.max(maxOf(values), maxOf(samples.map((sample) => sample.value)));
+  const min = Number.isFinite(rawMin) ? rawMin : 0;
+  const max = Number.isFinite(rawMax) ? rawMax : 0;
   return {
     id: `field-${type}-${runId}`,
     runId,
@@ -843,25 +891,10 @@ function stressAtSample(sample: AnalysisSample, loads: LoadModel[], faces: FaceM
   return Math.max(1, stress);
 }
 
-function displacementAtSample(sample: AnalysisSample, loads: LoadModel[], faces: FaceModel[], analysisMesh: AnalysisMesh): number {
-  if (!loads.length) return 0;
-  return loads.reduce((sum, load) => {
-    const spanVector = subtract(load.face.center, load.nearestSupport.center);
-    const spanLength = Math.max(length(spanVector), 0.001);
-    const forceScale = load.magnitude / 500;
-    const momentScale = load.moment / Math.max(250, 500 * spanLength);
-    const travel = segmentParameter(sample.point, load.nearestSupport.center, load.face.center);
-    const beamShape = cantileverDisplacementShape(travel);
-    const supportLockShape = load.leverArm > 0.001 ? beamShape : 1;
-    const tipDisplacement = forceScale * (0.162 + 0.11 * momentScale);
-    return sum + supportLockShape * tipDisplacement;
-  }, 0);
-}
-
-function displacementVectorAtSample(sample: AnalysisSample, loads: LoadModel[], faces: FaceModel[], analysisMesh: AnalysisMesh, displacementScale: number): Vec3 {
+function displacementVectorAtSample(sample: AnalysisSample, loads: LoadModel[], displacementScale: number): Vec3 {
   if (!loads.length) return [0, 0, 0];
   return loads.reduce<Vec3>((sum, load) => {
-    const magnitude = displacementAtSampleForLoad(sample, load, faces, analysisMesh) * displacementScale;
+    const magnitude = displacementAtSampleForLoad(sample, load) * displacementScale;
     const contribution = scale(load.direction, magnitude);
     return [sum[0] + contribution[0], sum[1] + contribution[1], sum[2] + contribution[2]];
   }, [0, 0, 0]);
@@ -872,7 +905,7 @@ function cantileverDisplacementShape(travel: number): number {
   return 0.5 * s * s * (3 - s);
 }
 
-function displacementAtSampleForLoad(sample: AnalysisSample, load: LoadModel, _faces: FaceModel[], analysisMesh: AnalysisMesh): number {
+function displacementAtSampleForLoad(sample: AnalysisSample, load: LoadModel): number {
   const spanVector = subtract(load.face.center, load.nearestSupport.center);
   const spanLength = Math.max(length(spanVector), 0.001);
   const forceScale = load.magnitude / 500;
@@ -885,14 +918,12 @@ function displacementAtSampleForLoad(sample: AnalysisSample, load: LoadModel, _f
 }
 
 function loadEquivalentForce(load: Load, face: FaceModel): number {
-  const rawValue = Number(load.parameters.value ?? 0);
-  const value = Number.isFinite(rawValue) && rawValue > 0 ? rawValue : 0;
-  if (load.type === "pressure") return value * estimatedFaceArea(face) * 0.001;
-  if (load.type === "gravity") {
-    const equivalentForce = Number(load.parameters.equivalentForceN);
-    return Number.isFinite(equivalentForce) && equivalentForce > 0 ? equivalentForce : value * STANDARD_GRAVITY;
+  if (load.type === "pressure") {
+    const rawValue = Number(load.parameters.value ?? 0);
+    const value = Number.isFinite(rawValue) && rawValue > 0 ? rawValue : 0;
+    return value * estimatedFaceArea(face) * 0.001;
   }
-  return value;
+  return loadForceNewtons(load);
 }
 
 function analysisMeshForFaces(faces: FaceModel[], quality: AnalysisMesh["quality"] = "medium"): AnalysisMesh {

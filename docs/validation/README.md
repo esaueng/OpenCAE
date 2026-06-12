@@ -28,6 +28,8 @@ pnpm vitest run apps/opencae-web/worker/index.test.ts scripts/core-cloud-validat
 
 The local Core Cloud validation drives the Node container service through HTTP request handlers. It covers `/health`, `/solve` static, `/solve` dynamic, invalid model diagnostics, frame budget compaction, result budget compaction, and provenance checks. No local estimate fallback is allowed in these tests.
 
+Note that `services/opencae-core-cloud` in this repo is a contract mirror: the deployed container image is built from the sibling OpenCAE-Core checkout at the commit pinned in `services/opencae-core-cloud/OPENCAE_CORE_REF` (see the Dockerfile). This suite validates the mirror's contract behavior; `pnpm verify:runner-version` cross-checks that the pinned sibling declares the same runner version so the two cannot silently diverge on the fail-closed version gate.
+
 ## Validate Deployed Cloud
 
 Before deploying, verify the Cloudflare/Core Cloud configuration and runner version:
