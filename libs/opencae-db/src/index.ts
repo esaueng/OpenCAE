@@ -24,6 +24,8 @@ export class SQLiteDatabaseProvider implements DatabaseProvider {
   constructor(private readonly dbPath = path.resolve(process.cwd(), "data/sqlite/opencae.local.sqlite")) {
     fs.mkdirSync(path.dirname(this.dbPath), { recursive: true });
     this.db = new Database(this.dbPath);
+    this.db.pragma("journal_mode = WAL");
+    this.db.pragma("busy_timeout = 5000");
   }
 
   migrate(): void {
@@ -54,10 +56,13 @@ export class SQLiteDatabaseProvider implements DatabaseProvider {
   }
 
   upsertProject(project: Project): void {
-    this.persistProjectOnly(project);
-    for (const study of project.studies) {
-      this.persistStudyOnly(study);
-    }
+    this.db.transaction(() => {
+      this.persistProjectOnly(project);
+      for (const study of project.studies) {
+        this.persistStudyOnly(study);
+      }
+      this.pruneRemovedStudies(project);
+    })();
   }
 
   getStudy(studyId: string): Study | undefined {
@@ -66,25 +71,30 @@ export class SQLiteDatabaseProvider implements DatabaseProvider {
   }
 
   upsertStudy(study: Study): void {
-    this.persistStudyOnly(study);
-    const project = this.getProject(study.projectId);
-    if (project) {
-      const studies = project.studies.filter((existing) => existing.id !== study.id).concat(study);
-      this.persistProjectOnly({ ...project, studies, updatedAt: new Date().toISOString() });
-    }
+    this.db.transaction(() => {
+      this.persistStudyOnly(study);
+      this.pruneRemovedRuns(study);
+      const project = this.getProject(study.projectId);
+      if (project) {
+        const studies = project.studies.filter((existing) => existing.id !== study.id).concat(study);
+        this.persistProjectOnly({ ...project, studies, updatedAt: new Date().toISOString() });
+      }
+    })();
   }
 
   upsertRun(run: StudyRun): void {
-    this.db
-      .prepare(
-        "insert into runs (id, study_id, status, data) values (?, ?, ?, ?) on conflict(id) do update set status = excluded.status, data = excluded.data"
-      )
-      .run(run.id, run.studyId, run.status, JSON.stringify(run));
-    const study = this.getStudy(run.studyId);
-    if (study) {
-      const runs = study.runs.filter((existing) => existing.id !== run.id).concat(run);
-      this.upsertStudy({ ...study, runs });
-    }
+    this.db.transaction(() => {
+      this.db
+        .prepare(
+          "insert into runs (id, study_id, status, data) values (?, ?, ?, ?) on conflict(id) do update set status = excluded.status, data = excluded.data"
+        )
+        .run(run.id, run.studyId, run.status, JSON.stringify(run));
+      const study = this.getStudy(run.studyId);
+      if (study) {
+        const runs = study.runs.filter((existing) => existing.id !== run.id).concat(run);
+        this.upsertStudy({ ...study, runs });
+      }
+    })();
   }
 
   getRun(runId: string): StudyRun | undefined {
@@ -113,6 +123,21 @@ export class SQLiteDatabaseProvider implements DatabaseProvider {
         "insert into studies (id, project_id, name, data) values (?, ?, ?, ?) on conflict(id) do update set project_id = excluded.project_id, name = excluded.name, data = excluded.data"
       )
       .run(study.id, study.projectId, study.name, JSON.stringify(study));
+  }
+
+  private pruneRemovedStudies(project: Project): void {
+    const keepIds = project.studies.map((study) => study.id);
+    const filter = keepIds.length ? ` and id not in (${keepIds.map(() => "?").join(", ")})` : "";
+    this.db
+      .prepare(`delete from runs where study_id in (select id from studies where project_id = ?${filter})`)
+      .run(project.id, ...keepIds);
+    this.db.prepare(`delete from studies where project_id = ?${filter}`).run(project.id, ...keepIds);
+  }
+
+  private pruneRemovedRuns(study: Study): void {
+    const keepIds = study.runs.map((run) => run.id);
+    const filter = keepIds.length ? ` and id not in (${keepIds.map(() => "?").join(", ")})` : "";
+    this.db.prepare(`delete from runs where study_id = ?${filter}`).run(study.id, ...keepIds);
   }
 }
 
