@@ -851,17 +851,22 @@ export function normalizeValueForRender(value: number, min: number, max: number)
   return Math.max(0, Math.min(1, (value - min) / range));
 }
 
-function fieldWithOwnValueRange(field: ResultField): ResultField {
+export function fieldWithOwnValueRange(field: ResultField): ResultField {
   if (typeof field.frameIndex === "number") return field;
-  const values = [
-    ...field.values,
-    ...(field.samples?.map((sample) => sample.value) ?? [])
-  ].filter(Number.isFinite);
-  if (!values.length) return field;
+  let min = Number.POSITIVE_INFINITY;
+  let max = Number.NEGATIVE_INFINITY;
+  const consider = (value: number) => {
+    if (!Number.isFinite(value)) return;
+    if (value < min) min = value;
+    if (value > max) max = value;
+  };
+  for (const value of field.values) consider(value);
+  for (const sample of field.samples ?? []) consider(sample.value);
+  if (min > max) return field;
   return {
     ...field,
-    min: Math.min(...values),
-    max: Math.max(...values)
+    min,
+    max
   };
 }
 

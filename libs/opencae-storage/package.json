@@ -6,7 +6,7 @@
   "exports": {
     ".": "./src/index.ts"
   },
-  "dependencies": {
+  "devDependencies": {
     "@types/node": "^22.10.5"
   },
   "license": "Apache-2.0"

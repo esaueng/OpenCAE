@@ -173,7 +173,6 @@ export function massForUnits(value: number, units: string, unitSystem: UnitSyste
   if (unitSystem === "US" && units === "g") return { value: value / 1000 / KG_PER_LB, units: "lb" };
   if (unitSystem === "SI" && units === "lb") return { value: value * KG_PER_LB, units: "kg" };
   if (unitSystem === "US" && units === "kg") return { value: value / KG_PER_LB, units: "lb" };
-  if (unitSystem === "SI" && units === "lb") return { value: value * KG_PER_LB, units: "kg" };
   return { value, units };
 }
 

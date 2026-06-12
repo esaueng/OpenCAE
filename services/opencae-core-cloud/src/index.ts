@@ -152,19 +152,60 @@ function previewRejection(model: OpenCAEModelJson, request: CoreCloudSolveReques
   return undefined;
 }
 
+const MAX_DYNAMIC_INTEGRATION_STEPS = 2_000_000;
+const MAX_DYNAMIC_OUTPUT_FRAMES = 2_000;
+const MAX_DYNAMIC_WINDOW_SECONDS = 600;
+
 function dynamicOptions(request: CoreCloudSolveRequest, model: OpenCAEModelJson) {
   const settings = request.solverSettings ?? {};
+  const bounded = boundedDynamicWindow(
+    numberOption(settings.startTime),
+    numberOption(settings.endTime),
+    numberOption(settings.timeStep),
+    numberOption(settings.outputInterval)
+  );
   return {
     stepIndex: nonnegativeIntegerOption(settings.stepIndex) ?? firstDynamicStepIndex(model),
-    startTime: numberOption(settings.startTime),
-    endTime: numberOption(settings.endTime),
-    timeStep: numberOption(settings.timeStep),
-    outputInterval: numberOption(settings.outputInterval),
+    startTime: bounded.startTime,
+    endTime: bounded.endTime,
+    timeStep: bounded.timeStep,
+    outputInterval: bounded.outputInterval,
     dampingRatio: numberOption(settings.dampingRatio),
     rayleighAlpha: numberOption(settings.rayleighAlpha),
     rayleighBeta: numberOption(settings.rayleighBeta),
     loadProfile: dynamicLoadProfileOption(settings.loadProfile)
   };
+}
+
+export function boundedDynamicWindow(
+  startTime: number | undefined,
+  endTime: number | undefined,
+  timeStep: number | undefined,
+  outputInterval: number | undefined
+): { startTime?: number; endTime?: number; timeStep?: number; outputInterval?: number } {
+  if (endTime === undefined && timeStep === undefined && outputInterval === undefined) {
+    return { startTime, endTime, timeStep, outputInterval };
+  }
+  const start = startTime ?? 0;
+  let boundedEnd = endTime;
+  let boundedTimeStep = timeStep;
+  let boundedOutputInterval = outputInterval;
+  if (boundedEnd !== undefined && boundedEnd - start > MAX_DYNAMIC_WINDOW_SECONDS) {
+    boundedEnd = start + MAX_DYNAMIC_WINDOW_SECONDS;
+  }
+  if (boundedEnd !== undefined && boundedTimeStep !== undefined && boundedTimeStep > 0 && boundedEnd > start) {
+    const steps = (boundedEnd - start) / boundedTimeStep;
+    if (steps > MAX_DYNAMIC_INTEGRATION_STEPS) {
+      boundedEnd = start + boundedTimeStep * MAX_DYNAMIC_INTEGRATION_STEPS;
+    }
+  }
+  if (boundedEnd !== undefined && boundedEnd > start) {
+    const interval = boundedOutputInterval !== undefined && boundedOutputInterval > 0 ? boundedOutputInterval : undefined;
+    if (interval !== undefined && (boundedEnd - start) / interval > MAX_DYNAMIC_OUTPUT_FRAMES) {
+      boundedOutputInterval = (boundedEnd - start) / MAX_DYNAMIC_OUTPUT_FRAMES;
+    }
+  }
+  return { startTime, endTime: boundedEnd, timeStep: boundedTimeStep, outputInterval: boundedOutputInterval };
 }
 
 function withCloudProvenance(result: Record<string, unknown>, model: OpenCAEModelJson, analysisType: "static_stress" | "dynamic_structural") {
