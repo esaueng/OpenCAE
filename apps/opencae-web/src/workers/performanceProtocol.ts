@@ -9,6 +9,10 @@ import {
 export interface LocalSolveResult {
   summary: ResultSummary;
   fields: ResultField[];
+  artifacts?: {
+    meshConnectivity?: { connectedComponents: number };
+    meshStatistics?: { nodes: number; elements: number };
+  };
 }
 
 export interface EncodedBounds {

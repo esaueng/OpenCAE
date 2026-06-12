@@ -17,13 +17,20 @@ export interface EmbeddedModelFile {
   contentBase64: string;
 }
 
+export interface SolverMeshStatistics {
+  nodes: number;
+  elements: number;
+  warnings: string[];
+  source: "core_solver";
+}
+
 export interface LocalResultBundle {
   activeRunId?: string;
   completedRunId?: string;
   summary: ResultSummary;
   fields: ResultField[];
   surfaceMesh?: SolverSurfaceMesh;
-  meshStats?: { nodes: number; elements: number };
+  solverMeshSummary?: SolverMeshStatistics;
 }
 
 export interface LocalProjectFile {
