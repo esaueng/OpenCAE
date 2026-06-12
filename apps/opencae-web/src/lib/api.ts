@@ -3,7 +3,7 @@ import type { LoadApplicationPoint, LoadDirection, LoadType, PayloadLoadMetadata
 import { embedUploadedModelFile, type EmbeddedModelFile, type LocalResultBundle, type SolverSurfaceMesh } from "../projectFile";
 import { createLocalBlankProject, createLocalSampleProject, createLocalUploadResponse, openLocalProjectPayload } from "../localProjectFactory";
 import { solveLocalStudyInWorker } from "../workers/performanceClient";
-import { buildOpenCaeCoreCloudModelForStudy, cloudGeometrySourceForStudy, hasActualCoreVolumeMesh, isComplexGeometry, normalizeSolverBackend, openCaeCoreEligibility, trySolveOpenCaeCoreStudy, OPENCAE_CORE_CLOUD_GEOMETRY_REQUIRED_REASON, type NormalizedBrowserSolverBackend } from "../workers/opencaeCoreSolve";
+import { buildOpenCaeCoreCloudModelForStudy, cloudGeometrySourceForStudy, hasActualCoreVolumeMesh, isComplexGeometry, normalizeSolverBackend, openCaeCoreEligibility, studyForCoreCloudGeometryDispatch, trySolveOpenCaeCoreStudy, OPENCAE_CORE_CLOUD_GEOMETRY_REQUIRED_REASON, type NormalizedBrowserSolverBackend } from "../workers/opencaeCoreSolve";
 
 export interface SampleProjectResponse {
   message?: string;
@@ -500,7 +500,9 @@ function openCaeCoreCloudSolveRequest(runId: string, study: Study, displayModel:
     return {
       runId,
       analysisType: study.type,
-      study,
+      // The cloud container meshes dispatched geometry in the upright solver frame and
+      // applies study load directions verbatim, so hand it a solver-frame study.
+      study: studyForCoreCloudGeometryDispatch(study, displayModel),
       displayModel,
       geometry,
       coreVolumeMesh: null,
