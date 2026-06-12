@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ElementRef, MouseEvent as ReactMouseEvent, MutableRefObject, PointerEvent as ReactPointerEvent } from "react";
 import { Billboard, Bounds, Edges, GizmoHelper, Html, Line, OrbitControls, Text, useBounds } from "@react-three/drei";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
+import { configureTextBuilder } from "troika-three-text";
 import type { ThreeEvent } from "@react-three/fiber";
 import type { DisplayFace, DisplayModel, MeshSummary, ResultField, ResultRenderBounds } from "@opencae/schema";
 import { meshVolumeM3FromTriangles, type Triangle } from "@opencae/units";
@@ -95,6 +96,12 @@ interface CadViewerProps {
   onResultRenderBoundsChange?: (bounds: ResultRenderBounds | null) => void;
   onViewerInteractionChange?: (interacting: boolean) => void;
 }
+
+// Troika's worker-based typesetter rehydrates its code with new Function()
+// inside a blob worker, which the production CSP (script-src 'self') forbids —
+// the gizmo <Text> labels would suspend forever and hide the whole viewer
+// behind the Suspense fallback. Typeset on the main thread instead.
+configureTextBuilder({ useWorker: false });
 
 const BRACKET_DEPTH = 1.1;
 const RIB_DEPTH = 0.38;
