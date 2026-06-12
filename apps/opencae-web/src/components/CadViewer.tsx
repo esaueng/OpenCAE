@@ -83,7 +83,7 @@ interface CadViewerProps {
   surfaceMesh?: SolverSurfaceMesh;
   resultPlaybackBufferCache?: PackedPreparedPlaybackCache | null;
   resultPlaybackFrameController?: ResultPlaybackFrameController;
-  meshSummary?: Pick<MeshSummary, "nodes" | "elements">;
+  meshSummary?: MeshSummary;
   unitSystem: UnitSystem;
   themeMode: ThemeMode;
   fitSignal: number;
@@ -4980,7 +4980,7 @@ export function resultLegendContentScale(size: ResultLegendSize) {
   ).toFixed(2));
 }
 
-function ResultLegend({ resultMode, resultFields, unitSystem, meshSummary, surfaceMesh, showDeformed, deformationScale }: { resultMode: ResultMode; resultFields: ResultField[]; unitSystem: UnitSystem; meshSummary?: Pick<MeshSummary, "nodes" | "elements">; surfaceMesh?: SolverSurfaceMesh; showDeformed?: boolean; deformationScale?: number }) {
+function ResultLegend({ resultMode, resultFields, unitSystem, meshSummary, surfaceMesh, showDeformed, deformationScale }: { resultMode: ResultMode; resultFields: ResultField[]; unitSystem: UnitSystem; meshSummary?: MeshSummary; surfaceMesh?: SolverSurfaceMesh; showDeformed?: boolean; deformationScale?: number }) {
   const legendRef = useRef<HTMLDivElement | null>(null);
   const resizeDragRef = useRef<ResultLegendResizeDrag | null>(null);
   const [legendSize, setLegendSize] = useState<ResultLegendSize | null>(null);
