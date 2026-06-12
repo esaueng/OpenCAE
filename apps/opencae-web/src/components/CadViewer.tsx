@@ -82,7 +82,7 @@ interface CadViewerProps {
   surfaceMesh?: SolverSurfaceMesh;
   resultPlaybackBufferCache?: PackedPreparedPlaybackCache | null;
   resultPlaybackFrameController?: ResultPlaybackFrameController;
-  meshSummary?: MeshSummary;
+  meshSummary?: Pick<MeshSummary, "nodes" | "elements">;
   unitSystem: UnitSystem;
   themeMode: ThemeMode;
   fitSignal: number;
@@ -284,14 +284,18 @@ export function CadViewer(props: CadViewerProps) {
           <group rotation={modelRotation}>
             <group rotation={baseModelRotation}>
               {effectiveViewMode === "results" && solverSurfaceResult ? (
-                <SolverSurfaceResultMesh
-                  surfaceMesh={props.surfaceMesh!}
-                  scalarField={solverSurfaceResult.scalarField}
-                  displacementField={solverSurfaceResult.displacementField}
-                  resultMode={props.resultMode}
-                  showDeformed={effectiveShowDeformed}
-                  deformationScale={props.stressExaggeration}
-                />
+                // Solver surface meshes are already in the Z-up solver frame; cancel
+                // the legacy Y-up sample base rotation or the part renders on its side.
+                <group rotation={[-baseModelRotation[0], -baseModelRotation[1], -baseModelRotation[2]]}>
+                  <SolverSurfaceResultMesh
+                    surfaceMesh={props.surfaceMesh!}
+                    scalarField={solverSurfaceResult.scalarField}
+                    displacementField={solverSurfaceResult.displacementField}
+                    resultMode={props.resultMode}
+                    showDeformed={effectiveShowDeformed}
+                    deformationScale={props.stressExaggeration}
+                  />
+                </group>
               ) : (
                 <BracketModel {...props} showDeformed={effectiveShowDeformed} resultFields={resultFields} viewMode={effectiveViewMode} uploadedPreviewBounds={uploadedPreviewBounds} onUploadedPreviewBounds={setUploadedPreviewBounds} />
               )}
@@ -311,7 +315,7 @@ export function CadViewer(props: CadViewerProps) {
         {viewerStatsEnabled && <ViewerRendererStatsProbe />}
       </Canvas>
       <a className="viewer-watermark" href={VIEWER_CREDIT_URL} target="_blank" rel="noreferrer">Built by Esau Engineering</a>
-      {effectiveViewMode === "results" && <ResultLegend resultMode={props.resultMode} resultFields={resultFields} unitSystem={props.unitSystem} meshSummary={props.meshSummary} />}
+      {effectiveViewMode === "results" && <ResultLegend resultMode={props.resultMode} resultFields={resultFields} unitSystem={props.unitSystem} meshSummary={props.meshSummary} surfaceMesh={props.surfaceMesh} showDeformed={effectiveShowDeformed} deformationScale={props.stressExaggeration} />}
     </section>
   );
 }
@@ -4999,11 +5003,17 @@ export function displayedLegendTickLabels(minValue: number, maxValue: number) {
   return [ticks[0], ticks[2], ticks[4]];
 }
 
-export function legendMeshStats(meshSummary: MeshSummary | undefined) {
+export function legendMeshStats(meshSummary: Pick<MeshSummary, "nodes" | "elements"> | undefined) {
   return {
-    nodes: (meshSummary?.nodes ?? 42381).toLocaleString(),
-    elements: (meshSummary?.elements ?? 26944).toLocaleString()
+    nodes: meshSummary?.nodes ? meshSummary.nodes.toLocaleString() : "--",
+    elements: meshSummary?.elements ? meshSummary.elements.toLocaleString() : "--"
   };
+}
+
+export function legendDeformationLabel(visualScale: number | undefined): string | null {
+  if (!Number.isFinite(visualScale) || !visualScale || visualScale <= 0) return null;
+  const rounded = visualScale >= 10 ? Math.round(visualScale).toLocaleString() : visualScale.toFixed(1);
+  return `Deformation: x${rounded} (exaggerated)`;
 }
 
 const RESULT_LEGEND_MIN_WIDTH = 280;
@@ -5068,12 +5078,29 @@ export function resultLegendContentScale(size: ResultLegendSize) {
   ).toFixed(2));
 }
 
-function ResultLegend({ resultMode, resultFields, unitSystem, meshSummary }: { resultMode: ResultMode; resultFields: ResultField[]; unitSystem: UnitSystem; meshSummary?: MeshSummary }) {
+function ResultLegend({ resultMode, resultFields, unitSystem, meshSummary, surfaceMesh, showDeformed, deformationScale }: { resultMode: ResultMode; resultFields: ResultField[]; unitSystem: UnitSystem; meshSummary?: Pick<MeshSummary, "nodes" | "elements">; surfaceMesh?: SolverSurfaceMesh; showDeformed?: boolean; deformationScale?: number }) {
   const legendRef = useRef<HTMLDivElement | null>(null);
   const resizeDragRef = useRef<ResultLegendResizeDrag | null>(null);
   const [legendSize, setLegendSize] = useState<ResultLegendSize | null>(null);
+  const deformationLabel = useMemo(() => {
+    if (!showDeformed || !surfaceMesh) return null;
+    const displacementField = resultFields.find((candidate) => isSolverSurfaceNodeField(candidate, surfaceMesh, "displacement"));
+    if (!displacementField?.vectors?.length) return null;
+    const bounds = new THREE.Box3();
+    for (const node of surfaceMesh.nodes) bounds.expandByPoint(new THREE.Vector3(...node));
+    const modelExtent = bounds.isEmpty() ? 1 : bounds.getSize(new THREE.Vector3()).length();
+    const appliedScale = finalVisualScaleForDisplacementField(modelExtent, displacementField, deformationScale ?? 1).finalVisualScale;
+    // Solver surface meshes are in solver units (meters) while displacement
+    // fields are normalized to mm; the true exaggeration is 1000x the applied
+    // vertex-shift factor in that case.
+    const unitFactor = displacementField.units === "mm" && surfaceMesh.coordinateSpace === "solver" ? 1000 : 1;
+    return legendDeformationLabel(appliedScale * unitFactor);
+  }, [deformationScale, resultFields, showDeformed, surfaceMesh]);
   const title = resultMode === "stress" ? "Von Mises Stress" : resultMode === "displacement" ? "Displacement" : resultMode === "velocity" ? "Velocity" : resultMode === "acceleration" ? "Acceleration" : "Safety Factor";
-  const field = selectedResultField(resultFields, resultMode);
+  // Prefer the field actually rendered on the solver surface mesh so the legend
+  // range matches the contours; fall back to the face/sample field otherwise.
+  const surfaceField = surfaceMesh ? resultFields.find((candidate) => isSolverSurfaceNodeField(candidate, surfaceMesh, resultMode)) : undefined;
+  const field = surfaceField ?? selectedResultField(resultFields, resultMode);
   const fallbackMin = resultMode === "stress" ? stressForUnits(28, "MPa", unitSystem) : resultMode === "displacement" || resultMode === "velocity" || resultMode === "acceleration" ? lengthForUnits(0, "mm", unitSystem) : { value: 1.8, units: "" };
   const fallbackMax = resultMode === "stress" ? stressForUnits(142, "MPa", unitSystem) : resultMode === "displacement" || resultMode === "velocity" || resultMode === "acceleration" ? lengthForUnits(0.184, "mm", unitSystem) : { value: 7.6, units: "" };
   const unit = field?.units ?? fallbackMax.units;
@@ -5161,6 +5188,7 @@ function ResultLegend({ resultMode, resultFields, unitSystem, meshSummary }: { r
       <strong>Elements: {meshStats.elements}</strong>
       <span>Type: {title}</span>
       <span>Unit: {unit || "ratio"}</span>
+      {deformationLabel && <span className="legend-deformation-note">{deformationLabel}</span>}
       <div className="legend-scale" />
       <div className="legend-values">
         <span>{ticks[0]}</span>

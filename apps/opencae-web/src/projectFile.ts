@@ -23,6 +23,7 @@ export interface LocalResultBundle {
   summary: ResultSummary;
   fields: ResultField[];
   surfaceMesh?: SolverSurfaceMesh;
+  meshStats?: { nodes: number; elements: number };
 }
 
 export interface LocalProjectFile {
