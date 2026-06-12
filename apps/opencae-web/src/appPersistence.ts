@@ -254,13 +254,27 @@ export function parseResultBundle(value: unknown): LocalResultBundle | undefined
   const summary = ResultSummarySchema.safeParse(value.summary);
   const fields = ResultFieldSchema.array().safeParse(value.fields);
   const surfaceMesh = parseSolverSurfaceMesh(value.surfaceMesh);
+  const solverMeshSummary = parseSolverMeshSummary(value.solverMeshSummary);
   if (!summary.success || !fields.success || fields.data.length === 0) return undefined;
   return {
     activeRunId: typeof value.activeRunId === "string" ? value.activeRunId : undefined,
     completedRunId: typeof value.completedRunId === "string" ? value.completedRunId : undefined,
     summary: summary.data,
     fields: fields.data,
-    ...(surfaceMesh ? { surfaceMesh } : {})
+    ...(surfaceMesh ? { surfaceMesh } : {}),
+    ...(solverMeshSummary ? { solverMeshSummary } : {})
+  };
+}
+
+function parseSolverMeshSummary(value: unknown): LocalResultBundle["solverMeshSummary"] | undefined {
+  if (!isRecord(value) || value.source !== "core_solver") return undefined;
+  if (typeof value.nodes !== "number" || !Number.isInteger(value.nodes) || value.nodes <= 0) return undefined;
+  if (typeof value.elements !== "number" || !Number.isInteger(value.elements) || value.elements <= 0) return undefined;
+  return {
+    nodes: value.nodes,
+    elements: value.elements,
+    warnings: Array.isArray(value.warnings) ? value.warnings.filter((warning): warning is string => typeof warning === "string") : [],
+    source: "core_solver"
   };
 }
 

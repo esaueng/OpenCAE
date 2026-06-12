@@ -474,11 +474,33 @@ describe("CadViewer result coloring", () => {
     expect(displayedLegendTickLabels(88.3, 156.6)).toEqual(["88.3", "122.45", "156.6"]);
   });
 
-  test("uses mesh summary values for result legend mesh stats", () => {
+  test("renders solver surface results outside the legacy sample base rotation", () => {
+    // Solver surface meshes are already in solver model space (Z-up). Nesting them in the
+    // Y-up sample base rotation group tipped results 90 degrees away from the setup view.
+    const modelRotationIndex = cadViewerSource.indexOf("<group rotation={modelRotation}>");
+    const solverSurfaceIndex = cadViewerSource.indexOf("<SolverSurfaceResultMesh");
+    const baseRotationIndex = cadViewerSource.indexOf("<group rotation={baseModelRotation}>");
+    expect(modelRotationIndex).toBeGreaterThan(-1);
+    expect(solverSurfaceIndex).toBeGreaterThan(modelRotationIndex);
+    expect(baseRotationIndex).toBeGreaterThan(solverSurfaceIndex);
+  });
+
+  test("labels preset mesh summary values as estimates in the result legend", () => {
     expect(legendMeshStats({ nodes: 182400, elements: 119808, warnings: [], analysisSampleCount: 45000, quality: "ultra" })).toEqual({
-      nodes: "182,400",
-      elements: "119,808"
+      nodes: "182,400 (est.)",
+      elements: "119,808 (est.)"
     });
+  });
+
+  test("shows solver-reported mesh statistics without an estimate marker", () => {
+    expect(legendMeshStats({ nodes: 5132, elements: 18345, warnings: [], source: "core_solver" })).toEqual({
+      nodes: "5,132",
+      elements: "18,345"
+    });
+  });
+
+  test("shows placeholders when no mesh summary exists instead of fabricated counts", () => {
+    expect(legendMeshStats(undefined)).toEqual({ nodes: "--", elements: "--" });
   });
 
   test("resizes the result legend from a top-right handle", () => {
