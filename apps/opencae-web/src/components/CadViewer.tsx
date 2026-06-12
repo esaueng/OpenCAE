@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ElementRef, MouseEvent as ReactMouseEvent, MutableRefObject, PointerEvent as ReactPointerEvent } from "react";
 import { Billboard, Bounds, Edges, GizmoHelper, Html, Line, OrbitControls, Text, useBounds } from "@react-three/drei";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
+import { configureTextBuilder } from "troika-three-text";
 import type { ThreeEvent } from "@react-three/fiber";
 import type { DisplayFace, DisplayModel, MeshSummary, ResultField, ResultRenderBounds } from "@opencae/schema";
 import { meshVolumeM3FromTriangles, type Triangle } from "@opencae/units";
@@ -16,7 +17,7 @@ import { packedPreparedPlaybackFieldSlot, packedPreparedPlaybackFrameOrdinal, ty
 import { createVertexResultMapping, type VertexResultMapping } from "../resultVertexMapping";
 import { shouldBlockPreviewResultsForDisplayModel } from "../resultProvenance";
 import { stepPreviewFromBase64 } from "../stepPreview";
-import { normalizedStlGeometryFromBuffer } from "../stlPreview";
+import { tryNormalizedStlGeometryFromBuffer } from "../stlPreview";
 import { lengthForUnits, stressForUnits, type UnitSystem } from "../unitDisplay";
 import { loadMarkerViewportPresentation, type PayloadObjectSelection } from "../loadPreview";
 import { highlightPayloadObjectMeshes } from "../payloadObjectHighlight";
@@ -95,6 +96,12 @@ interface CadViewerProps {
   onResultRenderBoundsChange?: (bounds: ResultRenderBounds | null) => void;
   onViewerInteractionChange?: (interacting: boolean) => void;
 }
+
+// Troika's worker-based typesetter rehydrates its code with new Function()
+// inside a blob worker, which the production CSP (script-src 'self') forbids —
+// the gizmo <Text> labels would suspend forever and hide the whole viewer
+// behind the Suspense fallback. Typeset on the main thread instead.
+configureTextBuilder({ useWorker: false });
 
 const BRACKET_DEPTH = 1.1;
 const RIB_DEPTH = 0.38;
@@ -347,9 +354,7 @@ function ViewerRendererStatsProbe() {
 
 function isViewerRendererStatsEnabled() {
   if (typeof window === "undefined") return false;
-  const explicitlyEnabled = new URLSearchParams(window.location.search).get("opencaePerf") === "1" || safeViewerStatsStorageFlag() === "1";
-  const productionOptInAllowed = !import.meta.env.DEV && explicitlyEnabled;
-  return (import.meta.env.DEV && explicitlyEnabled) || productionOptInAllowed;
+  return new URLSearchParams(window.location.search).get("opencaePerf") === "1" || safeViewerStatsStorageFlag() === "1";
 }
 
 function safeViewerStatsStorageFlag() {
@@ -1030,7 +1035,6 @@ function BracketModel({
   const isResultView = viewMode === "results";
   const showBoundaryMarkers = !isResultView;
   const placementMode = activeStep === "loads" || activeStep === "supports";
-  const activeHit = hoveredHit ?? selectedHit;
   const hasDraftLoadPreview = activeStep === "loads" && loadMarkers.some((marker) => marker.preview);
   const showModelHitLabel = shouldShowModelHitLabel(viewMode, Boolean(hoveredHit), hasDraftLoadPreview);
   const activePayloadObjectId = payloadHighlightObjectId(payloadObjectSelectionMode, selectedPayloadObject ?? hoveredHit?.payloadObject ?? null);
@@ -1196,18 +1200,6 @@ function modelKindForDisplayModel(displayModel: DisplayModel): SampleModelKind {
   if (displayModel.id.includes("plate")) return "plate";
   if (displayModel.id.includes("cantilever")) return "cantilever";
   return "bracket";
-}
-
-function transformedBox(bounds: THREE.Box3, transform: THREE.Matrix4) {
-  const nextBounds = new THREE.Box3();
-  for (const x of [bounds.min.x, bounds.max.x]) {
-    for (const y of [bounds.min.y, bounds.max.y]) {
-      for (const z of [bounds.min.z, bounds.max.z]) {
-        nextBounds.expandByPoint(new THREE.Vector3(x, y, z).applyMatrix4(transform));
-      }
-    }
-  }
-  return nextBounds;
 }
 
 function dimensionBoundsForDisplayModel(displayModel: DisplayModel) {
@@ -1418,14 +1410,6 @@ function modelNormalToViewerSpace(normal: [number, number, number], displayModel
 function formatDimensionLabel(value: number, units: string) {
   const formatted = Number.isInteger(value) ? `${value}` : value.toFixed(1);
   return `${formatted} ${units}`;
-}
-
-function worldPointToModelSpace(point: THREE.Vector3) {
-  return new THREE.Vector3(point.x, point.z, -point.y);
-}
-
-function worldNormalToModelSpace(normal: THREE.Vector3) {
-  return new THREE.Vector3(normal.x, normal.z, -normal.y).normalize();
 }
 
 function markerDirectionInModelSpace(marker: ViewerLoadMarker) {
@@ -1816,6 +1800,12 @@ function UploadedNativeCadModel({
     if (preview.object) highlightPayloadObjectMeshes(preview.object, activePayloadObjectId, { baseColor: color, highlightColor: "#34d399" });
   }, [activePayloadObjectId, color, preview.object]);
 
+  const previewObject = preview.object;
+  useEffect(() => {
+    if (!previewObject) return undefined;
+    return () => disposeObjectTree(previewObject);
+  }, [previewObject]);
+
   if (preview.status === "loading") {
     return (
       <Html center position={[0, 0.35, 0]} className="model-notice">
@@ -1839,7 +1829,8 @@ function UploadedNativeCadModel({
 function UploadedStlModel({ displayModel, color, pickHandlers, activePayloadObjectId }: { displayModel: DisplayModel; color: string; pickHandlers?: ModelPickHandlers; activePayloadObjectId?: string }) {
   const meshRef = useRef<THREE.Mesh | null>(null);
   const geometry = useMemo(() => {
-    const nextGeometry = normalizedStlGeometryFromBuffer(base64ToArrayBuffer(displayModel.visualMesh?.contentBase64 ?? ""));
+    const nextGeometry = uploadedStlGeometryFromBase64(displayModel.visualMesh?.contentBase64 ?? "");
+    if (!nextGeometry) return null;
     nextGeometry.userData.opencaeObjectLabel = displayModel.name.replace(" uploaded model", "");
     nextGeometry.userData.opencaeObjectId = "uploaded-stl-object";
     return nextGeometry;
@@ -1848,6 +1839,13 @@ function UploadedStlModel({ displayModel, color, pickHandlers, activePayloadObje
   useEffect(() => {
     if (meshRef.current) highlightPayloadObjectMeshes(meshRef.current, activePayloadObjectId, { baseColor: color, highlightColor: "#34d399" });
   }, [activePayloadObjectId, color]);
+
+  useEffect(() => {
+    if (!geometry) return undefined;
+    return () => geometry.dispose();
+  }, [geometry]);
+
+  if (!geometry) return <UnsupportedUploadedModelNotice filename={displayModel.name} />;
 
   return (
     <mesh ref={meshRef} geometry={geometry} userData={geometry.userData} {...pickHandlers}>
@@ -1859,8 +1857,13 @@ function UploadedStlModel({ displayModel, color, pickHandlers, activePayloadObje
 
 function UploadedObjModel({ displayModel, pickHandlers, activePayloadObjectId }: { displayModel: DisplayModel; pickHandlers?: ModelPickHandlers; activePayloadObjectId?: string }) {
   const object = useMemo(() => {
-    const text = new TextDecoder().decode(base64ToArrayBuffer(displayModel.visualMesh?.contentBase64 ?? ""));
-    const parsed = new OBJLoader().parse(text);
+    let parsed: THREE.Group;
+    try {
+      const text = new TextDecoder().decode(base64ToArrayBuffer(displayModel.visualMesh?.contentBase64 ?? ""));
+      parsed = new OBJLoader().parse(text);
+    } catch {
+      return null;
+    }
     const box = new THREE.Box3().setFromObject(parsed);
     const size = box.getSize(new THREE.Vector3());
     const center = box.getCenter(new THREE.Vector3());
@@ -1887,8 +1890,15 @@ function UploadedObjModel({ displayModel, pickHandlers, activePayloadObjectId }:
   }, [displayModel.visualMesh?.contentBase64]);
 
   useEffect(() => {
-    highlightPayloadObjectMeshes(object, activePayloadObjectId, { baseColor: "#9aa7b4", highlightColor: "#34d399" });
+    if (object) highlightPayloadObjectMeshes(object, activePayloadObjectId, { baseColor: "#9aa7b4", highlightColor: "#34d399" });
   }, [activePayloadObjectId, object]);
+
+  useEffect(() => {
+    if (!object) return undefined;
+    return () => disposeObjectTree(object);
+  }, [object]);
+
+  if (!object) return <UnsupportedUploadedModelNotice filename={displayModel.name} />;
 
   return <primitive object={object} {...pickHandlers} />;
 }
@@ -1957,7 +1967,6 @@ function AnalysisResultModel({
   onMeasureDisplayModelDimensions?: (dimensions: NonNullable<DisplayModel["dimensions"]>) => void;
   onUploadedPreviewBounds: (bounds: THREE.Box3) => void;
 }) {
-  if (kind === "blank") return null;
   const usesPackedPlaybackResults = Boolean(resultPlaybackPlaying && resultPlaybackFrameController);
   const staticSamples = useResultSamplesForFaces(displayModel.faces, resultFields, resultMode, !usesPackedPlaybackResults);
   const packedPlaybackSamples = useMemo(() => initialPackedPlaybackSamplesForFaces(displayModel.faces), [displayModel.faces]);
@@ -1978,6 +1987,7 @@ function AnalysisResultModel({
     }
     return finalDisplayScale;
   }, [resultFields, stressExaggeration]);
+  if (kind === "blank") return null;
   if (kind === "uploaded") {
     return (
       <UploadedResultSolid
@@ -2156,13 +2166,37 @@ function UploadedNativeCadResultModel({
     onUploadedPreviewBounds(preview.normalizedBounds);
   }, [onMeasureDisplayModelDimensions, onUploadedPreviewBounds, preview.dimensions, preview.normalizedBounds, preview.status]);
 
+  const resultObject = useMemo(
+    () => preview.status === "ready" && preview.sourceObject ? cloneResultPreviewObject(preview.sourceObject) : null,
+    [preview.sourceObject, preview.status]
+  );
+  // The undeformed outline must be derived before the first colorize pass deforms the clone in place.
+  const undeformedOutline = useMemo(
+    () => resultObject && !lightweightResultPlayback ? createUndeformedResultOutlineObject(resultObject) : null,
+    [lightweightResultPlayback, resultObject]
+  );
   const renderedPreview = useMemo(() => {
-    if (preview.status !== "ready" || !preview.sourceObject) return null;
-    const object = cloneResultPreviewObject(preview.sourceObject);
-    const outline = showDeformed && !lightweightResultPlayback ? createUndeformedResultOutlineObject(object) : undefined;
-    colorizeResultObject(object, "uploaded", resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale, supportMarkers, resultFields);
-    return { object, outline };
-  }, [deformationScale, lightweightResultPlayback, loadMarkers, preview.sourceObject, preview.status, resultFields, resultMode, samples, showDeformed, stressExaggeration, supportMarkers]);
+    if (!resultObject) return null;
+    colorizeResultObject(resultObject, "uploaded", resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale, supportMarkers, resultFields);
+    const outline = showDeformed && !lightweightResultPlayback ? undeformedOutline ?? undefined : undefined;
+    return { object: resultObject, outline };
+  }, [deformationScale, lightweightResultPlayback, loadMarkers, resultFields, resultMode, resultObject, samples, showDeformed, stressExaggeration, supportMarkers, undeformedOutline]);
+
+  const sourceObject = preview.sourceObject;
+  useEffect(() => {
+    if (!sourceObject) return undefined;
+    return () => disposeObjectTree(sourceObject);
+  }, [sourceObject]);
+
+  useEffect(() => {
+    if (!resultObject) return undefined;
+    return () => disposeObjectTree(resultObject);
+  }, [resultObject]);
+
+  useEffect(() => {
+    if (!undeformedOutline) return undefined;
+    return () => disposeObjectTree(undeformedOutline);
+  }, [undeformedOutline]);
 
   if (preview.status === "loading") {
     return (
@@ -2211,11 +2245,13 @@ function UploadedStlResultModel({
   supportMarkers: ViewerSupportMarker[];
 }) {
   const lightweightResultPlayback = Boolean(resultPlaybackFrameController);
-  const outlineGeometry = useMemo(() => normalizedStlGeometryFromBuffer(base64ToArrayBuffer(displayModel.visualMesh?.contentBase64 ?? "")), [displayModel.visualMesh?.contentBase64]);
+  // Parse the STL once per uploaded content; the base geometry stays undeformed for the outline.
+  const baseGeometry = useMemo(() => uploadedStlGeometryFromBase64(displayModel.visualMesh?.contentBase64 ?? ""), [displayModel.visualMesh?.contentBase64]);
+  const resultGeometry = useMemo(() => baseGeometry?.clone() ?? null, [baseGeometry]);
   const geometry = useMemo(() => {
-    const parsed = normalizedStlGeometryFromBuffer(base64ToArrayBuffer(displayModel.visualMesh?.contentBase64 ?? ""));
-    return colorizeResultGeometry(parsed, "uploaded", resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale, undefined, undefined, supportMarkers, resultFields);
-  }, [deformationScale, displayModel.visualMesh?.contentBase64, loadMarkers, resultFields, resultMode, samples, showDeformed, stressExaggeration, supportMarkers]);
+    if (!resultGeometry) return null;
+    return colorizeResultGeometry(resultGeometry, "uploaded", resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale, undefined, undefined, supportMarkers, resultFields);
+  }, [deformationScale, loadMarkers, resultFields, resultGeometry, resultMode, samples, showDeformed, stressExaggeration, supportMarkers]);
   usePackedPlaybackGeometry(geometry, {
     kind: "uploaded",
     resultMode,
@@ -2228,9 +2264,21 @@ function UploadedStlResultModel({
     resultPlaybackFrameController
   });
 
+  useEffect(() => {
+    if (!baseGeometry) return undefined;
+    return () => baseGeometry.dispose();
+  }, [baseGeometry]);
+
+  useEffect(() => {
+    if (!resultGeometry) return undefined;
+    return () => resultGeometry.dispose();
+  }, [resultGeometry]);
+
+  if (!baseGeometry || !geometry) return <UnsupportedUploadedModelNotice filename={displayModel.name} />;
+
   return (
     <group>
-      {shouldShowUndeformedResultOutline(showDeformed) && !lightweightResultPlayback && <UndeformedGeometryOutline geometry={outlineGeometry} />}
+      {shouldShowUndeformedResultOutline(showDeformed) && !lightweightResultPlayback && <UndeformedGeometryOutline geometry={baseGeometry} />}
       <mesh geometry={geometry}>
         <meshStandardMaterial vertexColors metalness={0.18} roughness={0.52} side={THREE.DoubleSide} />
         {!lightweightResultPlayback && <Edges color="#43556a" threshold={18} />}
@@ -2344,21 +2392,26 @@ function SampleResultSolid({
   loadMarkers: ViewerLoadMarker[];
   supportMarkers: ViewerSupportMarker[];
 }) {
-  const outlineBeamGeometry = useMemo(() => createBeamGeometry(), []);
-  const outlineBeamPayloadGeometry = useMemo(() => createBeamPayloadGeometry(), []);
-  const outlineCantileverGeometry = useMemo(() => new THREE.BoxGeometry(3.8, 0.5, 0.72, 40, 8, 8), []);
+  const outlineBeamGeometry = useMemo(() => kind === "plate" ? createBeamGeometry() : null, [kind]);
+  const outlineCantileverGeometry = useMemo(() => kind === "cantilever" ? new THREE.BoxGeometry(3.8, 0.5, 0.72, 40, 8, 8) : null, [kind]);
   const beamGeometry = useMemo(
-    () => colorizeSampleResultGeometry(createBeamGeometry(), kind, resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale, supportMarkers, resultFields),
+    () => kind === "plate"
+      ? colorizeSampleResultGeometry(createBeamGeometry(), kind, resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale, supportMarkers, resultFields)
+      : null,
     [deformationScale, kind, loadMarkers, resultMode, resultFields, samples, showDeformed, stressExaggeration, supportMarkers]
   );
-  const beamPayloadGeometry = useMemo(() => createBeamPayloadGeometry(), []);
+  const beamPayloadGeometry = useMemo(() => kind === "plate" ? createBeamPayloadGeometry() : null, [kind]);
   const beamPayloadOffset = useMemo(
-    () => resultPayloadOffsetForBeamDemo(beamGeometry, samples, loadMarkers, supportMarkers, resultFields, showDeformed, stressExaggeration, deformationScale ?? 1)
-      ?? resultPayloadOffsetForFields(BEAM_PAYLOAD_CENTER, beamGeometry, resultFields, showDeformed, deformationScale ?? 1),
+    () => beamGeometry
+      ? resultPayloadOffsetForBeamDemo(beamGeometry, samples, loadMarkers, supportMarkers, resultFields, showDeformed, stressExaggeration, deformationScale ?? 1)
+        ?? resultPayloadOffsetForFields(BEAM_PAYLOAD_CENTER, beamGeometry, resultFields, showDeformed, deformationScale ?? 1)
+      : undefined,
     [beamGeometry, deformationScale, loadMarkers, resultFields, samples, showDeformed, stressExaggeration, supportMarkers]
   );
   const cantileverGeometry = useMemo(
-    () => colorizeSampleResultGeometry(new THREE.BoxGeometry(3.8, 0.5, 0.72, 40, 8, 8), kind, resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale, supportMarkers, resultFields),
+    () => kind === "cantilever"
+      ? colorizeSampleResultGeometry(new THREE.BoxGeometry(3.8, 0.5, 0.72, 40, 8, 8), kind, resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale, supportMarkers, resultFields)
+      : null,
     [deformationScale, kind, loadMarkers, resultMode, resultFields, samples, showDeformed, stressExaggeration, supportMarkers]
   );
   usePackedPlaybackGeometry(beamGeometry, {
@@ -2386,12 +2439,13 @@ function SampleResultSolid({
     resultPlaybackFrameController
   });
   if (kind === "plate") {
+    if (!beamGeometry || !beamPayloadGeometry || !outlineBeamGeometry) return null;
     return (
       <group>
         {shouldShowUndeformedResultOutline(showDeformed) && !resultPlaybackPlaying && (
           <>
             <UndeformedGeometryOutline geometry={outlineBeamGeometry} />
-            <UndeformedGeometryOutline geometry={outlineBeamPayloadGeometry} />
+            <UndeformedGeometryOutline geometry={beamPayloadGeometry} />
           </>
         )}
         <mesh geometry={beamGeometry}>
@@ -2406,6 +2460,7 @@ function SampleResultSolid({
     );
   }
   if (kind === "cantilever") {
+    if (!cantileverGeometry || !outlineCantileverGeometry) return null;
     return (
       <group>
         {shouldShowUndeformedResultOutline(showDeformed) && !resultPlaybackPlaying && <UndeformedGeometryOutline geometry={outlineCantileverGeometry} position={[0, 0.18, 0]} />}
@@ -2585,6 +2640,8 @@ function assertSolverSurfaceMeshTopology(surfaceMesh: SolverSurfaceMesh): void {
 function UndeformedGeometryOutline({ geometry, position }: { geometry: THREE.BufferGeometry; position?: [number, number, number] }) {
   const edgeGeometry = useMemo(() => new THREE.EdgesGeometry(geometry, 18), [geometry]);
 
+  useEffect(() => () => edgeGeometry.dispose(), [edgeGeometry]);
+
   return (
     <lineSegments geometry={edgeGeometry} position={position} renderOrder={8}>
       <lineBasicMaterial color="#dbeafe" transparent opacity={0.72} depthTest={false} depthWrite={false} toneMapped={false} />
@@ -2621,6 +2678,25 @@ export function createUndeformedResultOutlineObject(object: THREE.Object3D) {
   });
 
   return outline;
+}
+
+function disposeMaterialValue(material: THREE.Material | THREE.Material[] | undefined) {
+  if (Array.isArray(material)) {
+    for (const item of material) item.dispose();
+    return;
+  }
+  material?.dispose();
+}
+
+function disposeObjectTree(root: THREE.Object3D) {
+  root.traverse((child) => {
+    const disposable = child as THREE.Object3D & {
+      geometry?: { dispose?: () => void };
+      material?: THREE.Material | THREE.Material[];
+    };
+    disposable.geometry?.dispose?.();
+    disposeMaterialValue(disposable.material);
+  });
 }
 
 export function cloneResultPreviewObject(object: THREE.Group) {
@@ -3281,15 +3357,19 @@ function basePositionBoundsForGeometry(geometry: THREE.BufferGeometry, basePosit
 
 function maxDisplacementMagnitude(field: ResultField | undefined): number {
   if (!field) return 0;
-  const magnitudes = [
-    Math.abs(Number(field.max)),
-    Math.abs(Number(field.min)),
-    ...field.values.map((value) => Math.abs(value)),
-    ...(field.vectors?.map((vector) => Math.hypot(...vector)) ?? []),
-    ...(field.samples?.map((sample) => Math.abs(sample.value)) ?? []),
-    ...(field.samples?.map((sample) => sample.vector ? Math.hypot(...sample.vector) : 0) ?? [])
-  ].filter(Number.isFinite);
-  return magnitudes.length ? Math.max(...magnitudes) : 0;
+  let max = Number.NEGATIVE_INFINITY;
+  const consider = (magnitude: number) => {
+    if (Number.isFinite(magnitude) && magnitude > max) max = magnitude;
+  };
+  consider(Math.abs(Number(field.max)));
+  consider(Math.abs(Number(field.min)));
+  for (const value of field.values) consider(Math.abs(value));
+  for (const vector of field.vectors ?? []) consider(Math.hypot(vector[0], vector[1], vector[2]));
+  for (const sample of field.samples ?? []) {
+    consider(Math.abs(sample.value));
+    consider(sample.vector ? Math.hypot(sample.vector[0], sample.vector[1], sample.vector[2]) : 0);
+  }
+  return Number.isFinite(max) ? max : 0;
 }
 
 function resultFieldPointExtent(field: ResultField | undefined): number {
@@ -3301,39 +3381,6 @@ function resultFieldPointExtent(field: ResultField | undefined): number {
   }
   if (bounds.isEmpty()) return 0;
   return bounds.getSize(new THREE.Vector3()).length();
-}
-
-function interpolateResultSampleValue(point: THREE.Vector3, samples: NonNullable<ResultField["samples"]>, fallback: number): number {
-  const neighbors = nearestResultSamples(point, samples, (sample) => Number.isFinite(sample.value));
-  if (!neighbors.length) return fallback;
-  const exact = neighbors.find((entry) => entry.distanceSq <= 1e-18);
-  if (exact) return exact.sample.value;
-  let weighted = 0;
-  let totalWeight = 0;
-  for (const neighbor of neighbors) {
-    const weight = 1 / Math.max(neighbor.distanceSq, 1e-18);
-    weighted += neighbor.sample.value * weight;
-    totalWeight += weight;
-  }
-  return totalWeight > 0 ? weighted / totalWeight : fallback;
-}
-
-function interpolateResultSampleVector(point: THREE.Vector3, samples: NonNullable<ResultField["samples"]>): THREE.Vector3 {
-  const neighbors = nearestResultSamples(point, samples, (sample) => Boolean(sample.vector?.every(Number.isFinite)));
-  if (!neighbors.length) return new THREE.Vector3();
-  const exact = neighbors.find((entry) => entry.distanceSq <= 1e-18);
-  if (exact?.sample.vector) return new THREE.Vector3(...exact.sample.vector);
-  const smoothInterpolator = smoothVectorInterpolatorForSamples(samples);
-  if (smoothInterpolator) return smoothInterpolator.interpolate(point);
-  const vector = new THREE.Vector3();
-  let totalWeight = 0;
-  for (const neighbor of neighbors) {
-    if (!neighbor.sample.vector) continue;
-    const weight = 1 / Math.max(neighbor.distanceSq, 1e-18);
-    vector.addScaledVector(new THREE.Vector3(...neighbor.sample.vector), weight);
-    totalWeight += weight;
-  }
-  return totalWeight > 0 ? vector.multiplyScalar(1 / totalWeight) : vector;
 }
 
 function squaredDistanceArrays(left: [number, number, number], right: [number, number, number]) {
@@ -3509,7 +3556,7 @@ export function colorizeSampleResultGeometry(
 }
 
 function usePackedPlaybackGeometry(
-  geometry: THREE.BufferGeometry,
+  geometry: THREE.BufferGeometry | null,
   options: {
     kind: SampleModelKind;
     resultMode: ResultMode;
@@ -3534,14 +3581,15 @@ function usePackedPlaybackGeometry(
   }, [options.initialSamples]);
   useEffect(() => {
     const controller = options.resultPlaybackFrameController;
-    if (!controller) return undefined;
+    const targetGeometry = geometry;
+    if (!controller || !targetGeometry) return undefined;
     const applySnapshot = (snapshot: ResultPlaybackFrameSnapshot) => {
       const latest = optionsRef.current;
       const frameOrdinal = packedPreparedPlaybackFrameOrdinal(snapshot.cache, snapshot.framePosition);
       const fields = resultFieldsForPackedPreparedFrame(snapshot.cache, frameOrdinal);
       if (fields.length) {
         applyResultFrameToGeometry({
-          geometry,
+          geometry: targetGeometry,
           fields,
           resultMode: latest.resultMode,
           showDeformed: latest.showDeformed,
@@ -3553,7 +3601,7 @@ function usePackedPlaybackGeometry(
       }
       const samples = updatePackedSamples(samplesRef.current, snapshot.cache, frameOrdinal, latest.resultMode);
       colorizeResultGeometry(
-        geometry,
+        targetGeometry,
         latest.kind,
         latest.resultMode,
         latest.showDeformed,
@@ -3853,12 +3901,14 @@ export function colorizeResultObject(
     if (!(child instanceof THREE.Mesh) || !(child.geometry instanceof THREE.BufferGeometry)) return;
     if (isResultPayloadObject(child, excludedPayloadObjects)) {
       child.visible = true;
+      const previousPayloadMaterial = child.material;
       child.material = new THREE.MeshStandardMaterial({
         color: RESULT_PAYLOAD_MATERIAL_COLOR,
         metalness: 0.14,
         roughness: 0.58,
         side: THREE.DoubleSide
       });
+      disposeMaterialValue(previousPayloadMaterial);
       payloadMeshes.push(child as THREE.Mesh<THREE.BufferGeometry>);
       return;
     }
@@ -3876,12 +3926,14 @@ export function colorizeResultObject(
       toResultPoint: (point) => point.clone().applyMatrix4(toResultMatrix),
       fromResultPoint: (point) => point.clone().applyMatrix4(fromResultMatrix)
     }, valueRange, supportMarkers, resultFields);
+    const previousMaterial = child.material;
     child.material = new THREE.MeshStandardMaterial({
       vertexColors: true,
       metalness: 0.18,
       roughness: 0.52,
       side: THREE.DoubleSide
     });
+    disposeMaterialValue(previousMaterial);
   }
   const displacementField = displacementFieldForResults(resultFields);
   const visualScale = showDeformed
@@ -4051,12 +4103,15 @@ function resultValuesForMesh(
 
 function resultValueRange(values: number[], samples: FaceResultSample[] = []): ResultValueRange {
   if (hasSolvedResultSamples(samples)) return { min: 0, max: 1 };
-  const finiteValues = values.filter(Number.isFinite);
-  if (!finiteValues.length) return { min: 0, max: 1 };
-  return {
-    min: Math.min(...finiteValues),
-    max: Math.max(...finiteValues)
-  };
+  let min = Number.POSITIVE_INFINITY;
+  let max = Number.NEGATIVE_INFINITY;
+  for (const value of values) {
+    if (!Number.isFinite(value)) continue;
+    if (value < min) min = value;
+    if (value > max) max = value;
+  }
+  if (min > max) return { min: 0, max: 1 };
+  return { min, max };
 }
 
 function hasSolvedResultSamples(samples: FaceResultSample[]) {
@@ -4082,13 +4137,16 @@ function deformationScaleForSamples(resultMode: ResultMode, samples: FaceResultS
 }
 
 function resultFieldAbsMax(field: ResultField) {
-  const activeValues = [
-    Math.abs(Number(field.min) || 0),
-    Math.abs(Number(field.max) || 0),
-    ...field.values.map((value) => Math.abs(value)).filter(Number.isFinite),
-    ...(field.samples?.map((sample) => Math.abs(sample.value)).filter(Number.isFinite) ?? [])
-  ].filter(Number.isFinite);
-  return activeValues.length ? Math.max(...activeValues) : 0;
+  let max = Math.max(Math.abs(Number(field.min) || 0), Math.abs(Number(field.max) || 0));
+  for (const value of field.values) {
+    const magnitude = Math.abs(value);
+    if (Number.isFinite(magnitude) && magnitude > max) max = magnitude;
+  }
+  for (const sample of field.samples ?? []) {
+    const magnitude = Math.abs(sample.value);
+    if (Number.isFinite(magnitude) && magnitude > max) max = magnitude;
+  }
+  return max;
 }
 
 function deformationScaleForMagnitude(magnitude: number, units: string) {
@@ -4354,10 +4412,6 @@ function deformedPointForKind(kind: SampleModelKind, point: THREE.Vector3, stres
   return next;
 }
 
-function resultColorForPoint(kind: SampleModelKind, resultMode: ResultMode, stressExaggeration: number, point: THREE.Vector3, samples: FaceResultSample[]) {
-  return resultColorForValue(resultMode, resultValueForPoint(kind, resultMode, stressExaggeration, point, samples));
-}
-
 export function resultValueForPoint(kind: SampleModelKind, resultMode: ResultMode, stressExaggeration: number, point: THREE.Vector3, samples: FaceResultSample[]) {
   const fieldSampleValue = resultFractionFromFieldSamples(point, samples);
   const sampleValue = fieldSampleValue ?? resultFractionFromSamples(point, samples);
@@ -4469,169 +4523,6 @@ function gaussian2d(x: number, y: number, cx: number, cy: number, rx: number, ry
   return Math.exp(-0.5 * (dx * dx + dy * dy));
 }
 
-function SmoothBracketBody({ resultMode, showDeformed, stressExaggeration }: { resultMode: ResultMode; showDeformed: boolean; stressExaggeration: number }) {
-  const bodyGeometry = useMemo(() => createBracketBodyGeometry(), []);
-  const ribGeometry = useMemo(() => createRibGeometry(), []);
-  return (
-    <group>
-      <mesh>
-        <primitive attach="geometry" object={bodyGeometry} />
-        <ResultMaterial resultMode={resultMode} part="body" showDeformed={showDeformed} stressExaggeration={stressExaggeration} />
-        <Edges color="#43556a" threshold={18} />
-      </mesh>
-      <mesh>
-        <primitive attach="geometry" object={ribGeometry} />
-        <ResultMaterial resultMode={resultMode} part="rib" showDeformed={showDeformed} stressExaggeration={stressExaggeration} />
-        <Edges color="#43556a" threshold={18} />
-      </mesh>
-    </group>
-  );
-}
-
-function ResultMaterial({ resultMode, part, showDeformed, stressExaggeration }: { resultMode: ResultMode; part: "body" | "rib"; showDeformed: boolean; stressExaggeration: number }) {
-  const mode = resultMode === "stress" ? 0 : resultMode === "displacement" || resultMode === "velocity" || resultMode === "acceleration" ? 1 : 2;
-  const partValue = part === "body" ? 0 : 1;
-  const uniforms = useMemo(
-    () => ({
-      uMode: { value: mode },
-      uPart: { value: partValue },
-      uShowDeformed: { value: showDeformed ? 1 : 0 },
-      uStressExaggeration: { value: stressExaggeration }
-    }),
-    [mode, partValue, showDeformed, stressExaggeration]
-  );
-
-  return (
-    <shaderMaterial
-      key={`${part}-${resultMode}-${showDeformed}-${stressExaggeration}`}
-      uniforms={uniforms}
-      vertexShader={RESULT_VERTEX_SHADER}
-      fragmentShader={RESULT_FRAGMENT_SHADER}
-      side={THREE.DoubleSide}
-    />
-  );
-}
-
-const RESULT_VERTEX_SHADER = `
-  varying vec3 vLocalPosition;
-  varying vec3 vNormal;
-  uniform int uShowDeformed;
-  uniform float uStressExaggeration;
-
-  float bracketSpan(vec3 p) {
-    return clamp((p.x + 1.55) / 3.90, 0.0, 1.0);
-  }
-
-  void main() {
-    vec3 deformed = position;
-    if (uShowDeformed == 1) {
-      float scale = 0.07 + max(uStressExaggeration - 1.0, 0.0) * 0.10;
-      float upright = smoothstep(0.20, 2.62, position.y) * (1.0 - bracketSpan(position) * 0.35);
-      float base = bracketSpan(position);
-      deformed.y -= scale * (upright * upright + base * base * 0.55);
-      deformed.x += scale * 0.22 * upright;
-      deformed.z += scale * 0.28 * (position.z >= 0.0 ? 1.0 : -1.0) * max(upright, base * 0.55);
-    }
-    vLocalPosition = position;
-    vNormal = normalize(normalMatrix * normal);
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(deformed, 1.0);
-  }
-`;
-
-const RESULT_FRAGMENT_SHADER = `
-  precision highp float;
-
-  uniform int uMode;
-  uniform int uPart;
-  uniform float uStressExaggeration;
-  varying vec3 vLocalPosition;
-  varying vec3 vNormal;
-
-  float gaussian2d(vec2 value, vec2 center, vec2 radius) {
-    vec2 d = (value - center) / radius;
-    return exp(-0.5 * dot(d, d));
-  }
-
-  float gaussian1d(float value, float center, float radius) {
-    float d = (value - center) / radius;
-    return exp(-0.5 * d * d);
-  }
-
-  float stressFraction(vec3 p) {
-    if (uPart == 1) {
-      float upperJoint = gaussian2d(p.xy, vec2(-0.74, 1.35), vec2(0.34, 0.38));
-      float lowerToe = gaussian2d(p.xy, vec2(-0.24, 0.34), vec2(0.42, 0.18));
-      float centerWeb = gaussian2d(p.xy, vec2(-0.34, 0.86), vec2(0.70, 0.55));
-      float frontFace = 0.04 * gaussian1d(p.z, 0.19, 0.18);
-      return clamp(0.04 + upperJoint * 0.50 + lowerToe * 0.40 + centerWeb * 0.22 + frontFace, 0.0, 1.0);
-    }
-
-    float loadHotSpot = gaussian2d(p.xy, vec2(-1.12, 2.50), vec2(0.28, 0.34));
-    float innerCorner = gaussian2d(p.xy, vec2(-0.78, 0.28), vec2(0.44, 0.32));
-    float uprightBending = gaussian2d(p.xy, vec2(-1.10, 1.55), vec2(0.34, 0.84));
-    float supportLeft = gaussian2d(p.xy, vec2(0.24, 0.0), vec2(0.25, 0.22));
-    float supportRight = gaussian2d(p.xy, vec2(1.20, 0.0), vec2(0.28, 0.22));
-    float frontFace = 0.05 * gaussian1d(p.z, 0.55, 0.20);
-    float freeBaseEnd = gaussian2d(p.xy, vec2(2.25, 0.0), vec2(0.28, 0.26));
-    float stress = loadHotSpot * 0.92 + innerCorner * 0.48 + uprightBending * 0.26 + supportLeft * 0.24 + supportRight * 0.18 + frontFace;
-    return clamp(stress - freeBaseEnd * 0.10, 0.0, 1.0);
-  }
-
-  float stressMpa(vec3 p) {
-    return mix(28.0, 142.0, stressFraction(p));
-  }
-
-  float stressDisplayFraction(vec3 p) {
-    float normalized = stressFraction(p);
-    return clamp(0.5 + (normalized - 0.5) * uStressExaggeration, 0.0, 1.0);
-  }
-
-  vec3 resultPalette(float t) {
-    if (uMode == 2) {
-      vec3 s0 = vec3(0.92, 0.18, 0.24);
-      vec3 s1 = vec3(0.96, 0.48, 0.20);
-      vec3 s2 = vec3(0.92, 0.82, 0.23);
-      vec3 s3 = vec3(0.64, 0.90, 0.21);
-      vec3 s4 = vec3(0.29, 0.82, 0.45);
-      vec3 s5 = vec3(0.13, 0.77, 0.37);
-      float safeX = clamp(t, 0.0, 1.0) * 5.0;
-      if (safeX < 1.0) return mix(s0, s1, safeX);
-      if (safeX < 2.0) return mix(s1, s2, safeX - 1.0);
-      if (safeX < 3.0) return mix(s2, s3, safeX - 2.0);
-      if (safeX < 4.0) return mix(s3, s4, safeX - 3.0);
-      return mix(s4, s5, safeX - 4.0);
-    }
-
-    vec3 c0 = vec3(0.04, 0.33, 0.78);
-    vec3 c1 = vec3(0.06, 0.70, 0.88);
-    vec3 c2 = vec3(0.20, 0.78, 0.42);
-    vec3 c3 = vec3(0.92, 0.82, 0.23);
-    vec3 c4 = vec3(0.96, 0.48, 0.20);
-    vec3 c5 = vec3(0.92, 0.18, 0.24);
-    float x = clamp(t, 0.0, 1.0) * 5.0;
-    if (x < 1.0) return mix(c0, c1, x);
-    if (x < 2.0) return mix(c1, c2, x - 1.0);
-    if (x < 3.0) return mix(c2, c3, x - 2.0);
-    if (x < 4.0) return mix(c3, c4, x - 3.0);
-    return mix(c4, c5, x - 4.0);
-  }
-
-  void main() {
-    float t;
-    if (uMode == 1) {
-      float topTravel = clamp((vLocalPosition.y + 0.24) / 2.86, 0.0, 1.0);
-      float cantileverTravel = clamp((vLocalPosition.x + 1.55) / 3.9, 0.0, 1.0);
-      t = clamp(0.12 + topTravel * 0.55 + cantileverTravel * 0.22, 0.0, 1.0);
-    } else {
-      t = uMode == 2 ? clamp(1.0 - stressFraction(vLocalPosition) * 0.88, 0.0, 1.0) : stressDisplayFraction(vLocalPosition);
-    }
-
-    vec3 color = resultPalette(t);
-    float light = 0.72 + 0.28 * clamp(dot(normalize(vNormal), normalize(vec3(0.35, 0.65, 0.45))), 0.0, 1.0);
-    gl_FragColor = vec4(color * light, 0.96);
-  }
-`;
-
 function createBracketBodyGeometry() {
   const geometry = new THREE.ExtrudeGeometry(createBracketShape(), {
     depth: BRACKET_DEPTH,
@@ -4725,6 +4616,16 @@ function base64ToArrayBuffer(value: string): ArrayBuffer {
     bytes[index] = binary.charCodeAt(index);
   }
   return bytes.buffer;
+}
+
+function uploadedStlGeometryFromBase64(contentBase64: string): THREE.BufferGeometry | null {
+  let buffer: ArrayBuffer;
+  try {
+    buffer = base64ToArrayBuffer(contentBase64);
+  } catch {
+    return null;
+  }
+  return tryNormalizedStlGeometryFromBuffer(buffer);
 }
 
 type ResultProbeConfig = { label: string; anchor: [number, number, number]; labelPosition: [number, number, number]; tone: ResultProbeTone };
@@ -5486,8 +5387,10 @@ function BoundsCameraReset({ contentFitKey, signal, viewAxis, viewAxisSignal, co
 function GizmoCameraReset({ view, signal, controlsRef }: { view: GizmoViewRequest | null; signal: number; controlsRef: MutableRefObject<ViewerOrbitControls | null> }) {
   const bounds = useBounds();
   const { camera, invalidate, size } = useThree();
+  const appliedSignalRef = useRef(0);
   useEffect(() => {
-    if (!view || signal === 0) return;
+    if (!view || signal === 0 || appliedSignalRef.current === signal) return;
+    appliedSignalRef.current = signal;
     const nextBounds = bounds.refresh().clip();
     const { box, center, distance } = nextBounds.getSize();
     const perspectiveCamera = camera as THREE.PerspectiveCamera;

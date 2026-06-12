@@ -180,7 +180,7 @@ describe("app persistence", () => {
         undoStack: [project],
         redoStack: [],
         status: "Results ready",
-        logs: ["Results ready"]
+        logs: [{ message: "Results ready", at: 1714000000000 }]
       }
     });
 
@@ -234,7 +234,7 @@ describe("app persistence", () => {
   });
 
   test("preserves enough logs to diagnose OpenCAE Core failures after reload", () => {
-    const logs = Array.from({ length: 120 }, (_, index) => `OpenCAE Core diagnostic ${index}`);
+    const logs = Array.from({ length: 120 }, (_, index) => ({ message: `OpenCAE Core diagnostic ${index}`, at: 1714000000000 + index }));
     const snapshot = buildAutosavedWorkspace({
       project,
       displayModel,
@@ -248,8 +248,26 @@ describe("app persistence", () => {
 
     expect(WORKSPACE_LOG_LIMIT).toBe(100);
     expect(parsed?.ui.logs).toHaveLength(100);
-    expect(parsed?.ui.logs[0]).toBe("OpenCAE Core diagnostic 0");
-    expect(parsed?.ui.logs.at(-1)).toBe("OpenCAE Core diagnostic 99");
+    expect(parsed?.ui.logs[0]).toEqual({ message: "OpenCAE Core diagnostic 0", at: 1714000000000 });
+    expect(parsed?.ui.logs.at(-1)).toEqual({ message: "OpenCAE Core diagnostic 99", at: 1714000000099 });
+  });
+
+  test("restores legacy plain-string log payloads as timestamped entries", () => {
+    const snapshot = buildAutosavedWorkspace({
+      project,
+      displayModel,
+      savedAt: "2026-04-24T13:00:00.000Z",
+      ui: baseUi
+    });
+    const legacyPayload = JSON.stringify({
+      ...snapshot,
+      ui: { ...snapshot.ui, logs: ["Legacy log line"] }
+    });
+
+    const parsed = parseAutosavedWorkspacePayload(legacyPayload);
+
+    expect(parsed?.ui.logs[0]?.message).toBe("Legacy log line");
+    expect(typeof parsed?.ui.logs[0]?.at).toBe("number");
   });
 
   test("does not restore or persist in-progress simulation state after reload", () => {
@@ -280,7 +298,7 @@ describe("app persistence", () => {
         undoStack: [],
         redoStack: [],
         status: "Running simulation",
-        logs: ["Running simulation"]
+        logs: [{ message: "Running simulation", at: 1714000000000 }]
       }
     });
 
@@ -327,7 +345,7 @@ describe("app persistence", () => {
         undoStack: [setupProject],
         redoStack: [setupProject],
         status: "Setup ready",
-        logs: ["Setup ready"]
+        logs: [{ message: "Setup ready", at: 1714000000000 }]
       }
     });
 
@@ -349,6 +367,71 @@ describe("app persistence", () => {
     });
     expect(parsed?.ui.undoStack[0]?.studies[0]?.loads).toEqual(studyWithSetup.loads);
     expect(parsed?.ui.redoStack[0]?.studies[0]?.constraints).toEqual(studyWithSetup.constraints);
+  });
+
+  test("strips embedded model payloads from undo history and reattaches them on restore", () => {
+    const embeddedModel = { filename: "bracket.step", contentType: "model/step", size: 4, contentBase64: "U1RFUA==" };
+    const projectWithUpload = {
+      ...project,
+      geometryFiles: [{
+        id: "geom-upload-1",
+        projectId: project.id,
+        filename: "bracket.step",
+        localPath: "uploads/bracket.step",
+        artifactKey: "project-1/geometry/uploaded-display.json",
+        status: "ready",
+        metadata: { source: "local-upload", embeddedModel }
+      }]
+    } satisfies Project;
+    const snapshot = buildAutosavedWorkspace({
+      project: projectWithUpload,
+      displayModel,
+      savedAt: "2026-04-24T13:00:00.000Z",
+      ui: {
+        ...baseUi,
+        undoStack: [projectWithUpload],
+        redoStack: [projectWithUpload]
+      }
+    });
+
+    expect(snapshot.ui.undoStack[0]?.geometryFiles[0]?.metadata.embeddedModel).toBeUndefined();
+    expect(snapshot.ui.redoStack[0]?.geometryFiles[0]?.metadata.embeddedModel).toBeUndefined();
+    expect(snapshot.projectFile.project.geometryFiles[0]?.metadata.embeddedModel).toEqual(embeddedModel);
+    expect(JSON.stringify(snapshot.ui)).not.toContain("U1RFUA==");
+
+    const storage = {
+      getItem: vi.fn((key: string) => (key === AUTOSAVE_STORAGE_KEY ? JSON.stringify(snapshot) : null)),
+      setItem: vi.fn()
+    };
+    const restored = readAutosavedWorkspace(storage);
+
+    expect(restored?.ui.undoStack[0]?.geometryFiles[0]?.metadata.embeddedModel).toEqual(embeddedModel);
+    expect(restored?.ui.redoStack[0]?.geometryFiles[0]?.metadata.embeddedModel).toEqual(embeddedModel);
+    expect(restored?.projectFile.project.geometryFiles[0]?.metadata.embeddedModel).toEqual(embeddedModel);
+  });
+
+  test("reports autosave write failures through the onWriteFailed callback", () => {
+    vi.useFakeTimers();
+    const storage = {
+      getItem: vi.fn(),
+      setItem: vi.fn(() => {
+        throw new DOMException("Quota exceeded", "QuotaExceededError");
+      })
+    };
+    const onWriteFailed = vi.fn();
+    const snapshot = buildAutosavedWorkspace({
+      project,
+      displayModel,
+      savedAt: "2026-04-24T13:00:00.000Z",
+      ui: baseUi
+    });
+
+    const cancel = scheduleAutosavedWorkspaceWrite(snapshot, storage, 100, onWriteFailed);
+    vi.advanceTimersByTime(100);
+
+    expect(storage.setItem).toHaveBeenCalledTimes(1);
+    expect(onWriteFailed).toHaveBeenCalledTimes(1);
+    cancel();
   });
 
   test("debounces autosave localStorage writes until idle work is scheduled", () => {
@@ -439,7 +522,7 @@ describe("app persistence", () => {
       resultMode: "displacement",
       stressExaggeration: 3.25,
       status: "Dragging deformation",
-      logs: ["Dragging deformation"]
+      logs: [{ message: "Dragging deformation", at: 1714000000000 }]
     }, "2026-04-24T13:05:00.000Z");
 
     const cancel = scheduleAutosavedUiSnapshotWrite(uiSnapshot, storage, 200);
@@ -466,7 +549,7 @@ describe("app persistence", () => {
         resultMode: "stress",
         stressExaggeration: 1,
         status: "Results ready",
-        logs: ["Results ready"]
+        logs: [{ message: "Results ready", at: 1714000000000 }]
       }
     });
     const uiSnapshot = buildAutosavedWorkspaceUiSnapshot({
@@ -474,7 +557,7 @@ describe("app persistence", () => {
       resultMode: "acceleration",
       stressExaggeration: 4,
       status: "Fine tuning view",
-      logs: ["Fine tuning view"]
+      logs: [{ message: "Fine tuning view", at: 1714000000000 }]
     }, "2026-04-24T13:02:00.000Z");
     const storage = {
       getItem: vi.fn((key: string) => {
