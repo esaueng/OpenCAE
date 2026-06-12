@@ -14,7 +14,9 @@ import {
   packedResultPlaybackTransferables,
   resultFrameIndexes,
   resultProbeSamplesForFaces,
-  resultSamplesForFaces
+  resultSamplesForFaces,
+  solverMeshSummaryFromResults,
+  withDerivedSurfaceSafetyFactorFields
 } from "./resultFields";
 
 const faces: DisplayFace[] = [
@@ -633,5 +635,108 @@ describe("fieldWithOwnValueRange", () => {
     };
 
     expect(fieldWithOwnValueRange(field)).toMatchObject({ min: -5, max: 45 });
+  });
+});
+
+describe("withDerivedSurfaceSafetyFactorFields", () => {
+  const surfaceStressField: ResultField = {
+    id: "stress-surface",
+    runId: "run-core",
+    type: "stress",
+    location: "node",
+    values: [50, 100, 200],
+    min: 50,
+    max: 200,
+    units: "MPa",
+    surfaceMeshRef: "solver-surface"
+  };
+  const summary = { maxStress: 200, safetyFactor: 2 } as Pick<ResultSummary, "maxStress" | "safetyFactor">;
+
+  test("derives a surface-node safety factor field from the surface stress field", () => {
+    const fields = withDerivedSurfaceSafetyFactorFields({ summary: summary as ResultSummary, fields: [surfaceStressField] });
+    const derived = fields.find((field) => field.type === "safety_factor" && field.surfaceMeshRef === "solver-surface");
+    expect(derived).toBeDefined();
+    expect(derived?.location).toBe("node");
+    // yield = maxStress x minSafetyFactor = 400 MPa.
+    expect(derived?.values).toEqual([8, 4, 2]);
+    expect(derived?.min).toBe(2);
+    expect(derived?.max).toBe(8);
+    expect(derived?.runId).toBe("run-core");
+  });
+
+  test("keeps existing surface safety factor fields untouched", () => {
+    const existing: ResultField = {
+      id: "safety-surface",
+      runId: "run-core",
+      type: "safety_factor",
+      location: "node",
+      values: [1, 2, 3],
+      min: 1,
+      max: 3,
+      units: "ratio",
+      surfaceMeshRef: "solver-surface"
+    };
+    const fields = withDerivedSurfaceSafetyFactorFields({ summary: summary as ResultSummary, fields: [surfaceStressField, existing] });
+    expect(fields).toHaveLength(2);
+  });
+
+  test("derives one safety field per dynamic frame", () => {
+    const frames: ResultField[] = [0, 1].map((frameIndex) => ({
+      ...surfaceStressField,
+      id: `stress-surface-frame-${frameIndex}`,
+      frameIndex,
+      timeSeconds: frameIndex * 0.005
+    }));
+    const fields = withDerivedSurfaceSafetyFactorFields({ summary: summary as ResultSummary, fields: frames });
+    const derived = fields.filter((field) => field.type === "safety_factor");
+    expect(derived).toHaveLength(2);
+    expect(derived.map((field) => field.frameIndex)).toEqual([0, 1]);
+    expect(derived.map((field) => field.timeSeconds)).toEqual([0, 0.005]);
+  });
+
+  test("skips derivation when the summary has no usable yield point", () => {
+    const fields = withDerivedSurfaceSafetyFactorFields({
+      summary: { maxStress: 0, safetyFactor: 0 } as ResultSummary,
+      fields: [surfaceStressField]
+    });
+    expect(fields).toHaveLength(1);
+  });
+
+  test("ignores element-located stress fields without a surface mesh", () => {
+    const elementField: ResultField = { ...surfaceStressField, id: "stress-element", location: "element", surfaceMeshRef: undefined };
+    const fields = withDerivedSurfaceSafetyFactorFields({ summary: summary as ResultSummary, fields: [elementField] });
+    expect(fields).toHaveLength(1);
+  });
+});
+
+describe("solverMeshSummaryFromResults", () => {
+  test("reads node and element counts from core-solve-diagnostics entries", () => {
+    const summary = solverMeshSummaryFromResults({
+      summary: { diagnostics: [] },
+      diagnostics: [
+        { id: "other-entry" },
+        { id: "core-solve-diagnostics", nodeCount: 5132, elementCount: 18345 }
+      ]
+    });
+    expect(summary).toEqual({ nodes: 5132, elements: 18345, warnings: [], source: "core_solver" });
+  });
+
+  test("prefers explicit meshStatistics artifacts", () => {
+    const summary = solverMeshSummaryFromResults({
+      artifacts: { meshStatistics: { nodes: 80, elements: 216 } },
+      diagnostics: [{ id: "core-solve-diagnostics", nodeCount: 1, elementCount: 1 }]
+    });
+    expect(summary).toEqual({ nodes: 80, elements: 216, warnings: [], source: "core_solver" });
+  });
+
+  test("returns null when no solver mesh statistics are present", () => {
+    expect(solverMeshSummaryFromResults({ summary: { diagnostics: [] }, diagnostics: [] })).toBeNull();
+    expect(solverMeshSummaryFromResults({})).toBeNull();
+  });
+
+  test("rejects malformed counts", () => {
+    expect(solverMeshSummaryFromResults({
+      diagnostics: [{ id: "core-solve-diagnostics", nodeCount: -3, elementCount: 10 }]
+    })).toBeNull();
   });
 });

@@ -72,6 +72,10 @@ export type LocalSolveResult = {
     meshConnectivity?: {
       connectedComponents: number;
     };
+    meshStatistics?: {
+      nodes: number;
+      elements: number;
+    };
   };
 };
 
@@ -153,7 +157,7 @@ export function cloudGeometrySourceForStudy(study: Study, displayModel?: Display
   const explicit = coreCloudGeometryFromUnknown((displayModel as { coreCloudGeometry?: unknown } | undefined)?.coreCloudGeometry)
     ?? coreCloudGeometryFromUnknown((study.meshSettings.summary as { artifacts?: { coreCloudGeometry?: unknown; geometry?: unknown } } | undefined)?.artifacts?.coreCloudGeometry)
     ?? coreCloudGeometryFromUnknown((study.meshSettings.summary as { artifacts?: { coreCloudGeometry?: unknown; geometry?: unknown } } | undefined)?.artifacts?.geometry);
-  if (explicit) return explicit;
+  if (explicit) return withMeshPresetSize(explicit, study.meshSettings.preset);
 
   if (displayModel?.nativeCad) {
     return {
@@ -180,7 +184,7 @@ export function cloudGeometrySourceForStudy(study: Study, displayModel?: Display
       kind: "sample_procedural",
       sampleId: "bracket",
       units: "mm",
-      descriptor: bracketProceduralGeometryDescriptor()
+      descriptor: bracketProceduralGeometryDescriptor(study.meshSettings.preset)
     };
   }
 
@@ -676,7 +680,10 @@ function resultBundleForOpenCaeCore(
       provenance
     },
     fields: [stressFrame, displacementFrame, safetyFrame],
-    ...(coreModel.meshConnectivity ? { artifacts: { meshConnectivity: coreModel.meshConnectivity } } : {})
+    artifacts: {
+      ...(coreModel.meshConnectivity ? { meshConnectivity: coreModel.meshConnectivity } : {}),
+      meshStatistics: meshStatisticsForCoreModel(coreModel)
+    }
   };
 }
 
@@ -760,7 +767,10 @@ function dynamicResultBundleForOpenCaeCore(
       provenance
     },
     fields,
-    ...(coreModel.meshConnectivity ? { artifacts: { meshConnectivity: coreModel.meshConnectivity } } : {})
+    artifacts: {
+      ...(coreModel.meshConnectivity ? { meshConnectivity: coreModel.meshConnectivity } : {}),
+      meshStatistics: meshStatisticsForCoreModel(coreModel)
+    }
   };
 }
 
@@ -817,7 +827,7 @@ function safetyFieldForOpenCaeCore(runId: string, stressFrame: ResultField, stud
     value: values[index] ?? 0,
     vonMisesStressPa: undefined
   })) ?? [];
-  return fieldFor(runId, "safety_factor", "element", values, "", samples, provenance);
+  return fieldFor(runId, "safety_factor", "element", values, "ratio", samples, provenance);
 }
 
 function fieldFor(
@@ -901,7 +911,7 @@ function forceVectorForLoad(load: Study["loads"][number], displayModel: DisplayM
   const value = Number(load.parameters.value);
   if (!direction || !Number.isFinite(value) || value <= 0) return [0, 0, 0];
   const magnitude = load.type === "pressure"
-    ? value * 1000 * projectedAreaM2(dimensions, direction)
+    ? pressurePascals(load) * projectedAreaM2(dimensions, direction)
     : load.type === "gravity"
       ? gravityMassKg(value, displayModel, densityKgM3) * STANDARD_GRAVITY
       : value;
@@ -931,6 +941,15 @@ function equivalentMassKg(densityKgM3: number, displayModel: DisplayModel): numb
 function dimensionMeters(dimensions: NonNullable<DisplayModel["dimensions"]>): Vec3 {
   const scale = dimensions.units === "mm" ? 0.001 : 1;
   return [dimensions.x * scale, dimensions.y * scale, dimensions.z * scale];
+}
+
+const NODES_PER_ELEMENT: Record<string, number> = { Tet4: 4, Tet10: 10 };
+
+function meshStatisticsForCoreModel(coreModel: CoreStudyModel): { nodes: number; elements: number } {
+  const nodes = Math.floor(coreModel.model.nodes.coordinates.length / 3);
+  const elements = coreModel.model.elementBlocks.reduce((sum, block) =>
+    sum + Math.floor(block.connectivity.length / (NODES_PER_ELEMENT[block.type] ?? 4)), 0);
+  return { nodes, elements };
 }
 
 function elementCentroid(coreModel: CoreStudyModel, elementIndex: number): Vec3 {
@@ -1243,7 +1262,7 @@ function isBracketDemoGeometry(study: Study, displayModel: DisplayModel): boolea
   return /\bbracket\b/i.test(text) && /\b(gusset|rib|upright|mounting|hole|holes)\b/i.test(text);
 }
 
-function bracketProceduralGeometryDescriptor(): Record<string, unknown> {
+function bracketProceduralGeometryDescriptor(preset: Study["meshSettings"]["preset"] = "medium"): Record<string, unknown> {
   return {
     base: { length: 120, width: 34, height: 10 },
     upright: { height: 88, width: 18, thickness: 34 },
@@ -1260,7 +1279,27 @@ function bracketProceduralGeometryDescriptor(): Record<string, unknown> {
     },
     supportFaceId: "face-base-left",
     loadFaceId: "face-load-top",
-    meshSize: 18
+    meshSize: bracketMeshSizeMmForPreset(preset)
+  };
+}
+
+// Characteristic gmsh element size (mm) for the 120 x 88 x 34 mm bracket sample.
+// The mesh quality preset must change the solve mesh, not just the preset label.
+export function bracketMeshSizeMmForPreset(preset: Study["meshSettings"]["preset"]): number {
+  if (preset === "ultra") return 7;
+  if (preset === "fine") return 9;
+  if (preset === "coarse") return 18;
+  return 12;
+}
+
+function withMeshPresetSize(geometry: CoreCloudGeometrySource, preset: Study["meshSettings"]["preset"]): CoreCloudGeometrySource {
+  if (geometry.kind !== "sample_procedural" || geometry.sampleId !== "bracket") return geometry;
+  return {
+    ...geometry,
+    descriptor: {
+      ...(geometry.descriptor ?? {}),
+      meshSize: bracketMeshSizeMmForPreset(preset)
+    }
   };
 }
 
