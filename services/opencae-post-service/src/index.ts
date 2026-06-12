@@ -20,10 +20,12 @@ export function reportPdfKeyFor(reportRef: string): string {
   return reportRef.endsWith(".html") ? reportRef.replace(/\.html$/, ".pdf") : `${reportRef}.pdf`;
 }
 
+const ASSESSMENT_STATUSES = ["pass", "warning", "fail", "unknown"] as const;
+
 export function buildHtmlReport(runId: string, summary: ResultSummary): string {
-  const stressScore = clamp(summary.maxStress / Math.max(summary.maxStress, 1), 0, 1);
-  const safetyPct = clamp(summary.safetyFactor / 3, 0, 1);
+  const stressScore = summary.safetyFactor > 0 ? clamp(1 / summary.safetyFactor, 0, 1) : 1;
   const assessment = summary.failureAssessment ?? assessResultFailure(summary);
+  const assessmentStatusClass = ASSESSMENT_STATUSES.includes(assessment.status) ? assessment.status : "unknown";
   const analysisLabel = summary.transient ? "Dynamic structural" : "Static stress";
   const transientRows = summary.transient
     ? `
@@ -110,7 +112,7 @@ export function buildHtmlReport(runId: string, summary: ResultSummary): string {
       </section>
       <section>
         <h2>Assessment</h2>
-        <div class="assessment ${assessment.status}">
+        <div class="assessment ${escapeHtml(assessmentStatusClass)}">
           <strong>${escapeHtml(assessment.title)}</strong>
           <p class="note">${escapeHtml(assessment.message)}</p>
         </div>
@@ -131,7 +133,7 @@ export function buildPdfReport(runId: string, summary: ResultSummary): Buffer {
     "0.95 0.97 1 rg 0 0 612 792 re f",
     "0.04 0.07 0.13 rg 0 618 612 174 re f",
     "0.08 0.28 0.56 rg 330 618 282 174 re f",
-    text("OpenCAE STATIC STRESS SIMULATION", 48, 744, 10, "F2", [0.75, 0.85, 1]),
+    text(`OpenCAE ${analysisLabel.toUpperCase()} SIMULATION`, 48, 744, 10, "F2", [0.75, 0.85, 1]),
     text("Structural Analysis Report", 48, 704, 26, "F1", [1, 1, 1]),
     text(`Run ${runId}`, 48, 680, 10, "F2", [0.78, 0.86, 0.96]),
     text("Key Results", 48, 586, 18, "F1"),

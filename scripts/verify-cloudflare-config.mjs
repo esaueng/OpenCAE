@@ -9,6 +9,13 @@ const productionDomains = ["cae.esau.app"];
 const productionWorkerName = "opencae";
 const legacySolverToken = ["calcu", "lix"].join("");
 const expectedCoreCloudRunnerVersion = readFileSync(resolve(rootDir, "services/opencae-core-cloud/RUNNER_VERSION"), "utf8").trim();
+// Three version tokens exist on purpose and only two must match:
+// - RUNNER_VERSION (services/opencae-core-cloud/RUNNER_VERSION) must equal the
+//   container image tag and the Durable Object instance name in the worker.
+// - The Cloudflare container *application* name below was created as 0.1.1 and
+//   is intentionally not renamed on runner bumps, because renaming a container
+//   application replaces it in Cloudflare. Update it only as a deliberate
+//   infrastructure migration.
 const expectedCoreCloudContainerName = "opencae-core-cloud-0.1.1";
 
 export function parseJsonc(source, label = "JSONC input") {
@@ -35,6 +42,9 @@ export function validateCloudflareConfigs({ defaultConfig, staticConfig, localFi
 
   if (defaultConfig) validateProductionConfig("default", defaultConfig, failures);
   if (containerConfig) validateCoreCloudContainerConfig("container", containerConfig, failures);
+  if (defaultConfig && containerConfig && JSON.stringify(defaultConfig) !== JSON.stringify(containerConfig)) {
+    failures.push("wrangler.jsonc must mirror wrangler.containers.jsonc exactly so a default deploy cannot publish an unbound Worker");
+  }
   if (packageJson) validateCoreCloudScripts(packageJson, failures);
 
   validateNonProductionConfig("static", staticConfig, defaultConfig, failures);

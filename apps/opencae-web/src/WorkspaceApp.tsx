@@ -3,7 +3,7 @@ import type { Constraint, DisplayFace, DisplayModel, DynamicSolverSettings, Load
 import { RotateCcw, Save } from "lucide-react";
 import { addLoad, addSupport, assignMaterial, cancelRun, createProject, generateMesh, getResults, importLocalProject, loadSampleProject, renameProject, runSimulation, subscribeToRun, updateStudy as saveStudyPatch, uploadModel, type SampleAnalysisType, type SampleModelId } from "./lib/api";
 import { normalizePrintParameters, starterMaterials } from "@opencae/materials";
-import { BottomPanel } from "./components/BottomPanel";
+import { BottomPanel, type WorkspaceLogEntry } from "./components/BottomPanel";
 import { OpenCaeLogoMark } from "./components/OpenCaeLogoMark";
 import { RightPanel } from "./components/RightPanel";
 import { StartScreen } from "./components/StartScreen";
@@ -125,13 +125,16 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const [viewAxis, setViewAxis] = useState<RotationAxis | null>(null);
   const [viewAxisSignal, setViewAxisSignal] = useState(0);
   const [status, setStatus] = useState(restoredUi?.status ?? (restoredProjectFile ? "Workspace restored after reload." : "Ready"));
-  const [logs, setLogs] = useState<string[]>(restoredUi?.logs.length ? restoredUi.logs : restoredProjectFile ? ["Workspace restored after reload.", "Ready | Local Mode"] : ["Ready | Local Mode"]);
+  const [logs, setLogs] = useState<WorkspaceLogEntry[]>(() => restoredUi?.logs.length
+    ? restoredUi.logs
+    : (restoredProjectFile ? ["Workspace restored after reload.", "Ready | Local Mode"] : ["Ready | Local Mode"]).map((message) => ({ message, at: Date.now() })));
   const [runProgress, setRunProgress] = useState(restoredUi?.runProgress ?? (restoredResults?.fields.length ? 100 : 0));
   const [runTiming, setRunTiming] = useState<RunTimingEstimate | null>(null);
   const [activeRunId, setActiveRunId] = useState(restoredUi?.activeRunId || restoredResults?.activeRunId || restoredResults?.completedRunId || "run-bracket-demo-seeded");
   const [completedRunId, setCompletedRunId] = useState(restoredUi?.completedRunId || restoredResults?.completedRunId || "run-bracket-demo-seeded");
   const [processingRunId, setProcessingRunId] = useState<string | null>(null);
-  const [resultSummary, setResultSummary] = useState<ResultSummary>(restoredResults?.summary ?? seededSummary);
+  const [resultSummary, setResultSummary] = useState<ResultSummary | null>(() =>
+    restoredResults?.summary ?? (hasSeededBracketDemoRun(restoredProjectFile?.project) ? seededSummary : null));
   const [resultFields, setResultFields] = useState<ResultField[]>(restoredResults?.fields ?? []);
   const [resultSurfaceMesh, setResultSurfaceMesh] = useState<SolverSurfaceMesh | undefined>(restoredResults?.surfaceMesh);
   const [resultFrameIndex, setResultFrameIndex] = useState(0);
@@ -154,6 +157,9 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const didRequestRestoredHomeView = useRef(false);
   const activeRunSourceRef = useRef<EventSource | null>(null);
   const processingRunIdRef = useRef<string | null>(null);
+  const projectRef = useRef<Project | null>(project);
+  const autosaveWriteFailureNotifiedRef = useRef(false);
+  const workspaceShortcutHandlerRef = useRef<(event: KeyboardEvent) => void>(() => undefined);
   const resultFrameIndexRef = useRef(0);
   const resultPlaybackFramePositionRef = useRef(0);
   const resultPlaybackOrdinalPositionRef = useRef(0);
@@ -179,7 +185,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const selectedFace = useMemo(() => displayModel?.faces.find((face) => face.id === selectedFaceId) ?? null, [displayModel, selectedFaceId]);
   const displayUnitSystem = project?.unitSystem ?? "SI";
   const displayModelForUi = useMemo(() => displayModel ? displayModelForUnits(displayModel, displayUnitSystem) : null, [displayModel, displayUnitSystem]);
-  const resultSummaryForUi = useMemo(() => resultSummaryForUnits(resultSummary, displayUnitSystem), [displayUnitSystem, resultSummary]);
+  const resultSummaryForUi = useMemo(() => resultSummary ? resultSummaryForUnits(resultSummary, displayUnitSystem) : null, [displayUnitSystem, resultSummary]);
   const resultFieldsForUi = useMemo(() => resultFields.map((field) => resultFieldForUnits(field, displayUnitSystem)), [displayUnitSystem, resultFields]);
   const resultFrameCache = useMemo(() => createResultFrameCache(resultFieldsForUi), [resultFieldsForUi]);
   const packedResultPlaybackCache = useMemo(() => createPackedResultPlaybackCache(resultFieldsForUi), [resultFieldsForUi]);
@@ -265,6 +271,10 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const effectiveCanRunSimulation = canRunSimulation;
   const canUndoAction = undoStack.length > 0;
   const canRedoAction = redoStack.length > 0;
+
+  useEffect(() => {
+    projectRef.current = project;
+  }, [project]);
 
   useEffect(() => {
     if (!initialAction || initialActionConsumedRef.current) return;
@@ -534,36 +544,49 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     });
   }, [study]);
 
-  useEffect(() => {
+  function handleWorkspaceShortcut(event: KeyboardEvent) {
     if (!project || !displayModel) return;
-    function handleShortcut(event: KeyboardEvent) {
-      const key = event.key.toLowerCase();
-      if ((event.metaKey || event.ctrlKey) && key === "s") {
-        event.preventDefault();
-        void handleSaveProject();
-      }
-      if ((event.metaKey || event.ctrlKey) && key === "z") {
-        event.preventDefault();
-        if (event.shiftKey) {
-          handleRedoAction();
-        } else {
-          handleUndoAction();
-        }
-      }
-      if (event.metaKey || event.ctrlKey || event.altKey || isEditableShortcutTarget(event.target as HTMLElement | null)) return;
-      if (key === "h") {
-        event.preventDefault();
-        handleFitDefaultView();
-        return;
-      }
-      const shortcutStep = workflowStepForShortcut(key, activeStep, { meshStatus: study?.meshSettings.status ?? "not_started" });
-      if (!shortcutStep) return;
+    const key = event.key.toLowerCase();
+    const editableTarget = isEditableShortcutTarget(event.target as HTMLElement | null);
+    if ((event.metaKey || event.ctrlKey) && key === "s") {
+      // Cmd/Ctrl+S stays global, even inside text inputs, so a save request is never silently dropped.
       event.preventDefault();
-      navigateToStep(shortcutStep);
+      void handleSaveProject();
+      return;
     }
+    if ((event.metaKey || event.ctrlKey) && key === "z") {
+      // Editable fields keep their native undo/redo instead of mutating app history.
+      if (editableTarget) return;
+      event.preventDefault();
+      if (event.shiftKey) {
+        handleRedoAction();
+      } else {
+        handleUndoAction();
+      }
+      return;
+    }
+    if (event.metaKey || event.ctrlKey || event.altKey || editableTarget) return;
+    if (key === "h") {
+      event.preventDefault();
+      handleFitDefaultView();
+      return;
+    }
+    const shortcutStep = workflowStepForShortcut(key, activeStep, { meshStatus: study?.meshSettings.status ?? "not_started" });
+    if (!shortcutStep) return;
+    event.preventDefault();
+    navigateToStep(shortcutStep);
+  }
+
+  // Keep the latest handler in a ref so the mount-once listener never reads stale state (e.g. Cmd+S saving outdated results).
+  useEffect(() => {
+    workspaceShortcutHandlerRef.current = handleWorkspaceShortcut;
+  });
+
+  useEffect(() => {
+    const handleShortcut = (event: KeyboardEvent) => workspaceShortcutHandlerRef.current(event);
     window.addEventListener("keydown", handleShortcut);
     return () => window.removeEventListener("keydown", handleShortcut);
-  }, [activeStep, displayModel, project, redoStack, study, undoStack, viewMode]);
+  }, []);
 
   const autosaveUiSnapshot = useMemo<WorkspaceUiSnapshot>(() => ({
     activeStep,
@@ -615,12 +638,19 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     viewMode
   ]);
 
+  function notifyAutosaveWriteFailure() {
+    if (autosaveWriteFailureNotifiedRef.current) return;
+    autosaveWriteFailureNotifiedRef.current = true;
+    pushMessage("Autosave failed: browser storage is full or unavailable. Save the project to disk to keep changes.");
+  }
+
   useEffect(() => {
     if (!project || !displayModel) return;
     return scheduleAutosavedUiSnapshotWrite(
       () => buildAutosavedWorkspaceUiSnapshot(autosaveUiSnapshot),
       undefined,
-      AUTOSAVE_UI_WRITE_DELAY_MS
+      AUTOSAVE_UI_WRITE_DELAY_MS,
+      notifyAutosaveWriteFailure
     );
   }, [autosaveUiSnapshot, displayModel, project]);
 
@@ -629,7 +659,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     return scheduleAutosavedWorkspaceWrite(() => buildAutosavedWorkspace({
       project,
       displayModel,
-      results: resultFields.length ? {
+      results: resultFields.length && resultSummary ? {
         activeRunId,
         completedRunId,
         summary: resultSummary,
@@ -637,7 +667,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         ...(resultSurfaceMesh ? { surfaceMesh: resultSurfaceMesh } : {})
       } : undefined,
       ui: autosaveUiSnapshot
-    }), undefined, AUTOSAVE_HEAVY_WRITE_DELAY_MS);
+    }), undefined, AUTOSAVE_HEAVY_WRITE_DELAY_MS, notifyAutosaveWriteFailure);
   }, [
     activeRunId,
     activeStep,
@@ -670,6 +700,12 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     options?: { nextStep?: StepId }
   ) {
     const response = await action;
+    // Stop watching any run from the previous project so it cannot overwrite the new project's results.
+    activeRunSourceRef.current?.close();
+    activeRunSourceRef.current = null;
+    processingRunIdRef.current = null;
+    setProcessingRunId(null);
+    setRunTiming(null);
     setHomeRequested(false);
     setProject(response.project);
     setDisplayModel(response.displayModel);
@@ -697,6 +733,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     } else {
       applyStep("model");
       setViewMode("model");
+      setResultSummary(null);
       setResultFields([]);
       setResultSurfaceMesh(undefined);
       setResultFrameIndex(0);
@@ -734,14 +771,14 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   async function handleSaveProject() {
     if (!project || !displayModel) return;
     try {
-      const savedAt = await saveProjectToLocalDisk(project, displayModel, {
+      const savedAt = await saveProjectToLocalDisk(project, displayModel, resultSummary ? {
         activeRunId,
         completedRunId,
         summary: resultSummary,
         fields: resultFields,
         ...(resultSurfaceMesh ? { surfaceMesh: resultSurfaceMesh } : {})
-      });
-      setProject({ ...project, updatedAt: savedAt });
+      } : undefined);
+      setProject((current) => current ? { ...current, updatedAt: savedAt } : current);
       pushMessage("Project saved to local disk.");
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") return;
@@ -751,7 +788,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
 
   function pushMessage(message: string) {
     setStatus(message);
-    setLogs((current) => [message, ...current].slice(0, WORKSPACE_LOG_LIMIT));
+    setLogs((current) => [{ message, at: Date.now() }, ...current].slice(0, WORKSPACE_LOG_LIMIT));
   }
 
   function clearLogs() {
@@ -760,9 +797,14 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
 
   async function updateStudy(action: Promise<{ study: Study; message: string }>, nextStep?: StepId) {
     const response = await action;
-    if (project) {
-      recordUndoSnapshot(project);
-      setProject({ ...project, studies: project.studies.map((item) => (item.id === response.study.id ? response.study : item)) });
+    // Snapshot the latest committed project (not the render closure) so quick consecutive mutations
+    // each capture their true pre-mutation state, then merge the study into the current project.
+    const projectBeforeUpdate = projectRef.current;
+    if (projectBeforeUpdate) {
+      recordUndoSnapshot(projectBeforeUpdate);
+      setProject((current) => current
+        ? { ...current, studies: current.studies.map((item) => (item.id === response.study.id ? response.study : item)) }
+        : current);
     }
     pushMessage(response.message);
     if (nextStep) navigateToStep(nextStep);
@@ -843,7 +885,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   }
 
   function recordUndoSnapshot(snapshot: Project) {
-    setUndoStack((history) => [...history, structuredClone(snapshot)].slice(-30));
+    setUndoStack((history) => [...history, cloneProjectSharingEmbeddedModels(snapshot)].slice(-30));
     setRedoStack([]);
   }
 
@@ -984,8 +1026,8 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     const previous = undoStack[undoStack.length - 1];
     if (!previous) return;
     setUndoStack(undoStack.slice(0, -1));
-    setRedoStack([...redoStack, structuredClone(project)]);
-    setProject(structuredClone(previous));
+    setRedoStack([...redoStack, cloneProjectSharingEmbeddedModels(project)]);
+    setProject(cloneProjectSharingEmbeddedModels(previous));
     void persistProjectSnapshot(previous, "Undo applied.");
   }
 
@@ -994,8 +1036,8 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     const next = redoStack[redoStack.length - 1];
     if (!next) return;
     setRedoStack(redoStack.slice(0, -1));
-    setUndoStack([...undoStack, structuredClone(project)].slice(-30));
-    setProject(structuredClone(next));
+    setUndoStack([...undoStack, cloneProjectSharingEmbeddedModels(project)].slice(-30));
+    setProject(cloneProjectSharingEmbeddedModels(next));
     void persistProjectSnapshot(next, "Redo applied.");
   }
 
@@ -1385,6 +1427,22 @@ function ProjectNameChip({ name, onRename }: { name: string; onRename: (name: st
       {name}
     </button>
   );
+}
+
+function hasSeededBracketDemoRun(project: Project | undefined): boolean {
+  const study = project?.studies[0];
+  return Boolean(study?.runs.some((run) => run.id === "run-bracket-demo-seeded" && (run.resultRef || run.status === "complete")));
+}
+
+function cloneProjectSharingEmbeddedModels(project: Project): Project {
+  const clone = structuredClone(project);
+  // Embedded model files are immutable after upload; sharing them by reference keeps
+  // undo/redo snapshots from duplicating large base64 payloads.
+  clone.geometryFiles.forEach((geometry, index) => {
+    const embeddedModel = project.geometryFiles[index]?.metadata.embeddedModel;
+    if (embeddedModel) geometry.metadata.embeddedModel = embeddedModel;
+  });
+  return clone;
 }
 
 function latestCompletedRunId(study: Study | null, activeRunId: string): string | null {

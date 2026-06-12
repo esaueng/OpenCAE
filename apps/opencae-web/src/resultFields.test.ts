@@ -5,6 +5,7 @@ import {
   createResultFrameCache,
   dynamicPlaybackFrames,
   fieldsForResultFrame,
+  fieldWithOwnValueRange,
   hasDynamicPlaybackFrames,
   interpolatedFieldsForFramePosition,
   nextLoopedResultFrameIndex,
@@ -571,5 +572,66 @@ describe("dynamic result frames", () => {
       cache!.vectorLengths.buffer,
       cache!.vectors.buffer
     ]));
+  });
+});
+
+describe("fieldWithOwnValueRange", () => {
+  test("computes min and max for very large value arrays without a spread RangeError", () => {
+    const values: number[] = new Array(200_000);
+    for (let index = 0; index < values.length; index += 1) {
+      values[index] = (index % 1000) - 500;
+    }
+    values[12_345] = -1234.5;
+    values[123_456] = 98765.4;
+    values[180_000] = Number.NaN;
+    const field: ResultField = {
+      id: "stress-large",
+      runId: "run",
+      type: "stress",
+      location: "node",
+      values,
+      min: 0,
+      max: 0,
+      units: "MPa"
+    };
+
+    const ranged = fieldWithOwnValueRange(field);
+
+    expect(ranged.min).toBe(-1234.5);
+    expect(ranged.max).toBe(98765.4);
+  });
+
+  test("keeps the incoming field when no finite values are present", () => {
+    const field: ResultField = {
+      id: "stress-empty",
+      runId: "run",
+      type: "stress",
+      location: "node",
+      values: [Number.NaN],
+      min: 3,
+      max: 7,
+      units: "MPa"
+    };
+
+    expect(fieldWithOwnValueRange(field)).toBe(field);
+  });
+
+  test("includes sample values when computing the field range", () => {
+    const field: ResultField = {
+      id: "stress-sampled",
+      runId: "run",
+      type: "stress",
+      location: "node",
+      values: [10, 20],
+      min: 0,
+      max: 0,
+      units: "MPa",
+      samples: [
+        { point: [0, 0, 0], normal: [0, 1, 0], value: -5 },
+        { point: [1, 0, 0], normal: [0, 1, 0], value: 45 }
+      ]
+    };
+
+    expect(fieldWithOwnValueRange(field)).toMatchObject({ min: -5, max: 45 });
   });
 });
