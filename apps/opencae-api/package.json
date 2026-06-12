@@ -14,7 +14,6 @@
     "@opencae/core-adapter": "workspace:*",
     "@opencae/db": "workspace:*",
     "@opencae/jobs": "workspace:*",
-    "@opencae/materials": "workspace:*",
     "@opencae/mesh-service": "workspace:*",
     "@opencae/post-service": "workspace:*",
     "@opencae/schema": "workspace:*",
@@ -25,7 +24,8 @@
     "fastify": "^5.2.1"
   },
   "devDependencies": {
-    "@types/node": "^22.10.5"
+    "@types/node": "^22.10.5",
+    "tsx": "^4.19.2"
   },
   "license": "Apache-2.0"
 }

@@ -69,6 +69,11 @@ export default {
         if (authorization) return authorization;
         return startCoreCloudRun(env, cloudRoute.runId);
       }
+      if (request.method === "POST" && cloudRoute.action === "cancel" && cloudRoute.runId) {
+        const authorization = await authorizeCoreCloudRun(request, env, cloudRoute.runId);
+        if (authorization) return authorization;
+        return cancelCoreCloudRun(env, cloudRoute.runId);
+      }
       if (request.method === "GET" && cloudRoute.action === "events" && cloudRoute.runId) {
         const authorization = await authorizeCoreCloudRun(request, env, cloudRoute.runId);
         if (authorization) return authorization;
@@ -104,12 +109,12 @@ export default {
 
 function isCloudCoreRoute(pathname: string): boolean {
   return pathname === "/api/cloud-core/runs" ||
-    /^\/api\/cloud-core\/runs\/[^/]+\/(?:start|events|results)$/.test(pathname);
+    /^\/api\/cloud-core\/runs\/[^/]+\/(?:start|events|results|cancel)$/.test(pathname);
 }
 
 function isLegacyCloudFeaRoute(pathname: string): boolean {
   return pathname === "/api/cloud-fea/runs" ||
-    /^\/api\/cloud-fea\/runs\/[^/]+\/(?:start|events|results)$/.test(pathname);
+    /^\/api\/cloud-fea\/runs\/[^/]+\/(?:start|events|results|cancel)$/.test(pathname);
 }
 
 type CoreCloudEnv = Env & {
@@ -119,12 +124,12 @@ type CoreCloudEnv = Env & {
 
 type CloudRoute =
   | { action: "runs"; runId?: undefined }
-  | { action: "start" | "events" | "results"; runId: string };
+  | { action: "start" | "events" | "results" | "cancel"; runId: string };
 
 type CoreCloudRunRequest = {
   runId?: string;
   analysisType?: string;
-  study?: { type?: string; loads?: unknown[] };
+  study?: { id?: string; type?: string; loads?: unknown[] };
   geometry?: unknown;
   coreModel?: unknown;
   coreVolumeMesh?: unknown;
@@ -134,7 +139,7 @@ type CoreCloudRunRequest = {
 
 type RunEvent = {
   runId: string;
-  type: "state" | "progress" | "message" | "complete" | "error";
+  type: "state" | "progress" | "message" | "complete" | "error" | "cancelled";
   progress?: number;
   message: string;
   timestamp: string;
@@ -143,9 +148,9 @@ type RunEvent = {
 function parseCloudCoreRoute(pathname: string): CloudRoute | undefined {
   if (!isCloudCoreRoute(pathname) && !isLegacyCloudFeaRoute(pathname)) return undefined;
   if (pathname === "/api/cloud-core/runs" || pathname === "/api/cloud-fea/runs") return { action: "runs" };
-  const match = pathname.match(/^\/api\/cloud-(?:core|fea)\/runs\/([^/]+)\/(start|events|results)$/);
+  const match = pathname.match(/^\/api\/cloud-(?:core|fea)\/runs\/([^/]+)\/(start|events|results|cancel)$/);
   if (!match) return undefined;
-  return { runId: match[1]!, action: match[2] as "start" | "events" | "results" };
+  return { runId: match[1]!, action: match[2] as "start" | "events" | "results" | "cancel" };
 }
 
 async function coreCloudHealth(env: Env): Promise<Response> {
@@ -180,7 +185,7 @@ async function coreCloudHealth(env: Env): Promise<Response> {
       [`no${"Calcu"}${"lix"}`]: true,
       noLocalEstimateFallback: true
     },
-    { status: containerBound && artifactBound ? 200 : 503, headers: jsonHeaders }
+    { status: coreCloudAvailable && artifactBound ? 200 : 503, headers: jsonHeaders }
   );
 }
 
@@ -245,6 +250,13 @@ async function startCoreCloudRun(env: Env, runId: string): Promise<Response> {
   if (existingEvents.some((item) => item.type === "error")) {
     return Response.json({ ok: false, runId, status: "error" }, { status: 409, headers: jsonHeaders });
   }
+  if (existingEvents.some((item) => item.type === "cancelled")) {
+    return Response.json({ ok: false, runId, status: "cancelled" }, { status: 409, headers: jsonHeaders });
+  }
+  const claimed = await claimCoreCloudRunStart(env, runId);
+  if (!claimed) {
+    return Response.json({ ok: false, runId, status: "running", error: "OpenCAE Core Cloud run is already started." }, { status: 409, headers: jsonHeaders });
+  }
   await runCoreCloudSolve(env, runId);
   const events = await readEvents(env, runId);
   const failed = events.find((item) => item.type === "error");
@@ -252,6 +264,25 @@ async function startCoreCloudRun(env: Env, runId: string): Promise<Response> {
     return Response.json({ ok: false, runId, status: "error", error: failed.message }, { status: 500, headers: jsonHeaders });
   }
   return Response.json({ ok: true, runId, status: "complete" }, { headers: jsonHeaders });
+}
+
+async function claimCoreCloudRunStart(env: Env, runId: string): Promise<boolean> {
+  const bucket = (env as CoreCloudEnv).CORE_CLOUD_ARTIFACTS;
+  if (!bucket) throw new Error("CORE_CLOUD_ARTIFACTS is not bound.");
+  const startKey = runStartedKey(runId);
+  const existing = await bucket.head(startKey);
+  if (existing) return false;
+  await bucket.put(startKey, JSON.stringify({ startedAt: new Date().toISOString() }));
+  return true;
+}
+
+async function cancelCoreCloudRun(env: Env, runId: string): Promise<Response> {
+  const existingEvents = await readEvents(env, runId);
+  if (existingEvents.some((item) => item.type === "complete" || item.type === "error" || item.type === "cancelled")) {
+    return Response.json({ ok: false, runId, status: "finished", error: "OpenCAE Core Cloud run already finished." }, { status: 409, headers: jsonHeaders });
+  }
+  await appendCoreCloudEvent(env, runId, event(runId, "cancelled", "OpenCAE Core Cloud run cancelled before dispatch. A solve already sent to the container may still finish server-side.", 100));
+  return Response.json({ ok: true, runId, status: "cancelled" }, { headers: jsonHeaders });
 }
 
 async function runCoreCloudSolve(env: Env, runId: string): Promise<void> {
@@ -279,6 +310,8 @@ async function runCoreCloudSolve(env: Env, runId: string): Promise<void> {
     const solveResult = coreCloudResultFromPayload(solvePayload);
     validateCoreCloudResult(solveResult, requestArtifact);
     await writeJson(env, resultsKey(runId), solveResult);
+    const eventsAfterSolve = await readEvents(env, runId);
+    if (eventsAfterSolve.some((item) => item.type === "cancelled")) return;
     await appendCoreCloudEvent(env, runId, event(runId, "complete", "OpenCAE Core Cloud solve complete.", 100));
   } catch (error) {
     await appendCoreCloudEvent(env, runId, event(runId, "error", error instanceof Error ? error.message : String(error), 100));
@@ -375,11 +408,18 @@ function hasCoreCloudBindings(env: Env): boolean {
   return Boolean(coreEnv.CORE_CLOUD_CONTAINER && coreEnv.CORE_CLOUD_ARTIFACTS);
 }
 
+const CONTAINER_HEALTH_TIMEOUT_MS = 30_000;
+const CONTAINER_SOLVE_TIMEOUT_MS = 300_000;
+
 function fetchCoreCloudContainer(env: Env, pathname: string, init?: RequestInit): Promise<Response> {
   const binding = (env as CoreCloudEnv).CORE_CLOUD_CONTAINER;
   if (!binding) throw new Error("CORE_CLOUD_CONTAINER is not bound.");
   const coreCloudContainer = getContainer(binding, coreCloudContainerInstanceName());
-  return coreCloudContainer.fetch(new Request(`https://container.local${pathname}`, init));
+  const timeoutMs = pathname === "/solve" ? CONTAINER_SOLVE_TIMEOUT_MS : CONTAINER_HEALTH_TIMEOUT_MS;
+  return coreCloudContainer.fetch(new Request(`https://container.local${pathname}`, {
+    ...init,
+    signal: AbortSignal.timeout(timeoutMs)
+  }));
 }
 
 async function authorizeCoreCloudRun(request: Request, env: Env, runId: string): Promise<Response | undefined> {
@@ -500,7 +540,7 @@ function event(runId: string, type: RunEvent["type"], message: string, progress?
   return {
     runId,
     type,
-    progress,
+    ...(progress === undefined ? {} : { progress }),
     message,
     timestamp: new Date().toISOString()
   };
@@ -516,6 +556,10 @@ function runAuthKey(runId: string): string {
 
 function eventsKey(runId: string): string {
   return `cloud-core/runs/${runId}/events.json`;
+}
+
+function runStartedKey(runId: string): string {
+  return `cloud-core/runs/${runId}/started.json`;
 }
 
 function resultsKey(runId: string): string {

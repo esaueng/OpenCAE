@@ -46,7 +46,9 @@ function collectDirectory(relativeDir) {
     if (entry.isDirectory()) return collectDirectory(child);
     if (!entry.isFile()) return [];
     if (entry.name === "Dockerfile") return [child];
-    const extension = entry.name.slice(entry.name.lastIndexOf("."));
+    const dotIndex = entry.name.lastIndexOf(".");
+    if (dotIndex < 0) return [];
+    const extension = entry.name.slice(dotIndex);
     return productionExtensions.has(extension) ? [child] : [];
   });
 }

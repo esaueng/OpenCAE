@@ -671,6 +671,7 @@ function resultBundleForOpenCaeCore(
   return {
     summary: {
       ...summaryBase,
+      diagnostics: [],
       failureAssessment: assessResultFailure(summaryBase),
       provenance
     },

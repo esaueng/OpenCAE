@@ -13,10 +13,10 @@ export const MaterialSchema = z.object({
   id: z.string(),
   name: z.string(),
   category: z.enum(["metal", "plastic", "composite", "resin"]).optional(),
-  youngsModulus: z.number(),
-  poissonRatio: z.number(),
-  density: z.number(),
-  yieldStrength: z.number(),
+  youngsModulus: z.number().positive(),
+  poissonRatio: z.number().gt(-1).lt(0.5),
+  density: z.number().positive(),
+  yieldStrength: z.number().positive(),
   printProfile: z
     .object({
       process: z.enum(["FDM", "SLA", "SLS", "MJF", "Metal AM"]),
@@ -305,7 +305,7 @@ export const ResultSummarySchema = z.object({
   reactionForce: z.number(),
   reactionForceUnits: z.string(),
   provenance: ResultProvenanceSchema.optional(),
-  diagnostics: z.array(DiagnosticSchema).default([]).optional(),
+  diagnostics: z.array(DiagnosticSchema).optional().default([]),
   loadSummary: z
     .object({
       appliedLoadMagnitude: z.number().optional(),
@@ -360,7 +360,7 @@ export type ResultProvenance = z.infer<typeof ResultProvenanceSchema>;
 export type ResultField = z.infer<typeof ResultFieldSchema>;
 export type GeometryFile = z.infer<typeof GeometryFileSchema>;
 export type MeshSummary = z.infer<typeof MeshSummarySchema>;
-export type ResultSummary = z.infer<typeof ResultSummarySchema>;
+export type ResultSummary = Omit<z.infer<typeof ResultSummarySchema>, "diagnostics"> & { diagnostics?: Diagnostic[] };
 export type StudyRun = z.infer<typeof StudyRunSchema>;
 export type Study = z.infer<typeof StudySchema>;
 export type Project = z.infer<typeof ProjectSchema>;
