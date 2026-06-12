@@ -209,6 +209,59 @@ export function cloudGeometrySourceForStudy(study: Study, displayModel?: Display
   return null;
 }
 
+/**
+ * Built-in sample geometry is authored in display-model space (Y axis = height) and the
+ * viewer stands it upright with the legacy +90 deg X base rotation, while every OpenCAE
+ * Core solver mesh for that geometry (cloud structured block, procedural bracket, and
+ * the structured block Core model built below) lives in the upright solver frame that
+ * rotation produces (Z axis = height). Uploaded CAD/mesh geometry is meshed in its own
+ * file coordinates, which the viewer renders without the base rotation, so its
+ * directions pass through unchanged.
+ */
+export function displayDirectionToSolverFrame(direction: Vec3, displayModel: DisplayModel | undefined): Vec3 {
+  if (!displayModel || !displayModelUsesUprightSolverFrame(displayModel)) {
+    return [direction[0], direction[1], direction[2]];
+  }
+  return [direction[0], negated(direction[2]), direction[1]];
+}
+
+function negated(value: number): number {
+  return value === 0 ? 0 : -value;
+}
+
+/**
+ * Study load directions are recorded in display-model space, but OpenCAE Core Cloud
+ * applies them verbatim in the solver frame when it meshes dispatched geometry. Rotate
+ * them into the solver frame so the solved deformation matches the load arrows shown in
+ * the viewer.
+ */
+export function studyForCoreCloudGeometryDispatch(study: Study, displayModel: DisplayModel | undefined): Study {
+  if (!displayModel || !displayModelUsesUprightSolverFrame(displayModel)) return study;
+  return {
+    ...study,
+    loads: study.loads.map((load) => {
+      const direction = vector3(load.parameters.direction);
+      if (!direction) return load;
+      return {
+        ...load,
+        parameters: {
+          ...load.parameters,
+          direction: displayDirectionToSolverFrame(direction, displayModel)
+        }
+      };
+    })
+  };
+}
+
+function displayModelUsesUprightSolverFrame(displayModel: DisplayModel): boolean {
+  // Mirrors the viewer rule for the legacy sample base rotation (modelOrientation.ts):
+  // uploaded geometry and empty models render without it.
+  return displayModel.bodyCount !== 0 &&
+    !displayModel.nativeCad &&
+    !displayModel.visualMesh &&
+    !displayModel.id.includes("uploaded");
+}
+
 export function isComplexGeometry(displayModel: DisplayModel | undefined, study?: Study): boolean {
   if (!displayModel) return false;
   if (hasActualCoreVolumeMeshForDisplay(displayModel)) return true;
@@ -331,7 +384,7 @@ export function buildOpenCaeCoreCloudModelForStudy(study: Study, displayModel: D
     }
     const mesh = tetMeshForDisplayModel(displayModel, study.meshSettings.preset);
     model = volumeMeshToModelJson({
-      nodes: { coordinates: mesh.solverCoordinates },
+      nodes: { coordinates: solverFrameCoordinates(mesh.solverCoordinates, displayModel) },
       materials: [coreMaterial],
       elementBlocks: [{
         name: "structured-block-tet4",
@@ -339,7 +392,7 @@ export function buildOpenCaeCoreCloudModelForStudy(study: Study, displayModel: D
         material: coreMaterial.name,
         connectivity: mesh.connectivity
       }],
-      coordinateSystem: { solverUnits: "m-N-s-Pa", renderCoordinateSpace: "display_model" },
+      coordinateSystem: { solverUnits: "m-N-s-Pa", renderCoordinateSpace: "solver" },
       meshProvenance: {
         kind: "opencae_core_fea",
         solver: "opencae-core-cloud",
@@ -361,7 +414,7 @@ export function buildOpenCaeCoreCloudModelForStudy(study: Study, displayModel: D
       resultSource: "computed",
       meshSource
     },
-    coordinateSystem: model.coordinateSystem ?? { solverUnits: "m-N-s-Pa", renderCoordinateSpace: meshSource === "structured_block_core" ? "display_model" : "solver" }
+    coordinateSystem: model.coordinateSystem ?? { solverUnits: "m-N-s-Pa", renderCoordinateSpace: "solver" }
   };
 
   const surfaceSets = [...(model.surfaceSets ?? [])];
@@ -398,17 +451,18 @@ export function buildOpenCaeCoreCloudModelForStudy(study: Study, displayModel: D
     if (load.type === "pressure") {
       const pressure = pressurePascals(load);
       if (pressure <= 0) continue;
+      const pressureDirection = normalize(vector3(load.parameters.direction) ?? [0, 0, -1]);
       loads.push({
         name: `pressure${index}`,
         type: "pressure",
         surfaceSet: surfaceSet.name,
         pressure,
-        ...(normalize(vector3(load.parameters.direction) ?? [0, 0, -1]) ? { direction: normalize(vector3(load.parameters.direction) ?? [0, 0, -1])! } : {})
+        ...(pressureDirection ? { direction: displayDirectionToSolverFrame(pressureDirection, displayModel) } : {})
       });
       continue;
     }
 
-    const force = forceVectorForLoad(load, displayModel, density);
+    const force = displayDirectionToSolverFrame(forceVectorForLoad(load, displayModel, density), displayModel);
     if (Math.hypot(...force) <= 1e-12) continue;
     loads.push({
       name: load.type === "gravity" ? `payloadGravity${index}` : `appliedForce${index}`,
@@ -1025,6 +1079,24 @@ function tetMeshForDisplayModel(displayModel: DisplayModel, preset: Study["meshS
   }
 
   return { solverCoordinates, renderNodePoints, connectivity };
+}
+
+/**
+ * Rotates display-frame structured block coordinates (Y axis = height) into the upright
+ * solver frame (Z axis = height) with the same proper rotation the viewer applies to
+ * sample geometry, so solver surface meshes and their displacement vectors render true
+ * without any axis flip. Render node points stay in display space for face mapping.
+ */
+function solverFrameCoordinates(displayFrameCoordinates: number[], displayModel: DisplayModel): number[] {
+  if (!displayModelUsesUprightSolverFrame(displayModel)) return displayFrameCoordinates;
+  const widthMeters = dimensionMeters(displayModel.dimensions!)[2];
+  const coordinates: number[] = new Array(displayFrameCoordinates.length);
+  for (let index = 0; index < displayFrameCoordinates.length; index += 3) {
+    coordinates[index] = displayFrameCoordinates[index] ?? 0;
+    coordinates[index + 1] = widthMeters - (displayFrameCoordinates[index + 2] ?? 0);
+    coordinates[index + 2] = displayFrameCoordinates[index + 1] ?? 0;
+  }
+  return coordinates;
 }
 
 function renderBoundsForDisplayModel(displayModel: DisplayModel): { min: Vec3; max: Vec3 } {

@@ -1,8 +1,13 @@
 import { describe, expect, test } from "vitest";
+import { solverSurfaceMeshFromModel } from "@opencae/core";
+import { solveCoreStatic } from "@opencae/solver-cpu";
 import type { DisplayModel, Study } from "@opencae/schema";
 import {
   bracketMeshSizeMmForPreset,
+  buildOpenCaeCoreCloudModelForStudy,
   cloudGeometrySourceForStudy,
+  displayDirectionToSolverFrame,
+  studyForCoreCloudGeometryDispatch,
   trySolveOpenCaeCoreStudy
 } from "./index";
 
@@ -115,6 +120,107 @@ describe("bracket mesh preset sizing", () => {
     expect(geometry?.descriptor?.meshSize).toBeUndefined();
   });
 });
+
+describe("display to solver frame conversion", () => {
+  test("rotates sample display directions into the upright solver frame", () => {
+    const displayModel = cantileverDisplayModel();
+    // Viewer "-Z" (down) is stored as display -Y and must become solver -Z (down).
+    expect(displayDirectionToSolverFrame([0, -1, 0], displayModel)).toEqual([0, 0, -1]);
+    // Viewer "+Y" (sideways) is stored as display -Z and must become solver +Y.
+    expect(displayDirectionToSolverFrame([0, 0, -1], displayModel)).toEqual([0, 1, 0]);
+    expect(displayDirectionToSolverFrame([1, 0, 0], displayModel)).toEqual([1, 0, 0]);
+  });
+
+  test("keeps uploaded geometry directions in file coordinates", () => {
+    const uploaded: DisplayModel = {
+      ...cantileverDisplayModel(),
+      id: "display-uploaded",
+      visualMesh: { format: "stl", filename: "part.stl", contentBase64: "" }
+    };
+    expect(displayDirectionToSolverFrame([0, -1, 0], uploaded)).toEqual([0, -1, 0]);
+    expect(displayDirectionToSolverFrame([0, -1, 0], undefined)).toEqual([0, -1, 0]);
+  });
+
+  test("rewrites study load directions for cloud geometry dispatch", () => {
+    const study = studyFixture({
+      loads: [{ id: "load-1", type: "force", selectionRef: "selection-load-face", parameters: { value: 500, units: "N", direction: [0, -1, 0] }, status: "complete" }]
+    });
+    const dispatched = studyForCoreCloudGeometryDispatch(study, cantileverDisplayModel());
+    expect(dispatched.loads[0]?.parameters.direction).toEqual([0, 0, -1]);
+    expect(dispatched.loads[0]?.parameters.value).toBe(500);
+    // The original study must stay in display space for the viewer and local solves.
+    expect(study.loads[0]?.parameters.direction).toEqual([0, -1, 0]);
+  });
+});
+
+describe("core cloud structured block model frame", () => {
+  function downLoadedStudy(): Study {
+    return studyFixture({
+      loads: [{ id: "load-1", type: "force", selectionRef: "selection-load-face", parameters: { value: 500, units: "N", direction: [0, -1, 0] }, status: "complete" }]
+    });
+  }
+
+  test("builds the structured block mesh upright with solver-frame load vectors", () => {
+    // Non-square section so a height/width axis swap cannot hide: display y (height)
+    // is 24 mm and display z (width) is 36 mm.
+    const displayModel: DisplayModel = {
+      ...cantileverDisplayModel(),
+      dimensions: { x: 180, y: 24, z: 36, units: "mm" }
+    };
+    const coreBuild = buildOpenCaeCoreCloudModelForStudy(downLoadedStudy(), displayModel);
+    const spans = coordinateSpans(coreBuild.model.nodes.coordinates);
+    expect(spans.x).toBeCloseTo(0.18, 9);
+    expect(spans.y).toBeCloseTo(0.036, 9);
+    expect(spans.z).toBeCloseTo(0.024, 9);
+    expect(coreBuild.model.coordinateSystem?.renderCoordinateSpace).toBe("solver");
+    expect(coreBuild.meshSource).toBe("structured_block_core");
+
+    const force = coreBuild.model.loads.find((load) => load.type === "surfaceForce");
+    expect(force?.type === "surfaceForce" ? force.totalForce : undefined).toEqual([0, 0, -500]);
+  });
+
+  test("solves the cantilever with the tip deflecting along the applied -Z load", () => {
+    const coreBuild = buildOpenCaeCoreCloudModelForStudy(downLoadedStudy(), cantileverDisplayModel());
+    const solved = solveCoreStatic(coreBuild.model, { method: "sparse", solverMode: "sparse" });
+    expect(solved.ok).toBe(true);
+    if (!solved.ok) return;
+
+    const surfaceMesh = solved.result.surfaceMesh ?? solverSurfaceMeshFromModel(coreBuild.model);
+    const displacement = solved.result.fields.find((field) => field.type === "displacement" && field.surfaceMeshRef === surfaceMesh.id);
+    expect(displacement?.vectors?.length).toBe(surfaceMesh.nodes.length);
+
+    const tipX = Math.max(...surfaceMesh.nodes.map((node) => node[0]));
+    let tipY = 0;
+    let tipZ = 0;
+    let tipCount = 0;
+    surfaceMesh.nodes.forEach((node, index) => {
+      if (Math.abs(node[0] - tipX) > 1e-9) return;
+      const vector = displacement?.vectors?.[index] ?? [0, 0, 0];
+      tipY += vector[1];
+      tipZ += vector[2];
+      tipCount += 1;
+    });
+    expect(tipCount).toBeGreaterThan(0);
+    const meanTipZ = tipZ / tipCount;
+    const meanTipY = tipY / tipCount;
+    // The free end must deflect downward (solver -Z), matching the viewer load arrow,
+    // and must not bend sideways across the beam width.
+    expect(meanTipZ).toBeLessThan(0);
+    expect(Math.abs(meanTipZ)).toBeGreaterThan(Math.abs(meanTipY) * 10);
+  });
+});
+
+function coordinateSpans(coordinates: number[]): { x: number; y: number; z: number } {
+  const min = [Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY];
+  const max = [Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY];
+  for (let index = 0; index < coordinates.length; index += 3) {
+    for (let axis = 0; axis < 3; axis += 1) {
+      min[axis] = Math.min(min[axis]!, coordinates[index + axis] ?? 0);
+      max[axis] = Math.max(max[axis]!, coordinates[index + axis] ?? 0);
+    }
+  }
+  return { x: max[0]! - min[0]!, y: max[1]! - min[1]!, z: max[2]! - min[2]! };
+}
 
 describe("local core solve mesh statistics", () => {
   test("reports the actual solver mesh node and element counts as artifacts", () => {

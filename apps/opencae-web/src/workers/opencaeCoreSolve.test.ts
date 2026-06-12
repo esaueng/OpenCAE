@@ -222,7 +222,9 @@ describe("OpenCAE Core browser solver adapter", () => {
     expect(result.model.surfaceFacets?.length).toBeGreaterThan(0);
     expect(result.model.surfaceSets?.map((set) => set.name)).toEqual(expect.arrayContaining(["selection-fixed", "selection-load"]));
     expect(result.model.boundaryConditions[0]).toMatchObject({ type: "fixed", nodeSet: "fixedNodes0" });
-    expect(result.model.loads[0]).toMatchObject({ type: "surfaceForce", surfaceSet: "selection-load", totalForce: [0, 0, -100] });
+    // Display-space -Z (front) rotates into the upright solver frame as +Y.
+    expect(result.model.loads[0]).toMatchObject({ type: "surfaceForce", surfaceSet: "selection-load", totalForce: [0, 100, 0] });
+    expect(result.model.coordinateSystem?.renderCoordinateSpace).toBe("solver");
     expect(result.model.materials[0]).toMatchObject({ density: 2700, yieldStrength: 276000000 });
   });
 
@@ -266,7 +268,7 @@ describe("OpenCAE Core browser solver adapter", () => {
     const result = buildOpenCaeCoreCloudModelForStudy(pressureStudy, displayModel);
 
     expect(validateModelJson(result.model).ok).toBe(true);
-    expect(result.model.loads[0]).toMatchObject({ type: "pressure", surfaceSet: "selection-load", pressure: 12000, direction: [0, 0, -1] });
+    expect(result.model.loads[0]).toMatchObject({ type: "pressure", surfaceSet: "selection-load", pressure: 12000, direction: [0, 1, 0] });
   });
 
   test("converts payload gravity loads to equivalent Core surface force loads", () => {
@@ -284,7 +286,8 @@ describe("OpenCAE Core browser solver adapter", () => {
     const result = buildOpenCaeCoreCloudModelForStudy(payloadStudy, displayModel);
 
     expect(validateModelJson(result.model).ok).toBe(true);
-    expect(result.model.loads[0]).toMatchObject({ type: "surfaceForce", surfaceSet: "selection-load", totalForce: [0, -24.516625, 0] });
+    // Display-space -Y (down) gravity rotates into the upright solver frame as -Z.
+    expect(result.model.loads[0]).toMatchObject({ type: "surfaceForce", surfaceSet: "selection-load", totalForce: [0, 0, -24.516625] });
   });
 
   test("applies effective printed material properties to the Core material", () => {
