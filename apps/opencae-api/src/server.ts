@@ -28,6 +28,7 @@ import {
   type Study,
   type StudyRun
 } from "@opencae/schema";
+import { cloneImportedProjectIdentity } from "./importIdentity";
 import { mutatingRateLimit, pdfFilename, projectsReadRateLimit, sanitizeFilename, sanitizeProjectName } from "./security";
 import { hasActualCoreVolumeMesh, openCaeCoreEligibility, trySolveOpenCaeCoreStudy } from "@opencae/core-adapter";
 import { FileSystemObjectStorageProvider } from "@opencae/storage";
@@ -170,14 +171,19 @@ api.post("/api/projects/import", mutatingRateLimit, async (request, reply) => {
   const parsed = ProjectSchema.safeParse(candidate);
   if (!parsed.success) return reply.code(400).send({ error: "The selected file is not a valid OpenCAE project JSON." });
 
-  const project = withCanonicalArtifactRefs(parsed.data);
+  // Validate any embedded results against the file's own (pre-remap) run ids,
+  // then clone the project under a brand-new identity so an import can never
+  // overwrite or prune an existing local project that shares an id.
+  const fileResults = parseLocalResults(body && "results" in body ? body.results : undefined, parsed.data);
+  const cloned = cloneImportedProjectIdentity(parsed.data, fileResults);
+  const project = withCanonicalArtifactRefs(cloned.project);
+  const results = cloned.results;
   const displayModel = parseDisplayModel(body && "displayModel" in body ? body.displayModel : undefined) ?? await displayModelForProject(project);
-  const results = parseLocalResults(body && "results" in body ? body.results : undefined, project);
   const importedProject = results ? projectWithImportedResultRefs(project, results) : project;
   db.upsertProject(importedProject);
   await persistImportedModelArtifacts(importedProject, displayModel);
   if (results) await persistImportedResults(importedProject, results);
-  return { project: importedProject, displayModel, results, message: `${importedProject.name} opened from local file.` };
+  return { project: importedProject, displayModel, results, message: `${importedProject.name} opened as a new local copy.` };
 });
 
 api.get("/api/projects/:projectId", async (request, reply) => {

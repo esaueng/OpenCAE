@@ -157,13 +157,70 @@ describe("OpenCAE API server", () => {
       geometryFiles: Array<{ artifactKey: string }>;
       studies: Array<{ runs: Array<{ resultRef?: string; reportRef?: string }> }>;
     };
+    // The import is cloned under a fresh identity, so all artifact refs are
+    // canonicalized to the new project id and can never point at the
+    // bracket-demo project the hostile file targeted.
+    expect(imported.id).not.toBe("project-hostile-import");
     for (const geometry of imported.geometryFiles) {
-      expect(geometry.artifactKey.startsWith("project-hostile-import/")).toBe(true);
+      expect(geometry.artifactKey.startsWith(`${imported.id}/`)).toBe(true);
+      expect(geometry.artifactKey.startsWith("project-bracket-demo/")).toBe(false);
     }
     for (const run of imported.studies.flatMap((study) => study.runs)) {
-      if (run.resultRef) expect(run.resultRef.startsWith("project-hostile-import/")).toBe(true);
-      if (run.reportRef) expect(run.reportRef.startsWith("project-hostile-import/")).toBe(true);
+      if (run.resultRef) {
+        expect(run.resultRef.startsWith(`${imported.id}/`)).toBe(true);
+        expect(run.resultRef.startsWith("project-bracket-demo/")).toBe(false);
+      }
+      if (run.reportRef) {
+        expect(run.reportRef.startsWith(`${imported.id}/`)).toBe(true);
+        expect(run.reportRef.startsWith("project-bracket-demo/")).toBe(false);
+      }
     }
+  });
+
+  test("importing a file that reuses an existing project id clones it and leaves the original intact", async () => {
+    const api = await buildApi();
+    const create = await api.inject({
+      method: "POST",
+      url: "/api/projects",
+      remoteAddress: "203.0.113.27",
+      payload: { mode: "sample", sample: "cantilever" }
+    });
+    expect(create.statusCode).toBe(200);
+    const existing = create.json().project as {
+      id: string;
+      studies: Array<{ id: string; runs: Array<{ id: string }> }>;
+    };
+
+    // An older saved copy of the same project (same ids) that, under a naive
+    // upsert, would overwrite the live project and prune its studies/runs.
+    const stale = structuredClone(existing) as typeof existing & { name: string };
+    stale.name = "Older saved copy";
+    stale.studies = stale.studies.map((study) => ({ ...study, runs: [] }));
+
+    const importResp = await api.inject({
+      method: "POST",
+      url: "/api/projects/import",
+      remoteAddress: "203.0.113.27",
+      payload: { project: stale }
+    });
+    expect(importResp.statusCode).toBe(200);
+    const imported = importResp.json().project as { id: string };
+    expect(imported.id).not.toBe(existing.id);
+
+    // The original project is untouched: same studies and runs.
+    const afterResp = await api.inject({ method: "GET", url: `/api/projects/${existing.id}` });
+    expect(afterResp.statusCode).toBe(200);
+    const after = afterResp.json().project as { studies: Array<{ id: string; runs: Array<{ id: string }> }> };
+    expect(after.studies.map((study) => study.id)).toEqual(existing.studies.map((study) => study.id));
+    expect(after.studies.flatMap((study) => study.runs.map((run) => run.id))).toEqual(
+      existing.studies.flatMap((study) => study.runs.map((run) => run.id))
+    );
+
+    // Both the original and the imported copy exist.
+    const list = await api.inject({ method: "GET", url: "/api/projects" });
+    const ids = (list.json().projects as Array<{ id: string }>).map((project) => project.id);
+    expect(ids).toContain(existing.id);
+    expect(ids).toContain(imported.id);
   });
 
   test("imported local estimate results are not marked as complete production runs", async () => {
@@ -224,8 +281,10 @@ describe("OpenCAE API server", () => {
     });
 
     expect(response.statusCode).toBe(200);
+    // The run is cloned under a new id; the imported estimate result must still
+    // resolve to a non-production complete_estimate status on the cloned run.
     const imported = response.json().project as { studies: Array<{ runs: Array<{ id: string; status: string }> }> };
-    expect(imported.studies[0]!.runs.find((run) => run.id === runId)?.status).toBe("complete_estimate");
+    expect(imported.studies[0]!.runs[0]?.status).toBe("complete_estimate");
   });
 
   test("local Core preview runs finish with complete_preview instead of complete", async () => {
