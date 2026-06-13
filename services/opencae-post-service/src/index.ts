@@ -388,6 +388,7 @@ function resultTierForSummary(summary: ResultSummary): ResultProvenanceTier {
 
 function resultTierLabel(tier: ResultProvenanceTier): string {
   if (tier === "production_fea") return "Production FEA";
+  if (tier === "core_local_fea") return "OpenCAE Core Local FEA";
   if (tier === "core_preview") return "OpenCAE Core Preview (coarse block proxy)";
   if (tier === "local_estimate") return "Estimate (not FEA)";
   if (tier === "analytical_benchmark") return "Analytical benchmark";
@@ -397,6 +398,12 @@ function resultTierLabel(tier: ResultProvenanceTier): string {
 
 function nonProductionBanner(tier: ResultProvenanceTier): { title: string; message: string } | null {
   if (tier === "production_fea") return null;
+  if (tier === "core_local_fea") {
+    return {
+      title: "LOCAL FEA",
+      message: "This result used local OpenCAE Core and is not OpenCAE Core Cloud production FEA."
+    };
+  }
   if (tier === "core_preview") {
     return {
       title: "PREVIEW ONLY",

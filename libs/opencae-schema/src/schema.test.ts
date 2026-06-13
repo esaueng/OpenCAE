@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CoreCloudResultProvenanceSchema, DynamicSolverSettingsSchema, MaterialSchema, ProjectSchema, ResultFieldSchema, ResultSummarySchema, RunEventSchema, SolverBackendSchema, StudyRunSchema, classifyResultProvenance, runStatusForResultProvenance } from "./index";
+import { CoreCloudResultProvenanceSchema, DynamicSolverSettingsSchema, MaterialSchema, ProjectSchema, ResultFieldSchema, ResultSummarySchema, RunEventSchema, SolverBackendSchema, StudyRunSchema, classifyResultProvenance, isRunResultReadyStatus, runStatusForResultProvenance } from "./index";
 
 describe("ProjectSchema", () => {
   it("accepts the minimum local project shape", () => {
@@ -318,6 +318,56 @@ describe("ProjectSchema", () => {
     })).toBe("imported_legacy");
   });
 
+  it("keeps production attribution reserved for OpenCAE Core Cloud", () => {
+    // Valid Core Cloud provenance is the only production FEA path.
+    const cloud = {
+      kind: "opencae_core_fea" as const,
+      solver: "opencae-core-cloud",
+      solverVersion: "0.1.0",
+      meshSource: "actual_volume_mesh" as const,
+      resultSource: "computed" as const,
+      units: "mm-N-s-MPa"
+    };
+    expect(classifyResultProvenance(cloud)).toBe("production_fea");
+    expect(runStatusForResultProvenance(cloud)).toBe("complete");
+
+    // Real local Core actual-mesh solves are honest FEA but not production.
+    for (const solver of ["opencae-core-sparse-tet", "opencae-core-mdof-tet"]) {
+      const local = {
+        kind: "opencae_core_fea" as const,
+        solver,
+        solverVersion: "0.1.0",
+        meshSource: "actual_volume_mesh" as const,
+        resultSource: "computed" as const,
+        units: "m-N-s-Pa"
+      };
+      expect(classifyResultProvenance(local)).toBe("core_local_fea");
+      expect(runStatusForResultProvenance(local)).toBe("complete_local_fea");
+    }
+
+    // structured_block_core mesh from a local solver is still local, not production.
+    expect(classifyResultProvenance({
+      kind: "opencae_core_fea",
+      solver: "opencae-core-sparse-tet",
+      solverVersion: "0.1.0",
+      meshSource: "structured_block_core",
+      resultSource: "computed",
+      units: "m-N-s-Pa"
+    })).toBe("core_local_fea");
+
+    // An unrecognized opencae_core_fea solver must never reach production.
+    const unknownSolver = {
+      kind: "opencae_core_fea" as const,
+      solver: "opencae-core-experimental",
+      solverVersion: "0.1.0",
+      meshSource: "actual_volume_mesh" as const,
+      resultSource: "computed" as const,
+      units: "m-N-s-Pa"
+    };
+    expect(classifyResultProvenance(unknownSolver)).toBe("unknown");
+    expect(runStatusForResultProvenance(unknownSolver)).not.toBe("complete");
+  });
+
   it("accepts explicit non-production terminal run statuses", () => {
     expect(StudyRunSchema.parse({
       id: "run-preview",
@@ -337,6 +387,17 @@ describe("ProjectSchema", () => {
       solverVersion: "0.1.0",
       diagnostics: []
     }).status).toBe("complete_estimate");
+    const localFea = StudyRunSchema.parse({
+      id: "run-local-fea",
+      studyId: "study-test",
+      status: "complete_local_fea",
+      jobId: "job-local-fea",
+      solverBackend: "opencae_core_local",
+      solverVersion: "0.1.0",
+      diagnostics: []
+    });
+    expect(localFea.status).toBe("complete_local_fea");
+    expect(isRunResultReadyStatus(localFea.status)).toBe(true);
   });
 
   it("accepts rich OpenCAE Core result sample metadata", () => {

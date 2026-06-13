@@ -107,7 +107,8 @@ export function formatResultProvenanceLabel(provenance: ResultProvenance | undef
   if (tier === "core_preview") return "OpenCAE Core Preview (coarse block proxy)";
   if (tier === "local_estimate") return "Estimate (not FEA)";
   if (tier === "analytical_benchmark") return "Analytical benchmark";
-  if (tier === "production_fea") return provenance?.solver === "opencae-core-cloud" ? "OpenCAE Core Cloud" : "OpenCAE Core Local";
+  if (tier === "core_local_fea") return "OpenCAE Core Local FEA";
+  if (tier === "production_fea") return "OpenCAE Core Cloud";
   return "Unknown result source";
 }
 

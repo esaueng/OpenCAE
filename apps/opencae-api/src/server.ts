@@ -612,6 +612,7 @@ function publish(runId: string, type: RunEvent["type"], progress: number | undef
 
 function completeRunMessage(resultTier: ResultProvenanceTier): string {
   if (resultTier === "production_fea") return "OpenCAE Core simulation complete.";
+  if (resultTier === "core_local_fea") return "OpenCAE Core local FEA complete.";
   if (resultTier === "core_preview") return "OpenCAE Core preview complete.";
   if (resultTier === "analytical_benchmark") return "Analytical benchmark result complete.";
   if (resultTier === "imported_legacy") return "Legacy result restored.";

@@ -80,6 +80,28 @@ describe("LocalReportProvider", () => {
     expect(pdf).toContain("Estimate \\(not FEA\\)");
   });
 
+  test("labels local OpenCAE Core FEA as local, not production", () => {
+    const localFeaSummary: ResultSummary = {
+      ...summary(500),
+      provenance: {
+        kind: "opencae_core_fea",
+        solver: "opencae-core-sparse-tet",
+        solverVersion: "0.1.0",
+        meshSource: "actual_volume_mesh",
+        resultSource: "computed",
+        units: "m-N-s-Pa"
+      }
+    };
+
+    const html = buildHtmlReport("run-local-fea", localFeaSummary);
+
+    expect(html).toContain("OpenCAE Core Local FEA");
+    expect(html).toContain("LOCAL FEA");
+    expect(html).toContain("is not OpenCAE Core Cloud production FEA");
+    // A local solve must never be presented as production FEA.
+    expect(html).not.toContain(">Production FEA<");
+  });
+
   test("includes a failure assessment for low safety-factor results", () => {
     const html = buildHtmlReport("run-a", summary(500, 0.82));
 

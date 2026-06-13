@@ -153,9 +153,9 @@ export const CoreCloudResultProvenanceSchema = ResultProvenanceSchema.superRefin
   }
 });
 
-export const ResultProvenanceTierSchema = z.enum(["production_fea", "core_preview", "local_estimate", "analytical_benchmark", "imported_legacy", "unknown"]);
-export const StudyRunStatusSchema = z.enum(["queued", "running", "complete", "complete_preview", "complete_estimate", "complete_benchmark", "complete_legacy", "failed", "cancelled"]);
-const terminalRunResultStatuses = new Set(["complete", "complete_preview", "complete_estimate", "complete_benchmark", "complete_legacy"]);
+export const ResultProvenanceTierSchema = z.enum(["production_fea", "core_local_fea", "core_preview", "local_estimate", "analytical_benchmark", "imported_legacy", "unknown"]);
+export const StudyRunStatusSchema = z.enum(["queued", "running", "complete", "complete_local_fea", "complete_preview", "complete_estimate", "complete_benchmark", "complete_legacy", "failed", "cancelled"]);
+const terminalRunResultStatuses = new Set(["complete", "complete_local_fea", "complete_preview", "complete_estimate", "complete_benchmark", "complete_legacy"]);
 
 export const ResultFieldSchema = z.object({
   id: z.string(),
@@ -381,22 +381,44 @@ export type FailureAssessment = NonNullable<ResultSummary["failureAssessment"]>;
 
 export type RunTimingEstimate = Pick<RunEvent, "elapsedMs" | "estimatedDurationMs" | "estimatedRemainingMs">;
 
+// Local OpenCAE Core solvers that produce real actual-mesh FEA results. These
+// are honest finite-element solves, but they are NOT OpenCAE Core Cloud, so
+// they must never be attributed as production FEA.
+const LOCAL_CORE_ACTUAL_SOLVERS = new Set(["opencae-core-sparse-tet", "opencae-core-mdof-tet"]);
+
+/**
+ * True for a real local OpenCAE Core actual-mesh solve (not Core Cloud). Such
+ * results are first-class FEA but stay in the `core_local_fea` tier so the
+ * `production_fea` attribution remains reserved for OpenCAE Core Cloud.
+ */
+export function isLocalOpenCaeCoreActualMeshProvenance(provenance: ResultProvenance): boolean {
+  return (
+    provenance.kind === "opencae_core_fea" &&
+    provenance.resultSource === "computed" &&
+    LOCAL_CORE_ACTUAL_SOLVERS.has(provenance.solver) &&
+    (provenance.meshSource === "actual_volume_mesh" ||
+      provenance.meshSource === "opencae_core_tet4" ||
+      provenance.meshSource === "structured_block_core")
+  );
+}
+
 export function classifyResultProvenance(provenance: ResultProvenance | undefined): ResultProvenanceTier {
   if (!provenance) return "unknown";
   if (isLegacyResultProvenance(provenance)) return "imported_legacy";
   if (provenance.kind === "analytical_benchmark") return "analytical_benchmark";
   if (isPreviewResultProvenance(provenance)) return "core_preview";
   if (provenance.kind === "local_estimate") return "local_estimate";
+  // Only a fully valid Core Cloud provenance earns production attribution.
   if (CoreCloudResultProvenanceSchema.safeParse(provenance).success) return "production_fea";
-  if (provenance.kind === "opencae_core_fea" && provenance.resultSource === "computed" && (provenance.meshSource === "actual_volume_mesh" || provenance.meshSource === "opencae_core_tet4" || provenance.meshSource === "structured_block_core")) {
-    return "production_fea";
-  }
+  // Real local Core FEA stays honest but non-production.
+  if (isLocalOpenCaeCoreActualMeshProvenance(provenance)) return "core_local_fea";
   return "unknown";
 }
 
-export function runStatusForResultProvenance(provenance: ResultProvenance | undefined): Extract<StudyRun["status"], "complete" | "complete_preview" | "complete_estimate" | "complete_benchmark" | "complete_legacy"> {
+export function runStatusForResultProvenance(provenance: ResultProvenance | undefined): Extract<StudyRun["status"], "complete" | "complete_local_fea" | "complete_preview" | "complete_estimate" | "complete_benchmark" | "complete_legacy"> {
   const tier = classifyResultProvenance(provenance);
   if (tier === "production_fea") return "complete";
+  if (tier === "core_local_fea") return "complete_local_fea";
   if (tier === "core_preview") return "complete_preview";
   if (tier === "analytical_benchmark") return "complete_benchmark";
   if (tier === "imported_legacy") return "complete_legacy";
