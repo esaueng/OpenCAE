@@ -212,4 +212,3 @@ function normalize(vector: Vec3): Vec3 {
   }
   return [vector[0] / length, vector[1] / length, vector[2] / length];
 }
-

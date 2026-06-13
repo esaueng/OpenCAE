@@ -235,8 +235,9 @@ describe("local core solve mesh statistics", () => {
     expect(stats).toBeDefined();
     expect(stats!.nodes).toBeGreaterThan(0);
     expect(stats!.elements).toBeGreaterThan(0);
-    // Medium preset structured block proxy: (4+1)*(3+1)*(3+1) nodes, 6 tets per cell.
-    expect(stats!.nodes).toBe(80);
-    expect(stats!.elements).toBe(4 * 3 * 3 * 6);
+    // Medium preset structured block proxy for this 180x24x24 mm cantilever:
+    // 15x2x2 cells elevated from Tet4 to Tet10 with shared midside nodes.
+    expect(stats!.nodes).toBe(775);
+    expect(stats!.elements).toBe(15 * 2 * 2 * 6);
   });
 });
