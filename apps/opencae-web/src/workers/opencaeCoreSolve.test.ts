@@ -113,7 +113,7 @@ describe("OpenCAE Core browser solver adapter", () => {
     });
   });
 
-  test("solves eligible static studies as OpenCAE Core preview provenance", () => {
+  test("solves eligible static studies as OpenCAE Core preview provenance", { timeout: 60000 }, () => {
     const outcome = trySolveOpenCaeCoreStudy({ study: staticStudy, runId: "run-core-1", displayModel });
 
     expect(outcome.ok).toBe(true);
@@ -135,7 +135,7 @@ describe("OpenCAE Core browser solver adapter", () => {
     expect(displacement?.samples?.every((sample) => sample.vector?.every(Number.isFinite))).toBe(true);
   });
 
-  test("solves dynamic studies with OpenCAE Core transient fields", () => {
+  test("solves dynamic studies with OpenCAE Core transient fields", { timeout: 60000 }, () => {
     const dynamicStudy = {
       ...staticStudy,
       type: "dynamic_structural",

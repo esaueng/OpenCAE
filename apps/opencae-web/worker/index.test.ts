@@ -21,7 +21,7 @@ const { default: worker } = await import("./index");
 function dispatchWorker(request: Request, env: Env, ctx: ExecutionContext = createExecutionContext()): Promise<Response> {
   return worker.fetch(request, env, ctx);
 }
-const expectedRunnerVersion = "0.1.3";
+const expectedRunnerVersion = "0.1.5";
 const expectedContainerInstanceName = `opencae-core-cloud-${expectedRunnerVersion}`;
 const expectedContainerApplicationName = "opencae-core-cloud-0.1.1";
 
@@ -159,8 +159,8 @@ describe("Cloudflare local-first worker", () => {
       ok: true,
       service: "opencae-core-cloud",
       runnerVersion: expectedRunnerVersion,
-      coreVersion: "0.1.2",
-      solverCpuVersion: "0.1.2",
+      coreVersion: "0.1.3",
+      solverCpuVersion: "0.1.4",
       supportedAnalysisTypes: ["static_stress", "dynamic_structural"],
       supportedSolverMethods: ["sparse_static", "mdof_dynamic"]
     }));
@@ -174,8 +174,8 @@ describe("Cloudflare local-first worker", () => {
       coreCloudAvailable: true,
       containerBound: true,
       containerRunnerVersion: expectedRunnerVersion,
-      coreVersion: "0.1.2",
-      solverCpuVersion: "0.1.2",
+      coreVersion: "0.1.3",
+      solverCpuVersion: "0.1.4",
       supportedAnalysisTypes: ["static_stress", "dynamic_structural"],
       supportedSolverMethods: ["sparse_static", "mdof_dynamic"],
       solver: "opencae-core-cloud",

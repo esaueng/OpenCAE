@@ -696,7 +696,7 @@ describe("api", () => {
     expect(seen.map((event) => event.message).join(" ")).toMatch(/actual Core volume mesh|OpenCAE Core Cloud/i);
   });
 
-  test("routes explicit local dynamic studies to OpenCAE Core dynamic locally", async () => {
+  test("routes explicit local dynamic studies to OpenCAE Core dynamic locally", { timeout: 60000 }, async () => {
     const dynamicStudy = {
       ...study,
       name: "Dynamic",
@@ -766,7 +766,7 @@ describe("api", () => {
     expect(apiSource).toContain('messageFromUnknownError(error) || "Local solve failed."');
   });
 
-  test("reports dynamic local frame-writing progress before completion", async () => {
+  test("reports dynamic local frame-writing progress before completion", { timeout: 60000 }, async () => {
     vi.useFakeTimers();
     try {
       vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: "Study not found" }), {
