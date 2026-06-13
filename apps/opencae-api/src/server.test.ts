@@ -287,6 +287,62 @@ describe("OpenCAE API server", () => {
     expect(imported.studies[0]!.runs[0]?.status).toBe("complete_estimate");
   });
 
+  test("rejects an imported result bundle whose fields reference an unknown run", async () => {
+    const api = await buildApi();
+    const sample = await api.inject({ method: "GET", url: "/api/sample-project" });
+    const template = sample.json().project as Record<string, unknown>;
+    const project = structuredClone(template) as { studies: Array<{ runs: Array<{ id: string }> }> };
+    const runId = project.studies[0]!.runs[0]!.id;
+    const provenance = {
+      kind: "local_estimate",
+      solver: "opencae-local-heuristic-surface",
+      solverVersion: "0.1.0",
+      meshSource: "mock",
+      resultSource: "generated",
+      units: "mm-N-s-MPa"
+    };
+    const field = (id: string, fieldRunId: string) => ({
+      id,
+      runId: fieldRunId,
+      type: "stress",
+      location: "face",
+      values: [100],
+      min: 100,
+      max: 100,
+      units: "MPa",
+      provenance
+    });
+
+    const response = await api.inject({
+      method: "POST",
+      url: "/api/projects/import",
+      remoteAddress: "203.0.113.28",
+      payload: {
+        project,
+        results: {
+          completedRunId: runId,
+          summary: {
+            maxStress: 100,
+            maxStressUnits: "MPa",
+            maxDisplacement: 0.2,
+            maxDisplacementUnits: "mm",
+            safetyFactor: 2,
+            reactionForce: 500,
+            reactionForceUnits: "N",
+            provenance
+          },
+          // The first field is valid; the second references a run that does not
+          // exist in the project and must cause the whole bundle to be dropped.
+          fields: [field("stress", runId), field("stress-orphan", "run-orphan-does-not-exist")]
+        }
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    // The malformed bundle is rejected, so no dangling result refs are persisted.
+    expect(response.json().results).toBeUndefined();
+  });
+
   test("local Core preview runs finish with complete_preview instead of complete", async () => {
     const api = await buildApi();
     const create = await api.inject({

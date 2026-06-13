@@ -680,6 +680,10 @@ function parseLocalResults(value: unknown, project: Project): ImportedResultBund
   const fieldRunId = fields.data[0]?.runId;
   const runId = completedRunId ?? activeRunId ?? fieldRunId;
   if (runId && projectRunIds.size > 0 && !projectRunIds.has(runId)) return undefined;
+  // Every result field must reference a run that exists in the project. Fields
+  // pointing at an unknown run would survive id remapping (via the preserve
+  // fallback) as dangling references, so reject the whole bundle instead.
+  if (projectRunIds.size > 0 && fields.data.some((field) => !projectRunIds.has(field.runId))) return undefined;
   return {
     activeRunId,
     completedRunId: completedRunId ?? runId,
