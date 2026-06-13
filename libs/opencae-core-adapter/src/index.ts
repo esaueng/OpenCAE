@@ -74,6 +74,10 @@ export type LocalSolveResult = {
     meshConnectivity?: {
       connectedComponents: number;
     };
+    meshStatistics?: {
+      nodes: number;
+      elements: number;
+    };
   };
 };
 
@@ -155,7 +159,7 @@ export function cloudGeometrySourceForStudy(study: Study, displayModel?: Display
   const explicit = coreCloudGeometryFromUnknown((displayModel as { coreCloudGeometry?: unknown } | undefined)?.coreCloudGeometry)
     ?? coreCloudGeometryFromUnknown((study.meshSettings.summary as { artifacts?: { coreCloudGeometry?: unknown; geometry?: unknown } } | undefined)?.artifacts?.coreCloudGeometry)
     ?? coreCloudGeometryFromUnknown((study.meshSettings.summary as { artifacts?: { coreCloudGeometry?: unknown; geometry?: unknown } } | undefined)?.artifacts?.geometry);
-  if (explicit) return explicit;
+  if (explicit) return withMeshPresetSize(explicit, study.meshSettings.preset);
 
   if (displayModel?.nativeCad) {
     return {
@@ -182,7 +186,7 @@ export function cloudGeometrySourceForStudy(study: Study, displayModel?: Display
       kind: "sample_procedural",
       sampleId: "bracket",
       units: "mm",
-      descriptor: bracketProceduralGeometryDescriptor()
+      descriptor: bracketProceduralGeometryDescriptor(study.meshSettings.preset)
     };
   }
 
@@ -205,6 +209,59 @@ export function cloudGeometrySourceForStudy(study: Study, displayModel?: Display
   }
 
   return null;
+}
+
+/**
+ * Built-in sample geometry is authored in display-model space (Y axis = height) and the
+ * viewer stands it upright with the legacy +90 deg X base rotation, while every OpenCAE
+ * Core solver mesh for that geometry (cloud structured block, procedural bracket, and
+ * the structured block Core model built below) lives in the upright solver frame that
+ * rotation produces (Z axis = height). Uploaded CAD/mesh geometry is meshed in its own
+ * file coordinates, which the viewer renders without the base rotation, so its
+ * directions pass through unchanged.
+ */
+export function displayDirectionToSolverFrame(direction: Vec3, displayModel: DisplayModel | undefined): Vec3 {
+  if (!displayModel || !displayModelUsesUprightSolverFrame(displayModel)) {
+    return [direction[0], direction[1], direction[2]];
+  }
+  return [direction[0], negated(direction[2]), direction[1]];
+}
+
+function negated(value: number): number {
+  return value === 0 ? 0 : -value;
+}
+
+/**
+ * Study load directions are recorded in display-model space, but OpenCAE Core Cloud
+ * applies them verbatim in the solver frame when it meshes dispatched geometry. Rotate
+ * them into the solver frame so the solved deformation matches the load arrows shown in
+ * the viewer.
+ */
+export function studyForCoreCloudGeometryDispatch(study: Study, displayModel: DisplayModel | undefined): Study {
+  if (!displayModel || !displayModelUsesUprightSolverFrame(displayModel)) return study;
+  return {
+    ...study,
+    loads: study.loads.map((load) => {
+      const direction = vector3(load.parameters.direction);
+      if (!direction) return load;
+      return {
+        ...load,
+        parameters: {
+          ...load.parameters,
+          direction: displayDirectionToSolverFrame(direction, displayModel)
+        }
+      };
+    })
+  };
+}
+
+function displayModelUsesUprightSolverFrame(displayModel: DisplayModel): boolean {
+  // Mirrors the viewer rule for the legacy sample base rotation (modelOrientation.ts):
+  // uploaded geometry and empty models render without it.
+  return displayModel.bodyCount !== 0 &&
+    !displayModel.nativeCad &&
+    !displayModel.visualMesh &&
+    !displayModel.id.includes("uploaded");
 }
 
 export function isComplexGeometry(displayModel: DisplayModel | undefined, study?: Study): boolean {
@@ -332,7 +389,7 @@ export function buildOpenCaeCoreCloudModelForStudy(study: Study, displayModel: D
     }
     const mesh = tetMeshForDisplayModel(displayModel, study.meshSettings.preset);
     model = volumeMeshToModelJson({
-      nodes: { coordinates: mesh.solverCoordinates },
+      nodes: { coordinates: solverFrameCoordinates(mesh.solverCoordinates, displayModel) },
       materials: [coreMaterial],
       elementBlocks: [{
         name: mesh.elementType === "Tet10" ? "structured-block-tet10" : "structured-block-tet4",
@@ -340,7 +397,7 @@ export function buildOpenCaeCoreCloudModelForStudy(study: Study, displayModel: D
         material: coreMaterial.name,
         connectivity: mesh.connectivity
       }],
-      coordinateSystem: { solverUnits: "m-N-s-Pa", renderCoordinateSpace: "display_model" },
+      coordinateSystem: { solverUnits: "m-N-s-Pa", renderCoordinateSpace: "solver" },
       meshProvenance: {
         kind: "opencae_core_fea",
         solver: "opencae-core-cloud",
@@ -362,7 +419,7 @@ export function buildOpenCaeCoreCloudModelForStudy(study: Study, displayModel: D
       resultSource: "computed",
       meshSource
     },
-    coordinateSystem: model.coordinateSystem ?? { solverUnits: "m-N-s-Pa", renderCoordinateSpace: meshSource === "structured_block_core" ? "display_model" : "solver" }
+    coordinateSystem: model.coordinateSystem ?? { solverUnits: "m-N-s-Pa", renderCoordinateSpace: "solver" }
   };
 
   const surfaceSets = [...(model.surfaceSets ?? [])];
@@ -399,17 +456,18 @@ export function buildOpenCaeCoreCloudModelForStudy(study: Study, displayModel: D
     if (load.type === "pressure") {
       const pressure = pressurePascals(load);
       if (pressure <= 0) continue;
+      const pressureDirection = normalize(vector3(load.parameters.direction) ?? [0, 0, -1]);
       loads.push({
         name: `pressure${index}`,
         type: "pressure",
         surfaceSet: surfaceSet.name,
         pressure,
-        ...(normalize(vector3(load.parameters.direction) ?? [0, 0, -1]) ? { direction: normalize(vector3(load.parameters.direction) ?? [0, 0, -1])! } : {})
+        ...(pressureDirection ? { direction: displayDirectionToSolverFrame(pressureDirection, displayModel) } : {})
       });
       continue;
     }
 
-    const force = forceVectorForLoad(load, displayModel, density);
+    const force = displayDirectionToSolverFrame(forceVectorForLoad(load, displayModel, density), displayModel);
     if (Math.hypot(...force) <= 1e-12) continue;
     loads.push({
       name: load.type === "gravity" ? `payloadGravity${index}` : `appliedForce${index}`,
@@ -688,11 +746,15 @@ function resultBundleForOpenCaeCore(
   return {
     summary: {
       ...summaryBase,
+      diagnostics: [],
       failureAssessment: assessResultFailure(summaryBase),
       provenance
     },
     fields: [stressFrame, displacementFrame, safetyFrame],
-    ...(coreModel.meshConnectivity ? { artifacts: { meshConnectivity: coreModel.meshConnectivity } } : {})
+    artifacts: {
+      ...(coreModel.meshConnectivity ? { meshConnectivity: coreModel.meshConnectivity } : {}),
+      meshStatistics: meshStatisticsForCoreModel(coreModel)
+    }
   };
 }
 
@@ -776,7 +838,10 @@ function dynamicResultBundleForOpenCaeCore(
       provenance
     },
     fields,
-    ...(coreModel.meshConnectivity ? { artifacts: { meshConnectivity: coreModel.meshConnectivity } } : {})
+    artifacts: {
+      ...(coreModel.meshConnectivity ? { meshConnectivity: coreModel.meshConnectivity } : {}),
+      meshStatistics: meshStatisticsForCoreModel(coreModel)
+    }
   };
 }
 
@@ -833,7 +898,7 @@ function safetyFieldForOpenCaeCore(runId: string, stressFrame: ResultField, stud
     value: values[index] ?? 0,
     vonMisesStressPa: undefined
   })) ?? [];
-  return fieldFor(runId, "safety_factor", "element", values, "", samples, provenance);
+  return fieldFor(runId, "safety_factor", "element", values, "ratio", samples, provenance);
 }
 
 function fieldFor(
@@ -917,7 +982,7 @@ function forceVectorForLoad(load: Study["loads"][number], displayModel: DisplayM
   const value = Number(load.parameters.value);
   if (!direction || !Number.isFinite(value) || value <= 0) return [0, 0, 0];
   const magnitude = load.type === "pressure"
-    ? value * 1000 * projectedAreaM2(dimensions, direction)
+    ? pressurePascals(load) * projectedAreaM2(dimensions, direction)
     : load.type === "gravity"
       ? gravityMassKg(value, displayModel, densityKgM3) * STANDARD_GRAVITY
       : value;
@@ -947,6 +1012,15 @@ function equivalentMassKg(densityKgM3: number, displayModel: DisplayModel): numb
 function dimensionMeters(dimensions: NonNullable<DisplayModel["dimensions"]>): Vec3 {
   const scale = dimensions.units === "mm" ? 0.001 : 1;
   return [dimensions.x * scale, dimensions.y * scale, dimensions.z * scale];
+}
+
+const NODES_PER_ELEMENT: Record<string, number> = { Tet4: 4, Tet10: 10 };
+
+function meshStatisticsForCoreModel(coreModel: CoreStudyModel): { nodes: number; elements: number } {
+  const nodes = Math.floor(coreModel.model.nodes.coordinates.length / 3);
+  const elements = coreModel.model.elementBlocks.reduce((sum, block) =>
+    sum + Math.floor(block.connectivity.length / (NODES_PER_ELEMENT[block.type] ?? 4)), 0);
+  return { nodes, elements };
 }
 
 function elementCentroid(coreModel: CoreStudyModel, elementIndex: number): Vec3 {
@@ -1064,6 +1138,24 @@ function tetMeshForDisplayModel(
     connectivity: elevated.elements.flat(),
     elementType: "Tet10"
   };
+}
+
+/**
+ * Rotates display-frame structured block coordinates (Y axis = height) into the upright
+ * solver frame (Z axis = height) with the same proper rotation the viewer applies to
+ * sample geometry, so solver surface meshes and their displacement vectors render true
+ * without any axis flip. Render node points stay in display space for face mapping.
+ */
+function solverFrameCoordinates(displayFrameCoordinates: number[], displayModel: DisplayModel): number[] {
+  if (!displayModelUsesUprightSolverFrame(displayModel)) return displayFrameCoordinates;
+  const widthMeters = dimensionMeters(displayModel.dimensions!)[2];
+  const coordinates: number[] = new Array(displayFrameCoordinates.length);
+  for (let index = 0; index < displayFrameCoordinates.length; index += 3) {
+    coordinates[index] = displayFrameCoordinates[index] ?? 0;
+    coordinates[index + 1] = widthMeters - (displayFrameCoordinates[index + 2] ?? 0);
+    coordinates[index + 2] = displayFrameCoordinates[index + 1] ?? 0;
+  }
+  return coordinates;
 }
 
 function renderBoundsForDisplayModel(displayModel: DisplayModel): { min: Vec3; max: Vec3 } {
@@ -1417,7 +1509,7 @@ function isBracketDemoGeometry(study: Study, displayModel: DisplayModel): boolea
   return /\bbracket\b/i.test(text) && /\b(gusset|rib|upright|mounting|hole|holes)\b/i.test(text);
 }
 
-function bracketProceduralGeometryDescriptor(): Record<string, unknown> {
+function bracketProceduralGeometryDescriptor(preset: Study["meshSettings"]["preset"] = "medium"): Record<string, unknown> {
   return {
     base: { length: 120, width: 34, height: 10 },
     upright: { height: 88, width: 18, thickness: 34 },
@@ -1434,7 +1526,27 @@ function bracketProceduralGeometryDescriptor(): Record<string, unknown> {
     },
     supportFaceId: "face-base-left",
     loadFaceId: "face-load-top",
-    meshSize: 18
+    meshSize: bracketMeshSizeMmForPreset(preset)
+  };
+}
+
+// Characteristic gmsh element size (mm) for the 120 x 88 x 34 mm bracket sample.
+// The mesh quality preset must change the solve mesh, not just the preset label.
+export function bracketMeshSizeMmForPreset(preset: Study["meshSettings"]["preset"]): number {
+  if (preset === "ultra") return 7;
+  if (preset === "fine") return 9;
+  if (preset === "coarse") return 18;
+  return 12;
+}
+
+function withMeshPresetSize(geometry: CoreCloudGeometrySource, preset: Study["meshSettings"]["preset"]): CoreCloudGeometrySource {
+  if (geometry.kind !== "sample_procedural" || geometry.sampleId !== "bracket") return geometry;
+  return {
+    ...geometry,
+    descriptor: {
+      ...(geometry.descriptor ?? {}),
+      meshSize: bracketMeshSizeMmForPreset(preset)
+    }
   };
 }
 

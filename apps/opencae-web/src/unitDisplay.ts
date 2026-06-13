@@ -1,3 +1,4 @@
+import { classifyResultProvenance } from "@opencae/schema";
 import type { DisplayModel, Project, ResultField, ResultProvenance, ResultSummary } from "@opencae/schema";
 
 export type UnitSystem = Project["unitSystem"];
@@ -101,15 +102,12 @@ export function resultFieldForUnits(field: ResultField, unitSystem: UnitSystem):
 }
 
 export function formatResultProvenanceLabel(provenance: ResultProvenance | undefined): string {
-  if (isLegacyBackendResult(provenance)) return "Legacy backend result";
-  if (provenance?.solver === "opencae-core-cloud") return "OpenCAE Core Cloud";
-  if (provenance?.solver === "opencae-core-preview-sdof" || provenance?.solver === "opencae-core-preview-tet4" || provenance?.resultSource === "computed_preview" || provenance?.meshSource === "structured_block_proxy" || provenance?.meshSource === "display_bounds_proxy") {
-    return "OpenCAE Core Preview";
-  }
-  if (provenance?.kind === "opencae_core_fea" && provenance.meshSource === "actual_volume_mesh" && provenance.resultSource === "computed") return "OpenCAE Core Local";
-  if (provenance?.kind === "opencae_core_fea") return "OpenCAE Core Local";
-  if (provenance?.kind === "analytical_benchmark") return "Analytical benchmark";
-  if (provenance?.kind === "local_estimate") return "OpenCAE Core Preview";
+  const tier = classifyResultProvenance(provenance);
+  if (tier === "imported_legacy") return "Legacy backend result";
+  if (tier === "core_preview") return "OpenCAE Core Preview (coarse block proxy)";
+  if (tier === "local_estimate") return "Estimate (not FEA)";
+  if (tier === "analytical_benchmark") return "Analytical benchmark";
+  if (tier === "production_fea") return provenance?.solver === "opencae-core-cloud" ? "OpenCAE Core Cloud" : "OpenCAE Core Local";
   return "Unknown result source";
 }
 
@@ -173,7 +171,6 @@ export function massForUnits(value: number, units: string, unitSystem: UnitSyste
   if (unitSystem === "US" && units === "g") return { value: value / 1000 / KG_PER_LB, units: "lb" };
   if (unitSystem === "SI" && units === "lb") return { value: value * KG_PER_LB, units: "kg" };
   if (unitSystem === "US" && units === "kg") return { value: value / KG_PER_LB, units: "lb" };
-  if (unitSystem === "SI" && units === "lb") return { value: value * KG_PER_LB, units: "kg" };
   return { value, units };
 }
 

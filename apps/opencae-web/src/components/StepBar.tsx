@@ -1,3 +1,4 @@
+import { isRunResultReadyStatus } from "@opencae/schema";
 import type { Project, Study } from "@opencae/schema";
 import { Activity, Anchor, Atom, Box, Layers3, Moon, PanelLeftClose, PanelLeftOpen, Play, Sun, Weight } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -37,8 +38,8 @@ export function StepBar({ activeStep, project, study, hasResults, collapsed, the
     supports: study.constraints.length > 0,
     loads: study.loads.length > 0,
     mesh: study.meshSettings.status === "complete",
-    run: hasResults || study.runs.some((run) => run.status === "complete"),
-    results: hasResults || study.runs.some((run) => run.status === "complete")
+    run: hasResults || study.runs.some((run) => isRunResultReadyStatus(run.status)),
+    results: hasResults || study.runs.some((run) => isRunResultReadyStatus(run.status))
   };
 
   const unitShort = project.unitSystem === "SI" ? "mm" : "in";

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CoreCloudResultProvenanceSchema, DynamicSolverSettingsSchema, ProjectSchema, ResultFieldSchema, ResultSummarySchema, RunEventSchema, SolverBackendSchema } from "./index";
+import { CoreCloudResultProvenanceSchema, DynamicSolverSettingsSchema, MaterialSchema, ProjectSchema, ResultFieldSchema, ResultSummarySchema, RunEventSchema, SolverBackendSchema, StudyRunSchema, classifyResultProvenance, runStatusForResultProvenance } from "./index";
 
 describe("ProjectSchema", () => {
   it("accepts the minimum local project shape", () => {
@@ -275,6 +275,70 @@ describe("ProjectSchema", () => {
     })).toThrow();
   });
 
+  it("classifies result provenance into load-bearing run statuses", () => {
+    expect(runStatusForResultProvenance({
+      kind: "opencae_core_fea",
+      solver: "opencae-core-cloud",
+      solverVersion: "0.1.0",
+      meshSource: "actual_volume_mesh",
+      resultSource: "computed",
+      units: "mm-N-s-MPa"
+    })).toBe("complete");
+    expect(runStatusForResultProvenance({
+      kind: "local_estimate",
+      solver: "opencae-core-preview-tet4",
+      solverVersion: "0.1.0",
+      meshSource: "structured_block_proxy",
+      resultSource: "computed_preview",
+      units: "mm-N-s-MPa"
+    })).toBe("complete_preview");
+    expect(runStatusForResultProvenance({
+      kind: "local_estimate",
+      solver: "opencae-local-heuristic-surface",
+      solverVersion: "0.1.0",
+      meshSource: "mock",
+      resultSource: "generated",
+      units: "mm-N-s-MPa"
+    })).toBe("complete_estimate");
+    expect(runStatusForResultProvenance({
+      kind: "analytical_benchmark",
+      solver: "opencae-euler-bernoulli",
+      solverVersion: "0.1.0",
+      meshSource: "structured_block",
+      resultSource: "generated",
+      units: "mm-N-s-MPa"
+    })).toBe("complete_benchmark");
+    expect(classifyResultProvenance({
+      kind: "opencae_core_fea",
+      solver: ["cloudflare-fea", "calculix"].join("-"),
+      solverVersion: "0.1.0",
+      meshSource: "actual_volume_mesh",
+      resultSource: "computed",
+      units: "mm-N-s-MPa"
+    })).toBe("imported_legacy");
+  });
+
+  it("accepts explicit non-production terminal run statuses", () => {
+    expect(StudyRunSchema.parse({
+      id: "run-preview",
+      studyId: "study-test",
+      status: "complete_preview",
+      jobId: "job-preview",
+      solverBackend: "opencae_core_local",
+      solverVersion: "0.1.0",
+      diagnostics: []
+    }).status).toBe("complete_preview");
+    expect(StudyRunSchema.parse({
+      id: "run-estimate",
+      studyId: "study-test",
+      status: "complete_estimate",
+      jobId: "job-estimate",
+      solverBackend: "local",
+      solverVersion: "0.1.0",
+      diagnostics: []
+    }).status).toBe("complete_estimate");
+  });
+
   it("accepts rich OpenCAE Core result sample metadata", () => {
     const parsed = ResultFieldSchema.parse({
       id: "field-stress-cloud",
@@ -320,6 +384,20 @@ describe("ProjectSchema", () => {
     });
 
     expect(parsed.provenance).toBeUndefined();
+  });
+
+  it("defaults missing result summary diagnostics to an empty array", () => {
+    const parsed = ResultSummarySchema.parse({
+      maxStress: 142,
+      maxStressUnits: "MPa",
+      maxDisplacement: 0.184,
+      maxDisplacementUnits: "mm",
+      safetyFactor: 1.8,
+      reactionForce: 500,
+      reactionForceUnits: "N"
+    });
+
+    expect(parsed.diagnostics).toEqual([]);
   });
 
   it("accepts result summaries and fields with explicit provenance", () => {
@@ -402,5 +480,32 @@ describe("ProjectSchema", () => {
       provenance,
       samples: [{ point: [100, 15, 10], normal: [0, 0, 1], value: 0.0014, vector: [0, 0, -0.0014], nodeId: "N2", source: "opencae_core" }]
     }).samples?.[0]?.vector).toEqual([0, 0, -0.0014]);
+  });
+});
+
+describe("MaterialSchema", () => {
+  const aluminum = {
+    id: "mat-aluminum-6061",
+    name: "Aluminum 6061",
+    youngsModulus: 68900000000,
+    poissonRatio: 0.33,
+    density: 2700,
+    yieldStrength: 276000000
+  };
+
+  it("accepts physically valid materials", () => {
+    expect(MaterialSchema.parse(aluminum).id).toBe("mat-aluminum-6061");
+  });
+
+  it("rejects non-positive stiffness, density, and strength", () => {
+    expect(() => MaterialSchema.parse({ ...aluminum, youngsModulus: 0 })).toThrow();
+    expect(() => MaterialSchema.parse({ ...aluminum, density: -1 })).toThrow();
+    expect(() => MaterialSchema.parse({ ...aluminum, yieldStrength: 0 })).toThrow();
+  });
+
+  it("rejects physically impossible Poisson ratios", () => {
+    expect(() => MaterialSchema.parse({ ...aluminum, poissonRatio: 0.5 })).toThrow();
+    expect(() => MaterialSchema.parse({ ...aluminum, poissonRatio: -1 })).toThrow();
+    expect(MaterialSchema.parse({ ...aluminum, poissonRatio: 0.499 }).poissonRatio).toBe(0.499);
   });
 });

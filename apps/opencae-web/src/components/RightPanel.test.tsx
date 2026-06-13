@@ -1319,4 +1319,59 @@ describe("RightPanel payload mass controls", () => {
     expect(markup).toContain(">Add load<");
     expect(markup).not.toContain('<button class="outline-action wide" disabled="">');
   });
+
+  test("shows an empty results state instead of fabricated numbers when no run has completed", () => {
+    const html = renderPanel("results", { resultSummary: null });
+
+    expect(html).toContain("Run a simulation to see results.");
+    expect(html).not.toContain("Max stress");
+    expect(html).not.toContain("Safety factor");
+    expect(html).not.toContain("Result mode");
+  });
+
+  test("hides the sample Volume and Mass rows for blank and uploaded projects", () => {
+    const blankHtml = renderPanel("model");
+    const uploadedHtml = renderPanel("model", {
+      project: {
+        ...project,
+        geometryFiles: [{
+          id: "geom-upload",
+          projectId: project.id,
+          filename: "fixture.step",
+          localPath: "uploads/fixture.step",
+          artifactKey: "project-1/geometry/uploaded-display.json",
+          status: "ready",
+          metadata: { source: "local-upload" }
+        }]
+      }
+    });
+    const sampleHtml = renderPanel("model", {
+      project: {
+        ...project,
+        geometryFiles: [{
+          id: "geom-sample",
+          projectId: project.id,
+          filename: "bracket-demo.step",
+          localPath: "examples/bracket-demo/bracket-demo.step",
+          artifactKey: "project-1/geometry/bracket-display.json",
+          status: "ready",
+          metadata: { source: "sample", sampleModel: "bracket" }
+        }]
+      }
+    });
+
+    expect(blankHtml).not.toContain("<span>Volume</span>");
+    expect(blankHtml).not.toContain("<span>Mass</span>");
+    expect(uploadedHtml).not.toContain("<span>Volume</span>");
+    expect(uploadedHtml).not.toContain("<span>Mass</span>");
+    expect(sampleHtml).toContain("<span>Volume</span>");
+    expect(sampleHtml).toContain("<span>Mass</span>");
+  });
+
+  test("offers the parametric part builder in the model panel", () => {
+    const html = renderPanel("model");
+    expect(html).toContain("Create parametric part");
+    expect(html).toContain("Add to project");
+    expect(html).toContain("Download .step");
+  });
 });

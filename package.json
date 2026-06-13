@@ -24,6 +24,7 @@
     "containers:build:core-cloud": "wrangler containers build services/opencae-core-cloud -t opencae/opencae-core-cloud:0.1.5 --config wrangler.containers.jsonc",
     "containers:push:core-cloud": "wrangler containers push opencae/opencae-core-cloud:0.1.5 --config wrangler.containers.jsonc",
     "test": "vitest run",
+    "typecheck": "pnpm --filter @opencae/api exec tsc --noEmit && pnpm --filter @opencae/web exec tsc --noEmit && pnpm --filter @opencae/core-cloud exec tsc -p tsconfig.json --noEmit",
     "test:core-cloud": "pnpm --filter @opencae/core-cloud test",
     "test:core-cloud-container": "pnpm --filter @opencae/core-cloud test",
     "db:migrate": "pnpm --filter @opencae/db migrate",
