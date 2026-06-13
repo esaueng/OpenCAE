@@ -1,6 +1,7 @@
 import {
   connectedComponents,
   deriveFixedSupportNodeSetFromSurface,
+  elevateTet4MeshToTet10,
   validateModelJson,
   volumeMeshToModelJson,
   type LoadJson,
@@ -44,6 +45,7 @@ type CoreTetMesh = {
   solverCoordinates: number[];
   renderNodePoints: Vec3[];
   connectivity: number[];
+  elementType: "Tet4" | "Tet10";
 };
 
 type ActualCoreVolumeMeshArtifact = {
@@ -257,7 +259,10 @@ export function trySolveOpenCaeCoreStudy({ study, runId, displayModel }: {
       const settings = dynamicSettingsForStudy(study);
       const provenance = isActualMesh ? OPENCAE_CORE_ACTUAL_DYNAMIC_PROVENANCE : OPENCAE_CORE_PREVIEW_DYNAMIC_PROVENANCE;
       const solved = solveDynamicMdofTet4Cpu(coreModel.model, {
-        maxDofs: maxDofsForMeshPreset(study.meshSettings.preset),
+        maxDofs: localSolveMaxDofs(study, coreModel),
+        // Display-grade CG tolerance: the per-step warm-started solves converge much
+        // faster and 1e-8 relative residual is far below render resolution.
+        tolerance: 1e-8,
         startTime: settings.startTime,
         endTime: settings.endTime,
         timeStep: settings.timeStep,
@@ -274,7 +279,7 @@ export function trySolveOpenCaeCoreStudy({ study, runId, displayModel }: {
       };
     }
 
-    const solved = solveStaticLinearTet4Cpu(coreModel.model, { maxDofs: maxDofsForMeshPreset(study.meshSettings.preset) });
+    const solved = solveStaticLinearTet4Cpu(coreModel.model, { maxDofs: localSolveMaxDofs(study, coreModel) });
     if (!solved.ok) return { ok: false, reason: `OpenCAE Core solve failed: ${solved.error.message}` };
     const provenance = isActualMesh ? OPENCAE_CORE_ACTUAL_STATIC_PROVENANCE : OPENCAE_CORE_PREVIEW_STATIC_PROVENANCE;
     return {
@@ -330,8 +335,8 @@ export function buildOpenCaeCoreCloudModelForStudy(study: Study, displayModel: D
       nodes: { coordinates: mesh.solverCoordinates },
       materials: [coreMaterial],
       elementBlocks: [{
-        name: "structured-block-tet4",
-        type: "Tet4",
+        name: mesh.elementType === "Tet10" ? "structured-block-tet10" : "structured-block-tet4",
+        type: mesh.elementType,
         material: coreMaterial.name,
         connectivity: mesh.connectivity
       }],
@@ -455,7 +460,11 @@ function openCaeCoreModelForStudy(study: Study, displayModel: DisplayModel | und
   const effective = effectiveMaterialProperties(material.material, material.parameters, {
     criticalLayerAxis: inferCriticalPrintAxis(study, displayModel.faces)
   });
-  const mesh = tetMeshForDisplayModel(displayModel, study.meshSettings.preset);
+  const mesh = tetMeshForDisplayModel(
+    displayModel,
+    study.meshSettings.preset,
+    study.type === "dynamic_structural" ? LOCAL_DYNAMIC_TET10_NODE_BUDGET : LOCAL_TET10_NODE_BUDGET
+  );
   const boundaryConditions: OpenCAEModelJson["boundaryConditions"] = [];
   const loads: OpenCAEModelJson["loads"] = [];
   const nodeSets: OpenCAEModelJson["nodeSets"] = [];
@@ -463,7 +472,7 @@ function openCaeCoreModelForStudy(study: Study, displayModel: DisplayModel | und
   for (const [index, constraint] of study.constraints.entries()) {
     if (constraint.type !== "fixed") continue;
     const centers = selectionCenters(study, displayModel, constraint.selectionRef);
-    const nodes = nearestMeshNodes(mesh.renderNodePoints, centers, nodeSelectionCount(study.meshSettings.preset));
+    const nodes = meshNodesForFaceSelection(mesh, centers, selectionNormals(study, displayModel, constraint.selectionRef), study.meshSettings.preset);
     if (!nodes.length) throw new Error("OpenCAE Core could not map fixed support selection to mesh nodes.");
     const name = `fixedNodes${index}`;
     nodeSets.push({ name, nodes });
@@ -474,7 +483,7 @@ function openCaeCoreModelForStudy(study: Study, displayModel: DisplayModel | und
   for (const [index, load] of study.loads.entries()) {
     if (load.type !== "force") continue;
     const centers = selectionCenters(study, displayModel, load.selectionRef);
-    const nodes = nearestMeshNodes(mesh.renderNodePoints, centers, nodeSelectionCount(study.meshSettings.preset));
+    const nodes = meshNodesForFaceSelection(mesh, centers, selectionNormals(study, displayModel, load.selectionRef), study.meshSettings.preset);
     if (!nodes.length) continue;
     const force = forceVectorForLoad(load, displayModel, density);
     if (Math.hypot(...force) <= 1e-12) continue;
@@ -500,13 +509,16 @@ function openCaeCoreModelForStudy(study: Study, displayModel: DisplayModel | und
       yieldStrength: effective.yieldStrength ?? material.material.yieldStrength
     }],
     elementBlocks: [{
-      name: "block-tet4",
-      type: "Tet4",
+      name: mesh.elementType === "Tet10" ? "block-tet10" : "block-tet4",
+      type: mesh.elementType,
       material: effective.id,
       connectivity: mesh.connectivity
     }],
     nodeSets,
-    elementSets: [{ name: "allElements", elements: Array.from({ length: mesh.connectivity.length / 4 }, (_value, index) => index) }],
+    elementSets: [{
+      name: "allElements",
+      elements: Array.from({ length: mesh.connectivity.length / (mesh.elementType === "Tet10" ? 10 : 4) }, (_value, index) => index)
+    }],
     boundaryConditions,
     loads,
     steps: [{
@@ -652,11 +664,13 @@ function pressurePascals(load: Study["loads"][number]): number {
 function resultBundleForOpenCaeCore(
   runId: string,
   coreModel: CoreStudyModel,
-  result: Pick<StaticLinearTet4CpuResult, "displacement" | "reactionForce" | "vonMises">,
+  result: Pick<StaticLinearTet4CpuResult, "displacement" | "reactionForce" | "vonMises" | "vonMisesPeak">,
   study: Study,
   provenance: ResultProvenance
 ): LocalSolveResult {
-  const stressFrame = stressFieldForOpenCaeCore(runId, coreModel, result.vonMises, study, provenance);
+  // Element-peak von Mises (Tet10 node sampling) instead of centroid values, which
+  // clip the outer-fiber bending stress on coarse meshes.
+  const stressFrame = stressFieldForOpenCaeCore(runId, coreModel, result.vonMisesPeak ?? result.vonMises, study, provenance);
   const displacementFrame = vectorFieldForOpenCaeCore(runId, "displacement", coreModel, result.displacement, "mm", 1000, 6, provenance);
   const safetyFrame = safetyFieldForOpenCaeCore(runId, stressFrame, study, provenance);
   const summaryBase = {
@@ -665,7 +679,10 @@ function resultBundleForOpenCaeCore(
     maxDisplacement: displacementFrame.max,
     maxDisplacementUnits: "mm",
     safetyFactor: safetyFrame.min,
-    reactionForce: round(vectorMagnitudes(result.reactionForce).reduce((sum, value) => sum + value, 0), 6),
+    // Magnitude of the net reaction vector: per-node magnitudes also count the
+    // self-cancelling bending-couple forces at the clamp and overstate the reaction
+    // by an order of magnitude.
+    reactionForce: round(netVectorMagnitude(result.reactionForce), 6),
     reactionForceUnits: "N"
   };
   return {
@@ -701,7 +718,7 @@ function dynamicResultBundleForOpenCaeCore(
   const peakAppliedLoad = round(appliedLoadMagnitude * Math.max(peakLoadScale, 1), 6);
 
   for (const frame of frames) {
-    const stressFrame = withFrame(stressFieldForOpenCaeCore(runId, coreModel, frame.vonMises.values, study, provenance), frame.frameIndex, frame.timeSeconds);
+    const stressFrame = withFrame(stressFieldForOpenCaeCore(runId, coreModel, frame.vonMisesPeak?.values ?? frame.vonMises.values, study, provenance), frame.frameIndex, frame.timeSeconds);
     const displacementFrame = withFrame(vectorFieldForOpenCaeCore(runId, "displacement", coreModel, frame.displacement.values, "mm", 1000, 8, provenance), frame.frameIndex, frame.timeSeconds);
     const velocityFrame = withFrame(vectorFieldForOpenCaeCore(runId, "velocity", coreModel, frame.velocity.values, "mm/s", 1000, 8, provenance), frame.frameIndex, frame.timeSeconds);
     const accelerationFrame = withFrame(vectorFieldForOpenCaeCore(runId, "acceleration", coreModel, frame.acceleration.values, "mm/s^2", 1000, 8, provenance), frame.frameIndex, frame.timeSeconds);
@@ -834,8 +851,8 @@ function fieldFor(
     type,
     location,
     values,
-    min: Math.min(...values),
-    max: Math.max(...values),
+    min: arrayMin(values),
+    max: arrayMax(values),
     units,
     samples,
     provenance
@@ -934,7 +951,9 @@ function dimensionMeters(dimensions: NonNullable<DisplayModel["dimensions"]>): V
 
 function elementCentroid(coreModel: CoreStudyModel, elementIndex: number): Vec3 {
   const block = coreModel.model.elementBlocks[0];
-  const connectivity = block?.connectivity.slice(elementIndex * 4, elementIndex * 4 + 4) ?? [];
+  // Corner nodes only: their average is the centroid for both Tet4 and straight-sided Tet10.
+  const stride = block?.type === "Tet10" ? 10 : 4;
+  const connectivity = block?.connectivity.slice(elementIndex * stride, elementIndex * stride + 4) ?? [];
   const sum: Vec3 = [0, 0, 0];
   for (const node of connectivity) {
     const point = coreModel.renderNodePoints[node] ?? [0, 0, 0];
@@ -945,12 +964,28 @@ function elementCentroid(coreModel: CoreStudyModel, elementIndex: number): Vec3 
   return [round(sum[0] / 4, 6), round(sum[1] / 4, 6), round(sum[2] / 4, 6)];
 }
 
-function tetMeshForDisplayModel(displayModel: DisplayModel, preset: Study["meshSettings"]["preset"]): CoreTetMesh {
+function netVectorMagnitude(vector: Float64Array): number {
+  let x = 0;
+  let y = 0;
+  let z = 0;
+  for (let node = 0; node < vector.length / 3; node += 1) {
+    x += vector[node * 3] ?? 0;
+    y += vector[node * 3 + 1] ?? 0;
+    z += vector[node * 3 + 2] ?? 0;
+  }
+  return Math.hypot(x, y, z);
+}
+
+function tetMeshForDisplayModel(
+  displayModel: DisplayModel,
+  preset: Study["meshSettings"]["preset"],
+  nodeBudget = LOCAL_TET10_NODE_BUDGET
+): CoreTetMesh {
   const dimensions = displayModel.dimensions;
   if (!dimensions) throw new Error("OpenCAE Core requires display dimensions.");
   const bounds = renderBoundsForDisplayModel(displayModel);
   const [physicalX, physicalY, physicalZ] = dimensionMeters(dimensions);
-  const [cellsX, cellsY, cellsZ] = meshCellsForPreset(preset);
+  const [cellsX, cellsY, cellsZ] = meshDivisionsForDimensions([physicalX, physicalY, physicalZ], preset, nodeBudget);
   const renderNodePoints: Vec3[] = [];
   const solverCoordinates: number[] = [];
   const nodeIndex = (i: number, j: number, k: number) => i + (cellsX + 1) * (j + (cellsY + 1) * k);
@@ -1004,7 +1039,31 @@ function tetMeshForDisplayModel(displayModel: DisplayModel, preset: Study["meshS
     }
   }
 
-  return { solverCoordinates, renderNodePoints, connectivity };
+  // Elevate to quadratic Tet10: linear tets lock in bending and under-predict
+  // cantilever deflection several-fold at these grid densities.
+  const tet4Elements: number[][] = [];
+  for (let offset = 0; offset < connectivity.length; offset += 4) {
+    tet4Elements.push(connectivity.slice(offset, offset + 4));
+  }
+  const elevated = elevateTet4MeshToTet10({ coordinates: solverCoordinates, elements: tet4Elements });
+  // Render positions are the same per-axis affine map of solver coordinates that
+  // produced the corner nodes, so midside nodes land on their edge midpoints.
+  for (let node = renderNodePoints.length; node < elevated.coordinates.length / 3; node += 1) {
+    const tx = physicalX > 0 ? elevated.coordinates[node * 3]! / physicalX : 0;
+    const ty = physicalY > 0 ? elevated.coordinates[node * 3 + 1]! / physicalY : 0;
+    const tz = physicalZ > 0 ? elevated.coordinates[node * 3 + 2]! / physicalZ : 0;
+    renderNodePoints.push([
+      lerp(bounds.min[0], bounds.max[0], tx),
+      lerp(bounds.min[1], bounds.max[1], ty),
+      lerp(bounds.min[2], bounds.max[2], tz)
+    ]);
+  }
+  return {
+    solverCoordinates: elevated.coordinates,
+    renderNodePoints,
+    connectivity: elevated.elements.flat(),
+    elementType: "Tet10"
+  };
 }
 
 function renderBoundsForDisplayModel(displayModel: DisplayModel): { min: Vec3; max: Vec3 } {
@@ -1035,6 +1094,35 @@ function renderBoundsForDisplayModel(displayModel: DisplayModel): { min: Vec3; m
   return { min, max };
 }
 
+// Selects every mesh node on the axis-aligned box face the selection points at, so
+// fixed supports clamp the whole face and loads spread across it (matching the cloud
+// surface-set behavior). The face is identified by the display face normal's dominant
+// axis; render-bound padding makes nearest-plane distance unreliable. Falls back to
+// nearest-N nodes when the selection carries no usable face normal.
+function meshNodesForFaceSelection(
+  mesh: CoreTetMesh,
+  centers: Vec3[],
+  normals: Vec3[],
+  preset: Study["meshSettings"]["preset"]
+): number[] {
+  const normal = normals.find((candidate) => Math.hypot(...candidate) > 1e-9);
+  if (normal) {
+    const axis = [0, 1, 2].reduce((best, candidate) =>
+      Math.abs(normal[candidate]!) > Math.abs(normal[best]!) ? candidate : best
+    );
+    const bounds = renderBoundsForPoints(mesh.renderNodePoints);
+    const plane = normal[axis]! < 0 ? bounds.min[axis]! : bounds.max[axis]!;
+    const span = Math.max(bounds.max[axis]! - bounds.min[axis]!, 1e-9);
+    const tolerance = span * 1e-6 + 1e-9;
+    const nodes: number[] = [];
+    for (let node = 0; node < mesh.renderNodePoints.length; node += 1) {
+      if (Math.abs(mesh.renderNodePoints[node]![axis]! - plane) <= tolerance) nodes.push(node);
+    }
+    if (nodes.length) return nodes;
+  }
+  return nearestMeshNodes(mesh.renderNodePoints, centers, nodeSelectionCount(preset));
+}
+
 function meshCellsForPreset(preset: Study["meshSettings"]["preset"]): [number, number, number] {
   if (preset === "ultra") return [6, 5, 4];
   if (preset === "fine") return [5, 4, 4];
@@ -1042,9 +1130,61 @@ function meshCellsForPreset(preset: Study["meshSettings"]["preset"]): [number, n
   return [4, 3, 3];
 }
 
+// Dimension-aware structured grid sizing, mirroring the cloud mesher: presets choose
+// how many cells span the smallest dimension, all axes target near-cubic cells, and
+// the elevated Tet10 grid stays inside the in-browser DOF budget. Densities sit one
+// notch below the cloud presets: the local backend is the fast preview tier, and the
+// per-frame implicit solves of dynamic studies run on the main worker thread.
+const LOCAL_CELLS_ACROSS_MIN_DIMENSION: Record<string, number> = {
+  coarse: 2,
+  medium: 2,
+  fine: 3,
+  ultra: 4
+};
+const LOCAL_MAX_DIVISIONS_PER_AXIS = 32;
+// 4k Tet10 nodes = 12k DOFs for a single static solve. Dynamic studies pay the solve
+// cost once per time step, so they get a smaller grid to stay interactive.
+const LOCAL_TET10_NODE_BUDGET = 4000;
+const LOCAL_DYNAMIC_TET10_NODE_BUDGET = 1500;
+
+function meshDivisionsForDimensions(
+  dimensions: [number, number, number],
+  preset: Study["meshSettings"]["preset"],
+  nodeBudget: number
+): [number, number, number] {
+  const positiveDims = dimensions.map((value) => (Number.isFinite(value) && value > 0 ? value : 1)) as [number, number, number];
+  const cellsAcross = LOCAL_CELLS_ACROSS_MIN_DIMENSION[preset] ?? LOCAL_CELLS_ACROSS_MIN_DIMENSION.medium!;
+  const targetCellSize = Math.min(...positiveDims) / cellsAcross;
+  const divisions = positiveDims.map((dimension) =>
+    Math.min(Math.max(Math.round(dimension / targetCellSize), 2), LOCAL_MAX_DIVISIONS_PER_AXIS)
+  ) as [number, number, number];
+  const elevatedNodes = ([x, y, z]: [number, number, number]) => (2 * x + 1) * (2 * y + 1) * (2 * z + 1);
+  while (elevatedNodes(divisions) > nodeBudget && divisions.some((value) => value > 2)) {
+    const scale = Math.cbrt(nodeBudget / elevatedNodes(divisions));
+    let shrunk = false;
+    for (let axis = 0; axis < 3; axis += 1) {
+      const next = Math.max(Math.floor(divisions[axis]! * scale), 2);
+      if (next < divisions[axis]!) shrunk = true;
+      divisions[axis] = next;
+    }
+    if (!shrunk) break;
+  }
+  return divisions;
+}
+
 function maxDofsForMeshPreset(preset: Study["meshSettings"]["preset"]): number {
   const [x, y, z] = meshCellsForPreset(preset);
   return (x + 1) * (y + 1) * (z + 1) * 3;
+}
+
+// The structured proxy mesh is elevated to Tet10, so the preset corner-node bound no
+// longer covers the midside nodes; actual-mesh artifacts size themselves. Cap at the
+// in-browser solver budget either way.
+const LOCAL_SOLVER_MAX_DOFS = 30000;
+
+function localSolveMaxDofs(study: Study, coreModel: CoreStudyModel): number {
+  const modelDofs = coreModel.model.nodes.coordinates.length;
+  return Math.min(Math.max(modelDofs, maxDofsForMeshPreset(study.meshSettings.preset)), LOCAL_SOLVER_MAX_DOFS);
 }
 
 function nodeSelectionCount(preset: Study["meshSettings"]["preset"]): number {
@@ -1064,6 +1204,15 @@ function selectionCenters(study: Study, displayModel: DisplayModel, selectionRef
   if (centers.length) return centers;
   const fallback = displayModel.faces[0]?.center;
   return fallback ? [fallback] : [[0, 0, 0]];
+}
+
+function selectionNormals(study: Study, displayModel: DisplayModel, selectionRef: string): Vec3[] {
+  const selection = study.namedSelections.find((candidate) => candidate.id === selectionRef);
+  const faceIds = new Set(selection?.geometryRefs.filter((ref) => ref.entityType === "face").map((ref) => ref.entityId) ?? []);
+  return displayModel.faces
+    .filter((face) => faceIds.has(face.id))
+    .map((face) => face.normal)
+    .filter((normal): normal is Vec3 => Array.isArray(normal) && normal.length === 3 && normal.every(Number.isFinite));
 }
 
 function nearestMeshNodes(points: Vec3[], centers: Vec3[], count: number): number[] {
@@ -1174,24 +1323,50 @@ function vectorForNode(values: Float64Array, node: number, unitScale: number, di
   ];
 }
 
+function arrayMin(values: number[]): number {
+  let min = Number.POSITIVE_INFINITY;
+  for (const value of values) min = Math.min(min, value);
+  return Number.isFinite(min) ? min : 0;
+}
+
+function arrayMax(values: number[]): number {
+  let max = Number.NEGATIVE_INFINITY;
+  for (const value of values) max = Math.max(max, value);
+  return Number.isFinite(max) ? max : 0;
+}
+
 function resultFieldAbsMax(field: ResultField): number {
-  return Math.max(...[
-    ...field.values,
-    ...(field.samples?.map((sample) => sample.value) ?? [])
-  ].map((value) => Math.abs(value)).filter(Number.isFinite), 0);
+  // Loop instead of spreading: realistic meshes put >100k values per field type,
+  // beyond the V8 argument limit for Math.max(...values).
+  let max = 0;
+  for (const value of field.values) {
+    if (Number.isFinite(value)) max = Math.max(max, Math.abs(value));
+  }
+  for (const sample of field.samples ?? []) {
+    if (Number.isFinite(sample.value)) max = Math.max(max, Math.abs(sample.value));
+  }
+  return max;
 }
 
 function stabilizeDynamicFieldRanges(fields: ResultField[]): void {
   const fieldTypes = [...new Set(fields.map((field) => field.type))];
   for (const type of fieldTypes) {
     const matchingFields = fields.filter((field) => field.type === type);
-    const values = matchingFields.flatMap((field) => [
-      ...field.values,
-      ...(field.samples?.map((sample) => sample.value) ?? [])
-    ]).filter(Number.isFinite);
-    if (!values.length) continue;
-    const min = Math.min(...values);
-    const max = Math.max(...values);
+    let min = Number.POSITIVE_INFINITY;
+    let max = Number.NEGATIVE_INFINITY;
+    for (const field of matchingFields) {
+      for (const value of field.values) {
+        if (!Number.isFinite(value)) continue;
+        min = Math.min(min, value);
+        max = Math.max(max, value);
+      }
+      for (const sample of field.samples ?? []) {
+        if (!Number.isFinite(sample.value)) continue;
+        min = Math.min(min, sample.value);
+        max = Math.max(max, sample.value);
+      }
+    }
+    if (!Number.isFinite(min) || !Number.isFinite(max)) continue;
     for (const field of matchingFields) {
       field.min = round(min, dynamicRangeDigits(type));
       field.max = round(max, dynamicRangeDigits(type));
