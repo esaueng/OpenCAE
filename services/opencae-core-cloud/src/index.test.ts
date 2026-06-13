@@ -2,9 +2,24 @@ import { describe, expect, test } from "vitest";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { solverSurfaceMeshFromModel, type OpenCAEModelJson } from "@opencae/core";
-import { handleRequest, normalizeCoreCloudResultForUi } from "./index";
+import { boundedDynamicWindow, handleRequest, normalizeCoreCloudResultForUi } from "./index";
 
 describe("OpenCAE Core Cloud service", () => {
+  test("clamps hostile dynamic solve windows before dispatching to the solver", () => {
+    const bounded = boundedDynamicWindow(0, 1_000_000, 1e-9, undefined);
+    expect(bounded.endTime).toBeLessThanOrEqual(600);
+    expect((bounded.endTime! - 0) / bounded.timeStep!).toBeLessThanOrEqual(2_000_000);
+
+    const frames = boundedDynamicWindow(0, 10, 0.001, 1e-6);
+    expect((frames.endTime! - 0) / frames.outputInterval!).toBeLessThanOrEqual(2_000);
+
+    const passthrough = boundedDynamicWindow(0, 0.1, 0.005, 0.01);
+    expect(passthrough).toEqual({ startTime: 0, endTime: 0.1, timeStep: 0.005, outputInterval: 0.01 });
+
+    const untouched = boundedDynamicWindow(undefined, undefined, undefined, undefined);
+    expect(untouched).toEqual({ startTime: undefined, endTime: undefined, timeStep: undefined, outputInterval: undefined });
+  });
+
   test("defines runner version in the service version file", () => {
     const versionPath = resolve(__dirname, "../RUNNER_VERSION");
     const source = readFileSync(resolve(__dirname, "index.ts"), "utf8");

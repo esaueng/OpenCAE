@@ -64,7 +64,7 @@ function cantileverStudy(type: "static_stress" | "dynamic_structural"): Study {
     solverSettings: { backend: "opencae_core_local", fidelity: "standard" },
     validation: [],
     runs: []
-  } satisfies Study;
+  } as Study;
 }
 
 describe("local cantilever accuracy", () => {

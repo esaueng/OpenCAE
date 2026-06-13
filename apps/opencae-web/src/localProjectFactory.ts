@@ -2,6 +2,7 @@ import type { DisplayModel, Load, Project } from "@opencae/schema";
 import { ProjectSchema } from "@opencae/schema";
 import { bracketDemoProject, bracketDisplayModel } from "@opencae/db/sample-data";
 import { stlDimensionsFromBase64 } from "@opencae/units";
+import { parseDisplayModel, parseResultBundle } from "./appPersistence";
 import type { EmbeddedModelFile, LocalResultBundle } from "./projectFile";
 import type { SampleAnalysisType, SampleModelId, SampleProjectResponse } from "./lib/api";
 
@@ -279,10 +280,9 @@ export function openLocalProjectPayload(payload: unknown): SampleProjectResponse
   const parsed = ProjectSchema.safeParse(candidate);
   if (!parsed.success) throw new Error("The selected file is not a valid OpenCAE project JSON.");
 
-  const displayModel = hasObjectKey(payload, "displayModel") && isDisplayModel(payload.displayModel)
-    ? payload.displayModel
-    : displayModelForProject(parsed.data);
-  const results = hasObjectKey(payload, "results") && isLocalResultBundle(payload.results) ? payload.results : undefined;
+  const displayModel = (hasObjectKey(payload, "displayModel") ? parseDisplayModel(payload.displayModel) : null)
+    ?? displayModelForProject(parsed.data);
+  const results = hasObjectKey(payload, "results") ? parseResultBundle(payload.results) : undefined;
   return {
     project: parsed.data,
     displayModel,
@@ -608,27 +608,6 @@ function baseNameForModel(filename: string): string {
 
 function hasObjectKey<Key extends string>(value: unknown, key: Key): value is Record<Key, unknown> {
   return Boolean(value && typeof value === "object" && key in value);
-}
-
-function isDisplayModel(value: unknown): value is DisplayModel {
-  return Boolean(
-    value &&
-    typeof value === "object" &&
-    typeof (value as Partial<DisplayModel>).id === "string" &&
-    typeof (value as Partial<DisplayModel>).name === "string" &&
-    typeof (value as Partial<DisplayModel>).bodyCount === "number" &&
-    Array.isArray((value as Partial<DisplayModel>).faces)
-  );
-}
-
-function isLocalResultBundle(value: unknown): value is LocalResultBundle {
-  return Boolean(
-    value &&
-    typeof value === "object" &&
-    hasObjectKey(value, "summary") &&
-    hasObjectKey(value, "fields") &&
-    Array.isArray(value.fields)
-  );
 }
 
 function newLocalId(): string {
