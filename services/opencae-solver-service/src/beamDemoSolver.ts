@@ -1,7 +1,8 @@
-import { effectiveMaterialProperties, starterMaterials } from "@opencae/materials";
+import { effectiveMaterialProperties } from "@opencae/materials";
 import { assessResultFailure } from "@opencae/schema";
 import type { AnalysisMesh, DisplayModel, Load, Material, ResultField, ResultProvenance, ResultSample, ResultSummary, Study } from "@opencae/schema";
 import { inferCriticalPrintAxis } from "@opencae/study-core";
+import { loadForceNewtons, materialForStudy, materialParametersForStudy, STANDARD_GRAVITY } from "./studyInputs";
 
 type Vec3 = [number, number, number];
 
@@ -65,7 +66,6 @@ export type BeamDemoSolveResult = {
   };
 };
 
-const STANDARD_GRAVITY = 9.80665;
 const BEAM_ELEMENT_COUNT = 64;
 const DISPLAY_BEAM_LENGTH = 3.8;
 const BEAM_DISPLAY_HEIGHT = 0.32;
@@ -179,7 +179,8 @@ export function solveBeamDemoStudy(study: Study, runId: string, optionsInput?: A
   const summary: ResultSummary = {
     ...summaryBase,
     failureAssessment: assessResultFailure(summaryBase),
-    provenance: BEAM_DEMO_PROVENANCE
+    provenance: BEAM_DEMO_PROVENANCE,
+    diagnostics: []
   };
   const diagnostics = {
     beamAxis: coordinate.beamAxis,
@@ -454,24 +455,13 @@ function primaryBeamLoad(study: Study): Load | undefined {
 }
 
 function equivalentLoadForce(load: Load, beamModel = DEFAULT_BEAM_DEMO_PHYSICAL_MODEL): number {
-  const value = typeof load.parameters.value === "number" ? Math.abs(load.parameters.value) : 0;
-  if (load.type === "gravity" && load.parameters.units === "kg") return (value || beamModel.payloadMassKg) * STANDARD_GRAVITY;
-  return value;
+  return loadForceNewtons(load, beamModel.payloadMassKg);
 }
 
 function faceForSelection(study: Study, selectionRef: string | undefined) {
   const selection = study.namedSelections.find((candidate) => candidate.id === selectionRef);
   const ref = selection?.geometryRefs[0];
   return ref ? beamDemoFaces.get(ref.entityId) : undefined;
-}
-
-function materialForStudy(study: Study): Material {
-  const materialId = study.materialAssignments[0]?.materialId;
-  return starterMaterials.find((material) => material.id === materialId) ?? starterMaterials[0]!;
-}
-
-function materialParametersForStudy(study: Study): Record<string, unknown> {
-  return study.materialAssignments[0]?.parameters ?? {};
 }
 
 function vectorFrom(value: unknown): Vec3 | undefined {

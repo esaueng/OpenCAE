@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { attachUploadedModelToProject, createLocalBlankProject, createLocalSampleProject, createLocalStaticStressStudy, uploadedDisplayModelFor } from "./localProjectFactory";
+import { attachUploadedModelToProject, createLocalBlankProject, createLocalSampleProject, createLocalStaticStressStudy, openLocalProjectPayload, uploadedDisplayModelFor } from "./localProjectFactory";
 
 const sizedAsciiStlBase64 = btoa(`
 solid beam
@@ -77,5 +77,69 @@ describe("local project factory workflow", () => {
     const load = response.project.studies[0]?.loads[0];
 
     expect(load?.parameters.direction).toEqual([0, -1, 0]);
+  });
+
+  test("rejects payloads without a valid project", () => {
+    expect(() => openLocalProjectPayload("not a project")).toThrow("The selected file is not a valid OpenCAE project JSON.");
+    expect(() => openLocalProjectPayload({ project: { id: "broken" } })).toThrow("The selected file is not a valid OpenCAE project JSON.");
+  });
+
+  test("ignores crafted display models with malformed faces instead of crashing face selection", () => {
+    const blank = createLocalBlankProject("2026-04-28T12:00:00.000Z").project;
+    const response = openLocalProjectPayload({
+      project: blank,
+      displayModel: {
+        id: "display-crafted",
+        name: "Crafted model",
+        bodyCount: 1,
+        faces: [{ id: "face-crafted", label: "Crafted face" }]
+      }
+    });
+
+    // The malformed faces (missing center/normal vectors) are rejected and a safe fallback model is used.
+    expect(response.displayModel.id).toBe("display-blank");
+    expect(response.displayModel.faces).toEqual([]);
+  });
+
+  test("ignores crafted result bundles with malformed summaries", () => {
+    const blank = createLocalBlankProject("2026-04-28T12:00:00.000Z").project;
+    const response = openLocalProjectPayload({
+      project: blank,
+      results: {
+        summary: { maxStress: "very high", maxStressUnits: "MPa" },
+        fields: [{ id: "field-crafted" }]
+      }
+    });
+
+    expect(response.results).toBeUndefined();
+  });
+
+  test("keeps well-formed display models and result bundles from project files", () => {
+    const blank = createLocalBlankProject("2026-04-28T12:00:00.000Z").project;
+    const response = openLocalProjectPayload({
+      project: blank,
+      displayModel: {
+        id: "display-saved",
+        name: "Saved model",
+        bodyCount: 1,
+        faces: [{ id: "face-1", label: "Face 1", color: "#fff", center: [0, 0, 0], normal: [0, 0, 1], stressValue: 12 }]
+      },
+      results: {
+        summary: {
+          maxStress: 12,
+          maxStressUnits: "MPa",
+          maxDisplacement: 0.2,
+          maxDisplacementUnits: "mm",
+          safetyFactor: 2,
+          reactionForce: 500,
+          reactionForceUnits: "N"
+        },
+        fields: [{ id: "field-1", runId: "run-1", type: "stress", location: "face", values: [12], min: 12, max: 12, units: "MPa" }]
+      }
+    });
+
+    expect(response.displayModel.id).toBe("display-saved");
+    expect(response.results?.summary.maxStress).toBe(12);
+    expect(response.results?.fields).toHaveLength(1);
   });
 });
