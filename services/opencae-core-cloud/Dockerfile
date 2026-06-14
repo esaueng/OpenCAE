@@ -11,8 +11,14 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
 COPY scripts ./scripts
 COPY services ./services
 
-ARG OPENCAE_CORE_CACHE_BUST=08ca7a6
-RUN echo "OpenCAE Core cache bust ${OPENCAE_CORE_CACHE_BUST}" && pnpm ensure:core
+# The COPY of services/ above includes services/opencae-core-cloud/OPENCAE_CORE_REF,
+# so changing the pinned ref invalidates this layer and re-runs ensure:core,
+# rebuilding the container against the new commit. Echo the ref (not a stale
+# hardcoded value) so the build log shows exactly which OpenCAE Core commit the
+# image was built from. OPENCAE_CORE_CACHE_BUST stays as an optional manual
+# override for moving-branch refs, where the file itself does not change.
+ARG OPENCAE_CORE_CACHE_BUST=none
+RUN echo "OpenCAE Core ref $(cat services/opencae-core-cloud/OPENCAE_CORE_REF) (manual bust: ${OPENCAE_CORE_CACHE_BUST})" && pnpm ensure:core
 RUN pnpm --dir /opencae-core install --frozen-lockfile --prod=false
 RUN pnpm --dir /opencae-core --filter @opencae/core build
 RUN pnpm --dir /opencae-core --filter @opencae/solver-cpu build
