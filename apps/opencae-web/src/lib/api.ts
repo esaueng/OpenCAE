@@ -55,6 +55,30 @@ function setCappedRunEntry<T>(cache: Map<string, T>, runId: string, value: T, li
   }
 }
 
+export interface CoreCloudHealth {
+  coreCloudAvailable: boolean;
+  /** Runner version the deployed Core Cloud container actually reports. */
+  containerRunnerVersion?: string;
+  coreVersion?: string;
+  solverCpuVersion?: string;
+}
+
+/**
+ * Live health of the deployed OpenCAE Core Cloud container, including the
+ * versions it actually reports. Returns null when the endpoint is unreachable
+ * (e.g. a local-first deploy with no cloud backend). The endpoint returns a
+ * JSON body carrying the versions even on a 503 (cloud unavailable), so the UI
+ * can always display the deployed version.
+ */
+export async function getCoreCloudHealth(): Promise<CoreCloudHealth | null> {
+  try {
+    const response = await fetch("/api/cloud-core/health", { headers: { accept: "application/json" } });
+    return (await response.json()) as CoreCloudHealth;
+  } catch {
+    return null;
+  }
+}
+
 export async function loadSampleProject(sample: SampleModelId = "bracket", analysisType: SampleAnalysisType = "static_stress"): Promise<SampleProjectResponse> {
   return fetchJsonWithFallback(
     "/api/sample-project/load",

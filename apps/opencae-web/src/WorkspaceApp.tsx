@@ -2,7 +2,7 @@ import { lazy, startTransition, Suspense, useCallback, useEffect, useMemo, useRe
 import { isRunResultReadyStatus } from "@opencae/schema";
 import type { Constraint, DisplayFace, DisplayModel, DynamicSolverSettings, Load, NamedSelection, Project, ResultField, ResultRenderBounds, ResultSummary, RunEvent, RunTimingEstimate, SimulationFidelity, Study } from "@opencae/schema";
 import { RotateCcw, Save } from "lucide-react";
-import { addLoad, addSupport, assignMaterial, cancelRun, createProject, generateMesh, getResults, importLocalProject, loadSampleProject, renameProject, runSimulation, subscribeToRun, updateStudy as saveStudyPatch, uploadModel, type SampleAnalysisType, type SampleModelId } from "./lib/api";
+import { addLoad, addSupport, assignMaterial, cancelRun, createProject, generateMesh, getCoreCloudHealth, getResults, importLocalProject, loadSampleProject, renameProject, runSimulation, subscribeToRun, updateStudy as saveStudyPatch, uploadModel, type SampleAnalysisType, type SampleModelId } from "./lib/api";
 import { normalizePrintParameters, starterMaterials } from "@opencae/materials";
 import { BottomPanel, type WorkspaceLogEntry } from "./components/BottomPanel";
 import { OpenCaeLogoMark } from "./components/OpenCaeLogoMark";
@@ -143,6 +143,9 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const [runProgress, setRunProgress] = useState(restoredUi?.runProgress ?? (restoredResults?.fields.length ? 100 : 0));
   const [runTiming, setRunTiming] = useState<RunTimingEstimate | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
+  // Live OpenCAE Core Cloud runner version, fetched from the deployed container
+  // so the Solver panel always shows the actually-deployed version.
+  const [coreCloudVersion, setCoreCloudVersion] = useState<string | null>(null);
   const [activeRunId, setActiveRunId] = useState(restoredUi?.activeRunId || restoredResults?.activeRunId || restoredResults?.completedRunId || "run-bracket-demo-seeded");
   const [completedRunId, setCompletedRunId] = useState(restoredUi?.completedRunId || restoredResults?.completedRunId || "run-bracket-demo-seeded");
   const [processingRunId, setProcessingRunId] = useState<string | null>(null);
@@ -246,6 +249,15 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const resultPlaybackBufferCacheForViewer = !DEBUG_RESULT_FRAME_CACHE_ONLY && resultPlaybackCacheState.status === "ready"
     ? resultPlaybackCacheState.cache.packed ?? null
     : null;
+  useEffect(() => {
+    let active = true;
+    void getCoreCloudHealth().then((health) => {
+      if (active) setCoreCloudVersion(health?.containerRunnerVersion ?? "unavailable");
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
   useEffect(() => {
     if (!DEBUG_RESULTS) return;
     const frameField = visibleResultFieldsForUi.find((field) => field.type === "stress")
@@ -1306,6 +1318,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           runProgress={runProgress}
           runError={runError}
           runTiming={runTiming}
+          coreCloudVersion={coreCloudVersion}
           sampleModel={sampleModel}
           sampleAnalysisType={sampleAnalysisType}
           draftLoadType={draftLoadType}

@@ -56,6 +56,8 @@ interface RightPanelProps {
   runProgress: number;
   runError?: string | null;
   runTiming?: RunTimingEstimate | null;
+  /** Live OpenCAE Core Cloud runner version reported by the deployed container. */
+  coreCloudVersion?: string | null;
   sampleModel: SampleModelId;
   sampleAnalysisType?: SampleAnalysisType;
   draftLoadType: LoadType;
@@ -971,7 +973,7 @@ function MeshPanel({ study, onGenerateMesh }: RightPanelProps) {
   );
 }
 
-function RunPanel({ study, displayModel, runProgress, runError, runTiming, onRunSimulation, onCancelSimulation, canCancelSimulation, onUpdateSolverSettings, canRunSimulation, missingRunItems }: RightPanelProps) {
+function RunPanel({ study, displayModel, runProgress, runError, runTiming, coreCloudVersion, onRunSimulation, onCancelSimulation, canCancelSimulation, onUpdateSolverSettings, canRunSimulation, missingRunItems }: RightPanelProps) {
   const progressPercent = Math.max(0, Math.min(100, Math.round(runProgress)));
   const isRunning = canCancelSimulation ?? (progressPercent > 0 && progressPercent < 100);
   const remainingLabel = formatSimulationEta(runTiming?.estimatedRemainingMs, isRunning);
@@ -1075,7 +1077,7 @@ function RunPanel({ study, displayModel, runProgress, runError, runTiming, onRun
       <SectionTitle helpId="solver">Solver</SectionTitle>
       <div className="summary-box">
         <Info label="Backend" value={solverBackendLabelForRunPanel(study, displayModel)} />
-        <Info label="Version" value="0.1.0" />
+        <Info label="Version" value={coreCloudVersion ?? "checking…"} />
         <Info label="Solver method" value={solverMethodForStudy(study)} />
         <Info label="Runner" value={solverRunnerLabelForStudy(study)} />
         <Info label="Local fallback" value="none" />
