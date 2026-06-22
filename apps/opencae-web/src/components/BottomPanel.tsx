@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type PointerEvent } from "react";
 import { Coffee, Github, MessageSquare } from "lucide-react";
 import { REQUIRED_SETTING_HELP_IDS, SETTING_HELP, type SettingHelpVisual } from "../settingHelp";
 
@@ -120,6 +120,19 @@ export function BottomPanel({ status, logs, projectName, studyName, meshStatus, 
     }
   }
 
+  function resizeDrawerByKey(event: KeyboardEvent<HTMLButtonElement>) {
+    const maxHeight = Math.max(260, window.innerHeight - 120);
+    const clamp = (value: number) => Math.min(maxHeight, Math.max(260, value));
+    let nextHeight: number | null = null;
+    if (event.key === "ArrowUp") nextHeight = drawerHeight + 24;
+    else if (event.key === "ArrowDown") nextHeight = drawerHeight - 24;
+    else if (event.key === "Home") nextHeight = 260;
+    else if (event.key === "End") nextHeight = maxHeight;
+    if (nextHeight === null) return;
+    event.preventDefault();
+    setDrawerHeight(clamp(nextHeight));
+  }
+
   function copyLogs() {
     if (typeof navigator === "undefined" || !navigator.clipboard) return;
     void navigator.clipboard.writeText(formattedLogs.join("\n"));
@@ -143,12 +156,18 @@ export function BottomPanel({ status, logs, projectName, studyName, meshStatus, 
           <button
             type="button"
             className="bottom-resize-handle"
-            aria-label="Resize drawer"
+            role="separator"
+            aria-orientation="horizontal"
+            aria-valuenow={drawerHeight}
+            aria-valuemin={260}
+            aria-valuemax={Math.max(260, window.innerHeight - 120)}
+            aria-label="Resize drawer (use arrow keys)"
             title="Drag up to resize"
             onPointerDown={startDrawerResize}
             onPointerMove={resizeDrawer}
             onPointerUp={stopDrawerResize}
             onPointerCancel={stopDrawerResize}
+            onKeyDown={resizeDrawerByKey}
           />
           <div className="logs-drawer-header">
             <span>Run logs</span>
@@ -174,12 +193,18 @@ export function BottomPanel({ status, logs, projectName, studyName, meshStatus, 
           <button
             type="button"
             className="bottom-resize-handle"
-            aria-label="Resize tips drawer"
+            role="separator"
+            aria-orientation="horizontal"
+            aria-valuenow={drawerHeight}
+            aria-valuemin={260}
+            aria-valuemax={Math.max(260, window.innerHeight - 120)}
+            aria-label="Resize drawer (use arrow keys)"
             title="Drag up to resize"
             onPointerDown={startDrawerResize}
             onPointerMove={resizeDrawer}
             onPointerUp={stopDrawerResize}
             onPointerCancel={stopDrawerResize}
+            onKeyDown={resizeDrawerByKey}
           />
           <div className="tips-drawer-header">
             <span>Settings tips</span>
@@ -205,7 +230,7 @@ export function BottomPanel({ status, logs, projectName, studyName, meshStatus, 
       <div className="status-strip">
         <div className="status-tabs">
           {(["tips", "logs"] as const).map((item) => (
-            <button key={item} className={tab === item ? "active" : ""} onClick={(event) => selectTab(item, event)}>
+            <button key={item} className={tab === item ? "active" : ""} aria-pressed={tab === item} aria-expanded={tab === item} onClick={(event) => selectTab(item, event)}>
               {item[0]?.toUpperCase()}{item.slice(1)}
               {item === "logs" && <span className="count-pill">{logs.length}</span>}
             </button>

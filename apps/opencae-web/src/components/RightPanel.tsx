@@ -188,9 +188,9 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sa
   return (
     <Panel title="Model" helper="Inspect the 3D part. Orbit with left-drag, pan with right-drag, zoom with scroll.">
       {showSampleModelPicker && (
-        <label className="field">
+        <div className="field">
           <HelpLabel helpId="sampleModel">Sample model</HelpLabel>
-          <div className="sample-option-grid panel-sample-grid" role="list" aria-label="Sample model">
+          <div className="sample-option-grid panel-sample-grid" role="group" aria-label="Sample model">
             {SAMPLE_OPTIONS.map((option) => (
               <SampleOptionCard
                 key={option.id}
@@ -205,8 +205,8 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sa
           </div>
           <HelpLabel helpId="sampleModel">Analysis type</HelpLabel>
           <div className="segmented analysis-type" role="group" aria-label="Analysis type">
-            <button className={sampleAnalysisType === "static_stress" ? "active" : ""} type="button" onClick={() => onSampleAnalysisTypeChange?.("static_stress")}>Static</button>
-            <button className={sampleAnalysisType === "dynamic_structural" ? "active" : ""} type="button" onClick={() => onSampleAnalysisTypeChange?.("dynamic_structural")}>Dynamic</button>
+            <button className={sampleAnalysisType === "static_stress" ? "active" : ""} type="button" aria-pressed={sampleAnalysisType === "static_stress"} onClick={() => onSampleAnalysisTypeChange?.("static_stress")}>Static</button>
+            <button className={sampleAnalysisType === "dynamic_structural" ? "active" : ""} type="button" aria-pressed={sampleAnalysisType === "dynamic_structural"} onClick={() => onSampleAnalysisTypeChange?.("dynamic_structural")}>Dynamic</button>
           </div>
           <button
             className={confirmSampleLoad ? "primary wide" : "secondary wide"}
@@ -218,7 +218,7 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sa
             {confirmSampleLoad ? "Click again to load sample" : `Load ${sampleAnalysisType === "dynamic_structural" ? "dynamic" : "static"} sample`}
           </button>
           {confirmSampleLoad && <span className="panel-copy confirm-copy">This will reload {sampleLabel} as {sampleAnalysisLabel} and reset the sample setup.</span>}
-        </label>
+        </div>
       )}
       <input
         ref={uploadInputRef}
@@ -515,7 +515,7 @@ function LoadsPanel({
         fallbackLabel={selectedPayloadObject?.label ?? selectedFace?.label}
         detail={selectedPayloadObject ? "object selected" : selectedLoadPoint ? "point picked" : undefined}
       />
-      <label className="field">
+      <div className="field">
         <HelpLabel helpId="loadType">Load type</HelpLabel>
         <div className="segmented" role="group" aria-label="Load type">
           {(["force", "pressure", "gravity"] as const).map((type) => (
@@ -523,6 +523,7 @@ function LoadsPanel({
               key={type}
               className={draftLoadType === type ? "active" : ""}
               type="button"
+              aria-pressed={draftLoadType === type}
               onClick={() => {
                 onDraftLoadTypeChange(type);
                 if (type !== draftLoadType) onDraftLoadValueChange(defaultValueForLoadType(type));
@@ -532,7 +533,7 @@ function LoadsPanel({
             </button>
           ))}
         </div>
-      </label>
+      </div>
       {draftLoadType === "gravity" ? (
         <PayloadMassControls
           unitSystem={project.unitSystem}
@@ -942,14 +943,14 @@ function MeshPanel({ study, onGenerateMesh }: RightPanelProps) {
   const [preset, setPreset] = useState<MeshQuality>(study.meshSettings.preset);
   return (
     <Panel title="Mesh" helper="The mesh breaks the model into small pieces so OpenCAE can calculate results.">
-      <label className="field">
+      <div className="field">
         <HelpLabel helpId="meshQuality">Quality preset</HelpLabel>
         <div className="segmented" role="group" aria-label="Mesh quality">
           {MESH_PRESETS.map((option) => (
-            <button key={option} className={preset === option ? "active" : ""} type="button" onClick={() => setPreset(option)}>{capitalize(option)}</button>
+            <button key={option} className={preset === option ? "active" : ""} type="button" aria-pressed={preset === option} onClick={() => setPreset(option)}>{capitalize(option)}</button>
           ))}
         </div>
-      </label>
+      </div>
       <button className="primary wide" onClick={() => onGenerateMesh(preset)}><Grid3X3 size={18} />Generate mesh</button>
       <Callout>{capitalize(preset)} creates a {meshPresetDescription(preset)}.</Callout>
       {study.meshSettings.summary && (
