@@ -121,6 +121,60 @@ describe("CadViewer result coloring", () => {
     expect(color.getZ(3)).toBeCloseTo(maxColor.b, 5);
   });
 
+  test("coerces non-finite solver-surface result data so one bad node cannot scramble the mesh", () => {
+    const surfaceMesh = {
+      id: "solver-surface",
+      nodes: [
+        [0, 0, 0],
+        [1, 0, 0],
+        [0, 1, 0],
+        [Number.NaN, 0, 1]
+      ] as [number, number, number][],
+      triangles: [[0, 1, 2], [0, 2, 3]] as [number, number, number][],
+      nodeMap: [0, 1, 2, 3]
+    };
+    const stressField: ResultField = {
+      id: "stress-surface",
+      runId: "run-surface",
+      type: "stress",
+      location: "node",
+      values: [0, 10, Number.NaN, 30],
+      min: 0,
+      max: 30,
+      units: "MPa",
+      surfaceMeshRef: "solver-surface"
+    };
+    const displacementField: ResultField = {
+      id: "displacement-surface",
+      runId: "run-surface",
+      type: "displacement",
+      location: "node",
+      values: [0.1, 0, 0, 0],
+      vectors: [[0, 0, 0.1], [Number.POSITIVE_INFINITY, 0, 0], [0, 0, 0], [0, 0, 0]],
+      min: 0,
+      max: 0.1,
+      units: "mm",
+      surfaceMeshRef: "solver-surface"
+    };
+
+    const geometry = buildSolverSurfaceResultGeometry({
+      surfaceMesh,
+      scalarField: stressField,
+      displacementField,
+      resultMode: "stress",
+      showDeformed: true,
+      deformationScale: 1
+    });
+    const position = geometry.getAttribute("position") as THREE.BufferAttribute;
+    const color = geometry.getAttribute("color") as THREE.BufferAttribute;
+    for (let index = 0; index < position.count * 3; index += 1) {
+      expect(Number.isFinite((position.array as Float32Array)[index])).toBe(true);
+      expect(Number.isFinite((color.array as Float32Array)[index])).toBe(true);
+    }
+    expect(geometry.boundingSphere).not.toBeNull();
+    expect(Number.isFinite(geometry.boundingSphere?.radius ?? Number.NaN)).toBe(true);
+  });
+
   test("keeps solver-surface undeformed outline geometry on original nodes", () => {
     const surfaceMesh = {
       id: "solver-surface",
@@ -1093,6 +1147,90 @@ describe("CadViewer result coloring", () => {
     expect(deformationScaleForResultFields([{ ...zeroFrame, max: 0 }])).toBe(0);
     expect(deformationScaleForResultFields([zeroFrame])).toBe(1);
     expect(deformationScaleForResultFields([peakFrame])).toBe(1);
+    // The run-wide peak gates deformation even when the opening frame is exactly zero, so a
+    // ramp-from-rest transient still animates instead of being pinned undeformed.
+    expect(deformationScaleForResultFields([{ ...zeroFrame, max: 0 }, peakFrame])).toBe(1);
+  });
+
+  test("keeps the paused opening transient frame undeformed instead of amplifying near-zero noise", () => {
+    const points: [number, number, number][] = [[-1, 0, 0], [0, 0, 0], [1, 0, 0]];
+    const buildGeometry = () => {
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute("position", new THREE.Float32BufferAttribute(points.flat(), 3));
+      return geometry;
+    };
+    // Opening frame: tiny, spatially incoherent displacement with its OWN per-frame max,
+    // mirroring a non-stabilized Core Cloud frame 0 (ramp load starts at 0). Peak frame:
+    // large coherent displacement. Both keep raw per-frame min/max (not globally stabilized).
+    const openingFrame: ResultField = {
+      id: "displacement-frame-0",
+      runId: "run-transient",
+      type: "displacement",
+      location: "node",
+      values: [0.001, 0.001, 0.001],
+      min: 0,
+      max: 0.001,
+      units: "mm",
+      frameIndex: 0,
+      timeSeconds: 0,
+      samples: points.map((point, index) => ({
+        point,
+        normal: [0, 1, 0] as [number, number, number],
+        value: 0.001,
+        vector: [0, index % 2 === 0 ? 0.001 : -0.001, 0] as [number, number, number]
+      }))
+    };
+    const peakFrame: ResultField = {
+      id: "displacement-frame-10",
+      runId: "run-transient",
+      type: "displacement",
+      location: "node",
+      values: [1, 1, 1],
+      min: 0,
+      max: 1,
+      units: "mm",
+      frameIndex: 10,
+      timeSeconds: 0.1,
+      samples: points.map((point) => ({
+        point,
+        normal: [0, 1, 0] as [number, number, number],
+        value: 1,
+        vector: [0, -1, 0] as [number, number, number]
+      }))
+    };
+
+    const maxDelta = (geometry: THREE.BufferGeometry) => {
+      const position = geometry.getAttribute("position") as THREE.BufferAttribute;
+      let max = 0;
+      for (let index = 0; index < position.count; index += 1) {
+        max = Math.max(max, Math.abs(position.getY(index)));
+      }
+      return max;
+    };
+
+    // Paused on the opening frame: all frames are present (static path), the displacement
+    // vectors come from frame 0, but the scale is normalized by the run-wide peak, so the
+    // amplified near-zero noise must NOT tear the mesh.
+    const pausedGeometry = buildGeometry();
+    applyResultFrameToGeometry({
+      geometry: pausedGeometry,
+      fields: [openingFrame, peakFrame],
+      resultMode: "displacement",
+      showDeformed: true,
+      deformationScale: 1
+    });
+    expect(maxDelta(pausedGeometry)).toBeLessThan(0.02);
+
+    // The peak frame on its own still deforms visibly under the same scale.
+    const peakGeometry = buildGeometry();
+    applyResultFrameToGeometry({
+      geometry: peakGeometry,
+      fields: [peakFrame],
+      resultMode: "displacement",
+      showDeformed: true,
+      deformationScale: 1
+    });
+    expect(maxDelta(peakGeometry)).toBeGreaterThan(0.05);
   });
 
   test("applies displacement vectors to geometry positions when deformed results are enabled", () => {
