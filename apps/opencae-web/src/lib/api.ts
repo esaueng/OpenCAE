@@ -567,6 +567,13 @@ function openCaeCoreCloudSolveRequest(runId: string, study: Study, displayModel:
     throw new Error(OPENCAE_CORE_CLOUD_GEOMETRY_REQUIRED_REASON);
   }
   if (geometry) {
+    const useLinearGmshElements = geometry.kind === "sample_procedural" && geometry.sampleId === "bracket";
+    const cloudSolverSettings = {
+      ...study.solverSettings,
+      backend: "opencae_core_cloud",
+      // Native curved Gmsh Tet10 elements can invert around the bracket's drilled holes.
+      ...(useLinearGmshElements ? { elementOrder: 1 } : {})
+    };
     return {
       runId,
       analysisType: study.type,
@@ -576,10 +583,7 @@ function openCaeCoreCloudSolveRequest(runId: string, study: Study, displayModel:
       displayModel,
       geometry: geometryWithMeshPreset(geometry, study),
       coreVolumeMesh: null,
-      solverSettings: {
-        ...study.solverSettings,
-        backend: "opencae_core_cloud"
-      },
+      solverSettings: cloudSolverSettings,
       resultSettings: {
         provenance: {
           kind: "opencae_core_fea",
