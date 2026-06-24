@@ -14,7 +14,7 @@
   --color-border-strong: #3a4554;
   --color-text: #e6edf3;
   --color-text-muted: #8b949e;
-  --color-text-subtle: #5c6672;
+  --color-text-subtle: #828d99; /* 4.87:1 vs --color-surface-2 #17202b (WCAG 1.4.3/1.4.11 AA) */
 
   /* ── Semantic ─────────────────────────────────────────── */
   --color-accent: #4da3ff;

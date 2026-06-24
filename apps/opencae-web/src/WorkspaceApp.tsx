@@ -170,6 +170,13 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const [previewPrintLayerOrientation, setPreviewPrintLayerOrientation] = useState<PrintLayerOrientation | null | undefined>(undefined);
   const [isStepbarCollapsed, setIsStepbarCollapsed] = useState(false);
   const [showBoundaryConditionMenu, setShowBoundaryConditionMenu] = useState(false);
+  const [singleKeyShortcutsEnabled, setSingleKeyShortcutsEnabled] = useState(() => {
+    try {
+      return window.localStorage.getItem("opencae.shortcuts.singleKey") !== "off";
+    } catch {
+      return true;
+    }
+  });
   const didRequestRestoredHomeView = useRef(false);
   const activeRunSourceRef = useRef<EventSource | null>(null);
   const processingRunIdRef = useRef<string | null>(null);
@@ -582,6 +589,10 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       return;
     }
     if (event.metaKey || event.ctrlKey || event.altKey || editableTarget) return;
+    // Single-key shortcuts: honor the user's off-switch (WCAG 2.1.4) and stay
+    // inert while a modal/menu overlay is open.
+    if (!singleKeyShortcutsEnabled) return;
+    if (document.querySelector('[role="dialog"], .condition-menu, .result-field-menu')) return;
     if (key === "h") {
       event.preventDefault();
       handleFitDefaultView();
@@ -1185,6 +1196,18 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     setHomeRequested(true);
   }
 
+  function handleToggleSingleKeyShortcuts() {
+    setSingleKeyShortcutsEnabled((enabled) => {
+      const next = !enabled;
+      try {
+        window.localStorage.setItem("opencae.shortcuts.singleKey", next ? "on" : "off");
+      } catch {
+        // Ignore storage failures (e.g. private browsing); keep in-memory state.
+      }
+      return next;
+    });
+  }
+
   function renderTopbar(showRunButton: boolean) {
     if (!project) return null;
     return (
@@ -1202,6 +1225,16 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
             <button className="icon-button history-button" type="button" title="Undo last change" aria-label="Undo last change" disabled={!canUndoAction} onClick={handleUndoAction}><UndoIcon /></button>
             <button className="icon-button history-button" type="button" title="Redo last change" aria-label="Redo last change" disabled={!canRedoAction} onClick={handleRedoAction}><RedoIcon /></button>
           </div>
+          <button
+            className="icon-button"
+            type="button"
+            aria-pressed={singleKeyShortcutsEnabled}
+            title={singleKeyShortcutsEnabled ? "Single-key shortcuts on" : "Single-key shortcuts off"}
+            aria-label="Single-key shortcuts"
+            onClick={handleToggleSingleKeyShortcuts}
+          >
+            Keys
+          </button>
         </div>
         {showRunButton ? (
           <button
@@ -1242,9 +1275,11 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
 
   return (
     <div className={`app-shell theme-${themeMode} ${isStepbarCollapsed ? "stepbar-collapsed" : ""}`}>
+      <a className="skip-link" href="#workspace-main">Skip to main content</a>
+      <h1 className="visually-hidden">{project?.name ? `OpenCAE — ${project.name}` : "OpenCAE workspace"}</h1>
       {renderTopbar(true)}
 
-      <main className="workspace">
+      <main className="workspace" id="workspace-main" tabIndex={-1}>
         <StepBar
           activeStep={activeStep}
           collapsed={isStepbarCollapsed}

@@ -124,11 +124,11 @@ export function SampleProjectMenu({ selectedSample, selectedAnalysisType, onBack
         <div className="start-sample-header">
           <span>Sample model</span>
           <div className="segmented analysis-type start-analysis-type" role="group" aria-label="Analysis type">
-            <button className={selectedAnalysisType === "static_stress" ? "active" : ""} type="button" onClick={() => onSelectAnalysisType("static_stress")}>Static</button>
-            <button className={selectedAnalysisType === "dynamic_structural" ? "active" : ""} type="button" onClick={() => onSelectAnalysisType("dynamic_structural")}>Dynamic</button>
+            <button className={selectedAnalysisType === "static_stress" ? "active" : ""} type="button" aria-pressed={selectedAnalysisType === "static_stress"} onClick={() => onSelectAnalysisType("static_stress")}>Static</button>
+            <button className={selectedAnalysisType === "dynamic_structural" ? "active" : ""} type="button" aria-pressed={selectedAnalysisType === "dynamic_structural"} onClick={() => onSelectAnalysisType("dynamic_structural")}>Dynamic</button>
           </div>
         </div>
-        <div className="sample-option-grid start-sample-grid" role="list" aria-label="Sample model">
+        <div className="sample-option-grid start-sample-grid" role="group" aria-label="Sample model">
           {SAMPLE_OPTIONS.map((option) => (
             <SampleOptionCard
               key={option.id}

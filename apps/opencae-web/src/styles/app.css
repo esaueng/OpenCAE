@@ -925,6 +925,7 @@ img {
 
 .setup-status.inactive {
   color: var(--color-text-muted);
+  border-style: dotted;
 }
 
 .tree-run-item {
@@ -977,6 +978,11 @@ img {
   background: transparent;
   border: 0;
   outline: none;
+}
+
+.material-search:focus-within {
+  border-color: var(--color-accent);
+  box-shadow: inset 0 0 0 1px var(--color-accent-border);
 }
 
 .material-preview-row {
@@ -2505,8 +2511,8 @@ img {
 
 .range-field input[type="range"]:focus,
 .range-field input[type="range"]:focus-visible {
-  outline: none;
-  box-shadow: none;
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
 }
 
 .range-label {
@@ -3646,6 +3652,106 @@ button:disabled {
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
+}
+
+.skip-link {
+  position: absolute;
+  left: 8px;
+  top: -48px;
+  z-index: 9999;
+  padding: 8px 14px;
+  background: var(--color-accent);
+  color: #04121f;
+  border-radius: var(--radius-md);
+  font-weight: var(--fw-medium);
+  transition: top var(--dur-fast) var(--ease-out);
+}
+
+.skip-link:focus {
+  top: 8px;
+  outline: 2px solid var(--color-text);
+}
+
+/* Keyboard/SR face picker: present in the a11y tree and tab order at all times,
+   visually revealed only when it receives keyboard focus so the default viewport
+   design is unchanged. opacity (not clip/position) keeps the absolute overlay
+   placement intact when revealed. */
+.viewer-a11y-faces {
+  position: absolute;
+  left: 12px;
+  top: 12px;
+  z-index: var(--z-viewer-overlay);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 60%;
+  overflow: auto;
+  padding: 10px;
+  background: var(--color-surface);
+  border: var(--border-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-panel);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.viewer-a11y-faces:focus-within {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.viewer-a11y-faces button {
+  text-align: left;
+}
+
+.viewer-a11y-faces button[aria-pressed="true"] {
+  color: var(--color-accent);
+  border-color: var(--color-accent-border);
+}
+
+/* Keyboard equivalent of the WebGL gizmo cube: hidden until focused (mouse users
+   keep using the gizmo), revealed on keyboard focus without disturbing layout. */
+.viewer-view-presets {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  z-index: var(--z-viewer-overlay);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-width: 220px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.viewer-view-presets:focus-within {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.viewer-view-presets button {
+  padding: 3px 8px;
+  font-size: var(--fs-xs);
+  color: var(--color-text-muted);
+  background: var(--color-surface-2);
+  border: var(--border-thin);
+  border-radius: var(--radius-sm);
+}
+
+.viewer-view-presets button:hover,
+.viewer-view-presets button:focus-visible {
+  color: var(--color-accent);
+  border-color: var(--color-accent-border);
+}
+
+.unit-toggle:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.stepbar-collapse:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: 1px;
 }
 
 @media (max-width: 980px) {

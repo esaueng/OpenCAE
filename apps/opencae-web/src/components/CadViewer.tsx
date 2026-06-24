@@ -319,6 +319,27 @@ export function CadViewer(props: CadViewerProps) {
         </GizmoHelper>
         {viewerStatsEnabled && <ViewerRendererStatsProbe />}
       </Canvas>
+      {props.displayModel.faces.length > 0 && (
+        <div className="viewer-a11y-faces" role="group" aria-label="Select a face with the keyboard">
+          <span>Select a face to place supports or loads.</span>
+          {props.displayModel.faces.map((face) => (
+            <button
+              key={face.id}
+              type="button"
+              aria-pressed={face.id === props.selectedFaceId}
+              onClick={() => props.onSelectFace(face, face.center)}
+            >
+              {face.label || face.id}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="viewer-view-presets" role="group" aria-label="Camera views">
+        <button type="button" onClick={() => setGizmoViewRequest((request) => ({ view: "x", signal: request.signal + 1 }))}>X</button>
+        <button type="button" onClick={() => setGizmoViewRequest((request) => ({ view: "y", signal: request.signal + 1 }))}>Y</button>
+        <button type="button" onClick={() => setGizmoViewRequest((request) => ({ view: "z", signal: request.signal + 1 }))}>Z</button>
+        <button type="button" onClick={() => setGizmoViewRequest((request) => ({ view: VIEWER_ISOMETRIC_GIZMO_VIEW, signal: request.signal + 1 }))}>Iso</button>
+      </div>
       <a className="viewer-watermark" href={VIEWER_CREDIT_URL} target="_blank" rel="noreferrer">Built by Esau Engineering</a>
       {effectiveViewMode === "results" && <ResultLegend resultMode={props.resultMode} resultFields={resultFields} unitSystem={props.unitSystem} meshSummary={props.meshSummary} surfaceMesh={props.surfaceMesh} showDeformed={effectiveShowDeformed} deformationScale={props.stressExaggeration} />}
     </section>
