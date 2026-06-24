@@ -559,6 +559,9 @@ describe("api", () => {
       expect(body).toMatchObject({
         analysisType: "static_stress",
         coreVolumeMesh: null,
+        solverSettings: expect.objectContaining({
+          elementOrder: 1
+        }),
         geometry: {
           kind: "sample_procedural",
           sampleId: "bracket",
