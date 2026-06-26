@@ -3623,7 +3623,66 @@ export function colorizeSampleResultGeometry(
   supportMarkers: ViewerSupportMarker[] = [],
   resultFields: ResultField[] = []
 ) {
-  return colorizeResultGeometry(geometry, kind, resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale, undefined, undefined, supportMarkers, resultFields);
+  // Core Cloud results carry their sample geometry in SOLVER space (meters, Z-up) while this
+  // procedural display geometry is in display space (mm, Y-up). Reconcile the two before the
+  // inverse-distance mapping, otherwise the meter-scale sample cloud collapses near the origin
+  // of the mm-scale model and almost every vertex extrapolates to zero -> a torn/frozen shape.
+  const coordinateTransform = solverSpaceResultCoordinateTransform(geometry, resultFields);
+  return colorizeResultGeometry(geometry, kind, resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale, coordinateTransform, undefined, supportMarkers, resultFields);
+}
+
+// When result samples live in a far smaller coordinate space than the display geometry
+// (solver meters vs display mm, the ~1000x gap a Core Cloud surface result exhibits), build a
+// similarity transform that places the display geometry INTO the sample (result) space so the
+// IDW mapping + displacement happen consistently, then maps the deformed points back. Returns
+// undefined for same-space samples (local/preview/beam paths) so those render byte-for-byte
+// unchanged. The rotation is exactly baseModelRotation [pi/2,0,0] — the frame swap the renderer
+// already applies to procedural geometry (see modelOrientation.ts / the <group> at the top of
+// BracketModel) — so handedness matches the solver-surface direct path.
+const SOLVER_SAMPLE_SPACE_SCALE_RATIO = 25; // mirrors coordinateSpaceDiagnostic() in resultFields.ts
+
+export function solverSpaceResultCoordinateTransform(
+  geometry: THREE.BufferGeometry,
+  resultFields: ResultField[]
+): ResultCoordinateTransform | undefined {
+  const sampleBounds = new THREE.Box3();
+  let samplePointCount = 0;
+  for (const field of resultFields) {
+    for (const sample of field.samples ?? []) {
+      const point = sample.point;
+      if (point && point.length === 3 && point.every(Number.isFinite)) {
+        sampleBounds.expandByPoint(new THREE.Vector3(point[0], point[1], point[2]));
+        samplePointCount += 1;
+      }
+    }
+  }
+  if (samplePointCount < 2 || sampleBounds.isEmpty()) return undefined;
+  const sampleDiag = sampleBounds.getSize(new THREE.Vector3()).length();
+  if (!(sampleDiag > 1e-12)) return undefined;
+
+  if (!geometry.boundingBox) geometry.computeBoundingBox();
+  const geomBounds = geometry.boundingBox?.clone();
+  if (!geomBounds || geomBounds.isEmpty()) return undefined;
+  const geomDiag = geomBounds.getSize(new THREE.Vector3()).length();
+  if (!(geomDiag > 1e-12)) return undefined;
+
+  // Only reconcile when the samples are clearly in a different (smaller) space than the
+  // display geometry. Same-space samples (already display mm: local/preview/beam) are left
+  // untouched so their existing render is unchanged.
+  if (geomDiag / sampleDiag < SOLVER_SAMPLE_SPACE_SCALE_RATIO) return undefined;
+
+  const rotation = new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(Math.PI / 2, 0, 0));
+  const inverseRotation = rotation.clone().invert();
+  const scale = sampleDiag / geomDiag;
+  const geomCenter = geomBounds.getCenter(new THREE.Vector3());
+  const sampleCenter = sampleBounds.getCenter(new THREE.Vector3());
+  // result = scale * R * display + translate, translate chosen so the centers coincide.
+  const translate = sampleCenter.clone().sub(geomCenter.clone().applyMatrix4(rotation).multiplyScalar(scale));
+  return {
+    bounds: sampleBounds,
+    toResultPoint: (point) => point.clone().applyMatrix4(rotation).multiplyScalar(scale).add(translate),
+    fromResultPoint: (point) => point.clone().sub(translate).multiplyScalar(1 / scale).applyMatrix4(inverseRotation)
+  };
 }
 
 function usePackedPlaybackGeometry(
