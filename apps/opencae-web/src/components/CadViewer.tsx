@@ -299,6 +299,7 @@ export function CadViewer(props: CadViewerProps) {
                 resultMode={props.resultMode}
                 showDeformed={effectiveShowDeformed}
                 deformationScale={props.stressExaggeration}
+                displacementPeakMagnitude={solverSurfaceResult.displacementPeakMagnitude}
               />
             ) : (
               <group rotation={baseModelRotation}>
@@ -2508,14 +2509,19 @@ export function shouldDisableResultDeformation(displayModel: DisplayModel, resul
 type SolverSurfaceResultFields = {
   scalarField: ResultField;
   displacementField?: ResultField;
+  displacementPeakMagnitude: number;
 };
 
 function solverSurfaceResultFields(surfaceMesh: SolverSurfaceMesh | undefined, fields: ResultField[], resultMode: ResultMode): SolverSurfaceResultFields | null {
   if (!surfaceMesh || !surfaceMesh.nodes.length || !surfaceMesh.triangles.length) return null;
   const scalarField = fields.find((field) => isSolverSurfaceNodeField(field, surfaceMesh, resultMode));
   if (!scalarField) return null;
-  const displacementField = fields.find((field) => isSolverSurfaceNodeField(field, surfaceMesh, "displacement"));
-  return { scalarField, displacementField };
+  const displacementFields = fields.filter((field) => isSolverSurfaceNodeField(field, surfaceMesh, "displacement"));
+  const displacementField = displacementFields[0];
+  // Run-wide peak across every transient frame so the deformation scale stays constant and a
+  // near-zero opening frame is not self-normalized into a torn shape (see procedural path).
+  const displacementPeakMagnitude = transientDisplacementPeakMagnitude(displacementFields, displacementField);
+  return { scalarField, ...(displacementField ? { displacementField } : {}), displacementPeakMagnitude };
 }
 
 function isSolverSurfaceNodeField(field: ResultField, surfaceMesh: SolverSurfaceMesh, resultMode: ResultMode): boolean {
@@ -2533,7 +2539,8 @@ function SolverSurfaceResultMesh({
   displacementField,
   resultMode,
   showDeformed,
-  deformationScale
+  deformationScale,
+  displacementPeakMagnitude
 }: {
   surfaceMesh: SolverSurfaceMesh;
   scalarField: ResultField;
@@ -2541,10 +2548,11 @@ function SolverSurfaceResultMesh({
   resultMode: ResultMode;
   showDeformed: boolean;
   deformationScale: number;
+  displacementPeakMagnitude?: number;
 }) {
   const geometry = useMemo(
-    () => buildSolverSurfaceResultGeometry({ surfaceMesh, scalarField, displacementField, resultMode, showDeformed, deformationScale }),
-    [deformationScale, displacementField, resultMode, scalarField, showDeformed, surfaceMesh]
+    () => buildSolverSurfaceResultGeometry({ surfaceMesh, scalarField, displacementField, resultMode, showDeformed, deformationScale, displacementPeakMagnitude }),
+    [deformationScale, displacementField, displacementPeakMagnitude, resultMode, scalarField, showDeformed, surfaceMesh]
   );
   const outlineGeometry = useMemo(() => buildSolverSurfaceOutlineGeometry(surfaceMesh), [surfaceMesh]);
   return (
@@ -2584,7 +2592,8 @@ export function buildSolverSurfaceResultGeometry({
   displacementField,
   resultMode,
   showDeformed,
-  deformationScale
+  deformationScale,
+  displacementPeakMagnitude
 }: {
   surfaceMesh: SolverSurfaceMesh;
   scalarField: ResultField;
@@ -2592,25 +2601,33 @@ export function buildSolverSurfaceResultGeometry({
   resultMode: ResultMode;
   showDeformed: boolean;
   deformationScale: number;
+  displacementPeakMagnitude?: number;
 }): THREE.BufferGeometry {
   assertSolverSurfaceRenderInputs(surfaceMesh, scalarField, displacementField);
   const positions = new Float32Array(surfaceMesh.nodes.length * 3);
   const colors = new Float32Array(surfaceMesh.nodes.length * 3);
   const baseBounds = new THREE.Box3();
-  for (const node of surfaceMesh.nodes) baseBounds.expandByPoint(new THREE.Vector3(...node));
+  // Skip non-finite nodes so a single bad coordinate cannot poison modelExtent (and through
+  // it the visual scale) into NaN — which would then propagate to every vertex position.
+  for (const node of surfaceMesh.nodes) {
+    if (node.every(Number.isFinite)) baseBounds.expandByPoint(new THREE.Vector3(...node));
+  }
   const modelExtent = baseBounds.isEmpty() ? 1 : baseBounds.getSize(new THREE.Vector3()).length();
   const visualScale = showDeformed && displacementField?.vectors?.length
-    ? finalVisualScaleForDisplacementField(modelExtent, displacementField, deformationScale).finalVisualScale
+    ? finiteOr0(finalVisualScaleForDisplacementField(modelExtent, displacementField, deformationScale, RESULT_DEFORMATION_CAP_FRACTION, displacementPeakMagnitude).finalVisualScale)
     : 0;
 
   for (let index = 0; index < surfaceMesh.nodes.length; index += 1) {
     const node = surfaceMesh.nodes[index]!;
     const vector = displacementField?.vectors?.[index] ?? [0, 0, 0];
     const offset = index * 3;
-    positions[offset] = node[0] + vector[0] * visualScale;
-    positions[offset + 1] = node[1] + vector[1] * visualScale;
-    positions[offset + 2] = node[2] + vector[2] * visualScale;
-    const normalized = normalizeScalarValueForResultRender(scalarField.values[index] ?? 0, scalarField);
+    // Coerce non-finite components to a safe value before they reach the buffer: a single
+    // NaN/Inf node position or displacement vector poisons computeVertexNormals/
+    // computeBoundingSphere below and scrambles the entire mesh into disconnected pieces.
+    positions[offset] = finiteOr0(node[0]) + finiteOr0(vector[0]) * visualScale;
+    positions[offset + 1] = finiteOr0(node[1]) + finiteOr0(vector[1]) * visualScale;
+    positions[offset + 2] = finiteOr0(node[2]) + finiteOr0(vector[2]) * visualScale;
+    const normalized = normalizeScalarValueForResultRender(finiteOr0(scalarField.values[index]), scalarField);
     writeResultColorForValue(colors, offset, resultMode, normalized);
   }
 
@@ -2776,7 +2793,15 @@ export function applyResultFrameToGeometry({
   logResultFieldDiagnostics(scalarField, resultMode);
   const geometryExtent = (coordinateTransform?.bounds ?? basePositionBoundsForGeometry(geometry, basePositions)).getSize(new THREE.Vector3()).length();
   const modelExtent = Math.max(geometryExtent, resultFieldPointExtent(displacementField));
-  const visualScaleResult = finalVisualScaleForDisplacementField(modelExtent, displacementField, deformationScale, deformationCapFraction);
+  // Transient deformation must use ONE scale tied to the peak displacement over the whole
+  // run, not each frame's own max. The opening frame of a ramp-from-rest study is ~0, so
+  // self-normalizing it explodes the auto-scale and amplifies numerical noise into a torn
+  // shape. Local solvers globally stabilize per-frame ranges (stabilizeDynamicFieldRanges)
+  // and the packed-playback cache normalizes them too, but the paused/static render path
+  // receives raw per-frame fields (e.g. non-stabilized Core Cloud frames), so derive the
+  // global peak from every displacement frame present here.
+  const transientDisplacementPeak = transientDisplacementPeakMagnitude(fields, displacementField);
+  const visualScaleResult = finalVisualScaleForDisplacementField(modelExtent, displacementField, deformationScale, deformationCapFraction, transientDisplacementPeak);
   const visualScale = visualScaleResult.finalVisualScale;
   if (DEBUG_RESULTS) {
     console.debug("[OpenCAE final deformation scale]", {
@@ -2996,9 +3021,9 @@ function applyLocalResultPositions(
   for (let vertexIndex = 0; vertexIndex < vertexCount; vertexIndex += 1) {
     const offset = vertexIndex * 3;
     const [ux, uy, uz] = displacementVectorForVertex(vertexIndex, offset, basePositions, displacementField, displacementMapping, smoothDisplacementInterpolator);
-    positionArray[offset] = (basePositions[offset] ?? 0) + ux * visualScale;
-    positionArray[offset + 1] = (basePositions[offset + 1] ?? 0) + uy * visualScale;
-    positionArray[offset + 2] = (basePositions[offset + 2] ?? 0) + uz * visualScale;
+    positionArray[offset] = finiteOr0(basePositions[offset]) + finiteOr0(ux) * visualScale;
+    positionArray[offset + 1] = finiteOr0(basePositions[offset + 1]) + finiteOr0(uy) * visualScale;
+    positionArray[offset + 2] = finiteOr0(basePositions[offset + 2]) + finiteOr0(uz) * visualScale;
   }
 }
 
@@ -3022,12 +3047,12 @@ function applyTransformedResultPositions(
     const offset = vertexIndex * 3;
     const [ux, uy, uz] = displacementVectorForVertex(vertexIndex, offset, resultBasePositions, displacementField, displacementMapping, smoothDisplacementInterpolator);
     const resultPoint = new THREE.Vector3(
-      (resultBasePositions[offset] ?? 0) + ux * visualScale,
-      (resultBasePositions[offset + 1] ?? 0) + uy * visualScale,
-      (resultBasePositions[offset + 2] ?? 0) + uz * visualScale
+      finiteOr0(resultBasePositions[offset]) + finiteOr0(ux) * visualScale,
+      finiteOr0(resultBasePositions[offset + 1]) + finiteOr0(uy) * visualScale,
+      finiteOr0(resultBasePositions[offset + 2]) + finiteOr0(uz) * visualScale
     );
     const local = coordinateTransform.fromResultPoint(resultPoint);
-    position.setXYZ(vertexIndex, local.x, local.y, local.z);
+    position.setXYZ(vertexIndex, finiteOr0(local.x), finiteOr0(local.y), finiteOr0(local.z));
   }
 }
 
@@ -3191,9 +3216,14 @@ export function finalVisualScaleForDisplacementField(
   modelExtent: number,
   displacementField: ResultField | undefined,
   deformationScale: number,
-  capFraction = RESULT_DEFORMATION_CAP_FRACTION
+  capFraction = RESULT_DEFORMATION_CAP_FRACTION,
+  displacementPeakMagnitude?: number
 ) {
-  const displacementMax = maxDisplacementMagnitude(displacementField);
+  // Prefer an explicit run-wide peak (transient) so the scale is constant across frames;
+  // fall back to the field's own max for single-frame (static) results.
+  const displacementMax = Number.isFinite(displacementPeakMagnitude) && (displacementPeakMagnitude ?? 0) > 0
+    ? (displacementPeakMagnitude as number)
+    : maxDisplacementMagnitude(displacementField);
   const requestedScale = Math.max(0, deformationScale);
   const safeExtent = Math.max(0, modelExtent);
   const autoScale = displacementMax > 1e-12
@@ -3376,6 +3406,24 @@ function basePositionBoundsForGeometry(geometry: THREE.BufferGeometry, basePosit
   const bounds = basePositionBounds(basePositions);
   geometry.userData.opencaeBasePositionBounds = bounds;
   return bounds;
+}
+
+function finiteOr0(value: number | undefined): number {
+  return Number.isFinite(value) ? (value as number) : 0;
+}
+
+// Peak displacement magnitude across every displacement frame supplied. The static render
+// path passes all frames (so this is the run-wide peak); the packed-playback path passes a
+// single already-globally-stabilized frame (so this returns that frame's global max). Either
+// way the deformation scale stays constant across the transient instead of self-normalizing
+// each frame, which would amplify a near-zero opening frame into a torn shape.
+function transientDisplacementPeakMagnitude(fields: ResultField[], currentField: ResultField | undefined): number {
+  let peak = 0;
+  for (const field of fields) {
+    if (field.type !== "displacement") continue;
+    peak = Math.max(peak, maxDisplacementMagnitude(field));
+  }
+  return peak > 0 ? peak : maxDisplacementMagnitude(currentField);
 }
 
 function maxDisplacementMagnitude(field: ResultField | undefined): number {
@@ -3575,7 +3623,66 @@ export function colorizeSampleResultGeometry(
   supportMarkers: ViewerSupportMarker[] = [],
   resultFields: ResultField[] = []
 ) {
-  return colorizeResultGeometry(geometry, kind, resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale, undefined, undefined, supportMarkers, resultFields);
+  // Core Cloud results carry their sample geometry in SOLVER space (meters, Z-up) while this
+  // procedural display geometry is in display space (mm, Y-up). Reconcile the two before the
+  // inverse-distance mapping, otherwise the meter-scale sample cloud collapses near the origin
+  // of the mm-scale model and almost every vertex extrapolates to zero -> a torn/frozen shape.
+  const coordinateTransform = solverSpaceResultCoordinateTransform(geometry, resultFields);
+  return colorizeResultGeometry(geometry, kind, resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale, coordinateTransform, undefined, supportMarkers, resultFields);
+}
+
+// When result samples live in a far smaller coordinate space than the display geometry
+// (solver meters vs display mm, the ~1000x gap a Core Cloud surface result exhibits), build a
+// similarity transform that places the display geometry INTO the sample (result) space so the
+// IDW mapping + displacement happen consistently, then maps the deformed points back. Returns
+// undefined for same-space samples (local/preview/beam paths) so those render byte-for-byte
+// unchanged. The rotation is exactly baseModelRotation [pi/2,0,0] — the frame swap the renderer
+// already applies to procedural geometry (see modelOrientation.ts / the <group> at the top of
+// BracketModel) — so handedness matches the solver-surface direct path.
+const SOLVER_SAMPLE_SPACE_SCALE_RATIO = 25; // mirrors coordinateSpaceDiagnostic() in resultFields.ts
+
+export function solverSpaceResultCoordinateTransform(
+  geometry: THREE.BufferGeometry,
+  resultFields: ResultField[]
+): ResultCoordinateTransform | undefined {
+  const sampleBounds = new THREE.Box3();
+  let samplePointCount = 0;
+  for (const field of resultFields) {
+    for (const sample of field.samples ?? []) {
+      const point = sample.point;
+      if (point && point.length === 3 && point.every(Number.isFinite)) {
+        sampleBounds.expandByPoint(new THREE.Vector3(point[0], point[1], point[2]));
+        samplePointCount += 1;
+      }
+    }
+  }
+  if (samplePointCount < 2 || sampleBounds.isEmpty()) return undefined;
+  const sampleDiag = sampleBounds.getSize(new THREE.Vector3()).length();
+  if (!(sampleDiag > 1e-12)) return undefined;
+
+  if (!geometry.boundingBox) geometry.computeBoundingBox();
+  const geomBounds = geometry.boundingBox?.clone();
+  if (!geomBounds || geomBounds.isEmpty()) return undefined;
+  const geomDiag = geomBounds.getSize(new THREE.Vector3()).length();
+  if (!(geomDiag > 1e-12)) return undefined;
+
+  // Only reconcile when the samples are clearly in a different (smaller) space than the
+  // display geometry. Same-space samples (already display mm: local/preview/beam) are left
+  // untouched so their existing render is unchanged.
+  if (geomDiag / sampleDiag < SOLVER_SAMPLE_SPACE_SCALE_RATIO) return undefined;
+
+  const rotation = new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(Math.PI / 2, 0, 0));
+  const inverseRotation = rotation.clone().invert();
+  const scale = sampleDiag / geomDiag;
+  const geomCenter = geomBounds.getCenter(new THREE.Vector3());
+  const sampleCenter = sampleBounds.getCenter(new THREE.Vector3());
+  // result = scale * R * display + translate, translate chosen so the centers coincide.
+  const translate = sampleCenter.clone().sub(geomCenter.clone().applyMatrix4(rotation).multiplyScalar(scale));
+  return {
+    bounds: sampleBounds,
+    toResultPoint: (point) => point.clone().applyMatrix4(rotation).multiplyScalar(scale).add(translate),
+    fromResultPoint: (point) => point.clone().sub(translate).multiplyScalar(1 / scale).applyMatrix4(inverseRotation)
+  };
 }
 
 function usePackedPlaybackGeometry(
@@ -4148,10 +4255,12 @@ function normalizeResultValue(value: number, range: ResultValueRange) {
 }
 
 export function deformationScaleForResultFields(fields: ResultField[]): number | undefined {
-  const displacementField = fields.find((field) => field.type === "displacement" && field.location === "face")
-    ?? fields.find((field) => field.type === "displacement");
-  if (!displacementField) return undefined;
-  return resultFieldAbsMax(displacementField) > 0 ? 1 : 0;
+  const displacementFields = fields.filter((field) => field.type === "displacement");
+  if (!displacementFields.length) return undefined;
+  // Gate on the run-wide peak, not just the first frame: a transient's opening frame is ~0,
+  // so checking only that frame would wrongly disable deformation for the entire animation.
+  const peak = Math.max(0, ...displacementFields.map((field) => resultFieldAbsMax(field)));
+  return peak > 0 ? 1 : 0;
 }
 
 function deformationScaleForSamples(resultMode: ResultMode, samples: FaceResultSample[]) {
@@ -5007,12 +5116,18 @@ function ResultLegend({ resultMode, resultFields, unitSystem, meshSummary, surfa
   const [legendSize, setLegendSize] = useState<ResultLegendSize | null>(null);
   const deformationLabel = useMemo(() => {
     if (!showDeformed || !surfaceMesh) return null;
-    const displacementField = resultFields.find((candidate) => isSolverSurfaceNodeField(candidate, surfaceMesh, "displacement"));
+    const displacementFields = resultFields.filter((candidate) => isSolverSurfaceNodeField(candidate, surfaceMesh, "displacement"));
+    const displacementField = displacementFields[0];
     if (!displacementField?.vectors?.length) return null;
     const bounds = new THREE.Box3();
-    for (const node of surfaceMesh.nodes) bounds.expandByPoint(new THREE.Vector3(...node));
+    for (const node of surfaceMesh.nodes) {
+      if (node.every(Number.isFinite)) bounds.expandByPoint(new THREE.Vector3(...node));
+    }
     const modelExtent = bounds.isEmpty() ? 1 : bounds.getSize(new THREE.Vector3()).length();
-    const appliedScale = finalVisualScaleForDisplacementField(modelExtent, displacementField, deformationScale ?? 1).finalVisualScale;
+    // Match the geometry's run-wide deformation scale so the reported exaggeration factor
+    // is consistent across frames rather than reflecting the opening frame's own max.
+    const displacementPeakMagnitude = transientDisplacementPeakMagnitude(displacementFields, displacementField);
+    const appliedScale = finalVisualScaleForDisplacementField(modelExtent, displacementField, deformationScale ?? 1, RESULT_DEFORMATION_CAP_FRACTION, displacementPeakMagnitude).finalVisualScale;
     // Solver surface meshes are in solver units (meters) while displacement
     // fields are normalized to mm; the true exaggeration is 1000x the applied
     // vertex-shift factor in that case.
