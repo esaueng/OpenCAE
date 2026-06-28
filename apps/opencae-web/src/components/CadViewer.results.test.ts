@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { describe, expect, test, vi } from "vitest";
-import { VIEWER_AXIS_HEAD_RADIUS, VIEWER_AXIS_LABEL_BADGE_COLOR, VIEWER_AXIS_LABEL_BADGE_RADIUS, VIEWER_AXIS_LABEL_COLOR, VIEWER_AXIS_LABEL_FONT_SIZE, VIEWER_AXIS_LABEL_FONT_WEIGHT, VIEWER_AXIS_LABEL_OUTLINE_COLOR, VIEWER_AXIS_LABEL_OUTLINE_WIDTH, VIEWER_CREDIT_URL, VIEWER_GIZMO_ALIGNMENT, VIEWER_GIZMO_AXIS_LENGTH, VIEWER_GIZMO_LABEL_DISTANCE, VIEWER_GIZMO_MARGIN, VIEWER_GIZMO_SCALE, VIEWER_ISOMETRIC_GIZMO_VIEW, VIEWER_VIEW_CUBE_BODY_OPACITY, VIEWER_VIEW_CUBE_CORNER_HIT_RADIUS, VIEWER_VIEW_CUBE_CORNER_RADIUS, VIEWER_VIEW_CUBE_EDGE_COLOR, VIEWER_VIEW_CUBE_FACE_HOVER_OPACITY, VIEWER_VIEW_CUBE_FACE_LABEL_FONT_SIZE, VIEWER_VIEW_CUBE_FACE_OPACITY, VIEWER_VIEW_CUBE_SIZE, applyResultFrameToGeometry, axisLabelToViewAxis, beamDemoDisplacementAtStation, beamDemoPayloadOffset, beamDemoStationForPoint, buildSolverSurfaceOutlineGeometry, buildSolverSurfaceResultGeometry, cameraDistanceForBounds, cameraViewForAxis, cloneResultPreviewObject, colorizeResultObject, colorizeSampleResultGeometry, createBeamDemoCoordinate, createUndeformedResultOutlineObject, defaultHomeViewTarget, deformationScaleForResultFields, displayedLegendTickLabels, finalVisualScaleForDisplacementField, getViewCubeCornerDescriptors, getViewCubeFaceDescriptors, gizmoViewTargetToRequest, interpolateDisplacementAtPoint, legendMeshStats, legendTickLabels, normalizedPointLoadCantileverShape, payloadHighlightObjectId, pointLoadCantileverShape, printLayerVisualizationForBounds, resultLegendContentScale, resultLegendResizeDimensions, resultProbesForKind, resultValueForPoint, rotatedCameraOrbit, shouldDisableResultDeformation, shouldShowDimensionOverlay, shouldShowModelHitLabel, shouldShowResultMarkers, shouldShowUndeformedResultOutline, shouldShowViewCubeFaceLabel, solverSpaceResultCoordinateTransform, updatePackedSamples, viewCubeFaceToGizmoView, viewerCameraResetPose, viewerGizmoLayout } from "./CadViewer";
+import { VIEWER_AXIS_HEAD_RADIUS, VIEWER_AXIS_LABEL_BADGE_COLOR, VIEWER_AXIS_LABEL_BADGE_RADIUS, VIEWER_AXIS_LABEL_COLOR, VIEWER_AXIS_LABEL_FONT_SIZE, VIEWER_AXIS_LABEL_FONT_WEIGHT, VIEWER_AXIS_LABEL_OUTLINE_COLOR, VIEWER_AXIS_LABEL_OUTLINE_WIDTH, VIEWER_CREDIT_URL, VIEWER_GIZMO_ALIGNMENT, VIEWER_GIZMO_AXIS_LENGTH, VIEWER_GIZMO_LABEL_DISTANCE, VIEWER_GIZMO_MARGIN, VIEWER_GIZMO_SCALE, VIEWER_ISOMETRIC_GIZMO_VIEW, VIEWER_VIEW_CUBE_BODY_OPACITY, VIEWER_VIEW_CUBE_CORNER_HIT_RADIUS, VIEWER_VIEW_CUBE_CORNER_RADIUS, VIEWER_VIEW_CUBE_EDGE_COLOR, VIEWER_VIEW_CUBE_FACE_HOVER_OPACITY, VIEWER_VIEW_CUBE_FACE_LABEL_FONT_SIZE, VIEWER_VIEW_CUBE_FACE_OPACITY, VIEWER_VIEW_CUBE_SIZE, applyResultFrameToGeometry, axisLabelToViewAxis, beamDemoDisplacementAtStation, beamDemoPayloadOffset, beamDemoStationForPoint, buildSolverSurfaceOutlineGeometry, buildSolverSurfaceResultGeometry, cameraDistanceForBounds, cameraViewForAxis, cloneResultPreviewObject, colorizeResultObject, colorizeSampleResultGeometry, createBeamDemoCoordinate, createUndeformedResultOutlineObject, defaultHomeViewTarget, deformationScaleForResultFields, displayedLegendTickLabels, finalVisualScaleForDisplacementField, getViewCubeCornerDescriptors, getViewCubeFaceDescriptors, gizmoViewTargetToRequest, interpolateDisplacementAtPoint, legendMeshStats, legendTickLabels, normalizedPointLoadCantileverShape, payloadHighlightObjectId, pointLoadCantileverShape, printLayerVisualizationForBounds, recoverSurfaceNodeScalarField, resultLegendContentScale, resultLegendResizeDimensions, resultProbesForKind, resultValueForPoint, rotatedCameraOrbit, shouldDisableResultDeformation, shouldShowDimensionOverlay, shouldShowModelHitLabel, shouldShowResultMarkers, shouldShowUndeformedResultOutline, shouldShowViewCubeFaceLabel, solverSpaceResultCoordinateTransform, updatePackedSamples, viewCubeFaceToGizmoView, viewerCameraResetPose, viewerGizmoLayout } from "./CadViewer";
 import { createPackedResultPlaybackCache, type FaceResultSample } from "../resultFields";
 import type { DisplayFace, DisplayModel, ResultField } from "@opencae/schema";
 import type { PackedPreparedPlaybackCache } from "../resultPlaybackCache";
@@ -2229,5 +2229,109 @@ describe("solver-space cloud sample reconciliation (procedural path)", () => {
     expect(maxAbsY).toBeGreaterThan(0);
     // Spatially correct: the free (+X) end deflects more than the fixed (-X) end.
     expect(frontDeflection).toBeGreaterThan(backDeflection);
+  });
+});
+
+describe("element-stress recovery onto the solver surface (smooth contour fix)", () => {
+  const surfaceMesh = {
+    id: "solver-surface",
+    nodes: [
+      [0, 0, 0],
+      [1, 0, 0],
+      [0, 1, 0],
+      [0, 0, 1]
+    ] as [number, number, number][],
+    triangles: [[0, 1, 2], [0, 2, 3]] as [number, number, number][],
+    nodeMap: [0, 1, 2, 3]
+  };
+
+  // An element-located stress field whose samples sit exactly on the surface nodes (this is how
+  // the cloud emits non-surface fields: sample.point = surface-node point). No surfaceMeshRef, so
+  // it does NOT qualify as a solver-surface node field and would otherwise hit the streaky path.
+  function elementStressField(): ResultField {
+    return {
+      id: "stress-element",
+      runId: "run-surface",
+      type: "stress",
+      location: "element",
+      values: [5, 15, 25, 35],
+      min: 5,
+      max: 35,
+      units: "MPa",
+      samples: [
+        { point: [0, 0, 0], normal: [0, 0, 1], value: 5 },
+        { point: [1, 0, 0], normal: [0, 0, 1], value: 15 },
+        { point: [0, 1, 0], normal: [0, 0, 1], value: 25 },
+        { point: [0, 0, 1], normal: [0, 0, 1], value: 35 }
+      ]
+    };
+  }
+
+  test("recovers a node-aligned stress field exactly when samples coincide with surface nodes", () => {
+    const recovered = recoverSurfaceNodeScalarField(surfaceMesh, [elementStressField()], "stress");
+    expect(recovered).toBeTruthy();
+    expect(recovered!.location).toBe("node");
+    expect(recovered!.surfaceMeshRef).toBe("solver-surface");
+    expect(recovered!.values).toHaveLength(surfaceMesh.nodes.length);
+    // Exact at coincident points (distance 0 short-circuits the IDW blend).
+    expect(recovered!.values).toEqual([5, 15, 25, 35]);
+    expect(recovered!.samples).toBeUndefined();
+    // The recovered field must satisfy the smooth surface render path's invariants.
+    const geometry = buildSolverSurfaceResultGeometry({
+      surfaceMesh,
+      scalarField: recovered!,
+      resultMode: "stress",
+      showDeformed: false,
+      deformationScale: 1
+    });
+    const color = geometry.getAttribute("color") as THREE.BufferAttribute;
+    // A real gradient: the low-stress node and the high-stress node get different colors.
+    const lowDiffersFromHigh =
+      Math.abs(color.getX(0) - color.getX(3)) +
+      Math.abs(color.getY(0) - color.getY(3)) +
+      Math.abs(color.getZ(0) - color.getZ(3));
+    expect(lowDiffersFromHigh).toBeGreaterThan(0.1);
+  });
+
+  test("interpolates smoothly (bounded, finite) when samples do not coincide with nodes", () => {
+    const offsetSamples: ResultField = {
+      ...elementStressField(),
+      samples: [
+        { point: [0.4, 0.1, 0.1], normal: [0, 0, 1], value: 10 },
+        { point: [0.1, 0.4, 0.1], normal: [0, 0, 1], value: 20 },
+        { point: [0.1, 0.1, 0.4], normal: [0, 0, 1], value: 30 }
+      ]
+    };
+    const recovered = recoverSurfaceNodeScalarField(surfaceMesh, [offsetSamples], "stress");
+    expect(recovered).toBeTruthy();
+    expect(recovered!.values).toHaveLength(4);
+    for (const value of recovered!.values) {
+      expect(Number.isFinite(value)).toBe(true);
+      // IDW stays within the sample range — no overshoot/ringing.
+      expect(value).toBeGreaterThanOrEqual(10);
+      expect(value).toBeLessThanOrEqual(30);
+    }
+  });
+
+  test("does not recover vector modes or when a real node field already exists", () => {
+    expect(recoverSurfaceNodeScalarField(surfaceMesh, [elementStressField()], "displacement")).toBeNull();
+    const nodeStress: ResultField = {
+      id: "stress-node",
+      runId: "run-surface",
+      type: "stress",
+      location: "node",
+      values: [1, 2, 3, 4],
+      min: 1,
+      max: 4,
+      units: "MPa",
+      surfaceMeshRef: "solver-surface"
+    };
+    expect(recoverSurfaceNodeScalarField(surfaceMesh, [nodeStress, elementStressField()], "stress")).toBeNull();
+  });
+
+  test("returns null when there is no usable source field", () => {
+    expect(recoverSurfaceNodeScalarField(surfaceMesh, [], "stress")).toBeNull();
+    const noSamples: ResultField = { ...elementStressField(), samples: undefined };
+    expect(recoverSurfaceNodeScalarField(surfaceMesh, [noSamples], "stress")).toBeNull();
   });
 });
