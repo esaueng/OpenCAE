@@ -230,7 +230,12 @@ export function CadViewer(props: CadViewerProps) {
   const baseModelRotation = useMemo(() => baseModelRotationRadians(props.displayModel), [props.displayModel]);
   const resultFields = props.resultFields;
   const effectiveShowDeformed = props.showDeformed && !shouldDisableResultDeformation(props.displayModel, resultFields);
-  const solverSurfaceResult = solverSurfaceResultFields(props.surfaceMesh, resultFields, props.resultMode);
+  // Memoized: solverSurfaceResultFields may recover an element-only contour onto the surface
+  // nodes (O(nodes x samples) IDW), so it must not re-run on every interaction render.
+  const solverSurfaceResult = useMemo(
+    () => solverSurfaceResultFields(props.surfaceMesh, resultFields, props.resultMode),
+    [props.surfaceMesh, resultFields, props.resultMode]
+  );
   const viewerContentFitKey = [
     props.activeStep,
     effectiveViewMode,
@@ -2513,14 +2518,81 @@ type SolverSurfaceResultFields = {
 
 function solverSurfaceResultFields(surfaceMesh: SolverSurfaceMesh | undefined, fields: ResultField[], resultMode: ResultMode): SolverSurfaceResultFields | null {
   if (!surfaceMesh || !surfaceMesh.nodes.length || !surfaceMesh.triangles.length) return null;
-  const scalarField = fields.find((field) => isSolverSurfaceNodeField(field, surfaceMesh, resultMode));
-  if (!scalarField) return null;
   const displacementFields = fields.filter((field) => isSolverSurfaceNodeField(field, surfaceMesh, "displacement"));
+  const scalarField = fields.find((field) => isSolverSurfaceNodeField(field, surfaceMesh, resultMode))
+    // The solver emits stress/safety_factor per element (no node field), so those modes fall to
+    // the procedural IDW render and show streaks instead of a smooth contour. Recover them onto
+    // the surface nodes so they render through this same smooth nodal path. Gate on a node
+    // displacement field existing, which confirms the result is already surface-renderable — so
+    // we never downgrade a procedural-tier result's deformation to an undeformed surface.
+    ?? (displacementFields.length ? recoverSurfaceNodeScalarField(surfaceMesh, fields, resultMode) : null);
+  if (!scalarField) return null;
   const displacementField = displacementFields[0];
   // Run-wide peak across every transient frame so the deformation scale stays constant and a
   // near-zero opening frame is not self-normalized into a torn shape (see procedural path).
   const displacementPeakMagnitude = transientDisplacementPeakMagnitude(displacementFields, displacementField);
   return { scalarField, ...(displacementField ? { displacementField } : {}), displacementPeakMagnitude };
+}
+
+// Recovers an element-located scalar contour (stress / safety_factor) onto the solver surface
+// mesh nodes via inverse-distance interpolation from the field's samples, returning a node field
+// aligned to surfaceMesh so the smooth SolverSurfaceResultMesh path can render it. Sample points
+// and surface nodes are both in solver space (the cloud emits sample.point = surface-node point),
+// so no coordinate reconciliation is needed here. Returns null when nothing is recoverable, so
+// callers fall back to the procedural render unchanged.
+export function recoverSurfaceNodeScalarField(
+  surfaceMesh: SolverSurfaceMesh,
+  fields: ResultField[],
+  resultMode: ResultMode
+): ResultField | null {
+  // Only the scalar contour modes the solver emits per element. displacement/velocity/
+  // acceleration already arrive as smooth node fields carrying their own vectors.
+  if (resultMode !== "stress" && resultMode !== "safety_factor") return null;
+  if (!surfaceMesh.nodes.length) return null;
+  if (fields.some((field) => isSolverSurfaceNodeField(field, surfaceMesh, resultMode))) return null;
+  const source = fields.find(
+    (field) =>
+      field.type === resultMode &&
+      (field.samples?.some((sample) => Number.isFinite(sample.value) && sample.point.length === 3 && sample.point.every(Number.isFinite)) ?? false)
+  );
+  const samples = source?.samples?.filter(
+    (sample) => Number.isFinite(sample.value) && sample.point.length === 3 && sample.point.every(Number.isFinite)
+  );
+  if (!source || !samples || !samples.length) return null;
+
+  const values = surfaceMesh.nodes.map((node) =>
+    interpolateScalarFromSamples(new THREE.Vector3(node[0], node[1], node[2]), samples)
+  );
+  if (!values.some(Number.isFinite)) return null;
+  const finiteValues = values.filter(Number.isFinite);
+  return {
+    ...source,
+    id: `${source.id}-surface-node`,
+    location: "node",
+    surfaceMeshRef: surfaceMesh.id,
+    values,
+    // Reuse the source field's range so the legend and color scale stay consistent with the
+    // element field's reported peak; interpolated node values fall within that range anyway.
+    min: Number.isFinite(source.min) ? source.min : Math.min(...finiteValues),
+    max: Number.isFinite(source.max) ? source.max : Math.max(...finiteValues),
+    samples: undefined,
+    vectors: undefined
+  };
+}
+
+function interpolateScalarFromSamples(point: THREE.Vector3, samples: NonNullable<ResultField["samples"]>): number {
+  const neighbors = nearestResultSamples(point, samples, (sample) => Number.isFinite(sample.value));
+  if (!neighbors.length) return Number.NaN;
+  const exact = neighbors.find((entry) => entry.distanceSq <= 1e-18);
+  if (exact) return exact.sample.value;
+  let weighted = 0;
+  let totalWeight = 0;
+  for (const neighbor of neighbors) {
+    const weight = 1 / Math.max(neighbor.distanceSq, 1e-18);
+    weighted += neighbor.sample.value * weight;
+    totalWeight += weight;
+  }
+  return totalWeight > 0 ? weighted / totalWeight : Number.NaN;
 }
 
 function isSolverSurfaceNodeField(field: ResultField, surfaceMesh: SolverSurfaceMesh, resultMode: ResultMode): boolean {
