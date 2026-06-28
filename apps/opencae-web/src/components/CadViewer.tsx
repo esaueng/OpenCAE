@@ -291,7 +291,7 @@ export function CadViewer(props: CadViewerProps) {
           <group rotation={modelRotation}>
             {/* Solver surface meshes arrive in solver model space (Z-up), so they must not
                 inherit the legacy Y-up sample base rotation applied to procedural models. */}
-            {effectiveViewMode === "results" && solverSurfaceResult ? (
+            {effectiveViewMode === "results" && solverSurfaceResult && (
               <SolverSurfaceResultMesh
                 surfaceMesh={props.surfaceMesh!}
                 scalarField={solverSurfaceResult.scalarField}
@@ -301,12 +301,11 @@ export function CadViewer(props: CadViewerProps) {
                 deformationScale={props.stressExaggeration}
                 displacementPeakMagnitude={solverSurfaceResult.displacementPeakMagnitude}
               />
-            ) : (
-              <group rotation={baseModelRotation}>
-                <BracketModel {...props} showDeformed={effectiveShowDeformed} resultFields={resultFields} viewMode={effectiveViewMode} uploadedPreviewBounds={uploadedPreviewBounds} onUploadedPreviewBounds={setUploadedPreviewBounds} />
-                {showDimensionOverlay && <ModelDimensionOverlay displayModel={props.displayModel} uploadedPreviewBounds={uploadedPreviewBounds} />}
-              </group>
             )}
+            <group rotation={baseModelRotation}>
+              <BracketModel {...props} showDeformed={effectiveShowDeformed} resultFields={resultFields} viewMode={effectiveViewMode} uploadedPreviewBounds={uploadedPreviewBounds} onUploadedPreviewBounds={setUploadedPreviewBounds} />
+              {showDimensionOverlay && <ModelDimensionOverlay displayModel={props.displayModel} uploadedPreviewBounds={uploadedPreviewBounds} />}
+            </group>
           </group>
           <BoundsCameraReset contentFitKey={viewerContentFitKey} signal={props.fitSignal} viewAxis={props.viewAxis} viewAxisSignal={props.viewAxisSignal} controlsRef={controlsRef} />
           <GizmoCameraReset view={gizmoViewRequest.view} signal={gizmoViewRequest.signal} controlsRef={controlsRef} />

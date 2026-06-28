@@ -539,6 +539,12 @@ describe("CadViewer result coloring", () => {
     expect(baseRotationIndex).toBeGreaterThan(solverSurfaceIndex);
   });
 
+  test("layers solver surface results without replacing the full result model", () => {
+    expect(cadViewerSource).toContain("{effectiveViewMode === \"results\" && solverSurfaceResult && (");
+    expect(cadViewerSource).toContain("<BracketModel {...props} showDeformed={effectiveShowDeformed} resultFields={resultFields} viewMode={effectiveViewMode}");
+    expect(cadViewerSource).not.toContain("effectiveViewMode === \"results\" && solverSurfaceResult ? (");
+  });
+
   test("labels preset mesh summary values as estimates in the result legend", () => {
     expect(legendMeshStats({ nodes: 182400, elements: 119808, warnings: [], analysisSampleCount: 45000, quality: "ultra" })).toEqual({
       nodes: "182,400 (est.)",
