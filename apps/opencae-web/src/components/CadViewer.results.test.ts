@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { describe, expect, test, vi } from "vitest";
-import { VIEWER_AXIS_HEAD_RADIUS, VIEWER_AXIS_LABEL_BADGE_COLOR, VIEWER_AXIS_LABEL_BADGE_RADIUS, VIEWER_AXIS_LABEL_COLOR, VIEWER_AXIS_LABEL_FONT_SIZE, VIEWER_AXIS_LABEL_FONT_WEIGHT, VIEWER_AXIS_LABEL_OUTLINE_COLOR, VIEWER_AXIS_LABEL_OUTLINE_WIDTH, VIEWER_CREDIT_URL, VIEWER_GIZMO_ALIGNMENT, VIEWER_GIZMO_AXIS_LENGTH, VIEWER_GIZMO_LABEL_DISTANCE, VIEWER_GIZMO_MARGIN, VIEWER_GIZMO_SCALE, VIEWER_ISOMETRIC_GIZMO_VIEW, VIEWER_VIEW_CUBE_BODY_OPACITY, VIEWER_VIEW_CUBE_CORNER_HIT_RADIUS, VIEWER_VIEW_CUBE_CORNER_RADIUS, VIEWER_VIEW_CUBE_EDGE_COLOR, VIEWER_VIEW_CUBE_FACE_HOVER_OPACITY, VIEWER_VIEW_CUBE_FACE_LABEL_FONT_SIZE, VIEWER_VIEW_CUBE_FACE_OPACITY, VIEWER_VIEW_CUBE_SIZE, applyResultFrameToGeometry, axisLabelToViewAxis, beamDemoDisplacementAtStation, beamDemoPayloadOffset, beamDemoStationForPoint, buildSolverSurfaceOutlineGeometry, buildSolverSurfaceResultGeometry, cameraDistanceForBounds, cameraViewForAxis, cloneResultPreviewObject, colorizeResultObject, colorizeSampleResultGeometry, createBeamDemoCoordinate, createUndeformedResultOutlineObject, defaultHomeViewTarget, deformationScaleForResultFields, displayedLegendTickLabels, finalVisualScaleForDisplacementField, getViewCubeCornerDescriptors, getViewCubeFaceDescriptors, gizmoViewTargetToRequest, interpolateDisplacementAtPoint, legendMeshStats, legendTickLabels, normalizedPointLoadCantileverShape, payloadHighlightObjectId, pointLoadCantileverShape, printLayerVisualizationForBounds, recoverSurfaceNodeScalarField, resultLegendContentScale, resultLegendResizeDimensions, resultProbesForKind, resultValueForPoint, rotatedCameraOrbit, shouldDisableResultDeformation, shouldShowDimensionOverlay, shouldShowModelHitLabel, shouldShowResultMarkers, shouldShowUndeformedResultOutline, shouldShowViewCubeFaceLabel, solverSpaceResultCoordinateTransform, updatePackedSamples, viewCubeFaceToGizmoView, viewerCameraResetPose, viewerGizmoLayout } from "./CadViewer";
-import { createPackedResultPlaybackCache, type FaceResultSample } from "../resultFields";
+import { VIEWER_AXIS_HEAD_RADIUS, VIEWER_AXIS_LABEL_BADGE_COLOR, VIEWER_AXIS_LABEL_BADGE_RADIUS, VIEWER_AXIS_LABEL_COLOR, VIEWER_AXIS_LABEL_FONT_SIZE, VIEWER_AXIS_LABEL_FONT_WEIGHT, VIEWER_AXIS_LABEL_OUTLINE_COLOR, VIEWER_AXIS_LABEL_OUTLINE_WIDTH, VIEWER_CREDIT_URL, VIEWER_GIZMO_ALIGNMENT, VIEWER_GIZMO_AXIS_LENGTH, VIEWER_GIZMO_LABEL_DISTANCE, VIEWER_GIZMO_MARGIN, VIEWER_GIZMO_SCALE, VIEWER_ISOMETRIC_GIZMO_VIEW, VIEWER_VIEW_CUBE_BODY_OPACITY, VIEWER_VIEW_CUBE_CORNER_HIT_RADIUS, VIEWER_VIEW_CUBE_CORNER_RADIUS, VIEWER_VIEW_CUBE_EDGE_COLOR, VIEWER_VIEW_CUBE_FACE_HOVER_OPACITY, VIEWER_VIEW_CUBE_FACE_LABEL_FONT_SIZE, VIEWER_VIEW_CUBE_FACE_OPACITY, VIEWER_VIEW_CUBE_SIZE, applyResultFrameToGeometry, axisLabelToViewAxis, beamDemoDisplacementAtStation, beamDemoPayloadOffset, beamDemoStationForPoint, buildSolverSurfaceOutlineGeometry, buildSolverSurfaceResultGeometry, cameraDistanceForBounds, cameraViewForAxis, cloneResultPreviewObject, colorizeResultObject, colorizeSampleResultGeometry, createBeamDemoCoordinate, createUndeformedResultOutlineObject, defaultHomeViewTarget, deformationScaleForResultFields, displayedLegendTickLabels, finalVisualScaleForDisplacementField, getViewCubeCornerDescriptors, getViewCubeFaceDescriptors, gizmoViewTargetToRequest, interpolateDisplacementAtPoint, legendMeshStats, legendTickLabels, normalizedPointLoadCantileverShape, payloadHighlightObjectId, pointLoadCantileverShape, printLayerVisualizationForBounds, recoverSurfaceNodeScalarField, resultFieldValuesAlignedToGeometry, resultLegendContentScale, resultLegendResizeDimensions, resultProbesForKind, resultValueForPoint, rotatedCameraOrbit, shouldDisableResultDeformation, shouldShowDimensionOverlay, shouldShowModelHitLabel, shouldShowResultMarkers, shouldShowUndeformedResultOutline, shouldShowViewCubeFaceLabel, solverSpaceResultCoordinateTransform, solverSurfaceDisplayFootprint, solverSurfaceResultFields, updatePackedSamples, viewCubeFaceToGizmoView, viewerCameraResetPose, viewerGizmoLayout } from "./CadViewer";
+import { createPackedResultPlaybackCache, createResultFrameCache, type FaceResultSample } from "../resultFields";
 import type { DisplayFace, DisplayModel, ResultField } from "@opencae/schema";
 import type { PackedPreparedPlaybackCache } from "../resultPlaybackCache";
 import { resetVertexResultMappingStatsForTests, vertexResultMappingBuildCountForTests } from "../resultVertexMapping";
@@ -539,10 +539,263 @@ describe("CadViewer result coloring", () => {
     expect(baseRotationIndex).toBeGreaterThan(solverSurfaceIndex);
   });
 
-  test("layers solver surface results without replacing the full result model", () => {
+  test("renders solver surface results exclusively, suppressing the procedural result solid", () => {
+    // When a surface result exists, ONLY SolverSurfaceResultMesh renders; the procedural
+    // result solid (AnalysisResultModel for all kinds) is suppressed so the real FEA mesh
+    // is not hidden inside an opaque, garbage-colored procedural solid. The procedural IDW
+    // path remains only as the fallback when no surface result exists.
     expect(cadViewerSource).toContain("{effectiveViewMode === \"results\" && solverSurfaceResult && (");
+    expect(cadViewerSource).toContain("suppressProceduralResultSolid={Boolean(solverSurfaceResult)}");
+    expect(cadViewerSource).toContain("suppressProceduralResultSolid ? null : <AnalysisResultModel");
     expect(cadViewerSource).toContain("<BracketModel {...props} showDeformed={effectiveShowDeformed} resultFields={resultFields} viewMode={effectiveViewMode}");
-    expect(cadViewerSource).not.toContain("effectiveViewMode === \"results\" && solverSurfaceResult ? (");
+  });
+
+  test("wraps the solver surface mesh in a display-footprint group without mutating geometry", () => {
+    // The surface mesh arrives in raw solver coordinates (meters, ~0.16 units) while the
+    // display solid is ~unit scale; the scale must be applied at the group level so the
+    // displacement visual-scale math (self-normalized against mesh extent) is unaffected.
+    expect(cadViewerSource).toContain("<group scale={solverSurfaceFootprint?.scale ?? 1} position={solverSurfaceFootprint?.position ?? [0, 0, 0]}>");
+    const groupIndex = cadViewerSource.indexOf("<group scale={solverSurfaceFootprint?.scale ?? 1}");
+    const surfaceMeshIndex = cadViewerSource.indexOf("<SolverSurfaceResultMesh");
+    expect(groupIndex).toBeGreaterThan(-1);
+    expect(surfaceMeshIndex).toBeGreaterThan(groupIndex);
+  });
+
+  test("computes the surface footprint deterministically from display and surface bounds", () => {
+    const surfaceMesh = {
+      id: "solver-surface",
+      nodes: [
+        [0, 0, 0],
+        [0.16, 0, 0],
+        [0, 0.02, 0],
+        [0, 0, 0.02]
+      ] as [number, number, number][],
+      triangles: [[0, 1, 2], [0, 2, 3]] as [number, number, number][],
+      nodeMap: [0, 1, 2, 3],
+      coordinateSpace: "solver"
+    };
+    const baseModelRotation: [number, number, number] = [Math.PI / 2, 0, 0];
+    const displayBounds = new THREE.Box3(new THREE.Vector3(-1.9, -0.07, -0.36), new THREE.Vector3(1.9, 0.43, 0.36));
+    const footprint = solverSurfaceDisplayFootprint(surfaceMesh, displayBounds, baseModelRotation);
+
+    // Max display dimension (3.8) over max surface dimension (0.16) — no ratio heuristic.
+    expect(footprint.scale).toBeCloseTo(3.8 / 0.16, 9);
+    // The bounds centers must coincide after the transform. The display bounds live inside
+    // the legacy base rotation, so compare in the outer (Z-up) frame where the mesh renders.
+    const rotation = new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(...baseModelRotation));
+    const displayCenter = displayBounds.clone().applyMatrix4(rotation).getCenter(new THREE.Vector3());
+    const surfaceCenter = new THREE.Vector3(0.08, 0.01, 0.01);
+    expectVectorCloseTo(surfaceCenter.multiplyScalar(footprint.scale).add(new THREE.Vector3(...footprint.position)), displayCenter.toArray());
+  });
+
+  test("recenters near-unit-scale surface meshes too instead of gating on a scale ratio", () => {
+    const surfaceMesh = {
+      id: "solver-surface",
+      nodes: [
+        [10, 0, 0],
+        [13.8, 0, 0],
+        [10, 0.5, 0],
+        [10, 0, 0.5]
+      ] as [number, number, number][],
+      triangles: [[0, 1, 2], [0, 2, 3]] as [number, number, number][],
+      nodeMap: [0, 1, 2, 3]
+    };
+    const displayBounds = new THREE.Box3(new THREE.Vector3(-1.9, -0.25, -0.36), new THREE.Vector3(1.9, 0.25, 0.36));
+    const footprint = solverSurfaceDisplayFootprint(surfaceMesh, displayBounds, [0, 0, 0]);
+    // Same extent -> scale 1, but the offset origin still recenters onto the display bounds.
+    expect(footprint.scale).toBeCloseTo(1, 9);
+    expect(footprint.position[0]).toBeCloseTo(-11.9, 9);
+  });
+
+  test("returns an identity footprint for degenerate bounds", () => {
+    const degenerateMesh = {
+      id: "solver-surface",
+      nodes: [] as [number, number, number][],
+      triangles: [] as [number, number, number][],
+      nodeMap: [] as number[]
+    };
+    expect(solverSurfaceDisplayFootprint(degenerateMesh, new THREE.Box3(new THREE.Vector3(0, 0, 0), new THREE.Vector3(1, 1, 1)), [0, 0, 0])).toEqual({ scale: 1, position: [0, 0, 0] });
+    const validMesh = {
+      id: "solver-surface",
+      nodes: [[0, 0, 0], [1, 0, 0], [0, 1, 0]] as [number, number, number][],
+      triangles: [[0, 1, 2]] as [number, number, number][],
+      nodeMap: [0, 1, 2]
+    };
+    expect(solverSurfaceDisplayFootprint(validMesh, null, [0, 0, 0])).toEqual({ scale: 1, position: [0, 0, 0] });
+  });
+
+  test("does not color procedural geometry by vertex index from a samples-less surface-node field", () => {
+    const geometry = new THREE.BoxGeometry(1, 1, 1);
+    const vertexCount = (geometry.getAttribute("position") as THREE.BufferAttribute).count;
+    const surfaceField: ResultField = {
+      id: "stress-surface",
+      runId: "run-surface",
+      type: "stress",
+      location: "node",
+      // Even a length-aligned values array must be ignored: these are surface-node values,
+      // not procedural vertex values, and indexing them by vertex order painted garbage.
+      values: Array.from({ length: vertexCount }, (_, index) => index),
+      min: 0,
+      max: vertexCount - 1,
+      units: "MPa",
+      surfaceMeshRef: "solver-surface"
+    };
+    expect(resultFieldValuesAlignedToGeometry(surfaceField, vertexCount)).toBe(false);
+
+    applyResultFrameToGeometry({ geometry, fields: [surfaceField], resultMode: "stress", showDeformed: false, deformationScale: 1 });
+    const color = geometry.getAttribute("color") as THREE.BufferAttribute;
+    const neutral = new THREE.Color("#0759d6");
+    for (let index = 0; index < color.count; index += 1) {
+      expect(color.getX(index)).toBeCloseTo(neutral.r, 5);
+      expect(color.getY(index)).toBeCloseTo(neutral.g, 5);
+      expect(color.getZ(index)).toBeCloseTo(neutral.b, 5);
+    }
+  });
+
+  test("still colors procedural geometry from genuinely vertex-aligned local field values", () => {
+    const geometry = new THREE.BoxGeometry(1, 1, 1);
+    const vertexCount = (geometry.getAttribute("position") as THREE.BufferAttribute).count;
+    const alignedField: ResultField = {
+      id: "stress-local",
+      runId: "run-local",
+      type: "stress",
+      location: "node",
+      values: Array.from({ length: vertexCount }, (_, index) => index),
+      min: 0,
+      max: vertexCount - 1,
+      units: "MPa"
+    };
+    expect(resultFieldValuesAlignedToGeometry(alignedField, vertexCount)).toBe(true);
+    expect(resultFieldValuesAlignedToGeometry(alignedField, vertexCount + 1)).toBe(false);
+
+    applyResultFrameToGeometry({ geometry, fields: [alignedField], resultMode: "stress", showDeformed: false, deformationScale: 1 });
+    const color = geometry.getAttribute("color") as THREE.BufferAttribute;
+    const first = [color.getX(0), color.getY(0), color.getZ(0)];
+    const last = [color.getX(color.count - 1), color.getY(color.count - 1), color.getZ(color.count - 1)];
+    expect(first).not.toEqual(last);
+  });
+
+  test("steps per-frame surface fields through the surface render path with a run-wide deformation peak", () => {
+    const surfaceMesh = {
+      id: "solver-surface",
+      nodes: [
+        [0, 0, 0],
+        [1, 0, 0],
+        [0, 1, 0]
+      ] as [number, number, number][],
+      triangles: [[0, 1, 2]] as [number, number, number][],
+      nodeMap: [0, 1, 2]
+    };
+    const frameField = (partial: Partial<ResultField> & Pick<ResultField, "id" | "type" | "values" | "min" | "max" | "units">, frameIndex: number, timeSeconds: number): ResultField => ({
+      runId: "run-surface",
+      location: "node",
+      surfaceMeshRef: "solver-surface",
+      frameIndex,
+      timeSeconds,
+      ...partial
+    } as ResultField);
+    const fields: ResultField[] = [
+      frameField({ id: "frame-0-stress-surface", type: "stress", values: [0, 1, 2], min: 0, max: 7, units: "MPa" }, 0, 0),
+      frameField({ id: "frame-0-displacement-surface", type: "displacement", values: [0, 0, 0], vectors: [[0, 0, 0], [0, 0, 0], [0, 0, 0]], min: 0, max: 0, units: "mm" }, 0, 0),
+      frameField({ id: "frame-1-stress-surface", type: "stress", values: [5, 6, 7], min: 0, max: 7, units: "MPa" }, 1, 0.005),
+      frameField({ id: "frame-1-displacement-surface", type: "displacement", values: [0.2, 0, 0], vectors: [[0, 0, 0.2], [0, 0, 0], [0, 0, 0]], min: 0, max: 0.2, units: "mm" }, 1, 0.005)
+    ];
+    const cache = createResultFrameCache(fields);
+
+    const frame0 = solverSurfaceResultFields(surfaceMesh, cache.fieldsForFrame(0), "stress");
+    const frame1 = solverSurfaceResultFields(surfaceMesh, cache.fieldsForFrame(1), "stress");
+    expect(frame0?.scalarField.values).toEqual([0, 1, 2]);
+    expect(frame1?.scalarField.values).toEqual([5, 6, 7]);
+    // The near-zero opening frame must deform with the run-wide displacement peak so it
+    // does not self-normalize into a torn shape.
+    expect(frame0?.displacementPeakMagnitude).toBeCloseTo(0.2, 9);
+    expect(frame1?.displacementPeakMagnitude).toBeCloseTo(0.2, 9);
+
+    // Packed playback interpolation between frames preserves type/location/surfaceMeshRef
+    // and node alignment, so the interpolated frame still renders on the surface path.
+    const interpolated = cache.fieldsForFramePosition(0.5);
+    const midSurface = solverSurfaceResultFields(surfaceMesh, interpolated, "stress");
+    expect(midSurface).not.toBeNull();
+    expect(midSurface?.scalarField.location).toBe("node");
+    expect(midSurface?.scalarField.surfaceMeshRef).toBe("solver-surface");
+    expect(midSurface?.scalarField.values.length).toBe(surfaceMesh.nodes.length);
+    expect(midSurface?.scalarField.values[0]).toBeCloseTo(2.5, 9);
+  });
+
+  test("renders container safety-factor surface fields directly for static and dynamic results", () => {
+    const surfaceMesh = {
+      id: "solver-surface",
+      nodes: [
+        [0, 0, 0],
+        [1, 0, 0],
+        [0, 1, 0]
+      ] as [number, number, number][],
+      triangles: [[0, 1, 2]] as [number, number, number][],
+      nodeMap: [0, 1, 2]
+    };
+    const staticFields: ResultField[] = [
+      {
+        id: "safety-factor-surface",
+        runId: "run-surface",
+        type: "safety_factor",
+        location: "node",
+        values: [4, 3, 2],
+        min: 0,
+        max: 4,
+        units: "ratio",
+        surfaceMeshRef: "solver-surface"
+      },
+      {
+        id: "displacement-surface",
+        runId: "run-surface",
+        type: "displacement",
+        location: "node",
+        values: [0.1, 0, 0],
+        vectors: [[0, 0, 0.1], [0, 0, 0], [0, 0, 0]],
+        min: 0,
+        max: 0.1,
+        units: "mm",
+        surfaceMeshRef: "solver-surface"
+      }
+    ];
+    const staticResult = solverSurfaceResultFields(surfaceMesh, staticFields, "safety_factor");
+    expect(staticResult?.scalarField.id).toBe("safety-factor-surface");
+    expect(staticResult?.scalarField.values).toEqual([4, 3, 2]);
+    expect(staticResult?.displacementField?.id).toBe("displacement-surface");
+
+    const dynamicFields: ResultField[] = [0, 1].flatMap((frameIndex): ResultField[] => [
+      {
+        id: `frame-${frameIndex}-safety-factor-surface`,
+        runId: "run-surface",
+        type: "safety_factor",
+        location: "node",
+        values: frameIndex === 0 ? [9, 8, 7] : [3, 2, 1],
+        min: 0,
+        max: 9,
+        units: "ratio",
+        surfaceMeshRef: "solver-surface",
+        frameIndex,
+        timeSeconds: frameIndex * 0.005
+      },
+      {
+        id: `frame-${frameIndex}-displacement-surface`,
+        runId: "run-surface",
+        type: "displacement",
+        location: "node",
+        values: [0, 0, 0],
+        vectors: [[0, 0, 0.1 * frameIndex], [0, 0, 0], [0, 0, 0]],
+        min: 0,
+        max: 0.1 * frameIndex,
+        units: "mm",
+        surfaceMeshRef: "solver-surface",
+        frameIndex,
+        timeSeconds: frameIndex * 0.005
+      }
+    ]);
+    const cache = createResultFrameCache(dynamicFields);
+    const frame1 = solverSurfaceResultFields(surfaceMesh, cache.fieldsForFrame(1), "safety_factor");
+    expect(frame1?.scalarField.id).toBe("frame-1-safety-factor-surface");
+    expect(frame1?.scalarField.values).toEqual([3, 2, 1]);
   });
 
   test("labels preset mesh summary values as estimates in the result legend", () => {
