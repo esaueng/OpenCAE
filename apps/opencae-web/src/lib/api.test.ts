@@ -352,7 +352,11 @@ describe("api", () => {
         elements: 57102,
         analysisSampleCount: 19200,
         quality: "fine",
-        warnings: ["Fine surface analysis sampling enabled for higher-quality local results."]
+        source: "preset_estimate",
+        warnings: [
+          "Node and element counts are preset planning estimates. The solver reports actual mesh statistics with the results.",
+          "Fine surface analysis sampling enabled for higher-quality local results."
+        ]
       }
     });
     expect(response.message).toBe("Mesh generated locally.");
@@ -389,6 +393,44 @@ describe("api", () => {
     expect(results.fields.map((field) => field.runId)).toEqual([response.run.id, response.run.id, response.run.id]);
     expect(results.summary.provenance?.solver).toBe("opencae-core-preview-tet4");
     expect(results.summary.maxStress).toBeGreaterThanOrEqual(0);
+  });
+
+  test("runs the in-browser core solver when the deployment has no Core Cloud route", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === "/api/cloud-core/runs") {
+        return new Response(JSON.stringify({ message: "Route POST:/api/cloud-core/runs not found", error: "Not Found", statusCode: 404 }), {
+          status: 404,
+          headers: { "content-type": "application/json" }
+        });
+      }
+      return new Response(JSON.stringify({ error: "Study not found" }), { status: 404, headers: { "content-type": "application/json" } });
+    }));
+    const readyStudy = {
+      ...study,
+      materialAssignments: [{ id: "assign-1", materialId: "mat-aluminum-6061", selectionRef: "selection-body-1", status: "complete" }],
+      constraints: [{ id: "constraint-1", type: "fixed", selectionRef: "selection-face-1", parameters: {}, status: "complete" }],
+      loads: [{ id: "load-1", type: "force", selectionRef: "selection-face-1", parameters: { value: 500, units: "N", direction: [0, -1, 0] }, status: "complete" }],
+      meshSettings: { preset: "fine", status: "complete", meshRef: "project-1/mesh/mesh-summary.json" },
+      // No explicit backend: samples default to opencae_core_cloud.
+      solverSettings: { fidelity: "standard" }
+    } as unknown as Study;
+    const statusMessages: string[] = [];
+
+    const response = await runSimulation("study-1", readyStudy, coreDisplayModel, { onRunStatus: (message) => statusMessages.push(message) });
+    const completed = await new Promise<RunEvent>((resolve) => {
+      const source = subscribeToRun(response.run.id, (event) => {
+        if (event.type === "complete" || event.type === "error") {
+          source.close();
+          resolve(event);
+        }
+      });
+    });
+    const results = await getResults(response.run.id);
+
+    expect(statusMessages.some((message) => message.includes("not available in this deployment"))).toBe(true);
+    expect(completed.type).toBe("complete");
+    expect(results.summary.provenance?.solver).toBe("opencae-core-preview-tet4");
+    expect(results.summary.provenance?.resultSource).toBe("computed_preview");
   });
 
   test("does not route explicit local sample static solves through legacy beam estimates", async () => {
@@ -481,6 +523,10 @@ describe("api", () => {
         }),
         resultSettings: expect.any(Object)
       });
+      // The display-space "-Y" (down) load must reach the upright cloud solver frame
+      // as -Z so the solved deformation matches the viewer load arrow.
+      const dispatchedStudy = body.study as { loads: Array<{ parameters: { direction?: unknown } }> };
+      expect(dispatchedStudy.loads[0]?.parameters.direction).toEqual([0, 0, -1]);
       expect(body.coreModel).toBeUndefined();
       expect(JSON.stringify(body).toLowerCase()).not.toMatch(/calculix|cloudflare-fea-calculix|\.inp|\.dat|\.frd/);
       return new Response(JSON.stringify({
@@ -513,6 +559,9 @@ describe("api", () => {
       expect(body).toMatchObject({
         analysisType: "static_stress",
         coreVolumeMesh: null,
+        solverSettings: expect.objectContaining({
+          elementOrder: 1
+        }),
         geometry: {
           kind: "sample_procedural",
           sampleId: "bracket",
@@ -584,6 +633,7 @@ describe("api", () => {
           height: 40
         })
       });
+      expect((body.study as { loads: Array<{ parameters: { direction?: unknown } }> }).loads[0]?.parameters.direction).toEqual([0, 0, -1]);
       return new Response(JSON.stringify({
         run: { id: "run-cloud-core-dynamic", solverBackend: "opencae-core-cloud" },
         streamUrl: "/api/cloud-core/runs/run-cloud-core-dynamic/events",
@@ -709,9 +759,14 @@ describe("api", () => {
   });
 
   test("defers local result solving until a queued run is subscribed", () => {
-    expect(apiSource).toContain("localResultSolversByRunId.set(runId");
+    expect(apiSource).toContain("setCappedRunEntry(localResultSolversByRunId, runId");
     expect(apiSource).toContain('if (event.type === "complete")');
     expect(apiSource).toContain("await computeLocalResults(event.runId);");
+  });
+
+  test("fails the run instead of hanging when the local solver rejects", () => {
+    expect(apiSource).toContain("localResultsByRunId.delete(event.runId);");
+    expect(apiSource).toContain('messageFromUnknownError(error) || "Local solve failed."');
   });
 
   test("reports dynamic local frame-writing progress before completion", { timeout: 60000 }, async () => {
@@ -802,5 +857,118 @@ describe("api", () => {
     expect(response.project.name).toBe("Uploaded Project");
     expect(response.displayModel.name).toBe("Display");
     expect(response.message).toBe("Uploaded Project opened from local file.");
+  });
+
+  test("rejects project files that are not JSON with a friendly import error", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("missing", { status: 404 })));
+    const file = new TestFile(["this is not json"], "broken.opencae.json", { type: "application/json" });
+
+    await expect(importLocalProject(file)).rejects.toThrow("The selected file is not a valid OpenCAE project file.");
+  });
+
+  test("cancels cloud-core runs against the cancel route derived from the events URL", async () => {
+    const runId = "run-cloud-core-cancel-ok";
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).endsWith("/start")) return new Response(JSON.stringify({ ok: true }), { headers: { "content-type": "application/json" } });
+      if (String(input) === `/api/cloud-core/runs/${runId}/cancel`) {
+        return new Response(JSON.stringify({ message: "Cloud run cancelled." }), { headers: { "content-type": "application/json" } });
+      }
+      return new Response(JSON.stringify({
+        run: { id: runId, solverBackend: "opencae-core-cloud" },
+        streamUrl: `/api/cloud-core/runs/${runId}/events?token=secret`,
+        startUrl: `/api/cloud-core/runs/${runId}/start`
+      }), { headers: { "content-type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const cloudStudy = {
+      ...study,
+      meshSettings: { preset: "medium", status: "complete", meshRef: "project-1/mesh/mesh-summary.json" },
+      solverSettings: { backend: "opencae_core_cloud" }
+    } as unknown as Study;
+
+    await runSimulation("study-1", cloudStudy, coreDisplayModel);
+    const cancelled = await cancelRun(runId);
+
+    expect(fetchMock).toHaveBeenCalledWith(`/api/cloud-core/runs/${runId}/cancel`, { method: "POST", headers: { "x-opencae-run-token": "secret" } });
+    expect(cancelled.run.status).toBe("cancelled");
+    expect(cancelled.message).toBe("Cloud run cancelled.");
+  });
+
+  test("does not claim a cloud solve stopped when the cancel request fails", async () => {
+    const runId = "run-cloud-core-cancel-fail";
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).endsWith("/start")) return new Response(JSON.stringify({ ok: true }), { headers: { "content-type": "application/json" } });
+      if (String(input).includes("/cancel")) return Promise.reject(new TypeError("Failed to fetch"));
+      return new Response(JSON.stringify({
+        run: { id: runId, solverBackend: "opencae-core-cloud" },
+        streamUrl: `/api/cloud-core/runs/${runId}/events`,
+        startUrl: `/api/cloud-core/runs/${runId}/start`
+      }), { headers: { "content-type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const cloudStudy = {
+      ...study,
+      meshSettings: { preset: "medium", status: "complete", meshRef: "project-1/mesh/mesh-summary.json" },
+      solverSettings: { backend: "opencae_core_cloud" }
+    } as unknown as Study;
+
+    await runSimulation("study-1", cloudStudy, coreDisplayModel);
+    const cancelled = await cancelRun(runId);
+
+    expect(fetchMock).toHaveBeenCalledWith(`/api/cloud-core/runs/${runId}/cancel`, { method: "POST", headers: {} });
+    expect(cancelled.message).toBe("Stopped watching the cloud run; the solve may still finish server-side.");
+    expect(cancelled.message).not.toContain("stopped locally");
+  });
+
+  test("delivers a synthetic error event when the cloud run start request fails", async () => {
+    const runId = "run-cloud-core-start-fail";
+    class StubEventSource {
+      url: string;
+      readyState = 0;
+      onerror: ((event: unknown) => void) | null = null;
+      constructor(url: string) {
+        this.url = url;
+      }
+      addEventListener() {}
+      close() {
+        this.readyState = 2;
+      }
+    }
+    vi.stubGlobal("EventSource", StubEventSource);
+    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).endsWith("/start")) return Promise.reject(new TypeError("start unreachable"));
+        return new Response(JSON.stringify({
+          run: { id: runId, solverBackend: "opencae-core-cloud" },
+          streamUrl: `/api/cloud-core/runs/${runId}/events`,
+          startUrl: `/api/cloud-core/runs/${runId}/start`
+        }), { headers: { "content-type": "application/json" } });
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      const cloudStudy = {
+        ...study,
+        meshSettings: { preset: "medium", status: "complete", meshRef: "project-1/mesh/mesh-summary.json" },
+        solverSettings: { backend: "opencae_core_cloud" }
+      } as unknown as Study;
+
+      await runSimulation("study-1", cloudStudy, coreDisplayModel);
+      const seen: RunEvent[] = [];
+      const source = subscribeToRun(runId, (event) => seen.push(event));
+      await vi.waitFor(() => expect(seen.some((event) => event.type === "error")).toBe(true), { timeout: 2000 });
+      source.close();
+
+      const errorEvent = seen.find((event) => event.type === "error");
+      expect(errorEvent?.message).toContain("start unreachable");
+      expect(errorEvent?.message).toContain("No local estimate fallback was used.");
+    } finally {
+      consoleWarn.mockRestore();
+    }
+  });
+
+  test("parses cancel URLs from events URLs and sends run tokens via header", () => {
+    expect(apiSource).toContain('path.replace(/\\/events$/, "/cancel")');
+    expect(apiSource).toContain("Stopped watching the cloud run; the solve may still finish server-side.");
+    expect(apiSource).toContain("x-opencae-run-token");
   });
 });

@@ -1,11 +1,14 @@
 import type { RouteShorthandOptions } from "fastify";
 
 const supportedUploadExtensions = new Set(["step", "stp", "stl", "obj"]);
+const MAX_SLUG_LENGTH = 96;
+const MAX_FILENAME_LENGTH = 128;
+const MAX_PROJECT_NAME_LENGTH = 128;
 
 export const projectsReadRateLimit = {
   config: {
     rateLimit: {
-      max: 300,
+      max: 60,
       timeWindow: "1 minute"
     }
   }
@@ -14,7 +17,7 @@ export const projectsReadRateLimit = {
 export const mutatingRateLimit = {
   config: {
     rateLimit: {
-      max: 60,
+      max: 30,
       timeWindow: "1 minute"
     }
   }
@@ -54,9 +57,15 @@ function dashSlug(value: string, fallback: string): string {
       parts.push("-");
       previousDash = true;
     }
+    if (parts.length >= MAX_SLUG_LENGTH) break;
   }
-  while (parts[parts.length - 1] === "-") parts.pop();
-  return hasAlphaNumeric ? parts.join("") : fallback;
+  while (parts.length > 0 && isSlugBoundary(parts[parts.length - 1]!)) parts.pop();
+  while (parts.length > 0 && isSlugBoundary(parts[0]!)) parts.shift();
+  return hasAlphaNumeric && parts.length > 0 ? parts.join("") : fallback;
+}
+
+function isSlugBoundary(char: string): boolean {
+  return char === "-" || char === "_" || char === ".";
 }
 
 function lastPathComponent(value: string): string {
@@ -71,8 +80,9 @@ function replaceUnsafeFilenameCharacters(value: string): string {
   const chars: string[] = [];
   for (const char of value) {
     chars.push(isFilenameChar(char) ? char : "_");
+    if (chars.length >= MAX_FILENAME_LENGTH) break;
   }
-  return chars.join("");
+  return chars.join("").trim();
 }
 
 function extensionFor(value: string): string | undefined {
@@ -92,6 +102,7 @@ function collapseWhitespace(value: string): string {
       parts.push(char);
       pendingSpace = false;
     }
+    if (parts.length >= MAX_PROJECT_NAME_LENGTH) break;
   }
   return parts.join("");
 }

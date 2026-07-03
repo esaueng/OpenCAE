@@ -1,10 +1,15 @@
-import { useEffect, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type PointerEvent } from "react";
 import { Coffee, Github, MessageSquare } from "lucide-react";
 import { REQUIRED_SETTING_HELP_IDS, SETTING_HELP, type SettingHelpVisual } from "../settingHelp";
 
+export interface WorkspaceLogEntry {
+  message: string;
+  at: number;
+}
+
 interface BottomPanelProps {
   status: string;
-  logs: string[];
+  logs: WorkspaceLogEntry[];
   projectName: string;
   studyName: string;
   meshStatus: string;
@@ -44,7 +49,7 @@ export function BottomPanel({ status, logs, projectName, studyName, meshStatus, 
   const replayTimeoutRef = useRef(0);
   const expanded = tab !== null;
   const displayStatus = statusForDisplay(status, solverStatus);
-  const healthy = solverStatus === "Running" ? "running" : displayStatus.endsWith("error") ? "warning" : meshStatus === "Ready" ? "ready" : "warning";
+  const healthy = solverStatus === "Running" ? "running" : displayStatus.endsWith("error") || displayStatus === "Needs attention" ? "warning" : meshStatus === "Ready" ? "ready" : "warning";
   const formattedLogs = logs.map(formatLogEntry);
   const donateLinkClassName = `status-link donate-link${coffeeAnimating ? " coffee-animating" : ""}`;
 
@@ -115,6 +120,19 @@ export function BottomPanel({ status, logs, projectName, studyName, meshStatus, 
     }
   }
 
+  function resizeDrawerByKey(event: KeyboardEvent<HTMLButtonElement>) {
+    const maxHeight = Math.max(260, window.innerHeight - 120);
+    const clamp = (value: number) => Math.min(maxHeight, Math.max(260, value));
+    let nextHeight: number | null = null;
+    if (event.key === "ArrowUp") nextHeight = drawerHeight + 24;
+    else if (event.key === "ArrowDown") nextHeight = drawerHeight - 24;
+    else if (event.key === "Home") nextHeight = 260;
+    else if (event.key === "End") nextHeight = maxHeight;
+    if (nextHeight === null) return;
+    event.preventDefault();
+    setDrawerHeight(clamp(nextHeight));
+  }
+
   function copyLogs() {
     if (typeof navigator === "undefined" || !navigator.clipboard) return;
     void navigator.clipboard.writeText(formattedLogs.join("\n"));
@@ -138,12 +156,18 @@ export function BottomPanel({ status, logs, projectName, studyName, meshStatus, 
           <button
             type="button"
             className="bottom-resize-handle"
-            aria-label="Resize drawer"
+            role="separator"
+            aria-orientation="horizontal"
+            aria-valuenow={drawerHeight}
+            aria-valuemin={260}
+            aria-valuemax={Math.max(260, window.innerHeight - 120)}
+            aria-label="Resize drawer (use arrow keys)"
             title="Drag up to resize"
             onPointerDown={startDrawerResize}
             onPointerMove={resizeDrawer}
             onPointerUp={stopDrawerResize}
             onPointerCancel={stopDrawerResize}
+            onKeyDown={resizeDrawerByKey}
           />
           <div className="logs-drawer-header">
             <span>Run logs</span>
@@ -169,12 +193,18 @@ export function BottomPanel({ status, logs, projectName, studyName, meshStatus, 
           <button
             type="button"
             className="bottom-resize-handle"
-            aria-label="Resize tips drawer"
+            role="separator"
+            aria-orientation="horizontal"
+            aria-valuenow={drawerHeight}
+            aria-valuemin={260}
+            aria-valuemax={Math.max(260, window.innerHeight - 120)}
+            aria-label="Resize drawer (use arrow keys)"
             title="Drag up to resize"
             onPointerDown={startDrawerResize}
             onPointerMove={resizeDrawer}
             onPointerUp={stopDrawerResize}
             onPointerCancel={stopDrawerResize}
+            onKeyDown={resizeDrawerByKey}
           />
           <div className="tips-drawer-header">
             <span>Settings tips</span>
@@ -200,7 +230,7 @@ export function BottomPanel({ status, logs, projectName, studyName, meshStatus, 
       <div className="status-strip">
         <div className="status-tabs">
           {(["tips", "logs"] as const).map((item) => (
-            <button key={item} className={tab === item ? "active" : ""} onClick={(event) => selectTab(item, event)}>
+            <button key={item} className={tab === item ? "active" : ""} aria-pressed={tab === item} aria-expanded={tab === item} onClick={(event) => selectTab(item, event)}>
               {item[0]?.toUpperCase()}{item.slice(1)}
               {item === "logs" && <span className="count-pill">{logs.length}</span>}
             </button>
@@ -287,6 +317,7 @@ export function KeyboardShortcutGuide() {
 function statusForDisplay(status: string, solverStatus: string) {
   const normalized = status.toLowerCase();
   if (normalized.includes("opencae core") && /(error|fail|failed|unavailable|not configured|not enabled|not ready)/.test(normalized)) return "OpenCAE Core error";
+  if (/(could not|failed)/.test(normalized)) return "Needs attention";
   if (solverStatus === "Running") return "Simulating";
   if (status.toLowerCase().includes("complete")) return "Results ready";
   if (normalized.includes("opencae core")) return "OpenCAE Core active";
@@ -297,12 +328,12 @@ export function resolveLogClearIntent(clickDetail: number, armed: boolean): "con
   return armed || clickDetail >= 2 ? "clear" : "confirm";
 }
 
-function formatLogEntry(entry: string, index: number) {
-  const normalized = entry.toLowerCase();
+function formatLogEntry(entry: WorkspaceLogEntry) {
+  const normalized = entry.message.toLowerCase();
   const level = normalized.includes("complete") || normalized.includes("generated")
     ? "OK"
     : /(error|fail|failed|unavailable|not configured|not enabled)/.test(normalized)
       ? "ERR"
       : "INFO";
-  return `${new Date(Date.now() - index * 15000).toLocaleTimeString([], { hour12: false })} ${level.padEnd(4, " ")} ${entry}`;
+  return `${new Date(entry.at).toLocaleTimeString([], { hour12: false })} ${level.padEnd(4, " ")} ${entry.message}`;
 }

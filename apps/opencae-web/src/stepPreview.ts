@@ -136,16 +136,21 @@ export async function stepPreviewFromBase64(contentBase64: string, color: string
 }
 
 function getOcctImporter(): Promise<OcctImporter> {
-  occtPromise ??= import("occt-import-js").then(({ default: occtimportjs }) => {
-    return occtimportjs({
-      locateFile: (path: string) => (path.endsWith(".wasm") ? occtWasmUrl : path)
+  occtPromise ??= import("occt-import-js")
+    .then(({ default: occtimportjs }) => {
+      return occtimportjs({
+        locateFile: (path: string) => (path.endsWith(".wasm") ? occtWasmUrl : path)
+      });
+    })
+    .catch((error: unknown) => {
+      occtPromise = null;
+      throw error;
     });
-  });
   return occtPromise;
 }
 
 function base64ToUint8Array(value: string): Uint8Array {
-  const binary = window.atob(value);
+  const binary = globalThis.atob(value);
   const bytes = new Uint8Array(binary.length);
   for (let index = 0; index < binary.length; index += 1) {
     bytes[index] = binary.charCodeAt(index);

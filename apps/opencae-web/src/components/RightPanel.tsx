@@ -1,6 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { AlertTriangle, Anchor, ArrowDown, Check, CircleHelp, Eye, Gauge, Grid3X3, Maximize2, Pause, Play, Plus, RotateCcw, Ruler, ScanLine, ShieldCheck, Upload, Weight, X } from "lucide-react";
+import { AlertTriangle, Anchor, ArrowDown, Check, ChevronDown, CircleHelp, Eye, Gauge, Grid3X3, Maximize2, Pause, Play, Plus, RotateCcw, Ruler, ScanLine, ShieldCheck, Upload, Weight, X } from "lucide-react";
 import { defaultPrintParametersFor, effectiveMaterialProperties, massKgForPayloadMaterial, normalizePrintParameters, payloadMaterialForId, payloadMaterials, starterMaterials, type PayloadMaterialCategory, type PrintMaterialParameters } from "@opencae/materials";
 import { assessResultFailure, estimateAllowableLoadForSafetyFactor } from "@opencae/schema";
 import type { Constraint, DisplayFace, DisplayModel, DynamicSolverSettings, Load, MeshQuality, Project, ResultField, ResultProvenance, ResultSummary, RunTimingEstimate, SimulationFidelity, SolverBackend, Study } from "@opencae/schema";
@@ -18,6 +18,7 @@ import { getViewportTooltipPosition } from "../tooltipPosition";
 import { forceForUnits, formatDensity, formatMass, formatMaterialStress, formatResultProvenanceLabel, formatVolume, legacyResultWarningForProvenance, loadValueForUnits, type UnitSystem } from "../unitDisplay";
 import { canNavigateToStep } from "../appShellState";
 import { MaterialLibraryModal } from "./SimulationWorkflow";
+import { ParametricPartBuilder } from "./ParametricPartBuilder";
 import { SampleOptionCard } from "./SampleOptionCard";
 import { SAMPLE_OPTIONS, sampleOptionFor } from "./sampleOptions";
 import { dynamicPlaybackFrames } from "../resultFields";
@@ -50,9 +51,10 @@ interface RightPanelProps {
   showDeformed: boolean;
   showDimensions: boolean;
   stressExaggeration: number;
-  resultSummary: ResultSummary;
+  resultSummary: ResultSummary | null;
   resultFields?: ResultField[];
   runProgress: number;
+  runError?: string | null;
   runTiming?: RunTimingEstimate | null;
   sampleModel: SampleModelId;
   sampleAnalysisType?: SampleAnalysisType;
@@ -74,7 +76,8 @@ interface RightPanelProps {
   onToggleDimensions: () => void;
   onStressExaggerationChange: (value: number) => void;
   onAssignMaterial: (materialId: string, parameters?: Record<string, unknown>) => void;
-  onPreviewPrintLayerOrientation?: (orientation: "x" | "y" | "z" | null) => void;
+  /** null suppresses the preview while editing; undefined clears the preview so the assigned orientation shows again. */
+  onPreviewPrintLayerOrientation?: (orientation: "x" | "y" | "z" | null | undefined) => void;
   onAddSupport: (selectionRef?: string) => void;
   onUpdateSupport: (support: Constraint) => void;
   onRemoveSupport: (supportId: string) => void;
@@ -185,15 +188,16 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sa
   return (
     <Panel title="Model" helper="Inspect the 3D part. Orbit with left-drag, pan with right-drag, zoom with scroll.">
       {showSampleModelPicker && (
-        <label className="field">
+        <div className="field">
           <HelpLabel helpId="sampleModel">Sample model</HelpLabel>
-          <div className="sample-option-grid panel-sample-grid" role="list" aria-label="Sample model">
+          <div className="sample-option-grid panel-sample-grid" role="group" aria-label="Sample model">
             {SAMPLE_OPTIONS.map((option) => (
               <SampleOptionCard
                 key={option.id}
                 option={option}
                 selected={pendingSampleModel === option.id}
                 compact
+                analysisType={sampleAnalysisType}
                 onSelect={handleSampleSelect}
                 onOpen={handleSampleOpen}
               />
@@ -201,8 +205,8 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sa
           </div>
           <HelpLabel helpId="sampleModel">Analysis type</HelpLabel>
           <div className="segmented analysis-type" role="group" aria-label="Analysis type">
-            <button className={sampleAnalysisType === "static_stress" ? "active" : ""} type="button" onClick={() => onSampleAnalysisTypeChange?.("static_stress")}>Static</button>
-            <button className={sampleAnalysisType === "dynamic_structural" ? "active" : ""} type="button" onClick={() => onSampleAnalysisTypeChange?.("dynamic_structural")}>Dynamic</button>
+            <button className={sampleAnalysisType === "static_stress" ? "active" : ""} type="button" aria-pressed={sampleAnalysisType === "static_stress"} onClick={() => onSampleAnalysisTypeChange?.("static_stress")}>Static</button>
+            <button className={sampleAnalysisType === "dynamic_structural" ? "active" : ""} type="button" aria-pressed={sampleAnalysisType === "dynamic_structural"} onClick={() => onSampleAnalysisTypeChange?.("dynamic_structural")}>Dynamic</button>
           </div>
           <button
             className={confirmSampleLoad ? "primary wide" : "secondary wide"}
@@ -214,7 +218,7 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sa
             {confirmSampleLoad ? "Click again to load sample" : `Load ${sampleAnalysisType === "dynamic_structural" ? "dynamic" : "static"} sample`}
           </button>
           {confirmSampleLoad && <span className="panel-copy confirm-copy">This will reload {sampleLabel} as {sampleAnalysisLabel} and reset the sample setup.</span>}
-        </label>
+        </div>
       )}
       <input
         ref={uploadInputRef}
@@ -238,13 +242,20 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sa
       ) : isUploadedProject ? (
         <Callout>{isNativeCadImport ? `${geometry.filename} is loaded as a selectable STEP import.` : uploadPreviewFormat ? `${geometry.filename} is loaded with a ${uploadPreviewFormat} viewport preview.` : `${geometry.filename} cannot be previewed in this local viewer. Replace it with STEP, STP, or STL.`}</Callout>
       ) : null}
+      <Collapsible title="Create parametric part" subtitle="Analytic STEP solid" defaultOpen={isBlankProject}>
+        <ParametricPartBuilder onCreatePart={onUploadModel} />
+      </Collapsible>
       <div className="summary-box">
         <Info label="Project" value={project.name} />
         <Info label="Model" value={geometry?.filename ?? "No model loaded"} />
         <Info label="Bodies" value={String(bodyCount)} />
         <Info label="Faces" value={String(faceCount)} />
-        <Info label="Volume" value={formatVolume(sampleSummaryVolumeMm3, "mm^3", project.unitSystem)} />
-        <Info label="Mass" value={formatMass(sampleSummaryMassG, "g", project.unitSystem)} />
+        {showSampleModelPicker && (
+          <>
+            <Info label="Volume" value={formatVolume(sampleSummaryVolumeMm3, "mm^3", project.unitSystem)} />
+            <Info label="Mass" value={formatMass(sampleSummaryMassG, "g", project.unitSystem)} />
+          </>
+        )}
         <Info label="Units" value={project.unitSystem === "US" ? "in" : "mm"} />
       </div>
       <button className={showDimensions ? "primary wide" : "secondary wide"} type="button" onClick={onToggleDimensions}>
@@ -316,6 +327,7 @@ function MaterialPanel({ project, displayModel, study, onAssignMaterial, onPrevi
 
   useEffect(() => {
     onPreviewPrintLayerOrientation?.(printable && printParameters.printed ? printParameters.layerOrientation ?? "z" : null);
+    return () => onPreviewPrintLayerOrientation?.(undefined);
   }, [onPreviewPrintLayerOrientation, printable, printParameters.layerOrientation, printParameters.printed]);
 
   function handleMaterialChange(materialId: string) {
@@ -503,7 +515,7 @@ function LoadsPanel({
         fallbackLabel={selectedPayloadObject?.label ?? selectedFace?.label}
         detail={selectedPayloadObject ? "object selected" : selectedLoadPoint ? "point picked" : undefined}
       />
-      <label className="field">
+      <div className="field">
         <HelpLabel helpId="loadType">Load type</HelpLabel>
         <div className="segmented" role="group" aria-label="Load type">
           {(["force", "pressure", "gravity"] as const).map((type) => (
@@ -511,6 +523,7 @@ function LoadsPanel({
               key={type}
               className={draftLoadType === type ? "active" : ""}
               type="button"
+              aria-pressed={draftLoadType === type}
               onClick={() => {
                 onDraftLoadTypeChange(type);
                 if (type !== draftLoadType) onDraftLoadValueChange(defaultValueForLoadType(type));
@@ -520,7 +533,7 @@ function LoadsPanel({
             </button>
           ))}
         </div>
-      </label>
+      </div>
       {draftLoadType === "gravity" ? (
         <PayloadMassControls
           unitSystem={project.unitSystem}
@@ -743,9 +756,10 @@ function LoadEditForm({ load, study, displayModel, unitSystem, onSave, onCancel,
   const calculatedPayloadMass = payloadVolumeM3 ? massKgForPayloadMaterial(payloadMaterialId, payloadVolumeM3) : 0;
   const manualMassKg = loadValueForUnits(Number(value), displayUnits, "SI").value;
   const editedValue = type === "gravity" && payloadMassMode === "material" && calculatedPayloadMass > 0 ? calculatedPayloadMass : manualMassKg;
-  const payloadMetadata: PayloadLoadMetadata = type === "gravity"
+  // Memoized on scalar inputs: a fresh object here would retrigger the preview effect every render and loop with the parent setState.
+  const payloadMetadata = useMemo<PayloadLoadMetadata>(() => type === "gravity"
     ? { payloadMaterialId, ...(payloadVolumeM3 ? { payloadVolumeM3 } : {}), payloadMassMode }
-    : {};
+    : {}, [payloadMassMode, payloadMaterialId, payloadVolumeM3, type]);
   const selectedPayloadMaterial = payloadMaterialForId(payloadMaterialId);
   const selectedRef = study.namedSelections.find((selection) => selection.id === load.selectionRef);
   const selectedFace = selectedRef?.geometryRefs[0];
@@ -929,29 +943,36 @@ function MeshPanel({ study, onGenerateMesh }: RightPanelProps) {
   const [preset, setPreset] = useState<MeshQuality>(study.meshSettings.preset);
   return (
     <Panel title="Mesh" helper="The mesh breaks the model into small pieces so OpenCAE can calculate results.">
-      <label className="field">
+      <div className="field">
         <HelpLabel helpId="meshQuality">Quality preset</HelpLabel>
         <div className="segmented" role="group" aria-label="Mesh quality">
           {MESH_PRESETS.map((option) => (
-            <button key={option} className={preset === option ? "active" : ""} type="button" onClick={() => setPreset(option)}>{capitalize(option)}</button>
+            <button key={option} className={preset === option ? "active" : ""} type="button" aria-pressed={preset === option} onClick={() => setPreset(option)}>{capitalize(option)}</button>
           ))}
         </div>
-      </label>
+      </div>
       <button className="primary wide" onClick={() => onGenerateMesh(preset)}><Grid3X3 size={18} />Generate mesh</button>
       <Callout>{capitalize(preset)} creates a {meshPresetDescription(preset)}.</Callout>
       {study.meshSettings.summary && (
         <div className="summary-box">
-          <Info label="Nodes" value={study.meshSettings.summary.nodes.toLocaleString()} />
-          <Info label="Elements" value={study.meshSettings.summary.elements.toLocaleString()} />
+          <Info
+            label={study.meshSettings.summary.source === "core_solver" ? "Nodes" : "Nodes (est.)"}
+            value={study.meshSettings.summary.nodes.toLocaleString()}
+          />
+          <Info
+            label={study.meshSettings.summary.source === "core_solver" ? "Elements" : "Elements (est.)"}
+            value={study.meshSettings.summary.elements.toLocaleString()}
+          />
           <Info label="Analysis samples" value={(study.meshSettings.summary.analysisSampleCount ?? 0).toLocaleString()} />
           <Info label="Warnings" value={String(study.meshSettings.summary.warnings.length)} />
         </div>
       )}
+      <p className="panel-copy">Cloud solves mesh the part on the server at the selected quality; final node and element counts appear with the results.</p>
     </Panel>
   );
 }
 
-function RunPanel({ study, displayModel, runProgress, runTiming, onRunSimulation, onCancelSimulation, canCancelSimulation, onUpdateSolverSettings, canRunSimulation, missingRunItems }: RightPanelProps) {
+function RunPanel({ study, displayModel, runProgress, runError, runTiming, onRunSimulation, onCancelSimulation, canCancelSimulation, onUpdateSolverSettings, canRunSimulation, missingRunItems }: RightPanelProps) {
   const progressPercent = Math.max(0, Math.min(100, Math.round(runProgress)));
   const isRunning = canCancelSimulation ?? (progressPercent > 0 && progressPercent < 100);
   const remainingLabel = formatSimulationEta(runTiming?.estimatedRemainingMs, isRunning);
@@ -1041,6 +1062,7 @@ function RunPanel({ study, displayModel, runProgress, runTiming, onRunSimulation
         </button>
       )}
       {missingRunItems.length > 0 && <p className="panel-copy">Complete {missingRunItems.join(", ").toLowerCase()} before running.</p>}
+      {runError && !isRunning && <p className="panel-warning" role="alert">{runError}</p>}
       <div className="progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progressPercent} aria-label="Simulation progress">
         <span style={{ width: `${progressPercent}%` }} />
         <strong className="progress-label">{progressPercent}%</strong>
@@ -1187,7 +1209,18 @@ function formatDurationSeconds(milliseconds: number): string {
   return remainder ? `${minutes}m ${remainder}s` : `${minutes}m`;
 }
 
-function ResultsPanel({
+function ResultsPanel(props: RightPanelProps) {
+  if (!props.resultSummary) {
+    return (
+      <Panel title="Results" helper="View stress and displacement directly on the 3D model.">
+        <Callout>Run a simulation to see results.</Callout>
+      </Panel>
+    );
+  }
+  return <ResultsPanelContent {...props} resultSummary={props.resultSummary} />;
+}
+
+function ResultsPanelContent({
   project,
   displayModel,
   resultMode,
@@ -1210,7 +1243,7 @@ function ResultsPanel({
   onResultModeChange,
   onToggleDeformed,
   onStressExaggerationChange
-}: RightPanelProps) {
+}: RightPanelProps & { resultSummary: ResultSummary }) {
   const [targetSafetyFactor, setTargetSafetyFactor] = useState(1.5);
   const [draftStressExaggeration, setDraftStressExaggeration] = useState(stressExaggeration);
   const stressExaggerationCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1370,9 +1403,9 @@ function ResultsPanel({
       <p className="panel-copy">Red areas have higher stress. Blue areas have lower stress.</p>
       <div className="summary-box">
         <Info label="Result source" value={formatResultProvenanceLabel(resultSummary.provenance)} />
-        <Info label="Core solver version" value={resultProvenance?.solverVersion ?? "--"} />
+        <Info label="Core solver version" value={resultProvenance?.solverVersion ?? resultProvenance?.solverCpuVersion ?? resultProvenance?.coreVersion ?? "--"} />
         <Info label="Core model schema version" value={project.schemaVersion} />
-        <Info label="Mesh source" value={formatMeshSourceLabel(resultProvenance?.meshSource)} />
+        <Info label="Mesh source" value={formatMeshSourceLabel(resultProvenance?.meshSource, displayModel)} />
         <Info label="Solver method" value={solverMethodForResult(resultSummary, study)} />
         <Info label="Runner" value={solverRunnerLabelForResult(resultProvenance)} />
         <Info label="Local fallback" value="none" />
@@ -1441,8 +1474,13 @@ function solverRunnerLabelForResult(provenance: ResultProvenance | undefined): s
   return provenance?.solver === "opencae-core-cloud" ? "cloud container" : "local core worker";
 }
 
-function formatMeshSourceLabel(meshSource: ResultProvenance["meshSource"] | undefined): string {
-  if (meshSource === "actual_volume_mesh") return "Actual volume mesh";
+function formatMeshSourceLabel(meshSource: ResultProvenance["meshSource"] | undefined, displayModel?: DisplayModel): string {
+  if (meshSource === "actual_volume_mesh") {
+    // Sample projects are meshed in the cloud from a simplified procedural
+    // descriptor (no hole features); claiming "actual" would overstate fidelity.
+    if (displayModel?.coreCloudGeometry?.kind === "sample_procedural") return "Procedural sample mesh (simplified)";
+    return "Actual volume mesh";
+  }
   if (meshSource === "structured_block_core") return "Structured block Core";
   if (meshSource === "opencae_core_tet4") return "OpenCAE Core Tet4";
   if (meshSource === "structured_block_proxy" || meshSource === "display_bounds_proxy") return "OpenCAE Core Preview";
@@ -1653,6 +1691,19 @@ function SectionTitle({ children, helpId }: { children: ReactNode; helpId?: Sett
 
 function Callout({ children }: { children: ReactNode }) {
   return <p className="callout">{children}</p>;
+}
+
+function Collapsible({ title, subtitle, defaultOpen = false, children }: { title: string; subtitle?: string; defaultOpen?: boolean; children: ReactNode }) {
+  return (
+    <details className="collapsible-section" open={defaultOpen}>
+      <summary className="collapsible-summary">
+        <span className="collapsible-title">{title}</span>
+        {subtitle && <span className="collapsible-subtitle">{subtitle}</span>}
+        <ChevronDown className="collapsible-chevron" size={16} aria-hidden="true" />
+      </summary>
+      <div className="collapsible-body">{children}</div>
+    </details>
+  );
 }
 
 function ConceptCard({ icon, title, detail, tone = "accent" }: { icon: ReactNode; title: string; detail: string; tone?: "accent" | "warning" }) {

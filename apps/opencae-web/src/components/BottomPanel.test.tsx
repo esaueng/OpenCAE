@@ -36,7 +36,7 @@ describe("BottomPanel", () => {
     const html = renderToStaticMarkup(
       <BottomPanel
         status="Results ready"
-        logs={["Ready"]}
+        logs={[{ message: "Ready", at: 1714000000000 }]}
         projectName="Cantilever Demo"
         studyName="Static Stress"
         meshStatus="Ready"
@@ -66,7 +66,7 @@ describe("BottomPanel", () => {
     const html = renderToStaticMarkup(
       <BottomPanel
         status="Results ready"
-        logs={["Ready"]}
+        logs={[{ message: "Ready", at: 1714000000000 }]}
         projectName="Cantilever Demo"
         studyName="Static Stress"
         meshStatus="Ready"
@@ -106,7 +106,7 @@ describe("BottomPanel", () => {
     const html = renderToStaticMarkup(
       <BottomPanel
         status="Ready"
-        logs={["Ready"]}
+        logs={[{ message: "Ready", at: 1714000000000 }]}
         projectName="Cantilever Demo"
         studyName="Static Stress"
         meshStatus="Ready"
@@ -124,7 +124,7 @@ describe("BottomPanel", () => {
     const html = renderToStaticMarkup(
       <BottomPanel
         status="OpenCAE Core solve failed: singular matrix."
-        logs={["OpenCAE Core solve failed: singular matrix."]}
+        logs={[{ message: "OpenCAE Core solve failed: singular matrix.", at: 1714000000000 }]}
         projectName="Cantilever Demo"
         studyName="Static Stress"
         meshStatus="Ready"
@@ -142,6 +142,30 @@ describe("BottomPanel", () => {
     expect(bottomPanelSource).toContain('className="log-copy-button"');
     expect(bottomPanelSource).toContain("Copy logs");
     expect(bottomPanelSource).toContain("navigator.clipboard.writeText");
+  });
+
+  test("renders the real log entry timestamp instead of a fabricated offset", () => {
+    expect(bottomPanelSource).toContain("new Date(entry.at).toLocaleTimeString");
+    expect(bottomPanelSource).not.toContain("Date.now() - index * 15000");
+  });
+
+  test("shows a warning state for failed actions instead of collapsing them to ready", () => {
+    const html = renderToStaticMarkup(
+      <BottomPanel
+        status="Could not open local project."
+        logs={[{ message: "Could not open local project.", at: 1714000000000 }]}
+        projectName="Cantilever Demo"
+        studyName="Static Stress"
+        meshStatus="Ready"
+        solverStatus="Idle"
+        backendStatus="core"
+        onClearLogs={() => undefined}
+      />
+    );
+
+    expect(html).toContain(">Needs attention</span>");
+    expect(html).toContain('class="status-state warning"');
+    expect(html).not.toContain('class="status-state ready"');
   });
 
   test("requires two clicks before clearing run logs", () => {

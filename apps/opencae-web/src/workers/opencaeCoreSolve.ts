@@ -8,6 +8,7 @@ export {
   normalizeSolverBackend,
   OPENCAE_CORE_CLOUD_GEOMETRY_REQUIRED_REASON,
   openCaeCoreEligibility,
+  studyForCoreCloudGeometryDispatch,
   trySolveOpenCaeCoreStudy,
   type CoreCloudGeometrySource,
   type NormalizedBrowserSolverBackend,

@@ -1,7 +1,9 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ChevronDown, Grid3X3, Plus, Search, X } from "lucide-react";
 import { starterMaterials } from "@opencae/materials";
+import { isRunResultReadyStatus } from "@opencae/schema";
 import type { Material, ResultField, Study } from "@opencae/schema";
+import { useFocusTrap } from "../hooks/useFocusTrap";
 import { formatDensity, formatMaterialStress, type UnitSystem } from "../unitDisplay";
 import dynamicAnalysisImage from "../assets/simulation-showcase/dynamic-analysis.png";
 import staticAnalysisImage from "../assets/simulation-showcase/static-analysis.png";
@@ -18,10 +20,11 @@ interface CreateSimulationModalProps {
 }
 
 export function CreateSimulationModal({ open, onCreateStatic, onCreateDynamic, onClose }: CreateSimulationModalProps) {
+  const dialogRef = useFocusTrap<HTMLElement>(open, onClose);
   if (!open) return null;
   return (
     <div className="workflow-modal-backdrop" role="presentation">
-      <section className="workflow-modal create-simulation-dialog" role="dialog" aria-modal="true" aria-labelledby="create-simulation-title">
+      <section ref={dialogRef} className="workflow-modal create-simulation-dialog" role="dialog" aria-modal="true" aria-labelledby="create-simulation-title">
         <header className="workflow-modal-header">
           <h2 id="create-simulation-title">Create Simulation</h2>
           <button className="icon-button" type="button" onClick={onClose} aria-label="Close create simulation">
@@ -197,8 +200,11 @@ export function StudyTree({ activeStep, study, hasGeometry, hasResults, runProgr
           <TreeButton label="Mesh" step="mesh" activeStep={activeStep} status={status.mesh} onSelect={onSelect} />
           <TreeButton label="Simulation runs" step="run" activeStep={activeStep} status={status.runs} onSelect={onSelect} />
           {study.runs.map((run, index) => (
-            <button key={run.id} className="tree-run-item" type="button" onClick={() => onSelect(run.status === "complete" ? "results" : "run")}>
-              <span className={`setup-status ${run.status === "complete" ? "complete" : run.status === "failed" ? "missing" : "running"}`} />
+            <button key={run.id} className="tree-run-item" type="button" onClick={() => onSelect(isRunResultReadyStatus(run.status) ? "results" : "run")}>
+              {(() => {
+                const runStatus = isRunResultReadyStatus(run.status) ? "complete" : run.status === "failed" ? "missing" : "running";
+                return <span className={`setup-status ${runStatus}`} role="img" aria-label={runStatus} />;
+              })()}
               Run {index + 1}
             </button>
           ))}
@@ -231,7 +237,7 @@ function workflowStatus(study: Study, hasGeometry: boolean, hasResults: boolean,
     simulationControl: study.meshSettings.status === "complete" ? "complete" : "inactive",
     resultControl: "complete",
     mesh: running ? "running" : study.meshSettings.status === "complete" ? "complete" : "missing",
-    runs: running ? "running" : hasResults || study.runs.some((run) => run.status === "complete") ? "complete" : "missing"
+    runs: running ? "running" : hasResults || study.runs.some((run) => isRunResultReadyStatus(run.status)) ? "complete" : "missing"
   };
 }
 
@@ -250,8 +256,8 @@ function TreeSection({ title, action, children }: { title: string; action?: Reac
 function TreeButton({ label, step, activeStep, status, action, onSelect }: { label: string; step: StepId; activeStep: StepId; status: SetupStatus; action?: ReactNode; onSelect: (step: StepId) => void }) {
   return (
     <div className={`tree-row ${activeStep === step ? "active" : ""}`}>
-      <button type="button" onClick={() => onSelect(step)}>
-        <span className={`setup-status ${status}`} />
+      <button type="button" aria-current={activeStep === step ? "step" : undefined} onClick={() => onSelect(step)}>
+        <span className={`setup-status ${status}`} role="img" aria-label={status} />
         {label}
       </button>
       {action}
@@ -278,6 +284,7 @@ interface MaterialLibraryModalProps {
 }
 
 export function MaterialLibraryModal({ open, selectedMaterialId, assignedSelectionLabel, unitSystem, onSelectMaterial, onApply, onClose }: MaterialLibraryModalProps) {
+  const dialogRef = useFocusTrap<HTMLElement>(open, onClose);
   const [query, setQuery] = useState("");
   const selectedMaterial = materialForId(selectedMaterialId);
   const groupedMaterials = useMemo(() => {
@@ -287,7 +294,7 @@ export function MaterialLibraryModal({ open, selectedMaterialId, assignedSelecti
   if (!open) return null;
   return (
     <div className="workflow-modal-backdrop" role="presentation">
-      <section className="workflow-modal material-library-dialog" role="dialog" aria-modal="true" aria-labelledby="material-library-title">
+      <section ref={dialogRef} className="workflow-modal material-library-dialog" role="dialog" aria-modal="true" aria-labelledby="material-library-title">
         <header className="workflow-modal-header">
           <h2 id="material-library-title">Material</h2>
           <button className="icon-button" type="button" onClick={onClose} aria-label="Close material library">
@@ -304,7 +311,7 @@ export function MaterialLibraryModal({ open, selectedMaterialId, assignedSelecti
             <h3>DEFAULT</h3>
             <div className="material-list">
               {groupedMaterials.map((material) => (
-                <button key={material.id} className={material.id === selectedMaterialId ? "active" : ""} type="button" onClick={() => onSelectMaterial(material.id)}>
+                <button key={material.id} className={material.id === selectedMaterialId ? "active" : ""} type="button" aria-pressed={material.id === selectedMaterialId} onClick={() => onSelectMaterial(material.id)}>
                   {material.name}
                 </button>
               ))}
@@ -346,6 +353,10 @@ function PreviewRow({ label, value }: { label: string; value: string }) {
 }
 
 export function BoundaryConditionMenu({ open, onSelect, onClose }: { open: boolean; onSelect: (type: BoundaryConditionType) => void; onClose: () => void }) {
+  const firstButtonRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    if (open) firstButtonRef.current?.focus();
+  }, [open]);
   if (!open) return null;
   const enabled: Array<{ type: BoundaryConditionType; label: string }> = [
     { type: "fixed", label: "Fixed support" },
@@ -356,18 +367,25 @@ export function BoundaryConditionMenu({ open, onSelect, onClose }: { open: boole
   ];
   const future = ["Bolt preload", "Elastic support", "Remote displacement", "Remote force", "Surface load", "Volume load", "Hinge constraint"];
   return (
-    <div className="condition-menu" role="menu" aria-label="Add boundary condition">
+    <div
+      className="condition-menu"
+      role="group"
+      aria-label="Add boundary condition"
+      onKeyDown={(event) => {
+        if (event.key === "Escape") onClose();
+      }}
+    >
       <div className="condition-menu-header">
         <strong>Add boundary condition</strong>
         <button className="icon-button" type="button" onClick={onClose} aria-label="Close boundary condition menu"><X size={16} /></button>
       </div>
-      {enabled.map((item) => (
-        <button key={item.type} type="button" role="menuitem" onClick={() => onSelect(item.type)}>
+      {enabled.map((item, index) => (
+        <button key={item.type} ref={index === 0 ? firstButtonRef : undefined} type="button" onClick={() => onSelect(item.type)}>
           {item.label}
         </button>
       ))}
       {future.map((label) => (
-        <button key={label} className="disabled" type="button" role="menuitem" disabled>
+        <button key={label} className="disabled" type="button" disabled>
           {label}
           <small>Coming soon</small>
         </button>
@@ -382,9 +400,14 @@ export function ResultsFieldSelector({ resultMode, fields, unitSystem, defaultOp
   const active = resultOptions.find((option) => option.mode === resultMode) ?? resultOptions[0]!;
   const stressUnits = unitSystem === "US" ? "psi" : "Pa";
   return (
-    <div className="result-field-selector">
+    <div
+      className="result-field-selector"
+      onKeyDown={(event) => {
+        if (event.key === "Escape" && open) setOpen(false);
+      }}
+    >
       {open && (
-        <div className="result-field-menu" role="menu" aria-label="Result fields">
+        <div className="result-field-menu" role="group" aria-label="Result fields">
           {resultOptions.map((option) => {
             const enabled = option.mode ? available.has(option.mode) : false;
             const units = option.mode ? fields.find((field) => field.type === option.mode)?.units : undefined;
@@ -408,7 +431,7 @@ export function ResultsFieldSelector({ resultMode, fields, unitSystem, defaultOp
         </div>
       )}
       <div className="result-field-controls">
-        <button className="result-field-button" type="button" onClick={() => setOpen((value) => !value)} aria-haspopup="menu" aria-expanded={open}>
+        <button className="result-field-button" type="button" onClick={() => setOpen((value) => !value)} aria-haspopup="true" aria-expanded={open}>
           {active.label}
           <Grid3X3 size={15} />
         </button>
