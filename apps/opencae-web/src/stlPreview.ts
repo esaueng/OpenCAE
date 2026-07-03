@@ -17,6 +17,14 @@ export function normalizedStlGeometryFromBuffer(buffer: ArrayBuffer): THREE.Buff
   return geometry;
 }
 
+export function tryNormalizedStlGeometryFromBuffer(buffer: ArrayBuffer): THREE.BufferGeometry | null {
+  try {
+    return normalizedStlGeometryFromBuffer(buffer);
+  } catch {
+    return null;
+  }
+}
+
 export function normalizeStlGeometry(geometry: THREE.BufferGeometry): void {
   const position = geometry.getAttribute("position");
   if (!position || position.count === 0) {

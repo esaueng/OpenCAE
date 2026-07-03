@@ -4,6 +4,7 @@ import * as THREE from "three";
 import {
   baseModelRotationRadians,
   formatModelOrientation,
+  modelDirectionToGlobalCadFrame,
   modelDirectionToViewerSpace,
   modelRotationRadians,
   modelToViewerMatrix,
@@ -94,5 +95,19 @@ describe("model orientation", () => {
     expect(transformed.x).toBeCloseTo(0);
     expect(transformed.y).toBeCloseTo(1);
     expect(transformed.z).toBeCloseTo(0);
+  });
+
+  test("maps stored sample load directions into the solver global frame", () => {
+    // A "Global -Z" load on a legacy sample model is stored as viewer-down
+    // [0, -1, 0]; the cloud solver meshes procedural geometry Z-up, so the
+    // solve request must carry [0, 0, -1] or the load is applied sideways.
+    expect(modelDirectionToGlobalCadFrame([0, -1, 0], baseModel)).toEqual([0, 0, -1]);
+    expect(modelDirectionToGlobalCadFrame([1, 0, 0], baseModel)).toEqual([1, 0, 0]);
+    expect(modelDirectionToGlobalCadFrame([0, 0, 1], baseModel)).toEqual([0, -1, 0]);
+  });
+
+  test("leaves uploaded model load directions untouched", () => {
+    expect(modelDirectionToGlobalCadFrame([0, 0, -1], uploadedModel)).toEqual([0, 0, -1]);
+    expect(modelDirectionToGlobalCadFrame([0, -1, 0], uploadedModel)).toEqual([0, -1, 0]);
   });
 });

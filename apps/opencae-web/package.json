@@ -4,18 +4,19 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite --host 0.0.0.0 --port 5173",
+    "dev": "vite --port 5173",
     "build": "tsc --noEmit && vite build",
     "check:bundle": "node ../../scripts/check-web-bundle-budget.mjs",
-    "preview": "vite preview --host 0.0.0.0 --port 5173"
+    "preview": "vite preview --port 5173"
   },
   "dependencies": {
+    "@cloudflare/containers": "^0.3.3",
     "@opencae/core": "workspace:*",
     "@opencae/core-adapter": "workspace:*",
     "@opencae/db": "workspace:*",
     "@opencae/materials": "workspace:*",
     "@opencae/schema": "workspace:*",
-    "@opencae/solver-service": "workspace:*",
+    "@opencae/step": "workspace:*",
     "@opencae/study-core": "workspace:*",
     "@opencae/units": "workspace:*",
     "@plausible-analytics/tracker": "^0.4.5",
@@ -25,7 +26,8 @@
     "occt-import-js": "^0.0.23",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "three": "^0.171.0"
+    "three": "^0.171.0",
+    "troika-three-text": "^0.52.4"
   },
   "devDependencies": {
     "@types/react": "^18.3.18",

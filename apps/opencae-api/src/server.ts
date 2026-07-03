@@ -13,16 +13,22 @@ import {
   ProjectSchema,
   ResultFieldSchema,
   ResultSummarySchema,
+  StudySchema,
+  classifyResultProvenance,
+  isRunResultReadyStatus,
+  runStatusForResultProvenance,
   type DisplayModel,
   type Load,
   type MeshQuality,
   type Project,
   type ResultField,
+  type ResultProvenanceTier,
   type ResultSummary,
   type RunEvent,
   type Study,
   type StudyRun
 } from "@opencae/schema";
+import { mutatingRateLimit, pdfFilename, projectsReadRateLimit, sanitizeFilename, sanitizeProjectName } from "./security";
 import { hasActualCoreVolumeMesh, openCaeCoreEligibility, trySolveOpenCaeCoreStudy } from "@opencae/core-adapter";
 import { FileSystemObjectStorageProvider } from "@opencae/storage";
 import { validateStaticStressStudy, validateStudy } from "@opencae/study-core";
@@ -63,9 +69,25 @@ await api.register(rateLimit, {
   })
 });
 
+api.setErrorHandler((error: { statusCode?: number; message?: string }, request, reply) => {
+  const statusCode = error.statusCode ?? 500;
+  if (statusCode === 429) {
+    void reply.code(429).send({ statusCode: 429, error: RATE_LIMIT_ERROR_MESSAGE });
+    return;
+  }
+  if (statusCode >= 500) {
+    request.log.error({ err: error }, "Unhandled API error");
+    void reply.code(500).send({ error: "Internal server error." });
+    return;
+  }
+  void reply.code(statusCode).send({ error: error.message ?? "Request failed." });
+});
+
 const db = new SQLiteDatabaseProvider();
 const storage = new FileSystemObjectStorageProvider();
-const jobs = new InMemoryJobQueueProvider();
+const jobs = new InMemoryJobQueueProvider({
+  onError: (jobId, error) => api.log.error({ err: error, jobId }, "Job failed")
+});
 const runState = new LocalRunStateProvider();
 const meshService = new MockMeshService(storage);
 const reports = new LocalReportProvider(storage);
@@ -109,23 +131,9 @@ api.post("/api/sample-project/load", async (request) => {
   };
 });
 
-api.get("/api/projects", {
-  config: {
-    rateLimit: {
-      max: 60,
-      timeWindow: "1 minute"
-    }
-  }
-}, async () => ({ projects: db.listProjects() }));
+api.get("/api/projects", projectsReadRateLimit, async () => ({ projects: db.listProjects() }));
 
-api.post("/api/projects", {
-  config: {
-    rateLimit: {
-      max: 30,
-      timeWindow: "1 minute"
-    }
-  }
-}, async (request) => {
+api.post("/api/projects", mutatingRateLimit, async (request) => {
   const body = request.body as Partial<Project> & { sample?: SampleModelId; analysisType?: string; mode?: "blank" | "sample" } | undefined;
   const now = new Date().toISOString();
   if (body?.mode !== "sample") {
@@ -156,13 +164,13 @@ api.post("/api/projects", {
   return { project, displayModel: sampleDisplayModelFor(sample), ...(dynamicResults ? { results: dynamicResults } : {}), message: "Project created." };
 });
 
-api.post("/api/projects/import", async (request, reply) => {
+api.post("/api/projects/import", mutatingRateLimit, async (request, reply) => {
   const body = request.body as { project?: unknown; displayModel?: unknown; results?: unknown } | Project | undefined;
   const candidate = body && "project" in body ? body.project : body;
   const parsed = ProjectSchema.safeParse(candidate);
   if (!parsed.success) return reply.code(400).send({ error: "The selected file is not a valid OpenCAE project JSON." });
 
-  const project = parsed.data;
+  const project = withCanonicalArtifactRefs(parsed.data);
   const displayModel = parseDisplayModel(body && "displayModel" in body ? body.displayModel : undefined) ?? await displayModelForProject(project);
   const results = parseLocalResults(body && "results" in body ? body.results : undefined, project);
   const importedProject = results ? projectWithImportedResultRefs(project, results) : project;
@@ -195,7 +203,7 @@ api.put("/api/projects/:projectId", async (request, reply) => {
   return { project: nextProject, message: "Project renamed." };
 });
 
-api.post("/api/projects/:projectId/uploads", async (request, reply) => {
+api.post("/api/projects/:projectId/uploads", mutatingRateLimit, async (request, reply) => {
   const { projectId } = request.params as { projectId: string };
   const project = db.getProject(projectId);
   if (!project) return reply.code(404).send({ error: "Project not found" });
@@ -280,10 +288,10 @@ api.get("/api/projects/:projectId/studies", async (request) => {
   return { studies: db.getProject(projectId)?.studies ?? [] };
 });
 
-api.post("/api/projects/:projectId/studies", async (request) => {
+api.post("/api/projects/:projectId/studies", mutatingRateLimit, async (request, reply) => {
   const { projectId } = request.params as { projectId: string };
   const project = db.getProject(projectId);
-  if (!project) return { error: "Project not found" };
+  if (!project) return reply.code(404).send({ error: "Project not found" });
   const body = request.body as { analysisType?: Study["type"] } | undefined;
   const displayModel = await displayModelForProject(project);
   const factory = body?.analysisType === "dynamic_structural" ? createDynamicStructuralStudy : createStaticStressStudy;
@@ -302,13 +310,16 @@ api.get("/api/studies/:studyId", async (request, reply) => {
   return { study };
 });
 
-api.put("/api/studies/:studyId", async (request, reply) => {
+api.put("/api/studies/:studyId", mutatingRateLimit, async (request, reply) => {
   const { studyId } = request.params as { studyId: string };
   const study = db.getStudy(studyId);
   if (!study) return reply.code(404).send({ error: "Study not found" });
-  const next = { ...study, ...(request.body as Partial<Study>) } as Study;
-  db.upsertStudy(next);
-  return { study: next };
+  if (!isRecord(request.body)) return reply.code(400).send({ error: "Invalid study update." });
+  const merged = { ...study, ...request.body, id: study.id, projectId: study.projectId };
+  const parsed = StudySchema.safeParse(merged);
+  if (!parsed.success) return reply.code(400).send({ error: "Invalid study update.", issues: parsed.error.issues.map((issue) => issue.message) });
+  db.upsertStudy(parsed.data);
+  return { study: parsed.data };
 });
 
 api.post("/api/studies/:studyId/validate", async (request, reply) => {
@@ -378,7 +389,7 @@ api.post("/api/studies/:studyId/loads", async (request, reply) => {
   return { study: next, message: "Load added." };
 });
 
-api.post("/api/studies/:studyId/mesh", async (request, reply) => {
+api.post("/api/studies/:studyId/mesh", mutatingRateLimit, async (request, reply) => {
   const { studyId } = request.params as { studyId: string };
   const study = db.getStudy(studyId);
   if (!study) return reply.code(404).send({ error: "Study not found" });
@@ -393,7 +404,7 @@ api.post("/api/studies/:studyId/mesh", async (request, reply) => {
   return { study: next, mesh, message: "Mesh generated." };
 });
 
-api.post("/api/studies/:studyId/runs", async (request, reply) => {
+api.post("/api/studies/:studyId/runs", mutatingRateLimit, async (request, reply) => {
   const { studyId } = request.params as { studyId: string };
   const study = db.getStudy(studyId);
   if (!study) return reply.code(404).send({ error: "Study not found" });
@@ -419,38 +430,70 @@ api.post("/api/studies/:studyId/runs", async (request, reply) => {
   db.upsertRun(run);
   publish(runId, "state", 0, "Simulation queued.");
   await jobs.enqueue(jobId, async () => {
-    publish(runId, "state", 3, "OpenCAE Core simulation running.");
-    publish(runId, "progress", 18, studySnapshot.type === "dynamic_structural" ? "OpenCAE Core dynamic Tet4 solver started." : "OpenCAE Core CPU Tet4 solver started.");
-    const solved = trySolveOpenCaeCoreStudy({ study: studySnapshot, runId, displayModel });
-    if (!solved.ok) {
-      const failed = {
+    const runCancelled = () => jobs.getStatus(jobId) === "cancelled" || db.getRun(runId)?.status === "cancelled";
+    try {
+      if (runCancelled()) return;
+      publish(runId, "state", 3, "OpenCAE Core simulation running.");
+      publish(runId, "progress", 18, studySnapshot.type === "dynamic_structural" ? "OpenCAE Core dynamic Tet4 solver started." : "OpenCAE Core CPU Tet4 solver started.");
+      const solved = trySolveOpenCaeCoreStudy({ study: studySnapshot, runId, displayModel });
+      if (runCancelled()) return;
+      if (!solved.ok) {
+        const failed = {
+          ...run,
+          status: "failed" as const,
+          finishedAt: new Date().toISOString(),
+          diagnostics: [{
+            id: "opencae-core-solve-failed",
+            severity: "error" as const,
+            source: "solver" as const,
+            message: solved.reason,
+            suggestedActions: []
+          }]
+        };
+        db.upsertRun(failed);
+        publish(runId, "error", 100, solved.reason);
+        return;
+      }
+      publish(runId, "progress", 68, studySnapshot.type === "dynamic_structural" ? "Writing OpenCAE Core dynamic result frames." : "Writing OpenCAE Core result fields.");
+      const resultRef = `${studySnapshot.projectId}/results/${runId}/results.json`;
+      const resultTier = classifyResultProvenance(solved.result.summary.provenance);
+      const resultStatus = runStatusForResultProvenance(solved.result.summary.provenance);
+      const result = {
+        ...solved.result,
+        summary: {
+          ...solved.result.summary,
+          resultTier
+        }
+      };
+      await storage.putObject(resultRef, JSON.stringify(result, null, 2));
+      const reportRef = await reports.generateReport({ projectId: studySnapshot.projectId, runId, summary: result.summary, study: studySnapshot, fields: result.fields });
+      if (runCancelled()) return;
+      db.upsertRun({
         ...run,
-        status: "failed" as const,
+        status: resultStatus,
+        resultTier,
+        resultRef,
+        reportRef,
+        finishedAt: new Date().toISOString()
+      });
+      publish(runId, "complete", 100, completeRunMessage(resultTier));
+    } catch (error) {
+      api.log.error({ err: error, runId }, "Run worker failed");
+      if (runCancelled()) return;
+      db.upsertRun({
+        ...run,
+        status: "failed",
         finishedAt: new Date().toISOString(),
         diagnostics: [{
-          id: "opencae-core-solve-failed",
+          id: "opencae-run-worker-failed",
           severity: "error" as const,
           source: "solver" as const,
-          message: solved.reason,
+          message: "The simulation failed while writing results. Check the API logs for details.",
           suggestedActions: []
         }]
-      };
-      db.upsertRun(failed);
-      publish(runId, "error", 100, solved.reason);
-      return;
+      });
+      publish(runId, "error", 100, "The simulation failed while writing results.");
     }
-    publish(runId, "progress", 68, studySnapshot.type === "dynamic_structural" ? "Writing OpenCAE Core dynamic result frames." : "Writing OpenCAE Core result fields.");
-    const resultRef = `${studySnapshot.projectId}/results/${runId}/results.json`;
-    await storage.putObject(resultRef, JSON.stringify(solved.result, null, 2));
-    const reportRef = await reports.generateReport({ projectId: studySnapshot.projectId, runId, summary: solved.result.summary, study: studySnapshot, fields: solved.result.fields });
-    db.upsertRun({
-      ...run,
-      status: "complete",
-      resultRef,
-      reportRef,
-      finishedAt: new Date().toISOString()
-    });
-    publish(runId, "complete", 100, "OpenCAE Core simulation complete.");
   });
   return { run, streamUrl: `/api/runs/${runId}/stream`, message: "OpenCAE Core simulation running." };
 });
@@ -469,19 +512,41 @@ api.get("/api/runs/:runId/events", async (request) => {
 
 api.get("/api/runs/:runId/stream", async (request, reply) => {
   const { runId } = request.params as { runId: string };
+  reply.hijack();
   reply.raw.writeHead(200, {
     "Content-Type": "text/event-stream",
     "Cache-Control": "no-cache, no-transform",
     Connection: "keep-alive",
     "X-Accel-Buffering": "no"
   });
+  const writeEvent = (event: RunEvent) => {
+    reply.raw.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
+  };
+  const isTerminalEvent = (event: RunEvent) => event.type === "complete" || event.type === "error" || event.type === "cancelled";
+  let reachedTerminal = false;
   for (const event of runState.getEvents(runId)) {
-    reply.raw.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
+    writeEvent(event);
+    if (isTerminalEvent(event)) reachedTerminal = true;
   }
+  if (reachedTerminal) {
+    reply.raw.end();
+    return;
+  }
+  const heartbeat = setInterval(() => {
+    reply.raw.write(":keep-alive\n\n");
+  }, 15_000);
   const unsubscribe = runState.subscribe(runId, (event) => {
-    reply.raw.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
+    writeEvent(event);
+    if (isTerminalEvent(event)) {
+      clearInterval(heartbeat);
+      unsubscribe();
+      reply.raw.end();
+    }
   });
-  request.raw.on("close", unsubscribe);
+  request.raw.on("close", () => {
+    clearInterval(heartbeat);
+    unsubscribe();
+  });
 });
 
 api.post("/api/runs/:runId/cancel", async (request, reply) => {
@@ -502,33 +567,55 @@ api.get("/api/runs/:runId/results", async (request, reply) => {
     if (runId === "run-bracket-demo-seeded") return { summary: bracketResultSummary, fields: bracketResultFields };
     return reply.code(404).send({ error: "Results not found" });
   }
-  const artifact = await storage.getObject(run.resultRef);
-  return JSON.parse(artifact.toString("utf8"));
+  try {
+    const artifact = await storage.getObject(run.resultRef);
+    return JSON.parse(artifact.toString("utf8"));
+  } catch {
+    return reply.code(404).send({ error: "Results artifact is missing or unreadable." });
+  }
 });
 
 api.get("/api/runs/:runId/report", async (request, reply) => {
   const { runId } = request.params as { runId: string };
   const run = db.getRun(runId);
-  if (!run && runId !== "run-bracket-demo-seeded") return reply.code(404).send({ error: "Run not found" });
-  const reportRef = run?.reportRef ?? "project-bracket-demo/reports/report.html";
-  const html = await storage.getObject(reportRef);
-  reply.header("content-type", "text/html; charset=utf-8");
-  return html.toString("utf8");
+  const reportRef = reportRefForRun(runId, run);
+  if (!reportRef) return reply.code(404).send({ error: "Report not found. Run the simulation before generating a report." });
+  try {
+    const html = await storage.getObject(reportRef);
+    reply.header("content-type", "text/html; charset=utf-8");
+    return html.toString("utf8");
+  } catch {
+    return reply.code(404).send({ error: "Report artifact is missing or unreadable." });
+  }
 });
 
 api.get("/api/runs/:runId/report.pdf", async (request, reply) => {
   const { runId } = request.params as { runId: string };
   const run = db.getRun(runId);
-  if (!run && runId !== "run-bracket-demo-seeded") return reply.code(404).send({ error: "Run not found" });
-  const reportRef = run?.reportRef ?? "project-bracket-demo/reports/report.html";
+  const reportRef = reportRefForRun(runId, run);
+  if (!reportRef) return reply.code(404).send({ error: "Report not found. Run the simulation before downloading a PDF." });
   const pdf = await pdfForReport(run, reportRef);
   reply.header("content-type", "application/pdf");
   reply.header("content-disposition", `attachment; filename="${pdfFilename(runId)}"`);
   return pdf;
 });
 
+function reportRefForRun(runId: string, run: StudyRun | undefined): string | undefined {
+  if (run?.reportRef) return run.reportRef;
+  if (runId === "run-bracket-demo-seeded") return "project-bracket-demo/reports/report.html";
+  return undefined;
+}
+
 function publish(runId: string, type: RunEvent["type"], progress: number | undefined, message: string): void {
   runState.publish(runId, { runId, type, progress, message, timestamp: new Date().toISOString() });
+}
+
+function completeRunMessage(resultTier: ResultProvenanceTier): string {
+  if (resultTier === "production_fea") return "OpenCAE Core simulation complete.";
+  if (resultTier === "core_preview") return "OpenCAE Core preview complete.";
+  if (resultTier === "analytical_benchmark") return "Analytical benchmark result complete.";
+  if (resultTier === "imported_legacy") return "Legacy result restored.";
+  return "Estimate result complete.";
 }
 
 function isLoadType(type: unknown): type is Load["type"] {
@@ -544,46 +631,12 @@ function unitsForLoadType(type: Load["type"]) {
 function latestCompletedRunForProject(project: Project): StudyRun | undefined {
   return project.studies
     .flatMap((study) => study.runs)
-    .filter((run) => run.reportRef || run.resultRef || run.status === "complete")
+    .filter((run) => run.reportRef || run.resultRef || isRunResultReadyStatus(run.status))
     .sort((left, right) => {
       const leftTime = Date.parse(left.finishedAt ?? left.startedAt ?? "");
       const rightTime = Date.parse(right.finishedAt ?? right.startedAt ?? "");
       return (rightTime || 0) - (leftTime || 0);
     })[0];
-}
-
-function pdfFilename(name: string): string {
-  const base = safeSlug(name, "opencae");
-  return `${base}-report.pdf`;
-}
-
-function safeSlug(value: string, fallback: string): string {
-  const chars: string[] = [];
-  let previousDash = false;
-  for (const char of value.toLowerCase()) {
-    if ((char >= "a" && char <= "z") || (char >= "0" && char <= "9") || char === "_" || char === ".") {
-      chars.push(char);
-      previousDash = false;
-    } else if (!previousDash && chars.length > 0) {
-      chars.push("-");
-      previousDash = true;
-    }
-    if (chars.length >= 96) break;
-  }
-  const slug = trimSlugBoundaries(chars.join(""));
-  return slug || fallback;
-}
-
-function trimSlugBoundaries(value: string): string {
-  let start = 0;
-  let end = value.length;
-  while (start < end && isSlugBoundary(value[start]!)) start += 1;
-  while (end > start && isSlugBoundary(value[end - 1]!)) end -= 1;
-  return value.slice(start, end);
-}
-
-function isSlugBoundary(char: string): boolean {
-  return char === "-" || char === "_" || char === ".";
 }
 
 async function pdfForReport(run: StudyRun | undefined, reportRef: string): Promise<Buffer> {
@@ -605,6 +658,7 @@ interface ImportedResultBundle {
   completedRunId?: string;
   summary: ResultSummary;
   fields: ResultField[];
+  resultTier: ResultProvenanceTier;
 }
 
 function parseLocalResults(value: unknown, project: Project): ImportedResultBundle | undefined {
@@ -623,7 +677,8 @@ function parseLocalResults(value: unknown, project: Project): ImportedResultBund
     activeRunId,
     completedRunId: completedRunId ?? runId,
     summary: summary.data,
-    fields: fields.data
+    fields: fields.data,
+    resultTier: classifyResultProvenance(summary.data.provenance)
   };
 }
 
@@ -638,7 +693,8 @@ function projectWithImportedResultRefs(project: Project, results: ImportedResult
         run.id === runId
           ? {
               ...run,
-              status: "complete",
+              status: runStatusForResultProvenance(results.summary.provenance),
+              resultTier: results.resultTier,
               resultRef: run.resultRef ?? `${project.id}/results/${runId}/results.json`,
               reportRef: run.reportRef ?? `${project.id}/reports/${runId}.html`
             }
@@ -648,15 +704,43 @@ function projectWithImportedResultRefs(project: Project, results: ImportedResult
   };
 }
 
+function withCanonicalArtifactRefs(project: Project): Project {
+  const isCanonicalRef = (ref: unknown): ref is string => typeof ref === "string" && ref.startsWith(`${project.id}/`) && !ref.includes("..");
+  return {
+    ...project,
+    geometryFiles: project.geometryFiles.map((geometry, index) => ({
+      ...geometry,
+      artifactKey: isCanonicalRef(geometry.artifactKey) ? geometry.artifactKey : `${project.id}/geometry/imported-display-${index}.json`,
+      metadata: isCanonicalRef(geometry.metadata.displayModelRef)
+        ? geometry.metadata
+        : { ...geometry.metadata, displayModelRef: undefined }
+    })),
+    studies: project.studies.map((study) => ({
+      ...study,
+      meshSettings: isCanonicalRef(study.meshSettings.meshRef)
+        ? study.meshSettings
+        : { ...study.meshSettings, meshRef: undefined },
+      runs: study.runs.map((run) => ({
+        ...run,
+        meshRef: isCanonicalRef(run.meshRef) ? run.meshRef : undefined,
+        resultRef: isCanonicalRef(run.resultRef) ? run.resultRef : undefined,
+        reportRef: isCanonicalRef(run.reportRef) ? run.reportRef : undefined
+      }))
+    }))
+  };
+}
+
 async function persistImportedModelArtifacts(project: Project, displayModel: DisplayModel): Promise<void> {
   const geometry = project.geometryFiles[0];
   if (!geometry?.artifactKey) return;
   await storage.putObject(geometry.artifactKey, JSON.stringify(displayModel, null, 2));
-  if (displayModel.nativeCad?.contentBase64) {
-    await storage.putObject(`${project.id}/uploads/${displayModel.nativeCad.filename}`, Buffer.from(displayModel.nativeCad.contentBase64, "base64"));
+  const nativeCadFilename = sanitizeFilename(displayModel.nativeCad?.filename);
+  if (displayModel.nativeCad?.contentBase64 && nativeCadFilename) {
+    await storage.putObject(`${project.id}/uploads/${nativeCadFilename}`, Buffer.from(displayModel.nativeCad.contentBase64, "base64"));
   }
-  if (displayModel.visualMesh?.contentBase64) {
-    await storage.putObject(`${project.id}/uploads/${displayModel.visualMesh.filename}`, Buffer.from(displayModel.visualMesh.contentBase64, "base64"));
+  const visualMeshFilename = sanitizeFilename(displayModel.visualMesh?.filename);
+  if (displayModel.visualMesh?.contentBase64 && visualMeshFilename) {
+    await storage.putObject(`${project.id}/uploads/${visualMeshFilename}`, Buffer.from(displayModel.visualMesh.contentBase64, "base64"));
   }
 }
 
@@ -666,8 +750,9 @@ async function persistImportedResults(project: Project, results: ImportedResultB
   const run = project.studies.flatMap((study) => study.runs).find((item) => item.id === runId);
   const resultRef = run?.resultRef ?? `${project.id}/results/${runId}/results.json`;
   const reportRef = run?.reportRef ?? `${project.id}/reports/${runId}.html`;
-  await storage.putObject(resultRef, JSON.stringify({ summary: results.summary, fields: results.fields }, null, 2));
-  await storage.putObject(reportRef, buildHtmlReport(runId, results.summary));
+  const summary = { ...results.summary, resultTier: results.resultTier };
+  await storage.putObject(resultRef, JSON.stringify({ summary, fields: results.fields }, null, 2));
+  await storage.putObject(reportRef, buildHtmlReport(runId, summary));
 }
 
 function dynamicSampleResults(project: Project): ImportedResultBundle | undefined {
@@ -680,7 +765,8 @@ function dynamicSampleResults(project: Project): ImportedResultBundle | undefine
     activeRunId: run.id,
     completedRunId: run.id,
     summary: solved.summary,
-    fields: solved.fields
+    fields: solved.fields,
+    resultTier: classifyResultProvenance(solved.summary.provenance)
   };
 }
 
@@ -690,9 +776,10 @@ async function persistSampleResults(project: Project, results: ImportedResultBun
   const run = project.studies.flatMap((study) => study.runs).find((item) => item.id === runId);
   const resultRef = run?.resultRef ?? `${project.id}/results/${runId}/results.json`;
   const reportRef = run?.reportRef ?? `${project.id}/reports/${runId}/report.html`;
-  await storage.putObject(resultRef, JSON.stringify({ summary: results.summary, fields: results.fields }, null, 2));
-  await storage.putObject(reportRef, buildHtmlReport(runId, results.summary));
-  await storage.putObject(reportPdfKeyFor(reportRef), buildPdfReport(runId, results.summary));
+  const summary = { ...results.summary, resultTier: results.resultTier };
+  await storage.putObject(resultRef, JSON.stringify({ summary, fields: results.fields }, null, 2));
+  await storage.putObject(reportRef, buildHtmlReport(runId, summary));
+  await storage.putObject(reportPdfKeyFor(reportRef), buildPdfReport(runId, summary));
 }
 
 async function displayModelForProject(project: Project): Promise<DisplayModel> {
@@ -744,60 +831,6 @@ function isDisplayFace(value: unknown): boolean {
 
 function isVector3(value: unknown): value is [number, number, number] {
   return Array.isArray(value) && value.length === 3 && value.every((item) => typeof item === "number" && Number.isFinite(item));
-}
-
-function sanitizeFilename(filename: unknown): string | undefined {
-  if (typeof filename !== "string") return undefined;
-  const cleaned = safeFilenameComponent(pathBasename(filename.trim()));
-  if (!cleaned) return undefined;
-  const extension = cleaned.split(".").pop()?.toLowerCase();
-  if (!extension || !["step", "stp", "stl", "obj"].includes(extension)) return undefined;
-  return cleaned;
-}
-
-function sanitizeProjectName(name: unknown): string | undefined {
-  if (typeof name !== "string") return undefined;
-  const cleaned = collapseWhitespace(name.trim());
-  return cleaned || undefined;
-}
-
-function pathBasename(value: string): string {
-  let start = 0;
-  for (let index = 0; index < value.length; index += 1) {
-    const char = value[index];
-    if (char === "/" || char === "\\") start = index + 1;
-  }
-  return value.slice(start);
-}
-
-function safeFilenameComponent(value: string): string {
-  let cleaned = "";
-  for (const char of value) {
-    if ((char >= "a" && char <= "z") || (char >= "A" && char <= "Z") || (char >= "0" && char <= "9") || char === "_" || char === " " || char === "." || char === "-") {
-      cleaned += char;
-    } else {
-      cleaned += "_";
-    }
-    if (cleaned.length >= 128) break;
-  }
-  return cleaned.trim();
-}
-
-function collapseWhitespace(value: string): string {
-  let cleaned = "";
-  let previousSpace = false;
-  for (const char of value) {
-    const isSpace = char === " " || char === "\t" || char === "\n" || char === "\r" || char === "\f";
-    if (isSpace) {
-      if (!previousSpace && cleaned) cleaned += " ";
-      previousSpace = true;
-    } else {
-      cleaned += char;
-      previousSpace = false;
-    }
-    if (cleaned.length >= 128) break;
-  }
-  return cleaned.trim();
 }
 
 function coreSolverBackendForRun(study: Study, displayModel: DisplayModel, eligibility: ReturnType<typeof openCaeCoreEligibility>): string {

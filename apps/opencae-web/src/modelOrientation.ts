@@ -74,6 +74,22 @@ export function modelDirectionToViewerSpace(direction: THREE.Vector3, displayMod
   return direction.clone().transformDirection(modelToViewerMatrix(displayModel)).normalize();
 }
 
+// Sample display models store directions in viewer space (Y-up), while the cloud
+// container meshes procedural/structured-block geometry in the user-facing global
+// frame (Z-up). Solve requests must remap stored directions across that boundary,
+// otherwise a "Global -Z" load reaches the solver pointing along the depth axis.
+export function modelDirectionToGlobalCadFrame(direction: [number, number, number], displayModel: DisplayModel): [number, number, number] {
+  if (isUploadedDisplayModel(displayModel)) return direction;
+  const mapped = modelDirectionToViewerSpace(new THREE.Vector3(...direction), displayModel);
+  return [snapAxisComponent(mapped.x), snapAxisComponent(mapped.y), snapAxisComponent(mapped.z)];
+}
+
+function snapAxisComponent(value: number): number {
+  if (Math.abs(value) < 1e-9) return 0;
+  const rounded = Math.round(value);
+  return Math.abs(value - rounded) < 1e-9 ? rounded : value;
+}
+
 export function formatModelOrientation(displayModel: DisplayModel): string {
   const orientation = getModelOrientation(displayModel);
   return `X ${orientation.x} deg / Y ${orientation.y} deg / Z ${orientation.z} deg`;
