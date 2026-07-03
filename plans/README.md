@@ -4,6 +4,7 @@ Two advisory runs are indexed here:
 
 - **Run 1 — 2026-06-12**, base commit `3a67db9`, standard read-only survey (plans 001–005). Written when the repo lived at `/Users/userzero/codex/opencae-alpha`.
 - **Run 2 — 2026-07-01**, standard read-only survey (plans 006–010). Audited **`origin/main` at `d1556f2`** via a detached worktree, because the local checkout's `main` (`4373faf`) is 1 ahead / 34 behind `origin/main` — see plan 006, which must land first. Run 2 re-verified plans 001–005 against `d1556f2`: **all five remain unimplemented and their cited code is unchanged**; they stay TODO.
+- **Run 3 — 2026-07-02**, standard engineering/CAE-validity survey (plans 011–014). Audited the **solver itself**: the sibling OpenCAE-Core checkout at the pinned ref `08ca7a6` (byte-identical to the production runner 0.1.5) plus the open-cae post-processing chain at `d1556f2`. Four parallel numerical-methods audits plus independent hand checks (Timoshenko deflection/stress, first-bending frequency, HRZ mass-fraction conservation). Headline: **the production solver's math is sound — the gaps are in the verification harness** (gates run in no CI, single-configuration benchmark, no gmsh-path gate, no unit round-trip).
 
 These plans are written for a fresh executor with no context from the surveys. Each is self-contained.
 
@@ -38,6 +39,37 @@ Production state checked 2026-07-01: `https://cae.esau.app/api/cloud-core/health
 | 8 | The cantilever accuracy gate's fixture is schema-invalid for its dynamic variant and hidden by an `as Study` cast — the dynamic benchmark certifies a configuration the product can't produce, and the cast swallows future fixture drift. | tests / accuracy guardrails | Med | S | Low | `apps/opencae-web/src/workers/localCantileverAccuracy.test.ts:29-68,95` |
 | 9 | Local build scripts use an unfrozen install path while CI is frozen. *(Run 1; re-verified unchanged at `package.json:11`.)* | DX / release integrity | Med | S | Low | `package.json:11`, `scripts/ensure-opencae-core.mjs` |
 | 10 | Source-text guard tests remain brittle. *(Run 1; re-verified — `performanceRewrite.test.ts` still asserts source strings.)* | tests / DX | Med | M | Low | `apps/opencae-web/src/performanceRewrite.test.ts` |
+| 11 | The solver accuracy gates run in **no CI**: the sibling repo has no `.github/` at all, and open-cae CI builds sibling packages but cannot reach its service tests (`pnpm-workspace.yaml` includes only `../opencae-core/packages/*`; `test:core-cloud` filters to the open-cae MIRROR because both service packages are named `@opencae/core-cloud`). A solver regression merges silently. *(Run 3, VERIFIED.)* | validation / reproducibility | High | M | Low | sibling: no `.github/`; `pnpm-workspace.yaml`; both `services/opencae-core-cloud/package.json` name fields |
+| 12 | The analytical benchmark covers one configuration — axis-aligned block, bending, end-state-only dynamics. No off-axis load, no natural-frequency gate (oracle ≈ 604 Hz, computable), no smoothed-viz ≤ summary-max invariant test, no stress-stabilization gate, no time-step-adequacy signal (cloud floor 1e-4 s ≈ 17 steps/period on the benchmark). *(Run 3, VERIFIED.)* | validation | High | M | Low | sibling `services/opencae-core-cloud/tests/cantilever-accuracy.test.ts`; `server.ts` SOLVER_LIMITS |
+| 13 | The gmsh path (used by real/uploaded geometry — the product's stated direction) has zero quantitative gates, and `gmsh` is installed unpinned in BOTH container Dockerfiles; `examples/plate-with-hole` is actually the beam demo (no holed geometry exists). *(Run 3, VERIFIED.)* | validation / reproducibility | Med-High | L | Low | sibling `Dockerfile:9`, open-cae `services/opencae-core-cloud/Dockerfile:29`, `examples/plate-with-hole/README.md` |
+| 14 | Unit boundary is trust-based: `normalizeCoreCloudResultForUi` silently defaults unknown solver-units strings to Pa/m, and no test round-trips solver → normalization → displayed magnitude (accuracy-plan Phase 2.3/2.4, still open). *(Run 3, VERIFIED via the June review + code.)* | correctness / unit integrity | Med | M | Med | open-cae `services/opencae-core-cloud/src/index.ts` (normalize fn), no round-trip test in either repo |
+
+## Engineering Validity — Verified Sound (Run 3)
+
+A CAE audit must state what was checked and found correct, not only defects. Independently verified at sibling `08ca7a6` (= production runner 0.1.5):
+
+- **Static element path is textbook-correct end to end**: isotropic D-matrix (λ, μ), B-matrix with consistent engineering-shear convention in assembly AND recovery, exact von Mises expression, Tet4 Jacobian/volume handling, 4-point Gauss Tet10 quadrature (correct points/weights), Tet4→Tet10 elevation with edge-keyed mid-node dedup matching the element's local numbering, constraint application by row/column elimination with RHS correction, CG with relative-residual criterion (1e-10) and guarded Jacobi preconditioning.
+- **Dynamics fundamentals are sound**: Newmark average-acceleration (β=0.25, γ=0.5, correct coefficient algebra and Rayleigh-consistent effective matrix), **HRZ Tet10 mass lumping** (vertex 1/36, edge 4/27 — 4·fV+6·fE = 1 exactly; code comment correctly cites the negative-vertex-mass pathology of row-sum lumping), **modally calibrated Rayleigh damping** (inverse-power ω₁ estimate, ω₂ = 4ω₁ anchoring — an earlier subagent claim of "hardcoded blind defaults" was refuted on read), per-frame reaction computation with a reactionBalance diagnostics trail, zero-mass DOF floor (1e-12).
+- **Post-processing honesty invariants hold in code**: summary max stress is the unaveraged element peak computed BEFORE Laplacian smoothing (smoothing is display-only); dynamic summary reaction is the end-state frame; reaction reported as net vector magnitude |Σr|.
+- **Benchmark oracles re-derived by hand and confirmed**: Timoshenko tip deflection 0.17578 + 0.00242 = 0.1782 mm; root outer-fiber stress 39.06 MPa; first bending frequency ≈ 604 Hz (matches the "~1.7 ms period" comment).
+- **Honest-results work has landed** on origin/main: provenance labels distinguish "Estimate (not FEA)" from "OpenCAE Core Preview (coarse block proxy)" from production; reports carry solver/mesh/provenance and a labeled schematic; the old 770/276 magic UI fallbacks are gone (`neutralValue` now returns 1/0).
+
+### Status of `docs/validation/quality-accuracy-plan.md` items (verified 2026-07-02 at `d1556f2` / `08ca7a6`)
+
+| Item | Status | Note |
+| - | - | - |
+| C1 heuristic solver invents stress | OPEN (by-policy) | Path still exists, honestly provenanced; Phase-1/plan-001 direction is to gate/relabel, not refine — refinement findings against it are rejected below. |
+| C2 fabricated UI fallbacks | LARGELY DONE | `resultFields` uses neutral values now; the seeded bracket demo summary remains as the known demo state. |
+| C3 label collapse | DONE | Distinct tier labels in `unitDisplay.ts`. |
+| C4 dishonest reports | DONE (modulo schematic) | Provenance/solver/mesh in reports; schematic explicitly labeled "not model geometry". |
+| H1 provenance unenforced at persist | OPEN | = plan 001. |
+| H3 assumption-based units | PARTIAL | Silent normalize default remains → plan 014; STL-mm and typed-unit schema items remain open (Phase 2.1/2.2). |
+| H4 mesh service constant stats | OPEN | Mock by design; real mesh stats arrive via cloud diagnostics only. |
+| M1 no quantitative gate in CI | PARTIAL → plan 011 | Gates now EXIST (post-review Tet10 lineage) but run in no CI. |
+| M2 no convergence evidence | PARTIAL → plan 012 | Preset sweep asserts counts/deflection, not stress stabilization. |
+| M3 alignment checks count-only | OPEN | Backlog. |
+| M4 beam-demo text-matching + 0.4 fiber factor | OPEN | Heuristic path; retirement direction. |
+| M5 SDOF demo completeness shape | OPEN | Heuristic path; retirement direction. |
 
 ## Backlog (vetted, not yet planned)
 
@@ -50,6 +82,7 @@ Real findings that didn't make the plan cut this run — next candidates:
 - **React 19 + @react-three/fiber 9 coupled migration** (with drei/@types) — not urgent; verify current ecosystem status online before scheduling. (dependencies, L, fix-risk High)
 - Micro-hardening adjacent to plan 004, fold in when 004 executes: validate `runId` path-segment format in `worker/index.ts:151-153`; add `X-Frame-Options: DENY` beside the existing `frame-ancestors 'none'`.
 - Document (or remove) the `fast-uri: 3.1.2` pnpm override — likely a past advisory pin; verify online. (dependencies, S)
+- Run 3 additions: **consistent (area-weighted) surface loads on Tet10 faces** — face forces are currently split equally across selected nodes; total force and reactions stay exact, but local stress at the loaded face is slightly distorted (corner/midside consistent weights differ). Low impact, benchmark-absorbed. (engineering, M) — **rename one of the two `@opencae/core-cloud` packages** (mirror vs sibling name collision behind finding 11's trap). (tech-debt, S) — **empty-selection load behavior**: cloud path throws when a fixed support maps to zero nodes but silently skips zero-force loads; audit whether an empty load *surface set* can produce a quietly unloaded solve. (engineering, S, UNCERTAIN) — **M3 correspondence check**: checksum node ordering between volume mesh and surface fields. (validation, M)
 
 ## Direction Options (Run 2)
 
@@ -69,9 +102,13 @@ Grounded options for what to build next — maintainer's call, not ranked agains
 5. `008-ci-build-web-and-enforce-bundle-budget.md`
 6. `009-guard-stale-run-completion-continuations.md`
 7. `010-make-cantilever-accuracy-fixture-schema-valid.md`
-8. `003-make-core-builds-reproducible.md`
-9. `004-harden-cloud-worker-run-orchestration.md`
-10. `005-replace-source-text-guard-tests.md`
+8. `011-run-solver-accuracy-gates-in-ci.md` — Part A (sibling CI) can run any time, even before 006.
+9. `012-broaden-analytical-solver-benchmarks.md`
+10. `014-unit-round-trip-gate-and-strict-units.md`
+11. `003-make-core-builds-reproducible.md`
+12. `013-gmsh-plate-with-hole-kt-benchmark.md` — after 011 (needs CI with gmsh); the gmsh version pin inside it can ship immediately.
+13. `004-harden-cloud-worker-run-orchestration.md`
+14. `005-replace-source-text-guard-tests.md`
 
 Dependency notes:
 
@@ -94,6 +131,10 @@ Dependency notes:
 | 008 CI: build web + enforce bundle budget | TODO | Wires existing scripts into CI; no new infrastructure. |
 | 009 Guard stale run-completion continuations | TODO | Truthfulness: superseded results must not display as current. |
 | 010 Schema-valid cantilever accuracy fixture | TODO | Removes the `as Study` cast that silenced the old tsc errors. |
+| 011 Run solver accuracy gates in CI | TODO | Two PRs (sibling CI + open-cae step). Beware the `@opencae/core-cloud` filter trap. |
+| 012 Broaden analytical solver benchmarks | TODO | Off-axis, ~604 Hz frequency gate, viz≤summary invariant, stress stabilization, dt diagnostic. |
+| 013 Gmsh plate-with-hole Kt benchmark | TODO | First real-geometry gate (Kt_net ≈ 2.42 at d/W=0.25); pins gmsh in both Dockerfiles. |
+| 014 Unit round-trip gate + strict units | TODO | Accuracy-plan Phase 2.3/2.4; reject unknown units instead of defaulting. |
 
 Run 2 was non-interactive: plans 006–010 are the top findings by leverage (impact ÷ effort, confidence-weighted), selected by default per the advisor skill's non-interactive rule rather than by maintainer choice. Re-cut as desired.
 
@@ -117,6 +158,23 @@ Run 2 (2026-07-01) — verified against the code and rejected; do not re-audit w
 - PDF string-escaping hardening in post-service — `pdfEscape` already handles `\`, `(`, `)` and non-ASCII; remaining concerns speculative.
 - "wrangler.static / wrangler.local-first configs are vestigial" — refuted: README documents both as intentional separate deploy paths.
 - Symlink hardening in storage — re-affirmed Run 1's rejection; no new evidence.
+
+Run 3 (2026-07-02) — engineering claims verified against the code and rejected; do not re-audit without new evidence:
+
+- "Production Rayleigh damping uses blind hardcoded defaults (α=10ζ, β=ζ·1e-4)" — refuted: the primary path calibrates modally (inverse-power ω₁, ω₂=4ω₁ anchoring, `rayleighFromFrequencies`); the cited constants are a fallback/override path.
+- "Tet10 lumped mass is row-sum (/4 per node) and risks negative or zero mid-side masses" — refuted: explicit HRZ lumping (1/36 vertex, 4/27 edge, sums to 1) with a code comment citing exactly that pathology; plus a 1e-12 mass floor.
+- Nine findings against `services/opencae-solver-service` (heuristic preview SDOF/stress path): ramp clamping, Rayleigh ignored, bounding-box mass floor, sign-blind stress scale, NaN guards, output-interval clamp, uncorrelated peaks, etc. — rejected as anti-leverage: the accuracy plan (C1/M5) and plan 001 direction is to gate/relabel/retire this honestly-provenanced demo path, not to refine its physics. If the maintainer instead decides to keep it long-term, these are real refinements to revisit.
+- "Face-selection tolerances (1e-6 vs 1e-5 span) drop mid-side nodes" — numerically unsupported as written (claimed 1e-15 drift is inside the 1e-9..1e-6 bands); kept only as an UNCERTAIN backlog probe (empty-selection behavior).
+- "Pressure loads use guessed projected areas" — cloud path integrates pressure over actual surface facets (`loads.ts`); the projected-area ×1000 shortcut is the local-preview block proxy only, consistent with its preview tier.
+- "Dynamic reaction omits inertia/damping terms" — production computes per-frame reactions with a reactionBalance diagnostics trail and reports the end-state frame in the summary, which matches its ramp-to-static semantics; heuristic-path version rejected per above.
+- Disconnected-mesh validation happening post-intake (422 at solve) — works correctly; ordering is a cost optimization at most.
+
+## Not Audited (Run 3)
+
+- The sibling's sparse assembly internals beyond the reviewed files; solver-wasm (1-line stub) and solver-webgpu (capability stub).
+- Composite/nonlinear/thermal behavior — the product is linear elastostatics + linear transient dynamics only; no findings issued against absent capabilities.
+- Numerical experiments (no solver executions were run — read-only audit); the UNCERTAIN items above say which experiment would resolve them.
+- Physical test correlation: no lab data exists in either repo; all validation is analytical. For engineering signoff purposes OpenCAE results remain development-grade per the README's own scope statement — nothing in this audit constitutes professional engineering review or approval.
 
 ## Not Audited (Run 2)
 
