@@ -553,7 +553,9 @@ function unpackInterpolatedFieldForSlots(
 ): ResultField {
   const lowerLength = fieldLengths[lowerSlot] ?? 0;
   const upperLength = fieldLengths[upperSlot] ?? 0;
-  const count = Math.max(lowerLength, upperLength);
+  // Surface-node fields must stay aligned 1:1 with surfaceMesh.nodes; pin the blended array
+  // to the lower frame's node count instead of max(lower, upper) (see interpolateField).
+  const count = descriptor.surfaceMeshRef ? lowerLength : Math.max(lowerLength, upperLength);
   const lowerOffset = fieldOffsets[lowerSlot] ?? 0;
   const upperOffset = fieldOffsets[upperSlot] ?? 0;
   const fieldValues = new Array<number>(count);
@@ -564,7 +566,7 @@ function unpackInterpolatedFieldForSlots(
   }
   const lowerVectors = unpackVectorsForSlot(lowerSlot, vectorOffsets, vectorLengths, vectors);
   const upperVectors = unpackVectorsForSlot(upperSlot, vectorOffsets, vectorLengths, vectors);
-  const fieldVectors = interpolatedVectorsForFields(lowerVectors, upperVectors, blend);
+  const fieldVectors = interpolatedVectorsForFields(lowerVectors, upperVectors, blend, descriptor.surfaceMeshRef ? lowerVectors.length : undefined);
   const lowerSamples = unpackSamplesForSlot(lowerSlot, sampleOffsets, sampleLengths, sampleValues, samplePoints, sampleNormals, sampleVectors);
   const upperSamples = unpackSamplesForSlot(upperSlot, sampleOffsets, sampleLengths, sampleValues, samplePoints, sampleNormals, sampleVectors);
   const samples = lowerSamples.length && upperSamples.length ? interpolateSamples(lowerSamples, upperSamples, blend) : lowerSamples;
@@ -895,11 +897,15 @@ function fieldSeriesKey(field: ResultField): string {
 }
 
 function interpolateField(lowerField: ResultField, upperField: ResultField, blend: number, framePosition: number): ResultField {
-  const vectors = interpolatedVectorsForFields(lowerField.vectors ?? [], upperField.vectors ?? [], blend);
+  // Surface-node fields must stay aligned 1:1 with surfaceMesh.nodes. Interpolating to
+  // max(lower, upper) length would break that alignment if one frame ever carried a
+  // mismatched array, so pin the blended arrays to the lower frame's node count.
+  const targetLength = lowerField.surfaceMeshRef ? lowerField.values.length : undefined;
+  const vectors = interpolatedVectorsForFields(lowerField.vectors ?? [], upperField.vectors ?? [], blend, lowerField.surfaceMeshRef ? lowerField.vectors?.length ?? 0 : undefined);
   return {
     ...lowerField,
     id: `${lowerField.id}-visual-${framePosition.toFixed(3)}`,
-    values: interpolateNumbers(lowerField.values, upperField.values, blend),
+    values: interpolateNumbers(lowerField.values, upperField.values, blend, targetLength),
     min: lerp(lowerField.min, upperField.min, blend),
     max: lerp(lowerField.max, upperField.max, blend),
     frameIndex: framePosition,
@@ -911,8 +917,8 @@ function interpolateField(lowerField: ResultField, upperField: ResultField, blen
   };
 }
 
-function interpolateNumbers(lowerValues: number[], upperValues: number[], blend: number): number[] {
-  const count = Math.max(lowerValues.length, upperValues.length);
+function interpolateNumbers(lowerValues: number[], upperValues: number[], blend: number, targetLength?: number): number[] {
+  const count = targetLength ?? Math.max(lowerValues.length, upperValues.length);
   return Array.from({ length: count }, (_, index) => lerp(lowerValues[index] ?? upperValues[index] ?? 0, upperValues[index] ?? lowerValues[index] ?? 0, blend));
 }
 
@@ -931,10 +937,11 @@ function interpolateSamples(lowerSamples: NonNullable<ResultField["samples"]>, u
 function interpolatedVectorsForFields(
   lowerVectors: NonNullable<ResultField["vectors"]>,
   upperVectors: NonNullable<ResultField["vectors"]>,
-  blend: number
+  blend: number,
+  targetLength?: number
 ): NonNullable<ResultField["vectors"]> {
   if (!lowerVectors.length && !upperVectors.length) return [];
-  const count = Math.max(lowerVectors.length, upperVectors.length);
+  const count = targetLength ?? Math.max(lowerVectors.length, upperVectors.length);
   return Array.from({ length: count }, (_, index) => interpolateVector(
     lowerVectors[index] ?? upperVectors[index],
     upperVectors[index] ?? lowerVectors[index],
@@ -1003,14 +1010,21 @@ export function withDerivedSurfaceSafetyFactorFields(results: SolverResultBundle
       (field.frameIndex ?? 0) === (frameIndex ?? 0));
     if (alreadyPresent) continue;
     const values = stressField.values.map((stress) => clampSafetyFactor(yieldMpa / Math.max(Math.abs(stress), 1e-9)));
+    // Loop instead of Math.min(...values): surface-node arrays can exceed the V8 argument limit.
+    let minValue = Number.POSITIVE_INFINITY;
+    let maxValue = Number.NEGATIVE_INFINITY;
+    for (const value of values) {
+      if (value < minValue) minValue = value;
+      if (value > maxValue) maxValue = value;
+    }
     derived.push({
       id: frameIndex === undefined ? `${stressField.id}-derived-safety-factor` : `${stressField.id}-derived-safety-factor-frame-${frameIndex}`,
       runId: stressField.runId,
       type: "safety_factor",
       location: "node",
       values,
-      min: Math.min(...values),
-      max: Math.max(...values),
+      min: Number.isFinite(minValue) ? minValue : 0,
+      max: Number.isFinite(maxValue) ? maxValue : 0,
       units: "ratio",
       surfaceMeshRef: stressField.surfaceMeshRef,
       ...(frameIndex === undefined ? {} : { frameIndex }),

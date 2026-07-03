@@ -236,6 +236,16 @@ export function CadViewer(props: CadViewerProps) {
     () => solverSurfaceResultFields(props.surfaceMesh, resultFields, props.resultMode),
     [props.surfaceMesh, resultFields, props.resultMode]
   );
+  // Cloud surface meshes are always in solver space (meters), far smaller than the display
+  // model (~unit scale). Scale + recenter the surface render deterministically from the two
+  // bounds so the real FEA mesh occupies the display model's visual footprint instead of
+  // rendering as an invisible speck inside it.
+  const solverSurfaceFootprint = useMemo(() => {
+    if (!solverSurfaceResult || !props.surfaceMesh) return null;
+    const kind = modelKindForDisplayModel(props.displayModel);
+    const displayBounds = kind === "uploaded" && uploadedPreviewBounds ? uploadedPreviewBounds : dimensionBoundsForDisplayModel(props.displayModel);
+    return solverSurfaceDisplayFootprint(props.surfaceMesh, displayBounds, baseModelRotation);
+  }, [baseModelRotation, props.displayModel, props.surfaceMesh, solverSurfaceResult, uploadedPreviewBounds]);
   const viewerContentFitKey = [
     props.activeStep,
     effectiveViewMode,
@@ -295,20 +305,28 @@ export function CadViewer(props: CadViewerProps) {
         <Bounds fit clip observe={!props.resultPlaybackPlaying} margin={VIEWER_FIT_MARGIN}>
           <group rotation={modelRotation}>
             {/* Solver surface meshes arrive in solver model space (Z-up), so they must not
-                inherit the legacy Y-up sample base rotation applied to procedural models. */}
+                inherit the legacy Y-up sample base rotation applied to procedural models.
+                The footprint group scales/recenters them into the display model's visual
+                footprint without mutating geometry, so the displacement visual-scale math
+                (which self-normalizes against mesh extent) keeps working unchanged. */}
             {effectiveViewMode === "results" && solverSurfaceResult && (
-              <SolverSurfaceResultMesh
-                surfaceMesh={props.surfaceMesh!}
-                scalarField={solverSurfaceResult.scalarField}
-                displacementField={solverSurfaceResult.displacementField}
-                resultMode={props.resultMode}
-                showDeformed={effectiveShowDeformed}
-                deformationScale={props.stressExaggeration}
-                displacementPeakMagnitude={solverSurfaceResult.displacementPeakMagnitude}
-              />
+              <group scale={solverSurfaceFootprint?.scale ?? 1} position={solverSurfaceFootprint?.position ?? [0, 0, 0]}>
+                <SolverSurfaceResultMesh
+                  surfaceMesh={props.surfaceMesh!}
+                  scalarField={solverSurfaceResult.scalarField}
+                  displacementField={solverSurfaceResult.displacementField}
+                  resultMode={props.resultMode}
+                  showDeformed={effectiveShowDeformed}
+                  deformationScale={props.stressExaggeration}
+                  displacementPeakMagnitude={solverSurfaceResult.displacementPeakMagnitude}
+                />
+              </group>
             )}
             <group rotation={baseModelRotation}>
-              <BracketModel {...props} showDeformed={effectiveShowDeformed} resultFields={resultFields} viewMode={effectiveViewMode} uploadedPreviewBounds={uploadedPreviewBounds} onUploadedPreviewBounds={setUploadedPreviewBounds} />
+              {/* When a solver surface result renders, the procedural result solid is suppressed
+                  (surface render is exclusive); the procedural IDW path remains only as the
+                  fallback for results without a surface mesh (e.g. preview-tier local solves). */}
+              <BracketModel {...props} showDeformed={effectiveShowDeformed} resultFields={resultFields} viewMode={effectiveViewMode} suppressProceduralResultSolid={Boolean(solverSurfaceResult)} uploadedPreviewBounds={uploadedPreviewBounds} onUploadedPreviewBounds={setUploadedPreviewBounds} />
               {showDimensionOverlay && <ModelDimensionOverlay displayModel={props.displayModel} uploadedPreviewBounds={uploadedPreviewBounds} />}
             </group>
           </group>
@@ -1051,9 +1069,10 @@ function BracketModel({
   supportMarkers,
   onMeasureDisplayModelDimensions,
   printLayerOrientation,
+  suppressProceduralResultSolid,
   uploadedPreviewBounds,
   onUploadedPreviewBounds
-}: CadViewerProps & { uploadedPreviewBounds: THREE.Box3 | null; onUploadedPreviewBounds: (bounds: THREE.Box3) => void }) {
+}: CadViewerProps & { suppressProceduralResultSolid: boolean; uploadedPreviewBounds: THREE.Box3 | null; onUploadedPreviewBounds: (bounds: THREE.Box3) => void }) {
   const [hoveredHit, setHoveredHit] = useState<ModelSelectionHit | null>(null);
   const [selectedHit, setSelectedHit] = useState<ModelSelectionHit | null>(null);
   const [snapResult, setSnapResult] = useState<SnapResult | null>(null);
@@ -1155,7 +1174,10 @@ function BracketModel({
   return (
     <group {...overlayFallbackPickHandlers}>
       {isResultView ? (
-        <AnalysisResultModel
+        // The solver-surface render is exclusive: when it is active the procedural result
+        // solid must not render underneath it (it would occlude the real FEA mesh and paint
+        // misindexed colors). Non-solid results-view overlays below stay untouched.
+        suppressProceduralResultSolid ? null : <AnalysisResultModel
           kind={modelKind}
           displayModel={displayModel}
           resultMode={resultMode}
@@ -2516,7 +2538,48 @@ type SolverSurfaceResultFields = {
   displacementPeakMagnitude: number;
 };
 
-function solverSurfaceResultFields(surfaceMesh: SolverSurfaceMesh | undefined, fields: ResultField[], resultMode: ResultMode): SolverSurfaceResultFields | null {
+// Uniform scale + recentering translation that places the solver surface mesh (solver space,
+// meters) into the display model's visual footprint. Derived deterministically from the two
+// bounds — no scale-ratio heuristic — because cloud surface meshes are always solver-space
+// while procedural display bounds are always display-space. The display bounds live inside
+// the legacy sample base rotation, so they are rotated into the outer results frame (Z-up)
+// where the surface mesh renders before comparing extents.
+export function solverSurfaceDisplayFootprint(
+  surfaceMesh: SolverSurfaceMesh,
+  displayBounds: THREE.Box3 | null,
+  baseModelRotation: [number, number, number]
+): { scale: number; position: [number, number, number] } {
+  const identity = { scale: 1, position: [0, 0, 0] as [number, number, number] };
+  const surfaceBounds = new THREE.Box3();
+  for (const node of surfaceMesh.nodes) {
+    if (node.length === 3 && node.every(Number.isFinite)) {
+      surfaceBounds.expandByPoint(new THREE.Vector3(node[0], node[1], node[2]));
+    }
+  }
+  if (surfaceBounds.isEmpty()) return identity;
+  const surfaceSize = surfaceBounds.getSize(new THREE.Vector3());
+  const surfaceMaxDimension = Math.max(surfaceSize.x, surfaceSize.y, surfaceSize.z);
+  if (!Number.isFinite(surfaceMaxDimension) || surfaceMaxDimension <= 1e-12) return identity;
+  if (!displayBounds || displayBounds.isEmpty()) return identity;
+  const rotation = new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(...baseModelRotation));
+  const displayOuterBounds = displayBounds.clone().applyMatrix4(rotation);
+  const displaySize = displayOuterBounds.getSize(new THREE.Vector3());
+  const displayMaxDimension = Math.max(displaySize.x, displaySize.y, displaySize.z);
+  if (!Number.isFinite(displayMaxDimension) || displayMaxDimension <= 1e-12) return identity;
+  const scale = displayMaxDimension / surfaceMaxDimension;
+  const displayCenter = displayOuterBounds.getCenter(new THREE.Vector3());
+  const surfaceCenter = surfaceBounds.getCenter(new THREE.Vector3());
+  return {
+    scale,
+    position: [
+      displayCenter.x - surfaceCenter.x * scale,
+      displayCenter.y - surfaceCenter.y * scale,
+      displayCenter.z - surfaceCenter.z * scale
+    ]
+  };
+}
+
+export function solverSurfaceResultFields(surfaceMesh: SolverSurfaceMesh | undefined, fields: ResultField[], resultMode: ResultMode): SolverSurfaceResultFields | null {
   if (!surfaceMesh || !surfaceMesh.nodes.length || !surfaceMesh.triangles.length) return null;
   const displacementFields = fields.filter((field) => isSolverSurfaceNodeField(field, surfaceMesh, "displacement"));
   const scalarField = fields.find((field) => isSolverSurfaceNodeField(field, surfaceMesh, resultMode))
@@ -2564,7 +2627,14 @@ export function recoverSurfaceNodeScalarField(
     interpolateScalarFromSamples(new THREE.Vector3(node[0], node[1], node[2]), samples)
   );
   if (!values.some(Number.isFinite)) return null;
-  const finiteValues = values.filter(Number.isFinite);
+  // Loop instead of Math.min(...spread): surface-node arrays can exceed the V8 argument limit.
+  let finiteMin = Number.POSITIVE_INFINITY;
+  let finiteMax = Number.NEGATIVE_INFINITY;
+  for (const value of values) {
+    if (!Number.isFinite(value)) continue;
+    if (value < finiteMin) finiteMin = value;
+    if (value > finiteMax) finiteMax = value;
+  }
   return {
     ...source,
     id: `${source.id}-surface-node`,
@@ -2573,8 +2643,8 @@ export function recoverSurfaceNodeScalarField(
     values,
     // Reuse the source field's range so the legend and color scale stay consistent with the
     // element field's reported peak; interpolated node values fall within that range anyway.
-    min: Number.isFinite(source.min) ? source.min : Math.min(...finiteValues),
-    max: Number.isFinite(source.max) ? source.max : Math.max(...finiteValues),
+    min: Number.isFinite(source.min) ? source.min : finiteMin,
+    max: Number.isFinite(source.max) ? source.max : finiteMax,
     samples: undefined,
     vectors: undefined
   };
@@ -3018,14 +3088,23 @@ function applyResultColorsToArray(
   scalarMapping: VertexResultMapping | null,
   resultMode: ResultMode
 ) {
+  const directValuesAligned = scalarField ? resultFieldValuesAlignedToGeometry(scalarField, vertexCount) : false;
   for (let index = 0; index < vertexCount; index += 1) {
-    const scalar = mappedScalarValue(index, scalarField, scalarMapping);
+    const scalar = mappedScalarValue(index, scalarField, scalarMapping, directValuesAligned);
     const normalized = scalarField ? normalizeScalarValueForResultRender(scalar, scalarField) : 0;
     writeResultColorForValue(colorArray, index * 3, resultMode, normalized);
   }
 }
 
-function mappedScalarValue(vertexIndex: number, field: ResultField | undefined, mapping: VertexResultMapping | null) {
+// A field's values array may only be indexed by procedural vertex index when it is actually
+// aligned to that geometry. Surface-node fields (surfaceMeshRef) are aligned to the solver
+// surface mesh, never to procedural geometry — indexing them by vertex index painted
+// meaningless near-uniform colors with vertex-order streaks.
+export function resultFieldValuesAlignedToGeometry(field: ResultField, vertexCount: number): boolean {
+  return !field.surfaceMeshRef && field.values.length === vertexCount;
+}
+
+function mappedScalarValue(vertexIndex: number, field: ResultField | undefined, mapping: VertexResultMapping | null, directValuesAligned: boolean) {
   if (!field) return 0;
   const samples = field.samples;
   const weights = mapping?.weightsByVertex[vertexIndex];
@@ -3040,7 +3119,9 @@ function mappedScalarValue(vertexIndex: number, field: ResultField | undefined, 
     }
     if (totalWeight > 0) return value / totalWeight;
   }
-  return field.values[vertexIndex] ?? 0;
+  // No valid mapping: render neutral (NaN normalizes to the palette floor) instead of
+  // misindexing an unaligned values array by procedural vertex index.
+  return directValuesAligned ? field.values[vertexIndex] ?? 0 : Number.NaN;
 }
 
 function normalizeScalarValueForResultRender(value: number, field: ResultField) {
