@@ -1208,7 +1208,7 @@ function BracketModel({
           orientation={printLayerOrientation}
         />
       )}
-      <HoleRims kind={modelKind} />
+      {!suppressProceduralResultSolid && <HoleRims kind={modelKind} />}
       {viewMode === "mesh" && <MeshOverlay kind={modelKind} />}
       {placementMode && !isResultView && <SnapVisualization result={snapResult} mode={activeStep === "supports" ? "supports" : "loads"} />}
       {showModelHitLabel && hoveredHit && <ModelHitLabel hit={hoveredHit} active={hoveredHit.face.id === selectedFaceId} />}
