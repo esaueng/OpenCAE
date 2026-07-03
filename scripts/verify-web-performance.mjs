@@ -2,8 +2,10 @@ import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { readFileSync } from "node:fs";
 import { setTimeout as delay } from "node:timers/promises";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { gzipSync } from "node:zlib";
+
+const INITIAL_JS_GZIP_BUDGET_BYTES = 175 * 1024;
 
 const root = new URL("../", import.meta.url);
 const dist = new URL("apps/opencae-web/dist/", root);
@@ -16,21 +18,26 @@ if (modulePreloads.some((href) => /WorkspaceApp|CadViewer|viewer-three|cad-impor
   throw new Error(`Heavy workspace/viewer chunks are preloaded: ${modulePreloads.join(", ")}`);
 }
 
-const initialScriptPath = new URL(initialScript.replace(/^\//, ""), dist);
-const initialFiles = collectStaticImports(initialScriptPath.pathname, new Set());
+const initialScriptPath = fileURLToPath(new URL(initialScript.replace(/^\//, ""), dist));
+const initialFiles = collectStaticImports(initialScriptPath, new Set());
 const initialGzipBytes = [...initialFiles].reduce((total, file) => total + gzipSync(readFileSync(file)).byteLength, 0);
+
+if (initialGzipBytes > INITIAL_JS_GZIP_BUDGET_BYTES) {
+  throw new Error(`Initial JS bundle is ${initialGzipBytes} gzip bytes, over the ${INITIAL_JS_GZIP_BUDGET_BYTES}-byte budget.`);
+}
 const result = {
   initialScript,
   initialJsGzipBytes: initialGzipBytes,
-  initialJsFiles: [...initialFiles].map((file) => file.replace(dist.pathname, "/")),
+  initialJsGzipBudgetBytes: INITIAL_JS_GZIP_BUDGET_BYTES,
+  initialJsFiles: [...initialFiles].map((file) => file.replace(fileURLToPath(dist), "/")),
   heavyModulePreloads: modulePreloads,
   preview: null,
   browserProbe: "skipped: install Playwright and set OPENCAE_PERF_BROWSER=1 to record viewer frame timing"
 };
 
-const preview = spawn("pnpm", ["--filter", "@opencae/web", "exec", "vite", "preview", "--host", "127.0.0.1", "--port", "4173", "--strictPort"], {
-  cwd: root,
-  detached: true,
+const preview = spawn(process.platform === "win32" ? "pnpm.cmd" : "pnpm", ["--filter", "@opencae/web", "exec", "vite", "preview", "--host", "127.0.0.1", "--port", "4173", "--strictPort"], {
+  cwd: fileURLToPath(root),
+  detached: process.platform !== "win32",
   stdio: ["ignore", "pipe", "pipe"]
 });
 let previewStderr = "";
@@ -84,7 +91,7 @@ function collectStaticImports(file, visited) {
   for (const match of source.matchAll(importPattern)) {
     const specifier = match.groups?.specifier;
     if (!specifier) continue;
-    collectStaticImports(new URL(`assets/${specifier.replace(/^\.\//, "")}`, dist).pathname, visited);
+    collectStaticImports(fileURLToPath(new URL(`assets/${specifier.replace(/^\.\//, "")}`, dist)), visited);
   }
   return visited;
 }

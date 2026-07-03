@@ -367,66 +367,63 @@ img {
   height: 100%;
 }
 
-.sample-face.top {
-  fill: url(#sample-top-bracket);
+.sample-face {
+  stroke: rgba(226, 232, 240, 0.26);
+  stroke-width: 1;
+  stroke-linejoin: round;
 }
 
-.sample-thumbnail-beam .sample-face.top {
-  fill: url(#sample-top-plate);
+.sample-fixed-face {
+  fill: rgba(34, 197, 94, 0.26);
+  stroke: rgba(134, 239, 172, 0.6);
+  stroke-width: 1;
+  stroke-linejoin: round;
 }
 
-.sample-thumbnail-cantilever .sample-face.top {
-  fill: url(#sample-top-cantilever);
+.sample-hatch path {
+  fill: none;
+  stroke: rgba(134, 239, 172, 0.55);
+  stroke-width: 1.3;
+  stroke-linecap: round;
 }
 
-.sample-face.side {
-  fill: url(#sample-side-bracket);
-}
-
-.sample-thumbnail-beam .sample-face.side {
-  fill: url(#sample-side-plate);
-}
-
-.sample-thumbnail-cantilever .sample-face.side {
-  fill: url(#sample-side-cantilever);
-}
-
-.sample-face.dark {
-  opacity: 0.7;
-}
-
-.sample-face.rib {
-  fill: rgba(34, 197, 94, 0.78);
-  stroke: rgba(190, 242, 211, 0.5);
-}
-
-.sample-face.payload {
-  fill: rgba(245, 158, 11, 0.86);
-  stroke: rgba(254, 215, 170, 0.48);
-}
-
-.sample-face,
 .sample-hole {
-  stroke: rgba(226, 232, 240, 0.28);
+  fill: #0a1017;
+  stroke: rgba(226, 232, 240, 0.35);
   stroke-width: 1;
 }
 
-.sample-hole {
-  fill: #0b1119;
+.sample-support-ring {
+  fill: none;
+  stroke: #4da3ff;
+  stroke-width: 1.6;
+  opacity: 0.9;
 }
 
-.sample-marker circle {
-  fill: #4da3ff;
-  stroke: #cde7ff;
-  stroke-width: 1.2;
+.sample-load line {
+  stroke: #f8b928;
+  stroke-width: 3.5;
+  stroke-linecap: round;
 }
 
-.sample-marker path {
+.sample-load path {
+  fill: #f8b928;
+}
+
+.sample-ghost path {
+  fill: none;
+  stroke: rgba(125, 190, 255, 0.6);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-dasharray: 4 3;
+}
+
+.sample-wave {
   fill: none;
   stroke: #f8b928;
-  stroke-width: 4;
+  stroke-width: 2;
   stroke-linecap: round;
-  stroke-linejoin: round;
+  opacity: 0.85;
 }
 
 .sample-option-copy,
@@ -928,6 +925,7 @@ img {
 
 .setup-status.inactive {
   color: var(--color-text-muted);
+  border-style: dotted;
 }
 
 .tree-run-item {
@@ -980,6 +978,11 @@ img {
   background: transparent;
   border: 0;
   outline: none;
+}
+
+.material-search:focus-within {
+  border-color: var(--color-accent);
+  box-shadow: inset 0 0 0 1px var(--color-accent-border);
 }
 
 .material-preview-row {
@@ -1941,6 +1944,11 @@ img {
   grid-column: 1 / -1;
 }
 
+.analysis-legend .legend-deformation-note {
+  color: var(--color-warning, #f59e0b);
+  font-weight: 600;
+}
+
 .legend-scale {
   grid-column: 1 / -1;
   width: 100%;
@@ -2503,8 +2511,8 @@ img {
 
 .range-field input[type="range"]:focus,
 .range-field input[type="range"]:focus-visible {
-  outline: none;
-  box-shadow: none;
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
 }
 
 .range-label {
@@ -2721,6 +2729,8 @@ button:disabled {
   font-family: var(--font-mono);
   font-weight: var(--fw-regular);
   text-align: right;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .summary-box,
@@ -2775,6 +2785,92 @@ button:disabled {
   border-radius: var(--radius-sm);
   font-size: var(--fs-sm);
   line-height: var(--lh-loose);
+}
+
+.collapsible-section {
+  margin: 14px 0 0;
+  border: var(--border-thin);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-2);
+}
+
+.collapsible-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  color: var(--color-text);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.collapsible-summary::-webkit-details-marker {
+  display: none;
+}
+
+.collapsible-subtitle {
+  margin-left: auto;
+  color: var(--color-text-subtle);
+  font-family: var(--font-mono);
+  font-size: var(--fs-mini);
+  letter-spacing: var(--ls-eyebrow);
+  text-transform: uppercase;
+}
+
+.collapsible-chevron {
+  flex: none;
+  margin-left: 4px;
+  color: var(--color-text-subtle);
+  transition: transform 0.15s ease;
+}
+
+.collapsible-section[open] .collapsible-chevron {
+  transform: rotate(180deg);
+}
+
+.collapsible-body {
+  padding: 0 12px 12px;
+}
+
+.parametric-part-summary {
+  margin: 0 0 12px;
+}
+
+.parametric-part-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.parametric-part-fields .field {
+  margin: 0;
+}
+
+.parametric-part-problems {
+  margin: 10px 0 0;
+  padding: 8px 12px 8px 26px;
+  color: var(--color-text);
+  background: rgba(239, 68, 68, 0.12);
+  border-left: 2px solid var(--color-error);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-loose);
+}
+
+.parametric-part-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 0;
+  color: var(--color-text-subtle);
+  font-size: var(--fs-mini);
+}
+
+.parametric-part-note svg {
+  flex: none;
 }
 
 .failure-assessment {
@@ -3556,6 +3652,106 @@ button:disabled {
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
+}
+
+.skip-link {
+  position: absolute;
+  left: 8px;
+  top: -48px;
+  z-index: 9999;
+  padding: 8px 14px;
+  background: var(--color-accent);
+  color: #04121f;
+  border-radius: var(--radius-md);
+  font-weight: var(--fw-medium);
+  transition: top var(--dur-fast) var(--ease-out);
+}
+
+.skip-link:focus {
+  top: 8px;
+  outline: 2px solid var(--color-text);
+}
+
+/* Keyboard/SR face picker: present in the a11y tree and tab order at all times,
+   visually revealed only when it receives keyboard focus so the default viewport
+   design is unchanged. opacity (not clip/position) keeps the absolute overlay
+   placement intact when revealed. */
+.viewer-a11y-faces {
+  position: absolute;
+  left: 12px;
+  top: 12px;
+  z-index: var(--z-viewer-overlay);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 60%;
+  overflow: auto;
+  padding: 10px;
+  background: var(--color-surface);
+  border: var(--border-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-panel);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.viewer-a11y-faces:focus-within {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.viewer-a11y-faces button {
+  text-align: left;
+}
+
+.viewer-a11y-faces button[aria-pressed="true"] {
+  color: var(--color-accent);
+  border-color: var(--color-accent-border);
+}
+
+/* Keyboard equivalent of the WebGL gizmo cube: hidden until focused (mouse users
+   keep using the gizmo), revealed on keyboard focus without disturbing layout. */
+.viewer-view-presets {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  z-index: var(--z-viewer-overlay);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-width: 220px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.viewer-view-presets:focus-within {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.viewer-view-presets button {
+  padding: 3px 8px;
+  font-size: var(--fs-xs);
+  color: var(--color-text-muted);
+  background: var(--color-surface-2);
+  border: var(--border-thin);
+  border-radius: var(--radius-sm);
+}
+
+.viewer-view-presets button:hover,
+.viewer-view-presets button:focus-visible {
+  color: var(--color-accent);
+  border-color: var(--color-accent-border);
+}
+
+.unit-toggle:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.stepbar-collapse:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: 1px;
 }
 
 @media (max-width: 980px) {

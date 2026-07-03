@@ -14,7 +14,7 @@
   --color-border-strong: #3a4554;
   --color-text: #e6edf3;
   --color-text-muted: #8b949e;
-  --color-text-subtle: #5c6672;
+  --color-text-subtle: #828d99; /* 4.87:1 vs --color-surface-2 #17202b (WCAG 1.4.3/1.4.11 AA) */
 
   /* ── Semantic ─────────────────────────────────────────── */
   --color-accent: #4da3ff;
@@ -25,13 +25,14 @@
   --color-success: #22c55e;
   --color-viewport-bg: #070b10;
 
-  /* ── Result ramp (stress contour: blue → teal → green → yellow → red) ── */
-  --color-ramp-0: #2050b0;
-  --color-ramp-1: #3489d8;
-  --color-ramp-2: #39c8c8;
-  --color-ramp-3: #5fd979;
-  --color-ramp-4: #f2c23a;
-  --color-ramp-5: #ef5d3a;
+  /* ── Result ramp — keep in sync with resultPalette() stress colors in
+     CadViewer.tsx so values read off the legend match the rendered contours ── */
+  --color-ramp-0: #0759d6;
+  --color-ramp-1: #0ea5e9;
+  --color-ramp-2: #22c55e;
+  --color-ramp-3: #facc15;
+  --color-ramp-4: #f97316;
+  --color-ramp-5: #ef4444;
 
   /* ── Typography ───────────────────────────────────────── */
   --font-ui: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;

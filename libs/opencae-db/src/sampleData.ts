@@ -32,6 +32,7 @@ export const bracketResultSummary: ResultSummary = {
   safetyFactor: 1.8,
   reactionForce: 500,
   reactionForceUnits: "N",
+  diagnostics: [],
   provenance: {
     kind: "local_estimate",
     solver: "sample-bracket-reference",
@@ -49,7 +50,7 @@ export const bracketResultFields: ResultField[] = [
     type: "stress",
     location: "face",
     values: [36, 142, 96, 54],
-    min: 28,
+    min: 36,
     max: 142,
     units: "MPa"
   },

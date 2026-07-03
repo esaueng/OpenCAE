@@ -97,11 +97,13 @@ describe("App workflow layout", () => {
     expect(apiSource).not.toContain("external solver bridge selected:");
     expect(appSource).toContain("try {\n      response = await runSimulation(study.id, study, displayModel ?? undefined, { onRunStatus: pushMessage, resultRenderBounds });");
     expect(appSource).toContain("setRunProgress(0);");
-    expect(appSource).toContain('pushMessage(errorMessage(error, "Could not start simulation."));');
+    expect(appSource).toContain('const message = errorMessage(error, "Could not start simulation.");');
+    expect(appSource).toContain("setRunError(message);");
+    expect(appSource).toContain('if (event.type === "error") setRunError(event.message || "Simulation run failed.");');
     expect(appSource).not.toContain("external solver run created: runId=");
     expect(appSource).not.toContain("external solver event polling started: GET");
     expect(appSource).not.toContain("external solver results fetch started: GET");
-    expect(appSource).toContain('pushMessage(errorMessage(error, "Could not load simulation results."));');
+    expect(appSource).toContain('const message = errorMessage(error, "Could not load simulation results.");');
   });
 
   test("passes measured viewer render bounds into browser-local runs", () => {
