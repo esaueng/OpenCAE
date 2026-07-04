@@ -159,7 +159,7 @@ describe("Cloudflare local-first worker", () => {
       ok: true,
       service: "opencae-core-cloud",
       runnerVersion: expectedRunnerVersion,
-      coreVersion: "0.1.4",
+      coreVersion: "0.1.5",
       solverCpuVersion: "0.1.5",
       supportedAnalysisTypes: ["static_stress", "dynamic_structural"],
       supportedSolverMethods: ["sparse_static", "mdof_dynamic"]
@@ -174,7 +174,7 @@ describe("Cloudflare local-first worker", () => {
       coreCloudAvailable: true,
       containerBound: true,
       containerRunnerVersion: expectedRunnerVersion,
-      coreVersion: "0.1.4",
+      coreVersion: "0.1.5",
       solverCpuVersion: "0.1.5",
       supportedAnalysisTypes: ["static_stress", "dynamic_structural"],
       supportedSolverMethods: ["sparse_static", "mdof_dynamic"],
