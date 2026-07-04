@@ -242,6 +242,27 @@ describe("dynamic result frames", () => {
     expect(interpolated[0]).toMatchObject({ values: [0, 60], min: 0, max: 100 });
   });
 
+  test("keeps interpolated surface-node fields aligned to the surface mesh node count", () => {
+    // Surface-node fields must stay aligned 1:1 with surfaceMesh.nodes. interpolateField
+    // used to emit values of length max(lower, upper), which would break the surface render
+    // alignment check if one frame ever carried a mismatched array.
+    const fields = normalizeTransientFieldRanges([
+      { id: "frame-0-stress-surface", runId: "run", type: "stress", location: "node", surfaceMeshRef: "solver-surface", values: [0, 10, 20], min: 0, max: 100, units: "MPa", frameIndex: 0, timeSeconds: 0 },
+      { id: "frame-1-stress-surface", runId: "run", type: "stress", location: "node", surfaceMeshRef: "solver-surface", values: [20, 30, 40, 999], min: 0, max: 100, units: "MPa", frameIndex: 1, timeSeconds: 0.005 },
+      { id: "frame-0-displacement-surface", runId: "run", type: "displacement", location: "node", surfaceMeshRef: "solver-surface", values: [0, 0, 0], vectors: [[0, 0, 0], [0, 0, 0], [0, 0, 0]], min: 0, max: 1, units: "mm", frameIndex: 0, timeSeconds: 0 },
+      { id: "frame-1-displacement-surface", runId: "run", type: "displacement", location: "node", surfaceMeshRef: "solver-surface", values: [1, 0, 0], vectors: [[0, 0, 1], [0, 0, 0], [0, 0, 0], [9, 9, 9]], min: 0, max: 1, units: "mm", frameIndex: 1, timeSeconds: 0.005 }
+    ] satisfies ResultField[]);
+
+    const interpolated = interpolatedFieldsForFramePosition(fields, 0.5);
+    const stress = interpolated.find((field) => field.type === "stress");
+    const displacement = interpolated.find((field) => field.type === "displacement");
+
+    expect(stress?.values).toEqual([10, 20, 30]);
+    expect(displacement?.values.length).toBe(3);
+    expect(displacement?.vectors?.length).toBe(3);
+    expect(displacement?.vectors?.[0]).toEqual([0, 0, 0.5]);
+  });
+
   test("same scalar value maps to the same normalized value at every dynamic frame", () => {
     const fields = normalizeTransientFieldRanges([
       { id: "stress-0", runId: "run", type: "stress", location: "face", values: [50, 20], min: 0, max: 50, units: "MPa", frameIndex: 0, timeSeconds: 0 },

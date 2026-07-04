@@ -45,7 +45,6 @@ type CoreTetMesh = {
   solverCoordinates: number[];
   renderNodePoints: Vec3[];
   connectivity: number[];
-  elementType: "Tet4" | "Tet10";
 };
 
 type ActualCoreVolumeMeshArtifact = {
@@ -311,6 +310,11 @@ export function trySolveOpenCaeCoreStudy({ study, runId, displayModel }: {
   try {
     const coreModel = openCaeCoreModelForStudy(study, displayModel);
     const isActualMesh = coreModel.meshSource === "actual_volume_mesh";
+    // The dynamic MDOF solver does not enforce maxDofs itself, so guard the in-browser
+    // DOF budget here for both paths — otherwise a large actual mesh would run unbounded
+    // per-step solves on the worker thread instead of failing fast like the static path.
+    const overBudget = localSolveDofBudgetExceeded(coreModel);
+    if (overBudget) return { ok: false, reason: overBudget };
     if (study.type === "dynamic_structural") {
       const material = materialForStudy(study).material;
       const settings = dynamicSettingsForStudy(study);
@@ -387,13 +391,13 @@ export function buildOpenCaeCoreCloudModelForStudy(study: Study, displayModel: D
       }
       throw new Error(OPENCAE_CORE_CLOUD_GEOMETRY_REQUIRED_REASON);
     }
-    const mesh = tetMeshForDisplayModel(displayModel, study.meshSettings.preset);
+    const mesh = tetMeshForDisplayModel(displayModel, study.meshSettings.preset, CLOUD_STRUCTURED_BLOCK_TET10_NODE_BUDGET);
     model = volumeMeshToModelJson({
       nodes: { coordinates: solverFrameCoordinates(mesh.solverCoordinates, displayModel) },
       materials: [coreMaterial],
       elementBlocks: [{
-        name: mesh.elementType === "Tet10" ? "structured-block-tet10" : "structured-block-tet4",
-        type: mesh.elementType,
+        name: "structured-block-tet10",
+        type: "Tet10",
         material: coreMaterial.name,
         connectivity: mesh.connectivity
       }],
@@ -523,6 +527,8 @@ function openCaeCoreModelForStudy(study: Study, displayModel: DisplayModel | und
     study.meshSettings.preset,
     study.type === "dynamic_structural" ? LOCAL_DYNAMIC_TET10_NODE_BUDGET : LOCAL_TET10_NODE_BUDGET
   );
+  // Computed once and reused for every fixed support and load below.
+  const renderBounds = renderBoundsForPoints(mesh.renderNodePoints);
   const boundaryConditions: OpenCAEModelJson["boundaryConditions"] = [];
   const loads: OpenCAEModelJson["loads"] = [];
   const nodeSets: OpenCAEModelJson["nodeSets"] = [];
@@ -530,7 +536,7 @@ function openCaeCoreModelForStudy(study: Study, displayModel: DisplayModel | und
   for (const [index, constraint] of study.constraints.entries()) {
     if (constraint.type !== "fixed") continue;
     const centers = selectionCenters(study, displayModel, constraint.selectionRef);
-    const nodes = meshNodesForFaceSelection(mesh, centers, selectionNormals(study, displayModel, constraint.selectionRef), study.meshSettings.preset);
+    const nodes = meshNodesForFaceSelection(mesh, renderBounds, centers, selectionNormals(study, displayModel, constraint.selectionRef), study.meshSettings.preset);
     if (!nodes.length) throw new Error("OpenCAE Core could not map fixed support selection to mesh nodes.");
     const name = `fixedNodes${index}`;
     nodeSets.push({ name, nodes });
@@ -541,10 +547,15 @@ function openCaeCoreModelForStudy(study: Study, displayModel: DisplayModel | und
   for (const [index, load] of study.loads.entries()) {
     if (load.type !== "force") continue;
     const centers = selectionCenters(study, displayModel, load.selectionRef);
-    const nodes = meshNodesForFaceSelection(mesh, centers, selectionNormals(study, displayModel, load.selectionRef), study.meshSettings.preset);
+    const nodes = meshNodesForFaceSelection(mesh, renderBounds, centers, selectionNormals(study, displayModel, load.selectionRef), study.meshSettings.preset);
     if (!nodes.length) continue;
     const force = forceVectorForLoad(load, displayModel, density);
     if (Math.hypot(...force) <= 1e-12) continue;
+    // Lumped equal split across all face nodes: statically equivalent (net force and
+    // resultant location preserved), which is the intended preview-tier fidelity. It is
+    // not the consistent quadratic load vector, so element-peak von Mises can be locally
+    // off right at the loaded face; the cloud surfaceForce path is the accurate tier for
+    // near-load stress.
     const distributedForce = scaleVector(force, 1 / nodes.length);
     const name = `loadNodes${index}`;
     nodeSets.push({ name, nodes });
@@ -567,15 +578,15 @@ function openCaeCoreModelForStudy(study: Study, displayModel: DisplayModel | und
       yieldStrength: effective.yieldStrength ?? material.material.yieldStrength
     }],
     elementBlocks: [{
-      name: mesh.elementType === "Tet10" ? "block-tet10" : "block-tet4",
-      type: mesh.elementType,
+      name: "block-tet10",
+      type: "Tet10",
       material: effective.id,
       connectivity: mesh.connectivity
     }],
     nodeSets,
     elementSets: [{
       name: "allElements",
-      elements: Array.from({ length: mesh.connectivity.length / (mesh.elementType === "Tet10" ? 10 : 4) }, (_value, index) => index)
+      elements: Array.from({ length: mesh.connectivity.length / 10 }, (_value, index) => index)
     }],
     boundaryConditions,
     loads,
@@ -674,8 +685,7 @@ function facetsForDisplaySelection(
   for (const face of faces) {
     const normal = normalize(face.normal);
     if (!normal) continue;
-    const axis = dominantAxis(normal);
-    const target = normal[axis] >= 0 ? bounds.max[axis] : bounds.min[axis];
+    const { axis, plane: target } = facePlaneForNormal(normal, bounds);
     const span = Math.max(bounds.max[axis] - bounds.min[axis], 1);
     const tolerance = Math.max(span * 1e-5, 1e-8);
     const matching = surfaceFacets
@@ -726,8 +736,11 @@ function resultBundleForOpenCaeCore(
   study: Study,
   provenance: ResultProvenance
 ): LocalSolveResult {
-  // Element-peak von Mises (Tet10 node sampling) instead of centroid values, which
-  // clip the outer-fiber bending stress on coarse meshes.
+  // Element-peak von Mises (Tet10 node sampling) instead of centroid values, which clip the
+  // outer-fiber bending stress on coarse meshes. The ?? is a type-safety guard for the
+  // optional vonMisesPeak field; the solver populates it on every successful solve (and
+  // already collapses an element to its centroid value internally when that element's
+  // nodal-stress recovery fails), so this fallback is effectively dead in practice.
   const stressFrame = stressFieldForOpenCaeCore(runId, coreModel, result.vonMisesPeak ?? result.vonMises, study, provenance);
   const displacementFrame = vectorFieldForOpenCaeCore(runId, "displacement", coreModel, result.displacement, "mm", 1000, 6, provenance);
   const safetyFrame = safetyFieldForOpenCaeCore(runId, stressFrame, study, provenance);
@@ -768,6 +781,9 @@ function dynamicResultBundleForOpenCaeCore(
   provenance: ResultProvenance
 ): LocalSolveResult {
   const fields: ResultField[] = [];
+  // Element centroids are geometry-only and identical across frames; compute once and
+  // reuse for every frame's stress field rather than re-deriving per element per frame.
+  const centroids = elementCentroidsForModel(coreModel);
   let peakDisplacement = 0;
   let peakDisplacementTimeSeconds = settings.startTime;
   let peakStress = 0;
@@ -776,11 +792,16 @@ function dynamicResultBundleForOpenCaeCore(
   const appliedLoadMagnitude = displayModel
     ? round(Math.hypot(...totalForceVector(study, displayModel, material.density)), 6)
     : 0;
-  const peakLoadScale = Math.max(...frames.map((frame) => Number.isFinite(frame.loadScale) ? Math.abs(frame.loadScale) : 0), 0);
+  // Loop instead of spreading frames into Math.max: a long transient can produce tens of
+  // thousands of frames, past the V8 argument limit for Math.max(...values).
+  let peakLoadScale = 0;
+  for (const frame of frames) {
+    if (Number.isFinite(frame.loadScale)) peakLoadScale = Math.max(peakLoadScale, Math.abs(frame.loadScale));
+  }
   const peakAppliedLoad = round(appliedLoadMagnitude * Math.max(peakLoadScale, 1), 6);
 
   for (const frame of frames) {
-    const stressFrame = withFrame(stressFieldForOpenCaeCore(runId, coreModel, frame.vonMisesPeak?.values ?? frame.vonMises.values, study, provenance), frame.frameIndex, frame.timeSeconds);
+    const stressFrame = withFrame(stressFieldForOpenCaeCore(runId, coreModel, frame.vonMisesPeak?.values ?? frame.vonMises.values, study, provenance, centroids), frame.frameIndex, frame.timeSeconds);
     const displacementFrame = withFrame(vectorFieldForOpenCaeCore(runId, "displacement", coreModel, frame.displacement.values, "mm", 1000, 8, provenance), frame.frameIndex, frame.timeSeconds);
     const velocityFrame = withFrame(vectorFieldForOpenCaeCore(runId, "velocity", coreModel, frame.velocity.values, "mm/s", 1000, 8, provenance), frame.frameIndex, frame.timeSeconds);
     const accelerationFrame = withFrame(vectorFieldForOpenCaeCore(runId, "acceleration", coreModel, frame.acceleration.values, "mm/s^2", 1000, 8, provenance), frame.frameIndex, frame.timeSeconds);
@@ -850,11 +871,13 @@ function stressFieldForOpenCaeCore(
   coreModel: CoreStudyModel,
   vonMises: Float64Array,
   study: Study,
-  provenance: ResultProvenance
+  provenance: ResultProvenance,
+  centroids?: Vec3[]
 ): ResultField {
+  const points = centroids ?? elementCentroidsForModel(coreModel);
   const values = Array.from(vonMises, (value) => round(Math.abs(value) / 1_000_000, 6));
   const samples = values.map((value, element) => ({
-    point: elementCentroid(coreModel, element),
+    point: points[element] ?? [0, 0, 0],
     normal: [0, 0, 1] as Vec3,
     value,
     elementId: `E${element}`,
@@ -910,14 +933,15 @@ function fieldFor(
   samples: NonNullable<ResultField["samples"]>,
   provenance: ResultProvenance
 ): ResultField {
+  const { min, max } = arrayMinMax(values);
   return {
     id: `field-${type}`,
     runId,
     type,
     location,
     values,
-    min: arrayMin(values),
-    max: arrayMax(values),
+    min,
+    max,
     units,
     samples,
     provenance
@@ -1023,19 +1047,29 @@ function meshStatisticsForCoreModel(coreModel: CoreStudyModel): { nodes: number;
   return { nodes, elements };
 }
 
-function elementCentroid(coreModel: CoreStudyModel, elementIndex: number): Vec3 {
+// Element centroids = average of the four corner nodes (connectivity indices 0-3), which
+// is the centroid for both Tet4 and straight-sided Tet10. Geometry is fixed across a
+// solve, so the whole array is computed once and reused by every stress frame instead of
+// re-slicing connectivity per element per frame.
+function elementCentroidsForModel(coreModel: CoreStudyModel): Vec3[] {
   const block = coreModel.model.elementBlocks[0];
-  // Corner nodes only: their average is the centroid for both Tet4 and straight-sided Tet10.
-  const stride = block?.type === "Tet10" ? 10 : 4;
-  const connectivity = block?.connectivity.slice(elementIndex * stride, elementIndex * stride + 4) ?? [];
-  const sum: Vec3 = [0, 0, 0];
-  for (const node of connectivity) {
-    const point = coreModel.renderNodePoints[node] ?? [0, 0, 0];
-    sum[0] += point[0];
-    sum[1] += point[1];
-    sum[2] += point[2];
+  if (!block) return [];
+  const stride = block.type === "Tet10" ? 10 : 4;
+  const points = coreModel.renderNodePoints;
+  const centroids: Vec3[] = [];
+  for (let offset = 0; offset + 4 <= block.connectivity.length; offset += stride) {
+    let x = 0;
+    let y = 0;
+    let z = 0;
+    for (let corner = 0; corner < 4; corner += 1) {
+      const point = points[block.connectivity[offset + corner]!] ?? [0, 0, 0];
+      x += point[0];
+      y += point[1];
+      z += point[2];
+    }
+    centroids.push([round(x / 4, 6), round(y / 4, 6), round(z / 4, 6)]);
   }
-  return [round(sum[0] / 4, 6), round(sum[1] / 4, 6), round(sum[2] / 4, 6)];
+  return centroids;
 }
 
 function netVectorMagnitude(vector: Float64Array): number {
@@ -1135,8 +1169,7 @@ function tetMeshForDisplayModel(
   return {
     solverCoordinates: elevated.coordinates,
     renderNodePoints,
-    connectivity: elevated.elements.flat(),
-    elementType: "Tet10"
+    connectivity: elevated.elements.flat()
   };
 }
 
@@ -1186,40 +1219,42 @@ function renderBoundsForDisplayModel(displayModel: DisplayModel): { min: Vec3; m
   return { min, max };
 }
 
-// Selects every mesh node on the axis-aligned box face the selection points at, so
-// fixed supports clamp the whole face and loads spread across it (matching the cloud
-// surface-set behavior). The face is identified by the display face normal's dominant
-// axis; render-bound padding makes nearest-plane distance unreliable. Falls back to
-// nearest-N nodes when the selection carries no usable face normal.
+// Selects every mesh node on the axis-aligned box faces the selection points at, so fixed
+// supports clamp the whole face and loads spread across it (matching the cloud surface-set
+// behavior). Each selected face is identified by its display normal's dominant axis
+// (render-bound padding makes nearest-plane distance unreliable); a multi-face selection
+// unions the nodes of every face. Falls back to nearest-N nodes when the selection carries
+// no usable face normal. Bounds are passed in so the caller computes them once for all
+// constraints/loads rather than re-scanning the mesh per call.
 function meshNodesForFaceSelection(
   mesh: CoreTetMesh,
+  bounds: { min: Vec3; max: Vec3 },
   centers: Vec3[],
   normals: Vec3[],
   preset: Study["meshSettings"]["preset"]
 ): number[] {
-  const normal = normals.find((candidate) => Math.hypot(...candidate) > 1e-9);
-  if (normal) {
-    const axis = [0, 1, 2].reduce((best, candidate) =>
-      Math.abs(normal[candidate]!) > Math.abs(normal[best]!) ? candidate : best
-    );
-    const bounds = renderBoundsForPoints(mesh.renderNodePoints);
-    const plane = normal[axis]! < 0 ? bounds.min[axis]! : bounds.max[axis]!;
-    const span = Math.max(bounds.max[axis]! - bounds.min[axis]!, 1e-9);
-    const tolerance = span * 1e-6 + 1e-9;
-    const nodes: number[] = [];
-    for (let node = 0; node < mesh.renderNodePoints.length; node += 1) {
-      if (Math.abs(mesh.renderNodePoints[node]![axis]! - plane) <= tolerance) nodes.push(node);
+  const usableNormals = normals.filter((candidate) => Math.hypot(...candidate) > 1e-9);
+  if (usableNormals.length) {
+    const selected = new Set<number>();
+    for (const normal of usableNormals) {
+      const { axis, plane } = facePlaneForNormal(normal, bounds);
+      const span = Math.max(bounds.max[axis] - bounds.min[axis], 1e-9);
+      const tolerance = span * 1e-6 + 1e-9;
+      for (let node = 0; node < mesh.renderNodePoints.length; node += 1) {
+        if (Math.abs(mesh.renderNodePoints[node]![axis] - plane) <= tolerance) selected.add(node);
+      }
     }
-    if (nodes.length) return nodes;
+    if (selected.size) return [...selected];
   }
   return nearestMeshNodes(mesh.renderNodePoints, centers, nodeSelectionCount(preset));
 }
 
-function meshCellsForPreset(preset: Study["meshSettings"]["preset"]): [number, number, number] {
-  if (preset === "ultra") return [6, 5, 4];
-  if (preset === "fine") return [5, 4, 4];
-  if (preset === "coarse") return [3, 3, 2];
-  return [4, 3, 3];
+// The axis-aligned box face an outward face normal points at: the dominant-axis extreme of
+// the render bounds. Shared by local node selection and cloud facet selection so the two
+// backends resolve a selection to the same face.
+function facePlaneForNormal(normal: Vec3, bounds: { min: Vec3; max: Vec3 }): { axis: 0 | 1 | 2; plane: number } {
+  const axis = dominantAxis(normal);
+  return { axis, plane: normal[axis] < 0 ? bounds.min[axis] : bounds.max[axis] };
 }
 
 // Dimension-aware structured grid sizing, mirroring the cloud mesher: presets choose
@@ -1229,15 +1264,20 @@ function meshCellsForPreset(preset: Study["meshSettings"]["preset"]): [number, n
 // per-frame implicit solves of dynamic studies run on the main worker thread.
 const LOCAL_CELLS_ACROSS_MIN_DIMENSION: Record<string, number> = {
   coarse: 2,
-  medium: 2,
-  fine: 3,
-  ultra: 4
+  medium: 3,
+  fine: 4,
+  ultra: 5
 };
 const LOCAL_MAX_DIVISIONS_PER_AXIS = 32;
 // 4k Tet10 nodes = 12k DOFs for a single static solve. Dynamic studies pay the solve
 // cost once per time step, so they get a smaller grid to stay interactive.
 const LOCAL_TET10_NODE_BUDGET = 4000;
 const LOCAL_DYNAMIC_TET10_NODE_BUDGET = 1500;
+// Cloud structured-block fallback (simple geometry with no separate geometry source): the
+// cloud container has no in-browser worker-thread constraint, so it gets a denser grid than
+// the local preview tier — ~8000 Tet10 nodes (~24000 DOFs), well under the cloud solver's
+// 100000-DOF limit (services/opencae-core-cloud server.ts SOLVER_LIMITS.maxDofs).
+const CLOUD_STRUCTURED_BLOCK_TET10_NODE_BUDGET = 8000;
 
 function meshDivisionsForDimensions(
   dimensions: [number, number, number],
@@ -1264,6 +1304,13 @@ function meshDivisionsForDimensions(
   return divisions;
 }
 
+function meshCellsForPreset(preset: Study["meshSettings"]["preset"]): [number, number, number] {
+  if (preset === "ultra") return [6, 5, 4];
+  if (preset === "fine") return [5, 4, 4];
+  if (preset === "coarse") return [3, 3, 2];
+  return [4, 3, 3];
+}
+
 function maxDofsForMeshPreset(preset: Study["meshSettings"]["preset"]): number {
   const [x, y, z] = meshCellsForPreset(preset);
   return (x + 1) * (y + 1) * (z + 1) * 3;
@@ -1277,6 +1324,15 @@ const LOCAL_SOLVER_MAX_DOFS = 30000;
 function localSolveMaxDofs(study: Study, coreModel: CoreStudyModel): number {
   const modelDofs = coreModel.model.nodes.coordinates.length;
   return Math.min(Math.max(modelDofs, maxDofsForMeshPreset(study.meshSettings.preset)), LOCAL_SOLVER_MAX_DOFS);
+}
+
+// Fail-fast guard for both static and dynamic local solves. The dynamic solver does not
+// enforce maxDofs internally, so without this an oversized actual mesh would run unbounded
+// per-step solves on the worker thread instead of returning a clean error.
+function localSolveDofBudgetExceeded(coreModel: CoreStudyModel): string | null {
+  const modelDofs = coreModel.model.nodes.coordinates.length;
+  if (modelDofs <= LOCAL_SOLVER_MAX_DOFS) return null;
+  return `OpenCAE Core Local solve exceeds the in-browser budget (${modelDofs} DOFs > ${LOCAL_SOLVER_MAX_DOFS}). Use OpenCAE Core Cloud for meshes this large.`;
 }
 
 function nodeSelectionCount(preset: Study["meshSettings"]["preset"]): number {
@@ -1399,14 +1455,6 @@ function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
 }
 
-function vectorMagnitudes(values: Float64Array): number[] {
-  const magnitudes: number[] = [];
-  for (let index = 0; index < values.length; index += 3) {
-    magnitudes.push(Math.hypot(values[index] ?? 0, values[index + 1] ?? 0, values[index + 2] ?? 0));
-  }
-  return magnitudes;
-}
-
 function vectorForNode(values: Float64Array, node: number, unitScale: number, digits: number): Vec3 {
   return [
     round((values[node * 3] ?? 0) * unitScale, digits),
@@ -1415,16 +1463,19 @@ function vectorForNode(values: Float64Array, node: number, unitScale: number, di
   ];
 }
 
-function arrayMin(values: number[]): number {
+// Single pass for both extremes; non-finite values are skipped, and an all-empty/non-finite
+// array yields 0 (treated as "unknown" downstream) rather than +/-Infinity.
+function arrayMinMax(values: number[]): { min: number; max: number } {
   let min = Number.POSITIVE_INFINITY;
-  for (const value of values) min = Math.min(min, value);
-  return Number.isFinite(min) ? min : 0;
-}
-
-function arrayMax(values: number[]): number {
   let max = Number.NEGATIVE_INFINITY;
-  for (const value of values) max = Math.max(max, value);
-  return Number.isFinite(max) ? max : 0;
+  for (const value of values) {
+    if (value < min) min = value;
+    if (value > max) max = value;
+  }
+  return {
+    min: Number.isFinite(min) ? min : 0,
+    max: Number.isFinite(max) ? max : 0
+  };
 }
 
 function resultFieldAbsMax(field: ResultField): number {

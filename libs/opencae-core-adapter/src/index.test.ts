@@ -208,6 +208,28 @@ describe("core cloud structured block model frame", () => {
     expect(meanTipZ).toBeLessThan(0);
     expect(Math.abs(meanTipZ)).toBeGreaterThan(Math.abs(meanTipY) * 10);
   });
+
+  test("local solver-cpu builders emit render-ready surface node fields including safety factor", () => {
+    // Parity with the cloud container: the same @opencae/solver-cpu builders back both, so a
+    // local solveCoreStatic result must carry the surface mesh plus node-located
+    // stress/displacement/safety-factor fields aligned 1:1 with surfaceMesh.nodes — the exact
+    // contract the web surface render path (solverSurfaceResultFields) consumes.
+    const coreBuild = buildOpenCaeCoreCloudModelForStudy(downLoadedStudy(), cantileverDisplayModel());
+    const solved = solveCoreStatic(coreBuild.model, { method: "sparse", solverMode: "sparse" });
+    expect(solved.ok).toBe(true);
+    if (!solved.ok) return;
+
+    const surfaceMesh = solved.result.surfaceMesh ?? solverSurfaceMeshFromModel(coreBuild.model);
+    for (const type of ["stress", "displacement", "safety_factor"] as const) {
+      const field = solved.result.fields.find((candidate) => candidate.type === type && candidate.surfaceMeshRef === surfaceMesh.id);
+      expect(field, `missing surface node field for ${type}`).toBeDefined();
+      expect(field?.location).toBe("node");
+      expect(field?.values.length).toBe(surfaceMesh.nodes.length);
+    }
+    const safetyField = solved.result.fields.find((candidate) => candidate.type === "safety_factor" && candidate.surfaceMeshRef === surfaceMesh.id);
+    expect(safetyField?.id).toBe("safety-factor-surface");
+    expect(safetyField?.units).toBe("ratio");
+  });
 });
 
 function coordinateSpans(coordinates: number[]): { x: number; y: number; z: number } {
@@ -236,8 +258,10 @@ describe("local core solve mesh statistics", () => {
     expect(stats!.nodes).toBeGreaterThan(0);
     expect(stats!.elements).toBeGreaterThan(0);
     // Medium preset structured block proxy for this 180x24x24 mm cantilever:
-    // 15x2x2 cells elevated from Tet4 to Tet10 with shared midside nodes.
-    expect(stats!.nodes).toBe(775);
-    expect(stats!.elements).toBe(15 * 2 * 2 * 6);
+    // 3 cells across the 24 mm minimum dimension (distinct coarse/medium/fine/ultra
+    // densities {2,3,4,5}) gives a 23x3x3 grid elevated from Tet4 to Tet10 with
+    // shared midside nodes: (2*23+1)*(2*3+1)*(2*3+1) = 2303 nodes.
+    expect(stats!.nodes).toBe(2303);
+    expect(stats!.elements).toBe(23 * 3 * 3 * 6);
   });
 });

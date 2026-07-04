@@ -33,11 +33,11 @@ export function buildHtmlReport(runId: string, summary: ResultSummary): string {
   const banner = nonProductionBanner(provenanceTier);
   const transientRows = summary.transient
     ? `
-            <tr><td>Integration method</td><td>${escapeHtml(summary.transient.integrationMethod)}</td></tr>
+            <tr><td>Integration method</td><td>${escapeHtml(summary.transient.integrationMethod ?? "--")}</td></tr>
             <tr><td>Time range</td><td>${format(summary.transient.startTime)}s - ${format(summary.transient.endTime)}s</td></tr>
             <tr><td>Time step</td><td>${format(summary.transient.timeStep)}s</td></tr>
             <tr><td>Output interval</td><td>${format(summary.transient.outputInterval)}s</td></tr>
-            <tr><td>Damping ratio</td><td>${format(summary.transient.dampingRatio)}</td></tr>
+            <tr><td>Damping ratio</td><td>${summary.transient.dampingRatio !== undefined ? format(summary.transient.dampingRatio) : "--"}</td></tr>
             <tr><td>Frame count</td><td>${format(summary.transient.frameCount)}</td></tr>
             <tr><td>Peak displacement time</td><td>${format(summary.transient.peakDisplacementTimeSeconds)}s</td></tr>`
     : "";

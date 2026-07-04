@@ -76,6 +76,15 @@ function validateCoreCloudScripts(packageJson, failures) {
   if (!String(scripts["deploy:core-cloud"] ?? "").includes("wrangler.containers.jsonc")) {
     failures.push("deploy:core-cloud must deploy with wrangler.containers.jsonc");
   }
+  // The container Docker build fetches the OPENCAE_CORE_REF pin from the Core remote;
+  // an unpushed pin would otherwise fail deep inside the image build (or worse, gate
+  // production on a runner version whose container can never be built). Every path
+  // that builds or deploys the container must run the fast reachability check first.
+  for (const script of ["deploy:cloudflare", "deploy:cloudflare:dry-run", "deploy:core-cloud", "deploy:core-cloud:dry-run", "containers:build:core-cloud"]) {
+    if (!String(scripts[script] ?? "").includes("verify:core-ref")) {
+      failures.push(`${script} must run verify:core-ref so an unpushed OPENCAE_CORE_REF pin fails fast with an actionable error`);
+    }
+  }
   if (!String(scripts["containers:build:core-cloud"] ?? "").includes(expectedImageTag)) {
     failures.push(`containers:build:core-cloud must build ${expectedImageTag}`);
   }
