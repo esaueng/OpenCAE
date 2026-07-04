@@ -46,7 +46,7 @@ describe("OpenCAE Core Cloud service", () => {
       ok: true,
       service: "opencae-core-cloud",
       runnerVersion,
-      coreVersion: "0.1.4",
+      coreVersion: "0.1.5",
       solverCpuVersion: "0.1.5",
       supportedAnalysisTypes: ["static_stress", "dynamic_structural"],
       supportedSolvers: ["sparse_static", "mdof_dynamic"],
