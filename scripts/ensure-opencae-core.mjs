@@ -37,7 +37,7 @@ if (existsSync(coreDir)) {
 await mkdir(dirname(coreDir), { recursive: true });
 if (isGitCommitRef(coreRef)) {
   run("git", ["clone", "--filter=blob:none", "--no-checkout", coreRepo, coreDir]);
-  run("git", ["-C", coreDir, "fetch", "--depth", "1", "origin", coreRef]);
+  fetchPinnedCommit(coreDir, coreRef);
   run("git", ["-C", coreDir, "checkout", "--detach", "FETCH_HEAD"]);
 } else {
   run("git", ["clone", "--depth", "1", "--branch", coreRef, coreRepo, coreDir]);
@@ -60,12 +60,27 @@ function updateExistingCoreWorkspace(directory, ref) {
     process.exit(1);
   }
 
-  run("git", ["-C", directory, "fetch", "--depth", "1", "origin", ref]);
   if (isGitCommitRef(ref)) {
-    run("git", ["-C", directory, "checkout", "--detach", "FETCH_HEAD"]);
+    // A pinned commit that already exists in the local checkout (e.g. the head of a
+    // not-yet-pushed sibling branch this repo is being developed against) is usable
+    // as-is: check it out directly instead of demanding it be fetchable from origin.
+    // Deploy/container builds still require remote reachability — that is gated by
+    // scripts/verify-core-ref-reachable.mjs and by the Docker clone itself.
+    if (!commitExistsLocally(directory, ref)) {
+      fetchPinnedCommit(directory, ref);
+    } else {
+      console.log(`OpenCAE Core pinned commit ${ref} already present in ${directory}; skipping remote fetch.`);
+    }
+    if (gitOutput(directory, ["rev-parse", "HEAD"]) === gitOutput(directory, ["rev-parse", `${ref}^{commit}`])) {
+      // Already at the pin (e.g. the checked-out branch head IS the pinned commit):
+      // leave the checkout alone instead of detaching HEAD.
+      return;
+    }
+    run("git", ["-C", directory, "checkout", "--detach", ref]);
     return;
   }
 
+  run("git", ["-C", directory, "fetch", "--depth", "1", "origin", ref]);
   if (localBranchExists(directory, ref)) {
     run("git", ["-C", directory, "checkout", ref]);
     run("git", ["-C", directory, "merge", "--ff-only", "FETCH_HEAD"]);
@@ -102,6 +117,22 @@ function isProductionBuild() {
 
 function localBranchExists(directory, branch) {
   return spawnSync("git", ["-C", directory, "show-ref", "--verify", "--quiet", `refs/heads/${branch}`]).status === 0;
+}
+
+function commitExistsLocally(directory, ref) {
+  return spawnSync("git", ["-C", directory, "cat-file", "-e", `${ref}^{commit}`]).status === 0;
+}
+
+function fetchPinnedCommit(directory, ref) {
+  const result = spawnSync("git", ["-C", directory, "fetch", "--depth", "1", "origin", ref], { stdio: "inherit" });
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    console.error(`Pinned OpenCAE Core commit ${ref} could not be fetched from the Core remote (${coreRepo}).`);
+    console.error("The commit is not reachable there — push the OpenCAE Core branch that contains it first");
+    console.error("(after a squash/rebase merge, update services/opencae-core-cloud/OPENCAE_CORE_REF to the new SHA).");
+    console.error("Container builds clone from that remote, so an unpushed pin can never build or deploy.");
+    process.exit(result.status ?? 1);
+  }
 }
 
 function describeHead(directory) {

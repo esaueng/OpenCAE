@@ -328,12 +328,14 @@ export const ResultSummarySchema = z.object({
   transient: z
     .object({
       analysisType: z.literal("dynamic_structural"),
-      integrationMethod: z.literal("newmark_average_acceleration"),
+      // Optional: Core Cloud runners up to 0.1.5 omit these two; requiring them made
+      // parseResultBundle silently drop restored dynamic cloud results.
+      integrationMethod: z.literal("newmark_average_acceleration").optional(),
       startTime: z.number(),
       endTime: z.number(),
       timeStep: z.number(),
       outputInterval: z.number(),
-      dampingRatio: z.number(),
+      dampingRatio: z.number().optional(),
       frameCount: z.number(),
       peakDisplacementTimeSeconds: z.number(),
       peakDisplacement: z.number()
