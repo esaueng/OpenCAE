@@ -151,6 +151,35 @@ describe("app persistence", () => {
     vi.restoreAllMocks();
   });
 
+  test("restores dynamic cloud results whose transient summary omits integrationMethod and dampingRatio", async () => {
+    // Core Cloud runners up to 0.1.5 emit transient summaries without these two keys;
+    // requiring them made parseResultBundle silently drop restored dynamic results.
+    const { parseResultBundle } = await import("./appPersistence");
+    const cloudTransientSummary = {
+      ...summary,
+      transient: {
+        analysisType: "dynamic_structural",
+        frameCount: 21,
+        startTime: 0,
+        endTime: 0.1,
+        timeStep: 0.005,
+        outputInterval: 0.005,
+        loadProfile: "ramp",
+        peakDisplacement: 0.0016,
+        peakDisplacementTimeSeconds: 0.1,
+        peakVelocity: 0.05,
+        peakAcceleration: 2.1
+      }
+    };
+    const bundle = parseResultBundle({
+      completedRunId: "run-cloud",
+      summary: cloudTransientSummary,
+      fields
+    });
+    expect(bundle).toBeDefined();
+    expect(bundle?.summary.transient?.frameCount).toBe(21);
+  });
+
   test("builds a reloadable snapshot with project, model, results, and UI state", () => {
     const snapshot = buildAutosavedWorkspace({
       project,

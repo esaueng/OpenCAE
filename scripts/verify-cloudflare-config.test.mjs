@@ -4,7 +4,7 @@ import { describe, expect, test } from "vitest";
 import { parseJsonc, validateCloudflareConfigs } from "./verify-cloudflare-config.mjs";
 
 const rootDir = resolve(import.meta.dirname, "..");
-const expectedRunnerVersion = "0.1.5";
+const expectedRunnerVersion = "0.1.6";
 const expectedContainerApplicationName = "opencae-core-cloud-0.1.1";
 
 function readConfig(path) {
@@ -151,6 +151,18 @@ describe("Cloudflare deployment config guard", () => {
 
     expect(() => validateCloudflareConfigs({ defaultConfig, staticConfig, containerConfig, packageJson })).toThrow(
       new RegExp(`opencae/opencae-core-cloud:${expectedRunnerVersion}`)
+    );
+  });
+
+  test("fails when a container build/deploy script loses the core-ref reachability gate", () => {
+    const defaultConfig = readConfig("wrangler.jsonc");
+    const staticConfig = readConfig("wrangler.static.jsonc");
+    const containerConfig = readConfig("wrangler.containers.jsonc");
+    const packageJson = clone(JSON.parse(readFileSync(resolve(rootDir, "package.json"), "utf8")));
+    packageJson.scripts["deploy:core-cloud"] = packageJson.scripts["deploy:core-cloud"].replace("pnpm verify:core-ref && ", "");
+
+    expect(() => validateCloudflareConfigs({ defaultConfig, staticConfig, containerConfig, packageJson })).toThrow(
+      /deploy:core-cloud must run verify:core-ref/
     );
   });
 
