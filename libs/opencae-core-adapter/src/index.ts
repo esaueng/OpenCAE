@@ -20,6 +20,7 @@ import {
 import { effectiveMaterialProperties, starterMaterials } from "@opencae/materials";
 import {
   assessResultFailure,
+  type Diagnostic,
   type DisplayModel,
   type DynamicSolverSettings,
   type ResultField,
@@ -88,11 +89,18 @@ export type OpenCaeCoreEligibility =
 
 export type OpenCaeCoreSolveOutcome =
   | { ok: true; result: LocalSolveResult; solverBackend: "opencae-core-preview-tet4" | "opencae-core-preview-sdof" | "opencae-core-sparse-tet" | "opencae-core-mdof-tet" }
-  | { ok: false; reason: string };
+  | { ok: false; reason: string; diagnostics?: Diagnostic[] };
+
+export type OpenCaeCorePreflightOutcome =
+  | { ok: true; diagnostics: Diagnostic[] }
+  | { ok: false; reason: string; diagnostics: Diagnostic[] };
 
 const STANDARD_GRAVITY = 9.80665;
 const DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.005;
 const MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.005;
+const LOCAL_DYNAMIC_MAX_STEPS = 2000;
+const LOCAL_DYNAMIC_WARN_STEPS = 120;
+const LOCAL_DYNAMIC_TRANSIENT_FIELD_BYTES = 256_000_000;
 const BROWSER_RUNNER_VERSION = "browser-0.1.0";
 
 const COMPLEX_CORE_PREVIEW_REJECTION_REASON = "OpenCAE Core Local requires simple block/beam geometry or an actual Core volume mesh. Use OpenCAE Core Cloud for complex production geometry.";
@@ -299,13 +307,47 @@ export function openCaeCoreEligibility(study: Study, displayModel?: DisplayModel
   return { ok: true };
 }
 
+export function preflightOpenCaeCoreStudy({ study, displayModel }: {
+  study: Study;
+  displayModel?: DisplayModel;
+}): OpenCaeCorePreflightOutcome {
+  const eligibility = openCaeCoreEligibility(study, displayModel);
+  if (!eligibility.ok) {
+    return {
+      ok: false,
+      reason: eligibility.reason,
+      diagnostics: [{
+        id: "opencae-core-ineligible",
+        severity: "error",
+        source: "solver",
+        message: eligibility.reason,
+        suggestedActions: []
+      }]
+    };
+  }
+
+  if (study.type !== "dynamic_structural") return { ok: true, diagnostics: [] };
+
+  const settings = dynamicSettingsForStudy(study);
+  const stepCount = dynamicStepCount(settings);
+  if (stepCount > LOCAL_DYNAMIC_MAX_STEPS) {
+    const diagnostic = dynamicStepBudgetDiagnostic(stepCount);
+    return {
+      ok: false,
+      reason: diagnostic.message,
+      diagnostics: [diagnostic]
+    };
+  }
+  return { ok: true, diagnostics: localDynamicLimitDiagnostics(settings, stepCount) };
+}
+
 export function trySolveOpenCaeCoreStudy({ study, runId, displayModel }: {
   study: Study;
   runId: string;
   displayModel?: DisplayModel;
 }): OpenCaeCoreSolveOutcome {
-  const eligibility = openCaeCoreEligibility(study, displayModel);
-  if (!eligibility.ok) return eligibility;
+  const preflight = preflightOpenCaeCoreStudy({ study, displayModel });
+  if (!preflight.ok) return { ok: false, reason: preflight.reason, diagnostics: preflight.diagnostics };
 
   try {
     const coreModel = buildOpenCaeCoreCloudModelForStudy(study, displayModel);
@@ -335,7 +377,7 @@ export function trySolveOpenCaeCoreStudy({ study, runId, displayModel }: {
       return {
         ok: true,
         solverBackend: "opencae-core-mdof-tet",
-        result: dynamicResultBundleForOpenCaeCore(runId, coreModel, solved.result.frames, study, displayModel, settings, provenance)
+        result: dynamicResultBundleForOpenCaeCore(runId, coreModel, solved.result.frames, study, displayModel, settings, provenance, preflight.diagnostics)
       };
     }
 
@@ -793,7 +835,8 @@ function dynamicResultBundleForOpenCaeCore(
   study: Study,
   displayModel: DisplayModel | undefined,
   settings: DynamicSolverSettings,
-  provenance: ResultProvenance
+  provenance: ResultProvenance,
+  diagnostics: Diagnostic[] = []
 ): LocalSolveResult {
   const fields: ResultField[] = [];
   // Element centroids are geometry-only and identical across frames; compute once and
@@ -841,15 +884,18 @@ function dynamicResultBundleForOpenCaeCore(
     safetyFactor: round(Number.isFinite(minSafetyFactor) ? minSafetyFactor : 0, 2),
     reactionForce: peakAppliedLoad,
     reactionForceUnits: "N",
-    diagnostics: [{
-      id: "dynamic-reaction-force-unavailable",
-      severity: "warning" as const,
-      source: "solver" as const,
-      message: provenance.resultSource === "computed_preview"
-        ? "Reaction force unavailable from this preview solver."
-        : "Reaction force unavailable from this dynamic solver.",
-      suggestedActions: []
-    }],
+    diagnostics: [
+      ...diagnostics,
+      {
+        id: "dynamic-reaction-force-unavailable",
+        severity: "warning" as const,
+        source: "solver" as const,
+        message: provenance.resultSource === "computed_preview"
+          ? "Reaction force unavailable from this preview solver."
+          : "Reaction force unavailable from this dynamic solver.",
+        suggestedActions: []
+      }
+    ],
     loadSummary: {
       appliedLoadMagnitude,
       reactionForceSource: "applied_load_estimate" as const
@@ -974,19 +1020,70 @@ function withFrame(field: ResultField, frameIndex: number, timeSeconds: number):
 
 function dynamicSettingsForStudy(study: Study): DynamicSolverSettings {
   const raw = study.solverSettings as Partial<DynamicSolverSettings>;
-  const timeStep = finiteOr(raw.timeStep, DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS);
+  const timeStep = positiveFiniteOr(raw.timeStep, DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS);
   return {
     backend: "opencae_core_local",
     fidelity: raw.fidelity ?? "standard",
     startTime: finiteOr(raw.startTime, 0),
     endTime: finiteOr(raw.endTime, 0.1),
     timeStep,
-    outputInterval: Math.max(finiteOr(raw.outputInterval, DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS), timeStep, MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS),
+    outputInterval: Math.max(positiveFiniteOr(raw.outputInterval, DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS), timeStep, MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS),
     dampingRatio: finiteOr(raw.dampingRatio, 0.02),
     integrationMethod: "newmark_average_acceleration",
     loadProfile: isDynamicLoadProfile(raw.loadProfile) ? raw.loadProfile : "ramp",
     ...(raw.allowFreeMotion === true ? { allowFreeMotion: true } : {})
   };
+}
+
+function dynamicStepCount(settings: DynamicSolverSettings): number {
+  const duration = Math.max(0, settings.endTime - settings.startTime);
+  if (duration <= 0 || settings.timeStep <= 0) return 0;
+  return Math.max(0, Math.ceil((duration / settings.timeStep) - 1e-9));
+}
+
+function dynamicStepBudgetDiagnostic(stepCount: number): Diagnostic {
+  return {
+    id: "opencae-core-local-dynamic-step-budget",
+    severity: "error",
+    source: "solver",
+    message: `OpenCAE Core Local dynamic solve requests ${stepCount} time steps, above the in-browser dynamic step budget of ${LOCAL_DYNAMIC_MAX_STEPS}. Increase the time step or shorten the time range.`,
+    suggestedActions: [
+      "Increase the dynamic time step.",
+      "Shorten the dynamic end time.",
+      "Use a coarser dynamic setup before increasing duration."
+    ]
+  };
+}
+
+function localDynamicLimitDiagnostics(settings: DynamicSolverSettings, stepCount: number): Diagnostic[] {
+  const diagnostics: Diagnostic[] = [{
+    id: "opencae-core-local-dynamic-limits",
+    severity: "info",
+    source: "solver",
+    message: `Browser dynamic solve limits: ${LOCAL_DYNAMIC_MAX_STEPS} time steps and ${formatBytes(LOCAL_DYNAMIC_TRANSIENT_FIELD_BYTES)} transient field storage. This run requests ${stepCount} time steps.`,
+    suggestedActions: []
+  }];
+  if (stepCount > LOCAL_DYNAMIC_WARN_STEPS) {
+    diagnostics.unshift({
+      id: "opencae-core-local-dynamic-runtime-warning",
+      severity: "warning",
+      source: "solver",
+      message: `This dynamic solve requests ${stepCount} time steps and may take minutes in the browser on larger meshes. Cancellation remains available while the solve runs.`,
+      suggestedActions: [
+        "Start with a shorter time range for setup validation.",
+        "Use a larger time step when high-frequency response is not needed."
+      ]
+    });
+  }
+  void settings;
+  return diagnostics;
+}
+
+function formatBytes(value: number): string {
+  if (value >= 1_000_000_000) return `${round(value / 1_000_000_000, 1)} GB`;
+  if (value >= 1_000_000) return `${round(value / 1_000_000, 0)} MB`;
+  if (value >= 1_000) return `${round(value / 1_000, 0)} KB`;
+  return `${value} B`;
 }
 
 function dynamicLoadProfileForCore(value: DynamicSolverSettings["loadProfile"]): DynamicLoadProfile {
@@ -1710,6 +1807,10 @@ function finitePositive(value: unknown): boolean {
 
 function finiteOr(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function positiveFiniteOr(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
 function vector3(value: unknown): Vec3 | null {
