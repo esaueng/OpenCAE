@@ -2,7 +2,7 @@ import type { AnalysisMesh, DisplayModel, DynamicSolverSettings, MeshQuality, Pr
 import type { LoadApplicationPoint, LoadDirection, LoadType, PayloadLoadMetadata, PayloadObjectSelection } from "../loadPreview";
 import { embedUploadedModelFile, type EmbeddedModelFile, type LocalResultBundle, type SolverSurfaceMesh } from "../projectFile";
 import { createLocalBlankProject, createLocalSampleProject, createLocalUploadResponse, openLocalProjectPayload } from "../localProjectFactory";
-import { buildOpenCaeCoreCloudModelForStudy, cloudGeometrySourceForStudy, hasActualCoreVolumeMesh, isComplexGeometry, normalizeSolverBackend, openCaeCoreEligibility, studyForCoreCloudGeometryDispatch, OPENCAE_CORE_CLOUD_GEOMETRY_REQUIRED_REASON, type NormalizedBrowserSolverBackend } from "../workers/opencaeCoreSolve";
+import { buildOpenCaeCoreCloudModelForStudy, cloudGeometrySourceForStudy, hasActualCoreVolumeMesh, isComplexGeometry, normalizeSolverBackend, openCaeCoreEligibility, preflightOpenCaeCoreStudy, studyForCoreCloudGeometryDispatch, OPENCAE_CORE_CLOUD_GEOMETRY_REQUIRED_REASON, type NormalizedBrowserSolverBackend } from "../workers/opencaeCoreSolve";
 import { startOpenCaeCoreSolveWorker, type StartedSolveWorker } from "../workers/solveWorkerClient";
 
 export interface SampleProjectResponse {
@@ -630,12 +630,12 @@ function openCaeCoreCloudSolveRequest(runId: string, study: Study, displayModel:
 
 function runSimulationLocally(study: Study, displayModel?: DisplayModel): { run: StudyRun; streamUrl: string; message: string } {
   const runId = `run-local-${crypto.randomUUID()}`;
-  const coreEligibility = openCaeCoreEligibility(study, displayModel);
-  if (!coreEligibility.ok) {
+  const preflight = preflightOpenCaeCoreStudy({ study, displayModel });
+  if (!preflight.ok) {
     const now = new Date().toISOString();
     setCappedRunEntry(localRunControllersByRunId, runId, replayLocalRunEvents([
       { runId, type: "state", progress: 0, message: "OpenCAE Core Local solve blocked.", timestamp: now },
-      { runId, type: "error", progress: 100, message: coreEligibility.reason, timestamp: now }
+      { runId, type: "error", progress: 100, message: preflight.reason, timestamp: now }
     ]));
     return {
       run: {
@@ -648,16 +648,10 @@ function runSimulationLocally(study: Study, displayModel?: DisplayModel): { run:
         solverVersion: "0.1.0",
         startedAt: now,
         finishedAt: now,
-        diagnostics: [{
-          id: "opencae-core-ineligible",
-          severity: "error",
-          source: "solver",
-          message: coreEligibility.reason,
-          suggestedActions: []
-        }]
+        diagnostics: preflight.diagnostics
       },
       streamUrl: `local:${runId}`,
-      message: coreEligibility.reason
+      message: preflight.reason
     };
   }
   if (hasRunningLocalSolve()) {
@@ -672,10 +666,10 @@ function runSimulationLocally(study: Study, displayModel?: DisplayModel): { run:
       status: "queued",
       jobId: `job-${runId}`,
       meshRef: study.meshSettings.meshRef,
-      solverBackend: localSolverBackendForRun(study, "opencae_core_local", coreEligibility),
+      solverBackend: localSolverBackendForRun(study, "opencae_core_local", { ok: true }),
       solverVersion: "0.1.0",
       startedAt: now,
-      diagnostics: []
+      diagnostics: preflight.diagnostics
     },
     streamUrl: `local:${runId}`,
     message: "OpenCAE Core Local simulation running."

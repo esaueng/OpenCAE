@@ -806,6 +806,54 @@ describe("api", () => {
     expect(seen.at(-1)?.estimatedRemainingMs).toBe(0);
   });
 
+  test("rejects oversized dynamic local step counts before starting the worker", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: "Study not found" }), {
+      status: 404,
+      headers: { "content-type": "application/json" }
+    })));
+    const oversizedDynamicStudy = {
+      ...study,
+      name: "Long Dynamic",
+      type: "dynamic_structural",
+      materialAssignments: [{ id: "assign-1", materialId: "mat-aluminum-6061", selectionRef: "selection-body-1", status: "complete" }],
+      constraints: [{ id: "constraint-1", type: "fixed", selectionRef: "selection-face-1", parameters: {}, status: "complete" }],
+      loads: [{ id: "load-1", type: "force", selectionRef: "selection-face-1", parameters: { value: 500, units: "N", direction: [0, -1, 0] }, status: "complete" }],
+      meshSettings: { preset: "coarse", status: "complete", meshRef: "project-1/mesh/mesh-summary.json" },
+      solverSettings: {
+        backend: "opencae_core_local",
+        startTime: 0,
+        endTime: 10,
+        timeStep: 0.0001,
+        outputInterval: 0.25,
+        dampingRatio: 0.02,
+        integrationMethod: "newmark_average_acceleration",
+        loadProfile: "ramp"
+      }
+    } as Study;
+
+    const response = await runSimulation("study-1", oversizedDynamicStudy, coreDisplayModel);
+    expect((response.run as { status?: string }).status).toBe("failed");
+    expect((response.run as { diagnostics?: Array<{ id: string; source: string; message: string }> }).diagnostics).toEqual([
+      expect.objectContaining({
+        id: "opencae-core-local-dynamic-step-budget",
+        source: "solver",
+        message: expect.stringContaining("100000 time steps")
+      })
+    ]);
+    expect(response.message).toContain("in-browser dynamic step budget");
+
+    const seen: RunEvent[] = [];
+    const source = subscribeToRun(response.run.id, (event) => seen.push(event));
+    await vi.waitFor(() => expect(seen.some((event) => event.type === "error")).toBe(true));
+    source.close();
+
+    expect(seen.at(-1)).toMatchObject({
+      type: "error",
+      progress: 100,
+      message: expect.stringContaining("in-browser dynamic step budget")
+    });
+  });
+
   test("cancels a local run so pending local run events stop", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: "Study not found" }), {
       status: 404,
