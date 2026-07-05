@@ -4,6 +4,7 @@ import { describe, expect, test } from "vitest";
 
 const appSource = readFileSync(resolve(__dirname, "App.tsx"), "utf8");
 const apiSource = readFileSync(resolve(__dirname, "lib/api.ts"), "utf8");
+const solveWorkerClientSource = readFileSync(resolve(__dirname, "workers/solveWorkerClient.ts"), "utf8");
 const coreAdapterSource = readFileSync(resolve(__dirname, "../../../libs/opencae-core-adapter/src/index.ts"), "utf8");
 const viteConfigSource = readFileSync(resolve(__dirname, "../vite.config.ts"), "utf8");
 const packageJson = JSON.parse(readFileSync(resolve(__dirname, "../package.json"), "utf8")) as {
@@ -35,8 +36,9 @@ describe("Worker UI performance rewrite boundaries", () => {
 
   test("keeps browser API solves on Core helpers without detailed local fallback imports", () => {
     expect(apiSource).not.toContain(`from "${removedSolverPackage}"`);
-    expect(apiSource).toContain("trySolveOpenCaeCoreStudy");
-    expect(apiSource).toContain(removedWorkerSolver);
+    expect(apiSource).toContain("startOpenCaeCoreSolveWorker");
+    expect(apiSource).not.toContain(removedWorkerSolver);
+    expect(solveWorkerClientSource).toContain("trySolveOpenCaeCoreStudy");
     expect(apiSource).not.toContain(removedFallbackSolver);
   });
 

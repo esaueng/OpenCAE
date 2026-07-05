@@ -93,21 +93,23 @@ export type OpenCaeCoreSolveOutcome =
 const STANDARD_GRAVITY = 9.80665;
 const DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.005;
 const MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.005;
+const BROWSER_RUNNER_VERSION = "browser-0.1.0";
 
 const COMPLEX_CORE_PREVIEW_REJECTION_REASON = "OpenCAE Core Local requires simple block/beam geometry or an actual Core volume mesh. Use OpenCAE Core Cloud for complex production geometry.";
 export const OPENCAE_CORE_CLOUD_GEOMETRY_REQUIRED_REASON = "OpenCAE Core Cloud requires a procedural or uploaded geometry source so the cloud container can generate a Core volume mesh.";
 
-const OPENCAE_CORE_ACTUAL_STATIC_PROVENANCE: ResultProvenance = {
+const OPENCAE_CORE_BROWSER_STATIC_PROVENANCE: ResultProvenance = {
   kind: "opencae_core_fea",
   solver: "opencae-core-sparse-tet",
   solverVersion: "0.1.0",
-  meshSource: "actual_volume_mesh",
+  runnerVersion: BROWSER_RUNNER_VERSION,
+  meshSource: "structured_block_core",
   resultSource: "computed",
   units: "m-N-s-Pa"
 };
 
-const OPENCAE_CORE_ACTUAL_DYNAMIC_PROVENANCE: ResultProvenance = {
-  ...OPENCAE_CORE_ACTUAL_STATIC_PROVENANCE,
+const OPENCAE_CORE_BROWSER_DYNAMIC_PROVENANCE: ResultProvenance = {
+  ...OPENCAE_CORE_BROWSER_STATIC_PROVENANCE,
   solver: "opencae-core-mdof-tet",
   integrationMethod: "newmark_average_acceleration"
 };
@@ -288,13 +290,11 @@ export function openCaeCoreEligibility(study: Study, displayModel?: DisplayModel
   if (!study.constraints.some((constraint) => constraint.type === "fixed")) {
     return { ok: false, reason: "OpenCAE Core requires at least one fixed support." };
   }
-  const unsupportedLoad = study.loads.find((load) => load.type !== "force");
-  if (unsupportedLoad) return { ok: false, reason: `OpenCAE Core Local supports force loads only; ${unsupportedLoad.type} loads require OpenCAE Core Cloud.` };
-  if (!study.loads.length) return { ok: false, reason: "OpenCAE Core requires at least one force load." };
+  if (!study.loads.length) return { ok: false, reason: "OpenCAE Core requires at least one load." };
   const material = materialForStudy(study).material;
   const force = totalForceVector(study, displayModel, material.density);
   if (Math.hypot(...force) <= 1e-12) {
-    return { ok: false, reason: "OpenCAE Core requires a force load with a finite positive value and direction." };
+    return { ok: false, reason: "OpenCAE Core requires a finite positive force, pressure, or gravity load with a direction." };
   }
   return { ok: true };
 }
@@ -308,8 +308,7 @@ export function trySolveOpenCaeCoreStudy({ study, runId, displayModel }: {
   if (!eligibility.ok) return eligibility;
 
   try {
-    const coreModel = openCaeCoreModelForStudy(study, displayModel);
-    const isActualMesh = coreModel.meshSource === "actual_volume_mesh";
+    const coreModel = buildOpenCaeCoreCloudModelForStudy(study, displayModel);
     // The dynamic MDOF solver does not enforce maxDofs itself, so guard the in-browser
     // DOF budget here for both paths — otherwise a large actual mesh would run unbounded
     // per-step solves on the worker thread instead of failing fast like the static path.
@@ -318,16 +317,16 @@ export function trySolveOpenCaeCoreStudy({ study, runId, displayModel }: {
     if (study.type === "dynamic_structural") {
       const material = materialForStudy(study).material;
       const settings = dynamicSettingsForStudy(study);
-      const provenance = isActualMesh ? OPENCAE_CORE_ACTUAL_DYNAMIC_PROVENANCE : OPENCAE_CORE_PREVIEW_DYNAMIC_PROVENANCE;
+      const provenance = browserCoreProvenance(coreModel, "dynamic_structural");
       const solved = solveDynamicMdofTet4Cpu(coreModel.model, {
         maxDofs: localSolveMaxDofs(study, coreModel),
-        // Display-grade CG tolerance: the per-step warm-started solves converge much
-        // faster and 1e-8 relative residual is far below render resolution.
-        tolerance: 1e-8,
+        maxIterations: 50000,
+        tolerance: 1e-10,
         startTime: settings.startTime,
         endTime: settings.endTime,
         timeStep: settings.timeStep,
         outputInterval: settings.outputInterval,
+        maxFrames: 2000,
         dampingRatio: settings.dampingRatio,
         loadProfile: dynamicLoadProfileForCore(settings.loadProfile),
         massDensity: material.density
@@ -335,22 +334,38 @@ export function trySolveOpenCaeCoreStudy({ study, runId, displayModel }: {
       if (!solved.ok) return { ok: false, reason: `OpenCAE Core solve failed: ${solved.error.message}` };
       return {
         ok: true,
-        solverBackend: isActualMesh ? "opencae-core-mdof-tet" : "opencae-core-preview-sdof",
+        solverBackend: "opencae-core-mdof-tet",
         result: dynamicResultBundleForOpenCaeCore(runId, coreModel, solved.result.frames, study, displayModel, settings, provenance)
       };
     }
 
-    const solved = solveStaticLinearTet4Cpu(coreModel.model, { maxDofs: localSolveMaxDofs(study, coreModel) });
+    const solved = solveStaticLinearTet4Cpu(coreModel.model, {
+      maxDofs: localSolveMaxDofs(study, coreModel),
+      maxIterations: 50000,
+      tolerance: 1e-10,
+      method: "sparse",
+      solverMode: "sparse"
+    });
     if (!solved.ok) return { ok: false, reason: `OpenCAE Core solve failed: ${solved.error.message}` };
-    const provenance = isActualMesh ? OPENCAE_CORE_ACTUAL_STATIC_PROVENANCE : OPENCAE_CORE_PREVIEW_STATIC_PROVENANCE;
+    const provenance = browserCoreProvenance(coreModel, "static_stress");
     return {
       ok: true,
-      solverBackend: isActualMesh ? "opencae-core-sparse-tet" : "opencae-core-preview-tet4",
+      solverBackend: "opencae-core-sparse-tet",
       result: resultBundleForOpenCaeCore(runId, coreModel, solved.result, study, provenance)
     };
   } catch (error) {
     return { ok: false, reason: error instanceof Error ? error.message : "OpenCAE Core solve failed." };
   }
+}
+
+function browserCoreProvenance(coreModel: CoreStudyModel, analysisType: Study["type"]): ResultProvenance {
+  const base = analysisType === "dynamic_structural"
+    ? OPENCAE_CORE_BROWSER_DYNAMIC_PROVENANCE
+    : OPENCAE_CORE_BROWSER_STATIC_PROVENANCE;
+  return {
+    ...base,
+    meshSource: coreModel.meshSource
+  };
 }
 
 export function buildOpenCaeCoreCloudModelForStudy(study: Study, displayModel: DisplayModel | undefined): CoreStudyModel {
@@ -525,7 +540,7 @@ function openCaeCoreModelForStudy(study: Study, displayModel: DisplayModel | und
   const mesh = tetMeshForDisplayModel(
     displayModel,
     study.meshSettings.preset,
-    study.type === "dynamic_structural" ? LOCAL_DYNAMIC_TET10_NODE_BUDGET : LOCAL_TET10_NODE_BUDGET
+    CLOUD_STRUCTURED_BLOCK_TET10_NODE_BUDGET
   );
   // Computed once and reused for every fixed support and load below.
   const renderBounds = renderBoundsForPoints(mesh.renderNodePoints);
@@ -1087,7 +1102,7 @@ function netVectorMagnitude(vector: Float64Array): number {
 function tetMeshForDisplayModel(
   displayModel: DisplayModel,
   preset: Study["meshSettings"]["preset"],
-  nodeBudget = LOCAL_TET10_NODE_BUDGET
+  nodeBudget = CLOUD_STRUCTURED_BLOCK_TET10_NODE_BUDGET
 ): CoreTetMesh {
   const dimensions = displayModel.dimensions;
   if (!dimensions) throw new Error("OpenCAE Core requires display dimensions.");
@@ -1259,9 +1274,7 @@ function facePlaneForNormal(normal: Vec3, bounds: { min: Vec3; max: Vec3 }): { a
 
 // Dimension-aware structured grid sizing, mirroring the cloud mesher: presets choose
 // how many cells span the smallest dimension, all axes target near-cubic cells, and
-// the elevated Tet10 grid stays inside the in-browser DOF budget. Densities sit one
-// notch below the cloud presets: the local backend is the fast preview tier, and the
-// per-frame implicit solves of dynamic studies run on the main worker thread.
+// the elevated Tet10 grid stays inside the in-browser staged DOF budget.
 const LOCAL_CELLS_ACROSS_MIN_DIMENSION: Record<string, number> = {
   coarse: 2,
   medium: 3,
@@ -1269,10 +1282,6 @@ const LOCAL_CELLS_ACROSS_MIN_DIMENSION: Record<string, number> = {
   ultra: 5
 };
 const LOCAL_MAX_DIVISIONS_PER_AXIS = 32;
-// 4k Tet10 nodes = 12k DOFs for a single static solve. Dynamic studies pay the solve
-// cost once per time step, so they get a smaller grid to stay interactive.
-const LOCAL_TET10_NODE_BUDGET = 4000;
-const LOCAL_DYNAMIC_TET10_NODE_BUDGET = 1500;
 // Cloud structured-block fallback (simple geometry with no separate geometry source): the
 // cloud container has no in-browser worker-thread constraint, so it gets a denser grid than
 // the local preview tier — ~8000 Tet10 nodes (~24000 DOFs), well under the cloud solver's
@@ -1316,10 +1325,9 @@ function maxDofsForMeshPreset(preset: Study["meshSettings"]["preset"]): number {
   return (x + 1) * (y + 1) * (z + 1) * 3;
 }
 
-// The structured proxy mesh is elevated to Tet10, so the preset corner-node bound no
-// longer covers the midside nodes; actual-mesh artifacts size themselves. Cap at the
-// in-browser solver budget either way.
-const LOCAL_SOLVER_MAX_DOFS = 30000;
+// Staged browser budget from the local-solver plan. The 100k cloud cap comes after
+// the upstream typed-array assembly builder and WebKit target-scale benchmark land.
+const LOCAL_SOLVER_MAX_DOFS = 60000;
 
 function localSolveMaxDofs(study: Study, coreModel: CoreStudyModel): number {
   const modelDofs = coreModel.model.nodes.coordinates.length;
