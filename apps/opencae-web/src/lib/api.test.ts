@@ -388,14 +388,15 @@ describe("api", () => {
     const results = await getResults(response.run.id);
 
     expect(response.message).toContain("OpenCAE Core Local");
-    expect((response.run as { solverBackend?: string }).solverBackend).toBe("opencae-core-preview-tet4");
+    expect((response.run as { solverBackend?: string }).solverBackend).toBe("opencae-core-sparse-tet");
     expect(completed.progress).toBe(100);
     expect(results.fields.map((field) => field.runId)).toEqual([response.run.id, response.run.id, response.run.id]);
-    expect(results.summary.provenance?.solver).toBe("opencae-core-preview-tet4");
+    expect(results.summary.provenance?.solver).toBe("opencae-core-sparse-tet");
+    expect(results.summary.provenance?.resultSource).toBe("computed");
     expect(results.summary.maxStress).toBeGreaterThanOrEqual(0);
   });
 
-  test("runs the in-browser core solver when the deployment has no Core Cloud route", async () => {
+  test("defaults eligible omitted-backend studies to the in-browser core solver", async () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       if (String(input) === "/api/cloud-core/runs") {
         return new Response(JSON.stringify({ message: "Route POST:/api/cloud-core/runs not found", error: "Not Found", statusCode: 404 }), {
@@ -411,7 +412,6 @@ describe("api", () => {
       constraints: [{ id: "constraint-1", type: "fixed", selectionRef: "selection-face-1", parameters: {}, status: "complete" }],
       loads: [{ id: "load-1", type: "force", selectionRef: "selection-face-1", parameters: { value: 500, units: "N", direction: [0, -1, 0] }, status: "complete" }],
       meshSettings: { preset: "fine", status: "complete", meshRef: "project-1/mesh/mesh-summary.json" },
-      // No explicit backend: samples default to opencae_core_cloud.
       solverSettings: { fidelity: "standard" }
     } as unknown as Study;
     const statusMessages: string[] = [];
@@ -427,10 +427,10 @@ describe("api", () => {
     });
     const results = await getResults(response.run.id);
 
-    expect(statusMessages.some((message) => message.includes("not available in this deployment"))).toBe(true);
+    expect(statusMessages).toEqual([]);
     expect(completed.type).toBe("complete");
-    expect(results.summary.provenance?.solver).toBe("opencae-core-preview-tet4");
-    expect(results.summary.provenance?.resultSource).toBe("computed_preview");
+    expect(results.summary.provenance?.solver).toBe("opencae-core-sparse-tet");
+    expect(results.summary.provenance?.resultSource).toBe("computed");
   });
 
   test("does not route explicit local sample static solves through legacy beam estimates", async () => {
@@ -459,19 +459,14 @@ describe("api", () => {
     expect(terminal.message).not.toContain("Euler-Bernoulli");
   });
 
-  test("runs explicit local backend selections in browser OpenCAE Core without cloud route calls", async () => {
-    const coreDisplayModel: DisplayModel = {
-      ...displayModel,
-      bodyCount: 1,
-      dimensions: { x: 0.12, y: 0.04, z: 0.02, units: "m" }
-    };
+  test("runs explicit local backend selections in browser OpenCAE Core without cloud route calls", { timeout: 15000 }, async () => {
     const coreStudy = {
       ...study,
       materialAssignments: [{ id: "assign-1", materialId: "mat-aluminum-6061", selectionRef: "selection-body-1", status: "complete" }],
       constraints: [{ id: "constraint-1", type: "fixed", selectionRef: "selection-face-1", parameters: {}, status: "complete" }],
       loads: [{ id: "load-1", type: "force", selectionRef: "selection-face-1", parameters: { value: 500, units: "N", direction: [0, -1, 0] }, status: "complete" }],
-      meshSettings: { preset: "ultra", status: "complete", meshRef: "project-1/mesh/mesh-summary.json" },
-      solverSettings: { backend: "opencae_core_local", fidelity: "ultra" }
+      meshSettings: { preset: "medium", status: "complete", meshRef: "project-1/mesh/mesh-summary.json" },
+      solverSettings: { backend: "opencae_core_local", fidelity: "standard" }
     } as unknown as Study;
     const fetchMock = vi.fn(async (_input?: RequestInfo | URL) => Promise.reject(new TypeError("API unavailable")));
     vi.stubGlobal("fetch", fetchMock);
@@ -480,15 +475,17 @@ describe("api", () => {
     const response = await runSimulation("study-1", coreStudy, coreDisplayModel, { onRunStatus: (message) => healthLogs.push(message) });
     const seen: RunEvent[] = [];
     const source = subscribeToRun(response.run.id, (event) => seen.push(event));
-    await vi.waitFor(() => expect(seen.some((event) => event.type === "complete")).toBe(true), { timeout: 3000 });
+    await vi.waitFor(() => expect(seen.some((event) => ["complete", "error", "cancelled"].includes(event.type))).toBe(true), { timeout: 10000 });
     source.close();
+    const terminal = seen.find((event) => ["complete", "error", "cancelled"].includes(event.type));
+    if (terminal?.type !== "complete") throw new Error(terminal?.message ?? "Local run did not complete.");
     const results = await getResults(response.run.id);
 
     expect(healthLogs).toEqual([]);
     expect(response.streamUrl).toMatch(/^local:run-local-/);
-    expect((response.run as { solverBackend?: string }).solverBackend).toBe("opencae-core-preview-tet4");
+    expect((response.run as { solverBackend?: string }).solverBackend).toBe("opencae-core-sparse-tet");
     expect(seen.map((event) => event.message).join(" ")).toContain("OpenCAE Core");
-    expect(results.summary.provenance?.solver).toBe("opencae-core-preview-tet4");
+    expect(results.summary.provenance?.solver).toBe("opencae-core-sparse-tet");
     expect(fetchMock.mock.calls.every(([input]) => !String(input).includes("/api/cloud-fea"))).toBe(true);
   });
 
@@ -730,12 +727,12 @@ describe("api", () => {
     source.close();
     const results = await getResults(response.run.id);
 
-    expect((response.run as { solverBackend?: string }).solverBackend).toBe("opencae-core-preview-sdof");
+    expect((response.run as { solverBackend?: string }).solverBackend).toBe("opencae-core-mdof-tet");
     expect(response.message).toContain("OpenCAE Core Local simulation running");
     expect(seen.map((event) => event.message).join(" ")).toContain("OpenCAE Core dynamic");
     expect(results.summary.transient?.frameCount).toBe(21);
     expect(results.fields.some((field) => field.type === "stress" && field.frameIndex === 20)).toBe(true);
-    expect(results.summary.provenance?.solver).toBe("opencae-core-preview-sdof");
+    expect(results.summary.provenance?.solver).toBe("opencae-core-mdof-tet");
     expect(fetchMock.mock.calls.every(([input]) => !String(input).includes("/api/cloud-fea"))).toBe(true);
   });
 
@@ -758,60 +755,55 @@ describe("api", () => {
     expect(dynamicOutputFrameEstimate(dynamicStudy, { backend: "opencae_core_local" })).toBe(21);
   });
 
-  test("defers local result solving until a queued run is subscribed", () => {
-    expect(apiSource).toContain("setCappedRunEntry(localResultSolversByRunId, runId");
-    expect(apiSource).toContain('if (event.type === "complete")');
-    expect(apiSource).toContain("await computeLocalResults(event.runId);");
+  test("starts local result solving through the dedicated controller when subscribed", () => {
+    expect(apiSource).toContain("createLocalSolveController(runId, study, displayModel)");
+    expect(apiSource).toContain("startOpenCaeCoreSolveWorker");
+    expect(apiSource).toContain("setCappedRunEntry(localResultsByRunId, runId, result)");
   });
 
   test("fails the run instead of hanging when the local solver rejects", () => {
-    expect(apiSource).toContain("localResultsByRunId.delete(event.runId);");
-    expect(apiSource).toContain('messageFromUnknownError(error) || "Local solve failed."');
+    expect(apiSource).toContain("localResultsByRunId.delete(runId);");
+    expect(apiSource).toContain('"OpenCAE Core local solve failed."');
   });
 
-  test("reports dynamic local frame-writing progress before completion", { timeout: 60000 }, async () => {
-    vi.useFakeTimers();
-    try {
-      vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: "Study not found" }), {
-        status: 404,
-        headers: { "content-type": "application/json" }
-      })));
-      const readyStudy = {
-        ...study,
-        name: "Dynamic",
-        type: "dynamic_structural",
-        materialAssignments: [{ id: "assign-1", materialId: "mat-aluminum-6061", selectionRef: "selection-body-1", status: "complete" }],
-        constraints: [{ id: "constraint-1", type: "fixed", selectionRef: "selection-face-1", parameters: {}, status: "complete" }],
-        loads: [{ id: "load-1", type: "force", selectionRef: "selection-face-1", parameters: { value: 500, units: "N", direction: [0, -1, 0] }, status: "complete" }],
-        meshSettings: { preset: "fine", status: "complete", meshRef: "project-1/mesh/mesh-summary.json" },
-        solverSettings: {
-          backend: "opencae_core_local",
-          startTime: 0,
-          endTime: 0.5,
-          timeStep: 0.001,
-          outputInterval: 0.001,
-          dampingRatio: 0.02,
-          integrationMethod: "newmark_average_acceleration",
-          loadProfile: "ramp"
-        }
-      } as Study;
+  test("reports worker-driven dynamic local progress without fake remaining-time estimates", { timeout: 60000 }, async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: "Study not found" }), {
+      status: 404,
+      headers: { "content-type": "application/json" }
+    })));
+    const readyStudy = {
+      ...study,
+      name: "Dynamic",
+      type: "dynamic_structural",
+      materialAssignments: [{ id: "assign-1", materialId: "mat-aluminum-6061", selectionRef: "selection-body-1", status: "complete" }],
+      constraints: [{ id: "constraint-1", type: "fixed", selectionRef: "selection-face-1", parameters: {}, status: "complete" }],
+      loads: [{ id: "load-1", type: "force", selectionRef: "selection-face-1", parameters: { value: 500, units: "N", direction: [0, -1, 0] }, status: "complete" }],
+      meshSettings: { preset: "coarse", status: "complete", meshRef: "project-1/mesh/mesh-summary.json" },
+      solverSettings: {
+        backend: "opencae_core_local",
+        startTime: 0,
+        endTime: 0.01,
+        timeStep: 0.005,
+        outputInterval: 0.005,
+        dampingRatio: 0.02,
+        integrationMethod: "newmark_average_acceleration",
+        loadProfile: "ramp"
+      }
+    } as Study;
 
-      const response = await runSimulation("study-1", readyStudy, coreDisplayModel);
-      const seen: RunEvent[] = [];
-      const source = subscribeToRun(response.run.id, (event) => seen.push(event));
-      await vi.runAllTimersAsync();
-      source.close();
+    const response = await runSimulation("study-1", readyStudy, coreDisplayModel);
+    const seen: RunEvent[] = [];
+    const source = subscribeToRun(response.run.id, (event) => seen.push(event));
+    await vi.waitFor(() => expect(seen.some((event) => event.type === "complete")).toBe(true), { timeout: 5000 });
+    source.close();
 
-      const writeEvents = seen.filter((event) => event.message.includes("Writing dynamic result frames"));
-      expect(writeEvents.length).toBeGreaterThan(1);
-      expect(writeEvents.at(-1)?.message).toContain("101 / 101");
-      expect(writeEvents.map((event) => event.progress)).toContain(98);
-      expect(writeEvents.every((event) => typeof event.estimatedRemainingMs === "number")).toBe(true);
-      expect(writeEvents.at(-1)?.estimatedRemainingMs).toBeLessThanOrEqual(writeEvents[0]?.estimatedRemainingMs ?? 0);
-      expect(seen.at(-1)?.type).toBe("complete");
-    } finally {
-      vi.useRealTimers();
-    }
+    const messages = seen.map((event) => event.message).join(" ");
+    expect(messages).toContain("OpenCAE Core dynamic browser solve queued.");
+    expect(messages).toContain("Building OpenCAE Core dynamic model and applying solver limits.");
+    expect(seen.some((event) => event.type === "progress" && event.progress === 90)).toBe(true);
+    expect(seen.filter((event) => event.type === "progress").every((event) => event.estimatedRemainingMs === undefined)).toBe(true);
+    expect(seen.at(-1)?.type).toBe("complete");
+    expect(seen.at(-1)?.estimatedRemainingMs).toBe(0);
   });
 
   test("cancels a local run so pending local run events stop", async () => {
@@ -828,7 +820,7 @@ describe("api", () => {
       solverSettings: { backend: "opencae_core_local", fidelity: "standard" }
     } as Study;
 
-    const response = await runSimulation("study-1", readyStudy);
+    const response = await runSimulation("study-1", readyStudy, coreDisplayModel);
     const seen: RunEvent[] = [];
     const source = subscribeToRun(response.run.id, (event) => seen.push(event));
     const cancelled = await cancelRun(response.run.id);

@@ -81,6 +81,28 @@ describe("OpenCAE Core browser solver adapter", () => {
     expect(eligibility).toEqual({ ok: true });
   });
 
+  test("accepts pressure loads on the browser Core path", { timeout: 60000 }, () => {
+    const pressureStudy = {
+      ...staticStudy,
+      loads: [{
+        id: "load-pressure",
+        type: "pressure",
+        selectionRef: "selection-load",
+        parameters: { value: 250, units: "kPa", direction: [0, 0, -1] },
+        status: "complete"
+      }]
+    } satisfies Study;
+
+    const eligibility = openCaeCoreEligibility(pressureStudy, displayModel);
+    const outcome = trySolveOpenCaeCoreStudy({ study: pressureStudy, runId: "run-pressure", displayModel });
+
+    expect(eligibility).toEqual({ ok: true });
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) throw new Error(outcome.reason);
+    expect(outcome.result.summary.provenance?.solver).toBe("opencae-core-sparse-tet");
+    expect(outcome.result.summary.maxDisplacement).toBeGreaterThan(0);
+  });
+
   test("rejects the Bracket Demo without an actual Core volume mesh", () => {
     const bracketStudy = bracketDemoProject.studies[0]!;
     const eligibility = openCaeCoreEligibility(bracketStudy, bracketDisplayModel);
@@ -113,7 +135,7 @@ describe("OpenCAE Core browser solver adapter", () => {
     });
   });
 
-  test("solves eligible static studies as OpenCAE Core preview provenance", { timeout: 60000 }, () => {
+  test("solves eligible static studies as browser OpenCAE Core sparse provenance", { timeout: 60000 }, () => {
     const outcome = trySolveOpenCaeCoreStudy({ study: staticStudy, runId: "run-core-1", displayModel });
 
     expect(outcome.ok).toBe(true);
@@ -121,15 +143,17 @@ describe("OpenCAE Core browser solver adapter", () => {
     const displacement = outcome.result.fields.find((field) => field.type === "displacement");
     const stress = outcome.result.fields.find((field) => field.type === "stress");
     expect(outcome.result.summary.provenance).toMatchObject({
-      kind: "local_estimate",
-      solver: "opencae-core-preview-tet4",
-      meshSource: "structured_block_proxy",
-      resultSource: "computed_preview"
+      kind: "opencae_core_fea",
+      solver: "opencae-core-sparse-tet",
+      meshSource: "structured_block_core",
+      resultSource: "computed",
+      runnerVersion: "browser-0.1.0"
     });
     expect(outcome.result.summary.maxStress).toBeGreaterThan(0);
     expect(outcome.result.summary.maxDisplacement).toBeGreaterThan(0);
     expect(outcome.result.fields.map((field) => field.type)).toEqual(["stress", "displacement", "safety_factor"]);
-    expect(outcome.result.fields.every((field) => field.provenance?.solver === "opencae-core-preview-tet4")).toBe(true);
+    expect(outcome.solverBackend).toBe("opencae-core-sparse-tet");
+    expect(outcome.result.fields.every((field) => field.provenance?.solver === "opencae-core-sparse-tet")).toBe(true);
     expect(displacement?.samples?.length).toBeGreaterThan(24);
     expect(stress?.samples?.length).toBeGreaterThan(24);
     expect(displacement?.samples?.every((sample) => sample.vector?.every(Number.isFinite))).toBe(true);
@@ -159,17 +183,18 @@ describe("OpenCAE Core browser solver adapter", () => {
     expect(eligibility).toEqual({ ok: true });
     if (!outcome.ok) throw new Error(outcome.reason);
     expect(outcome.ok).toBe(true);
-    expect(outcome.solverBackend).toBe("opencae-core-preview-sdof");
+    expect(outcome.solverBackend).toBe("opencae-core-mdof-tet");
     expect(outcome.result.summary.provenance).toMatchObject({
-      kind: "local_estimate",
-      solver: "opencae-core-preview-sdof",
-      meshSource: "structured_block_proxy",
-      resultSource: "computed_preview",
+      kind: "opencae_core_fea",
+      solver: "opencae-core-mdof-tet",
+      meshSource: "structured_block_core",
+      resultSource: "computed",
+      runnerVersion: "browser-0.1.0",
       integrationMethod: "newmark_average_acceleration"
     });
     expect(outcome.result.summary.reactionForce).toBeGreaterThan(0);
     expect(outcome.result.summary.loadSummary?.appliedLoadMagnitude).toBeCloseTo(500);
-    expect(outcome.result.summary.diagnostics?.some((diagnostic) => diagnostic.message === "Reaction force unavailable from this preview solver.")).toBe(true);
+    expect(outcome.result.summary.diagnostics?.some((diagnostic) => diagnostic.message === "Reaction force unavailable from this dynamic solver.")).toBe(true);
     expect(outcome.result.summary.transient?.frameCount).toBeGreaterThan(1);
     expect(outcome.result.fields.some((field) => field.type === "displacement" && field.frameIndex === 1)).toBe(true);
     expect(outcome.result.fields.some((field) => field.type === "velocity")).toBe(true);
@@ -203,8 +228,8 @@ describe("OpenCAE Core browser solver adapter", () => {
 
     const outcome = trySolveOpenCaeCoreStudy({ study: actualMeshStudy, runId: "run-actual-core", displayModel: bracketDisplayModel });
 
-    expect(outcome.ok).toBe(true);
     if (!outcome.ok) throw new Error(outcome.reason);
+    expect(outcome.ok).toBe(true);
     expect(outcome.result.summary.provenance).toMatchObject({
       kind: "opencae_core_fea",
       meshSource: "actual_volume_mesh",
@@ -348,6 +373,16 @@ function actualCoreModelFixture() {
       { name: "loadNodes", nodes: [3] }
     ],
     elementSets: [{ name: "allElements", elements: [0] }],
+    surfaceFacets: [
+      { id: 0, nodes: [0, 2, 1], element: 0, elementFace: 3, sourceSelectionRef: "selection-fixed-face", sourceFaceId: "face-base-left" },
+      { id: 1, nodes: [0, 1, 3], element: 0, elementFace: 2, sourceSelectionRef: "selection-load-face", sourceFaceId: "face-load-top" },
+      { id: 2, nodes: [0, 3, 2], element: 0, elementFace: 1 },
+      { id: 3, nodes: [1, 2, 3], element: 0, elementFace: 0 }
+    ],
+    surfaceSets: [
+      { name: "selection-fixed-face", facets: [0] },
+      { name: "selection-load-face", facets: [1] }
+    ],
     boundaryConditions: [{ name: "fixedSupport", type: "fixed" as const, nodeSet: "fixedNodes", components: ["x" as const, "y" as const, "z" as const] }],
     loads: [{ name: "appliedForce", type: "nodalForce" as const, nodeSet: "loadNodes", vector: [0, -500, 0] as [number, number, number] }],
     steps: [{ name: "loadStep", type: "staticLinear" as const, boundaryConditions: ["fixedSupport"], loads: ["appliedForce"] }],

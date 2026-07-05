@@ -23,7 +23,7 @@ import { SampleOptionCard } from "./SampleOptionCard";
 import { SAMPLE_OPTIONS, sampleOptionFor } from "./sampleOptions";
 import { dynamicPlaybackFrames } from "../resultFields";
 import { INVALID_REACTION_WARNING, PREVIEW_GEOMETRY_WARNING, canShowReverseLoadCapacity, hasInvalidReactionForce, hasUnavailableReactionDiagnostic, shouldBlockPreviewResultsForDisplayModel } from "../resultProvenance";
-import { normalizeSolverBackend } from "../workers/opencaeCoreSolve";
+import { normalizeSolverBackend, openCaeCoreEligibility } from "../workers/opencaeCoreSolve";
 import {
   frameIndexForRoundedPlaybackOrdinal,
   playbackOrdinalForSolverFramePosition
@@ -116,8 +116,8 @@ type SolverSettingsPatch = Partial<DynamicSolverSettings> & { fidelity?: Simulat
 const MESH_PRESETS: MeshQuality[] = ["coarse", "medium", "fine", "ultra"];
 const SIMULATION_FIDELITIES: SimulationFidelity[] = ["standard", "detailed", "ultra"];
 const SOLVER_BACKEND_OPTIONS: Array<{ value: SolverBackend; label: string }> = [
-  { value: "opencae_core_cloud", label: "OpenCAE Core Cloud" },
-  { value: "opencae_core_local", label: "OpenCAE Core Local" }
+  { value: "opencae_core_local", label: "OpenCAE Core Local" },
+  { value: "opencae_core_cloud", label: "OpenCAE Core Cloud" }
 ];
 
 export function RightPanel(props: RightPanelProps) {
@@ -985,7 +985,7 @@ function RunPanel({ study, displayModel, runProgress, runError, runTiming, onRun
   ] as const;
   const dynamic = study.type === "dynamic_structural" ? study.solverSettings : null;
   const fidelity = solverFidelityForStudy(study);
-  const solverBackend = normalizeSolverBackend(study);
+  const solverBackend = effectiveSolverBackend(study, displayModel);
   const updateSolverChoice = (settings: SolverSettingsPatch) => {
     onUpdateSolverSettings?.(settings);
   };
@@ -1078,7 +1078,7 @@ function RunPanel({ study, displayModel, runProgress, runError, runTiming, onRun
         <Info label="Backend" value={solverBackendLabelForRunPanel(study, displayModel)} />
         <Info label="Version" value="0.1.0" />
         <Info label="Solver method" value={solverMethodForStudy(study)} />
-        <Info label="Runner" value={solverRunnerLabelForStudy(study)} />
+        <Info label="Runner" value={solverRunnerLabelForStudy(study, displayModel)} />
         <Info label="Local fallback" value="none" />
       </div>
     </Panel>
@@ -1176,8 +1176,15 @@ function isSolverBackend(value: string): value is SolverBackend {
   return value === "opencae_core_cloud" || value === "opencae_core_local";
 }
 
-function solverBackendLabelForRunPanel(study: Study, _displayModel: DisplayModel): string {
-  if (normalizeSolverBackend(study) === "opencae_core_cloud") return "OpenCAE Core Cloud";
+function effectiveSolverBackend(study: Study, displayModel: DisplayModel): SolverBackend {
+  const backend = (study.solverSettings as { backend?: unknown }).backend;
+  const normalized = normalizeSolverBackend(study);
+  if (backend !== undefined) return normalized;
+  return openCaeCoreEligibility(study, displayModel).ok ? "opencae_core_local" : "opencae_core_cloud";
+}
+
+function solverBackendLabelForRunPanel(study: Study, displayModel: DisplayModel): string {
+  if (effectiveSolverBackend(study, displayModel) === "opencae_core_cloud") return "OpenCAE Core Cloud";
   return "OpenCAE Core Local";
 }
 
@@ -1185,8 +1192,8 @@ function solverMethodForStudy(study: Study): "sparse_static" | "mdof_dynamic" {
   return study.type === "dynamic_structural" ? "mdof_dynamic" : "sparse_static";
 }
 
-function solverRunnerLabelForStudy(study: Study): string {
-  return normalizeSolverBackend(study) === "opencae_core_cloud" ? "cloud container" : "local core worker";
+function solverRunnerLabelForStudy(study: Study, displayModel: DisplayModel): string {
+  return effectiveSolverBackend(study, displayModel) === "opencae_core_cloud" ? "cloud container" : "local core worker";
 }
 
 export function formatSimulationEta(remainingMs: number | undefined, isRunning = true): string {
