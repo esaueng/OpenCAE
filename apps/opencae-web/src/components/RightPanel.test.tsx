@@ -450,6 +450,27 @@ describe("RightPanel payload mass controls", () => {
     expect(runHtml).not.toContain("legacy backend");
   });
 
+  test("defaults eligible omitted-backend studies to OpenCAE Core Local", () => {
+    const readyStudy = {
+      ...study,
+      materialAssignments: [{ id: "assign-1", materialId: "mat-aluminum-6061", selectionRef: "selection-body", status: "complete" }],
+      constraints: [{ id: "constraint-1", type: "fixed", selectionRef: "selection-top", parameters: {}, status: "complete" }],
+      loads: [{ id: "load-1", type: "force", selectionRef: "selection-top", parameters: { value: 100, units: "N", direction: [0, 0, -1] }, status: "complete" }],
+      meshSettings: { preset: "medium", status: "complete" },
+      solverSettings: {}
+    } as Study;
+    const readyDisplayModel = {
+      ...displayModel,
+      id: "display-block",
+      dimensions: { x: 120, y: 40, z: 20, units: "mm" }
+    } as DisplayModel;
+
+    const runHtml = renderPanel("run", { study: readyStudy, displayModel: readyDisplayModel });
+
+    expect(runHtml).toContain("OpenCAE Core Local");
+    expect(runHtml).toContain("local core worker");
+  });
+
   test("keeps OpenCAE Core runs browser-local without container endpoint copy", () => {
     const detailedStudy: Study = {
       ...study,

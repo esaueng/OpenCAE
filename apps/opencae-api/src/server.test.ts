@@ -228,7 +228,7 @@ describe("OpenCAE API server", () => {
     expect(imported.studies[0]!.runs.find((run) => run.id === runId)?.status).toBe("complete_estimate");
   });
 
-  test("local Core preview runs finish with complete_preview instead of complete", async () => {
+  test("local Core runs finish as computed production results", async () => {
     const api = await buildApi();
     const create = await api.inject({
       method: "POST",
@@ -254,7 +254,7 @@ describe("OpenCAE API server", () => {
     expect(start.statusCode).toBe(200);
     const runId = (start.json().run as { id: string }).id;
     const run = await waitForTerminalRun(api, runId);
-    expect(run.status).toBe("complete_preview");
+    expect(run.status).toBe("complete");
   });
 });
 
