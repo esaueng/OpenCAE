@@ -31,7 +31,10 @@ let workerInstance: Worker | null = null;
 const pendingRequests = new Map<string, PendingRequest>();
 
 export function wasmMeshingEnabled(): boolean {
-  return import.meta.env.VITE_WASM_MESHING === "1";
+  // Default ON (plan A-M4): only an explicit VITE_WASM_MESHING=0 opt-out
+  // build disables in-browser meshing (that build swaps this module for
+  // meshWorkerClient.disabled.ts at bundle time anyway).
+  return import.meta.env.VITE_WASM_MESHING !== "0";
 }
 
 export async function meshGeoScriptInWorker(
@@ -54,7 +57,7 @@ export async function postMeshWorkerRequest<Operation extends MeshWorkerOperatio
   onProgress?: MeshProgressListener
 ): Promise<MeshWorkerResults[Operation]> {
   if (!wasmMeshingEnabled()) {
-    throw new Error("In-browser wasm meshing is disabled. Set VITE_WASM_MESHING=1 to enable the spike path.");
+    throw new Error("In-browser wasm meshing is disabled in this build (VITE_WASM_MESHING=0 opt-out).");
   }
   const worker = getMeshWorker();
   if (!worker) {
@@ -102,7 +105,12 @@ function handleMeshWorkerMessage(event: MessageEvent<MeshWorkerResponse>) {
   if (!pending) return;
   pendingRequests.delete(response.id);
   if (isMeshWorkerFailure(response)) {
-    pending.reject(new Error(response.error.message));
+    const error = new Error(response.error.message);
+    // Preserve the error identity across the worker boundary so callers can
+    // distinguish quality-gate rejections (MeshQualityError) from transient
+    // meshing failures.
+    if (response.error.name) error.name = response.error.name;
+    pending.reject(error);
     return;
   }
   pending.resolve(response.result as never);

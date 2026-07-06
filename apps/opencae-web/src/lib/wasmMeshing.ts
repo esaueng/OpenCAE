@@ -1,16 +1,32 @@
-// In-browser gmsh-wasm mesh generation for the app's mesh step (plan A-M2).
-// Gated behind VITE_WASM_MESHING=1: generateWasmMeshForStudy returns null when
-// the flag is off, when workers are unavailable, or when the study's geometry
-// has no wasm-meshable source, and generateMesh() then falls back to the
-// existing server/preset-estimate path.
+// In-browser gmsh-wasm mesh generation for the app's mesh step (plan A-M2,
+// production default since A-M4). generateWasmMeshForStudy returns null in
+// VITE_WASM_MESHING=0 opt-out builds, when workers are unavailable, or when
+// the study's geometry has no wasm-meshable source, and generateMesh() then
+// falls back to the existing preset-estimate path.
 //
 // The heavyweight pieces (@opencae/mesh-intake and, transitively, the gmsh
 // WASM module inside the worker) are loaded via dynamic import only after the
 // flag check passes, so default builds and the initial bundle stay untouched.
 import type { DisplayModel, MeshQuality, Study } from "@opencae/schema";
-import { studyForCoreCloudGeometryDispatch, type CoreCloudGeometrySource } from "../workers/opencaeCoreSolve";
+import { geometrySourceForStudy, studyForCoreGeometryDispatch, type CoreCloudGeometrySource } from "../workers/opencaeCoreSolve";
 import { unpackCoreVolumeMeshArtifact } from "../workers/meshProtocol";
 import type { MeshProgressListener } from "../workers/meshWorkerClient";
+
+/**
+ * Can this study's geometry be meshed on demand, in this build and browser?
+ * Mirrors exactly what meshWorkerRun below can mesh: the procedural bracket
+ * and STEP uploads. Used by run routing (A-M4 local-first): complex geometry
+ * without a stored mesh artifact is still runnable locally when this is true,
+ * because the run flow meshes first and then solves.
+ */
+export function canMeshStudyOnDemand(study: Study, displayModel?: DisplayModel): boolean {
+  if (import.meta.env.VITE_WASM_MESHING === "0") return false;
+  if (typeof Worker === "undefined") return false;
+  const geometry = geometrySourceForStudy(study, displayModel);
+  if (!geometry) return false;
+  if (geometry.kind === "sample_procedural" && geometry.sampleId === "bracket") return true;
+  return geometry.kind === "uploaded_cad" && geometry.format === "step" && Boolean(geometry.contentBase64);
+}
 
 // The worker client is loaded via dynamic import behind the statically
 // replaced VITE_WASM_MESHING check below. This matters for deploys: the
@@ -49,8 +65,9 @@ export async function generateWasmMeshForStudy(options: WasmMeshOptions): Promis
   // The dynamic imports live inside this statically replaced branch so
   // flag-off builds tree-shake meshWorkerRun entirely — rollup only prunes
   // the worker chunk when the import() call sites themselves become
-  // unreachable (an early-return guard is not enough).
-  if (import.meta.env.VITE_WASM_MESHING === "1") {
+  // unreachable (an early-return guard is not enough). Default is ON (plan
+  // A-M4); only an explicit VITE_WASM_MESHING=0 opt-out build disables it.
+  if (import.meta.env.VITE_WASM_MESHING !== "0") {
     return meshWorkerRun(options);
   }
   return null;
@@ -87,9 +104,9 @@ async function meshWorkerRun(options: WasmMeshOptions): Promise<WasmMeshStudyRes
   let attributionNote: string | undefined;
 
   if (geometry.kind === "sample_procedural" && geometry.sampleId === "bracket") {
-    // Mirrors the cloud dispatch override in openCaeCoreCloudSolveRequest():
-    // native curved Gmsh Tet10 elements can invert around the bracket's
-    // drilled holes, so the bracket meshes with linear elements.
+    // Native curved Gmsh Tet10 elements can invert around the bracket's
+    // drilled holes, so the bracket meshes with linear elements (the same
+    // policy the retired cloud dispatch used).
     elementOrder = 1;
     meshedPacked = await client.meshGeoScriptInWorker(
       {
@@ -140,7 +157,7 @@ async function meshWorkerRun(options: WasmMeshOptions): Promise<WasmMeshStudyRes
   const analysisType = study.type === "dynamic_structural" ? "dynamic_structural" : "static_stress";
   // The mirrored builder applies study load directions verbatim in the solver
   // frame (same contract as the cloud container), so hand it a solver-frame study.
-  const dispatchStudy = studyForCoreCloudGeometryDispatch(study, displayModel);
+  const dispatchStudy = studyForCoreGeometryDispatch(study, displayModel);
   const mappingDiagnostics: import("@opencae/mesh-intake").SelectionMappingDiagnostic[] = [];
   const model = intake.buildCoreModelFromCloudMesh({
     study: {

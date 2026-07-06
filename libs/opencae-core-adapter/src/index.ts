@@ -81,7 +81,10 @@ export type LocalSolveResult = {
   };
 };
 
-export type NormalizedBrowserSolverBackend = "opencae_core_cloud" | "opencae_core_local";
+// B4a: the client cloud-solve path is retired; the browser solves locally,
+// full stop. The type stays named so the B5 sweep (and any future backend)
+// touches one place.
+export type NormalizedBrowserSolverBackend = "opencae_core_local";
 
 export type OpenCaeCoreEligibility =
   | { ok: true }
@@ -95,12 +98,15 @@ const STANDARD_GRAVITY = 9.80665;
 const DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.005;
 const MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.005;
 
-const COMPLEX_CORE_PREVIEW_REJECTION_REASON = "OpenCAE Core Local requires simple block/beam geometry or an actual Core volume mesh. Use OpenCAE Core Cloud for complex production geometry.";
-export const OPENCAE_CORE_CLOUD_GEOMETRY_REQUIRED_REASON = "OpenCAE Core Cloud requires a procedural or uploaded geometry source so the cloud container can generate a Core volume mesh.";
+const COMPLEX_CORE_MESH_REQUIRED_REASON =
+  "This geometry needs a volume mesh before it can solve, and in-browser meshing is unavailable here " +
+  "(opt-out build, unsupported browser, or no meshable geometry source). Generate a mesh on the Mesh step, " +
+  "or rebuild with in-browser meshing enabled. Results are never estimated.";
+export const OPENCAE_CORE_MESH_REQUIRED_REASON = "OpenCAE Core requires a procedural or uploaded geometry source to generate a volume mesh for this study.";
 
 export function normalizeSolverBackend(value: { solverSettings?: { backend?: unknown } } | Study | undefined): NormalizedBrowserSolverBackend {
-  const backend = value?.solverSettings?.backend;
-  return backend === "opencae_core_local" ? "opencae_core_local" : "opencae_core_cloud";
+  void value;
+  return "opencae_core_local";
 }
 
 export type ResolvedSolverBackend = {
@@ -111,31 +117,47 @@ export type ResolvedSolverBackend = {
 
 /**
  * Explicit user backend choice, or null when the study carries no explicit
- * choice ("auto", unset, legacy, or unknown values all mean "never chose").
+ * choice ("auto", unset, legacy, retired "opencae_core_cloud", or unknown
+ * values all mean "never chose" — the schema aliases the retired cloud
+ * choice to "auto" at parse time, and this treats any straggler the same).
  */
 export function explicitSolverBackend(value: { solverSettings?: { backend?: unknown } } | Study | undefined): NormalizedBrowserSolverBackend | null {
   const backend = value?.solverSettings?.backend;
-  return backend === "opencae_core_local" || backend === "opencae_core_cloud" ? backend : null;
+  return backend === "opencae_core_local" ? backend : null;
 }
 
 /**
- * Backend that per-model auto routing would pick for this study, ignoring any
- * explicit user choice: local when the study is OpenCAE Core browser-eligible,
- * cloud otherwise (so auto never hits the local ineligible hard-fail path).
+ * Environment capabilities that affect run eligibility and routing. The web
+ * app reports whether it can mesh the study's geometry on demand (in-browser
+ * wasm meshing, production default since A-M4); the dev API server cannot.
  */
-export function autoSolverBackend(study: Study, displayModel?: DisplayModel): NormalizedBrowserSolverBackend {
-  return openCaeCoreEligibility(study, displayModel).ok ? "opencae_core_local" : "opencae_core_cloud";
+export type CoreSolveCapabilities = {
+  /** True when the caller can generate a real volume mesh before solving (wasm mesh worker + meshable geometry source). */
+  canMeshOnDemand?: boolean;
+};
+
+/**
+ * Backend that auto routing picks for this study. With the client cloud path
+ * retired (B4a) every run executes locally; ineligible studies fail the run
+ * honestly with openCaeCoreEligibility's actionable reason instead of being
+ * routed elsewhere or estimated.
+ */
+export function autoSolverBackend(study: Study, displayModel?: DisplayModel, capabilities?: CoreSolveCapabilities): NormalizedBrowserSolverBackend {
+  void study;
+  void displayModel;
+  void capabilities;
+  return "opencae_core_local";
 }
 
 /**
- * Concrete backend for a run. An explicit user choice always wins (explicit
- * local keeps its honest hard error for ineligible models). Without an explicit
- * choice, per-model auto routing applies.
+ * Concrete backend for a run plus whether the user chose it explicitly.
+ * Local either way since B4a; the explicit/auto distinction still drives UI
+ * labels and the solve worker's explicit-local guard.
  */
-export function resolveSolverBackend(study: Study, displayModel?: DisplayModel): ResolvedSolverBackend {
+export function resolveSolverBackend(study: Study, displayModel?: DisplayModel, capabilities?: CoreSolveCapabilities): ResolvedSolverBackend {
   const explicit = explicitSolverBackend(study);
   if (explicit) return { backend: explicit, source: "explicit" };
-  return { backend: autoSolverBackend(study, displayModel), source: "auto" };
+  return { backend: autoSolverBackend(study, displayModel, capabilities), source: "auto" };
 }
 
 export function isSimpleBlockLikeDisplayModel(displayModel: DisplayModel | undefined): boolean {
@@ -156,11 +178,11 @@ export function hasActualCoreVolumeMesh(study: Study, displayModel?: DisplayMode
   return connectedComponentCountForActualArtifact(artifact) === 1;
 }
 
-export function hasCloudMeshableGeometry(study: Study, displayModel?: DisplayModel): boolean {
-  return Boolean(cloudGeometrySourceForStudy(study, displayModel));
+export function hasMeshableGeometrySource(study: Study, displayModel?: DisplayModel): boolean {
+  return Boolean(geometrySourceForStudy(study, displayModel));
 }
 
-export function cloudGeometrySourceForStudy(study: Study, displayModel?: DisplayModel): CoreCloudGeometrySource | null {
+export function geometrySourceForStudy(study: Study, displayModel?: DisplayModel): CoreCloudGeometrySource | null {
   const explicit = coreCloudGeometryFromUnknown((displayModel as { coreCloudGeometry?: unknown } | undefined)?.coreCloudGeometry)
     ?? coreCloudGeometryFromUnknown((study.meshSettings.summary as { artifacts?: { coreCloudGeometry?: unknown; geometry?: unknown } } | undefined)?.artifacts?.coreCloudGeometry)
     ?? coreCloudGeometryFromUnknown((study.meshSettings.summary as { artifacts?: { coreCloudGeometry?: unknown; geometry?: unknown } } | undefined)?.artifacts?.geometry);
@@ -242,7 +264,7 @@ function negated(value: number): number {
  * them into the solver frame so the solved deformation matches the load arrows shown in
  * the viewer.
  */
-export function studyForCoreCloudGeometryDispatch(study: Study, displayModel: DisplayModel | undefined): Study {
+export function studyForCoreGeometryDispatch(study: Study, displayModel: DisplayModel | undefined): Study {
   if (!displayModel || !displayModelUsesUprightSolverFrame(displayModel)) return study;
   return {
     ...study,
@@ -279,7 +301,7 @@ export function isComplexGeometry(displayModel: DisplayModel | undefined, study?
   return displayModel.faces.length > 6;
 }
 
-export function openCaeCoreEligibility(study: Study, displayModel?: DisplayModel): OpenCaeCoreEligibility {
+export function openCaeCoreEligibility(study: Study, displayModel?: DisplayModel, capabilities?: CoreSolveCapabilities): OpenCaeCoreEligibility {
   if (study.type !== "static_stress" && study.type !== "dynamic_structural") {
     return { ok: false, reason: "OpenCAE Core browser solve currently supports static and dynamic structural studies only." };
   }
@@ -287,8 +309,11 @@ export function openCaeCoreEligibility(study: Study, displayModel?: DisplayModel
   if (!displayModel?.dimensions || !positiveDimensions(displayModel.dimensions)) {
     return { ok: false, reason: "OpenCAE Core requires usable block-like display dimensions." };
   }
-  if (isComplexGeometry(displayModel, study) && !hasActualCoreVolumeMesh(study, displayModel)) {
-    return { ok: false, reason: COMPLEX_CORE_PREVIEW_REJECTION_REASON };
+  if (isComplexGeometry(displayModel, study) && !hasActualCoreVolumeMesh(study, displayModel) && !capabilities?.canMeshOnDemand) {
+    // Complex geometry without a stored volume mesh is only runnable when the
+    // caller can mesh it for real before the solve (A-M4 local-first meshing);
+    // otherwise fail honestly — never estimate.
+    return { ok: false, reason: COMPLEX_CORE_MESH_REQUIRED_REASON };
   }
   if (!study.materialAssignments.length) return { ok: false, reason: "OpenCAE Core requires an assigned material." };
   if (!study.constraints.some((constraint) => constraint.type === "fixed")) {
@@ -324,7 +349,7 @@ export function trySolveOpenCaeCoreStudy({ study, runId, displayModel, hooks }: 
   if (!eligibility.ok) return eligibility;
 
   try {
-    const coreBuild = buildOpenCaeCoreCloudModelForStudy(study, displayModel);
+    const coreBuild = buildOpenCaeCoreModelForStudy(study, displayModel);
     const analysisType = study.type === "dynamic_structural" ? "dynamic_structural" : "static_stress";
     const solved = solveStudyModelWithCorePipeline({
       model: coreBuild.model,
@@ -384,7 +409,7 @@ function pipelineSolverSettingsForStudy(study: Study): Record<string, unknown> {
   };
 }
 
-export function buildOpenCaeCoreCloudModelForStudy(study: Study, displayModel: DisplayModel | undefined): CoreStudyModel {
+export function buildOpenCaeCoreModelForStudy(study: Study, displayModel: DisplayModel | undefined): CoreStudyModel {
   if (!displayModel?.dimensions) throw new Error("OpenCAE Core Cloud requires display dimensions before generating a Core model.");
   const actualMesh = actualCoreVolumeMeshArtifact(study);
   const material = materialForStudy(study);
@@ -417,10 +442,12 @@ export function buildOpenCaeCoreCloudModelForStudy(study: Study, displayModel: D
       : undefined;
   } else {
     if (isComplexGeometry(displayModel, study)) {
-      if (hasCloudMeshableGeometry(study, displayModel)) {
-        throw new Error("OpenCAE Core Cloud should dispatch this complex geometry source to the cloud container for meshing.");
+      if (hasMeshableGeometrySource(study, displayModel)) {
+        throw new Error(
+          "This complex geometry must be meshed into a Core volume mesh before solving (the run flow meshes it in-browser first); no mesh artifact was stored."
+        );
       }
-      throw new Error(OPENCAE_CORE_CLOUD_GEOMETRY_REQUIRED_REASON);
+      throw new Error(OPENCAE_CORE_MESH_REQUIRED_REASON);
     }
     const mesh = tetMeshForDisplayModel(displayModel, study.meshSettings.preset, CLOUD_STRUCTURED_BLOCK_TET10_NODE_BUDGET);
     model = volumeMeshToModelJson({

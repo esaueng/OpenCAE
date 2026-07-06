@@ -62,18 +62,18 @@ export const LoadSchema = z.object({
 const Vec3Schema = z.tuple([z.number(), z.number(), z.number()]);
 export const StudyAnalysisTypeSchema = z.enum(["static_stress", "dynamic_structural"]);
 export const MeshQualitySchema = z.enum(["coarse", "medium", "fine", "ultra"]);
-// "auto" means the user never made an explicit backend choice: the run router
-// picks per-model (local when the study is OpenCAE Core browser-eligible, cloud
-// otherwise). Explicit "opencae_core_cloud"/"opencae_core_local" choices from
-// saved projects parse untouched; legacy and unknown backend tokens predate the
-// explicit choice, so they normalize to "auto" rather than silently becoming a
-// cloud selection.
+// "auto" means the user never made an explicit backend choice; the run router
+// resolves it (local — the client cloud solve path was retired in B4a). An
+// explicit "opencae_core_local" choice from saved projects parses untouched.
+// "opencae_core_cloud" REMAINS parseable as an alias for "auto" so projects
+// saved before the cloud retirement still load; legacy and unknown backend
+// tokens likewise normalize to "auto".
 export const SolverBackendSchema = z.preprocess(
   (value) => {
-    if (value === "opencae_core_cloud" || value === "opencae_core_local") return value;
+    if (value === "opencae_core_local") return value;
     return "auto";
   },
-  z.enum(["auto", "opencae_core_cloud", "opencae_core_local"])
+  z.enum(["auto", "opencae_core_local"])
 );
 export const SimulationFidelitySchema = z.enum(["standard", "detailed", "ultra"]);
 

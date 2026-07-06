@@ -5,13 +5,13 @@ import type { DisplayModel, Study } from "@opencae/schema";
 import {
   autoSolverBackend,
   bracketMeshSizeMmForPreset,
-  buildOpenCaeCoreCloudModelForStudy,
-  cloudGeometrySourceForStudy,
+  buildOpenCaeCoreModelForStudy,
+  geometrySourceForStudy,
   displayDirectionToSolverFrame,
   explicitSolverBackend,
   openCaeCoreEligibility,
   resolveSolverBackend,
-  studyForCoreCloudGeometryDispatch,
+  studyForCoreGeometryDispatch,
   trySolveOpenCaeCoreStudy
 } from "./index";
 
@@ -95,7 +95,7 @@ describe("bracket mesh preset sizing", () => {
 
   test("applies the study mesh preset to the procedural bracket descriptor", () => {
     const study = studyFixture({ meshSettings: { preset: "fine", status: "complete" } });
-    const geometry = cloudGeometrySourceForStudy(study, bracketDisplayModelFixture());
+    const geometry = geometrySourceForStudy(study, bracketDisplayModelFixture());
     expect(geometry?.kind).toBe("sample_procedural");
     expect(geometry?.sampleId).toBe("bracket");
     expect(geometry?.descriptor?.meshSize).toBe(9);
@@ -112,14 +112,14 @@ describe("bracket mesh preset sizing", () => {
         descriptor: { base: { length: 120, width: 34, height: 10 }, meshSize: 18 }
       }
     } as DisplayModel;
-    const geometry = cloudGeometrySourceForStudy(study, displayModel);
+    const geometry = geometrySourceForStudy(study, displayModel);
     expect(geometry?.descriptor?.meshSize).toBe(7);
     expect(geometry?.descriptor?.base).toEqual({ length: 120, width: 34, height: 10 });
   });
 
   test("leaves non-bracket geometry descriptors untouched", () => {
     const study = studyFixture({ meshSettings: { preset: "ultra", status: "complete" } });
-    const geometry = cloudGeometrySourceForStudy(study, cantileverDisplayModel());
+    const geometry = geometrySourceForStudy(study, cantileverDisplayModel());
     expect(geometry?.kind).toBe("structured_block");
     expect(geometry?.descriptor?.meshSize).toBeUndefined();
   });
@@ -149,7 +149,7 @@ describe("display to solver frame conversion", () => {
     const study = studyFixture({
       loads: [{ id: "load-1", type: "force", selectionRef: "selection-load-face", parameters: { value: 500, units: "N", direction: [0, -1, 0] }, status: "complete" }]
     });
-    const dispatched = studyForCoreCloudGeometryDispatch(study, cantileverDisplayModel());
+    const dispatched = studyForCoreGeometryDispatch(study, cantileverDisplayModel());
     expect(dispatched.loads[0]?.parameters.direction).toEqual([0, 0, -1]);
     expect(dispatched.loads[0]?.parameters.value).toBe(500);
     // The original study must stay in display space for the viewer and local solves.
@@ -171,7 +171,7 @@ describe("core cloud structured block model frame", () => {
       ...cantileverDisplayModel(),
       dimensions: { x: 180, y: 24, z: 36, units: "mm" }
     };
-    const coreBuild = buildOpenCaeCoreCloudModelForStudy(downLoadedStudy(), displayModel);
+    const coreBuild = buildOpenCaeCoreModelForStudy(downLoadedStudy(), displayModel);
     const spans = coordinateSpans(coreBuild.model.nodes.coordinates);
     expect(spans.x).toBeCloseTo(0.18, 9);
     expect(spans.y).toBeCloseTo(0.036, 9);
@@ -184,7 +184,7 @@ describe("core cloud structured block model frame", () => {
   });
 
   test("solves the cantilever with the tip deflecting along the applied -Z load", () => {
-    const coreBuild = buildOpenCaeCoreCloudModelForStudy(downLoadedStudy(), cantileverDisplayModel());
+    const coreBuild = buildOpenCaeCoreModelForStudy(downLoadedStudy(), cantileverDisplayModel());
     const solved = solveCoreStatic(coreBuild.model, { method: "sparse", solverMode: "sparse" });
     expect(solved.ok).toBe(true);
     if (!solved.ok) return;
@@ -218,7 +218,7 @@ describe("core cloud structured block model frame", () => {
     // local solveCoreStatic result must carry the surface mesh plus node-located
     // stress/displacement/safety-factor fields aligned 1:1 with surfaceMesh.nodes — the exact
     // contract the web surface render path (solverSurfaceResultFields) consumes.
-    const coreBuild = buildOpenCaeCoreCloudModelForStudy(downLoadedStudy(), cantileverDisplayModel());
+    const coreBuild = buildOpenCaeCoreModelForStudy(downLoadedStudy(), cantileverDisplayModel());
     const solved = solveCoreStatic(coreBuild.model, { method: "sparse", solverMode: "sparse" });
     expect(solved.ok).toBe(true);
     if (!solved.ok) return;
@@ -293,13 +293,12 @@ describe("per-model solver backend resolution", () => {
     } as Study["meshSettings"];
   }
 
-  test("treats unset, auto, legacy, and unknown backend values as no explicit choice", () => {
-    for (const backend of [undefined, "auto", "cloudflare_fea", "opencae_core", "local_detailed", "mystery_backend"]) {
+  test("treats unset, auto, legacy, retired-cloud, and unknown backend values as no explicit choice", () => {
+    for (const backend of [undefined, "auto", "cloudflare_fea", "opencae_core", "local_detailed", "opencae_core_cloud", "mystery_backend"]) {
       const study = studyFixture({ solverSettings: { backend } as unknown as Study["solverSettings"] });
       expect(explicitSolverBackend(study), `backend=${String(backend)}`).toBeNull();
       expect(resolveSolverBackend(study, cantileverDisplayModel()).source, `backend=${String(backend)}`).toBe("auto");
     }
-    expect(explicitSolverBackend({ solverSettings: { backend: "opencae_core_cloud" } })).toBe("opencae_core_cloud");
     expect(explicitSolverBackend({ solverSettings: { backend: "opencae_core_local" } })).toBe("opencae_core_local");
   });
 
@@ -312,11 +311,23 @@ describe("per-model solver backend resolution", () => {
     });
   });
 
-  test("auto routes complex geometry without a local mesh artifact to the cloud", () => {
+  test("gates complex geometry without a mesh artifact on mesh-on-demand capability (A-M4/B4a)", () => {
     const study = autoStudy();
-    expect(openCaeCoreEligibility(study, bracketDisplayModelFixture()).ok).toBe(false);
+    // Routing is always local since B4a; honesty lives in eligibility. With
+    // no mesh-on-demand capability (opt-out build / no Worker) the run must
+    // fail with the actionable mesh-required reason, never estimate.
+    const withoutCapability = openCaeCoreEligibility(study, bracketDisplayModelFixture());
+    expect(withoutCapability.ok).toBe(false);
+    if (!withoutCapability.ok) expect(withoutCapability.reason).toMatch(/needs a volume mesh/i);
     expect(resolveSolverBackend(study, bracketDisplayModelFixture())).toEqual({
-      backend: "opencae_core_cloud",
+      backend: "opencae_core_local",
+      source: "auto"
+    });
+    // With in-browser wasm meshing available, the run meshes first and solves
+    // locally — complex geometry without an artifact is fully runnable.
+    expect(openCaeCoreEligibility(study, bracketDisplayModelFixture(), { canMeshOnDemand: true }).ok).toBe(true);
+    expect(resolveSolverBackend(study, bracketDisplayModelFixture(), { canMeshOnDemand: true })).toEqual({
+      backend: "opencae_core_local",
       source: "auto"
     });
   });
@@ -330,12 +341,12 @@ describe("per-model solver backend resolution", () => {
     });
   });
 
-  test("an explicit cloud choice wins even when the study is locally eligible", () => {
-    const study = studyFixture({ solverSettings: { backend: "opencae_core_cloud" } });
+  test("a retired explicit cloud choice resolves as auto local (old saves keep working)", () => {
+    const study = studyFixture({ solverSettings: { backend: "opencae_core_cloud" } as unknown as Study["solverSettings"] });
     expect(openCaeCoreEligibility(study, cantileverDisplayModel()).ok).toBe(true);
     expect(resolveSolverBackend(study, cantileverDisplayModel())).toEqual({
-      backend: "opencae_core_cloud",
-      source: "explicit"
+      backend: "opencae_core_local",
+      source: "auto"
     });
   });
 
@@ -348,12 +359,12 @@ describe("per-model solver backend resolution", () => {
     const outcome = trySolveOpenCaeCoreStudy({ study, runId: "run-explicit-local", displayModel: bracketDisplayModelFixture() });
     expect(outcome.ok).toBe(false);
     if (outcome.ok) throw new Error("Explicit local + ineligible must keep failing hard.");
-    expect(outcome.reason).toMatch(/actual Core volume mesh|OpenCAE Core Cloud/i);
+    expect(outcome.reason).toMatch(/needs a volume mesh|in-browser meshing is unavailable/i);
   });
 
-  test("autoSolverBackend mirrors eligibility for UI labels", () => {
+  test("autoSolverBackend is local for every study (single execution path since B4a)", () => {
     expect(autoSolverBackend(autoStudy(), cantileverDisplayModel())).toBe("opencae_core_local");
-    expect(autoSolverBackend(autoStudy(), bracketDisplayModelFixture())).toBe("opencae_core_cloud");
+    expect(autoSolverBackend(autoStudy(), bracketDisplayModelFixture())).toBe("opencae_core_local");
   });
 });
 
