@@ -26,14 +26,28 @@ export type GeoMeshResult = {
   msh: string;
   timings: MeshTimings;
   totalMs: number;
+  /** Min signed inverse condition number over all volume elements (gmsh minSICN). */
+  qualityMinSICN?: number;
 };
 
 export type StepMeshResult = GeoMeshResult & {
   /** Which 3D algorithm produced the mesh: gmsh default Delaunay, or the Frontal fallback. */
   algorithm3D: "delaunay" | "frontal";
-  /** Min signed inverse condition number over all volume elements (gmsh minSICN), when cheaply available. */
-  qualityMinSICN?: number;
 };
+
+/**
+ * Extra Emscripten Module options passed to the gmsh-wasm factory on every
+ * instantiation (fresh module per mesh). The browser mesh worker uses this to
+ * supply `wasmBinary` fetched from the gzip-precompressed deploy asset
+ * (Cloudflare caps static assets at 25 MiB per file, so the raw ~44 MB
+ * gmsh-core.wasm never ships uncompressed). Node keeps the default loader,
+ * which reads the .wasm straight from node_modules.
+ */
+let gmshWasmModuleOptionsProvider: (() => Promise<Record<string, unknown>>) | null = null;
+
+export function configureGmshWasmModuleOptions(provider: (() => Promise<Record<string, unknown>>) | null): void {
+  gmshWasmModuleOptionsProvider = provider;
+}
 
 /**
  * Instantiate a FRESH gmsh WASM module. Deliberately not cached: gmsh-wasm
@@ -45,7 +59,8 @@ export type StepMeshResult = GeoMeshResult & {
  */
 export async function loadGmshWasm(): Promise<GmshApi> {
   const mod = await import("@loumalouomega/gmsh-wasm");
-  return mod.default();
+  const moduleOptions = gmshWasmModuleOptionsProvider ? await gmshWasmModuleOptionsProvider() : {};
+  return mod.default(moduleOptions);
 }
 
 /**
@@ -71,8 +86,9 @@ export async function meshGeoScriptToMshV2(geoScript: string, options: MeshWasmO
     if (options.elementOrder === 2) {
       timePhaseSync(timings, options, "order2", totalStart, () => gmsh.model.mesh.setOrder(2));
     }
+    const qualityMinSICN = minSICNQuality(gmsh);
     const msh = timePhaseSync(timings, options, "write", totalStart, () => writeMshV2(gmsh));
-    return { msh, timings, totalMs: now() - totalStart };
+    return { msh, timings, totalMs: now() - totalStart, ...(qualityMinSICN !== undefined ? { qualityMinSICN } : {}) };
   } finally {
     safeFinalize(gmsh);
   }

@@ -1600,7 +1600,8 @@ let stepFacesApi: StepFacesModule | null = null;
 let stepFacesApiPromise: Promise<StepFacesModule> | null = null;
 
 function stepFacePickingEnabled(): boolean {
-  return import.meta.env.VITE_WASM_MESHING === "1";
+  // On by default (plan A-M4); VITE_WASM_MESHING=0 opt-out builds disable it.
+  return import.meta.env.VITE_WASM_MESHING !== "0";
 }
 
 /** Kick off (or reuse) the face-registry build for a STEP payload; resolves when picking is ready. */

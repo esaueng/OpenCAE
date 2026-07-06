@@ -80,6 +80,10 @@ export type CoreVolumeMeshArtifact = {
       minTetVolume: number;
       maxTetVolume: number;
       invertedElementCount: number;
+      /** Min signed inverse condition number (gmsh minSICN); stamped by the wasm-session quality gate. */
+      minSICN?: number;
+      /** Quality-gate warnings (e.g. minSICN below the warn threshold). */
+      warnings?: string[];
     };
     diagnostics: string[];
     units: "m";
