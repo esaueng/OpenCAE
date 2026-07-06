@@ -1109,7 +1109,18 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     pushMessage(runDiagnosticsMessage(study, displayModel ?? undefined));
     let response: Awaited<ReturnType<typeof runSimulation>>;
     try {
-      response = await runSimulation(study.id, study, displayModel ?? undefined, { onRunStatus: pushMessage, resultRenderBounds });
+      response = await runSimulation(study.id, study, displayModel ?? undefined, {
+        onRunStatus: pushMessage,
+        resultRenderBounds,
+        // A-M4 local-first meshing: when the run meshes geometry before
+        // solving, persist the meshed study (with its stored artifact) so
+        // later runs reuse it instead of re-meshing.
+        onStudyMeshed: (meshedStudy) => {
+          setProject((current) => current
+            ? { ...current, studies: current.studies.map((item) => (item.id === meshedStudy.id ? meshedStudy : item)) }
+            : current);
+        }
+      });
     } catch (error) {
       setProcessingRunId(null);
       setRunProgress(0);

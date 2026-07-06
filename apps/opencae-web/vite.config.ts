@@ -1,15 +1,22 @@
+import { readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { gzipSync } from "node:zlib";
 import { defineConfig, type PluginOption } from "vite";
 import react from "@vitejs/plugin-react";
 
-// When VITE_WASM_MESHING is off, swap the mesh worker client for a stub.
+// In-browser wasm meshing is the production default (plan A-M4). Builds carry
+// gmsh-wasm unless explicitly opted out with VITE_WASM_MESHING=0 — the escape
+// hatch for size-constrained deploys stays byte-clean (zero gmsh assets).
+const wasmMeshingDisabled = process.env.VITE_WASM_MESHING === "0";
+
+// When VITE_WASM_MESHING=0, swap the mesh worker client for a stub.
 // Rollup resolves dynamically imported modules before tree-shaking, so even
 // statically dead `import("./meshWorkerClient")` call sites trigger vite's
 // worker sub-build, which emits the meshWorker chunk plus the ~44 MB
-// gmsh-core.wasm asset into dist. Flag-off builds must not carry those
-// (Cloudflare static assets cap out at 25 MiB per file).
+// gmsh-core.wasm asset into dist.
 function stubMeshWorkerClientWhenDisabled(): PluginOption {
-  if (process.env.VITE_WASM_MESHING === "1") return null;
+  if (!wasmMeshingDisabled) return null;
   const clientStubPath = fileURLToPath(new URL("./src/workers/meshWorkerClient.disabled.ts", import.meta.url));
   const gmshStubPath = fileURLToPath(new URL("./src/workers/gmshWasm.disabled.ts", import.meta.url));
   return {
@@ -30,8 +37,65 @@ function stubMeshWorkerClientWhenDisabled(): PluginOption {
   };
 }
 
+// Cloudflare Workers static assets cap out at 25 MiB per file, but
+// gmsh-core.wasm is ~44 MB. Default builds therefore never ship the raw
+// .wasm: this plugin post-processes dist, gzip-compressing the emitted asset
+// (~44 MB -> ~11 MB, under the cap), deleting the raw file, and writing a
+// tiny stable-named manifest (assets/gmsh-wasm.json) pointing at the hashed
+// .wasm.gz. The mesh worker fetches the manifest, streams the .gz through
+// DecompressionStream("gzip"), and hands the bytes to the Emscripten factory
+// as `wasmBinary` (see src/workers/gmshWasmBinary.ts). In dev the raw .wasm
+// is served straight from node_modules — no manifest, no compression.
+function compressGmshWasmForDeploy(): PluginOption {
+  if (wasmMeshingDisabled) return null;
+  return {
+    name: "opencae:compress-gmsh-wasm-for-deploy",
+    apply: "build",
+    closeBundle() {
+      const assetsDir = fileURLToPath(new URL("./dist/assets", import.meta.url));
+      let entries: string[];
+      try {
+        entries = readdirSync(assetsDir);
+      } catch {
+        return; // No assets emitted (e.g. non-app build target).
+      }
+      const wasmNames = entries.filter((name) => /^gmsh-core.*\.wasm$/.test(name));
+      if (!wasmNames.length) {
+        throw new Error(
+          "compressGmshWasmForDeploy: expected a gmsh-core*.wasm asset in dist/assets (wasm meshing is enabled) but found none."
+        );
+      }
+      for (const name of wasmNames) {
+        const rawPath = join(assetsDir, name);
+        const raw = readFileSync(rawPath);
+        const compressed = gzipSync(raw, { level: 9 });
+        const gzName = `${name}.gz`;
+        writeFileSync(join(assetsDir, gzName), compressed);
+        rmSync(rawPath);
+        writeFileSync(
+          join(assetsDir, "gmsh-wasm.json"),
+          JSON.stringify({ wasm: `/assets/${gzName}`, encoding: "gzip", rawBytes: raw.byteLength, gzipBytes: compressed.byteLength })
+        );
+        const rawMiB = (raw.byteLength / 1024 / 1024).toFixed(1);
+        const gzMiB = (compressed.byteLength / 1024 / 1024).toFixed(1);
+        console.log(`[opencae] gmsh wasm deploy asset: ${name} ${rawMiB} MiB -> ${gzName} ${gzMiB} MiB (Cloudflare 25 MiB/file cap)`);
+        if (compressed.byteLength > 25 * 1024 * 1024) {
+          throw new Error(`compressGmshWasmForDeploy: ${gzName} is ${gzMiB} MiB, above the Cloudflare 25 MiB per-asset cap.`);
+        }
+      }
+      // Belt and braces: nothing else in dist may breach the per-asset cap.
+      for (const name of readdirSync(assetsDir)) {
+        const size = statSync(join(assetsDir, name)).size;
+        if (size > 25 * 1024 * 1024) {
+          throw new Error(`Deploy asset ${name} is ${(size / 1024 / 1024).toFixed(1)} MiB, above the Cloudflare 25 MiB per-asset cap.`);
+        }
+      }
+    }
+  };
+}
+
 export default defineConfig({
-  plugins: [react(), stubMeshWorkerClientWhenDisabled()],
+  plugins: [react(), stubMeshWorkerClientWhenDisabled(), compressGmshWasmForDeploy()],
   worker: {
     format: "es"
   },

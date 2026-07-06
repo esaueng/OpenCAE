@@ -56,6 +56,11 @@ async function runOperation(request: MeshWorkerRequest, reportPhase: (phase: Mes
   // Lazy-load the meshing library (which itself lazy-loads the gmsh WASM
   // module) only when the first meshing request arrives.
   const intake = await import("@opencae/mesh-intake");
+  // Production deploys serve gmsh-core.wasm gzip-precompressed (Cloudflare's
+  // 25 MiB per-asset cap); hand the intake loader the browser-side fetch +
+  // gunzip strategy before any gmsh module is instantiated.
+  const { gmshWasmModuleOptions } = await import("./gmshWasmBinary");
+  intake.configureGmshWasmModuleOptions(gmshWasmModuleOptions);
   const onPhase = (event: { phase: MeshWorkerPhase; elapsedMs: number }) => reportPhase(event.phase, event.elapsedMs);
 
   if (request.operation === "meshGeoScript") {
@@ -69,6 +74,9 @@ async function runOperation(request: MeshWorkerRequest, reportPhase: (phase: Mes
       sourceSelectionRefs: request.payload.sourceSelectionRefs,
       diagnostics: ["gmsh-wasm worker meshGeoScript"]
     });
+    // First-class wasm-session quality gate (A-M4): reject near-degenerate
+    // meshes, record marginal quality onto artifact metadata.
+    intake.enforceWasmMeshQualityGate(artifact, meshed.qualityMinSICN, "In-browser meshing");
     return {
       packed: packCoreVolumeMeshArtifact(artifact),
       timings: meshed.timings,
@@ -86,6 +94,7 @@ async function runOperation(request: MeshWorkerRequest, reportPhase: (phase: Mes
     units: request.payload.units ?? "mm",
     diagnostics: [`gmsh-wasm worker meshStepFile (algorithm3D=${meshed.algorithm3D})`]
   });
+  intake.enforceWasmMeshQualityGate(artifact, meshed.qualityMinSICN, "In-browser STEP meshing");
   // Facet -> B-rep face attribution (plan A-M3): stamp sourceFaceIds from the
   // STEP display tessellation BEFORE packing, so the ids ride along inside the
   // packed artifact's surface facets.

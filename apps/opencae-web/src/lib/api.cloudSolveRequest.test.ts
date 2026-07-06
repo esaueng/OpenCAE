@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { bracketDemoProject, bracketDisplayModel } from "@opencae/db/sample-data";
 import type { Study } from "@opencae/schema";
-import { cloudGeometrySourceForStudy } from "../workers/opencaeCoreSolve";
+import { geometrySourceForStudy } from "../workers/opencaeCoreSolve";
 import { geometryWithMeshPreset, studyForCoreCloudGeometrySolve } from "./api";
 
 const bracketStudy = bracketDemoProject.studies[0]! as Study;
@@ -23,7 +23,7 @@ describe("OpenCAE Core Cloud solve request preparation", () => {
   });
 
   test("applies the study mesh preset to procedural cloud geometry", () => {
-    const geometry = cloudGeometrySourceForStudy(bracketStudy, bracketDisplayModel);
+    const geometry = geometrySourceForStudy(bracketStudy, bracketDisplayModel);
     expect(geometry).not.toBeNull();
 
     const medium = geometryWithMeshPreset(geometry!, bracketStudy);
