@@ -9,7 +9,11 @@ import {
 export interface LocalSolveResult {
   summary: ResultSummary;
   fields: ResultField[];
-  artifacts?: {
+  /** Solver-space render surface mesh (cloud response contract). */
+  surfaceMesh?: unknown;
+  /** Solver diagnostics entries (core-solve-diagnostics, phase diagnostics, ...). */
+  diagnostics?: unknown[];
+  artifacts?: Record<string, unknown> & {
     meshConnectivity?: { connectedComponents: number };
     meshStatistics?: { nodes: number; elements: number };
   };
