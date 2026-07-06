@@ -1,6 +1,11 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, test, vi } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { StartScreen } from "./StartScreen";
+import { advanceOfflineReadiness, resetOfflineReadinessForTests } from "../lib/offlineStatus";
+
+afterEach(() => {
+  resetOfflineReadinessForTests();
+});
 
 describe("StartScreen", () => {
   test("links the Esau Engineering credit to the company website", () => {
@@ -14,6 +19,43 @@ describe("StartScreen", () => {
     expect(html).toContain("Runs locally");
     expect(html).not.toContain("v0.1.0-mvp");
     expect(html).not.toContain("local mode");
+  });
+
+  test("claims nothing about offline readiness before the service worker reports it", () => {
+    const html = renderToStaticMarkup(
+      <StartScreen onLoadSample={vi.fn()} onCreateProject={vi.fn()} onOpenProject={vi.fn()} />
+    );
+
+    expect(html).toContain("Runs locally");
+    expect(html).not.toContain("Offline-ready");
+    expect(html).not.toContain("Preparing offline assets");
+  });
+
+  test("shows the caching progress, then Offline-ready, as text in the footer", () => {
+    advanceOfflineReadiness("preparing");
+    const preparing = renderToStaticMarkup(
+      <StartScreen onLoadSample={vi.fn()} onCreateProject={vi.fn()} onOpenProject={vi.fn()} />
+    );
+    expect(preparing).toContain("Preparing offline assets…");
+    expect(preparing).not.toContain("Offline-ready");
+
+    advanceOfflineReadiness("ready");
+    const ready = renderToStaticMarkup(
+      <StartScreen onLoadSample={vi.fn()} onCreateProject={vi.fn()} onOpenProject={vi.fn()} />
+    );
+    expect(ready).toContain("Offline-ready");
+    expect(ready).not.toContain("Preparing offline assets");
+    // A11y: the state is conveyed as text (role=status), never color-only.
+    expect(ready).toContain('role="status"');
+  });
+
+  test("says nothing misleading when the service worker is unsupported or failed", () => {
+    advanceOfflineReadiness("unsupported");
+    const html = renderToStaticMarkup(
+      <StartScreen onLoadSample={vi.fn()} onCreateProject={vi.fn()} onOpenProject={vi.fn()} />
+    );
+    expect(html).toContain("Runs locally");
+    expect(html).not.toContain("Offline");
   });
 
   test("keeps sample choices inside the load sample submenu", () => {

@@ -1,115 +1,184 @@
+import type { SolveProgressEvent } from "@opencae/solve-pipeline";
 import { trySolveOpenCaeCoreStudy } from "./opencaeCoreSolve";
+import type { LocalSolveResult } from "./performanceProtocol";
 import {
-  makeSolveRunEvent,
+  createSolveWorkerRequestId,
+  isSolveWorkerProgress,
+  isSolveWorkerResult,
   type SolveWorkerRequest,
   type SolveWorkerResponse,
-  type SolveWorkerResult
-} from "./solveWorkerProtocol";
-import type { DisplayModel, RunEvent, Study } from "@opencae/schema";
+  type SolveWorkerSolvePayload
+} from "./solveProtocol";
 
-export type SolveWorkerPayload = {
-  runId: string;
-  study: Study;
-  displayModel?: DisplayModel;
+/**
+ * Client for the dedicated solve worker. Mirrors performanceClient's worker
+ * lifecycle handling, plus:
+ * - interim progress callbacks from the solver hooks,
+ * - cooperative cancel with a terminate+respawn fallback: a blocked worker
+ *   thread cannot observe the cancel message, so after
+ *   CANCEL_TERMINATE_TIMEOUT_MS the worker is killed and recreated lazily.
+ *   Only solve work lives on this worker, so termination never disturbs STL
+ *   decode/playback on the shared performance worker.
+ * - an inline fallback when Workers are unavailable (tests, SSR), running the
+ *   same adapter path with the same hooks.
+ */
+
+export const CANCEL_TERMINATE_TIMEOUT_MS = 2000;
+
+export class LocalSolveError extends Error {
+  readonly code?: string;
+
+  constructor(message: string, code?: string) {
+    super(message);
+    this.name = "LocalSolveError";
+    this.code = code;
+  }
+}
+
+export function isCancelledSolveError(error: unknown): boolean {
+  return error instanceof LocalSolveError && error.code === "cancelled";
+}
+
+export type LocalSolveCompletion = {
+  result: LocalSolveResult;
+  solverBackend: string;
 };
 
-export type SolveWorkerHandlers = {
-  onEvent: (event: RunEvent) => void;
-  onResult: (result: SolveWorkerResult) => void;
-  onError: (message: string) => void;
-};
-
-export type StartedSolveWorker = {
+export type LocalSolveHandle = {
+  completion: Promise<LocalSolveCompletion>;
   cancel: () => void;
 };
 
-let requestCounter = 0;
+type PendingSolve = {
+  id: string;
+  resolve: (completion: LocalSolveCompletion) => void;
+  reject: (error: Error) => void;
+  onProgress?: (event: SolveProgressEvent) => void;
+  cancelTimer?: ReturnType<typeof setTimeout>;
+};
 
-export function startOpenCaeCoreSolveWorker(payload: SolveWorkerPayload, handlers: SolveWorkerHandlers): StartedSolveWorker {
-  requestCounter += 1;
-  const request: SolveWorkerRequest = {
-    id: `solve-${Date.now().toString(36)}-${requestCounter.toString(36)}`,
-    ...payload
-  };
+let workerInstance: Worker | null = null;
+const pendingSolves = new Map<string, PendingSolve>();
 
-  if (typeof Worker === "undefined") {
-    let cancelled = false;
-    void runFallbackSolve(request, {
-      onEvent: (event) => {
-        if (!cancelled) handlers.onEvent(event);
-      },
-      onResult: (result) => {
-        if (!cancelled) handlers.onResult(result);
-      },
-      onError: (message) => {
-        if (!cancelled) handlers.onError(message);
-      }
-    });
-    return {
-      cancel() {
-        cancelled = true;
-      }
-    };
-  }
+export function startLocalSolve(
+  payload: SolveWorkerSolvePayload,
+  onProgress?: (event: SolveProgressEvent) => void
+): LocalSolveHandle {
+  if (typeof Worker === "undefined") return startInlineSolve(payload, onProgress);
 
-  const worker = new Worker(new URL("./solveWorker.ts", import.meta.url), { type: "module", name: "opencae-solve-worker" });
-  let settled = false;
-  const cleanup = () => {
-    worker.removeEventListener("message", handleMessage);
-    worker.removeEventListener("error", handleError);
-    worker.terminate();
-  };
-  const finish = (callback: () => void) => {
-    if (settled) return;
-    settled = true;
-    callback();
-    cleanup();
-  };
-  function handleMessage(event: MessageEvent<SolveWorkerResponse>) {
-    const response = event.data;
-    if (response.id !== request.id) return;
-    if (response.type === "event") {
-      handlers.onEvent(response.event);
-      return;
-    }
-    if (response.type === "result") {
-      finish(() => handlers.onResult(response.result));
-      return;
-    }
-    finish(() => handlers.onError(response.message));
-  }
-  function handleError(event: ErrorEvent) {
-    finish(() => handlers.onError(event.message || "OpenCAE Core solve worker failed."));
-  }
-  worker.addEventListener("message", handleMessage);
-  worker.addEventListener("error", handleError);
+  const id = createSolveWorkerRequestId();
+  const completion = new Promise<LocalSolveCompletion>((resolve, reject) => {
+    pendingSolves.set(id, { id, resolve, reject, onProgress });
+  });
+  const worker = getSolveWorker();
+  const request: SolveWorkerRequest = { kind: "solve", id, payload };
   worker.postMessage(request);
 
   return {
-    cancel() {
-      if (settled) return;
-      settled = true;
-      cleanup();
+    completion,
+    cancel: () => {
+      const pending = pendingSolves.get(id);
+      if (!pending) return;
+      // Cooperative first: the solver hooks check shouldCancel between CG
+      // iterations / time steps if the worker event loop ever yields.
+      workerInstance?.postMessage({ kind: "cancel", id } satisfies SolveWorkerRequest);
+      if (pending.cancelTimer) return;
+      pending.cancelTimer = setTimeout(() => {
+        if (!pendingSolves.has(id)) return;
+        // The worker is still blocked in the solve: terminate it. It respawns
+        // lazily on the next solve; no other work runs on this worker.
+        workerInstance?.terminate();
+        workerInstance = null;
+        rejectPending(id, new LocalSolveError("OpenCAE Core solve cancelled.", "cancelled"));
+      }, CANCEL_TERMINATE_TIMEOUT_MS);
     }
   };
 }
 
-async function runFallbackSolve(request: SolveWorkerRequest, handlers: SolveWorkerHandlers): Promise<void> {
-  const startedAt = Date.now();
-  const dynamic = request.study.type === "dynamic_structural";
-  handlers.onEvent(makeSolveRunEvent(request.runId, "state", 0, dynamic ? "OpenCAE Core dynamic browser solve queued." : "OpenCAE Core browser solve queued.", startedAt));
-  await Promise.resolve();
-  handlers.onEvent(makeSolveRunEvent(request.runId, "progress", 30, dynamic ? "Building OpenCAE Core dynamic model and applying solver limits." : "Building OpenCAE Core model and applying solver limits.", startedAt));
-  await Promise.resolve();
-  const solved = trySolveOpenCaeCoreStudy({
-    study: request.study,
-    runId: request.runId,
-    displayModel: request.displayModel
+function startInlineSolve(
+  payload: SolveWorkerSolvePayload,
+  onProgress?: (event: SolveProgressEvent) => void
+): LocalSolveHandle {
+  let cancelled = false;
+  const completion = new Promise<LocalSolveCompletion>((resolve, reject) => {
+    // Deferred one tick so callers can subscribe/cancel before the synchronous
+    // solve blocks this thread.
+    setTimeout(() => {
+      if (cancelled) {
+        reject(new LocalSolveError("OpenCAE Core solve cancelled.", "cancelled"));
+        return;
+      }
+      try {
+        const outcome = trySolveOpenCaeCoreStudy({
+          study: payload.study,
+          runId: payload.runId,
+          displayModel: payload.displayModel,
+          hooks: {
+            onProgress,
+            shouldCancel: () => cancelled
+          }
+        });
+        if (!outcome.ok) {
+          reject(new LocalSolveError(outcome.reason, outcome.code));
+          return;
+        }
+        resolve({ result: outcome.result, solverBackend: outcome.solverBackend });
+      } catch (error) {
+        reject(error instanceof Error ? error : new LocalSolveError(String(error)));
+      }
+    }, 0);
   });
-  if (!solved.ok) {
-    handlers.onError(solved.reason);
+  return {
+    completion,
+    cancel: () => {
+      cancelled = true;
+    }
+  };
+}
+
+function getSolveWorker(): Worker {
+  if (workerInstance) return workerInstance;
+  workerInstance = new Worker(new URL("./solveWorker.ts", import.meta.url), { type: "module", name: "opencae-solve-worker" });
+  workerInstance.addEventListener("message", handleSolveWorkerMessage);
+  workerInstance.addEventListener("error", handleSolveWorkerError);
+  return workerInstance;
+}
+
+function handleSolveWorkerMessage(event: MessageEvent<SolveWorkerResponse>): void {
+  const response = event.data;
+  if (isSolveWorkerProgress(response)) {
+    pendingSolves.get(response.id)?.onProgress?.(response.event);
     return;
   }
-  handlers.onEvent(makeSolveRunEvent(request.runId, "progress", 90, "Writing OpenCAE Core result fields.", startedAt));
-  handlers.onResult(solved.result);
+  if (!isSolveWorkerResult(response)) return;
+  const pending = pendingSolves.get(response.id);
+  if (!pending) return;
+  clearPending(pending);
+  if (response.ok) {
+    pending.resolve({ result: response.result, solverBackend: response.solverBackend });
+    return;
+  }
+  pending.reject(new LocalSolveError(response.error.message, response.error.code));
+}
+
+function handleSolveWorkerError(event: ErrorEvent): void {
+  const error = new LocalSolveError(event.message || "Solve worker failed.");
+  for (const pending of [...pendingSolves.values()]) {
+    clearPending(pending);
+    pending.reject(error);
+  }
+  workerInstance?.terminate();
+  workerInstance = null;
+}
+
+function rejectPending(id: string, error: Error): void {
+  const pending = pendingSolves.get(id);
+  if (!pending) return;
+  clearPending(pending);
+  pending.reject(error);
+}
+
+function clearPending(pending: PendingSolve): void {
+  if (pending.cancelTimer) clearTimeout(pending.cancelTimer);
+  pendingSolves.delete(pending.id);
 }

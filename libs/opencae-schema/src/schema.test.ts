@@ -233,18 +233,36 @@ describe("ProjectSchema", () => {
     });
 
     expect(parsed.studies[0]?.meshSettings.preset).toBe("ultra");
+    // Legacy "opencae_core" predates the explicit cloud/local choice, so old
+    // project files parse to "auto" (per-model routing), not a cloud selection.
     expect(parsed.studies[0]?.solverSettings).toMatchObject({
-      backend: "opencae_core_cloud",
+      backend: "auto",
       fidelity: "ultra"
     });
   });
 
-  it("normalizes legacy solver backend settings for imported project compatibility", () => {
-    const parsed = SolverBackendSchema.parse("cloudflare_fea");
+  it("normalizes legacy solver backend settings to auto for imported project compatibility", () => {
+    // Legacy and unknown backend tokens carry no explicit user choice.
+    expect(SolverBackendSchema.parse("cloudflare_fea")).toBe("auto");
+    expect(SolverBackendSchema.parse("cloudflare-fea-calculix")).toBe("auto");
+    expect(SolverBackendSchema.parse("opencae_core")).toBe("auto");
+    expect(SolverBackendSchema.parse("local_detailed")).toBe("auto");
+    expect(SolverBackendSchema.parse("auto")).toBe("auto");
+  });
 
-    expect(parsed).toBe("opencae_core_cloud");
-    expect(SolverBackendSchema.parse("cloudflare-fea-calculix")).toBe("opencae_core_cloud");
-    expect(SolverBackendSchema.parse("opencae_core")).toBe("opencae_core_cloud");
+  it("preserves explicit local backend choices and aliases retired cloud choices to auto", () => {
+    expect(SolverBackendSchema.parse("opencae_core_local")).toBe("opencae_core_local");
+    // B4a: the client cloud solve path is retired, but old projects that
+    // saved an explicit cloud choice must still load — as "auto".
+    expect(SolverBackendSchema.parse("opencae_core_cloud")).toBe("auto");
+  });
+
+  it("round-trips a retired opencae_core_cloud backend through parse -> serialize -> parse", () => {
+    const parsed = SolverBackendSchema.parse("opencae_core_cloud");
+    expect(parsed).toBe("auto");
+    // Serialized form of the migrated value stays parseable and stable.
+    const reparsed = SolverBackendSchema.parse(JSON.parse(JSON.stringify(parsed)));
+    expect(reparsed).toBe("auto");
   });
 
   it("requires production Core Cloud provenance and rejects CalculiX or preview sources", () => {

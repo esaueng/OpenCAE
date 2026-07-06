@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { AlertTriangle, Anchor, ArrowDown, Check, ChevronDown, CircleHelp, Eye, Gauge, Grid3X3, Maximize2, Pause, Play, Plus, RotateCcw, Ruler, ScanLine, ShieldCheck, Upload, Weight, X } from "lucide-react";
 import { defaultPrintParametersFor, effectiveMaterialProperties, massKgForPayloadMaterial, normalizePrintParameters, payloadMaterialForId, payloadMaterials, starterMaterials, type PayloadMaterialCategory, type PrintMaterialParameters } from "@opencae/materials";
 import { assessResultFailure, estimateAllowableLoadForSafetyFactor } from "@opencae/schema";
-import type { Constraint, DisplayFace, DisplayModel, DynamicSolverSettings, Load, MeshQuality, Project, ResultField, ResultProvenance, ResultSummary, RunTimingEstimate, SimulationFidelity, SolverBackend, Study } from "@opencae/schema";
+import type { Constraint, DisplayFace, DisplayModel, DynamicSolverSettings, Load, MeshQuality, Project, ResultField, ResultProvenance, ResultSummary, RunTimingEstimate, SimulationFidelity, Study } from "@opencae/schema";
 import { inferCriticalPrintAxis } from "@opencae/study-core";
 import type { ResultMode, ViewMode } from "./CadViewer";
 import type { StepId } from "./StepBar";
@@ -23,7 +23,6 @@ import { SampleOptionCard } from "./SampleOptionCard";
 import { SAMPLE_OPTIONS, sampleOptionFor } from "./sampleOptions";
 import { dynamicPlaybackFrames } from "../resultFields";
 import { INVALID_REACTION_WARNING, PREVIEW_GEOMETRY_WARNING, canShowReverseLoadCapacity, hasInvalidReactionForce, hasUnavailableReactionDiagnostic, shouldBlockPreviewResultsForDisplayModel } from "../resultProvenance";
-import { normalizeSolverBackend, openCaeCoreEligibility } from "../workers/opencaeCoreSolve";
 import {
   frameIndexForRoundedPlaybackOrdinal,
   playbackOrdinalForSolverFramePosition
@@ -115,10 +114,6 @@ const noopDraftPayloadPreviewChange = () => undefined;
 type SolverSettingsPatch = Partial<DynamicSolverSettings> & { fidelity?: SimulationFidelity };
 const MESH_PRESETS: MeshQuality[] = ["coarse", "medium", "fine", "ultra"];
 const SIMULATION_FIDELITIES: SimulationFidelity[] = ["standard", "detailed", "ultra"];
-const SOLVER_BACKEND_OPTIONS: Array<{ value: SolverBackend; label: string }> = [
-  { value: "opencae_core_local", label: "OpenCAE Core Local" },
-  { value: "opencae_core_cloud", label: "OpenCAE Core Cloud" }
-];
 
 export function RightPanel(props: RightPanelProps) {
   return (
@@ -985,13 +980,8 @@ function RunPanel({ study, displayModel, runProgress, runError, runTiming, onRun
   ] as const;
   const dynamic = study.type === "dynamic_structural" ? study.solverSettings : null;
   const fidelity = solverFidelityForStudy(study);
-  const solverBackend = effectiveSolverBackend(study, displayModel);
   const updateSolverChoice = (settings: SolverSettingsPatch) => {
     onUpdateSolverSettings?.(settings);
-  };
-  const updateSolverBackend = (value: string) => {
-    if (!isSolverBackend(value)) return;
-    onUpdateSolverSettings?.({ backend: value });
   };
   const updateDynamicNumber = (key: keyof Pick<DynamicSolverSettings, "startTime" | "endTime" | "timeStep" | "outputInterval" | "dampingRatio">, value: number) => {
     if (!Number.isFinite(value)) return;
@@ -1012,13 +1002,15 @@ function RunPanel({ study, displayModel, runProgress, runError, runTiming, onRun
       <div className="checklist">
         {checks.map(([label, done]) => <span key={label} className={done ? "check done" : "check"}><span>{done ? <Check size={18} /> : null}</span>{label}</span>)}
       </div>
-      <SectionTitle>Simulation backend</SectionTitle>
-      <label className="field">
-        <span>Backend</span>
-        <select name="solver-backend" value={solverBackend} onChange={(event) => updateSolverBackend(event.currentTarget.value)}>
-          {SOLVER_BACKEND_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-        </select>
-      </label>
+      {/* B5: the backend picker is gone — every simulation runs locally in the
+          browser, so a choice would be routing theater. The Solver info block
+          below states the backend; solverSettings.backend stays in the schema
+          so older project files (including retired cloud selections) still
+          round-trip. */}
+      <SectionTitle>Simulation settings</SectionTitle>
+      <div className="summary-box">
+        <Info label="Solver" value="Local (in-browser)" />
+      </div>
       <label className="field">
         <span>Fidelity</span>
         <select value={fidelity} onChange={(event) => updateSolverChoice({ fidelity: event.currentTarget.value as SimulationFidelity })}>
@@ -1172,20 +1164,13 @@ function solverFidelityForStudy(study: Study): SimulationFidelity {
   return fidelity === "detailed" || fidelity === "ultra" ? fidelity : "standard";
 }
 
-function isSolverBackend(value: string): value is SolverBackend {
-  return value === "opencae_core_cloud" || value === "opencae_core_local";
-}
-
-function effectiveSolverBackend(study: Study, displayModel: DisplayModel): SolverBackend {
-  const backend = (study.solverSettings as { backend?: unknown }).backend;
-  const normalized = normalizeSolverBackend(study);
-  if (backend !== undefined) return normalized;
-  return openCaeCoreEligibility(study, displayModel).ok ? "opencae_core_local" : "opencae_core_cloud";
-}
-
+// Solver info rows show the backend the run will actually use. Every run
+// executes locally in the browser since the cloud retirement (B5), so the
+// label is constant and there is nothing to pick.
 function solverBackendLabelForRunPanel(study: Study, displayModel: DisplayModel): string {
-  if (effectiveSolverBackend(study, displayModel) === "opencae_core_cloud") return "OpenCAE Core Cloud";
-  return "OpenCAE Core Local";
+  void study;
+  void displayModel;
+  return "OpenCAE Core Local (in-browser)";
 }
 
 function solverMethodForStudy(study: Study): "sparse_static" | "mdof_dynamic" {
@@ -1193,7 +1178,9 @@ function solverMethodForStudy(study: Study): "sparse_static" | "mdof_dynamic" {
 }
 
 function solverRunnerLabelForStudy(study: Study, displayModel: DisplayModel): string {
-  return effectiveSolverBackend(study, displayModel) === "opencae_core_cloud" ? "cloud container" : "local core worker";
+  void study;
+  void displayModel;
+  return "local core worker";
 }
 
 export function formatSimulationEta(remainingMs: number | undefined, isRunning = true): string {
@@ -1478,6 +1465,10 @@ function formatResultMetric(value: number, units: string | undefined): string {
 }
 
 function solverRunnerLabelForResult(provenance: ResultProvenance | undefined): string {
+  // The browser pipeline keeps the runner's solver id for golden byte-parity;
+  // runnerVersion "browser-*" is the honest local marker (plan 015; a distinct
+  // solver id is tracked as open question 4).
+  if (provenance?.runnerVersion?.startsWith("browser-")) return "in-browser solve worker";
   return provenance?.solver === "opencae-core-cloud" ? "cloud container" : "local core worker";
 }
 

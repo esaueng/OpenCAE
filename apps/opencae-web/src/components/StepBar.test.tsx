@@ -152,7 +152,7 @@ describe("StepBar", () => {
         project={project}
         study={{
           ...study,
-          solverSettings: { backend: "opencae_core_cloud" }
+          solverSettings: { backend: "opencae_core_local" }
         }}
         hasResults={false}
         collapsed={false}

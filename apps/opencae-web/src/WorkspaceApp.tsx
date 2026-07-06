@@ -3,6 +3,8 @@ import { isRunResultReadyStatus } from "@opencae/schema";
 import type { Constraint, DisplayFace, DisplayModel, DynamicSolverSettings, Load, NamedSelection, Project, ResultField, ResultRenderBounds, ResultSummary, RunEvent, RunTimingEstimate, SimulationFidelity, Study } from "@opencae/schema";
 import { RotateCcw, Save } from "lucide-react";
 import { addLoad, addSupport, assignMaterial, cancelRun, createProject, generateMesh, getResults, importLocalProject, loadSampleProject, renameProject, runSimulation, subscribeToRun, updateStudy as saveStudyPatch, uploadModel, type SampleAnalysisType, type SampleModelId } from "./lib/api";
+import { cancelWasmMeshing } from "./lib/wasmMeshing";
+import { resolveSolverBackend } from "./workers/opencaeCoreSolve";
 import { normalizePrintParameters, starterMaterials } from "@opencae/materials";
 import { BottomPanel, type WorkspaceLogEntry } from "./components/BottomPanel";
 import { OpenCaeLogoMark } from "./components/OpenCaeLogoMark";
@@ -253,6 +255,9 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const resultPlaybackBufferCacheForViewer = !DEBUG_RESULT_FRAME_CACHE_ONLY && resultPlaybackCacheState.status === "ready"
     ? resultPlaybackCacheState.cache.packed ?? null
     : null;
+  // In-browser wasm meshing has no cooperative cancel; terminate the mesh
+  // worker if the workspace unmounts mid-mesh (no-op when idle or flag off).
+  useEffect(() => () => cancelWasmMeshing("Meshing cancelled: workspace closed."), []);
   useEffect(() => {
     if (!DEBUG_RESULTS) return;
     const frameField = visibleResultFieldsForUi.find((field) => field.type === "stress")
@@ -1101,10 +1106,21 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     setResultPlaybackPlaying(false);
     setRunError(null);
     pushMessage("Starting simulation run.");
-    pushMessage(runDiagnosticsMessage(study));
+    pushMessage(runDiagnosticsMessage(study, displayModel ?? undefined));
     let response: Awaited<ReturnType<typeof runSimulation>>;
     try {
-      response = await runSimulation(study.id, study, displayModel ?? undefined, { onRunStatus: pushMessage, resultRenderBounds });
+      response = await runSimulation(study.id, study, displayModel ?? undefined, {
+        onRunStatus: pushMessage,
+        resultRenderBounds,
+        // A-M4 local-first meshing: when the run meshes geometry before
+        // solving, persist the meshed study (with its stored artifact) so
+        // later runs reuse it instead of re-meshing.
+        onStudyMeshed: (meshedStudy) => {
+          setProject((current) => current
+            ? { ...current, studies: current.studies.map((item) => (item.id === meshedStudy.id ? meshedStudy : item)) }
+            : current);
+        }
+      });
     } catch (error) {
       setProcessingRunId(null);
       setRunProgress(0);
@@ -1419,7 +1435,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           onRemoveLoad={(loadId) =>
             updateStudy(saveStudyPatch(study.id, { loads: study.loads.filter((item) => item.id !== loadId) }, "Load removed.", study))
           }
-          onGenerateMesh={(preset) => updateStudy(generateMesh(study.id, preset, study, displayModel), shouldAutoAdvanceAfterMeshGeneration() ? "run" : undefined)}
+          onGenerateMesh={(preset) => updateStudy(generateMesh(study.id, preset, study, displayModel, pushMessage), shouldAutoAdvanceAfterMeshGeneration() ? "run" : undefined)}
           onUpdateSolverSettings={handleUpdateSolverSettings}
           onRunSimulation={handleRunSimulation}
           onCancelSimulation={handleCancelSimulation}
@@ -1524,10 +1540,11 @@ function latestCompletedRunId(study: Study | null, activeRunId: string): string 
   return completed?.id ?? null;
 }
 
-function runDiagnosticsMessage(study: Study): string {
+function runDiagnosticsMessage(study: Study, displayModel?: DisplayModel): string {
   const fidelity = solverFidelityForDiagnostics(study);
+  const resolvedBackend = resolveSolverBackend(study, displayModel);
   return [
-    "Run diagnostics: backend=opencae_core_cloud",
+    `Run diagnostics: backend=${resolvedBackend.backend}${resolvedBackend.source === "auto" ? " (auto)" : ""}`,
     `fidelity=${fidelity}`,
     `analysis=${study.type}`,
     `materials=${study.materialAssignments.length}`,

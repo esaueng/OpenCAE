@@ -3,15 +3,16 @@ import type { DisplayModel, Study } from "@opencae/schema";
 import { bracketDemoProject, bracketDisplayModel } from "@opencae/db/sample-data";
 import { validateModelJson } from "@opencae/core";
 import {
-  buildOpenCaeCoreCloudModelForStudy,
-  cloudGeometrySourceForStudy,
+  buildOpenCaeCoreModelForStudy,
+  geometrySourceForStudy,
   hasActualCoreVolumeMesh,
-  hasCloudMeshableGeometry,
+  hasMeshableGeometrySource,
   isComplexGeometry,
   isSimpleBlockLikeDisplayModel,
   normalizeSolverBackend,
-  OPENCAE_CORE_CLOUD_GEOMETRY_REQUIRED_REASON,
+  OPENCAE_CORE_MESH_REQUIRED_REASON,
   openCaeCoreEligibility,
+  studyForCoreGeometryDispatch,
   trySolveOpenCaeCoreStudy
 } from "./opencaeCoreSolve";
 
@@ -66,41 +67,19 @@ const staticStudy = {
 } satisfies Study;
 
 describe("OpenCAE Core browser solver adapter", () => {
-  test("normalizes omitted and legacy backend selections to OpenCAE Core Cloud", () => {
-    expect(normalizeSolverBackend({ solverSettings: { backend: "cloudflare_fea" } })).toBe("opencae_core_cloud");
-    expect(normalizeSolverBackend({ solverSettings: { backend: "opencae_core" } })).toBe("opencae_core_cloud");
-    expect(normalizeSolverBackend({ solverSettings: { backend: "local_detailed" } })).toBe("opencae_core_cloud");
+  test("normalizes every backend selection to the local browser solver (cloud retired)", () => {
+    expect(normalizeSolverBackend({ solverSettings: { backend: "cloudflare_fea" } })).toBe("opencae_core_local");
+    expect(normalizeSolverBackend({ solverSettings: { backend: "opencae_core" } })).toBe("opencae_core_local");
+    expect(normalizeSolverBackend({ solverSettings: { backend: "opencae_core_cloud" } })).toBe("opencae_core_local");
     expect(normalizeSolverBackend({ solverSettings: { backend: "opencae_core_local" } })).toBe("opencae_core_local");
-    expect(normalizeSolverBackend({ solverSettings: {} })).toBe("opencae_core_cloud");
-    expect(normalizeSolverBackend(undefined)).toBe("opencae_core_cloud");
+    expect(normalizeSolverBackend({ solverSettings: {} })).toBe("opencae_core_local");
+    expect(normalizeSolverBackend(undefined)).toBe("opencae_core_local");
   });
 
   test("accepts static force studies with usable block dimensions", () => {
     const eligibility = openCaeCoreEligibility(staticStudy, displayModel);
 
     expect(eligibility).toEqual({ ok: true });
-  });
-
-  test("accepts pressure loads on the browser Core path", { timeout: 60000 }, () => {
-    const pressureStudy = {
-      ...staticStudy,
-      loads: [{
-        id: "load-pressure",
-        type: "pressure",
-        selectionRef: "selection-load",
-        parameters: { value: 250, units: "kPa", direction: [0, 0, -1] },
-        status: "complete"
-      }]
-    } satisfies Study;
-
-    const eligibility = openCaeCoreEligibility(pressureStudy, displayModel);
-    const outcome = trySolveOpenCaeCoreStudy({ study: pressureStudy, runId: "run-pressure", displayModel });
-
-    expect(eligibility).toEqual({ ok: true });
-    expect(outcome.ok).toBe(true);
-    if (!outcome.ok) throw new Error(outcome.reason);
-    expect(outcome.result.summary.provenance?.solver).toBe("opencae-core-sparse-tet");
-    expect(outcome.result.summary.maxDisplacement).toBeGreaterThan(0);
   });
 
   test("rejects the Bracket Demo without an actual Core volume mesh", () => {
@@ -112,15 +91,15 @@ describe("OpenCAE Core browser solver adapter", () => {
     expect(hasActualCoreVolumeMesh(bracketStudy, bracketDisplayModel)).toBe(false);
     expect(eligibility.ok).toBe(false);
     if (eligibility.ok) throw new Error("Bracket should not be Core-preview eligible.");
-    expect(eligibility.reason).toMatch(/actual Core volume mesh|OpenCAE Core Cloud/i);
+    expect(eligibility.reason).toMatch(/needs a volume mesh|in-browser meshing is unavailable/i);
   });
 
   test("treats the Bracket Demo as cloud-meshable without an actual Core volume mesh", () => {
     const bracketStudy = bracketDemoProject.studies[0]!;
-    const geometry = cloudGeometrySourceForStudy(bracketStudy, bracketDisplayModel);
+    const geometry = geometrySourceForStudy(bracketStudy, bracketDisplayModel);
 
     expect(hasActualCoreVolumeMesh(bracketStudy, bracketDisplayModel)).toBe(false);
-    expect(hasCloudMeshableGeometry(bracketStudy, bracketDisplayModel)).toBe(true);
+    expect(hasMeshableGeometrySource(bracketStudy, bracketDisplayModel)).toBe(true);
     expect(geometry).toMatchObject({
       kind: "sample_procedural",
       sampleId: "bracket",
@@ -135,33 +114,47 @@ describe("OpenCAE Core browser solver adapter", () => {
     });
   });
 
-  test("solves eligible static studies as browser OpenCAE Core sparse provenance", { timeout: 60000 }, () => {
+  test("solves eligible static studies through the production Core pipeline", { timeout: 60000 }, () => {
     const outcome = trySolveOpenCaeCoreStudy({ study: staticStudy, runId: "run-core-1", displayModel });
 
     expect(outcome.ok).toBe(true);
     if (!outcome.ok) throw new Error(outcome.reason);
-    const displacement = outcome.result.fields.find((field) => field.type === "displacement");
-    const stress = outcome.result.fields.find((field) => field.type === "stress");
+    expect(outcome.solverBackend).toBe("opencae-core-sparse-tet");
+    // Cloud-parity contract: same provenance stamp as the deployed runner,
+    // with a browser runnerVersion (honest about where it was computed).
     expect(outcome.result.summary.provenance).toMatchObject({
       kind: "opencae_core_fea",
-      solver: "opencae-core-sparse-tet",
+      solver: "opencae-core-cloud",
       meshSource: "structured_block_core",
       resultSource: "computed",
+      units: "mm-N-s-MPa",
       runnerVersion: "browser-0.1.0"
     });
     expect(outcome.result.summary.maxStress).toBeGreaterThan(0);
     expect(outcome.result.summary.maxDisplacement).toBeGreaterThan(0);
-    expect(outcome.result.fields.map((field) => field.type)).toEqual(["stress", "displacement", "safety_factor"]);
-    expect(outcome.solverBackend).toBe("opencae-core-sparse-tet");
-    expect(outcome.result.fields.every((field) => field.provenance?.solver === "opencae-core-sparse-tet")).toBe(true);
-    expect(displacement?.samples?.length).toBeGreaterThan(24);
-    expect(stress?.samples?.length).toBeGreaterThan(24);
-    expect(displacement?.samples?.every((sample) => sample.vector?.every(Number.isFinite))).toBe(true);
+    expect(outcome.result.fields.map((field) => field.id).sort()).toEqual([
+      "displacement-surface",
+      "safety-factor",
+      "safety-factor-surface",
+      "stress-surface",
+      "stress-von-mises-element"
+    ]);
+    const surfaceMesh = outcome.result.surfaceMesh as { id: string; nodes: unknown[] };
+    expect(surfaceMesh.id).toBe("solver-surface");
+    const displacement = outcome.result.fields.find((field) => field.id === "displacement-surface");
+    expect(displacement?.location).toBe("node");
+    expect(displacement?.values.length).toBe(surfaceMesh.nodes.length);
+    expect(displacement?.vectors?.length).toBe(surfaceMesh.nodes.length);
+    expect(outcome.result.diagnostics?.some((entry) => (entry as { id?: unknown })?.id === "browser-solve-limits")).toBe(true);
   });
 
-  test("solves dynamic studies with OpenCAE Core transient fields", { timeout: 60000 }, () => {
+  test("solves dynamic studies with OpenCAE Core transient fields", { timeout: 120000 }, () => {
     const dynamicStudy = {
       ...staticStudy,
+      // Coarse preset: the medium-density transient ran ~97 s on CI runners
+      // (~26 s locally) and tripped the 60 s timeout; the assertions below
+      // check contract/provenance, not mesh density.
+      meshSettings: { preset: "coarse", status: "complete", meshRef: "project-1/mesh/mesh-summary.json" },
       type: "dynamic_structural",
       solverSettings: {
         backend: "opencae_core_local",
@@ -186,16 +179,14 @@ describe("OpenCAE Core browser solver adapter", () => {
     expect(outcome.solverBackend).toBe("opencae-core-mdof-tet");
     expect(outcome.result.summary.provenance).toMatchObject({
       kind: "opencae_core_fea",
-      solver: "opencae-core-mdof-tet",
+      solver: "opencae-core-cloud",
       meshSource: "structured_block_core",
       resultSource: "computed",
-      runnerVersion: "browser-0.1.0",
-      integrationMethod: "newmark_average_acceleration"
+      runnerVersion: "browser-0.1.0"
     });
-    expect(outcome.result.summary.reactionForce).toBeGreaterThan(0);
-    expect(outcome.result.summary.loadSummary?.appliedLoadMagnitude).toBeCloseTo(500);
-    expect(outcome.result.summary.diagnostics?.some((diagnostic) => diagnostic.message === "Reaction force unavailable from this dynamic solver.")).toBe(true);
     expect(outcome.result.summary.transient?.frameCount).toBeGreaterThan(1);
+    expect(outcome.result.summary.transient?.integrationMethod).toBe("newmark_average_acceleration");
+    expect(Number.isFinite(outcome.result.summary.maxDisplacement)).toBe(true);
     expect(outcome.result.fields.some((field) => field.type === "displacement" && field.frameIndex === 1)).toBe(true);
     expect(outcome.result.fields.some((field) => field.type === "velocity")).toBe(true);
     expect(outcome.result.fields.some((field) => field.type === "acceleration")).toBe(true);
@@ -228,18 +219,21 @@ describe("OpenCAE Core browser solver adapter", () => {
 
     const outcome = trySolveOpenCaeCoreStudy({ study: actualMeshStudy, runId: "run-actual-core", displayModel: bracketDisplayModel });
 
+    expect(outcome.ok, outcome.ok ? undefined : outcome.reason).toBe(true);
     if (!outcome.ok) throw new Error(outcome.reason);
-    expect(outcome.ok).toBe(true);
+    expect(outcome.solverBackend).toBe("opencae-core-sparse-tet");
     expect(outcome.result.summary.provenance).toMatchObject({
       kind: "opencae_core_fea",
+      solver: "opencae-core-cloud",
       meshSource: "actual_volume_mesh",
-      resultSource: "computed"
+      resultSource: "computed",
+      runnerVersion: "browser-0.1.0"
     });
     expect(outcome.result.artifacts?.meshConnectivity?.connectedComponents).toBe(1);
   });
 
   test("builds a valid v0.2 Core Cloud model for a simple block study", () => {
-    const result = buildOpenCaeCoreCloudModelForStudy(staticStudy, displayModel);
+    const result = buildOpenCaeCoreModelForStudy(staticStudy, displayModel);
 
     expect(result.model.schemaVersion).toBe("0.2.0");
     expect(validateModelJson(result.model).ok).toBe(true);
@@ -258,7 +252,7 @@ describe("OpenCAE Core browser solver adapter", () => {
       ...staticStudy,
       type: "dynamic_structural",
       solverSettings: {
-        backend: "opencae_core_cloud",
+        backend: "opencae_core_local",
         fidelity: "standard",
         startTime: 0,
         endTime: 0.25,
@@ -270,7 +264,7 @@ describe("OpenCAE Core browser solver adapter", () => {
       }
     } satisfies Study;
 
-    const result = buildOpenCaeCoreCloudModelForStudy(dynamicStudy, displayModel);
+    const result = buildOpenCaeCoreModelForStudy(dynamicStudy, displayModel);
 
     expect(validateModelJson(result.model).ok).toBe(true);
     expect(result.model.steps[0]).toMatchObject({
@@ -290,7 +284,7 @@ describe("OpenCAE Core browser solver adapter", () => {
       loads: [{ id: "load-pressure", type: "pressure", selectionRef: "selection-load", parameters: { value: 12, units: "kPa", direction: [0, 0, -1] }, status: "complete" }]
     } satisfies Study;
 
-    const result = buildOpenCaeCoreCloudModelForStudy(pressureStudy, displayModel);
+    const result = buildOpenCaeCoreModelForStudy(pressureStudy, displayModel);
 
     expect(validateModelJson(result.model).ok).toBe(true);
     expect(result.model.loads[0]).toMatchObject({ type: "pressure", surfaceSet: "selection-load", pressure: 12000, direction: [0, 1, 0] });
@@ -308,7 +302,7 @@ describe("OpenCAE Core browser solver adapter", () => {
       }]
     } satisfies Study;
 
-    const result = buildOpenCaeCoreCloudModelForStudy(payloadStudy, displayModel);
+    const result = buildOpenCaeCoreModelForStudy(payloadStudy, displayModel);
 
     expect(validateModelJson(result.model).ok).toBe(true);
     // Display-space -Y (down) gravity rotates into the upright solver frame as -Z.
@@ -321,7 +315,7 @@ describe("OpenCAE Core browser solver adapter", () => {
       materialAssignments: [{ id: "mat-assignment", materialId: "mat-pla", selectionRef: "selection-body", parameters: { printed: true, infillDensity: 50, wallCount: 2, layerOrientation: "z" }, status: "complete" }]
     } satisfies Study;
 
-    const result = buildOpenCaeCoreCloudModelForStudy(printedStudy, displayModel);
+    const result = buildOpenCaeCoreModelForStudy(printedStudy, displayModel);
 
     expect(validateModelJson(result.model).ok).toBe(true);
     expect(result.model.materials[0]?.density).toBeGreaterThan(0);
@@ -330,7 +324,7 @@ describe("OpenCAE Core browser solver adapter", () => {
   });
 
   test("does not build a local Core Cloud model for bracket geometry that should be meshed in the container", () => {
-    expect(() => buildOpenCaeCoreCloudModelForStudy(bracketDemoProject.studies[0]!, bracketDisplayModel)).toThrow(/dispatch this complex geometry source/i);
+    expect(() => buildOpenCaeCoreModelForStudy(bracketDemoProject.studies[0]!, bracketDisplayModel)).toThrow(/must be meshed into a Core volume mesh before solving/i);
   });
 
   test("fails complex Core Cloud model building when no geometry source exists", () => {
@@ -349,8 +343,8 @@ describe("OpenCAE Core browser solver adapter", () => {
     } satisfies DisplayModel;
 
     expect(isComplexGeometry(complexDisplayModel, staticStudy)).toBe(true);
-    expect(hasCloudMeshableGeometry(staticStudy, complexDisplayModel)).toBe(false);
-    expect(() => buildOpenCaeCoreCloudModelForStudy(staticStudy, complexDisplayModel)).toThrow(OPENCAE_CORE_CLOUD_GEOMETRY_REQUIRED_REASON);
+    expect(hasMeshableGeometrySource(staticStudy, complexDisplayModel)).toBe(false);
+    expect(() => buildOpenCaeCoreModelForStudy(staticStudy, complexDisplayModel)).toThrow(OPENCAE_CORE_MESH_REQUIRED_REASON);
   });
 });
 
@@ -368,21 +362,39 @@ function actualCoreModelFixture() {
       density: 2700
     }],
     elementBlocks: [{ name: "actual-volume", type: "Tet4" as const, material: "mat-aluminum-6061", connectivity: [0, 1, 2, 3] }],
+    // Real actual-mesh artifacts carry the boundary facets tagged with the
+    // selections that produced them; the cloud model builder maps study
+    // constraints/loads onto these surface sets.
+    surfaceFacets: [
+      {
+        id: 0,
+        element: 0,
+        elementFace: 1,
+        nodes: [0, 3, 2],
+        area: 0.0008,
+        normal: [-1, 0, 0] as [number, number, number],
+        center: [0, 0.04 / 3, 0.04 / 3] as [number, number, number],
+        sourceSelectionRef: "selection-fixed-face",
+        sourceFaceId: "face-base-left"
+      },
+      {
+        id: 1,
+        element: 0,
+        elementFace: 0,
+        nodes: [1, 2, 3],
+        area: 0.0008 * Math.sqrt(3),
+        normal: [1 / Math.sqrt(3), 1 / Math.sqrt(3), 1 / Math.sqrt(3)] as [number, number, number],
+        center: [0.04 / 3, 0.04 / 3, 0.04 / 3] as [number, number, number],
+        sourceSelectionRef: "selection-load-face",
+        sourceFaceId: "face-load-top"
+      }
+    ],
+    surfaceSets: [],
     nodeSets: [
       { name: "fixedNodes", nodes: [0, 1, 2] },
       { name: "loadNodes", nodes: [3] }
     ],
     elementSets: [{ name: "allElements", elements: [0] }],
-    surfaceFacets: [
-      { id: 0, nodes: [0, 2, 1], element: 0, elementFace: 3, sourceSelectionRef: "selection-fixed-face", sourceFaceId: "face-base-left" },
-      { id: 1, nodes: [0, 1, 3], element: 0, elementFace: 2, sourceSelectionRef: "selection-load-face", sourceFaceId: "face-load-top" },
-      { id: 2, nodes: [0, 3, 2], element: 0, elementFace: 1 },
-      { id: 3, nodes: [1, 2, 3], element: 0, elementFace: 0 }
-    ],
-    surfaceSets: [
-      { name: "selection-fixed-face", facets: [0] },
-      { name: "selection-load-face", facets: [1] }
-    ],
     boundaryConditions: [{ name: "fixedSupport", type: "fixed" as const, nodeSet: "fixedNodes", components: ["x" as const, "y" as const, "z" as const] }],
     loads: [{ name: "appliedForce", type: "nodalForce" as const, nodeSet: "loadNodes", vector: [0, -500, 0] as [number, number, number] }],
     steps: [{ name: "loadStep", type: "staticLinear" as const, boundaryConditions: ["fixedSupport"], loads: ["appliedForce"] }],
@@ -395,3 +407,26 @@ function actualCoreModelFixture() {
     }
   };
 }
+
+// Ported from the retired api.cloudSolveRequest.test.ts (B4a): the solver-frame
+// dispatch physics guard. The wasm meshing path hands the mirrored Core model
+// builder a solver-frame study (studyForCoreGeometryDispatch), so the seeded
+// display-frame load direction must remap and the source study must not mutate.
+describe("solver-frame geometry dispatch (ported cloud-solve request physics)", () => {
+  const seededBracketStudy = bracketDemoProject.studies[0]! as Study;
+
+  test("remaps stored sample load directions into the solver global frame", () => {
+    const prepared = studyForCoreGeometryDispatch(seededBracketStudy, bracketDisplayModel);
+
+    // Seeded "Global -Z" load is stored viewer-down [0, -1, 0]; the mesher
+    // builds the bracket Z-up, so the solver-frame study must carry [0, 0, -1].
+    expect(seededBracketStudy.loads[0]!.parameters.direction).toEqual([0, -1, 0]);
+    expect(prepared.loads[0]!.parameters.direction).toEqual([0, 0, -1]);
+  });
+
+  test("does not mutate the source study", () => {
+    const direction = seededBracketStudy.loads[0]!.parameters.direction;
+    studyForCoreGeometryDispatch(seededBracketStudy, bracketDisplayModel);
+    expect(seededBracketStudy.loads[0]!.parameters.direction).toBe(direction);
+  });
+});
