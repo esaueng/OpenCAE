@@ -11,7 +11,22 @@ export {
   bracketGeometrySourceMetadata,
   type BracketGeometryDescriptor
 } from "./bracketGeo";
-export { buildCoreModelFromCloudMesh, mapSelectionToSurfaceSet } from "./coreModelFromMesh";
+export {
+  buildCoreModelFromCloudMesh,
+  mapSelectionToSurfaceSet,
+  type SelectionMappingDiagnostic,
+  type SelectionMappingMode
+} from "./coreModelFromMesh";
+export {
+  attributeFacetsToStepFaces,
+  buildStepAttributionTessellation,
+  type AttributeFacetsOptions,
+  type BuildStepAttributionOptions,
+  type FacetAttributionReport,
+  type StepAttributionTessellation,
+  type StepTessellatedMeshInput,
+  type SurfaceSetAttribution
+} from "./facetFaceAttribution";
 export {
   DEFAULT_CLOUD_ELEMENT_ORDER,
   elevateVolumeMeshArtifactToTet10,
