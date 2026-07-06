@@ -4,6 +4,8 @@ import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
 import { defineConfig, type PluginOption } from "vite";
 import react from "@vitejs/plugin-react";
+import { VitePWA } from "vite-plugin-pwa";
+import { DONT_CACHE_BUST_URLS, MAX_PRECACHE_FILE_BYTES, PRECACHE_GLOB_IGNORES, PRECACHE_GLOB_PATTERNS } from "./src/lib/offlinePrecache";
 
 // In-browser wasm meshing is the production default (plan A-M4). Builds carry
 // gmsh-wasm unless explicitly opted out with VITE_WASM_MESHING=0 — the escape
@@ -61,6 +63,11 @@ function compressGmshWasmForDeploy(): PluginOption {
       }
       const wasmNames = entries.filter((name) => /^gmsh-core.*\.wasm$/.test(name));
       if (!wasmNames.length) {
+        // closeBundle can run more than once per build (vite-plugin-pwa's
+        // service-worker generation shares the hook); once the raw wasm has
+        // been swapped for .wasm.gz + manifest this pass is a no-op.
+        const alreadyCompressed = entries.some((name) => /^gmsh-core.*\.wasm\.gz$/.test(name)) && entries.includes("gmsh-wasm.json");
+        if (alreadyCompressed) return;
         throw new Error(
           "compressGmshWasmForDeploy: expected a gmsh-core*.wasm asset in dist/assets (wasm meshing is enabled) but found none."
         );
@@ -94,8 +101,74 @@ function compressGmshWasmForDeploy(): PluginOption {
   };
 }
 
+// Offline asset caching (plan Workstream C): precache EVERYTHING — app
+// shell, every JS/CSS chunk (lazy meshWorker/solveWorker chunks included,
+// so offline-first-use works), the gmsh .wasm.gz + its stable manifest, and
+// the occt wasm. The big downloads happen in the service worker's install
+// step, in the background, without blocking the app; the UI only claims
+// "Offline-ready" once that install completed (see lib/offlineStatus.ts).
+//
+// Ordering trap, solved explicitly: compressGmshWasmForDeploy rewrites
+// dist/assets in closeBundle (raw gmsh-core-<hash>.wasm -> .wasm.gz +
+// gmsh-wasm.json). vite-plugin-pwa also globs dist in ITS closeBundle, so
+// the SW generation must run after the compression:
+// - vite-plugin-pwa's build plugin is enforce:"post" while the compress
+//   plugin is unenforced, which already orders the sequential closeBundle
+//   hooks compress-first;
+// - integration.closeBundleOrder:"post" pins that even if plugin ordering
+//   ever changes;
+// - PRECACHE_GLOB_IGNORES excludes the raw wasm so a regression would show
+//   up as a missing .gz entry in scripts/verify-offline-pwa.mjs's manifest
+//   audit rather than as a silently broken deploy.
+function offlineAssetCaching(): PluginOption {
+  return VitePWA({
+    registerType: "autoUpdate",
+    // Registration lives in src/lib/registerOfflineCaching.ts (prod only,
+    // via virtual:pwa-register) so the indicator can track install state.
+    injectRegister: null,
+    integration: { closeBundleOrder: "post" },
+    // The icon is already precached via the png glob; injecting it again
+    // from the manifest would duplicate the entry.
+    includeManifestIcons: false,
+    manifest: {
+      name: "OpenCAE",
+      short_name: "OpenCAE",
+      description: "Open structural simulation that runs locally in your browser.",
+      start_url: "/",
+      display: "standalone",
+      background_color: "#0b0f14",
+      theme_color: "#0b0f14",
+      icons: [{ src: "/opencae-logo.png", sizes: "512x512", type: "image/png" }]
+    },
+    workbox: {
+      globPatterns: PRECACHE_GLOB_PATTERNS,
+      globIgnores: PRECACHE_GLOB_IGNORES,
+      dontCacheBustURLsMatching: DONT_CACHE_BUST_URLS,
+      maximumFileSizeToCacheInBytes: MAX_PRECACHE_FILE_BYTES,
+      navigateFallback: "index.html",
+      cleanupOutdatedCaches: true,
+      // The 3D viewer's text labels (troika-three-text) resolve fonts from
+      // cdn.jsdelivr.net at runtime; cache them opportunistically so label
+      // rendering keeps working offline after the viewer has been used once
+      // online. (Precache can't cover this — the font set is codepoint
+      // dependent. The core offline flows do not depend on it.)
+      runtimeCaching: [
+        {
+          urlPattern: /^https:\/\/cdn\.jsdelivr\.net\/.*/i,
+          handler: "CacheFirst",
+          options: {
+            cacheName: "jsdelivr-fonts",
+            expiration: { maxEntries: 64, maxAgeSeconds: 365 * 24 * 60 * 60 },
+            cacheableResponse: { statuses: [0, 200] }
+          }
+        }
+      ]
+    }
+  });
+}
+
 export default defineConfig({
-  plugins: [react(), stubMeshWorkerClientWhenDisabled(), compressGmshWasmForDeploy()],
+  plugins: [react(), stubMeshWorkerClientWhenDisabled(), compressGmshWasmForDeploy(), offlineAssetCaching()],
   worker: {
     format: "es"
   },

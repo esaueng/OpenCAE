@@ -9,3 +9,11 @@
 
 /index.html
   Cache-Control: public, max-age=0, must-revalidate
+
+# Service worker: must revalidate on every update check, or the browser HTTP
+# cache could pin an old precache manifest and stall the autoUpdate flow.
+/sw.js
+  Cache-Control: no-cache
+
+/manifest.webmanifest
+  Cache-Control: public, max-age=0, must-revalidate
