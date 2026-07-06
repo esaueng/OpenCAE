@@ -13,8 +13,6 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { DisplayModel, Study } from "@opencae/schema";
-import { hasActualCoreVolumeMesh, openCaeCoreEligibility, trySolveOpenCaeCoreStudy } from "@opencae/core-adapter";
 import { solveCoreStatic } from "@opencae/solver-cpu";
 import { beforeAll, describe, expect, it } from "vitest";
 import { bracketGeoScript, bracketGeometrySourceMetadata } from "./bracketGeo";
@@ -102,45 +100,11 @@ describe("wasm-meshed bracket vs Core Cloud golden (plan A-M2)", () => {
     expect(Math.abs(summary.reactionForce - goldenSummary.reactionForce) / goldenSummary.reactionForce).toBeLessThan(0.001);
   });
 
-  it("makes the complex bracket eligible for local solve once the artifact is stored (adapter contract)", { timeout: 120_000 }, () => {
-    // Store the artifact exactly the way apps/opencae-web/src/lib/wasmMeshing.ts
-    // does, then run the untouched adapter pipeline end to end.
-    const baseStudy = golden.request.study as unknown as Study;
-    const displayModel = golden.request.displayModel as unknown as DisplayModel;
-    const study: Study = {
-      ...baseStudy,
-      meshSettings: {
-        preset: "medium",
-        status: "complete",
-        meshRef: `${baseStudy.projectId}/mesh/wasm-gmsh-mesh.json`,
-        summary: {
-          nodes: artifact.metadata.nodeCount,
-          elements: artifact.metadata.elementCount,
-          warnings: [],
-          quality: "medium",
-          source: "wasm_gmsh",
-          units: "m",
-          solverCoordinateSpace: "solver",
-          artifacts: {
-            actualCoreModel: { model },
-            meshConnectivity: { connectedComponents: artifact.metadata.connectedComponentCount }
-          }
-        }
-      }
-    };
-
-    expect(hasActualCoreVolumeMesh(study, displayModel)).toBe(true);
-    const eligibility = openCaeCoreEligibility(study, displayModel);
-    expect(eligibility.ok, eligibility.ok ? undefined : eligibility.reason).toBe(true);
-
-    const outcome = trySolveOpenCaeCoreStudy({ study, runId: "run-a-m2-parity", displayModel });
-    expect(outcome.ok, outcome.ok ? undefined : outcome.reason).toBe(true);
-    if (!outcome.ok) return;
-    expect(outcome.solverBackend).toBe("opencae-core-sparse-tet");
-    const goldenSummary = golden.response.summary;
-    expect(Math.abs(outcome.result.summary.maxStress - goldenSummary.maxStress) / goldenSummary.maxStress).toBeLessThan(0.02);
-    expect(Math.abs(outcome.result.summary.maxDisplacement - goldenSummary.maxDisplacement) / goldenSummary.maxDisplacement).toBeLessThan(0.02);
-  });
+  // The adapter-contract test lives in
+  // apps/opencae-web/src/workers/wasmBracketAdapterContract.test.ts: the adapter
+  // expects the DISPLAY-frame study (it applies displayDirectionToSolverFrame
+  // itself), and this fixture's request.study is already dispatched/solver-frame —
+  // feeding it back in double-remaps the load.
 });
 
 function deltaPct(actual: number, golden: number): string {
