@@ -438,7 +438,7 @@ describe("RightPanel payload mass controls", () => {
     expect(runHtml).toContain("OpenCAE Core Local");
   });
 
-  test("shows OpenCAE Core when solver backend is omitted", () => {
+  test("defaults an omitted solver backend to Auto and shows where it resolves", () => {
     const runHtml = renderPanel("run", {
       study: {
         ...study,
@@ -446,8 +446,43 @@ describe("RightPanel payload mass controls", () => {
       }
     });
 
-    expect(runHtml).toContain("OpenCAE Core Cloud");
+    // The fixture study is not browser-eligible (no display dimensions), so
+    // auto routing honestly resolves to the cloud backend.
+    expect(runHtml).toContain('name="solver-backend"');
+    expect(runHtml).toContain('<option value="auto" selected="">');
+    expect(runHtml).toContain("Auto — runs on OpenCAE Core Cloud");
+    expect(runHtml).toContain("Auto routing: this study runs on OpenCAE Core Cloud.");
+    expect(runHtml).toContain("OpenCAE Core Cloud (auto)");
+    expect(runHtml).toContain("cloud container");
     expect(runHtml).not.toContain("legacy backend");
+  });
+
+  test("shows Auto resolving to the local browser solver for eligible studies", () => {
+    const eligibleDisplayModel: DisplayModel = {
+      id: "display-cantilever",
+      name: "cantilever demo body",
+      bodyCount: 1,
+      dimensions: { x: 180, y: 24, z: 24, units: "mm" },
+      faces: [
+        { id: "face-fixed", label: "Fixed end face", color: "#4da3ff", center: [-1.9, 0.18, 0], normal: [-1, 0, 0], stressValue: 0 },
+        { id: "face-load", label: "Free end load face", color: "#f59e0b", center: [1.9, 0.18, 0], normal: [1, 0, 0], stressValue: 0 }
+      ]
+    };
+    const eligibleStudy: Study = {
+      ...study,
+      materialAssignments: [{ id: "assign-1", materialId: "mat-aluminum-6061", selectionRef: "selection-top", status: "complete" }],
+      constraints: [{ id: "constraint-1", type: "fixed", selectionRef: "selection-top", parameters: {}, status: "complete" }],
+      loads: [{ id: "load-1", type: "force", selectionRef: "selection-top", parameters: { value: 500, units: "N", direction: [0, -1, 0] }, status: "complete" }],
+      meshSettings: { preset: "medium", status: "complete" },
+      solverSettings: {}
+    } as Study;
+
+    const runHtml = renderPanel("run", { study: eligibleStudy, displayModel: eligibleDisplayModel });
+
+    expect(runHtml).toContain("Auto — runs locally in your browser");
+    expect(runHtml).toContain("Auto routing: this study solves locally in your browser.");
+    expect(runHtml).toContain("OpenCAE Core Local (auto)");
+    expect(runHtml).toContain("local core worker");
   });
 
   test("keeps OpenCAE Core runs browser-local without container endpoint copy", () => {
@@ -507,7 +542,7 @@ describe("RightPanel payload mass controls", () => {
     expect(runHtml).not.toContain("CalculiX");
   });
 
-  test("normalizes legacy backend selections to OpenCAE Core Cloud", () => {
+  test("treats legacy backend selections as Auto with truthful resolution labels", () => {
     const detailedStudy = {
       ...study,
       solverSettings: { backend: "cloudflare_fea", fidelity: "ultra" }
@@ -517,7 +552,10 @@ describe("RightPanel payload mass controls", () => {
       study: detailedStudy
     });
 
-    expect(runHtml).toContain("OpenCAE Core Cloud");
+    // Legacy tokens are not an explicit choice; this ineligible fixture
+    // resolves to the cloud backend under auto routing.
+    expect(runHtml).toContain('<option value="auto" selected="">');
+    expect(runHtml).toContain("OpenCAE Core Cloud (auto)");
     expect(runHtml).toContain("sparse_static");
     expect(runHtml).not.toContain("Expected detail");
     expect(runHtml).not.toContain("Browser OpenCAE Core CPU");

@@ -414,8 +414,9 @@ describe("api", () => {
       constraints: [{ id: "constraint-1", type: "fixed", selectionRef: "selection-face-1", parameters: {}, status: "complete" }],
       loads: [{ id: "load-1", type: "force", selectionRef: "selection-face-1", parameters: { value: 500, units: "N", direction: [0, -1, 0] }, status: "complete" }],
       meshSettings: { preset: "fine", status: "complete", meshRef: "project-1/mesh/mesh-summary.json" },
-      // No explicit backend: samples default to opencae_core_cloud.
-      solverSettings: { fidelity: "standard" }
+      // Explicit cloud choice: only explicit-cloud runs reach the cloud route,
+      // so only they can discover the deployment has no Core Cloud.
+      solverSettings: { backend: "opencae_core_cloud", fidelity: "standard" }
     } as unknown as Study;
     const statusMessages: string[] = [];
 
@@ -514,7 +515,7 @@ describe("api", () => {
       constraints: [{ id: "constraint-1", type: "fixed", selectionRef: "selection-face-1", parameters: {}, status: "complete" }],
       loads: [{ id: "load-1", type: "force", selectionRef: "selection-face-1", parameters: { value: 500, units: "N", direction: [0, -1, 0] }, status: "complete" }],
       meshSettings: { preset: "ultra", status: "complete", meshRef: "project-1/mesh/mesh-summary.json" },
-      solverSettings: { backend: "cloudflare_fea", fidelity: "ultra" }
+      solverSettings: { backend: "opencae_core_cloud", fidelity: "ultra" }
     } as unknown as Study;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (String(input) === "/api/cloud-core/runs/run-cloud-core/start") {
@@ -604,6 +605,67 @@ describe("api", () => {
     await runSimulation(bracketStudy.id, bracketStudy, sample.displayModel);
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  test("auto-routes eligible studies to the local browser solver without any network calls", { timeout: 60000 }, async () => {
+    const eligibleDisplayModel: DisplayModel = {
+      ...displayModel,
+      bodyCount: 1,
+      dimensions: { x: 0.12, y: 0.04, z: 0.02, units: "m" },
+      faces: [
+        { id: "selection-face-1", label: "Fixed", color: "#94a3b8", center: [0, 0.02, 0.01], normal: [-1, 0, 0], stressValue: 0 },
+        { id: "selection-face-2", label: "Load", color: "#94a3b8", center: [0.12, 0.02, 0.01], normal: [1, 0, 0], stressValue: 0 }
+      ]
+    };
+    const autoStudy = {
+      ...study,
+      materialAssignments: [{ id: "assign-1", materialId: "mat-aluminum-6061", selectionRef: "selection-body-1", status: "complete" }],
+      constraints: [{ id: "constraint-1", type: "fixed", selectionRef: "selection-face-1", parameters: {}, status: "complete" }],
+      loads: [{ id: "load-1", type: "force", selectionRef: "selection-face-1", parameters: { value: 500, units: "N", direction: [0, -1, 0] }, status: "complete" }],
+      meshSettings: { preset: "medium", status: "complete", meshRef: "project-1/mesh/mesh-summary.json" },
+      // No explicit backend: per-model routing solves eligible studies locally.
+      solverSettings: { fidelity: "standard" }
+    } as unknown as Study;
+    const fetchMock = vi.fn(async (_input?: RequestInfo | URL) => Promise.reject(new TypeError("auto-local runs must not touch the network")));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await runSimulation("study-1", autoStudy, eligibleDisplayModel);
+    const seen: RunEvent[] = [];
+    const source = subscribeToRun(response.run.id, (event) => seen.push(event));
+    await vi.waitFor(() => expect(seen.some((event) => event.type === "complete")).toBe(true), { timeout: 45000 });
+    source.close();
+
+    expect(response.streamUrl).toMatch(/^local:run-local-/);
+    expect((response.run as { solverBackend?: string }).solverBackend).toBe("opencae-core-sparse-tet");
+    expect(fetchMock).not.toHaveBeenCalled();
+    // The persisted study keeps its non-choice; only the run's dispatch copy is stamped local.
+    expect(autoStudy.solverSettings.backend).toBeUndefined();
+  });
+
+  test("auto-routes complex geometry without a local mesh artifact to OpenCAE Core Cloud", async () => {
+    const sample = await loadSampleProject("bracket");
+    const autoBracketStudy = sample.project.studies[0]!;
+    // The seeded bracket study carries no explicit cloud/local backend choice.
+    expect(autoBracketStudy.solverSettings.backend === "opencae_core_cloud" || autoBracketStudy.solverSettings.backend === "opencae_core_local").toBe(false);
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).endsWith("/start")) {
+        return new Response(JSON.stringify({ ok: true }), { headers: { "content-type": "application/json" } });
+      }
+      expect(String(input)).toBe("/api/cloud-core/runs");
+      return new Response(JSON.stringify({
+        run: { id: "run-cloud-core-auto-bracket", solverBackend: "opencae-core-cloud" },
+        streamUrl: "/api/cloud-core/runs/run-cloud-core-auto-bracket/events",
+        startUrl: "/api/cloud-core/runs/run-cloud-core-auto-bracket/start",
+        message: "OpenCAE Core Cloud simulation running."
+      }), { headers: { "content-type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await runSimulation(autoBracketStudy.id, autoBracketStudy, sample.displayModel);
+
+    expect(response.run.id).toBe("run-cloud-core-auto-bracket");
+    expect(response.message).toContain("OpenCAE Core Cloud");
+    expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/cloud-core/runs")).toBe(true);
   });
 
   test("sends dynamic solver settings to OpenCAE Core Cloud", async () => {

@@ -92,7 +92,7 @@ describe("App workflow layout", () => {
 
   test("surfaces run creation failures instead of leaving the run button inert", () => {
     expect(appSource).toContain('pushMessage("Starting simulation run.");');
-    expect(appSource).toContain("runDiagnosticsMessage(study)");
+    expect(appSource).toContain("runDiagnosticsMessage(study, displayModel ?? undefined)");
     expect(apiSource).not.toContain("external solver request started: POST");
     expect(apiSource).not.toContain("external solver bridge selected:");
     expect(appSource).toContain("try {\n      response = await runSimulation(study.id, study, displayModel ?? undefined, { onRunStatus: pushMessage, resultRenderBounds });");

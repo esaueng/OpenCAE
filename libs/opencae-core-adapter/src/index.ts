@@ -103,6 +103,41 @@ export function normalizeSolverBackend(value: { solverSettings?: { backend?: unk
   return backend === "opencae_core_local" ? "opencae_core_local" : "opencae_core_cloud";
 }
 
+export type ResolvedSolverBackend = {
+  backend: NormalizedBrowserSolverBackend;
+  /** "explicit" = the user chose this backend; "auto" = per-model routing chose it. */
+  source: "explicit" | "auto";
+};
+
+/**
+ * Explicit user backend choice, or null when the study carries no explicit
+ * choice ("auto", unset, legacy, or unknown values all mean "never chose").
+ */
+export function explicitSolverBackend(value: { solverSettings?: { backend?: unknown } } | Study | undefined): NormalizedBrowserSolverBackend | null {
+  const backend = value?.solverSettings?.backend;
+  return backend === "opencae_core_local" || backend === "opencae_core_cloud" ? backend : null;
+}
+
+/**
+ * Backend that per-model auto routing would pick for this study, ignoring any
+ * explicit user choice: local when the study is OpenCAE Core browser-eligible,
+ * cloud otherwise (so auto never hits the local ineligible hard-fail path).
+ */
+export function autoSolverBackend(study: Study, displayModel?: DisplayModel): NormalizedBrowserSolverBackend {
+  return openCaeCoreEligibility(study, displayModel).ok ? "opencae_core_local" : "opencae_core_cloud";
+}
+
+/**
+ * Concrete backend for a run. An explicit user choice always wins (explicit
+ * local keeps its honest hard error for ineligible models). Without an explicit
+ * choice, per-model auto routing applies.
+ */
+export function resolveSolverBackend(study: Study, displayModel?: DisplayModel): ResolvedSolverBackend {
+  const explicit = explicitSolverBackend(study);
+  if (explicit) return { backend: explicit, source: "explicit" };
+  return { backend: autoSolverBackend(study, displayModel), source: "auto" };
+}
+
 export function isSimpleBlockLikeDisplayModel(displayModel: DisplayModel | undefined): boolean {
   if (!displayModel?.dimensions || !positiveDimensions(displayModel.dimensions)) return false;
   if (displayModel.bodyCount !== 1) return false;

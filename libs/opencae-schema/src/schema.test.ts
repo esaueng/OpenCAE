@@ -233,18 +233,26 @@ describe("ProjectSchema", () => {
     });
 
     expect(parsed.studies[0]?.meshSettings.preset).toBe("ultra");
+    // Legacy "opencae_core" predates the explicit cloud/local choice, so old
+    // project files parse to "auto" (per-model routing), not a cloud selection.
     expect(parsed.studies[0]?.solverSettings).toMatchObject({
-      backend: "opencae_core_cloud",
+      backend: "auto",
       fidelity: "ultra"
     });
   });
 
-  it("normalizes legacy solver backend settings for imported project compatibility", () => {
-    const parsed = SolverBackendSchema.parse("cloudflare_fea");
+  it("normalizes legacy solver backend settings to auto for imported project compatibility", () => {
+    // Legacy and unknown backend tokens carry no explicit user choice.
+    expect(SolverBackendSchema.parse("cloudflare_fea")).toBe("auto");
+    expect(SolverBackendSchema.parse("cloudflare-fea-calculix")).toBe("auto");
+    expect(SolverBackendSchema.parse("opencae_core")).toBe("auto");
+    expect(SolverBackendSchema.parse("local_detailed")).toBe("auto");
+    expect(SolverBackendSchema.parse("auto")).toBe("auto");
+  });
 
-    expect(parsed).toBe("opencae_core_cloud");
-    expect(SolverBackendSchema.parse("cloudflare-fea-calculix")).toBe("opencae_core_cloud");
-    expect(SolverBackendSchema.parse("opencae_core")).toBe("opencae_core_cloud");
+  it("preserves explicit solver backend choices from saved projects", () => {
+    expect(SolverBackendSchema.parse("opencae_core_cloud")).toBe("opencae_core_cloud");
+    expect(SolverBackendSchema.parse("opencae_core_local")).toBe("opencae_core_local");
   });
 
   it("requires production Core Cloud provenance and rejects CalculiX or preview sources", () => {
