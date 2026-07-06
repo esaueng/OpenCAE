@@ -6,7 +6,7 @@ import type { SolveProgressEvent } from "@opencae/solve-pipeline";
 import { isCancelledSolveError, startLocalSolve } from "../workers/solveWorkerClient";
 import { loadLocalRunResults, saveLocalRunResults } from "./localResultsStore";
 import { generateWasmMeshForStudy } from "./wasmMeshing";
-import { buildOpenCaeCoreCloudModelForStudy, cloudGeometrySourceForStudy, hasActualCoreVolumeMesh, isComplexGeometry, normalizeSolverBackend, openCaeCoreEligibility, studyForCoreCloudGeometryDispatch, OPENCAE_CORE_CLOUD_GEOMETRY_REQUIRED_REASON, type NormalizedBrowserSolverBackend } from "../workers/opencaeCoreSolve";
+import { buildOpenCaeCoreCloudModelForStudy, cloudGeometrySourceForStudy, hasActualCoreVolumeMesh, isComplexGeometry, normalizeSolverBackend, openCaeCoreEligibility, resolveSolverBackend, studyForCoreCloudGeometryDispatch, OPENCAE_CORE_CLOUD_GEOMETRY_REQUIRED_REASON, type NormalizedBrowserSolverBackend } from "../workers/opencaeCoreSolve";
 
 export interface SampleProjectResponse {
   message?: string;
@@ -455,17 +455,33 @@ export async function addLoad(studyId: string, type: LoadType, value: number, se
 }
 
 export async function runSimulation(studyId: string, currentStudy?: Study, displayModel?: DisplayModel, options: RunSimulationOptions = {}): Promise<{ run: { id: string }; streamUrl: string; message: string }> {
-  if (currentStudy && simulationBackend(currentStudy) === "opencae_core_cloud") {
-    return runOpenCaeCoreCloudSimulation(currentStudy, displayModel, options);
-  }
-  try {
+  if (currentStudy) {
+    // Per-model backend routing: an explicit user choice always wins; without
+    // one ("auto"/unset/legacy), eligible studies solve locally in the browser
+    // and everything else runs on OpenCAE Core Cloud. Rollback to the old
+    // cloud-by-default behavior = swap resolveSolverBackend for
+    // normalizeSolverBackend on the next line.
+    const resolved = resolveSolverBackend(currentStudy, displayModel);
+    if (resolved.backend === "opencae_core_cloud") {
+      return runOpenCaeCoreCloudSimulation(currentStudy, displayModel, options);
+    }
     void options;
-    const response = await fetch(`/api/studies/${studyId}/runs`, { method: "POST" });
-    return await readJson(response, `POST /api/studies/${studyId}/runs`);
-  } catch (error) {
-    if (!currentStudy) throw error;
-    return runSimulationLocally(currentStudy, displayModel);
+    // Local runs never leave the browser. Stamp the resolved backend onto the
+    // run's study copy so the solve worker's explicit-local guard sees the
+    // routing decision; the persisted study keeps the user's "auto" choice.
+    return runSimulationLocally(studyWithLocalBackend(currentStudy), displayModel);
   }
+  const response = await fetch(`/api/studies/${studyId}/runs`, { method: "POST" });
+  return await readJson(response, `POST /api/studies/${studyId}/runs`);
+}
+
+function studyWithLocalBackend(study: Study): Study {
+  if (study.solverSettings.backend === "opencae_core_local") return study;
+  // The identical-looking branches keep the static/dynamic study union narrowed
+  // so each spread pairs solverSettings with its own study variant.
+  return study.type === "dynamic_structural"
+    ? { ...study, solverSettings: { ...study.solverSettings, backend: "opencae_core_local" } }
+    : { ...study, solverSettings: { ...study.solverSettings, backend: "opencae_core_local" } };
 }
 
 export async function getResults(runId: string): Promise<ResultsResponse> {
@@ -680,10 +696,7 @@ async function runOpenCaeCoreCloudSimulation(study: Study, displayModel: Display
     // still surface as errors below.
     if (isCloudCoreUnavailableInDeployment(error)) {
       options.onRunStatus?.("OpenCAE Core Cloud is not available in this deployment. Running the OpenCAE Core Local browser solver instead.");
-      const localStudy: Study = study.type === "dynamic_structural"
-        ? { ...study, solverSettings: { ...study.solverSettings, backend: "opencae_core_local" } }
-        : { ...study, solverSettings: { ...study.solverSettings, backend: "opencae_core_local" } };
-      return runSimulationLocally(localStudy, displayModel);
+      return runSimulationLocally(studyWithLocalBackend(study), displayModel);
     }
     throw new Error(coreCloudFailureMessage(error), { cause: error });
   }
