@@ -20,7 +20,7 @@ import type { OpenCAEModelJson } from "@opencae/core";
 import type { DisplayModel, Study } from "@opencae/schema";
 import { StudySchema } from "@opencae/schema";
 import { hasActualCoreVolumeMesh, openCaeCoreEligibility, trySolveOpenCaeCoreStudy } from "@opencae/core-adapter";
-import { studyForCoreCloudGeometryDispatch } from "./opencaeCoreSolve";
+import { studyForCoreGeometryDispatch } from "./opencaeCoreSolve";
 import { buildStepFaceRegistry, stepAttributionForRegistry, type StepFaceRegistry } from "../stepFaces";
 import {
   STEP_PROOF_LOAD_NEWTONS,
@@ -63,7 +63,7 @@ describe("STEP upload end-to-end (registry -> selection -> mesh -> attribution -
     attributeFacetsToStepFaces(artifact, stepAttributionForRegistry(registry));
 
     // 4. Core model build from the dispatched study (lib/wasmMeshing.ts contract).
-    const dispatchStudy = studyForCoreCloudGeometryDispatch(study, displayModel);
+    const dispatchStudy = studyForCoreGeometryDispatch(study, displayModel);
     model = buildCoreModelFromCloudMesh({
       study: {
         id: dispatchStudy.id,

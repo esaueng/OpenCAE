@@ -23,7 +23,7 @@ import { SampleOptionCard } from "./SampleOptionCard";
 import { SAMPLE_OPTIONS, sampleOptionFor } from "./sampleOptions";
 import { dynamicPlaybackFrames } from "../resultFields";
 import { INVALID_REACTION_WARNING, PREVIEW_GEOMETRY_WARNING, canShowReverseLoadCapacity, hasInvalidReactionForce, hasUnavailableReactionDiagnostic, shouldBlockPreviewResultsForDisplayModel } from "../resultProvenance";
-import { autoSolverBackend, explicitSolverBackend, resolveSolverBackend } from "../workers/opencaeCoreSolve";
+import { explicitSolverBackend, resolveSolverBackend } from "../workers/opencaeCoreSolve";
 import {
   frameIndexForRoundedPlaybackOrdinal,
   playbackOrdinalForSolverFramePosition
@@ -115,8 +115,12 @@ const noopDraftPayloadPreviewChange = () => undefined;
 type SolverSettingsPatch = Partial<DynamicSolverSettings> & { fidelity?: SimulationFidelity };
 const MESH_PRESETS: MeshQuality[] = ["coarse", "medium", "fine", "ultra"];
 const SIMULATION_FIDELITIES: SimulationFidelity[] = ["standard", "detailed", "ultra"];
+// B4a: the client cloud solve path is retired — offering a backend that
+// cannot execute would be dishonest. Auto and an explicit Local pin both run
+// the in-browser OpenCAE Core solver; the distinction is kept because an
+// explicit Local choice also hard-fails ineligible studies instead of letting
+// future auto routing pick something else (and keeps B5's sweep small).
 const EXPLICIT_SOLVER_BACKEND_OPTIONS: Array<{ value: SolverBackend; label: string }> = [
-  { value: "opencae_core_cloud", label: "OpenCAE Core Cloud" },
   { value: "opencae_core_local", label: "OpenCAE Core Local" }
 ];
 
@@ -987,10 +991,7 @@ function RunPanel({ study, displayModel, runProgress, runError, runTiming, onRun
   const fidelity = solverFidelityForStudy(study);
   // "auto" = the user never chose a backend; per-model routing picks one.
   const solverBackendChoice: SolverBackend = explicitSolverBackend(study) ?? "auto";
-  const autoResolvedBackend = autoSolverBackend(study, displayModel);
-  const autoOptionLabel = autoResolvedBackend === "opencae_core_local"
-    ? "Auto — runs locally in your browser"
-    : "Auto — runs on OpenCAE Core Cloud";
+  const autoOptionLabel = "Auto — runs locally in your browser";
   const updateSolverChoice = (settings: SolverSettingsPatch) => {
     onUpdateSolverSettings?.(settings);
   };
@@ -1027,9 +1028,7 @@ function RunPanel({ study, displayModel, runProgress, runError, runTiming, onRun
       </label>
       {solverBackendChoice === "auto" && (
         <p className="panel-copy">
-          {autoResolvedBackend === "opencae_core_local"
-            ? "Auto routing: this study solves locally in your browser. Choose a backend to override."
-            : "Auto routing: this study runs on OpenCAE Core Cloud. Choose a backend to override."}
+          Auto routing: this study solves locally in your browser. Pin OpenCAE Core Local to make the choice explicit.
         </p>
       )}
       <label className="field">
@@ -1186,15 +1185,14 @@ function solverFidelityForStudy(study: Study): SimulationFidelity {
 }
 
 function isSolverBackend(value: string): value is SolverBackend {
-  return value === "auto" || value === "opencae_core_cloud" || value === "opencae_core_local";
+  return value === "auto" || value === "opencae_core_local";
 }
 
 // Solver info rows show the backend the run will actually use, never the raw
 // "auto" token, so the user is not surprised by where the solve executes.
 function solverBackendLabelForRunPanel(study: Study, displayModel: DisplayModel): string {
   const resolved = resolveSolverBackend(study, displayModel);
-  const label = resolved.backend === "opencae_core_cloud" ? "OpenCAE Core Cloud" : "OpenCAE Core Local";
-  return resolved.source === "auto" ? `${label} (auto)` : label;
+  return resolved.source === "auto" ? "OpenCAE Core Local (auto)" : "OpenCAE Core Local";
 }
 
 function solverMethodForStudy(study: Study): "sparse_static" | "mdof_dynamic" {
@@ -1202,7 +1200,9 @@ function solverMethodForStudy(study: Study): "sparse_static" | "mdof_dynamic" {
 }
 
 function solverRunnerLabelForStudy(study: Study, displayModel: DisplayModel): string {
-  return resolveSolverBackend(study, displayModel).backend === "opencae_core_cloud" ? "cloud container" : "local core worker";
+  void study;
+  void displayModel;
+  return "local core worker";
 }
 
 export function formatSimulationEta(remainingMs: number | undefined, isRunning = true): string {

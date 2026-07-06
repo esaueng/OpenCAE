@@ -33,6 +33,15 @@ export {
   requestedElementOrder
 } from "./elevateArtifact";
 export {
+  enforceWasmMeshQualityGate,
+  isMeshQualityErrorLike,
+  MESH_QUALITY_REJECT_MIN_SICN,
+  MESH_QUALITY_WARN_MIN_SICN,
+  MeshQualityError,
+  type MeshQualityGateResult
+} from "./meshQualityGate";
+export {
+  configureGmshWasmModuleOptions,
   generateBoxWithBoreStep,
   loadGmshWasm,
   meshGeoScriptToMshV2,
