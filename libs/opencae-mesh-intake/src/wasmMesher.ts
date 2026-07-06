@@ -33,14 +33,17 @@ export type StepMeshResult = GeoMeshResult & {
   algorithm3D: "delaunay" | "frontal";
 };
 
-let gmshApiPromise: Promise<GmshApi> | null = null;
-
-/** Load (and cache) the gmsh WASM module. Safe to call repeatedly. */
+/**
+ * Instantiate a FRESH gmsh WASM module. Deliberately not cached: gmsh-wasm
+ * 0.1.2 aborts inside wasm on the second gmsh session per module instance
+ * (initialize -> finalize -> initialize crashes, and so does clear()-based
+ * model reuse — verified against the STEP/OCC path in Node 22). One module
+ * instance per mesh is the reliable pattern; instantiation costs ~0.1-0.5 s
+ * on top of the (engine-cached) dynamic import.
+ */
 export async function loadGmshWasm(): Promise<GmshApi> {
-  if (!gmshApiPromise) {
-    gmshApiPromise = import("@loumalouomega/gmsh-wasm").then((mod) => mod.default());
-  }
-  return gmshApiPromise;
+  const mod = await import("@loumalouomega/gmsh-wasm");
+  return mod.default();
 }
 
 /**
@@ -87,10 +90,12 @@ export async function meshStepToMshV2(stepContent: Uint8Array | string, options:
     const first = meshStepSession(gmsh, stepContent, options, "delaunay", totalStart);
     return { ...first, totalMs: now() - totalStart };
   } catch (delaunayError) {
-    // Retry once with the Frontal algorithm in a fresh session.
+    // Retry once with the Frontal algorithm on a FRESH module instance — a
+    // second session on the same instance aborts in gmsh-wasm 0.1.2.
     try {
       const retryStart = now();
-      const second = meshStepSession(gmsh, stepContent, options, "frontal", retryStart);
+      const retryGmsh = await loadGmshWasm();
+      const second = meshStepSession(retryGmsh, stepContent, options, "frontal", retryStart);
       return { ...second, totalMs: now() - totalStart };
     } catch (frontalError) {
       throw new Error(
