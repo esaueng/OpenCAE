@@ -3,6 +3,13 @@ declare module "occt-import-js" {
     locateFile?: (path: string) => string;
   }
 
+  /** Inclusive triangle range of one B-rep face within the mesh's index buffer. */
+  export interface OcctBrepFace {
+    first: number;
+    last: number;
+    color: [number, number, number] | null;
+  }
+
   export interface OcctMesh {
     name?: string;
     color?: [number, number, number];
@@ -11,6 +18,8 @@ declare module "occt-import-js" {
       normal?: { array: ArrayLike<number> };
     };
     index?: { array: ArrayLike<number> };
+    /** Per-face triangle ranges (present in occt-import-js >= 0.0.12). */
+    brep_faces?: OcctBrepFace[];
   }
 
   export interface OcctImportResult {

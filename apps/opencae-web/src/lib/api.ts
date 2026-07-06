@@ -262,6 +262,7 @@ export async function uploadModel(projectId: string, file: File, currentProject?
     size: file.size,
     contentBase64
   };
+  const stepDisplayFaces = await stepDisplayFacesForUpload(file.name, contentBase64);
   const data = await fetchJsonWithFallback(
     `/api/projects/${projectId}/uploads`,
     {
@@ -271,13 +272,35 @@ export async function uploadModel(projectId: string, file: File, currentProject?
     },
     () => {
       if (!currentProject) throw new Error("Could not upload model without an open project.");
-      return createLocalUploadResponse(currentProject, embeddedModel);
+      return createLocalUploadResponse(currentProject, embeddedModel, undefined, { stepDisplayFaces });
     }
   );
   return {
     ...data,
     project: embedUploadedModelFile(data.project, embeddedModel)
   };
+}
+
+/**
+ * Real B-rep faces for STEP uploads (plan A-M3), so supports/loads target
+ * actual geometry instead of generic box-face placeholders. Gated behind
+ * VITE_WASM_MESHING with the flag check outside the dynamic import so
+ * flag-off builds tree-shake the whole path; any registry failure falls back
+ * to the legacy generic faces.
+ */
+async function stepDisplayFacesForUpload(filename: string, contentBase64: string): Promise<DisplayModel["faces"] | undefined> {
+  if (import.meta.env.VITE_WASM_MESHING === "1") {
+    const extension = filename.trim().split(".").pop()?.toLowerCase();
+    if (extension !== "step" && extension !== "stp") return undefined;
+    try {
+      const stepFaces = await import("../stepFaces");
+      const registry = await stepFaces.stepFaceRegistryFromBase64(contentBase64);
+      return registry.displayFaces.length ? registry.displayFaces : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
 }
 
 export async function renameProject(projectId: string, name: string, currentProject?: Project): Promise<{ project: Project; message: string }> {

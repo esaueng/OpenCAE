@@ -86,10 +86,17 @@ async function runOperation(request: MeshWorkerRequest, reportPhase: (phase: Mes
     units: request.payload.units ?? "mm",
     diagnostics: [`gmsh-wasm worker meshStepFile (algorithm3D=${meshed.algorithm3D})`]
   });
+  // Facet -> B-rep face attribution (plan A-M3): stamp sourceFaceIds from the
+  // STEP display tessellation BEFORE packing, so the ids ride along inside the
+  // packed artifact's surface facets.
+  const attribution = request.payload.attribution
+    ? intake.attributeFacetsToStepFaces(artifact, request.payload.attribution)
+    : undefined;
   return {
     packed: packCoreVolumeMeshArtifact(artifact),
     timings: meshed.timings,
     totalMs: meshed.totalMs,
-    algorithm3D: meshed.algorithm3D
+    algorithm3D: meshed.algorithm3D,
+    ...(attribution ? { attribution } : {})
   };
 }

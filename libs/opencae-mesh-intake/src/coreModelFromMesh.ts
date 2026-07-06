@@ -1,10 +1,15 @@
 // Mirrored from opencae-core@5fff277 services/opencae-core-cloud/src/coreModelFromMesh.ts — pure model building only.
 // Upstream extraction into a shared package is planned (plan 016, A-M2). Do not diverge without syncing.
 //
-// One deliberate deviation: the upstream `solverSettings?: DynamicTet4CpuOptions &
-// Record<string, unknown>` type is widened to plain `Record<string, unknown>` here so
-// this browser-side library never depends on @opencae/solver-cpu (type-only upstream;
-// all reads go through numberValue()/dynamicLoadProfile() either way).
+// Two deliberate deviations:
+//  1. The upstream `solverSettings?: DynamicTet4CpuOptions & Record<string, unknown>`
+//     type is widened to plain `Record<string, unknown>` here so this browser-side
+//     library never depends on @opencae/solver-cpu (type-only upstream; all reads go
+//     through numberValue()/dynamicLoadProfile() either way).
+//  2. A-M3 adds an OPTIONAL `diagnostics`/`mappingDiagnostics` sink that records which
+//     branch of mapSelectionToSurfaceSet resolved each selection (bySelection/byFace/
+//     byPhysical/geometric). Purely additive — when the sink is omitted, behavior is
+//     byte-identical to upstream. Sync upstream when plan 016's extraction lands.
 import {
   OPENCAE_MODEL_SCHEMA,
   OPENCAE_MODEL_SCHEMA_VERSION,
@@ -30,6 +35,18 @@ type BuildCoreModelInput = {
   materials?: Array<IsotropicLinearElasticMaterialJson | Record<string, unknown>>;
   analysisType: CloudAnalysisType;
   solverSettings?: Record<string, unknown>;
+  /** A-M3 deviation (see header): collects how each selection was mapped. */
+  mappingDiagnostics?: SelectionMappingDiagnostic[];
+};
+
+export type SelectionMappingMode = "bySelection" | "byFace" | "byPhysical" | "geometric";
+
+export type SelectionMappingDiagnostic = {
+  selectionRef: string;
+  role: "fixed_support" | "load_surface";
+  mode: SelectionMappingMode;
+  surfaceSet: string;
+  matchedFacetCount: number;
 };
 
 type SelectionMappingInput = {
@@ -38,6 +55,8 @@ type SelectionMappingInput = {
   volumeMesh: CoreVolumeMeshArtifact;
   selectionRef: string;
   role: "fixed_support" | "load_surface";
+  /** A-M3 deviation (see header): receives one entry describing the resolved mapping. */
+  diagnostics?: SelectionMappingDiagnostic[];
 };
 
 const STANDARD_GRAVITY = 9.80665;
@@ -105,7 +124,8 @@ export function buildCoreModelFromCloudMesh(input: BuildCoreModelInput): OpenCAE
       displayModel: input.displayModel,
       volumeMesh: input.volumeMesh,
       selectionRef,
-      role: "fixed_support"
+      role: "fixed_support",
+      diagnostics: input.mappingDiagnostics
     }, surfaceSets);
     const nodeSetName = `${surfaceSet.name}_nodes`;
     nodeSets.push({ name: nodeSetName, nodes: nodeSetFromSurfaceSet(surfaceSet, input.volumeMesh.surfaceFacets) });
@@ -134,7 +154,8 @@ export function buildCoreModelFromCloudMesh(input: BuildCoreModelInput): OpenCAE
       displayModel: input.displayModel,
       volumeMesh: input.volumeMesh,
       selectionRef,
-      role: "load_surface"
+      role: "load_surface",
+      diagnostics: input.mappingDiagnostics
     }, surfaceSets);
 
     if (loadType === "pressure") {
@@ -162,7 +183,8 @@ export function buildCoreModelFromCloudMesh(input: BuildCoreModelInput): OpenCAE
       displayModel: input.displayModel,
       volumeMesh: input.volumeMesh,
       selectionRef: "FS1",
-      role: "fixed_support"
+      role: "fixed_support",
+      diagnostics: input.mappingDiagnostics
     }, surfaceSets);
     const nodeSetName = `${surfaceSet.name}_nodes`;
     nodeSets.push({ name: nodeSetName, nodes: nodeSetFromSurfaceSet(surfaceSet, input.volumeMesh.surfaceFacets) });
@@ -174,7 +196,8 @@ export function buildCoreModelFromCloudMesh(input: BuildCoreModelInput): OpenCAE
       displayModel: input.displayModel,
       volumeMesh: input.volumeMesh,
       selectionRef: "L1",
-      role: "load_surface"
+      role: "load_surface",
+      diagnostics: input.mappingDiagnostics
     }, surfaceSets);
     loads.push({ name: "appliedForce0", type: "surfaceForce", surfaceSet: surfaceSet.name, totalForce: [0, -500, 0] });
   }
@@ -215,12 +238,12 @@ export function mapSelectionToSurfaceSet(input: SelectionMappingInput): SurfaceS
   const facets = input.volumeMesh.surfaceFacets;
   const bySelection = facets.filter((facet) => facet.sourceSelectionRef === input.selectionRef);
   const bySelectionSet = bestSurfaceSetForFacets(input.volumeMesh.surfaceSets, bySelection);
-  if (bySelectionSet) return bySelectionSet;
+  if (bySelectionSet) return recordMapping(input, "bySelection", bySelectionSet, bySelection.length);
 
   const sourceFaceIds = new Set([input.selectionRef, ...geometryRefEntityIds(input.study, input.selectionRef)]);
   const byFace = facets.filter((facet) => facet.sourceFaceId && sourceFaceIds.has(facet.sourceFaceId));
   const byFaceSet = bestSurfaceSetForFacets(input.volumeMesh.surfaceSets, byFace);
-  if (byFaceSet) return byFaceSet;
+  if (byFaceSet) return recordMapping(input, "byFace", byFaceSet, byFace.length);
 
   const selectionNames = new Set([
     input.selectionRef,
@@ -229,12 +252,28 @@ export function mapSelectionToSurfaceSet(input: SelectionMappingInput): SurfaceS
   ].map(normalizeName));
   const physicalNames = physicalGroupCandidates(input.role);
   const byPhysical = input.volumeMesh.surfaceSets.find((set) => physicalNames.has(set.name) && selectionNames.has(normalizeName(set.name)));
-  if (byPhysical?.facets.length) return byPhysical;
+  if (byPhysical?.facets.length) return recordMapping(input, "byPhysical", byPhysical, byPhysical.facets.length);
 
   const geometric = geometricFallback(input);
-  if (geometric) return geometric;
+  if (geometric) return recordMapping(input, "geometric", geometric, geometric.facets.length);
 
   throw new Error(`OpenCAE Core Cloud could not map selection ${input.selectionRef} to a high-confidence ${input.role} surface set.`);
+}
+
+function recordMapping(
+  input: SelectionMappingInput,
+  mode: SelectionMappingMode,
+  surfaceSet: SurfaceSetJson,
+  matchedFacetCount: number
+): SurfaceSetJson {
+  input.diagnostics?.push({
+    selectionRef: input.selectionRef,
+    role: input.role,
+    mode,
+    surfaceSet: surfaceSet.name,
+    matchedFacetCount
+  });
+  return surfaceSet;
 }
 
 function validateVolumeMeshArtifact(volumeMesh: CoreVolumeMeshArtifact): void {
