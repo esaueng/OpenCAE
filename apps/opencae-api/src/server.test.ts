@@ -228,7 +228,10 @@ describe("OpenCAE API server", () => {
     expect(imported.studies[0]!.runs.find((run) => run.id === runId)?.status).toBe("complete_estimate");
   });
 
-  test("local Core runs finish as computed production results", async () => {
+  // The browser/local backend now runs the full production Core pipeline
+  // (B2: cloud-parity solve, provenance kind opencae_core_fea / computed with
+  // a browser runner stamp), so eligible local runs finish as production FEA.
+  test("local Core runs finish as complete production FEA solves", async () => {
     const api = await buildApi();
     const create = await api.inject({
       method: "POST",

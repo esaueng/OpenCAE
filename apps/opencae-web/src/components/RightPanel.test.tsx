@@ -411,13 +411,13 @@ describe("RightPanel payload mass controls", () => {
   test("renders OpenCAE Core backend and fidelity controls for simulation runs", () => {
     const detailedStudy: Study = {
       ...study,
-      solverSettings: { backend: "opencae_core_cloud", fidelity: "ultra" }
+      solverSettings: { backend: "opencae_core_local", fidelity: "ultra" }
     };
 
     const runHtml = renderPanel("run", { study: detailedStudy });
     const meshHtml = renderPanel("mesh", { study: { ...detailedStudy, meshSettings: { preset: "ultra", status: "complete", summary: { nodes: 182400, elements: 119808, warnings: [], analysisSampleCount: 45000, quality: "ultra" } } } });
 
-    expect(runHtml).toContain("Simulation backend");
+    expect(runHtml).toContain("Simulation settings");
     expect(runHtml).toContain("OpenCAE Core");
     expect(runHtml).toContain("Fidelity");
     expect(meshHtml).toContain("Ultra");
@@ -425,20 +425,24 @@ describe("RightPanel payload mass controls", () => {
     expect(meshHtml).toContain("45,000");
   });
 
-  test("lets simulation runs choose OpenCAE Core Local or Cloud", () => {
+  test("offers no backend picker: the solver is local, informationally stated (B5)", () => {
     const runHtml = renderPanel("run", {
       study: {
         ...study,
-        solverSettings: { backend: "opencae_core_cloud", fidelity: "standard" }
+        solverSettings: { backend: "opencae_core_local", fidelity: "standard" }
       }
     });
 
-    expect(runHtml).toContain("name=\"solver-backend\"");
-    expect(runHtml).toContain("OpenCAE Core Cloud");
-    expect(runHtml).toContain("OpenCAE Core Local");
+    // The cloud path is retired and every run executes in the browser, so a
+    // backend select would be routing theater; an informational row replaces it.
+    expect(runHtml).not.toContain("solver-backend");
+    expect(runHtml).not.toContain("Auto — runs locally in your browser");
+    expect(runHtml).toContain("Local (in-browser)");
+    expect(runHtml).toContain("OpenCAE Core Local (in-browser)");
+    expect(runHtml).not.toContain("OpenCAE Core Cloud");
   });
 
-  test("shows OpenCAE Core when solver backend is omitted", () => {
+  test("shows the local solver row for an omitted solver backend", () => {
     const runHtml = renderPanel("run", {
       study: {
         ...study,
@@ -446,29 +450,40 @@ describe("RightPanel payload mass controls", () => {
       }
     });
 
-    expect(runHtml).toContain("OpenCAE Core Cloud");
+    expect(runHtml).not.toContain("solver-backend");
+    expect(runHtml).toContain("Local (in-browser)");
+    expect(runHtml).toContain("OpenCAE Core Local (in-browser)");
+    expect(runHtml).toContain("local core worker");
+    expect(runHtml).not.toContain("OpenCAE Core Cloud");
     expect(runHtml).not.toContain("legacy backend");
   });
 
-  test("defaults eligible omitted-backend studies to OpenCAE Core Local", () => {
-    const readyStudy = {
+  test("states the local browser solver for eligible studies", () => {
+    const eligibleDisplayModel: DisplayModel = {
+      id: "display-cantilever",
+      name: "cantilever demo body",
+      bodyCount: 1,
+      dimensions: { x: 180, y: 24, z: 24, units: "mm" },
+      faces: [
+        { id: "face-fixed", label: "Fixed end face", color: "#4da3ff", center: [-1.9, 0.18, 0], normal: [-1, 0, 0], stressValue: 0 },
+        { id: "face-load", label: "Free end load face", color: "#f59e0b", center: [1.9, 0.18, 0], normal: [1, 0, 0], stressValue: 0 }
+      ]
+    };
+    const eligibleStudy: Study = {
       ...study,
-      materialAssignments: [{ id: "assign-1", materialId: "mat-aluminum-6061", selectionRef: "selection-body", status: "complete" }],
+      materialAssignments: [{ id: "assign-1", materialId: "mat-aluminum-6061", selectionRef: "selection-top", status: "complete" }],
       constraints: [{ id: "constraint-1", type: "fixed", selectionRef: "selection-top", parameters: {}, status: "complete" }],
-      loads: [{ id: "load-1", type: "force", selectionRef: "selection-top", parameters: { value: 100, units: "N", direction: [0, 0, -1] }, status: "complete" }],
+      loads: [{ id: "load-1", type: "force", selectionRef: "selection-top", parameters: { value: 500, units: "N", direction: [0, -1, 0] }, status: "complete" }],
       meshSettings: { preset: "medium", status: "complete" },
       solverSettings: {}
     } as Study;
-    const readyDisplayModel = {
-      ...displayModel,
-      id: "display-block",
-      dimensions: { x: 120, y: 40, z: 20, units: "mm" }
-    } as DisplayModel;
 
-    const runHtml = renderPanel("run", { study: readyStudy, displayModel: readyDisplayModel });
+    const runHtml = renderPanel("run", { study: eligibleStudy, displayModel: eligibleDisplayModel });
 
-    expect(runHtml).toContain("OpenCAE Core Local");
+    expect(runHtml).toContain("Local (in-browser)");
+    expect(runHtml).toContain("OpenCAE Core Local (in-browser)");
     expect(runHtml).toContain("local core worker");
+    expect(runHtml).not.toContain("solver-backend");
   });
 
   test("keeps OpenCAE Core runs browser-local without container endpoint copy", () => {
@@ -494,7 +509,7 @@ describe("RightPanel payload mass controls", () => {
     expect(runHtml).not.toContain('<button class="primary wide" disabled=""');
   });
 
-  test("labels the production simulation backend as OpenCAE Core Cloud", () => {
+  test("labels retired cloud backend selections from old saves as the local solver", () => {
     const cloudStudy = {
       ...study,
       solverSettings: { backend: "opencae_core_cloud", fidelity: "ultra" }
@@ -505,30 +520,31 @@ describe("RightPanel payload mass controls", () => {
       canRunSimulation: true
     });
 
-    expect(runHtml).toContain("OpenCAE Core Cloud");
+    expect(runHtml).toContain("OpenCAE Core Local (in-browser)");
+    expect(runHtml).not.toContain("OpenCAE Core Cloud");
     expect(runHtml).not.toContain("CalculiX FEA");
     expect(runHtml).not.toContain("Detailed local");
     expect(runHtml).not.toContain("Local estimate");
   });
 
-  test("warns when an invalid Core mesh blocks a cloud run without legacy labels", () => {
+  test("warns when an invalid Core mesh blocks a run without legacy labels", () => {
     const runHtml = renderPanel("run", {
       study: {
         ...study,
-        solverSettings: { backend: "opencae_core_cloud" },
+        solverSettings: { backend: "opencae_core_local" },
         meshSettings: { preset: "medium", status: "warning", summary: { nodes: 8, elements: 2, warnings: ["Disconnected mesh"], quality: "medium" } } as Study["meshSettings"]
       },
       canRunSimulation: false,
       missingRunItems: ["Valid Core volume mesh"]
     });
 
-    expect(runHtml).toContain("OpenCAE Core Cloud");
+    expect(runHtml).toContain("OpenCAE Core Local");
     expect(runHtml).toContain("Complete valid core volume mesh before running.");
     expect(runHtml).not.toContain("Local estimate");
     expect(runHtml).not.toContain("CalculiX");
   });
 
-  test("normalizes legacy backend selections to OpenCAE Core Cloud", () => {
+  test("treats legacy backend selections as Auto with truthful resolution labels", () => {
     const detailedStudy = {
       ...study,
       solverSettings: { backend: "cloudflare_fea", fidelity: "ultra" }
@@ -538,7 +554,10 @@ describe("RightPanel payload mass controls", () => {
       study: detailedStudy
     });
 
-    expect(runHtml).toContain("OpenCAE Core Cloud");
+    // Legacy tokens are not an explicit choice; every run executes locally
+    // (the only execution path since B4a) and the panel says so plainly.
+    expect(runHtml).not.toContain("solver-backend");
+    expect(runHtml).toContain("OpenCAE Core Local (in-browser)");
     expect(runHtml).toContain("sparse_static");
     expect(runHtml).not.toContain("Expected detail");
     expect(runHtml).not.toContain("Browser OpenCAE Core CPU");
@@ -642,7 +661,7 @@ describe("RightPanel payload mass controls", () => {
       name: "Dynamic",
       type: "dynamic_structural",
       solverSettings: {
-        backend: "opencae_core_cloud",
+        backend: "opencae_core_local",
         startTime: 0,
         endTime: 0.1,
         timeStep: 0.001,
@@ -666,7 +685,7 @@ describe("RightPanel payload mass controls", () => {
       name: "Dynamic",
       type: "dynamic_structural",
       solverSettings: {
-        backend: "opencae_core_cloud",
+        backend: "opencae_core_local",
         startTime: 0,
         endTime: 0.2,
         timeStep: 0.0005,

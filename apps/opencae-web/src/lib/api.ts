@@ -2,8 +2,11 @@ import type { AnalysisMesh, DisplayModel, DynamicSolverSettings, MeshQuality, Pr
 import type { LoadApplicationPoint, LoadDirection, LoadType, PayloadLoadMetadata, PayloadObjectSelection } from "../loadPreview";
 import { embedUploadedModelFile, type EmbeddedModelFile, type LocalResultBundle, type SolverSurfaceMesh } from "../projectFile";
 import { createLocalBlankProject, createLocalSampleProject, createLocalUploadResponse, openLocalProjectPayload } from "../localProjectFactory";
-import { buildOpenCaeCoreCloudModelForStudy, cloudGeometrySourceForStudy, hasActualCoreVolumeMesh, isComplexGeometry, normalizeSolverBackend, openCaeCoreEligibility, preflightOpenCaeCoreStudy, studyForCoreCloudGeometryDispatch, OPENCAE_CORE_CLOUD_GEOMETRY_REQUIRED_REASON, type NormalizedBrowserSolverBackend } from "../workers/opencaeCoreSolve";
-import { startOpenCaeCoreSolveWorker, type StartedSolveWorker } from "../workers/solveWorkerClient";
+import type { SolveProgressEvent } from "@opencae/solve-pipeline";
+import { isCancelledSolveError, startLocalSolve } from "../workers/solveWorkerClient";
+import { loadLocalRunResults, saveLocalRunResults } from "./localResultsStore";
+import { cancelWasmMeshing, canMeshStudyOnDemand, generateWasmMeshForStudy } from "./wasmMeshing";
+import { geometrySourceForStudy, hasActualCoreVolumeMesh, isComplexGeometry, normalizeSolverBackend, openCaeCoreEligibility, OPENCAE_CORE_MESH_REQUIRED_REASON, type NormalizedBrowserSolverBackend } from "../workers/opencaeCoreSolve";
 
 export interface SampleProjectResponse {
   message?: string;
@@ -30,26 +33,24 @@ export interface ResultsResponse {
 export interface RunSimulationOptions {
   onRunStatus?: (message: string) => void;
   resultRenderBounds?: ResultRenderBounds | null;
+  /**
+   * Called when a run had to mesh its geometry first (A-M4 local-first
+   * meshing): receives the study with the freshly stored mesh artifact so the
+   * caller can persist it (same shape generateMesh returns).
+   */
+  onStudyMeshed?: (study: Study) => void;
 }
 
-const localResultsByRunId = new Map<string, ResultsResponse | Promise<ResultsResponse>>();
-const localRunControllersByRunId = new Map<string, LocalRunController>();
-const cloudResultsUrlByRunId = new Map<string, string>();
-const cloudEventsUrlByRunId = new Map<string, string>();
-const failedCloudRunStartsByRunId = new Map<string, string>();
-const cloudRunStartFailureListenersByRunId = new Map<string, (message: string) => void>();
+const localResultsByRunId = new Map<string, ResultsResponse>();
+const localRunsByRunId = new Map<string, LocalRunRecord>();
 const RUN_BOOKKEEPING_LIMIT = 4;
 const EVENT_SOURCE_CLOSED_READY_STATE = 2;
 const DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.005;
 const MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.001;
-const OPENCAE_CORE_CLOUD_FAILURE_MESSAGE = "OpenCAE Core Cloud solve failed. No local estimate fallback was used.";
-const LOCAL_SOLVE_ALREADY_RUNNING_MESSAGE = "An OpenCAE Core Local solve is already running. Cancel it before starting another solve.";
-
-type LocalRunController = {
-  subscribe: (onEvent: (event: RunEvent) => void) => EventSource;
-  cancel: () => void;
-  isTerminal: () => boolean;
-};
+/** Prefix of retired client-dispatched cloud runs; kept only to recognize historical run ids from old autosaves. */
+const HISTORICAL_CLOUD_RUN_ID_PREFIX = "run-cloud-core-";
+const HISTORICAL_CLOUD_RUN_MESSAGE =
+  "This run was solved on the retired OpenCAE Core Cloud. Its results are only available if they were saved with the project; re-run the simulation to solve locally in your browser.";
 
 function setCappedRunEntry<T>(cache: Map<string, T>, runId: string, value: T, limit = RUN_BOOKKEEPING_LIMIT): void {
   cache.delete(runId);
@@ -58,6 +59,163 @@ function setCappedRunEntry<T>(cache: Map<string, T>, runId: string, value: T, li
     const oldestRunId = cache.keys().next().value as string | undefined;
     if (oldestRunId === undefined) return;
     cache.delete(oldestRunId);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Local run controller: real, solver-driven run events for in-browser solves.
+// Replaces the former pre-timed synthetic event scripts (honest results: every
+// progress event now reflects actual solver phase reports, elapsed time is
+// wall-clock, and estimatedRemainingMs is only present where it is derivable).
+// ---------------------------------------------------------------------------
+
+type LocalRunStatus = "running" | "complete" | "failed" | "cancelled";
+
+type LocalRunRecord = {
+  runId: string;
+  status: LocalRunStatus;
+  /** Replay buffer for late subscribers (bounded). */
+  events: RunEvent[];
+  listeners: Set<(event: RunEvent) => void>;
+  startedAtMs: number;
+  lastProgress: number;
+  cancelSolve?: () => void;
+};
+
+const LOCAL_RUN_EVENT_BUFFER_LIMIT = 200;
+
+function createLocalRunRecord(runId: string, status: LocalRunStatus = "running"): LocalRunRecord {
+  const record: LocalRunRecord = {
+    runId,
+    status,
+    events: [],
+    listeners: new Set(),
+    startedAtMs: Date.now(),
+    lastProgress: 0
+  };
+  setCappedRunEntry(localRunsByRunId, runId, record);
+  return record;
+}
+
+function activeLocalRun(): LocalRunRecord | undefined {
+  for (const record of localRunsByRunId.values()) {
+    if (record.status === "running") return record;
+  }
+  return undefined;
+}
+
+function emitLocalRunEvent(
+  record: LocalRunRecord,
+  event: { type: RunEvent["type"]; progress?: number; message: string; estimatedRemainingMs?: number }
+): void {
+  const progress = typeof event.progress === "number"
+    ? Math.max(record.lastProgress, Math.min(100, Math.max(0, Math.round(event.progress))))
+    : record.lastProgress;
+  record.lastProgress = progress;
+  const runEvent: RunEvent = {
+    runId: record.runId,
+    type: event.type,
+    progress,
+    message: event.message,
+    elapsedMs: Math.max(0, Date.now() - record.startedAtMs),
+    ...(event.estimatedRemainingMs !== undefined ? { estimatedRemainingMs: Math.max(0, Math.round(event.estimatedRemainingMs)) } : {}),
+    timestamp: new Date().toISOString()
+  };
+  record.events.push(runEvent);
+  // Bound the replay buffer: keep the initial state event, drop the oldest
+  // interim progress entries.
+  if (record.events.length > LOCAL_RUN_EVENT_BUFFER_LIMIT) record.events.splice(1, 1);
+  for (const listener of [...record.listeners]) listener(runEvent);
+}
+
+/** Terminal transition; guarantees exactly one terminal event per run. */
+function finishLocalRun(
+  record: LocalRunRecord,
+  status: Exclude<LocalRunStatus, "running">,
+  event: { type: RunEvent["type"]; progress?: number; message: string; estimatedRemainingMs?: number }
+): void {
+  if (record.status !== "running") return;
+  record.status = status;
+  record.cancelSolve = undefined;
+  emitLocalRunEvent(record, event);
+}
+
+/**
+ * Maps real solver progress hooks onto the run progress contract:
+ * assemble 0-30%, solve/frames 30-90% (stress recovery 85-90%), postprocess
+ * 90-100%. estimatedRemainingMs is only emitted for dynamic frame integration,
+ * where a per-frame pace is measurable; CG iteration counts admit no honest ETA.
+ *
+ * Runs that meshed first (A-M4) reserve 0-20% for real meshing phases, so
+ * their solve progress is compressed into offset..100 (progressOffset = 20).
+ */
+function handleLocalSolveProgress(record: LocalRunRecord, progress: SolveProgressEvent, progressOffset = 0): void {
+  if (record.status !== "running") return;
+  const fraction = progress.total > 0 ? Math.min(progress.completed / progress.total, 1) : 0;
+  let percent: number;
+  let message: string;
+  let estimatedRemainingMs: number | undefined;
+  if (progress.phase === "assemble") {
+    percent = 30 * fraction;
+    message = `Assembling OpenCAE Core stiffness matrix (${progress.completed.toLocaleString()} / ${progress.total.toLocaleString()} elements).`;
+  } else if (progress.phase === "frames") {
+    percent = 30 + 60 * fraction;
+    message = `Writing dynamic result frames ${progress.completed.toLocaleString()} / ${progress.total.toLocaleString()}.`;
+    const elapsedMs = Date.now() - record.startedAtMs;
+    if (progress.completed > 0 && progress.total > progress.completed) {
+      estimatedRemainingMs = (elapsedMs / progress.completed) * (progress.total - progress.completed);
+    } else if (progress.total <= progress.completed) {
+      estimatedRemainingMs = 0;
+    }
+  } else if (progress.phase === "recover") {
+    percent = 85 + 5 * fraction;
+    message = "Recovering OpenCAE Core element stresses.";
+  } else {
+    percent = 30 + 55 * fraction;
+    message = progress.iteration !== undefined
+      ? `Solving OpenCAE Core sparse system (CG iteration ${progress.iteration.toLocaleString()}${
+          progress.relativeResidual !== undefined && Number.isFinite(progress.relativeResidual)
+            ? `, residual ${progress.relativeResidual.toExponential(1)}`
+            : ""
+        }).`
+      : "Solving OpenCAE Core sparse system.";
+  }
+  emitLocalRunEvent(record, {
+    type: "progress",
+    progress: progressOffset + percent * (100 - progressOffset) / 100,
+    message,
+    ...(estimatedRemainingMs !== undefined ? { estimatedRemainingMs } : {})
+  });
+}
+
+/**
+ * Persist a completed local result bundle for reload restore. Failures are
+ * never silent: they surface as a visible warning diagnostic on the result
+ * summary (and a console warning).
+ */
+async function persistLocalRunResults(runId: string, results: ResultsResponse): Promise<ResultsResponse> {
+  try {
+    await saveLocalRunResults(runId, results);
+    return results;
+  } catch (error) {
+    const message = messageFromUnknownError(error) || "Browser storage is unavailable; these results will not survive a reload.";
+    console.warn(`[OpenCAE] ${message}`);
+    return {
+      ...results,
+      summary: {
+        ...results.summary,
+        diagnostics: [
+          ...(results.summary.diagnostics ?? []),
+          {
+            id: "local-results-persistence",
+            severity: "warning" as const,
+            source: "local_job" as const,
+            message: `Results computed successfully but could not be saved for reload: ${message}`,
+            suggestedActions: []
+          }
+        ]
+      }
+    };
   }
 }
 
@@ -112,6 +270,7 @@ export async function uploadModel(projectId: string, file: File, currentProject?
     size: file.size,
     contentBase64
   };
+  const stepDisplayFaces = await stepDisplayFacesForUpload(file.name, contentBase64);
   const data = await fetchJsonWithFallback(
     `/api/projects/${projectId}/uploads`,
     {
@@ -121,13 +280,35 @@ export async function uploadModel(projectId: string, file: File, currentProject?
     },
     () => {
       if (!currentProject) throw new Error("Could not upload model without an open project.");
-      return createLocalUploadResponse(currentProject, embeddedModel);
+      return createLocalUploadResponse(currentProject, embeddedModel, undefined, { stepDisplayFaces });
     }
   );
   return {
     ...data,
     project: embedUploadedModelFile(data.project, embeddedModel)
   };
+}
+
+/**
+ * Real B-rep faces for STEP uploads (plan A-M3), so supports/loads target
+ * actual geometry instead of generic box-face placeholders. On by default
+ * (A-M4) with the flag check outside the dynamic import so VITE_WASM_MESHING=0
+ * opt-out builds tree-shake the whole path; any registry failure falls back
+ * to the legacy generic faces.
+ */
+async function stepDisplayFacesForUpload(filename: string, contentBase64: string): Promise<DisplayModel["faces"] | undefined> {
+  if (import.meta.env.VITE_WASM_MESHING !== "0") {
+    const extension = filename.trim().split(".").pop()?.toLowerCase();
+    if (extension !== "step" && extension !== "stp") return undefined;
+    try {
+      const stepFaces = await import("../stepFaces");
+      const registry = await stepFaces.stepFaceRegistryFromBase64(contentBase64);
+      return registry.displayFaces.length ? registry.displayFaces : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
 }
 
 export async function renameProject(projectId: string, name: string, currentProject?: Project): Promise<{ project: Project; message: string }> {
@@ -152,7 +333,30 @@ export async function renameProject(projectId: string, name: string, currentProj
   );
 }
 
-export async function generateMesh(studyId: string, preset: MeshQuality, currentStudy?: Study, displayModel?: DisplayModel): Promise<{ study: Study; message: string }> {
+export async function generateMesh(studyId: string, preset: MeshQuality, currentStudy?: Study, displayModel?: DisplayModel, onProgress?: (message: string) => void): Promise<{ study: Study; message: string }> {
+  // In-browser gmsh-wasm meshing (production default since A-M4). Returns
+  // null in opt-out builds or when the geometry has no wasm-meshable source,
+  // and falls through to the existing preset-estimate path on transient
+  // failure. Quality-gate rejections (MeshQualityError) are NOT transient:
+  // they surface to the user instead of silently degrading to estimates.
+  if (currentStudy) {
+    try {
+      const presetStudy: Study = { ...currentStudy, meshSettings: { ...currentStudy.meshSettings, preset } };
+      const geometry = geometrySourceForStudy(presetStudy, displayModel);
+      const wasmMeshed = await generateWasmMeshForStudy({
+        preset,
+        study: presetStudy,
+        displayModel,
+        geometry: geometry ? geometryWithMeshPreset(geometry, presetStudy) : null,
+        meshSizeMm: PROCEDURAL_MESH_SIZE_MM[preset] ?? PROCEDURAL_MESH_SIZE_MM.medium,
+        onProgress
+      });
+      if (wasmMeshed) return wasmMeshed;
+    } catch (error) {
+      if (error instanceof Error && error.name === "MeshQualityError") throw error;
+      onProgress?.(`In-browser meshing failed (${messageFromUnknownError(error) || "unknown error"}). Falling back to preset estimates.`);
+    }
+  }
   return fetchJsonWithFallback(
     `/api/studies/${studyId}/mesh`,
     {
@@ -285,37 +489,51 @@ export async function addLoad(studyId: string, type: LoadType, value: number, se
 }
 
 export async function runSimulation(studyId: string, currentStudy?: Study, displayModel?: DisplayModel, options: RunSimulationOptions = {}): Promise<{ run: { id: string }; streamUrl: string; message: string }> {
-  if (currentStudy) {
-    if (simulationBackend(currentStudy, displayModel) === "opencae_core_cloud") {
-      return runOpenCaeCoreCloudSimulation(currentStudy, displayModel, options);
-    }
-    return runSimulationLocally(currentStudy, displayModel);
-  }
-  try {
-    void options;
-    const response = await fetch(`/api/studies/${studyId}/runs`, { method: "POST" });
-    return await readJson(response, `POST /api/studies/${studyId}/runs`);
-  } catch (error) {
-    if (!currentStudy) throw error;
-    return runSimulationLocally(currentStudy, displayModel);
-  }
+  // B4a: every run executes locally in the browser (complex geometry without
+  // a stored mesh artifact is wasm-meshed first when this build/browser can).
+  // The legacy POST /api/studies/{id}/runs dispatch branch is gone: since B3
+  // no reachable caller runs without the open study.
+  void studyId;
+  if (!currentStudy) throw new Error("runSimulation requires the open study; server-dispatched runs were removed.");
+  // Local runs never leave the browser. Stamp the resolved backend onto the
+  // run's study copy so the solve worker's explicit-local guard sees the
+  // routing decision; the persisted study keeps the user's "auto" choice.
+  return runSimulationLocally(studyWithLocalBackend(currentStudy), displayModel, options);
+}
+
+function studyWithLocalBackend(study: Study): Study {
+  if (study.solverSettings.backend === "opencae_core_local") return study;
+  // The identical-looking branches keep the static/dynamic study union narrowed
+  // so each spread pairs solverSettings with its own study variant.
+  return study.type === "dynamic_structural"
+    ? { ...study, solverSettings: { ...study.solverSettings, backend: "opencae_core_local" } }
+    : { ...study, solverSettings: { ...study.solverSettings, backend: "opencae_core_local" } };
 }
 
 export async function getResults(runId: string): Promise<ResultsResponse> {
-  const localResults = localResultsByRunId.get(runId) ?? computeLocalResults(runId);
-  if (localResults) {
-    const results = await localResults;
-    releaseLocalRunBookkeeping(runId);
-    return results;
-  }
-  const cloudResultsUrl = cloudResultsUrlByRunId.get(runId);
-  if (cloudResultsUrl) {
-    const request = headerTokenRequest(cloudResultsUrl);
-    const response = await fetch(request.url, { headers: request.headers });
-    return withFieldRunIds(runId, await readJson(response, `GET ${request.url}`));
-  }
+  const localResults = localResultsByRunId.get(runId);
+  if (localResults) return localResults;
+  // Local run ids never exist server-side; restore from the browser store
+  // (post-reload) or fail with a clear reason instead of a confusing 404.
+  if (runId.startsWith("run-local-")) return restoreLocalRunResults(runId);
+  // Historical cloud runs (pre-B4a autosaves): the client cloud path is gone,
+  // so never fetch the dead endpoints — fail with an honest explanation.
+  if (runId.startsWith(HISTORICAL_CLOUD_RUN_ID_PREFIX)) throw new Error(HISTORICAL_CLOUD_RUN_MESSAGE);
   const response = await fetch(`/api/runs/${runId}/results`);
   return withFieldRunIds(runId, await readJson(response, `GET /api/runs/${runId}/results`));
+}
+
+async function restoreLocalRunResults(runId: string): Promise<ResultsResponse> {
+  let stored: ResultsResponse | null;
+  try {
+    stored = await loadLocalRunResults<ResultsResponse>(runId);
+  } catch (error) {
+    throw new Error(`Local results for this run could not be restored: ${messageFromUnknownError(error) || "browser storage unavailable."}`);
+  }
+  if (!stored) throw new Error("Results for this local run are no longer available in this browser (storage cleared or run pruned). Re-run the simulation.");
+  const results = withFieldRunIds(runId, stored);
+  setCappedRunEntry(localResultsByRunId, runId, results);
+  return results;
 }
 
 // Deployed Core Cloud runners omit runId on result fields; the schema (and
@@ -369,35 +587,21 @@ export function withDerivedSafetyFactorSurfaceField(results: ResultsResponse): R
   };
 }
 
-function releaseLocalRunBookkeeping(runId: string): void {
-  localRunControllersByRunId.delete(runId);
-}
-
 export async function cancelRun(runId: string): Promise<{ run: StudyRun; message: string }> {
-  const localController = localRunControllersByRunId.get(runId);
-  if (localController) {
-    localController.cancel();
-    localRunControllersByRunId.delete(runId);
+  const localRecord = localRunsByRunId.get(runId);
+  if (localRecord) {
+    if (localRecord.status === "running") {
+      const cancelSolve = localRecord.cancelSolve;
+      // Terminal transition first so the solve completion/rejection handlers
+      // become no-ops: exactly one terminal event per run.
+      finishLocalRun(localRecord, "cancelled", { type: "cancelled", message: "Simulation cancelled." });
+      cancelSolve?.();
+    }
     localResultsByRunId.delete(runId);
     return {
       run: cancelledStudyRun(runId, "local"),
       message: "Simulation cancelled."
     };
-  }
-  const cloudEventsUrl = cloudEventsUrlByRunId.get(runId);
-  if (cloudEventsUrl) {
-    const cancelRequest = headerTokenRequest(cloudCancelUrlFromEventsUrl(cloudEventsUrl));
-    const cancelUrl = cancelRequest.url;
-    try {
-      const response = await fetch(cancelUrl, { method: "POST", headers: cancelRequest.headers });
-      const payload = await readJson<{ run?: StudyRun; message?: string }>(response, `POST ${cancelUrl}`);
-      return { run: payload.run ?? cancelledStudyRun(runId, "opencae-core-cloud"), message: payload.message ?? "Simulation cancelled." };
-    } catch {
-      return {
-        run: cancelledStudyRun(runId, "opencae-core-cloud"),
-        message: "Stopped watching the cloud run; the solve may still finish server-side."
-      };
-    }
   }
   const response = await fetch(`/api/runs/${runId}/cancel`, { method: "POST" });
   const payload = await readJson<{ run: StudyRun }>(response, `POST /api/runs/${runId}/cancel`);
@@ -418,38 +622,22 @@ function cancelledStudyRun(runId: string, solverBackend: string): StudyRun {
   };
 }
 
-function cloudCancelUrlFromEventsUrl(eventsUrl: string): string {
-  const queryIndex = eventsUrl.indexOf("?");
-  const path = queryIndex >= 0 ? eventsUrl.slice(0, queryIndex) : eventsUrl;
-  const query = queryIndex >= 0 ? eventsUrl.slice(queryIndex) : "";
-  return `${path.replace(/\/events$/, "/cancel")}${query}`;
-}
-
-// Run tokens travel in the x-opencae-run-token header for fetch calls so they
-// stay out of access logs and browser history. EventSource cannot set headers,
-// so the events stream URL keeps its token query parameter.
-function headerTokenRequest(url: string): { url: string; headers: Record<string, string> } {
-  const queryIndex = url.indexOf("?");
-  if (queryIndex < 0) return { url, headers: {} };
-  const params = new URLSearchParams(url.slice(queryIndex + 1));
-  const token = params.get("token");
-  if (!token) return { url, headers: {} };
-  params.delete("token");
-  const rest = params.toString();
-  return { url: `${url.slice(0, queryIndex)}${rest ? `?${rest}` : ""}`, headers: { "x-opencae-run-token": token } };
-}
-
 export function subscribeToRun(runId: string, onEvent: (event: RunEvent) => void): EventSource {
-  const localController = localRunControllersByRunId.get(runId);
-  if (localController) return localController.subscribe(onEvent);
+  const localRecord = localRunsByRunId.get(runId);
+  if (localRecord) return subscribeToLocalRunRecord(localRecord, onEvent);
   const deliverFailure = (message: string) => onEvent(syntheticRunErrorEvent(runId, message));
-  const failedStartMessage = failedCloudRunStartsByRunId.get(runId);
-  if (failedStartMessage) {
-    globalThis.setTimeout(() => deliverFailure(failedStartMessage), 0);
-  } else if (cloudEventsUrlByRunId.has(runId)) {
-    setCappedRunEntry(cloudRunStartFailureListenersByRunId, runId, deliverFailure);
+  // Browser-run ids with no live record are terminal history — never open an
+  // event stream to endpoints that cannot know them (historical cloud runs'
+  // client endpoints are gone; local runs live only in this session).
+  if (runId.startsWith(HISTORICAL_CLOUD_RUN_ID_PREFIX) || runId.startsWith("run-local-")) {
+    const timer = globalThis.setTimeout(() => deliverFailure(
+      runId.startsWith(HISTORICAL_CLOUD_RUN_ID_PREFIX)
+        ? HISTORICAL_CLOUD_RUN_MESSAGE
+        : "This local run is no longer active in this browser session. Re-run the simulation."
+    ), 0);
+    return { close: () => globalThis.clearTimeout(timer) } as EventSource;
   }
-  const source = new EventSource(cloudEventsUrlByRunId.get(runId) ?? `/api/runs/${runId}/stream`);
+  const source = new EventSource(`/api/runs/${runId}/stream`);
   const eventTypes: RunEvent["type"][] = ["state", "progress", "message", "log", "diagnostic", "complete", "cancelled", "error"];
   for (const type of eventTypes) {
     source.addEventListener(type, (message) => {
@@ -474,169 +662,46 @@ function syntheticRunErrorEvent(runId: string, message: string): RunEvent {
   return { runId, type: "error", progress: 100, message, timestamp: new Date().toISOString() };
 }
 
-async function runOpenCaeCoreCloudSimulation(study: Study, displayModel: DisplayModel | undefined, options: RunSimulationOptions): Promise<{ run: { id: string }; streamUrl: string; message: string }> {
-  const runId = `run-cloud-core-${crypto.randomUUID()}`;
-  try {
-    const response = await fetch("/api/cloud-core/runs", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(openCaeCoreCloudSolveRequest(runId, study, displayModel))
-    });
-    const payload = await readJson<{ run: { id: string }; streamUrl?: string; startUrl?: string; resultsUrl?: string; message?: string }>(response, "POST /api/cloud-core/runs");
-    const responseRunId = payload.run.id;
-    setCappedRunEntry(cloudResultsUrlByRunId, responseRunId, payload.resultsUrl ?? `/api/cloud-core/runs/${responseRunId}/results`);
-    setCappedRunEntry(cloudEventsUrlByRunId, responseRunId, payload.streamUrl ?? `/api/cloud-core/runs/${responseRunId}/events`);
-    void startOpenCaeCoreCloudRun(responseRunId, payload.startUrl ?? `/api/cloud-core/runs/${responseRunId}/start`);
-    return {
-      run: payload.run,
-      streamUrl: payload.streamUrl ?? `/api/cloud-core/runs/${responseRunId}/events`,
-      message: payload.message ?? "OpenCAE Core Cloud simulation running."
-    };
-  } catch (error) {
-    // A deployment without Core Cloud (local dev API, static/local-first Worker)
-    // cannot serve this route at all. Run the real in-browser OpenCAE Core solver
-    // instead; its provenance stays honestly labeled as a browser solve. This is
-    // not a result fallback: cloud solve failures from a provisioned deployment
-    // still surface as errors below.
-    if (isCloudCoreUnavailableInDeployment(error)) {
-      options.onRunStatus?.("OpenCAE Core Cloud is not available in this deployment. Running the OpenCAE Core Local browser solver instead.");
-      const localStudy: Study = study.type === "dynamic_structural"
-        ? { ...study, solverSettings: { ...study.solverSettings, backend: "opencae_core_local" } }
-        : { ...study, solverSettings: { ...study.solverSettings, backend: "opencae_core_local" } };
-      return runSimulationLocally(localStudy, displayModel);
-    }
-    throw new Error(coreCloudFailureMessage(error), { cause: error });
-  }
-}
-
-function isCloudCoreUnavailableInDeployment(error: unknown): boolean {
-  const message = messageFromUnknownError(error);
-  if (!message.startsWith("POST /api/cloud-core/runs failed with HTTP")) return false;
-  return message.includes("HTTP 404") || message.includes("not provisioned in this Worker build");
-}
-
-async function startOpenCaeCoreCloudRun(runId: string, startUrl: string): Promise<void> {
-  const request = headerTokenRequest(startUrl);
-  try {
-    const response = await fetch(request.url, { method: "POST", headers: request.headers });
-    if (!response.ok) {
-      const text = await response.text();
-      console.warn(text);
-      recordCloudRunStartFailure(runId, coreCloudFailureMessage(formatHttpError(`POST ${request.url}`, response.status, response.statusText, text)));
-    }
-  } catch (error) {
-    const message = coreCloudFailureMessage(error);
-    console.warn(message);
-    recordCloudRunStartFailure(runId, message);
-  }
-}
-
-function recordCloudRunStartFailure(runId: string, message: string): void {
-  setCappedRunEntry(failedCloudRunStartsByRunId, runId, message);
-  const listener = cloudRunStartFailureListenersByRunId.get(runId);
-  if (!listener) return;
-  cloudRunStartFailureListenersByRunId.delete(runId);
-  listener(message);
-}
-
-function coreCloudFailureMessage(error: unknown): string {
-  const message = messageFromUnknownError(error);
-  if (!message) return OPENCAE_CORE_CLOUD_FAILURE_MESSAGE;
-  if (message.includes("No local estimate fallback was used.")) return message;
-  return `${message.replace(/\.+$/, "")}. No local estimate fallback was used.`;
-}
-
 function messageFromUnknownError(error: unknown): string {
   return error instanceof Error ? error.message : typeof error === "string" ? error : "";
 }
 
-// Gmsh characteristic length (mm) for cloud-meshed procedural sample geometry.
-// The container caps solves at 30k DOFs; 6mm on the bracket stays well below it.
-const CLOUD_PROCEDURAL_MESH_SIZE_MM: Record<MeshQuality, number> = {
+// Gmsh characteristic length (mm) per mesh preset for procedural sample
+// geometry (bracket). Shared by the mesh step and the run flow's mesh-first
+// path; STEP uploads use the same map as a characteristic-length hint.
+const PROCEDURAL_MESH_SIZE_MM: Record<MeshQuality, number> = {
   coarse: 18,
   medium: 12,
   fine: 8,
   ultra: 6
 };
 
-export function geometryWithMeshPreset(geometry: NonNullable<ReturnType<typeof cloudGeometrySourceForStudy>>, study: Study) {
+export function geometryWithMeshPreset(geometry: NonNullable<ReturnType<typeof geometrySourceForStudy>>, study: Study) {
   if (geometry.kind !== "sample_procedural" || !geometry.descriptor) return geometry;
-  const meshSize = CLOUD_PROCEDURAL_MESH_SIZE_MM[study.meshSettings.preset] ?? CLOUD_PROCEDURAL_MESH_SIZE_MM.medium;
+  const meshSize = PROCEDURAL_MESH_SIZE_MM[study.meshSettings.preset] ?? PROCEDURAL_MESH_SIZE_MM.medium;
   return { ...geometry, descriptor: { ...geometry.descriptor, meshSize } };
 }
 
-export function studyForCoreCloudGeometrySolve(study: Study, displayModel: DisplayModel | undefined): Study {
-  return studyForCoreCloudGeometryDispatch(study, displayModel);
-}
+/** First 20% of a mesh-first run's progress belongs to real meshing phases. */
+const MESH_FIRST_SOLVE_PROGRESS_OFFSET = 20;
 
-function openCaeCoreCloudSolveRequest(runId: string, study: Study, displayModel: DisplayModel | undefined) {
-  const actualMesh = hasActualCoreVolumeMesh(study, displayModel);
-  const geometry = actualMesh ? null : cloudGeometrySourceForStudy(study, displayModel);
-  if (!actualMesh && !geometry && isComplexGeometry(displayModel, study)) {
-    throw new Error(OPENCAE_CORE_CLOUD_GEOMETRY_REQUIRED_REASON);
-  }
-  if (geometry) {
-    const useLinearGmshElements = geometry.kind === "sample_procedural" && geometry.sampleId === "bracket";
-    const cloudSolverSettings = {
-      ...study.solverSettings,
-      backend: "opencae_core_cloud",
-      // Native curved Gmsh Tet10 elements can invert around the bracket's drilled holes.
-      ...(useLinearGmshElements ? { elementOrder: 1 } : {})
-    };
-    return {
-      runId,
-      analysisType: study.type,
-      // The cloud container meshes dispatched geometry in the upright solver frame and
-      // applies study load directions verbatim, so hand it a solver-frame study.
-      study: studyForCoreCloudGeometryDispatch(study, displayModel),
-      displayModel,
-      geometry: geometryWithMeshPreset(geometry, study),
-      coreVolumeMesh: null,
-      solverSettings: cloudSolverSettings,
-      resultSettings: {
-        provenance: {
-          kind: "opencae_core_fea",
-          solver: "opencae-core-cloud",
-          resultSource: "computed",
-          meshSource: "actual_volume_mesh"
-        },
-        renderBounds: displayModel?.dimensions ?? null
-      }
-    };
-  }
-
-  const coreBuild = buildOpenCaeCoreCloudModelForStudy(study, displayModel);
-  return {
-    runId,
-    analysisType: study.type,
-    study,
-    coreModel: coreBuild.model,
-    coreVolumeMesh: null,
-    solverSettings: {
-      ...study.solverSettings,
-      backend: "opencae_core_cloud"
-    },
-    resultSettings: {
-      provenance: {
-        kind: "opencae_core_fea",
-        solver: "opencae-core-cloud",
-        resultSource: "computed",
-        meshSource: coreBuild.meshSource
-      },
-      renderBounds: displayModel?.dimensions ?? null
-    }
-  };
-}
-
-function runSimulationLocally(study: Study, displayModel?: DisplayModel): { run: StudyRun; streamUrl: string; message: string } {
+function runSimulationLocally(study: Study, displayModel?: DisplayModel, options: RunSimulationOptions = {}): { run: StudyRun; streamUrl: string; message: string } {
   const runId = `run-local-${crypto.randomUUID()}`;
-  const preflight = preflightOpenCaeCoreStudy({ study, displayModel });
-  if (!preflight.ok) {
-    const now = new Date().toISOString();
-    setCappedRunEntry(localRunControllersByRunId, runId, replayLocalRunEvents([
-      { runId, type: "state", progress: 0, message: "OpenCAE Core Local solve blocked.", timestamp: now },
-      { runId, type: "error", progress: 100, message: preflight.reason, timestamp: now }
-    ]));
+  const backend = simulationBackend(study);
+  // A-M4 local-first meshing: complex geometry without a stored Core volume
+  // mesh is meshed in-browser (real gmsh-wasm) before the solve; mesh and
+  // solve are strictly sequential — both are memory-heavy.
+  const needsMesh = isComplexGeometry(displayModel, study) && !hasActualCoreVolumeMesh(study, displayModel);
+  const capabilities = { canMeshOnDemand: needsMesh && canMeshStudyOnDemand(study, displayModel) };
+  const meshFirst = needsMesh && capabilities.canMeshOnDemand;
+  const coreEligibility = openCaeCoreEligibility(study, displayModel, capabilities);
+  const now = new Date().toISOString();
+  if (!coreEligibility.ok) {
+    const record = createLocalRunRecord(runId, "failed");
+    record.events.push(
+      { runId, type: "state", progress: 0, message: "OpenCAE Core Local solve blocked.", elapsedMs: 0, timestamp: now },
+      { runId, type: "error", progress: 100, message: coreEligibility.reason, elapsedMs: 0, timestamp: now }
+    );
     return {
       run: {
         id: runId,
@@ -648,17 +713,74 @@ function runSimulationLocally(study: Study, displayModel?: DisplayModel): { run:
         solverVersion: "0.1.0",
         startedAt: now,
         finishedAt: now,
-        diagnostics: preflight.diagnostics
+        diagnostics: [{
+          id: "opencae-core-ineligible",
+          severity: "error",
+          source: "solver",
+          message: coreEligibility.reason,
+          suggestedActions: []
+        }]
       },
       streamUrl: `local:${runId}`,
-      message: preflight.reason
+      message: coreEligibility.reason
     };
   }
-  if (hasRunningLocalSolve()) {
-    throw new Error(LOCAL_SOLVE_ALREADY_RUNNING_MESSAGE);
-  }
-  const now = new Date().toISOString();
-  setCappedRunEntry(localRunControllersByRunId, runId, createLocalSolveController(runId, study, displayModel));
+
+  // Single-flight: one in-browser solve at a time (same UX as the run button).
+  if (activeLocalRun()) throw new Error("Simulation is already running.");
+
+  const dynamic = study.type === "dynamic_structural";
+  const record = createLocalRunRecord(runId);
+  emitLocalRunEvent(record, {
+    type: "state",
+    progress: 0,
+    message: meshFirst
+      ? "OpenCAE Core run queued in browser: meshing geometry, then solving."
+      : dynamic ? "OpenCAE Core dynamic solve queued in browser." : "OpenCAE Core solve queued in browser."
+  });
+
+  const solveProgressOffset = meshFirst ? MESH_FIRST_SOLVE_PROGRESS_OFFSET : 0;
+  void (async () => {
+    let solveStudy = study;
+    if (meshFirst) {
+      // Hard-cancel path during meshing: terminate the mesh worker.
+      record.cancelSolve = () => cancelWasmMeshing("Simulation cancelled.");
+      solveStudy = await meshStudyForLocalRun(record, study, displayModel);
+      if (record.status !== "running") return; // Cancelled while meshing.
+      // Hand the freshly meshed study (with its stored artifact) back to the
+      // caller so the workspace persists it like a mesh-step result.
+      options.onStudyMeshed?.(solveStudy);
+    }
+    const handle = startLocalSolve(
+      { runId, study: solveStudy, displayModel, debugResults: debugResultsEnabled() },
+      (progress) => handleLocalSolveProgress(record, progress, solveProgressOffset)
+    );
+    record.cancelSolve = handle.cancel;
+    const { result } = await handle.completion;
+    if (record.status !== "running") return;
+    emitLocalRunEvent(record, { type: "progress", progress: 92, message: "Writing OpenCAE Core result fields." });
+    const results = await persistLocalRunResults(runId, withFieldRunIds(runId, result as ResultsResponse));
+    if (record.status !== "running") return;
+    setCappedRunEntry(localResultsByRunId, runId, results);
+    finishLocalRun(record, "complete", {
+      type: "complete",
+      progress: 100,
+      estimatedRemainingMs: 0,
+      message: dynamic ? "OpenCAE Core dynamic simulation complete." : "OpenCAE Core simulation complete."
+    });
+  })().catch((error) => {
+    if (record.status !== "running") return;
+    if (isCancelledSolveError(error)) {
+      finishLocalRun(record, "cancelled", { type: "cancelled", message: "Simulation cancelled." });
+      return;
+    }
+    finishLocalRun(record, "failed", {
+      type: "error",
+      progress: 100,
+      message: messageFromUnknownError(error) || "Local solve failed."
+    });
+  });
+
   return {
     run: {
       id: runId,
@@ -666,113 +788,61 @@ function runSimulationLocally(study: Study, displayModel?: DisplayModel): { run:
       status: "queued",
       jobId: `job-${runId}`,
       meshRef: study.meshSettings.meshRef,
-      solverBackend: localSolverBackendForRun(study, "opencae_core_local", { ok: true }),
+      solverBackend: localSolverBackendForRun(study, backend, coreEligibility),
       solverVersion: "0.1.0",
       startedAt: now,
-      diagnostics: preflight.diagnostics
+      diagnostics: []
     },
     streamUrl: `local:${runId}`,
     message: "OpenCAE Core Local simulation running."
   };
 }
 
-function hasRunningLocalSolve(): boolean {
-  for (const controller of localRunControllersByRunId.values()) {
-    if (!controller.isTerminal()) return true;
-  }
-  return false;
-}
-
-function createLocalSolveController(runId: string, study: Study, displayModel?: DisplayModel): LocalRunController {
-  const subscribers = new Set<(event: RunEvent) => void>();
-  const history: RunEvent[] = [];
-  let worker: StartedSolveWorker | null = null;
-  let terminal = false;
-  let started = false;
-  const startedAt = Date.now();
-
-  const emit = (event: RunEvent) => {
-    if (terminal && event.type !== "complete" && event.type !== "cancelled" && event.type !== "error") return;
-    history.push(event);
-    for (const subscriber of subscribers) subscriber(event);
-  };
-
-  const terminalEvent = (type: "complete" | "cancelled" | "error", progress: number, message: string): RunEvent => ({
-    runId,
-    type,
-    progress,
-    message,
-    elapsedMs: Math.max(0, Date.now() - startedAt),
-    ...(type === "complete" ? { estimatedRemainingMs: 0 } : {}),
-    timestamp: new Date().toISOString()
+/**
+ * Mesh-first leg of a local run (A-M4): reuses the mesh step's
+ * generateWasmMeshForStudy (single meshing code path), streaming its real
+ * phase reports ("Meshing volume...", ...) into the run event stream within
+ * the 0-20% progress window, and returns the study carrying the stored
+ * artifact. Throws (failing the run honestly) when meshing cannot produce a
+ * volume mesh — a run never falls back to estimates.
+ */
+async function meshStudyForLocalRun(record: LocalRunRecord, study: Study, displayModel?: DisplayModel): Promise<Study> {
+  const preset = study.meshSettings.preset;
+  emitLocalRunEvent(record, {
+    type: "progress",
+    progress: 2,
+    message: "No stored volume mesh for this geometry — meshing in browser before solving."
   });
-
-  const start = () => {
-    if (started || terminal) return;
-    started = true;
-    worker = startOpenCaeCoreSolveWorker(
-      { runId, study, displayModel },
-      {
-        onEvent: emit,
-        onResult: (result) => {
-          if (terminal) return;
-          setCappedRunEntry(localResultsByRunId, runId, result);
-          terminal = true;
-          emit(terminalEvent("complete", 100, "OpenCAE Core simulation complete."));
-          worker = null;
-        },
-        onError: (message) => {
-          if (terminal) return;
-          localResultsByRunId.delete(runId);
-          terminal = true;
-          emit(terminalEvent("error", 100, message || "OpenCAE Core local solve failed."));
-          worker = null;
-        }
-      }
-    );
-  };
-
-  return {
-    subscribe(onEvent) {
-      for (const event of history) onEvent(event);
-      subscribers.add(onEvent);
-      start();
-      return {
-        close() {
-          subscribers.delete(onEvent);
-        }
-      } as EventSource;
-    },
-    cancel() {
-      if (terminal) return;
-      worker?.cancel();
-      worker = null;
-      localResultsByRunId.delete(runId);
-      terminal = true;
-      emit(terminalEvent("cancelled", 100, "Simulation cancelled."));
-    },
-    isTerminal() {
-      return terminal;
+  let meshPhaseCount = 0;
+  const geometry = geometrySourceForStudy(study, displayModel);
+  const meshed = await generateWasmMeshForStudy({
+    preset,
+    study,
+    displayModel,
+    geometry: geometry ? geometryWithMeshPreset(geometry, study) : null,
+    meshSizeMm: PROCEDURAL_MESH_SIZE_MM[preset] ?? PROCEDURAL_MESH_SIZE_MM.medium,
+    onProgress: (message) => {
+      if (record.status !== "running") return;
+      meshPhaseCount += 1;
+      emitLocalRunEvent(record, {
+        type: "progress",
+        progress: Math.min(2 + meshPhaseCount * 2, MESH_FIRST_SOLVE_PROGRESS_OFFSET - 2),
+        message
+      });
     }
-  };
+  });
+  if (!meshed) {
+    throw new Error(`In-browser meshing could not run for this geometry, so the simulation was stopped. ${OPENCAE_CORE_MESH_REQUIRED_REASON}`);
+  }
+  emitLocalRunEvent(record, {
+    type: "progress",
+    progress: MESH_FIRST_SOLVE_PROGRESS_OFFSET,
+    message: meshed.message
+  });
+  return meshed.study;
 }
 
-function replayLocalRunEvents(events: RunEvent[]): LocalRunController {
-  return {
-    subscribe(onEvent) {
-      for (const event of events) {
-        globalThis.setTimeout(() => onEvent(event), 0);
-      }
-      return { close() {} } as EventSource;
-    },
-    cancel() {},
-    isTerminal() {
-      return true;
-    }
-  };
-}
-
-export function dynamicOutputFrameEstimate(study: Study, options: { backend?: "opencae_core_cloud" | "opencae_core_local" | "cloudflare_fea" | "opencae_core" | "local_detailed" } = {}): number {
+export function dynamicOutputFrameEstimate(study: Study, options: { backend?: string } = {}): number {
   const raw = study.solverSettings as Partial<DynamicSolverSettings>;
   const startTime = finiteOr(raw.startTime, 0);
   const endTime = finiteOr(raw.endTime, 0.1);
@@ -789,12 +859,6 @@ export function dynamicOutputFrameEstimate(study: Study, options: { backend?: "o
 
 function finiteOr(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
-}
-
-function computeLocalResults(runId: string): Promise<ResultsResponse> | null {
-  const existing = localResultsByRunId.get(runId);
-  if (existing) return Promise.resolve(existing);
-  return null;
 }
 
 type Vec3 = [number, number, number];
@@ -860,6 +924,34 @@ function lerp(min: number, max: number, t: number): number {
   return min + (max - min) * t;
 }
 
+/**
+ * EventSource-like adapter over a local run record: replays the buffered
+ * events asynchronously (matching EventSource delivery semantics), then
+ * streams live solver-driven events until closed.
+ */
+function subscribeToLocalRunRecord(record: LocalRunRecord, onEvent: (event: RunEvent) => void): EventSource {
+  let closed = false;
+  const listener = (event: RunEvent) => {
+    if (!closed) onEvent(event);
+  };
+  const replayTimer = globalThis.setTimeout(() => {
+    // Replay + attach happen in one task, so no event is missed or duplicated:
+    // live emits append to record.events and cannot interleave with this loop.
+    for (let index = 0; index < record.events.length; index += 1) {
+      if (closed) return;
+      onEvent(record.events[index]!);
+    }
+    if (!closed) record.listeners.add(listener);
+  }, 0);
+  return {
+    close() {
+      closed = true;
+      globalThis.clearTimeout(replayTimer);
+      record.listeners.delete(listener);
+    }
+  } as EventSource;
+}
+
 async function readJson<T>(response: Response, endpoint = response.url || "request"): Promise<T> {
   if (!response.ok) {
     const text = await response.text();
@@ -908,20 +1000,23 @@ function meshSummaryForPreset(preset: MeshQuality, analysisMesh?: AnalysisMesh) 
   return summaryByPreset[preset];
 }
 
-function simulationBackend(study: Study, displayModel?: DisplayModel): NormalizedBrowserSolverBackend {
-  const rawBackend = (study.solverSettings as { backend?: unknown }).backend;
-  const normalized = normalizeSolverBackend(study);
-  if (rawBackend !== undefined) return normalized;
-  return openCaeCoreEligibility(study, displayModel).ok ? "opencae_core_local" : "opencae_core_cloud";
+function simulationBackend(study: Study): NormalizedBrowserSolverBackend {
+  return normalizeSolverBackend(study);
 }
 
 function localSolverBackendForRun(study: Study, backend: NormalizedBrowserSolverBackend, coreEligibility?: ReturnType<typeof openCaeCoreEligibility>): string {
   if (backend === "opencae_core_local" && coreEligibility?.ok) {
+    // Structured-block and actual-mesh studies both run the full production
+    // Core pipeline in the browser now; the preview solver tier is retired.
     return study.type === "dynamic_structural" ? "opencae-core-mdof-tet" : "opencae-core-sparse-tet";
   }
   if (study.type === "dynamic_structural") return "local-dynamic-newmark";
   if (isBeamDemoStudyForLocalRun(study)) return "local-beam-demo-euler-bernoulli";
   return "local-heuristic-surface";
+}
+
+function debugResultsEnabled(): boolean {
+  return typeof window !== "undefined" && new URLSearchParams(window.location.search).get("debugResults") === "1";
 }
 
 function isBeamDemoStudyForLocalRun(study: Study): boolean {

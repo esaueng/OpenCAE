@@ -1,5 +1,10 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
+  // Production local-first Worker (cae.esau.app): static assets only.
+  // The OpenCAE Core Cloud container, Durable Object, and R2 artifact bindings
+  // were retired in July 2026 — see docs/cloud-retirement.md. This config was
+  // reconciled from the former wrangler.local-first.jsonc variant; solves run
+  // in the browser, so the production Worker needs no solver bindings.
   "name": "opencae",
   "account_id": "747b74cbd7d019dd7aeecb2c24a4bf10",
   "main": "apps/opencae-web/worker/index.ts",
@@ -18,36 +23,11 @@
     "not_found_handling": "single-page-application",
     "run_worker_first": ["/api/*", "/health"]
   },
-  "containers": [
-    {
-      "name": "opencae-core-cloud-0.1.1",
-      "class_name": "OpenCaeCoreCloudContainer",
-      "image": "./services/opencae-core-cloud/Dockerfile",
-      "image_build_context": ".",
-      "instance_type": "standard-1",
-      "max_instances": 12
-    }
-  ],
-  "r2_buckets": [
-    {
-      "binding": "CORE_CLOUD_ARTIFACTS",
-      "bucket_name": "opencae-core-cloud-artifacts"
-    }
-  ],
-  "durable_objects": {
-    "bindings": [
-      {
-        "name": "CORE_CLOUD_CONTAINER",
-        "class_name": "OpenCaeCoreCloudContainer"
-      }
-    ]
-  },
-  "migrations": [
-    {
-      "tag": "v3-opencae-core-cloud-container",
-      "new_sqlite_classes": ["OpenCaeCoreCloudContainer"]
-    }
-  ],
+  // No migrations in the checked-in config: Workers Builds uploads PR preview
+  // versions, and pending Durable Object migrations cannot ride a version
+  // upload. Deleting the retired OpenCaeCoreCloudContainer class is a one-off
+  // manual deploy step — see docs/cloud-retirement.md ("Durable Object
+  // cleanup") for the exact migration snippet and command.
   "observability": {
     "enabled": false,
     "head_sampling_rate": 1,
