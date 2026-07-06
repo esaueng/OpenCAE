@@ -113,26 +113,38 @@ describe("OpenCAE Core browser solver adapter", () => {
     });
   });
 
-  test("solves eligible static studies as OpenCAE Core preview provenance", { timeout: 60000 }, () => {
+  test("solves eligible static studies through the production Core pipeline", { timeout: 60000 }, () => {
     const outcome = trySolveOpenCaeCoreStudy({ study: staticStudy, runId: "run-core-1", displayModel });
 
     expect(outcome.ok).toBe(true);
     if (!outcome.ok) throw new Error(outcome.reason);
-    const displacement = outcome.result.fields.find((field) => field.type === "displacement");
-    const stress = outcome.result.fields.find((field) => field.type === "stress");
+    expect(outcome.solverBackend).toBe("opencae-core-sparse-tet");
+    // Cloud-parity contract: same provenance stamp as the deployed runner,
+    // with a browser runnerVersion (honest about where it was computed).
     expect(outcome.result.summary.provenance).toMatchObject({
-      kind: "local_estimate",
-      solver: "opencae-core-preview-tet4",
-      meshSource: "structured_block_proxy",
-      resultSource: "computed_preview"
+      kind: "opencae_core_fea",
+      solver: "opencae-core-cloud",
+      meshSource: "structured_block_core",
+      resultSource: "computed",
+      units: "mm-N-s-MPa",
+      runnerVersion: "browser-0.1.0"
     });
     expect(outcome.result.summary.maxStress).toBeGreaterThan(0);
     expect(outcome.result.summary.maxDisplacement).toBeGreaterThan(0);
-    expect(outcome.result.fields.map((field) => field.type)).toEqual(["stress", "displacement", "safety_factor"]);
-    expect(outcome.result.fields.every((field) => field.provenance?.solver === "opencae-core-preview-tet4")).toBe(true);
-    expect(displacement?.samples?.length).toBeGreaterThan(24);
-    expect(stress?.samples?.length).toBeGreaterThan(24);
-    expect(displacement?.samples?.every((sample) => sample.vector?.every(Number.isFinite))).toBe(true);
+    expect(outcome.result.fields.map((field) => field.id).sort()).toEqual([
+      "displacement-surface",
+      "safety-factor",
+      "safety-factor-surface",
+      "stress-surface",
+      "stress-von-mises-element"
+    ]);
+    const surfaceMesh = outcome.result.surfaceMesh as { id: string; nodes: unknown[] };
+    expect(surfaceMesh.id).toBe("solver-surface");
+    const displacement = outcome.result.fields.find((field) => field.id === "displacement-surface");
+    expect(displacement?.location).toBe("node");
+    expect(displacement?.values.length).toBe(surfaceMesh.nodes.length);
+    expect(displacement?.vectors?.length).toBe(surfaceMesh.nodes.length);
+    expect(outcome.result.diagnostics?.some((entry) => (entry as { id?: unknown })?.id === "browser-solve-limits")).toBe(true);
   });
 
   test("solves dynamic studies with OpenCAE Core transient fields", { timeout: 60000 }, () => {
@@ -159,18 +171,17 @@ describe("OpenCAE Core browser solver adapter", () => {
     expect(eligibility).toEqual({ ok: true });
     if (!outcome.ok) throw new Error(outcome.reason);
     expect(outcome.ok).toBe(true);
-    expect(outcome.solverBackend).toBe("opencae-core-preview-sdof");
+    expect(outcome.solverBackend).toBe("opencae-core-mdof-tet");
     expect(outcome.result.summary.provenance).toMatchObject({
-      kind: "local_estimate",
-      solver: "opencae-core-preview-sdof",
-      meshSource: "structured_block_proxy",
-      resultSource: "computed_preview",
-      integrationMethod: "newmark_average_acceleration"
+      kind: "opencae_core_fea",
+      solver: "opencae-core-cloud",
+      meshSource: "structured_block_core",
+      resultSource: "computed",
+      runnerVersion: "browser-0.1.0"
     });
-    expect(outcome.result.summary.reactionForce).toBeGreaterThan(0);
-    expect(outcome.result.summary.loadSummary?.appliedLoadMagnitude).toBeCloseTo(500);
-    expect(outcome.result.summary.diagnostics?.some((diagnostic) => diagnostic.message === "Reaction force unavailable from this preview solver.")).toBe(true);
     expect(outcome.result.summary.transient?.frameCount).toBeGreaterThan(1);
+    expect(outcome.result.summary.transient?.integrationMethod).toBe("newmark_average_acceleration");
+    expect(Number.isFinite(outcome.result.summary.maxDisplacement)).toBe(true);
     expect(outcome.result.fields.some((field) => field.type === "displacement" && field.frameIndex === 1)).toBe(true);
     expect(outcome.result.fields.some((field) => field.type === "velocity")).toBe(true);
     expect(outcome.result.fields.some((field) => field.type === "acceleration")).toBe(true);
@@ -203,12 +214,15 @@ describe("OpenCAE Core browser solver adapter", () => {
 
     const outcome = trySolveOpenCaeCoreStudy({ study: actualMeshStudy, runId: "run-actual-core", displayModel: bracketDisplayModel });
 
-    expect(outcome.ok).toBe(true);
+    expect(outcome.ok, outcome.ok ? undefined : outcome.reason).toBe(true);
     if (!outcome.ok) throw new Error(outcome.reason);
+    expect(outcome.solverBackend).toBe("opencae-core-sparse-tet");
     expect(outcome.result.summary.provenance).toMatchObject({
       kind: "opencae_core_fea",
+      solver: "opencae-core-cloud",
       meshSource: "actual_volume_mesh",
-      resultSource: "computed"
+      resultSource: "computed",
+      runnerVersion: "browser-0.1.0"
     });
     expect(outcome.result.artifacts?.meshConnectivity?.connectedComponents).toBe(1);
   });
@@ -343,6 +357,34 @@ function actualCoreModelFixture() {
       density: 2700
     }],
     elementBlocks: [{ name: "actual-volume", type: "Tet4" as const, material: "mat-aluminum-6061", connectivity: [0, 1, 2, 3] }],
+    // Real actual-mesh artifacts carry the boundary facets tagged with the
+    // selections that produced them; the cloud model builder maps study
+    // constraints/loads onto these surface sets.
+    surfaceFacets: [
+      {
+        id: 0,
+        element: 0,
+        elementFace: 1,
+        nodes: [0, 3, 2],
+        area: 0.0008,
+        normal: [-1, 0, 0] as [number, number, number],
+        center: [0, 0.04 / 3, 0.04 / 3] as [number, number, number],
+        sourceSelectionRef: "selection-fixed-face",
+        sourceFaceId: "face-base-left"
+      },
+      {
+        id: 1,
+        element: 0,
+        elementFace: 0,
+        nodes: [1, 2, 3],
+        area: 0.0008 * Math.sqrt(3),
+        normal: [1 / Math.sqrt(3), 1 / Math.sqrt(3), 1 / Math.sqrt(3)] as [number, number, number],
+        center: [0.04 / 3, 0.04 / 3, 0.04 / 3] as [number, number, number],
+        sourceSelectionRef: "selection-load-face",
+        sourceFaceId: "face-load-top"
+      }
+    ],
+    surfaceSets: [],
     nodeSets: [
       { name: "fixedNodes", nodes: [0, 1, 2] },
       { name: "loadNodes", nodes: [3] }
