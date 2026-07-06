@@ -40,13 +40,15 @@ describe("Cloudflare deployment config guard (post cloud retirement)", () => {
     expect(ensureCoreSource).not.toContain("services/opencae-core-cloud");
   });
 
-  test("keeps the Durable Object deletion migration for a clean production deploy", () => {
+  test("rejects checked-in migrations (PR preview version uploads cannot carry them)", () => {
     const { staticConfig, packageJson } = readCloudflareConfigs(rootDir);
     const defaultConfig = clone(readConfig("wrangler.jsonc"));
-    defaultConfig.migrations = defaultConfig.migrations.filter((migration) => !migration.deleted_classes);
+    defaultConfig.migrations = [
+      { tag: "v4-retire-opencae-core-cloud-container", deleted_classes: ["OpenCaeCoreCloudContainer"] }
+    ];
 
     expect(() => validateCloudflareConfigs({ defaultConfig, staticConfig, packageJson })).toThrow(
-      /deleted_classes migration/
+      /must not declare migrations/
     );
   });
 
