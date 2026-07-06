@@ -67,6 +67,6 @@ describe("ensure-opencae-core commit pins", () => {
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("could not be fetched from the Core remote");
     expect(result.stderr).toContain("push the OpenCAE Core branch that contains it");
-    expect(result.stderr).toContain("services/opencae-core-cloud/OPENCAE_CORE_REF");
+    expect(result.stderr).toContain("update OPENCAE_CORE_REF at the repo root");
   });
 });

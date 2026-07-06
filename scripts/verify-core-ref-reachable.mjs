@@ -1,13 +1,15 @@
 #!/usr/bin/env node
 
-// Deploy/build gate: the Core Cloud container Docker build clones OpenCAE Core from
-// its GitHub remote and fetches the commit pinned in
-// services/opencae-core-cloud/OPENCAE_CORE_REF. A pin that only exists in the local
-// sibling checkout (e.g. the head of a not-yet-pushed branch) makes every container
-// build fail deep inside `docker build` with a cryptic "not our ref" fetch error —
-// and with the web worker fail-closing on the runner version the pin ships, that
-// would leave production with no deployable container. This script probes the remote
-// the same way the Dockerfile does and fails FAST with an actionable message instead.
+// Deploy/build gate: CI and deploy environments clone OpenCAE Core from its
+// GitHub remote at the commit pinned in OPENCAE_CORE_REF (repo root) — the pin
+// for the sibling SOLVER packages the browser build consumes. A pin that only
+// exists in the local sibling checkout (e.g. the head of a not-yet-pushed
+// branch) makes every fresh build fail with a cryptic "not our ref" fetch
+// error. This script probes the remote the same way pnpm ensure:core does and
+// fails FAST with an actionable message instead.
+// (The Core Cloud container this gate originally protected was retired in
+// 2026-07; the pin and this reachability check outlived it. See
+// docs/cloud-retirement.md.)
 
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -19,7 +21,7 @@ const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const defaultCoreRepo = "https://github.com/esaueng/OpenCAE-Core.git";
 
 export function readPinnedCoreRef(baseDir = rootDir) {
-  const pinPath = resolve(baseDir, "services/opencae-core-cloud/OPENCAE_CORE_REF");
+  const pinPath = resolve(baseDir, "OPENCAE_CORE_REF");
   if (!existsSync(pinPath)) return undefined;
   const value = readFileSync(pinPath, "utf8").trim();
   return value.length > 0 ? value : undefined;
@@ -37,14 +39,14 @@ export function verifyCoreRefReachable({ repo, ref, probe = probeCoreRefWithGit 
       ok: false,
       ref: coreRef,
       message:
-        "services/opencae-core-cloud/OPENCAE_CORE_REF is missing or empty. Pin a full OpenCAE Core commit SHA before building or deploying the Core Cloud container."
+        "OPENCAE_CORE_REF (repo root) is missing or empty. Pin a full OpenCAE Core commit SHA before building or deploying."
     };
   }
   if (!isFullGitCommitRef(coreRef)) {
     return {
       ok: false,
       ref: coreRef,
-      message: `OPENCAE_CORE_REF must pin a full 40-character commit SHA for container builds; got "${coreRef}".`
+      message: `OPENCAE_CORE_REF must pin a full 40-character commit SHA for reproducible builds; got "${coreRef}".`
     };
   }
   const result = probe(coreRepo, coreRef);
@@ -57,15 +59,15 @@ export function verifyCoreRefReachable({ repo, ref, probe = probeCoreRefWithGit 
     message: [
       `Pinned OpenCAE Core commit ${coreRef} is NOT reachable on ${coreRepo}.`,
       result.detail ? `git: ${result.detail}` : undefined,
-      "The Core Cloud container Docker build (pnpm ensure:core) clones from that remote, so an unpushed pin can never build or deploy.",
-      "Push the OpenCAE Core branch containing the pinned commit first; after a squash/rebase merge, update services/opencae-core-cloud/OPENCAE_CORE_REF to the merged SHA."
+      "CI and deploy builds (pnpm ensure:core) clone from that remote, so an unpushed pin can never build or deploy.",
+      "Push the OpenCAE Core branch containing the pinned commit first; after a squash/rebase merge, update OPENCAE_CORE_REF (repo root) to the merged SHA."
     ]
       .filter(Boolean)
       .join("\n")
   };
 }
 
-// Mirrors the container Dockerfile's clone path: fetch the bare commit from the remote
+// Mirrors ensure-opencae-core's clone path: fetch the bare commit from the remote
 // into a throwaway repository. Exported for the integration test.
 export function probeCoreRefWithGit(repo, ref) {
   const probeDir = mkdtempSync(join(tmpdir(), "opencae-core-ref-probe-"));

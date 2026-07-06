@@ -9,11 +9,14 @@ import { spawnSync } from "node:child_process";
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const coreDir = resolve(process.env.OPENCAE_CORE_DIR ?? resolve(repoRoot, "../opencae-core"));
 const coreRepo = process.env.OPENCAE_CORE_REPO ?? "https://github.com/esaueng/OpenCAE-Core.git";
-const pinnedCoreRefPath = resolve(repoRoot, "services/opencae-core-cloud/OPENCAE_CORE_REF");
+// The pin lives at the repo root since the cloud retirement (2026-07): it pins
+// the sibling OpenCAE Core SOLVER packages consumed by the browser build, not
+// any cloud runner (the retired core-cloud service mirror is gone).
+const pinnedCoreRefPath = resolve(repoRoot, "OPENCAE_CORE_REF");
 const coreRef = process.env.OPENCAE_CORE_REF ?? readPinnedCoreRef() ?? "main";
 if (isProductionBuild() && !isFullGitCommitRef(coreRef)) {
   console.error("Production OpenCAE Core builds must pin OPENCAE_CORE_REF to a full commit SHA.");
-  console.error(`Got "${coreRef}". Update services/opencae-core-cloud/OPENCAE_CORE_REF before building production artifacts.`);
+  console.error(`Got "${coreRef}". Update OPENCAE_CORE_REF (repo root) before building production artifacts.`);
   process.exit(1);
 }
 
@@ -64,8 +67,8 @@ function updateExistingCoreWorkspace(directory, ref) {
     // A pinned commit that already exists in the local checkout (e.g. the head of a
     // not-yet-pushed sibling branch this repo is being developed against) is usable
     // as-is: check it out directly instead of demanding it be fetchable from origin.
-    // Deploy/container builds still require remote reachability — that is gated by
-    // scripts/verify-core-ref-reachable.mjs and by the Docker clone itself.
+    // Deploy/CI builds still require remote reachability — that is gated by
+    // scripts/verify-core-ref-reachable.mjs.
     if (!commitExistsLocally(directory, ref)) {
       fetchPinnedCommit(directory, ref);
     } else {
@@ -92,7 +95,7 @@ function updateExistingCoreWorkspace(directory, ref) {
   const fetchedHead = gitOutput(directory, ["rev-parse", "FETCH_HEAD"]);
   if (head !== fetchedHead) {
     console.error(`OpenCAE Core checkout did not update exactly to origin/${ref}.`);
-    console.error("Push or remove local ahead commits before building a Cloudflare-matching container.");
+    console.error("Push or remove local ahead commits before building a remote-reproducible artifact.");
     process.exit(1);
   }
 }
@@ -129,8 +132,8 @@ function fetchPinnedCommit(directory, ref) {
   if (result.status !== 0) {
     console.error(`Pinned OpenCAE Core commit ${ref} could not be fetched from the Core remote (${coreRepo}).`);
     console.error("The commit is not reachable there — push the OpenCAE Core branch that contains it first");
-    console.error("(after a squash/rebase merge, update services/opencae-core-cloud/OPENCAE_CORE_REF to the new SHA).");
-    console.error("Container builds clone from that remote, so an unpushed pin can never build or deploy.");
+    console.error("(after a squash/rebase merge, update OPENCAE_CORE_REF at the repo root to the new SHA).");
+    console.error("CI and deploy builds clone from that remote, so an unpushed pin can never build or deploy.");
     process.exit(result.status ?? 1);
   }
 }

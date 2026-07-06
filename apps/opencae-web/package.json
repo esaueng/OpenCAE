@@ -10,12 +10,13 @@
     "preview": "vite preview --port 5173"
   },
   "dependencies": {
-    "@cloudflare/containers": "^0.3.3",
     "@opencae/core": "workspace:*",
     "@opencae/core-adapter": "workspace:*",
     "@opencae/db": "workspace:*",
     "@opencae/materials": "workspace:*",
+    "@opencae/mesh-intake": "workspace:*",
     "@opencae/schema": "workspace:*",
+    "@opencae/solve-pipeline": "workspace:*",
     "@opencae/step": "workspace:*",
     "@opencae/study-core": "workspace:*",
     "@opencae/units": "workspace:*",
@@ -34,7 +35,9 @@
     "@types/react-dom": "^18.3.5",
     "@types/three": "^0.171.0",
     "@vitejs/plugin-react": "^4.3.4",
-    "vite": "^6.0.7"
+    "vite": "^6.0.7",
+    "vite-plugin-pwa": "1.3.0",
+    "workbox-window": "7.4.1"
   },
   "license": "Apache-2.0"
 }
