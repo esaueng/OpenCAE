@@ -107,7 +107,12 @@ export function formatResultProvenanceLabel(provenance: ResultProvenance | undef
   if (tier === "core_preview") return "OpenCAE Core Preview (coarse block proxy)";
   if (tier === "local_estimate") return "Estimate (not FEA)";
   if (tier === "analytical_benchmark") return "Analytical benchmark";
-  if (tier === "production_fea") return provenance?.solver === "opencae-core-cloud" ? "OpenCAE Core Cloud" : "OpenCAE Core Local";
+  if (tier === "production_fea") {
+    // Browser-pipeline results keep the runner's solver id for golden byte-parity;
+    // runnerVersion "browser-*" marks them as local solves (plan 015, open question 4).
+    if (provenance?.runnerVersion?.startsWith("browser-")) return "OpenCAE Core Local (in-browser)";
+    return provenance?.solver === "opencae-core-cloud" ? "OpenCAE Core Cloud" : "OpenCAE Core Local";
+  }
   return "Unknown result source";
 }
 
