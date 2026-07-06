@@ -93,6 +93,7 @@ const SWEPT_EXTENSIONS = new Set([
 ]);
 const SWEPT_EXTENSIONLESS = new Set(["Dockerfile", "_headers", "OPENCAE_CORE_REF"]);
 const SKIPPED_DIRECTORIES = new Set(["node_modules", "dist", ".git", ".claude", "coverage"]);
+const SKIPPED_RELATIVE_DIRECTORIES = new Set(["data/artifacts", "data/logs", "data/reports", "data/sqlite"]);
 
 function sweptFiles() {
   const files = [];
@@ -110,7 +111,7 @@ function collect(relativeDir, files) {
   for (const entry of readdirSync(resolve(rootDir, relativeDir), { withFileTypes: true })) {
     const child = `${relativeDir}/${entry.name}`;
     if (entry.isDirectory()) {
-      if (!SKIPPED_DIRECTORIES.has(entry.name)) collect(child, files);
+      if (!SKIPPED_DIRECTORIES.has(entry.name) && !SKIPPED_RELATIVE_DIRECTORIES.has(child)) collect(child, files);
       continue;
     }
     if (!entry.isFile()) continue;

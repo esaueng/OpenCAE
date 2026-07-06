@@ -16,12 +16,15 @@ function clone(value) {
 describe("Cloudflare deployment config guard (post cloud retirement)", () => {
   test("passes with the committed static-assets-only configs", () => {
     const { defaultConfig, staticConfig, packageJson } = readCloudflareConfigs(rootDir);
+    const readme = readFileSync(resolve(rootDir, "README.md"), "utf8");
 
     expect(defaultConfig.name).toBe("opencae");
     expect(staticConfig.name).toBe("opencae-static");
     expect(defaultConfig.containers).toBeUndefined();
     expect(defaultConfig.durable_objects).toBeUndefined();
     expect(defaultConfig.r2_buckets).toBeUndefined();
+    expect(readme).toContain("Deploy command: npx wrangler deploy");
+    expect(readme).toContain("Do not use `npx wrangler versions upload` for the production Worker");
     expect(() => validateCloudflareConfigs({ defaultConfig, staticConfig, packageJson })).not.toThrow();
   });
 
