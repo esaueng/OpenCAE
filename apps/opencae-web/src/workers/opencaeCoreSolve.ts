@@ -1,6 +1,8 @@
 export {
+  autoSolverBackend,
   buildOpenCaeCoreCloudModelForStudy,
   cloudGeometrySourceForStudy,
+  explicitSolverBackend,
   hasActualCoreVolumeMesh,
   hasCloudMeshableGeometry,
   isComplexGeometry,
@@ -8,10 +10,12 @@ export {
   normalizeSolverBackend,
   OPENCAE_CORE_CLOUD_GEOMETRY_REQUIRED_REASON,
   openCaeCoreEligibility,
+  resolveSolverBackend,
   studyForCoreCloudGeometryDispatch,
   trySolveOpenCaeCoreStudy,
   type CoreCloudGeometrySource,
   type NormalizedBrowserSolverBackend,
   type OpenCaeCoreEligibility,
-  type OpenCaeCoreSolveOutcome
+  type OpenCaeCoreSolveOutcome,
+  type ResolvedSolverBackend
 } from "@opencae/core-adapter";
