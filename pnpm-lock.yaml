@@ -31,41 +31,6 @@ importers:
         specifier: ^4.85.0
         version: 4.85.0
 
-  ../opencae-core/packages/core: {}
-
-  ../opencae-core/packages/examples:
-    dependencies:
-      '@opencae/core':
-        specifier: workspace:*
-        version: link:../core
-
-  ../opencae-core/packages/solver-cpu:
-    dependencies:
-      '@opencae/core':
-        specifier: workspace:*
-        version: link:../core
-    devDependencies:
-      '@opencae/examples':
-        specifier: workspace:*
-        version: link:../examples
-
-  ../opencae-core/packages/solver-wasm: {}
-
-  ../opencae-core/packages/solver-webgpu: {}
-
-  ../opencae-core/packages/viewer:
-    dependencies:
-      '@opencae/core':
-        specifier: workspace:*
-        version: link:../core
-    devDependencies:
-      '@opencae/examples':
-        specifier: workspace:*
-        version: link:../examples
-      '@opencae/solver-cpu':
-        specifier: workspace:*
-        version: link:../solver-cpu
-
   apps/opencae-api:
     dependencies:
       '@fastify/cors':
@@ -141,6 +106,9 @@ importers:
       '@opencae/schema':
         specifier: workspace:*
         version: link:../../libs/opencae-schema
+      '@opencae/solve-pipeline':
+        specifier: workspace:*
+        version: link:../../libs/opencae-solve-pipeline
       '@opencae/step':
         specifier: workspace:*
         version: link:../../libs/opencae-step
@@ -205,6 +173,9 @@ importers:
       '@opencae/schema':
         specifier: workspace:*
         version: link:../opencae-schema
+      '@opencae/solve-pipeline':
+        specifier: workspace:*
+        version: link:../opencae-solve-pipeline
       '@opencae/solver-cpu':
         specifier: workspace:*
         version: link:../../../opencae-core/packages/solver-cpu
@@ -263,6 +234,15 @@ importers:
       zod:
         specifier: ^3.24.1
         version: 3.25.76
+
+  libs/opencae-solve-pipeline:
+    dependencies:
+      '@opencae/core':
+        specifier: workspace:*
+        version: link:../../../opencae-core/packages/core
+      '@opencae/solver-cpu':
+        specifier: workspace:*
+        version: link:../../../opencae-core/packages/solver-cpu
 
   libs/opencae-step:
     devDependencies:

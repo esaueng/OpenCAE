@@ -1,0 +1,14 @@
+{
+  "name": "@opencae/solve-pipeline",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@opencae/core": "workspace:*",
+    "@opencae/solver-cpu": "workspace:*"
+  },
+  "license": "Apache-2.0"
+}

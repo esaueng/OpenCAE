@@ -33,18 +33,29 @@ describe("Worker UI performance rewrite boundaries", () => {
     expect(workspaceSource).not.toContain('import { CadViewer');
   });
 
-  test("keeps browser API solves on Core helpers without detailed local fallback imports", () => {
+  test("keeps browser API solves on the dedicated solve worker without detailed local fallback imports", () => {
     expect(apiSource).not.toContain(`from "${removedSolverPackage}"`);
-    expect(apiSource).toContain("trySolveOpenCaeCoreStudy");
-    expect(apiSource).toContain(removedWorkerSolver);
+    // Local solves go through the dedicated solve worker client (real solver
+    // progress + cancellation), never the shared performance worker op or the
+    // legacy in-thread fallback solver.
+    expect(apiSource).toContain("startLocalSolve");
+    expect(apiSource).toContain('from "../workers/solveWorkerClient"');
+    expect(apiSource).not.toContain(removedWorkerSolver);
     expect(apiSource).not.toContain(removedFallbackSolver);
   });
 
   test("keeps OpenCAE Core dynamic integration in the Core solver package", () => {
-    expect(coreAdapterSource).toContain("solveDynamicMdofTet4Cpu");
+    // The adapter delegates solving to the mirrored cloud pipeline, which
+    // calls the Core solver package's solveCoreStatic/solveCoreDynamic; no
+    // hand-rolled integration lives in the web/adapter layer.
+    expect(coreAdapterSource).toContain("solveStudyModelWithCorePipeline");
     expect(coreAdapterSource).not.toContain("integrateDynamicFrames");
     expect(coreAdapterSource).not.toContain("function loadScaleAt");
     expect(coreAdapterSource).not.toContain("Newmark");
+    const solvePipelineSource = readFileSync(resolve(__dirname, "../../../libs/opencae-solve-pipeline/src/index.ts"), "utf8");
+    expect(solvePipelineSource).toContain("solveCoreStatic");
+    expect(solvePipelineSource).toContain("solveCoreDynamic");
+    expect(solvePipelineSource).not.toContain("integrateDynamicFrames");
   });
 
   test("declares explicit chunks and a bundle budget command", () => {
