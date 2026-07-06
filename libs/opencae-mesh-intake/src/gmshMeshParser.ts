@@ -30,13 +30,22 @@ export type ParseOptions = {
   elementOrder?: 1 | 2;
 };
 
+function trimTrailingDots(value: string): string {
+  let end = value.length;
+  while (end > 0 && value.charCodeAt(end - 1) === 0x2e) end -= 1;
+  return value.slice(0, end);
+}
+
 export class CoreCloudMeshingError extends Error {
   readonly code: string;
   readonly status: number;
   readonly diagnostics: unknown[];
 
   constructor(code: string, message: string, options: { status?: number; diagnostics?: unknown[] } = {}) {
-    super(`${message.replace(/\.+$/, "")}. No local estimate fallback was used.`);
+    // Deviation from the opencae-core@5fff277 mirror: trailing dots are
+    // trimmed with a linear scan instead of /\.+$/ — CodeQL flags the
+    // anchored quantifier as polynomial on untrusted input.
+    super(`${trimTrailingDots(message)}. No local estimate fallback was used.`);
     this.name = "CoreCloudMeshingError";
     this.code = code;
     this.status = options.status ?? 422;

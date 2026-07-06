@@ -537,7 +537,15 @@ function physicalGroupCandidates(role: SelectionMappingInput["role"]): Set<strin
 }
 
 function normalizeName(value: string | undefined): string {
-  return (value ?? "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  // Deviation from the opencae-core@5fff277 mirror: leading/trailing
+  // underscores are trimmed with a linear scan instead of /^_+|_+$/g —
+  // CodeQL flags the anchored quantifier as polynomial on untrusted input.
+  const collapsed = (value ?? "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "_");
+  let start = 0;
+  let end = collapsed.length;
+  while (start < end && collapsed.charCodeAt(start) === 0x5f) start += 1;
+  while (end > start && collapsed.charCodeAt(end - 1) === 0x5f) end -= 1;
+  return collapsed.slice(start, end);
 }
 
 function geometricFallback(input: SelectionMappingInput): SurfaceSetJson | undefined {
