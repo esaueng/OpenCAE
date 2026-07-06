@@ -5,6 +5,7 @@ import { createLocalBlankProject, createLocalSampleProject, createLocalUploadRes
 import type { SolveProgressEvent } from "@opencae/solve-pipeline";
 import { isCancelledSolveError, startLocalSolve } from "../workers/solveWorkerClient";
 import { loadLocalRunResults, saveLocalRunResults } from "./localResultsStore";
+import { generateWasmMeshForStudy } from "./wasmMeshing";
 import { buildOpenCaeCoreCloudModelForStudy, cloudGeometrySourceForStudy, hasActualCoreVolumeMesh, isComplexGeometry, normalizeSolverBackend, openCaeCoreEligibility, studyForCoreCloudGeometryDispatch, OPENCAE_CORE_CLOUD_GEOMETRY_REQUIRED_REASON, type NormalizedBrowserSolverBackend } from "../workers/opencaeCoreSolve";
 
 export interface SampleProjectResponse {
@@ -301,7 +302,27 @@ export async function renameProject(projectId: string, name: string, currentProj
   );
 }
 
-export async function generateMesh(studyId: string, preset: MeshQuality, currentStudy?: Study, displayModel?: DisplayModel): Promise<{ study: Study; message: string }> {
+export async function generateMesh(studyId: string, preset: MeshQuality, currentStudy?: Study, displayModel?: DisplayModel, onProgress?: (message: string) => void): Promise<{ study: Study; message: string }> {
+  // Experimental in-browser gmsh-wasm meshing (VITE_WASM_MESHING=1). Returns
+  // null when disabled or when the geometry has no wasm-meshable source, and
+  // falls through to the existing server/preset-estimate path on failure.
+  if (currentStudy) {
+    try {
+      const presetStudy: Study = { ...currentStudy, meshSettings: { ...currentStudy.meshSettings, preset } };
+      const geometry = cloudGeometrySourceForStudy(presetStudy, displayModel);
+      const wasmMeshed = await generateWasmMeshForStudy({
+        preset,
+        study: presetStudy,
+        displayModel,
+        geometry: geometry ? geometryWithMeshPreset(geometry, presetStudy) : null,
+        meshSizeMm: CLOUD_PROCEDURAL_MESH_SIZE_MM[preset] ?? CLOUD_PROCEDURAL_MESH_SIZE_MM.medium,
+        onProgress
+      });
+      if (wasmMeshed) return wasmMeshed;
+    } catch (error) {
+      onProgress?.(`In-browser meshing failed (${messageFromUnknownError(error) || "unknown error"}). Falling back to preset estimates.`);
+    }
+  }
   return fetchJsonWithFallback(
     `/api/studies/${studyId}/mesh`,
     {
