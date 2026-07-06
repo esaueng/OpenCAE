@@ -3,10 +3,14 @@ import { solverSurfaceMeshFromModel } from "@opencae/core";
 import { solveCoreStatic } from "@opencae/solver-cpu";
 import type { DisplayModel, Study } from "@opencae/schema";
 import {
+  autoSolverBackend,
   bracketMeshSizeMmForPreset,
   buildOpenCaeCoreCloudModelForStudy,
   cloudGeometrySourceForStudy,
   displayDirectionToSolverFrame,
+  explicitSolverBackend,
+  openCaeCoreEligibility,
+  resolveSolverBackend,
   studyForCoreCloudGeometryDispatch,
   trySolveOpenCaeCoreStudy
 } from "./index";
@@ -265,3 +269,147 @@ describe("local core solve mesh statistics", () => {
     expect(stats!.elements).toBe(23 * 3 * 3 * 6);
   });
 });
+
+describe("per-model solver backend resolution", () => {
+  function autoStudy(overrides: Partial<Study> = {}): Study {
+    return studyFixture({ solverSettings: {}, ...overrides });
+  }
+
+  function actualMeshSettings(): Study["meshSettings"] {
+    return {
+      preset: "medium",
+      status: "complete",
+      meshRef: "project-1/mesh/core-volume-model.json",
+      summary: {
+        nodes: 4,
+        elements: 1,
+        warnings: [],
+        source: "actual_volume_mesh",
+        artifacts: {
+          meshConnectivity: { connectedComponents: 1 },
+          actualCoreModel: { model: actualCoreModelFixture() }
+        }
+      }
+    } as Study["meshSettings"];
+  }
+
+  test("treats unset, auto, legacy, and unknown backend values as no explicit choice", () => {
+    for (const backend of [undefined, "auto", "cloudflare_fea", "opencae_core", "local_detailed", "mystery_backend"]) {
+      const study = studyFixture({ solverSettings: { backend } as unknown as Study["solverSettings"] });
+      expect(explicitSolverBackend(study), `backend=${String(backend)}`).toBeNull();
+      expect(resolveSolverBackend(study, cantileverDisplayModel()).source, `backend=${String(backend)}`).toBe("auto");
+    }
+    expect(explicitSolverBackend({ solverSettings: { backend: "opencae_core_cloud" } })).toBe("opencae_core_cloud");
+    expect(explicitSolverBackend({ solverSettings: { backend: "opencae_core_local" } })).toBe("opencae_core_local");
+  });
+
+  test("auto routes eligible simple block studies to the local browser backend", () => {
+    const study = autoStudy();
+    expect(openCaeCoreEligibility(study, cantileverDisplayModel()).ok).toBe(true);
+    expect(resolveSolverBackend(study, cantileverDisplayModel())).toEqual({
+      backend: "opencae_core_local",
+      source: "auto"
+    });
+  });
+
+  test("auto routes complex geometry without a local mesh artifact to the cloud", () => {
+    const study = autoStudy();
+    expect(openCaeCoreEligibility(study, bracketDisplayModelFixture()).ok).toBe(false);
+    expect(resolveSolverBackend(study, bracketDisplayModelFixture())).toEqual({
+      backend: "opencae_core_cloud",
+      source: "auto"
+    });
+  });
+
+  test("auto routes complex geometry with an actual Core volume mesh artifact locally", () => {
+    const study = autoStudy({ meshSettings: actualMeshSettings() });
+    expect(openCaeCoreEligibility(study, bracketDisplayModelFixture()).ok).toBe(true);
+    expect(resolveSolverBackend(study, bracketDisplayModelFixture())).toEqual({
+      backend: "opencae_core_local",
+      source: "auto"
+    });
+  });
+
+  test("an explicit cloud choice wins even when the study is locally eligible", () => {
+    const study = studyFixture({ solverSettings: { backend: "opencae_core_cloud" } });
+    expect(openCaeCoreEligibility(study, cantileverDisplayModel()).ok).toBe(true);
+    expect(resolveSolverBackend(study, cantileverDisplayModel())).toEqual({
+      backend: "opencae_core_cloud",
+      source: "explicit"
+    });
+  });
+
+  test("an explicit local choice keeps its honest hard error for ineligible models", () => {
+    const study = studyFixture({ solverSettings: { backend: "opencae_core_local" } });
+    expect(resolveSolverBackend(study, bracketDisplayModelFixture())).toEqual({
+      backend: "opencae_core_local",
+      source: "explicit"
+    });
+    const outcome = trySolveOpenCaeCoreStudy({ study, runId: "run-explicit-local", displayModel: bracketDisplayModelFixture() });
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) throw new Error("Explicit local + ineligible must keep failing hard.");
+    expect(outcome.reason).toMatch(/actual Core volume mesh|OpenCAE Core Cloud/i);
+  });
+
+  test("autoSolverBackend mirrors eligibility for UI labels", () => {
+    expect(autoSolverBackend(autoStudy(), cantileverDisplayModel())).toBe("opencae_core_local");
+    expect(autoSolverBackend(autoStudy(), bracketDisplayModelFixture())).toBe("opencae_core_cloud");
+  });
+});
+
+function actualCoreModelFixture() {
+  return {
+    schema: "opencae.model" as const,
+    schemaVersion: "0.2.0" as const,
+    nodes: { coordinates: [0, 0, 0, 0.04, 0, 0, 0, 0.04, 0, 0, 0, 0.04] },
+    materials: [{
+      name: "mat-aluminum-6061",
+      type: "isotropicLinearElastic" as const,
+      youngModulus: 68_900_000_000,
+      poissonRatio: 0.33,
+      yieldStrength: 276_000_000,
+      density: 2700
+    }],
+    elementBlocks: [{ name: "actual-volume", type: "Tet4" as const, material: "mat-aluminum-6061", connectivity: [0, 1, 2, 3] }],
+    surfaceFacets: [
+      {
+        id: 0,
+        element: 0,
+        elementFace: 1,
+        nodes: [0, 3, 2],
+        area: 0.0008,
+        normal: [-1, 0, 0] as [number, number, number],
+        center: [0, 0.04 / 3, 0.04 / 3] as [number, number, number],
+        sourceSelectionRef: "selection-fixed-face",
+        sourceFaceId: "face-base-left"
+      },
+      {
+        id: 1,
+        element: 0,
+        elementFace: 0,
+        nodes: [1, 2, 3],
+        area: 0.0008 * Math.sqrt(3),
+        normal: [1 / Math.sqrt(3), 1 / Math.sqrt(3), 1 / Math.sqrt(3)] as [number, number, number],
+        center: [0.04 / 3, 0.04 / 3, 0.04 / 3] as [number, number, number],
+        sourceSelectionRef: "selection-load-face",
+        sourceFaceId: "face-load-top"
+      }
+    ],
+    surfaceSets: [],
+    nodeSets: [
+      { name: "fixedNodes", nodes: [0, 1, 2] },
+      { name: "loadNodes", nodes: [3] }
+    ],
+    elementSets: [{ name: "allElements", elements: [0] }],
+    boundaryConditions: [{ name: "fixedSupport", type: "fixed" as const, nodeSet: "fixedNodes", components: ["x" as const, "y" as const, "z" as const] }],
+    loads: [{ name: "appliedForce", type: "nodalForce" as const, nodeSet: "loadNodes", vector: [0, -500, 0] as [number, number, number] }],
+    steps: [{ name: "loadStep", type: "staticLinear" as const, boundaryConditions: ["fixedSupport"], loads: ["appliedForce"] }],
+    coordinateSystem: { solverUnits: "m-N-s-Pa" as const, renderCoordinateSpace: "solver" },
+    meshProvenance: {
+      kind: "opencae_core_fea" as const,
+      solver: "opencae-core-sparse-tet",
+      resultSource: "computed" as const,
+      meshSource: "actual_volume_mesh"
+    }
+  };
+}
