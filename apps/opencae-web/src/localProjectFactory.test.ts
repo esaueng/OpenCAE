@@ -84,6 +84,30 @@ describe("local project factory workflow", () => {
     expect(() => openLocalProjectPayload({ project: { id: "broken" } })).toThrow("The selected file is not a valid OpenCAE project JSON.");
   });
 
+  test("notes the migration once when a loaded study carried the retired cloud backend", async () => {
+    const sample = await createLocalSampleProject("cantilever", "static_stress", "2026-04-28T12:00:00.000Z");
+    const cloudProject = {
+      ...sample.project,
+      studies: sample.project.studies.map((studyValue) => ({
+        ...studyValue,
+        solverSettings: { ...studyValue.solverSettings, backend: "opencae_core_cloud" }
+      }))
+    };
+
+    const response = openLocalProjectPayload({ project: cloudProject });
+
+    // Honest, not silent: the raw payload carried the retired cloud pin, the
+    // parsed study is normalized to auto/local, and the run log says why.
+    expect(response.message).toContain("opened from local file.");
+    expect(response.message).toContain("retired OpenCAE Core Cloud backend");
+    expect(response.message).toContain("run locally in your browser");
+    expect(response.project.studies[0]?.solverSettings.backend).not.toBe("opencae_core_cloud");
+
+    // Projects without the retired pin stay note-free.
+    const clean = openLocalProjectPayload({ project: sample.project });
+    expect(clean.message).not.toContain("retired OpenCAE Core Cloud backend");
+  });
+
   test("ignores crafted display models with malformed faces instead of crashing face selection", () => {
     const blank = createLocalBlankProject("2026-04-28T12:00:00.000Z").project;
     const response = openLocalProjectPayload({

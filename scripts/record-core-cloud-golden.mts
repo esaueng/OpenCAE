@@ -1,10 +1,13 @@
 /**
  * Records golden OpenCAE Core Cloud solve fixtures for the built-in sample projects.
  *
- * The fixtures freeze the DEPLOYED runner's exact request/response contract so the
- * local (in-browser) solve pipeline can be compared against it bit-for-bit. Run a
- * pristine runner built from the pinned production opencae-core ref (see
- * services/opencae-core-cloud/OPENCAE_CORE_REF and
+ * PERMANENT KEEPER after the cloud retirement (B4b/B5, 2026-07): the fixtures
+ * freeze the RETIRED cloud runner's exact request/response contract so the
+ * local (in-browser) solve pipeline can be compared against it bit-for-bit
+ * (libs/opencae-solve-pipeline/src/goldenParity.test.ts). Re-record only if
+ * the frozen contract must be regenerated: build the runner from the SIBLING
+ * opencae-core repo (services/opencae-core-cloud there — this repo's mirror
+ * was deleted in B4b) at the ref recorded in the fixtures' meta.coreRef (see
  * apps/opencae-web/src/testdata/core-cloud-golden/README.md), then:
  *
  *   CORE_CLOUD_GOLDEN_URL=http://127.0.0.1:8080 \
@@ -12,11 +15,9 @@
  *   pnpm exec tsx scripts/record-core-cloud-golden.mts
  *
  * The request builder below is a frozen copy of the web app's retired
- * openCaeCoreCloudSolveRequest() (client cloud solves were removed in B4a;
- * this recording tool is runner-contract infrastructure and keeps the exact
- * request shape the deployed runner accepts on /solve until B4b decides the
- * runner's fate). It is built from the same @opencae/core-adapter pieces the
- * production path used.
+ * openCaeCoreCloudSolveRequest() (client cloud solves were removed in B4a).
+ * It is built from the same @opencae/core-adapter pieces the production path
+ * used, and is intentionally exempt from the cloud-retirement guard test.
  */
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -109,8 +110,11 @@ function openCaeCoreCloudSolveRequest(runId: string, study: Study, displayModel:
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const RUNNER_URL = process.env.CORE_CLOUD_GOLDEN_URL ?? "http://127.0.0.1:8080";
 const API_KEY = process.env.CORE_CLOUD_API_KEY ?? "golden-local";
+// The recorded meta.coreRef defaults to the repo-root OPENCAE_CORE_REF pin
+// (relocated from the deleted services/opencae-core-cloud mirror in B4b);
+// override with CORE_CLOUD_GOLDEN_CORE_REF when recording from another ref.
 const CORE_REF = process.env.CORE_CLOUD_GOLDEN_CORE_REF
-  ?? readFileSync(resolve(scriptDir, "../services/opencae-core-cloud/OPENCAE_CORE_REF"), "utf8").trim();
+  ?? readFileSync(resolve(scriptDir, "../OPENCAE_CORE_REF"), "utf8").trim();
 // Fixed timestamp keeps createdAt/updatedAt/run timestamps in requests deterministic.
 const FIXED_NOW = "2026-07-05T00:00:00.000Z";
 

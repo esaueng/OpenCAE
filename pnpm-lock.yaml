@@ -10,10 +10,6 @@ overrides:
 importers:
 
   .:
-    dependencies:
-      '@cloudflare/containers':
-        specifier: ^0.3.3
-        version: 0.3.3
     devDependencies:
       concurrently:
         specifier: ^9.1.2
@@ -120,9 +116,6 @@ importers:
 
   apps/opencae-web:
     dependencies:
-      '@cloudflare/containers':
-        specifier: ^0.3.3
-        version: 0.3.3
       '@opencae/core':
         specifier: workspace:*
         version: link:../../../opencae-core/packages/core
@@ -331,28 +324,6 @@ importers:
       '@opencae/storage':
         specifier: workspace:*
         version: link:../../libs/opencae-storage
-
-  services/opencae-core-cloud:
-    dependencies:
-      '@opencae/core':
-        specifier: workspace:*
-        version: link:../../../opencae-core/packages/core
-      '@opencae/solver-cpu':
-        specifier: workspace:*
-        version: link:../../../opencae-core/packages/solver-cpu
-    devDependencies:
-      '@opencae/examples':
-        specifier: workspace:*
-        version: link:../../../opencae-core/packages/examples
-      '@types/node':
-        specifier: ^22.10.5
-        version: 22.19.17
-      esbuild:
-        specifier: ^0.27.7
-        version: 0.27.7
-      typescript:
-        specifier: ^5.7.3
-        version: 5.9.3
 
   services/opencae-mesh-service:
     dependencies:
@@ -973,9 +944,6 @@ packages:
   '@babel/types@7.29.7':
     resolution: {integrity: sha512-4zBIxpPzowiZpusoFkyGVwakdRJUyuH5PxQ/PrqghfdFWWasvnCdPfQXHrenDai+gyLARulZjZowCOj6fjT4pA==}
     engines: {node: '>=6.9.0'}
-
-  '@cloudflare/containers@0.3.3':
-    resolution: {integrity: sha512-ZSXmArCoo5bVTp8pGAJdl5WKmwtZDcffJqr4JcZEbSmMIFjU+AlBqgysuxXMgu03Rp239cOdqerbjK7H0K2krQ==}
 
   '@cloudflare/kv-asset-handler@0.4.2':
     resolution: {integrity: sha512-SIOD2DxrRRwQ+jgzlXCqoEFiKOFqaPjhnNTGKXSRLvp1HiOvapLaFG2kEr9dYQTYe8rKrd9uvDUzmAITeNyaHQ==}
@@ -4563,8 +4531,6 @@ snapshots:
     dependencies:
       '@babel/helper-string-parser': 7.29.7
       '@babel/helper-validator-identifier': 7.29.7
-
-  '@cloudflare/containers@0.3.3': {}
 
   '@cloudflare/kv-asset-handler@0.4.2': {}
 

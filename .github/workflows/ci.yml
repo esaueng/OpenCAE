@@ -38,9 +38,6 @@ jobs:
       - name: Verify Cloudflare config
         run: node scripts/verify-cloudflare-config.mjs
 
-      - name: Verify runner version
-        run: node scripts/verify-runner-version.mjs
-
       - name: Type check
         run: pnpm typecheck
 
