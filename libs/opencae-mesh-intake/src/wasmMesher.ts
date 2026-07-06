@@ -31,6 +31,8 @@ export type GeoMeshResult = {
 export type StepMeshResult = GeoMeshResult & {
   /** Which 3D algorithm produced the mesh: gmsh default Delaunay, or the Frontal fallback. */
   algorithm3D: "delaunay" | "frontal";
+  /** Min signed inverse condition number over all volume elements (gmsh minSICN), when cheaply available. */
+  qualityMinSICN?: number;
 };
 
 /**
@@ -127,16 +129,69 @@ function meshStepSession(
       }
       gmsh.model.occ.importShapes("/in.step");
       gmsh.model.occ.synchronize();
+      // One physical group per geometric surface so the msh2 output keeps the
+      // boundary triangles grouped per B-rep surface (`surface_<tag>` sets in
+      // the parser) — the input the A-M3 facet->face attribution votes over.
+      // Without physical groups gmsh writes physicalTag 0 for every element
+      // and the parser collapses the whole boundary into one set.
+      addPerSurfacePhysicalGroups(gmsh);
     });
     timePhaseSync(timings, options, "mesh2d", totalStart, () => gmsh.model.mesh.generate(2));
     timePhaseSync(timings, options, "mesh3d", totalStart, () => gmsh.model.mesh.generate(3));
     if (options.elementOrder === 2) {
       timePhaseSync(timings, options, "order2", totalStart, () => gmsh.model.mesh.setOrder(2));
     }
+    const qualityMinSICN = minSICNQuality(gmsh);
     const msh = timePhaseSync(timings, options, "write", totalStart, () => writeMshV2(gmsh));
-    return { msh, timings, algorithm3D };
+    return { msh, timings, algorithm3D, ...(qualityMinSICN !== undefined ? { qualityMinSICN } : {}) };
   } finally {
     safeFinalize(gmsh);
+  }
+}
+
+function addPerSurfacePhysicalGroups(gmsh: GmshApi): void {
+  for (const tag of entityTags(gmsh, 2)) {
+    const physical = gmsh.model.addPhysicalGroup(2, [tag], -1);
+    gmsh.model.setPhysicalName(2, physical, `surface_${tag}`);
+  }
+  // Volume group so gmsh still writes the volume elements once physical
+  // groups exist (only physical entities are saved by default).
+  const volumeTags = entityTags(gmsh, 3);
+  if (volumeTags.length > 0) {
+    const physical = gmsh.model.addPhysicalGroup(3, volumeTags, -1);
+    gmsh.model.setPhysicalName(3, physical, "solid");
+  }
+}
+
+function entityTags(gmsh: GmshApi, dimension: number): number[] {
+  const flat = gmsh.model.getEntities(dimension).dimTags;
+  const tags: number[] = [];
+  for (let index = 1; index < flat.length; index += 2) {
+    tags.push(flat[index]!);
+  }
+  return tags;
+}
+
+/**
+ * Min signed inverse condition number across all volume elements, measured on
+ * the final (possibly order-elevated) mesh. Best effort: quality queries are
+ * diagnostics only, so any binding hiccup degrades to undefined.
+ */
+function minSICNQuality(gmsh: GmshApi): number | undefined {
+  try {
+    let min: number | undefined;
+    for (const typeCode of [4, 11]) {
+      const elements = gmsh.model.mesh.getElementsByType(typeCode);
+      const tags = Array.from(elements.elementTags ?? []);
+      if (tags.length === 0) continue;
+      const qualities = gmsh.model.mesh.getElementQualities(tags, "minSICN").elementsQuality;
+      for (const quality of qualities) {
+        if (min === undefined || quality < min) min = quality;
+      }
+    }
+    return min;
+  } catch {
+    return undefined;
   }
 }
 

@@ -291,8 +291,17 @@ export function openLocalProjectPayload(payload: unknown): SampleProjectResponse
   };
 }
 
-export function createLocalUploadResponse(project: Project, embeddedModel: EmbeddedModelFile, now = new Date().toISOString()): SampleProjectResponse {
-  const displayModel = uploadedDisplayModelFor(embeddedModel.filename, embeddedModel.contentBase64);
+export type UploadDisplayOptions = {
+  /**
+   * Real B-rep faces derived from the STEP face registry (plan A-M3). When
+   * present for a native CAD upload they replace the generic box-face
+   * placeholders, so supports/loads target real faces.
+   */
+  stepDisplayFaces?: DisplayModel["faces"];
+};
+
+export function createLocalUploadResponse(project: Project, embeddedModel: EmbeddedModelFile, now = new Date().toISOString(), options: UploadDisplayOptions = {}): SampleProjectResponse {
+  const displayModel = uploadedDisplayModelFor(embeddedModel.filename, embeddedModel.contentBase64, options);
   const artifactKey = `${project.id}/geometry/uploaded-display.json`;
   const nextProject = attachUploadedModelToProject(project, {
     geometryId: `geom-upload-${newLocalId()}`,
@@ -378,7 +387,7 @@ function structuredBlockGeometryForSample(dimensions: DisplayModel["dimensions"]
   };
 }
 
-export function uploadedDisplayModelFor(filename: string, contentBase64?: string): DisplayModel {
+export function uploadedDisplayModelFor(filename: string, contentBase64?: string, options: UploadDisplayOptions = {}): DisplayModel {
   const modelName = baseNameForModel(filename);
   const nativeFormat = nativeCadFormatForFilename(filename);
   const previewFormat = previewFormatForFilename(filename);
@@ -391,7 +400,7 @@ export function uploadedDisplayModelFor(filename: string, contentBase64?: string
       name: `${modelName} imported body`,
       bodyCount: 1,
       dimensions,
-      faces: uploadedBoxFaces(),
+      faces: options.stepDisplayFaces?.length ? options.stepDisplayFaces : uploadedBoxFaces(),
       nativeCad: {
         format: nativeFormat,
         filename,

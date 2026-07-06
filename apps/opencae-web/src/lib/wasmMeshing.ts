@@ -84,6 +84,7 @@ async function meshWorkerRun(options: WasmMeshOptions): Promise<WasmMeshStudyRes
   let meshedPacked: Awaited<ReturnType<MeshWorkerClientModule["meshGeoScriptInWorker"]>>;
   let elementOrder: 1 | 2;
   let algorithmNote: string | undefined;
+  let attributionNote: string | undefined;
 
   if (geometry.kind === "sample_procedural" && geometry.sampleId === "bracket") {
     // Mirrors the cloud dispatch override in openCaeCoreCloudSolveRequest():
@@ -101,18 +102,33 @@ async function meshWorkerRun(options: WasmMeshOptions): Promise<WasmMeshStudyRes
     );
   } else if (geometry.kind === "uploaded_cad" && geometry.format === "step" && geometry.contentBase64) {
     elementOrder = intake.requestedElementOrder(study.solverSettings as Record<string, unknown> | undefined);
+    // A-M3: send the STEP display tessellation + faceIds so the worker can
+    // stamp every boundary facet's sourceFaceId (facet -> B-rep face
+    // attribution). Meshing proceeds without it if the registry fails.
+    let attribution: import("@opencae/mesh-intake").StepAttributionTessellation | undefined;
+    try {
+      const stepFaces = await import("../stepFaces");
+      const registry = await stepFaces.stepFaceRegistryFromBase64(geometry.contentBase64);
+      attribution = stepFaces.stepAttributionForRegistry(registry);
+    } catch {
+      attribution = undefined;
+    }
     const stepResult = await client.meshStepFileInWorker(
       {
         stepContent: base64ToArrayBuffer(geometry.contentBase64),
         elementOrder,
         units: geometry.units ?? "mm",
-        meshSizeMm: options.meshSizeMm
+        meshSizeMm: options.meshSizeMm,
+        attribution
       },
       onWorkerProgress
     );
     meshedPacked = stepResult;
     if (stepResult.algorithm3D === "frontal") {
       algorithmNote = "Delaunay 3D meshing failed in the browser mesher; the Frontal algorithm produced this mesh.";
+    }
+    if (!attribution) {
+      attributionNote = "STEP face registry unavailable; selections fall back to geometric matching.";
     }
   } else {
     // Structured blocks and the cantilever/beam samples keep their existing
@@ -125,6 +141,7 @@ async function meshWorkerRun(options: WasmMeshOptions): Promise<WasmMeshStudyRes
   // The mirrored builder applies study load directions verbatim in the solver
   // frame (same contract as the cloud container), so hand it a solver-frame study.
   const dispatchStudy = studyForCoreCloudGeometryDispatch(study, displayModel);
+  const mappingDiagnostics: import("@opencae/mesh-intake").SelectionMappingDiagnostic[] = [];
   const model = intake.buildCoreModelFromCloudMesh({
     study: {
       id: dispatchStudy.id,
@@ -138,7 +155,8 @@ async function meshWorkerRun(options: WasmMeshOptions): Promise<WasmMeshStudyRes
     displayModel,
     volumeMesh: artifact,
     analysisType,
-    solverSettings: { ...(study.solverSettings as Record<string, unknown> | undefined ?? {}), elementOrder }
+    solverSettings: { ...(study.solverSettings as Record<string, unknown> | undefined ?? {}), elementOrder },
+    mappingDiagnostics
   });
 
   const nodes = artifact.metadata.nodeCount;
@@ -147,14 +165,18 @@ async function meshWorkerRun(options: WasmMeshOptions): Promise<WasmMeshStudyRes
   const summary: NonNullable<Study["meshSettings"]["summary"]> = {
     nodes,
     elements,
-    warnings: algorithmNote ? [algorithmNote] : [],
+    warnings: [algorithmNote, attributionNote].filter((note): note is string => Boolean(note)),
     quality: preset,
     source: "wasm_gmsh",
     units: "m",
     solverCoordinateSpace: "solver",
     artifacts: {
       actualCoreModel: { model },
-      meshConnectivity: { connectedComponents: artifact.metadata.connectedComponentCount }
+      meshConnectivity: { connectedComponents: artifact.metadata.connectedComponentCount },
+      // A-M3 diagnostics: which mapSelectionToSurfaceSet branch resolved each
+      // selection. For STEP uploads with a healthy face registry this must be
+      // bySelection/byFace — never the geometric fallback.
+      ...(mappingDiagnostics.length ? { selectionMapping: mappingDiagnostics } : {})
     }
   };
 
