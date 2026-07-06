@@ -1,10 +1,45 @@
 // Mirrored from opencae-core@5fff277 services/opencae-core-cloud/src/types.ts — pure parsing only.
 // Upstream extraction into a shared package is planned (plan 016, A-M2). Do not diverge without syncing.
 //
-// Only the types needed by the pure msh parser are mirrored here; request/solve
-// payload types (CloudSolveRequest etc.) stay in the cloud service because they
-// pull in @opencae/solver-cpu, which the browser intake path must not depend on.
+// Only the types needed by the pure msh parser and the pure model builder
+// (coreModelFromMesh.ts) are mirrored here; request/solve payload types
+// (CloudSolveRequest etc.) stay in the cloud service because they pull in
+// @opencae/solver-cpu, which the browser intake path must not depend on.
 import type { ElementType, SurfaceFacetJson, SurfaceSetJson } from "@opencae/core";
+
+export type CloudAnalysisType = "static_stress" | "dynamic_structural";
+
+export type CloudStudyLike = {
+  id?: string;
+  type?: CloudAnalysisType;
+  materialAssignments?: Array<{
+    materialId?: string;
+    parameters?: Record<string, unknown>;
+  }>;
+  namedSelections?: Array<{
+    id?: string;
+    name?: string;
+    entityType?: string;
+    geometryRefs?: Array<{
+      entityType?: string;
+      entityId?: string;
+      label?: string;
+    }>;
+  }>;
+  constraints?: Array<{
+    id?: string;
+    type?: string;
+    selectionRef?: string;
+    parameters?: Record<string, unknown>;
+  }>;
+  loads?: Array<{
+    id?: string;
+    type?: string;
+    selectionRef?: string;
+    parameters?: Record<string, unknown>;
+  }>;
+  solverSettings?: Record<string, unknown>;
+};
 
 export type SourceSelectionMetadata = {
   sourceSelectionRef?: string;

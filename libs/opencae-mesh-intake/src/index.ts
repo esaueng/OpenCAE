@@ -11,6 +11,12 @@ export {
   bracketGeometrySourceMetadata,
   type BracketGeometryDescriptor
 } from "./bracketGeo";
+export { buildCoreModelFromCloudMesh, mapSelectionToSurfaceSet } from "./coreModelFromMesh";
+export {
+  DEFAULT_CLOUD_ELEMENT_ORDER,
+  elevateVolumeMeshArtifactToTet10,
+  requestedElementOrder
+} from "./elevateArtifact";
 export {
   generateBoxWithBoreStep,
   loadGmshWasm,
@@ -25,4 +31,4 @@ export {
   type StepMeshResult,
   type StepMeshWasmOptions
 } from "./wasmMesher";
-export type { CloudVolumeElement, CoreVolumeMeshArtifact, SourceSelectionMetadata } from "./types";
+export type { CloudAnalysisType, CloudStudyLike, CloudVolumeElement, CoreVolumeMeshArtifact, SourceSelectionMetadata } from "./types";

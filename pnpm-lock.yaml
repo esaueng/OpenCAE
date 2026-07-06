@@ -228,6 +228,16 @@ importers:
       '@opencae/core':
         specifier: workspace:*
         version: link:../../../opencae-core/packages/core
+    devDependencies:
+      '@opencae/core-adapter':
+        specifier: workspace:*
+        version: link:../opencae-core-adapter
+      '@opencae/schema':
+        specifier: workspace:*
+        version: link:../opencae-schema
+      '@opencae/solver-cpu':
+        specifier: workspace:*
+        version: link:../../../opencae-core/packages/solver-cpu
 
   libs/opencae-schema:
     dependencies:

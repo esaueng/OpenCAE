@@ -10,5 +10,10 @@
     "@loumalouomega/gmsh-wasm": "0.1.2",
     "@opencae/core": "workspace:*"
   },
+  "devDependencies": {
+    "@opencae/core-adapter": "workspace:*",
+    "@opencae/schema": "workspace:*",
+    "@opencae/solver-cpu": "workspace:*"
+  },
   "license": "Apache-2.0"
 }
