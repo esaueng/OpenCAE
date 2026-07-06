@@ -560,7 +560,9 @@ export function studyForCoreCloudGeometrySolve(study: Study, displayModel: Displ
   return studyForCoreCloudGeometryDispatch(study, displayModel);
 }
 
-function openCaeCoreCloudSolveRequest(runId: string, study: Study, displayModel: DisplayModel | undefined) {
+// Exported so scripts/record-core-cloud-golden.mts records fixtures with the exact
+// production request builder (see apps/opencae-web/src/testdata/core-cloud-golden/).
+export function openCaeCoreCloudSolveRequest(runId: string, study: Study, displayModel: DisplayModel | undefined) {
   const actualMesh = hasActualCoreVolumeMesh(study, displayModel);
   const geometry = actualMesh ? null : cloudGeometrySourceForStudy(study, displayModel);
   if (!actualMesh && !geometry && isComplexGeometry(displayModel, study)) {
