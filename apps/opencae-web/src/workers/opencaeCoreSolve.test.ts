@@ -4,13 +4,13 @@ import { bracketDemoProject, bracketDisplayModel } from "@opencae/db/sample-data
 import { validateModelJson } from "@opencae/core";
 import {
   buildOpenCaeCoreCloudModelForStudy,
-  cloudGeometrySourceForStudy,
+  geometrySourceForStudy,
   hasActualCoreVolumeMesh,
-  hasCloudMeshableGeometry,
+  hasMeshableGeometrySource,
   isComplexGeometry,
   isSimpleBlockLikeDisplayModel,
   normalizeSolverBackend,
-  OPENCAE_CORE_CLOUD_GEOMETRY_REQUIRED_REASON,
+  OPENCAE_CORE_MESH_REQUIRED_REASON,
   openCaeCoreEligibility,
   trySolveOpenCaeCoreStudy
 } from "./opencaeCoreSolve";
@@ -90,15 +90,15 @@ describe("OpenCAE Core browser solver adapter", () => {
     expect(hasActualCoreVolumeMesh(bracketStudy, bracketDisplayModel)).toBe(false);
     expect(eligibility.ok).toBe(false);
     if (eligibility.ok) throw new Error("Bracket should not be Core-preview eligible.");
-    expect(eligibility.reason).toMatch(/actual Core volume mesh|OpenCAE Core Cloud/i);
+    expect(eligibility.reason).toMatch(/needs a volume mesh|in-browser meshing is unavailable/i);
   });
 
   test("treats the Bracket Demo as cloud-meshable without an actual Core volume mesh", () => {
     const bracketStudy = bracketDemoProject.studies[0]!;
-    const geometry = cloudGeometrySourceForStudy(bracketStudy, bracketDisplayModel);
+    const geometry = geometrySourceForStudy(bracketStudy, bracketDisplayModel);
 
     expect(hasActualCoreVolumeMesh(bracketStudy, bracketDisplayModel)).toBe(false);
-    expect(hasCloudMeshableGeometry(bracketStudy, bracketDisplayModel)).toBe(true);
+    expect(hasMeshableGeometrySource(bracketStudy, bracketDisplayModel)).toBe(true);
     expect(geometry).toMatchObject({
       kind: "sample_procedural",
       sampleId: "bracket",
@@ -319,7 +319,7 @@ describe("OpenCAE Core browser solver adapter", () => {
   });
 
   test("does not build a local Core Cloud model for bracket geometry that should be meshed in the container", () => {
-    expect(() => buildOpenCaeCoreCloudModelForStudy(bracketDemoProject.studies[0]!, bracketDisplayModel)).toThrow(/dispatch this complex geometry source/i);
+    expect(() => buildOpenCaeCoreCloudModelForStudy(bracketDemoProject.studies[0]!, bracketDisplayModel)).toThrow(/must be meshed into a Core volume mesh before solving/i);
   });
 
   test("fails complex Core Cloud model building when no geometry source exists", () => {
@@ -338,8 +338,8 @@ describe("OpenCAE Core browser solver adapter", () => {
     } satisfies DisplayModel;
 
     expect(isComplexGeometry(complexDisplayModel, staticStudy)).toBe(true);
-    expect(hasCloudMeshableGeometry(staticStudy, complexDisplayModel)).toBe(false);
-    expect(() => buildOpenCaeCoreCloudModelForStudy(staticStudy, complexDisplayModel)).toThrow(OPENCAE_CORE_CLOUD_GEOMETRY_REQUIRED_REASON);
+    expect(hasMeshableGeometrySource(staticStudy, complexDisplayModel)).toBe(false);
+    expect(() => buildOpenCaeCoreCloudModelForStudy(staticStudy, complexDisplayModel)).toThrow(OPENCAE_CORE_MESH_REQUIRED_REASON);
   });
 });
 

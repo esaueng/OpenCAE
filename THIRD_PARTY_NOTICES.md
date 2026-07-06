@@ -20,6 +20,38 @@ not change the license of OpenCAE source code.
   - Preserve copyright and license notices.
   - Ensure users can receive, inspect, and replace or modify LGPL-covered components as required by the applicable LGPL terms.
 
+## Meshing Components
+
+### Gmsh
+
+- Purpose: finite-element mesh generation (in-browser via WebAssembly).
+- Authors: Christophe Geuzaine and Jean-François Remacle, https://gmsh.info
+- License: GPL-2.0-or-later (with a linking exception for Netgen, METIS,
+  OpenCASCADE and ParaView). A separate commercial license is available from
+  the Gmsh authors.
+
+### @loumalouomega/gmsh-wasm
+
+- Purpose: WebAssembly packaging of the Gmsh C API (geometry + meshing, no
+  GUI) used by OpenCAE's in-browser mesh worker.
+- Copyright (C) 2026 Vicente Mataix Ferrándiz and gmsh-wasm contributors.
+- Source: https://github.com/loumalouomega/GMSH-JS
+- License: GPL-2.0-or-later (inherited from Gmsh, which is statically linked
+  into the distributed `.wasm`).
+
+### OpenCASCADE Technology (statically linked inside gmsh-wasm)
+
+- Purpose: CAD geometry kernel (`occ`) compiled into `gmsh-core.wasm`.
+- Source: https://dev.opencascade.org
+- License: LGPL-2.1 with the OCCT exception.
+
+Because the default web build distributes these components to browsers, the
+combined OpenCAE web-application bundle is distributed under GPLv3-compatible
+terms. OpenCAE's own source code remains Apache-2.0. See
+[`docs/licensing-gmsh-wasm.md`](docs/licensing-gmsh-wasm.md) for the full
+rationale, the 2026-07-06 stay-open decision, source-availability pointers,
+and the GPL-free opt-out build (`VITE_WASM_MESHING=0`).
+
 ## JavaScript and TypeScript Dependencies
 
 OpenCAE workspace packages declare their own source code as Apache-2.0, but

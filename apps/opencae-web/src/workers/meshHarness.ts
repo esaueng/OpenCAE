@@ -1,6 +1,7 @@
 // Browser proof harness for the gmsh-wasm meshing worker (plan A-M2).
-// Loaded (dynamically) from main.tsx only when VITE_WASM_MESHING=1, so default
-// builds carry none of this. It exposes window.__opencaeMeshProof so a headless
+// Loaded (dynamically) from main.tsx by default since A-M4 (its own lazy
+// chunk; VITE_WASM_MESHING=0 opt-out builds carry none of this). It exposes
+// window.__opencaeMeshProof so a headless
 // browser can drive a real end-to-end mesh (worker -> gmsh-wasm -> parser ->
 // packed transfer -> core model build) and read structured evidence back.
 import {
@@ -204,19 +205,125 @@ async function runStepProof(): Promise<StepProofResult> {
   }
 }
 
+// A-M4: full mesh-then-solve run proof through the PRODUCTION run flow
+// (lib/api.runSimulation). Starts from a bracket study with NO stored mesh
+// artifact (preset-estimate summary), so the local run must wasm-mesh first
+// (real phase progress events in the run stream), then solve, then produce
+// results labeled as a local browser solve.
+export type RunProofResult = {
+  ok: boolean;
+  error?: string;
+  runId?: string;
+  streamUrl?: string;
+  runSolverBackend?: string;
+  events?: Array<{ type: string; progress?: number; message: string }>;
+  sawMeshingEvents?: boolean;
+  sawSolveEvents?: boolean;
+  completed?: boolean;
+  meshedStudyStoredArtifact?: boolean;
+  results?: {
+    maxStress?: number;
+    maxStressUnits?: string;
+    reactionForce?: number;
+    provenanceSolver?: string;
+    provenanceRunnerVersion?: string;
+    provenanceResultSource?: string;
+    labeledLocal?: boolean;
+  };
+};
+
+async function runMeshThenSolveRunProof(): Promise<RunProofResult> {
+  try {
+    const [{ createLocalSampleProject }, api] = await Promise.all([
+      import("../localProjectFactory"),
+      import("../lib/api")
+    ]);
+    const sample = await createLocalSampleProject("bracket", "static_stress");
+    const baseStudy = sample.project.studies[0];
+    if (!baseStudy) return { ok: false, error: "bracket sample produced no study" };
+    // NO stored artifact: a completed mesh step whose summary is only a
+    // preset estimate — the run flow must mesh for real before solving.
+    const study = {
+      ...baseStudy,
+      meshSettings: {
+        preset: "medium" as const,
+        status: "complete" as const,
+        meshRef: `${baseStudy.projectId}/mesh/mesh-summary.json`,
+        summary: { nodes: 42381, elements: 26944, warnings: [], quality: "medium" as const, source: "preset_estimate" as const }
+      }
+    };
+
+    let meshedStudyStoredArtifact = false;
+    const response = await api.runSimulation(study.id, study, sample.displayModel, {
+      onStudyMeshed: (meshedStudy) => {
+        const artifacts = (meshedStudy.meshSettings.summary as { artifacts?: { actualCoreModel?: unknown } } | undefined)?.artifacts;
+        meshedStudyStoredArtifact = Boolean(artifacts?.actualCoreModel);
+      }
+    });
+
+    const events: Array<{ type: string; progress?: number; message: string }> = [];
+    const terminal = await new Promise<{ type: string; message: string }>((resolve) => {
+      const source = api.subscribeToRun(response.run.id, (event) => {
+        events.push({ type: event.type, progress: event.progress, message: event.message });
+        if (event.type === "complete" || event.type === "error" || event.type === "cancelled") {
+          source.close();
+          resolve({ type: event.type, message: event.message });
+        }
+      });
+    });
+
+    const completed = terminal.type === "complete";
+    const results = completed ? await api.getResults(response.run.id) : undefined;
+    const provenance = results?.summary.provenance as
+      | { solver?: string; runnerVersion?: string; resultSource?: string }
+      | undefined;
+    return {
+      ok: completed,
+      ...(completed ? {} : { error: `terminal=${terminal.type}: ${terminal.message}` }),
+      runId: response.run.id,
+      streamUrl: response.streamUrl,
+      runSolverBackend: (response.run as { solverBackend?: string }).solverBackend,
+      events,
+      sawMeshingEvents: events.some((event) => /meshing/i.test(event.message)),
+      sawSolveEvents: events.some((event) => /assembling|solving/i.test(event.message)),
+      completed,
+      meshedStudyStoredArtifact,
+      ...(results
+        ? {
+            results: {
+              maxStress: results.summary.maxStress,
+              maxStressUnits: results.summary.maxStressUnits,
+              reactionForce: results.summary.reactionForce,
+              provenanceSolver: provenance?.solver,
+              provenanceRunnerVersion: provenance?.runnerVersion,
+              provenanceResultSource: provenance?.resultSource,
+              // Local solves are marked by the browser runner stamp (the
+              // solver id keeps runner parity naming).
+              labeledLocal: Boolean(provenance?.runnerVersion?.startsWith("browser-"))
+            }
+          }
+        : {})
+    };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? `${error.message}\n${error.stack ?? ""}` : String(error) };
+  }
+}
+
 declare global {
   interface Window {
     __opencaeMeshProof?: {
       runBracket: typeof runBracketProof;
       runStep: typeof runStepProof;
-      /** Set once an auto-run (triggered by ?meshProof=1|step) finishes. */
+      runMeshThenSolve: typeof runMeshThenSolveRunProof;
+      /** Set once an auto-run (triggered by ?meshProof=1|step|run) finishes. */
       lastResult?: MeshProofResult;
       lastStepResult?: StepProofResult;
+      lastRunResult?: RunProofResult;
     };
   }
 }
 
-window.__opencaeMeshProof = { runBracket: runBracketProof, runStep: runStepProof };
+window.__opencaeMeshProof = { runBracket: runBracketProof, runStep: runStepProof, runMeshThenSolve: runMeshThenSolveRunProof };
 
 // ?meshProof=1 auto-runs the bracket proof, ?meshProof=step the STEP proof;
 // both mirror the outcome into document.title + console so dump-dom style
@@ -240,5 +347,15 @@ if (meshProofMode === "1") {
       : `STEPPROOF FAIL ${result.error.split("\n")[0]}`;
     document.title = title;
     console.log(`[meshProof:step] ${title}`, result);
+  });
+} else if (meshProofMode === "run") {
+  void runMeshThenSolveRunProof().then((result) => {
+    window.__opencaeMeshProof!.lastRunResult = result;
+    const title = result.ok
+      ? `RUNPROOF OK meshFirst=${result.sawMeshingEvents} solve=${result.sawSolveEvents} local=${result.results?.labeledLocal} ` +
+        `maxStress=${result.results?.maxStress?.toFixed(2)}${result.results?.maxStressUnits ?? ""}`
+      : `RUNPROOF FAIL ${(result.error ?? "unknown").split("\n")[0]}`;
+    document.title = title;
+    console.log(`[meshProof:run] ${title}`, result);
   });
 }

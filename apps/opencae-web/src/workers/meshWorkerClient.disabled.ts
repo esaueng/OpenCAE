@@ -15,7 +15,7 @@ import type {
 
 export type MeshProgressListener = (progress: { phase: string; elapsedMs: number }) => void;
 
-const DISABLED_MESSAGE = "In-browser wasm meshing is disabled in this build. Set VITE_WASM_MESHING=1 at build time to enable it.";
+const DISABLED_MESSAGE = "In-browser wasm meshing is disabled in this build (VITE_WASM_MESHING=0 opt-out). Rebuild without the opt-out to enable it.";
 
 export function wasmMeshingEnabled(): boolean {
   return false;

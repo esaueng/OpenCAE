@@ -5,8 +5,8 @@ import { createLocalBlankProject, createLocalSampleProject, createLocalUploadRes
 import type { SolveProgressEvent } from "@opencae/solve-pipeline";
 import { isCancelledSolveError, startLocalSolve } from "../workers/solveWorkerClient";
 import { loadLocalRunResults, saveLocalRunResults } from "./localResultsStore";
-import { generateWasmMeshForStudy } from "./wasmMeshing";
-import { buildOpenCaeCoreCloudModelForStudy, cloudGeometrySourceForStudy, hasActualCoreVolumeMesh, isComplexGeometry, normalizeSolverBackend, openCaeCoreEligibility, resolveSolverBackend, studyForCoreCloudGeometryDispatch, OPENCAE_CORE_CLOUD_GEOMETRY_REQUIRED_REASON, type NormalizedBrowserSolverBackend } from "../workers/opencaeCoreSolve";
+import { cancelWasmMeshing, canMeshStudyOnDemand, generateWasmMeshForStudy } from "./wasmMeshing";
+import { buildOpenCaeCoreCloudModelForStudy, geometrySourceForStudy, hasActualCoreVolumeMesh, isComplexGeometry, normalizeSolverBackend, openCaeCoreEligibility, resolveSolverBackend, studyForCoreCloudGeometryDispatch, OPENCAE_CORE_MESH_REQUIRED_REASON, type NormalizedBrowserSolverBackend } from "../workers/opencaeCoreSolve";
 
 export interface SampleProjectResponse {
   message?: string;
@@ -33,6 +33,12 @@ export interface ResultsResponse {
 export interface RunSimulationOptions {
   onRunStatus?: (message: string) => void;
   resultRenderBounds?: ResultRenderBounds | null;
+  /**
+   * Called when a run had to mesh its geometry first (A-M4 local-first
+   * meshing): receives the study with the freshly stored mesh artifact so the
+   * caller can persist it (same shape generateMesh returns).
+   */
+  onStudyMeshed?: (study: Study) => void;
 }
 
 const localResultsByRunId = new Map<string, ResultsResponse>();
@@ -140,8 +146,11 @@ function finishLocalRun(
  * assemble 0-30%, solve/frames 30-90% (stress recovery 85-90%), postprocess
  * 90-100%. estimatedRemainingMs is only emitted for dynamic frame integration,
  * where a per-frame pace is measurable; CG iteration counts admit no honest ETA.
+ *
+ * Runs that meshed first (A-M4) reserve 0-20% for real meshing phases, so
+ * their solve progress is compressed into offset..100 (progressOffset = 20).
  */
-function handleLocalSolveProgress(record: LocalRunRecord, progress: SolveProgressEvent): void {
+function handleLocalSolveProgress(record: LocalRunRecord, progress: SolveProgressEvent, progressOffset = 0): void {
   if (record.status !== "running") return;
   const fraction = progress.total > 0 ? Math.min(progress.completed / progress.total, 1) : 0;
   let percent: number;
@@ -174,7 +183,7 @@ function handleLocalSolveProgress(record: LocalRunRecord, progress: SolveProgres
   }
   emitLocalRunEvent(record, {
     type: "progress",
-    progress: percent,
+    progress: progressOffset + percent * (100 - progressOffset) / 100,
     message,
     ...(estimatedRemainingMs !== undefined ? { estimatedRemainingMs } : {})
   });
@@ -283,13 +292,13 @@ export async function uploadModel(projectId: string, file: File, currentProject?
 
 /**
  * Real B-rep faces for STEP uploads (plan A-M3), so supports/loads target
- * actual geometry instead of generic box-face placeholders. Gated behind
- * VITE_WASM_MESHING with the flag check outside the dynamic import so
- * flag-off builds tree-shake the whole path; any registry failure falls back
+ * actual geometry instead of generic box-face placeholders. On by default
+ * (A-M4) with the flag check outside the dynamic import so VITE_WASM_MESHING=0
+ * opt-out builds tree-shake the whole path; any registry failure falls back
  * to the legacy generic faces.
  */
 async function stepDisplayFacesForUpload(filename: string, contentBase64: string): Promise<DisplayModel["faces"] | undefined> {
-  if (import.meta.env.VITE_WASM_MESHING === "1") {
+  if (import.meta.env.VITE_WASM_MESHING !== "0") {
     const extension = filename.trim().split(".").pop()?.toLowerCase();
     if (extension !== "step" && extension !== "stp") return undefined;
     try {
@@ -326,23 +335,26 @@ export async function renameProject(projectId: string, name: string, currentProj
 }
 
 export async function generateMesh(studyId: string, preset: MeshQuality, currentStudy?: Study, displayModel?: DisplayModel, onProgress?: (message: string) => void): Promise<{ study: Study; message: string }> {
-  // Experimental in-browser gmsh-wasm meshing (VITE_WASM_MESHING=1). Returns
-  // null when disabled or when the geometry has no wasm-meshable source, and
-  // falls through to the existing server/preset-estimate path on failure.
+  // In-browser gmsh-wasm meshing (production default since A-M4). Returns
+  // null in opt-out builds or when the geometry has no wasm-meshable source,
+  // and falls through to the existing preset-estimate path on transient
+  // failure. Quality-gate rejections (MeshQualityError) are NOT transient:
+  // they surface to the user instead of silently degrading to estimates.
   if (currentStudy) {
     try {
       const presetStudy: Study = { ...currentStudy, meshSettings: { ...currentStudy.meshSettings, preset } };
-      const geometry = cloudGeometrySourceForStudy(presetStudy, displayModel);
+      const geometry = geometrySourceForStudy(presetStudy, displayModel);
       const wasmMeshed = await generateWasmMeshForStudy({
         preset,
         study: presetStudy,
         displayModel,
         geometry: geometry ? geometryWithMeshPreset(geometry, presetStudy) : null,
-        meshSizeMm: CLOUD_PROCEDURAL_MESH_SIZE_MM[preset] ?? CLOUD_PROCEDURAL_MESH_SIZE_MM.medium,
+        meshSizeMm: PROCEDURAL_MESH_SIZE_MM[preset] ?? PROCEDURAL_MESH_SIZE_MM.medium,
         onProgress
       });
       if (wasmMeshed) return wasmMeshed;
     } catch (error) {
+      if (error instanceof Error && error.name === "MeshQualityError") throw error;
       onProgress?.(`In-browser meshing failed (${messageFromUnknownError(error) || "unknown error"}). Falling back to preset estimates.`);
     }
   }
@@ -479,20 +491,19 @@ export async function addLoad(studyId: string, type: LoadType, value: number, se
 
 export async function runSimulation(studyId: string, currentStudy?: Study, displayModel?: DisplayModel, options: RunSimulationOptions = {}): Promise<{ run: { id: string }; streamUrl: string; message: string }> {
   if (currentStudy) {
-    // Per-model backend routing: an explicit user choice always wins; without
-    // one ("auto"/unset/legacy), eligible studies solve locally in the browser
-    // and everything else runs on OpenCAE Core Cloud. Rollback to the old
-    // cloud-by-default behavior = swap resolveSolverBackend for
-    // normalizeSolverBackend on the next line.
-    const resolved = resolveSolverBackend(currentStudy, displayModel);
+    // Per-model backend routing (A-M4 local-first): an explicit user choice
+    // always wins; without one ("auto"/unset/legacy), studies solve locally in
+    // the browser — including complex geometry without a stored mesh artifact,
+    // which the local run flow wasm-meshes first when this build/browser can.
+    const capabilities = { canMeshOnDemand: canMeshStudyOnDemand(currentStudy, displayModel) };
+    const resolved = resolveSolverBackend(currentStudy, displayModel, capabilities);
     if (resolved.backend === "opencae_core_cloud") {
       return runOpenCaeCoreCloudSimulation(currentStudy, displayModel, options);
     }
-    void options;
     // Local runs never leave the browser. Stamp the resolved backend onto the
     // run's study copy so the solve worker's explicit-local guard sees the
     // routing decision; the persisted study keeps the user's "auto" choice.
-    return runSimulationLocally(studyWithLocalBackend(currentStudy), displayModel);
+    return runSimulationLocally(studyWithLocalBackend(currentStudy), displayModel, options);
   }
   const response = await fetch(`/api/studies/${studyId}/runs`, { method: "POST" });
   return await readJson(response, `POST /api/studies/${studyId}/runs`);
@@ -719,7 +730,7 @@ async function runOpenCaeCoreCloudSimulation(study: Study, displayModel: Display
     // still surface as errors below.
     if (isCloudCoreUnavailableInDeployment(error)) {
       options.onRunStatus?.("OpenCAE Core Cloud is not available in this deployment. Running the OpenCAE Core Local browser solver instead.");
-      return runSimulationLocally(studyWithLocalBackend(study), displayModel);
+      return runSimulationLocally(studyWithLocalBackend(study), displayModel, options);
     }
     throw new Error(coreCloudFailureMessage(error), { cause: error });
   }
@@ -766,18 +777,19 @@ function messageFromUnknownError(error: unknown): string {
   return error instanceof Error ? error.message : typeof error === "string" ? error : "";
 }
 
-// Gmsh characteristic length (mm) for cloud-meshed procedural sample geometry.
-// The container caps solves at 30k DOFs; 6mm on the bracket stays well below it.
-const CLOUD_PROCEDURAL_MESH_SIZE_MM: Record<MeshQuality, number> = {
+// Gmsh characteristic length (mm) per mesh preset for procedural sample
+// geometry (bracket). Shared by the mesh step and the run flow's mesh-first
+// path; STEP uploads use the same map as a characteristic-length hint.
+const PROCEDURAL_MESH_SIZE_MM: Record<MeshQuality, number> = {
   coarse: 18,
   medium: 12,
   fine: 8,
   ultra: 6
 };
 
-export function geometryWithMeshPreset(geometry: NonNullable<ReturnType<typeof cloudGeometrySourceForStudy>>, study: Study) {
+export function geometryWithMeshPreset(geometry: NonNullable<ReturnType<typeof geometrySourceForStudy>>, study: Study) {
   if (geometry.kind !== "sample_procedural" || !geometry.descriptor) return geometry;
-  const meshSize = CLOUD_PROCEDURAL_MESH_SIZE_MM[study.meshSettings.preset] ?? CLOUD_PROCEDURAL_MESH_SIZE_MM.medium;
+  const meshSize = PROCEDURAL_MESH_SIZE_MM[study.meshSettings.preset] ?? PROCEDURAL_MESH_SIZE_MM.medium;
   return { ...geometry, descriptor: { ...geometry.descriptor, meshSize } };
 }
 
@@ -789,9 +801,9 @@ export function studyForCoreCloudGeometrySolve(study: Study, displayModel: Displ
 // production request builder (see apps/opencae-web/src/testdata/core-cloud-golden/).
 export function openCaeCoreCloudSolveRequest(runId: string, study: Study, displayModel: DisplayModel | undefined) {
   const actualMesh = hasActualCoreVolumeMesh(study, displayModel);
-  const geometry = actualMesh ? null : cloudGeometrySourceForStudy(study, displayModel);
+  const geometry = actualMesh ? null : geometrySourceForStudy(study, displayModel);
   if (!actualMesh && !geometry && isComplexGeometry(displayModel, study)) {
-    throw new Error(OPENCAE_CORE_CLOUD_GEOMETRY_REQUIRED_REASON);
+    throw new Error(OPENCAE_CORE_MESH_REQUIRED_REASON);
   }
   if (geometry) {
     const useLinearGmshElements = geometry.kind === "sample_procedural" && geometry.sampleId === "bracket";
@@ -846,10 +858,19 @@ export function openCaeCoreCloudSolveRequest(runId: string, study: Study, displa
   };
 }
 
-function runSimulationLocally(study: Study, displayModel?: DisplayModel): { run: StudyRun; streamUrl: string; message: string } {
+/** First 20% of a mesh-first run's progress belongs to real meshing phases. */
+const MESH_FIRST_SOLVE_PROGRESS_OFFSET = 20;
+
+function runSimulationLocally(study: Study, displayModel?: DisplayModel, options: RunSimulationOptions = {}): { run: StudyRun; streamUrl: string; message: string } {
   const runId = `run-local-${crypto.randomUUID()}`;
   const backend = simulationBackend(study);
-  const coreEligibility = openCaeCoreEligibility(study, displayModel);
+  // A-M4 local-first meshing: complex geometry without a stored Core volume
+  // mesh is meshed in-browser (real gmsh-wasm) before the solve; mesh and
+  // solve are strictly sequential — both are memory-heavy.
+  const needsMesh = isComplexGeometry(displayModel, study) && !hasActualCoreVolumeMesh(study, displayModel);
+  const capabilities = { canMeshOnDemand: needsMesh && canMeshStudyOnDemand(study, displayModel) };
+  const meshFirst = needsMesh && capabilities.canMeshOnDemand;
+  const coreEligibility = openCaeCoreEligibility(study, displayModel, capabilities);
   const now = new Date().toISOString();
   if (!coreEligibility.ok) {
     const record = createLocalRunRecord(runId, "failed");
@@ -889,40 +910,52 @@ function runSimulationLocally(study: Study, displayModel?: DisplayModel): { run:
   emitLocalRunEvent(record, {
     type: "state",
     progress: 0,
-    message: dynamic ? "OpenCAE Core dynamic solve queued in browser." : "OpenCAE Core solve queued in browser."
+    message: meshFirst
+      ? "OpenCAE Core run queued in browser: meshing geometry, then solving."
+      : dynamic ? "OpenCAE Core dynamic solve queued in browser." : "OpenCAE Core solve queued in browser."
   });
 
-  const handle = startLocalSolve(
-    { runId, study, displayModel, debugResults: debugResultsEnabled() },
-    (progress) => handleLocalSolveProgress(record, progress)
-  );
-  record.cancelSolve = handle.cancel;
-  void handle.completion
-    .then(async ({ result }) => {
-      if (record.status !== "running") return;
-      emitLocalRunEvent(record, { type: "progress", progress: 92, message: "Writing OpenCAE Core result fields." });
-      const results = await persistLocalRunResults(runId, withFieldRunIds(runId, result as ResultsResponse));
-      if (record.status !== "running") return;
-      setCappedRunEntry(localResultsByRunId, runId, results);
-      finishLocalRun(record, "complete", {
-        type: "complete",
-        progress: 100,
-        estimatedRemainingMs: 0,
-        message: dynamic ? "OpenCAE Core dynamic simulation complete." : "OpenCAE Core simulation complete."
-      });
-    })
-    .catch((error) => {
-      if (record.status !== "running") return;
-      if (isCancelledSolveError(error)) {
-        finishLocalRun(record, "cancelled", { type: "cancelled", message: "Simulation cancelled." });
-        return;
-      }
-      finishLocalRun(record, "failed", {
-        type: "error",
-        progress: 100,
-        message: messageFromUnknownError(error) || "Local solve failed."
-      });
+  const solveProgressOffset = meshFirst ? MESH_FIRST_SOLVE_PROGRESS_OFFSET : 0;
+  void (async () => {
+    let solveStudy = study;
+    if (meshFirst) {
+      // Hard-cancel path during meshing: terminate the mesh worker.
+      record.cancelSolve = () => cancelWasmMeshing("Simulation cancelled.");
+      solveStudy = await meshStudyForLocalRun(record, study, displayModel);
+      if (record.status !== "running") return; // Cancelled while meshing.
+      // Hand the freshly meshed study (with its stored artifact) back to the
+      // caller so the workspace persists it like a mesh-step result.
+      options.onStudyMeshed?.(solveStudy);
+    }
+    const handle = startLocalSolve(
+      { runId, study: solveStudy, displayModel, debugResults: debugResultsEnabled() },
+      (progress) => handleLocalSolveProgress(record, progress, solveProgressOffset)
+    );
+    record.cancelSolve = handle.cancel;
+    const { result } = await handle.completion;
+    if (record.status !== "running") return;
+    emitLocalRunEvent(record, { type: "progress", progress: 92, message: "Writing OpenCAE Core result fields." });
+    const results = await persistLocalRunResults(runId, withFieldRunIds(runId, result as ResultsResponse));
+    if (record.status !== "running") return;
+    setCappedRunEntry(localResultsByRunId, runId, results);
+    finishLocalRun(record, "complete", {
+      type: "complete",
+      progress: 100,
+      estimatedRemainingMs: 0,
+      message: dynamic ? "OpenCAE Core dynamic simulation complete." : "OpenCAE Core simulation complete."
     });
+  })().catch((error) => {
+    if (record.status !== "running") return;
+    if (isCancelledSolveError(error)) {
+      finishLocalRun(record, "cancelled", { type: "cancelled", message: "Simulation cancelled." });
+      return;
+    }
+    finishLocalRun(record, "failed", {
+      type: "error",
+      progress: 100,
+      message: messageFromUnknownError(error) || "Local solve failed."
+    });
+  });
 
   return {
     run: {
@@ -939,6 +972,50 @@ function runSimulationLocally(study: Study, displayModel?: DisplayModel): { run:
     streamUrl: `local:${runId}`,
     message: "OpenCAE Core Local simulation running."
   };
+}
+
+/**
+ * Mesh-first leg of a local run (A-M4): reuses the mesh step's
+ * generateWasmMeshForStudy (single meshing code path), streaming its real
+ * phase reports ("Meshing volume...", ...) into the run event stream within
+ * the 0-20% progress window, and returns the study carrying the stored
+ * artifact. Throws (failing the run honestly) when meshing cannot produce a
+ * volume mesh — a run never falls back to estimates.
+ */
+async function meshStudyForLocalRun(record: LocalRunRecord, study: Study, displayModel?: DisplayModel): Promise<Study> {
+  const preset = study.meshSettings.preset;
+  emitLocalRunEvent(record, {
+    type: "progress",
+    progress: 2,
+    message: "No stored volume mesh for this geometry — meshing in browser before solving."
+  });
+  let meshPhaseCount = 0;
+  const geometry = geometrySourceForStudy(study, displayModel);
+  const meshed = await generateWasmMeshForStudy({
+    preset,
+    study,
+    displayModel,
+    geometry: geometry ? geometryWithMeshPreset(geometry, study) : null,
+    meshSizeMm: PROCEDURAL_MESH_SIZE_MM[preset] ?? PROCEDURAL_MESH_SIZE_MM.medium,
+    onProgress: (message) => {
+      if (record.status !== "running") return;
+      meshPhaseCount += 1;
+      emitLocalRunEvent(record, {
+        type: "progress",
+        progress: Math.min(2 + meshPhaseCount * 2, MESH_FIRST_SOLVE_PROGRESS_OFFSET - 2),
+        message
+      });
+    }
+  });
+  if (!meshed) {
+    throw new Error(`In-browser meshing could not run for this geometry, so the simulation was stopped. ${OPENCAE_CORE_MESH_REQUIRED_REASON}`);
+  }
+  emitLocalRunEvent(record, {
+    type: "progress",
+    progress: MESH_FIRST_SOLVE_PROGRESS_OFFSET,
+    message: meshed.message
+  });
+  return meshed.study;
 }
 
 export function dynamicOutputFrameEstimate(study: Study, options: { backend?: "opencae_core_cloud" | "opencae_core_local" | "cloudflare_fea" | "opencae_core" | "local_detailed" } = {}): number {

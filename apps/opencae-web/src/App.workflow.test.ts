@@ -95,7 +95,7 @@ describe("App workflow layout", () => {
     expect(appSource).toContain("runDiagnosticsMessage(study, displayModel ?? undefined)");
     expect(apiSource).not.toContain("external solver request started: POST");
     expect(apiSource).not.toContain("external solver bridge selected:");
-    expect(appSource).toContain("try {\n      response = await runSimulation(study.id, study, displayModel ?? undefined, { onRunStatus: pushMessage, resultRenderBounds });");
+    expect(appSource).toContain("try {\n      response = await runSimulation(study.id, study, displayModel ?? undefined, {\n        onRunStatus: pushMessage,\n        resultRenderBounds,");
     expect(appSource).toContain("setRunProgress(0);");
     expect(appSource).toContain('const message = errorMessage(error, "Could not start simulation.");');
     expect(appSource).toContain("setRunError(message);");
