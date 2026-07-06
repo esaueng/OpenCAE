@@ -1,6 +1,13 @@
 # CAE Output Quality & Accuracy Plan
 
 Date: 2026-06-12
+
+> **Historical note (2026-07):** this review predates the cloud retirement.
+> `services/opencae-core-cloud` and the cloud solve path it analyzes were
+> removed in July 2026 — production solves now run locally in the browser and
+> the cloud contract survives as golden fixtures. See
+> [docs/cloud-retirement.md](../cloud-retirement.md). Path references below
+> are kept as written for the record.
 Scope: full-repo review of every code path that produces, transforms, or displays
 simulation numbers — `services/opencae-solver-service`, `services/opencae-post-service`,
 `services/opencae-core-cloud`, `services/opencae-mesh-service`, `libs/opencae-core-adapter`,

@@ -10,7 +10,6 @@
     "preview": "vite preview --port 5173"
   },
   "dependencies": {
-    "@cloudflare/containers": "^0.3.3",
     "@opencae/core": "workspace:*",
     "@opencae/core-adapter": "workspace:*",
     "@opencae/db": "workspace:*",

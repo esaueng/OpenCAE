@@ -18,7 +18,7 @@ pnpm install
 pnpm dev
 ```
 
-`pnpm build:core` refreshes the sibling checkout from `https://github.com/esaueng/OpenCAE-Core` before building Core packages. The ref comes from `services/opencae-core-cloud/OPENCAE_CORE_REF` and should be a full commit SHA for production builds so local and Cloudflare container artifacts are reproducible. If the sibling Core checkout has local changes or local-only commits, the refresh fails instead of overwriting work or producing a Cloudflare container that cannot be reproduced from the remote Core repo.
+`pnpm build:core` refreshes the sibling checkout from `https://github.com/esaueng/OpenCAE-Core` before building Core packages. The ref comes from `OPENCAE_CORE_REF` at the repo root and should be a full commit SHA for production builds so build artifacts are reproducible. If the sibling Core checkout has local changes or local-only commits, the refresh fails instead of overwriting work or producing a deploy that cannot be reproduced from the remote Core repo.
 
 `pnpm dev` starts the Fastify API on `http://localhost:4317` and the Vite web app on `http://localhost:5173`. The API creates and seeds the SQLite database if needed.
 
@@ -47,10 +47,8 @@ pnpm deploy:cloudflare:dry-run
 pnpm deploy:cloudflare
 pnpm deploy:cloudflare:static:dry-run
 pnpm deploy:cloudflare:static
-pnpm deploy:cloudflare:local-first:dry-run
-pnpm deploy:cloudflare:local-first
 ```
 
-Use the default Cloudflare deploy for the production app domains. It deploys the Core Cloud production Worker with `wrangler.containers.jsonc`, targets `opencae`, and binds `CORE_CLOUD_CONTAINER`, `CORE_CLOUD_ARTIFACTS`, and the versioned OpenCAE Core Cloud container. Use the static and local-first commands only for explicitly non-production Workers.
+Use the default Cloudflare deploy for the production app domain. It deploys the local-first Worker with the default `wrangler.jsonc` (static assets + security headers, no solver bindings) and targets `opencae`. Use the static commands only for the explicitly non-production `opencae-static` Worker. (The cloud container deploy commands were retired in July 2026; see [docs/cloud-retirement.md](../cloud-retirement.md).)
 
 Deploy and CI runners may start from a standalone checkout of this repo as long as their build command is `pnpm run build` or another script that runs `pnpm build:core`; that script creates `../opencae-core` before compiling.

@@ -62,15 +62,19 @@ describe("CalculiX production quarantine", () => {
     expect(() => statSync(legacyPath)).not.toThrow();
   });
 
-  test("package scripts expose only named OpenCAE Core Cloud container commands", () => {
+  test("package scripts expose no container commands (cloud solver retired 2026-07)", () => {
     const packageJson = JSON.parse(readFileSync(resolve(rootDir, "package.json"), "utf8"));
     const scripts = packageJson.scripts;
 
     expect(scripts["test:fea-container"]).toBeUndefined();
     expect(scripts["containers:build"]).toBeUndefined();
-    expect(scripts["test:core-cloud-container"]).toBe("pnpm --filter @opencae/core-cloud test");
-    expect(scripts["deploy:core-cloud"]).toContain("wrangler deploy --config wrangler.containers.jsonc");
-    expect(scripts["containers:build:core-cloud"]).toContain("services/opencae-core-cloud");
+    // B4b removed the OpenCAE Core Cloud container commands with the rest of
+    // the cloud solve infrastructure; none of them may return.
+    expect(scripts["test:core-cloud-container"]).toBeUndefined();
+    expect(scripts["deploy:core-cloud"]).toBeUndefined();
+    expect(scripts["containers:build:core-cloud"]).toBeUndefined();
+    expect(scripts["containers:push:core-cloud"]).toBeUndefined();
+    expect(JSON.stringify(scripts)).not.toContain("wrangler containers");
     expect(JSON.stringify(scripts).toLowerCase()).not.toContain("cloudflare-fea-calculix");
   });
 
