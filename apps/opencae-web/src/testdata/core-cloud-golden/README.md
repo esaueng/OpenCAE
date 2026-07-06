@@ -1,9 +1,12 @@
 # OpenCAE Core Cloud golden solve fixtures
 
 Frozen request/response pairs for the deployed OpenCAE Core Cloud runner, recorded so
-the upcoming local (in-browser) solve pipeline can be compared against the production
+the local (in-browser) solve pipeline can be compared against the production
 cloud contract bit-for-bit. `src/lib/coreCloudGolden.test.ts` characterizes these
-fixtures and is the executable spec a replacement pipeline must satisfy.
+fixtures, and `libs/opencae-solve-pipeline/src/goldenParity.test.ts` replays every
+fixture's solve through the browser pipeline (`@opencae/solve-pipeline`) and requires
+the recorded response to be reproduced (1e-12 relative numeric tolerance; the
+provenance `runnerVersion` differs by design).
 
 ## Provenance
 

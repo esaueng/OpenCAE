@@ -10,21 +10,18 @@ import {
   type SurfaceFacetJson,
   type SurfaceSetJson
 } from "@opencae/core";
+import type { DynamicLoadProfile } from "@opencae/solver-cpu";
 import {
-  solveDynamicMdofTet4Cpu,
-  solveStaticLinearTet4Cpu,
-  type DynamicLoadProfile,
-  type DynamicTet4CpuFrame,
-  type StaticLinearTet4CpuResult
-} from "@opencae/solver-cpu";
+  BROWSER_SOLVE_LIMITS,
+  solveStudyModelWithCorePipeline,
+  type SolverHooks
+} from "@opencae/solve-pipeline";
 import { effectiveMaterialProperties, starterMaterials } from "@opencae/materials";
 import {
-  assessResultFailure,
   type DisplayModel,
   type DynamicSolverSettings,
   type ResultField,
   type ResultProvenance,
-  type ResultSample,
   type ResultSummary,
   type Study
 } from "@opencae/schema";
@@ -69,7 +66,11 @@ export type CoreCloudGeometrySource = {
 export type LocalSolveResult = {
   summary: ResultSummary;
   fields: ResultField[];
-  artifacts?: {
+  /** Solver-space render surface mesh (same contract as the cloud response). */
+  surfaceMesh?: unknown;
+  /** Solver diagnostics entries (core-solve-diagnostics, phase diagnostics, ...). */
+  diagnostics?: unknown[];
+  artifacts?: Record<string, unknown> & {
     meshConnectivity?: {
       connectedComponents: number;
     };
@@ -87,8 +88,8 @@ export type OpenCaeCoreEligibility =
   | { ok: false; reason: string };
 
 export type OpenCaeCoreSolveOutcome =
-  | { ok: true; result: LocalSolveResult; solverBackend: "opencae-core-preview-tet4" | "opencae-core-preview-sdof" | "opencae-core-sparse-tet" | "opencae-core-mdof-tet" }
-  | { ok: false; reason: string };
+  | { ok: true; result: LocalSolveResult; solverBackend: "opencae-core-sparse-tet" | "opencae-core-mdof-tet" }
+  | { ok: false; reason: string; code?: string };
 
 const STANDARD_GRAVITY = 9.80665;
 const DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.005;
@@ -96,36 +97,6 @@ const MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.005;
 
 const COMPLEX_CORE_PREVIEW_REJECTION_REASON = "OpenCAE Core Local requires simple block/beam geometry or an actual Core volume mesh. Use OpenCAE Core Cloud for complex production geometry.";
 export const OPENCAE_CORE_CLOUD_GEOMETRY_REQUIRED_REASON = "OpenCAE Core Cloud requires a procedural or uploaded geometry source so the cloud container can generate a Core volume mesh.";
-
-const OPENCAE_CORE_ACTUAL_STATIC_PROVENANCE: ResultProvenance = {
-  kind: "opencae_core_fea",
-  solver: "opencae-core-sparse-tet",
-  solverVersion: "0.1.0",
-  meshSource: "actual_volume_mesh",
-  resultSource: "computed",
-  units: "m-N-s-Pa"
-};
-
-const OPENCAE_CORE_ACTUAL_DYNAMIC_PROVENANCE: ResultProvenance = {
-  ...OPENCAE_CORE_ACTUAL_STATIC_PROVENANCE,
-  solver: "opencae-core-mdof-tet",
-  integrationMethod: "newmark_average_acceleration"
-};
-
-const OPENCAE_CORE_PREVIEW_STATIC_PROVENANCE: ResultProvenance = {
-  kind: "local_estimate",
-  solver: "opencae-core-preview-tet4",
-  solverVersion: "0.1.0",
-  meshSource: "structured_block_proxy",
-  resultSource: "computed_preview",
-  units: "m-N-s-Pa"
-};
-
-const OPENCAE_CORE_PREVIEW_DYNAMIC_PROVENANCE: ResultProvenance = {
-  ...OPENCAE_CORE_PREVIEW_STATIC_PROVENANCE,
-  solver: "opencae-core-preview-sdof",
-  integrationMethod: "newmark_average_acceleration"
-};
 
 export function normalizeSolverBackend(value: { solverSettings?: { backend?: unknown } } | Study | undefined): NormalizedBrowserSolverBackend {
   const backend = value?.solverSettings?.backend;
@@ -288,69 +259,94 @@ export function openCaeCoreEligibility(study: Study, displayModel?: DisplayModel
   if (!study.constraints.some((constraint) => constraint.type === "fixed")) {
     return { ok: false, reason: "OpenCAE Core requires at least one fixed support." };
   }
-  const unsupportedLoad = study.loads.find((load) => load.type !== "force");
-  if (unsupportedLoad) return { ok: false, reason: `OpenCAE Core Local supports force loads only; ${unsupportedLoad.type} loads require OpenCAE Core Cloud.` };
-  if (!study.loads.length) return { ok: false, reason: "OpenCAE Core requires at least one force load." };
+  // Force, pressure, and gravity all route through the cloud-fidelity surface-set
+  // model builder; anything else has no Core load mapping yet.
+  const unsupportedLoad = study.loads.find((load) => load.type !== "force" && load.type !== "pressure" && load.type !== "gravity");
+  if (unsupportedLoad) return { ok: false, reason: `OpenCAE Core supports force, pressure, and gravity loads; ${unsupportedLoad.type} loads are not supported yet.` };
+  if (!study.loads.length) return { ok: false, reason: "OpenCAE Core requires at least one load." };
   const material = materialForStudy(study).material;
   const force = totalForceVector(study, displayModel, material.density);
   if (Math.hypot(...force) <= 1e-12) {
-    return { ok: false, reason: "OpenCAE Core requires a force load with a finite positive value and direction." };
+    return { ok: false, reason: "OpenCAE Core requires a load with a finite positive value and direction." };
   }
   return { ok: true };
 }
 
-export function trySolveOpenCaeCoreStudy({ study, runId, displayModel }: {
+/**
+ * Browser-local solve at parity with the deployed Core Cloud runner: the same
+ * high-fidelity model builder the cloud request path uses (surface sets,
+ * surfaceForce/pressure loads, solver-frame rotation) feeds the mirrored cloud
+ * pipeline in @opencae/solve-pipeline, under BROWSER_SOLVE_LIMITS.
+ */
+export function trySolveOpenCaeCoreStudy({ study, runId, displayModel, hooks }: {
   study: Study;
   runId: string;
   displayModel?: DisplayModel;
+  hooks?: SolverHooks;
 }): OpenCaeCoreSolveOutcome {
+  void runId;
   const eligibility = openCaeCoreEligibility(study, displayModel);
   if (!eligibility.ok) return eligibility;
 
   try {
-    const coreModel = openCaeCoreModelForStudy(study, displayModel);
-    const isActualMesh = coreModel.meshSource === "actual_volume_mesh";
-    // The dynamic MDOF solver does not enforce maxDofs itself, so guard the in-browser
-    // DOF budget here for both paths — otherwise a large actual mesh would run unbounded
-    // per-step solves on the worker thread instead of failing fast like the static path.
-    const overBudget = localSolveDofBudgetExceeded(coreModel);
-    if (overBudget) return { ok: false, reason: overBudget };
-    if (study.type === "dynamic_structural") {
-      const material = materialForStudy(study).material;
-      const settings = dynamicSettingsForStudy(study);
-      const provenance = isActualMesh ? OPENCAE_CORE_ACTUAL_DYNAMIC_PROVENANCE : OPENCAE_CORE_PREVIEW_DYNAMIC_PROVENANCE;
-      const solved = solveDynamicMdofTet4Cpu(coreModel.model, {
-        maxDofs: localSolveMaxDofs(study, coreModel),
-        // Display-grade CG tolerance: the per-step warm-started solves converge much
-        // faster and 1e-8 relative residual is far below render resolution.
-        tolerance: 1e-8,
-        startTime: settings.startTime,
-        endTime: settings.endTime,
-        timeStep: settings.timeStep,
-        outputInterval: settings.outputInterval,
-        dampingRatio: settings.dampingRatio,
-        loadProfile: dynamicLoadProfileForCore(settings.loadProfile),
-        massDensity: material.density
-      });
-      if (!solved.ok) return { ok: false, reason: `OpenCAE Core solve failed: ${solved.error.message}` };
+    const coreBuild = buildOpenCaeCoreCloudModelForStudy(study, displayModel);
+    const analysisType = study.type === "dynamic_structural" ? "dynamic_structural" : "static_stress";
+    const solved = solveStudyModelWithCorePipeline({
+      model: coreBuild.model,
+      analysisType,
+      solverSettings: pipelineSolverSettingsForStudy(study),
+      limits: BROWSER_SOLVE_LIMITS,
+      hooks
+    });
+    if (!solved.ok) {
       return {
-        ok: true,
-        solverBackend: isActualMesh ? "opencae-core-mdof-tet" : "opencae-core-preview-sdof",
-        result: dynamicResultBundleForOpenCaeCore(runId, coreModel, solved.result.frames, study, displayModel, settings, provenance)
+        ok: false,
+        code: solved.error.code,
+        reason: solved.error.code === "cancelled"
+          ? "OpenCAE Core solve cancelled."
+          : `OpenCAE Core solve failed: ${solved.error.message}`
       };
     }
-
-    const solved = solveStaticLinearTet4Cpu(coreModel.model, { maxDofs: localSolveMaxDofs(study, coreModel) });
-    if (!solved.ok) return { ok: false, reason: `OpenCAE Core solve failed: ${solved.error.message}` };
-    const provenance = isActualMesh ? OPENCAE_CORE_ACTUAL_STATIC_PROVENANCE : OPENCAE_CORE_PREVIEW_STATIC_PROVENANCE;
+    // The pipeline result is the cloud response contract (mm-N-s-MPa summary,
+    // surface-aligned fields, solver-surface mesh); the ResultSummary/ResultField
+    // schema types describe that same JSON shape.
+    const result = solved.result as unknown as Omit<LocalSolveResult, "artifacts"> & { artifacts?: Record<string, unknown> };
     return {
       ok: true,
-      solverBackend: isActualMesh ? "opencae-core-sparse-tet" : "opencae-core-preview-tet4",
-      result: resultBundleForOpenCaeCore(runId, coreModel, solved.result, study, provenance)
+      solverBackend: analysisType === "dynamic_structural" ? "opencae-core-mdof-tet" : "opencae-core-sparse-tet",
+      result: {
+        ...result,
+        artifacts: {
+          ...(result.artifacts ?? {}),
+          ...(coreBuild.meshConnectivity ? { meshConnectivity: coreBuild.meshConnectivity } : {}),
+          meshStatistics: meshStatisticsForCoreModel(coreBuild)
+        }
+      }
     };
   } catch (error) {
     return { ok: false, reason: error instanceof Error ? error.message : "OpenCAE Core solve failed." };
   }
+}
+
+/**
+ * Solver settings handed to the mirrored cloud pipeline. Static studies pass
+ * their study settings through (bounded by the pipeline); dynamic studies pass
+ * the same clamped transient settings that were written into the model's
+ * dynamicLinear step, so the run matches both the step and the UI's frame
+ * estimates.
+ */
+function pipelineSolverSettingsForStudy(study: Study): Record<string, unknown> {
+  if (study.type !== "dynamic_structural") return { ...study.solverSettings };
+  const settings = dynamicSettingsForStudy(study);
+  return {
+    ...study.solverSettings,
+    startTime: settings.startTime,
+    endTime: settings.endTime,
+    timeStep: settings.timeStep,
+    outputInterval: settings.outputInterval,
+    dampingRatio: settings.dampingRatio,
+    loadProfile: dynamicLoadProfileForCore(settings.loadProfile)
+  };
 }
 
 export function buildOpenCaeCoreCloudModelForStudy(study: Study, displayModel: DisplayModel | undefined): CoreStudyModel {
@@ -506,113 +502,6 @@ export function buildOpenCaeCoreCloudModelForStudy(study: Study, displayModel: D
   };
 }
 
-function openCaeCoreModelForStudy(study: Study, displayModel: DisplayModel | undefined): CoreStudyModel {
-  if (!displayModel?.dimensions) throw new Error("OpenCAE Core requires display dimensions.");
-  const actualMesh = actualCoreVolumeMeshArtifact(study);
-  if (actualMesh?.model) {
-    if (!hasActualCoreVolumeMesh(study, displayModel)) {
-      throw new Error("OpenCAE Core actual mesh artifacts must use actual_volume_mesh provenance and one connected component.");
-    }
-    return coreStudyModelForActualMeshArtifact(actualMesh);
-  }
-  if (isComplexGeometry(displayModel, study)) {
-    throw new Error(COMPLEX_CORE_PREVIEW_REJECTION_REASON);
-  }
-  const material = materialForStudy(study);
-  const effective = effectiveMaterialProperties(material.material, material.parameters, {
-    criticalLayerAxis: inferCriticalPrintAxis(study, displayModel.faces)
-  });
-  const mesh = tetMeshForDisplayModel(
-    displayModel,
-    study.meshSettings.preset,
-    study.type === "dynamic_structural" ? LOCAL_DYNAMIC_TET10_NODE_BUDGET : LOCAL_TET10_NODE_BUDGET
-  );
-  // Computed once and reused for every fixed support and load below.
-  const renderBounds = renderBoundsForPoints(mesh.renderNodePoints);
-  const boundaryConditions: OpenCAEModelJson["boundaryConditions"] = [];
-  const loads: OpenCAEModelJson["loads"] = [];
-  const nodeSets: OpenCAEModelJson["nodeSets"] = [];
-
-  for (const [index, constraint] of study.constraints.entries()) {
-    if (constraint.type !== "fixed") continue;
-    const centers = selectionCenters(study, displayModel, constraint.selectionRef);
-    const nodes = meshNodesForFaceSelection(mesh, renderBounds, centers, selectionNormals(study, displayModel, constraint.selectionRef), study.meshSettings.preset);
-    if (!nodes.length) throw new Error("OpenCAE Core could not map fixed support selection to mesh nodes.");
-    const name = `fixedNodes${index}`;
-    nodeSets.push({ name, nodes });
-    boundaryConditions.push({ name: `fixedSupport${index}`, type: "fixed", nodeSet: name, components: ["x", "y", "z"] });
-  }
-
-  const density = effective.density ?? material.material.density;
-  for (const [index, load] of study.loads.entries()) {
-    if (load.type !== "force") continue;
-    const centers = selectionCenters(study, displayModel, load.selectionRef);
-    const nodes = meshNodesForFaceSelection(mesh, renderBounds, centers, selectionNormals(study, displayModel, load.selectionRef), study.meshSettings.preset);
-    if (!nodes.length) continue;
-    const force = forceVectorForLoad(load, displayModel, density);
-    if (Math.hypot(...force) <= 1e-12) continue;
-    // Lumped equal split across all face nodes: statically equivalent (net force and
-    // resultant location preserved), which is the intended preview-tier fidelity. It is
-    // not the consistent quadratic load vector, so element-peak von Mises can be locally
-    // off right at the loaded face; the cloud surfaceForce path is the accurate tier for
-    // near-load stress.
-    const distributedForce = scaleVector(force, 1 / nodes.length);
-    const name = `loadNodes${index}`;
-    nodeSets.push({ name, nodes });
-    loads.push({ name: `appliedForce${index}`, type: "nodalForce", nodeSet: name, vector: distributedForce });
-  }
-
-  if (!boundaryConditions.length) throw new Error("OpenCAE Core requires at least one mapped fixed support.");
-  if (!loads.length) throw new Error("OpenCAE Core requires at least one mapped force load.");
-
-  const model: OpenCAEModelJson = {
-    schema: "opencae.model",
-    schemaVersion: "0.1.0",
-    nodes: { coordinates: mesh.solverCoordinates },
-    materials: [{
-      name: effective.id,
-      type: "isotropicLinearElastic",
-      youngModulus: effective.youngsModulus,
-      poissonRatio: effective.poissonRatio,
-      density: effective.density ?? material.material.density,
-      yieldStrength: effective.yieldStrength ?? material.material.yieldStrength
-    }],
-    elementBlocks: [{
-      name: "block-tet10",
-      type: "Tet10",
-      material: effective.id,
-      connectivity: mesh.connectivity
-    }],
-    nodeSets,
-    elementSets: [{
-      name: "allElements",
-      elements: Array.from({ length: mesh.connectivity.length / 10 }, (_value, index) => index)
-    }],
-    boundaryConditions,
-    loads,
-    steps: [{
-      name: "loadStep",
-      type: "staticLinear",
-      boundaryConditions: boundaryConditions.map((condition) => condition.name),
-      loads: loads.map((load) => load.name)
-    }]
-  };
-  return { model, renderNodePoints: mesh.renderNodePoints, meshSource: "structured_block_proxy" };
-}
-
-function coreStudyModelForActualMeshArtifact(artifact: ActualCoreVolumeMeshArtifact): CoreStudyModel {
-  const model = artifact.model;
-  const renderNodePoints = artifact.renderNodePoints?.length
-    ? artifact.renderNodePoints
-    : renderNodePointsForModel(model);
-  const connectedComponents = connectedComponentCountForActualArtifact(artifact);
-  return {
-    model,
-    renderNodePoints,
-    meshSource: "actual_volume_mesh",
-    meshConnectivity: connectedComponents ? { connectedComponents } : undefined
-  };
-}
 
 function cloneModelForCloud(model: OpenCAEModelJson): OpenCAEModelJson {
   return {
@@ -729,233 +618,6 @@ function pressurePascals(load: Study["loads"][number]): number {
   return value;
 }
 
-function resultBundleForOpenCaeCore(
-  runId: string,
-  coreModel: CoreStudyModel,
-  result: Pick<StaticLinearTet4CpuResult, "displacement" | "reactionForce" | "vonMises" | "vonMisesPeak">,
-  study: Study,
-  provenance: ResultProvenance
-): LocalSolveResult {
-  // Element-peak von Mises (Tet10 node sampling) instead of centroid values, which clip the
-  // outer-fiber bending stress on coarse meshes. The ?? is a type-safety guard for the
-  // optional vonMisesPeak field; the solver populates it on every successful solve (and
-  // already collapses an element to its centroid value internally when that element's
-  // nodal-stress recovery fails), so this fallback is effectively dead in practice.
-  const stressFrame = stressFieldForOpenCaeCore(runId, coreModel, result.vonMisesPeak ?? result.vonMises, study, provenance);
-  const displacementFrame = vectorFieldForOpenCaeCore(runId, "displacement", coreModel, result.displacement, "mm", 1000, 6, provenance);
-  const safetyFrame = safetyFieldForOpenCaeCore(runId, stressFrame, study, provenance);
-  const summaryBase = {
-    maxStress: stressFrame.max,
-    maxStressUnits: "MPa",
-    maxDisplacement: displacementFrame.max,
-    maxDisplacementUnits: "mm",
-    safetyFactor: safetyFrame.min,
-    // Magnitude of the net reaction vector: per-node magnitudes also count the
-    // self-cancelling bending-couple forces at the clamp and overstate the reaction
-    // by an order of magnitude.
-    reactionForce: round(netVectorMagnitude(result.reactionForce), 6),
-    reactionForceUnits: "N"
-  };
-  return {
-    summary: {
-      ...summaryBase,
-      diagnostics: [],
-      failureAssessment: assessResultFailure(summaryBase),
-      provenance
-    },
-    fields: [stressFrame, displacementFrame, safetyFrame],
-    artifacts: {
-      ...(coreModel.meshConnectivity ? { meshConnectivity: coreModel.meshConnectivity } : {}),
-      meshStatistics: meshStatisticsForCoreModel(coreModel)
-    }
-  };
-}
-
-function dynamicResultBundleForOpenCaeCore(
-  runId: string,
-  coreModel: CoreStudyModel,
-  frames: DynamicTet4CpuFrame[],
-  study: Study,
-  displayModel: DisplayModel | undefined,
-  settings: DynamicSolverSettings,
-  provenance: ResultProvenance
-): LocalSolveResult {
-  const fields: ResultField[] = [];
-  // Element centroids are geometry-only and identical across frames; compute once and
-  // reuse for every frame's stress field rather than re-deriving per element per frame.
-  const centroids = elementCentroidsForModel(coreModel);
-  let peakDisplacement = 0;
-  let peakDisplacementTimeSeconds = settings.startTime;
-  let peakStress = 0;
-  let minSafetyFactor = Number.POSITIVE_INFINITY;
-  const material = materialForStudy(study).material;
-  const appliedLoadMagnitude = displayModel
-    ? round(Math.hypot(...totalForceVector(study, displayModel, material.density)), 6)
-    : 0;
-  // Loop instead of spreading frames into Math.max: a long transient can produce tens of
-  // thousands of frames, past the V8 argument limit for Math.max(...values).
-  let peakLoadScale = 0;
-  for (const frame of frames) {
-    if (Number.isFinite(frame.loadScale)) peakLoadScale = Math.max(peakLoadScale, Math.abs(frame.loadScale));
-  }
-  const peakAppliedLoad = round(appliedLoadMagnitude * Math.max(peakLoadScale, 1), 6);
-
-  for (const frame of frames) {
-    const stressFrame = withFrame(stressFieldForOpenCaeCore(runId, coreModel, frame.vonMisesPeak?.values ?? frame.vonMises.values, study, provenance, centroids), frame.frameIndex, frame.timeSeconds);
-    const displacementFrame = withFrame(vectorFieldForOpenCaeCore(runId, "displacement", coreModel, frame.displacement.values, "mm", 1000, 8, provenance), frame.frameIndex, frame.timeSeconds);
-    const velocityFrame = withFrame(vectorFieldForOpenCaeCore(runId, "velocity", coreModel, frame.velocity.values, "mm/s", 1000, 8, provenance), frame.frameIndex, frame.timeSeconds);
-    const accelerationFrame = withFrame(vectorFieldForOpenCaeCore(runId, "acceleration", coreModel, frame.acceleration.values, "mm/s^2", 1000, 8, provenance), frame.frameIndex, frame.timeSeconds);
-    const safetyFrame = withFrame(safetyFieldForOpenCaeCore(runId, stressFrame, study, provenance), frame.frameIndex, frame.timeSeconds);
-    fields.push(stressFrame, displacementFrame, velocityFrame, accelerationFrame, safetyFrame);
-
-    const framePeakDisplacement = resultFieldAbsMax(displacementFrame);
-    if (framePeakDisplacement > peakDisplacement) {
-      peakDisplacement = framePeakDisplacement;
-      peakDisplacementTimeSeconds = frame.timeSeconds;
-    }
-    peakStress = Math.max(peakStress, stressFrame.max);
-    minSafetyFactor = Math.min(minSafetyFactor, safetyFrame.min);
-  }
-
-  stabilizeDynamicFieldRanges(fields);
-  const summaryBase = {
-    maxStress: round(peakStress, 1),
-    maxStressUnits: "MPa",
-    maxDisplacement: round(peakDisplacement, 8),
-    maxDisplacementUnits: "mm",
-    safetyFactor: round(Number.isFinite(minSafetyFactor) ? minSafetyFactor : 0, 2),
-    reactionForce: peakAppliedLoad,
-    reactionForceUnits: "N",
-    diagnostics: [{
-      id: "dynamic-reaction-force-unavailable",
-      severity: "warning" as const,
-      source: "solver" as const,
-      message: provenance.resultSource === "computed_preview"
-        ? "Reaction force unavailable from this preview solver."
-        : "Reaction force unavailable from this dynamic solver.",
-      suggestedActions: []
-    }],
-    loadSummary: {
-      appliedLoadMagnitude,
-      reactionForceSource: "applied_load_estimate" as const
-    },
-    transient: {
-      analysisType: "dynamic_structural" as const,
-      integrationMethod: settings.integrationMethod,
-      startTime: settings.startTime,
-      endTime: settings.endTime,
-      timeStep: settings.timeStep,
-      outputInterval: settings.outputInterval,
-      dampingRatio: settings.dampingRatio,
-      frameCount: frames.length,
-      peakDisplacementTimeSeconds: round(peakDisplacementTimeSeconds, 6),
-      peakDisplacement: round(peakDisplacement, 8)
-    }
-  };
-  return {
-    summary: {
-      ...summaryBase,
-      failureAssessment: assessResultFailure(summaryBase),
-      provenance
-    },
-    fields,
-    artifacts: {
-      ...(coreModel.meshConnectivity ? { meshConnectivity: coreModel.meshConnectivity } : {}),
-      meshStatistics: meshStatisticsForCoreModel(coreModel)
-    }
-  };
-}
-
-function stressFieldForOpenCaeCore(
-  runId: string,
-  coreModel: CoreStudyModel,
-  vonMises: Float64Array,
-  study: Study,
-  provenance: ResultProvenance,
-  centroids?: Vec3[]
-): ResultField {
-  const points = centroids ?? elementCentroidsForModel(coreModel);
-  const values = Array.from(vonMises, (value) => round(Math.abs(value) / 1_000_000, 6));
-  const samples = values.map((value, element) => ({
-    point: points[element] ?? [0, 0, 0],
-    normal: [0, 0, 1] as Vec3,
-    value,
-    elementId: `E${element}`,
-    source: "opencae_core",
-    vonMisesStressPa: round(value * 1_000_000, 3)
-  }));
-  return fieldFor(runId, "stress", "element", values, "MPa", samples, provenance);
-}
-
-function vectorFieldForOpenCaeCore(
-  runId: string,
-  type: ResultField["type"],
-  coreModel: CoreStudyModel,
-  vectors: Float64Array,
-  units: string,
-  unitScale: number,
-  digits: number,
-  provenance: ResultProvenance
-): ResultField {
-  const nodePoints = coreModel.renderNodePoints;
-  const samples = nodePoints.map((point, node) => {
-    const vector = vectorForNode(vectors, node, unitScale, digits);
-    return {
-      point,
-      normal: [0, 0, 1] as Vec3,
-      value: round(Math.hypot(...vector), digits),
-      vector,
-      nodeId: `N${node}`,
-      source: "opencae_core"
-    };
-  });
-  return fieldFor(runId, type, "node", samples.map((sample) => sample.value), units, samples, provenance);
-}
-
-function safetyFieldForOpenCaeCore(runId: string, stressFrame: ResultField, study: Study, provenance: ResultProvenance): ResultField {
-  const material = materialForStudy(study).material;
-  const yieldMpa = Math.max(material.yieldStrength / 1_000_000, 1e-9);
-  const values = stressFrame.values.map((stress) => round(Math.max(0.05, yieldMpa / Math.max(stress, 1e-9)), 4));
-  const samples = stressFrame.samples?.map((sample, index) => ({
-    ...sample,
-    value: values[index] ?? 0,
-    vonMisesStressPa: undefined
-  })) ?? [];
-  return fieldFor(runId, "safety_factor", "element", values, "ratio", samples, provenance);
-}
-
-function fieldFor(
-  runId: string,
-  type: ResultField["type"],
-  location: ResultField["location"],
-  values: number[],
-  units: string,
-  samples: NonNullable<ResultField["samples"]>,
-  provenance: ResultProvenance
-): ResultField {
-  const { min, max } = arrayMinMax(values);
-  return {
-    id: `field-${type}`,
-    runId,
-    type,
-    location,
-    values,
-    min,
-    max,
-    units,
-    samples,
-    provenance
-  };
-}
-
-function withFrame(field: ResultField, frameIndex: number, timeSeconds: number): ResultField {
-  return {
-    ...field,
-    id: `field-${field.type}-${field.runId}-frame-${frameIndex}`,
-    frameIndex,
-    timeSeconds
-  };
-}
 
 function dynamicSettingsForStudy(study: Study): DynamicSolverSettings {
   const raw = study.solverSettings as Partial<DynamicSolverSettings>;
@@ -1047,47 +709,11 @@ function meshStatisticsForCoreModel(coreModel: CoreStudyModel): { nodes: number;
   return { nodes, elements };
 }
 
-// Element centroids = average of the four corner nodes (connectivity indices 0-3), which
-// is the centroid for both Tet4 and straight-sided Tet10. Geometry is fixed across a
-// solve, so the whole array is computed once and reused by every stress frame instead of
-// re-slicing connectivity per element per frame.
-function elementCentroidsForModel(coreModel: CoreStudyModel): Vec3[] {
-  const block = coreModel.model.elementBlocks[0];
-  if (!block) return [];
-  const stride = block.type === "Tet10" ? 10 : 4;
-  const points = coreModel.renderNodePoints;
-  const centroids: Vec3[] = [];
-  for (let offset = 0; offset + 4 <= block.connectivity.length; offset += stride) {
-    let x = 0;
-    let y = 0;
-    let z = 0;
-    for (let corner = 0; corner < 4; corner += 1) {
-      const point = points[block.connectivity[offset + corner]!] ?? [0, 0, 0];
-      x += point[0];
-      y += point[1];
-      z += point[2];
-    }
-    centroids.push([round(x / 4, 6), round(y / 4, 6), round(z / 4, 6)]);
-  }
-  return centroids;
-}
-
-function netVectorMagnitude(vector: Float64Array): number {
-  let x = 0;
-  let y = 0;
-  let z = 0;
-  for (let node = 0; node < vector.length / 3; node += 1) {
-    x += vector[node * 3] ?? 0;
-    y += vector[node * 3 + 1] ?? 0;
-    z += vector[node * 3 + 2] ?? 0;
-  }
-  return Math.hypot(x, y, z);
-}
 
 function tetMeshForDisplayModel(
   displayModel: DisplayModel,
   preset: Study["meshSettings"]["preset"],
-  nodeBudget = LOCAL_TET10_NODE_BUDGET
+  nodeBudget = CLOUD_STRUCTURED_BLOCK_TET10_NODE_BUDGET
 ): CoreTetMesh {
   const dimensions = displayModel.dimensions;
   if (!dimensions) throw new Error("OpenCAE Core requires display dimensions.");
@@ -1219,39 +845,9 @@ function renderBoundsForDisplayModel(displayModel: DisplayModel): { min: Vec3; m
   return { min, max };
 }
 
-// Selects every mesh node on the axis-aligned box faces the selection points at, so fixed
-// supports clamp the whole face and loads spread across it (matching the cloud surface-set
-// behavior). Each selected face is identified by its display normal's dominant axis
-// (render-bound padding makes nearest-plane distance unreliable); a multi-face selection
-// unions the nodes of every face. Falls back to nearest-N nodes when the selection carries
-// no usable face normal. Bounds are passed in so the caller computes them once for all
-// constraints/loads rather than re-scanning the mesh per call.
-function meshNodesForFaceSelection(
-  mesh: CoreTetMesh,
-  bounds: { min: Vec3; max: Vec3 },
-  centers: Vec3[],
-  normals: Vec3[],
-  preset: Study["meshSettings"]["preset"]
-): number[] {
-  const usableNormals = normals.filter((candidate) => Math.hypot(...candidate) > 1e-9);
-  if (usableNormals.length) {
-    const selected = new Set<number>();
-    for (const normal of usableNormals) {
-      const { axis, plane } = facePlaneForNormal(normal, bounds);
-      const span = Math.max(bounds.max[axis] - bounds.min[axis], 1e-9);
-      const tolerance = span * 1e-6 + 1e-9;
-      for (let node = 0; node < mesh.renderNodePoints.length; node += 1) {
-        if (Math.abs(mesh.renderNodePoints[node]![axis] - plane) <= tolerance) selected.add(node);
-      }
-    }
-    if (selected.size) return [...selected];
-  }
-  return nearestMeshNodes(mesh.renderNodePoints, centers, nodeSelectionCount(preset));
-}
-
 // The axis-aligned box face an outward face normal points at: the dominant-axis extreme of
-// the render bounds. Shared by local node selection and cloud facet selection so the two
-// backends resolve a selection to the same face.
+// the render bounds. Used by cloud facet selection so both backends resolve a selection to
+// the same face.
 function facePlaneForNormal(normal: Vec3, bounds: { min: Vec3; max: Vec3 }): { axis: 0 | 1 | 2; plane: number } {
   const axis = dominantAxis(normal);
   return { axis, plane: normal[axis] < 0 ? bounds.min[axis] : bounds.max[axis] };
@@ -1259,9 +855,9 @@ function facePlaneForNormal(normal: Vec3, bounds: { min: Vec3; max: Vec3 }): { a
 
 // Dimension-aware structured grid sizing, mirroring the cloud mesher: presets choose
 // how many cells span the smallest dimension, all axes target near-cubic cells, and
-// the elevated Tet10 grid stays inside the in-browser DOF budget. Densities sit one
-// notch below the cloud presets: the local backend is the fast preview tier, and the
-// per-frame implicit solves of dynamic studies run on the main worker thread.
+// the elevated Tet10 grid stays inside the shared structured-block node budget.
+// Local and cloud structured-block solves now use the same density (the local
+// backend runs the full cloud pipeline on a dedicated solve worker).
 const LOCAL_CELLS_ACROSS_MIN_DIMENSION: Record<string, number> = {
   coarse: 2,
   medium: 3,
@@ -1269,10 +865,6 @@ const LOCAL_CELLS_ACROSS_MIN_DIMENSION: Record<string, number> = {
   ultra: 5
 };
 const LOCAL_MAX_DIVISIONS_PER_AXIS = 32;
-// 4k Tet10 nodes = 12k DOFs for a single static solve. Dynamic studies pay the solve
-// cost once per time step, so they get a smaller grid to stay interactive.
-const LOCAL_TET10_NODE_BUDGET = 4000;
-const LOCAL_DYNAMIC_TET10_NODE_BUDGET = 1500;
 // Cloud structured-block fallback (simple geometry with no separate geometry source): the
 // cloud container has no in-browser worker-thread constraint, so it gets a denser grid than
 // the local preview tier — ~8000 Tet10 nodes (~24000 DOFs), well under the cloud solver's
@@ -1304,74 +896,8 @@ function meshDivisionsForDimensions(
   return divisions;
 }
 
-function meshCellsForPreset(preset: Study["meshSettings"]["preset"]): [number, number, number] {
-  if (preset === "ultra") return [6, 5, 4];
-  if (preset === "fine") return [5, 4, 4];
-  if (preset === "coarse") return [3, 3, 2];
-  return [4, 3, 3];
-}
 
-function maxDofsForMeshPreset(preset: Study["meshSettings"]["preset"]): number {
-  const [x, y, z] = meshCellsForPreset(preset);
-  return (x + 1) * (y + 1) * (z + 1) * 3;
-}
 
-// The structured proxy mesh is elevated to Tet10, so the preset corner-node bound no
-// longer covers the midside nodes; actual-mesh artifacts size themselves. Cap at the
-// in-browser solver budget either way.
-const LOCAL_SOLVER_MAX_DOFS = 30000;
-
-function localSolveMaxDofs(study: Study, coreModel: CoreStudyModel): number {
-  const modelDofs = coreModel.model.nodes.coordinates.length;
-  return Math.min(Math.max(modelDofs, maxDofsForMeshPreset(study.meshSettings.preset)), LOCAL_SOLVER_MAX_DOFS);
-}
-
-// Fail-fast guard for both static and dynamic local solves. The dynamic solver does not
-// enforce maxDofs internally, so without this an oversized actual mesh would run unbounded
-// per-step solves on the worker thread instead of returning a clean error.
-function localSolveDofBudgetExceeded(coreModel: CoreStudyModel): string | null {
-  const modelDofs = coreModel.model.nodes.coordinates.length;
-  if (modelDofs <= LOCAL_SOLVER_MAX_DOFS) return null;
-  return `OpenCAE Core Local solve exceeds the in-browser budget (${modelDofs} DOFs > ${LOCAL_SOLVER_MAX_DOFS}). Use OpenCAE Core Cloud for meshes this large.`;
-}
-
-function nodeSelectionCount(preset: Study["meshSettings"]["preset"]): number {
-  if (preset === "ultra") return 18;
-  if (preset === "fine") return 14;
-  if (preset === "coarse") return 8;
-  return 10;
-}
-
-function selectionCenters(study: Study, displayModel: DisplayModel, selectionRef: string): Vec3[] {
-  const selection = study.namedSelections.find((candidate) => candidate.id === selectionRef);
-  const faceIds = new Set(selection?.geometryRefs.filter((ref) => ref.entityType === "face").map((ref) => ref.entityId) ?? []);
-  const centers = displayModel.faces
-    .filter((face) => faceIds.has(face.id))
-    .map((face) => face.center)
-    .filter((point) => point.every(Number.isFinite));
-  if (centers.length) return centers;
-  const fallback = displayModel.faces[0]?.center;
-  return fallback ? [fallback] : [[0, 0, 0]];
-}
-
-function selectionNormals(study: Study, displayModel: DisplayModel, selectionRef: string): Vec3[] {
-  const selection = study.namedSelections.find((candidate) => candidate.id === selectionRef);
-  const faceIds = new Set(selection?.geometryRefs.filter((ref) => ref.entityType === "face").map((ref) => ref.entityId) ?? []);
-  return displayModel.faces
-    .filter((face) => faceIds.has(face.id))
-    .map((face) => face.normal)
-    .filter((normal): normal is Vec3 => Array.isArray(normal) && normal.length === 3 && normal.every(Number.isFinite));
-}
-
-function nearestMeshNodes(points: Vec3[], centers: Vec3[], count: number): number[] {
-  const ranked = points
-    .map((point, index) => ({
-      index,
-      distanceSq: Math.min(...centers.map((center) => squaredDistance(point, center)))
-    }))
-    .sort((left, right) => left.distanceSq - right.distanceSq);
-  return ranked.slice(0, Math.max(1, count)).map((entry) => entry.index);
-}
 
 function nearestSurfaceFacets(surfaceFacets: SurfaceFacetJson[], renderNodePoints: Vec3[], centers: Vec3[], count: number): number[] {
   const ranked = surfaceFacets
@@ -1443,9 +969,6 @@ function squaredDistance(left: Vec3, right: Vec3): number {
   return dx * dx + dy * dy + dz * dz;
 }
 
-function scaleVector(vector: Vec3, scale: number): Vec3 {
-  return [vector[0] * scale, vector[1] * scale, vector[2] * scale];
-}
 
 function roundVector(vector: Vec3, decimals: number): Vec3 {
   return [round(vector[0], decimals), round(vector[1], decimals), round(vector[2], decimals)];
@@ -1455,73 +978,6 @@ function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
 }
 
-function vectorForNode(values: Float64Array, node: number, unitScale: number, digits: number): Vec3 {
-  return [
-    round((values[node * 3] ?? 0) * unitScale, digits),
-    round((values[node * 3 + 1] ?? 0) * unitScale, digits),
-    round((values[node * 3 + 2] ?? 0) * unitScale, digits)
-  ];
-}
-
-// Single pass for both extremes; non-finite values are skipped, and an all-empty/non-finite
-// array yields 0 (treated as "unknown" downstream) rather than +/-Infinity.
-function arrayMinMax(values: number[]): { min: number; max: number } {
-  let min = Number.POSITIVE_INFINITY;
-  let max = Number.NEGATIVE_INFINITY;
-  for (const value of values) {
-    if (value < min) min = value;
-    if (value > max) max = value;
-  }
-  return {
-    min: Number.isFinite(min) ? min : 0,
-    max: Number.isFinite(max) ? max : 0
-  };
-}
-
-function resultFieldAbsMax(field: ResultField): number {
-  // Loop instead of spreading: realistic meshes put >100k values per field type,
-  // beyond the V8 argument limit for Math.max(...values).
-  let max = 0;
-  for (const value of field.values) {
-    if (Number.isFinite(value)) max = Math.max(max, Math.abs(value));
-  }
-  for (const sample of field.samples ?? []) {
-    if (Number.isFinite(sample.value)) max = Math.max(max, Math.abs(sample.value));
-  }
-  return max;
-}
-
-function stabilizeDynamicFieldRanges(fields: ResultField[]): void {
-  const fieldTypes = [...new Set(fields.map((field) => field.type))];
-  for (const type of fieldTypes) {
-    const matchingFields = fields.filter((field) => field.type === type);
-    let min = Number.POSITIVE_INFINITY;
-    let max = Number.NEGATIVE_INFINITY;
-    for (const field of matchingFields) {
-      for (const value of field.values) {
-        if (!Number.isFinite(value)) continue;
-        min = Math.min(min, value);
-        max = Math.max(max, value);
-      }
-      for (const sample of field.samples ?? []) {
-        if (!Number.isFinite(sample.value)) continue;
-        min = Math.min(min, sample.value);
-        max = Math.max(max, sample.value);
-      }
-    }
-    if (!Number.isFinite(min) || !Number.isFinite(max)) continue;
-    for (const field of matchingFields) {
-      field.min = round(min, dynamicRangeDigits(type));
-      field.max = round(max, dynamicRangeDigits(type));
-    }
-  }
-}
-
-function dynamicRangeDigits(type: ResultField["type"]): number {
-  if (type === "stress") return 1;
-  if (type === "displacement" || type === "velocity" || type === "acceleration") return 8;
-  return 3;
-}
 
 function coreCloudGeometryFromUnknown(value: unknown): CoreCloudGeometrySource | null {
   if (!value || typeof value !== "object") return null;
