@@ -11,17 +11,100 @@
  *   CORE_CLOUD_API_KEY=golden-local \
  *   pnpm exec tsx scripts/record-core-cloud-golden.mts
  *
- * Requests are produced by the same code path the web app uses for
- * POST /api/cloud-core/runs: openCaeCoreCloudSolveRequest() in
- * apps/opencae-web/src/lib/api.ts, which the Worker forwards verbatim to the
- * runner's /solve endpoint (apps/opencae-web/worker/index.ts, runCoreCloudSolve).
+ * The request builder below is a frozen copy of the web app's retired
+ * openCaeCoreCloudSolveRequest() (client cloud solves were removed in B4a;
+ * this recording tool is runner-contract infrastructure and keeps the exact
+ * request shape the deployed runner accepts on /solve until B4b decides the
+ * runner's fate). It is built from the same @opencae/core-adapter pieces the
+ * production path used.
  */
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createLocalSampleProject } from "../apps/opencae-web/src/localProjectFactory";
-import { openCaeCoreCloudSolveRequest, type SampleAnalysisType, type SampleModelId } from "../apps/opencae-web/src/lib/api";
-import type { Study } from "@opencae/schema";
+import type { SampleAnalysisType, SampleModelId } from "../apps/opencae-web/src/lib/api";
+import {
+  buildOpenCaeCoreModelForStudy,
+  geometrySourceForStudy,
+  hasActualCoreVolumeMesh,
+  isComplexGeometry,
+  studyForCoreGeometryDispatch,
+  OPENCAE_CORE_MESH_REQUIRED_REASON,
+  type CoreCloudGeometrySource
+} from "@opencae/core-adapter";
+import type { DisplayModel, MeshQuality, Study } from "@opencae/schema";
+
+// Frozen copy of the retired client request builder (see file header).
+const CLOUD_PROCEDURAL_MESH_SIZE_MM: Record<MeshQuality, number> = {
+  coarse: 18,
+  medium: 12,
+  fine: 8,
+  ultra: 6
+};
+
+function geometryWithMeshPreset(geometry: CoreCloudGeometrySource, study: Study): CoreCloudGeometrySource {
+  if (geometry.kind !== "sample_procedural" || !geometry.descriptor) return geometry;
+  const meshSize = CLOUD_PROCEDURAL_MESH_SIZE_MM[study.meshSettings.preset] ?? CLOUD_PROCEDURAL_MESH_SIZE_MM.medium;
+  return { ...geometry, descriptor: { ...geometry.descriptor, meshSize } };
+}
+
+function openCaeCoreCloudSolveRequest(runId: string, study: Study, displayModel: DisplayModel | undefined) {
+  const actualMesh = hasActualCoreVolumeMesh(study, displayModel);
+  const geometry = actualMesh ? null : geometrySourceForStudy(study, displayModel);
+  if (!actualMesh && !geometry && isComplexGeometry(displayModel, study)) {
+    throw new Error(OPENCAE_CORE_MESH_REQUIRED_REASON);
+  }
+  if (geometry) {
+    const useLinearGmshElements = geometry.kind === "sample_procedural" && geometry.sampleId === "bracket";
+    return {
+      runId,
+      analysisType: study.type,
+      // The cloud container meshes dispatched geometry in the upright solver frame and
+      // applies study load directions verbatim, so hand it a solver-frame study.
+      study: studyForCoreGeometryDispatch(study, displayModel),
+      displayModel,
+      geometry: geometryWithMeshPreset(geometry, study),
+      coreVolumeMesh: null,
+      solverSettings: {
+        ...study.solverSettings,
+        backend: "opencae_core_cloud",
+        // Native curved Gmsh Tet10 elements can invert around the bracket's drilled holes.
+        ...(useLinearGmshElements ? { elementOrder: 1 } : {})
+      },
+      resultSettings: {
+        provenance: {
+          kind: "opencae_core_fea",
+          solver: "opencae-core-cloud",
+          resultSource: "computed",
+          meshSource: "actual_volume_mesh"
+        },
+        renderBounds: displayModel?.dimensions ?? null
+      }
+    };
+  }
+
+  const coreBuild = buildOpenCaeCoreModelForStudy(study, displayModel);
+  return {
+    runId,
+    analysisType: study.type,
+    study,
+    coreModel: coreBuild.model,
+    coreVolumeMesh: null,
+    solverSettings: {
+      ...study.solverSettings,
+      backend: "opencae_core_cloud"
+    },
+    resultSettings: {
+      provenance: {
+        kind: "opencae_core_fea",
+        solver: "opencae-core-cloud",
+        resultSource: "computed",
+        meshSource: coreBuild.meshSource
+      },
+      renderBounds: displayModel?.dimensions ?? null
+    }
+  };
+}
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const RUNNER_URL = process.env.CORE_CLOUD_GOLDEN_URL ?? "http://127.0.0.1:8080";

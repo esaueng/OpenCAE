@@ -250,9 +250,19 @@ describe("ProjectSchema", () => {
     expect(SolverBackendSchema.parse("auto")).toBe("auto");
   });
 
-  it("preserves explicit solver backend choices from saved projects", () => {
-    expect(SolverBackendSchema.parse("opencae_core_cloud")).toBe("opencae_core_cloud");
+  it("preserves explicit local backend choices and aliases retired cloud choices to auto", () => {
     expect(SolverBackendSchema.parse("opencae_core_local")).toBe("opencae_core_local");
+    // B4a: the client cloud solve path is retired, but old projects that
+    // saved an explicit cloud choice must still load — as "auto".
+    expect(SolverBackendSchema.parse("opencae_core_cloud")).toBe("auto");
+  });
+
+  it("round-trips a retired opencae_core_cloud backend through parse -> serialize -> parse", () => {
+    const parsed = SolverBackendSchema.parse("opencae_core_cloud");
+    expect(parsed).toBe("auto");
+    // Serialized form of the migrated value stays parseable and stable.
+    const reparsed = SolverBackendSchema.parse(JSON.parse(JSON.stringify(parsed)));
+    expect(reparsed).toBe("auto");
   });
 
   it("requires production Core Cloud provenance and rejects CalculiX or preview sources", () => {

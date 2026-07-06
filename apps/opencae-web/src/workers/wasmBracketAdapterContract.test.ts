@@ -20,7 +20,7 @@ import {
 } from "@opencae/mesh-intake";
 import { beforeAll, describe, expect, it } from "vitest";
 import { createLocalSampleProject } from "../localProjectFactory";
-import { studyForCoreCloudGeometryDispatch } from "./opencaeCoreSolve";
+import { studyForCoreGeometryDispatch } from "./opencaeCoreSolve";
 
 type GoldenFixture = {
   request: {
@@ -67,7 +67,7 @@ describe("wasm-meshed bracket through the adapter (display-frame contract)", () 
       sourceSelectionRefs: bracketGeometrySourceMetadata(),
       diagnostics: ["A-M2 adapter contract test"]
     });
-    const dispatchStudy = studyForCoreCloudGeometryDispatch(displayStudy, displayModel);
+    const dispatchStudy = studyForCoreGeometryDispatch(displayStudy, displayModel);
     model = buildCoreModelFromCloudMesh({
       study: dispatchStudy as unknown as Record<string, unknown>,
       displayModel: displayModel as unknown as Record<string, unknown>,

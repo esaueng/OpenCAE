@@ -81,7 +81,10 @@ export type LocalSolveResult = {
   };
 };
 
-export type NormalizedBrowserSolverBackend = "opencae_core_cloud" | "opencae_core_local";
+// B4a: the client cloud-solve path is retired; the browser solves locally,
+// full stop. The type stays named so the B5 sweep (and any future backend)
+// touches one place.
+export type NormalizedBrowserSolverBackend = "opencae_core_local";
 
 export type OpenCaeCoreEligibility =
   | { ok: true }
@@ -102,8 +105,8 @@ const COMPLEX_CORE_MESH_REQUIRED_REASON =
 export const OPENCAE_CORE_MESH_REQUIRED_REASON = "OpenCAE Core requires a procedural or uploaded geometry source to generate a volume mesh for this study.";
 
 export function normalizeSolverBackend(value: { solverSettings?: { backend?: unknown } } | Study | undefined): NormalizedBrowserSolverBackend {
-  const backend = value?.solverSettings?.backend;
-  return backend === "opencae_core_local" ? "opencae_core_local" : "opencae_core_cloud";
+  void value;
+  return "opencae_core_local";
 }
 
 export type ResolvedSolverBackend = {
@@ -114,11 +117,13 @@ export type ResolvedSolverBackend = {
 
 /**
  * Explicit user backend choice, or null when the study carries no explicit
- * choice ("auto", unset, legacy, or unknown values all mean "never chose").
+ * choice ("auto", unset, legacy, retired "opencae_core_cloud", or unknown
+ * values all mean "never chose" — the schema aliases the retired cloud
+ * choice to "auto" at parse time, and this treats any straggler the same).
  */
 export function explicitSolverBackend(value: { solverSettings?: { backend?: unknown } } | Study | undefined): NormalizedBrowserSolverBackend | null {
   const backend = value?.solverSettings?.backend;
-  return backend === "opencae_core_local" || backend === "opencae_core_cloud" ? backend : null;
+  return backend === "opencae_core_local" ? backend : null;
 }
 
 /**
@@ -132,20 +137,22 @@ export type CoreSolveCapabilities = {
 };
 
 /**
- * Backend that per-model auto routing would pick for this study, ignoring any
- * explicit user choice: local when the study is OpenCAE Core browser-eligible
- * (including complex geometry that will be wasm-meshed on demand before the
- * solve), cloud otherwise (so auto never hits the local ineligible hard-fail
- * path).
+ * Backend that auto routing picks for this study. With the client cloud path
+ * retired (B4a) every run executes locally; ineligible studies fail the run
+ * honestly with openCaeCoreEligibility's actionable reason instead of being
+ * routed elsewhere or estimated.
  */
 export function autoSolverBackend(study: Study, displayModel?: DisplayModel, capabilities?: CoreSolveCapabilities): NormalizedBrowserSolverBackend {
-  return openCaeCoreEligibility(study, displayModel, capabilities).ok ? "opencae_core_local" : "opencae_core_cloud";
+  void study;
+  void displayModel;
+  void capabilities;
+  return "opencae_core_local";
 }
 
 /**
- * Concrete backend for a run. An explicit user choice always wins (explicit
- * local keeps its honest hard error for ineligible models). Without an explicit
- * choice, per-model auto routing applies.
+ * Concrete backend for a run plus whether the user chose it explicitly.
+ * Local either way since B4a; the explicit/auto distinction still drives UI
+ * labels and the solve worker's explicit-local guard.
  */
 export function resolveSolverBackend(study: Study, displayModel?: DisplayModel, capabilities?: CoreSolveCapabilities): ResolvedSolverBackend {
   const explicit = explicitSolverBackend(study);
@@ -257,7 +264,7 @@ function negated(value: number): number {
  * them into the solver frame so the solved deformation matches the load arrows shown in
  * the viewer.
  */
-export function studyForCoreCloudGeometryDispatch(study: Study, displayModel: DisplayModel | undefined): Study {
+export function studyForCoreGeometryDispatch(study: Study, displayModel: DisplayModel | undefined): Study {
   if (!displayModel || !displayModelUsesUprightSolverFrame(displayModel)) return study;
   return {
     ...study,
@@ -342,7 +349,7 @@ export function trySolveOpenCaeCoreStudy({ study, runId, displayModel, hooks }: 
   if (!eligibility.ok) return eligibility;
 
   try {
-    const coreBuild = buildOpenCaeCoreCloudModelForStudy(study, displayModel);
+    const coreBuild = buildOpenCaeCoreModelForStudy(study, displayModel);
     const analysisType = study.type === "dynamic_structural" ? "dynamic_structural" : "static_stress";
     const solved = solveStudyModelWithCorePipeline({
       model: coreBuild.model,
@@ -402,7 +409,7 @@ function pipelineSolverSettingsForStudy(study: Study): Record<string, unknown> {
   };
 }
 
-export function buildOpenCaeCoreCloudModelForStudy(study: Study, displayModel: DisplayModel | undefined): CoreStudyModel {
+export function buildOpenCaeCoreModelForStudy(study: Study, displayModel: DisplayModel | undefined): CoreStudyModel {
   if (!displayModel?.dimensions) throw new Error("OpenCAE Core Cloud requires display dimensions before generating a Core model.");
   const actualMesh = actualCoreVolumeMeshArtifact(study);
   const material = materialForStudy(study);

@@ -118,16 +118,6 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      // The local API has no /api/cloud-core routes; set OPENCAE_CLOUD_PROXY_TARGET
-      // (e.g. https://cae.esau.app) to test cloud solves from local dev.
-      ...(process.env.OPENCAE_CLOUD_PROXY_TARGET
-        ? {
-            "/api/cloud-core": {
-              target: process.env.OPENCAE_CLOUD_PROXY_TARGET,
-              changeOrigin: true
-            }
-          }
-        : {}),
       "/api": "http://localhost:4317",
       "/health": "http://localhost:4317"
     }
