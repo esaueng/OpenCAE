@@ -15,6 +15,7 @@
     "@opencae/core-adapter": "workspace:*",
     "@opencae/db": "workspace:*",
     "@opencae/materials": "workspace:*",
+    "@opencae/mesh-intake": "workspace:*",
     "@opencae/schema": "workspace:*",
     "@opencae/step": "workspace:*",
     "@opencae/study-core": "workspace:*",
