@@ -1471,6 +1471,10 @@ function formatResultMetric(value: number, units: string | undefined): string {
 }
 
 function solverRunnerLabelForResult(provenance: ResultProvenance | undefined): string {
+  // The browser pipeline keeps the runner's solver id for golden byte-parity;
+  // runnerVersion "browser-*" is the honest local marker (plan 015; a distinct
+  // solver id is tracked as open question 4).
+  if (provenance?.runnerVersion?.startsWith("browser-")) return "in-browser solve worker";
   return provenance?.solver === "opencae-core-cloud" ? "cloud container" : "local core worker";
 }
 
