@@ -2,7 +2,14 @@
 // Mirrors the request/response conventions of performanceProtocol.ts and adds
 // phase-based progress messages plus a transferable packed mesh artifact
 // (Float64Array coordinates + Uint32Array connectivity + JSON metadata).
-import type { CoreVolumeMeshArtifact, MeshPhase, MeshTimings, SourceSelectionMetadata } from "@opencae/mesh-intake";
+import type {
+  CoreVolumeMeshArtifact,
+  FacetAttributionReport,
+  MeshPhase,
+  MeshTimings,
+  SourceSelectionMetadata,
+  StepAttributionTessellation
+} from "@opencae/mesh-intake";
 
 export type MeshWorkerPhase = MeshPhase | "parse";
 
@@ -19,6 +26,13 @@ export type MeshWorkerPayloads = {
     elementOrder?: 1 | 2;
     units?: "mm" | "m";
     meshSizeMm?: number;
+    /**
+     * STEP display tessellation + faceIds (plan A-M3): when present, the
+     * worker stamps every boundary facet's sourceFaceId per surface set so
+     * selection mapping resolves via byFace instead of the geometric
+     * fallback. Typed-array buffers travel as transferables.
+     */
+    attribution?: StepAttributionTessellation;
   };
 };
 
@@ -55,6 +69,8 @@ export type MeshWorkerResults = {
     timings: MeshTimings;
     totalMs: number;
     algorithm3D: "delaunay" | "frontal";
+    /** Facet->B-rep-face attribution report (present when the request carried attribution inputs). */
+    attribution?: FacetAttributionReport;
   };
 };
 
@@ -202,7 +218,13 @@ export function unpackCoreVolumeMeshArtifact(packed: PackedCoreVolumeMeshArtifac
 }
 
 export function transferablesForMeshWorkerRequest(request: MeshWorkerRequest): Transferable[] {
-  return request.operation === "meshStepFile" ? [request.payload.stepContent] : [];
+  if (request.operation !== "meshStepFile") return [];
+  const transfers: Transferable[] = [request.payload.stepContent];
+  const attribution = request.payload.attribution;
+  if (attribution) {
+    transfers.push(attribution.positions.buffer, attribution.indices.buffer, attribution.triangleFaceIndex.buffer);
+  }
+  return transfers;
 }
 
 export function transferablesForMeshWorkerResult(result: unknown): Transferable[] {

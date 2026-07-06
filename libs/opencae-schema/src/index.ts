@@ -510,6 +510,8 @@ export interface DisplayFace {
   center: [number, number, number];
   normal: [number, number, number];
   stressValue: number;
+  /** Real B-rep face area in mm^2 (STEP imports only; A-M3 face registry). */
+  area?: number;
 }
 
 export interface DisplayModel {

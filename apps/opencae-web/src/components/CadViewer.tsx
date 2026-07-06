@@ -1116,7 +1116,9 @@ function BracketModel({
   function hitFromEvent(event: ThreeEvent<PointerEvent> | ThreeEvent<MouseEvent>): ModelSelectionHit | null {
     if (!placementMode || isResultView) return null;
     if (modelKind === "uploaded") {
-      const hit = uploadedFaceHitFromEvent(event, displayModel);
+      // Real B-rep face picking for STEP imports (A-M3); ad-hoc point/normal
+      // faces remain the fallback for other uploads or a cold registry.
+      const hit = stepFaceHitFromEvent(event, displayModel) ?? uploadedFaceHitFromEvent(event, displayModel);
       if (!hit) return null;
       const snap = snapResultFromEvent(event, displayModel, hit.face, activeStep);
       return {
@@ -1198,6 +1200,7 @@ function BracketModel({
           color={materialColor("face-base-bottom")}
           pickHandlers={pickHandlers}
           activePayloadObjectId={activePayloadObjectId}
+          selectedFaceId={selectedFaceId}
           onMeasureDisplayModelDimensions={onMeasureDisplayModelDimensions}
           onUploadedPreviewBounds={onUploadedPreviewBounds}
         />
@@ -1588,6 +1591,96 @@ function PrintLayerOverlay({ bounds, orientation }: { bounds: THREE.Box3 | null;
   );
 }
 
+// --- STEP B-rep face picking (plan A-M3, gated behind VITE_WASM_MESHING) ---
+// The stepFaces module (and, through it, the occt-import-js WASM) loads
+// lazily the first time a native STEP model mounts; raycast handlers then use
+// the synchronous registry peek so picking stays allocation-light.
+type StepFacesModule = typeof import("../stepFaces");
+let stepFacesApi: StepFacesModule | null = null;
+let stepFacesApiPromise: Promise<StepFacesModule> | null = null;
+
+function stepFacePickingEnabled(): boolean {
+  return import.meta.env.VITE_WASM_MESHING === "1";
+}
+
+/** Kick off (or reuse) the face-registry build for a STEP payload; resolves when picking is ready. */
+function warmStepFaceRegistry(contentBase64: string | undefined): Promise<void> | null {
+  if (!stepFacePickingEnabled() || !contentBase64) return null;
+  stepFacesApiPromise ??= import("../stepFaces").then((module) => {
+    stepFacesApi = module;
+    return module;
+  });
+  return stepFacesApiPromise
+    .then((module) => module.stepFaceRegistryFromBase64(contentBase64))
+    .then(() => undefined)
+    .catch(() => undefined);
+}
+
+function stepFaceHitFromEvent(event: ThreeEvent<PointerEvent> | ThreeEvent<MouseEvent>, displayModel: DisplayModel): ModelSelectionHit | null {
+  const api = stepFacesApi;
+  const contentBase64 = displayModel.nativeCad?.contentBase64;
+  if (!api || !contentBase64 || displayModel.nativeCad?.format !== "step") return null;
+  const registry = api.peekStepFaceRegistryForBase64(contentBase64);
+  if (!registry) return null;
+  const meshIndex = stepPreviewMeshIndexFor(event.object);
+  const triangleIndex = event.faceIndex;
+  if (meshIndex === null || typeof triangleIndex !== "number") return null;
+  const faceId = api.stepFaceIdForMeshTriangle(registry, meshIndex, triangleIndex);
+  if (!faceId) return null;
+  const face = displayModel.faces.find((candidate) => candidate.id === faceId)
+    ?? registry.displayFaces.find((candidate) => candidate.id === faceId);
+  if (!face) return null;
+  const point = viewerPointToModelSpace(event.point, displayModel).toArray() as [number, number, number];
+  return { face, point };
+}
+
+/** Preview meshes carry userData.opencaeObjectId = "step-object-<n>" in import order. */
+function stepPreviewMeshIndexFor(object: THREE.Object3D): number | null {
+  let current: THREE.Object3D | null = object;
+  while (current) {
+    const id = current.userData?.opencaeObjectId;
+    if (typeof id === "string") {
+      const match = id.match(/^step-object-(\d+)$/);
+      return match ? Number.parseInt(match[1]!, 10) - 1 : null;
+    }
+    current = current.parent;
+  }
+  return null;
+}
+
+function createStepFaceHighlightMesh(registry: import("../stepFaces").StepFaceRegistry, record: import("../stepFaces").StepFaceRecord): THREE.Mesh {
+  const meshData = registry.meshes[record.meshIndex]!;
+  const [first, last] = record.triangleRange;
+  const triangleCount = last - first + 1;
+  const positions = new Float32Array(triangleCount * 9);
+  for (let triangle = 0; triangle < triangleCount; triangle += 1) {
+    for (let corner = 0; corner < 3; corner += 1) {
+      const vertex = meshData.indices[(first + triangle) * 3 + corner]!;
+      positions[triangle * 9 + corner * 3] = meshData.positions[vertex * 3]!;
+      positions[triangle * 9 + corner * 3 + 1] = meshData.positions[vertex * 3 + 1]!;
+      positions[triangle * 9 + corner * 3 + 2] = meshData.positions[vertex * 3 + 2]!;
+    }
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  const material = new THREE.MeshBasicMaterial({
+    color: "#4da3ff",
+    transparent: true,
+    opacity: 0.42,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    polygonOffset: true,
+    polygonOffsetFactor: -2,
+    polygonOffsetUnits: -2,
+    toneMapped: false
+  });
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.renderOrder = 6;
+  // The highlight overlay must never swallow raycasts meant for the model.
+  mesh.raycast = () => undefined;
+  return mesh;
+}
+
 function uploadedFaceHitFromEvent(event: ThreeEvent<PointerEvent> | ThreeEvent<MouseEvent>, displayModel: DisplayModel): ModelSelectionHit | null {
   const worldNormal = event.face?.normal.clone().transformDirection(event.object.matrixWorld).normalize() ?? new THREE.Vector3(0, 0, 1);
   const normal = viewerNormalToModelSpace(worldNormal, displayModel);
@@ -1702,6 +1795,7 @@ function SampleSolid({
   displayModel,
   pickHandlers,
   activePayloadObjectId,
+  selectedFaceId,
   onMeasureDisplayModelDimensions,
   onUploadedPreviewBounds
 }: {
@@ -1710,6 +1804,7 @@ function SampleSolid({
   displayModel?: DisplayModel;
   pickHandlers?: ModelPickHandlers;
   activePayloadObjectId?: string;
+  selectedFaceId?: string | null;
   onMeasureDisplayModelDimensions?: (dimensions: NonNullable<DisplayModel["dimensions"]>) => void;
   onUploadedPreviewBounds?: (bounds: THREE.Box3) => void;
 }) {
@@ -1721,6 +1816,7 @@ function SampleSolid({
         color={color}
         pickHandlers={pickHandlers}
         activePayloadObjectId={activePayloadObjectId}
+        selectedFaceId={selectedFaceId}
         onMeasureDisplayModelDimensions={onMeasureDisplayModelDimensions}
         onUploadedPreviewBounds={onUploadedPreviewBounds}
       />
@@ -1782,6 +1878,7 @@ function UploadedSolid({
   color,
   pickHandlers,
   activePayloadObjectId,
+  selectedFaceId,
   onMeasureDisplayModelDimensions,
   onUploadedPreviewBounds
 }: {
@@ -1789,6 +1886,7 @@ function UploadedSolid({
   color: string;
   pickHandlers?: ModelPickHandlers;
   activePayloadObjectId?: string;
+  selectedFaceId?: string | null;
   onMeasureDisplayModelDimensions?: (dimensions: NonNullable<DisplayModel["dimensions"]>) => void;
   onUploadedPreviewBounds?: (bounds: THREE.Box3) => void;
 }) {
@@ -1799,6 +1897,7 @@ function UploadedSolid({
         color={color}
         pickHandlers={pickHandlers}
         activePayloadObjectId={activePayloadObjectId}
+        selectedFaceId={selectedFaceId}
         onMeasureDisplayModelDimensions={onMeasureDisplayModelDimensions}
         onUploadedPreviewBounds={onUploadedPreviewBounds}
       />
@@ -1814,6 +1913,7 @@ function UploadedNativeCadModel({
   color,
   pickHandlers,
   activePayloadObjectId,
+  selectedFaceId,
   onMeasureDisplayModelDimensions,
   onUploadedPreviewBounds
 }: {
@@ -1821,11 +1921,46 @@ function UploadedNativeCadModel({
   color: string;
   pickHandlers?: ModelPickHandlers;
   activePayloadObjectId?: string;
+  selectedFaceId?: string | null;
   onMeasureDisplayModelDimensions?: (dimensions: NonNullable<DisplayModel["dimensions"]>) => void;
   onUploadedPreviewBounds?: (bounds: THREE.Box3) => void;
 }) {
   const filename = displayModel.nativeCad?.filename ?? displayModel.name;
   const [preview, setPreview] = useState<{ status: "loading" | "ready" | "error"; object?: THREE.Group; message?: string }>({ status: "loading" });
+  const [stepRegistryVersion, setStepRegistryVersion] = useState(0);
+
+  // Warm the B-rep face registry (A-M3) so raycast picking and the selected
+  // face highlight have synchronous access; bump a version so the highlight
+  // effect re-runs once the registry resolves.
+  const nativeCadContentBase64 = displayModel.nativeCad?.contentBase64;
+  useEffect(() => {
+    let cancelled = false;
+    const warm = warmStepFaceRegistry(nativeCadContentBase64);
+    void warm?.then(() => {
+      if (!cancelled) setStepRegistryVersion((version) => version + 1);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [nativeCadContentBase64]);
+
+  useEffect(() => {
+    const api = stepFacesApi;
+    const target = preview.object;
+    if (!api || !nativeCadContentBase64 || !target || !selectedFaceId || !api.isStepFaceId(selectedFaceId)) return undefined;
+    const registry = api.peekStepFaceRegistryForBase64(nativeCadContentBase64);
+    const record = registry ? api.stepFaceRecordForId(registry, selectedFaceId) : null;
+    if (!registry || !record) return undefined;
+    const parent = target.children[record.meshIndex];
+    if (!(parent instanceof THREE.Mesh)) return undefined;
+    const highlight = createStepFaceHighlightMesh(registry, record);
+    parent.add(highlight);
+    return () => {
+      parent.remove(highlight);
+      highlight.geometry.dispose();
+      (highlight.material as THREE.Material).dispose();
+    };
+  }, [nativeCadContentBase64, preview.object, selectedFaceId, stepRegistryVersion]);
 
   useEffect(() => {
     let cancelled = false;
