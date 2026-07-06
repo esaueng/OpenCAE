@@ -52,11 +52,10 @@ describe("Cloudflare local-first worker", () => {
     expect(defaultConfig.durable_objects).toBeUndefined();
     expect(defaultConfig.r2_buckets).toBeUndefined();
     expect(defaultConfig.assets?.run_worker_first).toEqual(expect.arrayContaining(["/api/*", "/health"]));
-    // The Durable Object class must be migrated away, not silently dropped,
-    // so the next deploy cleanly deletes the retired container binding.
-    expect(defaultConfig.migrations?.some((migration) =>
-      migration.deleted_classes?.includes("OpenCaeCoreCloudContainer")
-    )).toBe(true);
+    // Checked-in migrations break Workers Builds version uploads; the retired
+    // Durable Object cleanup is a one-off manual deploy step documented in
+    // docs/cloud-retirement.md.
+    expect(defaultConfig.migrations).toBeUndefined();
   });
 
   test("deploy scripts target the retired-cloud config without container gates", () => {

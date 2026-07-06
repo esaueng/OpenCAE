@@ -87,7 +87,7 @@ Build command: pnpm run build
 Deploy command: npx wrangler deploy
 ```
 
-`pnpm deploy:cloudflare` is also valid as a deploy command. Do not use the static deploy command for the production Worker.
+`pnpm deploy:cloudflare` is also valid as a deploy command. Do not use `npx wrangler versions upload` for the production Worker: version uploads cannot apply the retired container Durable Object cleanup path and can leave Cloudflare rejecting stale `OpenCaeCoreCloudContainer` state. Do not use the static deploy command for the production Worker.
 
 ## Production Uptime
 
