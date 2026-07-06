@@ -15,7 +15,7 @@ OpenCAE consumes the live OpenCAE Core workspace from a sibling checkout. Keep t
 <workspace>/opencae-core
 ```
 
-Run `pnpm ensure:core` (or any build command) to clone `https://github.com/esaueng/OpenCAE-Core` into the sibling path at the commit pinned in [services/opencae-core-cloud/OPENCAE_CORE_REF](services/opencae-core-cloud/OPENCAE_CORE_REF). Set `OPENCAE_CORE_DIR` to use a different location.
+Run `pnpm ensure:core` (or any build command) to clone `https://github.com/esaueng/OpenCAE-Core` into the sibling path at the commit pinned in [OPENCAE_CORE_REF](OPENCAE_CORE_REF). Set `OPENCAE_CORE_DIR` to use a different location.
 
 Install dependencies and start the API and web app from the repo root:
 
@@ -60,43 +60,34 @@ pnpm verify:perf
 
 ## Cloudflare Worker Deploy
 
-The production Cloudflare target for `cae.esau.app` serves the Vite web app from Workers Static Assets and routes production solves through OpenCAE Core Cloud. The default deploy path builds the web app, deploys the Worker asset binding, enables SPA fallback routing, and binds the versioned Core Cloud container, Durable Object, and R2 artifact bucket.
+The production Cloudflare target for `cae.esau.app` serves the Vite web app from Workers Static Assets. Simulations run entirely in the browser with OpenCAE Core — the Worker hosts no solver. (The former OpenCAE Core Cloud container/R2 solve path was retired in July 2026; see [docs/cloud-retirement.md](docs/cloud-retirement.md).)
 
 ```bash
 pnpm install
 pnpm deploy:cloudflare
 ```
 
-Build and deploy environments use `pnpm build:core` to ensure `https://github.com/esaueng/OpenCAE-Core` exists as `../opencae-core`, update that checkout to the pinned commit in `services/opencae-core-cloud/OPENCAE_CORE_REF`, rerun `pnpm install --no-frozen-lockfile`, and then build the live Core packages consumed through this workspace. Production builds require that ref to be a full commit SHA so container artifacts are reproducible. `pnpm` resolves `@opencae/core`, `@opencae/solver-cpu`, and other OpenCAE Core packages from that sibling workspace; there is no runtime network lookup.
+Build and deploy environments use `pnpm build:core` to ensure `https://github.com/esaueng/OpenCAE-Core` exists as `../opencae-core`, update that checkout to the pinned commit in `OPENCAE_CORE_REF` (repo root), rerun `pnpm install --no-frozen-lockfile`, and then build the live Core packages consumed through this workspace. Production builds require that ref to be a full commit SHA so build artifacts are reproducible. `pnpm` resolves `@opencae/core`, `@opencae/solver-cpu`, and other OpenCAE Core packages from that sibling workspace; there is no runtime network lookup.
 
-Production deploy scripts use [wrangler.containers.jsonc](wrangler.containers.jsonc) for the app domain and container rollout. [wrangler.jsonc](wrangler.jsonc) mirrors the Core Cloud production bindings so a default production config cannot publish an unbound Worker.
+Production deploys use the default [wrangler.jsonc](wrangler.jsonc) (static assets + security headers only, no solver bindings).
 
-For a separate static Worker deploy, use:
+For a separate non-production static Worker deploy, use:
 
 ```bash
 pnpm deploy:cloudflare:static:dry-run
 pnpm deploy:cloudflare:static
 ```
 
-That static path uses [wrangler.static.jsonc](wrangler.static.jsonc), which targets `opencae-static` and intentionally omits the `containers` section and the production custom domain routes.
-
-For a local-first/static Worker deploy under a separate config, use:
-
-```bash
-pnpm deploy:cloudflare:local-first:dry-run
-pnpm deploy:cloudflare:local-first
-```
-
-That explicit local-first path uses [wrangler.local-first.jsonc](wrangler.local-first.jsonc) and is not routed to the production custom domain.
+That static path uses [wrangler.static.jsonc](wrangler.static.jsonc), which targets `opencae-static` and intentionally omits the production custom domain routes.
 
 For Cloudflare Builds, use:
 
 ```text
 Build command: pnpm run build
-Deploy command: npx wrangler deploy --config wrangler.containers.jsonc --containers-rollout=immediate
+Deploy command: npx wrangler deploy
 ```
 
-`pnpm deploy:cloudflare` is also valid as a deploy command. Do not use a web-assets-only, static, or local-first deploy command for the production Worker.
+`pnpm deploy:cloudflare` is also valid as a deploy command. Do not use the static deploy command for the production Worker.
 
 ## Production Uptime
 
@@ -106,13 +97,7 @@ The live app runs at `https://cae.esau.app`. Uptime monitors should check the Wo
 curl -fsS https://cae.esau.app/health
 ```
 
-Solver readiness checks should use the Core Cloud health endpoint:
-
-```bash
-curl -fsS https://cae.esau.app/api/cloud-core/health
-```
-
-The `/health` route verifies the production Worker is reachable. The `/api/cloud-core/health` route verifies the bound OpenCAE Core Cloud service reports the expected solver, runner version, supported analysis types, and fail-closed production constraints.
+The `/health` route verifies the production Worker is reachable and reports `solverRuntime: "browser-opencae-core"`. There is no separate solver-readiness endpoint: the solver ships inside the app bundle and runs in the browser. Retired cloud solve routes return HTTP 410 (see [docs/cloud-retirement.md](docs/cloud-retirement.md)).
 
 ## Workspace Layout
 
@@ -120,7 +105,7 @@ The `/health` route verifies the production Worker is reachable. The `/api/cloud
 - `apps/opencae-api` - Fastify API for projects, uploads, studies, jobs, artifacts, reports, and service orchestration.
 - `../opencae-core/packages/*` - Live sibling OpenCAE Core packages consumed through the pnpm workspace.
 - `libs/*` - Shared schema, units, materials, storage, jobs, validation (study-core), database, and core-adapter packages.
-- `services/*` - CAD, mesh, solver, post-processing, and legacy container reference implementations. `services/opencae-core-cloud` is a contract mirror of the deployed OpenCAE Core Cloud service; the production container image is built from the sibling OpenCAE-Core checkout at the pinned ref (see the Dockerfile), and `pnpm verify:runner-version` cross-checks the two.
+- `services/*` - CAD, mesh, solver, post-processing, and legacy container reference implementations. (The `opencae-core-cloud` runner mirror was removed with the July 2026 cloud retirement; see [docs/cloud-retirement.md](docs/cloud-retirement.md).)
 - `runners/opencae-runner-local` - Local runner package for job execution flows.
 - `examples/*` - Sample project documentation and fixtures.
 - `docs/*` - Architecture, local development, file format, validation, and user guide notes.
@@ -135,7 +120,7 @@ The built-in demos include bracket, beam, and cantilever studies with Aluminum 6
 
 ## Solver Attribution
 
-Production solving is attributed to `OpenCAE Core Cloud`. Production results must carry `opencae_core_fea`, solver `opencae-core-cloud`, `computed` result provenance, and `actual_volume_mesh` or `structured_block_core` mesh provenance. Browser-local Core previews remain explicit development/demo behavior and must not be displayed as production FEA.
+Production solving runs in the browser with OpenCAE Core and is labeled as local computed FEA. Results must carry `opencae_core_fea`, `computed` result provenance, and `actual_volume_mesh` or `structured_block_core` mesh provenance; preview estimates must never be displayed as production FEA. Results solved on the retired OpenCAE Core Cloud (before July 2026) keep their historical cloud provenance labels — old data stays truthfully attributed (see [docs/cloud-retirement.md](docs/cloud-retirement.md)).
 
 ## Documentation
 
@@ -144,6 +129,7 @@ Production solving is attributed to `OpenCAE Core Cloud`. Production results mus
 - [User guide](docs/user-guide/README.md)
 - [File format](docs/file-format/README.md)
 - [Validation](docs/validation/README.md)
+- [Cloud retirement (2026-07)](docs/cloud-retirement.md)
 
 ## License
 

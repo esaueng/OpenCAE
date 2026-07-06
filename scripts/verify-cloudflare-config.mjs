@@ -1,5 +1,12 @@
 #!/usr/bin/env node
 
+// Deploy gate for the post-cloud-retirement Cloudflare configs (2026-07).
+// The production Worker serves static assets only: simulations run in the
+// browser with OpenCAE Core. This script fails the deploy if a config or
+// package script quietly reintroduces the retired OpenCAE Core Cloud
+// infrastructure (container, Durable Object, R2 artifact bucket) or drops
+// the production domain/asset wiring. See docs/cloud-retirement.md.
+
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -8,15 +15,7 @@ const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const productionDomains = ["cae.esau.app"];
 const productionWorkerName = "opencae";
 const legacySolverToken = ["calcu", "lix"].join("");
-const expectedCoreCloudRunnerVersion = readFileSync(resolve(rootDir, "services/opencae-core-cloud/RUNNER_VERSION"), "utf8").trim();
-// Three version tokens exist on purpose and only two must match:
-// - RUNNER_VERSION (services/opencae-core-cloud/RUNNER_VERSION) must equal the
-//   container image tag and the Durable Object instance name in the worker.
-// - The Cloudflare container *application* name below was created as 0.1.1 and
-//   is intentionally not renamed on runner bumps, because renaming a container
-//   application replaces it in Cloudflare. Update it only as a deliberate
-//   infrastructure migration.
-const expectedCoreCloudContainerName = "opencae-core-cloud-0.1.1";
+const retiredCloudTokens = ["CORE_CLOUD_CONTAINER", "CORE_CLOUD_ARTIFACTS", "opencae-core-cloud-artifacts"];
 
 export function parseJsonc(source, label = "JSONC input") {
   try {
@@ -31,110 +30,38 @@ export function readCloudflareConfigs(baseDir = rootDir) {
   return {
     defaultConfig: readWranglerConfig(resolve(baseDir, "wrangler.jsonc")),
     staticConfig: readWranglerConfig(resolve(baseDir, "wrangler.static.jsonc")),
-    localFirstConfig: readWranglerConfig(resolve(baseDir, "wrangler.local-first.jsonc")),
-    containerConfig: readWranglerConfig(resolve(baseDir, "wrangler.containers.jsonc")),
     packageJson: JSON.parse(readFileSync(resolve(baseDir, "package.json"), "utf8"))
   };
 }
 
-export function validateCloudflareConfigs({ defaultConfig, staticConfig, localFirstConfig, containerConfig, packageJson }) {
+export function validateCloudflareConfigs({ defaultConfig, staticConfig, packageJson }) {
   const failures = [];
 
   if (defaultConfig) validateProductionConfig("default", defaultConfig, failures);
-  if (containerConfig) validateCoreCloudContainerConfig("container", containerConfig, failures);
-  if (defaultConfig && containerConfig && JSON.stringify(defaultConfig) !== JSON.stringify(containerConfig)) {
-    failures.push("wrangler.jsonc must mirror wrangler.containers.jsonc exactly so a default deploy cannot publish an unbound Worker");
+  if (packageJson) validateDeployScripts(packageJson, failures);
+  if (staticConfig) {
+    validateRetiredCloudAbsent("static", staticConfig, failures);
+    validateNonProductionConfig("static", staticConfig, defaultConfig, failures);
   }
-  if (packageJson) validateCoreCloudScripts(packageJson, failures);
-
-  validateNonProductionConfig("static", staticConfig, defaultConfig, failures);
-  if (localFirstConfig) validateNonProductionConfig("local-first", localFirstConfig, defaultConfig, failures);
 
   if (failures.length > 0) {
     throw new Error(`Cloudflare config verification failed:\n- ${failures.join("\n- ")}`);
   }
 }
 
-function validateCoreCloudScripts(packageJson, failures) {
-  const scripts = packageJson?.scripts ?? {};
-  const expectedImageTag = `opencae/opencae-core-cloud:${expectedCoreCloudRunnerVersion}`;
-  if (!String(scripts["deploy:cloudflare"] ?? "").includes("verify:runner-version")) {
-    failures.push("deploy:cloudflare must run verify:runner-version before production deployment");
-  }
-  if (!String(scripts["deploy:cloudflare"] ?? "").includes("wrangler.containers.jsonc")) {
-    failures.push("deploy:cloudflare must deploy production with wrangler.containers.jsonc");
-  }
-  if (!String(scripts["deploy:cloudflare"] ?? "").includes("--containers-rollout=immediate")) {
-    failures.push("deploy:cloudflare must roll out the Core Cloud container immediately");
-  }
-  if (!String(scripts["deploy:cloudflare:dry-run"] ?? "").includes("wrangler.containers.jsonc --dry-run")) {
-    failures.push("deploy:cloudflare:dry-run must dry-run the Core Cloud production config");
-  }
-  if (!String(scripts["deploy:core-cloud"] ?? "").includes("verify:runner-version")) {
-    failures.push("deploy:core-cloud must run verify:runner-version before deployment");
-  }
-  if (!String(scripts["deploy:core-cloud"] ?? "").includes("wrangler.containers.jsonc")) {
-    failures.push("deploy:core-cloud must deploy with wrangler.containers.jsonc");
-  }
-  // The container Docker build fetches the OPENCAE_CORE_REF pin from the Core remote;
-  // an unpushed pin would otherwise fail deep inside the image build (or worse, gate
-  // production on a runner version whose container can never be built). Every path
-  // that builds or deploys the container must run the fast reachability check first.
-  for (const script of ["deploy:cloudflare", "deploy:cloudflare:dry-run", "deploy:core-cloud", "deploy:core-cloud:dry-run", "containers:build:core-cloud"]) {
-    if (!String(scripts[script] ?? "").includes("verify:core-ref")) {
-      failures.push(`${script} must run verify:core-ref so an unpushed OPENCAE_CORE_REF pin fails fast with an actionable error`);
-    }
-  }
-  if (!String(scripts["containers:build:core-cloud"] ?? "").includes(expectedImageTag)) {
-    failures.push(`containers:build:core-cloud must build ${expectedImageTag}`);
-  }
-  if (!String(scripts["containers:push:core-cloud"] ?? "").includes(expectedImageTag)) {
-    failures.push(`containers:push:core-cloud must push ${expectedImageTag}`);
-  }
-  if (scripts["test:core-cloud-container"] !== "pnpm --filter @opencae/core-cloud test") {
-    failures.push("test:core-cloud-container must run the OpenCAE Core Cloud service tests");
-  }
-}
-
-function validateCoreCloudContainerConfig(label, config, failures) {
+function validateProductionConfig(label, config, failures) {
   if (config.name !== productionWorkerName) {
     failures.push(`${label} config name must be "${productionWorkerName}", got "${String(config.name)}"`);
   }
-  if (JSON.stringify(config).toLowerCase().includes(legacySolverToken)) {
-    failures.push(`${label} config must not reference legacy solver containers`);
-  }
-  if (JSON.stringify(config).includes("OpenCaeFeaContainer") || JSON.stringify(config).includes("FEA_CONTAINER")) {
-    failures.push(`${label} config must use CORE_CLOUD_CONTAINER and OpenCaeCoreCloudContainer`);
-  }
-  const container = Array.isArray(config.containers) ? config.containers[0] : undefined;
-  if (
-    !container ||
-    container.name !== expectedCoreCloudContainerName ||
-    container.class_name !== "OpenCaeCoreCloudContainer" ||
-    container.image !== "./services/opencae-core-cloud/Dockerfile"
-  ) {
-    failures.push(`${label} config must define the ${expectedCoreCloudContainerName} container image and class`);
-  }
-  const binding = config.durable_objects?.bindings?.[0];
-  if (!binding || binding.name !== "CORE_CLOUD_CONTAINER" || binding.class_name !== "OpenCaeCoreCloudContainer") {
-    failures.push(`${label} config must bind CORE_CLOUD_CONTAINER to OpenCaeCoreCloudContainer`);
-  }
-  const r2Binding = Array.isArray(config.r2_buckets) ? config.r2_buckets.find((bucket) => bucket?.binding === "CORE_CLOUD_ARTIFACTS") : undefined;
-  if (!r2Binding) {
-    failures.push(`${label} config must bind CORE_CLOUD_ARTIFACTS for run requests, events, and results`);
-  }
-  if (!Array.isArray(config.migrations) || !config.migrations.some((migration) => Array.isArray(migration?.new_sqlite_classes) && migration.new_sqlite_classes.includes("OpenCaeCoreCloudContainer"))) {
-    failures.push(`${label} config must add an OpenCaeCoreCloudContainer Durable Object migration`);
-  }
-  for (const productionDomain of productionDomains) {
-    if (!hasCustomDomainRoute(config, productionDomain)) {
-      failures.push(`${label} config must route ${productionDomain} as a custom domain`);
-    }
-  }
-}
 
-function validateProductionConfig(label, config, failures) {
-  validateCoreCloudContainerConfig(label, config, failures);
+  validateRetiredCloudAbsent(label, config, failures);
+
+  // The DO class must be migrated away explicitly so the next deploy deletes
+  // the retired container binding instead of failing on an orphaned class.
+  const migrations = Array.isArray(config.migrations) ? config.migrations : [];
+  if (!migrations.some((migration) => Array.isArray(migration?.deleted_classes) && migration.deleted_classes.includes("OpenCaeCoreCloudContainer"))) {
+    failures.push(`${label} config must keep the OpenCaeCoreCloudContainer deleted_classes migration (cloud retirement, 2026-07)`);
+  }
 
   for (const productionDomain of productionDomains) {
     if (!hasCustomDomainRoute(config, productionDomain)) {
@@ -145,6 +72,52 @@ function validateProductionConfig(label, config, failures) {
   const runWorkerFirst = config.assets?.run_worker_first;
   if (!Array.isArray(runWorkerFirst) || !runWorkerFirst.includes("/api/*") || !runWorkerFirst.includes("/health")) {
     failures.push(`${label} config assets.run_worker_first must include "/api/*" and "/health"`);
+  }
+  if (config.assets?.binding !== "ASSETS") {
+    failures.push(`${label} config must bind Workers Static Assets as ASSETS`);
+  }
+}
+
+function validateRetiredCloudAbsent(label, config, failures) {
+  if (config.containers !== undefined) {
+    failures.push(`${label} config must not define containers — the Core Cloud container was retired in 2026-07 (docs/cloud-retirement.md)`);
+  }
+  if (config.durable_objects !== undefined) {
+    failures.push(`${label} config must not bind Durable Objects — the Core Cloud container DO was retired in 2026-07`);
+  }
+  if (config.r2_buckets !== undefined) {
+    failures.push(`${label} config must not bind R2 buckets — the Core Cloud artifact bucket binding was retired in 2026-07`);
+  }
+  const serialized = JSON.stringify(config);
+  if (serialized.toLowerCase().includes(legacySolverToken)) {
+    failures.push(`${label} config must not reference legacy solver containers`);
+  }
+  for (const token of retiredCloudTokens) {
+    if (serialized.includes(token)) {
+      failures.push(`${label} config must not reference the retired ${token} cloud binding`);
+    }
+  }
+}
+
+function validateDeployScripts(packageJson, failures) {
+  const scripts = packageJson?.scripts ?? {};
+  if (!String(scripts["deploy:cloudflare"] ?? "").includes("verify:cloudflare-config")) {
+    failures.push("deploy:cloudflare must run verify:cloudflare-config before production deployment");
+  }
+  const serializedScripts = JSON.stringify(scripts);
+  if (serializedScripts.includes("wrangler.containers.jsonc") || serializedScripts.includes("wrangler.local-first.jsonc")) {
+    failures.push("package scripts must not reference the removed wrangler.containers.jsonc / wrangler.local-first.jsonc configs");
+  }
+  for (const retiredScript of ["deploy:core-cloud", "deploy:core-cloud:dry-run", "containers:build:core-cloud", "containers:push:core-cloud", "verify:runner-version", "test:core-cloud", "test:core-cloud-container"]) {
+    if (scripts[retiredScript] !== undefined) {
+      failures.push(`package script ${retiredScript} was retired with the cloud solver and must not return`);
+    }
+  }
+  if (serializedScripts.toLowerCase().includes(legacySolverToken)) {
+    failures.push("package scripts must not reference legacy solver containers");
+  }
+  if (packageJson?.dependencies?.["@cloudflare/containers"] !== undefined) {
+    failures.push("@cloudflare/containers must stay removed — the Worker hosts no container");
   }
 }
 

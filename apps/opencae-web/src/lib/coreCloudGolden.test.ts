@@ -13,7 +13,10 @@ import { describe, expect, test } from "vitest";
  */
 
 const FIXTURE_DIR = resolve(__dirname, "../testdata/core-cloud-golden");
-const PINNED_CORE_REF = readFileSync(resolve(__dirname, "../../../../services/opencae-core-cloud/OPENCAE_CORE_REF"), "utf8").trim();
+// The pin moved from the deleted services/opencae-core-cloud mirror to the
+// repo root with the cloud retirement (B4b); it still pins the sibling Core
+// solver packages whose output must match these frozen fixtures.
+const PINNED_CORE_REF = readFileSync(resolve(__dirname, "../../../../OPENCAE_CORE_REF"), "utf8").trim();
 /**
  * Core refs whose solver output is proven identical to the ref the fixtures were
  * recorded at, so the fixtures remain the valid golden record under them. A ref
