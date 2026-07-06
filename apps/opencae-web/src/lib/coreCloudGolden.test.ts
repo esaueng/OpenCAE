@@ -14,6 +14,18 @@ import { describe, expect, test } from "vitest";
 
 const FIXTURE_DIR = resolve(__dirname, "../testdata/core-cloud-golden");
 const PINNED_CORE_REF = readFileSync(resolve(__dirname, "../../../../services/opencae-core-cloud/OPENCAE_CORE_REF"), "utf8").trim();
+/**
+ * Core refs whose solver output is proven identical to the ref the fixtures were
+ * recorded at, so the fixtures remain the valid golden record under them. A ref
+ * belongs here only with an explicit equivalence argument; anything else must
+ * re-record via scripts/record-core-cloud-golden.mts.
+ *
+ * - bc6c305: 5fff277 + solver progress/cancel hooks (no-ops when hooks are absent)
+ *   + typed-array CSR builder proven exactly equivalent to the Map builder
+ *   (sparse-builder-equivalence.test.ts in opencae-core, 0 mismatches).
+ */
+const RECORDED_CORE_REF = "5fff27782df894ecf28d65097f63461d69771f16";
+const VALIDATED_EQUIVALENT_REFS = new Set([RECORDED_CORE_REF, "bc6c305272bd2789634f5e4c9006e0eae21e116b"]);
 const EXPECTED_RUNNER_VERSION = "0.1.6";
 
 const STATIC_CASES = ["cantilever-static", "beam-static", "bracket-static"] as const;
@@ -106,7 +118,10 @@ describe.each(ALL_CASES)("core cloud golden fixture %s", (name) => {
 
   test("was recorded from the pinned production runner", () => {
     expect(fixture.meta.case).toBe(name);
-    expect(fixture.meta.coreRef).toBe(PINNED_CORE_REF);
+    expect(fixture.meta.coreRef).toBe(RECORDED_CORE_REF);
+    // The live pin may advance past the recording ref only through refs with a
+    // proven-identical solver output; otherwise fixtures are stale — re-record.
+    expect(VALIDATED_EQUIVALENT_REFS).toContain(PINNED_CORE_REF);
     expect(fixture.meta.runnerVersion).toBe(EXPECTED_RUNNER_VERSION);
   });
 
