@@ -772,8 +772,8 @@ describe("api", () => {
     source.close();
 
     expect((response.run as { status?: string }).status).toBe("failed");
-    expect(response.message).toMatch(/actual Core volume mesh|OpenCAE Core Cloud/i);
-    expect(seen.map((event) => event.message).join(" ")).toMatch(/actual Core volume mesh|OpenCAE Core Cloud/i);
+    expect(response.message).toMatch(/needs a volume mesh|in-browser meshing is unavailable/i);
+    expect(seen.map((event) => event.message).join(" ")).toMatch(/needs a volume mesh|in-browser meshing is unavailable/i);
   });
 
   test("routes explicit local dynamic studies to OpenCAE Core dynamic locally", { timeout: 60000 }, async () => {

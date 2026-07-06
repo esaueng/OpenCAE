@@ -6,8 +6,9 @@
 // Verified 2026-07-06: bracket 1,140 nodes / 562 Tet10 (matches the A-M1
 // Node spike); STEP proof reports mapping modes + reaction-vs-applied load.
 //
-// Usage (manual; needs Node >= 22 for global WebSocket, plus Chrome):
-//   VITE_WASM_MESHING=1 pnpm --filter @opencae/web build
+// Usage (manual; needs Node >= 22 for global WebSocket, plus Chrome).
+// Wasm meshing is the production default (A-M4), so a plain build carries it:
+//   pnpm --filter @opencae/web build
 //   pnpm --filter @opencae/web preview --port 5199 &
 //   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
 //     --headless=new --disable-gpu --no-first-run \
@@ -15,13 +16,18 @@
 //     --remote-debugging-port=9333 about:blank &
 //   node scripts/verify-wasm-mesh-browser.mjs            # bracket proof
 //   PROOF=step node scripts/verify-wasm-mesh-browser.mjs # STEP proof
+//   PROOF=run node scripts/verify-wasm-mesh-browser.mjs  # mesh-then-solve run proof (A-M4)
 //
 // Exit codes: 0 proof ok, 1 harness reported failure, 2 timeout.
 const DEBUG_PORT = Number(process.env.CDP_PORT ?? 9333);
-const PROOF_MODE = process.env.PROOF === "step" ? "step" : "bracket";
+const PROOF_MODE = process.env.PROOF === "step" ? "step" : process.env.PROOF === "run" ? "run" : "bracket";
 const PAGE_URL = process.env.PAGE_URL
-  ?? (PROOF_MODE === "step" ? "http://localhost:5199/?meshProof=step" : "http://localhost:5199/?meshProof=1");
-const RESULT_FIELD = PROOF_MODE === "step" ? "lastStepResult" : "lastResult";
+  ?? (PROOF_MODE === "step"
+    ? "http://localhost:5199/?meshProof=step"
+    : PROOF_MODE === "run"
+      ? "http://localhost:5199/?meshProof=run"
+      : "http://localhost:5199/?meshProof=1");
+const RESULT_FIELD = PROOF_MODE === "step" ? "lastStepResult" : PROOF_MODE === "run" ? "lastRunResult" : "lastResult";
 const TIMEOUT_MS = Number(process.env.PROOF_TIMEOUT_MS ?? 180_000);
 
 async function getTargets() {
@@ -107,6 +113,15 @@ const stepGateFailed = PROOF_MODE === "step" && result.ok
   && (result.usedGeometricFallback || !result.solve?.ok || result.solve?.reactionMatchesApplied === false);
 if (stepGateFailed) {
   console.log("STEPPROOF GATE FAILED: geometric fallback used or solve/reaction check failed.");
+  process.exit(1);
+}
+// A-M4 run proof: a study with NO stored artifact must mesh (real phase
+// events), then solve, and the results must be labeled as a local solve.
+const runGateFailed = PROOF_MODE === "run" && result.ok
+  && (!result.sawMeshingEvents || !result.sawSolveEvents || !result.completed
+    || !result.meshedStudyStoredArtifact || result.results?.labeledLocal !== true);
+if (runGateFailed) {
+  console.log("RUNPROOF GATE FAILED: missing meshing/solve events, no stored artifact, or results not labeled local.");
   process.exit(1);
 }
 process.exit(result.ok ? 0 : 1);
