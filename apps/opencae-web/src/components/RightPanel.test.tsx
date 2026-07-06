@@ -417,7 +417,7 @@ describe("RightPanel payload mass controls", () => {
     const runHtml = renderPanel("run", { study: detailedStudy });
     const meshHtml = renderPanel("mesh", { study: { ...detailedStudy, meshSettings: { preset: "ultra", status: "complete", summary: { nodes: 182400, elements: 119808, warnings: [], analysisSampleCount: 45000, quality: "ultra" } } } });
 
-    expect(runHtml).toContain("Simulation backend");
+    expect(runHtml).toContain("Simulation settings");
     expect(runHtml).toContain("OpenCAE Core");
     expect(runHtml).toContain("Fidelity");
     expect(meshHtml).toContain("Ultra");
@@ -425,7 +425,7 @@ describe("RightPanel payload mass controls", () => {
     expect(meshHtml).toContain("45,000");
   });
 
-  test("offers only Auto and OpenCAE Core Local backends (cloud option retired)", () => {
+  test("offers no backend picker: the solver is local, informationally stated (B5)", () => {
     const runHtml = renderPanel("run", {
       study: {
         ...study,
@@ -433,14 +433,16 @@ describe("RightPanel payload mass controls", () => {
       }
     });
 
-    expect(runHtml).toContain("name=\"solver-backend\"");
-    expect(runHtml).toContain("OpenCAE Core Local");
-    // B4a: a backend option that cannot execute would be dishonest.
+    // The cloud path is retired and every run executes in the browser, so a
+    // backend select would be routing theater; an informational row replaces it.
+    expect(runHtml).not.toContain("solver-backend");
+    expect(runHtml).not.toContain("Auto — runs locally in your browser");
+    expect(runHtml).toContain("Local (in-browser)");
+    expect(runHtml).toContain("OpenCAE Core Local (in-browser)");
     expect(runHtml).not.toContain("OpenCAE Core Cloud");
-    expect(runHtml).toContain("Auto — runs locally in your browser");
   });
 
-  test("defaults an omitted solver backend to Auto and shows where it resolves", () => {
+  test("shows the local solver row for an omitted solver backend", () => {
     const runHtml = renderPanel("run", {
       study: {
         ...study,
@@ -448,18 +450,15 @@ describe("RightPanel payload mass controls", () => {
       }
     });
 
-    // Since B4a every run executes locally; Auto stays the default choice and
-    // says so (ineligible studies fail the run with an actionable reason).
-    expect(runHtml).toContain('name="solver-backend"');
-    expect(runHtml).toContain('<option value="auto" selected="">');
-    expect(runHtml).toContain("Auto — runs locally in your browser");
-    expect(runHtml).toContain("OpenCAE Core Local (auto)");
+    expect(runHtml).not.toContain("solver-backend");
+    expect(runHtml).toContain("Local (in-browser)");
+    expect(runHtml).toContain("OpenCAE Core Local (in-browser)");
     expect(runHtml).toContain("local core worker");
     expect(runHtml).not.toContain("OpenCAE Core Cloud");
     expect(runHtml).not.toContain("legacy backend");
   });
 
-  test("shows Auto resolving to the local browser solver for eligible studies", () => {
+  test("states the local browser solver for eligible studies", () => {
     const eligibleDisplayModel: DisplayModel = {
       id: "display-cantilever",
       name: "cantilever demo body",
@@ -481,10 +480,10 @@ describe("RightPanel payload mass controls", () => {
 
     const runHtml = renderPanel("run", { study: eligibleStudy, displayModel: eligibleDisplayModel });
 
-    expect(runHtml).toContain("Auto — runs locally in your browser");
-    expect(runHtml).toContain("Auto routing: this study solves locally in your browser.");
-    expect(runHtml).toContain("OpenCAE Core Local (auto)");
+    expect(runHtml).toContain("Local (in-browser)");
+    expect(runHtml).toContain("OpenCAE Core Local (in-browser)");
     expect(runHtml).toContain("local core worker");
+    expect(runHtml).not.toContain("solver-backend");
   });
 
   test("keeps OpenCAE Core runs browser-local without container endpoint copy", () => {
@@ -510,7 +509,7 @@ describe("RightPanel payload mass controls", () => {
     expect(runHtml).not.toContain('<button class="primary wide" disabled=""');
   });
 
-  test("labels retired cloud backend selections from old saves as local auto routing", () => {
+  test("labels retired cloud backend selections from old saves as the local solver", () => {
     const cloudStudy = {
       ...study,
       solverSettings: { backend: "opencae_core_cloud", fidelity: "ultra" }
@@ -521,7 +520,8 @@ describe("RightPanel payload mass controls", () => {
       canRunSimulation: true
     });
 
-    expect(runHtml).toContain("OpenCAE Core Local (auto)");
+    expect(runHtml).toContain("OpenCAE Core Local (in-browser)");
+    expect(runHtml).not.toContain("OpenCAE Core Cloud");
     expect(runHtml).not.toContain("CalculiX FEA");
     expect(runHtml).not.toContain("Detailed local");
     expect(runHtml).not.toContain("Local estimate");
@@ -554,10 +554,10 @@ describe("RightPanel payload mass controls", () => {
       study: detailedStudy
     });
 
-    // Legacy tokens are not an explicit choice; auto routing runs locally
-    // (the only execution path since B4a).
-    expect(runHtml).toContain('<option value="auto" selected="">');
-    expect(runHtml).toContain("OpenCAE Core Local (auto)");
+    // Legacy tokens are not an explicit choice; every run executes locally
+    // (the only execution path since B4a) and the panel says so plainly.
+    expect(runHtml).not.toContain("solver-backend");
+    expect(runHtml).toContain("OpenCAE Core Local (in-browser)");
     expect(runHtml).toContain("sparse_static");
     expect(runHtml).not.toContain("Expected detail");
     expect(runHtml).not.toContain("Browser OpenCAE Core CPU");
