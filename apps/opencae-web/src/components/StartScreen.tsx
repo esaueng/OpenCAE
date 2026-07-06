@@ -1,5 +1,6 @@
-import { useRef, useState } from "react";
+import { useRef, useState, useSyncExternalStore } from "react";
 import type { SampleAnalysisType, SampleModelId } from "../lib/api";
+import { getOfflineReadiness, offlineReadinessLabel, subscribeOfflineReadiness } from "../lib/offlineStatus";
 import { OpenCaeLogoMark } from "./OpenCaeLogoMark";
 import { SampleOptionCard } from "./SampleOptionCard";
 import { SAMPLE_OPTIONS } from "./sampleOptions";
@@ -12,6 +13,11 @@ interface StartScreenProps {
 
 export function StartScreen({ onLoadSample, onCreateProject, onOpenProject }: StartScreenProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Truthful cache state (see lib/offlineStatus.ts): "Offline-ready" only
+  // once the service worker reports every precached asset (wasm included) in
+  // cache; nothing at all when there is no service worker.
+  const offlineReadiness = useSyncExternalStore(subscribeOfflineReadiness, getOfflineReadiness, getOfflineReadiness);
+  const offlineLabel = offlineReadinessLabel(offlineReadiness);
   const [selectedSample, setSelectedSample] = useState<SampleModelId>("bracket");
   const [selectedAnalysisType, setSelectedAnalysisType] = useState<SampleAnalysisType>("static_stress");
   const [sampleMenuOpen, setSampleMenuOpen] = useState(false);
@@ -94,7 +100,14 @@ export function StartScreen({ onLoadSample, onCreateProject, onOpenProject }: St
         )}
       </section>
       <footer className="start-footer">
-        <span className="local-runtime">Runs locally</span>
+        <span className="local-runtime">
+          Runs locally
+          {offlineLabel ? (
+            <span className="offline-readiness" role="status">
+              {` · ${offlineLabel}`}
+            </span>
+          ) : null}
+        </span>
         <a className="start-credit" href="https://esauengineering.com/" target="_blank" rel="noreferrer">
           Built by Esau Engineering
         </a>
