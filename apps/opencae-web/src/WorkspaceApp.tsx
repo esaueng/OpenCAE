@@ -3,6 +3,7 @@ import { isRunResultReadyStatus } from "@opencae/schema";
 import type { Constraint, DisplayFace, DisplayModel, DynamicSolverSettings, Load, NamedSelection, Project, ResultField, ResultRenderBounds, ResultSummary, RunEvent, RunTimingEstimate, SimulationFidelity, Study } from "@opencae/schema";
 import { RotateCcw, Save } from "lucide-react";
 import { addLoad, addSupport, assignMaterial, cancelRun, createProject, generateMesh, getResults, importLocalProject, loadSampleProject, renameProject, runSimulation, subscribeToRun, updateStudy as saveStudyPatch, uploadModel, type SampleAnalysisType, type SampleModelId } from "./lib/api";
+import { cancelWasmMeshing } from "./lib/wasmMeshing";
 import { normalizePrintParameters, starterMaterials } from "@opencae/materials";
 import { BottomPanel, type WorkspaceLogEntry } from "./components/BottomPanel";
 import { OpenCaeLogoMark } from "./components/OpenCaeLogoMark";
@@ -253,6 +254,9 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const resultPlaybackBufferCacheForViewer = !DEBUG_RESULT_FRAME_CACHE_ONLY && resultPlaybackCacheState.status === "ready"
     ? resultPlaybackCacheState.cache.packed ?? null
     : null;
+  // In-browser wasm meshing has no cooperative cancel; terminate the mesh
+  // worker if the workspace unmounts mid-mesh (no-op when idle or flag off).
+  useEffect(() => () => cancelWasmMeshing("Meshing cancelled: workspace closed."), []);
   useEffect(() => {
     if (!DEBUG_RESULTS) return;
     const frameField = visibleResultFieldsForUi.find((field) => field.type === "stress")
@@ -1419,7 +1423,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           onRemoveLoad={(loadId) =>
             updateStudy(saveStudyPatch(study.id, { loads: study.loads.filter((item) => item.id !== loadId) }, "Load removed.", study))
           }
-          onGenerateMesh={(preset) => updateStudy(generateMesh(study.id, preset, study, displayModel), shouldAutoAdvanceAfterMeshGeneration() ? "run" : undefined)}
+          onGenerateMesh={(preset) => updateStudy(generateMesh(study.id, preset, study, displayModel, pushMessage), shouldAutoAdvanceAfterMeshGeneration() ? "run" : undefined)}
           onUpdateSolverSettings={handleUpdateSolverSettings}
           onRunSimulation={handleRunSimulation}
           onCancelSimulation={handleCancelSimulation}
