@@ -1,9 +1,10 @@
 /**
  * Browser-local OpenCAE Core solve pipeline.
  *
- * Mirrors the deployed OpenCAE Core Cloud runner's /solve pipeline
- * (opencae-core services/opencae-core-cloud/src/server.ts, RUNNER_VERSION 0.1.6)
- * step for step from model validation onward:
+ * Mirrors the retired OpenCAE Core Cloud runner's /solve pipeline (sibling
+ * opencae-core repo, services/opencae-core-cloud/src/server.ts there,
+ * RUNNER_VERSION 0.1.6; the cloud service itself was retired in 2026-07 —
+ * see docs/cloud-retirement.md) step for step from model validation onward:
  *
  *   validateModelJson -> boundedSolverSettings -> solveCoreStatic/solveCoreDynamic
  *     -> stampProvenance -> validateCoreResult -> postprocess diagnostics

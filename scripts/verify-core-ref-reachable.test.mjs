@@ -44,7 +44,7 @@ describe("verify-core-ref-reachable gate", () => {
     expect(result.message).toContain("NOT reachable");
     expect(result.message).toContain("not our ref");
     expect(result.message).toContain("Push the OpenCAE Core branch containing the pinned commit");
-    expect(result.message).toContain("services/opencae-core-cloud/OPENCAE_CORE_REF");
+    expect(result.message).toContain("OPENCAE_CORE_REF (repo root)");
   });
 
   test("rejects short or non-SHA refs without probing the network", () => {
@@ -58,10 +58,13 @@ describe("verify-core-ref-reachable gate", () => {
     expect(probed).toBe(false);
   });
 
-  test("every container build/deploy script runs the gate", () => {
+  test("every production deploy script runs the gate", () => {
     const packageJson = JSON.parse(readFileSync(resolve(rootDir, "package.json"), "utf8"));
     expect(packageJson.scripts["verify:core-ref"]).toContain("scripts/verify-core-ref-reachable.mjs");
-    for (const script of ["deploy:cloudflare", "deploy:cloudflare:dry-run", "deploy:core-cloud", "deploy:core-cloud:dry-run", "containers:build:core-cloud"]) {
+    // Container build/deploy scripts were retired with the cloud solver (B4b);
+    // the pin still gates the production Worker deploys, which build the
+    // browser solver from the pinned sibling Core packages.
+    for (const script of ["deploy:cloudflare", "deploy:cloudflare:dry-run"]) {
       expect(packageJson.scripts[script], `${script} must gate on verify:core-ref`).toContain("verify:core-ref");
     }
   });

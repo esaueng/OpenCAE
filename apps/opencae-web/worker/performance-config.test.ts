@@ -12,7 +12,10 @@ function readJson(path: string) {
 
 describe("Cloudflare Worker performance config", () => {
   test("runs the Worker script only for API and health routes", () => {
-    for (const configPath of ["../../../wrangler.jsonc", "../../../wrangler.static.jsonc", "../../../wrangler.local-first.jsonc"]) {
+    // wrangler.containers.jsonc and wrangler.local-first.jsonc were removed
+    // with the cloud retirement (B4b); only the production and static
+    // configs remain.
+    for (const configPath of ["../../../wrangler.jsonc", "../../../wrangler.static.jsonc"]) {
       const config = readJson(configPath);
 
       expect(config.assets?.run_worker_first).toEqual(["/api/*", "/health"]);

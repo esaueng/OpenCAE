@@ -15,7 +15,7 @@ export async function fallbackSolveLocalStudy({
   debugResults?: boolean;
 }): Promise<LocalSolveResult> {
   if (normalizeSolverBackend(study) !== "opencae_core_local") {
-    throw new Error("OpenCAE Core Cloud solves must run through /api/cloud-core/runs.");
+    throw new Error("Unsupported solver backend for a local solve. Simulations run locally in your browser with OpenCAE Core (the cloud backend was retired).");
   }
   const coreSolved = trySolveOpenCaeCoreStudy({ study, runId, displayModel });
   if (coreSolved.ok) {
