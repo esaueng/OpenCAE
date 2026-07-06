@@ -135,7 +135,7 @@ export async function stepPreviewFromBase64(contentBase64: string, color: string
   return normalizedStepPreviewFromMeshes(result.meshes ?? [], color, options);
 }
 
-function getOcctImporter(): Promise<OcctImporter> {
+export function getOcctImporter(): Promise<OcctImporter> {
   occtPromise ??= import("occt-import-js")
     .then(({ default: occtimportjs }) => {
       return occtimportjs({
