@@ -8,7 +8,7 @@
 // WASM module inside the worker) are loaded via dynamic import only after the
 // flag check passes, so default builds and the initial bundle stay untouched.
 import type { DisplayModel, MeshQuality, Study } from "@opencae/schema";
-import { geometrySourceForStudy, studyForCoreCloudGeometryDispatch, type CoreCloudGeometrySource } from "../workers/opencaeCoreSolve";
+import { geometrySourceForStudy, studyForCoreGeometryDispatch, type CoreCloudGeometrySource } from "../workers/opencaeCoreSolve";
 import { unpackCoreVolumeMeshArtifact } from "../workers/meshProtocol";
 import type { MeshProgressListener } from "../workers/meshWorkerClient";
 
@@ -104,9 +104,9 @@ async function meshWorkerRun(options: WasmMeshOptions): Promise<WasmMeshStudyRes
   let attributionNote: string | undefined;
 
   if (geometry.kind === "sample_procedural" && geometry.sampleId === "bracket") {
-    // Mirrors the cloud dispatch override in openCaeCoreCloudSolveRequest():
-    // native curved Gmsh Tet10 elements can invert around the bracket's
-    // drilled holes, so the bracket meshes with linear elements.
+    // Native curved Gmsh Tet10 elements can invert around the bracket's
+    // drilled holes, so the bracket meshes with linear elements (the same
+    // policy the retired cloud dispatch used).
     elementOrder = 1;
     meshedPacked = await client.meshGeoScriptInWorker(
       {
@@ -157,7 +157,7 @@ async function meshWorkerRun(options: WasmMeshOptions): Promise<WasmMeshStudyRes
   const analysisType = study.type === "dynamic_structural" ? "dynamic_structural" : "static_stress";
   // The mirrored builder applies study load directions verbatim in the solver
   // frame (same contract as the cloud container), so hand it a solver-frame study.
-  const dispatchStudy = studyForCoreCloudGeometryDispatch(study, displayModel);
+  const dispatchStudy = studyForCoreGeometryDispatch(study, displayModel);
   const mappingDiagnostics: import("@opencae/mesh-intake").SelectionMappingDiagnostic[] = [];
   const model = intake.buildCoreModelFromCloudMesh({
     study: {
