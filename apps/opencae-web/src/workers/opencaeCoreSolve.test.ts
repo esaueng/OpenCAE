@@ -148,9 +148,13 @@ describe("OpenCAE Core browser solver adapter", () => {
     expect(outcome.result.diagnostics?.some((entry) => (entry as { id?: unknown })?.id === "browser-solve-limits")).toBe(true);
   });
 
-  test("solves dynamic studies with OpenCAE Core transient fields", { timeout: 60000 }, () => {
+  test("solves dynamic studies with OpenCAE Core transient fields", { timeout: 120000 }, () => {
     const dynamicStudy = {
       ...staticStudy,
+      // Coarse preset: the medium-density transient ran ~97 s on CI runners
+      // (~26 s locally) and tripped the 60 s timeout; the assertions below
+      // check contract/provenance, not mesh density.
+      meshSettings: { preset: "coarse", status: "complete", meshRef: "project-1/mesh/mesh-summary.json" },
       type: "dynamic_structural",
       solverSettings: {
         backend: "opencae_core_local",
