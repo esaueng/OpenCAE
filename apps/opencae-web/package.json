@@ -16,6 +16,7 @@
     "@opencae/db": "workspace:*",
     "@opencae/materials": "workspace:*",
     "@opencae/schema": "workspace:*",
+    "@opencae/solve-pipeline": "workspace:*",
     "@opencae/step": "workspace:*",
     "@opencae/study-core": "workspace:*",
     "@opencae/units": "workspace:*",
