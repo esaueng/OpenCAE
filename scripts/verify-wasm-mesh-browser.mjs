@@ -1,9 +1,10 @@
-// Browser proof for in-browser gmsh-wasm meshing (plan A-M2): drives real
-// headless Chrome via CDP, loads the built app with ?meshProof=1 (the
-// meshHarness.ts auto-run), captures console output, and polls
-// window.__opencaeMeshProof.lastResult for node/element counts and phase
-// progress evidence. Verified 2026-07-06: 1,140 nodes / 562 Tet10 for the
-// default bracket .geo, matching the A-M1 Node spike exactly.
+// Browser proof for in-browser gmsh-wasm meshing (plan A-M2/A-M3): drives
+// real headless Chrome via CDP, loads the built app with ?meshProof=1 (A-M2
+// bracket .geo proof) or ?meshProof=step (A-M3 STEP end-to-end: face
+// registry -> attribution -> byFace mapping -> in-browser solve), captures
+// console output, and polls window.__opencaeMeshProof for evidence.
+// Verified 2026-07-06: bracket 1,140 nodes / 562 Tet10 (matches the A-M1
+// Node spike); STEP proof reports mapping modes + reaction-vs-applied load.
 //
 // Usage (manual; needs Node >= 22 for global WebSocket, plus Chrome):
 //   VITE_WASM_MESHING=1 pnpm --filter @opencae/web build
@@ -12,11 +13,15 @@
 //     --headless=new --disable-gpu --no-first-run \
 //     --user-data-dir=/tmp/opencae-meshproof-profile \
 //     --remote-debugging-port=9333 about:blank &
-//   node scripts/verify-wasm-mesh-browser.mjs
+//   node scripts/verify-wasm-mesh-browser.mjs            # bracket proof
+//   PROOF=step node scripts/verify-wasm-mesh-browser.mjs # STEP proof
 //
 // Exit codes: 0 proof ok, 1 harness reported failure, 2 timeout.
 const DEBUG_PORT = Number(process.env.CDP_PORT ?? 9333);
-const PAGE_URL = process.env.PAGE_URL ?? "http://localhost:5199/?meshProof=1";
+const PROOF_MODE = process.env.PROOF === "step" ? "step" : "bracket";
+const PAGE_URL = process.env.PAGE_URL
+  ?? (PROOF_MODE === "step" ? "http://localhost:5199/?meshProof=step" : "http://localhost:5199/?meshProof=1");
+const RESULT_FIELD = PROOF_MODE === "step" ? "lastStepResult" : "lastResult";
 const TIMEOUT_MS = Number(process.env.PROOF_TIMEOUT_MS ?? 180_000);
 
 async function getTargets() {
@@ -79,7 +84,7 @@ const started = Date.now();
 let result = null;
 while (Date.now() - started < TIMEOUT_MS) {
   const evaluated = await send("Runtime.evaluate", {
-    expression: "window.__opencaeMeshProof && window.__opencaeMeshProof.lastResult ? JSON.stringify(window.__opencaeMeshProof.lastResult) : (window.__opencaeMeshProof ? 'HARNESS_LOADED' : 'NO_HARNESS')",
+    expression: `window.__opencaeMeshProof && window.__opencaeMeshProof.${RESULT_FIELD} ? JSON.stringify(window.__opencaeMeshProof.${RESULT_FIELD}) : (window.__opencaeMeshProof ? 'HARNESS_LOADED' : 'NO_HARNESS')`,
     returnByValue: true
   });
   const value = evaluated.result?.result?.value;
@@ -94,6 +99,14 @@ if (!result) {
   console.log("MESHPROOF TIMEOUT — no result within budget");
   process.exit(2);
 }
-console.log("MESHPROOF RESULT:");
+console.log(`MESHPROOF RESULT (${PROOF_MODE}):`);
 console.log(JSON.stringify(result, null, 2));
+// A-M3 STEP proof: byFace mapping (never geometric) plus a converged solve
+// with reaction ~= applied load are part of the pass criteria.
+const stepGateFailed = PROOF_MODE === "step" && result.ok
+  && (result.usedGeometricFallback || !result.solve?.ok || result.solve?.reactionMatchesApplied === false);
+if (stepGateFailed) {
+  console.log("STEPPROOF GATE FAILED: geometric fallback used or solve/reaction check failed.");
+  process.exit(1);
+}
 process.exit(result.ok ? 0 : 1);

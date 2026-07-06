@@ -7,10 +7,17 @@ import {
   bracketGeoScript,
   bracketGeometrySourceMetadata,
   buildCoreModelFromCloudMesh,
-  type BracketGeometryDescriptor
+  type BracketGeometryDescriptor,
+  type SelectionMappingDiagnostic
 } from "@opencae/mesh-intake";
 import { unpackCoreVolumeMeshArtifact, type MeshWorkerPhase } from "./meshProtocol";
-import { meshGeoScriptInWorker } from "./meshWorkerClient";
+import { meshGeoScriptInWorker, meshStepFileInWorker } from "./meshWorkerClient";
+import { trySolveOpenCaeCoreStudy } from "@opencae/core-adapter";
+import { stepAttributionForRegistry, stepFaceRegistryFromBase64 } from "../stepFaces";
+import { STEP_PROOF_LOAD_NEWTONS, stepProofScenario, studyWithWasmMeshSummary } from "./stepProofScenario";
+// The corpus STEP fixture ships inline in the (flag-on-only) harness chunk so
+// the browser proof runs the real upload path without network fetches.
+import boxWithBoreStep from "../../../../libs/opencae-mesh-intake/fixtures/box-with-bore.step?raw";
 
 export type MeshProofResult = {
   ok: true;
@@ -77,21 +84,145 @@ async function runBracketProof(options: { elementOrder?: 1 | 2; descriptor?: Bra
   }
 }
 
+// A-M3: STEP path end-to-end in the browser — registry (occt WASM) -> face
+// selections by real faceId -> mesh worker with attribution transferables ->
+// Core model build (byFace mapping asserted via diagnostics) -> in-browser
+// static solve with the reaction-vs-applied-load check.
+export type StepProofResult = {
+  ok: true;
+  brepFaceCount: number;
+  nodeCount: number;
+  elementCount: number;
+  elementType: string;
+  surfaceFacetCount: number;
+  connectedComponentCount: number;
+  invertedElementCount: number;
+  algorithm3D: "delaunay" | "frontal";
+  attributedSets: number;
+  totalSets: number;
+  supportFaceId: string;
+  loadFaceId: string;
+  mappingModes: Array<{ role: string; mode: string; surfaceSet: string; matchedFacetCount: number }>;
+  usedGeometricFallback: boolean;
+  phases: Array<{ phase: MeshWorkerPhase; elapsedMs: number }>;
+  totalMs: number;
+  solve: {
+    ok: boolean;
+    solverBackend?: string;
+    maxStress?: number;
+    maxStressUnits?: string;
+    maxDisplacement?: number;
+    maxDisplacementUnits?: string;
+    reactionForce?: number;
+    appliedForce: number;
+    reactionMatchesApplied?: boolean;
+    reason?: string;
+  };
+} | { ok: false; error: string };
+
+async function runStepProof(): Promise<StepProofResult> {
+  try {
+    const contentBase64 = btoa(boxWithBoreStep);
+    const registry = await stepFaceRegistryFromBase64(contentBase64);
+    const scenario = stepProofScenario(registry, { filename: "box-with-bore.step", contentBase64 });
+
+    const phases: Array<{ phase: MeshWorkerPhase; elapsedMs: number }> = [];
+    const stepBytes = new TextEncoder().encode(boxWithBoreStep);
+    const stepContent = new ArrayBuffer(stepBytes.byteLength);
+    new Uint8Array(stepContent).set(stepBytes);
+    const meshed = await meshStepFileInWorker(
+      {
+        stepContent,
+        elementOrder: 2,
+        units: "mm",
+        meshSizeMm: 6,
+        attribution: stepAttributionForRegistry(registry)
+      },
+      (progress) => phases.push({ phase: progress.phase, elapsedMs: Math.round(progress.elapsedMs) })
+    );
+    const artifact = unpackCoreVolumeMeshArtifact(meshed.packed);
+    const mappingDiagnostics: SelectionMappingDiagnostic[] = [];
+    const model = buildCoreModelFromCloudMesh({
+      study: {
+        id: scenario.study.id,
+        type: "static_stress",
+        materialAssignments: scenario.study.materialAssignments,
+        namedSelections: scenario.study.namedSelections,
+        constraints: scenario.study.constraints,
+        loads: scenario.study.loads,
+        solverSettings: scenario.study.solverSettings as Record<string, unknown>
+      },
+      displayModel: scenario.displayModel,
+      volumeMesh: artifact,
+      analysisType: "static_stress",
+      solverSettings: { elementOrder: 2 },
+      mappingDiagnostics
+    });
+
+    const solvableStudy = studyWithWasmMeshSummary({ study: scenario.study, artifact, model, mappingDiagnostics });
+    const outcome = trySolveOpenCaeCoreStudy({ study: solvableStudy, runId: "run-meshproof-step", displayModel: scenario.displayModel });
+    const summary = outcome.ok ? outcome.result.summary : undefined;
+    return {
+      ok: true,
+      brepFaceCount: registry.faces.length,
+      nodeCount: artifact.metadata.nodeCount,
+      elementCount: artifact.metadata.elementCount,
+      elementType: artifact.elements[0]?.type ?? "none",
+      surfaceFacetCount: artifact.metadata.surfaceFacetCount,
+      connectedComponentCount: artifact.metadata.connectedComponentCount,
+      invertedElementCount: artifact.metadata.meshQuality.invertedElementCount,
+      algorithm3D: meshed.algorithm3D,
+      attributedSets: meshed.attribution?.attributedSetCount ?? 0,
+      totalSets: meshed.attribution?.sets.length ?? 0,
+      supportFaceId: scenario.faces.supportFace.faceId,
+      loadFaceId: scenario.faces.loadFace.faceId,
+      mappingModes: mappingDiagnostics.map((diagnostic) => ({
+        role: diagnostic.role,
+        mode: diagnostic.mode,
+        surfaceSet: diagnostic.surfaceSet,
+        matchedFacetCount: diagnostic.matchedFacetCount
+      })),
+      usedGeometricFallback: mappingDiagnostics.some((diagnostic) => diagnostic.mode === "geometric"),
+      phases,
+      totalMs: Math.round(meshed.totalMs),
+      solve: outcome.ok
+        ? {
+            ok: true,
+            solverBackend: outcome.solverBackend,
+            maxStress: summary!.maxStress,
+            maxStressUnits: summary!.maxStressUnits,
+            maxDisplacement: summary!.maxDisplacement,
+            maxDisplacementUnits: summary!.maxDisplacementUnits,
+            reactionForce: summary!.reactionForce,
+            appliedForce: STEP_PROOF_LOAD_NEWTONS,
+            reactionMatchesApplied: Math.abs(summary!.reactionForce - STEP_PROOF_LOAD_NEWTONS) / STEP_PROOF_LOAD_NEWTONS < 0.02
+          }
+        : { ok: false, appliedForce: STEP_PROOF_LOAD_NEWTONS, reason: outcome.reason }
+    };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? `${error.message}\n${error.stack ?? ""}` : String(error) };
+  }
+}
+
 declare global {
   interface Window {
     __opencaeMeshProof?: {
       runBracket: typeof runBracketProof;
-      /** Set once an auto-run (triggered by ?meshProof=1) finishes. */
+      runStep: typeof runStepProof;
+      /** Set once an auto-run (triggered by ?meshProof=1|step) finishes. */
       lastResult?: MeshProofResult;
+      lastStepResult?: StepProofResult;
     };
   }
 }
 
-window.__opencaeMeshProof = { runBracket: runBracketProof };
+window.__opencaeMeshProof = { runBracket: runBracketProof, runStep: runStepProof };
 
-// ?meshProof=1 auto-runs the bracket proof and mirrors the outcome into
-// document.title + console so dump-dom style headless capture works too.
-if (new URLSearchParams(window.location.search).get("meshProof") === "1") {
+// ?meshProof=1 auto-runs the bracket proof, ?meshProof=step the STEP proof;
+// both mirror the outcome into document.title + console so dump-dom style
+// headless capture works too.
+const meshProofMode = new URLSearchParams(window.location.search).get("meshProof");
+if (meshProofMode === "1") {
   void runBracketProof().then((result) => {
     window.__opencaeMeshProof!.lastResult = result;
     const title = result.ok
@@ -99,5 +230,15 @@ if (new URLSearchParams(window.location.search).get("meshProof") === "1") {
       : `MESHPROOF FAIL ${result.error.split("\n")[0]}`;
     document.title = title;
     console.log(`[meshProof] ${title}`, result);
+  });
+} else if (meshProofMode === "step") {
+  void runStepProof().then((result) => {
+    window.__opencaeMeshProof!.lastStepResult = result;
+    const title = result.ok
+      ? `STEPPROOF ${result.usedGeometricFallback || !result.solve.ok ? "FAIL" : "OK"} nodes=${result.nodeCount} elements=${result.elementCount} ` +
+        `mapping=${result.mappingModes.map((entry) => `${entry.role}:${entry.mode}`).join(",")} reaction=${result.solve.reactionForce ?? "n/a"}`
+      : `STEPPROOF FAIL ${result.error.split("\n")[0]}`;
+    document.title = title;
+    console.log(`[meshProof:step] ${title}`, result);
   });
 }
