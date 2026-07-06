@@ -283,12 +283,29 @@ export function openLocalProjectPayload(payload: unknown): SampleProjectResponse
   const displayModel = (hasObjectKey(payload, "displayModel") ? parseDisplayModel(payload.displayModel) : null)
     ?? displayModelForProject(parsed.data);
   const results = hasObjectKey(payload, "results") ? parseResultBundle(payload.results) : undefined;
+  // One-time migration diagnostic (B5): the schema silently normalizes the
+  // retired cloud backend to "auto" at parse time, so detect it on the RAW
+  // payload and tell the user honestly instead of migrating in silence.
+  const migrationNote = carriesRetiredCloudBackend(candidate) ? ` ${RETIRED_CLOUD_BACKEND_MIGRATION_NOTE}` : "";
   return {
     project: parsed.data,
     displayModel,
     ...(results ? { results } : {}),
-    message: `${parsed.data.name} opened from local file.`
+    message: `${parsed.data.name} opened from local file.${migrationNote}`
   };
+}
+
+export const RETIRED_CLOUD_BACKEND_MIGRATION_NOTE =
+  "Note: this project was saved with the retired OpenCAE Core Cloud backend; simulations now run locally in your browser.";
+
+/** True when any study in the raw (pre-parse) payload pinned the retired cloud backend. */
+function carriesRetiredCloudBackend(candidate: unknown): boolean {
+  if (!hasObjectKey(candidate, "studies") || !Array.isArray(candidate.studies)) return false;
+  return candidate.studies.some((studyValue) =>
+    hasObjectKey(studyValue, "solverSettings") &&
+    hasObjectKey(studyValue.solverSettings, "backend") &&
+    studyValue.solverSettings.backend === "opencae_core_cloud"
+  );
 }
 
 export type UploadDisplayOptions = {
