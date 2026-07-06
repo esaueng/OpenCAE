@@ -29,9 +29,25 @@ since B4a). The cloud solve infrastructure was removed in two steps:
   `wrangler.containers.jsonc` was deleted; the former
   `wrangler.local-first.jsonc` shape was promoted into `wrangler.jsonc`
   (production identity kept: Worker name `opencae`, custom domain
-  `cae.esau.app`). A `v4-retire-opencae-core-cloud-container` migration with
-  `deleted_classes` removes the Durable Object class on the next deploy.
-  `wrangler.static.jsonc` remains the non-production variant.
+  `cae.esau.app`). `wrangler.static.jsonc` remains the non-production variant.
+  The checked-in config carries **no migrations** — Workers Builds uploads PR
+  preview versions, and pending Durable Object migrations cannot ride a
+  version upload (this failed CI on PR #31 until removed).
+
+  **Durable Object cleanup (one-off manual deploy step):** once rollback is
+  ruled out, delete the retired container class by deploying once with the
+  migration added temporarily to `wrangler.jsonc`:
+
+  ```jsonc
+  "migrations": [
+    { "tag": "v3-opencae-core-cloud-container", "new_sqlite_classes": ["OpenCaeCoreCloudContainer"] },
+    { "tag": "v4-retire-opencae-core-cloud-container", "deleted_classes": ["OpenCaeCoreCloudContainer"] }
+  ]
+  ```
+
+  then `npx wrangler deploy --config wrangler.jsonc`, and revert the config
+  edit afterwards (the migration is recorded server-side; the config guard
+  intentionally rejects committed migrations).
 - **Deploy/CI gates for the cloud path**: `scripts/verify-runner-version.mjs`
   and its CI step; the container assertions in
   `scripts/verify-cloudflare-config.mjs` (now asserting the bindings stay
