@@ -23,18 +23,11 @@
     "not_found_handling": "single-page-application",
     "run_worker_first": ["/api/*", "/health"]
   },
-  "migrations": [
-    {
-      "tag": "v3-opencae-core-cloud-container",
-      "new_sqlite_classes": ["OpenCaeCoreCloudContainer"]
-    },
-    {
-      // Cloud retirement (2026-07): deletes the container Durable Object class
-      // on the next deploy so the retired binding cannot linger in production.
-      "tag": "v4-retire-opencae-core-cloud-container",
-      "deleted_classes": ["OpenCaeCoreCloudContainer"]
-    }
-  ],
+  // No migrations in the checked-in config: Workers Builds uploads PR preview
+  // versions, and pending Durable Object migrations cannot ride a version
+  // upload. Deleting the retired OpenCaeCoreCloudContainer class is a one-off
+  // manual deploy step — see docs/cloud-retirement.md ("Durable Object
+  // cleanup") for the exact migration snippet and command.
   "observability": {
     "enabled": false,
     "head_sampling_rate": 1,

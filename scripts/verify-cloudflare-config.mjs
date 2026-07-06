@@ -56,11 +56,13 @@ function validateProductionConfig(label, config, failures) {
 
   validateRetiredCloudAbsent(label, config, failures);
 
-  // The DO class must be migrated away explicitly so the next deploy deletes
-  // the retired container binding instead of failing on an orphaned class.
+  // The checked-in config must carry NO migrations: Workers Builds uploads PR
+  // preview versions, and pending Durable Object migrations cannot ride a
+  // version upload. The retired container class is deleted via the one-off
+  // manual deploy documented in docs/cloud-retirement.md, not the config.
   const migrations = Array.isArray(config.migrations) ? config.migrations : [];
-  if (!migrations.some((migration) => Array.isArray(migration?.deleted_classes) && migration.deleted_classes.includes("OpenCaeCoreCloudContainer"))) {
-    failures.push(`${label} config must keep the OpenCaeCoreCloudContainer deleted_classes migration (cloud retirement, 2026-07)`);
+  if (migrations.length > 0) {
+    failures.push(`${label} config must not declare migrations (DO cleanup is a manual deploy step; see docs/cloud-retirement.md)`);
   }
 
   for (const productionDomain of productionDomains) {
