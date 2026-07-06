@@ -1,0 +1,14 @@
+{
+  "name": "@opencae/mesh-intake",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@loumalouomega/gmsh-wasm": "0.1.2",
+    "@opencae/core": "workspace:*"
+  },
+  "license": "Apache-2.0"
+}
