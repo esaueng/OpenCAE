@@ -14,6 +14,11 @@ registerOfflineCaching();
 // loads as its own lazy chunk so the initial bundle stays untouched.
 if (import.meta.env.VITE_WASM_MESHING !== "0") {
   void import("./workers/meshHarness");
+  // 100k-DOF solve benchmark harness (?solveBench=1): only loaded when the
+  // URL asks for it, so normal sessions never fetch the chunk.
+  if (new URLSearchParams(window.location.search).has("solveBench")) {
+    void import("./workers/solveBenchHarness");
+  }
 }
 
 createRoot(document.getElementById("root")!).render(

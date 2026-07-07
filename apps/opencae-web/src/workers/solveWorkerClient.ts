@@ -42,6 +42,8 @@ export function isCancelledSolveError(error: unknown): boolean {
 export type LocalSolveCompletion = {
   result: LocalSolveResult;
   solverBackend: string;
+  /** Peak worker-heap bytes (Chrome-only performance.memory sampling in the worker); measurement telemetry, absent elsewhere. */
+  workerPeakHeapBytes?: number;
 };
 
 export type LocalSolveHandle = {
@@ -155,7 +157,11 @@ function handleSolveWorkerMessage(event: MessageEvent<SolveWorkerResponse>): voi
   if (!pending) return;
   clearPending(pending);
   if (response.ok) {
-    pending.resolve({ result: response.result, solverBackend: response.solverBackend });
+    pending.resolve({
+      result: response.result,
+      solverBackend: response.solverBackend,
+      ...(response.workerPeakHeapBytes !== undefined ? { workerPeakHeapBytes: response.workerPeakHeapBytes } : {})
+    });
     return;
   }
   pending.reject(new LocalSolveError(response.error.message, response.error.code));
