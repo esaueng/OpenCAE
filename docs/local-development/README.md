@@ -45,10 +45,13 @@ pnpm verify:perf
 ```bash
 pnpm deploy:cloudflare:dry-run
 pnpm deploy:cloudflare
+pnpm deploy:cloudflare:retired-do-cleanup
 pnpm deploy:cloudflare:static:dry-run
 pnpm deploy:cloudflare:static
 ```
 
 Use the default Cloudflare deploy for the production app domain. It deploys the local-first Worker with the default `wrangler.jsonc` (static assets + security headers, no solver bindings) and targets `opencae`. Use the static commands only for the explicitly non-production `opencae-static` Worker. (The cloud container deploy commands were retired in July 2026; see [docs/cloud-retirement.md](../cloud-retirement.md).)
+
+Use `pnpm deploy:cloudflare:retired-do-cleanup` only once if Cloudflare still has the retired `OpenCaeCoreCloudContainer` Durable Object class recorded and rejects the normal deploy with code `10064`.
 
 Deploy and CI runners may start from a standalone checkout of this repo as long as their build command is `pnpm run build` or another script that runs `pnpm build:core`; that script creates `../opencae-core` before compiling.

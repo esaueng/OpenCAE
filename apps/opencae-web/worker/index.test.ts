@@ -68,6 +68,7 @@ describe("Cloudflare local-first worker", () => {
     expect(packageJson.scripts["deploy:cloudflare"]).not.toContain("wrangler.containers.jsonc");
     expect(packageJson.scripts["deploy:cloudflare"]).not.toContain("containers-rollout");
     expect(packageJson.scripts["deploy:cloudflare"]).not.toContain("verify:runner-version");
+    expect(packageJson.scripts["deploy:cloudflare:retired-do-cleanup"]).toContain("wrangler.retired-do-cleanup.jsonc");
     expect(packageJson.scripts["deploy:core-cloud"]).toBeUndefined();
     expect(packageJson.scripts["containers:build:core-cloud"]).toBeUndefined();
     expect(packageJson.scripts["containers:push:core-cloud"]).toBeUndefined();

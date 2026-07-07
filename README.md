@@ -89,6 +89,14 @@ Deploy command: npx wrangler deploy
 
 `pnpm deploy:cloudflare` is also valid as a deploy command. Do not use `npx wrangler versions upload` for the production Worker: version uploads cannot apply the retired container Durable Object cleanup path and can leave Cloudflare rejecting stale `OpenCaeCoreCloudContainer` state. Do not use the static deploy command for the production Worker.
 
+If Cloudflare rejects a deploy with code `10064` for `OpenCaeCoreCloudContainer`, run the one-off cleanup deploy from an authenticated Wrangler session:
+
+```bash
+pnpm deploy:cloudflare:retired-do-cleanup
+```
+
+That records the retired Durable Object delete-class migration server-side. After it succeeds, return to the normal `npx wrangler deploy` / `pnpm deploy:cloudflare` path.
+
 ## Production Uptime
 
 The live app runs at `https://cae.esau.app`. Uptime monitors should check the Worker health endpoint:

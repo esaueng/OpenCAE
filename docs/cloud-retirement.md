@@ -35,8 +35,9 @@ since B4a). The cloud solve infrastructure was removed in two steps:
   version upload (this failed CI on PR #31 until removed).
 
   **Durable Object cleanup (one-off manual deploy step):** once rollback is
-  ruled out, delete the retired container class by deploying once with the
-  migration added temporarily to `wrangler.jsonc`:
+  ruled out, delete the retired container class by deploying once with
+  `wrangler.retired-do-cleanup.jsonc`. This separate config targets the same
+  production Worker and carries only the Durable Object migration history:
 
   ```jsonc
   "migrations": [
@@ -45,9 +46,10 @@ since B4a). The cloud solve infrastructure was removed in two steps:
   ]
   ```
 
-  then `npx wrangler deploy --config wrangler.jsonc`, and revert the config
-  edit afterwards (the migration is recorded server-side; the config guard
-  intentionally rejects committed migrations).
+  Run `pnpm deploy:cloudflare:retired-do-cleanup` once from an authenticated
+  Wrangler session. After that server-side migration is recorded, normal
+  Cloudflare Builds should keep using `npx wrangler deploy` with the default
+  migration-free `wrangler.jsonc`.
 - **Deploy/CI gates for the cloud path**: `scripts/verify-runner-version.mjs`
   and its CI step; the container assertions in
   `scripts/verify-cloudflare-config.mjs` (now asserting the bindings stay
