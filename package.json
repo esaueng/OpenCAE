@@ -15,6 +15,7 @@
     "verify:core-ref": "node scripts/verify-core-ref-reachable.mjs",
     "deploy:cloudflare": "pnpm verify:cloudflare-config && pnpm verify:core-ref && pnpm build:cloudflare && wrangler deploy",
     "deploy:cloudflare:dry-run": "pnpm verify:cloudflare-config && pnpm verify:core-ref && pnpm build:cloudflare && wrangler deploy --dry-run",
+    "deploy:cloudflare:retired-do-cleanup": "pnpm verify:cloudflare-config && pnpm verify:core-ref && pnpm build:cloudflare && wrangler deploy --config wrangler.retired-do-cleanup.jsonc",
     "deploy:cloudflare:static": "pnpm build:cloudflare && wrangler deploy --config wrangler.static.jsonc",
     "deploy:cloudflare:static:dry-run": "pnpm build:cloudflare && wrangler deploy --config wrangler.static.jsonc --dry-run",
     "test": "vitest run",
