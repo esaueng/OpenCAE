@@ -1,10 +1,14 @@
 // Main-thread client for the gmsh-wasm meshing worker (plan A-M1 spike skeleton).
-// Mirrors performanceClient.ts, with two additions:
-//   - phase-based progress callbacks per request, and
-//   - hard cancel via terminate + respawn (gmsh has no cooperative cancel).
-//
-// The whole path is gated behind VITE_WASM_MESHING=1; nothing imports this
-// module from app UI yet, so the initial bundle is untouched.
+// Mirrors performanceClient.ts, with three additions:
+//   - phase-based progress callbacks per request,
+//   - hard cancel via terminate + respawn (gmsh has no cooperative cancel), and
+//   - eager teardown: the worker is terminated as soon as its request queue
+//     drains, returning the several-hundred-MB gmsh wasm arena to the OS.
+//     wasmMesher.ts must instantiate a fresh gmsh module per mesh anyway
+//     (module reuse crashes gmsh-wasm 0.1.2), so a kept-alive worker only
+//     saved ~100 ms of spawn + a service-worker-cached wasm fetch while
+//     pinning the dead arena in the tab's footprint (measured ~1.1 GB during
+//     meshing on the 100k-DOF bench) — a bad trade on iOS-class devices.
 import {
   createMeshWorkerRequest,
   isMeshWorkerFailure,
@@ -111,9 +115,23 @@ function handleMeshWorkerMessage(event: MessageEvent<MeshWorkerResponse>) {
     // meshing failures.
     if (response.error.name) error.name = response.error.name;
     pending.reject(error);
+    releaseMeshWorkerIfIdle();
     return;
   }
   pending.resolve(response.result as never);
+  releaseMeshWorkerIfIdle();
+}
+
+/**
+ * Terminate the worker once no requests are in flight. The mesh result has
+ * already been transferred to the main thread at this point; keeping the
+ * worker alive would only pin the dead gmsh module arena (fresh module per
+ * mesh is mandatory regardless). The next request respawns via getMeshWorker.
+ */
+function releaseMeshWorkerIfIdle(): void {
+  if (pendingRequests.size > 0) return;
+  workerInstance?.terminate();
+  workerInstance = null;
 }
 
 function handleMeshWorkerError(event: ErrorEvent) {
