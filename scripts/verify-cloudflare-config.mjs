@@ -29,15 +29,17 @@ export function parseJsonc(source, label = "JSONC input") {
 export function readCloudflareConfigs(baseDir = rootDir) {
   return {
     defaultConfig: readWranglerConfig(resolve(baseDir, "wrangler.jsonc")),
+    retiredDoCleanupConfig: readWranglerConfig(resolve(baseDir, "wrangler.retired-do-cleanup.jsonc")),
     staticConfig: readWranglerConfig(resolve(baseDir, "wrangler.static.jsonc")),
     packageJson: JSON.parse(readFileSync(resolve(baseDir, "package.json"), "utf8"))
   };
 }
 
-export function validateCloudflareConfigs({ defaultConfig, staticConfig, packageJson }) {
+export function validateCloudflareConfigs({ defaultConfig, retiredDoCleanupConfig, staticConfig, packageJson }) {
   const failures = [];
 
   if (defaultConfig) validateProductionConfig("default", defaultConfig, failures);
+  if (retiredDoCleanupConfig) validateRetiredDoCleanupConfig(retiredDoCleanupConfig, defaultConfig, failures);
   if (packageJson) validateDeployScripts(packageJson, failures);
   if (staticConfig) {
     validateRetiredCloudAbsent("static", staticConfig, failures);
@@ -50,19 +52,22 @@ export function validateCloudflareConfigs({ defaultConfig, staticConfig, package
 }
 
 function validateProductionConfig(label, config, failures) {
-  if (config.name !== productionWorkerName) {
-    failures.push(`${label} config name must be "${productionWorkerName}", got "${String(config.name)}"`);
-  }
-
+  validateProductionTarget(label, config, failures);
   validateRetiredCloudAbsent(label, config, failures);
 
-  // The checked-in config must carry NO migrations: Workers Builds uploads PR
-  // preview versions, and pending Durable Object migrations cannot ride a
-  // version upload. The retired container class is deleted via the one-off
-  // manual deploy documented in docs/cloud-retirement.md, not the config.
+  // The checked-in default config must carry NO migrations: Workers Builds
+  // uploads PR preview versions, and pending Durable Object migrations cannot
+  // ride a version upload. The retired container class is deleted via the
+  // one-off manual deploy config, not the normal production config.
   const migrations = Array.isArray(config.migrations) ? config.migrations : [];
   if (migrations.length > 0) {
-    failures.push(`${label} config must not declare migrations (DO cleanup is a manual deploy step; see docs/cloud-retirement.md)`);
+    failures.push(`${label} config must not declare migrations (DO cleanup uses wrangler.retired-do-cleanup.jsonc)`);
+  }
+}
+
+function validateProductionTarget(label, config, failures) {
+  if (config.name !== productionWorkerName) {
+    failures.push(`${label} config name must be "${productionWorkerName}", got "${String(config.name)}"`);
   }
 
   for (const productionDomain of productionDomains) {
@@ -77,6 +82,28 @@ function validateProductionConfig(label, config, failures) {
   }
   if (config.assets?.binding !== "ASSETS") {
     failures.push(`${label} config must bind Workers Static Assets as ASSETS`);
+  }
+}
+
+function validateRetiredDoCleanupConfig(config, productionConfig, failures) {
+  const label = "retired DO cleanup";
+  validateProductionTarget(label, config, failures);
+  validateRetiredCloudAbsent(label, config, failures);
+
+  if (productionConfig?.account_id !== undefined && config.account_id !== productionConfig.account_id) {
+    failures.push(`${label} config account_id must match the production config`);
+  }
+  if (config.main !== productionConfig?.main) {
+    failures.push(`${label} config main must match the production config`);
+  }
+
+  const migrations = Array.isArray(config.migrations) ? config.migrations : [];
+  const expectedMigrations = [
+    { tag: "v3-opencae-core-cloud-container", new_sqlite_classes: ["OpenCaeCoreCloudContainer"] },
+    { tag: "v4-retire-opencae-core-cloud-container", deleted_classes: ["OpenCaeCoreCloudContainer"] }
+  ];
+  if (JSON.stringify(migrations) !== JSON.stringify(expectedMigrations)) {
+    failures.push(`${label} config must contain only the recorded creation tag and the v4 delete-class migration for OpenCaeCoreCloudContainer`);
   }
 }
 
@@ -105,6 +132,10 @@ function validateDeployScripts(packageJson, failures) {
   const scripts = packageJson?.scripts ?? {};
   if (!String(scripts["deploy:cloudflare"] ?? "").includes("verify:cloudflare-config")) {
     failures.push("deploy:cloudflare must run verify:cloudflare-config before production deployment");
+  }
+  const cleanupScript = String(scripts["deploy:cloudflare:retired-do-cleanup"] ?? "");
+  if (!cleanupScript.includes("verify:cloudflare-config") || !cleanupScript.includes("wrangler deploy --config wrangler.retired-do-cleanup.jsonc")) {
+    failures.push("deploy:cloudflare:retired-do-cleanup must verify config and deploy wrangler.retired-do-cleanup.jsonc");
   }
   const serializedScripts = JSON.stringify(scripts);
   if (serializedScripts.includes("wrangler.containers.jsonc") || serializedScripts.includes("wrangler.local-first.jsonc")) {

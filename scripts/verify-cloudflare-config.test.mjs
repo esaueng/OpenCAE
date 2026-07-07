@@ -15,7 +15,7 @@ function clone(value) {
 
 describe("Cloudflare deployment config guard (post cloud retirement)", () => {
   test("passes with the committed static-assets-only configs", () => {
-    const { defaultConfig, staticConfig, packageJson } = readCloudflareConfigs(rootDir);
+    const { defaultConfig, retiredDoCleanupConfig, staticConfig, packageJson } = readCloudflareConfigs(rootDir);
     const readme = readFileSync(resolve(rootDir, "README.md"), "utf8");
 
     expect(defaultConfig.name).toBe("opencae");
@@ -25,7 +25,11 @@ describe("Cloudflare deployment config guard (post cloud retirement)", () => {
     expect(defaultConfig.r2_buckets).toBeUndefined();
     expect(readme).toContain("Deploy command: npx wrangler deploy");
     expect(readme).toContain("Do not use `npx wrangler versions upload` for the production Worker");
-    expect(() => validateCloudflareConfigs({ defaultConfig, staticConfig, packageJson })).not.toThrow();
+    expect(retiredDoCleanupConfig.migrations).toEqual([
+      { tag: "v3-opencae-core-cloud-container", new_sqlite_classes: ["OpenCaeCoreCloudContainer"] },
+      { tag: "v4-retire-opencae-core-cloud-container", deleted_classes: ["OpenCaeCoreCloudContainer"] }
+    ]);
+    expect(() => validateCloudflareConfigs({ defaultConfig, retiredDoCleanupConfig, staticConfig, packageJson })).not.toThrow();
   });
 
   test("retired container and local-first wrangler variants stay deleted", () => {
@@ -52,6 +56,19 @@ describe("Cloudflare deployment config guard (post cloud retirement)", () => {
 
     expect(() => validateCloudflareConfigs({ defaultConfig, staticConfig, packageJson })).toThrow(
       /must not declare migrations/
+    );
+  });
+
+  test("requires the retired Durable Object cleanup config to target production narrowly", () => {
+    const { defaultConfig, staticConfig, packageJson } = readCloudflareConfigs(rootDir);
+    const retiredDoCleanupConfig = clone(readConfig("wrangler.retired-do-cleanup.jsonc"));
+    retiredDoCleanupConfig.migrations = [
+      { tag: "v4-retire-opencae-core-cloud-container", deleted_classes: ["OpenCaeCoreCloudContainer"] },
+      { tag: "v5-unexpected", deleted_classes: ["SomeOtherClass"] }
+    ];
+
+    expect(() => validateCloudflareConfigs({ defaultConfig, retiredDoCleanupConfig, staticConfig, packageJson })).toThrow(
+      /recorded creation tag and the v4 delete-class migration/
     );
   });
 
