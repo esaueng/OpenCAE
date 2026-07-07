@@ -44,7 +44,13 @@ workerScope.addEventListener("message", (event) => {
 function handleSolve(id: string, payload: SolveWorkerSolvePayload): void {
   let lastForwardedAt = 0;
   let lastPhase = "";
+  // Peak worker-heap watermark, sampled where the blocked worker thread
+  // actually runs code: inside the solver progress hook. Chrome-only
+  // (performance.memory is non-standard); stays undefined elsewhere.
+  let peakHeapBytes = sampleWorkerHeapBytes();
   const onProgress = (progress: SolveProgressEvent) => {
+    const heapBytes = sampleWorkerHeapBytes();
+    if (heapBytes !== undefined && (peakHeapBytes === undefined || heapBytes > peakHeapBytes)) peakHeapBytes = heapBytes;
     const now = Date.now();
     const phaseChanged = progress.phase !== lastPhase;
     const finished = progress.total > 0 && progress.completed >= progress.total;
@@ -71,13 +77,29 @@ function handleSolve(id: string, payload: SolveWorkerSolvePayload): void {
       postResponse({ kind: "result", id, ok: false, error: normalizeSolveWorkerError(outcome.reason, outcome.code) });
       return;
     }
-    const message: SolveWorkerResponse = { kind: "result", id, ok: true, solverBackend: outcome.solverBackend, result: outcome.result };
+    const finalHeapBytes = sampleWorkerHeapBytes();
+    if (finalHeapBytes !== undefined && (peakHeapBytes === undefined || finalHeapBytes > peakHeapBytes)) peakHeapBytes = finalHeapBytes;
+    const message: SolveWorkerResponse = {
+      kind: "result",
+      id,
+      ok: true,
+      solverBackend: outcome.solverBackend,
+      result: outcome.result,
+      ...(peakHeapBytes !== undefined ? { workerPeakHeapBytes: peakHeapBytes } : {})
+    };
     workerScope.postMessage(message, transferablesForSolveResult(outcome.result));
   } catch (error) {
     postResponse({ kind: "result", id, ok: false, error: normalizeSolveWorkerError(error) });
   } finally {
     cancelledRequestIds.delete(id);
   }
+}
+
+function sampleWorkerHeapBytes(): number | undefined {
+  const memory = (globalThis.performance as unknown as { memory?: { usedJSHeapSize?: number } } | undefined)?.memory;
+  return typeof memory?.usedJSHeapSize === "number" && Number.isFinite(memory.usedJSHeapSize)
+    ? memory.usedJSHeapSize
+    : undefined;
 }
 
 function postResponse(message: SolveWorkerResponse): void {
