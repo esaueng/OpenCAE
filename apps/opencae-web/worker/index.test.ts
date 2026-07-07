@@ -52,11 +52,10 @@ describe("Cloudflare local-first worker", () => {
     expect(defaultConfig.durable_objects).toBeUndefined();
     expect(defaultConfig.r2_buckets).toBeUndefined();
     expect(defaultConfig.assets?.run_worker_first).toEqual(expect.arrayContaining(["/api/*", "/health"]));
-    // No migrations may ride the checked-in config: Workers Builds uploads PR
-    // preview versions, which reject pending Durable Object migrations. The
-    // retired container class is deleted via the one-off manual deploy in
-    // docs/cloud-retirement.md instead.
-    expect(defaultConfig.migrations ?? []).toEqual([]);
+    // Checked-in migrations break Workers Builds version uploads; the retired
+    // Durable Object cleanup is a one-off manual deploy step documented in
+    // docs/cloud-retirement.md.
+    expect(defaultConfig.migrations).toBeUndefined();
   });
 
   test("deploy scripts target the retired-cloud config without container gates", () => {
@@ -69,6 +68,7 @@ describe("Cloudflare local-first worker", () => {
     expect(packageJson.scripts["deploy:cloudflare"]).not.toContain("wrangler.containers.jsonc");
     expect(packageJson.scripts["deploy:cloudflare"]).not.toContain("containers-rollout");
     expect(packageJson.scripts["deploy:cloudflare"]).not.toContain("verify:runner-version");
+    expect(packageJson.scripts["deploy:cloudflare:retired-do-cleanup"]).toContain("wrangler.retired-do-cleanup.jsonc");
     expect(packageJson.scripts["deploy:core-cloud"]).toBeUndefined();
     expect(packageJson.scripts["containers:build:core-cloud"]).toBeUndefined();
     expect(packageJson.scripts["containers:push:core-cloud"]).toBeUndefined();
