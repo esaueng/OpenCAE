@@ -9,6 +9,7 @@ import {
   MAX_PRECACHE_FILE_BYTES,
   PRECACHE_GLOB_IGNORES,
   PRECACHE_GLOB_PATTERNS,
+  SW_FORCE_REFRESH_SCRIPT,
   auditPrecacheManifest,
   requiredOfflineUrls
 } from "./offlinePrecache";
@@ -105,6 +106,10 @@ describe("auditPrecacheManifest", () => {
 describe("workbox settings", () => {
   test("header changes force a service-worker update", () => {
     expect(PRECACHE_GLOB_PATTERNS).toContain("_headers");
+  });
+
+  test("service-worker updates import the stale-client refresh hook", () => {
+    expect(SW_FORCE_REFRESH_SCRIPT).toBe("sw-force-refresh.js");
   });
 
   test("glob ignores keep the raw gmsh wasm out of the precache", () => {

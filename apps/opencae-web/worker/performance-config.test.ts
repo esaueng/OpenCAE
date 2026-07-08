@@ -32,6 +32,15 @@ describe("Cloudflare Worker performance config", () => {
     expect(headers).toContain("Cache-Control: public, max-age=31556952, immutable");
   });
 
+  test("service-worker refresh hook is always revalidated", () => {
+    const headersPath = resolve(__dirname, "../public/_headers");
+
+    expect(existsSync(headersPath)).toBe(true);
+    const headers = readFileSync(headersPath, "utf8");
+    expect(headers).toContain("/sw-force-refresh.js");
+    expect(headers).toContain("Cache-Control: no-cache");
+  });
+
   test("uses generated Wrangler environment types instead of a hand-written Env", () => {
     const workerSource = readFileSync(resolve(__dirname, "index.ts"), "utf8");
 

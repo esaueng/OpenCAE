@@ -28,6 +28,13 @@
 export const PRECACHE_GLOB_PATTERNS = ["**/*.{js,css,html,png,wasm,gz,json}", "_headers"];
 
 /**
+ * Extra script imported by the generated Workbox service worker. It reloads
+ * already-open clients once a new SW activates, which moves stale tabs off an
+ * old cached app-shell response and onto the current CSP/header set.
+ */
+export const SW_FORCE_REFRESH_SCRIPT = "sw-force-refresh.js";
+
+/**
  * Hash-named assets are versioned by URL (revision:null is correct and avoids
  * pointless cache-bust query params) — EXCEPT assets/gmsh-wasm.json, whose URL
  * is stable while its content changes with every gmsh wasm hash. It must keep
