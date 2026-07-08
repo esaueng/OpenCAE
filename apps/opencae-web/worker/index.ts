@@ -85,7 +85,10 @@ function securityHeaders(): Record<string, string> {
   return {
     "content-security-policy": [
       "default-src 'self'",
-      "script-src 'self' 'wasm-unsafe-eval'",
+      // occt-import-js uses Emscripten embind's Function-based method caller
+      // generation during STEP import; without unsafe-eval uploaded STEP
+      // previews fail under the deployed CSP.
+      "script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval'",
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data: blob:",
       "connect-src 'self' https://plausible.io https://cdn.jsdelivr.net",
