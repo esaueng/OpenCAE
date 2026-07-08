@@ -18,11 +18,14 @@
 // browser with the network gone.
 
 /**
- * Dist files the service worker precaches (relative to dist/). No
- * "webmanifest": vite-plugin-pwa injects manifest.webmanifest itself, so
+ * Dist files the service worker precaches (relative to dist/). `_headers` is
+ * intentionally included even though it is not an offline runtime asset: its
+ * revision forces installed service workers to update after CSP/header-only
+ * deploys, so they do not keep serving a cached app shell with stale headers.
+ * No "webmanifest": vite-plugin-pwa injects manifest.webmanifest itself, so
  * globbing it too would duplicate the entry.
  */
-export const PRECACHE_GLOB_PATTERNS = ["**/*.{js,css,html,png,wasm,gz,json}"];
+export const PRECACHE_GLOB_PATTERNS = ["**/*.{js,css,html,png,wasm,gz,json}", "_headers"];
 
 /**
  * Hash-named assets are versioned by URL (revision:null is correct and avoids
