@@ -132,6 +132,12 @@ describe("Cloudflare local-first worker", () => {
     expect(response.headers.get("referrer-policy")).toBe("strict-origin-when-cross-origin");
   });
 
+  test("csp permits the OCCT STEP importer embind runtime", async () => {
+    const response = await dispatchWorker(new Request("https://cae.esau.app/"), createEnv("<html></html>"));
+
+    expect(response.headers.get("content-security-policy")).toContain("script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval'");
+  });
+
   test("static asset _headers ships the same security headers the worker applies", async () => {
     const headersFile = readFileSync(resolve(__dirname, "../public/_headers"), "utf8");
     const response = await dispatchWorker(new Request("https://cae.esau.app/"), createEnv("<html></html>"));
