@@ -5,7 +5,7 @@ import { gzipSync } from "node:zlib";
 import { defineConfig, type PluginOption } from "vite";
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
-import { DONT_CACHE_BUST_URLS, MAX_PRECACHE_FILE_BYTES, PRECACHE_GLOB_IGNORES, PRECACHE_GLOB_PATTERNS } from "./src/lib/offlinePrecache";
+import { DONT_CACHE_BUST_URLS, MAX_PRECACHE_FILE_BYTES, PRECACHE_GLOB_IGNORES, PRECACHE_GLOB_PATTERNS, SW_FORCE_REFRESH_SCRIPT } from "./src/lib/offlinePrecache";
 
 // In-browser wasm meshing is the production default (plan A-M4). Builds carry
 // gmsh-wasm unless explicitly opted out with VITE_WASM_MESHING=0 — the escape
@@ -141,6 +141,7 @@ function offlineAssetCaching(): PluginOption {
       icons: [{ src: "/opencae-logo.png", sizes: "512x512", type: "image/png" }]
     },
     workbox: {
+      importScripts: [SW_FORCE_REFRESH_SCRIPT],
       globPatterns: PRECACHE_GLOB_PATTERNS,
       globIgnores: PRECACHE_GLOB_IGNORES,
       dontCacheBustURLsMatching: DONT_CACHE_BUST_URLS,
