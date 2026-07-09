@@ -7,6 +7,7 @@ import { SQLiteDatabaseProvider } from "@opencae/db";
 import { bracketDemoMaterial, bracketDemoProject, bracketDisplayModel, bracketResultFields, bracketResultSummary } from "@opencae/db/sample-data";
 import { InMemoryJobQueueProvider, LocalRunStateProvider } from "@opencae/jobs";
 import { MockMeshService } from "@opencae/mesh-service";
+import { assertCompatibleManufacturingProcess } from "@opencae/materials";
 import { buildHtmlReport, buildPdfReport, LocalReportProvider, reportPdfKeyFor } from "@opencae/post-service";
 import { solveDynamicStudy } from "@opencae/solver-service";
 import {
@@ -335,12 +336,21 @@ api.post("/api/studies/:studyId/materials", async (request, reply) => {
   const study = db.getStudy(studyId);
   if (!study) return reply.code(404).send({ error: "Study not found" });
   const body = request.body as { materialId?: string; parameters?: Record<string, unknown> } | undefined;
+  const materialId = body?.materialId ?? bracketDemoMaterial.id;
+  const parameters = body?.parameters ?? {};
+  if (parameters.manufacturingProcessId !== undefined) {
+    try {
+      assertCompatibleManufacturingProcess(materialId, parameters.manufacturingProcessId);
+    } catch (error) {
+      return reply.code(400).send({ error: error instanceof Error ? error.message : "Invalid material and manufacturing process." });
+    }
+  }
   const bodySelection = study.namedSelections.find((selection) => selection.entityType === "body");
   const assignment = {
     id: "assign-material-current",
-    materialId: body?.materialId ?? bracketDemoMaterial.id,
+    materialId,
     selectionRef: bodySelection?.id ?? "selection-body-bracket",
-    parameters: body?.parameters ?? {},
+    parameters,
     status: "complete" as const
   };
   const next = { ...study, materialAssignments: [assignment] };

@@ -414,7 +414,7 @@ export function buildOpenCaeCoreModelForStudy(study: Study, displayModel: Displa
   const actualMesh = actualCoreVolumeMeshArtifact(study);
   const material = materialForStudy(study);
   const effective = effectiveMaterialProperties(material.material, material.parameters, {
-    criticalLayerAxis: inferCriticalPrintAxis(study, displayModel.faces)
+    criticalLayerAxis: inferCriticalPrintAxis(study, displayModel.faces.map((face) => ({ entityId: face.id, center: face.center })))
   });
   const coreMaterial = {
     name: effective.id,

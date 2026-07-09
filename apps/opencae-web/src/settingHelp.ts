@@ -12,6 +12,7 @@ export type SettingHelpId =
   | "dimensions"
   | "orientation"
   | "materialLibrary"
+  | "manufacturingProcess"
   | "printSettings"
   | "printedPart"
   | "infillDensity"
@@ -54,13 +55,18 @@ export const SETTING_HELP: Record<SettingHelpId, SettingHelp> = {
     visual: "axis"
   },
   materialLibrary: {
-    title: "Material library",
-    body: "Selects the material properties used by the solver, including stiffness, density, Poisson ratio, and yield strength for the break/factor-of-safety checks.",
+    title: "Base material",
+    body: "Selects the material family and its nominal solid properties. Manufacturing effects are applied separately after you choose a compatible process.",
     visual: "results"
   },
+  manufacturingProcess: {
+    title: "Manufacturing process",
+    body: "Shows only processes with a validated profile for the selected material. The process controls whether solid properties or process-adjusted properties are used.",
+    visual: "layers"
+  },
   printSettings: {
-    title: "3D print settings",
-    body: "Adjusts the effective printed material properties before applying the material. Infill, walls, and layer direction change stiffness and strength estimates.",
+    title: "Process settings",
+    body: "Adjusts only the settings relevant to the selected additive process. FDM uses infill, walls, and build direction; other processes expose fewer controls.",
     visual: "layers"
   },
   printedPart: {

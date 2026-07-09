@@ -17,7 +17,7 @@ describe("ProjectSchema", () => {
     expect(parsed.name).toBe("Test Project");
   });
 
-  it("preserves 3D print parameters on material assignments", () => {
+  it("round-trips manufacturing process and 3D print parameters on material assignments", () => {
     const parsed = ProjectSchema.parse({
       id: "project-test",
       name: "Test Project",
@@ -37,6 +37,7 @@ describe("ProjectSchema", () => {
               materialId: "mat-petg",
               selectionRef: "selection-body",
               parameters: {
+                manufacturingProcessId: "fdm",
                 printed: true,
                 infillDensity: 35,
                 wallCount: 3,
@@ -59,7 +60,10 @@ describe("ProjectSchema", () => {
       updatedAt: "2026-04-24T12:00:00.000Z"
     });
 
-    expect(parsed.studies[0]?.materialAssignments[0]?.parameters).toMatchObject({
+    const reparsed = ProjectSchema.parse(JSON.parse(JSON.stringify(parsed)));
+
+    expect(reparsed.studies[0]?.materialAssignments[0]?.parameters).toMatchObject({
+      manufacturingProcessId: "fdm",
       printed: true,
       infillDensity: 35
     });

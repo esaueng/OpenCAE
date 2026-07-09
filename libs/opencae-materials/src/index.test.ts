@@ -1,5 +1,15 @@
 import { describe, expect, test } from "vitest";
-import { massKgForPayloadMaterial, payloadMaterials, starterMaterials } from "./index";
+import {
+  assertCompatibleManufacturingProcess,
+  compatibleManufacturingProcessesFor,
+  defaultManufacturingProcessIdFor,
+  effectiveMaterialProperties,
+  isManufacturingProcessCompatible,
+  massKgForPayloadMaterial,
+  normalizeManufacturingParameters,
+  payloadMaterials,
+  starterMaterials
+} from "./index";
 
 describe("starterMaterials", () => {
   test("includes common engineering and 3D printed material options", () => {
@@ -18,8 +28,94 @@ describe("starterMaterials", () => {
     });
   });
 
+  test("offers CNC machining, injection molding, and FDM for ABS, but not SLA", () => {
+    const abs = starterMaterials.find((material) => material.id === "mat-abs");
+    expect(abs).toBeDefined();
+
+    expect(compatibleManufacturingProcessesFor(abs!).map((process) => process.id)).toEqual([
+      "cnc_machining",
+      "injection_molding",
+      "fdm"
+    ]);
+    expect(isManufacturingProcessCompatible(abs!, "sla")).toBe(false);
+  });
+
+  test("offers SLA as the only compatible process for photopolymer resin", () => {
+    const resin = starterMaterials.find((material) => material.id === "mat-sla-tough-resin");
+    expect(resin).toBeDefined();
+
+    expect(compatibleManufacturingProcessesFor(resin!).map((process) => process.id)).toEqual(["sla"]);
+  });
+
+  test("rejects an incompatible explicit material and process pair with a useful error", () => {
+    expect(() => assertCompatibleManufacturingProcess("mat-abs", "sla")).toThrow(
+      /SLA printing.*not compatible with ABS/i
+    );
+  });
+
+  test("keeps solid CNC properties unchanged even when stale print settings are present", () => {
+    const abs = starterMaterials.find((material) => material.id === "mat-abs");
+    expect(abs).toBeDefined();
+
+    const machined = effectiveMaterialProperties(abs!, {
+      manufacturingProcessId: "cnc_machining",
+      printed: true,
+      infillDensity: 10,
+      wallCount: 1,
+      layerOrientation: "x"
+    });
+
+    expect(machined).toEqual(abs);
+  });
+
+  test("reduces effective FDM properties when infill is sparse", () => {
+    const abs = starterMaterials.find((material) => material.id === "mat-abs");
+    expect(abs).toBeDefined();
+
+    const printed = effectiveMaterialProperties(abs!, {
+      manufacturingProcessId: "fdm",
+      infillDensity: 35,
+      wallCount: 3,
+      layerOrientation: "z"
+    });
+
+    expect(printed.youngsModulus).toBeLessThan(abs!.youngsModulus);
+    expect(printed.yieldStrength).toBeLessThan(abs!.yieldStrength);
+    expect(printed.density).toBeLessThan(abs!.density);
+  });
+
+  test("ignores stale FDM infill and wall settings for SLA", () => {
+    const resin = starterMaterials.find((material) => material.id === "mat-sla-tough-resin");
+    expect(resin).toBeDefined();
+
+    const printed = effectiveMaterialProperties(resin!, {
+      manufacturingProcessId: "sla",
+      printed: true,
+      infillDensity: 5,
+      wallCount: 12,
+      layerOrientation: "x"
+    });
+
+    expect(printed).toEqual(resin);
+  });
+
+  test("maps legacy printed flags onto compatible manufacturing processes", () => {
+    const abs = starterMaterials.find((material) => material.id === "mat-abs");
+    expect(abs).toBeDefined();
+
+    expect(defaultManufacturingProcessIdFor(abs!, { printed: true })).toBe("fdm");
+    expect(defaultManufacturingProcessIdFor(abs!, { printed: false })).toBe("cnc_machining");
+    expect(normalizeManufacturingParameters(abs!, { printed: true })).toMatchObject({
+      manufacturingProcessId: "fdm",
+      printed: true
+    });
+    expect(normalizeManufacturingParameters(abs!, { printed: false })).toMatchObject({
+      manufacturingProcessId: "cnc_machining",
+      printed: false
+    });
+  });
+
   test("reduces effective printed material properties when infill is sparse", async () => {
-    const { effectiveMaterialProperties } = await import("./index");
     const petg = starterMaterials.find((material) => material.id === "mat-petg");
     expect(petg).toBeDefined();
 
@@ -30,8 +126,7 @@ describe("starterMaterials", () => {
     expect(printed.density).toBeLessThan(petg!.density);
   });
 
-  test("treats Z build direction as the strongest printed orientation", async () => {
-    const { effectiveMaterialProperties } = await import("./index");
+  test("treats Z build direction as the strongest printed orientation", () => {
     const petg = starterMaterials.find((material) => material.id === "mat-petg");
     expect(petg).toBeDefined();
 
@@ -45,8 +140,7 @@ describe("starterMaterials", () => {
     expect(xBuild.yieldStrength).toBe(yBuild.yieldStrength);
   });
 
-  test("applies a severe interlayer penalty when the print direction is critical", async () => {
-    const { effectiveMaterialProperties } = await import("./index");
+  test("applies a severe interlayer penalty when the print direction is critical", () => {
     const petg = starterMaterials.find((material) => material.id === "mat-petg");
     expect(petg).toBeDefined();
 
@@ -58,6 +152,19 @@ describe("starterMaterials", () => {
     expect(xCritical.yieldStrength).toBeCloseTo(petg!.yieldStrength * 0.35);
     expect(xCritical.yieldStrength).toBeLessThan(yBuild.yieldStrength * 0.6);
     expect(genericX.yieldStrength).toBe(yBuild.yieldStrength);
+  });
+
+  test("honors an explicit critical-layer strength override", () => {
+    const petg = starterMaterials.find((material) => material.id === "mat-petg");
+    expect(petg).toBeDefined();
+
+    const xCritical = effectiveMaterialProperties(
+      petg!,
+      { manufacturingProcessId: "fdm", infillDensity: 100, wallCount: 3, layerOrientation: "x" },
+      { criticalLayerAxis: "x", criticalLayerFactor: 0.5 }
+    );
+
+    expect(xCritical.yieldStrength).toBeCloseTo(petg!.yieldStrength * 0.5);
   });
 });
 

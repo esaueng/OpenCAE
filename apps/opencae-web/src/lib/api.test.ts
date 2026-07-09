@@ -274,6 +274,44 @@ describe("api", () => {
     expect(response.message).toBe("Material assigned to Imported body.");
   });
 
+  test("rejects an incompatible explicit material and manufacturing process before calling the API", async () => {
+    const fetchMock = vi.fn(async () => new Response("missing", { status: 404 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(assignMaterial(
+      "study-1",
+      "mat-abs",
+      { manufacturingProcessId: "sla" },
+      study
+    )).rejects.toThrow(/SLA printing.*not compatible with ABS/i);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  test("sends and persists a compatible explicit material and manufacturing process", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response("missing", { status: 404 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const parameters = {
+      manufacturingProcessId: "fdm",
+      printed: true,
+      infillDensity: 35,
+      wallCount: 3,
+      layerOrientation: "z"
+    };
+
+    const response = await assignMaterial("study-1", "mat-abs", parameters, study);
+    const requestInit = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
+
+    expect(JSON.parse(requestInit?.body as string)).toEqual({
+      materialId: "mat-abs",
+      parameters
+    });
+    expect(response.study.materialAssignments[0]).toMatchObject({
+      materialId: "mat-abs",
+      parameters
+    });
+  });
+
   test("adds supports locally when the API is unavailable", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("missing", { status: 404 })));
 
