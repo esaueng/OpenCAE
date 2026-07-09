@@ -89,19 +89,25 @@ export const CLOUD_SOLVER_LIMITS: SolveLimits = {
 
 /**
  * Browser runtime defaults. Deviations from the cloud limits:
- * - maxDofs 60k (staged; 100k comes after WebKit main/worker-thread benchmarks),
  * - transientFieldBytes 256 MB (browser tab memory, not a 4 GB container),
  * - maxTimeSteps 20k: with no supervisor timeout, a runaway Newmark integration
  *   would block the solve worker for minutes. 20k steps at the conservative
  *   DEFAULT_DYNAMIC_MS_PER_STEP calibration is a ~5 minute worst case, already
  *   past what an interactive tab should attempt (cloud ceiling: 100k steps
  *   backstopped by its 300 s timeout).
+ * maxDofs matches the retired cloud runner's 100k since 2026-07. The cap was
+ * staged at 60k until (a) the pinned solver gained the typed-array COO->CSR
+ * assembly builder (opencae-core bc6c305, bounding transient assembly memory)
+ * and (b) a measured target-scale browser run existed on a non-V8 engine.
+ * Both landed: scripts/verify-100k-solve.mjs solves a ~99.3k-DOF Tet10 STEP
+ * mesh through the real solve worker in headless Chrome AND Playwright WebKit
+ * (?solveBench=1 harness) with cross-engine result parity and bounded heap.
  * Every deviation that changes an accepted request surfaces in result
  * diagnostics via the browser-solve-limits diagnostic below (honest results).
  */
 export const BROWSER_SOLVE_LIMITS: SolveLimits = {
   ...CLOUD_SOLVER_LIMITS,
-  maxDofs: 60000,
+  maxDofs: 100000,
   transientFieldBytes: 256e6,
   maxTimeSteps: 20000
 };
@@ -424,7 +430,8 @@ function dynamicBudgetGuard(
   if (modelDofs > maxDofs) {
     return {
       code: "max-dofs-exceeded",
-      message: `Dynamic solve requires ${modelDofs} DOFs, above the in-browser limit of ${maxDofs}. Use OpenCAE Core Cloud for meshes this large.`
+      message: `Dynamic solve requires ${modelDofs} DOFs, above the in-browser limit of ${maxDofs}. ` +
+        "Choose a coarser mesh preset (or a larger characteristic mesh size) to stay within the browser budget."
     };
   }
   const steps = dynamicIntegrationSteps(settings);
@@ -434,7 +441,7 @@ function dynamicBudgetGuard(
       code: "dynamic-step-budget-exceeded",
       message: `Dynamic solve requires ${steps} integration steps, above the in-browser limit of ${limits.maxTimeSteps} ` +
         `(~${Math.round(estimate.estimatedMs / 1000)} s at ${estimate.calibratedMsPerStep} ms/step). ` +
-        "Increase the time step, shorten the end time, or use OpenCAE Core Cloud."
+        "Increase the time step or shorten the end time."
     };
   }
   return undefined;
