@@ -1361,7 +1361,7 @@ function ResultsPanelContent({
             onResultPlaybackToggle?.();
           }}>{resultPlaybackPlaying ? <Pause size={16} /> : <Play size={16} />}{resultPlaybackPlaying ? "Pause" : "Play"}</button>
           {resultPlaybackCacheLabel && <small className="playback-cache-status">{resultPlaybackCacheLabel}</small>}
-          <Info label="Peak displacement" value={peakDisplacement ? `${peakDisplacement.value} ${peakDisplacement.units} at ${peakDisplacement.timeSeconds.toFixed(4)} s` : "Unavailable"} />
+          <Info label="Peak displacement" value={peakDisplacement ? `${Number(peakDisplacement.value.toPrecision(3))} ${peakDisplacement.units} at ${peakDisplacement.timeSeconds.toFixed(4)} s` : "Unavailable"} />
         </div>
       )}
       <SectionTitle helpId="resultMode">Result mode</SectionTitle>
