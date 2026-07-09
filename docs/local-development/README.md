@@ -1,24 +1,13 @@
 # Local Development
 
-This repo requires a sibling OpenCAE Core checkout for every install and build (only the relative layout matters):
-
-```text
-<workspace>/open-cae
-<workspace>/opencae-core
-```
-
-Run `pnpm ensure:core` (or clone `https://github.com/esaueng/OpenCAE-Core` into `../opencae-core`) before running `pnpm install` for the first local setup. The pnpm workspace resolves `@opencae/core`, `@opencae/solver-cpu`, and other Core packages from that live checkout, so rebuilding this repo picks up local Core changes. Set `OPENCAE_CORE_DIR` to use a different sibling path.
-
-If `../opencae-core` is missing in a build environment, `pnpm build:core` clones it, reruns `pnpm install --no-frozen-lockfile` (so dependency resolution can pick up sibling workspace changes), and builds the sibling Core packages consumed through this workspace. CI installs with `--frozen-lockfile` against the pinned Core ref.
-
 Install dependencies and run the local API plus web app:
 
 ```bash
-pnpm install
+pnpm install --frozen-lockfile
 pnpm dev
 ```
 
-`pnpm build:core` refreshes the sibling checkout from `https://github.com/esaueng/OpenCAE-Core` before building Core packages. The ref comes from `OPENCAE_CORE_REF` at the repo root and should be a full commit SHA for production builds so build artifacts are reproducible. If the sibling Core checkout has local changes or local-only commits, the refresh fails instead of overwriting work or producing a deploy that cannot be reproduced from the remote Core repo.
+OpenCAE Core packages are part of this monorepo under `packages/*`. `pnpm build:core` only builds those local packages; it does not install dependencies, clone another repository, or mutate the lockfile. CI and local verification should use `pnpm install --frozen-lockfile`.
 
 `pnpm dev` starts the Fastify API on `http://localhost:4317` and the Vite web app on `http://localhost:5173`. The API creates and seeds the SQLite database if needed.
 
@@ -54,4 +43,4 @@ Use the default Cloudflare deploy for the production app domain. It deploys the 
 
 Use `pnpm deploy:cloudflare:retired-do-cleanup` only once if Cloudflare still has the retired `OpenCaeCoreCloudContainer` Durable Object class recorded and rejects the normal deploy with code `10064`.
 
-Deploy and CI runners may start from a standalone checkout of this repo as long as their build command is `pnpm run build` or another script that runs `pnpm build:core`; that script creates `../opencae-core` before compiling.
+Deploy and CI runners may start from a standalone checkout of this repo. Use `pnpm install --frozen-lockfile` followed by `pnpm run build` or another script that runs `pnpm build:core`.

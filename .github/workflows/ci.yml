@@ -11,11 +11,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Clone pinned OpenCAE Core sibling workspace
-        run: node scripts/ensure-opencae-core.mjs
-        env:
-          CI: "true"
-
       - uses: pnpm/action-setup@v4
 
       - uses: actions/setup-node@v4
@@ -34,6 +29,9 @@ jobs:
           pnpm --filter @opencae/solver-wasm build
           pnpm --filter @opencae/solver-webgpu build
           pnpm --filter @opencae/viewer build
+
+      - name: Test OpenCAE Core packages
+        run: pnpm --filter "./packages/*" --if-present test
 
       - name: Verify Cloudflare config
         run: node scripts/verify-cloudflare-config.mjs
