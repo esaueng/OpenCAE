@@ -341,6 +341,29 @@ describe("per-model solver backend resolution", () => {
     });
   });
 
+  test("a material assigned after meshing rebinds the stored artifact's element blocks", () => {
+    // The stored artifact was meshed while aluminum was assigned; the user then
+    // assigns PETG with print settings. The run-time model must follow the
+    // study's current material — a dangling mesh-time reference fails model
+    // validation with "Element block material must reference an existing material."
+    const study = autoStudy({
+      meshSettings: actualMeshSettings(),
+      materialAssignments: [{
+        id: "assign-petg",
+        materialId: "mat-petg",
+        selectionRef: "selection-body-1",
+        parameters: { printed: true, infillDensity: 40, wallCount: 3, layerOrientation: "z" },
+        status: "complete"
+      }]
+    });
+    const coreBuild = buildOpenCaeCoreModelForStudy(study, bracketDisplayModelFixture());
+    expect(coreBuild.model.materials).toHaveLength(1);
+    expect(coreBuild.model.materials[0]!.name).toBe("mat-petg");
+    for (const block of coreBuild.model.elementBlocks) {
+      expect(block.material).toBe("mat-petg");
+    }
+  });
+
   test("a retired explicit cloud choice resolves as auto local (old saves keep working)", () => {
     const study = studyFixture({ solverSettings: { backend: "opencae_core_cloud" } as unknown as Study["solverSettings"] });
     expect(openCaeCoreEligibility(study, cantileverDisplayModel()).ok).toBe(true);
