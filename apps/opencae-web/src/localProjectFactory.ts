@@ -37,11 +37,18 @@ const BRACKET_CORE_CLOUD_GEOMETRY = {
   descriptor: {
     base: { length: 120, width: 34, height: 10 },
     upright: { height: 88, width: 18, thickness: 34 },
-    gusset: { length: 72, height: 58, thickness: 34 },
-    rib: { length: 72, height: 58, thickness: 34 },
+    // Thickness < base width makes the gusset a thin centered rib (matching the
+    // displayed bracket, whose rib is 0.38/1.1 of the 34 mm body depth). A full
+    // 34 mm gusset fills the bracket's inside corner into a solid wedge, so the
+    // solved/rendered result stops resembling the displayed model. The rib is
+    // also kept short and the flange bores placed beyond it: a bore under the
+    // rib intersects it (the bore cut overshoots 1 mm past the base top), and
+    // the resulting sliver elements fail the mesher's minSICN quality floor.
+    gusset: { length: 40, height: 40, thickness: 12 },
+    rib: { length: 40, height: 40, thickness: 12 },
     holes: [
-      { id: "hole-base-1", center: [32, 17, 5], diameter: 12 },
-      { id: "hole-base-2", center: [88, 17, 5], diameter: 12 },
+      { id: "hole-base-1", center: [68, 17, 5], diameter: 12 },
+      { id: "hole-base-2", center: [100, 17, 5], diameter: 12 },
       { id: "hole-upright-1", center: [9, 17, 56], diameter: 10 }
     ],
     surfaces: {
