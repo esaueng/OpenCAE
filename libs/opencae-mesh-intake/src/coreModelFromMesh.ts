@@ -10,6 +10,8 @@
 //     branch of mapSelectionToSurfaceSet resolved each selection (bySelection/byFace/
 //     byPhysical/geometric). Purely additive — when the sink is omitted, behavior is
 //     byte-identical to upstream. Sync upstream when plan 016's extraction lands.
+//  3. Built-in materials resolve through @opencae/materials so manufacturing-process
+//     compatibility and effective-property calculations cannot drift from the app.
 import {
   OPENCAE_MODEL_SCHEMA,
   OPENCAE_MODEL_SCHEMA_VERSION,
@@ -25,6 +27,7 @@ import {
   type SurfaceFacetJson,
   type SurfaceSetJson
 } from "@opencae/core";
+import { effectiveMaterialProperties, starterMaterials } from "@opencae/materials";
 import type { CloudAnalysisType, CloudStudyLike, CoreVolumeMeshArtifact } from "./types";
 
 type BuildCoreModelInput = {
@@ -77,29 +80,7 @@ type BuiltInMaterial = IsotropicLinearElasticMaterialJson & {
 
 type MaterialCatalog = Map<string, BuiltInMaterial>;
 
-const BUILT_IN_MATERIALS: Record<string, BuiltInMaterial> = {
-  "mat-aluminum-6061": materialDefinition("mat-aluminum-6061", 68_900_000_000, 0.33, 2700, 276_000_000),
-  "mat-aluminum-7075": materialDefinition("mat-aluminum-7075", 71_700_000_000, 0.33, 2810, 503_000_000),
-  "mat-steel": materialDefinition("mat-steel", 200_000_000_000, 0.29, 7850, 250_000_000),
-  "mat-stainless-304": materialDefinition("mat-stainless-304", 193_000_000_000, 0.29, 8000, 215_000_000),
-  "mat-titanium-grade-5": materialDefinition("mat-titanium-grade-5", 114_000_000_000, 0.34, 4430, 880_000_000),
-  "mat-copper": materialDefinition("mat-copper", 117_000_000_000, 0.34, 8960, 70_000_000),
-  "mat-brass": materialDefinition("mat-brass", 100_000_000_000, 0.34, 8530, 200_000_000),
-  "mat-abs": materialDefinition("mat-abs", 2_100_000_000, 0.35, 1040, 40_000_000, fdmProfile(35, 3, 0.7)),
-  "mat-pla": materialDefinition("mat-pla", 3_500_000_000, 0.36, 1240, 60_000_000, fdmProfile(35, 3, 0.68)),
-  "mat-pla-plus": materialDefinition("mat-pla-plus", 3_900_000_000, 0.36, 1240, 68_000_000, fdmProfile(35, 3, 0.7)),
-  "mat-petg": materialDefinition("mat-petg", 2_100_000_000, 0.38, 1270, 50_000_000, fdmProfile(40, 3, 0.72)),
-  "mat-asa": materialDefinition("mat-asa", 2_200_000_000, 0.35, 1070, 46_000_000, fdmProfile(35, 3, 0.7)),
-  "mat-nylon": materialDefinition("mat-nylon", 2_800_000_000, 0.39, 1150, 70_000_000, fdmProfile(40, 3, 0.74)),
-  "mat-nylon-cf": materialDefinition("mat-nylon-cf", 7_600_000_000, 0.34, 1180, 105_000_000, fdmProfile(40, 4, 0.78)),
-  "mat-pa12-sls": materialDefinition("mat-pa12-sls", 1_700_000_000, 0.39, 1010, 48_000_000, printProfile("SLS", 100, 2, 0.9)),
-  "mat-polycarbonate": materialDefinition("mat-polycarbonate", 2_400_000_000, 0.37, 1200, 65_000_000, fdmProfile(40, 3, 0.74)),
-  "mat-pc-abs": materialDefinition("mat-pc-abs", 2_300_000_000, 0.36, 1150, 56_000_000, fdmProfile(40, 3, 0.72)),
-  "mat-peek": materialDefinition("mat-peek", 3_700_000_000, 0.4, 1300, 97_000_000, fdmProfile(50, 4, 0.78)),
-  "mat-sla-tough-resin": materialDefinition("mat-sla-tough-resin", 2_800_000_000, 0.38, 1180, 55_000_000, printProfile("SLA", 100, 1, 0.86)),
-  "mat-sla-standard-resin": materialDefinition("mat-sla-standard-resin", 2_200_000_000, 0.38, 1120, 42_000_000, printProfile("SLA", 100, 1, 0.82)),
-  "mat-316l-am": materialDefinition("mat-316l-am", 180_000_000_000, 0.3, 7900, 470_000_000, printProfile("Metal AM", 100, 1, 0.92))
-};
+const BUILT_IN_MATERIAL_IDS = new Set(starterMaterials.map((material) => material.id));
 
 export function buildCoreModelFromCloudMesh(input: BuildCoreModelInput): OpenCAEModelJson {
   validateVolumeMeshArtifact(input.volumeMesh);
@@ -322,7 +303,7 @@ function materialFromUnknown(value: unknown, catalog: MaterialCatalog = new Map(
   const builtInId = stringValue(raw.id) ?? stringValue(raw.name);
   return builtInId
     ? materialFromCatalog(builtInId, catalog, objectValue(raw.parameters))
-      ?? (builtInId in BUILT_IN_MATERIALS ? materialFromBuiltIn(builtInId, objectValue(raw.parameters)) : undefined)
+      ?? (BUILT_IN_MATERIAL_IDS.has(builtInId) ? materialFromBuiltIn(builtInId, objectValue(raw.parameters)) : undefined)
     : undefined;
 }
 
@@ -358,9 +339,17 @@ function materialFromCatalog(
 }
 
 function materialFromBuiltIn(id: string, parameters?: Record<string, unknown>): IsotropicLinearElasticMaterialJson {
-  const material = BUILT_IN_MATERIALS[id];
+  const material = starterMaterials.find((candidate) => candidate.id === id);
   if (!material) throw new Error(`OpenCAE Core Cloud does not know material ${id}.`);
-  return stripPrintProfile(effectiveMaterial(material, parameters));
+  const effective = effectiveMaterialProperties(material, parameters ?? {});
+  return {
+    name: effective.id,
+    type: "isotropicLinearElastic",
+    youngModulus: effective.youngsModulus,
+    poissonRatio: effective.poissonRatio,
+    density: effective.density,
+    yieldStrength: effective.yieldStrength
+  };
 }
 
 function materialObjectFromUnknown(raw: Record<string, unknown>): BuiltInMaterial | undefined {
@@ -396,19 +385,6 @@ function materialDefinition(
     yieldStrength,
     ...(printProfile ? { printProfile } : {})
   };
-}
-
-function fdmProfile(defaultInfillDensity: number, defaultWallCount: number, layerStrengthFactor: number): PrintMaterialProfile {
-  return printProfile("FDM", defaultInfillDensity, defaultWallCount, layerStrengthFactor);
-}
-
-function printProfile(
-  process: PrintMaterialProfile["process"],
-  defaultInfillDensity: number,
-  defaultWallCount: number,
-  layerStrengthFactor: number
-): PrintMaterialProfile {
-  return { process, defaultInfillDensity, defaultWallCount, defaultLayerOrientation: "z", layerStrengthFactor };
 }
 
 function printProfileFromUnknown(value: unknown): PrintMaterialProfile | undefined {
