@@ -55,6 +55,28 @@ describe("unit display formatting", () => {
     expect(field.max).toBeCloseTo(0.01);
   });
 
+  test("converts result field data without display rounding (micro-displacement fields keep full precision)", () => {
+    // Field values and vectors feed the result render; a stiff part deflecting
+    // ~1 µm must not quantize onto a 0.001 mm grid (that crumples the deformed
+    // shape once the deformation auto-scale amplifies the steps).
+    const field = resultFieldForUnits({
+      id: "field-displacement",
+      runId: "run",
+      type: "displacement",
+      location: "node",
+      values: [0.0004, 0.0014],
+      min: 0.0004,
+      max: 0.0014,
+      units: "mm",
+      vectors: [[0.0004, 0, 0], [0.001, 0, 0.001]]
+    }, "SI");
+
+    expect(field.values).toEqual([0.0004, 0.0014]);
+    expect(field.min).toBe(0.0004);
+    expect(field.max).toBe(0.0014);
+    expect(field.vectors).toEqual([[0.0004, 0, 0], [0.001, 0, 0.001]]);
+  });
+
   test("formats result provenance labels with Core FEA and preview separated", () => {
     expect(formatResultProvenanceLabel({ kind: "opencae_core_fea", solver: "opencae-core-cloud", solverVersion: "0.1.0", meshSource: "actual_volume_mesh", resultSource: "computed", units: "mm-N-s-MPa" })).toBe("OpenCAE Core Cloud");
     expect(formatResultProvenanceLabel({ kind: "opencae_core_fea", solver: "opencae-core-sparse-tet", solverVersion: "0.1.0", meshSource: "actual_volume_mesh", resultSource: "computed", units: "mm-N-s-MPa" })).toBe("OpenCAE Core Local");
