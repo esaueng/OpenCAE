@@ -67,6 +67,50 @@ describe("OpenCAE API server", () => {
     expect(response.statusCode).toBe(404);
   });
 
+  test("keeps the newest model upload when same-workspace requests arrive out of order", async () => {
+    const api = await buildApi();
+    const remoteAddress = "203.0.113.27";
+    const create = await api.inject({ method: "POST", url: "/api/projects", remoteAddress, payload: {} });
+    const project = create.json().project as { id: string; updatedAt: string; geometryFiles: Array<{ id: string }> };
+    const baseMutation = {
+      clientId: "workspace-session",
+      expectedGeometryId: null,
+      expectedUpdatedAt: project.updatedAt
+    };
+    const upload = (filename: string, generation: number, clientId = baseMutation.clientId) => api.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/uploads`,
+      remoteAddress,
+      payload: {
+        filename,
+        contentType: "model/stl",
+        modelMutation: { ...baseMutation, clientId, generation }
+      }
+    });
+
+    const first = await upload("first.stl", 1);
+    const newest = await upload("newest.stl", 3);
+    const lateOlder = await upload("late-older.stl", 2);
+    const staleOtherWorkspace = await upload("other-workspace.stl", 4, "other-workspace");
+    const rename = await api.inject({
+      method: "PUT",
+      url: `/api/projects/${project.id}`,
+      remoteAddress,
+      payload: { name: "Renamed after upload" }
+    });
+    const staleAfterProjectEdit = await upload("stale-after-edit.stl", 5);
+    const files = await api.inject({ method: "GET", url: `/api/projects/${project.id}/files` });
+
+    expect(first.statusCode).toBe(200);
+    expect(newest.statusCode).toBe(200);
+    expect(lateOlder.statusCode).toBe(409);
+    expect(staleOtherWorkspace.statusCode).toBe(409);
+    expect(rename.statusCode).toBe(200);
+    expect(staleAfterProjectEdit.statusCode).toBe(409);
+    expect(files.json().files[0]?.filename).toBe("newest.stl");
+    expect(files.json().files[0]?.metadata.modelMutation).toMatchObject({ clientId: "workspace-session", generation: 3 });
+  });
+
   test("rejects study updates that fail schema validation", async () => {
     const api = await buildApi();
     const create = await api.inject({

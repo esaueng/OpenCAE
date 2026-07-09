@@ -55,6 +55,20 @@ export async function meshStepFileInWorker(
   return postMeshWorkerRequest("meshStepFile", payload, onProgress);
 }
 
+export async function inspectStepFileInWorker(
+  payload: MeshWorkerPayloads["inspectStepFile"],
+  onProgress?: MeshProgressListener
+): Promise<MeshWorkerResults["inspectStepFile"]> {
+  return postMeshWorkerRequest("inspectStepFile", payload, onProgress);
+}
+
+export async function repairStepFileInWorker(
+  payload: MeshWorkerPayloads["repairStepFile"],
+  onProgress?: MeshProgressListener
+): Promise<MeshWorkerResults["repairStepFile"]> {
+  return postMeshWorkerRequest("repairStepFile", payload, onProgress);
+}
+
 export async function postMeshWorkerRequest<Operation extends MeshWorkerOperation>(
   operation: Operation,
   payload: MeshWorkerPayloads[Operation],

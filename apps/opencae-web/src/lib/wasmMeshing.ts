@@ -104,6 +104,7 @@ async function meshWorkerRun(options: WasmMeshOptions): Promise<WasmMeshStudyRes
   let algorithmNote: string | undefined;
   let elevationNote: string | undefined;
   let refinementNote: string | undefined;
+  let geometryRepairNote: string | undefined;
   let attributionNote: string | undefined;
 
   if (geometry.kind === "sample_procedural" && geometry.sampleId === "bracket") {
@@ -154,6 +155,10 @@ async function meshWorkerRun(options: WasmMeshOptions): Promise<WasmMeshStudyRes
       const { requestedMeshSizeMm, usedMeshSizeMm } = stepResult.qualityRefinement;
       refinementNote = `Mesh quality at the ${formatMeshSizeMm(requestedMeshSizeMm)} mm preset size missed the quality floor on this geometry; the mesh was automatically refined to ${formatMeshSizeMm(usedMeshSizeMm)} mm.`;
     }
+    if (stepResult.geometryRepair) {
+      const { toleranceMm } = stepResult.geometryRepair;
+      geometryRepairNote = `Open or invalid STEP boundaries were automatically sewn before meshing (repair tolerance ${formatMeshSizeMm(toleranceMm)} mm). Review the repaired geometry before relying on results.`;
+    }
     if (!attribution) {
       attributionNote = "STEP face registry unavailable; selections fall back to geometric matching.";
     }
@@ -198,7 +203,7 @@ async function meshWorkerRun(options: WasmMeshOptions): Promise<WasmMeshStudyRes
   const summary: NonNullable<Study["meshSettings"]["summary"]> = {
     nodes,
     elements,
-    warnings: [algorithmNote, elevationNote, refinementNote, attributionNote].filter((note): note is string => Boolean(note)),
+    warnings: [algorithmNote, elevationNote, refinementNote, geometryRepairNote, attributionNote].filter((note): note is string => Boolean(note)),
     quality: preset,
     source: "wasm_gmsh",
     units: "m",

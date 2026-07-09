@@ -2137,6 +2137,17 @@ img {
   line-height: 1.45;
 }
 
+.panel-warning > svg {
+  display: inline-block;
+  margin-right: 7px;
+  vertical-align: -3px;
+}
+
+.step-repair-card {
+  display: grid;
+  gap: 8px;
+}
+
 .confirm-copy {
   margin-top: 8px;
 }

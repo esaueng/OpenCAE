@@ -35,6 +35,20 @@ export async function meshStepFileInWorker(
   throw new Error(DISABLED_MESSAGE);
 }
 
+export async function inspectStepFileInWorker(
+  _payload: MeshWorkerPayloads["inspectStepFile"],
+  _onProgress?: MeshProgressListener
+): Promise<MeshWorkerResults["inspectStepFile"]> {
+  throw new Error(DISABLED_MESSAGE);
+}
+
+export async function repairStepFileInWorker(
+  _payload: MeshWorkerPayloads["repairStepFile"],
+  _onProgress?: MeshProgressListener
+): Promise<MeshWorkerResults["repairStepFile"]> {
+  throw new Error(DISABLED_MESSAGE);
+}
+
 export async function postMeshWorkerRequest<Operation extends MeshWorkerOperation>(
   _operation: Operation,
   _payload: MeshWorkerPayloads[Operation],
