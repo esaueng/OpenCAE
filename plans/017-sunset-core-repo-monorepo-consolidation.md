@@ -1,7 +1,7 @@
 # Plan 017: Sunset OpenCAE-Core — Make open-cae A Fully Standalone Monorepo
 
 Base state: open-cae `main` at 9140ad9 (post PR #34 + Tet10 elevation rescue); sibling OpenCAE-Core pinned at `bc6c305` via `OPENCAE_CORE_REF`.
-Status: TODO
+Status: DONE — executed 2026-07-09 on main (commit 391151b), ahead of the planned sequencing
 Priority: architecture track; do after the current plan-016 WIP lands, before further solver work widens the two-repo surface
 Category: architecture / repo structure / build reproducibility / licensing
 
