@@ -140,6 +140,7 @@ Dependency notes:
 | 014 Unit round-trip gate + strict units | TODO | Accuracy-plan Phase 2.3/2.4; reject unknown units instead of defaulting. |
 | 015 Local-first browser solver parity | IN PROGRESS | Dynamic step-count preflight slice landed; fixtures, upstream hooks, persistence, and cloud-solve wind-down remain. |
 | 016 WASM meshing and offline asset caching | TODO | Gmsh WASM smoke/licensing gate first; blocks full cloud infrastructure retirement. |
+| 017 Sunset Core repo (monorepo consolidation) | TODO | After current plan-016 WIP lands. Phase 0 first: prod pin `bc6c305` is NOT on Core `main`; rescue unpushed Core plans in `~/claude/open-cae-core`. |
 
 Run 2 was non-interactive: plans 006–010 are the top findings by leverage (impact ÷ effort, confidence-weighted), selected by default per the advisor skill's non-interactive rule rather than by maintainer choice. Re-cut as desired.
 
