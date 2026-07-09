@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { attachUploadedModelToProject, createLocalBlankProject, createLocalSampleProject, createLocalStaticStressStudy, openLocalProjectPayload, uploadedDisplayModelFor } from "./localProjectFactory";
+import { BRACKET_CORE_CLOUD_GEOMETRY, BRACKET_GEOMETRY_MIGRATION_NOTE } from "./bracketGeometryMigration";
 
 const sizedAsciiStlBase64 = btoa(`
 solid beam
@@ -106,6 +107,52 @@ describe("local project factory workflow", () => {
     // Projects without the retired pin stay note-free.
     const clean = openLocalProjectPayload({ project: sample.project });
     expect(clean.message).not.toContain("retired OpenCAE Core Cloud backend");
+  });
+
+  test("refreshes an outdated bracket descriptor and clears the stale mesh when opening a saved project", async () => {
+    const sample = await createLocalSampleProject("bracket", "static_stress", "2026-04-28T12:00:00.000Z");
+    // A pre-fix save: the persisted descriptor still carries the full-width
+    // 34 mm gusset (the wedge), and the study kept the mesh built from it.
+    const staleGeometry = structuredClone(BRACKET_CORE_CLOUD_GEOMETRY);
+    staleGeometry.descriptor.gusset.thickness = 34;
+    const staleProject = {
+      ...sample.project,
+      geometryFiles: sample.project.geometryFiles.map((geometry) => ({
+        ...geometry,
+        metadata: { ...geometry.metadata, coreCloudGeometry: staleGeometry }
+      })),
+      studies: sample.project.studies.map((studyValue) => ({
+        ...studyValue,
+        meshSettings: {
+          preset: "medium" as const,
+          status: "complete" as const,
+          meshRef: "mesh-wedge",
+          summary: { nodes: 2150, elements: 1126, warnings: [], artifacts: { actualCoreModel: { model: { elementBlocks: [] } } } }
+        }
+      }))
+    };
+    const staleDisplayModel = { ...sample.displayModel, coreCloudGeometry: staleGeometry };
+
+    const response = openLocalProjectPayload(JSON.parse(JSON.stringify({ project: staleProject, displayModel: staleDisplayModel })));
+
+    expect(response.project.geometryFiles[0]?.metadata.coreCloudGeometry).toEqual(BRACKET_CORE_CLOUD_GEOMETRY);
+    expect(response.displayModel.coreCloudGeometry).toEqual(BRACKET_CORE_CLOUD_GEOMETRY);
+    // The wedge mesh is invalidated so the user re-meshes the corrected shape.
+    expect(response.project.studies[0]?.meshSettings).toEqual({ preset: "medium", status: "not_started" });
+    expect(response.message).toContain(BRACKET_GEOMETRY_MIGRATION_NOTE);
+  });
+
+  test("leaves up-to-date bracket and non-bracket saves note-free with their mesh intact", async () => {
+    const sample = await createLocalSampleProject("bracket", "static_stress", "2026-04-28T12:00:00.000Z");
+    const response = openLocalProjectPayload(JSON.parse(JSON.stringify({ project: sample.project, displayModel: sample.displayModel })));
+
+    expect(response.message).not.toContain(BRACKET_GEOMETRY_MIGRATION_NOTE);
+    expect(response.project.studies[0]?.meshSettings).toEqual(sample.project.studies[0]?.meshSettings);
+    expect(response.project.geometryFiles[0]?.metadata.coreCloudGeometry).toEqual(BRACKET_CORE_CLOUD_GEOMETRY);
+
+    const cantilever = await createLocalSampleProject("cantilever", "static_stress", "2026-04-28T12:00:00.000Z");
+    const cantileverResponse = openLocalProjectPayload(JSON.parse(JSON.stringify({ project: cantilever.project })));
+    expect(cantileverResponse.message).not.toContain(BRACKET_GEOMETRY_MIGRATION_NOTE);
   });
 
   test("ignores crafted display models with malformed faces instead of crashing face selection", () => {
