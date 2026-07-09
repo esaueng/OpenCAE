@@ -29,11 +29,10 @@ The golden parity suite replays every recorded OpenCAE Core Cloud solve fixture 
 
 ## Historical: Validate Deployed Cloud (retired 2026-07)
 
-The deployed-cloud validation flow (cloud health readiness, run creation through the Worker, runner-version cross-checks) was retired with the cloud infrastructure; the retired routes now return HTTP 410 (see [docs/cloud-retirement.md](../cloud-retirement.md) for the exact route list). The deploy gates that remain are `pnpm verify:cloudflare-config` (asserts the retired bindings stay absent) and `pnpm verify:core-ref` (asserts the pinned OpenCAE Core solver ref is reachable):
+The deployed-cloud validation flow (cloud health readiness, run creation through the Worker, runner-version cross-checks) was retired with the cloud infrastructure; the retired routes now return HTTP 410 (see [docs/cloud-retirement.md](../cloud-retirement.md) for the exact route list). The deploy gates that remain are `pnpm verify:cloudflare-config` (asserts the retired bindings stay absent) and the Cloudflare dry run:
 
 ```sh
 pnpm verify:cloudflare-config
-pnpm verify:core-ref
 pnpm deploy:cloudflare:dry-run
 ```
 

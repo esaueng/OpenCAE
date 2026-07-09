@@ -47,7 +47,8 @@ describe("validation and retirement documentation", () => {
     expect(retirement).toContain("opencae/opencae-core-cloud:0.1.6");
     expect(retirement).toContain("cloud-core/runs/*");
     expect(retirement).toContain("open owner decision");
-    expect(retirement).toContain("OPENCAE_CORE_REF");
+    expect(retirement).toContain("Repo consolidation coda");
+    expect(retirement).toContain("bc6c305272bd2789634f5e4c9006e0eae21e116b");
     expect(retirement).toContain("cloud-retirement-guard.test.mjs");
   });
 

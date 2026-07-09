@@ -6,24 +6,23 @@ Four advisory runs are indexed here:
 - **Run 2 — 2026-07-01**, standard read-only survey (plans 006–010). Audited **`origin/main` at `d1556f2`** via a detached worktree, because the local checkout's `main` (`4373faf`) is 1 ahead / 34 behind `origin/main` — see plan 006, which must land first. Run 2 re-verified plans 001–005 against `d1556f2`: **all five remain unimplemented and their cited code is unchanged**; they stay TODO.
 - **Run 3 — 2026-07-02**, standard engineering/CAE-validity survey (plans 011–014). Audited the **solver itself**: the sibling OpenCAE-Core checkout at the pinned ref `08ca7a6` (byte-identical to the production runner 0.1.5) plus the open-cae post-processing chain at `d1556f2`. Four parallel numerical-methods audits plus independent hand checks (Timoshenko deflection/stress, first-bending frequency, HRZ mass-fraction conservation). Headline: **the production solver's math is sound — the gaps are in the verification harness** (gates run in no CI, single-configuration benchmark, no gmsh-path gate, no unit round-trip).
 - **Run 4 — 2026-07-05**, local-first solver migration plan (plans 015–016). Split the revised fully-local solver memo into an executable browser-solver parity track and a WASM meshing/offline-assets track. Plan 015 is already in progress with a dynamic step-budget preflight slice; plan 016 remains gated by Gmsh WASM viability and licensing.
-- **2026-07-09** (maintainer-requested, not an advisory run): plan 017 — sunset the sibling OpenCAE-Core repo and merge its packages into this repo, making open-cae fully standalone. Scoped after the cloud retirement removed the last reason for the split. Closes plan 003 and delivers plan 011 Part A as side effects.
+- **Run 5 — 2026-07-09**, repo consolidation (plan 017). Imported OpenCAE Core packages into this monorepo, removed the sibling checkout/pin bootstrap, and wired Core package tests into this repo's CI.
 
 These plans are written for a fresh executor with no context from the surveys. Each is self-contained.
 
 ## Recon Summary
 
-OpenCAE is a pnpm 9 / TypeScript monorepo: React 18 + Vite + three.js web app (`apps/opencae-web`) fronted in production (cae.esau.app) by a Cloudflare Worker (`apps/opencae-web/worker/index.ts`) that proxies solves to a containerized solver (`services/opencae-core-cloud`, Durable Object + R2); a Fastify local-dev API (`apps/opencae-api`); shared libs (`libs/*`); and a sibling `../opencae-core` workspace supplying `@opencae/core*` solver packages, pinned by `services/opencae-core-cloud/OPENCAE_CORE_REF`. CI (Node 22) clones the pinned sibling, installs frozen, builds core packages, runs the Cloudflare/runner verify scripts, then `pnpm typecheck` and `pnpm test`.
+OpenCAE is a pnpm / TypeScript monorepo: React 18 + Vite + three.js web app (`apps/opencae-web`) fronted in production (cae.esau.app) by a Cloudflare Worker (`apps/opencae-web/worker/index.ts`) that serves static assets and health checks while solves run locally in the browser; a Fastify local-dev API (`apps/opencae-api`); imported OpenCAE Core packages (`packages/*`); and shared libs/services/runners (`libs/*`, `services/*`, `runners/*`). CI (Node 22) installs frozen, builds and tests Core packages, runs the Cloudflare config gate, then `pnpm typecheck` and `pnpm test`.
 
 Primary verification gates for implementation plans:
 
 ```sh
 pnpm verify:cloudflare-config
-pnpm verify:runner-version
 pnpm typecheck
 pnpm test
 ```
 
-Full build/deploy gates when a plan touches build or Cloudflare behavior: `pnpm build`, `pnpm deploy:cloudflare:dry-run` (but see plan 003 about `build:core`'s unfrozen install).
+Full build/deploy gates when a plan touches build or Cloudflare behavior: `pnpm build`, `pnpm deploy:cloudflare:dry-run`.
 
 Production state checked 2026-07-01: `https://cae.esau.app/api/cloud-core/health` reports runner 0.1.5, core 0.1.3, solver-cpu 0.1.4 — production matches `origin/main`'s pins.
 
