@@ -83,20 +83,25 @@ export function resultFieldForUnits(field: ResultField, unitSystem: UnitSystem):
 
   if (!converter) return field;
 
-  const convertedValues = field.values.map((value) => roundDisplayValue(converter(value).value));
+  // Convert only — never round field data. These values and vectors feed the
+  // result render (colors and the deformed shape), where display rounding is
+  // destructive: sub-0.01 displacement fields (a stiff part deflecting ~1 µm)
+  // quantize onto a 0.001 grid, and the deformation auto-scale amplifies the
+  // steps into a jagged, crumpled shape. Readouts format at display time.
+  const convertedValues = field.values.map((value) => converter(value).value);
   const convertedMin = converter(field.min);
   const convertedMax = converter(field.max);
   return {
     ...field,
     values: convertedValues,
-    min: roundDisplayValue(convertedMin.value),
-    max: roundDisplayValue(convertedMax.value),
+    min: convertedMin.value,
+    max: convertedMax.value,
     units: convertedMax.units,
-    vectors: field.vectors?.map((vector) => vector.map((component) => roundDisplayValue(converter(component).value)) as [number, number, number]),
+    vectors: field.vectors?.map((vector) => vector.map((component) => converter(component).value) as [number, number, number]),
     samples: field.samples?.map((sample) => ({
       ...sample,
-      value: roundDisplayValue(converter(sample.value).value),
-      ...(sample.vector ? { vector: sample.vector.map((component) => roundDisplayValue(converter(component).value)) as [number, number, number] } : {})
+      value: converter(sample.value).value,
+      ...(sample.vector ? { vector: sample.vector.map((component) => converter(component).value) as [number, number, number] } : {})
     }))
   };
 }
