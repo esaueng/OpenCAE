@@ -43,6 +43,11 @@ export type StepMeshResult = GeoMeshResult & {
    */
   elevation?: "curved" | "straight_edge";
   /**
+   * Present when the linear mesh missed the quality floor and gmsh's Netgen
+   * optimizer repaired it in-session (local sliver splitting/smoothing).
+   */
+  optimizer?: "netgen";
+  /**
    * Present when the requested size missed the quality-gate floor and the
    * mesh was automatically retried at finer characteristic lengths.
    */
@@ -166,6 +171,12 @@ export async function meshStepToMshV2(stepContent: Uint8Array | string, options:
   };
 }
 
+const NETGEN_CRASH_ERROR_NAME = "NetgenOptimizerCrash";
+
+function isNetgenCrash(error: unknown): boolean {
+  return error instanceof Error && error.name === NETGEN_CRASH_ERROR_NAME;
+}
+
 async function meshStepWithAlgorithmFallback(
   stepContent: Uint8Array | string,
   options: StepMeshWasmOptions,
@@ -173,14 +184,26 @@ async function meshStepWithAlgorithmFallback(
 ): Promise<Omit<StepMeshResult, "totalMs">> {
   const gmsh = await loadGmshWasm();
   try {
-    return meshStepSession(gmsh, stepContent, options, "delaunay", totalStart);
+    return meshStepSession(gmsh, stepContent, options, "delaunay", totalStart, true);
   } catch (delaunayError) {
+    // The Netgen optimizer can crash the wasm module outright ("memory access
+    // out of bounds") on some meshes; the whole session is poisoned, so retry
+    // the same algorithm on a FRESH module without the optimizer.
+    if (isNetgenCrash(delaunayError)) {
+      try {
+        return meshStepSession(await loadGmshWasm(), stepContent, options, "delaunay", now(), false);
+      } catch {
+        // Fall through to the Frontal fallback below.
+      }
+    }
     // Retry once with the Frontal algorithm on a FRESH module instance — a
     // second session on the same instance aborts in gmsh-wasm 0.1.2.
     try {
-      const retryGmsh = await loadGmshWasm();
-      return meshStepSession(retryGmsh, stepContent, options, "frontal", now());
+      return meshStepSession(await loadGmshWasm(), stepContent, options, "frontal", now(), true);
     } catch (frontalError) {
+      if (isNetgenCrash(frontalError)) {
+        return meshStepSession(await loadGmshWasm(), stepContent, options, "frontal", now(), false);
+      }
       throw new Error(
         `gmsh-wasm STEP meshing failed with both 3D algorithms. Delaunay: ${messageOf(delaunayError)}; Frontal: ${messageOf(frontalError)}`
       );
@@ -205,7 +228,8 @@ function meshStepSession(
   stepContent: Uint8Array | string,
   options: StepMeshWasmOptions,
   algorithm3D: "delaunay" | "frontal",
-  totalStart: number
+  totalStart: number,
+  allowNetgen: boolean
 ): Omit<StepMeshResult, "totalMs"> {
   const timings: MeshTimings = {};
   timePhaseSync(timings, options, "init", totalStart, () => {
@@ -231,12 +255,34 @@ function meshStepSession(
     });
     timePhaseSync(timings, options, "mesh2d", totalStart, () => gmsh.model.mesh.generate(2));
     timePhaseSync(timings, options, "mesh3d", totalStart, () => gmsh.model.mesh.generate(3));
+
+    // Thin walls leave a tiny tail of sliver tets in the LINEAR mesh (often a
+    // single element out of thousands) that no global size change reliably
+    // removes — measured on a 1.5 mm sheet: minSICN 0.0115 raw vs 0.112 after
+    // one Netgen pass (~50 ms), which locally splits/repairs exactly that
+    // tail. Only run it when the mesh would otherwise fail the gate: Netgen
+    // in gmsh-wasm can hard-crash the module on some meshes, which aborts the
+    // session (caught upstream and retried without the optimizer).
+    let optimizer: StepMeshResult["optimizer"];
+    let linearQuality = minSICNQuality(gmsh);
+    if (allowNetgen && linearQuality !== undefined && linearQuality < MESH_QUALITY_REJECT_MIN_SICN) {
+      try {
+        gmsh.model.mesh.optimize("Netgen");
+      } catch (error) {
+        const crash = new Error(`gmsh Netgen optimizer crashed: ${messageOf(error)}`);
+        crash.name = NETGEN_CRASH_ERROR_NAME;
+        throw crash;
+      }
+      optimizer = "netgen";
+      linearQuality = minSICNQuality(gmsh);
+    }
+
     let elevation: StepMeshResult["elevation"];
     if (options.elementOrder === 2) {
       timePhaseSync(timings, options, "order2", totalStart, () => gmsh.model.mesh.setOrder(2));
       elevation = "curved";
     }
-    let qualityMinSICN = minSICNQuality(gmsh);
+    let qualityMinSICN = options.elementOrder === 2 ? minSICNQuality(gmsh) : linearQuality;
     if (
       elevation === "curved" &&
       qualityMinSICN !== undefined &&
@@ -258,6 +304,7 @@ function meshStepSession(
       msh,
       timings,
       algorithm3D,
+      ...(optimizer !== undefined ? { optimizer } : {}),
       ...(elevation !== undefined ? { elevation } : {}),
       ...(qualityMinSICN !== undefined ? { qualityMinSICN } : {})
     };
