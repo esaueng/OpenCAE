@@ -69,6 +69,8 @@ export type MeshWorkerResults = {
     timings: MeshTimings;
     totalMs: number;
     algorithm3D: "delaunay" | "frontal";
+    /** Tet10 mid-side node placement: gmsh's curved default, or the straight-edge rescue for thin/bent geometry. */
+    elevation?: "curved" | "straight_edge";
     /** Facet->B-rep-face attribution report (present when the request carried attribution inputs). */
     attribution?: FacetAttributionReport;
   };

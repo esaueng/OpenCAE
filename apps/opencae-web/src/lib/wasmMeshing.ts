@@ -101,6 +101,7 @@ async function meshWorkerRun(options: WasmMeshOptions): Promise<WasmMeshStudyRes
   let meshedPacked: Awaited<ReturnType<MeshWorkerClientModule["meshGeoScriptInWorker"]>>;
   let elementOrder: 1 | 2;
   let algorithmNote: string | undefined;
+  let elevationNote: string | undefined;
   let attributionNote: string | undefined;
 
   if (geometry.kind === "sample_procedural" && geometry.sampleId === "bracket") {
@@ -144,6 +145,9 @@ async function meshWorkerRun(options: WasmMeshOptions): Promise<WasmMeshStudyRes
     if (stepResult.algorithm3D === "frontal") {
       algorithmNote = "Delaunay 3D meshing failed in the browser mesher; the Frontal algorithm produced this mesh.";
     }
+    if (stepResult.elevation === "straight_edge") {
+      elevationNote = "Curved Tet10 elevation produced near-degenerate elements on this geometry; mid-side nodes were placed on straight edges instead (slightly less accurate on curved boundaries).";
+    }
     if (!attribution) {
       attributionNote = "STEP face registry unavailable; selections fall back to geometric matching.";
     }
@@ -182,7 +186,7 @@ async function meshWorkerRun(options: WasmMeshOptions): Promise<WasmMeshStudyRes
   const summary: NonNullable<Study["meshSettings"]["summary"]> = {
     nodes,
     elements,
-    warnings: [algorithmNote, attributionNote].filter((note): note is string => Boolean(note)),
+    warnings: [algorithmNote, elevationNote, attributionNote].filter((note): note is string => Boolean(note)),
     quality: preset,
     source: "wasm_gmsh",
     units: "m",

@@ -106,6 +106,7 @@ async function runOperation(request: MeshWorkerRequest, reportPhase: (phase: Mes
     timings: meshed.timings,
     totalMs: meshed.totalMs,
     algorithm3D: meshed.algorithm3D,
+    ...(meshed.elevation ? { elevation: meshed.elevation } : {}),
     ...(attribution ? { attribution } : {})
   };
 }
