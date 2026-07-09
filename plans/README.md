@@ -6,6 +6,7 @@ Four advisory runs are indexed here:
 - **Run 2 — 2026-07-01**, standard read-only survey (plans 006–010). Audited **`origin/main` at `d1556f2`** via a detached worktree, because the local checkout's `main` (`4373faf`) is 1 ahead / 34 behind `origin/main` — see plan 006, which must land first. Run 2 re-verified plans 001–005 against `d1556f2`: **all five remain unimplemented and their cited code is unchanged**; they stay TODO.
 - **Run 3 — 2026-07-02**, standard engineering/CAE-validity survey (plans 011–014). Audited the **solver itself**: the sibling OpenCAE-Core checkout at the pinned ref `08ca7a6` (byte-identical to the production runner 0.1.5) plus the open-cae post-processing chain at `d1556f2`. Four parallel numerical-methods audits plus independent hand checks (Timoshenko deflection/stress, first-bending frequency, HRZ mass-fraction conservation). Headline: **the production solver's math is sound — the gaps are in the verification harness** (gates run in no CI, single-configuration benchmark, no gmsh-path gate, no unit round-trip).
 - **Run 4 — 2026-07-05**, local-first solver migration plan (plans 015–016). Split the revised fully-local solver memo into an executable browser-solver parity track and a WASM meshing/offline-assets track. Plan 015 is already in progress with a dynamic step-budget preflight slice; plan 016 remains gated by Gmsh WASM viability and licensing.
+- **2026-07-09** (maintainer-requested, not an advisory run): plan 017 — sunset the sibling OpenCAE-Core repo and merge its packages into this repo, making open-cae fully standalone. Scoped after the cloud retirement removed the last reason for the split. Closes plan 003 and delivers plan 011 Part A as side effects.
 
 These plans are written for a fresh executor with no context from the surveys. Each is self-contained.
 
@@ -140,6 +141,7 @@ Dependency notes:
 | 014 Unit round-trip gate + strict units | TODO | Accuracy-plan Phase 2.3/2.4; reject unknown units instead of defaulting. |
 | 015 Local-first browser solver parity | IN PROGRESS | Dynamic step-count preflight slice landed; fixtures, upstream hooks, persistence, and cloud-solve wind-down remain. |
 | 016 WASM meshing and offline asset caching | TODO | Gmsh WASM smoke/licensing gate first; blocks full cloud infrastructure retirement. |
+| 017 Sunset Core repo (monorepo consolidation) | TODO | After current plan-016 WIP lands. Phase 0 first: prod pin `bc6c305` is NOT on Core `main`; rescue unpushed Core plans in `~/claude/open-cae-core`. |
 
 Run 2 was non-interactive: plans 006–010 are the top findings by leverage (impact ÷ effort, confidence-weighted), selected by default per the advisor skill's non-interactive rule rather than by maintainer choice. Re-cut as desired.
 
