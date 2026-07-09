@@ -13,6 +13,7 @@ import {
   writeAutosavedWorkspace
 } from "./appPersistence";
 import type { AutosavedWorkspace, WorkspaceUiSnapshot } from "./appPersistence";
+import { BRACKET_CORE_CLOUD_GEOMETRY, BRACKET_GEOMETRY_MIGRATION_NOTE } from "./bracketGeometryMigration";
 
 const project = {
   id: "project-1",
@@ -605,6 +606,75 @@ describe("app persistence", () => {
     expect(restored?.ui.resultMode).toBe("acceleration");
     expect(restored?.ui.stressExaggeration).toBe(4);
     expect(restored?.ui.status).toBe("Fine tuning view");
+  });
+});
+
+describe("bracket geometry migration on autosave restore", () => {
+  function bracketProjectWith(geometry: unknown): Project {
+    return {
+      ...project,
+      geometryFiles: [{
+        id: "geom-bracket",
+        projectId: project.id,
+        filename: "bracket-demo.step",
+        localPath: "samples/bracket-demo.step",
+        artifactKey: "project-1/geometry/bracket-display.json",
+        status: "ready",
+        metadata: { source: "sample", sampleModel: "bracket", coreCloudGeometry: geometry }
+      }],
+      studies: [studyWithSetup]
+    } as Project;
+  }
+
+  function storageWith(snapshot: AutosavedWorkspace) {
+    return {
+      getItem: vi.fn((key: string) => (key === AUTOSAVE_STORAGE_KEY ? JSON.stringify(snapshot) : null)),
+      setItem: vi.fn()
+    };
+  }
+
+  test("refreshes an outdated bracket descriptor on restore, clears the stale mesh, and reports it", () => {
+    // A pre-fix autosave: the embedded descriptor still carries the full-width
+    // 34 mm gusset (the wedge), and the study kept the mesh built from it.
+    const staleGeometry = structuredClone(BRACKET_CORE_CLOUD_GEOMETRY);
+    staleGeometry.descriptor.gusset.thickness = 34;
+    const staleProject = bracketProjectWith(staleGeometry);
+    const snapshot = buildAutosavedWorkspace({
+      project: staleProject,
+      displayModel: { ...displayModel, coreCloudGeometry: staleGeometry },
+      savedAt: "2026-07-01T12:00:00.000Z",
+      ui: { ...baseUi, undoStack: [staleProject], status: "Results ready", logs: [{ message: "Results ready", at: 1714000000000 }] }
+    });
+
+    const restored = readAutosavedWorkspace(storageWith(snapshot));
+
+    expect(restored?.projectFile.project.geometryFiles[0]?.metadata.coreCloudGeometry).toEqual(BRACKET_CORE_CLOUD_GEOMETRY);
+    expect(restored?.projectFile.displayModel.coreCloudGeometry).toEqual(BRACKET_CORE_CLOUD_GEOMETRY);
+    // The wedge mesh is invalidated so the run flow re-meshes the corrected shape.
+    expect(restored?.projectFile.project.studies[0]?.meshSettings).toEqual({ preset: "medium", status: "not_started" });
+    // Undo history is refreshed too, so undo cannot resurrect the wedge.
+    expect(restored?.ui.undoStack[0]?.geometryFiles[0]?.metadata.coreCloudGeometry).toEqual(BRACKET_CORE_CLOUD_GEOMETRY);
+    expect(restored?.ui.undoStack[0]?.studies[0]?.meshSettings.status).toBe("not_started");
+    // Honest, not silent: the migration is the restored status and newest log line.
+    expect(restored?.ui.status).toBe(BRACKET_GEOMETRY_MIGRATION_NOTE);
+    expect(restored?.ui.logs[0]?.message).toBe(BRACKET_GEOMETRY_MIGRATION_NOTE);
+    expect(restored?.ui.logs[1]?.message).toBe("Results ready");
+  });
+
+  test("leaves an up-to-date bracket autosave untouched and note-free", () => {
+    const currentProject = bracketProjectWith(structuredClone(BRACKET_CORE_CLOUD_GEOMETRY));
+    const snapshot = buildAutosavedWorkspace({
+      project: currentProject,
+      displayModel: { ...displayModel, coreCloudGeometry: BRACKET_CORE_CLOUD_GEOMETRY },
+      savedAt: "2026-07-09T12:00:00.000Z",
+      ui: { ...baseUi, status: "Results ready" }
+    });
+
+    const restored = readAutosavedWorkspace(storageWith(snapshot));
+
+    expect(restored?.ui.status).toBe("Results ready");
+    expect(restored?.projectFile.project.studies[0]?.meshSettings).toEqual(studyWithSetup.meshSettings);
+    expect(restored?.projectFile.displayModel.coreCloudGeometry).toEqual(BRACKET_CORE_CLOUD_GEOMETRY);
   });
 });
 

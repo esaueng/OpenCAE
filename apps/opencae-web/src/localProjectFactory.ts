@@ -3,6 +3,7 @@ import { ProjectSchema } from "@opencae/schema";
 import { bracketDemoProject, bracketDisplayModel } from "@opencae/db/sample-data";
 import { stlDimensionsFromBase64 } from "@opencae/units";
 import { parseDisplayModel, parseResultBundle } from "./appPersistence";
+import { BRACKET_CORE_CLOUD_GEOMETRY, BRACKET_GEOMETRY_MIGRATION_NOTE, refreshBracketSampleGeometry } from "./bracketGeometryMigration";
 import type { EmbeddedModelFile, LocalResultBundle } from "./projectFile";
 import type { SampleAnalysisType, SampleModelId, SampleProjectResponse } from "./lib/api";
 
@@ -27,37 +28,6 @@ const SAMPLE_META: Record<SampleModelId, { projectName: string; modelName: strin
     filename: "cantilever-beam.step",
     displayName: "cantilever demo body",
     dimensions: { x: 180, y: 24, z: 24, units: "mm" }
-  }
-};
-
-const BRACKET_CORE_CLOUD_GEOMETRY = {
-  kind: "sample_procedural" as const,
-  sampleId: "bracket" as const,
-  units: "mm" as const,
-  descriptor: {
-    base: { length: 120, width: 34, height: 10 },
-    upright: { height: 88, width: 18, thickness: 34 },
-    // Thickness < base width makes the gusset a thin centered rib (matching the
-    // displayed bracket, whose rib is 0.38/1.1 of the 34 mm body depth). A full
-    // 34 mm gusset fills the bracket's inside corner into a solid wedge, so the
-    // solved/rendered result stops resembling the displayed model. The rib is
-    // also kept short and the flange bores placed beyond it: a bore under the
-    // rib intersects it (the bore cut overshoots 1 mm past the base top), and
-    // the resulting sliver elements fail the mesher's minSICN quality floor.
-    gusset: { length: 40, height: 40, thickness: 12 },
-    rib: { length: 40, height: 40, thickness: 12 },
-    holes: [
-      { id: "hole-base-1", center: [68, 17, 5], diameter: 12 },
-      { id: "hole-base-2", center: [100, 17, 5], diameter: 12 },
-      { id: "hole-upright-1", center: [9, 17, 56], diameter: 10 }
-    ],
-    surfaces: {
-      fixedSupport: { selectionRef: "selection-fixed-face", sourceSelectionRef: "FS1", sourceFaceId: "face-base-left", name: "fixed_support" },
-      loadSurface: { selectionRef: "selection-load-face", sourceSelectionRef: "L1", sourceFaceId: "face-load-top", name: "load_surface" }
-    },
-    supportFaceId: "face-base-left",
-    loadFaceId: "face-load-top",
-    meshSize: 18
   }
 };
 
@@ -294,11 +264,15 @@ export function openLocalProjectPayload(payload: unknown): SampleProjectResponse
   // retired cloud backend to "auto" at parse time, so detect it on the RAW
   // payload and tell the user honestly instead of migrating in silence.
   const migrationNote = carriesRetiredCloudBackend(candidate) ? ` ${RETIRED_CLOUD_BACKEND_MIGRATION_NOTE}` : "";
+  // Saved Bracket Demo projects embed the solver geometry at creation time;
+  // refresh outdated descriptors (and their stale wedge meshes) honestly.
+  const bracket = refreshBracketSampleGeometry(parsed.data, displayModel);
+  const bracketNote = bracket.migrated ? ` ${BRACKET_GEOMETRY_MIGRATION_NOTE}` : "";
   return {
-    project: parsed.data,
-    displayModel,
+    project: bracket.project,
+    displayModel: bracket.displayModel ?? displayModel,
     ...(results ? { results } : {}),
-    message: `${parsed.data.name} opened from local file.${migrationNote}`
+    message: `${parsed.data.name} opened from local file.${migrationNote}${bracketNote}`
   };
 }
 
