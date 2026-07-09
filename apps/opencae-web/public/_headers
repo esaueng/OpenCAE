@@ -1,3 +1,6 @@
+# script-src needs 'unsafe-eval' because occt-import-js (STEP preview/meshing)
+# compiles embind invokers with the Function constructor at init; without it
+# every STEP import fails with "call to Function() blocked by CSP".
 /*
   Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' https://plausible.io https://cdn.jsdelivr.net; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'
   X-Content-Type-Options: nosniff

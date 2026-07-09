@@ -962,7 +962,7 @@ function MeshPanel({ study, onGenerateMesh }: RightPanelProps) {
           <Info label="Warnings" value={String(study.meshSettings.summary.warnings.length)} />
         </div>
       )}
-      <p className="panel-copy">Cloud solves mesh the part on the server at the selected quality; final node and element counts appear with the results.</p>
+      <p className="panel-copy">Meshing runs locally in your browser at the selected quality; final node and element counts appear with the results.</p>
     </Panel>
   );
 }
