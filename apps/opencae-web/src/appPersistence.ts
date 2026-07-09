@@ -126,8 +126,33 @@ export function readAutosavedWorkspace(storage = getBrowserStorage()): Autosaved
   return { ...merged, ui: reattachEmbeddedModelsToUiSnapshot(merged.ui, merged.projectFile.project) };
 }
 
-export function writeAutosavedWorkspace(snapshot: AutosavedWorkspace, storage = getBrowserStorage()): boolean {
-  return writeJsonStorageItem(AUTOSAVE_STORAGE_KEY, snapshot, storage);
+export type AutosaveWriteOutcome = "full" | "slim" | "failed";
+
+/**
+ * Persist the workspace autosave. A real project (embedded CAD + stored Core
+ * mesh artifact + dynamic result frames) can exceed the ~5 MB localStorage
+ * quota, so a failed full write retries with a slim snapshot that keeps the
+ * whole project SETUP but drops the regenerable heavyweights: the results
+ * bundle (re-runnable; also persisted per run in IndexedDB) and the studies'
+ * stored mesh artifacts (the run flow re-meshes when absent).
+ */
+export function writeAutosavedWorkspace(snapshot: AutosavedWorkspace, storage = getBrowserStorage()): AutosaveWriteOutcome {
+  if (writeJsonStorageItem(AUTOSAVE_STORAGE_KEY, snapshot, storage)) return "full";
+  const slim = slimAutosavedWorkspaceForQuota(snapshot);
+  if (slim && writeJsonStorageItem(AUTOSAVE_STORAGE_KEY, slim, storage)) return "slim";
+  return "failed";
+}
+
+function slimAutosavedWorkspaceForQuota(snapshot: AutosavedWorkspace): AutosavedWorkspace | null {
+  const projectFile = snapshot.projectFile;
+  const slimProject = stripHeavyMeshArtifactsFromProject(projectFile.project);
+  const hasResults = Boolean(projectFile.results);
+  if (!hasResults && slimProject === projectFile.project) return null; // Nothing to shed; retry would fail identically.
+  const { results: _results, ...projectFileWithoutResults } = projectFile;
+  return {
+    ...snapshot,
+    projectFile: { ...projectFileWithoutResults, project: slimProject }
+  };
 }
 
 export function writeAutosavedUiSnapshot(snapshot: AutosavedWorkspaceUiSnapshot, storage = getBrowserStorage()): boolean {
@@ -138,9 +163,19 @@ export function scheduleAutosavedWorkspaceWrite(
   snapshot: AutosavedWorkspace | (() => AutosavedWorkspace),
   storage = getBrowserStorage(),
   delayMs = 5000,
-  onWriteFailed?: () => void
+  onWriteFailed?: () => void,
+  onWriteDegraded?: () => void
 ): () => void {
-  return scheduleStorageWrite(() => writeAutosavedWorkspace(readSnapshot(snapshot), storage), storage, delayMs, onWriteFailed);
+  return scheduleStorageWrite(
+    () => {
+      const outcome = writeAutosavedWorkspace(readSnapshot(snapshot), storage);
+      if (outcome === "slim") onWriteDegraded?.();
+      return outcome !== "failed";
+    },
+    storage,
+    delayMs,
+    onWriteFailed
+  );
 }
 
 export function scheduleAutosavedUiSnapshotWrite(
@@ -160,15 +195,38 @@ function stripEmbeddedModelsFromUiSnapshot(ui: WorkspaceUiSnapshot): WorkspaceUi
 }
 
 function stripEmbeddedModelsFromProject(project: Project): Project {
-  if (!project.geometryFiles.some((geometry) => geometry.metadata.embeddedModel)) return project;
-  return {
-    ...project,
-    geometryFiles: project.geometryFiles.map((geometry) => {
-      if (!geometry.metadata.embeddedModel) return geometry;
-      const { embeddedModel: _embeddedModel, ...metadata } = geometry.metadata;
-      return { ...geometry, metadata };
-    })
-  };
+  const withoutModels = project.geometryFiles.some((geometry) => geometry.metadata.embeddedModel)
+    ? {
+        ...project,
+        geometryFiles: project.geometryFiles.map((geometry) => {
+          if (!geometry.metadata.embeddedModel) return geometry;
+          const { embeddedModel: _embeddedModel, ...metadata } = geometry.metadata;
+          return { ...geometry, metadata };
+        })
+      }
+    : project;
+  // Undo/redo snapshots also carry each study's stored Core-model artifact
+  // (hundreds of KB per real mesh); a handful of undo entries can exceed the
+  // localStorage quota on their own. The artifact is regenerable (the run
+  // flow re-meshes when it is absent), so history never needs it.
+  return stripHeavyMeshArtifactsFromProject(withoutModels);
+}
+
+/** Drop regenerable multi-hundred-KB mesh artifacts (Core model / volume mesh) from every study. */
+function stripHeavyMeshArtifactsFromProject(project: Project): Project {
+  const studies = project.studies.map((study) => {
+    const artifacts = study.meshSettings.summary?.artifacts as Record<string, unknown> | undefined;
+    if (!artifacts || (!artifacts.actualCoreModel && !artifacts.coreModel && !artifacts.volumeMesh)) return study;
+    const { actualCoreModel: _actual, coreModel: _core, volumeMesh: _volume, ...lightArtifacts } = artifacts;
+    return {
+      ...study,
+      meshSettings: {
+        ...study.meshSettings,
+        summary: { ...study.meshSettings.summary!, artifacts: lightArtifacts }
+      }
+    };
+  });
+  return studies.every((study, index) => study === project.studies[index]) ? project : { ...project, studies };
 }
 
 function reattachEmbeddedModelsToUiSnapshot(ui: WorkspaceUiSnapshot, project: Project): WorkspaceUiSnapshot {

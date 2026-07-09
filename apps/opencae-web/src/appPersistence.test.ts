@@ -9,9 +9,10 @@ import {
   readAutosavedWorkspace,
   scheduleAutosavedUiSnapshotWrite,
   scheduleAutosavedWorkspaceWrite,
-  WORKSPACE_LOG_LIMIT
+  WORKSPACE_LOG_LIMIT,
+  writeAutosavedWorkspace
 } from "./appPersistence";
-import type { WorkspaceUiSnapshot } from "./appPersistence";
+import type { AutosavedWorkspace, WorkspaceUiSnapshot } from "./appPersistence";
 
 const project = {
   id: "project-1",
@@ -604,5 +605,105 @@ describe("app persistence", () => {
     expect(restored?.ui.resultMode).toBe("acceleration");
     expect(restored?.ui.stressExaggeration).toBe(4);
     expect(restored?.ui.status).toBe("Fine tuning view");
+  });
+});
+
+describe("autosave quota fallback", () => {
+  function quotaLimitedStorage(maxBytes: number) {
+    const store = new Map<string, string>();
+    return {
+      store,
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        if (value.length > maxBytes) throw new DOMException("Quota exceeded", "QuotaExceededError");
+        store.set(key, value);
+      }
+    };
+  }
+
+  function heavyProject(): Project {
+    const artifacts = {
+      actualCoreModel: { model: { nodes: { coordinates: Array.from({ length: 3000 }, (_v, i) => i * 0.001) } } },
+      meshConnectivity: { connectedComponents: 1 },
+      selectionMapping: [{ selection: "FS1", mode: "byFace" }]
+    };
+    const study = {
+      ...studyWithSetup,
+      meshSettings: {
+        preset: "medium" as const,
+        status: "complete" as const,
+        meshRef: "mesh-1",
+        summary: { nodes: 2150, elements: 1126, warnings: [], artifacts }
+      }
+    };
+    return { ...project, studies: [study] } as Project;
+  }
+
+  test("sheds results and mesh artifacts when the full autosave exceeds quota", () => {
+    const storage = quotaLimitedStorage(20_000);
+    const snapshot = buildAutosavedWorkspace({
+      project: heavyProject(),
+      displayModel,
+      savedAt: "2026-07-09T02:47:41.000Z",
+      results: {
+        activeRunId: "run-1",
+        completedRunId: "run-1",
+        summary,
+        fields: [{ ...fields[0]!, values: Array.from({ length: 5000 }, () => 12) }]
+      },
+      ui: baseUi
+    });
+
+    const outcome = writeAutosavedWorkspace(snapshot, storage);
+
+    expect(outcome).toBe("slim");
+    const stored = JSON.parse(storage.store.get(AUTOSAVE_STORAGE_KEY)!) as AutosavedWorkspace;
+    expect(stored.projectFile.results).toBeUndefined();
+    const storedArtifacts = stored.projectFile.project.studies[0]!.meshSettings.summary?.artifacts as Record<string, unknown>;
+    expect(storedArtifacts.actualCoreModel).toBeUndefined();
+    // Regenerable heavyweights are gone; the setup and light artifacts survive.
+    expect(storedArtifacts.meshConnectivity).toEqual({ connectedComponents: 1 });
+    expect(storedArtifacts.selectionMapping).toEqual([{ selection: "FS1", mode: "byFace" }]);
+    expect(stored.projectFile.project.studies[0]!.meshSettings.summary?.nodes).toBe(2150);
+    expect(stored.projectFile.project.studies[0]!.constraints).toEqual(studyWithSetup.constraints);
+  });
+
+  test("reports failed when even the slim autosave cannot fit", () => {
+    const storage = quotaLimitedStorage(10);
+    const snapshot = buildAutosavedWorkspace({ project: heavyProject(), displayModel, ui: baseUi });
+
+    expect(writeAutosavedWorkspace(snapshot, storage)).toBe("failed");
+  });
+
+  test("notifies degradation (not failure) through scheduleAutosavedWorkspaceWrite", () => {
+    vi.useFakeTimers();
+    const storage = quotaLimitedStorage(20_000);
+    const onWriteFailed = vi.fn();
+    const onWriteDegraded = vi.fn();
+    const snapshot = buildAutosavedWorkspace({
+      project: heavyProject(),
+      displayModel,
+      results: { activeRunId: "run-1", completedRunId: "run-1", summary, fields: [{ ...fields[0]!, values: Array.from({ length: 5000 }, () => 12) }] },
+      ui: baseUi
+    });
+
+    const cancel = scheduleAutosavedWorkspaceWrite(snapshot, storage, 100, onWriteFailed, onWriteDegraded);
+    vi.advanceTimersByTime(100);
+
+    expect(onWriteDegraded).toHaveBeenCalledTimes(1);
+    expect(onWriteFailed).not.toHaveBeenCalled();
+    cancel();
+  });
+
+  test("undo/redo snapshots never carry heavy mesh artifacts", () => {
+    const snapshot = buildAutosavedWorkspace({
+      project,
+      displayModel,
+      ui: { ...baseUi, undoStack: [heavyProject()], redoStack: [] }
+    });
+
+    const undoArtifacts = snapshot.ui.undoStack[0]!.studies[0]!.meshSettings.summary?.artifacts as Record<string, unknown>;
+    expect(undoArtifacts.actualCoreModel).toBeUndefined();
+    expect(undoArtifacts.meshConnectivity).toEqual({ connectedComponents: 1 });
   });
 });

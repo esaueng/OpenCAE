@@ -185,6 +185,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const processingRunIdRef = useRef<string | null>(null);
   const projectRef = useRef<Project | null>(project);
   const autosaveWriteFailureNotifiedRef = useRef(false);
+  const autosaveDegradedNotifiedRef = useRef(false);
   const workspaceShortcutHandlerRef = useRef<(event: KeyboardEvent) => void>(() => undefined);
   const resultFrameIndexRef = useRef(0);
   const resultPlaybackFramePositionRef = useRef(0);
@@ -677,6 +678,12 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     pushMessage("Autosave failed: browser storage is full or unavailable. Save the project to disk to keep changes.");
   }
 
+  function notifyAutosaveDegraded() {
+    if (autosaveDegradedNotifiedRef.current) return;
+    autosaveDegradedNotifiedRef.current = true;
+    pushMessage("Autosave kept the project setup, but the mesh artifact and results exceed browser storage. Use Save project to keep them on disk.");
+  }
+
   // Projects saved while the STEP face registry was unavailable (the CSP
   // regression) carry placeholder "face-upload-*" faces whose selections can
   // never map onto the meshed geometry. Rebuild the real registry and remap
@@ -727,7 +734,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         ...(solverMeshSummary ? { solverMeshSummary } : {})
       } : undefined,
       ui: autosaveUiSnapshot
-    }), undefined, AUTOSAVE_HEAVY_WRITE_DELAY_MS, notifyAutosaveWriteFailure);
+    }), undefined, AUTOSAVE_HEAVY_WRITE_DELAY_MS, notifyAutosaveWriteFailure, notifyAutosaveDegraded);
   }, [
     activeRunId,
     activeStep,
