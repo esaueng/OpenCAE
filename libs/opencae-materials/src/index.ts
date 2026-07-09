@@ -69,7 +69,12 @@ export interface MaterialManufacturingProfile {
   defaultInfillDensity?: number;
   defaultWallCount?: number;
   defaultLayerOrientation?: "x" | "y" | "z";
+  /** Legacy dense-print strength factor; treated as the in-plane value for FDM. */
   layerStrengthFactor?: number;
+  inPlaneModulusFactor?: number;
+  interlayerModulusFactor?: number;
+  inPlaneStrengthFactor?: number;
+  interlayerStrengthFactor?: number;
 }
 
 export const manufacturingProcesses: ManufacturingProcess[] = [
@@ -195,7 +200,22 @@ export type PrintMaterialParameters = ManufacturingParameters;
 
 export interface PrintStrengthContext {
   criticalLayerAxis?: "x" | "y" | "z";
+  /** Legacy/testing override for the interlayer strength factor. */
   criticalLayerFactor?: number;
+}
+
+export type FdmLoadPathRelation = "within_layers" | "across_layers" | "conservative";
+
+export interface FdmPropertyFactors {
+  buildAxis: "x" | "y" | "z";
+  criticalAxis?: "x" | "y" | "z";
+  loadPathRelation: FdmLoadPathRelation;
+  shellShare: number;
+  relativeDensity: number;
+  stiffnessFillFactor: number;
+  strengthFillFactor: number;
+  modulusDirectionFactor: number;
+  strengthDirectionFactor: number;
 }
 
 export function manufacturingProcessForId(processId: ManufacturingProcessId): ManufacturingProcess | undefined {
@@ -204,7 +224,26 @@ export function manufacturingProcessForId(processId: ManufacturingProcessId): Ma
 
 export function materialManufacturingProfilesFor(material: Material | string): MaterialManufacturingProfile[] {
   const materialId = typeof material === "string" ? material : material.id;
-  return [...(manufacturingProfilesByMaterialId[materialId] ?? [])];
+  const configured = manufacturingProfilesByMaterialId[materialId];
+  if (configured) return configured.map((profile) => ({ ...profile }));
+  if (typeof material === "string" || !material.printProfile) return [];
+  const processId = legacyManufacturingProcessId(material.printProfile.process);
+  if (!processId) return [];
+  const profile = material.printProfile;
+  const additive = {
+    processId,
+    defaultInfillDensity: profile.defaultInfillDensity,
+    defaultWallCount: profile.defaultWallCount,
+    defaultLayerOrientation: profile.defaultLayerOrientation,
+    layerStrengthFactor: profile.layerStrengthFactor,
+    inPlaneModulusFactor: profile.inPlaneModulusFactor,
+    interlayerModulusFactor: profile.interlayerModulusFactor,
+    inPlaneStrengthFactor: profile.inPlaneStrengthFactor,
+    interlayerStrengthFactor: profile.interlayerStrengthFactor
+  } satisfies MaterialManufacturingProfile;
+  // A caller-provided material definition can still describe solid stock; its
+  // printProfile adds an additive option rather than making printing mandatory.
+  return [bulkProfile("cnc_machining"), additive];
 }
 
 export function compatibleManufacturingProcessesFor(material: Material | string): ManufacturingProcess[] {
@@ -285,26 +324,89 @@ export function effectiveMaterialProperties(material: Material, parameters: Reco
   const profile = materialManufacturingProfileFor(material, processId);
   if (!process || !profile || process.kind !== "additive") return material;
 
-  const usesShellAndInfill = process.settingsKind === "fdm";
-  const infill = usesShellAndInfill ? clamp((settings.infillDensity ?? 100) / 100, 0.05, 1) : 1;
-  const wallCount = usesShellAndInfill ? clamp(settings.wallCount ?? 3, 1, 12) : 1;
-  const shellShare = usesShellAndInfill ? clamp(0.12 + wallCount * 0.045, 0.16, 0.5) : 1;
-  const sectionFill = usesShellAndInfill ? clamp(shellShare + (1 - shellShare) * infill, 0.05, 1) : 1;
+  const fdm = fdmPropertyFactorsFor(material, settings, context);
   const directionSensitive = profile.layerStrengthFactor !== undefined && process.settingsKind !== "none";
-  const genericLayerFactor = directionSensitive && settings.layerOrientation !== "z" ? profile.layerStrengthFactor! : 1;
-  const layerFactor = directionSensitive && context.criticalLayerAxis === settings.layerOrientation
-    ? context.criticalLayerFactor ?? 0.35
-    : genericLayerFactor;
-  const stiffnessFactor = usesShellAndInfill ? clamp(0.18 + 0.82 * sectionFill ** 1.35, 0.08, 1) : 1;
-  const fillStrengthFactor = usesShellAndInfill ? 0.25 + 0.75 * sectionFill ** 1.15 : 1;
-  const strengthFactor = clamp(fillStrengthFactor * layerFactor, 0.08, 1);
-  const densityFactor = usesShellAndInfill ? clamp(0.18 + 0.82 * sectionFill, 0.08, 1) : 1;
+  const unknownOrCriticalDirection = !context.criticalLayerAxis || context.criticalLayerAxis === settings.layerOrientation;
+  const nonFdmLayerFactor = directionSensitive && unknownOrCriticalDirection
+    ? context.criticalLayerFactor ?? profile.layerStrengthFactor ?? 1
+    : 1;
+  const stiffnessFactor = fdm
+    ? clamp(fdm.stiffnessFillFactor * fdm.modulusDirectionFactor, 0.05, 1)
+    : 1;
+  const strengthFactor = fdm
+    ? clamp(fdm.strengthFillFactor * fdm.strengthDirectionFactor, 0.05, 1)
+    : clamp(nonFdmLayerFactor, 0.1, 1);
+  const densityFactor = fdm ? fdm.relativeDensity : 1;
 
   return {
     ...material,
     youngsModulus: material.youngsModulus * stiffnessFactor,
     density: material.density * densityFactor,
     yieldStrength: material.yieldStrength * strengthFactor
+  };
+}
+
+/**
+ * Homogenized FDM response for the study's governing load path.
+ *
+ * The Core solver currently accepts one isotropic material per body, so the weak
+ * interlayer axis is projected onto that governing path. The factors are deliberately
+ * conservative engineering defaults and can be overridden by calibrated material
+ * profiles; production allowables still require coupons made with the real printer,
+ * filament, raster, layer height, and temperature.
+ */
+export function fdmPropertyFactorsFor(
+  material: Material,
+  parameters: Record<string, unknown> = {},
+  context: PrintStrengthContext = {}
+): FdmPropertyFactors | undefined {
+  const settings = normalizeManufacturingParameters(material, parameters);
+  if (settings.manufacturingProcessId !== "fdm") return undefined;
+  const profile = materialManufacturingProfileFor(material, "fdm");
+  if (!profile) return undefined;
+
+  const infill = clamp((settings.infillDensity ?? 100) / 100, 0.01, 1);
+  const wallCount = clamp(settings.wallCount ?? 3, 1, 12);
+  const shellShare = clamp(0.12 + wallCount * 0.045, 0.16, 0.5);
+  const relativeDensity = clamp(shellShare + (1 - shellShare) * infill, 0.01, 1);
+  // Modulus is close to linear with infill; strength shows stronger diminishing
+  // returns because solid perimeters keep carrying load at sparse infill.
+  const stiffnessFillFactor = clamp(shellShare + (1 - shellShare) * infill ** 0.9, 0.01, 1);
+  const strengthFillFactor = clamp(shellShare + (1 - shellShare) * infill ** 0.75, 0.01, 1);
+  const buildAxis = settings.layerOrientation ?? "z";
+  const loadPathRelation: FdmLoadPathRelation = !context.criticalLayerAxis
+    ? "conservative"
+    : context.criticalLayerAxis === buildAxis
+      ? "across_layers"
+      : "within_layers";
+  const acrossLayers = loadPathRelation !== "within_layers";
+  const inPlaneModulusFactor = profile.inPlaneModulusFactor ?? 0.9;
+  const interlayerModulusFactor = Math.min(
+    profile.interlayerModulusFactor ?? Math.min(0.65, inPlaneModulusFactor),
+    inPlaneModulusFactor
+  );
+  const inPlaneStrengthFactor = profile.inPlaneStrengthFactor ?? profile.layerStrengthFactor ?? 0.72;
+  const interlayerStrengthFactor = Math.min(
+    profile.interlayerStrengthFactor ?? Math.min(clamp(inPlaneStrengthFactor * 0.5, 0.35, 0.4), inPlaneStrengthFactor),
+    inPlaneStrengthFactor
+  );
+  const modulusDirectionFactor = acrossLayers
+    ? interlayerModulusFactor
+    : inPlaneModulusFactor;
+  const strengthDirectionFactor = acrossLayers
+    ? Math.min(context.criticalLayerFactor ?? interlayerStrengthFactor, inPlaneStrengthFactor)
+    : inPlaneStrengthFactor;
+
+  return {
+    buildAxis,
+    criticalAxis: context.criticalLayerAxis,
+    loadPathRelation,
+    shellShare,
+    relativeDensity,
+    stiffnessFillFactor,
+    strengthFillFactor,
+    modulusDirectionFactor,
+    strengthDirectionFactor
   };
 }
 
@@ -364,17 +466,35 @@ function additiveProfile(
   defaultWallCount: number,
   layerStrengthFactor?: number
 ): MaterialManufacturingProfile {
-  return {
+  const profile: MaterialManufacturingProfile = {
     processId,
     defaultInfillDensity,
     defaultWallCount,
     defaultLayerOrientation: "z",
     ...(layerStrengthFactor === undefined ? {} : { layerStrengthFactor })
   };
+  if (processId !== "fdm" || layerStrengthFactor === undefined) return profile;
+  return {
+    ...profile,
+    inPlaneModulusFactor: 0.9,
+    interlayerModulusFactor: 0.65,
+    inPlaneStrengthFactor: layerStrengthFactor,
+    interlayerStrengthFactor: clamp(layerStrengthFactor * 0.5, 0.35, 0.4)
+  };
 }
 
 function fdmProfile(defaultInfillDensity: number, defaultWallCount: number, layerStrengthFactor: number): NonNullable<Material["printProfile"]> {
-  return { process: "FDM", defaultInfillDensity, defaultWallCount, defaultLayerOrientation: "z", layerStrengthFactor };
+  return {
+    process: "FDM",
+    defaultInfillDensity,
+    defaultWallCount,
+    defaultLayerOrientation: "z",
+    layerStrengthFactor,
+    inPlaneModulusFactor: 0.9,
+    interlayerModulusFactor: 0.65,
+    inPlaneStrengthFactor: layerStrengthFactor,
+    interlayerStrengthFactor: clamp(layerStrengthFactor * 0.5, 0.35, 0.4)
+  };
 }
 
 function isLayerOrientation(value: unknown): value is "x" | "y" | "z" {

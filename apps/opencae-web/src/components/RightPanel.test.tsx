@@ -929,87 +929,73 @@ describe("RightPanel payload mass controls", () => {
     expect(html).toContain('aria-label="Playback time position"');
   });
 
-  test("shows the process-specific weak X build yield in simulation properties", () => {
-    const html = renderToStaticMarkup(
-      <RightPanel
-        activeStep="material"
-        project={project}
-        displayModel={{
-          ...displayModel,
-          id: "display-cantilever",
-          faces: [
-            { id: "face-base-left", label: "Fixed end face", color: "#4da3ff", center: [-1.8, 0.18, 0], normal: [-1, 0, 0], stressValue: 132 },
-            { id: "face-load-top", label: "Free end load face", color: "#4da3ff", center: [1.75, 0.18, 0], normal: [1, 0, 0], stressValue: 96 }
-          ]
-        }}
-        study={{
-          ...study,
-          materialAssignments: [{ id: "assign", materialId: "mat-petg", selectionRef: "selection-body", parameters: { manufacturingProcessId: "fdm", infillDensity: 100, wallCount: 3, layerOrientation: "x" }, status: "complete" }],
-          namedSelections: [
-            {
-              id: "selection-fixed-face",
-              name: "Fixed end face",
-              entityType: "face",
-              geometryRefs: [{ bodyId: "body", entityType: "face", entityId: "face-base-left", label: "Fixed end face" }],
-              fingerprint: "fixed"
-            },
-            {
-              id: "selection-load-face",
-              name: "Free end load face",
-              entityType: "face",
-              geometryRefs: [{ bodyId: "body", entityType: "face", entityId: "face-load-top", label: "Free end load face" }],
-              fingerprint: "load"
-            }
-          ],
-          constraints: [{ id: "fixed", type: "fixed", selectionRef: "selection-fixed-face", parameters: {}, status: "complete" }],
-          loads: [{ id: "load", type: "force", selectionRef: "selection-load-face", parameters: { value: 500, direction: [0, 0, -1] }, status: "complete" }]
-        }}
-        selectedFace={null}
-        viewMode="model"
-        resultMode="stress"
-        showDeformed={false}
-        showDimensions={false}
-        stressExaggeration={1}
-        resultSummary={resultSummary}
-        runProgress={0}
-        sampleModel="cantilever"
-        draftLoadType="force"
-        draftLoadValue={500}
-        draftLoadDirection="-Z"
-        selectedLoadPoint={null}
-        selectedPayloadObject={null}
-        onFitView={vi.fn()}
-        onRotateModel={vi.fn()}
-        onResetModelOrientation={vi.fn()}
-        onLoadSample={vi.fn()}
-        onUploadModel={vi.fn()}
-        onSampleModelChange={vi.fn()}
-        onViewModeChange={vi.fn()}
-        onResultModeChange={vi.fn()}
-        onToggleDeformed={vi.fn()}
-        onToggleDimensions={vi.fn()}
-        onStressExaggerationChange={vi.fn()}
-        onAssignMaterial={vi.fn()}
-        onAddSupport={vi.fn()}
-        onUpdateSupport={vi.fn()}
-        onRemoveSupport={vi.fn()}
-        onDraftLoadTypeChange={vi.fn()}
-        onDraftLoadValueChange={vi.fn()}
-        onDraftLoadDirectionChange={vi.fn()}
-        onAddLoad={vi.fn()}
-        onUpdateLoad={vi.fn()}
-        onPreviewLoadEdit={vi.fn()}
-        onRemoveLoad={vi.fn()}
-        onGenerateMesh={vi.fn()}
-        onRunSimulation={vi.fn()}
-        canRunSimulation={false}
-        missingRunItems={[]}
-        onStepSelect={vi.fn()}
-      />
-    );
+  test("shows X as the bracket's weakest FDM build direction for an out-of-plane force", () => {
+    const bracketStudy = {
+      ...study,
+      materialAssignments: [{
+        id: "assign",
+        materialId: "mat-abs",
+        selectionRef: "selection-body",
+        parameters: { manufacturingProcessId: "fdm", infillDensity: 35, wallCount: 3, layerOrientation: "x" },
+        status: "complete"
+      }],
+      namedSelections: [
+        {
+          id: "selection-fixed-face",
+          name: "Fixed base mounting holes",
+          entityType: "face",
+          geometryRefs: [{ bodyId: "body", entityType: "face", entityId: "face-base-left", label: "Base mounting holes" }],
+          fingerprint: "fixed"
+        },
+        {
+          id: "selection-load-face",
+          name: "Top load face",
+          entityType: "face",
+          geometryRefs: [{ bodyId: "body", entityType: "face", entityId: "face-load-top", label: "Top load face" }],
+          fingerprint: "load"
+        }
+      ],
+      constraints: [{ id: "fixed", type: "fixed", selectionRef: "selection-fixed-face", parameters: {}, status: "complete" }],
+      // Built-in samples store model-space -Y, which renders/solves as global -Z.
+      loads: [{ id: "load", type: "force", selectionRef: "selection-load-face", parameters: { value: 500, direction: [0, -1, 0] }, status: "complete" }]
+    } satisfies Study;
+    const xHtml = renderPanel("material", { displayModel: bracketDisplayModel, study: bracketStudy });
+    const yHtml = renderPanel("material", {
+      displayModel: bracketDisplayModel,
+      study: {
+        ...bracketStudy,
+        materialAssignments: [{
+          id: "assign",
+          materialId: "mat-abs",
+          selectionRef: "selection-body",
+          parameters: { manufacturingProcessId: "fdm", infillDensity: 35, wallCount: 3, layerOrientation: "y" },
+          status: "complete"
+        }]
+      }
+    });
+    const rotatedYHtml = renderPanel("material", {
+      displayModel: { ...bracketDisplayModel, orientation: { x: 0, y: 0, z: 90 } },
+      study: {
+        ...bracketStudy,
+        materialAssignments: [{
+          id: "assign",
+          materialId: "mat-abs",
+          selectionRef: "selection-body",
+          parameters: { manufacturingProcessId: "fdm", infillDensity: 35, wallCount: 3, layerOrientation: "y" },
+          status: "complete"
+        }]
+      }
+    });
 
-    expect(html).toContain("Simulation Properties");
-    expect(html).toContain('<span>Effective yield</span><strong>17.5 MPa</strong>');
+    expect(xHtml).toContain('<span>Governing load path</span><strong>X axis</strong>');
+    expect(xHtml).toContain('<span>Layer response</span><strong>Across layers · weakest</strong>');
+    expect(xHtml).toContain('<span>Effective modulus</span><strong>743.4 MPa</strong>');
+    expect(xHtml).toContain('<span>Effective yield</span><strong>8.316 MPa</strong>');
+    expect(yHtml).toContain('<span>Layer response</span><strong>Within layers</strong>');
+    expect(yHtml).toContain('<span>Effective modulus</span><strong>1,029.3 MPa</strong>');
+    expect(yHtml).toContain('<span>Effective yield</span><strong>16.63 MPa</strong>');
+    expect(rotatedYHtml).toContain('<span>Governing load path</span><strong>Y axis</strong>');
+    expect(rotatedYHtml).toContain('<span>Layer response</span><strong>Across layers · weakest</strong>');
   });
 
   test("separates the base material from its compatible manufacturing processes", () => {
