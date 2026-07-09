@@ -80,6 +80,36 @@ export async function generateBentShellStandStep(): Promise<string> {
   });
 }
 
+/**
+ * Thin J-clip like a sheet-metal tablet stand: 93 mm wide, 2 mm walls — a
+ * 60 mm base, 50 mm back, and a 22 mm front prong, with an 8 mm bend fillet.
+ * Regression geometry for thin-wall sliver tets: at the 12 mm medium preset
+ * its linear mesh scores minSICN ~0.02 (below the 0.05 floor) while 8 mm
+ * scores ~0.25, driving the quality-refinement ladder.
+ */
+export async function generateThinClipStandStep(): Promise<string> {
+  return withOccSession((gmsh) => {
+    const base = gmsh.model.occ.addBox(0, 0, 0, 93, 60, 2);
+    const back = gmsh.model.occ.addBox(0, 0, 0, 93, 2, 50);
+    const prong = gmsh.model.occ.addBox(0, 55, 0, 93, 2, 22);
+    gmsh.model.occ.fuse([3, base], [3, back, 3, prong]);
+    gmsh.model.occ.synchronize();
+    const joint = entityTags(gmsh, 1).filter((tag) => {
+      const bounds = gmsh.model.getBoundingBox(1, tag);
+      const shortYZ = Math.abs(bounds.ymax - bounds.ymin) < 0.1 && Math.abs(bounds.zmax - bounds.zmin) < 0.1;
+      return bounds.xmax - bounds.xmin > 80 && shortYZ && Math.abs(bounds.zmin - 2) < 0.5;
+    });
+    if (joint.length) {
+      try {
+        gmsh.model.occ.fillet(entityTags(gmsh, 3), joint.slice(0, 2), [8], true);
+        gmsh.model.occ.synchronize();
+      } catch {
+        // Fillet is best effort; the unfilleted clip still exercises thin walls.
+      }
+    }
+  });
+}
+
 /** Thin-walled open tray: 60x40x30 mm outer shell with uniform 2 mm walls/floor and an open top. */
 export async function generateThinWalledTrayStep(): Promise<string> {
   return withOccSession((gmsh) => {

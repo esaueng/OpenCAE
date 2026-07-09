@@ -43,3 +43,29 @@ describe("STEP Tet10 elevation rescue", () => {
     expect(meshed.elevation).toBeUndefined();
   }, 120_000);
 });
+
+describe("STEP quality-refinement ladder", () => {
+  test("thin-wall clip re-meshes at a finer size and passes the quality floor", async () => {
+    const { generateThinClipStandStep } = await import("./stepFixtures");
+    const step = await generateThinClipStandStep();
+    const meshed = await meshStepToMshV2(new TextEncoder().encode(step), {
+      elementOrder: 2,
+      meshSizeMm: MEDIUM_PRESET_MM
+    });
+
+    expect(meshed.qualityMinSICN).toBeDefined();
+    expect(meshed.qualityMinSICN!).toBeGreaterThanOrEqual(MESH_QUALITY_REJECT_MIN_SICN);
+    expect(meshed.qualityRefinement).toBeDefined();
+    expect(meshed.qualityRefinement!.requestedMeshSizeMm).toBe(MEDIUM_PRESET_MM);
+    expect(meshed.qualityRefinement!.usedMeshSizeMm).toBeLessThan(MEDIUM_PRESET_MM);
+    expect(meshed.qualityRefinement!.triedMeshSizesMm[0]).toBe(MEDIUM_PRESET_MM);
+  }, 240_000);
+
+  test("geometry that passes at the requested size reports no refinement", async () => {
+    const stepText = readFileSync(new URL("../fixtures/box-with-bore.step", import.meta.url), "utf8");
+    const meshed = await meshStepToMshV2(new TextEncoder().encode(stepText), { elementOrder: 2, meshSizeMm: MEDIUM_PRESET_MM });
+
+    expect(meshed.qualityRefinement).toBeUndefined();
+    expect(meshed.qualityMinSICN!).toBeGreaterThanOrEqual(MESH_QUALITY_REJECT_MIN_SICN);
+  }, 120_000);
+});
