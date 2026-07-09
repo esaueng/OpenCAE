@@ -37,7 +37,20 @@ export type SolveWorkerErrorShape = {
 };
 
 export type SolveWorkerResultMessage =
-  | { kind: "result"; id: string; ok: true; solverBackend: string; result: LocalSolveResult }
+  | {
+      kind: "result";
+      id: string;
+      ok: true;
+      solverBackend: string;
+      result: LocalSolveResult;
+      /**
+       * Peak worker-heap bytes observed via performance.memory samples taken
+       * inside the solver progress hook (Chrome-only, non-standard API; absent
+       * on WebKit/Firefox). Measurement telemetry for the ?solveBench=1
+       * harness — never a result value.
+       */
+      workerPeakHeapBytes?: number;
+    }
   | { kind: "result"; id: string; ok: false; error: SolveWorkerErrorShape };
 
 export type SolveWorkerResponse = SolveWorkerProgressMessage | SolveWorkerResultMessage;
