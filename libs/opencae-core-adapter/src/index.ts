@@ -25,7 +25,7 @@ import {
   type ResultSummary,
   type Study
 } from "@opencae/schema";
-import { inferCriticalPrintAxis } from "@opencae/study-core";
+import { inferGlobalCriticalPrintAxis } from "@opencae/study-core";
 
 type Vec3 = [number, number, number];
 
@@ -413,8 +413,13 @@ export function buildOpenCaeCoreModelForStudy(study: Study, displayModel: Displa
   if (!displayModel?.dimensions) throw new Error("OpenCAE Core Cloud requires display dimensions before generating a Core model.");
   const actualMesh = actualCoreVolumeMeshArtifact(study);
   const material = materialForStudy(study);
+  const criticalLayerAxis = inferGlobalCriticalPrintAxis(study, displayModel.faces.map((face) => ({
+    entityId: face.id,
+    center: face.center,
+    ...(face.area ? { areaM2: face.area * 1e-6 } : {})
+  })), displayModel);
   const effective = effectiveMaterialProperties(material.material, material.parameters, {
-    criticalLayerAxis: inferCriticalPrintAxis(study, displayModel.faces.map((face) => ({ entityId: face.id, center: face.center })))
+    criticalLayerAxis
   });
   const coreMaterial = {
     name: effective.id,

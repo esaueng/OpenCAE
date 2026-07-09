@@ -530,4 +530,41 @@ describe("MaterialSchema", () => {
     expect(() => MaterialSchema.parse({ ...aluminum, poissonRatio: -1 })).toThrow();
     expect(MaterialSchema.parse({ ...aluminum, poissonRatio: 0.499 }).poissonRatio).toBe(0.499);
   });
+
+  it("accepts partial FDM calibration profiles and preserves their factors", () => {
+    const material = MaterialSchema.parse({
+      ...aluminum,
+      printProfile: {
+        process: "FDM",
+        inPlaneModulusFactor: 0.88,
+        interlayerModulusFactor: 0.6,
+        inPlaneStrengthFactor: 0.7,
+        interlayerStrengthFactor: 0.35
+      }
+    });
+
+    expect(material.printProfile).toMatchObject({
+      process: "FDM",
+      inPlaneModulusFactor: 0.88,
+      interlayerModulusFactor: 0.6,
+      inPlaneStrengthFactor: 0.7,
+      interlayerStrengthFactor: 0.35
+    });
+    expect(MaterialSchema.parse({ ...aluminum, printProfile: { process: "FDM" } }).printProfile?.process).toBe("FDM");
+  });
+
+  it("rejects out-of-range or stronger interlayer FDM calibration factors", () => {
+    expect(() => MaterialSchema.parse({
+      ...aluminum,
+      printProfile: { process: "FDM", inPlaneStrengthFactor: 0.5, interlayerStrengthFactor: 0.7 }
+    })).toThrow(/Interlayer strength/);
+    expect(() => MaterialSchema.parse({
+      ...aluminum,
+      printProfile: { process: "FDM", inPlaneModulusFactor: 0.5, interlayerModulusFactor: 0.7 }
+    })).toThrow(/Interlayer modulus/);
+    expect(() => MaterialSchema.parse({
+      ...aluminum,
+      printProfile: { process: "FDM", interlayerStrengthFactor: 1.1 }
+    })).toThrow();
+  });
 });

@@ -8,6 +8,7 @@
 // WASM module inside the worker) are loaded via dynamic import only after the
 // flag check passes, so default builds and the initial bundle stay untouched.
 import type { DisplayModel, MeshQuality, Study } from "@opencae/schema";
+import { inferGlobalCriticalPrintAxis } from "@opencae/study-core";
 import { geometrySourceForStudy, studyForCoreGeometryDispatch, type CoreCloudGeometrySource } from "../workers/opencaeCoreSolve";
 import { unpackCoreVolumeMeshArtifact } from "../workers/meshProtocol";
 import type { MeshProgressListener } from "../workers/meshWorkerClient";
@@ -167,6 +168,11 @@ async function meshWorkerRun(options: WasmMeshOptions): Promise<WasmMeshStudyRes
   // The mirrored builder applies study load directions verbatim in the solver
   // frame (same contract as the cloud container), so hand it a solver-frame study.
   const dispatchStudy = studyForCoreGeometryDispatch(study, displayModel);
+  const criticalLayerAxis = inferGlobalCriticalPrintAxis(study, (displayModel?.faces ?? []).map((face) => ({
+    entityId: face.id,
+    center: face.center,
+    ...(face.area ? { areaM2: face.area * 1e-6 } : {})
+  })), displayModel);
   const mappingDiagnostics: import("@opencae/mesh-intake").SelectionMappingDiagnostic[] = [];
   const model = intake.buildCoreModelFromCloudMesh({
     study: {
@@ -182,6 +188,7 @@ async function meshWorkerRun(options: WasmMeshOptions): Promise<WasmMeshStudyRes
     volumeMesh: artifact,
     analysisType,
     solverSettings: { ...(study.solverSettings as Record<string, unknown> | undefined ?? {}), elementOrder },
+    criticalLayerAxis,
     mappingDiagnostics
   });
 

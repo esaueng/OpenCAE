@@ -3,7 +3,7 @@ import { assessResultFailure } from "@opencae/schema";
 import type { AnalysisMesh, AnalysisSample, Diagnostic, DynamicSolverSettings, Load, Material, ResultField, ResultProvenance, ResultSample, ResultSummary, RunEvent, Study } from "@opencae/schema";
 import type { ObjectStorageProvider } from "@opencae/storage";
 import { bracketDisplayModel, bracketResultSummary } from "@opencae/db/sample-data";
-import { inferCriticalPrintAxis } from "@opencae/study-core";
+import { inferGlobalCriticalPrintAxis } from "@opencae/study-core";
 import { isBeamDemoStudy, solveBeamDemoStudy, type BeamDemoSolveOptions } from "./beamDemoSolver";
 import { loadForceNewtons, materialForStudy, materialParametersForStudy } from "./studyInputs";
 
@@ -228,9 +228,13 @@ export function solveHeuristicSurfaceStudy(study: Study, runId: string, optionsI
   const analysisMesh = options.analysisMesh ?? analysisMeshForFaces(faces, study.meshSettings.preset);
   const material = materialForStudy(study);
   const materialParameters = materialParametersForStudy(study);
-  const criticalLayerAxis = inferCriticalPrintAxis(study, faces);
+  const printDisplayModel = options.displayModel ?? inferredSampleDisplayModelForStudy(study);
+  const criticalLayerAxis = inferGlobalCriticalPrintAxis(study, faces.map((face) => ({
+    ...face,
+    areaM2: estimatedFaceArea(face) * 1e-6
+  })), printDisplayModel);
   const effectiveMaterial = effectiveMaterialProperties(material, materialParameters, { criticalLayerAxis });
-  const response = materialResponse(effectiveMaterial, loads);
+  const response = materialResponse(effectiveMaterial);
   const totalAppliedLoad = round(loads.reduce((sum, load) => sum + load.magnitude, 0));
   const stressValues = faces.map((face) => round(stressAtFace(face, loads, faces) * response.stressScale, 1));
   const displacementValues = faces.map((face) => round(displacementAtFace(face, loads, faces) * response.displacementScale, 4));
@@ -299,11 +303,11 @@ export function solveDynamicStudy(study: Study, runId: string, optionsInput?: Lo
   const analysisMesh = options.analysisMesh ?? analysisMeshForFaces(faceModelsForStudy(study), study.meshSettings.preset);
   const totalForce = Math.max(staticSolved.totalAppliedLoad, 0.001);
   const staticDisplacementMeters = Math.max((displacementBase?.max ?? staticSolved.summary.maxDisplacement) / 1000, 1e-6);
-  const massKg = equivalentMassKg(staticSolved.material, analysisMesh);
+  const massKg = equivalentMassKg(staticSolved.effectiveMaterial, analysisMesh);
   const stiffnessNPerM = Math.max(totalForce / staticDisplacementMeters, 1);
   const dampingNsPerM = 2 * settings.dampingRatio * Math.sqrt(stiffnessNPerM * massKg);
   const frames = integrateDynamicFrames(settings, totalForce, massKg, stiffnessNPerM, dampingNsPerM);
-  const yieldMpa = staticSolved.material.yieldStrength / 1_000_000;
+  const yieldMpa = staticSolved.effectiveMaterial.yieldStrength / 1_000_000;
   const fields: ResultField[] = [];
   let peakDisplacement = 0;
   let peakDisplacementTimeSeconds = settings.startTime;
@@ -365,6 +369,7 @@ export function solveDynamicStudy(study: Study, runId: string, optionsInput?: Lo
     summary,
     fields,
     material: staticSolved.material,
+    effectiveMaterial: staticSolved.effectiveMaterial,
     massKg: round(massKg, 6),
     stiffnessNPerM: round(stiffnessNPerM, 3),
     dampingNsPerM: round(dampingNsPerM, 6),
@@ -518,8 +523,10 @@ function loadScaleAt(time: number, settings: DynamicSolverSettings): number {
 
 function equivalentMassKg(material: Material, analysisMesh: AnalysisMesh): number {
   const span = subtract(analysisMesh.bounds.max, analysisMesh.bounds.min);
-  const volumeM3 = Math.max(Math.abs(span[0] * span[1] * span[2]) * 1e-6, 1e-5);
-  return Math.max(material.density * volumeM3, 0.05);
+  const volumeM3 = Math.max(Math.abs(span[0] * span[1] * span[2]) * 1e-6, 1e-12);
+  // Keep only a numerical floor: a larger fixed mass floor hid infill-density
+  // changes for the small sample geometries this solver is meant to preview.
+  return Math.max(material.density * volumeM3, 1e-9);
 }
 
 function scaleBaseField(
@@ -673,18 +680,15 @@ function dynamicRangeDigits(type: ResultField["type"]) {
   return 3;
 }
 
-function materialResponse(material: Material, loads: LoadModel[]): { stressScale: number; displacementScale: number; yieldMpa: number } {
+function materialResponse(material: Material): { stressScale: number; displacementScale: number; yieldMpa: number } {
   const reference = starterMaterials[0]!;
-  const baseMaterial = starterMaterials.find((candidate) => candidate.id === material.id) ?? material;
   const youngsScale = reference.youngsModulus / Math.max(material.youngsModulus, 1);
-  const stiffnessReduction = baseMaterial.youngsModulus / Math.max(material.youngsModulus, 1);
-  const strengthReduction = baseMaterial.yieldStrength / Math.max(material.yieldStrength, 1);
-  const printedStressScale = clamp(1 + (Math.max(stiffnessReduction, strengthReduction) - 1) * 0.35, 1, 2.25);
-  const hasGravity = loads.some((load) => load.load.type === "gravity");
-  const densityScale = hasGravity ? 1 + (material.density / reference.density - 1) * 0.08 : 1;
   return {
-    stressScale: round(densityScale * printedStressScale, 4),
-    displacementScale: round(youngsScale * densityScale, 4),
+    // In a force-controlled homogeneous linear solve, changing E changes strain
+    // and displacement, not the equilibrium stress field. Strength enters through
+    // yield/safety factor instead of an artificial stress multiplier.
+    stressScale: 1,
+    displacementScale: round(youngsScale, 4),
     yieldMpa: material.yieldStrength / 1_000_000
   };
 }
@@ -737,6 +741,12 @@ function faceModelsForStudy(study: Study): FaceModel[] {
       baselineStress: geometry.baselineStress
     };
   });
+}
+
+function inferredSampleDisplayModelForStudy(study: Study) {
+  const entityIds = new Set(study.namedSelections.flatMap((selection) => selection.geometryRefs.map((ref) => ref.entityId)));
+  const bracketMatches = bracketDisplayModel.faces.filter((face) => entityIds.has(face.id)).length;
+  return bracketMatches >= 2 ? bracketDisplayModel : undefined;
 }
 
 function supportFacesForStudy(study: Study, faces: FaceModel[]): FaceModel[] {

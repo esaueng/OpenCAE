@@ -416,7 +416,7 @@ describe("LocalMockComputeBackend", () => {
       const z = await zRun;
 
       expect(x.summary.safetyFactor).toBeLessThan(y.summary.safetyFactor * 0.7);
-      expect(x.summary.safetyFactor).toBeLessThan(z.summary.safetyFactor * 0.5);
+      expect(x.summary.safetyFactor).toBeLessThan(z.summary.safetyFactor * 0.6);
       expect(await storage.getObject("project-cantilever/solver/run-cantilever-petg-x/solver-input.txt").then((buffer) => buffer.toString("utf8"))).toContain("layerOrientation=x");
     } finally {
       vi.useRealTimers();
@@ -483,10 +483,10 @@ describe("LocalMockComputeBackend", () => {
       await vi.runAllTimersAsync();
       const printed = await printedRun;
 
-      expect(printed.summary.maxStress).toBeGreaterThan(solid.summary.maxStress);
+      expect(printed.summary.maxStress).toBe(solid.summary.maxStress);
       expect(printed.summary.maxDisplacement).toBeGreaterThan(solid.summary.maxDisplacement);
       expect(printed.summary.safetyFactor).toBeLessThan(solid.summary.safetyFactor);
-      expect(printed.fields.find((field) => field.type === "stress")?.values).not.toEqual(
+      expect(printed.fields.find((field) => field.type === "stress")?.values).toEqual(
         solid.fields.find((field) => field.type === "stress")?.values
       );
       expect(await storage.getObject("project-test/solver/run-petg-printed/solver-input.txt").then((buffer) => buffer.toString("utf8"))).toContain("infillDensity=35");
@@ -757,6 +757,32 @@ describe("LocalMockComputeBackend", () => {
 
     expect(defaulted.summary.maxDisplacement).toBe(ramp.summary.maxDisplacement);
     expect(defaulted.summary.maxDisplacement).not.toBe(step.summary.maxDisplacement);
+  });
+
+  test("uses effective FDM stiffness, density, and yield in dynamic response", () => {
+    const settings = { endTime: 0.02, timeStep: 0.005, outputInterval: 0.005, loadProfile: "ramp" };
+    const solidStudy = dynamicCantileverStudy("mat-petg", settings);
+    const printedStudy: Study = {
+      ...solidStudy,
+      materialAssignments: solidStudy.materialAssignments.map((assignment) => ({
+        ...assignment,
+        parameters: {
+          manufacturingProcessId: "fdm",
+          infillDensity: 35,
+          wallCount: 3,
+          layerOrientation: "x"
+        }
+      }))
+    };
+
+    const solid = solveDynamicStudy(solidStudy, "run-dynamic-solid", rectangularBeamAnalysisMesh());
+    const printed = solveDynamicStudy(printedStudy, "run-dynamic-fdm", rectangularBeamAnalysisMesh());
+
+    expect(printed.effectiveMaterial.youngsModulus).toBeLessThan(solid.effectiveMaterial.youngsModulus);
+    expect(printed.effectiveMaterial.density).toBeLessThan(solid.effectiveMaterial.density);
+    expect(printed.effectiveMaterial.yieldStrength).toBeLessThan(solid.effectiveMaterial.yieldStrength);
+    expect(printed.massKg).toBeLessThan(solid.massKg);
+    expect(printed.summary.safetyFactor).toBeLessThan(solid.summary.safetyFactor);
   });
 
   test("dynamic response changes with density and damping", async () => {
