@@ -1,0 +1,5 @@
+{
+  "name": "placeholder-model",
+  "description": "Placeholder OpenCAE Core fixture for Phase 0. This is not a valid FEA model yet.",
+  "phase": 0
+}

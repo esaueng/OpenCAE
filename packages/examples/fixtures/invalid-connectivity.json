@@ -1,0 +1,47 @@
+{
+  "schema": "opencae.model",
+  "schemaVersion": "0.1.0",
+  "nodes": {
+    "coordinates": [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1]
+  },
+  "materials": [
+    {
+      "name": "steel",
+      "type": "isotropicLinearElastic",
+      "youngModulus": 210000000000,
+      "poissonRatio": 0.3
+    }
+  ],
+  "elementBlocks": [
+    {
+      "name": "tetrahedra",
+      "type": "Tet4",
+      "material": "steel",
+      "connectivity": [0, 1, 1, 9, 2]
+    }
+  ],
+  "nodeSets": [
+    {
+      "name": "fixedNodes",
+      "nodes": [0]
+    }
+  ],
+  "elementSets": [],
+  "boundaryConditions": [
+    {
+      "name": "fixedSupport",
+      "type": "fixed",
+      "nodeSet": "fixedNodes",
+      "components": ["x", "y", "z"]
+    }
+  ],
+  "loads": [],
+  "steps": [
+    {
+      "name": "loadStep",
+      "type": "staticLinear",
+      "boundaryConditions": ["fixedSupport"],
+      "loads": []
+    }
+  ]
+}
