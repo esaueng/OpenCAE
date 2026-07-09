@@ -2,7 +2,7 @@
 
 [![Production health](https://img.shields.io/website?url=https%3A%2F%2Fcae.esau.app%2Fhealth&label=production%20health)](https://cae.esau.app/health)
 
-OpenCAE is a local-first CAD/CAE simulation workspace for structural study setup, fast OpenCAE Core solves, and browser-based result review. The current app supports static stress and dynamic structural studies, sample projects, local project files, uploaded geometry previews, browser-local OpenCAE Core CPU solves, and report export.
+OpenCAE is a local-first CAD/CAE simulation workspace: set up a structural study, solve it in the browser with OpenCAE Core, and review the results. It supports static stress and dynamic structural studies, sample projects, local `.opencae.json` project files, uploaded geometry previews, browser-local CPU solves, and HTML/PDF report export.
 
 The project is organized around service boundaries so the React workspace, Fastify API, CAD import, meshing, OpenCAE Core solver, post-processing, storage, and job runners can evolve independently.
 
@@ -105,7 +105,7 @@ The live app runs at `https://cae.esau.app`. Uptime monitors should check the Wo
 curl -fsS https://cae.esau.app/health
 ```
 
-The `/health` route verifies the production Worker is reachable and reports `solverRuntime: "browser-opencae-core"`. There is no separate solver-readiness endpoint: the solver ships inside the app bundle and runs in the browser. Retired cloud solve routes return HTTP 410 (see [docs/cloud-retirement.md](docs/cloud-retirement.md)).
+The `/health` route verifies the production Worker is reachable and reports `solverRuntime: "browser-opencae-core"`. There is no separate solver-readiness endpoint: the solver ships inside the app bundle and runs in the browser. Retired cloud solve routes return HTTP 410.
 
 ## Workspace Layout
 
@@ -113,7 +113,7 @@ The `/health` route verifies the production Worker is reachable and reports `sol
 - `apps/opencae-api` - Fastify API for projects, uploads, studies, jobs, artifacts, reports, and service orchestration.
 - `../opencae-core/packages/*` - Live sibling OpenCAE Core packages consumed through the pnpm workspace.
 - `libs/*` - Shared schema, units, materials, storage, jobs, validation (study-core), database, and core-adapter packages.
-- `services/*` - CAD, mesh, solver, post-processing, and legacy container reference implementations. (The `opencae-core-cloud` runner mirror was removed with the July 2026 cloud retirement; see [docs/cloud-retirement.md](docs/cloud-retirement.md).)
+- `services/*` - CAD, mesh, solver, post-processing, and legacy container reference implementations. (The `opencae-core-cloud` runner mirror was removed in the July 2026 cloud retirement.)
 - `runners/opencae-runner-local` - Local runner package for job execution flows.
 - `examples/*` - Sample project documentation and fixtures.
 - `docs/*` - Architecture, local development, file format, validation, and user guide notes.
@@ -124,11 +124,11 @@ The `/health` route verifies the production Worker is reachable and reports `sol
 
 OpenCAE treats CAD entities as the source of truth. Meshes are generated artifacts, while results and reports are immutable study-run artifacts. Loads, supports, contacts, and named selections bind to CAD topology references so the data model can survive backend changes without rewriting the user workflow.
 
-The built-in demos include bracket, beam, and cantilever studies with Aluminum 6061 and 3D-printing material presets, supports, payload/force loads, generated mesh summaries, and local report artifacts.
+The built-in bracket, beam, and cantilever demos ship with Aluminum 6061 and 3D-printing material presets, supports, payload/force loads, generated mesh summaries, and local report artifacts.
 
 ## Solver Attribution
 
-Production solving runs in the browser with OpenCAE Core and is labeled as local computed FEA. Results must carry `opencae_core_fea`, `computed` result provenance, and `actual_volume_mesh` or `structured_block_core` mesh provenance; preview estimates must never be displayed as production FEA. Results solved on the retired OpenCAE Core Cloud (before July 2026) keep their historical cloud provenance labels — old data stays truthfully attributed (see [docs/cloud-retirement.md](docs/cloud-retirement.md)).
+Production solving runs in the browser with OpenCAE Core and is labeled as local computed FEA. Results must carry `opencae_core_fea`, `computed` result provenance, and `actual_volume_mesh` or `structured_block_core` mesh provenance; preview estimates must never be displayed as production FEA. Results solved on the retired OpenCAE Core Cloud (before July 2026) keep their historical cloud provenance labels — old data stays truthfully attributed.
 
 ## Documentation
 
