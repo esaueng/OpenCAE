@@ -27,7 +27,7 @@ import {
   type SurfaceFacetJson,
   type SurfaceSetJson
 } from "@opencae/core";
-import { effectiveMaterialProperties, starterMaterials } from "@opencae/materials";
+import { effectiveMaterialProperties, starterMaterials, type PrintStrengthContext } from "@opencae/materials";
 import type { CloudAnalysisType, CloudStudyLike, CoreVolumeMeshArtifact } from "./types";
 
 type BuildCoreModelInput = {
@@ -38,6 +38,8 @@ type BuildCoreModelInput = {
   materials?: Array<IsotropicLinearElasticMaterialJson | Record<string, unknown>>;
   analysisType: CloudAnalysisType;
   solverSettings?: Record<string, unknown>;
+  /** Governing material axis, already mapped into the solver/global frame. */
+  criticalLayerAxis?: "x" | "y" | "z";
   /** A-M3 deviation (see header): collects how each selection was mapped. */
   mappingDiagnostics?: SelectionMappingDiagnostic[];
 };
@@ -65,11 +67,15 @@ type SelectionMappingInput = {
 const STANDARD_GRAVITY = 9.80665;
 
 type PrintMaterialProfile = {
-  process: "FDM" | "SLS" | "SLA" | "Metal AM";
-  defaultInfillDensity: number;
-  defaultWallCount: number;
-  defaultLayerOrientation: "x" | "y" | "z";
-  layerStrengthFactor: number;
+  process: "FDM" | "SLS" | "SLA" | "MJF" | "Metal AM";
+  defaultInfillDensity?: number;
+  defaultWallCount?: number;
+  defaultLayerOrientation?: "x" | "y" | "z";
+  layerStrengthFactor?: number;
+  inPlaneModulusFactor?: number;
+  interlayerModulusFactor?: number;
+  inPlaneStrengthFactor?: number;
+  interlayerStrengthFactor?: number;
 };
 
 type BuiltInMaterial = IsotropicLinearElasticMaterialJson & {
@@ -271,39 +277,45 @@ function validateVolumeMeshArtifact(volumeMesh: CoreVolumeMeshArtifact): void {
 function resolveMaterial(input: BuildCoreModelInput): IsotropicLinearElasticMaterialJson {
   const providedCatalog = providedMaterialCatalog([input.material, ...(input.materials ?? [])]);
   const materialAssignments = input.study?.materialAssignments ?? [];
-  const material = materialFromUnknown(input.material, providedCatalog);
+  const context: PrintStrengthContext = { criticalLayerAxis: input.criticalLayerAxis };
+  const material = materialFromUnknown(input.material, providedCatalog, context);
   if (material) return material;
 
   for (const assignment of materialAssignments) {
-    const assigned = materialFromUnknown(assignment, providedCatalog);
+    const assigned = materialFromUnknown(assignment, providedCatalog, context);
     if (assigned) return assigned;
   }
 
   for (const candidate of input.materials ?? []) {
-    const listed = materialFromUnknown(candidate, providedCatalog);
+    const listed = materialFromUnknown(candidate, providedCatalog, context);
     if (listed) return listed;
   }
-  return materialFromBuiltIn("mat-aluminum-6061");
+  return materialFromBuiltIn("mat-aluminum-6061", undefined, context);
 }
 
-function materialFromUnknown(value: unknown, catalog: MaterialCatalog = new Map()): IsotropicLinearElasticMaterialJson | undefined {
+function materialFromUnknown(
+  value: unknown,
+  catalog: MaterialCatalog = new Map(),
+  context: PrintStrengthContext = {}
+): IsotropicLinearElasticMaterialJson | undefined {
   if (typeof value === "string") {
-    return materialFromCatalog(value, catalog) ?? materialFromBuiltIn(value);
+    return materialFromCatalog(value, catalog, undefined, context) ?? materialFromBuiltIn(value, undefined, context);
   }
   if (!value || typeof value !== "object") return undefined;
   const raw = value as Record<string, unknown>;
   const materialId = stringValue(raw.materialId);
   if (materialId) {
-    return materialFromCatalog(materialId, catalog, objectValue(raw.parameters)) ?? materialFromBuiltIn(materialId, objectValue(raw.parameters));
+    return materialFromCatalog(materialId, catalog, objectValue(raw.parameters), context)
+      ?? materialFromBuiltIn(materialId, objectValue(raw.parameters), context);
   }
 
   const directMaterial = materialObjectFromUnknown(raw);
-  if (directMaterial) return stripPrintProfile(effectiveMaterial(directMaterial, objectValue(raw.parameters)));
+  if (directMaterial) return stripPrintProfile(effectiveMaterial(directMaterial, objectValue(raw.parameters), context));
 
   const builtInId = stringValue(raw.id) ?? stringValue(raw.name);
   return builtInId
-    ? materialFromCatalog(builtInId, catalog, objectValue(raw.parameters))
-      ?? (BUILT_IN_MATERIAL_IDS.has(builtInId) ? materialFromBuiltIn(builtInId, objectValue(raw.parameters)) : undefined)
+    ? materialFromCatalog(builtInId, catalog, objectValue(raw.parameters), context)
+      ?? (BUILT_IN_MATERIAL_IDS.has(builtInId) ? materialFromBuiltIn(builtInId, objectValue(raw.parameters), context) : undefined)
     : undefined;
 }
 
@@ -331,17 +343,22 @@ function addCatalogAlias(catalog: MaterialCatalog, alias: unknown, material: Bui
 function materialFromCatalog(
   id: string,
   catalog: MaterialCatalog,
-  parameters?: Record<string, unknown>
+  parameters?: Record<string, unknown>,
+  context: PrintStrengthContext = {}
 ): IsotropicLinearElasticMaterialJson | undefined {
   const material = catalog.get(id) ?? catalog.get(id.toLowerCase());
   if (!material) return undefined;
-  return stripPrintProfile(effectiveMaterial({ ...material, name: id }, parameters));
+  return stripPrintProfile(effectiveMaterial({ ...material, name: id }, parameters, context));
 }
 
-function materialFromBuiltIn(id: string, parameters?: Record<string, unknown>): IsotropicLinearElasticMaterialJson {
+function materialFromBuiltIn(
+  id: string,
+  parameters?: Record<string, unknown>,
+  context: PrintStrengthContext = {}
+): IsotropicLinearElasticMaterialJson {
   const material = starterMaterials.find((candidate) => candidate.id === id);
   if (!material) throw new Error(`OpenCAE Core Cloud does not know material ${id}.`);
-  const effective = effectiveMaterialProperties(material, parameters ?? {});
+  const effective = effectiveMaterialProperties(material, parameters ?? {}, context);
   return {
     name: effective.id,
     type: "isotropicLinearElastic",
@@ -391,56 +408,47 @@ function printProfileFromUnknown(value: unknown): PrintMaterialProfile | undefin
   const raw = objectValue(value);
   if (!raw) return undefined;
   const process = printProcess(raw.process);
-  const defaultInfillDensity = numberValue(raw.defaultInfillDensity);
-  const defaultWallCount = numberValue(raw.defaultWallCount);
+  const defaultInfillDensity = boundedNumberValue(raw.defaultInfillDensity, 1, 100);
+  const defaultWallCount = boundedNumberValue(raw.defaultWallCount, 1, 12);
   const defaultLayerOrientation = isLayerOrientation(raw.defaultLayerOrientation) ? raw.defaultLayerOrientation : undefined;
-  const layerStrengthFactor = numberValue(raw.layerStrengthFactor);
-  if (!process || defaultInfillDensity === undefined || defaultWallCount === undefined || !defaultLayerOrientation || layerStrengthFactor === undefined) {
-    return undefined;
-  }
+  const layerStrengthFactor = boundedNumberValue(raw.layerStrengthFactor, 0.1, 1);
+  if (!process) return undefined;
   return {
     process,
-    defaultInfillDensity,
-    defaultWallCount,
-    defaultLayerOrientation,
-    layerStrengthFactor
+    ...(defaultInfillDensity === undefined ? {} : { defaultInfillDensity }),
+    ...(defaultWallCount === undefined ? {} : { defaultWallCount }),
+    ...(defaultLayerOrientation === undefined ? {} : { defaultLayerOrientation }),
+    ...(layerStrengthFactor === undefined ? {} : { layerStrengthFactor }),
+    inPlaneModulusFactor: boundedNumberValue(raw.inPlaneModulusFactor, 0.1, 1),
+    interlayerModulusFactor: boundedNumberValue(raw.interlayerModulusFactor, 0.1, 1),
+    inPlaneStrengthFactor: boundedNumberValue(raw.inPlaneStrengthFactor, 0.1, 1),
+    interlayerStrengthFactor: boundedNumberValue(raw.interlayerStrengthFactor, 0.1, 1)
   };
 }
 
 function printProcess(value: unknown): PrintMaterialProfile["process"] | undefined {
-  return value === "FDM" || value === "SLS" || value === "SLA" || value === "Metal AM" ? value : undefined;
+  return value === "FDM" || value === "SLS" || value === "SLA" || value === "MJF" || value === "Metal AM" ? value : undefined;
 }
 
-function effectiveMaterial(material: BuiltInMaterial, parameters: Record<string, unknown> | undefined): BuiltInMaterial {
-  const printSettings = normalizePrintParameters(material, parameters);
-  if (!material.printProfile || !printSettings.printed) return material;
-
-  const infill = clamp((printSettings.infillDensity ?? 100) / 100, 0.05, 1);
-  const wallCount = clamp(printSettings.wallCount ?? 3, 1, 12);
-  const shellShare = clamp(0.12 + wallCount * 0.045, 0.16, 0.5);
-  const sectionFill = clamp(shellShare + (1 - shellShare) * infill, 0.05, 1);
-  const layerFactor = printSettings.layerOrientation === "z" ? 1 : material.printProfile.layerStrengthFactor;
-  const stiffnessFactor = clamp(0.18 + 0.82 * sectionFill ** 1.35, 0.08, 1);
-  const strengthFactor = clamp((0.25 + 0.75 * sectionFill ** 1.15) * layerFactor, 0.08, 1);
-  const densityFactor = clamp(0.18 + 0.82 * sectionFill, 0.08, 1);
-
+function effectiveMaterial(
+  material: BuiltInMaterial,
+  parameters: Record<string, unknown> | undefined,
+  context: PrintStrengthContext = {}
+): BuiltInMaterial {
+  const effective = effectiveMaterialProperties({
+    id: material.name,
+    name: material.name,
+    youngsModulus: material.youngModulus,
+    poissonRatio: material.poissonRatio,
+    density: material.density,
+    yieldStrength: material.yieldStrength,
+    printProfile: material.printProfile
+  }, parameters ?? {}, context);
   return {
     ...material,
-    youngModulus: material.youngModulus * stiffnessFactor,
-    density: material.density * densityFactor,
-    yieldStrength: material.yieldStrength * strengthFactor
-  };
-}
-
-function normalizePrintParameters(
-  material: BuiltInMaterial,
-  parameters: Record<string, unknown> | undefined
-): { printed: boolean; infillDensity: number; wallCount: number; layerOrientation: "x" | "y" | "z" } {
-  return {
-    printed: typeof parameters?.printed === "boolean" ? parameters.printed : Boolean(material.printProfile),
-    infillDensity: clamp(numberValue(parameters?.infillDensity) ?? material.printProfile?.defaultInfillDensity ?? 100, 1, 100),
-    wallCount: Math.round(clamp(numberValue(parameters?.wallCount) ?? material.printProfile?.defaultWallCount ?? 1, 1, 12)),
-    layerOrientation: isLayerOrientation(parameters?.layerOrientation) ? parameters.layerOrientation : material.printProfile?.defaultLayerOrientation ?? "z"
+    youngModulus: effective.youngsModulus,
+    density: effective.density,
+    yieldStrength: effective.yieldStrength
   };
 }
 
@@ -629,6 +637,11 @@ function vector3(value: unknown): [number, number, number] | undefined {
 
 function numberValue(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function boundedNumberValue(value: unknown, min: number, max: number): number | undefined {
+  const number = numberValue(value);
+  return number !== undefined && number >= min && number <= max ? number : undefined;
 }
 
 function normalize(vector: [number, number, number]): [number, number, number] {

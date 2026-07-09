@@ -66,7 +66,7 @@ export const SETTING_HELP: Record<SettingHelpId, SettingHelp> = {
   },
   printSettings: {
     title: "Process settings",
-    body: "Adjusts only the settings relevant to the selected additive process. FDM uses infill, walls, and build direction; other processes expose fewer controls.",
+    body: "Adjusts only the settings relevant to the selected additive process. FDM uses infill, walls, and build direction to estimate density, stiffness, and load-path strength.",
     visual: "layers"
   },
   printedPart: {
@@ -86,7 +86,7 @@ export const SETTING_HELP: Record<SettingHelpId, SettingHelp> = {
   },
   layerDirection: {
     title: "Layer direction",
-    body: "Choose which model axis points away from the build plate while printing. 3D printed parts are usually weaker across layer lines, so this changes the effective strength used by the simulation.",
+    body: "Choose which model axis points away from the build plate while printing. When the governing load path crosses that build axis, the part is weaker across layer lines, so the simulation reduces interlayer stiffness and strength.",
     visual: "layers"
   },
   supportPlacement: {

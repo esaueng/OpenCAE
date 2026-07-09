@@ -1,4 +1,4 @@
-import type { Diagnostic, DynamicSolverSettings, Study } from "@opencae/schema";
+import type { Diagnostic, DisplayModel, DynamicSolverSettings, Load, Study } from "@opencae/schema";
 import { manufacturingProcessCompatibilityError } from "@opencae/materials";
 
 export type PrintCriticalAxis = "x" | "y" | "z";
@@ -9,6 +9,48 @@ export interface PrintCriticalFace {
   selectionId?: string;
   entityId?: string;
   center: [number, number, number];
+  /** Loaded face area in square metres, when known. */
+  areaM2?: number;
+}
+
+/** Maps a model-local structural axis into the user-facing global build frame. */
+export function modelAxisToGlobalBuildAxis(axis: PrintCriticalAxis, displayModel: DisplayModel | undefined): PrintCriticalAxis {
+  if (!displayModel) return axis;
+  let vector = vectorForAxis(axis);
+  if (usesLegacySampleFrame(displayModel)) vector = rotateX(vector, Math.PI / 2);
+  const orientation = displayModel.orientation ?? { x: 0, y: 0, z: 0 };
+  vector = rotateX(vector, degreesToRadians(orientation.x));
+  vector = rotateY(vector, degreesToRadians(orientation.y));
+  vector = rotateZ(vector, degreesToRadians(orientation.z));
+  return dominantAxis(vector);
+}
+
+/** Maps a user-facing global build direction back into model-local coordinates. */
+export function globalBuildAxisToModelAxis(axis: PrintCriticalAxis, displayModel: DisplayModel | undefined): PrintCriticalAxis {
+  if (!displayModel) return axis;
+  const orientation = displayModel.orientation ?? { x: 0, y: 0, z: 0 };
+  let vector = vectorForAxis(axis);
+  vector = rotateZ(vector, -degreesToRadians(orientation.z));
+  vector = rotateY(vector, -degreesToRadians(orientation.y));
+  vector = rotateX(vector, -degreesToRadians(orientation.x));
+  if (usesLegacySampleFrame(displayModel)) vector = rotateX(vector, -Math.PI / 2);
+  return dominantAxis(vector);
+}
+
+export function inferGlobalCriticalPrintAxis(
+  study: Study,
+  faces: PrintCriticalFace[],
+  displayModel: DisplayModel | undefined
+): PrintCriticalAxis | undefined {
+  const modelAxis = inferCriticalPrintAxis(study, faces);
+  return modelAxis ? modelAxisToGlobalBuildAxis(modelAxis, displayModel) : undefined;
+}
+
+export function usesLegacySampleFrame(displayModel: DisplayModel): boolean {
+  return displayModel.bodyCount !== 0 &&
+    !displayModel.nativeCad &&
+    !displayModel.visualMesh &&
+    !displayModel.id.includes("uploaded");
 }
 
 export function validateStaticStressStudy(study: Study): Diagnostic[] {
@@ -83,7 +125,13 @@ export function inferCriticalPrintAxis(study: Study, faces: PrintCriticalFace[])
     .filter((face): face is PrintCriticalFace => Boolean(face));
   if (!supportFaces.length) return undefined;
 
-  let best: { axis: PrintCriticalAxis; score: number } | undefined;
+  const candidates: Array<{
+    axis: PrintCriticalAxis;
+    spanLength: number;
+    bendingLeverLength: number;
+    isAxial: boolean;
+    equivalentForceN?: number;
+  }> = [];
   for (const load of study.loads) {
     const loadFace = faceForSelection(study, faces, load.selectionRef);
     if (!loadFace) continue;
@@ -96,13 +144,58 @@ export function inferCriticalPrintAxis(study: Study, faces: PrintCriticalFace[])
     if (!direction || spanLength <= 0) continue;
     const spanUnit = normalize(span);
     const directionUnit = normalize(direction);
-    const perpendicular = length(cross(spanUnit, directionUnit));
-    if (perpendicular < 0.35) continue;
-    const axis = dominantAxis(span);
-    const score = spanLength * perpendicular;
-    if (!best || score > best.score) best = { axis, score };
+    const axialSpan = scale(directionUnit, dot(span, directionUnit));
+    const bendingLever = subtract(span, axialSpan);
+    const bendingLeverLength = length(bendingLever);
+    const isAxial = bendingLeverLength / spanLength < 0.35;
+    const axis = isAxial ? dominantAxis(spanUnit) : dominantAxis(bendingLever);
+    candidates.push({
+      axis,
+      spanLength,
+      bendingLeverLength,
+      isAxial,
+      equivalentForceN: equivalentLoadForceNewtons(load, loadFace)
+    });
+  }
+  if (!candidates.length) return undefined;
+  // A pressure cannot be ranked against force or payload mass without loaded
+  // area. Returning no governing axis keeps the FDM result conservative rather
+  // than comparing incompatible raw N, kg, and pressure values.
+  if (candidates.length > 1 && candidates.some((candidate) => candidate.equivalentForceN === undefined)) return undefined;
+
+  const characteristicLength = Math.max(...candidates.map((candidate) => candidate.spanLength), 1e-9);
+  let best: { axis: PrintCriticalAxis; score: number } | undefined;
+  for (const candidate of candidates) {
+    const normalizedLever = candidate.isAxial ? 1 : candidate.bendingLeverLength / characteristicLength;
+    const score = (candidate.equivalentForceN ?? 1) * normalizedLever;
+    if (!best || score > best.score) best = { axis: candidate.axis, score };
   }
   return best?.axis;
+}
+
+function equivalentLoadForceNewtons(load: Load, face: PrintCriticalFace): number | undefined {
+  const explicit = positiveNumber(load.parameters.equivalentForceN);
+  if (explicit !== undefined) return explicit;
+  const value = positiveNumber(load.parameters.value);
+  if (value === undefined) return undefined;
+  const units = typeof load.parameters.units === "string" ? load.parameters.units : undefined;
+  if (load.type === "gravity") {
+    if (units === "N") return value;
+    const massKg = units === "lb" ? value * 0.45359237 : value;
+    return massKg * 9.80665;
+  }
+  if (load.type === "pressure") {
+    if (!(face.areaM2 && Number.isFinite(face.areaM2) && face.areaM2 > 0)) return undefined;
+    const pressurePa = units === "Pa"
+      ? value
+      : units === "MPa"
+        ? value * 1_000_000
+        : units === "psi"
+          ? value * 6894.757293168
+          : value * 1000;
+    return pressurePa * face.areaM2;
+  }
+  return units === "lbf" ? value * 4.4482216152605 : value;
 }
 
 function materialProcessDiagnostics(study: Study): Diagnostic[] {
@@ -122,8 +215,42 @@ function isPositiveFinite(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value > 0;
 }
 
+function positiveNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
 function isDirection(value: unknown): value is [number, number, number] {
-  return Array.isArray(value) && value.length === 3 && value.every((item) => typeof item === "number" && Number.isFinite(item));
+  return Array.isArray(value) &&
+    value.length === 3 &&
+    value.every((item) => typeof item === "number" && Number.isFinite(item)) &&
+    Math.hypot(value[0], value[1], value[2]) > 1e-12;
+}
+
+function vectorForAxis(axis: PrintCriticalAxis): [number, number, number] {
+  if (axis === "x") return [1, 0, 0];
+  return axis === "y" ? [0, 1, 0] : [0, 0, 1];
+}
+
+function degreesToRadians(value: number | undefined): number {
+  return (Number.isFinite(value) ? value ?? 0 : 0) * Math.PI / 180;
+}
+
+function rotateX([x, y, z]: [number, number, number], radians: number): [number, number, number] {
+  const cosine = Math.cos(radians);
+  const sine = Math.sin(radians);
+  return [x, y * cosine - z * sine, y * sine + z * cosine];
+}
+
+function rotateY([x, y, z]: [number, number, number], radians: number): [number, number, number] {
+  const cosine = Math.cos(radians);
+  const sine = Math.sin(radians);
+  return [x * cosine + z * sine, y, -x * sine + z * cosine];
+}
+
+function rotateZ([x, y, z]: [number, number, number], radians: number): [number, number, number] {
+  const cosine = Math.cos(radians);
+  const sine = Math.sin(radians);
+  return [x * cosine - y * sine, x * sine + y * cosine, z];
 }
 
 function faceForSelection(study: Study, faces: PrintCriticalFace[], selectionRef: string): PrintCriticalFace | undefined {
@@ -147,12 +274,12 @@ function subtract(left: [number, number, number], right: [number, number, number
   return [left[0] - right[0], left[1] - right[1], left[2] - right[2]];
 }
 
-function cross(left: [number, number, number], right: [number, number, number]): [number, number, number] {
-  return [
-    left[1] * right[2] - left[2] * right[1],
-    left[2] * right[0] - left[0] * right[2],
-    left[0] * right[1] - left[1] * right[0]
-  ];
+function dot(left: [number, number, number], right: [number, number, number]): number {
+  return left[0] * right[0] + left[1] * right[1] + left[2] * right[2];
+}
+
+function scale(vector: [number, number, number], scalar: number): [number, number, number] {
+  return [vector[0] * scalar, vector[1] * scalar, vector[2] * scalar];
 }
 
 function length(vector: [number, number, number]): number {

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { estimateAllowableLoadForSafetyFactor } from "@opencae/schema";
-import type { Study } from "@opencae/schema";
+import type { DisplayModel, Study } from "@opencae/schema";
 import {
   DEFAULT_BEAM_DEMO_PHYSICAL_MODEL,
   endLoadCantileverShape,
@@ -123,6 +123,35 @@ describe("Beam Demo Euler-Bernoulli solver", () => {
     expect(result.summary.reactionForce).toBeCloseTo(500, 5);
     expect(result.beamDemoDiagnostics.loadStation).toBeCloseTo(1, 5);
     expect(values.at(-1)).toBe(Math.max(...values));
+  });
+
+  test("keeps rotated global build directions aligned with the Beam solver material", () => {
+    const displayModel: DisplayModel = {
+      id: "sample-beam",
+      name: "Beam Demo",
+      bodyCount: 1,
+      faces: [],
+      orientation: { x: 0, y: 0, z: 90 }
+    };
+    const printedStudy = (layerOrientation: "x" | "y"): Study => {
+      const study = beamForceStudy();
+      return {
+        ...study,
+        materialAssignments: [{
+          ...study.materialAssignments[0]!,
+          materialId: "mat-pla",
+          parameters: { manufacturingProcessId: "fdm", infillDensity: 100, wallCount: 3, layerOrientation }
+        }]
+      };
+    };
+
+    const globalX = solveBeamDemoStudy(printedStudy("x"), "run-beam-print-x", { displayModel });
+    const globalY = solveBeamDemoStudy(printedStudy("y"), "run-beam-print-y", { displayModel });
+
+    expect(globalY.effectiveMaterial.youngsModulus).toBeLessThan(globalX.effectiveMaterial.youngsModulus);
+    expect(globalY.effectiveMaterial.yieldStrength).toBeLessThan(globalX.effectiveMaterial.yieldStrength);
+    expect(globalY.summary.maxDisplacement).toBeGreaterThan(globalX.summary.maxDisplacement);
+    expect(globalY.summary.safetyFactor).toBeLessThan(globalX.summary.safetyFactor);
   });
 
   test("exports standard end-load cantilever shape helpers", () => {

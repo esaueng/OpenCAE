@@ -1,10 +1,10 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { AlertTriangle, Anchor, ArrowDown, Atom, Check, ChevronDown, ChevronRight, CircleHelp, Eye, Factory, Gauge, Grid3X3, Layers3, Maximize2, Pause, Play, Plus, RotateCcw, Ruler, ScanLine, ShieldCheck, Upload, Weight, Wrench, X } from "lucide-react";
-import { compatibleManufacturingProcessesFor, defaultManufacturingParametersFor, defaultManufacturingProcessIdFor, effectiveMaterialProperties, isManufacturingProcessCompatible, manufacturingParametersForAssignment, manufacturingProcessForId, massKgForPayloadMaterial, materialCategoryLabel, normalizeManufacturingParameters, payloadMaterialForId, payloadMaterials, starterMaterials, type ManufacturingParameters, type ManufacturingProcessId, type PayloadMaterialCategory } from "@opencae/materials";
+import { compatibleManufacturingProcessesFor, defaultManufacturingParametersFor, defaultManufacturingProcessIdFor, effectiveMaterialProperties, fdmPropertyFactorsFor, isManufacturingProcessCompatible, manufacturingParametersForAssignment, manufacturingProcessForId, massKgForPayloadMaterial, materialCategoryLabel, normalizeManufacturingParameters, payloadMaterialForId, payloadMaterials, starterMaterials, type ManufacturingParameters, type ManufacturingProcessId, type PayloadMaterialCategory } from "@opencae/materials";
 import { assessResultFailure, estimateAllowableLoadForSafetyFactor } from "@opencae/schema";
 import type { Constraint, DisplayFace, DisplayModel, DynamicSolverSettings, Load, MeshQuality, Project, ResultField, ResultProvenance, ResultSummary, RunTimingEstimate, SimulationFidelity, Study } from "@opencae/schema";
-import { inferCriticalPrintAxis } from "@opencae/study-core";
+import { inferGlobalCriticalPrintAxis } from "@opencae/study-core";
 import type { ResultMode, ViewMode } from "./CadViewer";
 import type { StepId } from "./StepBar";
 import { applicationPointForLoad, createViewerLoadMarkers, directionLabelForLoad, directionVectorForLabel, equivalentForceForLoad, loadMarkerOrdinalLabel, payloadObjectForLoad, unitsForLoadType, type LoadApplicationPoint, type LoadDirectionLabel, type LoadType, type PayloadLoadMetadata, type PayloadMassMode, type PayloadObjectSelection } from "../loadPreview";
@@ -317,8 +317,13 @@ function MaterialPanel({ project, displayModel, study, onAssignMaterial, onPrevi
   const selectedProcess = manufacturingProcessForId(selectedProcessId)!;
   const compatibleProcesses = compatibleManufacturingProcessesFor(selectedMaterial);
   const processUsesBuildDirection = selectedProcess.settingsKind === "fdm" || selectedProcess.settingsKind === "build_direction";
-  const criticalLayerAxis = inferCriticalPrintAxis(study, displayModel.faces.map((face) => ({ entityId: face.id, center: face.center })));
+  const criticalLayerAxis = inferGlobalCriticalPrintAxis(study, displayModel.faces.map((face) => ({
+    entityId: face.id,
+    center: face.center,
+    ...(face.area ? { areaM2: face.area * 1e-6 } : {})
+  })), displayModel);
   const effectiveMaterial = effectiveMaterialProperties(selectedMaterial, { ...manufacturingParameters }, { criticalLayerAxis });
+  const fdmFactors = fdmPropertyFactorsFor(selectedMaterial, manufacturingParameters, { criticalLayerAxis });
   const assignedParameters = currentAssignment ? normalizeManufacturingParameters(assignedMaterial, currentParameters) : undefined;
   const assignedProcess = assignedParameters?.manufacturingProcessId ? manufacturingProcessForId(assignedParameters.manufacturingProcessId) : undefined;
   const assignedDetail = assignedProcess
@@ -457,6 +462,8 @@ function MaterialPanel({ project, displayModel, study, onAssignMaterial, onPrevi
 
       <SectionTitle>Simulation Properties</SectionTitle>
       <div className="summary-box material-simulation-properties">
+        {fdmFactors ? <Info label="Governing load path" value={fdmFactors.criticalAxis ? `${fdmFactors.criticalAxis.toUpperCase()} axis` : "Conservative"} /> : null}
+        {fdmFactors ? <Info label="Layer response" value={fdmLayerResponseLabel(fdmFactors.loadPathRelation)} /> : null}
         <Info label="Effective modulus" value={formatMaterialStress(effectiveMaterial.youngsModulus, project.unitSystem)} />
         <Info label="Effective density" value={formatDensity(effectiveMaterial.density, "kg/m^3", project.unitSystem)} />
         <Info label="Effective yield" value={formatMaterialStress(effectiveMaterial.yieldStrength, project.unitSystem)} />
@@ -485,6 +492,12 @@ function MaterialPanel({ project, displayModel, study, onAssignMaterial, onPrevi
       )}
     </Panel>
   );
+}
+
+function fdmLayerResponseLabel(relation: "within_layers" | "across_layers" | "conservative") {
+  if (relation === "within_layers") return "Within layers";
+  if (relation === "across_layers") return "Across layers · weakest";
+  return "Across layers · conservative";
 }
 
 function ManufacturingProcessIcon({ processId }: { processId: ManufacturingProcessId }) {

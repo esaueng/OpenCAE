@@ -1,4 +1,5 @@
 import type { DisplayModel } from "@opencae/schema";
+import { modelAxisToGlobalBuildAxis } from "@opencae/study-core";
 import * as THREE from "three";
 
 export type RotationAxis = "x" | "y" | "z";
@@ -82,6 +83,10 @@ export function modelDirectionToGlobalCadFrame(direction: [number, number, numbe
   if (isUploadedDisplayModel(displayModel)) return direction;
   const mapped = modelDirectionToViewerSpace(new THREE.Vector3(...direction), displayModel);
   return [snapAxisComponent(mapped.x), snapAxisComponent(mapped.y), snapAxisComponent(mapped.z)];
+}
+
+export function modelAxisToGlobalCadFrame(axis: RotationAxis, displayModel: DisplayModel): RotationAxis {
+  return modelAxisToGlobalBuildAxis(axis, displayModel);
 }
 
 function snapAxisComponent(value: number): number {

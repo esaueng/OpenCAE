@@ -4,6 +4,7 @@ import {
   compatibleManufacturingProcessesFor,
   defaultManufacturingProcessIdFor,
   effectiveMaterialProperties,
+  fdmPropertyFactorsFor,
   isManufacturingProcessCompatible,
   massKgForPayloadMaterial,
   normalizeManufacturingParameters,
@@ -115,7 +116,7 @@ describe("starterMaterials", () => {
     });
   });
 
-  test("reduces effective printed material properties when infill is sparse", async () => {
+  test("reduces effective printed material properties when infill is sparse", () => {
     const petg = starterMaterials.find((material) => material.id === "mat-petg");
     expect(petg).toBeDefined();
 
@@ -126,18 +127,48 @@ describe("starterMaterials", () => {
     expect(printed.density).toBeLessThan(petg!.density);
   });
 
-  test("treats Z build direction as the strongest printed orientation", () => {
+  test("uses the build axis as the weak direction only when it crosses the governing load path", () => {
     const petg = starterMaterials.find((material) => material.id === "mat-petg");
     expect(petg).toBeDefined();
 
-    const parameters = { printed: true, infillDensity: 35, wallCount: 3 };
-    const zBuild = effectiveMaterialProperties(petg!, { ...parameters, layerOrientation: "z" });
-    const xBuild = effectiveMaterialProperties(petg!, { ...parameters, layerOrientation: "x" });
-    const yBuild = effectiveMaterialProperties(petg!, { ...parameters, layerOrientation: "y" });
+    const parameters = { manufacturingProcessId: "fdm", infillDensity: 35, wallCount: 3 } as const;
+    const xBuild = effectiveMaterialProperties(petg!, { ...parameters, layerOrientation: "x" }, { criticalLayerAxis: "x" });
+    const yBuild = effectiveMaterialProperties(petg!, { ...parameters, layerOrientation: "y" }, { criticalLayerAxis: "x" });
+    const zBuild = effectiveMaterialProperties(petg!, { ...parameters, layerOrientation: "z" }, { criticalLayerAxis: "x" });
 
-    expect(zBuild.yieldStrength).toBeGreaterThan(xBuild.yieldStrength);
-    expect(zBuild.yieldStrength).toBeGreaterThan(yBuild.yieldStrength);
-    expect(xBuild.yieldStrength).toBe(yBuild.yieldStrength);
+    expect(xBuild.youngsModulus).toBeLessThan(yBuild.youngsModulus);
+    expect(xBuild.yieldStrength).toBeLessThan(yBuild.yieldStrength);
+    expect(yBuild.youngsModulus).toBe(zBuild.youngsModulus);
+    expect(yBuild.yieldStrength).toBe(zBuild.yieldStrength);
+    expect(xBuild.density).toBe(yBuild.density);
+    expect(yBuild.density).toBe(zBuild.density);
+  });
+
+  test("has no intrinsic X, Y, or Z preference without a resolved load path", () => {
+    const abs = starterMaterials.find((material) => material.id === "mat-abs")!;
+    const parameters = { manufacturingProcessId: "fdm", infillDensity: 35, wallCount: 3 } as const;
+    const results = (["x", "y", "z"] as const).map((layerOrientation) =>
+      effectiveMaterialProperties(abs, { ...parameters, layerOrientation })
+    );
+
+    expect(new Set(results.map((material) => material.youngsModulus)).size).toBe(1);
+    expect(new Set(results.map((material) => material.yieldStrength)).size).toBe(1);
+    expect(fdmPropertyFactorsFor(abs, { ...parameters, layerOrientation: "x" })?.loadPathRelation).toBe("conservative");
+  });
+
+  test("increases density, stiffness, and strength monotonically with infill and walls", () => {
+    const abs = starterMaterials.find((material) => material.id === "mat-abs")!;
+    const context = { criticalLayerAxis: "x" as const };
+    const sparse = effectiveMaterialProperties(abs, { manufacturingProcessId: "fdm", infillDensity: 20, wallCount: 1, layerOrientation: "x" }, context);
+    const denser = effectiveMaterialProperties(abs, { manufacturingProcessId: "fdm", infillDensity: 60, wallCount: 1, layerOrientation: "x" }, context);
+    const moreWalls = effectiveMaterialProperties(abs, { manufacturingProcessId: "fdm", infillDensity: 20, wallCount: 5, layerOrientation: "x" }, context);
+
+    for (const property of ["density", "youngsModulus", "yieldStrength"] as const) {
+      expect(denser[property]).toBeGreaterThan(sparse[property]);
+      expect(moreWalls[property]).toBeGreaterThan(sparse[property]);
+      expect(denser[property]).toBeLessThanOrEqual(abs[property]);
+      expect(moreWalls[property]).toBeLessThanOrEqual(abs[property]);
+    }
   });
 
   test("applies a severe interlayer penalty when the print direction is critical", () => {
@@ -149,9 +180,10 @@ describe("starterMaterials", () => {
     const yBuild = effectiveMaterialProperties(petg!, { ...parameters, layerOrientation: "y" }, { criticalLayerAxis: "x" });
     const genericX = effectiveMaterialProperties(petg!, { ...parameters, layerOrientation: "x" });
 
-    expect(xCritical.yieldStrength).toBeCloseTo(petg!.yieldStrength * 0.35);
+    expect(xCritical.yieldStrength).toBeCloseTo(petg!.yieldStrength * 0.36);
     expect(xCritical.yieldStrength).toBeLessThan(yBuild.yieldStrength * 0.6);
-    expect(genericX.yieldStrength).toBe(yBuild.yieldStrength);
+    expect(xCritical.youngsModulus).toBeLessThan(yBuild.youngsModulus);
+    expect(genericX.yieldStrength).toBe(xCritical.yieldStrength);
   });
 
   test("honors an explicit critical-layer strength override", () => {
@@ -165,6 +197,30 @@ describe("starterMaterials", () => {
     );
 
     expect(xCritical.yieldStrength).toBeCloseTo(petg!.yieldStrength * 0.5);
+  });
+
+  test("never lets a partial custom profile make interlayer response stronger than in-plane response", () => {
+    const custom = {
+      id: "custom-fdm",
+      name: "Custom FDM",
+      youngsModulus: 2_000_000_000,
+      poissonRatio: 0.35,
+      density: 1_000,
+      yieldStrength: 40_000_000,
+      printProfile: {
+        process: "FDM" as const,
+        inPlaneModulusFactor: 0.2,
+        interlayerModulusFactor: 0.8,
+        inPlaneStrengthFactor: 0.2,
+        interlayerStrengthFactor: 0.8
+      }
+    };
+    const parameters = { manufacturingProcessId: "fdm", infillDensity: 100, wallCount: 3, layerOrientation: "x" };
+    const across = effectiveMaterialProperties(custom, parameters, { criticalLayerAxis: "x" });
+    const within = effectiveMaterialProperties(custom, parameters, { criticalLayerAxis: "y" });
+
+    expect(across.youngsModulus).toBeLessThanOrEqual(within.youngsModulus);
+    expect(across.yieldStrength).toBeLessThanOrEqual(within.yieldStrength);
   });
 });
 

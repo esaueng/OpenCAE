@@ -213,6 +213,40 @@ describe("core cloud structured block model frame", () => {
     expect(Math.abs(meanTipZ)).toBeGreaterThan(Math.abs(meanTipY) * 10);
   });
 
+  test("compares FDM build direction in the same global frame used by sample loads", () => {
+    const displayModel: DisplayModel = {
+      ...cantileverDisplayModel(),
+      faces: [
+        { id: "face-base-left", label: "Fixed face", color: "#4da3ff", center: [0, -1.9, 0], normal: [0, -1, 0], stressValue: 0 },
+        { id: "face-load-top", label: "Load face", color: "#f59e0b", center: [0, 1.9, 0], normal: [0, 1, 0], stressValue: 0 }
+      ]
+    };
+    const printedStudy = (layerOrientation: "y" | "z"): Study => studyFixture({
+      loads: [{ id: "load-1", type: "force", selectionRef: "selection-load-face", parameters: { value: 500, units: "N", direction: [1, 0, 0] }, status: "complete" }],
+      materialAssignments: [{
+        id: "assign-1",
+        materialId: "mat-pla",
+        selectionRef: "selection-body-1",
+        parameters: { manufacturingProcessId: "fdm", infillDensity: 100, wallCount: 3, layerOrientation },
+        status: "complete"
+      }]
+    });
+
+    const globalYBuild = buildOpenCaeCoreModelForStudy(printedStudy("y"), displayModel);
+    const globalZBuild = buildOpenCaeCoreModelForStudy(printedStudy("z"), displayModel);
+
+    // Raw sample-model Y becomes global Z after the legacy base rotation, so Z
+    // must receive the interlayer penalty and Y remains an in-layer direction.
+    expect(globalZBuild.model.materials[0]!.yieldStrength).toBeLessThan(globalYBuild.model.materials[0]!.yieldStrength!);
+    expect(globalZBuild.model.materials[0]!.youngModulus).toBeLessThan(globalYBuild.model.materials[0]!.youngModulus);
+
+    const rotatedDisplayModel = { ...displayModel, orientation: { x: 90, y: 0, z: 0 } };
+    const rotatedGlobalYBuild = buildOpenCaeCoreModelForStudy(printedStudy("y"), rotatedDisplayModel);
+    const rotatedGlobalZBuild = buildOpenCaeCoreModelForStudy(printedStudy("z"), rotatedDisplayModel);
+    expect(rotatedGlobalYBuild.model.materials[0]!.yieldStrength).toBeLessThan(rotatedGlobalZBuild.model.materials[0]!.yieldStrength!);
+    expect(rotatedGlobalYBuild.model.materials[0]!.youngModulus).toBeLessThan(rotatedGlobalZBuild.model.materials[0]!.youngModulus);
+  });
+
   test("local solver-cpu builders emit render-ready surface node fields including safety factor", () => {
     // Parity with the cloud container: the same @opencae/solver-cpu builders back both, so a
     // local solveCoreStatic result must carry the surface mesh plus node-located
