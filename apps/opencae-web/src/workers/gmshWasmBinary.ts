@@ -41,6 +41,10 @@ async function loadCompressedWasmBinary(): Promise<ArrayBuffer | null> {
     return null; // No server to ask (tests) — let the glue use its default loader.
   }
   if (!manifestResponse.ok) return null; // Dev server: raw .wasm is served directly.
+  // The vite dev server answers unknown paths with index.html + HTTP 200 (SPA
+  // fallback), so a missing manifest must be detected by content type, not
+  // status — otherwise .json() throws and dev meshing dies before it starts.
+  if (!(manifestResponse.headers.get("content-type") ?? "").includes("json")) return null;
   const manifest = (await manifestResponse.json()) as { wasm?: string; encoding?: string };
   if (!manifest.wasm) {
     throw new Error("gmsh wasm manifest (assets/gmsh-wasm.json) is present but has no `wasm` entry; the deploy is broken.");
