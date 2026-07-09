@@ -30,12 +30,17 @@ The browser already has a real OpenCAE Core solve path (`opencae_core_local`), b
 2. **Upstream solver hooks.**
    - In `../opencae-core`, extend solver options with progress and cancellation hooks.
    - Thread hooks through static CG iterations, dynamic output-frame loops, and assembly progress.
-   - Replace `Map<number, number>[]` sparse assembly with typed-array COO -> sort/merge CSR before raising browser defaults beyond 60k DOF.
+   - Replace `Map<number, number>[]` sparse assembly with typed-array COO -> sort/merge CSR before raising browser defaults beyond 60k DOF. DONE: opencae-core `bc6c305` (pinned).
    - Bump `OPENCAE_CORE_REF` only after the upstream tests pass.
 3. **Browser pipeline parity.**
    - Keep local solves on `buildOpenCaeCoreCloudModelForStudy` semantics.
    - Preserve `displayDirectionToSolverFrame()` and solver-space result rendering.
    - Keep the staged browser cap at 60k DOF until the typed-array builder and a WebKit target-scale run land.
+     DONE 2026-07: cap raised to 100k (`BROWSER_SOLVE_LIMITS.maxDofs`, matching the retired cloud runner). Evidence:
+     `scripts/verify-100k-solve.mjs` solves a 99,345-DOF Tet10 STEP mesh through the real solve worker in headless
+     Chrome (11.7 s) AND Playwright WebKit 26.5 (8.5 s) with bit-identical results, reaction = applied 500 N to 1e-13,
+     solver JS-heap peak 609 MB (measured in-process; 40% of the 1.5 GB stop line), renderer footprint peak 1.62 GB
+     dominated by the gmsh meshing arena (1.14 GB before the solve starts — present at the 60k cap too).
    - Surface the deliberate dynamic deviations: browser transient field budget and hard step-count cap.
 4. **Dedicated solve worker.**
    - Keep solve work isolated from STL decode/playback workers.
@@ -59,6 +64,11 @@ The browser already has a real OpenCAE Core solve path (`opencae_core_local`), b
 
 ## Current Slice Landed
 
+- Raised `BROWSER_SOLVE_LIMITS.maxDofs` 60k -> 100k with the measured browser evidence above
+  (`?solveBench=1` harness + `scripts/verify-100k-solve.mjs` cross-engine gate; Node scale smoke in
+  `apps/opencae-web/src/workers/solveScale100k.test.ts`). The `browser-solve-limits` diagnostic now
+  reports only the remaining deviations (transient field bytes, step cap); the dynamic guard messages
+  no longer point users at the retired cloud runner.
 - Added a browser dynamic step-count preflight for local solves.
 - Oversized dynamic studies now fail before the worker starts, with `opencae-core-local-dynamic-step-budget` diagnostics.
 - Accepted dynamic browser solves carry diagnostics describing the local step cap and transient field budget.
