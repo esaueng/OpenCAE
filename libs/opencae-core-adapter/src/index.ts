@@ -475,6 +475,12 @@ export function buildOpenCaeCoreModelForStudy(study: Study, displayModel: Displa
     ...model,
     schemaVersion: "0.2.0",
     materials: [coreMaterial],
+    // Stored mesh artifacts carry the material resolved at mesh time; the run
+    // applies the study's current material, so every block must follow it or
+    // model validation rejects the dangling mesh-time reference.
+    elementBlocks: model.elementBlocks.map((block) => (
+      block.material === coreMaterial.name ? block : { ...block, material: coreMaterial.name }
+    )),
     meshProvenance: {
       kind: "opencae_core_fea",
       solver: "opencae-core-cloud",
