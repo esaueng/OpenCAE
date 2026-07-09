@@ -5,6 +5,8 @@
 // The WASM module is lazy-loaded via dynamic import so browser bundles only pay
 // for it when meshing actually starts (the .wasm asset is ~44 MB).
 
+import { MESH_QUALITY_REJECT_MIN_SICN } from "./meshQualityGate";
+
 type GmshWasmModule = typeof import("@loumalouomega/gmsh-wasm");
 export type GmshApi = Awaited<ReturnType<GmshWasmModule["default"]>>;
 
@@ -33,6 +35,13 @@ export type GeoMeshResult = {
 export type StepMeshResult = GeoMeshResult & {
   /** Which 3D algorithm produced the mesh: gmsh default Delaunay, or the Frontal fallback. */
   algorithm3D: "delaunay" | "frontal";
+  /**
+   * How Tet10 mid-side nodes were placed (order-2 meshes only). "curved"
+   * snaps them onto the CAD surface (gmsh default); "straight_edge" is the
+   * rescue applied when curved elevation inverts elements on thin or bent
+   * geometry (Mesh.SecondOrderLinear re-elevation).
+   */
+  elevation?: "curved" | "straight_edge";
 };
 
 /**
@@ -154,12 +163,36 @@ function meshStepSession(
     });
     timePhaseSync(timings, options, "mesh2d", totalStart, () => gmsh.model.mesh.generate(2));
     timePhaseSync(timings, options, "mesh3d", totalStart, () => gmsh.model.mesh.generate(3));
+    let elevation: StepMeshResult["elevation"];
     if (options.elementOrder === 2) {
       timePhaseSync(timings, options, "order2", totalStart, () => gmsh.model.mesh.setOrder(2));
+      elevation = "curved";
     }
-    const qualityMinSICN = minSICNQuality(gmsh);
+    let qualityMinSICN = minSICNQuality(gmsh);
+    if (
+      elevation === "curved" &&
+      qualityMinSICN !== undefined &&
+      qualityMinSICN < MESH_QUALITY_REJECT_MIN_SICN
+    ) {
+      // Curved elevation snaps Tet10 mid-side nodes onto the CAD surface,
+      // which inverts elements on thin or bent regions (measured minSICN
+      // -0.29 on a 3 mm bent shell whose linear mesh scores +0.31). Straight
+      // re-elevation keeps quadratic elements with the linear mesh's quality
+      // at the cost of linearized curved boundaries.
+      gmsh.model.mesh.setOrder(1);
+      gmsh.option.setNumber("Mesh.SecondOrderLinear", 1);
+      gmsh.model.mesh.setOrder(2);
+      qualityMinSICN = minSICNQuality(gmsh);
+      elevation = "straight_edge";
+    }
     const msh = timePhaseSync(timings, options, "write", totalStart, () => writeMshV2(gmsh));
-    return { msh, timings, algorithm3D, ...(qualityMinSICN !== undefined ? { qualityMinSICN } : {}) };
+    return {
+      msh,
+      timings,
+      algorithm3D,
+      ...(elevation !== undefined ? { elevation } : {}),
+      ...(qualityMinSICN !== undefined ? { qualityMinSICN } : {})
+    };
   } finally {
     safeFinalize(gmsh);
   }
