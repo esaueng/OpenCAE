@@ -102,6 +102,7 @@ async function meshWorkerRun(options: WasmMeshOptions): Promise<WasmMeshStudyRes
   let elementOrder: 1 | 2;
   let algorithmNote: string | undefined;
   let elevationNote: string | undefined;
+  let refinementNote: string | undefined;
   let attributionNote: string | undefined;
 
   if (geometry.kind === "sample_procedural" && geometry.sampleId === "bracket") {
@@ -148,6 +149,10 @@ async function meshWorkerRun(options: WasmMeshOptions): Promise<WasmMeshStudyRes
     if (stepResult.elevation === "straight_edge") {
       elevationNote = "Curved Tet10 elevation produced near-degenerate elements on this geometry; mid-side nodes were placed on straight edges instead (slightly less accurate on curved boundaries).";
     }
+    if (stepResult.qualityRefinement) {
+      const { requestedMeshSizeMm, usedMeshSizeMm } = stepResult.qualityRefinement;
+      refinementNote = `Mesh quality at the ${formatMeshSizeMm(requestedMeshSizeMm)} mm preset size missed the quality floor on this geometry; the mesh was automatically refined to ${formatMeshSizeMm(usedMeshSizeMm)} mm.`;
+    }
     if (!attribution) {
       attributionNote = "STEP face registry unavailable; selections fall back to geometric matching.";
     }
@@ -186,7 +191,7 @@ async function meshWorkerRun(options: WasmMeshOptions): Promise<WasmMeshStudyRes
   const summary: NonNullable<Study["meshSettings"]["summary"]> = {
     nodes,
     elements,
-    warnings: [algorithmNote, elevationNote, attributionNote].filter((note): note is string => Boolean(note)),
+    warnings: [algorithmNote, elevationNote, refinementNote, attributionNote].filter((note): note is string => Boolean(note)),
     quality: preset,
     source: "wasm_gmsh",
     units: "m",
@@ -213,6 +218,10 @@ async function meshWorkerRun(options: WasmMeshOptions): Promise<WasmMeshStudyRes
     },
     message: `Mesh generated in browser (gmsh-wasm): ${nodes.toLocaleString()} nodes, ${elements.toLocaleString()} ${elementType} elements.`
   };
+}
+
+function formatMeshSizeMm(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }
 
 function base64ToArrayBuffer(contentBase64: string): ArrayBuffer {
