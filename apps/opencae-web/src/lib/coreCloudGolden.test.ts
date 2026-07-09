@@ -6,17 +6,16 @@ import { describe, expect, test } from "vitest";
  * Characterization tests for the golden OpenCAE Core Cloud solve fixtures in
  * src/testdata/core-cloud-golden/. The fixtures freeze the deployed runner's exact
  * request/response contract (recorded by scripts/record-core-cloud-golden.mts against
- * a runner built from the pinned production opencae-core ref). These assertions are
+ * a runner built from the imported production Core ref). These assertions are
  * the executable spec the local solve pipeline must satisfy to replace the cloud
  * runner: they check contract invariants of the recorded payloads, they do NOT
  * re-solve anything.
  */
 
 const FIXTURE_DIR = resolve(__dirname, "../testdata/core-cloud-golden");
-// The pin moved from the deleted services/opencae-core-cloud mirror to the
-// repo root with the cloud retirement (B4b); it still pins the sibling Core
-// solver packages whose output must match these frozen fixtures.
-const PINNED_CORE_REF = readFileSync(resolve(__dirname, "../../../../OPENCAE_CORE_REF"), "utf8").trim();
+// Core was imported into this monorepo from the production-equivalent ref whose
+// output must match these frozen fixtures.
+const IMPORTED_CORE_REF = "bc6c305272bd2789634f5e4c9006e0eae21e116b";
 /**
  * Core refs whose solver output is proven identical to the ref the fixtures were
  * recorded at, so the fixtures remain the valid golden record under them. A ref
@@ -119,12 +118,12 @@ describe.each(ALL_CASES)("core cloud golden fixture %s", (name) => {
   const fixture = fixtures.get(name)!;
   const { request, response } = fixture;
 
-  test("was recorded from the pinned production runner", () => {
+  test("was recorded from the imported production runner", () => {
     expect(fixture.meta.case).toBe(name);
     expect(fixture.meta.coreRef).toBe(RECORDED_CORE_REF);
-    // The live pin may advance past the recording ref only through refs with a
-    // proven-identical solver output; otherwise fixtures are stale — re-record.
-    expect(VALIDATED_EQUIVALENT_REFS).toContain(PINNED_CORE_REF);
+    // The imported ref may advance past the recording ref only through refs with
+    // proven-identical solver output; otherwise fixtures are stale.
+    expect(VALIDATED_EQUIVALENT_REFS).toContain(IMPORTED_CORE_REF);
     expect(fixture.meta.runnerVersion).toBe(EXPECTED_RUNNER_VERSION);
   });
 

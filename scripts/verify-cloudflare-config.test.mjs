@@ -39,12 +39,23 @@ describe("Cloudflare deployment config guard (post cloud retirement)", () => {
     expect(existsSync(resolve(rootDir, "scripts/verify-runner-version.mjs"))).toBe(false);
   });
 
-  test("the OPENCAE_CORE_REF solver pin survives at the repo root", () => {
-    const pinPath = resolve(rootDir, "OPENCAE_CORE_REF");
-    expect(existsSync(pinPath)).toBe(true);
-    expect(readFileSync(pinPath, "utf8").trim()).toMatch(/^[0-9a-f]{40}$/);
-    const ensureCoreSource = readFileSync(resolve(rootDir, "scripts/ensure-opencae-core.mjs"), "utf8");
-    expect(ensureCoreSource).not.toContain("services/opencae-core-cloud");
+  test("OpenCAE Core packages are in-repo and sibling bootstrap files stay deleted", () => {
+    for (const packageDir of ["core", "examples", "solver-cpu", "solver-wasm", "solver-webgpu", "viewer"]) {
+      expect(existsSync(resolve(rootDir, "packages", packageDir, "package.json")), packageDir).toBe(true);
+    }
+    for (const retiredPath of [
+      "OPENCAE_CORE_REF",
+      "scripts/ensure-opencae-core.mjs",
+      "scripts/verify-core-ref-reachable.mjs"
+    ]) {
+      expect(existsSync(resolve(rootDir, retiredPath)), retiredPath).toBe(false);
+    }
+    const workspace = readFileSync(resolve(rootDir, "pnpm-workspace.yaml"), "utf8");
+    expect(workspace).not.toContain("../opencae-core");
+    const packageJson = JSON.parse(readFileSync(resolve(rootDir, "package.json"), "utf8"));
+    expect(packageJson.scripts).not.toHaveProperty("ensure:core");
+    expect(packageJson.scripts).not.toHaveProperty("verify:core-ref");
+    expect(packageJson.scripts["build:core"]).not.toContain("install");
   });
 
   test("rejects checked-in migrations (PR preview version uploads cannot carry them)", () => {
