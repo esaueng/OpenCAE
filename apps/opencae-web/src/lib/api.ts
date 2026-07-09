@@ -1,4 +1,5 @@
 import type { AnalysisMesh, DisplayModel, DynamicSolverSettings, MeshQuality, Project, ResultField, ResultRenderBounds, ResultSummary, RunEvent, Study, StudyRun } from "@opencae/schema";
+import { assertCompatibleManufacturingProcess } from "@opencae/materials";
 import type { LoadApplicationPoint, LoadDirection, LoadType, PayloadLoadMetadata, PayloadObjectSelection } from "../loadPreview";
 import { embedUploadedModelFile, type EmbeddedModelFile, type LocalResultBundle, type SolverSurfaceMesh } from "../projectFile";
 import { createLocalBlankProject, createLocalSampleProject, createLocalUploadResponse, openLocalProjectPayload } from "../localProjectFactory";
@@ -385,6 +386,9 @@ export async function generateMesh(studyId: string, preset: MeshQuality, current
 }
 
 export async function assignMaterial(studyId: string, materialId: string, parameters: Record<string, unknown> = {}, currentStudy?: Study): Promise<{ study: Study; message: string }> {
+  if (parameters.manufacturingProcessId !== undefined) {
+    assertCompatibleManufacturingProcess(materialId, parameters.manufacturingProcessId);
+  }
   return fetchJsonWithFallback(
     `/api/studies/${studyId}/materials`,
     {

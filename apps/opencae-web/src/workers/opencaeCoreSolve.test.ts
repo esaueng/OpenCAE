@@ -323,6 +323,23 @@ describe("OpenCAE Core browser solver adapter", () => {
     expect(result.model.materials[0]?.yieldStrength).toBeLessThan(60000000);
   });
 
+  test("uses display-face identifiers when applying the critical FDM layer penalty", () => {
+    const printedStudy = {
+      ...staticStudy,
+      materialAssignments: [{
+        id: "mat-assignment",
+        materialId: "mat-pla",
+        selectionRef: "selection-body",
+        parameters: { manufacturingProcessId: "fdm", infillDensity: 100, wallCount: 3, layerOrientation: "x" },
+        status: "complete"
+      }]
+    } satisfies Study;
+
+    const result = buildOpenCaeCoreModelForStudy(printedStudy, displayModel);
+
+    expect(result.model.materials[0]?.yieldStrength).toBeCloseTo(60_000_000 * 0.35);
+  });
+
   test("does not build a local Core Cloud model for bracket geometry that should be meshed in the container", () => {
     expect(() => buildOpenCaeCoreModelForStudy(bracketDemoProject.studies[0]!, bracketDisplayModel)).toThrow(/must be meshed into a Core volume mesh before solving/i);
   });

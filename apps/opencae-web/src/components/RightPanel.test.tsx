@@ -929,7 +929,7 @@ describe("RightPanel payload mass controls", () => {
     expect(html).toContain('aria-label="Playback time position"');
   });
 
-  test("shows contextual weak X build yield on cantilever material previews", () => {
+  test("shows the process-specific weak X build yield in simulation properties", () => {
     const html = renderToStaticMarkup(
       <RightPanel
         activeStep="material"
@@ -944,7 +944,7 @@ describe("RightPanel payload mass controls", () => {
         }}
         study={{
           ...study,
-          materialAssignments: [{ id: "assign", materialId: "mat-petg", selectionRef: "selection-body", parameters: { printed: true, infillDensity: 100, wallCount: 3, layerOrientation: "x" }, status: "complete" }],
+          materialAssignments: [{ id: "assign", materialId: "mat-petg", selectionRef: "selection-body", parameters: { manufacturingProcessId: "fdm", infillDensity: 100, wallCount: 3, layerOrientation: "x" }, status: "complete" }],
           namedSelections: [
             {
               id: "selection-fixed-face",
@@ -1008,66 +1008,68 @@ describe("RightPanel payload mass controls", () => {
       />
     );
 
-    expect(html).toContain("17.5 MPa");
+    expect(html).toContain("Simulation Properties");
+    expect(html).toContain('<span>Effective yield</span><strong>17.5 MPa</strong>');
   });
 
-  test("hides print process details when a printable material is not marked as 3D printed", () => {
-    const html = renderToStaticMarkup(
-      <RightPanel
-        activeStep="material"
-        project={project}
-        displayModel={displayModel}
-        study={{
-          ...study,
-          materialAssignments: [{ id: "assign", materialId: "mat-abs", selectionRef: "selection-body", parameters: { printed: false, infillDensity: 35, wallCount: 3, layerOrientation: "z" }, status: "complete" }]
-        }}
-        selectedFace={null}
-        viewMode="model"
-        resultMode="stress"
-        showDeformed={false}
-        showDimensions={false}
-        stressExaggeration={1}
-        resultSummary={resultSummary}
-        runProgress={0}
-        sampleModel="bracket"
-        draftLoadType="force"
-        draftLoadValue={500}
-        draftLoadDirection="-Z"
-        selectedLoadPoint={null}
-        selectedPayloadObject={null}
-        onFitView={vi.fn()}
-        onRotateModel={vi.fn()}
-        onResetModelOrientation={vi.fn()}
-        onLoadSample={vi.fn()}
-        onUploadModel={vi.fn()}
-        onSampleModelChange={vi.fn()}
-        onViewModeChange={vi.fn()}
-        onResultModeChange={vi.fn()}
-        onToggleDeformed={vi.fn()}
-        onToggleDimensions={vi.fn()}
-        onStressExaggerationChange={vi.fn()}
-        onAssignMaterial={vi.fn()}
-        onAddSupport={vi.fn()}
-        onUpdateSupport={vi.fn()}
-        onRemoveSupport={vi.fn()}
-        onDraftLoadTypeChange={vi.fn()}
-        onDraftLoadValueChange={vi.fn()}
-        onDraftLoadDirectionChange={vi.fn()}
-        onAddLoad={vi.fn()}
-        onUpdateLoad={vi.fn()}
-        onPreviewLoadEdit={vi.fn()}
-        onRemoveLoad={vi.fn()}
-        onGenerateMesh={vi.fn()}
-        onRunSimulation={vi.fn()}
-        canRunSimulation={false}
-        missingRunItems={[]}
-        onStepSelect={vi.fn()}
-      />
-    );
+  test("separates the base material from its compatible manufacturing processes", () => {
+    const html = renderPanel("material", {
+      study: {
+        ...study,
+        materialAssignments: [{
+          id: "assign",
+          materialId: "mat-abs",
+          selectionRef: "selection-body",
+          parameters: { manufacturingProcessId: "fdm", infillDensity: 35, wallCount: 3, layerOrientation: "z" },
+          status: "complete"
+        }]
+      }
+    });
 
-    expect(html).toContain("3D printed part");
-    expect(html).not.toContain("Print process");
-    expect(html).not.toContain("FDM");
+    expect(html).toContain("Base Material");
+    expect(html).toContain("ABS Plastic");
+    expect(html).toContain("Thermoplastic");
+    expect(html).toContain("Manufacturing Process");
+    expect(html).toContain("Compatible with ABS Plastic. Only validated options are shown.");
+    expect(html).toContain('role="radiogroup" aria-label="Manufacturing process"');
+    expect(html).toContain("CNC machining");
+    expect(html).toContain("Injection molding");
+    expect(html).toContain("FDM printing");
+    expect(html).not.toContain("SLA printing");
+    expect(html).toContain("FDM Settings");
+    expect(html).toContain("Infill density");
+    expect(html).toContain("Wall count");
+    expect(html).toContain("Build direction");
+    expect(html).toContain("Simulation Properties");
+    expect(html).toContain("Effective modulus");
+    expect(html).toContain("Effective density");
+    expect(html).toContain("Effective yield");
+    expect(html).toContain("Poisson ratio");
+    expect(html).toContain("Apply material &amp; process");
+    expect(html).not.toContain("3D printed part");
+  });
+
+  test("only shows FDM settings when FDM is the selected manufacturing process", () => {
+    const cncHtml = renderPanel("material", {
+      study: {
+        ...study,
+        materialAssignments: [{
+          id: "assign",
+          materialId: "mat-abs",
+          selectionRef: "selection-body",
+          parameters: { manufacturingProcessId: "cnc_machining" },
+          status: "complete"
+        }]
+      }
+    });
+
+    expect(cncHtml).toContain('role="radio" aria-checked="true"');
+    expect(cncHtml).toContain("CNC machining");
+    expect(cncHtml).toContain("FDM printing");
+    expect(cncHtml).not.toContain("FDM Settings");
+    expect(cncHtml).not.toContain("Infill density");
+    expect(cncHtml).not.toContain("Wall count");
+    expect(cncHtml).not.toContain("Build direction");
   });
 
   test("enables adding payload mass when a payload object is selected without a named face selection", () => {

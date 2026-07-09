@@ -1,4 +1,5 @@
 import type { Diagnostic, DynamicSolverSettings, Study } from "@opencae/schema";
+import { manufacturingProcessCompatibilityError } from "@opencae/materials";
 
 export type PrintCriticalAxis = "x" | "y" | "z";
 
@@ -13,6 +14,7 @@ export interface PrintCriticalFace {
 export function validateStaticStressStudy(study: Study): Diagnostic[] {
   const diagnostics: Diagnostic[] = [];
   if (study.materialAssignments.length === 0) diagnostics.push(issue("validation-material", "Choose what the part is made of."));
+  diagnostics.push(...materialProcessDiagnostics(study));
   if (study.constraints.length === 0) diagnostics.push(issue("validation-support", "Choose where the part is held fixed."));
   if (study.loads.length === 0) diagnostics.push(issue("validation-load", "Choose where force, pressure, or payload weight is applied."));
   for (const load of study.loads) {
@@ -40,6 +42,7 @@ export function validateDynamicStructuralStudy(study: Study): Diagnostic[] {
   const diagnostics: Diagnostic[] = [];
   const solverSettings = study.solverSettings as DynamicSolverSettings;
   if (study.materialAssignments.length === 0) diagnostics.push(issue("validation-material", "Choose what the part is made of."));
+  diagnostics.push(...materialProcessDiagnostics(study));
   for (const load of study.loads) {
     const selection = study.namedSelections.find((item) => item.id === load.selectionRef);
     if (!selection || selection.entityType !== "face") {
@@ -100,6 +103,15 @@ export function inferCriticalPrintAxis(study: Study, faces: PrintCriticalFace[])
     if (!best || score > best.score) best = { axis, score };
   }
   return best?.axis;
+}
+
+function materialProcessDiagnostics(study: Study): Diagnostic[] {
+  return study.materialAssignments.flatMap((assignment) => {
+    const processId = assignment.parameters?.manufacturingProcessId;
+    if (processId === undefined) return [];
+    const error = manufacturingProcessCompatibilityError(assignment.materialId, processId);
+    return error ? [issue(`validation-material-process-${assignment.id}`, error)] : [];
+  });
 }
 
 function issue(id: string, message: string): Diagnostic {

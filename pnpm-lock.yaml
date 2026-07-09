@@ -47,6 +47,9 @@ importers:
       '@opencae/jobs':
         specifier: workspace:*
         version: link:../../libs/opencae-jobs
+      '@opencae/materials':
+        specifier: workspace:*
+        version: link:../../libs/opencae-materials
       '@opencae/mesh-service':
         specifier: workspace:*
         version: link:../../services/opencae-mesh-service
@@ -227,6 +230,9 @@ importers:
       '@opencae/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@opencae/materials':
+        specifier: workspace:*
+        version: link:../opencae-materials
     devDependencies:
       '@opencae/core-adapter':
         specifier: workspace:*
@@ -270,6 +276,9 @@ importers:
 
   libs/opencae-study-core:
     dependencies:
+      '@opencae/materials':
+        specifier: workspace:*
+        version: link:../opencae-materials
       '@opencae/schema':
         specifier: workspace:*
         version: link:../opencae-schema
