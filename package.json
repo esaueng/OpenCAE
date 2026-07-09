@@ -7,19 +7,17 @@
   "scripts": {
     "dev": "concurrently -n api,web -c cyan,blue \"pnpm --filter @opencae/api dev\" \"pnpm --filter @opencae/web dev\"",
     "build": "pnpm build:core && pnpm --filter @opencae/api build && pnpm --filter @opencae/web build",
-    "ensure:core": "node scripts/ensure-opencae-core.mjs",
-    "build:core": "pnpm ensure:core && pnpm install --no-frozen-lockfile && pnpm --filter @opencae/core build && pnpm --filter @opencae/examples build && pnpm --filter @opencae/solver-cpu build && pnpm --filter @opencae/solver-wasm build && pnpm --filter @opencae/solver-webgpu build && pnpm --filter @opencae/viewer build",
+    "build:core": "pnpm --filter @opencae/core build && pnpm --filter @opencae/examples build && pnpm --filter @opencae/solver-cpu build && pnpm --filter @opencae/solver-wasm build && pnpm --filter @opencae/solver-webgpu build && pnpm --filter @opencae/viewer build",
     "build:cloudflare": "pnpm build:core && pnpm --filter @opencae/web build",
     "verify:perf": "pnpm build:core && pnpm --filter @opencae/web build && node scripts/verify-web-performance.mjs",
     "verify:cloudflare-config": "node scripts/verify-cloudflare-config.mjs",
-    "verify:core-ref": "node scripts/verify-core-ref-reachable.mjs",
-    "deploy:cloudflare": "pnpm verify:cloudflare-config && pnpm verify:core-ref && pnpm build:cloudflare && wrangler deploy",
-    "deploy:cloudflare:dry-run": "pnpm verify:cloudflare-config && pnpm verify:core-ref && pnpm build:cloudflare && wrangler deploy --dry-run",
-    "deploy:cloudflare:retired-do-cleanup": "pnpm verify:cloudflare-config && pnpm verify:core-ref && pnpm build:cloudflare && wrangler deploy --config wrangler.retired-do-cleanup.jsonc",
+    "deploy:cloudflare": "pnpm verify:cloudflare-config && pnpm build:cloudflare && wrangler deploy",
+    "deploy:cloudflare:dry-run": "pnpm verify:cloudflare-config && pnpm build:cloudflare && wrangler deploy --dry-run",
+    "deploy:cloudflare:retired-do-cleanup": "pnpm verify:cloudflare-config && pnpm build:cloudflare && wrangler deploy --config wrangler.retired-do-cleanup.jsonc",
     "deploy:cloudflare:static": "pnpm build:cloudflare && wrangler deploy --config wrangler.static.jsonc",
     "deploy:cloudflare:static:dry-run": "pnpm build:cloudflare && wrangler deploy --config wrangler.static.jsonc --dry-run",
     "test": "vitest run",
-    "typecheck": "pnpm --filter @opencae/api exec tsc --noEmit && pnpm --filter @opencae/web exec tsc --noEmit",
+    "typecheck": "pnpm --filter \"./packages/*\" --if-present typecheck && pnpm --filter @opencae/api exec tsc --noEmit && pnpm --filter @opencae/web exec tsc --noEmit",
     "db:migrate": "pnpm --filter @opencae/db migrate",
     "db:seed": "pnpm --filter @opencae/db seed",
     "reset:local": "pnpm --filter @opencae/db reset && pnpm db:migrate && pnpm db:seed"
@@ -27,14 +25,9 @@
   "devDependencies": {
     "concurrently": "^9.1.2",
     "tsx": "^4.19.2",
-    "typescript": "^5.7.3",
-    "vitest": "^3.0.5",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4",
     "wrangler": "^4.85.0"
-  },
-  "pnpm": {
-    "overrides": {
-      "fast-uri": "3.1.2"
-    }
   },
   "packageManager": "pnpm@9.15.4",
   "license": "Apache-2.0"

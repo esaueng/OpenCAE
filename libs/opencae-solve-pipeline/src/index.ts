@@ -1,8 +1,7 @@
 /**
  * Browser-local OpenCAE Core solve pipeline.
  *
- * Mirrors the retired OpenCAE Core Cloud runner's /solve pipeline (sibling
- * opencae-core repo, services/opencae-core-cloud/src/server.ts there,
+ * Mirrors the retired OpenCAE Core Cloud runner's /solve pipeline (Core Cloud
  * RUNNER_VERSION 0.1.6; the cloud service itself was retired in 2026-07 —
  * see docs/cloud-retirement.md) step for step from model validation onward:
  *
