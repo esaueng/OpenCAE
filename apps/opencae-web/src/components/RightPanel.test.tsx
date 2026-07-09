@@ -4,6 +4,7 @@ import { bracketDisplayModel } from "@opencae/db/sample-data";
 import type { DisplayModel, Project, ResultField, ResultSummary, Study } from "@opencae/schema";
 import { editableNumberCommitValue, playbackPeakMarkerPercent, RightPanel, rangeProgressPercent } from "./RightPanel";
 import type { StepId } from "./StepBar";
+import type { StepGeometryMetadata } from "../lib/api";
 
 const project: Project = {
   id: "project-1",
@@ -117,6 +118,24 @@ function renderPanel(activeStep: StepId, overrides: Partial<Parameters<typeof Ri
       {...overrides}
     />
   );
+}
+
+function uploadedStepProject(status: StepGeometryMetadata["status"], message?: string): Project {
+  return {
+    ...project,
+    geometryFiles: [{
+      id: "geom-upload",
+      projectId: project.id,
+      filename: "fixture.step",
+      localPath: "uploads/fixture.step",
+      artifactKey: "project-1/geometry/uploaded-display.json",
+      status: "ready",
+      metadata: {
+        source: "local-upload",
+        stepGeometry: { status, message }
+      }
+    }]
+  };
 }
 
 describe("RightPanel payload mass controls", () => {
@@ -1394,6 +1413,50 @@ describe("RightPanel payload mass controls", () => {
     expect(uploadedHtml).not.toContain("<span>Mass</span>");
     expect(sampleHtml).toContain("<span>Volume</span>");
     expect(sampleHtml).toContain("<span>Mass</span>");
+  });
+
+  test("renders an accessible repair action when uploaded STEP surfaces are open", () => {
+    const html = renderPanel("model", {
+      project: uploadedStepProject("repairable", "Open boundary loops were detected in this STEP model."),
+      onRepairModel: vi.fn()
+    });
+
+    expect(html).toContain('<div class="step-repair-card" role="alert" aria-label="Open STEP surfaces detected">');
+    expect(html).toContain("Open boundary loops were detected in this STEP model.");
+    expect(html).toContain("Fix open surfaces");
+    expect(html).not.toContain('<button class="outline-action wide" type="button" disabled="">');
+  });
+
+  test("disables the repair action and shows progress while fixing STEP surfaces", () => {
+    const html = renderPanel("model", {
+      project: uploadedStepProject("repairable"),
+      onRepairModel: vi.fn(),
+      isRepairingModel: true
+    });
+
+    expect(html).toMatch(/<button class="outline-action wide" type="button" disabled="">[\s\S]*Fixing model\.\.\.<\/button>/);
+    expect(html).not.toContain("Fix open surfaces");
+  });
+
+  test("confirms when uploaded STEP geometry was repaired", () => {
+    const html = renderPanel("model", {
+      project: uploadedStepProject("repaired")
+    });
+
+    expect(html).toContain("Geometry repair complete.");
+    expect(html).toContain("Open boundaries were converted into a closed solid");
+    expect(html).not.toContain("Fix open surfaces");
+  });
+
+  test("shows an unrepairable STEP warning without offering an automatic fix", () => {
+    const html = renderPanel("model", {
+      project: uploadedStepProject("unrepairable", "Automatic repair could not close every surface.")
+    });
+
+    expect(html).toContain('<p class="panel-warning" role="alert">');
+    expect(html).toContain("Automatic repair could not close every surface.");
+    expect(html).not.toContain("Fix open surfaces");
+    expect(html).not.toContain('aria-label="Open STEP surfaces detected"');
   });
 
   test("offers the parametric part builder in the model panel", () => {

@@ -84,6 +84,27 @@ async function runOperation(request: MeshWorkerRequest, reportPhase: (phase: Mes
     };
   }
 
+  if (request.operation === "inspectStepFile") {
+    reportPhase("import");
+    const stepContent = new Uint8Array(request.payload.stepContent);
+    const inspection = await intake.inspectStepGeometry(stepContent);
+    if (inspection.status !== "open_shell") return { inspection };
+    // Do not infer repairability from face/edge counts. Prove it with the same
+    // explicit repair operation the Fix model button will run, then discard
+    // the trial bytes; the original upload remains untouched.
+    try {
+      await intake.repairStepGeometry(stepContent);
+      return { inspection: { ...inspection, repairable: true } };
+    } catch {
+      return { inspection: { ...inspection, repairable: false } };
+    }
+  }
+
+  if (request.operation === "repairStepFile") {
+    reportPhase("import");
+    return intake.repairStepGeometry(new Uint8Array(request.payload.stepContent));
+  }
+
   const meshed = await intake.meshStepToMshV2(new Uint8Array(request.payload.stepContent), {
     elementOrder: request.payload.elementOrder,
     meshSizeMm: request.payload.meshSizeMm,
@@ -109,6 +130,7 @@ async function runOperation(request: MeshWorkerRequest, reportPhase: (phase: Mes
     ...(meshed.elevation ? { elevation: meshed.elevation } : {}),
     ...(meshed.optimizer ? { optimizer: meshed.optimizer } : {}),
     ...(meshed.qualityRefinement ? { qualityRefinement: meshed.qualityRefinement } : {}),
+    ...(meshed.geometryRepair ? { geometryRepair: meshed.geometryRepair } : {}),
     ...(attribution ? { attribution } : {})
   };
 }

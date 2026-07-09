@@ -56,7 +56,48 @@ export type StepMeshResult = GeoMeshResult & {
     usedMeshSizeMm: number;
     triedMeshSizesMm: number[];
   };
+  /** Present when the imported STEP boundary had to be healed before volume meshing. */
+  geometryRepair?: StepGeometryRepairReport;
 };
+
+export type StepGeometryInspection = {
+  status: "solid" | "open_shell" | "invalid";
+  volumeCount: number;
+  surfaceCount: number;
+  orphanSurfaceCount: number;
+  openBoundaryCurveCount: number;
+  surfaceMeshValid: boolean;
+  repairable: boolean;
+  issue?: "no_solid_volume" | "open_boundaries" | "orphan_surfaces" | "degenerate_volume" | "invalid_surface_loop" | "import_failed";
+  message?: string;
+};
+
+export type StepGeometryRepairReport = {
+  method: "heal" | "heal_and_cap";
+  profile: "automatic" | "explicit";
+  toleranceMm: number;
+  cappedSurfaceCount: number;
+  originalVolumeCount: number;
+  repairedVolumeCount: number;
+  originalOpenBoundaryCurveCount: number;
+  repairedOpenBoundaryCurveCount: number;
+  originalOrphanSurfaceCount: number;
+  repairedOrphanSurfaceCount: number;
+  originalVolumeMm3?: number;
+  repairedVolumeMm3?: number;
+  relativeVolumeChange?: number;
+  relativeBoundsChange: number;
+};
+
+export type StepGeometryRepairResult = {
+  stepContent: Uint8Array;
+  inspection: StepGeometryInspection;
+  repair: StepGeometryRepairReport;
+};
+
+export class StepGeometryError extends Error {
+  override name = "StepGeometryError";
+}
 
 /**
  * Extra Emscripten Module options passed to the gmsh-wasm factory on every
@@ -183,16 +224,20 @@ async function meshStepWithAlgorithmFallback(
   totalStart: number
 ): Promise<Omit<StepMeshResult, "totalMs">> {
   const gmsh = await loadGmshWasm();
+  let delaunayError: unknown;
+  let frontalError: unknown;
   try {
     return meshStepSession(gmsh, stepContent, options, "delaunay", totalStart, true);
-  } catch (delaunayError) {
+  } catch (error) {
+    delaunayError = error;
     // The Netgen optimizer can crash the wasm module outright ("memory access
     // out of bounds") on some meshes; the whole session is poisoned, so retry
     // the same algorithm on a FRESH module without the optimizer.
-    if (isNetgenCrash(delaunayError)) {
+    if (isNetgenCrash(error)) {
       try {
         return meshStepSession(await loadGmshWasm(), stepContent, options, "delaunay", now(), false);
-      } catch {
+      } catch (retryError) {
+        delaunayError = retryError;
         // Fall through to the Frontal fallback below.
       }
     }
@@ -200,12 +245,49 @@ async function meshStepWithAlgorithmFallback(
     // second session on the same instance aborts in gmsh-wasm 0.1.2.
     try {
       return meshStepSession(await loadGmshWasm(), stepContent, options, "frontal", now(), true);
-    } catch (frontalError) {
-      if (isNetgenCrash(frontalError)) {
-        return meshStepSession(await loadGmshWasm(), stepContent, options, "frontal", now(), false);
+    } catch (error) {
+      frontalError = error;
+      if (isNetgenCrash(error)) {
+        try {
+          return meshStepSession(await loadGmshWasm(), stepContent, options, "frontal", now(), false);
+        } catch (retryError) {
+          frontalError = retryError;
+        }
       }
-      throw new Error(
-        `gmsh-wasm STEP meshing failed with both 3D algorithms. Delaunay: ${messageOf(delaunayError)}; Frontal: ${messageOf(frontalError)}`
+    }
+  }
+
+  // A STEP file can look closed in the viewport while its OpenCASCADE shell
+  // contains a tolerance gap, a degenerate wire, or a genuinely missing face.
+  // Both 3D algorithms consume the same broken 1D/2D boundary, so changing
+  // algorithms cannot repair this class of failure. Retry on fresh modules
+  // after conservatively sewing/healing the B-rep. Automatic meshing never
+  // invents a cap; boundary patching is reserved for the explicit Fix action.
+  try {
+    return meshStepSession(await loadGmshWasm(), stepContent, options, "delaunay", now(), true, true);
+  } catch (repairDelaunayError) {
+    if (isNetgenCrash(repairDelaunayError)) {
+      try {
+        return meshStepSession(await loadGmshWasm(), stepContent, options, "delaunay", now(), false, true);
+      } catch {
+        // Continue to the repaired Frontal boundary-recovery fallback.
+      }
+    }
+    try {
+      return meshStepSession(await loadGmshWasm(), stepContent, options, "frontal", now(), true, true);
+    } catch (repairFrontalError) {
+      if (isNetgenCrash(repairFrontalError)) {
+        try {
+          return meshStepSession(await loadGmshWasm(), stepContent, options, "frontal", now(), false, true);
+        } catch {
+          // Use the original repaired failures in the final diagnostic below.
+        }
+      }
+      throw new StepGeometryError(
+        "STEP geometry has open or invalid surfaces, and automatic healing could not create a closed solid. " +
+          "Use Fix model on the Model step, or repair the source CAD and upload it again. " +
+          `(Original Delaunay: ${messageOf(delaunayError)}; original Frontal: ${messageOf(frontalError)}; ` +
+          `healed Delaunay: ${messageOf(repairDelaunayError)}; healed Frontal: ${messageOf(repairFrontalError)})`
       );
     }
   }
@@ -229,9 +311,11 @@ function meshStepSession(
   options: StepMeshWasmOptions,
   algorithm3D: "delaunay" | "frontal",
   totalStart: number,
-  allowNetgen: boolean
+  allowNetgen: boolean,
+  repairGeometry = false
 ): Omit<StepMeshResult, "totalMs"> {
   const timings: MeshTimings = {};
+  let geometryRepair: StepGeometryRepairReport | undefined;
   timePhaseSync(timings, options, "init", totalStart, () => {
     gmsh.initialize();
     quietLogger(gmsh);
@@ -244,8 +328,24 @@ function meshStepSession(
         gmsh.option.setNumber("Mesh.CharacteristicLengthMin", options.meshSizeMm * 0.45);
         gmsh.option.setNumber("Mesh.CharacteristicLengthMax", options.meshSizeMm);
       }
-      gmsh.model.occ.importShapes("/in.step");
+      // Gmsh defaults `highestDimOnly` to true, which silently discards a
+      // detached sheet whenever the same STEP also contains a solid. Import
+      // every top-level shape so validation can reject those open surfaces.
+      gmsh.model.occ.importShapes("/in.step", false);
       gmsh.model.occ.synchronize();
+      if (repairGeometry) {
+        geometryRepair = repairImportedStepGeometry(gmsh, "automatic", false);
+      }
+      if (entityTags(gmsh, 3).length === 0) {
+        throw new StepGeometryError("The STEP import contains surfaces but no closed solid volume.");
+      }
+      if (hasDegenerateVolumes(gmsh)) {
+        throw new StepGeometryError("The STEP import contains a zero-volume or degenerate solid body.");
+      }
+      const orphanSurfaceCount = orphanSurfaceTags(gmsh).length;
+      if (orphanSurfaceCount > 0) {
+        throw new StepGeometryError(`The STEP import contains ${orphanSurfaceCount.toLocaleString()} surface ${orphanSurfaceCount === 1 ? "sheet" : "sheets"} that do not bound a solid volume.`);
+      }
       // One physical group per geometric surface so the msh2 output keeps the
       // boundary triangles grouped per B-rep surface (`surface_<tag>` sets in
       // the parser) — the input the A-M3 facet->face attribution votes over.
@@ -300,17 +400,388 @@ function meshStepSession(
       elevation = "straight_edge";
     }
     const msh = timePhaseSync(timings, options, "write", totalStart, () => writeMshV2(gmsh));
+    if (countTetLines(msh) === 0) {
+      throw new StepGeometryError("Gmsh did not create any tetrahedra from the STEP solid.");
+    }
     return {
       msh,
       timings,
       algorithm3D,
       ...(optimizer !== undefined ? { optimizer } : {}),
       ...(elevation !== undefined ? { elevation } : {}),
+      ...(geometryRepair !== undefined ? { geometryRepair } : {}),
       ...(qualityMinSICN !== undefined ? { qualityMinSICN } : {})
     };
   } finally {
     safeFinalize(gmsh);
   }
+}
+
+/**
+ * Inspect STEP topology in the same OpenCASCADE/Gmsh stack used by production
+ * meshing. Generating only the surface mesh catches malformed face wires (the
+ * exact "1D mesh ... not forming a closed loop" failure) without paying for a
+ * tetrahedral mesh.
+ */
+export async function inspectStepGeometry(stepContent: Uint8Array | string): Promise<StepGeometryInspection> {
+  const gmsh = await loadGmshWasm();
+  gmsh.initialize();
+  quietLogger(gmsh);
+  try {
+    gmsh.FS.writeFile("/inspect.step", stepContent);
+    try {
+      gmsh.model.occ.importShapes("/inspect.step", false);
+      gmsh.model.occ.synchronize();
+    } catch (error) {
+      return {
+        status: "invalid",
+        volumeCount: 0,
+        surfaceCount: 0,
+        orphanSurfaceCount: 0,
+        openBoundaryCurveCount: 0,
+        surfaceMeshValid: false,
+        repairable: false,
+        issue: "import_failed",
+        message: `STEP geometry could not be imported: ${messageOf(error)}`
+      };
+    }
+
+    const volumeCount = entityTags(gmsh, 3).length;
+    const surfaceCount = entityTags(gmsh, 2).length;
+    const orphanSurfaceCount = orphanSurfaceTags(gmsh).length;
+    const openBoundaryCurveCount = openBoundaryCurveTags(gmsh).length;
+    let surfaceMeshValid = true;
+    let surfaceMeshError = "";
+    try {
+      gmsh.model.mesh.generate(2);
+    } catch (error) {
+      surfaceMeshValid = false;
+      surfaceMeshError = messageOf(error);
+    }
+
+    if (!surfaceMeshValid) {
+      return {
+        status: "open_shell",
+        volumeCount,
+        surfaceCount,
+        orphanSurfaceCount,
+        openBoundaryCurveCount,
+        surfaceMeshValid,
+        repairable: false,
+        issue: "invalid_surface_loop",
+        message: `Open or invalid STEP surface detected: ${surfaceMeshError}`
+      };
+    }
+    if (volumeCount === 0) {
+      return {
+        status: "open_shell",
+        volumeCount,
+        surfaceCount,
+        orphanSurfaceCount,
+        openBoundaryCurveCount,
+        surfaceMeshValid,
+        repairable: false,
+        issue: "no_solid_volume",
+        message: "The STEP file contains an open surface shell instead of a closed solid volume."
+      };
+    }
+    if (hasDegenerateVolumes(gmsh)) {
+      return {
+        status: "invalid",
+        volumeCount,
+        surfaceCount,
+        orphanSurfaceCount,
+        openBoundaryCurveCount,
+        surfaceMeshValid,
+        repairable: false,
+        issue: "degenerate_volume",
+        message: "The STEP file contains a zero-volume or degenerate solid body."
+      };
+    }
+    if (orphanSurfaceCount > 0) {
+      return {
+        status: "open_shell",
+        volumeCount,
+        surfaceCount,
+        orphanSurfaceCount,
+        openBoundaryCurveCount,
+        surfaceMeshValid,
+        repairable: false,
+        issue: "orphan_surfaces",
+        message: `The STEP file contains ${orphanSurfaceCount.toLocaleString()} open surface ${orphanSurfaceCount === 1 ? "sheet" : "sheets"} that do not belong to a solid volume.`
+      };
+    }
+    return {
+      status: "solid",
+      volumeCount,
+      surfaceCount,
+      orphanSurfaceCount: 0,
+      // Periodic/seam curves on otherwise valid OCC solids do not always
+      // cancel in getBoundary(combined=true). A real volume plus a successful
+      // 2D mesh is the authoritative health gate; retain the count only as a
+      // diagnostic instead of false-flagging healthy fillets/cylinders.
+      openBoundaryCurveCount,
+      surfaceMeshValid: true,
+      repairable: false
+    };
+  } finally {
+    safeFinalize(gmsh);
+  }
+}
+
+/** Heal/sew an uploaded STEP shell, cap closed free-edge loops, and export it. */
+export async function repairStepGeometry(stepContent: Uint8Array | string): Promise<StepGeometryRepairResult> {
+  const gmsh = await loadGmshWasm();
+  gmsh.initialize();
+  quietLogger(gmsh);
+  try {
+    gmsh.FS.writeFile("/repair-input.step", stepContent);
+    gmsh.model.occ.importShapes("/repair-input.step", false);
+    gmsh.model.occ.synchronize();
+    const repair = repairImportedStepGeometry(gmsh, "explicit", true);
+    if (repair.repairedVolumeCount === 0) {
+      throw new StepGeometryError("The open STEP surfaces could not be joined into a closed solid volume.");
+    }
+    try {
+      gmsh.model.mesh.generate(2);
+    } catch (error) {
+      throw new StepGeometryError(`The repaired STEP still has an invalid surface loop: ${messageOf(error)}`);
+    }
+    gmsh.write("/repaired.step");
+    const content = gmsh.FS.readFile("/repaired.step");
+    const stepBytes = typeof content === "string" ? new TextEncoder().encode(content) : Uint8Array.from(content);
+    return {
+      stepContent: stepBytes,
+      repair,
+      inspection: {
+        status: "solid",
+        volumeCount: repair.repairedVolumeCount,
+        surfaceCount: entityTags(gmsh, 2).length,
+        orphanSurfaceCount: repair.repairedOrphanSurfaceCount,
+        openBoundaryCurveCount: repair.repairedOpenBoundaryCurveCount,
+        surfaceMeshValid: true,
+        repairable: false
+      }
+    };
+  } finally {
+    safeFinalize(gmsh);
+  }
+}
+
+const MAX_EXPLICIT_CAPS = 16;
+
+function repairImportedStepGeometry(
+  gmsh: GmshApi,
+  profile: StepGeometryRepairReport["profile"],
+  allowSurfacePatches: boolean
+): StepGeometryRepairReport {
+  const originalVolumeCount = entityTags(gmsh, 3).length;
+  const originalOpenBoundaryCurveCount = openBoundaryCurveTags(gmsh).length;
+  const originalOrphanSurfaceCount = orphanSurfaceTags(gmsh).length;
+  const originalVolumeMm3 = occVolume(gmsh);
+  const originalBoundsDiagonal = modelBoundingBoxDiagonal(gmsh);
+  // STEP coordinates in this app are millimetres. A relative tolerance closes
+  // exporter-scale cracks. Automatic repair stays below 0.01 mm; the larger
+  // explicit profile only runs after the user chooses Fix model.
+  const toleranceMm = profile === "automatic"
+    ? Math.min(0.01, Math.max(1e-8, originalBoundsDiagonal * 1e-5))
+    : Math.min(0.05, Math.max(1e-7, originalBoundsDiagonal * 1e-3));
+  gmsh.model.occ.healShapes([], toleranceMm, true, true, true, true, true);
+  gmsh.model.occ.synchronize();
+
+  let cappedSurfaceCount = 0;
+  // Surface filling invents geometry, so it is never part of the automatic
+  // meshing fallback. It is reserved for the explicit Fix model action, whose
+  // UI warns that the repaired shape must be reviewed and resets setup tied to
+  // the old face ids.
+  if (allowSurfacePatches && entityTags(gmsh, 3).length === 0) {
+    const loops = orderedOpenBoundaryLoops(gmsh).slice(0, MAX_EXPLICIT_CAPS);
+    for (const loop of loops) {
+      try {
+        const wire = gmsh.model.occ.addWire(loop, -1, true);
+        try {
+          // Preserve planar openings exactly whenever possible. Generic
+          // surface filling can bow beyond the source bounds, so it is only a
+          // fallback for genuinely non-planar boundary loops.
+          gmsh.model.occ.addPlaneSurface([wire]);
+        } catch {
+          gmsh.model.occ.addSurfaceFilling(wire);
+        }
+        cappedSurfaceCount += 1;
+      } catch {
+        // Some free-edge graphs are not valid closed wires. Leave those for
+        // the final validation, which returns a clear user-facing error.
+      }
+    }
+    if (cappedSurfaceCount > 0) {
+      gmsh.model.occ.healShapes([], toleranceMm, true, true, true, true, true);
+      gmsh.model.occ.synchronize();
+    }
+  }
+
+  const repairedVolumeCount = entityTags(gmsh, 3).length;
+  const repairedOpenBoundaryCurveCount = openBoundaryCurveTags(gmsh).length;
+  const repairedOrphanSurfaceCount = orphanSurfaceTags(gmsh).length;
+  if (repairedVolumeCount === 0) {
+    throw new StepGeometryError("Open STEP surfaces remain after sewing and boundary patching; no solid volume could be created.");
+  }
+  if (repairedOrphanSurfaceCount > 0) {
+    throw new StepGeometryError(`CAD healing left ${repairedOrphanSurfaceCount.toLocaleString()} open surface ${repairedOrphanSurfaceCount === 1 ? "sheet" : "sheets"} outside the repaired solid.`);
+  }
+  if (hasDegenerateVolumes(gmsh)) {
+    throw new StepGeometryError("CAD healing produced one or more zero-volume or degenerate solid bodies.");
+  }
+  const repairedVolumeMm3 = occVolume(gmsh);
+  const repairedBoundsDiagonal = modelBoundingBoxDiagonal(gmsh);
+  const minimumMeaningfulVolumeMm3 = Math.max(repairedBoundsDiagonal ** 3 * 1e-12, 1e-12);
+  if (repairedVolumeMm3 === undefined || repairedVolumeMm3 <= minimumMeaningfulVolumeMm3) {
+    throw new StepGeometryError("CAD healing produced a zero-volume or degenerate solid, so the model is not safe to simulate.");
+  }
+  const relativeBoundsChange = relativeChange(originalBoundsDiagonal, repairedBoundsDiagonal);
+  const relativeVolumeChange = originalVolumeMm3 !== undefined && repairedVolumeMm3 !== undefined
+    ? relativeChange(originalVolumeMm3, repairedVolumeMm3)
+    : undefined;
+  const maxBoundsChange = profile === "automatic" ? 0.005 : 0.02;
+  const maxVolumeChange = profile === "automatic" ? 0.01 : 0.05;
+  if (relativeBoundsChange > maxBoundsChange || (relativeVolumeChange !== undefined && relativeVolumeChange > maxVolumeChange)) {
+    throw new StepGeometryError(
+      `${profile === "automatic" ? "Automatic" : "Requested"} CAD healing changed the model too much (bounds ${(relativeBoundsChange * 100).toFixed(2)}%` +
+        `${relativeVolumeChange !== undefined ? `, volume ${(relativeVolumeChange * 100).toFixed(2)}%` : ""}). ` +
+        "Repair the source CAD and upload it again."
+    );
+  }
+  return {
+    method: cappedSurfaceCount > 0 ? "heal_and_cap" : "heal",
+    profile,
+    toleranceMm,
+    cappedSurfaceCount,
+    originalVolumeCount,
+    repairedVolumeCount,
+    originalOpenBoundaryCurveCount,
+    repairedOpenBoundaryCurveCount,
+    originalOrphanSurfaceCount,
+    repairedOrphanSurfaceCount,
+    ...(originalVolumeMm3 !== undefined ? { originalVolumeMm3 } : {}),
+    ...(repairedVolumeMm3 !== undefined ? { repairedVolumeMm3 } : {}),
+    ...(relativeVolumeChange !== undefined ? { relativeVolumeChange } : {}),
+    relativeBoundsChange
+  };
+}
+
+function occVolume(gmsh: GmshApi): number | undefined {
+  const volumes = entityTags(gmsh, 3);
+  if (volumes.length === 0) return undefined;
+  try {
+    return volumes.reduce((total, tag) => total + Math.abs(gmsh.model.occ.getMass(3, tag).mass), 0);
+  } catch {
+    return undefined;
+  }
+}
+
+function hasDegenerateVolumes(gmsh: GmshApi): boolean {
+  const volumes = entityTags(gmsh, 3);
+  if (volumes.length === 0) return false;
+  const minimumMeaningfulVolume = Math.max(modelBoundingBoxDiagonal(gmsh) ** 3 * 1e-12, 1e-12);
+  try {
+    return volumes.some((tag) => Math.abs(gmsh.model.occ.getMass(3, tag).mass) <= minimumMeaningfulVolume);
+  } catch {
+    return true;
+  }
+}
+
+function relativeChange(before: number, after: number): number {
+  if (!Number.isFinite(before) || !Number.isFinite(after)) return Infinity;
+  return Math.abs(after - before) / Math.max(Math.abs(before), 1e-12);
+}
+
+function modelBoundingBoxDiagonal(gmsh: GmshApi): number {
+  try {
+    const bounds = gmsh.model.getBoundingBox(-1, -1);
+    return Math.max(Math.hypot(bounds.xmax - bounds.xmin, bounds.ymax - bounds.ymin, bounds.zmax - bounds.zmin), 1e-4);
+  } catch {
+    return 1;
+  }
+}
+
+function openBoundaryCurveTags(gmsh: GmshApi): number[] {
+  const surfaces = entityTags(gmsh, 2);
+  if (surfaces.length === 0) return [];
+  try {
+    const boundary = gmsh.model.getBoundary(surfaces.flatMap((tag) => [2, tag]), true, true, false).outDimTags;
+    const tags = new Set<number>();
+    for (let index = 1; index < boundary.length; index += 2) tags.add(Math.abs(boundary[index]!));
+    return [...tags];
+  } catch {
+    return [];
+  }
+}
+
+function orphanSurfaceTags(gmsh: GmshApi): number[] {
+  const allSurfaces = entityTags(gmsh, 2);
+  if (allSurfaces.length === 0) return [];
+  const volumeBoundarySurfaces = new Set<number>();
+  for (const volumeTag of entityTags(gmsh, 3)) {
+    try {
+      for (const loop of gmsh.model.occ.getSurfaceLoops(volumeTag).surfaceTags) {
+        for (const surfaceTag of loop) volumeBoundarySurfaces.add(Math.abs(surfaceTag));
+      }
+    } catch {
+      // A volume whose OCC boundary cannot be queried is not safe to accept;
+      // its surfaces remain absent from the set and are reported as orphaned.
+    }
+  }
+  return allSurfaces.filter((tag) => !volumeBoundarySurfaces.has(tag));
+}
+
+function orderedOpenBoundaryLoops(gmsh: GmshApi): number[][] {
+  const curveTags = openBoundaryCurveTags(gmsh);
+  const endpoints = new Map<number, [number, number] | null>();
+  const curvesAtPoint = new Map<number, number[]>();
+  for (const curveTag of curveTags) {
+    const boundary = gmsh.model.getBoundary([1, curveTag], false, false, false).outDimTags;
+    const points: number[] = [];
+    for (let index = 1; index < boundary.length; index += 2) {
+      const point = Math.abs(boundary[index]!);
+      if (!points.includes(point)) points.push(point);
+    }
+    if (points.length <= 1) {
+      endpoints.set(curveTag, null); // A periodic curve is a complete loop by itself.
+      continue;
+    }
+    const pair: [number, number] = [points[0]!, points[1]!];
+    endpoints.set(curveTag, pair);
+    for (const point of pair) curvesAtPoint.set(point, [...(curvesAtPoint.get(point) ?? []), curveTag]);
+  }
+
+  const unvisited = new Set(curveTags);
+  const loops: number[][] = [];
+  for (const startCurve of curveTags) {
+    if (!unvisited.has(startCurve)) continue;
+    const startEndpoints = endpoints.get(startCurve);
+    if (startEndpoints === null) {
+      unvisited.delete(startCurve);
+      loops.push([startCurve]);
+      continue;
+    }
+    if (!startEndpoints) continue;
+    const [startPoint, nextPoint] = startEndpoints;
+    const loop = [startCurve];
+    unvisited.delete(startCurve);
+    let currentPoint = nextPoint;
+    let closed = currentPoint === startPoint;
+    while (!closed && loop.length <= curveTags.length) {
+      const nextCurve = (curvesAtPoint.get(currentPoint) ?? []).find((tag) => unvisited.has(tag));
+      if (nextCurve === undefined) break;
+      const nextEndpoints = endpoints.get(nextCurve);
+      if (!nextEndpoints) break;
+      loop.push(nextCurve);
+      unvisited.delete(nextCurve);
+      currentPoint = nextEndpoints[0] === currentPoint ? nextEndpoints[1] : nextEndpoints[0];
+      closed = currentPoint === startPoint;
+    }
+    if (closed) loops.push(loop);
+  }
+  return loops;
 }
 
 function addPerSurfacePhysicalGroups(gmsh: GmshApi): void {
