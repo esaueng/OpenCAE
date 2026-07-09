@@ -9,6 +9,7 @@ import type { ResultMode, ViewMode } from "./CadViewer";
 import type { StepId } from "./StepBar";
 import { applicationPointForLoad, createViewerLoadMarkers, directionLabelForLoad, directionVectorForLabel, equivalentForceForLoad, loadMarkerOrdinalLabel, payloadObjectForLoad, unitsForLoadType, type LoadApplicationPoint, type LoadDirectionLabel, type LoadType, type PayloadLoadMetadata, type PayloadMassMode, type PayloadObjectSelection } from "../loadPreview";
 import type { SampleAnalysisType, SampleModelId } from "../lib/api";
+import { stepGeometryMetadataForProject } from "../stepGeometryState";
 import { dimensionValuesForDisplayModel } from "../modelDimensions";
 import { formatModelOrientation, getModelOrientation, type RotationAxis } from "../modelOrientation";
 import { shouldShowSampleModelPicker } from "../modelPanelState";
@@ -67,6 +68,8 @@ interface RightPanelProps {
   onResetModelOrientation: () => void;
   onLoadSample: (sample?: SampleModelId, analysisType?: SampleAnalysisType) => void;
   onUploadModel: (file: File) => void;
+  onRepairModel?: () => void;
+  isRepairingModel?: boolean;
   onSampleModelChange: (sample: SampleModelId) => void;
   onSampleAnalysisTypeChange?: (analysisType: SampleAnalysisType) => void;
   onViewModeChange: (mode: ViewMode) => void;
@@ -130,7 +133,7 @@ export function RightPanel(props: RightPanelProps) {
   );
 }
 
-function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sampleModel, sampleAnalysisType = "static_stress", onFitView, onRotateModel, onResetModelOrientation, onViewModeChange, onToggleDimensions, onLoadSample, onUploadModel, onSampleModelChange, onSampleAnalysisTypeChange }: RightPanelProps) {
+function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sampleModel, sampleAnalysisType = "static_stress", onFitView, onRotateModel, onResetModelOrientation, onViewModeChange, onToggleDimensions, onLoadSample, onUploadModel, onRepairModel, isRepairingModel = false, onSampleModelChange, onSampleAnalysisTypeChange }: RightPanelProps) {
   const [confirmSampleLoad, setConfirmSampleLoad] = useState(false);
   const [pendingSampleModel, setPendingSampleModel] = useState<SampleModelId>(sampleModel);
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
@@ -145,6 +148,8 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sa
   const isNativeCadImport = Boolean(geometry?.metadata.nativeCadImport);
   const faceCount = Number(geometry?.metadata.faceCount ?? 0);
   const bodyCount = Number(geometry?.metadata.bodyCount ?? 0);
+  const stepGeometry = stepGeometryMetadataForProject(project);
+  const stepGeometryResolvedByMesh = Boolean(study.meshSettings.summary?.artifacts?.actualCoreModel);
   const sampleLabel = sampleOptionFor(pendingSampleModel).title;
   const sampleAnalysisLabel = sampleAnalysisType === "dynamic_structural" ? "Dynamic Structural" : "Static Stress";
   const sampleForceLabel = formatEquivalentForce(500, project.unitSystem);
@@ -237,6 +242,22 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sa
       ) : isUploadedProject ? (
         <Callout>{isNativeCadImport ? `${geometry.filename} is loaded as a selectable STEP import.` : uploadPreviewFormat ? `${geometry.filename} is loaded with a ${uploadPreviewFormat} viewport preview.` : `${geometry.filename} cannot be previewed in this local viewer. Replace it with STEP, STP, or STL.`}</Callout>
       ) : null}
+      {stepGeometry?.status === "repairable" && !stepGeometryResolvedByMesh && (
+        <div className="step-repair-card" role="alert" aria-label="Open STEP surfaces detected">
+          <p className="panel-warning"><AlertTriangle size={16} />{stepGeometry.message ?? "This STEP model has open or invalid surfaces and is not a closed simulation solid."}</p>
+          <button className="outline-action wide" type="button" onClick={onRepairModel} disabled={isRepairingModel || !onRepairModel}>
+            <Wrench size={16} />
+            {isRepairingModel ? "Fixing model..." : "Fix open surfaces"}
+          </button>
+          <p className="panel-copy">Fix model sews small gaps and may patch closed boundary loops. Review the repaired shape; face-based setup will be reset.</p>
+        </div>
+      )}
+      {(stepGeometry?.status === "unrepairable" || stepGeometry?.status === "invalid") && !stepGeometryResolvedByMesh && (
+        <p className="panel-warning" role="alert"><AlertTriangle size={16} />{stepGeometry.message ?? "This STEP model is not a closed solid and automatic repair could not produce one. Repair it in CAD and upload it again."}</p>
+      )}
+      {(stepGeometry?.status === "repaired" || (stepGeometryResolvedByMesh && stepGeometry?.status === "repairable")) && (
+        <Callout>Geometry repair complete. Open boundaries were converted into a closed solid for simulation; review the shape before relying on results.</Callout>
+      )}
       <Collapsible title="Create parametric part" subtitle="Analytic STEP solid" defaultOpen={isBlankProject}>
         <ParametricPartBuilder onCreatePart={onUploadModel} />
       </Collapsible>
