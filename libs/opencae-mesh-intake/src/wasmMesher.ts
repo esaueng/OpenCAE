@@ -42,6 +42,15 @@ export type StepMeshResult = GeoMeshResult & {
    * geometry (Mesh.SecondOrderLinear re-elevation).
    */
   elevation?: "curved" | "straight_edge";
+  /**
+   * Present when the requested size missed the quality-gate floor and the
+   * mesh was automatically retried at finer characteristic lengths.
+   */
+  qualityRefinement?: {
+    requestedMeshSizeMm: number;
+    usedMeshSizeMm: number;
+    triedMeshSizesMm: number[];
+  };
 };
 
 /**
@@ -103,33 +112,92 @@ export async function meshGeoScriptToMshV2(geoScript: string, options: MeshWasmO
   }
 }
 
+/** Each quality refinement multiplies the characteristic length by this. */
+const QUALITY_REFINEMENT_FACTOR = 2 / 3;
+/** Extra mesh attempts at finer sizes when the quality floor is missed. */
+const MAX_QUALITY_REFINEMENTS = 2;
+/** Stop refining once a mesh gets this large — the solver caps DOF anyway. */
+const MAX_QUALITY_REFINEMENT_TETS = 80_000;
+
 /**
  * Import a STEP file through the OpenCASCADE kernel and volume-mesh it to msh v2.2.
  *
- * The single-threaded WASM build of gmsh has a documented weakness in the default
- * Delaunay 3D algorithm's boundary recovery; when generate(3) fails we retry the
- * whole session with Mesh.Algorithm3D = 4 (Frontal) and report which one won.
+ * Two layers of robustness, both measured on real thin-walled parts:
+ * - The single-threaded WASM build of gmsh has a documented weakness in the
+ *   default Delaunay 3D algorithm's boundary recovery; when generate(3) fails
+ *   the session retries with Mesh.Algorithm3D = 4 (Frontal).
+ * - Thin walls produce sliver tets whose quality is NON-monotonic in mesh
+ *   size (a 2 mm-wall clip scores minSICN 0.02 at 12 mm, 0.009 at 6 mm, but
+ *   0.25 at 8 mm), so when a session misses the quality-gate floor the whole
+ *   mesh is retried at 2/3 the size, up to two steps, and the first size that
+ *   passes wins. The refinement ladder is recorded on the result so callers
+ *   can surface it honestly.
  */
 export async function meshStepToMshV2(stepContent: Uint8Array | string, options: StepMeshWasmOptions = {}): Promise<StepMeshResult> {
   const totalStart = now();
+  const requestedSizeMm = options.meshSizeMm;
+  let best: (Omit<StepMeshResult, "totalMs"> & { sizeMm?: number }) | undefined;
+  const triedSizesMm: number[] = [];
+
+  for (let attempt = 0; attempt <= MAX_QUALITY_REFINEMENTS; attempt += 1) {
+    const sizeMm = requestedSizeMm !== undefined && requestedSizeMm > 0
+      ? requestedSizeMm * QUALITY_REFINEMENT_FACTOR ** attempt
+      : undefined;
+    if (sizeMm !== undefined) triedSizesMm.push(sizeMm);
+    const result = await meshStepWithAlgorithmFallback(stepContent, { ...options, meshSizeMm: sizeMm }, totalStart);
+    if (best === undefined || (result.qualityMinSICN ?? -Infinity) > (best.qualityMinSICN ?? -Infinity)) {
+      best = { ...result, sizeMm };
+    }
+    const quality = result.qualityMinSICN;
+    if (quality !== undefined && quality >= MESH_QUALITY_REJECT_MIN_SICN) break; // Passes the gate — stop refining.
+    if (sizeMm === undefined) break; // No size hint to refine against.
+    if (countTetLines(result.msh) > MAX_QUALITY_REFINEMENT_TETS) break;
+  }
+
+  const chosen = best!;
+  const refined = chosen.sizeMm !== undefined && requestedSizeMm !== undefined && chosen.sizeMm !== requestedSizeMm;
+  const { sizeMm: _chosenSizeMm, ...bestResult } = chosen;
+  return {
+    ...bestResult,
+    totalMs: now() - totalStart,
+    ...(refined
+      ? { qualityRefinement: { requestedMeshSizeMm: requestedSizeMm!, usedMeshSizeMm: chosen.sizeMm!, triedMeshSizesMm: triedSizesMm } }
+      : {})
+  };
+}
+
+async function meshStepWithAlgorithmFallback(
+  stepContent: Uint8Array | string,
+  options: StepMeshWasmOptions,
+  totalStart: number
+): Promise<Omit<StepMeshResult, "totalMs">> {
   const gmsh = await loadGmshWasm();
   try {
-    const first = meshStepSession(gmsh, stepContent, options, "delaunay", totalStart);
-    return { ...first, totalMs: now() - totalStart };
+    return meshStepSession(gmsh, stepContent, options, "delaunay", totalStart);
   } catch (delaunayError) {
     // Retry once with the Frontal algorithm on a FRESH module instance — a
     // second session on the same instance aborts in gmsh-wasm 0.1.2.
     try {
-      const retryStart = now();
       const retryGmsh = await loadGmshWasm();
-      const second = meshStepSession(retryGmsh, stepContent, options, "frontal", retryStart);
-      return { ...second, totalMs: now() - totalStart };
+      return meshStepSession(retryGmsh, stepContent, options, "frontal", now());
     } catch (frontalError) {
       throw new Error(
         `gmsh-wasm STEP meshing failed with both 3D algorithms. Delaunay: ${messageOf(delaunayError)}; Frontal: ${messageOf(frontalError)}`
       );
     }
   }
+}
+
+/** Cheap volume-element count from msh2 text (element type 4 = Tet4, 11 = Tet10). */
+function countTetLines(msh: string): number {
+  let count = 0;
+  for (const line of msh.split("\n")) {
+    const firstSpace = line.indexOf(" ");
+    if (firstSpace <= 0) continue;
+    const rest = line.slice(firstSpace + 1);
+    if (rest.startsWith("4 ") || rest.startsWith("11 ")) count += 1;
+  }
+  return count;
 }
 
 function meshStepSession(
