@@ -6,6 +6,7 @@ import {
   type DisplayModel,
   type Project
 } from "@opencae/schema";
+import { BRACKET_GEOMETRY_MIGRATION_NOTE, refreshBracketSampleGeometry } from "./bracketGeometryMigration";
 import { buildLocalProjectFile, type EmbeddedModelFile, type LocalProjectFile, type LocalResultBundle } from "./projectFile";
 import type { LoadDirectionLabel, LoadType } from "./loadPreview";
 import type { LoadApplicationPoint, PayloadObjectSelection } from "./loadPreview";
@@ -123,7 +124,29 @@ export function readAutosavedWorkspace(storage = getBrowserStorage()): Autosaved
   const uiPayload = storage.getItem(AUTOSAVE_UI_STORAGE_KEY);
   const uiSnapshot = uiPayload ? parseAutosavedWorkspaceUiSnapshotPayload(uiPayload) : null;
   const merged = uiSnapshot && isNewerOrSameTimestamp(uiSnapshot.savedAt, workspace.savedAt) ? { ...workspace, ui: uiSnapshot.ui } : workspace;
-  return { ...merged, ui: reattachEmbeddedModelsToUiSnapshot(merged.ui, merged.projectFile.project) };
+  const ui = reattachEmbeddedModelsToUiSnapshot(merged.ui, merged.projectFile.project);
+  // Autosaved Bracket Demo projects embed their solver geometry (and a mesh
+  // built from it); refresh outdated descriptors so a save from before the
+  // bracket fix stops solving the old wedge, and say so - never silently.
+  const bracket = refreshBracketSampleGeometry(merged.projectFile.project, merged.projectFile.displayModel);
+  if (!bracket.migrated) return { ...merged, ui };
+  return {
+    ...merged,
+    projectFile: {
+      ...merged.projectFile,
+      project: bracket.project,
+      displayModel: bracket.displayModel ?? merged.projectFile.displayModel
+    },
+    ui: {
+      ...ui,
+      // Undo entries carry the same embedded geometry and stale mesh; refresh
+      // them too so undo cannot resurrect the wedge.
+      undoStack: ui.undoStack.map((item) => refreshBracketSampleGeometry(item).project),
+      redoStack: ui.redoStack.map((item) => refreshBracketSampleGeometry(item).project),
+      status: BRACKET_GEOMETRY_MIGRATION_NOTE,
+      logs: [{ message: BRACKET_GEOMETRY_MIGRATION_NOTE, at: Date.now() }, ...ui.logs].slice(0, WORKSPACE_LOG_LIMIT)
+    }
+  };
 }
 
 export type AutosaveWriteOutcome = "full" | "slim" | "failed";
