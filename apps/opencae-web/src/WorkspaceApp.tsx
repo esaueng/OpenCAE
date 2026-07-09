@@ -39,6 +39,7 @@ import {
 import { displayModelForUnits, loadValueForUnits, resultFieldForUnits, resultSummaryForUnits, type UnitSystem } from "./unitDisplay";
 import { supportDisplayLabel } from "./supportLabels";
 import { nextSelectedPayloadObject, shouldClearPayloadSelectionOnViewerMiss } from "./payloadSelection";
+import { hasLegacyStepUploadFaces, healLegacyStepFaces, legacyStepFaceHealMessage } from "./stepFaceHealing";
 import { createLocalDynamicStructuralStudy, createLocalStaticStressStudy } from "./localProjectFactory";
 import { createPackedResultPlaybackCache, createResultFrameCache, hasDynamicPlaybackFrames, solverMeshSummaryFromResults, withDerivedSurfaceSafetyFactorFields, type SolverMeshSummary } from "./resultFields";
 import { packResultFieldsForPlayback, packedPreparedPlaybackFrameOrdinal, playbackFieldsForResultMode, playbackMemoryBudgetBytes, type PackedPreparedPlaybackCache, type PreparedPlaybackFrameCache } from "./resultPlaybackCache";
@@ -675,6 +676,32 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     autosaveWriteFailureNotifiedRef.current = true;
     pushMessage("Autosave failed: browser storage is full or unavailable. Save the project to disk to keep changes.");
   }
+
+  // Projects saved while the STEP face registry was unavailable (the CSP
+  // regression) carry placeholder "face-upload-*" faces whose selections can
+  // never map onto the meshed geometry. Rebuild the real registry and remap
+  // or flag those selections once, as soon as such a project is open.
+  useEffect(() => {
+    if (!project || !hasLegacyStepUploadFaces(displayModel)) return undefined;
+    let cancelled = false;
+    void import("./stepFaces")
+      .then((stepFaces) => stepFaces.stepFaceRegistryFromBase64(displayModel.nativeCad!.contentBase64!))
+      .then((registry) => {
+        if (cancelled || !registry.displayFaces.length) return;
+        const heal = healLegacyStepFaces(project, displayModel, registry);
+        setProject(heal.project);
+        setDisplayModel(heal.displayModel);
+        const message = legacyStepFaceHealMessage(heal);
+        if (message) pushMessage(message);
+      })
+      .catch(() => {
+        // Registry still unavailable (e.g. import failure): leave the
+        // placeholder faces in place; meshing will surface its own error.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [displayModel, project]);
 
   useEffect(() => {
     if (!project || !displayModel) return;
@@ -1435,7 +1462,14 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           onRemoveLoad={(loadId) =>
             updateStudy(saveStudyPatch(study.id, { loads: study.loads.filter((item) => item.id !== loadId) }, "Load removed.", study))
           }
-          onGenerateMesh={(preset) => updateStudy(generateMesh(study.id, preset, study, displayModel, pushMessage), shouldAutoAdvanceAfterMeshGeneration() ? "run" : undefined)}
+          onGenerateMesh={(preset) =>
+            // generateMesh rethrows quality-gate rejections (MeshQualityError)
+            // by design; without this catch they die as unhandled rejections
+            // and mesh generation fails with no feedback at all.
+            void updateStudy(generateMesh(study.id, preset, study, displayModel, pushMessage), shouldAutoAdvanceAfterMeshGeneration() ? "run" : undefined).catch((error: unknown) => {
+              pushMessage(`Mesh generation failed: ${error instanceof Error ? error.message : String(error)}`);
+            })
+          }
           onUpdateSolverSettings={handleUpdateSolverSettings}
           onRunSimulation={handleRunSimulation}
           onCancelSimulation={handleCancelSimulation}

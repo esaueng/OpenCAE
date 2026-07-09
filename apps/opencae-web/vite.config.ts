@@ -173,6 +173,15 @@ export default defineConfig({
   worker: {
     format: "es"
   },
+  optimizeDeps: {
+    // Keep the Emscripten glue out of dev pre-bundling: esbuild would inline
+    // it under /node_modules/.vite/deps, where its import.meta.url-relative
+    // gmsh-core.wasm fetch resolves to a URL the dev server answers with the
+    // SPA fallback (index.html), aborting every dev mesh with a wasm
+    // CompileError. Served un-bundled, the relative .wasm resolves to the
+    // real file in node_modules.
+    exclude: ["@loumalouomega/gmsh-wasm"]
+  },
   build: {
     modulePreload: false,
     rollupOptions: {
