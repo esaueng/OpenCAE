@@ -8,21 +8,14 @@ The project is organized around service boundaries so the React workspace, Fasti
 
 ## Local Development
 
-OpenCAE consumes the live OpenCAE Core workspace from a sibling checkout. Keep the repos beside each other (only the relative layout matters):
-
-```text
-<workspace>/open-cae
-<workspace>/opencae-core
-```
-
-Run `pnpm ensure:core` (or any build command) to clone `https://github.com/esaueng/OpenCAE-Core` into the sibling path at the commit pinned in [OPENCAE_CORE_REF](OPENCAE_CORE_REF). Set `OPENCAE_CORE_DIR` to use a different location.
-
 Install dependencies and start the API and web app from the repo root:
 
 ```bash
-pnpm install
+pnpm install --frozen-lockfile
 pnpm dev
 ```
+
+OpenCAE Core packages live in this monorepo under `packages/*`; no sibling checkout or pin bootstrap is required.
 
 `pnpm dev` starts:
 
@@ -63,11 +56,11 @@ pnpm verify:perf
 The production Cloudflare target for `cae.esau.app` serves the Vite web app from Workers Static Assets. Simulations run entirely in the browser with OpenCAE Core — the Worker hosts no solver. (The former OpenCAE Core Cloud container/R2 solve path was retired in July 2026; see [docs/cloud-retirement.md](docs/cloud-retirement.md).)
 
 ```bash
-pnpm install
+pnpm install --frozen-lockfile
 pnpm deploy:cloudflare
 ```
 
-Build and deploy environments use `pnpm build:core` to ensure `https://github.com/esaueng/OpenCAE-Core` exists as `../opencae-core`, update that checkout to the pinned commit in `OPENCAE_CORE_REF` (repo root), rerun `pnpm install --no-frozen-lockfile`, and then build the live Core packages consumed through this workspace. Production builds require that ref to be a full commit SHA so build artifacts are reproducible. `pnpm` resolves `@opencae/core`, `@opencae/solver-cpu`, and other OpenCAE Core packages from that sibling workspace; there is no runtime network lookup.
+Build and deploy environments use `pnpm build:core` to build the in-repo OpenCAE Core packages before the web bundle. Production deploys require only this repository plus the checked-in lockfile; there is no runtime or build-time fetch of a second repo.
 
 Production deploys use the default [wrangler.jsonc](wrangler.jsonc) (static assets + security headers only, no solver bindings).
 
@@ -111,7 +104,7 @@ The `/health` route verifies the production Worker is reachable and reports `sol
 
 - `apps/opencae-web` - React/Vite CAD workspace for static and dynamic structural workflows.
 - `apps/opencae-api` - Fastify API for projects, uploads, studies, jobs, artifacts, reports, and service orchestration.
-- `../opencae-core/packages/*` - Live sibling OpenCAE Core packages consumed through the pnpm workspace.
+- `packages/*` - OpenCAE Core model, examples, solver, wasm/webgpu stubs, and viewer packages.
 - `libs/*` - Shared schema, units, materials, storage, jobs, validation (study-core), database, and core-adapter packages.
 - `services/*` - CAD, mesh, solver, post-processing, and legacy container reference implementations. (The `opencae-core-cloud` runner mirror was removed in the July 2026 cloud retirement.)
 - `runners/opencae-runner-local` - Local runner package for job execution flows.

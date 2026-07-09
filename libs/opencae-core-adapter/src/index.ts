@@ -930,7 +930,7 @@ const LOCAL_MAX_DIVISIONS_PER_AXIS = 32;
 // Cloud-parity structured-block tier (simple geometry with no separate geometry source):
 // sized for the retired Core Cloud runner, which had no in-browser worker-thread
 // constraint — ~8000 Tet10 nodes (~24000 DOFs), well under that runner's 100000-DOF
-// limit (SOLVER_LIMITS.maxDofs in the sibling opencae-core repo's core-cloud server;
+// limit (SOLVER_LIMITS.maxDofs in the retired core-cloud server lineage;
 // the frozen golden fixtures pin this behavior).
 const CLOUD_STRUCTURED_BLOCK_TET10_NODE_BUDGET = 8000;
 

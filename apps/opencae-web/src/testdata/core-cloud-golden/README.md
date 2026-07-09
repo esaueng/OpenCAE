@@ -13,7 +13,7 @@ provenance `runnerVersion` differs by design).
 ## Provenance
 
 - Runner: the Core Cloud runner service (`services/opencae-core-cloud` in the
-  sibling opencae-core repo; this repo's mirror of it was deleted with the
+  archived OpenCAE Core repo; this repo's mirror of it was deleted with the
   cloud retirement) built at the ref recorded in each fixture's `meta.coreRef`
   (`5fff27782df894ecf28d65097f63461d69771f16`), runnerVersion `0.1.6`,
   coreVersion `0.1.5`, native gmsh `4.15.2-git` available (the bracket case was meshed
@@ -56,10 +56,10 @@ pretty-printing the numeric arrays roughly triples their size.
 The cloud runner is retired, so re-record only if the frozen contract itself must be
 regenerated (e.g. to extend fixture coverage from the same archived runner):
 
-1. Check out the sibling opencae-core repo at the ref in the fixtures' `meta.coreRef`
+1. Check out the archived OpenCAE Core repo at the ref in the fixtures' `meta.coreRef`
    (use a separate worktree), `pnpm install && pnpm build` there.
 2. `PORT=8080 CORE_CLOUD_API_KEY=golden-local node services/opencae-core-cloud/dist/server.bundle.js`
-   in that opencae-core worktree (native `gmsh` must be on PATH for the bracket case;
+   in that Core worktree (native `gmsh` must be on PATH for the bracket case;
    `/health` reports `gmshAvailable`).
 3. In this repo: `pnpm exec tsx scripts/record-core-cloud-golden.mts`
    (set `CORE_CLOUD_GOLDEN_CORE_REF` to the runner's ref so `meta.coreRef` stays accurate).

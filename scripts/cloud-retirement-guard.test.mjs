@@ -26,6 +26,13 @@ const RETIRED_TOKENS = [
   "x-opencae-run-token"
 ];
 
+/** Tokens that indicate the repo still depends on a sibling Core checkout. */
+const STANDALONE_FORBIDDEN_TOKENS = ["../opencae-core/", "OPENCAE_CORE_REF"];
+const STANDALONE_TOKEN_ALLOWLIST = new Set([
+  "scripts/cloud-retirement-guard.test.mjs",
+  "scripts/verify-cloudflare-config.test.mjs"
+]);
+
 /**
  * ALLOWLIST — every entry needs a justification, and additions require the
  * same scrutiny as reintroducing the cloud path itself. `tokens: "*"` allows
@@ -161,6 +168,18 @@ describe("cloud retirement guard", () => {
     ]) {
       expect(existsSync(resolve(rootDir, retiredPath)), `${retiredPath} must stay deleted`).toBe(false);
     }
+  });
+
+  test("production files do not depend on a sibling OpenCAE Core checkout", () => {
+    const offenders = [];
+    for (const path of sweptFiles()) {
+      if (path.startsWith("docs/") || path.startsWith("plans/") || STANDALONE_TOKEN_ALLOWLIST.has(path)) continue;
+      const source = readFileSync(resolve(rootDir, path), "utf8");
+      for (const token of STANDALONE_FORBIDDEN_TOKENS) {
+        if (source.includes(token)) offenders.push(`${path}: ${token}`);
+      }
+    }
+    expect(offenders, "Standalone repo guard found sibling Core coupling outside docs/plans:\n").toEqual([]);
   });
 
   // Bundle proof: when a production build exists, the emitted chunks must be

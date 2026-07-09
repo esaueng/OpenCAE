@@ -20,10 +20,9 @@ since B4a). The cloud solve infrastructure was removed in two steps:
   **HTTP 410** ("cloud solve retired — solves run locally in your browser").
   The Worker keeps serving the SPA static assets with security headers.
 - **Container service mirror**: `services/opencae-core-cloud/` (Dockerfile,
-  `RUNNER_VERSION`, contract-mirror source, its validation tests). The
-  `OPENCAE_CORE_REF` solver pin that lived inside it moved to the **repo
-  root** — it pins the sibling OpenCAE Core solver packages the browser build
-  consumes and remains load-bearing.
+  `RUNNER_VERSION`, contract-mirror source, its validation tests). The browser
+  build now consumes OpenCAE Core directly from this monorepo's `packages/*`
+  workspace packages.
 - **Wrangler configs**: container, Durable Object (`CORE_CLOUD_CONTAINER` /
   `OpenCaeCoreCloudContainer`), and R2 (`CORE_CLOUD_ARTIFACTS`) bindings.
   `wrangler.containers.jsonc` was deleted; the former
@@ -70,9 +69,10 @@ since B4a). The cloud solve infrastructure was removed in two steps:
 - **Schema alias**: `solverSettings.backend: "opencae_core_cloud"` still
   parses (as an alias for `auto`) so old project files round-trip; loading one
   logs a one-time migration note.
-- **`OPENCAE_CORE_REF`** (repo root) + `pnpm ensure:core` +
-  `scripts/verify-core-ref-reachable.mjs`: still pin and verify the sibling
-  OpenCAE Core solver packages.
+- **OpenCAE Core packages**: `packages/core`, `packages/examples`,
+  `packages/solver-cpu`, `packages/solver-wasm`, `packages/solver-webgpu`, and
+  `packages/viewer` are now part of this repository and build before the web
+  bundle.
 - **The guard**: `scripts/cloud-retirement-guard.test.mjs` fails CI if any
   retired surface token reappears outside a short, justified allowlist.
 
@@ -100,9 +100,15 @@ since B4a). The cloud solve infrastructure was removed in two steps:
   distributes or invokes the cloud container stack; worth a pass to confirm
   attributions still match what ships.
 
-## Deploy ordering note
+## Repo consolidation coda
 
-The sibling opencae-core repo's hooks/branches must be pushed **before**
-open-cae `main` merges a bumped `OPENCAE_CORE_REF`, or CI (which clones the
-pin from the Core remote) fails with an unreachable-pin error —
-`pnpm verify:core-ref` reports this fast with guidance.
+OpenCAE Core was consolidated into this monorepo in July 2026 from Core commit
+`bc6c305272bd2789634f5e4c9006e0eae21e116b`, the production-equivalent solver
+lineage used by the local browser build. The imported packages live under
+`packages/*`, Core reference docs live under `docs/core/`, and the old Core
+advisory plans rescued from the stale checkout live under `docs/core/plans/`.
+
+After this consolidation, a fresh checkout of this repository plus
+`pnpm install --frozen-lockfile` is the build source of truth. The former
+OpenCAE-Core GitHub repository can be tombstoned and archived after this branch
+lands and the production deploy is verified.
