@@ -54,6 +54,32 @@ export async function generateLBracketGussetStep(): Promise<string> {
   });
 }
 
+/**
+ * Bent thin shell like a sheet-metal tablet stand: 93 mm wide L of two 3 mm
+ * plates (60 mm deep base, 50 mm tall back) with a 12 mm fillet at the bend.
+ * Regression geometry for curved Tet10 elevation inverting elements on thin
+ * bent regions (minSICN -0.29 curved vs +0.31 straight at the 12 mm preset).
+ */
+export async function generateBentShellStandStep(): Promise<string> {
+  return withOccSession((gmsh) => {
+    const base = gmsh.model.occ.addBox(0, 0, 0, 93, 60, 3);
+    const back = gmsh.model.occ.addBox(0, 0, 0, 93, 3, 50);
+    gmsh.model.occ.fuse([3, base], [3, back]);
+    gmsh.model.occ.synchronize();
+    // Fillet the concave joint edge (the long X-parallel edge at y=z=3).
+    const joint = entityTags(gmsh, 1).filter((tag) => {
+      const bounds = gmsh.model.getBoundingBox(1, tag);
+      return bounds.xmax - bounds.xmin > 80 &&
+        Math.abs(bounds.ymin - 3) < 0.5 && Math.abs(bounds.ymax - 3) < 0.5 &&
+        Math.abs(bounds.zmin - 3) < 0.5 && Math.abs(bounds.zmax - 3) < 0.5;
+    });
+    if (joint.length) {
+      gmsh.model.occ.fillet(entityTags(gmsh, 3), joint, [12], true);
+      gmsh.model.occ.synchronize();
+    }
+  });
+}
+
 /** Thin-walled open tray: 60x40x30 mm outer shell with uniform 2 mm walls/floor and an open top. */
 export async function generateThinWalledTrayStep(): Promise<string> {
   return withOccSession((gmsh) => {
