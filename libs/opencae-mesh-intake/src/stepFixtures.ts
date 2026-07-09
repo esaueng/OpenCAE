@@ -110,6 +110,37 @@ export async function generateThinClipStandStep(): Promise<string> {
   });
 }
 
+/**
+ * 1.5 mm sheet tablet stand: 93 mm wide base + 50.5 mm back + 22 mm prong
+ * with a 6 mm slot gap and a 10 mm bend fillet — the thinnest, nastiest
+ * shape class reported from production. Its linear mesh at the 12 mm medium
+ * preset keeps a sliver tail (minSICN ~0.01, 2/776 elements below floor)
+ * that only gmsh's Netgen optimizer reliably repairs (to ~0.11).
+ */
+export async function generateThinSheetStandStep(): Promise<string> {
+  return withOccSession((gmsh) => {
+    const wall = 1.5;
+    const base = gmsh.model.occ.addBox(0, 0, 0, 93, 60, wall);
+    const back = gmsh.model.occ.addBox(0, 0, 0, 93, wall, 50.5);
+    const prong = gmsh.model.occ.addBox(0, wall + 6, 0, 93, wall, 22);
+    gmsh.model.occ.fuse([3, base], [3, back, 3, prong]);
+    gmsh.model.occ.synchronize();
+    const joint = entityTags(gmsh, 1).filter((tag) => {
+      const bounds = gmsh.model.getBoundingBox(1, tag);
+      const shortYZ = Math.abs(bounds.ymax - bounds.ymin) < 0.1 && Math.abs(bounds.zmax - bounds.zmin) < 0.1;
+      return bounds.xmax - bounds.xmin > 80 && shortYZ && bounds.zmin < wall + 0.6 && bounds.ymin < wall + 0.6;
+    });
+    if (joint.length) {
+      try {
+        gmsh.model.occ.fillet(entityTags(gmsh, 3), joint.slice(0, 2), [10], true);
+        gmsh.model.occ.synchronize();
+      } catch {
+        // Fillet is best effort; the unfilleted stand still exercises thin sheets.
+      }
+    }
+  });
+}
+
 /** Thin-walled open tray: 60x40x30 mm outer shell with uniform 2 mm walls/floor and an open top. */
 export async function generateThinWalledTrayStep(): Promise<string> {
   return withOccSession((gmsh) => {
