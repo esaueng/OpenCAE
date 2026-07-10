@@ -9,6 +9,7 @@ import type { ResultMode, ViewMode } from "./CadViewer";
 import type { StepId } from "./StepBar";
 import { applicationPointForLoad, createViewerLoadMarkers, directionLabelForLoad, directionVectorForLabel, equivalentForceForLoad, LOAD_DIRECTION_LABELS, loadMarkerOrdinalLabel, payloadObjectForLoad, unitsForLoadType, type LoadApplicationPoint, type LoadDirectionLabel, type LoadType, type PayloadLoadMetadata, type PayloadMassMode, type PayloadObjectSelection } from "../loadPreview";
 import type { SampleAnalysisType, SampleModelId } from "../lib/api";
+import type { WasmMeshPhaseProgress } from "../lib/wasmMeshing";
 import { stepGeometryMetadataForProject } from "../stepGeometryState";
 import { dimensionValuesForDisplayModel } from "../modelDimensions";
 import { formatModelOrientation, getModelOrientation, type RotationAxis } from "../modelOrientation";
@@ -92,6 +93,7 @@ interface RightPanelProps {
   onPreviewLoadEdit: (load: Load | null) => void;
   onRemoveLoad: (loadId: string) => void;
   onGenerateMesh: (preset: MeshQuality) => void;
+  meshPhaseProgress?: WasmMeshPhaseProgress | null;
   onUpdateSolverSettings?: (settings: SolverSettingsPatch) => void;
   onRunSimulation: () => void;
   onCancelSimulation?: () => void;
@@ -1028,19 +1030,39 @@ function selectionForFace(study: Study, faceId: string) {
   return study.namedSelections.find((item) => item.entityType === "face" && item.geometryRefs.some((ref) => ref.entityId === faceId));
 }
 
-function MeshPanel({ study, onGenerateMesh }: RightPanelProps) {
+function MeshPanel({ study, onGenerateMesh, meshPhaseProgress }: RightPanelProps) {
   const [preset, setPreset] = useState<MeshQuality>(study.meshSettings.preset);
+  const meshing = Boolean(meshPhaseProgress);
   return (
     <Panel title="Mesh" helper="The mesh breaks the model into small pieces so OpenCAE can calculate results.">
       <div className="field">
         <HelpLabel helpId="meshQuality">Quality preset</HelpLabel>
         <div className="segmented" role="group" aria-label="Mesh quality">
           {MESH_PRESETS.map((option) => (
-            <button key={option} className={preset === option ? "active" : ""} type="button" aria-pressed={preset === option} onClick={() => setPreset(option)}>{capitalize(option)}</button>
+            <button key={option} className={preset === option ? "active" : ""} type="button" aria-pressed={preset === option} disabled={meshing} onClick={() => setPreset(option)}>{capitalize(option)}</button>
           ))}
         </div>
       </div>
-      <button className="primary wide" onClick={() => onGenerateMesh(preset)}><Grid3X3 size={18} />Generate mesh</button>
+      <button className="primary wide" disabled={meshing} onClick={() => onGenerateMesh(preset)}><Grid3X3 size={18} />{meshing ? "Meshing..." : "Generate mesh"}</button>
+      {meshPhaseProgress && (
+        <>
+          {/* Honest phase progress: worker phase position, not a synthetic percent —
+              phase durations vary with geometry and quality retries revisit phases. */}
+          <div
+            className="progress"
+            role="progressbar"
+            aria-valuemin={1}
+            aria-valuemax={meshPhaseProgress.phaseCount}
+            aria-valuenow={meshPhaseProgress.phaseIndex + 1}
+            aria-valuetext={meshPhaseProgress.message}
+            aria-label="Mesh generation progress"
+          >
+            <span style={{ width: `${Math.round(((meshPhaseProgress.phaseIndex + 1) / meshPhaseProgress.phaseCount) * 100)}%` }} />
+            <strong className="progress-label">{meshPhaseProgress.phaseIndex + 1} / {meshPhaseProgress.phaseCount}</strong>
+          </div>
+          <p className="panel-copy mesh-progress-message" aria-live="polite">{meshPhaseProgress.message}</p>
+        </>
+      )}
       <Callout>{capitalize(preset)} creates a {meshPresetDescription(preset)}.</Callout>
       {study.meshSettings.summary && (
         <div className="summary-box">
