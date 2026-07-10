@@ -1145,6 +1145,7 @@ describe("RightPanel payload mass controls", () => {
       expect(html).not.toContain('label="Plastics"');
       expect(html).toContain("Calculated mass");
       expect(html).toContain("Manual mass override");
+      expect(html).toContain("Add each rod or carried part separately");
       expect(html).toContain("Add payload mass");
       expect(html).not.toMatch(/<button class="outline-action wide" disabled="">[\s\S]*Add payload mass/);
     } finally {

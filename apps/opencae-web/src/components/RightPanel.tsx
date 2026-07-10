@@ -729,6 +729,7 @@ function PayloadMassControls({
         </datalist>
       </label>
       <Info label="Payload volume" value={payloadObject?.volumeM3 ? `${formatVolume(payloadObject.volumeM3, "m^3", unitSystem)} · ${volumeSource}` : "Select a closed object or use manual mass"} />
+      <Callout>Disconnected payload objects are carried weight, not bonded structure. Add each rod or carried part separately; unselected objects do not add weight to the solve.</Callout>
       <label className="toggle material-print-toggle">
         <input
           type="checkbox"
