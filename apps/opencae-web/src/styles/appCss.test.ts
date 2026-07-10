@@ -201,14 +201,14 @@ describe("app CSS", () => {
     expect(startFooterLinkHover).toMatch(/text-decoration:\s*underline/);
   });
 
-  test("shows a visible focus indicator on range sliders", () => {
+  test("does not draw a focus outline around range sliders", () => {
     const rangeInput = cssRule(".range-field input[type=\"range\"]");
     const rangeFocus = cssRule(".range-field input[type=\"range\"]:focus,\n.range-field input[type=\"range\"]:focus-visible");
 
     expect(rangeInput).toMatch(/border:\s*none/);
     expect(rangeInput).toMatch(/padding:\s*0/);
-    expect(rangeFocus).toMatch(/outline:\s*2px\s+solid\s+var\(--color-accent\)/);
-    expect(rangeFocus).toMatch(/outline-offset:\s*2px/);
+    expect(rangeFocus).toMatch(/outline:\s*none/);
+    expect(rangeFocus).not.toMatch(/outline-offset/);
   });
 
   test("styles playback time as a passive playhead instead of a draggable slider", () => {
