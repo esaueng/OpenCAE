@@ -187,6 +187,39 @@ describe("STEP quality recovery orchestration", () => {
     expect(fake.state.qualityRepairAttempts).toEqual([6]);
   });
 
+  test("stamps ladder phase events with their attempt so progress consumers can show retries", async () => {
+    fake.state.scenario = "coarser_size";
+    const events: Array<{ phase: string; attempt?: { attempt: number; stage: string; sizeMm?: number } }> = [];
+
+    await meshStepToMshV2(new Uint8Array([1]), {
+      elementOrder: 2,
+      meshSizeMm: 8,
+      onPhase: (event) => events.push({ phase: event.phase, attempt: event.attempt })
+    });
+
+    // Every ladder session's phases carry the rung's attempt context; the
+    // second rung (coarser retry at 12 mm) must be visibly attempt 2.
+    expect(events.length).toBeGreaterThan(0);
+    expect(events.every((event) => event.attempt !== undefined)).toBe(true);
+    const attempts = [...new Set(events.map((event) => event.attempt!.attempt))];
+    expect(attempts).toEqual([1, 2]);
+    const retryEvents = events.filter((event) => event.attempt!.attempt === 2);
+    expect(retryEvents[0]?.attempt).toMatchObject({ stage: "size", sizeMm: 12 });
+  });
+
+  test("stamps quality-repair phase events with the repair stage", async () => {
+    fake.state.scenario = "quality_repair";
+    const events: Array<{ attempt?: { stage: string; sizeMm?: number } }> = [];
+
+    await meshStepToMshV2(new Uint8Array([1]), {
+      elementOrder: 2,
+      meshSizeMm: 8,
+      onPhase: (event) => events.push({ attempt: event.attempt })
+    });
+
+    expect(events.some((event) => event.attempt?.stage === "repair" && event.attempt.sizeMm === 6)).toBe(true);
+  });
+
   test("rejects surface-only output even when physical tags look like Tet4/Tet10 records", async () => {
     fake.state.scenario = "surface_only";
 
