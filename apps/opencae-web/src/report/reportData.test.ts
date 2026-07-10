@@ -41,7 +41,9 @@ function report(overrides: Partial<Parameters<typeof buildReportData>[0]> = {}) 
     solverMeshSummary: null,
     runTiming: { elapsedMs: 1234 },
     unitSystem: "SI",
-    captures: { stress: "data:image/png;base64,stress" },
+    captures: {
+      stress: { png: "data:image/png;base64,stress", fieldId: "stress", selection: "static" }
+    },
     generatedAt: new Date("2026-07-10T12:34:56.000Z"),
     exaggeration: 1.8,
     showDeformed: true,
@@ -116,11 +118,40 @@ describe("buildReportData", () => {
         peakDisplacement: 0.184
       }
     };
-    const data = report({ study: dynamicStudy, resultSummary: dynamicSummary });
+    const dynamicFields: ResultField[] = [
+      { id: "stress-0", runId: "run", type: "stress", location: "node", values: [0], min: 0, max: 142, units: "MPa", frameIndex: 0, timeSeconds: 0 },
+      { id: "stress-4", runId: "run", type: "stress", location: "node", values: [142], min: 0, max: 142, units: "MPa", frameIndex: 4, timeSeconds: 0.04 },
+      { id: "displacement-0", runId: "run", type: "displacement", location: "node", values: [0], min: 0, max: 0.184, units: "mm", frameIndex: 0, timeSeconds: 0 },
+      { id: "displacement-8", runId: "run", type: "displacement", location: "node", values: [0.184], min: 0, max: 0.184, units: "mm", frameIndex: 8, timeSeconds: 0.08 }
+    ];
+    const data = report({
+      study: dynamicStudy,
+      resultSummary: dynamicSummary,
+      resultFields: dynamicFields,
+      captures: {
+        stress: {
+          png: "data:image/png;base64,stress-peak",
+          fieldId: "stress-4",
+          selection: "peak",
+          frameIndex: 4,
+          timeSeconds: 0.04
+        },
+        displacement: {
+          png: "data:image/png;base64,displacement-peak",
+          fieldId: "displacement-8",
+          selection: "peak",
+          frameIndex: 8,
+          timeSeconds: 0.08
+        }
+      }
+    });
 
     expect(data.title).toBe("Dynamic Structural Simulation Report");
     expect(data.solver).toContainEqual({ label: "Time step", value: "0.005 s" });
     expect(data.transientResults).toContainEqual({ label: "Frames", value: "11" });
+    expect(data.figures.stress.legendMax).toBe("142");
+    expect(data.figures.stress.caption).toContain("Automatically selected peak von Mises stress frame (frame 2 of 3, 0.0400 s)");
+    expect(data.figures.displacement.caption).toContain("Automatically selected peak displacement magnitude frame (frame 3 of 3, 0.0800 s)");
   });
 });
 

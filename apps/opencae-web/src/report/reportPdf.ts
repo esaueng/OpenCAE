@@ -148,7 +148,7 @@ class PdfReport {
     const assessment = this.data.failureAssessment;
     const tone = assessment.status === "pass" ? "success" : assessment.status === "fail" ? "error" : "warning";
     const message = `${assessment.title}: ${assessment.message}`;
-    const lines = this.doc.splitTextToSize(message, this.contentWidth - 8) as string[];
+    const lines = this.splitText(message, this.contentWidth - 8, REPORT_TYPE.body, "bold");
     this.callout(lines, tone, Math.max(12, lines.length * 4.3 + 5));
     this.y += 5;
   }
@@ -254,7 +254,7 @@ class PdfReport {
 
     this.legend(imageX + imageAreaWidth + gap, imageY, legendWidth, frameHeight, figure);
     this.y += frameHeight + 4;
-    const captionLines = this.doc.splitTextToSize(figure.caption, this.contentWidth) as string[];
+    const captionLines = this.splitText(figure.caption, this.contentWidth, REPORT_TYPE.caption);
     this.text(captionLines, REPORT_LAYOUT.margin, this.y, REPORT_TYPE.caption, REPORT_THEME.inkMuted);
     this.y += captionLines.length * 3.5 + 6;
   }
@@ -279,7 +279,7 @@ class PdfReport {
   }
 
   private bullet(message: string): void {
-    const lines = this.doc.splitTextToSize(message, this.contentWidth - 7) as string[];
+    const lines = this.splitText(message, this.contentWidth - 7, REPORT_TYPE.body);
     const height = Math.max(5, lines.length * 4.2);
     this.ensureSpace(height + 2);
     this.doc.setFillColor(REPORT_THEME.accent);
@@ -307,6 +307,12 @@ class PdfReport {
   private addPage(): void {
     this.doc.addPage(this.data.pageFormat, "portrait");
     this.y = REPORT_LAYOUT.margin;
+  }
+
+  private splitText(value: string, width: number, size: number, weight: "normal" | "bold" = "normal"): string[] {
+    this.doc.setFont(this.fontFamily, weight);
+    this.doc.setFontSize(size);
+    return this.doc.splitTextToSize(value, width) as string[];
   }
 
   private text(

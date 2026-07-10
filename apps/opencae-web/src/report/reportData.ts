@@ -2,8 +2,9 @@ import { assessResultFailure, classifyResultProvenance } from "@opencae/schema";
 import type { DisplayModel, Project, ResultField, ResultSummary, RunTimingEstimate, Study } from "@opencae/schema";
 import { starterMaterials } from "@opencae/materials";
 import type { SolverMeshSummary } from "../resultFields";
-import { formatResultValue } from "../resultFields";
+import { fieldWithOwnValueRange, formatResultValue } from "../resultFields";
 import { unitsForLoadType } from "../loadPreview";
+import type { CapturedResultView, ResultViewCaptures } from "./captureResultViews";
 import {
   formatDensity,
   formatMaterialStress,
@@ -88,11 +89,10 @@ export interface BuildReportDataInput {
   solverMeshSummary: SolverMeshSummary | null;
   runTiming: RunTimingEstimate | null;
   unitSystem: UnitSystem;
-  captures: { stress?: string; displacement?: string };
+  captures: ResultViewCaptures;
   generatedAt: Date;
   exaggeration: number;
   showDeformed?: boolean;
-  activeFrameIndex?: number;
 }
 
 const MISSING = "--";
@@ -104,8 +104,8 @@ export function buildReportData(input: BuildReportDataInput): ReportData {
   const assessment = summary.failureAssessment ?? assessResultFailure(summary);
   const provenance = summary.provenance;
   const provenanceTier = classifyResultProvenance(provenance);
-  const stressField = fieldForReport(fields, "stress", input.activeFrameIndex);
-  const displacementField = fieldForReport(fields, "displacement", input.activeFrameIndex);
+  const stressField = fieldForReport(fields, "stress", input.captures.stress);
+  const displacementField = fieldForReport(fields, "displacement", input.captures.displacement);
   const meshSummary = input.solverMeshSummary ?? input.study.meshSettings.summary ?? null;
   const actualMeshCounts = input.solverMeshSummary?.source === "core_solver" || input.study.meshSettings.summary?.source === "core_solver";
   const generatedAtIso = input.generatedAt.toISOString();
@@ -150,8 +150,8 @@ export function buildReportData(input: BuildReportDataInput): ReportData {
     ],
     solver: solverRows(input, summary),
     figures: {
-      stress: figureData("Von Mises stress", stressField, input.captures.stress, input),
-      displacement: figureData("Displacement magnitude", displacementField, input.captures.displacement, input)
+      stress: figureData("Von Mises stress", stressField, input.captures.stress, fields, input),
+      displacement: figureData("Displacement magnitude", displacementField, input.captures.displacement, fields, input)
     },
     results: resultRows(input.project, input.study, summary, input.displayModel),
     transientResults: transientRows(summary),
@@ -306,21 +306,27 @@ function transientRows(summary: ResultSummary): ReportRow[] {
   ];
 }
 
-function figureData(title: string, field: ResultField | undefined, png: string | undefined, input: BuildReportDataInput): ReportFigure {
-  const frameCaption = field?.frameIndex === undefined
-    ? ""
-    : ` · frame ${field.frameIndex}${field.timeSeconds === undefined ? "" : ` at ${field.timeSeconds.toFixed(4)} s`}`;
+function figureData(
+  title: string,
+  field: ResultField | undefined,
+  capture: CapturedResultView | undefined,
+  fields: ResultField[],
+  input: BuildReportDataInput
+): ReportFigure {
+  const frameCaption = capture?.selection === "peak" && capture.frameIndex !== undefined
+    ? ` Automatically selected peak ${lowercaseFirst(title)} frame (${framePositionLabel(fields, capture.frameIndex)}${capture.timeSeconds === undefined ? "" : `, ${capture.timeSeconds.toFixed(4)} s`}).`
+    : "";
   const deformationCaption = input.showDeformed
     ? `Deformed shape, ×${formatResultValue(input.exaggeration)} exaggeration (display only)`
     : "Undeformed shape";
   return {
     title,
-    ...(png ? { png } : {}),
+    ...(capture?.png ? { png: capture.png } : {}),
     unavailableLabel: "Not available (--)",
     legendMin: field ? formatResultValue(field.min) : MISSING,
     legendMax: field ? formatResultValue(field.max) : MISSING,
     units: field?.units || MISSING,
-    caption: `${title}${field?.units ? ` (${field.units})` : ""}${frameCaption}. ${deformationCaption}.`
+    caption: `${title}${field?.units ? ` (${field.units})` : ""}.${frameCaption} ${deformationCaption}.`
   };
 }
 
@@ -338,16 +344,34 @@ function collectDiagnostics(input: BuildReportDataInput, summary: ResultSummary,
   return [...entries];
 }
 
-function fieldForReport(fields: ResultField[], type: ResultField["type"], frameIndex?: number): ResultField | undefined {
+function fieldForReport(fields: ResultField[], type: ResultField["type"], capture?: CapturedResultView): ResultField | undefined {
   const candidates = fields.filter((field) => field.type === type);
-  if (frameIndex !== undefined) {
-    const active = candidates.find((field) => field.frameIndex === frameIndex && field.location === "node")
-      ?? candidates.find((field) => field.frameIndex === frameIndex);
-    if (active) return active;
+  if (capture) {
+    const capturedField = candidates.find((field) => field.id === capture.fieldId);
+    if (capturedField) return fieldWithOwnValueRange(capturedField);
+    if (capture.frameIndex !== undefined) {
+      const active = candidates.find((field) => field.frameIndex === capture.frameIndex && field.location === "node")
+        ?? candidates.find((field) => field.frameIndex === capture.frameIndex);
+      if (active) return fieldWithOwnValueRange(active);
+    }
   }
-  return candidates.find((field) => field.location === "node")
+  const fallback = candidates.find((field) => field.location === "node")
     ?? candidates.find((field) => field.location === "face")
     ?? candidates[0];
+  return fallback ? fieldWithOwnValueRange(fallback) : undefined;
+}
+
+function framePositionLabel(fields: ResultField[], frameIndex: number): string {
+  const frameIndexes = [...new Set(fields
+    .map((field) => field.frameIndex)
+    .filter((candidate): candidate is number => typeof candidate === "number" && Number.isFinite(candidate)))]
+    .sort((left, right) => left - right);
+  const ordinal = frameIndexes.indexOf(frameIndex);
+  return ordinal >= 0 ? `frame ${ordinal + 1} of ${frameIndexes.length}` : `solver frame ${frameIndex}`;
+}
+
+function lowercaseFirst(value: string): string {
+  return value ? `${value[0]!.toLowerCase()}${value.slice(1)}` : value;
 }
 
 function meshCount(value: number | undefined, actual: boolean): string {
