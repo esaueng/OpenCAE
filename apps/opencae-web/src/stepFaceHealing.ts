@@ -25,6 +25,8 @@ export type LegacyStepFaceHeal = {
   remapped: Array<{ selectionName: string; fromFaceId: string; toFaceId: string; toLabel: string }>;
   /** Selections whose placeholder face had no dominant real match; the user must re-pick them. */
   unresolved: Array<{ selectionName: string; fromFaceId: string }>;
+  /** Placeholder selections left behind after their support/load was removed. */
+  removed: Array<{ selectionName: string; fromFaceId: string }>;
 };
 
 /**
@@ -47,35 +49,44 @@ export function healLegacyStepFaces(project: Project, displayModel: DisplayModel
   const legacyFacesById = new Map(displayModel.faces.map((face) => [face.id, face]));
   const remapped: LegacyStepFaceHeal["remapped"] = [];
   const unresolved: LegacyStepFaceHeal["unresolved"] = [];
+  const removed: LegacyStepFaceHeal["removed"] = [];
 
-  const studies = project.studies.map((study) => ({
-    ...study,
-    namedSelections: study.namedSelections.map((selection) => {
-      if (selection.entityType !== "face") return selection;
-      const legacyRef = selection.geometryRefs.find((ref) => ref.entityType === "face" && ref.entityId.startsWith(LEGACY_UPLOAD_FACE_PREFIX));
-      if (!legacyRef) return selection;
-      const legacyFace = legacyFacesById.get(legacyRef.entityId);
-      const match = legacyFace ? dominantFaceForNormal(registry.displayFaces, legacyFace.normal) : null;
-      if (!match) {
-        unresolved.push({ selectionName: selection.name, fromFaceId: legacyRef.entityId });
-        return selection;
-      }
-      remapped.push({ selectionName: selection.name, fromFaceId: legacyRef.entityId, toFaceId: match.id, toLabel: match.label });
-      return {
-        ...selection,
-        geometryRefs: selection.geometryRefs.map((ref) =>
-          ref === legacyRef ? { ...ref, entityId: match.id, label: match.label } : ref
-        ),
-        fingerprint: `${match.id}-${match.center.map((value) => value.toFixed(3)).join("-")}`
-      };
-    })
-  }));
+  const studies = project.studies.map((study) => {
+    const referencedSelections = boundarySelectionReferences(study);
+    return {
+      ...study,
+      namedSelections: study.namedSelections.flatMap((selection) => {
+        if (selection.entityType !== "face") return selection;
+        const legacyRef = selection.geometryRefs.find((ref) => ref.entityType === "face" && ref.entityId.startsWith(LEGACY_UPLOAD_FACE_PREFIX));
+        if (!legacyRef) return selection;
+        if (!referencedSelections.has(selection.id)) {
+          removed.push({ selectionName: selection.name, fromFaceId: legacyRef.entityId });
+          return [];
+        }
+        const legacyFace = legacyFacesById.get(legacyRef.entityId);
+        const match = legacyFace ? dominantFaceForNormal(registry.displayFaces, legacyFace.normal) : null;
+        if (!match) {
+          unresolved.push({ selectionName: selection.name, fromFaceId: legacyRef.entityId });
+          return selection;
+        }
+        remapped.push({ selectionName: selection.name, fromFaceId: legacyRef.entityId, toFaceId: match.id, toLabel: match.label });
+        return {
+          ...selection,
+          geometryRefs: selection.geometryRefs.map((ref) =>
+            ref === legacyRef ? { ...ref, entityId: match.id, label: match.label } : ref
+          ),
+          fingerprint: `${match.id}-${match.center.map((value) => value.toFixed(3)).join("-")}`
+        };
+      })
+    };
+  });
 
   return {
     project: { ...project, studies },
     displayModel: { ...displayModel, faces: registry.displayFaces },
     remapped,
-    unresolved
+    unresolved,
+    removed
   };
 }
 
@@ -87,8 +98,11 @@ export function legacyStepFaceHealMessage(heal: LegacyStepFaceHeal): string | nu
     parts.push(`Remapped to real STEP faces: ${moves}. Review them before running.`);
   }
   if (heal.unresolved.length) {
-    const names = heal.unresolved.map((item) => item.selectionName).join(", ");
-    parts.push(`Re-select on the model (no confident match): ${names}.`);
+    const names = selectionNameSummary(heal.unresolved);
+    parts.push(`Re-select on the model (no confident match): ${names}. Remove the affected support or load first; its stale selection will be cleaned up automatically.`);
+  }
+  if (heal.removed.length) {
+    parts.push(`Removed stale selections no longer used by a support or load: ${selectionNameSummary(heal.removed)}.`);
   }
   if (!parts.length) return null;
   return `This project was saved before STEP faces were available. ${parts.join(" ")}`;
@@ -125,28 +139,36 @@ export function healStepFaceSelections(project: Project, displayModel: DisplayMo
   const placeholderFacesById = new Map(displayModel.faces.filter((face) => face.id.startsWith(LEGACY_UPLOAD_FACE_PREFIX)).map((face) => [face.id, face]));
   const remapped: LegacyStepFaceHeal["remapped"] = [];
   const unresolved: LegacyStepFaceHeal["unresolved"] = [];
+  const removed: LegacyStepFaceHeal["removed"] = [];
 
-  const studies = project.studies.map((study) => ({
-    ...study,
-    namedSelections: study.namedSelections.map((selection) => {
-      if (selection.entityType !== "face") return selection;
-      const placeholderRef = selection.geometryRefs.find((ref) => ref.entityType === "face" && ref.entityId.startsWith(LEGACY_UPLOAD_FACE_PREFIX));
-      if (!placeholderRef) return selection;
-      const match = resolvePlaceholderFace(placeholderRef.entityId, placeholderFacesById, registry);
-      if (!match) {
-        unresolved.push({ selectionName: selection.name, fromFaceId: placeholderRef.entityId });
-        return selection;
-      }
-      remapped.push({ selectionName: selection.name, fromFaceId: placeholderRef.entityId, toFaceId: match.id, toLabel: match.label });
-      return {
-        ...selection,
-        geometryRefs: selection.geometryRefs.map((ref) =>
-          ref === placeholderRef ? { ...ref, entityId: match.id, label: match.label } : ref
-        ),
-        fingerprint: `${match.id}-${match.center.map((value) => value.toFixed(3)).join("-")}`
-      };
-    })
-  }));
+  const studies = project.studies.map((study) => {
+    const referencedSelections = boundarySelectionReferences(study);
+    return {
+      ...study,
+      namedSelections: study.namedSelections.flatMap((selection) => {
+        if (selection.entityType !== "face") return selection;
+        const placeholderRef = selection.geometryRefs.find((ref) => ref.entityType === "face" && ref.entityId.startsWith(LEGACY_UPLOAD_FACE_PREFIX));
+        if (!placeholderRef) return selection;
+        if (!referencedSelections.has(selection.id)) {
+          removed.push({ selectionName: selection.name, fromFaceId: placeholderRef.entityId });
+          return [];
+        }
+        const match = resolvePlaceholderFace(placeholderRef.entityId, placeholderFacesById, registry);
+        if (!match) {
+          unresolved.push({ selectionName: selection.name, fromFaceId: placeholderRef.entityId });
+          return selection;
+        }
+        remapped.push({ selectionName: selection.name, fromFaceId: placeholderRef.entityId, toFaceId: match.id, toLabel: match.label });
+        return {
+          ...selection,
+          geometryRefs: selection.geometryRefs.map((ref) =>
+            ref === placeholderRef ? { ...ref, entityId: match.id, label: match.label } : ref
+          ),
+          fingerprint: `${match.id}-${match.center.map((value) => value.toFixed(3)).join("-")}`
+        };
+      })
+    };
+  });
 
   const unresolvedIds = new Set(unresolved.map((entry) => entry.fromFaceId));
   const keptPlaceholders = displayModel.faces.filter((face) => face.id.startsWith(LEGACY_UPLOAD_FACE_PREFIX) && unresolvedIds.has(face.id));
@@ -154,7 +176,8 @@ export function healStepFaceSelections(project: Project, displayModel: DisplayMo
     project: { ...project, studies },
     displayModel: { ...displayModel, faces: [...registry.displayFaces, ...keptPlaceholders] },
     remapped,
-    unresolved
+    unresolved,
+    removed
   };
 }
 
@@ -244,6 +267,20 @@ function dominantFaceForNormal(faces: DisplayFace[], normal: [number, number, nu
   if (!best || bestScore < REMAP_MIN_ALIGNMENT) return null;
   if (bestScore - runnerUpScore < REMAP_MIN_ALIGNMENT_MARGIN) return null;
   return best;
+}
+
+function boundarySelectionReferences(study: Project["studies"][number]): Set<string> {
+  return new Set([
+    ...study.materialAssignments.map((assignment) => assignment.selectionRef),
+    ...study.constraints.map((constraint) => constraint.selectionRef),
+    ...study.loads.map((load) => load.selectionRef)
+  ]);
+}
+
+function selectionNameSummary(entries: Array<{ selectionName: string }>): string {
+  const counts = new Map<string, number>();
+  for (const entry of entries) counts.set(entry.selectionName, (counts.get(entry.selectionName) ?? 0) + 1);
+  return [...counts].map(([name, count]) => count > 1 ? `${name} (${count} selections)` : name).join(", ");
 }
 
 function dot(left: [number, number, number], right: [number, number, number]): number {

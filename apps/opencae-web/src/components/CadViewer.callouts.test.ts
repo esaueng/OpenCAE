@@ -1,7 +1,13 @@
 import { describe, expect, test } from "vitest";
-import { beamPayloadSelectionForTarget, faceIdForPlacementSnap, faceSnapAxesForDisplayModel, loadGlyphLabelPosition, loadGlyphSurfacePoint, pointForPlacementSnap, shouldShowModelHitLabel, supportGlyphAnchor, supportMarkerAnchor } from "./CadViewer";
+import { beamPayloadSelectionForTarget, faceIdForPlacementSnap, faceSnapAxesForDisplayModel, loadGlyphLabelPosition, loadGlyphSurfacePoint, pointForPlacementSnap, shouldCreateUploadedFacePlaceholder, shouldShowModelHitLabel, supportGlyphAnchor, supportMarkerAnchor } from "./CadViewer";
 
 describe("CadViewer callouts", () => {
+  test("does not create placeholder faces after the STEP registry is live", () => {
+    expect(shouldCreateUploadedFacePlaceholder("step", true)).toBe(false);
+    expect(shouldCreateUploadedFacePlaceholder("step", false)).toBe(true);
+    expect(shouldCreateUploadedFacePlaceholder("stl", true)).toBe(true);
+  });
+
   test("uses the real cantilever fixed face as the support callout anchor", () => {
     const face = {
       id: "face-base-left",
