@@ -9,6 +9,7 @@
 //     saved ~100 ms of spawn + a service-worker-cached wasm fetch while
 //     pinning the dead arena in the tab's footprint (measured ~1.1 GB during
 //     meshing on the 100k-DOF bench) — a bad trade on iOS-class devices.
+import type { MeshAttemptContext } from "@opencae/mesh-intake";
 import {
   createMeshWorkerRequest,
   isMeshWorkerFailure,
@@ -22,7 +23,7 @@ import {
   type MeshWorkerResults
 } from "./meshProtocol";
 
-export type MeshProgressListener = (progress: { phase: MeshWorkerPhase; elapsedMs: number }) => void;
+export type MeshProgressListener = (progress: { phase: MeshWorkerPhase; elapsedMs: number; attempt?: MeshAttemptContext }) => void;
 
 type PendingRequest<Operation extends MeshWorkerOperation = MeshWorkerOperation> = {
   operation: Operation;
@@ -115,7 +116,7 @@ function getMeshWorker(): Worker | null {
 function handleMeshWorkerMessage(event: MessageEvent<MeshWorkerResponse>) {
   const response = event.data;
   if (isMeshWorkerProgress(response)) {
-    pendingRequests.get(response.id)?.onProgress?.({ phase: response.phase, elapsedMs: response.elapsedMs });
+    pendingRequests.get(response.id)?.onProgress?.({ phase: response.phase, elapsedMs: response.elapsedMs, ...(response.attempt ? { attempt: response.attempt } : {}) });
     return;
   }
   if (!isMeshWorkerSuccess(response) && !isMeshWorkerFailure(response)) return;
