@@ -39,7 +39,7 @@ import {
 import { displayModelForUnits, loadValueForUnits, resultFieldForUnits, resultSummaryForUnits, type UnitSystem } from "./unitDisplay";
 import { supportDisplayLabel } from "./supportLabels";
 import { nextSelectedPayloadObject, shouldClearPayloadSelectionOnViewerMiss } from "./payloadSelection";
-import { hasLegacyStepUploadFaces, healLegacyStepFaces, legacyStepFaceHealMessage } from "./stepFaceHealing";
+import { hasLegacyStepUploadFaces, hasUnresolvedStepFaceSelections, healStepFaceSelections, legacyStepFaceHealMessage } from "./stepFaceHealing";
 import { createLocalDynamicStructuralStudy, createLocalStaticStressStudy } from "./localProjectFactory";
 import { createPackedResultPlaybackCache, createResultFrameCache, hasDynamicPlaybackFrames, solverMeshSummaryFromResults, withDerivedSurfaceSafetyFactorFields, type SolverMeshSummary } from "./resultFields";
 import { packResultFieldsForPlayback, packedPreparedPlaybackFrameOrdinal, playbackFieldsForResultMode, playbackMemoryBudgetBytes, type PackedPreparedPlaybackCache, type PreparedPlaybackFrameCache } from "./resultPlaybackCache";
@@ -186,6 +186,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const projectRef = useRef<Project | null>(project);
   const autosaveWriteFailureNotifiedRef = useRef(false);
   const autosaveDegradedNotifiedRef = useRef(false);
+  const stepFaceHealNotifiedRef = useRef<string | null>(null);
   const workspaceShortcutHandlerRef = useRef<(event: KeyboardEvent) => void>(() => undefined);
   const resultFrameIndexRef = useRef(0);
   const resultPlaybackFramePositionRef = useRef(0);
@@ -684,22 +685,34 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     pushMessage("Autosave kept the project setup, but the mesh artifact and results exceed browser storage. Use Save project to keep them on disk.");
   }
 
-  // Projects saved while the STEP face registry was unavailable (the CSP
-  // regression) carry placeholder "face-upload-*" faces whose selections can
-  // never map onto the meshed geometry. Rebuild the real registry and remap
-  // or flag those selections once, as soon as such a project is open.
+  // Selections referencing placeholder "face-upload-*" faces can never map
+  // onto the meshed geometry: legacy generic box faces (uploads made while the
+  // STEP face registry was unavailable — the CSP regression) and viewport
+  // picks made before the registry finished loading ("face-upload-picked-*").
+  // Rebuild the real registry and remap or flag those selections as soon as
+  // such a project is open or such a pick lands.
   useEffect(() => {
-    if (!project || !hasLegacyStepUploadFaces(displayModel)) return undefined;
+    if (!project || !displayModel) return undefined;
+    const legacyUpload = hasLegacyStepUploadFaces(displayModel);
+    if (!legacyUpload && !hasUnresolvedStepFaceSelections(project, displayModel)) return undefined;
     let cancelled = false;
     void import("./stepFaces")
       .then((stepFaces) => stepFaces.stepFaceRegistryFromBase64(displayModel.nativeCad!.contentBase64!))
       .then((registry) => {
         if (cancelled || !registry.displayFaces.length) return;
-        const heal = healLegacyStepFaces(project, displayModel, registry);
-        setProject(heal.project);
-        setDisplayModel(heal.displayModel);
+        const heal = healStepFaceSelections(project, displayModel, registry);
+        // Unresolved-only heals must not write state: the selections are
+        // unchanged and re-setting equivalent objects would loop this effect.
+        // Legacy uploads still always swap in the registry's real faces.
+        if (heal.remapped.length || legacyUpload) {
+          setProject(heal.project);
+          setDisplayModel(heal.displayModel);
+        }
         const message = legacyStepFaceHealMessage(heal);
-        if (message) pushMessage(message);
+        if (message && stepFaceHealNotifiedRef.current !== message) {
+          stepFaceHealNotifiedRef.current = message;
+          pushMessage(message);
+        }
       })
       .catch(() => {
         // Registry still unavailable (e.g. import failure): leave the
