@@ -9,6 +9,7 @@ import {
   type SolveWorkerResponse,
   type SolveWorkerSolvePayload
 } from "./solveProtocol";
+import { workerClientError } from "./workerClientError";
 
 /**
  * Client for the dedicated solve worker. Mirrors performanceClient's worker
@@ -69,12 +70,21 @@ export function startLocalSolve(
   if (typeof Worker === "undefined") return startInlineSolve(payload, onProgress);
 
   const id = createSolveWorkerRequestId();
+  let worker: Worker;
+  try {
+    worker = getSolveWorker();
+  } catch (error) {
+    return rejectedSolveHandle(workerClientError(error, "Could not start the solve worker."));
+  }
   const completion = new Promise<LocalSolveCompletion>((resolve, reject) => {
     pendingSolves.set(id, { id, resolve, reject, onProgress });
   });
-  const worker = getSolveWorker();
   const request: SolveWorkerRequest = { kind: "solve", id, payload };
-  worker.postMessage(request);
+  try {
+    worker.postMessage(request);
+  } catch (error) {
+    rejectPending(id, workerClientError(error, "Could not send work to the solve worker."));
+  }
 
   return {
     completion,
@@ -83,7 +93,14 @@ export function startLocalSolve(
       if (!pending) return;
       // Cooperative first: the solver hooks check shouldCancel between CG
       // iterations / time steps if the worker event loop ever yields.
-      workerInstance?.postMessage({ kind: "cancel", id } satisfies SolveWorkerRequest);
+      try {
+        workerInstance?.postMessage({ kind: "cancel", id } satisfies SolveWorkerRequest);
+      } catch {
+        workerInstance?.terminate();
+        workerInstance = null;
+        rejectPending(id, new LocalSolveError("OpenCAE Core solve cancelled.", "cancelled"));
+        return;
+      }
       if (pending.cancelTimer) return;
       pending.cancelTimer = setTimeout(() => {
         if (!pendingSolves.has(id)) return;
@@ -94,6 +111,13 @@ export function startLocalSolve(
         rejectPending(id, new LocalSolveError("OpenCAE Core solve cancelled.", "cancelled"));
       }, CANCEL_TERMINATE_TIMEOUT_MS);
     }
+  };
+}
+
+function rejectedSolveHandle(error: Error): LocalSolveHandle {
+  return {
+    completion: Promise.reject(error),
+    cancel: () => undefined
   };
 }
 

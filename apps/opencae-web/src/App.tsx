@@ -1,4 +1,5 @@
 import { lazy, Suspense, useMemo, useState } from "react";
+import { hasAutosavedWorkspace } from "./autosaveStorage";
 import { StartScreen } from "./components/StartScreen";
 
 type SampleModelId = "bracket" | "plate" | "cantilever";
@@ -11,7 +12,6 @@ export type WorkspaceInitialAction =
 
 const lazyWorkspaceImport = () => import("./WorkspaceApp").then((module) => ({ default: module.WorkspaceApp }));
 const WorkspaceApp = lazy(lazyWorkspaceImport);
-const AUTOSAVE_STORAGE_KEY = "opencae.workspace.autosave.v1";
 
 export function App() {
   const hasRestoredWorkspace = useMemo(() => hasAutosavedWorkspace(), []);
@@ -38,9 +38,4 @@ export function App() {
       <WorkspaceApp initialAction={initialAction} />
     </Suspense>
   );
-}
-
-function hasAutosavedWorkspace(): boolean {
-  if (typeof window === "undefined") return false;
-  return Boolean(window.localStorage.getItem(AUTOSAVE_STORAGE_KEY));
 }

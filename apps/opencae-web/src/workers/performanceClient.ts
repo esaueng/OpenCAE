@@ -11,6 +11,7 @@ import {
   type PerformanceWorkerResults
 } from "./performanceProtocol";
 import { fallbackSolveLocalStudy } from "./localSolve";
+import { workerClientError } from "./workerClientError";
 
 type PendingRequest<Operation extends PerformanceWorkerOperation = PerformanceWorkerOperation> = {
   operation: Operation;
@@ -50,7 +51,12 @@ export async function postPerformanceWorkerRequest<Operation extends Performance
   const request = createPerformanceWorkerRequest(operation, payload);
   return new Promise((resolve, reject) => {
     pendingRequests.set(request.id, { operation, resolve, reject } as PendingRequest);
-    worker.postMessage(request, transfer.length ? transfer : transferablesForPerformanceWorkerRequest(request));
+    try {
+      worker.postMessage(request, transfer.length ? transfer : transferablesForPerformanceWorkerRequest(request));
+    } catch (error) {
+      pendingRequests.delete(request.id);
+      reject(workerClientError(error, "Could not send work to the performance worker."));
+    }
   });
 }
 

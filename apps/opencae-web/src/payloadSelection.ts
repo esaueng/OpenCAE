@@ -1,5 +1,5 @@
-import type { PayloadObjectSelection } from "./loadPreview";
 import type { StepId } from "./components/StepBar";
+import type { PayloadObjectSelection } from "./workspaceViewTypes";
 
 export function nextSelectedPayloadObject({
   activeStep,

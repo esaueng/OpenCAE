@@ -153,6 +153,17 @@ describe("app persistence", () => {
     vi.restoreAllMocks();
   });
 
+  test("returns no autosave when storage reads are denied", () => {
+    const storage = {
+      getItem: vi.fn(() => {
+        throw new DOMException("Storage access denied", "SecurityError");
+      }),
+      setItem: vi.fn()
+    };
+
+    expect(readAutosavedWorkspace(storage)).toBeNull();
+  });
+
   test("restores dynamic cloud results whose transient summary omits integrationMethod and dampingRatio", async () => {
     // Core Cloud runners up to 0.1.5 emit transient summaries without these two keys;
     // requiring them made parseResultBundle silently drop restored dynamic results.
