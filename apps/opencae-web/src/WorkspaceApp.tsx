@@ -2,7 +2,7 @@ import { lazy, startTransition, Suspense, useCallback, useEffect, useMemo, useRe
 import { isRunResultReadyStatus } from "@opencae/schema";
 import type { Constraint, DisplayFace, DisplayModel, DynamicSolverSettings, Load, MeshQuality, NamedSelection, Project, ResultField, ResultRenderBounds, ResultSummary, RunEvent, RunTimingEstimate, SimulationFidelity, Study } from "@opencae/schema";
 import { RotateCcw, Save } from "lucide-react";
-import { addLoad, addSupport, assignMaterial, cancelRun, createProject, generateMesh, getResults, importLocalProject, isStepGeometryMeshFailure, loadSampleProject, probeUploadedStepRepairAfterMeshFailure, renameProject, repairUploadedStepModel, runSimulation, STEP_REPAIR_UNAVAILABLE_MESSAGE, subscribeToRun, updateStudy as saveStudyPatch, uploadModel, type SampleAnalysisType, type SampleModelId } from "./lib/api";
+import { addLoad, addSupport, assignMaterial, cancelRun, createProject, generateMesh, getResults, importLocalProject, isStepGeometryMeshFailure, loadSampleProject, probeUploadedStepRepairAfterMeshFailure, renameProject, repairUploadedStepModel, runSimulation, STEP_REPAIR_UNAVAILABLE_MESSAGE, subscribeToRun, updateStudy as saveStudyPatch, uploadedStepRepairProbeDecision, uploadModel, type SampleAnalysisType, type SampleModelId } from "./lib/api";
 import { cancelWasmMeshing, type WasmMeshPhaseProgress } from "./lib/wasmMeshing";
 import { resolveSolverBackend } from "./workers/opencaeCoreSolve";
 import { manufacturingProcessForId, normalizeManufacturingParameters, starterMaterials } from "@opencae/materials";
@@ -1033,14 +1033,20 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       .catch(async (error: unknown) => {
         setMeshPhaseProgress(null);
         pushMessage(`Mesh generation failed: ${error instanceof Error ? error.message : String(error)}`);
-        if (!isStepGeometryMeshFailure(error) || projectRef.current !== sourceProject) return;
-        const currentStepGeometry = stepGeometryMetadataForProject(sourceProject);
+        if (!isStepGeometryMeshFailure(error)) return;
+        const probeDecision = uploadedStepRepairProbeDecision(sourceProject, projectRef.current);
+        if (!probeDecision.shouldProbe) {
+          pushMessage(probeDecision.reason);
+          return;
+        }
+        const liveProject = probeDecision.project;
+        const currentStepGeometry = stepGeometryMetadataForProject(liveProject);
         if (currentStepGeometry && currentStepGeometry.status !== "solid" && currentStepGeometry.status !== "unchecked") return;
 
         pushMessage("Checking whether Fix open surfaces can repair this model...");
-        const actionHandle = beginProjectAction(sourceProject);
+        const actionHandle = beginProjectAction(liveProject);
         try {
-          const probe = await probeUploadedStepRepairAfterMeshFailure(sourceProject, {
+          const probe = await probeUploadedStepRepairAfterMeshFailure(liveProject, {
             signal: actionHandle.signal,
             isCurrent: actionHandle.isCurrent,
             clientId: actionHandle.clientId,
