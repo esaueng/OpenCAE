@@ -141,6 +141,61 @@ export async function generateThinSheetStandStep(): Promise<string> {
   });
 }
 
+/**
+ * Seed-holder-style carrier tray, the most complex corpus member (~90 B-rep
+ * faces): a 160x120x16 mm picture frame with a through window, eight
+ * scalloped cradle pockets across the top of each long rail (16 half-round
+ * grooves), four counterbored corner bolt holes, a grip notch in each short
+ * rail, and filleted outer corners. Models the production part class that
+ * exposed the multi-support preflight and picked-face mapping failures.
+ */
+export async function generateSeedHolderTrayStep(): Promise<string> {
+  return withOccSession((gmsh) => {
+    const frame = gmsh.model.occ.addBox(0, 0, 0, 160, 120, 16);
+    const cutters: number[] = [];
+    // Through window leaving 24 mm rails on every side.
+    cutters.push(gmsh.model.occ.addBox(24, 24, -1, 112, 72, 18));
+    // Eight scallop cradles across the top of each long rail: half-round
+    // grooves from Y-axis cylinders centered on the top surface.
+    for (let pocket = 0; pocket < 8; pocket += 1) {
+      const x = 34 + pocket * 13;
+      cutters.push(gmsh.model.occ.addCylinder(x, -1, 16, 0, 26, 0, 6.5));
+      cutters.push(gmsh.model.occ.addCylinder(x, 95, 16, 0, 26, 0, 6.5));
+      // Drainage bore up through each cradle floor: a 4 mm hole whose top
+      // pierces the scallop cylinder, forcing curved-curved boolean seams and
+      // a 40:1 part-to-feature scale ratio.
+      cutters.push(gmsh.model.occ.addCylinder(x, 12, -1, 0, 0, 11.5, 2));
+      cutters.push(gmsh.model.occ.addCylinder(x, 108, -1, 0, 0, 11.5, 2));
+    }
+    // Counterbored corner bolt holes: 8 mm through bore, 14 mm x 5 mm seat.
+    for (const [x, y] of [[12, 12], [148, 12], [12, 108], [148, 108]] as const) {
+      cutters.push(gmsh.model.occ.addCylinder(x, y, -1, 0, 0, 18, 4));
+      cutters.push(gmsh.model.occ.addCylinder(x, y, 11, 0, 0, 6, 7));
+    }
+    // Grip notches through the outer wall of each short rail.
+    cutters.push(gmsh.model.occ.addBox(-1, 50, 8, 13, 20, 9));
+    cutters.push(gmsh.model.occ.addBox(148, 50, 8, 13, 20, 9));
+    gmsh.model.occ.cut([3, frame], cutters.flatMap((cutter) => [3, cutter]));
+    gmsh.model.occ.synchronize();
+    // Fillet the four outer vertical corner edges (best effort).
+    const corners = entityTags(gmsh, 1).filter((tag) => {
+      const bounds = gmsh.model.getBoundingBox(1, tag);
+      const vertical = Math.abs(bounds.xmax - bounds.xmin) < 0.1 && Math.abs(bounds.ymax - bounds.ymin) < 0.1 && bounds.zmax - bounds.zmin > 15;
+      const atCornerX = Math.abs(bounds.xmin) < 0.1 || Math.abs(bounds.xmin - 160) < 0.1;
+      const atCornerY = Math.abs(bounds.ymin) < 0.1 || Math.abs(bounds.ymin - 120) < 0.1;
+      return vertical && atCornerX && atCornerY;
+    });
+    if (corners.length) {
+      try {
+        gmsh.model.occ.fillet(entityTags(gmsh, 3), corners, [6], true);
+        gmsh.model.occ.synchronize();
+      } catch {
+        // Fillet is best effort; the sharp-cornered tray still exercises the pipeline.
+      }
+    }
+  });
+}
+
 /** Thin-walled open tray: 60x40x30 mm outer shell with uniform 2 mm walls/floor and an open top. */
 export async function generateThinWalledTrayStep(): Promise<string> {
   return withOccSession((gmsh) => {

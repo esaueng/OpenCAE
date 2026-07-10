@@ -30,7 +30,11 @@ const CORPUS: CorpusEntry[] = [
   { fixture: "filleted-block.step", meshSizeMm: 6, expectedFaceCount: 26 },
   { fixture: "multi-hole-plate.step", meshSizeMm: 6, expectedFaceCount: 11 },
   { fixture: "l-bracket-gusset.step", meshSizeMm: 8, expectedFaceCount: 11 },
-  { fixture: "thin-walled-tray.step", meshSizeMm: 4, expectedFaceCount: 11 }
+  { fixture: "thin-walled-tray.step", meshSizeMm: 4, expectedFaceCount: 11 },
+  // Production-class complexity: a 160x120 mm carrier frame with 16 scallop
+  // cradles pierced by 4 mm drainage bores (curved-curved boolean seams,
+  // 40:1 part-to-feature scale) plus counterbored bolt holes and grip notches.
+  { fixture: "seed-holder-tray.step", meshSizeMm: 8, expectedFaceCount: 67 }
 ];
 
 describe("STEP robustness corpus (gmsh-wasm + facet->face attribution)", () => {

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import type { BodyGravityLoadJson, DynamicLinearStepJson } from "../src/model-json";
+import { extractBoundarySurfaceFacets } from "../src/mesh";
 import { preflightCoreModel, validateModelJson } from "../src/validation";
 import { createSingleTetModel, createTwoTetModel } from "./fixtures";
 
@@ -631,6 +632,53 @@ describe("validateModelJson", () => {
     expect(report.diagnostics.fixedNodeCount).toBeGreaterThan(0);
     expect(report.diagnostics.loadNodeCount).toBeGreaterThan(0);
     expect(report.diagnostics.totalLoadVectorN).toEqual([0, 0, -100]);
+  });
+
+  test("preflight accepts multiple supports that each map to their own surface set", () => {
+    // Two fixed supports on two different faces: each support's nodes fit its
+    // own surface selection, but their union fits no single surface set. The
+    // check must be per support, or any model with more than one support fails
+    // with "Production supports must map to a non-empty surface set".
+    const base = createSingleTetModel();
+    const facets = extractBoundarySurfaceFacets(base);
+    const faceA = facets.find((facet) => [...facet.nodes].sort().join(",") === "0,1,2")!;
+    const faceB = facets.find((facet) => [...facet.nodes].sort().join(",") === "0,1,3")!;
+    const model = {
+      ...base,
+      schemaVersion: "0.2.0",
+      surfaceFacets: facets,
+      surfaceSets: [
+        { name: "supportFaceA", facets: [faceA.id] },
+        { name: "supportFaceB", facets: [faceB.id] },
+        { name: "loadFace", facets: [faceA.id] }
+      ],
+      nodeSets: [
+        { name: "fixedNodesA", nodes: [2] },
+        { name: "fixedNodesB", nodes: [3] },
+        { name: "loadNodes", nodes: [1] }
+      ],
+      boundaryConditions: [
+        { name: "fixedSupport0", type: "fixed" as const, nodeSet: "fixedNodesA", components: ["x", "y", "z"] as ["x", "y", "z"] },
+        { name: "fixedSupport1", type: "fixed" as const, nodeSet: "fixedNodesB", components: ["x", "y", "z"] as ["x", "y", "z"] }
+      ],
+      loads: [
+        { name: "appliedForce0", type: "surfaceForce" as const, surfaceSet: "loadFace", totalForce: [0, 0, -100] as [number, number, number] }
+      ],
+      steps: [
+        { name: "loadStep", type: "staticLinear" as const, boundaryConditions: ["fixedSupport0", "fixedSupport1"], loads: ["appliedForce0"] }
+      ]
+    };
+
+    const report = preflightCoreModel(model, { requireSurfaceSelections: true });
+
+    expect(report.errors.map((issue) => issue.code)).not.toContain("missing-support-surface-set");
+    // A support whose nodes escape every surface selection must still fail.
+    const escaped = {
+      ...model,
+      nodeSets: model.nodeSets.map((set) => (set.name === "fixedNodesB" ? { ...set, nodes: [2, 3] } : set))
+    };
+    const escapedReport = preflightCoreModel(escaped, { requireSurfaceSelections: true });
+    expect(escapedReport.errors.map((issue) => issue.code)).toContain("missing-support-surface-set");
   });
 
   test("preflight rejects orphan nodes and missing production surface selections", () => {
