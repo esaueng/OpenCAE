@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { DisplayModel, Project, RunEvent, Study } from "@opencae/schema";
-import { addLoad, addSupport, assignMaterial, cancelRun, createProject, dynamicOutputFrameEstimate, generateMesh, geometryWithMeshPreset, getResults, importLocalProject, loadSampleProject, probeUploadedStepRepairAfterMeshFailure, renameProject, runSimulation, STEP_REPAIR_PROBE_MODEL_CHANGED_MESSAGE, STEP_REPAIR_UNAVAILABLE_MESSAGE, subscribeToRun, updateStudy, uploadedStepRepairProbeDecision, uploadModel } from "./api";
+import { addLoad, addSupport, assignMaterial, cancelRun, createProject, dynamicOutputFrameEstimate, generateMesh, geometryWithMeshPreset, getResults, importLocalProject, loadSampleProject, probeUploadedStepRepairAfterMeshFailure, renameProject, runSimulation, STEP_REPAIR_PROBE_MODEL_CHANGED_MESSAGE, STEP_REPAIR_UNAVAILABLE_MESSAGE, subscribeToRun, updateStudy, uploadedStepRepairProbeDecision, uploadModel, withReportCaptures } from "./api";
 
 const TestFile = globalThis.File ?? class extends Blob {
   name: string;
@@ -113,6 +113,22 @@ describe("api", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
+  });
+
+  test("attaches immutable report captures to a completed result bundle", () => {
+    const results = {
+      summary: { maxStress: 1, maxStressUnits: "MPa", maxDisplacement: 0.1, maxDisplacementUnits: "mm", safetyFactor: 2, reactionForce: 5, reactionForceUnits: "N" },
+      fields: []
+    };
+    const reportCaptures = {
+      stress: { png: "data:image/png;base64,stress", fieldId: "stress-peak", selection: "peak" as const, frameIndex: 3, timeSeconds: 0.03 }
+    };
+
+    const stored = withReportCaptures(results, reportCaptures);
+
+    expect(stored).not.toBe(results);
+    expect(stored.reportCaptures).toBe(reportCaptures);
+    expect(results).not.toHaveProperty("reportCaptures");
   });
 
   test("keeps uploaded model bytes on the project returned from upload", async () => {
