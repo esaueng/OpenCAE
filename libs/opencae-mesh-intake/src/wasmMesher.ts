@@ -852,7 +852,10 @@ function repairImportedStepGeometry(
   const repairedOpenBoundaryCurveCount = openBoundaryCurveTags(gmsh).length;
   const repairedOrphanSurfaceCount = orphanSurfaceTags(gmsh).length;
   if (repairedVolumeCount === 0) {
-    throw new StepGeometryError("Open STEP surfaces remain after sewing and boundary patching; no solid volume could be created.");
+    throw new StepGeometryError(
+      "Open STEP surfaces remain after sewing and boundary patching; no solid volume could be created. " +
+      "Use Fix open surfaces on the Model step, or re-export the part from CAD as a solid body."
+    );
   }
   if (repairedOrphanSurfaceCount > 0) {
     throw new StepGeometryError(`CAD healing left ${repairedOrphanSurfaceCount.toLocaleString()} open surface ${repairedOrphanSurfaceCount === 1 ? "sheet" : "sheets"} outside the repaired solid.`);
