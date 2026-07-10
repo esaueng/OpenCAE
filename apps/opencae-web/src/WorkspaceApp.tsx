@@ -1,8 +1,8 @@
 import { lazy, startTransition, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { isRunResultReadyStatus } from "@opencae/schema";
-import type { Constraint, DisplayFace, DisplayModel, DynamicSolverSettings, Load, NamedSelection, Project, ResultField, ResultRenderBounds, ResultSummary, RunEvent, RunTimingEstimate, SimulationFidelity, Study } from "@opencae/schema";
+import type { Constraint, DisplayFace, DisplayModel, DynamicSolverSettings, Load, MeshQuality, NamedSelection, Project, ResultField, ResultRenderBounds, ResultSummary, RunEvent, RunTimingEstimate, SimulationFidelity, Study } from "@opencae/schema";
 import { RotateCcw, Save } from "lucide-react";
-import { addLoad, addSupport, assignMaterial, cancelRun, createProject, generateMesh, getResults, importLocalProject, loadSampleProject, renameProject, repairUploadedStepModel, runSimulation, subscribeToRun, updateStudy as saveStudyPatch, uploadModel, type SampleAnalysisType, type SampleModelId } from "./lib/api";
+import { addLoad, addSupport, assignMaterial, cancelRun, createProject, generateMesh, getResults, importLocalProject, isStepGeometryMeshFailure, loadSampleProject, probeUploadedStepRepairAfterMeshFailure, renameProject, repairUploadedStepModel, runSimulation, STEP_REPAIR_UNAVAILABLE_MESSAGE, subscribeToRun, updateStudy as saveStudyPatch, uploadModel, type SampleAnalysisType, type SampleModelId } from "./lib/api";
 import { cancelWasmMeshing, type WasmMeshPhaseProgress } from "./lib/wasmMeshing";
 import { resolveSolverBackend } from "./workers/opencaeCoreSolve";
 import { manufacturingProcessForId, normalizeManufacturingParameters, starterMaterials } from "@opencae/materials";
@@ -40,7 +40,7 @@ import { displayModelForUnits, loadValueForUnits, resultFieldForUnits, resultSum
 import { supportDisplayLabel } from "./supportLabels";
 import { nextSelectedPayloadObject, shouldClearPayloadSelectionOnViewerMiss } from "./payloadSelection";
 import { hasLegacyStepUploadFaces, hasUnresolvedStepFaceSelections, healStepFaceSelections, legacyStepFaceHealMessage } from "./stepFaceHealing";
-import { stepGeometryNeedsRepair } from "./stepGeometryState";
+import { stepGeometryMetadataForProject, stepGeometryNeedsRepair } from "./stepGeometryState";
 import { createLocalDynamicStructuralStudy, createLocalStaticStressStudy } from "./localProjectFactory";
 import { createPackedResultPlaybackCache, createResultFrameCache, hasDynamicPlaybackFrames, solverMeshSummaryFromResults, withDerivedSurfaceSafetyFactorFields, type SolverMeshSummary } from "./resultFields";
 import { packResultFieldsForPlayback, packedPreparedPlaybackFrameOrdinal, playbackFieldsForResultMode, playbackMemoryBudgetBytes, type PackedPreparedPlaybackCache, type PreparedPlaybackFrameCache } from "./resultPlaybackCache";
@@ -1022,6 +1022,47 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     if (nextStep) navigateToStep(nextStep);
   }
 
+  function handleGenerateMesh(preset: MeshQuality) {
+    if (!project || !study) return;
+    const sourceProject = project;
+    setMeshPhaseProgress({ phase: "load", phaseIndex: 0, phaseCount: 8, message: "Loading gmsh WebAssembly module..." });
+    // generateMesh rethrows quality-gate and STEP topology rejections by
+    // design. Surface the primary failure immediately, then trial-run the
+    // exact Fix action only for geometry-class failures on the same model.
+    void updateStudy(generateMesh(study.id, preset, study, displayModel ?? undefined, pushMessage, setMeshPhaseProgress), shouldAutoAdvanceAfterMeshGeneration() ? "run" : undefined)
+      .catch(async (error: unknown) => {
+        setMeshPhaseProgress(null);
+        pushMessage(`Mesh generation failed: ${error instanceof Error ? error.message : String(error)}`);
+        if (!isStepGeometryMeshFailure(error) || projectRef.current !== sourceProject) return;
+        const currentStepGeometry = stepGeometryMetadataForProject(sourceProject);
+        if (currentStepGeometry && currentStepGeometry.status !== "solid" && currentStepGeometry.status !== "unchecked") return;
+
+        pushMessage("Checking whether Fix open surfaces can repair this model...");
+        const actionHandle = beginProjectAction(sourceProject);
+        try {
+          const probe = await probeUploadedStepRepairAfterMeshFailure(sourceProject, {
+            signal: actionHandle.signal,
+            isCurrent: actionHandle.isCurrent,
+            clientId: actionHandle.clientId,
+            generation: actionHandle.generation
+          });
+          if (!probe || !actionHandle.isCurrent()) return;
+          completeProjectAction(actionHandle);
+          projectRef.current = probe.project;
+          setProject(probe.project);
+          pushMessage(probe.stepGeometry.status === "repairable"
+            ? "Fix open surfaces is available on the Model and Mesh steps."
+            : STEP_REPAIR_UNAVAILABLE_MESSAGE);
+        } catch (probeError) {
+          if (isAbortError(probeError)) return;
+          pushMessage(`Could not check automatic STEP repair: ${probeError instanceof Error ? probeError.message : String(probeError)}`);
+        } finally {
+          completeProjectAction(actionHandle);
+        }
+      })
+      .finally(() => setMeshPhaseProgress(null));
+  }
+
   function handleViewportFaceSelect(face: DisplayFace, point?: [number, number, number], payloadObject?: PayloadObjectSelection) {
     setSelectedFaceId(face.id);
     const isPayloadObjectLoad = activeStep === "loads" && draftLoadType === "gravity";
@@ -1606,17 +1647,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           onRemoveLoad={(loadId) =>
             updateStudy(saveStudyPatch(study.id, { loads: study.loads.filter((item) => item.id !== loadId) }, "Load removed.", study))
           }
-          onGenerateMesh={(preset) => {
-            setMeshPhaseProgress({ phase: "load", phaseIndex: 0, phaseCount: 8, message: "Loading gmsh WebAssembly module..." });
-            // generateMesh rethrows quality-gate rejections (MeshQualityError)
-            // by design; without this catch they die as unhandled rejections
-            // and mesh generation fails with no feedback at all.
-            void updateStudy(generateMesh(study.id, preset, study, displayModel, pushMessage, setMeshPhaseProgress), shouldAutoAdvanceAfterMeshGeneration() ? "run" : undefined)
-              .catch((error: unknown) => {
-                pushMessage(`Mesh generation failed: ${error instanceof Error ? error.message : String(error)}`);
-              })
-              .finally(() => setMeshPhaseProgress(null));
-          }}
+          onGenerateMesh={handleGenerateMesh}
           meshPhaseProgress={meshPhaseProgress}
           onUpdateSolverSettings={handleUpdateSolverSettings}
           onRunSimulation={handleRunSimulation}

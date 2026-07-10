@@ -24,6 +24,12 @@ export type StepGeometryMetadata = {
   message?: string;
 };
 
+export const STEP_REPAIR_UNAVAILABLE_MESSAGE =
+  "Automatic repair cannot close this model. Re-export it from CAD as a solid body (stitch/heal in CAD; the gaps exceed the 0.05 mm in-app sew tolerance).";
+
+const STEP_REPAIR_AVAILABLE_MESSAGE =
+  "Automatic repair can re-close this model's faces. Use Fix open surfaces before simulation.";
+
 export type ModelMutationOptions = {
   signal?: AbortSignal;
   /** Rechecked after expensive CAD work and immediately before persistence. */
@@ -379,19 +385,71 @@ async function inspectStepGeometryForUpload(filename: string, contentBase64: str
   }
   try {
     const client = await import("../workers/meshWorkerClient");
-    const { inspection } = await client.inspectStepFileInWorker({ stepContent: base64ToArrayBuffer(contentBase64) });
-    const status: StepGeometryMetadata["status"] = inspection.status === "solid"
-      ? "solid"
-      : inspection.status === "invalid"
-        ? "invalid"
-        : inspection.repairable ? "repairable" : "unrepairable";
-    return { status, inspection, ...(inspection.message ? { message: inspection.message } : {}) };
+    const { inspection, repairProbe } = await client.inspectStepFileInWorker({ stepContent: base64ToArrayBuffer(contentBase64) });
+    return stepGeometryMetadataFromInspection(inspection, repairProbe);
   } catch (error) {
     return {
       status: "unchecked",
       message: `STEP topology check was unavailable: ${messageFromUnknownError(error) || "unknown error"}`
     };
   }
+}
+
+export function stepGeometryMetadataFromInspection(
+  inspection: StepGeometryInspection,
+  repairProbe?: "succeeded" | "failed"
+): StepGeometryMetadata {
+  const status: StepGeometryMetadata["status"] = repairProbe === "succeeded" || inspection.repairable
+    ? "repairable"
+    : repairProbe === "failed"
+      ? "unrepairable"
+      : inspection.status === "solid"
+        ? "solid"
+        : inspection.status === "invalid"
+          ? "invalid"
+          : "unrepairable";
+  return { status, inspection, ...(inspection.message ? { message: inspection.message } : {}) };
+}
+
+/**
+ * A nominal solid can still fail during 3D meshing. Trial-run the exact repair
+ * behind Fix open surfaces and persist only its repairability result onto the
+ * current uploaded model; the original STEP bytes remain untouched.
+ */
+export async function probeUploadedStepRepairAfterMeshFailure(
+  currentProject: Project,
+  mutationOptions: ModelMutationOptions = {}
+): Promise<{ project: Project; stepGeometry: StepGeometryMetadata } | null> {
+  assertCurrentModelMutation(mutationOptions);
+  const embeddedModel = embeddedStepModel(currentProject);
+  if (!embeddedModel) return null;
+  const currentStatus = uploadedStepGeometryStatus(currentProject) ?? "unchecked";
+  if (currentStatus !== "solid" && currentStatus !== "unchecked") return null;
+  if (import.meta.env.VITE_WASM_MESHING === "0" || typeof Worker === "undefined") {
+    throw new Error("STEP repairability checking is unavailable in this browser build.");
+  }
+  const client = await import("../workers/meshWorkerClient");
+  assertCurrentModelMutation(mutationOptions);
+  const { inspection, repairProbe } = await client.inspectStepFileInWorker({
+    stepContent: base64ToArrayBuffer(embeddedModel.contentBase64),
+    probeRepairEvenIfSolid: true
+  });
+  assertCurrentModelMutation(mutationOptions);
+  const mapped = stepGeometryMetadataFromInspection(inspection, repairProbe);
+  const stepGeometry: StepGeometryMetadata = mapped.status === "repairable"
+    ? { ...mapped, message: STEP_REPAIR_AVAILABLE_MESSAGE }
+    : { ...mapped, status: "unrepairable", message: STEP_REPAIR_UNAVAILABLE_MESSAGE };
+  return {
+    project: attachStepGeometryMetadata(currentProject, embeddedModel.filename, stepGeometry),
+    stepGeometry
+  };
+}
+
+export function isStepGeometryMeshFailure(error: unknown): boolean {
+  return error instanceof Error && (
+    error.name === "StepGeometryError" ||
+    error.name === "StepGeometryRepairLostVolume"
+  );
 }
 
 function attachStepGeometryMetadata(project: Project, filename: string, stepGeometry: StepGeometryMetadata): Project {
@@ -407,6 +465,14 @@ function attachStepGeometryMetadata(project: Project, filename: string, stepGeom
         : geometry
     )
   };
+}
+
+function uploadedStepGeometryStatus(project: Project): StepGeometryMetadata["status"] | undefined {
+  const geometry = project.geometryFiles.find((candidate) => candidate.metadata.source === "local-upload");
+  const value = geometry?.metadata.stepGeometry;
+  if (!value || typeof value !== "object") return undefined;
+  const status = (value as Partial<StepGeometryMetadata>).status;
+  return status;
 }
 
 function stepGeometryUploadNotice(stepGeometry: StepGeometryMetadata | undefined): string {
