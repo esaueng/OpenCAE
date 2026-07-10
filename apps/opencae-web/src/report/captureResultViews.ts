@@ -2,15 +2,28 @@ import type { ResultField } from "@opencae/schema";
 import type { ResultMode, ViewMode } from "../workspaceViewTypes";
 
 export interface ResultViewCaptures {
-  stress?: string;
-  displacement?: string;
+  stress?: CapturedResultView;
+  displacement?: CapturedResultView;
+}
+
+export interface CapturedResultView {
+  png: string;
+  fieldId: string;
+  selection: "peak" | "static";
+  frameIndex?: number;
+  timeSeconds?: number;
 }
 
 export interface CaptureResultViewsOptions {
   getViewMode: () => ViewMode;
   getResultMode: () => ResultMode;
   setResultMode: (mode: ResultMode) => void;
+  getResultFrameIndex: () => number;
+  setResultFrameIndex: (frameIndex: number) => void;
+  getPlaybackPlaying: () => boolean;
+  setPlaybackPlaying: (playing: boolean) => void;
   resultFields: ResultField[];
+  surfaceMeshRef?: string;
   capture: (() => string) | null;
   isCurrent: () => boolean;
   waitForAnimationFrame?: () => Promise<void>;
@@ -29,22 +42,71 @@ export async function captureResultViews(options: CaptureResultViewsOptions): Pr
   }
 
   const originalMode = options.getResultMode();
+  const originalFrameIndex = options.getResultFrameIndex();
+  const originalPlaybackPlaying = options.getPlaybackPlaying();
   const waitForFrame = options.waitForAnimationFrame ?? nextAnimationFrame;
   const captures: ResultViewCaptures = {};
 
   try {
+    if (originalPlaybackPlaying) options.setPlaybackPlaying(false);
     for (const mode of availableModes) {
       assertCurrent(options);
+      const peakField = peakResultField(options.resultFields, mode, options.surfaceMeshRef);
+      if (!peakField) continue;
       options.setResultMode(mode);
+      if (peakField.frameIndex !== undefined) options.setResultFrameIndex(peakField.frameIndex);
       await waitForFrame();
       await waitForFrame();
       assertCurrent(options);
-      captures[mode] = options.capture!();
+      captures[mode] = {
+        png: options.capture!(),
+        fieldId: peakField.id,
+        selection: peakField.frameIndex === undefined ? "static" : "peak",
+        ...(peakField.frameIndex === undefined ? {} : { frameIndex: peakField.frameIndex }),
+        ...(peakField.timeSeconds === undefined ? {} : { timeSeconds: peakField.timeSeconds })
+      };
     }
     return captures;
   } finally {
+    options.setResultFrameIndex(originalFrameIndex);
     options.setResultMode(originalMode);
+    if (originalPlaybackPlaying) options.setPlaybackPlaying(true);
   }
+}
+
+export function peakResultField(fields: ResultField[], mode: "stress" | "displacement", surfaceMeshRef?: string): ResultField | undefined {
+  const modeFields = fields.filter((field) => field.type === mode);
+  if (!modeFields.length) return undefined;
+
+  const surfaceFields = surfaceMeshRef
+    ? modeFields.filter((field) => field.location === "node" && field.surfaceMeshRef === surfaceMeshRef)
+    : [];
+  const faceFields = modeFields.filter((field) => field.location === "face");
+  const sampledFields = modeFields.filter((field) => field.samples?.length);
+  const candidates = surfaceFields.length
+    ? surfaceFields
+    : faceFields.length
+      ? faceFields
+      : sampledFields.length
+        ? sampledFields
+        : modeFields;
+
+  return candidates
+    .map((field) => ({ field, magnitude: fieldPeakMagnitude(field) }))
+    .reduce((peak, candidate) => candidate.magnitude > peak.magnitude ? candidate : peak)
+    .field;
+}
+
+function fieldPeakMagnitude(field: ResultField): number {
+  let peak = Number.NEGATIVE_INFINITY;
+  for (const value of field.values) {
+    if (Number.isFinite(value)) peak = Math.max(peak, Math.abs(value));
+  }
+  for (const sample of field.samples ?? []) {
+    if (Number.isFinite(sample.value)) peak = Math.max(peak, Math.abs(sample.value));
+  }
+  if (Number.isFinite(peak)) return peak;
+  return Math.max(Math.abs(Number(field.min) || 0), Math.abs(Number(field.max) || 0));
 }
 
 function assertCurrent(options: Pick<CaptureResultViewsOptions, "getViewMode" | "isCurrent">): void {

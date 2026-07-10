@@ -203,7 +203,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const resultPlaybackFrameControllerRef = useRef<MutableResultPlaybackFrameController | null>(null);
   const viewerInteractingRef = useRef(false);
   const viewerCaptureRef = useRef<(() => string) | null>(null);
-  const reportStateRef = useRef({ viewMode, resultMode, resultSummary, completedRunId });
+  const reportStateRef = useRef({ viewMode, resultMode, resultSummary, completedRunId, resultPlaybackPlaying });
   const initialActionConsumedRef = useRef(false);
   if (!resultPlaybackFrameControllerRef.current) {
     resultPlaybackFrameControllerRef.current = createResultPlaybackFrameController();
@@ -308,7 +308,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     }
   }, [resultPlaybackCacheState]);
   const solverRunning = Boolean(processingRunId) || (runProgress > 0 && runProgress < 100);
-  reportStateRef.current = { viewMode, resultMode, resultSummary, completedRunId };
+  reportStateRef.current = { viewMode, resultMode, resultSummary, completedRunId, resultPlaybackPlaying };
   const runReadiness = useMemo(() => readinessForStudy(study), [study]);
   const canRunSimulation = runReadiness.every((item) => item.done) && !solverRunning;
   const missingRunItems = runReadiness.filter((item) => !item.done).map((item) => item.label);
@@ -1018,7 +1018,12 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         getViewMode: () => reportStateRef.current.viewMode,
         getResultMode: () => reportStateRef.current.resultMode,
         setResultMode,
+        getResultFrameIndex: () => resultFrameIndexRef.current,
+        setResultFrameIndex: handleResultFrameChange,
+        getPlaybackPlaying: () => reportStateRef.current.resultPlaybackPlaying,
+        setPlaybackPlaying: setResultPlaybackPlaying,
         resultFields,
+        surfaceMeshRef: resultSurfaceMesh?.id,
         capture: viewerCaptureRef.current,
         isCurrent: () => reportStateRef.current.resultSummary === sourceSummary && reportStateRef.current.completedRunId === sourceRunId
       });
@@ -1034,8 +1039,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         captures,
         generatedAt,
         exaggeration: stressExaggeration,
-        showDeformed,
-        activeFrameIndex: resultFrameIndex
+        showDeformed
       });
       const { renderReportPdf } = await import("./report/reportPdf");
       const blob = await renderReportPdf(reportData);
