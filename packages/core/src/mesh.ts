@@ -196,16 +196,22 @@ export function orphanNodes(model: MeshUtilityModel): number[] {
 }
 
 export function meshQualitySummary(model: MeshUtilityModel): MeshQualitySummary {
-  const volumes: number[] = [];
   let elementCount = 0;
   let invertedElementCount = 0;
+  let tetCount = 0;
+  let minTetVolume = Number.POSITIVE_INFINITY;
+  let maxTetVolume = Number.NEGATIVE_INFINITY;
 
   for (const block of model.elementBlocks) {
     forEachElement(block, (connectivity) => {
       elementCount += 1;
       if (block.type !== "Tet4") return;
       const volume = tet4Volume(model.nodes.coordinates, connectivity);
-      volumes.push(volume);
+      tetCount += 1;
+      // Keep each Math call bounded: spreading a production-sized volume
+      // array can exceed the JavaScript engine's argument limit.
+      minTetVolume = Math.min(minTetVolume, volume);
+      maxTetVolume = Math.max(maxTetVolume, volume);
       if (!Number.isFinite(volume) || volume <= 0) {
         invertedElementCount += 1;
       }
@@ -218,8 +224,8 @@ export function meshQualitySummary(model: MeshUtilityModel): MeshQualitySummary 
     nodeCount: model.nodes.coordinates.length / 3,
     surfaceFacetCount: surfaceFacets.length,
     connectedComponentCount: connectedComponents(model).componentCount,
-    minTetVolume: volumes.length > 0 ? Math.min(...volumes) : 0,
-    maxTetVolume: volumes.length > 0 ? Math.max(...volumes) : 0,
+    minTetVolume: tetCount > 0 ? minTetVolume : 0,
+    maxTetVolume: tetCount > 0 ? maxTetVolume : 0,
     invertedElementCount,
     orphanNodeCount: orphanNodes(model).length
   };

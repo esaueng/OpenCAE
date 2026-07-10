@@ -4,6 +4,7 @@ import { bracketDisplayModel } from "@opencae/db/sample-data";
 import type { DisplayModel, Project, ResultField, ResultSummary, Study } from "@opencae/schema";
 import { editableNumberCommitValue, playbackPeakMarkerPercent, RightPanel, rangeProgressPercent } from "./RightPanel";
 import type { StepId } from "./StepBar";
+import type { StepGeometryMetadata } from "../lib/api";
 
 const project: Project = {
   id: "project-1",
@@ -119,7 +120,31 @@ function renderPanel(activeStep: StepId, overrides: Partial<Parameters<typeof Ri
   );
 }
 
+function uploadedStepProject(status: StepGeometryMetadata["status"], message?: string): Project {
+  return {
+    ...project,
+    geometryFiles: [{
+      id: "geom-upload",
+      projectId: project.id,
+      filename: "fixture.step",
+      localPath: "uploads/fixture.step",
+      artifactKey: "project-1/geometry/uploaded-display.json",
+      status: "ready",
+      metadata: {
+        source: "local-upload",
+        stepGeometry: { status, message }
+      }
+    }]
+  };
+}
+
 describe("RightPanel payload mass controls", () => {
+  test("offers the opposite face normal as a load direction", () => {
+    const markup = renderPanel("loads");
+
+    expect(markup).toContain('<option value="Opposite normal">Opposite face normal</option>');
+  });
+
   test("maps range slider values to a full visual fill at the maximum", () => {
     expect(rangeProgressPercent(1, 1, 4)).toBe(0);
     expect(rangeProgressPercent(2.5, 1, 4)).toBe(50);
@@ -929,145 +954,133 @@ describe("RightPanel payload mass controls", () => {
     expect(html).toContain('aria-label="Playback time position"');
   });
 
-  test("shows contextual weak X build yield on cantilever material previews", () => {
-    const html = renderToStaticMarkup(
-      <RightPanel
-        activeStep="material"
-        project={project}
-        displayModel={{
-          ...displayModel,
-          id: "display-cantilever",
-          faces: [
-            { id: "face-base-left", label: "Fixed end face", color: "#4da3ff", center: [-1.8, 0.18, 0], normal: [-1, 0, 0], stressValue: 132 },
-            { id: "face-load-top", label: "Free end load face", color: "#4da3ff", center: [1.75, 0.18, 0], normal: [1, 0, 0], stressValue: 96 }
-          ]
-        }}
-        study={{
-          ...study,
-          materialAssignments: [{ id: "assign", materialId: "mat-petg", selectionRef: "selection-body", parameters: { printed: true, infillDensity: 100, wallCount: 3, layerOrientation: "x" }, status: "complete" }],
-          namedSelections: [
-            {
-              id: "selection-fixed-face",
-              name: "Fixed end face",
-              entityType: "face",
-              geometryRefs: [{ bodyId: "body", entityType: "face", entityId: "face-base-left", label: "Fixed end face" }],
-              fingerprint: "fixed"
-            },
-            {
-              id: "selection-load-face",
-              name: "Free end load face",
-              entityType: "face",
-              geometryRefs: [{ bodyId: "body", entityType: "face", entityId: "face-load-top", label: "Free end load face" }],
-              fingerprint: "load"
-            }
-          ],
-          constraints: [{ id: "fixed", type: "fixed", selectionRef: "selection-fixed-face", parameters: {}, status: "complete" }],
-          loads: [{ id: "load", type: "force", selectionRef: "selection-load-face", parameters: { value: 500, direction: [0, 0, -1] }, status: "complete" }]
-        }}
-        selectedFace={null}
-        viewMode="model"
-        resultMode="stress"
-        showDeformed={false}
-        showDimensions={false}
-        stressExaggeration={1}
-        resultSummary={resultSummary}
-        runProgress={0}
-        sampleModel="cantilever"
-        draftLoadType="force"
-        draftLoadValue={500}
-        draftLoadDirection="-Z"
-        selectedLoadPoint={null}
-        selectedPayloadObject={null}
-        onFitView={vi.fn()}
-        onRotateModel={vi.fn()}
-        onResetModelOrientation={vi.fn()}
-        onLoadSample={vi.fn()}
-        onUploadModel={vi.fn()}
-        onSampleModelChange={vi.fn()}
-        onViewModeChange={vi.fn()}
-        onResultModeChange={vi.fn()}
-        onToggleDeformed={vi.fn()}
-        onToggleDimensions={vi.fn()}
-        onStressExaggerationChange={vi.fn()}
-        onAssignMaterial={vi.fn()}
-        onAddSupport={vi.fn()}
-        onUpdateSupport={vi.fn()}
-        onRemoveSupport={vi.fn()}
-        onDraftLoadTypeChange={vi.fn()}
-        onDraftLoadValueChange={vi.fn()}
-        onDraftLoadDirectionChange={vi.fn()}
-        onAddLoad={vi.fn()}
-        onUpdateLoad={vi.fn()}
-        onPreviewLoadEdit={vi.fn()}
-        onRemoveLoad={vi.fn()}
-        onGenerateMesh={vi.fn()}
-        onRunSimulation={vi.fn()}
-        canRunSimulation={false}
-        missingRunItems={[]}
-        onStepSelect={vi.fn()}
-      />
-    );
+  test("shows X as the bracket's weakest FDM build direction for an out-of-plane force", () => {
+    const bracketStudy = {
+      ...study,
+      materialAssignments: [{
+        id: "assign",
+        materialId: "mat-abs",
+        selectionRef: "selection-body",
+        parameters: { manufacturingProcessId: "fdm", infillDensity: 35, wallCount: 3, layerOrientation: "x" },
+        status: "complete"
+      }],
+      namedSelections: [
+        {
+          id: "selection-fixed-face",
+          name: "Fixed base mounting holes",
+          entityType: "face",
+          geometryRefs: [{ bodyId: "body", entityType: "face", entityId: "face-base-left", label: "Base mounting holes" }],
+          fingerprint: "fixed"
+        },
+        {
+          id: "selection-load-face",
+          name: "Top load face",
+          entityType: "face",
+          geometryRefs: [{ bodyId: "body", entityType: "face", entityId: "face-load-top", label: "Top load face" }],
+          fingerprint: "load"
+        }
+      ],
+      constraints: [{ id: "fixed", type: "fixed", selectionRef: "selection-fixed-face", parameters: {}, status: "complete" }],
+      // Built-in samples store model-space -Y, which renders/solves as global -Z.
+      loads: [{ id: "load", type: "force", selectionRef: "selection-load-face", parameters: { value: 500, direction: [0, -1, 0] }, status: "complete" }]
+    } satisfies Study;
+    const xHtml = renderPanel("material", { displayModel: bracketDisplayModel, study: bracketStudy });
+    const yHtml = renderPanel("material", {
+      displayModel: bracketDisplayModel,
+      study: {
+        ...bracketStudy,
+        materialAssignments: [{
+          id: "assign",
+          materialId: "mat-abs",
+          selectionRef: "selection-body",
+          parameters: { manufacturingProcessId: "fdm", infillDensity: 35, wallCount: 3, layerOrientation: "y" },
+          status: "complete"
+        }]
+      }
+    });
+    const rotatedYHtml = renderPanel("material", {
+      displayModel: { ...bracketDisplayModel, orientation: { x: 0, y: 0, z: 90 } },
+      study: {
+        ...bracketStudy,
+        materialAssignments: [{
+          id: "assign",
+          materialId: "mat-abs",
+          selectionRef: "selection-body",
+          parameters: { manufacturingProcessId: "fdm", infillDensity: 35, wallCount: 3, layerOrientation: "y" },
+          status: "complete"
+        }]
+      }
+    });
 
-    expect(html).toContain("17.5 MPa");
+    expect(xHtml).toContain('<span>Governing load path</span><strong>X axis</strong>');
+    expect(xHtml).toContain('<span>Layer response</span><strong>Across layers · weakest</strong>');
+    expect(xHtml).toContain('<span>Effective modulus</span><strong>743.4 MPa</strong>');
+    expect(xHtml).toContain('<span>Effective yield</span><strong>8.316 MPa</strong>');
+    expect(yHtml).toContain('<span>Layer response</span><strong>Within layers</strong>');
+    expect(yHtml).toContain('<span>Effective modulus</span><strong>1,029.3 MPa</strong>');
+    expect(yHtml).toContain('<span>Effective yield</span><strong>16.63 MPa</strong>');
+    expect(rotatedYHtml).toContain('<span>Governing load path</span><strong>Y axis</strong>');
+    expect(rotatedYHtml).toContain('<span>Layer response</span><strong>Across layers · weakest</strong>');
   });
 
-  test("hides print process details when a printable material is not marked as 3D printed", () => {
-    const html = renderToStaticMarkup(
-      <RightPanel
-        activeStep="material"
-        project={project}
-        displayModel={displayModel}
-        study={{
-          ...study,
-          materialAssignments: [{ id: "assign", materialId: "mat-abs", selectionRef: "selection-body", parameters: { printed: false, infillDensity: 35, wallCount: 3, layerOrientation: "z" }, status: "complete" }]
-        }}
-        selectedFace={null}
-        viewMode="model"
-        resultMode="stress"
-        showDeformed={false}
-        showDimensions={false}
-        stressExaggeration={1}
-        resultSummary={resultSummary}
-        runProgress={0}
-        sampleModel="bracket"
-        draftLoadType="force"
-        draftLoadValue={500}
-        draftLoadDirection="-Z"
-        selectedLoadPoint={null}
-        selectedPayloadObject={null}
-        onFitView={vi.fn()}
-        onRotateModel={vi.fn()}
-        onResetModelOrientation={vi.fn()}
-        onLoadSample={vi.fn()}
-        onUploadModel={vi.fn()}
-        onSampleModelChange={vi.fn()}
-        onViewModeChange={vi.fn()}
-        onResultModeChange={vi.fn()}
-        onToggleDeformed={vi.fn()}
-        onToggleDimensions={vi.fn()}
-        onStressExaggerationChange={vi.fn()}
-        onAssignMaterial={vi.fn()}
-        onAddSupport={vi.fn()}
-        onUpdateSupport={vi.fn()}
-        onRemoveSupport={vi.fn()}
-        onDraftLoadTypeChange={vi.fn()}
-        onDraftLoadValueChange={vi.fn()}
-        onDraftLoadDirectionChange={vi.fn()}
-        onAddLoad={vi.fn()}
-        onUpdateLoad={vi.fn()}
-        onPreviewLoadEdit={vi.fn()}
-        onRemoveLoad={vi.fn()}
-        onGenerateMesh={vi.fn()}
-        onRunSimulation={vi.fn()}
-        canRunSimulation={false}
-        missingRunItems={[]}
-        onStepSelect={vi.fn()}
-      />
-    );
+  test("separates the base material from its compatible manufacturing processes", () => {
+    const html = renderPanel("material", {
+      study: {
+        ...study,
+        materialAssignments: [{
+          id: "assign",
+          materialId: "mat-abs",
+          selectionRef: "selection-body",
+          parameters: { manufacturingProcessId: "fdm", infillDensity: 35, wallCount: 3, layerOrientation: "z" },
+          status: "complete"
+        }]
+      }
+    });
 
-    expect(html).toContain("3D printed part");
-    expect(html).not.toContain("Print process");
-    expect(html).not.toContain("FDM");
+    expect(html).toContain("Base Material");
+    expect(html).toContain("ABS Plastic");
+    expect(html).toContain("Thermoplastic");
+    expect(html).toContain("Manufacturing Process");
+    expect(html).toContain("Compatible with ABS Plastic. Only validated options are shown.");
+    expect(html).toContain('role="radiogroup" aria-label="Manufacturing process"');
+    expect(html).toContain("CNC machining");
+    expect(html).toContain("Injection molding");
+    expect(html).toContain("FDM printing");
+    expect(html).not.toContain("SLA printing");
+    expect(html).toContain("FDM Settings");
+    expect(html).toContain("Infill density");
+    expect(html).toContain("Wall count");
+    expect(html).toContain("Build direction");
+    expect(html).toContain("Simulation Properties");
+    expect(html).toContain("Effective modulus");
+    expect(html).toContain("Effective density");
+    expect(html).toContain("Effective yield");
+    expect(html).toContain("Poisson ratio");
+    expect(html).toContain("Apply material &amp; process");
+    expect(html).not.toContain("3D printed part");
+  });
+
+  test("only shows FDM settings when FDM is the selected manufacturing process", () => {
+    const cncHtml = renderPanel("material", {
+      study: {
+        ...study,
+        materialAssignments: [{
+          id: "assign",
+          materialId: "mat-abs",
+          selectionRef: "selection-body",
+          parameters: { manufacturingProcessId: "cnc_machining" },
+          status: "complete"
+        }]
+      }
+    });
+
+    expect(cncHtml).toContain('role="radio" aria-checked="true"');
+    expect(cncHtml).toContain("CNC machining");
+    expect(cncHtml).toContain("FDM printing");
+    expect(cncHtml).not.toContain("FDM Settings");
+    expect(cncHtml).not.toContain("Infill density");
+    expect(cncHtml).not.toContain("Wall count");
+    expect(cncHtml).not.toContain("Build direction");
   });
 
   test("enables adding payload mass when a payload object is selected without a named face selection", () => {
@@ -1406,6 +1419,50 @@ describe("RightPanel payload mass controls", () => {
     expect(uploadedHtml).not.toContain("<span>Mass</span>");
     expect(sampleHtml).toContain("<span>Volume</span>");
     expect(sampleHtml).toContain("<span>Mass</span>");
+  });
+
+  test("renders an accessible repair action when uploaded STEP surfaces are open", () => {
+    const html = renderPanel("model", {
+      project: uploadedStepProject("repairable", "Open boundary loops were detected in this STEP model."),
+      onRepairModel: vi.fn()
+    });
+
+    expect(html).toContain('<div class="step-repair-card" role="alert" aria-label="Open STEP surfaces detected">');
+    expect(html).toContain("Open boundary loops were detected in this STEP model.");
+    expect(html).toContain("Fix open surfaces");
+    expect(html).not.toContain('<button class="outline-action wide" type="button" disabled="">');
+  });
+
+  test("disables the repair action and shows progress while fixing STEP surfaces", () => {
+    const html = renderPanel("model", {
+      project: uploadedStepProject("repairable"),
+      onRepairModel: vi.fn(),
+      isRepairingModel: true
+    });
+
+    expect(html).toMatch(/<button class="outline-action wide" type="button" disabled="">[\s\S]*Fixing model\.\.\.<\/button>/);
+    expect(html).not.toContain("Fix open surfaces");
+  });
+
+  test("confirms when uploaded STEP geometry was repaired", () => {
+    const html = renderPanel("model", {
+      project: uploadedStepProject("repaired")
+    });
+
+    expect(html).toContain("Geometry repair complete.");
+    expect(html).toContain("Open boundaries were converted into a closed solid");
+    expect(html).not.toContain("Fix open surfaces");
+  });
+
+  test("shows an unrepairable STEP warning without offering an automatic fix", () => {
+    const html = renderPanel("model", {
+      project: uploadedStepProject("unrepairable", "Automatic repair could not close every surface.")
+    });
+
+    expect(html).toContain('<p class="panel-warning" role="alert">');
+    expect(html).toContain("Automatic repair could not close every surface.");
+    expect(html).not.toContain("Fix open surfaces");
+    expect(html).not.toContain('aria-label="Open STEP surfaces detected"');
   });
 
   test("offers the parametric part builder in the model panel", () => {

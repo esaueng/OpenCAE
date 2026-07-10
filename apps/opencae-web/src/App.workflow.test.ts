@@ -19,7 +19,7 @@ describe("App workflow layout", () => {
   });
 
   test("keeps sample model and analysis changes on the model step", () => {
-    expect(appSource).toContain('await openProjectResponse(loadSampleProject(nextSample, nextAnalysisType), { nextStep: "model" });');
+    expect(appSource).toContain('await openProjectResponse(loadSampleProject(nextSample, nextAnalysisType), { actionHandle, nextStep: "model" });');
     expect(appSource).toContain("applyStep(options.nextStep);");
   });
 

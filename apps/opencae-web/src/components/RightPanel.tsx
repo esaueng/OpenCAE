@@ -1,14 +1,15 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { AlertTriangle, Anchor, ArrowDown, Check, ChevronDown, CircleHelp, Eye, Gauge, Grid3X3, Maximize2, Pause, Play, Plus, RotateCcw, Ruler, ScanLine, ShieldCheck, Upload, Weight, X } from "lucide-react";
-import { defaultPrintParametersFor, effectiveMaterialProperties, massKgForPayloadMaterial, normalizePrintParameters, payloadMaterialForId, payloadMaterials, starterMaterials, type PayloadMaterialCategory, type PrintMaterialParameters } from "@opencae/materials";
+import { AlertTriangle, Anchor, ArrowDown, Atom, Check, ChevronDown, ChevronRight, CircleHelp, Eye, Factory, Gauge, Grid3X3, Layers3, Maximize2, Pause, Play, Plus, RotateCcw, Ruler, ScanLine, ShieldCheck, Upload, Weight, Wrench, X } from "lucide-react";
+import { compatibleManufacturingProcessesFor, defaultManufacturingParametersFor, defaultManufacturingProcessIdFor, effectiveMaterialProperties, fdmPropertyFactorsFor, isManufacturingProcessCompatible, manufacturingParametersForAssignment, manufacturingProcessForId, massKgForPayloadMaterial, materialCategoryLabel, normalizeManufacturingParameters, payloadMaterialForId, payloadMaterials, starterMaterials, type ManufacturingParameters, type ManufacturingProcessId, type PayloadMaterialCategory } from "@opencae/materials";
 import { assessResultFailure, estimateAllowableLoadForSafetyFactor } from "@opencae/schema";
 import type { Constraint, DisplayFace, DisplayModel, DynamicSolverSettings, Load, MeshQuality, Project, ResultField, ResultProvenance, ResultSummary, RunTimingEstimate, SimulationFidelity, Study } from "@opencae/schema";
-import { inferCriticalPrintAxis } from "@opencae/study-core";
+import { inferGlobalCriticalPrintAxis } from "@opencae/study-core";
 import type { ResultMode, ViewMode } from "./CadViewer";
 import type { StepId } from "./StepBar";
-import { applicationPointForLoad, createViewerLoadMarkers, directionLabelForLoad, directionVectorForLabel, equivalentForceForLoad, loadMarkerOrdinalLabel, payloadObjectForLoad, unitsForLoadType, type LoadApplicationPoint, type LoadDirectionLabel, type LoadType, type PayloadLoadMetadata, type PayloadMassMode, type PayloadObjectSelection } from "../loadPreview";
+import { applicationPointForLoad, createViewerLoadMarkers, directionLabelForLoad, directionVectorForLabel, equivalentForceForLoad, LOAD_DIRECTION_LABELS, loadMarkerOrdinalLabel, payloadObjectForLoad, unitsForLoadType, type LoadApplicationPoint, type LoadDirectionLabel, type LoadType, type PayloadLoadMetadata, type PayloadMassMode, type PayloadObjectSelection } from "../loadPreview";
 import type { SampleAnalysisType, SampleModelId } from "../lib/api";
+import { stepGeometryMetadataForProject } from "../stepGeometryState";
 import { dimensionValuesForDisplayModel } from "../modelDimensions";
 import { formatModelOrientation, getModelOrientation, type RotationAxis } from "../modelOrientation";
 import { shouldShowSampleModelPicker } from "../modelPanelState";
@@ -67,6 +68,8 @@ interface RightPanelProps {
   onResetModelOrientation: () => void;
   onLoadSample: (sample?: SampleModelId, analysisType?: SampleAnalysisType) => void;
   onUploadModel: (file: File) => void;
+  onRepairModel?: () => void;
+  isRepairingModel?: boolean;
   onSampleModelChange: (sample: SampleModelId) => void;
   onSampleAnalysisTypeChange?: (analysisType: SampleAnalysisType) => void;
   onViewModeChange: (mode: ViewMode) => void;
@@ -130,7 +133,7 @@ export function RightPanel(props: RightPanelProps) {
   );
 }
 
-function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sampleModel, sampleAnalysisType = "static_stress", onFitView, onRotateModel, onResetModelOrientation, onViewModeChange, onToggleDimensions, onLoadSample, onUploadModel, onSampleModelChange, onSampleAnalysisTypeChange }: RightPanelProps) {
+function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sampleModel, sampleAnalysisType = "static_stress", onFitView, onRotateModel, onResetModelOrientation, onViewModeChange, onToggleDimensions, onLoadSample, onUploadModel, onRepairModel, isRepairingModel = false, onSampleModelChange, onSampleAnalysisTypeChange }: RightPanelProps) {
   const [confirmSampleLoad, setConfirmSampleLoad] = useState(false);
   const [pendingSampleModel, setPendingSampleModel] = useState<SampleModelId>(sampleModel);
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
@@ -145,6 +148,8 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sa
   const isNativeCadImport = Boolean(geometry?.metadata.nativeCadImport);
   const faceCount = Number(geometry?.metadata.faceCount ?? 0);
   const bodyCount = Number(geometry?.metadata.bodyCount ?? 0);
+  const stepGeometry = stepGeometryMetadataForProject(project);
+  const stepGeometryResolvedByMesh = Boolean(study.meshSettings.summary?.artifacts?.actualCoreModel);
   const sampleLabel = sampleOptionFor(pendingSampleModel).title;
   const sampleAnalysisLabel = sampleAnalysisType === "dynamic_structural" ? "Dynamic Structural" : "Static Stress";
   const sampleForceLabel = formatEquivalentForce(500, project.unitSystem);
@@ -237,6 +242,22 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sa
       ) : isUploadedProject ? (
         <Callout>{isNativeCadImport ? `${geometry.filename} is loaded as a selectable STEP import.` : uploadPreviewFormat ? `${geometry.filename} is loaded with a ${uploadPreviewFormat} viewport preview.` : `${geometry.filename} cannot be previewed in this local viewer. Replace it with STEP, STP, or STL.`}</Callout>
       ) : null}
+      {stepGeometry?.status === "repairable" && !stepGeometryResolvedByMesh && (
+        <div className="step-repair-card" role="alert" aria-label="Open STEP surfaces detected">
+          <p className="panel-warning"><AlertTriangle size={16} />{stepGeometry.message ?? "This STEP model has open or invalid surfaces and is not a closed simulation solid."}</p>
+          <button className="outline-action wide" type="button" onClick={onRepairModel} disabled={isRepairingModel || !onRepairModel}>
+            <Wrench size={16} />
+            {isRepairingModel ? "Fixing model..." : "Fix open surfaces"}
+          </button>
+          <p className="panel-copy">Fix model sews small gaps and may patch closed boundary loops. Review the repaired shape; face-based setup will be reset.</p>
+        </div>
+      )}
+      {(stepGeometry?.status === "unrepairable" || stepGeometry?.status === "invalid") && !stepGeometryResolvedByMesh && (
+        <p className="panel-warning" role="alert"><AlertTriangle size={16} />{stepGeometry.message ?? "This STEP model is not a closed solid and automatic repair could not produce one. Repair it in CAD and upload it again."}</p>
+      )}
+      {(stepGeometry?.status === "repaired" || (stepGeometryResolvedByMesh && stepGeometry?.status === "repairable")) && (
+        <Callout>Geometry repair complete. Open boundaries were converted into a closed solid for simulation; review the shape before relying on results.</Callout>
+      )}
       <Collapsible title="Create parametric part" subtitle="Analytic STEP solid" defaultOpen={isBlankProject}>
         <ParametricPartBuilder onCreatePart={onUploadModel} />
       </Collapsible>
@@ -298,128 +319,186 @@ function MaterialPanel({ project, displayModel, study, onAssignMaterial, onPrevi
   const current = currentAssignment?.materialId ?? "mat-aluminum-6061";
   const currentParameters = currentAssignment?.parameters ?? EMPTY_PARAMETERS;
   const [selectedMaterialId, setSelectedMaterialId] = useState(current);
-  const [printParameters, setPrintParameters] = useState<PrintMaterialParameters>(() => {
-    const material = materialForId(current);
-    return material.printProfile ? normalizePrintParameters(material, currentParameters) : defaultPrintParametersFor(material);
-  });
+  const [manufacturingParameters, setManufacturingParameters] = useState<ManufacturingParameters>(() =>
+    normalizeManufacturingParameters(materialForId(current), currentParameters)
+  );
   const [showLibrary, setShowLibrary] = useState(false);
+  const [compatibilityNote, setCompatibilityNote] = useState<string | null>(null);
 
   useEffect(() => {
     const material = materialForId(current);
     setSelectedMaterialId(current);
-    setPrintParameters(material.printProfile ? normalizePrintParameters(material, currentParameters) : defaultPrintParametersFor(material));
+    setManufacturingParameters(normalizeManufacturingParameters(material, currentParameters));
+    setCompatibilityNote(null);
   }, [current, currentParameters]);
 
   const selectedMaterial = materialForId(selectedMaterialId);
   const assignedMaterial = materialForId(current);
-  const printable = Boolean(selectedMaterial.printProfile);
-  const criticalLayerAxis = inferCriticalPrintAxis(study, displayModel.faces.map((face) => ({ entityId: face.id, center: face.center })));
-  const effectiveMaterial = effectiveMaterialProperties(selectedMaterial, printable ? { ...printParameters } : {}, { criticalLayerAxis });
-  const assignedPrintParameters = currentAssignment && assignedMaterial.printProfile ? normalizePrintParameters(assignedMaterial, currentParameters) : undefined;
-  const assignedDetail = assignedPrintParameters?.printed
-    ? `3D printed · ${assignedPrintParameters.infillDensity}% infill`
-    : "all bodies";
+  const selectedProcessId = manufacturingParameters.manufacturingProcessId ?? defaultManufacturingProcessIdFor(selectedMaterial);
+  const selectedProcess = manufacturingProcessForId(selectedProcessId)!;
+  const compatibleProcesses = compatibleManufacturingProcessesFor(selectedMaterial);
+  const processUsesBuildDirection = selectedProcess.settingsKind === "fdm" || selectedProcess.settingsKind === "build_direction";
+  const criticalLayerAxis = inferGlobalCriticalPrintAxis(study, displayModel.faces.map((face) => ({
+    entityId: face.id,
+    center: face.center,
+    ...(face.area ? { areaM2: face.area * 1e-6 } : {})
+  })), displayModel);
+  const effectiveMaterial = effectiveMaterialProperties(selectedMaterial, { ...manufacturingParameters }, { criticalLayerAxis });
+  const fdmFactors = fdmPropertyFactorsFor(selectedMaterial, manufacturingParameters, { criticalLayerAxis });
+  const assignedParameters = currentAssignment ? normalizeManufacturingParameters(assignedMaterial, currentParameters) : undefined;
+  const assignedProcess = assignedParameters?.manufacturingProcessId ? manufacturingProcessForId(assignedParameters.manufacturingProcessId) : undefined;
+  const assignedDetail = assignedProcess
+    ? `${assignedProcess.label}${assignedProcess.id === "fdm" ? ` · ${assignedParameters?.infillDensity}% infill` : ""}`
+    : "Process not selected";
+  const assignedSelectionLabel = study.geometryScope[0]?.label ?? displayModel.name;
 
   useEffect(() => {
-    onPreviewPrintLayerOrientation?.(printable && printParameters.printed ? printParameters.layerOrientation ?? "z" : null);
+    onPreviewPrintLayerOrientation?.(processUsesBuildDirection ? manufacturingParameters.layerOrientation ?? "z" : null);
     return () => onPreviewPrintLayerOrientation?.(undefined);
-  }, [onPreviewPrintLayerOrientation, printable, printParameters.layerOrientation, printParameters.printed]);
+  }, [manufacturingParameters.layerOrientation, onPreviewPrintLayerOrientation, processUsesBuildDirection]);
 
   function handleMaterialChange(materialId: string) {
     const material = materialForId(materialId);
+    const previousProcessId = manufacturingParameters.manufacturingProcessId;
+    const canKeepProcess = previousProcessId ? isManufacturingProcessCompatible(material, previousProcessId) : false;
+    const nextProcessId = canKeepProcess ? previousProcessId! : defaultManufacturingProcessIdFor(material);
+    const nextParameters = canKeepProcess
+      ? normalizeManufacturingParameters(material, { ...manufacturingParameters, manufacturingProcessId: nextProcessId })
+      : defaultManufacturingParametersFor(material, nextProcessId);
     setSelectedMaterialId(materialId);
-    setPrintParameters(material.printProfile ? defaultPrintParametersFor(material) : { printed: false, infillDensity: 100, wallCount: 1, layerOrientation: "z" });
+    setManufacturingParameters(nextParameters);
+    if (previousProcessId && !canKeepProcess) {
+      const previousProcess = manufacturingProcessForId(previousProcessId);
+      const nextProcess = manufacturingProcessForId(nextProcessId);
+      setCompatibilityNote(`${previousProcess?.label ?? "The selected process"} is not available for ${material.name}. Switched to ${nextProcess?.label ?? "a compatible process"}.`);
+    } else {
+      setCompatibilityNote(null);
+    }
   }
 
-  function updatePrintParameters(patch: Partial<PrintMaterialParameters>) {
-    setPrintParameters((previous) => normalizePrintParameters(selectedMaterial, { ...previous, ...patch }));
+  function handleProcessChange(processId: ManufacturingProcessId) {
+    setManufacturingParameters(defaultManufacturingParametersFor(selectedMaterial, processId));
+    setCompatibilityNote(null);
+  }
+
+  function updateManufacturingParameters(patch: Partial<ManufacturingParameters>) {
+    setManufacturingParameters((previous) => normalizeManufacturingParameters(selectedMaterial, { ...previous, ...patch }));
   }
 
   return (
-    <Panel title="Material" helper="Choose what the part is made of.">
-      <label className="field">
-        <HelpLabel helpId="materialLibrary">Material library</HelpLabel>
-        <select value={selectedMaterialId} onChange={(event) => handleMaterialChange(event.currentTarget.value)}>
-          {starterMaterials.map((material) => (
-            <option key={material.id} value={material.id}>{material.name}</option>
-          ))}
-        </select>
-      </label>
-      <button className="secondary wide" type="button" onClick={() => setShowLibrary(true)}>Open material library</button>
-      <div className="summary-box">
-        <Info label={printable && printParameters.printed ? "Effective modulus" : "Young's modulus"} value={formatMaterialStress(effectiveMaterial.youngsModulus, project.unitSystem)} />
-        <Info label="Poisson ratio" value={String(selectedMaterial.poissonRatio)} />
-        <Info label={printable && printParameters.printed ? "Effective density" : "Density"} value={formatDensity(effectiveMaterial.density, "kg/m^3", project.unitSystem)} />
-        <Info label={printable && printParameters.printed ? "Effective yield" : "Yield strength"} value={formatMaterialStress(effectiveMaterial.yieldStrength, project.unitSystem)} />
-        {printable && printParameters.printed && selectedMaterial.printProfile && <Info label="Print process" value={selectedMaterial.printProfile.process} />}
+    <Panel title="Material" helper="Choose the material, then how it is made.">
+      <SectionTitle helpId="materialLibrary">Base Material</SectionTitle>
+      <div className="base-material-card">
+        <button className="base-material-selector" type="button" onClick={() => setShowLibrary(true)} aria-label={`Change base material. Current material: ${selectedMaterial.name}`}>
+          <span className="base-material-icon"><Atom size={20} aria-hidden="true" /></span>
+          <span className="base-material-name">
+            <strong>{selectedMaterial.name}</strong>
+            <small>{materialCategoryLabel(selectedMaterial)}</small>
+          </span>
+          <span className="base-material-change">Change <ChevronRight size={15} aria-hidden="true" /></span>
+        </button>
+        <div className="base-material-properties">
+          <Info label="Modulus" value={formatMaterialStress(selectedMaterial.youngsModulus, project.unitSystem)} />
+          <Info label="Density" value={formatDensity(selectedMaterial.density, "kg/m^3", project.unitSystem)} />
+          <Info label="Yield strength" value={formatMaterialStress(selectedMaterial.yieldStrength, project.unitSystem)} />
+        </div>
       </div>
-      {printable && (
+
+      <SectionTitle helpId="manufacturingProcess">Manufacturing Process</SectionTitle>
+      <p className="material-process-helper">Compatible with {selectedMaterial.name}. Only validated options are shown.</p>
+      <div className="material-process-list" role="radiogroup" aria-label="Manufacturing process">
+        {compatibleProcesses.map((process) => {
+          const active = process.id === selectedProcessId;
+          return (
+            <button
+              key={process.id}
+              className={`material-process-option ${active ? "active" : ""}`}
+              type="button"
+              role="radio"
+              aria-checked={active}
+              onClick={() => handleProcessChange(process.id)}
+            >
+              <span className="material-process-radio" aria-hidden="true">{active ? <Check size={14} /> : null}</span>
+              <span className="material-process-icon"><ManufacturingProcessIcon processId={process.id} /></span>
+              <span className="material-process-copy">
+                <strong>{process.label}</strong>
+                <small>{process.description}</small>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      {compatibilityNote ? <p className="material-compatibility-note" role="status">{compatibilityNote}</p> : null}
+
+      {processUsesBuildDirection ? (
         <>
-          <SectionTitle helpId="printSettings">3D Print Settings</SectionTitle>
+          <SectionTitle helpId="printSettings">{selectedProcess.shortLabel} Settings</SectionTitle>
           <div className="print-settings">
-            <label className="toggle material-print-toggle">
-              <input
-                type="checkbox"
-                checked={Boolean(printParameters.printed)}
-                onChange={(event) => updatePrintParameters({ printed: event.currentTarget.checked })}
-              />
-              <HelpLabel helpId="printedPart">3D printed part</HelpLabel>
-            </label>
-            {printParameters.printed && (
-              <div className="print-settings-grid">
-                <label className="field">
-                  <HelpLabel helpId="infillDensity">Infill density</HelpLabel>
-                  <span className="input-with-unit">
-                    <input
-                      type="number"
-                      min="1"
-                      max="100"
-                      value={printParameters.infillDensity ?? 100}
-                      onChange={(event) => updatePrintParameters({ infillDensity: Number(event.currentTarget.value) })}
-                    />
-                    <span>%</span>
-                  </span>
-                </label>
-                <label className="field">
-                  <HelpLabel helpId="wallCount">Wall count</HelpLabel>
-                  <span className="input-with-unit">
-                    <input
-                      type="number"
-                      min="1"
-                      max="12"
-                      value={printParameters.wallCount ?? 1}
-                      onChange={(event) => updatePrintParameters({ wallCount: Number(event.currentTarget.value) })}
-                    />
-                    <span>walls</span>
-                  </span>
-                </label>
-                <label className="field">
-                  <HelpLabel helpId="layerDirection">Layer direction</HelpLabel>
-                  <select
-                    value={printParameters.layerOrientation ?? "z"}
-                    onChange={(event) => updatePrintParameters({ layerOrientation: event.currentTarget.value as PrintMaterialParameters["layerOrientation"] })}
-                  >
-                    <option value="z">Z build direction</option>
-                    <option value="x">X build direction</option>
-                    <option value="y">Y build direction</option>
-                  </select>
-                </label>
-              </div>
-            )}
+            <div className={`print-settings-grid ${selectedProcess.settingsKind === "fdm" ? "" : "build-direction-only"}`}>
+              {selectedProcess.settingsKind === "fdm" ? (
+                <>
+                  <label className="field">
+                    <HelpLabel helpId="infillDensity">Infill density</HelpLabel>
+                    <span className="input-with-unit">
+                      <input
+                        type="number"
+                        min="1"
+                        max="100"
+                        value={manufacturingParameters.infillDensity ?? 100}
+                        onChange={(event) => updateManufacturingParameters({ infillDensity: Number(event.currentTarget.value) })}
+                      />
+                      <span>%</span>
+                    </span>
+                  </label>
+                  <label className="field">
+                    <HelpLabel helpId="wallCount">Wall count</HelpLabel>
+                    <span className="input-with-unit">
+                      <input
+                        type="number"
+                        min="1"
+                        max="12"
+                        value={manufacturingParameters.wallCount ?? 1}
+                        onChange={(event) => updateManufacturingParameters({ wallCount: Number(event.currentTarget.value) })}
+                      />
+                      <span>walls</span>
+                    </span>
+                  </label>
+                </>
+              ) : null}
+              <label className="field">
+                <HelpLabel helpId="layerDirection">Build direction</HelpLabel>
+                <select
+                  value={manufacturingParameters.layerOrientation ?? "z"}
+                  onChange={(event) => updateManufacturingParameters({ layerOrientation: event.currentTarget.value as ManufacturingParameters["layerOrientation"] })}
+                >
+                  <option value="z">Z build direction</option>
+                  <option value="x">X build direction</option>
+                  <option value="y">Y build direction</option>
+                </select>
+              </label>
+            </div>
           </div>
         </>
-      )}
-      <button className="primary wide" onClick={() => onAssignMaterial(selectedMaterialId, printable ? { ...printParameters } : {})}>Apply material</button>
+      ) : null}
+
+      <SectionTitle>Simulation Properties</SectionTitle>
+      <div className="summary-box material-simulation-properties">
+        {fdmFactors ? <Info label="Governing load path" value={fdmFactors.criticalAxis ? `${fdmFactors.criticalAxis.toUpperCase()} axis` : "Conservative"} /> : null}
+        {fdmFactors ? <Info label="Layer response" value={fdmLayerResponseLabel(fdmFactors.loadPathRelation)} /> : null}
+        <Info label="Effective modulus" value={formatMaterialStress(effectiveMaterial.youngsModulus, project.unitSystem)} />
+        <Info label="Effective density" value={formatDensity(effectiveMaterial.density, "kg/m^3", project.unitSystem)} />
+        <Info label="Effective yield" value={formatMaterialStress(effectiveMaterial.yieldStrength, project.unitSystem)} />
+        <Info label="Poisson ratio" value={String(selectedMaterial.poissonRatio)} />
+      </div>
+
+      <button className="primary wide material-apply-button" type="button" onClick={() => onAssignMaterial(selectedMaterialId, manufacturingParametersForAssignment(selectedMaterial, manufacturingParameters))}>Apply material &amp; process</button>
       <MaterialLibraryModal
         open={showLibrary}
         selectedMaterialId={selectedMaterialId}
-        assignedSelectionLabel={study.geometryScope[0]?.label ?? displayModel.name}
+        assignedSelectionLabel={assignedSelectionLabel}
         unitSystem={project.unitSystem}
-        onSelectMaterial={handleMaterialChange}
         onApply={(materialId) => {
-          const material = materialForId(materialId);
-          const parameters = materialId === selectedMaterialId ? printParameters : defaultPrintParametersFor(material);
-          onAssignMaterial(materialId, material.printProfile ? { ...parameters } : {});
+          handleMaterialChange(materialId);
           setShowLibrary(false);
         }}
         onClose={() => setShowLibrary(false)}
@@ -427,13 +506,25 @@ function MaterialPanel({ project, displayModel, study, onAssignMaterial, onPrevi
       <SectionTitle>Assigned</SectionTitle>
       {currentAssignment ? (
         <div className="concept-card-list">
-          <ConceptCard icon={<Check size={18} />} title={assignedMaterial.name} detail={`bracket · ${assignedDetail}`} tone="accent" />
+          <ConceptCard icon={<Check size={18} />} title={assignedMaterial.name} detail={`${assignedSelectionLabel} · ${assignedDetail}`} tone="accent" />
         </div>
       ) : (
         <Callout>No material assigned</Callout>
       )}
     </Panel>
   );
+}
+
+function fdmLayerResponseLabel(relation: "within_layers" | "across_layers" | "conservative") {
+  if (relation === "within_layers") return "Within layers";
+  if (relation === "across_layers") return "Across layers · weakest";
+  return "Across layers · conservative";
+}
+
+function ManufacturingProcessIcon({ processId }: { processId: ManufacturingProcessId }) {
+  if (processId === "cnc_machining") return <Wrench size={18} aria-hidden="true" />;
+  if (processId === "injection_molding") return <Factory size={18} aria-hidden="true" />;
+  return <Layers3 size={18} aria-hidden="true" />;
 }
 
 function SupportsPanel({ selectedFace, study, onAddSupport, onUpdateSupport, onRemoveSupport }: RightPanelProps) {
@@ -564,7 +655,7 @@ function LoadsPanel({
       <label className="field">
         <HelpLabel helpId="loadDirection">Direction</HelpLabel>
         <select value={draftLoadDirection} onChange={(event) => onDraftLoadDirectionChange(event.currentTarget.value as LoadDirectionLabel)}>
-          {(["-Y", "+Y", "+X", "-X", "+Z", "-Z", "Normal"] as const).map((option) => (
+          {LOAD_DIRECTION_LABELS.map((option) => (
             <option key={option} value={option}>{directionOptionLabel(option)}</option>
           ))}
         </select>
@@ -673,6 +764,7 @@ function LoadEditorList({ study, displayModel, unitSystem, onUpdateLoad, onPrevi
         const units = String(load.parameters.units ?? unitsForLoadType(load.type));
         const displayLoad = loadValueForUnits(Number(load.parameters.value ?? 0), units, unitSystem);
         const selection = study.namedSelections.find((candidate) => candidate.id === load.selectionRef);
+        const selectedFace = displayModel.faces.find((candidate) => candidate.id === selection?.geometryRefs[0]?.entityId);
         const label = selection?.geometryRefs[0]?.label ?? "selected face";
         const payloadObject = payloadObjectForLoad(load);
         const payloadMaterial = load.type === "gravity" && typeof load.parameters.payloadMaterialId === "string" ? payloadMaterialForId(load.parameters.payloadMaterialId).name : "";
@@ -700,7 +792,7 @@ function LoadEditorList({ study, displayModel, unitSystem, onUpdateLoad, onPrevi
             <div className="editable-summary">
               <span className={`item-icon load-type-icon ${load.type}`}><LoadTypeIcon type={load.type} /></span>
               <strong>{loadLabel ? `${loadLabel} · ` : ""}{loadTypeLabel(load.type)} · {formatNumber(displayLoad.value)} {displayLoad.units}</strong>
-              <small>{label}{pointLabel} · {directionLabelForLoad(load, displayModel)} direction{equivalentForce}</small>
+              <small>{label}{pointLabel} · {directionOptionLabel(directionLabelForLoad(load, displayModel, selectedFace))} direction{equivalentForce}</small>
               <button
                 className="remove-glyph"
                 type="button"
@@ -741,7 +833,10 @@ function LoadEditForm({ load, study, displayModel, unitSystem, onSave, onCancel,
     const initialUnits = String(load.parameters.units ?? unitsForLoadType(load.type));
     return formatInputValue(loadValueForUnits(Number(load.parameters.value ?? 500), initialUnits, unitSystem).value);
   });
-  const [direction, setDirection] = useState<LoadDirectionLabel>(directionLabelForLoad(load, displayModel));
+  const selectedRef = study.namedSelections.find((selection) => selection.id === load.selectionRef);
+  const selectedFace = selectedRef?.geometryRefs[0];
+  const selectedDisplayFace = displayModel.faces.find((face) => face.id === selectedFace?.entityId);
+  const [direction, setDirection] = useState<LoadDirectionLabel>(directionLabelForLoad(load, displayModel, selectedDisplayFace));
   const [payloadMaterialId, setPayloadMaterialId] = useState(String(load.parameters.payloadMaterialId ?? "payload-steel"));
   const [payloadMassMode, setPayloadMassMode] = useState<PayloadMassMode>(load.parameters.payloadMassMode === "manual" ? "manual" : "material");
   const units = unitsForLoadType(type);
@@ -756,16 +851,14 @@ function LoadEditForm({ load, study, displayModel, unitSystem, onSave, onCancel,
     ? { payloadMaterialId, ...(payloadVolumeM3 ? { payloadVolumeM3 } : {}), payloadMassMode }
     : {}, [payloadMassMode, payloadMaterialId, payloadVolumeM3, type]);
   const selectedPayloadMaterial = payloadMaterialForId(payloadMaterialId);
-  const selectedRef = study.namedSelections.find((selection) => selection.id === load.selectionRef);
-  const selectedFace = selectedRef?.geometryRefs[0];
-  const directionFace: DisplayFace = useMemo(() => ({
+  const directionFace: DisplayFace = useMemo(() => selectedDisplayFace ?? ({
     id: selectedFace?.entityId ?? "selected-face",
     label: selectedFace?.label ?? "selected face",
     color: "#fff",
     center: [0, 0, 0],
-    normal: direction === "Normal" && Array.isArray(load.parameters.direction) ? load.parameters.direction as [number, number, number] : [0, 1, 0],
+    normal: [0, 1, 0],
     stressValue: 0
-  }), [direction, load.parameters.direction, selectedFace?.entityId, selectedFace?.label]);
+  }), [selectedDisplayFace, selectedFace?.entityId, selectedFace?.label]);
   const previewLoad = useMemo(() => editedLoadForForm(load, type, value, displayUnits, units, direction, directionFace, displayModel, payloadMetadata, editedValue), [direction, directionFace, displayModel, displayUnits, editedValue, load, payloadMetadata, type, units, value]);
 
   useEffect(() => {
@@ -812,8 +905,8 @@ function LoadEditForm({ load, study, displayModel, unitSystem, onSave, onCancel,
       <label className="field">
         <HelpLabel helpId="loadDirection">Direction</HelpLabel>
         <select value={direction} onChange={(event) => setDirection(event.currentTarget.value as LoadDirectionLabel)}>
-          {(["-Y", "+Y", "+X", "-X", "+Z", "-Z", "Normal"] as const).map((option) => (
-            <option key={option} value={option}>{option}</option>
+          {LOAD_DIRECTION_LABELS.map((option) => (
+            <option key={option} value={option}>{directionOptionLabel(option)}</option>
           ))}
         </select>
       </label>
@@ -840,6 +933,7 @@ function editedLoadForForm(load: Load, type: LoadType, value: string, displayUni
       value: overrideValue ?? loadValueForUnits(Number(value), displayUnits, "SI").value,
       units,
       direction: directionVectorForLabel(direction, directionFace, displayModel),
+      directionMode: direction,
       ...(type === "gravity" ? payloadMetadata : {})
     }
   };
@@ -1835,6 +1929,7 @@ function defaultValueForLoadType(type: LoadType) {
 
 function directionOptionLabel(direction: LoadDirectionLabel) {
   if (direction === "Normal") return "Face normal";
+  if (direction === "Opposite normal") return "Opposite face normal";
   return `Global ${direction}`;
 }
 

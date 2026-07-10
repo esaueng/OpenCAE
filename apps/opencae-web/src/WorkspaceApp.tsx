@@ -2,10 +2,10 @@ import { lazy, startTransition, Suspense, useCallback, useEffect, useMemo, useRe
 import { isRunResultReadyStatus } from "@opencae/schema";
 import type { Constraint, DisplayFace, DisplayModel, DynamicSolverSettings, Load, NamedSelection, Project, ResultField, ResultRenderBounds, ResultSummary, RunEvent, RunTimingEstimate, SimulationFidelity, Study } from "@opencae/schema";
 import { RotateCcw, Save } from "lucide-react";
-import { addLoad, addSupport, assignMaterial, cancelRun, createProject, generateMesh, getResults, importLocalProject, loadSampleProject, renameProject, runSimulation, subscribeToRun, updateStudy as saveStudyPatch, uploadModel, type SampleAnalysisType, type SampleModelId } from "./lib/api";
+import { addLoad, addSupport, assignMaterial, cancelRun, createProject, generateMesh, getResults, importLocalProject, loadSampleProject, renameProject, repairUploadedStepModel, runSimulation, subscribeToRun, updateStudy as saveStudyPatch, uploadModel, type SampleAnalysisType, type SampleModelId } from "./lib/api";
 import { cancelWasmMeshing } from "./lib/wasmMeshing";
 import { resolveSolverBackend } from "./workers/opencaeCoreSolve";
-import { normalizePrintParameters, starterMaterials } from "@opencae/materials";
+import { manufacturingProcessForId, normalizeManufacturingParameters, starterMaterials } from "@opencae/materials";
 import { BottomPanel, type WorkspaceLogEntry } from "./components/BottomPanel";
 import { OpenCaeLogoMark } from "./components/OpenCaeLogoMark";
 import { RightPanel } from "./components/RightPanel";
@@ -40,6 +40,7 @@ import { displayModelForUnits, loadValueForUnits, resultFieldForUnits, resultSum
 import { supportDisplayLabel } from "./supportLabels";
 import { nextSelectedPayloadObject, shouldClearPayloadSelectionOnViewerMiss } from "./payloadSelection";
 import { hasLegacyStepUploadFaces, hasUnresolvedStepFaceSelections, healStepFaceSelections, legacyStepFaceHealMessage } from "./stepFaceHealing";
+import { stepGeometryNeedsRepair } from "./stepGeometryState";
 import { createLocalDynamicStructuralStudy, createLocalStaticStressStudy } from "./localProjectFactory";
 import { createPackedResultPlaybackCache, createResultFrameCache, hasDynamicPlaybackFrames, solverMeshSummaryFromResults, withDerivedSurfaceSafetyFactorFields, type SolverMeshSummary } from "./resultFields";
 import { packResultFieldsForPlayback, packedPreparedPlaybackFrameOrdinal, playbackFieldsForResultMode, playbackMemoryBudgetBytes, type PackedPreparedPlaybackCache, type PreparedPlaybackFrameCache } from "./resultPlaybackCache";
@@ -110,6 +111,13 @@ type MutableResultPlaybackFrameController = ResultPlaybackFrameController & {
   setPackedFrame: (cache: PackedPreparedPlaybackCache, framePosition: number) => void;
 };
 
+type ProjectActionHandle = {
+  clientId: string;
+  generation: number;
+  signal: AbortSignal;
+  isCurrent: () => boolean;
+};
+
 interface WorkspaceAppProps {
   initialAction?: WorkspaceInitialAction | null;
   restoredWorkspace?: AutosavedWorkspace | null;
@@ -173,6 +181,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const [previewPrintLayerOrientation, setPreviewPrintLayerOrientation] = useState<PrintLayerOrientation | null | undefined>(undefined);
   const [isStepbarCollapsed, setIsStepbarCollapsed] = useState(false);
   const [showBoundaryConditionMenu, setShowBoundaryConditionMenu] = useState(false);
+  const [isRepairingModel, setIsRepairingModel] = useState(false);
   const [singleKeyShortcutsEnabled, setSingleKeyShortcutsEnabled] = useState(() => {
     try {
       return window.localStorage.getItem("opencae.shortcuts.singleKey") !== "off";
@@ -184,6 +193,10 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const activeRunSourceRef = useRef<EventSource | null>(null);
   const processingRunIdRef = useRef<string | null>(null);
   const projectRef = useRef<Project | null>(project);
+  const projectActionGenerationRef = useRef(0);
+  const projectActionAbortRef = useRef<AbortController | null>(null);
+  const projectActionSourceRef = useRef<Project | null>(null);
+  const projectActionClientIdRef = useRef<string | null>(null);
   const autosaveWriteFailureNotifiedRef = useRef(false);
   const autosaveDegradedNotifiedRef = useRef(false);
   const stepFaceHealNotifiedRef = useRef<string | null>(null);
@@ -199,15 +212,19 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   if (!resultPlaybackFrameControllerRef.current) {
     resultPlaybackFrameControllerRef.current = createResultPlaybackFrameController();
   }
+  if (!projectActionClientIdRef.current) {
+    projectActionClientIdRef.current = createProjectActionClientId();
+  }
 
   const study = project?.studies[0] ?? null;
   const assignedPrintLayerOrientation = useMemo<PrintLayerOrientation | null>(() => {
     const assignment = study?.materialAssignments[0];
     if (!assignment) return null;
     const material = starterMaterials.find((candidate) => candidate.id === assignment.materialId);
-    if (!material?.printProfile) return null;
-    const parameters = normalizePrintParameters(material, assignment.parameters ?? {});
-    return parameters.printed ? parameters.layerOrientation ?? "z" : null;
+    if (!material) return null;
+    const parameters = normalizeManufacturingParameters(material, assignment.parameters ?? {});
+    const process = parameters.manufacturingProcessId ? manufacturingProcessForId(parameters.manufacturingProcessId) : undefined;
+    return process?.settingsKind === "fdm" || process?.settingsKind === "build_direction" ? parameters.layerOrientation ?? "z" : null;
   }, [study?.materialAssignments]);
   const printLayerOrientation = printLayerOrientationForViewer(assignedPrintLayerOrientation, previewPrintLayerOrientation);
   const selectedFace = useMemo(() => displayModel?.faces.find((face) => face.id === selectedFaceId) ?? null, [displayModel, selectedFaceId]);
@@ -298,14 +315,21 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const runReadiness = useMemo(() => readinessForStudy(study), [study]);
   const canRunSimulation = runReadiness.every((item) => item.done) && !solverRunning;
   const missingRunItems = runReadiness.filter((item) => !item.done).map((item) => item.label);
-  const effectiveMissingRunItems = missingRunItems;
-  const effectiveCanRunSimulation = canRunSimulation;
+  const hasActualVolumeMesh = Boolean(study?.meshSettings.summary?.artifacts?.actualCoreModel);
+  const openStepNeedsRepair = stepGeometryNeedsRepair(project) && !hasActualVolumeMesh;
+  const effectiveMissingRunItems = openStepNeedsRepair ? [...missingRunItems, "Closed STEP solid"] : missingRunItems;
+  const effectiveCanRunSimulation = canRunSimulation && !openStepNeedsRepair;
   const canUndoAction = undoStack.length > 0;
   const canRedoAction = redoStack.length > 0;
 
   useEffect(() => {
     projectRef.current = project;
+    if (projectActionAbortRef.current && project !== projectActionSourceRef.current) {
+      invalidateProjectAction();
+    }
   }, [project]);
+
+  useEffect(() => () => projectActionAbortRef.current?.abort(), []);
 
   useEffect(() => {
     if (!initialAction || initialActionConsumedRef.current) return;
@@ -536,6 +560,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           value,
           units: unitsForLoadType(draftLoadType),
           direction: directionVectorForLabel(draftLoadDirection, face, displayModel ?? undefined),
+          directionMode: draftLoadDirection,
           applicationPoint: point,
           ...(isPayloadMass && selectedPayloadObject ? { payloadObject: selectedPayloadObject } : {}),
           ...payloadMetadata
@@ -778,9 +803,23 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
 
   async function openProjectResponse(
     action: Promise<{ project: Project; displayModel: DisplayModel; message?: string; results?: LocalResultBundle }>,
-    options?: { nextStep?: StepId }
+    options: { actionHandle: ProjectActionHandle; nextStep?: StepId; staleMessage?: string }
   ) {
-    const response = await action;
+    let response: { project: Project; displayModel: DisplayModel; message?: string; results?: LocalResultBundle };
+    try {
+      response = await action;
+    } catch (error) {
+      completeProjectAction(options.actionHandle);
+      throw error;
+    }
+    if (!options.actionHandle.isCurrent()) {
+      completeProjectAction(options.actionHandle);
+      if (options.staleMessage) pushMessage(options.staleMessage);
+      return false;
+    }
+    // Clear the request token before setting project state; the project-change
+    // effect treats any state change during an active action as superseding it.
+    completeProjectAction(options.actionHandle);
     // Stop watching any run from the previous project so it cannot overwrite the new project's results.
     activeRunSourceRef.current?.close();
     activeRunSourceRef.current = null;
@@ -788,6 +827,11 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     setProcessingRunId(null);
     setRunTiming(null);
     setHomeRequested(false);
+    // Keep the imperative snapshot in sync immediately. The effect below is
+    // intentionally retained for ordinary state mutations, but async model
+    // operations must not have a render-sized window where they can compare
+    // against the previous project and overwrite a newer workspace.
+    projectRef.current = response.project;
     setProject(response.project);
     setDisplayModel(response.displayModel);
     requestDefaultHomeView();
@@ -805,7 +849,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       setActiveRunId(response.results.activeRunId ?? restoredRunId);
       setCompletedRunId(restoredRunId);
       setRunProgress(100);
-      if (options?.nextStep) {
+      if (options.nextStep) {
         applyStep(options.nextStep);
         setViewMode("model");
       } else {
@@ -826,29 +870,102 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       setCompletedRunId(nextCompletedRunId);
     }
     pushMessage(response.message ?? "Project opened.");
+    return true;
   }
 
   async function handleLoadSample(nextSample = sampleModel, nextAnalysisType = sampleAnalysisType) {
+    const actionHandle = beginProjectAction(projectRef.current);
     setSampleModel(nextSample);
     setSampleAnalysisType(nextAnalysisType);
-    await openProjectResponse(loadSampleProject(nextSample, nextAnalysisType), { nextStep: "model" });
+    await openProjectResponse(loadSampleProject(nextSample, nextAnalysisType), { actionHandle, nextStep: "model" });
   }
 
   function handleCreateProject() {
-    void openProjectResponse(createProject());
+    const actionHandle = beginProjectAction(projectRef.current);
+    void openProjectResponse(createProject(), { actionHandle });
   }
 
   function handleOpenProject(file: File) {
-    void openProjectResponse(importLocalProject(file)).catch((error: unknown) => {
+    const actionHandle = beginProjectAction(projectRef.current);
+    void openProjectResponse(importLocalProject(file), { actionHandle }).catch((error: unknown) => {
+      if (isAbortError(error)) return;
       pushMessage(error instanceof Error ? error.message : "Could not open local project.");
     });
   }
 
   function handleUploadModel(file: File) {
     if (!project) return;
-    void openProjectResponse(uploadModel(project.id, file, project)).catch((error: unknown) => {
+    const sourceProject = project;
+    const actionHandle = beginProjectAction(sourceProject);
+    const extension = file.name.trim().split(".").pop()?.toLowerCase();
+    pushMessage(extension === "step" || extension === "stp" ? "Uploading model and checking STEP topology..." : "Uploading model...");
+    void openProjectResponse(uploadModel(project.id, file, project, {
+      signal: actionHandle.signal,
+      isCurrent: actionHandle.isCurrent,
+      clientId: actionHandle.clientId,
+      generation: actionHandle.generation
+    }), { actionHandle }).catch((error: unknown) => {
+      if (isAbortError(error)) return;
       pushMessage(error instanceof Error ? error.message : "Could not upload model.");
     });
+  }
+
+  async function handleRepairModel() {
+    if (!project || isRepairingModel) return;
+    const actionHandle = beginProjectAction(project);
+    setIsRepairingModel(true);
+    pushMessage("Repairing open STEP surfaces...");
+    try {
+      await openProjectResponse(repairUploadedStepModel(project.id, project, {
+        signal: actionHandle.signal,
+        isCurrent: actionHandle.isCurrent,
+        clientId: actionHandle.clientId,
+        generation: actionHandle.generation
+      }), {
+        actionHandle,
+        nextStep: "model",
+        staleMessage: "The repaired model was not applied because the workspace changed during repair."
+      });
+    } catch (error) {
+      if (isAbortError(error)) {
+        pushMessage("Model repair stopped because the workspace changed.");
+        return;
+      }
+      pushMessage(`Model repair failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setIsRepairingModel(false);
+    }
+  }
+
+  function beginProjectAction(sourceProject: Project | null): ProjectActionHandle {
+    invalidateProjectAction();
+    const controller = new AbortController();
+    const generation = projectActionGenerationRef.current;
+    projectActionAbortRef.current = controller;
+    projectActionSourceRef.current = sourceProject;
+    return {
+      clientId: projectActionClientIdRef.current!,
+      generation,
+      signal: controller.signal,
+      isCurrent: () =>
+        projectActionGenerationRef.current === generation &&
+        projectActionAbortRef.current === controller &&
+        !controller.signal.aborted &&
+        projectRef.current === sourceProject
+    };
+  }
+
+  function completeProjectAction(actionHandle: ProjectActionHandle): void {
+    if (projectActionGenerationRef.current !== actionHandle.generation) return;
+    projectActionAbortRef.current = null;
+    projectActionSourceRef.current = null;
+  }
+
+  function invalidateProjectAction(): void {
+    projectActionGenerationRef.current += 1;
+    projectActionAbortRef.current?.abort();
+    projectActionAbortRef.current = null;
+    projectActionSourceRef.current = null;
   }
 
   async function handleSaveProject() {
@@ -952,7 +1069,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       id: `load-${crypto.randomUUID()}`,
       type,
       selectionRef: selection.id,
-      parameters: { value, units: unitsForLoadType(type), direction: directionVectorForLabel(direction, face, displayModel ?? undefined), ...(applicationPoint ? { applicationPoint } : {}), ...(payloadObject ? { payloadObject } : {}), ...(type === "gravity" ? payloadMetadata : {}) },
+      parameters: { value, units: unitsForLoadType(type), direction: directionVectorForLabel(direction, face, displayModel ?? undefined), directionMode: direction, ...(applicationPoint ? { applicationPoint } : {}), ...(payloadObject ? { payloadObject } : {}), ...(type === "gravity" ? payloadMetadata : {}) },
       status: "complete"
     };
     await updateStudy(
@@ -1416,6 +1533,8 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           onResetModelOrientation={handleResetModelOrientation}
           onLoadSample={handleLoadSample}
           onUploadModel={handleUploadModel}
+          onRepairModel={() => void handleRepairModel()}
+          isRepairingModel={isRepairingModel}
           onSampleModelChange={handleLoadSample}
           onSampleAnalysisTypeChange={(analysisType) => void handleLoadSample(sampleModel, analysisType)}
           onViewModeChange={setViewMode}
@@ -1463,7 +1582,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
               return;
             }
             if (selection) {
-              updateStudy(addLoad(study.id, type, value, selection.id, directionVectorForLabel(direction, face, displayModel ?? undefined), applicationPoint, payloadObject, study, payloadMetadata));
+              updateStudy(addLoad(study.id, type, value, selection.id, directionVectorForLabel(direction, face, displayModel ?? undefined), applicationPoint, payloadObject, study, payloadMetadata, direction));
               setSelectedLoadPoint(null);
               if (type === "gravity") setSelectedPayloadObject(null);
               return;
@@ -1778,6 +1897,15 @@ async function saveProjectToLocalDisk(project: Project, displayModel: DisplayMod
   link.click();
   URL.revokeObjectURL(url);
   return savedAt;
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === "AbortError";
+}
+
+function createProjectActionClientId(): string {
+  if (typeof globalThis.crypto?.randomUUID === "function") return globalThis.crypto.randomUUID();
+  return `workspace-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
 
 function UndoIcon() {

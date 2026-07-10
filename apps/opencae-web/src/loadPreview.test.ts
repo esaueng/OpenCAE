@@ -46,6 +46,24 @@ describe("load preview helpers", () => {
     expect(directionVectorForLabel("+Z", face)).toEqual([0, 0, 1]);
     expect(directionVectorForLabel("-Z", face)).toEqual([0, 0, -1]);
     expect(directionVectorForLabel("Normal", face)).toEqual([0, 0, 1]);
+    expect(directionVectorForLabel("Opposite normal", face)).toEqual([0, 0, -1]);
+  });
+
+  test("recognizes face-normal and opposite-face-normal vectors", () => {
+    expect(directionLabelForVector([0, 0, 1], undefined, face)).toBe("Normal");
+    expect(directionLabelForVector([0, 0, -1], undefined, face)).toBe("Opposite normal");
+  });
+
+  test("prefers a saved direction mode when a global axis matches the face normal", () => {
+    const load = {
+      id: "load-global-z",
+      type: "force",
+      selectionRef: "selection-side",
+      parameters: { value: 100, direction: [0, 0, -1], directionMode: "-Z" },
+      status: "complete"
+    } as Load;
+
+    expect(directionLabelForLoad(load, undefined, face)).toBe("-Z");
   });
 
   test("maps viewer global directions through legacy sample orientation when saving", () => {
@@ -279,6 +297,19 @@ describe("load preview helpers", () => {
 
     expect(loadMarkerFromLoad(load, study, 0)?.directionLabel).toBe("-Z");
     expect(directionLabelForLoad(load)).toBe("-Z");
+  });
+
+  test("keeps an opposite-normal load labeled against its selected face", () => {
+    const load: Load = {
+      id: "load-opposite-normal",
+      type: "force",
+      selectionRef: "selection-side",
+      parameters: { value: 250, units: "N", direction: [0, 0, -1] },
+      status: "complete"
+    };
+
+    expect(loadMarkerFromLoad(load, study, 0, false, legacySampleDisplayModel)?.directionLabel).toBe("Opposite normal");
+    expect(directionLabelForLoad(load, legacySampleDisplayModel, face)).toBe("Opposite normal");
   });
 
   test("labels legacy sample model-space directions by viewer global axes", () => {

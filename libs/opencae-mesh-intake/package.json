@@ -8,7 +8,8 @@
   },
   "dependencies": {
     "@loumalouomega/gmsh-wasm": "0.1.2",
-    "@opencae/core": "workspace:*"
+    "@opencae/core": "workspace:*",
+    "@opencae/materials": "workspace:*"
   },
   "devDependencies": {
     "@opencae/core-adapter": "workspace:*",

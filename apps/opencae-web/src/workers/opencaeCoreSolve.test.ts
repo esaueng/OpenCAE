@@ -323,6 +323,46 @@ describe("OpenCAE Core browser solver adapter", () => {
     expect(result.model.materials[0]?.yieldStrength).toBeLessThan(60000000);
   });
 
+  test("uses display-face identifiers when applying the critical FDM layer penalty", () => {
+    const printedStudy = {
+      ...staticStudy,
+      materialAssignments: [{
+        id: "mat-assignment",
+        materialId: "mat-pla",
+        selectionRef: "selection-body",
+        parameters: { manufacturingProcessId: "fdm", infillDensity: 100, wallCount: 3, layerOrientation: "x" },
+        status: "complete"
+      }]
+    } satisfies Study;
+
+    const result = buildOpenCaeCoreModelForStudy(printedStudy, displayModel);
+
+    expect(result.model.materials[0]?.youngModulus).toBeCloseTo(3_500_000_000 * 0.65);
+    expect(result.model.materials[0]?.yieldStrength).toBeCloseTo(60_000_000 * 0.35);
+  });
+
+  test("carries weak X-build stiffness and strength through the production Core solve", { timeout: 60000 }, () => {
+    const printedStudy = (layerOrientation: "x" | "y"): Study => ({
+      ...staticStudy,
+      materialAssignments: [{
+        id: "mat-assignment",
+        materialId: "mat-pla",
+        selectionRef: "selection-body",
+        parameters: { manufacturingProcessId: "fdm", infillDensity: 100, wallCount: 3, layerOrientation },
+        status: "complete"
+      }]
+    });
+    const xBuild = trySolveOpenCaeCoreStudy({ study: printedStudy("x"), runId: "run-fdm-x", displayModel });
+    const yBuild = trySolveOpenCaeCoreStudy({ study: printedStudy("y"), runId: "run-fdm-y", displayModel });
+
+    expect(xBuild.ok).toBe(true);
+    expect(yBuild.ok).toBe(true);
+    if (!xBuild.ok || !yBuild.ok) throw new Error("Expected both directional FDM studies to solve.");
+    expect(xBuild.result.summary.maxStress).toBeCloseTo(yBuild.result.summary.maxStress, 3);
+    expect(xBuild.result.summary.maxDisplacement).toBeGreaterThan(yBuild.result.summary.maxDisplacement * 1.25);
+    expect(xBuild.result.summary.safetyFactor).toBeLessThan(yBuild.result.summary.safetyFactor * 0.6);
+  });
+
   test("does not build a local Core Cloud model for bracket geometry that should be meshed in the container", () => {
     expect(() => buildOpenCaeCoreModelForStudy(bracketDemoProject.studies[0]!, bracketDisplayModel)).toThrow(/must be meshed into a Core volume mesh before solving/i);
   });

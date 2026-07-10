@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ChevronDown, Grid3X3, Plus, Search, X } from "lucide-react";
-import { starterMaterials } from "@opencae/materials";
+import { compatibleManufacturingProcessesFor, materialCategoryLabel, starterMaterials } from "@opencae/materials";
 import { isRunResultReadyStatus } from "@opencae/schema";
 import type { Material, ResultField, Study } from "@opencae/schema";
 import { useFocusTrap } from "../hooks/useFocusTrap";
@@ -278,25 +278,38 @@ interface MaterialLibraryModalProps {
   selectedMaterialId: string;
   assignedSelectionLabel: string;
   unitSystem: UnitSystem;
-  onSelectMaterial: (materialId: string) => void;
   onApply: (materialId: string) => void;
   onClose: () => void;
 }
 
-export function MaterialLibraryModal({ open, selectedMaterialId, assignedSelectionLabel, unitSystem, onSelectMaterial, onApply, onClose }: MaterialLibraryModalProps) {
+export function MaterialLibraryModal({ open, selectedMaterialId, assignedSelectionLabel, unitSystem, onApply, onClose }: MaterialLibraryModalProps) {
   const dialogRef = useFocusTrap<HTMLElement>(open, onClose);
   const [query, setQuery] = useState("");
-  const selectedMaterial = materialForId(selectedMaterialId);
+  const [draftMaterialId, setDraftMaterialId] = useState(selectedMaterialId);
+  useEffect(() => {
+    if (open) {
+      setDraftMaterialId(selectedMaterialId);
+      setQuery("");
+    }
+  }, [open, selectedMaterialId]);
+  const selectedMaterial = materialForId(draftMaterialId);
   const groupedMaterials = useMemo(() => {
     const normalized = query.trim().toLowerCase();
-    return starterMaterials.filter((material) => !normalized || material.name.toLowerCase().includes(normalized));
+    const filtered = starterMaterials.filter((material) => !normalized || material.name.toLowerCase().includes(normalized));
+    return [
+      { id: "metal", label: "Metals", materials: filtered.filter((material) => material.category === "metal") },
+      { id: "plastic", label: "Thermoplastics", materials: filtered.filter((material) => material.category === "plastic") },
+      { id: "composite", label: "Composites", materials: filtered.filter((material) => material.category === "composite") },
+      { id: "resin", label: "Photopolymer resins", materials: filtered.filter((material) => material.category === "resin") }
+    ].filter((group) => group.materials.length > 0);
   }, [query]);
+  const compatibleProcesses = compatibleManufacturingProcessesFor(selectedMaterial);
   if (!open) return null;
   return (
     <div className="workflow-modal-backdrop" role="presentation">
       <section ref={dialogRef} className="workflow-modal material-library-dialog" role="dialog" aria-modal="true" aria-labelledby="material-library-title">
         <header className="workflow-modal-header">
-          <h2 id="material-library-title">Material</h2>
+          <h2 id="material-library-title">Material library</h2>
           <button className="icon-button" type="button" onClick={onClose} aria-label="Close material library">
             <X size={18} />
           </button>
@@ -308,30 +321,48 @@ export function MaterialLibraryModal({ open, selectedMaterialId, assignedSelecti
               <input value={query} onChange={(event) => setQuery(event.currentTarget.value)} placeholder="Search materials" />
               <Search size={18} />
             </label>
-            <h3>DEFAULT</h3>
-            <div className="material-list">
-              {groupedMaterials.map((material) => (
-                <button key={material.id} className={material.id === selectedMaterialId ? "active" : ""} type="button" aria-pressed={material.id === selectedMaterialId} onClick={() => onSelectMaterial(material.id)}>
-                  {material.name}
-                </button>
-              ))}
-            </div>
+            {groupedMaterials.map((group) => (
+              <div className="material-list-group" key={group.id}>
+                <h3>{group.label}</h3>
+                <div className="material-list">
+                  {group.materials.map((material) => {
+                    const processCount = compatibleManufacturingProcessesFor(material).length;
+                    return (
+                      <button key={material.id} className={material.id === draftMaterialId ? "active" : ""} type="button" aria-pressed={material.id === draftMaterialId} onClick={() => setDraftMaterialId(material.id)}>
+                        <span>
+                          <strong>{material.name}</strong>
+                          <small>{processCount} compatible {processCount === 1 ? "process" : "processes"}</small>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+            {groupedMaterials.length === 0 ? <p className="material-list-empty">No materials match “{query}”.</p> : null}
           </aside>
           <article className="material-preview-pane">
             <h3>{selectedMaterial.name}</h3>
+            <p className="material-preview-category">{materialCategoryLabel(selectedMaterial)}</p>
             <PreviewRow label="Material behavior" value="Linear elastic" />
             <PreviewRow label="Directional dependency" value="Isotropic" />
             <PreviewRow label="Young's modulus" value={formatMaterialStress(selectedMaterial.youngsModulus, unitSystem)} />
             <PreviewRow label="Poisson's ratio" value={String(selectedMaterial.poissonRatio)} />
             <PreviewRow label="Density" value={formatDensity(selectedMaterial.density, "kg/m^3", unitSystem)} />
+            <div className="material-compatible-processes">
+              <strong>Compatible processes</strong>
+              <ul>
+                {compatibleProcesses.map((process) => <li key={process.id}>{process.label}</li>)}
+              </ul>
+            </div>
             <div className="assigned-volumes">
-              <strong>Assigned Volumes</strong>
+              <strong>Apply to</strong>
               <span>{assignedSelectionLabel}</span>
             </div>
           </article>
         </div>
         <footer className="workflow-modal-footer">
-          <button className="primary" type="button" onClick={() => onApply(selectedMaterialId)}>Apply</button>
+          <button className="primary" type="button" onClick={() => onApply(draftMaterialId)}>Select material</button>
           <button className="secondary" type="button" onClick={onClose}>Cancel</button>
         </footer>
       </section>

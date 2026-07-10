@@ -243,7 +243,7 @@ describe("app persistence", () => {
         stressExaggeration: 1,
         draftLoadType: "pressure",
         draftLoadValue: 12,
-        draftLoadDirection: "+Z",
+        draftLoadDirection: "Opposite normal",
         sampleModel: "plate",
         sampleAnalysisType: "dynamic_structural",
         activeRunId: "",
@@ -260,6 +260,7 @@ describe("app persistence", () => {
     expect(parseAutosavedWorkspacePayload(JSON.stringify(snapshot))?.ui.sampleAnalysisType).toBe("dynamic_structural");
     expect(parseAutosavedWorkspacePayload(JSON.stringify(snapshot))?.ui.selectedLoadPoint).toBeNull();
     expect(parseAutosavedWorkspacePayload(JSON.stringify(snapshot))?.ui.selectedPayloadObject).toBeNull();
+    expect(parseAutosavedWorkspacePayload(JSON.stringify(snapshot))?.ui.draftLoadDirection).toBe("Opposite normal");
     expect(parseAutosavedWorkspacePayload("{bad json")).toBeNull();
     expect(parseAutosavedWorkspacePayload(JSON.stringify({ ...snapshot, version: 99 }))).toBeNull();
   });

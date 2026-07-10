@@ -8,7 +8,7 @@ import {
 } from "@opencae/schema";
 import { BRACKET_GEOMETRY_MIGRATION_NOTE, refreshBracketSampleGeometry } from "./bracketGeometryMigration";
 import { buildLocalProjectFile, type EmbeddedModelFile, type LocalProjectFile, type LocalResultBundle } from "./projectFile";
-import type { LoadDirectionLabel, LoadType } from "./loadPreview";
+import { LOAD_DIRECTION_LABELS, type LoadDirectionLabel, type LoadType } from "./loadPreview";
 import type { LoadApplicationPoint, PayloadObjectSelection } from "./loadPreview";
 import type { WorkspaceLogEntry } from "./components/BottomPanel";
 import type { ResultMode, ViewMode } from "./components/CadViewer";
@@ -75,7 +75,7 @@ const VIEW_MODES: ViewMode[] = ["model", "mesh", "results"];
 const RESULT_MODES: ResultMode[] = ["stress", "displacement", "safety_factor", "velocity", "acceleration"];
 const THEMES: ThemeMode[] = ["dark", "light"];
 const LOAD_TYPES: LoadType[] = ["force", "pressure", "gravity"];
-const LOAD_DIRECTIONS: LoadDirectionLabel[] = ["-Y", "+Y", "+X", "-X", "+Z", "-Z", "Normal"];
+const LOAD_DIRECTIONS: LoadDirectionLabel[] = [...LOAD_DIRECTION_LABELS];
 const SAMPLE_MODELS: SampleModelId[] = ["bracket", "plate", "cantilever"];
 const SAMPLE_ANALYSIS_TYPES: SampleAnalysisType[] = ["static_stress", "dynamic_structural"];
 

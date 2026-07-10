@@ -43,9 +43,12 @@ export {
 export {
   configureGmshWasmModuleOptions,
   generateBoxWithBoreStep,
+  inspectStepGeometry,
   loadGmshWasm,
   meshGeoScriptToMshV2,
   meshStepToMshV2,
+  repairStepGeometry,
+  StepGeometryError,
   type GeoMeshResult,
   type GmshApi,
   type MeshPhase,
@@ -53,6 +56,16 @@ export {
   type MeshTimings,
   type MeshWasmOptions,
   type StepMeshResult,
-  type StepMeshWasmOptions
+  type StepMeshWasmOptions,
+  type StepGeometryInspection,
+  type StepGeometryRepairReport,
+  type StepGeometryRepairResult
 } from "./wasmMesher";
-export type { CloudAnalysisType, CloudStudyLike, CloudVolumeElement, CoreVolumeMeshArtifact, SourceSelectionMetadata } from "./types";
+export type {
+  CloudAnalysisType,
+  CloudStudyLike,
+  CloudVolumeElement,
+  CoreVolumeMeshArtifact,
+  ElementOrderFallbackMetadata,
+  SourceSelectionMetadata
+} from "./types";

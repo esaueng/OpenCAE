@@ -5,6 +5,7 @@ import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { configureTextBuilder } from "troika-three-text";
 import type { ThreeEvent } from "@react-three/fiber";
 import type { DisplayFace, DisplayModel, MeshSummary, ResultField, ResultRenderBounds } from "@opencae/schema";
+import { globalBuildAxisToModelAxis } from "@opencae/study-core";
 import { meshVolumeM3FromTriangles, type Triangle } from "@opencae/units";
 import * as THREE from "three";
 import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
@@ -1209,6 +1210,7 @@ function BracketModel({
         <PrintLayerOverlay
           bounds={modelKind === "uploaded" && uploadedPreviewBounds ? uploadedPreviewBounds : dimensionBoundsForDisplayModel(displayModel)}
           orientation={printLayerOrientation}
+          displayModel={displayModel}
         />
       )}
       {!suppressProceduralResultSolid && <HoleRims kind={modelKind} />}
@@ -1540,9 +1542,14 @@ interface PrintLayerVisualization {
   planes: Array<Array<[number, number, number]>>;
 }
 
-export function printLayerVisualizationForBounds(bounds: THREE.Box3 | null, orientation: PrintLayerOrientation): PrintLayerVisualization | null {
+export function printLayerVisualizationForBounds(
+  bounds: THREE.Box3 | null,
+  orientation: PrintLayerOrientation,
+  displayModel?: DisplayModel
+): PrintLayerVisualization | null {
   if (!bounds || bounds.isEmpty()) return null;
-  const axisIndex = orientation === "x" ? 0 : orientation === "y" ? 2 : 1;
+  const modelAxis = globalBuildAxisToModelAxis(orientation, displayModel);
+  const axisIndex = modelAxis === "x" ? 0 : modelAxis === "y" ? 1 : 2;
   const axis = new THREE.Vector3(axisIndex === 0 ? 1 : 0, axisIndex === 1 ? 1 : 0, axisIndex === 2 ? 1 : 0);
   const min = bounds.min.toArray() as [number, number, number];
   const max = bounds.max.toArray() as [number, number, number];
@@ -1579,8 +1586,11 @@ function layerPlanePoints(min: [number, number, number], max: [number, number, n
   });
 }
 
-function PrintLayerOverlay({ bounds, orientation }: { bounds: THREE.Box3 | null; orientation: PrintLayerOrientation }) {
-  const visualization = useMemo(() => printLayerVisualizationForBounds(bounds, orientation), [bounds, orientation]);
+function PrintLayerOverlay({ bounds, orientation, displayModel }: { bounds: THREE.Box3 | null; orientation: PrintLayerOrientation; displayModel: DisplayModel }) {
+  const visualization = useMemo(
+    () => printLayerVisualizationForBounds(bounds, orientation, displayModel),
+    [bounds, displayModel, orientation]
+  );
   if (!visualization) return null;
   return (
     <group renderOrder={18}>

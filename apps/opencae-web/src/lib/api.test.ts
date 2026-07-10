@@ -119,6 +119,63 @@ describe("api", () => {
     expect(response.project.geometryFiles[0]?.metadata.embeddedModel).toEqual(expectedEmbeddedModel);
   });
 
+  test("does not persist a model upload after its workspace generation is superseded", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const file = new TestFile([sizedAsciiStl], "superseded.stl", { type: "model/stl" });
+    await expect(uploadModel("project-1", file, project, {
+      isCurrent: () => false
+    })).rejects.toMatchObject({ name: "AbortError" });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  test("sends a conditional monotonic token with guarded model uploads", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify({ project, displayModel, message: "Uploaded." }), {
+      headers: { "content-type": "application/json" }
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const file = new TestFile([sizedAsciiStl], "newer.stl", { type: "model/stl" });
+    await uploadModel("project-1", file, project, {
+      clientId: "workspace-session",
+      generation: 7,
+      isCurrent: () => true
+    });
+
+    const requestInit = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    const requestBody = JSON.parse(requestInit.body as string) as Record<string, unknown>;
+    expect(requestBody.modelMutation).toEqual({
+      clientId: "workspace-session",
+      generation: 7,
+      expectedGeometryId: "geometry-1",
+      expectedUpdatedAt: project.updatedAt
+    });
+  });
+
+  test("does not fall back to a local stale upload when persistence is cancelled", async () => {
+    const controller = new AbortController();
+    const fetchMock = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      const rejectAsAborted = () => {
+        const error = new Error("The operation was aborted.");
+        error.name = "AbortError";
+        reject(error);
+      };
+      if (init?.signal?.aborted) rejectAsAborted();
+      else init?.signal?.addEventListener("abort", rejectAsAborted, { once: true });
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const file = new TestFile([sizedAsciiStl], "cancelled.stl", { type: "model/stl" });
+    const upload = uploadModel("project-1", file, project, { signal: controller.signal });
+    const rejectedUpload = expect(upload).rejects.toMatchObject({ name: "AbortError" });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    controller.abort();
+
+    await rejectedUpload;
+  });
+
   test("uploads a model locally when the API is unavailable", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new TypeError("NetworkError when attempting to fetch resource."))));
 
@@ -274,6 +331,44 @@ describe("api", () => {
     expect(response.message).toBe("Material assigned to Imported body.");
   });
 
+  test("rejects an incompatible explicit material and manufacturing process before calling the API", async () => {
+    const fetchMock = vi.fn(async () => new Response("missing", { status: 404 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(assignMaterial(
+      "study-1",
+      "mat-abs",
+      { manufacturingProcessId: "sla" },
+      study
+    )).rejects.toThrow(/SLA printing.*not compatible with ABS/i);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  test("sends and persists a compatible explicit material and manufacturing process", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response("missing", { status: 404 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const parameters = {
+      manufacturingProcessId: "fdm",
+      printed: true,
+      infillDensity: 35,
+      wallCount: 3,
+      layerOrientation: "z"
+    };
+
+    const response = await assignMaterial("study-1", "mat-abs", parameters, study);
+    const requestInit = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
+
+    expect(JSON.parse(requestInit?.body as string)).toEqual({
+      materialId: "mat-abs",
+      parameters
+    });
+    expect(response.study.materialAssignments[0]).toMatchObject({
+      materialId: "mat-abs",
+      parameters
+    });
+  });
+
   test("adds supports locally when the API is unavailable", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("missing", { status: 404 })));
 
@@ -302,6 +397,14 @@ describe("api", () => {
       status: "complete"
     });
     expect(response.message).toBe("Load added.");
+  });
+
+  test("preserves the selected face-relative direction mode when adding locally", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("missing", { status: 404 })));
+
+    const response = await addLoad("study-1", "force", 500, "selection-face-1", [0, 0, -1], [1, 2, 3], null, study, {}, "Opposite normal");
+
+    expect(response.study.loads[0]?.parameters.directionMode).toBe("Opposite normal");
   });
 
   test("adds payload material metadata locally while preserving value as mass", async () => {
@@ -360,6 +463,49 @@ describe("api", () => {
       }
     });
     expect(response.message).toBe("Mesh generated locally.");
+  });
+
+  test("does not mask a STEP topology failure with a completed preset estimate", async () => {
+    const stepText = readFileSync(resolve(__dirname, "../../../../libs/opencae-mesh-intake/fixtures/box-with-bore.step"), "utf8");
+    const progress: string[] = [];
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    class FailingStepWorker {
+      private listeners = new Map<string, (event: MessageEvent | ErrorEvent) => void>();
+
+      addEventListener(type: string, listener: (event: MessageEvent | ErrorEvent) => void) {
+        this.listeners.set(type, listener);
+      }
+
+      postMessage(request: { id: string; operation: string }) {
+        queueMicrotask(() => this.listeners.get("message")?.({
+          data: {
+            id: request.id,
+            operation: request.operation,
+            ok: false,
+            error: { name: "StepGeometryError", message: "STEP geometry has open surfaces." }
+          }
+        } as MessageEvent));
+      }
+
+      terminate() {}
+    }
+    vi.stubGlobal("Worker", FailingStepWorker);
+    const uploadedStepDisplay = {
+      ...coreDisplayModel,
+      id: "display-uploaded-step",
+      nativeCad: {
+        format: "step" as const,
+        filename: "open-part.step",
+        contentBase64: Buffer.from(stepText).toString("base64")
+      }
+    } satisfies DisplayModel;
+
+    await expect(generateMesh("study-1", "medium", study, uploadedStepDisplay, (message) => progress.push(message)))
+      .rejects.toMatchObject({ name: "StepGeometryError", message: "STEP geometry has open surfaces." });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(progress.some((message) => message.includes("Falling back to preset estimates"))).toBe(false);
   });
 
   test("runs explicit OpenCAE Core Local static solves without local estimate fallback", async () => {

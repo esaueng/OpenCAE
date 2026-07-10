@@ -361,11 +361,21 @@ function connectedComponentCountForElements(elements: Array<{ connectivity: numb
 
 function summarizeMeshQuality(coordinates: number[], elements: Array<{ type: ElementType; connectivity: number[] }>): CoreVolumeMeshArtifact["metadata"]["meshQuality"] {
   // Tet10 corner nodes are the leading four entries, so the corner-tet volume works for both types.
-  const volumes = elements.map((element) => tet4Volume(coordinates, element.connectivity));
+  let minTetVolume = Number.POSITIVE_INFINITY;
+  let maxTetVolume = Number.NEGATIVE_INFINITY;
+  let invertedElementCount = 0;
+  for (const element of elements) {
+    const volume = tet4Volume(coordinates, element.connectivity);
+    // Keep each Math call bounded: spreading a production-sized volume array
+    // can exceed the JavaScript engine's argument limit and overflow the stack.
+    minTetVolume = Math.min(minTetVolume, volume);
+    maxTetVolume = Math.max(maxTetVolume, volume);
+    if (!Number.isFinite(volume) || volume <= 0) invertedElementCount += 1;
+  }
   return {
-    minTetVolume: volumes.length ? Math.min(...volumes) : 0,
-    maxTetVolume: volumes.length ? Math.max(...volumes) : 0,
-    invertedElementCount: volumes.filter((volume) => !Number.isFinite(volume) || volume <= 0).length
+    minTetVolume: elements.length ? minTetVolume : 0,
+    maxTetVolume: elements.length ? maxTetVolume : 0,
+    invertedElementCount
   };
 }
 

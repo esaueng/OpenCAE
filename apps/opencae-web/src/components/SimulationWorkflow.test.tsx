@@ -104,29 +104,37 @@ describe("static simulation workflow components", () => {
     expect(html).toContain("setup-status complete");
   });
 
-  test("renders material library search, grouped defaults, preview fields, and apply actions", () => {
+  test("renders grouped material categories with compatible-process preview and select action", () => {
     const html = renderToStaticMarkup(
       <MaterialLibraryModal
         open
         selectedMaterialId="mat-abs"
         assignedSelectionLabel="root"
         unitSystem="SI"
-        onSelectMaterial={vi.fn()}
         onApply={vi.fn()}
         onClose={vi.fn()}
       />
     );
 
-    expect(html).toContain("Material");
+    expect(html).toContain("Material library");
     expect(html).toContain("Search materials");
-    expect(html).toContain("DEFAULT");
+    expect(html).toContain("Metals");
+    expect(html).toContain("Thermoplastics");
+    expect(html).toContain("Composites");
+    expect(html).toContain("Photopolymer resins");
     expect(html).toContain("ABS Plastic");
+    expect(html).toContain("3 compatible processes");
+    expect(html).toContain("Compatible processes");
+    expect(html).toContain("CNC machining");
+    expect(html).toContain("Injection molding");
+    expect(html).toContain("FDM printing");
+    expect(html).not.toContain("SLA printing</li>");
     expect(html).toContain("Young&#x27;s modulus");
-    expect(html).toContain("Poisson");
+    expect(html).toContain("Poisson&#x27;s ratio");
     expect(html).toContain("Density");
-    expect(html).toContain("Assigned Volumes");
+    expect(html).toContain("Apply to");
     expect(html).toContain("root");
-    expect(html).toContain("Apply");
+    expect(html).toContain("Select material");
     expect(html).toContain("Cancel");
   });
 
