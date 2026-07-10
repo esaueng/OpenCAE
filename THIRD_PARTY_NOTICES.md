@@ -54,6 +54,19 @@ and the GPL-free opt-out build (`VITE_WASM_MESHING=0`).
 
 ## JavaScript and TypeScript Dependencies
 
+### jsPDF / jspdf-autotable
+
+- Purpose: Client-side generation and tabular layout of OpenCAE simulation reports.
+- License: MIT.
+- Source: https://github.com/parallax/jsPDF and https://github.com/simonbengtsson/jsPDF-AutoTable
+
+### IBM Plex Sans
+
+- Purpose: Embedded report typography (Regular and SemiBold weights).
+- Copyright: Copyright 2017 IBM Corp.
+- License: SIL Open Font License 1.1.
+- Source: https://github.com/IBM/plex
+
 OpenCAE workspace packages declare their own source code as Apache-2.0, but
 package dependencies and transitive dependencies are licensed separately by
 their respective authors. Generated dependency notice reports should be

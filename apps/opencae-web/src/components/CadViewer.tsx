@@ -61,6 +61,7 @@ interface CadViewerProps {
   onMeasureDisplayModelDimensions?: (dimensions: NonNullable<DisplayModel["dimensions"]>) => void;
   onResultRenderBoundsChange?: (bounds: ResultRenderBounds | null) => void;
   onViewerInteractionChange?: (interacting: boolean) => void;
+  onRegisterCapture?: (capture: (() => string) | null) => void;
 }
 
 // Troika's worker-based typesetter rehydrates its code with new Function()
@@ -265,6 +266,7 @@ export function CadViewer(props: CadViewerProps) {
           viewAxis={props.viewAxis}
           viewAxisSignal={props.viewAxisSignal}
         />
+        <CaptureBridge register={props.onRegisterCapture} />
         <color attach="background" args={[viewportBackground]} />
         <ambientLight intensity={effectiveViewMode === "results" || isLightTheme ? 1.4 : 0.75} />
         <directionalLight position={[4, 6, 3]} intensity={effectiveViewMode === "results" || isLightTheme ? 1.45 : 2.2} />
@@ -459,6 +461,20 @@ function ViewerInvalidator({
     viewAxis,
     viewAxisSignal
   ]);
+  return null;
+}
+
+function CaptureBridge({ register }: { register?: (capture: (() => string) | null) => void }) {
+  const { camera, gl, scene } = useThree();
+  useEffect(() => {
+    if (!register) return undefined;
+    const capture = () => {
+      gl.render(scene, camera);
+      return gl.domElement.toDataURL("image/png");
+    };
+    register(capture);
+    return () => register(null);
+  }, [camera, gl, register, scene]);
   return null;
 }
 

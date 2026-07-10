@@ -1383,6 +1383,18 @@ describe("RightPanel payload mass controls", () => {
     expect(html).not.toContain("Result mode");
   });
 
+  test("offers one-click report generation with busy and error states", () => {
+    const idle = renderPanel("results", { onGenerateReport: vi.fn() });
+    const busy = renderPanel("results", { onGenerateReport: vi.fn(), reportBusy: true });
+    const failed = renderPanel("results", { onGenerateReport: vi.fn(), reportError: "Capture failed." });
+
+    expect(idle).toContain("Generate report");
+    expect(busy).toContain("Generating…");
+    expect(busy).toContain('disabled=""');
+    expect(failed).toContain('role="alert"');
+    expect(failed).toContain("Capture failed.");
+  });
+
   test("hides the sample Volume and Mass rows for blank and uploaded projects", () => {
     const blankHtml = renderPanel("model");
     const uploadedHtml = renderPanel("model", {

@@ -1,9 +1,9 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { AlertTriangle, Anchor, ArrowDown, Atom, Check, ChevronDown, ChevronRight, CircleHelp, Eye, Factory, Gauge, Grid3X3, Layers3, Maximize2, Pause, Play, Plus, RotateCcw, Ruler, ScanLine, ShieldCheck, Upload, Weight, Wrench, X } from "lucide-react";
+import { AlertTriangle, Anchor, ArrowDown, Atom, Check, ChevronDown, ChevronRight, CircleHelp, Eye, Factory, FileDown, Gauge, Grid3X3, Layers3, Maximize2, Pause, Play, Plus, RotateCcw, Ruler, ScanLine, ShieldCheck, Upload, Weight, Wrench, X } from "lucide-react";
 import { compatibleManufacturingProcessesFor, defaultManufacturingParametersFor, defaultManufacturingProcessIdFor, effectiveMaterialProperties, fdmPropertyFactorsFor, isManufacturingProcessCompatible, manufacturingParametersForAssignment, manufacturingProcessForId, massKgForPayloadMaterial, materialCategoryLabel, normalizeManufacturingParameters, payloadMaterialForId, payloadMaterials, starterMaterials, type ManufacturingParameters, type ManufacturingProcessId, type PayloadMaterialCategory } from "@opencae/materials";
 import { assessResultFailure, estimateAllowableLoadForSafetyFactor } from "@opencae/schema";
-import type { Constraint, DisplayFace, DisplayModel, DynamicSolverSettings, Load, MeshQuality, Project, ResultField, ResultProvenance, ResultSummary, RunTimingEstimate, SimulationFidelity, Study } from "@opencae/schema";
+import type { Constraint, DisplayFace, DisplayModel, DynamicSolverSettings, Load, MeshQuality, Project, ResultField, ResultSummary, RunTimingEstimate, SimulationFidelity, Study } from "@opencae/schema";
 import { inferGlobalCriticalPrintAxis } from "@opencae/study-core";
 import type { StepId } from "./StepBar";
 import { applicationPointForLoad, createViewerLoadMarkers, directionLabelForLoad, directionVectorForLabel, equivalentForceForLoad, LOAD_DIRECTION_LABELS, loadMarkerOrdinalLabel, payloadObjectForLoad, unitsForLoadType, type LoadApplicationPoint, type LoadDirectionLabel, type LoadType, type PayloadLoadMetadata, type PayloadMassMode } from "../loadPreview";
@@ -17,7 +17,7 @@ import { shouldShowSampleModelPicker } from "../modelPanelState";
 import { SETTING_HELP, type SettingHelpId, type SettingHelpVisual } from "../settingHelp";
 import { supportDisplayLabel } from "../supportLabels";
 import { getViewportTooltipPosition } from "../tooltipPosition";
-import { forceForUnits, formatDensity, formatMass, formatMaterialStress, formatResultProvenanceLabel, formatVolume, legacyResultWarningForProvenance, loadValueForUnits, type UnitSystem } from "../unitDisplay";
+import { forceForUnits, formatDensity, formatMass, formatMaterialStress, formatMeshSourceLabel, formatResultMetric, formatResultProvenanceLabel, formatVolume, hasResultUnit, legacyResultWarningForProvenance, loadValueForUnits, solverMethodForResult, solverRunnerLabelForResult, type UnitSystem } from "../unitDisplay";
 import { canNavigateToStep } from "../appShellState";
 import { MaterialLibraryModal } from "./SimulationWorkflow";
 import { ParametricPartBuilder } from "./ParametricPartBuilder";
@@ -58,6 +58,10 @@ interface RightPanelProps {
   runProgress: number;
   runError?: string | null;
   runTiming?: RunTimingEstimate | null;
+  onGenerateReport?: () => Promise<void>;
+  reportBusy?: boolean;
+  reportError?: string | null;
+  reportDisabled?: boolean;
   sampleModel: SampleModelId;
   sampleAnalysisType?: SampleAnalysisType;
   draftLoadType: LoadType;
@@ -1369,7 +1373,11 @@ function ResultsPanelContent({
   onResultPlaybackReverseLoopChange,
   onResultModeChange,
   onToggleDeformed,
-  onStressExaggerationChange
+  onStressExaggerationChange,
+  onGenerateReport,
+  reportBusy = false,
+  reportError,
+  reportDisabled = false
 }: RightPanelProps & { resultSummary: ResultSummary }) {
   const [targetSafetyFactor, setTargetSafetyFactor] = useState(1.5);
   const [draftStressExaggeration, setDraftStressExaggeration] = useState(stressExaggeration);
@@ -1434,6 +1442,12 @@ function ResultsPanelContent({
 
   return (
     <Panel title="Results" helper="View stress and displacement directly on the 3D model.">
+      {onGenerateReport && (
+        <button className="primary wide" type="button" disabled={reportBusy || reportDisabled} onClick={() => void onGenerateReport()}>
+          <FileDown size={18} />{reportBusy ? "Generating…" : "Generate report"}
+        </button>
+      )}
+      {reportError && <p className="panel-warning" role="alert"><AlertTriangle size={16} />{reportError}</p>}
       <div className={`failure-assessment ${assessment.status}`}>
         <span className="assessment-icon"><AssessmentIcon size={20} /></span>
         <span>
@@ -1575,48 +1589,11 @@ function ResultsPanelContent({
   );
 }
 
-function solverMethodForResult(resultSummary: ResultSummary, study: Study): string {
-  const provenanceMethod = (resultSummary.provenance as Record<string, unknown> | undefined)?.coreSolver;
-  if (typeof provenanceMethod === "string" && provenanceMethod) return provenanceMethod;
-  if (resultSummary.transient || study.type === "dynamic_structural") return "mdof_dynamic";
-  return "sparse_static";
-}
-
 function resultContractHasMissingUnits(summary: ResultSummary, fields: ResultField[]): boolean {
   return !hasResultUnit(summary.maxStressUnits) ||
     !hasResultUnit(summary.maxDisplacementUnits) ||
     !hasResultUnit(summary.reactionForceUnits) ||
     fields.some((field) => !hasResultUnit(field.units));
-}
-
-function hasResultUnit(units: string | undefined): units is string {
-  return typeof units === "string" && units.length > 0 && units !== "undefined";
-}
-
-function formatResultMetric(value: number, units: string | undefined): string {
-  return hasResultUnit(units) ? `${value} ${units}` : "Unit missing";
-}
-
-function solverRunnerLabelForResult(provenance: ResultProvenance | undefined): string {
-  // The browser pipeline keeps the runner's solver id for golden byte-parity;
-  // runnerVersion "browser-*" is the honest local marker (plan 015; a distinct
-  // solver id is tracked as open question 4).
-  if (provenance?.runnerVersion?.startsWith("browser-")) return "in-browser solve worker";
-  return provenance?.solver === "opencae-core-cloud" ? "cloud container" : "local core worker";
-}
-
-function formatMeshSourceLabel(meshSource: ResultProvenance["meshSource"] | undefined, displayModel?: DisplayModel): string {
-  if (meshSource === "actual_volume_mesh") {
-    // Sample projects are meshed in the cloud from a simplified procedural
-    // descriptor (no hole features); claiming "actual" would overstate fidelity.
-    if (displayModel?.coreCloudGeometry?.kind === "sample_procedural") return "Procedural sample mesh (simplified)";
-    return "Actual volume mesh";
-  }
-  if (meshSource === "structured_block_core") return "Structured block Core";
-  if (meshSource === "opencae_core_tet4") return "OpenCAE Core Tet4";
-  if (meshSource === "structured_block_proxy" || meshSource === "display_bounds_proxy") return "OpenCAE Core Preview";
-  if (typeof meshSource === "string" && meshSource) return meshSource.replaceAll("_", " ");
-  return "--";
 }
 
 export function rangeProgressPercent(value: number, min: number, max: number) {

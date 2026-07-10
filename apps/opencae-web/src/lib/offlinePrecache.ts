@@ -25,7 +25,7 @@
  * No "webmanifest": vite-plugin-pwa injects manifest.webmanifest itself, so
  * globbing it too would duplicate the entry.
  */
-export const PRECACHE_GLOB_PATTERNS = ["**/*.{js,css,html,png,wasm,gz,json}", "_headers"];
+export const PRECACHE_GLOB_PATTERNS = ["**/*.{js,css,html,png,ttf,wasm,gz,json}", "_headers"];
 
 /**
  * Extra script imported by the generated Workbox service worker. It reloads
@@ -85,7 +85,7 @@ export function requiredOfflineUrls(distFiles: string[]): string[] {
     .filter((file) => {
       if (SERVICE_WORKER_FILE_PATTERN.test(file)) return false;
       if (RAW_GMSH_WASM_PATTERN.test(file)) return false; // deleted post-compress; must not be required OR present
-      return /\.(js|css|html|png|wasm|webmanifest)$/.test(file) || GMSH_WASM_GZ_PATTERN.test(file) || file === GMSH_WASM_MANIFEST_URL;
+      return /\.(js|css|html|png|ttf|wasm|webmanifest)$/.test(file) || GMSH_WASM_GZ_PATTERN.test(file) || file === GMSH_WASM_MANIFEST_URL;
     })
     .sort();
 }
