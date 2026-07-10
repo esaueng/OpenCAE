@@ -139,6 +139,12 @@ function uploadedStepProject(status: StepGeometryMetadata["status"], message?: s
 }
 
 describe("RightPanel payload mass controls", () => {
+  test("offers the opposite face normal as a load direction", () => {
+    const markup = renderPanel("loads");
+
+    expect(markup).toContain('<option value="Opposite normal">Opposite face normal</option>');
+  });
+
   test("maps range slider values to a full visual fill at the maximum", () => {
     expect(rangeProgressPercent(1, 1, 4)).toBe(0);
     expect(rangeProgressPercent(2.5, 1, 4)).toBe(50);

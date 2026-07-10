@@ -116,7 +116,7 @@ export const SETTING_HELP: Record<SettingHelpId, SettingHelp> = {
   },
   loadDirection: {
     title: "Direction",
-    body: "Chooses the load direction in global axes or along the selected face normal. With Z-up, -Z usually means downward gravity.",
+    body: "Chooses the load direction in global axes, along the selected face normal, or opposite the face normal. With Z-up, -Z usually means downward gravity.",
     visual: "axis"
   },
   meshQuality: {
