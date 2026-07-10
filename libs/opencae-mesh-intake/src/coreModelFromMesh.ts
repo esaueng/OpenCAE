@@ -244,7 +244,11 @@ export function mapSelectionToSurfaceSet(input: SelectionMappingInput): SurfaceS
   const geometric = geometricFallback(input);
   if (geometric) return recordMapping(input, "geometric", geometric, geometric.facets.length);
 
-  throw new Error(`OpenCAE Core Cloud could not map selection ${input.selectionRef} to a high-confidence ${input.role} surface set.`);
+  const roleLabel = input.role === "fixed_support" ? "support" : "load";
+  throw new Error(
+    `OpenCAE Core Cloud could not map selection ${input.selectionRef} to a high-confidence ${input.role} surface set. ` +
+    `Re-select the ${roleLabel} face on the model (its stored face reference no longer matches the geometry), then generate the mesh again.`
+  );
 }
 
 function recordMapping(

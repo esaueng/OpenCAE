@@ -1,7 +1,18 @@
-import { describe, expect, test } from "vitest";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { beforeAll, describe, expect, test } from "vitest";
 import type { DisplayModel, Project } from "@opencae/schema";
-import type { StepFaceRegistry } from "./stepFaces";
-import { hasLegacyStepUploadFaces, healLegacyStepFaces, legacyStepFaceHealMessage } from "./stepFaceHealing";
+import { buildStepFaceRegistry, type StepFaceRegistry } from "./stepFaces";
+import {
+  hasLegacyStepUploadFaces,
+  hasUnresolvedStepFaceSelections,
+  healLegacyStepFaces,
+  healStepFaceSelections,
+  legacyStepFaceHealMessage,
+  parsePickedFaceId,
+  remapStepFaceSelectionsInStudy
+} from "./stepFaceHealing";
 
 const LEGACY_FACES: DisplayModel["faces"] = [
   { id: "face-upload-top", label: "Top face", color: "#f59e0b", center: [0, 0.72, 0], normal: [0, 1, 0], stressValue: 72 },
@@ -161,5 +172,109 @@ describe("healLegacyStepFaces", () => {
     expect(heal.unresolved).toEqual([]);
     expect(legacyStepFaceHealMessage(heal)).toBeNull();
     expect(heal.displayModel.faces.map((face) => face.id)).toEqual(["step-face-0"]);
+  });
+});
+
+describe("picked-face selections against the real box-with-bore registry", () => {
+  const fixturePath = join(
+    dirname(fileURLToPath(import.meta.url)),
+    "../../../libs/opencae-mesh-intake/fixtures/box-with-bore.step"
+  );
+  // Box: 60 x 40 x 20 mm with a 12 mm bore through Z at (30, 20).
+  let registry: StepFaceRegistry;
+  let topFaceId: string;
+
+  beforeAll(async () => {
+    const { default: occtimportjs } = await import("occt-import-js");
+    const occt = await occtimportjs();
+    const result = occt.ReadStepFile(new Uint8Array(readFileSync(fixturePath)), null);
+    expect(result.success).toBe(true);
+    registry = buildStepFaceRegistry(result.meshes ?? []);
+    const boredArea = 60 * 40 - Math.PI * 6 ** 2;
+    topFaceId = registry.faces.find((face) => Math.abs(face.area - boredArea) / boredArea < 0.02 && face.centroid[2] > 10)!.faceId;
+  }, 60_000);
+
+  const toViewer = (model: [number, number, number]): [number, number, number] => [
+    model[0] * registry.normalization.scale + registry.normalization.offset[0],
+    model[1] * registry.normalization.scale + registry.normalization.offset[1],
+    model[2] * registry.normalization.scale + registry.normalization.offset[2]
+  ];
+
+  function pickedProjectAndModel(pickedCenter: [number, number, number], options: { includeDisplayFace?: boolean } = {}) {
+    const pickedId = `face-upload-picked-${[...pickedCenter, 0, 0, 1].map((value) => value.toFixed(2).replace("-", "m").replace(".", "p")).join("-")}`;
+    const pickedFace: DisplayModel["faces"][number] = { id: pickedId, label: "Top face", color: "#4da3ff", center: pickedCenter, normal: [0, 0, 1], stressValue: 72 };
+    const displayModel = legacyDisplayModel({
+      faces: [...registry.displayFaces, ...(options.includeDisplayFace === false ? [] : [pickedFace])]
+    });
+    const project = projectWithFaceSelections();
+    project.studies[0]!.namedSelections = project.studies[0]!.namedSelections.map((selection) =>
+      selection.id === "selection-fs1"
+        ? { ...selection, geometryRefs: [{ bodyId: "body-uploaded", entityType: "face" as const, entityId: pickedId, label: "Top face" }] }
+        : selection
+    );
+    // Leave L 1 on a real registry face so only the pick needs healing.
+    project.studies[0]!.namedSelections = project.studies[0]!.namedSelections.map((selection) =>
+      selection.id === "selection-l1"
+        ? { ...selection, geometryRefs: [{ bodyId: "body-uploaded", entityType: "face" as const, entityId: registry.displayFaces[0]!.id, label: registry.displayFaces[0]!.label }] }
+        : selection
+    );
+    return { project, displayModel, pickedId };
+  }
+
+  test("detects unresolved picked selections", () => {
+    const { project, displayModel } = pickedProjectAndModel(toViewer([10, 10, 20]));
+    expect(hasUnresolvedStepFaceSelections(project, displayModel)).toBe(true);
+    expect(hasUnresolvedStepFaceSelections(project, { ...displayModel, nativeCad: undefined })).toBe(false);
+  });
+
+  test("heals a picked support onto the face the pick landed on", () => {
+    const { project, displayModel, pickedId } = pickedProjectAndModel(toViewer([10, 10, 20]));
+    const heal = healStepFaceSelections(project, displayModel, registry);
+
+    expect(heal.remapped).toEqual([expect.objectContaining({ selectionName: "FS 1", fromFaceId: pickedId, toFaceId: topFaceId })]);
+    expect(heal.unresolved).toEqual([]);
+    const fs1 = heal.project.studies[0]!.namedSelections.find((item) => item.id === "selection-fs1");
+    expect(fs1?.geometryRefs[0]?.entityId).toBe(topFaceId);
+    // The placeholder face entry is dropped once its selection points at a real face.
+    expect(heal.displayModel.faces.some((face) => face.id === pickedId)).toBe(false);
+  });
+
+  test("heals from the id's encoded point when the display face entry is gone", () => {
+    const { project, displayModel } = pickedProjectAndModel(toViewer([10, 10, 20]), { includeDisplayFace: false });
+    const heal = healStepFaceSelections(project, displayModel, registry);
+    expect(heal.remapped[0]?.toFaceId).toBe(topFaceId);
+  });
+
+  test("reports picks that no longer land on any surface instead of guessing", () => {
+    // Bore axis midpoint: 6 mm from the nearest surface.
+    const { project, displayModel, pickedId } = pickedProjectAndModel(toViewer([30, 20, 10]));
+    const heal = healStepFaceSelections(project, displayModel, registry);
+
+    expect(heal.remapped).toEqual([]);
+    expect(heal.unresolved).toEqual([{ selectionName: "FS 1", fromFaceId: pickedId }]);
+    expect(legacyStepFaceHealMessage(heal)).toContain("Re-select on the model");
+    // The unresolved placeholder face stays visible for its marker.
+    expect(heal.displayModel.faces.some((face) => face.id === pickedId)).toBe(true);
+  });
+
+  test("remapStepFaceSelectionsInStudy resolves picks for mesh dispatch without touching unresolvable ones", () => {
+    const { project, displayModel, pickedId } = pickedProjectAndModel(toViewer([10, 10, 20]));
+    const study = remapStepFaceSelectionsInStudy(project.studies[0]!, displayModel, registry);
+    const fs1 = study.namedSelections.find((item) => item.id === "selection-fs1");
+    expect(fs1?.geometryRefs[0]?.entityId).toBe(topFaceId);
+
+    const stuck = pickedProjectAndModel(toViewer([30, 20, 10]));
+    const unchanged = remapStepFaceSelectionsInStudy(stuck.project.studies[0]!, stuck.displayModel, registry);
+    expect(unchanged.namedSelections.find((item) => item.id === "selection-fs1")?.geometryRefs[0]?.entityId).toBe(stuck.pickedId);
+    void pickedId;
+  });
+
+  test("parsePickedFaceId decodes the m/p encoding", () => {
+    expect(parsePickedFaceId("face-upload-picked-m0p01-1p17-0p02-0p00-0p00-1p00")).toEqual({
+      center: [-0.01, 1.17, 0.02],
+      normal: [0, 0, 1]
+    });
+    expect(parsePickedFaceId("face-upload-top")).toBeNull();
+    expect(parsePickedFaceId("face-upload-picked-borked")).toBeNull();
   });
 });
