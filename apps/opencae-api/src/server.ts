@@ -7,6 +7,7 @@ import { SQLiteDatabaseProvider } from "@opencae/db";
 import { bracketDemoMaterial, bracketDemoProject, bracketDisplayModel, bracketResultFields, bracketResultSummary } from "@opencae/db/sample-data";
 import { InMemoryJobQueueProvider, LocalRunStateProvider } from "@opencae/jobs";
 import { MockMeshService } from "@opencae/mesh-service";
+import { assertCompatibleManufacturingProcess } from "@opencae/materials";
 import { buildHtmlReport, buildPdfReport, LocalReportProvider, reportPdfKeyFor } from "@opencae/post-service";
 import { solveDynamicStudy } from "@opencae/solver-service";
 import {
@@ -207,19 +208,30 @@ api.post("/api/projects/:projectId/uploads", mutatingRateLimit, async (request, 
   const { projectId } = request.params as { projectId: string };
   const project = db.getProject(projectId);
   if (!project) return reply.code(404).send({ error: "Project not found" });
-  const body = request.body as { filename?: string; size?: number; contentType?: string; contentBase64?: string } | undefined;
+  const body = request.body as { filename?: string; size?: number; contentType?: string; contentBase64?: string; modelMutation?: unknown } | undefined;
   const filename = sanitizeFilename(body?.filename);
   if (!filename) {
     return reply.code(400).send({
       error: "Only STEP, STP, STL, and OBJ model uploads are supported in the local viewer."
     });
   }
+  const modelMutation = body?.modelMutation === undefined ? undefined : parseUploadModelMutation(body.modelMutation);
+  if (body?.modelMutation !== undefined && !modelMutation) {
+    return reply.code(400).send({ error: "Invalid model mutation token." });
+  }
+  if (modelMutation && !canApplyUploadModelMutation(project, modelMutation)) {
+    return reply.code(409).send({ error: "This model upload was superseded by a newer workspace change." });
+  }
 
   const contentBase64 = typeof body?.contentBase64 === "string" && body.contentBase64.length > 0 ? body.contentBase64 : undefined;
   const displayModel = uploadedDisplayModelFor(filename, contentBase64);
-  const artifactKey = `${project.id}/geometry/uploaded-display.json`;
+  const geometryId = `geom-upload-${crypto.randomUUID()}`;
+  // Each accepted mutation gets its own object key. Otherwise an older
+  // handler that is already awaiting storage could overwrite the display
+  // artifact after a newer database mutation has committed.
+  const artifactKey = `${project.id}/geometry/${geometryId}-display.json`;
   const nextProject = attachUploadedModelToProject(project, {
-    geometryId: `geom-upload-${crypto.randomUUID()}`,
+    geometryId,
     filename,
     artifactKey,
     now: new Date().toISOString(),
@@ -228,7 +240,16 @@ api.post("/api/projects/:projectId/uploads", mutatingRateLimit, async (request, 
   nextProject.geometryFiles[0]!.metadata = {
     ...nextProject.geometryFiles[0]!.metadata,
     originalSize: Number.isFinite(body?.size) ? body?.size : undefined,
-    contentType: body?.contentType
+    contentType: body?.contentType,
+    ...(modelMutation ? {
+      modelMutation: {
+        clientId: modelMutation.clientId,
+        generation: modelMutation.generation,
+        baseGeometryId: modelMutation.expectedGeometryId,
+        baseUpdatedAt: modelMutation.expectedUpdatedAt,
+        appliedUpdatedAt: nextProject.updatedAt
+      }
+    } : {})
   };
   db.upsertProject(nextProject);
   await storage.putObject(artifactKey, JSON.stringify(displayModel, null, 2));
@@ -335,12 +356,21 @@ api.post("/api/studies/:studyId/materials", async (request, reply) => {
   const study = db.getStudy(studyId);
   if (!study) return reply.code(404).send({ error: "Study not found" });
   const body = request.body as { materialId?: string; parameters?: Record<string, unknown> } | undefined;
+  const materialId = body?.materialId ?? bracketDemoMaterial.id;
+  const parameters = body?.parameters ?? {};
+  if (parameters.manufacturingProcessId !== undefined) {
+    try {
+      assertCompatibleManufacturingProcess(materialId, parameters.manufacturingProcessId);
+    } catch (error) {
+      return reply.code(400).send({ error: error instanceof Error ? error.message : "Invalid material and manufacturing process." });
+    }
+  }
   const bodySelection = study.namedSelections.find((selection) => selection.entityType === "body");
   const assignment = {
     id: "assign-material-current",
-    materialId: body?.materialId ?? bracketDemoMaterial.id,
+    materialId,
     selectionRef: bodySelection?.id ?? "selection-body-bracket",
-    parameters: body?.parameters ?? {},
+    parameters,
     status: "complete" as const
   };
   const next = { ...study, materialAssignments: [assignment] };
@@ -369,15 +399,16 @@ api.post("/api/studies/:studyId/loads", async (request, reply) => {
   const { studyId } = request.params as { studyId: string };
   const study = db.getStudy(studyId);
   if (!study) return reply.code(404).send({ error: "Study not found" });
-  const body = request.body as Partial<Load> & { value?: number; selectionRef?: string; direction?: [number, number, number]; applicationPoint?: [number, number, number]; payloadObject?: unknown; payloadMaterialId?: string; payloadVolumeM3?: number; payloadMassMode?: string } | undefined;
+  const body = request.body as Partial<Load> & { value?: number; selectionRef?: string; direction?: [number, number, number]; directionMode?: string; applicationPoint?: [number, number, number]; payloadObject?: unknown; payloadMaterialId?: string; payloadVolumeM3?: number; payloadMassMode?: string } | undefined;
   const type = body?.type ?? "force";
   if (!isLoadType(type)) return reply.code(400).send({ error: "Invalid load type." });
+  if (body?.directionMode !== undefined && !isLoadDirectionMode(body.directionMode)) return reply.code(400).send({ error: "Invalid load direction mode." });
   const payloadVolumeM3 = body?.payloadVolumeM3;
   const load: Load = {
     id: `load-${crypto.randomUUID()}`,
     type,
     selectionRef: body?.selectionRef ?? "selection-load-face",
-    parameters: { value: body?.value ?? 500, units: unitsForLoadType(type), direction: body?.direction ?? [0, 0, -1], ...(body?.applicationPoint ? { applicationPoint: body.applicationPoint } : {}), ...(body?.payloadObject ? { payloadObject: body.payloadObject } : {}), ...(type === "gravity" && body?.payloadMaterialId ? { payloadMaterialId: body.payloadMaterialId } : {}), ...(type === "gravity" && Number.isFinite(payloadVolumeM3) ? { payloadVolumeM3 } : {}), ...(type === "gravity" && body?.payloadMassMode ? { payloadMassMode: body.payloadMassMode } : {}) },
+    parameters: { value: body?.value ?? 500, units: unitsForLoadType(type), direction: body?.direction ?? [0, 0, -1], ...(body?.directionMode ? { directionMode: body.directionMode } : {}), ...(body?.applicationPoint ? { applicationPoint: body.applicationPoint } : {}), ...(body?.payloadObject ? { payloadObject: body.payloadObject } : {}), ...(type === "gravity" && body?.payloadMaterialId ? { payloadMaterialId: body.payloadMaterialId } : {}), ...(type === "gravity" && Number.isFinite(payloadVolumeM3) ? { payloadVolumeM3 } : {}), ...(type === "gravity" && body?.payloadMassMode ? { payloadMassMode: body.payloadMassMode } : {}) },
     status: "complete"
   };
   const next = { ...study, loads: [...study.loads, load] };
@@ -622,6 +653,10 @@ function isLoadType(type: unknown): type is Load["type"] {
   return type === "force" || type === "pressure" || type === "gravity";
 }
 
+function isLoadDirectionMode(value: unknown): value is string {
+  return value === "-Y" || value === "+Y" || value === "+X" || value === "-X" || value === "+Z" || value === "-Z" || value === "Normal" || value === "Opposite normal";
+}
+
 function unitsForLoadType(type: Load["type"]) {
   if (type === "pressure") return "kPa";
   if (type === "gravity") return "kg";
@@ -810,6 +845,77 @@ function parseDisplayModel(value: unknown): DisplayModel | undefined {
     return candidate as DisplayModel;
   }
   return undefined;
+}
+
+type UploadModelMutation = {
+  clientId: string;
+  generation: number;
+  expectedGeometryId: string | null;
+  expectedUpdatedAt: string | null;
+};
+
+function parseUploadModelMutation(value: unknown): UploadModelMutation | undefined {
+  if (!isRecord(value)) return undefined;
+  if (
+    typeof value.clientId !== "string" ||
+    value.clientId.length < 1 ||
+    value.clientId.length > 128 ||
+    typeof value.generation !== "number" ||
+    !Number.isSafeInteger(value.generation) ||
+    value.generation < 0 ||
+    !isNullableBoundedString(value.expectedGeometryId, 256) ||
+    !isNullableBoundedString(value.expectedUpdatedAt, 128)
+  ) return undefined;
+  return value as UploadModelMutation;
+}
+
+function canApplyUploadModelMutation(project: Project, incoming: UploadModelMutation): boolean {
+  const geometry = project.geometryFiles.find((candidate) => candidate.metadata.source === "local-upload")
+    ?? project.geometryFiles[0];
+  const current = parseStoredModelMutation(geometry?.metadata.modelMutation);
+  const matchesCurrentRevision = incoming.expectedGeometryId === (geometry?.id ?? null) &&
+    incoming.expectedUpdatedAt === project.updatedAt;
+  if (current?.clientId === incoming.clientId) {
+    // Requests from one workspace carry a monotonic generation. This makes
+    // the newest action win even when its HTTP request arrives before an
+    // older sibling request that started from the same project revision. Do
+    // not bypass unrelated project edits made after that sibling committed.
+    const sharesStartingRevision = current.baseGeometryId !== undefined &&
+      current.baseUpdatedAt !== undefined &&
+      incoming.expectedGeometryId === current.baseGeometryId &&
+      incoming.expectedUpdatedAt === current.baseUpdatedAt;
+    const noInterveningProjectEdit = current.appliedUpdatedAt === project.updatedAt;
+    return incoming.generation > current.generation &&
+      (matchesCurrentRevision || (sharesStartingRevision && noInterveningProjectEdit));
+  }
+  return matchesCurrentRevision;
+}
+
+function parseStoredModelMutation(value: unknown): {
+  clientId: string;
+  generation: number;
+  baseGeometryId?: string | null;
+  baseUpdatedAt?: string | null;
+  appliedUpdatedAt?: string;
+} | undefined {
+  if (!isRecord(value)) return undefined;
+  if (
+    typeof value.clientId !== "string" ||
+    typeof value.generation !== "number" ||
+    !Number.isSafeInteger(value.generation) ||
+    value.generation < 0
+  ) return undefined;
+  return {
+    clientId: value.clientId,
+    generation: value.generation,
+    ...(isNullableBoundedString(value.baseGeometryId, 256) ? { baseGeometryId: value.baseGeometryId } : {}),
+    ...(isNullableBoundedString(value.baseUpdatedAt, 128) ? { baseUpdatedAt: value.baseUpdatedAt } : {}),
+    ...(typeof value.appliedUpdatedAt === "string" && value.appliedUpdatedAt.length <= 128 ? { appliedUpdatedAt: value.appliedUpdatedAt } : {})
+  };
+}
+
+function isNullableBoundedString(value: unknown, maxLength: number): value is string | null {
+  return value === null || (typeof value === "string" && value.length <= maxLength);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

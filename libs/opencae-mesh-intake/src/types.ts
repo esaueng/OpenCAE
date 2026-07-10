@@ -46,6 +46,18 @@ export type SourceSelectionMetadata = {
   sourceFaceId?: string;
 };
 
+/**
+ * Records an intentional reduction from quadratic to linear tetrahedra when
+ * the quadratic node count would exceed the in-browser solver's DOF budget.
+ * The mesh quality gate still applies to the retained Tet4 mesh.
+ */
+export type ElementOrderFallbackMetadata = {
+  requested: 2;
+  used: 1;
+  reason: "browser_dof_limit";
+  quadraticNodeCount: number;
+};
+
 export type CloudVolumeElement = {
   type: ElementType;
   connectivity: number[];

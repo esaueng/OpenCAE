@@ -1,7 +1,7 @@
 import { effectiveMaterialProperties } from "@opencae/materials";
 import { assessResultFailure } from "@opencae/schema";
 import type { AnalysisMesh, DisplayModel, Load, Material, ResultField, ResultProvenance, ResultSample, ResultSummary, Study } from "@opencae/schema";
-import { inferCriticalPrintAxis } from "@opencae/study-core";
+import { inferCriticalPrintAxis, modelAxisToGlobalBuildAxis } from "@opencae/study-core";
 import { loadForceNewtons, materialForStudy, materialParametersForStudy, STANDARD_GRAVITY } from "./studyInputs";
 
 type Vec3 = [number, number, number];
@@ -31,6 +31,13 @@ export type BeamDemoSolveOptions = {
   displayModel?: DisplayModel;
   beamModel?: BeamDemoPhysicalModel;
   debugResults?: boolean;
+};
+
+const DEFAULT_BEAM_PRINT_DISPLAY_MODEL: DisplayModel = {
+  id: "sample-beam",
+  name: "Beam Demo",
+  bodyCount: 1,
+  faces: []
 };
 
 export type BeamDemoSolveResult = {
@@ -118,7 +125,12 @@ export function solveBeamDemoStudy(study: Study, runId: string, optionsInput?: A
   const beamModel = options.beamModel ?? DEFAULT_BEAM_DEMO_PHYSICAL_MODEL;
   const material = materialForStudy(study);
   const materialParameters = materialParametersForStudy(study);
-  const effectiveMaterial = effectiveMaterialProperties(material, materialParameters, { criticalLayerAxis: beamCriticalPrintAxis(study) });
+  const modelCriticalLayerAxis = beamCriticalPrintAxis(study);
+  const effectiveMaterial = effectiveMaterialProperties(material, materialParameters, {
+    criticalLayerAxis: modelCriticalLayerAxis
+      ? modelAxisToGlobalBuildAxis(modelCriticalLayerAxis, options.displayModel ?? DEFAULT_BEAM_PRINT_DISPLAY_MODEL)
+      : undefined
+  });
   const load = primaryBeamLoad(study);
   if (!load) throw new Error("Beam Demo solver requires a force or gravity payload load.");
   const coordinate = beamDemoCoordinateForStudy(study, beamModel, load);

@@ -4,11 +4,14 @@
 // (Float64Array coordinates + Uint32Array connectivity + JSON metadata).
 import type {
   CoreVolumeMeshArtifact,
+  ElementOrderFallbackMetadata,
   FacetAttributionReport,
   MeshPhase,
   MeshTimings,
   SourceSelectionMetadata,
-  StepAttributionTessellation
+  StepAttributionTessellation,
+  StepGeometryInspection,
+  StepGeometryRepairReport
 } from "@opencae/mesh-intake";
 
 export type MeshWorkerPhase = MeshPhase | "parse";
@@ -33,6 +36,14 @@ export type MeshWorkerPayloads = {
      * fallback. Typed-array buffers travel as transferables.
      */
     attribution?: StepAttributionTessellation;
+  };
+  inspectStepFile: {
+    /** UTF-8 encoded STEP file content (transferable). */
+    stepContent: ArrayBuffer;
+  };
+  repairStepFile: {
+    /** UTF-8 encoded STEP file content (transferable). */
+    stepContent: ArrayBuffer;
   };
 };
 
@@ -73,10 +84,34 @@ export type MeshWorkerResults = {
     elevation?: "curved" | "straight_edge";
     /** Present when gmsh's Netgen optimizer repaired a sliver tail in the linear mesh. */
     optimizer?: "netgen";
-    /** Present when the mesh was automatically re-meshed at finer sizes to clear the quality floor. */
-    qualityRefinement?: { requestedMeshSizeMm: number; usedMeshSizeMm: number; triedMeshSizesMm: number[] };
+    /** Present when the mesh was automatically re-meshed at a nearby size to clear the quality floor. */
+    qualityRefinement?: {
+      requestedMeshSizeMm: number;
+      usedMeshSizeMm: number;
+      triedMeshSizesMm: number[];
+      direction: "finer" | "coarser";
+    };
+    /** Present when bounded OCC healing + MeshAdapt recovered a safe mesh. */
+    qualityRepair?: {
+      method: "occ_heal_meshadapt";
+      requestedMeshSizeMm: number;
+      usedMeshSizeMm: number;
+      triedMeshSizesMm: number[];
+    };
+    /** Present when open/invalid STEP boundaries were healed before meshing. */
+    geometryRepair?: StepGeometryRepairReport;
+    /** Present when Tet10 was safely reduced to Tet4 to stay within the browser solver's DOF budget. */
+    elementOrderFallback?: ElementOrderFallbackMetadata;
     /** Facet->B-rep-face attribution report (present when the request carried attribution inputs). */
     attribution?: FacetAttributionReport;
+  };
+  inspectStepFile: {
+    inspection: StepGeometryInspection;
+  };
+  repairStepFile: {
+    stepContent: Uint8Array;
+    inspection: StepGeometryInspection;
+    repair: StepGeometryRepairReport;
   };
 };
 
@@ -224,6 +259,9 @@ export function unpackCoreVolumeMeshArtifact(packed: PackedCoreVolumeMeshArtifac
 }
 
 export function transferablesForMeshWorkerRequest(request: MeshWorkerRequest): Transferable[] {
+  if (request.operation === "inspectStepFile" || request.operation === "repairStepFile") {
+    return [request.payload.stepContent];
+  }
   if (request.operation !== "meshStepFile") return [];
   const transfers: Transferable[] = [request.payload.stepContent];
   const attribution = request.payload.attribution;
@@ -234,7 +272,9 @@ export function transferablesForMeshWorkerRequest(request: MeshWorkerRequest): T
 }
 
 export function transferablesForMeshWorkerResult(result: unknown): Transferable[] {
-  if (!isRecord(result) || !isRecord(result.packed)) return [];
+  if (!isRecord(result)) return [];
+  if (result.stepContent instanceof Uint8Array) return [result.stepContent.buffer];
+  if (!isRecord(result.packed)) return [];
   const packed = result.packed as Partial<PackedCoreVolumeMeshArtifact>;
   const transfers: Transferable[] = [];
   if (packed.coordinates instanceof Float64Array) transfers.push(packed.coordinates.buffer);

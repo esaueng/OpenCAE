@@ -1,5 +1,7 @@
 import type { AnalysisMesh, DisplayModel, DynamicSolverSettings, MeshQuality, Project, ResultField, ResultRenderBounds, ResultSummary, RunEvent, Study, StudyRun } from "@opencae/schema";
-import type { LoadApplicationPoint, LoadDirection, LoadType, PayloadLoadMetadata, PayloadObjectSelection } from "../loadPreview";
+import type { StepGeometryInspection, StepGeometryRepairReport } from "@opencae/mesh-intake";
+import { assertCompatibleManufacturingProcess } from "@opencae/materials";
+import type { LoadApplicationPoint, LoadDirection, LoadDirectionLabel, LoadType, PayloadLoadMetadata, PayloadObjectSelection } from "../loadPreview";
 import { embedUploadedModelFile, type EmbeddedModelFile, type LocalResultBundle, type SolverSurfaceMesh } from "../projectFile";
 import { createLocalBlankProject, createLocalSampleProject, createLocalUploadResponse, openLocalProjectPayload } from "../localProjectFactory";
 import type { SolveProgressEvent } from "@opencae/solve-pipeline";
@@ -14,6 +16,22 @@ export interface SampleProjectResponse {
   displayModel: DisplayModel;
   results?: LocalResultBundle;
 }
+
+export type StepGeometryMetadata = {
+  status: "solid" | "repairable" | "unrepairable" | "invalid" | "unchecked" | "repaired";
+  inspection?: StepGeometryInspection;
+  repair?: StepGeometryRepairReport;
+  message?: string;
+};
+
+export type ModelMutationOptions = {
+  signal?: AbortSignal;
+  /** Rechecked after expensive CAD work and immediately before persistence. */
+  isCurrent?: () => boolean;
+  /** Monotonic token used by the API to reject out-of-order model writes. */
+  clientId?: string;
+  generation?: number;
+};
 
 export type SampleModelId = "bracket" | "plate" | "cantilever";
 export type SampleAnalysisType = "static_stress" | "dynamic_structural";
@@ -262,8 +280,25 @@ export async function importLocalProject(file: File): Promise<SampleProjectRespo
   );
 }
 
-export async function uploadModel(projectId: string, file: File, currentProject?: Project): Promise<SampleProjectResponse> {
+export async function uploadModel(
+  projectId: string,
+  file: File,
+  currentProject?: Project,
+  mutationOptions: ModelMutationOptions = {}
+): Promise<SampleProjectResponse> {
+  return uploadModelWithGeometry(projectId, file, currentProject, undefined, mutationOptions);
+}
+
+async function uploadModelWithGeometry(
+  projectId: string,
+  file: File,
+  currentProject?: Project,
+  knownStepGeometry?: StepGeometryMetadata,
+  mutationOptions: ModelMutationOptions = {}
+): Promise<SampleProjectResponse> {
+  assertCurrentModelMutation(mutationOptions);
   const contentBase64 = await fileToBase64(file);
+  assertCurrentModelMutation(mutationOptions);
   const embeddedModel: EmbeddedModelFile = {
     filename: file.name,
     contentType: file.type || "application/octet-stream",
@@ -271,22 +306,131 @@ export async function uploadModel(projectId: string, file: File, currentProject?
     contentBase64
   };
   const stepDisplayFaces = await stepDisplayFacesForUpload(file.name, contentBase64);
+  assertCurrentModelMutation(mutationOptions);
+  const stepGeometry = knownStepGeometry ?? await inspectStepGeometryForUpload(file.name, contentBase64);
+  assertCurrentModelMutation(mutationOptions);
+  const modelMutation = modelMutationForRequest(currentProject, mutationOptions);
   const data = await fetchJsonWithFallback(
     `/api/projects/${projectId}/uploads`,
     {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ ...embeddedModel })
+      body: JSON.stringify({ ...embeddedModel, ...(modelMutation ? { modelMutation } : {}) }),
+      ...(mutationOptions.signal ? { signal: mutationOptions.signal } : {})
     },
     () => {
       if (!currentProject) throw new Error("Could not upload model without an open project.");
       return createLocalUploadResponse(currentProject, embeddedModel, undefined, { stepDisplayFaces });
     }
   );
+  let nextProject = embedUploadedModelFile(data.project, embeddedModel);
+  if (stepGeometry) nextProject = attachStepGeometryMetadata(nextProject, embeddedModel.filename, stepGeometry);
+  const notice = stepGeometryUploadNotice(stepGeometry);
   return {
     ...data,
-    project: embedUploadedModelFile(data.project, embeddedModel)
+    project: nextProject,
+    message: [data.message, notice].filter(Boolean).join(" ")
   };
+}
+
+/**
+ * Export a healed STEP through Gmsh, then feed those bytes back through the
+ * normal replacement path. Re-importing intentionally resets face-bound
+ * setup because healing/capping can renumber B-rep faces.
+ */
+export async function repairUploadedStepModel(
+  projectId: string,
+  currentProject: Project,
+  mutationOptions: ModelMutationOptions = {}
+): Promise<SampleProjectResponse> {
+  assertCurrentModelMutation(mutationOptions);
+  const embeddedModel = embeddedStepModel(currentProject);
+  if (!embeddedModel) throw new Error("The uploaded STEP bytes are unavailable. Re-upload the model before repairing it.");
+  if (import.meta.env.VITE_WASM_MESHING === "0" || typeof Worker === "undefined") {
+    throw new Error("STEP repair is unavailable in this browser build.");
+  }
+  const client = await import("../workers/meshWorkerClient");
+  const repaired = await client.repairStepFileInWorker({
+    stepContent: base64ToArrayBuffer(embeddedModel.contentBase64)
+  });
+  // Do not let an old repair persist over a model/project selected while the
+  // worker was healing the B-rep. The caller's generation guard changes at
+  // action initiation, before the newer upload has to finish.
+  assertCurrentModelMutation(mutationOptions);
+  const repairedBuffer = repaired.stepContent.slice().buffer as ArrayBuffer;
+  const repairedFile = new File([repairedBuffer], embeddedModel.filename, { type: embeddedModel.contentType || "model/step" });
+  const response = await uploadModelWithGeometry(projectId, repairedFile, currentProject, {
+    status: "repaired",
+    inspection: repaired.inspection,
+    repair: repaired.repair,
+    message: "Open surfaces were healed into a closed solid. Review the repaired shape before simulation."
+  }, mutationOptions);
+  return {
+    ...response,
+    message: `Open surfaces fixed (${repaired.repair.method === "heal_and_cap" ? `${repaired.repair.cappedSurfaceCount} boundary patch${repaired.repair.cappedSurfaceCount === 1 ? "" : "es"} added` : "faces sewn"}). Material, supports, loads, mesh, and prior runs were reset because repaired face IDs can change.`
+  };
+}
+
+async function inspectStepGeometryForUpload(filename: string, contentBase64: string): Promise<StepGeometryMetadata | undefined> {
+  const extension = filename.trim().split(".").pop()?.toLowerCase();
+  if (extension !== "step" && extension !== "stp") return undefined;
+  if (import.meta.env.VITE_WASM_MESHING === "0" || typeof Worker === "undefined") {
+    return { status: "unchecked", message: "STEP topology could not be checked in this browser build." };
+  }
+  try {
+    const client = await import("../workers/meshWorkerClient");
+    const { inspection } = await client.inspectStepFileInWorker({ stepContent: base64ToArrayBuffer(contentBase64) });
+    const status: StepGeometryMetadata["status"] = inspection.status === "solid"
+      ? "solid"
+      : inspection.status === "invalid"
+        ? "invalid"
+        : inspection.repairable ? "repairable" : "unrepairable";
+    return { status, inspection, ...(inspection.message ? { message: inspection.message } : {}) };
+  } catch (error) {
+    return {
+      status: "unchecked",
+      message: `STEP topology check was unavailable: ${messageFromUnknownError(error) || "unknown error"}`
+    };
+  }
+}
+
+function attachStepGeometryMetadata(project: Project, filename: string, stepGeometry: StepGeometryMetadata): Project {
+  const exactIndex = project.geometryFiles.findIndex((geometry) => geometry.filename === filename && geometry.metadata.source === "local-upload");
+  const fallbackIndex = project.geometryFiles.findIndex((geometry) => geometry.metadata.source === "local-upload");
+  const targetIndex = exactIndex >= 0 ? exactIndex : fallbackIndex;
+  if (targetIndex < 0) return project;
+  return {
+    ...project,
+    geometryFiles: project.geometryFiles.map((geometry, index) =>
+      index === targetIndex
+        ? { ...geometry, metadata: { ...geometry.metadata, stepGeometry } }
+        : geometry
+    )
+  };
+}
+
+function stepGeometryUploadNotice(stepGeometry: StepGeometryMetadata | undefined): string {
+  if (stepGeometry?.status === "repairable") return "Open STEP surfaces were detected. Use Fix model before simulation.";
+  if (stepGeometry?.status === "unrepairable") return "Open STEP surfaces were detected, but automatic repair could not create a safe solid.";
+  if (stepGeometry?.status === "invalid") return stepGeometry.message ?? "The STEP topology is invalid.";
+  return "";
+}
+
+function embeddedStepModel(project: Project): EmbeddedModelFile | null {
+  const geometry = project.geometryFiles.find((candidate) => candidate.metadata.source === "local-upload");
+  const value = geometry?.metadata.embeddedModel;
+  if (!value || typeof value !== "object") return null;
+  const embedded = value as Partial<EmbeddedModelFile>;
+  const extension = embedded.filename?.trim().split(".").pop()?.toLowerCase();
+  if (
+    (extension !== "step" && extension !== "stp") ||
+    typeof embedded.filename !== "string" ||
+    typeof embedded.contentType !== "string" ||
+    typeof embedded.size !== "number" ||
+    typeof embedded.contentBase64 !== "string" ||
+    !embedded.contentBase64
+  ) return null;
+  return embedded as EmbeddedModelFile;
 }
 
 /**
@@ -337,8 +481,9 @@ export async function generateMesh(studyId: string, preset: MeshQuality, current
   // In-browser gmsh-wasm meshing (production default since A-M4). Returns
   // null in opt-out builds or when the geometry has no wasm-meshable source,
   // and falls through to the existing preset-estimate path on transient
-  // failure. Quality-gate rejections (MeshQualityError) are NOT transient:
-  // they surface to the user instead of silently degrading to estimates.
+  // failure for preview/sample geometry. Uploaded STEP failures and typed
+  // quality/topology rejections are permanent: surface them instead of
+  // marking a fake estimate complete and failing again at Run.
   if (currentStudy) {
     try {
       const presetStudy: Study = { ...currentStudy, meshSettings: { ...currentStudy.meshSettings, preset } };
@@ -353,7 +498,10 @@ export async function generateMesh(studyId: string, preset: MeshQuality, current
       });
       if (wasmMeshed) return wasmMeshed;
     } catch (error) {
-      if (error instanceof Error && error.name === "MeshQualityError") throw error;
+      if (
+        displayModel?.nativeCad?.format === "step" ||
+        (error instanceof Error && (error.name === "MeshQualityError" || error.name === "StepGeometryError"))
+      ) throw error;
       onProgress?.(`In-browser meshing failed (${messageFromUnknownError(error) || "unknown error"}). Falling back to preset estimates.`);
     }
   }
@@ -385,6 +533,9 @@ export async function generateMesh(studyId: string, preset: MeshQuality, current
 }
 
 export async function assignMaterial(studyId: string, materialId: string, parameters: Record<string, unknown> = {}, currentStudy?: Study): Promise<{ study: Study; message: string }> {
+  if (parameters.manufacturingProcessId !== undefined) {
+    assertCompatibleManufacturingProcess(materialId, parameters.manufacturingProcessId);
+  }
   return fetchJsonWithFallback(
     `/api/studies/${studyId}/materials`,
     {
@@ -458,13 +609,13 @@ export async function updateStudy(studyId: string, patch: Partial<Study>, messag
   ).then((data) => ({ ...data, message }));
 }
 
-export async function addLoad(studyId: string, type: LoadType, value: number, selectionRef: string, direction: LoadDirection, applicationPoint?: LoadApplicationPoint | null, payloadObject?: PayloadObjectSelection | null, currentStudy?: Study, payloadMetadata: PayloadLoadMetadata = {}): Promise<{ study: Study; message: string }> {
+export async function addLoad(studyId: string, type: LoadType, value: number, selectionRef: string, direction: LoadDirection, applicationPoint?: LoadApplicationPoint | null, payloadObject?: PayloadObjectSelection | null, currentStudy?: Study, payloadMetadata: PayloadLoadMetadata = {}, directionMode?: LoadDirectionLabel): Promise<{ study: Study; message: string }> {
   return fetchJsonWithFallback(
     `/api/studies/${studyId}/loads`,
     {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ type, value, selectionRef, direction, applicationPoint, payloadObject, ...payloadMetadata })
+      body: JSON.stringify({ type, value, selectionRef, direction, directionMode, applicationPoint, payloadObject, ...payloadMetadata })
     },
     () => {
       if (!currentStudy) throw new Error("Could not add load without an open study.");
@@ -477,7 +628,7 @@ export async function addLoad(studyId: string, type: LoadType, value: number, se
               id: `load-${crypto.randomUUID()}`,
               type,
               selectionRef,
-              parameters: { value, units: type === "pressure" ? "kPa" : type === "gravity" ? "kg" : "N", direction, ...(applicationPoint ? { applicationPoint } : {}), ...(payloadObject ? { payloadObject } : {}), ...(type === "gravity" ? payloadMetadata : {}) },
+              parameters: { value, units: type === "pressure" ? "kPa" : type === "gravity" ? "kg" : "N", direction, ...(directionMode ? { directionMode } : {}), ...(applicationPoint ? { applicationPoint } : {}), ...(payloadObject ? { payloadObject } : {}), ...(type === "gravity" ? payloadMetadata : {}) },
               status: "complete" as const
             }
           ]
@@ -962,7 +1113,7 @@ async function readJson<T>(response: Response, endpoint = response.url || "reque
     } catch {
       // Use the raw response body when the server did not return JSON.
     }
-    throw new Error(formatHttpError(endpoint, response.status, response.statusText, message));
+    throw new HttpResponseError(formatHttpError(endpoint, response.status, response.statusText, message), response.status);
   }
   return response.json() as Promise<T>;
 }
@@ -982,7 +1133,11 @@ async function fetchJsonWithFallback<T>(input: RequestInfo | URL, init: RequestI
   try {
     const response = await fetch(input, init);
     return await readJson<T>(response, typeof input === "string" ? `${init.method ?? "GET"} ${input}` : undefined);
-  } catch {
+  } catch (error) {
+    // A superseded model mutation is deliberately cancelled. Falling back to
+    // the local write path would resurrect the stale response the abort was
+    // intended to discard.
+    if (isAbortError(error) || (error instanceof HttpResponseError && error.status === 409)) throw error;
     return fallback();
   }
 }
@@ -1039,4 +1194,42 @@ async function fileToBase64(file: File): Promise<string> {
     binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
   }
   return btoa(binary);
+}
+
+function base64ToArrayBuffer(contentBase64: string): ArrayBuffer {
+  const binary = atob(contentBase64);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return bytes.buffer;
+}
+
+function assertCurrentModelMutation(options: ModelMutationOptions): void {
+  if (!options.signal?.aborted && options.isCurrent?.() !== false) return;
+  const error = new Error("This model action was superseded by a newer workspace change.");
+  error.name = "AbortError";
+  throw error;
+}
+
+function modelMutationForRequest(project: Project | undefined, options: ModelMutationOptions) {
+  if (!options.clientId || !Number.isSafeInteger(options.generation) || options.generation! < 0) return undefined;
+  const geometry = project?.geometryFiles.find((candidate) => candidate.metadata.source === "local-upload")
+    ?? project?.geometryFiles[0];
+  return {
+    clientId: options.clientId,
+    generation: options.generation!,
+    expectedGeometryId: geometry?.id ?? null,
+    expectedUpdatedAt: project?.updatedAt ?? null
+  };
+}
+
+class HttpResponseError extends Error {
+  override name = "HttpResponseError";
+
+  constructor(message: string, readonly status: number) {
+    super(message);
+  }
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === "AbortError";
 }
