@@ -25,7 +25,7 @@ describe("captureResultViews", () => {
     const setResultMode = vi.fn((next: ResultMode) => { mode = next; });
     const setResultFrameIndex = vi.fn((next: number) => { frameIndex = next; });
     const setPlaybackPlaying = vi.fn((next: boolean) => { playing = next; });
-    const capture = vi.fn(() => `data:image/png;base64,${mode}-${frameIndex}`);
+    const capture = vi.fn(async () => `data:image/png;base64,${mode}-${frameIndex}`);
     const waitForAnimationFrame = vi.fn(async () => undefined);
 
     const result = await captureResultViews({

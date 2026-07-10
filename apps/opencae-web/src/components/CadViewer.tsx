@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ElementRef, MouseEvent as ReactMouseEvent, MutableRefObject, PointerEvent as ReactPointerEvent } from "react";
 import { Billboard, Bounds, Edges, GizmoHelper, Html, Line, OrbitControls, Text, useBounds } from "@react-three/drei";
-import { Canvas, useFrame, useThree } from "@react-three/fiber";
+import { addAfterEffect, Canvas, useFrame, useThree } from "@react-three/fiber";
 import { configureTextBuilder } from "troika-three-text";
 import type { ThreeEvent } from "@react-three/fiber";
 import type { DisplayFace, DisplayModel, MeshSummary, ResultField, ResultRenderBounds } from "@opencae/schema";
@@ -61,7 +61,7 @@ interface CadViewerProps {
   onMeasureDisplayModelDimensions?: (dimensions: NonNullable<DisplayModel["dimensions"]>) => void;
   onResultRenderBoundsChange?: (bounds: ResultRenderBounds | null) => void;
   onViewerInteractionChange?: (interacting: boolean) => void;
-  onRegisterCapture?: (capture: (() => string) | null) => void;
+  onRegisterCapture?: (capture: (() => Promise<string>) | null) => void;
 }
 
 // Troika's worker-based typesetter rehydrates its code with new Function()
@@ -464,18 +464,68 @@ function ViewerInvalidator({
   return null;
 }
 
-function CaptureBridge({ register }: { register?: (capture: (() => string) | null) => void }) {
-  const { camera, gl, scene } = useThree();
+function CaptureBridge({ register }: { register?: (capture: (() => Promise<string>) | null) => void }) {
+  const { gl, invalidate } = useThree();
   useEffect(() => {
     if (!register) return undefined;
-    const capture = () => {
-      gl.render(scene, camera);
-      return gl.domElement.toDataURL("image/png");
+    // This Canvas renders on demand. Reading it immediately after a React state
+    // change can return the previous frame even when the requested frame metadata
+    // has already advanced. Resolve captures from R3F's after-render phase so the
+    // PNG and its report caption always describe the same rendered scene.
+    const controller = createRenderedFrameCaptureController({
+      invalidate,
+      readPixels: () => gl.domElement.toDataURL("image/png"),
+      subscribeAfterRender: addAfterEffect
+    });
+    register(controller.capture);
+    return () => {
+      register(null);
+      controller.dispose();
     };
-    register(capture);
-    return () => register(null);
-  }, [camera, gl, register, scene]);
+  }, [gl, invalidate, register]);
   return null;
+}
+
+export interface RenderedFrameCaptureController {
+  capture: () => Promise<string>;
+  dispose: () => void;
+}
+
+export function createRenderedFrameCaptureController({
+  invalidate,
+  readPixels,
+  subscribeAfterRender
+}: {
+  invalidate: () => void;
+  readPixels: () => string;
+  subscribeAfterRender: (callback: () => void) => () => void;
+}): RenderedFrameCaptureController {
+  let pending: { resolve: (png: string) => void; reject: (error: Error) => void } | null = null;
+  const unsubscribe = subscribeAfterRender(() => {
+    if (!pending) return;
+    const request = pending;
+    pending = null;
+    try {
+      request.resolve(readPixels());
+    } catch (error) {
+      request.reject(error instanceof Error ? error : new Error("Could not capture the rendered result frame."));
+    }
+  });
+
+  return {
+    capture: () => {
+      if (pending) return Promise.reject(new Error("A result frame capture is already in progress."));
+      return new Promise<string>((resolve, reject) => {
+        pending = { resolve, reject };
+        invalidate();
+      });
+    },
+    dispose: () => {
+      unsubscribe();
+      pending?.reject(new Error("The result viewer closed before the frame capture completed."));
+      pending = null;
+    }
+  };
 }
 
 function DemandOrbitControls({ controlsRef, onInteractionChange }: { controlsRef: MutableRefObject<ViewerOrbitControls | null>; onInteractionChange?: (interacting: boolean) => void }) {

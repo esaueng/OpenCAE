@@ -24,7 +24,7 @@ export interface CaptureResultViewsOptions {
   setPlaybackPlaying: (playing: boolean) => void;
   resultFields: ResultField[];
   surfaceMeshRef?: string;
-  capture: (() => string) | null;
+  capture: (() => string | Promise<string>) | null;
   isCurrent: () => boolean;
   waitForAnimationFrame?: () => Promise<void>;
 }
@@ -59,7 +59,7 @@ export async function captureResultViews(options: CaptureResultViewsOptions): Pr
       await waitForFrame();
       assertCurrent(options);
       captures[mode] = {
-        png: options.capture!(),
+        png: await options.capture!(),
         fieldId: peakField.id,
         selection: peakField.frameIndex === undefined ? "static" : "peak",
         ...(peakField.frameIndex === undefined ? {} : { frameIndex: peakField.frameIndex }),

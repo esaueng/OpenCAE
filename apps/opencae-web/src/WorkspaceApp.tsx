@@ -202,7 +202,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const resultPlaybackEndpointHoldRemainingMsRef = useRef(0);
   const resultPlaybackFrameControllerRef = useRef<MutableResultPlaybackFrameController | null>(null);
   const viewerInteractingRef = useRef(false);
-  const viewerCaptureRef = useRef<(() => string) | null>(null);
+  const viewerCaptureRef = useRef<(() => Promise<string>) | null>(null);
   const reportStateRef = useRef({ viewMode, resultMode, resultSummary, completedRunId, resultPlaybackPlaying });
   const initialActionConsumedRef = useRef(false);
   if (!resultPlaybackFrameControllerRef.current) {
@@ -989,7 +989,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     }
   }
 
-  const handleRegisterViewerCapture = useCallback((capture: (() => string) | null) => {
+  const handleRegisterViewerCapture = useCallback((capture: (() => Promise<string>) | null) => {
     viewerCaptureRef.current = capture;
   }, []);
 
