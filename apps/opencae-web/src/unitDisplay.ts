@@ -1,5 +1,5 @@
 import { classifyResultProvenance } from "@opencae/schema";
-import type { DisplayModel, Project, ResultField, ResultProvenance, ResultSummary } from "@opencae/schema";
+import type { DisplayModel, Project, ResultField, ResultProvenance, ResultSummary, Study } from "@opencae/schema";
 
 export type UnitSystem = Project["unitSystem"];
 
@@ -119,6 +119,38 @@ export function formatResultProvenanceLabel(provenance: ResultProvenance | undef
     return provenance?.solver === "opencae-core-cloud" ? "OpenCAE Core Cloud" : "OpenCAE Core Local";
   }
   return "Unknown result source";
+}
+
+export function hasResultUnit(units: string | undefined): units is string {
+  return typeof units === "string" && units.length > 0 && units !== "undefined";
+}
+
+export function formatResultMetric(value: number, units: string | undefined): string {
+  return hasResultUnit(units) ? `${value} ${units}` : "Unit missing";
+}
+
+export function solverMethodForResult(resultSummary: ResultSummary, study: Study): string {
+  const provenanceMethod = (resultSummary.provenance as Record<string, unknown> | undefined)?.coreSolver;
+  if (typeof provenanceMethod === "string" && provenanceMethod) return provenanceMethod;
+  if (resultSummary.transient || study.type === "dynamic_structural") return "mdof_dynamic";
+  return "sparse_static";
+}
+
+export function solverRunnerLabelForResult(provenance: ResultProvenance | undefined): string {
+  if (provenance?.runnerVersion?.startsWith("browser-")) return "in-browser solve worker";
+  return provenance?.solver === "opencae-core-cloud" ? "cloud container" : "local core worker";
+}
+
+export function formatMeshSourceLabel(meshSource: ResultProvenance["meshSource"] | undefined, displayModel?: DisplayModel): string {
+  if (meshSource === "actual_volume_mesh") {
+    if (displayModel?.coreCloudGeometry?.kind === "sample_procedural") return "Procedural sample mesh (simplified)";
+    return "Actual volume mesh";
+  }
+  if (meshSource === "structured_block_core") return "Structured block Core";
+  if (meshSource === "opencae_core_tet4") return "OpenCAE Core Tet4";
+  if (meshSource === "structured_block_proxy" || meshSource === "display_bounds_proxy") return "OpenCAE Core Preview";
+  if (typeof meshSource === "string" && meshSource) return meshSource.replaceAll("_", " ");
+  return "--";
 }
 
 export function legacyResultWarningForProvenance(provenance: ResultProvenance | undefined): string | null {

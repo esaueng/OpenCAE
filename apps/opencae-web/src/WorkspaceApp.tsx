@@ -23,6 +23,9 @@ import {
 } from "./loadPreview";
 import { resetDisplayModelOrientation, type RotationAxis } from "./modelOrientation";
 import { buildLocalProjectFile, suggestedProjectFilename, type LocalResultBundle, type SolverSurfaceMesh } from "./projectFile";
+import { prepareBlobSaveToDisk, saveBlobToDisk } from "./lib/fileSave";
+import { captureResultViews } from "./report/captureResultViews";
+import { buildReportData, suggestedReportFilename } from "./report/reportData";
 import { buildAutosavedWorkspace, buildAutosavedWorkspaceUiSnapshot, readAutosavedWorkspace, scheduleAutosavedUiSnapshotWrite, scheduleAutosavedWorkspaceWrite, WORKSPACE_LOG_LIMIT } from "./appPersistence";
 import type { AutosavedWorkspace, WorkspaceUiSnapshot } from "./appPersistence";
 import {
@@ -59,17 +62,6 @@ const CadViewer = lazy(lazyCadViewerImport);
 const DEBUG_RESULT_PARAMS = typeof window === "undefined" ? new URLSearchParams() : new URLSearchParams(window.location.search);
 const DEBUG_RESULTS = import.meta.env.DEV && DEBUG_RESULT_PARAMS.get("debugResults") === "1";
 const DEBUG_RESULT_FRAME_CACHE_ONLY = DEBUG_RESULTS && DEBUG_RESULT_PARAMS.get("bypassPacked") === "1";
-
-interface SaveFilePickerHandle {
-  createWritable: () => Promise<{ write: (content: Blob) => Promise<void>; close: () => Promise<void> }>;
-}
-
-interface SaveFilePickerWindow extends Window {
-  showSaveFilePicker?: (options: {
-    suggestedName: string;
-    types: Array<{ description: string; accept: Record<string, string[]> }>;
-  }) => Promise<SaveFilePickerHandle>;
-}
 
 // Reference numbers shown for the pre-seeded bracket demo before any solve runs.
 // The provenance marks them as generated sample values so the Results panel
@@ -154,6 +146,8 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const [meshPhaseProgress, setMeshPhaseProgress] = useState<WasmMeshPhaseProgress | null>(null);
   const [runTiming, setRunTiming] = useState<RunTimingEstimate | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
+  const [reportBusy, setReportBusy] = useState(false);
+  const [reportError, setReportError] = useState<string | null>(null);
   const [activeRunId, setActiveRunId] = useState(restoredUi?.activeRunId || restoredResults?.activeRunId || restoredResults?.completedRunId || "run-bracket-demo-seeded");
   const [completedRunId, setCompletedRunId] = useState(restoredUi?.completedRunId || restoredResults?.completedRunId || "run-bracket-demo-seeded");
   const [processingRunId, setProcessingRunId] = useState<string | null>(null);
@@ -208,6 +202,8 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const resultPlaybackEndpointHoldRemainingMsRef = useRef(0);
   const resultPlaybackFrameControllerRef = useRef<MutableResultPlaybackFrameController | null>(null);
   const viewerInteractingRef = useRef(false);
+  const viewerCaptureRef = useRef<(() => string) | null>(null);
+  const reportStateRef = useRef({ viewMode, resultMode, resultSummary, completedRunId });
   const initialActionConsumedRef = useRef(false);
   if (!resultPlaybackFrameControllerRef.current) {
     resultPlaybackFrameControllerRef.current = createResultPlaybackFrameController();
@@ -312,6 +308,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     }
   }, [resultPlaybackCacheState]);
   const solverRunning = Boolean(processingRunId) || (runProgress > 0 && runProgress < 100);
+  reportStateRef.current = { viewMode, resultMode, resultSummary, completedRunId };
   const runReadiness = useMemo(() => readinessForStudy(study), [study]);
   const canRunSimulation = runReadiness.every((item) => item.done) && !solverRunning;
   const missingRunItems = runReadiness.filter((item) => !item.done).map((item) => item.label);
@@ -983,11 +980,70 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         ...(resultSurfaceMesh ? { surfaceMesh: resultSurfaceMesh } : {}),
         ...(solverMeshSummary ? { solverMeshSummary } : {})
       } : undefined);
+      if (!savedAt) return;
       setProject((current) => current ? { ...current, updatedAt: savedAt } : current);
       pushMessage("Project saved to local disk.");
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") return;
       pushMessage(error instanceof Error ? error.message : "Could not save project.");
+    }
+  }
+
+  const handleRegisterViewerCapture = useCallback((capture: (() => string) | null) => {
+    viewerCaptureRef.current = capture;
+  }, []);
+
+  async function handleGenerateReport() {
+    if (!project || !study || !resultSummary) {
+      setReportError("Run a simulation before generating a report.");
+      return;
+    }
+    if (solverRunning) {
+      setReportError("Wait for the active solve to finish before generating a report.");
+      return;
+    }
+
+    const sourceSummary = resultSummary;
+    const sourceRunId = completedRunId;
+    const generatedAt = new Date();
+    setReportBusy(true);
+    setReportError(null);
+    try {
+      const saveTarget = await prepareBlobSaveToDisk(suggestedReportFilename(project.name, generatedAt), {
+        description: "PDF report",
+        accept: { "application/pdf": [".pdf"] }
+      });
+      if (saveTarget === "cancelled") return;
+      const captures = await captureResultViews({
+        getViewMode: () => reportStateRef.current.viewMode,
+        getResultMode: () => reportStateRef.current.resultMode,
+        setResultMode,
+        resultFields,
+        capture: viewerCaptureRef.current,
+        isCurrent: () => reportStateRef.current.resultSummary === sourceSummary && reportStateRef.current.completedRunId === sourceRunId
+      });
+      const reportData = buildReportData({
+        project,
+        study,
+        displayModel,
+        resultSummary: sourceSummary,
+        resultFields,
+        solverMeshSummary,
+        runTiming,
+        unitSystem: displayUnitSystem,
+        captures,
+        generatedAt,
+        exaggeration: stressExaggeration,
+        showDeformed,
+        activeFrameIndex: resultFrameIndex
+      });
+      const { renderReportPdf } = await import("./report/reportPdf");
+      const blob = await renderReportPdf(reportData);
+      await saveTarget.save(blob);
+    } catch (error) {
+      setReportError(error instanceof Error ? error.message : "Could not generate the simulation report.");
+    } finally {
+      setReportBusy(false);
     }
   }
 
@@ -1554,6 +1610,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
             onMeasureDisplayModelDimensions={handleMeasureDisplayModelDimensions}
             onResultRenderBoundsChange={setResultRenderBounds}
             onViewerInteractionChange={handleViewerInteractionChange}
+            onRegisterCapture={handleRegisterViewerCapture}
           />
         </Suspense>
         <RightPanel
@@ -1572,6 +1629,10 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           runProgress={runProgress}
           runError={runError}
           runTiming={runTiming}
+          onGenerateReport={handleGenerateReport}
+          reportBusy={reportBusy}
+          reportError={reportError}
+          reportDisabled={solverRunning}
           sampleModel={sampleModel}
           sampleAnalysisType={sampleAnalysisType}
           draftLoadType={draftLoadType}
@@ -1916,32 +1977,18 @@ function defaultValueForLoadType(type: LoadType) {
   return 500;
 }
 
-async function saveProjectToLocalDisk(project: Project, displayModel: DisplayModel, results?: LocalResultBundle): Promise<string> {
+async function saveProjectToLocalDisk(project: Project, displayModel: DisplayModel, results?: LocalResultBundle): Promise<string | null> {
   const savedAt = new Date().toISOString();
   const filename = suggestedProjectFilename(project.name);
   const savedResults = results?.fields.length ? results : undefined;
   const blob = new Blob([JSON.stringify(buildLocalProjectFile(project, displayModel, savedAt, savedResults), null, 2)], {
     type: "application/json"
   });
-  const savePicker = (window as SaveFilePickerWindow).showSaveFilePicker;
-  if (savePicker) {
-    const handle = await savePicker({
-      suggestedName: filename,
-      types: [{ description: "OpenCAE project", accept: { "application/json": [".json", ".opencae"] } }]
-    });
-    const writable = await handle.createWritable();
-    await writable.write(blob);
-    await writable.close();
-    return savedAt;
-  }
-
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  link.click();
-  URL.revokeObjectURL(url);
-  return savedAt;
+  const outcome = await saveBlobToDisk(blob, filename, {
+    description: "OpenCAE project",
+    accept: { "application/json": [".json", ".opencae"] }
+  });
+  return outcome === "saved" ? savedAt : null;
 }
 
 function isAbortError(error: unknown): boolean {
