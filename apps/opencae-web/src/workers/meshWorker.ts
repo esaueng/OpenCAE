@@ -2,6 +2,7 @@
 // Mirrors performanceWorker.ts conventions. gmsh-wasm (and the whole
 // @opencae/mesh-intake meshing path) is loaded via dynamic import inside the
 // worker so the initial app bundle never pays for the ~44 MB WASM asset.
+import type { MeshAttemptContext } from "@opencae/mesh-intake";
 import {
   normalizeMeshWorkerError,
   packCoreVolumeMeshArtifact,
@@ -24,13 +25,14 @@ workerScope.addEventListener("message", (event) => {
 
 async function handleRequest(request: MeshWorkerRequest): Promise<void> {
   const started = Date.now();
-  const reportPhase = (phase: MeshWorkerPhase, elapsedMs?: number) => {
+  const reportPhase = (phase: MeshWorkerPhase, elapsedMs?: number, attempt?: MeshAttemptContext) => {
     workerScope.postMessage({
       id: request.id,
       operation: request.operation,
       kind: "progress",
       phase,
-      elapsedMs: elapsedMs ?? Date.now() - started
+      elapsedMs: elapsedMs ?? Date.now() - started,
+      ...(attempt ? { attempt } : {})
     } satisfies MeshWorkerResponse);
   };
   try {
@@ -52,7 +54,7 @@ async function handleRequest(request: MeshWorkerRequest): Promise<void> {
   }
 }
 
-async function runOperation(request: MeshWorkerRequest, reportPhase: (phase: MeshWorkerPhase, elapsedMs?: number) => void) {
+async function runOperation(request: MeshWorkerRequest, reportPhase: (phase: MeshWorkerPhase, elapsedMs?: number, attempt?: MeshAttemptContext) => void) {
   // Lazy-load the meshing library (which itself lazy-loads the gmsh WASM
   // module) only when the first meshing request arrives.
   const intake = await import("@opencae/mesh-intake");
@@ -61,7 +63,7 @@ async function runOperation(request: MeshWorkerRequest, reportPhase: (phase: Mes
   // gunzip strategy before any gmsh module is instantiated.
   const { gmshWasmModuleOptions } = await import("./gmshWasmBinary");
   intake.configureGmshWasmModuleOptions(gmshWasmModuleOptions);
-  const onPhase = (event: { phase: MeshWorkerPhase; elapsedMs: number }) => reportPhase(event.phase, event.elapsedMs);
+  const onPhase = (event: { phase: MeshWorkerPhase; elapsedMs: number; attempt?: MeshAttemptContext }) => reportPhase(event.phase, event.elapsedMs, event.attempt);
 
   if (request.operation === "meshGeoScript") {
     const meshed = await intake.meshGeoScriptToMshV2(request.payload.geoScript, {
