@@ -1,6 +1,3 @@
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { beforeAll, describe, expect, test } from "vitest";
 import type { DisplayModel, Project } from "@opencae/schema";
 import { buildStepFaceRegistry, type StepFaceRegistry } from "./stepFaces";
@@ -175,24 +172,35 @@ describe("healLegacyStepFaces", () => {
   });
 });
 
-describe("picked-face selections against the real box-with-bore registry", () => {
-  const fixturePath = join(
-    dirname(fileURLToPath(import.meta.url)),
-    "../../../libs/opencae-mesh-intake/fixtures/box-with-bore.step"
-  );
-  // Box: 60 x 40 x 20 mm with a 12 mm bore through Z at (30, 20).
+describe("picked-face selections against a synthetic two-face registry", () => {
+  // Hand-built tessellation standing in for a 60 x 40 x 20 mm part: a top
+  // face at z=20 (+Z normals) and a side face at x=0 (-X normals). Synthetic
+  // instead of an occt import so this file adds no second wasm initialization
+  // to the root CI test run (stepFaces.test.ts covers the real tessellation).
   let registry: StepFaceRegistry;
   let topFaceId: string;
 
-  beforeAll(async () => {
-    const { default: occtimportjs } = await import("occt-import-js");
-    const occt = await occtimportjs();
-    const result = occt.ReadStepFile(new Uint8Array(readFileSync(fixturePath)), null);
-    expect(result.success).toBe(true);
-    registry = buildStepFaceRegistry(result.meshes ?? []);
-    const boredArea = 60 * 40 - Math.PI * 6 ** 2;
-    topFaceId = registry.faces.find((face) => Math.abs(face.area - boredArea) / boredArea < 0.02 && face.centroid[2] > 10)!.faceId;
-  }, 60_000);
+  beforeAll(() => {
+    const positions = [
+      // Top face at z=20.
+      0, 0, 20, 60, 0, 20, 60, 40, 20, 0, 40, 20,
+      // Side face at x=0.
+      0, 0, 0, 0, 40, 0, 0, 40, 20, 0, 0, 20
+    ];
+    const indices = [
+      0, 1, 2, 0, 2, 3, // +Z winding
+      4, 6, 5, 4, 7, 6 // -X winding
+    ];
+    registry = buildStepFaceRegistry([
+      {
+        attributes: { position: { array: positions } },
+        index: { array: indices },
+        brep_faces: [{ first: 0, last: 1 }, { first: 2, last: 3 }]
+      } as never
+    ]);
+    expect(registry.faces).toHaveLength(2);
+    topFaceId = registry.faces.find((face) => face.avgNormal[2] > 0.9)!.faceId;
+  });
 
   const toViewer = (model: [number, number, number]): [number, number, number] => [
     model[0] * registry.normalization.scale + registry.normalization.offset[0],
@@ -246,7 +254,7 @@ describe("picked-face selections against the real box-with-bore registry", () =>
   });
 
   test("reports picks that no longer land on any surface instead of guessing", () => {
-    // Bore axis midpoint: 6 mm from the nearest surface.
+    // Interior point: 10 mm from the nearest surface, far beyond tolerance.
     const { project, displayModel, pickedId } = pickedProjectAndModel(toViewer([30, 20, 10]));
     const heal = healStepFaceSelections(project, displayModel, registry);
 
