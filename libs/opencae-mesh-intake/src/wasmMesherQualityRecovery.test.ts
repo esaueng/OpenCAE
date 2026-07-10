@@ -1,15 +1,20 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 const fake = vi.hoisted(() => {
-  type Scenario = "algorithm_fallback" | "coarser_size";
+  type Scenario = "algorithm_fallback" | "coarser_size" | "quality_repair" | "surface_only" | "dof_fallback";
   const state = {
     scenario: "algorithm_fallback" as Scenario,
     attempts: [] as Array<{ algorithm: "delaunay" | "frontal"; sizeMm: number }>,
+    qualityRepairAttempts: [] as number[],
     moduleCount: 0
   };
 
-  const qualityFor = (algorithm: "delaunay" | "frontal", sizeMm: number): number => {
+  const qualityFor = (algorithm: "delaunay" | "frontal", sizeMm: number, qualityRepair: boolean, optimized: boolean): number => {
     if (state.scenario === "algorithm_fallback") return algorithm === "frontal" ? 0.2 : 0.0075;
+    if (state.scenario === "quality_repair" || state.scenario === "surface_only") {
+      return qualityRepair && optimized && sizeMm <= 6 ? 0.08 : (algorithm === "frontal" ? 0.02 : 0.01);
+    }
+    if (state.scenario === "dof_fallback") return 0.2;
     if (sizeMm >= 12) return 0.2;
     return algorithm === "frontal" ? 0.02 : 0.01;
   };
@@ -19,6 +24,12 @@ const fake = vi.hoisted(() => {
     let algorithm: "delaunay" | "frontal" = "delaunay";
     let sizeMm = 8;
     let elementOrder: 1 | 2 = 1;
+    let healed = false;
+    let meshAdapt = false;
+    let optimized = false;
+
+    const isQualityRepair = () => healed && meshAdapt;
+    const hasVolumeElements = () => state.scenario !== "surface_only" || isQualityRepair();
 
     return {
       initialize() {},
@@ -27,12 +38,18 @@ const fake = vi.hoisted(() => {
       FS: {
         writeFile() {},
         readFile() {
-          return "$Elements\n1\n1 11 0 1 2 3 4 5 6 7 8 9 10\n$EndElements\n";
+          if (!hasVolumeElements()) {
+            return "$PhysicalNames\n2\n2 4 \"surface_4\"\n2 11 \"surface_11\"\n$EndPhysicalNames\n$Elements\n1\n1 9 0 1 2 3 4 5 6\n$EndElements\n";
+          }
+          const typeCode = elementOrder === 2 ? 11 : 4;
+          const nodeTags = elementOrder === 2 ? "1 2 3 4 5 6 7 8 9 10" : "1 2 3 4";
+          return `$Elements\n1\n1 ${typeCode} 0 ${nodeTags}\n$EndElements\n`;
         }
       },
       option: {
         setNumber(name: string, value: number) {
           if (name === "Mesh.Algorithm3D" && value === 4) algorithm = "frontal";
+          if (name === "Mesh.Algorithm" && value === 1) meshAdapt = true;
           if (name === "Mesh.CharacteristicLengthMax") sizeMm = value;
         }
       },
@@ -52,6 +69,10 @@ const fake = vi.hoisted(() => {
         occ: {
           importShapes() {},
           synchronize() {},
+          healShapes() {
+            healed = true;
+            return { outDimTags: [3, 1] };
+          },
           getMass() {
             return { mass: 1_000 };
           },
@@ -61,22 +82,31 @@ const fake = vi.hoisted(() => {
         },
         mesh: {
           generate(dimension: number) {
-            if (dimension === 3) state.attempts.push({ algorithm, sizeMm });
+            if (dimension === 3) {
+              state.attempts.push({ algorithm, sizeMm });
+              if (isQualityRepair()) state.qualityRepairAttempts.push(sizeMm);
+            }
           },
           optimize() {
             if (state.scenario === "algorithm_fallback" && algorithm === "delaunay") {
               throw new Error("memory access out of bounds");
             }
+            optimized = true;
           },
           setOrder(order: 1 | 2) {
             elementOrder = order;
           },
+          getNodes() {
+            const nodeCount = state.scenario === "dof_fallback" && elementOrder === 2 ? 40_000 : 4;
+            return { nodeTags: new Array(nodeCount), coord: [], parametricCoord: [] };
+          },
           getElementsByType(typeCode: number) {
+            if (!hasVolumeElements()) return { elementTags: [], nodeTags: [] };
             const activeType = elementOrder === 2 ? 11 : 4;
             return { elementTags: typeCode === activeType ? [1] : [], nodeTags: [] };
           },
           getElementQualities() {
-            return { elementsQuality: [qualityFor(algorithm, sizeMm)] };
+            return { elementsQuality: [qualityFor(algorithm, sizeMm, isQualityRepair(), optimized)] };
           }
         }
       }
@@ -95,6 +125,7 @@ import { meshStepToMshV2 } from "./wasmMesher";
 describe("STEP quality recovery orchestration", () => {
   beforeEach(() => {
     fake.state.attempts.length = 0;
+    fake.state.qualityRepairAttempts.length = 0;
     fake.state.moduleCount = 0;
   });
 
@@ -131,5 +162,53 @@ describe("STEP quality recovery orchestration", () => {
       { algorithm: "frontal", sizeMm: 8 },
       { algorithm: "delaunay", sizeMm: 12 }
     ]);
+  });
+
+  test("heals sliver features and uses MeshAdapt without lowering the quality floor", async () => {
+    fake.state.scenario = "quality_repair";
+
+    const result = await meshStepToMshV2(new Uint8Array([1]), { elementOrder: 2, meshSizeMm: 8 });
+
+    expect(result.qualityMinSICN).toBe(0.08);
+    expect(result.optimizer).toBe("netgen");
+    expect(result.geometryRepair).toMatchObject({ profile: "quality" });
+    expect(result.geometryRepair?.toleranceMm).toBeGreaterThan(0.01);
+    expect(result.qualityRepair).toEqual({
+      method: "occ_heal_meshadapt",
+      requestedMeshSizeMm: 8,
+      usedMeshSizeMm: 6,
+      triedMeshSizesMm: [6]
+    });
+    expect(result.qualityRefinement).toMatchObject({
+      requestedMeshSizeMm: 8,
+      usedMeshSizeMm: 6,
+      direction: "finer"
+    });
+    expect(fake.state.qualityRepairAttempts).toEqual([6]);
+  });
+
+  test("rejects surface-only output even when physical tags look like Tet4/Tet10 records", async () => {
+    fake.state.scenario = "surface_only";
+
+    const result = await meshStepToMshV2(new Uint8Array([1]), { elementOrder: 2, meshSizeMm: 8 });
+
+    expect(result.qualityRepair?.method).toBe("occ_heal_meshadapt");
+    expect(result.qualityMinSICN).toBe(0.08);
+    expect(fake.state.qualityRepairAttempts).toEqual([6]);
+  });
+
+  test("retains Tet4 when the safe quadratic mesh would exceed 100,000 DOFs", async () => {
+    fake.state.scenario = "dof_fallback";
+
+    const result = await meshStepToMshV2(new Uint8Array([1]), { elementOrder: 2, meshSizeMm: 8 });
+
+    expect(result.elementOrderFallback).toEqual({
+      requested: 2,
+      used: 1,
+      reason: "browser_dof_limit",
+      quadraticNodeCount: 40_000
+    });
+    expect(result.elevation).toBeUndefined();
+    expect(result.msh).toContain("1 4 0 1 2 3 4");
   });
 });

@@ -130,7 +130,9 @@ async function runOperation(request: MeshWorkerRequest, reportPhase: (phase: Mes
     ...(meshed.elevation ? { elevation: meshed.elevation } : {}),
     ...(meshed.optimizer ? { optimizer: meshed.optimizer } : {}),
     ...(meshed.qualityRefinement ? { qualityRefinement: meshed.qualityRefinement } : {}),
+    ...(meshed.qualityRepair ? { qualityRepair: meshed.qualityRepair } : {}),
     ...(meshed.geometryRepair ? { geometryRepair: meshed.geometryRepair } : {}),
+    ...(meshed.elementOrderFallback ? { elementOrderFallback: meshed.elementOrderFallback } : {}),
     ...(attribution ? { attribution } : {})
   };
 }
