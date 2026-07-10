@@ -137,6 +137,119 @@ export function stepFaceRecordForId(registry: StepFaceRegistry, faceId: string):
   return registry.faces.find((face) => face.faceId === faceId) ?? null;
 }
 
+export type ResolvedPickedStepFace = {
+  faceId: string;
+  label: string;
+  /** Point-to-face distance in model units (mm). */
+  distanceModelUnits: number;
+};
+
+/**
+ * Resolve a picked point (normalized preview frame, as stored on
+ * "face-upload-picked-*" selections) to the B-rep face it lies on, by exact
+ * point-to-triangle distance over every face's tessellation. The picked point
+ * came from a raycast against this same tessellation, so the true face sits at
+ * ~0 distance (bounded by the picked id's 0.01 viewer-unit quantization); the
+ * nearest triangle's own normal must also agree with the picked normal so a
+ * point near an edge cannot land on the back side of a thin wall.
+ */
+export function resolvePickedStepFace(
+  registry: StepFaceRegistry,
+  viewerCenter: [number, number, number],
+  viewerNormal: [number, number, number] | undefined
+): ResolvedPickedStepFace | null {
+  const { scale, offset } = registry.normalization;
+  if (!(scale > 0)) return null;
+  const point: [number, number, number] = [
+    (viewerCenter[0] - offset[0]) / scale,
+    (viewerCenter[1] - offset[1]) / scale,
+    (viewerCenter[2] - offset[2]) / scale
+  ];
+  // Picked ids quantize viewer coordinates to 0.01 on a 2.4-sized preview;
+  // allow 2.5x that (in model units) so quantized picks still resolve.
+  const tolerance = 0.025 / scale;
+  const normalAgreementMin = 0.5;
+
+  let best: { face: StepFaceRecord; distance: number } | null = null;
+  for (const face of registry.faces) {
+    const mesh = registry.meshes[face.meshIndex];
+    if (!mesh) continue;
+    for (let triangle = face.triangleRange[0]; triangle <= face.triangleRange[1]; triangle += 1) {
+      const a = trianglePoint(mesh, triangle, 0);
+      const b = trianglePoint(mesh, triangle, 1);
+      const c = trianglePoint(mesh, triangle, 2);
+      const distance = pointTriangleDistance(point, a, b, c);
+      if (distance > tolerance || (best && distance >= best.distance)) continue;
+      if (viewerNormal) {
+        const normal = triangleNormal(a, b, c);
+        const agreement = normal[0] * viewerNormal[0] + normal[1] * viewerNormal[1] + normal[2] * viewerNormal[2];
+        if (agreement < normalAgreementMin) continue;
+      }
+      best = { face, distance };
+    }
+  }
+  if (!best) return null;
+  const display = registry.displayFaces.find((face) => face.id === best!.face.faceId);
+  return { faceId: best.face.faceId, label: display?.label ?? best.face.faceId, distanceModelUnits: best.distance };
+}
+
+function trianglePoint(mesh: StepFaceRegistryMesh, triangle: number, corner: number): [number, number, number] {
+  const vertex = mesh.indices[triangle * 3 + corner]!;
+  return [mesh.positions[vertex * 3] ?? 0, mesh.positions[vertex * 3 + 1] ?? 0, mesh.positions[vertex * 3 + 2] ?? 0];
+}
+
+function triangleNormal(a: [number, number, number], b: [number, number, number], c: [number, number, number]): [number, number, number] {
+  const nx = (b[1] - a[1]) * (c[2] - a[2]) - (b[2] - a[2]) * (c[1] - a[1]);
+  const ny = (b[2] - a[2]) * (c[0] - a[0]) - (b[0] - a[0]) * (c[2] - a[2]);
+  const nz = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+  const length = Math.hypot(nx, ny, nz);
+  return length > 0 ? [nx / length, ny / length, nz / length] : [0, 0, 0];
+}
+
+/** Exact point-to-triangle distance (Ericson, Real-Time Collision Detection). */
+function pointTriangleDistance(p: [number, number, number], a: [number, number, number], b: [number, number, number], c: [number, number, number]): number {
+  const abx = b[0] - a[0], aby = b[1] - a[1], abz = b[2] - a[2];
+  const acx = c[0] - a[0], acy = c[1] - a[1], acz = c[2] - a[2];
+  const apx = p[0] - a[0], apy = p[1] - a[1], apz = p[2] - a[2];
+
+  const d1 = abx * apx + aby * apy + abz * apz;
+  const d2 = acx * apx + acy * apy + acz * apz;
+  if (d1 <= 0 && d2 <= 0) return Math.hypot(apx, apy, apz);
+
+  const bpx = p[0] - b[0], bpy = p[1] - b[1], bpz = p[2] - b[2];
+  const d3 = abx * bpx + aby * bpy + abz * bpz;
+  const d4 = acx * bpx + acy * bpy + acz * bpz;
+  if (d3 >= 0 && d4 <= d3) return Math.hypot(bpx, bpy, bpz);
+
+  const vc = d1 * d4 - d3 * d2;
+  if (vc <= 0 && d1 >= 0 && d3 <= 0) {
+    const v = d1 / (d1 - d3);
+    return Math.hypot(apx - v * abx, apy - v * aby, apz - v * abz);
+  }
+
+  const cpx = p[0] - c[0], cpy = p[1] - c[1], cpz = p[2] - c[2];
+  const d5 = abx * cpx + aby * cpy + abz * cpz;
+  const d6 = acx * cpx + acy * cpy + acz * cpz;
+  if (d6 >= 0 && d5 <= d6) return Math.hypot(cpx, cpy, cpz);
+
+  const vb = d5 * d2 - d1 * d6;
+  if (vb <= 0 && d2 >= 0 && d6 <= 0) {
+    const w = d2 / (d2 - d6);
+    return Math.hypot(apx - w * acx, apy - w * acy, apz - w * acz);
+  }
+
+  const va = d3 * d6 - d5 * d4;
+  if (va <= 0 && d4 - d3 >= 0 && d5 - d6 >= 0) {
+    const w = (d4 - d3) / ((d4 - d3) + (d5 - d6));
+    return Math.hypot(bpx - w * (c[0] - b[0]), bpy - w * (c[1] - b[1]), bpz - w * (c[2] - b[2]));
+  }
+
+  const denominator = 1 / (va + vb + vc);
+  const v = vb * denominator;
+  const w = vc * denominator;
+  return Math.hypot(apx - (v * abx + w * acx), apy - (v * aby + w * acy), apz - (v * abz + w * acz));
+}
+
 /** Flattened tessellation for the mesh worker's facet->face attribution. */
 export function stepAttributionForRegistry(registry: StepFaceRegistry): StepAttributionTessellation {
   return buildStepAttributionTessellation(
