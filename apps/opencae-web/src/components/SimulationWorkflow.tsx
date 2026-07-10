@@ -7,7 +7,7 @@ import { useFocusTrap } from "../hooks/useFocusTrap";
 import { formatDensity, formatMaterialStress, type UnitSystem } from "../unitDisplay";
 import dynamicAnalysisImage from "../assets/simulation-showcase/dynamic-analysis.png";
 import staticAnalysisImage from "../assets/simulation-showcase/static-analysis.png";
-import type { ResultMode } from "./CadViewer";
+import type { ResultMode } from "../workspaceViewTypes";
 import type { StepId } from "./StepBar";
 
 type BoundaryConditionType = "fixed" | "prescribed_displacement" | "force" | "pressure" | "gravity";

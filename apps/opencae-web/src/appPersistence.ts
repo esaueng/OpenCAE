@@ -8,18 +8,16 @@ import {
 } from "@opencae/schema";
 import { BRACKET_GEOMETRY_MIGRATION_NOTE, refreshBracketSampleGeometry } from "./bracketGeometryMigration";
 import { buildLocalProjectFile, type EmbeddedModelFile, type LocalProjectFile, type LocalResultBundle } from "./projectFile";
-import { LOAD_DIRECTION_LABELS, type LoadDirectionLabel, type LoadType } from "./loadPreview";
-import type { LoadApplicationPoint, PayloadObjectSelection } from "./loadPreview";
+import { LOAD_DIRECTION_LABELS, type LoadApplicationPoint, type LoadDirectionLabel, type LoadType } from "./loadPreview";
+import { AUTOSAVE_STORAGE_KEY, AUTOSAVE_UI_STORAGE_KEY, getBrowserStorage, readStorageItem, type StorageLike } from "./autosaveStorage";
 import type { WorkspaceLogEntry } from "./components/BottomPanel";
-import type { ResultMode, ViewMode } from "./components/CadViewer";
 import type { StepId } from "./components/StepBar";
 import type { SampleAnalysisType, SampleModelId } from "./lib/api";
+import type { PayloadObjectSelection, ResultMode, ThemeMode, ViewMode } from "./workspaceViewTypes";
 
-export const AUTOSAVE_STORAGE_KEY = "opencae.workspace.autosave.v1";
-export const AUTOSAVE_UI_STORAGE_KEY = "opencae.workspace.ui.autosave.v1";
+export { AUTOSAVE_STORAGE_KEY, AUTOSAVE_UI_STORAGE_KEY } from "./autosaveStorage";
+export type { ThemeMode } from "./workspaceViewTypes";
 export const WORKSPACE_LOG_LIMIT = 100;
-
-export type ThemeMode = "dark" | "light";
 
 export interface WorkspaceUiSnapshot {
   activeStep: StepId;
@@ -58,11 +56,6 @@ export interface AutosavedWorkspaceUiSnapshot {
   version: 1;
   savedAt: string;
   ui: WorkspaceUiSnapshot;
-}
-
-interface StorageLike {
-  getItem: (key: string) => string | null;
-  setItem: (key: string, value: string) => void;
 }
 
 interface IdleCallbackHandle {
@@ -118,10 +111,10 @@ export function parseAutosavedWorkspacePayload(payload: string): AutosavedWorksp
 
 export function readAutosavedWorkspace(storage = getBrowserStorage()): AutosavedWorkspace | null {
   if (!storage) return null;
-  const payload = storage.getItem(AUTOSAVE_STORAGE_KEY);
+  const payload = readStorageItem(storage, AUTOSAVE_STORAGE_KEY);
   const workspace = payload ? parseAutosavedWorkspacePayload(payload) : null;
   if (!workspace) return null;
-  const uiPayload = storage.getItem(AUTOSAVE_UI_STORAGE_KEY);
+  const uiPayload = readStorageItem(storage, AUTOSAVE_UI_STORAGE_KEY);
   const uiSnapshot = uiPayload ? parseAutosavedWorkspaceUiSnapshotPayload(uiPayload) : null;
   const merged = uiSnapshot && isNewerOrSameTimestamp(uiSnapshot.savedAt, workspace.savedAt) ? { ...workspace, ui: uiSnapshot.ui } : workspace;
   const ui = reattachEmbeddedModelsToUiSnapshot(merged.ui, merged.projectFile.project);
@@ -531,8 +524,4 @@ function isNewerOrSameTimestamp(candidate: string, baseline: string): boolean {
   const baselineTime = Date.parse(baseline);
   if (!Number.isFinite(candidateTime) || !Number.isFinite(baselineTime)) return true;
   return candidateTime >= baselineTime;
-}
-
-function getBrowserStorage(): StorageLike | null {
-  return typeof window === "undefined" ? null : window.localStorage;
 }

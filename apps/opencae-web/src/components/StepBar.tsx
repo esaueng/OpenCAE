@@ -4,7 +4,7 @@ import { Activity, Anchor, Atom, Box, Layers3, Moon, PanelLeftClose, PanelLeftOp
 import type { LucideIcon } from "lucide-react";
 import { canNavigateToStep } from "../appShellState";
 import type { UnitSystem } from "../unitDisplay";
-import type { ThemeMode } from "../appPersistence";
+import type { ThemeMode } from "../workspaceViewTypes";
 
 export type StepId = "model" | "material" | "supports" | "loads" | "mesh" | "run" | "results";
 
