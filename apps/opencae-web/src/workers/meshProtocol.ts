@@ -10,6 +10,7 @@ import type {
   MeshPhase,
   MeshTimings,
   SourceSelectionMetadata,
+  StepBodyBounds,
   StepAttributionTessellation,
   StepGeometryInspection,
   StepGeometryRepairReport
@@ -30,6 +31,8 @@ export type MeshWorkerPayloads = {
     elementOrder?: 1 | 2;
     units?: "mm" | "m";
     meshSizeMm?: number;
+    /** Bounds of STEP bodies that participate structurally; disconnected payload/visual bodies are removed before meshing. */
+    structuralBodyBounds?: StepBodyBounds[];
     /**
      * STEP display tessellation + faceIds (plan A-M3): when present, the
      * worker stamps every boundary facet's sourceFaceId per surface set so

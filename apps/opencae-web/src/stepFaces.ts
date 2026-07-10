@@ -19,7 +19,7 @@
 // stepPreview's shared importer and caches registries per STEP content.
 import type { OcctMesh } from "occt-import-js";
 import type { DisplayFace } from "@opencae/schema";
-import { buildStepAttributionTessellation, type StepAttributionTessellation } from "@opencae/mesh-intake";
+import { buildStepAttributionTessellation, type StepAttributionTessellation, type StepBodyBounds } from "@opencae/mesh-intake";
 
 export type StepFaceRecord = {
   /** Stable per-import id, global across meshes: "step-face-<k>". */
@@ -137,6 +137,86 @@ export function stepFaceRecordForId(registry: StepFaceRegistry, faceId: string):
   return registry.faces.find((face) => face.faceId === faceId) ?? null;
 }
 
+/** Viewer STEP object ids are one-based (`step-object-1`); registry mesh indices are zero-based. */
+export function stepMeshIndexFromObjectId(objectId: string | null | undefined): number | null {
+  const match = /^step-object-(\d+)$/.exec(objectId ?? "");
+  if (!match) return null;
+  const oneBasedIndex = Number.parseInt(match[1]!, 10);
+  return Number.isSafeInteger(oneBasedIndex) && oneBasedIndex > 0 ? oneBasedIndex - 1 : null;
+}
+
+/** Exact model-space bounds for one preview body, used to identify the same OCC volume in gmsh. */
+export function stepBodyBoundsForMesh(registry: StepFaceRegistry, meshIndex: number): StepBodyBounds | null {
+  const mesh = registry.meshes[meshIndex];
+  if (!mesh || mesh.positions.length < 3) return null;
+  const min: [number, number, number] = [Infinity, Infinity, Infinity];
+  const max: [number, number, number] = [-Infinity, -Infinity, -Infinity];
+  for (let index = 0; index + 2 < mesh.positions.length; index += 3) {
+    for (let axis = 0; axis < 3; axis += 1) {
+      const value = mesh.positions[index + axis]!;
+      if (value < min[axis]!) min[axis] = value;
+      if (value > max[axis]!) max[axis] = value;
+    }
+  }
+  return Number.isFinite(min[0]) ? { min, max } : null;
+}
+
+/**
+ * Find the retained structural face nearest a payload's contact point. A face
+ * pointing against gravity wins ties, so a rod resting on a tray maps to the
+ * tray's upper contact surface instead of a coincident wall or underside.
+ */
+export function nearestStepFaceIdOnMeshes(
+  registry: StepFaceRegistry,
+  point: [number, number, number],
+  meshIndices: readonly number[],
+  preferredNormal?: [number, number, number]
+): string | null {
+  const included = new Set(meshIndices);
+  let nearestAny: { faceId: string; distance: number } | null = null;
+  let nearestAligned: { faceId: string; distance: number; agreement: number } | null = null;
+  for (const face of registry.faces) {
+    if (!included.has(face.meshIndex)) continue;
+    const mesh = registry.meshes[face.meshIndex];
+    if (!mesh) continue;
+    let faceDistance = Infinity;
+    for (let triangle = face.triangleRange[0]; triangle <= face.triangleRange[1]; triangle += 1) {
+      const distance = pointTriangleDistance(
+        point,
+        trianglePoint(mesh, triangle, 0),
+        trianglePoint(mesh, triangle, 1),
+        trianglePoint(mesh, triangle, 2)
+      );
+      if (distance < faceDistance) faceDistance = distance;
+    }
+    if (!Number.isFinite(faceDistance)) continue;
+    if (!nearestAny || faceDistance < nearestAny.distance) nearestAny = { faceId: face.faceId, distance: faceDistance };
+    if (!preferredNormal) continue;
+    const agreement =
+      face.avgNormal[0] * preferredNormal[0] +
+      face.avgNormal[1] * preferredNormal[1] +
+      face.avgNormal[2] * preferredNormal[2];
+    if (agreement < 0.25) continue;
+    if (
+      !nearestAligned ||
+      faceDistance < nearestAligned.distance - 1e-9 ||
+      (Math.abs(faceDistance - nearestAligned.distance) <= 1e-9 && agreement > nearestAligned.agreement)
+    ) {
+      nearestAligned = { faceId: face.faceId, distance: faceDistance, agreement };
+    }
+  }
+  if (nearestAligned && nearestAny) {
+    const size = [
+      registry.bounds.max[0] - registry.bounds.min[0],
+      registry.bounds.max[1] - registry.bounds.min[1],
+      registry.bounds.max[2] - registry.bounds.min[2]
+    ];
+    const alignmentTolerance = Math.max(Math.hypot(...size) * 0.01, 1e-6);
+    if (nearestAligned.distance <= nearestAny.distance + alignmentTolerance) return nearestAligned.faceId;
+  }
+  return nearestAny?.faceId ?? nearestAligned?.faceId ?? null;
+}
+
 export type ResolvedPickedStepFace = {
   faceId: string;
   label: string;
@@ -251,14 +331,21 @@ function pointTriangleDistance(p: [number, number, number], a: [number, number, 
 }
 
 /** Flattened tessellation for the mesh worker's facet->face attribution. */
-export function stepAttributionForRegistry(registry: StepFaceRegistry): StepAttributionTessellation {
+export function stepAttributionForRegistry(registry: StepFaceRegistry, meshIndices?: readonly number[]): StepAttributionTessellation {
+  const included = meshIndices ? new Set(meshIndices) : null;
+  const meshes = registry.meshes
+    .map((mesh, meshIndex) => ({ mesh, meshIndex }))
+    .filter(({ meshIndex }) => !included || included.has(meshIndex));
   return buildStepAttributionTessellation(
-    registry.meshes.map((mesh) => ({
+    meshes.map(({ mesh }) => ({
       positions: mesh.positions,
       indices: mesh.indices,
       brepFaces: mesh.faceRanges
     })),
-    { faceIds: registry.faces.map((face) => face.faceId), unitScale: 0.001 }
+    {
+      faceIds: meshes.flatMap(({ meshIndex }) => registry.faces.filter((face) => face.meshIndex === meshIndex).map((face) => face.faceId)),
+      unitScale: 0.001
+    }
   );
 }
 

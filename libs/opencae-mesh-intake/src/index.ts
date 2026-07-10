@@ -61,6 +61,7 @@ export {
   type MeshWasmOptions,
   type StepMeshResult,
   type StepMeshWasmOptions,
+  type StepBodyBounds,
   type StepGeometryInspection,
   type StepGeometryRepairReport,
   type StepGeometryRepairResult
