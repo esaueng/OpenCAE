@@ -114,8 +114,7 @@ export function buildCoreModelFromCloudMesh(input: BuildCoreModelInput): OpenCAE
       role: "fixed_support",
       diagnostics: input.mappingDiagnostics
     }, surfaceSets);
-    const nodeSetName = `${surfaceSet.name}_nodes`;
-    nodeSets.push({ name: nodeSetName, nodes: nodeSetFromSurfaceSet(surfaceSet, input.volumeMesh.surfaceFacets) });
+    const nodeSetName = ensureNodeSetForSurfaceSet(nodeSets, surfaceSet, input.volumeMesh.surfaceFacets);
     boundaryConditions.push({
       name: `fixedSupport${index}`,
       type: "fixed",
@@ -173,8 +172,7 @@ export function buildCoreModelFromCloudMesh(input: BuildCoreModelInput): OpenCAE
       role: "fixed_support",
       diagnostics: input.mappingDiagnostics
     }, surfaceSets);
-    const nodeSetName = `${surfaceSet.name}_nodes`;
-    nodeSets.push({ name: nodeSetName, nodes: nodeSetFromSurfaceSet(surfaceSet, input.volumeMesh.surfaceFacets) });
+    const nodeSetName = ensureNodeSetForSurfaceSet(nodeSets, surfaceSet, input.volumeMesh.surfaceFacets);
     boundaryConditions.push({ name: "fixedSupport0", type: "fixed", nodeSet: nodeSetName, components: ["x", "y", "z"] });
   }
   if (loads.length === 0) {
@@ -481,6 +479,20 @@ function isLayerOrientation(value: unknown): value is "x" | "y" | "z" {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
+}
+
+/**
+ * Register the node set backing a surface-set boundary condition, reusing an
+ * existing entry when another support already mapped to the same surface —
+ * two supports picked on one face must not emit duplicate node-set names
+ * (model validation rejects them with "Names must be unique").
+ */
+function ensureNodeSetForSurfaceSet(nodeSets: NodeSetJson[], surfaceSet: SurfaceSetJson, surfaceFacets: SurfaceFacetJson[]): string {
+  const name = `${surfaceSet.name}_nodes`;
+  if (!nodeSets.some((set) => set.name === name)) {
+    nodeSets.push({ name, nodes: nodeSetFromSurfaceSet(surfaceSet, surfaceFacets) });
+  }
+  return name;
 }
 
 function ensureMappedSurfaceSet(input: SelectionMappingInput, surfaceSets: SurfaceSetJson[]): SurfaceSetJson {
