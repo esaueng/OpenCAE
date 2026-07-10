@@ -10,6 +10,8 @@
 //     branch of mapSelectionToSurfaceSet resolved each selection (bySelection/byFace/
 //     byPhysical/geometric). Purely additive — when the sink is omitted, behavior is
 //     byte-identical to upstream. Sync upstream when plan 016's extraction lands.
+//  3. Built-in materials resolve through @opencae/materials so manufacturing-process
+//     compatibility and effective-property calculations cannot drift from the app.
 import {
   OPENCAE_MODEL_SCHEMA,
   OPENCAE_MODEL_SCHEMA_VERSION,
@@ -25,6 +27,7 @@ import {
   type SurfaceFacetJson,
   type SurfaceSetJson
 } from "@opencae/core";
+import { effectiveMaterialProperties, starterMaterials, type PrintStrengthContext } from "@opencae/materials";
 import type { CloudAnalysisType, CloudStudyLike, CoreVolumeMeshArtifact } from "./types";
 
 type BuildCoreModelInput = {
@@ -35,6 +38,8 @@ type BuildCoreModelInput = {
   materials?: Array<IsotropicLinearElasticMaterialJson | Record<string, unknown>>;
   analysisType: CloudAnalysisType;
   solverSettings?: Record<string, unknown>;
+  /** Governing material axis, already mapped into the solver/global frame. */
+  criticalLayerAxis?: "x" | "y" | "z";
   /** A-M3 deviation (see header): collects how each selection was mapped. */
   mappingDiagnostics?: SelectionMappingDiagnostic[];
 };
@@ -62,11 +67,15 @@ type SelectionMappingInput = {
 const STANDARD_GRAVITY = 9.80665;
 
 type PrintMaterialProfile = {
-  process: "FDM" | "SLS" | "SLA" | "Metal AM";
-  defaultInfillDensity: number;
-  defaultWallCount: number;
-  defaultLayerOrientation: "x" | "y" | "z";
-  layerStrengthFactor: number;
+  process: "FDM" | "SLS" | "SLA" | "MJF" | "Metal AM";
+  defaultInfillDensity?: number;
+  defaultWallCount?: number;
+  defaultLayerOrientation?: "x" | "y" | "z";
+  layerStrengthFactor?: number;
+  inPlaneModulusFactor?: number;
+  interlayerModulusFactor?: number;
+  inPlaneStrengthFactor?: number;
+  interlayerStrengthFactor?: number;
 };
 
 type BuiltInMaterial = IsotropicLinearElasticMaterialJson & {
@@ -77,29 +86,7 @@ type BuiltInMaterial = IsotropicLinearElasticMaterialJson & {
 
 type MaterialCatalog = Map<string, BuiltInMaterial>;
 
-const BUILT_IN_MATERIALS: Record<string, BuiltInMaterial> = {
-  "mat-aluminum-6061": materialDefinition("mat-aluminum-6061", 68_900_000_000, 0.33, 2700, 276_000_000),
-  "mat-aluminum-7075": materialDefinition("mat-aluminum-7075", 71_700_000_000, 0.33, 2810, 503_000_000),
-  "mat-steel": materialDefinition("mat-steel", 200_000_000_000, 0.29, 7850, 250_000_000),
-  "mat-stainless-304": materialDefinition("mat-stainless-304", 193_000_000_000, 0.29, 8000, 215_000_000),
-  "mat-titanium-grade-5": materialDefinition("mat-titanium-grade-5", 114_000_000_000, 0.34, 4430, 880_000_000),
-  "mat-copper": materialDefinition("mat-copper", 117_000_000_000, 0.34, 8960, 70_000_000),
-  "mat-brass": materialDefinition("mat-brass", 100_000_000_000, 0.34, 8530, 200_000_000),
-  "mat-abs": materialDefinition("mat-abs", 2_100_000_000, 0.35, 1040, 40_000_000, fdmProfile(35, 3, 0.7)),
-  "mat-pla": materialDefinition("mat-pla", 3_500_000_000, 0.36, 1240, 60_000_000, fdmProfile(35, 3, 0.68)),
-  "mat-pla-plus": materialDefinition("mat-pla-plus", 3_900_000_000, 0.36, 1240, 68_000_000, fdmProfile(35, 3, 0.7)),
-  "mat-petg": materialDefinition("mat-petg", 2_100_000_000, 0.38, 1270, 50_000_000, fdmProfile(40, 3, 0.72)),
-  "mat-asa": materialDefinition("mat-asa", 2_200_000_000, 0.35, 1070, 46_000_000, fdmProfile(35, 3, 0.7)),
-  "mat-nylon": materialDefinition("mat-nylon", 2_800_000_000, 0.39, 1150, 70_000_000, fdmProfile(40, 3, 0.74)),
-  "mat-nylon-cf": materialDefinition("mat-nylon-cf", 7_600_000_000, 0.34, 1180, 105_000_000, fdmProfile(40, 4, 0.78)),
-  "mat-pa12-sls": materialDefinition("mat-pa12-sls", 1_700_000_000, 0.39, 1010, 48_000_000, printProfile("SLS", 100, 2, 0.9)),
-  "mat-polycarbonate": materialDefinition("mat-polycarbonate", 2_400_000_000, 0.37, 1200, 65_000_000, fdmProfile(40, 3, 0.74)),
-  "mat-pc-abs": materialDefinition("mat-pc-abs", 2_300_000_000, 0.36, 1150, 56_000_000, fdmProfile(40, 3, 0.72)),
-  "mat-peek": materialDefinition("mat-peek", 3_700_000_000, 0.4, 1300, 97_000_000, fdmProfile(50, 4, 0.78)),
-  "mat-sla-tough-resin": materialDefinition("mat-sla-tough-resin", 2_800_000_000, 0.38, 1180, 55_000_000, printProfile("SLA", 100, 1, 0.86)),
-  "mat-sla-standard-resin": materialDefinition("mat-sla-standard-resin", 2_200_000_000, 0.38, 1120, 42_000_000, printProfile("SLA", 100, 1, 0.82)),
-  "mat-316l-am": materialDefinition("mat-316l-am", 180_000_000_000, 0.3, 7900, 470_000_000, printProfile("Metal AM", 100, 1, 0.92))
-};
+const BUILT_IN_MATERIAL_IDS = new Set(starterMaterials.map((material) => material.id));
 
 export function buildCoreModelFromCloudMesh(input: BuildCoreModelInput): OpenCAEModelJson {
   validateVolumeMeshArtifact(input.volumeMesh);
@@ -294,39 +281,45 @@ function validateVolumeMeshArtifact(volumeMesh: CoreVolumeMeshArtifact): void {
 function resolveMaterial(input: BuildCoreModelInput): IsotropicLinearElasticMaterialJson {
   const providedCatalog = providedMaterialCatalog([input.material, ...(input.materials ?? [])]);
   const materialAssignments = input.study?.materialAssignments ?? [];
-  const material = materialFromUnknown(input.material, providedCatalog);
+  const context: PrintStrengthContext = { criticalLayerAxis: input.criticalLayerAxis };
+  const material = materialFromUnknown(input.material, providedCatalog, context);
   if (material) return material;
 
   for (const assignment of materialAssignments) {
-    const assigned = materialFromUnknown(assignment, providedCatalog);
+    const assigned = materialFromUnknown(assignment, providedCatalog, context);
     if (assigned) return assigned;
   }
 
   for (const candidate of input.materials ?? []) {
-    const listed = materialFromUnknown(candidate, providedCatalog);
+    const listed = materialFromUnknown(candidate, providedCatalog, context);
     if (listed) return listed;
   }
-  return materialFromBuiltIn("mat-aluminum-6061");
+  return materialFromBuiltIn("mat-aluminum-6061", undefined, context);
 }
 
-function materialFromUnknown(value: unknown, catalog: MaterialCatalog = new Map()): IsotropicLinearElasticMaterialJson | undefined {
+function materialFromUnknown(
+  value: unknown,
+  catalog: MaterialCatalog = new Map(),
+  context: PrintStrengthContext = {}
+): IsotropicLinearElasticMaterialJson | undefined {
   if (typeof value === "string") {
-    return materialFromCatalog(value, catalog) ?? materialFromBuiltIn(value);
+    return materialFromCatalog(value, catalog, undefined, context) ?? materialFromBuiltIn(value, undefined, context);
   }
   if (!value || typeof value !== "object") return undefined;
   const raw = value as Record<string, unknown>;
   const materialId = stringValue(raw.materialId);
   if (materialId) {
-    return materialFromCatalog(materialId, catalog, objectValue(raw.parameters)) ?? materialFromBuiltIn(materialId, objectValue(raw.parameters));
+    return materialFromCatalog(materialId, catalog, objectValue(raw.parameters), context)
+      ?? materialFromBuiltIn(materialId, objectValue(raw.parameters), context);
   }
 
   const directMaterial = materialObjectFromUnknown(raw);
-  if (directMaterial) return stripPrintProfile(effectiveMaterial(directMaterial, objectValue(raw.parameters)));
+  if (directMaterial) return stripPrintProfile(effectiveMaterial(directMaterial, objectValue(raw.parameters), context));
 
   const builtInId = stringValue(raw.id) ?? stringValue(raw.name);
   return builtInId
-    ? materialFromCatalog(builtInId, catalog, objectValue(raw.parameters))
-      ?? (builtInId in BUILT_IN_MATERIALS ? materialFromBuiltIn(builtInId, objectValue(raw.parameters)) : undefined)
+    ? materialFromCatalog(builtInId, catalog, objectValue(raw.parameters), context)
+      ?? (BUILT_IN_MATERIAL_IDS.has(builtInId) ? materialFromBuiltIn(builtInId, objectValue(raw.parameters), context) : undefined)
     : undefined;
 }
 
@@ -354,17 +347,30 @@ function addCatalogAlias(catalog: MaterialCatalog, alias: unknown, material: Bui
 function materialFromCatalog(
   id: string,
   catalog: MaterialCatalog,
-  parameters?: Record<string, unknown>
+  parameters?: Record<string, unknown>,
+  context: PrintStrengthContext = {}
 ): IsotropicLinearElasticMaterialJson | undefined {
   const material = catalog.get(id) ?? catalog.get(id.toLowerCase());
   if (!material) return undefined;
-  return stripPrintProfile(effectiveMaterial({ ...material, name: id }, parameters));
+  return stripPrintProfile(effectiveMaterial({ ...material, name: id }, parameters, context));
 }
 
-function materialFromBuiltIn(id: string, parameters?: Record<string, unknown>): IsotropicLinearElasticMaterialJson {
-  const material = BUILT_IN_MATERIALS[id];
+function materialFromBuiltIn(
+  id: string,
+  parameters?: Record<string, unknown>,
+  context: PrintStrengthContext = {}
+): IsotropicLinearElasticMaterialJson {
+  const material = starterMaterials.find((candidate) => candidate.id === id);
   if (!material) throw new Error(`OpenCAE Core Cloud does not know material ${id}.`);
-  return stripPrintProfile(effectiveMaterial(material, parameters));
+  const effective = effectiveMaterialProperties(material, parameters ?? {}, context);
+  return {
+    name: effective.id,
+    type: "isotropicLinearElastic",
+    youngModulus: effective.youngsModulus,
+    poissonRatio: effective.poissonRatio,
+    density: effective.density,
+    yieldStrength: effective.yieldStrength
+  };
 }
 
 function materialObjectFromUnknown(raw: Record<string, unknown>): BuiltInMaterial | undefined {
@@ -402,73 +408,51 @@ function materialDefinition(
   };
 }
 
-function fdmProfile(defaultInfillDensity: number, defaultWallCount: number, layerStrengthFactor: number): PrintMaterialProfile {
-  return printProfile("FDM", defaultInfillDensity, defaultWallCount, layerStrengthFactor);
-}
-
-function printProfile(
-  process: PrintMaterialProfile["process"],
-  defaultInfillDensity: number,
-  defaultWallCount: number,
-  layerStrengthFactor: number
-): PrintMaterialProfile {
-  return { process, defaultInfillDensity, defaultWallCount, defaultLayerOrientation: "z", layerStrengthFactor };
-}
-
 function printProfileFromUnknown(value: unknown): PrintMaterialProfile | undefined {
   const raw = objectValue(value);
   if (!raw) return undefined;
   const process = printProcess(raw.process);
-  const defaultInfillDensity = numberValue(raw.defaultInfillDensity);
-  const defaultWallCount = numberValue(raw.defaultWallCount);
+  const defaultInfillDensity = boundedNumberValue(raw.defaultInfillDensity, 1, 100);
+  const defaultWallCount = boundedNumberValue(raw.defaultWallCount, 1, 12);
   const defaultLayerOrientation = isLayerOrientation(raw.defaultLayerOrientation) ? raw.defaultLayerOrientation : undefined;
-  const layerStrengthFactor = numberValue(raw.layerStrengthFactor);
-  if (!process || defaultInfillDensity === undefined || defaultWallCount === undefined || !defaultLayerOrientation || layerStrengthFactor === undefined) {
-    return undefined;
-  }
+  const layerStrengthFactor = boundedNumberValue(raw.layerStrengthFactor, 0.1, 1);
+  if (!process) return undefined;
   return {
     process,
-    defaultInfillDensity,
-    defaultWallCount,
-    defaultLayerOrientation,
-    layerStrengthFactor
+    ...(defaultInfillDensity === undefined ? {} : { defaultInfillDensity }),
+    ...(defaultWallCount === undefined ? {} : { defaultWallCount }),
+    ...(defaultLayerOrientation === undefined ? {} : { defaultLayerOrientation }),
+    ...(layerStrengthFactor === undefined ? {} : { layerStrengthFactor }),
+    inPlaneModulusFactor: boundedNumberValue(raw.inPlaneModulusFactor, 0.1, 1),
+    interlayerModulusFactor: boundedNumberValue(raw.interlayerModulusFactor, 0.1, 1),
+    inPlaneStrengthFactor: boundedNumberValue(raw.inPlaneStrengthFactor, 0.1, 1),
+    interlayerStrengthFactor: boundedNumberValue(raw.interlayerStrengthFactor, 0.1, 1)
   };
 }
 
 function printProcess(value: unknown): PrintMaterialProfile["process"] | undefined {
-  return value === "FDM" || value === "SLS" || value === "SLA" || value === "Metal AM" ? value : undefined;
+  return value === "FDM" || value === "SLS" || value === "SLA" || value === "MJF" || value === "Metal AM" ? value : undefined;
 }
 
-function effectiveMaterial(material: BuiltInMaterial, parameters: Record<string, unknown> | undefined): BuiltInMaterial {
-  const printSettings = normalizePrintParameters(material, parameters);
-  if (!material.printProfile || !printSettings.printed) return material;
-
-  const infill = clamp((printSettings.infillDensity ?? 100) / 100, 0.05, 1);
-  const wallCount = clamp(printSettings.wallCount ?? 3, 1, 12);
-  const shellShare = clamp(0.12 + wallCount * 0.045, 0.16, 0.5);
-  const sectionFill = clamp(shellShare + (1 - shellShare) * infill, 0.05, 1);
-  const layerFactor = printSettings.layerOrientation === "z" ? 1 : material.printProfile.layerStrengthFactor;
-  const stiffnessFactor = clamp(0.18 + 0.82 * sectionFill ** 1.35, 0.08, 1);
-  const strengthFactor = clamp((0.25 + 0.75 * sectionFill ** 1.15) * layerFactor, 0.08, 1);
-  const densityFactor = clamp(0.18 + 0.82 * sectionFill, 0.08, 1);
-
+function effectiveMaterial(
+  material: BuiltInMaterial,
+  parameters: Record<string, unknown> | undefined,
+  context: PrintStrengthContext = {}
+): BuiltInMaterial {
+  const effective = effectiveMaterialProperties({
+    id: material.name,
+    name: material.name,
+    youngsModulus: material.youngModulus,
+    poissonRatio: material.poissonRatio,
+    density: material.density,
+    yieldStrength: material.yieldStrength,
+    printProfile: material.printProfile
+  }, parameters ?? {}, context);
   return {
     ...material,
-    youngModulus: material.youngModulus * stiffnessFactor,
-    density: material.density * densityFactor,
-    yieldStrength: material.yieldStrength * strengthFactor
-  };
-}
-
-function normalizePrintParameters(
-  material: BuiltInMaterial,
-  parameters: Record<string, unknown> | undefined
-): { printed: boolean; infillDensity: number; wallCount: number; layerOrientation: "x" | "y" | "z" } {
-  return {
-    printed: typeof parameters?.printed === "boolean" ? parameters.printed : Boolean(material.printProfile),
-    infillDensity: clamp(numberValue(parameters?.infillDensity) ?? material.printProfile?.defaultInfillDensity ?? 100, 1, 100),
-    wallCount: Math.round(clamp(numberValue(parameters?.wallCount) ?? material.printProfile?.defaultWallCount ?? 1, 1, 12)),
-    layerOrientation: isLayerOrientation(parameters?.layerOrientation) ? parameters.layerOrientation : material.printProfile?.defaultLayerOrientation ?? "z"
+    youngModulus: effective.youngsModulus,
+    density: effective.density,
+    yieldStrength: effective.yieldStrength
   };
 }
 
@@ -557,12 +541,172 @@ function geometricFallback(input: SelectionMappingInput): SurfaceSetJson | undef
   const entityIds = new Set([input.selectionRef, ...geometryRefEntityIds(input.study, input.selectionRef)]);
   const face = displayFaces.find((candidate) => entityIds.has(candidate.id));
   if (!face) return undefined;
+  // STEP picking can briefly fall back to an ad-hoc point/normal face while
+  // the B-rep registry is still warming. Those points live in the normalized
+  // 2.4-unit preview frame, while volume-mesh facets live in solver meters.
+  // Reproject the picked point into the mesh frame and resolve the actual
+  // triangle under it before trying the older centroid heuristic.
+  if (face.id.startsWith("face-upload-picked-")) {
+    const pickedSurfaceSet = surfaceSetAtPickedUploadPoint(input.volumeMesh, face);
+    if (pickedSurfaceSet) return pickedSurfaceSet;
+  }
   const ranked = input.volumeMesh.surfaceSets
     .map((set) => ({ set, score: geometricScore(set, input.volumeMesh.surfaceFacets, face) }))
     .filter((entry) => entry.score >= 0.9)
     .sort((left, right) => right.score - left.score);
   if (ranked.length !== 1) return undefined;
   return ranked[0]!.set;
+}
+
+const STEP_PREVIEW_LONGEST_SPAN = 2.4;
+const PICKED_POINT_MIN_NORMAL_ALIGNMENT = 0.8;
+const PICKED_POINT_MAX_DISTANCE_FRACTION = 0.03;
+const PICKED_POINT_AMBIGUITY_DISTANCE_FRACTION = 0.005;
+const PICKED_POINT_AMBIGUITY_NORMAL_MARGIN = 0.1;
+
+function surfaceSetAtPickedUploadPoint(
+  volumeMesh: CoreVolumeMeshArtifact,
+  face: { center?: [number, number, number]; normal?: [number, number, number] }
+): SurfaceSetJson | undefined {
+  if (!face.center || !face.normal) return undefined;
+  const bounds = meshNodeBounds(volumeMesh.nodes.coordinates);
+  if (!bounds) return undefined;
+  const size: [number, number, number] = [
+    bounds.max[0] - bounds.min[0],
+    bounds.max[1] - bounds.min[1],
+    bounds.max[2] - bounds.min[2]
+  ];
+  const longest = Math.max(...size);
+  if (!(longest > 0)) return undefined;
+  const meshCenter: [number, number, number] = [
+    (bounds.min[0] + bounds.max[0]) / 2,
+    (bounds.min[1] + bounds.max[1]) / 2,
+    (bounds.min[2] + bounds.max[2]) / 2
+  ];
+  const previewToMeshScale = longest / STEP_PREVIEW_LONGEST_SPAN;
+  const pickedPoint: [number, number, number] = [
+    meshCenter[0] + face.center[0] * previewToMeshScale,
+    meshCenter[1] + face.center[1] * previewToMeshScale,
+    meshCenter[2] + face.center[2] * previewToMeshScale
+  ];
+  const pickedNormal = normalize(face.normal);
+  const facetsById = new Map(volumeMesh.surfaceFacets.map((facet) => [facet.id, facet]));
+  const ranked = volumeMesh.surfaceSets
+    .flatMap((set) => {
+      let distance = Infinity;
+      let normalAlignment = -1;
+      for (const facetId of set.facets) {
+        const facet = facetsById.get(facetId);
+        if (!facet) continue;
+        const facetDistance = pointToSurfaceFacetDistance(pickedPoint, facet, volumeMesh.nodes.coordinates);
+        if (facetDistance < distance) distance = facetDistance;
+        if (facet.normal) normalAlignment = Math.max(normalAlignment, dot(pickedNormal, normalize(facet.normal)));
+      }
+      return Number.isFinite(distance) && normalAlignment >= PICKED_POINT_MIN_NORMAL_ALIGNMENT
+        ? [{ set, distance, normalAlignment }]
+        : [];
+    })
+    .sort((left, right) => left.distance - right.distance || right.normalAlignment - left.normalAlignment);
+
+  const best = ranked[0];
+  if (!best || best.distance > longest * PICKED_POINT_MAX_DISTANCE_FRACTION) return undefined;
+  const runnerUp = ranked[1];
+  if (
+    runnerUp &&
+    runnerUp.distance - best.distance < longest * PICKED_POINT_AMBIGUITY_DISTANCE_FRACTION &&
+    best.normalAlignment - runnerUp.normalAlignment < PICKED_POINT_AMBIGUITY_NORMAL_MARGIN
+  ) return undefined;
+  return best.set;
+}
+
+function meshNodeBounds(coordinates: number[]): { min: [number, number, number]; max: [number, number, number] } | undefined {
+  if (coordinates.length < 3) return undefined;
+  const min: [number, number, number] = [Infinity, Infinity, Infinity];
+  const max: [number, number, number] = [-Infinity, -Infinity, -Infinity];
+  for (let index = 0; index + 2 < coordinates.length; index += 3) {
+    for (let axis = 0; axis < 3; axis += 1) {
+      const value = coordinates[index + axis]!;
+      if (value < min[axis]!) min[axis] = value;
+      if (value > max[axis]!) max[axis] = value;
+    }
+  }
+  return Number.isFinite(min[0]) ? { min, max } : undefined;
+}
+
+function pointToSurfaceFacetDistance(
+  point: [number, number, number],
+  facet: SurfaceFacetJson,
+  coordinates: number[]
+): number {
+  const corners = facet.nodes.slice(0, 3).map((node) => nodeCoordinate(coordinates, node));
+  if (corners.length !== 3 || corners.some((corner) => !corner)) {
+    return facet.center ? Math.hypot(point[0] - facet.center[0], point[1] - facet.center[1], point[2] - facet.center[2]) : Infinity;
+  }
+  return pointTriangleDistance(point, corners[0]!, corners[1]!, corners[2]!);
+}
+
+function nodeCoordinate(coordinates: number[], node: number): [number, number, number] | undefined {
+  const offset = node * 3;
+  return offset + 2 < coordinates.length
+    ? [coordinates[offset]!, coordinates[offset + 1]!, coordinates[offset + 2]!]
+    : undefined;
+}
+
+/** Exact point-to-triangle distance (Ericson, Real-Time Collision Detection). */
+function pointTriangleDistance(
+  point: [number, number, number],
+  a: [number, number, number],
+  b: [number, number, number],
+  c: [number, number, number]
+): number {
+  const ab = subtract(b, a);
+  const ac = subtract(c, a);
+  const ap = subtract(point, a);
+  const d1 = dot(ab, ap);
+  const d2 = dot(ac, ap);
+  if (d1 <= 0 && d2 <= 0) return Math.hypot(...ap);
+
+  const bp = subtract(point, b);
+  const d3 = dot(ab, bp);
+  const d4 = dot(ac, bp);
+  if (d3 >= 0 && d4 <= d3) return Math.hypot(...bp);
+
+  const vc = d1 * d4 - d3 * d2;
+  if (vc <= 0 && d1 >= 0 && d3 <= 0) {
+    const v = d1 / (d1 - d3);
+    return Math.hypot(ap[0] - v * ab[0], ap[1] - v * ab[1], ap[2] - v * ab[2]);
+  }
+
+  const cp = subtract(point, c);
+  const d5 = dot(ab, cp);
+  const d6 = dot(ac, cp);
+  if (d6 >= 0 && d5 <= d6) return Math.hypot(...cp);
+
+  const vb = d5 * d2 - d1 * d6;
+  if (vb <= 0 && d2 >= 0 && d6 <= 0) {
+    const w = d2 / (d2 - d6);
+    return Math.hypot(ap[0] - w * ac[0], ap[1] - w * ac[1], ap[2] - w * ac[2]);
+  }
+
+  const va = d3 * d6 - d5 * d4;
+  if (va <= 0 && d4 - d3 >= 0 && d5 - d6 >= 0) {
+    const edge = subtract(c, b);
+    const w = (d4 - d3) / ((d4 - d3) + (d5 - d6));
+    return Math.hypot(bp[0] - w * edge[0], bp[1] - w * edge[1], bp[2] - w * edge[2]);
+  }
+
+  const denominator = 1 / (va + vb + vc);
+  const v = vb * denominator;
+  const w = vc * denominator;
+  return Math.hypot(
+    ap[0] - (v * ab[0] + w * ac[0]),
+    ap[1] - (v * ab[1] + w * ac[1]),
+    ap[2] - (v * ab[2] + w * ac[2])
+  );
+}
+
+function subtract(left: [number, number, number], right: [number, number, number]): [number, number, number] {
+  return [left[0] - right[0], left[1] - right[1], left[2] - right[2]];
 }
 
 function displayModelFaces(displayModel: unknown): Array<{ id: string; center?: [number, number, number]; normal?: [number, number, number] }> {
@@ -657,6 +801,11 @@ function vector3(value: unknown): [number, number, number] | undefined {
 
 function numberValue(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function boundedNumberValue(value: unknown, min: number, max: number): number | undefined {
+  const number = numberValue(value);
+  return number !== undefined && number >= min && number <= max ? number : undefined;
 }
 
 function normalize(vector: [number, number, number]): [number, number, number] {

@@ -4,6 +4,7 @@ import * as THREE from "three";
 import {
   baseModelRotationRadians,
   formatModelOrientation,
+  modelAxisToGlobalCadFrame,
   modelDirectionToGlobalCadFrame,
   modelDirectionToViewerSpace,
   modelRotationRadians,
@@ -104,10 +105,14 @@ describe("model orientation", () => {
     expect(modelDirectionToGlobalCadFrame([0, -1, 0], baseModel)).toEqual([0, 0, -1]);
     expect(modelDirectionToGlobalCadFrame([1, 0, 0], baseModel)).toEqual([1, 0, 0]);
     expect(modelDirectionToGlobalCadFrame([0, 0, 1], baseModel)).toEqual([0, -1, 0]);
+    expect(modelAxisToGlobalCadFrame("x", baseModel)).toBe("x");
+    expect(modelAxisToGlobalCadFrame("y", baseModel)).toBe("z");
+    expect(modelAxisToGlobalCadFrame("z", baseModel)).toBe("y");
   });
 
   test("leaves uploaded model load directions untouched", () => {
     expect(modelDirectionToGlobalCadFrame([0, 0, -1], uploadedModel)).toEqual([0, 0, -1]);
     expect(modelDirectionToGlobalCadFrame([0, -1, 0], uploadedModel)).toEqual([0, -1, 0]);
+    expect(modelAxisToGlobalCadFrame("y", uploadedModel)).toBe("y");
   });
 });

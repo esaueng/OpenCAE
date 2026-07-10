@@ -9,6 +9,44 @@ export const DiagnosticSchema = z.object({
   suggestedActions: z.array(z.string()).default([])
 });
 
+const MaterialPrintProfileSchema = z
+  .object({
+    process: z.enum(["FDM", "SLA", "SLS", "MJF", "Metal AM"]),
+    defaultInfillDensity: z.number().min(1).max(100).optional(),
+    defaultWallCount: z.number().min(1).max(12).optional(),
+    defaultLayerOrientation: z.enum(["x", "y", "z"]).optional(),
+    layerStrengthFactor: z.number().min(0.1).max(1).optional(),
+    inPlaneModulusFactor: z.number().min(0.1).max(1).optional(),
+    interlayerModulusFactor: z.number().min(0.1).max(1).optional(),
+    inPlaneStrengthFactor: z.number().min(0.1).max(1).optional(),
+    interlayerStrengthFactor: z.number().min(0.1).max(1).optional()
+  })
+  .superRefine((profile, context) => {
+    if (profile.process !== "FDM") return;
+    if (
+      profile.inPlaneModulusFactor !== undefined &&
+      profile.interlayerModulusFactor !== undefined &&
+      profile.interlayerModulusFactor > profile.inPlaneModulusFactor
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["interlayerModulusFactor"],
+        message: "Interlayer modulus cannot exceed in-plane modulus for an FDM profile."
+      });
+    }
+    if (
+      profile.inPlaneStrengthFactor !== undefined &&
+      profile.interlayerStrengthFactor !== undefined &&
+      profile.interlayerStrengthFactor > profile.inPlaneStrengthFactor
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["interlayerStrengthFactor"],
+        message: "Interlayer strength cannot exceed in-plane strength for an FDM profile."
+      });
+    }
+  });
+
 export const MaterialSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -17,15 +55,7 @@ export const MaterialSchema = z.object({
   poissonRatio: z.number().gt(-1).lt(0.5),
   density: z.number().positive(),
   yieldStrength: z.number().positive(),
-  printProfile: z
-    .object({
-      process: z.enum(["FDM", "SLA", "SLS", "MJF", "Metal AM"]),
-      defaultInfillDensity: z.number().min(1).max(100).optional(),
-      defaultWallCount: z.number().min(1).max(12).optional(),
-      defaultLayerOrientation: z.enum(["x", "y", "z"]).optional(),
-      layerStrengthFactor: z.number().min(0.1).max(1).optional()
-    })
-    .optional()
+  printProfile: MaterialPrintProfileSchema.optional()
 });
 
 export const GeometryReferenceSchema = z.object({

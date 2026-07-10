@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import type { OpenCAEModelJson, SurfaceSetJson } from "../src";
 import {
   connectedComponents,
@@ -141,6 +141,51 @@ describe("mesh topology utilities", () => {
       orphanNodeCount: 1,
       minTetVolume: -1 / 6,
       maxTetVolume: 1 / 6
+    });
+  });
+
+  test("summarizes volume extrema with bounded Math.min and Math.max calls", () => {
+    const model = modelWith(
+      [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      [
+        0, 0, 0,
+        1, 0, 0,
+        0, 1, 0,
+        0, 0, 1,
+        10, 0, 0,
+        12, 0, 0,
+        10, 2, 0,
+        10, 0, 2,
+        20, 0, 0,
+        23, 0, 0,
+        20, 3, 0,
+        20, 0, 3
+      ]
+    );
+    model.surfaceFacets = [];
+    const originalMin = Math.min;
+    const originalMax = Math.max;
+    const minSpy = vi.spyOn(Math, "min").mockImplementation((...values: number[]) => {
+      if (values.length > 2) throw new RangeError("simulated JavaScript argument limit");
+      return originalMin(...values);
+    });
+    const maxSpy = vi.spyOn(Math, "max").mockImplementation((...values: number[]) => {
+      if (values.length > 2) throw new RangeError("simulated JavaScript argument limit");
+      return originalMax(...values);
+    });
+
+    let summary: ReturnType<typeof meshQualitySummary> | undefined;
+    try {
+      summary = meshQualitySummary(model);
+    } finally {
+      minSpy.mockRestore();
+      maxSpy.mockRestore();
+    }
+
+    expect(summary).toMatchObject({
+      minTetVolume: 1 / 6,
+      maxTetVolume: 27 / 6,
+      invertedElementCount: 0
     });
   });
 });
