@@ -200,7 +200,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const projectActionClientIdRef = useRef<string | null>(null);
   const autosaveWriteFailureNotifiedRef = useRef(false);
   const autosaveDegradedNotifiedRef = useRef(false);
-  const stepFaceHealNotifiedRef = useRef<string | null>(null);
+  const stepFaceHealNotifiedRef = useRef(false);
   const workspaceShortcutHandlerRef = useRef<(event: KeyboardEvent) => void>(() => undefined);
   const resultFrameIndexRef = useRef(0);
   const resultPlaybackFramePositionRef = useRef(0);
@@ -730,13 +730,16 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         // Unresolved-only heals must not write state: the selections are
         // unchanged and re-setting equivalent objects would loop this effect.
         // Legacy uploads still always swap in the registry's real faces.
-        if (heal.remapped.length || legacyUpload) {
+        if (heal.remapped.length || heal.removed.length || legacyUpload) {
           setProject(heal.project);
           setDisplayModel(heal.displayModel);
         }
         const message = legacyStepFaceHealMessage(heal);
-        if (message && stepFaceHealNotifiedRef.current !== message) {
-          stepFaceHealNotifiedRef.current = message;
+        // Project mutations intentionally re-run this effect while unresolved
+        // selections remain. Notify once for the loaded workspace instead of
+        // keying on the growing message text and spamming every mutation.
+        if (message && !stepFaceHealNotifiedRef.current) {
+          stepFaceHealNotifiedRef.current = true;
           pushMessage(message);
         }
       })
@@ -828,6 +831,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     setProcessingRunId(null);
     setRunTiming(null);
     setHomeRequested(false);
+    stepFaceHealNotifiedRef.current = false;
     // Keep the imperative snapshot in sync immediately. The effect below is
     // intentionally retained for ordinary state mutations, but async model
     // operations must not have a render-sized window where they can compare

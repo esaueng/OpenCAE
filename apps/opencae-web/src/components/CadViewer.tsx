@@ -1119,7 +1119,16 @@ function BracketModel({
     if (modelKind === "uploaded") {
       // Real B-rep face picking for STEP imports (A-M3); ad-hoc point/normal
       // faces remain the fallback for other uploads or a cold registry.
-      const hit = stepFaceHitFromEvent(event, displayModel) ?? uploadedFaceHitFromEvent(event, displayModel);
+      const stepHit = stepFaceHitFromEvent(event, displayModel);
+      const liveStepRegistry = hasLiveStepFaceRegistry(displayModel);
+      // Once the STEP registry is live, never manufacture another
+      // "face-upload-picked-*" placeholder. If triangle attribution misses,
+      // stepFaceHitFromEvent uses the picked point to resolve a real B-rep
+      // face; if that also fails, ignore the hit instead of persisting a
+      // selection that can never mesh.
+      const hit = stepHit ?? (shouldCreateUploadedFacePlaceholder(displayModel.nativeCad?.format, liveStepRegistry)
+        ? uploadedFaceHitFromEvent(event, displayModel)
+        : null);
       if (!hit) return null;
       const snap = snapResultFromEvent(event, displayModel, hit.face, activeStep);
       return {
@@ -1633,16 +1642,36 @@ function stepFaceHitFromEvent(event: ThreeEvent<PointerEvent> | ThreeEvent<Mouse
   if (!api || !contentBase64 || displayModel.nativeCad?.format !== "step") return null;
   const registry = api.peekStepFaceRegistryForBase64(contentBase64);
   if (!registry) return null;
+  const point = viewerPointToModelSpace(event.point, displayModel).toArray() as [number, number, number];
   const meshIndex = stepPreviewMeshIndexFor(event.object);
   const triangleIndex = event.faceIndex;
-  if (meshIndex === null || typeof triangleIndex !== "number") return null;
-  const faceId = api.stepFaceIdForMeshTriangle(registry, meshIndex, triangleIndex);
+  let faceId = meshIndex !== null && typeof triangleIndex === "number"
+    ? api.stepFaceIdForMeshTriangle(registry, meshIndex, triangleIndex)
+    : null;
+  if (!faceId) {
+    const worldNormal = event.face?.normal.clone().transformDirection(event.object.matrixWorld).normalize() ?? new THREE.Vector3(0, 0, 1);
+    const normal = viewerNormalToModelSpace(worldNormal, displayModel).toArray() as [number, number, number];
+    faceId = api.resolvePickedStepFace(registry, point, normal)?.faceId ?? null;
+  }
   if (!faceId) return null;
   const face = displayModel.faces.find((candidate) => candidate.id === faceId)
     ?? registry.displayFaces.find((candidate) => candidate.id === faceId);
   if (!face) return null;
-  const point = viewerPointToModelSpace(event.point, displayModel).toArray() as [number, number, number];
   return { face, point };
+}
+
+function hasLiveStepFaceRegistry(displayModel: DisplayModel): boolean {
+  const contentBase64 = displayModel.nativeCad?.contentBase64;
+  return Boolean(
+    stepFacesApi &&
+    contentBase64 &&
+    displayModel.nativeCad?.format === "step" &&
+    stepFacesApi.peekStepFaceRegistryForBase64(contentBase64)
+  );
+}
+
+export function shouldCreateUploadedFacePlaceholder(nativeCadFormat: string | undefined, hasLiveRegistry: boolean): boolean {
+  return nativeCadFormat !== "step" || !hasLiveRegistry;
 }
 
 /** Preview meshes carry userData.opencaeObjectId = "step-object-<n>" in import order. */

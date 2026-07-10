@@ -119,6 +119,7 @@ describe("healLegacyStepFaces", () => {
       { selectionName: "L 1", fromFaceId: "face-upload-left", toFaceId: "step-face-2", toLabel: "-X planar face" }
     ]);
     expect(heal.unresolved).toEqual([]);
+    expect(heal.removed).toEqual([]);
     const selections = heal.project.studies[0]!.namedSelections;
     expect(selections.find((item) => item.id === "selection-fs1")?.geometryRefs[0]?.entityId).toBe("step-face-0");
     expect(selections.find((item) => item.id === "selection-l1")?.geometryRefs[0]?.entityId).toBe("step-face-2");
@@ -167,6 +168,7 @@ describe("healLegacyStepFaces", () => {
 
     expect(heal.remapped).toEqual([]);
     expect(heal.unresolved).toEqual([]);
+    expect(heal.removed).toEqual([]);
     expect(legacyStepFaceHealMessage(heal)).toBeNull();
     expect(heal.displayModel.faces.map((face) => face.id)).toEqual(["step-face-0"]);
   });
@@ -263,6 +265,57 @@ describe("picked-face selections against a synthetic two-face registry", () => {
     expect(legacyStepFaceHealMessage(heal)).toContain("Re-select on the model");
     // The unresolved placeholder face stays visible for its marker.
     expect(heal.displayModel.faces.some((face) => face.id === pickedId)).toBe(true);
+  });
+
+  test("deduplicates repeated unresolved labels and prunes orphaned placeholders", () => {
+    const first = pickedProjectAndModel(toViewer([30, 20, 10]));
+    const secondId = `${first.pickedId}-second`;
+    const secondSelection = {
+      ...first.project.studies[0]!.namedSelections.find((selection) => selection.id === "selection-fs1")!,
+      id: "selection-fs2",
+      name: "Top face",
+      geometryRefs: [{ bodyId: "body-uploaded", entityType: "face" as const, entityId: secondId, label: "Top face" }]
+    };
+    const orphanId = `${first.pickedId}-orphan`;
+    const orphanSelection = {
+      ...secondSelection,
+      id: "selection-orphan",
+      geometryRefs: [{ bodyId: "body-uploaded", entityType: "face" as const, entityId: orphanId, label: "Top face" }]
+    };
+    const project = {
+      ...first.project,
+      studies: [{
+        ...first.project.studies[0]!,
+        namedSelections: [
+          ...first.project.studies[0]!.namedSelections.map((selection) => selection.id === "selection-fs1" ? { ...selection, name: "Top face" } : selection),
+          secondSelection,
+          orphanSelection
+        ],
+        constraints: [
+          ...first.project.studies[0]!.constraints,
+          { id: "constraint-fs2", type: "fixed" as const, selectionRef: secondSelection.id, parameters: {}, status: "complete" as const }
+        ]
+      }]
+    };
+    const displayModel = {
+      ...first.displayModel,
+      faces: [
+        ...first.displayModel.faces,
+        { ...first.displayModel.faces.find((face) => face.id === first.pickedId)!, id: secondId },
+        { ...first.displayModel.faces.find((face) => face.id === first.pickedId)!, id: orphanId }
+      ]
+    };
+
+    const heal = healStepFaceSelections(project, displayModel, registry);
+    const message = legacyStepFaceHealMessage(heal);
+
+    expect(heal.unresolved).toHaveLength(2);
+    expect(heal.removed).toEqual([{ selectionName: "Top face", fromFaceId: orphanId }]);
+    expect(heal.project.studies[0]!.namedSelections.some((selection) => selection.id === orphanSelection.id)).toBe(false);
+    expect(heal.displayModel.faces.some((face) => face.id === orphanId)).toBe(false);
+    expect(message).toContain("Top face (2 selections)");
+    expect(message).not.toContain("Top face, Top face");
+    expect(message).toContain("cleaned up automatically");
   });
 
   test("remapStepFaceSelectionsInStudy resolves picks for mesh dispatch without touching unresolvable ones", () => {
