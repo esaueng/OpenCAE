@@ -1034,7 +1034,7 @@ function MeshPanel({ study, onGenerateMesh }: RightPanelProps) {
     <Panel title="Mesh" helper="The mesh breaks the model into small pieces so OpenCAE can calculate results.">
       <div className="field">
         <HelpLabel helpId="meshQuality">Quality preset</HelpLabel>
-        <div className="segmented" role="group" aria-label="Mesh quality">
+        <div className="segmented mesh-quality" role="group" aria-label="Mesh quality">
           {MESH_PRESETS.map((option) => (
             <button key={option} className={preset === option ? "active" : ""} type="button" aria-pressed={preset === option} onClick={() => setPreset(option)}>{capitalize(option)}</button>
           ))}
