@@ -152,8 +152,10 @@ async function meshWorkerRun(options: WasmMeshOptions): Promise<WasmMeshStudyRes
       elevationNote = "Curved Tet10 elevation produced near-degenerate elements on this geometry; mid-side nodes were placed on straight edges instead (slightly less accurate on curved boundaries).";
     }
     if (stepResult.qualityRefinement) {
-      const { requestedMeshSizeMm, usedMeshSizeMm } = stepResult.qualityRefinement;
-      refinementNote = `Mesh quality at the ${formatMeshSizeMm(requestedMeshSizeMm)} mm preset size missed the quality floor on this geometry; the mesh was automatically refined to ${formatMeshSizeMm(usedMeshSizeMm)} mm.`;
+      const { requestedMeshSizeMm, usedMeshSizeMm, direction } = stepResult.qualityRefinement;
+      refinementNote = direction === "finer"
+        ? `Mesh quality at the ${formatMeshSizeMm(requestedMeshSizeMm)} mm preset size missed the quality floor on this geometry; the mesh was automatically refined to ${formatMeshSizeMm(usedMeshSizeMm)} mm.`
+        : `Mesh quality at the ${formatMeshSizeMm(requestedMeshSizeMm)} mm preset size missed the quality floor on this geometry; the mesh was automatically adjusted to ${formatMeshSizeMm(usedMeshSizeMm)} mm (coarser) to remove near-degenerate elements. Local stress resolution may be lower than the selected preset.`;
     }
     if (stepResult.geometryRepair) {
       const { toleranceMm } = stepResult.geometryRepair;
