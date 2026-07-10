@@ -58,9 +58,9 @@ function fixtureReport(): ReportData {
     filename: "OpenCAE-Report_fixture_2026-07-10.pdf",
     generatedAtIso: "2026-07-10T12:00:00.000Z",
     reportDate: "2026-07-10",
-    title: "Structural Simulation Report",
+    title: "Dynamic Structural Simulation Report",
     projectName: "Cantilever Fixture",
-    studyName: "Static Stress",
+    studyName: "Dynamic Structural",
     unitSystemLabel: "SI (m, Pa)",
     provenanceTier: "production_fea",
     provenanceLabel: "OpenCAE Core Local (in-browser)",
@@ -80,8 +80,8 @@ function fixtureReport(): ReportData {
     mesh: [{ label: "Nodes", value: "42,381" }, { label: "Elements", value: "26,944" }, { label: "Element type", value: "Tet10" }],
     solver: rows,
     figures: {
-      stress: { title: "Von Mises stress", png: ONE_PIXEL_PNG, unavailableLabel: "Not available (--)", legendMin: "0", legendMax: "142", units: "MPa", caption: "Von Mises stress (MPa). Deformed shape, ×1.8 exaggeration (display only)." },
-      displacement: { title: "Displacement magnitude", png: ONE_PIXEL_PNG, unavailableLabel: "Not available (--)", legendMin: "0", legendMax: "0.184", units: "mm", caption: "Displacement magnitude (mm). Deformed shape, ×1.8 exaggeration (display only)." }
+      stress: { title: "Von Mises stress", png: ONE_PIXEL_PNG, unavailableLabel: "Not available (--)", legendMin: "0", legendMax: "142", units: "MPa", caption: "Von Mises stress (MPa). Automatically selected peak von Mises stress frame (frame 17 of 21, 0.0800 s). Deformed shape, ×1.8 exaggeration (display only)." },
+      displacement: { title: "Displacement magnitude", png: ONE_PIXEL_PNG, unavailableLabel: "Not available (--)", legendMin: "0", legendMax: "0.184", units: "mm", caption: "Displacement magnitude (mm). Automatically selected peak displacement magnitude frame (frame 21 of 21, 0.1000 s). Deformed shape, ×1.8 exaggeration (display only)." }
     },
     results: rows,
     transientResults: [],
