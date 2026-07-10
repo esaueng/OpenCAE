@@ -1030,29 +1030,13 @@ function selectionForFace(study: Study, faceId: string) {
   return study.namedSelections.find((item) => item.entityType === "face" && item.geometryRefs.some((ref) => ref.entityId === faceId));
 }
 
-function MeshPanel({ project, study, onGenerateMesh, meshPhaseProgress }: RightPanelProps) {
+function MeshPanel({ project, study, onGenerateMesh, meshPhaseProgress, onRepairModel, isRepairingModel = false }: RightPanelProps) {
   const [preset, setPreset] = useState<MeshQuality>(study.meshSettings.preset);
   const meshing = Boolean(meshPhaseProgress);
-  // Surface the Model step's open-geometry verdict here too: users reach the
-  // Mesh step, hit "no solid volume could be created", and have no pointer
-  // back to the Fix open surfaces action. A completed mesh artifact means the
-  // automatic sew already resolved it — stay quiet then.
   const stepGeometry = stepGeometryMetadataForProject(project);
   const stepGeometryResolvedByMesh = Boolean(study.meshSettings.summary?.artifacts?.actualCoreModel);
   return (
     <Panel title="Mesh" helper="The mesh breaks the model into small pieces so OpenCAE can calculate results.">
-      {stepGeometry?.status === "repairable" && !stepGeometryResolvedByMesh && (
-        <p className="panel-warning" role="alert">
-          <AlertTriangle size={16} />
-          This STEP model has open surfaces. Meshing will try to sew small gaps; if it fails, use Fix open surfaces on the Model step.
-        </p>
-      )}
-      {(stepGeometry?.status === "unrepairable" || stepGeometry?.status === "invalid") && !stepGeometryResolvedByMesh && (
-        <p className="panel-warning" role="alert">
-          <AlertTriangle size={16} />
-          This STEP model is not a closed solid and automatic repair could not produce one. Re-export it from CAD as a solid body.
-        </p>
-      )}
       <div className="field">
         <HelpLabel helpId="meshQuality">Quality preset</HelpLabel>
         <div className="segmented mesh-quality" role="group" aria-label="Mesh quality">
@@ -1062,6 +1046,19 @@ function MeshPanel({ project, study, onGenerateMesh, meshPhaseProgress }: RightP
         </div>
       </div>
       <button className="primary wide" disabled={meshing} onClick={() => onGenerateMesh(preset)}><Grid3X3 size={18} />{meshing ? "Meshing..." : "Generate mesh"}</button>
+      {stepGeometry?.status === "repairable" && !stepGeometryResolvedByMesh && (
+        <div className="step-repair-card" role="alert" aria-label="Open STEP surfaces detected">
+          <p className="panel-warning"><AlertTriangle size={16} />{stepGeometry.message ?? "This STEP model has open or invalid surfaces and is not a closed simulation solid."}</p>
+          <button className="outline-action wide" type="button" onClick={onRepairModel} disabled={isRepairingModel || !onRepairModel}>
+            <Wrench size={16} />
+            {isRepairingModel ? "Fixing model..." : "Fix open surfaces"}
+          </button>
+          <p className="panel-copy">Fix model sews small gaps and may patch closed boundary loops. Review the repaired shape; face-based setup will be reset.</p>
+        </div>
+      )}
+      {(stepGeometry?.status === "unrepairable" || stepGeometry?.status === "invalid") && !stepGeometryResolvedByMesh && (
+        <p className="panel-warning" role="alert"><AlertTriangle size={16} />{stepGeometry.message ?? "Automatic repair cannot close this model. Re-export it from CAD as a solid body."}</p>
+      )}
       {meshPhaseProgress && (
         <>
           {/* Honest phase progress: worker phase position, not a synthetic percent —

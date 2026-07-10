@@ -5,6 +5,9 @@ import {
   loadGmshWasm,
   meshStepToMshV2,
   repairStepGeometry,
+  STEP_GEOMETRY_REPAIR_LOST_VOLUME_ERROR_NAME,
+  stepGeometryNoRepairedVolumeError,
+  stepMeshFailureAfterRepairAttempt,
   StepGeometryError,
   type GmshApi
 } from "./wasmMesher";
@@ -137,7 +140,37 @@ describe("STEP geometry inspection and repair", () => {
     });
 
     await expect(repairStepGeometry(singleSheetStep)).rejects.toBeInstanceOf(StepGeometryError);
-    await expect(meshStepToMshV2(singleSheetStep, { meshSizeMm: 3 })).rejects.toBeInstanceOf(StepGeometryError);
+    await expect(meshStepToMshV2(singleSheetStep, { meshSizeMm: 3 })).rejects.toMatchObject({
+      name: "StepGeometryError",
+      message: expect.stringContaining("Use Fix open surfaces on the Model step")
+    });
+  });
+
+  it("keeps the standard mesh failure first when bounded healing loses an imported volume", () => {
+    const standardError = new StepGeometryError("Gmsh failed to create the 3D mesh for the imported solid.");
+    const repairError = stepGeometryNoRepairedVolumeError(1, 0.05);
+
+    const composed = stepMeshFailureAfterRepairAttempt(standardError, repairError);
+
+    expect(composed).toBeInstanceOf(StepGeometryError);
+    expect(composed).toMatchObject({
+      name: "StepGeometryError",
+      message: expect.stringMatching(/^Gmsh failed to create the 3D mesh for the imported solid\./)
+    });
+    expect((composed as Error).message).toContain("Automatic geometry repair was also tried");
+    expect((composed as Error).message).toContain("was discarded");
+    expect((composed as Error).message).toContain("Use Fix open surfaces on the Model step");
+    expect((composed as Error).message).not.toContain(repairError.message);
+  });
+
+  it("keeps the no-solid-volume diagnosis when the import never contained a volume", () => {
+    const error = stepGeometryNoRepairedVolumeError(0, 0.05);
+
+    expect(error).toMatchObject({
+      name: "StepGeometryError",
+      message: "Open STEP surfaces remain after sewing and boundary patching; no solid volume could be created."
+    });
+    expect(error.name).not.toBe(STEP_GEOMETRY_REPAIR_LOST_VOLUME_ERROR_NAME);
   });
 
   it("rejects a valid solid accompanied by a disconnected surface sheet", { timeout: 180_000 }, async () => {

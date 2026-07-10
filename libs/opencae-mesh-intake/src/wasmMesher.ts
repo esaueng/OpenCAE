@@ -120,6 +120,12 @@ export class StepGeometryError extends Error {
   override name = "StepGeometryError";
 }
 
+/** Stable marker for the repair path that starts with a volume but loses it while sewing. */
+export const STEP_GEOMETRY_REPAIR_LOST_VOLUME_ERROR_NAME = "StepGeometryRepairLostVolume";
+
+const FIX_OPEN_SURFACES_ACTION =
+  "Use Fix open surfaces on the Model step, or re-export the part from CAD as a solid body.";
+
 /**
  * Extra Emscripten Module options passed to the gmsh-wasm factory on every
  * instantiation (fresh module per mesh). The browser mesh worker uses this to
@@ -279,8 +285,10 @@ export async function meshStepToMshV2(stepContent: Uint8Array | string, options:
   // uses MeshAdapt's surface triangulation before Delaunay + Netgen. It does
   // not lower the gate.
   if (!best || !meshResultPassesQuality(best)) {
+    const standardLadderError = lastError;
     const repairSizesMm = qualityRepairSizes(requestedSizeMm);
     const repairTriedSizesMm: number[] = [];
+    let repairLostImportedVolume = false;
     for (const sizeMm of repairSizesMm) {
       repairTriedSizesMm.push(sizeMm);
       if (!triedSizesMm.includes(sizeMm)) triedSizesMm.push(sizeMm);
@@ -305,13 +313,18 @@ export async function meshStepToMshV2(stepContent: Uint8Array | string, options:
         };
         if (consider(repairedResult, sizeMm)) break;
       } catch (error) {
-        lastError = error;
+        if (isRepairLostVolumeError(error)) {
+          repairLostImportedVolume = true;
+          lastError = stepMeshFailureAfterRepairAttempt(standardLadderError, error);
+        } else if (!repairLostImportedVolume) {
+          lastError = error;
+        }
       }
     }
   }
 
   if (best === undefined) {
-    if (lastError instanceof Error) throw lastError;
+    if (lastError instanceof Error) throw withStepGeometryAction(lastError);
     throw new StepGeometryError("Gmsh could not create a tetrahedral volume mesh from the STEP solid.");
   }
   const chosen = best;
@@ -362,6 +375,41 @@ function isQualityRepairRecommended(error: unknown): boolean {
   return error instanceof Error && error.name === QUALITY_REPAIR_RECOMMENDED_ERROR_NAME;
 }
 
+function isRepairLostVolumeError(error: unknown): error is Error {
+  return error instanceof Error && error.name === STEP_GEOMETRY_REPAIR_LOST_VOLUME_ERROR_NAME;
+}
+
+/**
+ * Keep the ordinary meshing failure as the primary diagnosis when bounded
+ * healing destroys a volume that imported successfully. Exported from this
+ * module so the orchestration rule can be regression-tested without relying
+ * on one vendor-specific STEP fixture.
+ */
+export function stepMeshFailureAfterRepairAttempt(standardError: unknown, repairError: unknown): unknown {
+  if (!isRepairLostVolumeError(repairError)) return repairError;
+  if (!(standardError instanceof Error)) return repairError;
+  return new StepGeometryError(
+    `${messageOf(standardError)} Automatic geometry repair was also tried, but it could not re-close the model's faces within the bounded 0.05 mm sew tolerance and was discarded. ${FIX_OPEN_SURFACES_ACTION}`
+  );
+}
+
+export function stepGeometryNoRepairedVolumeError(originalVolumeCount: number, toleranceMm: number): StepGeometryError {
+  if (originalVolumeCount <= 0) {
+    return new StepGeometryError("Open STEP surfaces remain after sewing and boundary patching; no solid volume could be created.");
+  }
+  const error = new StepGeometryError(
+    `Automatic geometry repair could not re-close this model's faces (sew tolerance ${formatToleranceMm(toleranceMm)} mm), so the repaired attempt was discarded.`
+  );
+  error.name = STEP_GEOMETRY_REPAIR_LOST_VOLUME_ERROR_NAME;
+  return error;
+}
+
+function withStepGeometryAction(error: Error): Error {
+  if (error.name !== "StepGeometryError" && !isRepairLostVolumeError(error)) return error;
+  if (error.message.includes("Fix open surfaces")) return error;
+  return new StepGeometryError(`${error.message} ${FIX_OPEN_SURFACES_ACTION}`);
+}
+
 async function meshStepWithAlgorithmFallback(
   stepContent: Uint8Array | string,
   options: StepMeshWasmOptions,
@@ -387,7 +435,7 @@ async function meshStepWithAlgorithmFallback(
   if (repaired.best !== undefined) return repaired.best;
   throw new StepGeometryError(
     "STEP geometry has open or invalid surfaces, and automatic healing could not create a closed solid. " +
-      "Use Fix model on the Model step, or repair the source CAD and upload it again. " +
+      `${FIX_OPEN_SURFACES_ACTION} ` +
       `(Original Delaunay: ${messageOf(original.delaunayError)}; original Frontal: ${messageOf(original.frontalError)}; ` +
       `healed Delaunay: ${messageOf(repaired.delaunayError)}; healed Frontal: ${messageOf(repaired.frontalError)})`
   );
@@ -852,10 +900,7 @@ function repairImportedStepGeometry(
   const repairedOpenBoundaryCurveCount = openBoundaryCurveTags(gmsh).length;
   const repairedOrphanSurfaceCount = orphanSurfaceTags(gmsh).length;
   if (repairedVolumeCount === 0) {
-    throw new StepGeometryError(
-      "Open STEP surfaces remain after sewing and boundary patching; no solid volume could be created. " +
-      "Use Fix open surfaces on the Model step, or re-export the part from CAD as a solid body."
-    );
+    throw stepGeometryNoRepairedVolumeError(originalVolumeCount, toleranceMm);
   }
   if (repairedOrphanSurfaceCount > 0) {
     throw new StepGeometryError(`CAD healing left ${repairedOrphanSurfaceCount.toLocaleString()} open surface ${repairedOrphanSurfaceCount === 1 ? "sheet" : "sheets"} outside the repaired solid.`);
@@ -1113,6 +1158,10 @@ function quietLogger(gmsh: GmshApi): void {
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function formatToleranceMm(toleranceMm: number): string {
+  return Number(toleranceMm.toPrecision(6)).toString();
 }
 
 function safeFinalize(gmsh: GmshApi): void {

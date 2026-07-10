@@ -41,6 +41,8 @@ export type MeshWorkerPayloads = {
   inspectStepFile: {
     /** UTF-8 encoded STEP file content (transferable). */
     stepContent: ArrayBuffer;
+    /** Trial-run explicit repair even when ordinary inspection finds a nominal solid. */
+    probeRepairEvenIfSolid?: boolean;
   };
   repairStepFile: {
     /** UTF-8 encoded STEP file content (transferable). */
@@ -108,6 +110,8 @@ export type MeshWorkerResults = {
   };
   inspectStepFile: {
     inspection: StepGeometryInspection;
+    /** Present when the worker actually trial-ran the Fix open surfaces operation. */
+    repairProbe?: "succeeded" | "failed";
   };
   repairStepFile: {
     stepContent: Uint8Array;
@@ -204,6 +208,10 @@ export function normalizeMeshWorkerError(error: unknown): MeshWorkerError {
     name: "Error",
     message: typeof error === "string" ? error : "Mesh worker operation failed."
   };
+}
+
+export function shouldProbeStepRepair(inspection: StepGeometryInspection, probeRepairEvenIfSolid = false): boolean {
+  return inspection.status === "open_shell" || (probeRepairEvenIfSolid && inspection.status === "solid");
 }
 
 export function packCoreVolumeMeshArtifact(artifact: CoreVolumeMeshArtifact): PackedCoreVolumeMeshArtifact {

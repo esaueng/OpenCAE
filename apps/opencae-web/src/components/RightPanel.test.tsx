@@ -1465,6 +1465,35 @@ describe("RightPanel payload mass controls", () => {
     expect(html).not.toContain('aria-label="Open STEP surfaces detected"');
   });
 
+  test("surfaces a post-failure repair action on both the Model and Mesh steps", () => {
+    const repairableProject = uploadedStepProject(
+      "repairable",
+      "Automatic repair can re-close this model's faces."
+    );
+
+    for (const activeStep of ["model", "mesh"] as const) {
+      const html = renderPanel(activeStep, {
+        project: repairableProject,
+        onRepairModel: vi.fn()
+      });
+      expect(html).toContain("Automatic repair can re-close this model&#x27;s faces.");
+      expect(html).toContain("Fix open surfaces");
+    }
+  });
+
+  test("surfaces the honest re-export warning on both the Model and Mesh steps", () => {
+    const unrepairableProject = uploadedStepProject(
+      "unrepairable",
+      "Automatic repair cannot close this model. Re-export it from CAD as a solid body."
+    );
+
+    for (const activeStep of ["model", "mesh"] as const) {
+      const html = renderPanel(activeStep, { project: unrepairableProject });
+      expect(html).toContain("Automatic repair cannot close this model. Re-export it from CAD as a solid body.");
+      expect(html).not.toContain("Fix open surfaces");
+    }
+  });
+
   test("offers the parametric part builder in the model panel", () => {
     const html = renderPanel("model");
     expect(html).toContain("Create parametric part");
