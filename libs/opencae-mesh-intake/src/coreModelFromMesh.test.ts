@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mapSelectionToSurfaceSet, type SelectionMappingDiagnostic } from "./coreModelFromMesh";
+import { buildCoreModelFromCloudMesh, mapSelectionToSurfaceSet, type SelectionMappingDiagnostic } from "./coreModelFromMesh";
 import type { CoreVolumeMeshArtifact } from "./types";
 
 describe("mapSelectionToSurfaceSet", () => {
@@ -52,6 +52,75 @@ describe("mapSelectionToSurfaceSet", () => {
     })).toThrow(/could not map selection/);
   });
 });
+
+describe("buildCoreModelFromCloudMesh", () => {
+  it("shares one node set when two supports resolve to the same face", () => {
+    // Two picks on the same face (e.g. both supports healed onto the tray
+    // bottom) must not emit duplicate node-set names — the model validator
+    // rejects those with "Names must be unique".
+    const model = buildCoreModelFromCloudMesh({
+      study: {
+        id: "study-1",
+        type: "static_stress",
+        materialAssignments: [{ id: "assign-1", materialId: "mat-aluminum-6061", selectionRef: "selection-body", parameters: {}, status: "complete" }],
+        namedSelections: [
+          { id: "selection-fs-a", name: "FS 1", entityType: "face", geometryRefs: [{ entityType: "face", entityId: "step-face-4" }] },
+          { id: "selection-fs-b", name: "FS 2", entityType: "face", geometryRefs: [{ entityType: "face", entityId: "step-face-4" }] },
+          { id: "selection-l1", name: "L 1", entityType: "face", geometryRefs: [{ entityType: "face", entityId: "step-face-9" }] }
+        ],
+        constraints: [
+          { id: "constraint-1", type: "fixed", selectionRef: "selection-fs-a", parameters: {}, status: "complete" },
+          { id: "constraint-2", type: "fixed", selectionRef: "selection-fs-b", parameters: {}, status: "complete" }
+        ],
+        loads: [
+          { id: "load-1", type: "force", selectionRef: "selection-l1", parameters: { value: 5, units: "N", direction: [0, 0, -1] }, status: "complete" }
+        ]
+      },
+      volumeMesh: singleTetArtifact(),
+      analysisType: "static_stress",
+      solverSettings: {}
+    });
+
+    const bottomNodeSets = model.nodeSets.filter((set) => set.name === "surface_bottom_nodes");
+    expect(bottomNodeSets).toHaveLength(1);
+    expect(model.boundaryConditions.map((condition) => condition.nodeSet)).toEqual([
+      "surface_bottom_nodes",
+      "surface_bottom_nodes"
+    ]);
+  });
+});
+
+/** One positive-volume Tet4 in meters with canonical face facets (TET_CORNER_FACES order). */
+function singleTetArtifact(): CoreVolumeMeshArtifact {
+  return {
+    nodes: {
+      coordinates: [0, 0, 0, 0.04, 0, 0, 0, 0.04, 0, 0, 0, 0.04]
+    },
+    elements: [{ type: "Tet4", connectivity: [0, 1, 2, 3] }],
+    surfaceFacets: [
+      { id: 0, element: 0, elementFace: 0, nodes: [1, 2, 3], center: [0.0133, 0.0133, 0.0133], normal: [0.577, 0.577, 0.577] },
+      { id: 1, element: 0, elementFace: 1, nodes: [0, 3, 2], center: [0, 0.0133, 0.0133], normal: [-1, 0, 0] },
+      { id: 2, element: 0, elementFace: 2, nodes: [0, 1, 3], center: [0.0133, 0, 0.0133], normal: [0, -1, 0], sourceFaceId: "step-face-9" },
+      { id: 3, element: 0, elementFace: 3, nodes: [0, 2, 1], center: [0.0133, 0.0133, 0], normal: [0, 0, -1], sourceFaceId: "step-face-4" }
+    ],
+    surfaceSets: [
+      { name: "surface_bottom", facets: [3] },
+      { name: "surface_load", facets: [2] }
+    ],
+    coordinateSystem: { solverUnits: "m-N-s-Pa", renderCoordinateSpace: "solver" },
+    metadata: {
+      source: "gmsh",
+      nodeCount: 4,
+      elementCount: 1,
+      surfaceFacetCount: 4,
+      physicalGroups: [],
+      connectedComponentCount: 1,
+      meshQuality: { minTetVolume: 1e-8, maxTetVolume: 1e-8, invertedElementCount: 0 },
+      diagnostics: [],
+      units: "m"
+    }
+  };
+}
 
 function boxSurfaceArtifact(): CoreVolumeMeshArtifact {
   return {
