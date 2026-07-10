@@ -818,13 +818,29 @@ function activeLoadNodes(model: OpenCAEModelJson, loadNames: string[], facets = 
 }
 
 function hasBoundarySurfaceSelection(model: OpenCAEModelJson, boundaryConditionNames: string[], facets: OpenCAEModelJson["surfaceFacets"] = []): boolean {
-  const boundaryNodes = activeBoundaryNodes(model, boundaryConditionNames);
-  if (boundaryNodes.size === 0) return false;
-  for (const surfaceSet of model.surfaceSets ?? []) {
-    const surfaceNodes = new Set(nodeSetFromSurfaceSet(surfaceSet, facets));
-    if (surfaceNodes.size > 0 && isSubset(boundaryNodes, surfaceNodes)) return true;
+  // Each support maps to its own surface selection, so check every condition
+  // against the surface sets individually — supports on different faces must
+  // not be unioned into one node set that no single surface can contain.
+  const active = new Set(boundaryConditionNames);
+  const nodeSets = new Map(model.nodeSets.map((set) => [set.name, set.nodes]));
+  const surfaceSetsByName = new Map((model.surfaceSets ?? []).map((set) => [set.name, set]));
+  const surfaceNodeSets = (model.surfaceSets ?? [])
+    .map((set) => new Set(nodeSetFromSurfaceSet(set, facets)))
+    .filter((nodes) => nodes.size > 0);
+  let sawSupportedCondition = false;
+  for (const condition of model.boundaryConditions) {
+    if (!active.has(condition.name)) continue;
+    if (condition.type === "fixed" && "surfaceSet" in condition && condition.surfaceSet) {
+      if ((surfaceSetsByName.get(condition.surfaceSet)?.facets.length ?? 0) === 0) return false;
+      sawSupportedCondition = true;
+      continue;
+    }
+    const nodes = new Set<number>("nodeSet" in condition && condition.nodeSet ? nodeSets.get(condition.nodeSet) ?? [] : []);
+    if (nodes.size === 0) continue;
+    if (!surfaceNodeSets.some((surfaceNodes) => isSubset(nodes, surfaceNodes))) return false;
+    sawSupportedCondition = true;
   }
-  return false;
+  return sawSupportedCondition;
 }
 
 function hasLoadSurfaceSelection(model: OpenCAEModelJson, loadNames: string[]): boolean {
