@@ -111,6 +111,7 @@ async function runOperation(request: MeshWorkerRequest, reportPhase: (phase: Mes
   const meshed = await intake.meshStepToMshV2(new Uint8Array(request.payload.stepContent), {
     elementOrder: request.payload.elementOrder,
     meshSizeMm: request.payload.meshSizeMm,
+    structuralBodyBounds: request.payload.structuralBodyBounds,
     onPhase
   });
   reportPhase("parse");

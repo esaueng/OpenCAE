@@ -30,6 +30,13 @@ export type MeshWasmOptions = {
 export type StepMeshWasmOptions = MeshWasmOptions & {
   /** Characteristic mesh size in the STEP file's model units (our fixtures are mm). */
   meshSizeMm?: number;
+  /** Exact preview-body bounds to retain as structural solids; other disconnected STEP volumes are payload/visual-only. */
+  structuralBodyBounds?: StepBodyBounds[];
+};
+
+export type StepBodyBounds = {
+  min: [number, number, number];
+  max: [number, number, number];
 };
 
 export type GeoMeshResult = {
@@ -586,6 +593,9 @@ function meshStepSession(
       // every top-level shape so validation can reject those open surfaces.
       gmsh.model.occ.importShapes("/in.step", false);
       gmsh.model.occ.synchronize();
+      if (options.structuralBodyBounds?.length) {
+        retainStructuralStepVolumes(gmsh, options.structuralBodyBounds);
+      }
       const importedSurfaceCount = entityTags(gmsh, 2).length;
       const importedOpenBoundaryCurveCount = openBoundaryCurveTags(gmsh).length;
       preferQualityRepair = repairProfile === false &&
@@ -705,6 +715,82 @@ function meshStepSession(
   } finally {
     safeFinalize(gmsh);
   }
+}
+
+function retainStructuralStepVolumes(gmsh: GmshApi, structuralBounds: StepBodyBounds[]): void {
+  const volumeTags = entityTags(gmsh, 3);
+  if (volumeTags.length === 0) return;
+  if (structuralBounds.length >= volumeTags.length) return;
+
+  const candidates = volumeTags.map((tag) => ({
+    tag,
+    bounds: boundsFromGmsh(gmsh.model.getBoundingBox(3, tag))
+  }));
+  const unmatched = new Set(volumeTags);
+  const retained = new Set<number>();
+  for (const target of structuralBounds) {
+    const ranked = candidates
+      .filter((candidate) => unmatched.has(candidate.tag))
+      .map((candidate) => ({ candidate, score: stepBoundsMatchScore(target, candidate.bounds) }))
+      .sort((left, right) => left.score - right.score);
+    const best = ranked[0];
+    if (!best || best.score > 0.1) {
+      throw new StepGeometryError("Could not identify the selected structural body in the imported STEP model.");
+    }
+    retained.add(best.candidate.tag);
+    unmatched.delete(best.candidate.tag);
+  }
+
+  const removeDimTags = volumeTags.filter((tag) => !retained.has(tag)).flatMap((tag) => [3, tag]);
+  if (removeDimTags.length === 0) return;
+  gmsh.model.occ.remove(removeDimTags, true);
+  gmsh.model.occ.synchronize();
+  if (entityTags(gmsh, 3).length !== retained.size) {
+    throw new StepGeometryError("Could not isolate the selected structural STEP body for meshing.");
+  }
+}
+
+function boundsFromGmsh(bounds: { xmin: number; ymin: number; zmin: number; xmax: number; ymax: number; zmax: number }): StepBodyBounds {
+  return {
+    min: [bounds.xmin, bounds.ymin, bounds.zmin],
+    max: [bounds.xmax, bounds.ymax, bounds.zmax]
+  };
+}
+
+function stepBoundsMatchScore(target: StepBodyBounds, candidate: StepBodyBounds): number {
+  const targetCenter = boundsCenter(target);
+  const candidateCenter = boundsCenter(candidate);
+  const targetSize = boundsSize(target);
+  const candidateSize = boundsSize(candidate);
+  const scale = Math.max(Math.hypot(...targetSize), Math.hypot(...candidateSize), 1e-9);
+  return (
+    Math.hypot(
+      targetCenter[0] - candidateCenter[0],
+      targetCenter[1] - candidateCenter[1],
+      targetCenter[2] - candidateCenter[2]
+    ) +
+    Math.hypot(
+      targetSize[0] - candidateSize[0],
+      targetSize[1] - candidateSize[1],
+      targetSize[2] - candidateSize[2]
+    )
+  ) / scale;
+}
+
+function boundsCenter(bounds: StepBodyBounds): [number, number, number] {
+  return [
+    (bounds.min[0] + bounds.max[0]) / 2,
+    (bounds.min[1] + bounds.max[1]) / 2,
+    (bounds.min[2] + bounds.max[2]) / 2
+  ];
+}
+
+function boundsSize(bounds: StepBodyBounds): [number, number, number] {
+  return [
+    bounds.max[0] - bounds.min[0],
+    bounds.max[1] - bounds.min[1],
+    bounds.max[2] - bounds.min[2]
+  ];
 }
 
 /**

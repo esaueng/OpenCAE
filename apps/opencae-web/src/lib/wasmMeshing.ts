@@ -162,7 +162,9 @@ async function meshWorkerRunExclusive(options: WasmMeshOptions): Promise<WasmMes
   let geometryRepairNote: string | undefined;
   let elementOrderFallbackNote: string | undefined;
   let attributionNote: string | undefined;
+  let structuralBodyNote: string | undefined;
   let stepFaceRegistry: import("../stepFaces").StepFaceRegistry | undefined;
+  let stepStructuralBodyPlan: import("../stepStructuralBodies").StepStructuralBodyPlan | undefined;
 
   if (geometry.kind === "sample_procedural" && geometry.sampleId === "bracket") {
     // Native curved Gmsh Tet10 elements can invert around the bracket's
@@ -187,10 +189,20 @@ async function meshWorkerRunExclusive(options: WasmMeshOptions): Promise<WasmMes
     try {
       const stepFaces = await import("../stepFaces");
       const registry = await stepFaces.stepFaceRegistryFromBase64(geometry.contentBase64);
-      attribution = stepFaces.stepAttributionForRegistry(registry);
+      const [{ remapStepFaceSelectionsInStudy }, structuralBodies] = await Promise.all([
+        import("../stepFaceHealing"),
+        import("../stepStructuralBodies")
+      ]);
+      const planningStudy = remapStepFaceSelectionsInStudy(study, displayModel, registry);
+      stepStructuralBodyPlan = structuralBodies.planStepStructuralBodies(planningStudy, registry) ?? undefined;
+      attribution = stepFaces.stepAttributionForRegistry(registry, stepStructuralBodyPlan?.structuralMeshIndices);
       stepFaceRegistry = registry;
+      if (stepStructuralBodyPlan) structuralBodyNote = structuralBodies.stepStructuralBodyWarning(stepStructuralBodyPlan);
     } catch {
       attribution = undefined;
+      stepFaceRegistry = undefined;
+      stepStructuralBodyPlan = undefined;
+      structuralBodyNote = undefined;
     }
     const stepResult = await client.meshStepFileInWorker(
       {
@@ -198,6 +210,7 @@ async function meshWorkerRunExclusive(options: WasmMeshOptions): Promise<WasmMes
         elementOrder,
         units: geometry.units ?? "mm",
         meshSizeMm: options.meshSizeMm,
+        structuralBodyBounds: stepStructuralBodyPlan?.structuralBodyBounds,
         attribution
       },
       onWorkerProgress
@@ -249,6 +262,10 @@ async function meshWorkerRunExclusive(options: WasmMeshOptions): Promise<WasmMes
     // resolve them here too so the artifact build never dies on a stale pick.
     const { remapStepFaceSelectionsInStudy } = await import("../stepFaceHealing");
     dispatchStudy = remapStepFaceSelectionsInStudy(dispatchStudy, displayModel, stepFaceRegistry);
+    if (stepStructuralBodyPlan) {
+      const { studyWithStepPayloadContacts } = await import("../stepStructuralBodies");
+      dispatchStudy = studyWithStepPayloadContacts(dispatchStudy, stepFaceRegistry, stepStructuralBodyPlan);
+    }
   }
   const criticalLayerAxis = inferGlobalCriticalPrintAxis(study, (displayModel?.faces ?? []).map((face) => ({
     entityId: face.id,
@@ -280,7 +297,7 @@ async function meshWorkerRunExclusive(options: WasmMeshOptions): Promise<WasmMes
   const summary: NonNullable<Study["meshSettings"]["summary"]> = {
     nodes,
     elements,
-    warnings: [algorithmNote, elevationNote, refinementNote, geometryRepairNote, elementOrderFallbackNote, attributionNote].filter((note): note is string => Boolean(note)),
+    warnings: [structuralBodyNote, algorithmNote, elevationNote, refinementNote, geometryRepairNote, elementOrderFallbackNote, attributionNote].filter((note): note is string => Boolean(note)),
     quality: preset,
     source: "wasm_gmsh",
     units: "m",

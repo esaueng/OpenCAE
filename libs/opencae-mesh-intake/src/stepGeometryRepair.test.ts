@@ -22,6 +22,7 @@ let smallGapShellStep: string;
 let missingTopShellStep: string;
 let singleSheetStep: string;
 let solidWithOrphanSheetStep: string;
+let trayWithDisconnectedPayloadStep: string;
 
 describe("STEP geometry inspection and repair", () => {
   beforeAll(async () => {
@@ -56,6 +57,11 @@ describe("STEP geometry inspection and repair", () => {
         [BOX.width, BOX.depth, BOX.height + 10],
         [0, BOX.depth, BOX.height + 10]
       ]);
+      gmsh.model.occ.synchronize();
+    });
+    trayWithDisconnectedPayloadStep = await createStep((gmsh) => {
+      gmsh.model.occ.addBox(0, 0, 0, 20, 16, 4);
+      gmsh.model.occ.addBox(6, 5, 8, 8, 6, 12);
       gmsh.model.occ.synchronize();
     });
   }, 180_000);
@@ -186,6 +192,29 @@ describe("STEP geometry inspection and repair", () => {
 
     await expect(repairStepGeometry(solidWithOrphanSheetStep)).rejects.toBeInstanceOf(StepGeometryError);
     await expect(meshStepToMshV2(solidWithOrphanSheetStep, { meshSizeMm: 3 })).rejects.toBeInstanceOf(StepGeometryError);
+  });
+
+  it("retains only the selected structural body when a STEP also contains disconnected payload solids", { timeout: 180_000 }, async () => {
+    const inspection = await inspectStepGeometry(trayWithDisconnectedPayloadStep);
+    expect(inspection).toMatchObject({ status: "solid", volumeCount: 2 });
+
+    const meshed = await meshStepToMshV2(trayWithDisconnectedPayloadStep, {
+      elementOrder: 1,
+      meshSizeMm: 4,
+      structuralBodyBounds: [{ min: [0, 0, 0], max: [20, 16, 4] }]
+    });
+    const artifact = parseGmshMeshToCoreVolumeMesh(meshed.msh, { units: "mm" });
+    expect(artifact.metadata.connectedComponentCount).toBe(1);
+    const coordinates = artifact.nodes.coordinates;
+    const xs = Array.from({ length: coordinates.length / 3 }, (_value, index) => coordinates[index * 3]!);
+    const ys = Array.from({ length: coordinates.length / 3 }, (_value, index) => coordinates[index * 3 + 1]!);
+    const zs = Array.from({ length: coordinates.length / 3 }, (_value, index) => coordinates[index * 3 + 2]!);
+    expect(Math.min(...xs)).toBeCloseTo(0, 8);
+    expect(Math.max(...xs)).toBeCloseTo(0.02, 8);
+    expect(Math.min(...ys)).toBeCloseTo(0, 8);
+    expect(Math.max(...ys)).toBeCloseTo(0.016, 8);
+    expect(Math.min(...zs)).toBeCloseTo(0, 8);
+    expect(Math.max(...zs)).toBeCloseTo(0.004, 8);
   });
 });
 
