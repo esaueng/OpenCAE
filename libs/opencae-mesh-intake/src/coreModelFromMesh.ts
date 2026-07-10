@@ -537,12 +537,172 @@ function geometricFallback(input: SelectionMappingInput): SurfaceSetJson | undef
   const entityIds = new Set([input.selectionRef, ...geometryRefEntityIds(input.study, input.selectionRef)]);
   const face = displayFaces.find((candidate) => entityIds.has(candidate.id));
   if (!face) return undefined;
+  // STEP picking can briefly fall back to an ad-hoc point/normal face while
+  // the B-rep registry is still warming. Those points live in the normalized
+  // 2.4-unit preview frame, while volume-mesh facets live in solver meters.
+  // Reproject the picked point into the mesh frame and resolve the actual
+  // triangle under it before trying the older centroid heuristic.
+  if (face.id.startsWith("face-upload-picked-")) {
+    const pickedSurfaceSet = surfaceSetAtPickedUploadPoint(input.volumeMesh, face);
+    if (pickedSurfaceSet) return pickedSurfaceSet;
+  }
   const ranked = input.volumeMesh.surfaceSets
     .map((set) => ({ set, score: geometricScore(set, input.volumeMesh.surfaceFacets, face) }))
     .filter((entry) => entry.score >= 0.9)
     .sort((left, right) => right.score - left.score);
   if (ranked.length !== 1) return undefined;
   return ranked[0]!.set;
+}
+
+const STEP_PREVIEW_LONGEST_SPAN = 2.4;
+const PICKED_POINT_MIN_NORMAL_ALIGNMENT = 0.8;
+const PICKED_POINT_MAX_DISTANCE_FRACTION = 0.03;
+const PICKED_POINT_AMBIGUITY_DISTANCE_FRACTION = 0.005;
+const PICKED_POINT_AMBIGUITY_NORMAL_MARGIN = 0.1;
+
+function surfaceSetAtPickedUploadPoint(
+  volumeMesh: CoreVolumeMeshArtifact,
+  face: { center?: [number, number, number]; normal?: [number, number, number] }
+): SurfaceSetJson | undefined {
+  if (!face.center || !face.normal) return undefined;
+  const bounds = meshNodeBounds(volumeMesh.nodes.coordinates);
+  if (!bounds) return undefined;
+  const size: [number, number, number] = [
+    bounds.max[0] - bounds.min[0],
+    bounds.max[1] - bounds.min[1],
+    bounds.max[2] - bounds.min[2]
+  ];
+  const longest = Math.max(...size);
+  if (!(longest > 0)) return undefined;
+  const meshCenter: [number, number, number] = [
+    (bounds.min[0] + bounds.max[0]) / 2,
+    (bounds.min[1] + bounds.max[1]) / 2,
+    (bounds.min[2] + bounds.max[2]) / 2
+  ];
+  const previewToMeshScale = longest / STEP_PREVIEW_LONGEST_SPAN;
+  const pickedPoint: [number, number, number] = [
+    meshCenter[0] + face.center[0] * previewToMeshScale,
+    meshCenter[1] + face.center[1] * previewToMeshScale,
+    meshCenter[2] + face.center[2] * previewToMeshScale
+  ];
+  const pickedNormal = normalize(face.normal);
+  const facetsById = new Map(volumeMesh.surfaceFacets.map((facet) => [facet.id, facet]));
+  const ranked = volumeMesh.surfaceSets
+    .flatMap((set) => {
+      let distance = Infinity;
+      let normalAlignment = -1;
+      for (const facetId of set.facets) {
+        const facet = facetsById.get(facetId);
+        if (!facet) continue;
+        const facetDistance = pointToSurfaceFacetDistance(pickedPoint, facet, volumeMesh.nodes.coordinates);
+        if (facetDistance < distance) distance = facetDistance;
+        if (facet.normal) normalAlignment = Math.max(normalAlignment, dot(pickedNormal, normalize(facet.normal)));
+      }
+      return Number.isFinite(distance) && normalAlignment >= PICKED_POINT_MIN_NORMAL_ALIGNMENT
+        ? [{ set, distance, normalAlignment }]
+        : [];
+    })
+    .sort((left, right) => left.distance - right.distance || right.normalAlignment - left.normalAlignment);
+
+  const best = ranked[0];
+  if (!best || best.distance > longest * PICKED_POINT_MAX_DISTANCE_FRACTION) return undefined;
+  const runnerUp = ranked[1];
+  if (
+    runnerUp &&
+    runnerUp.distance - best.distance < longest * PICKED_POINT_AMBIGUITY_DISTANCE_FRACTION &&
+    best.normalAlignment - runnerUp.normalAlignment < PICKED_POINT_AMBIGUITY_NORMAL_MARGIN
+  ) return undefined;
+  return best.set;
+}
+
+function meshNodeBounds(coordinates: number[]): { min: [number, number, number]; max: [number, number, number] } | undefined {
+  if (coordinates.length < 3) return undefined;
+  const min: [number, number, number] = [Infinity, Infinity, Infinity];
+  const max: [number, number, number] = [-Infinity, -Infinity, -Infinity];
+  for (let index = 0; index + 2 < coordinates.length; index += 3) {
+    for (let axis = 0; axis < 3; axis += 1) {
+      const value = coordinates[index + axis]!;
+      if (value < min[axis]!) min[axis] = value;
+      if (value > max[axis]!) max[axis] = value;
+    }
+  }
+  return Number.isFinite(min[0]) ? { min, max } : undefined;
+}
+
+function pointToSurfaceFacetDistance(
+  point: [number, number, number],
+  facet: SurfaceFacetJson,
+  coordinates: number[]
+): number {
+  const corners = facet.nodes.slice(0, 3).map((node) => nodeCoordinate(coordinates, node));
+  if (corners.length !== 3 || corners.some((corner) => !corner)) {
+    return facet.center ? Math.hypot(point[0] - facet.center[0], point[1] - facet.center[1], point[2] - facet.center[2]) : Infinity;
+  }
+  return pointTriangleDistance(point, corners[0]!, corners[1]!, corners[2]!);
+}
+
+function nodeCoordinate(coordinates: number[], node: number): [number, number, number] | undefined {
+  const offset = node * 3;
+  return offset + 2 < coordinates.length
+    ? [coordinates[offset]!, coordinates[offset + 1]!, coordinates[offset + 2]!]
+    : undefined;
+}
+
+/** Exact point-to-triangle distance (Ericson, Real-Time Collision Detection). */
+function pointTriangleDistance(
+  point: [number, number, number],
+  a: [number, number, number],
+  b: [number, number, number],
+  c: [number, number, number]
+): number {
+  const ab = subtract(b, a);
+  const ac = subtract(c, a);
+  const ap = subtract(point, a);
+  const d1 = dot(ab, ap);
+  const d2 = dot(ac, ap);
+  if (d1 <= 0 && d2 <= 0) return Math.hypot(...ap);
+
+  const bp = subtract(point, b);
+  const d3 = dot(ab, bp);
+  const d4 = dot(ac, bp);
+  if (d3 >= 0 && d4 <= d3) return Math.hypot(...bp);
+
+  const vc = d1 * d4 - d3 * d2;
+  if (vc <= 0 && d1 >= 0 && d3 <= 0) {
+    const v = d1 / (d1 - d3);
+    return Math.hypot(ap[0] - v * ab[0], ap[1] - v * ab[1], ap[2] - v * ab[2]);
+  }
+
+  const cp = subtract(point, c);
+  const d5 = dot(ab, cp);
+  const d6 = dot(ac, cp);
+  if (d6 >= 0 && d5 <= d6) return Math.hypot(...cp);
+
+  const vb = d5 * d2 - d1 * d6;
+  if (vb <= 0 && d2 >= 0 && d6 <= 0) {
+    const w = d2 / (d2 - d6);
+    return Math.hypot(ap[0] - w * ac[0], ap[1] - w * ac[1], ap[2] - w * ac[2]);
+  }
+
+  const va = d3 * d6 - d5 * d4;
+  if (va <= 0 && d4 - d3 >= 0 && d5 - d6 >= 0) {
+    const edge = subtract(c, b);
+    const w = (d4 - d3) / ((d4 - d3) + (d5 - d6));
+    return Math.hypot(bp[0] - w * edge[0], bp[1] - w * edge[1], bp[2] - w * edge[2]);
+  }
+
+  const denominator = 1 / (va + vb + vc);
+  const v = vb * denominator;
+  const w = vc * denominator;
+  return Math.hypot(
+    ap[0] - (v * ab[0] + w * ac[0]),
+    ap[1] - (v * ab[1] + w * ac[1]),
+    ap[2] - (v * ab[2] + w * ac[2])
+  );
+}
+
+function subtract(left: [number, number, number], right: [number, number, number]): [number, number, number] {
+  return [left[0] - right[0], left[1] - right[1], left[2] - right[2]];
 }
 
 function displayModelFaces(displayModel: unknown): Array<{ id: string; center?: [number, number, number]; normal?: [number, number, number] }> {
