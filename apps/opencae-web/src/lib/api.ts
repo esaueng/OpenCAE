@@ -6,6 +6,7 @@ import type { PayloadObjectSelection } from "../workspaceViewTypes";
 import { embedUploadedModelFile, type EmbeddedModelFile, type LocalResultBundle, type SolverSurfaceMesh } from "../projectFile";
 import { createLocalBlankProject, createLocalSampleProject, createLocalUploadResponse, openLocalProjectPayload } from "../localProjectFactory";
 import type { SolveProgressEvent } from "@opencae/solve-pipeline";
+import type { ResultViewCaptures } from "../report/captureResultViews";
 import { isCancelledSolveError, startLocalSolve } from "../workers/solveWorkerClient";
 import { loadLocalRunResults, saveLocalRunResults } from "./localResultsStore";
 import { cancelWasmMeshing, canMeshStudyOnDemand, generateWasmMeshForStudy, type WasmMeshPhaseProgress } from "./wasmMeshing";
@@ -53,6 +54,7 @@ export interface ResultsResponse {
     meshConnectivity?: { connectedComponents: number };
     meshStatistics?: { nodes: number; elements: number };
   };
+  reportCaptures?: ResultViewCaptures;
 }
 
 export interface RunSimulationOptions {
@@ -777,6 +779,19 @@ async function restoreLocalRunResults(runId: string): Promise<ResultsResponse> {
   const results = withFieldRunIds(runId, stored);
   setCappedRunEntry(localResultsByRunId, runId, results);
   return results;
+}
+
+export function withReportCaptures(results: ResultsResponse, reportCaptures: ResultViewCaptures): ResultsResponse {
+  return { ...results, reportCaptures };
+}
+
+export async function saveRunReportCaptures(runId: string, reportCaptures: ResultViewCaptures): Promise<void> {
+  let results = localResultsByRunId.get(runId);
+  if (!results) results = await loadLocalRunResults<ResultsResponse>(runId) ?? undefined;
+  if (!results) throw new Error("Simulation results are no longer available; report images could not be saved.");
+  const next = withReportCaptures(results, reportCaptures);
+  await saveLocalRunResults(runId, next);
+  setCappedRunEntry(localResultsByRunId, runId, next);
 }
 
 // Deployed Core Cloud runners omit runId on result fields; the schema (and

@@ -193,6 +193,29 @@ describe("app persistence", () => {
     expect(bundle?.summary.transient?.frameCount).toBe(21);
   });
 
+  test("restores report captures saved with completed simulation results", async () => {
+    const { parseResultBundle } = await import("./appPersistence");
+    const reportCaptures = {
+      stress: {
+        png: "data:image/png;base64,stress",
+        fieldId: "field-1",
+        selection: "peak" as const,
+        frameIndex: 2,
+        timeSeconds: 0.02
+      }
+    };
+
+    const bundle = parseResultBundle({
+      activeRunId: "run-1",
+      completedRunId: "run-1",
+      summary,
+      fields,
+      reportCaptures
+    });
+
+    expect(bundle?.reportCaptures).toEqual(reportCaptures);
+  });
+
   test("builds a reloadable snapshot with project, model, results, and UI state", () => {
     const snapshot = buildAutosavedWorkspace({
       project,

@@ -2,7 +2,7 @@ import { lazy, startTransition, Suspense, useCallback, useEffect, useMemo, useRe
 import { isRunResultReadyStatus } from "@opencae/schema";
 import type { Constraint, DisplayFace, DisplayModel, DynamicSolverSettings, Load, MeshQuality, NamedSelection, Project, ResultField, ResultRenderBounds, ResultSummary, RunEvent, RunTimingEstimate, SimulationFidelity, Study } from "@opencae/schema";
 import { RotateCcw, Save } from "lucide-react";
-import { addLoad, addSupport, assignMaterial, cancelRun, createProject, generateMesh, getResults, importLocalProject, isStepGeometryMeshFailure, loadSampleProject, probeUploadedStepRepairAfterMeshFailure, renameProject, repairUploadedStepModel, runSimulation, STEP_REPAIR_UNAVAILABLE_MESSAGE, subscribeToRun, updateStudy as saveStudyPatch, uploadedStepRepairProbeDecision, uploadModel, type SampleAnalysisType, type SampleModelId } from "./lib/api";
+import { addLoad, addSupport, assignMaterial, cancelRun, createProject, generateMesh, getResults, importLocalProject, isStepGeometryMeshFailure, loadSampleProject, probeUploadedStepRepairAfterMeshFailure, renameProject, repairUploadedStepModel, runSimulation, saveRunReportCaptures, STEP_REPAIR_UNAVAILABLE_MESSAGE, subscribeToRun, updateStudy as saveStudyPatch, uploadedStepRepairProbeDecision, uploadModel, type SampleAnalysisType, type SampleModelId } from "./lib/api";
 import { cancelWasmMeshing, type WasmMeshPhaseProgress } from "./lib/wasmMeshing";
 import { resolveSolverBackend } from "./workers/opencaeCoreSolve";
 import { manufacturingProcessForId, normalizeManufacturingParameters, starterMaterials } from "@opencae/materials";
@@ -24,7 +24,7 @@ import {
 import { resetDisplayModelOrientation, type RotationAxis } from "./modelOrientation";
 import { buildLocalProjectFile, suggestedProjectFilename, type LocalResultBundle, type SolverSurfaceMesh } from "./projectFile";
 import { prepareBlobSaveToDisk, saveBlobToDisk } from "./lib/fileSave";
-import { captureResultViews } from "./report/captureResultViews";
+import { captureResultViews, type ResultViewCaptures } from "./report/captureResultViews";
 import { buildReportData, suggestedReportFilename } from "./report/reportData";
 import { buildAutosavedWorkspace, buildAutosavedWorkspaceUiSnapshot, readAutosavedWorkspace, scheduleAutosavedUiSnapshotWrite, scheduleAutosavedWorkspaceWrite, WORKSPACE_LOG_LIMIT } from "./appPersistence";
 import type { AutosavedWorkspace, WorkspaceUiSnapshot } from "./appPersistence";
@@ -158,6 +158,11 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     : []);
   const [resultSurfaceMesh, setResultSurfaceMesh] = useState<SolverSurfaceMesh | undefined>(restoredResults?.surfaceMesh);
   const [solverMeshSummary, setSolverMeshSummary] = useState<SolverMeshSummary | null>(restoredResults?.solverMeshSummary ?? null);
+  const [reportCaptures, setReportCaptures] = useState<{ runId: string; captures: ResultViewCaptures } | null>(() => {
+    const restoredRunId = restoredResults?.completedRunId ?? restoredResults?.activeRunId;
+    return restoredRunId && restoredResults?.reportCaptures ? { runId: restoredRunId, captures: restoredResults.reportCaptures } : null;
+  });
+  const [viewerCaptureRevision, setViewerCaptureRevision] = useState(0);
   const [resultFrameIndex, setResultFrameIndex] = useState(0);
   const [resultPlaybackFramePosition, setResultPlaybackFramePosition] = useState(0);
   const [resultPlaybackOrdinalPosition, setResultPlaybackOrdinalPosition] = useState(0);
@@ -203,6 +208,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const resultPlaybackFrameControllerRef = useRef<MutableResultPlaybackFrameController | null>(null);
   const viewerInteractingRef = useRef(false);
   const viewerCaptureRef = useRef<(() => Promise<string>) | null>(null);
+  const reportCaptureInFlightRef = useRef<string | null>(null);
   const reportStateRef = useRef({ viewMode, resultMode, resultSummary, completedRunId, resultPlaybackPlaying });
   const initialActionConsumedRef = useRef(false);
   if (!resultPlaybackFrameControllerRef.current) {
@@ -769,7 +775,8 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         summary: resultSummary,
         fields: resultFields,
         ...(resultSurfaceMesh ? { surfaceMesh: resultSurfaceMesh } : {}),
-        ...(solverMeshSummary ? { solverMeshSummary } : {})
+        ...(solverMeshSummary ? { solverMeshSummary } : {}),
+        ...(reportCaptures?.runId === completedRunId ? { reportCaptures: reportCaptures.captures } : {})
       } : undefined,
       ui: autosaveUiSnapshot
     }), undefined, AUTOSAVE_HEAVY_WRITE_DELAY_MS, notifyAutosaveWriteFailure, notifyAutosaveDegraded);
@@ -787,6 +794,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     resultFields,
     resultSurfaceMesh,
     resultSummary,
+    reportCaptures,
     runProgress,
     sampleAnalysisType,
     sampleModel,
@@ -845,8 +853,9 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       setResultFields(withDerivedSurfaceSafetyFactorFields(response.results));
       setResultSurfaceMesh(response.results.surfaceMesh);
       setSolverMeshSummary(response.results.solverMeshSummary ?? null);
-      setResultFrameIndex(0);
       const restoredRunId = response.results.completedRunId ?? response.results.activeRunId ?? latestCompletedRunId(response.project.studies[0] ?? null, "") ?? "";
+      setReportCaptures(response.results.reportCaptures && restoredRunId ? { runId: restoredRunId, captures: response.results.reportCaptures } : null);
+      setResultFrameIndex(0);
       setActiveRunId(response.results.activeRunId ?? restoredRunId);
       setCompletedRunId(restoredRunId);
       setRunProgress(100);
@@ -864,6 +873,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       setResultFields([]);
       setResultSurfaceMesh(undefined);
       setSolverMeshSummary(null);
+      setReportCaptures(null);
       setResultFrameIndex(0);
       setRunProgress(0);
       const nextCompletedRunId = latestCompletedRunId(response.project.studies[0] ?? null, "") ?? "";
@@ -978,7 +988,8 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         summary: resultSummary,
         fields: resultFields,
         ...(resultSurfaceMesh ? { surfaceMesh: resultSurfaceMesh } : {}),
-        ...(solverMeshSummary ? { solverMeshSummary } : {})
+        ...(solverMeshSummary ? { solverMeshSummary } : {}),
+        ...(reportCaptures?.runId === completedRunId ? { reportCaptures: reportCaptures.captures } : {})
       } : undefined);
       if (!savedAt) return;
       setProject((current) => current ? { ...current, updatedAt: savedAt } : current);
@@ -991,7 +1002,48 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
 
   const handleRegisterViewerCapture = useCallback((capture: (() => Promise<string>) | null) => {
     viewerCaptureRef.current = capture;
+    if (capture) setViewerCaptureRevision((revision) => revision + 1);
   }, []);
+
+  useEffect(() => {
+    const runId = completedRunId;
+    if (!runId || !resultSummary || !resultFields.length || viewMode !== "results" || !viewerCaptureRef.current) return;
+    if (reportCaptures?.runId === runId || reportCaptureInFlightRef.current === runId) return;
+    const sourceSummary = resultSummary;
+    const capture = viewerCaptureRef.current;
+    let cancelled = false;
+    reportCaptureInFlightRef.current = runId;
+    void captureResultViews({
+      getViewMode: () => reportStateRef.current.viewMode,
+      getResultMode: () => reportStateRef.current.resultMode,
+      setResultMode,
+      getResultFrameIndex: () => resultFrameIndexRef.current,
+      setResultFrameIndex: handleResultFrameChange,
+      getPlaybackPlaying: () => reportStateRef.current.resultPlaybackPlaying,
+      setPlaybackPlaying: setResultPlaybackPlaying,
+      resultFields,
+      surfaceMeshRef: resultSurfaceMesh?.id,
+      capture,
+      isCurrent: () => reportStateRef.current.resultSummary === sourceSummary && reportStateRef.current.completedRunId === runId
+    }).then(async (captures) => {
+      if (cancelled) return;
+      await saveRunReportCaptures(runId, captures);
+      if (cancelled || reportStateRef.current.completedRunId !== runId) return;
+      setReportCaptures({ runId, captures });
+      setReportError(null);
+      pushMessage("Report images saved with simulation results.");
+    }).catch((error) => {
+      if (cancelled) return;
+      const message = errorMessage(error, "Could not save report images with the simulation results.");
+      setReportError(message);
+      pushMessage(message);
+    }).finally(() => {
+      if (reportCaptureInFlightRef.current === runId) reportCaptureInFlightRef.current = null;
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [completedRunId, reportCaptures, resultFields, resultSummary, resultSurfaceMesh?.id, viewMode, viewerCaptureRevision]);
 
   async function handleGenerateReport() {
     if (!project || !study || !resultSummary) {
@@ -1005,6 +1057,11 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
 
     const sourceSummary = resultSummary;
     const sourceRunId = completedRunId;
+    const captures = reportCaptures?.runId === sourceRunId ? reportCaptures.captures : null;
+    if (!captures) {
+      setReportError("Report images are still being saved with this simulation. Wait for image preparation to finish, then generate the report again.");
+      return;
+    }
     const generatedAt = new Date();
     setReportBusy(true);
     setReportError(null);
@@ -1014,19 +1071,6 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         accept: { "application/pdf": [".pdf"] }
       });
       if (saveTarget === "cancelled") return;
-      const captures = await captureResultViews({
-        getViewMode: () => reportStateRef.current.viewMode,
-        getResultMode: () => reportStateRef.current.resultMode,
-        setResultMode,
-        getResultFrameIndex: () => resultFrameIndexRef.current,
-        setResultFrameIndex: handleResultFrameChange,
-        getPlaybackPlaying: () => reportStateRef.current.resultPlaybackPlaying,
-        setPlaybackPlaying: setResultPlaybackPlaying,
-        resultFields,
-        surfaceMeshRef: resultSurfaceMesh?.id,
-        capture: viewerCaptureRef.current,
-        isCurrent: () => reportStateRef.current.resultSummary === sourceSummary && reportStateRef.current.completedRunId === sourceRunId
-      });
       const reportData = buildReportData({
         project,
         study,
@@ -1253,6 +1297,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
 
   function invalidateCompletedRunState() {
     setCompletedRunId("");
+    setReportCaptures(null);
     setActiveRunId("");
     setRunProgress(0);
     setResultFields([]);
@@ -1408,6 +1453,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     }
     setActiveRunId(response.run.id);
     setCompletedRunId("");
+    setReportCaptures(null);
     setProcessingRunId(response.run.id);
     setRunProgress(0);
     setRunTiming(null);
@@ -1434,6 +1480,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           setResultFields(withDerivedSurfaceSafetyFactorFields(results));
           setResultSurfaceMesh(results.surfaceMesh);
           setSolverMeshSummary(solverMeshSummaryFromResults(results));
+          setReportCaptures(results.reportCaptures ? { runId: response.run.id, captures: results.reportCaptures } : null);
           setResultFrameIndex(0);
           setResultPlaybackPlaying(false);
           if (study.type === "dynamic_structural") setResultMode("stress");

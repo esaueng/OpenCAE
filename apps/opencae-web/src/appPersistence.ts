@@ -13,6 +13,7 @@ import { AUTOSAVE_STORAGE_KEY, AUTOSAVE_UI_STORAGE_KEY, getBrowserStorage, readS
 import type { WorkspaceLogEntry } from "./components/BottomPanel";
 import type { StepId } from "./components/StepBar";
 import type { SampleAnalysisType, SampleModelId } from "./lib/api";
+import type { CapturedResultView } from "./report/captureResultViews";
 import type { PayloadObjectSelection, ResultMode, ThemeMode, ViewMode } from "./workspaceViewTypes";
 
 export { AUTOSAVE_STORAGE_KEY, AUTOSAVE_UI_STORAGE_KEY } from "./autosaveStorage";
@@ -329,6 +330,7 @@ export function parseResultBundle(value: unknown): LocalResultBundle | undefined
   const fields = ResultFieldSchema.array().safeParse(value.fields);
   const surfaceMesh = parseSolverSurfaceMesh(value.surfaceMesh);
   const solverMeshSummary = parseSolverMeshSummary(value.solverMeshSummary);
+  const reportCaptures = parseResultViewCaptures(value.reportCaptures);
   if (!summary.success || !fields.success || fields.data.length === 0) return undefined;
   return {
     activeRunId: typeof value.activeRunId === "string" ? value.activeRunId : undefined,
@@ -336,8 +338,27 @@ export function parseResultBundle(value: unknown): LocalResultBundle | undefined
     summary: summary.data,
     fields: fields.data,
     ...(surfaceMesh ? { surfaceMesh } : {}),
-    ...(solverMeshSummary ? { solverMeshSummary } : {})
+    ...(solverMeshSummary ? { solverMeshSummary } : {}),
+    ...(reportCaptures ? { reportCaptures } : {})
   };
+}
+
+function parseResultViewCaptures(value: unknown): LocalResultBundle["reportCaptures"] | undefined {
+  if (!isRecord(value)) return undefined;
+  const parseCapture = (capture: unknown): CapturedResultView | undefined => {
+    if (!isRecord(capture) || typeof capture.png !== "string" || !capture.png.startsWith("data:image/png;base64,")) return undefined;
+    if (typeof capture.fieldId !== "string" || (capture.selection !== "peak" && capture.selection !== "static")) return undefined;
+    return {
+      png: capture.png,
+      fieldId: capture.fieldId,
+      selection: capture.selection,
+      ...(typeof capture.frameIndex === "number" && Number.isInteger(capture.frameIndex) ? { frameIndex: capture.frameIndex } : {}),
+      ...(typeof capture.timeSeconds === "number" && Number.isFinite(capture.timeSeconds) ? { timeSeconds: capture.timeSeconds } : {})
+    };
+  };
+  const stress = parseCapture(value.stress);
+  const displacement = parseCapture(value.displacement);
+  return stress || displacement ? { ...(stress ? { stress } : {}), ...(displacement ? { displacement } : {}) } : undefined;
 }
 
 function parseSolverMeshSummary(value: unknown): LocalResultBundle["solverMeshSummary"] | undefined {

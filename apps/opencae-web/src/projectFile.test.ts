@@ -62,12 +62,16 @@ describe("projectFile", () => {
       activeRunId: "run-1",
       completedRunId: "run-1",
       summary,
-      fields
+      fields,
+      reportCaptures: {
+        stress: { png: "data:image/png;base64,stress", fieldId: "field-1", selection: "static" }
+      }
     });
 
     expect(payload.results?.summary).toBe(summary);
     expect(payload.results?.fields).toBe(fields);
     expect(payload.results?.completedRunId).toBe("run-1");
+    expect(payload.results?.reportCaptures?.stress?.png).toBe("data:image/png;base64,stress");
   });
 
   test("embeds uploaded model bytes in the project geometry metadata", () => {
