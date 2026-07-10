@@ -7,7 +7,7 @@ import { createLocalBlankProject, createLocalSampleProject, createLocalUploadRes
 import type { SolveProgressEvent } from "@opencae/solve-pipeline";
 import { isCancelledSolveError, startLocalSolve } from "../workers/solveWorkerClient";
 import { loadLocalRunResults, saveLocalRunResults } from "./localResultsStore";
-import { cancelWasmMeshing, canMeshStudyOnDemand, generateWasmMeshForStudy } from "./wasmMeshing";
+import { cancelWasmMeshing, canMeshStudyOnDemand, generateWasmMeshForStudy, type WasmMeshPhaseProgress } from "./wasmMeshing";
 import { geometrySourceForStudy, hasActualCoreVolumeMesh, isComplexGeometry, normalizeSolverBackend, openCaeCoreEligibility, OPENCAE_CORE_MESH_REQUIRED_REASON, type NormalizedBrowserSolverBackend } from "../workers/opencaeCoreSolve";
 
 export interface SampleProjectResponse {
@@ -477,7 +477,7 @@ export async function renameProject(projectId: string, name: string, currentProj
   );
 }
 
-export async function generateMesh(studyId: string, preset: MeshQuality, currentStudy?: Study, displayModel?: DisplayModel, onProgress?: (message: string) => void): Promise<{ study: Study; message: string }> {
+export async function generateMesh(studyId: string, preset: MeshQuality, currentStudy?: Study, displayModel?: DisplayModel, onProgress?: (message: string) => void, onPhaseProgress?: (progress: WasmMeshPhaseProgress) => void): Promise<{ study: Study; message: string }> {
   // In-browser gmsh-wasm meshing (production default since A-M4). Returns
   // null in opt-out builds or when the geometry has no wasm-meshable source,
   // and falls through to the existing preset-estimate path on transient
@@ -494,7 +494,8 @@ export async function generateMesh(studyId: string, preset: MeshQuality, current
         displayModel,
         geometry: geometry ? geometryWithMeshPreset(geometry, presetStudy) : null,
         meshSizeMm: PROCEDURAL_MESH_SIZE_MM[preset] ?? PROCEDURAL_MESH_SIZE_MM.medium,
-        onProgress
+        onProgress,
+        onPhaseProgress
       });
       if (wasmMeshed) return wasmMeshed;
     } catch (error) {
