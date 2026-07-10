@@ -83,8 +83,13 @@ export type MeshWorkerResults = {
     elevation?: "curved" | "straight_edge";
     /** Present when gmsh's Netgen optimizer repaired a sliver tail in the linear mesh. */
     optimizer?: "netgen";
-    /** Present when the mesh was automatically re-meshed at finer sizes to clear the quality floor. */
-    qualityRefinement?: { requestedMeshSizeMm: number; usedMeshSizeMm: number; triedMeshSizesMm: number[] };
+    /** Present when the mesh was automatically re-meshed at a nearby size to clear the quality floor. */
+    qualityRefinement?: {
+      requestedMeshSizeMm: number;
+      usedMeshSizeMm: number;
+      triedMeshSizesMm: number[];
+      direction: "finer" | "coarser";
+    };
     /** Present when open/invalid STEP boundaries were healed before meshing. */
     geometryRepair?: StepGeometryRepairReport;
     /** Facet->B-rep-face attribution report (present when the request carried attribution inputs). */
