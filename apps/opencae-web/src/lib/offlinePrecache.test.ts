@@ -28,7 +28,8 @@ const DEFAULT_DIST = [
   "assets/occt-import-js-BhHfLpto.wasm",
   "assets/gmsh-core-HGUso1mk.wasm.gz",
   "assets/gmsh-wasm.json",
-  "assets/static-analysis-CM2D4-im.png"
+  "assets/static-analysis-CM2D4-im.png",
+  "assets/IBMPlexSans-Regular-Di2H3.ttf"
 ];
 
 describe("requiredOfflineUrls", () => {
@@ -47,6 +48,8 @@ describe("requiredOfflineUrls", () => {
     // Start-screen imagery renders offline too.
     expect(required).toContain("opencae-logo.png");
     expect(required).toContain("assets/static-analysis-CM2D4-im.png");
+    // On-demand report typography remains available after the app is installed.
+    expect(required).toContain("assets/IBMPlexSans-Regular-Di2H3.ttf");
   });
 
   test("never requires the service worker machinery, _headers, or the deleted raw gmsh wasm", () => {
@@ -106,6 +109,7 @@ describe("auditPrecacheManifest", () => {
 describe("workbox settings", () => {
   test("header changes force a service-worker update", () => {
     expect(PRECACHE_GLOB_PATTERNS).toContain("_headers");
+    expect(PRECACHE_GLOB_PATTERNS[0]).toContain("ttf");
   });
 
   test("service-worker updates import the stale-client refresh hook", () => {
