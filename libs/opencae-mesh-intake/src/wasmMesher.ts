@@ -190,6 +190,13 @@ const MAX_QUALITY_REFINEMENT_TETS = 80_000;
 /** The browser solve pipeline accepts at most 100,000 displacement DOFs. */
 const MAX_BROWSER_SOLVE_NODES = Math.floor(100_000 / 3);
 /**
+ * Large imported solids with residual free-edge seams can exhaust a browser
+ * worker when every size and 3D-algorithm candidate is tried before OCC
+ * healing. At this complexity the seam topology, rather than characteristic
+ * length, is the useful recovery signal.
+ */
+const COMPLEX_SEAM_REPAIR_SURFACE_THRESHOLD = 128;
+/**
  * A conservative upper size for the healed MeshAdapt rescue. The supplied
  * sliver-heavy STEP and neighboring sizes show a stable passing window at
  * 5-6 mm; larger sizes can reintroduce the same sliver non-monotonically.
@@ -216,10 +223,11 @@ const MAX_QUALITY_REPAIR_SIZE_MM = 6;
 export async function meshStepToMshV2(stepContent: Uint8Array | string, options: StepMeshWasmOptions = {}): Promise<StepMeshResult> {
   const totalStart = now();
   const requestedSizeMm = options.meshSizeMm;
-  type Candidate = Omit<StepMeshResult, "totalMs"> & { sizeMm?: number };
+  type Candidate = StepMeshCandidate & { sizeMm?: number };
   let best: Candidate | undefined;
   const triedSizesMm: number[] = [];
   let skipFinerSizes = false;
+  let preferQualityRepair = false;
   let lastError: unknown;
   // Stamp every phase event with its ladder attempt so progress consumers can
   // show "retrying at 8 mm (attempt 3)" instead of a silent repeating loop.
@@ -233,8 +241,9 @@ export async function meshStepToMshV2(stepContent: Uint8Array | string, options:
     };
   };
 
-  const consider = (result: Omit<StepMeshResult, "totalMs">, sizeMm?: number): boolean => {
+  const consider = (result: StepMeshCandidate, sizeMm?: number): boolean => {
     if (best === undefined || qualityOf(result) > qualityOf(best)) best = { ...result, sizeMm };
+    if (result.preferQualityRepair) preferQualityRepair = true;
     return meshResultPassesQuality(result);
   };
 
@@ -246,6 +255,7 @@ export async function meshStepToMshV2(stepContent: Uint8Array | string, options:
       return consider(result, sizeMm);
     } catch (error) {
       lastError = error;
+      if (isQualityRepairRecommended(error)) preferQualityRepair = true;
       return false;
     }
   };
@@ -259,6 +269,7 @@ export async function meshStepToMshV2(stepContent: Uint8Array | string, options:
       ? requestedSizeMm * multiplier
       : undefined;
     if (await tryStandardSize(sizeMm)) break;
+    if (preferQualityRepair) break;
     if (sizeMm === undefined) break;
   }
 
@@ -283,7 +294,7 @@ export async function meshStepToMshV2(stepContent: Uint8Array | string, options:
           true,
           "quality"
         );
-        const repairedResult: Omit<StepMeshResult, "totalMs"> = {
+        const repairedResult: StepMeshCandidate = {
           ...result,
           qualityRepair: {
             method: "occ_heal_meshadapt",
@@ -305,7 +316,7 @@ export async function meshStepToMshV2(stepContent: Uint8Array | string, options:
   }
   const chosen = best;
   const refined = chosen.sizeMm !== undefined && requestedSizeMm !== undefined && chosen.sizeMm !== requestedSizeMm;
-  const { sizeMm: _chosenSizeMm, ...bestResult } = chosen;
+  const { sizeMm: _chosenSizeMm, preferQualityRepair: _preferQualityRepair, ...bestResult } = chosen;
   return {
     ...bestResult,
     totalMs: now() - totalStart,
@@ -330,21 +341,40 @@ function qualityRepairSizes(requestedSizeMm: number | undefined): number[] {
 }
 
 const NETGEN_CRASH_ERROR_NAME = "NetgenOptimizerCrash";
+const QUALITY_REPAIR_RECOMMENDED_ERROR_NAME = "StepQualityRepairRecommended";
+
+type StepMeshCandidate = Omit<StepMeshResult, "totalMs"> & {
+  /** Internal orchestration hint; deliberately removed from the public result. */
+  preferQualityRepair?: boolean;
+};
 
 function isNetgenCrash(error: unknown): boolean {
   return error instanceof Error && error.name === NETGEN_CRASH_ERROR_NAME;
+}
+
+function qualityRepairRecommendedError(error: unknown): Error {
+  const recommended = new Error(messageOf(error));
+  recommended.name = QUALITY_REPAIR_RECOMMENDED_ERROR_NAME;
+  return recommended;
+}
+
+function isQualityRepairRecommended(error: unknown): boolean {
+  return error instanceof Error && error.name === QUALITY_REPAIR_RECOMMENDED_ERROR_NAME;
 }
 
 async function meshStepWithAlgorithmFallback(
   stepContent: Uint8Array | string,
   options: StepMeshWasmOptions,
   totalStart: number
-): Promise<Omit<StepMeshResult, "totalMs">> {
+): Promise<StepMeshCandidate> {
   const original = await meshStepAlgorithmCandidates(stepContent, options, totalStart, false);
   if (original.best !== undefined) {
     // A mesh below the floor is still valuable as the best candidate for the
     // outer size ladder, but only after both algorithms have had a chance.
     return original.best;
+  }
+  if (original.preferQualityRepair) {
+    throw original.delaunayError ?? original.frontalError ?? qualityRepairRecommendedError("Complex STEP seams require bounded quality repair.");
   }
 
   // A STEP file can look closed in the viewport while its OpenCASCADE shell
@@ -364,9 +394,10 @@ async function meshStepWithAlgorithmFallback(
 }
 
 type StepAlgorithmCandidates = {
-  best?: Omit<StepMeshResult, "totalMs">;
+  best?: StepMeshCandidate;
   delaunayError?: unknown;
   frontalError?: unknown;
+  preferQualityRepair?: boolean;
 };
 
 async function meshStepAlgorithmCandidates(
@@ -375,12 +406,12 @@ async function meshStepAlgorithmCandidates(
   totalStart: number,
   repairGeometry: boolean
 ): Promise<StepAlgorithmCandidates> {
-  let best: Omit<StepMeshResult, "totalMs"> | undefined;
+  let best: StepMeshCandidate | undefined;
   let delaunayError: unknown;
   let frontalError: unknown;
 
   for (const algorithm of ["delaunay", "frontal"] as const) {
-    let result: Omit<StepMeshResult, "totalMs"> | undefined;
+    let result: StepMeshCandidate | undefined;
     try {
       result = meshStepSession(
         await loadGmshWasm(),
@@ -394,6 +425,10 @@ async function meshStepAlgorithmCandidates(
     } catch (error) {
       if (algorithm === "delaunay") delaunayError = error;
       else frontalError = error;
+
+      if (isQualityRepairRecommended(error)) {
+        return { best, delaunayError, frontalError, preferQualityRepair: true };
+      }
 
       // The Netgen optimizer can crash the wasm module outright ("memory
       // access out of bounds"). Retry the same algorithm on a fresh module,
@@ -419,6 +454,10 @@ async function meshStepAlgorithmCandidates(
     if (result !== undefined) {
       if (best === undefined || qualityOf(result) > qualityOf(best)) best = result;
       if (meshResultPassesQuality(result)) return { best, delaunayError, frontalError };
+      // A large solid with residual seam edges needs bounded OCC healing, not
+      // another unhealed Frontal or characteristic-size attempt. Returning
+      // this hint avoids retaining many fresh gmsh WASM heaps in one worker.
+      if (result.preferQualityRepair) return { best, delaunayError, frontalError };
     }
   }
 
@@ -457,9 +496,10 @@ function meshStepSession(
   totalStart: number,
   allowNetgen: boolean,
   repairProfile: "automatic" | "quality" | false = false
-): Omit<StepMeshResult, "totalMs"> {
+): StepMeshCandidate {
   const timings: MeshTimings = {};
   let geometryRepair: StepGeometryRepairReport | undefined;
+  let preferQualityRepair = false;
   timePhaseSync(timings, options, "init", totalStart, () => {
     gmsh.initialize();
     quietLogger(gmsh);
@@ -484,6 +524,11 @@ function meshStepSession(
       // every top-level shape so validation can reject those open surfaces.
       gmsh.model.occ.importShapes("/in.step", false);
       gmsh.model.occ.synchronize();
+      const importedSurfaceCount = entityTags(gmsh, 2).length;
+      const importedOpenBoundaryCurveCount = openBoundaryCurveTags(gmsh).length;
+      preferQualityRepair = repairProfile === false &&
+        importedSurfaceCount >= COMPLEX_SEAM_REPAIR_SURFACE_THRESHOLD &&
+        importedOpenBoundaryCurveCount > 0;
       if (repairProfile) {
         geometryRepair = repairImportedStepGeometry(gmsh, repairProfile, false);
       }
@@ -522,7 +567,7 @@ function meshStepSession(
     // session (caught upstream and retried without the optimizer).
     let optimizer: StepMeshResult["optimizer"];
     let linearQuality = minSICNQuality(gmsh);
-    if (allowNetgen && linearQuality !== undefined && linearQuality < MESH_QUALITY_REJECT_MIN_SICN) {
+    if (allowNetgen && !preferQualityRepair && linearQuality !== undefined && linearQuality < MESH_QUALITY_REJECT_MIN_SICN) {
       try {
         gmsh.model.mesh.optimize("Netgen");
       } catch (error) {
@@ -536,7 +581,10 @@ function meshStepSession(
 
     let elevation: StepMeshResult["elevation"];
     let elementOrderFallback: StepMeshResult["elementOrderFallback"];
-    if (options.elementOrder === 2) {
+    if (
+      options.elementOrder === 2 &&
+      !(preferQualityRepair && linearQuality !== undefined && linearQuality < MESH_QUALITY_REJECT_MIN_SICN)
+    ) {
       timePhaseSync(timings, options, "order2", totalStart, () => gmsh.model.mesh.setOrder(2));
       elevation = "curved";
     }
@@ -586,8 +634,12 @@ function meshStepSession(
       ...(elevation !== undefined ? { elevation } : {}),
       ...(geometryRepair !== undefined ? { geometryRepair } : {}),
       ...(elementOrderFallback !== undefined ? { elementOrderFallback } : {}),
+      ...(preferQualityRepair ? { preferQualityRepair: true } : {}),
       ...(qualityMinSICN !== undefined ? { qualityMinSICN } : {})
     };
+  } catch (error) {
+    if (preferQualityRepair) throw qualityRepairRecommendedError(error);
+    throw error;
   } finally {
     safeFinalize(gmsh);
   }

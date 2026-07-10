@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 const fake = vi.hoisted(() => {
-  type Scenario = "algorithm_fallback" | "coarser_size" | "quality_repair" | "surface_only" | "dof_fallback";
+  type Scenario = "algorithm_fallback" | "coarser_size" | "quality_repair" | "complex_seams" | "surface_only" | "dof_fallback";
   const state = {
     scenario: "algorithm_fallback" as Scenario,
     attempts: [] as Array<{ algorithm: "delaunay" | "frontal"; sizeMm: number }>,
@@ -11,7 +11,7 @@ const fake = vi.hoisted(() => {
 
   const qualityFor = (algorithm: "delaunay" | "frontal", sizeMm: number, qualityRepair: boolean, optimized: boolean): number => {
     if (state.scenario === "algorithm_fallback") return algorithm === "frontal" ? 0.2 : 0.0075;
-    if (state.scenario === "quality_repair" || state.scenario === "surface_only") {
+    if (state.scenario === "quality_repair" || state.scenario === "complex_seams" || state.scenario === "surface_only") {
       return qualityRepair && optimized && sizeMm <= 6 ? 0.08 : (algorithm === "frontal" ? 0.02 : 0.01);
     }
     if (state.scenario === "dof_fallback") return 0.2;
@@ -56,8 +56,15 @@ const fake = vi.hoisted(() => {
       model: {
         getEntities(dimension: number) {
           if (dimension === 3) return { dimTags: [3, 1] };
-          if (dimension === 2) return { dimTags: [2, 1] };
+          if (dimension === 2) {
+            const surfaceCount = state.scenario === "complex_seams" ? 160 : 1;
+            return { dimTags: Array.from({ length: surfaceCount }, (_, index) => [2, index + 1]).flat() };
+          }
           return { dimTags: [] };
+        },
+        getBoundary() {
+          if (state.scenario !== "complex_seams" || healed) return { outDimTags: [] };
+          return { outDimTags: Array.from({ length: 32 }, (_, index) => [1, index + 1]).flat() };
         },
         getBoundingBox() {
           return { xmin: 0, ymin: 0, zmin: 0, xmax: 10, ymax: 10, zmax: 10 };
@@ -77,7 +84,11 @@ const fake = vi.hoisted(() => {
             return { mass: 1_000 };
           },
           getSurfaceLoops() {
-            return { surfaceLoopTags: [1], surfaceTags: [[1]] };
+            const surfaceCount = state.scenario === "complex_seams" ? 160 : 1;
+            return {
+              surfaceLoopTags: [1],
+              surfaceTags: [Array.from({ length: surfaceCount }, (_, index) => index + 1)]
+            };
           }
         },
         mesh: {
@@ -85,6 +96,9 @@ const fake = vi.hoisted(() => {
             if (dimension === 3) {
               state.attempts.push({ algorithm, sizeMm });
               if (isQualityRepair()) state.qualityRepairAttempts.push(sizeMm);
+              if (state.scenario === "complex_seams" && !isQualityRepair()) {
+                throw new Error("boundary recovery failed");
+              }
             }
           },
           optimize() {
@@ -218,6 +232,31 @@ describe("STEP quality recovery orchestration", () => {
     });
 
     expect(events.some((event) => event.attempt?.stage === "repair" && event.attempt.sizeMm === 6)).toBe(true);
+  });
+
+  test("routes a complex solid with residual seams directly to bounded quality repair", async () => {
+    fake.state.scenario = "complex_seams";
+
+    const result = await meshStepToMshV2(new Uint8Array([1]), { elementOrder: 2, meshSizeMm: 12 });
+
+    expect(result.qualityMinSICN).toBe(0.08);
+    expect(result.qualityRepair).toEqual({
+      method: "occ_heal_meshadapt",
+      requestedMeshSizeMm: 12,
+      usedMeshSizeMm: 6,
+      triedMeshSizesMm: [6]
+    });
+    expect(result.qualityRefinement).toMatchObject({
+      requestedMeshSizeMm: 12,
+      usedMeshSizeMm: 6,
+      triedMeshSizesMm: [12, 6],
+      direction: "finer"
+    });
+    expect(fake.state.attempts).toEqual([
+      { algorithm: "delaunay", sizeMm: 12 },
+      { algorithm: "delaunay", sizeMm: 6 }
+    ]);
+    expect(fake.state.moduleCount).toBe(2);
   });
 
   test("rejects surface-only output even when physical tags look like Tet4/Tet10 records", async () => {
