@@ -399,15 +399,16 @@ api.post("/api/studies/:studyId/loads", async (request, reply) => {
   const { studyId } = request.params as { studyId: string };
   const study = db.getStudy(studyId);
   if (!study) return reply.code(404).send({ error: "Study not found" });
-  const body = request.body as Partial<Load> & { value?: number; selectionRef?: string; direction?: [number, number, number]; applicationPoint?: [number, number, number]; payloadObject?: unknown; payloadMaterialId?: string; payloadVolumeM3?: number; payloadMassMode?: string } | undefined;
+  const body = request.body as Partial<Load> & { value?: number; selectionRef?: string; direction?: [number, number, number]; directionMode?: string; applicationPoint?: [number, number, number]; payloadObject?: unknown; payloadMaterialId?: string; payloadVolumeM3?: number; payloadMassMode?: string } | undefined;
   const type = body?.type ?? "force";
   if (!isLoadType(type)) return reply.code(400).send({ error: "Invalid load type." });
+  if (body?.directionMode !== undefined && !isLoadDirectionMode(body.directionMode)) return reply.code(400).send({ error: "Invalid load direction mode." });
   const payloadVolumeM3 = body?.payloadVolumeM3;
   const load: Load = {
     id: `load-${crypto.randomUUID()}`,
     type,
     selectionRef: body?.selectionRef ?? "selection-load-face",
-    parameters: { value: body?.value ?? 500, units: unitsForLoadType(type), direction: body?.direction ?? [0, 0, -1], ...(body?.applicationPoint ? { applicationPoint: body.applicationPoint } : {}), ...(body?.payloadObject ? { payloadObject: body.payloadObject } : {}), ...(type === "gravity" && body?.payloadMaterialId ? { payloadMaterialId: body.payloadMaterialId } : {}), ...(type === "gravity" && Number.isFinite(payloadVolumeM3) ? { payloadVolumeM3 } : {}), ...(type === "gravity" && body?.payloadMassMode ? { payloadMassMode: body.payloadMassMode } : {}) },
+    parameters: { value: body?.value ?? 500, units: unitsForLoadType(type), direction: body?.direction ?? [0, 0, -1], ...(body?.directionMode ? { directionMode: body.directionMode } : {}), ...(body?.applicationPoint ? { applicationPoint: body.applicationPoint } : {}), ...(body?.payloadObject ? { payloadObject: body.payloadObject } : {}), ...(type === "gravity" && body?.payloadMaterialId ? { payloadMaterialId: body.payloadMaterialId } : {}), ...(type === "gravity" && Number.isFinite(payloadVolumeM3) ? { payloadVolumeM3 } : {}), ...(type === "gravity" && body?.payloadMassMode ? { payloadMassMode: body.payloadMassMode } : {}) },
     status: "complete"
   };
   const next = { ...study, loads: [...study.loads, load] };
@@ -650,6 +651,10 @@ function completeRunMessage(resultTier: ResultProvenanceTier): string {
 
 function isLoadType(type: unknown): type is Load["type"] {
   return type === "force" || type === "pressure" || type === "gravity";
+}
+
+function isLoadDirectionMode(value: unknown): value is string {
+  return value === "-Y" || value === "+Y" || value === "+X" || value === "-X" || value === "+Z" || value === "-Z" || value === "Normal" || value === "Opposite normal";
 }
 
 function unitsForLoadType(type: Load["type"]) {
