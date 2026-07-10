@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { DisplayModel, Project, RunEvent, Study } from "@opencae/schema";
-import { addLoad, addSupport, assignMaterial, cancelRun, createProject, dynamicOutputFrameEstimate, generateMesh, geometryWithMeshPreset, getResults, importLocalProject, loadSampleProject, renameProject, runSimulation, subscribeToRun, updateStudy, uploadModel } from "./api";
+import { addLoad, addSupport, assignMaterial, cancelRun, createProject, dynamicOutputFrameEstimate, generateMesh, geometryWithMeshPreset, getResults, importLocalProject, loadSampleProject, probeUploadedStepRepairAfterMeshFailure, renameProject, runSimulation, STEP_REPAIR_UNAVAILABLE_MESSAGE, subscribeToRun, updateStudy, uploadModel } from "./api";
 
 const TestFile = globalThis.File ?? class extends Blob {
   name: string;
@@ -88,6 +88,26 @@ endsolid tray
 `;
 
 const apiSource = readFileSync(resolve(__dirname, "api.ts"), "utf8");
+
+function uploadedStepProjectForRepairProbe(status: "solid" | "unchecked"): Project {
+  return {
+    ...project,
+    geometryFiles: [{
+      ...project.geometryFiles[0]!,
+      filename: "nominal-solid.step",
+      metadata: {
+        source: "local-upload",
+        embeddedModel: {
+          filename: "nominal-solid.step",
+          contentType: "model/step",
+          size: 4,
+          contentBase64: "U1RFUA=="
+        },
+        stepGeometry: { status }
+      }
+    }]
+  };
+}
 
 describe("api", () => {
   afterEach(() => {
@@ -506,6 +526,99 @@ describe("api", () => {
 
     expect(fetchMock).not.toHaveBeenCalled();
     expect(progress.some((message) => message.includes("Falling back to preset estimates"))).toBe(false);
+  });
+
+  test("force-probes a nominal STEP solid after meshing fails and stores an unrepairable result", async () => {
+    const workerRequests: Array<{ payload: { probeRepairEvenIfSolid?: boolean } }> = [];
+    class InspectingStepWorker {
+      private listeners = new Map<string, (event: MessageEvent | ErrorEvent) => void>();
+
+      addEventListener(type: string, listener: (event: MessageEvent | ErrorEvent) => void) {
+        this.listeners.set(type, listener);
+      }
+
+      postMessage(request: { id: string; operation: string; payload: { probeRepairEvenIfSolid?: boolean } }) {
+        workerRequests.push(request);
+        queueMicrotask(() => this.listeners.get("message")?.({
+          data: {
+            id: request.id,
+            operation: request.operation,
+            ok: true,
+            result: {
+              inspection: {
+                status: "solid",
+                volumeCount: 1,
+                surfaceCount: 428,
+                orphanSurfaceCount: 0,
+                openBoundaryCurveCount: 8,
+                surfaceMeshValid: true,
+                repairable: false
+              },
+              repairProbe: "failed"
+            }
+          }
+        } as MessageEvent));
+      }
+
+      terminate() {}
+    }
+    vi.stubGlobal("Worker", InspectingStepWorker);
+    const nominalStepProject = uploadedStepProjectForRepairProbe("solid");
+
+    const result = await probeUploadedStepRepairAfterMeshFailure(nominalStepProject, { isCurrent: () => true });
+
+    expect(workerRequests[0]?.payload.probeRepairEvenIfSolid).toBe(true);
+    expect(result?.stepGeometry).toMatchObject({
+      status: "unrepairable",
+      message: STEP_REPAIR_UNAVAILABLE_MESSAGE
+    });
+    expect(result?.project.geometryFiles[0]?.metadata.stepGeometry).toMatchObject({
+      status: "unrepairable",
+      message: STEP_REPAIR_UNAVAILABLE_MESSAGE
+    });
+  });
+
+  test("discards a forced STEP repair probe when the workspace generation changes", async () => {
+    let current = true;
+    class SupersededProbeWorker {
+      private listeners = new Map<string, (event: MessageEvent | ErrorEvent) => void>();
+
+      addEventListener(type: string, listener: (event: MessageEvent | ErrorEvent) => void) {
+        this.listeners.set(type, listener);
+      }
+
+      postMessage(request: { id: string; operation: string }) {
+        queueMicrotask(() => {
+          current = false;
+          this.listeners.get("message")?.({
+            data: {
+              id: request.id,
+              operation: request.operation,
+              ok: true,
+              result: {
+                inspection: {
+                  status: "solid",
+                  volumeCount: 1,
+                  surfaceCount: 428,
+                  orphanSurfaceCount: 0,
+                  openBoundaryCurveCount: 8,
+                  surfaceMeshValid: true,
+                  repairable: true
+                },
+                repairProbe: "succeeded"
+              }
+            }
+          } as MessageEvent);
+        });
+      }
+
+      terminate() {}
+    }
+    vi.stubGlobal("Worker", SupersededProbeWorker);
+
+    await expect(probeUploadedStepRepairAfterMeshFailure(uploadedStepProjectForRepairProbe("solid"), {
+      isCurrent: () => current
+    })).rejects.toMatchObject({ name: "AbortError" });
   });
 
   test("runs explicit OpenCAE Core Local static solves without local estimate fallback", async () => {
