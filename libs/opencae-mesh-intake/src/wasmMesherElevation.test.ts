@@ -7,8 +7,11 @@
 //   2. Straight-edge Tet10 elevation — curved elevation snaps mid-side nodes
 //      onto the CAD surface and inverts elements on bent thin regions
 //      (minSICN -0.29 on a 3 mm bent shell whose linear mesh scores +0.31).
-//   3. Size-refinement ladder — the backstop when a full session (with both
-//      rescues) still misses the floor: re-mesh at 2/3 the size, twice max.
+//   3. Quality-aware 3D algorithm fallback — a completed but sub-floor
+//      Delaunay mesh is retried with Frontal instead of being accepted merely
+//      because generation did not throw.
+//   4. Bidirectional size ladder — the backstop when both algorithms still
+//      miss the floor: try one adjacent coarser size and two finer sizes.
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
 import { meshStepToMshV2 } from "./wasmMesher";

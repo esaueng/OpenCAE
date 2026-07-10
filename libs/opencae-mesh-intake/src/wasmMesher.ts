@@ -49,12 +49,13 @@ export type StepMeshResult = GeoMeshResult & {
   optimizer?: "netgen";
   /**
    * Present when the requested size missed the quality-gate floor and the
-   * mesh was automatically retried at finer characteristic lengths.
+   * mesh was automatically retried at nearby characteristic lengths.
    */
   qualityRefinement?: {
     requestedMeshSizeMm: number;
     usedMeshSizeMm: number;
     triedMeshSizesMm: number[];
+    direction: "finer" | "coarser";
   };
   /** Present when the imported STEP boundary had to be healed before volume meshing. */
   geometryRepair?: StepGeometryRepairReport;
@@ -158,10 +159,12 @@ export async function meshGeoScriptToMshV2(geoScript: string, options: MeshWasmO
   }
 }
 
-/** Each quality refinement multiplies the characteristic length by this. */
-const QUALITY_REFINEMENT_FACTOR = 2 / 3;
-/** Extra mesh attempts at finer sizes when the quality floor is missed. */
-const MAX_QUALITY_REFINEMENTS = 2;
+/**
+ * Nearby characteristic-length attempts when the requested size misses the
+ * quality floor. Tet quality is non-monotonic in size, so try the adjacent
+ * coarser size as well as the two existing finer sizes.
+ */
+const QUALITY_SIZE_MULTIPLIERS = [1, 3 / 2, 2 / 3, 4 / 9] as const;
 /** Stop refining once a mesh gets this large — the solver caps DOF anyway. */
 const MAX_QUALITY_REFINEMENT_TETS = 80_000;
 
@@ -172,32 +175,40 @@ const MAX_QUALITY_REFINEMENT_TETS = 80_000;
  * - The single-threaded WASM build of gmsh has a documented weakness in the
  *   default Delaunay 3D algorithm's boundary recovery; when generate(3) fails
  *   the session retries with Mesh.Algorithm3D = 4 (Frontal).
+ * - A completed Delaunay mesh can still miss the quality floor, especially
+ *   when Netgen crashed and the safe no-optimizer retry completed. That is a
+ *   quality failure, not a successful fallback: retry Frontal and keep the
+ *   better result.
  * - Thin walls produce sliver tets whose quality is NON-monotonic in mesh
  *   size (a 2 mm-wall clip scores minSICN 0.02 at 12 mm, 0.009 at 6 mm, but
- *   0.25 at 8 mm), so when a session misses the quality-gate floor the whole
- *   mesh is retried at 2/3 the size, up to two steps, and the first size that
- *   passes wins. The refinement ladder is recorded on the result so callers
- *   can surface it honestly.
+ *   0.25 at 8 mm), so a failed requested size is retried once coarser and up
+ *   to two steps finer. The first passing size wins and the adjustment is
+ *   recorded so callers can surface it honestly.
  */
 export async function meshStepToMshV2(stepContent: Uint8Array | string, options: StepMeshWasmOptions = {}): Promise<StepMeshResult> {
   const totalStart = now();
   const requestedSizeMm = options.meshSizeMm;
   let best: (Omit<StepMeshResult, "totalMs"> & { sizeMm?: number }) | undefined;
   const triedSizesMm: number[] = [];
+  let skipFinerSizes = false;
 
-  for (let attempt = 0; attempt <= MAX_QUALITY_REFINEMENTS; attempt += 1) {
+  for (const multiplier of QUALITY_SIZE_MULTIPLIERS) {
+    if (multiplier < 1 && skipFinerSizes) continue;
     const sizeMm = requestedSizeMm !== undefined && requestedSizeMm > 0
-      ? requestedSizeMm * QUALITY_REFINEMENT_FACTOR ** attempt
+      ? requestedSizeMm * multiplier
       : undefined;
     if (sizeMm !== undefined) triedSizesMm.push(sizeMm);
     const result = await meshStepWithAlgorithmFallback(stepContent, { ...options, meshSizeMm: sizeMm }, totalStart);
     if (best === undefined || (result.qualityMinSICN ?? -Infinity) > (best.qualityMinSICN ?? -Infinity)) {
       best = { ...result, sizeMm };
     }
-    const quality = result.qualityMinSICN;
-    if (quality !== undefined && quality >= MESH_QUALITY_REJECT_MIN_SICN) break; // Passes the gate — stop refining.
-    if (sizeMm === undefined) break; // No size hint to refine against.
-    if (countTetLines(result.msh) > MAX_QUALITY_REFINEMENT_TETS) break;
+    if (meshResultPassesQuality(result)) break;
+    if (sizeMm === undefined) break; // No size hint to adjust.
+    // A coarser candidate is still worth trying when the requested mesh is
+    // already large; it reduces the element count. Only suppress finer sizes.
+    if (countTetLines(result.msh) > MAX_QUALITY_REFINEMENT_TETS) {
+      skipFinerSizes = true;
+    }
   }
 
   const chosen = best!;
@@ -207,7 +218,14 @@ export async function meshStepToMshV2(stepContent: Uint8Array | string, options:
     ...bestResult,
     totalMs: now() - totalStart,
     ...(refined
-      ? { qualityRefinement: { requestedMeshSizeMm: requestedSizeMm!, usedMeshSizeMm: chosen.sizeMm!, triedMeshSizesMm: triedSizesMm } }
+      ? {
+          qualityRefinement: {
+            requestedMeshSizeMm: requestedSizeMm!,
+            usedMeshSizeMm: chosen.sizeMm!,
+            triedMeshSizesMm: triedSizesMm,
+            direction: chosen.sizeMm! < requestedSizeMm! ? "finer" : "coarser"
+          }
+        }
       : {})
   };
 }
@@ -223,38 +241,11 @@ async function meshStepWithAlgorithmFallback(
   options: StepMeshWasmOptions,
   totalStart: number
 ): Promise<Omit<StepMeshResult, "totalMs">> {
-  const gmsh = await loadGmshWasm();
-  let delaunayError: unknown;
-  let frontalError: unknown;
-  try {
-    return meshStepSession(gmsh, stepContent, options, "delaunay", totalStart, true);
-  } catch (error) {
-    delaunayError = error;
-    // The Netgen optimizer can crash the wasm module outright ("memory access
-    // out of bounds") on some meshes; the whole session is poisoned, so retry
-    // the same algorithm on a FRESH module without the optimizer.
-    if (isNetgenCrash(error)) {
-      try {
-        return meshStepSession(await loadGmshWasm(), stepContent, options, "delaunay", now(), false);
-      } catch (retryError) {
-        delaunayError = retryError;
-        // Fall through to the Frontal fallback below.
-      }
-    }
-    // Retry once with the Frontal algorithm on a FRESH module instance — a
-    // second session on the same instance aborts in gmsh-wasm 0.1.2.
-    try {
-      return meshStepSession(await loadGmshWasm(), stepContent, options, "frontal", now(), true);
-    } catch (error) {
-      frontalError = error;
-      if (isNetgenCrash(error)) {
-        try {
-          return meshStepSession(await loadGmshWasm(), stepContent, options, "frontal", now(), false);
-        } catch (retryError) {
-          frontalError = retryError;
-        }
-      }
-    }
+  const original = await meshStepAlgorithmCandidates(stepContent, options, totalStart, false);
+  if (original.best !== undefined) {
+    // A mesh below the floor is still valuable as the best candidate for the
+    // outer size ladder, but only after both algorithms have had a chance.
+    return original.best;
   }
 
   // A STEP file can look closed in the viewport while its OpenCASCADE shell
@@ -263,34 +254,85 @@ async function meshStepWithAlgorithmFallback(
   // algorithms cannot repair this class of failure. Retry on fresh modules
   // after conservatively sewing/healing the B-rep. Automatic meshing never
   // invents a cap; boundary patching is reserved for the explicit Fix action.
-  try {
-    return meshStepSession(await loadGmshWasm(), stepContent, options, "delaunay", now(), true, true);
-  } catch (repairDelaunayError) {
-    if (isNetgenCrash(repairDelaunayError)) {
-      try {
-        return meshStepSession(await loadGmshWasm(), stepContent, options, "delaunay", now(), false, true);
-      } catch {
-        // Continue to the repaired Frontal boundary-recovery fallback.
-      }
-    }
+  const repaired = await meshStepAlgorithmCandidates(stepContent, options, now(), true);
+  if (repaired.best !== undefined) return repaired.best;
+  throw new StepGeometryError(
+    "STEP geometry has open or invalid surfaces, and automatic healing could not create a closed solid. " +
+      "Use Fix model on the Model step, or repair the source CAD and upload it again. " +
+      `(Original Delaunay: ${messageOf(original.delaunayError)}; original Frontal: ${messageOf(original.frontalError)}; ` +
+      `healed Delaunay: ${messageOf(repaired.delaunayError)}; healed Frontal: ${messageOf(repaired.frontalError)})`
+  );
+}
+
+type StepAlgorithmCandidates = {
+  best?: Omit<StepMeshResult, "totalMs">;
+  delaunayError?: unknown;
+  frontalError?: unknown;
+};
+
+async function meshStepAlgorithmCandidates(
+  stepContent: Uint8Array | string,
+  options: StepMeshWasmOptions,
+  totalStart: number,
+  repairGeometry: boolean
+): Promise<StepAlgorithmCandidates> {
+  let best: Omit<StepMeshResult, "totalMs"> | undefined;
+  let delaunayError: unknown;
+  let frontalError: unknown;
+
+  for (const algorithm of ["delaunay", "frontal"] as const) {
+    let result: Omit<StepMeshResult, "totalMs"> | undefined;
     try {
-      return meshStepSession(await loadGmshWasm(), stepContent, options, "frontal", now(), true, true);
-    } catch (repairFrontalError) {
-      if (isNetgenCrash(repairFrontalError)) {
+      result = meshStepSession(
+        await loadGmshWasm(),
+        stepContent,
+        options,
+        algorithm,
+        algorithm === "delaunay" ? totalStart : now(),
+        true,
+        repairGeometry
+      );
+    } catch (error) {
+      if (algorithm === "delaunay") delaunayError = error;
+      else frontalError = error;
+
+      // The Netgen optimizer can crash the wasm module outright ("memory
+      // access out of bounds"). Retry the same algorithm on a fresh module,
+      // but do not mistake a completed sub-floor mesh for a successful rescue.
+      if (isNetgenCrash(error)) {
         try {
-          return meshStepSession(await loadGmshWasm(), stepContent, options, "frontal", now(), false, true);
-        } catch {
-          // Use the original repaired failures in the final diagnostic below.
+          result = meshStepSession(
+            await loadGmshWasm(),
+            stepContent,
+            options,
+            algorithm,
+            now(),
+            false,
+            repairGeometry
+          );
+        } catch (retryError) {
+          if (algorithm === "delaunay") delaunayError = retryError;
+          else frontalError = retryError;
         }
       }
-      throw new StepGeometryError(
-        "STEP geometry has open or invalid surfaces, and automatic healing could not create a closed solid. " +
-          "Use Fix model on the Model step, or repair the source CAD and upload it again. " +
-          `(Original Delaunay: ${messageOf(delaunayError)}; original Frontal: ${messageOf(frontalError)}; ` +
-          `healed Delaunay: ${messageOf(repairDelaunayError)}; healed Frontal: ${messageOf(repairFrontalError)})`
-      );
+    }
+
+    if (result !== undefined) {
+      if (best === undefined || qualityOf(result) > qualityOf(best)) best = result;
+      if (meshResultPassesQuality(result)) return { best, delaunayError, frontalError };
     }
   }
+
+  return { best, delaunayError, frontalError };
+}
+
+function qualityOf(result: Pick<StepMeshResult, "qualityMinSICN">): number {
+  return result.qualityMinSICN ?? -Infinity;
+}
+
+function meshResultPassesQuality(result: Pick<StepMeshResult, "qualityMinSICN">): boolean {
+  const quality = result.qualityMinSICN;
+  return quality !== undefined && quality >= MESH_QUALITY_REJECT_MIN_SICN;
 }
 
 /** Cheap volume-element count from msh2 text (element type 4 = Tet4, 11 = Tet10). */
