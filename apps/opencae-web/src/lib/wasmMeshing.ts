@@ -8,6 +8,7 @@
 // WASM module inside the worker) are loaded via dynamic import only after the
 // flag check passes, so default builds and the initial bundle stay untouched.
 import type { DisplayModel, MeshQuality, Study } from "@opencae/schema";
+import type { CoreVolumeMeshArtifact, ElementOrderFallbackMetadata } from "@opencae/mesh-intake";
 import { inferGlobalCriticalPrintAxis } from "@opencae/study-core";
 import { geometrySourceForStudy, studyForCoreGeometryDispatch, type CoreCloudGeometrySource } from "../workers/opencaeCoreSolve";
 import { unpackCoreVolumeMeshArtifact } from "../workers/meshProtocol";
@@ -105,6 +106,7 @@ async function meshWorkerRun(options: WasmMeshOptions): Promise<WasmMeshStudyRes
   let elevationNote: string | undefined;
   let refinementNote: string | undefined;
   let geometryRepairNote: string | undefined;
+  let elementOrderFallbackNote: string | undefined;
   let attributionNote: string | undefined;
 
   if (geometry.kind === "sample_procedural" && geometry.sampleId === "bracket") {
@@ -158,8 +160,13 @@ async function meshWorkerRun(options: WasmMeshOptions): Promise<WasmMeshStudyRes
         : `Mesh quality at the ${formatMeshSizeMm(requestedMeshSizeMm)} mm preset size missed the quality floor on this geometry; the mesh was automatically adjusted to ${formatMeshSizeMm(usedMeshSizeMm)} mm (coarser) to remove near-degenerate elements. Local stress resolution may be lower than the selected preset.`;
     }
     if (stepResult.geometryRepair) {
-      const { toleranceMm } = stepResult.geometryRepair;
-      geometryRepairNote = `Open or invalid STEP boundaries were automatically sewn before meshing (repair tolerance ${formatMeshSizeMm(toleranceMm)} mm). Review the repaired geometry before relying on results.`;
+      const { profile, toleranceMm } = stepResult.geometryRepair;
+      geometryRepairNote = profile === "quality"
+        ? `Tiny or sliver STEP features were automatically healed before meshing (repair tolerance ${formatMeshSizeMm(toleranceMm)} mm); the original quality floor remained enforced. Review the repaired geometry before relying on results.`
+        : `Open or invalid STEP boundaries were automatically sewn before meshing (repair tolerance ${formatMeshSizeMm(toleranceMm)} mm). Review the repaired geometry before relying on results.`;
+    }
+    if (stepResult.elementOrderFallback) {
+      elementOrderFallbackNote = formatElementOrderFallbackWarning(stepResult.elementOrderFallback);
     }
     if (!attribution) {
       attributionNote = "STEP face registry unavailable; selections fall back to geometric matching.";
@@ -171,6 +178,10 @@ async function meshWorkerRun(options: WasmMeshOptions): Promise<WasmMeshStudyRes
   }
 
   const artifact = unpackCoreVolumeMeshArtifact(meshedPacked.packed);
+  // The mesher may intentionally retain a linear mesh when Tet10 would exceed
+  // the browser solver's DOF budget. The artifact is authoritative: carrying
+  // the requested order into the model would misconfigure a Tet4 solve.
+  const actualElementOrder = actualElementOrderForArtifact(artifact);
   const analysisType = study.type === "dynamic_structural" ? "dynamic_structural" : "static_stress";
   // The mirrored builder applies study load directions verbatim in the solver
   // frame (same contract as the cloud container), so hand it a solver-frame study.
@@ -194,7 +205,7 @@ async function meshWorkerRun(options: WasmMeshOptions): Promise<WasmMeshStudyRes
     displayModel,
     volumeMesh: artifact,
     analysisType,
-    solverSettings: { ...(study.solverSettings as Record<string, unknown> | undefined ?? {}), elementOrder },
+    solverSettings: { ...(study.solverSettings as Record<string, unknown> | undefined ?? {}), elementOrder: actualElementOrder },
     criticalLayerAxis,
     mappingDiagnostics
   });
@@ -205,7 +216,7 @@ async function meshWorkerRun(options: WasmMeshOptions): Promise<WasmMeshStudyRes
   const summary: NonNullable<Study["meshSettings"]["summary"]> = {
     nodes,
     elements,
-    warnings: [algorithmNote, elevationNote, refinementNote, geometryRepairNote, attributionNote].filter((note): note is string => Boolean(note)),
+    warnings: [algorithmNote, elevationNote, refinementNote, geometryRepairNote, elementOrderFallbackNote, attributionNote].filter((note): note is string => Boolean(note)),
     quality: preset,
     source: "wasm_gmsh",
     units: "m",
@@ -236,6 +247,15 @@ async function meshWorkerRun(options: WasmMeshOptions): Promise<WasmMeshStudyRes
 
 function formatMeshSizeMm(value: number): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
+
+export function actualElementOrderForArtifact(artifact: Pick<CoreVolumeMeshArtifact, "elements">): 1 | 2 {
+  return artifact.elements[0]?.type === "Tet10" ? 2 : 1;
+}
+
+export function formatElementOrderFallbackWarning(fallback: ElementOrderFallbackMetadata): string {
+  const quadraticDofCount = fallback.quadraticNodeCount * 3;
+  return `The requested Tet10 mesh would require ${fallback.quadraticNodeCount.toLocaleString()} quadratic nodes (${quadraticDofCount.toLocaleString()} displacement DOFs), exceeding the browser solver limit. A safe linear Tet4 mesh is used instead; the mesh quality floor remains enforced.`;
 }
 
 function base64ToArrayBuffer(contentBase64: string): ArrayBuffer {

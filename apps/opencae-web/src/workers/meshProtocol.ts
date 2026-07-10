@@ -4,6 +4,7 @@
 // (Float64Array coordinates + Uint32Array connectivity + JSON metadata).
 import type {
   CoreVolumeMeshArtifact,
+  ElementOrderFallbackMetadata,
   FacetAttributionReport,
   MeshPhase,
   MeshTimings,
@@ -90,8 +91,17 @@ export type MeshWorkerResults = {
       triedMeshSizesMm: number[];
       direction: "finer" | "coarser";
     };
+    /** Present when bounded OCC healing + MeshAdapt recovered a safe mesh. */
+    qualityRepair?: {
+      method: "occ_heal_meshadapt";
+      requestedMeshSizeMm: number;
+      usedMeshSizeMm: number;
+      triedMeshSizesMm: number[];
+    };
     /** Present when open/invalid STEP boundaries were healed before meshing. */
     geometryRepair?: StepGeometryRepairReport;
+    /** Present when Tet10 was safely reduced to Tet4 to stay within the browser solver's DOF budget. */
+    elementOrderFallback?: ElementOrderFallbackMetadata;
     /** Facet->B-rep-face attribution report (present when the request carried attribution inputs). */
     attribution?: FacetAttributionReport;
   };
