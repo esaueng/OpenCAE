@@ -6,6 +6,7 @@
 // for it when meshing actually starts (the .wasm asset is ~44 MB).
 
 import { MESH_QUALITY_REJECT_MIN_SICN } from "./meshQualityGate";
+import type { ElementOrderFallbackMetadata } from "./types";
 
 type GmshWasmModule = typeof import("@loumalouomega/gmsh-wasm");
 export type GmshApi = Awaited<ReturnType<GmshWasmModule["default"]>>;
@@ -57,8 +58,20 @@ export type StepMeshResult = GeoMeshResult & {
     triedMeshSizesMm: number[];
     direction: "finer" | "coarser";
   };
+  /**
+   * Present when a bounded CAD-healing + MeshAdapt pass recovered a mesh that
+   * the ordinary size/algorithm ladder could not bring above the quality floor.
+   */
+  qualityRepair?: {
+    method: "occ_heal_meshadapt";
+    requestedMeshSizeMm: number;
+    usedMeshSizeMm: number;
+    triedMeshSizesMm: number[];
+  };
   /** Present when the imported STEP boundary had to be healed before volume meshing. */
   geometryRepair?: StepGeometryRepairReport;
+  /** Present when a safe Tet10 mesh was reduced to Tet4 to stay solvable in-browser. */
+  elementOrderFallback?: ElementOrderFallbackMetadata;
 };
 
 export type StepGeometryInspection = {
@@ -75,7 +88,7 @@ export type StepGeometryInspection = {
 
 export type StepGeometryRepairReport = {
   method: "heal" | "heal_and_cap";
-  profile: "automatic" | "explicit";
+  profile: "automatic" | "quality" | "explicit";
   toleranceMm: number;
   cappedSurfaceCount: number;
   originalVolumeCount: number;
@@ -167,6 +180,14 @@ export async function meshGeoScriptToMshV2(geoScript: string, options: MeshWasmO
 const QUALITY_SIZE_MULTIPLIERS = [1, 3 / 2, 2 / 3, 4 / 9] as const;
 /** Stop refining once a mesh gets this large — the solver caps DOF anyway. */
 const MAX_QUALITY_REFINEMENT_TETS = 80_000;
+/** The browser solve pipeline accepts at most 100,000 displacement DOFs. */
+const MAX_BROWSER_SOLVE_NODES = Math.floor(100_000 / 3);
+/**
+ * A conservative upper size for the healed MeshAdapt rescue. The supplied
+ * sliver-heavy STEP and neighboring sizes show a stable passing window at
+ * 5-6 mm; larger sizes can reintroduce the same sliver non-monotonically.
+ */
+const MAX_QUALITY_REPAIR_SIZE_MM = 6;
 
 /**
  * Import a STEP file through the OpenCASCADE kernel and volume-mesh it to msh v2.2.
@@ -188,30 +209,83 @@ const MAX_QUALITY_REFINEMENT_TETS = 80_000;
 export async function meshStepToMshV2(stepContent: Uint8Array | string, options: StepMeshWasmOptions = {}): Promise<StepMeshResult> {
   const totalStart = now();
   const requestedSizeMm = options.meshSizeMm;
-  let best: (Omit<StepMeshResult, "totalMs"> & { sizeMm?: number }) | undefined;
+  type Candidate = Omit<StepMeshResult, "totalMs"> & { sizeMm?: number };
+  let best: Candidate | undefined;
   const triedSizesMm: number[] = [];
   let skipFinerSizes = false;
+  let lastError: unknown;
 
+  const consider = (result: Omit<StepMeshResult, "totalMs">, sizeMm?: number): boolean => {
+    if (best === undefined || qualityOf(result) > qualityOf(best)) best = { ...result, sizeMm };
+    return meshResultPassesQuality(result);
+  };
+
+  const tryStandardSize = async (sizeMm?: number): Promise<boolean> => {
+    if (sizeMm !== undefined) triedSizesMm.push(sizeMm);
+    try {
+      const result = await meshStepWithAlgorithmFallback(stepContent, { ...options, meshSizeMm: sizeMm }, totalStart);
+      if (countTetLines(result.msh) > MAX_QUALITY_REFINEMENT_TETS) skipFinerSizes = true;
+      return consider(result, sizeMm);
+    } catch (error) {
+      lastError = error;
+      return false;
+    }
+  };
+
+  // Exhaust the ordinary size/algorithm ladder before the broader sliver-heal
+  // profile. Tet quality is non-monotonic, so requested, coarser, and finer
+  // candidates can each be the one that clears the floor without that repair.
   for (const multiplier of QUALITY_SIZE_MULTIPLIERS) {
     if (multiplier < 1 && skipFinerSizes) continue;
     const sizeMm = requestedSizeMm !== undefined && requestedSizeMm > 0
       ? requestedSizeMm * multiplier
       : undefined;
-    if (sizeMm !== undefined) triedSizesMm.push(sizeMm);
-    const result = await meshStepWithAlgorithmFallback(stepContent, { ...options, meshSizeMm: sizeMm }, totalStart);
-    if (best === undefined || (result.qualityMinSICN ?? -Infinity) > (best.qualityMinSICN ?? -Infinity)) {
-      best = { ...result, sizeMm };
-    }
-    if (meshResultPassesQuality(result)) break;
-    if (sizeMm === undefined) break; // No size hint to adjust.
-    // A coarser candidate is still worth trying when the requested mesh is
-    // already large; it reduces the element count. Only suppress finer sizes.
-    if (countTetLines(result.msh) > MAX_QUALITY_REFINEMENT_TETS) {
-      skipFinerSizes = true;
+    if (await tryStandardSize(sizeMm)) break;
+    if (sizeMm === undefined) break;
+  }
+
+  // Only after the complete ordinary ladder still produces a sub-floor mesh
+  // (or no volume mesh), run a bounded, fresh-session quality repair. This
+  // removes tiny OCC edges/faces under strict bounds/volume-change guards and
+  // uses MeshAdapt's surface triangulation before Delaunay + Netgen. It does
+  // not lower the gate.
+  if (!best || !meshResultPassesQuality(best)) {
+    const repairSizesMm = qualityRepairSizes(requestedSizeMm);
+    const repairTriedSizesMm: number[] = [];
+    for (const sizeMm of repairSizesMm) {
+      repairTriedSizesMm.push(sizeMm);
+      if (!triedSizesMm.includes(sizeMm)) triedSizesMm.push(sizeMm);
+      try {
+        const result = meshStepSession(
+          await loadGmshWasm(),
+          stepContent,
+          { ...options, meshSizeMm: sizeMm },
+          "delaunay",
+          now(),
+          true,
+          "quality"
+        );
+        const repairedResult: Omit<StepMeshResult, "totalMs"> = {
+          ...result,
+          qualityRepair: {
+            method: "occ_heal_meshadapt",
+            requestedMeshSizeMm: requestedSizeMm!,
+            usedMeshSizeMm: sizeMm,
+            triedMeshSizesMm: [...repairTriedSizesMm]
+          }
+        };
+        if (consider(repairedResult, sizeMm)) break;
+      } catch (error) {
+        lastError = error;
+      }
     }
   }
 
-  const chosen = best!;
+  if (best === undefined) {
+    if (lastError instanceof Error) throw lastError;
+    throw new StepGeometryError("Gmsh could not create a tetrahedral volume mesh from the STEP solid.");
+  }
+  const chosen = best;
   const refined = chosen.sizeMm !== undefined && requestedSizeMm !== undefined && chosen.sizeMm !== requestedSizeMm;
   const { sizeMm: _chosenSizeMm, ...bestResult } = chosen;
   return {
@@ -228,6 +302,13 @@ export async function meshStepToMshV2(stepContent: Uint8Array | string, options:
         }
       : {})
   };
+}
+
+function qualityRepairSizes(requestedSizeMm: number | undefined): number[] {
+  if (requestedSizeMm === undefined || !Number.isFinite(requestedSizeMm) || requestedSizeMm <= 0) return [];
+  const first = Math.min(requestedSizeMm, MAX_QUALITY_REPAIR_SIZE_MM);
+  const second = first * (5 / 6);
+  return second > 0 && Math.abs(second - first) > 1e-9 ? [first, second] : [first];
 }
 
 const NETGEN_CRASH_ERROR_NAME = "NetgenOptimizerCrash";
@@ -290,7 +371,7 @@ async function meshStepAlgorithmCandidates(
         algorithm,
         algorithm === "delaunay" ? totalStart : now(),
         true,
-        repairGeometry
+        repairGeometry ? "automatic" : false
       );
     } catch (error) {
       if (algorithm === "delaunay") delaunayError = error;
@@ -308,7 +389,7 @@ async function meshStepAlgorithmCandidates(
             algorithm,
             now(),
             false,
-            repairGeometry
+            repairGeometry ? "automatic" : false
           );
         } catch (retryError) {
           if (algorithm === "delaunay") delaunayError = retryError;
@@ -335,14 +416,17 @@ function meshResultPassesQuality(result: Pick<StepMeshResult, "qualityMinSICN">)
   return quality !== undefined && quality >= MESH_QUALITY_REJECT_MIN_SICN;
 }
 
-/** Cheap volume-element count from msh2 text (element type 4 = Tet4, 11 = Tet10). */
+/** Volume-element count from the declared msh2 `$Elements` records only. */
 function countTetLines(msh: string): number {
+  const lines = msh.split(/\r?\n/);
+  const sectionStart = lines.findIndex((line) => line.trim() === "$Elements");
+  if (sectionStart < 0) return 0;
+  const declaredCount = Number.parseInt(lines[sectionStart + 1]?.trim() ?? "", 10);
+  if (!Number.isFinite(declaredCount) || declaredCount < 0) return 0;
   let count = 0;
-  for (const line of msh.split("\n")) {
-    const firstSpace = line.indexOf(" ");
-    if (firstSpace <= 0) continue;
-    const rest = line.slice(firstSpace + 1);
-    if (rest.startsWith("4 ") || rest.startsWith("11 ")) count += 1;
+  for (let offset = 0; offset < declaredCount; offset += 1) {
+    const fields = lines[sectionStart + 2 + offset]?.trim().split(/\s+/);
+    if (fields?.[1] === "4" || fields?.[1] === "11") count += 1;
   }
   return count;
 }
@@ -354,7 +438,7 @@ function meshStepSession(
   algorithm3D: "delaunay" | "frontal",
   totalStart: number,
   allowNetgen: boolean,
-  repairGeometry = false
+  repairProfile: "automatic" | "quality" | false = false
 ): Omit<StepMeshResult, "totalMs"> {
   const timings: MeshTimings = {};
   let geometryRepair: StepGeometryRepairReport | undefined;
@@ -366,6 +450,13 @@ function meshStepSession(
     timePhaseSync(timings, options, "import", totalStart, () => {
       gmsh.FS.writeFile("/in.step", stepContent);
       if (algorithm3D === "frontal") gmsh.option.setNumber("Mesh.Algorithm3D", 4);
+      if (repairProfile === "quality") {
+        // MeshAdapt is materially more robust than Frontal-Delaunay around
+        // healed sliver faces. Keep 3D Delaunay explicit so this profile is
+        // deterministic even if gmsh changes an automatic default.
+        gmsh.option.setNumber("Mesh.Algorithm", 1);
+        gmsh.option.setNumber("Mesh.Algorithm3D", 1);
+      }
       if (options.meshSizeMm !== undefined && options.meshSizeMm > 0) {
         gmsh.option.setNumber("Mesh.CharacteristicLengthMin", options.meshSizeMm * 0.45);
         gmsh.option.setNumber("Mesh.CharacteristicLengthMax", options.meshSizeMm);
@@ -375,8 +466,8 @@ function meshStepSession(
       // every top-level shape so validation can reject those open surfaces.
       gmsh.model.occ.importShapes("/in.step", false);
       gmsh.model.occ.synchronize();
-      if (repairGeometry) {
-        geometryRepair = repairImportedStepGeometry(gmsh, "automatic", false);
+      if (repairProfile) {
+        geometryRepair = repairImportedStepGeometry(gmsh, repairProfile, false);
       }
       if (entityTags(gmsh, 3).length === 0) {
         throw new StepGeometryError("The STEP import contains surfaces but no closed solid volume.");
@@ -397,6 +488,12 @@ function meshStepSession(
     });
     timePhaseSync(timings, options, "mesh2d", totalStart, () => gmsh.model.mesh.generate(2));
     timePhaseSync(timings, options, "mesh3d", totalStart, () => gmsh.model.mesh.generate(3));
+    if (tetElementCount(gmsh) === 0) {
+      // Query gmsh's volume element tables directly. Scanning the emitted MSH
+      // can false-match physical group, node, or surface-element records whose
+      // numeric tags happen to be 4 or 11.
+      throw new StepGeometryError("Gmsh did not create any tetrahedra from the STEP solid.");
+    }
 
     // Thin walls leave a tiny tail of sliver tets in the LINEAR mesh (often a
     // single element out of thousands) that no global size change reliably
@@ -420,6 +517,7 @@ function meshStepSession(
     }
 
     let elevation: StepMeshResult["elevation"];
+    let elementOrderFallback: StepMeshResult["elementOrderFallback"];
     if (options.elementOrder === 2) {
       timePhaseSync(timings, options, "order2", totalStart, () => gmsh.model.mesh.setOrder(2));
       elevation = "curved";
@@ -441,6 +539,23 @@ function meshStepSession(
       qualityMinSICN = minSICNQuality(gmsh);
       elevation = "straight_edge";
     }
+    if (options.elementOrder === 2) {
+      const quadraticNodeCount = meshNodeCount(gmsh);
+      if (quadraticNodeCount > MAX_BROWSER_SOLVE_NODES) {
+        // A safe mesh that cannot enter the browser solver is not a useful
+        // recovery. Retain the same corner-node tetrahedra as Tet4, recompute
+        // quality, and expose the downgrade so callers can warn the user.
+        gmsh.model.mesh.setOrder(1);
+        qualityMinSICN = minSICNQuality(gmsh);
+        elevation = undefined;
+        elementOrderFallback = {
+          requested: 2,
+          used: 1,
+          reason: "browser_dof_limit",
+          quadraticNodeCount
+        };
+      }
+    }
     const msh = timePhaseSync(timings, options, "write", totalStart, () => writeMshV2(gmsh));
     if (countTetLines(msh) === 0) {
       throw new StepGeometryError("Gmsh did not create any tetrahedra from the STEP solid.");
@@ -452,6 +567,7 @@ function meshStepSession(
       ...(optimizer !== undefined ? { optimizer } : {}),
       ...(elevation !== undefined ? { elevation } : {}),
       ...(geometryRepair !== undefined ? { geometryRepair } : {}),
+      ...(elementOrderFallback !== undefined ? { elementOrderFallback } : {}),
       ...(qualityMinSICN !== undefined ? { qualityMinSICN } : {})
     };
   } finally {
@@ -622,9 +738,10 @@ function repairImportedStepGeometry(
   const originalOrphanSurfaceCount = orphanSurfaceTags(gmsh).length;
   const originalVolumeMm3 = occVolume(gmsh);
   const originalBoundsDiagonal = modelBoundingBoxDiagonal(gmsh);
-  // STEP coordinates in this app are millimetres. A relative tolerance closes
-  // exporter-scale cracks. Automatic repair stays below 0.01 mm; the larger
-  // explicit profile only runs after the user chooses Fix model.
+  // STEP coordinates in this app are millimetres. Ordinary automatic repair
+  // only closes exporter-scale cracks. Quality repair may remove sliver edges
+  // up to 0.05 mm, but retains the strict automatic bounds/volume-change
+  // guards and never invents a cap. The explicit profile is user-requested.
   const toleranceMm = profile === "automatic"
     ? Math.min(0.01, Math.max(1e-8, originalBoundsDiagonal * 1e-5))
     : Math.min(0.05, Math.max(1e-7, originalBoundsDiagonal * 1e-3));
@@ -683,11 +800,12 @@ function repairImportedStepGeometry(
   const relativeVolumeChange = originalVolumeMm3 !== undefined && repairedVolumeMm3 !== undefined
     ? relativeChange(originalVolumeMm3, repairedVolumeMm3)
     : undefined;
-  const maxBoundsChange = profile === "automatic" ? 0.005 : 0.02;
-  const maxVolumeChange = profile === "automatic" ? 0.01 : 0.05;
+  const isAutomatic = profile !== "explicit";
+  const maxBoundsChange = isAutomatic ? 0.005 : 0.02;
+  const maxVolumeChange = isAutomatic ? 0.01 : 0.05;
   if (relativeBoundsChange > maxBoundsChange || (relativeVolumeChange !== undefined && relativeVolumeChange > maxVolumeChange)) {
     throw new StepGeometryError(
-      `${profile === "automatic" ? "Automatic" : "Requested"} CAD healing changed the model too much (bounds ${(relativeBoundsChange * 100).toFixed(2)}%` +
+      `${isAutomatic ? "Automatic" : "Requested"} CAD healing changed the model too much (bounds ${(relativeBoundsChange * 100).toFixed(2)}%` +
         `${relativeVolumeChange !== undefined ? `, volume ${(relativeVolumeChange * 100).toFixed(2)}%` : ""}). ` +
         "Repair the source CAD and upload it again."
     );
@@ -872,6 +990,18 @@ function minSICNQuality(gmsh: GmshApi): number | undefined {
   }
 }
 
+function tetElementCount(gmsh: GmshApi): number {
+  let count = 0;
+  for (const typeCode of [4, 11]) {
+    count += gmsh.model.mesh.getElementsByType(typeCode).elementTags.length;
+  }
+  return count;
+}
+
+function meshNodeCount(gmsh: GmshApi): number {
+  return gmsh.model.mesh.getNodes().nodeTags.length;
+}
+
 /**
  * Create a small STEP fixture (box with a cylindrical bore) using the OCC kernel.
  * Used once to generate the checked-in test fixture; kept exported so the spike
@@ -904,6 +1034,7 @@ function writeMshV2(gmsh: GmshApi): string {
 
 function quietLogger(gmsh: GmshApi): void {
   // 2 = warnings and errors only; keeps worker/test output readable.
+  gmsh.option.setNumber("General.Terminal", 0);
   gmsh.option.setNumber("General.Verbosity", 2);
 }
 
