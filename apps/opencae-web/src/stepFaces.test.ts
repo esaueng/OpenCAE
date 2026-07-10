@@ -8,6 +8,7 @@ import type { OcctMesh } from "occt-import-js";
 import { beforeAll, describe, expect, it } from "vitest";
 import {
   buildStepFaceRegistry,
+  resolvePickedStepFace,
   stepAttributionForRegistry,
   stepFaceFingerprint,
   stepFaceIdForMeshTriangle,
@@ -135,5 +136,48 @@ describe("STEP face registry (box-with-bore fixture)", () => {
     expect(stepFaceRecordForId(registry, "step-face-3")?.faceId).toBe("step-face-3");
     expect(stepFaceRecordForId(registry, "step-face-99")).toBeNull();
     expect(stepFaceRecordForId(registry, "face-upload-top")).toBeNull();
+  });
+
+  describe("resolvePickedStepFace", () => {
+    const { x, y, z, boreDiameter } = FIXTURE_DIMENSIONS_MM;
+    const toViewer = (model: [number, number, number]): [number, number, number] => [
+      model[0] * registry.normalization.scale + registry.normalization.offset[0],
+      model[1] * registry.normalization.scale + registry.normalization.offset[1],
+      model[2] * registry.normalization.scale + registry.normalization.offset[2]
+    ];
+    const topFaceId = () => {
+      const boredArea = x * y - Math.PI * (boreDiameter / 2) ** 2;
+      return registry.faces.find((face) => Math.abs(face.area - boredArea) / boredArea < 0.02 && face.centroid[2] > z / 2)!.faceId;
+    };
+    const boreFaceId = () => {
+      const boreArea = 2 * Math.PI * (boreDiameter / 2) * z;
+      return registry.faces.find((face) => Math.abs(face.area - boreArea) / boreArea < 0.02)!.faceId;
+    };
+
+    it("resolves a pick on a planar face by point-to-triangle distance", () => {
+      const resolved = resolvePickedStepFace(registry, toViewer([10, 10, z]), [0, 0, 1]);
+      expect(resolved?.faceId).toBe(topFaceId());
+    });
+
+    it("resolves a pick on the bore cylinder via the nearest triangle's own normal", () => {
+      // The bore is a hole, so its wall normals point toward the axis: -X at
+      // the +X side of the bore — the same normal a viewport raycast reports.
+      const resolved = resolvePickedStepFace(registry, toViewer([x / 2 + boreDiameter / 2, y / 2, z / 2]), [-1, 0, 0]);
+      expect(resolved?.faceId).toBe(boreFaceId());
+    });
+
+    it("tolerates the picked id's 0.01 viewer-unit quantization", () => {
+      const quantized = toViewer([10, 10, z]).map((value) => Math.round(value * 100) / 100) as [number, number, number];
+      const resolved = resolvePickedStepFace(registry, quantized, [0, 0, 1]);
+      expect(resolved?.faceId).toBe(topFaceId());
+    });
+
+    it("returns null for points off every surface and for disagreeing normals", () => {
+      // Bore axis midpoint: 6 mm from the nearest surface, far beyond tolerance.
+      expect(resolvePickedStepFace(registry, toViewer([x / 2, y / 2, z / 2]), [0, 0, 1])).toBeNull();
+      // On the top face but with an inverted normal: the gate rejects it and
+      // no other face is within tolerance.
+      expect(resolvePickedStepFace(registry, toViewer([10, 10, z]), [0, 0, -1])).toBeNull();
+    });
   });
 });

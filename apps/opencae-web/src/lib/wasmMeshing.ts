@@ -104,6 +104,7 @@ async function meshWorkerRun(options: WasmMeshOptions): Promise<WasmMeshStudyRes
   let elevationNote: string | undefined;
   let refinementNote: string | undefined;
   let attributionNote: string | undefined;
+  let stepFaceRegistry: import("../stepFaces").StepFaceRegistry | undefined;
 
   if (geometry.kind === "sample_procedural" && geometry.sampleId === "bracket") {
     // Native curved Gmsh Tet10 elements can invert around the bracket's
@@ -129,6 +130,7 @@ async function meshWorkerRun(options: WasmMeshOptions): Promise<WasmMeshStudyRes
       const stepFaces = await import("../stepFaces");
       const registry = await stepFaces.stepFaceRegistryFromBase64(geometry.contentBase64);
       attribution = stepFaces.stepAttributionForRegistry(registry);
+      stepFaceRegistry = registry;
     } catch {
       attribution = undefined;
     }
@@ -166,7 +168,15 @@ async function meshWorkerRun(options: WasmMeshOptions): Promise<WasmMeshStudyRes
   const analysisType = study.type === "dynamic_structural" ? "dynamic_structural" : "static_stress";
   // The mirrored builder applies study load directions verbatim in the solver
   // frame (same contract as the cloud container), so hand it a solver-frame study.
-  const dispatchStudy = studyForCoreGeometryDispatch(study, displayModel);
+  let dispatchStudy = studyForCoreGeometryDispatch(study, displayModel);
+  if (stepFaceRegistry) {
+    // Viewport picks made before the STEP face registry loaded reference
+    // "face-upload-picked-*" placeholders that no meshed facet carries; the
+    // workspace heal normally rewrites them, but meshing can start first —
+    // resolve them here too so the artifact build never dies on a stale pick.
+    const { remapStepFaceSelectionsInStudy } = await import("../stepFaceHealing");
+    dispatchStudy = remapStepFaceSelectionsInStudy(dispatchStudy, displayModel, stepFaceRegistry);
+  }
   const mappingDiagnostics: import("@opencae/mesh-intake").SelectionMappingDiagnostic[] = [];
   const model = intake.buildCoreModelFromCloudMesh({
     study: {
