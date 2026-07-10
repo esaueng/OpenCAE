@@ -6,6 +6,7 @@ import type {
   CoreVolumeMeshArtifact,
   ElementOrderFallbackMetadata,
   FacetAttributionReport,
+  MeshAttemptContext,
   MeshPhase,
   MeshTimings,
   SourceSelectionMetadata,
@@ -137,6 +138,8 @@ export type MeshWorkerProgress = {
   kind: "progress";
   phase: MeshWorkerPhase;
   elapsedMs: number;
+  /** Robustness-ladder attempt this phase belongs to (size/algorithm retries, quality repair). */
+  attempt?: MeshAttemptContext;
 };
 
 export type MeshWorkerSuccess<Operation extends MeshWorkerOperation = MeshWorkerOperation> = {

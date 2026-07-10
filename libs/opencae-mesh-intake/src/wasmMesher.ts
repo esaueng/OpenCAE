@@ -12,7 +12,14 @@ type GmshWasmModule = typeof import("@loumalouomega/gmsh-wasm");
 export type GmshApi = Awaited<ReturnType<GmshWasmModule["default"]>>;
 
 export type MeshPhase = "load" | "init" | "import" | "mesh2d" | "mesh3d" | "order2" | "write";
-export type MeshPhaseEvent = { phase: MeshPhase; elapsedMs: number };
+/**
+ * Which robustness-ladder attempt a phase event belongs to. The size/algorithm
+ * ladder and the quality repair legitimately re-run whole gmsh sessions, so
+ * without this context the repeated phase stream is indistinguishable from an
+ * infinite loop for callers showing progress.
+ */
+export type MeshAttemptContext = { attempt: number; stage: "size" | "repair"; sizeMm?: number };
+export type MeshPhaseEvent = { phase: MeshPhase; elapsedMs: number; attempt?: MeshAttemptContext };
 export type MeshTimings = Partial<Record<MeshPhase, number>>;
 
 export type MeshWasmOptions = {
@@ -214,6 +221,17 @@ export async function meshStepToMshV2(stepContent: Uint8Array | string, options:
   const triedSizesMm: number[] = [];
   let skipFinerSizes = false;
   let lastError: unknown;
+  // Stamp every phase event with its ladder attempt so progress consumers can
+  // show "retrying at 8 mm (attempt 3)" instead of a silent repeating loop.
+  let attemptNumber = 0;
+  const optionsForAttempt = (stage: MeshAttemptContext["stage"], sizeMm?: number): StepMeshWasmOptions => {
+    attemptNumber += 1;
+    const attempt: MeshAttemptContext = { attempt: attemptNumber, stage, ...(sizeMm !== undefined ? { sizeMm } : {}) };
+    return {
+      ...options,
+      onPhase: options.onPhase ? (event) => options.onPhase!({ ...event, attempt }) : undefined
+    };
+  };
 
   const consider = (result: Omit<StepMeshResult, "totalMs">, sizeMm?: number): boolean => {
     if (best === undefined || qualityOf(result) > qualityOf(best)) best = { ...result, sizeMm };
@@ -223,7 +241,7 @@ export async function meshStepToMshV2(stepContent: Uint8Array | string, options:
   const tryStandardSize = async (sizeMm?: number): Promise<boolean> => {
     if (sizeMm !== undefined) triedSizesMm.push(sizeMm);
     try {
-      const result = await meshStepWithAlgorithmFallback(stepContent, { ...options, meshSizeMm: sizeMm }, totalStart);
+      const result = await meshStepWithAlgorithmFallback(stepContent, { ...optionsForAttempt("size", sizeMm), meshSizeMm: sizeMm }, totalStart);
       if (countTetLines(result.msh) > MAX_QUALITY_REFINEMENT_TETS) skipFinerSizes = true;
       return consider(result, sizeMm);
     } catch (error) {
@@ -259,7 +277,7 @@ export async function meshStepToMshV2(stepContent: Uint8Array | string, options:
         const result = meshStepSession(
           await loadGmshWasm(),
           stepContent,
-          { ...options, meshSizeMm: sizeMm },
+          { ...optionsForAttempt("repair", sizeMm), meshSizeMm: sizeMm },
           "delaunay",
           now(),
           true,
