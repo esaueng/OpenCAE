@@ -3,7 +3,7 @@ import { isRunResultReadyStatus } from "@opencae/schema";
 import type { Constraint, DisplayFace, DisplayModel, DynamicSolverSettings, Load, NamedSelection, Project, ResultField, ResultRenderBounds, ResultSummary, RunEvent, RunTimingEstimate, SimulationFidelity, Study } from "@opencae/schema";
 import { RotateCcw, Save } from "lucide-react";
 import { addLoad, addSupport, assignMaterial, cancelRun, createProject, generateMesh, getResults, importLocalProject, loadSampleProject, renameProject, repairUploadedStepModel, runSimulation, subscribeToRun, updateStudy as saveStudyPatch, uploadModel, type SampleAnalysisType, type SampleModelId } from "./lib/api";
-import { cancelWasmMeshing } from "./lib/wasmMeshing";
+import { cancelWasmMeshing, type WasmMeshPhaseProgress } from "./lib/wasmMeshing";
 import { resolveSolverBackend } from "./workers/opencaeCoreSolve";
 import { manufacturingProcessForId, normalizeManufacturingParameters, starterMaterials } from "@opencae/materials";
 import { BottomPanel, type WorkspaceLogEntry } from "./components/BottomPanel";
@@ -152,6 +152,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     ? restoredUi.logs
     : (restoredProjectFile ? ["Workspace restored after reload.", "Ready | Local Mode"] : ["Ready | Local Mode"]).map((message) => ({ message, at: Date.now() })));
   const [runProgress, setRunProgress] = useState(restoredUi?.runProgress ?? (restoredResults?.fields.length ? 100 : 0));
+  const [meshPhaseProgress, setMeshPhaseProgress] = useState<WasmMeshPhaseProgress | null>(null);
   const [runTiming, setRunTiming] = useState<RunTimingEstimate | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
   const [activeRunId, setActiveRunId] = useState(restoredUi?.activeRunId || restoredResults?.activeRunId || restoredResults?.completedRunId || "run-bracket-demo-seeded");
@@ -1601,14 +1602,18 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           onRemoveLoad={(loadId) =>
             updateStudy(saveStudyPatch(study.id, { loads: study.loads.filter((item) => item.id !== loadId) }, "Load removed.", study))
           }
-          onGenerateMesh={(preset) =>
+          onGenerateMesh={(preset) => {
+            setMeshPhaseProgress({ phase: "load", phaseIndex: 0, phaseCount: 8, message: "Loading gmsh WebAssembly module..." });
             // generateMesh rethrows quality-gate rejections (MeshQualityError)
             // by design; without this catch they die as unhandled rejections
             // and mesh generation fails with no feedback at all.
-            void updateStudy(generateMesh(study.id, preset, study, displayModel, pushMessage), shouldAutoAdvanceAfterMeshGeneration() ? "run" : undefined).catch((error: unknown) => {
-              pushMessage(`Mesh generation failed: ${error instanceof Error ? error.message : String(error)}`);
-            })
-          }
+            void updateStudy(generateMesh(study.id, preset, study, displayModel, pushMessage, setMeshPhaseProgress), shouldAutoAdvanceAfterMeshGeneration() ? "run" : undefined)
+              .catch((error: unknown) => {
+                pushMessage(`Mesh generation failed: ${error instanceof Error ? error.message : String(error)}`);
+              })
+              .finally(() => setMeshPhaseProgress(null));
+          }}
+          meshPhaseProgress={meshPhaseProgress}
           onUpdateSolverSettings={handleUpdateSolverSettings}
           onRunSimulation={handleRunSimulation}
           onCancelSimulation={handleCancelSimulation}
