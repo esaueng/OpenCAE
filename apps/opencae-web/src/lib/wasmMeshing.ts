@@ -69,7 +69,17 @@ export type WasmMeshPhaseProgress = {
   phaseIndex: number;
   phaseCount: number;
   message: string;
+  /** Robustness-ladder attempt (size/algorithm retries, quality repair), when past the first. */
+  attempt?: { attempt: number; stage: "size" | "repair"; sizeMm?: number };
 };
+
+/** "Meshing volume... — retry 3 at 8 mm" instead of a silently repeating phase stream. */
+function messageWithAttempt(message: string, attempt: WasmMeshPhaseProgress["attempt"]): string {
+  if (!attempt || attempt.attempt <= 1) return message;
+  const size = attempt.sizeMm !== undefined ? ` at ${Number(attempt.sizeMm.toFixed(1))} mm` : "";
+  const stage = attempt.stage === "repair" ? ", geometry repair" : "";
+  return `${message} — retry ${attempt.attempt}${size}${stage}`;
+}
 
 export type WasmMeshStudyResult = { study: Study; message: string } | null;
 
@@ -104,17 +114,38 @@ type WasmMeshOptions = {
   onPhaseProgress?: (progress: WasmMeshPhaseProgress) => void;
 };
 
-async function meshWorkerRun(options: WasmMeshOptions): Promise<WasmMeshStudyResult> {
-  const { preset, study, displayModel, geometry } = options;
-  if (typeof Worker === "undefined" || !geometry) return null;
+let activeMeshRuns = 0;
 
-  const onWorkerProgress: MeshProgressListener = ({ phase }) => {
-    const message = MESH_PHASE_MESSAGES[phase];
-    if (!message) return;
+async function meshWorkerRun(options: WasmMeshOptions): Promise<WasmMeshStudyResult> {
+  if (typeof Worker === "undefined" || !options.geometry) return null;
+
+  // Last intent wins: a new mesh request supersedes any in-flight one instead
+  // of queueing behind it. Before this, repeat Generate clicks (or a run-flow
+  // mesh racing a manual one) stacked serial jobs on the worker — the phase
+  // log churned for minutes and read as an infinite loop.
+  if (activeMeshRuns > 0) {
+    cancelWasmMeshing("Superseded by a newer mesh request.");
+  }
+  activeMeshRuns += 1;
+  try {
+    return await meshWorkerRunExclusive(options);
+  } finally {
+    activeMeshRuns -= 1;
+  }
+}
+
+async function meshWorkerRunExclusive(options: WasmMeshOptions): Promise<WasmMeshStudyResult> {
+  const { preset, study, displayModel, geometry } = options;
+  if (!geometry) return null;
+
+  const onWorkerProgress: MeshProgressListener = ({ phase, attempt }) => {
+    const baseMessage = MESH_PHASE_MESSAGES[phase];
+    if (!baseMessage) return;
+    const message = messageWithAttempt(baseMessage, attempt);
     options.onProgress?.(message);
     const phaseIndex = MESH_PHASE_SEQUENCE.indexOf(phase as (typeof MESH_PHASE_SEQUENCE)[number]);
     if (phaseIndex >= 0) {
-      options.onPhaseProgress?.({ phase, phaseIndex, phaseCount: MESH_PHASE_SEQUENCE.length, message });
+      options.onPhaseProgress?.({ phase, phaseIndex, phaseCount: MESH_PHASE_SEQUENCE.length, message, ...(attempt ? { attempt } : {}) });
     }
   };
 

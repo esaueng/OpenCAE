@@ -51,6 +51,7 @@ export {
   StepGeometryError,
   type GeoMeshResult,
   type GmshApi,
+  type MeshAttemptContext,
   type MeshPhase,
   type MeshPhaseEvent,
   type MeshTimings,
