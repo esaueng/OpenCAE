@@ -4,7 +4,8 @@ import type { ViewerLoadMarker } from "./components/CadViewer";
 import { modelDirectionToViewerSpace as importedModelDirectionToViewerSpace, viewerDirectionToModelSpace as importedViewerDirectionToModelSpace } from "./modelOrientation";
 
 export type LoadType = "force" | "pressure" | "gravity";
-export type LoadDirectionLabel = "-Y" | "+Y" | "+X" | "-X" | "+Z" | "-Z" | "Normal";
+export type LoadDirectionLabel = "-Y" | "+Y" | "+X" | "-X" | "+Z" | "-Z" | "Normal" | "Opposite normal";
+export const LOAD_DIRECTION_LABELS = ["-Y", "+Y", "+X", "-X", "+Z", "-Z", "Normal", "Opposite normal"] as const satisfies readonly LoadDirectionLabel[];
 export type LoadDirection = [number, number, number];
 export type LoadApplicationPoint = [number, number, number];
 export interface PayloadObjectSelection {
@@ -27,7 +28,7 @@ export interface DraftLoadPreview {
 }
 export const STANDARD_GRAVITY = 9.80665;
 
-const DIRECTION_VECTORS: Record<Exclude<LoadDirectionLabel, "Normal">, LoadDirection> = {
+const DIRECTION_VECTORS: Record<Exclude<LoadDirectionLabel, "Normal" | "Opposite normal">, LoadDirection> = {
   "-Y": [0, -1, 0],
   "+Y": [0, 1, 0],
   "+X": [1, 0, 0],
@@ -51,14 +52,20 @@ export function equivalentForceForLoad(load: Pick<Load, "type" | "parameters">):
 
 export function directionVectorForLabel(label: LoadDirectionLabel, face: DisplayFace, displayModel?: DisplayModel): LoadDirection {
   if (label === "Normal") return [...face.normal] as LoadDirection;
+  if (label === "Opposite normal") return vectorToLoadDirection(new THREE.Vector3(...face.normal).negate());
   const viewerDirection = new THREE.Vector3(...DIRECTION_VECTORS[label]);
   const modelDirection = displayModel ? viewerDirectionToModelSpace(viewerDirection, displayModel) : viewerDirection;
   return vectorToLoadDirection(modelDirection);
 }
 
-export function directionLabelForVector(direction: unknown, displayModel?: DisplayModel): LoadDirectionLabel {
+export function directionLabelForVector(direction: unknown, displayModel?: DisplayModel, face?: DisplayFace): LoadDirectionLabel {
   if (!isDirection(direction)) return "-Z";
   const modelDirection = new THREE.Vector3(...direction);
+  if (face) {
+    const faceNormal = new THREE.Vector3(...face.normal);
+    if (vectorsPointTheSameWay(modelDirection, faceNormal)) return "Normal";
+    if (vectorsPointTheSameWay(modelDirection, faceNormal.negate())) return "Opposite normal";
+  }
   const viewerDirection = displayModel ? modelDirectionToViewerSpace(modelDirection, displayModel) : modelDirection;
   const [x, y, z] = vectorToLoadDirection(viewerDirection);
   if (x === 1 && y === 0 && z === 0) return "+X";
@@ -70,8 +77,9 @@ export function directionLabelForVector(direction: unknown, displayModel?: Displ
   return "Normal";
 }
 
-export function directionLabelForLoad(load: Load, displayModel?: DisplayModel): LoadDirectionLabel {
-  return directionLabelForVector(load.parameters.direction, displayModel);
+export function directionLabelForLoad(load: Load, displayModel?: DisplayModel, face?: DisplayFace): LoadDirectionLabel {
+  if (isLoadDirectionLabel(load.parameters.directionMode)) return load.parameters.directionMode;
+  return directionLabelForVector(load.parameters.direction, displayModel, face);
 }
 
 export function applicationPointForLoad(load: Load): LoadApplicationPoint | undefined {
@@ -95,6 +103,7 @@ export function loadMarkerFromLoad(load: Load, study: Study, stackIndex: number,
   const selection = study.namedSelections.find((item) => item.id === load.selectionRef);
   const faceId = selection?.geometryRefs[0]?.entityId;
   if (!faceId) return null;
+  const face = displayModel?.faces.find((candidate) => candidate.id === faceId);
   const direction = isDirection(load.parameters.direction) ? load.parameters.direction : ([0, 0, -1] as LoadDirection);
   const payloadObject = payloadObjectForLoad(load);
   return {
@@ -106,7 +115,7 @@ export function loadMarkerFromLoad(load: Load, study: Study, stackIndex: number,
     value: Number(load.parameters.value ?? 0),
     units: String(load.parameters.units ?? unitsForLoadType(load.type)),
     direction,
-    directionLabel: directionLabelForVector(direction, displayModel),
+    directionLabel: directionLabelForLoad(load, displayModel, face),
     labelIndex: stackIndex,
     stackIndex,
     ...(preview ? { preview: true } : {})
@@ -183,6 +192,11 @@ function formatLoadMarkerValue(value: number) {
   return value.toLocaleString(undefined, { maximumFractionDigits: 1 });
 }
 
+function vectorsPointTheSameWay(left: THREE.Vector3, right: THREE.Vector3) {
+  if (left.lengthSq() === 0 || right.lengthSq() === 0) return false;
+  return left.clone().normalize().dot(right.clone().normalize()) > 1 - 1e-6;
+}
+
 function viewerDirectionToModelSpace(direction: THREE.Vector3, displayModel?: DisplayModel): THREE.Vector3 {
   return displayModel ? importedViewerDirectionToModelSpace(direction, displayModel) : direction;
 }
@@ -193,6 +207,10 @@ function modelDirectionToViewerSpace(direction: THREE.Vector3, displayModel?: Di
 
 function isDirection(value: unknown): value is LoadDirection {
   return isVector3(value);
+}
+
+function isLoadDirectionLabel(value: unknown): value is LoadDirectionLabel {
+  return typeof value === "string" && (LOAD_DIRECTION_LABELS as readonly string[]).includes(value);
 }
 
 function vectorToLoadDirection(vector: THREE.Vector3): LoadDirection {

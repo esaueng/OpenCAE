@@ -7,7 +7,7 @@ import type { Constraint, DisplayFace, DisplayModel, DynamicSolverSettings, Load
 import { inferGlobalCriticalPrintAxis } from "@opencae/study-core";
 import type { ResultMode, ViewMode } from "./CadViewer";
 import type { StepId } from "./StepBar";
-import { applicationPointForLoad, createViewerLoadMarkers, directionLabelForLoad, directionVectorForLabel, equivalentForceForLoad, loadMarkerOrdinalLabel, payloadObjectForLoad, unitsForLoadType, type LoadApplicationPoint, type LoadDirectionLabel, type LoadType, type PayloadLoadMetadata, type PayloadMassMode, type PayloadObjectSelection } from "../loadPreview";
+import { applicationPointForLoad, createViewerLoadMarkers, directionLabelForLoad, directionVectorForLabel, equivalentForceForLoad, LOAD_DIRECTION_LABELS, loadMarkerOrdinalLabel, payloadObjectForLoad, unitsForLoadType, type LoadApplicationPoint, type LoadDirectionLabel, type LoadType, type PayloadLoadMetadata, type PayloadMassMode, type PayloadObjectSelection } from "../loadPreview";
 import type { SampleAnalysisType, SampleModelId } from "../lib/api";
 import { stepGeometryMetadataForProject } from "../stepGeometryState";
 import { dimensionValuesForDisplayModel } from "../modelDimensions";
@@ -655,7 +655,7 @@ function LoadsPanel({
       <label className="field">
         <HelpLabel helpId="loadDirection">Direction</HelpLabel>
         <select value={draftLoadDirection} onChange={(event) => onDraftLoadDirectionChange(event.currentTarget.value as LoadDirectionLabel)}>
-          {(["-Y", "+Y", "+X", "-X", "+Z", "-Z", "Normal"] as const).map((option) => (
+          {LOAD_DIRECTION_LABELS.map((option) => (
             <option key={option} value={option}>{directionOptionLabel(option)}</option>
           ))}
         </select>
@@ -764,6 +764,7 @@ function LoadEditorList({ study, displayModel, unitSystem, onUpdateLoad, onPrevi
         const units = String(load.parameters.units ?? unitsForLoadType(load.type));
         const displayLoad = loadValueForUnits(Number(load.parameters.value ?? 0), units, unitSystem);
         const selection = study.namedSelections.find((candidate) => candidate.id === load.selectionRef);
+        const selectedFace = displayModel.faces.find((candidate) => candidate.id === selection?.geometryRefs[0]?.entityId);
         const label = selection?.geometryRefs[0]?.label ?? "selected face";
         const payloadObject = payloadObjectForLoad(load);
         const payloadMaterial = load.type === "gravity" && typeof load.parameters.payloadMaterialId === "string" ? payloadMaterialForId(load.parameters.payloadMaterialId).name : "";
@@ -791,7 +792,7 @@ function LoadEditorList({ study, displayModel, unitSystem, onUpdateLoad, onPrevi
             <div className="editable-summary">
               <span className={`item-icon load-type-icon ${load.type}`}><LoadTypeIcon type={load.type} /></span>
               <strong>{loadLabel ? `${loadLabel} · ` : ""}{loadTypeLabel(load.type)} · {formatNumber(displayLoad.value)} {displayLoad.units}</strong>
-              <small>{label}{pointLabel} · {directionLabelForLoad(load, displayModel)} direction{equivalentForce}</small>
+              <small>{label}{pointLabel} · {directionOptionLabel(directionLabelForLoad(load, displayModel, selectedFace))} direction{equivalentForce}</small>
               <button
                 className="remove-glyph"
                 type="button"
@@ -832,7 +833,10 @@ function LoadEditForm({ load, study, displayModel, unitSystem, onSave, onCancel,
     const initialUnits = String(load.parameters.units ?? unitsForLoadType(load.type));
     return formatInputValue(loadValueForUnits(Number(load.parameters.value ?? 500), initialUnits, unitSystem).value);
   });
-  const [direction, setDirection] = useState<LoadDirectionLabel>(directionLabelForLoad(load, displayModel));
+  const selectedRef = study.namedSelections.find((selection) => selection.id === load.selectionRef);
+  const selectedFace = selectedRef?.geometryRefs[0];
+  const selectedDisplayFace = displayModel.faces.find((face) => face.id === selectedFace?.entityId);
+  const [direction, setDirection] = useState<LoadDirectionLabel>(directionLabelForLoad(load, displayModel, selectedDisplayFace));
   const [payloadMaterialId, setPayloadMaterialId] = useState(String(load.parameters.payloadMaterialId ?? "payload-steel"));
   const [payloadMassMode, setPayloadMassMode] = useState<PayloadMassMode>(load.parameters.payloadMassMode === "manual" ? "manual" : "material");
   const units = unitsForLoadType(type);
@@ -847,16 +851,14 @@ function LoadEditForm({ load, study, displayModel, unitSystem, onSave, onCancel,
     ? { payloadMaterialId, ...(payloadVolumeM3 ? { payloadVolumeM3 } : {}), payloadMassMode }
     : {}, [payloadMassMode, payloadMaterialId, payloadVolumeM3, type]);
   const selectedPayloadMaterial = payloadMaterialForId(payloadMaterialId);
-  const selectedRef = study.namedSelections.find((selection) => selection.id === load.selectionRef);
-  const selectedFace = selectedRef?.geometryRefs[0];
-  const directionFace: DisplayFace = useMemo(() => ({
+  const directionFace: DisplayFace = useMemo(() => selectedDisplayFace ?? ({
     id: selectedFace?.entityId ?? "selected-face",
     label: selectedFace?.label ?? "selected face",
     color: "#fff",
     center: [0, 0, 0],
-    normal: direction === "Normal" && Array.isArray(load.parameters.direction) ? load.parameters.direction as [number, number, number] : [0, 1, 0],
+    normal: [0, 1, 0],
     stressValue: 0
-  }), [direction, load.parameters.direction, selectedFace?.entityId, selectedFace?.label]);
+  }), [selectedDisplayFace, selectedFace?.entityId, selectedFace?.label]);
   const previewLoad = useMemo(() => editedLoadForForm(load, type, value, displayUnits, units, direction, directionFace, displayModel, payloadMetadata, editedValue), [direction, directionFace, displayModel, displayUnits, editedValue, load, payloadMetadata, type, units, value]);
 
   useEffect(() => {
@@ -903,8 +905,8 @@ function LoadEditForm({ load, study, displayModel, unitSystem, onSave, onCancel,
       <label className="field">
         <HelpLabel helpId="loadDirection">Direction</HelpLabel>
         <select value={direction} onChange={(event) => setDirection(event.currentTarget.value as LoadDirectionLabel)}>
-          {(["-Y", "+Y", "+X", "-X", "+Z", "-Z", "Normal"] as const).map((option) => (
-            <option key={option} value={option}>{option}</option>
+          {LOAD_DIRECTION_LABELS.map((option) => (
+            <option key={option} value={option}>{directionOptionLabel(option)}</option>
           ))}
         </select>
       </label>
@@ -931,6 +933,7 @@ function editedLoadForForm(load: Load, type: LoadType, value: string, displayUni
       value: overrideValue ?? loadValueForUnits(Number(value), displayUnits, "SI").value,
       units,
       direction: directionVectorForLabel(direction, directionFace, displayModel),
+      directionMode: direction,
       ...(type === "gravity" ? payloadMetadata : {})
     }
   };
@@ -1926,6 +1929,7 @@ function defaultValueForLoadType(type: LoadType) {
 
 function directionOptionLabel(direction: LoadDirectionLabel) {
   if (direction === "Normal") return "Face normal";
+  if (direction === "Opposite normal") return "Opposite face normal";
   return `Global ${direction}`;
 }
 

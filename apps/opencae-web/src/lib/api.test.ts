@@ -399,6 +399,14 @@ describe("api", () => {
     expect(response.message).toBe("Load added.");
   });
 
+  test("preserves the selected face-relative direction mode when adding locally", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("missing", { status: 404 })));
+
+    const response = await addLoad("study-1", "force", 500, "selection-face-1", [0, 0, -1], [1, 2, 3], null, study, {}, "Opposite normal");
+
+    expect(response.study.loads[0]?.parameters.directionMode).toBe("Opposite normal");
+  });
+
   test("adds payload material metadata locally while preserving value as mass", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("missing", { status: 404 })));
 

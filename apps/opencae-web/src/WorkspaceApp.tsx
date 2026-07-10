@@ -559,6 +559,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           value,
           units: unitsForLoadType(draftLoadType),
           direction: directionVectorForLabel(draftLoadDirection, face, displayModel ?? undefined),
+          directionMode: draftLoadDirection,
           applicationPoint: point,
           ...(isPayloadMass && selectedPayloadObject ? { payloadObject: selectedPayloadObject } : {}),
           ...payloadMetadata
@@ -1055,7 +1056,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       id: `load-${crypto.randomUUID()}`,
       type,
       selectionRef: selection.id,
-      parameters: { value, units: unitsForLoadType(type), direction: directionVectorForLabel(direction, face, displayModel ?? undefined), ...(applicationPoint ? { applicationPoint } : {}), ...(payloadObject ? { payloadObject } : {}), ...(type === "gravity" ? payloadMetadata : {}) },
+      parameters: { value, units: unitsForLoadType(type), direction: directionVectorForLabel(direction, face, displayModel ?? undefined), directionMode: direction, ...(applicationPoint ? { applicationPoint } : {}), ...(payloadObject ? { payloadObject } : {}), ...(type === "gravity" ? payloadMetadata : {}) },
       status: "complete"
     };
     await updateStudy(
@@ -1568,7 +1569,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
               return;
             }
             if (selection) {
-              updateStudy(addLoad(study.id, type, value, selection.id, directionVectorForLabel(direction, face, displayModel ?? undefined), applicationPoint, payloadObject, study, payloadMetadata));
+              updateStudy(addLoad(study.id, type, value, selection.id, directionVectorForLabel(direction, face, displayModel ?? undefined), applicationPoint, payloadObject, study, payloadMetadata, direction));
               setSelectedLoadPoint(null);
               if (type === "gravity") setSelectedPayloadObject(null);
               return;
