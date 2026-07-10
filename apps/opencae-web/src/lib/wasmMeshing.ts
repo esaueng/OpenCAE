@@ -55,6 +55,22 @@ const MESH_PHASE_MESSAGES: Record<string, string> = {
   parse: "Building Core volume mesh artifact..."
 };
 
+/** Worker phase order; drives the mesh step's phase-progress display. */
+const MESH_PHASE_SEQUENCE = ["load", "init", "import", "mesh2d", "mesh3d", "order2", "write", "parse"] as const;
+
+/**
+ * Honest phase progress for the UI: which worker phase is running and where
+ * it sits in the sequence. No synthetic percentages — phase durations vary
+ * wildly with geometry, and retries (quality ladder, Frontal fallback) may
+ * legitimately revisit earlier phases.
+ */
+export type WasmMeshPhaseProgress = {
+  phase: string;
+  phaseIndex: number;
+  phaseCount: number;
+  message: string;
+};
+
 export type WasmMeshStudyResult = { study: Study; message: string } | null;
 
 /**
@@ -84,6 +100,8 @@ type WasmMeshOptions = {
   /** Characteristic length for STEP uploads (mm), mirroring the cloud preset map. */
   meshSizeMm?: number;
   onProgress?: (message: string) => void;
+  /** Structured phase progress for UI indicators (onProgress keeps feeding the log). */
+  onPhaseProgress?: (progress: WasmMeshPhaseProgress) => void;
 };
 
 async function meshWorkerRun(options: WasmMeshOptions): Promise<WasmMeshStudyResult> {
@@ -92,7 +110,12 @@ async function meshWorkerRun(options: WasmMeshOptions): Promise<WasmMeshStudyRes
 
   const onWorkerProgress: MeshProgressListener = ({ phase }) => {
     const message = MESH_PHASE_MESSAGES[phase];
-    if (message) options.onProgress?.(message);
+    if (!message) return;
+    options.onProgress?.(message);
+    const phaseIndex = MESH_PHASE_SEQUENCE.indexOf(phase as (typeof MESH_PHASE_SEQUENCE)[number]);
+    if (phaseIndex >= 0) {
+      options.onPhaseProgress?.({ phase, phaseIndex, phaseCount: MESH_PHASE_SEQUENCE.length, message });
+    }
   };
 
   const [client, intake] = await Promise.all([
