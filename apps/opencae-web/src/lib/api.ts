@@ -452,6 +452,30 @@ export function isStepGeometryMeshFailure(error: unknown): boolean {
   );
 }
 
+export const STEP_REPAIR_PROBE_MODEL_CHANGED_MESSAGE =
+  "Skipped the Fix open surfaces check because the model changed during meshing.";
+
+/** Project metadata may change during a long mesh; only STEP byte identity matters for a follow-up probe. */
+export function uploadedStepRepairProbeDecision<CurrentProject extends Pick<Project, "id" | "geometryFiles">>(
+  sourceProject: Pick<Project, "id" | "geometryFiles"> | null | undefined,
+  currentProject: CurrentProject | null | undefined
+): { shouldProbe: true; project: CurrentProject } | { shouldProbe: false; reason: string } {
+  if (!sourceProject || !currentProject || sourceProject.id !== currentProject.id) {
+    return { shouldProbe: false, reason: STEP_REPAIR_PROBE_MODEL_CHANGED_MESSAGE };
+  }
+  const sourceModel = embeddedStepModel(sourceProject);
+  const currentModel = embeddedStepModel(currentProject);
+  const sameModel = Boolean(
+    sourceModel &&
+    currentModel &&
+    sourceModel.size === currentModel.size &&
+    sourceModel.contentBase64 === currentModel.contentBase64
+  );
+  return sameModel
+    ? { shouldProbe: true, project: currentProject }
+    : { shouldProbe: false, reason: STEP_REPAIR_PROBE_MODEL_CHANGED_MESSAGE };
+}
+
 function attachStepGeometryMetadata(project: Project, filename: string, stepGeometry: StepGeometryMetadata): Project {
   const exactIndex = project.geometryFiles.findIndex((geometry) => geometry.filename === filename && geometry.metadata.source === "local-upload");
   const fallbackIndex = project.geometryFiles.findIndex((geometry) => geometry.metadata.source === "local-upload");
@@ -482,7 +506,7 @@ function stepGeometryUploadNotice(stepGeometry: StepGeometryMetadata | undefined
   return "";
 }
 
-function embeddedStepModel(project: Project): EmbeddedModelFile | null {
+function embeddedStepModel(project: Pick<Project, "geometryFiles">): EmbeddedModelFile | null {
   const geometry = project.geometryFiles.find((candidate) => candidate.metadata.source === "local-upload");
   const value = geometry?.metadata.embeddedModel;
   if (!value || typeof value !== "object") return null;

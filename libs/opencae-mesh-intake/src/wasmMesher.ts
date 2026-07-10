@@ -422,7 +422,7 @@ async function meshStepWithAlgorithmFallback(
     return original.best;
   }
   if (original.preferQualityRepair) {
-    throw original.delaunayError ?? original.frontalError ?? qualityRepairRecommendedError("Complex STEP seams require bounded quality repair.");
+    throw qualityRepairRecommendedFromAlgorithmFailures(original);
   }
 
   // A STEP file can look closed in the viewport while its OpenCASCADE shell
@@ -448,6 +448,14 @@ type StepAlgorithmCandidates = {
   preferQualityRepair?: boolean;
 };
 
+function qualityRepairRecommendedFromAlgorithmFailures(candidates: StepAlgorithmCandidates): Error {
+  const recommended = new Error(
+    `Standard STEP meshing failed (Delaunay: ${messageOf(candidates.delaunayError)}; Frontal: ${messageOf(candidates.frontalError)}).`
+  );
+  recommended.name = QUALITY_REPAIR_RECOMMENDED_ERROR_NAME;
+  return recommended;
+}
+
 async function meshStepAlgorithmCandidates(
   stepContent: Uint8Array | string,
   options: StepMeshWasmOptions,
@@ -457,6 +465,7 @@ async function meshStepAlgorithmCandidates(
   let best: StepMeshCandidate | undefined;
   let delaunayError: unknown;
   let frontalError: unknown;
+  let preferQualityRepair = false;
 
   for (const algorithm of ["delaunay", "frontal"] as const) {
     let result: StepMeshCandidate | undefined;
@@ -475,7 +484,11 @@ async function meshStepAlgorithmCandidates(
       else frontalError = error;
 
       if (isQualityRepairRecommended(error)) {
-        return { best, delaunayError, frontalError, preferQualityRepair: true };
+        preferQualityRepair = true;
+        // A thrown Delaunay boundary-recovery failure is exactly why Frontal
+        // exists. Only a completed result carrying preferQualityRepair below
+        // may skip the alternate algorithm; thrown candidates continue.
+        continue;
       }
 
       // The Netgen optimizer can crash the wasm module outright ("memory
@@ -495,6 +508,7 @@ async function meshStepAlgorithmCandidates(
         } catch (retryError) {
           if (algorithm === "delaunay") delaunayError = retryError;
           else frontalError = retryError;
+          if (isQualityRepairRecommended(retryError)) preferQualityRepair = true;
         }
       }
     }
@@ -509,7 +523,7 @@ async function meshStepAlgorithmCandidates(
     }
   }
 
-  return { best, delaunayError, frontalError };
+  return { best, delaunayError, frontalError, ...(preferQualityRepair ? { preferQualityRepair: true } : {}) };
 }
 
 function qualityOf(result: Pick<StepMeshResult, "qualityMinSICN">): number {

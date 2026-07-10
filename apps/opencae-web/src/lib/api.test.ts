@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { DisplayModel, Project, RunEvent, Study } from "@opencae/schema";
-import { addLoad, addSupport, assignMaterial, cancelRun, createProject, dynamicOutputFrameEstimate, generateMesh, geometryWithMeshPreset, getResults, importLocalProject, loadSampleProject, probeUploadedStepRepairAfterMeshFailure, renameProject, runSimulation, STEP_REPAIR_UNAVAILABLE_MESSAGE, subscribeToRun, updateStudy, uploadModel } from "./api";
+import { addLoad, addSupport, assignMaterial, cancelRun, createProject, dynamicOutputFrameEstimate, generateMesh, geometryWithMeshPreset, getResults, importLocalProject, loadSampleProject, probeUploadedStepRepairAfterMeshFailure, renameProject, runSimulation, STEP_REPAIR_PROBE_MODEL_CHANGED_MESSAGE, STEP_REPAIR_UNAVAILABLE_MESSAGE, subscribeToRun, updateStudy, uploadedStepRepairProbeDecision, uploadModel } from "./api";
 
 const TestFile = globalThis.File ?? class extends Blob {
   name: string;
@@ -575,6 +575,44 @@ describe("api", () => {
     expect(result?.project.geometryFiles[0]?.metadata.stepGeometry).toMatchObject({
       status: "unrepairable",
       message: STEP_REPAIR_UNAVAILABLE_MESSAGE
+    });
+  });
+
+  test("keeps the repair probe eligible after project metadata changes without replacing the STEP model", () => {
+    const sourceProject = uploadedStepProjectForRepairProbe("solid");
+    const savedProject = {
+      ...sourceProject,
+      name: "Renamed while meshing",
+      updatedAt: "2026-07-10T13:30:58.000Z"
+    };
+
+    const decision = uploadedStepRepairProbeDecision(sourceProject, savedProject);
+
+    expect(decision.shouldProbe).toBe(true);
+    if (decision.shouldProbe) expect(decision.project).toBe(savedProject);
+  });
+
+  test("rejects the repair probe when the embedded STEP model changed", () => {
+    const sourceProject = uploadedStepProjectForRepairProbe("solid");
+    const replacedProject: Project = {
+      ...sourceProject,
+      geometryFiles: sourceProject.geometryFiles.map((geometry) => ({
+        ...geometry,
+        metadata: {
+          ...geometry.metadata,
+          embeddedModel: {
+            filename: "replacement.step",
+            contentType: "model/step",
+            size: 7,
+            contentBase64: "TkVXU1RFUA=="
+          }
+        }
+      }))
+    };
+
+    expect(uploadedStepRepairProbeDecision(sourceProject, replacedProject)).toEqual({
+      shouldProbe: false,
+      reason: STEP_REPAIR_PROBE_MODEL_CHANGED_MESSAGE
     });
   });
 
