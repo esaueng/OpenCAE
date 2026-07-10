@@ -17,9 +17,11 @@ describe("Worker UI performance rewrite boundaries", () => {
   test("keeps the first app shell free of workspace, viewer, and solver imports", () => {
     expect(appSource).toContain("lazyWorkspaceImport");
     expect(appSource).toContain('import("./WorkspaceApp")');
+    expect(appSource).toContain('from "./autosaveStorage"');
     expect(appSource).not.toContain('from "./WorkspaceApp"');
     expect(appSource).not.toContain('from "./components/CadViewer"');
     expect(appSource).not.toContain('from "./lib/api"');
+    expect(appSource).not.toContain("window.localStorage");
     expect(appSource).not.toContain("@react-three");
     expect(appSource).not.toContain("three");
     expect(appSource).not.toContain(removedSolverPackage);
@@ -31,6 +33,17 @@ describe("Worker UI performance rewrite boundaries", () => {
     expect(workspaceSource).toContain("lazyCadViewerImport");
     expect(workspaceSource).toContain('import("./components/CadViewer")');
     expect(workspaceSource).not.toContain('import { CadViewer');
+  });
+
+  test("keeps shared workspace view state out of the viewer component", () => {
+    const workspaceSource = readFileSync(resolve(__dirname, "WorkspaceApp.tsx"), "utf8");
+    const persistenceSource = readFileSync(resolve(__dirname, "appPersistence.ts"), "utf8");
+    const viewerSource = readFileSync(resolve(__dirname, "components/CadViewer.tsx"), "utf8");
+
+    expect(workspaceSource).toContain('from "./workspaceViewTypes"');
+    expect(persistenceSource).toContain('from "./workspaceViewTypes"');
+    expect(persistenceSource).not.toContain('from "./components/CadViewer"');
+    expect(viewerSource).toContain('from "../workspaceViewTypes"');
   });
 
   test("keeps browser API solves on the dedicated solve worker without detailed local fallback imports", () => {

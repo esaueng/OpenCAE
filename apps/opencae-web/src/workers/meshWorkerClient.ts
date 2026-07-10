@@ -22,6 +22,7 @@ import {
   type MeshWorkerResponse,
   type MeshWorkerResults
 } from "./meshProtocol";
+import { workerClientError } from "./workerClientError";
 
 export type MeshProgressListener = (progress: { phase: MeshWorkerPhase; elapsedMs: number; attempt?: MeshAttemptContext }) => void;
 
@@ -85,7 +86,13 @@ export async function postMeshWorkerRequest<Operation extends MeshWorkerOperatio
   const request = createMeshWorkerRequest(operation, payload);
   return new Promise((resolve, reject) => {
     pendingRequests.set(request.id, { operation, resolve, reject, onProgress } as PendingRequest);
-    worker.postMessage(request, transferablesForMeshWorkerRequest(request));
+    try {
+      worker.postMessage(request, transferablesForMeshWorkerRequest(request));
+    } catch (error) {
+      pendingRequests.delete(request.id);
+      releaseMeshWorkerIfIdle();
+      reject(workerClientError(error, "Could not send work to the mesh worker."));
+    }
   });
 }
 

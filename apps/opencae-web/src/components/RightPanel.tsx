@@ -5,9 +5,9 @@ import { compatibleManufacturingProcessesFor, defaultManufacturingParametersFor,
 import { assessResultFailure, estimateAllowableLoadForSafetyFactor } from "@opencae/schema";
 import type { Constraint, DisplayFace, DisplayModel, DynamicSolverSettings, Load, MeshQuality, Project, ResultField, ResultProvenance, ResultSummary, RunTimingEstimate, SimulationFidelity, Study } from "@opencae/schema";
 import { inferGlobalCriticalPrintAxis } from "@opencae/study-core";
-import type { ResultMode, ViewMode } from "./CadViewer";
 import type { StepId } from "./StepBar";
-import { applicationPointForLoad, createViewerLoadMarkers, directionLabelForLoad, directionVectorForLabel, equivalentForceForLoad, LOAD_DIRECTION_LABELS, loadMarkerOrdinalLabel, payloadObjectForLoad, unitsForLoadType, type LoadApplicationPoint, type LoadDirectionLabel, type LoadType, type PayloadLoadMetadata, type PayloadMassMode, type PayloadObjectSelection } from "../loadPreview";
+import { applicationPointForLoad, createViewerLoadMarkers, directionLabelForLoad, directionVectorForLabel, equivalentForceForLoad, LOAD_DIRECTION_LABELS, loadMarkerOrdinalLabel, payloadObjectForLoad, unitsForLoadType, type LoadApplicationPoint, type LoadDirectionLabel, type LoadType, type PayloadLoadMetadata, type PayloadMassMode } from "../loadPreview";
+import type { PayloadObjectSelection, ResultMode, ViewMode } from "../workspaceViewTypes";
 import type { SampleAnalysisType, SampleModelId } from "../lib/api";
 import type { WasmMeshPhaseProgress } from "../lib/wasmMeshing";
 import { stepGeometryMetadataForProject } from "../stepGeometryState";
@@ -30,6 +30,7 @@ import {
   playbackOrdinalForSolverFramePosition
 } from "../resultPlaybackTimeline";
 
+const useIsomorphicLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
 const DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.005;
 const MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.001;
 const STRESS_EXAGGERATION_COMMIT_DELAY_MS = 120;
@@ -1729,7 +1730,7 @@ function SettingHelpTrigger({ helpId }: { helpId: SettingHelpId }) {
     setTooltipStyle({ top: position.top, left: position.left });
   };
 
-  useLayoutEffect(() => {
+  useIsomorphicLayoutEffect(() => {
     if (!isTooltipOpen) return;
     updateTooltipPosition();
   }, [isTooltipOpen, helpId]);

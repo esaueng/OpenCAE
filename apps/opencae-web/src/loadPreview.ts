@@ -1,21 +1,15 @@
 import type { DisplayFace, DisplayModel, Load, Study } from "@opencae/schema";
 import * as THREE from "three";
-import type { ViewerLoadMarker } from "./components/CadViewer";
 import { modelDirectionToViewerSpace as importedModelDirectionToViewerSpace, viewerDirectionToModelSpace as importedViewerDirectionToModelSpace } from "./modelOrientation";
+import type { PayloadObjectSelection, ViewerLoadMarker } from "./workspaceViewTypes";
+
+export type { PayloadObjectSelection } from "./workspaceViewTypes";
 
 export type LoadType = "force" | "pressure" | "gravity";
 export type LoadDirectionLabel = "-Y" | "+Y" | "+X" | "-X" | "+Z" | "-Z" | "Normal" | "Opposite normal";
 export const LOAD_DIRECTION_LABELS = ["-Y", "+Y", "+X", "-X", "+Z", "-Z", "Normal", "Opposite normal"] as const satisfies readonly LoadDirectionLabel[];
 export type LoadDirection = [number, number, number];
 export type LoadApplicationPoint = [number, number, number];
-export interface PayloadObjectSelection {
-  id: string;
-  label: string;
-  center: LoadApplicationPoint;
-  volumeM3?: number;
-  volumeSource?: "mesh" | "step" | "bounds-fallback" | "manual";
-  volumeStatus?: "available" | "estimated" | "unknown";
-}
 export type PayloadMassMode = "material" | "manual";
 export interface PayloadLoadMetadata {
   payloadMaterialId?: string;

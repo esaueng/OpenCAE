@@ -20,51 +20,16 @@ import { shouldBlockPreviewResultsForDisplayModel } from "../resultProvenance";
 import { stepPreviewFromBase64 } from "../stepPreview";
 import { tryNormalizedStlGeometryFromBuffer } from "../stlPreview";
 import { lengthForUnits, stressForUnits, type UnitSystem } from "../unitDisplay";
-import { loadMarkerViewportPresentation, type PayloadObjectSelection } from "../loadPreview";
+import { loadMarkerViewportPresentation } from "../loadPreview";
 import { highlightPayloadObjectMeshes } from "../payloadObjectHighlight";
 import { layoutOutsideModelLabels, payloadMassLabelOffset, type LabelAnchor } from "../calloutLabelLayout";
 import { getSnapSuggestion } from "../snapping/snapController";
 import type { SolverSurfaceMesh } from "../projectFile";
 import { isSnapOverlayObject, SnapVisualization } from "../snapping/Visualization";
 import type { CursorRay, FaceSnapAxis, SnapMeasurement, SnapResult, Vec3 } from "../snapping/types";
+import type { PayloadObjectSelection, PrintLayerOrientation, ResultMode, ResultPlaybackFrameController, ResultPlaybackFrameSnapshot, ThemeMode, ViewerLoadMarker, ViewerSupportMarker, ViewMode } from "../workspaceViewTypes";
 
-export type ViewMode = "model" | "mesh" | "results";
-export type ResultMode = "stress" | "displacement" | "safety_factor" | "velocity" | "acceleration";
-export type ThemeMode = "dark" | "light";
-export type PrintLayerOrientation = "x" | "y" | "z";
-export interface ViewerLoadMarker {
-  id: string;
-  faceId: string;
-  point?: [number, number, number];
-  payloadObject?: PayloadObjectSelection;
-  type: string;
-  value: number;
-  units: string;
-  direction: [number, number, number];
-  directionLabel: string;
-  labelIndex: number;
-  stackIndex: number;
-  preview?: boolean;
-}
-
-export interface ViewerSupportMarker {
-  id: string;
-  faceId: string;
-  type: string;
-  displayLabel: string;
-  label: string;
-  stackIndex: number;
-}
-
-export interface ResultPlaybackFrameSnapshot {
-  cache: PackedPreparedPlaybackCache;
-  framePosition: number;
-}
-
-export interface ResultPlaybackFrameController {
-  subscribe: (listener: (snapshot: ResultPlaybackFrameSnapshot) => void) => () => void;
-  getSnapshot: () => ResultPlaybackFrameSnapshot | null;
-}
+export type { PrintLayerOrientation, ResultMode, ResultPlaybackFrameController, ResultPlaybackFrameSnapshot, ThemeMode, ViewerLoadMarker, ViewerSupportMarker, ViewMode } from "../workspaceViewTypes";
 
 interface CadViewerProps {
   displayModel: DisplayModel;
