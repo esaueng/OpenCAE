@@ -1602,13 +1602,14 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
             onClick={handleRunSimulation}
             disabled={!effectiveCanRunSimulation}
             title={effectiveMissingRunItems.length ? `Complete before running: ${effectiveMissingRunItems.join(", ")}` : "Run simulation"}
+            aria-label={solverRunning ? "Running…" : "Run simulation"}
           >
-            <span aria-hidden="true">▶</span>{solverRunning ? "Running…" : "Run simulation"}
+            <span aria-hidden="true">▶</span><span className="topbar-action-label">{solverRunning ? "Running…" : "Run simulation"}</span>
           </button>
         ) : null}
-        <button className="secondary topbar-action" type="button" onClick={handleSaveProject} title="Save project to local disk">
+        <button className="secondary topbar-action" type="button" onClick={handleSaveProject} title="Save project to local disk" aria-label="Save project">
           <Save size={16} aria-hidden="true" />
-          Save project
+          <span className="topbar-action-label">Save project</span>
         </button>
       </header>
     );
