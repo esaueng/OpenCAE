@@ -699,8 +699,7 @@ img {
   position: absolute;
   inset: 0;
   background:
-    linear-gradient(180deg, rgba(5, 9, 16, 0.52), transparent 31%, transparent 64%, rgba(5, 9, 16, 0.64)),
-    linear-gradient(90deg, rgba(5, 9, 16, 0.2), transparent 25%, transparent 70%, rgba(5, 9, 16, 0.24));
+    linear-gradient(180deg, rgba(5, 9, 16, 0.3), transparent 26%, transparent 68%, rgba(5, 9, 16, 0.42));
   pointer-events: none;
 }
 
@@ -721,81 +720,70 @@ img {
   overflow: visible;
 }
 
-.showcase-support-line,
-.showcase-support-arrow,
-.showcase-load-line,
-.showcase-frame-arc {
+.showcase-support-post,
+.showcase-support-hatch,
+.showcase-load-shaft,
+.showcase-load-chevron,
+.showcase-callout-leader,
+.showcase-callout-anchor,
+.showcase-frame-cross {
   fill: none;
   stroke-linecap: round;
   stroke-linejoin: round;
-  vector-effect: non-scaling-stroke;
 }
 
-.showcase-support-line,
-.showcase-support-arrow {
-  stroke: #55aaff;
-  stroke-width: 5;
-  filter: drop-shadow(0 2px 7px rgba(72, 164, 255, 0.42));
+.showcase-support-post {
+  stroke: rgba(159, 195, 232, 0.85);
+  stroke-width: 1.5;
 }
 
-.showcase-load-line {
-  stroke: #ffc13b;
-  stroke-width: 7;
-  filter: drop-shadow(0 2px 8px rgba(255, 193, 59, 0.46));
+.showcase-support-hatch {
+  stroke: rgba(159, 195, 232, 0.55);
+  stroke-width: 1.25;
 }
 
-.showcase-load-head {
-  fill: #ffc13b;
-  filter: drop-shadow(0 2px 8px rgba(255, 193, 59, 0.46));
+.showcase-load-shaft,
+.showcase-load-chevron {
+  stroke: rgba(159, 195, 232, 0.9);
+  stroke-width: 1.5;
 }
 
-.showcase-frame-arc {
-  stroke: #55aaff;
-  stroke-width: 5;
-  filter: drop-shadow(0 2px 7px rgba(72, 164, 255, 0.42));
+.showcase-callout-leader {
+  stroke: rgba(159, 195, 232, 0.6);
+  stroke-width: 1.25;
 }
 
-.showcase-frame-dot--one {
-  fill: #55aaff;
+.showcase-callout-anchor {
+  stroke: rgba(159, 195, 232, 0.85);
+  stroke-width: 1.25;
 }
 
-.showcase-frame-dot--two {
-  fill: #ffd05c;
+.showcase-frame-cross {
+  stroke: rgba(159, 195, 232, 0.8);
+  stroke-width: 1.25;
 }
 
-.showcase-frame-dot--three {
-  fill: #ff6b52;
-}
-
-.showcase-load-label,
-.showcase-caption,
+.showcase-label,
 .showcase-frame-label {
+  fill: #c8dcf2;
   font-family: var(--font-ui);
-  font-weight: 700;
-  letter-spacing: 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
   paint-order: stroke;
-  stroke: rgba(5, 9, 16, 0.72);
-  stroke-width: 5px;
+  stroke: rgba(6, 10, 17, 0.7);
+  stroke-width: 3px;
   stroke-linejoin: round;
 }
 
-.showcase-load-label {
-  fill: #ffd05c;
-  font-size: 28px;
+.showcase-label--load {
+  fill: #f0d49c;
 }
 
-.showcase-caption {
-  fill: #dce8f7;
-  font-size: 22px;
-}
-
-.showcase-caption--support {
-  fill: #b7cbe3;
-}
-
-.showcase-frame-label {
-  fill: #dce8f7;
-  font-size: 20px;
+.analysis-showcase--compact .showcase-callout,
+.analysis-showcase--compact .showcase-frame-label {
+  display: none;
 }
 
 .analysis-description p {
