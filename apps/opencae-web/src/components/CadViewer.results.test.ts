@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { describe, expect, test, vi } from "vitest";
 import { REPORT_CAPTURE_BACKGROUND, VIEWER_AXIS_HEAD_RADIUS, VIEWER_AXIS_LABEL_BADGE_COLOR, VIEWER_AXIS_LABEL_BADGE_RADIUS, VIEWER_AXIS_LABEL_COLOR, VIEWER_AXIS_LABEL_FONT_SIZE, VIEWER_AXIS_LABEL_FONT_WEIGHT, VIEWER_AXIS_LABEL_OUTLINE_COLOR, VIEWER_AXIS_LABEL_OUTLINE_WIDTH, VIEWER_CREDIT_URL, VIEWER_GIZMO_ALIGNMENT, VIEWER_GIZMO_AXIS_LENGTH, VIEWER_GIZMO_LABEL_DISTANCE, VIEWER_GIZMO_MARGIN, VIEWER_GIZMO_SCALE, VIEWER_ISOMETRIC_GIZMO_VIEW, VIEWER_VIEW_CUBE_BODY_OPACITY, VIEWER_VIEW_CUBE_CORNER_HIT_RADIUS, VIEWER_VIEW_CUBE_CORNER_RADIUS, VIEWER_VIEW_CUBE_EDGE_COLOR, VIEWER_VIEW_CUBE_FACE_HOVER_OPACITY, VIEWER_VIEW_CUBE_FACE_LABEL_FONT_SIZE, VIEWER_VIEW_CUBE_FACE_OPACITY, VIEWER_VIEW_CUBE_SIZE, applyResultFrameToGeometry, axisLabelToViewAxis, beamDemoDisplacementAtStation, beamDemoPayloadOffset, beamDemoStationForPoint, buildSolverSurfaceOutlineGeometry, buildSolverSurfaceResultGeometry, cameraDistanceForBounds, cameraViewForAxis, cloneResultPreviewObject, colorizeResultObject, colorizeSampleResultGeometry, createBeamDemoCoordinate, createRenderedFrameCaptureController, createUndeformedResultOutlineObject, defaultHomeViewTarget, deformationScaleForResultFields, displayedLegendTickLabels, finalVisualScaleForDisplacementField, getViewCubeCornerDescriptors, getViewCubeFaceDescriptors, gizmoViewTargetToRequest, interpolateDisplacementAtPoint, legendMeshStats, legendTickLabels, normalizedPointLoadCantileverShape, payloadHighlightObjectId, pointLoadCantileverShape, printLayerVisualizationForBounds, recoverSurfaceNodeScalarField, renderReportCapture, reportCaptureBounds, resultFieldValuesAlignedToGeometry, resultLegendContentScale, resultLegendResizeDimensions, resultProbesForKind, resultValueForPoint, rotatedCameraOrbit, shouldDisableResultDeformation, shouldShowDimensionOverlay, shouldShowModelHitLabel, shouldShowResultMarkers, shouldShowUndeformedResultOutline, shouldShowViewCubeFaceLabel, solverSpaceResultCoordinateTransform, solverSurfaceDisplayFootprint, solverSurfaceResultFields, updatePackedSamples, viewCubeFaceToGizmoView, viewerCameraResetPose, viewerGizmoLayout } from "./CadViewer";
+import { solverSurfaceDisplayBoundsForDisplayModel } from "./CadViewer";
 import { createPackedResultPlaybackCache, createResultFrameCache, type FaceResultSample } from "../resultFields";
 import type { DisplayFace, DisplayModel, ResultField } from "@opencae/schema";
 import type { PackedPreparedPlaybackCache } from "../resultPlaybackCache";
@@ -677,6 +678,20 @@ describe("CadViewer result coloring", () => {
     const displayCenter = displayBounds.clone().applyMatrix4(rotation).getCenter(new THREE.Vector3());
     const surfaceCenter = new THREE.Vector3(0.08, 0.01, 0.01);
     expectVectorCloseTo(surfaceCenter.multiplyScalar(footprint.scale).add(new THREE.Vector3(...footprint.position)), displayCenter.toArray());
+  });
+
+  test("fits beam solver surfaces to the structural body instead of the payload assembly", () => {
+    const beamDisplayModel: DisplayModel = {
+      id: "display-plate",
+      name: "end loaded beam assembly",
+      bodyCount: 1,
+      dimensions: { x: 160, y: 160 * (0.28 / 3.8), z: 160 * (0.36 / 3.8), units: "mm" },
+      faces: []
+    };
+    const bounds = solverSurfaceDisplayBoundsForDisplayModel(beamDisplayModel, null);
+    const size = bounds?.getSize(new THREE.Vector3());
+
+    expect(size?.toArray()).toEqual([3.8, 0.28, 0.36]);
   });
 
   test("recenters near-unit-scale surface meshes too instead of gating on a scale ratio", () => {

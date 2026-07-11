@@ -213,8 +213,7 @@ export function CadViewer(props: CadViewerProps) {
   // rendering as an invisible speck inside it.
   const solverSurfaceFootprint = useMemo(() => {
     if (!solverSurfaceResult || !props.surfaceMesh) return null;
-    const kind = modelKindForDisplayModel(props.displayModel);
-    const displayBounds = kind === "uploaded" && uploadedPreviewBounds ? uploadedPreviewBounds : dimensionBoundsForDisplayModel(props.displayModel);
+    const displayBounds = solverSurfaceDisplayBoundsForDisplayModel(props.displayModel, uploadedPreviewBounds);
     return solverSurfaceDisplayFootprint(props.surfaceMesh, displayBounds, baseModelRotation);
   }, [baseModelRotation, props.displayModel, props.surfaceMesh, solverSurfaceResult, uploadedPreviewBounds]);
   const viewerContentFitKey = [
@@ -295,6 +294,9 @@ export function CadViewer(props: CadViewerProps) {
               </group>
             )}
             <group rotation={baseModelRotation}>
+              {effectiveViewMode === "results" && solverSurfaceResult && (
+                <SolverSurfacePayloadMass kind={modelKindForDisplayModel(props.displayModel)} loadMarkers={props.loadMarkers} />
+              )}
               {/* When a solver surface result renders, the procedural result solid is suppressed
                   (surface render is exclusive); the procedural IDW path remains only as the
                   fallback for results without a surface mesh (e.g. preview-tier local solves). */}
@@ -1401,6 +1403,21 @@ function dimensionBoundsForDisplayModel(displayModel: DisplayModel) {
   return new THREE.Box3(new THREE.Vector3(-1.55, -0.24, -BRACKET_DEPTH / 2), new THREE.Vector3(2.35, 2.62, BRACKET_DEPTH / 2));
 }
 
+export function solverSurfaceDisplayBoundsForDisplayModel(displayModel: DisplayModel, uploadedPreviewBounds: THREE.Box3 | null) {
+  const kind = modelKindForDisplayModel(displayModel);
+  if (kind === "uploaded" && uploadedPreviewBounds) return uploadedPreviewBounds;
+  if (kind === "plate") {
+    // A payload-mass sample contains two visible bodies, but the solver surface
+    // represents only the structural beam. Fit to the beam body so the Core
+    // result keeps the exact source-model proportions.
+    return new THREE.Box3(
+      new THREE.Vector3(-1.9, 0, -BEAM_DEPTH / 2),
+      new THREE.Vector3(1.9, BEAM_HEIGHT, BEAM_DEPTH / 2)
+    );
+  }
+  return dimensionBoundsForDisplayModel(displayModel);
+}
+
 function boxToLabelBounds(bounds: THREE.Box3) {
   return {
     min: bounds.min.toArray() as [number, number, number],
@@ -2012,6 +2029,18 @@ function BeamSolid({ color, pickHandlers }: { color: string; pickHandlers?: Mode
         <Edges color="#d1d8df" threshold={15} />
       </mesh>
     </group>
+  );
+}
+
+function SolverSurfacePayloadMass({ kind, loadMarkers }: { kind: SampleModelKind; loadMarkers: ViewerLoadMarker[] }) {
+  const payloadGeometry = useMemo(() => kind === "plate" ? createBeamPayloadGeometry() : null, [kind]);
+  const hasPayloadMass = loadMarkers.some((marker) => marker.type === "gravity" && marker.payloadObject);
+  if (!payloadGeometry || !hasPayloadMass) return null;
+  return (
+    <mesh geometry={payloadGeometry} userData={{ opencaeObjectId: BEAM_PAYLOAD_OBJECT_ID, opencaeObjectLabel: BEAM_PAYLOAD_LABEL }}>
+      <meshStandardMaterial color={RESULT_PAYLOAD_MATERIAL_COLOR} metalness={0.12} roughness={0.58} />
+      <Edges color="#596472" threshold={18} />
+    </mesh>
   );
 }
 
