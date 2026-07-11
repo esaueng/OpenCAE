@@ -62,9 +62,18 @@ export function resultSummaryForUnits(summary: ResultSummary, unitSystem: UnitSy
   const stress = stressForUnits(summary.maxStress, summary.maxStressUnits, unitSystem);
   const displacement = lengthForUnits(summary.maxDisplacement, summary.maxDisplacementUnits, unitSystem);
   const reaction = forceForUnits(summary.reactionForce, summary.reactionForceUnits, unitSystem);
+  // transient.peakDisplacement carries no units of its own — it shares
+  // maxDisplacementUnits, so it must convert with the same source units.
+  const transient = summary.transient
+    ? {
+      ...summary.transient,
+      peakDisplacement: roundDisplayValue(lengthForUnits(summary.transient.peakDisplacement, summary.maxDisplacementUnits, unitSystem).value)
+    }
+    : undefined;
   return {
     ...summary,
     failureAssessment: undefined,
+    ...(transient ? { transient } : {}),
     maxStress: roundDisplayValue(stress.value),
     maxStressUnits: stress.units,
     maxDisplacement: roundDisplayValue(displacement.value),
@@ -234,7 +243,7 @@ function formatDisplayNumber(value: number): string {
   return roundDisplayValue(value).toLocaleString(undefined, { maximumFractionDigits: 3 });
 }
 
-function roundDisplayValue(value: number): number {
+export function roundDisplayValue(value: number): number {
   if (!Number.isFinite(value)) return value;
   const magnitude = Math.abs(value);
   if (magnitude >= 100) return Math.round(value * 10) / 10;

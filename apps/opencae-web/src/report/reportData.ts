@@ -6,6 +6,7 @@ import { fieldWithOwnValueRange, formatResultValue } from "../resultFields";
 import { unitsForLoadType } from "../loadPreview";
 import type { CapturedResultView, ResultViewCaptures } from "./captureResultViews";
 import {
+  displayModelForUnits,
   formatDensity,
   formatMaterialStress,
   formatMeshSourceLabel,
@@ -16,6 +17,7 @@ import {
   loadValueForUnits,
   resultFieldForUnits,
   resultSummaryForUnits,
+  roundDisplayValue,
   solverMethodForResult,
   solverRunnerLabelForResult,
   type UnitSystem
@@ -60,6 +62,7 @@ export interface ReportData {
   unitSystemLabel: string;
   provenanceTier: ReturnType<typeof classifyResultProvenance>;
   provenanceLabel: string;
+  coverMeta: ReportRow[];
   keyResults: ReportRow[];
   failureAssessment: NonNullable<ResultSummary["failureAssessment"]>;
   geometry: ReportRow[];
@@ -109,7 +112,7 @@ export function buildReportData(input: BuildReportDataInput): ReportData {
   const meshSummary = input.solverMeshSummary ?? input.study.meshSettings.summary ?? null;
   const actualMeshCounts = input.solverMeshSummary?.source === "core_solver" || input.study.meshSettings.summary?.source === "core_solver";
   const generatedAtIso = input.generatedAt.toISOString();
-  const reportDate = generatedAtIso.slice(0, 10);
+  const reportDate = localIsoDate(input.generatedAt);
   const diagnostics = collectDiagnostics(input, summary, fields);
 
   return {
@@ -123,15 +126,15 @@ export function buildReportData(input: BuildReportDataInput): ReportData {
     unitSystemLabel: input.unitSystem === "US" ? "US (in, psi)" : "SI (m, Pa)",
     provenanceTier,
     provenanceLabel: formatResultProvenanceLabel(provenance),
+    coverMeta: coverMetaRows(input, summary, meshSummary),
     keyResults: [
       { label: "Max von Mises stress", value: formatResultMetric(summary.maxStress, summary.maxStressUnits) },
       { label: "Max displacement", value: formatResultMetric(summary.maxDisplacement, summary.maxDisplacementUnits) },
-      { label: "Safety factor", value: String(summary.safetyFactor) },
-      { label: "Reaction force", value: formatResultMetric(summary.reactionForce, summary.reactionForceUnits) },
-      { label: "Failure check", value: assessment.title }
+      { label: "Safety factor", value: String(roundDisplayValue(summary.safetyFactor)) },
+      { label: "Reaction force", value: formatResultMetric(summary.reactionForce, summary.reactionForceUnits) }
     ],
     failureAssessment: assessment,
-    geometry: geometryRows(input.project, input.displayModel),
+    geometry: geometryRows(input.project, input.displayModel ? displayModelForUnits(input.displayModel, input.unitSystem) : null),
     geometryFiles: {
       headers: ["File", "Format", "Size"],
       rows: input.project.geometryFiles.map((geometry) => [geometry.filename, geometryFormat(geometry.filename), geometryFileSize(geometry.metadata)]),
@@ -167,7 +170,27 @@ export function suggestedReportFilename(projectName: string, generatedAt: Date):
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
-  return `OpenCAE-Report_${slug || "opencae-project"}_${generatedAt.toISOString().slice(0, 10)}.pdf`;
+  return `OpenCAE-Report_${slug || "opencae-project"}_${localIsoDate(generatedAt)}.pdf`;
+}
+
+function localIsoDate(date: Date): string {
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
+function coverMetaRows(input: BuildReportDataInput, summary: ResultSummary, meshSummary: SolverMeshSummary | Study["meshSettings"]["summary"] | null): ReportRow[] {
+  const provenance = summary.provenance;
+  const version = provenance?.solverVersion ?? provenance?.solverCpuVersion ?? provenance?.coreVersion;
+  const elementType = elementTypeForMesh(provenance?.meshSource);
+  const elements = Number.isFinite(meshSummary?.elements) ? `${Math.round(meshSummary!.elements).toLocaleString()} elements` : undefined;
+  const mesh = [elementType === MISSING ? undefined : elementType, elements].filter(Boolean).join(" · ");
+  return [
+    { label: "Solver", value: formatResultProvenanceLabel(provenance) },
+    { label: "Version", value: version ?? MISSING },
+    { label: "Method", value: solverMethodForResult(summary, input.study) },
+    { label: "Mesh", value: mesh || MISSING }
+  ];
 }
 
 function geometryRows(project: Project, displayModel: DisplayModel | null): ReportRow[] {
@@ -236,7 +259,7 @@ function loadTable(study: Study, unitSystem: UnitSystem): ReportTable {
       const converted = Number.isFinite(rawValue) ? loadValueForUnits(rawValue, rawUnits, unitSystem) : null;
       return [
         load.type === "force" ? "Force" : load.type === "pressure" ? "Pressure" : "Gravity / payload mass",
-        converted ? formatResultMetric(converted.value, converted.units) : MISSING,
+        converted ? formatResultMetric(roundDisplayValue(converted.value), converted.units) : MISSING,
         formatDirection(load.parameters.direction),
         selectionLabel(study, load.selectionRef)
       ];
@@ -284,7 +307,7 @@ function resultRows(project: Project, study: Study, summary: ResultSummary, disp
     { label: "Local fallback", value: "none" },
     { label: "Max stress", value: formatResultMetric(summary.maxStress, summary.maxStressUnits) },
     { label: "Max displacement", value: formatResultMetric(summary.maxDisplacement, summary.maxDisplacementUnits) },
-    { label: "Safety factor", value: String(summary.safetyFactor) },
+    { label: "Safety factor", value: String(roundDisplayValue(summary.safetyFactor)) },
     { label: "Failure check", value: assessment.title },
     { label: "Reaction force", value: formatResultMetric(summary.reactionForce, summary.reactionForceUnits) }
   ];

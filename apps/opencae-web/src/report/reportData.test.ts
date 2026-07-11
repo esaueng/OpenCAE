@@ -56,7 +56,10 @@ describe("buildReportData", () => {
     const data = report();
 
     expect(data.provenanceLabel).toBe("OpenCAE Core Local (in-browser)");
+    expect(data.coverMeta).toContainEqual({ label: "Solver", value: "OpenCAE Core Local (in-browser)" });
+    expect(data.coverMeta).toContainEqual({ label: "Version", value: "0.2.0" });
     expect(data.keyResults).toContainEqual({ label: "Max von Mises stress", value: "142 MPa" });
+    expect(data.keyResults.map((row) => row.label)).not.toContain("Failure check");
     expect(data.mesh).toContainEqual({ label: "Nodes", value: "42,381 (est.)" });
     expect(data.mesh).toContainEqual({ label: "Element type", value: "Tet10" });
     expect(data.diagnostics).toContain("Fixture diagnostic, reproduced verbatim.");
@@ -149,6 +152,7 @@ describe("buildReportData", () => {
     expect(data.title).toBe("Dynamic Structural Simulation Report");
     expect(data.solver).toContainEqual({ label: "Time step", value: "0.005 s" });
     expect(data.transientResults).toContainEqual({ label: "Frames", value: "11" });
+    expect(data.transientResults).toContainEqual({ label: "Peak displacement", value: "0.184 mm at 0.08 s" });
     expect(data.figures.stress.legendMax).toBe("142");
     expect(data.figures.stress.caption).toContain("Automatically selected peak von Mises stress frame (frame 2 of 3, 0.0400 s)");
     expect(data.figures.displacement.caption).toContain("Automatically selected peak displacement magnitude frame (frame 3 of 3, 0.0800 s)");
