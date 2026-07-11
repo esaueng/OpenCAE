@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { describe, expect, test, vi } from "vitest";
-import { VIEWER_AXIS_HEAD_RADIUS, VIEWER_AXIS_LABEL_BADGE_COLOR, VIEWER_AXIS_LABEL_BADGE_RADIUS, VIEWER_AXIS_LABEL_COLOR, VIEWER_AXIS_LABEL_FONT_SIZE, VIEWER_AXIS_LABEL_FONT_WEIGHT, VIEWER_AXIS_LABEL_OUTLINE_COLOR, VIEWER_AXIS_LABEL_OUTLINE_WIDTH, VIEWER_CREDIT_URL, VIEWER_GIZMO_ALIGNMENT, VIEWER_GIZMO_AXIS_LENGTH, VIEWER_GIZMO_LABEL_DISTANCE, VIEWER_GIZMO_MARGIN, VIEWER_GIZMO_SCALE, VIEWER_ISOMETRIC_GIZMO_VIEW, VIEWER_VIEW_CUBE_BODY_OPACITY, VIEWER_VIEW_CUBE_CORNER_HIT_RADIUS, VIEWER_VIEW_CUBE_CORNER_RADIUS, VIEWER_VIEW_CUBE_EDGE_COLOR, VIEWER_VIEW_CUBE_FACE_HOVER_OPACITY, VIEWER_VIEW_CUBE_FACE_LABEL_FONT_SIZE, VIEWER_VIEW_CUBE_FACE_OPACITY, VIEWER_VIEW_CUBE_SIZE, applyResultFrameToGeometry, axisLabelToViewAxis, beamDemoDisplacementAtStation, beamDemoPayloadOffset, beamDemoStationForPoint, buildSolverSurfaceOutlineGeometry, buildSolverSurfaceResultGeometry, cameraDistanceForBounds, cameraViewForAxis, cloneResultPreviewObject, colorizeResultObject, colorizeSampleResultGeometry, createBeamDemoCoordinate, createRenderedFrameCaptureController, createUndeformedResultOutlineObject, defaultHomeViewTarget, deformationScaleForResultFields, displayedLegendTickLabels, finalVisualScaleForDisplacementField, getViewCubeCornerDescriptors, getViewCubeFaceDescriptors, gizmoViewTargetToRequest, interpolateDisplacementAtPoint, legendMeshStats, legendTickLabels, normalizedPointLoadCantileverShape, payloadHighlightObjectId, pointLoadCantileverShape, printLayerVisualizationForBounds, recoverSurfaceNodeScalarField, resultFieldValuesAlignedToGeometry, resultLegendContentScale, resultLegendResizeDimensions, resultProbesForKind, resultValueForPoint, rotatedCameraOrbit, shouldDisableResultDeformation, shouldShowDimensionOverlay, shouldShowModelHitLabel, shouldShowResultMarkers, shouldShowUndeformedResultOutline, shouldShowViewCubeFaceLabel, solverSpaceResultCoordinateTransform, solverSurfaceDisplayFootprint, solverSurfaceResultFields, updatePackedSamples, viewCubeFaceToGizmoView, viewerCameraResetPose, viewerGizmoLayout } from "./CadViewer";
+import { REPORT_CAPTURE_BACKGROUND, VIEWER_AXIS_HEAD_RADIUS, VIEWER_AXIS_LABEL_BADGE_COLOR, VIEWER_AXIS_LABEL_BADGE_RADIUS, VIEWER_AXIS_LABEL_COLOR, VIEWER_AXIS_LABEL_FONT_SIZE, VIEWER_AXIS_LABEL_FONT_WEIGHT, VIEWER_AXIS_LABEL_OUTLINE_COLOR, VIEWER_AXIS_LABEL_OUTLINE_WIDTH, VIEWER_CREDIT_URL, VIEWER_GIZMO_ALIGNMENT, VIEWER_GIZMO_AXIS_LENGTH, VIEWER_GIZMO_LABEL_DISTANCE, VIEWER_GIZMO_MARGIN, VIEWER_GIZMO_SCALE, VIEWER_ISOMETRIC_GIZMO_VIEW, VIEWER_VIEW_CUBE_BODY_OPACITY, VIEWER_VIEW_CUBE_CORNER_HIT_RADIUS, VIEWER_VIEW_CUBE_CORNER_RADIUS, VIEWER_VIEW_CUBE_EDGE_COLOR, VIEWER_VIEW_CUBE_FACE_HOVER_OPACITY, VIEWER_VIEW_CUBE_FACE_LABEL_FONT_SIZE, VIEWER_VIEW_CUBE_FACE_OPACITY, VIEWER_VIEW_CUBE_SIZE, applyResultFrameToGeometry, axisLabelToViewAxis, beamDemoDisplacementAtStation, beamDemoPayloadOffset, beamDemoStationForPoint, buildSolverSurfaceOutlineGeometry, buildSolverSurfaceResultGeometry, cameraDistanceForBounds, cameraViewForAxis, cloneResultPreviewObject, colorizeResultObject, colorizeSampleResultGeometry, createBeamDemoCoordinate, createRenderedFrameCaptureController, createUndeformedResultOutlineObject, defaultHomeViewTarget, deformationScaleForResultFields, displayedLegendTickLabels, finalVisualScaleForDisplacementField, getViewCubeCornerDescriptors, getViewCubeFaceDescriptors, gizmoViewTargetToRequest, interpolateDisplacementAtPoint, legendMeshStats, legendTickLabels, normalizedPointLoadCantileverShape, payloadHighlightObjectId, pointLoadCantileverShape, printLayerVisualizationForBounds, recoverSurfaceNodeScalarField, renderReportCapture, reportCaptureBounds, resultFieldValuesAlignedToGeometry, resultLegendContentScale, resultLegendResizeDimensions, resultProbesForKind, resultValueForPoint, rotatedCameraOrbit, shouldDisableResultDeformation, shouldShowDimensionOverlay, shouldShowModelHitLabel, shouldShowResultMarkers, shouldShowUndeformedResultOutline, shouldShowViewCubeFaceLabel, solverSpaceResultCoordinateTransform, solverSurfaceDisplayFootprint, solverSurfaceResultFields, updatePackedSamples, viewCubeFaceToGizmoView, viewerCameraResetPose, viewerGizmoLayout } from "./CadViewer";
 import { createPackedResultPlaybackCache, createResultFrameCache, type FaceResultSample } from "../resultFields";
 import type { DisplayFace, DisplayModel, ResultField } from "@opencae/schema";
 import type { PackedPreparedPlaybackCache } from "../resultPlaybackCache";
@@ -56,6 +56,69 @@ describe("CadViewer result coloring", () => {
     expect(readPixels).toHaveBeenCalledOnce();
     controller.dispose();
     expect(unsubscribe).toHaveBeenCalledOnce();
+  });
+
+  test("report capture renders white-background tight-fit frames, then restores the live viewer", () => {
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color("#070b10");
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(2, 1, 1));
+    mesh.position.set(5, 0, 0);
+    scene.add(mesh);
+    const hidden = new THREE.Mesh(new THREE.BoxGeometry(80, 80, 80));
+    hidden.visible = false;
+    scene.add(hidden);
+    const camera = new THREE.PerspectiveCamera(42, 1.6);
+    camera.position.set(40, 40, 40);
+    camera.lookAt(5, 0, 0);
+    camera.updateMatrixWorld();
+    const originalQuaternion = camera.quaternion.clone();
+
+    const renderedFrames: Array<{ background: string | null; position: THREE.Vector3 }> = [];
+    const gl = {
+      render: vi.fn((renderScene: THREE.Scene, renderCamera: THREE.Camera) => {
+        renderedFrames.push({
+          background: renderScene.background instanceof THREE.Color ? `#${renderScene.background.getHexString()}` : null,
+          position: renderCamera.position.clone()
+        });
+      }),
+      domElement: { toDataURL: vi.fn(() => "data:image/png;base64,report-frame") }
+    };
+
+    const png = renderReportCapture(gl, scene, camera);
+
+    expect(png).toBe("data:image/png;base64,report-frame");
+    expect(renderedFrames).toHaveLength(2);
+    // The captured frame renders on the report page background, framed tight on
+    // the visible mesh (the invisible box must not inflate the fit).
+    expect(renderedFrames[0]!.background).toBe(REPORT_CAPTURE_BACKGROUND);
+    expect(renderedFrames[0]!.position.distanceTo(new THREE.Vector3(5, 0, 0))).toBeLessThan(6);
+    // The repaint after the capture restores the interactive viewer exactly.
+    expect(renderedFrames[1]!.background).toBe("#070b10");
+    expectVectorCloseTo(renderedFrames[1]!.position, [40, 40, 40]);
+    expect(scene.background instanceof THREE.Color && `#${scene.background.getHexString()}`).toBe("#070b10");
+    expectVectorCloseTo(camera.position, [40, 40, 40]);
+    expect(camera.quaternion.angleTo(originalQuaternion)).toBeCloseTo(0);
+  });
+
+  test("report capture bounds track baked-in deformation past stale geometry bounding boxes", () => {
+    const geometry = new THREE.BoxGeometry(2, 2, 2);
+    geometry.computeBoundingBox();
+    const positions = geometry.getAttribute("position") as THREE.BufferAttribute;
+    for (let index = 0; index < positions.count; index += 1) {
+      positions.setX(index, positions.getX(index) + 10);
+    }
+    positions.needsUpdate = true;
+    const scene = new THREE.Scene();
+    scene.add(new THREE.Mesh(geometry));
+
+    const bounds = reportCaptureBounds(scene);
+    expect(bounds).not.toBeNull();
+    expectVectorCloseTo(bounds!.getCenter(new THREE.Vector3()), [10, 0, 0]);
+    expect(reportCaptureBounds(new THREE.Scene())).toBeNull();
+  });
+
+  test("viewer captures route through the report styling pass", () => {
+    expect(cadViewerSource).toContain("renderReportCapture(gl, scene, camera)");
   });
 
   test("links the viewer watermark to the Esau Engineering website", () => {

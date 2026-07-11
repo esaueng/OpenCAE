@@ -139,6 +139,10 @@ export const VIEWER_ISOMETRIC_GIZMO_VIEW = "iso";
 export const VIEWER_CREDIT_URL = "https://esauengineering.com/";
 const VIEWER_FIT_MARGIN = 1.28;
 const DEFAULT_HOME_FIT_MARGIN = 1.46;
+// Report figures land on a white PDF page, so captures re-render on white with a
+// tighter fit than the interactive viewer before reading pixels.
+export const REPORT_CAPTURE_BACKGROUND = "#ffffff";
+export const REPORT_CAPTURE_FIT_MARGIN = 1.12;
 const VIEWER_FIT_RETRY_DELAY_MS = 120;
 const VIEWER_STATS_LOG_INTERVAL_MS = 1000;
 const VIEWER_STATS_STORAGE_KEY = "opencae.perf.viewerStats";
@@ -465,7 +469,7 @@ function ViewerInvalidator({
 }
 
 function CaptureBridge({ register }: { register?: (capture: (() => Promise<string>) | null) => void }) {
-  const { gl, invalidate } = useThree();
+  const { camera, gl, invalidate, scene } = useThree();
   useEffect(() => {
     if (!register) return undefined;
     // This Canvas renders on demand. Reading it immediately after a React state
@@ -474,7 +478,15 @@ function CaptureBridge({ register }: { register?: (capture: (() => Promise<strin
     // PNG and its report caption always describe the same rendered scene.
     const controller = createRenderedFrameCaptureController({
       invalidate,
-      readPixels: () => gl.domElement.toDataURL("image/png"),
+      readPixels: () => {
+        try {
+          return renderReportCapture(gl, scene, camera);
+        } finally {
+          // The report pass repaints the live frame itself, but overlay passes
+          // (view gizmo) render outside it — schedule a full frame to redraw them.
+          invalidate();
+        }
+      },
       subscribeAfterRender: addAfterEffect
     });
     register(controller.capture);
@@ -482,8 +494,77 @@ function CaptureBridge({ register }: { register?: (capture: (() => Promise<strin
       register(null);
       controller.dispose();
     };
-  }, [gl, invalidate, register]);
+  }, [camera, gl, invalidate, register, scene]);
   return null;
+}
+
+export interface ReportCaptureRenderer {
+  render: (scene: THREE.Scene, camera: THREE.Camera) => void;
+  domElement: { toDataURL: (type: string) => string };
+}
+
+// Renders the report figure frame — white background, camera fit tight on the
+// visible result geometry along the current view direction — reads the PNG, then
+// restores the scene and camera and repaints so the interactive viewer never
+// shows the report styling.
+export function renderReportCapture(gl: ReportCaptureRenderer, scene: THREE.Scene, camera: THREE.Camera): string {
+  const previousBackground = scene.background;
+  const previousPosition = camera.position.clone();
+  const previousQuaternion = camera.quaternion.clone();
+  try {
+    scene.background = new THREE.Color(REPORT_CAPTURE_BACKGROUND);
+    const bounds = reportCaptureBounds(scene);
+    const perspectiveCamera = camera as THREE.PerspectiveCamera;
+    if (bounds && perspectiveCamera.isPerspectiveCamera) {
+      const center = bounds.getCenter(new THREE.Vector3());
+      const offset = camera.position.clone().sub(center);
+      const viewDirection = offset.lengthSq() > 1e-12 ? offset.normalize() : ISO_CAMERA_DIRECTION.clone();
+      const up = new THREE.Vector3().crossVectors(viewDirection, camera.up).lengthSq() > 1e-6
+        ? camera.up
+        : ISO_CAMERA_UP;
+      const distance = cameraDistanceForBounds(
+        bounds,
+        viewDirection,
+        up,
+        perspectiveCamera.fov,
+        perspectiveCamera.aspect,
+        REPORT_CAPTURE_FIT_MARGIN
+      );
+      camera.position.copy(center).addScaledVector(viewDirection, distance);
+      camera.lookAt(center);
+      camera.updateMatrixWorld();
+    }
+    gl.render(scene, camera);
+    return gl.domElement.toDataURL("image/png");
+  } finally {
+    scene.background = previousBackground;
+    camera.position.copy(previousPosition);
+    camera.quaternion.copy(previousQuaternion);
+    camera.updateMatrixWorld();
+    gl.render(scene, camera);
+  }
+}
+
+// Bounds of the visible rendered content only: Box3.setFromObject would include
+// invisible subtrees, and stale geometry bounding boxes would miss the frame's
+// baked-in result deformation.
+export function reportCaptureBounds(root: THREE.Object3D): THREE.Box3 | null {
+  root.updateWorldMatrix(true, true);
+  const bounds = new THREE.Box3();
+  const objectBounds = new THREE.Box3();
+  let hasContent = false;
+  root.traverseVisible((object) => {
+    const geometry = (object as THREE.Mesh).geometry as THREE.BufferGeometry | undefined;
+    if (!geometry?.isBufferGeometry) return;
+    geometry.computeBoundingBox();
+    const geometryBounds = geometry.boundingBox;
+    if (!geometryBounds || geometryBounds.isEmpty()) return;
+    objectBounds.copy(geometryBounds).applyMatrix4(object.matrixWorld);
+    if (![objectBounds.min, objectBounds.max].every((corner) => Number.isFinite(corner.x) && Number.isFinite(corner.y) && Number.isFinite(corner.z))) return;
+    bounds.union(objectBounds);
+    hasContent = true;
+  });
+  return hasContent ? bounds : null;
 }
 
 export interface RenderedFrameCaptureController {
