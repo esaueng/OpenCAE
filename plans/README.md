@@ -7,6 +7,8 @@ Four advisory runs are indexed here:
 - **Run 3 — 2026-07-02**, standard engineering/CAE-validity survey (plans 011–014). Audited the **solver itself**: the sibling OpenCAE-Core checkout at the pinned ref `08ca7a6` (byte-identical to the production runner 0.1.5) plus the open-cae post-processing chain at `d1556f2`. Four parallel numerical-methods audits plus independent hand checks (Timoshenko deflection/stress, first-bending frequency, HRZ mass-fraction conservation). Headline: **the production solver's math is sound — the gaps are in the verification harness** (gates run in no CI, single-configuration benchmark, no gmsh-path gate, no unit round-trip).
 - **Run 4 — 2026-07-05**, local-first solver migration plan (plans 015–016). Split the revised fully-local solver memo into an executable browser-solver parity track and a WASM meshing/offline-assets track. Plan 015 is already in progress with a dynamic step-budget preflight slice; plan 016 remains gated by Gmsh WASM viability and licensing.
 - **Run 5 — 2026-07-09**, repo consolidation (plan 017). Imported OpenCAE Core packages into this monorepo, removed the sibling checkout/pin bootstrap, and wired Core package tests into this repo's CI.
+- **2026-07-10**, mesh-failure UX (plan 018, from a live failing upload rather than an advisor run). A nominal-solid STEP (428 faces) failed 3D meshing; the automatic repair sew destroyed the imported volume and the surfaced error pointed at a Fix open surfaces button that never renders for parts inspected as "solid" at upload.
+- **2026-07-10**, product feature (plan 020, maintainer request). One-click professional PDF simulation report from the results page: full setup (geometry, material, BCs, mesh, solver) + results with contour figures, built on the honest-results formatters, lazy-loaded jsPDF, and a new viewer capture seam.
 
 These plans are written for a fresh executor with no context from the surveys. Each is self-contained.
 
@@ -112,6 +114,9 @@ Grounded options for what to build next — maintainer's call, not ranked agains
 14. `005-replace-source-text-guard-tests.md`
 15. `015-local-first-solver.md` — local-first migration track; can proceed in slices, but upstream solver hooks and persistence gates block full cloud-solve retirement.
 16. `016-wasm-meshing-and-offline-assets.md` — after the gmsh-wasm smoke/licensing gate; blocks cloud meshing infrastructure removal.
+17. `018-mesh-failure-repair-probe-and-honest-geometry-errors.md` — DONE 2026-07-10.
+18. `019-frontal-fallback-before-repair-bail-and-model-keyed-probe-guard.md` — independent; the Frontal fix is the likeliest path to actually meshing the Corning part.
+19. `020-results-pdf-report.md` — independent feature; benefits from plan 001 (provenance tightening) landing first but does not require it (it reuses whatever labels `unitDisplay.ts` produces).
 
 Dependency notes:
 
@@ -141,6 +146,9 @@ Dependency notes:
 | 015 Local-first browser solver parity | IN PROGRESS | Dynamic step-count preflight slice landed; fixtures, upstream hooks, persistence, and cloud-solve wind-down remain. |
 | 016 WASM meshing and offline asset caching | TODO | Gmsh WASM smoke/licensing gate first; blocks full cloud infrastructure retirement. |
 | 017 Sunset Core repo (monorepo consolidation) | DONE | Executed 2026-07-09 (Run 5): Core packages imported, sibling checkout/pin bootstrap removed, Core tests wired into CI. |
+| 018 Mesh-failure repair probe + honest geometry errors | DONE | Executed 2026-07-10 (`fa2ae84`, with the Top-face heal cleanup in `f1aba34`). Re-test surfaced the true root error (Delaunay PLC segment/facet intersection) and two follow-up defects → plan 019. |
+| 019 Frontal fallback before repair bail + model-keyed probe guard | TODO | Delaunay-throw + ≥128-face heuristic skips the Frontal fallback entirely (wasmMesher.ts:477); saving mid-mesh silently suppresses the 018 repair probe (project object-identity guard). |
+| 020 One-click PDF simulation report | TODO | Generate-report button on the results panel → branded PDF (cover summary, setup sections, contour figures, diagnostics). Requires the new CadViewer capture seam; jsPDF must stay behind a dynamic import (175 KB budget gate). |
 
 Run 2 was non-interactive: plans 006–010 are the top findings by leverage (impact ÷ effort, confidence-weighted), selected by default per the advisor skill's non-interactive rule rather than by maintainer choice. Re-cut as desired.
 
