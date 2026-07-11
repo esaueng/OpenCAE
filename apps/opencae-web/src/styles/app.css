@@ -540,7 +540,7 @@ img {
   color: var(--color-text);
   background: var(--color-surface);
   border: var(--border-thin);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   box-shadow: var(--shadow-panel);
 }
 
@@ -650,6 +650,15 @@ img {
 .simulation-choice-card small {
   color: var(--color-text-muted);
   font-size: var(--fs-sm);
+}
+
+.simulation-choice-card:hover:not(.active),
+.simulation-choice-card:focus-visible:not(.active),
+.material-list button:hover:not(.active),
+.material-list button:focus-visible:not(.active),
+.condition-menu button:hover:not(:disabled),
+.condition-menu button:focus-visible:not(:disabled) {
+  background: var(--color-surface-hover);
 }
 
 .simulation-choice-card.active,
@@ -1182,7 +1191,7 @@ img {
   border: 1px solid var(--color-accent-border);
   border-radius: var(--radius-sm);
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--fs-mini);
   line-height: 1;
   text-transform: uppercase;
 }
@@ -1295,6 +1304,7 @@ img {
 
 .topbar-action {
   min-height: 32px;
+  white-space: nowrap;
 }
 
 .status-link.donate-link {
@@ -1408,6 +1418,13 @@ img {
 .status-link.donate-link:hover,
 .status-link.donate-link:focus-visible {
   color: #ffe2bd;
+}
+
+/* The warm peach only reads on dark surfaces; light theme reuses its amber token. */
+.theme-light .status-link.donate-link,
+.theme-light .status-link.donate-link:hover,
+.theme-light .status-link.donate-link:focus-visible {
+  color: var(--color-warning);
 }
 
 @keyframes coffee-mug-lift {
@@ -1560,6 +1577,19 @@ img {
   outline: none;
 }
 
+/* The stepbar chips hard-code dark translucent fills; swap in the light
+   surface token so muted text keeps AA contrast in light theme. */
+.theme-light .stepbar-collapse,
+.theme-light .stepbar-link,
+.theme-light .step-icon,
+.theme-light .stepbar.collapsed .unit-switch .unit-toggle {
+  background: var(--color-surface-2);
+}
+
+.theme-light .step:hover {
+  background: var(--color-surface-hover);
+}
+
 .step-list {
   display: grid;
   gap: var(--sp-1);
@@ -1710,7 +1740,7 @@ img {
   background: rgba(11, 15, 20, 0.28);
   border: var(--border-thin);
   border-radius: var(--radius-md);
-  font-family: var(--font-sans);
+  font-family: var(--font-ui);
   font-size: var(--fs-xs);
   letter-spacing: 0;
   text-transform: none;
@@ -1839,7 +1869,7 @@ img {
   z-index: var(--z-viewer-overlay);
   transform: translateX(50%);
   color: rgba(203, 213, 225, 0.58);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   letter-spacing: 0.01em;
   text-decoration: none;
   text-underline-offset: 3px;
@@ -1852,7 +1882,7 @@ img {
 }
 
 .theme-light .viewer-watermark {
-  color: rgba(51, 65, 85, 0.62);
+  color: rgba(51, 65, 85, 0.8);
 }
 
 .result-marker,
@@ -1919,6 +1949,10 @@ img {
   width: 180px;
   padding: 8px 10px;
   font-size: var(--fs-xs);
+}
+
+.theme-light .model-notice {
+  background: rgba(255, 255, 255, 0.88);
 }
 
 .analysis-legend {
@@ -2173,15 +2207,19 @@ img {
 .workflow-nav kbd {
   min-width: 18px;
   padding: 1px 5px;
-  color: var(--color-text-subtle);
+  color: var(--color-text-muted);
   background: rgba(255, 255, 255, 0.04);
   border: var(--border-thin);
   border-radius: var(--radius-sm);
   font-family: var(--font-mono);
   font-size: var(--fs-mini);
-  font-weight: var(--fw-semibold);
+  font-weight: 600;
   line-height: 1.35;
   text-align: center;
+}
+
+.workflow-nav .primary kbd {
+  color: inherit;
 }
 
 .field {
@@ -2229,7 +2267,7 @@ img {
   background: rgba(11, 17, 24, 0.94);
   border: var(--border-thin);
   border-radius: var(--radius-md);
-  box-shadow: var(--shadow-md);
+  box-shadow: var(--shadow-panel);
   font-size: var(--fs-xs);
   font-weight: var(--fw-regular);
   line-height: 1.45;
@@ -2627,6 +2665,10 @@ img {
   border-right: 0;
 }
 
+.segmented button:hover:not(.active):not(:disabled) {
+  color: var(--color-text);
+}
+
 .segmented button.active {
   color: var(--color-accent);
   background: var(--color-accent-dim);
@@ -2917,6 +2959,16 @@ input {
 
 .primary:hover {
   background: #69b3ff;
+}
+
+/* Light-theme accent is dark (#0b63b6), so primary buttons need light text
+   and a darkened (not lightened) hover to hold WCAG AA contrast. */
+.theme-light .primary {
+  color: #f8fbff;
+}
+
+.theme-light .primary:hover {
+  background: color-mix(in srgb, var(--color-accent) 85%, #06111e);
 }
 
 .secondary:hover,
@@ -3434,8 +3486,8 @@ button:disabled {
   align-items: center;
   justify-content: center;
   color: #f8fbff;
-  font-size: 11px;
-  font-weight: 700;
+  font-size: var(--fs-xs);
+  font-weight: 600;
   line-height: 1;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
   pointer-events: none;
@@ -3522,6 +3574,7 @@ button:disabled {
 
 .bottom-panel {
   position: relative;
+  min-width: 0;
   background: var(--color-surface);
   border-top: var(--border-thin);
 }
@@ -3557,6 +3610,10 @@ button:disabled {
   font-size: var(--fs-xs);
 }
 
+.theme-light .status-tabs button {
+  background: var(--color-surface-2);
+}
+
 .status-tabs button:hover,
 .status-tabs button:focus-visible,
 .status-tabs button.active {
@@ -3574,7 +3631,7 @@ button:disabled {
   border: var(--border-thin);
   border-radius: 999px;
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--fs-mini);
 }
 
 .status-groups {
@@ -3661,6 +3718,10 @@ button:disabled {
   border-left: var(--border-thin);
 }
 
+.theme-light .bottom-content {
+  background: var(--color-surface);
+}
+
 .bottom-resize-handle {
   position: absolute;
   top: -5px;
@@ -3722,7 +3783,7 @@ button:disabled {
 }
 
 .logs-drawer-header span {
-  font-weight: var(--fw-semibold);
+  font-weight: 600;
 }
 
 .logs-drawer-actions {
@@ -3759,8 +3820,17 @@ button:disabled {
   border-color: rgba(231, 178, 90, 0.35);
 }
 
+.theme-light .log-copy-button,
+.theme-light .log-clear-button {
+  background: var(--color-surface-2);
+}
+
+.theme-light .log-clear-button {
+  color: var(--color-warning);
+}
+
 .log-clear-button:disabled {
-  color: var(--color-text-faint);
+  color: var(--color-text-subtle);
   cursor: not-allowed;
   border-color: var(--color-border);
 }
@@ -3783,7 +3853,7 @@ button:disabled {
 }
 
 .tips-drawer-header span {
-  font-weight: var(--fw-semibold);
+  font-weight: 600;
 }
 
 .tips-drawer-header strong {
@@ -3868,7 +3938,7 @@ button:disabled {
   border: var(--border-thin);
   border-radius: var(--radius-sm);
   font: inherit;
-  font-weight: var(--fw-semibold);
+  font-weight: 600;
   line-height: 1.35;
 }
 
@@ -3883,6 +3953,11 @@ button:disabled {
   background: rgba(11, 15, 20, 0.26);
   border: var(--border-thin);
   border-radius: var(--radius-md);
+}
+
+.theme-light .tip-card,
+.theme-light .shortcut-guide {
+  background: rgba(255, 255, 255, 0.55);
 }
 
 .tip-card strong,
@@ -3928,6 +4003,10 @@ button:disabled {
 .skip-link:focus {
   top: 8px;
   outline: 2px solid var(--color-text);
+}
+
+.theme-light .skip-link {
+  color: #f8fbff;
 }
 
 /* Keyboard/SR face picker: present in the a11y tree and tab order at all times,

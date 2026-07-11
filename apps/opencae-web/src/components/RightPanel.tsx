@@ -543,7 +543,6 @@ function SupportsPanel({ selectedFace, study, onAddSupport, onUpdateSupport, onR
       <HelpNote helpId="supportPlacement" />
       <PlacementReadout selectedRef={selectedFromViewport} fallbackLabel={selectedFace?.label} />
       <button className="outline-action wide" disabled={!selectedFromViewport} onClick={() => selectedFromViewport && onAddSupport(selectedFromViewport.id)}><Plus size={18} />{addLabel}</button>
-      <SectionTitle>Applied</SectionTitle>
       <SupportEditorList study={study} onUpdateSupport={onUpdateSupport} onRemoveSupport={onRemoveSupport} />
       <Callout>Fixed supports prevent any motion of the selected face.</Callout>
     </Panel>
@@ -669,7 +668,6 @@ function LoadsPanel({
         </select>
       </label>
       <button className="outline-action wide" disabled={!canAddDraftLoad} onClick={() => canAddDraftLoad && onAddLoad(draftLoadType, effectiveDraftValue, selectedFromViewport?.id, draftLoadDirection, payloadMetadata)}><Plus size={18} />{addLabel}</button>
-      <SectionTitle>Applied</SectionTitle>
       <LoadEditorList study={study} displayModel={displayModel} unitSystem={project.unitSystem} onUpdateLoad={onUpdateLoad} onPreviewLoadEdit={onPreviewLoadEdit} onRemoveLoad={onRemoveLoad} />
     </Panel>
   );
