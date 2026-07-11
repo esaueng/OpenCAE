@@ -1,14 +1,11 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ChevronDown, Grid3X3, Plus, Search, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Search, X } from "lucide-react";
 import { compatibleManufacturingProcessesFor, materialCategoryLabel, starterMaterials } from "@opencae/materials";
-import { isRunResultReadyStatus } from "@opencae/schema";
-import type { Material, ResultField, Study } from "@opencae/schema";
+import type { Material } from "@opencae/schema";
 import { useFocusTrap } from "../hooks/useFocusTrap";
 import { formatDensity, formatMaterialStress, type UnitSystem } from "../unitDisplay";
 import dynamicAnalysisImage from "../assets/simulation-showcase/dynamic-analysis.png";
 import staticAnalysisImage from "../assets/simulation-showcase/static-analysis.png";
-import type { ResultMode } from "../workspaceViewTypes";
-import type { StepId } from "./StepBar";
 
 type BoundaryConditionType = "fixed" | "prescribed_displacement" | "force" | "pressure" | "gravity";
 
@@ -63,7 +60,6 @@ function SimulationTypePicker({ onCreateStatic, onCreateDynamic }: Omit<CreateSi
     <>
       <div className="simulation-picker-layout">
         <section className="simulation-choice-list" aria-label="Choose simulation type">
-          <h3>Choose simulation type</h3>
           {[staticAnalysisOption, dynamicAnalysisOption].map((option) => (
             <button
               key={option.type}
@@ -183,108 +179,6 @@ const dynamicAnalysisOption = {
   tags: ["Solid", "Transient loads", "Newmark", "Playback frames"]
 } satisfies AnalysisOption;
 
-interface StudyTreeProps {
-  activeStep: StepId;
-  study: Study;
-  hasGeometry: boolean;
-  hasResults: boolean;
-  runProgress: number;
-  onSelect: (step: StepId) => void;
-  onOpenBoundaryMenu: () => void;
-}
-
-export function StudyTree({ activeStep, study, hasGeometry, hasResults, runProgress, onSelect, onOpenBoundaryMenu }: StudyTreeProps) {
-  const status = workflowStatus(study, hasGeometry, hasResults, runProgress);
-  return (
-    <nav className="study-tree" aria-label="Simulation setup tree">
-      <TreeSection title="Geometries">
-        <TreeButton label="Geometry" step="model" activeStep={activeStep} status={status.geometry} onSelect={onSelect} />
-      </TreeSection>
-      <TreeSection title="Simulations" action={<TreePlus label="Create boundary condition" onClick={onOpenBoundaryMenu} />}>
-        <TreeButton label={study.name} step="model" activeStep={activeStep} status="complete" onSelect={onSelect} />
-        <div className="study-tree-children">
-          <TreeButton label="Geometry" step="model" activeStep={activeStep} status={status.geometry} onSelect={onSelect} />
-          <TreeButton label="Materials" step="material" activeStep={activeStep} status={status.materials} onSelect={onSelect} />
-          <TreeButton label="Boundary conditions" step="supports" activeStep={activeStep} status={status.boundaryConditions} onSelect={onSelect} action={<TreePlus label="Add boundary condition" onClick={onOpenBoundaryMenu} />} />
-          <TreeButton label="Numerics" step="run" activeStep={activeStep} status="complete" onSelect={onSelect} />
-          <TreeButton label="Simulation control" step="run" activeStep={activeStep} status={status.simulationControl} onSelect={onSelect} />
-          <TreeButton label="Result control" step="results" activeStep={activeStep} status={status.resultControl} onSelect={onSelect} />
-          <TreeButton label="Mesh" step="mesh" activeStep={activeStep} status={status.mesh} onSelect={onSelect} />
-          <TreeButton label="Simulation runs" step="run" activeStep={activeStep} status={status.runs} onSelect={onSelect} />
-          {study.runs.map((run, index) => (
-            <button key={run.id} className="tree-run-item" type="button" onClick={() => onSelect(isRunResultReadyStatus(run.status) ? "results" : "run")}>
-              {(() => {
-                const runStatus = isRunResultReadyStatus(run.status) ? "complete" : run.status === "failed" ? "missing" : "running";
-                return <span className={`setup-status ${runStatus}`} role="img" aria-label={runStatus} />;
-              })()}
-              Run {index + 1}
-            </button>
-          ))}
-        </div>
-      </TreeSection>
-      <TreeSection title="Job status">
-        <span className={`job-status-row ${status.runs}`}>{runProgress > 0 && runProgress < 100 ? `Run in progress · ${runProgress}%` : hasResults ? "Latest run complete" : "No active job"}</span>
-      </TreeSection>
-    </nav>
-  );
-}
-
-type SetupStatus = "complete" | "missing" | "running" | "inactive";
-interface WorkflowStatus {
-  geometry: SetupStatus;
-  materials: SetupStatus;
-  boundaryConditions: SetupStatus;
-  simulationControl: SetupStatus;
-  resultControl: SetupStatus;
-  mesh: SetupStatus;
-  runs: SetupStatus;
-}
-
-function workflowStatus(study: Study, hasGeometry: boolean, hasResults: boolean, runProgress: number): WorkflowStatus {
-  const running = runProgress > 0 && runProgress < 100;
-  return {
-    geometry: hasGeometry ? "complete" : "missing",
-    materials: study.materialAssignments.length ? "complete" : "missing",
-    boundaryConditions: study.constraints.length && study.loads.length ? "complete" : "missing",
-    simulationControl: study.meshSettings.status === "complete" ? "complete" : "inactive",
-    resultControl: "complete",
-    mesh: running ? "running" : study.meshSettings.status === "complete" ? "complete" : "missing",
-    runs: running ? "running" : hasResults || study.runs.some((run) => isRunResultReadyStatus(run.status)) ? "complete" : "missing"
-  };
-}
-
-function TreeSection({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
-  return (
-    <section className="study-tree-section">
-      <div className="study-tree-section-header">
-        <span>{title}</span>
-        {action}
-      </div>
-      {children}
-    </section>
-  );
-}
-
-function TreeButton({ label, step, activeStep, status, action, onSelect }: { label: string; step: StepId; activeStep: StepId; status: SetupStatus; action?: ReactNode; onSelect: (step: StepId) => void }) {
-  return (
-    <div className={`tree-row ${activeStep === step ? "active" : ""}`}>
-      <button type="button" aria-current={activeStep === step ? "step" : undefined} onClick={() => onSelect(step)}>
-        <span className={`setup-status ${status}`} role="img" aria-label={status} />
-        {label}
-      </button>
-      {action}
-    </div>
-  );
-}
-
-function TreePlus({ label, onClick }: { label: string; onClick: () => void }) {
-  return (
-    <button className="tree-plus" type="button" onClick={onClick} aria-label={label} title={label}>
-      <Plus size={14} />
-    </button>
-  );
-}
-
 interface MaterialLibraryModalProps {
   open: boolean;
   selectedMaterialId: string;
@@ -374,8 +268,8 @@ export function MaterialLibraryModal({ open, selectedMaterialId, assignedSelecti
           </article>
         </div>
         <footer className="workflow-modal-footer">
-          <button className="primary" type="button" onClick={() => onApply(draftMaterialId)}>Select material</button>
           <button className="secondary" type="button" onClick={onClose}>Cancel</button>
+          <button className="primary" type="button" onClick={() => onApply(draftMaterialId)}>Select material</button>
         </footer>
       </section>
     </div>
@@ -437,65 +331,3 @@ export function BoundaryConditionMenu({ open, onSelect, onClose }: { open: boole
   );
 }
 
-export function ResultsFieldSelector({ resultMode, fields, unitSystem, defaultOpen = false, onResultModeChange }: { resultMode: ResultMode; fields: ResultField[]; unitSystem: UnitSystem; defaultOpen?: boolean; onResultModeChange: (mode: ResultMode) => void }) {
-  const [open, setOpen] = useState(defaultOpen);
-  const available = new Set(fields.map((field) => field.type));
-  const active = resultOptions.find((option) => option.mode === resultMode) ?? resultOptions[0]!;
-  const stressUnits = unitSystem === "US" ? "psi" : "Pa";
-  return (
-    <div
-      className="result-field-selector"
-      onKeyDown={(event) => {
-        if (event.key === "Escape" && open) setOpen(false);
-      }}
-    >
-      {open && (
-        <div className="result-field-menu" role="group" aria-label="Result fields">
-          {resultOptions.map((option) => {
-            const enabled = option.mode ? available.has(option.mode) : false;
-            const units = option.mode ? fields.find((field) => field.type === option.mode)?.units : undefined;
-            return (
-              <button
-                key={option.label}
-                className={`result-option ${enabled ? "" : "disabled"}`}
-                type="button"
-                disabled={!enabled}
-                onClick={() => {
-                  if (option.mode) onResultModeChange(option.mode);
-                  setOpen(false);
-                }}
-              >
-                {option.label}
-                {units ? <small>{units}</small> : null}
-                {option.children ? <ChevronDown size={14} /> : null}
-              </button>
-            );
-          })}
-        </div>
-      )}
-      <div className="result-field-controls">
-        <button className="result-field-button" type="button" onClick={() => setOpen((value) => !value)} aria-haspopup="true" aria-expanded={open}>
-          {active.label}
-          <Grid3X3 size={15} />
-        </button>
-        <button className="result-unit-button" type="button">{activeUnitForResult(resultMode, active.mode ? fields.find((field) => field.type === active.mode)?.units : undefined, stressUnits)}</button>
-      </div>
-    </div>
-  );
-}
-
-const resultOptions: Array<{ label: string; mode?: ResultMode; children?: boolean }> = [
-  { label: "Von Mises Stress", mode: "stress" },
-  { label: "Total Strain", children: true },
-  { label: "Displacement", mode: "displacement", children: true },
-  { label: "Velocity", mode: "velocity" },
-  { label: "Acceleration", mode: "acceleration" },
-  { label: "Cauchy Stress", children: true },
-  { label: "Safety factor", mode: "safety_factor" }
-];
-
-function activeUnitForResult(resultMode: ResultMode, units: string | undefined, stressUnits: string): string {
-  if (resultMode === "safety_factor") return "-";
-  if (units) return units;
-  return resultMode === "stress" ? stressUnits : "";
-}
