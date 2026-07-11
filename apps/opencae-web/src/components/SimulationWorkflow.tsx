@@ -71,6 +71,7 @@ function SimulationTypePicker({ onCreateStatic, onCreateDynamic }: Omit<CreateSi
               type="button"
               aria-pressed={selectedType === option.type}
               onClick={() => setSelectedType(option.type)}
+              onDoubleClick={() => (option.type === "static" ? onCreateStatic : onCreateDynamic)()}
             >
               <AnalysisShowcase option={option} variant="compact" />
               <span>
@@ -119,14 +120,24 @@ function AnalysisShowcase({ option, variant }: { option: AnalysisOption; variant
 function StaticShowcaseOverlay() {
   return (
     <svg className="analysis-showcase-overlay" viewBox="0 0 720 360" aria-hidden="true" focusable="false">
-      <path className="showcase-support-line" d="M112 108 L112 272" />
-      <path className="showcase-support-arrow" d="M88 122 L112 96 L136 122" />
-      <path className="showcase-support-arrow" d="M88 258 L112 284 L136 258" />
-      <path className="showcase-load-line" d="M616 56 L616 116" />
-      <path className="showcase-load-head" d="M584 108 L616 164 L648 108 Z" />
-      <text className="showcase-load-label" x="560" y="48">500 N</text>
-      <text className="showcase-caption showcase-caption--support" x="76" y="324">Fixed support</text>
-      <text className="showcase-caption showcase-caption--result" x="424" y="324">Static peak stress</text>
+      <path className="showcase-support-post" d="M104 106 L104 274" />
+      <path
+        className="showcase-support-hatch"
+        d="M104 120 l-15 13 M104 148 l-15 13 M104 176 l-15 13 M104 204 l-15 13 M104 232 l-15 13 M104 260 l-15 13"
+      />
+      <path className="showcase-load-shaft" d="M616 58 L616 138" />
+      <path className="showcase-load-chevron" d="M606 126 L616 140 L626 126" />
+      <text className="showcase-label showcase-label--load" x="616" y="44" textAnchor="middle">500 N</text>
+      <g className="showcase-callout">
+        <circle className="showcase-callout-anchor" cx="112" cy="240" r="4" />
+        <path className="showcase-callout-leader" d="M116 243 L172 314 L318 314" />
+        <text className="showcase-label" x="180" y="306">Fixed support</text>
+      </g>
+      <g className="showcase-callout">
+        <circle className="showcase-callout-anchor" cx="632" cy="258" r="4" />
+        <path className="showcase-callout-leader" d="M628 262 L566 318 L392 318" />
+        <text className="showcase-label" x="400" y="310">Static peak stress</text>
+      </g>
     </svg>
   );
 }
@@ -134,19 +145,20 @@ function StaticShowcaseOverlay() {
 function DynamicShowcaseOverlay() {
   return (
     <svg className="analysis-showcase-overlay" viewBox="0 0 720 360" aria-hidden="true" focusable="false">
-      <path className="showcase-support-line" d="M92 98 L92 276" />
-      <path className="showcase-support-arrow" d="M68 112 L92 86 L116 112" />
-      <path className="showcase-support-arrow" d="M68 262 L92 288 L116 262" />
-      <path className="showcase-load-line" d="M612 52 L612 112" />
-      <path className="showcase-load-head" d="M580 104 L612 160 L644 104 Z" />
-      <text className="showcase-load-label" x="532" y="46">Impulse load</text>
-      <path className="showcase-frame-arc" d="M270 284 C330 244 420 244 480 284" />
-      <circle className="showcase-frame-dot showcase-frame-dot--one" cx="270" cy="284" r="8" />
-      <circle className="showcase-frame-dot showcase-frame-dot--two" cx="374" cy="252" r="8" />
-      <circle className="showcase-frame-dot showcase-frame-dot--three" cx="480" cy="284" r="8" />
-      <text className="showcase-frame-label" x="236" y="324">Frame 1</text>
-      <text className="showcase-frame-label" x="340" y="324">Frame 2</text>
-      <text className="showcase-frame-label" x="444" y="324">Frame 3</text>
+      <path className="showcase-support-post" d="M86 98 L86 276" />
+      <path
+        className="showcase-support-hatch"
+        d="M86 112 l-15 13 M86 140 l-15 13 M86 168 l-15 13 M86 196 l-15 13 M86 224 l-15 13 M86 252 l-15 13"
+      />
+      <path className="showcase-load-shaft" d="M612 54 L612 134" />
+      <path className="showcase-load-chevron" d="M602 122 L612 136 L622 122" />
+      <text className="showcase-label showcase-label--load" x="612" y="40" textAnchor="middle">Impulse load</text>
+      <path className="showcase-frame-cross" d="M262 282 h16 M270 274 v16" />
+      <path className="showcase-frame-cross" d="M366 250 h16 M374 242 v16" />
+      <path className="showcase-frame-cross" d="M472 282 h16 M480 274 v16" />
+      <text className="showcase-frame-label" x="270" y="316" textAnchor="middle">Frame 1</text>
+      <text className="showcase-frame-label" x="374" y="316" textAnchor="middle">Frame 2</text>
+      <text className="showcase-frame-label" x="480" y="316" textAnchor="middle">Frame 3</text>
     </svg>
   );
 }
