@@ -1737,38 +1737,6 @@ img {
   color: rgba(51, 65, 85, 0.8);
 }
 
-.result-marker,
-.load-marker,
-.analysis-callout {
-  white-space: nowrap;
-  padding: 3px 7px;
-  color: var(--color-text);
-  background: rgba(17, 24, 33, 0.85);
-  border: var(--border-thin);
-  border-radius: var(--radius-sm);
-  font-family: var(--font-mono);
-  font-size: var(--fs-mini);
-  backdrop-filter: blur(8px);
-}
-
-.analysis-callout {
-  color: #111827;
-  background: rgba(225, 229, 235, 0.94);
-  border-color: #6b7280;
-}
-
-.analysis-callout.max {
-  border-color: rgba(239, 68, 68, 0.7);
-}
-
-.analysis-callout.mid {
-  border-color: rgba(245, 158, 11, 0.72);
-}
-
-.analysis-callout.min {
-  border-color: rgba(37, 99, 235, 0.7);
-}
-
 .model-notice {
   width: 260px;
   display: grid;
