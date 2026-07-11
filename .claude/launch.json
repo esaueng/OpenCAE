@@ -3,9 +3,10 @@
   "configurations": [
     {
       "name": "opencae-web",
-      "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["--filter", "@opencae/web", "dev"],
-      "port": 5173
+      "runtimeExecutable": "sh",
+      "runtimeArgs": ["-c", "pnpm --filter @opencae/web dev --port ${PORT:-5173}"],
+      "port": 5173,
+      "autoPort": true
     },
     {
       "name": "opencae-web-cloud",

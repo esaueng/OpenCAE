@@ -174,7 +174,7 @@ export const bracketDemoProject: Project = {
         summary: {
           nodes: 42381,
           elements: 26944,
-          warnings: ["Small feature simplified for the mock mesh."]
+          warnings: ["Small features simplified in the demo mesh preview."]
         }
       },
       solverSettings: {

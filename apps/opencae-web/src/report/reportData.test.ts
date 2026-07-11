@@ -91,6 +91,52 @@ describe("buildReportData", () => {
     expect(data.materials.rows[0]).toEqual(expect.arrayContaining(["--"]));
   });
 
+  test("keeps the demo report honest about procedural sample geometry and mesh warnings", () => {
+    const project: Project = {
+      ...bracketDemoProject,
+      name: "Cantilever Demo",
+      geometryFiles: bracketDemoProject.geometryFiles.map((geometry) => ({
+        ...geometry,
+        filename: "cantilever-beam.step",
+        metadata: { ...geometry.metadata, source: "sample", sampleModel: "cantilever" }
+      })),
+      studies: bracketDemoProject.studies.map((study) => ({ ...study }))
+    };
+    const data = report({
+      project,
+      study: project.studies[0]!,
+      displayModel: {
+        ...bracketDisplayModel,
+        coreCloudGeometry: {
+          kind: "structured_block",
+          sampleId: "cantilever",
+          units: "mm",
+          descriptor: { length: 180, width: 24, height: 24 }
+        }
+      }
+    });
+
+    expect(data.geometry).toContainEqual({ label: "Source", value: "Sample model: Cantilever (procedural)" });
+    expect(data.geometryFiles.rows[0]).toEqual(["cantilever-beam.step", "Sample placeholder (procedural geometry)", "--"]);
+    expect(data.mesh).toContainEqual({ label: "Warnings", value: "Small features simplified in the demo mesh preview." });
+  });
+
+  test("translates legacy internal mesh warnings from saved projects at the report boundary", () => {
+    const study: Study = {
+      ...bracketDemoProject.studies[0]!,
+      meshSettings: {
+        ...bracketDemoProject.studies[0]!.meshSettings,
+        summary: { nodes: 42381, elements: 26944, warnings: ["Small feature simplified for the mock mesh.", "Aspect ratio above 5 on 3 elements."] }
+      }
+    };
+    const data = report({ study });
+
+    expect(data.mesh).toContainEqual({
+      label: "Warnings",
+      value: "Small features simplified in the demo mesh preview.; Aspect ratio above 5 on 3 elements."
+    });
+  });
+
   test("adds dynamic solver and transient rows", () => {
     const dynamicStudy: Study = {
       ...bracketDemoProject.studies[0]!,

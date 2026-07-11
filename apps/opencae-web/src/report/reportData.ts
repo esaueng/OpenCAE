@@ -137,7 +137,11 @@ export function buildReportData(input: BuildReportDataInput): ReportData {
     geometry: geometryRows(input.project, input.displayModel ? displayModelForUnits(input.displayModel, input.unitSystem) : null),
     geometryFiles: {
       headers: ["File", "Format", "Size"],
-      rows: input.project.geometryFiles.map((geometry) => [geometry.filename, geometryFormat(geometry.filename), geometryFileSize(geometry.metadata)]),
+      rows: input.project.geometryFiles.map((geometry) => [
+        geometry.filename,
+        isSampleGeometryFile(geometry) ? "Sample placeholder (procedural geometry)" : geometryFormat(geometry.filename),
+        geometryFileSize(geometry.metadata)
+      ]),
       emptyMessage: "No geometry file recorded."
     },
     materials: materialTable(input.study, input.unitSystem),
@@ -149,7 +153,7 @@ export function buildReportData(input: BuildReportDataInput): ReportData {
       { label: "Elements", value: meshCount(meshSummary?.elements, actualMeshCounts) },
       { label: "Element type", value: elementTypeForMesh(provenance?.meshSource) },
       { label: "Source", value: input.solverMeshSummary ? "Core solver" : formatMeshSourceLabel(provenance?.meshSource, input.displayModel ?? undefined) },
-      { label: "Warnings", value: input.study.meshSettings.summary?.warnings.length ? input.study.meshSettings.summary.warnings.join("; ") : "None" }
+      { label: "Warnings", value: input.study.meshSettings.summary?.warnings.length ? input.study.meshSettings.summary.warnings.map(userFacingMeshWarning).join("; ") : "None" }
     ],
     solver: solverRows(input, summary),
     figures: {
@@ -203,7 +207,9 @@ function geometryRows(project: Project, displayModel: DisplayModel | null): Repo
   } else if (geometry?.kind === "uploaded_mesh") {
     source = `Uploaded mesh: ${geometry.filename ?? displayModel?.visualMesh?.filename ?? displayModel?.name ?? MISSING}`;
   } else if (geometry?.kind === "structured_block") {
-    source = "Structured block (procedural proxy)";
+    source = geometry.sampleId
+      ? `Sample model: ${humanize(geometry.sampleId)} (procedural)`
+      : "Structured block (procedural proxy)";
   } else if (displayModel?.nativeCad) {
     source = `Uploaded CAD: ${displayModel.nativeCad.filename}`;
   } else if (displayModel?.visualMesh) {
@@ -410,6 +416,22 @@ function elementTypeForMesh(meshSource: ResultSummary["provenance"] extends infe
 
 function selectionLabel(study: Study, selectionRef: string): string {
   return study.namedSelections.find((selection) => selection.id === selectionRef)?.name ?? selectionRef ?? MISSING;
+}
+
+// Saved demo projects persist the internal seed-data phrasing; translate it at
+// the report boundary so customer PDFs never show mock-mesh jargon.
+const USER_FACING_MESH_WARNINGS: Record<string, string> = {
+  "Small feature simplified for the mock mesh.": "Small features simplified in the demo mesh preview."
+};
+
+function userFacingMeshWarning(warning: string): string {
+  return USER_FACING_MESH_WARNINGS[warning] ?? warning;
+}
+
+// Sample geometry "files" are display names only — no CAD data exists, so the
+// report must not present them as customer CAD that was meshed.
+function isSampleGeometryFile(geometry: Project["geometryFiles"][number]): boolean {
+  return geometry.metadata.source === "sample" || typeof geometry.metadata.sampleModel === "string";
 }
 
 function geometryFormat(filename: string): string {
