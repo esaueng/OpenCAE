@@ -56,13 +56,15 @@ class PdfReport {
     this.text(this.data.projectName, REPORT_LAYOUT.margin, this.y, 13, REPORT_THEME.ink, "bold");
     this.y += 5.5;
     this.text(`${this.data.studyName} · ${this.data.unitSystemLabel}`, REPORT_LAYOUT.margin, this.y, REPORT_TYPE.body, REPORT_THEME.inkMuted);
-    this.y += 9;
+    this.y += 8;
 
-    const production = this.data.provenanceTier === "production_fea";
-    this.callout(this.data.provenanceLabel, production ? "success" : "warning", 10);
-    this.y += 4;
-    this.table({ headers: ["Key result", "Value"], rows: this.data.keyResults.map((row) => [row.label, row.value]) }, { compact: true, keyResults: true });
-    this.failureCallout();
+    this.coverMetaStrip();
+    if (this.data.provenanceTier !== "production_fea") {
+      this.callout(this.data.provenanceLabel, "warning", 10);
+      this.y += 4;
+    }
+    this.table({ headers: ["Key result", "Value"], rows: this.data.keyResults.map((row) => [row.label, row.value]) }, { compact: true, keyResults: true, headerless: true });
+    this.verdictLine();
 
     this.text("Primary result", REPORT_LAYOUT.margin, this.y, 10, REPORT_THEME.accent, "bold");
     this.y += 4;
@@ -94,7 +96,9 @@ class PdfReport {
   }
 
   results(): void {
-    this.sectionHeading(6, "Result figures");
+    // Keep the heading with its first figure: a figure claims up to 96mm, so a
+    // heading that fits alone in less strands itself above a page break.
+    this.sectionHeading(6, "Result figures", 108);
     this.figure(this.data.figures.stress, 82);
     this.ensureSpace(36);
     this.figure(this.data.figures.displacement, 82);
@@ -139,22 +143,50 @@ class PdfReport {
     }
     this.text("OpenCAE", REPORT_LAYOUT.margin + 14, REPORT_LAYOUT.margin + 5.2, 15, REPORT_THEME.ink, "bold");
     this.text(this.data.reportDate, this.pageWidth - REPORT_LAYOUT.margin, REPORT_LAYOUT.margin + 4.2, REPORT_TYPE.body, REPORT_THEME.inkMuted, "normal", "right");
-    this.doc.setDrawColor(REPORT_THEME.accent);
+    this.doc.setDrawColor(REPORT_THEME.ink);
     this.doc.setLineWidth(0.5);
     this.doc.line(REPORT_LAYOUT.margin, REPORT_LAYOUT.margin + 11, this.pageWidth - REPORT_LAYOUT.margin, REPORT_LAYOUT.margin + 11);
   }
 
-  private failureCallout(): void {
-    const assessment = this.data.failureAssessment;
-    const tone = assessment.status === "pass" ? "success" : assessment.status === "fail" ? "error" : "warning";
-    const message = `${assessment.title}: ${assessment.message}`;
-    const lines = this.splitText(message, this.contentWidth - 8, REPORT_TYPE.body, "bold");
-    this.callout(lines, tone, Math.max(12, lines.length * 4.3 + 5));
-    this.y += 5;
+  private coverMetaStrip(): void {
+    const rows = this.data.coverMeta;
+    if (!rows.length) return;
+    const cellWidth = this.contentWidth / rows.length;
+    const topY = this.y;
+    this.doc.setDrawColor(REPORT_THEME.hairline);
+    this.doc.setLineWidth(0.2);
+    this.doc.line(REPORT_LAYOUT.margin, topY, this.pageWidth - REPORT_LAYOUT.margin, topY);
+    rows.forEach((row, index) => {
+      const x = REPORT_LAYOUT.margin + index * cellWidth;
+      this.text(row.label.toUpperCase(), x, topY + 4, 6.2, REPORT_THEME.inkMuted);
+      const value = this.splitText(row.value, cellWidth - 4, 8, "bold")[0] ?? row.value;
+      this.text(value, x, topY + 8, 8, REPORT_THEME.ink, "bold");
+    });
+    this.doc.line(REPORT_LAYOUT.margin, topY + 10.5, this.pageWidth - REPORT_LAYOUT.margin, topY + 10.5);
+    this.y = topY + 15;
   }
 
-  private sectionHeading(number: number, title: string): void {
-    this.ensureSpace(REPORT_LAYOUT.sectionKeepTogether);
+  private verdictLine(): void {
+    const assessment = this.data.failureAssessment;
+    const color = assessment.status === "pass" ? REPORT_THEME.success : assessment.status === "fail" ? REPORT_THEME.error : REPORT_THEME.warning;
+    const textX = REPORT_LAYOUT.margin + 4.5;
+    this.doc.setFillColor(color);
+    this.doc.circle(REPORT_LAYOUT.margin + 1.2, this.y - 1.2, 1.1, "F");
+    this.text(assessment.title, textX, this.y, REPORT_TYPE.body, REPORT_THEME.ink, "bold");
+    const titleWidth = this.doc.getTextWidth(assessment.title);
+    const messageLines = this.splitText(`— ${assessment.message}`, this.contentWidth - 4.5 - titleWidth - 2, REPORT_TYPE.body);
+    this.text(messageLines[0] ?? "", textX + titleWidth + 2, this.y, REPORT_TYPE.body, REPORT_THEME.ink);
+    if (messageLines.length > 1) {
+      this.y += 4.2;
+      const wrapped = this.splitText(messageLines.slice(1).join(" "), this.contentWidth - 4.5, REPORT_TYPE.body);
+      this.text(wrapped, textX, this.y, REPORT_TYPE.body, REPORT_THEME.ink);
+      this.y += (wrapped.length - 1) * 4.2;
+    }
+    this.y += 8;
+  }
+
+  private sectionHeading(number: number, title: string, keepTogether: number = REPORT_LAYOUT.sectionKeepTogether): void {
+    this.ensureSpace(keepTogether);
     this.y += 2;
     this.text(`${number}  ${title}`, REPORT_LAYOUT.margin, this.y, REPORT_TYPE.section, REPORT_THEME.accent, "bold");
     this.y += 3;
@@ -174,7 +206,7 @@ class PdfReport {
     this.table({ headers: ["Item", "Value"], rows: rows.map((row) => [row.label, row.value]) });
   }
 
-  private table(table: ReportTable, options: { compact?: boolean; keyResults?: boolean } = {}): void {
+  private table(table: ReportTable, options: { compact?: boolean; keyResults?: boolean; headerless?: boolean } = {}): void {
     this.ensureSpace(22);
     const rows = table.rows.length ? table.rows : [[table.emptyMessage ?? "Not available (--)", ...table.headers.slice(1).map(() => "--")]];
     autoTable(this.doc, {
@@ -184,7 +216,7 @@ class PdfReport {
       theme: "plain",
       head: [table.headers],
       body: rows,
-      showHead: "everyPage",
+      showHead: options.headerless ? false : "everyPage",
       pageBreak: "auto",
       rowPageBreak: "avoid",
       styles: {
@@ -207,7 +239,7 @@ class PdfReport {
         lineColor: REPORT_THEME.hairline
       },
       didParseCell: (hook) => {
-        if (!options.keyResults || hook.section !== "body" || hook.column.index !== 1 || hook.row.index >= 4) return;
+        if (!options.keyResults || hook.section !== "body" || hook.column.index !== 1) return;
         hook.cell.styles.fontSize = REPORT_TYPE.keyValue;
         hook.cell.styles.fontStyle = "bold";
       },
