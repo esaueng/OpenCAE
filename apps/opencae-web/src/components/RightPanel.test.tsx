@@ -1459,6 +1459,28 @@ describe("RightPanel payload mass controls", () => {
     expect(sampleHtml).toContain("<span>Mass</span>");
   });
 
+  test("reports beam structural mass separately from the payload mass", () => {
+    const beamHtml = renderPanel("model", {
+      sampleModel: "plate",
+      project: {
+        ...project,
+        geometryFiles: [{
+          id: "geom-beam",
+          projectId: project.id,
+          filename: "end-loaded-beam.step",
+          localPath: "examples/beam/end-loaded-beam.step",
+          artifactKey: "project-1/geometry/beam-display.json",
+          status: "ready",
+          metadata: { source: "sample", sampleModel: "plate" }
+        }]
+      }
+    });
+
+    expect(beamHtml).toContain("28,590 mm");
+    expect(beamHtml).toContain("77 g");
+    expect(beamHtml).toContain("Payload mass · 0.498 kg");
+  });
+
   test("renders an accessible repair action when uploaded STEP surfaces are open", () => {
     const html = renderPanel("model", {
       project: uploadedStepProject("repairable", "Open boundary loops were detected in this STEP model."),

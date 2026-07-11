@@ -161,8 +161,11 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sa
   const sampleLabel = sampleOptionFor(pendingSampleModel).title;
   const sampleAnalysisLabel = sampleAnalysisType === "dynamic_structural" ? "Dynamic Structural" : "Static Stress";
   const sampleForceLabel = formatEquivalentForce(500, project.unitSystem);
-  const sampleSummaryVolumeMm3 = pendingSampleModel === "plate" ? 184_320 : 41_280;
-  const sampleSummaryMassG = pendingSampleModel === "plate" ? 498 : 111;
+  // The beam summary describes the structural body only. The separate
+  // 0.498 kg payload is reported below as a load and must not be counted as
+  // beam material mass.
+  const sampleSummaryVolumeMm3 = pendingSampleModel === "plate" ? 28_590 : 41_280;
+  const sampleSummaryMassG = pendingSampleModel === "plate" ? 77 : 111;
   const sampleLoadTitle = pendingSampleModel === "plate" ? `Payload mass · ${formatMass(0.497664, "kg", project.unitSystem)}` : `Force · ${sampleForceLabel}`;
   const orientation = getModelOrientation(displayModel);
   const hasCustomOrientation = orientation.x !== 0 || orientation.y !== 0 || orientation.z !== 0;

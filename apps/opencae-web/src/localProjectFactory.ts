@@ -7,6 +7,18 @@ import { BRACKET_CORE_CLOUD_GEOMETRY, BRACKET_GEOMETRY_MIGRATION_NOTE, refreshBr
 import type { EmbeddedModelFile, LocalResultBundle } from "./projectFile";
 import type { SampleAnalysisType, SampleModelId, SampleProjectResponse } from "./lib/api";
 
+const BEAM_RENDER_LENGTH = 3.8;
+const BEAM_RENDER_HEIGHT = 0.28;
+const BEAM_RENDER_DEPTH = 0.36;
+const BEAM_PHYSICAL_LENGTH_MM = 160;
+const BEAM_PAYLOAD_VOLUME_M3 = 0.00018432;
+const BEAM_STRUCTURAL_DIMENSIONS: NonNullable<DisplayModel["dimensions"]> = {
+  x: BEAM_PHYSICAL_LENGTH_MM,
+  y: BEAM_PHYSICAL_LENGTH_MM * (BEAM_RENDER_HEIGHT / BEAM_RENDER_LENGTH),
+  z: BEAM_PHYSICAL_LENGTH_MM * (BEAM_RENDER_DEPTH / BEAM_RENDER_LENGTH),
+  units: "mm"
+};
+
 const SAMPLE_META: Record<SampleModelId, { projectName: string; modelName: string; filename: string; displayName: string; dimensions: DisplayModel["dimensions"] }> = {
   bracket: {
     projectName: "Bracket Demo",
@@ -20,7 +32,7 @@ const SAMPLE_META: Record<SampleModelId, { projectName: string; modelName: strin
     modelName: "Beam",
     filename: "end-loaded-beam.step",
     displayName: "end loaded beam assembly",
-    dimensions: { x: 160, y: 32, z: 36, units: "mm" }
+    dimensions: BEAM_STRUCTURAL_DIMENSIONS
   },
   cantilever: {
     projectName: "Cantilever Demo",
@@ -188,7 +200,9 @@ function sampleLoadsFor(sample: SampleModelId, templateLoads: Load[], displayMod
   }
   if (sample !== "plate") return templateLoads;
   const payloadFace = displayModel.faces.find((face) => face.id === "face-load-top");
-  const volumeM3 = dimensionsVolumeM3(displayModel.dimensions);
+  // The payload is a separate body. Its mass must not be inferred from the
+  // structural beam dimensions, which also define the Core solver block.
+  const volumeM3 = BEAM_PAYLOAD_VOLUME_M3;
   const center = payloadFace?.center ?? [0, 0, 0] as [number, number, number];
   return templateLoads.map((load) => load.selectionRef === "selection-load-face"
     ? {
@@ -214,11 +228,6 @@ function sampleLoadsFor(sample: SampleModelId, templateLoads: Load[], displayMod
         status: "complete"
       }
     : load);
-}
-
-function dimensionsVolumeM3(dimensions: DisplayModel["dimensions"]) {
-  if (!dimensions) return 0;
-  return Math.max(dimensions.x, 0) * Math.max(dimensions.y, 0) * Math.max(dimensions.z, 0) / 1_000_000_000;
 }
 
 export function createLocalBlankProject(now = new Date().toISOString()): SampleProjectResponse {
