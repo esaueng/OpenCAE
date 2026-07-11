@@ -628,7 +628,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     // Single-key shortcuts: honor the user's off-switch (WCAG 2.1.4) and stay
     // inert while a modal/menu overlay is open.
     if (!singleKeyShortcutsEnabled) return;
-    if (document.querySelector('[role="dialog"], .condition-menu, .result-field-menu')) return;
+    if (document.querySelector('[role="dialog"], .condition-menu')) return;
     if (key === "h") {
       event.preventDefault();
       handleFitDefaultView();
