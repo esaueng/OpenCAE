@@ -405,6 +405,31 @@ describe("RightPanel payload mass controls", () => {
     expect(renderPanel("run")).not.toContain("Start time");
   });
 
+  test("offers an analysis-type switch on the run panel reflecting the study type", () => {
+    const staticHtml = renderPanel("run");
+    expect(staticHtml).toContain('aria-label="Analysis type"');
+    expect(staticHtml).toMatch(/aria-pressed="true"[^>]*>Static</);
+    expect(staticHtml).toMatch(/aria-pressed="false"[^>]*>Dynamic</);
+
+    const dynamicStudy: Study = {
+      ...study,
+      name: "Dynamic Structural",
+      type: "dynamic_structural",
+      solverSettings: {
+        startTime: 0,
+        endTime: 0.1,
+        timeStep: 0.005,
+        outputInterval: 0.005,
+        dampingRatio: 0.02,
+        integrationMethod: "newmark_average_acceleration",
+        loadProfile: "ramp"
+      }
+    };
+    const dynamicHtml = renderPanel("run", { study: dynamicStudy });
+    expect(dynamicHtml).toMatch(/aria-pressed="true"[^>]*>Dynamic</);
+    expect(dynamicHtml).toMatch(/aria-pressed="false"[^>]*>Static</);
+  });
+
   test("renders selected dynamic load profile helper text", () => {
     const dynamicStudy: Study = {
       ...study,
