@@ -1,5 +1,5 @@
 import { lazy, startTransition, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { isRunResultReadyStatus } from "@opencae/schema";
+import { DynamicSolverSettingsSchema, isRunResultReadyStatus } from "@opencae/schema";
 import type { Constraint, DisplayFace, DisplayModel, DynamicSolverSettings, Load, MeshQuality, NamedSelection, Project, ResultField, ResultRenderBounds, ResultSummary, RunEvent, RunTimingEstimate, SimulationFidelity, Study } from "@opencae/schema";
 import { RotateCcw, Save } from "lucide-react";
 import { addLoad, addSupport, assignMaterial, cancelRun, createProject, generateMesh, getResults, importLocalProject, isStepGeometryMeshFailure, loadSampleProject, probeUploadedStepRepairAfterMeshFailure, renameProject, repairUploadedStepModel, runSimulation, saveRunReportCaptures, STEP_REPAIR_UNAVAILABLE_MESSAGE, subscribeToRun, updateStudy as saveStudyPatch, uploadedStepRepairProbeDecision, uploadModel, type SampleAnalysisType, type SampleModelId } from "./lib/api";
@@ -1324,6 +1324,28 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     );
   }
 
+  function handleChangeStudyType(type: Study["type"]) {
+    if (!study || study.type === type || solverRunning) return;
+    // Backend and fidelity survive the switch; the transient settings are
+    // schema defaults going to dynamic and dropped going back to static.
+    const backend = study.solverSettings.backend;
+    const fidelity = study.solverSettings.fidelity;
+    const carried = { ...(backend ? { backend } : {}), ...(fidelity ? { fidelity } : {}) };
+    const defaultNames = ["Static Stress", "Dynamic Structural"];
+    const name = defaultNames.includes(study.name)
+      ? (type === "dynamic_structural" ? "Dynamic Structural" : "Static Stress")
+      : study.name;
+    const patch: Partial<Study> = type === "dynamic_structural"
+      ? { type, name, solverSettings: DynamicSolverSettingsSchema.parse(carried) }
+      : { type, name, solverSettings: carried };
+    void updateStudy(saveStudyPatch(
+      study.id,
+      patch,
+      type === "dynamic_structural" ? "Study switched to dynamic structural analysis." : "Study switched to static stress analysis.",
+      study
+    ));
+  }
+
   function normalizedDynamicSolverSettings(
     currentSettings: DynamicSolverSettings,
     mergedSettings: DynamicSolverSettings & { fidelity?: SimulationFidelity },
@@ -1767,6 +1789,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           onGenerateMesh={handleGenerateMesh}
           meshPhaseProgress={meshPhaseProgress}
           onUpdateSolverSettings={handleUpdateSolverSettings}
+          onChangeStudyType={handleChangeStudyType}
           onRunSimulation={handleRunSimulation}
           onCancelSimulation={handleCancelSimulation}
           canCancelSimulation={solverRunning}

@@ -100,6 +100,7 @@ interface RightPanelProps {
   onGenerateMesh: (preset: MeshQuality) => void;
   meshPhaseProgress?: WasmMeshPhaseProgress | null;
   onUpdateSolverSettings?: (settings: SolverSettingsPatch) => void;
+  onChangeStudyType?: (type: Study["type"]) => void;
   onRunSimulation: () => void;
   onCancelSimulation?: () => void;
   canCancelSimulation?: boolean;
@@ -1104,7 +1105,7 @@ function MeshPanel({ project, study, onGenerateMesh, meshPhaseProgress, onRepair
   );
 }
 
-function RunPanel({ study, displayModel, runProgress, runError, runTiming, onRunSimulation, onCancelSimulation, canCancelSimulation, onUpdateSolverSettings, canRunSimulation, missingRunItems }: RightPanelProps) {
+function RunPanel({ study, displayModel, runProgress, runError, runTiming, onRunSimulation, onCancelSimulation, canCancelSimulation, onUpdateSolverSettings, onChangeStudyType, canRunSimulation, missingRunItems }: RightPanelProps) {
   const progressPercent = Math.max(0, Math.min(100, Math.round(runProgress)));
   const isRunning = canCancelSimulation ?? (progressPercent > 0 && progressPercent < 100);
   const remainingLabel = formatSimulationEta(runTiming?.estimatedRemainingMs, isRunning);
@@ -1145,6 +1146,25 @@ function RunPanel({ study, displayModel, runProgress, runError, runTiming, onRun
           so older project files (including retired cloud selections) still
           round-trip. */}
       <SectionTitle>Simulation settings</SectionTitle>
+      <div className="field">
+        <span>Analysis type</span>
+        <div className="segmented analysis-type" role="group" aria-label="Analysis type">
+          <button
+            className={study.type === "static_stress" ? "active" : ""}
+            type="button"
+            aria-pressed={study.type === "static_stress"}
+            disabled={isRunning}
+            onClick={() => study.type !== "static_stress" && onChangeStudyType?.("static_stress")}
+          >Static</button>
+          <button
+            className={study.type === "dynamic_structural" ? "active" : ""}
+            type="button"
+            aria-pressed={study.type === "dynamic_structural"}
+            disabled={isRunning}
+            onClick={() => study.type !== "dynamic_structural" && onChangeStudyType?.("dynamic_structural")}
+          >Dynamic</button>
+        </div>
+      </div>
       <div className="summary-box">
         <Info label="Solver" value="Local (in-browser)" />
       </div>
