@@ -374,8 +374,8 @@ export function MaterialLibraryModal({ open, selectedMaterialId, assignedSelecti
           </article>
         </div>
         <footer className="workflow-modal-footer">
-          <button className="primary" type="button" onClick={() => onApply(draftMaterialId)}>Select material</button>
           <button className="secondary" type="button" onClick={onClose}>Cancel</button>
+          <button className="primary" type="button" onClick={() => onApply(draftMaterialId)}>Select material</button>
         </footer>
       </section>
     </div>
