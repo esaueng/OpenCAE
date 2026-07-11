@@ -234,7 +234,7 @@ export function MaterialLibraryModal({ open, selectedMaterialId, assignedSelecti
                   {group.materials.map((material) => {
                     const processCount = compatibleManufacturingProcessesFor(material).length;
                     return (
-                      <button key={material.id} className={material.id === draftMaterialId ? "active" : ""} type="button" aria-pressed={material.id === draftMaterialId} onClick={() => setDraftMaterialId(material.id)}>
+                      <button key={material.id} className={material.id === draftMaterialId ? "active" : ""} type="button" aria-pressed={material.id === draftMaterialId} onClick={() => setDraftMaterialId(material.id)} onDoubleClick={() => onApply(material.id)}>
                         <span>
                           <strong>{material.name}</strong>
                           <small>{processCount} compatible {processCount === 1 ? "process" : "processes"}</small>
