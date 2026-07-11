@@ -63,7 +63,6 @@ function SimulationTypePicker({ onCreateStatic, onCreateDynamic }: Omit<CreateSi
     <>
       <div className="simulation-picker-layout">
         <section className="simulation-choice-list" aria-label="Choose simulation type">
-          <h3>Choose simulation type</h3>
           {[staticAnalysisOption, dynamicAnalysisOption].map((option) => (
             <button
               key={option.type}
