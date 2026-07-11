@@ -4226,6 +4226,10 @@ button:disabled {
     padding: 6px 8px;
   }
 
+  .topbar-action .topbar-action-label {
+    display: none;
+  }
+
   .workspace {
     grid-template-columns: var(--stepbar-w) minmax(0, 1fr);
   }
