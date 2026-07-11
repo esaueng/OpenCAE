@@ -64,12 +64,17 @@ function fixtureReport(): ReportData {
     unitSystemLabel: "SI (m, Pa)",
     provenanceTier: "production_fea",
     provenanceLabel: "OpenCAE Core Local (in-browser)",
+    coverMeta: [
+      { label: "Solver", value: "OpenCAE Core Local (in-browser)" },
+      { label: "Version", value: "0.2.0" },
+      { label: "Method", value: "mdof_dynamic" },
+      { label: "Mesh", value: "Tet10 · 26,944 elements" }
+    ],
     keyResults: [
       { label: "Max von Mises stress", value: "142 MPa" },
       { label: "Max displacement", value: "0.184 mm" },
       { label: "Safety factor", value: "1.8" },
-      { label: "Reaction force", value: "500 N" },
-      { label: "Failure check", value: "Within allowable limit" }
+      { label: "Reaction force", value: "500 N" }
     ],
     failureAssessment: { status: "pass", title: "Within allowable limit", message: "The reported factor of safety is above 1.0." },
     geometry: [{ label: "Source", value: "Sample model: Cantilever (procedural)" }],

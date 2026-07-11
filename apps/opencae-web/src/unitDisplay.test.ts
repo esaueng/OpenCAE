@@ -32,13 +32,26 @@ describe("unit display formatting", () => {
       maxDisplacementUnits: "mm",
       safetyFactor: 1.8,
       reactionForce: 500,
-      reactionForceUnits: "N"
+      reactionForceUnits: "N",
+      transient: {
+        analysisType: "dynamic_structural",
+        startTime: 0,
+        endTime: 0.1,
+        timeStep: 0.005,
+        outputInterval: 0.01,
+        frameCount: 11,
+        peakDisplacementTimeSeconds: 0.08,
+        peakDisplacement: 0.184
+      }
     }, "US");
 
     expect(summary.maxStressUnits).toBe("ksi");
     expect(summary.maxDisplacementUnits).toBe("in");
     expect(summary.safetyFactor).toBe(1.8);
     expect(summary.reactionForceUnits).toBe("lbf");
+    // transient.peakDisplacement shares maxDisplacementUnits, so it must
+    // convert alongside it — a mm value labeled "in" is a silent 25x error.
+    expect(summary.transient?.peakDisplacement).toBe(summary.maxDisplacement);
 
     const field = resultFieldForUnits({
       id: "field-displacement",
