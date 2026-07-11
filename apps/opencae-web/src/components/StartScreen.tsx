@@ -131,7 +131,6 @@ export function SampleProjectMenu({ selectedSample, selectedAnalysisType, onBack
     <div className="start-sample-menu">
       <div className="start-sample-menu-bar">
         <button className="start-menu-back" type="button" onClick={onBack}>Back</button>
-        <span>Sample model</span>
       </div>
       <div className="start-sample-setup" aria-label="Sample setup">
         <div className="start-sample-header">
