@@ -1,4 +1,4 @@
-import { assessResultFailure, classifyResultProvenance } from "@opencae/schema";
+import { assessResultFailure, classifyResultProvenance, estimateAllowableLoadForSafetyFactor } from "@opencae/schema";
 import type { DisplayModel, Material, Project, ResultField, ResultSummary, RunTimingEstimate, Study } from "@opencae/schema";
 import {
   effectiveMaterialProperties,
@@ -33,6 +33,7 @@ import {
 import {
   INVALID_REACTION_WARNING,
   PREVIEW_GEOMETRY_WARNING,
+  canShowReverseLoadCapacity,
   hasInvalidReactionForce,
   hasUnavailableReactionDiagnostic,
   shouldBlockPreviewResultsForDisplayModel
@@ -85,6 +86,7 @@ export interface ReportData {
     displacement: ReportFigure;
   };
   results: ReportRow[];
+  loadCapacity: ReportRow[];
   transientResults: ReportRow[];
   diagnostics: string[];
   includeSmoothingDisclaimer: boolean;
@@ -104,6 +106,8 @@ export interface BuildReportDataInput {
   generatedAt: Date;
   exaggeration: number;
   showDeformed?: boolean;
+  /** Reverse-check target from the results panel; defaults to 1.5 like the panel. */
+  targetSafetyFactor?: number;
 }
 
 const MISSING = "--";
@@ -179,6 +183,7 @@ export function buildReportData(input: BuildReportDataInput): ReportData {
       displacement: figureData("Displacement magnitude", displacementField, input.captures.displacement, fields, input)
     },
     results: resultRows(input.project, input.study, summary, input.displayModel),
+    loadCapacity: loadCapacityRows(input, summary, fields),
     transientResults: transientRows(summary),
     diagnostics,
     includeSmoothingDisclaimer: provenance?.kind === "opencae_core_fea",
@@ -384,6 +389,28 @@ function resultRows(project: Project, study: Study, summary: ResultSummary, disp
     { label: "Safety factor", value: String(roundDisplayValue(summary.safetyFactor)) },
     { label: "Failure check", value: assessment.title },
     { label: "Reaction force", value: formatResultMetric(summary.reactionForce, summary.reactionForceUnits) }
+  ];
+}
+
+const DEFAULT_TARGET_SAFETY_FACTOR = 1.5;
+
+// Mirrors the results panel's Reverse Check gating: only report a load
+// capacity when the reaction force is trustworthy and units are intact.
+function loadCapacityRows(input: BuildReportDataInput, summary: ResultSummary, fields: ResultField[]): ReportRow[] {
+  const target = Number.isFinite(input.targetSafetyFactor) && input.targetSafetyFactor! > 0
+    ? input.targetSafetyFactor!
+    : DEFAULT_TARGET_SAFETY_FACTOR;
+  const atTarget = estimateAllowableLoadForSafetyFactor(summary, target);
+  const atYield = estimateAllowableLoadForSafetyFactor(summary, 1);
+  const unitsIntact = hasResultUnit(summary.maxStressUnits) && hasResultUnit(summary.maxDisplacementUnits) && hasResultUnit(summary.reactionForceUnits) && fields.every((field) => hasResultUnit(field.units));
+  if (!unitsIntact || atTarget.status !== "available" || !input.displayModel || !canShowReverseLoadCapacity(summary, input.displayModel, fields, input.study)) {
+    return [];
+  }
+  return [
+    { label: "Current applied load", value: formatResultMetric(roundDisplayValue(atTarget.currentLoad), atTarget.loadUnits) },
+    { label: "Max theoretical load (at FoS 1.0)", value: formatResultMetric(roundDisplayValue(atYield.allowableLoad), atYield.loadUnits) },
+    { label: "Target factor of safety", value: String(roundDisplayValue(target)) },
+    { label: "Max load at target FoS", value: `${formatResultMetric(roundDisplayValue(atTarget.allowableLoad), atTarget.loadUnits)} (${roundDisplayValue(atTarget.loadScale)}x current)` }
   ];
 }
 
