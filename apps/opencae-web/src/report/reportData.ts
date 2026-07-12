@@ -55,7 +55,6 @@ export interface ReportFigure {
   unavailableLabel: string;
   legendMin: string;
   legendMax: string;
-  units: string;
   caption: string;
 }
 
@@ -421,11 +420,15 @@ function figureData(
     title,
     ...(capture?.png ? { png: capture.png } : {}),
     unavailableLabel: "Not available (--)",
-    legendMin: field ? formatResultValue(field.min) : MISSING,
-    legendMax: field ? formatResultValue(field.max) : MISSING,
-    units: field?.units || MISSING,
+    legendMin: field ? legendValueWithUnits(field.min, field.units) : MISSING,
+    legendMax: field ? legendValueWithUnits(field.max, field.units) : MISSING,
     caption: `${title}${field?.units ? ` (${field.units})` : ""}.${frameCaption} ${deformationCaption}.`
   };
+}
+
+function legendValueWithUnits(value: number, units: string): string {
+  const formatted = formatResultValue(value);
+  return hasResultUnit(units) ? `${formatted} ${units}` : formatted;
 }
 
 function collectDiagnostics(input: BuildReportDataInput, summary: ResultSummary, fields: ResultField[]): string[] {

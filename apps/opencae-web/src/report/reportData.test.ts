@@ -77,6 +77,9 @@ describe("buildReportData", () => {
     expect(data.keyResults).toContainEqual({ label: "Reaction force", value: "112.4 lbf" });
     expect(data.materials.rows[0]?.[1]).toContain("ksi");
     expect(data.materials.rows[0]?.[3]).toContain("lb/ft^3");
+    expect(data.figures.stress.legendMax).toContain("ksi");
+    expect(data.figures.stress.legendMin).toContain("ksi");
+    expect(data.figures.displacement.legendMax).toContain("in");
   });
 
   test("prefers solver-actual mesh counts and marks unresolved material values missing", () => {
@@ -236,7 +239,7 @@ describe("buildReportData", () => {
     expect(data.solver).toContainEqual({ label: "Time step", value: "0.005 s" });
     expect(data.transientResults).toContainEqual({ label: "Frames", value: "11" });
     expect(data.transientResults).toContainEqual({ label: "Peak displacement", value: "0.184 mm at 0.08 s" });
-    expect(data.figures.stress.legendMax).toBe("142");
+    expect(data.figures.stress.legendMax).toBe("142 MPa");
     expect(data.figures.stress.caption).toContain("Automatically selected peak von Mises stress frame (frame 2 of 3, 0.0400 s)");
     expect(data.figures.displacement.caption).toContain("Automatically selected peak displacement magnitude frame (frame 3 of 3, 0.0800 s)");
   });
