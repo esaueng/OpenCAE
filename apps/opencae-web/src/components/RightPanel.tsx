@@ -1166,9 +1166,6 @@ function RunPanel({ study, displayModel, runProgress, runError, runTiming, onRun
           >Dynamic</button>
         </div>
       </div>
-      <div className="summary-box">
-        <Info label="Solver" value="Local (in-browser)" />
-      </div>
       <label className="field">
         <span>Fidelity</span>
         <select value={fidelity} onChange={(event) => updateSolverChoice({ fidelity: event.currentTarget.value as SimulationFidelity })}>
@@ -1178,18 +1175,18 @@ function RunPanel({ study, displayModel, runProgress, runError, runTiming, onRun
       {dynamic && (
         <>
           <SectionTitle>Dynamic settings</SectionTitle>
-          <DynamicNumberField label="Start time" unit="s" value={dynamic.startTime} min={0} step={dynamic.timeStep} onCommit={(value) => updateDynamicNumber("startTime", value)} />
-          <DynamicNumberField label="End time" unit="s" value={dynamic.endTime} min={dynamic.startTime + dynamic.timeStep} step={dynamic.timeStep} onCommit={(value) => updateDynamicNumber("endTime", value)} />
-          <DynamicNumberField label="Time step" unit="s" value={dynamic.timeStep} min={0.0001} step="0.0005" onCommit={(value) => updateDynamicNumber("timeStep", value)} />
-          <DynamicNumberField label="Output interval" unit="s" value={outputIntervalValue} min={outputIntervalMinimum} step={outputIntervalMinimum} onCommit={(value) => updateDynamicNumber("outputInterval", value)} />
+          <DynamicNumberField label="Start time" helpId="dynamicStartTime" unit="s" value={dynamic.startTime} min={0} step={dynamic.timeStep} onCommit={(value) => updateDynamicNumber("startTime", value)} />
+          <DynamicNumberField label="End time" helpId="dynamicEndTime" unit="s" value={dynamic.endTime} min={dynamic.startTime + dynamic.timeStep} step={dynamic.timeStep} onCommit={(value) => updateDynamicNumber("endTime", value)} />
+          <DynamicNumberField label="Time step" helpId="dynamicTimeStep" unit="s" value={dynamic.timeStep} min={0.0001} step="0.0005" onCommit={(value) => updateDynamicNumber("timeStep", value)} />
+          <DynamicNumberField label="Output interval" helpId="dynamicOutputInterval" unit="s" value={outputIntervalValue} min={outputIntervalMinimum} step={outputIntervalMinimum} onCommit={(value) => updateDynamicNumber("outputInterval", value)} />
           <label className="field">
-            <span>Load profile</span>
+            <HelpLabel helpId="dynamicLoadProfile">Load profile</HelpLabel>
             <select value={loadProfile} onChange={(event) => updateDynamicLoadProfile(event.currentTarget.value)}>
               {DYNAMIC_LOAD_PROFILE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
           </label>
           <p className="panel-copy">{loadProfileHelper}</p>
-          <DynamicNumberField label="Damping ratio" unit="ζ" value={dynamic.dampingRatio} min={0} step="0.01" onCommit={(value) => updateDynamicNumber("dampingRatio", value)} />
+          <DynamicNumberField label="Damping ratio" helpId="dynamicDampingRatio" unit="ζ" value={dynamic.dampingRatio} min={0} step="0.01" onCommit={(value) => updateDynamicNumber("dampingRatio", value)} />
           <div className="summary-box">
             <Info label="Estimated frames" value={frameEstimate ? frameEstimate.count.toLocaleString() : "--"} />
             <Info label="Output cadence" value={`Every ${formatSeconds(normalizedDynamicOutputInterval(dynamic))}`} />
@@ -1229,7 +1226,6 @@ function RunPanel({ study, displayModel, runProgress, runError, runTiming, onRun
         <Info label="Version" value="0.1.0" />
         <Info label="Solver method" value={solverMethodForStudy(study)} />
         <Info label="Runner" value={solverRunnerLabelForStudy(study, displayModel)} />
-        <Info label="Local fallback" value="none" />
       </div>
     </Panel>
   );
@@ -1237,6 +1233,7 @@ function RunPanel({ study, displayModel, runProgress, runError, runTiming, onRun
 
 function DynamicNumberField({
   label,
+  helpId,
   unit,
   value,
   min,
@@ -1244,6 +1241,7 @@ function DynamicNumberField({
   onCommit
 }: {
   label: string;
+  helpId: SettingHelpId;
   unit: string;
   value: number;
   min: number;
@@ -1266,7 +1264,7 @@ function DynamicNumberField({
 
   return (
     <label className="field">
-      <span>{label}</span>
+      <HelpLabel helpId={helpId}>{label}</HelpLabel>
       <span className="input-with-unit">
         <input
           type="number"
@@ -1328,7 +1326,7 @@ function solverFidelityForStudy(study: Study): SimulationFidelity {
 function solverBackendLabelForRunPanel(study: Study, displayModel: DisplayModel): string {
   void study;
   void displayModel;
-  return "OpenCAE Core Local (in-browser)";
+  return "Local (in-browser)";
 }
 
 function solverMethodForStudy(study: Study): "sparse_static" | "mdof_dynamic" {
@@ -1373,7 +1371,6 @@ function ResultsPanel(props: RightPanelProps) {
 }
 
 function ResultsPanelContent({
-  project,
   displayModel,
   resultMode,
   showDeformed,
@@ -1564,13 +1561,10 @@ function ResultsPanelContent({
       {unitMissingDiagnostic && <p className="panel-warning">{unitMissingDiagnostic}</p>}
       <p className="panel-copy">Red areas have higher stress. Blue areas have lower stress.</p>
       <div className="summary-box">
-        <Info label="Result source" value={formatResultProvenanceLabel(resultSummary.provenance)} />
-        <Info label="Core solver version" value={resultProvenance?.solverVersion ?? resultProvenance?.solverCpuVersion ?? resultProvenance?.coreVersion ?? "--"} />
-        <Info label="Core model schema version" value={project.schemaVersion} />
+        <Info label="Result source" value={resultSourceLabelForPanel(resultSummary)} />
         <Info label="Mesh source" value={formatMeshSourceLabel(resultProvenance?.meshSource, displayModel)} />
         <Info label="Solver method" value={solverMethodForResult(resultSummary, study)} />
         <Info label="Runner" value={solverRunnerLabelForResult(resultProvenance)} />
-        <Info label="Local fallback" value="none" />
         <Info label="Max stress" value={formatResultMetric(resultSummary.maxStress, resultSummary.maxStressUnits)} />
         <Info label="Max displacement" value={formatResultMetric(resultSummary.maxDisplacement, resultSummary.maxDisplacementUnits)} />
         <Info label="Safety factor" value={String(resultSummary.safetyFactor)} />
@@ -1605,9 +1599,14 @@ function ResultsPanelContent({
           </div>
         </>
       )}
-      <div className="legend"><span /> <small>Low</small><small>High</small></div>
+      <div className="legend"><small>Low</small><span /><small>High</small></div>
     </Panel>
   );
+}
+
+function resultSourceLabelForPanel(resultSummary: ResultSummary): string {
+  const label = formatResultProvenanceLabel(resultSummary.provenance);
+  return label === "OpenCAE Core Local (in-browser)" ? "Local (in-browser)" : label;
 }
 
 function resultContractHasMissingUnits(summary: ResultSummary, fields: ResultField[]): boolean {

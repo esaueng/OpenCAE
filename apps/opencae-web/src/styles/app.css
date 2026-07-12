@@ -3036,6 +3036,7 @@ button:disabled {
   height: 28px;
   display: inline-grid;
   place-items: center;
+  align-self: center;
   color: var(--color-accent);
 }
 
@@ -3327,7 +3328,7 @@ button:disabled {
 
 .legend {
   display: grid;
-  grid-template-columns: 1fr auto auto;
+  grid-template-columns: auto 1fr auto;
   align-items: center;
   gap: 8px;
   margin: 14px 0;
