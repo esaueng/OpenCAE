@@ -1602,9 +1602,8 @@ function labelLaneOffset(index: number) {
 function ModelDimensionOverlay({ displayModel, uploadedPreviewBounds }: { displayModel: DisplayModel; uploadedPreviewBounds: THREE.Box3 | null }) {
   const dimensions = displayModel.dimensions;
   const dimensionValues = dimensionValuesForDisplayModel(displayModel);
-  const bounds = modelKindForDisplayModel(displayModel) === "uploaded" && uploadedPreviewBounds
-    ? uploadedPreviewBounds
-    : dimensionBoundsForDisplayModel(displayModel);
+  const uploaded = modelKindForDisplayModel(displayModel) === "uploaded";
+  const bounds = uploaded && uploadedPreviewBounds ? uploadedPreviewBounds : dimensionBoundsForDisplayModel(displayModel);
   if (!dimensions || !dimensionValues || !bounds) return null;
 
   const min = bounds.min;
@@ -1616,6 +1615,18 @@ function ModelDimensionOverlay({ displayModel, uploadedPreviewBounds }: { displa
   const xLineZ = min.z - zOffset;
   const axisLineX = max.x + xOffset;
 
+  // The overlay renders in the model's local frame. Samples sit inside the
+  // legacy Y-up base rotation with y/z-swapped dimension values, so local z
+  // carries the user-facing "Y" width and local y the "Z" height. Uploaded
+  // models render unrotated with unswapped values, so their local axes match
+  // the user frame directly — labelling local z as "Y" would cross the values.
+  const zSpanLabel = uploaded
+    ? `Z ${formatDimensionLabel(dimensionValues.z, dimensionValues.units)}`
+    : `Y ${formatDimensionLabel(dimensionValues.y, dimensionValues.units)}`;
+  const ySpanLabel = uploaded
+    ? `Y ${formatDimensionLabel(dimensionValues.y, dimensionValues.units)}`
+    : `Z ${formatDimensionLabel(dimensionValues.z, dimensionValues.units)}`;
+
   return (
     <group renderOrder={20}>
       <DimensionLine
@@ -1626,25 +1637,91 @@ function ModelDimensionOverlay({ displayModel, uploadedPreviewBounds }: { displa
       <DimensionLine
         start={[axisLineX, xLineY, min.z]}
         end={[axisLineX, xLineY, max.z]}
-        label={`Y ${formatDimensionLabel(dimensionValues.y, dimensionValues.units)}`}
+        label={zSpanLabel}
       />
       <DimensionLine
         start={[axisLineX, min.y, max.z + zOffset]}
         end={[axisLineX, max.y, max.z + zOffset]}
-        label={`Z ${formatDimensionLabel(dimensionValues.z, dimensionValues.units)}`}
+        label={ySpanLabel}
       />
     </group>
   );
 }
 
+const DIMENSION_LABEL_FONT_SIZE = 0.095;
+// Approximate troika glyph advance per character, used to decide whether the
+// label fits inside its dimension line.
+const DIMENSION_LABEL_GLYPH_ASPECT = 0.62;
+
 function DimensionLine({ start, end, label }: { start: [number, number, number]; end: [number, number, number]; label: string }) {
-  const labelPosition: [number, number, number] = [(start[0] + end[0]) / 2, (start[1] + end[1]) / 2, (start[2] + end[2]) / 2];
+  const startVec = new THREE.Vector3(...start);
+  const endVec = new THREE.Vector3(...end);
+  const tangent = endVec.clone().sub(startVec);
+  const lineLength = tangent.length();
+  tangent.normalize();
+  const estimatedLabelWidth = label.length * DIMENSION_LABEL_FONT_SIZE * DIMENSION_LABEL_GLYPH_ASPECT;
+  // Sit the label on the line itself when it fits; expand it out past the end
+  // of the line when the span is too short to hold the text.
+  const inline = estimatedLabelWidth <= lineLength * 0.8;
+  const labelPosition = inline
+    ? startVec.clone().add(endVec).multiplyScalar(0.5)
+    : endVec.clone().add(tangent.clone().multiplyScalar(estimatedLabelWidth / 2 + 0.14));
   return (
     <group>
       <Line points={[start, end]} color="#4da3ff" lineWidth={1.8} transparent opacity={0.95} />
       <DimensionEndpoint position={start} />
       <DimensionEndpoint position={end} />
-      <SceneLabel label={label} position={labelPosition} tone="dimension" />
+      <DimensionLineLabel label={label} position={labelPosition.toArray() as [number, number, number]} tangent={tangent.toArray() as [number, number, number]} />
+    </group>
+  );
+}
+
+// Dimension text runs along its line (rotated with the model) while staying
+// readable: each frame the label plane is tilted toward the camera around the
+// line axis, and the reading direction flips so it never renders mirrored.
+function DimensionLineLabel({ label, position, tangent }: { label: string; position: [number, number, number]; tangent: [number, number, number] }) {
+  const groupRef = useRef<THREE.Group>(null);
+  const colors = sceneLabelColors("dimension");
+  useFrame(({ camera }) => {
+    const group = groupRef.current;
+    if (!group?.parent) return;
+    const parentQuaternion = group.parent.getWorldQuaternion(new THREE.Quaternion());
+    const lineAxis = new THREE.Vector3(...tangent).applyQuaternion(parentQuaternion).normalize();
+    const cameraRight = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+    if (lineAxis.dot(cameraRight) < 0) lineAxis.negate();
+    const worldPosition = group.getWorldPosition(new THREE.Vector3());
+    const toCamera = camera.position.clone().sub(worldPosition).normalize();
+    const normal = toCamera.sub(lineAxis.clone().multiplyScalar(toCamera.dot(lineAxis)));
+    const worldQuaternion = new THREE.Quaternion();
+    if (normal.lengthSq() < 1e-6) {
+      // The line points straight at the camera; fall back to a screen-facing label.
+      worldQuaternion.copy(camera.quaternion);
+    } else {
+      normal.normalize();
+      const up = new THREE.Vector3().crossVectors(normal, lineAxis);
+      worldQuaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(lineAxis, up, normal));
+    }
+    group.quaternion.copy(parentQuaternion.invert().multiply(worldQuaternion));
+  });
+  return (
+    <group ref={groupRef} position={position}>
+      <Text
+        anchorX="center"
+        anchorY="bottom"
+        position={[0, 0.045, 0]}
+        renderOrder={50}
+        color={colors.text}
+        material-depthTest={false}
+        material-depthWrite={false}
+        material-toneMapped={false}
+        fontSize={DIMENSION_LABEL_FONT_SIZE}
+        letterSpacing={0}
+        outlineColor={colors.outline}
+        outlineOpacity={0.88}
+        outlineWidth={0.014}
+      >
+        {label}
+      </Text>
     </group>
   );
 }
