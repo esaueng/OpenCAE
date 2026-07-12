@@ -177,8 +177,7 @@ export function solveDynamicMdofTet4Cpu(
   const peakVelocity = Math.max(...frames.map((frame) => maxAbs(frame.velocity.values)), 0);
   const peakAcceleration = Math.max(...frames.map((frame) => maxAbs(frame.acceleration.values)), 0);
   const peakStress = Math.max(...frames.map((frame) => maxAbs(frame.stress.values)), 0);
-  const safetyFactors = frames.flatMap((frame) => Array.from(frame.safety_factor.values).filter((value) => value > 0 && Number.isFinite(value)));
-  const minSafetyFactor = safetyFactors.length > 0 ? Math.min(...safetyFactors) : undefined;
+  const minSafetyFactor = minimumPositiveFinite(frames.map((frame) => frame.safety_factor.values));
   const equivalentMass = lumpedMassResult.totalMass;
   const equivalentStiffness = estimateEquivalentStiffness(system);
 
@@ -248,6 +247,24 @@ export function solveDynamicMdofTet4Cpu(
     result: dynamicResult,
     diagnostics
   };
+}
+
+/**
+ * Find the minimum valid value without flattening fields or spreading them into
+ * Math.min. Production dynamic runs can contain millions of element values
+ * across their frames, which exceeds browser function-argument limits.
+ */
+export function minimumPositiveFinite(fields: Iterable<ArrayLike<number>>): number | undefined {
+  let minimum: number | undefined;
+  for (const values of fields) {
+    for (let index = 0; index < values.length; index += 1) {
+      const value = values[index];
+      if (value > 0 && Number.isFinite(value) && (minimum === undefined || value < minimum)) {
+        minimum = value;
+      }
+    }
+  }
+  return minimum;
 }
 
 function dynamicSettings(model: NormalizedOpenCAEModel, options: DynamicTet4CpuOptions): DynamicSettings {

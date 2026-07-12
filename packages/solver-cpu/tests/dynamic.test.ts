@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import { singleTetStaticFixture } from "@opencae/examples";
 import { validateCoreResult, type OpenCAEModelJson } from "@opencae/core";
 import { solveDynamicLinearTetMDOF, solvePreviewSdofTet4Cpu, solveStaticLinearTet4Cpu } from "../src";
+import { minimumPositiveFinite } from "../src/dynamic-mdof";
 
 const densityModel = {
   ...singleTetStaticFixture,
@@ -31,6 +32,19 @@ describe("solvePreviewSdofTet4Cpu preview", () => {
 });
 
 describe("solveDynamicLinearTetMDOF", () => {
+  test("reduces production-scale safety-factor frames without spreading millions of arguments", () => {
+    const fields = Array.from({ length: 22 }, (_, frameIndex) => {
+      const values = new Float64Array(50_729);
+      values.fill(10 + frameIndex);
+      return values;
+    });
+    fields[21][50_728] = 0.25;
+    fields[0][0] = Number.NaN;
+    fields[0][1] = 0;
+
+    expect(minimumPositiveFinite(fields)).toBe(0.25);
+  });
+
   test("generates dynamic frames at the requested cadence including the final end time", () => {
     const result = solveDynamicLinearTetMDOF(densityModel, {
       endTime: 0.025,
