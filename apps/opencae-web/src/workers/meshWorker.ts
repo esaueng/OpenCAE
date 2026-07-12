@@ -136,6 +136,7 @@ async function runOperation(request: MeshWorkerRequest, reportPhase: (phase: Mes
     ...(meshed.qualityRefinement ? { qualityRefinement: meshed.qualityRefinement } : {}),
     ...(meshed.qualityRepair ? { qualityRepair: meshed.qualityRepair } : {}),
     ...(meshed.geometryRepair ? { geometryRepair: meshed.geometryRepair } : {}),
+    ...(meshed.multiBodyFusion ? { multiBodyFusion: meshed.multiBodyFusion } : {}),
     ...(meshed.elementOrderFallback ? { elementOrderFallback: meshed.elementOrderFallback } : {}),
     ...(attribution ? { attribution } : {})
   };
