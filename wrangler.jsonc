@@ -1,6 +1,7 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  // Production local-first Worker (cae.esau.app): static assets only.
+  // Production local-first Worker (cae.esau.app): static assets plus
+  // consent-gated, client-encrypted recovery backups only.
   // The OpenCAE Core Cloud container, Durable Object, and R2 artifact bindings
   // were retired in July 2026 — see docs/cloud-retirement.md. This config was
   // reconciled from the former wrangler.local-first.jsonc variant; solves run
@@ -23,6 +24,19 @@
     "not_found_handling": "single-page-application",
     "run_worker_first": ["/api/*", "/health"]
   },
+  "r2_buckets": [
+    {
+      "binding": "PROJECT_BACKUPS",
+      "bucket_name": "opencae-project-backups"
+    }
+  ],
+  "ratelimits": [
+    {
+      "name": "PROJECT_BACKUP_RATE_LIMITER",
+      "namespace_id": "20260712",
+      "simple": { "limit": 2, "period": 60 }
+    }
+  ],
   // No migrations in the checked-in config: Workers Builds uploads PR preview
   // versions, and pending Durable Object migrations cannot ride a version
   // upload. Deleting the retired OpenCaeCoreCloudContainer class is a one-off
