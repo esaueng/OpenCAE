@@ -160,6 +160,7 @@ async function meshWorkerRunExclusive(options: WasmMeshOptions): Promise<WasmMes
   let elevationNote: string | undefined;
   let refinementNote: string | undefined;
   let geometryRepairNote: string | undefined;
+  let multiBodyFusionNote: string | undefined;
   let elementOrderFallbackNote: string | undefined;
   let attributionNote: string | undefined;
   let structuralBodyNote: string | undefined;
@@ -227,6 +228,12 @@ async function meshWorkerRunExclusive(options: WasmMeshOptions): Promise<WasmMes
       refinementNote = direction === "finer"
         ? `Mesh quality at the ${formatMeshSizeMm(requestedMeshSizeMm)} mm preset size missed the quality floor on this geometry; the mesh was automatically refined to ${formatMeshSizeMm(usedMeshSizeMm)} mm.`
         : `Mesh quality at the ${formatMeshSizeMm(requestedMeshSizeMm)} mm preset size missed the quality floor on this geometry; the mesh was automatically adjusted to ${formatMeshSizeMm(usedMeshSizeMm)} mm (coarser) to remove near-degenerate elements. Local stress resolution may be lower than the selected preset.`;
+    }
+    if (stepResult.multiBodyFusion) {
+      const { inputVolumeCount, fusedVolumeCount } = stepResult.multiBodyFusion;
+      multiBodyFusionNote = fusedVolumeCount === 1
+        ? `The STEP file contains ${inputVolumeCount} solid bodies that touch or overlap; they were fused into one part for meshing. Review the fused geometry before relying on results.`
+        : `The STEP file contains ${inputVolumeCount} solid bodies; touching or overlapping bodies were fused into ${fusedVolumeCount} parts for meshing. Review the fused geometry before relying on results.`;
     }
     if (stepResult.geometryRepair) {
       const { profile, toleranceMm } = stepResult.geometryRepair;
@@ -297,7 +304,7 @@ async function meshWorkerRunExclusive(options: WasmMeshOptions): Promise<WasmMes
   const summary: NonNullable<Study["meshSettings"]["summary"]> = {
     nodes,
     elements,
-    warnings: [structuralBodyNote, algorithmNote, elevationNote, refinementNote, geometryRepairNote, elementOrderFallbackNote, attributionNote].filter((note): note is string => Boolean(note)),
+    warnings: [structuralBodyNote, multiBodyFusionNote, algorithmNote, elevationNote, refinementNote, geometryRepairNote, elementOrderFallbackNote, attributionNote].filter((note): note is string => Boolean(note)),
     quality: preset,
     source: "wasm_gmsh",
     units: "m",

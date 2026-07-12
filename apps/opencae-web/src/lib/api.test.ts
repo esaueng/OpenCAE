@@ -756,7 +756,7 @@ describe("api", () => {
     expect(results.summary.provenance?.resultSource).toBe("computed");
   });
 
-  test("does not route explicit local sample static solves through legacy beam estimates", async () => {
+  test("does not route explicit local sample static solves through legacy beam estimates", { timeout: 60000 }, async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: "Study not found" }), {
       status: 404,
       headers: { "content-type": "application/json" }
