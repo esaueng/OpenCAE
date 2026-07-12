@@ -177,6 +177,26 @@ describe("buildReportData", () => {
     expect(data.materials.rows).toHaveLength(1);
   });
 
+  test("reports the reverse-check load capacity using the panel's target factor", () => {
+    const data = report({ targetSafetyFactor: 2 });
+
+    expect(data.loadCapacity).toEqual([
+      { label: "Current applied load", value: "500 N" },
+      { label: "Max theoretical load (at FoS 1.0)", value: "900 N" },
+      { label: "Target factor of safety", value: "2" },
+      { label: "Max load at target FoS", value: "450 N (0.9x current)" }
+    ]);
+  });
+
+  test("defaults the reverse-check target to 1.5 and omits it when the reaction force is invalid", () => {
+    const data = report();
+    expect(data.loadCapacity).toContainEqual({ label: "Target factor of safety", value: "1.5" });
+    expect(data.loadCapacity).toContainEqual({ label: "Max load at target FoS", value: "600 N (1.2x current)" });
+
+    const invalid = report({ resultSummary: { ...productionSummary, reactionForce: 0 } });
+    expect(invalid.loadCapacity).toEqual([]);
+  });
+
   test("adds dynamic solver and transient rows", () => {
     const dynamicStudy: Study = {
       ...bracketDemoProject.studies[0]!,

@@ -107,6 +107,15 @@ class PdfReport {
 
     this.sectionHeading(7, "Results table");
     this.keyValueRows(this.data.results);
+    if (this.data.loadCapacity.length) {
+      this.subheading("Load capacity (reverse check)");
+      this.keyValueRows(this.data.loadCapacity);
+      const note = "Estimated by linearly scaling the current result against the material yield limit; verify with a run at the target load.";
+      const noteLines = this.splitText(note, this.contentWidth, REPORT_TYPE.caption);
+      this.ensureSpace(noteLines.length * 3.5 + 4);
+      this.text(noteLines, REPORT_LAYOUT.margin, this.y, REPORT_TYPE.caption, REPORT_THEME.inkMuted);
+      this.y += noteLines.length * 3.5 + 5;
+    }
     if (this.data.transientResults.length) {
       this.subheading("Transient results");
       this.keyValueRows(this.data.transientResults);
