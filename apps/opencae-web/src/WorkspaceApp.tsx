@@ -1145,6 +1145,10 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     void updateStudy(generateMesh(study.id, preset, study, displayModel ?? undefined, pushMessage, setMeshPhaseProgress), shouldAutoAdvanceAfterMeshGeneration() ? "run" : undefined)
       .catch(async (error: unknown) => {
         setMeshPhaseProgress(null);
+        if (isAbortError(error)) {
+          pushMessage(error.message || "Mesh generation cancelled.");
+          return;
+        }
         pushMessage(`Mesh generation failed: ${error instanceof Error ? error.message : String(error)}`);
         if (!isStepGeometryMeshFailure(error)) return;
         const probeDecision = uploadedStepRepairProbeDecision(sourceProject, projectRef.current);
@@ -1180,6 +1184,10 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         }
       })
       .finally(() => setMeshPhaseProgress(null));
+  }
+
+  function handleCancelMesh() {
+    cancelWasmMeshing("Mesh generation cancelled.");
   }
 
   function handleViewportFaceSelect(face: DisplayFace, point?: [number, number, number], payloadObject?: PayloadObjectSelection) {
@@ -1814,6 +1822,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
             updateStudy(saveStudyPatch(study.id, { loads: study.loads.filter((item) => item.id !== loadId) }, "Load removed.", study))
           }
           onGenerateMesh={handleGenerateMesh}
+          onCancelMesh={handleCancelMesh}
           meshPhaseProgress={meshPhaseProgress}
           onUpdateSolverSettings={handleUpdateSolverSettings}
           onChangeStudyType={handleChangeStudyType}
@@ -2092,7 +2101,7 @@ async function saveProjectToLocalDisk(project: Project, displayModel: DisplayMod
   return outcome === "saved" ? savedAt : null;
 }
 
-function isAbortError(error: unknown): boolean {
+function isAbortError(error: unknown): error is Error {
   return error instanceof Error && error.name === "AbortError";
 }
 

@@ -104,6 +104,7 @@ function renderPanel(activeStep: StepId, overrides: Partial<Parameters<typeof Ri
       onPreviewLoadEdit={vi.fn()}
       onRemoveLoad={vi.fn()}
       onGenerateMesh={vi.fn()}
+      onCancelMesh={vi.fn()}
       onRunSimulation={vi.fn()}
       onCancelSimulation={vi.fn()}
       canRunSimulation={false}
@@ -1389,6 +1390,21 @@ describe("RightPanel payload mass controls", () => {
     expect(html).toContain('title="Next workflow step (N)"');
     expect(html).toContain('aria-label="Next workflow step: Run. Shortcut N"');
     expect(html).toContain('<span class="workflow-nav-label">Next: Run</span><kbd>N</kbd>');
+  });
+
+  test("turns the active meshing button into an enabled stop action", () => {
+    const html = renderPanel("mesh", {
+      meshPhaseProgress: {
+        phase: "mesh3d",
+        phaseIndex: 4,
+        phaseCount: 8,
+        message: "Meshing volume..."
+      }
+    });
+
+    expect(html).toContain('aria-label="Stop mesh generation"');
+    expect(html).toContain("Stop meshing");
+    expect(html).not.toContain('aria-label="Stop mesh generation" disabled');
   });
 
   test("shows Back and Next hotkey hints on workflow navigation buttons", () => {

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 const fake = vi.hoisted(() => {
-  type Scenario = "algorithm_fallback" | "coarser_size" | "quality_repair" | "complex_seams" | "complex_seams_completed" | "complex_seams_repair_loses_volume" | "surface_only" | "dof_fallback";
+  type Scenario = "algorithm_fallback" | "coarser_size" | "deep_refinement" | "quality_repair" | "complex_seams" | "complex_seams_completed" | "complex_seams_repair_loses_volume" | "surface_only" | "dof_fallback";
   const state = {
     scenario: "algorithm_fallback" as Scenario,
     attempts: [] as Array<{ algorithm: "delaunay" | "frontal"; sizeMm: number }>,
@@ -15,6 +15,7 @@ const fake = vi.hoisted(() => {
       return qualityRepair && optimized && sizeMm <= 6 ? 0.08 : (algorithm === "frontal" ? 0.02 : 0.01);
     }
     if (state.scenario === "dof_fallback") return 0.2;
+    if (state.scenario === "deep_refinement") return sizeMm <= 2 ? 0.2 : 0.01;
     if (sizeMm >= 12) return 0.2;
     return algorithm === "frontal" ? 0.02 : 0.01;
   };
@@ -100,6 +101,9 @@ const fake = vi.hoisted(() => {
             if (dimension === 3) {
               state.attempts.push({ algorithm, sizeMm });
               if (isQualityRepair()) state.qualityRepairAttempts.push(sizeMm);
+              if (state.scenario === "deep_refinement" && sizeMm > 2) {
+                throw new Error("PLC Error: A segment and a facet intersect at point");
+              }
               if (hasComplexSeams() && state.scenario !== "complex_seams_completed" && !isQualityRepair()) {
                 throw new Error("boundary recovery failed");
               }
@@ -180,6 +184,23 @@ describe("STEP quality recovery orchestration", () => {
       { algorithm: "frontal", sizeMm: 8 },
       { algorithm: "delaunay", sizeMm: 12 }
     ]);
+  });
+
+  test("refines through coarse PLC intersections until a feature-safe mesh succeeds", async () => {
+    fake.state.scenario = "deep_refinement";
+
+    const result = await meshStepToMshV2(new Uint8Array([1]), { elementOrder: 2, meshSizeMm: 12 });
+
+    expect(result.qualityMinSICN).toBe(0.2);
+    expect(result.geometryRepair).toBeUndefined();
+    expect(result.qualityRepair).toBeUndefined();
+    expect(result.qualityRefinement).toEqual({
+      requestedMeshSizeMm: 12,
+      usedMeshSizeMm: 2,
+      triedMeshSizesMm: [12, 18, 8, 12 * (4 / 9), 2],
+      direction: "finer"
+    });
+    expect(fake.state.attempts.at(-1)).toEqual({ algorithm: "delaunay", sizeMm: 2 });
   });
 
   test("heals sliver features and uses MeshAdapt without lowering the quality floor", async () => {
