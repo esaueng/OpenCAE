@@ -81,6 +81,8 @@ class PdfReport {
 
     this.sectionHeading(2, "Material");
     this.table(this.data.materials);
+    this.subheading("Manufacturing");
+    this.table(this.data.manufacturing);
 
     this.sectionHeading(3, "Boundary conditions");
     this.subheading("Supports");
