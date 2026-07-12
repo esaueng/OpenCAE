@@ -42,6 +42,7 @@ export {
 } from "./meshQualityGate";
 export {
   configureGmshWasmModuleOptions,
+  diagnoseStepMeshFailure,
   generateBoxWithBoreStep,
   inspectStepGeometry,
   loadGmshWasm,
@@ -61,6 +62,7 @@ export {
   type MeshWasmOptions,
   type StepMeshResult,
   type StepMeshWasmOptions,
+  type StepMultiBodyFusionReport,
   type StepBodyBounds,
   type StepGeometryInspection,
   type StepGeometryRepairReport,

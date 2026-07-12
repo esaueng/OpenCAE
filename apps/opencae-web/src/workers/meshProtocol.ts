@@ -106,6 +106,8 @@ export type MeshWorkerResults = {
     };
     /** Present when open/invalid STEP boundaries were healed before meshing. */
     geometryRepair?: StepGeometryRepairReport;
+    /** Present when several touching/overlapping STEP solids were fused into fewer volumes before meshing. */
+    multiBodyFusion?: { inputVolumeCount: number; fusedVolumeCount: number };
     /** Present when Tet10 was safely reduced to Tet4 to stay within the browser solver's DOF budget. */
     elementOrderFallback?: ElementOrderFallbackMetadata;
     /** Facet->B-rep-face attribution report (present when the request carried attribution inputs). */
