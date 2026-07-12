@@ -34,6 +34,7 @@ describe("renderReportPdf", () => {
     empty.geometry = [];
     empty.geometryFiles.rows = [];
     empty.materials.rows = [];
+    empty.manufacturing.rows = [];
     empty.supports.rows = [];
     empty.loads.rows = [];
     empty.mesh = [];
@@ -80,6 +81,7 @@ function fixtureReport(): ReportData {
     geometry: [{ label: "Source", value: "Sample model: Cantilever (procedural)" }],
     geometryFiles: { headers: ["File", "Format", "Size"], rows: [["cantilever.step", "STEP", "12.0 KB"]] },
     materials: { headers: ["Material / target", "Young's modulus", "Poisson ratio", "Density", "Yield strength"], rows: [["Aluminum 6061 / Body", "68,900 MPa", "0.33", "2,700 kg/m^3", "276 MPa"]] },
+    manufacturing: { headers: ["Material / target", "Process", "Process settings"], rows: [["Aluminum 6061 / Body", "CNC machining", "Solid stock · Isotropic"]] },
     supports: { headers: ["Support", "Target"], rows: [["Fixed support", "Fixed end"]] },
     loads: { headers: ["Load", "Magnitude", "Direction", "Target"], rows: [["Force", "500 N", "[0, 0, -1]", "Free end"]] },
     mesh: [{ label: "Nodes", value: "42,381" }, { label: "Elements", value: "26,944" }, { label: "Element type", value: "Tet10" }],
