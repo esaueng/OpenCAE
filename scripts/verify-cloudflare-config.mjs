@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
 // Deploy gate for the post-cloud-retirement Cloudflare configs (2026-07).
-// The production Worker serves static assets only: simulations run in the
-// browser with OpenCAE Core. This script fails the deploy if a config or
+// The production Worker serves static assets plus consent-gated encrypted
+// recovery backups; simulations still run in the browser with OpenCAE Core. This script fails the deploy if a config or
 // package script quietly reintroduces the retired OpenCAE Core Cloud
 // infrastructure (container, Durable Object, R2 artifact bucket) or drops
 // the production domain/asset wiring. See docs/cloud-retirement.md.
@@ -54,6 +54,10 @@ export function validateCloudflareConfigs({ defaultConfig, retiredDoCleanupConfi
 function validateProductionConfig(label, config, failures) {
   validateProductionTarget(label, config, failures);
   validateRetiredCloudAbsent(label, config, failures);
+  const expectedBackupBinding = [{ binding: "PROJECT_BACKUPS", bucket_name: "opencae-project-backups" }];
+  if (JSON.stringify(config.r2_buckets) !== JSON.stringify(expectedBackupBinding)) {
+    failures.push(`${label} config must bind only PROJECT_BACKUPS to opencae-project-backups`);
+  }
 
   // The checked-in default config must carry NO migrations: Workers Builds
   // uploads PR preview versions, and pending Durable Object migrations cannot
@@ -114,8 +118,8 @@ function validateRetiredCloudAbsent(label, config, failures) {
   if (config.durable_objects !== undefined) {
     failures.push(`${label} config must not bind Durable Objects — the Core Cloud container DO was retired in 2026-07`);
   }
-  if (config.r2_buckets !== undefined) {
-    failures.push(`${label} config must not bind R2 buckets — the Core Cloud artifact bucket binding was retired in 2026-07`);
+  if (label !== "default" && config.r2_buckets !== undefined) {
+    failures.push(`${label} config must not bind R2 buckets`);
   }
   const serialized = JSON.stringify(config);
   if (serialized.toLowerCase().includes(legacySolverToken)) {
