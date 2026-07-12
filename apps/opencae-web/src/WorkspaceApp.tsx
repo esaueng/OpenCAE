@@ -1,12 +1,12 @@
 import { lazy, startTransition, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DynamicSolverSettingsSchema, isRunResultReadyStatus } from "@opencae/schema";
 import type { Constraint, DisplayFace, DisplayModel, DynamicSolverSettings, Load, MeshQuality, NamedSelection, Project, ResultField, ResultRenderBounds, ResultSummary, RunEvent, RunTimingEstimate, SimulationFidelity, Study } from "@opencae/schema";
-import { RotateCcw, Save } from "lucide-react";
+import { RotateCcw, Save, X } from "lucide-react";
 import { addLoad, addSupport, assignMaterial, cancelRun, createProject, generateMesh, getResults, importLocalProject, isStepGeometryMeshFailure, loadSampleProject, probeUploadedStepRepairAfterMeshFailure, renameProject, repairUploadedStepModel, runSimulation, saveRunReportCaptures, STEP_REPAIR_UNAVAILABLE_MESSAGE, subscribeToRun, updateStudy as saveStudyPatch, uploadedStepRepairProbeDecision, uploadModel, type SampleAnalysisType, type SampleModelId } from "./lib/api";
 import { cancelWasmMeshing, type WasmMeshPhaseProgress } from "./lib/wasmMeshing";
 import { resolveSolverBackend } from "./workers/opencaeCoreSolve";
 import { manufacturingProcessForId, normalizeManufacturingParameters, starterMaterials } from "@opencae/materials";
-import { BottomPanel, type WorkspaceLogEntry } from "./components/BottomPanel";
+import { BottomPanel, KeyboardShortcutGuide, type WorkspaceLogEntry } from "./components/BottomPanel";
 import { OpenCaeLogoMark } from "./components/OpenCaeLogoMark";
 import { RightPanel } from "./components/RightPanel";
 import { StartScreen } from "./components/StartScreen";
@@ -188,6 +188,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       return true;
     }
   });
+  const [shortcutGuideOpen, setShortcutGuideOpen] = useState(false);
   const didRequestRestoredHomeView = useRef(false);
   const activeRunSourceRef = useRef<EventSource | null>(null);
   const processingRunIdRef = useRef<string | null>(null);
@@ -650,6 +651,15 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     window.addEventListener("keydown", handleShortcut);
     return () => window.removeEventListener("keydown", handleShortcut);
   }, []);
+
+  useEffect(() => {
+    if (!shortcutGuideOpen) return undefined;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setShortcutGuideOpen(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [shortcutGuideOpen]);
 
   const autosaveUiSnapshot = useMemo<WorkspaceUiSnapshot>(() => ({
     activeStep,
@@ -1588,13 +1598,29 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           <button
             className="icon-button"
             type="button"
-            aria-pressed={singleKeyShortcutsEnabled}
-            title={singleKeyShortcutsEnabled ? "Single-key shortcuts on" : "Single-key shortcuts off"}
-            aria-label="Single-key shortcuts"
-            onClick={handleToggleSingleKeyShortcuts}
+            aria-expanded={shortcutGuideOpen}
+            aria-controls="workspace-shortcut-guide"
+            title="Show keyboard shortcuts"
+            aria-label="Show keyboard shortcuts"
+            onClick={() => setShortcutGuideOpen((open) => !open)}
           >
             Keys
           </button>
+          {shortcutGuideOpen ? (
+            <div className="shortcut-popover" id="workspace-shortcut-guide" role="dialog" aria-label="Keyboard shortcuts">
+              <button className="shortcut-popover-close" type="button" aria-label="Close keyboard shortcuts" onClick={() => setShortcutGuideOpen(false)}>
+                <X size={16} aria-hidden="true" />
+              </button>
+              <KeyboardShortcutGuide />
+              <label className="shortcut-toggle">
+                <input type="checkbox" checked={singleKeyShortcutsEnabled} onChange={handleToggleSingleKeyShortcuts} />
+                <span>
+                  <strong>Single-key shortcuts</strong>
+                  <small>Enable N, B, and H when you are not typing in a field.</small>
+                </span>
+              </label>
+            </div>
+          ) : null}
         </div>
         {showRunButton ? (
           <button

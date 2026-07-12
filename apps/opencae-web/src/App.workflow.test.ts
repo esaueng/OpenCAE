@@ -132,6 +132,10 @@ describe("App workflow layout", () => {
     expect(appSource).toContain("workflowStepForShortcut(key, activeStep");
     expect(appSource).toContain("navigateToStep(shortcutStep);");
     expect(appSource).toContain("isEditableShortcutTarget(event.target as HTMLElement | null)");
+    expect(appSource).toContain('aria-controls="workspace-shortcut-guide"');
+    expect(appSource).toContain("<KeyboardShortcutGuide />");
+    expect(appSource).toContain("checked={singleKeyShortcutsEnabled}");
+    expect(appSource).toContain('if (event.key === "Escape") setShortcutGuideOpen(false);');
   });
 
   test("invalidates completed results after dynamic solver settings change", () => {
