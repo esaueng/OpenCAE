@@ -288,10 +288,13 @@ describe("RightPanel payload mass controls", () => {
     expect(html).not.toContain("bracket · all bodies");
   });
 
-  test("shows a stop processing action while a simulation is running", () => {
+  test("turns the run simulation button into the only stop action while running", () => {
     const markup = renderPanel("run", { runProgress: 42 });
 
-    expect(markup).toContain("Stop processing");
+    expect(markup).toContain('aria-label="Stop simulation"');
+    expect(markup).toContain("Stop simulation");
+    expect(markup).not.toContain("Run simulation");
+    expect(markup).not.toContain("Stop processing");
   });
 
   test("shows the estimated simulation calculation time while running", () => {

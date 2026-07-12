@@ -1207,17 +1207,15 @@ function RunPanel({ study, displayModel, runProgress, runError, runTiming, onRun
       )}
       <button
         className="primary wide"
-        onClick={onRunSimulation}
-        disabled={!canRunSimulation}
-        title={missingRunItems.length ? `Complete before running: ${missingRunItems.join(", ")}` : "Run simulation"}
+        type="button"
+        onClick={isRunning ? onCancelSimulation : onRunSimulation}
+        disabled={isRunning ? !onCancelSimulation : !canRunSimulation}
+        title={isRunning ? "Stop simulation" : (missingRunItems.length ? `Complete before running: ${missingRunItems.join(", ")}` : "Run simulation")}
+        aria-label={isRunning ? "Stop simulation" : "Run simulation"}
       >
-        <Play size={16} />Run simulation
+        {isRunning ? <X size={16} /> : <Play size={16} />}
+        {isRunning ? "Stop simulation" : "Run simulation"}
       </button>
-      {isRunning && (
-        <button className="secondary wide" type="button" onClick={onCancelSimulation}>
-          <X size={16} />Stop processing
-        </button>
-      )}
       {missingRunItems.length > 0 && <p className="panel-copy">Complete {missingRunItems.join(", ").toLowerCase()} before running.</p>}
       {runError && !isRunning && <p className="panel-warning" role="alert">{runError}</p>}
       <div className="progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progressPercent} aria-label="Simulation progress">
