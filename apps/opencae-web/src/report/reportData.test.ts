@@ -137,6 +137,43 @@ describe("buildReportData", () => {
     });
   });
 
+  test("reports the manufacturing process, print settings, and as-analyzed properties", () => {
+    const baseStudy = bracketDemoProject.studies[0]!;
+    const study: Study = {
+      ...baseStudy,
+      materialAssignments: [{
+        ...baseStudy.materialAssignments[0]!,
+        materialId: "mat-petg",
+        parameters: { manufacturingProcessId: "fdm", printed: true, infillDensity: 40, wallCount: 3, layerOrientation: "x" }
+      }]
+    };
+    const data = report({ study });
+
+    expect(data.manufacturing.headers).toEqual(["Material / target", "Process", "Process settings"]);
+    expect(data.manufacturing.rows[0]?.[0]).toContain("PETG");
+    expect(data.manufacturing.rows[0]?.[1]).toBe("FDM printing");
+    expect(data.manufacturing.rows[0]?.[2]).toBe("3 walls · 40% infill · X build direction");
+
+    const datasheetRow = data.materials.rows[0]!;
+    const analyzedRow = data.materials.rows[1]!;
+    expect(datasheetRow[0]).toContain("PETG");
+    expect(analyzedRow[0]).toBe("As analyzed (FDM, homogenized)");
+    expect(analyzedRow[1]).not.toBe(datasheetRow[1]);
+    expect(analyzedRow[1]).toContain("MPa");
+    expect(analyzedRow[4]).not.toBe(datasheetRow[4]);
+  });
+
+  test("marks a defaulted process as assumed and keeps solid materials to one properties row", () => {
+    const data = report();
+
+    expect(data.manufacturing.rows[0]).toEqual([
+      "Aluminum 6061 / Bracket body",
+      "CNC machining (assumed)",
+      "Solid stock · Isotropic"
+    ]);
+    expect(data.materials.rows).toHaveLength(1);
+  });
+
   test("adds dynamic solver and transient rows", () => {
     const dynamicStudy: Study = {
       ...bracketDemoProject.studies[0]!,
