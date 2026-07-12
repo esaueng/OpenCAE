@@ -58,7 +58,7 @@ interface RightPanelProps {
   runProgress: number;
   runError?: string | null;
   runTiming?: RunTimingEstimate | null;
-  onGenerateReport?: () => Promise<void>;
+  onGenerateReport?: (options?: { targetSafetyFactor?: number }) => Promise<void>;
   reportBusy?: boolean;
   reportError?: string | null;
   reportDisabled?: boolean;
@@ -1469,7 +1469,7 @@ function ResultsPanelContent({
   return (
     <Panel title="Results" helper="View stress and displacement directly on the 3D model.">
       {onGenerateReport && (
-        <button className="primary wide" type="button" disabled={reportBusy || reportDisabled} onClick={() => void onGenerateReport()}>
+        <button className="primary wide" type="button" disabled={reportBusy || reportDisabled} onClick={() => void onGenerateReport({ targetSafetyFactor })}>
           <FileDown size={18} />{reportBusy ? "Generating…" : "Generate report"}
         </button>
       )}

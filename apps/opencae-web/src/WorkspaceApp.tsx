@@ -1117,7 +1117,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     };
   }, [completedRunId, reportCaptures, resultFields, resultSummary, resultSurfaceMesh?.id, viewMode, viewerCaptureRevision]);
 
-  async function handleGenerateReport() {
+  async function handleGenerateReport(options?: { targetSafetyFactor?: number }) {
     if (!project || !study || !resultSummary) {
       setReportError("Run a simulation before generating a report.");
       return;
@@ -1155,7 +1155,8 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         captures,
         generatedAt,
         exaggeration: stressExaggeration,
-        showDeformed
+        showDeformed,
+        targetSafetyFactor: options?.targetSafetyFactor
       });
       const { renderReportPdf } = await import("./report/reportPdf");
       const blob = await renderReportPdf(reportData);

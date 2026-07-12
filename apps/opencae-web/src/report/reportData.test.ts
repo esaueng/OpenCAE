@@ -77,6 +77,9 @@ describe("buildReportData", () => {
     expect(data.keyResults).toContainEqual({ label: "Reaction force", value: "112.4 lbf" });
     expect(data.materials.rows[0]?.[1]).toContain("ksi");
     expect(data.materials.rows[0]?.[3]).toContain("lb/ft^3");
+    expect(data.figures.stress.legendMax).toContain("ksi");
+    expect(data.figures.stress.legendMin).toContain("ksi");
+    expect(data.figures.displacement.legendMax).toContain("in");
   });
 
   test("prefers solver-actual mesh counts and marks unresolved material values missing", () => {
@@ -174,6 +177,26 @@ describe("buildReportData", () => {
     expect(data.materials.rows).toHaveLength(1);
   });
 
+  test("reports the reverse-check load capacity using the panel's target factor", () => {
+    const data = report({ targetSafetyFactor: 2 });
+
+    expect(data.loadCapacity).toEqual([
+      { label: "Current applied load", value: "500 N" },
+      { label: "Max theoretical load (at FoS 1.0)", value: "900 N" },
+      { label: "Target factor of safety", value: "2" },
+      { label: "Max load at target FoS", value: "450 N (0.9x current)" }
+    ]);
+  });
+
+  test("defaults the reverse-check target to 1.5 and omits it when the reaction force is invalid", () => {
+    const data = report();
+    expect(data.loadCapacity).toContainEqual({ label: "Target factor of safety", value: "1.5" });
+    expect(data.loadCapacity).toContainEqual({ label: "Max load at target FoS", value: "600 N (1.2x current)" });
+
+    const invalid = report({ resultSummary: { ...productionSummary, reactionForce: 0 } });
+    expect(invalid.loadCapacity).toEqual([]);
+  });
+
   test("adds dynamic solver and transient rows", () => {
     const dynamicStudy: Study = {
       ...bracketDemoProject.studies[0]!,
@@ -236,7 +259,7 @@ describe("buildReportData", () => {
     expect(data.solver).toContainEqual({ label: "Time step", value: "0.005 s" });
     expect(data.transientResults).toContainEqual({ label: "Frames", value: "11" });
     expect(data.transientResults).toContainEqual({ label: "Peak displacement", value: "0.184 mm at 0.08 s" });
-    expect(data.figures.stress.legendMax).toBe("142");
+    expect(data.figures.stress.legendMax).toBe("142 MPa");
     expect(data.figures.stress.caption).toContain("Automatically selected peak von Mises stress frame (frame 2 of 3, 0.0400 s)");
     expect(data.figures.displacement.caption).toContain("Automatically selected peak displacement magnitude frame (frame 3 of 3, 0.0800 s)");
   });
