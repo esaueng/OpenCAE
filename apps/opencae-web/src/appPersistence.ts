@@ -147,6 +147,12 @@ export function readAutosavedWorkspace(storage = getBrowserStorage()): Autosaved
   };
 }
 
+export function localRunIdForResultsRestore(workspace: AutosavedWorkspace | null): string | null {
+  if (!workspace || workspace.projectFile.results?.fields.length) return null;
+  const runId = workspace.ui.completedRunId || workspace.ui.activeRunId;
+  return runId.startsWith("run-local-") ? runId : null;
+}
+
 export type AutosaveWriteOutcome = "full" | "slim" | "failed";
 
 /**

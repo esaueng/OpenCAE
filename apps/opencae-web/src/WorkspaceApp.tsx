@@ -26,7 +26,7 @@ import { buildLocalProjectFile, suggestedProjectFilename, type LocalResultBundle
 import { prepareBlobSaveToDisk, saveBlobToDisk } from "./lib/fileSave";
 import { captureResultViews, type ResultViewCaptures } from "./report/captureResultViews";
 import { buildReportData, suggestedReportFilename } from "./report/reportData";
-import { buildAutosavedWorkspace, buildAutosavedWorkspaceUiSnapshot, flushAutosavedWorkspace, installAutosavePageHideFlush, readAutosavedWorkspace, scheduleAutosavedUiSnapshotWrite, scheduleAutosavedWorkspaceWrite, WORKSPACE_LOG_LIMIT } from "./appPersistence";
+import { buildAutosavedWorkspace, buildAutosavedWorkspaceUiSnapshot, flushAutosavedWorkspace, installAutosavePageHideFlush, localRunIdForResultsRestore, readAutosavedWorkspace, scheduleAutosavedUiSnapshotWrite, scheduleAutosavedWorkspaceWrite, WORKSPACE_LOG_LIMIT } from "./appPersistence";
 import type { AutosavedWorkspace, WorkspaceUiSnapshot } from "./appPersistence";
 import {
   canNavigateToStep,
@@ -119,6 +119,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const restoredProjectFile = restoredWorkspace?.projectFile;
   const restoredUi = restoredWorkspace?.ui;
   const restoredResults = restoredProjectFile?.results;
+  const reloadResultsRunId = localRunIdForResultsRestore(restoredWorkspace);
   const [project, setProject] = useState<Project | null>(restoredProjectFile?.project ?? null);
   const [displayModel, setDisplayModel] = useState<DisplayModel | null>(restoredProjectFile?.displayModel ?? null);
   const [homeRequested, setHomeRequested] = useState(restoredUi?.homeRequested ?? !restoredProjectFile);
@@ -333,6 +334,35 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       invalidateProjectAction();
     }
   }, [project]);
+
+  useEffect(() => {
+    if (!reloadResultsRunId) return undefined;
+    const sourceProject = projectRef.current;
+    let cancelled = false;
+    void getResults(reloadResultsRunId)
+      .then((results) => {
+        if (cancelled || projectRef.current !== sourceProject) return;
+        setResultSummary(results.summary);
+        setResultFields(withDerivedSurfaceSafetyFactorFields(results));
+        setResultSurfaceMesh(results.surfaceMesh);
+        setSolverMeshSummary(solverMeshSummaryFromResults(results));
+        setReportCaptures(results.reportCaptures ? { runId: reloadResultsRunId, captures: results.reportCaptures } : null);
+        setActiveRunId(reloadResultsRunId);
+        setCompletedRunId(reloadResultsRunId);
+        setRunProgress(100);
+        setRunError(null);
+        pushMessage("Simulation results restored after reload.");
+      })
+      .catch((error) => {
+        if (cancelled || projectRef.current !== sourceProject) return;
+        const message = errorMessage(error, "Could not restore simulation results after reload.");
+        setRunError(message);
+        pushMessage(message);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [reloadResultsRunId]);
 
   useEffect(() => () => projectActionAbortRef.current?.abort(), []);
 
