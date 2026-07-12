@@ -98,6 +98,7 @@ interface RightPanelProps {
   onPreviewLoadEdit: (load: Load | null) => void;
   onRemoveLoad: (loadId: string) => void;
   onGenerateMesh: (preset: MeshQuality) => void;
+  onCancelMesh?: () => void;
   meshPhaseProgress?: WasmMeshPhaseProgress | null;
   onUpdateSolverSettings?: (settings: SolverSettingsPatch) => void;
   onChangeStudyType?: (type: Study["type"]) => void;
@@ -1038,7 +1039,7 @@ function selectionForFace(study: Study, faceId: string) {
   return study.namedSelections.find((item) => item.entityType === "face" && item.geometryRefs.some((ref) => ref.entityId === faceId));
 }
 
-function MeshPanel({ project, study, onGenerateMesh, meshPhaseProgress, onRepairModel, isRepairingModel = false }: RightPanelProps) {
+function MeshPanel({ project, study, onGenerateMesh, onCancelMesh, meshPhaseProgress, onRepairModel, isRepairingModel = false }: RightPanelProps) {
   const [preset, setPreset] = useState<MeshQuality>(study.meshSettings.preset);
   const meshing = Boolean(meshPhaseProgress);
   const stepGeometry = stepGeometryMetadataForProject(project);
@@ -1053,7 +1054,16 @@ function MeshPanel({ project, study, onGenerateMesh, meshPhaseProgress, onRepair
           ))}
         </div>
       </div>
-      <button className="primary wide" disabled={meshing} onClick={() => onGenerateMesh(preset)}><Grid3X3 size={18} />{meshing ? "Meshing..." : "Generate mesh"}</button>
+      <button
+        className="primary wide"
+        type="button"
+        disabled={meshing && !onCancelMesh}
+        aria-label={meshing ? "Stop mesh generation" : "Generate mesh"}
+        onClick={() => meshing ? onCancelMesh?.() : onGenerateMesh(preset)}
+      >
+        {meshing ? <X size={18} /> : <Grid3X3 size={18} />}
+        {meshing ? "Stop meshing" : "Generate mesh"}
+      </button>
       {stepGeometry?.status === "repairable" && !stepGeometryResolvedByMesh && (
         <div className="step-repair-card" role="alert" aria-label="Open STEP surfaces detected">
           <p className="panel-warning"><AlertTriangle size={16} />{stepGeometry.message ?? "This STEP model has open or invalid surfaces and is not a closed simulation solid."}</p>

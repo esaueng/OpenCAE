@@ -204,7 +204,13 @@ export async function meshGeoScriptToMshV2(geoScript: string, options: MeshWasmO
  * quality floor. Tet quality is non-monotonic in size, so try the adjacent
  * coarser size as well as the two existing finer sizes.
  */
-const QUALITY_SIZE_MULTIPLIERS = [1, 3 / 2, 2 / 3, 4 / 9] as const;
+// Keep one deep-refinement rung for valid, feature-dense solids whose coarse
+// surface triangulation intersects itself during PLC recovery. The CAE load
+// test bracket (160 x 60 x 10 mm, 210 faces) fails from 12 mm through 3 mm but
+// produces a passing 18k-tet mesh at 2 mm. This rung is still guarded by the
+// existing tet/DOF limits, so genuinely large refinements cannot enter the
+// browser solver unchecked.
+const QUALITY_SIZE_MULTIPLIERS = [1, 3 / 2, 2 / 3, 4 / 9, 1 / 6] as const;
 /** Stop refining once a mesh gets this large — the solver caps DOF anyway. */
 const MAX_QUALITY_REFINEMENT_TETS = 80_000;
 /** The browser solve pipeline accepts at most 100,000 displacement DOFs. */

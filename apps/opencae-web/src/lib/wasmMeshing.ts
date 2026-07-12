@@ -38,10 +38,19 @@ export function canMeshStudyOnDemand(study: Study, displayModel?: DisplayModel):
 // cap out at 25 MiB per file).
 type MeshWorkerClientModule = typeof import("../workers/meshWorkerClient");
 let workerClient: MeshWorkerClientModule | null = null;
+let meshCancellationGeneration = 0;
 
 /** Hard-cancel any in-flight in-browser meshing (terminates the worker). No-op when idle. */
 export function cancelWasmMeshing(reason?: string): void {
+  meshCancellationGeneration += 1;
   workerClient?.cancelMeshWork(reason);
+}
+
+function throwIfMeshingCancelled(generation: number): void {
+  if (generation === meshCancellationGeneration) return;
+  const error = new Error("Mesh generation cancelled.");
+  error.name = "AbortError";
+  throw error;
 }
 
 const MESH_PHASE_MESSAGES: Record<string, string> = {
@@ -126,17 +135,19 @@ async function meshWorkerRun(options: WasmMeshOptions): Promise<WasmMeshStudyRes
   if (activeMeshRuns > 0) {
     cancelWasmMeshing("Superseded by a newer mesh request.");
   }
+  const cancellationGeneration = meshCancellationGeneration;
   activeMeshRuns += 1;
   try {
-    return await meshWorkerRunExclusive(options);
+    return await meshWorkerRunExclusive(options, cancellationGeneration);
   } finally {
     activeMeshRuns -= 1;
   }
 }
 
-async function meshWorkerRunExclusive(options: WasmMeshOptions): Promise<WasmMeshStudyResult> {
+async function meshWorkerRunExclusive(options: WasmMeshOptions, cancellationGeneration: number): Promise<WasmMeshStudyResult> {
   const { preset, study, displayModel, geometry } = options;
   if (!geometry) return null;
+  throwIfMeshingCancelled(cancellationGeneration);
 
   const onWorkerProgress: MeshProgressListener = ({ phase, attempt }) => {
     const baseMessage = MESH_PHASE_MESSAGES[phase];
@@ -154,6 +165,9 @@ async function meshWorkerRunExclusive(options: WasmMeshOptions): Promise<WasmMes
     import("@opencae/mesh-intake")
   ]);
   workerClient = client;
+  // Cancellation can happen while the worker/client chunks are still loading.
+  // Do not start gmsh after the user has already stopped this request.
+  throwIfMeshingCancelled(cancellationGeneration);
   let meshedPacked: Awaited<ReturnType<MeshWorkerClientModule["meshGeoScriptInWorker"]>>;
   let elementOrder: 1 | 2;
   let algorithmNote: string | undefined;
@@ -205,6 +219,7 @@ async function meshWorkerRunExclusive(options: WasmMeshOptions): Promise<WasmMes
       stepStructuralBodyPlan = undefined;
       structuralBodyNote = undefined;
     }
+    throwIfMeshingCancelled(cancellationGeneration);
     const stepResult = await client.meshStepFileInWorker(
       {
         stepContent: base64ToArrayBuffer(geometry.contentBase64),
@@ -253,6 +268,7 @@ async function meshWorkerRunExclusive(options: WasmMeshOptions): Promise<WasmMes
     return null;
   }
 
+  throwIfMeshingCancelled(cancellationGeneration);
   const artifact = unpackCoreVolumeMeshArtifact(meshedPacked.packed);
   // The mesher may intentionally retain a linear mesh when Tet10 would exceed
   // the browser solver's DOF budget. The artifact is authoritative: carrying
@@ -274,6 +290,7 @@ async function meshWorkerRunExclusive(options: WasmMeshOptions): Promise<WasmMes
       dispatchStudy = studyWithStepPayloadContacts(dispatchStudy, stepFaceRegistry, stepStructuralBodyPlan);
     }
   }
+  throwIfMeshingCancelled(cancellationGeneration);
   const criticalLayerAxis = inferGlobalCriticalPrintAxis(study, (displayModel?.faces ?? []).map((face) => ({
     entityId: face.id,
     center: face.center,
@@ -318,6 +335,7 @@ async function meshWorkerRunExclusive(options: WasmMeshOptions): Promise<WasmMes
       ...(mappingDiagnostics.length ? { selectionMapping: mappingDiagnostics } : {})
     }
   };
+  throwIfMeshingCancelled(cancellationGeneration);
 
   return {
     study: {
