@@ -26,8 +26,9 @@ import { buildLocalProjectFile, suggestedProjectFilename, type LocalResultBundle
 import { prepareBlobSaveToDisk, saveBlobToDisk } from "./lib/fileSave";
 import { captureResultViews, type ResultViewCaptures } from "./report/captureResultViews";
 import { buildReportData, suggestedReportFilename } from "./report/reportData";
-import { buildAutosavedWorkspace, buildAutosavedWorkspaceUiSnapshot, flushAutosavedWorkspace, installAutosavePageHideFlush, localRunIdForResultsRestore, readAutosavedWorkspace, scheduleAutosavedUiSnapshotWrite, scheduleAutosavedWorkspaceWrite, WORKSPACE_LOG_LIMIT } from "./appPersistence";
+import { buildAutosavedWorkspace, buildAutosavedWorkspaceUiSnapshot, flushAutosavedWorkspace, installAutosavePageHideFlush, localRunIdForResultsRestore, parseAutosavedWorkspacePayload, readAutosavedWorkspace, scheduleAutosavedUiSnapshotWrite, scheduleAutosavedWorkspaceWrite, WORKSPACE_LOG_LIMIT } from "./appPersistence";
 import type { AutosavedWorkspace, WorkspaceUiSnapshot } from "./appPersistence";
+import { requestPersistentBrowserStorage, restoreEncryptedCloudBackup, saveEncryptedCloudBackup } from "./cloudBackup";
 import {
   canNavigateToStep,
   isEditableShortcutTarget,
@@ -149,6 +150,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const [runError, setRunError] = useState<string | null>(null);
   const [reportBusy, setReportBusy] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
+  const [overflowRecoveryRequest, setOverflowRecoveryRequest] = useState(0);
   const [activeRunId, setActiveRunId] = useState(restoredUi?.activeRunId || restoredResults?.activeRunId || restoredResults?.completedRunId || "run-bracket-demo-seeded");
   const [completedRunId, setCompletedRunId] = useState(restoredUi?.completedRunId || restoredResults?.completedRunId || "run-bracket-demo-seeded");
   const [processingRunId, setProcessingRunId] = useState<string | null>(null);
@@ -200,6 +202,8 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const projectActionClientIdRef = useRef<string | null>(null);
   const autosaveWriteFailureNotifiedRef = useRef(false);
   const autosaveDegradedNotifiedRef = useRef(false);
+  const cloudBackupPromptedRef = useRef(false);
+  const fullAutosaveSnapshotRef = useRef<() => AutosavedWorkspace | null>(() => null);
   const flushAutosaveRef = useRef<() => void>(() => undefined);
   const stepFaceHealNotifiedRef = useRef(false);
   const workspaceShortcutHandlerRef = useRef<(event: KeyboardEvent) => void>(() => undefined);
@@ -342,27 +346,41 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     void getResults(reloadResultsRunId)
       .then((results) => {
         if (cancelled || projectRef.current !== sourceProject) return;
-        setResultSummary(results.summary);
-        setResultFields(withDerivedSurfaceSafetyFactorFields(results));
-        setResultSurfaceMesh(results.surfaceMesh);
-        setSolverMeshSummary(solverMeshSummaryFromResults(results));
-        setReportCaptures(results.reportCaptures ? { runId: reloadResultsRunId, captures: results.reportCaptures } : null);
-        setActiveRunId(reloadResultsRunId);
-        setCompletedRunId(reloadResultsRunId);
-        setRunProgress(100);
-        setRunError(null);
-        pushMessage("Simulation results restored after reload.");
+        applyReloadedResults(results, reloadResultsRunId, "Simulation results restored after reload.");
       })
-      .catch((error) => {
+      .catch(async (localError) => {
         if (cancelled || projectRef.current !== sourceProject) return;
-        const message = errorMessage(error, "Could not restore simulation results after reload.");
-        setRunError(message);
-        pushMessage(message);
+        try {
+          const cloudSnapshot = await restoreEncryptedCloudBackup(reloadResultsRunId);
+          if (cancelled || projectRef.current !== sourceProject) return;
+          const parsed = cloudSnapshot ? parseAutosavedWorkspacePayload(JSON.stringify(cloudSnapshot)) : null;
+          const cloudResults = parsed?.projectFile.results;
+          if (!cloudResults?.fields.length) throw localError;
+          applyReloadedResults(cloudResults, reloadResultsRunId, "Simulation results restored from the encrypted cloud recovery backup.");
+        } catch (cloudError) {
+          if (cancelled || projectRef.current !== sourceProject) return;
+          const message = errorMessage(cloudError, errorMessage(localError, "Could not restore simulation results after reload."));
+          setRunError(message);
+          pushMessage(message);
+        }
       });
     return () => {
       cancelled = true;
     };
   }, [reloadResultsRunId]);
+
+  function applyReloadedResults(results: Awaited<ReturnType<typeof getResults>>, runId: string, message: string) {
+    setResultSummary(results.summary);
+    setResultFields(withDerivedSurfaceSafetyFactorFields(results));
+    setResultSurfaceMesh(results.surfaceMesh);
+    setSolverMeshSummary(solverMeshSummaryFromResults(results));
+    setReportCaptures(results.reportCaptures ? { runId, captures: results.reportCaptures } : null);
+    setActiveRunId(runId);
+    setCompletedRunId(runId);
+    setRunProgress(100);
+    setRunError(null);
+    pushMessage(message);
+  }
 
   useEffect(() => () => projectActionAbortRef.current?.abort(), []);
 
@@ -753,20 +771,57 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   function notifyAutosaveWriteFailure() {
     if (autosaveWriteFailureNotifiedRef.current) return;
     autosaveWriteFailureNotifiedRef.current = true;
-    pushMessage("Autosave failed: browser storage is full or unavailable. Save the project to disk to keep changes.");
+    pushMessage("Autosave failed: browser storage is full or unavailable.");
+    void offerOverflowRecoveryOptions();
   }
 
   function notifyAutosaveDegraded() {
     if (autosaveDegradedNotifiedRef.current) return;
     autosaveDegradedNotifiedRef.current = true;
-    pushMessage("Autosave kept the project setup, but the mesh artifact and results exceed browser storage. Use Save project to keep them on disk.");
+    pushMessage("Autosave kept the project setup, but the mesh artifact and results exceed browser storage.");
+    void offerOverflowRecoveryOptions();
+  }
+
+  async function offerOverflowRecoveryOptions() {
+    if (cloudBackupPromptedRef.current) return;
+    cloudBackupPromptedRef.current = true;
+    try {
+      const persistent = await requestPersistentBrowserStorage();
+      if (persistent) pushMessage("Persistent browser storage enabled to reduce automatic eviction.");
+    } catch {
+      // Persistence is best-effort; the explicit cloud decision still follows.
+    }
+    const allowed = window.confirm([
+      "This project is larger than the browser autosave limit.",
+      "",
+      "Allow OpenCAE to upload one encrypted recovery backup to Cloudflare R2 for 30 days?",
+      "The simulation still runs locally. Encryption happens in this browser, and the cloud service never receives the decryption key.",
+      "",
+      "Choose Cancel to keep everything local and use Save project to write a file instead."
+    ].join("\n"));
+    if (!allowed) {
+      pushMessage("Cloud backup not enabled. Use Save project to keep a complete local file.");
+      return;
+    }
+    const snapshot = fullAutosaveSnapshotRef.current();
+    const runId = completedRunId || activeRunId;
+    if (!snapshot || !runId) {
+      pushMessage("Cloud backup could not start because there is no completed workspace snapshot.");
+      return;
+    }
+    try {
+      const backup = await saveEncryptedCloudBackup(snapshot, runId);
+      pushMessage(`Encrypted cloud recovery backup saved until ${new Date(backup.expiresAt).toLocaleDateString()}.`);
+    } catch (error) {
+      pushMessage(`${errorMessage(error, "Cloud backup failed.")} Use Save project to keep a complete local file.`);
+    }
   }
 
   // A normal reload tears down the delayed autosave effects before their
   // timers fire. Keep a render-current writer behind a stable pagehide
   // listener so setup changes made immediately before reload are not lost.
-  flushAutosaveRef.current = () => {
-    if (!project || !displayModel) return;
+  fullAutosaveSnapshotRef.current = () => {
+    if (!project || !displayModel) return null;
     const savedAt = new Date().toISOString();
     const results = resultFields.length && resultSummary ? {
       activeRunId,
@@ -777,13 +832,24 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       ...(solverMeshSummary ? { solverMeshSummary } : {}),
       ...(reportCaptures?.runId === completedRunId ? { reportCaptures: reportCaptures.captures } : {})
     } : undefined;
+    return buildAutosavedWorkspace({ project, displayModel, savedAt, results, ui: autosaveUiSnapshot });
+  };
+
+  flushAutosaveRef.current = () => {
+    const snapshot = fullAutosaveSnapshotRef.current();
+    if (!snapshot) return;
     flushAutosavedWorkspace(
-      buildAutosavedWorkspace({ project, displayModel, savedAt, results, ui: autosaveUiSnapshot }),
-      buildAutosavedWorkspaceUiSnapshot(autosaveUiSnapshot, savedAt)
+      snapshot,
+      buildAutosavedWorkspaceUiSnapshot(autosaveUiSnapshot, snapshot.savedAt)
     );
   };
 
   useEffect(() => installAutosavePageHideFlush(() => flushAutosaveRef.current()), []);
+
+  useEffect(() => {
+    if (!overflowRecoveryRequest) return;
+    void offerOverflowRecoveryOptions();
+  }, [overflowRecoveryRequest]);
 
   // Selections referencing placeholder "face-upload-*" faces can never map
   // onto the meshed geometry: legacy generic box faces (uploads made while the
@@ -1590,6 +1656,10 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           setCompletedRunId(response.run.id);
           setViewMode("results");
           setActiveStep("results");
+          if (results.summary.diagnostics?.some((diagnostic) => diagnostic.id === "local-results-persistence")) {
+            pushMessage("Completed results exceeded or could not use IndexedDB storage.");
+            setOverflowRecoveryRequest((request) => request + 1);
+          }
         } catch (error) {
           const message = errorMessage(error, "Could not load simulation results.");
           setRunError(message);
