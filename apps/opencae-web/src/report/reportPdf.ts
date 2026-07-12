@@ -107,6 +107,15 @@ class PdfReport {
 
     this.sectionHeading(7, "Results table");
     this.keyValueRows(this.data.results);
+    if (this.data.loadCapacity.length) {
+      this.subheading("Load capacity (reverse check)");
+      this.keyValueRows(this.data.loadCapacity);
+      const note = "Estimated by linearly scaling the current result against the material yield limit; verify with a run at the target load.";
+      const noteLines = this.splitText(note, this.contentWidth, REPORT_TYPE.caption);
+      this.ensureSpace(noteLines.length * 3.5 + 4);
+      this.text(noteLines, REPORT_LAYOUT.margin, this.y, REPORT_TYPE.caption, REPORT_THEME.inkMuted);
+      this.y += noteLines.length * 3.5 + 5;
+    }
     if (this.data.transientResults.length) {
       this.subheading("Transient results");
       this.keyValueRows(this.data.transientResults);
@@ -257,7 +266,7 @@ class PdfReport {
     this.ensureSpace(Math.min(maxHeight + 18, 96));
     this.text(figure.title, REPORT_LAYOUT.margin, this.y, 10, REPORT_THEME.ink, "bold");
     this.y += 4;
-    const legendWidth = 18;
+    const legendWidth = 24;
     const gap = 5;
     const imageAreaWidth = this.contentWidth - legendWidth - gap;
     const frameHeight = Math.max(35, Math.min(maxHeight - 14, imageAreaWidth * 0.56));
@@ -305,7 +314,6 @@ class PdfReport {
     this.doc.setDrawColor(REPORT_THEME.hairline);
     this.doc.rect(x, barY, barWidth, barHeight);
     this.text(figure.legendMax, x + barWidth + 2, barY + 2, 7.2, REPORT_THEME.ink, "bold");
-    this.text(figure.units, x + barWidth + 2, barY + barHeight / 2, 7.2, REPORT_THEME.inkMuted);
     this.text(figure.legendMin, x + barWidth + 2, barY + barHeight, 7.2, REPORT_THEME.ink, "bold");
     this.text("Max", x, y + 4, 6.8, REPORT_THEME.inkMuted);
     this.text("Min", x, Math.min(y + height, barY + barHeight + 4), 6.8, REPORT_THEME.inkMuted);
