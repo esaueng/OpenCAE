@@ -1103,10 +1103,78 @@ img {
 }
 
 .topbar-tools {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 8px;
   margin-left: auto;
+}
+
+.shortcut-popover {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 10px);
+  right: 0;
+  width: min(520px, calc(100vw - 24px));
+  padding: 12px;
+  color: var(--color-text-muted);
+  background: var(--color-surface);
+  border: var(--border-thin);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-panel);
+}
+
+.shortcut-popover-close {
+  position: absolute;
+  z-index: 1;
+  top: 20px;
+  right: 20px;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  color: var(--color-text-muted);
+  border-radius: var(--radius-sm);
+}
+
+.shortcut-popover-close:hover,
+.shortcut-popover-close:focus-visible {
+  color: var(--color-text);
+  background: var(--color-surface-2);
+}
+
+.shortcut-toggle {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 9px;
+  margin-top: 10px;
+  padding: 10px;
+  color: var(--color-text-muted);
+  background: var(--color-surface-2);
+  border: var(--border-thin);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.shortcut-toggle input {
+  margin-top: 2px;
+}
+
+.shortcut-toggle strong,
+.shortcut-toggle small {
+  display: block;
+}
+
+.shortcut-toggle strong {
+  color: var(--color-text);
+  font-size: var(--fs-sm);
+}
+
+.shortcut-toggle small {
+  margin-top: 2px;
+  font-size: var(--fs-xs);
+  line-height: 1.4;
 }
 
 .history-tools {
@@ -3761,6 +3829,15 @@ button:disabled {
   font: inherit;
   font-weight: 600;
   line-height: 1.35;
+}
+
+.shortcut-popover .shortcut-guide {
+  margin-top: 0;
+  padding-right: 32px;
+}
+
+.shortcut-popover .shortcut-list {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .tip-card {
