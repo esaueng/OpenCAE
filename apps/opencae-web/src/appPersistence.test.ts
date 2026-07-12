@@ -5,6 +5,7 @@ import {
   AUTOSAVE_UI_STORAGE_KEY,
   buildAutosavedWorkspace,
   buildAutosavedWorkspaceUiSnapshot,
+  installAutosavePageHideFlush,
   parseAutosavedWorkspacePayload,
   readAutosavedWorkspace,
   scheduleAutosavedUiSnapshotWrite,
@@ -66,6 +67,10 @@ const baseUi = {
   showDeformed: false,
   showDimensions: false,
   stressExaggeration: 1,
+  resultFrameIndex: 0,
+  resultPlaybackFps: 12,
+  resultPlaybackReverseLoop: false,
+  isStepbarCollapsed: false,
   draftLoadType: "force",
   draftLoadValue: 500,
   draftLoadDirection: "-Z",
@@ -90,7 +95,7 @@ const studyWithSetup = {
     id: "assign-1",
     materialId: "mat-aluminum-6061",
     selectionRef: "selection-body",
-    parameters: { printed: false },
+    parameters: { printed: false, manufacturingProcessId: "process-cnc-machining" },
     status: "complete"
   }],
   namedSelections: [
@@ -575,6 +580,19 @@ describe("app persistence", () => {
     expect(storage.setItem).toHaveBeenCalledWith(AUTOSAVE_STORAGE_KEY, expect.stringContaining('"fields"'));
 
     cancel();
+  });
+
+  test("flushes the latest autosave when the web page is reloaded", () => {
+    const target = new EventTarget();
+    const flush = vi.fn();
+    const uninstall = installAutosavePageHideFlush(flush, target);
+
+    target.dispatchEvent(new Event("pagehide"));
+    expect(flush).toHaveBeenCalledTimes(1);
+
+    uninstall();
+    target.dispatchEvent(new Event("pagehide"));
+    expect(flush).toHaveBeenCalledTimes(1);
   });
 
   test("writes lightweight UI autosave separately from the heavy workspace snapshot", () => {

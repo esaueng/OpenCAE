@@ -26,7 +26,7 @@ import { buildLocalProjectFile, suggestedProjectFilename, type LocalResultBundle
 import { prepareBlobSaveToDisk, saveBlobToDisk } from "./lib/fileSave";
 import { captureResultViews, type ResultViewCaptures } from "./report/captureResultViews";
 import { buildReportData, suggestedReportFilename } from "./report/reportData";
-import { buildAutosavedWorkspace, buildAutosavedWorkspaceUiSnapshot, readAutosavedWorkspace, scheduleAutosavedUiSnapshotWrite, scheduleAutosavedWorkspaceWrite, WORKSPACE_LOG_LIMIT } from "./appPersistence";
+import { buildAutosavedWorkspace, buildAutosavedWorkspaceUiSnapshot, flushAutosavedWorkspace, installAutosavePageHideFlush, readAutosavedWorkspace, scheduleAutosavedUiSnapshotWrite, scheduleAutosavedWorkspaceWrite, WORKSPACE_LOG_LIMIT } from "./appPersistence";
 import type { AutosavedWorkspace, WorkspaceUiSnapshot } from "./appPersistence";
 import {
   canNavigateToStep,
@@ -163,12 +163,12 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     return restoredRunId && restoredResults?.reportCaptures ? { runId: restoredRunId, captures: restoredResults.reportCaptures } : null;
   });
   const [viewerCaptureRevision, setViewerCaptureRevision] = useState(0);
-  const [resultFrameIndex, setResultFrameIndex] = useState(0);
+  const [resultFrameIndex, setResultFrameIndex] = useState(restoredUi?.resultFrameIndex ?? 0);
   const [resultPlaybackFramePosition, setResultPlaybackFramePosition] = useState(0);
   const [resultPlaybackOrdinalPosition, setResultPlaybackOrdinalPosition] = useState(0);
   const [resultPlaybackPlaying, setResultPlaybackPlaying] = useState(false);
-  const [resultPlaybackFps, setResultPlaybackFps] = useState(12);
-  const [resultPlaybackReverseLoop, setResultPlaybackReverseLoop] = useState(false);
+  const [resultPlaybackFps, setResultPlaybackFps] = useState(restoredUi?.resultPlaybackFps ?? 12);
+  const [resultPlaybackReverseLoop, setResultPlaybackReverseLoop] = useState(restoredUi?.resultPlaybackReverseLoop ?? false);
   const [resultPlaybackCacheState, setResultPlaybackCacheState] = useState<ResultPlaybackCacheState>({ status: "idle" });
   const [draftLoadType, setDraftLoadType] = useState<LoadType>(restoredUi?.draftLoadType ?? "force");
   const [draftLoadValue, setDraftLoadValue] = useState(restoredUi?.draftLoadValue ?? 500);
@@ -178,7 +178,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const [sampleModel, setSampleModel] = useState<SampleModelId>(restoredUi?.sampleModel ?? "bracket");
   const [sampleAnalysisType, setSampleAnalysisType] = useState<SampleAnalysisType>(restoredUi?.sampleAnalysisType ?? "static_stress");
   const [previewPrintLayerOrientation, setPreviewPrintLayerOrientation] = useState<PrintLayerOrientation | null | undefined>(undefined);
-  const [isStepbarCollapsed, setIsStepbarCollapsed] = useState(false);
+  const [isStepbarCollapsed, setIsStepbarCollapsed] = useState(restoredUi?.isStepbarCollapsed ?? false);
   const [showBoundaryConditionMenu, setShowBoundaryConditionMenu] = useState(false);
   const [isRepairingModel, setIsRepairingModel] = useState(false);
   const [singleKeyShortcutsEnabled, setSingleKeyShortcutsEnabled] = useState(() => {
@@ -199,6 +199,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const projectActionClientIdRef = useRef<string | null>(null);
   const autosaveWriteFailureNotifiedRef = useRef(false);
   const autosaveDegradedNotifiedRef = useRef(false);
+  const flushAutosaveRef = useRef<() => void>(() => undefined);
   const stepFaceHealNotifiedRef = useRef(false);
   const workspaceShortcutHandlerRef = useRef<(event: KeyboardEvent) => void>(() => undefined);
   const resultFrameIndexRef = useRef(0);
@@ -673,6 +674,10 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     showDeformed,
     showDimensions,
     stressExaggeration,
+    resultFrameIndex,
+    resultPlaybackFps,
+    resultPlaybackReverseLoop,
+    isStepbarCollapsed,
     draftLoadType,
     draftLoadValue,
     draftLoadDirection,
@@ -693,9 +698,13 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     draftLoadType,
     draftLoadValue,
     homeRequested,
+    isStepbarCollapsed,
     logs,
     redoStack,
+    resultFrameIndex,
     resultMode,
+    resultPlaybackFps,
+    resultPlaybackReverseLoop,
     runProgress,
     sampleAnalysisType,
     sampleModel,
@@ -722,6 +731,29 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     autosaveDegradedNotifiedRef.current = true;
     pushMessage("Autosave kept the project setup, but the mesh artifact and results exceed browser storage. Use Save project to keep them on disk.");
   }
+
+  // A normal reload tears down the delayed autosave effects before their
+  // timers fire. Keep a render-current writer behind a stable pagehide
+  // listener so setup changes made immediately before reload are not lost.
+  flushAutosaveRef.current = () => {
+    if (!project || !displayModel) return;
+    const savedAt = new Date().toISOString();
+    const results = resultFields.length && resultSummary ? {
+      activeRunId,
+      completedRunId,
+      summary: resultSummary,
+      fields: resultFields,
+      ...(resultSurfaceMesh ? { surfaceMesh: resultSurfaceMesh } : {}),
+      ...(solverMeshSummary ? { solverMeshSummary } : {}),
+      ...(reportCaptures?.runId === completedRunId ? { reportCaptures: reportCaptures.captures } : {})
+    } : undefined;
+    flushAutosavedWorkspace(
+      buildAutosavedWorkspace({ project, displayModel, savedAt, results, ui: autosaveUiSnapshot }),
+      buildAutosavedWorkspaceUiSnapshot(autosaveUiSnapshot, savedAt)
+    );
+  };
+
+  useEffect(() => installAutosavePageHideFlush(() => flushAutosaveRef.current()), []);
 
   // Selections referencing placeholder "face-upload-*" faces can never map
   // onto the meshed geometry: legacy generic box faces (uploads made while the
