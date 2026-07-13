@@ -337,7 +337,6 @@ export function CadViewer(props: CadViewerProps) {
         <button type="button" onClick={() => setGizmoViewRequest((request) => ({ view: "z", signal: request.signal + 1 }))}>Z</button>
         <button type="button" onClick={() => setGizmoViewRequest((request) => ({ view: VIEWER_ISOMETRIC_GIZMO_VIEW, signal: request.signal + 1 }))}>Iso</button>
       </div>
-      <a className="viewer-watermark" href={VIEWER_CREDIT_URL} target="_blank" rel="noreferrer">Built by Esau Engineering</a>
       {effectiveViewMode === "results" && <ResultLegend resultMode={props.resultMode} resultFields={resultFields} unitSystem={props.unitSystem} meshSummary={props.meshSummary} surfaceMesh={props.surfaceMesh} showDeformed={effectiveShowDeformed} deformationScale={props.stressExaggeration} />}
     </section>
   );
