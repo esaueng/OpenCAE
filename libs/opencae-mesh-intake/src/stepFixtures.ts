@@ -207,6 +207,48 @@ export async function generateThinWalledTrayStep(): Promise<string> {
   });
 }
 
+/**
+ * T-bar exported as TWO UNFUSED solids that interpenetrate (the cross-bar
+ * overlaps the arm's first 10 mm), like the failing "CAE Load Test" upload
+ * class: a 160x20x10 mm arm with an 8 mm bore near the tip, plus a
+ * 20x60x10 mm cross-bar. Exercises the multi-body fusion stage — meshed
+ * per-volume this double-counts the overlap and can never form one component.
+ */
+export async function generateOverlappingTBarStep(): Promise<string> {
+  return withOccSession((gmsh) => {
+    const arm = gmsh.model.occ.addBox(0, -10, 0, 160, 20, 10);
+    gmsh.model.occ.addBox(-10, -30, 0, 20, 60, 10);
+    const bore = gmsh.model.occ.addCylinder(150, 0, -1, 0, 0, 12, 4);
+    gmsh.model.occ.cut([3, arm], [3, bore]);
+    gmsh.model.occ.synchronize();
+  });
+}
+
+/**
+ * The same T-bar as two UNFUSED solids that exactly touch at the x=0 plane
+ * (coincident faces, no interpenetration). Meshed per-volume the coincident
+ * faces get independent, non-matching triangulations, so the two bodies never
+ * share nodes and the solver rejects the mesh as two components.
+ */
+export async function generateTouchingTBarStep(): Promise<string> {
+  return withOccSession((gmsh) => {
+    const arm = gmsh.model.occ.addBox(0, -10, 0, 160, 20, 10);
+    gmsh.model.occ.addBox(-10, -30, 0, 10, 60, 10);
+    const bore = gmsh.model.occ.addCylinder(150, 0, -1, 0, 0, 12, 4);
+    gmsh.model.occ.cut([3, arm], [3, bore]);
+    gmsh.model.occ.synchronize();
+  });
+}
+
+/** Two 40x20x10 mm bars separated by a 5 mm air gap: fusion must leave disjoint bodies alone. */
+export async function generateDisjointBarsStep(): Promise<string> {
+  return withOccSession((gmsh) => {
+    gmsh.model.occ.addBox(0, 0, 0, 40, 20, 10);
+    gmsh.model.occ.addBox(45, 0, 0, 40, 20, 10);
+    gmsh.model.occ.synchronize();
+  });
+}
+
 async function withOccSession(build: (gmsh: GmshApi) => void): Promise<string> {
   const gmsh = await loadGmshWasm();
   gmsh.initialize();

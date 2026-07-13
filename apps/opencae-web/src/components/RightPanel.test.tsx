@@ -104,6 +104,7 @@ function renderPanel(activeStep: StepId, overrides: Partial<Parameters<typeof Ri
       onPreviewLoadEdit={vi.fn()}
       onRemoveLoad={vi.fn()}
       onGenerateMesh={vi.fn()}
+      onCancelMesh={vi.fn()}
       onRunSimulation={vi.fn()}
       onCancelSimulation={vi.fn()}
       canRunSimulation={false}
@@ -167,18 +168,35 @@ describe("RightPanel payload mass controls", () => {
     });
 
     expect(coreHtml).toContain("OpenCAE Core Cloud");
-    expect(coreHtml).toContain("Core solver version");
-    expect(coreHtml).toContain("0.1.0");
-    expect(coreHtml).toContain("Core model schema version");
-    expect(coreHtml).toContain(project.schemaVersion);
+    expect(coreHtml).not.toContain("Core solver version");
+    expect(coreHtml).not.toContain("Core model schema version");
     expect(coreHtml).toContain("Mesh source");
     expect(coreHtml).toContain("Actual volume mesh");
     expect(coreHtml).toContain("Solver method");
     expect(coreHtml).toContain("sparse_static");
     expect(coreHtml).toContain("Runner");
     expect(coreHtml).toContain("cloud container");
-    expect(coreHtml).toContain("Local fallback");
-    expect(coreHtml).toContain("none");
+    expect(coreHtml).not.toContain("Local fallback");
+  });
+
+  test("uses the concise local result label and places legend labels at their matching ends", () => {
+    const html = renderPanel("results", {
+      resultSummary: {
+        ...resultSummary,
+        provenance: {
+          kind: "opencae_core_fea",
+          solver: "opencae-core-sparse-tet",
+          runnerVersion: "browser-0.2.0",
+          meshSource: "actual_volume_mesh",
+          resultSource: "computed",
+          units: "mm-N-s-MPa"
+        }
+      }
+    });
+
+    expect(html).toContain("Local (in-browser)");
+    expect(html).not.toContain("OpenCAE Core Local (in-browser)");
+    expect(html).toContain('<div class="legend"><small>Low</small><span></span><small>High</small></div>');
   });
 
   test("renders a missing-unit diagnostic instead of undefined result units", () => {
@@ -270,10 +288,13 @@ describe("RightPanel payload mass controls", () => {
     expect(html).not.toContain("bracket · all bodies");
   });
 
-  test("shows a stop processing action while a simulation is running", () => {
+  test("turns the run simulation button into the only stop action while running", () => {
     const markup = renderPanel("run", { runProgress: 42 });
 
-    expect(markup).toContain("Stop processing");
+    expect(markup).toContain('aria-label="Stop simulation"');
+    expect(markup).toContain("Stop simulation");
+    expect(markup).not.toContain("Run simulation");
+    expect(markup).not.toContain("Stop processing");
   });
 
   test("shows the estimated simulation calculation time while running", () => {
@@ -468,7 +489,7 @@ describe("RightPanel payload mass controls", () => {
     const meshHtml = renderPanel("mesh", { study: { ...detailedStudy, meshSettings: { preset: "ultra", status: "complete", summary: { nodes: 182400, elements: 119808, warnings: [], analysisSampleCount: 45000, quality: "ultra" } } } });
 
     expect(runHtml).toContain("Simulation settings");
-    expect(runHtml).toContain("OpenCAE Core");
+    expect(runHtml).toContain("Local (in-browser)");
     expect(runHtml).toContain("Fidelity");
     expect(meshHtml).toContain("Ultra");
     expect(meshHtml).toContain("Analysis samples");
@@ -484,11 +505,12 @@ describe("RightPanel payload mass controls", () => {
     });
 
     // The cloud path is retired and every run executes in the browser, so a
-    // backend select would be routing theater; an informational row replaces it.
+    // backend select would be routing theater; the lower diagnostics state it once.
     expect(runHtml).not.toContain("solver-backend");
     expect(runHtml).not.toContain("Auto — runs locally in your browser");
     expect(runHtml).toContain("Local (in-browser)");
-    expect(runHtml).toContain("OpenCAE Core Local (in-browser)");
+    expect(runHtml.match(/Local \(in-browser\)/g)).toHaveLength(1);
+    expect(runHtml).not.toContain("Local fallback");
     expect(runHtml).not.toContain("OpenCAE Core Cloud");
   });
 
@@ -502,7 +524,7 @@ describe("RightPanel payload mass controls", () => {
 
     expect(runHtml).not.toContain("solver-backend");
     expect(runHtml).toContain("Local (in-browser)");
-    expect(runHtml).toContain("OpenCAE Core Local (in-browser)");
+    expect(runHtml.match(/Local \(in-browser\)/g)).toHaveLength(1);
     expect(runHtml).toContain("local core worker");
     expect(runHtml).not.toContain("OpenCAE Core Cloud");
     expect(runHtml).not.toContain("legacy backend");
@@ -531,7 +553,7 @@ describe("RightPanel payload mass controls", () => {
     const runHtml = renderPanel("run", { study: eligibleStudy, displayModel: eligibleDisplayModel });
 
     expect(runHtml).toContain("Local (in-browser)");
-    expect(runHtml).toContain("OpenCAE Core Local (in-browser)");
+    expect(runHtml.match(/Local \(in-browser\)/g)).toHaveLength(1);
     expect(runHtml).toContain("local core worker");
     expect(runHtml).not.toContain("solver-backend");
   });
@@ -547,8 +569,7 @@ describe("RightPanel payload mass controls", () => {
       canRunSimulation: true
     });
 
-    expect(runHtml).toContain("OpenCAE Core");
-    expect(runHtml).toContain("OpenCAE Core Local");
+    expect(runHtml).toContain("Local (in-browser)");
     expect(runHtml).not.toContain("opencae-core-preview");
     expect(runHtml).not.toContain("Expected detail");
     expect(runHtml).not.toContain("Browser OpenCAE Core CPU");
@@ -570,7 +591,7 @@ describe("RightPanel payload mass controls", () => {
       canRunSimulation: true
     });
 
-    expect(runHtml).toContain("OpenCAE Core Local (in-browser)");
+    expect(runHtml).toContain("Local (in-browser)");
     expect(runHtml).not.toContain("OpenCAE Core Cloud");
     expect(runHtml).not.toContain("CalculiX FEA");
     expect(runHtml).not.toContain("Detailed local");
@@ -588,7 +609,7 @@ describe("RightPanel payload mass controls", () => {
       missingRunItems: ["Valid Core volume mesh"]
     });
 
-    expect(runHtml).toContain("OpenCAE Core Local");
+    expect(runHtml).toContain("Local (in-browser)");
     expect(runHtml).toContain("Complete valid core volume mesh before running.");
     expect(runHtml).not.toContain("Local estimate");
     expect(runHtml).not.toContain("CalculiX");
@@ -607,7 +628,7 @@ describe("RightPanel payload mass controls", () => {
     // Legacy tokens are not an explicit choice; every run executes locally
     // (the only execution path since B4a) and the panel says so plainly.
     expect(runHtml).not.toContain("solver-backend");
-    expect(runHtml).toContain("OpenCAE Core Local (in-browser)");
+    expect(runHtml).toContain("Local (in-browser)");
     expect(runHtml).toContain("sparse_static");
     expect(runHtml).not.toContain("Expected detail");
     expect(runHtml).not.toContain("Browser OpenCAE Core CPU");
@@ -635,8 +656,13 @@ describe("RightPanel payload mass controls", () => {
 
     const runHtml = renderPanel("run", { study: dynamicStudy });
 
-    expect(runHtml).toContain("OpenCAE Core");
-    expect(runHtml).toContain("OpenCAE Core Local");
+    expect(runHtml).toContain("Local (in-browser)");
+    expect(runHtml).toContain('aria-label="Start time help"');
+    expect(runHtml).toContain('aria-label="End time help"');
+    expect(runHtml).toContain('aria-label="Time step help"');
+    expect(runHtml).toContain('aria-label="Output interval help"');
+    expect(runHtml).toContain('aria-label="Load profile help"');
+    expect(runHtml).toContain('aria-label="Damping ratio help"');
     expect(runHtml).not.toContain("Expected detail");
     expect(runHtml).not.toContain("Browser OpenCAE Core CPU");
     expect(runHtml).toContain("mdof_dynamic");
@@ -1369,6 +1395,21 @@ describe("RightPanel payload mass controls", () => {
     expect(html).toContain('<span class="workflow-nav-label">Next: Run</span><kbd>N</kbd>');
   });
 
+  test("turns the active meshing button into an enabled stop action", () => {
+    const html = renderPanel("mesh", {
+      meshPhaseProgress: {
+        phase: "mesh3d",
+        phaseIndex: 4,
+        phaseCount: 8,
+        message: "Meshing volume..."
+      }
+    });
+
+    expect(html).toContain('aria-label="Stop mesh generation"');
+    expect(html).toContain("Stop meshing");
+    expect(html).not.toContain('aria-label="Stop mesh generation" disabled');
+  });
+
   test("shows Back and Next hotkey hints on workflow navigation buttons", () => {
     const html = renderPanel("loads", { study: { ...study, meshSettings: { preset: "medium", status: "complete" } } });
 
@@ -1457,6 +1498,28 @@ describe("RightPanel payload mass controls", () => {
     expect(uploadedHtml).not.toContain("<span>Mass</span>");
     expect(sampleHtml).toContain("<span>Volume</span>");
     expect(sampleHtml).toContain("<span>Mass</span>");
+  });
+
+  test("reports beam structural mass separately from the payload mass", () => {
+    const beamHtml = renderPanel("model", {
+      sampleModel: "plate",
+      project: {
+        ...project,
+        geometryFiles: [{
+          id: "geom-beam",
+          projectId: project.id,
+          filename: "end-loaded-beam.step",
+          localPath: "examples/beam/end-loaded-beam.step",
+          artifactKey: "project-1/geometry/beam-display.json",
+          status: "ready",
+          metadata: { source: "sample", sampleModel: "plate" }
+        }]
+      }
+    });
+
+    expect(beamHtml).toContain("28,590 mm");
+    expect(beamHtml).toContain("77 g");
+    expect(beamHtml).toContain("Payload mass · 0.498 kg");
   });
 
   test("renders an accessible repair action when uploaded STEP surfaces are open", () => {

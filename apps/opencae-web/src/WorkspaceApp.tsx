@@ -1,12 +1,12 @@
-import { lazy, startTransition, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, startTransition, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { DynamicSolverSettingsSchema, isRunResultReadyStatus } from "@opencae/schema";
 import type { Constraint, DisplayFace, DisplayModel, DynamicSolverSettings, Load, MeshQuality, NamedSelection, Project, ResultField, ResultRenderBounds, ResultSummary, RunEvent, RunTimingEstimate, SimulationFidelity, Study } from "@opencae/schema";
-import { RotateCcw, Save } from "lucide-react";
+import { RotateCcw, Save, X } from "lucide-react";
 import { addLoad, addSupport, assignMaterial, cancelRun, createProject, generateMesh, getResults, importLocalProject, isStepGeometryMeshFailure, loadSampleProject, probeUploadedStepRepairAfterMeshFailure, renameProject, repairUploadedStepModel, runSimulation, saveRunReportCaptures, STEP_REPAIR_UNAVAILABLE_MESSAGE, subscribeToRun, updateStudy as saveStudyPatch, uploadedStepRepairProbeDecision, uploadModel, type SampleAnalysisType, type SampleModelId } from "./lib/api";
 import { cancelWasmMeshing, type WasmMeshPhaseProgress } from "./lib/wasmMeshing";
 import { resolveSolverBackend } from "./workers/opencaeCoreSolve";
 import { manufacturingProcessForId, normalizeManufacturingParameters, starterMaterials } from "@opencae/materials";
-import { BottomPanel, type WorkspaceLogEntry } from "./components/BottomPanel";
+import { BottomPanel, KeyboardShortcutGuide, type WorkspaceLogEntry } from "./components/BottomPanel";
 import { OpenCaeLogoMark } from "./components/OpenCaeLogoMark";
 import { RightPanel } from "./components/RightPanel";
 import { StartScreen } from "./components/StartScreen";
@@ -26,8 +26,9 @@ import { buildLocalProjectFile, suggestedProjectFilename, type LocalResultBundle
 import { prepareBlobSaveToDisk, saveBlobToDisk } from "./lib/fileSave";
 import { captureResultViews, type ResultViewCaptures } from "./report/captureResultViews";
 import { buildReportData, suggestedReportFilename } from "./report/reportData";
-import { buildAutosavedWorkspace, buildAutosavedWorkspaceUiSnapshot, readAutosavedWorkspace, scheduleAutosavedUiSnapshotWrite, scheduleAutosavedWorkspaceWrite, WORKSPACE_LOG_LIMIT } from "./appPersistence";
+import { buildAutosavedWorkspace, buildAutosavedWorkspaceUiSnapshot, flushAutosavedWorkspace, installAutosavePageHideFlush, localRunIdForResultsRestore, parseAutosavedWorkspacePayload, readAutosavedWorkspace, scheduleAutosavedUiSnapshotWrite, scheduleAutosavedWorkspaceWrite, WORKSPACE_LOG_LIMIT } from "./appPersistence";
 import type { AutosavedWorkspace, WorkspaceUiSnapshot } from "./appPersistence";
+import { requestPersistentBrowserStorage, restoreEncryptedCloudBackup, saveEncryptedCloudBackup } from "./cloudBackup";
 import {
   canNavigateToStep,
   isEditableShortcutTarget,
@@ -119,6 +120,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const restoredProjectFile = restoredWorkspace?.projectFile;
   const restoredUi = restoredWorkspace?.ui;
   const restoredResults = restoredProjectFile?.results;
+  const reloadResultsRunId = localRunIdForResultsRestore(restoredWorkspace);
   const [project, setProject] = useState<Project | null>(restoredProjectFile?.project ?? null);
   const [displayModel, setDisplayModel] = useState<DisplayModel | null>(restoredProjectFile?.displayModel ?? null);
   const [homeRequested, setHomeRequested] = useState(restoredUi?.homeRequested ?? !restoredProjectFile);
@@ -148,6 +150,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const [runError, setRunError] = useState<string | null>(null);
   const [reportBusy, setReportBusy] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
+  const [overflowRecoveryRequest, setOverflowRecoveryRequest] = useState(0);
   const [activeRunId, setActiveRunId] = useState(restoredUi?.activeRunId || restoredResults?.activeRunId || restoredResults?.completedRunId || "run-bracket-demo-seeded");
   const [completedRunId, setCompletedRunId] = useState(restoredUi?.completedRunId || restoredResults?.completedRunId || "run-bracket-demo-seeded");
   const [processingRunId, setProcessingRunId] = useState<string | null>(null);
@@ -163,12 +166,12 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     return restoredRunId && restoredResults?.reportCaptures ? { runId: restoredRunId, captures: restoredResults.reportCaptures } : null;
   });
   const [viewerCaptureRevision, setViewerCaptureRevision] = useState(0);
-  const [resultFrameIndex, setResultFrameIndex] = useState(0);
+  const [resultFrameIndex, setResultFrameIndex] = useState(restoredUi?.resultFrameIndex ?? 0);
   const [resultPlaybackFramePosition, setResultPlaybackFramePosition] = useState(0);
   const [resultPlaybackOrdinalPosition, setResultPlaybackOrdinalPosition] = useState(0);
   const [resultPlaybackPlaying, setResultPlaybackPlaying] = useState(false);
-  const [resultPlaybackFps, setResultPlaybackFps] = useState(12);
-  const [resultPlaybackReverseLoop, setResultPlaybackReverseLoop] = useState(false);
+  const [resultPlaybackFps, setResultPlaybackFps] = useState(restoredUi?.resultPlaybackFps ?? 12);
+  const [resultPlaybackReverseLoop, setResultPlaybackReverseLoop] = useState(restoredUi?.resultPlaybackReverseLoop ?? false);
   const [resultPlaybackCacheState, setResultPlaybackCacheState] = useState<ResultPlaybackCacheState>({ status: "idle" });
   const [draftLoadType, setDraftLoadType] = useState<LoadType>(restoredUi?.draftLoadType ?? "force");
   const [draftLoadValue, setDraftLoadValue] = useState(restoredUi?.draftLoadValue ?? 500);
@@ -178,7 +181,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const [sampleModel, setSampleModel] = useState<SampleModelId>(restoredUi?.sampleModel ?? "bracket");
   const [sampleAnalysisType, setSampleAnalysisType] = useState<SampleAnalysisType>(restoredUi?.sampleAnalysisType ?? "static_stress");
   const [previewPrintLayerOrientation, setPreviewPrintLayerOrientation] = useState<PrintLayerOrientation | null | undefined>(undefined);
-  const [isStepbarCollapsed, setIsStepbarCollapsed] = useState(false);
+  const [isStepbarCollapsed, setIsStepbarCollapsed] = useState(restoredUi?.isStepbarCollapsed ?? false);
   const [showBoundaryConditionMenu, setShowBoundaryConditionMenu] = useState(false);
   const [isRepairingModel, setIsRepairingModel] = useState(false);
   const [singleKeyShortcutsEnabled, setSingleKeyShortcutsEnabled] = useState(() => {
@@ -188,6 +191,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       return true;
     }
   });
+  const [shortcutGuideOpen, setShortcutGuideOpen] = useState(false);
   const didRequestRestoredHomeView = useRef(false);
   const activeRunSourceRef = useRef<EventSource | null>(null);
   const processingRunIdRef = useRef<string | null>(null);
@@ -198,6 +202,9 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const projectActionClientIdRef = useRef<string | null>(null);
   const autosaveWriteFailureNotifiedRef = useRef(false);
   const autosaveDegradedNotifiedRef = useRef(false);
+  const cloudBackupPromptedRef = useRef(false);
+  const fullAutosaveSnapshotRef = useRef<() => AutosavedWorkspace | null>(() => null);
+  const flushAutosaveRef = useRef<() => void>(() => undefined);
   const stepFaceHealNotifiedRef = useRef(false);
   const workspaceShortcutHandlerRef = useRef<(event: KeyboardEvent) => void>(() => undefined);
   const resultFrameIndexRef = useRef(0);
@@ -314,6 +321,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     }
   }, [resultPlaybackCacheState]);
   const solverRunning = Boolean(processingRunId) || (runProgress > 0 && runProgress < 100);
+  const runButtonProgress = Math.min(100, Math.max(0, Math.round(runProgress)));
   reportStateRef.current = { viewMode, resultMode, resultSummary, completedRunId, resultPlaybackPlaying };
   const runReadiness = useMemo(() => readinessForStudy(study), [study]);
   const canRunSimulation = runReadiness.every((item) => item.done) && !solverRunning;
@@ -331,6 +339,49 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       invalidateProjectAction();
     }
   }, [project]);
+
+  useEffect(() => {
+    if (!reloadResultsRunId) return undefined;
+    const sourceProject = projectRef.current;
+    let cancelled = false;
+    void getResults(reloadResultsRunId)
+      .then((results) => {
+        if (cancelled || projectRef.current !== sourceProject) return;
+        applyReloadedResults(results, reloadResultsRunId, "Simulation results restored after reload.");
+      })
+      .catch(async (localError) => {
+        if (cancelled || projectRef.current !== sourceProject) return;
+        try {
+          const cloudSnapshot = await restoreEncryptedCloudBackup(reloadResultsRunId);
+          if (cancelled || projectRef.current !== sourceProject) return;
+          const parsed = cloudSnapshot ? parseAutosavedWorkspacePayload(JSON.stringify(cloudSnapshot)) : null;
+          const cloudResults = parsed?.projectFile.results;
+          if (!cloudResults?.fields.length) throw localError;
+          applyReloadedResults(cloudResults, reloadResultsRunId, "Simulation results restored from the encrypted cloud recovery backup.");
+        } catch (cloudError) {
+          if (cancelled || projectRef.current !== sourceProject) return;
+          const message = errorMessage(cloudError, errorMessage(localError, "Could not restore simulation results after reload."));
+          setRunError(message);
+          pushMessage(message);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [reloadResultsRunId]);
+
+  function applyReloadedResults(results: Awaited<ReturnType<typeof getResults>>, runId: string, message: string) {
+    setResultSummary(results.summary);
+    setResultFields(withDerivedSurfaceSafetyFactorFields(results));
+    setResultSurfaceMesh(results.surfaceMesh);
+    setSolverMeshSummary(solverMeshSummaryFromResults(results));
+    setReportCaptures(results.reportCaptures ? { runId, captures: results.reportCaptures } : null);
+    setActiveRunId(runId);
+    setCompletedRunId(runId);
+    setRunProgress(100);
+    setRunError(null);
+    pushMessage(message);
+  }
 
   useEffect(() => () => projectActionAbortRef.current?.abort(), []);
 
@@ -651,6 +702,15 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     return () => window.removeEventListener("keydown", handleShortcut);
   }, []);
 
+  useEffect(() => {
+    if (!shortcutGuideOpen) return undefined;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setShortcutGuideOpen(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [shortcutGuideOpen]);
+
   const autosaveUiSnapshot = useMemo<WorkspaceUiSnapshot>(() => ({
     activeStep,
     homeRequested,
@@ -663,6 +723,10 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     showDeformed,
     showDimensions,
     stressExaggeration,
+    resultFrameIndex,
+    resultPlaybackFps,
+    resultPlaybackReverseLoop,
+    isStepbarCollapsed,
     draftLoadType,
     draftLoadValue,
     draftLoadDirection,
@@ -683,9 +747,13 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     draftLoadType,
     draftLoadValue,
     homeRequested,
+    isStepbarCollapsed,
     logs,
     redoStack,
+    resultFrameIndex,
     resultMode,
+    resultPlaybackFps,
+    resultPlaybackReverseLoop,
     runProgress,
     sampleAnalysisType,
     sampleModel,
@@ -704,14 +772,85 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   function notifyAutosaveWriteFailure() {
     if (autosaveWriteFailureNotifiedRef.current) return;
     autosaveWriteFailureNotifiedRef.current = true;
-    pushMessage("Autosave failed: browser storage is full or unavailable. Save the project to disk to keep changes.");
+    pushMessage("Autosave failed: browser storage is full or unavailable.");
+    void offerOverflowRecoveryOptions();
   }
 
   function notifyAutosaveDegraded() {
     if (autosaveDegradedNotifiedRef.current) return;
     autosaveDegradedNotifiedRef.current = true;
-    pushMessage("Autosave kept the project setup, but the mesh artifact and results exceed browser storage. Use Save project to keep them on disk.");
+    pushMessage("Autosave kept the project setup, but the mesh artifact and results exceed browser storage.");
+    void offerOverflowRecoveryOptions();
   }
+
+  async function offerOverflowRecoveryOptions() {
+    if (cloudBackupPromptedRef.current) return;
+    cloudBackupPromptedRef.current = true;
+    try {
+      const persistent = await requestPersistentBrowserStorage();
+      if (persistent) pushMessage("Persistent browser storage enabled to reduce automatic eviction.");
+    } catch {
+      // Persistence is best-effort; the explicit cloud decision still follows.
+    }
+    const allowed = window.confirm([
+      "This project is larger than the browser autosave limit.",
+      "",
+      "Allow OpenCAE to upload one encrypted recovery backup to Cloudflare R2 for 30 days?",
+      "The simulation still runs locally. Encryption happens in this browser, and the cloud service never receives the decryption key.",
+      "",
+      "Choose Cancel to keep everything local and use Save project to write a file instead."
+    ].join("\n"));
+    if (!allowed) {
+      pushMessage("Cloud backup not enabled. Use Save project to keep a complete local file.");
+      return;
+    }
+    const snapshot = fullAutosaveSnapshotRef.current();
+    const runId = completedRunId || activeRunId;
+    if (!snapshot || !runId) {
+      pushMessage("Cloud backup could not start because there is no completed workspace snapshot.");
+      return;
+    }
+    try {
+      const backup = await saveEncryptedCloudBackup(snapshot, runId);
+      pushMessage(`Encrypted cloud recovery backup saved until ${new Date(backup.expiresAt).toLocaleDateString()}.`);
+    } catch (error) {
+      pushMessage(`${errorMessage(error, "Cloud backup failed.")} Use Save project to keep a complete local file.`);
+    }
+  }
+
+  // A normal reload tears down the delayed autosave effects before their
+  // timers fire. Keep a render-current writer behind a stable pagehide
+  // listener so setup changes made immediately before reload are not lost.
+  fullAutosaveSnapshotRef.current = () => {
+    if (!project || !displayModel) return null;
+    const savedAt = new Date().toISOString();
+    const results = resultFields.length && resultSummary ? {
+      activeRunId,
+      completedRunId,
+      summary: resultSummary,
+      fields: resultFields,
+      ...(resultSurfaceMesh ? { surfaceMesh: resultSurfaceMesh } : {}),
+      ...(solverMeshSummary ? { solverMeshSummary } : {}),
+      ...(reportCaptures?.runId === completedRunId ? { reportCaptures: reportCaptures.captures } : {})
+    } : undefined;
+    return buildAutosavedWorkspace({ project, displayModel, savedAt, results, ui: autosaveUiSnapshot });
+  };
+
+  flushAutosaveRef.current = () => {
+    const snapshot = fullAutosaveSnapshotRef.current();
+    if (!snapshot) return;
+    flushAutosavedWorkspace(
+      snapshot,
+      buildAutosavedWorkspaceUiSnapshot(autosaveUiSnapshot, snapshot.savedAt)
+    );
+  };
+
+  useEffect(() => installAutosavePageHideFlush(() => flushAutosaveRef.current()), []);
+
+  useEffect(() => {
+    if (!overflowRecoveryRequest) return;
+    void offerOverflowRecoveryOptions();
+  }, [overflowRecoveryRequest]);
 
   // Selections referencing placeholder "face-upload-*" faces can never map
   // onto the meshed geometry: legacy generic box faces (uploads made while the
@@ -1045,7 +1184,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     };
   }, [completedRunId, reportCaptures, resultFields, resultSummary, resultSurfaceMesh?.id, viewMode, viewerCaptureRevision]);
 
-  async function handleGenerateReport() {
+  async function handleGenerateReport(options?: { targetSafetyFactor?: number }) {
     if (!project || !study || !resultSummary) {
       setReportError("Run a simulation before generating a report.");
       return;
@@ -1083,7 +1222,8 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         captures,
         generatedAt,
         exaggeration: stressExaggeration,
-        showDeformed
+        showDeformed,
+        targetSafetyFactor: options?.targetSafetyFactor
       });
       const { renderReportPdf } = await import("./report/reportPdf");
       const blob = await renderReportPdf(reportData);
@@ -1135,6 +1275,10 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     void updateStudy(generateMesh(study.id, preset, study, displayModel ?? undefined, pushMessage, setMeshPhaseProgress), shouldAutoAdvanceAfterMeshGeneration() ? "run" : undefined)
       .catch(async (error: unknown) => {
         setMeshPhaseProgress(null);
+        if (isAbortError(error)) {
+          pushMessage(error.message || "Mesh generation cancelled.");
+          return;
+        }
         pushMessage(`Mesh generation failed: ${error instanceof Error ? error.message : String(error)}`);
         if (!isStepGeometryMeshFailure(error)) return;
         const probeDecision = uploadedStepRepairProbeDecision(sourceProject, projectRef.current);
@@ -1170,6 +1314,10 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         }
       })
       .finally(() => setMeshPhaseProgress(null));
+  }
+
+  function handleCancelMesh() {
+    cancelWasmMeshing("Mesh generation cancelled.");
   }
 
   function handleViewportFaceSelect(face: DisplayFace, point?: [number, number, number], payloadObject?: PayloadObjectSelection) {
@@ -1509,6 +1657,10 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           setCompletedRunId(response.run.id);
           setViewMode("results");
           setActiveStep("results");
+          if (results.summary.diagnostics?.some((diagnostic) => diagnostic.id === "local-results-persistence")) {
+            pushMessage("Completed results exceeded or could not use IndexedDB storage.");
+            setOverflowRecoveryRequest((request) => request + 1);
+          }
         } catch (error) {
           const message = errorMessage(error, "Could not load simulation results.");
           setRunError(message);
@@ -1588,13 +1740,29 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           <button
             className="icon-button"
             type="button"
-            aria-pressed={singleKeyShortcutsEnabled}
-            title={singleKeyShortcutsEnabled ? "Single-key shortcuts on" : "Single-key shortcuts off"}
-            aria-label="Single-key shortcuts"
-            onClick={handleToggleSingleKeyShortcuts}
+            aria-expanded={shortcutGuideOpen}
+            aria-controls="workspace-shortcut-guide"
+            title="Show keyboard shortcuts"
+            aria-label="Show keyboard shortcuts"
+            onClick={() => setShortcutGuideOpen((open) => !open)}
           >
             Keys
           </button>
+          {shortcutGuideOpen ? (
+            <div className="shortcut-popover" id="workspace-shortcut-guide" role="dialog" aria-label="Keyboard shortcuts">
+              <button className="shortcut-popover-close" type="button" aria-label="Close keyboard shortcuts" onClick={() => setShortcutGuideOpen(false)}>
+                <X size={16} aria-hidden="true" />
+              </button>
+              <KeyboardShortcutGuide />
+              <label className="shortcut-toggle">
+                <input type="checkbox" checked={singleKeyShortcutsEnabled} onChange={handleToggleSingleKeyShortcuts} />
+                <span>
+                  <strong>Single-key shortcuts</strong>
+                  <small>Enable N, B, and H when you are not typing in a field.</small>
+                </span>
+              </label>
+            </div>
+          ) : null}
         </div>
         {showRunButton ? (
           <button
@@ -1602,9 +1770,11 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
             onClick={handleRunSimulation}
             disabled={!effectiveCanRunSimulation}
             title={effectiveMissingRunItems.length ? `Complete before running: ${effectiveMissingRunItems.join(", ")}` : "Run simulation"}
-            aria-label={solverRunning ? "Running…" : "Run simulation"}
+            aria-label={solverRunning ? `Running simulation: ${runButtonProgress}%` : "Run simulation"}
+            aria-busy={solverRunning}
+            style={{ "--run-progress": `${runButtonProgress}%` } as CSSProperties}
           >
-            <span aria-hidden="true">▶</span><span className="topbar-action-label">{solverRunning ? "Running…" : "Run simulation"}</span>
+            <span aria-hidden="true">▶</span><span className="topbar-action-label">{solverRunning ? `Running… ${runButtonProgress}%` : "Run simulation"}</span>
           </button>
         ) : null}
         <button className="secondary topbar-action" type="button" onClick={handleSaveProject} title="Save project to local disk" aria-label="Save project">
@@ -1627,7 +1797,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           onCreateStatic={handleCreateStaticSimulation}
           onCreateDynamic={handleCreateDynamicSimulation}
         />
-        <BottomPanel status={status} logs={logs} projectName={project.name} studyName="No simulation" meshStatus="Not generated" solverStatus="Idle" backendStatus="core" onClearLogs={clearLogs} />
+        <BottomPanel status={status} logs={logs} meshStatus="Not generated" solverStatus="Idle" onClearLogs={clearLogs} />
       </div>
     );
   }
@@ -1788,6 +1958,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
             updateStudy(saveStudyPatch(study.id, { loads: study.loads.filter((item) => item.id !== loadId) }, "Load removed.", study))
           }
           onGenerateMesh={handleGenerateMesh}
+          onCancelMesh={handleCancelMesh}
           meshPhaseProgress={meshPhaseProgress}
           onUpdateSolverSettings={handleUpdateSolverSettings}
           onChangeStudyType={handleChangeStudyType}
@@ -1821,11 +1992,8 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       <BottomPanel
         status={status}
         logs={logs}
-        projectName={project.name}
-        studyName={study?.name ?? "No simulation"}
         meshStatus={study?.meshSettings.status === "complete" ? "Ready" : "Not generated"}
         solverStatus={solverRunning ? "Running" : runProgress >= 100 ? "Complete" : "Idle"}
-        backendStatus="core"
         onClearLogs={clearLogs}
       />
     </div>
@@ -2066,7 +2234,7 @@ async function saveProjectToLocalDisk(project: Project, displayModel: DisplayMod
   return outcome === "saved" ? savedAt : null;
 }
 
-function isAbortError(error: unknown): boolean {
+function isAbortError(error: unknown): error is Error {
   return error instanceof Error && error.name === "AbortError";
 }
 

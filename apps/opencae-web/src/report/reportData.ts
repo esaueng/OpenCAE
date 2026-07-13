@@ -1,6 +1,14 @@
-import { assessResultFailure, classifyResultProvenance } from "@opencae/schema";
-import type { DisplayModel, Project, ResultField, ResultSummary, RunTimingEstimate, Study } from "@opencae/schema";
-import { starterMaterials } from "@opencae/materials";
+import { assessResultFailure, classifyResultProvenance, estimateAllowableLoadForSafetyFactor } from "@opencae/schema";
+import type { DisplayModel, Material, Project, ResultField, ResultSummary, RunTimingEstimate, Study } from "@opencae/schema";
+import {
+  effectiveMaterialProperties,
+  manufacturingProcessForId,
+  normalizeManufacturingParameters,
+  starterMaterials,
+  type ManufacturingParameters,
+  type ManufacturingProcess
+} from "@opencae/materials";
+import { inferGlobalCriticalPrintAxis } from "@opencae/study-core";
 import type { SolverMeshSummary } from "../resultFields";
 import { fieldWithOwnValueRange, formatResultValue } from "../resultFields";
 import { unitsForLoadType } from "../loadPreview";
@@ -25,6 +33,7 @@ import {
 import {
   INVALID_REACTION_WARNING,
   PREVIEW_GEOMETRY_WARNING,
+  canShowReverseLoadCapacity,
   hasInvalidReactionForce,
   hasUnavailableReactionDiagnostic,
   shouldBlockPreviewResultsForDisplayModel
@@ -47,7 +56,6 @@ export interface ReportFigure {
   unavailableLabel: string;
   legendMin: string;
   legendMax: string;
-  units: string;
   caption: string;
 }
 
@@ -68,6 +76,7 @@ export interface ReportData {
   geometry: ReportRow[];
   geometryFiles: ReportTable;
   materials: ReportTable;
+  manufacturing: ReportTable;
   supports: ReportTable;
   loads: ReportTable;
   mesh: ReportRow[];
@@ -77,6 +86,7 @@ export interface ReportData {
     displacement: ReportFigure;
   };
   results: ReportRow[];
+  loadCapacity: ReportRow[];
   transientResults: ReportRow[];
   diagnostics: string[];
   includeSmoothingDisclaimer: boolean;
@@ -96,6 +106,8 @@ export interface BuildReportDataInput {
   generatedAt: Date;
   exaggeration: number;
   showDeformed?: boolean;
+  /** Reverse-check target from the results panel; defaults to 1.5 like the panel. */
+  targetSafetyFactor?: number;
 }
 
 const MISSING = "--";
@@ -114,6 +126,15 @@ export function buildReportData(input: BuildReportDataInput): ReportData {
   const generatedAtIso = input.generatedAt.toISOString();
   const reportDate = localIsoDate(input.generatedAt);
   const diagnostics = collectDiagnostics(input, summary, fields);
+  // Same governing-axis inference the solver adapter uses, so the as-analyzed
+  // material row reproduces the properties the solve actually ran with.
+  const criticalLayerAxis = input.displayModel
+    ? inferGlobalCriticalPrintAxis(input.study, input.displayModel.faces.map((face) => ({
+        entityId: face.id,
+        center: face.center,
+        ...(face.area ? { areaM2: face.area * 1e-6 } : {})
+      })), input.displayModel)
+    : undefined;
 
   return {
     pageFormat: input.unitSystem === "US" ? "letter" : "a4",
@@ -144,7 +165,8 @@ export function buildReportData(input: BuildReportDataInput): ReportData {
       ]),
       emptyMessage: "No geometry file recorded."
     },
-    materials: materialTable(input.study, input.unitSystem),
+    materials: materialTable(input.study, input.unitSystem, criticalLayerAxis),
+    manufacturing: manufacturingTable(input.study),
     supports: supportTable(input.study),
     loads: loadTable(input.study, input.unitSystem),
     mesh: [
@@ -161,6 +183,7 @@ export function buildReportData(input: BuildReportDataInput): ReportData {
       displacement: figureData("Displacement magnitude", displacementField, input.captures.displacement, fields, input)
     },
     results: resultRows(input.project, input.study, summary, input.displayModel),
+    loadCapacity: loadCapacityRows(input, summary, fields),
     transientResults: transientRows(summary),
     diagnostics,
     includeSmoothingDisclaimer: provenance?.kind === "opencae_core_fea",
@@ -228,21 +251,71 @@ function geometryRows(project: Project, displayModel: DisplayModel | null): Repo
   ];
 }
 
-function materialTable(study: Study, unitSystem: UnitSystem): ReportTable {
+function materialTable(study: Study, unitSystem: UnitSystem, criticalLayerAxis: "x" | "y" | "z" | undefined): ReportTable {
   return {
     headers: ["Material / target", "Young's modulus", "Poisson ratio", "Density", "Yield strength"],
-    rows: study.materialAssignments.map((assignment) => {
+    rows: study.materialAssignments.flatMap((assignment) => {
       const material = starterMaterials.find((candidate) => candidate.id === assignment.materialId);
-      return [
+      const datasheetRow = [
         `${material?.name ?? assignment.materialId} / ${selectionLabel(study, assignment.selectionRef)}`,
         material ? formatMaterialStress(material.youngsModulus, unitSystem) : MISSING,
         material ? String(material.poissonRatio) : MISSING,
         material ? formatDensity(material.density, "kg/m^3", unitSystem) : MISSING,
         material?.yieldStrength ? formatMaterialStress(material.yieldStrength, unitSystem) : MISSING
       ];
+      if (!material) return [datasheetRow];
+      // Additive processes knock properties down before the solve; report the
+      // homogenized values alongside the datasheet ones so the numbers the
+      // solver used are on the record.
+      const process = assignmentProcess(material, assignment.parameters);
+      const effective = effectiveMaterialProperties(material, assignment.parameters ?? {}, { criticalLayerAxis });
+      if (!process || process.kind !== "additive" || effective === material) return [datasheetRow];
+      return [datasheetRow, [
+        `As analyzed (${process.shortLabel}, homogenized)`,
+        formatMaterialStress(effective.youngsModulus, unitSystem),
+        String(effective.poissonRatio),
+        formatDensity(effective.density, "kg/m^3", unitSystem),
+        Number.isFinite(effective.yieldStrength) ? formatMaterialStress(effective.yieldStrength, unitSystem) : MISSING
+      ]];
     }),
     emptyMessage: "No material assignments recorded."
   };
+}
+
+function manufacturingTable(study: Study): ReportTable {
+  return {
+    headers: ["Material / target", "Process", "Process settings"],
+    rows: study.materialAssignments.map((assignment) => {
+      const material = starterMaterials.find((candidate) => candidate.id === assignment.materialId);
+      const target = `${material?.name ?? assignment.materialId} / ${selectionLabel(study, assignment.selectionRef)}`;
+      if (!material) return [target, MISSING, MISSING];
+      const process = assignmentProcess(material, assignment.parameters);
+      if (!process) return [target, MISSING, MISSING];
+      const explicitProcess = typeof assignment.parameters?.manufacturingProcessId === "string";
+      const parameters = normalizeManufacturingParameters(material, assignment.parameters ?? {});
+      return [
+        target,
+        explicitProcess ? process.label : `${process.label} (assumed)`,
+        manufacturingSettingsLabel(process, parameters)
+      ];
+    }),
+    emptyMessage: "No material assignments recorded."
+  };
+}
+
+function assignmentProcess(material: Material, parameters: Record<string, unknown> | undefined): ManufacturingProcess | undefined {
+  const processId = normalizeManufacturingParameters(material, parameters ?? {}).manufacturingProcessId;
+  return processId ? manufacturingProcessForId(processId) : undefined;
+}
+
+function manufacturingSettingsLabel(process: ManufacturingProcess, parameters: ManufacturingParameters): string {
+  const buildDirection = `${(parameters.layerOrientation ?? "z").toUpperCase()} build direction`;
+  if (process.settingsKind === "fdm") {
+    const wallCount = parameters.wallCount ?? 1;
+    return `${wallCount} ${wallCount === 1 ? "wall" : "walls"} · ${parameters.infillDensity ?? 100}% infill · ${buildDirection}`;
+  }
+  if (process.settingsKind === "build_direction") return buildDirection;
+  return process.description;
 }
 
 function supportTable(study: Study): ReportTable {
@@ -319,6 +392,28 @@ function resultRows(project: Project, study: Study, summary: ResultSummary, disp
   ];
 }
 
+const DEFAULT_TARGET_SAFETY_FACTOR = 1.5;
+
+// Mirrors the results panel's Reverse Check gating: only report a load
+// capacity when the reaction force is trustworthy and units are intact.
+function loadCapacityRows(input: BuildReportDataInput, summary: ResultSummary, fields: ResultField[]): ReportRow[] {
+  const target = Number.isFinite(input.targetSafetyFactor) && input.targetSafetyFactor! > 0
+    ? input.targetSafetyFactor!
+    : DEFAULT_TARGET_SAFETY_FACTOR;
+  const atTarget = estimateAllowableLoadForSafetyFactor(summary, target);
+  const atYield = estimateAllowableLoadForSafetyFactor(summary, 1);
+  const unitsIntact = hasResultUnit(summary.maxStressUnits) && hasResultUnit(summary.maxDisplacementUnits) && hasResultUnit(summary.reactionForceUnits) && fields.every((field) => hasResultUnit(field.units));
+  if (!unitsIntact || atTarget.status !== "available" || !input.displayModel || !canShowReverseLoadCapacity(summary, input.displayModel, fields, input.study)) {
+    return [];
+  }
+  return [
+    { label: "Current applied load", value: formatResultMetric(roundDisplayValue(atTarget.currentLoad), atTarget.loadUnits) },
+    { label: "Max theoretical load (at FoS 1.0)", value: formatResultMetric(roundDisplayValue(atYield.allowableLoad), atYield.loadUnits) },
+    { label: "Target factor of safety", value: String(roundDisplayValue(target)) },
+    { label: "Max load at target FoS", value: `${formatResultMetric(roundDisplayValue(atTarget.allowableLoad), atTarget.loadUnits)} (${roundDisplayValue(atTarget.loadScale)}x current)` }
+  ];
+}
+
 function transientRows(summary: ResultSummary): ReportRow[] {
   const transient = summary.transient;
   if (!transient) return [];
@@ -352,11 +447,15 @@ function figureData(
     title,
     ...(capture?.png ? { png: capture.png } : {}),
     unavailableLabel: "Not available (--)",
-    legendMin: field ? formatResultValue(field.min) : MISSING,
-    legendMax: field ? formatResultValue(field.max) : MISSING,
-    units: field?.units || MISSING,
+    legendMin: field ? legendValueWithUnits(field.min, field.units) : MISSING,
+    legendMax: field ? legendValueWithUnits(field.max, field.units) : MISSING,
     caption: `${title}${field?.units ? ` (${field.units})` : ""}.${frameCaption} ${deformationCaption}.`
   };
+}
+
+function legendValueWithUnits(value: number, units: string): string {
+  const formatted = formatResultValue(value);
+  return hasResultUnit(units) ? `${formatted} ${units}` : formatted;
 }
 
 function collectDiagnostics(input: BuildReportDataInput, summary: ResultSummary, fields: ResultField[]): string[] {

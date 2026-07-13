@@ -58,7 +58,7 @@ interface RightPanelProps {
   runProgress: number;
   runError?: string | null;
   runTiming?: RunTimingEstimate | null;
-  onGenerateReport?: () => Promise<void>;
+  onGenerateReport?: (options?: { targetSafetyFactor?: number }) => Promise<void>;
   reportBusy?: boolean;
   reportError?: string | null;
   reportDisabled?: boolean;
@@ -98,6 +98,7 @@ interface RightPanelProps {
   onPreviewLoadEdit: (load: Load | null) => void;
   onRemoveLoad: (loadId: string) => void;
   onGenerateMesh: (preset: MeshQuality) => void;
+  onCancelMesh?: () => void;
   meshPhaseProgress?: WasmMeshPhaseProgress | null;
   onUpdateSolverSettings?: (settings: SolverSettingsPatch) => void;
   onChangeStudyType?: (type: Study["type"]) => void;
@@ -161,8 +162,11 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sa
   const sampleLabel = sampleOptionFor(pendingSampleModel).title;
   const sampleAnalysisLabel = sampleAnalysisType === "dynamic_structural" ? "Dynamic Structural" : "Static Stress";
   const sampleForceLabel = formatEquivalentForce(500, project.unitSystem);
-  const sampleSummaryVolumeMm3 = pendingSampleModel === "plate" ? 184_320 : 41_280;
-  const sampleSummaryMassG = pendingSampleModel === "plate" ? 498 : 111;
+  // The beam summary describes the structural body only. The separate
+  // 0.498 kg payload is reported below as a load and must not be counted as
+  // beam material mass.
+  const sampleSummaryVolumeMm3 = pendingSampleModel === "plate" ? 28_590 : 41_280;
+  const sampleSummaryMassG = pendingSampleModel === "plate" ? 77 : 111;
   const sampleLoadTitle = pendingSampleModel === "plate" ? `Payload mass · ${formatMass(0.497664, "kg", project.unitSystem)}` : `Force · ${sampleForceLabel}`;
   const orientation = getModelOrientation(displayModel);
   const hasCustomOrientation = orientation.x !== 0 || orientation.y !== 0 || orientation.z !== 0;
@@ -1035,7 +1039,7 @@ function selectionForFace(study: Study, faceId: string) {
   return study.namedSelections.find((item) => item.entityType === "face" && item.geometryRefs.some((ref) => ref.entityId === faceId));
 }
 
-function MeshPanel({ project, study, onGenerateMesh, meshPhaseProgress, onRepairModel, isRepairingModel = false }: RightPanelProps) {
+function MeshPanel({ project, study, onGenerateMesh, onCancelMesh, meshPhaseProgress, onRepairModel, isRepairingModel = false }: RightPanelProps) {
   const [preset, setPreset] = useState<MeshQuality>(study.meshSettings.preset);
   const meshing = Boolean(meshPhaseProgress);
   const stepGeometry = stepGeometryMetadataForProject(project);
@@ -1050,7 +1054,16 @@ function MeshPanel({ project, study, onGenerateMesh, meshPhaseProgress, onRepair
           ))}
         </div>
       </div>
-      <button className="primary wide" disabled={meshing} onClick={() => onGenerateMesh(preset)}><Grid3X3 size={18} />{meshing ? "Meshing..." : "Generate mesh"}</button>
+      <button
+        className="primary wide"
+        type="button"
+        disabled={meshing && !onCancelMesh}
+        aria-label={meshing ? "Stop mesh generation" : "Generate mesh"}
+        onClick={() => meshing ? onCancelMesh?.() : onGenerateMesh(preset)}
+      >
+        {meshing ? <X size={18} /> : <Grid3X3 size={18} />}
+        {meshing ? "Stop meshing" : "Generate mesh"}
+      </button>
       {stepGeometry?.status === "repairable" && !stepGeometryResolvedByMesh && (
         <div className="step-repair-card" role="alert" aria-label="Open STEP surfaces detected">
           <p className="panel-warning"><AlertTriangle size={16} />{stepGeometry.message ?? "This STEP model has open or invalid surfaces and is not a closed simulation solid."}</p>
@@ -1163,9 +1176,6 @@ function RunPanel({ study, displayModel, runProgress, runError, runTiming, onRun
           >Dynamic</button>
         </div>
       </div>
-      <div className="summary-box">
-        <Info label="Solver" value="Local (in-browser)" />
-      </div>
       <label className="field">
         <span>Fidelity</span>
         <select value={fidelity} onChange={(event) => updateSolverChoice({ fidelity: event.currentTarget.value as SimulationFidelity })}>
@@ -1175,18 +1185,18 @@ function RunPanel({ study, displayModel, runProgress, runError, runTiming, onRun
       {dynamic && (
         <>
           <SectionTitle>Dynamic settings</SectionTitle>
-          <DynamicNumberField label="Start time" unit="s" value={dynamic.startTime} min={0} step={dynamic.timeStep} onCommit={(value) => updateDynamicNumber("startTime", value)} />
-          <DynamicNumberField label="End time" unit="s" value={dynamic.endTime} min={dynamic.startTime + dynamic.timeStep} step={dynamic.timeStep} onCommit={(value) => updateDynamicNumber("endTime", value)} />
-          <DynamicNumberField label="Time step" unit="s" value={dynamic.timeStep} min={0.0001} step="0.0005" onCommit={(value) => updateDynamicNumber("timeStep", value)} />
-          <DynamicNumberField label="Output interval" unit="s" value={outputIntervalValue} min={outputIntervalMinimum} step={outputIntervalMinimum} onCommit={(value) => updateDynamicNumber("outputInterval", value)} />
+          <DynamicNumberField label="Start time" helpId="dynamicStartTime" unit="s" value={dynamic.startTime} min={0} step={dynamic.timeStep} onCommit={(value) => updateDynamicNumber("startTime", value)} />
+          <DynamicNumberField label="End time" helpId="dynamicEndTime" unit="s" value={dynamic.endTime} min={dynamic.startTime + dynamic.timeStep} step={dynamic.timeStep} onCommit={(value) => updateDynamicNumber("endTime", value)} />
+          <DynamicNumberField label="Time step" helpId="dynamicTimeStep" unit="s" value={dynamic.timeStep} min={0.0001} step="0.0005" onCommit={(value) => updateDynamicNumber("timeStep", value)} />
+          <DynamicNumberField label="Output interval" helpId="dynamicOutputInterval" unit="s" value={outputIntervalValue} min={outputIntervalMinimum} step={outputIntervalMinimum} onCommit={(value) => updateDynamicNumber("outputInterval", value)} />
           <label className="field">
-            <span>Load profile</span>
+            <HelpLabel helpId="dynamicLoadProfile">Load profile</HelpLabel>
             <select value={loadProfile} onChange={(event) => updateDynamicLoadProfile(event.currentTarget.value)}>
               {DYNAMIC_LOAD_PROFILE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
           </label>
           <p className="panel-copy">{loadProfileHelper}</p>
-          <DynamicNumberField label="Damping ratio" unit="ζ" value={dynamic.dampingRatio} min={0} step="0.01" onCommit={(value) => updateDynamicNumber("dampingRatio", value)} />
+          <DynamicNumberField label="Damping ratio" helpId="dynamicDampingRatio" unit="ζ" value={dynamic.dampingRatio} min={0} step="0.01" onCommit={(value) => updateDynamicNumber("dampingRatio", value)} />
           <div className="summary-box">
             <Info label="Estimated frames" value={frameEstimate ? frameEstimate.count.toLocaleString() : "--"} />
             <Info label="Output cadence" value={`Every ${formatSeconds(normalizedDynamicOutputInterval(dynamic))}`} />
@@ -1197,17 +1207,15 @@ function RunPanel({ study, displayModel, runProgress, runError, runTiming, onRun
       )}
       <button
         className="primary wide"
-        onClick={onRunSimulation}
-        disabled={!canRunSimulation}
-        title={missingRunItems.length ? `Complete before running: ${missingRunItems.join(", ")}` : "Run simulation"}
+        type="button"
+        onClick={isRunning ? onCancelSimulation : onRunSimulation}
+        disabled={isRunning ? !onCancelSimulation : !canRunSimulation}
+        title={isRunning ? "Stop simulation" : (missingRunItems.length ? `Complete before running: ${missingRunItems.join(", ")}` : "Run simulation")}
+        aria-label={isRunning ? "Stop simulation" : "Run simulation"}
       >
-        <Play size={16} />Run simulation
+        {isRunning ? <X size={16} /> : <Play size={16} />}
+        {isRunning ? "Stop simulation" : "Run simulation"}
       </button>
-      {isRunning && (
-        <button className="secondary wide" type="button" onClick={onCancelSimulation}>
-          <X size={16} />Stop processing
-        </button>
-      )}
       {missingRunItems.length > 0 && <p className="panel-copy">Complete {missingRunItems.join(", ").toLowerCase()} before running.</p>}
       {runError && !isRunning && <p className="panel-warning" role="alert">{runError}</p>}
       <div className="progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progressPercent} aria-label="Simulation progress">
@@ -1226,7 +1234,6 @@ function RunPanel({ study, displayModel, runProgress, runError, runTiming, onRun
         <Info label="Version" value="0.1.0" />
         <Info label="Solver method" value={solverMethodForStudy(study)} />
         <Info label="Runner" value={solverRunnerLabelForStudy(study, displayModel)} />
-        <Info label="Local fallback" value="none" />
       </div>
     </Panel>
   );
@@ -1234,6 +1241,7 @@ function RunPanel({ study, displayModel, runProgress, runError, runTiming, onRun
 
 function DynamicNumberField({
   label,
+  helpId,
   unit,
   value,
   min,
@@ -1241,6 +1249,7 @@ function DynamicNumberField({
   onCommit
 }: {
   label: string;
+  helpId: SettingHelpId;
   unit: string;
   value: number;
   min: number;
@@ -1263,7 +1272,7 @@ function DynamicNumberField({
 
   return (
     <label className="field">
-      <span>{label}</span>
+      <HelpLabel helpId={helpId}>{label}</HelpLabel>
       <span className="input-with-unit">
         <input
           type="number"
@@ -1325,7 +1334,7 @@ function solverFidelityForStudy(study: Study): SimulationFidelity {
 function solverBackendLabelForRunPanel(study: Study, displayModel: DisplayModel): string {
   void study;
   void displayModel;
-  return "OpenCAE Core Local (in-browser)";
+  return "Local (in-browser)";
 }
 
 function solverMethodForStudy(study: Study): "sparse_static" | "mdof_dynamic" {
@@ -1370,7 +1379,6 @@ function ResultsPanel(props: RightPanelProps) {
 }
 
 function ResultsPanelContent({
-  project,
   displayModel,
   resultMode,
   showDeformed,
@@ -1461,7 +1469,7 @@ function ResultsPanelContent({
   return (
     <Panel title="Results" helper="View stress and displacement directly on the 3D model.">
       {onGenerateReport && (
-        <button className="primary wide" type="button" disabled={reportBusy || reportDisabled} onClick={() => void onGenerateReport()}>
+        <button className="primary wide" type="button" disabled={reportBusy || reportDisabled} onClick={() => void onGenerateReport({ targetSafetyFactor })}>
           <FileDown size={18} />{reportBusy ? "Generating…" : "Generate report"}
         </button>
       )}
@@ -1561,13 +1569,10 @@ function ResultsPanelContent({
       {unitMissingDiagnostic && <p className="panel-warning">{unitMissingDiagnostic}</p>}
       <p className="panel-copy">Red areas have higher stress. Blue areas have lower stress.</p>
       <div className="summary-box">
-        <Info label="Result source" value={formatResultProvenanceLabel(resultSummary.provenance)} />
-        <Info label="Core solver version" value={resultProvenance?.solverVersion ?? resultProvenance?.solverCpuVersion ?? resultProvenance?.coreVersion ?? "--"} />
-        <Info label="Core model schema version" value={project.schemaVersion} />
+        <Info label="Result source" value={resultSourceLabelForPanel(resultSummary)} />
         <Info label="Mesh source" value={formatMeshSourceLabel(resultProvenance?.meshSource, displayModel)} />
         <Info label="Solver method" value={solverMethodForResult(resultSummary, study)} />
         <Info label="Runner" value={solverRunnerLabelForResult(resultProvenance)} />
-        <Info label="Local fallback" value="none" />
         <Info label="Max stress" value={formatResultMetric(resultSummary.maxStress, resultSummary.maxStressUnits)} />
         <Info label="Max displacement" value={formatResultMetric(resultSummary.maxDisplacement, resultSummary.maxDisplacementUnits)} />
         <Info label="Safety factor" value={String(resultSummary.safetyFactor)} />
@@ -1602,9 +1607,14 @@ function ResultsPanelContent({
           </div>
         </>
       )}
-      <div className="legend"><span /> <small>Low</small><small>High</small></div>
+      <div className="legend"><small>Low</small><span /><small>High</small></div>
     </Panel>
   );
+}
+
+function resultSourceLabelForPanel(resultSummary: ResultSummary): string {
+  const label = formatResultProvenanceLabel(resultSummary.provenance);
+  return label === "OpenCAE Core Local (in-browser)" ? "Local (in-browser)" : label;
 }
 
 function resultContractHasMissingUnits(summary: ResultSummary, fields: ResultField[]): boolean {

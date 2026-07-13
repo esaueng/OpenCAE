@@ -27,6 +27,12 @@ export type SettingHelpId =
   | "meshQuality"
   | "runReadiness"
   | "solver"
+  | "dynamicStartTime"
+  | "dynamicEndTime"
+  | "dynamicTimeStep"
+  | "dynamicOutputInterval"
+  | "dynamicLoadProfile"
+  | "dynamicDampingRatio"
   | "resultMode"
   | "stressExaggeration"
   | "deformedShape"
@@ -132,6 +138,36 @@ export const SETTING_HELP: Record<SettingHelpId, SettingHelp> = {
   solver: {
     title: "Solver",
     body: "Shows the local solver backend and progress. Results are estimates from the local static solver, not a certified finite-element analysis.",
+    visual: "results"
+  },
+  dynamicStartTime: {
+    title: "Start time",
+    body: "Sets when the dynamic simulation begins. It is usually zero unless you need the result timeline to start at a later physical time.",
+    visual: "results"
+  },
+  dynamicEndTime: {
+    title: "End time",
+    body: "Sets how long the dynamic simulation runs. A longer duration captures more of the response but requires more solver steps.",
+    visual: "results"
+  },
+  dynamicTimeStep: {
+    title: "Time step",
+    body: "Sets the time increment used by the solver. Smaller steps can capture faster motion more accurately, but increase calculation time.",
+    visual: "results"
+  },
+  dynamicOutputInterval: {
+    title: "Output interval",
+    body: "Sets how often a result frame is saved. Smaller intervals create smoother playback and more frames, which use more memory.",
+    visual: "results"
+  },
+  dynamicLoadProfile: {
+    title: "Load profile",
+    body: "Controls how the applied load changes over the simulated time, such as arriving gradually, immediately, slowly, or as a repeating sine wave.",
+    visual: "load"
+  },
+  dynamicDampingRatio: {
+    title: "Damping ratio",
+    body: "Controls how quickly vibration dies out. Zero means no damping; larger values remove oscillation faster and reduce later response peaks.",
     visual: "results"
   },
   resultMode: {
