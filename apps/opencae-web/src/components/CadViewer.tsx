@@ -1199,6 +1199,9 @@ function BracketModel({
   const hasDraftLoadPreview = activeStep === "loads" && loadMarkers.some((marker) => marker.preview);
   const showModelHitLabel = shouldShowModelHitLabel(viewMode, Boolean(hoveredHit), hasDraftLoadPreview);
   const activePayloadObjectId = payloadHighlightObjectId(payloadObjectSelectionMode, selectedPayloadObject ?? hoveredHit?.payloadObject ?? null);
+  const markerScale = useMemo(() => (
+    boundaryMarkerScale(modelKind === "uploaded" && uploadedPreviewBounds ? uploadedPreviewBounds : dimensionBoundsForDisplayModel(displayModel))
+  ), [displayModel, modelKind, uploadedPreviewBounds]);
   const boundaryLabelPositions = useMemo(() => {
     if (!showBoundaryMarkers) return new Map<string, [number, number, number]>();
     const bounds = dimensionBoundsForDisplayModel(displayModel);
@@ -1343,12 +1346,12 @@ function BracketModel({
         const face = displayModel.faces.find((item) => item.id === marker.faceId);
         if (!face) return null;
         return marker.preview
-          ? <PickedLoadLocationMarker key={marker.id} marker={marker} face={face} active={activeStep === "loads"} />
-          : <LoadGlyph key={marker.id} marker={marker} face={face} active={activeStep === "loads"} labelPosition={boundaryLabelPositions.get(boundaryLabelKey("load", marker.id))} />;
+          ? <PickedLoadLocationMarker key={marker.id} marker={marker} face={face} active={activeStep === "loads"} scale={markerScale} />
+          : <LoadGlyph key={marker.id} marker={marker} face={face} active={activeStep === "loads"} labelPosition={boundaryLabelPositions.get(boundaryLabelKey("load", marker.id))} scale={markerScale} />;
       })}
       {showBoundaryMarkers && supportMarkers.map((marker) => {
         const face = displayModel.faces.find((item) => item.id === marker.faceId);
-        return face ? <SupportGlyph key={marker.id} kind={modelKind} marker={marker} face={face} active={activeStep === "supports"} labelPosition={boundaryLabelPositions.get(boundaryLabelKey("support", marker.id))} /> : null;
+        return face ? <SupportGlyph key={marker.id} kind={modelKind} marker={marker} face={face} active={activeStep === "supports"} labelPosition={boundaryLabelPositions.get(boundaryLabelKey("support", marker.id))} scale={markerScale} /> : null;
       })}
       {showResultMarkers && resultProbesForKind(modelKind, displayModel.faces, resultMode, resultFields, unitSystem).map((probe) => <ResultProbe key={`${probe.tone}-${probe.label}-${probe.anchor.join(",")}`} {...probe} />)}
     </group>
@@ -1400,6 +1403,22 @@ function dimensionBoundsForDisplayModel(displayModel: DisplayModel) {
     return new THREE.Box3(halfSize.clone().multiplyScalar(-1), halfSize);
   }
   return new THREE.Box3(new THREE.Vector3(-1.55, -0.24, -BRACKET_DEPTH / 2), new THREE.Vector3(2.35, 2.62, BRACKET_DEPTH / 2));
+}
+
+// Boundary-marker glyph sizes (arrows, support bursts, labels) were tuned on
+// the bracket sample's bounds. Uploaded models normalize to a smaller world
+// footprint — and slender parts have far less visual mass than the bracket —
+// so scale the glyphs by the model's mean extent to keep them proportionate.
+const MARKER_REFERENCE_MEAN_EXTENT = 2.55;
+const MARKER_SCALE_MIN = 0.3;
+const MARKER_SCALE_MAX = 1.5;
+
+export function boundaryMarkerScale(bounds: THREE.Box3 | null): number {
+  if (!bounds || bounds.isEmpty()) return 1;
+  const size = bounds.getSize(new THREE.Vector3());
+  const meanExtent = (size.x + size.y + size.z) / 3;
+  if (!Number.isFinite(meanExtent) || meanExtent <= 0) return 1;
+  return clampNumber(meanExtent / MARKER_REFERENCE_MEAN_EXTENT, MARKER_SCALE_MIN, MARKER_SCALE_MAX);
 }
 
 export function solverSurfaceDisplayBoundsForDisplayModel(displayModel: DisplayModel, uploadedPreviewBounds: THREE.Box3 | null) {
@@ -1490,14 +1509,14 @@ function loadMarkerAnchor(marker: ViewerLoadMarker, face: DisplayFace): [number,
   return marker.point ?? marker.payloadObject?.center ?? face.center;
 }
 
-export function loadGlyphSurfacePoint(marker: ViewerLoadMarker, face: DisplayFace) {
+export function loadGlyphSurfacePoint(marker: ViewerLoadMarker, face: DisplayFace, scale = 1) {
   const center = new THREE.Vector3(...loadMarkerAnchor(marker, face));
   if (marker.point || marker.payloadObject) return center;
   const normal = new THREE.Vector3(...face.normal).normalize();
   const tangent = new THREE.Vector3().crossVectors(normal, new THREE.Vector3(0, 1, 0));
   if (tangent.lengthSq() < 0.001) tangent.set(1, 0, 0);
   tangent.normalize();
-  return center.add(tangent.multiplyScalar((marker.stackIndex - 0.5) * 0.22));
+  return center.add(tangent.multiplyScalar((marker.stackIndex - 0.5) * 0.22 * scale));
 }
 
 export function supportMarkerAnchor(kind: SampleModelKind, marker: ViewerSupportMarker, face: DisplayFace): [number, number, number] {
@@ -1505,8 +1524,8 @@ export function supportMarkerAnchor(kind: SampleModelKind, marker: ViewerSupport
   return face.center;
 }
 
-export function supportGlyphAnchor(kind: SampleModelKind, marker: ViewerSupportMarker, face: DisplayFace) {
-  return new THREE.Vector3(...supportMarkerAnchor(kind, marker, face)).add(new THREE.Vector3(...face.normal).normalize().multiplyScalar(0.04));
+export function supportGlyphAnchor(kind: SampleModelKind, marker: ViewerSupportMarker, face: DisplayFace, scale = 1) {
+  return new THREE.Vector3(...supportMarkerAnchor(kind, marker, face)).add(new THREE.Vector3(...face.normal).normalize().multiplyScalar(0.04 * scale));
 }
 
 export function beamPayloadSelectionForTarget(targetId: unknown): PayloadObjectSelection | null {
@@ -5475,11 +5494,13 @@ function ModelHitLabel({ hit, active }: { hit: ModelSelectionHit; active: boolea
 function SceneLabel({
   label,
   position,
-  tone
+  tone,
+  scale = 1
 }: {
   label: string;
   position: [number, number, number];
   tone: "max" | "mid" | "min" | "load" | "active-load" | "payload-mass" | "dimension" | "print";
+  scale?: number;
 }) {
   const labelWidth = Math.max(1.02, label.length * 0.098);
   const colors = sceneLabelColors(tone);
@@ -5492,12 +5513,12 @@ function SceneLabel({
         material-depthTest={false}
         material-depthWrite={false}
         material-toneMapped={false}
-        fontSize={0.135}
+        fontSize={0.135 * scale}
         letterSpacing={0}
-        maxWidth={labelWidth - 0.16}
+        maxWidth={(labelWidth - 0.16) * scale}
         outlineColor={colors.outline}
         outlineOpacity={0.88}
-        outlineWidth={0.018}
+        outlineWidth={0.018 * scale}
       >
         {label}
       </Text>
@@ -5516,7 +5537,7 @@ function sceneLabelColors(tone: "max" | "mid" | "min" | "load" | "active-load" |
   return { outline: "#1f1300", text: "#ffe6a3" };
 }
 
-function SupportGlyph({ kind, marker, face, active, labelPosition }: { kind: SampleModelKind; marker: ViewerSupportMarker; face: DisplayFace; active: boolean; labelPosition?: [number, number, number] }) {
+function SupportGlyph({ kind, marker, face, active, labelPosition, scale = 1 }: { kind: SampleModelKind; marker: ViewerSupportMarker; face: DisplayFace; active: boolean; labelPosition?: [number, number, number]; scale?: number }) {
   if (kind === "bracket" && face.id === "face-base-left") {
     const depthOffset = Math.min(marker.stackIndex, 2) * 0.05;
     const anchor: [number, number, number] = [0.72, 0, BRACKET_DEPTH / 2 + 0.065 + depthOffset];
@@ -5525,40 +5546,41 @@ function SupportGlyph({ kind, marker, face, active, labelPosition }: { kind: Sam
       <group position={[0, 0, depthOffset]}>
         {BRACKET_HOLES.filter((hole) => hole.supported).map((hole) => (
           <group key={`${marker.id}-${hole.id}`} position={[hole.center[0], hole.center[1], BRACKET_DEPTH / 2 + 0.065]}>
-            <SupportBurst radius={hole.radius} active={active} />
+            <SupportBurst radius={hole.radius} active={active} scale={scale} />
           </group>
         ))}
-        <BoundaryLabelLeader anchor={anchor} labelPosition={position} color={active ? "#4da3ff" : "#f59e0b"} />
+        <BoundaryLabelLeader anchor={anchor} labelPosition={position} color={active ? "#4da3ff" : "#f59e0b"} scale={scale} />
         <SceneLabel
           label={supportLabel(marker)}
           position={position}
           tone={active ? "active-load" : "load"}
+          scale={scale}
         />
       </group>
     );
   }
 
   const normal = new THREE.Vector3(...face.normal).normalize();
-  const anchor = supportGlyphAnchor(kind, marker, face);
-  const position = labelPosition ?? anchor.clone().add(normal.clone().multiplyScalar(0.32)).add(new THREE.Vector3(0, 0.14, 0)).toArray() as [number, number, number];
+  const anchor = supportGlyphAnchor(kind, marker, face, scale);
+  const position = labelPosition ?? anchor.clone().add(normal.clone().multiplyScalar(0.32 * scale)).add(new THREE.Vector3(0, 0.14 * scale, 0)).toArray() as [number, number, number];
   return (
     <group>
       <mesh position={anchor.toArray()} rotation={rotationForNormal(face.normal)}>
-        <circleGeometry args={[0.12, 36]} />
+        <circleGeometry args={[0.12 * scale, 36]} />
         <meshBasicMaterial color={active ? "#4da3ff" : "#f59e0b"} transparent opacity={0.88} side={THREE.DoubleSide} />
       </mesh>
-      <SupportBurstAt position={anchor.toArray()} normal={normal} active={active} />
-      <BoundaryLabelLeader anchor={anchor.toArray()} labelPosition={position} color={active ? "#4da3ff" : "#f59e0b"} />
-      <SceneLabel label={supportLabel(marker)} position={position} tone={active ? "active-load" : "load"} />
+      <SupportBurstAt position={anchor.toArray()} normal={normal} active={active} scale={scale} />
+      <BoundaryLabelLeader anchor={anchor.toArray()} labelPosition={position} color={active ? "#4da3ff" : "#f59e0b"} scale={scale} />
+      <SceneLabel label={supportLabel(marker)} position={position} tone={active ? "active-load" : "load"} scale={scale} />
     </group>
   );
 }
 
-function SupportBurstAt({ position, normal, active }: { position: [number, number, number]; normal: THREE.Vector3; active: boolean }) {
+function SupportBurstAt({ position, normal, active, scale = 1 }: { position: [number, number, number]; normal: THREE.Vector3; active: boolean; scale?: number }) {
   const quaternion = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal.clone().normalize());
   return (
     <group position={position} quaternion={quaternion}>
-      <SupportBurst radius={0.15} active={active} />
+      <SupportBurst radius={0.15 * scale} active={active} scale={scale} />
     </group>
   );
 }
@@ -5795,7 +5817,7 @@ function clampNumber(value: number, minValue: number, maxValue: number) {
   return Math.max(minValue, Math.min(maxValue, value));
 }
 
-function LoadGlyph({ marker, face, active, labelPosition }: { marker: ViewerLoadMarker; face: DisplayFace; active: boolean; labelPosition?: [number, number, number] }) {
+function LoadGlyph({ marker, face, active, labelPosition, scale = 1 }: { marker: ViewerLoadMarker; face: DisplayFace; active: boolean; labelPosition?: [number, number, number]; scale?: number }) {
   const presentation = loadMarkerViewportPresentation(marker);
   const markerDirection = markerDirectionInModelSpace(marker);
   const isNormalDirection = marker.directionLabel === "Normal";
@@ -5808,14 +5830,14 @@ function LoadGlyph({ marker, face, active, labelPosition }: { marker: ViewerLoad
   if (tangent.lengthSq() < 0.001) tangent.set(1, 0, 0);
   tangent.normalize();
   const arrowDirection = isNormalDirection ? normal : markerDirection;
-  const { start, end } = arrowPointsOutsideSurface(loadGlyphSurfacePoint(marker, face), normal, arrowDirection, 0.54);
+  const { start, end } = arrowPointsOutsideSurface(loadGlyphSurfacePoint(marker, face, scale), normal, arrowDirection, 0.54 * scale, 0.12 * scale);
   const payloadOffset = payloadMassLabelOffset(marker.labelIndex);
   const massLabelPosition = labelPosition ? new THREE.Vector3(...labelPosition) : center
     .clone()
-    .add(tangent.clone().multiplyScalar(payloadOffset.tangent))
-    .add(normal.clone().multiplyScalar(0.24))
-    .add(new THREE.Vector3(0, payloadOffset.lift, 0));
-  const forceLabelPosition = labelPosition ? new THREE.Vector3(...labelPosition) : loadGlyphLabelPosition(marker, face, start, normal, arrowDirection);
+    .add(tangent.clone().multiplyScalar(payloadOffset.tangent * scale))
+    .add(normal.clone().multiplyScalar(0.24 * scale))
+    .add(new THREE.Vector3(0, payloadOffset.lift * scale, 0));
+  const forceLabelPosition = labelPosition ? new THREE.Vector3(...labelPosition) : loadGlyphLabelPosition(marker, face, start, normal, arrowDirection, scale);
   const glyphAnchor = presentation.showArrow ? end.toArray() as [number, number, number] : center.toArray() as [number, number, number];
   if (DEBUG_RESULTS) {
     console.info("[OpenCAE debugResults] viewer load marker direction audit", {
@@ -5831,19 +5853,21 @@ function LoadGlyph({ marker, face, active, labelPosition }: { marker: ViewerLoad
 
   return (
     <group>
-      {presentation.showArrow && <ArrowGlyph start={start} end={end} color={markerColor} />}
+      {presentation.showArrow && <ArrowGlyph start={start} end={end} color={markerColor} scale={scale} />}
       {presentation.showLeader && (
         <PayloadMassLeader
           anchor={center}
           labelPosition={massLabelPosition}
           color={markerColor}
+          scale={scale}
         />
       )}
-      {labelPosition && <BoundaryLabelLeader anchor={glyphAnchor} labelPosition={labelPosition} color={markerColor} />}
+      {labelPosition && <BoundaryLabelLeader anchor={glyphAnchor} labelPosition={labelPosition} color={markerColor} scale={scale} />}
       <SceneLabel
         label={presentation.label}
         position={(presentation.showArrow ? forceLabelPosition : massLabelPosition).toArray()}
         tone={labelTone}
+        scale={scale}
       />
     </group>
   );
@@ -5854,15 +5878,17 @@ export function loadGlyphLabelPosition(
   face: DisplayFace,
   arrowStart?: THREE.Vector3,
   faceNormal?: THREE.Vector3,
-  arrowDirection?: THREE.Vector3
+  arrowDirection?: THREE.Vector3,
+  scale = 1
 ) {
   const normal = faceNormal?.clone().normalize() ?? new THREE.Vector3(...face.normal).normalize();
   const direction = arrowDirection?.clone().normalize() ?? markerDirectionInModelSpace(marker);
   const start = arrowStart?.clone() ?? arrowPointsOutsideSurface(
-    loadGlyphSurfacePoint(marker, face),
+    loadGlyphSurfacePoint(marker, face, scale),
     normal,
     marker.directionLabel === "Normal" ? normal : direction,
-    0.54
+    0.54 * scale,
+    0.12 * scale
   ).start;
   const side = new THREE.Vector3().crossVectors(direction, normal);
   if (side.lengthSq() < 0.001) side.crossVectors(direction, new THREE.Vector3(0, 1, 0));
@@ -5870,18 +5896,18 @@ export function loadGlyphLabelPosition(
   side.normalize();
   const { lane, row } = labelLaneOffset(marker.labelIndex);
   return start
-    .add(direction.clone().multiplyScalar(-0.18))
-    .add(normal.clone().multiplyScalar(0.1 + row * 0.08))
-    .add(side.multiplyScalar(lane * 0.22));
+    .add(direction.clone().multiplyScalar(-0.18 * scale))
+    .add(normal.clone().multiplyScalar((0.1 + row * 0.08) * scale))
+    .add(side.multiplyScalar(lane * 0.22 * scale));
 }
 
-function PickedLoadLocationMarker({ marker, face, active }: { marker: ViewerLoadMarker; face: DisplayFace; active: boolean }) {
+function PickedLoadLocationMarker({ marker, face, active, scale = 1 }: { marker: ViewerLoadMarker; face: DisplayFace; active: boolean; scale?: number }) {
   const normal = new THREE.Vector3(...face.normal).normalize();
-  const anchor = loadGlyphSurfacePoint(marker, face).clone().add(normal.multiplyScalar(0.035));
+  const anchor = loadGlyphSurfacePoint(marker, face, scale).clone().add(normal.multiplyScalar(0.035 * scale));
   const color = active ? "#4da3ff" : "#93c5fd";
   return (
     <Billboard position={anchor.toArray()} renderOrder={24}>
-      <group>
+      <group scale={scale}>
         <mesh>
           <ringGeometry args={[0.055, 0.075, 36]} />
           <meshBasicMaterial color={color} depthTest={false} transparent opacity={0.96} toneMapped={false} />
@@ -5899,20 +5925,20 @@ function PickedLoadLocationMarker({ marker, face, active }: { marker: ViewerLoad
   );
 }
 
-function BoundaryLabelLeader({ anchor, labelPosition, color }: { anchor: [number, number, number]; labelPosition: [number, number, number]; color: string }) {
+function BoundaryLabelLeader({ anchor, labelPosition, color, scale = 1 }: { anchor: [number, number, number]; labelPosition: [number, number, number]; color: string; scale?: number }) {
   const anchorVector = new THREE.Vector3(...anchor);
   const labelVector = new THREE.Vector3(...labelPosition);
-  const leaderEnd = labelVector.clone().add(anchorVector.clone().sub(labelVector).normalize().multiplyScalar(0.2));
+  const leaderEnd = labelVector.clone().add(anchorVector.clone().sub(labelVector).normalize().multiplyScalar(0.2 * scale));
   return <Line points={[anchor, leaderEnd.toArray()]} color={color} transparent opacity={0.62} lineWidth={1.2} />;
 }
 
-function PayloadMassLeader({ anchor, labelPosition, color }: { anchor: THREE.Vector3; labelPosition: THREE.Vector3; color: string }) {
-  const labelAnchor = labelPosition.clone().add(anchor.clone().sub(labelPosition).normalize().multiplyScalar(0.16));
+function PayloadMassLeader({ anchor, labelPosition, color, scale = 1 }: { anchor: THREE.Vector3; labelPosition: THREE.Vector3; color: string; scale?: number }) {
+  const labelAnchor = labelPosition.clone().add(anchor.clone().sub(labelPosition).normalize().multiplyScalar(0.16 * scale));
   return (
     <group>
       <Line points={[anchor.toArray(), labelAnchor.toArray()]} color={color} transparent opacity={0.82} lineWidth={1.4} />
       <Billboard position={anchor.toArray()}>
-        <mesh>
+        <mesh scale={scale}>
           <ringGeometry args={[0.045, 0.072, 28]} />
           <meshBasicMaterial color={color} depthTest={false} toneMapped={false} transparent opacity={0.92} />
         </mesh>
@@ -5930,7 +5956,7 @@ function compactFaceLabel(label: string) {
     .trim();
 }
 
-function arrowPointsOutsideSurface(surfacePoint: THREE.Vector3, normal: THREE.Vector3, direction: THREE.Vector3, length: number) {
+function arrowPointsOutsideSurface(surfacePoint: THREE.Vector3, normal: THREE.Vector3, direction: THREE.Vector3, length: number, clearance = 0.12) {
   const faceNormal = normal.clone().normalize();
   const arrowDirection = direction.clone().normalize();
   const rawStart = surfacePoint.clone().add(arrowDirection.clone().multiplyScalar(-length));
@@ -5939,7 +5965,6 @@ function arrowPointsOutsideSurface(surfacePoint: THREE.Vector3, normal: THREE.Ve
     rawStart.clone().sub(surfacePoint).dot(faceNormal),
     rawEnd.clone().sub(surfacePoint).dot(faceNormal)
   );
-  const clearance = 0.12;
   const outsideShift = faceNormal.multiplyScalar(clearance - minNormalDistance);
   return {
     start: rawStart.add(outsideShift),
@@ -5951,13 +5976,15 @@ function ArrowGlyph({
   start,
   end,
   color,
-  shaftRadius = 0.025,
-  headRadius = 0.09,
-  headLength = 0.22
+  scale = 1,
+  shaftRadius = 0.025 * scale,
+  headRadius = 0.09 * scale,
+  headLength = 0.22 * scale
 }: {
   start: THREE.Vector3;
   end: THREE.Vector3;
   color: string;
+  scale?: number;
   shaftRadius?: number;
   headRadius?: number;
   headLength?: number;
@@ -5991,15 +6018,15 @@ function HoleRims({ kind }: { kind: SampleModelKind }) {
   return null;
 }
 
-function SupportBurst({ radius, active = false }: { radius: number; active?: boolean }) {
+function SupportBurst({ radius, active = false, scale = 1 }: { radius: number; active?: boolean; scale?: number }) {
   return (
     <group>
       {[0, Math.PI / 2, Math.PI, Math.PI * 1.5].map((angle) => {
         const x = Math.cos(angle) * radius * 2.0;
         const y = Math.sin(angle) * radius * 2.0;
         return (
-          <mesh key={angle} position={[x, y, 0.035]} rotation={[0, 0, angle - Math.PI / 2]}>
-            <coneGeometry args={[0.045, 0.13, 3]} />
+          <mesh key={angle} position={[x, y, 0.035 * scale]} rotation={[0, 0, angle - Math.PI / 2]}>
+            <coneGeometry args={[0.045 * scale, 0.13 * scale, 3]} />
             <meshBasicMaterial color={active ? "#4da3ff" : "#f59e0b"} />
           </mesh>
         );
