@@ -1,4 +1,4 @@
-import { lazy, startTransition, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, startTransition, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { DynamicSolverSettingsSchema, isRunResultReadyStatus } from "@opencae/schema";
 import type { Constraint, DisplayFace, DisplayModel, DynamicSolverSettings, Load, MeshQuality, NamedSelection, Project, ResultField, ResultRenderBounds, ResultSummary, RunEvent, RunTimingEstimate, SimulationFidelity, Study } from "@opencae/schema";
 import { RotateCcw, Save, X } from "lucide-react";
@@ -321,6 +321,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     }
   }, [resultPlaybackCacheState]);
   const solverRunning = Boolean(processingRunId) || (runProgress > 0 && runProgress < 100);
+  const runButtonProgress = Math.min(100, Math.max(0, Math.round(runProgress)));
   reportStateRef.current = { viewMode, resultMode, resultSummary, completedRunId, resultPlaybackPlaying };
   const runReadiness = useMemo(() => readinessForStudy(study), [study]);
   const canRunSimulation = runReadiness.every((item) => item.done) && !solverRunning;
@@ -1769,9 +1770,11 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
             onClick={handleRunSimulation}
             disabled={!effectiveCanRunSimulation}
             title={effectiveMissingRunItems.length ? `Complete before running: ${effectiveMissingRunItems.join(", ")}` : "Run simulation"}
-            aria-label={solverRunning ? "Running…" : "Run simulation"}
+            aria-label={solverRunning ? `Running simulation: ${runButtonProgress}%` : "Run simulation"}
+            aria-busy={solverRunning}
+            style={{ "--run-progress": `${runButtonProgress}%` } as CSSProperties}
           >
-            <span aria-hidden="true">▶</span><span className="topbar-action-label">{solverRunning ? "Running…" : "Run simulation"}</span>
+            <span aria-hidden="true">▶</span><span className="topbar-action-label">{solverRunning ? `Running… ${runButtonProgress}%` : "Run simulation"}</span>
           </button>
         ) : null}
         <button className="secondary topbar-action" type="button" onClick={handleSaveProject} title="Save project to local disk" aria-label="Save project">
@@ -1794,7 +1797,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           onCreateStatic={handleCreateStaticSimulation}
           onCreateDynamic={handleCreateDynamicSimulation}
         />
-        <BottomPanel status={status} logs={logs} projectName={project.name} studyName="No simulation" meshStatus="Not generated" solverStatus="Idle" backendStatus="core" onClearLogs={clearLogs} />
+        <BottomPanel status={status} logs={logs} meshStatus="Not generated" solverStatus="Idle" onClearLogs={clearLogs} />
       </div>
     );
   }
@@ -1989,11 +1992,8 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       <BottomPanel
         status={status}
         logs={logs}
-        projectName={project.name}
-        studyName={study?.name ?? "No simulation"}
         meshStatus={study?.meshSettings.status === "complete" ? "Ready" : "Not generated"}
         solverStatus={solverRunning ? "Running" : runProgress >= 100 ? "Complete" : "Idle"}
-        backendStatus="core"
         onClearLogs={clearLogs}
       />
     </div>

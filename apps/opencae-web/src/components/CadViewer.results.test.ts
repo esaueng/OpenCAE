@@ -122,8 +122,9 @@ describe("CadViewer result coloring", () => {
     expect(cadViewerSource).toContain("renderReportCapture(gl, scene, camera)");
   });
 
-  test("links the viewer watermark to the Esau Engineering website", () => {
+  test("keeps the Esau Engineering attribution target stable outside the viewer", () => {
     expect(VIEWER_CREDIT_URL).toBe("https://esauengineering.com/");
+    expect(cadViewerSource).not.toContain('className="viewer-watermark"');
   });
 
   test("disables deformed rendering for complex geometry with preview provenance", () => {
