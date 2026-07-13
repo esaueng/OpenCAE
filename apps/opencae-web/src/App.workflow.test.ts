@@ -106,6 +106,13 @@ describe("App workflow layout", () => {
     expect(appSource).toContain('const message = errorMessage(error, "Could not load simulation results.");');
   });
 
+  test("renders live solver progress inside the topbar run button", () => {
+    expect(appSource).toContain("const runButtonProgress = Math.min(100, Math.max(0, Math.round(runProgress)));");
+    expect(appSource).toContain('style={{ "--run-progress": `${runButtonProgress}%` } as CSSProperties}');
+    expect(appSource).toContain('aria-label={solverRunning ? `Running simulation: ${runButtonProgress}%` : "Run simulation"}');
+    expect(appSource).toContain('solverRunning ? `Running… ${runButtonProgress}%` : "Run simulation"');
+  });
+
   test("passes measured viewer render bounds into browser-local runs", () => {
     expect(appSource).toContain("const [resultRenderBounds, setResultRenderBounds] = useState<ResultRenderBounds | null>(null);");
     expect(appSource).toContain("onResultRenderBoundsChange={setResultRenderBounds}");
@@ -120,7 +127,7 @@ describe("App workflow layout", () => {
   });
 
   test("wires reverse loop playback controls into the results panel", () => {
-    expect(appSource).toContain("const [resultPlaybackReverseLoop, setResultPlaybackReverseLoop] = useState(false);");
+    expect(appSource).toContain("const [resultPlaybackReverseLoop, setResultPlaybackReverseLoop] = useState(restoredUi?.resultPlaybackReverseLoop ?? false);");
     expect(appSource).toContain("resultPlaybackReverseLoop={resultPlaybackReverseLoop}");
     expect(appSource).toContain("onResultPlaybackReverseLoopChange={setResultPlaybackReverseLoop}");
     expect(appSource).toContain('mode: resultPlaybackReverseLoop ? "reverse" : "restart"');

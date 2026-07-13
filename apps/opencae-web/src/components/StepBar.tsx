@@ -46,7 +46,6 @@ export function StepBar({ activeStep, project, study, hasResults, collapsed, the
   const currentUnitLabel = project.unitSystem === "SI" ? "Metric" : "Imperial";
   const nextUnitSystem = project.unitSystem === "SI" ? "US" : "SI";
   const studyTypeLabel = study.type === "dynamic_structural" ? "dynamic" : "static";
-  const backendLabel = "core";
   const ThemeIcon = themeMode === "dark" ? Sun : Moon;
 
   return (
@@ -102,7 +101,6 @@ export function StepBar({ activeStep, project, study, hasResults, collapsed, the
             <span className="unit-toggle-short" aria-hidden="true">{unitShort}</span>
           </button>
         </div>
-        <div><span>backend</span><strong>{backendLabel}</strong></div>
       </div>
     </nav>
   );

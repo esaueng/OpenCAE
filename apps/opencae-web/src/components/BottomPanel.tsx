@@ -10,11 +10,8 @@ export interface WorkspaceLogEntry {
 interface BottomPanelProps {
   status: string;
   logs: WorkspaceLogEntry[];
-  projectName: string;
-  studyName: string;
   meshStatus: string;
   solverStatus: string;
-  backendStatus: "core";
   onClearLogs: () => void;
 }
 
@@ -30,6 +27,7 @@ export const WORKSPACE_SHORTCUT_GUIDE: Array<{ keys: string[]; label: string }> 
 export const COFFEE_ANIMATION_DURATION_MS = 1800;
 export const COFFEE_ANIMATION_REPLAY_DELAY_MS = { min: 18000, max: 45000 } as const;
 const COFFEE_LINK_TEXT = "Buy me a coffee";
+const ESAU_ENGINEERING_URL = "https://esauengineering.com/";
 
 export function coffeeAnimationReplayDelayMs(randomValue = Math.random()) {
   const safeRandomValue = Number.isFinite(randomValue) ? randomValue : 0;
@@ -38,7 +36,7 @@ export function coffeeAnimationReplayDelayMs(randomValue = Math.random()) {
   return Math.round(COFFEE_ANIMATION_REPLAY_DELAY_MS.min + delayRange * boundedRandomValue);
 }
 
-export function BottomPanel({ status, logs, projectName, studyName, meshStatus, solverStatus, backendStatus, onClearLogs }: BottomPanelProps) {
+export function BottomPanel({ status, logs, meshStatus, solverStatus, onClearLogs }: BottomPanelProps) {
   const [tab, setTab] = useState<"tips" | "logs" | null>(null);
   const [drawerHeight, setDrawerHeight] = useState(320);
   const [clearPromptVisible, setClearPromptVisible] = useState(false);
@@ -228,22 +226,20 @@ export function BottomPanel({ status, logs, projectName, studyName, meshStatus, 
         </div>
       )}
       <div className="status-strip">
-        <div className="status-tabs">
-          {(["tips", "logs"] as const).map((item) => (
-            <button key={item} className={tab === item ? "active" : ""} aria-pressed={tab === item} aria-expanded={tab === item} onClick={(event) => selectTab(item, event)}>
-              {item[0]?.toUpperCase()}{item.slice(1)}
-              {item === "logs" && <span className="count-pill">{logs.length}</span>}
-            </button>
-          ))}
+        <div className="status-primary">
+          <div className="status-tabs">
+            {(["tips", "logs"] as const).map((item) => (
+              <button key={item} className={tab === item ? "active" : ""} aria-pressed={tab === item} aria-expanded={tab === item} onClick={(event) => selectTab(item, event)}>
+                {item[0]?.toUpperCase()}{item.slice(1)}
+                {item === "logs" && <span className="count-pill">{logs.length}</span>}
+              </button>
+            ))}
+          </div>
+          <div className="status-groups" aria-label="Simulation status">
+            <span className={`status-state ${healthy}`}><i />{displayStatus}</span>
+          </div>
         </div>
-        <div className="status-groups" aria-label="Simulation status">
-          <span className={`status-state ${healthy}`}><i />{displayStatus}</span>
-          <span className="backend-pill"><span aria-hidden="true" />{backendStatus}</span>
-          <span><b>project</b>{projectName}</span>
-          <span><b>study</b>{studyName}</span>
-          <span><b>mesh</b>{meshStatus}</span>
-          <span><b>solver</b>{solverStatus}</span>
-        </div>
+        <a className="status-attribution" href={ESAU_ENGINEERING_URL} target="_blank" rel="noreferrer">Built by Esau Engineering</a>
         <div className="status-links" aria-label="Project links">
           <a className={donateLinkClassName} href="https://ko-fi.com/petergn" target="_blank" rel="noreferrer" title="Support OpenCAE on Ko-fi" onMouseEnter={runCoffeeAnimation}>
             <span className="coffee-mark" aria-hidden="true" key={`coffee-mark-${coffeeAnimationRun}`}>
