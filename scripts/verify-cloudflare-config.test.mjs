@@ -14,7 +14,7 @@ function clone(value) {
 }
 
 describe("Cloudflare deployment config guard (post cloud retirement)", () => {
-  test("passes with the committed static-assets-only configs", () => {
+  test("passes with static assets and the isolated encrypted backup binding", () => {
     const { defaultConfig, retiredDoCleanupConfig, staticConfig, packageJson } = readCloudflareConfigs(rootDir);
     const readme = readFileSync(resolve(rootDir, "README.md"), "utf8");
 
@@ -22,7 +22,7 @@ describe("Cloudflare deployment config guard (post cloud retirement)", () => {
     expect(staticConfig.name).toBe("opencae-static");
     expect(defaultConfig.containers).toBeUndefined();
     expect(defaultConfig.durable_objects).toBeUndefined();
-    expect(defaultConfig.r2_buckets).toBeUndefined();
+    expect(defaultConfig.r2_buckets).toEqual([{ binding: "PROJECT_BACKUPS", bucket_name: "opencae-project-backups" }]);
     expect(readme).toContain("Deploy command: npx wrangler deploy");
     expect(readme).toContain("Do not use `npx wrangler versions upload` for the production Worker");
     expect(retiredDoCleanupConfig.migrations).toEqual([
@@ -109,7 +109,7 @@ describe("Cloudflare deployment config guard (post cloud retirement)", () => {
     defaultConfig.r2_buckets = [{ binding: "CORE_CLOUD_ARTIFACTS", bucket_name: "opencae-core-cloud-artifacts" }];
 
     expect(() => validateCloudflareConfigs({ defaultConfig, staticConfig, packageJson })).toThrow(
-      /must not bind R2 buckets/
+      /must bind only PROJECT_BACKUPS/
     );
   });
 

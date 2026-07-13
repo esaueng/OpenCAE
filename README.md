@@ -53,7 +53,7 @@ pnpm verify:perf
 
 ## Cloudflare Worker Deploy
 
-The production Cloudflare target for `cae.esau.app` serves the Vite web app from Workers Static Assets. Simulations run entirely in the browser with OpenCAE Core — the Worker hosts no solver. (The former OpenCAE Core Cloud container/R2 solve path was retired in July 2026; see [docs/cloud-retirement.md](docs/cloud-retirement.md).)
+The production Cloudflare target for `cae.esau.app` serves the Vite web app from Workers Static Assets. Simulations run entirely in the browser with OpenCAE Core — the Worker hosts no solver. If browser autosave overflows, the app can ask for explicit permission to upload a client-encrypted 30-day recovery snapshot; the Worker never receives its decryption key. (The former OpenCAE Core Cloud container/R2 solve path was retired in July 2026; see [docs/cloud-retirement.md](docs/cloud-retirement.md).)
 
 ```bash
 pnpm install --frozen-lockfile
@@ -62,7 +62,7 @@ pnpm deploy:cloudflare
 
 Build and deploy environments use `pnpm build:core` to build the in-repo OpenCAE Core packages before the web bundle. Production deploys require only this repository plus the checked-in lockfile; there is no runtime or build-time fetch of a second repo.
 
-Production deploys use the default [wrangler.jsonc](wrangler.jsonc) (static assets + security headers only, no solver bindings).
+Production deploys use the default [wrangler.jsonc](wrangler.jsonc) (static assets, security headers, and the encrypted recovery-backup binding; no solver bindings).
 
 For a separate non-production static Worker deploy, use:
 

@@ -5,6 +5,8 @@ import {
   AUTOSAVE_UI_STORAGE_KEY,
   buildAutosavedWorkspace,
   buildAutosavedWorkspaceUiSnapshot,
+  installAutosavePageHideFlush,
+  localRunIdForResultsRestore,
   parseAutosavedWorkspacePayload,
   readAutosavedWorkspace,
   scheduleAutosavedUiSnapshotWrite,
@@ -66,6 +68,10 @@ const baseUi = {
   showDeformed: false,
   showDimensions: false,
   stressExaggeration: 1,
+  resultFrameIndex: 0,
+  resultPlaybackFps: 12,
+  resultPlaybackReverseLoop: false,
+  isStepbarCollapsed: false,
   draftLoadType: "force",
   draftLoadValue: 500,
   draftLoadDirection: "-Z",
@@ -90,7 +96,7 @@ const studyWithSetup = {
     id: "assign-1",
     materialId: "mat-aluminum-6061",
     selectionRef: "selection-body",
-    parameters: { printed: false },
+    parameters: { printed: false, manufacturingProcessId: "process-cnc-machining" },
     status: "complete"
   }],
   namedSelections: [
@@ -577,6 +583,19 @@ describe("app persistence", () => {
     cancel();
   });
 
+  test("flushes the latest autosave when the web page is reloaded", () => {
+    const target = new EventTarget();
+    const flush = vi.fn();
+    const uninstall = installAutosavePageHideFlush(flush, target);
+
+    target.dispatchEvent(new Event("pagehide"));
+    expect(flush).toHaveBeenCalledTimes(1);
+
+    uninstall();
+    target.dispatchEvent(new Event("pagehide"));
+    expect(flush).toHaveBeenCalledTimes(1);
+  });
+
   test("writes lightweight UI autosave separately from the heavy workspace snapshot", () => {
     vi.useFakeTimers();
     const storage = {
@@ -641,6 +660,22 @@ describe("app persistence", () => {
     expect(restored?.ui.resultMode).toBe("acceleration");
     expect(restored?.ui.stressExaggeration).toBe(4);
     expect(restored?.ui.status).toBe("Fine tuning view");
+  });
+
+  test("identifies a completed local run whose large results were shed from the autosave", () => {
+    const workspace = buildAutosavedWorkspace({
+      project,
+      displayModel,
+      results: { activeRunId: "run-local-1", completedRunId: "run-local-1", summary, fields },
+      ui: { ...baseUi, activeRunId: "run-local-1", completedRunId: "run-local-1", runProgress: 100 }
+    });
+    const slimWorkspace = {
+      ...workspace,
+      projectFile: { ...workspace.projectFile, results: undefined }
+    } satisfies AutosavedWorkspace;
+
+    expect(localRunIdForResultsRestore(slimWorkspace)).toBe("run-local-1");
+    expect(localRunIdForResultsRestore(workspace)).toBeNull();
   });
 });
 
@@ -751,12 +786,12 @@ describe("autosave quota fallback", () => {
       displayModel,
       savedAt: "2026-07-09T02:47:41.000Z",
       results: {
-        activeRunId: "run-1",
-        completedRunId: "run-1",
+        activeRunId: "run-local-quota",
+        completedRunId: "run-local-quota",
         summary,
         fields: [{ ...fields[0]!, values: Array.from({ length: 5000 }, () => 12) }]
       },
-      ui: baseUi
+      ui: { ...baseUi, activeRunId: "run-local-quota", completedRunId: "run-local-quota", runProgress: 100 }
     });
 
     const outcome = writeAutosavedWorkspace(snapshot, storage);
@@ -764,6 +799,7 @@ describe("autosave quota fallback", () => {
     expect(outcome).toBe("slim");
     const stored = JSON.parse(storage.store.get(AUTOSAVE_STORAGE_KEY)!) as AutosavedWorkspace;
     expect(stored.projectFile.results).toBeUndefined();
+    expect(localRunIdForResultsRestore(stored)).toBe("run-local-quota");
     const storedArtifacts = stored.projectFile.project.studies[0]!.meshSettings.summary?.artifacts as Record<string, unknown>;
     expect(storedArtifacts.actualCoreModel).toBeUndefined();
     // Regenerable heavyweights are gone; the setup and light artifacts survive.
