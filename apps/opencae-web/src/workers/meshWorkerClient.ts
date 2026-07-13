@@ -103,6 +103,7 @@ export async function postMeshWorkerRequest<Operation extends MeshWorkerOperatio
  */
 export function cancelMeshWork(reason = "Meshing was cancelled."): void {
   const error = new Error(reason);
+  error.name = "AbortError";
   for (const pending of pendingRequests.values()) {
     pending.reject(error);
   }

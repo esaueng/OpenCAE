@@ -37,11 +37,8 @@ describe("BottomPanel", () => {
       <BottomPanel
         status="Results ready"
         logs={[{ message: "Ready", at: 1714000000000 }]}
-        projectName="Cantilever Demo"
-        studyName="Static Stress"
         meshStatus="Ready"
         solverStatus="Complete"
-        backendStatus="core"
         onClearLogs={() => undefined}
       />
     );
@@ -54,12 +51,13 @@ describe("BottomPanel", () => {
     expect(html).toContain(">feedback</a>");
     expect(textContent(html)).toContain("Buy me a coffee");
     expect(html).toContain(">github</a>");
-    expect(html.indexOf("Results ready")).toBeLessThan(html.indexOf("core"));
-    expect(html.indexOf("core")).toBeLessThan(html.indexOf("<b>project</b>"));
-    expect(html.indexOf('href="https://ko-fi.com/petergn"')).toBeGreaterThan(html.indexOf("<b>solver</b>"));
+    expect(html).toContain('class="status-attribution"');
+    expect(html).toContain('href="https://esauengineering.com/"');
+    expect(html).toContain("Built by Esau Engineering");
+    expect(html.indexOf("Results ready")).toBeLessThan(html.indexOf("Built by Esau Engineering"));
+    expect(html.indexOf("Built by Esau Engineering")).toBeLessThan(html.indexOf('href="https://ko-fi.com/petergn"'));
     expect(html.indexOf('href="https://ko-fi.com/petergn"')).toBeLessThan(html.indexOf('href="https://form.esauengineering.com/opencae-feedback"'));
     expect(html.indexOf('href="https://ko-fi.com/petergn"')).toBeLessThan(html.indexOf('href="https://github.com/esaueng/OpenCAE"'));
-    expect(html.indexOf(">github</a>")).toBeGreaterThan(html.indexOf("<b>solver</b>"));
   });
 
   test("renders decorative coffee animation elements and wave text without changing link copy", () => {
@@ -67,11 +65,8 @@ describe("BottomPanel", () => {
       <BottomPanel
         status="Results ready"
         logs={[{ message: "Ready", at: 1714000000000 }]}
-        projectName="Cantilever Demo"
-        studyName="Static Stress"
         meshStatus="Ready"
         solverStatus="Complete"
-        backendStatus="core"
         onClearLogs={() => undefined}
       />
     );
@@ -102,22 +97,22 @@ describe("BottomPanel", () => {
     expect(coffeeAnimationReplayDelayMs(2)).toBe(45000);
   });
 
-  test("shows core backend status when OpenCAE Core is selected", () => {
+  test("omits backend and verbose workspace metadata from the status strip", () => {
     const html = renderToStaticMarkup(
       <BottomPanel
         status="Ready"
         logs={[{ message: "Ready", at: 1714000000000 }]}
-        projectName="Cantilever Demo"
-        studyName="Static Stress"
         meshStatus="Ready"
         solverStatus="Idle"
-        backendStatus="core"
         onClearLogs={() => undefined}
       />
     );
 
-    expect(html).toContain('class="backend-pill"');
-    expect(html).toContain(">core</span>");
+    expect(html).not.toContain('class="backend-pill"');
+    expect(html).not.toContain("<b>project</b>");
+    expect(html).not.toContain("<b>study</b>");
+    expect(html).not.toContain("<b>mesh</b>");
+    expect(html).not.toContain("<b>solver</b>");
   });
 
   test("shows OpenCAE Core errors instead of collapsing them to ready", () => {
@@ -125,11 +120,8 @@ describe("BottomPanel", () => {
       <BottomPanel
         status="OpenCAE Core solve failed: singular matrix."
         logs={[{ message: "OpenCAE Core solve failed: singular matrix.", at: 1714000000000 }]}
-        projectName="Cantilever Demo"
-        studyName="Static Stress"
         meshStatus="Ready"
         solverStatus="Idle"
-        backendStatus="core"
         onClearLogs={() => undefined}
       />
     );
@@ -154,11 +146,8 @@ describe("BottomPanel", () => {
       <BottomPanel
         status="Could not open local project."
         logs={[{ message: "Could not open local project.", at: 1714000000000 }]}
-        projectName="Cantilever Demo"
-        studyName="Static Stress"
         meshStatus="Ready"
         solverStatus="Idle"
-        backendStatus="core"
         onClearLogs={() => undefined}
       />
     );

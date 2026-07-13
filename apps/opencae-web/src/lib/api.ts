@@ -592,6 +592,7 @@ export async function generateMesh(studyId: string, preset: MeshQuality, current
       });
       if (wasmMeshed) return wasmMeshed;
     } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") throw error;
       if (
         displayModel?.nativeCad?.format === "step" ||
         (error instanceof Error && (error.name === "MeshQualityError" || error.name === "StepGeometryError"))

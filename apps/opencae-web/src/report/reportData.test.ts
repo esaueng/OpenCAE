@@ -77,6 +77,9 @@ describe("buildReportData", () => {
     expect(data.keyResults).toContainEqual({ label: "Reaction force", value: "112.4 lbf" });
     expect(data.materials.rows[0]?.[1]).toContain("ksi");
     expect(data.materials.rows[0]?.[3]).toContain("lb/ft^3");
+    expect(data.figures.stress.legendMax).toContain("ksi");
+    expect(data.figures.stress.legendMin).toContain("ksi");
+    expect(data.figures.displacement.legendMax).toContain("in");
   });
 
   test("prefers solver-actual mesh counts and marks unresolved material values missing", () => {
@@ -135,6 +138,63 @@ describe("buildReportData", () => {
       label: "Warnings",
       value: "Small features simplified in the demo mesh preview.; Aspect ratio above 5 on 3 elements."
     });
+  });
+
+  test("reports the manufacturing process, print settings, and as-analyzed properties", () => {
+    const baseStudy = bracketDemoProject.studies[0]!;
+    const study: Study = {
+      ...baseStudy,
+      materialAssignments: [{
+        ...baseStudy.materialAssignments[0]!,
+        materialId: "mat-petg",
+        parameters: { manufacturingProcessId: "fdm", printed: true, infillDensity: 40, wallCount: 3, layerOrientation: "x" }
+      }]
+    };
+    const data = report({ study });
+
+    expect(data.manufacturing.headers).toEqual(["Material / target", "Process", "Process settings"]);
+    expect(data.manufacturing.rows[0]?.[0]).toContain("PETG");
+    expect(data.manufacturing.rows[0]?.[1]).toBe("FDM printing");
+    expect(data.manufacturing.rows[0]?.[2]).toBe("3 walls · 40% infill · X build direction");
+
+    const datasheetRow = data.materials.rows[0]!;
+    const analyzedRow = data.materials.rows[1]!;
+    expect(datasheetRow[0]).toContain("PETG");
+    expect(analyzedRow[0]).toBe("As analyzed (FDM, homogenized)");
+    expect(analyzedRow[1]).not.toBe(datasheetRow[1]);
+    expect(analyzedRow[1]).toContain("MPa");
+    expect(analyzedRow[4]).not.toBe(datasheetRow[4]);
+  });
+
+  test("marks a defaulted process as assumed and keeps solid materials to one properties row", () => {
+    const data = report();
+
+    expect(data.manufacturing.rows[0]).toEqual([
+      "Aluminum 6061 / Bracket body",
+      "CNC machining (assumed)",
+      "Solid stock · Isotropic"
+    ]);
+    expect(data.materials.rows).toHaveLength(1);
+  });
+
+  test("reports the reverse-check load capacity using the panel's target factor", () => {
+    const data = report({ targetSafetyFactor: 2 });
+
+    expect(data.loadCapacity).toEqual([
+      { label: "Current applied load", value: "500 N" },
+      { label: "Max theoretical load (at FoS 1.0)", value: "900 N" },
+      { label: "Target factor of safety", value: "2" },
+      { label: "Max load at target FoS", value: "450 N (0.9x current)" }
+    ]);
+  });
+
+  test("defaults the reverse-check target to 1.5 and omits it when the reaction force is invalid", () => {
+    const data = report();
+    expect(data.loadCapacity).toContainEqual({ label: "Target factor of safety", value: "1.5" });
+    expect(data.loadCapacity).toContainEqual({ label: "Max load at target FoS", value: "600 N (1.2x current)" });
+
+    const invalid = report({ resultSummary: { ...productionSummary, reactionForce: 0 } });
+    expect(invalid.loadCapacity).toEqual([]);
   });
 
   test("adds dynamic solver and transient rows", () => {
@@ -199,7 +259,7 @@ describe("buildReportData", () => {
     expect(data.solver).toContainEqual({ label: "Time step", value: "0.005 s" });
     expect(data.transientResults).toContainEqual({ label: "Frames", value: "11" });
     expect(data.transientResults).toContainEqual({ label: "Peak displacement", value: "0.184 mm at 0.08 s" });
-    expect(data.figures.stress.legendMax).toBe("142");
+    expect(data.figures.stress.legendMax).toBe("142 MPa");
     expect(data.figures.stress.caption).toContain("Automatically selected peak von Mises stress frame (frame 2 of 3, 0.0400 s)");
     expect(data.figures.displacement.caption).toContain("Automatically selected peak displacement magnitude frame (frame 3 of 3, 0.0800 s)");
   });

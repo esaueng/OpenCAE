@@ -14,8 +14,26 @@ function readJsonc(path: string) {
 }
 
 function createEnv(assetBody = "asset"): Env {
+  const objects = new Map<string, { bytes: Uint8Array; customMetadata: Record<string, string> }>();
   return {
-    ASSETS: { fetch: async () => new Response(assetBody, { headers: { "content-type": "text/html" } }) }
+    ASSETS: { fetch: async () => new Response(assetBody, { headers: { "content-type": "text/html" } }) },
+    PROJECT_BACKUP_RATE_LIMITER: { limit: async () => ({ success: true }) },
+    PROJECT_BACKUPS: {
+      put: async (key: string, value: ReadableStream, options: { customMetadata: Record<string, string> }) => {
+        const bytes = new Uint8Array(await new Response(value).arrayBuffer());
+        objects.set(key, { bytes, customMetadata: options.customMetadata });
+        return null;
+      },
+      get: async (key: string) => {
+        const object = objects.get(key);
+        return object ? {
+          body: new Blob([object.bytes.slice().buffer as ArrayBuffer]).stream(),
+          size: object.bytes.byteLength,
+          customMetadata: object.customMetadata
+        } : null;
+      },
+      delete: async (key: string) => { objects.delete(key); }
+    }
   } as unknown as Env;
 }
 
@@ -35,7 +53,7 @@ describe("Cloudflare local-first worker", () => {
     expect(workerSource).not.toContain("cloud-core/runs/");
   });
 
-  test("wrangler config binds only static assets (no containers, DO, or R2)", () => {
+  test("wrangler config keeps solver infrastructure retired and binds only the encrypted project-backup bucket", () => {
     const defaultConfig = readJsonc("../../../wrangler.jsonc") as {
       name?: string;
       routes?: Array<{ pattern?: string; custom_domain?: boolean }>;
@@ -50,7 +68,7 @@ describe("Cloudflare local-first worker", () => {
     expect(defaultConfig.routes).toEqual([{ pattern: "cae.esau.app", custom_domain: true }]);
     expect(defaultConfig.containers).toBeUndefined();
     expect(defaultConfig.durable_objects).toBeUndefined();
-    expect(defaultConfig.r2_buckets).toBeUndefined();
+    expect(defaultConfig.r2_buckets).toEqual([{ binding: "PROJECT_BACKUPS", bucket_name: "opencae-project-backups" }]);
     expect(defaultConfig.assets?.run_worker_first).toEqual(expect.arrayContaining(["/api/*", "/health"]));
     // Checked-in migrations break Workers Builds version uploads; the retired
     // Durable Object cleanup is a one-off manual deploy step documented in
@@ -115,6 +133,37 @@ describe("Cloudflare local-first worker", () => {
     await expect(response.json()).resolves.toMatchObject({
       error: expect.stringContaining("Simulations run in the browser")
     });
+  });
+
+  test("stores and retrieves an explicitly authorized encrypted project backup", async () => {
+    const env = createEnv();
+    const backupId = "11111111-1111-4111-8111-111111111111";
+    const token = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMN1234567890-_";
+    const encrypted = new Uint8Array(32).fill(7);
+    const put = await dispatchWorker(new Request(`https://cae.esau.app/api/project-backups/${backupId}`, {
+      method: "PUT",
+      headers: {
+        "content-type": "application/octet-stream",
+        "content-length": String(encrypted.byteLength),
+        "x-opencae-backup-token": token,
+        "x-opencae-run-id": "run-local-1"
+      },
+      body: encrypted
+    }), env);
+
+    expect(put.status).toBe(201);
+    const get = await dispatchWorker(new Request(`https://cae.esau.app/api/project-backups/${backupId}`, {
+      headers: { "x-opencae-backup-token": token }
+    }), env);
+    expect(get.status).toBe(200);
+    await expect(get.arrayBuffer()).resolves.toEqual(encrypted.buffer);
+  });
+
+  test("does not disclose encrypted backups without the capability token", async () => {
+    const backupId = "11111111-1111-4111-8111-111111111111";
+    const response = await dispatchWorker(new Request(`https://cae.esau.app/api/project-backups/${backupId}`), createEnv());
+
+    expect(response.status).toBe(401);
   });
 
   test("serves static assets for non-api routes", async () => {

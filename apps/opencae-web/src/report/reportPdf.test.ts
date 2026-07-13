@@ -34,11 +34,13 @@ describe("renderReportPdf", () => {
     empty.geometry = [];
     empty.geometryFiles.rows = [];
     empty.materials.rows = [];
+    empty.manufacturing.rows = [];
     empty.supports.rows = [];
     empty.loads.rows = [];
     empty.mesh = [];
     empty.solver = [];
     empty.results = [];
+    empty.loadCapacity = [];
     empty.diagnostics = [];
     empty.figures.stress.png = undefined;
     empty.figures.displacement.png = undefined;
@@ -80,15 +82,22 @@ function fixtureReport(): ReportData {
     geometry: [{ label: "Source", value: "Sample model: Cantilever (procedural)" }],
     geometryFiles: { headers: ["File", "Format", "Size"], rows: [["cantilever.step", "STEP", "12.0 KB"]] },
     materials: { headers: ["Material / target", "Young's modulus", "Poisson ratio", "Density", "Yield strength"], rows: [["Aluminum 6061 / Body", "68,900 MPa", "0.33", "2,700 kg/m^3", "276 MPa"]] },
+    manufacturing: { headers: ["Material / target", "Process", "Process settings"], rows: [["Aluminum 6061 / Body", "CNC machining", "Solid stock · Isotropic"]] },
     supports: { headers: ["Support", "Target"], rows: [["Fixed support", "Fixed end"]] },
     loads: { headers: ["Load", "Magnitude", "Direction", "Target"], rows: [["Force", "500 N", "[0, 0, -1]", "Free end"]] },
     mesh: [{ label: "Nodes", value: "42,381" }, { label: "Elements", value: "26,944" }, { label: "Element type", value: "Tet10" }],
     solver: rows,
     figures: {
-      stress: { title: "Von Mises stress", png: ONE_PIXEL_PNG, unavailableLabel: "Not available (--)", legendMin: "0", legendMax: "142", units: "MPa", caption: "Von Mises stress (MPa). Automatically selected peak von Mises stress frame (frame 17 of 21, 0.0800 s). Deformed shape, ×1.8 exaggeration (display only)." },
-      displacement: { title: "Displacement magnitude", png: ONE_PIXEL_PNG, unavailableLabel: "Not available (--)", legendMin: "0", legendMax: "0.184", units: "mm", caption: "Displacement magnitude (mm). Automatically selected peak displacement magnitude frame (frame 21 of 21, 0.1000 s). Deformed shape, ×1.8 exaggeration (display only)." }
+      stress: { title: "Von Mises stress", png: ONE_PIXEL_PNG, unavailableLabel: "Not available (--)", legendMin: "0 MPa", legendMax: "142 MPa", caption: "Von Mises stress (MPa). Automatically selected peak von Mises stress frame (frame 17 of 21, 0.0800 s). Deformed shape, ×1.8 exaggeration (display only)." },
+      displacement: { title: "Displacement magnitude", png: ONE_PIXEL_PNG, unavailableLabel: "Not available (--)", legendMin: "0 mm", legendMax: "0.184 mm", caption: "Displacement magnitude (mm). Automatically selected peak displacement magnitude frame (frame 21 of 21, 0.1000 s). Deformed shape, ×1.8 exaggeration (display only)." }
     },
     results: rows,
+    loadCapacity: [
+      { label: "Current applied load", value: "500 N" },
+      { label: "Max theoretical load (at FoS 1.0)", value: "900 N" },
+      { label: "Target factor of safety", value: "1.5" },
+      { label: "Max load at target FoS", value: "600 N (1.2x current)" }
+    ],
     transientResults: [],
     diagnostics: ["Fixture diagnostic."],
     includeSmoothingDisclaimer: true,

@@ -86,6 +86,13 @@ export type StepMeshResult = GeoMeshResult & {
   geometryRepair?: StepGeometryRepairReport;
   /** Present when a safe Tet10 mesh was reduced to Tet4 to stay solvable in-browser. */
   elementOrderFallback?: ElementOrderFallbackMetadata;
+  /** Present when multiple imported solids were fused into fewer volumes before meshing. */
+  multiBodyFusion?: StepMultiBodyFusionReport;
+};
+
+export type StepMultiBodyFusionReport = {
+  inputVolumeCount: number;
+  fusedVolumeCount: number;
 };
 
 export type StepGeometryInspection = {
@@ -197,7 +204,13 @@ export async function meshGeoScriptToMshV2(geoScript: string, options: MeshWasmO
  * quality floor. Tet quality is non-monotonic in size, so try the adjacent
  * coarser size as well as the two existing finer sizes.
  */
-const QUALITY_SIZE_MULTIPLIERS = [1, 3 / 2, 2 / 3, 4 / 9] as const;
+// Keep one deep-refinement rung for valid, feature-dense solids whose coarse
+// surface triangulation intersects itself during PLC recovery. The CAE load
+// test bracket (160 x 60 x 10 mm, 210 faces) fails from 12 mm through 3 mm but
+// produces a passing 18k-tet mesh at 2 mm. This rung is still guarded by the
+// existing tet/DOF limits, so genuinely large refinements cannot enter the
+// browser solver unchecked.
+const QUALITY_SIZE_MULTIPLIERS = [1, 3 / 2, 2 / 3, 4 / 9, 1 / 6] as const;
 /** Stop refining once a mesh gets this large — the solver caps DOF anyway. */
 const MAX_QUALITY_REFINEMENT_TETS = 80_000;
 /** The browser solve pipeline accepts at most 100,000 displacement DOFs. */
@@ -331,7 +344,7 @@ export async function meshStepToMshV2(stepContent: Uint8Array | string, options:
   }
 
   if (best === undefined) {
-    if (lastError instanceof Error) throw withStepGeometryAction(lastError);
+    if (lastError instanceof Error) throw diagnoseStepMeshFailure(lastError);
     throw new StepGeometryError("Gmsh could not create a tetrahedral volume mesh from the STEP solid.");
   }
   const chosen = best;
@@ -409,6 +422,25 @@ export function stepGeometryNoRepairedVolumeError(originalVolumeCount: number, t
   );
   error.name = STEP_GEOMETRY_REPAIR_LOST_VOLUME_ERROR_NAME;
   return error;
+}
+
+/**
+ * Gmsh's 3D boundary recovery reports self-intersecting surface meshes with
+ * TetGen's raw "PLC Error: A segment and a facet intersect at point" wording,
+ * which gives the user nothing actionable. Translate that failure class into
+ * an honest geometry diagnosis. The "Fix open surfaces" action is deliberately
+ * not appended: the shell is closed — its faces cross each other — so sewing
+ * advice would be wrong.
+ */
+const BOUNDARY_SELF_INTERSECTION_PATTERN = /PLC Error|segment and a facet intersect|facets intersect|self-?intersect/i;
+
+export function diagnoseStepMeshFailure(error: Error): Error {
+  if (!BOUNDARY_SELF_INTERSECTION_PATTERN.test(error.message)) return withStepGeometryAction(error);
+  return new StepGeometryError(
+    "Meshing failed because the model's surfaces pass through each other, so no valid volume boundary could be recovered. " +
+      "This usually comes from overlapping solid bodies or a self-intersecting boolean result in the source CAD; re-export the part as a single fused solid. " +
+      `(Mesher detail: ${error.message})`
+  );
 }
 
 function withStepGeometryAction(error: Error): Error {
@@ -568,6 +600,7 @@ function meshStepSession(
 ): StepMeshCandidate {
   const timings: MeshTimings = {};
   let geometryRepair: StepGeometryRepairReport | undefined;
+  let multiBodyFusion: StepMultiBodyFusionReport | undefined;
   let preferQualityRepair = false;
   timePhaseSync(timings, options, "init", totalStart, () => {
     gmsh.initialize();
@@ -596,6 +629,12 @@ function meshStepSession(
       if (options.structuralBodyBounds?.length) {
         retainStructuralStepVolumes(gmsh, options.structuralBodyBounds);
       }
+      // A STEP file exported as several touching or overlapping solids meshes
+      // per-volume into disconnected (or double-counted) tetrahedra that the
+      // solver rejects as multiple components. Fuse them into one part up
+      // front; genuinely disjoint bodies are left alone (the payload-body plan
+      // and the connected-component check own that case).
+      multiBodyFusion = fuseImportedStepVolumes(gmsh);
       const importedSurfaceCount = entityTags(gmsh, 2).length;
       const importedOpenBoundaryCurveCount = openBoundaryCurveTags(gmsh).length;
       preferQualityRepair = repairProfile === false &&
@@ -705,6 +744,7 @@ function meshStepSession(
       ...(optimizer !== undefined ? { optimizer } : {}),
       ...(elevation !== undefined ? { elevation } : {}),
       ...(geometryRepair !== undefined ? { geometryRepair } : {}),
+      ...(multiBodyFusion !== undefined ? { multiBodyFusion } : {}),
       ...(elementOrderFallback !== undefined ? { elementOrderFallback } : {}),
       ...(preferQualityRepair ? { preferQualityRepair: true } : {}),
       ...(qualityMinSICN !== undefined ? { qualityMinSICN } : {})
@@ -715,6 +755,33 @@ function meshStepSession(
   } finally {
     safeFinalize(gmsh);
   }
+}
+
+/**
+ * Fuse a multi-solid STEP import into as few volumes as OCC's boolean union
+ * can produce. Touching bodies become one conformal solid; overlapping bodies
+ * stop double-counting material. Disjoint bodies survive unchanged (the union
+ * cannot merge them), and any boolean failure falls back to the un-fused
+ * import so behavior degrades to the previous per-volume meshing.
+ */
+function fuseImportedStepVolumes(gmsh: GmshApi): StepMultiBodyFusionReport | undefined {
+  const volumeTags = entityTags(gmsh, 3);
+  if (volumeTags.length <= 1) return undefined;
+  const [firstTag, ...restTags] = volumeTags;
+  try {
+    gmsh.model.occ.fuse([3, firstTag!], restTags.flatMap((tag) => [3, tag]));
+    gmsh.model.occ.synchronize();
+  } catch {
+    try {
+      gmsh.model.occ.synchronize();
+    } catch {
+      /* leave the import as-is */
+    }
+    return undefined;
+  }
+  const fusedVolumeCount = entityTags(gmsh, 3).length;
+  if (fusedVolumeCount === 0 || fusedVolumeCount >= volumeTags.length) return undefined;
+  return { inputVolumeCount: volumeTags.length, fusedVolumeCount };
 }
 
 function retainStructuralStepVolumes(gmsh: GmshApi, structuralBounds: StepBodyBounds[]): void {

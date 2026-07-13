@@ -82,6 +82,7 @@ describe("app CSS", () => {
     const shortcutList = cssRule(".shortcut-list");
     const shortcutItem = cssRule(".shortcut-item");
     const shortcutKey = cssRule(".shortcut-key");
+    const shortcutPopover = cssRule(".shortcut-popover");
 
     expect(workflowNavButton).toMatch(/display:\s*flex/);
     expect(workflowNavButton).toMatch(/justify-content:\s*space-between/);
@@ -91,6 +92,8 @@ describe("app CSS", () => {
     expect(shortcutList).toMatch(/grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/);
     expect(shortcutItem).toMatch(/grid-template-columns:\s*auto\s+minmax\(0,\s*1fr\)/);
     expect(shortcutKey).toMatch(/font-family:\s*var\(--font-mono\)/);
+    expect(shortcutPopover).toMatch(/position:\s*absolute/);
+    expect(shortcutPopover).toMatch(/box-shadow:\s*var\(--shadow-panel\)/);
   });
 
   test("keeps light mode shared text colors above contrast requirements", () => {

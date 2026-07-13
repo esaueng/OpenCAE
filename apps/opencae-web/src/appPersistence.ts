@@ -32,6 +32,10 @@ export interface WorkspaceUiSnapshot {
   showDeformed: boolean;
   showDimensions: boolean;
   stressExaggeration: number;
+  resultFrameIndex?: number;
+  resultPlaybackFps?: number;
+  resultPlaybackReverseLoop?: boolean;
+  isStepbarCollapsed?: boolean;
   draftLoadType: LoadType;
   draftLoadValue: number;
   draftLoadDirection: LoadDirectionLabel;
@@ -143,6 +147,12 @@ export function readAutosavedWorkspace(storage = getBrowserStorage()): Autosaved
   };
 }
 
+export function localRunIdForResultsRestore(workspace: AutosavedWorkspace | null): string | null {
+  if (!workspace || workspace.projectFile.results?.fields.length) return null;
+  const runId = workspace.ui.completedRunId || workspace.ui.activeRunId;
+  return runId.startsWith("run-local-") ? runId : null;
+}
+
 export type AutosaveWriteOutcome = "full" | "slim" | "failed";
 
 /**
@@ -174,6 +184,17 @@ function slimAutosavedWorkspaceForQuota(snapshot: AutosavedWorkspace): Autosaved
 
 export function writeAutosavedUiSnapshot(snapshot: AutosavedWorkspaceUiSnapshot, storage = getBrowserStorage()): boolean {
   return writeJsonStorageItem(AUTOSAVE_UI_STORAGE_KEY, snapshot, storage);
+}
+
+export function flushAutosavedWorkspace(
+  workspace: AutosavedWorkspace,
+  uiSnapshot: AutosavedWorkspaceUiSnapshot,
+  storage = getBrowserStorage()
+): { workspace: AutosaveWriteOutcome; ui: boolean } {
+  return {
+    ui: writeAutosavedUiSnapshot(uiSnapshot, storage),
+    workspace: writeAutosavedWorkspace(workspace, storage)
+  };
 }
 
 export function scheduleAutosavedWorkspaceWrite(
@@ -413,6 +434,10 @@ function parseUiSnapshot(value: unknown): WorkspaceUiSnapshot | null {
     showDeformed: value.showDeformed === true,
     showDimensions: value.showDimensions === true,
     stressExaggeration: readFiniteNumber(value.stressExaggeration, 1.8),
+    resultFrameIndex: Math.max(0, Math.trunc(readFiniteNumber(value.resultFrameIndex, 0))),
+    resultPlaybackFps: clamp(readFiniteNumber(value.resultPlaybackFps, 12), 1, 60),
+    resultPlaybackReverseLoop: value.resultPlaybackReverseLoop === true,
+    isStepbarCollapsed: value.isStepbarCollapsed === true,
     draftLoadType: readEnum(value.draftLoadType, LOAD_TYPES, "force"),
     draftLoadValue: readFiniteNumber(value.draftLoadValue, 500),
     draftLoadDirection: readEnum(value.draftLoadDirection, LOAD_DIRECTIONS, "-Z"),
@@ -524,6 +549,15 @@ function scheduleStorageWrite(write: () => boolean, storage: StorageLike | null,
     globalThis.clearTimeout(timeoutHandle);
     if (idleHandle !== null) idleCallbacks.cancelIdleCallback?.(idleHandle);
   };
+}
+
+export function installAutosavePageHideFlush(
+  flush: () => void,
+  target: Pick<EventTarget, "addEventListener" | "removeEventListener"> | null = typeof window === "undefined" ? null : window
+): () => void {
+  if (!target) return () => undefined;
+  target.addEventListener("pagehide", flush);
+  return () => target.removeEventListener("pagehide", flush);
 }
 
 function writeJsonStorageItem(key: string, snapshot: unknown, storage: StorageLike | null): boolean {

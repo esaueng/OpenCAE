@@ -18,7 +18,10 @@ since B4a). The cloud solve infrastructure was removed in two steps:
   `cloud-core/runs/*`, the `EXPECTED_CORE_CLOUD_RUNNER_VERSION` fail-closed
   gate, and the container fetch timeouts. Retired routes now return an honest
   **HTTP 410** ("cloud solve retired — solves run locally in your browser").
-  The Worker keeps serving the SPA static assets with security headers.
+  The Worker keeps serving the SPA static assets with security headers. A
+  later, separate `PROJECT_BACKUPS` R2 binding stores only client-encrypted,
+  user-consented recovery snapshots; it does not run simulations and cannot
+  decrypt those snapshots.
 - **Container service mirror**: `services/opencae-core-cloud/` (Dockerfile,
   `RUNNER_VERSION`, contract-mirror source, its validation tests). The browser
   build now consumes OpenCAE Core directly from this monorepo's `packages/*`
@@ -93,6 +96,10 @@ since B4a). The cloud solve infrastructure was removed in two steps:
   binding is gone but the bucket and its historical run artifacts still exist
   in Cloudflare. Retention vs. export vs. deletion is an open owner decision.
   Nothing in this repo reads or writes it anymore; no data was deleted.
+- **Encrypted project recovery is separate**: `opencae-project-backups` is not
+  a solver artifact bucket. The browser asks before each overflow backup,
+  encrypts locally, retains the decryption key locally, and uploads ciphertext
+  with a 30-day retention policy.
 - **Cloudflare cleanup**: the container application and any pushed images can
   be deleted from the Cloudflare account once rollback is ruled out (manual,
   intentionally not scripted).

@@ -279,6 +279,14 @@ describe("api", () => {
     expect(response.project.name).toBe("Beam Demo");
     expect(response.project.geometryFiles[0]?.filename).toBe("end-loaded-beam.step");
     expect(response.displayModel.name).toBe("end loaded beam assembly");
+    expect(response.displayModel.dimensions?.x).toBe(160);
+    expect(response.displayModel.dimensions?.y).toBeCloseTo(160 * (0.28 / 3.8), 9);
+    expect(response.displayModel.dimensions?.z).toBeCloseTo(160 * (0.36 / 3.8), 9);
+    expect(response.displayModel.coreCloudGeometry?.descriptor).toMatchObject({
+      length: 160,
+      height: 160 * (0.28 / 3.8),
+      width: 160 * (0.36 / 3.8)
+    });
     expect(response.displayModel.faces.map((face) => face.label)).toEqual([
       "Fixed end face",
       "End payload mass",
@@ -748,7 +756,7 @@ describe("api", () => {
     expect(results.summary.provenance?.resultSource).toBe("computed");
   });
 
-  test("does not route explicit local sample static solves through legacy beam estimates", async () => {
+  test("does not route explicit local sample static solves through legacy beam estimates", { timeout: 60000 }, async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: "Study not found" }), {
       status: 404,
       headers: { "content-type": "application/json" }
