@@ -127,6 +127,56 @@ describe("STEP upload end-to-end (registry -> selection -> mesh -> attribution -
     expect(loadArea).toBeGreaterThan(fullTop - bore * 1.05);
   });
 
+  it("maps a fixed support selected on the cylindrical hole wall by its real face id", () => {
+    const holeWall = registry.faces.find((face) => face.surfaceType === "cylindrical" && face.cylinder?.interior);
+    expect(holeWall).toBeDefined();
+    const cylindricalStudy: Study = {
+      ...study,
+      namedSelections: study.namedSelections.map((selection) => selection.id === STEP_PROOF_SUPPORT_SELECTION
+        ? {
+            ...selection,
+            name: holeWall!.faceId,
+            geometryRefs: [{ ...selection.geometryRefs[0]!, entityId: holeWall!.faceId, label: "Cylindrical hole wall" }],
+            fingerprint: holeWall!.fingerprint
+          }
+        : selection)
+    };
+    const diagnostics: SelectionMappingDiagnostic[] = [];
+    const dispatchStudy = studyForCoreGeometryDispatch(cylindricalStudy, displayModel);
+    const cylindricalModel = buildCoreModelFromCloudMesh({
+      study: {
+        id: dispatchStudy.id,
+        type: "static_stress",
+        materialAssignments: dispatchStudy.materialAssignments,
+        namedSelections: dispatchStudy.namedSelections,
+        constraints: dispatchStudy.constraints,
+        loads: dispatchStudy.loads,
+        solverSettings: dispatchStudy.solverSettings as Record<string, unknown>
+      },
+      displayModel,
+      volumeMesh: artifact,
+      analysisType: "static_stress",
+      solverSettings: { elementOrder: 2 },
+      mappingDiagnostics: diagnostics
+    });
+
+    const supportDiagnostic = diagnostics.find((diagnostic) => diagnostic.role === "fixed_support");
+    expect(["bySelection", "byFace"]).toContain(supportDiagnostic?.mode);
+    expect(supportDiagnostic!.matchedFacetCount).toBeGreaterThan(0);
+    const supportSet = cylindricalModel.surfaceSets?.find((surfaceSet) => surfaceSet.name === supportDiagnostic!.surfaceSet);
+    expect(supportSet?.facets.length).toBeGreaterThan(0);
+    const supportFacetIds = new Set(supportSet!.facets);
+    const supportFacets = cylindricalModel.surfaceFacets?.filter((facet) => supportFacetIds.has(facet.id)) ?? [];
+    for (const facet of supportFacets) {
+      const center = facet.center!;
+      const radialDistance = Math.hypot(center[0] - 0.03, center[1] - 0.02);
+      expect(radialDistance).toBeGreaterThan(0.004);
+      expect(radialDistance).toBeLessThan(0.0061);
+      expect(center[2]).toBeGreaterThanOrEqual(-1e-9);
+      expect(center[2]).toBeLessThanOrEqual(DIMS_MM.z * 1e-3 + 1e-9);
+    }
+  });
+
   it("solves through the adapter with reaction equal to the applied load", { timeout: 300_000 }, () => {
     const solvableStudy = studyWithWasmMeshSummary({ study, artifact, model, mappingDiagnostics });
     expect(hasActualCoreVolumeMesh(solvableStudy, displayModel)).toBe(true);
