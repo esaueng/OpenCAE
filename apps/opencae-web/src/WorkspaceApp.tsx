@@ -24,8 +24,9 @@ import {
 import { resetDisplayModelOrientation, type RotationAxis } from "./modelOrientation";
 import { buildLocalProjectFile, suggestedProjectFilename, type LocalResultBundle, type SolverSurfaceMesh } from "./projectFile";
 import { prepareBlobSaveToDisk, saveBlobToDisk } from "./lib/fileSave";
-import { BOUNDARY_CAPTURE_REVISION, captureResultViews, type ResultViewCaptures } from "./report/captureResultViews";
+import { BOUNDARY_CAPTURE_REVISION, captureResultViews, createCaptureQueue, type CaptureQueue, type ResultViewCaptures } from "./report/captureResultViews";
 import { buildReportData, suggestedReportFilename } from "./report/reportData";
+import { pngDataUrlToBlob, suggestedResultPngFilename } from "./report/resultPngExport";
 import { buildAutosavedWorkspace, buildAutosavedWorkspaceUiSnapshot, flushAutosavedWorkspace, installAutosavePageHideFlush, localRunIdForResultsRestore, parseAutosavedWorkspacePayload, readAutosavedWorkspace, scheduleAutosavedUiSnapshotWrite, scheduleAutosavedWorkspaceWrite, WORKSPACE_LOG_LIMIT } from "./appPersistence";
 import type { AutosavedWorkspace, WorkspaceUiSnapshot } from "./appPersistence";
 import { requestPersistentBrowserStorage, restoreEncryptedCloudBackup, saveEncryptedCloudBackup } from "./cloudBackup";
@@ -157,6 +158,8 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const [runError, setRunError] = useState<string | null>(null);
   const [reportBusy, setReportBusy] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
+  const [pngExportBusy, setPngExportBusy] = useState(false);
+  const [pngExportError, setPngExportError] = useState<string | null>(null);
   const [overflowRecoveryRequest, setOverflowRecoveryRequest] = useState(0);
   const [activeRunId, setActiveRunId] = useState(restoredUi?.activeRunId || restoredResults?.activeRunId || restoredResults?.completedRunId || "run-bracket-demo-seeded");
   const [completedRunId, setCompletedRunId] = useState(restoredUi?.completedRunId || restoredResults?.completedRunId || "run-bracket-demo-seeded");
@@ -223,6 +226,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const resultPlaybackFrameControllerRef = useRef<MutableResultPlaybackFrameController | null>(null);
   const viewerInteractingRef = useRef(false);
   const viewerCaptureRef = useRef<(() => Promise<string>) | null>(null);
+  const captureQueueRef = useRef<CaptureQueue | null>(null);
   const reportCaptureInFlightRef = useRef<string | null>(null);
   // Viewer-only view-mode override for the report's boundary-conditions
   // capture. Kept separate from viewMode so flipping the viewer to model view
@@ -234,6 +238,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   if (!resultPlaybackFrameControllerRef.current) {
     resultPlaybackFrameControllerRef.current = createResultPlaybackFrameController();
   }
+  if (!captureQueueRef.current) captureQueueRef.current = createCaptureQueue();
   if (!projectActionClientIdRef.current) {
     projectActionClientIdRef.current = createProjectActionClientId();
   }
@@ -1348,6 +1353,44 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     if (capture) setViewerCaptureRevision((revision) => revision + 1);
   }, []);
 
+  async function handleExportResultPng() {
+    const field = activeResultSelectionForUi.scalarField;
+    if (!project || !field || viewMode !== "results") {
+      setPngExportError("Open a rendered result field before exporting a PNG.");
+      return;
+    }
+    const suggestedName = suggestedResultPngFilename({
+      projectName: project.name,
+      resultMode,
+      stressComponent: resultMode === "stress" ? stressComponent : undefined,
+      field
+    });
+    setPngExportBusy(true);
+    setPngExportError(null);
+    try {
+      // Acquire the handle immediately from the click gesture; WebGL capture is
+      // queued afterward because report and manual reads share one canvas.
+      const saveTarget = await prepareBlobSaveToDisk(suggestedName, {
+        description: "PNG result image",
+        accept: { "image/png": [".png"] }
+      });
+      if (saveTarget === "cancelled") return;
+      const png = await captureQueueRef.current!.enqueue(async () => {
+        const capture = viewerCaptureRef.current;
+        if (!capture) throw new Error("The 3D result view is still loading. Wait for it to appear, then export again.");
+        return capture();
+      });
+      await saveTarget.save(pngDataUrlToBlob(png));
+      pushMessage(`Exported ${suggestedName}.`);
+    } catch (error) {
+      const message = errorMessage(error, "Could not export the current result image.");
+      setPngExportError(message);
+      pushMessage(message);
+    } finally {
+      setPngExportBusy(false);
+    }
+  }
+
   const boundaryConditionCount = (study?.constraints.length ?? 0) + (study?.loads.length ?? 0);
   const hasNativeCadModel = Boolean(displayModel?.nativeCad);
   useEffect(() => {
@@ -1364,7 +1407,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     const capture = viewerCaptureRef.current;
     let cancelled = false;
     reportCaptureInFlightRef.current = runId;
-    void captureResultViews({
+    void captureQueueRef.current!.enqueue(() => captureResultViews({
       getViewMode: () => reportStateRef.current.viewMode,
       getResultMode: () => reportStateRef.current.resultMode,
       setResultMode,
@@ -1391,7 +1434,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
             })
           }
         : {})
-    }).then(async (captures) => {
+    })).then(async (captures) => {
       if (cancelled) return;
       await saveRunReportCaptures(runId, captures);
       if (cancelled || reportStateRef.current.completedRunId !== runId) return;
@@ -2119,9 +2162,12 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           runError={runError}
           runTiming={runTiming}
           onGenerateReport={handleGenerateReport}
+          onExportResultPng={handleExportResultPng}
           reportBusy={reportBusy}
           reportError={reportError}
           reportDisabled={solverRunning}
+          pngExportBusy={pngExportBusy}
+          pngExportError={pngExportError}
           sampleModel={sampleModel}
           sampleAnalysisType={sampleAnalysisType}
           draftLoadType={draftLoadType}

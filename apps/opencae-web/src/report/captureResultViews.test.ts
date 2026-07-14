@@ -1,7 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 import type { ResultField } from "@opencae/schema";
 import type { ResultMode } from "../workspaceViewTypes";
-import { BOUNDARY_CAPTURE_REVISION, captureResultViews, peakResultField } from "./captureResultViews";
+import { BOUNDARY_CAPTURE_REVISION, captureResultViews, createCaptureQueue, peakResultField } from "./captureResultViews";
 
 const staticFields = [
   { id: "stress", runId: "run", type: "stress", location: "node", values: [1], min: 1, max: 1, units: "MPa" },
@@ -18,6 +18,30 @@ const dynamicFields = [
 ] satisfies ResultField[];
 
 describe("captureResultViews", () => {
+  test("serializes automatic and manual capture tasks and continues after failures", async () => {
+    const queue = createCaptureQueue();
+    const events: string[] = [];
+    let releaseFirst: (() => void) | null = null;
+    const first = queue.enqueue(async () => {
+      events.push("automatic-start");
+      await new Promise<void>((resolve) => { releaseFirst = resolve; });
+      events.push("automatic-end");
+    });
+    const second = queue.enqueue(async () => {
+      events.push("manual-start");
+      throw new Error("capture failed");
+    });
+    const third = queue.enqueue(() => events.push("next-start"));
+
+    await Promise.resolve();
+    expect(events).toEqual(["automatic-start"]);
+    releaseFirst!();
+    await first;
+    await expect(second).rejects.toThrow("capture failed");
+    await third;
+    expect(events).toEqual(["automatic-start", "automatic-end", "manual-start", "next-start"]);
+  });
+
   test("captures each result at its rendered peak frame, then restores viewer state", async () => {
     let mode: ResultMode = "safety_factor";
     let frameIndex = 0;

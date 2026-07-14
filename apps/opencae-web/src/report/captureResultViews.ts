@@ -25,6 +25,21 @@ export interface CapturedBoundaryView {
 // cropped to its content so the figure fills its frame.
 export const BOUNDARY_CAPTURE_REVISION = 3;
 
+export interface CaptureQueue {
+  enqueue: <T>(task: () => T | Promise<T>) => Promise<T>;
+}
+
+export function createCaptureQueue(): CaptureQueue {
+  let tail: Promise<void> = Promise.resolve();
+  return {
+    enqueue: <T>(task: () => T | Promise<T>) => {
+      const result = tail.then(task, task);
+      tail = result.then(() => undefined, () => undefined);
+      return result;
+    }
+  };
+}
+
 export interface CaptureResultViewsOptions {
   getViewMode: () => ViewMode;
   getResultMode: () => ResultMode;

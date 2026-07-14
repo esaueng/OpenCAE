@@ -342,7 +342,7 @@ export function CadViewer(props: CadViewerProps) {
         </Bounds>
         <DemandOrbitControls controlsRef={controlsRef} onInteractionChange={handleViewerInteractionChange} />
         <ShiftPanControls controlsRef={controlsRef} onInteractionChange={handleViewerInteractionChange} />
-        <GizmoHelper alignment={VIEWER_GIZMO_ALIGNMENT} margin={VIEWER_GIZMO_MARGIN}>
+        <GizmoHelper alignment={VIEWER_GIZMO_ALIGNMENT} margin={VIEWER_GIZMO_MARGIN} userData={{ opencaeCaptureExclude: true }}>
           <CleanAxisGizmo
             onSelectView={(view) => setGizmoViewRequest((request) => ({ view, signal: request.signal + 1 }))}
           />
@@ -742,7 +742,9 @@ export function renderReportCapture(gl: ReportCaptureRenderer, scene: THREE.Scen
     top: orthographicCamera.top,
     zoom: orthographicCamera.zoom
   } : null;
+  const excludedObjects = captureExcludedObjects(scene);
   try {
+    for (const object of excludedObjects) object.visible = false;
     scene.background = new THREE.Color(REPORT_CAPTURE_BACKGROUND);
     const bounds = reportCaptureBounds(scene);
     if (bounds && perspectiveCamera) {
@@ -784,6 +786,7 @@ export function renderReportCapture(gl: ReportCaptureRenderer, scene: THREE.Scen
     return croppedReportCapturePng(gl.domElement) ?? gl.domElement.toDataURL("image/png");
   } finally {
     scene.background = previousBackground;
+    for (const object of excludedObjects) object.visible = true;
     camera.position.copy(previousPosition);
     camera.quaternion.copy(previousQuaternion);
     camera.up.copy(previousUp);
@@ -804,6 +807,14 @@ export function renderReportCapture(gl: ReportCaptureRenderer, scene: THREE.Scen
     camera.updateMatrixWorld();
     gl.render(scene, camera);
   }
+}
+
+export function captureExcludedObjects(root: THREE.Object3D): THREE.Object3D[] {
+  const excluded: THREE.Object3D[] = [];
+  root.traverse((object) => {
+    if (object.visible && object.userData.opencaeCaptureExclude === true) excluded.push(object);
+  });
+  return excluded;
 }
 
 // Bounds of the visible rendered content only: Box3.setFromObject would include
