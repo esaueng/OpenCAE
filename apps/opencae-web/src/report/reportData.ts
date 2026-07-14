@@ -4,7 +4,7 @@ import {
   effectiveMaterialProperties,
   manufacturingProcessForId,
   normalizeManufacturingParameters,
-  starterMaterials,
+  resolveMaterial,
   type ManufacturingParameters,
   type ManufacturingProcess
 } from "@opencae/materials";
@@ -166,8 +166,8 @@ export function buildReportData(input: BuildReportDataInput): ReportData {
       ]),
       emptyMessage: "No geometry file recorded."
     },
-    materials: materialTable(input.study, input.unitSystem, criticalLayerAxis),
-    manufacturing: manufacturingTable(input.study),
+    materials: materialTable(input.study, input.unitSystem, criticalLayerAxis, input.project.customMaterials),
+    manufacturing: manufacturingTable(input.study, input.project.customMaterials),
     supports: supportTable(input.study),
     loads: loadTable(input.study, input.unitSystem),
     mesh: [
@@ -240,8 +240,8 @@ function buildModalReportData(input: BuildReportDataInput, summary: ModalResultS
       rows: input.project.geometryFiles.map((geometry) => [geometry.filename, geometryFormat(geometry.filename), geometryFileSize(geometry.metadata)]),
       emptyMessage: "No geometry file recorded."
     },
-    materials: materialTable(input.study, input.unitSystem, criticalLayerAxis),
-    manufacturing: manufacturingTable(input.study),
+    materials: materialTable(input.study, input.unitSystem, criticalLayerAxis, input.project.customMaterials),
+    manufacturing: manufacturingTable(input.study, input.project.customMaterials),
     supports: supportTable(input.study),
     loads: { headers: ["Load", "Magnitude", "Direction", "Target"], rows: [], emptyMessage: "Applied loads are not used in modal analysis." },
     mesh: [
@@ -335,13 +335,18 @@ function geometryRows(project: Project, displayModel: DisplayModel | null): Repo
   ];
 }
 
-function materialTable(study: Study, unitSystem: UnitSystem, criticalLayerAxis: "x" | "y" | "z" | undefined): ReportTable {
+function materialTable(
+  study: Study,
+  unitSystem: UnitSystem,
+  criticalLayerAxis: "x" | "y" | "z" | undefined,
+  customMaterials: Project["customMaterials"]
+): ReportTable {
   return {
     headers: ["Material / target", "Young's modulus", "Poisson ratio", "Density", "Yield strength"],
     rows: study.materialAssignments.flatMap((assignment) => {
-      const material = starterMaterials.find((candidate) => candidate.id === assignment.materialId);
+      const material = tryResolveReportMaterial(assignment.materialId, customMaterials);
       const datasheetRow = [
-        `${material?.name ?? assignment.materialId} / ${selectionLabel(study, assignment.selectionRef)}`,
+        `${material ? reportMaterialName(material) : assignment.materialId} / ${selectionLabel(study, assignment.selectionRef)}`,
         material ? formatMaterialStress(material.youngsModulus, unitSystem) : MISSING,
         material ? String(material.poissonRatio) : MISSING,
         material ? formatDensity(material.density, "kg/m^3", unitSystem) : MISSING,
@@ -366,12 +371,12 @@ function materialTable(study: Study, unitSystem: UnitSystem, criticalLayerAxis: 
   };
 }
 
-function manufacturingTable(study: Study): ReportTable {
+function manufacturingTable(study: Study, customMaterials: Project["customMaterials"]): ReportTable {
   return {
     headers: ["Material / target", "Process", "Process settings"],
     rows: study.materialAssignments.map((assignment) => {
-      const material = starterMaterials.find((candidate) => candidate.id === assignment.materialId);
-      const target = `${material?.name ?? assignment.materialId} / ${selectionLabel(study, assignment.selectionRef)}`;
+      const material = tryResolveReportMaterial(assignment.materialId, customMaterials);
+      const target = `${material ? reportMaterialName(material) : assignment.materialId} / ${selectionLabel(study, assignment.selectionRef)}`;
       if (!material) return [target, MISSING, MISSING];
       const process = assignmentProcess(material, assignment.parameters);
       if (!process) return [target, MISSING, MISSING];
@@ -385,6 +390,20 @@ function manufacturingTable(study: Study): ReportTable {
     }),
     emptyMessage: "No material assignments recorded."
   };
+}
+
+function tryResolveReportMaterial(materialId: string, customMaterials: Project["customMaterials"]): Material | undefined {
+  try {
+    return resolveMaterial(materialId, customMaterials);
+  } catch {
+    return undefined;
+  }
+}
+
+function reportMaterialName(material: Material): string {
+  return (material as Material & { verification?: string }).verification === "user_supplied_unverified"
+    ? `${material.name} (user-supplied, unverified)`
+    : material.name;
 }
 
 function assignmentProcess(material: Material, parameters: Record<string, unknown> | undefined): ManufacturingProcess | undefined {

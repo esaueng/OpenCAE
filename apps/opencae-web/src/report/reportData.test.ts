@@ -94,6 +94,28 @@ describe("buildReportData", () => {
     expect(data.materials.rows[0]).toEqual(expect.arrayContaining(["--"]));
   });
 
+  test("resolves and labels project custom materials as user-supplied and unverified", () => {
+    const custom = {
+      id: "0ac4dbda-1d37-43c0-b3ac-9d1d2cc28e84",
+      name: "Shop aluminum",
+      category: "metal" as const,
+      youngsModulus: 70e9,
+      poissonRatio: 0.33,
+      density: 2710,
+      yieldStrength: 290e6,
+      verification: "user_supplied_unverified" as const
+    };
+    const project = { ...bracketDemoProject, customMaterials: [custom] } satisfies Project;
+    const study = {
+      ...bracketDemoProject.studies[0]!,
+      materialAssignments: [{ ...bracketDemoProject.studies[0]!.materialAssignments[0]!, materialId: custom.id }]
+    } satisfies Study;
+    const data = report({ project, study });
+
+    expect(data.materials.rows[0]?.[0]).toContain("Shop aluminum (user-supplied, unverified)");
+    expect(data.materials.rows[0]?.[1]).toContain("70,000 MPa");
+  });
+
   test("keeps the demo report honest about procedural sample geometry and mesh warnings", () => {
     const project: Project = {
       ...bracketDemoProject,

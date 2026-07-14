@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CoreCloudResultProvenanceSchema, DynamicSolverSettingsSchema, MaterialSchema, ProjectSchema, ResultFieldSchema, ResultSummarySchema, RunEventSchema, SolverBackendSchema, StudyRunSchema, classifyResultProvenance, runStatusForResultProvenance } from "./index";
+import { CoreCloudResultProvenanceSchema, CustomMaterialSchema, DynamicSolverSettingsSchema, MaterialSchema, ProjectSchema, ResultFieldSchema, ResultSummarySchema, RunEventSchema, SolverBackendSchema, StudyRunSchema, classifyResultProvenance, runStatusForResultProvenance } from "./index";
 
 describe("ProjectSchema", () => {
   it("accepts the minimum local project shape", () => {
@@ -15,6 +15,32 @@ describe("ProjectSchema", () => {
     });
 
     expect(parsed.name).toBe("Test Project");
+  });
+
+  it("round-trips project-scoped custom materials in canonical SI units", () => {
+    const customMaterial = {
+      id: "0ac4dbda-1d37-43c0-b3ac-9d1d2cc28e84",
+      name: "Shop aluminum",
+      category: "metal" as const,
+      youngsModulus: 70e9,
+      poissonRatio: 0.33,
+      density: 2710,
+      yieldStrength: 290e6,
+      verification: "user_supplied_unverified" as const
+    };
+    const parsed = ProjectSchema.parse({
+      id: "project-custom-material",
+      name: "Custom material project",
+      schemaVersion: "0.3.0",
+      unitSystem: "US",
+      geometryFiles: [],
+      customMaterials: [customMaterial],
+      studies: [],
+      createdAt: "2026-04-24T12:00:00.000Z",
+      updatedAt: "2026-04-24T12:00:00.000Z"
+    });
+
+    expect(parsed.customMaterials?.[0]).toEqual(customMaterial);
   });
 
   it("round-trips manufacturing process and 3D print parameters on material assignments", () => {
@@ -587,6 +613,18 @@ describe("MaterialSchema", () => {
 
   it("accepts physically valid materials", () => {
     expect(MaterialSchema.parse(aluminum).id).toBe("mat-aluminum-6061");
+  });
+
+  it("requires UUID-backed custom materials to be marked unverified", () => {
+    const custom = {
+      ...aluminum,
+      id: "0ac4dbda-1d37-43c0-b3ac-9d1d2cc28e84",
+      category: "metal" as const,
+      verification: "user_supplied_unverified" as const
+    };
+    expect(CustomMaterialSchema.parse(custom).verification).toBe("user_supplied_unverified");
+    expect(() => CustomMaterialSchema.parse({ ...custom, id: "shop-aluminum" })).toThrow();
+    expect(() => CustomMaterialSchema.parse({ ...custom, verification: "verified" })).toThrow();
   });
 
   it("rejects non-positive stiffness, density, and strength", () => {

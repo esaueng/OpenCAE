@@ -30,6 +30,23 @@ describe("projectFile", () => {
     expect(payload.displayModel).toBe(displayModel);
   });
 
+  test("keeps project custom materials in the version-2 portable container", () => {
+    const custom = {
+      id: "0ac4dbda-1d37-43c0-b3ac-9d1d2cc28e84",
+      name: "Shop aluminum",
+      category: "metal" as const,
+      youngsModulus: 70e9,
+      poissonRatio: 0.33,
+      density: 2710,
+      yieldStrength: 290e6,
+      verification: "user_supplied_unverified" as const
+    };
+    const payload = buildLocalProjectFile({ ...project, customMaterials: [custom] }, displayModel, "2026-04-24T13:00:00.000Z");
+
+    expect(payload.version).toBe(2);
+    expect(payload.project.customMaterials).toEqual([custom]);
+  });
+
   test("keeps saved model orientation in the local project payload", () => {
     const orientedDisplayModel = { ...displayModel, orientation: { x: 0, y: 90, z: 180 } } satisfies DisplayModel;
     const payload = buildLocalProjectFile(project, orientedDisplayModel, "2026-04-24T13:00:00.000Z");

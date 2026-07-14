@@ -9,7 +9,7 @@ describe("validateStaticStressStudy", () => {
     name: "Static Stress",
     type: "static_stress",
     geometryScope: [],
-    materialAssignments: [{ id: "assign", materialId: "mat", selectionRef: "body", status: "complete" }],
+    materialAssignments: [{ id: "assign", materialId: "mat-aluminum-6061", selectionRef: "body", status: "complete" }],
     contacts: [],
     constraints: [{ id: "fixed", type: "fixed", selectionRef: "face", parameters: {}, status: "complete" }],
     namedSelections: [
@@ -285,6 +285,30 @@ describe("validateStaticStressStudy", () => {
 
   it("preserves static validation through the generic validator", () => {
     expect(validateStudy(readyStudy)).toEqual([]);
+  });
+
+  it("resolves project custom materials and reports dangling material IDs clearly", () => {
+    const custom = {
+      id: "0ac4dbda-1d37-43c0-b3ac-9d1d2cc28e84",
+      name: "Shop aluminum",
+      category: "metal" as const,
+      youngsModulus: 70e9,
+      poissonRatio: 0.33,
+      density: 2710,
+      yieldStrength: 290e6,
+      verification: "user_supplied_unverified" as const
+    };
+    const customStudy = {
+      ...readyStudy,
+      materialAssignments: [{ ...readyStudy.materialAssignments[0]!, materialId: custom.id }]
+    };
+    const unknownStudy = {
+      ...readyStudy,
+      materialAssignments: [{ ...readyStudy.materialAssignments[0]!, materialId: "deleted-custom-material" }]
+    };
+
+    expect(validateStudy(customStudy, [custom])).toEqual([]);
+    expect(validateStudy(unknownStudy).map((diagnostic) => diagnostic.message)).toContain('Unknown material "deleted-custom-material".');
   });
 
   it("validates dynamic structural time settings and required setup", () => {

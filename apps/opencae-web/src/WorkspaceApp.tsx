@@ -1,11 +1,11 @@
 import { lazy, startTransition, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { DynamicSolverSettingsSchema, isModalResultSummary, isRunResultReadyStatus, ModalSolverSettingsSchema } from "@opencae/schema";
-import type { Constraint, DisplayFace, DisplayModel, DynamicSolverSettings, Load, MeshQuality, ModalSolverSettings, NamedSelection, Project, ResultField, ResultRenderBounds, ResultSummary, RunEvent, RunTimingEstimate, SimulationFidelity, Study } from "@opencae/schema";
+import type { Constraint, CustomMaterial, DisplayFace, DisplayModel, DynamicSolverSettings, Load, MeshQuality, ModalSolverSettings, NamedSelection, Project, ResultField, ResultRenderBounds, ResultSummary, RunEvent, RunTimingEstimate, SimulationFidelity, Study } from "@opencae/schema";
 import { RotateCcw, Save, X } from "lucide-react";
 import { addLoad, addSupport, assignMaterial, cancelRun, createProject, generateMesh, getResults, importLocalProject, isStepGeometryMeshFailure, loadSampleProject, probeUploadedStepRepairAfterMeshFailure, renameProject, repairUploadedStepModel, runSimulation, saveRunReportCaptures, STEP_REPAIR_UNAVAILABLE_MESSAGE, subscribeToRun, updateStudy as saveStudyPatch, uploadedStepRepairProbeDecision, uploadModel, type SampleAnalysisType, type SampleModelId } from "./lib/api";
 import { cancelWasmMeshing, type WasmMeshPhaseProgress } from "./lib/wasmMeshing";
 import { resolveSolverBackend } from "./workers/opencaeCoreSolve";
-import { manufacturingProcessForId, normalizeManufacturingParameters, starterMaterials } from "@opencae/materials";
+import { manufacturingProcessForId, normalizeManufacturingParameters, resolveMaterial } from "@opencae/materials";
 import { BottomPanel, KeyboardShortcutGuide, type WorkspaceLogEntry } from "./components/BottomPanel";
 import { OpenCaeLogoMark } from "./components/OpenCaeLogoMark";
 import { RightPanel } from "./components/RightPanel";
@@ -57,7 +57,7 @@ import {
 } from "./resultPlaybackTimeline";
 import { preparePlaybackFramesInWorker } from "./workers/performanceClient";
 import type { WorkspaceInitialAction } from "./App";
-import type { PayloadObjectSelection, PrintLayerOrientation, ResultMode, ResultPlaybackFrameController, StressComponent, ThemeMode, ViewerLoadMarker, ViewerSupportMarker, ViewMode } from "./workspaceViewTypes";
+import { DEFAULT_SECTION_PLANE, type PayloadObjectSelection, type PrintLayerOrientation, type ResultMode, type ResultPlaybackFrameController, type SectionPlaneState, type StressComponent, type ThemeMode, type ViewerLoadMarker, type ViewerSupportMarker, type ViewMode } from "./workspaceViewTypes";
 
 const lazyCadViewerImport = () => import("./components/CadViewer").then((module) => ({ default: module.CadViewer }));
 const CadViewer = lazy(lazyCadViewerImport);
@@ -141,6 +141,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const [resultRenderBounds, setResultRenderBounds] = useState<ResultRenderBounds | null>(null);
   const [showDeformed, setShowDeformed] = useState(restoredUi?.showDeformed ?? false);
   const [showDimensions, setShowDimensions] = useState(restoredUi?.showDimensions ?? false);
+  const [sectionPlane, setSectionPlane] = useState<SectionPlaneState>(restoredUi?.sectionPlane ?? { ...DEFAULT_SECTION_PLANE });
   const [stressExaggeration, setStressExaggeration] = useState(restoredUi?.stressExaggeration ?? 1.8);
   const [fitSignal, setFitSignal] = useState(0);
   const [viewAxis, setViewAxis] = useState<RotationAxis | null>(null);
@@ -235,12 +236,16 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const assignedPrintLayerOrientation = useMemo<PrintLayerOrientation | null>(() => {
     const assignment = study?.materialAssignments[0];
     if (!assignment) return null;
-    const material = starterMaterials.find((candidate) => candidate.id === assignment.materialId);
-    if (!material) return null;
+    let material;
+    try {
+      material = resolveMaterial(assignment.materialId, project?.customMaterials);
+    } catch {
+      return null;
+    }
     const parameters = normalizeManufacturingParameters(material, assignment.parameters ?? {});
     const process = parameters.manufacturingProcessId ? manufacturingProcessForId(parameters.manufacturingProcessId) : undefined;
     return process?.settingsKind === "fdm" || process?.settingsKind === "build_direction" ? parameters.layerOrientation ?? "z" : null;
-  }, [study?.materialAssignments]);
+  }, [project?.customMaterials, study?.materialAssignments]);
   const printLayerOrientation = printLayerOrientationForViewer(assignedPrintLayerOrientation, previewPrintLayerOrientation);
   const selectedFace = useMemo(() => displayModel?.faces.find((face) => face.id === selectedFaceId) ?? null, [displayModel, selectedFaceId]);
   const displayUnitSystem = project?.unitSystem ?? "SI";
@@ -776,6 +781,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     stressComponent,
     showDeformed,
     showDimensions,
+    sectionPlane,
     stressExaggeration,
     resultFrameIndex,
     resultPlaybackFps,
@@ -816,6 +822,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     selectedFaceId,
     selectedLoadPoint,
     selectedPayloadObject,
+    sectionPlane,
     showDeformed,
     showDimensions,
     status,
@@ -1376,6 +1383,42 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     if (nextStep) navigateToStep(nextStep);
   }
 
+  function handleSaveCustomMaterial(material: CustomMaterial) {
+    const currentProject = projectRef.current;
+    if (!currentProject) return;
+    const existing = currentProject.customMaterials?.find((candidate) => candidate.id === material.id);
+    const assigned = currentProject.studies.some((candidate) => candidate.materialAssignments.some((assignment) => assignment.materialId === material.id));
+    const customMaterials = existing
+      ? (currentProject.customMaterials ?? []).map((candidate) => candidate.id === material.id ? material : candidate)
+      : [...(currentProject.customMaterials ?? []), material];
+    recordUndoSnapshot(currentProject);
+    setProject({ ...currentProject, customMaterials, updatedAt: new Date().toISOString() });
+    if (existing && assigned) {
+      invalidateCompletedRunState();
+      pushMessage("Previous results cleared: an assigned custom material was edited.");
+    }
+    pushMessage(existing ? `Custom material ${material.name} updated.` : `Custom material ${material.name} created.`);
+  }
+
+  function handleDeleteCustomMaterial(materialId: string) {
+    const currentProject = projectRef.current;
+    if (!currentProject) return;
+    const assigned = currentProject.studies.some((candidate) => candidate.materialAssignments.some((assignment) => assignment.materialId === materialId));
+    if (assigned) {
+      pushMessage("Assigned custom materials cannot be deleted.");
+      return;
+    }
+    const material = currentProject.customMaterials?.find((candidate) => candidate.id === materialId);
+    if (!material) return;
+    recordUndoSnapshot(currentProject);
+    setProject({
+      ...currentProject,
+      customMaterials: currentProject.customMaterials?.filter((candidate) => candidate.id !== materialId),
+      updatedAt: new Date().toISOString()
+    });
+    pushMessage(`Custom material ${material.name} deleted.`);
+  }
+
   function handleGenerateMesh(preset: MeshQuality) {
     if (!project || !study) return;
     const sourceProject = project;
@@ -1731,6 +1774,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       response = await runSimulation(study.id, study, displayModel ?? undefined, {
         onRunStatus: pushMessage,
         resultRenderBounds,
+        customMaterials: project?.customMaterials,
         // A-M4 local-first meshing: when the run meshes geometry before
         // solving, persist the meshed study (with its stored artifact) so
         // later runs reuse it instead of re-meshing.
@@ -1973,6 +2017,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
             showDeformed={showDeformed}
             resultPlaybackPlaying={resultPlaybackPlaying}
             showDimensions={showDimensions}
+            sectionPlane={sectionPlane}
             stressExaggeration={stressExaggeration}
             resultFields={visibleResultFieldsForUi}
             resultProbes={resultProbes}
@@ -2007,6 +2052,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           stressComponent={stressComponent}
           showDeformed={showDeformed}
           showDimensions={showDimensions}
+          sectionPlane={sectionPlane}
           stressExaggeration={stressExaggeration}
           resultSummary={resultSummaryForUi}
           resultFields={resultFieldsForUi}
@@ -2048,10 +2094,13 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           onStressComponentChange={setStressComponent}
           onToggleDeformed={() => setShowDeformed((value) => !value)}
           onToggleDimensions={() => setShowDimensions((value) => !value)}
+          onSectionPlaneChange={setSectionPlane}
           onStressExaggerationChange={setStressExaggeration}
           onAssignMaterial={(materialId, parameters) =>
-            updateStudy(assignMaterial(study.id, materialId, parameters, study), shouldAutoAdvanceAfterMaterialAssignment() ? "supports" : undefined)
+            updateStudy(assignMaterial(study.id, materialId, parameters, study, project?.customMaterials), shouldAutoAdvanceAfterMaterialAssignment() ? "supports" : undefined)
           }
+          onSaveCustomMaterial={handleSaveCustomMaterial}
+          onDeleteCustomMaterial={handleDeleteCustomMaterial}
           onPreviewPrintLayerOrientation={setPreviewPrintLayerOrientation}
           onAddSupport={(selectionRef) => updateStudy(addSupport(study.id, selectionRef, study))}
           onUpdateSupport={(support: Constraint) =>

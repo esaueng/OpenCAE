@@ -966,6 +966,47 @@ img {
   border-radius: var(--radius-sm);
 }
 
+.material-unverified,
+.material-editor-profile {
+  color: var(--color-warning, #d59b3a);
+  font-size: var(--fs-sm);
+}
+
+.material-editor {
+  display: grid;
+  gap: var(--sp-3);
+}
+
+.material-editor label {
+  display: grid;
+  gap: 6px;
+  color: var(--color-text-muted);
+  font-size: var(--fs-sm);
+}
+
+.material-editor input,
+.material-editor select {
+  width: 100%;
+}
+
+.material-editor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-top: var(--sp-4);
+}
+
+.material-editor-error {
+  margin: 0;
+  color: var(--color-danger);
+}
+
+.section-plane-controls {
+  display: grid;
+  gap: var(--sp-3);
+  margin: var(--sp-3) 0 var(--sp-4);
+}
+
 @media (max-width: 860px) {
   .simulation-picker-layout,
   .material-library-layout {
