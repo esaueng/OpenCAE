@@ -138,6 +138,9 @@ describe("OpenCAE Core browser solver adapter", () => {
       "displacement-surface",
       "safety-factor",
       "safety-factor-surface",
+      "stress-max-shear-surface",
+      "stress-principal-max-surface",
+      "stress-principal-min-surface",
       "stress-surface",
       "stress-von-mises-element"
     ]);

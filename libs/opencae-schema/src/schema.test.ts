@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CoreCloudResultProvenanceSchema, CustomMaterialSchema, DynamicSolverSettingsSchema, MaterialSchema, ProjectSchema, ResultFieldSchema, ResultSummarySchema, RunEventSchema, SolverBackendSchema, StudyRunSchema, classifyResultProvenance, runStatusForResultProvenance } from "./index";
+import { CoreCloudResultProvenanceSchema, CustomMaterialSchema, DynamicSolverSettingsSchema, MaterialSchema, ProjectSchema, ResultFieldSchema, ResultSummarySchema, RunEventSchema, RunVariantResultSchema, SolverBackendSchema, StudyRunSchema, classifyResultProvenance, runStatusForResultProvenance } from "./index";
 
 describe("ProjectSchema", () => {
   it("accepts the minimum local project shape", () => {
@@ -134,6 +134,109 @@ describe("ProjectSchema", () => {
       integrationMethod: "newmark_average_acceleration",
       loadProfile: "ramp"
     });
+    expect(parsed.studies[0]).toMatchObject({
+      loadCases: [{ id: "case-default", name: "Default", enabled: true, loadIds: [] }],
+      loadCombinations: []
+    });
+  });
+
+  it("migrates legacy structural loads into one default case", () => {
+    const parsed = ProjectSchema.parse({
+      id: "project-cases",
+      name: "Legacy cases",
+      schemaVersion: "0.2.0",
+      unitSystem: "SI",
+      geometryFiles: [],
+      studies: [{
+        id: "study-cases",
+        projectId: "project-cases",
+        name: "Static",
+        type: "static_stress",
+        geometryScope: [],
+        materialAssignments: [],
+        namedSelections: [],
+        contacts: [],
+        constraints: [],
+        loads: [{ id: "load-a", type: "force", selectionRef: "face-a", parameters: {}, status: "complete" }],
+        meshSettings: { preset: "medium", status: "not_started" },
+        solverSettings: {},
+        validation: [],
+        runs: []
+      }],
+      createdAt: "2026-04-24T12:00:00.000Z",
+      updatedAt: "2026-04-24T12:00:00.000Z"
+    });
+
+    expect(parsed.studies[0]).toMatchObject({
+      loadCases: [{ id: "case-default", name: "Default", loadIds: ["load-a"] }],
+      loadCombinations: []
+    });
+  });
+
+  it("enforces a one-case load partition and static-only finite combinations", () => {
+    const project = {
+      id: "project-cases",
+      name: "Cases",
+      schemaVersion: "0.3.0",
+      unitSystem: "SI" as const,
+      geometryFiles: [],
+      studies: [{
+        id: "study-cases",
+        projectId: "project-cases",
+        name: "Static",
+        type: "static_stress" as const,
+        geometryScope: [],
+        materialAssignments: [],
+        namedSelections: [],
+        contacts: [],
+        constraints: [],
+        loads: [{ id: "load-a", type: "force" as const, selectionRef: "face-a", parameters: {}, status: "complete" as const }],
+        loadCases: [
+          { id: "case-a", name: "A", enabled: true, loadIds: ["load-a"] },
+          { id: "case-b", name: "B", enabled: true, loadIds: ["load-a"] }
+        ],
+        loadCombinations: [{ id: "combo", name: "A-B", enabled: true, factors: [{ caseId: "case-a", factor: 1 }, { caseId: "case-b", factor: -1 }] }],
+        meshSettings: { preset: "medium" as const, status: "not_started" as const },
+        solverSettings: {},
+        validation: [],
+        runs: []
+      }],
+      createdAt: "2026-04-24T12:00:00.000Z",
+      updatedAt: "2026-04-24T12:00:00.000Z"
+    };
+    const duplicate = ProjectSchema.safeParse(project);
+    expect(duplicate.success).toBe(false);
+    if (!duplicate.success) expect(duplicate.error.issues.some((issue) => issue.message.includes("2 load cases"))).toBe(true);
+
+    const dynamic = structuredClone(project);
+    dynamic.studies[0]!.type = "dynamic_structural" as "static_stress";
+    const dynamicCombination = ProjectSchema.safeParse(dynamic);
+    expect(dynamicCombination.success).toBe(false);
+    if (!dynamicCombination.success) expect(dynamicCombination.error.issues.some((issue) => issue.message.includes("Dynamic load combinations"))).toBe(true);
+  });
+
+  it("parses run variants and governing envelope indices", () => {
+    const summary = {
+      maxStress: 42,
+      maxStressUnits: "MPa",
+      maxDisplacement: 0.25,
+      maxDisplacementUnits: "mm",
+      safetyFactor: 2,
+      reactionForce: 500,
+      reactionForceUnits: "N"
+    };
+    expect(RunVariantResultSchema.parse({
+      id: "variant-envelope",
+      name: "Envelope",
+      kind: "envelope",
+      summary,
+      fields: [],
+      governingVariantIndices: {
+        variantIds: ["case-a", "combo-a-b"],
+        stress: [0, 1],
+        displacement: [1, 0]
+      }
+    }).governingVariantIndices?.stress).toEqual([0, 1]);
   });
 
   it("accepts modal studies and defaults to six requested modes", () => {

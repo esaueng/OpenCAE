@@ -348,7 +348,7 @@ api.post("/api/studies/:studyId/validate", async (request, reply) => {
   const study = db.getStudy(studyId);
   if (!study) return reply.code(404).send({ error: "Study not found" });
   const project = db.getProject(study.projectId);
-  const diagnostics = validateStaticStressStudy(study, project?.customMaterials).map((diagnostic) => diagnostic.message);
+  const diagnostics = validateStudy(study, project?.customMaterials).map((diagnostic) => diagnostic.message);
   return { ready: diagnostics.length === 0, diagnostics };
 });
 
@@ -414,7 +414,11 @@ api.post("/api/studies/:studyId/loads", async (request, reply) => {
     parameters: { value: body?.value ?? 500, units: unitsForLoadType(type), direction: body?.direction ?? [0, 0, -1], ...(body?.directionMode ? { directionMode: body.directionMode } : {}), ...(body?.applicationPoint ? { applicationPoint: body.applicationPoint } : {}), ...(body?.payloadObject ? { payloadObject: body.payloadObject } : {}), ...(type === "gravity" && body?.payloadMaterialId ? { payloadMaterialId: body.payloadMaterialId } : {}), ...(type === "gravity" && Number.isFinite(payloadVolumeM3) ? { payloadVolumeM3 } : {}), ...(type === "gravity" && body?.payloadMassMode ? { payloadMassMode: body.payloadMassMode } : {}) },
     status: "complete"
   };
-  const next = { ...study, loads: [...study.loads, load] };
+  const loadCases = study.type === "modal_analysis" ? undefined : (study.loadCases?.length
+    ? study.loadCases
+    : [{ id: "case-default", name: "Default", enabled: true, loadIds: study.loads.map((item) => item.id) }])
+      .map((loadCase, index) => index === 0 ? { ...loadCase, loadIds: [...loadCase.loadIds, load.id] } : loadCase);
+  const next = { ...study, loads: [...study.loads, load], ...(loadCases ? { loadCases } : {}) } as Study;
   const loadDiagnostics = validateStaticStressStudy(next).filter((diagnostic) => diagnostic.id.includes(load.id));
   if (loadDiagnostics.length) {
     return reply.code(400).send({ error: "Invalid load.", diagnostics: loadDiagnostics });

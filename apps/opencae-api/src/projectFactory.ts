@@ -68,6 +68,8 @@ export function createStaticStressStudy(project: Project, displayModel: DisplayM
     contacts: [],
     constraints: [],
     loads: [],
+    loadCases: [defaultLoadCase()],
+    loadCombinations: [],
     meshSettings: {
       preset: "medium",
       status: "not_started"
@@ -99,6 +101,8 @@ export function createDynamicStructuralStudy(project: Project, displayModel: Dis
     contacts: [],
     constraints: [],
     loads: [],
+    loadCases: [defaultLoadCase()],
+    loadCombinations: [],
     meshSettings: {
       preset: "medium",
       status: "not_started"
@@ -202,6 +206,9 @@ export function attachUploadedModelToProject(
     namedSelections: namedSelectionsForDisplayModel(bodyLabel, options.displayModel),
     constraints: [],
     loads: [],
+    ...((study.type === "static_stress" || study.type === "dynamic_structural")
+      ? { loadCases: [defaultLoadCase()], loadCombinations: [] }
+      : {}),
     meshSettings: {
       ...study.meshSettings,
       status: "not_started" as const,
@@ -304,6 +311,7 @@ export function createSampleProject(
       fingerprint: `${face.id}-${sampleId}-v1`
     };
   });
+  const sampleLoads = sampleLoadsFor(sampleId, templateStudy.loads, displayModel, meta.displayName);
   const sampleStudyBase = {
     ...templateStudy,
     id: studyId,
@@ -319,7 +327,9 @@ export function createSampleProject(
         : []),
       ...faceSelections
     ],
-    loads: sampleLoadsFor(sampleId, templateStudy.loads, displayModel, meta.displayName)
+    loads: sampleLoads,
+    loadCases: [defaultLoadCase(sampleLoads.map((load) => load.id))],
+    loadCombinations: []
   };
   const sampleStudy: Project["studies"][number] = analysisType === "dynamic_structural"
     ? {
@@ -369,6 +379,10 @@ export function createSampleProject(
     createdAt: options.now,
     updatedAt: options.now
   };
+}
+
+function defaultLoadCase(loadIds: string[] = []) {
+  return { id: "case-default", name: "Default", enabled: true, loadIds };
 }
 
 function sampleRunsFor(

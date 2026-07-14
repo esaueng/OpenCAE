@@ -14,6 +14,8 @@ import {
   DEFAULT_DYNAMIC_MS_PER_STEP,
   dynamicIntegrationSteps,
   estimateDynamicRuntime,
+  solveDynamicVariantsWithCorePipeline,
+  solveStaticVariantsWithCorePipeline,
   solveStudyModelWithCorePipeline,
   type SolveProgressEvent
 } from "./index";
@@ -156,6 +158,91 @@ describe("dynamic runtime guards", () => {
     expect(outcome.ok).toBe(false);
     if (outcome.ok) return;
     expect(outcome.error.code).toBe("max-dofs-exceeded");
+  });
+});
+
+describe("run variant pipelines", () => {
+  test("solves static cases once and derives signed combinations from tensor fields", () => {
+    const model = fixtureModel("beam-static");
+    const baseStep = model.steps[0];
+    const baseLoad = model.loads[0];
+    if (!baseStep || baseStep.type !== "staticLinear" || !baseLoad) throw new Error("Expected static fixture step and load.");
+    const secondLoad = { ...baseLoad, name: `${baseLoad.name}-second` };
+    model.loads.push(secondLoad);
+    model.steps = [
+      { ...baseStep, name: "loadCase:a", loads: [baseLoad.name] },
+      { ...baseStep, name: "loadCase:b", loads: [secondLoad.name] }
+    ];
+
+    const outcome = solveStaticVariantsWithCorePipeline({
+      model,
+      cases: [{ id: "a", stepIndex: 0 }, { id: "b", stepIndex: 1 }],
+      combinations: [{ id: "signed", factors: [{ caseId: "a", factor: 1 }, { caseId: "b", factor: -0.5 }] }],
+      limits: BROWSER_SOLVE_LIMITS
+    });
+
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.cases).toHaveLength(2);
+    expect(outcome.combinations).toHaveLength(1);
+    expect(outcome.cases[0]?.result.diagnostics.some((entry) => (entry as { id?: unknown }).id === "browser-solve-limits")).toBe(true);
+    expect(outcome.combinations[0]?.result.fields.map((field) => field.component)).toEqual(expect.arrayContaining(["von_mises", "principal_max", "principal_min", "max_shear"]));
+  });
+
+  test("streams dynamic cases in order while retaining only the first completed payload", () => {
+    const model = fixtureModel("beam-dynamic");
+    const baseStep = model.steps[0];
+    const baseLoad = model.loads[0];
+    if (!baseStep || baseStep.type !== "dynamicLinear" || !baseLoad) throw new Error("Expected dynamic fixture step and load.");
+    const secondLoad = { ...baseLoad, name: `${baseLoad.name}-second` };
+    model.loads.push(secondLoad);
+    model.steps = [
+      { ...baseStep, name: "loadCase:a", loads: [baseLoad.name], endTime: 0.01, timeStep: 0.005, outputInterval: 0.005 },
+      { ...baseStep, name: "loadCase:b", loads: [secondLoad.name], endTime: 0.01, timeStep: 0.005, outputInterval: 0.005 }
+    ];
+    const streamed: string[] = [];
+
+    const outcome = solveDynamicVariantsWithCorePipeline({
+      model,
+      cases: [{ id: "a", stepIndex: 0 }, { id: "b", stepIndex: 1 }],
+      solverSettings: { startTime: 0, endTime: 0.01, timeStep: 0.005, outputInterval: 0.005 },
+      limits: BROWSER_SOLVE_LIMITS,
+      onCaseComplete: (entry) => streamed.push(entry.id)
+    });
+
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(streamed).toEqual(["a", "b"]);
+    expect(outcome.cases.map((entry) => entry.id)).toEqual(["a"]);
+    expect(outcome.cases[0]?.result.diagnostics.some((entry) => (entry as { id?: unknown }).id === "browser-solve-limits")).toBe(true);
+  });
+
+  test("cancels a dynamic batch after an already-streamed case without reporting success", () => {
+    const model = fixtureModel("beam-dynamic");
+    const baseStep = model.steps[0];
+    const baseLoad = model.loads[0];
+    if (!baseStep || baseStep.type !== "dynamicLinear" || !baseLoad) throw new Error("Expected dynamic fixture step and load.");
+    const secondLoad = { ...baseLoad, name: `${baseLoad.name}-cancel-second` };
+    model.loads.push(secondLoad);
+    model.steps = [
+      { ...baseStep, name: "loadCase:a", loads: [baseLoad.name], endTime: 0.01, timeStep: 0.005, outputInterval: 0.005 },
+      { ...baseStep, name: "loadCase:b", loads: [secondLoad.name], endTime: 0.01, timeStep: 0.005, outputInterval: 0.005 }
+    ];
+    const streamed: string[] = [];
+
+    const outcome = solveDynamicVariantsWithCorePipeline({
+      model,
+      cases: [{ id: "a", stepIndex: 0 }, { id: "b", stepIndex: 1 }],
+      solverSettings: { startTime: 0, endTime: 0.01, timeStep: 0.005, outputInterval: 0.005 },
+      hooks: { shouldCancel: () => streamed.length === 1 },
+      onCaseComplete: (entry) => streamed.push(entry.id)
+    });
+
+    expect(streamed).toEqual(["a"]);
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) return;
+    expect(outcome.error.code).toBe("cancelled");
+    expect(outcome.caseId).toBe("b");
   });
 });
 

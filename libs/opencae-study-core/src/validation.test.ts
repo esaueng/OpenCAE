@@ -66,6 +66,24 @@ describe("validateStaticStressStudy", () => {
     ]);
   });
 
+  it("requires each load to belong to exactly one structurally shared load case", () => {
+    const study: Study = {
+      ...readyStudy,
+      loadCases: [
+        { id: "case-a", name: "Case A", enabled: false, loadIds: ["force", "missing"] },
+        { id: "case-b", name: "Case B", enabled: false, loadIds: ["force"] }
+      ],
+      loadCombinations: [{ id: "combo", name: "Bad combo", enabled: true, factors: [{ caseId: "missing-case", factor: 1 }] }]
+    };
+
+    expect(validateStaticStressStudy(study).map((item) => item.message)).toEqual(expect.arrayContaining([
+      "Load case Case A references unknown load missing.",
+      "Load force belongs to more than one load case.",
+      "Enable at least one non-empty load case.",
+      "Combination Bad combo references unknown load case missing-case."
+    ]));
+  });
+
   it("rejects a zero-length load direction", () => {
     const study = {
       ...readyStudy,
@@ -340,6 +358,25 @@ describe("validateStaticStressStudy", () => {
       "Dynamic output interval must be greater than zero and no smaller than the time step.",
       "Dynamic damping ratio cannot be negative."
     ]);
+  });
+
+  it("rejects combinations on dynamic studies", () => {
+    const dynamicStudy: Study = {
+      ...readyStudy,
+      type: "dynamic_structural",
+      loadCases: [{ id: "case-default", name: "Default", enabled: true, loadIds: ["force"] }],
+      loadCombinations: [{ id: "combo", name: "Not supported", enabled: true, factors: [{ caseId: "case-default", factor: 1 }] }],
+      solverSettings: {
+        startTime: 0,
+        endTime: 0.1,
+        timeStep: 0.01,
+        outputInterval: 0.01,
+        dampingRatio: 0.02,
+        integrationMethod: "newmark_average_acceleration"
+      }
+    };
+
+    expect(validateStudy(dynamicStudy).map((item) => item.message)).toContain("Dynamic load combinations are not supported.");
   });
 
   it("rejects dynamic time settings that request an excessive number of integration steps", () => {

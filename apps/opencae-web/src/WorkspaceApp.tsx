@@ -1,8 +1,8 @@
 import { lazy, startTransition, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { DynamicSolverSettingsSchema, isModalResultSummary, isRunResultReadyStatus, ModalSolverSettingsSchema } from "@opencae/schema";
-import type { Constraint, CustomMaterial, DisplayFace, DisplayModel, DynamicSolverSettings, Load, MeshQuality, ModalSolverSettings, NamedSelection, Project, ResultField, ResultRenderBounds, ResultSummary, RunEvent, RunTimingEstimate, SimulationFidelity, Study } from "@opencae/schema";
+import type { Constraint, CustomMaterial, DisplayFace, DisplayModel, DynamicSolverSettings, Load, MeshQuality, ModalSolverSettings, NamedSelection, Project, ResultField, ResultRenderBounds, ResultSummary, RunEvent, RunTimingEstimate, RunVariantRef, RunVariantResult, SimulationFidelity, Study } from "@opencae/schema";
 import { RotateCcw, Save, X } from "lucide-react";
-import { addLoad, addSupport, assignMaterial, cancelRun, createProject, generateMesh, getResults, importLocalProject, isStepGeometryMeshFailure, loadSampleProject, probeUploadedStepRepairAfterMeshFailure, renameProject, repairUploadedStepModel, runSimulation, saveRunReportCaptures, STEP_REPAIR_UNAVAILABLE_MESSAGE, subscribeToRun, updateStudy as saveStudyPatch, uploadedStepRepairProbeDecision, uploadModel, type SampleAnalysisType, type SampleModelId } from "./lib/api";
+import { addLoad, addSupport, assignMaterial, cancelRun, createProject, generateMesh, getResults, getRunVariant, importLocalProject, isStepGeometryMeshFailure, loadSampleProject, probeUploadedStepRepairAfterMeshFailure, renameProject, repairUploadedStepModel, runSimulation, saveRunReportCaptures, STEP_REPAIR_UNAVAILABLE_MESSAGE, subscribeToRun, updateStudy as saveStudyPatch, uploadedStepRepairProbeDecision, uploadModel, type SampleAnalysisType, type SampleModelId } from "./lib/api";
 import { cancelWasmMeshing, type WasmMeshPhaseProgress } from "./lib/wasmMeshing";
 import { resolveSolverBackend } from "./workers/opencaeCoreSolve";
 import { manufacturingProcessForId, normalizeManufacturingParameters, resolveMaterial } from "@opencae/materials";
@@ -45,7 +45,7 @@ import { hasLegacyStepUploadFaces, hasUnresolvedStepFaceSelections, healStepFace
 import { stepGeometryMetadataForProject, stepGeometryNeedsRepair } from "./stepGeometryState";
 import { createLocalDynamicStructuralStudy, createLocalModalStudy, createLocalStaticStressStudy } from "./localProjectFactory";
 import { createPackedResultPlaybackCache, createResultFrameCache, hasDynamicPlaybackFrames, solverMeshSummaryFromResults, synthesizeModalPhaseFields, withDerivedSurfaceSafetyFactorFields, type SolverMeshSummary } from "./resultFields";
-import { appendResultProbe, MAX_RESULT_PROBES, resolveResultProbe, resultProbeTopologySignature, selectActiveResultField, type ResultProbeAnchor, type ResultProbePin } from "./resultSelection";
+import { appendResultProbe, governingVariantIdForProbe, MAX_RESULT_PROBES, resolveResultProbe, resultProbeTopologySignature, selectActiveResultField, type ResultProbeAnchor, type ResultProbePin } from "./resultSelection";
 import { packResultFieldsForPlayback, packedPreparedPlaybackFrameOrdinal, playbackFieldsForResultMode, playbackMemoryBudgetBytes, type PackedPreparedPlaybackCache, type PreparedPlaybackFrameCache } from "./resultPlaybackCache";
 import {
   advancePlaybackTimeline,
@@ -165,6 +165,11 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const [resultFields, setResultFields] = useState<ResultField[]>(() => restoredResults
     ? withDerivedSurfaceSafetyFactorFields(restoredResults)
     : []);
+  const [resultVariants, setResultVariants] = useState<RunVariantResult[]>(restoredResults?.variants ?? []);
+  const [resultVariantRefs, setResultVariantRefs] = useState<RunVariantRef[]>(() => restoredResults?.variantRefs
+    ?? restoredResults?.variants?.map(({ id, name, kind, caseId, combinationId }) => ({ id, name, kind, caseId, combinationId }))
+    ?? []);
+  const [activeResultVariantId, setActiveResultVariantId] = useState(restoredResults?.activeVariantId ?? restoredResults?.variants?.[0]?.id ?? "");
   const [resultSurfaceMesh, setResultSurfaceMesh] = useState<SolverSurfaceMesh | undefined>(restoredResults?.surfaceMesh);
   const [solverMeshSummary, setSolverMeshSummary] = useState<SolverMeshSummary | null>(restoredResults?.solverMeshSummary ?? null);
   const [reportCaptures, setReportCaptures] = useState<{ runId: string; captures: ResultViewCaptures } | null>(() => {
@@ -273,6 +278,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const resultPlaybackCacheKey = useMemo(() => [
     completedRunId,
     activeRunId,
+    activeResultVariantId || "no-variant",
     displayModelForUi?.id ?? "no-model",
     displayModelForUi?.nativeCad?.contentBase64?.length ?? displayModelForUi?.visualMesh?.contentBase64?.length ?? 0,
     resultMode,
@@ -285,7 +291,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     resultFieldsSignature,
     resultSurfaceMesh?.id ?? "no-surface",
     resultFrameCache.frameIndexes.join(",")
-  ].join("|"), [activeRunId, completedRunId, displayModelForUi, displayUnitSystem, resultFieldsSignature, resultSurfaceMesh?.id, resultFrameCache.frameIndexes, resultMode, selectedModeIndex, showDeformed, stressComponent, stressExaggeration, study?.meshSettings.preset]);
+  ].join("|"), [activeResultVariantId, activeRunId, completedRunId, displayModelForUi, displayUnitSystem, resultFieldsSignature, resultSurfaceMesh?.id, resultFrameCache.frameIndexes, resultMode, selectedModeIndex, showDeformed, stressComponent, stressExaggeration, study?.meshSettings.preset]);
   const visibleResultFieldsForUi = useMemo(
     () => {
       if (DEBUG_RESULT_FRAME_CACHE_ONLY) {
@@ -310,11 +316,18 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     frameIndex: resultFrameIndex,
     modeIndex: selectedModeIndex
   }), [resultFrameIndex, resultMode, resultSurfaceMesh, selectedModeIndex, stressComponent, visibleResultFieldsForUi]);
+  const activeEnvelopeVariant = resultVariants.find((variant) => variant.id === activeResultVariantId && variant.kind === "envelope");
   const resolvedResultProbesForUi = useMemo(() => resultProbes.flatMap((probe) => {
     const resolved = resolveResultProbe(probe, activeResultSelectionForUi.scalarField, resultSurfaceMesh);
-    return resolved ? [resolved] : [];
-  }), [activeResultSelectionForUi.scalarField, resultProbes, resultSurfaceMesh]);
-  const resultProbeTopologyKey = resultProbeTopologySignature(project?.id, completedRunId, displayModel?.id, resultSurfaceMesh);
+    if (!resolved) return [];
+    const governingMode = resultMode === "displacement" ? "displacement" : resultMode === "stress" ? "stress" : undefined;
+    const governingId = governingMode
+      ? governingVariantIdForProbe(probe, activeEnvelopeVariant?.governingVariantIndices, governingMode)
+      : undefined;
+    const governingName = governingId ? resultVariantRefs.find((reference) => reference.id === governingId)?.name ?? governingId : undefined;
+    return [{ ...resolved, ...(governingName ? { governingVariantName: governingName } : {}) }];
+  }), [activeEnvelopeVariant?.governingVariantIndices, activeResultSelectionForUi.scalarField, resultMode, resultProbes, resultSurfaceMesh, resultVariantRefs]);
+  const resultProbeTopologyKey = resultProbeTopologySignature(project?.id, completedRunId, displayModel?.id, resultSurfaceMesh, activeResultVariantId);
   // In-browser wasm meshing has no cooperative cancel; terminate the mesh
   // worker if the workspace unmounts mid-mesh (no-op when idle or flag off).
   useEffect(() => () => cancelWasmMeshing("Meshing cancelled: workspace closed."), []);
@@ -408,6 +421,9 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   function applyReloadedResults(results: Awaited<ReturnType<typeof getResults>>, runId: string, message: string) {
     setResultSummary(results.summary);
     setResultFields(withDerivedSurfaceSafetyFactorFields(results));
+    setResultVariants(results.variants ?? []);
+    setResultVariantRefs(resultVariantRefsForBundle(results));
+    setActiveResultVariantId(results.activeVariantId ?? results.variants?.[0]?.id ?? "");
     setResultSurfaceMesh(results.surfaceMesh);
     setSolverMeshSummary(solverMeshSummaryFromResults(results));
     setReportCaptures(results.reportCaptures ? { runId, captures: results.reportCaptures } : null);
@@ -892,6 +908,9 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       completedRunId,
       summary: resultSummary,
       fields: resultFields,
+      ...(resultVariants.length ? { variants: resultVariants } : {}),
+      ...(resultVariantRefs.length ? { variantRefs: resultVariantRefs } : {}),
+      ...(activeResultVariantId ? { activeVariantId: activeResultVariantId } : {}),
       ...(resultSurfaceMesh ? { surfaceMesh: resultSurfaceMesh } : {}),
       ...(solverMeshSummary ? { solverMeshSummary } : {}),
       ...(reportCaptures?.runId === completedRunId ? { reportCaptures: reportCaptures.captures } : {})
@@ -1031,6 +1050,9 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         completedRunId,
         summary: resultSummary,
         fields: resultFields,
+        ...(resultVariants.length ? { variants: resultVariants } : {}),
+        ...(resultVariantRefs.length ? { variantRefs: resultVariantRefs } : {}),
+        ...(activeResultVariantId ? { activeVariantId: activeResultVariantId } : {}),
         ...(resultSurfaceMesh ? { surfaceMesh: resultSurfaceMesh } : {}),
         ...(solverMeshSummary ? { solverMeshSummary } : {}),
         ...(reportCaptures?.runId === completedRunId ? { reportCaptures: reportCaptures.captures } : {})
@@ -1038,6 +1060,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       ui: autosaveUiSnapshot
     }), undefined, AUTOSAVE_HEAVY_WRITE_DELAY_MS, notifyAutosaveWriteFailure, notifyAutosaveDegraded);
   }, [
+    activeResultVariantId,
     activeRunId,
     activeStep,
     completedRunId,
@@ -1051,6 +1074,8 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     resultFields,
     resultSurfaceMesh,
     resultSummary,
+    resultVariantRefs,
+    resultVariants,
     reportCaptures,
     runProgress,
     sampleAnalysisType,
@@ -1108,6 +1133,9 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     if (response.results?.fields.length) {
       setResultSummary(response.results.summary);
       setResultFields(withDerivedSurfaceSafetyFactorFields(response.results));
+      setResultVariants(response.results.variants ?? []);
+      setResultVariantRefs(resultVariantRefsForBundle(response.results));
+      setActiveResultVariantId(response.results.activeVariantId ?? response.results.variants?.[0]?.id ?? "");
       setResultSurfaceMesh(response.results.surfaceMesh);
       setSolverMeshSummary(response.results.solverMeshSummary ?? null);
       const restoredRunId = response.results.completedRunId ?? response.results.activeRunId ?? latestCompletedRunId(response.project.studies[0] ?? null, "") ?? "";
@@ -1128,6 +1156,9 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       setViewMode("model");
       setResultSummary(null);
       setResultFields([]);
+      setResultVariants([]);
+      setResultVariantRefs([]);
+      setActiveResultVariantId("");
       setResultSurfaceMesh(undefined);
       setSolverMeshSummary(null);
       setReportCaptures(null);
@@ -1244,6 +1275,9 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         completedRunId,
         summary: resultSummary,
         fields: resultFields,
+        ...(resultVariants.length ? { variants: resultVariants } : {}),
+        ...(resultVariantRefs.length ? { variantRefs: resultVariantRefs } : {}),
+        ...(activeResultVariantId ? { activeVariantId: activeResultVariantId } : {}),
         ...(resultSurfaceMesh ? { surfaceMesh: resultSurfaceMesh } : {}),
         ...(solverMeshSummary ? { solverMeshSummary } : {}),
         ...(reportCaptures?.runId === completedRunId ? { reportCaptures: reportCaptures.captures } : {})
@@ -1529,8 +1563,9 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       parameters: { value, units: unitsForLoadType(type), direction: directionVectorForLabel(direction, face, displayModel ?? undefined), directionMode: direction, ...(applicationPoint ? { applicationPoint } : {}), ...(payloadObject ? { payloadObject } : {}), ...(type === "gravity" ? payloadMetadata : {}) },
       status: "complete"
     };
+    const loadCases = study.type === "modal_analysis" ? undefined : loadCasesWithAddedLoad(study, load.id);
     await updateStudy(
-      saveStudyPatch(study.id, { namedSelections: nextSelections, loads: [...study.loads, load] }, "Load added.", study)
+      saveStudyPatch(study.id, { namedSelections: nextSelections, loads: [...study.loads, load], ...(loadCases ? { loadCases } : {}) }, "Load added.", study)
     );
   }
 
@@ -1613,6 +1648,9 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     setActiveRunId("");
     setRunProgress(0);
     setResultFields([]);
+    setResultVariants([]);
+    setResultVariantRefs([]);
+    setActiveResultVariantId("");
     setResultSurfaceMesh(undefined);
     setSolverMeshSummary(null);
     setResultFrameIndex(0);
@@ -1759,6 +1797,35 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     }
   }
 
+  async function handleResultVariantChange(variantId: string) {
+    if (!completedRunId || variantId === activeResultVariantId) return;
+    try {
+      const inMemory = resultVariants.find((variant) => variant.id === variantId);
+      const variant = inMemory ?? await getRunVariant(completedRunId, variantId);
+      const withSafetyFactor = withDerivedSurfaceSafetyFactorFields({
+        summary: variant.summary,
+        fields: variant.fields
+      });
+      setResultSummary(variant.summary);
+      setResultFields(withSafetyFactor);
+      setActiveResultVariantId(variant.id);
+      if (resultVariantRefs.find((reference) => reference.id === variant.id)?.persistedSeparately) {
+        // Dynamic cases are deliberately one-at-a-time in memory; their full
+        // transient payloads remain separate IndexedDB records.
+        setResultVariants([variant]);
+      }
+      setResultFrameIndex(0);
+      setResultPlaybackFramePosition(0);
+      setResultPlaybackPlaying(false);
+      setRunError(null);
+      pushMessage(`Showing ${variant.name}.`);
+    } catch (error) {
+      const message = errorMessage(error, "Could not load the selected result variant.");
+      setRunError(message);
+      pushMessage(message);
+    }
+  }
+
   async function handleRunSimulation() {
     if (!study) return;
     if (!effectiveCanRunSimulation) {
@@ -1821,6 +1888,9 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           }
           setResultSummary(results.summary);
           setResultFields(withDerivedSurfaceSafetyFactorFields(results));
+          setResultVariants(results.variants ?? []);
+          setResultVariantRefs(resultVariantRefsForBundle(results));
+          setActiveResultVariantId(results.activeVariantId ?? results.variants?.[0]?.id ?? "");
           setResultSurfaceMesh(results.surfaceMesh);
           setSolverMeshSummary(solverMeshSummaryFromResults(results));
           setReportCaptures(results.reportCaptures ? { runId: response.run.id, captures: results.reportCaptures } : null);
@@ -2056,6 +2126,9 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           stressExaggeration={stressExaggeration}
           resultSummary={resultSummaryForUi}
           resultFields={resultFieldsForUi}
+          resultVariants={resultVariantRefs}
+          activeResultVariantId={activeResultVariantId}
+          onResultVariantChange={handleResultVariantChange}
           resultProbes={resolvedResultProbesForUi}
           resultProbeLimitReached={resultProbeLimitReached}
           onRemoveResultProbe={handleRemoveResultProbe}
@@ -2155,7 +2228,15 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           }
           onPreviewLoadEdit={setPreviewLoadEdit}
           onRemoveLoad={(loadId) =>
-            updateStudy(saveStudyPatch(study.id, { loads: study.loads.filter((item) => item.id !== loadId) }, "Load removed.", study))
+            updateStudy(saveStudyPatch(study.id, {
+              loads: study.loads.filter((item) => item.id !== loadId),
+              ...(study.type === "modal_analysis" ? {} : {
+                loadCases: structuralLoadCases(study).map((loadCase) => ({ ...loadCase, loadIds: loadCase.loadIds.filter((id) => id !== loadId) }))
+              })
+            }, "Load removed.", study))
+          }
+          onLoadCasesChange={(loadCases, loadCombinations) =>
+            updateStudy(saveStudyPatch(study.id, { loadCases, loadCombinations }, "Load cases updated.", study))
           }
           onGenerateMesh={handleGenerateMesh}
           onCancelMesh={handleCancelMesh}
@@ -2439,6 +2520,28 @@ async function saveProjectToLocalDisk(project: Project, displayModel: DisplayMod
     accept: { "application/json": [".json", ".opencae"] }
   });
   return outcome === "saved" ? savedAt : null;
+}
+
+function resultVariantRefsForBundle(results: Pick<LocalResultBundle, "variants" | "variantRefs">): RunVariantRef[] {
+  return results.variantRefs ?? results.variants?.map((variant) => ({
+    id: variant.id,
+    name: variant.name,
+    kind: variant.kind,
+    ...(variant.caseId ? { caseId: variant.caseId } : {}),
+    ...(variant.combinationId ? { combinationId: variant.combinationId } : {})
+  })) ?? [];
+}
+
+function structuralLoadCases(study: Extract<Study, { type: "static_stress" | "dynamic_structural" }>) {
+  return study.loadCases?.length
+    ? study.loadCases
+    : [{ id: "case-default", name: "Default", enabled: true, loadIds: study.loads.map((load) => load.id) }];
+}
+
+function loadCasesWithAddedLoad(study: Extract<Study, { type: "static_stress" | "dynamic_structural" }>, loadId: string) {
+  return structuralLoadCases(study).map((loadCase, index) => index === 0
+    ? { ...loadCase, loadIds: [...loadCase.loadIds, loadId] }
+    : loadCase);
 }
 
 function isAbortError(error: unknown): error is Error {

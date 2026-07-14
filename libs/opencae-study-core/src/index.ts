@@ -59,6 +59,7 @@ export function validateStaticStressStudy(study: Study, customMaterials: readonl
   diagnostics.push(...materialProcessDiagnostics(study, customMaterials));
   if (study.constraints.length === 0) diagnostics.push(issue("validation-support", "Choose where the part is held fixed."));
   if (study.loads.length === 0) diagnostics.push(issue("validation-load", "Choose where force, pressure, or payload weight is applied."));
+  diagnostics.push(...structuralVariantDiagnostics(study));
   for (const load of study.loads) {
     const selection = study.namedSelections.find((item) => item.id === load.selectionRef);
     if (!selection || selection.entityType !== "face") {
@@ -112,6 +113,7 @@ export function validateDynamicStructuralStudy(study: Study, customMaterials: re
     }
   }
   if (study.loads.length === 0) diagnostics.push(issue("validation-load", "Choose where force, pressure, or payload weight is applied."));
+  diagnostics.push(...structuralVariantDiagnostics(study));
   if (study.meshSettings.status !== "complete") diagnostics.push(issue("validation-mesh", "Generate the mesh before running."));
   if (study.constraints.length === 0 && solverSettings.allowFreeMotion !== true) {
     diagnostics.push(issue("validation-dynamic-support", "Add at least one support or enable free motion for the dynamic run."));
@@ -129,6 +131,51 @@ export function validateDynamicStructuralStudy(study: Study, customMaterials: re
   }
   if (!(solverSettings.dampingRatio >= 0)) {
     diagnostics.push(issue("validation-dynamic-damping", "Dynamic damping ratio cannot be negative."));
+  }
+  return diagnostics;
+}
+
+function structuralVariantDiagnostics(study: Study): Diagnostic[] {
+  if (study.type !== "static_stress" && study.type !== "dynamic_structural") return [];
+  const loadCases = study.loadCases;
+  if (loadCases === undefined) return []; // Legacy in-memory studies behave as one synthesized Default case.
+  if (!loadCases.length) return [issue("validation-load-case-required", "Add at least one load case.")];
+  const diagnostics: Diagnostic[] = [];
+  const caseIds = new Set<string>();
+  const assignmentCounts = new Map(study.loads.map((load) => [load.id, 0]));
+  for (const loadCase of loadCases) {
+    if (caseIds.has(loadCase.id)) diagnostics.push(issue(`validation-load-case-duplicate-${loadCase.id}`, `Load case ID ${loadCase.id} is duplicated.`));
+    caseIds.add(loadCase.id);
+    for (const loadId of loadCase.loadIds) {
+      const count = assignmentCounts.get(loadId);
+      if (count === undefined) {
+        diagnostics.push(issue(`validation-load-case-unknown-load-${loadCase.id}-${loadId}`, `Load case ${loadCase.name} references unknown load ${loadId}.`));
+      } else {
+        assignmentCounts.set(loadId, count + 1);
+      }
+    }
+  }
+  for (const [loadId, count] of assignmentCounts) {
+    if (count === 0) diagnostics.push(issue(`validation-load-case-unassigned-${loadId}`, `Load ${loadId} must belong to exactly one load case.`));
+    if (count > 1) diagnostics.push(issue(`validation-load-case-repeated-${loadId}`, `Load ${loadId} belongs to more than one load case.`));
+  }
+  if (study.loads.length > 0 && !loadCases.some((loadCase) => loadCase.enabled && loadCase.loadIds.length > 0)) {
+    diagnostics.push(issue("validation-load-case-enabled", "Enable at least one non-empty load case."));
+  }
+  const combinations = study.loadCombinations ?? [];
+  if (study.type === "dynamic_structural" && combinations.length) {
+    diagnostics.push(issue("validation-dynamic-combinations", "Dynamic load combinations are not supported."));
+    return diagnostics;
+  }
+  for (const combination of combinations) {
+    for (const factor of combination.factors) {
+      if (!caseIds.has(factor.caseId)) {
+        diagnostics.push(issue(`validation-combination-case-${combination.id}-${factor.caseId}`, `Combination ${combination.name} references unknown load case ${factor.caseId}.`));
+      }
+      if (!Number.isFinite(factor.factor)) {
+        diagnostics.push(issue(`validation-combination-factor-${combination.id}-${factor.caseId}`, `Combination ${combination.name} has a non-finite factor.`));
+      }
+    }
   }
   return diagnostics;
 }
