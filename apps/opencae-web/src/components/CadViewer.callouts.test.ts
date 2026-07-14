@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import * as THREE from "three";
-import { beamPayloadSelectionForTarget, faceIdForPlacementSnap, faceSnapAxesForDisplayModel, loadGlyphLabelPosition, loadGlyphSurfacePoint, pointForPlacementSnap, shouldCreateUploadedFacePlaceholder, shouldShowModelHitLabel, stepFaceIdFromPickObject, supportGlyphAnchor, supportMarkerAnchor } from "./CadViewer";
+import { beamPayloadSelectionForTarget, faceIdForPlacementSnap, faceSnapAxesForDisplayModel, holeSupportGlyphGeometry, loadGlyphLabelPosition, loadGlyphSurfacePoint, pointForPlacementSnap, shouldCreateUploadedFacePlaceholder, shouldShowModelHitLabel, stepFaceIdFromPickObject, supportGlyphAnchor, supportMarkerAnchor } from "./CadViewer";
 
 describe("CadViewer callouts", () => {
   test("does not create placeholder faces after the STEP registry is live", () => {
@@ -17,6 +17,32 @@ describe("CadViewer callouts", () => {
 
     expect(stepFaceIdFromPickObject(child)).toBe("step-face-hole");
     expect(stepFaceIdFromPickObject(new THREE.Mesh())).toBeNull();
+  });
+
+  test("builds a rod marker through an internal cylindrical support", () => {
+    const face = {
+      id: "step-face-hole",
+      label: "Cylindrical hole wall F7",
+      color: "#8b949e",
+      center: [0.2, -0.1, 0.3] as [number, number, number],
+      normal: [0, 0, 0] as [number, number, number],
+      stressValue: 0,
+      surfaceType: "cylindrical" as const,
+      surfaceAxis: [0, 0, 2] as [number, number, number],
+      surfaceRadius: 0.12,
+      surfaceLength: 0.4,
+      interiorSurface: true
+    };
+
+    const geometry = holeSupportGlyphGeometry(face, 0.5)!;
+
+    expect(geometry.axis).toEqual([0, 0, 1]);
+    expect(geometry.shaftRadius).toBeLessThan(face.surfaceRadius);
+    expect(geometry.collarRadius).toBeLessThan(face.surfaceRadius);
+    expect(geometry.shaftLength).toBeGreaterThan(face.surfaceLength);
+    expect(geometry.negativeEnd).toEqual([0.2, -0.1, 0.3 - geometry.shaftLength / 2]);
+    expect(geometry.positiveEnd).toEqual([0.2, -0.1, 0.3 + geometry.shaftLength / 2]);
+    expect(holeSupportGlyphGeometry({ ...face, interiorSurface: false }, 0.5)).toBeNull();
   });
 
   test("uses the real cantilever fixed face as the support callout anchor", () => {
