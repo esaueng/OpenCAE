@@ -210,6 +210,27 @@ describe("OpenCAE API server", () => {
     }
   });
 
+  test("imports project files larger than the general API body limit", async () => {
+    const api = await buildApi();
+    const sample = await api.inject({ method: "GET", url: "/api/sample-project" });
+    const template = sample.json().project as Record<string, unknown>;
+    const response = await api.inject({
+      method: "POST",
+      url: "/api/projects/import",
+      remoteAddress: "203.0.113.26",
+      payload: {
+        project: template,
+        // Saved dynamic projects legitimately carry result frames well past
+        // Fastify's general 5 MB request ceiling. Keep the larger allowance
+        // isolated to the local-project import route.
+        padding: "x".repeat(5_100_000)
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().project.id).toBe(template.id);
+  });
+
   test("imported local estimate results are not marked as complete production runs", async () => {
     const api = await buildApi();
     const sample = await api.inject({ method: "GET", url: "/api/sample-project" });
