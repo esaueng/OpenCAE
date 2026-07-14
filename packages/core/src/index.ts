@@ -1,6 +1,7 @@
 export const OPENCAE_CORE_VERSION = "0.1.5";
 export type {
   BoundaryConditionJson,
+  BodyForceDensityLoadJson,
   BodyGravityLoadJson,
   CoordinateSystemJson,
   DisplacementComponent,
@@ -11,6 +12,7 @@ export type {
   ElementBlockJson,
   ElementType,
   FixedBoundaryConditionJson,
+  EquivalentBoltPreloadLoadJson,
   IsotropicLinearElasticMaterialJson,
   LoadJson,
   MeshConnectionJson,
@@ -37,7 +39,9 @@ export type {
   StepJson,
   SurfaceFacetJson,
   SurfaceForceLoadJson,
+  SurfaceTractionLoadJson,
   SurfaceSetJson,
+  RemoteForceLoadJson,
   Tet10ElementBlockJson,
   Tet4ElementBlockJson,
   ValidationIssue,
@@ -86,7 +90,10 @@ export {
   orphanNodes,
   surfaceArea,
   surfaceNormalAverage,
-  tet4Volume
+  TET10_HRZ_EDGE_MASS_FRACTION,
+  TET10_HRZ_VERTEX_MASS_FRACTION,
+  tet4Volume,
+  tet10Volume
 } from "./mesh";
 export type {
   LoadAssemblyDiagnostics,

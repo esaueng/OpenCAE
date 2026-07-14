@@ -639,19 +639,32 @@ function LoadsPanel({
   onLoadCasesChange
 }: RightPanelProps) {
   const selectedFromViewport = selectedFace ? selectionForFace(study, selectedFace.id) : undefined;
-  const placementSelection = draftLoadType === "gravity" ? undefined : selectedFromViewport;
+  const bodySelection = study.namedSelections.find((selection) => selection.entityType === "body");
+  const placementSelection = draftLoadType === "gravity" ? undefined : draftLoadType === "volume_force" ? bodySelection : selectedFromViewport;
   const units = unitsForLoadType(draftLoadType);
   const valueLabel = draftLoadType === "gravity" ? "Payload mass" : "Magnitude";
   const addLabel = draftLoadType === "gravity" ? "Add payload mass" : "Add load";
   const [payloadMaterialId, setPayloadMaterialId] = useState("payload-steel");
   const [payloadMassMode, setPayloadMassMode] = useState<PayloadMassMode>("material");
+  const [remotePoint, setRemotePoint] = useState<LoadApplicationPoint>(() => selectedLoadPoint ?? selectedFace?.center ?? [0, 0, 0]);
+  const secondaryFaceOptions = useMemo(
+    () => study.namedSelections.filter((selection) => selection.entityType === "face" && selection.id !== selectedFromViewport?.id),
+    [selectedFromViewport?.id, study.namedSelections]
+  );
+  const [secondarySelectionRef, setSecondarySelectionRef] = useState(secondaryFaceOptions[0]?.id ?? "");
   const payloadVolumeM3 = selectedPayloadObject?.volumeM3;
   const calculatedPayloadMass = payloadVolumeM3 ? massKgForPayloadMaterial(payloadMaterialId, payloadVolumeM3) : 0;
   const effectiveDraftValue = draftLoadType === "gravity" && payloadMassMode === "material" && calculatedPayloadMass > 0 ? calculatedPayloadMass : draftLoadValue;
   const displayDraftLoad = loadValueForUnits(effectiveDraftValue, units, project.unitSystem);
   const selectedPayloadMaterial = payloadMaterialForId(payloadMaterialId);
   const canAddPayloadMass = payloadMassMode === "manual" ? draftLoadValue > 0 : calculatedPayloadMass > 0;
-  const canAddDraftLoad = draftLoadType === "gravity" ? Boolean(selectedPayloadObject) && canAddPayloadMass : Boolean(selectedFace && selectedLoadPoint);
+  const canAddDraftLoad = draftLoadType === "gravity"
+    ? Boolean(selectedPayloadObject) && canAddPayloadMass
+    : draftLoadType === "volume_force"
+      ? Boolean(bodySelection)
+      : draftLoadType === "bolt_preload"
+        ? Boolean(selectedFace && secondarySelectionRef)
+        : Boolean(selectedFace);
   const payloadMetadata: PayloadLoadMetadata = draftLoadType === "gravity"
     ? {
       payloadMaterialId,
@@ -670,6 +683,14 @@ function LoadsPanel({
         : null
     );
   }, [draftLoadType, effectiveDraftValue, onDraftPayloadPreviewChange, payloadMassMode, payloadMaterialId, payloadVolumeM3]);
+  useEffect(() => {
+    if (draftLoadType === "remote_force" && selectedLoadPoint) setRemotePoint(selectedLoadPoint);
+  }, [draftLoadType, selectedLoadPoint]);
+  useEffect(() => {
+    if (!secondaryFaceOptions.some((selection) => selection.id === secondarySelectionRef)) {
+      setSecondarySelectionRef(secondaryFaceOptions[0]?.id ?? "");
+    }
+  }, [secondaryFaceOptions, secondarySelectionRef]);
   const loadCases = study.type === "modal_analysis" ? [] : structuralLoadCasesForPanel(study);
   const loadCombinations = study.type === "static_stress" ? study.loadCombinations ?? [] : [];
   function assignLoadToCase(loadId: string, caseId: string) {
@@ -682,7 +703,7 @@ function LoadsPanel({
     })), loadCombinations);
   }
   return (
-    <Panel title="Loads" helper={draftLoadType === "gravity" ? "Choose the object carrying payload mass, then add its weight as a load." : "Select a point on the model, then click Add load."}>
+    <Panel title="Loads" helper={draftLoadType === "gravity" ? "Choose the object carrying payload mass, then add its weight as a load." : draftLoadType === "volume_force" ? "Apply a force density to the selected structural body." : "Select a face on the model, then add the load."}>
       <HelpNote helpId="loadPlacement" />
       <PlacementReadout
         selectedRef={placementSelection}
@@ -691,22 +712,22 @@ function LoadsPanel({
       />
       <div className="field">
         <HelpLabel helpId="loadType">Load type</HelpLabel>
-        <div className="segmented" role="group" aria-label="Load type">
-          {(["force", "pressure", "gravity"] as const).map((type) => (
-            <button
-              key={type}
-              className={draftLoadType === type ? "active" : ""}
-              type="button"
-              aria-pressed={draftLoadType === type}
-              onClick={() => {
-                onDraftLoadTypeChange(type);
-                if (type !== draftLoadType) onDraftLoadValueChange(defaultValueForLoadType(type));
-              }}
-            >
-              {loadTypeLabel(type)}
-            </button>
-          ))}
-        </div>
+        <select
+          value={draftLoadType}
+          onChange={(event) => {
+            const type = event.currentTarget.value as LoadType;
+            onDraftLoadTypeChange(type);
+            if (type !== draftLoadType) onDraftLoadValueChange(defaultValueForLoadType(type));
+          }}
+        >
+          <option value="force">Face force (total)</option>
+          <option value="pressure">Pressure</option>
+          <option value="surface_traction">Surface traction</option>
+          <option value="volume_force">Volume force</option>
+          <option value="remote_force">Remote force</option>
+          {study.type === "static_stress" ? <option value="bolt_preload">Equivalent bolt preload</option> : null}
+          <option value="gravity">Payload mass</option>
+        </select>
       </div>
       {draftLoadType === "gravity" ? (
         <PayloadMassControls
@@ -740,6 +761,31 @@ function LoadsPanel({
           <Callout>{formatEquivalentForce(equivalentForceForLoad({ type: "gravity", parameters: { value: effectiveDraftValue } }), project.unitSystem)} equivalent weight.</Callout>
         </>
       )}
+      {draftLoadType === "force" ? <Callout>Face force is a total force distributed over the selected face. Its visual point does not affect the solve.</Callout> : null}
+      {draftLoadType === "remote_force" ? (
+        <fieldset className="field">
+          <legend>Remote point coordinates</legend>
+          <div className="vector-inputs">
+            {(["X", "Y", "Z"] as const).map((axis, index) => (
+              <label key={axis}>{axis}<input type="number" value={remotePoint[index]} onChange={(event) => {
+                const next = [...remotePoint] as LoadApplicationPoint;
+                next[index] = Number(event.currentTarget.value);
+                setRemotePoint(next);
+              }} /></label>
+            ))}
+          </div>
+          <small>Distributed force and moment only; this is not a rigid MPC coupling.</small>
+        </fieldset>
+      ) : null}
+      {draftLoadType === "bolt_preload" ? (
+        <>
+          <label className="field">Opposing face<select value={secondarySelectionRef} onChange={(event) => setSecondarySelectionRef(event.currentTarget.value)}>
+            <option value="">Choose a different face</option>
+            {secondaryFaceOptions.map((selection) => <option key={selection.id} value={selection.id}>{selection.name}</option>)}
+          </select></label>
+          <Callout>Bonded-linear approximation only: no contact, slip, or fastener stiffness.</Callout>
+        </>
+      ) : null}
       <label className="field">
         <HelpLabel helpId="loadDirection">Direction</HelpLabel>
         <select value={draftLoadDirection} onChange={(event) => onDraftLoadDirectionChange(event.currentTarget.value as LoadDirectionLabel)}>
@@ -748,7 +794,17 @@ function LoadsPanel({
           ))}
         </select>
       </label>
-      <button className="outline-action wide" disabled={!canAddDraftLoad} onClick={() => canAddDraftLoad && onAddLoad(draftLoadType, effectiveDraftValue, selectedFromViewport?.id, draftLoadDirection, payloadMetadata)}><Plus size={18} />{addLabel}</button>
+      <button className="outline-action wide" disabled={!canAddDraftLoad} onClick={() => canAddDraftLoad && onAddLoad(
+        draftLoadType,
+        effectiveDraftValue,
+        placementSelection?.id,
+        draftLoadDirection,
+        {
+          ...payloadMetadata,
+          ...(draftLoadType === "remote_force" ? { remotePoint } : {}),
+          ...(draftLoadType === "bolt_preload" ? { secondarySelectionRef } : {})
+        }
+      )}><Plus size={18} />{addLabel}</button>
       {study.type !== "modal_analysis" && (
         <LoadCasesEditor
           studyType={study.type}
@@ -1018,17 +1074,24 @@ function LoadEditorList({ study, displayModel, unitSystem, loadCases, onAssignLo
 }
 
 function LoadEditForm({ load, study, displayModel, unitSystem, onSave, onCancel, onPreviewChange }: { load: Load; study: Study; displayModel: DisplayModel; unitSystem: UnitSystem; onSave: (load: Load) => void; onCancel: () => void; onPreviewChange: (load: Load | null) => void }) {
-  const [type, setType] = useState<"force" | "pressure" | "gravity">(load.type);
+  const [type, setType] = useState<LoadType>(load.type);
   const [value, setValue] = useState(() => {
     const initialUnits = String(load.parameters.units ?? unitsForLoadType(load.type));
     return formatInputValue(loadValueForUnits(Number(load.parameters.value ?? 500), initialUnits, unitSystem).value);
   });
   const selectedRef = study.namedSelections.find((selection) => selection.id === load.selectionRef);
+  const selectionIsBody = selectedRef?.entityType === "body";
   const selectedFace = selectedRef?.geometryRefs[0];
   const selectedDisplayFace = displayModel.faces.find((face) => face.id === selectedFace?.entityId);
   const [direction, setDirection] = useState<LoadDirectionLabel>(directionLabelForLoad(load, displayModel, selectedDisplayFace));
   const [payloadMaterialId, setPayloadMaterialId] = useState(String(load.parameters.payloadMaterialId ?? "payload-steel"));
   const [payloadMassMode, setPayloadMassMode] = useState<PayloadMassMode>(load.parameters.payloadMassMode === "manual" ? "manual" : "material");
+  const [remotePoint, setRemotePoint] = useState<LoadApplicationPoint>(() => finiteVector3(load.parameters.remotePoint) ?? selectedDisplayFace?.center ?? [0, 0, 0]);
+  const secondaryFaceOptions = useMemo(
+    () => study.namedSelections.filter((selection) => selection.entityType === "face" && selection.id !== load.selectionRef),
+    [load.selectionRef, study.namedSelections]
+  );
+  const [secondarySelectionRef, setSecondarySelectionRef] = useState(typeof load.parameters.secondarySelectionRef === "string" ? load.parameters.secondarySelectionRef : secondaryFaceOptions[0]?.id ?? "");
   const units = unitsForLoadType(type);
   const displayUnits = loadValueForUnits(defaultValueForLoadType(type), units, unitSystem).units;
   const payloadObject = payloadObjectForLoad(load) ?? null;
@@ -1039,7 +1102,11 @@ function LoadEditForm({ load, study, displayModel, unitSystem, onSave, onCancel,
   // Memoized on scalar inputs: a fresh object here would retrigger the preview effect every render and loop with the parent setState.
   const payloadMetadata = useMemo<PayloadLoadMetadata>(() => type === "gravity"
     ? { payloadMaterialId, ...(payloadVolumeM3 ? { payloadVolumeM3 } : {}), payloadMassMode }
-    : {}, [payloadMassMode, payloadMaterialId, payloadVolumeM3, type]);
+    : type === "remote_force"
+      ? { remotePoint }
+      : type === "bolt_preload"
+        ? { secondarySelectionRef }
+        : {}, [payloadMassMode, payloadMaterialId, payloadVolumeM3, remotePoint, secondarySelectionRef, type]);
   const selectedPayloadMaterial = payloadMaterialForId(payloadMaterialId);
   const directionFace: DisplayFace = useMemo(() => selectedDisplayFace ?? ({
     id: selectedFace?.entityId ?? "selected-face",
@@ -1060,10 +1127,21 @@ function LoadEditForm({ load, study, displayModel, unitSystem, onSave, onCancel,
     <div className="edit-form">
       <label className="field">
         <HelpLabel helpId="loadType">Load type</HelpLabel>
-        <select value={type} onChange={(event) => setType(event.currentTarget.value as "force" | "pressure" | "gravity")}>
-          <option value="force">Force</option>
-          <option value="pressure">Pressure</option>
-          <option value="gravity">Payload mass</option>
+        <select value={type} onChange={(event) => setType(event.currentTarget.value as LoadType)}>
+          {selectionIsBody ? (
+            <>
+              <option value="volume_force">Volume force</option>
+              <option value="gravity">Payload mass</option>
+            </>
+          ) : (
+            <>
+              <option value="force">Face force (total)</option>
+              <option value="pressure">Pressure</option>
+              <option value="surface_traction">Surface traction</option>
+              <option value="remote_force">Remote force</option>
+              {study.type === "static_stress" ? <option value="bolt_preload">Equivalent bolt preload</option> : null}
+            </>
+          )}
         </select>
       </label>
       {type === "gravity" ? (
@@ -1092,6 +1170,21 @@ function LoadEditForm({ load, study, displayModel, unitSystem, onSave, onCancel,
         </label>
       )}
       <PlacementReadout selectedRef={selectedRef} />
+      {type === "remote_force" ? (
+        <fieldset className="field"><legend>Remote point coordinates</legend><div className="vector-inputs">
+          {(["X", "Y", "Z"] as const).map((axis, index) => <label key={axis}>{axis}<input type="number" value={remotePoint[index]} onChange={(event) => {
+            const next = [...remotePoint] as LoadApplicationPoint;
+            next[index] = Number(event.currentTarget.value);
+            setRemotePoint(next);
+          }} /></label>)}
+        </div></fieldset>
+      ) : null}
+      {type === "bolt_preload" ? (
+        <label className="field">Opposing face<select value={secondarySelectionRef} onChange={(event) => setSecondarySelectionRef(event.currentTarget.value)}>
+          <option value="">Choose a different face</option>
+          {secondaryFaceOptions.map((selection) => <option key={selection.id} value={selection.id}>{selection.name}</option>)}
+        </select></label>
+      ) : null}
       <label className="field">
         <HelpLabel helpId="loadDirection">Direction</HelpLabel>
         <select value={direction} onChange={(event) => setDirection(event.currentTarget.value as LoadDirectionLabel)}>
@@ -1124,13 +1217,19 @@ function editedLoadForForm(load: Load, type: LoadType, value: string, displayUni
       units,
       direction: directionVectorForLabel(direction, directionFace, displayModel),
       directionMode: direction,
-      ...(type === "gravity" ? payloadMetadata : {})
+      ...(type === "gravity" || type === "remote_force" || type === "bolt_preload" ? payloadMetadata : {})
     }
   };
 }
 
 function positiveNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
+function finiteVector3(value: unknown): LoadApplicationPoint | null {
+  return Array.isArray(value) && value.length === 3 && value.every((item) => typeof item === "number" && Number.isFinite(item))
+    ? [value[0], value[1], value[2]]
+    : null;
 }
 
 function SupportEditorList({ study, onUpdateSupport, onRemoveSupport }: { study: Study; onUpdateSupport: (support: Constraint) => void; onRemoveSupport: (supportId: string) => void }) {
@@ -1179,7 +1278,7 @@ function SupportEditorList({ study, onUpdateSupport, onRemoveSupport }: { study:
 }
 
 function LoadTypeIcon({ type }: { type: LoadType }) {
-  if (type === "pressure") return <Gauge size={16} />;
+  if (type === "pressure" || type === "surface_traction") return <Gauge size={16} />;
   if (type === "gravity") return <Weight size={16} />;
   return <ScanLine size={16} />;
 }
@@ -2476,11 +2575,17 @@ function formatInputValue(value: number) {
 
 function loadTypeLabel(type: LoadType) {
   if (type === "gravity") return "Payload mass";
+  if (type === "force") return "Face force (total)";
+  if (type === "surface_traction") return "Surface traction";
+  if (type === "volume_force") return "Volume force";
+  if (type === "remote_force") return "Remote force";
+  if (type === "bolt_preload") return "Equivalent bolt preload";
   return capitalize(type);
 }
 
 function defaultValueForLoadType(type: LoadType) {
-  if (type === "pressure") return 100;
+  if (type === "pressure" || type === "surface_traction") return 100;
+  if (type === "volume_force") return 1000;
   if (type === "gravity") return 5;
   return 500;
 }

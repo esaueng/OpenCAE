@@ -150,7 +150,7 @@ Dependency notes:
 | 019 Frontal fallback before repair bail + model-keyed probe guard | DONE | Executed: thrown Delaunay quality-repair candidates continue to Frontal; project actions use generation/client identity rather than fragile object identity. |
 | 020 One-click PDF simulation report | DONE | Executed: Results-panel PDF generation, persisted white-background captures, report data/layout, and unit/provenance honesty checks are shipped. |
 | 021 OpenCAE Quick-Wins Rollout | IN PROGRESS | Five staged releases: result probes, unified palettes, principal stresses, projection/PNG export, and recent project handles. |
-| 022 OpenCAE Medium-Feature Roadmap | IN PROGRESS | Flagship-first sequence. Increments 1-4 released; advanced loads and equivalent bolt preload are next. |
+| 022 OpenCAE Medium-Feature Roadmap | COMPLETE | All five flagship-first increments released: modal analysis; open sections and custom materials; structural cases/combinations/envelopes; static convergence studies; and advanced loads with equivalent bolt preload. |
 
 Run 2 was non-interactive: plans 006–010 are the top findings by leverage (impact ÷ effort, confidence-weighted), selected by default per the advisor skill's non-interactive rule rather than by maintainer choice. Re-cut as desired.
 

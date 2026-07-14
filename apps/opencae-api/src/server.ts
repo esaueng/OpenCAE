@@ -32,7 +32,7 @@ import {
 import { mutatingRateLimit, pdfFilename, projectsReadRateLimit, sanitizeFilename, sanitizeProjectName } from "./security";
 import { hasActualCoreVolumeMesh, openCaeCoreEligibility, trySolveOpenCaeCoreStudy } from "@opencae/core-adapter";
 import { FileSystemObjectStorageProvider } from "@opencae/storage";
-import { validateStaticStressStudy, validateStudy } from "@opencae/study-core";
+import { validateStudy } from "@opencae/study-core";
 import {
   attachUploadedModelToProject,
   blankDisplayModel,
@@ -402,16 +402,17 @@ api.post("/api/studies/:studyId/loads", async (request, reply) => {
   const { studyId } = request.params as { studyId: string };
   const study = db.getStudy(studyId);
   if (!study) return reply.code(404).send({ error: "Study not found" });
-  const body = request.body as Partial<Load> & { value?: number; selectionRef?: string; direction?: [number, number, number]; directionMode?: string; applicationPoint?: [number, number, number]; payloadObject?: unknown; payloadMaterialId?: string; payloadVolumeM3?: number; payloadMassMode?: string } | undefined;
+  const body = request.body as Partial<Load> & { value?: number; selectionRef?: string; direction?: [number, number, number]; directionMode?: string; applicationPoint?: [number, number, number]; remotePoint?: [number, number, number]; secondarySelectionRef?: string; payloadObject?: unknown; payloadMaterialId?: string; payloadVolumeM3?: number; payloadMassMode?: string } | undefined;
   const type = body?.type ?? "force";
   if (!isLoadType(type)) return reply.code(400).send({ error: "Invalid load type." });
+  if (type === "bolt_preload" && study.type !== "static_stress") return reply.code(400).send({ error: "Equivalent bolt preload is static-only." });
   if (body?.directionMode !== undefined && !isLoadDirectionMode(body.directionMode)) return reply.code(400).send({ error: "Invalid load direction mode." });
   const payloadVolumeM3 = body?.payloadVolumeM3;
   const load: Load = {
     id: `load-${crypto.randomUUID()}`,
     type,
     selectionRef: body?.selectionRef ?? "selection-load-face",
-    parameters: { value: body?.value ?? 500, units: unitsForLoadType(type), direction: body?.direction ?? [0, 0, -1], ...(body?.directionMode ? { directionMode: body.directionMode } : {}), ...(body?.applicationPoint ? { applicationPoint: body.applicationPoint } : {}), ...(body?.payloadObject ? { payloadObject: body.payloadObject } : {}), ...(type === "gravity" && body?.payloadMaterialId ? { payloadMaterialId: body.payloadMaterialId } : {}), ...(type === "gravity" && Number.isFinite(payloadVolumeM3) ? { payloadVolumeM3 } : {}), ...(type === "gravity" && body?.payloadMassMode ? { payloadMassMode: body.payloadMassMode } : {}) },
+    parameters: { value: body?.value ?? 500, units: unitsForLoadType(type), direction: body?.direction ?? [0, 0, -1], ...(body?.directionMode ? { directionMode: body.directionMode } : {}), ...(body?.applicationPoint ? { applicationPoint: body.applicationPoint } : {}), ...(type === "remote_force" && body?.remotePoint ? { remotePoint: body.remotePoint } : {}), ...(type === "bolt_preload" && body?.secondarySelectionRef ? { secondarySelectionRef: body.secondarySelectionRef } : {}), ...(body?.payloadObject ? { payloadObject: body.payloadObject } : {}), ...(type === "gravity" && body?.payloadMaterialId ? { payloadMaterialId: body.payloadMaterialId } : {}), ...(type === "gravity" && Number.isFinite(payloadVolumeM3) ? { payloadVolumeM3 } : {}), ...(type === "gravity" && body?.payloadMassMode ? { payloadMassMode: body.payloadMassMode } : {}) },
     status: "complete"
   };
   const loadCases = study.type === "modal_analysis" ? undefined : (study.loadCases?.length
@@ -419,7 +420,7 @@ api.post("/api/studies/:studyId/loads", async (request, reply) => {
     : [{ id: "case-default", name: "Default", enabled: true, loadIds: study.loads.map((item) => item.id) }])
       .map((loadCase, index) => index === 0 ? { ...loadCase, loadIds: [...loadCase.loadIds, load.id] } : loadCase);
   const next = { ...study, loads: [...study.loads, load], ...(loadCases ? { loadCases } : {}) } as Study;
-  const loadDiagnostics = validateStaticStressStudy(next).filter((diagnostic) => diagnostic.id.includes(load.id));
+  const loadDiagnostics = validateStudy(next).filter((diagnostic) => diagnostic.id.includes(load.id));
   if (loadDiagnostics.length) {
     return reply.code(400).send({ error: "Invalid load.", diagnostics: loadDiagnostics });
   }
@@ -657,7 +658,7 @@ function completeRunMessage(resultTier: ResultProvenanceTier): string {
 }
 
 function isLoadType(type: unknown): type is Load["type"] {
-  return type === "force" || type === "pressure" || type === "gravity";
+  return type === "force" || type === "pressure" || type === "gravity" || type === "surface_traction" || type === "volume_force" || type === "remote_force" || type === "bolt_preload";
 }
 
 function isLoadDirectionMode(value: unknown): value is string {
@@ -665,7 +666,8 @@ function isLoadDirectionMode(value: unknown): value is string {
 }
 
 function unitsForLoadType(type: Load["type"]) {
-  if (type === "pressure") return "kPa";
+  if (type === "pressure" || type === "surface_traction") return "kPa";
+  if (type === "volume_force") return "N/m^3";
   if (type === "gravity") return "kg";
   return "N";
 }

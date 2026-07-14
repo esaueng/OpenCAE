@@ -136,15 +136,16 @@ describe("static simulation workflow components", () => {
     const html = renderToStaticMarkup(
       <BoundaryConditionMenu
         open
+        studyType="static_stress"
         onSelect={vi.fn()}
         onClose={vi.fn()}
       />
     );
 
-    for (const enabled of ["Fixed support", "Prescribed displacement", "Force", "Pressure", "Payload mass"]) {
+    for (const enabled of ["Fixed support", "Prescribed displacement", "Face force (total)", "Pressure", "Surface traction", "Volume force", "Remote force", "Equivalent bolt preload", "Payload mass"]) {
       expect(html).toContain(enabled);
     }
-    for (const future of ["Bolt preload", "Elastic support", "Remote displacement", "Remote force", "Surface load", "Volume load", "Hinge constraint"]) {
+    for (const future of ["Elastic support", "Remote displacement", "Hinge constraint"]) {
       expect(html).toContain(future);
     }
     expect(html).toContain("Coming soon");

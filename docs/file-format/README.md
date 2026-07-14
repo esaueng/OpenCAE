@@ -35,6 +35,15 @@ Runtime artifacts are stored separately under `data/artifacts` during local API 
 
 Core readers accept `0.1.0`, `0.2.0`, and `0.3.0`. Schema `0.3.0` adds a `modal` step with `boundaryConditions` and `modeCount` (1–10). Modal steps use material density and supports but no load references.
 
+Schema `0.3.0` also adds four mesh-native load records. Values are always stored in the model coordinate system's canonical force units:
+
+- `surfaceTraction` references a `surfaceSet` and stores a three-component `traction` force-density vector in Pa (`N/m^2`) for `m-N-s-Pa` models or MPa (`N/mm^2`) for `mm-N-s-MPa` models.
+- `bodyForceDensity` references an explicit `elementSet` and stores a three-component `forceDensity` vector in `N/m^3` or `N/mm^3`.
+- `remoteForce` references a `surfaceSet` and stores `totalForce` plus explicit `remotePoint` coordinates. It represents an equivalent distributed force and moment, not a rigid multipoint coupling.
+- `equivalentBoltPreload` references two surface sets and stores a unitless direction vector `axis` plus positive `preloadForce`. It is static-only and represents equal/opposite bonded-linear tractions without contact, slip, or fastener stiffness.
+
+The project-level load discriminators are `surface_traction`, `volume_force`, `remote_force`, and `bolt_preload`. Remote points and bolt secondary-selection references live in each load's optional parameter metadata. These optional records do not change the outer project-container version.
+
 Modal result bundles are discriminated by `summary.analysisType: "modal_analysis"`. Each mode records its 1-based index, frequency in Hz, eigenvalue, scaled residual, and field id. Its `mode_shape` field is a node-located 3-vector surface field with `normalized` units; it is never labeled as displacement. Shape vectors are normalized to a maximum nodal vector magnitude of 1 and have deterministic, physically arbitrary sign.
 
 The outer `opencae-local-project` container remains version 2 because the new study and result shapes are backward-readable additions. Legacy structural summary/field bundles continue parsing as one Default run variant.

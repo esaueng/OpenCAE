@@ -2,6 +2,7 @@ import {
   assembleNodalLoadVectorWithDiagnostics,
   normalizeModelJson,
   type BoundaryConditionJson,
+  type LoadAssemblyDiagnostics,
   type NormalizedElementBlock,
   type NormalizedOpenCAEModel,
 } from "@opencae/core";
@@ -122,17 +123,28 @@ export function solveStaticLinearTet4Cpu(
     });
   }
   const loads = loadAssembly.forces;
+  const reportedLoadAssembly = hasAdvancedLoadPrimitives(model, step.loads) ? loadAssembly.diagnostics : undefined;
   const solverMode = selectSolverMode(dofs, options, model, step.loads);
 
   if (solverMode === "dense") {
     const assembly = assembleDenseStiffness(model, options.hooks);
     if (!assembly.ok) return failure(assembly.error.code, assembly.error.message, { dofs });
-    return solveDenseSystem(model, assembly.stiffness, loads, constraints.values, free, options);
+    return solveDenseSystem(model, assembly.stiffness, loads, constraints.values, free, options, reportedLoadAssembly);
   }
 
   const assembly = assembleSparseStiffness(model, options.hooks);
   if (!assembly.ok) return failure(assembly.error.code, assembly.error.message, { dofs });
-  return solveSparseSystem(model, assembly.stiffness, loads, constraints.values, free, options);
+  return solveSparseSystem(model, assembly.stiffness, loads, constraints.values, free, options, reportedLoadAssembly);
+}
+
+function hasAdvancedLoadPrimitives(model: NormalizedOpenCAEModel, loadNames: string[]): boolean {
+  const selected = new Set(loadNames);
+  return model.loads.some((load) => selected.has(load.name) && (
+    load.type === "surfaceTraction"
+    || load.type === "bodyForceDensity"
+    || load.type === "remoteForce"
+    || load.type === "equivalentBoltPreload"
+  ));
 }
 
 export function solveStaticLinearTet(
@@ -231,7 +243,8 @@ export function solvePreparedStaticLoadCase(
       converged: true,
       matrixRows: prepared.dofs,
       matrixNonZeros: prepared.stiffness.values.length,
-      visualizationSmoothing: options.visualizationSmoothing
+      visualizationSmoothing: options.visualizationSmoothing,
+      ...(hasAdvancedLoadPrimitives(prepared.model, loadNames) ? { loadAssembly: loadAssembly.diagnostics } : {})
     }
   );
   return finished.ok ? { ...finished, reducedSolution: solve.solution } : finished;
@@ -395,8 +408,8 @@ export function assembleNodalForces(model: NormalizedOpenCAEModel, loadNames: st
   return result.forces;
 }
 
-function assembleNodalForcesWithDiagnostics(model: NormalizedOpenCAEModel, loadNames: string[]):
-  | { ok: true; forces: Float64Array }
+export function assembleNodalForcesWithDiagnostics(model: NormalizedOpenCAEModel, loadNames: string[]):
+  | { ok: true; forces: Float64Array; diagnostics: LoadAssemblyDiagnostics }
   | { ok: false; error: CpuSolverError } {
   const result = assembleNodalLoadVectorWithDiagnostics(model, loadNames);
   if (result.diagnostics.errors.length > 0) {
@@ -409,7 +422,7 @@ function assembleNodalForcesWithDiagnostics(model: NormalizedOpenCAEModel, loadN
       }
     };
   }
-  return { ok: true, forces: result.vector };
+  return { ok: true, forces: result.vector, diagnostics: result.diagnostics };
 }
 
 export function collectConstraints(model: NormalizedOpenCAEModel, boundaryConditionNames: string[]):
@@ -496,7 +509,8 @@ function solveDenseSystem(
   loads: Float64Array,
   constraints: Map<number, number>,
   free: Int32Array,
-  options: CpuSolverOptions
+  options: CpuSolverOptions,
+  loadAssembly: LoadAssemblyDiagnostics | undefined
 ): StaticLinearTet4CpuSolveResult {
   const dofs = model.counts.nodes * 3;
   const freeDofs = free.length;
@@ -530,7 +544,8 @@ function solveDenseSystem(
     converged: true,
     matrixRows: dofs,
     matrixNonZeros: dofs * dofs,
-    visualizationSmoothing: options.visualizationSmoothing
+    visualizationSmoothing: options.visualizationSmoothing,
+    ...(loadAssembly ? { loadAssembly } : {})
   });
 }
 
@@ -540,7 +555,8 @@ function solveSparseSystem(
   loads: Float64Array,
   constraints: Map<number, number>,
   free: Int32Array,
-  options: CpuSolverOptions
+  options: CpuSolverOptions,
+  loadAssembly: LoadAssemblyDiagnostics | undefined
 ): StaticLinearTet4CpuSolveResult {
   const reduced = reduceCsrSystem(stiffness, loads, free, constraints);
   const solve = conjugateGradient(reduced.matrix, reduced.rhs, {
@@ -567,7 +583,8 @@ function solveSparseSystem(
     converged: true,
     matrixRows: model.counts.nodes * 3,
     matrixNonZeros: stiffness.values.length,
-    visualizationSmoothing: options.visualizationSmoothing
+    visualizationSmoothing: options.visualizationSmoothing,
+    ...(loadAssembly ? { loadAssembly } : {})
   });
 }
 
@@ -578,7 +595,7 @@ function finishSolve(
   free: Int32Array,
   freeSolution: Float64Array,
   multiplyFull: (displacement: Float64Array) => Float64Array,
-  diagnostics: Pick<CpuSolverDiagnostics, "solverMode" | "iterations" | "converged" | "matrixRows" | "matrixNonZeros" | "visualizationSmoothing">
+  diagnostics: Pick<CpuSolverDiagnostics, "solverMode" | "iterations" | "converged" | "matrixRows" | "matrixNonZeros" | "visualizationSmoothing" | "loadAssembly">
 ): StaticLinearTet4CpuSolveResult {
   const dofs = model.counts.nodes * 3;
   const displacement = new Float64Array(dofs);
@@ -970,7 +987,7 @@ function selectSolverMode(
 
 function activeLoadsRequireSparse(model: NormalizedOpenCAEModel, activeLoadNames: string[]): boolean {
   const active = new Set(activeLoadNames);
-  return model.loads.some((load) => active.has(load.name) && (load.type === "surfaceForce" || load.type === "pressure"));
+  return model.loads.some((load) => active.has(load.name) && load.type !== "nodalForce" && load.type !== "bodyGravity");
 }
 
 function failure(

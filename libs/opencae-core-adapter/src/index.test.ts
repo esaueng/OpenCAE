@@ -270,6 +270,100 @@ describe("core cloud structured block model frame", () => {
   });
 });
 
+describe("advanced load adapter contracts", () => {
+  function withBodySelection(study: Study): Study {
+    return {
+      ...study,
+      namedSelections: [{
+        id: "selection-body-1",
+        name: "Cantilever body",
+        entityType: "body",
+        geometryRefs: [{ bodyId: "body-1", entityType: "body", entityId: "body-1", label: "Cantilever body" }],
+        fingerprint: "body-1"
+      }, ...study.namedSelections]
+    };
+  }
+
+  test("maps traction and volume-force density into canonical solver units", () => {
+    const study = withBodySelection(studyFixture({
+      loads: [
+        { id: "traction", type: "surface_traction", selectionRef: "selection-load-face", parameters: { value: 125, units: "kPa", direction: [0, -1, 0] }, status: "complete" },
+        { id: "volume", type: "volume_force", selectionRef: "selection-body-1", parameters: { value: 2.5, units: "kN/m^3", direction: [0, -1, 0] }, status: "complete" }
+      ]
+    }));
+
+    const model = buildOpenCaeCoreModelForStudy(study, cantileverDisplayModel()).model;
+    const traction = model.loads.find((load) => load.type === "surfaceTraction");
+    const volume = model.loads.find((load) => load.type === "bodyForceDensity");
+
+    expect(traction).toMatchObject({ type: "surfaceTraction", traction: [0, 0, -125_000] });
+    expect(volume).toMatchObject({ type: "bodyForceDensity", elementSet: "allElements", forceDensity: [0, 0, -2_500] });
+  });
+
+  test("maps remote force point and records distributed-wrench diagnostics", () => {
+    const study = studyFixture({
+      loads: [{
+        id: "remote",
+        type: "remote_force",
+        selectionRef: "selection-load-face",
+        parameters: { value: 200, units: "N", direction: [0, -1, 0], remotePoint: [2.4, 0.8, 0] },
+        status: "complete"
+      }]
+    });
+
+    const coreBuild = buildOpenCaeCoreModelForStudy(study, cantileverDisplayModel());
+    const remote = coreBuild.model.loads.find((load) => load.type === "remoteForce");
+    expect(remote).toMatchObject({ type: "remoteForce", totalForce: [0, 0, -200] });
+    expect(remote?.type === "remoteForce" ? remote.remotePoint.every(Number.isFinite) : false).toBe(true);
+    const solved = solveCoreStatic(coreBuild.model, { method: "sparse", solverMode: "sparse" });
+    expect(solved.ok, solved.ok ? undefined : solved.error.message).toBe(true);
+    if (!solved.ok) return;
+    const loadAssembly = solved.diagnostics.loadAssembly;
+    expect(loadAssembly?.perLoad[0]).toMatchObject({
+      distribution: "area_weighted_minimum_norm",
+      approximation: expect.stringMatching(/no rigid MPC coupling/i)
+    });
+    expect(loadAssembly?.perLoad[0]?.forceBalanceError).toBeLessThan(1e-9);
+    expect(loadAssembly?.perLoad[0]?.momentBalanceError).toBeLessThan(1e-9);
+  });
+
+  test("maps a static equivalent preload and rejects it for dynamic studies", () => {
+    const preload = {
+      id: "preload",
+      type: "bolt_preload" as const,
+      selectionRef: "selection-fixed-face",
+      parameters: { value: 1_200, units: "N", direction: [1, 0, 0], secondarySelectionRef: "selection-load-face" },
+      status: "complete" as const
+    };
+    const staticStudy = studyFixture({ loads: [preload] });
+    const model = buildOpenCaeCoreModelForStudy(staticStudy, cantileverDisplayModel()).model;
+    expect(model.loads[0]).toMatchObject({
+      type: "equivalentBoltPreload",
+      axis: [1, 0, 0],
+      preloadForce: 1_200
+    });
+    const dynamicStudy = studyFixture({
+      name: "Dynamic",
+      type: "dynamic_structural",
+      loads: [preload],
+      solverSettings: {
+        backend: "opencae_core_local",
+        startTime: 0,
+        endTime: 0.1,
+        timeStep: 0.01,
+        outputInterval: 0.01,
+        dampingRatio: 0.02,
+        integrationMethod: "newmark_average_acceleration",
+        loadProfile: "ramp"
+      }
+    });
+    expect(openCaeCoreEligibility(dynamicStudy, cantileverDisplayModel())).toEqual({
+      ok: false,
+      reason: "Equivalent bolt preload is supported for static studies only."
+    });
+  });
+});
+
 function coordinateSpans(coordinates: number[]): { x: number; y: number; z: number } {
   const min = [Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY];
   const max = [Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY];

@@ -1600,7 +1600,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       id: `load-${crypto.randomUUID()}`,
       type,
       selectionRef: selection.id,
-      parameters: { value, units: unitsForLoadType(type), direction: directionVectorForLabel(direction, face, displayModel ?? undefined), directionMode: direction, ...(applicationPoint ? { applicationPoint } : {}), ...(payloadObject ? { payloadObject } : {}), ...(type === "gravity" ? payloadMetadata : {}) },
+      parameters: { value, units: unitsForLoadType(type), direction: directionVectorForLabel(direction, face, displayModel ?? undefined), directionMode: direction, ...(applicationPoint ? { applicationPoint } : {}), ...(payloadObject ? { payloadObject } : {}), ...(type === "gravity" || type === "remote_force" || type === "bolt_preload" ? payloadMetadata : {}) },
       status: "complete"
     };
     const loadCases = study.type === "modal_analysis" ? undefined : loadCasesWithAddedLoad(study, load.id);
@@ -1766,7 +1766,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     return value === "ramp" || value === "step" || value === "quasi_static" || value === "sinusoidal";
   }
 
-  function handleBoundaryConditionType(type: "fixed" | "prescribed_displacement" | "force" | "pressure" | "gravity") {
+  function handleBoundaryConditionType(type: "fixed" | "prescribed_displacement" | LoadType) {
     setShowBoundaryConditionMenu(false);
     if (type === "fixed" || type === "prescribed_displacement") {
       applyStep("supports");
@@ -2244,19 +2244,17 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
             const payloadObject = type === "gravity" ? selectedPayloadObject : null;
             const fallbackPayloadFace = payloadObject ? faceForPayloadObject(payloadObject) : null;
             const face = selectedFace?.id === faceId || (!selection && selectedFace) ? selectedFace : displayModel.faces.find((item) => item.id === faceId) ?? fallbackPayloadFace;
-            if (!face) return;
+            const directionFace = face ?? displayModel.faces[0];
+            if (!directionFace) return;
             const applicationPoint = type === "gravity" && payloadObject ? payloadObject.center : selectedLoadPoint;
-            if (type !== "gravity" && !applicationPoint) {
-              pushMessage("Select a point on the model before adding a load.");
-              return;
-            }
             if (selection) {
-              updateStudy(addLoad(study.id, type, value, selection.id, directionVectorForLabel(direction, face, displayModel ?? undefined), applicationPoint, payloadObject, study, payloadMetadata, direction));
+              updateStudy(addLoad(study.id, type, value, selection.id, directionVectorForLabel(direction, directionFace, displayModel ?? undefined), applicationPoint, payloadObject, study, payloadMetadata, direction));
               setSelectedLoadPoint(null);
               if (type === "gravity") setSelectedPayloadObject(null);
               return;
             }
-            void addLoadForFace(type, value, face, direction, applicationPoint, payloadObject, payloadMetadata);
+            if (!face) return;
+            void addLoadForFace(type, value, face, direction, applicationPoint ?? face.center, payloadObject, payloadMetadata);
             setSelectedLoadPoint(null);
             if (type === "gravity") setSelectedPayloadObject(null);
           }}
@@ -2307,6 +2305,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         {showBoundaryConditionMenu && study ? (
           <BoundaryConditionMenu
             open
+            studyType={study.type}
             onSelect={handleBoundaryConditionType}
             onClose={() => setShowBoundaryConditionMenu(false)}
           />
@@ -2546,7 +2545,8 @@ function faceForPayloadObject(payloadObject: PayloadObjectSelection): DisplayFac
 }
 
 function defaultValueForLoadType(type: LoadType) {
-  if (type === "pressure") return 100;
+  if (type === "pressure" || type === "surface_traction") return 100;
+  if (type === "volume_force") return 1000;
   if (type === "gravity") return 5;
   return 500;
 }

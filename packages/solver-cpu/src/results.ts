@@ -4,6 +4,7 @@ import {
   connectedComponents,
   createCoreResultField,
   OPENCAE_CORE_VERSION,
+  nodesPerElement,
   solverSurfaceMeshFromModel,
   validateProductionSurfaceFieldInvariant,
   type BoundaryConditionJson,
@@ -853,15 +854,40 @@ function addLoadNodes(model: NormalizedOpenCAEModel, load: LoadJson, nodeIds: Se
     addNodeSetNodes(model, load.nodeSet, nodeIds);
     return;
   }
-  if (load.type === "surfaceForce" || load.type === "pressure") {
-    const surfaceSet = model.surfaceSets.find((set) => set.name === load.surfaceSet);
-    if (!surfaceSet) return;
-    const facetById = new Map(model.surfaceFacets.map((facet) => [facet.id, facet]));
-    for (const facetId of surfaceSet.facets) {
-      const facet = facetById.get(facetId);
-      if (!facet) continue;
-      for (const node of facet.nodes) nodeIds.add(node);
+  if (load.type === "surfaceForce" || load.type === "pressure" || load.type === "surfaceTraction" || load.type === "remoteForce") {
+    addSurfaceSetNodes(model, load.surfaceSet, nodeIds);
+    return;
+  }
+  if (load.type === "equivalentBoltPreload") {
+    addSurfaceSetNodes(model, load.surfaceSetA, nodeIds);
+    addSurfaceSetNodes(model, load.surfaceSetB, nodeIds);
+    return;
+  }
+  if (load.type === "bodyForceDensity") {
+    const selected = new Set(model.elementSets.find((set) => set.name === load.elementSet)?.elements ?? []);
+    let globalElement = 0;
+    for (const block of model.elementBlocks) {
+      const count = nodesPerElement(block.type);
+      for (let offset = 0; offset + count <= block.connectivity.length; offset += count, globalElement += 1) {
+        if (!selected.has(globalElement)) continue;
+        for (let local = 0; local < count; local += 1) nodeIds.add(block.connectivity[offset + local]!);
+      }
     }
+    return;
+  }
+  if (load.type === "bodyGravity") {
+    for (let node = 0; node < model.counts.nodes; node += 1) nodeIds.add(node);
+  }
+}
+
+function addSurfaceSetNodes(model: NormalizedOpenCAEModel, surfaceSetName: string, nodeIds: Set<number>): void {
+  const surfaceSet = model.surfaceSets.find((set) => set.name === surfaceSetName);
+  if (!surfaceSet) return;
+  const facetById = new Map(model.surfaceFacets.map((facet) => [facet.id, facet]));
+  for (const facetId of surfaceSet.facets) {
+    const facet = facetById.get(facetId);
+    if (!facet) continue;
+    for (const node of facet.nodes) nodeIds.add(node);
   }
 }
 

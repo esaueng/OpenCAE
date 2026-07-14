@@ -89,7 +89,7 @@ export const ConstraintSchema = z.object({
 
 export const LoadSchema = z.object({
   id: z.string(),
-  type: z.enum(["force", "pressure", "gravity"]),
+  type: z.enum(["force", "pressure", "gravity", "surface_traction", "volume_force", "remote_force", "bolt_preload"]),
   selectionRef: z.string(),
   parameters: z.record(z.unknown()),
   status: z.enum(["not_started", "ready", "warning", "complete"])

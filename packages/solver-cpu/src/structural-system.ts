@@ -1,13 +1,16 @@
-import type { NormalizedOpenCAEModel } from "@opencae/core";
+import {
+  assembleNodalLoadVectorWithDiagnostics,
+  TET10_HRZ_EDGE_MASS_FRACTION,
+  TET10_HRZ_VERTEX_MASS_FRACTION,
+  type LoadAssemblyDiagnostics,
+  type NormalizedOpenCAEModel
+} from "@opencae/core";
 import { computeTet4Geometry } from "./geometry";
 import {
   computeTet10Volume,
-  TET10_HRZ_EDGE_MASS_FRACTION,
-  TET10_HRZ_VERTEX_MASS_FRACTION,
   TET10_NODE_COUNT
 } from "./element-tet10";
 import {
-  assembleNodalForces,
   assembleSparseStiffness,
   collectConstraints,
   collectElementCoordinates,
@@ -25,6 +28,7 @@ export type PreparedStructuralSystem = {
   mass: Float64Array;
   fullMass: Float64Array;
   totalMass: number;
+  loadAssembly?: LoadAssemblyDiagnostics;
   free: Int32Array;
   constraints: Map<number, number>;
 };
@@ -42,7 +46,17 @@ export function prepareStructuralSystem(
   const constraints = collectConstraints(model, boundaryConditionNames);
   if (!constraints.ok) return constraints;
   const free = enumerateFreeDofs(model.counts.nodes * 3, constraints.values);
-  const fullLoad = assembleNodalForces(model, loadNames);
+  const loadAssembly = assembleNodalLoadVectorWithDiagnostics(model, loadNames);
+  if (loadAssembly.diagnostics.errors.length > 0) {
+    return {
+      ok: false,
+      error: {
+        code: loadAssembly.diagnostics.errors[0]!.code,
+        message: loadAssembly.diagnostics.errors.map((error) => error.message).join("; ")
+      }
+    };
+  }
+  const fullLoad = loadAssembly.vector;
   const reduced = reduceCsrSystem(stiffness.stiffness, fullLoad, free, constraints.values);
   const lumpedMass = assembleLumpedMass(model, analysisLabel);
   if (!lumpedMass.ok) return lumpedMass;
@@ -74,10 +88,22 @@ export function prepareStructuralSystem(
       mass: reducedMass,
       fullMass: lumpedMass.dofMass,
       totalMass: lumpedMass.totalMass,
+      ...(hasAdvancedLoadPrimitives(model, loadNames) ? { loadAssembly: loadAssembly.diagnostics } : {}),
       free,
       constraints: constraints.values
     }
   };
+}
+
+/** Legacy result bundles omit assembly detail; expose it only for the new primitives that require balance diagnostics. */
+export function hasAdvancedLoadPrimitives(model: NormalizedOpenCAEModel, loadNames: string[]): boolean {
+  const selected = new Set(loadNames);
+  return model.loads.some((load) => selected.has(load.name) && (
+    load.type === "surfaceTraction"
+    || load.type === "bodyForceDensity"
+    || load.type === "remoteForce"
+    || load.type === "equivalentBoltPreload"
+  ));
 }
 
 export function assembleLumpedMass(model: NormalizedOpenCAEModel, analysisLabel: "Dynamic" | "Modal" = "Dynamic"):

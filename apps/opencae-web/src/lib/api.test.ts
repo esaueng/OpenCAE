@@ -458,6 +458,16 @@ describe("api", () => {
     expect(response.study.loads[0]?.parameters.directionMode).toBe("Opposite normal");
   });
 
+  test("preserves advanced load metadata and canonical units when adding locally", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("missing", { status: 404 })));
+
+    const remote = await addLoad("study-1", "remote_force", 500, "selection-face-1", [0, 0, -1], null, null, study, { remotePoint: [4, 5, 6] });
+    const volume = await addLoad("study-1", "volume_force", 1200, "selection-body-1", [0, -1, 0], null, null, study);
+
+    expect(remote.study.loads[0]?.parameters).toMatchObject({ units: "N", remotePoint: [4, 5, 6] });
+    expect(volume.study.loads[0]?.parameters).toMatchObject({ units: "N/m^3" });
+  });
+
   test("adds payload material metadata locally while preserving value as mass", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("missing", { status: 404 })));
 

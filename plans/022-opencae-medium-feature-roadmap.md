@@ -2,7 +2,7 @@
 
 ## Status
 
-In progress on `codex/022-medium-feature-roadmap`.
+Complete on `codex/022-medium-feature-roadmap`.
 
 | Increment | Status | Release gate |
 | - | - | - |
@@ -10,7 +10,7 @@ In progress on `codex/022-medium-feature-roadmap`.
 | 2. Open section and project custom materials | Released (2026-07-14) | 372 focused tests, typecheck, build, 1,279-test full suite |
 | 3. Static/dynamic cases, combinations, envelopes | Released (2026-07-14) | 361 focused tests, typecheck, build, 1,308-test full suite |
 | 4. Static mesh-convergence studies | Released (2026-07-14) | 265 focused tests, typecheck, build, 1,319-test full suite |
-| 5. Advanced loads and equivalent bolt preload | Pending | Same gate |
+| 5. Advanced loads and equivalent bolt preload | Released (2026-07-14) | 326 focused tests, typecheck, build, 1,340-test full suite |
 
 The plan runs after the result-identity, cache-key, and barycentric-probe foundation from plan 021 Stage 1. The browser solve limit is 100,000 DOF and must always be passed through `@opencae/solve-pipeline`; the solver package's internal 30,000-DOF default is not the product limit.
 
@@ -59,13 +59,19 @@ The plan runs after the result-identity, cache-key, and barycentric-probe founda
 - Add a static-case/probe control and lightweight SVG plot of both metrics against actual DOF, including skipped/capped markers and the compact persisted rung details.
 - Preserve the version-2 portable container and workspace autosave behavior with optional convergence records. Keep convergence meshing local-only so fallback paths cannot mutate the API-owned working study.
 
-## Remaining increment
+## Increment 5 — Advanced loads and boundary conditions
 
-5. Add consistently integrated surface traction and volume force, rank-checked distributed remote wrench loads, and static-only equivalent bonded-linear bolt preload. Preserve exact resultant/moment diagnostics and reject missing geometry mappings.
+- Rename the existing face load in user-facing surfaces to **Face force (total)** and state that its display point is visual only. Preserve its total-force semantics and shared consistent surface integration.
+- Add surface traction as force per area on selected facets. Tri3 and Tri6 integration shares the established surface-load path and conserves the exact applied resultant.
+- Add body force density on an explicit element set. Tet4 uses equal volume weights and Tet10 uses positive HRZ lumping; both conserve the integrated volume resultant. Multi-body inputs without body-to-element mapping fail instead of guessing.
+- Add remote force as an area-weighted distributed wrench. A scaled, pivoted, rank-checked 6x6 minimum-norm solve enforces the requested resultant force and remote-point moment and reports both balance errors. Degenerate surfaces fail clearly. This load is not a rigid MPC coupling.
+- Add static-only equivalent bolt preload across two opposing faces. Validate area, normals, centroid separation, preload axis, connected topology, and net force/moment balance before applying equal and opposite distributed tractions. Results identify the bonded-linear approximation without contact, slip, or fastener stiffness.
+- Support surface traction, body force density, and remote force in static and dynamic cases. Keep equivalent bolt preload out of dynamic studies at schema, study-validation, API, adapter, and UI boundaries.
+- Persist canonical advanced-load values and metadata through workspace/project files, round-trip them through actual volume-mesh intake, expose assembly diagnostics in Core results, and replace the shipped boundary-condition menu placeholders.
 
 ## Compatibility and delivery
 
-- OpenCAE Core schema `0.3.0` adds modal steps first and will add the advanced load primitives in increment 5. Readers continue accepting `0.1.0` and `0.2.0`.
+- OpenCAE Core schema `0.3.0` adds modal steps plus surface traction, body force density, remote force, and equivalent bolt preload primitives. Readers continue accepting `0.1.0` and `0.2.0`.
 - The portable `opencae-local-project` container remains version 2; new project fields are optional.
 - Result APIs are a structural/modal union. Legacy single-result bundles remain readable.
 - Each increment receives focused tests, `pnpm typecheck`, `pnpm build`, and one full `pnpm test`, followed by a short imperative commit and push.

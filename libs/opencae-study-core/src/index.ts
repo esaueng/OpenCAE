@@ -62,14 +62,24 @@ export function validateStaticStressStudy(study: Study, customMaterials: readonl
   diagnostics.push(...structuralVariantDiagnostics(study));
   for (const load of study.loads) {
     const selection = study.namedSelections.find((item) => item.id === load.selectionRef);
-    if (!selection || selection.entityType !== "face") {
-      diagnostics.push(issue(`validation-load-selection-${load.id}`, `Load ${load.id} must reference a face selection.`));
+    const expectedSelectionType = load.type === "volume_force" ? "body" : "face";
+    if (!selection || selection.entityType !== expectedSelectionType) {
+      diagnostics.push(issue(`validation-load-selection-${load.id}`, `Load ${load.id} must reference a ${expectedSelectionType} selection.`));
     }
     if (!isPositiveFinite(load.parameters.value)) {
       diagnostics.push(issue(`validation-load-value-${load.id}`, `Load ${load.id} needs a positive finite magnitude.`));
     }
     if (!isDirection(load.parameters.direction)) {
       diagnostics.push(issue(`validation-load-direction-${load.id}`, `Load ${load.id} needs a 3D direction vector.`));
+    }
+    if (load.type === "remote_force" && !isFiniteVec3(load.parameters.remotePoint)) {
+      diagnostics.push(issue(`validation-load-remote-point-${load.id}`, `Remote force ${load.id} needs explicit remote-point coordinates.`));
+    }
+    if (load.type === "bolt_preload") {
+      const secondarySelection = study.namedSelections.find((item) => item.id === load.parameters.secondarySelectionRef);
+      if (!secondarySelection || secondarySelection.entityType !== "face" || secondarySelection.id === selection?.id) {
+        diagnostics.push(issue(`validation-load-secondary-selection-${load.id}`, `Bolt preload ${load.id} needs a different opposing face selection.`));
+      }
     }
   }
   if (study.meshSettings.status !== "complete") diagnostics.push(issue("validation-mesh", "Generate the mesh before running."));
@@ -102,14 +112,21 @@ export function validateDynamicStructuralStudy(study: Study, customMaterials: re
   diagnostics.push(...materialProcessDiagnostics(study, customMaterials));
   for (const load of study.loads) {
     const selection = study.namedSelections.find((item) => item.id === load.selectionRef);
-    if (!selection || selection.entityType !== "face") {
-      diagnostics.push(issue(`validation-load-selection-${load.id}`, `Load ${load.id} must reference a face selection.`));
+    const expectedSelectionType = load.type === "volume_force" ? "body" : "face";
+    if (!selection || selection.entityType !== expectedSelectionType) {
+      diagnostics.push(issue(`validation-load-selection-${load.id}`, `Load ${load.id} must reference a ${expectedSelectionType} selection.`));
     }
     if (!isPositiveFinite(load.parameters.value)) {
       diagnostics.push(issue(`validation-load-value-${load.id}`, `Load ${load.id} needs a positive finite magnitude.`));
     }
     if (!isDirection(load.parameters.direction)) {
       diagnostics.push(issue(`validation-load-direction-${load.id}`, `Load ${load.id} needs a 3D direction vector.`));
+    }
+    if (load.type === "remote_force" && !isFiniteVec3(load.parameters.remotePoint)) {
+      diagnostics.push(issue(`validation-load-remote-point-${load.id}`, `Remote force ${load.id} needs explicit remote-point coordinates.`));
+    }
+    if (load.type === "bolt_preload") {
+      diagnostics.push(issue(`validation-load-static-only-${load.id}`, `Load ${load.id} is an equivalent bolt preload and is static-only.`));
     }
   }
   if (study.loads.length === 0) diagnostics.push(issue("validation-load", "Choose where force, pressure, or payload weight is applied."));
@@ -293,6 +310,12 @@ function isDirection(value: unknown): value is [number, number, number] {
     value.length === 3 &&
     value.every((item) => typeof item === "number" && Number.isFinite(item)) &&
     Math.hypot(value[0], value[1], value[2]) > 1e-12;
+}
+
+function isFiniteVec3(value: unknown): value is [number, number, number] {
+  return Array.isArray(value) &&
+    value.length === 3 &&
+    value.every((item) => typeof item === "number" && Number.isFinite(item));
 }
 
 function vectorForAxis(axis: PrintCriticalAxis): [number, number, number] {

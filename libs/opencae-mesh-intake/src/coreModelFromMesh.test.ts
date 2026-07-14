@@ -104,6 +104,39 @@ describe("buildCoreModelFromCloudMesh", () => {
       "surface_bottom_nodes"
     ]);
   });
+
+  it("round-trips advanced load primitives through the meshed-model contract", () => {
+    const volumeMesh = singleTetArtifact();
+    volumeMesh.surfaceFacets[2]!.normal = [0, 0, 1];
+    const model = buildCoreModelFromCloudMesh({
+      study: {
+        id: "advanced-loads",
+        type: "static_stress",
+        materialAssignments: [{ materialId: "mat-aluminum-6061" }],
+        namedSelections: [
+          { id: "body", name: "Body", entityType: "body", geometryRefs: [{ entityType: "body", entityId: "body" }] },
+          { id: "bottom", name: "Bottom", entityType: "face", geometryRefs: [{ entityType: "face", entityId: "step-face-4" }] },
+          { id: "load", name: "Load", entityType: "face", geometryRefs: [{ entityType: "face", entityId: "step-face-9" }] }
+        ],
+        constraints: [{ id: "fixed", type: "fixed", selectionRef: "bottom", parameters: {} }],
+        loads: [
+          { id: "traction", type: "surface_traction", selectionRef: "load", parameters: { value: 2, units: "kPa", direction: [1, 0, 0] } },
+          { id: "body-force", type: "volume_force", selectionRef: "body", parameters: { value: 3, units: "kN/m^3", direction: [0, 1, 0] } },
+          { id: "remote", type: "remote_force", selectionRef: "load", parameters: { value: 4, units: "N", direction: [0, 0, -1], remotePoint: [0.1, 0.2, 0.3] } }
+        ]
+      },
+      displayModel: { bodyCount: 1 },
+      volumeMesh,
+      analysisType: "static_stress",
+      solverSettings: {}
+    });
+
+    expect(model.loads).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "surfaceTraction", traction: [2000, 0, 0] }),
+      expect.objectContaining({ type: "bodyForceDensity", elementSet: "allElements", forceDensity: [0, 3000, 0] }),
+      expect.objectContaining({ type: "remoteForce", totalForce: [0, 0, -4], remotePoint: [0.1, 0.2, 0.3] })
+    ]));
+  });
 });
 
 /** One positive-volume Tet4 in meters with canonical face facets (TET_CORNER_FACES order). */

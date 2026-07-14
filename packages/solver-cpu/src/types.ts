@@ -1,4 +1,4 @@
-import type { CoreModalSolveResult as CoreModalFeaResult, CoreSolveResult, CoreStructuralSolveResult, NormalizedOpenCAEModel, OpenCAEModelJson, ValidationReport } from "@opencae/core";
+import type { CoreModalSolveResult as CoreModalFeaResult, CoreSolveResult, CoreStructuralSolveResult, LoadAssemblyDiagnostics, NormalizedOpenCAEModel, OpenCAEModelJson, ValidationReport } from "@opencae/core";
 
 export type CpuSolverInput = OpenCAEModelJson | NormalizedOpenCAEModel;
 
@@ -103,6 +103,7 @@ export type CpuSolverDiagnostics = {
   converged?: boolean;
   matrixRows?: number;
   matrixNonZeros?: number;
+  loadAssembly?: LoadAssemblyDiagnostics;
   reactionBalance?: {
     appliedLoad: [number, number, number];
     reaction: [number, number, number];

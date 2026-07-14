@@ -32,6 +32,14 @@ Static convergence studies are project records, not run variants. The browser cl
 
 The orchestrator retains only compact rung metrics: requested preset, actual mesh size and counts, raw element peak von Mises stress, and one interpolated displacement-probe magnitude. It reuses the result probe's barycentric vector interpolation on the nearest solver-surface triangle with a model-scale mapping tolerance. Full mesh and result fields remain transient to each worker job and are not attached to the convergence record.
 
+## Advanced Load Assembly
+
+All surface loads share one facet-integration boundary. Total face force, pressure, and surface traction are converted to a physical facet resultant and integrated with Tri3/Tri6-consistent nodal weights. Body force density is integrated over the selected element set using equal Tet4 weights or positive HRZ Tet10 lumping. Each path records the actual area or volume and assembled resultant so force conservation is observable at the solver boundary.
+
+Remote force assembly treats the selected face as a distributed wrench. It solves the area-weighted minimum-norm nodal distribution subject to three resultant-force and three remote-point-moment constraints. Constraint rows are geometry-scaled before a pivoted 6x6 rank check; a degenerate selection fails instead of dropping moment equations. Diagnostics report requested and assembled force/moment plus their balance errors. The formulation does not create rigid MPC kinematics.
+
+Equivalent bolt preload is a static load pair, not a contact model. Preflight requires two nonzero-area, separated, opposing surface sets on one connected structure and an axis aligned from the first centroid toward the second. Equal and opposite consistently distributed tractions must have zero net force and moment within scale-aware tolerance. The approximation omits contact, slip, and fastener stiffness and is labeled as such in UI and reports.
+
 ## Materials And Workspace Sections
 
 Starter materials and optional project-scoped custom materials resolve through `@opencae/materials`. The same strict resolver is used by UI assignment, study validation, mesh intake, browser/API Core adapters, and reports. An explicit dangling material ID is an error; no solver boundary substitutes a default material. Custom values are stored canonically in Pa and kg/m³, are marked user-supplied/unverified, and remain local to the owning project.

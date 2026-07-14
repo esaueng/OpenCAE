@@ -2,7 +2,7 @@ import { isModalResultSummary } from "@opencae/schema";
 import type { AnalysisMesh, CustomMaterial, DisplayModel, DynamicSolverSettings, MeshConvergenceRecord, MeshQuality, Project, ResultField, ResultRenderBounds, ResultSummary, RunEvent, RunVariantRef, RunVariantResult, Study, StudyRun } from "@opencae/schema";
 import type { StepGeometryInspection, StepGeometryRepairReport } from "@opencae/mesh-intake";
 import { assertCompatibleManufacturingProcess, resolveMaterial } from "@opencae/materials";
-import type { LoadApplicationPoint, LoadDirection, LoadDirectionLabel, LoadType, PayloadLoadMetadata } from "../loadPreview";
+import { unitsForLoadType, type LoadApplicationPoint, type LoadDirection, type LoadDirectionLabel, type LoadType, type PayloadLoadMetadata } from "../loadPreview";
 import type { PayloadObjectSelection } from "../workspaceViewTypes";
 import { embedUploadedModelFile, type EmbeddedModelFile, type LocalResultBundle, type SolverSurfaceMesh } from "../projectFile";
 import { createLocalBlankProject, createLocalSampleProject, createLocalUploadResponse, openLocalProjectPayload } from "../localProjectFactory";
@@ -800,7 +800,7 @@ export async function addLoad(studyId: string, type: LoadType, value: number, se
               id: loadId,
               type,
               selectionRef,
-              parameters: { value, units: type === "pressure" ? "kPa" : type === "gravity" ? "kg" : "N", direction, ...(directionMode ? { directionMode } : {}), ...(applicationPoint ? { applicationPoint } : {}), ...(payloadObject ? { payloadObject } : {}), ...(type === "gravity" ? payloadMetadata : {}) },
+              parameters: { value, units: unitsForLoadType(type), direction, ...(directionMode ? { directionMode } : {}), ...(applicationPoint ? { applicationPoint } : {}), ...(payloadObject ? { payloadObject } : {}), ...(type === "gravity" || type === "remote_force" || type === "bolt_preload" ? payloadMetadata : {}) },
               status: "complete" as const
             }
           ],

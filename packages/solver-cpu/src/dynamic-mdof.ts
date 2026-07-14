@@ -1,14 +1,14 @@
 import { type NormalizedOpenCAEModel } from "@opencae/core";
 import { dynamicCoreResultFromSolve } from "./results";
 import {
-  assembleNodalForces,
+  assembleNodalForcesWithDiagnostics,
   elementNodeCountForBlock,
   getNormalizedModel,
   maxAbs,
   recoverElementResults
 } from "./solver";
 import { addSparseEntry, conjugateGradient, createSparseMatrixBuilder, csrMatVec, reduceCsrRhs, toCsrMatrix, type CsrMatrix } from "./sparse";
-import { expandFreeVector, prepareStructuralSystem, type PreparedStructuralSystem } from "./structural-system";
+import { expandFreeVector, hasAdvancedLoadPrimitives, prepareStructuralSystem, type PreparedStructuralSystem } from "./structural-system";
 import { solveModalSubspace } from "./modal";
 import type {
   CpuSolverError,
@@ -112,11 +112,14 @@ export function solveDynamicLinearTetLoadCases(
   const sharedDamping = resolveRayleighDamping(prepared.system, sharedSettings, options);
   const solvedCases: DynamicLoadCaseSolve[] = [];
   for (const { loadCase, step } of dynamicSteps) {
-    const fullLoad = assembleNodalForces(model, step.loads);
+    const loadAssembly = assembleNodalForcesWithDiagnostics(model, step.loads);
+    if (!loadAssembly.ok) return { ok: false, error: loadAssembly.error, caseId: loadCase.id };
+    const fullLoad = loadAssembly.forces;
     const system: PreparedStructuralSystem = {
       ...prepared.system,
       fullLoad,
-      load: reduceCsrRhs(prepared.system.fullStiffness, fullLoad, prepared.system.free, prepared.system.constraints)
+      load: reduceCsrRhs(prepared.system.fullStiffness, fullLoad, prepared.system.free, prepared.system.constraints),
+      loadAssembly: hasAdvancedLoadPrimitives(model, step.loads) ? loadAssembly.diagnostics : undefined
     };
     const settings = dynamicSettings(model, { ...options, stepIndex: loadCase.stepIndex });
     const solved = solveDynamicPreparedSystem(model, system, settings, { ...options, stepIndex: loadCase.stepIndex }, sharedDamping);
@@ -222,6 +225,7 @@ function solveDynamicPreparedSystem(
     maxVonMisesStress: Math.max(...frames.map((frame) => maxAbs((frame.vonMisesPeak ?? frame.vonMises).values)), 0),
     solverMode: "sparse",
     converged: true,
+    ...(system.loadAssembly ? { loadAssembly: system.loadAssembly } : {}),
     frameCount: frames.length,
     visualizationSmoothing: options.visualizationSmoothing,
     startTime: settings.startTime,

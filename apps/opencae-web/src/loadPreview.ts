@@ -5,7 +5,7 @@ import type { PayloadObjectSelection, ViewerLoadMarker } from "./workspaceViewTy
 
 export type { PayloadObjectSelection } from "./workspaceViewTypes";
 
-export type LoadType = "force" | "pressure" | "gravity";
+export type LoadType = Load["type"];
 export type LoadDirectionLabel = "-Y" | "+Y" | "+X" | "-X" | "+Z" | "-Z" | "Normal" | "Opposite normal";
 export const LOAD_DIRECTION_LABELS = ["-Y", "+Y", "+X", "-X", "+Z", "-Z", "Normal", "Opposite normal"] as const satisfies readonly LoadDirectionLabel[];
 export type LoadDirection = [number, number, number];
@@ -15,6 +15,8 @@ export interface PayloadLoadMetadata {
   payloadMaterialId?: string;
   payloadVolumeM3?: number;
   payloadMassMode?: PayloadMassMode;
+  remotePoint?: LoadApplicationPoint;
+  secondarySelectionRef?: string;
 }
 export interface DraftLoadPreview {
   load: Load;
@@ -32,7 +34,8 @@ const DIRECTION_VECTORS: Record<Exclude<LoadDirectionLabel, "Normal" | "Opposite
 };
 
 export function unitsForLoadType(type: LoadType) {
-  if (type === "pressure") return "kPa";
+  if (type === "pressure" || type === "surface_traction") return "kPa";
+  if (type === "volume_force") return "N/m^3";
   if (type === "gravity") return "kg";
   return "N";
 }
@@ -103,7 +106,9 @@ export function loadMarkerFromLoad(load: Load, study: Study, stackIndex: number,
   return {
     id: load.id,
     faceId,
-    point: applicationPointForLoad(load) ?? (load.type === "gravity" ? payloadObject?.center : undefined),
+    point: load.type === "remote_force" && isVector3(load.parameters.remotePoint)
+      ? load.parameters.remotePoint
+      : applicationPointForLoad(load) ?? (load.type === "gravity" ? payloadObject?.center : undefined),
     payloadObject,
     type: load.type,
     value: Number(load.parameters.value ?? 0),
@@ -155,7 +160,7 @@ export function loadMarkerOrdinalLabel(marker: ViewerLoadMarker) {
 }
 
 export function loadMarkerDisplayLabel(marker: ViewerLoadMarker) {
-  const kind = marker.type === "pressure" ? "P" : marker.type === "gravity" ? "G" : "F";
+  const kind = marker.type === "pressure" || marker.type === "surface_traction" ? "P" : marker.type === "gravity" ? "G" : "F";
   return `${loadMarkerOrdinalLabel(marker)} ${kind} ${formatLoadMarkerValue(marker.value)} ${marker.units} ${marker.directionLabel}`;
 }
 

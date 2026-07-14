@@ -96,6 +96,41 @@ describe("validateStaticStressStudy", () => {
     expect(inferCriticalPrintAxis(study, [{ selectionId: "face", entityId: "face-1", center: [1, 0, 0] }])).toBeUndefined();
   });
 
+  it("validates advanced load selection and static-only contracts", () => {
+    const selections = [
+      ...readyStudy.namedSelections,
+      { id: "face-b", name: "Face B", entityType: "face" as const, geometryRefs: [{ bodyId: "body", entityType: "face" as const, entityId: "face-2", label: "Face B" }], fingerprint: "face-b" },
+      { id: "body", name: "Body", entityType: "body" as const, geometryRefs: [{ bodyId: "body", entityType: "body" as const, entityId: "body", label: "Body" }], fingerprint: "body" }
+    ];
+    const advanced: Study = {
+      ...readyStudy,
+      namedSelections: selections,
+      loads: [
+        { id: "traction", type: "surface_traction", selectionRef: "face", parameters: { value: 10, direction: [1, 0, 0] }, status: "complete" },
+        { id: "volume", type: "volume_force", selectionRef: "body", parameters: { value: 10, direction: [0, -1, 0] }, status: "complete" },
+        { id: "remote", type: "remote_force", selectionRef: "face", parameters: { value: 10, direction: [0, 0, -1], remotePoint: [0, 0, 0] }, status: "complete" },
+        { id: "preload", type: "bolt_preload", selectionRef: "face", parameters: { value: 10, direction: [1, 0, 0], secondarySelectionRef: "face-b" }, status: "complete" }
+      ]
+    };
+
+    expect(validateStaticStressStudy(advanced)).toEqual([]);
+    const dynamic = {
+      ...advanced,
+      name: "Dynamic",
+      type: "dynamic_structural" as const,
+      solverSettings: {
+        startTime: 0,
+        endTime: 0.1,
+        timeStep: 0.01,
+        outputInterval: 0.01,
+        dampingRatio: 0.02,
+        integrationMethod: "newmark_average_acceleration" as const,
+        loadProfile: "ramp" as const
+      }
+    };
+    expect(validateStudy(dynamic).map((diagnostic) => diagnostic.message)).toContain("Load preload is an equivalent bolt preload and is static-only.");
+  });
+
   it("retains the dominant bending span when the cantilever clamp normal follows the span", () => {
     const study: Study = {
       ...readyStudy,
