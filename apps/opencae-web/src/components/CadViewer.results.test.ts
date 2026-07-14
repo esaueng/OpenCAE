@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { describe, expect, test, vi } from "vitest";
 import { REPORT_CAPTURE_BACKGROUND, VIEWER_AXIS_HEAD_RADIUS, VIEWER_AXIS_LABEL_BADGE_COLOR, VIEWER_AXIS_LABEL_BADGE_RADIUS, VIEWER_AXIS_LABEL_COLOR, VIEWER_AXIS_LABEL_FONT_SIZE, VIEWER_AXIS_LABEL_FONT_WEIGHT, VIEWER_AXIS_LABEL_OUTLINE_COLOR, VIEWER_AXIS_LABEL_OUTLINE_WIDTH, VIEWER_CREDIT_URL, VIEWER_GIZMO_ALIGNMENT, VIEWER_GIZMO_AXIS_LENGTH, VIEWER_GIZMO_LABEL_DISTANCE, VIEWER_GIZMO_MARGIN, VIEWER_GIZMO_SCALE, VIEWER_ISOMETRIC_GIZMO_VIEW, VIEWER_VIEW_CUBE_BODY_OPACITY, VIEWER_VIEW_CUBE_CORNER_HIT_RADIUS, VIEWER_VIEW_CUBE_CORNER_RADIUS, VIEWER_VIEW_CUBE_EDGE_COLOR, VIEWER_VIEW_CUBE_FACE_HOVER_OPACITY, VIEWER_VIEW_CUBE_FACE_LABEL_FONT_SIZE, VIEWER_VIEW_CUBE_FACE_OPACITY, VIEWER_VIEW_CUBE_SIZE, applyResultFrameToGeometry, axisLabelToViewAxis, beamDemoDisplacementAtStation, beamDemoPayloadOffset, beamDemoStationForPoint, buildSolverSurfaceOutlineGeometry, buildSolverSurfaceResultGeometry, cameraDistanceForBounds, cameraViewForAxis, cloneResultPreviewObject, colorizeResultObject, colorizeSampleResultGeometry, createBeamDemoCoordinate, createRenderedFrameCaptureController, createUndeformedResultOutlineObject, defaultHomeViewTarget, deformationScaleForResultFields, displayedLegendTickLabels, finalVisualScaleForDisplacementField, getViewCubeCornerDescriptors, getViewCubeFaceDescriptors, gizmoViewTargetToRequest, interpolateDisplacementAtPoint, legendMeshStats, legendTickLabels, normalizedPointLoadCantileverShape, opaqueContentCropRect, payloadHighlightObjectId, pointLoadCantileverShape, printLayerVisualizationForBounds, recoverSurfaceNodeScalarField, renderReportCapture, reportCaptureBounds, resultFieldValuesAlignedToGeometry, resultLegendContentScale, resultLegendResizeDimensions, resultProbesForKind, resultValueForPoint, rotatedCameraOrbit, shouldDisableResultDeformation, shouldShowDimensionOverlay, shouldShowModelHitLabel, shouldShowResultMarkers, shouldShowUndeformedResultOutline, shouldShowViewCubeFaceLabel, solverSpaceResultCoordinateTransform, solverSurfaceDisplayFootprint, solverSurfaceResultFields, updatePackedSamples, viewCubeFaceToGizmoView, viewerCameraResetPose, viewerGizmoLayout } from "./CadViewer";
-import { cameraForProjection, cameraVerticalSpanAtTarget, fitOrthographicCamera, orthographicVerticalSpanForBounds, panCamera, resizeProjectionCamera, solverSurfaceDisplayBoundsForDisplayModel } from "./CadViewer";
+import { cameraForProjection, cameraVerticalSpanAtTarget, captureExcludedObjects, fitOrthographicCamera, orthographicVerticalSpanForBounds, panCamera, resizeProjectionCamera, solverSurfaceDisplayBoundsForDisplayModel } from "./CadViewer";
 import { createPackedResultPlaybackCache, createResultFrameCache, type FaceResultSample } from "../resultFields";
 import type { DisplayFace, DisplayModel, ResultField } from "@opencae/schema";
 import type { PackedPreparedPlaybackCache } from "../resultPlaybackCache";
@@ -156,6 +156,32 @@ describe("CadViewer result coloring", () => {
     expect(scene.background instanceof THREE.Color && `#${scene.background.getHexString()}`).toBe("#070b10");
     expectVectorCloseTo(camera.position, [40, 40, 40]);
     expect(camera.quaternion.angleTo(originalQuaternion)).toBeCloseTo(0);
+  });
+
+  test("capture hides tagged view-gizmo objects while retaining model annotations", () => {
+    const scene = new THREE.Scene();
+    const model = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1));
+    const annotation = new THREE.Mesh(new THREE.SphereGeometry(0.1));
+    annotation.userData.opencaeAnnotation = true;
+    const gizmo = new THREE.Group();
+    gizmo.userData.opencaeCaptureExclude = true;
+    gizmo.add(new THREE.Mesh(new THREE.BoxGeometry(100, 100, 100)));
+    scene.add(model, annotation, gizmo);
+    const camera = new THREE.PerspectiveCamera(42, 1.6);
+    camera.position.set(4, 4, 4);
+    camera.lookAt(0, 0, 0);
+    const visibility: Array<{ annotation: boolean; gizmo: boolean }> = [];
+    const gl = {
+      render: vi.fn(() => visibility.push({ annotation: annotation.visible, gizmo: gizmo.visible })),
+      domElement: { toDataURL: vi.fn(() => "data:image/png;base64,capture") }
+    };
+
+    expect(captureExcludedObjects(scene)).toEqual([gizmo]);
+    renderReportCapture(gl, scene, camera);
+    expect(visibility).toEqual([
+      { annotation: true, gizmo: false },
+      { annotation: true, gizmo: true }
+    ]);
   });
 
   test("orthographic report capture restores position, orientation, and frustum", () => {
