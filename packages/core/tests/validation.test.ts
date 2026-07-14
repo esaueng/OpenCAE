@@ -710,4 +710,27 @@ describe("validateModelJson", () => {
       ])
     );
   });
+
+  test("accepts schema 0.3 modal steps without loads and enforces inertial inputs", () => {
+    const base = createSingleTetModel();
+    const modal = {
+      ...base,
+      schemaVersion: "0.3.0" as const,
+      materials: base.materials.map((material) => ({ ...material, density: 7850 })),
+      loads: [],
+      steps: [{
+        name: "modes",
+        type: "modal" as const,
+        boundaryConditions: base.boundaryConditions.map((condition) => condition.name),
+        modeCount: 6
+      }]
+    };
+    expect(validateModelJson(modal).ok).toBe(true);
+    expect(preflightCoreModel(modal).errors.map((issue) => issue.code)).not.toContain("missing-step-loads");
+
+    const missingDensity = { ...modal, materials: base.materials };
+    expect(preflightCoreModel(missingDensity).errors.map((issue) => issue.code)).toContain("missing-inertial-material-density");
+    const invalidCount = { ...modal, steps: [{ ...modal.steps[0], modeCount: 11 }] };
+    expect(validateModelJson(invalidCount).errors.map((issue) => issue.code)).toContain("invalid-modal-mode-count");
+  });
 });

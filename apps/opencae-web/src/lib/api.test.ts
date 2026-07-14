@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { isModalResultSummary } from "@opencae/schema";
 import type { DisplayModel, Project, RunEvent, Study } from "@opencae/schema";
 import { addLoad, addSupport, assignMaterial, cancelRun, createProject, dynamicOutputFrameEstimate, generateMesh, geometryWithMeshPreset, getResults, importLocalProject, loadSampleProject, probeUploadedStepRepairAfterMeshFailure, renameProject, runSimulation, STEP_REPAIR_PROBE_MODEL_CHANGED_MESSAGE, STEP_REPAIR_UNAVAILABLE_MESSAGE, subscribeToRun, updateStudy, uploadedStepRepairProbeDecision, uploadModel, withReportCaptures } from "./api";
 
@@ -716,6 +717,7 @@ describe("api", () => {
     expect(results.fields.every((field) => field.runId === response.run.id)).toBe(true);
     expect(results.summary.provenance?.solver).toBe("opencae-core-cloud");
     expect((results.summary.provenance as { runnerVersion?: string })?.runnerVersion).toBe("browser-0.1.0");
+    if (isModalResultSummary(results.summary)) throw new Error("Expected structural results.");
     expect(results.summary.maxStress).toBeGreaterThanOrEqual(0);
   });
 
@@ -941,6 +943,7 @@ describe("api", () => {
     expect((response.run as { solverBackend?: string }).solverBackend).toBe("opencae-core-mdof-tet");
     expect(response.message).toContain("OpenCAE Core Local simulation running");
     expect(seen.map((event) => event.message).join(" ")).toContain("OpenCAE Core dynamic");
+    if (isModalResultSummary(results.summary)) throw new Error("Expected dynamic structural results.");
     expect(results.summary.transient?.frameCount).toBe(21);
     expect(results.fields.some((field) => field.type === "stress" && field.frameIndex === 20)).toBe(true);
     expect(results.summary.provenance?.solver).toBe("opencae-core-cloud");

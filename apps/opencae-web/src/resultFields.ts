@@ -1,6 +1,8 @@
-import type { DisplayFace, ResultField, ResultSummary } from "@opencae/schema";
+import { isModalResultSummary } from "@opencae/schema";
+import type { DisplayFace, ResultField, ResultSummary, StructuralResultSummary } from "@opencae/schema";
+import { semanticResultFieldKey, stressComponentForField } from "./resultSelection";
 
-export type ResultFieldMode = "stress" | "displacement" | "safety_factor" | "velocity" | "acceleration";
+export type ResultFieldMode = "stress" | "displacement" | "safety_factor" | "velocity" | "acceleration" | "mode_shape";
 
 export interface FaceResultSample {
   face: DisplayFace;
@@ -48,7 +50,7 @@ export function dynamicPlaybackFrames(fields: ResultField[]): DynamicPlaybackFra
     .sort((left, right) => left.frameIndex - right.frameIndex);
 }
 
-export function hasDynamicPlaybackFrames(summary: Pick<ResultSummary, "transient">, fields: ResultField[]): boolean {
+export function hasDynamicPlaybackFrames(summary: Pick<StructuralResultSummary, "transient">, fields: ResultField[]): boolean {
   if (!summary.transient || !Number.isFinite(summary.transient.frameCount) || summary.transient.frameCount <= 1) return false;
   const framedFields = fields.filter((field) => typeof field.frameIndex === "number");
   if (!framedFields.length) return false;
@@ -62,6 +64,30 @@ export function hasDynamicPlaybackFrames(summary: Pick<ResultSummary, "transient
   return frameIndexes.size > 1 && dynamicPlaybackFrames(fields).length > 1;
 }
 
+export function synthesizeModalPhaseFields(fields: ResultField[], modeIndex: number, frameCount = 24): ResultField[] {
+  const modeFields = fields.filter((field) => field.type === "mode_shape" && field.modeIndex === modeIndex);
+  if (!modeFields.length) return [];
+  const count = Math.max(2, Math.floor(frameCount));
+  return Array.from({ length: count }, (_, frameIndex) => {
+    const factor = Math.cos(2 * Math.PI * frameIndex / count);
+    const magnitudeFactor = Math.abs(factor);
+    return modeFields.map((field) => ({
+      ...field,
+      id: `${field.id}-phase-${frameIndex}`,
+      frameIndex,
+      timeSeconds: frameIndex / count,
+      values: field.values.map((value) => Math.abs(value) * magnitudeFactor),
+      vectors: field.vectors?.map((vector) => [
+        vector[0] * factor,
+        vector[1] * factor,
+        vector[2] * factor
+      ] as [number, number, number]),
+      min: 0,
+      max: Math.max(0, field.max)
+    }));
+  }).flat();
+}
+
 export interface ResultFrameCache {
   frameIndexes: number[];
   fieldsForFrame: (frameIndex: number) => ResultField[];
@@ -73,6 +99,11 @@ export interface PackedResultPlaybackFieldDescriptor {
   id: string;
   runId: string;
   type: ResultField["type"];
+  component?: ResultField["component"];
+  modeIndex?: number;
+  frequencyHz?: number;
+  eigenvalue?: number;
+  scaledResidual?: number;
   location: ResultField["location"];
   units: string;
   surfaceMeshRef?: string;
@@ -455,6 +486,11 @@ function descriptorForPackedResultField(field: ResultField): PackedResultPlaybac
     id: field.id,
     runId: field.runId,
     type: field.type,
+    ...(field.component ? { component: field.component } : {}),
+    ...(field.modeIndex !== undefined ? { modeIndex: field.modeIndex } : {}),
+    ...(field.frequencyHz !== undefined ? { frequencyHz: field.frequencyHz } : {}),
+    ...(field.eigenvalue !== undefined ? { eigenvalue: field.eigenvalue } : {}),
+    ...(field.scaledResidual !== undefined ? { scaledResidual: field.scaledResidual } : {}),
     location: field.location,
     units: field.units,
     ...(field.surfaceMeshRef ? { surfaceMeshRef: field.surfaceMeshRef } : {}),
@@ -865,7 +901,7 @@ export function fieldWithOwnValueRange(field: ResultField): ResultField {
 }
 
 function transientFieldRangeKey(field: ResultField): string {
-  return `${field.runId}\u0000${field.type}\u0000${field.location}`;
+  return semanticResultFieldKey(field);
 }
 
 function isTransientField(field: ResultField): boolean {
@@ -893,7 +929,7 @@ function normalizedRangeForFieldType(type: ResultField["type"], min: number, max
 }
 
 function fieldSeriesKey(field: ResultField): string {
-  return `${field.runId}:${field.type}:${field.location}`;
+  return semanticResultFieldKey(field);
 }
 
 function interpolateField(lowerField: ResultField, upperField: ResultField, blend: number, framePosition: number): ResultField {
@@ -969,6 +1005,7 @@ function resultProbeLabel(mode: ResultFieldMode, value: number, units = "") {
   if (mode === "velocity") return `Vel: ${formatResultValue(value)}${unit}`;
   if (mode === "acceleration") return `Accel: ${formatResultValue(value)}${unit}`;
   if (mode === "safety_factor") return `FoS: ${formatResultValue(value)}`;
+  if (mode === "mode_shape") return `Amplitude: ${formatResultValue(value)}${unit}`;
   return `Stress: ${formatResultValue(value)}${unit}`;
 }
 
@@ -980,7 +1017,7 @@ const SAFETY_FACTOR_DISPLAY_CAP = 10000;
 const SAFETY_FACTOR_DISPLAY_FLOOR = 0.01;
 
 type SolverResultBundle = {
-  summary?: Pick<ResultSummary, "maxStress" | "safetyFactor"> | null;
+  summary?: ResultSummary | null;
   fields: ResultField[];
 };
 
@@ -995,10 +1032,15 @@ type SolverResultBundle = {
  */
 export function withDerivedSurfaceSafetyFactorFields(results: SolverResultBundle): ResultField[] {
   const fields = results.fields;
+  if (!results.summary || isModalResultSummary(results.summary)) return fields;
   const yieldMpa = solverYieldStressMpa(results.summary);
   if (!yieldMpa) return fields;
   const surfaceStressFields = fields.filter((field) =>
-    field.type === "stress" && field.location === "node" && typeof field.surfaceMeshRef === "string" && field.values.length > 0);
+    field.type === "stress" &&
+    stressComponentForField(field) === "von_mises" &&
+    field.location === "node" &&
+    typeof field.surfaceMeshRef === "string" &&
+    field.values.length > 0);
   if (!surfaceStressFields.length) return fields;
   const derived: ResultField[] = [];
   for (const stressField of surfaceStressFields) {
@@ -1040,7 +1082,7 @@ function clampSafetyFactor(value: number): number {
   return Math.min(SAFETY_FACTOR_DISPLAY_CAP, Math.max(SAFETY_FACTOR_DISPLAY_FLOOR, value));
 }
 
-function solverYieldStressMpa(summary: SolverResultBundle["summary"]): number | null {
+function solverYieldStressMpa(summary: StructuralResultSummary | null | undefined): number | null {
   const maxStress = Number(summary?.maxStress);
   const safetyFactor = Number(summary?.safetyFactor);
   if (!Number.isFinite(maxStress) || maxStress <= 0) return null;

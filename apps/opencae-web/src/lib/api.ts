@@ -1,3 +1,4 @@
+import { isModalResultSummary } from "@opencae/schema";
 import type { AnalysisMesh, DisplayModel, DynamicSolverSettings, MeshQuality, Project, ResultField, ResultRenderBounds, ResultSummary, RunEvent, Study, StudyRun } from "@opencae/schema";
 import type { StepGeometryInspection, StepGeometryRepairReport } from "@opencae/mesh-intake";
 import { assertCompatibleManufacturingProcess } from "@opencae/materials";
@@ -751,9 +752,9 @@ function studyWithLocalBackend(study: Study): Study {
   if (study.solverSettings.backend === "opencae_core_local") return study;
   // The identical-looking branches keep the static/dynamic study union narrowed
   // so each spread pairs solverSettings with its own study variant.
-  return study.type === "dynamic_structural"
-    ? { ...study, solverSettings: { ...study.solverSettings, backend: "opencae_core_local" } }
-    : { ...study, solverSettings: { ...study.solverSettings, backend: "opencae_core_local" } };
+  if (study.type === "dynamic_structural") return { ...study, solverSettings: { ...study.solverSettings, backend: "opencae_core_local" } };
+  if (study.type === "modal_analysis") return { ...study, solverSettings: { ...study.solverSettings, backend: "opencae_core_local" } };
+  return { ...study, solverSettings: { ...study.solverSettings, backend: "opencae_core_local" } };
 }
 
 export async function getResults(runId: string): Promise<ResultsResponse> {
@@ -813,6 +814,7 @@ const DERIVED_SAFETY_FACTOR_CAP = 1000;
 // alignment, so Safety Factor mode used to fall back to demo geometry. Derive a
 // per-node field from the surface stress field and the summary yield margin.
 export function withDerivedSafetyFactorSurfaceField(results: ResultsResponse): ResultsResponse {
+  if (isModalResultSummary(results.summary)) return results;
   const surfaceMesh = results.surfaceMesh;
   if (!surfaceMesh) return results;
   const aligned = (field: ResultField) => field.location === "node" && field.surfaceMeshRef === surfaceMesh.id && field.values.length === surfaceMesh.nodes.length;

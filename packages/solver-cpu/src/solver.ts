@@ -121,12 +121,20 @@ export function getNormalizedModel(input: CpuSolverInput):
 
   const result = normalizeModelJson(input);
   if (!result.ok) {
-    const densityError = result.report.errors.find((issue) => issue.code === "missing-dynamic-material-density");
+    const densityError = result.report.errors.find((issue) =>
+      issue.code === "missing-dynamic-material-density" || issue.code === "missing-inertial-material-density"
+    );
+    const modalSupportError = result.report.errors.find((issue) => issue.code === "missing-modal-support");
+    const hasModalStep = Array.isArray(input.steps) && input.steps.some((step) => step.type === "modal");
     return {
       ok: false,
       error: {
-        code: "validation-failed",
-        message: densityError ? "Dynamic solve requires material density." : "Input model failed OpenCAE Core validation.",
+        code: modalSupportError ? "insufficient-modal-constraints" : "validation-failed",
+        message: modalSupportError
+          ? "Model is insufficiently constrained for modal analysis. Add or revise supports in the Supports step."
+          : densityError
+            ? hasModalStep ? "Modal solve requires material density." : "Dynamic solve requires material density."
+            : "Input model failed OpenCAE Core validation.",
         report: result.report
       }
     };

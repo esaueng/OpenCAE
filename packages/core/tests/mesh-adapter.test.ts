@@ -17,7 +17,7 @@ const coordinates = [
 ];
 
 describe("actual volume mesh adapter", () => {
-  test("converts a Tet4 volume mesh into a v0.2 model with surface facets and sets", () => {
+  test("converts a Tet4 volume mesh into the current model schema with surface facets and sets", () => {
     const model = volumeMeshToModelJson({
       nodes: { coordinates },
       materials: [
@@ -44,7 +44,7 @@ describe("actual volume mesh adapter", () => {
       ]
     });
 
-    expect(model.schemaVersion).toBe("0.2.0");
+    expect(model.schemaVersion).toBe("0.3.0");
     expect(model.surfaceFacets?.length).toBe(6);
     expect(model.surfaceSets?.[0].facets.length).toBeGreaterThan(0);
     expect(model.meshProvenance?.meshSource).toBe("actual_volume_mesh");

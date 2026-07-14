@@ -2,6 +2,7 @@ import {
   OPENCAE_LEGACY_MODEL_SCHEMA_VERSION,
   OPENCAE_MODEL_SCHEMA,
   OPENCAE_MODEL_SCHEMA_VERSION,
+  OPENCAE_PREVIOUS_MODEL_SCHEMA_VERSION,
   type OpenCAEModelJson,
   type ElementType,
   type ValidationIssue,
@@ -34,10 +35,11 @@ export function validateModelJson(input: unknown): ValidationReport {
 
   if (
     input.schemaVersion !== OPENCAE_MODEL_SCHEMA_VERSION &&
+    input.schemaVersion !== OPENCAE_PREVIOUS_MODEL_SCHEMA_VERSION &&
     input.schemaVersion !== OPENCAE_LEGACY_MODEL_SCHEMA_VERSION
   ) {
     errors.push(
-      issue("invalid-schema-version", "Model schemaVersion must be 0.1.0 or 0.2.0.", "$.schemaVersion")
+      issue("invalid-schema-version", "Model schemaVersion must be 0.1.0, 0.2.0, or 0.3.0.", "$.schemaVersion")
     );
   }
 
@@ -62,7 +64,7 @@ export function validateModelJson(input: unknown): ValidationReport {
   validateCoordinateSystem(input.coordinateSystem, errors);
   validateMeshProvenance(input.meshProvenance, errors);
   validateMeshConnections(input.meshConnections, errors);
-  validateDynamicMaterialDensity(input.steps, input.elementBlocks, materials.densityByName, errors);
+  validateInertialMaterialDensity(input.steps, input.elementBlocks, materials.densityByName, errors);
 
   if (
     elementValidation.connectivityOk &&
@@ -120,8 +122,11 @@ export function preflightCoreModel(
   const orphans = orphanNodes(model);
   const step = model.steps[options.stepIndex ?? 0];
   const fixedNodes = step ? activeBoundaryNodes(model, step.boundaryConditions) : new Set<number>();
-  const loadNodes = step ? activeLoadNodes(model, step.loads, facets) : new Set<number>();
-  const loadDiagnostics = step ? assembleNodalLoadVectorWithDiagnostics({ ...model, surfaceFacets: facets }, step.loads).diagnostics : undefined;
+  const activeLoads = step && step.type !== "modal" ? step.loads : [];
+  const loadNodes = step ? activeLoadNodes(model, activeLoads, facets) : new Set<number>();
+  const loadDiagnostics = step && step.type !== "modal"
+    ? assembleNodalLoadVectorWithDiagnostics({ ...model, surfaceFacets: facets }, activeLoads).diagnostics
+    : undefined;
 
   if (orphans.length > 0) {
     errors.push(issue("orphan-nodes", "Production preflight requires all nodes to belong to at least one element.", "$.nodes"));
@@ -136,7 +141,7 @@ export function preflightCoreModel(
     if (!hasBoundarySurfaceSelection(model, step.boundaryConditions, facets)) {
       errors.push(issue("missing-support-surface-set", "Production supports must map to a non-empty surface set.", "$.boundaryConditions"));
     }
-    if (!hasLoadSurfaceSelection(model, step.loads)) {
+    if (step.type !== "modal" && !hasLoadSurfaceSelection(model, step.loads)) {
       errors.push(issue("missing-load-surface-set", "Production loads must map to a non-empty surface set.", "$.loads"));
     }
   }
@@ -645,11 +650,13 @@ function validateSteps(
       return;
     }
     validateUniqueName(step.name, names, "step", `${path}.name`, errors);
-    if (step.type !== "staticLinear" && step.type !== "dynamicLinear") {
-      errors.push(issue("invalid-step-type", "Step type must be staticLinear or dynamicLinear.", `${path}.type`));
+    if (step.type !== "staticLinear" && step.type !== "dynamicLinear" && step.type !== "modal") {
+      errors.push(issue("invalid-step-type", "Step type must be staticLinear, dynamicLinear, or modal.", `${path}.type`));
     }
     validateNameReferenceArray(step.boundaryConditions, boundaryConditionNames, "missing-boundary-condition-reference", `${path}.boundaryConditions`, errors);
-    validateNameReferenceArray(step.loads, loadNames, "missing-load-reference", `${path}.loads`, errors);
+    if (step.type !== "modal") {
+      validateNameReferenceArray(step.loads, loadNames, "missing-load-reference", `${path}.loads`, errors);
+    }
     if (step.type === "dynamicLinear") {
       validateFinite(step.startTime, `${path}.startTime`, "invalid-dynamic-time", errors);
       validateFinite(step.endTime, `${path}.endTime`, "invalid-dynamic-time", errors);
@@ -664,6 +671,14 @@ function validateSteps(
       validateOptionalNonNegative(step.dampingRatio, `${path}.dampingRatio`, "invalid-damping-ratio", errors);
       validateOptionalNonNegative(step.rayleighAlpha, `${path}.rayleighAlpha`, "invalid-rayleigh-alpha", errors);
       validateOptionalNonNegative(step.rayleighBeta, `${path}.rayleighBeta`, "invalid-rayleigh-beta", errors);
+    }
+    if (step.type === "modal") {
+      if (!isInteger(step.modeCount) || step.modeCount < 1 || step.modeCount > 10) {
+        errors.push(issue("invalid-modal-mode-count", "Modal modeCount must be an integer from 1 through 10.", `${path}.modeCount`));
+      }
+      if (!Array.isArray(step.boundaryConditions) || step.boundaryConditions.length === 0) {
+        errors.push(issue("missing-modal-support", "Modal analysis requires at least one support in the supports step.", `${path}.boundaryConditions`));
+      }
     }
   });
 }
@@ -728,13 +743,16 @@ function validateMeshProvenance(meshProvenance: unknown, errors: ValidationIssue
   }
 }
 
-function validateDynamicMaterialDensity(
+function validateInertialMaterialDensity(
   steps: unknown,
   elementBlocks: unknown,
   densityByName: Map<string, number | undefined>,
   errors: ValidationIssue[]
 ): void {
-  if (!Array.isArray(steps) || !steps.some((step) => isRecord(step) && step.type === "dynamicLinear")) return;
+  if (!Array.isArray(steps)) return;
+  const hasDynamicStep = steps.some((step) => isRecord(step) && step.type === "dynamicLinear");
+  const hasModalStep = steps.some((step) => isRecord(step) && step.type === "modal");
+  if (!hasDynamicStep && !hasModalStep) return;
   if (!Array.isArray(elementBlocks)) return;
   elementBlocks.forEach((block, index) => {
     if (!isRecord(block) || typeof block.material !== "string") return;
@@ -742,8 +760,10 @@ function validateDynamicMaterialDensity(
     if (!isFiniteNumber(density) || density <= 0) {
       errors.push(
         issue(
-          "missing-dynamic-material-density",
-          "Dynamic linear steps require positive material density for every solved element block.",
+          hasDynamicStep ? "missing-dynamic-material-density" : "missing-inertial-material-density",
+          hasDynamicStep
+            ? "Dynamic steps require positive material density for every solved element block."
+            : "Modal steps require positive material density for every solved element block.",
           `$.elementBlocks[${index}].material`
         )
       );

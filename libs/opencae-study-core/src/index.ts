@@ -1,4 +1,4 @@
-import type { Diagnostic, DisplayModel, DynamicSolverSettings, Load, Study } from "@opencae/schema";
+import type { Diagnostic, DisplayModel, DynamicSolverSettings, Load, ModalSolverSettings, Study } from "@opencae/schema";
 import { manufacturingProcessCompatibilityError } from "@opencae/materials";
 
 export type PrintCriticalAxis = "x" | "y" | "z";
@@ -77,7 +77,21 @@ export function validateStaticStressStudy(study: Study): Diagnostic[] {
 
 export function validateStudy(study: Study): Diagnostic[] {
   if (study.type === "dynamic_structural") return validateDynamicStructuralStudy(study);
+  if (study.type === "modal_analysis") return validateModalStudy(study);
   return validateStaticStressStudy(study);
+}
+
+export function validateModalStudy(study: Extract<Study, { type: "modal_analysis" }>): Diagnostic[] {
+  const diagnostics: Diagnostic[] = [];
+  const settings = study.solverSettings as ModalSolverSettings;
+  if (study.materialAssignments.length === 0) diagnostics.push(issue("validation-material", "Choose what the part is made of."));
+  diagnostics.push(...materialProcessDiagnostics(study));
+  if (study.constraints.length === 0) diagnostics.push(issue("validation-modal-support", "Add at least one support for modal analysis."));
+  if (study.meshSettings.status !== "complete") diagnostics.push(issue("validation-mesh", "Generate the mesh before running."));
+  if (!Number.isInteger(settings.modeCount) || settings.modeCount < 1 || settings.modeCount > 10) {
+    diagnostics.push(issue("validation-modal-mode-count", "Modal mode count must be from 1 through 10."));
+  }
+  return diagnostics;
 }
 
 export function validateDynamicStructuralStudy(study: Study): Diagnostic[] {

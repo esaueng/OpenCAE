@@ -13,10 +13,11 @@ interface CreateSimulationModalProps {
   open: boolean;
   onCreateStatic: () => void;
   onCreateDynamic: () => void;
+  onCreateModal: () => void;
   onClose: () => void;
 }
 
-export function CreateSimulationModal({ open, onCreateStatic, onCreateDynamic, onClose }: CreateSimulationModalProps) {
+export function CreateSimulationModal({ open, onCreateStatic, onCreateDynamic, onCreateModal, onClose }: CreateSimulationModalProps) {
   const dialogRef = useFocusTrap<HTMLElement>(open, onClose);
   if (!open) return null;
   return (
@@ -28,13 +29,13 @@ export function CreateSimulationModal({ open, onCreateStatic, onCreateDynamic, o
             <X size={18} />
           </button>
         </header>
-        <SimulationTypePicker onCreateStatic={onCreateStatic} onCreateDynamic={onCreateDynamic} />
+        <SimulationTypePicker onCreateStatic={onCreateStatic} onCreateDynamic={onCreateDynamic} onCreateModal={onCreateModal} />
       </section>
     </div>
   );
 }
 
-export function CreateSimulationScreen({ onCreateStatic, onCreateDynamic }: Omit<CreateSimulationModalProps, "open" | "onClose">) {
+export function CreateSimulationScreen({ onCreateStatic, onCreateDynamic, onCreateModal }: Omit<CreateSimulationModalProps, "open" | "onClose">) {
   return (
     <main className="simulation-type-screen" aria-labelledby="simulation-type-title">
       <section className="workflow-modal create-simulation-dialog simulation-type-card">
@@ -44,30 +45,31 @@ export function CreateSimulationScreen({ onCreateStatic, onCreateDynamic }: Omit
             <h2 id="simulation-type-title">Choose Simulation Type</h2>
           </span>
         </header>
-        <SimulationTypePicker onCreateStatic={onCreateStatic} onCreateDynamic={onCreateDynamic} />
+        <SimulationTypePicker onCreateStatic={onCreateStatic} onCreateDynamic={onCreateDynamic} onCreateModal={onCreateModal} />
       </section>
     </main>
   );
 }
 
-type AnalysisChoice = "static" | "dynamic";
+type AnalysisChoice = "static" | "dynamic" | "modal";
 
-function SimulationTypePicker({ onCreateStatic, onCreateDynamic }: Omit<CreateSimulationModalProps, "open" | "onClose">) {
+function SimulationTypePicker({ onCreateStatic, onCreateDynamic, onCreateModal }: Omit<CreateSimulationModalProps, "open" | "onClose">) {
   const [selectedType, setSelectedType] = useState<AnalysisChoice>("static");
-  const selectedAnalysis = selectedType === "static" ? staticAnalysisOption : dynamicAnalysisOption;
-  const handleCreate = selectedType === "static" ? onCreateStatic : onCreateDynamic;
+  const options = ANALYSIS_OPTIONS;
+  const selectedAnalysis = options.find((option) => option.type === selectedType) ?? staticAnalysisOption;
+  const handleCreate = selectedType === "static" ? onCreateStatic : selectedType === "dynamic" ? onCreateDynamic : onCreateModal;
   return (
     <>
       <div className="simulation-picker-layout">
         <section className="simulation-choice-list" aria-label="Choose simulation type">
-          {[staticAnalysisOption, dynamicAnalysisOption].map((option) => (
+          {options.map((option) => (
             <button
               key={option.type}
               className={`simulation-choice-card ${selectedType === option.type ? "active" : ""}`}
               type="button"
               aria-pressed={selectedType === option.type}
               onClick={() => setSelectedType(option.type)}
-              onDoubleClick={() => (option.type === "static" ? onCreateStatic : onCreateDynamic)()}
+              onDoubleClick={() => (option.type === "static" ? onCreateStatic : option.type === "dynamic" ? onCreateDynamic : onCreateModal)()}
             >
               <AnalysisShowcase option={option} variant="compact" />
               <span>
@@ -87,7 +89,7 @@ function SimulationTypePicker({ onCreateStatic, onCreateDynamic }: Omit<CreateSi
         </article>
       </div>
       <footer className="workflow-modal-footer">
-        <span><strong>Need Help?</strong> Static handles steady loads; Dynamic handles transient loads with inertia.</span>
+        <span><strong>Need Help?</strong> Static handles steady loads, Dynamic handles transient loads, and Modal finds natural frequencies.</span>
         <button className="primary" type="button" onClick={handleCreate}>Create Simulation</button>
       </footer>
     </>
@@ -108,7 +110,7 @@ function AnalysisShowcase({ option, variant }: { option: AnalysisOption; variant
   return (
     <figure className={`analysis-showcase analysis-showcase--${variant} analysis-showcase--${option.type}`}>
       <img src={option.image} alt={variant === "large" ? `${option.imageAlt} large preview` : option.imageAlt} />
-      {option.type === "static" ? <StaticShowcaseOverlay /> : <DynamicShowcaseOverlay />}
+      {option.type === "static" ? <StaticShowcaseOverlay /> : option.type === "dynamic" ? <DynamicShowcaseOverlay /> : <ModalShowcaseOverlay />}
     </figure>
   );
 }
@@ -159,6 +161,20 @@ function DynamicShowcaseOverlay() {
   );
 }
 
+function ModalShowcaseOverlay() {
+  return (
+    <svg className="analysis-showcase-overlay" viewBox="0 0 720 360" aria-hidden="true" focusable="false">
+      <path className="showcase-support-post" d="M86 98 L86 276" />
+      <path className="showcase-support-hatch" d="M86 112 l-15 13 M86 140 l-15 13 M86 168 l-15 13 M86 196 l-15 13 M86 224 l-15 13 M86 252 l-15 13" />
+      <path className="showcase-load-shaft" d="M590 150 C620 112 620 248 590 210" />
+      <text className="showcase-label showcase-label--load" x="590" y="126" textAnchor="middle">Mode shape</text>
+      <text className="showcase-frame-label" x="270" y="316" textAnchor="middle">Mode 1</text>
+      <text className="showcase-frame-label" x="374" y="316" textAnchor="middle">Mode 2</text>
+      <text className="showcase-frame-label" x="480" y="316" textAnchor="middle">Mode 3</text>
+    </svg>
+  );
+}
+
 const staticAnalysisOption = {
   type: "static" as AnalysisChoice,
   title: "Static Analysis",
@@ -178,6 +194,18 @@ const dynamicAnalysisOption = {
   image: dynamicAnalysisImage,
   tags: ["Solid", "Transient loads", "Newmark", "Playback frames"]
 } satisfies AnalysisOption;
+
+const modalAnalysisOption = {
+  type: "modal" as AnalysisChoice,
+  title: "Modal Analysis",
+  summary: "Natural frequencies and mode shapes",
+  description: "Find the supported structure's natural frequencies and normalized vibration shapes without applying loads.",
+  imageAlt: "Modal vibration example",
+  image: dynamicAnalysisImage,
+  tags: ["Solid", "Natural frequencies", "Mode shapes", "Local solver"]
+} satisfies AnalysisOption;
+
+const ANALYSIS_OPTIONS = [staticAnalysisOption, dynamicAnalysisOption, modalAnalysisOption] as const;
 
 interface MaterialLibraryModalProps {
   open: boolean;
@@ -330,4 +358,3 @@ export function BoundaryConditionMenu({ open, onSelect, onClose }: { open: boole
     </div>
   );
 }
-
