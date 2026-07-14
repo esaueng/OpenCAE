@@ -22,6 +22,8 @@ export type CoreResultField = {
   component?: "von_mises" | "principal_max" | "principal_min" | "max_shear";
   location: "node" | "element" | "integration_point";
   values: number[];
+  /** Flat symmetric tensors in [xx, yy, zz, xy, yz, xz] order, one per scalar value. */
+  tensorValues?: number[];
   min: number;
   max: number;
   units: string;
@@ -599,6 +601,16 @@ function validateField(
       errors.push(issue("non-finite-field-value", "Core result field values must be finite.", `${path}.values[${valueIndex}]`));
     }
   });
+  if (field.tensorValues !== undefined) {
+    if (field.tensorValues.length !== field.values.length * 6) {
+      errors.push(issue("invalid-field-tensor-length", "Stress tensors must contain six components per scalar value.", `${path}.tensorValues`));
+    }
+    field.tensorValues.forEach((value, valueIndex) => {
+      if (!Number.isFinite(value)) {
+        errors.push(issue("non-finite-field-tensor", "Stress tensor components must be finite.", `${path}.tensorValues[${valueIndex}]`));
+      }
+    });
+  }
   if (field.vectors !== undefined) {
     field.vectors.forEach((vector, vectorIndex) => {
       for (let component = 0; component < 3; component += 1) {

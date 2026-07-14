@@ -267,6 +267,7 @@ describe("Tet10 cantilever fidelity", () => {
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
+    expect(result.result.frames.every((frame) => frame.nodalStress?.values.length === (model.nodes.coordinates.length / 3) * 6)).toBe(true);
     expect(result.result.frames.length).toBeGreaterThan(2);
     expect(result.diagnostics.totalMass).toBeCloseTo(
       STEEL.density * BEAM_LENGTH * BEAM_WIDTH * BEAM_HEIGHT,
