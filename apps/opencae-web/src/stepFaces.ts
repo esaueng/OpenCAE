@@ -79,6 +79,9 @@ const CYLINDER_NORMAL_AXIS_TOLERANCE = 1e-3;
 const CYLINDER_RADIUS_RELATIVE_TOLERANCE = 0.02;
 const CYLINDER_MIN_NORMAL_VARIATION = 0.05;
 const HOLE_WALL_PICK_RADIUS_FACTOR = 0.82;
+const HOLE_CAP_NORMAL_ALIGNMENT_MIN = 0.95;
+const HOLE_CAP_AREA_RELATIVE_TOLERANCE = 0.25;
+const HOLE_CAP_CENTER_RADIUS_TOLERANCE = 0.08;
 
 /** Matches the ids issued by buildStepFaceRegistry. */
 export function isStepFaceId(value: string | null | undefined): value is string {
@@ -158,6 +161,54 @@ export function stepFaceIdForMeshTriangle(registry: StepFaceRegistry, meshIndex:
 
 export function stepFaceRecordForId(registry: StepFaceRegistry, faceId: string): StepFaceRecord | null {
   return registry.faces.find((face) => face.faceId === faceId) ?? null;
+}
+
+/**
+ * Resolve a support picked on a blind hole's circular bottom to the matching
+ * cylindrical wall. The match is intentionally strict so nearby planar faces
+ * and the large annular face around a through-hole remain planar selections.
+ */
+export function stepSupportFaceIdForPickedFace(registry: StepFaceRegistry, pickedFaceId: string): string {
+  const pickedFace = stepFaceRecordForId(registry, pickedFaceId);
+  if (!pickedFace || pickedFace.surfaceType !== "planar") return pickedFaceId;
+
+  const pickedNormalLength = Math.hypot(...pickedFace.avgNormal);
+  if (!(pickedNormalLength > GEOMETRY_EPSILON)) return pickedFaceId;
+  const pickedNormal = scale3(pickedFace.avgNormal, 1 / pickedNormalLength);
+  let bestMatch: { faceId: string; score: number } | null = null;
+
+  for (const candidate of registry.faces) {
+    const cylinder = candidate.cylinder;
+    if (
+      candidate.meshIndex !== pickedFace.meshIndex ||
+      !cylinder?.interior ||
+      !(cylinder.radius > GEOMETRY_EPSILON) ||
+      !(cylinder.length > GEOMETRY_EPSILON)
+    ) continue;
+
+    const normalAlignment = Math.abs(dot3(pickedNormal, cylinder.axis));
+    if (normalAlignment < HOLE_CAP_NORMAL_ALIGNMENT_MIN) continue;
+
+    const expectedCapArea = Math.PI * cylinder.radius * cylinder.radius;
+    const relativeAreaError = Math.abs(pickedFace.area - expectedCapArea) / expectedCapArea;
+    if (relativeAreaError > HOLE_CAP_AREA_RELATIVE_TOLERANCE) continue;
+
+    const halfLength = cylinder.length / 2;
+    const relativeCenter = subtract3(pickedFace.centroid, candidate.centroid);
+    const axialOffset = dot3(relativeCenter, cylinder.axis);
+    const radialOffset = subtract3(relativeCenter, scale3(cylinder.axis, axialOffset));
+    const radialDistance = Math.hypot(...radialOffset);
+    const endpointDistance = Math.abs(Math.abs(axialOffset) - halfLength);
+    const centerTolerance = Math.max(cylinder.radius * HOLE_CAP_CENTER_RADIUS_TOLERANCE, GEOMETRY_EPSILON * 100);
+    if (radialDistance > centerTolerance || endpointDistance > centerTolerance) continue;
+
+    const score = (radialDistance + endpointDistance) / cylinder.radius
+      + relativeAreaError
+      + (1 - normalAlignment);
+    if (!bestMatch || score < bestMatch.score) bestMatch = { faceId: candidate.faceId, score };
+  }
+
+  return bestMatch?.faceId ?? pickedFaceId;
 }
 
 /**
@@ -646,7 +697,7 @@ function canonicalDirection(direction: [number, number, number]): [number, numbe
 }
 
 function displayFaceForRecord(face: StepFaceRecord, scale: number, offset: [number, number, number]): DisplayFace {
-  return {
+  const displayFace: DisplayFace = {
     id: face.faceId,
     label: stepFaceLabel(face),
     color: "#8b949e",
@@ -657,8 +708,16 @@ function displayFaceForRecord(face: StepFaceRecord, scale: number, offset: [numb
     ],
     normal: [...face.avgNormal],
     stressValue: 0,
-    area: face.area
+    area: face.area,
+    surfaceType: face.surfaceType
   };
+  if (face.cylinder) {
+    displayFace.surfaceAxis = [...face.cylinder.axis];
+    displayFace.surfaceRadius = face.cylinder.radius * scale;
+    displayFace.surfaceLength = face.cylinder.length * scale;
+    displayFace.interiorSurface = face.cylinder.interior;
+  }
+  return displayFace;
 }
 
 function stepFaceLabel(face: StepFaceRecord): string {

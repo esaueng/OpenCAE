@@ -545,6 +545,16 @@ export interface DisplayFace {
   stressValue: number;
   /** Real B-rep face area in mm^2 (STEP imports only; A-M3 face registry). */
   area?: number;
+  /** STEP surface classification used for geometry-specific selection markers. */
+  surfaceType?: "planar" | "cylindrical" | "curved";
+  /** Unit cylinder axis in display-model coordinates. */
+  surfaceAxis?: [number, number, number];
+  /** Cylinder radius in normalized viewer units. */
+  surfaceRadius?: number;
+  /** Cylinder axial length in normalized viewer units. */
+  surfaceLength?: number;
+  /** True when a cylindrical surface is the inside wall of a hole. */
+  interiorSurface?: boolean;
 }
 
 export interface DisplayModel {
