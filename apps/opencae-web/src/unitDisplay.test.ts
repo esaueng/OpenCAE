@@ -102,6 +102,24 @@ describe("unit display formatting", () => {
     expect(resultValueFromDisplayUnits(motionField, 1, "US")).toBeCloseTo(25.4, 12);
   });
 
+  test("converts raw stress tensors with the scalar field without rounding", () => {
+    const field = resultFieldForUnits({
+      id: "stress",
+      runId: "run",
+      type: "stress",
+      component: "von_mises",
+      location: "node",
+      values: [100],
+      tensorValues: [100, -25, 0, 12.5, 0, 0],
+      min: 100,
+      max: 100,
+      units: "MPa"
+    }, "US");
+    expect(field.units).toBe("ksi");
+    expect(field.tensorValues?.[0]).toBeCloseTo(14.5037738, 6);
+    expect(field.tensorValues?.[1]).toBeCloseTo(-3.62594345, 6);
+  });
+
   test("formats result provenance labels with Core FEA and preview separated", () => {
     expect(formatResultProvenanceLabel({ kind: "opencae_core_fea", solver: "opencae-core-cloud", solverVersion: "0.1.0", meshSource: "actual_volume_mesh", resultSource: "computed", units: "mm-N-s-MPa" })).toBe("OpenCAE Core Cloud");
     expect(formatResultProvenanceLabel({ kind: "opencae_core_fea", solver: "opencae-core-sparse-tet", solverVersion: "0.1.0", meshSource: "actual_volume_mesh", resultSource: "computed", units: "mm-N-s-MPa" })).toBe("OpenCAE Core Local");

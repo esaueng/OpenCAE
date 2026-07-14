@@ -87,6 +87,7 @@ export interface PackedResultPlaybackCache {
   frameCount: number;
   fieldCount: number;
   valueCount: number;
+  tensorCount: number;
   sampleCount: number;
   frameIndexes: Int32Array;
   times: Float32Array;
@@ -96,6 +97,9 @@ export interface PackedResultPlaybackCache {
   fieldMins: Float32Array;
   fieldMaxes: Float32Array;
   values: Float32Array;
+  tensorOffsets: Int32Array;
+  tensorLengths: Int32Array;
+  tensorValues: Float32Array;
   vectorOffsets: Int32Array;
   vectorLengths: Int32Array;
   vectors: Float32Array;
@@ -187,12 +191,15 @@ export function createPackedResultPlaybackCache(fields: ResultField[]): PackedRe
   const fieldLengths = new Int32Array(frameCount * fieldCount);
   const fieldMins = new Float32Array(frameCount * fieldCount);
   const fieldMaxes = new Float32Array(frameCount * fieldCount);
+  const tensorOffsets = new Int32Array(frameCount * fieldCount);
+  const tensorLengths = new Int32Array(frameCount * fieldCount);
   const vectorOffsets = new Int32Array(frameCount * fieldCount);
   const vectorLengths = new Int32Array(frameCount * fieldCount);
   const sampleOffsets = new Int32Array(frameCount * fieldCount);
   const sampleLengths = new Int32Array(frameCount * fieldCount);
   const descriptors: PackedResultPlaybackFieldDescriptor[] = [];
   let valueCount = 0;
+  let tensorCount = 0;
   let vectorCount = 0;
   let sampleCount = 0;
 
@@ -208,10 +215,13 @@ export function createPackedResultPlaybackCache(fields: ResultField[]): PackedRe
       fieldMins[slot] = field ? Number(field.min) : 0;
       fieldMaxes[slot] = field ? Number(field.max) : 0;
       vectorOffsets[slot] = vectorCount;
+      tensorOffsets[slot] = tensorCount;
+      tensorLengths[slot] = field?.tensorValues?.length ?? 0;
       vectorLengths[slot] = field?.vectors?.length ?? 0;
       sampleOffsets[slot] = sampleCount;
       sampleLengths[slot] = field?.samples?.length ?? 0;
       valueCount += field?.values.length ?? 0;
+      tensorCount += field?.tensorValues?.length ?? 0;
       vectorCount += field?.vectors?.length ?? 0;
       sampleCount += field?.samples?.length ?? 0;
       if (frameOrdinal === 0) {
@@ -224,6 +234,7 @@ export function createPackedResultPlaybackCache(fields: ResultField[]): PackedRe
   }
 
   const values = new Float32Array(valueCount);
+  const tensorValues = new Float32Array(tensorCount);
   const vectors = new Float32Array(vectorCount * 3);
   const sampleValues = new Float32Array(sampleCount);
   const samplePoints = new Float32Array(sampleCount * 3);
@@ -237,6 +248,7 @@ export function createPackedResultPlaybackCache(fields: ResultField[]): PackedRe
       if (!field) continue;
       const slot = frameOrdinal * fieldCount + fieldOrdinal;
       values.set(field.values, fieldOffsets[slot]);
+      if (field.tensorValues) tensorValues.set(field.tensorValues, tensorOffsets[slot]);
       const fieldVectors = field.vectors ?? [];
       const vectorOffset = vectorOffsets[slot] ?? 0;
       for (let vectorIndex = 0; vectorIndex < fieldVectors.length; vectorIndex += 1) {
@@ -268,6 +280,9 @@ export function createPackedResultPlaybackCache(fields: ResultField[]): PackedRe
       fieldMins,
       fieldMaxes,
       values,
+      tensorOffsets,
+      tensorLengths,
+      tensorValues,
       vectorOffsets,
       vectorLengths,
       vectors,
@@ -301,6 +316,9 @@ export function createPackedResultPlaybackCache(fields: ResultField[]): PackedRe
         fieldMins,
         fieldMaxes,
         values,
+        tensorOffsets,
+        tensorLengths,
+        tensorValues,
         vectorOffsets,
         vectorLengths,
         vectors,
@@ -318,6 +336,7 @@ export function createPackedResultPlaybackCache(fields: ResultField[]): PackedRe
     frameCount,
     fieldCount,
     valueCount,
+    tensorCount,
     sampleCount,
     frameIndexes: frameIndexArray,
     times,
@@ -327,6 +346,9 @@ export function createPackedResultPlaybackCache(fields: ResultField[]): PackedRe
     fieldMins,
     fieldMaxes,
     values,
+    tensorOffsets,
+    tensorLengths,
+    tensorValues,
     vectorOffsets,
     vectorLengths,
     vectors,
@@ -336,7 +358,7 @@ export function createPackedResultPlaybackCache(fields: ResultField[]): PackedRe
     samplePoints,
     sampleNormals,
     sampleVectors,
-    estimatedBytes: frameIndexArray.byteLength + times.byteLength + fieldOffsets.byteLength + fieldLengths.byteLength + fieldMins.byteLength + fieldMaxes.byteLength + values.byteLength + vectorOffsets.byteLength + vectorLengths.byteLength + vectors.byteLength + sampleOffsets.byteLength + sampleLengths.byteLength + sampleValues.byteLength + samplePoints.byteLength + sampleNormals.byteLength + sampleVectors.byteLength,
+    estimatedBytes: frameIndexArray.byteLength + times.byteLength + fieldOffsets.byteLength + fieldLengths.byteLength + fieldMins.byteLength + fieldMaxes.byteLength + values.byteLength + tensorOffsets.byteLength + tensorLengths.byteLength + tensorValues.byteLength + vectorOffsets.byteLength + vectorLengths.byteLength + vectors.byteLength + sampleOffsets.byteLength + sampleLengths.byteLength + sampleValues.byteLength + samplePoints.byteLength + sampleNormals.byteLength + sampleVectors.byteLength,
     fieldsForFrame: (frameIndex) => {
       const ordinal = indexOfFrame(frameIndexArray, frameIndex);
       return fieldsForFrameOrdinal(ordinal >= 0 ? ordinal : 0);
@@ -358,6 +380,9 @@ export function packedResultPlaybackTransferables(cache: PackedResultPlaybackCac
     cache.fieldMins.buffer,
     cache.fieldMaxes.buffer,
     cache.values.buffer,
+    cache.tensorOffsets.buffer,
+    cache.tensorLengths.buffer,
+    cache.tensorValues.buffer,
     cache.vectorOffsets.buffer,
     cache.vectorLengths.buffer,
     cache.vectors.buffer,
@@ -391,12 +416,12 @@ export function interpolatedFieldsForFramePosition(fields: ResultField[], frameP
 }
 
 export function normalizeTransientFieldRanges(fields: ResultField[]): ResultField[] {
-  const rangesByGroup = new Map<string, { min: number; max: number; transient: boolean; type: ResultField["type"] }>();
+  const rangesByGroup = new Map<string, { min: number; max: number; transient: boolean; type: ResultField["type"]; component?: ResultField["component"] }>();
   for (const field of fields) {
     const transient = isTransientField(field);
     if (!transient) continue;
     const key = transientFieldRangeKey(field);
-    const existing = rangesByGroup.get(key) ?? { min: Number.POSITIVE_INFINITY, max: Number.NEGATIVE_INFINITY, transient, type: field.type };
+    const existing = rangesByGroup.get(key) ?? { min: Number.POSITIVE_INFINITY, max: Number.NEGATIVE_INFINITY, transient, type: field.type, component: field.component };
     for (const value of finiteFieldValues(field)) {
       existing.min = Math.min(existing.min, value);
       existing.max = Math.max(existing.max, value);
@@ -407,7 +432,7 @@ export function normalizeTransientFieldRanges(fields: ResultField[]): ResultFiel
     if (!isTransientField(field)) return field;
     const range = rangesByGroup.get(transientFieldRangeKey(field));
     if (!range?.transient || !Number.isFinite(range.min) || !Number.isFinite(range.max)) return field;
-    const normalizedRange = normalizedRangeForFieldType(range.type, range.min, range.max);
+    const normalizedRange = normalizedRangeForFieldType(range.type, range.min, range.max, range.component);
     if (field.min === normalizedRange.min && field.max === normalizedRange.max) return field;
     return {
       ...field,
@@ -501,6 +526,9 @@ function unpackFieldForSlot(
   fieldMins: Float32Array,
   fieldMaxes: Float32Array,
   values: Float32Array,
+  tensorOffsets: Int32Array,
+  tensorLengths: Int32Array,
+  tensorValues: Float32Array,
   vectorOffsets: Int32Array,
   vectorLengths: Int32Array,
   vectors: Float32Array,
@@ -518,6 +546,7 @@ function unpackFieldForSlot(
     fieldValues[index] = values[offset + index] ?? 0;
   }
   const fieldVectors = unpackVectorsForSlot(slot, vectorOffsets, vectorLengths, vectors);
+  const fieldTensors = unpackFlatValuesForSlot(slot, tensorOffsets, tensorLengths, tensorValues);
   const samples = unpackSamplesForSlot(slot, sampleOffsets, sampleLengths, sampleValues, samplePoints, sampleNormals, sampleVectors);
   return {
     ...descriptor,
@@ -527,6 +556,7 @@ function unpackFieldForSlot(
     max: fieldMaxes[slot] ?? 0,
     frameIndex,
     timeSeconds,
+    ...(fieldTensors.length ? { tensorValues: fieldTensors } : {}),
     ...(fieldVectors.length ? { vectors: fieldVectors } : {}),
     ...(samples.length ? { samples } : {})
   };
@@ -544,6 +574,9 @@ function unpackInterpolatedFieldForSlots(
   fieldMins: Float32Array,
   fieldMaxes: Float32Array,
   values: Float32Array,
+  tensorOffsets: Int32Array,
+  tensorLengths: Int32Array,
+  tensorValues: Float32Array,
   vectorOffsets: Int32Array,
   vectorLengths: Int32Array,
   vectors: Float32Array,
@@ -570,6 +603,9 @@ function unpackInterpolatedFieldForSlots(
   const lowerVectors = unpackVectorsForSlot(lowerSlot, vectorOffsets, vectorLengths, vectors);
   const upperVectors = unpackVectorsForSlot(upperSlot, vectorOffsets, vectorLengths, vectors);
   const fieldVectors = interpolatedVectorsForFields(lowerVectors, upperVectors, blend, descriptor.surfaceMeshRef ? lowerVectors.length : undefined);
+  const lowerTensors = unpackFlatValuesForSlot(lowerSlot, tensorOffsets, tensorLengths, tensorValues);
+  const upperTensors = unpackFlatValuesForSlot(upperSlot, tensorOffsets, tensorLengths, tensorValues);
+  const fieldTensors = interpolateFlatValues(lowerTensors, upperTensors, blend, descriptor.surfaceMeshRef ? lowerTensors.length : undefined);
   const lowerSamples = unpackSamplesForSlot(lowerSlot, sampleOffsets, sampleLengths, sampleValues, samplePoints, sampleNormals, sampleVectors);
   const upperSamples = unpackSamplesForSlot(upperSlot, sampleOffsets, sampleLengths, sampleValues, samplePoints, sampleNormals, sampleVectors);
   const samples = lowerSamples.length && upperSamples.length ? interpolateSamples(lowerSamples, upperSamples, blend) : lowerSamples;
@@ -581,9 +617,25 @@ function unpackInterpolatedFieldForSlots(
     max: lerp(fieldMaxes[lowerSlot] ?? 0, fieldMaxes[upperSlot] ?? fieldMaxes[lowerSlot] ?? 0, blend),
     frameIndex,
     timeSeconds,
+    ...(fieldTensors.length ? { tensorValues: fieldTensors } : {}),
     ...(fieldVectors.length ? { vectors: fieldVectors } : {}),
     ...(samples.length ? { samples } : {})
   };
+}
+
+function unpackFlatValuesForSlot(slot: number, offsets: Int32Array, lengths: Int32Array, packed: Float32Array): number[] {
+  const length = lengths[slot] ?? 0;
+  const offset = offsets[slot] ?? 0;
+  return Array.from(packed.subarray(offset, offset + length));
+}
+
+function interpolateFlatValues(lower: number[], upper: number[], blend: number, fixedLength?: number): number[] {
+  const count = fixedLength ?? Math.max(lower.length, upper.length);
+  const values = new Array<number>(count);
+  for (let index = 0; index < count; index += 1) {
+    values[index] = lerp(lower[index] ?? upper[index] ?? 0, upper[index] ?? lower[index] ?? 0, blend);
+  }
+  return values;
 }
 
 function unpackVectorsForSlot(
@@ -884,12 +936,12 @@ function finiteFieldValues(field: ResultField): number[] {
   ].filter(Number.isFinite);
 }
 
-function normalizedRangeForFieldType(type: ResultField["type"], min: number, max: number): { min: number; max: number } {
+function normalizedRangeForFieldType(type: ResultField["type"], min: number, max: number, component?: ResultField["component"]): { min: number; max: number } {
   if (type === "velocity" || type === "acceleration") {
     const bound = Math.max(Math.abs(min), Math.abs(max));
     return { min: -bound, max: bound };
   }
-  if (type === "stress" || (type === "displacement" && min >= 0)) {
+  if ((type === "stress" && component !== "principal_max" && component !== "principal_min") || (type === "displacement" && min >= 0)) {
     return { min: 0, max };
   }
   return { min, max };
@@ -905,6 +957,9 @@ function interpolateField(lowerField: ResultField, upperField: ResultField, blen
   // mismatched array, so pin the blended arrays to the lower frame's node count.
   const targetLength = lowerField.surfaceMeshRef ? lowerField.values.length : undefined;
   const vectors = interpolatedVectorsForFields(lowerField.vectors ?? [], upperField.vectors ?? [], blend, lowerField.surfaceMeshRef ? lowerField.vectors?.length ?? 0 : undefined);
+  const tensorValues = lowerField.tensorValues?.length && upperField.tensorValues?.length
+    ? interpolateNumbers(lowerField.tensorValues, upperField.tensorValues, blend, lowerField.surfaceMeshRef ? lowerField.tensorValues.length : undefined)
+    : lowerField.tensorValues;
   return {
     ...lowerField,
     id: `${lowerField.id}-visual-${framePosition.toFixed(3)}`,
@@ -913,6 +968,7 @@ function interpolateField(lowerField: ResultField, upperField: ResultField, blen
     max: lerp(lowerField.max, upperField.max, blend),
     frameIndex: framePosition,
     timeSeconds: lerp(lowerField.timeSeconds ?? 0, upperField.timeSeconds ?? lowerField.timeSeconds ?? 0, blend),
+    ...(tensorValues?.length ? { tensorValues } : {}),
     ...(vectors.length ? { vectors } : {}),
     ...(lowerField.samples?.length && upperField.samples?.length
       ? { samples: interpolateSamples(lowerField.samples, upperField.samples, blend) }

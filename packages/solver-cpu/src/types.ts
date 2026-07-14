@@ -86,6 +86,8 @@ export type StaticLinearTet4CpuResult = {
   vonMises: Float64Array;
   /** Volume-weighted nodal von Mises recovered from element node samples (Tet10: linear in-element field). */
   nodalVonMises?: Float64Array;
+  /** Volume-weighted nodal stress tensors in [xx, yy, zz, xy, yz, xz] order. */
+  nodalStress?: Float64Array;
   /** Per-element peak von Mises over the element's node samples; conservative basis for safety factors. */
   vonMisesPeak?: Float64Array;
   coreResult?: CoreSolveResult;
@@ -120,6 +122,7 @@ export type DynamicTet4CpuFrame = {
   stress: DynamicResultField;
   vonMises: DynamicResultField;
   nodalVonMises?: DynamicResultField;
+  nodalStress?: DynamicResultField;
   vonMisesPeak?: DynamicResultField;
   safety_factor: DynamicResultField;
   reactionForce?: Float64Array;

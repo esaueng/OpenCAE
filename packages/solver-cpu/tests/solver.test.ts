@@ -18,6 +18,8 @@ describe("solveStaticLinearTet4Cpu", () => {
     expect(result.result.strain.length).toBe(6);
     expect(result.result.stress.length).toBe(6);
     expect(result.result.vonMises.length).toBe(1);
+    expect(result.result.nodalStress?.length).toBe((singleTetStaticFixture.nodes.coordinates.length / 3) * 6);
+    expect(Array.from(result.result.nodalStress ?? []).every(Number.isFinite)).toBe(true);
     expect(result.diagnostics.relativeResidual).toBeLessThan(1e-8);
     expect(result.diagnostics.dofs).toBe(12);
     expect(result.diagnostics.constrainedDofs).toBeGreaterThan(0);
@@ -34,6 +36,9 @@ describe("solveStaticLinearTet4Cpu", () => {
       expect.arrayContaining(["displacement", "stress"])
     );
     expect(result.result.coreResult?.fields.every((field) => field.values.length > 0)).toBe(true);
+    const stressSurface = result.result.coreResult?.fields.find((field) => field.type === "stress" && field.location === "node");
+    expect(stressSurface?.component).toBe("von_mises");
+    expect(stressSurface?.tensorValues?.length).toBe((stressSurface?.values.length ?? 0) * 6);
     expect(Number.isFinite(result.result.coreResult?.summary.maxDisplacement)).toBe(true);
     expect(Number.isFinite(result.result.coreResult?.summary.maxStress)).toBe(true);
     expect(validateCoreResult(result.result.coreResult!).ok).toBe(true);
