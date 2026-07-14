@@ -9,7 +9,7 @@ In progress on `codex/022-medium-feature-roadmap`.
 | 1. Modal analysis | Released (2026-07-14) | 285 focused tests, typecheck, build, 1,263-test full suite |
 | 2. Open section and project custom materials | Released (2026-07-14) | 372 focused tests, typecheck, build, 1,279-test full suite |
 | 3. Static/dynamic cases, combinations, envelopes | Released (2026-07-14) | 361 focused tests, typecheck, build, 1,308-test full suite |
-| 4. Static mesh-convergence studies | Pending | Same gate |
+| 4. Static mesh-convergence studies | Released (2026-07-14) | 265 focused tests, typecheck, build, 1,319-test full suite |
 | 5. Advanced loads and equivalent bolt preload | Pending | Same gate |
 
 The plan runs after the result-identity, cache-key, and barycentric-probe foundation from plan 021 Stage 1. The browser solve limit is 100,000 DOF and must always be passed through `@opencae/solve-pipeline`; the solver package's internal 30,000-DOF default is not the product limit.
@@ -49,9 +49,18 @@ The plan runs after the result-identity, cache-key, and barycentric-probe founda
 - Add the case/combination editor and result-variant selector. Disabled cases remain editable but do not solve, and dynamic studies expose cases without combination/envelope controls.
 - Thread the 100,000-DOF browser limit through every variant pipeline and preserve the honest browser-limit diagnostic on case results.
 
-## Remaining increments
+## Increment 4 — Static mesh-convergence studies
 
-4. Add project-persisted coarse-to-medium-to-fine static convergence records using barycentric displacement probes, the 100k-DOF cap, actual mesh/DOF counts, raw peak stress, and apparent-convergence thresholds of 5% displacement and 10% stress.
+- Add project-persisted convergence records for one selected static load case. Run the isolated `coarse -> medium -> fine` ladder without changing the working study's selected mesh or active results; `ultra` stays outside automatic v1 studies.
+- Default an explicit displacement probe to the primary case-load application point. Map it to the nearest solver-surface triangle with model-scale tolerance and reuse barycentric vector interpolation; a point that cannot map fails that rung honestly.
+- Preflight every generated Core mesh for actual node/element counts, total/free DOF, and representative mesh size. Import the authoritative 100,000-DOF cap through a lightweight solve-pipeline limits entry point and skip over-limit meshes before entering the solve worker.
+- Persist only compact rung metrics: requested preset, actual counts and size, raw element peak von Mises stress, probe displacement magnitude, status, and skip/failure reason. Full rung meshes and result fields remain transient.
+- Continue after individual mesh, solve, or mapping failures. Classify only three successful strictly increasing-DOF rungs; medium-to-fine changes at or below 5% displacement and 10% stress are labeled apparent convergence, threshold misses are unconverged, and missing/non-monotonic ladders are inconclusive.
+- Add a static-case/probe control and lightweight SVG plot of both metrics against actual DOF, including skipped/capped markers and the compact persisted rung details.
+- Preserve the version-2 portable container and workspace autosave behavior with optional convergence records. Keep convergence meshing local-only so fallback paths cannot mutate the API-owned working study.
+
+## Remaining increment
+
 5. Add consistently integrated surface traction and volume force, rank-checked distributed remote wrench loads, and static-only equivalent bonded-linear bolt preload. Preserve exact resultant/moment diagnostics and reject missing geometry mappings.
 
 ## Compatibility and delivery

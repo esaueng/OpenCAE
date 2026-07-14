@@ -474,6 +474,72 @@ function validateStructuralVariants(
   }
 }
 
+export const MeshConvergenceRungSchema = z.object({
+  requestedPreset: z.enum(["coarse", "medium", "fine"]),
+  status: z.enum(["complete", "failed", "skipped"]),
+  actualNodeCount: z.number().int().positive().optional(),
+  actualElementCount: z.number().int().positive().optional(),
+  totalDofs: z.number().int().positive().optional(),
+  freeDofs: z.number().int().nonnegative().optional(),
+  actualMeshSizeMm: z.number().positive().optional(),
+  rawElementPeakVonMises: z.number().nonnegative().optional(),
+  stressUnits: z.string().optional(),
+  probeDisplacement: z.number().nonnegative().optional(),
+  displacementUnits: z.string().optional(),
+  skipReason: z.string().optional()
+}).superRefine((rung, context) => {
+  if (rung.status !== "complete") {
+    if (!rung.skipReason?.trim()) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["skipReason"], message: "Failed or skipped convergence rung requires a reason." });
+    }
+    return;
+  }
+  const required = [
+    "actualNodeCount",
+    "actualElementCount",
+    "totalDofs",
+    "freeDofs",
+    "actualMeshSizeMm",
+    "rawElementPeakVonMises",
+    "stressUnits",
+    "probeDisplacement",
+    "displacementUnits"
+  ] as const;
+  for (const key of required) {
+    if (rung[key] !== undefined) continue;
+    context.addIssue({ code: z.ZodIssueCode.custom, path: [key], message: `Completed convergence rung requires ${key}.` });
+  }
+});
+
+export const MeshConvergenceRecordSchema = z.object({
+  id: z.string().min(1),
+  studyId: z.string().min(1),
+  caseId: z.string().min(1),
+  createdAt: z.string(),
+  completedAt: z.string(),
+  probe: z.object({
+    point: Vec3Schema,
+    source: z.enum(["explicit", "primary_load"]),
+    label: z.string().optional()
+  }),
+  rungs: z.array(MeshConvergenceRungSchema).length(3),
+  classification: z.enum(["apparent_convergence", "unconverged", "inconclusive"]),
+  lastStepChanges: z.object({
+    displacement: z.number().nonnegative(),
+    stress: z.number().nonnegative()
+  }).optional()
+}).superRefine((record, context) => {
+  const expected = ["coarse", "medium", "fine"] as const;
+  record.rungs.forEach((rung, index) => {
+    if (rung.requestedPreset === expected[index]) return;
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["rungs", index, "requestedPreset"],
+      message: "Convergence rungs must be ordered coarse, medium, fine."
+    });
+  });
+});
+
 export const ProjectSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -481,6 +547,7 @@ export const ProjectSchema = z.object({
   unitSystem: z.enum(["SI", "US"]),
   geometryFiles: z.array(GeometryFileSchema),
   customMaterials: z.array(CustomMaterialSchema).optional(),
+  convergenceRecords: z.array(MeshConvergenceRecordSchema).optional(),
   studies: z.array(StudySchema),
   createdAt: z.string(),
   updatedAt: z.string()
@@ -630,6 +697,8 @@ export type RunVariantKind = z.infer<typeof RunVariantKindSchema>;
 export type GoverningVariantIndex = z.infer<typeof GoverningVariantIndexSchema>;
 export type RunVariantResult = Omit<z.infer<typeof RunVariantResultSchema>, "summary"> & { summary: ResultSummary };
 export type RunVariantRef = z.infer<typeof RunVariantRefSchema>;
+export type MeshConvergenceRung = z.infer<typeof MeshConvergenceRungSchema>;
+export type MeshConvergenceRecord = z.infer<typeof MeshConvergenceRecordSchema>;
 export type StudyRun = z.infer<typeof StudyRunSchema>;
 export type Study = z.infer<typeof StudySchema>;
 export type Project = z.infer<typeof ProjectSchema>;

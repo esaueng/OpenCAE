@@ -1,5 +1,5 @@
 import { isModalResultSummary } from "@opencae/schema";
-import type { AnalysisMesh, CustomMaterial, DisplayModel, DynamicSolverSettings, MeshQuality, Project, ResultField, ResultRenderBounds, ResultSummary, RunEvent, RunVariantRef, RunVariantResult, Study, StudyRun } from "@opencae/schema";
+import type { AnalysisMesh, CustomMaterial, DisplayModel, DynamicSolverSettings, MeshConvergenceRecord, MeshQuality, Project, ResultField, ResultRenderBounds, ResultSummary, RunEvent, RunVariantRef, RunVariantResult, Study, StudyRun } from "@opencae/schema";
 import type { StepGeometryInspection, StepGeometryRepairReport } from "@opencae/mesh-intake";
 import { assertCompatibleManufacturingProcess, resolveMaterial } from "@opencae/materials";
 import type { LoadApplicationPoint, LoadDirection, LoadDirectionLabel, LoadType, PayloadLoadMetadata } from "../loadPreview";
@@ -11,7 +11,8 @@ import type { ResultViewCaptures } from "../report/captureResultViews";
 import { isCancelledSolveError, startLocalSolve } from "../workers/solveWorkerClient";
 import { deleteLocalRunVariantResults, loadLocalRunResults, loadLocalRunVariantResult, saveLocalRunResults, saveLocalRunVariantResult } from "./localResultsStore";
 import { cancelWasmMeshing, canMeshStudyOnDemand, generateWasmMeshForStudy, type WasmMeshPhaseProgress } from "./wasmMeshing";
-import { geometrySourceForStudy, hasActualCoreVolumeMesh, isComplexGeometry, normalizeSolverBackend, openCaeCoreEligibility, OPENCAE_CORE_MESH_REQUIRED_REASON, type NormalizedBrowserSolverBackend } from "../workers/opencaeCoreSolve";
+import { coreMeshStatisticsForStudy, geometrySourceForStudy, hasActualCoreVolumeMesh, isComplexGeometry, normalizeSolverBackend, openCaeCoreEligibility, OPENCAE_CORE_MESH_REQUIRED_REASON, type NormalizedBrowserSolverBackend } from "../workers/opencaeCoreSolve";
+import { runStaticMeshConvergence, type ConvergenceProbe } from "../meshConvergence";
 
 export interface SampleProjectResponse {
   message?: string;
@@ -56,7 +57,7 @@ export interface ResultsResponse {
   diagnostics?: unknown[];
   artifacts?: {
     meshConnectivity?: { connectedComponents: number };
-    meshStatistics?: { nodes: number; elements: number };
+    meshStatistics?: { nodes: number; elements: number; totalDofs?: number; constrainedDofs?: number; freeDofs?: number; representativeElementSizeMm?: number };
   };
   reportCaptures?: ResultViewCaptures;
 }
@@ -71,6 +72,16 @@ export interface RunSimulationOptions {
    * caller can persist it (same shape generateMesh returns).
    */
   onStudyMeshed?: (study: Study) => void;
+}
+
+export interface RunMeshConvergenceOptions {
+  customMaterials?: CustomMaterial[];
+  onProgress?: (message: string) => void;
+}
+
+export interface GenerateMeshOptions {
+  /** Keep isolated workflows, such as convergence ladders, from mutating the API-owned study. */
+  localOnly?: boolean;
 }
 
 const localResultsByRunId = new Map<string, ResultsResponse>();
@@ -575,7 +586,7 @@ export async function renameProject(projectId: string, name: string, currentProj
   );
 }
 
-export async function generateMesh(studyId: string, preset: MeshQuality, currentStudy?: Study, displayModel?: DisplayModel, onProgress?: (message: string) => void, onPhaseProgress?: (progress: WasmMeshPhaseProgress) => void): Promise<{ study: Study; message: string }> {
+export async function generateMesh(studyId: string, preset: MeshQuality, currentStudy?: Study, displayModel?: DisplayModel, onProgress?: (message: string) => void, onPhaseProgress?: (progress: WasmMeshPhaseProgress) => void, options: GenerateMeshOptions = {}): Promise<{ study: Study; message: string }> {
   // In-browser gmsh-wasm meshing (production default since A-M4). Returns
   // null in opt-out builds or when the geometry has no wasm-meshable source,
   // and falls through to the existing preset-estimate path on transient
@@ -605,6 +616,24 @@ export async function generateMesh(studyId: string, preset: MeshQuality, current
       onProgress?.(`In-browser meshing failed (${messageFromUnknownError(error) || "unknown error"}). Falling back to preset estimates.`);
     }
   }
+  const localFallback = () => {
+    if (!currentStudy) throw new Error("Could not generate mesh without an open study.");
+    const analysisMesh = displayModel ? analysisMeshForDisplayModel(displayModel, preset) : undefined;
+    const summary = meshSummaryForPreset(preset, analysisMesh);
+    return {
+      study: {
+        ...currentStudy,
+        meshSettings: {
+          preset,
+          status: "complete" as const,
+          meshRef: `${currentStudy.projectId}/mesh/mesh-summary.json`,
+          summary
+        }
+      },
+      message: "Mesh generated locally."
+    };
+  };
+  if (options.localOnly) return localFallback();
   return fetchJsonWithFallback(
     `/api/studies/${studyId}/mesh`,
     {
@@ -612,24 +641,58 @@ export async function generateMesh(studyId: string, preset: MeshQuality, current
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ preset })
     },
-    () => {
-      if (!currentStudy) throw new Error("Could not generate mesh without an open study.");
-      const analysisMesh = displayModel ? analysisMeshForDisplayModel(displayModel, preset) : undefined;
-      const summary = meshSummaryForPreset(preset, analysisMesh);
-      return {
-        study: {
-          ...currentStudy,
-          meshSettings: {
-            preset,
-            status: "complete" as const,
-            meshRef: `${currentStudy.projectId}/mesh/mesh-summary.json`,
-            summary
-          }
-        },
-        message: "Mesh generated locally."
-      };
-    }
+    localFallback
   );
+}
+
+export async function runMeshConvergence(
+  currentStudy: Study,
+  caseId: string,
+  probe: ConvergenceProbe,
+  displayModel: DisplayModel,
+  options: RunMeshConvergenceOptions = {}
+): Promise<MeshConvergenceRecord> {
+  if (currentStudy.type !== "static_stress") throw new Error("Mesh convergence is available for static load cases only.");
+  return runStaticMeshConvergence({
+    study: currentStudy,
+    caseId,
+    probe,
+    onProgress: (preset, phase) => options.onProgress?.(`${capitalizeWord(preset)} convergence rung: ${phase}.`),
+    prepareMesh: async (preset, isolatedStudy) => {
+      const generated = await generateMesh(
+        isolatedStudy.id,
+        preset,
+        isolatedStudy,
+        displayModel,
+        options.onProgress,
+        undefined,
+        { localOnly: true }
+      );
+      if (generated.study.type !== "static_stress") throw new Error("Convergence meshing changed the static study type unexpectedly.");
+      const coreStatistics = coreMeshStatisticsForStudy(generated.study, displayModel, options.customMaterials);
+      const density = generated.study.meshSettings.summary?.density;
+      const actualMeshSizeMm = finitePositiveNumber(density?.actualMeshSizeMm) ?? coreStatistics.representativeElementSizeMm;
+      return {
+        study: generated.study,
+        statistics: {
+          nodes: coreStatistics.nodes,
+          elements: coreStatistics.elements,
+          totalDofs: coreStatistics.totalDofs,
+          freeDofs: coreStatistics.freeDofs,
+          actualMeshSizeMm
+        }
+      };
+    },
+    solve: async (isolatedStudy, preset) => {
+      const runId = `run-convergence-${preset}-${randomUuid()}`;
+      const handle = startLocalSolve(
+        { runId, study: studyWithLocalBackend(isolatedStudy), displayModel, customMaterials: options.customMaterials },
+        (event) => options.onProgress?.(`${capitalizeWord(preset)} solve: ${event.phase}.`)
+      );
+      const { result } = await handle.completion;
+      return result;
+    }
+  });
 }
 
 export async function assignMaterial(
@@ -1196,6 +1259,20 @@ export function dynamicOutputFrameEstimate(study: Study, options: { backend?: st
 
 function finiteOr(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function finitePositiveNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+function capitalizeWord(value: string): string {
+  return value.length ? `${value[0]!.toUpperCase()}${value.slice(1)}` : value;
+}
+
+function randomUuid(): string {
+  return typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
 
 type Vec3 = [number, number, number];
