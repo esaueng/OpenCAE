@@ -1931,11 +1931,40 @@ function DimensionArrowhead({ position, direction, scale }: { position: THREE.Ve
   );
 }
 
+// How far the line must lean off screen-vertical before its reading direction
+// is allowed to flip. A line pointing straight up the screen sits exactly on the
+// left-to-right test's boundary, so without a deadband the tiniest orbit
+// sign-flips it and the label strobes 180 degrees every frame.
+const DIMENSION_LABEL_FLIP_DEADBAND = 0.2;
+
+/**
+ * Whether dimension text should read along the reversed line axis.
+ *
+ * `screenRight`/`screenUp` are the line axis projected onto the camera's right
+ * and up vectors. Text reads left-to-right when the axis leans right, so the
+ * axis flips once it leans left — but only past a deadband, inside which the
+ * previous orientation is held. Near-vertical lines therefore keep whatever
+ * orientation they last settled on instead of flickering across the boundary.
+ * With no previous orientation to hold (the first frame), a near-vertical line
+ * falls back to reading bottom-to-top, as drawings conventionally set them.
+ */
+export function dimensionLabelFlipped(
+  previous: boolean | null,
+  screenRight: number,
+  screenUp: number,
+  deadband = DIMENSION_LABEL_FLIP_DEADBAND
+): boolean {
+  if (screenRight > deadband) return false;
+  if (screenRight < -deadband) return true;
+  return previous ?? screenUp < 0;
+}
+
 // Dimension text runs along its line (rotated with the model) while staying
 // readable: each frame the label plane is tilted toward the camera around the
 // line axis, and the reading direction flips so it never renders mirrored.
 function DimensionLineLabel({ label, position, tangent, scale }: { label: string; position: [number, number, number]; tangent: [number, number, number]; scale: number }) {
   const groupRef = useRef<THREE.Group>(null);
+  const flippedRef = useRef<boolean | null>(null);
   const colors = sceneLabelColors("dimension");
   useFrame(({ camera }) => {
     const group = groupRef.current;
@@ -1943,7 +1972,10 @@ function DimensionLineLabel({ label, position, tangent, scale }: { label: string
     const parentQuaternion = group.parent.getWorldQuaternion(new THREE.Quaternion());
     const lineAxis = new THREE.Vector3(...tangent).applyQuaternion(parentQuaternion).normalize();
     const cameraRight = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
-    if (lineAxis.dot(cameraRight) < 0) lineAxis.negate();
+    const cameraUp = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
+    const flipped = dimensionLabelFlipped(flippedRef.current, lineAxis.dot(cameraRight), lineAxis.dot(cameraUp));
+    flippedRef.current = flipped;
+    if (flipped) lineAxis.negate();
     const worldPosition = group.getWorldPosition(new THREE.Vector3());
     const toCamera = camera.position.clone().sub(worldPosition).normalize();
     const normal = toCamera.sub(lineAxis.clone().multiplyScalar(toCamera.dot(lineAxis)));
