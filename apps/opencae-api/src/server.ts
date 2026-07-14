@@ -49,6 +49,7 @@ import {
 } from "./projectFactory";
 
 export const API_LISTEN_HOST = process.env.OPENCAE_API_HOST ?? "127.0.0.1";
+export const MAX_LOCAL_PROJECT_IMPORT_BYTES = 256 * 1024 * 1024;
 
 const allowedCorsOrigins = new Set([
   "http://localhost:5173",
@@ -165,7 +166,7 @@ api.post("/api/projects", mutatingRateLimit, async (request) => {
   return { project, displayModel: sampleDisplayModelFor(sample), ...(dynamicResults ? { results: dynamicResults } : {}), message: "Project created." };
 });
 
-api.post("/api/projects/import", mutatingRateLimit, async (request, reply) => {
+api.post("/api/projects/import", { ...mutatingRateLimit, bodyLimit: MAX_LOCAL_PROJECT_IMPORT_BYTES }, async (request, reply) => {
   const body = request.body as { project?: unknown; displayModel?: unknown; results?: unknown } | Project | undefined;
   const candidate = body && "project" in body ? body.project : body;
   const parsed = ProjectSchema.safeParse(candidate);
