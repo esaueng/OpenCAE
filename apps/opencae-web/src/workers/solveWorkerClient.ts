@@ -139,6 +139,7 @@ function startInlineSolve(
           study: payload.study,
           runId: payload.runId,
           displayModel: payload.displayModel,
+          customMaterials: payload.customMaterials,
           hooks: {
             onProgress,
             shouldCancel: () => cancelled

@@ -68,6 +68,7 @@ function handleSolve(id: string, payload: SolveWorkerSolvePayload): void {
       study: payload.study,
       runId: payload.runId,
       displayModel: payload.displayModel,
+      customMaterials: payload.customMaterials,
       hooks: {
         onProgress,
         shouldCancel: () => cancelledRequestIds.has(id)

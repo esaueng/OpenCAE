@@ -226,7 +226,7 @@ export function solveHeuristicSurfaceStudy(study: Study, runId: string, optionsI
   const supports = supportFacesForStudy(study, faces);
   const loads = study.loads.map((load) => loadModelFor(load, faces, supports)).filter((load): load is LoadModel => Boolean(load));
   const analysisMesh = options.analysisMesh ?? analysisMeshForFaces(faces, study.meshSettings.preset);
-  const material = materialForStudy(study);
+  const material = materialForStudy(study, options.customMaterials);
   const materialParameters = materialParametersForStudy(study);
   const printDisplayModel = options.displayModel ?? inferredSampleDisplayModelForStudy(study);
   const criticalLayerAxis = inferGlobalCriticalPrintAxis(study, faces.map((face) => ({

@@ -7,7 +7,7 @@ In progress on `codex/022-medium-feature-roadmap`.
 | Increment | Status | Release gate |
 | - | - | - |
 | 1. Modal analysis | Released (2026-07-14) | 285 focused tests, typecheck, build, 1,263-test full suite |
-| 2. Open section and project custom materials | Pending | Same gate |
+| 2. Open section and project custom materials | Released (2026-07-14) | 372 focused tests, typecheck, build, 1,279-test full suite |
 | 3. Static/dynamic cases, combinations, envelopes | Pending | Same gate |
 | 4. Static mesh-convergence studies | Pending | Same gate |
 | 5. Advanced loads and equivalent bolt preload | Pending | Same gate |
@@ -25,9 +25,19 @@ The plan runs after the result-identity, cache-key, and barycentric-probe founda
 - Export normalized vector `mode_shape` surface fields and a modal result summary. Mode identity participates in selector, series, packed-playback, and cache keys.
 - Show a mode table and synthesize 24 sinusoidal phase frames in the browser. Phase and amplitude are visualization-only, not displacement.
 
+## Increment 2 — Open section and project custom materials
+
+- Store one optional X/Y/Z clipping plane in workspace UI autosave state, with normalized offset and cut-side flip. It is deliberately absent from portable project data.
+- Enable Three.js local clipping for model geometry, mesh overlays, solver/result materials, feature-edge line segments, and undeformed outlines. Loads, supports, probes, dimensions, and other annotations stay outside the clipping roots.
+- Render the visible `Open section` label inside the WebGL scene so report/project captures include it whenever clipping is active.
+- Add optional project-scoped UUID custom materials. Canonical storage remains Pa and kg/m³; SI/US conversion happens only at the editor boundary.
+- Duplicate starter or custom materials with copied additive print profiles. Custom materials without a print profile receive only an unvalidated CNC/bulk path.
+- Mark every custom definition `user_supplied_unverified`, preserve it through autosave and version-2 portable files, and show the warning in the library and reports.
+- Resolve material IDs through one built-in-plus-project catalog in UI, validation, browser/API solver adapters, mesh intake, and reports. Explicit unknown IDs fail clearly and never fall back to Aluminum 6061.
+- Editing an assigned custom material clears stale results. Deletion is disabled and guarded while any study assigns the material.
+
 ## Remaining increments
 
-2. Add one persistent workspace-only axis-aligned open-section plane, clip result/geometry/edge/outline materials, and add project-scoped UUID custom materials with canonical Pa and kg/m³ storage and centralized resolution.
 3. Add structurally shared support/material/mesh load cases, static combinations and envelopes, shared prepare/solve/recover assembly, independent dynamic cases, streamed persistence, and variant-aware result identities.
 4. Add project-persisted coarse-to-medium-to-fine static convergence records using barycentric displacement probes, the 100k-DOF cap, actual mesh/DOF counts, raw peak stress, and apparent-convergence thresholds of 5% displacement and 10% stress.
 5. Add consistently integrated surface traction and volume force, rank-checked distributed remote wrench loads, and static-only equivalent bonded-linear bolt preload. Preserve exact resultant/moment diagnostics and reject missing geometry mappings.

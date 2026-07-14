@@ -27,7 +27,7 @@ import {
   type SurfaceFacetJson,
   type SurfaceSetJson
 } from "@opencae/core";
-import { effectiveMaterialProperties, starterMaterials, type PrintStrengthContext } from "@opencae/materials";
+import { effectiveMaterialProperties, resolveMaterial as resolveCatalogMaterial, starterMaterials, type PrintStrengthContext } from "@opencae/materials";
 import type { CloudAnalysisType, CloudStudyLike, CoreVolumeMeshArtifact } from "./types";
 
 type BuildCoreModelInput = {
@@ -286,6 +286,10 @@ function resolveMaterial(input: BuildCoreModelInput): IsotropicLinearElasticMate
   for (const assignment of materialAssignments) {
     const assigned = materialFromUnknown(assignment, providedCatalog, context);
     if (assigned) return assigned;
+    const materialId = assignment && typeof assignment === "object"
+      ? stringValue((assignment as Record<string, unknown>).materialId)
+      : undefined;
+    if (materialId) throw new Error(`Unknown material "${materialId}".`);
   }
 
   for (const candidate of input.materials ?? []) {
@@ -358,8 +362,7 @@ function materialFromBuiltIn(
   parameters?: Record<string, unknown>,
   context: PrintStrengthContext = {}
 ): IsotropicLinearElasticMaterialJson {
-  const material = starterMaterials.find((candidate) => candidate.id === id);
-  if (!material) throw new Error(`OpenCAE Core Cloud does not know material ${id}.`);
+  const material = resolveCatalogMaterial(id);
   const effective = effectiveMaterialProperties(material, parameters ?? {}, context);
   return {
     name: effective.id,

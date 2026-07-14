@@ -10,14 +10,16 @@ OpenCAE starts on a local workspace screen with three paths:
 
 Static and dynamic studies work through Model, Material, Supports, Loads, Mesh, Run, and Results. Modal studies skip Loads because natural frequencies do not use applied loads.
 
-- Model: inspect the part, upload STEP, STP, STL, or OBJ files, show dimensions, rotate the model, and switch between model and mesh views.
-- Material: assign starter materials and configure print parameters for 3D-printing materials. Print layer orientation changes the effective material properties used by OpenCAE Core.
+- Model: inspect the part, upload STEP, STP, STL, or OBJ files, show dimensions, rotate the model, switch between model and mesh views, or enable one axis-aligned open section. Choose X/Y/Z, move its normalized offset, and flip the visible side. The cut is uncapped; loads, supports, probes, and labels remain visible.
+- Material: assign starter materials and configure print parameters for 3D-printing materials. Print layer orientation changes the effective material properties used by OpenCAE Core. **Duplicate & edit** creates a project-only custom material. Editor stress/density units follow the project, while saved values remain Pa and kg/m³. Custom definitions are always labeled user-supplied and unverified.
 - Supports: select model faces and add fixed supports.
 - Loads: add force, pressure, or payload-weight loads. Payload loads can use selected payload objects and material density to calculate mass.
 - Mesh: choose coarse, medium, fine, or ultra sampling. The generated mesh summary is stored as a study artifact.
 - Run: review readiness messages, start an OpenCAE Core run, watch progress/log events, or cancel an active local run.
 
 For modal analysis, choose 1–10 requested modes in Run (default 6). Every assigned material must have density, and the model must be constrained against rigid-body motion. If supports are insufficient, OpenCAE stops with a Supports-step error instead of showing a numerical solver failure.
+
+Editing a custom material that is assigned to a study clears that study's stale displayed results. An assigned custom material cannot be deleted; assign a different material first. Unknown material IDs in older or hand-edited files are reported explicitly instead of being replaced by Aluminum 6061.
 
 ## Results And Reports
 

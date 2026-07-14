@@ -1,4 +1,4 @@
-import type { DisplayModel, Study } from "@opencae/schema";
+import type { CustomMaterial, DisplayModel, Study } from "@opencae/schema";
 import type { SolveProgressEvent } from "@opencae/solve-pipeline";
 import type { LocalSolveResult } from "./performanceProtocol";
 
@@ -16,6 +16,7 @@ export type SolveWorkerSolvePayload = {
   runId: string;
   study: Study;
   displayModel?: DisplayModel;
+  customMaterials?: CustomMaterial[];
   debugResults?: boolean;
 };
 

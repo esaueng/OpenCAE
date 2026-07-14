@@ -1,5 +1,5 @@
-import type { Diagnostic, DisplayModel, DynamicSolverSettings, Load, ModalSolverSettings, Study } from "@opencae/schema";
-import { manufacturingProcessCompatibilityError } from "@opencae/materials";
+import type { CustomMaterial, Diagnostic, DisplayModel, DynamicSolverSettings, Load, ModalSolverSettings, Study } from "@opencae/schema";
+import { manufacturingProcessCompatibilityError, resolveMaterial } from "@opencae/materials";
 
 export type PrintCriticalAxis = "x" | "y" | "z";
 
@@ -53,10 +53,10 @@ export function usesLegacySampleFrame(displayModel: DisplayModel): boolean {
     !displayModel.id.includes("uploaded");
 }
 
-export function validateStaticStressStudy(study: Study): Diagnostic[] {
+export function validateStaticStressStudy(study: Study, customMaterials: readonly CustomMaterial[] = []): Diagnostic[] {
   const diagnostics: Diagnostic[] = [];
   if (study.materialAssignments.length === 0) diagnostics.push(issue("validation-material", "Choose what the part is made of."));
-  diagnostics.push(...materialProcessDiagnostics(study));
+  diagnostics.push(...materialProcessDiagnostics(study, customMaterials));
   if (study.constraints.length === 0) diagnostics.push(issue("validation-support", "Choose where the part is held fixed."));
   if (study.loads.length === 0) diagnostics.push(issue("validation-load", "Choose where force, pressure, or payload weight is applied."));
   for (const load of study.loads) {
@@ -75,17 +75,17 @@ export function validateStaticStressStudy(study: Study): Diagnostic[] {
   return diagnostics;
 }
 
-export function validateStudy(study: Study): Diagnostic[] {
-  if (study.type === "dynamic_structural") return validateDynamicStructuralStudy(study);
-  if (study.type === "modal_analysis") return validateModalStudy(study);
-  return validateStaticStressStudy(study);
+export function validateStudy(study: Study, customMaterials: readonly CustomMaterial[] = []): Diagnostic[] {
+  if (study.type === "dynamic_structural") return validateDynamicStructuralStudy(study, customMaterials);
+  if (study.type === "modal_analysis") return validateModalStudy(study, customMaterials);
+  return validateStaticStressStudy(study, customMaterials);
 }
 
-export function validateModalStudy(study: Extract<Study, { type: "modal_analysis" }>): Diagnostic[] {
+export function validateModalStudy(study: Extract<Study, { type: "modal_analysis" }>, customMaterials: readonly CustomMaterial[] = []): Diagnostic[] {
   const diagnostics: Diagnostic[] = [];
   const settings = study.solverSettings as ModalSolverSettings;
   if (study.materialAssignments.length === 0) diagnostics.push(issue("validation-material", "Choose what the part is made of."));
-  diagnostics.push(...materialProcessDiagnostics(study));
+  diagnostics.push(...materialProcessDiagnostics(study, customMaterials));
   if (study.constraints.length === 0) diagnostics.push(issue("validation-modal-support", "Add at least one support for modal analysis."));
   if (study.meshSettings.status !== "complete") diagnostics.push(issue("validation-mesh", "Generate the mesh before running."));
   if (!Number.isInteger(settings.modeCount) || settings.modeCount < 1 || settings.modeCount > 10) {
@@ -94,11 +94,11 @@ export function validateModalStudy(study: Extract<Study, { type: "modal_analysis
   return diagnostics;
 }
 
-export function validateDynamicStructuralStudy(study: Study): Diagnostic[] {
+export function validateDynamicStructuralStudy(study: Study, customMaterials: readonly CustomMaterial[] = []): Diagnostic[] {
   const diagnostics: Diagnostic[] = [];
   const solverSettings = study.solverSettings as DynamicSolverSettings;
   if (study.materialAssignments.length === 0) diagnostics.push(issue("validation-material", "Choose what the part is made of."));
-  diagnostics.push(...materialProcessDiagnostics(study));
+  diagnostics.push(...materialProcessDiagnostics(study, customMaterials));
   for (const load of study.loads) {
     const selection = study.namedSelections.find((item) => item.id === load.selectionRef);
     if (!selection || selection.entityType !== "face") {
@@ -212,11 +212,19 @@ function equivalentLoadForceNewtons(load: Load, face: PrintCriticalFace): number
   return units === "lbf" ? value * 4.4482216152605 : value;
 }
 
-function materialProcessDiagnostics(study: Study): Diagnostic[] {
+function materialProcessDiagnostics(study: Study, customMaterials: readonly CustomMaterial[]): Diagnostic[] {
   return study.materialAssignments.flatMap((assignment) => {
+    try {
+      resolveMaterial(assignment.materialId, customMaterials);
+    } catch (error) {
+      return [issue(
+        `validation-material-resolution-${assignment.id}`,
+        error instanceof Error ? error.message : `Unknown material "${assignment.materialId}".`
+      )];
+    }
     const processId = assignment.parameters?.manufacturingProcessId;
     if (processId === undefined) return [];
-    const error = manufacturingProcessCompatibilityError(assignment.materialId, processId);
+    const error = manufacturingProcessCompatibilityError(assignment.materialId, processId, customMaterials);
     return error ? [issue(`validation-material-process-${assignment.id}`, error)] : [];
   });
 }

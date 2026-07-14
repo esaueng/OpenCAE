@@ -14,7 +14,7 @@ import type { WorkspaceLogEntry } from "./components/BottomPanel";
 import type { StepId } from "./components/StepBar";
 import type { SampleAnalysisType, SampleModelId } from "./lib/api";
 import type { CapturedResultView } from "./report/captureResultViews";
-import type { PayloadObjectSelection, ResultMode, StressComponent, ThemeMode, ViewMode } from "./workspaceViewTypes";
+import type { PayloadObjectSelection, ResultMode, SectionPlaneState, StressComponent, ThemeMode, ViewMode } from "./workspaceViewTypes";
 
 export { AUTOSAVE_STORAGE_KEY, AUTOSAVE_UI_STORAGE_KEY } from "./autosaveStorage";
 export type { ThemeMode } from "./workspaceViewTypes";
@@ -33,6 +33,7 @@ export interface WorkspaceUiSnapshot {
   stressComponent?: StressComponent;
   showDeformed: boolean;
   showDimensions: boolean;
+  sectionPlane?: SectionPlaneState;
   stressExaggeration: number;
   resultFrameIndex?: number;
   resultPlaybackFps?: number;
@@ -75,6 +76,7 @@ const VIEW_MODES: ViewMode[] = ["model", "mesh", "results"];
 const RESULT_MODES: ResultMode[] = ["stress", "displacement", "safety_factor", "velocity", "acceleration", "mode_shape"];
 const STRESS_COMPONENTS: StressComponent[] = ["von_mises", "principal_max", "principal_min", "max_shear"];
 const THEMES: ThemeMode[] = ["dark", "light"];
+const SECTION_PLANE_AXES: SectionPlaneState["axis"][] = ["x", "y", "z"];
 const LOAD_TYPES: LoadType[] = ["force", "pressure", "gravity"];
 const LOAD_DIRECTIONS: LoadDirectionLabel[] = [...LOAD_DIRECTION_LABELS];
 const SAMPLE_MODELS: SampleModelId[] = ["bracket", "plate", "cantilever"];
@@ -438,6 +440,7 @@ function parseUiSnapshot(value: unknown): WorkspaceUiSnapshot | null {
     stressComponent: readEnum(value.stressComponent, STRESS_COMPONENTS, "von_mises"),
     showDeformed: value.showDeformed === true,
     showDimensions: value.showDimensions === true,
+    sectionPlane: parseSectionPlane(value.sectionPlane),
     stressExaggeration: readFiniteNumber(value.stressExaggeration, 1.8),
     resultFrameIndex: Math.max(0, Math.trunc(readFiniteNumber(value.resultFrameIndex, 0))),
     resultPlaybackFps: clamp(readFiniteNumber(value.resultPlaybackFps, 12), 1, 60),
@@ -456,6 +459,16 @@ function parseUiSnapshot(value: unknown): WorkspaceUiSnapshot | null {
     status: typeof value.status === "string" ? value.status : "Ready",
     logs: parseLogEntries(value.logs)
   });
+}
+
+function parseSectionPlane(value: unknown): SectionPlaneState | undefined {
+  if (!isRecord(value)) return undefined;
+  return {
+    enabled: value.enabled === true,
+    axis: readEnum(value.axis, SECTION_PLANE_AXES, "x"),
+    offset: clamp(readFiniteNumber(value.offset, 0.5), 0, 1),
+    flipped: value.flipped === true
+  };
 }
 
 function normalizeUiRunState(ui: WorkspaceUiSnapshot): WorkspaceUiSnapshot {

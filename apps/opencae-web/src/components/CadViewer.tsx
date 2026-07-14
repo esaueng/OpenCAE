@@ -28,7 +28,7 @@ import { getSnapSuggestion } from "../snapping/snapController";
 import type { SolverSurfaceMesh } from "../projectFile";
 import { isSnapOverlayObject, SnapVisualization } from "../snapping/Visualization";
 import type { CursorRay, FaceSnapAxis, SnapMeasurement, SnapResult, Vec3 } from "../snapping/types";
-import type { PayloadObjectSelection, PrintLayerOrientation, ResultMode, ResultPlaybackFrameController, ResultPlaybackFrameSnapshot, StressComponent, ThemeMode, ViewerLoadMarker, ViewerSupportMarker, ViewMode } from "../workspaceViewTypes";
+import type { PayloadObjectSelection, PrintLayerOrientation, ResultMode, ResultPlaybackFrameController, ResultPlaybackFrameSnapshot, SectionPlaneState, StressComponent, ThemeMode, ViewerLoadMarker, ViewerSupportMarker, ViewMode } from "../workspaceViewTypes";
 
 export type { PrintLayerOrientation, ResultMode, ResultPlaybackFrameController, ResultPlaybackFrameSnapshot, ThemeMode, ViewerLoadMarker, ViewerSupportMarker, ViewMode } from "../workspaceViewTypes";
 
@@ -46,6 +46,7 @@ interface CadViewerProps {
   showDeformed: boolean;
   resultPlaybackPlaying: boolean;
   showDimensions: boolean;
+  sectionPlane: SectionPlaneState;
   stressExaggeration: number;
   resultFields: ResultField[];
   resultProbes?: ResultProbePin[];
@@ -203,6 +204,15 @@ export function CadViewer(props: CadViewerProps) {
   const viewportBackground = isLightTheme ? "#f7f9fc" : "#070b10";
   const modelRotation = useMemo(() => modelRotationRadians(props.displayModel), [props.displayModel]);
   const baseModelRotation = useMemo(() => baseModelRotationRadians(props.displayModel), [props.displayModel]);
+  const sectionBounds = useMemo(() => {
+    const localBounds = modelKindForDisplayModel(props.displayModel) === "uploaded" && uploadedPreviewBounds
+      ? uploadedPreviewBounds
+      : dimensionBoundsForDisplayModel(props.displayModel);
+    if (!localBounds) return null;
+    const outer = new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(modelRotation[0], modelRotation[1], modelRotation[2]));
+    const base = new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(baseModelRotation[0], baseModelRotation[1], baseModelRotation[2]));
+    return localBounds.clone().applyMatrix4(outer.multiply(base));
+  }, [baseModelRotation, modelRotation, props.displayModel, uploadedPreviewBounds]);
   const resultFields = props.resultFields;
   const stressComponent = props.stressComponent ?? "von_mises";
   const effectiveShowDeformed = props.showDeformed && !shouldDisableResultDeformation(props.displayModel, resultFields);
@@ -249,7 +259,8 @@ export function CadViewer(props: CadViewerProps) {
   }, [props.displayModel, props.onResultRenderBoundsChange, uploadedPreviewBounds]);
   return (
     <section className={`viewer-shell ${effectiveViewMode === "results" ? "results-view" : ""}`} aria-label="3D CAD viewer">
-      <Canvas frameloop="demand" dpr={viewerDpr} camera={{ position: [4.8, 4.8, 4.8], up: ISO_CAMERA_UP.toArray(), fov: 42 }} onPointerMissed={props.onViewerMiss}>
+      <Canvas frameloop="demand" dpr={viewerDpr} camera={{ position: [4.8, 4.8, 4.8], up: ISO_CAMERA_UP.toArray(), fov: 42 }} onCreated={({ gl }) => { gl.localClippingEnabled = true; }} onPointerMissed={props.onViewerMiss}>
+        <SectionClippingController state={props.sectionPlane} bounds={sectionBounds} />
         <ViewerInvalidator
           activeStep={props.activeStep}
           displayModel={props.displayModel}
@@ -264,6 +275,7 @@ export function CadViewer(props: CadViewerProps) {
           resultPlaybackPlaying={props.resultPlaybackPlaying}
           selectedFaceId={props.selectedFaceId}
           selectedPayloadObject={props.selectedPayloadObject}
+          sectionPlane={props.sectionPlane}
           showDeformed={effectiveShowDeformed}
           showDimensions={props.showDimensions}
           stressExaggeration={props.stressExaggeration}
@@ -315,7 +327,7 @@ export function CadViewer(props: CadViewerProps) {
             )}
             <group rotation={baseModelRotation}>
               {effectiveViewMode === "results" && solverSurfaceResult && (
-                <SolverSurfacePayloadMass kind={modelKindForDisplayModel(props.displayModel)} loadMarkers={props.loadMarkers} />
+                <group userData={{ opencaeSectionClippable: true }}><SolverSurfacePayloadMass kind={modelKindForDisplayModel(props.displayModel)} loadMarkers={props.loadMarkers} /></group>
               )}
               {/* When a solver surface result renders, the procedural result solid is suppressed
                   (surface render is exclusive); the procedural IDW path remains only as the
@@ -327,6 +339,7 @@ export function CadViewer(props: CadViewerProps) {
           <BoundsCameraReset contentFitKey={viewerContentFitKey} signal={props.fitSignal} viewAxis={props.viewAxis} viewAxisSignal={props.viewAxisSignal} controlsRef={controlsRef} />
           <GizmoCameraReset view={gizmoViewRequest.view} signal={gizmoViewRequest.signal} controlsRef={controlsRef} />
         </Bounds>
+        {props.sectionPlane.enabled && sectionBounds ? <OpenSectionLabel bounds={sectionBounds} state={props.sectionPlane} /> : null}
         <DemandOrbitControls controlsRef={controlsRef} onInteractionChange={handleViewerInteractionChange} />
         <ShiftPanControls controlsRef={controlsRef} onInteractionChange={handleViewerInteractionChange} />
         <GizmoHelper alignment={VIEWER_GIZMO_ALIGNMENT} margin={VIEWER_GIZMO_MARGIN}>
@@ -418,6 +431,7 @@ function ViewerInvalidator({
   resultPlaybackPlaying,
   selectedFaceId,
   selectedPayloadObject,
+  sectionPlane,
   showDeformed,
   showDimensions,
   stressExaggeration,
@@ -441,6 +455,7 @@ function ViewerInvalidator({
   resultPlaybackPlaying: boolean;
   selectedFaceId: string | null;
   selectedPayloadObject: PayloadObjectSelection | null;
+  sectionPlane: SectionPlaneState;
   showDeformed: boolean;
   showDimensions: boolean;
   stressExaggeration: number;
@@ -476,6 +491,7 @@ function ViewerInvalidator({
     resultPlaybackPlaying,
     selectedFaceId,
     selectedPayloadObject,
+    sectionPlane,
     showDeformed,
     showDimensions,
     stressExaggeration,
@@ -487,6 +503,112 @@ function ViewerInvalidator({
     viewAxisSignal
   ]);
   return null;
+}
+
+type SectionClippingMaterialState = {
+  clippingPlanes: THREE.Plane[] | null;
+  clipIntersection: boolean;
+};
+
+export function sectionPlaneForBounds(state: SectionPlaneState, bounds: THREE.Box3 | null): THREE.Plane | null {
+  if (!state.enabled || !bounds || bounds.isEmpty()) return null;
+  const axisIndex = state.axis === "x" ? 0 : state.axis === "y" ? 1 : 2;
+  const minimum = bounds.min.getComponent(axisIndex);
+  const maximum = bounds.max.getComponent(axisIndex);
+  if (!Number.isFinite(minimum) || !Number.isFinite(maximum) || maximum - minimum <= Number.EPSILON) return null;
+  const coordinate = THREE.MathUtils.lerp(minimum, maximum, THREE.MathUtils.clamp(state.offset, 0, 1));
+  const direction = state.flipped ? -1 : 1;
+  const normal = new THREE.Vector3();
+  normal.setComponent(axisIndex, direction);
+  return new THREE.Plane(normal, -direction * coordinate);
+}
+
+export function applySectionClippingToObject(root: THREE.Object3D, plane: THREE.Plane): () => void {
+  const previous = new Map<THREE.Material, SectionClippingMaterialState>();
+  applySectionClipping(root, plane, previous);
+  return () => restoreSectionClipping(previous);
+}
+
+function applySectionClipping(
+  root: THREE.Object3D,
+  plane: THREE.Plane,
+  previous: Map<THREE.Material, SectionClippingMaterialState>
+) {
+  root.traverse((object) => {
+    if (!hasSectionClippableAncestor(object)) return;
+    const materialValue = (object as THREE.Mesh | THREE.LineSegments).material;
+    const materials = Array.isArray(materialValue) ? materialValue : materialValue ? [materialValue] : [];
+    for (const material of materials) {
+      if (previous.has(material) && material.clippingPlanes?.at(-1) === plane) continue;
+      if (!previous.has(material)) {
+        previous.set(material, {
+          clippingPlanes: material.clippingPlanes ? [...material.clippingPlanes] : material.clippingPlanes,
+          clipIntersection: material.clipIntersection
+        });
+      }
+      const baseline = previous.get(material)!.clippingPlanes ?? [];
+      material.clippingPlanes = [...baseline, plane];
+      material.clipIntersection = false;
+      material.needsUpdate = true;
+    }
+  });
+}
+
+function restoreSectionClipping(previous: Map<THREE.Material, SectionClippingMaterialState>) {
+  for (const [material, state] of previous) {
+    material.clippingPlanes = state.clippingPlanes;
+    material.clipIntersection = state.clipIntersection;
+    material.needsUpdate = true;
+  }
+  previous.clear();
+}
+
+function hasSectionClippableAncestor(object: THREE.Object3D): boolean {
+  let current: THREE.Object3D | null = object;
+  while (current) {
+    if (current.userData.opencaeSectionExclude === true) return false;
+    if (current.userData.opencaeSectionClippable === true) return true;
+    current = current.parent;
+  }
+  return false;
+}
+
+function SectionClippingController({ state, bounds }: { state: SectionPlaneState; bounds: THREE.Box3 | null }) {
+  const { invalidate, scene } = useThree();
+  const previousRef = useRef(new Map<THREE.Material, SectionClippingMaterialState>());
+  const plane = useMemo(() => sectionPlaneForBounds(state, bounds), [bounds, state]);
+  useEffect(() => {
+    restoreSectionClipping(previousRef.current);
+    if (plane) applySectionClipping(scene, plane, previousRef.current);
+    invalidate();
+    return () => restoreSectionClipping(previousRef.current);
+  }, [invalidate, plane, scene]);
+  useFrame(() => {
+    if (plane) applySectionClipping(scene, plane, previousRef.current);
+  });
+  return null;
+}
+
+function OpenSectionLabel({ bounds, state }: { bounds: THREE.Box3; state: SectionPlaneState }) {
+  const plane = sectionPlaneForBounds(state, bounds);
+  if (!plane) return null;
+  const center = bounds.getCenter(new THREE.Vector3());
+  const axisIndex = state.axis === "x" ? 0 : state.axis === "y" ? 1 : 2;
+  center.setComponent(axisIndex, -plane.constant / plane.normal.getComponent(axisIndex));
+  center.y = bounds.max.y + Math.max(0.12, bounds.getSize(new THREE.Vector3()).y * 0.06);
+  return (
+    <Billboard position={center.toArray() as [number, number, number]} follow>
+      <Text
+        color="#f8fafc"
+        fontSize={0.11 * boundaryMarkerScale(bounds)}
+        anchorX="center"
+        anchorY="bottom"
+        outlineColor="#111827"
+        outlineWidth={0.012}
+        renderOrder={30}
+      >Open section</Text>
+    </Billboard>
+  );
 }
 
 function CaptureBridge({ register }: { register?: (capture: (() => Promise<string>) | null) => void }) {
@@ -1358,17 +1480,17 @@ function BracketModel({
           onUploadedPreviewBounds={onUploadedPreviewBounds}
         />
       ) : (
-        <SampleSolid
-          kind={modelKind}
-          displayModel={displayModel}
-          color={materialColor("face-base-bottom")}
-          pickHandlers={pickHandlers}
-          enableHoleWallPicking={activeStep === "supports"}
-          activePayloadObjectId={activePayloadObjectId}
-          selectedFaceId={selectedFaceId}
-          onMeasureDisplayModelDimensions={onMeasureDisplayModelDimensions}
-          onUploadedPreviewBounds={onUploadedPreviewBounds}
-        />
+        <group userData={{ opencaeSectionClippable: true }}><SampleSolid
+            kind={modelKind}
+            displayModel={displayModel}
+            color={materialColor("face-base-bottom")}
+            pickHandlers={pickHandlers}
+            enableHoleWallPicking={activeStep === "supports"}
+            activePayloadObjectId={activePayloadObjectId}
+            selectedFaceId={selectedFaceId}
+            onMeasureDisplayModelDimensions={onMeasureDisplayModelDimensions}
+            onUploadedPreviewBounds={onUploadedPreviewBounds}
+          /></group>
       )}
       {printLayerOrientation && !isResultView && (
         <PrintLayerOverlay
@@ -1377,8 +1499,8 @@ function BracketModel({
           displayModel={displayModel}
         />
       )}
-      {!suppressProceduralResultSolid && <HoleRims kind={modelKind} />}
-      {viewMode === "mesh" && <MeshOverlay kind={modelKind} />}
+      {!suppressProceduralResultSolid && <group userData={{ opencaeSectionClippable: true }}><HoleRims kind={modelKind} /></group>}
+      {viewMode === "mesh" && <group userData={{ opencaeSectionClippable: true }}><MeshOverlay kind={modelKind} /></group>}
       {placementMode && !isResultView && <SnapVisualization result={snapResult} mode={activeStep === "supports" ? "supports" : "loads"} />}
       {showModelHitLabel && hoveredHit && <ModelHitLabel hit={hoveredHit} active={hoveredHit.face.id === selectedFaceId} />}
       {showBoundaryMarkers && loadMarkers.map((marker) => {
@@ -2621,7 +2743,7 @@ function AnalysisResultModel({
   if (kind === "blank") return null;
   if (kind === "uploaded") {
     return (
-      <UploadedResultSolid
+      <group userData={{ opencaeSectionClippable: true }}><UploadedResultSolid
         displayModel={displayModel}
         samples={samples}
         resultMode={resultMode}
@@ -2635,13 +2757,13 @@ function AnalysisResultModel({
         supportMarkers={supportMarkers}
         onMeasureDisplayModelDimensions={onMeasureDisplayModelDimensions}
         onUploadedPreviewBounds={onUploadedPreviewBounds}
-      />
+      /></group>
     );
   }
   if (kind === "bracket") {
-    return <BracketResultSolid kind={kind} samples={samples} resultFields={resultFields} resultMode={resultMode} showDeformed={showDeformed} resultPlaybackPlaying={resultPlaybackPlaying} stressExaggeration={stressExaggeration} deformationScale={deformationScale} resultPlaybackFrameController={resultPlaybackFrameController} loadMarkers={loadMarkers} supportMarkers={supportMarkers} />;
+    return <group userData={{ opencaeSectionClippable: true }}><BracketResultSolid kind={kind} samples={samples} resultFields={resultFields} resultMode={resultMode} showDeformed={showDeformed} resultPlaybackPlaying={resultPlaybackPlaying} stressExaggeration={stressExaggeration} deformationScale={deformationScale} resultPlaybackFrameController={resultPlaybackFrameController} loadMarkers={loadMarkers} supportMarkers={supportMarkers} /></group>;
   }
-  return <SampleResultSolid kind={kind} samples={samples} resultFields={resultFields} resultMode={resultMode} showDeformed={showDeformed} resultPlaybackPlaying={resultPlaybackPlaying} stressExaggeration={stressExaggeration} deformationScale={deformationScale} resultPlaybackFrameController={resultPlaybackFrameController} loadMarkers={loadMarkers} supportMarkers={supportMarkers} />;
+  return <group userData={{ opencaeSectionClippable: true }}><SampleResultSolid kind={kind} samples={samples} resultFields={resultFields} resultMode={resultMode} showDeformed={showDeformed} resultPlaybackPlaying={resultPlaybackPlaying} stressExaggeration={stressExaggeration} deformationScale={deformationScale} resultPlaybackFrameController={resultPlaybackFrameController} loadMarkers={loadMarkers} supportMarkers={supportMarkers} /></group>;
 }
 
 function useResultSamplesForFaces(faces: DisplayFace[], resultFields: ResultField[], resultMode: ResultMode, enabled: boolean) {
@@ -2843,7 +2965,7 @@ function UploadedNativeCadResultModel({
   }
 
   return (
-    <group>
+    <group userData={{ opencaeSectionClippable: true }}>
       {renderedPreview.outline && <primitive object={renderedPreview.outline} />}
       <primitive object={renderedPreview.object} />
     </group>
@@ -3272,7 +3394,7 @@ function SolverSurfaceResultMesh({
   );
   const outlineGeometry = useMemo(() => buildSolverSurfaceOutlineGeometry(surfaceMesh), [surfaceMesh]);
   return (
-    <group>
+    <group userData={{ opencaeSectionClippable: true }}>
       {shouldShowUndeformedResultOutline(showDeformed) && <UndeformedGeometryOutline geometry={outlineGeometry} />}
       <mesh geometry={geometry} onClick={(event) => {
         if (!onAddResultProbe || resultPlaybackPlaying) return;

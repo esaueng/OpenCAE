@@ -1,7 +1,7 @@
 import { isModalResultSummary } from "@opencae/schema";
-import type { AnalysisMesh, DisplayModel, DynamicSolverSettings, MeshQuality, Project, ResultField, ResultRenderBounds, ResultSummary, RunEvent, Study, StudyRun } from "@opencae/schema";
+import type { AnalysisMesh, CustomMaterial, DisplayModel, DynamicSolverSettings, MeshQuality, Project, ResultField, ResultRenderBounds, ResultSummary, RunEvent, Study, StudyRun } from "@opencae/schema";
 import type { StepGeometryInspection, StepGeometryRepairReport } from "@opencae/mesh-intake";
-import { assertCompatibleManufacturingProcess } from "@opencae/materials";
+import { assertCompatibleManufacturingProcess, resolveMaterial } from "@opencae/materials";
 import type { LoadApplicationPoint, LoadDirection, LoadDirectionLabel, LoadType, PayloadLoadMetadata } from "../loadPreview";
 import type { PayloadObjectSelection } from "../workspaceViewTypes";
 import { embedUploadedModelFile, type EmbeddedModelFile, type LocalResultBundle, type SolverSurfaceMesh } from "../projectFile";
@@ -61,6 +61,7 @@ export interface ResultsResponse {
 export interface RunSimulationOptions {
   onRunStatus?: (message: string) => void;
   resultRenderBounds?: ResultRenderBounds | null;
+  customMaterials?: CustomMaterial[];
   /**
    * Called when a run had to mesh its geometry first (A-M4 local-first
    * meshing): receives the study with the freshly stored mesh artifact so the
@@ -628,9 +629,16 @@ export async function generateMesh(studyId: string, preset: MeshQuality, current
   );
 }
 
-export async function assignMaterial(studyId: string, materialId: string, parameters: Record<string, unknown> = {}, currentStudy?: Study): Promise<{ study: Study; message: string }> {
+export async function assignMaterial(
+  studyId: string,
+  materialId: string,
+  parameters: Record<string, unknown> = {},
+  currentStudy?: Study,
+  customMaterials: readonly CustomMaterial[] = []
+): Promise<{ study: Study; message: string }> {
+  resolveMaterial(materialId, customMaterials);
   if (parameters.manufacturingProcessId !== undefined) {
-    assertCompatibleManufacturingProcess(materialId, parameters.manufacturingProcessId);
+    assertCompatibleManufacturingProcess(materialId, parameters.manufacturingProcessId, customMaterials);
   }
   return fetchJsonWithFallback(
     `/api/studies/${studyId}/materials`,
@@ -955,7 +963,7 @@ function runSimulationLocally(study: Study, displayModel?: DisplayModel, options
   const needsMesh = isComplexGeometry(displayModel, study) && !hasActualCoreVolumeMesh(study, displayModel);
   const capabilities = { canMeshOnDemand: needsMesh && canMeshStudyOnDemand(study, displayModel) };
   const meshFirst = needsMesh && capabilities.canMeshOnDemand;
-  const coreEligibility = openCaeCoreEligibility(study, displayModel, capabilities);
+  const coreEligibility = openCaeCoreEligibility(study, displayModel, capabilities, options.customMaterials);
   const now = new Date().toISOString();
   if (!coreEligibility.ok) {
     const record = createLocalRunRecord(runId, "failed");
@@ -1013,7 +1021,7 @@ function runSimulationLocally(study: Study, displayModel?: DisplayModel, options
       options.onStudyMeshed?.(solveStudy);
     }
     const handle = startLocalSolve(
-      { runId, study: solveStudy, displayModel, debugResults: debugResultsEnabled() },
+      { runId, study: solveStudy, displayModel, customMaterials: options.customMaterials, debugResults: debugResultsEnabled() },
       (progress) => handleLocalSolveProgress(record, progress, solveProgressOffset)
     );
     record.cancelSolve = handle.cancel;

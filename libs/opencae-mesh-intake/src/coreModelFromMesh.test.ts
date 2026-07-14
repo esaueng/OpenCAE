@@ -54,6 +54,22 @@ describe("mapSelectionToSurfaceSet", () => {
 });
 
 describe("buildCoreModelFromCloudMesh", () => {
+  it("rejects an explicit dangling material assignment instead of substituting aluminum", () => {
+    expect(() => buildCoreModelFromCloudMesh({
+      study: {
+        id: "study-unknown-material",
+        type: "static_stress",
+        materialAssignments: [{ id: "assign-1", materialId: "deleted-custom-material", selectionRef: "selection-body", parameters: {}, status: "complete" }],
+        namedSelections: [],
+        constraints: [],
+        loads: []
+      },
+      volumeMesh: singleTetArtifact(),
+      analysisType: "static_stress",
+      solverSettings: {}
+    })).toThrow('Unknown material "deleted-custom-material".');
+  });
+
   it("shares one node set when two supports resolve to the same face", () => {
     // Two picks on the same face (e.g. both supports healed onto the tray
     // bottom) must not emit duplicate node-set names — the model validator

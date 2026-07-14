@@ -7,7 +7,7 @@ import { SQLiteDatabaseProvider } from "@opencae/db";
 import { bracketDemoMaterial, bracketDemoProject, bracketDisplayModel, bracketResultFields, bracketResultSummary } from "@opencae/db/sample-data";
 import { InMemoryJobQueueProvider, LocalRunStateProvider } from "@opencae/jobs";
 import { MockMeshService } from "@opencae/mesh-service";
-import { assertCompatibleManufacturingProcess } from "@opencae/materials";
+import { assertCompatibleManufacturingProcess, resolveMaterial } from "@opencae/materials";
 import { buildHtmlReport, buildPdfReport, LocalReportProvider, reportPdfKeyFor } from "@opencae/post-service";
 import { solveDynamicStudy } from "@opencae/solver-service";
 import {
@@ -347,7 +347,8 @@ api.post("/api/studies/:studyId/validate", async (request, reply) => {
   const { studyId } = request.params as { studyId: string };
   const study = db.getStudy(studyId);
   if (!study) return reply.code(404).send({ error: "Study not found" });
-  const diagnostics = validateStaticStressStudy(study).map((diagnostic) => diagnostic.message);
+  const project = db.getProject(study.projectId);
+  const diagnostics = validateStaticStressStudy(study, project?.customMaterials).map((diagnostic) => diagnostic.message);
   return { ready: diagnostics.length === 0, diagnostics };
 });
 
@@ -358,12 +359,14 @@ api.post("/api/studies/:studyId/materials", async (request, reply) => {
   const body = request.body as { materialId?: string; parameters?: Record<string, unknown> } | undefined;
   const materialId = body?.materialId ?? bracketDemoMaterial.id;
   const parameters = body?.parameters ?? {};
-  if (parameters.manufacturingProcessId !== undefined) {
-    try {
-      assertCompatibleManufacturingProcess(materialId, parameters.manufacturingProcessId);
-    } catch (error) {
-      return reply.code(400).send({ error: error instanceof Error ? error.message : "Invalid material and manufacturing process." });
+  try {
+    const project = db.getProject(study.projectId);
+    resolveMaterial(materialId, project?.customMaterials);
+    if (parameters.manufacturingProcessId !== undefined) {
+      assertCompatibleManufacturingProcess(materialId, parameters.manufacturingProcessId, project?.customMaterials);
     }
+  } catch (error) {
+    return reply.code(400).send({ error: error instanceof Error ? error.message : "Invalid material and manufacturing process." });
   }
   const bodySelection = study.namedSelections.find((selection) => selection.entityType === "body");
   const assignment = {
@@ -439,12 +442,12 @@ api.post("/api/studies/:studyId/runs", mutatingRateLimit, async (request, reply)
   const { studyId } = request.params as { studyId: string };
   const study = db.getStudy(studyId);
   if (!study) return reply.code(404).send({ error: "Study not found" });
-  const runDiagnostics = validateStudy(study);
+  const project = db.getProject(study.projectId);
+  const runDiagnostics = validateStudy(study, project?.customMaterials);
   if (runDiagnostics.length) return reply.code(400).send({ error: "Study is not ready.", diagnostics: runDiagnostics });
   const studySnapshot = structuredClone(study);
-  const project = db.getProject(studySnapshot.projectId);
   const displayModel = project ? await displayModelForProject(project) : blankDisplayModel();
-  const eligibility = openCaeCoreEligibility(studySnapshot, displayModel);
+  const eligibility = openCaeCoreEligibility(studySnapshot, displayModel, undefined, project?.customMaterials);
   const runId = `run-${crypto.randomUUID()}`;
   const jobId = `job-${crypto.randomUUID()}`;
   const run: StudyRun = {
@@ -466,7 +469,7 @@ api.post("/api/studies/:studyId/runs", mutatingRateLimit, async (request, reply)
       if (runCancelled()) return;
       publish(runId, "state", 3, "OpenCAE Core simulation running.");
       publish(runId, "progress", 18, studySnapshot.type === "dynamic_structural" ? "OpenCAE Core dynamic Tet4 solver started." : "OpenCAE Core CPU Tet4 solver started.");
-      const solved = trySolveOpenCaeCoreStudy({ study: studySnapshot, runId, displayModel });
+      const solved = trySolveOpenCaeCoreStudy({ study: studySnapshot, runId, displayModel, customMaterials: project?.customMaterials });
       if (runCancelled()) return;
       if (!solved.ok) {
         const failed = {

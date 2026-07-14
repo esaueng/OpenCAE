@@ -398,6 +398,34 @@ describe("per-model solver backend resolution", () => {
     }
   });
 
+  test("builds and validates with a project custom material while rejecting unknown IDs", () => {
+    const custom = {
+      id: "0ac4dbda-1d37-43c0-b3ac-9d1d2cc28e84",
+      name: "Shop aluminum",
+      category: "metal" as const,
+      youngsModulus: 70e9,
+      poissonRatio: 0.33,
+      density: 2710,
+      yieldStrength: 290e6,
+      verification: "user_supplied_unverified" as const
+    };
+    const customStudy = studyFixture({
+      materialAssignments: [{ ...studyFixture().materialAssignments[0]!, materialId: custom.id }]
+    });
+    const unknownStudy = studyFixture({
+      materialAssignments: [{ ...studyFixture().materialAssignments[0]!, materialId: "deleted-custom-material" }]
+    });
+
+    expect(openCaeCoreEligibility(customStudy, cantileverDisplayModel(), undefined, [custom])).toEqual({ ok: true });
+    const coreBuild = buildOpenCaeCoreModelForStudy(customStudy, cantileverDisplayModel(), [custom]);
+    expect(coreBuild.model.materials[0]).toMatchObject({
+      name: custom.id,
+      youngModulus: custom.youngsModulus,
+      density: custom.density
+    });
+    expect(openCaeCoreEligibility(unknownStudy, cantileverDisplayModel())).toEqual({ ok: false, reason: 'Unknown material "deleted-custom-material".' });
+  });
+
   test("a retired explicit cloud choice resolves as auto local (old saves keep working)", () => {
     const study = studyFixture({ solverSettings: { backend: "opencae_core_cloud" } as unknown as Study["solverSettings"] });
     expect(openCaeCoreEligibility(study, cantileverDisplayModel()).ok).toBe(true);

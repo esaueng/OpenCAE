@@ -1,13 +1,13 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { AlertTriangle, Anchor, ArrowDown, Atom, Check, ChevronDown, ChevronRight, CircleHelp, Eye, Factory, FileDown, Gauge, Grid3X3, Layers3, Maximize2, Pause, Play, Plus, RotateCcw, Ruler, ScanLine, ShieldCheck, Upload, Weight, Wrench, X } from "lucide-react";
-import { compatibleManufacturingProcessesFor, defaultManufacturingParametersFor, defaultManufacturingProcessIdFor, effectiveMaterialProperties, fdmPropertyFactorsFor, isManufacturingProcessCompatible, manufacturingParametersForAssignment, manufacturingProcessForId, massKgForPayloadMaterial, materialCategoryLabel, normalizeManufacturingParameters, payloadMaterialForId, payloadMaterials, starterMaterials, type ManufacturingParameters, type ManufacturingProcessId, type PayloadMaterialCategory } from "@opencae/materials";
+import { compatibleManufacturingProcessesFor, defaultManufacturingParametersFor, defaultManufacturingProcessIdFor, effectiveMaterialProperties, fdmPropertyFactorsFor, isManufacturingProcessCompatible, manufacturingParametersForAssignment, manufacturingProcessForId, massKgForPayloadMaterial, materialCatalog, materialCategoryLabel, normalizeManufacturingParameters, payloadMaterialForId, payloadMaterials, type ManufacturingParameters, type ManufacturingProcessId, type PayloadMaterialCategory } from "@opencae/materials";
 import { assessResultFailure, estimateAllowableLoadForSafetyFactor, isModalResultSummary } from "@opencae/schema";
-import type { Constraint, DisplayFace, DisplayModel, DynamicSolverSettings, Load, MeshQuality, ModalResultSummary, ModalSolverSettings, Project, ResultField, ResultSummary, RunTimingEstimate, SimulationFidelity, StructuralResultSummary, Study } from "@opencae/schema";
+import type { Constraint, CustomMaterial, DisplayFace, DisplayModel, DynamicSolverSettings, Load, Material, MeshQuality, ModalResultSummary, ModalSolverSettings, Project, ResultField, ResultSummary, RunTimingEstimate, SimulationFidelity, StructuralResultSummary, Study } from "@opencae/schema";
 import { inferGlobalCriticalPrintAxis } from "@opencae/study-core";
 import type { StepId } from "./StepBar";
 import { applicationPointForLoad, createViewerLoadMarkers, directionLabelForLoad, directionVectorForLabel, equivalentForceForLoad, LOAD_DIRECTION_LABELS, loadMarkerOrdinalLabel, payloadObjectForLoad, unitsForLoadType, type LoadApplicationPoint, type LoadDirectionLabel, type LoadType, type PayloadLoadMetadata, type PayloadMassMode } from "../loadPreview";
-import type { PayloadObjectSelection, ResultMode, StressComponent, ViewMode } from "../workspaceViewTypes";
+import { DEFAULT_SECTION_PLANE, type PayloadObjectSelection, type ResultMode, type SectionPlaneState, type StressComponent, type ViewMode } from "../workspaceViewTypes";
 import type { ResolvedResultProbe } from "../resultSelection";
 import type { SampleAnalysisType, SampleModelId } from "../lib/api";
 import type { WasmMeshPhaseProgress } from "../lib/wasmMeshing";
@@ -55,6 +55,7 @@ interface RightPanelProps {
   stressComponent?: StressComponent;
   showDeformed: boolean;
   showDimensions: boolean;
+  sectionPlane?: SectionPlaneState;
   stressExaggeration: number;
   resultSummary: ResultSummary | null;
   resultFields?: ResultField[];
@@ -91,8 +92,11 @@ interface RightPanelProps {
   onClearResultProbes?: () => void;
   onToggleDeformed: () => void;
   onToggleDimensions: () => void;
+  onSectionPlaneChange?: (state: SectionPlaneState) => void;
   onStressExaggerationChange: (value: number) => void;
   onAssignMaterial: (materialId: string, parameters?: Record<string, unknown>) => void;
+  onSaveCustomMaterial?: (material: CustomMaterial) => void;
+  onDeleteCustomMaterial?: (materialId: string) => void;
   /** null suppresses the preview while editing; undefined clears the preview so the assigned orientation shows again. */
   onPreviewPrintLayerOrientation?: (orientation: "x" | "y" | "z" | null | undefined) => void;
   onAddSupport: (selectionRef?: string) => void;
@@ -151,7 +155,7 @@ export function RightPanel(props: RightPanelProps) {
   );
 }
 
-function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sampleModel, sampleAnalysisType = "static_stress", onFitView, onRotateModel, onResetModelOrientation, onViewModeChange, onToggleDimensions, onLoadSample, onUploadModel, onRepairModel, isRepairingModel = false, onSampleModelChange, onSampleAnalysisTypeChange }: RightPanelProps) {
+function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sectionPlane = DEFAULT_SECTION_PLANE, sampleModel, sampleAnalysisType = "static_stress", onFitView, onRotateModel, onResetModelOrientation, onViewModeChange, onToggleDimensions, onSectionPlaneChange, onLoadSample, onUploadModel, onRepairModel, isRepairingModel = false, onSampleModelChange, onSampleAnalysisTypeChange }: RightPanelProps) {
   const [confirmSampleLoad, setConfirmSampleLoad] = useState(false);
   const [pendingSampleModel, setPendingSampleModel] = useState<SampleModelId>(sampleModel);
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
@@ -301,6 +305,39 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sa
       </button>
       <HelpNote helpId="dimensions" />
       {showDimensions && <ModelDimensions displayModel={displayModel} />}
+      <SectionTitle>Open section</SectionTitle>
+      <button
+        className={sectionPlane.enabled ? "primary wide" : "secondary wide"}
+        type="button"
+        aria-pressed={sectionPlane.enabled}
+        onClick={() => onSectionPlaneChange?.({ ...sectionPlane, enabled: !sectionPlane.enabled })}
+      >
+        <ScanLine size={16} />
+        {sectionPlane.enabled ? "Close section" : "Open section"}
+      </button>
+      {sectionPlane.enabled ? (
+        <div className="section-plane-controls">
+          <div className="segmented" role="group" aria-label="Section plane axis">
+            {(["x", "y", "z"] as const).map((axis) => (
+              <button
+                key={axis}
+                className={sectionPlane.axis === axis ? "active" : ""}
+                type="button"
+                aria-pressed={sectionPlane.axis === axis}
+                onClick={() => onSectionPlaneChange?.({ ...sectionPlane, axis })}
+              >{axis.toUpperCase()}</button>
+            ))}
+          </div>
+          <label className="field">
+            <span>Normalized offset · {Math.round(sectionPlane.offset * 100)}%</span>
+            <input type="range" min="0" max="1" step="0.01" value={sectionPlane.offset} onChange={(event) => onSectionPlaneChange?.({ ...sectionPlane, offset: Number(event.currentTarget.value) })} />
+          </label>
+          <button className="secondary wide" type="button" onClick={() => onSectionPlaneChange?.({ ...sectionPlane, flipped: !sectionPlane.flipped })}>
+            <RotateCcw size={15} />Flip cut side
+          </button>
+          <p className="panel-copy">Geometry, mesh, result contours, feature edges, and the undeformed outline are clipped. Loads, supports, probes, and annotations stay visible.</p>
+        </div>
+      ) : null}
       <SectionTitle helpId="orientation">Orientation</SectionTitle>
       <div className="orientation-controls" role="group" aria-label="Axis view">
         {(["x", "y", "z"] as const).map((axis) => (
@@ -335,26 +372,30 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sa
   );
 }
 
-function MaterialPanel({ project, displayModel, study, onAssignMaterial, onPreviewPrintLayerOrientation }: RightPanelProps) {
+function MaterialPanel({ project, displayModel, study, onAssignMaterial, onSaveCustomMaterial, onDeleteCustomMaterial, onPreviewPrintLayerOrientation }: RightPanelProps) {
+  const materials = useMemo(() => materialCatalog(project.customMaterials), [project.customMaterials]);
+  const defaultMaterial = materials[0]!;
   const currentAssignment = study.materialAssignments[0];
   const current = currentAssignment?.materialId ?? "mat-aluminum-6061";
   const currentParameters = currentAssignment?.parameters ?? EMPTY_PARAMETERS;
-  const [selectedMaterialId, setSelectedMaterialId] = useState(current);
+  const initialMaterial = materialForId(current, materials) ?? defaultMaterial;
+  const [selectedMaterialId, setSelectedMaterialId] = useState(initialMaterial.id);
   const [manufacturingParameters, setManufacturingParameters] = useState<ManufacturingParameters>(() =>
-    normalizeManufacturingParameters(materialForId(current), currentParameters)
+    normalizeManufacturingParameters(initialMaterial, currentParameters)
   );
   const [showLibrary, setShowLibrary] = useState(false);
   const [compatibilityNote, setCompatibilityNote] = useState<string | null>(null);
 
   useEffect(() => {
-    const material = materialForId(current);
-    setSelectedMaterialId(current);
+    const material = materialForId(current, materials) ?? defaultMaterial;
+    setSelectedMaterialId(material.id);
     setManufacturingParameters(normalizeManufacturingParameters(material, currentParameters));
     setCompatibilityNote(null);
-  }, [current, currentParameters]);
+  }, [current, currentParameters, defaultMaterial, materials]);
 
-  const selectedMaterial = materialForId(selectedMaterialId);
-  const assignedMaterial = materialForId(current);
+  const selectedMaterial = materialForId(selectedMaterialId, materials) ?? defaultMaterial;
+  const resolvedAssignedMaterial = materialForId(current, materials);
+  const assignedMaterial = resolvedAssignedMaterial ?? defaultMaterial;
   const selectedProcessId = manufacturingParameters.manufacturingProcessId ?? defaultManufacturingProcessIdFor(selectedMaterial);
   const selectedProcess = manufacturingProcessForId(selectedProcessId)!;
   const compatibleProcesses = compatibleManufacturingProcessesFor(selectedMaterial);
@@ -379,7 +420,8 @@ function MaterialPanel({ project, displayModel, study, onAssignMaterial, onPrevi
   }, [manufacturingParameters.layerOrientation, onPreviewPrintLayerOrientation, processUsesBuildDirection]);
 
   function handleMaterialChange(materialId: string) {
-    const material = materialForId(materialId);
+    const material = materialForId(materialId, materials);
+    if (!material) return;
     const previousProcessId = manufacturingParameters.manufacturingProcessId;
     const canKeepProcess = previousProcessId ? isManufacturingProcessCompatible(material, previousProcessId) : false;
     const nextProcessId = canKeepProcess ? previousProcessId! : defaultManufacturingProcessIdFor(material);
@@ -518,6 +560,11 @@ function MaterialPanel({ project, displayModel, study, onAssignMaterial, onPrevi
         selectedMaterialId={selectedMaterialId}
         assignedSelectionLabel={assignedSelectionLabel}
         unitSystem={project.unitSystem}
+        materials={materials}
+        customMaterialIds={project.customMaterials?.map((material) => material.id)}
+        assignedMaterialIds={project.studies.flatMap((candidate) => candidate.materialAssignments.map((assignment) => assignment.materialId))}
+        onSaveCustomMaterial={onSaveCustomMaterial}
+        onDeleteCustomMaterial={onDeleteCustomMaterial}
         onApply={(materialId) => {
           handleMaterialChange(materialId);
           setShowLibrary(false);
@@ -525,9 +572,10 @@ function MaterialPanel({ project, displayModel, study, onAssignMaterial, onPrevi
         onClose={() => setShowLibrary(false)}
       />
       <SectionTitle>Assigned</SectionTitle>
+      {currentAssignment && !resolvedAssignedMaterial ? <Callout>Unknown material “{currentAssignment.materialId}”. Choose a valid material before solving.</Callout> : null}
       {currentAssignment ? (
         <div className="concept-card-list">
-          <ConceptCard icon={<Check size={18} />} title={assignedMaterial.name} detail={`${assignedSelectionLabel} · ${assignedDetail}`} tone="accent" />
+          <ConceptCard icon={<Check size={18} />} title={resolvedAssignedMaterial?.name ?? currentAssignment.materialId} detail={`${assignedSelectionLabel} · ${resolvedAssignedMaterial ? assignedDetail : "Unresolved material"}`} tone="accent" />
         </div>
       ) : (
         <Callout>No material assigned</Callout>
@@ -2031,8 +2079,8 @@ function PlacementReadout({ selectedRef, fallbackLabel, detail }: { selectedRef:
   );
 }
 
-function materialForId(materialId: string) {
-  return starterMaterials.find((material) => material.id === materialId) ?? starterMaterials[0]!;
+function materialForId(materialId: string, materials: readonly Material[]): Material | undefined {
+  return materials.find((material) => material.id === materialId);
 }
 
 function SupportIcon() {

@@ -1,6 +1,6 @@
 import { effectiveMaterialProperties } from "@opencae/materials";
 import { assessResultFailure } from "@opencae/schema";
-import type { AnalysisMesh, DisplayModel, Load, Material, ResultField, ResultProvenance, ResultSample, StructuralResultSummary, Study } from "@opencae/schema";
+import type { AnalysisMesh, CustomMaterial, DisplayModel, Load, Material, ResultField, ResultProvenance, ResultSample, StructuralResultSummary, Study } from "@opencae/schema";
 import { inferCriticalPrintAxis, modelAxisToGlobalBuildAxis } from "@opencae/study-core";
 import { loadForceNewtons, materialForStudy, materialParametersForStudy, STANDARD_GRAVITY } from "./studyInputs";
 
@@ -29,6 +29,7 @@ export type BeamDemoPhysicalModel = {
 export type BeamDemoSolveOptions = {
   analysisMesh?: AnalysisMesh;
   displayModel?: DisplayModel;
+  customMaterials?: readonly CustomMaterial[];
   beamModel?: BeamDemoPhysicalModel;
   debugResults?: boolean;
 };
@@ -123,7 +124,7 @@ export function isBeamDemoStudy(study: Study): boolean {
 export function solveBeamDemoStudy(study: Study, runId: string, optionsInput?: AnalysisMesh | BeamDemoSolveOptions): BeamDemoSolveResult {
   const options = normalizeBeamDemoSolveOptions(optionsInput);
   const beamModel = options.beamModel ?? DEFAULT_BEAM_DEMO_PHYSICAL_MODEL;
-  const material = materialForStudy(study);
+  const material = materialForStudy(study, options.customMaterials);
   const materialParameters = materialParametersForStudy(study);
   const modelCriticalLayerAxis = beamCriticalPrintAxis(study);
   const effectiveMaterial = effectiveMaterialProperties(material, materialParameters, {

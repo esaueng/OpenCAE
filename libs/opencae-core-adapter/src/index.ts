@@ -16,8 +16,9 @@ import {
   solveStudyModelWithCorePipeline,
   type SolverHooks
 } from "@opencae/solve-pipeline";
-import { effectiveMaterialProperties, starterMaterials } from "@opencae/materials";
+import { effectiveMaterialProperties, resolveMaterial } from "@opencae/materials";
 import {
+  type CustomMaterial,
   type DisplayModel,
   type DynamicSolverSettings,
   type ModalSolverSettings,
@@ -302,7 +303,12 @@ export function isComplexGeometry(displayModel: DisplayModel | undefined, study?
   return displayModel.faces.length > 6;
 }
 
-export function openCaeCoreEligibility(study: Study, displayModel?: DisplayModel, capabilities?: CoreSolveCapabilities): OpenCaeCoreEligibility {
+export function openCaeCoreEligibility(
+  study: Study,
+  displayModel?: DisplayModel,
+  capabilities?: CoreSolveCapabilities,
+  customMaterials: readonly CustomMaterial[] = []
+): OpenCaeCoreEligibility {
   if (study.type !== "static_stress" && study.type !== "dynamic_structural" && study.type !== "modal_analysis") {
     return { ok: false, reason: "OpenCAE Core browser solve currently supports static, dynamic, and modal structural studies only." };
   }
@@ -317,6 +323,12 @@ export function openCaeCoreEligibility(study: Study, displayModel?: DisplayModel
     return { ok: false, reason: COMPLEX_CORE_MESH_REQUIRED_REASON };
   }
   if (!study.materialAssignments.length) return { ok: false, reason: "OpenCAE Core requires an assigned material." };
+  let material: MaterialStudyResolution;
+  try {
+    material = materialForStudy(study, customMaterials);
+  } catch (error) {
+    return { ok: false, reason: error instanceof Error ? error.message : "OpenCAE Core could not resolve the assigned material." };
+  }
   if (!study.constraints.some((constraint) => constraint.type === "fixed")) {
     return { ok: false, reason: "OpenCAE Core requires at least one fixed support." };
   }
@@ -326,8 +338,7 @@ export function openCaeCoreEligibility(study: Study, displayModel?: DisplayModel
   if (unsupportedLoad) return { ok: false, reason: `OpenCAE Core supports force, pressure, and gravity loads; ${unsupportedLoad.type} loads are not supported yet.` };
   if (study.type === "modal_analysis") return { ok: true };
   if (!study.loads.length) return { ok: false, reason: "OpenCAE Core requires at least one load." };
-  const material = materialForStudy(study).material;
-  const force = totalForceVector(study, displayModel, material.density);
+  const force = totalForceVector(study, displayModel, material.material.density);
   if (Math.hypot(...force) <= 1e-12) {
     return { ok: false, reason: "OpenCAE Core requires a load with a finite positive value and direction." };
   }
@@ -340,18 +351,19 @@ export function openCaeCoreEligibility(study: Study, displayModel?: DisplayModel
  * surfaceForce/pressure loads, solver-frame rotation) feeds the mirrored cloud
  * pipeline in @opencae/solve-pipeline, under BROWSER_SOLVE_LIMITS.
  */
-export function trySolveOpenCaeCoreStudy({ study, runId, displayModel, hooks }: {
+export function trySolveOpenCaeCoreStudy({ study, runId, displayModel, customMaterials = [], hooks }: {
   study: Study;
   runId: string;
   displayModel?: DisplayModel;
+  customMaterials?: readonly CustomMaterial[];
   hooks?: SolverHooks;
 }): OpenCaeCoreSolveOutcome {
   void runId;
-  const eligibility = openCaeCoreEligibility(study, displayModel);
+  const eligibility = openCaeCoreEligibility(study, displayModel, undefined, customMaterials);
   if (!eligibility.ok) return eligibility;
 
   try {
-    const coreBuild = buildOpenCaeCoreModelForStudy(study, displayModel);
+    const coreBuild = buildOpenCaeCoreModelForStudy(study, displayModel, customMaterials);
     const analysisType = study.type === "dynamic_structural"
       ? "dynamic_structural"
       : study.type === "modal_analysis"
@@ -422,10 +434,14 @@ function pipelineSolverSettingsForStudy(study: Study): Record<string, unknown> {
   };
 }
 
-export function buildOpenCaeCoreModelForStudy(study: Study, displayModel: DisplayModel | undefined): CoreStudyModel {
+export function buildOpenCaeCoreModelForStudy(
+  study: Study,
+  displayModel: DisplayModel | undefined,
+  customMaterials: readonly CustomMaterial[] = []
+): CoreStudyModel {
   if (!displayModel?.dimensions) throw new Error("OpenCAE Core Cloud requires display dimensions before generating a Core model.");
   const actualMesh = actualCoreVolumeMeshArtifact(study);
-  const material = materialForStudy(study);
+  const material = materialForStudy(study, customMaterials);
   const criticalLayerAxis = inferGlobalCriticalPrintAxis(study, displayModel.faces.map((face) => ({
     entityId: face.id,
     center: face.center,
@@ -737,10 +753,15 @@ function dynamicLoadProfileForCore(value: DynamicSolverSettings["loadProfile"]):
   return value === "quasi_static" ? "quasiStatic" : value;
 }
 
-function materialForStudy(study: Study) {
+type MaterialStudyResolution = {
+  material: ReturnType<typeof resolveMaterial>;
+  parameters: Record<string, unknown>;
+};
+
+function materialForStudy(study: Study, customMaterials: readonly CustomMaterial[] = []): MaterialStudyResolution {
   const assignment = study.materialAssignments[0];
-  const material = starterMaterials.find((candidate) => candidate.id === assignment?.materialId);
-  if (!material) throw new Error("OpenCAE Core requires an assigned material.");
+  if (!assignment) throw new Error("OpenCAE Core requires an assigned material.");
+  const material = resolveMaterial(assignment.materialId, customMaterials);
   return {
     material,
     parameters: assignment?.parameters ?? {}

@@ -4,7 +4,11 @@ import {
   BoundaryConditionMenu,
   CreateSimulationModal,
   CreateSimulationScreen,
-  MaterialLibraryModal
+  MaterialLibraryModal,
+  densityForEditor,
+  densityFromEditor,
+  stressForEditor,
+  stressFromEditor
 } from "./SimulationWorkflow";
 
 describe("static simulation workflow components", () => {
@@ -86,6 +90,46 @@ describe("static simulation workflow components", () => {
     expect(html).toContain("root");
     expect(html).toContain("Select material");
     expect(html).toContain("Cancel");
+  });
+
+  test("converts custom material editor values without changing canonical SI storage", () => {
+    expect(stressForEditor(68_947_572.93168, "US")).toBeCloseTo(10);
+    expect(stressFromEditor(10, "US")).toBeCloseTo(68_947_572.93168);
+    expect(densityForEditor(2767.99047102, "US")).toBeCloseTo(0.1);
+    expect(densityFromEditor(0.1, "US")).toBeCloseTo(2767.99047102);
+    expect(stressFromEditor(stressForEditor(276e6, "SI"), "SI")).toBeCloseTo(276e6);
+  });
+
+  test("marks project custom materials unverified and disables deletion while assigned", () => {
+    const custom = {
+      id: "0ac4dbda-1d37-43c0-b3ac-9d1d2cc28e84",
+      name: "Shop aluminum",
+      category: "metal" as const,
+      youngsModulus: 70e9,
+      poissonRatio: 0.33,
+      density: 2710,
+      yieldStrength: 290e6,
+      verification: "user_supplied_unverified" as const
+    };
+    const html = renderToStaticMarkup(
+      <MaterialLibraryModal
+        open
+        selectedMaterialId={custom.id}
+        assignedSelectionLabel="body"
+        unitSystem="SI"
+        materials={[custom]}
+        customMaterialIds={[custom.id]}
+        assignedMaterialIds={[custom.id]}
+        onApply={vi.fn()}
+        onSaveCustomMaterial={vi.fn()}
+        onDeleteCustomMaterial={vi.fn()}
+        onClose={vi.fn()}
+      />
+    );
+
+    expect(html).toContain("User-supplied · unverified");
+    expect(html).toContain("Duplicate &amp; edit");
+    expect(html).toMatch(/disabled=""[^>]*title="Assigned custom materials cannot be deleted\."[^>]*>Delete/);
   });
 
   test("renders enabled and future boundary condition types", () => {
