@@ -65,6 +65,25 @@ describe("browser solve limits", () => {
     expect(settings.maxDofs).toBe(100000);
   });
 
+  test("threads the 100k browser limit and bounded mode count into modal solves", () => {
+    const dynamic = fixtureModel("beam-dynamic");
+    const step = dynamic.steps[0];
+    if (!step || step.type !== "dynamicLinear") throw new Error("Expected the dynamic golden fixture.");
+    const model: OpenCAEModelJson = {
+      ...dynamic,
+      schemaVersion: "0.3.0",
+      loads: [],
+      steps: [{ name: "modes", type: "modal", boundaryConditions: step.boundaryConditions, modeCount: 2 }]
+    };
+    const settings = boundedSolverSettings("modal_analysis", { maxDofs: 250_000, modeCount: 20 }, model, BROWSER_SOLVE_LIMITS);
+    expect(settings).toMatchObject({ maxDofs: 100_000, modeCount: 10 });
+    const outcome = solveStudyModelWithCorePipeline({ model, analysisType: "modal_analysis", solverSettings: { modeCount: 2 }, limits: BROWSER_SOLVE_LIMITS });
+    expect(outcome.ok, outcome.ok ? undefined : outcome.error.message).toBe(true);
+    if (!outcome.ok) return;
+    const resource = outcome.result.diagnostics.find((entry) => entry && typeof entry === "object" && (entry as { id?: unknown }).id === "core-cloud-resource-limits") as { maxDofs?: number; modeCount?: number } | undefined;
+    expect(resource).toMatchObject({ maxDofs: 100_000, modeCount: 2 });
+  });
+
   test("a static model above 100k DOFs fails fast with the actionable max-dofs error", { timeout: 120_000 }, () => {
     const model = structuredTet10BlockModel(16); // (2*16+1)^3 = 35,937 nodes = 107,811 DOFs
     expect(Math.floor(model.nodes.coordinates.length / 3) * 3).toBeGreaterThan(BROWSER_SOLVE_LIMITS.maxDofs);

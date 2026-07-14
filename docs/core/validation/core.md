@@ -20,7 +20,7 @@ pnpm --filter @opencae/solver-cpu build
 
 ## Supported Model Schema
 
-The validation suite targets `opencae.model` schema `0.2.0`, while preserving compatibility with normalized `0.1.0` static Tet4 models.
+The validation suite targets `opencae.model` schema `0.3.0`, while preserving compatibility with `0.1.0` and `0.2.0` models.
 
 Supported mesh-native primitives:
 

@@ -1,9 +1,11 @@
 export const OPENCAE_MODEL_SCHEMA = "opencae.model";
-export const OPENCAE_MODEL_SCHEMA_VERSION = "0.2.0";
+export const OPENCAE_MODEL_SCHEMA_VERSION = "0.3.0";
+export const OPENCAE_PREVIOUS_MODEL_SCHEMA_VERSION = "0.2.0";
 export const OPENCAE_LEGACY_MODEL_SCHEMA_VERSION = "0.1.0";
 
 export type OpenCAEModelSchemaVersion =
   | typeof OPENCAE_MODEL_SCHEMA_VERSION
+  | typeof OPENCAE_PREVIOUS_MODEL_SCHEMA_VERSION
   | typeof OPENCAE_LEGACY_MODEL_SCHEMA_VERSION;
 
 export type ElementType = "Tet4" | "Tet10";
@@ -169,7 +171,7 @@ export type BodyGravityLoadJson = {
   acceleration: [number, number, number];
 };
 
-export type StepJson = StaticLinearStepJson | DynamicLinearStepJson;
+export type StepJson = StaticLinearStepJson | DynamicLinearStepJson | ModalStepJson;
 
 export type StaticLinearStepJson = {
   name: string;
@@ -196,6 +198,13 @@ export type DynamicLinearStepJson = {
 };
 
 export type DynamicStepJson = DynamicLinearStepJson;
+
+export type ModalStepJson = {
+  name: string;
+  type: "modal";
+  boundaryConditions: string[];
+  modeCount: number;
+};
 
 export type ResultSampleLocation = "node" | "element" | "integration_point";
 

@@ -8,6 +8,7 @@
 // equal the applied 500 N load (equilibrium), with finite sane stresses.
 import { readFileSync } from "node:fs";
 import { beforeAll, describe, expect, it } from "vitest";
+import { isModalResultSummary } from "@opencae/schema";
 import {
   attributeFacetsToStepFaces,
   buildCoreModelFromCloudMesh,
@@ -189,6 +190,7 @@ describe("STEP upload end-to-end (registry -> selection -> mesh -> attribution -
     expect(outcome.solverBackend).toBe("opencae-core-sparse-tet");
 
     const summary = outcome.result.summary;
+    if (isModalResultSummary(summary)) throw new Error("Expected structural STEP results.");
     expect(Number.isFinite(summary.maxStress)).toBe(true);
     expect(summary.maxStress).toBeGreaterThan(0);
     expect(Number.isFinite(summary.maxDisplacement)).toBe(true);

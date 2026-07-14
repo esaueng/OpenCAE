@@ -1,12 +1,17 @@
 import { describe, expect, test } from "vitest";
-import { elevateTet4MeshToTet10, type OpenCAEModelJson } from "@opencae/core";
+import { elevateTet4MeshToTet10, normalizeModelJson, type OpenCAEModelJson } from "@opencae/core";
 import {
   computeTet10ElementStiffness,
   computeTet10Volume,
+  conjugateGradient,
+  csrMatVec,
   recoverTet10CentroidStrain,
   solveDynamicMdofTet4Cpu,
+  solveModalLinearTet,
   solveStaticLinearTet4Cpu
 } from "../src";
+import { solveModalSubspace } from "../src/modal";
+import { prepareStructuralSystem, type PreparedStructuralSystem } from "../src/structural-system";
 
 const UNIT_TET10_COORDINATES = new Float64Array([
   0, 0, 0,
@@ -239,6 +244,40 @@ function tipDeflection(model: OpenCAEModelJson): number {
   return maxDrop;
 }
 
+/** Frozen test-only copy of the estimator retired from dynamic-mdof.ts. */
+function retiredFrequencyEstimateReference(system: PreparedStructuralSystem): number | undefined {
+  const size = system.free.length;
+  if (size === 0) return undefined;
+  let vector = Float64Array.from(system.load);
+  if (!vector.some((value) => value !== 0)) vector.fill(1);
+  for (let iteration = 0; iteration < 4; iteration += 1) {
+    let massNormSquared = 0;
+    for (let index = 0; index < size; index += 1) {
+      massNormSquared += system.mass[index] * vector[index] * vector[index];
+    }
+    const massNorm = Math.sqrt(massNormSquared);
+    if (!(massNorm > 0) || !Number.isFinite(massNorm)) return undefined;
+    const rhs = new Float64Array(size);
+    for (let index = 0; index < size; index += 1) rhs[index] = (system.mass[index] * vector[index]) / massNorm;
+    const solved = conjugateGradient(system.stiffness, rhs, {
+      tolerance: 1e-8,
+      jacobi: true,
+      initialGuess: vector
+    });
+    if (!solved.ok) return undefined;
+    vector = solved.solution;
+  }
+  const stiffnessProduct = csrMatVec(system.stiffness, vector);
+  let numerator = 0;
+  let denominator = 0;
+  for (let index = 0; index < size; index += 1) {
+    numerator += vector[index] * stiffnessProduct[index];
+    denominator += system.mass[index] * vector[index] * vector[index];
+  }
+  const omega = Math.sqrt(numerator / denominator);
+  return Number.isFinite(omega) && omega > 0 ? omega : undefined;
+}
+
 describe("Tet10 cantilever fidelity", () => {
   const analyticTipDeflection =
     (TIP_LOAD * BEAM_LENGTH ** 3) /
@@ -279,5 +318,46 @@ describe("Tet10 cantilever fidelity", () => {
     expect(frequency).toBeLessThan(300);
     expect(result.diagnostics.rayleighAlpha).toBeGreaterThan(0);
     expect(result.diagnostics.rayleighBeta).toBeGreaterThan(0);
+  });
+
+  test("keeps the retired one-vector frequency estimate unchanged on the cantilever fixture", () => {
+    const { model } = buildCantileverBeamModel("Tet10", 3);
+    const normalized = normalizeModelJson(model);
+    expect(normalized.ok).toBe(true);
+    if (!normalized.ok) return;
+    const step = normalized.model.steps[0];
+    if (!step || step.type !== "staticLinear") throw new Error("Expected static cantilever fixture.");
+    const prepared = prepareStructuralSystem(normalized.model, step.boundaryConditions, step.loads, undefined, "Dynamic");
+    expect(prepared.ok).toBe(true);
+    if (!prepared.ok) return;
+    const legacy = retiredFrequencyEstimateReference(prepared.system);
+    const shared = solveModalSubspace(prepared.system, 1, {
+      frequencyEstimateSeed: prepared.system.load,
+      frequencyEstimateIterations: 4
+    });
+    expect(legacy).toBeDefined();
+    expect(shared.ok).toBe(true);
+    if (legacy === undefined || !shared.ok) return;
+    const omega = Math.sqrt(shared.modes[0]?.eigenvalue ?? 0);
+    expect(Math.abs(omega - legacy) / legacy).toBeLessThan(1e-12);
+  });
+
+  test("predicts the first cantilever frequency within ten percent of Euler-Bernoulli theory", () => {
+    const { model } = buildCantileverBeamModel("Tet10", 8);
+    const modalModel: OpenCAEModelJson = {
+      ...model,
+      schemaVersion: "0.3.0",
+      loads: [],
+      steps: [{ name: "modes", type: "modal", boundaryConditions: ["fixedSupport"], modeCount: 1 }]
+    };
+    const solved = solveModalLinearTet(modalModel, { maxDofs: 100_000 });
+    expect(solved.ok, solved.ok ? undefined : JSON.stringify(solved.error)).toBe(true);
+    if (!solved.ok) return;
+    const computed = solved.result.modes[0]?.frequencyHz ?? 0;
+    const beta1 = 1.875104068711961;
+    const area = BEAM_WIDTH * BEAM_HEIGHT;
+    const secondMoment = BEAM_WIDTH * BEAM_HEIGHT ** 3 / 12;
+    const theoretical = beta1 ** 2 / (2 * Math.PI * BEAM_LENGTH ** 2) * Math.sqrt(STEEL.youngModulus * secondMoment / (STEEL.density * area));
+    expect(Math.abs(computed - theoretical) / theoretical).toBeLessThanOrEqual(0.1);
   });
 });

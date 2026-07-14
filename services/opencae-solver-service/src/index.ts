@@ -1,6 +1,6 @@
 import { effectiveMaterialProperties, starterMaterials } from "@opencae/materials";
 import { assessResultFailure } from "@opencae/schema";
-import type { AnalysisMesh, AnalysisSample, Diagnostic, DynamicSolverSettings, Load, Material, ResultField, ResultProvenance, ResultSample, ResultSummary, RunEvent, Study } from "@opencae/schema";
+import type { AnalysisMesh, AnalysisSample, Diagnostic, DynamicSolverSettings, Load, Material, ResultField, ResultProvenance, ResultSample, ResultSummary, RunEvent, StructuralResultSummary, Study } from "@opencae/schema";
 import type { ObjectStorageProvider } from "@opencae/storage";
 import { bracketDisplayModel, bracketResultSummary } from "@opencae/db/sample-data";
 import { inferGlobalCriticalPrintAxis } from "@opencae/study-core";
@@ -284,7 +284,7 @@ export function solveHeuristicSurfaceStudy(study: Study, runId: string, optionsI
     message: "No resolvable loads were found; reaction force reported as 0.",
     suggestedActions: []
   }];
-  const summary: ResultSummary = {
+  const summary: StructuralResultSummary = {
     ...summaryBase,
     failureAssessment: assessResultFailure(summaryBase),
     provenance: LOCAL_HEURISTIC_PROVENANCE,
@@ -359,7 +359,7 @@ export function solveDynamicStudy(study: Study, runId: string, optionsInput?: Lo
       peakDisplacement: round(peakDisplacement, 4)
     }
   };
-  const summary: ResultSummary = {
+  const summary: StructuralResultSummary = {
     ...summaryBase,
     failureAssessment: assessResultFailure(summaryBase),
     provenance: LOCAL_DYNAMIC_PROVENANCE,

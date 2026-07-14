@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { attachUploadedModelToProject, createLocalBlankProject, createLocalSampleProject, createLocalStaticStressStudy, openLocalProjectPayload, uploadedDisplayModelFor } from "./localProjectFactory";
+import { isModalResultSummary } from "@opencae/schema";
+import { attachUploadedModelToProject, createLocalBlankProject, createLocalModalStudy, createLocalSampleProject, createLocalStaticStressStudy, openLocalProjectPayload, uploadedDisplayModelFor } from "./localProjectFactory";
 import { BRACKET_CORE_CLOUD_GEOMETRY, BRACKET_GEOMETRY_MIGRATION_NOTE } from "./bracketGeometryMigration";
 
 const sizedAsciiStlBase64 = btoa(`
@@ -43,6 +44,15 @@ describe("local project factory workflow", () => {
     expect(study.constraints).toEqual([]);
     expect(study.loads).toEqual([]);
     expect(study.meshSettings.status).toBe("not_started");
+  });
+
+  test("creates modal studies with six modes and no loads", () => {
+    const project = createLocalBlankProject("2026-04-28T12:00:00.000Z").project;
+    const displayModel = uploadedDisplayModelFor("sample-bar.stl", sizedAsciiStlBase64);
+    const study = createLocalModalStudy(project, displayModel, "study-modal");
+    expect(study.type).toBe("modal_analysis");
+    expect(study.solverSettings).toMatchObject({ modeCount: 6 });
+    expect(study.loads).toEqual([]);
   });
 
   test("uses the uploaded file name as the default project name", () => {
@@ -210,6 +220,7 @@ describe("local project factory workflow", () => {
     });
 
     expect(response.displayModel.id).toBe("display-saved");
+    if (!response.results || isModalResultSummary(response.results.summary)) throw new Error("Expected structural results.");
     expect(response.results?.summary.maxStress).toBe(12);
     expect(response.results?.fields).toHaveLength(1);
   });

@@ -14,7 +14,7 @@ import type { WorkspaceLogEntry } from "./components/BottomPanel";
 import type { StepId } from "./components/StepBar";
 import type { SampleAnalysisType, SampleModelId } from "./lib/api";
 import type { CapturedResultView } from "./report/captureResultViews";
-import type { PayloadObjectSelection, ResultMode, ThemeMode, ViewMode } from "./workspaceViewTypes";
+import type { PayloadObjectSelection, ResultMode, StressComponent, ThemeMode, ViewMode } from "./workspaceViewTypes";
 
 export { AUTOSAVE_STORAGE_KEY, AUTOSAVE_UI_STORAGE_KEY } from "./autosaveStorage";
 export type { ThemeMode } from "./workspaceViewTypes";
@@ -29,6 +29,8 @@ export interface WorkspaceUiSnapshot {
   viewMode: ViewMode;
   themeMode: ThemeMode;
   resultMode: ResultMode;
+  selectedModeIndex?: number;
+  stressComponent?: StressComponent;
   showDeformed: boolean;
   showDimensions: boolean;
   stressExaggeration: number;
@@ -70,7 +72,8 @@ interface IdleCallbackHandle {
 
 const STEPS: StepId[] = ["model", "material", "supports", "loads", "mesh", "run", "results"];
 const VIEW_MODES: ViewMode[] = ["model", "mesh", "results"];
-const RESULT_MODES: ResultMode[] = ["stress", "displacement", "safety_factor", "velocity", "acceleration"];
+const RESULT_MODES: ResultMode[] = ["stress", "displacement", "safety_factor", "velocity", "acceleration", "mode_shape"];
+const STRESS_COMPONENTS: StressComponent[] = ["von_mises", "principal_max", "principal_min", "max_shear"];
 const THEMES: ThemeMode[] = ["dark", "light"];
 const LOAD_TYPES: LoadType[] = ["force", "pressure", "gravity"];
 const LOAD_DIRECTIONS: LoadDirectionLabel[] = [...LOAD_DIRECTION_LABELS];
@@ -431,6 +434,8 @@ function parseUiSnapshot(value: unknown): WorkspaceUiSnapshot | null {
     viewMode: readEnum(value.viewMode, VIEW_MODES, "model"),
     themeMode: readEnum(value.themeMode, THEMES, "dark"),
     resultMode: readEnum(value.resultMode, RESULT_MODES, "stress"),
+    selectedModeIndex: Math.max(1, Math.min(10, Math.trunc(readFiniteNumber(value.selectedModeIndex, 1)))),
+    stressComponent: readEnum(value.stressComponent, STRESS_COMPONENTS, "von_mises"),
     showDeformed: value.showDeformed === true,
     showDimensions: value.showDimensions === true,
     stressExaggeration: readFiniteNumber(value.stressExaggeration, 1.8),

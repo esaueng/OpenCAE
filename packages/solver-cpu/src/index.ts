@@ -4,6 +4,7 @@ export type {
   CpuSolverInput,
   CpuSolverOptions,
   CoreDynamicSolveResult,
+  CoreModalSolveResult,
   CoreFeaResult,
   CoreStaticSolveResult,
   DenseLinearSolveResult,
@@ -14,6 +15,11 @@ export type {
   DynamicTet4CpuOptions,
   DynamicTet4CpuResult,
   DynamicTet4CpuSolveResult,
+  ModalCpuDiagnostics,
+  ModalCpuOptions,
+  ModalCpuResult,
+  ModalCpuSolveResult,
+  ModalMode,
   PreviewDynamicResult,
   PreviewDynamicSolveResult,
   SolveProgressEvent,
@@ -60,6 +66,7 @@ export {
 export type { ConjugateGradientOptions, ConjugateGradientResult, CsrMatrix, SparseMatrixBuilder } from "./sparse";
 export { solvePreviewSdofTet4Cpu } from "./dynamic";
 export { solveDynamicLinearTetMDOF, solveDynamicMdofTet4Cpu } from "./dynamic-mdof";
+export { solveModalLinearTet, solveModalSubspace } from "./modal";
 export { solveStaticLinearTet, solveStaticLinearTet4Cpu } from "./solver";
 export { solveStaticLinearTetSparse } from "./static-sparse";
 export {
@@ -71,6 +78,7 @@ export {
 } from "./results";
 export {
   solveCoreDynamic,
+  solveCoreModal,
   solveCorePreviewDynamic,
   solveCoreStatic
 } from "./core-api";

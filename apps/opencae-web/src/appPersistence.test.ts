@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
+import { isModalResultSummary } from "@opencae/schema";
 import type { DisplayModel, Project, ResultField, ResultSummary, Study } from "@opencae/schema";
 import {
   AUTOSAVE_STORAGE_KEY,
@@ -196,6 +197,7 @@ describe("app persistence", () => {
       fields
     });
     expect(bundle).toBeDefined();
+    if (!bundle || isModalResultSummary(bundle.summary)) throw new Error("Expected structural transient results.");
     expect(bundle?.summary.transient?.frameCount).toBe(21);
   });
 
@@ -303,6 +305,18 @@ describe("app persistence", () => {
     expect(parseAutosavedWorkspacePayload(JSON.stringify(snapshot))?.ui.draftLoadDirection).toBe("Opposite normal");
     expect(parseAutosavedWorkspacePayload("{bad json")).toBeNull();
     expect(parseAutosavedWorkspacePayload(JSON.stringify({ ...snapshot, version: 99 }))).toBeNull();
+  });
+
+  test("defaults legacy UI snapshots to von Mises and restores an explicit stress component", () => {
+    const snapshot = buildAutosavedWorkspace({ project, displayModel, ui: baseUi });
+    const legacy = parseAutosavedWorkspacePayload(JSON.stringify(snapshot));
+    const principal = parseAutosavedWorkspacePayload(JSON.stringify({
+      ...snapshot,
+      ui: { ...snapshot.ui, stressComponent: "principal_min" }
+    }));
+
+    expect(legacy?.ui.stressComponent).toBe("von_mises");
+    expect(principal?.ui.stressComponent).toBe("principal_min");
   });
 
   test("preserves enough logs to diagnose OpenCAE Core failures after reload", () => {

@@ -1,24 +1,14 @@
 import { type NormalizedOpenCAEModel } from "@opencae/core";
-import { computeTet4Geometry } from "./geometry";
-import {
-  computeTet10Volume,
-  TET10_HRZ_EDGE_MASS_FRACTION,
-  TET10_HRZ_VERTEX_MASS_FRACTION,
-  TET10_NODE_COUNT
-} from "./element-tet10";
 import { dynamicCoreResultFromSolve } from "./results";
 import {
-  assembleNodalForces,
-  assembleSparseStiffness,
-  collectConstraints,
-  collectElementCoordinates,
   elementNodeCountForBlock,
-  enumerateFreeDofs,
   getNormalizedModel,
   maxAbs,
   recoverElementResults
 } from "./solver";
-import { addSparseEntry, conjugateGradient, createSparseMatrixBuilder, csrMatVec, reduceCsrSystem, toCsrMatrix, type CsrMatrix } from "./sparse";
+import { addSparseEntry, conjugateGradient, createSparseMatrixBuilder, csrMatVec, toCsrMatrix, type CsrMatrix } from "./sparse";
+import { expandFreeVector, prepareStructuralSystem, type PreparedStructuralSystem } from "./structural-system";
+import { solveModalSubspace } from "./modal";
 import type {
   CpuSolverError,
   CpuSolverInput,
@@ -49,15 +39,7 @@ type DynamicSettings = {
   maxFrames: number;
 };
 
-type ReducedSystem = {
-  stiffness: CsrMatrix;
-  fullStiffness: CsrMatrix;
-  fullLoad: Float64Array;
-  load: Float64Array;
-  mass: Float64Array;
-  free: Int32Array;
-  constraints: Map<number, number>;
-};
+type ReducedSystem = PreparedStructuralSystem;
 
 export function solveDynamicLinearTetMDOF(
   input: CpuSolverInput,
@@ -88,28 +70,10 @@ export function solveDynamicMdofTet4Cpu(
   }
 
   const hooks = options.hooks;
-  const stiffness = assembleSparseStiffness(model, hooks);
-  if (!stiffness.ok) return { ok: false, error: stiffness.error };
-  const constraints = collectConstraints(model, step.boundaryConditions);
-  if (!constraints.ok) return { ok: false, error: constraints.error };
-  const free = enumerateFreeDofs(model.counts.nodes * 3, constraints.values);
-  const fullLoad = assembleNodalForces(model, step.loads);
-  const reduced = reduceCsrSystem(stiffness.stiffness, fullLoad, free, constraints.values);
-  const lumpedMassResult = assembleLumpedMass(model);
-  if (!lumpedMassResult.ok) return { ok: false, error: lumpedMassResult.error };
-  const lumpedMass = lumpedMassResult.dofMass;
-  const reducedMass = new Float64Array(free.length);
-  for (let i = 0; i < free.length; i += 1) reducedMass[i] = Math.max(lumpedMass[free[i]], 1e-12);
-
-  const system: ReducedSystem = {
-    stiffness: reduced.matrix,
-    fullStiffness: stiffness.stiffness,
-    fullLoad,
-    load: reduced.rhs,
-    mass: reducedMass,
-    free,
-    constraints: constraints.values
-  };
+  const prepared = prepareStructuralSystem(model, step.boundaryConditions, step.loads, hooks);
+  if (!prepared.ok) return prepared;
+  const system = prepared.system;
+  const free = system.free;
   const damping = resolveRayleighDamping(system, settings, options);
   const rayleighAlpha = damping.alpha;
   const rayleighBeta = damping.beta;
@@ -178,13 +142,13 @@ export function solveDynamicMdofTet4Cpu(
   const peakAcceleration = Math.max(...frames.map((frame) => maxAbs(frame.acceleration.values)), 0);
   const peakStress = Math.max(...frames.map((frame) => maxAbs(frame.stress.values)), 0);
   const minSafetyFactor = minimumPositiveFinite(frames.map((frame) => frame.safety_factor.values));
-  const equivalentMass = lumpedMassResult.totalMass;
+  const equivalentMass = system.totalMass;
   const equivalentStiffness = estimateEquivalentStiffness(system);
 
   const diagnostics: DynamicTet4CpuDiagnostics = {
     dofs: model.counts.nodes * 3,
     freeDofs: free.length,
-    constrainedDofs: constraints.values.size,
+    constrainedDofs: system.constraints.size,
     relativeResidual: 0,
     maxDisplacement: peakDisplacement,
     maxVonMisesStress: Math.max(...frames.map((frame) => maxAbs((frame.vonMisesPeak ?? frame.vonMises).values)), 0),
@@ -211,7 +175,7 @@ export function solveDynamicMdofTet4Cpu(
     peakAcceleration,
     minSafetyFactor,
     convergence,
-    totalMass: lumpedMassResult.totalMass,
+    totalMass: system.totalMass,
     reactionBalance: convergence.map((entry) => ({
       frameIndex: entry.frameIndex,
       timeSeconds: entry.timeSeconds,
@@ -295,9 +259,6 @@ type RayleighResolution = {
 // structure's fundamental frequency (and at RAYLEIGH_UPPER_FREQUENCY_RATIO times it),
 // instead of applying magic per-coefficient constants.
 const RAYLEIGH_UPPER_FREQUENCY_RATIO = 4;
-const FREQUENCY_ESTIMATE_ITERATIONS = 4;
-const FREQUENCY_ESTIMATE_TOLERANCE = 1e-8;
-
 function resolveRayleighDamping(
   system: ReducedSystem,
   settings: DynamicSettings,
@@ -314,7 +275,15 @@ function resolveRayleighDamping(
     return { alpha: 0, beta: 0, calibration: { method: "undamped" } };
   }
 
-  const omega1 = estimateFundamentalAngularFrequency(system, options);
+  const modal = solveModalSubspace(system, 1, {
+    maxCgIterations: options.maxIterations,
+    hooks: options.hooks,
+    frequencyEstimateSeed: system.load,
+    frequencyEstimateIterations: 4
+  });
+  const omega1 = modal.ok && modal.modes[0]
+    ? Math.sqrt(modal.modes[0].eigenvalue)
+    : undefined;
   if (omega1 === undefined) {
     // Static SDOF estimate as a fallback: load-shape Rayleigh quotient over lumped mass.
     const equivalentStiffness = estimateEquivalentStiffness(system);
@@ -344,51 +313,6 @@ function rayleighFromFrequencies(
       omega2
     }
   };
-}
-
-// Inverse power iteration on (K, M) with diagonal M: a handful of CG solves gives the
-// fundamental frequency to far better accuracy than damping calibration needs.
-function estimateFundamentalAngularFrequency(
-  system: ReducedSystem,
-  options: DynamicTet4CpuOptions
-): number | undefined {
-  const size = system.free.length;
-  if (size === 0) return undefined;
-  let x: Float64Array = new Float64Array(size);
-  let seeded = false;
-  for (let i = 0; i < size; i += 1) {
-    x[i] = system.load[i];
-    if (system.load[i] !== 0) seeded = true;
-  }
-  if (!seeded) x.fill(1);
-
-  for (let iteration = 0; iteration < FREQUENCY_ESTIMATE_ITERATIONS; iteration += 1) {
-    const massNorm = Math.sqrt(massDot(system.mass, x, x));
-    if (!(massNorm > 0) || !Number.isFinite(massNorm)) return undefined;
-    const rhs = new Float64Array(size);
-    for (let i = 0; i < size; i += 1) rhs[i] = (system.mass[i] * x[i]) / massNorm;
-    const solve = conjugateGradient(system.stiffness, rhs, {
-      tolerance: FREQUENCY_ESTIMATE_TOLERANCE,
-      maxIterations: options.maxIterations,
-      jacobi: true,
-      initialGuess: x
-    });
-    if (!solve.ok) return undefined;
-    x = solve.solution;
-  }
-
-  const kx = csrMatVec(system.stiffness, x);
-  const numerator = dot(x, kx);
-  const denominator = massDot(system.mass, x, x);
-  if (!(numerator > 0) || !(denominator > 0)) return undefined;
-  const omega = Math.sqrt(numerator / denominator);
-  return Number.isFinite(omega) && omega > 0 ? omega : undefined;
-}
-
-function massDot(mass: Float64Array, a: Float64Array, b: Float64Array): number {
-  let result = 0;
-  for (let i = 0; i < a.length; i += 1) result += mass[i] * a[i] * b[i];
-  return result;
 }
 
 function averageMass(mass: Float64Array): number {
@@ -551,67 +475,6 @@ function createFrame(
   };
 }
 
-function assembleLumpedMass(model: NormalizedOpenCAEModel):
-  | { ok: true; dofMass: Float64Array; totalMass: number }
-  | { ok: false; error: CpuSolverError } {
-  const nodalMass = new Float64Array(model.counts.nodes);
-  let totalMass = 0;
-  for (const block of model.elementBlocks) {
-    const nodeCount = elementNodeCountForBlock(block);
-    if (nodeCount === undefined) {
-      return {
-        ok: false,
-        error: {
-          code: "unsupported-element-type",
-          message: "Dynamic solve supports Tet4 and Tet10 element blocks."
-        }
-      };
-    }
-    const material = model.materials[block.materialIndex];
-    if (!material?.density || !Number.isFinite(material.density)) {
-      return {
-        ok: false,
-        error: {
-          code: "missing-material-density",
-          message: "Dynamic solve requires material density."
-        }
-      };
-    }
-    const density = material.density;
-    for (let offset = 0; offset < block.connectivity.length; offset += nodeCount) {
-      if (block.type === "Tet4") {
-        const geometry = computeTet4Geometry(tetCoordinates(model.nodes.coordinates, block.connectivity, offset));
-        if (!geometry.ok) continue;
-        const elementMass = geometry.volume * density;
-        const nodeMass = elementMass / 4;
-        totalMass += elementMass;
-        for (let localNode = 0; localNode < 4; localNode += 1) {
-          nodalMass[block.connectivity[offset + localNode]] += nodeMass;
-        }
-      } else {
-        const volume = computeTet10Volume(
-          collectElementCoordinates(model.nodes.coordinates, block.connectivity, offset, nodeCount)
-        );
-        if (!volume.ok) continue;
-        const elementMass = volume.volume * density;
-        totalMass += elementMass;
-        // HRZ lumping: plain row-sum lumping yields negative vertex masses for quadratic tets.
-        for (let localNode = 0; localNode < TET10_NODE_COUNT; localNode += 1) {
-          const fraction = localNode < 4 ? TET10_HRZ_VERTEX_MASS_FRACTION : TET10_HRZ_EDGE_MASS_FRACTION;
-          nodalMass[block.connectivity[offset + localNode]] += elementMass * fraction;
-        }
-      }
-    }
-  }
-  const dofMass = new Float64Array(model.counts.nodes * 3);
-  for (let node = 0; node < nodalMass.length; node += 1) {
-    dofMass[node * 3] = nodalMass[node];
-    dofMass[node * 3 + 1] = nodalMass[node];
-    dofMass[node * 3 + 2] = nodalMass[node];
-  }
-  return { ok: true, dofMass, totalMass };
-}
-
 function computeSafetyFactor(model: NormalizedOpenCAEModel, vonMises: Float64Array): Float64Array {
   const values = new Float64Array(vonMises.length);
   let element = 0;
@@ -651,18 +514,6 @@ function sampleIndices(length: number): number[] {
   return [...result].sort((a, b) => a - b);
 }
 
-function expandFreeVector(
-  dofs: number,
-  free: Int32Array,
-  reduced: Float64Array,
-  constraints?: Map<number, number>
-): Float64Array {
-  const full = new Float64Array(dofs);
-  for (const [dof, value] of constraints ?? []) full[dof] = value;
-  for (let i = 0; i < free.length; i += 1) full[free[i]] = reduced[i];
-  return full;
-}
-
 function maxNodeVectorNorm(values: Float64Array): number {
   let max = 0;
   for (let node = 0; node < values.length / 3; node += 1) {
@@ -683,16 +534,6 @@ function estimateFrameCount(settings: DynamicSettings): number {
   return Math.floor(duration / settings.outputInterval) + 2;
 }
 
-function tetCoordinates(coordinates: Float64Array, connectivity: Uint32Array, offset: number): Float64Array {
-  const result = new Float64Array(12);
-  for (let localNode = 0; localNode < 4; localNode += 1) {
-    const node = connectivity[offset + localNode] ?? 0;
-    result[localNode * 3] = coordinates[node * 3] ?? 0;
-    result[localNode * 3 + 1] = coordinates[node * 3 + 1] ?? 0;
-    result[localNode * 3 + 2] = coordinates[node * 3 + 2] ?? 0;
-  }
-  return result;
-}
 
 function loadScaleAt(time: number, settings: DynamicSettings): number {
   const s = clamp((time - settings.startTime) / Math.max(settings.endTime - settings.startTime, settings.timeStep), 0, 1);

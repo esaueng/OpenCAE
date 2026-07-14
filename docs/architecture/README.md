@@ -2,7 +2,7 @@
 
 OpenCAE is organized around service boundaries that keep user workflow data separate from generated artifacts.
 
-- The React/Vite web app owns the CAD workspace, study setup UI, local project save/open flow, result visualization, and dynamic playback.
+- The React/Vite web app owns the CAD workspace, study setup UI, local project save/open flow, result visualization, dynamic playback, and client-side modal phase animation.
 - The Fastify API owns local projects, uploads, study mutation routes, validation, run orchestration, reports, and artifact lookup.
 - SQLite stores project and study metadata through `@opencae/db`.
 - Filesystem object storage stores geometry display models, uploaded model files, mesh summaries, solver inputs/logs, result bundles, HTML reports, and PDF reports under `data/artifacts`.
@@ -14,4 +14,6 @@ CAD entities remain the source of truth. Mesh entities are generated artifacts. 
 
 ## Solver Boundaries
 
-Static and dynamic structural studies run through OpenCAE Core with explicit attribution. Simple block or beam-like studies may use a structured proxy mesh and are labeled preview-only. Complex geometry is blocked from that path unless an actual connected Core volume mesh artifact is available, in which case the result can carry actual-volume-mesh FEA provenance.
+Static, dynamic, and modal structural studies run through OpenCAE Core with explicit attribution. The browser product limit is 100,000 DOF and is passed by `@opencae/solve-pipeline` into every solver call; callers must not rely on the solver package's lower internal default. Simple block or beam-like studies may use a structured proxy mesh and are labeled preview-only. Complex geometry is blocked from that path unless an actual connected Core volume mesh artifact is available, in which case the result can carry actual-volume-mesh FEA provenance.
+
+Dynamic and modal analysis share sparse stiffness, constraint reduction, and positive HRZ lumped-mass assembly. Modal analysis uses deterministic block shift-invert subspace iteration and returns only modes that satisfy the scaled residual tolerance. Its normalized vector fields use the same deformation renderer as displacement, while the web app creates 24 phase frames without storing duplicate solver output.

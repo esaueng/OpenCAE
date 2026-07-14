@@ -8,25 +8,25 @@ import {
 } from "./SimulationWorkflow";
 
 describe("static simulation workflow components", () => {
-  test("renders a simplified create simulation modal with only static and dynamic choices", () => {
-    const html = renderToStaticMarkup(<CreateSimulationModal open onCreateStatic={vi.fn()} onCreateDynamic={vi.fn()} onClose={vi.fn()} />);
+  test("renders static, dynamic, and modal simulation choices", () => {
+    const html = renderToStaticMarkup(<CreateSimulationModal open onCreateStatic={vi.fn()} onCreateDynamic={vi.fn()} onCreateModal={vi.fn()} onClose={vi.fn()} />);
 
     expect(html).toContain("Create Simulation");
     expect(html).toContain("Static Analysis");
     expect(html).toContain("Dynamic Analysis");
+    expect(html).toContain("Modal Analysis");
     expect(html).toContain("Static stress example");
     expect(html).toContain("Dynamic stress frame sequence example");
     expect(html).toContain("Time-dependent");
     expect(html).toContain("Choose simulation type");
     expect(html).toContain(">Create Simulation</button>");
     expect(html).not.toContain("Incompressible");
-    expect(html).not.toContain("Frequency Analysis");
     expect(html).not.toContain("Coming soon");
     expect(html).not.toContain("Create Dynamic");
   });
 
   test("renders simulation showcase renders with native overlays instead of inline SVG images", () => {
-    const html = renderToStaticMarkup(<CreateSimulationModal open onCreateStatic={vi.fn()} onCreateDynamic={vi.fn()} onClose={vi.fn()} />);
+    const html = renderToStaticMarkup(<CreateSimulationModal open onCreateStatic={vi.fn()} onCreateDynamic={vi.fn()} onCreateModal={vi.fn()} onClose={vi.fn()} />);
 
     expect(html).toContain("analysis-showcase analysis-showcase--compact analysis-showcase--static");
     expect(html).toContain("analysis-showcase analysis-showcase--large analysis-showcase--static");
@@ -44,11 +44,12 @@ describe("static simulation workflow components", () => {
   });
 
   test("renders a required simulation type screen without a close action", () => {
-    const html = renderToStaticMarkup(<CreateSimulationScreen onCreateStatic={vi.fn()} onCreateDynamic={vi.fn()} />);
+    const html = renderToStaticMarkup(<CreateSimulationScreen onCreateStatic={vi.fn()} onCreateDynamic={vi.fn()} onCreateModal={vi.fn()} />);
 
     expect(html).toContain("Choose simulation type");
     expect(html).toContain("Static Analysis");
     expect(html).toContain("Dynamic Analysis");
+    expect(html).toContain("Modal Analysis");
     expect(html).toContain(">Create Simulation</button>");
     expect(html).not.toContain("Close create simulation");
   });

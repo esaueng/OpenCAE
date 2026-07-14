@@ -139,6 +139,29 @@ function uploadedStepProject(status: StepGeometryMetadata["status"], message?: s
   };
 }
 
+describe("RightPanel result probes", () => {
+  test("lists raw engineering readings with removal, clear, and cap feedback", () => {
+    const html = renderPanel("results", {
+      resultProbes: [{
+        id: "probe-1",
+        anchor: { kind: "sample", point: [1, 2, 3] },
+        point: [1, 2, 3],
+        value: 0.000456789,
+        units: "MPa"
+      }],
+      resultProbeLimitReached: true,
+      onRemoveResultProbe: vi.fn(),
+      onClearResultProbes: vi.fn()
+    });
+
+    expect(html).toContain("Pinned probes");
+    expect(html).toContain("0.000456789 MPa");
+    expect(html).toContain("Clear All");
+    expect(html).toContain('aria-label="Remove probe 1"');
+    expect(html).toContain("Probe limit reached. Remove a pin to place another.");
+  });
+});
+
 describe("RightPanel payload mass controls", () => {
   test("offers the opposite face normal as a load direction", () => {
     const markup = renderPanel("loads");
@@ -332,6 +355,50 @@ describe("RightPanel payload mass controls", () => {
     expect(markup).toContain("About 4s remaining");
     expect(markup).toContain("Elapsed");
     expect(markup).toContain("2s");
+  });
+
+  test("skips loads for modal readiness and shows mode-count settings", () => {
+    const modalStudy: Study = { ...study, name: "Modal Analysis", type: "modal_analysis", solverSettings: { modeCount: 6 } };
+    const markup = renderPanel("run", { study: modalStudy });
+    expect(markup).toContain("Requested modes");
+    expect(markup).toContain("Modal settings");
+    expect(markup).not.toContain("Load added");
+    expect(markup).toContain("block_shift_invert_modal");
+  });
+
+  test("renders a selectable modal table and phase playback", () => {
+    const modalStudy: Study = { ...study, name: "Modal Analysis", type: "modal_analysis", solverSettings: { modeCount: 2 } };
+    const modalSummary: ResultSummary = {
+      analysisType: "modal_analysis",
+      requestedModeCount: 2,
+      convergedModeCount: 2,
+      modes: [
+        { modeIndex: 1, frequencyHz: 81.5, eigenvalue: 262_188, scaledResidual: 1e-8, fieldId: "mode-1" },
+        { modeIndex: 2, frequencyHz: 220, eigenvalue: 1_910_751, scaledResidual: 2e-8, fieldId: "mode-2" }
+      ]
+    };
+    const modalFields: ResultField[] = [0, 1].map((frameIndex) => ({
+      id: `mode-1-phase-${frameIndex}`,
+      runId: "run-modal",
+      type: "mode_shape",
+      location: "node",
+      values: [1],
+      vectors: [[1, 0, 0]],
+      min: 0,
+      max: 1,
+      units: "normalized",
+      modeIndex: 1,
+      frequencyHz: 81.5,
+      eigenvalue: 262_188,
+      scaledResidual: 1e-8,
+      frameIndex,
+      timeSeconds: frameIndex / 2
+    }));
+    const markup = renderPanel("results", { study: modalStudy, resultSummary: modalSummary, resultFields: modalFields, resultMode: "mode_shape", selectedModeIndex: 1 });
+    expect(markup).toContain("Mode 1");
+    expect(markup).toContain("81.5 Hz");
+    expect(markup).toContain("Phase");
+    expect(markup).toContain("visualization-only");
   });
 
   test("does not show the selected face as a persistent right-panel banner", () => {

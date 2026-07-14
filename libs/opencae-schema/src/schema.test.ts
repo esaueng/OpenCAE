@@ -110,6 +110,60 @@ describe("ProjectSchema", () => {
     });
   });
 
+  it("accepts modal studies and defaults to six requested modes", () => {
+    const parsed = ProjectSchema.parse({
+      id: "project-modal",
+      name: "Modal Project",
+      schemaVersion: "0.3.0",
+      unitSystem: "SI",
+      geometryFiles: [],
+      studies: [{
+        id: "study-modal",
+        projectId: "project-modal",
+        name: "Modal Analysis",
+        type: "modal_analysis",
+        geometryScope: [],
+        materialAssignments: [],
+        namedSelections: [],
+        contacts: [],
+        constraints: [],
+        loads: [],
+        meshSettings: { preset: "medium", status: "not_started" },
+        solverSettings: {},
+        validation: [],
+        runs: []
+      }],
+      createdAt: "2026-04-24T12:00:00.000Z",
+      updatedAt: "2026-04-24T12:00:00.000Z"
+    });
+    expect(parsed.studies[0]).toMatchObject({ type: "modal_analysis", solverSettings: { modeCount: 6 } });
+  });
+
+  it("accepts modal summaries and normalized vector fields", () => {
+    expect(ResultSummarySchema.parse({
+      analysisType: "modal_analysis",
+      requestedModeCount: 2,
+      convergedModeCount: 1,
+      modes: [{ modeIndex: 1, frequencyHz: 81.5, eigenvalue: 262_188, scaledResidual: 2e-8, fieldId: "mode-1" }],
+      warning: "Only 1 of 2 requested modes converged."
+    })).toMatchObject({ analysisType: "modal_analysis", convergedModeCount: 1 });
+    expect(ResultFieldSchema.parse({
+      id: "mode-1",
+      runId: "run-modal",
+      type: "mode_shape",
+      location: "node",
+      values: [0, 1],
+      vectors: [[0, 0, 0], [0, 1, 0]],
+      min: 0,
+      max: 1,
+      units: "normalized",
+      modeIndex: 1,
+      frequencyHz: 81.5,
+      eigenvalue: 262_188,
+      scaledResidual: 2e-8
+    }).modeIndex).toBe(1);
+  });
+
   it("accepts framed velocity and acceleration result fields while keeping unframed static fields valid", () => {
     expect(ResultFieldSchema.parse({
       id: "field-velocity-frame-1",
@@ -145,6 +199,22 @@ describe("ProjectSchema", () => {
       max: 42,
       units: "MPa"
     }).frameIndex).toBeUndefined();
+  });
+
+  it("accepts optional stress components without changing legacy fields", () => {
+    const base = {
+      id: "field-stress",
+      runId: "run-static",
+      type: "stress" as const,
+      location: "node" as const,
+      values: [42],
+      min: 42,
+      max: 42,
+      units: "MPa"
+    };
+    expect(ResultFieldSchema.parse(base).component).toBeUndefined();
+    expect(ResultFieldSchema.parse({ ...base, component: "principal_max" }).component).toBe("principal_max");
+    expect(() => ResultFieldSchema.parse({ ...base, component: "invalid" })).toThrow();
   });
 
   it("accepts OpenCAE Core dynamic settings and transient metadata", () => {

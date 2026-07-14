@@ -59,12 +59,23 @@ Supported dynamic load profiles:
 
 Choose `timeStep` small enough to resolve the fastest meaningful response change. Choose `outputInterval` for result and animation frame cadence; it is normalized to be greater than or equal to `timeStep`.
 
+## OpenCAE Core Modal Support
+
+Modal studies require positive density for every solved material, a generated mesh, and enough supports to make the constrained stiffness matrix nonsingular. They do not require or apply loads. The solver requests 1–10 modes (default 6) and uses deterministic block shift-invert subspace iteration with a block size of `min(modeCount + 2, freeDOFs)`.
+
+A mode converges only when its unit-independent scaled residual
+
+`||K phi - lambda M phi|| / max(||K phi||, |lambda| ||M phi||)`
+
+is at most `1e-6`. The solver returns only converged modes and reports requested versus converged counts. Inner CG non-convergence or singular constrained systems must produce an explicit insufficient-supports error naming the Supports step. A raw CG error is not an acceptable user diagnostic.
+
 ## Benchmark Matrix
 
 | Case | Model | Material | Load and support | Expected behavior |
 | --- | --- | --- | --- | --- |
 | Simple cantilever static | Connected Tet4 block | Linear elastic validation material | Fixed left face and transverse right-face force | Reaction force balances applied force, displacement/stress are finite and positive, safety factor is finite, fields are non-empty, and the solver surface mesh is connected. |
 | Simple cantilever dynamic | Same connected Tet4 block | Linear elastic validation material with density | Fixed left face and ramp or step right-face force | Dynamic frame count matches the requested cadence, frames are unique, velocity/acceleration fields are present, fields are non-empty, and no frame is reused as a fake response. |
+| Simple cantilever modal | Connected Tet10 beam | Linear elastic validation material with density | Fixed left face; no loads | First bending frequency is within 10% of Euler–Bernoulli theory, returned shapes are M-orthogonal, and every returned scaled residual is at most `1e-6`. |
 | Pressure patch | Connected Tet4 block | Linear elastic validation material | Pressure on right face with explicit direction | Reaction force balances `pressure * surface area`; result provenance is computed production provenance. |
 | Payload mass | Connected Tet4 block | Linear elastic validation material with density | Body gravity equivalent of payload mass | Reaction force balances `mass * 9.80665`; no preview or local estimate fallback is used. |
 | Bracket actual mesh static | Connected bracket Tet4 Core mesh artifact | Steel fixture material | Fixed base-mount surface and load on upright surface | Static result uses `actual_volume_mesh`, has connected surface output, finite stress/displacement/safety/reaction values, and non-empty fields. |
@@ -90,7 +101,7 @@ The validation mesh is intentionally coarse Tet4 geometry, so displacement and s
 
 - The local validation suites use small Tet4 fixtures; they are production-path regression suites, not mesh-convergence studies.
 - Bracket validation uses a compact actual Core mesh fixture. Larger imported brackets still require a real Core volume mesh (generated in-browser) before solving.
-- Dynamic validation checks frame cadence and unique response frames; it does not claim modal convergence for arbitrary geometries.
+- Modal validation reports partial convergence honestly. Passing the cantilever benchmark does not certify convergence or physical fidelity for arbitrary geometries.
 - Result budgets compact visualization fields and frame payloads only. Engineering summary values such as max stress, max displacement, safety factor, and reaction force must remain full computed values.
 - The local solver must fail with diagnostics when the model cannot be solved exactly. No local estimate fallback or CalculiX rerun path is permitted.
 
@@ -103,5 +114,6 @@ Validation fails if any of these conditions are found:
 - An OpenCAE Core Preview dynamic result reports `reactionForce: 0` while nonzero loads exist without a reaction-force diagnostic.
 - Static results omit stress, displacement, or safety-factor fields.
 - Dynamic results omit velocity or acceleration frames.
+- Modal results contain unconverged modes, displacement units, non-vector shapes, or omit requested/converged counts.
 - Legacy or retired backend settings are exposed as selectable runtime options instead of being normalized to the local backend.
 - New work is dispatched to the retired OpenCAE Core Cloud surface (guarded by `scripts/cloud-retirement-guard.test.mjs`).

@@ -8,16 +8,17 @@ import {
   validateProductionSurfaceFieldInvariant,
   type BoundaryConditionJson,
   type CoreResultField,
+  type CoreModalSolveResult,
   type CoreSolveDiagnostics,
   type CoreSolveProvenance,
-  type CoreSolveResult,
+  type CoreStructuralSolveResult,
   type LoadJson,
   type NormalizedOpenCAEModel,
   type SolverSurfaceMesh
 } from "@opencae/core";
 import { smoothNodalScalarField } from "./element";
 import { recoverNodalVonMisesFromElements } from "./recovery";
-import type { DynamicTet4CpuResult, DynamicTet4CpuDiagnostics, StaticLinearTet4CpuResult, CpuSolverDiagnostics } from "./types";
+import type { DynamicTet4CpuResult, DynamicTet4CpuDiagnostics, ModalCpuDiagnostics, ModalCpuResult, StaticLinearTet4CpuResult, CpuSolverDiagnostics } from "./types";
 
 export const SOLVER_CPU_VERSION = "0.1.5";
 
@@ -25,7 +26,7 @@ export function staticCoreResultFromSolve(
   model: NormalizedOpenCAEModel,
   result: StaticLinearTet4CpuResult,
   diagnostics: CpuSolverDiagnostics
-): CoreSolveResult {
+): CoreStructuralSolveResult {
   const surfaceMesh = solverSurfaceMeshFromModel(model);
   const safetyFactor = computeSafetyFactor(model, result.vonMisesPeak ?? result.vonMises);
   const provenance = coreProvenance(model, "opencae-core-sparse-tet");
@@ -137,7 +138,7 @@ export function staticCoreResultFromSolve(
       message: "Displacement is exactly zero even though the solved reaction force is nonzero."
     });
   }
-  const coreResult: CoreSolveResult = {
+  const coreResult: CoreStructuralSolveResult = {
     summary: {
       maxStress: displayMaxStress,
       maxStressUnits: "MPa",
@@ -167,7 +168,7 @@ export function dynamicCoreResultFromSolve(
   model: NormalizedOpenCAEModel,
   result: DynamicTet4CpuResult,
   diagnostics: DynamicTet4CpuDiagnostics
-): CoreSolveResult {
+): CoreStructuralSolveResult {
   const surfaceMesh = solverSurfaceMeshFromModel(model);
   const provenance = coreProvenance(model, "opencae-core-mdof-tet");
   const fields: CoreResultField[] = [];
@@ -323,7 +324,7 @@ export function dynamicCoreResultFromSolve(
     displayMaxStress
   );
 
-  const coreResult: CoreSolveResult = {
+  const coreResult: CoreStructuralSolveResult = {
     summary: {
       maxStress: displayMaxStress,
       maxStressUnits: "MPa",
@@ -371,6 +372,51 @@ export function dynamicCoreResultFromSolve(
     });
   }
   return coreResult;
+}
+
+export function modalCoreResultFromSolve(
+  model: NormalizedOpenCAEModel,
+  result: Pick<ModalCpuResult, "modes">,
+  diagnostics: ModalCpuDiagnostics
+): CoreModalSolveResult {
+  const surfaceMesh = solverSurfaceMeshFromModel(model);
+  const provenance = coreProvenance(model, "opencae-core-modal-tet");
+  const fields = result.modes.map((mode) => createCoreResultField({
+    id: `mode-${mode.modeIndex}-shape`,
+    type: "mode_shape" as const,
+    location: "node" as const,
+    values: surfaceVectorMagnitudes(surfaceMesh, mode.shape, 1),
+    vectors: surfaceNodeVectors(surfaceMesh, mode.shape, 1),
+    units: "normalized",
+    surfaceMeshRef: surfaceMesh.id,
+    modeIndex: mode.modeIndex,
+    frequencyHz: mode.frequencyHz,
+    eigenvalue: mode.eigenvalue,
+    scaledResidual: mode.scaledResidual,
+    visualizationSource: "normalized_modal_eigenvector"
+  }));
+  return {
+    analysisType: "modal_analysis",
+    summary: {
+      analysisType: "modal_analysis",
+      requestedModeCount: diagnostics.requestedModeCount,
+      convergedModeCount: result.modes.length,
+      modes: result.modes.map((mode) => ({
+        modeIndex: mode.modeIndex,
+        frequencyHz: mode.frequencyHz,
+        eigenvalue: mode.eigenvalue,
+        scaledResidual: mode.scaledResidual,
+        fieldId: `mode-${mode.modeIndex}-shape`
+      })),
+      ...(diagnostics.partialConvergenceWarning ? { warning: diagnostics.partialConvergenceWarning } : {}),
+      provenance
+    },
+    fields,
+    surfaceMesh,
+    diagnostics: [{ id: "modal-solve-diagnostics", ...diagnostics }],
+    provenance,
+    artifacts: { rawUnits: model.coordinateSystem.solverUnits }
+  };
 }
 
 function computeSafetyFactor(model: NormalizedOpenCAEModel, vonMises: Float64Array): Float64Array {

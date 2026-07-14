@@ -16,6 +16,7 @@ import { meshGeoScriptInWorker, meshStepFileInWorker } from "./meshWorkerClient"
 import { trySolveOpenCaeCoreStudy } from "@opencae/core-adapter";
 import { stepAttributionForRegistry, stepFaceRegistryFromBase64 } from "../stepFaces";
 import { STEP_PROOF_LOAD_NEWTONS, stepProofScenario, studyWithWasmMeshSummary } from "./stepProofScenario";
+import { isModalResultSummary } from "@opencae/schema";
 // The corpus STEP fixture ships inline in the (flag-on-only) harness chunk so
 // the browser proof runs the real upload path without network fetches.
 import boxWithBoreStep from "../../../../libs/opencae-mesh-intake/fixtures/box-with-bore.step?raw";
@@ -162,7 +163,7 @@ async function runStepProof(): Promise<StepProofResult> {
 
     const solvableStudy = studyWithWasmMeshSummary({ study: scenario.study, artifact, model, mappingDiagnostics });
     const outcome = trySolveOpenCaeCoreStudy({ study: solvableStudy, runId: "run-meshproof-step", displayModel: scenario.displayModel });
-    const summary = outcome.ok ? outcome.result.summary : undefined;
+    const summary = outcome.ok && !isModalResultSummary(outcome.result.summary) ? outcome.result.summary : undefined;
     return {
       ok: true,
       brepFaceCount: registry.faces.length,
@@ -186,7 +187,7 @@ async function runStepProof(): Promise<StepProofResult> {
       usedGeometricFallback: mappingDiagnostics.some((diagnostic) => diagnostic.mode === "geometric"),
       phases,
       totalMs: Math.round(meshed.totalMs),
-      solve: outcome.ok
+      solve: outcome.ok && summary
         ? {
             ok: true,
             solverBackend: outcome.solverBackend,
@@ -198,7 +199,7 @@ async function runStepProof(): Promise<StepProofResult> {
             appliedForce: STEP_PROOF_LOAD_NEWTONS,
             reactionMatchesApplied: Math.abs(summary!.reactionForce - STEP_PROOF_LOAD_NEWTONS) / STEP_PROOF_LOAD_NEWTONS < 0.02
           }
-        : { ok: false, appliedForce: STEP_PROOF_LOAD_NEWTONS, reason: outcome.reason }
+        : { ok: false, appliedForce: STEP_PROOF_LOAD_NEWTONS, reason: outcome.ok ? "Unexpected modal result in structural mesh proof." : outcome.reason }
     };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? `${error.message}\n${error.stack ?? ""}` : String(error) };
@@ -274,6 +275,7 @@ async function runMeshThenSolveRunProof(): Promise<RunProofResult> {
 
     const completed = terminal.type === "complete";
     const results = completed ? await api.getResults(response.run.id) : undefined;
+    const structuralSummary = results && !isModalResultSummary(results.summary) ? results.summary : undefined;
     const provenance = results?.summary.provenance as
       | { solver?: string; runnerVersion?: string; resultSource?: string }
       | undefined;
@@ -288,12 +290,12 @@ async function runMeshThenSolveRunProof(): Promise<RunProofResult> {
       sawSolveEvents: events.some((event) => /assembling|solving/i.test(event.message)),
       completed,
       meshedStudyStoredArtifact,
-      ...(results
+      ...(structuralSummary
         ? {
             results: {
-              maxStress: results.summary.maxStress,
-              maxStressUnits: results.summary.maxStressUnits,
-              reactionForce: results.summary.reactionForce,
+              maxStress: structuralSummary.maxStress,
+              maxStressUnits: structuralSummary.maxStressUnits,
+              reactionForce: structuralSummary.reactionForce,
               provenanceSolver: provenance?.solver,
               provenanceRunnerVersion: provenance?.runnerVersion,
               provenanceResultSource: provenance?.resultSource,

@@ -90,7 +90,7 @@ export const LoadSchema = z.object({
 });
 
 const Vec3Schema = z.tuple([z.number(), z.number(), z.number()]);
-export const StudyAnalysisTypeSchema = z.enum(["static_stress", "dynamic_structural"]);
+export const StudyAnalysisTypeSchema = z.enum(["static_stress", "dynamic_structural", "modal_analysis"]);
 export const MeshQualitySchema = z.enum(["coarse", "medium", "fine", "ultra"]);
 // "auto" means the user never made an explicit backend choice; the run router
 // resolves it (local — the client cloud solve path was retired in B4a). An
@@ -120,6 +120,12 @@ export const DynamicSolverSettingsSchema = z.object({
   rayleighAlpha: z.number().nonnegative().optional(),
   rayleighBeta: z.number().nonnegative().optional(),
   allowFreeMotion: z.boolean().optional()
+});
+
+export const ModalSolverSettingsSchema = z.object({
+  backend: SolverBackendSchema.optional(),
+  fidelity: SimulationFidelitySchema.optional(),
+  modeCount: z.number().int().min(1).max(10).default(6)
 });
 
 export const AnalysisSampleSchema = z.object({
@@ -190,10 +196,13 @@ export const ResultProvenanceTierSchema = z.enum(["production_fea", "core_previe
 export const StudyRunStatusSchema = z.enum(["queued", "running", "complete", "complete_preview", "complete_estimate", "complete_benchmark", "complete_legacy", "failed", "cancelled"]);
 const terminalRunResultStatuses = new Set(["complete", "complete_preview", "complete_estimate", "complete_benchmark", "complete_legacy"]);
 
+export const StressComponentSchema = z.enum(["von_mises", "principal_max", "principal_min", "max_shear"]);
+
 export const ResultFieldSchema = z.object({
   id: z.string(),
   runId: z.string(),
-  type: z.enum(["stress", "displacement", "safety_factor", "velocity", "acceleration"]),
+  type: z.enum(["stress", "displacement", "safety_factor", "velocity", "acceleration", "mode_shape"]),
+  component: StressComponentSchema.optional(),
   location: z.enum(["node", "element", "face"]),
   values: z.array(z.number()),
   min: z.number(),
@@ -206,6 +215,10 @@ export const ResultFieldSchema = z.object({
   engineeringSource: z.string().optional(),
   frameIndex: z.number().int().min(0).optional(),
   timeSeconds: z.number().min(0).optional(),
+  modeIndex: z.number().int().min(1).optional(),
+  frequencyHz: z.number().positive().optional(),
+  eigenvalue: z.number().positive().optional(),
+  scaledResidual: z.number().nonnegative().optional(),
   provenance: ResultProvenanceSchema.optional()
 });
 
@@ -306,7 +319,12 @@ export const DynamicStudySchema = StudyBaseSchema.extend({
   solverSettings: DynamicSolverSettingsSchema
 });
 
-export const StudySchema = z.discriminatedUnion("type", [StaticStudySchema, DynamicStudySchema]);
+export const ModalStudySchema = StudyBaseSchema.extend({
+  type: z.literal("modal_analysis"),
+  solverSettings: ModalSolverSettingsSchema
+});
+
+export const StudySchema = z.discriminatedUnion("type", [StaticStudySchema, DynamicStudySchema, ModalStudySchema]);
 
 export const ProjectSchema = z.object({
   id: z.string(),
@@ -332,7 +350,7 @@ export const MeshSummarySchema = z.object({
   resultSampleCoordinateSpace: z.string().optional()
 });
 
-export const ResultSummarySchema = z.object({
+export const StructuralResultSummarySchema = z.object({
   maxStress: z.number(),
   maxStressUnits: z.string(),
   maxDisplacement: z.number(),
@@ -376,6 +394,25 @@ export const ResultSummarySchema = z.object({
     .optional()
 });
 
+export const ModalResultSummarySchema = z.object({
+  analysisType: z.literal("modal_analysis"),
+  requestedModeCount: z.number().int().min(1).max(10),
+  convergedModeCount: z.number().int().min(0).max(10),
+  modes: z.array(z.object({
+    modeIndex: z.number().int().min(1),
+    frequencyHz: z.number().positive(),
+    eigenvalue: z.number().positive(),
+    scaledResidual: z.number().nonnegative(),
+    fieldId: z.string()
+  })),
+  warning: z.string().optional(),
+  resultTier: ResultProvenanceTierSchema.optional(),
+  provenance: ResultProvenanceSchema.optional(),
+  diagnostics: z.array(DiagnosticSchema).optional().default([])
+});
+
+export const ResultSummarySchema = z.union([StructuralResultSummarySchema, ModalResultSummarySchema]);
+
 export const RunEventSchema = z.object({
   runId: z.string(),
   type: z.enum(["state", "progress", "message", "log", "diagnostic", "complete", "cancelled", "error"]),
@@ -394,6 +431,7 @@ export type MeshQuality = z.infer<typeof MeshQualitySchema>;
 export type SolverBackend = z.infer<typeof SolverBackendSchema>;
 export type SimulationFidelity = z.infer<typeof SimulationFidelitySchema>;
 export type DynamicSolverSettings = z.infer<typeof DynamicSolverSettingsSchema>;
+export type ModalSolverSettings = z.infer<typeof ModalSolverSettingsSchema>;
 export type Material = z.infer<typeof MaterialSchema>;
 export type GeometryReference = z.infer<typeof GeometryReferenceSchema>;
 export type NamedSelection = z.infer<typeof NamedSelectionSchema>;
@@ -404,15 +442,18 @@ export type AnalysisMesh = z.infer<typeof AnalysisMeshSchema>;
 export type ResultSample = z.infer<typeof ResultSampleSchema>;
 export type ResultProvenance = z.infer<typeof ResultProvenanceSchema>;
 export type ResultProvenanceTier = z.infer<typeof ResultProvenanceTierSchema>;
+export type StressComponent = z.infer<typeof StressComponentSchema>;
 export type ResultField = z.infer<typeof ResultFieldSchema>;
 export type GeometryFile = z.infer<typeof GeometryFileSchema>;
 export type MeshSummary = z.infer<typeof MeshSummarySchema>;
-export type ResultSummary = Omit<z.infer<typeof ResultSummarySchema>, "diagnostics"> & { diagnostics?: Diagnostic[] };
+export type StructuralResultSummary = Omit<z.infer<typeof StructuralResultSummarySchema>, "diagnostics"> & { diagnostics?: Diagnostic[] };
+export type ModalResultSummary = Omit<z.infer<typeof ModalResultSummarySchema>, "diagnostics"> & { diagnostics?: Diagnostic[] };
+export type ResultSummary = StructuralResultSummary | ModalResultSummary;
 export type StudyRun = z.infer<typeof StudyRunSchema>;
 export type Study = z.infer<typeof StudySchema>;
 export type Project = z.infer<typeof ProjectSchema>;
 export type RunEvent = z.infer<typeof RunEventSchema>;
-export type FailureAssessment = NonNullable<ResultSummary["failureAssessment"]>;
+export type FailureAssessment = NonNullable<StructuralResultSummary["failureAssessment"]>;
 
 export type RunTimingEstimate = Pick<RunEvent, "elapsedMs" | "estimatedDurationMs" | "estimatedRemainingMs">;
 
@@ -464,7 +505,7 @@ export interface LoadCapacityEstimate {
   loadUnits: string;
 }
 
-export function assessResultFailure(summary: Pick<ResultSummary, "safetyFactor" | "maxStress" | "maxStressUnits">): FailureAssessment {
+export function assessResultFailure(summary: Pick<StructuralResultSummary, "safetyFactor" | "maxStress" | "maxStressUnits">): FailureAssessment {
   const safetyFactor = Number(summary.safetyFactor);
   if (!Number.isFinite(safetyFactor) || safetyFactor <= 0) {
     return {
@@ -504,7 +545,7 @@ function formatAssessmentNumber(value: number): string {
 }
 
 export function estimateAllowableLoadForSafetyFactor(
-  summary: Pick<ResultSummary, "safetyFactor" | "reactionForce" | "reactionForceUnits">,
+  summary: Pick<StructuralResultSummary, "safetyFactor" | "reactionForce" | "reactionForceUnits">,
   targetSafetyFactor: number
 ): LoadCapacityEstimate {
   const currentSafetyFactor = Number(summary.safetyFactor);
@@ -530,6 +571,10 @@ export function estimateAllowableLoadForSafetyFactor(
     loadScale: roundAssessmentNumber(loadScale),
     loadUnits: summary.reactionForceUnits
   };
+}
+
+export function isModalResultSummary(summary: ResultSummary): summary is ModalResultSummary {
+  return "analysisType" in summary && summary.analysisType === "modal_analysis";
 }
 
 function roundAssessmentNumber(value: number): number {
