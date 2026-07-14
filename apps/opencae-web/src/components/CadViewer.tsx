@@ -1701,6 +1701,7 @@ function ModelDimensionOverlay({ displayModel, uploadedPreviewBounds }: { displa
   const xLineY = min.y - yOffset;
   const xLineZ = min.z - zOffset;
   const axisLineX = max.x + xOffset;
+  const annotationScale = dimensionAnnotationScale(bounds);
 
   // The overlay renders in the model's local frame. Samples sit inside the
   // legacy Y-up base rotation with y/z-swapped dimension values, so local z
@@ -1720,16 +1721,19 @@ function ModelDimensionOverlay({ displayModel, uploadedPreviewBounds }: { displa
         start={[min.x, xLineY, xLineZ]}
         end={[max.x, xLineY, xLineZ]}
         label={`X ${formatDimensionLabel(dimensionValues.x, dimensionValues.units)}`}
+        scale={annotationScale}
       />
       <DimensionLine
         start={[axisLineX, xLineY, min.z]}
         end={[axisLineX, xLineY, max.z]}
         label={zSpanLabel}
+        scale={annotationScale}
       />
       <DimensionLine
         start={[axisLineX, min.y, max.z + zOffset]}
         end={[axisLineX, max.y, max.z + zOffset]}
         label={ySpanLabel}
+        scale={annotationScale}
       />
     </group>
   );
@@ -1740,25 +1744,30 @@ const DIMENSION_LABEL_FONT_SIZE = 0.095;
 // label fits inside its dimension line.
 const DIMENSION_LABEL_GLYPH_ASPECT = 0.62;
 
-function DimensionLine({ start, end, label }: { start: [number, number, number]; end: [number, number, number]; label: string }) {
+export function dimensionAnnotationScale(bounds: THREE.Box3 | null): number {
+  return boundaryMarkerScale(bounds);
+}
+
+function DimensionLine({ start, end, label, scale }: { start: [number, number, number]; end: [number, number, number]; label: string; scale: number }) {
   const startVec = new THREE.Vector3(...start);
   const endVec = new THREE.Vector3(...end);
   const tangent = endVec.clone().sub(startVec);
   const lineLength = tangent.length();
   tangent.normalize();
-  const estimatedLabelWidth = label.length * DIMENSION_LABEL_FONT_SIZE * DIMENSION_LABEL_GLYPH_ASPECT;
+  const fontSize = DIMENSION_LABEL_FONT_SIZE * scale;
+  const estimatedLabelWidth = label.length * fontSize * DIMENSION_LABEL_GLYPH_ASPECT;
   // Sit the label on the line itself when it fits; expand it out past the end
   // of the line when the span is too short to hold the text.
   const inline = estimatedLabelWidth <= lineLength * 0.8;
   const labelPosition = inline
     ? startVec.clone().add(endVec).multiplyScalar(0.5)
-    : endVec.clone().add(tangent.clone().multiplyScalar(estimatedLabelWidth / 2 + 0.14));
+    : endVec.clone().add(tangent.clone().multiplyScalar(estimatedLabelWidth / 2 + 0.14 * scale));
   return (
     <group>
       <Line points={[start, end]} color="#4da3ff" lineWidth={1.8} transparent opacity={0.95} />
-      <DimensionEndpoint position={start} />
-      <DimensionEndpoint position={end} />
-      <DimensionLineLabel label={label} position={labelPosition.toArray() as [number, number, number]} tangent={tangent.toArray() as [number, number, number]} />
+      <DimensionEndpoint position={start} scale={scale} />
+      <DimensionEndpoint position={end} scale={scale} />
+      <DimensionLineLabel label={label} position={labelPosition.toArray() as [number, number, number]} tangent={tangent.toArray() as [number, number, number]} scale={scale} />
     </group>
   );
 }
@@ -1766,7 +1775,7 @@ function DimensionLine({ start, end, label }: { start: [number, number, number];
 // Dimension text runs along its line (rotated with the model) while staying
 // readable: each frame the label plane is tilted toward the camera around the
 // line axis, and the reading direction flips so it never renders mirrored.
-function DimensionLineLabel({ label, position, tangent }: { label: string; position: [number, number, number]; tangent: [number, number, number] }) {
+function DimensionLineLabel({ label, position, tangent, scale }: { label: string; position: [number, number, number]; tangent: [number, number, number]; scale: number }) {
   const groupRef = useRef<THREE.Group>(null);
   const colors = sceneLabelColors("dimension");
   useFrame(({ camera }) => {
@@ -1794,18 +1803,17 @@ function DimensionLineLabel({ label, position, tangent }: { label: string; posit
     <group ref={groupRef} position={position}>
       <Text
         anchorX="center"
-        anchorY="bottom"
-        position={[0, 0.045, 0]}
+        anchorY="middle"
         renderOrder={50}
         color={colors.text}
         material-depthTest={false}
         material-depthWrite={false}
         material-toneMapped={false}
-        fontSize={DIMENSION_LABEL_FONT_SIZE}
+        fontSize={DIMENSION_LABEL_FONT_SIZE * scale}
         letterSpacing={0}
         outlineColor={colors.outline}
         outlineOpacity={0.88}
-        outlineWidth={0.014}
+        outlineWidth={0.014 * scale}
       >
         {label}
       </Text>
@@ -1813,10 +1821,10 @@ function DimensionLineLabel({ label, position, tangent }: { label: string; posit
   );
 }
 
-function DimensionEndpoint({ position }: { position: [number, number, number] }) {
+function DimensionEndpoint({ position, scale }: { position: [number, number, number]; scale: number }) {
   return (
     <mesh position={position}>
-      <sphereGeometry args={[0.035, 16, 16]} />
+      <sphereGeometry args={[0.035 * scale, 16, 16]} />
       <meshBasicMaterial color="#4da3ff" depthTest={false} toneMapped={false} />
     </mesh>
   );
