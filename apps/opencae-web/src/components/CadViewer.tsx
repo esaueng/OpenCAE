@@ -530,6 +530,99 @@ export interface ReportCaptureRenderer {
   domElement: { toDataURL: (type: string) => string };
 }
 
+export interface CaptureCropRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+// Anything at least this bright on every channel counts as report-page
+// background. Troika label outlines and antialiased edges fade toward white, so
+// the threshold sits just below it rather than at 255.
+const CAPTURE_TRIM_WHITE_THRESHOLD = 247;
+const CAPTURE_TRIM_PADDING_FRACTION = 0.015;
+const CAPTURE_TRIM_MIN_PADDING = 4;
+
+// Tight bounds of the non-background ink in a report capture. The camera fits
+// the scene to the *canvas* aspect, so a model whose proportions differ from the
+// canvas (and from the PDF frame it lands in) is ringed by white the PDF then
+// scales down along with the model. Cropping to the ink lets the figure fill its
+// frame regardless of the viewer window's shape.
+export function opaqueContentCropRect(
+  image: { data: Uint8ClampedArray | number[]; width: number; height: number },
+  options: { threshold?: number; padding?: number } = {}
+): CaptureCropRect | null {
+  const { data, width, height } = image;
+  if (!(width > 0) || !(height > 0) || data.length < width * height * 4) return null;
+  const threshold = options.threshold ?? CAPTURE_TRIM_WHITE_THRESHOLD;
+  let minX = width;
+  let minY = height;
+  let maxX = -1;
+  let maxY = -1;
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const offset = (y * width + x) * 4;
+      const isBackground = data[offset]! >= threshold && data[offset + 1]! >= threshold && data[offset + 2]! >= threshold;
+      if (isBackground) continue;
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
+  }
+  // An all-background capture has no content to frame; the caller keeps the
+  // uncropped frame rather than emitting a zero-size image.
+  if (maxX < 0) return null;
+  const contentWidth = maxX - minX + 1;
+  const contentHeight = maxY - minY + 1;
+  const padding = options.padding ?? Math.max(
+    CAPTURE_TRIM_MIN_PADDING,
+    Math.round(Math.min(contentWidth, contentHeight) * CAPTURE_TRIM_PADDING_FRACTION)
+  );
+  const x = Math.max(0, minX - padding);
+  const y = Math.max(0, minY - padding);
+  return {
+    x,
+    y,
+    width: Math.min(width, maxX + padding + 1) - x,
+    height: Math.min(height, maxY + padding + 1) - y
+  };
+}
+
+// Best-effort crop of the just-rendered frame. Returns null whenever the canvas
+// cannot be read back (notably the plain object stubs used in tests), leaving
+// the caller on the uncropped path.
+function croppedReportCapturePng(domElement: ReportCaptureRenderer["domElement"]): string | null {
+  const source = domElement as Partial<HTMLCanvasElement>;
+  const width = source.width;
+  const height = source.height;
+  if (typeof document === "undefined" || typeof width !== "number" || typeof height !== "number" || !width || !height) return null;
+  try {
+    const readback = document.createElement("canvas");
+    readback.width = width;
+    readback.height = height;
+    const readbackContext = readback.getContext("2d", { willReadFrequently: true });
+    if (!readbackContext) return null;
+    // Same synchronous tick as gl.render, so the drawing buffer is still intact
+    // without preserveDrawingBuffer — the same guarantee toDataURL relies on.
+    readbackContext.drawImage(source as CanvasImageSource, 0, 0);
+    const crop = opaqueContentCropRect(readbackContext.getImageData(0, 0, width, height));
+    if (!crop || (crop.width === width && crop.height === height)) return null;
+    const cropped = document.createElement("canvas");
+    cropped.width = crop.width;
+    cropped.height = crop.height;
+    const croppedContext = cropped.getContext("2d");
+    if (!croppedContext) return null;
+    croppedContext.fillStyle = REPORT_CAPTURE_BACKGROUND;
+    croppedContext.fillRect(0, 0, crop.width, crop.height);
+    croppedContext.drawImage(readback, crop.x, crop.y, crop.width, crop.height, 0, 0, crop.width, crop.height);
+    return cropped.toDataURL("image/png");
+  } catch {
+    return null;
+  }
+}
+
 // Renders the report figure frame — white background, camera fit tight on the
 // visible result geometry along the current view direction — reads the PNG, then
 // restores the scene and camera and repaints so the interactive viewer never
@@ -562,7 +655,7 @@ export function renderReportCapture(gl: ReportCaptureRenderer, scene: THREE.Scen
       camera.updateMatrixWorld();
     }
     gl.render(scene, camera);
-    return gl.domElement.toDataURL("image/png");
+    return croppedReportCapturePng(gl.domElement) ?? gl.domElement.toDataURL("image/png");
   } finally {
     scene.background = previousBackground;
     camera.position.copy(previousPosition);

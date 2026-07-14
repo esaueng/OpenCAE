@@ -17,7 +17,13 @@ export interface CapturedResultView {
 
 export interface CapturedBoundaryView {
   png: string;
+  /** Bump BOUNDARY_CAPTURE_REVISION when the figure's framing/styling changes so saved runs recapture. */
+  revision?: number;
 }
+
+// Revision 3: dimension overlay hidden during the capture, and the capture
+// cropped to its content so the figure fills its frame.
+export const BOUNDARY_CAPTURE_REVISION = 3;
 
 export interface CaptureResultViewsOptions {
   getViewMode: () => ViewMode;
@@ -103,7 +109,7 @@ async function captureBoundaryView(options: CaptureResultViewsOptions, waitForFr
     await waitForFrame();
     await waitForFrame();
     if (!options.isCurrent()) throw staleResultsError();
-    return { png: await options.capture!() };
+    return { png: await options.capture!(), revision: BOUNDARY_CAPTURE_REVISION };
   } finally {
     options.setViewMode!("results");
   }
