@@ -67,6 +67,14 @@ Static case batches must match separate direct solves. Combination regressions i
 
 Dynamic case validation requires one K/M assembly, shared damping calibration, independent zero initial conditions, ordered completion callbacks, separate persistence, cancellation cleanup, and no aggregate transient retention. All case, combination, envelope, playback, and probe keys include the active variant identity.
 
+## Static Mesh-Convergence Studies
+
+The automatic convergence ladder is available only for a selected static load case and always runs `coarse`, `medium`, then `fine`; `ultra` is intentionally manual. The displacement probe defaults to the primary load application point but remains explicit and editable. It must map to the nearest solver-surface triangle through barycentric interpolation within a scale-aware tolerance. Failure to map is a failed rung, not permission to sample an arbitrary node.
+
+Each rung records actual generated node/element counts, total/free DOF, actual mesh size, the raw element peak von Mises stress, and the interpolated displacement magnitude. A generated mesh above the 100,000-DOF browser pipeline limit is marked skipped before a solve begins, and later rungs are still attempted so failures and caps remain visible.
+
+"Apparent convergence" requires all three rungs to complete with strictly increasing actual DOF. The symmetric last-step change from medium to fine must be at most 5% for probe displacement and 10% for raw peak stress. Three successful increasing rungs outside either threshold are `unconverged`; missing, skipped, failed, or non-increasing rungs are `inconclusive`. This is a mesh-ladder indicator, not a proof of asymptotic convergence.
+
 ## OpenCAE Core Modal Support
 
 Modal studies require positive density for every solved material, a generated mesh, and enough supports to make the constrained stiffness matrix nonsingular. They do not require or apply loads. The solver requests 1–10 modes (default 6) and uses deterministic block shift-invert subspace iteration with a block size of `min(modeCount + 2, freeDOFs)`.
@@ -96,6 +104,7 @@ is at most `1e-6`. The solver returns only converged modes and reports requested
 | Dynamic cadence | Same block | Aluminum 6061 | `timeStep=0.005`, `outputInterval=0.01`, `endTime=0.025` | Frames appear at `0`, `0.01`, `0.02`, and final `0.025`. |
 | Static signed combination | Connected Tet4 block | Linear elastic validation material | Two shared-support cases with positive and negative factors | Tensor/vector superposition matches a direct solve; von Mises and principal stresses are recomputed from the combined tensor. |
 | Dynamic case isolation | Connected Tet4 block | Linear elastic validation material with density | Two cases sharing supports but carrying different loads | K/M is assembled once; both cases start from zero state, stream in order, and persist as separate transient records. |
+| Static convergence ladder | Same static case remeshed coarse, medium, and fine | Same material and supports for every rung | Explicit surface-mappable displacement probe | Working mesh/results stay unchanged; actual DOF rises strictly; probe displacement and raw peak stress determine apparent, unconverged, or inconclusive status; over-limit meshes skip before solving. |
 
 ## Beam Theory Comparison
 

@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { AlertTriangle, Anchor, ArrowDown, Atom, Check, ChevronDown, ChevronRight, CircleHelp, Eye, Factory, FileDown, Gauge, Grid3X3, Layers3, Maximize2, Pause, Play, Plus, RotateCcw, Ruler, ScanLine, ShieldCheck, Upload, Weight, Wrench, X } from "lucide-react";
 import { compatibleManufacturingProcessesFor, defaultManufacturingParametersFor, defaultManufacturingProcessIdFor, effectiveMaterialProperties, fdmPropertyFactorsFor, isManufacturingProcessCompatible, manufacturingParametersForAssignment, manufacturingProcessForId, massKgForPayloadMaterial, materialCatalog, materialCategoryLabel, normalizeManufacturingParameters, payloadMaterialForId, payloadMaterials, type ManufacturingParameters, type ManufacturingProcessId, type PayloadMaterialCategory } from "@opencae/materials";
 import { assessResultFailure, estimateAllowableLoadForSafetyFactor, isModalResultSummary } from "@opencae/schema";
-import type { Constraint, CustomMaterial, DisplayFace, DisplayModel, DynamicSolverSettings, Load, LoadCase, LoadCombination, Material, MeshQuality, ModalResultSummary, ModalSolverSettings, Project, ResultField, ResultSummary, RunTimingEstimate, RunVariantRef, SimulationFidelity, StructuralResultSummary, Study } from "@opencae/schema";
+import type { Constraint, CustomMaterial, DisplayFace, DisplayModel, DynamicSolverSettings, Load, LoadCase, LoadCombination, Material, MeshConvergenceRecord, MeshQuality, ModalResultSummary, ModalSolverSettings, Project, ResultField, ResultSummary, RunTimingEstimate, RunVariantRef, SimulationFidelity, StructuralResultSummary, Study } from "@opencae/schema";
 import { inferGlobalCriticalPrintAxis } from "@opencae/study-core";
 import type { StepId } from "./StepBar";
 import { applicationPointForLoad, createViewerLoadMarkers, directionLabelForLoad, directionVectorForLabel, equivalentForceForLoad, LOAD_DIRECTION_LABELS, loadMarkerOrdinalLabel, payloadObjectForLoad, unitsForLoadType, type LoadApplicationPoint, type LoadDirectionLabel, type LoadType, type PayloadLoadMetadata, type PayloadMassMode } from "../loadPreview";
@@ -11,6 +11,7 @@ import { DEFAULT_SECTION_PLANE, type PayloadObjectSelection, type ResultMode, ty
 import type { ResolvedResultProbe } from "../resultSelection";
 import type { SampleAnalysisType, SampleModelId } from "../lib/api";
 import type { WasmMeshPhaseProgress } from "../lib/wasmMeshing";
+import { defaultConvergenceProbe, type ConvergenceProbe } from "../meshConvergence";
 import { stepGeometryMetadataForProject } from "../stepGeometryState";
 import { dimensionValuesForDisplayModel } from "../modelDimensions";
 import { formatModelOrientation, getModelOrientation, type RotationAxis } from "../modelOrientation";
@@ -117,6 +118,9 @@ interface RightPanelProps {
   onGenerateMesh: (preset: MeshQuality) => void;
   onCancelMesh?: () => void;
   meshPhaseProgress?: WasmMeshPhaseProgress | null;
+  onRunMeshConvergence?: (caseId: string, probe: ConvergenceProbe) => void;
+  convergenceBusy?: boolean;
+  convergenceProgress?: string;
   onUpdateSolverSettings?: (settings: SolverSettingsPatch) => void;
   onChangeStudyType?: (type: Study["type"]) => void;
   onRunSimulation: () => void;
@@ -1214,25 +1218,65 @@ function selectionForFace(study: Study, faceId: string) {
   return study.namedSelections.find((item) => item.entityType === "face" && item.geometryRefs.some((ref) => ref.entityId === faceId));
 }
 
-function MeshPanel({ project, study, onGenerateMesh, onCancelMesh, meshPhaseProgress, onRepairModel, isRepairingModel = false }: RightPanelProps) {
+function MeshPanel({ project, displayModel, study, onGenerateMesh, onCancelMesh, meshPhaseProgress, onRepairModel, isRepairingModel = false, onRunMeshConvergence, convergenceBusy = false, convergenceProgress = "" }: RightPanelProps) {
   const [preset, setPreset] = useState<MeshQuality>(study.meshSettings.preset);
   const meshing = Boolean(meshPhaseProgress);
   const stepGeometry = stepGeometryMetadataForProject(project);
   const stepGeometryResolvedByMesh = Boolean(study.meshSettings.summary?.artifacts?.actualCoreModel);
+  const staticStudy = study.type === "static_stress" ? study : null;
+  const convergenceCases = staticStudy ? structuralLoadCasesForPanel(staticStudy).filter((loadCase) => loadCase.enabled && loadCase.loadIds.length) : [];
+  const [convergenceCaseId, setConvergenceCaseId] = useState(convergenceCases[0]?.id ?? "");
+  const initialProbe = staticStudy && convergenceCaseId ? defaultConvergenceProbe(staticStudy, convergenceCaseId, displayModel) : null;
+  const [probeCoordinates, setProbeCoordinates] = useState<[string, string, string]>(() => initialProbe
+    ? initialProbe.point.map((value) => String(value)) as [string, string, string]
+    : ["", "", ""]);
+  const [probeEdited, setProbeEdited] = useState(false);
+  useEffect(() => {
+    if (!staticStudy || !convergenceCases.length) return;
+    const caseId = convergenceCases.some((loadCase) => loadCase.id === convergenceCaseId) ? convergenceCaseId : convergenceCases[0]!.id;
+    if (caseId !== convergenceCaseId) setConvergenceCaseId(caseId);
+    const probe = defaultConvergenceProbe(staticStudy, caseId, displayModel);
+    setProbeCoordinates(probe ? probe.point.map((value) => String(value)) as [string, string, string] : ["", "", ""]);
+    setProbeEdited(false);
+  }, [displayModel, staticStudy?.id, staticStudy?.loads, staticStudy?.loadCases, convergenceCaseId]);
+  const probePoint = probeCoordinates.map(Number) as [number, number, number];
+  const validProbe = probeCoordinates.every((value) => value.trim() !== "") && probePoint.every(Number.isFinite);
+  const latestRecord = [...(project.convergenceRecords ?? [])]
+    .reverse()
+    .find((record) => record.studyId === study.id && record.caseId === convergenceCaseId);
+
+  function selectConvergenceCase(caseId: string) {
+    setConvergenceCaseId(caseId);
+    if (!staticStudy) return;
+    const probe = defaultConvergenceProbe(staticStudy, caseId, displayModel);
+    setProbeCoordinates(probe ? probe.point.map((value) => String(value)) as [string, string, string] : ["", "", ""]);
+    setProbeEdited(false);
+  }
+
+  function runConvergence() {
+    if (!staticStudy || !validProbe || !convergenceCaseId) return;
+    const fallback = defaultConvergenceProbe(staticStudy, convergenceCaseId, displayModel);
+    onRunMeshConvergence?.(convergenceCaseId, {
+      point: probePoint,
+      source: probeEdited ? "explicit" : fallback?.source ?? "explicit",
+      ...(probeEdited ? { label: "Explicit displacement probe" } : fallback?.label ? { label: fallback.label } : {})
+    });
+  }
+
   return (
     <Panel title="Mesh" helper="The mesh breaks the model into small pieces so OpenCAE can calculate results.">
       <div className="field">
         <HelpLabel helpId="meshQuality">Quality preset</HelpLabel>
         <div className="segmented mesh-quality" role="group" aria-label="Mesh quality">
           {MESH_PRESETS.map((option) => (
-            <button key={option} className={preset === option ? "active" : ""} type="button" aria-pressed={preset === option} disabled={meshing} onClick={() => setPreset(option)}>{capitalize(option)}</button>
+            <button key={option} className={preset === option ? "active" : ""} type="button" aria-pressed={preset === option} disabled={meshing || convergenceBusy} onClick={() => setPreset(option)}>{capitalize(option)}</button>
           ))}
         </div>
       </div>
       <button
         className="primary wide"
         type="button"
-        disabled={meshing && !onCancelMesh}
+        disabled={convergenceBusy || (meshing && !onCancelMesh)}
         aria-label={meshing ? "Stop mesh generation" : "Generate mesh"}
         onClick={() => meshing ? onCancelMesh?.() : onGenerateMesh(preset)}
       >
@@ -1287,8 +1331,127 @@ function MeshPanel({ project, study, onGenerateMesh, onCancelMesh, meshPhaseProg
         </div>
       )}
       <p className="panel-copy">Meshing runs locally in your browser at the selected quality; final node and element counts appear with the results.</p>
+      {staticStudy ? (
+        <section className="convergence-card" aria-label="Static mesh convergence">
+          <h3>Mesh convergence</h3>
+          <p className="panel-copy">Runs an isolated static case at coarse, medium, then fine. Your working mesh and active results stay unchanged.</p>
+          <label className="field">
+            <span>Static case</span>
+            <select value={convergenceCaseId} disabled={convergenceBusy} onChange={(event) => selectConvergenceCase(event.currentTarget.value)}>
+              {convergenceCases.map((loadCase) => <option key={loadCase.id} value={loadCase.id}>{loadCase.name}</option>)}
+            </select>
+          </label>
+          <div className="field">
+            <span>Displacement probe ({displayModel.dimensions?.units ?? "model units"})</span>
+            <div className="convergence-probe-grid">
+              {(["X", "Y", "Z"] as const).map((axis, index) => (
+                <label key={axis}>
+                  <span>{axis}</span>
+                  <input
+                    type="number"
+                    value={probeCoordinates[index]}
+                    disabled={convergenceBusy}
+                    onChange={(event) => {
+                      const next = [...probeCoordinates] as [string, string, string];
+                      next[index] = event.currentTarget.value;
+                      setProbeCoordinates(next);
+                      setProbeEdited(true);
+                    }}
+                  />
+                </label>
+              ))}
+            </div>
+          </div>
+          {!validProbe && <p className="panel-warning"><AlertTriangle size={16} />Choose a finite displacement probe point before running convergence.</p>}
+          <button className="secondary wide" type="button" disabled={!onRunMeshConvergence || convergenceBusy || meshing || !validProbe || !convergenceCaseId} onClick={runConvergence}>
+            <ScanLine size={16} />{convergenceBusy ? "Running convergence…" : "Run coarse → medium → fine"}
+          </button>
+          {convergenceBusy && <p className="panel-copy" aria-live="polite">{convergenceProgress || "Running convergence study."}</p>}
+          {latestRecord && <ConvergenceRecordCard record={latestRecord} />}
+        </section>
+      ) : (
+        <p className="panel-copy">Mesh-convergence studies are available for static load cases only.</p>
+      )}
     </Panel>
   );
+}
+
+function ConvergenceRecordCard({ record }: { record: MeshConvergenceRecord }) {
+  const classification = record.classification === "apparent_convergence"
+    ? "Apparent convergence"
+    : record.classification === "unconverged"
+      ? "Unconverged"
+      : "Inconclusive";
+  return (
+    <div className="convergence-record">
+      <strong>{classification}</strong>
+      {record.lastStepChanges && (
+        <small>Last step: displacement {(record.lastStepChanges.displacement * 100).toFixed(1)}% · stress {(record.lastStepChanges.stress * 100).toFixed(1)}%</small>
+      )}
+      <ConvergenceChart record={record} />
+      <div className="convergence-rungs">
+        {record.rungs.map((rung) => (
+          <div key={rung.requestedPreset} className={`convergence-rung ${rung.status}`}>
+            <span>{capitalize(rung.requestedPreset)}</span>
+            <small>{rung.totalDofs?.toLocaleString() ?? "—"} total · {rung.freeDofs?.toLocaleString() ?? "—"} free DOF</small>
+            <small>{rung.actualNodeCount?.toLocaleString() ?? "—"} nodes · {rung.actualElementCount?.toLocaleString() ?? "—"} elements · {formatCompact(rung.actualMeshSizeMm)} mm</small>
+            <small>{rung.status === "complete"
+              ? `${formatCompact(rung.probeDisplacement)} ${rung.displacementUnits} · ${formatCompact(rung.rawElementPeakVonMises)} ${rung.stressUnits}`
+              : rung.skipReason ?? capitalize(rung.status)}</small>
+          </div>
+        ))}
+      </div>
+      <p className="panel-copy">Apparent convergence requires three increasing-DOF rungs, ≤5% displacement change, and ≤10% raw element stress change.</p>
+    </div>
+  );
+}
+
+function ConvergenceChart({ record }: { record: MeshConvergenceRecord }) {
+  const plottable = record.rungs.filter((rung) => rung.totalDofs !== undefined);
+  const complete = plottable.filter((rung) => rung.status === "complete" && rung.probeDisplacement !== undefined && rung.rawElementPeakVonMises !== undefined);
+  if (!plottable.length) return null;
+  const dofs = plottable.map((rung) => rung.totalDofs!);
+  const minDof = Math.min(...dofs);
+  const maxDof = Math.max(...dofs);
+  const x = (dof: number) => 18 + ((dof - minDof) / Math.max(1, maxDof - minDof)) * 204;
+  const normalizedY = (value: number, values: number[]) => {
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    return 82 - ((value - min) / Math.max(Number.EPSILON, max - min)) * 58;
+  };
+  const displacementValues = complete.map((rung) => rung.probeDisplacement!);
+  const stressValues = complete.map((rung) => rung.rawElementPeakVonMises!);
+  const displacementPoints = complete.map((rung) => `${x(rung.totalDofs!)},${normalizedY(rung.probeDisplacement!, displacementValues)}`).join(" ");
+  const stressPoints = complete.map((rung) => `${x(rung.totalDofs!)},${normalizedY(rung.rawElementPeakVonMises!, stressValues)}`).join(" ");
+  return (
+    <svg className="convergence-chart" viewBox="0 0 240 112" role="img" aria-label="Probe displacement and raw element peak stress versus actual degrees of freedom">
+      <title>Convergence metrics versus actual degrees of freedom</title>
+      <line x1="18" y1="86" x2="222" y2="86" className="chart-axis" />
+      <line x1="18" y1="18" x2="18" y2="86" className="chart-axis" />
+      {displacementPoints && <polyline points={displacementPoints} className="chart-displacement" />}
+      {stressPoints && <polyline points={stressPoints} className="chart-stress" />}
+      {complete.map((rung) => (
+        <g key={`point-${rung.requestedPreset}`}>
+          <circle cx={x(rung.totalDofs!)} cy={normalizedY(rung.probeDisplacement!, displacementValues)} r="3" className="chart-displacement" />
+          <circle cx={x(rung.totalDofs!)} cy={normalizedY(rung.rawElementPeakVonMises!, stressValues)} r="3" className="chart-stress" />
+        </g>
+      ))}
+      {plottable.filter((rung) => rung.status !== "complete").map((rung) => (
+        <g key={`skip-${rung.requestedPreset}`} className="chart-skipped" aria-label={`${rung.requestedPreset} ${rung.status}`}>
+          <line x1={x(rung.totalDofs!) - 4} y1="78" x2={x(rung.totalDofs!) + 4} y2="86" />
+          <line x1={x(rung.totalDofs!) + 4} y1="78" x2={x(rung.totalDofs!) - 4} y2="86" />
+        </g>
+      ))}
+      <text x="22" y="104" className="chart-displacement-label">Displacement</text>
+      <text x="100" y="104" className="chart-stress-label">Stress</text>
+      <text x="190" y="104" className="chart-axis-label">DOF</text>
+    </svg>
+  );
+}
+
+function formatCompact(value: number | undefined): string {
+  if (value === undefined || !Number.isFinite(value)) return "—";
+  return Math.abs(value) >= 100 ? value.toFixed(1) : Math.abs(value) >= 1 ? value.toFixed(3) : value.toExponential(3);
 }
 
 function RunPanel({ study, displayModel, runProgress, runError, runTiming, onRunSimulation, onCancelSimulation, canCancelSimulation, onUpdateSolverSettings, onChangeStudyType, canRunSimulation, missingRunItems }: RightPanelProps) {

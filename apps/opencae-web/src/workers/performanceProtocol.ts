@@ -18,7 +18,7 @@ export interface LocalSolveResult {
   diagnostics?: unknown[];
   artifacts?: Record<string, unknown> & {
     meshConnectivity?: { connectedComponents: number };
-    meshStatistics?: { nodes: number; elements: number };
+    meshStatistics?: { nodes: number; elements: number; totalDofs?: number; constrainedDofs?: number; freeDofs?: number; representativeElementSizeMm?: number };
   };
 }
 

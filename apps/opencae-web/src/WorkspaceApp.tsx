@@ -2,7 +2,7 @@ import { lazy, startTransition, Suspense, useCallback, useEffect, useMemo, useRe
 import { DynamicSolverSettingsSchema, isModalResultSummary, isRunResultReadyStatus, ModalSolverSettingsSchema } from "@opencae/schema";
 import type { Constraint, CustomMaterial, DisplayFace, DisplayModel, DynamicSolverSettings, Load, MeshQuality, ModalSolverSettings, NamedSelection, Project, ResultField, ResultRenderBounds, ResultSummary, RunEvent, RunTimingEstimate, RunVariantRef, RunVariantResult, SimulationFidelity, Study } from "@opencae/schema";
 import { RotateCcw, Save, X } from "lucide-react";
-import { addLoad, addSupport, assignMaterial, cancelRun, createProject, generateMesh, getResults, getRunVariant, importLocalProject, isStepGeometryMeshFailure, loadSampleProject, probeUploadedStepRepairAfterMeshFailure, renameProject, repairUploadedStepModel, runSimulation, saveRunReportCaptures, STEP_REPAIR_UNAVAILABLE_MESSAGE, subscribeToRun, updateStudy as saveStudyPatch, uploadedStepRepairProbeDecision, uploadModel, type SampleAnalysisType, type SampleModelId } from "./lib/api";
+import { addLoad, addSupport, assignMaterial, cancelRun, createProject, generateMesh, getResults, getRunVariant, importLocalProject, isStepGeometryMeshFailure, loadSampleProject, probeUploadedStepRepairAfterMeshFailure, renameProject, repairUploadedStepModel, runMeshConvergence, runSimulation, saveRunReportCaptures, STEP_REPAIR_UNAVAILABLE_MESSAGE, subscribeToRun, updateStudy as saveStudyPatch, uploadedStepRepairProbeDecision, uploadModel, type SampleAnalysisType, type SampleModelId } from "./lib/api";
 import { cancelWasmMeshing, type WasmMeshPhaseProgress } from "./lib/wasmMeshing";
 import { resolveSolverBackend } from "./workers/opencaeCoreSolve";
 import { manufacturingProcessForId, normalizeManufacturingParameters, resolveMaterial } from "@opencae/materials";
@@ -23,6 +23,7 @@ import {
 } from "./loadPreview";
 import { resetDisplayModelOrientation, type RotationAxis } from "./modelOrientation";
 import { buildLocalProjectFile, suggestedProjectFilename, type LocalResultBundle, type SolverSurfaceMesh } from "./projectFile";
+import type { ConvergenceProbe } from "./meshConvergence";
 import { prepareBlobSaveToDisk, saveBlobToDisk } from "./lib/fileSave";
 import { captureResultViews, type ResultViewCaptures } from "./report/captureResultViews";
 import { buildReportData, suggestedReportFilename } from "./report/reportData";
@@ -152,6 +153,8 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     : (restoredProjectFile ? ["Workspace restored after reload.", "Ready | Local Mode"] : ["Ready | Local Mode"]).map((message) => ({ message, at: Date.now() })));
   const [runProgress, setRunProgress] = useState(restoredUi?.runProgress ?? (restoredResults?.fields.length ? 100 : 0));
   const [meshPhaseProgress, setMeshPhaseProgress] = useState<WasmMeshPhaseProgress | null>(null);
+  const [convergenceBusy, setConvergenceBusy] = useState(false);
+  const [convergenceProgress, setConvergenceProgress] = useState("");
   const [runTiming, setRunTiming] = useState<RunTimingEstimate | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
   const [reportBusy, setReportBusy] = useState(false);
@@ -372,7 +375,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const runButtonProgress = Math.min(100, Math.max(0, Math.round(runProgress)));
   reportStateRef.current = { viewMode, resultMode, resultSummary, completedRunId, resultPlaybackPlaying };
   const runReadiness = useMemo(() => readinessForStudy(study), [study]);
-  const canRunSimulation = runReadiness.every((item) => item.done) && !solverRunning;
+  const canRunSimulation = runReadiness.every((item) => item.done) && !solverRunning && !convergenceBusy;
   const missingRunItems = runReadiness.filter((item) => !item.done).map((item) => item.label);
   const hasActualVolumeMesh = Boolean(study?.meshSettings.summary?.artifacts?.actualCoreModel);
   const openStepNeedsRepair = stepGeometryNeedsRepair(project) && !hasActualVolumeMesh;
@@ -1508,6 +1511,43 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     cancelWasmMeshing("Mesh generation cancelled.");
   }
 
+  async function handleRunMeshConvergence(caseId: string, probe: ConvergenceProbe) {
+    const sourceProject = projectRef.current;
+    if (!sourceProject || !study || study.type !== "static_stress" || !displayModel || convergenceBusy || solverRunning) return;
+    setConvergenceBusy(true);
+    setConvergenceProgress("Preparing coarse convergence mesh.");
+    pushMessage("Starting static mesh-convergence study (coarse → medium → fine).");
+    try {
+      const record = await runMeshConvergence(study, caseId, probe, displayModel, {
+        customMaterials: sourceProject.customMaterials,
+        onProgress: setConvergenceProgress
+      });
+      if (projectRef.current !== sourceProject) {
+        pushMessage("Convergence finished, but the project changed during the run; the stale record was not attached.");
+        return;
+      }
+      const nextProject: Project = {
+        ...sourceProject,
+        convergenceRecords: [...(sourceProject.convergenceRecords ?? []), record],
+        updatedAt: new Date().toISOString()
+      };
+      projectRef.current = nextProject;
+      setProject(nextProject);
+      const label = record.classification === "apparent_convergence"
+        ? "apparent convergence"
+        : record.classification === "unconverged"
+          ? "unconverged"
+          : "inconclusive";
+      pushMessage(`Mesh-convergence study complete: ${label}. Working mesh and active results were unchanged.`);
+    } catch (error) {
+      pushMessage(`Mesh-convergence study failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setConvergenceBusy(false);
+      setConvergenceProgress("");
+      setMeshPhaseProgress(null);
+    }
+  }
+
   function handleViewportFaceSelect(face: DisplayFace, point?: [number, number, number], payloadObject?: PayloadObjectSelection) {
     setSelectedFaceId(face.id);
     const isPayloadObjectLoad = activeStep === "loads" && draftLoadType === "gravity";
@@ -2139,7 +2179,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           onGenerateReport={handleGenerateReport}
           reportBusy={reportBusy}
           reportError={reportError}
-          reportDisabled={solverRunning}
+          reportDisabled={solverRunning || convergenceBusy}
           sampleModel={sampleModel}
           sampleAnalysisType={sampleAnalysisType}
           draftLoadType={draftLoadType}
@@ -2241,6 +2281,9 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           onGenerateMesh={handleGenerateMesh}
           onCancelMesh={handleCancelMesh}
           meshPhaseProgress={meshPhaseProgress}
+          onRunMeshConvergence={(caseId, probe) => void handleRunMeshConvergence(caseId, probe)}
+          convergenceBusy={convergenceBusy}
+          convergenceProgress={convergenceProgress}
           onUpdateSolverSettings={handleUpdateSolverSettings}
           onChangeStudyType={handleChangeStudyType}
           onRunSimulation={handleRunSimulation}

@@ -25,6 +25,8 @@ Uploaded STEP, STP, STL, and OBJ source data can be embedded into the project me
 
 `project.customMaterials` is optional. Each entry uses a UUID id, name, category, Young's modulus and yield strength in Pa, density in kg/m³, Poisson ratio, optional copied additive `printProfile`, and `verification: "user_supplied_unverified"`. These definitions are project-scoped; there is no global browser material library. Because this is an optional backward-readable field, the outer container remains version 2.
 
+`project.convergenceRecords` is also optional. Each static-case record stores its study/case ids, probe point and source, completion timestamps, classification, last-step percentage changes, and exactly three `coarse`, `medium`, and `fine` rung summaries. Rungs contain actual mesh/DOF counts and size when available, raw element peak von Mises stress, probe displacement magnitude, status, and an optional skip/failure reason. Solver meshes, surface fields, and result bundles are deliberately excluded. These compact records persist through workspace autosave and the same version-2 portable container.
+
 The open-section clipping plane is not part of this file format. Its enabled state, X/Y/Z axis, normalized offset, and flip direction are browser workspace UI preferences only.
 
 Runtime artifacts are stored separately under `data/artifacts` during local API use. Those artifacts include uploaded models, display metadata, mesh summaries, solver inputs/logs, result bundles, HTML reports, and PDF reports.

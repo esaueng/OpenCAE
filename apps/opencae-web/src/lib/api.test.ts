@@ -516,6 +516,16 @@ describe("api", () => {
     expect(response.message).toBe("Mesh generated locally.");
   });
 
+  test("keeps isolated mesh generation off the project API", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await generateMesh("study-1", "coarse", study, undefined, undefined, undefined, { localOnly: true });
+
+    expect(response.study.meshSettings.preset).toBe("coarse");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   test("does not mask a STEP topology failure with a completed preset estimate", async () => {
     const stepText = readFileSync(resolve(__dirname, "../../../../libs/opencae-mesh-intake/fixtures/box-with-bore.step"), "utf8");
     const progress: string[] = [];

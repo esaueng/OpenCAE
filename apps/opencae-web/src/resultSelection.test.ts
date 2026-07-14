@@ -3,6 +3,7 @@ import { describe, expect, test } from "vitest";
 import {
   barycentricPoint,
   barycentricScalar,
+  barycentricVector,
   appendResultProbe,
   governingVariantIdForProbe,
   interpolateScalarFromSamples,
@@ -76,6 +77,7 @@ describe("result probes", () => {
   test("interpolates aligned nodal values with retained barycentric weights", () => {
     const weights: [number, number, number] = [0.2, 0.3, 0.5];
     expect(barycentricScalar([10, 20, 40], [0, 1, 2], weights)).toBeCloseTo(28, 12);
+    expect(barycentricVector([[0, 0, 0], [1, 2, 3], [2, 4, 6]], [0, 1, 2], weights)).toEqual([1.3, 2.6, 3.9]);
     expect(barycentricPoint(surfaceMesh.nodes, [0, 1, 2], weights)).toEqual([0.3, 0.5, 0]);
     expect(resolveResultProbe({ id: "probe-1", anchor: { kind: "surface", surfaceMeshId: surfaceMesh.id, triangle: [0, 1, 2], barycentric: weights } }, field(), surfaceMesh)).toMatchObject({ value: 28, point: [0.3, 0.5, 0] });
   });

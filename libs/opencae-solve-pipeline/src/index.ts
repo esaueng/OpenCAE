@@ -31,8 +31,10 @@ import {
   solveStaticLinearTetLoadCases,
   type SolverHooks
 } from "@opencae/solver-cpu";
+import { BROWSER_SOLVE_LIMITS, CLOUD_SOLVER_LIMITS, type SolveLimits } from "./limits";
 
 export type { SolveProgressEvent, SolverHooks } from "@opencae/solver-cpu";
+export { BROWSER_SOLVE_LIMITS, CLOUD_SOLVER_LIMITS, type SolveLimits } from "./limits";
 
 /** Mirror of the deployed runner's SOLVER_CPU_VERSION stamp (server.ts). */
 export const SOLVER_CPU_VERSION = "0.1.5";
@@ -57,68 +59,6 @@ export type CorePipelineSolverSettings = Record<string, unknown> & {
   outputInterval?: number;
   allowPreview?: boolean;
   modeCount?: number;
-};
-
-/**
- * Resource limits applied by boundedSolverSettings. The first seven entries are
- * the deployed runner's SOLVER_LIMITS verbatim; transientFieldBytes mirrors its
- * MAX_TRANSIENT_FIELD_BYTES; maxTimeSteps is a browser-only integration-step
- * ceiling the cloud never needed because its Worker enforced a 300 s wall-clock
- * timeout around the whole solve.
- */
-export type SolveLimits = {
-  maxDofs: number;
-  maxIterations: number;
-  tolerance: number;
-  maxFrames: number;
-  endTimeSeconds: number;
-  minTimeStepSeconds: number;
-  minOutputIntervalSeconds: number;
-  transientFieldBytes: number;
-  maxTimeSteps: number;
-};
-
-/**
- * The deployed runner's limits (server.ts SOLVER_LIMITS + MAX_TRANSIENT_FIELD_BYTES).
- * maxTimeSteps = endTimeSeconds / minTimeStepSeconds — the runner's implicit
- * ceiling; in the container the real backstop was the 300 s Worker timeout.
- * Use these for golden-fixture parity runs.
- */
-export const CLOUD_SOLVER_LIMITS: SolveLimits = {
-  maxDofs: 100000,
-  maxIterations: 50000,
-  tolerance: 1e-10,
-  maxFrames: 2000,
-  endTimeSeconds: 10,
-  minTimeStepSeconds: 0.0001,
-  minOutputIntervalSeconds: 0.0005,
-  transientFieldBytes: 1.5e9,
-  maxTimeSteps: 100000
-};
-
-/**
- * Browser runtime defaults. Deviations from the cloud limits:
- * - transientFieldBytes 256 MB (browser tab memory, not a 4 GB container),
- * - maxTimeSteps 20k: with no supervisor timeout, a runaway Newmark integration
- *   would block the solve worker for minutes. 20k steps at the conservative
- *   DEFAULT_DYNAMIC_MS_PER_STEP calibration is a ~5 minute worst case, already
- *   past what an interactive tab should attempt (cloud ceiling: 100k steps
- *   backstopped by its 300 s timeout).
- * maxDofs matches the retired cloud runner's 100k since 2026-07. The cap was
- * staged at 60k until (a) the pinned solver gained the typed-array COO->CSR
- * assembly builder (opencae-core bc6c305, bounding transient assembly memory)
- * and (b) a measured target-scale browser run existed on a non-V8 engine.
- * Both landed: scripts/verify-100k-solve.mjs solves a ~99.3k-DOF Tet10 STEP
- * mesh through the real solve worker in headless Chrome AND Playwright WebKit
- * (?solveBench=1 harness) with cross-engine result parity and bounded heap.
- * Every deviation that changes an accepted request surfaces in result
- * diagnostics via the browser-solve-limits diagnostic below (honest results).
- */
-export const BROWSER_SOLVE_LIMITS: SolveLimits = {
-  ...CLOUD_SOLVER_LIMITS,
-  maxDofs: 100000,
-  transientFieldBytes: 256e6,
-  maxTimeSteps: 20000
 };
 
 /**

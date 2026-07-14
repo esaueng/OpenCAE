@@ -3317,6 +3317,122 @@ button:disabled {
   font-size: var(--fs-xs);
 }
 
+.convergence-card {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--color-border);
+}
+
+.convergence-card h3 {
+  margin: 0;
+}
+
+.convergence-probe-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.convergence-probe-grid label {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.convergence-probe-grid input {
+  min-width: 0;
+  width: 100%;
+}
+
+.convergence-record {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: var(--border-thin);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-2);
+}
+
+.convergence-record > small,
+.convergence-rung small {
+  color: var(--color-text-muted);
+}
+
+.convergence-chart {
+  width: 100%;
+  min-height: 112px;
+  overflow: visible;
+}
+
+.convergence-chart polyline {
+  fill: none;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.convergence-chart circle {
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.convergence-chart .chart-axis {
+  stroke: var(--color-border-strong);
+  stroke-width: 1;
+}
+
+.convergence-chart .chart-displacement {
+  stroke: #38bdf8;
+  fill: var(--color-surface-2);
+}
+
+.convergence-chart .chart-stress {
+  stroke: #fb923c;
+  fill: var(--color-surface-2);
+}
+
+.convergence-chart .chart-skipped {
+  stroke: #f87171;
+  stroke-width: 2;
+}
+
+.convergence-chart text {
+  font-size: 8px;
+  fill: var(--color-text-muted);
+}
+
+.convergence-chart .chart-displacement-label {
+  fill: #38bdf8;
+}
+
+.convergence-chart .chart-stress-label {
+  fill: #fb923c;
+}
+
+.convergence-rungs {
+  display: grid;
+  gap: 6px;
+}
+
+.convergence-rung {
+  display: grid;
+  grid-template-columns: 64px 72px minmax(0, 1fr);
+  gap: 6px;
+  align-items: baseline;
+}
+
+.convergence-rung small {
+  overflow-wrap: anywhere;
+}
+
+.convergence-rung.skipped small:last-child,
+.convergence-rung.failed small:last-child {
+  color: var(--color-warning);
+}
+
 .capacity-readout {
   display: grid;
   gap: 3px;

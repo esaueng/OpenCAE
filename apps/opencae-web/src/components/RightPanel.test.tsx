@@ -1568,6 +1568,54 @@ describe("RightPanel payload mass controls", () => {
     expect(html).not.toContain('aria-label="Stop mesh generation" disabled');
   });
 
+  test("shows static convergence controls, persisted metrics, and capped SVG markers", () => {
+    const convergenceStudy = {
+      ...study,
+      loads: [{ id: "load-1", type: "force", selectionRef: "selection-top", parameters: { value: 10, units: "N", direction: [0, 0, -1], applicationPoint: [0, 0, 0] }, status: "complete" }],
+      loadCases: [{ id: "case-default", name: "Default", enabled: true, loadIds: ["load-1"] }],
+      loadCombinations: []
+    } satisfies Study;
+    const completeRung = {
+      status: "complete" as const,
+      actualNodeCount: 100,
+      actualElementCount: 300,
+      totalDofs: 300,
+      freeDofs: 270,
+      actualMeshSizeMm: 12,
+      rawElementPeakVonMises: 42,
+      stressUnits: "MPa",
+      probeDisplacement: 0.15,
+      displacementUnits: "mm"
+    };
+    const convergenceProject: Project = {
+      ...project,
+      convergenceRecords: [{
+        id: "convergence-1",
+        studyId: study.id,
+        caseId: "case-default",
+        createdAt: "2026-07-14T12:00:00.000Z",
+        completedAt: "2026-07-14T12:01:00.000Z",
+        probe: { point: [0, 0, 0], source: "primary_load" },
+        classification: "inconclusive",
+        rungs: [
+          { ...completeRung, requestedPreset: "coarse" },
+          { ...completeRung, requestedPreset: "medium", totalDofs: 600 },
+          { requestedPreset: "fine", status: "skipped", actualNodeCount: 40_000, actualElementCount: 120_000, totalDofs: 120_000, freeDofs: 119_970, actualMeshSizeMm: 8, skipReason: "Generated mesh exceeds the 100,000 DOF cap." }
+        ]
+      }]
+    };
+
+    const html = renderPanel("mesh", { project: convergenceProject, study: convergenceStudy, onRunMeshConvergence: vi.fn() });
+
+    expect(html).toContain("Run coarse → medium → fine");
+    expect(html).toContain("Displacement probe");
+    expect(html).toContain("Inconclusive");
+    expect(html).toContain("120,000 total · 119,970 free DOF");
+    expect(html).toContain("40,000 nodes · 120,000 elements · 8.000 mm");
+    expect(html).toContain("chart-skipped");
+    expect(html).toContain("Probe displacement and raw element peak stress versus actual degrees of freedom");
+  });
+
   test("shows Back and Next hotkey hints on workflow navigation buttons", () => {
     const html = renderPanel("loads", { study: { ...study, meshSettings: { preset: "medium", status: "complete" } } });
 

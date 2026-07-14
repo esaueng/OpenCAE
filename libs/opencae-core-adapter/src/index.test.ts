@@ -301,6 +301,10 @@ describe("local core solve mesh statistics", () => {
     // shared midside nodes: (2*23+1)*(2*3+1)*(2*3+1) = 2303 nodes.
     expect(stats!.nodes).toBe(2303);
     expect(stats!.elements).toBe(23 * 3 * 3 * 6);
+    expect(stats!.totalDofs).toBe(stats!.nodes * 3);
+    expect(stats!.freeDofs).toBeLessThan(stats!.totalDofs);
+    expect(stats!.constrainedDofs).toBe(stats!.totalDofs - stats!.freeDofs);
+    expect(stats!.representativeElementSizeMm).toBeGreaterThan(0);
   });
 });
 
