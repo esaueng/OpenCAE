@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CoreCloudResultProvenanceSchema, CustomMaterialSchema, DynamicSolverSettingsSchema, MaterialSchema, ProjectSchema, ResultFieldSchema, ResultSummarySchema, RunEventSchema, RunVariantResultSchema, SolverBackendSchema, StudyRunSchema, classifyResultProvenance, runStatusForResultProvenance } from "./index";
+import { CoreCloudResultProvenanceSchema, CustomMaterialSchema, DynamicSolverSettingsSchema, MaterialSchema, MeshConvergenceRecordSchema, ProjectSchema, ResultFieldSchema, ResultSummarySchema, RunEventSchema, RunVariantResultSchema, SolverBackendSchema, StudyRunSchema, classifyResultProvenance, runStatusForResultProvenance } from "./index";
 
 describe("ProjectSchema", () => {
   it("accepts the minimum local project shape", () => {
@@ -15,6 +15,50 @@ describe("ProjectSchema", () => {
     });
 
     expect(parsed.name).toBe("Test Project");
+  });
+
+  it("persists compact three-rung static convergence records", () => {
+    const completeRung = {
+      status: "complete" as const,
+      actualNodeCount: 100,
+      actualElementCount: 300,
+      totalDofs: 300,
+      freeDofs: 270,
+      actualMeshSizeMm: 12,
+      rawElementPeakVonMises: 42,
+      stressUnits: "MPa",
+      probeDisplacement: 0.15,
+      displacementUnits: "mm"
+    };
+    const record = MeshConvergenceRecordSchema.parse({
+      id: "convergence-1",
+      studyId: "study-1",
+      caseId: "case-default",
+      createdAt: "2026-07-14T12:00:00.000Z",
+      completedAt: "2026-07-14T12:01:00.000Z",
+      probe: { point: [1, 2, 3], source: "primary_load" },
+      rungs: [
+        { ...completeRung, requestedPreset: "coarse" },
+        { ...completeRung, requestedPreset: "medium", totalDofs: 600 },
+        { ...completeRung, requestedPreset: "fine", totalDofs: 900 }
+      ],
+      classification: "apparent_convergence",
+      lastStepChanges: { displacement: 0.03, stress: 0.08 }
+    });
+
+    expect(record.rungs.map((rung) => rung.requestedPreset)).toEqual(["coarse", "medium", "fine"]);
+    expect(() => MeshConvergenceRecordSchema.parse({
+      ...record,
+      rungs: [{ requestedPreset: "coarse", status: "complete" }, ...record.rungs.slice(1)]
+    })).toThrow(/requires actualNodeCount/);
+    expect(() => MeshConvergenceRecordSchema.parse({
+      ...record,
+      rungs: [record.rungs[1], record.rungs[0], record.rungs[2]]
+    })).toThrow(/ordered coarse, medium, fine/);
+    expect(() => MeshConvergenceRecordSchema.parse({
+      ...record,
+      rungs: [{ requestedPreset: "coarse", status: "skipped" }, ...record.rungs.slice(1)]
+    })).toThrow(/requires a reason/);
   });
 
   it("round-trips project-scoped custom materials in canonical SI units", () => {

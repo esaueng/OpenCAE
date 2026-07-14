@@ -335,6 +335,34 @@ describe("app persistence", () => {
     expect(parseAutosavedWorkspacePayload(JSON.stringify(snapshot))?.ui.homeRequested).toBe(true);
   });
 
+  test("round-trips compact convergence records through autosave", () => {
+    const convergenceRecord: NonNullable<Project["convergenceRecords"]>[number] = {
+      id: "convergence-1",
+      studyId: "study-1",
+      caseId: "case-default",
+      createdAt: "2026-07-14T12:00:00.000Z",
+      completedAt: "2026-07-14T12:01:00.000Z",
+      probe: { point: [1, 2, 3], source: "explicit" },
+      classification: "inconclusive",
+      rungs: ["coarse", "medium", "fine"].map((requestedPreset) => ({
+        requestedPreset: requestedPreset as "coarse" | "medium" | "fine",
+        status: "skipped" as const,
+        totalDofs: 120_000,
+        skipReason: "Above the browser pipeline limit."
+      }))
+    };
+    const snapshot = buildAutosavedWorkspace({
+      project: { ...project, convergenceRecords: [convergenceRecord] },
+      displayModel,
+      savedAt: "2026-07-14T12:01:00.000Z",
+      ui: baseUi
+    });
+
+    const restored = parseAutosavedWorkspacePayload(JSON.stringify(snapshot));
+    expect(restored?.projectFile.project.convergenceRecords).toEqual([convergenceRecord]);
+    expect(JSON.stringify(restored?.projectFile.project.convergenceRecords)).not.toContain("fields");
+  });
+
   test("parses valid autosave JSON and rejects invalid autosave JSON", () => {
     const snapshot = buildAutosavedWorkspace({
       project,

@@ -14,12 +14,14 @@ Static and dynamic studies work through Model, Material, Supports, Loads, Mesh, 
 - Material: assign starter materials and configure print parameters for 3D-printing materials. Print layer orientation changes the effective material properties used by OpenCAE Core. **Duplicate & edit** creates a project-only custom material. Editor stress/density units follow the project, while saved values remain Pa and kg/m³. Custom definitions are always labeled user-supplied and unverified.
 - Supports: select model faces and add fixed supports.
 - Loads: add force, pressure, or payload-weight loads. Payload loads can use selected payload objects and material density to calculate mass. Every structural study starts with an enabled **Default** load case. Add cases, rename or disable them, and assign each load to exactly one case. Static studies can also add signed combinations; dynamic combinations are intentionally unavailable.
-- Mesh: choose coarse, medium, fine, or ultra sampling. The generated mesh summary is stored as a study artifact.
+- Mesh: choose coarse, medium, fine, or ultra sampling. The generated mesh summary is stored as a study artifact. For a static study, select an enabled load case and set a displacement-probe point to run the automatic coarse-to-medium-to-fine convergence ladder. The point defaults to the primary load application point.
 - Run: review readiness messages, start an OpenCAE Core run, watch progress/log events, or cancel an active local run.
 
 For modal analysis, choose 1–10 requested modes in Run (default 6). Every assigned material must have density, and the model must be constrained against rigid-body motion. If supports are insufficient, OpenCAE stops with a Supports-step error instead of showing a numerical solver failure.
 
 Editing a custom material that is assigned to a study clears that study's stale displayed results. An assigned custom material cannot be deleted; assign a different material first. Unknown material IDs in older or hand-edited files are reported explicitly instead of being replaced by Aluminum 6061.
+
+The convergence panel plots probe displacement and raw element peak von Mises stress against actual DOF. A red capped/skipped marker means that rung was not solved; meshes above the browser's 100,000-DOF limit are always skipped before solving. OpenCAE reports **apparent convergence** only when all three successful rungs have strictly increasing DOF and the medium-to-fine changes are at most 5% displacement and 10% stress. Failed or non-increasing ladders are inconclusive. Running the ladder does not change the working mesh selection or replace the active results.
 
 ## Results And Reports
 

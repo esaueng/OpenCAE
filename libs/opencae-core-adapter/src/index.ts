@@ -53,6 +53,15 @@ type CoreTetMesh = {
   connectivity: number[];
 };
 
+export type CoreMeshStatistics = {
+  nodes: number;
+  elements: number;
+  totalDofs: number;
+  constrainedDofs: number;
+  freeDofs: number;
+  representativeElementSizeMm: number;
+};
+
 type ActualCoreVolumeMeshArtifact = {
   model: OpenCAEModelJson;
   renderNodePoints?: Vec3[];
@@ -86,10 +95,7 @@ export type LocalSolveResult = {
     meshConnectivity?: {
       connectedComponents: number;
     };
-    meshStatistics?: {
-      nodes: number;
-      elements: number;
-    };
+    meshStatistics?: CoreMeshStatistics;
   };
 };
 
@@ -751,6 +757,14 @@ export function buildOpenCaeCoreModelForStudy(
   };
 }
 
+export function coreMeshStatisticsForStudy(
+  study: Study,
+  displayModel?: DisplayModel,
+  customMaterials: readonly CustomMaterial[] = []
+): CoreMeshStatistics {
+  return meshStatisticsForCoreModel(buildOpenCaeCoreModelForStudy(study, displayModel, customMaterials));
+}
+
 
 function cloneModelForCloud(model: OpenCAEModelJson): OpenCAEModelJson {
   return {
@@ -1096,11 +1110,71 @@ function dimensionMeters(dimensions: NonNullable<DisplayModel["dimensions"]>): V
 
 const NODES_PER_ELEMENT: Record<string, number> = { Tet4: 4, Tet10: 10 };
 
-function meshStatisticsForCoreModel(coreModel: CoreStudyModel): { nodes: number; elements: number } {
-  const nodes = Math.floor(coreModel.model.nodes.coordinates.length / 3);
-  const elements = coreModel.model.elementBlocks.reduce((sum, block) =>
+function meshStatisticsForCoreModel(coreModel: CoreStudyModel): CoreMeshStatistics {
+  const model = coreModel.model;
+  const nodes = Math.floor(model.nodes.coordinates.length / 3);
+  const elements = model.elementBlocks.reduce((sum, block) =>
     sum + Math.floor(block.connectivity.length / (NODES_PER_ELEMENT[block.type] ?? 4)), 0);
-  return { nodes, elements };
+  const totalDofs = nodes * 3;
+  const structuralStep = model.steps.find((step) => step.type === "staticLinear" || step.type === "dynamicLinear" || step.type === "modal");
+  const activeBoundaryConditions = new Set(structuralStep?.boundaryConditions ?? []);
+  const nodeSetByName = new Map(model.nodeSets.map((nodeSet) => [nodeSet.name, nodeSet.nodes]));
+  const surfaceSetByName = new Map((model.surfaceSets ?? []).map((surfaceSet) => [surfaceSet.name, surfaceSet.facets]));
+  const facetById = new Map((model.surfaceFacets ?? []).map((facet) => [facet.id, facet.nodes]));
+  const componentIndex = new Map([["x", 0], ["y", 1], ["z", 2]] as const);
+  const constrained = new Set<number>();
+  for (const boundaryCondition of model.boundaryConditions) {
+    if (!activeBoundaryConditions.has(boundaryCondition.name)) continue;
+    const constrainedNodes = typeof boundaryCondition.nodeSet === "string"
+      ? nodeSetByName.get(boundaryCondition.nodeSet)
+      : boundaryCondition.type === "fixed" && typeof boundaryCondition.surfaceSet === "string"
+        ? [...new Set((surfaceSetByName.get(boundaryCondition.surfaceSet) ?? []).flatMap((facetId) => Array.from(facetById.get(facetId) ?? [])))]
+        : undefined;
+    if (!constrainedNodes) continue;
+    const components = boundaryCondition.type === "fixed" ? boundaryCondition.components : [boundaryCondition.component];
+    for (const node of constrainedNodes) {
+      for (const component of components) {
+        const index = componentIndex.get(component);
+        if (index === undefined) continue;
+        constrained.add(node * 3 + index);
+      }
+    }
+  }
+  const constrainedDofs = constrained.size;
+  return {
+    nodes,
+    elements,
+    totalDofs,
+    constrainedDofs,
+    freeDofs: Math.max(0, totalDofs - constrainedDofs),
+    representativeElementSizeMm: representativeElementSizeMm(model)
+  };
+}
+
+function representativeElementSizeMm(model: OpenCAEModelJson): number {
+  const coordinates = model.nodes.coordinates;
+  const lengthScale = (model.coordinateSystem?.solverUnits ?? "m-N-s-Pa").startsWith("m-") ? 1000 : 1;
+  const cornerEdges = [[0, 1], [0, 2], [0, 3], [1, 2], [1, 3], [2, 3]] as const;
+  let total = 0;
+  let count = 0;
+  for (const block of model.elementBlocks) {
+    const nodesPerElement = NODES_PER_ELEMENT[block.type] ?? 4;
+    for (let offset = 0; offset + nodesPerElement <= block.connectivity.length; offset += nodesPerElement) {
+      for (const [leftLocal, rightLocal] of cornerEdges) {
+        const left = block.connectivity[offset + leftLocal];
+        const right = block.connectivity[offset + rightLocal];
+        if (left === undefined || right === undefined) continue;
+        const dx = (coordinates[right * 3] ?? Number.NaN) - (coordinates[left * 3] ?? Number.NaN);
+        const dy = (coordinates[right * 3 + 1] ?? Number.NaN) - (coordinates[left * 3 + 1] ?? Number.NaN);
+        const dz = (coordinates[right * 3 + 2] ?? Number.NaN) - (coordinates[left * 3 + 2] ?? Number.NaN);
+        const length = Math.hypot(dx, dy, dz);
+        if (!Number.isFinite(length) || length <= 0) continue;
+        total += length;
+        count += 1;
+      }
+    }
+  }
+  return count ? (total / count) * lengthScale : Number.EPSILON;
 }
 
 

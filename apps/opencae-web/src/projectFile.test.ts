@@ -47,6 +47,29 @@ describe("projectFile", () => {
     expect(payload.project.customMaterials).toEqual([custom]);
   });
 
+  test("keeps compact convergence records in the version-2 portable container", () => {
+    const record: NonNullable<Project["convergenceRecords"]>[number] = {
+      id: "convergence-1",
+      studyId: "study-1",
+      caseId: "case-default",
+      createdAt: "2026-07-14T12:00:00.000Z",
+      completedAt: "2026-07-14T12:01:00.000Z",
+      probe: { point: [1, 2, 3], source: "explicit" },
+      classification: "inconclusive",
+      rungs: ["coarse", "medium", "fine"].map((requestedPreset) => ({
+        requestedPreset: requestedPreset as "coarse" | "medium" | "fine",
+        status: "skipped" as const,
+        totalDofs: 120_000,
+        skipReason: "Above the browser pipeline limit."
+      }))
+    };
+    const payload = buildLocalProjectFile({ ...project, convergenceRecords: [record] }, displayModel, "2026-04-24T13:00:00.000Z");
+
+    expect(payload.version).toBe(2);
+    expect(payload.project.convergenceRecords).toEqual([record]);
+    expect(JSON.stringify(payload.project.convergenceRecords)).not.toContain("fields");
+  });
+
   test("keeps saved model orientation in the local project payload", () => {
     const orientedDisplayModel = { ...displayModel, orientation: { x: 0, y: 90, z: 180 } } satisfies DisplayModel;
     const payload = buildLocalProjectFile(project, orientedDisplayModel, "2026-04-24T13:00:00.000Z");

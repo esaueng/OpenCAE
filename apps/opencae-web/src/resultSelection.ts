@@ -184,6 +184,22 @@ export function barycentricScalar(
   return (va ?? 0) * wa + (vb ?? 0) * wb + (vc ?? 0) * wc;
 }
 
+export function barycentricVector(
+  values: ArrayLike<[number, number, number]>,
+  triangle: [number, number, number],
+  barycentric: [number, number, number]
+): [number, number, number] | null {
+  const a = values[triangle[0]];
+  const b = values[triangle[1]];
+  const c = values[triangle[2]];
+  if (!a || !b || !c || ![...a, ...b, ...c, ...barycentric].every(Number.isFinite)) return null;
+  return [
+    a[0] * barycentric[0] + b[0] * barycentric[1] + c[0] * barycentric[2],
+    a[1] * barycentric[0] + b[1] * barycentric[1] + c[1] * barycentric[2],
+    a[2] * barycentric[0] + b[2] * barycentric[1] + c[2] * barycentric[2]
+  ];
+}
+
 export function barycentricPoint(
   points: ArrayLike<[number, number, number]>,
   triangle: [number, number, number],
