@@ -86,6 +86,51 @@ describe("captureResultViews", () => {
     expect(frameIndex).toBe(4);
   });
 
+  test("captures the boundary-condition view in model view and restores results view", async () => {
+    let mode: ResultMode = "stress";
+    const viewModes: string[] = [];
+    const result = await captureResultViews({
+      getViewMode: () => "results",
+      getResultMode: () => mode,
+      setResultMode: (next) => { mode = next; },
+      getResultFrameIndex: () => 0,
+      setResultFrameIndex: () => undefined,
+      getPlaybackPlaying: () => false,
+      setPlaybackPlaying: () => undefined,
+      resultFields: staticFields,
+      capture: () => `data:image/png;base64,${viewModes.at(-1) === "model" ? "boundary" : mode}`,
+      isCurrent: () => true,
+      waitForAnimationFrame: async () => undefined,
+      setViewMode: (next) => { viewModes.push(next); },
+      captureBoundaryView: true
+    });
+
+    expect(result.boundary).toEqual({ png: "data:image/png;base64,boundary" });
+    expect(viewModes).toEqual(["model", "results"]);
+  });
+
+  test("restores results view when the boundary capture finds stale results", async () => {
+    const viewModes: string[] = [];
+    let framesWaited = 0;
+    await expect(captureResultViews({
+      getViewMode: () => "results",
+      getResultMode: () => "stress",
+      setResultMode: () => undefined,
+      getResultFrameIndex: () => 0,
+      setResultFrameIndex: () => undefined,
+      getPlaybackPlaying: () => false,
+      setPlaybackPlaying: () => undefined,
+      resultFields: [],
+      capture: () => "data:image/png;base64,unused",
+      // Stale only after the boundary capture's frame waits begin.
+      isCurrent: () => framesWaited < 1,
+      waitForAnimationFrame: async () => { framesWaited += 1; },
+      setViewMode: (next) => { viewModes.push(next); },
+      captureBoundaryView: true
+    })).rejects.toThrow("Results changed while the report figures were being captured");
+    expect(viewModes).toEqual(["model", "results"]);
+  });
+
   test("returns static capture metadata when the result has no transient frames", async () => {
     let mode: ResultMode = "stress";
     const result = await captureResultViews({
