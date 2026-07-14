@@ -543,7 +543,7 @@ function SupportsPanel({ selectedFace, study, onAddSupport, onUpdateSupport, onR
   const selectedFromViewport = selectedFace ? selectionForFace(study, selectedFace.id) : undefined;
   const addLabel = study.constraints.length ? "Add another fixed support" : "Add fixed support";
   return (
-    <Panel title="Supports" helper="Choose where the part is held fixed. Select a face, then add a fixed support. You can add more than one.">
+    <Panel title="Supports" helper="Choose where the part is held fixed. Select a face, or click inside a cylindrical hole to constrain its wall. You can add more than one support.">
       <HelpNote helpId="supportPlacement" />
       <PlacementReadout selectedRef={selectedFromViewport} fallbackLabel={selectedFace?.label} />
       <button className="outline-action wide" disabled={!selectedFromViewport} onClick={() => selectedFromViewport && onAddSupport(selectedFromViewport.id)}><Plus size={18} />{addLabel}</button>

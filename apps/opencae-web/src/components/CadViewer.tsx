@@ -1322,6 +1322,7 @@ function BracketModel({
           displayModel={displayModel}
           color={materialColor("face-base-bottom")}
           pickHandlers={pickHandlers}
+          enableHoleWallPicking={activeStep === "supports"}
           activePayloadObjectId={activePayloadObjectId}
           selectedFaceId={selectedFaceId}
           onMeasureDisplayModelDimensions={onMeasureDisplayModelDimensions}
@@ -1848,11 +1849,12 @@ function stepFaceHitFromEvent(event: ThreeEvent<PointerEvent> | ThreeEvent<Mouse
   const registry = api.peekStepFaceRegistryForBase64(contentBase64);
   if (!registry) return null;
   const point = viewerPointToModelSpace(event.point, displayModel).toArray() as [number, number, number];
+  const holeWallFaceId = stepFaceIdFromPickObject(event.object);
   const meshIndex = stepPreviewMeshIndexFor(event.object);
   const triangleIndex = event.faceIndex;
-  let faceId = meshIndex !== null && typeof triangleIndex === "number"
+  let faceId = holeWallFaceId ?? (meshIndex !== null && typeof triangleIndex === "number"
     ? api.stepFaceIdForMeshTriangle(registry, meshIndex, triangleIndex)
-    : null;
+    : null);
   if (!faceId) {
     const worldNormal = event.face?.normal.clone().transformDirection(event.object.matrixWorld).normalize() ?? new THREE.Vector3(0, 0, 1);
     const normal = viewerNormalToModelSpace(worldNormal, displayModel).toArray() as [number, number, number];
@@ -1863,6 +1865,17 @@ function stepFaceHitFromEvent(event: ThreeEvent<PointerEvent> | ThreeEvent<Mouse
     ?? registry.displayFaces.find((candidate) => candidate.id === faceId);
   if (!face) return null;
   return { face, point };
+}
+
+/** Walk through R3F's picked object ancestry to resolve an invisible hole-opening target. */
+export function stepFaceIdFromPickObject(object: THREE.Object3D): string | null {
+  let current: THREE.Object3D | null = object;
+  while (current) {
+    const faceId = current.userData?.opencaeStepFaceId;
+    if (typeof faceId === "string" && faceId.length > 0) return faceId;
+    current = current.parent;
+  }
+  return null;
 }
 
 function hasLiveStepFaceRegistry(displayModel: DisplayModel): boolean {
@@ -2039,6 +2052,7 @@ function SampleSolid({
   color,
   displayModel,
   pickHandlers,
+  enableHoleWallPicking,
   activePayloadObjectId,
   selectedFaceId,
   onMeasureDisplayModelDimensions,
@@ -2048,6 +2062,7 @@ function SampleSolid({
   color: string;
   displayModel?: DisplayModel;
   pickHandlers?: ModelPickHandlers;
+  enableHoleWallPicking?: boolean;
   activePayloadObjectId?: string;
   selectedFaceId?: string | null;
   onMeasureDisplayModelDimensions?: (dimensions: NonNullable<DisplayModel["dimensions"]>) => void;
@@ -2060,6 +2075,7 @@ function SampleSolid({
         displayModel={displayModel}
         color={color}
         pickHandlers={pickHandlers}
+        enableHoleWallPicking={enableHoleWallPicking}
         activePayloadObjectId={activePayloadObjectId}
         selectedFaceId={selectedFaceId}
         onMeasureDisplayModelDimensions={onMeasureDisplayModelDimensions}
@@ -2134,6 +2150,7 @@ function UploadedSolid({
   displayModel,
   color,
   pickHandlers,
+  enableHoleWallPicking,
   activePayloadObjectId,
   selectedFaceId,
   onMeasureDisplayModelDimensions,
@@ -2142,6 +2159,7 @@ function UploadedSolid({
   displayModel?: DisplayModel;
   color: string;
   pickHandlers?: ModelPickHandlers;
+  enableHoleWallPicking?: boolean;
   activePayloadObjectId?: string;
   selectedFaceId?: string | null;
   onMeasureDisplayModelDimensions?: (dimensions: NonNullable<DisplayModel["dimensions"]>) => void;
@@ -2153,6 +2171,7 @@ function UploadedSolid({
         displayModel={displayModel}
         color={color}
         pickHandlers={pickHandlers}
+        enableHoleWallPicking={enableHoleWallPicking}
         activePayloadObjectId={activePayloadObjectId}
         selectedFaceId={selectedFaceId}
         onMeasureDisplayModelDimensions={onMeasureDisplayModelDimensions}
@@ -2169,6 +2188,7 @@ function UploadedNativeCadModel({
   displayModel,
   color,
   pickHandlers,
+  enableHoleWallPicking,
   activePayloadObjectId,
   selectedFaceId,
   onMeasureDisplayModelDimensions,
@@ -2177,6 +2197,7 @@ function UploadedNativeCadModel({
   displayModel: DisplayModel;
   color: string;
   pickHandlers?: ModelPickHandlers;
+  enableHoleWallPicking?: boolean;
   activePayloadObjectId?: string;
   selectedFaceId?: string | null;
   onMeasureDisplayModelDimensions?: (dimensions: NonNullable<DisplayModel["dimensions"]>) => void;
@@ -2190,6 +2211,11 @@ function UploadedNativeCadModel({
   // face highlight have synchronous access; bump a version so the highlight
   // effect re-runs once the registry resolves.
   const nativeCadContentBase64 = displayModel.nativeCad?.contentBase64;
+  const holeWallPickDisks = useMemo(() => {
+    if (!enableHoleWallPicking || !nativeCadContentBase64 || !stepFacesApi) return [];
+    const registry = stepFacesApi.peekStepFaceRegistryForBase64(nativeCadContentBase64);
+    return registry ? stepFacesApi.stepHoleWallPickDisks(registry) : [];
+  }, [enableHoleWallPicking, nativeCadContentBase64, stepRegistryVersion]);
   useEffect(() => {
     let cancelled = false;
     const warm = warmStepFaceRegistry(nativeCadContentBase64);
@@ -2264,7 +2290,37 @@ function UploadedNativeCadModel({
   return (
     <group {...pickHandlers}>
       <primitive object={preview.object} />
+      {holeWallPickDisks.map((disk, index) => (
+        <StepHoleWallPickTarget key={`${disk.faceId}-${index}`} disk={disk} />
+      ))}
     </group>
+  );
+}
+
+function StepHoleWallPickTarget({ disk }: { disk: import("../stepFaces").StepHoleWallPickDisk }) {
+  const [nx, ny, nz] = disk.normal;
+  const quaternion = useMemo(
+    () => new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), new THREE.Vector3(nx, ny, nz).normalize()),
+    [nx, ny, nz]
+  );
+  return (
+    <mesh
+      name={`Pick ${disk.faceId} cylindrical hole wall`}
+      position={disk.center}
+      quaternion={quaternion}
+      userData={{ opencaeStepFaceId: disk.faceId }}
+    >
+      <circleGeometry args={[disk.radius, 48]} />
+      <meshBasicMaterial
+        colorWrite={false}
+        depthTest={false}
+        depthWrite={false}
+        opacity={0}
+        side={THREE.DoubleSide}
+        toneMapped={false}
+        transparent
+      />
+    </mesh>
   );
 }
 

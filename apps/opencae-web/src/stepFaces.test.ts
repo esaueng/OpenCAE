@@ -13,6 +13,7 @@ import {
   stepFaceFingerprint,
   stepFaceIdForMeshTriangle,
   stepFaceRecordForId,
+  stepHoleWallPickDisks,
   type StepFaceRegistry
 } from "./stepFaces";
 
@@ -70,8 +71,14 @@ describe("STEP face registry (box-with-bore fixture)", () => {
     const boreArea = 2 * Math.PI * boreRadius * z;
     const boreFace = registry.faces.find((face) => Math.abs(face.area - boreArea) / boreArea < 0.02);
     expect(boreFace).toBeDefined();
-    // Curved face: area-weighted normals cancel around the cylinder.
-    expect(Math.hypot(...boreFace!.avgNormal)).toBeLessThanOrEqual(1);
+    // Curved face: area-weighted normals cancel around the cylinder. Never
+    // normalize that floating-point residue into a fake planar direction.
+    expect(Math.hypot(...boreFace!.avgNormal)).toBeLessThan(1e-12);
+    expect(boreFace).toMatchObject({ surfaceType: "cylindrical", cylinder: { interior: true } });
+    expect(boreFace!.cylinder!.radius).toBeCloseTo(boreRadius, 3);
+    expect(boreFace!.cylinder!.length).toBeCloseTo(z, 3);
+    expect(Math.abs(boreFace!.cylinder!.axis[2])).toBeCloseTo(1, 6);
+    expect(registry.displayFaces.find((face) => face.id === boreFace!.faceId)?.label).toContain("Cylindrical hole wall");
     expect(boreFace!.centroid[0]).toBeCloseTo(x / 2, 0);
     expect(boreFace!.centroid[1]).toBeCloseTo(y / 2, 0);
 
@@ -118,6 +125,22 @@ describe("STEP face registry (box-with-bore fixture)", () => {
     const record = registry.faces[0]!;
     const displayFace = registry.displayFaces[0]!;
     expect(displayFace.center[0]).toBeCloseTo(record.centroid[0] * scale + registry.normalization.offset[0], 6);
+  });
+
+  it("creates support-only pick disks across both cylindrical hole openings", () => {
+    const boreArea = 2 * Math.PI * (FIXTURE_DIMENSIONS_MM.boreDiameter / 2) * FIXTURE_DIMENSIONS_MM.z;
+    const boreFace = registry.faces.find((face) => Math.abs(face.area - boreArea) / boreArea < 0.02)!;
+    const disks = stepHoleWallPickDisks(registry);
+
+    expect(disks).toHaveLength(2);
+    expect(disks.every((disk) => disk.faceId === boreFace.faceId)).toBe(true);
+    expect(disks[0]!.radius).toBeCloseTo((FIXTURE_DIMENSIONS_MM.boreDiameter / 2) * registry.normalization.scale * 0.82, 6);
+    const axialSeparation = Math.hypot(
+      disks[1]!.center[0] - disks[0]!.center[0],
+      disks[1]!.center[1] - disks[0]!.center[1],
+      disks[1]!.center[2] - disks[0]!.center[2]
+    );
+    expect(axialSeparation).toBeCloseTo(FIXTURE_DIMENSIONS_MM.z * registry.normalization.scale, 6);
   });
 
   it("flattens to a transferable attribution tessellation with per-triangle faceIds", () => {

@@ -34,6 +34,16 @@ export type StepFaceRecord = {
   centroid: [number, number, number];
   /** Area-weighted average unit normal (STEP model space). */
   avgNormal: [number, number, number];
+  /** Tessellation-derived surface classification used by the picker and labels. */
+  surfaceType: "planar" | "cylindrical" | "curved";
+  /** Present for full cylindrical surfaces whose axis/radius can be resolved robustly. */
+  cylinder?: {
+    axis: [number, number, number];
+    radius: number;
+    length: number;
+    /** True when the face normals point toward the cylinder axis (a hole wall). */
+    interior: boolean;
+  };
   /** Quantized area/centroid/normal digest; survives re-tessellation. */
   fingerprint: string;
 };
@@ -55,7 +65,20 @@ export type StepFaceRegistry = {
   displayFaces: DisplayFace[];
 };
 
+export type StepHoleWallPickDisk = {
+  faceId: string;
+  center: [number, number, number];
+  normal: [number, number, number];
+  radius: number;
+};
+
 const STEP_FACE_ID_PREFIX = "step-face-";
+const GEOMETRY_EPSILON = 1e-9;
+const PLANAR_NORMAL_DOT_TOLERANCE = 1e-6;
+const CYLINDER_NORMAL_AXIS_TOLERANCE = 1e-3;
+const CYLINDER_RADIUS_RELATIVE_TOLERANCE = 0.02;
+const CYLINDER_MIN_NORMAL_VARIATION = 0.05;
+const HOLE_WALL_PICK_RADIUS_FACTOR = 0.82;
 
 /** Matches the ids issued by buildStepFaceRegistry. */
 export function isStepFaceId(value: string | null | undefined): value is string {
@@ -135,6 +158,38 @@ export function stepFaceIdForMeshTriangle(registry: StepFaceRegistry, meshIndex:
 
 export function stepFaceRecordForId(registry: StepFaceRegistry, faceId: string): StepFaceRecord | null {
   return registry.faces.find((face) => face.faceId === faceId) ?? null;
+}
+
+/**
+ * Invisible support-step targets that span the openings of recognized
+ * cylindrical holes. The disk stays inside the rim so ordinary planar-face
+ * clicks remain available while the much narrower barrel becomes easy to pick.
+ */
+export function stepHoleWallPickDisks(registry: StepFaceRegistry): StepHoleWallPickDisk[] {
+  const { scale, offset } = registry.normalization;
+  if (!(scale > GEOMETRY_EPSILON)) return [];
+  return registry.faces.flatMap((face): StepHoleWallPickDisk[] => {
+    const cylinder = face.cylinder;
+    if (!cylinder?.interior || !(cylinder.radius > GEOMETRY_EPSILON) || !(cylinder.length > GEOMETRY_EPSILON)) return [];
+    const halfLength = cylinder.length / 2;
+    return [-1, 1].map((direction): StepHoleWallPickDisk => {
+      const modelCenter: [number, number, number] = [
+        face.centroid[0] + cylinder.axis[0] * halfLength * direction,
+        face.centroid[1] + cylinder.axis[1] * halfLength * direction,
+        face.centroid[2] + cylinder.axis[2] * halfLength * direction
+      ];
+      return {
+        faceId: face.faceId,
+        center: [
+          modelCenter[0] * scale + offset[0],
+          modelCenter[1] * scale + offset[1],
+          modelCenter[2] * scale + offset[2]
+        ],
+        normal: [...cylinder.axis],
+        radius: cylinder.radius * scale * HOLE_WALL_PICK_RADIUS_FACTOR
+      };
+    });
+  });
 }
 
 /** Viewer STEP object ids are one-based (`step-object-1`); registry mesh indices are zero-based. */
@@ -424,6 +479,9 @@ function faceRecordForRange(
   let area = 0;
   const centroid: [number, number, number] = [0, 0, 0];
   const normalSum: [number, number, number] = [0, 0, 0];
+  const triangleNormals: [number, number, number][] = [];
+  const triangleCenters: [number, number, number][] = [];
+  const triangleAreas: number[] = [];
   for (let triangle = range.first; triangle <= range.last; triangle += 1) {
     const a = vertexAt(mesh, mesh.indices[triangle * 3]!);
     const b = vertexAt(mesh, mesh.indices[triangle * 3 + 1]!);
@@ -443,16 +501,24 @@ function faceRecordForRange(
     normalSum[0] += nx / 2;
     normalSum[1] += ny / 2;
     normalSum[2] += nz / 2;
+    if (doubleArea > GEOMETRY_EPSILON) {
+      triangleNormals.push([nx / doubleArea, ny / doubleArea, nz / doubleArea]);
+      triangleCenters.push([(a[0] + b[0] + c[0]) / 3, (a[1] + b[1] + c[1]) / 3, (a[2] + b[2] + c[2]) / 3]);
+      triangleAreas.push(triangleArea);
+    }
   }
   if (area > 0) {
     centroid[0] /= area;
     centroid[1] /= area;
     centroid[2] /= area;
   }
-  const normalLength = Math.hypot(...normalSum);
-  const avgNormal: [number, number, number] = normalLength > 0
-    ? [normalSum[0] / normalLength, normalSum[1] / normalLength, normalSum[2] / normalLength]
-    : [0, 0, 1];
+  // Keep the true area-weighted mean instead of normalizing its magnitude.
+  // Closed curved faces intentionally cancel toward zero; normalizing their
+  // floating-point residue manufactures a bogus planar direction.
+  const avgNormal: [number, number, number] = area > GEOMETRY_EPSILON
+    ? [normalSum[0] / area, normalSum[1] / area, normalSum[2] / area]
+    : [0, 0, 0];
+  const surface = classifyStepSurface(mesh, range, centroid, triangleNormals, triangleCenters, triangleAreas);
   return {
     faceId: `${STEP_FACE_ID_PREFIX}${globalIndex}`,
     meshIndex,
@@ -461,8 +527,122 @@ function faceRecordForRange(
     area,
     centroid,
     avgNormal,
+    surfaceType: surface.surfaceType,
+    ...(surface.cylinder ? { cylinder: surface.cylinder } : {}),
     fingerprint: stepFaceFingerprint(area, centroid, avgNormal)
   };
+}
+
+function classifyStepSurface(
+  mesh: StepFaceRegistryMesh,
+  range: { first: number; last: number },
+  centroid: [number, number, number],
+  triangleNormals: [number, number, number][],
+  triangleCenters: [number, number, number][],
+  triangleAreas: number[]
+): Pick<StepFaceRecord, "surfaceType" | "cylinder"> {
+  const reference = triangleNormals[0];
+  if (!reference) return { surfaceType: "curved" };
+
+  const minimumNormalAgreement = triangleNormals.reduce(
+    (minimum, normal) => Math.min(minimum, dot3(reference, normal)),
+    1
+  );
+  if (minimumNormalAgreement >= 1 - PLANAR_NORMAL_DOT_TOLERANCE) return { surfaceType: "planar" };
+
+  let axisCandidate: [number, number, number] = [0, 0, 0];
+  let axisCandidateLength = 0;
+  for (const normal of triangleNormals) {
+    const candidate = cross3(reference, normal);
+    const candidateLength = Math.hypot(...candidate);
+    if (candidateLength > axisCandidateLength + GEOMETRY_EPSILON) {
+      axisCandidate = candidate;
+      axisCandidateLength = candidateLength;
+    }
+  }
+  if (!(axisCandidateLength > CYLINDER_MIN_NORMAL_VARIATION)) return { surfaceType: "curved" };
+
+  const axis = canonicalDirection(scale3(axisCandidate, 1 / axisCandidateLength));
+  const maximumNormalAxisAgreement = triangleNormals.reduce(
+    (maximum, normal) => Math.max(maximum, Math.abs(dot3(normal, axis))),
+    0
+  );
+  if (maximumNormalAxisAgreement > CYLINDER_NORMAL_AXIS_TOLERANCE) return { surfaceType: "curved" };
+
+  const radialDistances: number[] = [];
+  let axialMinimum = Infinity;
+  let axialMaximum = -Infinity;
+  for (let triangle = range.first; triangle <= range.last; triangle += 1) {
+    for (let corner = 0; corner < 3; corner += 1) {
+      const relative = subtract3(trianglePoint(mesh, triangle, corner), centroid);
+      const axial = dot3(relative, axis);
+      const radial = subtract3(relative, scale3(axis, axial));
+      radialDistances.push(Math.hypot(...radial));
+      axialMinimum = Math.min(axialMinimum, axial);
+      axialMaximum = Math.max(axialMaximum, axial);
+    }
+  }
+  if (!radialDistances.length) return { surfaceType: "curved" };
+  const radius = radialDistances.reduce((total, distance) => total + distance, 0) / radialDistances.length;
+  const radiusSpread = radialDistances.reduce(
+    (maximum, distance) => Math.max(maximum, Math.abs(distance - radius)),
+    0
+  );
+  const length = axialMaximum - axialMinimum;
+  if (
+    !(radius > GEOMETRY_EPSILON) ||
+    !(length > GEOMETRY_EPSILON) ||
+    radiusSpread / radius > CYLINDER_RADIUS_RELATIVE_TOLERANCE
+  ) {
+    return { surfaceType: "curved" };
+  }
+
+  let radialNormalAgreement = 0;
+  let agreementArea = 0;
+  for (let index = 0; index < triangleNormals.length; index += 1) {
+    const relative = subtract3(triangleCenters[index]!, centroid);
+    const radial = subtract3(relative, scale3(axis, dot3(relative, axis)));
+    const radialLength = Math.hypot(...radial);
+    if (!(radialLength > GEOMETRY_EPSILON)) continue;
+    const triangleArea = triangleAreas[index] ?? 0;
+    radialNormalAgreement += dot3(triangleNormals[index]!, scale3(radial, 1 / radialLength)) * triangleArea;
+    agreementArea += triangleArea;
+  }
+  const interior = agreementArea > GEOMETRY_EPSILON && radialNormalAgreement / agreementArea < -0.5;
+  return {
+    surfaceType: "cylindrical",
+    cylinder: { axis, radius, length, interior }
+  };
+}
+
+function dot3(left: [number, number, number], right: [number, number, number]): number {
+  return left[0] * right[0] + left[1] * right[1] + left[2] * right[2];
+}
+
+function cross3(left: [number, number, number], right: [number, number, number]): [number, number, number] {
+  return [
+    left[1] * right[2] - left[2] * right[1],
+    left[2] * right[0] - left[0] * right[2],
+    left[0] * right[1] - left[1] * right[0]
+  ];
+}
+
+function subtract3(left: [number, number, number], right: [number, number, number]): [number, number, number] {
+  return [left[0] - right[0], left[1] - right[1], left[2] - right[2]];
+}
+
+function scale3(vector: [number, number, number], scale: number): [number, number, number] {
+  return [vector[0] * scale, vector[1] * scale, vector[2] * scale];
+}
+
+function canonicalDirection(direction: [number, number, number]): [number, number, number] {
+  const absolute = direction.map(Math.abs);
+  const dominantAxis = absolute[0]! >= absolute[1]! && absolute[0]! >= absolute[2]!
+    ? 0
+    : absolute[1]! >= absolute[2]!
+      ? 1
+      : 2;
+  return direction[dominantAxis]! < 0 ? scale3(direction, -1) : direction;
 }
 
 function displayFaceForRecord(face: StepFaceRecord, scale: number, offset: [number, number, number]): DisplayFace {
@@ -483,6 +663,10 @@ function displayFaceForRecord(face: StepFaceRecord, scale: number, offset: [numb
 
 function stepFaceLabel(face: StepFaceRecord): string {
   const ordinal = face.faceId.slice(STEP_FACE_ID_PREFIX.length);
+  if (face.surfaceType === "cylindrical") {
+    return `${face.cylinder?.interior ? "Cylindrical hole wall" : "Cylindrical surface"} F${ordinal} (${formatAreaMm2(face.area)})`;
+  }
+  if (face.surfaceType === "curved") return `Curved surface F${ordinal} (${formatAreaMm2(face.area)})`;
   const [nx, ny, nz] = face.avgNormal;
   const axes: Array<{ label: string; value: number }> = [
     { label: "+X", value: nx },
@@ -493,7 +677,7 @@ function stepFaceLabel(face: StepFaceRecord): string {
     { label: "-Z", value: -nz }
   ];
   const dominant = axes.sort((left, right) => right.value - left.value)[0];
-  const orientation = dominant && dominant.value > 0.72 ? `${dominant.label} planar face` : "Curved/skew face";
+  const orientation = dominant && dominant.value > 0.72 ? `${dominant.label} planar face` : "Planar face";
   return `${orientation} F${ordinal} (${formatAreaMm2(face.area)})`;
 }
 
