@@ -1,11 +1,22 @@
 import { describe, expect, test } from "vitest";
-import { beamPayloadSelectionForTarget, faceIdForPlacementSnap, faceSnapAxesForDisplayModel, loadGlyphLabelPosition, loadGlyphSurfacePoint, pointForPlacementSnap, shouldCreateUploadedFacePlaceholder, shouldShowModelHitLabel, supportGlyphAnchor, supportMarkerAnchor } from "./CadViewer";
+import * as THREE from "three";
+import { beamPayloadSelectionForTarget, faceIdForPlacementSnap, faceSnapAxesForDisplayModel, loadGlyphLabelPosition, loadGlyphSurfacePoint, pointForPlacementSnap, shouldCreateUploadedFacePlaceholder, shouldShowModelHitLabel, stepFaceIdFromPickObject, supportGlyphAnchor, supportMarkerAnchor } from "./CadViewer";
 
 describe("CadViewer callouts", () => {
   test("does not create placeholder faces after the STEP registry is live", () => {
     expect(shouldCreateUploadedFacePlaceholder("step", true)).toBe(false);
     expect(shouldCreateUploadedFacePlaceholder("step", false)).toBe(true);
     expect(shouldCreateUploadedFacePlaceholder("stl", true)).toBe(true);
+  });
+
+  test("resolves a cylindrical hole-wall pick target through object ancestry", () => {
+    const parent = new THREE.Group();
+    parent.userData.opencaeStepFaceId = "step-face-hole";
+    const child = new THREE.Mesh();
+    parent.add(child);
+
+    expect(stepFaceIdFromPickObject(child)).toBe("step-face-hole");
+    expect(stepFaceIdFromPickObject(new THREE.Mesh())).toBeNull();
   });
 
   test("uses the real cantilever fixed face as the support callout anchor", () => {
