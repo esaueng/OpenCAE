@@ -380,7 +380,10 @@ function parseResultViewCaptures(value: unknown): LocalResultBundle["reportCaptu
   const stress = parseCapture(value.stress);
   const displacement = parseCapture(value.displacement);
   const boundary = isRecord(value.boundary) && typeof value.boundary.png === "string" && value.boundary.png.startsWith("data:image/png;base64,")
-    ? { png: value.boundary.png }
+    ? {
+        png: value.boundary.png,
+        ...(typeof value.boundary.revision === "number" && Number.isInteger(value.boundary.revision) ? { revision: value.boundary.revision } : {})
+      }
     : undefined;
   return stress || displacement || boundary
     ? { ...(stress ? { stress } : {}), ...(displacement ? { displacement } : {}), ...(boundary ? { boundary } : {}) }

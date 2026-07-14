@@ -86,8 +86,8 @@ class PdfReport {
 
     // Keep the heading with the figure: like result figures, the boundary view
     // claims most of the remaining page when it strands below a heading.
-    this.sectionHeading(3, "Boundary conditions", this.hasBoundaryFigure() ? 100 : REPORT_LAYOUT.sectionKeepTogether);
-    if (this.hasBoundaryFigure()) this.boundaryFigure(this.data.boundaryFigure, 74);
+    this.sectionHeading(3, "Boundary conditions", this.hasBoundaryFigure() ? 118 : REPORT_LAYOUT.sectionKeepTogether);
+    if (this.hasBoundaryFigure()) this.boundaryFigure(this.data.boundaryFigure, 96);
     this.subheading("Supports");
     this.table(this.data.supports);
     this.subheading("Loads");
@@ -312,10 +312,10 @@ class PdfReport {
   // Full-width viewer snapshot of the support/load markers on the undeformed
   // model; a textual marker key replaces the result figures' color ramp.
   private boundaryFigure(figure: ReportBoundaryFigure, maxHeight: number): void {
-    this.ensureSpace(Math.min(maxHeight + 20, 96));
+    this.ensureSpace(Math.min(maxHeight + 20, 118));
     this.text(figure.title, REPORT_LAYOUT.margin, this.y, 10, REPORT_THEME.ink, "bold");
     this.y += 4;
-    const frameHeight = Math.max(35, Math.min(maxHeight - 12, this.contentWidth * 0.42));
+    const frameHeight = Math.max(35, Math.min(maxHeight - 12, this.contentWidth * 0.56));
     const imageX = REPORT_LAYOUT.margin;
     const imageY = this.y;
 
