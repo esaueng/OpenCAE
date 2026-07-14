@@ -190,10 +190,13 @@ export const ResultProvenanceTierSchema = z.enum(["production_fea", "core_previe
 export const StudyRunStatusSchema = z.enum(["queued", "running", "complete", "complete_preview", "complete_estimate", "complete_benchmark", "complete_legacy", "failed", "cancelled"]);
 const terminalRunResultStatuses = new Set(["complete", "complete_preview", "complete_estimate", "complete_benchmark", "complete_legacy"]);
 
+export const StressComponentSchema = z.enum(["von_mises", "principal_max", "principal_min", "max_shear"]);
+
 export const ResultFieldSchema = z.object({
   id: z.string(),
   runId: z.string(),
   type: z.enum(["stress", "displacement", "safety_factor", "velocity", "acceleration"]),
+  component: StressComponentSchema.optional(),
   location: z.enum(["node", "element", "face"]),
   values: z.array(z.number()),
   min: z.number(),
@@ -404,6 +407,7 @@ export type AnalysisMesh = z.infer<typeof AnalysisMeshSchema>;
 export type ResultSample = z.infer<typeof ResultSampleSchema>;
 export type ResultProvenance = z.infer<typeof ResultProvenanceSchema>;
 export type ResultProvenanceTier = z.infer<typeof ResultProvenanceTierSchema>;
+export type StressComponent = z.infer<typeof StressComponentSchema>;
 export type ResultField = z.infer<typeof ResultFieldSchema>;
 export type GeometryFile = z.infer<typeof GeometryFileSchema>;
 export type MeshSummary = z.infer<typeof MeshSummarySchema>;

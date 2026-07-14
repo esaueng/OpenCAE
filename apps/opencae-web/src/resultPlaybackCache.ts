@@ -1,5 +1,6 @@
 import type { ResultField } from "@opencae/schema";
 import { createPackedResultPlaybackCache, createResultFrameCache } from "./resultFields";
+import { stressComponentForField } from "./resultSelection";
 
 export type PlaybackFrameCacheMode = "full" | "reducedFps" | "integerFrames" | "fallback";
 
@@ -73,6 +74,7 @@ export interface PackedPreparedPlaybackFieldDescriptor {
   id: string;
   runId: string;
   type: ResultField["type"];
+  component?: ResultField["component"];
   location: ResultField["location"];
   units: string;
   surfaceMeshRef?: string;
@@ -383,8 +385,14 @@ function unpackPackedSamplesForSlot(
   return samples;
 }
 
-export function playbackFieldsForResultMode(fields: ResultField[], resultMode: ResultField["type"]): ResultField[] {
-  const selected = fields.filter((field) => field.type === resultMode);
+export function playbackFieldsForResultMode(
+  fields: ResultField[],
+  resultMode: ResultField["type"],
+  stressComponent: ResultField["component"] = "von_mises"
+): ResultField[] {
+  const selected = fields.filter((field) =>
+    field.type === resultMode &&
+    (resultMode !== "stress" || stressComponentForField(field) === stressComponent));
   if (!selected.length) return fields;
   if (resultMode === "displacement") return selected;
   const displacement = fields.filter((field) => field.type === "displacement");
@@ -494,10 +502,11 @@ export function packedPreparedPlaybackFieldSlot(
   cache: PackedPreparedPlaybackCache,
   frameOrdinal: number,
   type: ResultField["type"],
-  location?: ResultField["location"]
+  location?: ResultField["location"],
+  component?: ResultField["component"]
 ): PackedPreparedPlaybackFieldSlot | null {
   const clampedFrameOrdinal = Math.max(0, Math.min(cache.frameCount - 1, Math.floor(frameOrdinal)));
-  const fieldOrdinal = packedPreparedPlaybackFieldOrdinal(cache.fieldDescriptors, type, location);
+  const fieldOrdinal = packedPreparedPlaybackFieldOrdinal(cache.fieldDescriptors, type, location, component);
   if (fieldOrdinal < 0) return null;
   const slot = clampedFrameOrdinal * cache.fieldCount + fieldOrdinal;
   const offset = cache.fieldOffsets[slot] ?? 0;
@@ -528,17 +537,20 @@ export function packedPreparedPlaybackFieldSlot(
 function packedPreparedPlaybackFieldOrdinal(
   descriptors: PackedPreparedPlaybackFieldDescriptor[],
   type: ResultField["type"],
-  location?: ResultField["location"]
+  location?: ResultField["location"],
+  component?: ResultField["component"]
 ): number {
+  const matchesComponent = (descriptor: PackedPreparedPlaybackFieldDescriptor) =>
+    type !== "stress" || (descriptor.component ?? "von_mises") === (component ?? "von_mises");
   if (location) {
-    const exact = descriptors.findIndex((descriptor) => descriptor.type === type && descriptor.location === location);
+    const exact = descriptors.findIndex((descriptor) => descriptor.type === type && descriptor.location === location && matchesComponent(descriptor));
     if (exact >= 0) return exact;
   }
-  const face = descriptors.findIndex((descriptor) => descriptor.type === type && descriptor.location === "face");
+  const face = descriptors.findIndex((descriptor) => descriptor.type === type && descriptor.location === "face" && matchesComponent(descriptor));
   if (face >= 0) return face;
-  const nodeOrSample = descriptors.findIndex((descriptor) => descriptor.type === type && descriptor.location === "node");
+  const nodeOrSample = descriptors.findIndex((descriptor) => descriptor.type === type && descriptor.location === "node" && matchesComponent(descriptor));
   if (nodeOrSample >= 0) return nodeOrSample;
-  return descriptors.findIndex((descriptor) => descriptor.type === type);
+  return descriptors.findIndex((descriptor) => descriptor.type === type && matchesComponent(descriptor));
 }
 
 function packPreparedPlaybackFrames(frames: PreparedPlaybackFrame[]): PackedPreparedPlaybackCache | undefined {
@@ -645,6 +657,7 @@ function descriptorForPackedPlaybackField(field: Omit<ResultField, "values">): P
     id: field.id,
     runId: field.runId,
     type: field.type,
+    ...(field.component ? { component: field.component } : {}),
     location: field.location,
     units: field.units,
     ...(field.surfaceMeshRef ? { surfaceMeshRef: field.surfaceMeshRef } : {}),

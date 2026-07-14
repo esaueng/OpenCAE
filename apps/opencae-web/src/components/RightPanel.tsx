@@ -3,11 +3,12 @@ import { createPortal } from "react-dom";
 import { AlertTriangle, Anchor, ArrowDown, Atom, Check, ChevronDown, ChevronRight, CircleHelp, Eye, Factory, FileDown, Gauge, Grid3X3, Layers3, Maximize2, Pause, Play, Plus, RotateCcw, Ruler, ScanLine, ShieldCheck, Upload, Weight, Wrench, X } from "lucide-react";
 import { compatibleManufacturingProcessesFor, defaultManufacturingParametersFor, defaultManufacturingProcessIdFor, effectiveMaterialProperties, fdmPropertyFactorsFor, isManufacturingProcessCompatible, manufacturingParametersForAssignment, manufacturingProcessForId, massKgForPayloadMaterial, materialCategoryLabel, normalizeManufacturingParameters, payloadMaterialForId, payloadMaterials, starterMaterials, type ManufacturingParameters, type ManufacturingProcessId, type PayloadMaterialCategory } from "@opencae/materials";
 import { assessResultFailure, estimateAllowableLoadForSafetyFactor } from "@opencae/schema";
-import type { Constraint, DisplayFace, DisplayModel, DynamicSolverSettings, Load, MeshQuality, Project, ResultField, ResultSummary, RunTimingEstimate, SimulationFidelity, Study } from "@opencae/schema";
+import type { Constraint, DisplayFace, DisplayModel, DynamicSolverSettings, Load, MeshQuality, Project, ResultField, ResultSummary, RunTimingEstimate, SimulationFidelity, StressComponent, Study } from "@opencae/schema";
 import { inferGlobalCriticalPrintAxis } from "@opencae/study-core";
 import type { StepId } from "./StepBar";
 import { applicationPointForLoad, createViewerLoadMarkers, directionLabelForLoad, directionVectorForLabel, equivalentForceForLoad, LOAD_DIRECTION_LABELS, loadMarkerOrdinalLabel, payloadObjectForLoad, unitsForLoadType, type LoadApplicationPoint, type LoadDirectionLabel, type LoadType, type PayloadLoadMetadata, type PayloadMassMode } from "../loadPreview";
 import type { PayloadObjectSelection, ResultMode, ViewMode } from "../workspaceViewTypes";
+import type { ResolvedResultProbe } from "../resultSelection";
 import type { SampleAnalysisType, SampleModelId } from "../lib/api";
 import type { WasmMeshPhaseProgress } from "../lib/wasmMeshing";
 import { stepGeometryMetadataForProject } from "../stepGeometryState";
@@ -50,11 +51,16 @@ interface RightPanelProps {
   selectedFace: DisplayFace | null;
   viewMode: ViewMode;
   resultMode: ResultMode;
+  stressComponent?: StressComponent;
   showDeformed: boolean;
   showDimensions: boolean;
   stressExaggeration: number;
   resultSummary: ResultSummary | null;
   resultFields?: ResultField[];
+  resultProbes?: ResolvedResultProbe[];
+  resultProbeLimitReached?: boolean;
+  onRemoveResultProbe?: (probeId: string) => void;
+  onClearResultProbes?: () => void;
   runProgress: number;
   runError?: string | null;
   runTiming?: RunTimingEstimate | null;
@@ -80,6 +86,7 @@ interface RightPanelProps {
   onSampleAnalysisTypeChange?: (analysisType: SampleAnalysisType) => void;
   onViewModeChange: (mode: ViewMode) => void;
   onResultModeChange: (mode: ResultMode) => void;
+  onStressComponentChange?: (component: StressComponent) => void;
   onToggleDeformed: () => void;
   onToggleDimensions: () => void;
   onStressExaggerationChange: (value: number) => void;
@@ -1367,6 +1374,11 @@ function formatDurationSeconds(milliseconds: number): string {
   return remainder ? `${minutes}m ${remainder}s` : `${minutes}m`;
 }
 
+function formatProbeReading(probe: ResolvedResultProbe): string {
+  const value = Number.isFinite(probe.value) ? String(Number(probe.value.toPrecision(6))) : "Unavailable";
+  return `${value}${probe.units ? ` ${probe.units}` : ""}`;
+}
+
 function ResultsPanel(props: RightPanelProps) {
   if (!props.resultSummary) {
     return (
@@ -1385,6 +1397,8 @@ function ResultsPanelContent({
   stressExaggeration,
   resultSummary,
   resultFields = [],
+  resultProbes = [],
+  resultProbeLimitReached = false,
   study,
   resultFrameIndex = 0,
   resultFramePosition = resultFrameIndex,
@@ -1398,6 +1412,8 @@ function ResultsPanelContent({
   onResultPlaybackFpsChange,
   onResultPlaybackReverseLoopChange,
   onResultModeChange,
+  onRemoveResultProbe,
+  onClearResultProbes,
   onToggleDeformed,
   onStressExaggerationChange,
   onGenerateReport,
@@ -1546,6 +1562,25 @@ function ResultsPanelContent({
         {resultFields.some((field) => field.type === "acceleration") && <button className={resultMode === "acceleration" ? "primary" : "secondary"} onClick={() => onResultModeChange("acceleration")}>Acceleration</button>}
         <button className={resultMode === "safety_factor" ? "primary" : "secondary"} onClick={() => onResultModeChange("safety_factor")}>Safety factor</button>
       </div>
+      {(resultProbes.length > 0 || resultProbeLimitReached) && (
+        <section className="result-probe-list" aria-label="Pinned result probes">
+          <div className="result-probe-list-header">
+            <SectionTitle>Pinned probes</SectionTitle>
+            {resultProbes.length > 0 && onClearResultProbes && <button className="text-button" type="button" onClick={onClearResultProbes}>Clear All</button>}
+          </div>
+          {resultProbeLimitReached && <p className="panel-warning" role="status">Probe limit reached. Remove a pin to place another.</p>}
+          {resultProbes.length > 0 && (
+            <ol>
+              {resultProbes.map((probe, index) => (
+                <li key={probe.id}>
+                  <span><strong>{`P${index + 1}`}</strong><small>{formatProbeReading(probe)}</small></span>
+                  {onRemoveResultProbe && <button className="icon-button" type="button" aria-label={`Remove probe ${index + 1}`} onClick={() => onRemoveResultProbe(probe.id)}><X size={14} /></button>}
+                </li>
+              ))}
+            </ol>
+          )}
+        </section>
+      )}
       {resultMode === "stress" && (
         <label className="field range-field">
           <span className="range-label"><HelpLabel helpId="stressExaggeration">Deformation scale</HelpLabel><strong>{draftStressExaggeration.toFixed(1)}x</strong></span>

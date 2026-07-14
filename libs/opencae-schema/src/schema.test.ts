@@ -147,6 +147,22 @@ describe("ProjectSchema", () => {
     }).frameIndex).toBeUndefined();
   });
 
+  it("accepts optional stress components without changing legacy fields", () => {
+    const base = {
+      id: "field-stress",
+      runId: "run-static",
+      type: "stress" as const,
+      location: "node" as const,
+      values: [42],
+      min: 42,
+      max: 42,
+      units: "MPa"
+    };
+    expect(ResultFieldSchema.parse(base).component).toBeUndefined();
+    expect(ResultFieldSchema.parse({ ...base, component: "principal_max" }).component).toBe("principal_max");
+    expect(() => ResultFieldSchema.parse({ ...base, component: "invalid" })).toThrow();
+  });
+
   it("accepts OpenCAE Core dynamic settings and transient metadata", () => {
     expect(DynamicSolverSettingsSchema.parse({
       startTime: 0,

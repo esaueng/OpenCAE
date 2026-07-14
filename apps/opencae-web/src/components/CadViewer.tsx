@@ -14,6 +14,7 @@ import { faceForModelHit, type SampleModelKind } from "../modelSelection";
 import { baseModelRotationRadians, modelRotationRadians, modelToViewerMatrix, viewerNormalToModelSpace, viewerPointToModelSpace, type RotationAxis } from "../modelOrientation";
 import { dimensionValuesForDisplayModel } from "../modelDimensions";
 import { formatResultValue, normalizeValueForRender, resultProbeSamplesForFaces, resultSamplesForFaces, type FaceResultSample, type FieldResultSample, type ResultProbeTone } from "../resultFields";
+import { barycentricPoint, interpolateScalarFromSamples, resolveResultProbe, selectActiveResultField, stressComponentForField, type ResolvedResultProbe, type ResultProbeAnchor, type ResultProbePin } from "../resultSelection";
 import { packedPreparedPlaybackFieldSlot, packedPreparedPlaybackFrameOrdinal, type PackedPreparedPlaybackCache } from "../resultPlaybackCache";
 import { createVertexResultMapping, type VertexResultMapping } from "../resultVertexMapping";
 import { shouldBlockPreviewResultsForDisplayModel } from "../resultProvenance";
@@ -27,7 +28,7 @@ import { getSnapSuggestion } from "../snapping/snapController";
 import type { SolverSurfaceMesh } from "../projectFile";
 import { isSnapOverlayObject, SnapVisualization } from "../snapping/Visualization";
 import type { CursorRay, FaceSnapAxis, SnapMeasurement, SnapResult, Vec3 } from "../snapping/types";
-import type { PayloadObjectSelection, PrintLayerOrientation, ResultMode, ResultPlaybackFrameController, ResultPlaybackFrameSnapshot, ThemeMode, ViewerLoadMarker, ViewerSupportMarker, ViewMode } from "../workspaceViewTypes";
+import type { PayloadObjectSelection, PrintLayerOrientation, ResultMode, ResultPlaybackFrameController, ResultPlaybackFrameSnapshot, StressComponent, ThemeMode, ViewerLoadMarker, ViewerSupportMarker, ViewMode } from "../workspaceViewTypes";
 
 export type { PrintLayerOrientation, ResultMode, ResultPlaybackFrameController, ResultPlaybackFrameSnapshot, ThemeMode, ViewerLoadMarker, ViewerSupportMarker, ViewMode } from "../workspaceViewTypes";
 
@@ -41,11 +42,14 @@ interface CadViewerProps {
   onSelectFace: (face: DisplayFace, point?: [number, number, number], payloadObject?: PayloadObjectSelection) => void;
   viewMode: ViewMode;
   resultMode: ResultMode;
+  stressComponent?: StressComponent;
   showDeformed: boolean;
   resultPlaybackPlaying: boolean;
   showDimensions: boolean;
   stressExaggeration: number;
   resultFields: ResultField[];
+  resultProbes?: ResultProbePin[];
+  onAddResultProbe?: (anchor: ResultProbeAnchor) => void;
   surfaceMesh?: SolverSurfaceMesh;
   resultPlaybackBufferCache?: PackedPreparedPlaybackCache | null;
   resultPlaybackFrameController?: ResultPlaybackFrameController;
@@ -200,12 +204,13 @@ export function CadViewer(props: CadViewerProps) {
   const modelRotation = useMemo(() => modelRotationRadians(props.displayModel), [props.displayModel]);
   const baseModelRotation = useMemo(() => baseModelRotationRadians(props.displayModel), [props.displayModel]);
   const resultFields = props.resultFields;
+  const stressComponent = props.stressComponent ?? "von_mises";
   const effectiveShowDeformed = props.showDeformed && !shouldDisableResultDeformation(props.displayModel, resultFields);
   // Memoized: solverSurfaceResultFields may recover an element-only contour onto the surface
   // nodes (O(nodes x samples) IDW), so it must not re-run on every interaction render.
   const solverSurfaceResult = useMemo(
-    () => solverSurfaceResultFields(props.surfaceMesh, resultFields, props.resultMode),
-    [props.surfaceMesh, resultFields, props.resultMode]
+    () => solverSurfaceResultFields(props.surfaceMesh, resultFields, props.resultMode, stressComponent),
+    [props.surfaceMesh, resultFields, props.resultMode, stressComponent]
   );
   // Cloud surface meshes are always in solver space (meters), far smaller than the display
   // model (~unit scale). Scale + recenter the surface render deterministically from the two
@@ -290,8 +295,23 @@ export function CadViewer(props: CadViewerProps) {
                   showDeformed={effectiveShowDeformed}
                   deformationScale={props.stressExaggeration}
                   displacementPeakMagnitude={solverSurfaceResult.displacementPeakMagnitude}
+                  resultPlaybackPlaying={props.resultPlaybackPlaying}
+                  onAddResultProbe={props.onAddResultProbe}
                 />
               </group>
+            )}
+            {effectiveViewMode === "results" && solverSurfaceResult && props.surfaceMesh && (
+              <SurfaceResultProbeMarkers
+                fallbackFields={resultFields}
+                surfaceMesh={props.surfaceMesh}
+                footprint={solverSurfaceFootprint}
+                pins={props.resultProbes ?? []}
+                resultMode={props.resultMode}
+                stressComponent={stressComponent}
+                showDeformed={effectiveShowDeformed}
+                deformationScale={props.stressExaggeration}
+                playbackController={props.resultPlaybackFrameController}
+              />
             )}
             <group rotation={baseModelRotation}>
               {effectiveViewMode === "results" && solverSurfaceResult && (
@@ -1181,6 +1201,9 @@ function BracketModel({
   unitSystem,
   loadMarkers,
   supportMarkers,
+  resultProbes = [],
+  onAddResultProbe,
+  stressComponent = "von_mises",
   onMeasureDisplayModelDimensions,
   printLayerOrientation,
   suppressProceduralResultSolid,
@@ -1192,6 +1215,10 @@ function BracketModel({
   const [snapResult, setSnapResult] = useState<SnapResult | null>(null);
   const modelKind = modelKindForDisplayModel(displayModel);
   const materialColor = useMemo(() => colorForResult(displayModel.faces, viewMode, resultMode), [displayModel.faces, resultMode, viewMode]);
+  const probeCoordinateTransform = useMemo(
+    () => resultProbeCoordinateTransform(displayModel, resultFields),
+    [displayModel, resultFields]
+  );
   const showResultMarkers = shouldShowResultMarkers(viewMode, activeStep, resultPlaybackPlaying);
   const isResultView = viewMode === "results";
   const showBoundaryMarkers = !isResultView;
@@ -1298,9 +1325,20 @@ function BracketModel({
       onSelectFace(hit.face, hit.point, hit.payloadObject);
     }
   };
+  const rootPickHandlers: ModelPickHandlers = isResultView
+    ? {
+        onClick: (event) => {
+          if (!onAddResultProbe || resultPlaybackPlaying || suppressProceduralResultSolid) return;
+          event.stopPropagation();
+          const modelPoint = viewerPointToModelSpace(event.point, displayModel);
+          const resultPoint = probeCoordinateTransform?.toResultPoint(modelPoint) ?? modelPoint;
+          onAddResultProbe({ kind: "sample", point: resultPoint.toArray() as [number, number, number] });
+        }
+      }
+    : overlayFallbackPickHandlers;
 
   return (
-    <group {...overlayFallbackPickHandlers}>
+    <group {...rootPickHandlers}>
       {isResultView ? (
         // The solver-surface render is exclusive: when it is active the procedural result
         // solid must not render underneath it (it would occlude the real FEA mesh and paint
@@ -1355,6 +1393,18 @@ function BracketModel({
         return face ? <SupportGlyph key={marker.id} kind={modelKind} marker={marker} face={face} active={activeStep === "supports"} labelPosition={boundaryLabelPositions.get(boundaryLabelKey("support", marker.id))} scale={markerScale} /> : null;
       })}
       {showResultMarkers && resultProbesForKind(modelKind, displayModel.faces, resultMode, resultFields, unitSystem).map((probe) => <ResultProbe key={`${probe.tone}-${probe.label}-${probe.anchor.join(",")}`} {...probe} />)}
+      {isResultView && (
+        <SampleResultProbeMarkers
+          displayModel={displayModel}
+          fallbackFields={resultFields}
+          pins={resultProbes}
+          resultMode={resultMode}
+          stressComponent={stressComponent}
+          showDeformed={showDeformed}
+          deformationScale={stressExaggeration}
+          playbackController={resultPlaybackFrameController}
+        />
+      )}
     </group>
   );
 }
@@ -3110,16 +3160,18 @@ export function solverSurfaceDisplayFootprint(
   };
 }
 
-export function solverSurfaceResultFields(surfaceMesh: SolverSurfaceMesh | undefined, fields: ResultField[], resultMode: ResultMode): SolverSurfaceResultFields | null {
+export function solverSurfaceResultFields(surfaceMesh: SolverSurfaceMesh | undefined, fields: ResultField[], resultMode: ResultMode, stressComponent: StressComponent = "von_mises"): SolverSurfaceResultFields | null {
   if (!surfaceMesh || !surfaceMesh.nodes.length || !surfaceMesh.triangles.length) return null;
   const displacementFields = fields.filter((field) => isSolverSurfaceNodeField(field, surfaceMesh, "displacement"));
-  const scalarField = fields.find((field) => isSolverSurfaceNodeField(field, surfaceMesh, resultMode))
+  const selected = selectActiveResultField({ fields, resultMode, stressComponent, surfaceMesh });
+  const scalarField = selected.scalarField && isSolverSurfaceNodeField(selected.scalarField, surfaceMesh, resultMode)
+    ? selected.scalarField
     // The solver emits stress/safety_factor per element (no node field), so those modes fall to
     // the procedural IDW render and show streaks instead of a smooth contour. Recover them onto
     // the surface nodes so they render through this same smooth nodal path. Gate on a node
     // displacement field existing, which confirms the result is already surface-renderable — so
     // we never downgrade a procedural-tier result's deformation to an undeformed surface.
-    ?? (displacementFields.length ? recoverSurfaceNodeScalarField(surfaceMesh, fields, resultMode) : null);
+    : (displacementFields.length ? recoverSurfaceNodeScalarField(surfaceMesh, fields, resultMode, stressComponent) : null);
   if (!scalarField) return null;
   const displacementField = displacementFields[0];
   // Run-wide peak across every transient frame so the deformation scale stays constant and a
@@ -3137,7 +3189,8 @@ export function solverSurfaceResultFields(surfaceMesh: SolverSurfaceMesh | undef
 export function recoverSurfaceNodeScalarField(
   surfaceMesh: SolverSurfaceMesh,
   fields: ResultField[],
-  resultMode: ResultMode
+  resultMode: ResultMode,
+  stressComponent: StressComponent = "von_mises"
 ): ResultField | null {
   // Only the scalar contour modes the solver emits per element. displacement/velocity/
   // acceleration already arrive as smooth node fields carrying their own vectors.
@@ -3147,6 +3200,7 @@ export function recoverSurfaceNodeScalarField(
   const source = fields.find(
     (field) =>
       field.type === resultMode &&
+      (resultMode !== "stress" || stressComponentForField(field) === stressComponent) &&
       (field.samples?.some((sample) => Number.isFinite(sample.value) && sample.point.length === 3 && sample.point.every(Number.isFinite)) ?? false)
   );
   const samples = source?.samples?.filter(
@@ -3155,7 +3209,7 @@ export function recoverSurfaceNodeScalarField(
   if (!source || !samples || !samples.length) return null;
 
   const values = surfaceMesh.nodes.map((node) =>
-    interpolateScalarFromSamples(new THREE.Vector3(node[0], node[1], node[2]), samples)
+    interpolateScalarFromSamples(node, samples)
   );
   if (!values.some(Number.isFinite)) return null;
   // Loop instead of Math.min(...spread): surface-node arrays can exceed the V8 argument limit.
@@ -3181,21 +3235,6 @@ export function recoverSurfaceNodeScalarField(
   };
 }
 
-function interpolateScalarFromSamples(point: THREE.Vector3, samples: NonNullable<ResultField["samples"]>): number {
-  const neighbors = nearestResultSamples(point, samples, (sample) => Number.isFinite(sample.value));
-  if (!neighbors.length) return Number.NaN;
-  const exact = neighbors.find((entry) => entry.distanceSq <= 1e-18);
-  if (exact) return exact.sample.value;
-  let weighted = 0;
-  let totalWeight = 0;
-  for (const neighbor of neighbors) {
-    const weight = 1 / Math.max(neighbor.distanceSq, 1e-18);
-    weighted += neighbor.sample.value * weight;
-    totalWeight += weight;
-  }
-  return totalWeight > 0 ? weighted / totalWeight : Number.NaN;
-}
-
 function isSolverSurfaceNodeField(field: ResultField, surfaceMesh: SolverSurfaceMesh, resultMode: ResultMode): boolean {
   return (
     field.type === resultMode &&
@@ -3212,7 +3251,9 @@ function SolverSurfaceResultMesh({
   resultMode,
   showDeformed,
   deformationScale,
-  displacementPeakMagnitude
+  displacementPeakMagnitude,
+  resultPlaybackPlaying,
+  onAddResultProbe
 }: {
   surfaceMesh: SolverSurfaceMesh;
   scalarField: ResultField;
@@ -3221,6 +3262,8 @@ function SolverSurfaceResultMesh({
   showDeformed: boolean;
   deformationScale: number;
   displacementPeakMagnitude?: number;
+  resultPlaybackPlaying: boolean;
+  onAddResultProbe?: (anchor: ResultProbeAnchor) => void;
 }) {
   const geometry = useMemo(
     () => buildSolverSurfaceResultGeometry({ surfaceMesh, scalarField, displacementField, resultMode, showDeformed, deformationScale, displacementPeakMagnitude }),
@@ -3230,12 +3273,136 @@ function SolverSurfaceResultMesh({
   return (
     <group>
       {shouldShowUndeformedResultOutline(showDeformed) && <UndeformedGeometryOutline geometry={outlineGeometry} />}
-      <mesh geometry={geometry}>
+      <mesh geometry={geometry} onClick={(event) => {
+        if (!onAddResultProbe || resultPlaybackPlaying) return;
+        const anchor = solverSurfaceProbeAnchorFromEvent(event, surfaceMesh, geometry);
+        if (!anchor) return;
+        event.stopPropagation();
+        onAddResultProbe(anchor);
+      }}>
         <meshStandardMaterial vertexColors metalness={0.18} roughness={0.52} side={THREE.DoubleSide} />
         <Edges color="#43556a" threshold={18} />
       </mesh>
     </group>
   );
+}
+
+export function solverSurfaceProbeAnchorFromEvent(
+  event: ThreeEvent<MouseEvent>,
+  surfaceMesh: SolverSurfaceMesh,
+  geometry: THREE.BufferGeometry
+): Extract<ResultProbeAnchor, { kind: "surface" }> | null {
+  const faceIndex = event.faceIndex;
+  if (typeof faceIndex !== "number" || !Number.isInteger(faceIndex) || faceIndex < 0) return null;
+  const triangle = surfaceMesh.triangles[faceIndex];
+  if (!triangle) return null;
+  const positions = geometry.getAttribute("position");
+  if (!(positions instanceof THREE.BufferAttribute)) return null;
+  const a = new THREE.Vector3().fromBufferAttribute(positions, triangle[0]);
+  const b = new THREE.Vector3().fromBufferAttribute(positions, triangle[1]);
+  const c = new THREE.Vector3().fromBufferAttribute(positions, triangle[2]);
+  const localPoint = event.object.worldToLocal(event.point.clone());
+  const weights = new THREE.Triangle(a, b, c).getBarycoord(localPoint, new THREE.Vector3());
+  if (!weights) return null;
+  if (![weights.x, weights.y, weights.z].every(Number.isFinite)) return null;
+  const epsilon = 1e-8;
+  if (weights.x < -epsilon || weights.y < -epsilon || weights.z < -epsilon) return null;
+  const clamped = [Math.max(0, weights.x), Math.max(0, weights.y), Math.max(0, weights.z)] as [number, number, number];
+  const total = clamped[0] + clamped[1] + clamped[2];
+  if (!(total > epsilon)) return null;
+  return {
+    kind: "surface",
+    surfaceMeshId: surfaceMesh.id,
+    triangle: [...triangle] as [number, number, number],
+    barycentric: clamped.map((weight) => weight / total) as [number, number, number]
+  };
+}
+
+export function solverSurfaceProbePoint({
+  surfaceMesh,
+  anchor,
+  displacementField,
+  showDeformed,
+  deformationScale,
+  displacementPeakMagnitude
+}: {
+  surfaceMesh: SolverSurfaceMesh;
+  anchor: Extract<ResultProbeAnchor, { kind: "surface" }>;
+  displacementField?: ResultField;
+  showDeformed: boolean;
+  deformationScale: number;
+  displacementPeakMagnitude?: number;
+}): [number, number, number] | null {
+  if (anchor.surfaceMeshId !== surfaceMesh.id) return null;
+  const bounds = new THREE.Box3();
+  for (const node of surfaceMesh.nodes) {
+    if (node.every(Number.isFinite)) bounds.expandByPoint(new THREE.Vector3(...node));
+  }
+  const modelExtent = bounds.isEmpty() ? 1 : bounds.getSize(new THREE.Vector3()).length();
+  const visualScale = showDeformed && displacementField?.vectors?.length
+    ? finiteOr0(finalVisualScaleForDisplacementField(modelExtent, displacementField, deformationScale, RESULT_DEFORMATION_CAP_FRACTION, displacementPeakMagnitude).finalVisualScale)
+    : 0;
+  const trianglePoints = anchor.triangle.map((nodeIndex) => {
+    const node = surfaceMesh.nodes[nodeIndex];
+    const vector = displacementField?.vectors?.[nodeIndex] ?? [0, 0, 0];
+    return node ? [
+      finiteOr0(node[0]) + finiteOr0(vector[0]) * visualScale,
+      finiteOr0(node[1]) + finiteOr0(vector[1]) * visualScale,
+      finiteOr0(node[2]) + finiteOr0(vector[2]) * visualScale
+    ] as [number, number, number] : [Number.NaN, Number.NaN, Number.NaN] as [number, number, number];
+  }) as [[number, number, number], [number, number, number], [number, number, number]];
+  return barycentricPoint(trianglePoints, [0, 1, 2], anchor.barycentric);
+}
+
+function SurfaceResultProbeMarkers({
+  fallbackFields,
+  surfaceMesh,
+  footprint,
+  pins,
+  resultMode,
+  stressComponent,
+  showDeformed,
+  deformationScale,
+  playbackController
+}: {
+  fallbackFields: ResultField[];
+  surfaceMesh: SolverSurfaceMesh;
+  footprint: { scale: number; position: [number, number, number] } | null;
+  pins: ResultProbePin[];
+  resultMode: ResultMode;
+  stressComponent: StressComponent;
+  showDeformed: boolean;
+  deformationScale: number;
+  playbackController?: ResultPlaybackFrameController;
+}) {
+  const fields = usePlaybackProbeFields(fallbackFields, playbackController);
+  const selected = useMemo(
+    () => solverSurfaceResultFields(surfaceMesh, fields, resultMode, stressComponent),
+    [fields, resultMode, stressComponent, surfaceMesh]
+  );
+  if (!selected) return null;
+  const scale = footprint?.scale ?? 1;
+  const offset = footprint?.position ?? [0, 0, 0];
+  return pins.flatMap((pin, index) => {
+    if (pin.anchor.kind !== "surface") return [];
+    const reading = resolveResultProbe(pin, selected.scalarField, surfaceMesh);
+    if (!reading) return [];
+    const localPoint = solverSurfaceProbePoint({
+      surfaceMesh,
+      anchor: pin.anchor,
+      displacementField: selected.displacementField,
+      showDeformed,
+      deformationScale,
+      displacementPeakMagnitude: selected.displacementPeakMagnitude
+    });
+    if (!localPoint) return [];
+    const point = [
+      localPoint[0] * scale + offset[0],
+      localPoint[1] * scale + offset[1],
+      localPoint[2] * scale + offset[2]
+    ] as [number, number, number];
+    return [<UserResultProbeMarker key={reading.id} reading={reading} point={point} index={index} />];
+  });
 }
 
 export function buildSolverSurfaceOutlineGeometry(surfaceMesh: SolverSurfaceMesh): THREE.BufferGeometry {
@@ -4328,6 +4495,24 @@ export function solverSpaceResultCoordinateTransform(
   geometry: THREE.BufferGeometry,
   resultFields: ResultField[]
 ): ResultCoordinateTransform | undefined {
+  if (!geometry.boundingBox) geometry.computeBoundingBox();
+  const geomBounds = geometry.boundingBox?.clone();
+  if (!geomBounds || geomBounds.isEmpty()) return undefined;
+  return resultCoordinateTransformForBounds(geomBounds, resultFields);
+}
+
+export function resultProbeCoordinateTransform(
+  displayModel: DisplayModel,
+  resultFields: ResultField[]
+): ResultCoordinateTransform | undefined {
+  const displayBounds = dimensionBoundsForDisplayModel(displayModel);
+  return displayBounds ? resultCoordinateTransformForBounds(displayBounds, resultFields) : undefined;
+}
+
+function resultCoordinateTransformForBounds(
+  geomBounds: THREE.Box3,
+  resultFields: ResultField[]
+): ResultCoordinateTransform | undefined {
   const sampleBounds = new THREE.Box3();
   let samplePointCount = 0;
   for (const field of resultFields) {
@@ -4342,10 +4527,6 @@ export function solverSpaceResultCoordinateTransform(
   if (samplePointCount < 2 || sampleBounds.isEmpty()) return undefined;
   const sampleDiag = sampleBounds.getSize(new THREE.Vector3()).length();
   if (!(sampleDiag > 1e-12)) return undefined;
-
-  if (!geometry.boundingBox) geometry.computeBoundingBox();
-  const geomBounds = geometry.boundingBox?.clone();
-  if (!geomBounds || geomBounds.isEmpty()) return undefined;
   const geomDiag = geomBounds.getSize(new THREE.Vector3()).length();
   if (!(geomDiag > 1e-12)) return undefined;
 
@@ -4366,6 +4547,54 @@ export function solverSpaceResultCoordinateTransform(
     toResultPoint: (point) => point.clone().applyMatrix4(rotation).multiplyScalar(scale).add(translate),
     fromResultPoint: (point) => point.clone().sub(translate).multiplyScalar(1 / scale).applyMatrix4(inverseRotation)
   };
+}
+
+function SampleResultProbeMarkers({
+  displayModel,
+  fallbackFields,
+  pins,
+  resultMode,
+  stressComponent,
+  showDeformed,
+  deformationScale,
+  playbackController
+}: {
+  displayModel: DisplayModel;
+  fallbackFields: ResultField[];
+  pins: ResultProbePin[];
+  resultMode: ResultMode;
+  stressComponent: StressComponent;
+  showDeformed: boolean;
+  deformationScale: number;
+  playbackController?: ResultPlaybackFrameController;
+}) {
+  const fields = usePlaybackProbeFields(fallbackFields, playbackController);
+  const selected = useMemo(
+    () => selectActiveResultField({ fields, resultMode, stressComponent }),
+    [fields, resultMode, stressComponent]
+  );
+  const transform = useMemo(() => resultProbeCoordinateTransform(displayModel, fields), [displayModel, fields]);
+  const modelKind = modelKindForDisplayModel(displayModel);
+  const displayBounds = dimensionBoundsForDisplayModel(displayModel);
+  const modelExtent = (transform?.bounds ?? displayBounds)?.getSize(new THREE.Vector3()).length() ?? 1;
+  const visualScale = showDeformed
+    ? finalVisualScaleForDisplacementField(modelExtent, selected.displacementField, deformationScale).finalVisualScale
+    : 0;
+  return pins.flatMap((pin, index) => {
+    if (pin.anchor.kind !== "sample") return [];
+    const reading = resolveResultProbe(pin, selected.scalarField);
+    if (!reading) return [];
+    const resultPoint = new THREE.Vector3(...reading.point);
+    if (visualScale > 0 && selected.displacementField?.samples?.some((sample) => sample.vector)) {
+      const displacement = interpolateDisplacementAtPoint(reading.point, selected.displacementField);
+      resultPoint.addScaledVector(new THREE.Vector3(...displacement), visualScale);
+    }
+    let modelPoint = transform?.fromResultPoint(resultPoint) ?? resultPoint;
+    if (showDeformed && visualScale <= 0) {
+      modelPoint = deformedPointForKind(modelKind, modelPoint, deformationScale, deformationScaleForResultFields(fields) ?? 1);
+    }
+    return [<UserResultProbeMarker key={reading.id} reading={reading} point={modelPoint.toArray() as [number, number, number]} index={index} />];
+  });
 }
 
 function usePackedPlaybackGeometry(
@@ -4547,6 +4776,23 @@ function resultFieldsForPackedPreparedFrame(cache: PackedPreparedPlaybackCache, 
   });
 }
 
+function usePlaybackProbeFields(
+  fallbackFields: ResultField[],
+  controller?: ResultPlaybackFrameController
+): ResultField[] {
+  const [snapshot, setSnapshot] = useState<ResultPlaybackFrameSnapshot | null>(() => controller?.getSnapshot() ?? null);
+  useEffect(() => {
+    setSnapshot(controller?.getSnapshot() ?? null);
+    if (!controller) return undefined;
+    return controller.subscribe(setSnapshot);
+  }, [controller]);
+  return useMemo(() => {
+    if (!snapshot) return fallbackFields;
+    const frameOrdinal = packedPreparedPlaybackFrameOrdinal(snapshot.cache, snapshot.framePosition);
+    return resultFieldsForPackedPreparedFrame(snapshot.cache, frameOrdinal);
+  }, [fallbackFields, snapshot]);
+}
+
 function vectorsForPackedPreparedSlot(slot: NonNullable<ReturnType<typeof packedPreparedPlaybackFieldSlot>>): NonNullable<ResultField["vectors"]> | undefined {
   const vectors = Array.from({ length: slot.vectorLength }, (_, index) => {
     const vectorOffset = (slot.vectorOffset + index) * 3;
@@ -4605,7 +4851,7 @@ function updatePackedFieldSamples(samples: FaceResultSample[], slot: NonNullable
   }
 }
 
-type ResultCoordinateTransform = {
+export type ResultCoordinateTransform = {
   bounds?: THREE.Box3;
   toResultPoint: (point: THREE.Vector3) => THREE.Vector3;
   fromResultPoint: (point: THREE.Vector3) => THREE.Vector3;
@@ -5594,6 +5840,21 @@ function ResultProbe({ label, anchor, labelPosition, tone }: ResultProbeConfig) 
   );
 }
 
+function UserResultProbeMarker({ reading, point, index }: { reading: ResolvedResultProbe; point: [number, number, number]; index: number }) {
+  const label = `P${index + 1}: ${formatResultValue(reading.value)}${reading.units ? ` ${reading.units}` : ""}`;
+  const labelPosition = [point[0] + 0.18, point[1] + 0.18, point[2] + 0.22] as [number, number, number];
+  return (
+    <group>
+      <Line points={[point, labelPosition]} color="#4da3ff" transparent opacity={0.82} lineWidth={1} />
+      <mesh position={point} onClick={(event) => event.stopPropagation()}>
+        <sphereGeometry args={[0.045, 18, 18]} />
+        <meshBasicMaterial color="#4da3ff" depthTest={false} toneMapped={false} />
+      </mesh>
+      <SceneLabel label={label} position={labelPosition} tone="active-load" />
+    </group>
+  );
+}
+
 function ModelHitLabel({ hit, active }: { hit: ModelSelectionHit; active: boolean }) {
   const anchor = hit.payloadObject?.center ?? hit.point;
   const label = hit.payloadObject?.label ?? compactFaceLabel(hit.face.label);
@@ -5851,7 +6112,7 @@ function ResultLegend({ resultMode, resultFields, unitSystem, meshSummary, surfa
     // vertex-shift factor in that case.
     const unitFactor = displacementField.units === "mm" && surfaceMesh.coordinateSpace === "solver" ? 1000 : 1;
     return legendDeformationLabel(appliedScale * unitFactor);
-  }, [deformationScale, resultFields, showDeformed, surfaceMesh]);
+  }, [deformationScale, resultFields, resultMode, showDeformed, surfaceMesh]);
   const title = resultMode === "stress" ? "Von Mises Stress" : resultMode === "displacement" ? "Displacement" : resultMode === "velocity" ? "Velocity" : resultMode === "acceleration" ? "Acceleration" : "Safety Factor";
   // Prefer the field actually rendered on the solver surface mesh so the legend
   // range matches the contours; fall back to the face/sample field otherwise.

@@ -1,4 +1,5 @@
 import type { PackedPreparedPlaybackCache } from "./resultPlaybackCache";
+export type { StressComponent } from "@opencae/schema";
 
 export type ViewMode = "model" | "mesh" | "results";
 export type ResultMode = "stress" | "displacement" | "safety_factor" | "velocity" | "acceleration";

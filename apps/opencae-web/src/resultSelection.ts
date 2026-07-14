@@ -1,0 +1,205 @@
+import type { ResultField, StressComponent } from "@opencae/schema";
+import type { SolverSurfaceMesh } from "./projectFile";
+import type { ResultMode } from "./workspaceViewTypes";
+
+export const DEFAULT_STRESS_COMPONENT: StressComponent = "von_mises";
+export const MAX_RESULT_PROBES = 20;
+
+export type ResultProbeAnchor =
+  | {
+      kind: "surface";
+      surfaceMeshId: string;
+      triangle: [number, number, number];
+      barycentric: [number, number, number];
+    }
+  | {
+      kind: "sample";
+      point: [number, number, number];
+    };
+
+export interface ResultProbePin {
+  id: string;
+  anchor: ResultProbeAnchor;
+}
+
+export interface ResolvedResultProbe {
+  id: string;
+  anchor: ResultProbeAnchor;
+  point: [number, number, number];
+  value: number;
+  units: string;
+}
+
+export function resultProbeTopologySignature(
+  projectId: string | undefined,
+  runId: string | undefined,
+  modelId: string | undefined,
+  surfaceMesh?: Pick<SolverSurfaceMesh, "id" | "nodes" | "triangles">
+): string {
+  return [
+    projectId ?? "no-project",
+    runId ?? "no-run",
+    modelId ?? "no-model",
+    surfaceMesh?.id ?? "no-surface",
+    surfaceMesh?.nodes.length ?? 0,
+    surfaceMesh?.triangles.length ?? 0
+  ].join("|");
+}
+
+export function appendResultProbe(
+  pins: ResultProbePin[],
+  anchor: ResultProbeAnchor,
+  id: string
+): { pins: ResultProbePin[]; limitReached: boolean } {
+  if (pins.length >= MAX_RESULT_PROBES) return { pins, limitReached: true };
+  return { pins: [...pins, { id, anchor }], limitReached: false };
+}
+
+export interface ActiveResultFieldSelection {
+  scalarField?: ResultField;
+  displacementField?: ResultField;
+}
+
+export interface ActiveResultFieldOptions {
+  fields: ResultField[];
+  resultMode: ResultMode;
+  stressComponent?: StressComponent;
+  surfaceMesh?: SolverSurfaceMesh;
+  frameIndex?: number;
+}
+
+/**
+ * Single scalar-field selection seam shared by contours, legends, probes, and
+ * playback. Legacy stress fields without a component are explicitly treated as
+ * von Mises so old autosaves and runner payloads remain readable.
+ */
+export function selectActiveResultField({
+  fields,
+  resultMode,
+  stressComponent = DEFAULT_STRESS_COMPONENT,
+  surfaceMesh,
+  frameIndex
+}: ActiveResultFieldOptions): ActiveResultFieldSelection {
+  const frameFields = fieldsForRequestedFrame(fields, frameIndex);
+  const candidates = frameFields.filter((field) =>
+    field.type === resultMode && (resultMode !== "stress" || stressComponentForField(field) === stressComponent)
+  );
+  const scalarField = surfaceMesh
+    ? candidates.find((field) => isAlignedSurfaceNodeField(field, surfaceMesh))
+      ?? candidates.find((field) => field.location === "face")
+      ?? candidates.find((field) => Boolean(field.samples?.length))
+      ?? candidates[0]
+    : candidates.find((field) => field.location === "face")
+      ?? candidates.find((field) => Boolean(field.samples?.length))
+      ?? candidates[0];
+  const displacementCandidates = frameFields.filter((field) => field.type === "displacement");
+  const displacementField = surfaceMesh
+    ? displacementCandidates.find((field) => isAlignedSurfaceNodeField(field, surfaceMesh)) ?? displacementCandidates[0]
+    : displacementCandidates[0];
+  return {
+    ...(scalarField ? { scalarField } : {}),
+    ...(displacementField ? { displacementField } : {})
+  };
+}
+
+export function stressComponentForField(field: Pick<ResultField, "type" | "component">): StressComponent | undefined {
+  if (field.type !== "stress") return undefined;
+  return field.component ?? DEFAULT_STRESS_COMPONENT;
+}
+
+export function semanticResultFieldKey(field: Pick<ResultField, "runId" | "type" | "location" | "component">): string {
+  return `${field.runId}\u0000${field.type}\u0000${field.location}\u0000${stressComponentForField(field) ?? "none"}`;
+}
+
+export function isAlignedSurfaceNodeField(field: ResultField, surfaceMesh: SolverSurfaceMesh): boolean {
+  return field.location === "node"
+    && field.surfaceMeshRef === surfaceMesh.id
+    && field.values.length === surfaceMesh.nodes.length;
+}
+
+export function resolveResultProbe(
+  pin: ResultProbePin,
+  scalarField: ResultField | undefined,
+  surfaceMesh?: SolverSurfaceMesh
+): ResolvedResultProbe | null {
+  if (!scalarField) return null;
+  if (pin.anchor.kind === "surface") {
+    if (!surfaceMesh || pin.anchor.surfaceMeshId !== surfaceMesh.id) return null;
+    if (!isAlignedSurfaceNodeField(scalarField, surfaceMesh)) return null;
+    const point = barycentricPoint(surfaceMesh.nodes, pin.anchor.triangle, pin.anchor.barycentric);
+    const value = barycentricScalar(scalarField.values, pin.anchor.triangle, pin.anchor.barycentric);
+    if (!point || !Number.isFinite(value)) return null;
+    return { id: pin.id, anchor: pin.anchor, point, value, units: scalarField.units };
+  }
+  const samples = scalarField.samples;
+  if (!samples?.length) return null;
+  const value = interpolateScalarFromSamples(pin.anchor.point, samples);
+  if (!Number.isFinite(value)) return null;
+  return { id: pin.id, anchor: pin.anchor, point: pin.anchor.point, value, units: scalarField.units };
+}
+
+export function barycentricScalar(
+  values: ArrayLike<number>,
+  triangle: [number, number, number],
+  barycentric: [number, number, number]
+): number {
+  const [a, b, c] = triangle;
+  const [wa, wb, wc] = barycentric;
+  const va = values[a];
+  const vb = values[b];
+  const vc = values[c];
+  if (![va, vb, vc, wa, wb, wc].every(Number.isFinite)) return Number.NaN;
+  return (va ?? 0) * wa + (vb ?? 0) * wb + (vc ?? 0) * wc;
+}
+
+export function barycentricPoint(
+  points: ArrayLike<[number, number, number]>,
+  triangle: [number, number, number],
+  barycentric: [number, number, number]
+): [number, number, number] | null {
+  const a = points[triangle[0]];
+  const b = points[triangle[1]];
+  const c = points[triangle[2]];
+  if (!a || !b || !c || ![...a, ...b, ...c, ...barycentric].every(Number.isFinite)) return null;
+  return [
+    a[0] * barycentric[0] + b[0] * barycentric[1] + c[0] * barycentric[2],
+    a[1] * barycentric[0] + b[1] * barycentric[1] + c[1] * barycentric[2],
+    a[2] * barycentric[0] + b[2] * barycentric[1] + c[2] * barycentric[2]
+  ];
+}
+
+/** Eight-neighbor inverse-distance interpolation used by procedural results. */
+export function interpolateScalarFromSamples(
+  point: [number, number, number],
+  samples: NonNullable<ResultField["samples"]>
+): number {
+  const neighbors = samples
+    .map((sample) => ({ sample, distanceSq: squaredDistance(point, sample.point) }))
+    .filter((entry) => Number.isFinite(entry.sample.value) && Number.isFinite(entry.distanceSq))
+    .sort((left, right) => left.distanceSq - right.distanceSq)
+    .slice(0, Math.min(8, Math.max(3, samples.length)));
+  if (!neighbors.length) return Number.NaN;
+  const exact = neighbors.find((entry) => entry.distanceSq <= 1e-18);
+  if (exact) return exact.sample.value;
+  let weighted = 0;
+  let totalWeight = 0;
+  for (const neighbor of neighbors) {
+    const weight = 1 / Math.max(neighbor.distanceSq, 1e-18);
+    weighted += neighbor.sample.value * weight;
+    totalWeight += weight;
+  }
+  return totalWeight > 0 ? weighted / totalWeight : Number.NaN;
+}
+
+function fieldsForRequestedFrame(fields: ResultField[], frameIndex: number | undefined): ResultField[] {
+  if (frameIndex === undefined || !fields.some((field) => field.frameIndex !== undefined)) return fields;
+  const exact = fields.filter((field) => (field.frameIndex ?? 0) === frameIndex);
+  return exact.length ? exact : fields;
+}
+
+function squaredDistance(left: [number, number, number], right: [number, number, number]): number {
+  const dx = left[0] - right[0];
+  const dy = left[1] - right[1];
+  const dz = left[2] - right[2];
+  return dx * dx + dy * dy + dz * dz;
+}

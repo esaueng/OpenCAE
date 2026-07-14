@@ -45,6 +45,7 @@ import { hasLegacyStepUploadFaces, hasUnresolvedStepFaceSelections, healStepFace
 import { stepGeometryMetadataForProject, stepGeometryNeedsRepair } from "./stepGeometryState";
 import { createLocalDynamicStructuralStudy, createLocalStaticStressStudy } from "./localProjectFactory";
 import { createPackedResultPlaybackCache, createResultFrameCache, hasDynamicPlaybackFrames, solverMeshSummaryFromResults, withDerivedSurfaceSafetyFactorFields, type SolverMeshSummary } from "./resultFields";
+import { appendResultProbe, MAX_RESULT_PROBES, resolveResultProbe, resultProbeTopologySignature, selectActiveResultField, type ResultProbeAnchor, type ResultProbePin } from "./resultSelection";
 import { packResultFieldsForPlayback, packedPreparedPlaybackFrameOrdinal, playbackFieldsForResultMode, playbackMemoryBudgetBytes, type PackedPreparedPlaybackCache, type PreparedPlaybackFrameCache } from "./resultPlaybackCache";
 import {
   advancePlaybackTimeline,
@@ -56,7 +57,7 @@ import {
 } from "./resultPlaybackTimeline";
 import { preparePlaybackFramesInWorker } from "./workers/performanceClient";
 import type { WorkspaceInitialAction } from "./App";
-import type { PayloadObjectSelection, PrintLayerOrientation, ResultMode, ResultPlaybackFrameController, ThemeMode, ViewerLoadMarker, ViewerSupportMarker, ViewMode } from "./workspaceViewTypes";
+import type { PayloadObjectSelection, PrintLayerOrientation, ResultMode, ResultPlaybackFrameController, StressComponent, ThemeMode, ViewerLoadMarker, ViewerSupportMarker, ViewMode } from "./workspaceViewTypes";
 
 const lazyCadViewerImport = () => import("./components/CadViewer").then((module) => ({ default: module.CadViewer }));
 const CadViewer = lazy(lazyCadViewerImport);
@@ -133,6 +134,9 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const [viewMode, setViewMode] = useState<ViewMode>(restoredUi?.viewMode ?? (restoredResults?.fields.length ? "results" : "model"));
   const [themeMode, setThemeMode] = useState<ThemeMode>(restoredUi?.themeMode ?? "dark");
   const [resultMode, setResultMode] = useState<ResultMode>(restoredUi?.resultMode ?? "stress");
+  const [stressComponent, setStressComponent] = useState<StressComponent>(restoredUi?.stressComponent ?? "von_mises");
+  const [resultProbes, setResultProbes] = useState<ResultProbePin[]>([]);
+  const [resultProbeLimitReached, setResultProbeLimitReached] = useState(false);
   const [resultRenderBounds, setResultRenderBounds] = useState<ResultRenderBounds | null>(null);
   const [showDeformed, setShowDeformed] = useState(restoredUi?.showDeformed ?? false);
   const [showDimensions, setShowDimensions] = useState(restoredUi?.showDimensions ?? false);
@@ -261,6 +265,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     displayModelForUi?.id ?? "no-model",
     displayModelForUi?.nativeCad?.contentBase64?.length ?? displayModelForUi?.visualMesh?.contentBase64?.length ?? 0,
     resultMode,
+    stressComponent,
     showDeformed ? "deformed" : "undeformed",
     stressExaggeration.toFixed(2),
     study?.meshSettings.preset ?? "no-mesh",
@@ -268,7 +273,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     resultFieldsSignature,
     resultSurfaceMesh?.id ?? "no-surface",
     resultFrameCache.frameIndexes.join(",")
-  ].join("|"), [activeRunId, completedRunId, displayModelForUi, displayUnitSystem, resultFieldsSignature, resultSurfaceMesh?.id, resultFrameCache.frameIndexes, resultMode, showDeformed, stressExaggeration, study?.meshSettings.preset]);
+  ].join("|"), [activeRunId, completedRunId, displayModelForUi, displayUnitSystem, resultFieldsSignature, resultSurfaceMesh?.id, resultFrameCache.frameIndexes, resultMode, showDeformed, stressComponent, stressExaggeration, study?.meshSettings.preset]);
   const visibleResultFieldsForUi = useMemo(
     () => {
       if (DEBUG_RESULT_FRAME_CACHE_ONLY) {
@@ -285,9 +290,25 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const resultPlaybackBufferCacheForViewer = !DEBUG_RESULT_FRAME_CACHE_ONLY && resultPlaybackCacheState.status === "ready"
     ? resultPlaybackCacheState.cache.packed ?? null
     : null;
+  const activeResultSelectionForUi = useMemo(() => selectActiveResultField({
+    fields: visibleResultFieldsForUi,
+    resultMode,
+    stressComponent,
+    surfaceMesh: resultSurfaceMesh,
+    frameIndex: resultFrameIndex
+  }), [resultFrameIndex, resultMode, resultSurfaceMesh, stressComponent, visibleResultFieldsForUi]);
+  const resolvedResultProbesForUi = useMemo(() => resultProbes.flatMap((probe) => {
+    const resolved = resolveResultProbe(probe, activeResultSelectionForUi.scalarField, resultSurfaceMesh);
+    return resolved ? [resolved] : [];
+  }), [activeResultSelectionForUi.scalarField, resultProbes, resultSurfaceMesh]);
+  const resultProbeTopologyKey = resultProbeTopologySignature(project?.id, completedRunId, displayModel?.id, resultSurfaceMesh);
   // In-browser wasm meshing has no cooperative cancel; terminate the mesh
   // worker if the workspace unmounts mid-mesh (no-op when idle or flag off).
   useEffect(() => () => cancelWasmMeshing("Meshing cancelled: workspace closed."), []);
+  useEffect(() => {
+    setResultProbes([]);
+    setResultProbeLimitReached(false);
+  }, [resultProbeTopologyKey]);
   useEffect(() => {
     if (!DEBUG_RESULTS) return;
     const frameField = visibleResultFieldsForUi.find((field) => field.type === "stress")
@@ -434,7 +455,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     }
     let cancelled = false;
     const navigatorWithMemory = typeof navigator === "undefined" ? undefined : navigator as Navigator & { deviceMemory?: number };
-    const playbackFieldsForSelectedMode = playbackFieldsForResultMode(resultFieldsForUi, resultMode);
+    const playbackFieldsForSelectedMode = playbackFieldsForResultMode(resultFieldsForUi, resultMode, stressComponent);
     const packedFields = packResultFieldsForPlayback(playbackFieldsForSelectedMode);
     setResultPlaybackCacheState({ status: "preparing", cacheKey: resultPlaybackCacheKey });
     void preparePlaybackFramesInWorker({
@@ -459,7 +480,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     return () => {
       cancelled = true;
     };
-  }, [activeStep, playbackFrameIndexes, resultFieldsForUi, resultMode, resultPlaybackCacheKey]);
+  }, [activeStep, playbackFrameIndexes, resultFieldsForUi, resultMode, resultPlaybackCacheKey, stressComponent]);
 
   useEffect(() => {
     if (!resultPlaybackPlaying || activeStep !== "results" || playbackFrameIndexes.length < 2) return;
@@ -533,6 +554,28 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       startTransition(() => setResultFrameIndex(nextFrameIndex));
     }
   }, [commitPlaybackViewerFrame, playbackFrameIndexes]);
+
+  const handleAddResultProbe = useCallback((anchor: ResultProbeAnchor) => {
+    if (resultPlaybackPlaying) return;
+    if (resultProbes.length >= MAX_RESULT_PROBES) {
+      setResultProbeLimitReached(true);
+      pushMessage(`Probe limit reached (${MAX_RESULT_PROBES}). Remove a pin before adding another.`);
+      return;
+    }
+    const next = appendResultProbe(resultProbes, anchor, createResultProbeId());
+    setResultProbeLimitReached(next.limitReached);
+    setResultProbes(next.pins);
+  }, [resultPlaybackPlaying, resultProbes.length]);
+
+  const handleRemoveResultProbe = useCallback((probeId: string) => {
+    setResultProbes((current) => current.filter((probe) => probe.id !== probeId));
+    setResultProbeLimitReached(false);
+  }, []);
+
+  const handleClearResultProbes = useCallback(() => {
+    setResultProbes([]);
+    setResultProbeLimitReached(false);
+  }, []);
 
   const handleMeasureDisplayModelDimensions = useCallback((dimensions: NonNullable<DisplayModel["dimensions"]>) => {
     setDisplayModel((current) => {
@@ -721,6 +764,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     viewMode,
     themeMode,
     resultMode,
+    stressComponent,
     showDeformed,
     showDimensions,
     stressExaggeration,
@@ -753,6 +797,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     redoStack,
     resultFrameIndex,
     resultMode,
+    stressComponent,
     resultPlaybackFps,
     resultPlaybackReverseLoop,
     runProgress,
@@ -1890,11 +1935,14 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
             onSelectFace={handleViewportFaceSelect}
             viewMode={viewMode}
             resultMode={resultMode}
+            stressComponent={stressComponent}
             showDeformed={showDeformed}
             resultPlaybackPlaying={resultPlaybackPlaying}
             showDimensions={showDimensions}
             stressExaggeration={stressExaggeration}
             resultFields={visibleResultFieldsForUi}
+            resultProbes={resultProbes}
+            onAddResultProbe={handleAddResultProbe}
             surfaceMesh={resultSurfaceMesh}
             resultPlaybackBufferCache={resultPlaybackBufferCacheForViewer}
             resultPlaybackFrameController={resultPlaybackPlaying ? resultPlaybackFrameControllerRef.current : undefined}
@@ -1921,11 +1969,16 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           selectedFace={selectedFace}
           viewMode={viewMode}
           resultMode={resultMode}
+          stressComponent={stressComponent}
           showDeformed={showDeformed}
           showDimensions={showDimensions}
           stressExaggeration={stressExaggeration}
           resultSummary={resultSummaryForUi}
           resultFields={resultFieldsForUi}
+          resultProbes={resolvedResultProbesForUi}
+          resultProbeLimitReached={resultProbeLimitReached}
+          onRemoveResultProbe={handleRemoveResultProbe}
+          onClearResultProbes={handleClearResultProbes}
           runProgress={runProgress}
           runError={runError}
           runTiming={runTiming}
@@ -1951,6 +2004,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           onSampleAnalysisTypeChange={(analysisType) => void handleLoadSample(sampleModel, analysisType)}
           onViewModeChange={setViewMode}
           onResultModeChange={setResultMode}
+          onStressComponentChange={setStressComponent}
           onToggleDeformed={() => setShowDeformed((value) => !value)}
           onToggleDimensions={() => setShowDimensions((value) => !value)}
           onStressExaggerationChange={setStressExaggeration}
@@ -2216,6 +2270,7 @@ function resultFieldsSignatureForCache(fields: ResultField[]): string {
     const lastSample = field.samples?.[field.samples.length - 1];
     return [
       field.type,
+      field.component ?? "von_mises",
       field.location,
       field.frameIndex ?? "static",
       field.timeSeconds ?? "no-time",
@@ -2233,6 +2288,11 @@ function resultFieldsSignatureForCache(fields: ResultField[]): string {
 
 function finiteSignatureValue(value: unknown): string {
   return typeof value === "number" && Number.isFinite(value) ? Number(value).toPrecision(8) : "na";
+}
+
+function createResultProbeId(): string {
+  const randomId = globalThis.crypto?.randomUUID?.();
+  return randomId ? `probe-${randomId}` : `probe-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
 function debugResultField(field: ResultField | undefined) {
