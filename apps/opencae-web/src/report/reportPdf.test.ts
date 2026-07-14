@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { ReportData } from "./reportData";
-import { renderReportPdf } from "./reportPdf";
+import { boundaryFrameHeight, renderReportPdf } from "./reportPdf";
 
 const ONE_PIXEL_PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4XmOQz7/wHwAEbQJe8AlDgQAAAABJRU5ErkJggg==";
 
@@ -50,6 +50,38 @@ describe("renderReportPdf", () => {
     await expect(renderReportPdf(empty)).resolves.toBeInstanceOf(Blob);
   });
 });
+
+describe("boundaryFrameHeight", () => {
+  const CONTENT_WIDTH = 174; // A4 at REPORT_LAYOUT.margin 18
+  const MAX_HEIGHT = 108;
+
+  test("sizes the frame so a content-cropped capture spans the content width", () => {
+    // Aspect of a real cropped boundary capture (1797x1038): tall enough to be
+    // capped, so the image fills the full width of the page.
+    expect(boundaryFrameHeight(pngFixture(1797, 1038), CONTENT_WIDTH, MAX_HEIGHT)).toBe(96);
+    // A squarer capture would want more height than the page can spare.
+    expect(boundaryFrameHeight(pngFixture(1000, 900), CONTENT_WIDTH, MAX_HEIGHT)).toBe(96);
+    // A wide, flat capture gets a short frame instead of empty page.
+    expect(boundaryFrameHeight(pngFixture(3000, 500), CONTENT_WIDTH, MAX_HEIGHT)).toBe(45);
+    // A moderately wide capture is driven by its own aspect, not the cap.
+    expect(boundaryFrameHeight(pngFixture(2000, 800), CONTENT_WIDTH, MAX_HEIGHT)).toBe(68);
+  });
+
+  test("falls back to a fixed ratio when no capture is available", () => {
+    expect(boundaryFrameHeight(undefined, CONTENT_WIDTH, MAX_HEIGHT)).toBe(96);
+  });
+});
+
+// Minimal PNG header (signature + IHDR width/height) — enough for pngDimensions.
+function pngFixture(width: number, height: number): string {
+  const header = Buffer.alloc(24);
+  header.write("\x89PNG\r\n\x1a\n", 0, "latin1");
+  header.writeUInt32BE(13, 8);
+  header.write("IHDR", 12, "latin1");
+  header.writeUInt32BE(width, 16);
+  header.writeUInt32BE(height, 20);
+  return `data:image/png;base64,${header.toString("base64")}`;
+}
 
 function fixtureReport(): ReportData {
   const rows = [

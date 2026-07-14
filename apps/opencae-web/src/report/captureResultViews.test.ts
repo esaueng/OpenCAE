@@ -1,7 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 import type { ResultField } from "@opencae/schema";
 import type { ResultMode } from "../workspaceViewTypes";
-import { captureResultViews, peakResultField } from "./captureResultViews";
+import { BOUNDARY_CAPTURE_REVISION, captureResultViews, peakResultField } from "./captureResultViews";
 
 const staticFields = [
   { id: "stress", runId: "run", type: "stress", location: "node", values: [1], min: 1, max: 1, units: "MPa" },
@@ -105,7 +105,7 @@ describe("captureResultViews", () => {
       captureBoundaryView: true
     });
 
-    expect(result.boundary).toEqual({ png: "data:image/png;base64,boundary" });
+    expect(result.boundary).toEqual({ png: "data:image/png;base64,boundary", revision: BOUNDARY_CAPTURE_REVISION });
     expect(viewModes).toEqual(["model", "results"]);
   });
 
