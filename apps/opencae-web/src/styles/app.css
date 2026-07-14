@@ -4029,8 +4029,8 @@ button:disabled {
   border-color: var(--color-accent-border);
 }
 
-/* Keyboard equivalent of the WebGL gizmo cube: hidden until focused (mouse users
-   keep using the gizmo), revealed on keyboard focus without disturbing layout. */
+/* Compact camera controls remain available for projection switching while the
+   WebGL gizmo provides the same axis/corner presets in the viewport. */
 .viewer-view-presets {
   position: absolute;
   left: 12px;
@@ -4039,14 +4039,19 @@ button:disabled {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  max-width: 220px;
-  opacity: 0;
-  pointer-events: none;
+  max-width: min(520px, calc(100% - 24px));
+  opacity: 0.88;
+  pointer-events: auto;
 }
 
 .viewer-view-presets:focus-within {
   opacity: 1;
-  pointer-events: auto;
+}
+
+.viewer-view-presets .projection-divider {
+  width: 1px;
+  margin: 2px 2px;
+  background: var(--color-border);
 }
 
 .viewer-view-presets button {
@@ -4059,7 +4064,8 @@ button:disabled {
 }
 
 .viewer-view-presets button:hover,
-.viewer-view-presets button:focus-visible {
+.viewer-view-presets button:focus-visible,
+.viewer-view-presets button[aria-pressed="true"] {
   color: var(--color-accent);
   border-color: var(--color-accent-border);
 }

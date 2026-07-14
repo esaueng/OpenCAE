@@ -29,7 +29,7 @@ import type { SolverSurfaceMesh } from "../projectFile";
 import { resultColorAtNormalized, resultColorForValue as colorForScaleValue, resultScaleCssGradient, type ResolvedResultColorScale } from "../resultColorScale";
 import { isSnapOverlayObject, SnapVisualization } from "../snapping/Visualization";
 import type { CursorRay, FaceSnapAxis, SnapMeasurement, SnapResult, Vec3 } from "../snapping/types";
-import type { PayloadObjectSelection, PrintLayerOrientation, ResultMode, ResultPlaybackFrameController, ResultPlaybackFrameSnapshot, StressComponent, ThemeMode, ViewerLoadMarker, ViewerSupportMarker, ViewMode } from "../workspaceViewTypes";
+import type { PayloadObjectSelection, PrintLayerOrientation, ProjectionMode, ResultMode, ResultPlaybackFrameController, ResultPlaybackFrameSnapshot, StressComponent, ThemeMode, ViewerLoadMarker, ViewerSupportMarker, ViewMode } from "../workspaceViewTypes";
 
 export type { PrintLayerOrientation, ResultMode, ResultPlaybackFrameController, ResultPlaybackFrameSnapshot, ThemeMode, ViewerLoadMarker, ViewerSupportMarker, ViewMode } from "../workspaceViewTypes";
 
@@ -58,6 +58,8 @@ interface CadViewerProps {
   meshSummary?: MeshSummary;
   unitSystem: UnitSystem;
   themeMode: ThemeMode;
+  projectionMode?: ProjectionMode;
+  onProjectionModeChange?: (mode: ProjectionMode) => void;
   fitSignal: number;
   viewAxis: RotationAxis | null;
   viewAxisSignal: number;
@@ -94,6 +96,8 @@ const BEAM_PAYLOAD_LABEL = "end payload mass";
 const BEAM_PAYLOAD_CENTER: [number, number, number] = [1.48, BEAM_TOP_Y + BEAM_PAYLOAD_HEIGHT / 2, 0];
 const BEAM_PAYLOAD_VOLUME_M3 = 0.00018432;
 const WORLD_UP = new THREE.Vector3(0, 0, 1);
+const DEFAULT_CAMERA_FOV = 42;
+const CAMERA_EPSILON = 1e-9;
 const ISO_CAMERA_DIRECTION = new THREE.Vector3(1, 1, 1).normalize();
 const ISO_CAMERA_UP = WORLD_UP.clone().projectOnPlane(ISO_CAMERA_DIRECTION).normalize();
 const RESULT_PAYLOAD_MATERIAL_COLOR = "#8f9aa5";
@@ -205,6 +209,7 @@ export function CadViewer(props: CadViewerProps) {
   const viewerDpr = props.resultPlaybackPlaying || viewerInteracting ? VIEWER_ACTIVE_DPR_RANGE : VIEWER_IDLE_DPR_RANGE;
   const isLightTheme = props.themeMode === "light";
   const viewportBackground = isLightTheme ? "#f7f9fc" : "#070b10";
+  const projectionMode = props.projectionMode ?? "perspective";
   const modelRotation = useMemo(() => modelRotationRadians(props.displayModel), [props.displayModel]);
   const baseModelRotation = useMemo(() => baseModelRotationRadians(props.displayModel), [props.displayModel]);
   const resultFields = props.resultFields;
@@ -256,7 +261,8 @@ export function CadViewer(props: CadViewerProps) {
     <ResultColorScaleContext.Provider value={resultColorScale}>
       <StressComponentContext.Provider value={stressComponent}>
     <section className={`viewer-shell ${effectiveViewMode === "results" ? "results-view" : ""}`} aria-label="3D CAD viewer">
-      <Canvas frameloop="demand" dpr={viewerDpr} camera={{ position: [4.8, 4.8, 4.8], up: ISO_CAMERA_UP.toArray(), fov: 42 }} onPointerMissed={props.onViewerMiss}>
+      <Canvas frameloop="demand" dpr={viewerDpr} camera={{ position: [4.8, 4.8, 4.8], up: ISO_CAMERA_UP.toArray(), fov: DEFAULT_CAMERA_FOV }} onPointerMissed={props.onViewerMiss}>
+        <ProjectionCameraController projectionMode={projectionMode} controlsRef={controlsRef} />
         <ViewerInvalidator
           activeStep={props.activeStep}
           displayModel={props.displayModel}
@@ -363,6 +369,9 @@ export function CadViewer(props: CadViewerProps) {
         <button type="button" onClick={() => setGizmoViewRequest((request) => ({ view: "y", signal: request.signal + 1 }))}>Y</button>
         <button type="button" onClick={() => setGizmoViewRequest((request) => ({ view: "z", signal: request.signal + 1 }))}>Z</button>
         <button type="button" onClick={() => setGizmoViewRequest((request) => ({ view: VIEWER_ISOMETRIC_GIZMO_VIEW, signal: request.signal + 1 }))}>Iso</button>
+        <span className="projection-divider" aria-hidden="true" />
+        <button type="button" aria-pressed={projectionMode === "perspective"} onClick={() => props.onProjectionModeChange?.("perspective")}>Perspective</button>
+        <button type="button" aria-pressed={projectionMode === "orthographic"} onClick={() => props.onProjectionModeChange?.("orthographic")}>Orthographic</button>
       </div>
       {effectiveViewMode === "results" && <ResultLegend resultMode={props.resultMode} resultFields={resultFields} unitSystem={props.unitSystem} meshSummary={props.meshSummary} surfaceMesh={props.surfaceMesh} showDeformed={effectiveShowDeformed} deformationScale={props.stressExaggeration} />}
     </section>
@@ -495,6 +504,94 @@ function ViewerInvalidator({
     viewAxis,
     viewAxisSignal
   ]);
+  return null;
+}
+
+export function cameraVerticalSpanAtTarget(camera: THREE.Camera, target: THREE.Vector3): number {
+  if (camera instanceof THREE.PerspectiveCamera) {
+    const distance = Math.max(camera.position.distanceTo(target), CAMERA_EPSILON);
+    return 2 * distance * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2) / Math.max(camera.zoom, CAMERA_EPSILON);
+  }
+  if (camera instanceof THREE.OrthographicCamera) {
+    return Math.abs(camera.top - camera.bottom) / Math.max(camera.zoom, CAMERA_EPSILON);
+  }
+  return Math.max(camera.position.distanceTo(target) * 2, CAMERA_EPSILON);
+}
+
+export function cameraForProjection(
+  camera: THREE.Camera,
+  target: THREE.Vector3,
+  projectionMode: ProjectionMode,
+  aspect: number
+): THREE.PerspectiveCamera | THREE.OrthographicCamera {
+  const safeAspect = Math.max(aspect, CAMERA_EPSILON);
+  const verticalSpan = Math.max(cameraVerticalSpanAtTarget(camera, target), CAMERA_EPSILON);
+  const near = camera instanceof THREE.PerspectiveCamera || camera instanceof THREE.OrthographicCamera ? camera.near : 0.1;
+  const far = camera instanceof THREE.PerspectiveCamera || camera instanceof THREE.OrthographicCamera ? camera.far : 2000;
+  const viewDirection = camera.position.clone().sub(target);
+  if (viewDirection.lengthSq() <= CAMERA_EPSILON * CAMERA_EPSILON) viewDirection.copy(ISO_CAMERA_DIRECTION);
+  viewDirection.normalize();
+
+  const next = projectionMode === "orthographic"
+    ? new THREE.OrthographicCamera(-verticalSpan * safeAspect / 2, verticalSpan * safeAspect / 2, verticalSpan / 2, -verticalSpan / 2, near, far)
+    : new THREE.PerspectiveCamera(DEFAULT_CAMERA_FOV, safeAspect, near, far);
+  const distance = projectionMode === "perspective"
+    ? verticalSpan / (2 * Math.tan(THREE.MathUtils.degToRad(DEFAULT_CAMERA_FOV) / 2))
+    : camera.position.distanceTo(target);
+  next.position.copy(target).addScaledVector(viewDirection, Math.max(distance, CAMERA_EPSILON));
+  next.up.copy(camera.up);
+  next.layers.mask = camera.layers.mask;
+  next.lookAt(target);
+  next.updateProjectionMatrix();
+  next.updateMatrixWorld();
+  return next;
+}
+
+export function resizeProjectionCamera(camera: THREE.Camera, aspect: number): void {
+  const safeAspect = Math.max(aspect, CAMERA_EPSILON);
+  if (camera instanceof THREE.PerspectiveCamera) {
+    camera.aspect = safeAspect;
+    camera.updateProjectionMatrix();
+    return;
+  }
+  if (camera instanceof THREE.OrthographicCamera) {
+    const verticalSpan = Math.max(Math.abs(camera.top - camera.bottom), CAMERA_EPSILON);
+    camera.left = -verticalSpan * safeAspect / 2;
+    camera.right = verticalSpan * safeAspect / 2;
+    camera.updateProjectionMatrix();
+  }
+}
+
+function ProjectionCameraController({
+  projectionMode,
+  controlsRef
+}: {
+  projectionMode: ProjectionMode;
+  controlsRef: MutableRefObject<ViewerOrbitControls | null>;
+}) {
+  const { camera, invalidate, set, size } = useThree();
+  useEffect(() => {
+    const aspect = size.width / Math.max(size.height, 1);
+    const wantsOrthographic = projectionMode === "orthographic";
+    const alreadyCorrect = wantsOrthographic
+      ? camera instanceof THREE.OrthographicCamera
+      : camera instanceof THREE.PerspectiveCamera;
+    if (alreadyCorrect) {
+      resizeProjectionCamera(camera, aspect);
+      invalidate();
+      return;
+    }
+
+    const controls = controlsRef.current;
+    const target = controls?.target.clone() ?? new THREE.Vector3(0, 0, 0.75);
+    const nextCamera = cameraForProjection(camera, target, projectionMode, aspect);
+    set({ camera: nextCamera });
+    if (controls) {
+      (controls as ViewerOrbitControls & { object: THREE.Camera }).object = nextCamera;
+      controls.update();
+    }
+    invalidate();
+  }, [camera, controlsRef, invalidate, projectionMode, set, size.height, size.width]);
   return null;
 }
 
@@ -634,11 +731,21 @@ export function renderReportCapture(gl: ReportCaptureRenderer, scene: THREE.Scen
   const previousBackground = scene.background;
   const previousPosition = camera.position.clone();
   const previousQuaternion = camera.quaternion.clone();
+  const previousUp = camera.up.clone();
+  const perspectiveCamera = camera instanceof THREE.PerspectiveCamera ? camera : null;
+  const orthographicCamera = camera instanceof THREE.OrthographicCamera ? camera : null;
+  const previousPerspective = perspectiveCamera ? { aspect: perspectiveCamera.aspect, fov: perspectiveCamera.fov, zoom: perspectiveCamera.zoom } : null;
+  const previousOrthographic = orthographicCamera ? {
+    bottom: orthographicCamera.bottom,
+    left: orthographicCamera.left,
+    right: orthographicCamera.right,
+    top: orthographicCamera.top,
+    zoom: orthographicCamera.zoom
+  } : null;
   try {
     scene.background = new THREE.Color(REPORT_CAPTURE_BACKGROUND);
     const bounds = reportCaptureBounds(scene);
-    const perspectiveCamera = camera as THREE.PerspectiveCamera;
-    if (bounds && perspectiveCamera.isPerspectiveCamera) {
+    if (bounds && perspectiveCamera) {
       const center = bounds.getCenter(new THREE.Vector3());
       const offset = camera.position.clone().sub(center);
       const viewDirection = offset.lengthSq() > 1e-12 ? offset.normalize() : ISO_CAMERA_DIRECTION.clone();
@@ -656,6 +763,22 @@ export function renderReportCapture(gl: ReportCaptureRenderer, scene: THREE.Scen
       camera.position.copy(center).addScaledVector(viewDirection, distance);
       camera.lookAt(center);
       camera.updateMatrixWorld();
+    } else if (bounds && orthographicCamera) {
+      const center = bounds.getCenter(new THREE.Vector3());
+      const offset = camera.position.clone().sub(center);
+      const viewDirection = offset.lengthSq() > CAMERA_EPSILON * CAMERA_EPSILON ? offset.normalize() : ISO_CAMERA_DIRECTION.clone();
+      const up = new THREE.Vector3().crossVectors(viewDirection, camera.up).lengthSq() > CAMERA_EPSILON * CAMERA_EPSILON
+        ? camera.up
+        : ISO_CAMERA_UP;
+      const canvas = gl.domElement as { width?: number; height?: number };
+      const aspect = typeof canvas.width === "number" && typeof canvas.height === "number" && canvas.height > 0
+        ? canvas.width / canvas.height
+        : Math.abs(orthographicCamera.right - orthographicCamera.left) / Math.max(Math.abs(orthographicCamera.top - orthographicCamera.bottom), CAMERA_EPSILON);
+      camera.position.copy(center).addScaledVector(viewDirection, Math.max(previousPosition.distanceTo(center), CAMERA_EPSILON));
+      camera.up.copy(up);
+      camera.lookAt(center);
+      fitOrthographicCamera(orthographicCamera, bounds, center, viewDirection, up, aspect, REPORT_CAPTURE_FIT_MARGIN);
+      camera.updateMatrixWorld();
     }
     gl.render(scene, camera);
     return croppedReportCapturePng(gl.domElement) ?? gl.domElement.toDataURL("image/png");
@@ -663,6 +786,21 @@ export function renderReportCapture(gl: ReportCaptureRenderer, scene: THREE.Scen
     scene.background = previousBackground;
     camera.position.copy(previousPosition);
     camera.quaternion.copy(previousQuaternion);
+    camera.up.copy(previousUp);
+    if (perspectiveCamera && previousPerspective) {
+      perspectiveCamera.aspect = previousPerspective.aspect;
+      perspectiveCamera.fov = previousPerspective.fov;
+      perspectiveCamera.zoom = previousPerspective.zoom;
+      perspectiveCamera.updateProjectionMatrix();
+    }
+    if (orthographicCamera && previousOrthographic) {
+      orthographicCamera.bottom = previousOrthographic.bottom;
+      orthographicCamera.left = previousOrthographic.left;
+      orthographicCamera.right = previousOrthographic.right;
+      orthographicCamera.top = previousOrthographic.top;
+      orthographicCamera.zoom = previousOrthographic.zoom;
+      orthographicCamera.updateProjectionMatrix();
+    }
     camera.updateMatrixWorld();
     gl.render(scene, camera);
   }
@@ -822,13 +960,16 @@ function ShiftPanControls({ controlsRef, onInteractionChange }: { controlsRef: M
   return null;
 }
 
-function panCamera(camera: THREE.Camera, target: THREE.Vector3, deltaX: number, deltaY: number, viewportHeight: number) {
+export function panCamera(camera: THREE.Camera, target: THREE.Vector3, deltaX: number, deltaY: number, viewportHeight: number) {
   const perspectiveCamera = camera as THREE.PerspectiveCamera;
+  const orthographicCamera = camera as THREE.OrthographicCamera;
   const distance = camera.position.distanceTo(target);
   const targetDistance = perspectiveCamera.isPerspectiveCamera
-    ? distance * Math.tan((perspectiveCamera.fov / 2) * THREE.MathUtils.DEG2RAD)
-    : distance;
-  const scale = (2 * targetDistance) / viewportHeight;
+    ? distance * Math.tan((perspectiveCamera.fov / 2) * THREE.MathUtils.DEG2RAD) / Math.max(perspectiveCamera.zoom, CAMERA_EPSILON)
+    : orthographicCamera.isOrthographicCamera
+      ? Math.abs(orthographicCamera.top - orthographicCamera.bottom) / (2 * Math.max(orthographicCamera.zoom, CAMERA_EPSILON))
+      : distance;
+  const scale = (2 * targetDistance) / Math.max(viewportHeight, 1);
   const panOffset = new THREE.Vector3();
   const xAxis = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 0).multiplyScalar(-deltaX * scale);
   const yAxis = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 1).multiplyScalar(deltaY * scale);
@@ -6660,6 +6801,17 @@ function BoundsCameraReset({ contentFitKey, signal, viewAxis, viewAxisSignal, co
         size.width / size.height
       );
       applyViewerCameraPose(camera, controlsRef.current, pose);
+      if (camera instanceof THREE.OrthographicCamera) {
+        fitOrthographicCamera(
+          camera,
+          box,
+          pose.target,
+          pose.position.clone().sub(pose.target),
+          pose.up,
+          size.width / Math.max(size.height, 1),
+          viewAxis ? VIEWER_FIT_MARGIN : DEFAULT_HOME_FIT_MARGIN
+        );
+      }
       invalidate();
     }
 
@@ -6693,6 +6845,17 @@ function GizmoCameraReset({ view, signal, controlsRef }: { view: GizmoViewReques
       size.width / size.height
     );
     applyViewerCameraPose(camera, controlsRef.current, pose);
+    if (camera instanceof THREE.OrthographicCamera) {
+      fitOrthographicCamera(
+        camera,
+        box,
+        pose.target,
+        pose.position.clone().sub(pose.target),
+        pose.up,
+        size.width / Math.max(size.height, 1),
+        VIEWER_FIT_MARGIN
+      );
+    }
     invalidate();
   }, [bounds, camera, controlsRef, invalidate, signal, size.height, size.width, view]);
   return null;
@@ -6808,6 +6971,55 @@ function projectedBoundsHalfHeight(bounds: THREE.Box3, center: THREE.Vector3, vi
     }
   }
   return halfHeight;
+}
+
+export function orthographicVerticalSpanForBounds(
+  bounds: THREE.Box3,
+  target: THREE.Vector3,
+  direction: THREE.Vector3,
+  up: THREE.Vector3,
+  aspect: number,
+  margin: number
+): number {
+  const safeAspect = Math.max(aspect, CAMERA_EPSILON);
+  const viewDirection = direction.clone().normalize();
+  const right = new THREE.Vector3().crossVectors(viewDirection, up);
+  if (right.lengthSq() <= CAMERA_EPSILON * CAMERA_EPSILON) {
+    right.crossVectors(viewDirection, Math.abs(viewDirection.z) < 0.9 ? WORLD_UP : new THREE.Vector3(0, 1, 0));
+  }
+  right.normalize();
+  const viewUp = new THREE.Vector3().crossVectors(right, viewDirection).normalize();
+  let halfWidth = 0;
+  let halfHeight = 0;
+  for (const x of [bounds.min.x, bounds.max.x]) {
+    for (const y of [bounds.min.y, bounds.max.y]) {
+      for (const z of [bounds.min.z, bounds.max.z]) {
+        const offset = new THREE.Vector3(x, y, z).sub(target);
+        halfWidth = Math.max(halfWidth, Math.abs(offset.dot(right)));
+        halfHeight = Math.max(halfHeight, Math.abs(offset.dot(viewUp)));
+      }
+    }
+  }
+  return 2 * Math.max(halfHeight, halfWidth / safeAspect, CAMERA_EPSILON) * Math.max(margin, CAMERA_EPSILON);
+}
+
+export function fitOrthographicCamera(
+  camera: THREE.OrthographicCamera,
+  bounds: THREE.Box3,
+  target: THREE.Vector3,
+  direction: THREE.Vector3,
+  up: THREE.Vector3,
+  aspect: number,
+  margin: number
+): void {
+  const safeAspect = Math.max(aspect, CAMERA_EPSILON);
+  const verticalSpan = orthographicVerticalSpanForBounds(bounds, target, direction, up, safeAspect, margin);
+  camera.left = -verticalSpan * safeAspect / 2;
+  camera.right = verticalSpan * safeAspect / 2;
+  camera.top = verticalSpan / 2;
+  camera.bottom = -verticalSpan / 2;
+  camera.zoom = 1;
+  camera.updateProjectionMatrix();
 }
 
 export function cameraDistanceForBounds(
