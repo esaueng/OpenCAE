@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import * as THREE from "three";
-import { beamPayloadSelectionForTarget, faceIdForPlacementSnap, faceSnapAxesForDisplayModel, holeSupportGlyphGeometry, loadGlyphLabelPosition, loadGlyphSurfacePoint, pointForPlacementSnap, shouldCreateUploadedFacePlaceholder, shouldShowModelHitLabel, stepFaceIdFromPickObject, supportGlyphAnchor, supportMarkerAnchor } from "./CadViewer";
+import { beamPayloadSelectionForTarget, dimensionAnnotationScale, faceIdForPlacementSnap, faceSnapAxesForDisplayModel, holeSupportGlyphGeometry, loadGlyphLabelPosition, loadGlyphSurfacePoint, pointForPlacementSnap, shouldCreateUploadedFacePlaceholder, shouldShowModelHitLabel, stepFaceIdFromPickObject, supportGlyphAnchor, supportMarkerAnchor } from "./CadViewer";
 
 describe("CadViewer callouts", () => {
   test("does not create placeholder faces after the STEP registry is live", () => {
@@ -167,6 +167,21 @@ describe("CadViewer callouts", () => {
 
     expect(new Set(labelPositions.map((position) => position.map((value) => value.toFixed(3)).join(","))).size).toBe(3);
     expect(labelPositions.every((position) => position.every(Number.isFinite))).toBe(true);
+  });
+
+  test("scales dimension annotations to the displayed model footprint", () => {
+    const beamBounds = new THREE.Box3(
+      new THREE.Vector3(-1.9, 0, -0.3),
+      new THREE.Vector3(1.78, 0.8, 0.3)
+    );
+    const tinyBounds = new THREE.Box3(
+      new THREE.Vector3(-0.01, -0.01, -0.01),
+      new THREE.Vector3(0.01, 0.01, 0.01)
+    );
+
+    expect(dimensionAnnotationScale(beamBounds)).toBeCloseTo(((3.68 + 0.8 + 0.6) / 3) / 2.55);
+    expect(dimensionAnnotationScale(tinyBounds)).toBe(0.3);
+    expect(dimensionAnnotationScale(null)).toBe(1);
   });
 
   test("derives whole-unit snap axes from displayed model dimensions", () => {
