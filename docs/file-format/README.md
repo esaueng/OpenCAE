@@ -17,6 +17,10 @@ OpenCAE local project files use JSON and are saved with `.opencae.json` by defau
 - `displayModel` contains the browser display representation, face references, optional visual mesh data, and optional native CAD metadata.
 - `results` is optional and stores the active/completed run id, a structural or modal result summary, and result fields for completed local files.
 
+Static and dynamic structural studies may contain `loadCases` and `loadCombinations`. Each load id appears in exactly one case. Cases do not contain their own supports, material, geometry, mesh, or solver settings. Combination factors are finite signed numbers that reference static case ids directly; nested combinations are not valid. Readers synthesize one enabled `Default` case containing every load when those arrays are absent in an older project.
+
+Structural `results` may include `variants`, lightweight `variantRefs`, and `activeVariantId`. Variant kinds are `case`, `combination`, and `envelope`; dynamic case refs can be marked `persistedSeparately` because their full transient fields live in per-case IndexedDB records. An envelope may store compact `governingVariantIndices` with one shared variant-id table plus integer stress and displacement arrays. Older single-summary/field structural bundles reopen as one Default case variant. Modal bundles remain modal and are not rewritten as load cases.
+
 Uploaded STEP, STP, STL, and OBJ source data can be embedded into the project metadata as base64 when the browser has the uploaded model content available. This makes saved local project files self-contained for reopening in the web app.
 
 `project.customMaterials` is optional. Each entry uses a UUID id, name, category, Young's modulus and yield strength in Pa, density in kg/m³, Poisson ratio, optional copied additive `printProfile`, and `verification: "user_supplied_unverified"`. These definitions are project-scoped; there is no global browser material library. Because this is an optional backward-readable field, the outer container remains version 2.
@@ -31,4 +35,4 @@ Core readers accept `0.1.0`, `0.2.0`, and `0.3.0`. Schema `0.3.0` adds a `modal`
 
 Modal result bundles are discriminated by `summary.analysisType: "modal_analysis"`. Each mode records its 1-based index, frequency in Hz, eigenvalue, scaled residual, and field id. Its `mode_shape` field is a node-located 3-vector surface field with `normalized` units; it is never labeled as displacement. Shape vectors are normalized to a maximum nodal vector magnitude of 1 and have deterministic, physically arbitrary sign.
 
-The outer `opencae-local-project` container remains version 2 because the new study and result shapes are backward-readable additions. Legacy structural summary/field bundles continue parsing unchanged.
+The outer `opencae-local-project` container remains version 2 because the new study and result shapes are backward-readable additions. Legacy structural summary/field bundles continue parsing as one Default run variant.

@@ -201,6 +201,75 @@ describe("app persistence", () => {
     expect(bundle?.summary.transient?.frameCount).toBe(21);
   });
 
+  test("migrates a legacy structural result bundle to one Default run variant", async () => {
+    const { parseResultBundle } = await import("./appPersistence");
+
+    const bundle = parseResultBundle({ completedRunId: "run-1", summary, fields });
+
+    expect(bundle?.activeVariantId).toBe("case:default");
+    expect(bundle?.variantRefs).toEqual([{
+      id: "case:default",
+      name: "Default",
+      kind: "case",
+      caseId: "case-default",
+      combinationId: undefined
+    }]);
+    expect(bundle?.variants).toHaveLength(1);
+    expect(bundle?.variants?.[0]?.fields[0]?.variantId).toBe("case:default");
+  });
+
+  test("restores explicit case, combination, and envelope variant metadata", async () => {
+    const { parseResultBundle } = await import("./appPersistence");
+    const variants = [
+      { id: "case:service", name: "Service", kind: "case" as const, caseId: "service", summary, fields: fields.map((field) => ({ ...field, variantId: "case:service" })) },
+      { id: "combination:reverse", name: "Reverse", kind: "combination" as const, combinationId: "reverse", summary, fields: fields.map((field) => ({ ...field, variantId: "combination:reverse" })) },
+      {
+        id: "envelope",
+        name: "Envelope",
+        kind: "envelope" as const,
+        summary,
+        fields: fields.map((field) => ({ ...field, variantId: "envelope" })),
+        governingVariantIndices: { variantIds: ["case:service", "combination:reverse"], stress: [0], displacement: [1] }
+      }
+    ];
+
+    const bundle = parseResultBundle({ summary, fields, variants, activeVariantId: "envelope" });
+
+    expect(bundle?.activeVariantId).toBe("envelope");
+    expect(bundle?.variants?.map((variant) => variant.kind)).toEqual(["case", "combination", "envelope"]);
+    expect(bundle?.variantRefs?.map((variant) => variant.id)).toEqual(["case:service", "combination:reverse", "envelope"]);
+    expect(bundle?.variants?.[2]?.governingVariantIndices?.displacement).toEqual([1]);
+  });
+
+  test("uses the active separately persisted case metadata when only dynamic refs remain", async () => {
+    const { parseResultBundle } = await import("./appPersistence");
+    const bundle = parseResultBundle({
+      summary: {
+        ...summary,
+        transient: {
+          analysisType: "dynamic_structural",
+          startTime: 0,
+          endTime: 0.1,
+          timeStep: 0.01,
+          outputInterval: 0.01,
+          frameCount: 11,
+          peakDisplacementTimeSeconds: 0.1,
+          peakDisplacement: 0.2
+        }
+      },
+      fields,
+      variantRefs: [
+        { id: "case:down", name: "Down", kind: "case", caseId: "down", persistedSeparately: true },
+        { id: "case:side", name: "Side", kind: "case", caseId: "side", persistedSeparately: true }
+      ],
+      activeVariantId: "case:side"
+    });
+
+    expect(bundle?.activeVariantId).toBe("case:side");
+    expect(bundle?.variants?.[0]).toMatchObject({ id: "case:side", name: "Side", caseId: "side" });
+    expect(bundle?.variants?.[0]?.fields[0]?.variantId).toBe("case:side");
+  });
+
   test("restores report captures saved with completed simulation results", async () => {
     const { parseResultBundle } = await import("./appPersistence");
     const reportCaptures = {

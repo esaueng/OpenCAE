@@ -98,6 +98,7 @@ export interface ResultFrameCache {
 export interface PackedResultPlaybackFieldDescriptor {
   id: string;
   runId: string;
+  variantId?: string;
   type: ResultField["type"];
   component?: ResultField["component"];
   modeIndex?: number;
@@ -485,6 +486,7 @@ function descriptorForPackedResultField(field: ResultField): PackedResultPlaybac
   return {
     id: field.id,
     runId: field.runId,
+    ...(field.variantId ? { variantId: field.variantId } : {}),
     type: field.type,
     ...(field.component ? { component: field.component } : {}),
     ...(field.modeIndex !== undefined ? { modeIndex: field.modeIndex } : {}),

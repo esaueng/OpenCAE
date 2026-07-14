@@ -73,6 +73,7 @@ const hydratedFrames = new WeakMap<PreparedPlaybackFrame, { framePosition: numbe
 export interface PackedPreparedPlaybackFieldDescriptor {
   id: string;
   runId: string;
+  variantId?: string;
   type: ResultField["type"];
   component?: ResultField["component"];
   modeIndex?: number;
@@ -660,6 +661,7 @@ function descriptorForPackedPlaybackField(field: Omit<ResultField, "values">): P
   return {
     id: field.id,
     runId: field.runId,
+    ...(field.variantId ? { variantId: field.variantId } : {}),
     type: field.type,
     ...(field.component ? { component: field.component } : {}),
     ...(field.modeIndex !== undefined ? { modeIndex: field.modeIndex } : {}),

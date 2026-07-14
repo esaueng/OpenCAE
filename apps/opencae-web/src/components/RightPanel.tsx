@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { AlertTriangle, Anchor, ArrowDown, Atom, Check, ChevronDown, ChevronRight, CircleHelp, Eye, Factory, FileDown, Gauge, Grid3X3, Layers3, Maximize2, Pause, Play, Plus, RotateCcw, Ruler, ScanLine, ShieldCheck, Upload, Weight, Wrench, X } from "lucide-react";
 import { compatibleManufacturingProcessesFor, defaultManufacturingParametersFor, defaultManufacturingProcessIdFor, effectiveMaterialProperties, fdmPropertyFactorsFor, isManufacturingProcessCompatible, manufacturingParametersForAssignment, manufacturingProcessForId, massKgForPayloadMaterial, materialCatalog, materialCategoryLabel, normalizeManufacturingParameters, payloadMaterialForId, payloadMaterials, type ManufacturingParameters, type ManufacturingProcessId, type PayloadMaterialCategory } from "@opencae/materials";
 import { assessResultFailure, estimateAllowableLoadForSafetyFactor, isModalResultSummary } from "@opencae/schema";
-import type { Constraint, CustomMaterial, DisplayFace, DisplayModel, DynamicSolverSettings, Load, Material, MeshQuality, ModalResultSummary, ModalSolverSettings, Project, ResultField, ResultSummary, RunTimingEstimate, SimulationFidelity, StructuralResultSummary, Study } from "@opencae/schema";
+import type { Constraint, CustomMaterial, DisplayFace, DisplayModel, DynamicSolverSettings, Load, LoadCase, LoadCombination, Material, MeshQuality, ModalResultSummary, ModalSolverSettings, Project, ResultField, ResultSummary, RunTimingEstimate, RunVariantRef, SimulationFidelity, StructuralResultSummary, Study } from "@opencae/schema";
 import { inferGlobalCriticalPrintAxis } from "@opencae/study-core";
 import type { StepId } from "./StepBar";
 import { applicationPointForLoad, createViewerLoadMarkers, directionLabelForLoad, directionVectorForLabel, equivalentForceForLoad, LOAD_DIRECTION_LABELS, loadMarkerOrdinalLabel, payloadObjectForLoad, unitsForLoadType, type LoadApplicationPoint, type LoadDirectionLabel, type LoadType, type PayloadLoadMetadata, type PayloadMassMode } from "../loadPreview";
@@ -59,6 +59,9 @@ interface RightPanelProps {
   stressExaggeration: number;
   resultSummary: ResultSummary | null;
   resultFields?: ResultField[];
+  resultVariants?: RunVariantRef[];
+  activeResultVariantId?: string;
+  onResultVariantChange?: (variantId: string) => void | Promise<void>;
   resultProbes?: ResolvedResultProbe[];
   resultProbeLimitReached?: boolean;
   runProgress: number;
@@ -110,6 +113,7 @@ interface RightPanelProps {
   onUpdateLoad: (load: Load) => void;
   onPreviewLoadEdit: (load: Load | null) => void;
   onRemoveLoad: (loadId: string) => void;
+  onLoadCasesChange?: (loadCases: LoadCase[], loadCombinations: LoadCombination[]) => void;
   onGenerateMesh: (preset: MeshQuality) => void;
   onCancelMesh?: () => void;
   meshPhaseProgress?: WasmMeshPhaseProgress | null;
@@ -627,7 +631,8 @@ function LoadsPanel({
   onAddLoad,
   onUpdateLoad,
   onPreviewLoadEdit,
-  onRemoveLoad
+  onRemoveLoad,
+  onLoadCasesChange
 }: RightPanelProps) {
   const selectedFromViewport = selectedFace ? selectionForFace(study, selectedFace.id) : undefined;
   const placementSelection = draftLoadType === "gravity" ? undefined : selectedFromViewport;
@@ -661,6 +666,17 @@ function LoadsPanel({
         : null
     );
   }, [draftLoadType, effectiveDraftValue, onDraftPayloadPreviewChange, payloadMassMode, payloadMaterialId, payloadVolumeM3]);
+  const loadCases = study.type === "modal_analysis" ? [] : structuralLoadCasesForPanel(study);
+  const loadCombinations = study.type === "static_stress" ? study.loadCombinations ?? [] : [];
+  function assignLoadToCase(loadId: string, caseId: string) {
+    if (!onLoadCasesChange) return;
+    onLoadCasesChange(loadCases.map((loadCase) => ({
+      ...loadCase,
+      loadIds: loadCase.id === caseId
+        ? [...loadCase.loadIds.filter((id) => id !== loadId), loadId]
+        : loadCase.loadIds.filter((id) => id !== loadId)
+    })), loadCombinations);
+  }
   return (
     <Panel title="Loads" helper={draftLoadType === "gravity" ? "Choose the object carrying payload mass, then add its weight as a load." : "Select a point on the model, then click Add load."}>
       <HelpNote helpId="loadPlacement" />
@@ -729,7 +745,15 @@ function LoadsPanel({
         </select>
       </label>
       <button className="outline-action wide" disabled={!canAddDraftLoad} onClick={() => canAddDraftLoad && onAddLoad(draftLoadType, effectiveDraftValue, selectedFromViewport?.id, draftLoadDirection, payloadMetadata)}><Plus size={18} />{addLabel}</button>
-      <LoadEditorList study={study} displayModel={displayModel} unitSystem={project.unitSystem} onUpdateLoad={onUpdateLoad} onPreviewLoadEdit={onPreviewLoadEdit} onRemoveLoad={onRemoveLoad} />
+      {study.type !== "modal_analysis" && (
+        <LoadCasesEditor
+          studyType={study.type}
+          loadCases={loadCases}
+          loadCombinations={loadCombinations}
+          onChange={(cases, combinations) => onLoadCasesChange?.(cases, combinations)}
+        />
+      )}
+      <LoadEditorList study={study} displayModel={displayModel} unitSystem={project.unitSystem} loadCases={loadCases} onAssignLoadToCase={assignLoadToCase} onUpdateLoad={onUpdateLoad} onPreviewLoadEdit={onPreviewLoadEdit} onRemoveLoad={onRemoveLoad} />
     </Panel>
   );
 }
@@ -819,7 +843,92 @@ function PayloadMassControls({
   );
 }
 
-function LoadEditorList({ study, displayModel, unitSystem, onUpdateLoad, onPreviewLoadEdit, onRemoveLoad }: { study: Study; displayModel: DisplayModel; unitSystem: UnitSystem; onUpdateLoad: (load: Load) => void; onPreviewLoadEdit: (load: Load | null) => void; onRemoveLoad: (loadId: string) => void }) {
+function LoadCasesEditor({ studyType, loadCases, loadCombinations, onChange }: {
+  studyType: "static_stress" | "dynamic_structural";
+  loadCases: LoadCase[];
+  loadCombinations: LoadCombination[];
+  onChange: (loadCases: LoadCase[], loadCombinations: LoadCombination[]) => void;
+}) {
+  const referencedCaseIds = new Set(loadCombinations.flatMap((combination) => combination.factors.map((factor) => factor.caseId)));
+  const updateCase = (caseId: string, patch: Partial<LoadCase>) => onChange(
+    loadCases.map((loadCase) => loadCase.id === caseId ? { ...loadCase, ...patch } : loadCase),
+    loadCombinations
+  );
+  const updateCombination = (combinationId: string, patch: Partial<LoadCombination>) => onChange(
+    loadCases,
+    loadCombinations.map((combination) => combination.id === combinationId ? { ...combination, ...patch } : combination)
+  );
+  return (
+    <section className="load-case-editor" aria-label="Load cases">
+      <SectionTitle>Load cases</SectionTitle>
+      {loadCases.map((loadCase) => {
+        const canDelete = loadCases.length > 1 && loadCase.loadIds.length === 0 && !referencedCaseIds.has(loadCase.id);
+        return (
+          <div className="load-case-row" key={loadCase.id}>
+            <input aria-label={`Load case name ${loadCase.name}`} value={loadCase.name} onChange={(event) => updateCase(loadCase.id, { name: event.currentTarget.value || "Untitled case" })} />
+            <label className="toggle compact-toggle">
+              <input type="checkbox" checked={loadCase.enabled} onChange={(event) => updateCase(loadCase.id, { enabled: event.currentTarget.checked })} />
+              <span>Enabled</span>
+            </label>
+            <small>{loadCase.loadIds.length} load{loadCase.loadIds.length === 1 ? "" : "s"}</small>
+            <button type="button" className="remove-glyph" aria-label={`Delete load case ${loadCase.name}`} disabled={!canDelete} onClick={() => onChange(loadCases.filter((candidate) => candidate.id !== loadCase.id), loadCombinations)}><X size={15} /></button>
+          </div>
+        );
+      })}
+      <button className="secondary wide" type="button" onClick={() => onChange([
+        ...loadCases,
+        { id: `case-${crypto.randomUUID()}`, name: `Case ${loadCases.length + 1}`, enabled: true, loadIds: [] }
+      ], loadCombinations)}><Plus size={16} />Add load case</button>
+      {studyType === "static_stress" && (
+        <>
+          <SectionTitle>Combinations</SectionTitle>
+          {loadCombinations.map((combination) => (
+            <div className="load-combination-row" key={combination.id}>
+              <input aria-label={`Combination name ${combination.name}`} value={combination.name} onChange={(event) => updateCombination(combination.id, { name: event.currentTarget.value || "Untitled combination" })} />
+              <label className="toggle compact-toggle">
+                <input type="checkbox" checked={combination.enabled} onChange={(event) => updateCombination(combination.id, { enabled: event.currentTarget.checked })} />
+                <span>Enabled</span>
+              </label>
+              {combination.factors.map((factor) => (
+                <label className="combination-factor" key={factor.caseId}>
+                  <span>{loadCases.find((loadCase) => loadCase.id === factor.caseId)?.name ?? factor.caseId}</span>
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={factor.factor}
+                    onChange={(event) => updateCombination(combination.id, {
+                      factors: combination.factors.map((candidate) => candidate.caseId === factor.caseId
+                        ? { ...candidate, factor: Number.isFinite(Number(event.currentTarget.value)) ? Number(event.currentTarget.value) : 0 }
+                        : candidate)
+                    })}
+                  />
+                </label>
+              ))}
+              <button type="button" className="secondary" onClick={() => onChange(loadCases, loadCombinations.filter((candidate) => candidate.id !== combination.id))}>Delete combination</button>
+            </div>
+          ))}
+          <button className="secondary wide" type="button" disabled={!loadCases.length} onClick={() => onChange(loadCases, [
+            ...loadCombinations,
+            {
+              id: `combination-${crypto.randomUUID()}`,
+              name: `Combination ${loadCombinations.length + 1}`,
+              enabled: true,
+              factors: loadCases.slice(0, 2).map((loadCase) => ({ caseId: loadCase.id, factor: 1 }))
+            }
+          ])}><Plus size={16} />Add combination</button>
+        </>
+      )}
+    </section>
+  );
+}
+
+function structuralLoadCasesForPanel(study: Extract<Study, { type: "static_stress" | "dynamic_structural" }>): LoadCase[] {
+  return study.loadCases?.length
+    ? study.loadCases
+    : [{ id: "case-default", name: "Default", enabled: true, loadIds: study.loads.map((load) => load.id) }];
+}
+
+function LoadEditorList({ study, displayModel, unitSystem, loadCases, onAssignLoadToCase, onUpdateLoad, onPreviewLoadEdit, onRemoveLoad }: { study: Study; displayModel: DisplayModel; unitSystem: UnitSystem; loadCases: LoadCase[]; onAssignLoadToCase: (loadId: string, caseId: string) => void; onUpdateLoad: (load: Load) => void; onPreviewLoadEdit: (load: Load | null) => void; onRemoveLoad: (loadId: string) => void }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   if (!study.loads.length) return <EmptyEditableList title="Loads" />;
   const loadLabelsById = new Map(createViewerLoadMarkers({ study, displayModel }).map((marker) => [marker.id, loadMarkerOrdinalLabel(marker)]));
@@ -841,6 +950,7 @@ function LoadEditorList({ study, displayModel, unitSystem, onUpdateLoad, onPrevi
           : applicationPointForLoad(load) ? " · point load" : "";
         const equivalentForce = load.type === "gravity" ? ` · ${formatEquivalentForce(equivalentForceForLoad(load), unitSystem)} weight` : "";
         const loadLabel = loadLabelsById.get(load.id);
+        const loadCaseId = loadCases.find((loadCase) => loadCase.loadIds.includes(load.id))?.id ?? loadCases[0]?.id ?? "";
         const editLabel = `Edit ${loadLabel ? `${loadLabel} ` : ""}${load.type} load`;
         const beginEdit = () => setEditingId(load.id);
         return (
@@ -861,6 +971,14 @@ function LoadEditorList({ study, displayModel, unitSystem, onUpdateLoad, onPrevi
               <span className={`item-icon load-type-icon ${load.type}`}><LoadTypeIcon type={load.type} /></span>
               <strong>{loadLabel ? `${loadLabel} · ` : ""}{loadTypeLabel(load.type)} · {formatNumber(displayLoad.value)} {displayLoad.units}</strong>
               <small>{label}{pointLabel} · {directionOptionLabel(directionLabelForLoad(load, displayModel, selectedFace))} direction{equivalentForce}</small>
+              {loadCases.length > 1 && (
+                <label className="load-case-assignment" onClick={(event) => event.stopPropagation()}>
+                  <span>Case</span>
+                  <select value={loadCaseId} onChange={(event) => onAssignLoadToCase(load.id, event.currentTarget.value)}>
+                    {loadCases.map((loadCase) => <option key={loadCase.id} value={loadCase.id}>{loadCase.name}</option>)}
+                  </select>
+                </label>
+              )}
               <button
                 className="remove-glyph"
                 type="button"
@@ -1570,6 +1688,8 @@ function ResultsPanelContent({
   stressExaggeration,
   resultSummary,
   resultFields = [],
+  resultVariants = [],
+  activeResultVariantId = resultVariants[0]?.id ?? "",
   resultProbes = [],
   resultProbeLimitReached = false,
   study,
@@ -1585,6 +1705,7 @@ function ResultsPanelContent({
   onResultPlaybackFpsChange,
   onResultPlaybackReverseLoopChange,
   onResultModeChange,
+  onResultVariantChange,
   onRemoveResultProbe,
   onClearResultProbes,
   onToggleDeformed,
@@ -1658,6 +1779,16 @@ function ResultsPanelContent({
 
   return (
     <Panel title="Results" helper="View stress and displacement directly on the 3D model.">
+      {resultVariants.length > 1 && (
+        <label className="field result-variant-selector">
+          <span>Run variant</span>
+          <select value={activeResultVariantId} onChange={(event) => void onResultVariantChange?.(event.currentTarget.value)}>
+            {resultVariants.map((variant) => (
+              <option key={variant.id} value={variant.id}>{variant.name}{variant.kind === "envelope" ? " · envelope" : ""}</option>
+            ))}
+          </select>
+        </label>
+      )}
       {onGenerateReport && (
         <button className="primary wide" type="button" disabled={reportBusy || reportDisabled} onClick={() => void onGenerateReport({ targetSafetyFactor })}>
           <FileDown size={18} />{reportBusy ? "Generating…" : "Generate report"}
@@ -1746,7 +1877,11 @@ function ResultsPanelContent({
             <ol>
               {resultProbes.map((probe, index) => (
                 <li key={probe.id}>
-                  <span><strong>{`P${index + 1}`}</strong><small>{formatProbeReading(probe)}</small></span>
+                  <span>
+                    <strong>{`P${index + 1}`}</strong>
+                    <small>{formatProbeReading(probe)}</small>
+                    {probe.governingVariantName && <small>{`Governed near probe by ${probe.governingVariantName}`}</small>}
+                  </span>
                   {onRemoveResultProbe && <button className="icon-button" type="button" aria-label={`Remove probe ${index + 1}`} onClick={() => onRemoveResultProbe(probe.id)}><X size={14} /></button>}
                 </li>
               ))}

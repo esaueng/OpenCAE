@@ -94,6 +94,76 @@ export function computeVonMisesStress(stress: ArrayLike<number>): number {
   );
 }
 
+export type PrincipalStressMeasures = {
+  principalMax: number;
+  principalMin: number;
+  maxShear: number;
+};
+
+/** Deterministic Jacobi eigenvalues for the real symmetric Cauchy stress tensor. */
+export function computePrincipalStressMeasures(stress: ArrayLike<number>): PrincipalStressMeasures {
+  const xx = stress[0] ?? 0;
+  const yy = stress[1] ?? 0;
+  const zz = stress[2] ?? 0;
+  const xy = stress[3] ?? 0;
+  const yz = stress[4] ?? 0;
+  const xz = stress[5] ?? 0;
+  const tensorScale = Math.max(Math.abs(xx), Math.abs(yy), Math.abs(zz), Math.abs(xy), Math.abs(yz), Math.abs(xz), 1);
+  const matrix = [xx, xy, xz, xy, yy, yz, xz, yz, zz];
+  const tolerance = 64 * Number.EPSILON * tensorScale;
+  for (let iteration = 0; iteration < 20; iteration += 1) {
+    let p = 0;
+    let q = 1;
+    let largest = Math.abs(matrix[1] ?? 0);
+    if (Math.abs(matrix[2] ?? 0) > largest) {
+      p = 0;
+      q = 2;
+      largest = Math.abs(matrix[2] ?? 0);
+    }
+    if (Math.abs(matrix[5] ?? 0) > largest) {
+      p = 1;
+      q = 2;
+      largest = Math.abs(matrix[5] ?? 0);
+    }
+    if (largest <= tolerance) break;
+    const pp = p * 3 + p;
+    const qq = q * 3 + q;
+    const pq = p * 3 + q;
+    const app = matrix[pp] ?? 0;
+    const aqq = matrix[qq] ?? 0;
+    const apq = matrix[pq] ?? 0;
+    const tau = (aqq - app) / (2 * apq);
+    const tangent = tau === 0 ? 1 : Math.sign(tau) / (Math.abs(tau) + Math.sqrt(1 + tau * tau));
+    const cosine = 1 / Math.sqrt(1 + tangent * tangent);
+    const sine = tangent * cosine;
+    matrix[pp] = app - tangent * apq;
+    matrix[qq] = aqq + tangent * apq;
+    matrix[pq] = 0;
+    matrix[q * 3 + p] = 0;
+    for (let r = 0; r < 3; r += 1) {
+      if (r === p || r === q) continue;
+      const rp = r * 3 + p;
+      const rq = r * 3 + q;
+      const arp = matrix[rp] ?? 0;
+      const arq = matrix[rq] ?? 0;
+      const nextRp = cosine * arp - sine * arq;
+      const nextRq = sine * arp + cosine * arq;
+      matrix[rp] = nextRp;
+      matrix[p * 3 + r] = nextRp;
+      matrix[rq] = nextRq;
+      matrix[q * 3 + r] = nextRq;
+    }
+  }
+  const eigenvalues = [matrix[0] ?? 0, matrix[4] ?? 0, matrix[8] ?? 0].sort((left, right) => right - left);
+  const principalMax = eigenvalues[0] ?? 0;
+  const principalMin = eigenvalues[2] ?? 0;
+  return {
+    principalMax,
+    principalMin,
+    maxShear: Math.max(0, (principalMax - principalMin) / 2)
+  };
+}
+
 export function collectTetCoordinates(
   coordinates: Float64Array,
   connectivity: Uint32Array,

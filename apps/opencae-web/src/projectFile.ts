@@ -1,4 +1,4 @@
-import type { DisplayModel, Project, ResultField, ResultSummary } from "@opencae/schema";
+import type { DisplayModel, Project, ResultField, ResultSummary, RunVariantRef, RunVariantResult } from "@opencae/schema";
 import type { ResultViewCaptures } from "./report/captureResultViews";
 
 export interface SolverSurfaceMesh {
@@ -30,6 +30,9 @@ export interface LocalResultBundle {
   completedRunId?: string;
   summary: ResultSummary;
   fields: ResultField[];
+  variants?: RunVariantResult[];
+  variantRefs?: RunVariantRef[];
+  activeVariantId?: string;
   surfaceMesh?: SolverSurfaceMesh;
   solverMeshSummary?: SolverMeshStatistics;
   reportCaptures?: ResultViewCaptures;

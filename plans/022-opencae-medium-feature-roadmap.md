@@ -8,7 +8,7 @@ In progress on `codex/022-medium-feature-roadmap`.
 | - | - | - |
 | 1. Modal analysis | Released (2026-07-14) | 285 focused tests, typecheck, build, 1,263-test full suite |
 | 2. Open section and project custom materials | Released (2026-07-14) | 372 focused tests, typecheck, build, 1,279-test full suite |
-| 3. Static/dynamic cases, combinations, envelopes | Pending | Same gate |
+| 3. Static/dynamic cases, combinations, envelopes | Released (2026-07-14) | 361 focused tests, typecheck, build, 1,308-test full suite |
 | 4. Static mesh-convergence studies | Pending | Same gate |
 | 5. Advanced loads and equivalent bolt preload | Pending | Same gate |
 
@@ -36,9 +36,21 @@ The plan runs after the result-identity, cache-key, and barycentric-probe founda
 - Resolve material IDs through one built-in-plus-project catalog in UI, validation, browser/API solver adapters, mesh intake, and reports. Explicit unknown IDs fail clearly and never fall back to Aluminum 6061.
 - Editing an assigned custom material clears stale results. Deletion is disabled and guarded while any study assigns the material.
 
+## Increment 3 — Static and dynamic load cases
+
+- Add structurally shared support/material/mesh load cases to static and dynamic studies. Every load belongs to exactly one case; legacy studies migrate to one enabled `Default` case without changing their solve.
+- Add finite signed static combinations that reference cases directly. Nested combinations and all dynamic combinations are rejected by schema and study validation.
+- Split static solving into prepare, solve, and recover stages. Assemble and reduce stiffness once, warm-start each case from the previous displacement, and recover raw displacement, reaction, strain, and six-component stress tensors.
+- Superpose only raw vectors and tensors for combinations, then recompute von Mises, principal stresses, and maximum shear. Preserve exact numeric parity for legacy fields while treating the tensor-derived measures as additive result fields.
+- Create one static envelope across enabled cases and combinations. Stress takes the maximum recovered von Mises; displacement retains the complete vector from the variant with the largest magnitude; compact governing-variant indices feed probe tooltips.
+- Reuse shared stiffness, mass, and Rayleigh assembly for dynamic cases while starting each case from zero state. Stream completed cases through the solve worker and persist them independently in IndexedDB so aggregate transient payloads are not retained.
+- Store case, combination, and envelope payloads as `RunVariantResult` entries over one shared surface mesh. Active variant identity now participates in field selection, probes, series, and packed-playback cache keys.
+- Keep portable container version 2 and parse old structural result bundles as one `Default` variant. Partial IndexedDB variant records are removed after cancellation or failure.
+- Add the case/combination editor and result-variant selector. Disabled cases remain editable but do not solve, and dynamic studies expose cases without combination/envelope controls.
+- Thread the 100,000-DOF browser limit through every variant pipeline and preserve the honest browser-limit diagnostic on case results.
+
 ## Remaining increments
 
-3. Add structurally shared support/material/mesh load cases, static combinations and envelopes, shared prepare/solve/recover assembly, independent dynamic cases, streamed persistence, and variant-aware result identities.
 4. Add project-persisted coarse-to-medium-to-fine static convergence records using barycentric displacement probes, the 100k-DOF cap, actual mesh/DOF counts, raw peak stress, and apparent-convergence thresholds of 5% displacement and 10% stress.
 5. Add consistently integrated surface traction and volume force, rank-checked distributed remote wrench loads, and static-only equivalent bonded-linear bolt preload. Preserve exact resultant/moment diagnostics and reject missing geometry mappings.
 

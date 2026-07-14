@@ -1,12 +1,13 @@
 import { type NormalizedOpenCAEModel } from "@opencae/core";
 import { dynamicCoreResultFromSolve } from "./results";
 import {
+  assembleNodalForces,
   elementNodeCountForBlock,
   getNormalizedModel,
   maxAbs,
   recoverElementResults
 } from "./solver";
-import { addSparseEntry, conjugateGradient, createSparseMatrixBuilder, csrMatVec, toCsrMatrix, type CsrMatrix } from "./sparse";
+import { addSparseEntry, conjugateGradient, createSparseMatrixBuilder, csrMatVec, reduceCsrRhs, toCsrMatrix, type CsrMatrix } from "./sparse";
 import { expandFreeVector, prepareStructuralSystem, type PreparedStructuralSystem } from "./structural-system";
 import { solveModalSubspace } from "./modal";
 import type {
@@ -41,6 +42,12 @@ type DynamicSettings = {
 
 type ReducedSystem = PreparedStructuralSystem;
 
+export type DynamicLoadCaseInput = { id: string; stepIndex: number };
+export type DynamicLoadCaseSolve = { id: string; result: DynamicTet4CpuResult; diagnostics: DynamicTet4CpuDiagnostics };
+export type DynamicLoadCaseBatchSolveResult =
+  | { ok: true; cases: DynamicLoadCaseSolve[] }
+  | { ok: false; error: CpuSolverError; caseId?: string; diagnostics?: Partial<DynamicTet4CpuDiagnostics> };
+
 export function solveDynamicLinearTetMDOF(
   input: CpuSolverInput,
   options: DynamicTet4CpuOptions = {}
@@ -72,9 +79,70 @@ export function solveDynamicMdofTet4Cpu(
   const hooks = options.hooks;
   const prepared = prepareStructuralSystem(model, step.boundaryConditions, step.loads, hooks);
   if (!prepared.ok) return prepared;
-  const system = prepared.system;
+  return solveDynamicPreparedSystem(model, prepared.system, settings, options);
+}
+
+/** Batch dynamic cases share K/M and supports while every case starts from rest. */
+export function solveDynamicLinearTetLoadCases(
+  input: CpuSolverInput,
+  cases: DynamicLoadCaseInput[],
+  options: DynamicTet4CpuOptions = {},
+  onCaseComplete?: (solved: DynamicLoadCaseSolve) => void,
+  retainCompletedCases = true
+): DynamicLoadCaseBatchSolveResult {
+  const modelResult = getNormalizedModel(input);
+  if (!modelResult.ok) return { ok: false, error: modelResult.error };
+  const model = modelResult.model;
+  if (!cases.length) return { ok: false, error: { code: "missing-load-cases", message: "At least one enabled dynamic load case is required." } };
+  const steps = cases.map((loadCase) => ({ loadCase, step: model.steps[loadCase.stepIndex] }));
+  if (steps.some(({ step }) => step?.type !== "dynamicLinear")) {
+    return { ok: false, error: { code: "invalid-step", message: "Every dynamic load case must reference a dynamicLinear step." } };
+  }
+  const dynamicSteps = steps as Array<{ loadCase: DynamicLoadCaseInput; step: Extract<NormalizedOpenCAEModel["steps"][number], { type: "dynamicLinear" }> }>;
+  const firstStep = dynamicSteps[0]!.step;
+  if (dynamicSteps.some(({ step }) => !sameStrings(step.boundaryConditions, firstStep.boundaryConditions))) {
+    return { ok: false, error: { code: "case-support-mismatch", message: "Dynamic load cases must share identical supports." } };
+  }
+  if (dynamicSteps.some(({ step }) => !sameDynamicStepSettings(step, firstStep))) {
+    return { ok: false, error: { code: "case-solver-settings-mismatch", message: "Dynamic load cases must share identical time integration and damping settings." } };
+  }
+  const prepared = prepareStructuralSystem(model, firstStep.boundaryConditions, firstStep.loads, options.hooks);
+  if (!prepared.ok) return prepared;
+  const sharedSettings = dynamicSettings(model, { ...options, stepIndex: cases[0]!.stepIndex });
+  const sharedDamping = resolveRayleighDamping(prepared.system, sharedSettings, options);
+  const solvedCases: DynamicLoadCaseSolve[] = [];
+  for (const { loadCase, step } of dynamicSteps) {
+    const fullLoad = assembleNodalForces(model, step.loads);
+    const system: PreparedStructuralSystem = {
+      ...prepared.system,
+      fullLoad,
+      load: reduceCsrRhs(prepared.system.fullStiffness, fullLoad, prepared.system.free, prepared.system.constraints)
+    };
+    const settings = dynamicSettings(model, { ...options, stepIndex: loadCase.stepIndex });
+    const solved = solveDynamicPreparedSystem(model, system, settings, { ...options, stepIndex: loadCase.stepIndex }, sharedDamping);
+    if (!solved.ok) return { ...solved, caseId: loadCase.id };
+    const entry = { id: loadCase.id, result: solved.result, diagnostics: solved.diagnostics };
+    onCaseComplete?.(entry);
+    if (retainCompletedCases) solvedCases.push(entry);
+  }
+  return { ok: true, cases: solvedCases };
+}
+
+function solveDynamicPreparedSystem(
+  model: NormalizedOpenCAEModel,
+  system: PreparedStructuralSystem,
+  settings: DynamicSettings,
+  options: DynamicTet4CpuOptions,
+  sharedDamping?: RayleighResolution
+): DynamicTet4CpuSolveResult {
+  if (settings.endTime <= settings.startTime) return failure("invalid-time-range", "Dynamic solve endTime must be greater than startTime.");
+  const expectedFrameCount = estimateFrameCount(settings);
+  if (expectedFrameCount > settings.maxFrames) {
+    return failure("too-many-frames", `Dynamic solve would produce ${expectedFrameCount} frames, exceeding maxFrames ${settings.maxFrames}.`);
+  }
+  const hooks = options.hooks;
   const free = system.free;
-  const damping = resolveRayleighDamping(system, settings, options);
+  const damping = sharedDamping ?? resolveRayleighDamping(system, settings, options);
   const rayleighAlpha = damping.alpha;
   const rayleighBeta = damping.beta;
 
@@ -211,6 +279,24 @@ export function solveDynamicMdofTet4Cpu(
     result: dynamicResult,
     diagnostics
   };
+}
+
+function sameStrings(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function sameDynamicStepSettings(
+  left: Extract<NormalizedOpenCAEModel["steps"][number], { type: "dynamicLinear" }>,
+  right: Extract<NormalizedOpenCAEModel["steps"][number], { type: "dynamicLinear" }>
+): boolean {
+  return left.startTime === right.startTime
+    && left.endTime === right.endTime
+    && left.timeStep === right.timeStep
+    && left.outputInterval === right.outputInterval
+    && left.loadProfile === right.loadProfile
+    && left.dampingRatio === right.dampingRatio
+    && left.rayleighAlpha === right.rayleighAlpha
+    && left.rayleighBeta === right.rayleighBeta;
 }
 
 /**

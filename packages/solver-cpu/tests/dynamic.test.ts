@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { singleTetStaticFixture } from "@opencae/examples";
 import { validateCoreResult, type OpenCAEModelJson } from "@opencae/core";
-import { solveDynamicLinearTetMDOF, solvePreviewSdofTet4Cpu, solveStaticLinearTet4Cpu } from "../src";
+import { solveDynamicLinearTetLoadCases, solveDynamicLinearTetMDOF, solvePreviewSdofTet4Cpu, solveStaticLinearTet4Cpu, type SolveProgressEvent } from "../src";
 import { minimumPositiveFinite } from "../src/dynamic-mdof";
 
 const densityModel = {
@@ -32,6 +32,74 @@ describe("solvePreviewSdofTet4Cpu preview", () => {
 });
 
 describe("solveDynamicLinearTetMDOF", () => {
+  test("shares K/M across dynamic cases while keeping independent zero initial conditions", () => {
+    const progress: SolveProgressEvent[] = [];
+    const completed: string[] = [];
+    const settings = {
+      type: "dynamicLinear" as const,
+      boundaryConditions: ["fixedSupport", "settlement", "supportY", "supportZ"],
+      startTime: 0,
+      endTime: 0.02,
+      timeStep: 0.005,
+      outputInterval: 0.01,
+      loadProfile: "ramp" as const
+    };
+    const model: OpenCAEModelJson = {
+      ...densityModel,
+      loads: [
+        { name: "down", type: "nodalForce", nodeSet: "loadNodes", vector: [0, 0, -100] },
+        { name: "side", type: "nodalForce", nodeSet: "loadNodes", vector: [80, 0, 0] }
+      ],
+      steps: [
+        { ...settings, name: "down", loads: ["down"] },
+        { ...settings, name: "side", loads: ["side"] }
+      ]
+    };
+    const solved = solveDynamicLinearTetLoadCases(
+      model,
+      [{ id: "down", stepIndex: 0 }, { id: "side", stepIndex: 1 }],
+      { hooks: { onProgress: (event) => progress.push(event) } },
+      (entry) => completed.push(entry.id)
+    );
+
+    expect(solved.ok).toBe(true);
+    if (!solved.ok) return;
+    expect(progress.filter((event) => event.phase === "assemble" && event.completed === event.total)).toHaveLength(1);
+    expect(completed).toEqual(["down", "side"]);
+    expect(solved.cases.every((entry) => maxAbs(entry.result.frames[0]!.displacement.values) === 0)).toBe(true);
+    expect(solved.cases[0]!.diagnostics.rayleighCalibration).toEqual(solved.cases[1]!.diagnostics.rayleighCalibration);
+    expect(Array.from(solved.cases[0]!.result.frames.at(-1)!.displacement.values)).not.toEqual(
+      Array.from(solved.cases[1]!.result.frames.at(-1)!.displacement.values)
+    );
+  });
+
+  test("rejects dynamic cases with case-local integration settings", () => {
+    const firstStep = {
+      name: "case-a",
+      type: "dynamicLinear" as const,
+      boundaryConditions: densityModel.steps[0]!.boundaryConditions,
+      loads: densityModel.steps[0]!.loads,
+      startTime: 0,
+      endTime: 0.02,
+      timeStep: 0.005,
+      outputInterval: 0.01,
+      loadProfile: "ramp" as const
+    };
+    const model: OpenCAEModelJson = {
+      ...densityModel,
+      steps: [
+        { ...firstStep, name: "case-a" },
+        { ...firstStep, name: "case-b", timeStep: firstStep.timeStep * 2 }
+      ]
+    };
+
+    const solved = solveDynamicLinearTetLoadCases(model, [{ id: "a", stepIndex: 0 }, { id: "b", stepIndex: 1 }]);
+
+    expect(solved.ok).toBe(false);
+    if (solved.ok) return;
+    expect(solved.error.code).toBe("case-solver-settings-mismatch");
+  });
+
   test("reduces production-scale safety-factor frames without spreading millions of arguments", () => {
     const fields = Array.from({ length: 22 }, (_, frameIndex) => {
       const values = new Float64Array(50_729);
@@ -90,7 +158,7 @@ describe("solveDynamicLinearTetMDOF", () => {
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    const stressFields = result.result.coreResult?.fields.filter((field) => field.type === "stress" && field.location === "node") ?? [];
+    const stressFields = result.result.coreResult?.fields.filter((field) => field.type === "stress" && field.location === "node" && field.component === "von_mises") ?? [];
     expect(stressFields.length).toBeGreaterThan(0);
     expect(stressFields.every((field) => field.visualizationSource === "volume_weighted_nodal_recovery_laplacian_smoothed")).toBe(true);
     expect(result.diagnostics.visualizationSmoothing).toEqual({ iterations: 1, alpha: 0.25 });

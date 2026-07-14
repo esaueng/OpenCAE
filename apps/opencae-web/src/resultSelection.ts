@@ -1,4 +1,4 @@
-import type { ResultField, StressComponent } from "@opencae/schema";
+import type { ResultField, RunVariantResult, StressComponent } from "@opencae/schema";
 import type { SolverSurfaceMesh } from "./projectFile";
 import type { ResultMode } from "./workspaceViewTypes";
 
@@ -28,17 +28,20 @@ export interface ResolvedResultProbe {
   point: [number, number, number];
   value: number;
   units: string;
+  governingVariantName?: string;
 }
 
 export function resultProbeTopologySignature(
   projectId: string | undefined,
   runId: string | undefined,
   modelId: string | undefined,
-  surfaceMesh?: Pick<SolverSurfaceMesh, "id" | "nodes" | "triangles">
+  surfaceMesh?: Pick<SolverSurfaceMesh, "id" | "nodes" | "triangles">,
+  variantId?: string
 ): string {
   return [
     projectId ?? "no-project",
     runId ?? "no-run",
+    variantId ?? "no-variant",
     modelId ?? "no-model",
     surfaceMesh?.id ?? "no-surface",
     surfaceMesh?.nodes.length ?? 0,
@@ -109,8 +112,8 @@ export function stressComponentForField(field: Pick<ResultField, "type" | "compo
   return field.component ?? DEFAULT_STRESS_COMPONENT;
 }
 
-export function semanticResultFieldKey(field: Pick<ResultField, "runId" | "type" | "location" | "component" | "modeIndex">): string {
-  return `${field.runId}\u0000${field.type}\u0000${field.location}\u0000${stressComponentForField(field) ?? "none"}\u0000${field.modeIndex ?? "none"}`;
+export function semanticResultFieldKey(field: Pick<ResultField, "runId" | "variantId" | "type" | "location" | "component" | "modeIndex">): string {
+  return `${field.runId}\u0000${field.variantId ?? "default"}\u0000${field.type}\u0000${field.location}\u0000${stressComponentForField(field) ?? "none"}\u0000${field.modeIndex ?? "none"}`;
 }
 
 export function isAlignedSurfaceNodeField(field: ResultField, surfaceMesh: SolverSurfaceMesh): boolean {
@@ -138,6 +141,33 @@ export function resolveResultProbe(
   const value = interpolateScalarFromSamples(pin.anchor.point, samples);
   if (!Number.isFinite(value)) return null;
   return { id: pin.id, anchor: pin.anchor, point: pin.anchor.point, value, units: scalarField.units };
+}
+
+/** Resolve the compact envelope index near a barycentric surface probe. */
+export function governingVariantIdForProbe(
+  pin: ResultProbePin,
+  governing: RunVariantResult["governingVariantIndices"],
+  mode: "stress" | "displacement"
+): string | undefined {
+  if (!governing || pin.anchor.kind !== "surface") return undefined;
+  const nodeIndices = governing[mode];
+  const votes = new Map<number, number>();
+  for (let localNode = 0; localNode < 3; localNode += 1) {
+    const node = pin.anchor.triangle[localNode];
+    const weight = pin.anchor.barycentric[localNode];
+    if (node === undefined || weight === undefined) continue;
+    const governingIndex = nodeIndices[node];
+    if (governingIndex === undefined || !Number.isInteger(governingIndex) || !Number.isFinite(weight) || weight < 0 || governingIndex < 0 || governingIndex >= governing.variantIds.length) continue;
+    votes.set(governingIndex, (votes.get(governingIndex) ?? 0) + weight);
+  }
+  let bestIndex: number | undefined;
+  let bestWeight = Number.NEGATIVE_INFINITY;
+  for (const [index, weight] of votes) {
+    if (weight <= bestWeight + 1e-12) continue;
+    bestIndex = index;
+    bestWeight = weight;
+  }
+  return bestIndex === undefined ? undefined : governing.variantIds[bestIndex];
 }
 
 export function barycentricScalar(

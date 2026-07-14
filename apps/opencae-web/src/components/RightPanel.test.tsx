@@ -147,7 +147,8 @@ describe("RightPanel result probes", () => {
         anchor: { kind: "sample", point: [1, 2, 3] },
         point: [1, 2, 3],
         value: 0.000456789,
-        units: "MPa"
+        units: "MPa",
+        governingVariantName: "Service"
       }],
       resultProbeLimitReached: true,
       onRemoveResultProbe: vi.fn(),
@@ -156,6 +157,7 @@ describe("RightPanel result probes", () => {
 
     expect(html).toContain("Pinned probes");
     expect(html).toContain("0.000456789 MPa");
+    expect(html).toContain("Governed near probe by Service");
     expect(html).toContain("Clear All");
     expect(html).toContain('aria-label="Remove probe 1"');
     expect(html).toContain("Probe limit reached. Remove a pin to place another.");
@@ -174,6 +176,55 @@ describe("RightPanel open section", () => {
     expect(html).toContain("Normalized offset · 37%");
     expect(html).toContain("Flip cut side");
     expect(html).toContain("Section plane axis");
+  });
+});
+
+describe("RightPanel run variants and load cases", () => {
+  test("renders case assignment, static combinations, and enabled controls", () => {
+    const caseStudy: Study = {
+      ...study,
+      loads: [{ id: "load-1", type: "force", selectionRef: "selection-top", parameters: { value: 100, units: "N", direction: [0, 0, -1] }, status: "complete" }],
+      loadCases: [
+        { id: "case-service", name: "Service", enabled: true, loadIds: ["load-1"] },
+        { id: "case-reverse", name: "Reverse", enabled: true, loadIds: [] }
+      ],
+      loadCombinations: [{
+        id: "combination-net",
+        name: "Net signed",
+        enabled: true,
+        factors: [{ caseId: "case-service", factor: 1 }, { caseId: "case-reverse", factor: -1 }]
+      }]
+    };
+
+    const html = renderPanel("loads", { study: caseStudy, onLoadCasesChange: vi.fn() });
+
+    expect(html).toContain("Load cases");
+    expect(html).toContain("Service");
+    expect(html).toContain("Reverse");
+    expect(html).toContain("Net signed");
+    expect(html).toContain("Add load case");
+    expect(html).toContain("Add combination");
+    expect(html).toContain("Case</span><select");
+  });
+
+  test("shows the active case, combination, and envelope in the results selector", () => {
+    const variants = [
+      { id: "case:service", name: "Service", kind: "case" as const, caseId: "case-service" },
+      { id: "combination:net", name: "Net signed", kind: "combination" as const, combinationId: "combination-net" },
+      { id: "envelope", name: "Envelope", kind: "envelope" as const }
+    ];
+
+    const html = renderPanel("results", {
+      resultVariants: variants,
+      activeResultVariantId: "combination:net",
+      onResultVariantChange: vi.fn()
+    });
+
+    expect(html).toContain("Run variant");
+    expect(html).toContain("Service");
+    expect(html).toContain("Net signed");
+    expect(html).toContain("Envelope · envelope");
+    expect(html).toContain('value="combination:net" selected=""');
   });
 });
 

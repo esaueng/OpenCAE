@@ -441,6 +441,12 @@ describe("api", () => {
       parameters: { value: 500, units: "N", direction: [0, 0, -1], applicationPoint: [1, 2, 3] },
       status: "complete"
     });
+    expect(response.study.type === "modal_analysis" ? undefined : response.study.loadCases).toEqual([{
+      id: "case-default",
+      name: "Default",
+      enabled: true,
+      loadIds: [response.study.loads[0]?.id]
+    }]);
     expect(response.message).toBe("Load added.");
   });
 
@@ -712,8 +718,10 @@ describe("api", () => {
     expect(response.message).toContain("OpenCAE Core Local");
     expect((response.run as { solverBackend?: string }).solverBackend).toBe("opencae-core-sparse-tet");
     expect(completed.progress).toBe(100);
-    // Cloud-parity contract: five surface/element fields, all stamped with the run id.
-    expect(results.fields).toHaveLength(5);
+    // Structural contract: displacement, von Mises, three tensor-derived
+    // principal measures, element stress, and two safety-factor fields.
+    expect(results.fields).toHaveLength(8);
+    expect(results.fields.map((field) => field.component)).toEqual(expect.arrayContaining(["von_mises", "principal_max", "principal_min", "max_shear"]));
     expect(results.fields.every((field) => field.runId === response.run.id)).toBe(true);
     expect(results.summary.provenance?.solver).toBe("opencae-core-cloud");
     expect((results.summary.provenance as { runnerVersion?: string })?.runnerVersion).toBe("browser-0.1.0");
@@ -984,6 +992,10 @@ describe("api", () => {
     expect(apiSource).toContain("persistLocalRunResults");
     expect(apiSource).toContain("local-results-persistence");
     expect(apiSource).toContain("restoreLocalRunResults");
+    expect(apiSource).toContain("saveLocalRunVariantResult");
+    expect(apiSource).toContain("loadLocalRunVariantResult");
+    expect(apiSource).toContain("deleteLocalRunVariantResults");
+    expect(apiSource).toContain("dynamic-case-persistence");
   });
 
   test("reports real dynamic frame-writing progress with a derivable ETA before completion", { timeout: 60000 }, async () => {

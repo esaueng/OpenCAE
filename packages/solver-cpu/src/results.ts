@@ -16,8 +16,8 @@ import {
   type NormalizedOpenCAEModel,
   type SolverSurfaceMesh
 } from "@opencae/core";
-import { smoothNodalScalarField } from "./element";
-import { recoverNodalVonMisesFromElements } from "./recovery";
+import { computePrincipalStressMeasures, smoothNodalScalarField } from "./element";
+import { recoverNodalStressTensorsFromElements, recoverNodalVonMisesFromElements } from "./recovery";
 import type { DynamicTet4CpuResult, DynamicTet4CpuDiagnostics, ModalCpuDiagnostics, ModalCpuResult, StaticLinearTet4CpuResult, CpuSolverDiagnostics } from "./types";
 
 export const SOLVER_CPU_VERSION = "0.1.5";
@@ -62,6 +62,7 @@ export function staticCoreResultFromSolve(
   const stressSurfaceField = createCoreResultField({
     id: "stress-surface",
     type: "stress",
+    component: "von_mises",
     location: "node",
     values: surfaceVonMises,
     units: "MPa",
@@ -72,9 +73,11 @@ export function staticCoreResultFromSolve(
   const fields: CoreResultField[] = [
     displacementSurfaceField,
     stressSurfaceField,
+    ...principalStressSurfaceFields(model, surfaceMesh, result.stress, stressScale),
     createCoreResultField({
       id: "stress-von-mises-element",
       type: "stress",
+      component: "von_mises",
       location: "element",
       values: scaleValues(result.vonMises, stressScale),
       units: "MPa",
@@ -210,6 +213,7 @@ export function dynamicCoreResultFromSolve(
     const stressSurfaceField = createCoreResultField({
       id: `frame-${frame.frameIndex}-stress-surface`,
       type: "stress",
+      component: "von_mises",
       location: "node",
       values: surfaceVonMises,
       units: "MPa",
@@ -246,9 +250,15 @@ export function dynamicCoreResultFromSolve(
         visualizationSource: "surface_acceleration_magnitude"
       }),
       stressSurfaceField,
+      ...principalStressSurfaceFields(model, surfaceMesh, frame.stress.values, stressScale, {
+        idPrefix: `frame-${frame.frameIndex}-`,
+        frameIndex: frame.frameIndex,
+        timeSeconds: frame.timeSeconds
+      }),
       createCoreResultField({
         id: `frame-${frame.frameIndex}-stress-von-mises-element`,
         type: "stress",
+        component: "von_mises",
         location: "element",
         values: scaleValues(frame.vonMises.values, stressScale),
         units: "MPa",
@@ -372,6 +382,41 @@ export function dynamicCoreResultFromSolve(
     });
   }
   return coreResult;
+}
+
+function principalStressSurfaceFields(
+  model: NormalizedOpenCAEModel,
+  surfaceMesh: SolverSurfaceMesh,
+  elementStress: ArrayLike<number>,
+  stressScale: number,
+  metadata: { idPrefix?: string; frameIndex?: number; timeSeconds?: number } = {}
+): CoreResultField[] {
+  const nodalStress = recoverNodalStressTensorsFromElements(model, elementStress);
+  const principalMax = new Float64Array(model.counts.nodes);
+  const principalMin = new Float64Array(model.counts.nodes);
+  const maxShear = new Float64Array(model.counts.nodes);
+  for (let node = 0; node < model.counts.nodes; node += 1) {
+    const measures = computePrincipalStressMeasures(nodalStress.subarray(node * 6, node * 6 + 6));
+    principalMax[node] = measures.principalMax;
+    principalMin[node] = measures.principalMin;
+    maxShear[node] = measures.maxShear;
+  }
+  const shared = {
+    type: "stress" as const,
+    location: "node" as const,
+    units: "MPa",
+    surfaceMeshRef: surfaceMesh.id,
+    visualizationSource: "volume_weighted_recovered_stress_tensor",
+    engineeringSource: "combined_or_recovered_stress_tensor",
+    ...(metadata.frameIndex !== undefined ? { frameIndex: metadata.frameIndex } : {}),
+    ...(metadata.timeSeconds !== undefined ? { timeSeconds: metadata.timeSeconds } : {})
+  };
+  const idPrefix = metadata.idPrefix ?? "";
+  return [
+    createCoreResultField({ ...shared, id: `${idPrefix}stress-principal-max-surface`, component: "principal_max", values: surfaceNodeScalars(surfaceMesh, principalMax, stressScale) }),
+    createCoreResultField({ ...shared, id: `${idPrefix}stress-principal-min-surface`, component: "principal_min", values: surfaceNodeScalars(surfaceMesh, principalMin, stressScale) }),
+    createCoreResultField({ ...shared, id: `${idPrefix}stress-max-shear-surface`, component: "max_shear", values: surfaceNodeScalars(surfaceMesh, maxShear, stressScale) })
+  ];
 }
 
 export function modalCoreResultFromSolve(

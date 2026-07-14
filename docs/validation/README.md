@@ -59,6 +59,14 @@ Supported dynamic load profiles:
 
 Choose `timeStep` small enough to resolve the fastest meaningful response change. Choose `outputInterval` for result and animation frame cadence; it is normalized to be greater than or equal to `timeStep`.
 
+## Structural Load Cases And Combinations
+
+Every structural load must belong to exactly one load case. Case ids must be unique, case load references must exist, and static combination factors must be finite and reference cases directly. Supports are structurally shared at the study level; Core also rejects any hand-built multi-step model whose case steps do not carry identical boundary-condition lists. Dynamic combinations and envelopes are not supported.
+
+Static case batches must match separate direct solves. Combination regressions include negative factors and compare displacement, reactions, strain, all six stress components, recomputed von Mises, and recomputed principal measures. A scalar von Mises or principal field must never be combined directly. Envelope tests verify the pointwise stress maximum, complete governing displacement vector, and compact governing-variant indices.
+
+Dynamic case validation requires one K/M assembly, shared damping calibration, independent zero initial conditions, ordered completion callbacks, separate persistence, cancellation cleanup, and no aggregate transient retention. All case, combination, envelope, playback, and probe keys include the active variant identity.
+
 ## OpenCAE Core Modal Support
 
 Modal studies require positive density for every solved material, a generated mesh, and enough supports to make the constrained stiffness matrix nonsingular. They do not require or apply loads. The solver requests 1–10 modes (default 6) and uses deterministic block shift-invert subspace iteration with a block size of `min(modeCount + 2, freeDOFs)`.
@@ -86,6 +94,8 @@ is at most `1e-6`. The solver returns only converged modes and reports requested
 | Material swap | Same cantilever block | Aluminum 6061 vs PETG or titanium | Same load/support | Dynamic response changes with density and damping. |
 | Load scaling | Same block | Aluminum 6061 | Compare 1 N vs 2 N | Linear static response scales with load. |
 | Dynamic cadence | Same block | Aluminum 6061 | `timeStep=0.005`, `outputInterval=0.01`, `endTime=0.025` | Frames appear at `0`, `0.01`, `0.02`, and final `0.025`. |
+| Static signed combination | Connected Tet4 block | Linear elastic validation material | Two shared-support cases with positive and negative factors | Tensor/vector superposition matches a direct solve; von Mises and principal stresses are recomputed from the combined tensor. |
+| Dynamic case isolation | Connected Tet4 block | Linear elastic validation material with density | Two cases sharing supports but carrying different loads | K/M is assembled once; both cases start from zero state, stream in order, and persist as separate transient records. |
 
 ## Beam Theory Comparison
 
@@ -115,5 +125,7 @@ Validation fails if any of these conditions are found:
 - Static results omit stress, displacement, or safety-factor fields.
 - Dynamic results omit velocity or acceleration frames.
 - Modal results contain unconverged modes, displacement units, non-vector shapes, or omit requested/converged counts.
+- A load is unassigned or repeated across cases, a combination references another combination, or a dynamic study contains combinations.
+- Combination von Mises or principal stresses are formed by scalar superposition instead of recomputation from the combined stress tensor.
 - Legacy or retired backend settings are exposed as selectable runtime options instead of being normalized to the local backend.
 - New work is dispatched to the retired OpenCAE Core Cloud surface (guarded by `scripts/cloud-retirement-guard.test.mjs`).

@@ -18,10 +18,19 @@ import {
   validateCoreResult,
   validateModelJson,
   type CoreResultValidationReport,
+  type CoreStructuralSolveResult,
   type CoreSolveResult,
   type OpenCAEModelJson
 } from "@opencae/core";
-import { solveCoreDynamic, solveCoreModal, solveCoreStatic, type SolverHooks } from "@opencae/solver-cpu";
+import {
+  combineStaticLinearTetResults,
+  solveDynamicLinearTetLoadCases,
+  solveCoreDynamic,
+  solveCoreModal,
+  solveCoreStatic,
+  solveStaticLinearTetLoadCases,
+  type SolverHooks
+} from "@opencae/solver-cpu";
 
 export type { SolveProgressEvent, SolverHooks } from "@opencae/solver-cpu";
 
@@ -157,6 +166,31 @@ export type CorePipelineOutcome =
       artifacts?: Record<string, unknown>;
     };
 
+export type StaticPipelineCase = { id: string; stepIndex: number };
+export type StaticPipelineCombination = {
+  id: string;
+  factors: Array<{ caseId: string; factor: number }>;
+};
+export type StaticVariantPipelineOutcome =
+  | {
+      ok: true;
+      cases: Array<{ id: string; result: CoreStructuralSolveResult }>;
+      combinations: Array<{ id: string; result: CoreStructuralSolveResult }>;
+    }
+  | {
+      ok: false;
+      status: number;
+      error: CorePipelineError;
+      diagnostics?: unknown[];
+      caseId?: string;
+      combinationId?: string;
+    };
+
+export type DynamicPipelineCase = { id: string; stepIndex: number };
+export type DynamicVariantPipelineOutcome =
+  | { ok: true; cases: Array<{ id: string; result: CoreStructuralSolveResult }> }
+  | { ok: false; status: number; error: CorePipelineError; diagnostics?: unknown[]; caseId?: string };
+
 export type SolveStudyModelWithCorePipelineInput = {
   model: OpenCAEModelJson;
   analysisType: CorePipelineAnalysisType;
@@ -283,6 +317,164 @@ export function solveStudyModelWithCorePipeline(input: SolveStudyModelWithCorePi
   }
 
   return { ok: true, result: stamped };
+}
+
+/**
+ * Static multi-case pipeline. The solver owns one prepared Kff and reuses the
+ * previous case displacement as the next CG initial guess; combinations are
+ * formed from raw vectors/tensors before any derived stress scalar is rebuilt.
+ */
+export function solveStaticVariantsWithCorePipeline(input: {
+  model: OpenCAEModelJson;
+  cases: StaticPipelineCase[];
+  combinations?: StaticPipelineCombination[];
+  solverSettings?: CorePipelineSolverSettings;
+  limits?: SolveLimits;
+  hooks?: SolverHooks;
+  runnerVersion?: string;
+}): StaticVariantPipelineOutcome {
+  const validation = validateModelJson(input.model);
+  if (!validation.ok) {
+    return { ok: false, status: 422, error: { code: "validation-failed", message: "Input model failed OpenCAE Core validation.", report: validation } };
+  }
+  if (!input.cases.length) {
+    return { ok: false, status: 422, error: { code: "missing-load-cases", message: "At least one enabled static load case is required." } };
+  }
+  const steps = input.cases.map((loadCase) => ({ loadCase, step: input.model.steps[loadCase.stepIndex] }));
+  if (steps.some(({ step }) => step?.type !== "staticLinear")) {
+    return { ok: false, status: 422, error: { code: "invalid-step", message: "Every static load case must reference a staticLinear step." } };
+  }
+  const staticSteps = steps.map(({ loadCase, step }) => ({ loadCase, step: step! as Extract<typeof step, { type: "staticLinear" }> }));
+  const boundaryConditions = staticSteps[0]!.step.boundaryConditions;
+  if (staticSteps.some(({ step }) => !sameStrings(step.boundaryConditions, boundaryConditions))) {
+    return { ok: false, status: 422, error: { code: "case-support-mismatch", message: "Static load cases must share identical supports." } };
+  }
+  const limits = input.limits ?? BROWSER_SOLVE_LIMITS;
+  const settings = boundedSolverSettings("static_stress", input.solverSettings, input.model, limits);
+  const limitsDeviation = browserLimitsDeviationDiagnostic(limits);
+  const diagnostics: unknown[] = [
+    resourceLimitsDiagnostic("static_stress", settings),
+    ...(limitsDeviation ? [limitsDeviation] : [])
+  ];
+  const batch = solveStaticLinearTetLoadCases(
+    input.model,
+    boundaryConditions,
+    staticSteps.map(({ loadCase, step }) => ({ id: loadCase.id, loadNames: step.loads })),
+    {
+      method: "sparse",
+      solverMode: "sparse",
+      maxDofs: settings.maxDofs,
+      maxIterations: settings.maxIterations,
+      tolerance: settings.tolerance,
+      hooks: input.hooks
+    }
+  );
+  if (!batch.ok) {
+    return {
+      ok: false,
+      status: batch.error.code === "max-dofs-exceeded" ? 422 : 500,
+      error: batch.error,
+      diagnostics: [...diagnostics, ...(batch.diagnostics ? [batch.diagnostics] : [])],
+      ...(batch.caseId ? { caseId: batch.caseId } : {})
+    };
+  }
+  const runnerVersion = input.runnerVersion ?? BROWSER_RUNNER_VERSION;
+  const cases = batch.cases.map((solvedCase) => ({
+    id: solvedCase.id,
+    result: stampAndValidateStaticVariant(solvedCase.result.coreResult!, runnerVersion, diagnostics)
+  }));
+  const rawByCaseId = new Map(batch.cases.map((solvedCase) => [solvedCase.id, solvedCase.result]));
+  const combinations: Array<{ id: string; result: CoreStructuralSolveResult }> = [];
+  for (const combination of input.combinations ?? []) {
+    const terms = combination.factors.flatMap((factor) => {
+      const result = rawByCaseId.get(factor.caseId);
+      return result ? [{ factor: factor.factor, result }] : [];
+    });
+    if (terms.length !== combination.factors.length) {
+      return { ok: false, status: 422, combinationId: combination.id, error: { code: "unknown-combination-case", message: `Load combination ${combination.id} references an unsolved or disabled case.` } };
+    }
+    const combined = combineStaticLinearTetResults(batch.prepared, terms, { visualizationSmoothing: settings.visualizationSmoothing as { iterations?: number; alpha?: number } | undefined });
+    if (!combined.ok) {
+      return { ok: false, status: 500, combinationId: combination.id, error: combined.error, diagnostics: combined.diagnostics ? [combined.diagnostics] : undefined };
+    }
+    combinations.push({
+      id: combination.id,
+      result: stampAndValidateStaticVariant(combined.result.coreResult!, runnerVersion, diagnostics)
+    });
+  }
+  return { ok: true, cases, combinations };
+}
+
+/** Dynamic cases share K/M and stream each completed case without retaining the aggregate transient payload. */
+export function solveDynamicVariantsWithCorePipeline(input: {
+  model: OpenCAEModelJson;
+  cases: DynamicPipelineCase[];
+  solverSettings?: CorePipelineSolverSettings;
+  limits?: SolveLimits;
+  hooks?: SolverHooks;
+  runnerVersion?: string;
+  onCaseComplete?: (entry: { id: string; result: CoreStructuralSolveResult }) => void;
+}): DynamicVariantPipelineOutcome {
+  const validation = validateModelJson(input.model);
+  if (!validation.ok) {
+    return { ok: false, status: 422, error: { code: "validation-failed", message: "Input model failed OpenCAE Core validation.", report: validation } };
+  }
+  if (!input.cases.length) {
+    return { ok: false, status: 422, error: { code: "missing-load-cases", message: "At least one enabled dynamic load case is required." } };
+  }
+  const limits = input.limits ?? BROWSER_SOLVE_LIMITS;
+  const settings = boundedSolverSettings("dynamic_structural", { ...input.solverSettings, stepIndex: input.cases[0]!.stepIndex }, input.model, limits);
+  const guard = dynamicBudgetGuard(input.model, settings, limits);
+  if (guard) return { ok: false, status: 422, error: guard };
+  const limitsDeviation = browserLimitsDeviationDiagnostic(limits);
+  const diagnostics: unknown[] = [
+    resourceLimitsDiagnostic("dynamic_structural", settings),
+    ...(limitsDeviation ? [limitsDeviation] : [])
+  ];
+  const runnerVersion = input.runnerVersion ?? BROWSER_RUNNER_VERSION;
+  const firstCompleted: Array<{ id: string; result: CoreStructuralSolveResult }> = [];
+  const solved = solveDynamicLinearTetLoadCases(
+    input.model,
+    input.cases,
+    {
+      ...settings,
+      hooks: input.hooks,
+      maxDofs: settings.maxDofs,
+      maxIterations: settings.maxIterations,
+      tolerance: settings.tolerance
+    },
+    (entry) => {
+      const result = stampAndValidateStaticVariant(entry.result.coreResult!, runnerVersion, diagnostics);
+      if (!firstCompleted.length) firstCompleted.push({ id: entry.id, result });
+      input.onCaseComplete?.({ id: entry.id, result });
+    },
+    false
+  );
+  if (!solved.ok) {
+    return {
+      ok: false,
+      status: solved.error.code === "max-dofs-exceeded" ? 422 : 500,
+      error: solved.error,
+      diagnostics: solved.diagnostics ? [...diagnostics, solved.diagnostics] : diagnostics,
+      ...(solved.caseId ? { caseId: solved.caseId } : {})
+    };
+  }
+  return { ok: true, cases: firstCompleted };
+}
+
+function stampAndValidateStaticVariant(
+  result: CoreStructuralSolveResult,
+  runnerVersion: string,
+  diagnostics: unknown[]
+): CoreStructuralSolveResult {
+  const stamped = stampBrowserProvenance(result, runnerVersion, diagnostics) as CoreStructuralSolveResult;
+  const validation = validateCoreResult(stamped);
+  if (!validation.ok) throw new Error(coreResultValidationFailureMessage(validation));
+  return stamped;
+}
+
+function sameStrings(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 export function coreResultValidationFailureMessage(report: CoreResultValidationReport): string {
@@ -461,7 +653,7 @@ function dynamicBudgetGuard(
  * Port of the runner's stampCloudProvenance: identical solver/core/solver-cpu
  * ids, with the runnerVersion identifying the browser pipeline.
  */
-function stampBrowserProvenance(
+export function stampBrowserProvenance(
   result: CoreSolveResult,
   runnerVersion: string,
   diagnostics: unknown[] = [],

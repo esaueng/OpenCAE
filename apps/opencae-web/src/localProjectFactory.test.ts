@@ -43,6 +43,7 @@ describe("local project factory workflow", () => {
     expect(study.materialAssignments).toEqual([]);
     expect(study.constraints).toEqual([]);
     expect(study.loads).toEqual([]);
+    expect(study.type === "modal_analysis" ? undefined : study.loadCases).toEqual([{ id: "case-default", name: "Default", enabled: true, loadIds: [] }]);
     expect(study.meshSettings.status).toBe("not_started");
   });
 
@@ -88,6 +89,7 @@ describe("local project factory workflow", () => {
     const load = response.project.studies[0]?.loads[0];
 
     expect(load?.parameters.direction).toEqual([0, -1, 0]);
+    expect(response.project.studies[0]?.type === "modal_analysis" ? undefined : response.project.studies[0]?.loadCases?.[0]?.loadIds).toEqual([load?.id]);
   });
 
   test("rejects payloads without a valid project", () => {

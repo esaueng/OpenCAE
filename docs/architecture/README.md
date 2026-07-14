@@ -18,6 +18,14 @@ Static, dynamic, and modal structural studies run through OpenCAE Core with expl
 
 Dynamic and modal analysis share sparse stiffness, constraint reduction, and positive HRZ lumped-mass assembly. Modal analysis uses deterministic block shift-invert subspace iteration and returns only modes that satisfy the scaled residual tolerance. Its normalized vector fields use the same deformation renderer as displacement, while the web app creates 24 phase frames without storing duplicate solver output.
 
+## Run Variants And Linear Reuse
+
+Structural load cases own only load membership. Geometry, supports, material, mesh, and solver settings remain on the study, so every case necessarily shares the same constrained system. Static case batches assemble and reduce `K` once, then use the preceding converged displacement as the next CG initial guess. Signed combinations superpose displacement, reaction, strain, and six-component stress tensors; von Mises and principal stress measures are recomputed afterward from the combined tensor.
+
+Static envelopes keep pointwise maximum von Mises, the displacement vector from the variant with the largest nodal magnitude, and compact integer arrays that map each surface node to its governing case or combination. Run and variant ids both participate in field-selection, probe-topology, and packed-playback identities.
+
+Dynamic cases reuse one K/M preparation and Rayleigh calibration but start each transient solve from independent zero displacement, velocity, and acceleration. The solve worker posts each completed case immediately. The web app writes each transient case to a separate IndexedDB record and retains only the active case payload in memory; cancellation or batch failure removes partial records.
+
 ## Materials And Workspace Sections
 
 Starter materials and optional project-scoped custom materials resolve through `@opencae/materials`. The same strict resolver is used by UI assignment, study validation, mesh intake, browser/API Core adapters, and reports. An explicit dangling material ID is an error; no solver boundary substitutes a default material. Custom values are stored canonically in Pa and kg/m³, are marked user-supplied/unverified, and remain local to the owning project.

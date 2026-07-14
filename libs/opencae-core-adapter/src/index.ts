@@ -6,6 +6,7 @@ import {
   volumeMeshToModelJson,
   type LoadJson,
   type OpenCAEModelJson,
+  type CoreStructuralSolveResult,
   type StepJson,
   type SurfaceFacetJson,
   type SurfaceSetJson
@@ -13,6 +14,8 @@ import {
 import type { DynamicLoadProfile } from "@opencae/solver-cpu";
 import {
   BROWSER_SOLVE_LIMITS,
+  solveDynamicVariantsWithCorePipeline,
+  solveStaticVariantsWithCorePipeline,
   solveStudyModelWithCorePipeline,
   type SolverHooks
 } from "@opencae/solve-pipeline";
@@ -25,6 +28,10 @@ import {
   type ResultField,
   type ResultProvenance,
   type ResultSummary,
+  type LoadCase,
+  type LoadCombination,
+  type RunVariantResult,
+  type RunVariantRef,
   type Study
 } from "@opencae/schema";
 import { inferGlobalCriticalPrintAxis } from "@opencae/study-core";
@@ -68,6 +75,9 @@ export type CoreCloudGeometrySource = {
 export type LocalSolveResult = {
   summary: ResultSummary;
   fields: ResultField[];
+  variants?: RunVariantResult[];
+  variantRefs?: RunVariantRef[];
+  activeVariantId?: string;
   /** Solver-space render surface mesh (same contract as the cloud response). */
   surfaceMesh?: unknown;
   /** Solver diagnostics entries (core-solve-diagnostics, phase diagnostics, ...). */
@@ -338,8 +348,15 @@ export function openCaeCoreEligibility(
   if (unsupportedLoad) return { ok: false, reason: `OpenCAE Core supports force, pressure, and gravity loads; ${unsupportedLoad.type} loads are not supported yet.` };
   if (study.type === "modal_analysis") return { ok: true };
   if (!study.loads.length) return { ok: false, reason: "OpenCAE Core requires at least one load." };
-  const force = totalForceVector(study, displayModel, material.material.density);
-  if (Math.hypot(...force) <= 1e-12) {
+  const combinations = structuralLoadCombinations(study).filter((combination) => combination.enabled);
+  const requiredCaseIds = new Set([
+    ...structuralLoadCases(study).filter((loadCase) => loadCase.enabled).map((loadCase) => loadCase.id),
+    ...combinations.flatMap((combination) => combination.factors.map((factor) => factor.caseId))
+  ]);
+  const requiredLoadIds = new Set(structuralLoadCases(study).filter((loadCase) => requiredCaseIds.has(loadCase.id)).flatMap((loadCase) => loadCase.loadIds));
+  if (!requiredCaseIds.size) return { ok: false, reason: "OpenCAE Core requires at least one enabled load case or combination." };
+  const hasNonzeroLoad = study.loads.some((load) => requiredLoadIds.has(load.id) && Math.hypot(...forceVectorForLoad(load, displayModel, material.material.density)) > 1e-12);
+  if (!hasNonzeroLoad) {
     return { ok: false, reason: "OpenCAE Core requires a load with a finite positive value and direction." };
   }
   return { ok: true };
@@ -351,14 +368,14 @@ export function openCaeCoreEligibility(
  * surfaceForce/pressure loads, solver-frame rotation) feeds the mirrored cloud
  * pipeline in @opencae/solve-pipeline, under BROWSER_SOLVE_LIMITS.
  */
-export function trySolveOpenCaeCoreStudy({ study, runId, displayModel, customMaterials = [], hooks }: {
+export function trySolveOpenCaeCoreStudy({ study, runId, displayModel, customMaterials = [], hooks, onVariantComplete }: {
   study: Study;
   runId: string;
   displayModel?: DisplayModel;
   customMaterials?: readonly CustomMaterial[];
   hooks?: SolverHooks;
+  onVariantComplete?: (variant: RunVariantResult, surfaceMesh?: unknown) => void;
 }): OpenCaeCoreSolveOutcome {
-  void runId;
   const eligibility = openCaeCoreEligibility(study, displayModel, undefined, customMaterials);
   if (!eligibility.ok) return eligibility;
 
@@ -369,6 +386,131 @@ export function trySolveOpenCaeCoreStudy({ study, runId, displayModel, customMat
       : study.type === "modal_analysis"
         ? "modal_analysis"
         : "static_stress";
+    if (study.type === "static_stress") {
+      const loadCases = structuralLoadCases(study);
+      const enabledCombinations = structuralLoadCombinations(study).filter((combination) => combination.enabled);
+      const requiredCaseIds = new Set([
+        ...loadCases.filter((loadCase) => loadCase.enabled).map((loadCase) => loadCase.id),
+        ...enabledCombinations.flatMap((combination) => combination.factors.map((factor) => factor.caseId))
+      ]);
+      const solveCases = loadCases.filter((loadCase) => requiredCaseIds.has(loadCase.id));
+      const solved = solveStaticVariantsWithCorePipeline({
+        model: coreBuild.model,
+        cases: solveCases.map((loadCase) => ({ id: loadCase.id, stepIndex: coreStepIndexForLoadCase(coreBuild.model, loadCase.id) })),
+        combinations: enabledCombinations.map((combination) => ({ id: combination.id, factors: combination.factors })),
+        solverSettings: pipelineSolverSettingsForStudy(study),
+        limits: BROWSER_SOLVE_LIMITS,
+        hooks
+      });
+      if (!solved.ok) {
+        return {
+          ok: false,
+          code: solved.error.code,
+          reason: solved.error.code === "cancelled" ? "OpenCAE Core solve cancelled." : `OpenCAE Core solve failed: ${solved.error.message}`
+        };
+      }
+      const caseById = new Map(loadCases.map((loadCase) => [loadCase.id, loadCase]));
+      const combinationById = new Map(enabledCombinations.map((combination) => [combination.id, combination]));
+      const variants: RunVariantResult[] = [
+        ...solved.cases
+          .filter((entry) => caseById.get(entry.id)?.enabled)
+          .map((entry) => runVariantFromCoreResult({
+            id: `case:${entry.id}`,
+            name: caseById.get(entry.id)?.name ?? entry.id,
+            kind: "case",
+            caseId: entry.id,
+            result: entry.result,
+            runId
+          })),
+        ...solved.combinations.map((entry) => runVariantFromCoreResult({
+          id: `combination:${entry.id}`,
+          name: combinationById.get(entry.id)?.name ?? entry.id,
+          kind: "combination",
+          combinationId: entry.id,
+          result: entry.result,
+          runId
+        }))
+      ];
+      if (variants.length > 1) variants.push(staticEnvelopeVariant(variants, runId));
+      const active = variants[0];
+      if (!active) return { ok: false, code: "missing-load-cases", reason: "OpenCAE Core requires at least one enabled load case or combination." };
+      const surfaceMesh = solved.cases[0]?.result.surfaceMesh;
+      return {
+        ok: true,
+        solverBackend: "opencae-core-sparse-tet",
+        result: {
+          summary: active.summary,
+          fields: active.fields,
+          variants,
+          activeVariantId: active.id,
+          surfaceMesh,
+          diagnostics: solved.cases.flatMap((entry) => entry.result.diagnostics),
+          artifacts: {
+            ...(solved.cases[0]?.result.artifacts ?? {}),
+            ...(coreBuild.meshConnectivity ? { meshConnectivity: coreBuild.meshConnectivity } : {}),
+            meshStatistics: meshStatisticsForCoreModel(coreBuild)
+          }
+        }
+      };
+    }
+    if (study.type === "dynamic_structural") {
+      const loadCases = structuralLoadCases(study).filter((loadCase) => loadCase.enabled);
+      let firstCompleted: RunVariantResult | undefined;
+      const solved = solveDynamicVariantsWithCorePipeline({
+        model: coreBuild.model,
+        cases: loadCases.map((loadCase) => ({ id: loadCase.id, stepIndex: coreStepIndexForLoadCase(coreBuild.model, loadCase.id) })),
+        solverSettings: pipelineSolverSettingsForStudy(study),
+        limits: BROWSER_SOLVE_LIMITS,
+        hooks,
+        onCaseComplete: (entry) => {
+          const loadCase = loadCases.find((candidate) => candidate.id === entry.id)!;
+          const variant = runVariantFromCoreResult({
+            id: `case:${entry.id}`,
+            name: loadCase.name,
+            kind: "case",
+            caseId: entry.id,
+            result: entry.result,
+            runId
+          });
+          if (!firstCompleted) firstCompleted = variant;
+          onVariantComplete?.(variant, entry.result.surfaceMesh);
+        }
+      });
+      if (!solved.ok) {
+        return {
+          ok: false,
+          code: solved.error.code,
+          reason: solved.error.code === "cancelled" ? "OpenCAE Core solve cancelled." : `OpenCAE Core solve failed: ${solved.error.message}`
+        };
+      }
+      const active = firstCompleted;
+      const firstCore = solved.cases[0]?.result;
+      if (!active || !firstCore) return { ok: false, code: "missing-load-cases", reason: "OpenCAE Core requires at least one enabled dynamic load case." };
+      return {
+        ok: true,
+        solverBackend: "opencae-core-mdof-tet",
+        result: {
+          summary: active.summary,
+          fields: active.fields,
+          variants: [active],
+          variantRefs: loadCases.map((loadCase) => ({
+            id: `case:${loadCase.id}`,
+            name: loadCase.name,
+            kind: "case",
+            caseId: loadCase.id,
+            persistedSeparately: true
+          })),
+          activeVariantId: active.id,
+          surfaceMesh: firstCore.surfaceMesh,
+          diagnostics: firstCore.diagnostics,
+          artifacts: {
+            ...(firstCore.artifacts ?? {}),
+            ...(coreBuild.meshConnectivity ? { meshConnectivity: coreBuild.meshConnectivity } : {}),
+            meshStatistics: meshStatisticsForCoreModel(coreBuild)
+          }
+        }
+      };
+    }
     const solved = solveStudyModelWithCorePipeline({
       model: coreBuild.model,
       analysisType,
@@ -528,6 +670,7 @@ export function buildOpenCaeCoreModelForStudy(
   const nodeSets = [...model.nodeSets.filter((set) => !/^fixedNodes\d+$/.test(set.name))];
   const boundaryConditions: OpenCAEModelJson["boundaryConditions"] = [];
   const loads: LoadJson[] = [];
+  const coreLoadNameByStudyLoadId = new Map<string, string>();
 
   for (const [index, constraint] of study.constraints.entries()) {
     if (constraint.type !== "fixed") continue;
@@ -559,24 +702,28 @@ export function buildOpenCaeCoreModelForStudy(
       const pressure = pressurePascals(load);
       if (pressure <= 0) continue;
       const pressureDirection = normalize(vector3(load.parameters.direction) ?? [0, 0, -1]);
+      const name = `pressure${index}`;
       loads.push({
-        name: `pressure${index}`,
+        name,
         type: "pressure",
         surfaceSet: surfaceSet.name,
         pressure,
         ...(pressureDirection ? { direction: displayDirectionToSolverFrame(pressureDirection, displayModel) } : {})
       });
+      coreLoadNameByStudyLoadId.set(load.id, name);
       continue;
     }
 
     const force = displayDirectionToSolverFrame(forceVectorForLoad(load, displayModel, density), displayModel);
     if (Math.hypot(...force) <= 1e-12) continue;
+    const name = load.type === "gravity" ? `payloadGravity${index}` : `appliedForce${index}`;
     loads.push({
-      name: load.type === "gravity" ? `payloadGravity${index}` : `appliedForce${index}`,
+      name,
       type: "surfaceForce",
       surfaceSet: surfaceSet.name,
       totalForce: roundVector(force, 9)
     });
+    coreLoadNameByStudyLoadId.set(load.id, name);
   }
 
   if (!boundaryConditions.length) throw new Error("OpenCAE Core Cloud requires at least one mapped fixed support.");
@@ -588,7 +735,7 @@ export function buildOpenCaeCoreModelForStudy(
     nodeSets,
     boundaryConditions,
     loads,
-    steps: [coreCloudStepForStudy(study, boundaryConditions.map((condition) => condition.name), loads.map((load) => load.name))]
+    steps: coreCloudStepsForStudy(study, boundaryConditions.map((condition) => condition.name), coreLoadNameByStudyLoadId)
   };
   const validation = validateModelJson(model);
   if (!validation.ok) {
@@ -689,27 +836,167 @@ function facetsForDisplaySelection(
   return [...result];
 }
 
-function coreCloudStepForStudy(study: Study, boundaryConditions: string[], loads: string[]): StepJson {
+function coreCloudStepsForStudy(
+  study: Study,
+  boundaryConditions: string[],
+  coreLoadNameByStudyLoadId: ReadonlyMap<string, string>
+): StepJson[] {
   if (study.type === "modal_analysis") {
-    return { name: "modalStep", type: "modal", boundaryConditions, modeCount: modalSettingsForStudy(study).modeCount };
+    return [{ name: "modalStep", type: "modal", boundaryConditions, modeCount: modalSettingsForStudy(study).modeCount }];
   }
   if (study.type !== "dynamic_structural") {
-    return { name: "loadStep", type: "staticLinear", boundaryConditions, loads };
+    return structuralLoadCases(study).map((loadCase) => ({
+      name: `loadCase:${loadCase.id}`,
+      type: "staticLinear" as const,
+      boundaryConditions,
+      loads: loadCase.loadIds.flatMap((loadId) => {
+        const name = coreLoadNameByStudyLoadId.get(loadId);
+        return name ? [name] : [];
+      })
+    }));
   }
   const settings = dynamicSettingsForStudy(study);
+  return structuralLoadCases(study).map((loadCase) => ({
+      name: `loadCase:${loadCase.id}`,
+      type: "dynamicLinear" as const,
+      boundaryConditions,
+      loads: loadCase.loadIds.flatMap((loadId) => {
+        const name = coreLoadNameByStudyLoadId.get(loadId);
+        return name ? [name] : [];
+      }),
+      startTime: settings.startTime,
+      endTime: settings.endTime,
+      timeStep: settings.timeStep,
+      outputInterval: settings.outputInterval,
+      loadProfile: settings.loadProfile,
+      dampingRatio: settings.dampingRatio,
+      ...("rayleighAlpha" in settings && typeof settings.rayleighAlpha === "number" ? { rayleighAlpha: settings.rayleighAlpha } : {}),
+      ...("rayleighBeta" in settings && typeof settings.rayleighBeta === "number" ? { rayleighBeta: settings.rayleighBeta } : {})
+    }));
+}
+
+function structuralLoadCases(study: Extract<Study, { type: "static_stress" | "dynamic_structural" }>): LoadCase[] {
+  return study.loadCases?.length
+    ? study.loadCases
+    : [{ id: "case-default", name: "Default", enabled: true, loadIds: study.loads.map((load) => load.id) }];
+}
+
+function structuralLoadCombinations(study: Extract<Study, { type: "static_stress" | "dynamic_structural" }>): LoadCombination[] {
+  return study.loadCombinations ?? [];
+}
+
+function coreStepIndexForLoadCase(model: OpenCAEModelJson, caseId: string): number {
+  const index = model.steps.findIndex((step) => step.name === `loadCase:${caseId}`);
+  if (index < 0) throw new Error(`OpenCAE Core model is missing the step for load case ${caseId}.`);
+  return index;
+}
+
+function runVariantFromCoreResult({ id, name, kind, caseId, combinationId, result, runId }: {
+  id: string;
+  name: string;
+  kind: "case" | "combination";
+  caseId?: string;
+  combinationId?: string;
+  result: CoreStructuralSolveResult;
+  runId: string;
+}): RunVariantResult {
   return {
-    name: "dynamicStep",
-    type: "dynamicLinear",
-    boundaryConditions,
-    loads,
-    startTime: settings.startTime,
-    endTime: settings.endTime,
-    timeStep: settings.timeStep,
-    outputInterval: settings.outputInterval,
-    loadProfile: settings.loadProfile,
-    dampingRatio: settings.dampingRatio,
-    ...("rayleighAlpha" in settings && typeof settings.rayleighAlpha === "number" ? { rayleighAlpha: settings.rayleighAlpha } : {}),
-    ...("rayleighBeta" in settings && typeof settings.rayleighBeta === "number" ? { rayleighBeta: settings.rayleighBeta } : {})
+    id,
+    name,
+    kind,
+    ...(caseId ? { caseId } : {}),
+    ...(combinationId ? { combinationId } : {}),
+    summary: result.summary as unknown as ResultSummary,
+    fields: result.fields.map((field) => ({ ...field, runId, variantId: id })) as unknown as ResultField[]
+  };
+}
+
+/** Pointwise static envelope; governing arrays index the compact variantIds table. */
+export function staticEnvelopeVariant(variants: RunVariantResult[], runId: string): RunVariantResult {
+  if (!variants.length) throw new Error("A static envelope requires at least one case or combination.");
+  const stressFields = variants.map((variant) => variant.fields.find((field) =>
+    field.type === "stress" && field.location === "node" && (field.component === undefined || field.component === "von_mises")
+  ));
+  const displacementFields = variants.map((variant) => variant.fields.find((field) => field.type === "displacement" && field.location === "node"));
+  const stressLength = stressFields[0]?.values.length ?? 0;
+  const displacementLength = displacementFields[0]?.values.length ?? 0;
+  if (!stressLength || !displacementLength || stressFields.some((field) => field?.values.length !== stressLength) || displacementFields.some((field) => field?.values.length !== displacementLength)) {
+    throw new Error("Static envelope fields must share aligned surface stress and displacement arrays.");
+  }
+  const stress = new Array<number>(stressLength).fill(Number.NEGATIVE_INFINITY);
+  const stressGoverning = new Array<number>(stressLength).fill(0);
+  for (let variantIndex = 0; variantIndex < stressFields.length; variantIndex += 1) {
+    const values = stressFields[variantIndex]!.values;
+    for (let node = 0; node < values.length; node += 1) {
+      if (values[node]! > stress[node]!) {
+        stress[node] = values[node]!;
+        stressGoverning[node] = variantIndex;
+      }
+    }
+  }
+  const displacement = new Array<number>(displacementLength).fill(0);
+  const displacementVectors = new Array<[number, number, number]>(displacementLength).fill([0, 0, 0]);
+  const displacementGoverning = new Array<number>(displacementLength).fill(0);
+  for (let variantIndex = 0; variantIndex < displacementFields.length; variantIndex += 1) {
+    const field = displacementFields[variantIndex]!;
+    for (let node = 0; node < field.values.length; node += 1) {
+      const vector = field.vectors?.[node] ?? [0, 0, 0];
+      const magnitude = Math.hypot(vector[0], vector[1], vector[2]);
+      if (magnitude > displacement[node]!) {
+        displacement[node] = magnitude;
+        displacementVectors[node] = [...vector];
+        displacementGoverning[node] = variantIndex;
+      }
+    }
+  }
+  const referenceStress = stressFields[0]!;
+  const referenceDisplacement = displacementFields[0]!;
+  const structuralSummaries = variants.map((variant) => variant.summary).filter((summary): summary is Extract<ResultSummary, { maxStress: number }> => "maxStress" in summary);
+  const maxStress = Math.max(...stress, 0);
+  const maxDisplacement = Math.max(...displacement, 0);
+  const safetyFactor = Math.min(...structuralSummaries.map((summary) => summary.safetyFactor).filter((value) => Number.isFinite(value) && value > 0), Number.POSITIVE_INFINITY);
+  return {
+    id: "envelope",
+    name: "Envelope",
+    kind: "envelope",
+    summary: {
+      maxStress,
+      maxStressUnits: referenceStress.units,
+      maxDisplacement,
+      maxDisplacementUnits: referenceDisplacement.units,
+      safetyFactor: Number.isFinite(safetyFactor) ? safetyFactor : 0,
+      reactionForce: Math.max(...structuralSummaries.map((summary) => summary.reactionForce), 0),
+      reactionForceUnits: structuralSummaries[0]?.reactionForceUnits ?? "N",
+      provenance: structuralSummaries[0]?.provenance,
+      diagnostics: []
+    },
+    fields: [
+      {
+        ...referenceStress,
+        id: "envelope-stress-surface",
+        runId,
+        variantId: "envelope",
+        component: "von_mises",
+        values: stress,
+        min: Math.min(...stress),
+        max: maxStress
+      },
+      {
+        ...referenceDisplacement,
+        id: "envelope-displacement-surface",
+        runId,
+        variantId: "envelope",
+        values: displacement,
+        vectors: displacementVectors,
+        min: Math.min(...displacement),
+        max: maxDisplacement
+      }
+    ],
+    governingVariantIndices: {
+      variantIds: variants.map((variant) => variant.id),
+      stress: stressGoverning,
+      displacement: displacementGoverning
+    }
   };
 }
 
@@ -766,17 +1053,6 @@ function materialForStudy(study: Study, customMaterials: readonly CustomMaterial
     material,
     parameters: assignment?.parameters ?? {}
   };
-}
-
-function totalForceVector(study: Study, displayModel: DisplayModel, densityKgM3: number): Vec3 {
-  const force: Vec3 = [0, 0, 0];
-  for (const load of study.loads) {
-    const vector = forceVectorForLoad(load, displayModel, densityKgM3);
-    force[0] += vector[0];
-    force[1] += vector[1];
-    force[2] += vector[2];
-  }
-  return force;
 }
 
 function forceVectorForLoad(load: Study["loads"][number], displayModel: DisplayModel, densityKgM3: number): Vec3 {

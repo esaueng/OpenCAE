@@ -304,6 +304,122 @@ describe("local core solve mesh statistics", () => {
   });
 });
 
+describe("load-case run variants", () => {
+  test("ignores disabled empty cases without invalidating the enabled solve", () => {
+    const study = studyFixture({
+      loadCases: [
+        { id: "service", name: "Service", enabled: true, loadIds: ["load-1"] },
+        { id: "draft", name: "Draft", enabled: false, loadIds: [] }
+      ],
+      loadCombinations: []
+    });
+
+    const solved = trySolveOpenCaeCoreStudy({ study, runId: "run-disabled-case", displayModel: cantileverDisplayModel() });
+
+    expect(solved.ok, solved.ok ? undefined : solved.reason).toBe(true);
+    if (!solved.ok) return;
+    expect(solved.result.variants?.map((variant) => variant.id)).toEqual(["case:service"]);
+  });
+
+  test("solves enabled cases and signed combinations, then creates a governing envelope", () => {
+    const study = studyFixture({
+      loads: [
+        { id: "load-down", type: "force", selectionRef: "selection-load-face", parameters: { value: 500, units: "N", direction: [0, -1, 0] }, status: "complete" },
+        { id: "load-side", type: "force", selectionRef: "selection-load-face", parameters: { value: 250, units: "N", direction: [0, 0, -1] }, status: "complete" }
+      ],
+      loadCases: [
+        { id: "down", name: "Down", enabled: true, loadIds: ["load-down"] },
+        { id: "side", name: "Side", enabled: true, loadIds: ["load-side"] }
+      ],
+      loadCombinations: [{
+        id: "down-minus-side",
+        name: "Down - 0.5 Side",
+        enabled: true,
+        factors: [{ caseId: "down", factor: 1 }, { caseId: "side", factor: -0.5 }]
+      }]
+    });
+    const solved = trySolveOpenCaeCoreStudy({ study, runId: "run-cases", displayModel: cantileverDisplayModel() });
+    expect(solved.ok).toBe(true);
+    if (!solved.ok) return;
+    expect(solved.result.variants?.map((variant) => [variant.id, variant.kind])).toEqual([
+      ["case:down", "case"],
+      ["case:side", "case"],
+      ["combination:down-minus-side", "combination"],
+      ["envelope", "envelope"]
+    ]);
+    expect(solved.result.activeVariantId).toBe("case:down");
+    expect(solved.result.fields.every((field) => field.runId === "run-cases" && field.variantId === "case:down")).toBe(true);
+    const envelope = solved.result.variants?.at(-1);
+    expect(envelope?.governingVariantIndices?.variantIds).toEqual([
+      "case:down",
+      "case:side",
+      "combination:down-minus-side"
+    ]);
+    expect(envelope?.governingVariantIndices?.stress.length).toBe(solved.result.surfaceMesh?.nodes.length);
+    expect(envelope?.governingVariantIndices?.displacement.length).toBe(solved.result.surfaceMesh?.nodes.length);
+  });
+
+  test("streams dynamic cases separately and retains only the active transient payload", () => {
+    const loads = [
+      { id: "load-down", type: "force" as const, selectionRef: "selection-load-face", parameters: { value: 40, units: "N", direction: [0, -1, 0] }, status: "complete" as const },
+      { id: "load-side", type: "force" as const, selectionRef: "selection-load-face", parameters: { value: 20, units: "N", direction: [0, 0, -1] }, status: "complete" as const }
+    ];
+    const study = studyFixture({
+      name: "Dynamic cases",
+      type: "dynamic_structural",
+      loads,
+      loadCases: [
+        { id: "down", name: "Down", enabled: true, loadIds: ["load-down"] },
+        { id: "side", name: "Side", enabled: true, loadIds: ["load-side"] }
+      ],
+      loadCombinations: [],
+      meshSettings: {
+        preset: "coarse",
+        status: "complete",
+        meshRef: "actual-core-model",
+        summary: {
+          nodes: 4,
+          elements: 1,
+          warnings: [],
+          artifacts: { actualCoreModel: { model: actualCoreModelFixture() } }
+        }
+      },
+      solverSettings: {
+        backend: "opencae_core_local",
+        startTime: 0,
+        endTime: 0.01,
+        timeStep: 0.005,
+        outputInterval: 0.005,
+        dampingRatio: 0.02,
+        integrationMethod: "newmark_average_acceleration",
+        loadProfile: "ramp"
+      }
+    });
+    const streamed: Array<{ id: string; frameCount: number }> = [];
+
+    const solved = trySolveOpenCaeCoreStudy({
+      study,
+      runId: "run-dynamic-cases",
+      displayModel: cantileverDisplayModel(),
+      onVariantComplete: (variant) => streamed.push({
+        id: variant.id,
+        frameCount: variant.fields.filter((field) => field.type === "displacement").length
+      })
+    });
+
+    expect(solved.ok).toBe(true);
+    if (!solved.ok) return;
+    expect(streamed.map((variant) => variant.id)).toEqual(["case:down", "case:side"]);
+    expect(streamed.every((variant) => variant.frameCount === 3)).toBe(true);
+    expect(solved.result.variants?.map((variant) => variant.id)).toEqual(["case:down"]);
+    expect(solved.result.variantRefs).toEqual([
+      { id: "case:down", name: "Down", kind: "case", caseId: "down", persistedSeparately: true },
+      { id: "case:side", name: "Side", kind: "case", caseId: "side", persistedSeparately: true }
+    ]);
+    expect(solved.result.activeVariantId).toBe("case:down");
+  });
+});
+
 describe("per-model solver backend resolution", () => {
   function autoStudy(overrides: Partial<Study> = {}): Study {
     return studyFixture({ solverSettings: {}, ...overrides });
