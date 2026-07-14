@@ -217,6 +217,11 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const viewerInteractingRef = useRef(false);
   const viewerCaptureRef = useRef<(() => Promise<string>) | null>(null);
   const reportCaptureInFlightRef = useRef<string | null>(null);
+  // Viewer-only view-mode override for the report's boundary-conditions
+  // capture. Kept separate from viewMode so flipping the viewer to model view
+  // mid-capture does not re-trigger (and cancel) the capture effect.
+  const [captureViewMode, setCaptureViewMode] = useState<ViewMode | null>(null);
+  const stepPreviewMeasureWaitersRef = useRef<Array<() => void>>([]);
   const reportStateRef = useRef({ viewMode, resultMode, resultSummary, completedRunId, resultPlaybackPlaying });
   const initialActionConsumedRef = useRef(false);
   if (!resultPlaybackFrameControllerRef.current) {
@@ -535,6 +540,9 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   }, [commitPlaybackViewerFrame, playbackFrameIndexes]);
 
   const handleMeasureDisplayModelDimensions = useCallback((dimensions: NonNullable<DisplayModel["dimensions"]>) => {
+    // The STEP preview just finished tessellating; release any boundary-figure
+    // capture waiting for the model view to have real geometry.
+    stepPreviewMeasureWaitersRef.current.splice(0).forEach((resolve) => resolve());
     setDisplayModel((current) => {
       if (!current?.nativeCad) return current;
       if (
@@ -1200,10 +1208,16 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     if (capture) setViewerCaptureRevision((revision) => revision + 1);
   }, []);
 
+  const boundaryConditionCount = (study?.constraints.length ?? 0) + (study?.loads.length ?? 0);
+  const hasNativeCadModel = Boolean(displayModel?.nativeCad);
   useEffect(() => {
     const runId = completedRunId;
     if (!runId || !resultSummary || !resultFields.length || viewMode !== "results" || !viewerCaptureRef.current) return;
-    if (reportCaptures?.runId === runId || reportCaptureInFlightRef.current === runId) return;
+    const captureBoundaryView = boundaryConditionCount > 0;
+    // Recapture when the run predates the boundary-conditions figure so older
+    // saved results gain it the next time their results view is open.
+    const capturesComplete = reportCaptures?.runId === runId && (Boolean(reportCaptures.captures.boundary) || !captureBoundaryView);
+    if (capturesComplete || reportCaptureInFlightRef.current === runId) return;
     const sourceSummary = resultSummary;
     const capture = viewerCaptureRef.current;
     let cancelled = false;
@@ -1219,7 +1233,22 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       resultFields,
       surfaceMeshRef: resultSurfaceMesh?.id,
       capture,
-      isCurrent: () => reportStateRef.current.resultSummary === sourceSummary && reportStateRef.current.completedRunId === runId
+      isCurrent: () => reportStateRef.current.resultSummary === sourceSummary && reportStateRef.current.completedRunId === runId,
+      setViewMode: (mode) => setCaptureViewMode(mode === "results" ? null : mode),
+      captureBoundaryView,
+      // Uploaded STEP previews re-tessellate when the viewer leaves the
+      // results view; wait for that (with a fallback timeout) before shooting.
+      ...(hasNativeCadModel
+        ? {
+            waitForBoundaryViewReady: () => new Promise<void>((resolve) => {
+              const timer = window.setTimeout(() => resolve(), 10000);
+              stepPreviewMeasureWaitersRef.current.push(() => {
+                window.clearTimeout(timer);
+                resolve();
+              });
+            })
+          }
+        : {})
     }).then(async (captures) => {
       if (cancelled) return;
       await saveRunReportCaptures(runId, captures);
@@ -1237,8 +1266,9 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     });
     return () => {
       cancelled = true;
+      setCaptureViewMode(null);
     };
-  }, [completedRunId, reportCaptures, resultFields, resultSummary, resultSurfaceMesh?.id, viewMode, viewerCaptureRevision]);
+  }, [boundaryConditionCount, completedRunId, hasNativeCadModel, reportCaptures, resultFields, resultSummary, resultSurfaceMesh?.id, viewMode, viewerCaptureRevision]);
 
   async function handleGenerateReport(options?: { targetSafetyFactor?: number }) {
     if (!project || !study || !resultSummary) {
@@ -1888,7 +1918,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
             selectedPayloadObject={selectedPayloadObject}
             onViewerMiss={handleViewerMiss}
             onSelectFace={handleViewportFaceSelect}
-            viewMode={viewMode}
+            viewMode={captureViewMode ?? viewMode}
             resultMode={resultMode}
             showDeformed={showDeformed}
             resultPlaybackPlaying={resultPlaybackPlaying}

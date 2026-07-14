@@ -2,7 +2,7 @@ import { jsPDF } from "jspdf";
 import { autoTable } from "jspdf-autotable";
 import regularFontUrl from "./fonts/IBMPlexSans-Regular.ttf?url";
 import semiBoldFontUrl from "./fonts/IBMPlexSans-SemiBold.ttf?url";
-import type { ReportData, ReportFigure, ReportRow, ReportTable } from "./reportData";
+import type { ReportBoundaryFigure, ReportData, ReportFigure, ReportRow, ReportTable } from "./reportData";
 import { REPORT_LAYOUT, REPORT_THEME, REPORT_TYPE } from "./reportTheme";
 
 const FONT_FAMILY = "IBMPlexSans";
@@ -84,7 +84,10 @@ class PdfReport {
     this.subheading("Manufacturing");
     this.table(this.data.manufacturing);
 
-    this.sectionHeading(3, "Boundary conditions");
+    // Keep the heading with the figure: like result figures, the boundary view
+    // claims most of the remaining page when it strands below a heading.
+    this.sectionHeading(3, "Boundary conditions", this.hasBoundaryFigure() ? 100 : REPORT_LAYOUT.sectionKeepTogether);
+    if (this.hasBoundaryFigure()) this.boundaryFigure(this.data.boundaryFigure, 74);
     this.subheading("Supports");
     this.table(this.data.supports);
     this.subheading("Loads");
@@ -300,6 +303,57 @@ class PdfReport {
     const captionLines = this.splitText(figure.caption, this.contentWidth, REPORT_TYPE.caption);
     this.text(captionLines, REPORT_LAYOUT.margin, this.y, REPORT_TYPE.caption, REPORT_THEME.inkMuted);
     this.y += captionLines.length * 3.5 + 6;
+  }
+
+  private hasBoundaryFigure(): boolean {
+    return Boolean(this.data.boundaryFigure.png || this.data.boundaryFigure.markerKey.length);
+  }
+
+  // Full-width viewer snapshot of the support/load markers on the undeformed
+  // model; a textual marker key replaces the result figures' color ramp.
+  private boundaryFigure(figure: ReportBoundaryFigure, maxHeight: number): void {
+    this.ensureSpace(Math.min(maxHeight + 20, 96));
+    this.text(figure.title, REPORT_LAYOUT.margin, this.y, 10, REPORT_THEME.ink, "bold");
+    this.y += 4;
+    const frameHeight = Math.max(35, Math.min(maxHeight - 12, this.contentWidth * 0.42));
+    const imageX = REPORT_LAYOUT.margin;
+    const imageY = this.y;
+
+    this.doc.setDrawColor(REPORT_THEME.hairline);
+    this.doc.setLineWidth(0.2);
+    this.doc.rect(imageX, imageY, this.contentWidth, frameHeight);
+    if (figure.png) {
+      const dimensions = pngDimensions(figure.png);
+      const fit = fitImage(dimensions.width, dimensions.height, this.contentWidth - 4, frameHeight - 4);
+      this.doc.addImage(
+        figure.png,
+        "PNG",
+        imageX + (this.contentWidth - fit.width) / 2,
+        imageY + (frameHeight - fit.height) / 2,
+        fit.width,
+        fit.height,
+        undefined,
+        "FAST"
+      );
+    } else {
+      this.doc.setFillColor("#f6f8fa");
+      this.doc.rect(imageX + 0.2, imageY + 0.2, this.contentWidth - 0.4, frameHeight - 0.4, "F");
+      this.text(figure.unavailableLabel, imageX + this.contentWidth / 2, imageY + frameHeight / 2, REPORT_TYPE.body, REPORT_THEME.inkMuted, "normal", "center");
+    }
+    this.y += frameHeight + 4;
+
+    for (const key of figure.markerKey) {
+      const lines = this.splitText(key, this.contentWidth - 4, REPORT_TYPE.caption);
+      this.ensureSpace(lines.length * 3.5 + 2);
+      this.text(lines, REPORT_LAYOUT.margin + 4, this.y, REPORT_TYPE.caption, REPORT_THEME.ink);
+      this.doc.setFillColor(REPORT_THEME.accent);
+      this.doc.rect(REPORT_LAYOUT.margin, this.y - 1.5, 2, 0.4, "F");
+      this.y += lines.length * 3.5 + 1;
+    }
+    const captionLines = this.splitText(figure.caption, this.contentWidth, REPORT_TYPE.caption);
+    this.ensureSpace(captionLines.length * 3.5 + 4);
+    this.text(captionLines, REPORT_LAYOUT.margin, this.y + 1, REPORT_TYPE.caption, REPORT_THEME.inkMuted);
+    this.y += captionLines.length * 3.5 + 7;
   }
 
   private legend(x: number, y: number, width: number, height: number, figure: ReportFigure): void {
