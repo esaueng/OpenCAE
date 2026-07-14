@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { displayModelForUnits, formatDensity, formatForce, formatLength, formatMass, formatMaterialStress, formatResultProvenanceLabel, formatStress, formatUnitSystemLabel, formatVolume, loadValueForUnits, resultFieldForUnits, resultSummaryForUnits } from "./unitDisplay";
+import { displayModelForUnits, formatDensity, formatForce, formatLength, formatMass, formatMaterialStress, formatResultProvenanceLabel, formatStress, formatUnitSystemLabel, formatVolume, loadValueForUnits, resultFieldForUnits, resultSummaryForUnits, resultValueForUnits, resultValueFromDisplayUnits } from "./unitDisplay";
 
 describe("unit display formatting", () => {
   test("labels project unit systems for the workspace footer", () => {
@@ -88,6 +88,18 @@ describe("unit display formatting", () => {
     expect(field.min).toBe(0.0004);
     expect(field.max).toBe(0.0014);
     expect(field.vectors).toEqual([[0.0004, 0, 0], [0.001, 0, 0.001]]);
+  });
+
+  test("round-trips manual result clamps through display units without changing the physical range", () => {
+    const stressField = { type: "stress" as const, units: "MPa" };
+    const imperial = resultValueForUnits(stressField, 142, "US");
+    expect(imperial.units).toBe("ksi");
+    expect(resultValueFromDisplayUnits(stressField, imperial.value, "US")).toBeCloseTo(142, 12);
+
+    const motionField = { type: "velocity" as const, units: "mm/s" };
+    const inchesPerSecond = resultValueForUnits(motionField, 25.4, "US");
+    expect(inchesPerSecond).toEqual({ value: 1, units: "in/s" });
+    expect(resultValueFromDisplayUnits(motionField, 1, "US")).toBeCloseTo(25.4, 12);
   });
 
   test("formats result provenance labels with Core FEA and preview separated", () => {

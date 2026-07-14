@@ -38,14 +38,15 @@ import {
   shouldShowStartScreen,
   workflowStepForShortcut
 } from "./appShellState";
-import { displayModelForUnits, loadValueForUnits, resultFieldForUnits, resultSummaryForUnits, type UnitSystem } from "./unitDisplay";
+import { displayModelForUnits, loadValueForUnits, resultFieldForUnits, resultSummaryForUnits, resultValueForUnits, resultValueFromDisplayUnits, type UnitSystem } from "./unitDisplay";
 import { supportDisplayLabel } from "./supportLabels";
 import { nextSelectedPayloadObject, shouldClearPayloadSelectionOnViewerMiss } from "./payloadSelection";
 import { hasLegacyStepUploadFaces, hasUnresolvedStepFaceSelections, healStepFaceSelections, healStepHoleSupportSelections, legacyStepFaceHealMessage } from "./stepFaceHealing";
 import { stepGeometryMetadataForProject, stepGeometryNeedsRepair } from "./stepGeometryState";
 import { createLocalDynamicStructuralStudy, createLocalStaticStressStudy } from "./localProjectFactory";
 import { createPackedResultPlaybackCache, createResultFrameCache, hasDynamicPlaybackFrames, solverMeshSummaryFromResults, withDerivedSurfaceSafetyFactorFields, type SolverMeshSummary } from "./resultFields";
-import { appendResultProbe, MAX_RESULT_PROBES, resolveResultProbe, resultProbeTopologySignature, selectActiveResultField, type ResultProbeAnchor, type ResultProbePin } from "./resultSelection";
+import { appendResultProbe, MAX_RESULT_PROBES, resolveResultProbe, resultProbeTopologySignature, selectActiveResultField, semanticResultFieldKey, type ResultProbeAnchor, type ResultProbePin } from "./resultSelection";
+import { automaticResultFieldRange, DEFAULT_RESULT_COLOR_SCALE_SETTING, resolveResultColorScale, type ResultColorScaleSetting, type ResultColorScaleSettings } from "./resultColorScale";
 import { packResultFieldsForPlayback, packedPreparedPlaybackFrameOrdinal, playbackFieldsForResultMode, playbackMemoryBudgetBytes, type PackedPreparedPlaybackCache, type PreparedPlaybackFrameCache } from "./resultPlaybackCache";
 import {
   advancePlaybackTimeline,
@@ -135,6 +136,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const [themeMode, setThemeMode] = useState<ThemeMode>(restoredUi?.themeMode ?? "dark");
   const [resultMode, setResultMode] = useState<ResultMode>(restoredUi?.resultMode ?? "stress");
   const [stressComponent, setStressComponent] = useState<StressComponent>(restoredUi?.stressComponent ?? "von_mises");
+  const [resultColorScaleSettings, setResultColorScaleSettings] = useState<ResultColorScaleSettings>(restoredUi?.resultColorScaleSettings ?? {});
   const [resultProbes, setResultProbes] = useState<ResultProbePin[]>([]);
   const [resultProbeLimitReached, setResultProbeLimitReached] = useState(false);
   const [resultRenderBounds, setResultRenderBounds] = useState<ResultRenderBounds | null>(null);
@@ -271,6 +273,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     displayModelForUi?.nativeCad?.contentBase64?.length ?? displayModelForUi?.visualMesh?.contentBase64?.length ?? 0,
     resultMode,
     stressComponent,
+    JSON.stringify(resultColorScaleSettings),
     showDeformed ? "deformed" : "undeformed",
     stressExaggeration.toFixed(2),
     study?.meshSettings.preset ?? "no-mesh",
@@ -278,7 +281,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     resultFieldsSignature,
     resultSurfaceMesh?.id ?? "no-surface",
     resultFrameCache.frameIndexes.join(",")
-  ].join("|"), [activeRunId, completedRunId, displayModelForUi, displayUnitSystem, resultFieldsSignature, resultSurfaceMesh?.id, resultFrameCache.frameIndexes, resultMode, showDeformed, stressComponent, stressExaggeration, study?.meshSettings.preset]);
+  ].join("|"), [activeRunId, completedRunId, displayModelForUi, displayUnitSystem, resultColorScaleSettings, resultFieldsSignature, resultSurfaceMesh?.id, resultFrameCache.frameIndexes, resultMode, showDeformed, stressComponent, stressExaggeration, study?.meshSettings.preset]);
   const visibleResultFieldsForUi = useMemo(
     () => {
       if (DEBUG_RESULT_FRAME_CACHE_ONLY) {
@@ -302,6 +305,68 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     surfaceMesh: resultSurfaceMesh,
     frameIndex: resultFrameIndex
   }), [resultFrameIndex, resultMode, resultSurfaceMesh, stressComponent, visibleResultFieldsForUi]);
+  const activeCanonicalResultField = useMemo(() => {
+    const activeUiField = activeResultSelectionForUi.scalarField;
+    if (!activeUiField) return undefined;
+    const key = semanticResultFieldKey(activeUiField);
+    return resultFields.find((field) => semanticResultFieldKey(field) === key);
+  }, [activeResultSelectionForUi.scalarField, resultFields]);
+  const activeResultColorScaleKey = activeCanonicalResultField ? semanticResultFieldKey(activeCanonicalResultField) : null;
+  const activeResultColorScaleSetting = activeResultColorScaleKey
+    ? resultColorScaleSettings[activeResultColorScaleKey] ?? DEFAULT_RESULT_COLOR_SCALE_SETTING
+    : DEFAULT_RESULT_COLOR_SCALE_SETTING;
+  const activeCanonicalAutomaticRange = useMemo(() => activeCanonicalResultField
+    ? automaticResultFieldRange(resultFields, semanticResultFieldKey, activeCanonicalResultField)
+    : { min: 0, max: 1 }, [activeCanonicalResultField, resultFields]);
+  const activeResultColorScale = useMemo(() => {
+    const field = activeCanonicalResultField;
+    if (!field) return resolveResultColorScale({
+      type: resultMode,
+      component: resultMode === "stress" ? stressComponent : undefined,
+      automaticRange: { min: 0, max: 1 }
+    });
+    const automaticRange = {
+      min: resultValueForUnits(field, activeCanonicalAutomaticRange.min, displayUnitSystem).value,
+      max: resultValueForUnits(field, activeCanonicalAutomaticRange.max, displayUnitSystem).value
+    };
+    const displaySetting: ResultColorScaleSetting = {
+      ...activeResultColorScaleSetting,
+      ...(activeResultColorScaleSetting.manualMin !== undefined
+        ? { manualMin: resultValueForUnits(field, activeResultColorScaleSetting.manualMin, displayUnitSystem).value }
+        : {}),
+      ...(activeResultColorScaleSetting.manualMax !== undefined
+        ? { manualMax: resultValueForUnits(field, activeResultColorScaleSetting.manualMax, displayUnitSystem).value }
+        : {})
+    };
+    return resolveResultColorScale({
+      type: field.type,
+      component: field.component,
+      automaticRange,
+      setting: displaySetting
+    });
+  }, [activeCanonicalAutomaticRange, activeCanonicalResultField, activeResultColorScaleSetting, displayUnitSystem, resultMode, stressComponent]);
+  const activeResultColorScaleControl = useMemo(() => {
+    if (!activeCanonicalResultField || !activeResultColorScaleKey) return undefined;
+    const displayAutomaticMin = resultValueForUnits(activeCanonicalResultField, activeCanonicalAutomaticRange.min, displayUnitSystem).value;
+    const displayAutomaticMax = resultValueForUnits(activeCanonicalResultField, activeCanonicalAutomaticRange.max, displayUnitSystem).value;
+    const displaySetting: ResultColorScaleSetting = {
+      ...activeResultColorScaleSetting,
+      ...(activeResultColorScaleSetting.manualMin !== undefined
+        ? { manualMin: resultValueForUnits(activeCanonicalResultField, activeResultColorScaleSetting.manualMin, displayUnitSystem).value }
+        : {}),
+      ...(activeResultColorScaleSetting.manualMax !== undefined
+        ? { manualMax: resultValueForUnits(activeCanonicalResultField, activeResultColorScaleSetting.manualMax, displayUnitSystem).value }
+        : {})
+    };
+    return {
+      setting: displaySetting,
+      automaticMin: displayAutomaticMin,
+      automaticMax: displayAutomaticMax,
+      displayMin: activeResultColorScale.min,
+      displayMax: activeResultColorScale.max,
+      units: activeResultSelectionForUi.scalarField?.units ?? activeCanonicalResultField.units
+    };
+  }, [activeCanonicalAutomaticRange, activeCanonicalResultField, activeResultColorScale, activeResultColorScaleKey, activeResultColorScaleSetting, activeResultSelectionForUi.scalarField?.units, displayUnitSystem]);
   const resolvedResultProbesForUi = useMemo(() => resultProbes.flatMap((probe) => {
     const resolved = resolveResultProbe(probe, activeResultSelectionForUi.scalarField, resultSurfaceMesh);
     return resolved ? [resolved] : [];
@@ -582,6 +647,21 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     setResultProbeLimitReached(false);
   }, []);
 
+  const handleResultColorScaleSettingChange = useCallback((setting: ResultColorScaleSetting) => {
+    if (!activeCanonicalResultField || !activeResultColorScaleKey) return;
+    const canonicalSetting: ResultColorScaleSetting = {
+      rangeMode: setting.rangeMode,
+      bands: setting.bands,
+      ...(setting.manualMin !== undefined
+        ? { manualMin: resultValueFromDisplayUnits(activeCanonicalResultField, setting.manualMin, displayUnitSystem) }
+        : {}),
+      ...(setting.manualMax !== undefined
+        ? { manualMax: resultValueFromDisplayUnits(activeCanonicalResultField, setting.manualMax, displayUnitSystem) }
+        : {})
+    };
+    setResultColorScaleSettings((current) => ({ ...current, [activeResultColorScaleKey]: canonicalSetting }));
+  }, [activeCanonicalResultField, activeResultColorScaleKey, displayUnitSystem]);
+
   const handleMeasureDisplayModelDimensions = useCallback((dimensions: NonNullable<DisplayModel["dimensions"]>) => {
     // The STEP preview just finished tessellating; release any boundary-figure
     // capture waiting for the model view to have real geometry.
@@ -773,6 +853,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     themeMode,
     resultMode,
     stressComponent,
+    resultColorScaleSettings,
     showDeformed,
     showDimensions,
     stressExaggeration,
@@ -805,6 +886,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     redoStack,
     resultFrameIndex,
     resultMode,
+    resultColorScaleSettings,
     stressComponent,
     resultPlaybackFps,
     resultPlaybackReverseLoop,
@@ -1971,6 +2053,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
             showDimensions={showDimensions}
             stressExaggeration={stressExaggeration}
             resultFields={visibleResultFieldsForUi}
+            resultColorScale={activeResultColorScale}
             resultProbes={resultProbes}
             onAddResultProbe={handleAddResultProbe}
             surfaceMesh={resultSurfaceMesh}
@@ -2005,6 +2088,9 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           stressExaggeration={stressExaggeration}
           resultSummary={resultSummaryForUi}
           resultFields={resultFieldsForUi}
+          resultColorScale={activeResultColorScale}
+          resultColorScaleControl={activeResultColorScaleControl}
+          onResultColorScaleSettingChange={handleResultColorScaleSettingChange}
           resultProbes={resolvedResultProbesForUi}
           resultProbeLimitReached={resultProbeLimitReached}
           onRemoveResultProbe={handleRemoveResultProbe}

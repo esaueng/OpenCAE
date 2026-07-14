@@ -25,6 +25,7 @@ import { ParametricPartBuilder } from "./ParametricPartBuilder";
 import { SampleOptionCard } from "./SampleOptionCard";
 import { SAMPLE_OPTIONS, sampleOptionFor } from "./sampleOptions";
 import { dynamicPlaybackFrames } from "../resultFields";
+import { resultScaleCssGradient, validManualResultRange, type ResolvedResultColorScale, type ResultColorScaleSetting } from "../resultColorScale";
 import { INVALID_REACTION_WARNING, PREVIEW_GEOMETRY_WARNING, canShowReverseLoadCapacity, hasInvalidReactionForce, hasUnavailableReactionDiagnostic, shouldBlockPreviewResultsForDisplayModel } from "../resultProvenance";
 import {
   frameIndexForRoundedPlaybackOrdinal,
@@ -57,6 +58,16 @@ interface RightPanelProps {
   stressExaggeration: number;
   resultSummary: ResultSummary | null;
   resultFields?: ResultField[];
+  resultColorScale?: ResolvedResultColorScale;
+  resultColorScaleControl?: {
+    setting: ResultColorScaleSetting;
+    automaticMin: number;
+    automaticMax: number;
+    displayMin: number;
+    displayMax: number;
+    units: string;
+  };
+  onResultColorScaleSettingChange?: (setting: ResultColorScaleSetting) => void;
   resultProbes?: ResolvedResultProbe[];
   resultProbeLimitReached?: boolean;
   onRemoveResultProbe?: (probeId: string) => void;
@@ -1397,6 +1408,8 @@ function ResultsPanelContent({
   stressExaggeration,
   resultSummary,
   resultFields = [],
+  resultColorScale,
+  resultColorScaleControl,
   resultProbes = [],
   resultProbeLimitReached = false,
   study,
@@ -1412,6 +1425,7 @@ function ResultsPanelContent({
   onResultPlaybackFpsChange,
   onResultPlaybackReverseLoopChange,
   onResultModeChange,
+  onResultColorScaleSettingChange,
   onRemoveResultProbe,
   onClearResultProbes,
   onToggleDeformed,
@@ -1423,6 +1437,8 @@ function ResultsPanelContent({
 }: RightPanelProps & { resultSummary: ResultSummary }) {
   const [targetSafetyFactor, setTargetSafetyFactor] = useState(1.5);
   const [draftStressExaggeration, setDraftStressExaggeration] = useState(stressExaggeration);
+  const [draftScaleMin, setDraftScaleMin] = useState(() => String(resultColorScaleControl?.displayMin ?? 0));
+  const [draftScaleMax, setDraftScaleMax] = useState(() => String(resultColorScaleControl?.displayMax ?? 1));
   const stressExaggerationCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const committedStressExaggerationRef = useRef(stressExaggeration);
   const assessment = resultSummary.failureAssessment ?? assessResultFailure(resultSummary);
@@ -1455,6 +1471,11 @@ function ResultsPanelContent({
     setDraftStressExaggeration(stressExaggeration);
   }, [stressExaggeration]);
 
+  useEffect(() => {
+    setDraftScaleMin(String(resultColorScaleControl?.displayMin ?? 0));
+    setDraftScaleMax(String(resultColorScaleControl?.displayMax ?? 1));
+  }, [resultColorScaleControl?.displayMax, resultColorScaleControl?.displayMin, resultColorScaleControl?.units]);
+
   useEffect(() => () => {
     if (stressExaggerationCommitTimerRef.current) clearTimeout(stressExaggerationCommitTimerRef.current);
   }, []);
@@ -1481,6 +1502,29 @@ function ResultsPanelContent({
     const nextValue = Number(value.toFixed(1));
     setDraftStressExaggeration(nextValue);
     scheduleStressExaggerationCommit(nextValue);
+  }
+
+  const parsedScaleMin = draftScaleMin.trim() ? Number(draftScaleMin) : Number.NaN;
+  const parsedScaleMax = draftScaleMax.trim() ? Number(draftScaleMax) : Number.NaN;
+  const manualScaleValid = validManualResultRange(parsedScaleMin, parsedScaleMax);
+
+  function updateColorScaleSetting(patch: Partial<ResultColorScaleSetting>) {
+    if (!resultColorScaleControl || !onResultColorScaleSettingChange) return;
+    onResultColorScaleSettingChange({ ...resultColorScaleControl.setting, ...patch });
+  }
+
+  function enableManualScale() {
+    if (!resultColorScaleControl) return;
+    const min = manualScaleValid ? parsedScaleMin : resultColorScaleControl.automaticMin;
+    const max = manualScaleValid ? parsedScaleMax : resultColorScaleControl.automaticMax;
+    setDraftScaleMin(String(min));
+    setDraftScaleMax(String(max));
+    updateColorScaleSetting({ rangeMode: "manual", manualMin: min, manualMax: max });
+  }
+
+  function commitManualScale() {
+    if (!manualScaleValid) return;
+    updateColorScaleSetting({ rangeMode: "manual", manualMin: parsedScaleMin, manualMax: parsedScaleMax });
   }
 
   return (
@@ -1562,6 +1606,40 @@ function ResultsPanelContent({
         {resultFields.some((field) => field.type === "acceleration") && <button className={resultMode === "acceleration" ? "primary" : "secondary"} onClick={() => onResultModeChange("acceleration")}>Acceleration</button>}
         <button className={resultMode === "safety_factor" ? "primary" : "secondary"} onClick={() => onResultModeChange("safety_factor")}>Safety factor</button>
       </div>
+      {resultColorScaleControl && (
+        <section className="result-scale-controls" aria-label="Result color scale">
+          <div className="result-probe-list-header">
+            <SectionTitle>Color scale</SectionTitle>
+            <button className="text-button" type="button" onClick={() => {
+              setDraftScaleMin(String(resultColorScaleControl.automaticMin));
+              setDraftScaleMax(String(resultColorScaleControl.automaticMax));
+              updateColorScaleSetting({ rangeMode: "auto", manualMin: undefined, manualMax: undefined });
+            }}>Reset</button>
+          </div>
+          <div className="segmented" role="group" aria-label="Color range mode">
+            <button className={resultColorScaleControl.setting.rangeMode === "auto" ? "active" : ""} type="button" aria-pressed={resultColorScaleControl.setting.rangeMode === "auto"} onClick={() => updateColorScaleSetting({ rangeMode: "auto" })}>Auto</button>
+            <button className={resultColorScaleControl.setting.rangeMode === "manual" ? "active" : ""} type="button" aria-pressed={resultColorScaleControl.setting.rangeMode === "manual"} onClick={enableManualScale}>Manual</button>
+          </div>
+          {resultColorScaleControl.setting.rangeMode === "manual" && (
+            <div className="result-scale-range-inputs">
+              <label className="field">
+                <span>Minimum</span>
+                <span className="input-with-unit"><input aria-label="Color scale minimum" type="number" value={draftScaleMin} onChange={(event) => setDraftScaleMin(event.currentTarget.value)} onBlur={commitManualScale} /><span>{resultColorScaleControl.units}</span></span>
+              </label>
+              <label className="field">
+                <span>Maximum</span>
+                <span className="input-with-unit"><input aria-label="Color scale maximum" type="number" value={draftScaleMax} onChange={(event) => setDraftScaleMax(event.currentTarget.value)} onBlur={commitManualScale} /><span>{resultColorScaleControl.units}</span></span>
+              </label>
+              {!manualScaleValid && <p className="panel-warning" role="alert">Minimum and maximum must be finite, distinct values with minimum below maximum.</p>}
+            </div>
+          )}
+          <div className="segmented" role="group" aria-label="Color scale bands">
+            <button className={resultColorScaleControl.setting.bands === "continuous" ? "active" : ""} type="button" aria-pressed={resultColorScaleControl.setting.bands === "continuous"} onClick={() => updateColorScaleSetting({ bands: "continuous" })}>Continuous</button>
+            <button className={resultColorScaleControl.setting.bands === "bands8" ? "active" : ""} type="button" aria-pressed={resultColorScaleControl.setting.bands === "bands8"} onClick={() => updateColorScaleSetting({ bands: "bands8" })}>8 bands</button>
+          </div>
+          <small>{`Automatic run range: ${Number(resultColorScaleControl.automaticMin.toPrecision(6))}–${Number(resultColorScaleControl.automaticMax.toPrecision(6))}${resultColorScaleControl.units ? ` ${resultColorScaleControl.units}` : ""}`}</small>
+        </section>
+      )}
       {(resultProbes.length > 0 || resultProbeLimitReached) && (
         <section className="result-probe-list" aria-label="Pinned result probes">
           <div className="result-probe-list-header">
@@ -1644,7 +1722,7 @@ function ResultsPanelContent({
           </div>
         </>
       )}
-      <div className="legend"><small>Low</small><span /><small>High</small></div>
+      <div className="legend"><small>Low</small><span style={resultColorScale ? { background: resultScaleCssGradient(resultColorScale) } : undefined} /><small>High</small></div>
     </Panel>
   );
 }

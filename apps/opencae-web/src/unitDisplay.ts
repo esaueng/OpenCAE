@@ -84,11 +84,7 @@ export function resultSummaryForUnits(summary: ResultSummary, unitSystem: UnitSy
 }
 
 export function resultFieldForUnits(field: ResultField, unitSystem: UnitSystem): ResultField {
-  const converter = field.type === "stress"
-    ? (value: number) => stressForUnits(value, field.units, unitSystem)
-    : field.type === "displacement" || field.type === "velocity" || field.type === "acceleration"
-      ? (value: number) => lengthForUnits(value, field.units, unitSystem)
-      : undefined;
+  const converter = resultValueConverter(field, unitSystem);
 
   if (!converter) return field;
 
@@ -113,6 +109,23 @@ export function resultFieldForUnits(field: ResultField, unitSystem: UnitSystem):
       ...(sample.vector ? { vector: sample.vector.map((component) => converter(component).value) as [number, number, number] } : {})
     }))
   };
+}
+
+export function resultValueForUnits(field: Pick<ResultField, "type" | "units">, value: number, unitSystem: UnitSystem): { value: number; units: string } {
+  return resultValueConverter(field, unitSystem)?.(value) ?? { value, units: field.units };
+}
+
+export function resultValueFromDisplayUnits(field: Pick<ResultField, "type" | "units">, value: number, unitSystem: UnitSystem): number {
+  const displayUnitValue = resultValueForUnits(field, 1, unitSystem).value;
+  return Number.isFinite(displayUnitValue) && Math.abs(displayUnitValue) > Number.EPSILON ? value / displayUnitValue : value;
+}
+
+function resultValueConverter(field: Pick<ResultField, "type" | "units">, unitSystem: UnitSystem) {
+  return field.type === "stress"
+    ? (value: number) => stressForUnits(value, field.units, unitSystem)
+    : field.type === "displacement" || field.type === "velocity" || field.type === "acceleration"
+      ? (value: number) => lengthForUnits(value, field.units, unitSystem)
+      : undefined;
 }
 
 export function formatResultProvenanceLabel(provenance: ResultProvenance | undefined): string {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ElementRef, MouseEvent as ReactMouseEvent, MutableRefObject, PointerEvent as ReactPointerEvent } from "react";
 import { Billboard, Bounds, Edges, GizmoHelper, Html, Line, OrbitControls, Text, useBounds } from "@react-three/drei";
 import { addAfterEffect, Canvas, useFrame, useThree } from "@react-three/fiber";
@@ -26,6 +26,7 @@ import { highlightPayloadObjectMeshes } from "../payloadObjectHighlight";
 import { layoutOutsideModelLabels, payloadMassLabelOffset, type LabelAnchor } from "../calloutLabelLayout";
 import { getSnapSuggestion } from "../snapping/snapController";
 import type { SolverSurfaceMesh } from "../projectFile";
+import { resultColorAtNormalized, resultColorForValue as colorForScaleValue, resultScaleCssGradient, type ResolvedResultColorScale } from "../resultColorScale";
 import { isSnapOverlayObject, SnapVisualization } from "../snapping/Visualization";
 import type { CursorRay, FaceSnapAxis, SnapMeasurement, SnapResult, Vec3 } from "../snapping/types";
 import type { PayloadObjectSelection, PrintLayerOrientation, ResultMode, ResultPlaybackFrameController, ResultPlaybackFrameSnapshot, StressComponent, ThemeMode, ViewerLoadMarker, ViewerSupportMarker, ViewMode } from "../workspaceViewTypes";
@@ -48,6 +49,7 @@ interface CadViewerProps {
   showDimensions: boolean;
   stressExaggeration: number;
   resultFields: ResultField[];
+  resultColorScale?: ResolvedResultColorScale;
   resultProbes?: ResultProbePin[];
   onAddResultProbe?: (anchor: ResultProbeAnchor) => void;
   surfaceMesh?: SolverSurfaceMesh;
@@ -166,6 +168,7 @@ const DEBUG_FORCE_DEFORMATION_SCALE =
     : Number.NaN;
 const RESULT_DEFORMATION_TARGET_FRACTION = 0.08;
 const RESULT_DEFORMATION_CAP_FRACTION = DEBUG_RESULTS ? 1 : 0.25;
+const ResultColorScaleContext = createContext<ResolvedResultColorScale | null>(null);
 
 export function viewerGizmoLayout() {
   const cubeSize = VIEWER_VIEW_CUBE_SIZE;
@@ -221,6 +224,7 @@ export function CadViewer(props: CadViewerProps) {
     const displayBounds = solverSurfaceDisplayBoundsForDisplayModel(props.displayModel, uploadedPreviewBounds);
     return solverSurfaceDisplayFootprint(props.surfaceMesh, displayBounds, baseModelRotation);
   }, [baseModelRotation, props.displayModel, props.surfaceMesh, solverSurfaceResult, uploadedPreviewBounds]);
+  const resultColorScale = props.resultColorScale ?? resultColorScaleForField(solverSurfaceResult?.scalarField ?? selectedResultField(resultFields, props.resultMode), props.resultMode, stressComponent);
   const viewerContentFitKey = [
     props.activeStep,
     effectiveViewMode,
@@ -248,6 +252,7 @@ export function CadViewer(props: CadViewerProps) {
     props.onResultRenderBoundsChange?.(bounds ? resultRenderBoundsForBox(bounds) : null);
   }, [props.displayModel, props.onResultRenderBoundsChange, uploadedPreviewBounds]);
   return (
+    <ResultColorScaleContext.Provider value={resultColorScale}>
     <section className={`viewer-shell ${effectiveViewMode === "results" ? "results-view" : ""}`} aria-label="3D CAD viewer">
       <Canvas frameloop="demand" dpr={viewerDpr} camera={{ position: [4.8, 4.8, 4.8], up: ISO_CAMERA_UP.toArray(), fov: 42 }} onPointerMissed={props.onViewerMiss}>
         <ViewerInvalidator
@@ -359,6 +364,7 @@ export function CadViewer(props: CadViewerProps) {
       </div>
       {effectiveViewMode === "results" && <ResultLegend resultMode={props.resultMode} resultFields={resultFields} unitSystem={props.unitSystem} meshSummary={props.meshSummary} surfaceMesh={props.surfaceMesh} showDeformed={effectiveShowDeformed} deformationScale={props.stressExaggeration} />}
     </section>
+    </ResultColorScaleContext.Provider>
   );
 }
 
@@ -1210,11 +1216,12 @@ function BracketModel({
   uploadedPreviewBounds,
   onUploadedPreviewBounds
 }: CadViewerProps & { suppressProceduralResultSolid: boolean; uploadedPreviewBounds: THREE.Box3 | null; onUploadedPreviewBounds: (bounds: THREE.Box3) => void }) {
+  const resultColorScale = useContext(ResultColorScaleContext);
   const [hoveredHit, setHoveredHit] = useState<ModelSelectionHit | null>(null);
   const [selectedHit, setSelectedHit] = useState<ModelSelectionHit | null>(null);
   const [snapResult, setSnapResult] = useState<SnapResult | null>(null);
   const modelKind = modelKindForDisplayModel(displayModel);
-  const materialColor = useMemo(() => colorForResult(displayModel.faces, viewMode, resultMode), [displayModel.faces, resultMode, viewMode]);
+  const materialColor = useMemo(() => colorForResult(displayModel.faces, viewMode, resultMode, resultColorScale ?? undefined), [displayModel.faces, resultColorScale, resultMode, viewMode]);
   const probeCoordinateTransform = useMemo(
     () => resultProbeCoordinateTransform(displayModel, resultFields),
     [displayModel, resultFields]
@@ -2758,6 +2765,7 @@ function UploadedNativeCadResultModel({
   onMeasureDisplayModelDimensions?: (dimensions: NonNullable<DisplayModel["dimensions"]>) => void;
   onUploadedPreviewBounds: (bounds: THREE.Box3) => void;
 }) {
+  const resultColorScale = useContext(ResultColorScaleContext) ?? resultColorScaleForField(selectedResultField(resultFields, resultMode), resultMode);
   const filename = displayModel.nativeCad?.filename ?? displayModel.name;
   const contentBase64 = displayModel.nativeCad?.contentBase64 ?? "";
   const lightweightResultPlayback = Boolean(resultPlaybackFrameController);
@@ -2808,10 +2816,10 @@ function UploadedNativeCadResultModel({
   );
   const renderedPreview = useMemo(() => {
     if (!resultObject) return null;
-    colorizeResultObject(resultObject, "uploaded", resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale, supportMarkers, resultFields);
+    colorizeResultObject(resultObject, "uploaded", resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale, supportMarkers, resultFields, resultColorScale);
     const outline = showDeformed && !lightweightResultPlayback ? undeformedOutline ?? undefined : undefined;
     return { object: resultObject, outline };
-  }, [deformationScale, lightweightResultPlayback, loadMarkers, resultFields, resultMode, resultObject, samples, showDeformed, stressExaggeration, supportMarkers, undeformedOutline]);
+  }, [deformationScale, lightweightResultPlayback, loadMarkers, resultColorScale, resultFields, resultMode, resultObject, samples, showDeformed, stressExaggeration, supportMarkers, undeformedOutline]);
 
   const sourceObject = preview.sourceObject;
   useEffect(() => {
@@ -2875,14 +2883,15 @@ function UploadedStlResultModel({
   loadMarkers: ViewerLoadMarker[];
   supportMarkers: ViewerSupportMarker[];
 }) {
+  const resultColorScale = useContext(ResultColorScaleContext) ?? resultColorScaleForField(selectedResultField(resultFields, resultMode), resultMode);
   const lightweightResultPlayback = Boolean(resultPlaybackFrameController);
   // Parse the STL once per uploaded content; the base geometry stays undeformed for the outline.
   const baseGeometry = useMemo(() => uploadedStlGeometryFromBase64(displayModel.visualMesh?.contentBase64 ?? ""), [displayModel.visualMesh?.contentBase64]);
   const resultGeometry = useMemo(() => baseGeometry?.clone() ?? null, [baseGeometry]);
   const geometry = useMemo(() => {
     if (!resultGeometry) return null;
-    return colorizeResultGeometry(resultGeometry, "uploaded", resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale, undefined, undefined, supportMarkers, resultFields);
-  }, [deformationScale, loadMarkers, resultFields, resultGeometry, resultMode, samples, showDeformed, stressExaggeration, supportMarkers]);
+    return colorizeResultGeometry(resultGeometry, "uploaded", resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale, undefined, undefined, supportMarkers, resultFields, true, resultColorScale);
+  }, [deformationScale, loadMarkers, resultColorScale, resultFields, resultGeometry, resultMode, samples, showDeformed, stressExaggeration, supportMarkers]);
   usePackedPlaybackGeometry(geometry, {
     kind: "uploaded",
     resultMode,
@@ -2943,15 +2952,16 @@ function BracketResultSolid({
   loadMarkers: ViewerLoadMarker[];
   supportMarkers: ViewerSupportMarker[];
 }) {
+  const resultColorScale = useContext(ResultColorScaleContext) ?? resultColorScaleForField(selectedResultField(resultFields, resultMode), resultMode);
   const outlineBodyGeometry = useMemo(() => createBracketBodyGeometry(), []);
   const outlineRibGeometry = useMemo(() => createRibGeometry(), []);
   const bodyGeometry = useMemo(
-    () => colorizeSampleResultGeometry(createBracketBodyGeometry(), kind, resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale, supportMarkers, resultFields),
-    [deformationScale, kind, loadMarkers, resultMode, resultFields, samples, showDeformed, stressExaggeration, supportMarkers]
+    () => colorizeSampleResultGeometry(createBracketBodyGeometry(), kind, resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale, supportMarkers, resultFields, resultColorScale),
+    [deformationScale, kind, loadMarkers, resultColorScale, resultMode, resultFields, samples, showDeformed, stressExaggeration, supportMarkers]
   );
   const ribGeometry = useMemo(
-    () => colorizeSampleResultGeometry(createRibGeometry(), kind, resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale, supportMarkers, resultFields),
-    [deformationScale, kind, loadMarkers, resultMode, resultFields, samples, showDeformed, stressExaggeration, supportMarkers]
+    () => colorizeSampleResultGeometry(createRibGeometry(), kind, resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale, supportMarkers, resultFields, resultColorScale),
+    [deformationScale, kind, loadMarkers, resultColorScale, resultMode, resultFields, samples, showDeformed, stressExaggeration, supportMarkers]
   );
   usePackedPlaybackGeometry(bodyGeometry, {
     kind,
@@ -3023,13 +3033,14 @@ function SampleResultSolid({
   loadMarkers: ViewerLoadMarker[];
   supportMarkers: ViewerSupportMarker[];
 }) {
+  const resultColorScale = useContext(ResultColorScaleContext) ?? resultColorScaleForField(selectedResultField(resultFields, resultMode), resultMode);
   const outlineBeamGeometry = useMemo(() => kind === "plate" ? createBeamGeometry() : null, [kind]);
   const outlineCantileverGeometry = useMemo(() => kind === "cantilever" ? new THREE.BoxGeometry(3.8, 0.5, 0.72, 40, 8, 8) : null, [kind]);
   const beamGeometry = useMemo(
     () => kind === "plate"
-      ? colorizeSampleResultGeometry(createBeamGeometry(), kind, resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale, supportMarkers, resultFields)
+      ? colorizeSampleResultGeometry(createBeamGeometry(), kind, resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale, supportMarkers, resultFields, resultColorScale)
       : null,
-    [deformationScale, kind, loadMarkers, resultMode, resultFields, samples, showDeformed, stressExaggeration, supportMarkers]
+    [deformationScale, kind, loadMarkers, resultColorScale, resultMode, resultFields, samples, showDeformed, stressExaggeration, supportMarkers]
   );
   const beamPayloadGeometry = useMemo(() => kind === "plate" ? createBeamPayloadGeometry() : null, [kind]);
   const beamPayloadOffset = useMemo(
@@ -3041,9 +3052,9 @@ function SampleResultSolid({
   );
   const cantileverGeometry = useMemo(
     () => kind === "cantilever"
-      ? colorizeSampleResultGeometry(new THREE.BoxGeometry(3.8, 0.5, 0.72, 40, 8, 8), kind, resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale, supportMarkers, resultFields)
+      ? colorizeSampleResultGeometry(new THREE.BoxGeometry(3.8, 0.5, 0.72, 40, 8, 8), kind, resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale, supportMarkers, resultFields, resultColorScale)
       : null,
-    [deformationScale, kind, loadMarkers, resultMode, resultFields, samples, showDeformed, stressExaggeration, supportMarkers]
+    [deformationScale, kind, loadMarkers, resultColorScale, resultMode, resultFields, samples, showDeformed, stressExaggeration, supportMarkers]
   );
   usePackedPlaybackGeometry(beamGeometry, {
     kind,
@@ -3102,7 +3113,7 @@ function SampleResultSolid({
       </group>
     );
   }
-  return <SampleSolid kind={kind} color={resultPalette(resultMode).body[2] ?? "#9aa7b4"} />;
+  return <SampleSolid kind={kind} color={resultColorAtNormalized(resultMode, undefined, 0.4)} />;
 }
 
 export function shouldShowUndeformedResultOutline(showDeformed: boolean) {
@@ -3265,9 +3276,10 @@ function SolverSurfaceResultMesh({
   resultPlaybackPlaying: boolean;
   onAddResultProbe?: (anchor: ResultProbeAnchor) => void;
 }) {
+  const resultColorScale = useContext(ResultColorScaleContext) ?? resultColorScaleForField(scalarField, resultMode);
   const geometry = useMemo(
-    () => buildSolverSurfaceResultGeometry({ surfaceMesh, scalarField, displacementField, resultMode, showDeformed, deformationScale, displacementPeakMagnitude }),
-    [deformationScale, displacementField, displacementPeakMagnitude, resultMode, scalarField, showDeformed, surfaceMesh]
+    () => buildSolverSurfaceResultGeometry({ surfaceMesh, scalarField, displacementField, resultMode, showDeformed, deformationScale, displacementPeakMagnitude, resultColorScale }),
+    [deformationScale, displacementField, displacementPeakMagnitude, resultColorScale, resultMode, scalarField, showDeformed, surfaceMesh]
   );
   const outlineGeometry = useMemo(() => buildSolverSurfaceOutlineGeometry(surfaceMesh), [surfaceMesh]);
   return (
@@ -3432,7 +3444,8 @@ export function buildSolverSurfaceResultGeometry({
   resultMode,
   showDeformed,
   deformationScale,
-  displacementPeakMagnitude
+  displacementPeakMagnitude,
+  resultColorScale
 }: {
   surfaceMesh: SolverSurfaceMesh;
   scalarField: ResultField;
@@ -3441,6 +3454,7 @@ export function buildSolverSurfaceResultGeometry({
   showDeformed: boolean;
   deformationScale: number;
   displacementPeakMagnitude?: number;
+  resultColorScale?: ResolvedResultColorScale;
 }): THREE.BufferGeometry {
   assertSolverSurfaceRenderInputs(surfaceMesh, scalarField, displacementField);
   const positions = new Float32Array(surfaceMesh.nodes.length * 3);
@@ -3466,8 +3480,7 @@ export function buildSolverSurfaceResultGeometry({
     positions[offset] = finiteOr0(node[0]) + finiteOr0(vector[0]) * visualScale;
     positions[offset + 1] = finiteOr0(node[1]) + finiteOr0(vector[1]) * visualScale;
     positions[offset + 2] = finiteOr0(node[2]) + finiteOr0(vector[2]) * visualScale;
-    const normalized = normalizeScalarValueForResultRender(finiteOr0(scalarField.values[index]), scalarField);
-    writeResultColorForValue(colors, offset, resultMode, normalized);
+    writeResultColorForValue(colors, offset, finiteOr0(scalarField.values[index]), resultColorScale ?? resultColorScaleForField(scalarField, resultMode));
   }
 
   const geometry = new THREE.BufferGeometry();
@@ -3605,7 +3618,8 @@ export function applyResultFrameToGeometry({
   deformationScale,
   coordinateTransform,
   recomputeDerivedGeometry = true,
-  deformationCapFraction = RESULT_DEFORMATION_CAP_FRACTION
+  deformationCapFraction = RESULT_DEFORMATION_CAP_FRACTION,
+  resultColorScale
 }: {
   geometry: THREE.BufferGeometry;
   fields: ResultField[];
@@ -3615,6 +3629,7 @@ export function applyResultFrameToGeometry({
   coordinateTransform?: ResultCoordinateTransform;
   recomputeDerivedGeometry?: boolean;
   deformationCapFraction?: number;
+  resultColorScale?: ResolvedResultColorScale;
 }) {
   const totalStart = DEBUG_PERF ? performance.now() : 0;
   let mappingMs = 0;
@@ -3669,7 +3684,7 @@ export function applyResultFrameToGeometry({
 
   const colorArray = colorAttribute.array as Float32Array;
   const scalarStart = DEBUG_PERF ? performance.now() : 0;
-  applyResultColorsToArray(colorArray, position.count, scalarField, scalarMapping, resultMode);
+  applyResultColorsToArray(colorArray, position.count, scalarField, scalarMapping, resultMode, resultColorScale);
   if (DEBUG_PERF) scalarMs = performance.now() - scalarStart;
 
   const displacementStart = DEBUG_PERF ? performance.now() : 0;
@@ -3784,13 +3799,14 @@ function applyResultColorsToArray(
   vertexCount: number,
   scalarField: ResultField | undefined,
   scalarMapping: VertexResultMapping | null,
-  resultMode: ResultMode
+  resultMode: ResultMode,
+  resultColorScale?: ResolvedResultColorScale
 ) {
+  const scale = resultColorScale ?? resultColorScaleForField(scalarField, resultMode);
   const directValuesAligned = scalarField ? resultFieldValuesAlignedToGeometry(scalarField, vertexCount) : false;
   for (let index = 0; index < vertexCount; index += 1) {
     const scalar = mappedScalarValue(index, scalarField, scalarMapping, directValuesAligned);
-    const normalized = scalarField ? normalizeScalarValueForResultRender(scalar, scalarField) : 0;
-    writeResultColorForValue(colorArray, index * 3, resultMode, normalized);
+    writeResultColorForValue(colorArray, index * 3, scalar, scale);
   }
 }
 
@@ -3822,37 +3838,14 @@ function mappedScalarValue(vertexIndex: number, field: ResultField | undefined, 
   return directValuesAligned ? field.values[vertexIndex] ?? 0 : Number.NaN;
 }
 
-function normalizeScalarValueForResultRender(value: number, field: ResultField) {
-  if (!Number.isFinite(value)) return 0;
-  if (!Number.isFinite(field.min) || !Number.isFinite(field.max) || Math.abs(field.max - field.min) <= 1e-12) return 0;
-  return normalizeValueForRender(value, field.min, field.max);
-}
-
-function writeResultColorForValue(colorArray: Float32Array, offset: number, resultMode: ResultMode, t: number) {
-  const color = reusablePaletteColor(resultMode, t);
+function writeResultColorForValue(colorArray: Float32Array, offset: number, value: number, scale: ResolvedResultColorScale) {
+  const color = resultColorScratch.set(colorForScaleValue(value, scale));
   colorArray[offset] = color.r;
   colorArray[offset + 1] = color.g;
   colorArray[offset + 2] = color.b;
 }
 
 const resultColorScratch = new THREE.Color();
-const resultPaletteColorCache = new Map<ResultMode, THREE.Color[]>();
-
-function reusablePaletteColor(resultMode: ResultMode, t: number) {
-  const colors = cachedResultPaletteColors(resultMode);
-  const value = Math.max(0, Math.min(1, t));
-  const index = Math.min(colors.length - 2, Math.floor(value * (colors.length - 1)));
-  const localT = value * (colors.length - 1) - index;
-  return resultColorScratch.lerpColors(colors[index] ?? colors[0]!, colors[index + 1] ?? colors.at(-1)!, localT);
-}
-
-function cachedResultPaletteColors(resultMode: ResultMode) {
-  const cached = resultPaletteColorCache.get(resultMode);
-  if (cached) return cached;
-  const colors = resultPalette(resultMode).body.map((color) => new THREE.Color(color));
-  resultPaletteColorCache.set(resultMode, colors);
-  return colors;
-}
 
 function applyLocalResultPositions(
   positionArray: Float32Array,
@@ -4112,7 +4105,8 @@ function colorizeResultGeometry(
   valueRange?: ResultValueRange,
   supportMarkers: ViewerSupportMarker[] = [],
   resultFields: ResultField[] = [],
-  recomputeDerivedGeometry = true
+  recomputeDerivedGeometry = true,
+  resultColorScale?: ResolvedResultColorScale
 ) {
   const positions = geometry.getAttribute("position");
   if (!(positions instanceof THREE.BufferAttribute)) return geometry;
@@ -4123,7 +4117,8 @@ function colorizeResultGeometry(
       fields: resultFields,
       resultMode,
       showDeformed,
-      deformationScale: deformationScale ?? 1
+      deformationScale: deformationScale ?? 1,
+      resultColorScale
     });
   }
   if (resultFields.length && coordinateTransform) {
@@ -4133,7 +4128,8 @@ function colorizeResultGeometry(
       resultMode,
       showDeformed,
       deformationScale: deformationScale ?? 1,
-      coordinateTransform
+      coordinateTransform,
+      resultColorScale
     });
   }
   const basePositions = basePositionArrayForGeometry(geometry, positions);
@@ -4150,6 +4146,9 @@ function colorizeResultGeometry(
     ? beamDemoMaxDisplacementForLoads(stressExaggeration, loadMarkers, resolvedDeformationScale, usesResultDeformationScale)
     : 0;
   const range = valueRange ?? (beamDemoCoordinate ? { min: 0, max: 1 } : resultValueRangeForGeometry(geometry, kind, resultMode, stressExaggeration, samples, coordinateTransform));
+  const fallbackColorScale = usesBeamPayloadFallback
+    ? { type: resultMode, component: resultColorScale?.component, min: range.min, max: range.max, bands: resultColorScale?.bands ?? "continuous" } as ResolvedResultColorScale
+    : resultColorScale ?? { type: resultMode, min: range.min, max: range.max, bands: "continuous" };
   const colorAttribute = colorAttributeForGeometry(geometry, positions.count);
   for (let index = 0; index < positions.count; index += 1) {
     const baseOffset = index * 3;
@@ -4158,7 +4157,7 @@ function colorizeResultGeometry(
     const value = beamDemoCoordinate
       ? beamDemoFallbackValueForPoint(resultMode, resultPoint, beamDemoCoordinate)
       : resultValueForPoint(kind, resultMode, stressExaggeration, resultPoint, samples);
-    color.copy(resultColorForValue(resultMode, normalizeResultValue(value, range)));
+    color.set(colorForScaleValue(value, fallbackColorScale));
     colorAttribute.setXYZ(index, color.r, color.g, color.b);
     if (showDeformed) {
       const deformed = beamDemoCoordinate
@@ -4471,14 +4470,15 @@ export function colorizeSampleResultGeometry(
   loadMarkers: ViewerLoadMarker[],
   deformationScale?: number,
   supportMarkers: ViewerSupportMarker[] = [],
-  resultFields: ResultField[] = []
+  resultFields: ResultField[] = [],
+  resultColorScale?: ResolvedResultColorScale
 ) {
   // Core Cloud results carry their sample geometry in SOLVER space (meters, Z-up) while this
   // procedural display geometry is in display space (mm, Y-up). Reconcile the two before the
   // inverse-distance mapping, otherwise the meter-scale sample cloud collapses near the origin
   // of the mm-scale model and almost every vertex extrapolates to zero -> a torn/frozen shape.
   const coordinateTransform = solverSpaceResultCoordinateTransform(geometry, resultFields);
-  return colorizeResultGeometry(geometry, kind, resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale, coordinateTransform, undefined, supportMarkers, resultFields);
+  return colorizeResultGeometry(geometry, kind, resultMode, showDeformed, stressExaggeration, samples, loadMarkers, deformationScale, coordinateTransform, undefined, supportMarkers, resultFields, true, resultColorScale);
 }
 
 // When result samples live in a far smaller coordinate space than the display geometry
@@ -4613,6 +4613,7 @@ function usePackedPlaybackGeometry(
   }
 ) {
   const { invalidate } = useThree();
+  const resultColorScale = useContext(ResultColorScaleContext);
   const optionsRef = useRef(options);
   const samplesRef = useRef<FaceResultSample[]>([]);
   useEffect(() => {
@@ -4636,7 +4637,8 @@ function usePackedPlaybackGeometry(
           resultMode: latest.resultMode,
           showDeformed: latest.showDeformed,
           deformationScale: latest.deformationScale ?? 1,
-          recomputeDerivedGeometry: false
+          recomputeDerivedGeometry: false,
+          resultColorScale: resultColorScale ?? undefined
         });
         invalidate();
         return;
@@ -4655,7 +4657,8 @@ function usePackedPlaybackGeometry(
         undefined,
         latest.supportMarkers,
         [],
-        false
+        false,
+        resultColorScale ?? undefined
       );
       invalidate();
     };
@@ -4669,7 +4672,8 @@ function usePackedPlaybackGeometry(
     options.resultMode,
     options.resultPlaybackFrameController,
     options.showDeformed,
-    options.stressExaggeration
+    options.stressExaggeration,
+    resultColorScale
   ]);
 }
 
@@ -4950,7 +4954,8 @@ export function colorizeResultObject(
   loadMarkers: ViewerLoadMarker[],
   deformationScale?: number,
   supportMarkers: ViewerSupportMarker[] = [],
-  resultFields: ResultField[] = []
+  resultFields: ResultField[] = [],
+  resultColorScale?: ResolvedResultColorScale
 ) {
   object.updateMatrixWorld(true);
   const excludedPayloadObjects = resultPayloadObjectRefs(loadMarkers);
@@ -4984,7 +4989,7 @@ export function colorizeResultObject(
       bounds,
       toResultPoint: (point) => point.clone().applyMatrix4(toResultMatrix),
       fromResultPoint: (point) => point.clone().applyMatrix4(fromResultMatrix)
-    }, valueRange, supportMarkers, resultFields);
+    }, valueRange, supportMarkers, resultFields, true, resultColorScale);
     const previousMaterial = child.material;
     child.material = new THREE.MeshStandardMaterial({
       vertexColors: true,
@@ -5175,12 +5180,6 @@ function resultValueRange(values: number[], samples: FaceResultSample[] = []): R
 
 function hasSolvedResultSamples(samples: FaceResultSample[]) {
   return samples.some((sample) => Number.isFinite(sample.normalized) || Boolean(sample.fieldSamples?.length));
-}
-
-function normalizeResultValue(value: number, range: ResultValueRange) {
-  const span = range.max - range.min;
-  if (!Number.isFinite(value) || !Number.isFinite(span) || Math.abs(span) < 1e-12) return 0;
-  return Math.max(0, Math.min(1, (value - range.min) / span));
 }
 
 export function deformationScaleForResultFields(fields: ResultField[]): number | undefined {
@@ -5484,10 +5483,6 @@ export function resultValueForPoint(kind: SampleModelKind, resultMode: ResultMod
     : resultMode === "safety_factor"
       ? kind === "cantilever" ? Math.max(0, Math.min(1, 1 - stress * 0.88)) : sampleValue ?? (1 - stress * 0.88)
       : Math.max(0, Math.min(1, 0.5 + (stress - 0.5) * stressExaggeration));
-}
-
-function resultColorForValue(resultMode: ResultMode, t: number) {
-  return new THREE.Color(interpolatedPaletteColor(resultPalette(resultMode).body, t));
 }
 
 function resultFractionFromSamples(point: THREE.Vector3, samples: FaceResultSample[]): number | null {
@@ -5841,14 +5836,16 @@ function ResultProbe({ label, anchor, labelPosition, tone }: ResultProbeConfig) 
 }
 
 function UserResultProbeMarker({ reading, point, index }: { reading: ResolvedResultProbe; point: [number, number, number]; index: number }) {
+  const resultColorScale = useContext(ResultColorScaleContext);
+  const markerColor = resultColorScale ? colorForScaleValue(reading.value, resultColorScale) : "#4da3ff";
   const label = `P${index + 1}: ${formatResultValue(reading.value)}${reading.units ? ` ${reading.units}` : ""}`;
   const labelPosition = [point[0] + 0.18, point[1] + 0.18, point[2] + 0.22] as [number, number, number];
   return (
     <group>
-      <Line points={[point, labelPosition]} color="#4da3ff" transparent opacity={0.82} lineWidth={1} />
+      <Line points={[point, labelPosition]} color={markerColor} transparent opacity={0.82} lineWidth={1} />
       <mesh position={point} onClick={(event) => event.stopPropagation()}>
         <sphereGeometry args={[0.045, 18, 18]} />
-        <meshBasicMaterial color="#4da3ff" depthTest={false} toneMapped={false} />
+        <meshBasicMaterial color={markerColor} depthTest={false} toneMapped={false} />
       </mesh>
       <SceneLabel label={label} position={labelPosition} tone="active-load" />
     </group>
@@ -6090,6 +6087,7 @@ export function resultLegendContentScale(size: ResultLegendSize) {
 }
 
 function ResultLegend({ resultMode, resultFields, unitSystem, meshSummary, surfaceMesh, showDeformed, deformationScale }: { resultMode: ResultMode; resultFields: ResultField[]; unitSystem: UnitSystem; meshSummary?: MeshSummary; surfaceMesh?: SolverSurfaceMesh; showDeformed?: boolean; deformationScale?: number }) {
+  const contextColorScale = useContext(ResultColorScaleContext);
   const legendRef = useRef<HTMLDivElement | null>(null);
   const resizeDragRef = useRef<ResultLegendResizeDrag | null>(null);
   const [legendSize, setLegendSize] = useState<ResultLegendSize | null>(null);
@@ -6121,8 +6119,9 @@ function ResultLegend({ resultMode, resultFields, unitSystem, meshSummary, surfa
   const fallbackMin = resultMode === "stress" ? stressForUnits(28, "MPa", unitSystem) : resultMode === "displacement" || resultMode === "velocity" || resultMode === "acceleration" ? lengthForUnits(0, "mm", unitSystem) : { value: 1.8, units: "" };
   const fallbackMax = resultMode === "stress" ? stressForUnits(142, "MPa", unitSystem) : resultMode === "displacement" || resultMode === "velocity" || resultMode === "acceleration" ? lengthForUnits(0.184, "mm", unitSystem) : { value: 7.6, units: "" };
   const unit = field?.units ?? fallbackMax.units;
-  const minValue = field?.min ?? fallbackMin.value;
-  const maxValue = field?.max ?? fallbackMax.value;
+  const colorScale = contextColorScale ?? resultColorScaleForField(field, resultMode);
+  const minValue = colorScale.min ?? fallbackMin.value;
+  const maxValue = colorScale.max ?? fallbackMax.value;
   const ticks = displayedLegendTickLabels(minValue, maxValue);
   const meshStats = legendMeshStats(meshSummary);
   const legendStyle = legendSize
@@ -6185,7 +6184,7 @@ function ResultLegend({ resultMode, resultFields, unitSystem, meshSummary, surfa
   return (
     <div
       ref={legendRef}
-      className={`analysis-legend ${resultMode === "safety_factor" ? "safety-scale" : ""}`}
+      className="analysis-legend"
       style={legendStyle}
       title="Double-click to reset legend size"
       onDoubleClick={resetResultLegendSize}
@@ -6206,7 +6205,7 @@ function ResultLegend({ resultMode, resultFields, unitSystem, meshSummary, surfa
       <span>Type: {title}</span>
       <span>Unit: {unit || "ratio"}</span>
       {deformationLabel && <span className="legend-deformation-note">{deformationLabel}</span>}
-      <div className="legend-scale" />
+      <div className="legend-scale" style={{ background: resultScaleCssGradient(colorScale) }} />
       <div className="legend-values">
         <span>{ticks[0]}</span>
         <span>{ticks[1]}</span>
@@ -6224,6 +6223,17 @@ function selectedResultField(resultFields: ResultField[], resultMode: ResultMode
   return resultFields.find((candidate) => candidate.type === resultMode && candidate.location === "face")
     ?? resultFields.find((candidate) => candidate.type === resultMode && candidate.samples?.length)
     ?? resultFields.find((candidate) => candidate.type === resultMode);
+}
+
+function resultColorScaleForField(field: ResultField | undefined, resultMode: ResultMode, component?: ResultField["component"]): ResolvedResultColorScale {
+  const resolvedComponent = field?.component ?? component;
+  return {
+    type: resultMode,
+    ...(resolvedComponent ? { component: resolvedComponent } : {}),
+    min: Number.isFinite(field?.min) ? field!.min : 0,
+    max: Number.isFinite(field?.max) ? field!.max : 1,
+    bands: "continuous"
+  };
 }
 
 function clampNumber(value: number, minValue: number, maxValue: number) {
@@ -6727,44 +6737,14 @@ function vectorForRotationAxis(axis: RotationAxis) {
   return new THREE.Vector3(0, 0, 1);
 }
 
-function colorForResult(faces: DisplayFace[], viewMode: ViewMode, resultMode: ResultMode) {
+function colorForResult(faces: DisplayFace[], viewMode: ViewMode, resultMode: ResultMode, resultColorScale?: ResolvedResultColorScale) {
   const byId = new Map(faces.map((face) => [face.id, face]));
   return (faceId: string) => {
     if (viewMode !== "results") return "#9aa7b4";
     const face = byId.get(faceId);
     const value = face?.stressValue ?? 60;
-    if (resultMode === "displacement" || resultMode === "velocity" || resultMode === "acceleration") return gradient(value, 28, 142, ["#2f80ed", "#4dd0e1", "#d7f75b"]);
-    if (resultMode === "safety_factor") return gradient(142 - value, 0, 114, ["#ef4444", "#f59e0b", "#22c55e"]);
-    return gradient(value, 28, 142, ["#2563eb", "#22c55e", "#f59e0b", "#ef4444"]);
+    return colorForScaleValue(value, resultColorScale ?? { type: resultMode, min: 28, max: 142, bands: "continuous" });
   };
-}
-
-function resultPalette(resultMode: ResultMode): { body: string[] } {
-  if (resultMode === "displacement" || resultMode === "velocity" || resultMode === "acceleration") {
-    return {
-      body: ["#0759d6", "#0ea5e9", "#10b8f0", "#2ee875", "#f2e94e", "#ff8f1f", "#ef4444"]
-    };
-  }
-  if (resultMode === "safety_factor") {
-    return {
-      body: ["#ef4444", "#fb923c", "#facc15", "#a3e635", "#4ade80", "#22c55e"]
-    };
-  }
-  return {
-    body: ["#0759d6", "#0ea5e9", "#22c55e", "#facc15", "#f97316", "#ef4444"]
-  };
-}
-
-function interpolatedPaletteColor(colors: string[], value: number): string {
-  const t = Math.max(0, Math.min(1, value));
-  const index = Math.min(colors.length - 2, Math.floor(t * (colors.length - 1)));
-  const localT = t * (colors.length - 1) - index;
-  return new THREE.Color(colors[index] ?? colors[0]).lerp(new THREE.Color(colors[index + 1] ?? colors.at(-1)), localT).getStyle();
-}
-
-function gradient(value: number, min: number, max: number, colors: string[]): string {
-  const t = Math.max(0, Math.min(1, (value - min) / (max - min)));
-  return interpolatedPaletteColor(colors, t);
 }
 
 function rotationForNormal(normal: [number, number, number]): [number, number, number] {

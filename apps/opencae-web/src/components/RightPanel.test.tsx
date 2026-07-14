@@ -121,6 +121,30 @@ function renderPanel(activeStep: StepId, overrides: Partial<Parameters<typeof Ri
   );
 }
 
+test("renders per-field range and band controls from the shared color-scale contract", () => {
+  const html = renderPanel("results", {
+    viewMode: "results",
+    resultColorScale: { type: "stress", component: "von_mises", min: 12, max: 48, bands: "bands8" },
+    resultColorScaleControl: {
+      setting: { rangeMode: "manual", bands: "bands8", manualMin: 12, manualMax: 48 },
+      automaticMin: 0,
+      automaticMax: 60,
+      displayMin: 12,
+      displayMax: 48,
+      units: "MPa"
+    },
+    onResultColorScaleSettingChange: vi.fn()
+  });
+
+  expect(html).toContain("Color scale");
+  expect(html).toContain('aria-pressed="true">Manual');
+  expect(html).toContain('aria-label="Color scale minimum"');
+  expect(html).toContain('value="12"');
+  expect(html).toContain('aria-pressed="true">8 bands');
+  expect(html).toContain("Automatic run range: 0–60 MPa");
+  expect(html).toContain("linear-gradient(90deg");
+});
+
 function uploadedStepProject(status: StepGeometryMetadata["status"], message?: string): Project {
   return {
     ...project,
