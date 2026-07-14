@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { describe, expect, test, vi } from "vitest";
 import { REPORT_CAPTURE_BACKGROUND, VIEWER_AXIS_HEAD_RADIUS, VIEWER_AXIS_LABEL_BADGE_COLOR, VIEWER_AXIS_LABEL_BADGE_RADIUS, VIEWER_AXIS_LABEL_COLOR, VIEWER_AXIS_LABEL_FONT_SIZE, VIEWER_AXIS_LABEL_FONT_WEIGHT, VIEWER_AXIS_LABEL_OUTLINE_COLOR, VIEWER_AXIS_LABEL_OUTLINE_WIDTH, VIEWER_CREDIT_URL, VIEWER_GIZMO_ALIGNMENT, VIEWER_GIZMO_AXIS_LENGTH, VIEWER_GIZMO_LABEL_DISTANCE, VIEWER_GIZMO_MARGIN, VIEWER_GIZMO_SCALE, VIEWER_ISOMETRIC_GIZMO_VIEW, VIEWER_VIEW_CUBE_BODY_OPACITY, VIEWER_VIEW_CUBE_CORNER_HIT_RADIUS, VIEWER_VIEW_CUBE_CORNER_RADIUS, VIEWER_VIEW_CUBE_EDGE_COLOR, VIEWER_VIEW_CUBE_FACE_HOVER_OPACITY, VIEWER_VIEW_CUBE_FACE_LABEL_FONT_SIZE, VIEWER_VIEW_CUBE_FACE_OPACITY, VIEWER_VIEW_CUBE_SIZE, applyResultFrameToGeometry, axisLabelToViewAxis, beamDemoDisplacementAtStation, beamDemoPayloadOffset, beamDemoStationForPoint, buildSolverSurfaceOutlineGeometry, buildSolverSurfaceResultGeometry, cameraDistanceForBounds, cameraViewForAxis, cloneResultPreviewObject, colorizeResultObject, colorizeSampleResultGeometry, createBeamDemoCoordinate, createRenderedFrameCaptureController, createUndeformedResultOutlineObject, defaultHomeViewTarget, deformationScaleForResultFields, displayedLegendTickLabels, finalVisualScaleForDisplacementField, getViewCubeCornerDescriptors, getViewCubeFaceDescriptors, gizmoViewTargetToRequest, interpolateDisplacementAtPoint, legendMeshStats, legendTickLabels, normalizedPointLoadCantileverShape, opaqueContentCropRect, payloadHighlightObjectId, pointLoadCantileverShape, printLayerVisualizationForBounds, recoverSurfaceNodeScalarField, renderReportCapture, reportCaptureBounds, resultFieldValuesAlignedToGeometry, resultLegendContentScale, resultLegendResizeDimensions, resultProbesForKind, resultValueForPoint, rotatedCameraOrbit, shouldDisableResultDeformation, shouldShowDimensionOverlay, shouldShowModelHitLabel, shouldShowResultMarkers, shouldShowUndeformedResultOutline, shouldShowViewCubeFaceLabel, solverSpaceResultCoordinateTransform, solverSurfaceDisplayFootprint, solverSurfaceResultFields, updatePackedSamples, viewCubeFaceToGizmoView, viewerCameraResetPose, viewerGizmoLayout } from "./CadViewer";
-import { solverSurfaceDisplayBoundsForDisplayModel } from "./CadViewer";
+import { cameraForProjection, cameraVerticalSpanAtTarget, fitOrthographicCamera, orthographicVerticalSpanForBounds, panCamera, resizeProjectionCamera, solverSurfaceDisplayBoundsForDisplayModel } from "./CadViewer";
 import { createPackedResultPlaybackCache, createResultFrameCache, type FaceResultSample } from "../resultFields";
 import type { DisplayFace, DisplayModel, ResultField } from "@opencae/schema";
 import type { PackedPreparedPlaybackCache } from "../resultPlaybackCache";
@@ -31,6 +31,63 @@ function expectVectorCloseTo(actual: THREE.Vector3, expected: number[]) {
 }
 
 describe("CadViewer result coloring", () => {
+  test("projection switching preserves the target, direction, and apparent scale", () => {
+    const target = new THREE.Vector3(1, -2, 0.5);
+    const perspective = new THREE.PerspectiveCamera(42, 1.6, 0.1, 1000);
+    perspective.position.set(9, 6, 7);
+    perspective.up.set(0, 0, 1);
+    perspective.lookAt(target);
+    perspective.updateMatrixWorld();
+    const originalDirection = perspective.position.clone().sub(target).normalize();
+    const originalSpan = cameraVerticalSpanAtTarget(perspective, target);
+
+    const orthographic = cameraForProjection(perspective, target, "orthographic", 1.6);
+    expect(orthographic).toBeInstanceOf(THREE.OrthographicCamera);
+    expect(cameraVerticalSpanAtTarget(orthographic, target)).toBeCloseTo(originalSpan, 10);
+    expect(orthographic.position.clone().sub(target).normalize().angleTo(originalDirection)).toBeLessThan(1e-9);
+
+    const roundTrip = cameraForProjection(orthographic, target, "perspective", 1.6);
+    expect(roundTrip).toBeInstanceOf(THREE.PerspectiveCamera);
+    expect(cameraVerticalSpanAtTarget(roundTrip, target)).toBeCloseTo(originalSpan, 10);
+    expect(roundTrip.position.clone().sub(target).normalize().angleTo(originalDirection)).toBeLessThan(1e-9);
+    expect(roundTrip.up.angleTo(perspective.up)).toBeLessThan(1e-9);
+  });
+
+  test("orthographic fit and resize preserve a finite frustum and scale", () => {
+    const bounds = new THREE.Box3(new THREE.Vector3(-2, -1, -0.5), new THREE.Vector3(2, 1, 0.5));
+    const target = bounds.getCenter(new THREE.Vector3());
+    const direction = new THREE.Vector3(1, 1, 1).normalize();
+    const up = new THREE.Vector3(0, 0, 1);
+    const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 1000);
+    camera.position.copy(target).addScaledVector(direction, 10);
+    camera.up.copy(up);
+    camera.lookAt(target);
+
+    const expectedSpan = orthographicVerticalSpanForBounds(bounds, target, direction, up, 2, 1.28);
+    fitOrthographicCamera(camera, bounds, target, direction, up, 2, 1.28);
+    expect(camera.top - camera.bottom).toBeCloseTo(expectedSpan, 10);
+    expect(camera.right - camera.left).toBeCloseTo(expectedSpan * 2, 10);
+
+    resizeProjectionCamera(camera, 0.5);
+    expect(camera.top - camera.bottom).toBeCloseTo(expectedSpan, 10);
+    expect(camera.right - camera.left).toBeCloseTo(expectedSpan * 0.5, 10);
+    expect(Number.isFinite(camera.projectionMatrix.elements[0])).toBe(true);
+  });
+
+  test("shift-pan uses the visible orthographic frustum instead of camera distance", () => {
+    const camera = new THREE.OrthographicCamera(-2, 2, 2, -2, 0.1, 1000);
+    camera.zoom = 2;
+    camera.position.set(0, 0, 10);
+    camera.lookAt(0, 0, 0);
+    camera.updateMatrixWorld();
+    const target = new THREE.Vector3();
+
+    panCamera(camera, target, 0, 10, 100);
+
+    expect(target.y).toBeCloseTo(0.2, 10);
+    expect(camera.position.y).toBeCloseTo(0.2, 10);
+  });
+
   test("captures pixels only after the requested WebGL frame has rendered", async () => {
     let afterRender: (() => void) | null = null;
     let renderedPixels = "data:image/png;base64,initial-frame";
@@ -98,6 +155,36 @@ describe("CadViewer result coloring", () => {
     expectVectorCloseTo(renderedFrames[1]!.position, [40, 40, 40]);
     expect(scene.background instanceof THREE.Color && `#${scene.background.getHexString()}`).toBe("#070b10");
     expectVectorCloseTo(camera.position, [40, 40, 40]);
+    expect(camera.quaternion.angleTo(originalQuaternion)).toBeCloseTo(0);
+  });
+
+  test("orthographic report capture restores position, orientation, and frustum", () => {
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color("#070b10");
+    scene.add(new THREE.Mesh(new THREE.BoxGeometry(4, 2, 1)));
+    const camera = new THREE.OrthographicCamera(-12, 12, 8, -8, 0.1, 1000);
+    camera.zoom = 1.7;
+    camera.position.set(10, 12, 8);
+    camera.up.set(0, 0, 1);
+    camera.lookAt(0, 0, 0);
+    camera.updateProjectionMatrix();
+    camera.updateMatrixWorld();
+    const originalPosition = camera.position.clone();
+    const originalQuaternion = camera.quaternion.clone();
+    const originalFrustum = [camera.left, camera.right, camera.top, camera.bottom, camera.zoom];
+    const capturedFrusta: number[][] = [];
+    const gl = {
+      render: vi.fn((_scene: THREE.Scene, renderCamera: THREE.Camera) => {
+        const ortho = renderCamera as THREE.OrthographicCamera;
+        capturedFrusta.push([ortho.left, ortho.right, ortho.top, ortho.bottom, ortho.zoom]);
+      }),
+      domElement: { width: 800, height: 500, toDataURL: vi.fn(() => "data:image/png;base64,ortho") }
+    };
+
+    expect(renderReportCapture(gl, scene, camera)).toBe("data:image/png;base64,ortho");
+    expect(capturedFrusta[0]).not.toEqual(originalFrustum);
+    expect(capturedFrusta[1]).toEqual(originalFrustum);
+    expectVectorCloseTo(camera.position, originalPosition.toArray());
     expect(camera.quaternion.angleTo(originalQuaternion)).toBeCloseTo(0);
   });
 

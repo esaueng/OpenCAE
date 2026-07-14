@@ -14,7 +14,7 @@ import type { WorkspaceLogEntry } from "./components/BottomPanel";
 import type { StepId } from "./components/StepBar";
 import type { SampleAnalysisType, SampleModelId } from "./lib/api";
 import type { CapturedResultView } from "./report/captureResultViews";
-import type { PayloadObjectSelection, ResultMode, StressComponent, ThemeMode, ViewMode } from "./workspaceViewTypes";
+import type { PayloadObjectSelection, ProjectionMode, ResultMode, StressComponent, ThemeMode, ViewMode } from "./workspaceViewTypes";
 import type { ResultColorScaleSettings } from "./resultColorScale";
 
 export { AUTOSAVE_STORAGE_KEY, AUTOSAVE_UI_STORAGE_KEY } from "./autosaveStorage";
@@ -29,6 +29,7 @@ export interface WorkspaceUiSnapshot {
   selectedPayloadObject: PayloadObjectSelection | null;
   viewMode: ViewMode;
   themeMode: ThemeMode;
+  projectionMode?: ProjectionMode;
   resultMode: ResultMode;
   stressComponent?: StressComponent;
   resultColorScaleSettings?: ResultColorScaleSettings;
@@ -76,6 +77,7 @@ const VIEW_MODES: ViewMode[] = ["model", "mesh", "results"];
 const RESULT_MODES: ResultMode[] = ["stress", "displacement", "safety_factor", "velocity", "acceleration"];
 const STRESS_COMPONENTS: StressComponent[] = ["von_mises", "principal_max", "principal_min", "max_shear"];
 const THEMES: ThemeMode[] = ["dark", "light"];
+const PROJECTION_MODES: ProjectionMode[] = ["perspective", "orthographic"];
 const LOAD_TYPES: LoadType[] = ["force", "pressure", "gravity"];
 const LOAD_DIRECTIONS: LoadDirectionLabel[] = [...LOAD_DIRECTION_LABELS];
 const SAMPLE_MODELS: SampleModelId[] = ["bracket", "plate", "cantilever"];
@@ -442,6 +444,7 @@ function parseUiSnapshot(value: unknown): WorkspaceUiSnapshot | null {
     selectedPayloadObject: parsePayloadObject(value.selectedPayloadObject),
     viewMode: readEnum(value.viewMode, VIEW_MODES, "model"),
     themeMode: readEnum(value.themeMode, THEMES, "dark"),
+    projectionMode: readEnum(value.projectionMode, PROJECTION_MODES, "perspective"),
     resultMode: readEnum(value.resultMode, RESULT_MODES, "stress"),
     stressComponent: readEnum(value.stressComponent, STRESS_COMPONENTS, "von_mises"),
     resultColorScaleSettings: parseResultColorScaleSettings(value.resultColorScaleSettings),

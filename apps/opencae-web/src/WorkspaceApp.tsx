@@ -58,7 +58,7 @@ import {
 } from "./resultPlaybackTimeline";
 import { preparePlaybackFramesInWorker } from "./workers/performanceClient";
 import type { WorkspaceInitialAction } from "./App";
-import type { PayloadObjectSelection, PrintLayerOrientation, ResultMode, ResultPlaybackFrameController, StressComponent, ThemeMode, ViewerLoadMarker, ViewerSupportMarker, ViewMode } from "./workspaceViewTypes";
+import type { PayloadObjectSelection, PrintLayerOrientation, ProjectionMode, ResultMode, ResultPlaybackFrameController, StressComponent, ThemeMode, ViewerLoadMarker, ViewerSupportMarker, ViewMode } from "./workspaceViewTypes";
 
 const lazyCadViewerImport = () => import("./components/CadViewer").then((module) => ({ default: module.CadViewer }));
 const CadViewer = lazy(lazyCadViewerImport);
@@ -134,6 +134,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const [selectedPayloadObject, setSelectedPayloadObject] = useState<PayloadObjectSelection | null>(restoredUi?.selectedPayloadObject ?? null);
   const [viewMode, setViewMode] = useState<ViewMode>(restoredUi?.viewMode ?? (restoredResults?.fields.length ? "results" : "model"));
   const [themeMode, setThemeMode] = useState<ThemeMode>(restoredUi?.themeMode ?? "dark");
+  const [projectionMode, setProjectionMode] = useState<ProjectionMode>(restoredUi?.projectionMode ?? "perspective");
   const [resultMode, setResultMode] = useState<ResultMode>(restoredUi?.resultMode ?? "stress");
   const [stressComponent, setStressComponent] = useState<StressComponent>(restoredUi?.stressComponent ?? "von_mises");
   const [resultColorScaleSettings, setResultColorScaleSettings] = useState<ResultColorScaleSettings>(restoredUi?.resultColorScaleSettings ?? {});
@@ -861,6 +862,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     selectedPayloadObject,
     viewMode,
     themeMode,
+    projectionMode,
     resultMode,
     stressComponent,
     resultColorScaleSettings,
@@ -893,6 +895,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     homeRequested,
     isStepbarCollapsed,
     logs,
+    projectionMode,
     redoStack,
     resultFrameIndex,
     resultMode,
@@ -2077,6 +2080,8 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
             meshSummary={solverMeshSummary ?? study.meshSettings.summary}
             unitSystem={displayUnitSystem}
             themeMode={themeMode}
+            projectionMode={projectionMode}
+            onProjectionModeChange={setProjectionMode}
             fitSignal={fitSignal}
             viewAxis={viewAxis}
             viewAxisSignal={viewAxisSignal}
