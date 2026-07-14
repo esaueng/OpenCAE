@@ -1549,6 +1549,18 @@ describe("RightPanel payload mass controls", () => {
     expect(failed).toContain("Capture failed.");
   });
 
+  test("offers PNG export with independent busy and error states", () => {
+    const idle = renderPanel("results", { onExportResultPng: vi.fn() });
+    const busy = renderPanel("results", { onExportResultPng: vi.fn(), pngExportBusy: true });
+    const failed = renderPanel("results", { onExportResultPng: vi.fn(), pngExportError: "PNG capture failed." });
+
+    expect(idle).toContain("Export PNG");
+    expect(busy).toContain("Exporting…");
+    expect(busy).toContain('disabled=""');
+    expect(failed).toContain('role="alert"');
+    expect(failed).toContain("PNG capture failed.");
+  });
+
   test("hides the sample Volume and Mass rows for blank and uploaded projects", () => {
     const blankHtml = renderPanel("model");
     const uploadedHtml = renderPanel("model", {

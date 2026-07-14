@@ -76,9 +76,12 @@ interface RightPanelProps {
   runError?: string | null;
   runTiming?: RunTimingEstimate | null;
   onGenerateReport?: (options?: { targetSafetyFactor?: number }) => Promise<void>;
+  onExportResultPng?: () => Promise<void>;
   reportBusy?: boolean;
   reportError?: string | null;
   reportDisabled?: boolean;
+  pngExportBusy?: boolean;
+  pngExportError?: string | null;
   sampleModel: SampleModelId;
   sampleAnalysisType?: SampleAnalysisType;
   draftLoadType: LoadType;
@@ -1440,9 +1443,12 @@ function ResultsPanelContent({
   onToggleDeformed,
   onStressExaggerationChange,
   onGenerateReport,
+  onExportResultPng,
   reportBusy = false,
   reportError,
-  reportDisabled = false
+  reportDisabled = false,
+  pngExportBusy = false,
+  pngExportError
 }: RightPanelProps & { resultSummary: ResultSummary }) {
   const [targetSafetyFactor, setTargetSafetyFactor] = useState(1.5);
   const [draftStressExaggeration, setDraftStressExaggeration] = useState(stressExaggeration);
@@ -1544,7 +1550,13 @@ function ResultsPanelContent({
           <FileDown size={18} />{reportBusy ? "Generating…" : "Generate report"}
         </button>
       )}
+      {onExportResultPng && (
+        <button className="secondary wide" type="button" disabled={pngExportBusy || reportDisabled} onClick={() => void onExportResultPng()}>
+          <FileDown size={18} />{pngExportBusy ? "Exporting…" : "Export PNG"}
+        </button>
+      )}
       {reportError && <p className="panel-warning" role="alert"><AlertTriangle size={16} />{reportError}</p>}
+      {pngExportError && <p className="panel-warning" role="alert"><AlertTriangle size={16} />{pngExportError}</p>}
       <div className={`failure-assessment ${assessment.status}`}>
         <span className="assessment-icon"><AssessmentIcon size={20} /></span>
         <span>
