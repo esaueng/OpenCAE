@@ -1,14 +1,15 @@
-import { useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { SampleAnalysisType, SampleModelId } from "../lib/api";
 import { getOfflineReadiness, offlineReadinessLabel, subscribeOfflineReadiness } from "../lib/offlineStatus";
 import { OpenCaeLogoMark } from "./OpenCaeLogoMark";
 import { SampleOptionCard } from "./SampleOptionCard";
 import { SAMPLE_OPTIONS } from "./sampleOptions";
+import { defaultRecentProjectService, isRecentProjectsSupported, pickRecentProjectFile, projectNameFromFile, requestRecentProjectFile, type RecentProjectEntry, type RecentProjectFileHandle, type RecentProjectService } from "../recentProjects";
 
 interface StartScreenProps {
   onLoadSample: (sample?: SampleModelId, analysisType?: SampleAnalysisType) => void;
   onCreateProject: () => void;
-  onOpenProject: (file: File) => void;
+  onOpenProject: (file: File, handle?: RecentProjectFileHandle) => void | Promise<void>;
 }
 
 export function StartScreen({ onLoadSample, onCreateProject, onOpenProject }: StartScreenProps) {
@@ -21,9 +22,91 @@ export function StartScreen({ onLoadSample, onCreateProject, onOpenProject }: St
   const [selectedSample, setSelectedSample] = useState<SampleModelId>("bracket");
   const [selectedAnalysisType, setSelectedAnalysisType] = useState<SampleAnalysisType>("static_stress");
   const [sampleMenuOpen, setSampleMenuOpen] = useState(false);
+  const [recentProjects, setRecentProjects] = useState<RecentProjectEntry[]>([]);
+  const [recentsAvailable, setRecentsAvailable] = useState(() => isRecentProjectsSupported());
+  const [recentError, setRecentError] = useState<string | null>(null);
+  const [recentBusyId, setRecentBusyId] = useState<string | null>(null);
+  const recentServiceRef = useRef<RecentProjectService | null>(null);
+  if (!recentServiceRef.current) recentServiceRef.current = defaultRecentProjectService();
+
+  useEffect(() => {
+    if (!recentsAvailable) return undefined;
+    let cancelled = false;
+    void recentServiceRef.current!.list().then((entries) => {
+      if (!cancelled) setRecentProjects(entries);
+    }).catch((error) => {
+      if (cancelled) return;
+      setRecentsAvailable(false);
+      setRecentError(messageFromError(error, "Recent Projects is unavailable."));
+    });
+    return () => { cancelled = true; };
+  }, [recentsAvailable]);
 
   function loadSelectedSample(sample = selectedSample) {
     onLoadSample(sample, selectedAnalysisType);
+  }
+
+  async function openValidatedProject(file: File, handle?: RecentProjectFileHandle) {
+    setRecentError(null);
+    const projectName = await projectNameFromFile(file);
+    if (handle && recentsAvailable) {
+      try {
+        setRecentProjects(await recentServiceRef.current!.add(handle, { filename: file.name, projectName }));
+      } catch (error) {
+        setRecentsAvailable(false);
+        setRecentError(messageFromError(error, "Recent Projects could not be updated."));
+      }
+    }
+    await onOpenProject(file, handle);
+  }
+
+  async function chooseLocalProject() {
+    if (!recentsAvailable) {
+      fileInputRef.current?.click();
+      return;
+    }
+    setRecentBusyId("picker");
+    setRecentError(null);
+    try {
+      const selected = await pickRecentProjectFile();
+      if (selected !== "cancelled") await openValidatedProject(selected.file, selected.handle);
+    } catch (error) {
+      setRecentError(messageFromError(error, "Could not open the selected project."));
+    } finally {
+      setRecentBusyId(null);
+    }
+  }
+
+  async function openRecentProject(entry: RecentProjectEntry) {
+    setRecentBusyId(entry.id);
+    setRecentError(null);
+    try {
+      const file = await requestRecentProjectFile(entry);
+      await openValidatedProject(file, entry.handle);
+    } catch (error) {
+      setRecentError(messageFromError(error, `Could not open ${entry.filename}.`));
+    } finally {
+      setRecentBusyId(null);
+    }
+  }
+
+  async function removeRecentProject(id: string) {
+    setRecentError(null);
+    try {
+      setRecentProjects(await recentServiceRef.current!.remove(id));
+    } catch (error) {
+      setRecentError(messageFromError(error, "Could not remove the recent project."));
+    }
+  }
+
+  async function clearRecentProjects() {
+    setRecentError(null);
+    try {
+      await recentServiceRef.current!.clear();
+      setRecentProjects([]);
+    } catch (error) {
+      setRecentError(messageFromError(error, "Could not clear Recent Projects."));
+    }
   }
 
   return (
@@ -45,7 +128,7 @@ export function StartScreen({ onLoadSample, onCreateProject, onOpenProject }: St
         }
         if (!event.metaKey && !event.ctrlKey && !event.altKey && event.key.toLowerCase() === "o") {
           event.preventDefault();
-          fileInputRef.current?.click();
+          void chooseLocalProject();
         }
       }}
     >
@@ -69,7 +152,7 @@ export function StartScreen({ onLoadSample, onCreateProject, onOpenProject }: St
                 <span>Create new project</span>
                 <kbd>N</kbd>
               </button>
-              <button className="start-action secondary" onClick={() => fileInputRef.current?.click()}>
+              <button className="start-action secondary" disabled={recentBusyId === "picker"} onClick={() => void chooseLocalProject()}>
                 <span>Open local project</span>
                 <kbd>O</kbd>
               </button>
@@ -88,10 +171,20 @@ export function StartScreen({ onLoadSample, onCreateProject, onOpenProject }: St
                 onChange={(event) => {
                   const file = event.currentTarget.files?.[0];
                   event.currentTarget.value = "";
-                  if (file) onOpenProject(file);
+                  if (file) void openValidatedProject(file).catch((error) => setRecentError(messageFromError(error, "Could not open the selected project.")));
                 }}
               />
             </div>
+            {recentsAvailable && (
+              <RecentProjectsSection
+                entries={recentProjects}
+                busyId={recentBusyId}
+                onOpen={(entry) => void openRecentProject(entry)}
+                onRemove={(id) => void removeRecentProject(id)}
+                onClear={() => void clearRecentProjects()}
+              />
+            )}
+            {recentError && <p className="start-inline-error" role="alert">{recentError}</p>}
             <p className="start-caption">
               <span>OpenCAE helps you test how parts respond to forces.</span>
               <span>Start with the sample project to see a complete example.</span>
@@ -115,6 +208,44 @@ export function StartScreen({ onLoadSample, onCreateProject, onOpenProject }: St
       </footer>
     </main>
   );
+}
+
+export function RecentProjectsSection({
+  entries,
+  busyId,
+  onOpen,
+  onRemove,
+  onClear
+}: {
+  entries: RecentProjectEntry[];
+  busyId: string | null;
+  onOpen: (entry: RecentProjectEntry) => void;
+  onRemove: (id: string) => void;
+  onClear: () => void;
+}) {
+  return (
+    <section className="recent-projects" aria-label="Recent Projects">
+      <div className="recent-projects-header">
+        <h2>Recent Projects</h2>
+        {entries.length > 0 && <button type="button" onClick={onClear}>Clear List</button>}
+      </div>
+      {entries.length === 0 ? <p>No recent project files yet.</p> : (
+        <ul>
+          {entries.map((entry) => (
+            <li key={entry.id}>
+              <span><strong>{entry.projectName}</strong><small>{entry.filename}</small></span>
+              <button type="button" disabled={busyId !== null} onClick={() => onOpen(entry)}>{busyId === entry.id ? "Opening…" : "Open"}</button>
+              <button type="button" aria-label={`Remove ${entry.projectName} from Recent Projects`} disabled={busyId !== null} onClick={() => onRemove(entry.id)}>Remove</button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function messageFromError(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback;
 }
 
 interface SampleProjectMenuProps {

@@ -1,4 +1,6 @@
-export interface SaveFilePickerHandle {
+import type { RecentProjectFileHandle } from "../recentProjects";
+
+export interface SaveFilePickerHandle extends RecentProjectFileHandle {
   createWritable: () => Promise<{ write: (content: Blob) => Promise<void>; close: () => Promise<void> }>;
 }
 
@@ -15,6 +17,7 @@ export interface SaveBlobOptions {
 }
 
 export interface BlobSaveTarget {
+  handle?: SaveFilePickerHandle;
   save: (blob: Blob) => Promise<"saved">;
 }
 
@@ -40,6 +43,7 @@ export async function prepareBlobSaveToDisk(
         types: [{ description: options.description, accept: options.accept }]
       });
       return {
+        handle,
         save: async (blob) => {
           const writable = await handle.createWritable();
           await writable.write(blob);
