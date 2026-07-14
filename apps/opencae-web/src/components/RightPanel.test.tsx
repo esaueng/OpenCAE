@@ -199,6 +199,31 @@ describe("RightPanel payload mass controls", () => {
     expect(html).toContain('<div class="legend"><small>Low</small><span></span><small>High</small></div>');
   });
 
+  test("shows the maximum force at a factor of safety of one in the reverse check", () => {
+    const html = renderPanel("results", {
+      resultSummary: {
+        maxStress: 142,
+        maxStressUnits: "MPa",
+        maxDisplacement: 0.184,
+        maxDisplacementUnits: "mm",
+        safetyFactor: 1.8,
+        reactionForce: 500,
+        reactionForceUnits: "N",
+        provenance: {
+          kind: "opencae_core_fea",
+          solver: "opencae-core-sparse-tet",
+          meshSource: "actual_volume_mesh",
+          resultSource: "computed",
+          units: "mm-N-s-MPa"
+        }
+      }
+    });
+
+    expect(html).toContain("Max total load");
+    expect(html).toContain("600 N");
+    expect(html).toContain("Max force at 1.0 FoS · 900 N");
+  });
+
   test("renders a missing-unit diagnostic instead of undefined result units", () => {
     const html = renderPanel("results", {
       resultSummary: {

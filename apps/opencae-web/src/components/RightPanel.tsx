@@ -1411,6 +1411,7 @@ function ResultsPanelContent({
   const committedStressExaggerationRef = useRef(stressExaggeration);
   const assessment = resultSummary.failureAssessment ?? assessResultFailure(resultSummary);
   const loadCapacity = estimateAllowableLoadForSafetyFactor(resultSummary, targetSafetyFactor);
+  const loadCapacityAtOne = estimateAllowableLoadForSafetyFactor(resultSummary, 1);
   const blockPreviewResults = shouldBlockPreviewResultsForDisplayModel(displayModel, resultSummary, resultFields, study);
   const reactionForceInvalid = hasInvalidReactionForce(resultSummary, study) || hasUnavailableReactionDiagnostic(resultSummary);
   const resultContractInvalid = resultContractHasMissingUnits(resultSummary, resultFields);
@@ -1603,6 +1604,7 @@ function ResultsPanelContent({
               <span>Max total load</span>
               <strong>{`${formatLoadCapacity(loadCapacity.allowableLoad)} ${loadCapacity.loadUnits}`}</strong>
               <small>{`Current ${formatLoadCapacity(loadCapacity.currentLoad)} ${loadCapacity.loadUnits} · ${formatLoadCapacity(loadCapacity.loadScale)}x`}</small>
+              <small>{`Max force at 1.0 FoS · ${formatLoadCapacity(loadCapacityAtOne.allowableLoad)} ${loadCapacityAtOne.loadUnits}`}</small>
             </div>
           </div>
         </>
