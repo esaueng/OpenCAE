@@ -319,6 +319,18 @@ describe("app persistence", () => {
     expect(principal?.ui.stressComponent).toBe("principal_min");
   });
 
+  test("persists the open-section plane only in workspace UI state", () => {
+    const snapshot = buildAutosavedWorkspace({
+      project,
+      displayModel,
+      ui: { ...baseUi, sectionPlane: { enabled: true, axis: "z", offset: 0.72, flipped: true } }
+    });
+    const parsed = parseAutosavedWorkspacePayload(JSON.stringify(snapshot));
+
+    expect(parsed?.ui.sectionPlane).toEqual({ enabled: true, axis: "z", offset: 0.72, flipped: true });
+    expect(snapshot.projectFile.project).not.toHaveProperty("sectionPlane");
+  });
+
   test("preserves enough logs to diagnose OpenCAE Core failures after reload", () => {
     const logs = Array.from({ length: 120 }, (_, index) => ({ message: `OpenCAE Core diagnostic ${index}`, at: 1714000000000 + index }));
     const snapshot = buildAutosavedWorkspace({

@@ -162,6 +162,21 @@ describe("RightPanel result probes", () => {
   });
 });
 
+describe("RightPanel open section", () => {
+  test("shows axis, normalized offset, and flip controls when the plane is active", () => {
+    const html = renderPanel("model", {
+      sectionPlane: { enabled: true, axis: "y", offset: 0.37, flipped: false },
+      onSectionPlaneChange: vi.fn()
+    });
+
+    expect(html).toContain("Open section");
+    expect(html).toContain("Close section");
+    expect(html).toContain("Normalized offset · 37%");
+    expect(html).toContain("Flip cut side");
+    expect(html).toContain("Section plane axis");
+  });
+});
+
 describe("RightPanel payload mass controls", () => {
   test("offers the opposite face normal as a load direction", () => {
     const markup = renderPanel("loads");

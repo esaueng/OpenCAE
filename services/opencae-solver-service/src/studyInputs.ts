@@ -1,5 +1,5 @@
-import { starterMaterials } from "@opencae/materials";
-import type { Load, Material, Study } from "@opencae/schema";
+import { resolveMaterial, starterMaterials } from "@opencae/materials";
+import type { CustomMaterial, Load, Material, Study } from "@opencae/schema";
 
 export const STANDARD_GRAVITY = 9.80665;
 
@@ -16,12 +16,10 @@ export function loadForceNewtons(load: Load, fallbackMassKg = 0): number {
   return value;
 }
 
-export function materialForStudy(study: Study): Material {
+export function materialForStudy(study: Study, customMaterials: readonly CustomMaterial[] = []): Material {
   const assignment = study.materialAssignments[0];
   if (!assignment) return starterMaterials[0]!;
-  const material = starterMaterials.find((candidate) => candidate.id === assignment.materialId);
-  if (!material) throw new Error(`Local solver requires an assigned material. Unknown material "${assignment.materialId}".`);
-  return material;
+  return resolveMaterial(assignment.materialId, customMaterials);
 }
 
 export function materialParametersForStudy(study: Study): Record<string, unknown> {

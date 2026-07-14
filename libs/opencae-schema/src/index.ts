@@ -58,6 +58,12 @@ export const MaterialSchema = z.object({
   printProfile: MaterialPrintProfileSchema.optional()
 });
 
+export const CustomMaterialSchema = MaterialSchema.extend({
+  id: z.string().uuid(),
+  category: z.enum(["metal", "plastic", "composite", "resin"]),
+  verification: z.literal("user_supplied_unverified")
+});
+
 export const GeometryReferenceSchema = z.object({
   bodyId: z.string(),
   entityType: z.enum(["body", "face", "edge", "vertex"]),
@@ -332,6 +338,7 @@ export const ProjectSchema = z.object({
   schemaVersion: z.string(),
   unitSystem: z.enum(["SI", "US"]),
   geometryFiles: z.array(GeometryFileSchema),
+  customMaterials: z.array(CustomMaterialSchema).optional(),
   studies: z.array(StudySchema),
   createdAt: z.string(),
   updatedAt: z.string()
@@ -433,6 +440,7 @@ export type SimulationFidelity = z.infer<typeof SimulationFidelitySchema>;
 export type DynamicSolverSettings = z.infer<typeof DynamicSolverSettingsSchema>;
 export type ModalSolverSettings = z.infer<typeof ModalSolverSettingsSchema>;
 export type Material = z.infer<typeof MaterialSchema>;
+export type CustomMaterial = z.infer<typeof CustomMaterialSchema>;
 export type GeometryReference = z.infer<typeof GeometryReferenceSchema>;
 export type NamedSelection = z.infer<typeof NamedSelectionSchema>;
 export type Constraint = z.infer<typeof ConstraintSchema>;

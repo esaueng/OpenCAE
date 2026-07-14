@@ -19,6 +19,10 @@ OpenCAE local project files use JSON and are saved with `.opencae.json` by defau
 
 Uploaded STEP, STP, STL, and OBJ source data can be embedded into the project metadata as base64 when the browser has the uploaded model content available. This makes saved local project files self-contained for reopening in the web app.
 
+`project.customMaterials` is optional. Each entry uses a UUID id, name, category, Young's modulus and yield strength in Pa, density in kg/m³, Poisson ratio, optional copied additive `printProfile`, and `verification: "user_supplied_unverified"`. These definitions are project-scoped; there is no global browser material library. Because this is an optional backward-readable field, the outer container remains version 2.
+
+The open-section clipping plane is not part of this file format. Its enabled state, X/Y/Z axis, normalized offset, and flip direction are browser workspace UI preferences only.
+
 Runtime artifacts are stored separately under `data/artifacts` during local API use. Those artifacts include uploaded models, display metadata, mesh summaries, solver inputs/logs, result bundles, HTML reports, and PDF reports.
 
 ## OpenCAE Core model schema 0.3.0
