@@ -12,7 +12,7 @@ import { inferGlobalCriticalPrintAxis } from "@opencae/study-core";
 import type { SolverMeshSummary } from "../resultFields";
 import { fieldWithOwnValueRange, formatResultValue } from "../resultFields";
 import { unitsForLoadType } from "../loadPreview";
-import type { CapturedResultView, ResultViewCaptures } from "./captureResultViews";
+import type { CapturedBoundaryView, CapturedResultView, ResultViewCaptures } from "./captureResultViews";
 import {
   displayModelForUnits,
   formatDensity,
@@ -59,6 +59,15 @@ export interface ReportFigure {
   caption: string;
 }
 
+export interface ReportBoundaryFigure {
+  title: string;
+  png?: string;
+  unavailableLabel: string;
+  caption: string;
+  /** Marker-key lines explaining the viewer annotations visible in the capture. */
+  markerKey: string[];
+}
+
 export interface ReportData {
   pageFormat: "a4" | "letter";
   filename: string;
@@ -79,6 +88,7 @@ export interface ReportData {
   manufacturing: ReportTable;
   supports: ReportTable;
   loads: ReportTable;
+  boundaryFigure: ReportBoundaryFigure;
   mesh: ReportRow[];
   solver: ReportRow[];
   figures: {
@@ -169,6 +179,7 @@ export function buildReportData(input: BuildReportDataInput): ReportData {
     manufacturing: manufacturingTable(input.study),
     supports: supportTable(input.study),
     loads: loadTable(input.study, input.unitSystem),
+    boundaryFigure: boundaryFigureData(input.study, input.captures.boundary),
     mesh: [
       { label: "Preset", value: humanize(input.study.meshSettings.preset) },
       { label: "Nodes", value: meshCount(meshSummary?.nodes, actualMeshCounts) },
@@ -344,6 +355,23 @@ function loadTable(study: Study, unitSystem: UnitSystem): ReportTable {
       ];
     }),
     emptyMessage: "No loads recorded."
+  };
+}
+
+function boundaryFigureData(study: Study, capture: CapturedBoundaryView | undefined): ReportBoundaryFigure {
+  const supportCount = study.constraints.length;
+  const loadCount = study.loads.length;
+  const hasPayloadMass = study.loads.some((load) => load.type === "gravity");
+  return {
+    title: "Boundary conditions on model",
+    ...(capture ? { png: capture.png } : {}),
+    unavailableLabel: "Not captured for this run — open the Results view once, then regenerate the report.",
+    caption: "Support and load markers as placed in the study, shown on the undeformed model.",
+    markerKey: [
+      ...(supportCount ? [`FS n — fixed support on the constrained face (${supportCount} in this study)`] : []),
+      ...(loadCount ? [`L n — applied load at its application point; the arrow shows the load direction (${loadCount} in this study)`] : []),
+      ...(hasPayloadMass ? ["Payload-mass loads are marked at the payload body with a leader instead of an arrow."] : [])
+    ]
   };
 }
 
