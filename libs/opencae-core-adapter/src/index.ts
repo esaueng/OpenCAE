@@ -272,6 +272,22 @@ export function displayDirectionToSolverFrame(direction: Vec3, displayModel: Dis
   return [direction[0], negated(direction[2]), direction[1]];
 }
 
+export function displayPointToSolverFrame(point: Vec3, displayModel: DisplayModel | undefined): Vec3 {
+  if (!displayModel?.dimensions || !displayModelUsesUprightSolverFrame(displayModel)) {
+    return [point[0], point[1], point[2]];
+  }
+  const bounds = renderBoundsForDisplayModel(displayModel);
+  const dimensions = dimensionMeters(displayModel.dimensions);
+  const physical: Vec3 = [0, 0, 0];
+  for (let axis = 0; axis < 3; axis += 1) {
+    const span = bounds.max[axis]! - bounds.min[axis]!;
+    physical[axis] = span > 1e-15
+      ? ((point[axis]! - bounds.min[axis]!) / span) * dimensions[axis]!
+      : dimensions[axis]! / 2;
+  }
+  return [physical[0], dimensions[2] - physical[2], physical[1]];
+}
+
 function negated(value: number): number {
   return value === 0 ? 0 : -value;
 }
@@ -288,12 +304,14 @@ export function studyForCoreGeometryDispatch(study: Study, displayModel: Display
     ...study,
     loads: study.loads.map((load) => {
       const direction = vector3(load.parameters.direction);
-      if (!direction) return load;
+      const remotePoint = vector3(load.parameters.remotePoint);
+      if (!direction && !remotePoint) return load;
       return {
         ...load,
         parameters: {
           ...load.parameters,
-          direction: displayDirectionToSolverFrame(direction, displayModel)
+          ...(direction ? { direction: displayDirectionToSolverFrame(direction, displayModel) } : {}),
+          ...(remotePoint ? { remotePoint: displayPointToSolverFrame(remotePoint, displayModel) } : {})
         }
       };
     })
@@ -348,10 +366,9 @@ export function openCaeCoreEligibility(
   if (!study.constraints.some((constraint) => constraint.type === "fixed")) {
     return { ok: false, reason: "OpenCAE Core requires at least one fixed support." };
   }
-  // Force, pressure, and gravity all route through the cloud-fidelity surface-set
-  // model builder; anything else has no Core load mapping yet.
-  const unsupportedLoad = study.loads.find((load) => load.type !== "force" && load.type !== "pressure" && load.type !== "gravity");
-  if (unsupportedLoad) return { ok: false, reason: `OpenCAE Core supports force, pressure, and gravity loads; ${unsupportedLoad.type} loads are not supported yet.` };
+  if (study.type === "dynamic_structural" && study.loads.some((load) => load.type === "bolt_preload")) {
+    return { ok: false, reason: "Equivalent bolt preload is supported for static studies only." };
+  }
   if (study.type === "modal_analysis") return { ok: true };
   if (!study.loads.length) return { ok: false, reason: "OpenCAE Core requires at least one load." };
   const combinations = structuralLoadCombinations(study).filter((combination) => combination.enabled);
@@ -673,6 +690,7 @@ export function buildOpenCaeCoreModelForStudy(
   };
 
   const surfaceSets = [...(model.surfaceSets ?? [])];
+  const elementSets = [...model.elementSets];
   const nodeSets = [...model.nodeSets.filter((set) => !/^fixedNodes\d+$/.test(set.name))];
   const boundaryConditions: OpenCAEModelJson["boundaryConditions"] = [];
   const loads: LoadJson[] = [];
@@ -696,6 +714,22 @@ export function buildOpenCaeCoreModelForStudy(
 
   const density = coreMaterial.density ?? material.material.density;
   for (const [index, load] of study.loads.entries()) {
+    if (load.type === "volume_force") {
+      const elementSet = ensureElementSetForSelection(model, elementSets, study, displayModel, load.selectionRef);
+      const direction = normalize(vector3(load.parameters.direction) ?? [0, 0, -1]);
+      const magnitude = forceDensityNewtonsPerCubicMeter(load);
+      if (!direction || !(magnitude > 0)) continue;
+      const name = `bodyForceDensity${index}`;
+      loads.push({
+        name,
+        type: "bodyForceDensity",
+        elementSet: elementSet.name,
+        forceDensity: roundVector(displayDirectionToSolverFrame(scaleVector(direction, magnitude), displayModel), 9)
+      });
+      coreLoadNameByStudyLoadId.set(load.id, name);
+      continue;
+    }
+
     const surfaceSet = ensureSurfaceSetForSelection({
       model,
       renderNodePoints,
@@ -720,6 +754,69 @@ export function buildOpenCaeCoreModelForStudy(
       continue;
     }
 
+    if (load.type === "surface_traction") {
+      const direction = normalize(vector3(load.parameters.direction) ?? [0, 0, -1]);
+      const magnitude = pressurePascals(load);
+      if (!direction || !(magnitude > 0)) continue;
+      const name = `surfaceTraction${index}`;
+      loads.push({
+        name,
+        type: "surfaceTraction",
+        surfaceSet: surfaceSet.name,
+        traction: roundVector(displayDirectionToSolverFrame(scaleVector(direction, magnitude), displayModel), 9)
+      });
+      coreLoadNameByStudyLoadId.set(load.id, name);
+      continue;
+    }
+
+    if (load.type === "remote_force") {
+      const force = displayDirectionToSolverFrame(forceVectorForLoad(load, displayModel, density), displayModel);
+      const remotePoint = vector3(load.parameters.remotePoint);
+      if (Math.hypot(...force) <= 1e-12 || !remotePoint) continue;
+      const name = `remoteForce${index}`;
+      loads.push({
+        name,
+        type: "remoteForce",
+        surfaceSet: surfaceSet.name,
+        totalForce: roundVector(force, 9),
+        remotePoint: roundVector(renderPointToSolverPoint(remotePoint, renderNodePoints, model.nodes.coordinates, displayModel), 12)
+      });
+      coreLoadNameByStudyLoadId.set(load.id, name);
+      continue;
+    }
+
+    if (load.type === "bolt_preload") {
+      if (study.type !== "static_stress") throw new Error("Equivalent bolt preload is supported for static studies only.");
+      const secondarySelectionRef = typeof load.parameters.secondarySelectionRef === "string"
+        ? load.parameters.secondarySelectionRef
+        : undefined;
+      if (!secondarySelectionRef || secondarySelectionRef === load.selectionRef) {
+        throw new Error(`Equivalent bolt preload ${load.id} requires a different opposing face selection.`);
+      }
+      const surfaceSetB = ensureSurfaceSetForSelection({
+        model,
+        renderNodePoints,
+        displayModel,
+        study,
+        selectionRef: secondarySelectionRef,
+        surfaceSets
+      });
+      const axis = normalize(vector3(load.parameters.direction) ?? [0, 0, 1]);
+      const preloadForce = Number(load.parameters.value);
+      if (!axis || !Number.isFinite(preloadForce) || preloadForce <= 0) continue;
+      const name = `equivalentBoltPreload${index}`;
+      loads.push({
+        name,
+        type: "equivalentBoltPreload",
+        surfaceSetA: surfaceSet.name,
+        surfaceSetB: surfaceSetB.name,
+        axis: roundVector(displayDirectionToSolverFrame(axis, displayModel), 12),
+        preloadForce
+      });
+      coreLoadNameByStudyLoadId.set(load.id, name);
+      continue;
+    }
+
     const force = displayDirectionToSolverFrame(forceVectorForLoad(load, displayModel, density), displayModel);
     if (Math.hypot(...force) <= 1e-12) continue;
     const name = load.type === "gravity" ? `payloadGravity${index}` : `appliedForce${index}`;
@@ -738,6 +835,7 @@ export function buildOpenCaeCoreModelForStudy(
   model = {
     ...model,
     surfaceSets,
+    elementSets,
     nodeSets,
     boundaryConditions,
     loads,
@@ -815,6 +913,39 @@ function ensureSurfaceSetForSelection({
   const next = { name: selectionRef, facets: [...new Set(facets)].sort((left, right) => left - right) };
   surfaceSets.push(next);
   return next;
+}
+
+function ensureElementSetForSelection(
+  model: OpenCAEModelJson,
+  elementSets: OpenCAEModelJson["elementSets"],
+  study: Study,
+  displayModel: DisplayModel,
+  selectionRef: string
+): OpenCAEModelJson["elementSets"][number] {
+  const selection = study.namedSelections.find((candidate) => candidate.id === selectionRef);
+  const candidateNames = new Set([
+    selectionRef,
+    selection?.name ?? "",
+    ...(selection?.geometryRefs.map((ref) => ref.entityId) ?? []),
+    ...(selection?.geometryRefs.map((ref) => ref.label) ?? [])
+  ].filter(Boolean).map(normalizedSelectionName));
+  const existing = elementSets.find((set) => candidateNames.has(normalizedSelectionName(set.name)));
+  if (existing?.elements.length) return existing;
+  if (displayModel.bodyCount !== 1) {
+    throw new Error(`Volume force ${selectionRef} cannot map its body selection to volume elements in a multi-body mesh.`);
+  }
+  const allElements = elementSets.find((set) => set.name === "allElements" || set.name === "all");
+  if (allElements?.elements.length) return allElements;
+  const next = {
+    name: "allElements",
+    elements: Array.from({ length: model.elementBlocks.reduce((count, block) => count + block.connectivity.length / (block.type === "Tet10" ? 10 : 4), 0) }, (_value, index) => index)
+  };
+  elementSets.push(next);
+  return next;
+}
+
+function normalizedSelectionName(value: string): string {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
 }
 
 function facetsForDisplaySelection(
@@ -1029,6 +1160,18 @@ function pressurePascals(load: Study["loads"][number]): number {
   if (units === "kpa") return value * 1000;
   if (units === "mpa") return value * 1_000_000;
   if (units === "psi") return value * 6894.757293168;
+  return value;
+}
+
+function forceDensityNewtonsPerCubicMeter(load: Study["loads"][number]): number {
+  const value = Number(load.parameters.value);
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  const units = typeof load.parameters.units === "string"
+    ? load.parameters.units.toLowerCase().replace(/³/g, "^3")
+    : "n/m^3";
+  if (units === "kn/m^3") return value * 1_000;
+  if (units === "n/mm^3") return value * 1_000_000_000;
+  if (units === "lbf/in^3") return value * 271_447.14116097;
   return value;
 }
 
@@ -1405,6 +1548,39 @@ function renderBoundsForPoints(points: Vec3[]): { min: Vec3; max: Vec3 } {
   };
 }
 
+function renderPointToSolverPoint(
+  point: Vec3,
+  renderNodePoints: Vec3[],
+  solverCoordinates: ArrayLike<number>,
+  displayModel: DisplayModel
+): Vec3 {
+  if (displayModelUsesUprightSolverFrame(displayModel)) return displayPointToSolverFrame(point, displayModel);
+  const renderBounds = renderBoundsForPoints(renderNodePoints);
+  const solverBounds = coordinateBounds(solverCoordinates);
+  const mapped: Vec3 = [0, 0, 0];
+  for (let axis = 0; axis < 3; axis += 1) {
+    const renderSpan = renderBounds.max[axis]! - renderBounds.min[axis]!;
+    const solverSpan = solverBounds.max[axis]! - solverBounds.min[axis]!;
+    mapped[axis] = renderSpan > 1e-15
+      ? solverBounds.min[axis]! + ((point[axis]! - renderBounds.min[axis]!) / renderSpan) * solverSpan
+      : (solverBounds.min[axis]! + solverBounds.max[axis]!) / 2;
+  }
+  return mapped;
+}
+
+function coordinateBounds(coordinates: ArrayLike<number>): { min: Vec3; max: Vec3 } {
+  const min: Vec3 = [Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY];
+  const max: Vec3 = [Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY];
+  for (let index = 0; index + 2 < coordinates.length; index += 3) {
+    for (let axis = 0; axis < 3; axis += 1) {
+      const value = coordinates[index + axis] ?? 0;
+      min[axis] = Math.min(min[axis]!, value);
+      max[axis] = Math.max(max[axis]!, value);
+    }
+  }
+  return { min, max };
+}
+
 function dominantAxis(vector: Vec3): 0 | 1 | 2 {
   const absolutes = vector.map(Math.abs) as Vec3;
   if (absolutes[0] >= absolutes[1] && absolutes[0] >= absolutes[2]) return 0;
@@ -1441,6 +1617,10 @@ function squaredDistance(left: Vec3, right: Vec3): number {
 
 function roundVector(vector: Vec3, decimals: number): Vec3 {
   return [round(vector[0], decimals), round(vector[1], decimals), round(vector[2], decimals)];
+}
+
+function scaleVector(vector: Vec3, scalar: number): Vec3 {
+  return [vector[0] * scalar, vector[1] * scalar, vector[2] * scalar];
 }
 
 function lerp(a: number, b: number, t: number): number {

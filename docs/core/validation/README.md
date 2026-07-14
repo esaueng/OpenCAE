@@ -2,7 +2,7 @@
 
 See [core.md](./core.md) for the runnable Core validation suite, solver benchmark tolerances, mesh-quality requirements, and current solver limitations.
 
-OpenCAE Core solves the volume mesh supplied in the model JSON. Complex geometry must provide an actual Tet4 volume mesh with surface facets and surface sets. Core must not create or solve a rectangular display-bounds proxy for brackets, holes, ribs, gussets, uploaded CAD, or other non-block shapes.
+OpenCAE Core solves the volume mesh supplied in the model JSON. Complex geometry must provide an actual Tet4 or Tet10 volume mesh with surface facets and surface sets. Core must not create or solve a rectangular display-bounds proxy for brackets, holes, ribs, gussets, uploaded CAD, or other non-block shapes.
 
 If a complex display model has no actual volume mesh, preflight should fail with:
 
@@ -12,9 +12,9 @@ OpenCAE Core requires an actual volume mesh for complex geometry. Use Cloud FEA 
 
 ## Model Schema
 
-Schema `0.2.0` adds Tet4/Tet10 element blocks, surface facets, surface sets, surface force and pressure loads, dynamic linear steps, coordinate metadata, mesh provenance, and optional mesh connection metadata. Schema `0.3.0` adds modal steps and normalized vector mode-shape results. Legacy `0.1.0` and `0.2.0` models remain accepted.
+Schema `0.2.0` adds Tet4/Tet10 element blocks, surface facets, surface sets, surface force and pressure loads, dynamic linear steps, coordinate metadata, mesh provenance, and optional mesh connection metadata. Schema `0.3.0` adds modal steps, normalized vector mode-shape results, surface traction, body force density, remote force, and equivalent bolt preload. Legacy `0.1.0` and `0.2.0` models remain accepted.
 
-Tet10 is currently schema-valid only. `@opencae/solver-cpu` returns `unsupported-element-type` for Tet10 instead of downgrading it to Tet4.
+The CPU solver supports Tet4 and Tet10 stiffness, recovery, mass, and load integration. Tet10 inertial and body-force lumping uses positive HRZ weights with exact total-mass/resultant conservation.
 
 ## Mesh Preflight
 
@@ -24,7 +24,9 @@ For a fused single-solid fixture, `connectedComponents(mesh).componentCount` mus
 
 ## Loads And Results
 
-Surface force loads are distributed over selected facets by area, then to each facet node. Pressure loads use `pressure * facet area` along an explicit direction or the facet normal. The assembled nodal forces must balance reactions within solver tolerance.
+Surface force loads are total resultants distributed over selected facets; their visual application point does not affect assembly. Pressure and surface traction integrate force density through the shared Tri3/Tri6-consistent facet path. Body force density integrates over an explicit element set with equal Tet4 or positive HRZ Tet10 weights. Every path reports actual area or volume and must conserve its requested resultant within scale-aware solver tolerance.
+
+Remote force uses an area-weighted minimum-norm distribution with a rank-checked 6x6 constraint solve. Requested and assembled force and remote-point moment must balance; rank-deficient selections fail. Equivalent bolt preload is static-only and applies equal/opposite consistent tractions after checking opposing normals, nonzero areas, separated centroids, axis orientation, connected topology, and net force/moment. It remains explicitly a bonded-linear approximation without contact, slip, or fastener stiffness.
 
 Accurate result visualization should use the solver surface mesh returned by Core metadata. `surfaceMesh.nodeMap` maps each surface node back to the volume mesh node id. Surface visualization fields use `surfaceMeshRef` and must contain one value per surface node, so downstream viewers can render and deform the solved topology instead of projecting values onto unrelated display primitives.
 

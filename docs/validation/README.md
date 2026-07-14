@@ -36,13 +36,18 @@ pnpm verify:cloudflare-config
 pnpm deploy:cloudflare:dry-run
 ```
 
-## OpenCAE Core Static Load Support
+## OpenCAE Core Structural Load Support
 
-The Core CPU solver accepts study loads from the UI and adapts them to a small Tet4 Core model:
+The Core adapter preserves the study load's physical meaning and converts only at the model boundary:
 
-- `force`: total force in `N` is applied as a nodal force.
-- `pressure`: `kPa` is converted to an equivalent force from the display-model projected area.
-- `gravity`: payload mass in `kg` is converted to equivalent force with `massKg * 9.80665`.
+- `force` is a total force in `N`, consistently distributed over its selected face. The UI arrow point is visual only.
+- `pressure` and `surface_traction` are force densities converted to the Core coordinate system and integrated over the actual selected facets.
+- `volume_force` is force per volume over an explicit body/element set. Tet4 uses equal weights and Tet10 uses positive HRZ lumping with exact resultant conservation. Ambiguous multi-body mapping is rejected.
+- `gravity` payload mass in `kg` is converted to equivalent force with `massKg * 9.80665`.
+- `remote_force` is an area-weighted minimum-norm distributed wrench. A scaled, rank-checked 6x6 solve must reproduce both total force and remote-point moment; it is not a rigid MPC coupling.
+- `bolt_preload` is static-only. It validates two opposing faces and applies equal/opposite distributed tractions as an explicitly bonded-linear approximation without contact, slip, or fastener stiffness.
+
+Surface traction, volume force, and remote force are supported in static and dynamic cases. Load diagnostics record integrated area/volume, resultant and moment, and balance errors where applicable.
 
 Unsupported or incomplete studies must fail with clear Core diagnostics instead of publishing generated fallback results.
 
@@ -93,6 +98,10 @@ is at most `1e-6`. The solver returns only converged modes and reports requested
 | Simple cantilever dynamic | Same connected Tet4 block | Linear elastic validation material with density | Fixed left face and ramp or step right-face force | Dynamic frame count matches the requested cadence, frames are unique, velocity/acceleration fields are present, fields are non-empty, and no frame is reused as a fake response. |
 | Simple cantilever modal | Connected Tet10 beam | Linear elastic validation material with density | Fixed left face; no loads | First bending frequency is within 10% of Euler–Bernoulli theory, returned shapes are M-orthogonal, and every returned scaled residual is at most `1e-6`. |
 | Pressure patch | Connected Tet4 block | Linear elastic validation material | Pressure on right face with explicit direction | Reaction force balances `pressure * surface area`; result provenance is computed production provenance. |
+| Surface traction patch | Connected Tet4/Tet10 block | Linear elastic validation material | Vector traction on one surface | Tri3/Tri6 integration balances `traction * surface area` and conserves direction. |
+| Volume force | Connected Tet4/Tet10 body | Linear elastic validation material | Vector force density on an explicit element set | Tet4/Tet10 nodal forces balance `force density * volume`; Tet10 HRZ weights remain positive. |
+| Remote wrench | Nondegenerate selected surface | Linear elastic validation material | Total force and explicit remote point | Rank-checked distribution balances requested resultant and remote-point moment; degenerate selections fail. |
+| Equivalent bolt preload | One connected static model with opposing faces | Linear elastic validation material | Axis and positive preload force | Equal/opposite tractions have zero net force and moment; invalid normals/centroids and dynamic use fail. |
 | Payload mass | Connected Tet4 block | Linear elastic validation material with density | Body gravity equivalent of payload mass | Reaction force balances `mass * 9.80665`; no preview or local estimate fallback is used. |
 | Bracket actual mesh static | Connected bracket Tet4 Core mesh artifact | Steel fixture material | Fixed base-mount surface and load on upright surface | Static result uses `actual_volume_mesh`, has connected surface output, finite stress/displacement/safety/reaction values, and non-empty fields. |
 | Bracket actual mesh dynamic | Same connected bracket Tet4 Core mesh artifact | Steel fixture material with density | Dynamic ramp load on upright surface | MDOF dynamic result uses `actual_volume_mesh`, contains multiple unique frames, connected surface output, and production provenance. |
@@ -118,7 +127,7 @@ The validation mesh is intentionally coarse Tet4 geometry, so displacement and s
 
 ## Known Limitations
 
-- The local validation suites use small Tet4 fixtures; they are production-path regression suites, not mesh-convergence studies.
+- The local validation suites use compact Tet4 and Tet10 fixtures; they are production-path regression suites, not mesh-convergence studies.
 - Bracket validation uses a compact actual Core mesh fixture. Larger imported brackets still require a real Core volume mesh (generated in-browser) before solving.
 - Modal validation reports partial convergence honestly. Passing the cantilever benchmark does not certify convergence or physical fidelity for arbitrary geometries.
 - Result budgets compact visualization fields and frame payloads only. Engineering summary values such as max stress, max displacement, safety factor, and reaction force must remain full computed values.
