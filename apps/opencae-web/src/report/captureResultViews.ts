@@ -21,8 +21,9 @@ export interface CapturedBoundaryView {
   revision?: number;
 }
 
-// Revision 2: dimension overlay hidden during the capture for a tighter fit.
-export const BOUNDARY_CAPTURE_REVISION = 2;
+// Revision 3: dimension overlay hidden during the capture, and the capture
+// cropped to its content so the figure fills its frame.
+export const BOUNDARY_CAPTURE_REVISION = 3;
 
 export interface CaptureResultViewsOptions {
   getViewMode: () => ViewMode;

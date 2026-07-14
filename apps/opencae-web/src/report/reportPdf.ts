@@ -86,8 +86,8 @@ class PdfReport {
 
     // Keep the heading with the figure: like result figures, the boundary view
     // claims most of the remaining page when it strands below a heading.
-    this.sectionHeading(3, "Boundary conditions", this.hasBoundaryFigure() ? 118 : REPORT_LAYOUT.sectionKeepTogether);
-    if (this.hasBoundaryFigure()) this.boundaryFigure(this.data.boundaryFigure, 96);
+    this.sectionHeading(3, "Boundary conditions", this.hasBoundaryFigure() ? 130 : REPORT_LAYOUT.sectionKeepTogether);
+    if (this.hasBoundaryFigure()) this.boundaryFigure(this.data.boundaryFigure, 108);
     this.subheading("Supports");
     this.table(this.data.supports);
     this.subheading("Loads");
@@ -315,7 +315,10 @@ class PdfReport {
     this.ensureSpace(Math.min(maxHeight + 20, 118));
     this.text(figure.title, REPORT_LAYOUT.margin, this.y, 10, REPORT_THEME.ink, "bold");
     this.y += 4;
-    const frameHeight = Math.max(35, Math.min(maxHeight - 12, this.contentWidth * 0.56));
+    // The capture is cropped to its content, so the frame tracks the image's own
+    // proportions: a fixed frame would letterbox the model back down to the
+    // height it had before the crop.
+    const frameHeight = boundaryFrameHeight(figure.png, this.contentWidth, maxHeight);
     const imageX = REPORT_LAYOUT.margin;
     const imageY = this.y;
 
@@ -485,6 +488,22 @@ function readUint32(binary: string, offset: number): number {
     (binary.charCodeAt(offset + 1) << 16) +
     (binary.charCodeAt(offset + 2) << 8) +
     binary.charCodeAt(offset + 3)) >>> 0;
+}
+
+const BOUNDARY_FRAME_MIN_HEIGHT = 45;
+
+// Height that lets a content-cropped capture span the full content width, capped
+// so the figure still leaves room for its key and the supports/loads tables.
+export function boundaryFrameHeight(png: string | undefined, contentWidth: number, maxHeight: number): number {
+  const cap = Math.max(BOUNDARY_FRAME_MIN_HEIGHT, maxHeight - 12);
+  if (!png) return Math.min(cap, contentWidth * 0.56);
+  const { width, height } = pngDimensions(png);
+  const aspect = width > 0 && height > 0 ? width / height : 16 / 9;
+  return Math.round(clampNumber((contentWidth - 4) / aspect, BOUNDARY_FRAME_MIN_HEIGHT, cap) * 10) / 10;
+}
+
+function clampNumber(value: number, minValue: number, maxValue: number): number {
+  return Math.max(minValue, Math.min(maxValue, value));
 }
 
 function fitImage(pixelWidth: number, pixelHeight: number, maxWidth: number, maxHeight: number): { width: number; height: number } {
