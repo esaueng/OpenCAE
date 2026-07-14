@@ -1,5 +1,5 @@
 import { isModalResultSummary } from "@opencae/schema";
-import type { AnalysisMesh, CustomMaterial, DisplayModel, DynamicSolverSettings, MeshQuality, Project, ResultField, ResultRenderBounds, ResultSummary, RunEvent, Study, StudyRun } from "@opencae/schema";
+import type { AnalysisMesh, CustomMaterial, DisplayModel, DynamicSolverSettings, MeshQuality, Project, ResultField, ResultRenderBounds, ResultSummary, RunEvent, RunVariantRef, RunVariantResult, Study, StudyRun } from "@opencae/schema";
 import type { StepGeometryInspection, StepGeometryRepairReport } from "@opencae/mesh-intake";
 import { assertCompatibleManufacturingProcess, resolveMaterial } from "@opencae/materials";
 import type { LoadApplicationPoint, LoadDirection, LoadDirectionLabel, LoadType, PayloadLoadMetadata } from "../loadPreview";
@@ -9,7 +9,7 @@ import { createLocalBlankProject, createLocalSampleProject, createLocalUploadRes
 import type { SolveProgressEvent } from "@opencae/solve-pipeline";
 import type { ResultViewCaptures } from "../report/captureResultViews";
 import { isCancelledSolveError, startLocalSolve } from "../workers/solveWorkerClient";
-import { loadLocalRunResults, saveLocalRunResults } from "./localResultsStore";
+import { deleteLocalRunVariantResults, loadLocalRunResults, loadLocalRunVariantResult, saveLocalRunResults, saveLocalRunVariantResult } from "./localResultsStore";
 import { cancelWasmMeshing, canMeshStudyOnDemand, generateWasmMeshForStudy, type WasmMeshPhaseProgress } from "./wasmMeshing";
 import { geometrySourceForStudy, hasActualCoreVolumeMesh, isComplexGeometry, normalizeSolverBackend, openCaeCoreEligibility, OPENCAE_CORE_MESH_REQUIRED_REASON, type NormalizedBrowserSolverBackend } from "../workers/opencaeCoreSolve";
 
@@ -48,6 +48,9 @@ export type SampleAnalysisType = "static_stress" | "dynamic_structural";
 export interface ResultsResponse {
   summary: ResultSummary;
   fields: ResultField[];
+  variants?: RunVariantResult[];
+  variantRefs?: RunVariantRef[];
+  activeVariantId?: string;
   surfaceMesh?: SolverSurfaceMesh;
   /** Solver diagnostics entries (e.g. core-solve-diagnostics with real mesh counts). */
   diagnostics?: unknown[];
@@ -723,24 +726,34 @@ export async function addLoad(studyId: string, type: LoadType, value: number, se
     },
     () => {
       if (!currentStudy) throw new Error("Could not add load without an open study.");
+      const loadId = `load-${crypto.randomUUID()}`;
+      const loadCases = currentStudy.type === "modal_analysis" ? undefined : loadCasesWithAddedLoad(currentStudy, loadId);
       return {
         study: {
           ...currentStudy,
           loads: [
             ...currentStudy.loads,
             {
-              id: `load-${crypto.randomUUID()}`,
+              id: loadId,
               type,
               selectionRef,
               parameters: { value, units: type === "pressure" ? "kPa" : type === "gravity" ? "kg" : "N", direction, ...(directionMode ? { directionMode } : {}), ...(applicationPoint ? { applicationPoint } : {}), ...(payloadObject ? { payloadObject } : {}), ...(type === "gravity" ? payloadMetadata : {}) },
               status: "complete" as const
             }
-          ]
+          ],
+          ...(loadCases ? { loadCases } : {})
         },
         message: "Load added."
       };
     }
   );
+}
+
+function loadCasesWithAddedLoad(study: Extract<Study, { type: "static_stress" | "dynamic_structural" }>, loadId: string) {
+  const cases = study.loadCases?.length
+    ? study.loadCases
+    : [{ id: "case-default", name: "Default", enabled: true, loadIds: study.loads.map((load) => load.id) }];
+  return cases.map((loadCase, index) => index === 0 ? { ...loadCase, loadIds: [...loadCase.loadIds, loadId] } : loadCase);
 }
 
 export async function runSimulation(studyId: string, currentStudy?: Study, displayModel?: DisplayModel, options: RunSimulationOptions = {}): Promise<{ run: { id: string }; streamUrl: string; message: string }> {
@@ -807,13 +820,30 @@ export async function saveRunReportCaptures(runId: string, reportCaptures: Resul
 // Deployed Core Cloud runners omit runId on result fields; the schema (and
 // autosave restore) requires it, so stamp the owning run before use.
 export function withFieldRunIds(runId: string, results: ResultsResponse): ResultsResponse {
-  const stamped = !Array.isArray(results.fields) || results.fields.every((field) => typeof field.runId === "string" && field.runId)
-    ? results
-    : {
-        ...results,
-        fields: results.fields.map((field) => (typeof field.runId === "string" && field.runId ? field : { ...field, runId }))
-      };
+  const stampFields = (fields: ResultField[], variantId?: string) => fields.map((field) => ({
+    ...field,
+    ...(!field.runId ? { runId } : {}),
+    ...(variantId && !field.variantId ? { variantId } : {})
+  }));
+  const stamped = {
+    ...results,
+    fields: stampFields(results.fields, results.activeVariantId),
+    ...(results.variants ? {
+      variants: results.variants.map((variant) => ({ ...variant, fields: stampFields(variant.fields, variant.id) }))
+    } : {})
+  };
   return withDerivedSafetyFactorSurfaceField(stamped);
+}
+
+export async function getRunVariant(runId: string, variantId: string): Promise<RunVariantResult> {
+  const inMemory = localResultsByRunId.get(runId)?.variants?.find((variant) => variant.id === variantId);
+  if (inMemory) return inMemory;
+  const stored = await loadLocalRunVariantResult<RunVariantResult>(runId, variantId);
+  if (!stored) throw new Error(`Result variant ${variantId} is no longer available in browser storage. Re-run the simulation.`);
+  return {
+    ...stored,
+    fields: stored.fields.map((field) => ({ ...field, runId: field.runId || runId, variantId: field.variantId || variantId }))
+  };
 }
 
 const DERIVED_SAFETY_FACTOR_CAP = 1000;
@@ -865,6 +895,7 @@ export async function cancelRun(runId: string): Promise<{ run: StudyRun; message
       // become no-ops: exactly one terminal event per run.
       finishLocalRun(localRecord, "cancelled", { type: "cancelled", message: "Simulation cancelled." });
       cancelSolve?.();
+      void deleteLocalRunVariantResults(runId).catch(() => undefined);
     }
     localResultsByRunId.delete(runId);
     return {
@@ -1009,6 +1040,7 @@ function runSimulationLocally(study: Study, displayModel?: DisplayModel, options
   });
 
   const solveProgressOffset = meshFirst ? MESH_FIRST_SOLVE_PROGRESS_OFFSET : 0;
+  const variantWrites: Promise<void>[] = [];
   void (async () => {
     let solveStudy = study;
     if (meshFirst) {
@@ -1020,15 +1052,49 @@ function runSimulationLocally(study: Study, displayModel?: DisplayModel, options
       // caller so the workspace persists it like a mesh-step result.
       options.onStudyMeshed?.(solveStudy);
     }
+    let variantPersistenceWarning: string | undefined;
     const handle = startLocalSolve(
       { runId, study: solveStudy, displayModel, customMaterials: options.customMaterials, debugResults: debugResultsEnabled() },
-      (progress) => handleLocalSolveProgress(record, progress, solveProgressOffset)
+      (progress) => handleLocalSolveProgress(record, progress, solveProgressOffset),
+      (variant) => {
+        emitLocalRunEvent(record, {
+          type: "message",
+          message: `Completed ${variant.name}; saving it separately.`
+        });
+        variantWrites.push(saveLocalRunVariantResult(runId, variant.id, variant)
+          .then(() => {
+            if (record.status === "running") emitLocalRunEvent(record, { type: "message", message: `Stored ${variant.name}.` });
+          })
+          .catch((error) => {
+            variantPersistenceWarning = messageFromUnknownError(error) || "A completed dynamic case could not be persisted.";
+          }));
+      }
     );
     record.cancelSolve = handle.cancel;
     const { result } = await handle.completion;
+    await Promise.all(variantWrites);
     if (record.status !== "running") return;
     emitLocalRunEvent(record, { type: "progress", progress: 92, message: "Writing OpenCAE Core result fields." });
-    const results = await persistLocalRunResults(runId, withFieldRunIds(runId, result as ResultsResponse));
+    let stampedResults = withFieldRunIds(runId, result as ResultsResponse);
+    if (variantPersistenceWarning) {
+      stampedResults = {
+        ...stampedResults,
+        summary: {
+          ...stampedResults.summary,
+          diagnostics: [
+            ...(stampedResults.summary.diagnostics ?? []),
+            {
+              id: "dynamic-case-persistence",
+              severity: "warning",
+              source: "local_job",
+              message: `Dynamic cases completed, but not every case could be saved separately: ${variantPersistenceWarning}`,
+              suggestedActions: []
+            }
+          ]
+        }
+      };
+    }
+    const results = await persistLocalRunResults(runId, stampedResults);
     if (record.status !== "running") return;
     setCappedRunEntry(localResultsByRunId, runId, results);
     finishLocalRun(record, "complete", {
@@ -1037,7 +1103,9 @@ function runSimulationLocally(study: Study, displayModel?: DisplayModel, options
       estimatedRemainingMs: 0,
       message: dynamic ? "OpenCAE Core dynamic simulation complete." : "OpenCAE Core simulation complete."
     });
-  })().catch((error) => {
+  })().catch(async (error) => {
+    await Promise.allSettled(variantWrites);
+    await deleteLocalRunVariantResults(runId).catch(() => undefined);
     if (record.status !== "running") return;
     if (isCancelledSolveError(error)) {
       finishLocalRun(record, "cancelled", { type: "cancelled", message: "Simulation cancelled." });

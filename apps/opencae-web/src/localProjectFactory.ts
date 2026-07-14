@@ -75,6 +75,7 @@ export async function createLocalSampleProject(sample: SampleModelId = "bracket"
       fingerprint: `${face.id}-${sample}-v1`
     };
   });
+  const sampleLoads = templateStudy ? sampleLoadsFor(sample, templateStudy.loads, displayModel, meta.displayName) : [];
   const sampleStudyBase = templateStudy
     ? {
         ...templateStudy,
@@ -91,7 +92,9 @@ export async function createLocalSampleProject(sample: SampleModelId = "bracket"
             : []),
           ...faceSelections
         ],
-        loads: sampleLoadsFor(sample, templateStudy.loads, displayModel, meta.displayName)
+        loads: sampleLoads,
+        loadCases: [defaultLoadCase(sampleLoads.map((load) => load.id))],
+        loadCombinations: []
       }
     : undefined;
   const sampleStudy: Project["studies"][number] | undefined = sampleStudyBase
@@ -456,6 +459,9 @@ export function attachUploadedModelToProject(
     namedSelections: namedSelectionsForDisplayModel(bodyLabel, options.displayModel),
     constraints: [],
     loads: [],
+    ...((study.type === "static_stress" || study.type === "dynamic_structural")
+      ? { loadCases: [defaultLoadCase()], loadCombinations: [] }
+      : {}),
     meshSettings: {
       ...study.meshSettings,
       status: "not_started" as const,
@@ -520,6 +526,8 @@ function createStaticStressStudyForProject(project: Project, displayModel: Displ
     contacts: [],
     constraints: [],
     loads: [],
+    loadCases: [defaultLoadCase()],
+    loadCombinations: [],
     meshSettings: {
       preset: "medium",
       status: "not_started"
@@ -551,6 +559,8 @@ function createDynamicStructuralStudyForProject(project: Project, displayModel: 
     contacts: [],
     constraints: [],
     loads: [],
+    loadCases: [defaultLoadCase()],
+    loadCombinations: [],
     meshSettings: {
       preset: "medium",
       status: "not_started"
@@ -567,6 +577,10 @@ function createDynamicStructuralStudyForProject(project: Project, displayModel: 
     validation: [],
     runs: []
   };
+}
+
+function defaultLoadCase(loadIds: string[] = []) {
+  return { id: "case-default", name: "Default", enabled: true, loadIds };
 }
 
 function createModalStudyForProject(project: Project, displayModel: DisplayModel, studyId: string): Project["studies"][number] {

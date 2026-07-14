@@ -65,6 +65,9 @@ describe("public Core solver APIs", () => {
     expect(result.result.provenance.units).toBe("mm-N-s-MPa");
     expect(result.result.fields.map((field) => field.type)).toEqual(expect.arrayContaining(["displacement", "stress"]));
     const surfaceStress = result.result.fields.find((field) => field.id === "stress-surface");
+    const principalMax = result.result.fields.find((field) => field.component === "principal_max");
+    const principalMin = result.result.fields.find((field) => field.component === "principal_min");
+    const maxShear = result.result.fields.find((field) => field.component === "max_shear");
     const surfaceDisplacement = result.result.fields.find((field) => field.id === "displacement-surface");
     const engineeringStress = result.result.fields.find((field) => field.id === "stress-von-mises-element");
     expect(surfaceStress?.location).toBe("node");
@@ -72,7 +75,11 @@ describe("public Core solver APIs", () => {
     expect(surfaceStress?.surfaceMeshRef).toBe(result.result.surfaceMesh?.id);
     expect(surfaceStress?.visualizationSource).toBe("volume_weighted_nodal_recovery");
     expect(surfaceStress?.engineeringSource).toBe("raw_element_von_mises");
+    expect(surfaceStress?.component).toBe("von_mises");
     expect(surfaceStress?.values).toHaveLength(result.result.surfaceMesh?.nodes.length ?? -1);
+    expect(principalMax?.values).toHaveLength(result.result.surfaceMesh?.nodes.length ?? -1);
+    expect(principalMin?.values).toHaveLength(result.result.surfaceMesh?.nodes.length ?? -1);
+    expect(maxShear?.values).toHaveLength(result.result.surfaceMesh?.nodes.length ?? -1);
     expect(surfaceDisplacement?.location).toBe("node");
     expect(surfaceDisplacement?.units).toBe("mm");
     expect(surfaceDisplacement?.values).toHaveLength(result.result.surfaceMesh?.nodes.length ?? -1);

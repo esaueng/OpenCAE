@@ -35,6 +35,11 @@ import { CLOUD_SOLVER_LIMITS, solveStudyModelWithCorePipeline } from "./index";
 const FIXTURE_DIR = resolve(__dirname, "../../../apps/opencae-web/src/testdata/core-cloud-golden");
 const EXPECTED_CLOUD_RUNNER_VERSION = "0.1.6";
 const RELATIVE_TOLERANCE = 1e-12;
+const PRINCIPAL_FIELD_SUFFIXES = [
+  "stress-principal-max-surface",
+  "stress-principal-min-surface",
+  "stress-max-shear-surface"
+] as const;
 
 const ALL_CASES = [
   "cantilever-static",
@@ -202,6 +207,20 @@ function collectRunnerVersions(value: unknown, out: Set<string>): void {
   for (const key of Object.keys(record)) collectRunnerVersions(record[key], out);
 }
 
+function isPrincipalMeasureField(field: unknown): field is Record<string, unknown> & { id: string } {
+  if (!field || typeof field !== "object") return false;
+  const id = (field as { id?: unknown }).id;
+  return typeof id === "string" && PRINCIPAL_FIELD_SUFFIXES.some((suffix) => id.endsWith(suffix));
+}
+
+function legacyResultField(field: unknown): unknown {
+  if (!field || typeof field !== "object") return field;
+  // Field components are additive identity metadata introduced after the
+  // recorded runner contract; the legacy payload remains the numeric oracle.
+  const { component: _component, ...legacy } = field as Record<string, unknown>;
+  return legacy;
+}
+
 describe("golden parity: browser pipeline vs deployed Core Cloud runner", () => {
   test.each([...ALL_CASES])("%s reproduces the recorded cloud response", { timeout: 120000 }, (name) => {
     const fixture = loadFixture(name);
@@ -225,8 +244,16 @@ describe("golden parity: browser pipeline vs deployed Core Cloud runner", () => 
     const mismatches: string[] = [];
     // The fixtures froze the HTTP wire contract; JSON round-trip the in-process
     // result the same way (drops undefined-valued optional keys).
-    const wireResult = JSON.parse(JSON.stringify(outcome.result)) as unknown;
-    compareStructures(wireResult, fixture.response, "response", stats, mismatches);
+    const wireResult = JSON.parse(JSON.stringify(outcome.result)) as GoldenFixture["response"];
+    const principalFields = wireResult.fields.filter(isPrincipalMeasureField);
+    const legacyWireResult = {
+      ...wireResult,
+      // Runner 0.1.6 predates the additive principal/max-shear fields. Keep its
+      // recorded fields as an exact numeric parity oracle while validating the
+      // new tensor-derived fields independently below.
+      fields: wireResult.fields.filter((field) => !isPrincipalMeasureField(field)).map(legacyResultField)
+    };
+    compareStructures(legacyWireResult, fixture.response, "response", stats, mismatches);
     // eslint-disable-next-line no-console
     console.log(
       `golden parity ${name}: ${stats.comparisons.toLocaleString()} numeric comparisons, ` +
@@ -235,6 +262,22 @@ describe("golden parity: browser pipeline vs deployed Core Cloud runner", () => 
     );
     expect(mismatches, mismatches.slice(0, 10).join("\n")).toEqual([]);
     expect(stats.maxRelDelta).toBeLessThanOrEqual(RELATIVE_TOLERANCE);
+
+    const frameIndices = new Set(
+      fixture.response.fields.map((field) => (field as { frameIndex?: unknown }).frameIndex ?? "static")
+    );
+    expect(principalFields).toHaveLength(frameIndices.size * PRINCIPAL_FIELD_SUFFIXES.length);
+    for (const frameIndex of frameIndices) {
+      const frameFields = principalFields.filter((field) => (field.frameIndex ?? "static") === frameIndex);
+      expect(frameFields.map((field) => PRINCIPAL_FIELD_SUFFIXES.find((suffix) => field.id.endsWith(suffix))).sort()).toEqual(
+        [...PRINCIPAL_FIELD_SUFFIXES].sort()
+      );
+      for (const field of frameFields) {
+        expect(field.location).toBe("node");
+        expect(field.units).toBe("MPa");
+        expect(field.values).toHaveLength((wireResult.surfaceMesh.nodes as unknown[]).length);
+      }
+    }
 
     // Provenance parity is structural; the runner stamp differs by design.
     const actualVersions = new Set<string>();

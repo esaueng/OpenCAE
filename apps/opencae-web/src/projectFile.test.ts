@@ -91,6 +91,43 @@ describe("projectFile", () => {
     expect(payload.results?.reportCaptures?.stress?.png).toBe("data:image/png;base64,stress");
   });
 
+  test("keeps run variants in the backward-readable version-2 project container", () => {
+    const summary = {
+      maxStress: 10,
+      maxStressUnits: "MPa",
+      maxDisplacement: 0.1,
+      maxDisplacementUnits: "mm",
+      safetyFactor: 20,
+      reactionForce: 100,
+      reactionForceUnits: "N"
+    } satisfies ResultSummary;
+    const fields = [{
+      id: "stress-service",
+      runId: "run-variants",
+      variantId: "case:service",
+      type: "stress" as const,
+      location: "node" as const,
+      values: [10],
+      min: 10,
+      max: 10,
+      units: "MPa"
+    }];
+    const variant = { id: "case:service", name: "Service", kind: "case" as const, caseId: "service", summary, fields };
+
+    const payload = buildLocalProjectFile(project, displayModel, "2026-04-24T13:00:00.000Z", {
+      completedRunId: "run-variants",
+      summary,
+      fields,
+      variants: [variant],
+      variantRefs: [{ id: variant.id, name: variant.name, kind: variant.kind, caseId: variant.caseId }],
+      activeVariantId: variant.id
+    });
+
+    expect(payload.version).toBe(2);
+    expect(payload.results?.variants?.[0]).toBe(variant);
+    expect(payload.results?.activeVariantId).toBe("case:service");
+  });
+
   test("embeds uploaded model bytes in the project geometry metadata", () => {
     const uploadedProject = {
       ...project,

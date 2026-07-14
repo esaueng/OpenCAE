@@ -1,6 +1,8 @@
 import {
   ProjectSchema,
   ResultFieldSchema,
+  RunVariantRefSchema,
+  RunVariantResultSchema,
   ResultSummarySchema,
   type DisplayFace,
   type DisplayModel,
@@ -357,12 +359,49 @@ export function parseResultBundle(value: unknown): LocalResultBundle | undefined
   const surfaceMesh = parseSolverSurfaceMesh(value.surfaceMesh);
   const solverMeshSummary = parseSolverMeshSummary(value.solverMeshSummary);
   const reportCaptures = parseResultViewCaptures(value.reportCaptures);
+  const variants = RunVariantResultSchema.array().safeParse(value.variants);
+  const variantRefs = RunVariantRefSchema.array().safeParse(value.variantRefs);
   if (!summary.success || !fields.success || fields.data.length === 0) return undefined;
+  const parsedVariants = variants.success ? variants.data : [];
+  const explicitVariantRefs = variantRefs.success ? variantRefs.data : [];
+  const requestedActiveVariantId = typeof value.activeVariantId === "string" ? value.activeVariantId : undefined;
+  const activeExplicitRef = explicitVariantRefs.find((reference) => reference.id === requestedActiveVariantId) ?? explicitVariantRefs[0];
+  const structuralVariants = parsedVariants.length
+    ? parsedVariants
+    : "analysisType" in summary.data && summary.data.analysisType === "modal_analysis"
+      ? []
+      : [activeExplicitRef
+        ? {
+          id: activeExplicitRef.id,
+          name: activeExplicitRef.name,
+          kind: activeExplicitRef.kind,
+          ...(activeExplicitRef.caseId ? { caseId: activeExplicitRef.caseId } : {}),
+          ...(activeExplicitRef.combinationId ? { combinationId: activeExplicitRef.combinationId } : {}),
+          summary: summary.data,
+          fields: fields.data.map((field) => ({ ...field, variantId: field.variantId ?? activeExplicitRef.id }))
+        }
+        : {
+          id: "case:default",
+          name: "Default",
+          kind: "case" as const,
+          caseId: "case-default",
+          summary: summary.data,
+          fields: fields.data.map((field) => ({ ...field, variantId: field.variantId ?? "case:default" }))
+        }];
+  const parsedVariantRefs = explicitVariantRefs.length
+    ? explicitVariantRefs
+    : structuralVariants.map(({ id, name, kind, caseId, combinationId }) => ({ id, name, kind, caseId, combinationId }));
+  const activeVariantId = requestedActiveVariantId && parsedVariantRefs.some((reference) => reference.id === requestedActiveVariantId)
+    ? requestedActiveVariantId
+    : structuralVariants[0]?.id;
   return {
     activeRunId: typeof value.activeRunId === "string" ? value.activeRunId : undefined,
     completedRunId: typeof value.completedRunId === "string" ? value.completedRunId : undefined,
     summary: summary.data,
     fields: fields.data,
+    ...(structuralVariants.length ? { variants: structuralVariants } : {}),
+    ...(parsedVariantRefs.length ? { variantRefs: parsedVariantRefs } : {}),
+    ...(activeVariantId ? { activeVariantId } : {}),
     ...(surfaceMesh ? { surfaceMesh } : {}),
     ...(solverMeshSummary ? { solverMeshSummary } : {}),
     ...(reportCaptures ? { reportCaptures } : {})
