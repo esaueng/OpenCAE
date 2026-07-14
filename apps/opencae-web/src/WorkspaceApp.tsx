@@ -24,7 +24,7 @@ import {
 import { resetDisplayModelOrientation, type RotationAxis } from "./modelOrientation";
 import { buildLocalProjectFile, suggestedProjectFilename, type LocalResultBundle, type SolverSurfaceMesh } from "./projectFile";
 import { prepareBlobSaveToDisk, saveBlobToDisk } from "./lib/fileSave";
-import { captureResultViews, type ResultViewCaptures } from "./report/captureResultViews";
+import { BOUNDARY_CAPTURE_REVISION, captureResultViews, type ResultViewCaptures } from "./report/captureResultViews";
 import { buildReportData, suggestedReportFilename } from "./report/reportData";
 import { buildAutosavedWorkspace, buildAutosavedWorkspaceUiSnapshot, flushAutosavedWorkspace, installAutosavePageHideFlush, localRunIdForResultsRestore, parseAutosavedWorkspacePayload, readAutosavedWorkspace, scheduleAutosavedUiSnapshotWrite, scheduleAutosavedWorkspaceWrite, WORKSPACE_LOG_LIMIT } from "./appPersistence";
 import type { AutosavedWorkspace, WorkspaceUiSnapshot } from "./appPersistence";
@@ -1214,9 +1214,11 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     const runId = completedRunId;
     if (!runId || !resultSummary || !resultFields.length || viewMode !== "results" || !viewerCaptureRef.current) return;
     const captureBoundaryView = boundaryConditionCount > 0;
-    // Recapture when the run predates the boundary-conditions figure so older
-    // saved results gain it the next time their results view is open.
-    const capturesComplete = reportCaptures?.runId === runId && (Boolean(reportCaptures.captures.boundary) || !captureBoundaryView);
+    // Recapture when the run predates the boundary-conditions figure (or a
+    // framing revision of it) so older saved results gain the current figure
+    // the next time their results view is open.
+    const boundaryCurrent = reportCaptures?.captures.boundary?.revision === BOUNDARY_CAPTURE_REVISION;
+    const capturesComplete = reportCaptures?.runId === runId && (boundaryCurrent || !captureBoundaryView);
     if (capturesComplete || reportCaptureInFlightRef.current === runId) return;
     const sourceSummary = resultSummary;
     const capture = viewerCaptureRef.current;
@@ -1922,7 +1924,10 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
             resultMode={resultMode}
             showDeformed={showDeformed}
             resultPlaybackPlaying={resultPlaybackPlaying}
-            showDimensions={showDimensions}
+            // The boundary-figure capture hides the dimension overlay: its
+            // lines/labels sit outside the model and force the report camera
+            // to zoom far out; the dimensions are already tabled in section 1.
+            showDimensions={captureViewMode ? false : showDimensions}
             stressExaggeration={stressExaggeration}
             resultFields={visibleResultFieldsForUi}
             surfaceMesh={resultSurfaceMesh}
