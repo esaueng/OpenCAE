@@ -305,6 +305,18 @@ describe("app persistence", () => {
     expect(parseAutosavedWorkspacePayload(JSON.stringify({ ...snapshot, version: 99 }))).toBeNull();
   });
 
+  test("defaults legacy UI snapshots to von Mises and restores an explicit stress component", () => {
+    const snapshot = buildAutosavedWorkspace({ project, displayModel, ui: baseUi });
+    const legacy = parseAutosavedWorkspacePayload(JSON.stringify(snapshot));
+    const principal = parseAutosavedWorkspacePayload(JSON.stringify({
+      ...snapshot,
+      ui: { ...snapshot.ui, stressComponent: "principal_min" }
+    }));
+
+    expect(legacy?.ui.stressComponent).toBe("von_mises");
+    expect(principal?.ui.stressComponent).toBe("principal_min");
+  });
+
   test("preserves enough logs to diagnose OpenCAE Core failures after reload", () => {
     const logs = Array.from({ length: 120 }, (_, index) => ({ message: `OpenCAE Core diagnostic ${index}`, at: 1714000000000 + index }));
     const snapshot = buildAutosavedWorkspace({

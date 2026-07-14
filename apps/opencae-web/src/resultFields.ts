@@ -1,4 +1,5 @@
 import type { DisplayFace, ResultField, ResultSummary } from "@opencae/schema";
+import { semanticResultFieldKey, stressComponentForField } from "./resultSelection";
 
 export type ResultFieldMode = "stress" | "displacement" | "safety_factor" | "velocity" | "acceleration";
 
@@ -73,6 +74,7 @@ export interface PackedResultPlaybackFieldDescriptor {
   id: string;
   runId: string;
   type: ResultField["type"];
+  component?: ResultField["component"];
   location: ResultField["location"];
   units: string;
   surfaceMeshRef?: string;
@@ -455,6 +457,7 @@ function descriptorForPackedResultField(field: ResultField): PackedResultPlaybac
     id: field.id,
     runId: field.runId,
     type: field.type,
+    ...(field.component ? { component: field.component } : {}),
     location: field.location,
     units: field.units,
     ...(field.surfaceMeshRef ? { surfaceMeshRef: field.surfaceMeshRef } : {}),
@@ -865,7 +868,7 @@ export function fieldWithOwnValueRange(field: ResultField): ResultField {
 }
 
 function transientFieldRangeKey(field: ResultField): string {
-  return `${field.runId}\u0000${field.type}\u0000${field.location}`;
+  return semanticResultFieldKey(field);
 }
 
 function isTransientField(field: ResultField): boolean {
@@ -893,7 +896,7 @@ function normalizedRangeForFieldType(type: ResultField["type"], min: number, max
 }
 
 function fieldSeriesKey(field: ResultField): string {
-  return `${field.runId}:${field.type}:${field.location}`;
+  return semanticResultFieldKey(field);
 }
 
 function interpolateField(lowerField: ResultField, upperField: ResultField, blend: number, framePosition: number): ResultField {
@@ -998,7 +1001,11 @@ export function withDerivedSurfaceSafetyFactorFields(results: SolverResultBundle
   const yieldMpa = solverYieldStressMpa(results.summary);
   if (!yieldMpa) return fields;
   const surfaceStressFields = fields.filter((field) =>
-    field.type === "stress" && field.location === "node" && typeof field.surfaceMeshRef === "string" && field.values.length > 0);
+    field.type === "stress" &&
+    stressComponentForField(field) === "von_mises" &&
+    field.location === "node" &&
+    typeof field.surfaceMeshRef === "string" &&
+    field.values.length > 0);
   if (!surfaceStressFields.length) return fields;
   const derived: ResultField[] = [];
   for (const stressField of surfaceStressFields) {

@@ -297,6 +297,24 @@ describe("result playback cache", () => {
     expect(selectedModeCache.actualBytes).toBeLessThan(allModeCache.actualBytes);
   });
 
+  test("keeps stress components distinct in selected and packed playback fields", () => {
+    const fields = [0, 1].flatMap((frameIndex) => [
+      { ...typedResultField(frameIndex, "stress", [10 + frameIndex]), component: "von_mises" as const },
+      { ...typedResultField(frameIndex, "stress", [-5 + frameIndex]), id: `principal-${frameIndex}`, component: "principal_min" as const },
+      typedResultField(frameIndex, "displacement", [0.1 + frameIndex])
+    ]);
+    const selected = playbackFieldsForResultMode(fields, "stress", "principal_min");
+    const prepared = preparePlaybackFrames({ fields, frameIndexes: [0, 1], playbackFps: 30, budgetBytes: 100_000 });
+    const vonMises = packedPreparedPlaybackFieldSlot(prepared.packed!, 0, "stress", undefined, "von_mises");
+    const principal = packedPreparedPlaybackFieldSlot(prepared.packed!, 0, "stress", undefined, "principal_min");
+
+    expect(selected.filter((field) => field.type === "stress").every((field) => field.component === "principal_min")).toBe(true);
+    expect(vonMises?.descriptor.component).toBe("von_mises");
+    expect(principal?.descriptor.component).toBe("principal_min");
+    expect(Array.from(vonMises?.values.slice(vonMises.offset, vonMises.offset + vonMises.length) ?? [])).toEqual([10]);
+    expect(Array.from(principal?.values.slice(principal.offset, principal.offset + principal.length) ?? [])).toEqual([-5]);
+  });
+
   test("falls back to all playback fields when the selected result mode is unavailable", () => {
     const fields = [0, 1].flatMap((frameIndex) => [
       typedResultField(frameIndex, "stress", [10 + frameIndex]),

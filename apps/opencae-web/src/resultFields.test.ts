@@ -231,6 +231,18 @@ describe("dynamic result frames", () => {
     expect(normalized.map((field) => [field.min, field.max])).toEqual([[0, 100], [0, 100], [0, 100]]);
   });
 
+  test("normalizes transient stress ranges independently by component", () => {
+    const normalized = normalizeTransientFieldRanges([
+      { id: "vm-0", runId: "run", type: "stress", component: "von_mises", location: "node", values: [10], min: 10, max: 10, units: "MPa", frameIndex: 0, timeSeconds: 0 },
+      { id: "vm-1", runId: "run", type: "stress", component: "von_mises", location: "node", values: [100], min: 100, max: 100, units: "MPa", frameIndex: 1, timeSeconds: 0.1 },
+      { id: "p3-0", runId: "run", type: "stress", component: "principal_min", location: "node", values: [-50], min: -50, max: -50, units: "MPa", frameIndex: 0, timeSeconds: 0 },
+      { id: "p3-1", runId: "run", type: "stress", component: "principal_min", location: "node", values: [-5], min: -5, max: -5, units: "MPa", frameIndex: 1, timeSeconds: 0.1 }
+    ] satisfies ResultField[]);
+
+    expect(normalized.filter((field) => field.component === "von_mises").map((field) => [field.min, field.max])).toEqual([[0, 100], [0, 100]]);
+    expect(normalized.filter((field) => field.component === "principal_min").map((field) => [field.min, field.max])).toEqual([[0, -5], [0, -5]]);
+  });
+
   test("interpolated dynamic fields retain global normalized min and max", () => {
     const fields = normalizeTransientFieldRanges([
       { id: "stress-0", runId: "run", type: "stress", location: "node", values: [0, 20], min: 0, max: 20, units: "MPa", frameIndex: 0, timeSeconds: 0 },
@@ -729,6 +741,12 @@ describe("withDerivedSurfaceSafetyFactorFields", () => {
     const elementField: ResultField = { ...surfaceStressField, id: "stress-element", location: "element", surfaceMeshRef: undefined };
     const fields = withDerivedSurfaceSafetyFactorFields({ summary: summary as ResultSummary, fields: [elementField] });
     expect(fields).toHaveLength(1);
+  });
+
+  test("derives safety factor only from von Mises surface stress", () => {
+    const principal: ResultField = { ...surfaceStressField, id: "principal", component: "principal_max", values: [500, 600, 700] };
+    const fields = withDerivedSurfaceSafetyFactorFields({ summary: summary as ResultSummary, fields: [principal] });
+    expect(fields).toEqual([principal]);
   });
 });
 

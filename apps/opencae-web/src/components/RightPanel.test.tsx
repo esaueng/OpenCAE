@@ -139,6 +139,29 @@ function uploadedStepProject(status: StepGeometryMetadata["status"], message?: s
   };
 }
 
+describe("RightPanel result probes", () => {
+  test("lists raw engineering readings with removal, clear, and cap feedback", () => {
+    const html = renderPanel("results", {
+      resultProbes: [{
+        id: "probe-1",
+        anchor: { kind: "sample", point: [1, 2, 3] },
+        point: [1, 2, 3],
+        value: 0.000456789,
+        units: "MPa"
+      }],
+      resultProbeLimitReached: true,
+      onRemoveResultProbe: vi.fn(),
+      onClearResultProbes: vi.fn()
+    });
+
+    expect(html).toContain("Pinned probes");
+    expect(html).toContain("0.000456789 MPa");
+    expect(html).toContain("Clear All");
+    expect(html).toContain('aria-label="Remove probe 1"');
+    expect(html).toContain("Probe limit reached. Remove a pin to place another.");
+  });
+});
+
 describe("RightPanel payload mass controls", () => {
   test("offers the opposite face normal as a load direction", () => {
     const markup = renderPanel("loads");

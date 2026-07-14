@@ -19,6 +19,7 @@ export type SolverSurfaceMesh = {
 export type CoreResultField = {
   id: string;
   type: "stress" | "displacement" | "velocity" | "acceleration" | "safety_factor";
+  component?: "von_mises" | "principal_max" | "principal_min" | "max_shear";
   location: "node" | "element" | "integration_point";
   values: number[];
   min: number;
