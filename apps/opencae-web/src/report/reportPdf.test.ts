@@ -44,6 +44,8 @@ describe("renderReportPdf", () => {
     empty.diagnostics = [];
     empty.figures.stress.png = undefined;
     empty.figures.displacement.png = undefined;
+    empty.boundaryFigure.png = undefined;
+    empty.boundaryFigure.markerKey = [];
 
     await expect(renderReportPdf(empty)).resolves.toBeInstanceOf(Blob);
   });
@@ -85,6 +87,16 @@ function fixtureReport(): ReportData {
     manufacturing: { headers: ["Material / target", "Process", "Process settings"], rows: [["Aluminum 6061 / Body", "CNC machining", "Solid stock · Isotropic"]] },
     supports: { headers: ["Support", "Target"], rows: [["Fixed support", "Fixed end"]] },
     loads: { headers: ["Load", "Magnitude", "Direction", "Target"], rows: [["Force", "500 N", "[0, 0, -1]", "Free end"]] },
+    boundaryFigure: {
+      title: "Boundary conditions on model",
+      png: ONE_PIXEL_PNG,
+      unavailableLabel: "Not captured for this run — open the Results view once, then regenerate the report.",
+      caption: "Support and load markers as placed in the study, shown on the undeformed model.",
+      markerKey: [
+        "FS n — fixed support on the constrained face (1 in this study)",
+        "L n — applied load at its application point; the arrow shows the load direction (1 in this study)"
+      ]
+    },
     mesh: [{ label: "Nodes", value: "42,381" }, { label: "Elements", value: "26,944" }, { label: "Element type", value: "Tet10" }],
     solver: rows,
     figures: {

@@ -4,6 +4,7 @@ import type { ResultMode, ViewMode } from "../workspaceViewTypes";
 export interface ResultViewCaptures {
   stress?: CapturedResultView;
   displacement?: CapturedResultView;
+  boundary?: CapturedBoundaryView;
 }
 
 export interface CapturedResultView {
@@ -12,6 +13,10 @@ export interface CapturedResultView {
   selection: "peak" | "static";
   frameIndex?: number;
   timeSeconds?: number;
+}
+
+export interface CapturedBoundaryView {
+  png: string;
 }
 
 export interface CaptureResultViewsOptions {
@@ -27,6 +32,16 @@ export interface CaptureResultViewsOptions {
   capture: (() => string | Promise<string>) | null;
   isCurrent: () => boolean;
   waitForAnimationFrame?: () => Promise<void>;
+  /** Switches the viewer between results and model view for the boundary-condition capture. */
+  setViewMode?: (mode: ViewMode) => void;
+  /** Capture a model-view snapshot of the support/load markers for the report's boundary-conditions figure. */
+  captureBoundaryView?: boolean;
+  /**
+   * Resolves once the model view has real geometry to photograph. Uploaded
+   * STEP previews remount and re-tessellate when leaving the results view, so
+   * a fixed frame wait would capture an empty scene.
+   */
+  waitForBoundaryViewReady?: () => Promise<void>;
 }
 
 const REPORT_RESULT_MODES = ["stress", "displacement"] as const;
@@ -37,7 +52,8 @@ export async function captureResultViews(options: CaptureResultViewsOptions): Pr
   }
 
   const availableModes = REPORT_RESULT_MODES.filter((mode) => options.resultFields.some((field) => field.type === mode));
-  if (availableModes.length && !options.capture) {
+  const captureBoundary = Boolean(options.captureBoundaryView && options.setViewMode);
+  if ((availableModes.length || captureBoundary) && !options.capture) {
     throw new Error("The 3D result view is still loading. Wait for it to appear, then generate the report again.");
   }
 
@@ -66,11 +82,30 @@ export async function captureResultViews(options: CaptureResultViewsOptions): Pr
         ...(peakField.timeSeconds === undefined ? {} : { timeSeconds: peakField.timeSeconds })
       };
     }
+    if (captureBoundary) {
+      captures.boundary = await captureBoundaryView(options, waitForFrame);
+    }
     return captures;
   } finally {
     options.setResultFrameIndex(originalFrameIndex);
     options.setResultMode(originalMode);
     if (originalPlaybackPlaying) options.setPlaybackPlaying(true);
+  }
+}
+
+// The boundary markers (supports + loads) only render outside the results
+// view, so flip the viewer to model view for the snapshot and restore it.
+async function captureBoundaryView(options: CaptureResultViewsOptions, waitForFrame: () => Promise<void>): Promise<CapturedBoundaryView> {
+  assertCurrent(options);
+  options.setViewMode!("model");
+  try {
+    await options.waitForBoundaryViewReady?.();
+    await waitForFrame();
+    await waitForFrame();
+    if (!options.isCurrent()) throw staleResultsError();
+    return { png: await options.capture!() };
+  } finally {
+    options.setViewMode!("results");
   }
 }
 
@@ -111,8 +146,12 @@ function fieldPeakMagnitude(field: ResultField): number {
 
 function assertCurrent(options: Pick<CaptureResultViewsOptions, "getViewMode" | "isCurrent">): void {
   if (options.getViewMode() !== "results" || !options.isCurrent()) {
-    throw new Error("Results changed while the report figures were being captured. Generate the report again from the current results.");
+    throw staleResultsError();
   }
+}
+
+function staleResultsError(): Error {
+  return new Error("Results changed while the report figures were being captured. Generate the report again from the current results.");
 }
 
 function nextAnimationFrame(): Promise<void> {
