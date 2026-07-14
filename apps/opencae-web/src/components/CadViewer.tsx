@@ -1641,11 +1641,12 @@ function ModelDimensionOverlay({ displayModel, uploadedPreviewBounds }: { displa
   const bounds = uploaded && uploadedPreviewBounds ? uploadedPreviewBounds : dimensionBoundsForDisplayModel(displayModel);
   if (!dimensions || !dimensionValues || !bounds) return null;
 
+  const scale = boundaryMarkerScale(bounds);
   const min = bounds.min;
   const max = bounds.max;
-  const xOffset = Math.max(0.16, (max.x - min.x) * 0.04);
-  const yOffset = Math.max(0.16, (max.y - min.y) * 0.08);
-  const zOffset = Math.max(0.16, (max.z - min.z) * 0.18);
+  const xOffset = Math.max(0.16 * scale, (max.x - min.x) * 0.04);
+  const yOffset = Math.max(0.16 * scale, (max.y - min.y) * 0.08);
+  const zOffset = Math.max(0.16 * scale, (max.z - min.z) * 0.18);
   const xLineY = min.y - yOffset;
   const xLineZ = min.z - zOffset;
   const axisLineX = max.x + xOffset;
@@ -1668,16 +1669,19 @@ function ModelDimensionOverlay({ displayModel, uploadedPreviewBounds }: { displa
         start={[min.x, xLineY, xLineZ]}
         end={[max.x, xLineY, xLineZ]}
         label={`X ${formatDimensionLabel(dimensionValues.x, dimensionValues.units)}`}
+        scale={scale}
       />
       <DimensionLine
         start={[axisLineX, xLineY, min.z]}
         end={[axisLineX, xLineY, max.z]}
         label={zSpanLabel}
+        scale={scale}
       />
       <DimensionLine
         start={[axisLineX, min.y, max.z + zOffset]}
         end={[axisLineX, max.y, max.z + zOffset]}
         label={ySpanLabel}
+        scale={scale}
       />
     </group>
   );
@@ -1688,33 +1692,48 @@ const DIMENSION_LABEL_FONT_SIZE = 0.095;
 // label fits inside its dimension line.
 const DIMENSION_LABEL_GLYPH_ASPECT = 0.62;
 
-function DimensionLine({ start, end, label }: { start: [number, number, number]; end: [number, number, number]; label: string }) {
+function DimensionLine({ start, end, label, scale = 1 }: { start: [number, number, number]; end: [number, number, number]; label: string; scale?: number }) {
   const startVec = new THREE.Vector3(...start);
   const endVec = new THREE.Vector3(...end);
   const tangent = endVec.clone().sub(startVec);
   const lineLength = tangent.length();
   tangent.normalize();
-  const estimatedLabelWidth = label.length * DIMENSION_LABEL_FONT_SIZE * DIMENSION_LABEL_GLYPH_ASPECT;
+  const estimatedLabelWidth = label.length * DIMENSION_LABEL_FONT_SIZE * scale * DIMENSION_LABEL_GLYPH_ASPECT;
   // Sit the label on the line itself when it fits; expand it out past the end
   // of the line when the span is too short to hold the text.
   const inline = estimatedLabelWidth <= lineLength * 0.8;
   const labelPosition = inline
     ? startVec.clone().add(endVec).multiplyScalar(0.5)
-    : endVec.clone().add(tangent.clone().multiplyScalar(estimatedLabelWidth / 2 + 0.14));
+    : endVec.clone().add(tangent.clone().multiplyScalar(estimatedLabelWidth / 2 + 0.14 * scale));
   return (
     <group>
-      <Line points={[start, end]} color="#4da3ff" lineWidth={1.8} transparent opacity={0.95} />
-      <DimensionEndpoint position={start} />
-      <DimensionEndpoint position={end} />
-      <DimensionLineLabel label={label} position={labelPosition.toArray() as [number, number, number]} tangent={tangent.toArray() as [number, number, number]} />
+      <Line points={[start, end]} color="#4da3ff" lineWidth={1.3} transparent opacity={0.9} />
+      <DimensionArrowhead position={startVec} direction={tangent.clone().negate()} scale={scale} />
+      <DimensionArrowhead position={endVec} direction={tangent} scale={scale} />
+      <DimensionLineLabel label={label} position={labelPosition.toArray() as [number, number, number]} tangent={tangent.toArray() as [number, number, number]} scale={scale} />
     </group>
+  );
+}
+
+// Slender cone pointing outward along the dimension line, replacing the old
+// sphere endpoints — reads as a standard CAD dimension arrow.
+function DimensionArrowhead({ position, direction, scale }: { position: THREE.Vector3; direction: THREE.Vector3; scale: number }) {
+  const length = 0.075 * scale;
+  const unit = direction.clone().normalize();
+  const quaternion = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), unit);
+  const conePosition = position.clone().add(unit.multiplyScalar(-length / 2));
+  return (
+    <mesh position={conePosition.toArray()} quaternion={quaternion}>
+      <coneGeometry args={[0.02 * scale, length, 12]} />
+      <meshBasicMaterial color="#4da3ff" depthTest={false} toneMapped={false} transparent opacity={0.92} />
+    </mesh>
   );
 }
 
 // Dimension text runs along its line (rotated with the model) while staying
 // readable: each frame the label plane is tilted toward the camera around the
 // line axis, and the reading direction flips so it never renders mirrored.
-function DimensionLineLabel({ label, position, tangent }: { label: string; position: [number, number, number]; tangent: [number, number, number] }) {
+function DimensionLineLabel({ label, position, tangent, scale = 1 }: { label: string; position: [number, number, number]; tangent: [number, number, number]; scale?: number }) {
   const groupRef = useRef<THREE.Group>(null);
   const colors = sceneLabelColors("dimension");
   useFrame(({ camera }) => {
@@ -1743,30 +1762,21 @@ function DimensionLineLabel({ label, position, tangent }: { label: string; posit
       <Text
         anchorX="center"
         anchorY="bottom"
-        position={[0, 0.045, 0]}
+        position={[0, 0.04 * scale, 0]}
         renderOrder={50}
         color={colors.text}
         material-depthTest={false}
         material-depthWrite={false}
         material-toneMapped={false}
-        fontSize={DIMENSION_LABEL_FONT_SIZE}
-        letterSpacing={0}
+        fontSize={DIMENSION_LABEL_FONT_SIZE * scale}
+        letterSpacing={0.01}
         outlineColor={colors.outline}
-        outlineOpacity={0.88}
-        outlineWidth={0.014}
+        outlineOpacity={0.65}
+        outlineWidth={0.009 * scale}
       >
         {label}
       </Text>
     </group>
-  );
-}
-
-function DimensionEndpoint({ position }: { position: [number, number, number] }) {
-  return (
-    <mesh position={position}>
-      <sphereGeometry args={[0.035, 16, 16]} />
-      <meshBasicMaterial color="#4da3ff" depthTest={false} toneMapped={false} />
-    </mesh>
   );
 }
 
@@ -5491,6 +5501,8 @@ function ModelHitLabel({ hit, active }: { hit: ModelSelectionHit; active: boolea
   );
 }
 
+type SceneLabelTone = "max" | "mid" | "min" | "load" | "active-load" | "payload-mass" | "dimension" | "print" | "support";
+
 function SceneLabel({
   label,
   position,
@@ -5499,7 +5511,7 @@ function SceneLabel({
 }: {
   label: string;
   position: [number, number, number];
-  tone: "max" | "mid" | "min" | "load" | "active-load" | "payload-mass" | "dimension" | "print";
+  tone: SceneLabelTone;
   scale?: number;
 }) {
   const labelWidth = Math.max(1.02, label.length * 0.098);
@@ -5513,12 +5525,12 @@ function SceneLabel({
         material-depthTest={false}
         material-depthWrite={false}
         material-toneMapped={false}
-        fontSize={0.135 * scale}
-        letterSpacing={0}
+        fontSize={0.12 * scale}
+        letterSpacing={0.01}
         maxWidth={(labelWidth - 0.16) * scale}
         outlineColor={colors.outline}
-        outlineOpacity={0.88}
-        outlineWidth={0.018 * scale}
+        outlineOpacity={0.7}
+        outlineWidth={0.011 * scale}
       >
         {label}
       </Text>
@@ -5526,7 +5538,7 @@ function SceneLabel({
   );
 }
 
-function sceneLabelColors(tone: "max" | "mid" | "min" | "load" | "active-load" | "payload-mass" | "dimension" | "print") {
+function sceneLabelColors(tone: SceneLabelTone) {
   if (tone === "max") return { outline: "#1f0707", text: "#fee2e2" };
   if (tone === "mid") return { outline: "#1f1300", text: "#fef3c7" };
   if (tone === "min") return { outline: "#06142a", text: "#dbeafe" };
@@ -5534,7 +5546,16 @@ function sceneLabelColors(tone: "max" | "mid" | "min" | "load" | "active-load" |
   if (tone === "print") return { outline: "#032018", text: "#a7f3d0" };
   if (tone === "active-load") return { outline: "#03101d", text: "#8cc8ff" };
   if (tone === "payload-mass") return { outline: "#032018", text: "#6ee7c8" };
+  if (tone === "support") return { outline: "#042f2a", text: "#99f6e4" };
   return { outline: "#1f1300", text: "#ffe6a3" };
+}
+
+// Constraint teal keeps fixed supports visually distinct from amber loads,
+// matching the load/constraint color split of mainstream CAE tools.
+const SUPPORT_COLOR = "#2dd4bf";
+
+function supportGlyphColor(active: boolean) {
+  return active ? "#4da3ff" : SUPPORT_COLOR;
 }
 
 function SupportGlyph({ kind, marker, face, active, labelPosition, scale = 1 }: { kind: SampleModelKind; marker: ViewerSupportMarker; face: DisplayFace; active: boolean; labelPosition?: [number, number, number]; scale?: number }) {
@@ -5549,11 +5570,11 @@ function SupportGlyph({ kind, marker, face, active, labelPosition, scale = 1 }: 
             <SupportBurst radius={hole.radius} active={active} scale={scale} />
           </group>
         ))}
-        <BoundaryLabelLeader anchor={anchor} labelPosition={position} color={active ? "#4da3ff" : "#f59e0b"} scale={scale} />
+        <BoundaryLabelLeader anchor={anchor} labelPosition={position} color={supportGlyphColor(active)} scale={scale} />
         <SceneLabel
           label={supportLabel(marker)}
           position={position}
-          tone={active ? "active-load" : "load"}
+          tone={active ? "active-load" : "support"}
           scale={scale}
         />
       </group>
@@ -5566,12 +5587,16 @@ function SupportGlyph({ kind, marker, face, active, labelPosition, scale = 1 }: 
   return (
     <group>
       <mesh position={anchor.toArray()} rotation={rotationForNormal(face.normal)}>
-        <circleGeometry args={[0.12 * scale, 36]} />
-        <meshBasicMaterial color={active ? "#4da3ff" : "#f59e0b"} transparent opacity={0.88} side={THREE.DoubleSide} />
+        <ringGeometry args={[0.088 * scale, 0.108 * scale, 40]} />
+        <meshBasicMaterial color={supportGlyphColor(active)} transparent opacity={0.92} side={THREE.DoubleSide} toneMapped={false} />
+      </mesh>
+      <mesh position={anchor.toArray()} rotation={rotationForNormal(face.normal)}>
+        <circleGeometry args={[0.026 * scale, 24]} />
+        <meshBasicMaterial color={supportGlyphColor(active)} transparent opacity={0.85} side={THREE.DoubleSide} toneMapped={false} />
       </mesh>
       <SupportBurstAt position={anchor.toArray()} normal={normal} active={active} scale={scale} />
-      <BoundaryLabelLeader anchor={anchor.toArray()} labelPosition={position} color={active ? "#4da3ff" : "#f59e0b"} scale={scale} />
-      <SceneLabel label={supportLabel(marker)} position={position} tone={active ? "active-load" : "load"} scale={scale} />
+      <BoundaryLabelLeader anchor={anchor.toArray()} labelPosition={position} color={supportGlyphColor(active)} scale={scale} />
+      <SceneLabel label={supportLabel(marker)} position={position} tone={active ? "active-load" : "support"} scale={scale} />
     </group>
   );
 }
@@ -5580,7 +5605,7 @@ function SupportBurstAt({ position, normal, active, scale = 1 }: { position: [nu
   const quaternion = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal.clone().normalize());
   return (
     <group position={position} quaternion={quaternion}>
-      <SupportBurst radius={0.15 * scale} active={active} scale={scale} />
+      <SupportBurst radius={0.11 * scale} active={active} scale={scale} />
     </group>
   );
 }
@@ -5929,7 +5954,7 @@ function BoundaryLabelLeader({ anchor, labelPosition, color, scale = 1 }: { anch
   const anchorVector = new THREE.Vector3(...anchor);
   const labelVector = new THREE.Vector3(...labelPosition);
   const leaderEnd = labelVector.clone().add(anchorVector.clone().sub(labelVector).normalize().multiplyScalar(0.2 * scale));
-  return <Line points={[anchor, leaderEnd.toArray()]} color={color} transparent opacity={0.62} lineWidth={1.2} />;
+  return <Line points={[anchor, leaderEnd.toArray()]} color={color} transparent opacity={0.42} lineWidth={1} />;
 }
 
 function PayloadMassLeader({ anchor, labelPosition, color, scale = 1 }: { anchor: THREE.Vector3; labelPosition: THREE.Vector3; color: string; scale?: number }) {
@@ -5977,9 +6002,9 @@ function ArrowGlyph({
   end,
   color,
   scale = 1,
-  shaftRadius = 0.025 * scale,
-  headRadius = 0.09 * scale,
-  headLength = 0.22 * scale
+  shaftRadius = 0.02 * scale,
+  headRadius = 0.072 * scale,
+  headLength = 0.2 * scale
 }: {
   start: THREE.Vector3;
   end: THREE.Vector3;
@@ -6022,12 +6047,12 @@ function SupportBurst({ radius, active = false, scale = 1 }: { radius: number; a
   return (
     <group>
       {[0, Math.PI / 2, Math.PI, Math.PI * 1.5].map((angle) => {
-        const x = Math.cos(angle) * radius * 2.0;
-        const y = Math.sin(angle) * radius * 2.0;
+        const x = Math.cos(angle) * radius * 1.9;
+        const y = Math.sin(angle) * radius * 1.9;
         return (
-          <mesh key={angle} position={[x, y, 0.035 * scale]} rotation={[0, 0, angle - Math.PI / 2]}>
-            <coneGeometry args={[0.045 * scale, 0.13 * scale, 3]} />
-            <meshBasicMaterial color={active ? "#4da3ff" : "#f59e0b"} />
+          <mesh key={angle} position={[x, y, 0.03 * scale]} rotation={[0, 0, angle - Math.PI / 2]}>
+            <coneGeometry args={[0.03 * scale, 0.09 * scale, 3]} />
+            <meshBasicMaterial color={supportGlyphColor(active)} toneMapped={false} />
           </mesh>
         );
       })}
