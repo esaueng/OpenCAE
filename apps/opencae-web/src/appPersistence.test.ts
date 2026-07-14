@@ -305,16 +305,18 @@ describe("app persistence", () => {
     expect(parseAutosavedWorkspacePayload(JSON.stringify({ ...snapshot, version: 99 }))).toBeNull();
   });
 
-  test("defaults legacy UI snapshots to von Mises and restores an explicit stress component", () => {
+  test("defaults legacy UI snapshots to von Mises and perspective, then restores explicit values", () => {
     const snapshot = buildAutosavedWorkspace({ project, displayModel, ui: baseUi });
     const legacy = parseAutosavedWorkspacePayload(JSON.stringify(snapshot));
     const principal = parseAutosavedWorkspacePayload(JSON.stringify({
       ...snapshot,
-      ui: { ...snapshot.ui, stressComponent: "principal_min" }
+      ui: { ...snapshot.ui, stressComponent: "principal_min", projectionMode: "orthographic" }
     }));
 
     expect(legacy?.ui.stressComponent).toBe("von_mises");
+    expect(legacy?.ui.projectionMode).toBe("perspective");
     expect(principal?.ui.stressComponent).toBe("principal_min");
+    expect(principal?.ui.projectionMode).toBe("orthographic");
   });
 
   test("defaults legacy color scales and restores finite per-field settings", () => {
