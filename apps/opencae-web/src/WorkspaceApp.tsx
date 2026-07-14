@@ -45,7 +45,7 @@ import { hasLegacyStepUploadFaces, hasUnresolvedStepFaceSelections, healStepFace
 import { stepGeometryMetadataForProject, stepGeometryNeedsRepair } from "./stepGeometryState";
 import { createLocalDynamicStructuralStudy, createLocalStaticStressStudy } from "./localProjectFactory";
 import { createPackedResultPlaybackCache, createResultFrameCache, hasDynamicPlaybackFrames, solverMeshSummaryFromResults, withDerivedSurfaceSafetyFactorFields, type SolverMeshSummary } from "./resultFields";
-import { appendResultProbe, MAX_RESULT_PROBES, resolveResultProbe, resultProbeTopologySignature, selectActiveResultField, semanticResultFieldKey, type ResultProbeAnchor, type ResultProbePin } from "./resultSelection";
+import { appendResultProbe, availableStressComponents, derivedStressFieldsForComponent, MAX_RESULT_PROBES, resolveResultProbe, resultProbeTopologySignature, selectActiveResultField, semanticResultFieldKey, type ResultProbeAnchor, type ResultProbePin } from "./resultSelection";
 import { automaticResultFieldRange, DEFAULT_RESULT_COLOR_SCALE_SETTING, resolveResultColorScale, type ResultColorScaleSetting, type ResultColorScaleSettings } from "./resultColorScale";
 import { packResultFieldsForPlayback, packedPreparedPlaybackFrameOrdinal, playbackFieldsForResultMode, playbackMemoryBudgetBytes, type PackedPreparedPlaybackCache, type PreparedPlaybackFrameCache } from "./resultPlaybackCache";
 import {
@@ -305,19 +305,29 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     surfaceMesh: resultSurfaceMesh,
     frameIndex: resultFrameIndex
   }), [resultFrameIndex, resultMode, resultSurfaceMesh, stressComponent, visibleResultFieldsForUi]);
+  useEffect(() => {
+    const available = availableStressComponents(resultFields);
+    if (available.length > 0 && !available.includes(stressComponent)) setStressComponent("von_mises");
+  }, [resultFields, stressComponent]);
   const activeCanonicalResultField = useMemo(() => {
-    const activeUiField = activeResultSelectionForUi.scalarField;
-    if (!activeUiField) return undefined;
-    const key = semanticResultFieldKey(activeUiField);
-    return resultFields.find((field) => semanticResultFieldKey(field) === key);
-  }, [activeResultSelectionForUi.scalarField, resultFields]);
+    return selectActiveResultField({
+      fields: resultFields,
+      resultMode,
+      stressComponent,
+      surfaceMesh: resultSurfaceMesh,
+      frameIndex: resultFrameIndex
+    }).scalarField;
+  }, [resultFields, resultFrameIndex, resultMode, resultSurfaceMesh, stressComponent]);
   const activeResultColorScaleKey = activeCanonicalResultField ? semanticResultFieldKey(activeCanonicalResultField) : null;
   const activeResultColorScaleSetting = activeResultColorScaleKey
     ? resultColorScaleSettings[activeResultColorScaleKey] ?? DEFAULT_RESULT_COLOR_SCALE_SETTING
     : DEFAULT_RESULT_COLOR_SCALE_SETTING;
+  const canonicalScaleFields = useMemo(() => resultMode === "stress" && stressComponent !== "von_mises"
+    ? [...resultFields, ...derivedStressFieldsForComponent(resultFields, stressComponent)]
+    : resultFields, [resultFields, resultMode, stressComponent]);
   const activeCanonicalAutomaticRange = useMemo(() => activeCanonicalResultField
-    ? automaticResultFieldRange(resultFields, semanticResultFieldKey, activeCanonicalResultField)
-    : { min: 0, max: 1 }, [activeCanonicalResultField, resultFields]);
+    ? automaticResultFieldRange(canonicalScaleFields, semanticResultFieldKey, activeCanonicalResultField)
+    : { min: 0, max: 1 }, [activeCanonicalResultField, canonicalScaleFields]);
   const activeResultColorScale = useMemo(() => {
     const field = activeCanonicalResultField;
     if (!field) return resolveResultColorScale({
@@ -2398,9 +2408,12 @@ function resultFieldsSignatureForCache(fields: ResultField[]): string {
       field.min,
       field.max,
       field.values.length,
+      field.tensorValues?.length ?? 0,
       field.samples?.length ?? 0,
       finiteSignatureValue(firstValue),
       finiteSignatureValue(lastValue),
+      finiteSignatureValue(field.tensorValues?.[0]),
+      finiteSignatureValue(field.tensorValues?.[field.tensorValues.length - 1]),
       finiteSignatureValue(firstSample?.value),
       finiteSignatureValue(lastSample?.value)
     ].join(":");

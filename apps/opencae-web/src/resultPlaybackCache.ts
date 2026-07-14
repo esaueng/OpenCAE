@@ -25,6 +25,7 @@ export interface PackedResultFieldsForPlayback {
   frameCount: number;
   fieldCount: number;
   valueCount: number;
+  tensorCount: number;
   vectorCount: number;
   sampleCount: number;
   frameIndexes: Int32Array;
@@ -35,6 +36,9 @@ export interface PackedResultFieldsForPlayback {
   fieldMins: Float32Array;
   fieldMaxes: Float32Array;
   values: Float32Array;
+  tensorOffsets: Int32Array;
+  tensorLengths: Int32Array;
+  tensorValues: Float32Array;
   vectorOffsets: Int32Array;
   vectorLengths: Int32Array;
   vectors: Float32Array;
@@ -46,8 +50,9 @@ export interface PackedResultFieldsForPlayback {
   sampleVectors: Float32Array;
 }
 
-export interface PreparedPlaybackField extends Omit<ResultField, "values"> {
+export interface PreparedPlaybackField extends Omit<ResultField, "values" | "tensorValues"> {
   values: Float32Array;
+  tensorValues?: Float32Array;
 }
 
 export interface PreparedPlaybackFrame {
@@ -95,6 +100,9 @@ export interface PackedPreparedPlaybackCache {
   fieldMins: Float32Array;
   fieldMaxes: Float32Array;
   values: Float32Array;
+  tensorOffsets: Int32Array;
+  tensorLengths: Int32Array;
+  tensorValues: Float32Array;
   vectorOffsets: Int32Array;
   vectorLengths: Int32Array;
   vectors: Float32Array;
@@ -114,6 +122,9 @@ export interface PackedPreparedPlaybackFieldSlot {
   min: number;
   max: number;
   values: Float32Array;
+  tensorOffset: number;
+  tensorLength: number;
+  tensorValues: Float32Array;
   vectorOffset: number;
   vectorLength: number;
   vectors: Float32Array;
@@ -193,11 +204,14 @@ export function preparePlaybackFrames(input: PlaybackFrameCacheInput): PreparedP
   let actualBytes = 0;
   const frames = plan.framePositions.map((framePosition) => {
     const fields = frameCache.fieldsForFramePosition(framePosition).map((field) => {
+      const { tensorValues: sourceTensorValues, ...fieldWithoutTensors } = field;
       const values = new Float32Array(field.values);
-      actualBytes += values.byteLength;
+      const tensorValues = sourceTensorValues ? new Float32Array(sourceTensorValues) : undefined;
+      actualBytes += values.byteLength + (tensorValues?.byteLength ?? 0);
       return {
-        ...field,
-        values
+        ...fieldWithoutTensors,
+        values,
+        ...(tensorValues ? { tensorValues } : {})
       };
     });
     return {
@@ -230,6 +244,7 @@ export function packResultFieldsForPlayback(fields: ResultField[]): PackedResult
     frameCount: packed.frameCount,
     fieldCount: packed.fieldCount,
     valueCount: packed.valueCount,
+    tensorCount: packed.tensorCount,
     vectorCount: packed.vectors.length / 3,
     frameIndexes: packed.frameIndexes,
     times: packed.times,
@@ -239,6 +254,9 @@ export function packResultFieldsForPlayback(fields: ResultField[]): PackedResult
     fieldMins: packed.fieldMins,
     fieldMaxes: packed.fieldMaxes,
     values: packed.values,
+    tensorOffsets: packed.tensorOffsets,
+    tensorLengths: packed.tensorLengths,
+    tensorValues: packed.tensorValues,
     vectorOffsets: packed.vectorOffsets,
     vectorLengths: packed.vectorLengths,
     vectors: packed.vectors,
@@ -271,6 +289,9 @@ export function unpackResultFieldsForPlayback(packed: PackedResultFieldsForPlayb
         packed.fieldMins,
         packed.fieldMaxes,
         packed.values,
+        packed.tensorOffsets,
+        packed.tensorLengths,
+        packed.tensorValues,
         packed.vectorOffsets,
         packed.vectorLengths,
         packed.vectors,
@@ -296,6 +317,9 @@ function unpackPackedInputFieldForSlot(
   fieldMins: Float32Array,
   fieldMaxes: Float32Array,
   values: Float32Array,
+  tensorOffsets: Int32Array,
+  tensorLengths: Int32Array,
+  tensorValues: Float32Array,
   vectorOffsets: Int32Array,
   vectorLengths: Int32Array,
   vectors: Float32Array,
@@ -313,6 +337,7 @@ function unpackPackedInputFieldForSlot(
     fieldValues[index] = values[offset + index] ?? 0;
   }
   const fieldVectors = unpackPackedVectorsForSlot(slot, vectorOffsets, vectorLengths, vectors);
+  const tensors = unpackPackedFlatValuesForSlot(slot, tensorOffsets, tensorLengths, tensorValues);
   const samples = unpackPackedSamplesForSlot(slot, sampleOffsets, sampleLengths, sampleValues, samplePoints, sampleNormals, sampleVectors);
   return {
     ...descriptor,
@@ -322,6 +347,7 @@ function unpackPackedInputFieldForSlot(
     max: fieldMaxes[slot] ?? 0,
     frameIndex,
     timeSeconds,
+    ...(tensors.length ? { tensorValues: tensors } : {}),
     ...(fieldVectors.length ? { vectors: fieldVectors } : {}),
     ...(samples.length ? { samples } : {})
   };
@@ -390,9 +416,14 @@ export function playbackFieldsForResultMode(
   resultMode: ResultField["type"],
   stressComponent: ResultField["component"] = "von_mises"
 ): ResultField[] {
-  const selected = fields.filter((field) =>
+  let selected = fields.filter((field) =>
     field.type === resultMode &&
     (resultMode !== "stress" || stressComponentForField(field) === stressComponent));
+  if (!selected.length && resultMode === "stress" && stressComponent !== "von_mises") {
+    selected = fields.filter((field) => field.type === "stress"
+      && stressComponentForField(field) === "von_mises"
+      && field.tensorValues?.length === field.values.length * 6);
+  }
   if (!selected.length) return fields;
   if (resultMode === "displacement") return selected;
   const displacement = fields.filter((field) => field.type === "displacement");
@@ -406,10 +437,14 @@ export function hydratePreparedPlaybackFrame(frame: PreparedPlaybackFrame): { fr
     framePosition: frame.framePosition,
     frameIndex: frame.frameIndex,
     timeSeconds: frame.timeSeconds,
-    fields: frame.fields.map((field) => ({
-      ...field,
-      values: Array.prototype.slice.call(field.values) as number[]
-    }))
+    fields: frame.fields.map((field) => {
+      const { tensorValues, ...fieldWithoutTensors } = field;
+      return {
+        ...fieldWithoutTensors,
+        values: Array.prototype.slice.call(field.values) as number[],
+        ...(tensorValues ? { tensorValues: Array.prototype.slice.call(tensorValues) as number[] } : {})
+      };
+    })
   };
   hydratedFrames.set(frame, hydrated);
   return hydrated;
@@ -445,6 +480,9 @@ export function preparedPlaybackTransferables(cache: PreparedPlaybackFrameCache)
       cache.packed.fieldMins.buffer,
       cache.packed.fieldMaxes.buffer,
       cache.packed.values.buffer,
+      cache.packed.tensorOffsets.buffer,
+      cache.packed.tensorLengths.buffer,
+      cache.packed.tensorValues.buffer,
       cache.packed.vectorOffsets.buffer,
       cache.packed.vectorLengths.buffer,
       cache.packed.vectors.buffer,
@@ -459,6 +497,7 @@ export function preparedPlaybackTransferables(cache: PreparedPlaybackFrameCache)
   for (const frame of cache.frames) {
     for (const field of frame.fields) {
       transferables.push(field.values.buffer);
+      if (field.tensorValues) transferables.push(field.tensorValues.buffer);
     }
   }
   return transferables;
@@ -473,6 +512,9 @@ export function packedResultFieldsForPlaybackTransferables(packed: PackedResultF
     packed.fieldMins.buffer,
     packed.fieldMaxes.buffer,
     packed.values.buffer,
+    packed.tensorOffsets.buffer,
+    packed.tensorLengths.buffer,
+    packed.tensorValues.buffer,
     packed.vectorOffsets.buffer,
     packed.vectorLengths.buffer,
     packed.vectors.buffer,
@@ -513,6 +555,8 @@ export function packedPreparedPlaybackFieldSlot(
   const length = cache.fieldLengths[slot] ?? 0;
   const vectorOffset = cache.vectorOffsets[slot] ?? 0;
   const vectorLength = cache.vectorLengths[slot] ?? 0;
+  const tensorOffset = cache.tensorOffsets[slot] ?? 0;
+  const tensorLength = cache.tensorLengths[slot] ?? 0;
   const sampleOffset = cache.sampleOffsets[slot] ?? 0;
   const sampleLength = cache.sampleLengths[slot] ?? 0;
   return {
@@ -522,6 +566,9 @@ export function packedPreparedPlaybackFieldSlot(
     min: cache.fieldMins[slot] ?? 0,
     max: cache.fieldMaxes[slot] ?? 0,
     values: cache.values,
+    tensorOffset,
+    tensorLength,
+    tensorValues: cache.tensorValues,
     vectorOffset,
     vectorLength,
     vectors: cache.vectors,
@@ -567,10 +614,13 @@ function packPreparedPlaybackFrames(frames: PreparedPlaybackFrame[]): PackedPrep
   const fieldMins = new Float32Array(frameCount * fieldCount);
   const fieldMaxes = new Float32Array(frameCount * fieldCount);
   const vectorOffsets = new Int32Array(frameCount * fieldCount);
+  const tensorOffsets = new Int32Array(frameCount * fieldCount);
+  const tensorLengths = new Int32Array(frameCount * fieldCount);
   const vectorLengths = new Int32Array(frameCount * fieldCount);
   const sampleOffsets = new Int32Array(frameCount * fieldCount);
   const sampleLengths = new Int32Array(frameCount * fieldCount);
   let valueCount = 0;
+  let tensorCount = 0;
   let vectorCount = 0;
   let sampleCount = 0;
 
@@ -587,16 +637,20 @@ function packPreparedPlaybackFrames(frames: PreparedPlaybackFrame[]): PackedPrep
       fieldMins[slot] = field?.min ?? 0;
       fieldMaxes[slot] = field?.max ?? 0;
       vectorOffsets[slot] = vectorCount;
+      tensorOffsets[slot] = tensorCount;
+      tensorLengths[slot] = field?.tensorValues?.length ?? 0;
       vectorLengths[slot] = field?.vectors?.length ?? 0;
       sampleOffsets[slot] = sampleCount;
       sampleLengths[slot] = field?.samples?.length ?? 0;
       valueCount += field?.values.length ?? 0;
+      tensorCount += field?.tensorValues?.length ?? 0;
       vectorCount += field?.vectors?.length ?? 0;
       sampleCount += field?.samples?.length ?? 0;
     }
   }
 
   const values = new Float32Array(valueCount);
+  const tensorValues = new Float32Array(tensorCount);
   const vectors = new Float32Array(vectorCount * 3);
   const sampleValues = new Float32Array(sampleCount);
   const samplePoints = new Float32Array(sampleCount * 3);
@@ -609,6 +663,7 @@ function packPreparedPlaybackFrames(frames: PreparedPlaybackFrame[]): PackedPrep
       if (!field) continue;
       const slot = frameOrdinal * fieldCount + fieldOrdinal;
       values.set(field.values, fieldOffsets[slot]);
+      if (field.tensorValues) tensorValues.set(field.tensorValues, tensorOffsets[slot]);
       const fieldVectors = field.vectors ?? [];
       const vectorOffset = vectorOffsets[slot] ?? 0;
       for (let vectorIndex = 0; vectorIndex < fieldVectors.length; vectorIndex += 1) {
@@ -639,6 +694,9 @@ function packPreparedPlaybackFrames(frames: PreparedPlaybackFrame[]): PackedPrep
     fieldMins,
     fieldMaxes,
     values,
+    tensorOffsets,
+    tensorLengths,
+    tensorValues,
     vectorOffsets,
     vectorLengths,
     vectors,
@@ -648,11 +706,11 @@ function packPreparedPlaybackFrames(frames: PreparedPlaybackFrame[]): PackedPrep
     samplePoints,
     sampleNormals,
     sampleVectors,
-    actualBytes: framePositions.byteLength + frameIndexes.byteLength + times.byteLength + fieldOffsets.byteLength + fieldLengths.byteLength + fieldMins.byteLength + fieldMaxes.byteLength + values.byteLength + vectorOffsets.byteLength + vectorLengths.byteLength + vectors.byteLength + sampleOffsets.byteLength + sampleLengths.byteLength + sampleValues.byteLength + samplePoints.byteLength + sampleNormals.byteLength + sampleVectors.byteLength
+    actualBytes: framePositions.byteLength + frameIndexes.byteLength + times.byteLength + fieldOffsets.byteLength + fieldLengths.byteLength + fieldMins.byteLength + fieldMaxes.byteLength + values.byteLength + tensorOffsets.byteLength + tensorLengths.byteLength + tensorValues.byteLength + vectorOffsets.byteLength + vectorLengths.byteLength + vectors.byteLength + sampleOffsets.byteLength + sampleLengths.byteLength + sampleValues.byteLength + samplePoints.byteLength + sampleNormals.byteLength + sampleVectors.byteLength
   };
 }
 
-function descriptorForPackedPlaybackField(field: Omit<ResultField, "values">): PackedPreparedPlaybackFieldDescriptor {
+function descriptorForPackedPlaybackField(field: Pick<ResultField, "id" | "runId" | "type" | "component" | "location" | "units" | "surfaceMeshRef" | "visualizationSource" | "engineeringSource" | "provenance">): PackedPreparedPlaybackFieldDescriptor {
   return {
     id: field.id,
     runId: field.runId,
@@ -665,6 +723,12 @@ function descriptorForPackedPlaybackField(field: Omit<ResultField, "values">): P
     ...(field.engineeringSource ? { engineeringSource: field.engineeringSource } : {}),
     ...(field.provenance ? { provenance: field.provenance } : {})
   };
+}
+
+function unpackPackedFlatValuesForSlot(slot: number, offsets: Int32Array, lengths: Int32Array, values: Float32Array): number[] {
+  const offset = offsets[slot] ?? 0;
+  const length = lengths[slot] ?? 0;
+  return Array.from(values.subarray(offset, offset + length));
 }
 
 function normalizedFrameIndexes(frameIndexes: number[]): number[] {
@@ -695,8 +759,9 @@ function estimatePreparedFrameBytes(fields: ResultField[], fallbackFrameIndex: n
   const fieldsForFrame = fields.filter((field) => (field.frameIndex ?? fallbackFrameIndex) === fallbackFrameIndex);
   const visibleFields = fieldsForFrame.length ? fieldsForFrame : fields;
   const valueCount = visibleFields.reduce((total, field) => total + field.values.length, 0);
+  const tensorCount = visibleFields.reduce((total, field) => total + (field.tensorValues?.length ?? 0), 0);
   const sampleCount = visibleFields.reduce((total, field) => total + (field.samples?.length ?? 0), 0);
-  return Math.max(1, valueCount) * Float64Array.BYTES_PER_ELEMENT + sampleCount * 10 * Float32Array.BYTES_PER_ELEMENT;
+  return Math.max(1, valueCount + tensorCount) * Float64Array.BYTES_PER_ELEMENT + sampleCount * 10 * Float32Array.BYTES_PER_ELEMENT;
 }
 
 function estimateTotalBytes(perFrameBytes: number, frameCount: number): number {

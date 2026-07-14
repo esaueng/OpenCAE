@@ -389,6 +389,7 @@ function finishSolve(
     stress: recovery.stress,
     vonMises: recovery.vonMises,
     nodalVonMises: recovery.nodalVonMises,
+    nodalStress: recovery.nodalStress,
     vonMisesPeak: recovery.vonMisesPeak,
     provenance: {
       kind: "opencae_core_fea",
@@ -572,13 +573,14 @@ function setConstraint(
 }
 
 export function recoverElementResults(model: NormalizedOpenCAEModel, displacement: Float64Array):
-  | { ok: true; strain: Float64Array; stress: Float64Array; vonMises: Float64Array; nodalVonMises: Float64Array; vonMisesPeak: Float64Array }
+  | { ok: true; strain: Float64Array; stress: Float64Array; vonMises: Float64Array; nodalVonMises: Float64Array; nodalStress: Float64Array; vonMisesPeak: Float64Array }
   | { ok: false; error: CpuSolverError } {
   const strain = new Float64Array(model.counts.elements * 6);
   const stress = new Float64Array(model.counts.elements * 6);
   const vonMises = new Float64Array(model.counts.elements);
   const vonMisesPeak = new Float64Array(model.counts.elements);
   const nodalSum = new Float64Array(model.counts.nodes);
+  const nodalStressSum = new Float64Array(model.counts.nodes * 6);
   const nodalWeight = new Float64Array(model.counts.nodes);
   let globalElement = 0;
 
@@ -609,6 +611,7 @@ export function recoverElementResults(model: NormalizedOpenCAEModel, displacemen
       // Von Mises at each element node: constant for Tet4, linearly varying for Tet10,
       // where node sampling recovers the outer-fiber stress that centroid sampling clips.
       const nodalValues = new Float64Array(nodeCount);
+      const nodalStresses = new Float64Array(nodeCount * 6);
       if (block.type === "Tet4") {
         const geometry = computeTet4Geometry(
           collectTetCoordinates(model.nodes.coordinates, block.connectivity, elementOffset)
@@ -616,7 +619,9 @@ export function recoverElementResults(model: NormalizedOpenCAEModel, displacemen
         if (!geometry.ok) return geometry;
         elementStrain = recoverTet4Strain(geometry.gradients, elementDisplacement);
         elementVolume = geometry.volume;
-        nodalValues.fill(computeVonMisesStress(recoverStress(d, elementStrain)));
+        const constantStress = recoverStress(d, elementStrain);
+        nodalValues.fill(computeVonMisesStress(constantStress));
+        for (let localNode = 0; localNode < nodeCount; localNode += 1) nodalStresses.set(constantStress, localNode * 6);
       } else {
         const coordinates = collectElementCoordinates(model.nodes.coordinates, block.connectivity, elementOffset, nodeCount);
         const recovered = recoverTet10CentroidStrain(coordinates, elementDisplacement);
@@ -627,12 +632,14 @@ export function recoverElementResults(model: NormalizedOpenCAEModel, displacemen
         const nodalStrains = recoverTet10NodalStrains(coordinates, elementDisplacement);
         if (nodalStrains.ok) {
           for (let localNode = 0; localNode < nodeCount; localNode += 1) {
-            nodalValues[localNode] = computeVonMisesStress(
-              recoverStress(d, nodalStrains.strains.subarray(localNode * 6, localNode * 6 + 6))
-            );
+            const nodalStress = recoverStress(d, nodalStrains.strains.subarray(localNode * 6, localNode * 6 + 6));
+            nodalStresses.set(nodalStress, localNode * 6);
+            nodalValues[localNode] = computeVonMisesStress(nodalStress);
           }
         } else {
-          nodalValues.fill(computeVonMisesStress(recoverStress(d, elementStrain)));
+          const constantStress = recoverStress(d, elementStrain);
+          nodalValues.fill(computeVonMisesStress(constantStress));
+          for (let localNode = 0; localNode < nodeCount; localNode += 1) nodalStresses.set(constantStress, localNode * 6);
         }
       }
       const elementStress = recoverStress(d, elementStrain);
@@ -645,6 +652,9 @@ export function recoverElementResults(model: NormalizedOpenCAEModel, displacemen
         const node = block.connectivity[elementOffset + localNode];
         nodalSum[node] += nodalValues[localNode] * elementVolume;
         nodalWeight[node] += elementVolume;
+        for (let component = 0; component < 6; component += 1) {
+          nodalStressSum[node * 6 + component] += nodalStresses[localNode * 6 + component] * elementVolume;
+        }
       }
       vonMisesPeak[globalElement] = peak;
       globalElement += 1;
@@ -652,10 +662,16 @@ export function recoverElementResults(model: NormalizedOpenCAEModel, displacemen
   }
 
   const nodalVonMises = new Float64Array(model.counts.nodes);
+  const nodalStress = new Float64Array(model.counts.nodes * 6);
   for (let node = 0; node < nodalVonMises.length; node += 1) {
     nodalVonMises[node] = nodalWeight[node] > 0 ? nodalSum[node] / nodalWeight[node] : 0;
+    for (let component = 0; component < 6; component += 1) {
+      nodalStress[node * 6 + component] = nodalWeight[node] > 0
+        ? nodalStressSum[node * 6 + component] / nodalWeight[node]
+        : 0;
+    }
   }
-  return { ok: true, strain, stress, vonMises, nodalVonMises, vonMisesPeak };
+  return { ok: true, strain, stress, vonMises, nodalVonMises, nodalStress, vonMisesPeak };
 }
 
 function multiplyDenseMatrixVector(matrix: Float64Array, size: number): (vector: Float64Array) => Float64Array {

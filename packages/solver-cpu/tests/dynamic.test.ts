@@ -77,6 +77,8 @@ describe("solveDynamicLinearTetMDOF", () => {
     expect(coreResult?.fields.some((field) => field.type === "acceleration" && field.timeSeconds === 0.02)).toBe(true);
     expect(coreResult?.fields.some((field) => field.type === "safety_factor" && field.frameIndex === 0)).toBe(true);
     expect(coreResult?.fields.every((field) => field.values.length > 0)).toBe(true);
+    const surfaceStressFields = coreResult?.fields.filter((field) => field.type === "stress" && field.location === "node") ?? [];
+    expect(surfaceStressFields.every((field) => field.component === "von_mises" && field.tensorValues?.length === field.values.length * 6)).toBe(true);
     expect(validateCoreResult(coreResult!).ok).toBe(true);
   });
 
@@ -114,6 +116,7 @@ describe("solveDynamicLinearTetMDOF", () => {
       expect(frame.strain.values.length).toBe(staticResult.result.strain.length);
       expect(frame.stress.values.length).toBe(staticResult.result.stress.length);
       expect(frame.vonMises.values.length).toBe(staticResult.result.vonMises.length);
+      expect(frame.nodalStress?.values.length).toBe((staticResult.result.nodalStress?.length ?? 0));
       expect(frame.safety_factor.values.length).toBe(staticResult.result.vonMises.length);
       expect(frame.reactionForce?.length).toBe(staticResult.result.reactionForce.length);
       expect(frame.displacement.samples.length).toBeGreaterThan(0);

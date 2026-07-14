@@ -48,6 +48,12 @@ export function solvePreviewSdofTet4Cpu(
       strain: field(strain, frameIndex, timeSeconds),
       stress: field(stress, frameIndex, timeSeconds),
       vonMises: field(vonMises, frameIndex, timeSeconds),
+      nodalVonMises: staticSolve.result.nodalVonMises
+        ? field(scaleVector(staticSolve.result.nodalVonMises, Math.abs(scale)), frameIndex, timeSeconds)
+        : undefined,
+      nodalStress: staticSolve.result.nodalStress
+        ? field(scaleVector(staticSolve.result.nodalStress, scale), frameIndex, timeSeconds)
+        : undefined,
       safety_factor: field(safety, frameIndex, timeSeconds),
       reactionForce: scaleVector(staticSolve.result.reactionForce, scale)
     });

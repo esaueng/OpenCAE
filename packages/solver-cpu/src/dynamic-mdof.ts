@@ -229,6 +229,7 @@ export function solveDynamicMdofTet4Cpu(
       stress: frames.at(-1)?.stress.values ?? new Float64Array(model.counts.elements * 6),
       vonMises: frames.at(-1)?.vonMises.values ?? new Float64Array(model.counts.elements),
       nodalVonMises: frames.at(-1)?.nodalVonMises?.values,
+      nodalStress: frames.at(-1)?.nodalStress?.values,
       vonMisesPeak: frames.at(-1)?.vonMisesPeak?.values,
       provenance: {
         kind: "opencae_core_fea",
@@ -544,6 +545,7 @@ function createFrame(
       stress: field(recovery.stress, frameIndex, timeSeconds),
       vonMises: field(recovery.vonMises, frameIndex, timeSeconds),
       nodalVonMises: field(recovery.nodalVonMises, frameIndex, timeSeconds),
+      nodalStress: field(recovery.nodalStress, frameIndex, timeSeconds),
       vonMisesPeak: field(recovery.vonMisesPeak, frameIndex, timeSeconds),
       safety_factor: field(safetyFactor, frameIndex, timeSeconds),
       reactionForce

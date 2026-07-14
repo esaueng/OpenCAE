@@ -169,6 +169,7 @@ const DEBUG_FORCE_DEFORMATION_SCALE =
 const RESULT_DEFORMATION_TARGET_FRACTION = 0.08;
 const RESULT_DEFORMATION_CAP_FRACTION = DEBUG_RESULTS ? 1 : 0.25;
 const ResultColorScaleContext = createContext<ResolvedResultColorScale | null>(null);
+const StressComponentContext = createContext<StressComponent>("von_mises");
 
 export function viewerGizmoLayout() {
   const cubeSize = VIEWER_VIEW_CUBE_SIZE;
@@ -253,6 +254,7 @@ export function CadViewer(props: CadViewerProps) {
   }, [props.displayModel, props.onResultRenderBoundsChange, uploadedPreviewBounds]);
   return (
     <ResultColorScaleContext.Provider value={resultColorScale}>
+      <StressComponentContext.Provider value={stressComponent}>
     <section className={`viewer-shell ${effectiveViewMode === "results" ? "results-view" : ""}`} aria-label="3D CAD viewer">
       <Canvas frameloop="demand" dpr={viewerDpr} camera={{ position: [4.8, 4.8, 4.8], up: ISO_CAMERA_UP.toArray(), fov: 42 }} onPointerMissed={props.onViewerMiss}>
         <ViewerInvalidator
@@ -364,6 +366,7 @@ export function CadViewer(props: CadViewerProps) {
       </div>
       {effectiveViewMode === "results" && <ResultLegend resultMode={props.resultMode} resultFields={resultFields} unitSystem={props.unitSystem} meshSummary={props.meshSummary} surfaceMesh={props.surfaceMesh} showDeformed={effectiveShowDeformed} deformationScale={props.stressExaggeration} />}
     </section>
+      </StressComponentContext.Provider>
     </ResultColorScaleContext.Provider>
   );
 }
@@ -3712,7 +3715,8 @@ export function applyResultFrameToGeometry({
   coordinateTransform,
   recomputeDerivedGeometry = true,
   deformationCapFraction = RESULT_DEFORMATION_CAP_FRACTION,
-  resultColorScale
+  resultColorScale,
+  stressComponent = "von_mises"
 }: {
   geometry: THREE.BufferGeometry;
   fields: ResultField[];
@@ -3723,6 +3727,7 @@ export function applyResultFrameToGeometry({
   recomputeDerivedGeometry?: boolean;
   deformationCapFraction?: number;
   resultColorScale?: ResolvedResultColorScale;
+  stressComponent?: StressComponent;
 }) {
   const totalStart = DEBUG_PERF ? performance.now() : 0;
   let mappingMs = 0;
@@ -3735,7 +3740,7 @@ export function applyResultFrameToGeometry({
   const basePositions = basePositionArrayForGeometry(geometry, position);
   const { colorAttribute, colorAttributeRecreated } = prepareResultGeometryAttributes(geometry, position);
 
-  const scalarField = selectedResultField(fields, resultMode);
+  const scalarField = selectActiveResultField({ fields, resultMode, stressComponent }).scalarField;
   const displacementField = fields.find((field) => field.type === "displacement" && field.samples?.some((sample) => sample.vector));
   logResultFieldDiagnostics(scalarField, resultMode);
   const geometryExtent = (coordinateTransform?.bounds ?? basePositionBoundsForGeometry(geometry, basePositions)).getSize(new THREE.Vector3()).length();
@@ -4707,6 +4712,7 @@ function usePackedPlaybackGeometry(
 ) {
   const { invalidate } = useThree();
   const resultColorScale = useContext(ResultColorScaleContext);
+  const stressComponent = useContext(StressComponentContext);
   const optionsRef = useRef(options);
   const samplesRef = useRef<FaceResultSample[]>([]);
   useEffect(() => {
@@ -4731,7 +4737,8 @@ function usePackedPlaybackGeometry(
           showDeformed: latest.showDeformed,
           deformationScale: latest.deformationScale ?? 1,
           recomputeDerivedGeometry: false,
-          resultColorScale: resultColorScale ?? undefined
+          resultColorScale: resultColorScale ?? undefined,
+          stressComponent
         });
         invalidate();
         return;
@@ -4800,6 +4807,7 @@ function resultFieldForPackedSlot(slot: NonNullable<ReturnType<typeof packedPrep
     ...slot.descriptor,
     id: `${slot.descriptor.id}-packed`,
     values: Array.from(slot.values.slice(slot.offset, slot.offset + slot.length)),
+    tensorValues: Array.from(slot.tensorValues.slice(slot.tensorOffset, slot.tensorOffset + slot.tensorLength)),
     min: slot.min,
     max: slot.max,
     vectors: vectorsForPackedPreparedSlot(slot),
@@ -4838,10 +4846,13 @@ function resultFieldsForPackedPreparedFrame(cache: PackedPreparedPlaybackCache, 
     const length = cache.fieldLengths[slot] ?? 0;
     const sampleOffset = cache.sampleOffsets[slot] ?? 0;
     const sampleLength = cache.sampleLengths[slot] ?? 0;
+    const tensorOffset = cache.tensorOffsets[slot] ?? 0;
+    const tensorLength = cache.tensorLengths[slot] ?? 0;
     return {
       ...descriptor,
       id: `${descriptor.id}-packed-${frameIndex}`,
       values: Array.from(cache.values.slice(offset, offset + length)),
+      tensorValues: Array.from(cache.tensorValues.slice(tensorOffset, tensorOffset + tensorLength)),
       min: cache.fieldMins[slot] ?? 0,
       max: cache.fieldMaxes[slot] ?? 0,
       frameIndex,
@@ -6180,6 +6191,7 @@ export function resultLegendContentScale(size: ResultLegendSize) {
 }
 
 function ResultLegend({ resultMode, resultFields, unitSystem, meshSummary, surfaceMesh, showDeformed, deformationScale }: { resultMode: ResultMode; resultFields: ResultField[]; unitSystem: UnitSystem; meshSummary?: MeshSummary; surfaceMesh?: SolverSurfaceMesh; showDeformed?: boolean; deformationScale?: number }) {
+  const stressComponent = useContext(StressComponentContext);
   const contextColorScale = useContext(ResultColorScaleContext);
   const legendRef = useRef<HTMLDivElement | null>(null);
   const resizeDragRef = useRef<ResultLegendResizeDrag | null>(null);
@@ -6204,7 +6216,11 @@ function ResultLegend({ resultMode, resultFields, unitSystem, meshSummary, surfa
     const unitFactor = displacementField.units === "mm" && surfaceMesh.coordinateSpace === "solver" ? 1000 : 1;
     return legendDeformationLabel(appliedScale * unitFactor);
   }, [deformationScale, resultFields, resultMode, showDeformed, surfaceMesh]);
-  const title = resultMode === "stress" ? "Von Mises Stress" : resultMode === "displacement" ? "Displacement" : resultMode === "velocity" ? "Velocity" : resultMode === "acceleration" ? "Acceleration" : "Safety Factor";
+  const title = resultMode === "stress"
+    ? stressComponent === "principal_max" ? "Principal Stress σ₁"
+      : stressComponent === "principal_min" ? "Principal Stress σ₃"
+        : stressComponent === "max_shear" ? "Maximum Shear Stress" : "Von Mises Stress"
+    : resultMode === "displacement" ? "Displacement" : resultMode === "velocity" ? "Velocity" : resultMode === "acceleration" ? "Acceleration" : "Safety Factor";
   // Prefer the field actually rendered on the solver surface mesh so the legend
   // range matches the contours; fall back to the face/sample field otherwise.
   const surfaceField = surfaceMesh ? resultFields.find((candidate) => isSolverSurfaceNodeField(candidate, surfaceMesh, resultMode)) : undefined;

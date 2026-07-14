@@ -1,6 +1,7 @@
 import type { ResultField, StressComponent } from "@opencae/schema";
 import type { SolverSurfaceMesh } from "./projectFile";
 import type { ResultMode } from "./workspaceViewTypes";
+import { deriveStressScalars } from "./stressTensor";
 
 export const DEFAULT_STRESS_COMPONENT: StressComponent = "von_mises";
 export const MAX_RESULT_PROBES = 20;
@@ -68,6 +69,18 @@ export interface ActiveResultFieldOptions {
   frameIndex?: number;
 }
 
+const derivedStressFieldCache = new WeakMap<ResultField, Map<StressComponent, ResultField>>();
+
+export function availableStressComponents(fields: ResultField[]): StressComponent[] {
+  const components: StressComponent[] = [];
+  if (fields.some((field) => field.type === "stress")) components.push("von_mises");
+  if (fields.some(hasStressTensors)) components.push("principal_max", "principal_min", "max_shear");
+  for (const component of ["principal_max", "principal_min", "max_shear"] as const) {
+    if (fields.some((field) => field.type === "stress" && field.component === component) && !components.includes(component)) components.push(component);
+  }
+  return components;
+}
+
 /**
  * Single scalar-field selection seam shared by contours, legends, probes, and
  * playback. Legacy stress fields without a component are explicitly treated as
@@ -81,9 +94,12 @@ export function selectActiveResultField({
   frameIndex
 }: ActiveResultFieldOptions): ActiveResultFieldSelection {
   const frameFields = fieldsForRequestedFrame(fields, frameIndex);
-  const candidates = frameFields.filter((field) =>
+  let candidates = frameFields.filter((field) =>
     field.type === resultMode && (resultMode !== "stress" || stressComponentForField(field) === stressComponent)
   );
+  if (resultMode === "stress" && stressComponent !== "von_mises" && candidates.length === 0) {
+    candidates = frameFields.filter(hasStressTensors).map((field) => derivedStressField(field, stressComponent));
+  }
   const scalarField = surfaceMesh
     ? candidates.find((field) => isAlignedSurfaceNodeField(field, surfaceMesh))
       ?? candidates.find((field) => field.location === "face")
@@ -100,6 +116,41 @@ export function selectActiveResultField({
     ...(scalarField ? { scalarField } : {}),
     ...(displacementField ? { displacementField } : {})
   };
+}
+
+export function derivedStressFieldsForComponent(fields: ResultField[], component: StressComponent): ResultField[] {
+  if (component === "von_mises") return fields.filter((field) => field.type === "stress" && stressComponentForField(field) === component);
+  return fields.filter(hasStressTensors).map((field) => derivedStressField(field, component));
+}
+
+function hasStressTensors(field: ResultField): boolean {
+  return field.type === "stress"
+    && stressComponentForField(field) === "von_mises"
+    && field.tensorValues?.length === field.values.length * 6;
+}
+
+function derivedStressField(source: ResultField, component: StressComponent): ResultField {
+  let byComponent = derivedStressFieldCache.get(source);
+  if (!byComponent) {
+    byComponent = new Map();
+    derivedStressFieldCache.set(source, byComponent);
+  }
+  const cached = byComponent.get(component);
+  if (cached) return cached;
+  const values = deriveStressScalars(source.tensorValues ?? [], component);
+  const derived: ResultField = {
+    ...source,
+    id: `${source.id}-${component}`,
+    component,
+    values,
+    min: Math.min(...values),
+    max: Math.max(...values),
+    ...(source.samples?.length === values.length
+      ? { samples: source.samples.map((sample, index) => ({ ...sample, value: values[index] ?? sample.value })) }
+      : { samples: undefined })
+  };
+  byComponent.set(component, derived);
+  return derived;
 }
 
 export function stressComponentForField(field: Pick<ResultField, "type" | "component">): StressComponent | undefined {

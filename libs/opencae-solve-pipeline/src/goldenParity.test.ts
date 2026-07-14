@@ -166,7 +166,11 @@ function compareStructures(actual: unknown, expected: unknown, path: string, sta
     const actualRecord = actual as Record<string, unknown>;
     const expectedKeys = Object.keys(expectedRecord).sort();
     const actualKeys = Object.keys(actualRecord).sort();
-    if (expectedKeys.join(",") !== actualKeys.join(",")) {
+    const additiveStressKeys = /^response\.fields\[\d+\]$/.test(path)
+      ? actualKeys.filter((key) => !expectedKeys.includes(key) && (key === "component" || key === "tensorValues"))
+      : [];
+    const comparableActualKeys = actualKeys.filter((key) => !additiveStressKeys.includes(key));
+    if (expectedKeys.join(",") !== comparableActualKeys.join(",")) {
       mismatches.push(`${path}: keys [${actualKeys}] != [${expectedKeys}]`);
       return;
     }
@@ -217,6 +221,12 @@ describe("golden parity: browser pipeline vs deployed Core Cloud runner", () => 
     // result the same way (drops undefined-valued optional keys).
     const wireResult = JSON.parse(JSON.stringify(outcome.result)) as unknown;
     compareStructures(wireResult, fixture.response, "response", stats, mismatches);
+    const stressFields = outcome.result.fields.filter((field) => field.type === "stress");
+    expect(stressFields.every((field) => field.component === "von_mises")).toBe(true);
+    expect(stressFields.some((field) => field.component === "principal_max" || field.component === "principal_min" || field.component === "max_shear")).toBe(false);
+    const tensorFields = stressFields.filter((field) => field.location === "node");
+    expect(tensorFields.every((field) => field.tensorValues?.length === field.values.length * 6)).toBe(true);
+    expect(tensorFields.every((field) => field.tensorValues?.every(Number.isFinite))).toBe(true);
     // eslint-disable-next-line no-console
     console.log(
       `golden parity ${name}: ${stats.comparisons.toLocaleString()} numeric comparisons, ` +

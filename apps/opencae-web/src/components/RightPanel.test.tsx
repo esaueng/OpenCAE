@@ -145,6 +145,22 @@ test("renders per-field range and band controls from the shared color-scale cont
   expect(html).toContain("linear-gradient(90deg");
 });
 
+test("shows tensor-backed stress measures and hides them for legacy fields", () => {
+  const tensorField: ResultField = {
+    id: "stress", runId: "run", type: "stress", component: "von_mises", location: "node",
+    values: [100], tensorValues: [100, 0, 0, 0, 0, 0], min: 100, max: 100, units: "MPa"
+  };
+  const tensorHtml = renderPanel("results", { resultFields: [tensorField] });
+  expect(tensorHtml).toContain("Stress measure");
+  expect(tensorHtml).toContain("σ₁");
+  expect(tensorHtml).toContain("σ₃");
+  expect(tensorHtml).toContain("Max shear");
+
+  const legacyHtml = renderPanel("results", { resultFields: [{ ...tensorField, tensorValues: undefined }] });
+  expect(legacyHtml).toContain("Von Mises");
+  expect(legacyHtml).not.toContain("σ₁");
+});
+
 function uploadedStepProject(status: StepGeometryMetadata["status"], message?: string): Project {
   return {
     ...project,

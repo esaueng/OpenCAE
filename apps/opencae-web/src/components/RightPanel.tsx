@@ -8,7 +8,7 @@ import { inferGlobalCriticalPrintAxis } from "@opencae/study-core";
 import type { StepId } from "./StepBar";
 import { applicationPointForLoad, createViewerLoadMarkers, directionLabelForLoad, directionVectorForLabel, equivalentForceForLoad, LOAD_DIRECTION_LABELS, loadMarkerOrdinalLabel, payloadObjectForLoad, unitsForLoadType, type LoadApplicationPoint, type LoadDirectionLabel, type LoadType, type PayloadLoadMetadata, type PayloadMassMode } from "../loadPreview";
 import type { PayloadObjectSelection, ResultMode, ViewMode } from "../workspaceViewTypes";
-import type { ResolvedResultProbe } from "../resultSelection";
+import { availableStressComponents, type ResolvedResultProbe } from "../resultSelection";
 import type { SampleAnalysisType, SampleModelId } from "../lib/api";
 import type { WasmMeshPhaseProgress } from "../lib/wasmMeshing";
 import { stepGeometryMetadataForProject } from "../stepGeometryState";
@@ -144,6 +144,13 @@ const noopDraftPayloadPreviewChange = () => undefined;
 type SolverSettingsPatch = Partial<DynamicSolverSettings> & { fidelity?: SimulationFidelity };
 const MESH_PRESETS: MeshQuality[] = ["coarse", "medium", "fine", "ultra"];
 const SIMULATION_FIDELITIES: SimulationFidelity[] = ["standard", "detailed", "ultra"];
+
+function stressComponentLabel(component: StressComponent): string {
+  if (component === "principal_max") return "σ₁";
+  if (component === "principal_min") return "σ₃";
+  if (component === "max_shear") return "Max shear";
+  return "Von Mises";
+}
 
 export function RightPanel(props: RightPanelProps) {
   return (
@@ -1404,6 +1411,7 @@ function ResultsPanel(props: RightPanelProps) {
 function ResultsPanelContent({
   displayModel,
   resultMode,
+  stressComponent = "von_mises",
   showDeformed,
   stressExaggeration,
   resultSummary,
@@ -1425,6 +1433,7 @@ function ResultsPanelContent({
   onResultPlaybackFpsChange,
   onResultPlaybackReverseLoopChange,
   onResultModeChange,
+  onStressComponentChange,
   onResultColorScaleSettingChange,
   onRemoveResultProbe,
   onClearResultProbes,
@@ -1465,6 +1474,7 @@ function ResultsPanelContent({
   const peakMarkerLabel = peakDisplacement ? `Peak displacement at ${peakDisplacement.timeSeconds.toFixed(4)} s` : "";
   const resultProvenance = resultSummary.provenance;
   const legacyResultWarning = legacyResultWarningForProvenance(resultProvenance);
+  const stressComponents = availableStressComponents(resultFields);
 
   useEffect(() => {
     committedStressExaggerationRef.current = stressExaggeration;
@@ -1606,6 +1616,22 @@ function ResultsPanelContent({
         {resultFields.some((field) => field.type === "acceleration") && <button className={resultMode === "acceleration" ? "primary" : "secondary"} onClick={() => onResultModeChange("acceleration")}>Acceleration</button>}
         <button className={resultMode === "safety_factor" ? "primary" : "secondary"} onClick={() => onResultModeChange("safety_factor")}>Safety factor</button>
       </div>
+      {resultMode === "stress" && stressComponents.length > 0 && (
+        <div className="field">
+          <SectionTitle>Stress measure</SectionTitle>
+          <div className="segmented" role="group" aria-label="Stress measure">
+            {stressComponents.map((component) => (
+              <button
+                key={component}
+                className={stressComponent === component ? "active" : ""}
+                type="button"
+                aria-pressed={stressComponent === component}
+                onClick={() => onStressComponentChange?.(component)}
+              >{stressComponentLabel(component)}</button>
+            ))}
+          </div>
+        </div>
+      )}
       {resultColorScaleControl && (
         <section className="result-scale-controls" aria-label="Result color scale">
           <div className="result-probe-list-header">

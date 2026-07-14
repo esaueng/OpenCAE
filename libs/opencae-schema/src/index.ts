@@ -199,6 +199,8 @@ export const ResultFieldSchema = z.object({
   component: StressComponentSchema.optional(),
   location: z.enum(["node", "element", "face"]),
   values: z.array(z.number()),
+  /** Flat symmetric tensors in [xx, yy, zz, xy, yz, xz] order, one per value. */
+  tensorValues: z.array(z.number()).optional(),
   min: z.number(),
   max: z.number(),
   units: z.string(),

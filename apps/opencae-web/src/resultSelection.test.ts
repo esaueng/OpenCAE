@@ -4,6 +4,7 @@ import {
   barycentricPoint,
   barycentricScalar,
   appendResultProbe,
+  availableStressComponents,
   interpolateScalarFromSamples,
   resolveResultProbe,
   resultProbeTopologySignature,
@@ -53,6 +54,29 @@ describe("active result field selection", () => {
     const frame0 = field({ frameIndex: 0, timeSeconds: 0 });
     const frame1 = field({ id: "frame-1", frameIndex: 1, timeSeconds: 0.1 });
     expect(selectActiveResultField({ fields: [frame0, frame1], resultMode: "stress", frameIndex: 1, surfaceMesh }).scalarField).toBe(frame1);
+  });
+
+  test("lazily derives and memoizes principal and maximum-shear fields from nodal tensors", () => {
+    const tensorField = field({
+      component: "von_mises",
+      tensorValues: [
+        100, 0, 0, 0, 0, 0,
+        -20, 40, 0, 0, 0, 0,
+        0, 0, 0, 30, 0, 0
+      ]
+    });
+    expect(availableStressComponents([tensorField])).toEqual(["von_mises", "principal_max", "principal_min", "max_shear"]);
+    const first = selectActiveResultField({ fields: [tensorField], resultMode: "stress", stressComponent: "principal_min", surfaceMesh }).scalarField;
+    const second = selectActiveResultField({ fields: [tensorField], resultMode: "stress", stressComponent: "principal_min", surfaceMesh }).scalarField;
+    expect(first).toBe(second);
+    expect(first?.values).toEqual([0, -20, -30]);
+    const shear = selectActiveResultField({ fields: [tensorField], resultMode: "stress", stressComponent: "max_shear", surfaceMesh }).scalarField;
+    expect(shear?.values).toEqual([50, 30, 30]);
+  });
+
+  test("hides principal measures for legacy tensor-free fields", () => {
+    expect(availableStressComponents([field()])).toEqual(["von_mises"]);
+    expect(selectActiveResultField({ fields: [field()], resultMode: "stress", stressComponent: "principal_max" }).scalarField).toBeUndefined();
   });
 });
 

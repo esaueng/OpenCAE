@@ -48,6 +48,9 @@ export function staticCoreResultFromSolve(
     visualizationStress.values,
     stressScale
   );
+  const surfaceStressTensors = result.nodalStress
+    ? surfaceNodeTensors(surfaceMesh, result.nodalStress, stressScale)
+    : undefined;
   const displacementSurfaceField = createCoreResultField({
     id: "displacement-surface",
     type: "displacement",
@@ -61,8 +64,10 @@ export function staticCoreResultFromSolve(
   const stressSurfaceField = createCoreResultField({
     id: "stress-surface",
     type: "stress",
+    component: "von_mises",
     location: "node",
     values: surfaceVonMises,
+    tensorValues: surfaceStressTensors,
     units: "MPa",
     surfaceMeshRef: surfaceMesh.id,
     visualizationSource: visualizationStress.source,
@@ -74,6 +79,7 @@ export function staticCoreResultFromSolve(
     createCoreResultField({
       id: "stress-von-mises-element",
       type: "stress",
+      component: "von_mises",
       location: "element",
       values: scaleValues(result.vonMises, stressScale),
       units: "MPa",
@@ -192,6 +198,9 @@ export function dynamicCoreResultFromSolve(
       visualizationStress.values,
       stressScale
     );
+    const surfaceStressTensors = frame.nodalStress
+      ? surfaceNodeTensors(surfaceMesh, frame.nodalStress.values, stressScale)
+      : undefined;
     latestSurfaceVonMises = surfaceVonMises;
     latestSurfaceDisplacement = surfaceDisplacement;
     const displacementSurfaceField = createCoreResultField({
@@ -209,8 +218,10 @@ export function dynamicCoreResultFromSolve(
     const stressSurfaceField = createCoreResultField({
       id: `frame-${frame.frameIndex}-stress-surface`,
       type: "stress",
+      component: "von_mises",
       location: "node",
       values: surfaceVonMises,
+      tensorValues: surfaceStressTensors,
       units: "MPa",
       surfaceMeshRef: surfaceMesh.id,
       frameIndex: frame.frameIndex,
@@ -248,6 +259,7 @@ export function dynamicCoreResultFromSolve(
       createCoreResultField({
         id: `frame-${frame.frameIndex}-stress-von-mises-element`,
         type: "stress",
+        component: "von_mises",
         location: "element",
         values: scaleValues(frame.vonMises.values, stressScale),
         units: "MPa",
@@ -301,6 +313,7 @@ export function dynamicCoreResultFromSolve(
     latestStressSurfaceField ?? createCoreResultField({
       id: "stress-surface-empty",
       type: "stress",
+      component: "von_mises",
       location: "node",
       values: latestSurfaceVonMises,
       units: "MPa",
@@ -545,6 +558,21 @@ function surfaceNodeScalars(surfaceMesh: SolverSurfaceMesh, nodalValues: Float64
     }
     return value * scale;
   });
+}
+
+function surfaceNodeTensors(surfaceMesh: SolverSurfaceMesh, nodalValues: Float64Array, scale: number): number[] {
+  const values = new Array<number>(surfaceMesh.nodeMap.length * 6);
+  surfaceMesh.nodeMap.forEach((volumeNode, surfaceNode) => {
+    assertValidSurfaceVolumeNode(surfaceMesh, volumeNode, surfaceNode);
+    for (let component = 0; component < 6; component += 1) {
+      const value = nodalValues[volumeNode * 6 + component];
+      if (!Number.isFinite(value)) {
+        throw new Error(`Surface stress tensor cannot read volume node ${volumeNode}, component ${component}.`);
+      }
+      values[surfaceNode * 6 + component] = value * scale;
+    }
+  });
+  return values;
 }
 
 function vectorComponentsForVolumeNode(

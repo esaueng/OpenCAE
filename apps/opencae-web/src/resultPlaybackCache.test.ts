@@ -315,6 +315,30 @@ describe("result playback cache", () => {
     expect(Array.from(principal?.values.slice(principal.offset, principal.offset + principal.length) ?? [])).toEqual([-5]);
   });
 
+  test("packs one tensor-backed von Mises series for lazy principal playback", () => {
+    const fields = [0, 1].flatMap((frameIndex) => [
+      {
+        ...typedResultField(frameIndex, "stress", [10 + frameIndex]),
+        component: "von_mises" as const,
+        tensorValues: [100 + frameIndex * 100, 0, 0, 0, 0, 0]
+      },
+      typedResultField(frameIndex, "displacement", [0.1 + frameIndex])
+    ]);
+    const selected = playbackFieldsForResultMode(fields, "stress", "principal_max");
+    expect(selected.filter((field) => field.type === "stress")).toHaveLength(2);
+    expect(selected.some((field) => field.component === "principal_max")).toBe(false);
+
+    const packedInput = packResultFieldsForPlayback(selected)!;
+    expect(packedInput.fieldCount).toBe(2);
+    expect(packedInput.tensorCount).toBe(12);
+    const unpacked = unpackResultFieldsForPlayback(packedInput);
+    expect(unpacked.find((field) => field.type === "stress" && field.frameIndex === 1)?.tensorValues).toEqual([200, 0, 0, 0, 0, 0]);
+
+    const prepared = preparePlaybackFrames({ fields: selected, frameIndexes: [0, 1], playbackFps: 30, budgetBytes: 100_000 });
+    const halfway = prepared.frames.find((frame) => Math.abs(frame.framePosition - 0.5) < 0.001)!;
+    expect(hydratePreparedPlaybackFrame(halfway).fields.find((field) => field.type === "stress")?.tensorValues).toEqual([150, 0, 0, 0, 0, 0]);
+  });
+
   test("falls back to all playback fields when the selected result mode is unavailable", () => {
     const fields = [0, 1].flatMap((frameIndex) => [
       typedResultField(frameIndex, "stress", [10 + frameIndex]),

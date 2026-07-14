@@ -99,6 +99,7 @@ export function resultFieldForUnits(field: ResultField, unitSystem: UnitSystem):
   return {
     ...field,
     values: convertedValues,
+    tensorValues: field.tensorValues?.map((value) => converter(value).value),
     min: convertedMin.value,
     max: convertedMax.value,
     units: convertedMax.units,

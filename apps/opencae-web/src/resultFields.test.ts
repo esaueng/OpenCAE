@@ -240,7 +240,7 @@ describe("dynamic result frames", () => {
     ] satisfies ResultField[]);
 
     expect(normalized.filter((field) => field.component === "von_mises").map((field) => [field.min, field.max])).toEqual([[0, 100], [0, 100]]);
-    expect(normalized.filter((field) => field.component === "principal_min").map((field) => [field.min, field.max])).toEqual([[0, -5], [0, -5]]);
+    expect(normalized.filter((field) => field.component === "principal_min").map((field) => [field.min, field.max])).toEqual([[-50, -5], [-50, -5]]);
   });
 
   test("interpolated dynamic fields retain global normalized min and max", () => {
