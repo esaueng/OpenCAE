@@ -14,6 +14,7 @@ import {
   stepFaceIdForMeshTriangle,
   stepFaceRecordForId,
   stepHoleWallPickDisks,
+  stepSupportFaceIdForPickedFace,
   type StepFaceRegistry
 } from "./stepFaces";
 
@@ -79,6 +80,10 @@ describe("STEP face registry (box-with-bore fixture)", () => {
     expect(boreFace!.cylinder!.length).toBeCloseTo(z, 3);
     expect(Math.abs(boreFace!.cylinder!.axis[2])).toBeCloseTo(1, 6);
     expect(registry.displayFaces.find((face) => face.id === boreFace!.faceId)?.label).toContain("Cylindrical hole wall");
+    const boreDisplayFace = registry.displayFaces.find((face) => face.id === boreFace!.faceId)!;
+    expect(boreDisplayFace).toMatchObject({ surfaceType: "cylindrical", interiorSurface: true });
+    expect(boreDisplayFace.surfaceRadius).toBeCloseTo(boreRadius * registry.normalization.scale, 3);
+    expect(boreDisplayFace.surfaceLength).toBeCloseTo(z * registry.normalization.scale, 3);
     expect(boreFace!.centroid[0]).toBeCloseTo(x / 2, 0);
     expect(boreFace!.centroid[1]).toBeCloseTo(y / 2, 0);
 
@@ -141,6 +146,44 @@ describe("STEP face registry (box-with-bore fixture)", () => {
       disks[1]!.center[2] - disks[0]!.center[2]
     );
     expect(axialSeparation).toBeCloseTo(FIXTURE_DIMENSIONS_MM.z * registry.normalization.scale, 6);
+  });
+
+  it("redirects a matching blind-hole bottom support to its cylindrical wall", () => {
+    const boreArea = 2 * Math.PI * (FIXTURE_DIMENSIONS_MM.boreDiameter / 2) * FIXTURE_DIMENSIONS_MM.z;
+    const boreFace = registry.faces.find((face) => Math.abs(face.area - boreArea) / boreArea < 0.02)!;
+    const cylinder = boreFace.cylinder!;
+    const capFaceId = "step-face-blind-cap";
+    const halfLength = cylinder.length / 2;
+    const blindHoleRegistry: StepFaceRegistry = {
+      ...registry,
+      faces: [
+        ...registry.faces,
+        {
+          faceId: capFaceId,
+          meshIndex: boreFace.meshIndex,
+          triangleRange: [0, 0],
+          triangleCount: 1,
+          area: Math.PI * cylinder.radius ** 2,
+          centroid: [
+            boreFace.centroid[0] + cylinder.axis[0] * halfLength,
+            boreFace.centroid[1] + cylinder.axis[1] * halfLength,
+            boreFace.centroid[2] + cylinder.axis[2] * halfLength
+          ],
+          avgNormal: [...cylinder.axis],
+          surfaceType: "planar",
+          fingerprint: "blind-hole-cap"
+        }
+      ]
+    };
+
+    expect(stepSupportFaceIdForPickedFace(blindHoleRegistry, capFaceId)).toBe(boreFace.faceId);
+    expect(stepSupportFaceIdForPickedFace(blindHoleRegistry, boreFace.faceId)).toBe(boreFace.faceId);
+  });
+
+  it("keeps unrelated planar support faces unchanged", () => {
+    const largePlanarFace = registry.faces.find((face) => face.surfaceType === "planar" && face.area > 700)!;
+    expect(stepSupportFaceIdForPickedFace(registry, largePlanarFace.faceId)).toBe(largePlanarFace.faceId);
+    expect(stepSupportFaceIdForPickedFace(registry, "step-face-missing")).toBe("step-face-missing");
   });
 
   it("flattens to a transferable attribution tessellation with per-triangle faceIds", () => {

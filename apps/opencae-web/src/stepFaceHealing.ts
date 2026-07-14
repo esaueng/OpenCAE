@@ -9,7 +9,7 @@
 // B-rep face, and name anything ambiguous for manual re-selection instead of
 // silently guessing at physics.
 import type { DisplayFace, DisplayModel, Project } from "@opencae/schema";
-import { resolvePickedStepFace, type StepFaceRegistry } from "./stepFaces";
+import { resolvePickedStepFace, stepSupportFaceIdForPickedFace, type StepFaceRegistry } from "./stepFaces";
 
 export const LEGACY_UPLOAD_FACE_PREFIX = "face-upload-";
 export const PICKED_UPLOAD_FACE_PREFIX = "face-upload-picked-";
@@ -27,6 +27,12 @@ export type LegacyStepFaceHeal = {
   unresolved: Array<{ selectionName: string; fromFaceId: string }>;
   /** Placeholder selections left behind after their support/load was removed. */
   removed: Array<{ selectionName: string; fromFaceId: string }>;
+};
+
+export type StepHoleSupportHeal = {
+  project: Project;
+  displayModel: DisplayModel;
+  remapped: Array<{ selectionName: string; fromFaceId: string; toFaceId: string; toLabel: string }>;
 };
 
 /**
@@ -182,11 +188,58 @@ export function healStepFaceSelections(project: Project, displayModel: DisplayMo
 }
 
 /**
+ * Upgrade supports saved on a blind hole's circular bottom to the matching
+ * cylindrical wall and refresh STEP display faces with current surface
+ * metadata. Loads and unrelated planar supports are intentionally untouched.
+ */
+export function healStepHoleSupportSelections(
+  project: Project,
+  displayModel: DisplayModel,
+  registry: StepFaceRegistry
+): StepHoleSupportHeal {
+  const remapped: StepHoleSupportHeal["remapped"] = [];
+  const studies = project.studies.map((study) => {
+    const supportSelectionIds = new Set(study.constraints.map((constraint) => constraint.selectionRef));
+    return {
+      ...study,
+      namedSelections: study.namedSelections.map((selection) => {
+        if (!supportSelectionIds.has(selection.id) || selection.entityType !== "face") return selection;
+        const faceRef = selection.geometryRefs.find((ref) => ref.entityType === "face");
+        if (!faceRef) return selection;
+        const targetFaceId = stepSupportFaceIdForPickedFace(registry, faceRef.entityId);
+        if (targetFaceId === faceRef.entityId) return selection;
+        const targetFace = registry.displayFaces.find((face) => face.id === targetFaceId);
+        if (!targetFace) return selection;
+        remapped.push({
+          selectionName: selection.name,
+          fromFaceId: faceRef.entityId,
+          toFaceId: targetFace.id,
+          toLabel: targetFace.label
+        });
+        return {
+          ...selection,
+          geometryRefs: selection.geometryRefs.map((ref) =>
+            ref === faceRef ? { ...ref, entityId: targetFace.id, label: targetFace.label } : ref
+          ),
+          fingerprint: `${targetFace.id}-${targetFace.center.map((value) => value.toFixed(3)).join("-")}`
+        };
+      })
+    };
+  });
+
+  return {
+    project: remapped.length ? { ...project, studies } : project,
+    displayModel: { ...displayModel, faces: registry.displayFaces },
+    remapped
+  };
+}
+
+/**
  * Same placeholder resolution applied to a single study without touching
  * persisted state — used by the mesh dispatch path so meshing succeeds even
  * when it starts before the workspace heal effect has landed.
  */
-export function remapStepFaceSelectionsInStudy<S extends Pick<Project["studies"][number], "namedSelections">>(
+export function remapStepFaceSelectionsInStudy<S extends Pick<Project["studies"][number], "namedSelections" | "constraints">>(
   study: S,
   displayModel: DisplayModel | undefined,
   registry: StepFaceRegistry
@@ -194,18 +247,30 @@ export function remapStepFaceSelectionsInStudy<S extends Pick<Project["studies"]
   const placeholderFacesById = new Map(
     (displayModel?.faces ?? []).filter((face) => face.id.startsWith(LEGACY_UPLOAD_FACE_PREFIX)).map((face) => [face.id, face])
   );
+  const supportSelectionIds = new Set(study.constraints.map((constraint) => constraint.selectionRef));
   return {
     ...study,
     namedSelections: study.namedSelections.map((selection) => {
       if (selection.entityType !== "face") return selection;
       const placeholderRef = selection.geometryRefs.find((ref) => ref.entityType === "face" && ref.entityId.startsWith(LEGACY_UPLOAD_FACE_PREFIX));
-      if (!placeholderRef) return selection;
-      const match = resolvePlaceholderFace(placeholderRef.entityId, placeholderFacesById, registry);
-      if (!match) return selection;
-      return {
+      const match = placeholderRef ? resolvePlaceholderFace(placeholderRef.entityId, placeholderFacesById, registry) : null;
+      const healedSelection = match && placeholderRef ? {
         ...selection,
         geometryRefs: selection.geometryRefs.map((ref) =>
           ref === placeholderRef ? { ...ref, entityId: match.id, label: match.label } : ref
+        )
+      } : selection;
+      if (!supportSelectionIds.has(selection.id)) return healedSelection;
+      const faceRef = healedSelection.geometryRefs.find((ref) => ref.entityType === "face");
+      if (!faceRef) return healedSelection;
+      const targetFaceId = stepSupportFaceIdForPickedFace(registry, faceRef.entityId);
+      if (targetFaceId === faceRef.entityId) return healedSelection;
+      const targetFace = registry.displayFaces.find((face) => face.id === targetFaceId);
+      if (!targetFace) return healedSelection;
+      return {
+        ...healedSelection,
+        geometryRefs: healedSelection.geometryRefs.map((ref) =>
+          ref === faceRef ? { ...ref, entityId: targetFace.id, label: targetFace.label } : ref
         )
       };
     })

@@ -1235,7 +1235,7 @@ function BracketModel({
     if (modelKind === "uploaded") {
       // Real B-rep face picking for STEP imports (A-M3); ad-hoc point/normal
       // faces remain the fallback for other uploads or a cold registry.
-      const stepHit = stepFaceHitFromEvent(event, displayModel);
+      const stepHit = stepFaceHitFromEvent(event, displayModel, activeStep === "supports");
       const liveStepRegistry = hasLiveStepFaceRegistry(displayModel);
       // Once the STEP registry is live, never manufacture another
       // "face-upload-picked-*" placeholder. If triangle attribution misses,
@@ -1527,6 +1527,57 @@ export function supportMarkerAnchor(kind: SampleModelKind, marker: ViewerSupport
 
 export function supportGlyphAnchor(kind: SampleModelKind, marker: ViewerSupportMarker, face: DisplayFace, scale = 1) {
   return new THREE.Vector3(...supportMarkerAnchor(kind, marker, face)).add(new THREE.Vector3(...face.normal).normalize().multiplyScalar(0.04 * scale));
+}
+
+export type HoleSupportGlyphGeometry = {
+  center: [number, number, number];
+  axis: [number, number, number];
+  shaftRadius: number;
+  shaftLength: number;
+  collarRadius: number;
+  collarThickness: number;
+  negativeEnd: [number, number, number];
+  positiveEnd: [number, number, number];
+};
+
+/** Geometry for a bolt-like support marker that passes through a STEP hole. */
+export function holeSupportGlyphGeometry(face: DisplayFace, scale = 1): HoleSupportGlyphGeometry | null {
+  const holeRadius = face.surfaceRadius;
+  const holeLength = face.surfaceLength;
+  if (
+    face.surfaceType !== "cylindrical" ||
+    !face.interiorSurface ||
+    !face.surfaceAxis ||
+    typeof holeRadius !== "number" ||
+    typeof holeLength !== "number" ||
+    !Number.isFinite(holeRadius) ||
+    !Number.isFinite(holeLength) ||
+    !(holeRadius > 1e-9) ||
+    !(holeLength > 1e-9)
+  ) return null;
+
+  const axisVector = new THREE.Vector3(...face.surfaceAxis);
+  if (!(axisVector.lengthSq() > 1e-18)) return null;
+  axisVector.normalize();
+  const markerScale = Number.isFinite(scale) && scale > 1e-9 ? scale : 1;
+  const shaftRadius = holeRadius * 0.52;
+  const axialOverhang = Math.max(holeRadius * 1.15, 0.08 * markerScale);
+  const shaftLength = holeLength + axialOverhang * 2;
+  const collarRadius = holeRadius * 0.82;
+  const collarThickness = Math.max(holeRadius * 0.18, 0.018 * markerScale);
+  const center = new THREE.Vector3(...face.center);
+  const halfShaft = axisVector.clone().multiplyScalar(shaftLength / 2);
+
+  return {
+    center: [...face.center],
+    axis: axisVector.toArray() as [number, number, number],
+    shaftRadius,
+    shaftLength,
+    collarRadius,
+    collarThickness,
+    negativeEnd: center.clone().sub(halfShaft).toArray() as [number, number, number],
+    positiveEnd: center.clone().add(halfShaft).toArray() as [number, number, number]
+  };
 }
 
 export function beamPayloadSelectionForTarget(targetId: unknown): PayloadObjectSelection | null {
@@ -1861,7 +1912,11 @@ function warmStepFaceRegistry(contentBase64: string | undefined): Promise<void> 
     .catch(() => undefined);
 }
 
-function stepFaceHitFromEvent(event: ThreeEvent<PointerEvent> | ThreeEvent<MouseEvent>, displayModel: DisplayModel): ModelSelectionHit | null {
+function stepFaceHitFromEvent(
+  event: ThreeEvent<PointerEvent> | ThreeEvent<MouseEvent>,
+  displayModel: DisplayModel,
+  preferHoleWall: boolean
+): ModelSelectionHit | null {
   const api = stepFacesApi;
   const contentBase64 = displayModel.nativeCad?.contentBase64;
   if (!api || !contentBase64 || displayModel.nativeCad?.format !== "step") return null;
@@ -1880,6 +1935,7 @@ function stepFaceHitFromEvent(event: ThreeEvent<PointerEvent> | ThreeEvent<Mouse
     faceId = api.resolvePickedStepFace(registry, point, normal)?.faceId ?? null;
   }
   if (!faceId) return null;
+  if (preferHoleWall) faceId = api.stepSupportFaceIdForPickedFace(registry, faceId);
   const face = displayModel.faces.find((candidate) => candidate.id === faceId)
     ?? registry.displayFaces.find((candidate) => candidate.id === faceId);
   if (!face) return null;
@@ -5612,6 +5668,38 @@ function SupportGlyph({ kind, marker, face, active, labelPosition, scale = 1 }: 
           tone={active ? "active-load" : "load"}
           scale={scale}
         />
+      </group>
+    );
+  }
+
+  const holeGeometry = holeSupportGlyphGeometry(face, scale);
+  if (holeGeometry) {
+    const axis = new THREE.Vector3(...holeGeometry.axis);
+    const quaternion = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), axis);
+    const endOffset = (holeGeometry.shaftLength - holeGeometry.collarThickness) / 2;
+    const center = new THREE.Vector3(...holeGeometry.center);
+    const negativeCollar = center.clone().addScaledVector(axis, -endOffset).toArray() as [number, number, number];
+    const positiveCollar = center.clone().addScaledVector(axis, endOffset).toArray() as [number, number, number];
+    const position = labelPosition ?? center.clone()
+      .addScaledVector(axis, holeGeometry.shaftLength / 2 + 0.16 * scale)
+      .add(new THREE.Vector3(0, 0.12 * scale, 0))
+      .toArray() as [number, number, number];
+    const color = active ? "#4da3ff" : "#f59e0b";
+    const brightColor = active ? "#8cc8ff" : "#ffd166";
+    return (
+      <group renderOrder={24}>
+        <mesh position={holeGeometry.center} quaternion={quaternion}>
+          <cylinderGeometry args={[holeGeometry.shaftRadius, holeGeometry.shaftRadius, holeGeometry.shaftLength, 32]} />
+          <meshStandardMaterial color={color} emissive={color} emissiveIntensity={0.28} metalness={0.72} roughness={0.24} depthTest={false} depthWrite={false} transparent opacity={0.94} />
+        </mesh>
+        {[negativeCollar, positiveCollar].map((collarPosition, index) => (
+          <mesh key={`${marker.id}-hole-collar-${index}`} position={collarPosition} quaternion={quaternion}>
+            <cylinderGeometry args={[holeGeometry.collarRadius, holeGeometry.collarRadius, holeGeometry.collarThickness, 32]} />
+            <meshStandardMaterial color={brightColor} emissive={color} emissiveIntensity={0.35} metalness={0.62} roughness={0.3} depthTest={false} depthWrite={false} />
+          </mesh>
+        ))}
+        <BoundaryLabelLeader anchor={holeGeometry.positiveEnd} labelPosition={position} color={color} scale={scale} />
+        <SceneLabel label={supportLabel(marker)} position={position} tone={active ? "active-load" : "load"} scale={scale} />
       </group>
     );
   }

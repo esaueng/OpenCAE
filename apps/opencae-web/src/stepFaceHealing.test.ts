@@ -6,6 +6,7 @@ import {
   hasUnresolvedStepFaceSelections,
   healLegacyStepFaces,
   healStepFaceSelections,
+  healStepHoleSupportSelections,
   legacyStepFaceHealMessage,
   parsePickedFaceId,
   remapStepFaceSelectionsInStudy
@@ -171,6 +172,98 @@ describe("healLegacyStepFaces", () => {
     expect(heal.removed).toEqual([]);
     expect(legacyStepFaceHealMessage(heal)).toBeNull();
     expect(heal.displayModel.faces.map((face) => face.id)).toEqual(["step-face-0"]);
+  });
+});
+
+describe("blind-hole support healing", () => {
+  const cylinderFaceId = "step-face-cylinder";
+  const capFaceId = "step-face-cap";
+  const registry: StepFaceRegistry = {
+    faces: [
+      {
+        faceId: cylinderFaceId,
+        meshIndex: 0,
+        triangleRange: [0, 1],
+        triangleCount: 2,
+        area: 40 * Math.PI,
+        centroid: [0, 0, 5],
+        avgNormal: [0, 0, 0],
+        surfaceType: "cylindrical",
+        cylinder: { axis: [0, 0, 1], radius: 2, length: 10, interior: true },
+        fingerprint: "cylinder"
+      },
+      {
+        faceId: capFaceId,
+        meshIndex: 0,
+        triangleRange: [2, 2],
+        triangleCount: 1,
+        area: 4 * Math.PI,
+        centroid: [0, 0, 0],
+        avgNormal: [0, 0, 1],
+        surfaceType: "planar",
+        fingerprint: "cap"
+      }
+    ],
+    meshes: [],
+    bounds: { min: [-2, -2, 0], max: [2, 2, 10] },
+    normalization: { scale: 0.1, offset: [0, 0, -0.5] },
+    displayFaces: [
+      {
+        id: cylinderFaceId,
+        label: "Cylindrical hole wall F1",
+        color: "#8b949e",
+        center: [0, 0, 0],
+        normal: [0, 0, 0],
+        stressValue: 0,
+        surfaceType: "cylindrical",
+        surfaceAxis: [0, 0, 1],
+        surfaceRadius: 0.2,
+        surfaceLength: 1,
+        interiorSurface: true
+      },
+      {
+        id: capFaceId,
+        label: "+Z planar face F2",
+        color: "#8b949e",
+        center: [0, 0, -0.5],
+        normal: [0, 0, 1],
+        stressValue: 0,
+        surfaceType: "planar"
+      }
+    ]
+  };
+
+  test("upgrades only a constraint selection from the circular cap to the cylinder", () => {
+    const project = projectWithFaceSelections();
+    const study = project.studies[0]!;
+    study.namedSelections = study.namedSelections.map((selection) => {
+      if (selection.id === "selection-fs1" || selection.id === "selection-l1") {
+        return { ...selection, geometryRefs: [{ bodyId: "body-uploaded", entityType: "face" as const, entityId: capFaceId, label: "+Z planar face F2" }] };
+      }
+      return selection;
+    });
+    const displayModel = legacyDisplayModel({ faces: registry.displayFaces });
+
+    const heal = healStepHoleSupportSelections(project, displayModel, registry);
+    const fs1 = heal.project.studies[0]!.namedSelections.find((selection) => selection.id === "selection-fs1");
+    const load = heal.project.studies[0]!.namedSelections.find((selection) => selection.id === "selection-l1");
+
+    expect(heal.remapped).toEqual([expect.objectContaining({ selectionName: "FS 1", fromFaceId: capFaceId, toFaceId: cylinderFaceId })]);
+    expect(fs1?.geometryRefs[0]?.entityId).toBe(cylinderFaceId);
+    expect(load?.geometryRefs[0]?.entityId).toBe(capFaceId);
+    expect(heal.displayModel.faces[0]).toMatchObject({ id: cylinderFaceId, interiorSurface: true });
+  });
+
+  test("applies the same support redirect in the mesh-dispatch safety path", () => {
+    const project = projectWithFaceSelections();
+    project.studies[0]!.namedSelections = project.studies[0]!.namedSelections.map((selection) =>
+      selection.id === "selection-fs1"
+        ? { ...selection, geometryRefs: [{ bodyId: "body-uploaded", entityType: "face" as const, entityId: capFaceId, label: "+Z planar face F2" }] }
+        : selection
+    );
+
+    const remapped = remapStepFaceSelectionsInStudy(project.studies[0]!, legacyDisplayModel({ faces: registry.displayFaces }), registry);
+    expect(remapped.namedSelections.find((selection) => selection.id === "selection-fs1")?.geometryRefs[0]?.entityId).toBe(cylinderFaceId);
   });
 });
 

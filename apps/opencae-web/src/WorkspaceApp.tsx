@@ -41,7 +41,7 @@ import {
 import { displayModelForUnits, loadValueForUnits, resultFieldForUnits, resultSummaryForUnits, type UnitSystem } from "./unitDisplay";
 import { supportDisplayLabel } from "./supportLabels";
 import { nextSelectedPayloadObject, shouldClearPayloadSelectionOnViewerMiss } from "./payloadSelection";
-import { hasLegacyStepUploadFaces, hasUnresolvedStepFaceSelections, healStepFaceSelections, legacyStepFaceHealMessage } from "./stepFaceHealing";
+import { hasLegacyStepUploadFaces, hasUnresolvedStepFaceSelections, healStepFaceSelections, healStepHoleSupportSelections, legacyStepFaceHealMessage } from "./stepFaceHealing";
 import { stepGeometryMetadataForProject, stepGeometryNeedsRepair } from "./stepGeometryState";
 import { createLocalDynamicStructuralStudy, createLocalStaticStressStudy } from "./localProjectFactory";
 import { createPackedResultPlaybackCache, createResultFrameCache, hasDynamicPlaybackFrames, solverMeshSummaryFromResults, withDerivedSurfaceSafetyFactorFields, type SolverMeshSummary } from "./resultFields";
@@ -206,6 +206,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const fullAutosaveSnapshotRef = useRef<() => AutosavedWorkspace | null>(() => null);
   const flushAutosaveRef = useRef<() => void>(() => undefined);
   const stepFaceHealNotifiedRef = useRef(false);
+  const stepHoleSupportAuditRef = useRef<string | null>(null);
   const workspaceShortcutHandlerRef = useRef<(event: KeyboardEvent) => void>(() => undefined);
   const resultFrameIndexRef = useRef(0);
   const resultPlaybackFramePositionRef = useRef(0);
@@ -890,6 +891,61 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       });
     return () => {
       cancelled = true;
+    };
+  }, [displayModel, project]);
+
+  // Healthy STEP projects may still contain a fixed support saved on the
+  // circular bottom of a blind hole. Audit each distinct set of STEP support
+  // refs once, redirect matching caps to their cylindrical walls, and refresh
+  // older saved display faces with the surface metadata used by the rod glyph.
+  useEffect(() => {
+    if (
+      !project ||
+      !displayModel?.nativeCad?.contentBase64 ||
+      displayModel.nativeCad.format !== "step" ||
+      (displayModel.faces.length > 0 && displayModel.faces.every((face) => face.id.startsWith("face-upload-"))) ||
+      hasUnresolvedStepFaceSelections(project, displayModel)
+    ) return undefined;
+
+    const supportFaceIds = project.studies.flatMap((study) => {
+      const selectionById = new Map(study.namedSelections.map((selection) => [selection.id, selection]));
+      return study.constraints.flatMap((constraint) =>
+        selectionById.get(constraint.selectionRef)?.geometryRefs
+          .filter((ref) => ref.entityType === "face")
+          .map((ref) => ref.entityId) ?? []
+      );
+    }).sort();
+    const metadataMissing = displayModel.faces.some((face) => face.id.startsWith("step-face-") && !face.surfaceType);
+    if (!supportFaceIds.length && !metadataMissing) return undefined;
+
+    const auditKey = [
+      displayModel.id,
+      displayModel.nativeCad.filename,
+      displayModel.nativeCad.contentBase64.length,
+      metadataMissing ? "metadata-missing" : "metadata-current",
+      ...supportFaceIds
+    ].join(":");
+    if (stepHoleSupportAuditRef.current === auditKey) return undefined;
+    stepHoleSupportAuditRef.current = auditKey;
+
+    let cancelled = false;
+    void import("./stepFaces")
+      .then((stepFaces) => stepFaces.stepFaceRegistryFromBase64(displayModel.nativeCad!.contentBase64!))
+      .then((registry) => {
+        if (cancelled || !registry.displayFaces.length) return;
+        const heal = healStepHoleSupportSelections(project, displayModel, registry);
+        if (heal.remapped.length) {
+          setProject(heal.project);
+          pushMessage(`Updated ${heal.remapped.map((item) => `${item.selectionName} to ${item.toLabel}`).join(", ")}.`);
+        }
+        if (metadataMissing || heal.remapped.length) setDisplayModel(heal.displayModel);
+      })
+      .catch(() => {
+        if (stepHoleSupportAuditRef.current === auditKey) stepHoleSupportAuditRef.current = null;
+      });
+    return () => {
+      cancelled = true;
+      if (stepHoleSupportAuditRef.current === auditKey) stepHoleSupportAuditRef.current = null;
     };
   }, [displayModel, project]);
 
