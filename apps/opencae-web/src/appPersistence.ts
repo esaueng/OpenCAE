@@ -381,7 +381,12 @@ function parseResultViewCaptures(value: unknown): LocalResultBundle["reportCaptu
   };
   const stress = parseCapture(value.stress);
   const displacement = parseCapture(value.displacement);
-  return stress || displacement ? { ...(stress ? { stress } : {}), ...(displacement ? { displacement } : {}) } : undefined;
+  const boundary = isRecord(value.boundary) && typeof value.boundary.png === "string" && value.boundary.png.startsWith("data:image/png;base64,")
+    ? { png: value.boundary.png }
+    : undefined;
+  return stress || displacement || boundary
+    ? { ...(stress ? { stress } : {}), ...(displacement ? { displacement } : {}), ...(boundary ? { boundary } : {}) }
+    : undefined;
 }
 
 function parseSolverMeshSummary(value: unknown): LocalResultBundle["solverMeshSummary"] | undefined {
