@@ -1918,15 +1918,10 @@ img {
   height: calc(10px * var(--analysis-legend-scale, 1));
   margin: calc(5px * var(--analysis-legend-scale, 1)) 0 0;
   border: 1px solid rgba(42, 52, 65, 0.7);
-  background: linear-gradient(90deg, var(--color-ramp-0), var(--color-ramp-1), var(--color-ramp-2), var(--color-ramp-3), var(--color-ramp-4), var(--color-ramp-5));
 }
 
 .theme-light .analysis-legend .legend-scale {
   border-color: rgba(82, 103, 130, 0.24);
-}
-
-.analysis-legend.safety-scale .legend-scale {
-  background: linear-gradient(90deg, var(--color-ramp-5), var(--color-ramp-4), var(--color-ramp-3), #a3e635, #4ade80, var(--color-success));
 }
 
 .legend-values {
@@ -2559,6 +2554,44 @@ img {
 
 .result-probe-list small {
   font-family: var(--font-mono);
+}
+
+.result-scale-controls {
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+  border: var(--border-thin);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-subtle);
+}
+
+.result-scale-controls .segmented {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.result-scale-controls > small {
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  line-height: 1.4;
+}
+
+.result-scale-range-inputs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.result-scale-range-inputs .field {
+  min-width: 0;
+  margin: 0;
+}
+
+.result-scale-range-inputs .input-with-unit input {
+  min-width: 0;
+}
+
+.result-scale-range-inputs .panel-warning {
+  grid-column: 1 / -1;
 }
 
 .segmented {
@@ -3444,7 +3477,6 @@ button:disabled {
 .legend span {
   height: 10px;
   border-radius: var(--radius-sm);
-  background: linear-gradient(90deg, var(--color-ramp-0), var(--color-ramp-2), var(--color-ramp-3), var(--color-ramp-4), var(--color-ramp-5));
 }
 
 .concept-card-list,
