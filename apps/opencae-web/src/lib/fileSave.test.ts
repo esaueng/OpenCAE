@@ -10,7 +10,7 @@ describe("file saving", () => {
     const write = vi.fn(async () => undefined);
     const close = vi.fn(async () => undefined);
     const createWritable = vi.fn(async () => ({ write, close }));
-    const showSaveFilePicker = vi.fn(async () => ({ createWritable }));
+    const showSaveFilePicker = vi.fn(async () => ({ name: "report.pdf", getFile: vi.fn(), createWritable }));
     vi.stubGlobal("window", { showSaveFilePicker });
     vi.stubGlobal("navigator", { webdriver: false });
 
@@ -18,6 +18,7 @@ describe("file saving", () => {
     expect(showSaveFilePicker).toHaveBeenCalledOnce();
     expect(createWritable).not.toHaveBeenCalled();
     if (target === "cancelled") throw new Error("Unexpected cancellation");
+    expect(target.handle?.name).toBe("report.pdf");
     await target.save(new Blob(["report"]));
     expect(write).toHaveBeenCalledOnce();
     expect(close).toHaveBeenCalledOnce();

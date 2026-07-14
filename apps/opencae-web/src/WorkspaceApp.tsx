@@ -23,7 +23,7 @@ import {
 } from "./loadPreview";
 import { resetDisplayModelOrientation, type RotationAxis } from "./modelOrientation";
 import { buildLocalProjectFile, suggestedProjectFilename, type LocalResultBundle, type SolverSurfaceMesh } from "./projectFile";
-import { prepareBlobSaveToDisk, saveBlobToDisk } from "./lib/fileSave";
+import { prepareBlobSaveToDisk, type SaveFilePickerHandle } from "./lib/fileSave";
 import { BOUNDARY_CAPTURE_REVISION, captureResultViews, createCaptureQueue, type CaptureQueue, type ResultViewCaptures } from "./report/captureResultViews";
 import { buildReportData, suggestedReportFilename } from "./report/reportData";
 import { pngDataUrlToBlob, suggestedResultPngFilename } from "./report/resultPngExport";
@@ -60,6 +60,7 @@ import {
 import { preparePlaybackFramesInWorker } from "./workers/performanceClient";
 import type { WorkspaceInitialAction } from "./App";
 import type { PayloadObjectSelection, PrintLayerOrientation, ProjectionMode, ResultMode, ResultPlaybackFrameController, StressComponent, ThemeMode, ViewerLoadMarker, ViewerSupportMarker, ViewMode } from "./workspaceViewTypes";
+import { defaultRecentProjectService, isRecentProjectsSupported } from "./recentProjects";
 
 const lazyCadViewerImport = () => import("./components/CadViewer").then((module) => ({ default: module.CadViewer }));
 const CadViewer = lazy(lazyCadViewerImport);
@@ -1330,7 +1331,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   async function handleSaveProject() {
     if (!project || !displayModel) return;
     try {
-      const savedAt = await saveProjectToLocalDisk(project, displayModel, resultSummary ? {
+      const saved = await saveProjectToLocalDisk(project, displayModel, resultSummary ? {
         activeRunId,
         completedRunId,
         summary: resultSummary,
@@ -1339,8 +1340,16 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         ...(solverMeshSummary ? { solverMeshSummary } : {}),
         ...(reportCaptures?.runId === completedRunId ? { reportCaptures: reportCaptures.captures } : {})
       } : undefined);
-      if (!savedAt) return;
-      setProject((current) => current ? { ...current, updatedAt: savedAt } : current);
+      if (!saved) return;
+      setProject((current) => current ? { ...current, updatedAt: saved.savedAt } : current);
+      if (saved.handle && isRecentProjectsSupported()) {
+        try {
+          await defaultRecentProjectService().add(saved.handle, { filename: saved.handle.name, projectName: project.name });
+        } catch (error) {
+          pushMessage(`Project saved to local disk. ${errorMessage(error, "Recent Projects could not be updated.")}`);
+          return;
+        }
+      }
       pushMessage("Project saved to local disk.");
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") return;
@@ -2521,18 +2530,20 @@ function defaultValueForLoadType(type: LoadType) {
   return 500;
 }
 
-async function saveProjectToLocalDisk(project: Project, displayModel: DisplayModel, results?: LocalResultBundle): Promise<string | null> {
+async function saveProjectToLocalDisk(project: Project, displayModel: DisplayModel, results?: LocalResultBundle): Promise<{ savedAt: string; handle?: SaveFilePickerHandle } | null> {
   const savedAt = new Date().toISOString();
   const filename = suggestedProjectFilename(project.name);
   const savedResults = results?.fields.length ? results : undefined;
   const blob = new Blob([JSON.stringify(buildLocalProjectFile(project, displayModel, savedAt, savedResults), null, 2)], {
     type: "application/json"
   });
-  const outcome = await saveBlobToDisk(blob, filename, {
+  const target = await prepareBlobSaveToDisk(filename, {
     description: "OpenCAE project",
     accept: { "application/json": [".json", ".opencae"] }
   });
-  return outcome === "saved" ? savedAt : null;
+  if (target === "cancelled") return null;
+  await target.save(blob);
+  return { savedAt, ...(target.handle ? { handle: target.handle } : {}) };
 }
 
 function isAbortError(error: unknown): error is Error {

@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { StartScreen } from "./StartScreen";
+import { RecentProjectsSection, StartScreen } from "./StartScreen";
 import { advanceOfflineReadiness, resetOfflineReadinessForTests } from "../lib/offlineStatus";
 
 afterEach(() => {
@@ -70,6 +70,31 @@ describe("StartScreen", () => {
     expect(html).not.toContain("Bracket Demo");
     expect(html).not.toContain("Beam Demo");
     expect(html).not.toContain("Cantilever Demo");
+  });
+
+  test("renders recent-project open, remove, and clear actions", () => {
+    const html = renderToStaticMarkup(
+      <RecentProjectsSection
+        entries={[{
+          id: "recent-1",
+          filename: "wing.opencae.json",
+          projectName: "Wing Rev B",
+          lastOpenedAt: 1,
+          handle: { name: "wing.opencae.json", getFile: vi.fn() }
+        }]}
+        busyId={null}
+        onOpen={vi.fn()}
+        onRemove={vi.fn()}
+        onClear={vi.fn()}
+      />
+    );
+
+    expect(html).toContain('aria-label="Recent Projects"');
+    expect(html).toContain("Wing Rev B");
+    expect(html).toContain("wing.opencae.json");
+    expect(html).toContain("Open");
+    expect(html).toContain("Remove");
+    expect(html).toContain("Clear List");
   });
 });
 
