@@ -18,7 +18,8 @@ export type SolverSurfaceMesh = {
 
 export type CoreResultField = {
   id: string;
-  type: "stress" | "displacement" | "velocity" | "acceleration" | "safety_factor";
+  type: "stress" | "displacement" | "velocity" | "acceleration" | "safety_factor" | "mode_shape";
+  component?: "von_mises" | "principal_max" | "principal_min" | "max_shear";
   location: "node" | "element" | "integration_point";
   values: number[];
   min: number;
@@ -30,6 +31,10 @@ export type CoreResultField = {
   surfaceMeshRef?: string;
   frameIndex?: number;
   timeSeconds?: number;
+  modeIndex?: number;
+  frequencyHz?: number;
+  eigenvalue?: number;
+  scaledResidual?: number;
   visualizationSource?: string;
   engineeringSource?: string;
 };
@@ -50,7 +55,7 @@ export type CoreTransientSummary = {
   peakAcceleration?: number;
 };
 
-export type CoreSolveSummary = {
+export type CoreStructuralSolveSummary = {
   maxStress: number;
   maxStressUnits: "MPa";
   maxDisplacement: number;
@@ -62,9 +67,28 @@ export type CoreSolveSummary = {
   transient?: CoreTransientSummary;
 };
 
+export type CoreModalModeSummary = {
+  modeIndex: number;
+  frequencyHz: number;
+  eigenvalue: number;
+  scaledResidual: number;
+  fieldId: string;
+};
+
+export type CoreModalSolveSummary = {
+  analysisType: "modal_analysis";
+  requestedModeCount: number;
+  convergedModeCount: number;
+  modes: CoreModalModeSummary[];
+  warning?: string;
+  provenance: CoreSolveProvenance;
+};
+
+export type CoreSolveSummary = CoreStructuralSolveSummary | CoreModalSolveSummary;
+
 export type CoreSolveProvenance = {
   kind: "opencae_core_fea";
-  solver: "opencae-core-cloud" | "opencae-core-sparse-tet" | "opencae-core-mdof-tet";
+  solver: "opencae-core-cloud" | "opencae-core-sparse-tet" | "opencae-core-mdof-tet" | "opencae-core-modal-tet";
   resultSource: "computed";
   meshSource: "actual_volume_mesh" | "structured_block_core";
   units: "mm-N-s-MPa";
@@ -114,8 +138,7 @@ export type CoreSolveDiagnostics = {
   }>;
 };
 
-export type CoreSolveResult = {
-  summary: CoreSolveSummary;
+type CoreSolveResultBase = {
   fields: CoreResultField[];
   surfaceMesh?: SolverSurfaceMesh;
   diagnostics: unknown[];
@@ -125,6 +148,18 @@ export type CoreSolveResult = {
     [key: string]: unknown;
   };
 };
+
+export type CoreStructuralSolveResult = CoreSolveResultBase & {
+  analysisType?: "static_stress" | "dynamic_structural";
+  summary: CoreStructuralSolveSummary;
+};
+
+export type CoreModalSolveResult = CoreSolveResultBase & {
+  analysisType: "modal_analysis";
+  summary: CoreModalSolveSummary;
+};
+
+export type CoreSolveResult = CoreStructuralSolveResult | CoreModalSolveResult;
 
 export type CoreResultValidationIssue = {
   code: string;
@@ -217,6 +252,7 @@ export function createCoreResultField(
 }
 
 export function validateCoreResult(result: CoreSolveResult): CoreResultValidationReport {
+  if (result.analysisType === "modal_analysis") return validateModalCoreResult(result);
   const errors: CoreResultValidationIssue[] = [];
   validateSummary(result.summary, errors);
   validateProvenance(result.provenance, errors);
@@ -299,7 +335,7 @@ export function assertProductionSurfaceFieldInvariant(
   }
 }
 
-function validateRequiredProductionFields(result: CoreSolveResult, errors: CoreResultValidationIssue[]): void {
+function validateRequiredProductionFields(result: CoreStructuralSolveResult, errors: CoreResultValidationIssue[]): void {
   const transient = result.summary.transient !== undefined;
   const fields = new Map(result.fields.map((field) => [field.id, field]));
   if (!transient) {
@@ -325,7 +361,7 @@ function validateRequiredProductionFields(result: CoreSolveResult, errors: CoreR
   }
 }
 
-function validateTransientProductionSurfaceFields(result: CoreSolveResult, errors: CoreResultValidationIssue[]): void {
+function validateTransientProductionSurfaceFields(result: CoreStructuralSolveResult, errors: CoreResultValidationIssue[]): void {
   const surfaceMesh = result.surfaceMesh;
   const surfaceNodeFields = result.fields.filter(
     (field) =>
@@ -484,7 +520,7 @@ function validateProductionSurfaceField(
   }
 }
 
-function validateRequiredDiagnostics(result: CoreSolveResult, errors: CoreResultValidationIssue[]): void {
+function validateRequiredDiagnostics(result: CoreStructuralSolveResult, errors: CoreResultValidationIssue[]): void {
   const diagnostic = result.diagnostics.find(
     (candidate): candidate is { id: "core-solve-diagnostics"; fieldSurfaceAlignment?: unknown; stressFieldValueCount?: unknown; displacementFieldValueCount?: unknown; surfaceNodeCount?: unknown } =>
       !!candidate &&
@@ -519,7 +555,8 @@ function validateProvenance(provenance: CoreSolveProvenance, errors: CoreResultV
   if (
     provenance.solver !== "opencae-core-cloud" &&
     provenance.solver !== "opencae-core-sparse-tet" &&
-    provenance.solver !== "opencae-core-mdof-tet"
+    provenance.solver !== "opencae-core-mdof-tet" &&
+    provenance.solver !== "opencae-core-modal-tet"
   ) {
     errors.push(issue("invalid-provenance", "Production Core result solver must be an OpenCAE Core solver.", "provenance.solver"));
   }
@@ -554,7 +591,7 @@ function collectSurfaceFacets(model: OpenCAEModelJson | NormalizedOpenCAEModel):
   })) as SurfaceFacetJson[];
 }
 
-function validateSummary(summary: CoreSolveSummary, errors: CoreResultValidationIssue[]): void {
+function validateSummary(summary: CoreStructuralSolveSummary, errors: CoreResultValidationIssue[]): void {
   if (!Number.isFinite(summary.maxStress)) {
     errors.push(issue("non-finite-summary", "Summary maxStress must be finite.", "summary.maxStress"));
   }
@@ -581,6 +618,43 @@ function validateSummary(summary: CoreSolveSummary, errors: CoreResultValidation
   } else {
     validateProvenance(summary.provenance, errors);
   }
+}
+
+function validateModalCoreResult(result: CoreModalSolveResult): CoreResultValidationReport {
+  const errors: CoreResultValidationIssue[] = [];
+  validateProvenance(result.provenance, errors);
+  if (result.summary.analysisType !== "modal_analysis") {
+    errors.push(issue("invalid-modal-summary", "Modal result summary must identify modal_analysis.", "summary.analysisType"));
+  }
+  if (!Number.isInteger(result.summary.requestedModeCount) || result.summary.requestedModeCount < 1 || result.summary.requestedModeCount > 10) {
+    errors.push(issue("invalid-modal-mode-count", "Modal requestedModeCount must be an integer from 1 through 10.", "summary.requestedModeCount"));
+  }
+  if (result.summary.convergedModeCount !== result.summary.modes.length || result.fields.length !== result.summary.modes.length) {
+    errors.push(issue("modal-mode-count-mismatch", "Modal fields and mode summaries must match convergedModeCount.", "summary.convergedModeCount"));
+  }
+  if (result.summary.convergedModeCount < result.summary.requestedModeCount && !result.summary.warning) {
+    errors.push(issue("missing-partial-convergence-warning", "Partially converged modal results require an explicit warning.", "summary.warning"));
+  }
+  if (!result.surfaceMesh) {
+    errors.push(issue("missing-surface-mesh", "Modal results must include the solver surface mesh.", "surfaceMesh"));
+  } else {
+    validateSurfaceMesh(result.surfaceMesh, errors);
+  }
+  result.fields.forEach((field, index) => {
+    validateField(field, index, result.surfaceMesh, errors);
+    if (field.type !== "mode_shape" || field.location !== "node" || field.units !== "normalized") {
+      errors.push(issue("invalid-modal-field", "Modal fields must be normalized node-located mode_shape vectors.", `fields[${index}]`));
+    }
+    if (!field.vectors || field.vectors.length !== result.surfaceMesh?.nodes.length) {
+      errors.push(issue("missing-modal-vectors", "Modal mode_shape fields require one vector per solver surface node.", `fields[${index}].vectors`));
+    }
+    if (!Number.isInteger(field.modeIndex) || !(field.frequencyHz! > 0) || !(field.eigenvalue! > 0) || !(field.scaledResidual! >= 0)) {
+      errors.push(issue("invalid-modal-metadata", "Modal fields require finite positive frequency/eigenvalue and non-negative scaled residual metadata.", `fields[${index}]`));
+    }
+  });
+  const diagnostic = result.diagnostics.find((candidate) => candidate && typeof candidate === "object" && (candidate as { id?: unknown }).id === "modal-solve-diagnostics");
+  if (!diagnostic) errors.push(issue("missing-modal-diagnostics", "Modal results require modal-solve-diagnostics.", "diagnostics"));
+  return { ok: errors.length === 0, errors, warnings: [] };
 }
 
 function validateField(

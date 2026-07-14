@@ -12,7 +12,7 @@ OpenCAE Core requires an actual volume mesh for complex geometry. Use Cloud FEA 
 
 ## Model Schema
 
-Schema `0.2.0` adds Tet4/Tet10 element blocks, surface facets, surface sets, surface force and pressure loads, dynamic linear steps, coordinate metadata, mesh provenance, and optional mesh connection metadata. Legacy `0.1.0` Tet4/static/nodal-force models still validate and normalize internally to `0.2.0`.
+Schema `0.2.0` adds Tet4/Tet10 element blocks, surface facets, surface sets, surface force and pressure loads, dynamic linear steps, coordinate metadata, mesh provenance, and optional mesh connection metadata. Schema `0.3.0` adds modal steps and normalized vector mode-shape results. Legacy `0.1.0` and `0.2.0` models remain accepted.
 
 Tet10 is currently schema-valid only. `@opencae/solver-cpu` returns `unsupported-element-type` for Tet10 instead of downgrading it to Tet4.
 

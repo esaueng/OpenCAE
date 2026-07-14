@@ -15,6 +15,7 @@ export type {
   LoadJson,
   MeshConnectionJson,
   MeshProvenanceJson,
+  ModalStepJson,
   ModelNormalizationResult,
   NodalForceLoadJson,
   NodeSetJson,
@@ -45,7 +46,8 @@ export type {
 export {
   OPENCAE_LEGACY_MODEL_SCHEMA_VERSION,
   OPENCAE_MODEL_SCHEMA,
-  OPENCAE_MODEL_SCHEMA_VERSION
+  OPENCAE_MODEL_SCHEMA_VERSION,
+  OPENCAE_PREVIOUS_MODEL_SCHEMA_VERSION
 } from "./model-json";
 export type {
   BuildSurfaceFacetsInput,
@@ -106,10 +108,15 @@ export type {
   CoreResultField,
   CoreResultValidationIssue,
   CoreResultValidationReport,
+  CoreModalModeSummary,
+  CoreModalSolveResult,
+  CoreModalSolveSummary,
   CoreSolveDiagnostics,
   CoreSolveResult,
   CoreSolveProvenance,
   CoreSolveSummary,
+  CoreStructuralSolveResult,
+  CoreStructuralSolveSummary,
   CoreTransientSummary,
   ProductionSurfaceFieldInvariantInput,
   ProductionSurfaceFieldInvariantOptions,

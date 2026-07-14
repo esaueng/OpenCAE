@@ -8,6 +8,7 @@
 //   - target-scale models failing (memory/convergence) under default limits.
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { isModalResultSummary } from "@opencae/schema";
 import {
   attributeFacetsToStepFaces,
   meshStepToMshV2,
@@ -77,6 +78,7 @@ describe("100k-DOF target-scale solve smoke (production browser limits)", () => 
     expect(outcome.solverBackend).toBe("opencae-core-sparse-tet");
 
     const summary = outcome.result.summary;
+    if (isModalResultSummary(summary)) throw new Error("Expected structural scale-smoke results.");
     expect(Number.isFinite(summary.maxStress)).toBe(true);
     expect(summary.maxStress).toBeGreaterThan(0);
     expect(Number.isFinite(summary.maxDisplacement)).toBe(true);

@@ -2,13 +2,13 @@
 
 OpenCAE starts on a local workspace screen with three paths:
 
-- **Create new project** opens the simulation type picker for static stress or dynamic structural studies.
+- **Create new project** opens the simulation type picker for static stress, dynamic structural, or modal studies.
 - **Open local project** loads a saved `.opencae.json` file, including embedded uploaded geometry and saved results when present.
 - **Load sample project** opens the bracket, beam, or cantilever sample. Samples can be loaded as static or dynamic studies from the Model panel.
 
 ## Study Setup
 
-Work through the Model, Material, Supports, Loads, Mesh, Run, Results, and Report steps.
+Static and dynamic studies work through Model, Material, Supports, Loads, Mesh, Run, and Results. Modal studies skip Loads because natural frequencies do not use applied loads.
 
 - Model: inspect the part, upload STEP, STP, STL, or OBJ files, show dimensions, rotate the model, and switch between model and mesh views.
 - Material: assign starter materials and configure print parameters for 3D-printing materials. Print layer orientation changes the effective material properties used by OpenCAE Core.
@@ -17,9 +17,11 @@ Work through the Model, Material, Supports, Loads, Mesh, Run, Results, and Repor
 - Mesh: choose coarse, medium, fine, or ultra sampling. The generated mesh summary is stored as a study artifact.
 - Run: review readiness messages, start an OpenCAE Core run, watch progress/log events, or cancel an active local run.
 
+For modal analysis, choose 1–10 requested modes in Run (default 6). Every assigned material must have density, and the model must be constrained against rigid-body motion. If supports are insufficient, OpenCAE stops with a Supports-step error instead of showing a numerical solver failure.
+
 ## Results And Reports
 
-Static runs show stress, displacement, and safety-factor result fields. Dynamic runs add timed frames and may include velocity and acceleration fields. Use the Results step to switch fields, toggle deformed shape, adjust stress exaggeration, and play cached dynamic frames.
+Static runs show stress, displacement, and safety-factor result fields. Dynamic runs add timed frames and may include velocity and acceleration fields. Modal runs show a frequency table and normalized vector mode shapes. Selecting a mode creates 24 sinusoidal phase frames in the browser; the Phase control and visualization amplitude do not represent physical displacement.
 
 Each completed run writes result artifacts plus an HTML report and PDF report. Saved local project files include completed result bundles so a project can be reopened without rerunning the study.
 

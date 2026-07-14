@@ -20,6 +20,7 @@ import { effectiveMaterialProperties, starterMaterials } from "@opencae/material
 import {
   type DisplayModel,
   type DynamicSolverSettings,
+  type ModalSolverSettings,
   type ResultField,
   type ResultProvenance,
   type ResultSummary,
@@ -91,7 +92,7 @@ export type OpenCaeCoreEligibility =
   | { ok: false; reason: string };
 
 export type OpenCaeCoreSolveOutcome =
-  | { ok: true; result: LocalSolveResult; solverBackend: "opencae-core-sparse-tet" | "opencae-core-mdof-tet" }
+  | { ok: true; result: LocalSolveResult; solverBackend: "opencae-core-sparse-tet" | "opencae-core-mdof-tet" | "opencae-core-modal-tet" }
   | { ok: false; reason: string; code?: string };
 
 const STANDARD_GRAVITY = 9.80665;
@@ -302,8 +303,8 @@ export function isComplexGeometry(displayModel: DisplayModel | undefined, study?
 }
 
 export function openCaeCoreEligibility(study: Study, displayModel?: DisplayModel, capabilities?: CoreSolveCapabilities): OpenCaeCoreEligibility {
-  if (study.type !== "static_stress" && study.type !== "dynamic_structural") {
-    return { ok: false, reason: "OpenCAE Core browser solve currently supports static and dynamic structural studies only." };
+  if (study.type !== "static_stress" && study.type !== "dynamic_structural" && study.type !== "modal_analysis") {
+    return { ok: false, reason: "OpenCAE Core browser solve currently supports static, dynamic, and modal structural studies only." };
   }
   if (study.meshSettings.status !== "complete") return { ok: false, reason: "OpenCAE Core requires a completed mesh step." };
   if (!displayModel?.dimensions || !positiveDimensions(displayModel.dimensions)) {
@@ -323,6 +324,7 @@ export function openCaeCoreEligibility(study: Study, displayModel?: DisplayModel
   // model builder; anything else has no Core load mapping yet.
   const unsupportedLoad = study.loads.find((load) => load.type !== "force" && load.type !== "pressure" && load.type !== "gravity");
   if (unsupportedLoad) return { ok: false, reason: `OpenCAE Core supports force, pressure, and gravity loads; ${unsupportedLoad.type} loads are not supported yet.` };
+  if (study.type === "modal_analysis") return { ok: true };
   if (!study.loads.length) return { ok: false, reason: "OpenCAE Core requires at least one load." };
   const material = materialForStudy(study).material;
   const force = totalForceVector(study, displayModel, material.density);
@@ -350,7 +352,11 @@ export function trySolveOpenCaeCoreStudy({ study, runId, displayModel, hooks }: 
 
   try {
     const coreBuild = buildOpenCaeCoreModelForStudy(study, displayModel);
-    const analysisType = study.type === "dynamic_structural" ? "dynamic_structural" : "static_stress";
+    const analysisType = study.type === "dynamic_structural"
+      ? "dynamic_structural"
+      : study.type === "modal_analysis"
+        ? "modal_analysis"
+        : "static_stress";
     const solved = solveStudyModelWithCorePipeline({
       model: coreBuild.model,
       analysisType,
@@ -373,7 +379,11 @@ export function trySolveOpenCaeCoreStudy({ study, runId, displayModel, hooks }: 
     const result = solved.result as unknown as Omit<LocalSolveResult, "artifacts"> & { artifacts?: Record<string, unknown> };
     return {
       ok: true,
-      solverBackend: analysisType === "dynamic_structural" ? "opencae-core-mdof-tet" : "opencae-core-sparse-tet",
+      solverBackend: analysisType === "dynamic_structural"
+        ? "opencae-core-mdof-tet"
+        : analysisType === "modal_analysis"
+          ? "opencae-core-modal-tet"
+          : "opencae-core-sparse-tet",
       result: {
         ...result,
         artifacts: {
@@ -396,6 +406,9 @@ export function trySolveOpenCaeCoreStudy({ study, runId, displayModel, hooks }: 
  * estimates.
  */
 function pipelineSolverSettingsForStudy(study: Study): Record<string, unknown> {
+  if (study.type === "modal_analysis") {
+    return { ...study.solverSettings, modeCount: modalSettingsForStudy(study).modeCount };
+  }
   if (study.type !== "dynamic_structural") return { ...study.solverSettings };
   const settings = dynamicSettingsForStudy(study);
   return {
@@ -478,7 +491,7 @@ export function buildOpenCaeCoreModelForStudy(study: Study, displayModel: Displa
 
   model = {
     ...model,
-    schemaVersion: "0.2.0",
+    schemaVersion: "0.3.0",
     materials: [coreMaterial],
     // Stored mesh artifacts carry the material resolved at mesh time; the run
     // applies the study's current material, so every block must follow it or
@@ -551,7 +564,7 @@ export function buildOpenCaeCoreModelForStudy(study: Study, displayModel: Displa
   }
 
   if (!boundaryConditions.length) throw new Error("OpenCAE Core Cloud requires at least one mapped fixed support.");
-  if (!loads.length) throw new Error("OpenCAE Core Cloud requires at least one mapped load.");
+  if (study.type !== "modal_analysis" && !loads.length) throw new Error("OpenCAE Core Cloud requires at least one mapped load.");
 
   model = {
     ...model,
@@ -661,6 +674,9 @@ function facetsForDisplaySelection(
 }
 
 function coreCloudStepForStudy(study: Study, boundaryConditions: string[], loads: string[]): StepJson {
+  if (study.type === "modal_analysis") {
+    return { name: "modalStep", type: "modal", boundaryConditions, modeCount: modalSettingsForStudy(study).modeCount };
+  }
   if (study.type !== "dynamic_structural") {
     return { name: "loadStep", type: "staticLinear", boundaryConditions, loads };
   }
@@ -678,6 +694,14 @@ function coreCloudStepForStudy(study: Study, boundaryConditions: string[], loads
     dampingRatio: settings.dampingRatio,
     ...("rayleighAlpha" in settings && typeof settings.rayleighAlpha === "number" ? { rayleighAlpha: settings.rayleighAlpha } : {}),
     ...("rayleighBeta" in settings && typeof settings.rayleighBeta === "number" ? { rayleighBeta: settings.rayleighBeta } : {})
+  };
+}
+
+function modalSettingsForStudy(study: Extract<Study, { type: "modal_analysis" }>): ModalSolverSettings {
+  const count = Number(study.solverSettings.modeCount);
+  return {
+    ...study.solverSettings,
+    modeCount: Number.isInteger(count) ? Math.min(10, Math.max(1, count)) : 6
   };
 }
 

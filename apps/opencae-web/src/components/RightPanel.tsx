@@ -2,12 +2,13 @@ import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSP
 import { createPortal } from "react-dom";
 import { AlertTriangle, Anchor, ArrowDown, Atom, Check, ChevronDown, ChevronRight, CircleHelp, Eye, Factory, FileDown, Gauge, Grid3X3, Layers3, Maximize2, Pause, Play, Plus, RotateCcw, Ruler, ScanLine, ShieldCheck, Upload, Weight, Wrench, X } from "lucide-react";
 import { compatibleManufacturingProcessesFor, defaultManufacturingParametersFor, defaultManufacturingProcessIdFor, effectiveMaterialProperties, fdmPropertyFactorsFor, isManufacturingProcessCompatible, manufacturingParametersForAssignment, manufacturingProcessForId, massKgForPayloadMaterial, materialCategoryLabel, normalizeManufacturingParameters, payloadMaterialForId, payloadMaterials, starterMaterials, type ManufacturingParameters, type ManufacturingProcessId, type PayloadMaterialCategory } from "@opencae/materials";
-import { assessResultFailure, estimateAllowableLoadForSafetyFactor } from "@opencae/schema";
-import type { Constraint, DisplayFace, DisplayModel, DynamicSolverSettings, Load, MeshQuality, Project, ResultField, ResultSummary, RunTimingEstimate, SimulationFidelity, Study } from "@opencae/schema";
+import { assessResultFailure, estimateAllowableLoadForSafetyFactor, isModalResultSummary } from "@opencae/schema";
+import type { Constraint, DisplayFace, DisplayModel, DynamicSolverSettings, Load, MeshQuality, ModalResultSummary, ModalSolverSettings, Project, ResultField, ResultSummary, RunTimingEstimate, SimulationFidelity, StructuralResultSummary, Study } from "@opencae/schema";
 import { inferGlobalCriticalPrintAxis } from "@opencae/study-core";
 import type { StepId } from "./StepBar";
 import { applicationPointForLoad, createViewerLoadMarkers, directionLabelForLoad, directionVectorForLabel, equivalentForceForLoad, LOAD_DIRECTION_LABELS, loadMarkerOrdinalLabel, payloadObjectForLoad, unitsForLoadType, type LoadApplicationPoint, type LoadDirectionLabel, type LoadType, type PayloadLoadMetadata, type PayloadMassMode } from "../loadPreview";
-import type { PayloadObjectSelection, ResultMode, ViewMode } from "../workspaceViewTypes";
+import type { PayloadObjectSelection, ResultMode, StressComponent, ViewMode } from "../workspaceViewTypes";
+import type { ResolvedResultProbe } from "../resultSelection";
 import type { SampleAnalysisType, SampleModelId } from "../lib/api";
 import type { WasmMeshPhaseProgress } from "../lib/wasmMeshing";
 import { stepGeometryMetadataForProject } from "../stepGeometryState";
@@ -50,11 +51,15 @@ interface RightPanelProps {
   selectedFace: DisplayFace | null;
   viewMode: ViewMode;
   resultMode: ResultMode;
+  selectedModeIndex?: number;
+  stressComponent?: StressComponent;
   showDeformed: boolean;
   showDimensions: boolean;
   stressExaggeration: number;
   resultSummary: ResultSummary | null;
   resultFields?: ResultField[];
+  resultProbes?: ResolvedResultProbe[];
+  resultProbeLimitReached?: boolean;
   runProgress: number;
   runError?: string | null;
   runTiming?: RunTimingEstimate | null;
@@ -80,6 +85,10 @@ interface RightPanelProps {
   onSampleAnalysisTypeChange?: (analysisType: SampleAnalysisType) => void;
   onViewModeChange: (mode: ViewMode) => void;
   onResultModeChange: (mode: ResultMode) => void;
+  onSelectedModeIndexChange?: (modeIndex: number) => void;
+  onStressComponentChange?: (component: StressComponent) => void;
+  onRemoveResultProbe?: (probeId: string) => void;
+  onClearResultProbes?: () => void;
   onToggleDeformed: () => void;
   onToggleDimensions: () => void;
   onStressExaggerationChange: (value: number) => void;
@@ -123,7 +132,7 @@ interface RightPanelProps {
 
 const EMPTY_PARAMETERS: Record<string, unknown> = {};
 const noopDraftPayloadPreviewChange = () => undefined;
-type SolverSettingsPatch = Partial<DynamicSolverSettings> & { fidelity?: SimulationFidelity };
+type SolverSettingsPatch = Partial<DynamicSolverSettings & ModalSolverSettings> & { fidelity?: SimulationFidelity };
 const MESH_PRESETS: MeshQuality[] = ["coarse", "medium", "fine", "ultra"];
 const SIMULATION_FIDELITIES: SimulationFidelity[] = ["standard", "detailed", "ultra"];
 
@@ -1121,13 +1130,14 @@ function RunPanel({ study, displayModel, runProgress, runError, runTiming, onRun
   const isRunning = canCancelSimulation ?? (progressPercent > 0 && progressPercent < 100);
   const remainingLabel = formatSimulationEta(runTiming?.estimatedRemainingMs, isRunning);
   const elapsedLabel = formatSimulationElapsed(runTiming?.elapsedMs);
-  const checks = [
+  const checks: Array<readonly [string, boolean]> = [
     ["Material assigned", study.materialAssignments.length > 0],
     ["Support added", study.constraints.length > 0],
-    ["Load added", study.loads.length > 0],
+    ...(study.type === "modal_analysis" ? [] : [["Load added", study.loads.length > 0] as const]),
     ["Mesh generated", study.meshSettings.status === "complete"]
-  ] as const;
+  ];
   const dynamic = study.type === "dynamic_structural" ? study.solverSettings : null;
+  const modal = study.type === "modal_analysis" ? study.solverSettings : null;
   const fidelity = solverFidelityForStudy(study);
   const updateSolverChoice = (settings: SolverSettingsPatch) => {
     onUpdateSolverSettings?.(settings);
@@ -1146,7 +1156,7 @@ function RunPanel({ study, displayModel, runProgress, runError, runTiming, onRun
   const loadProfile = isDynamicLoadProfile(dynamic?.loadProfile) ? dynamic.loadProfile : "ramp";
   const loadProfileHelper = DYNAMIC_LOAD_PROFILE_OPTIONS.find((option) => option.value === loadProfile)?.helper ?? DEFAULT_DYNAMIC_LOAD_PROFILE_HELPER;
   return (
-    <Panel title="Run" helper="Run the simulation to estimate stress and displacement.">
+    <Panel title="Run" helper={modal ? "Solve for natural frequencies and normalized mode shapes." : "Run the simulation to estimate stress and displacement."}>
       <SectionTitle helpId="runReadiness">Readiness</SectionTitle>
       <div className="checklist">
         {checks.map(([label, done]) => <span key={label} className={done ? "check done" : "check"}><span>{done ? <Check size={18} /> : null}</span>{label}</span>)}
@@ -1174,6 +1184,13 @@ function RunPanel({ study, displayModel, runProgress, runError, runTiming, onRun
             disabled={isRunning}
             onClick={() => study.type !== "dynamic_structural" && onChangeStudyType?.("dynamic_structural")}
           >Dynamic</button>
+          <button
+            className={study.type === "modal_analysis" ? "active" : ""}
+            type="button"
+            aria-pressed={study.type === "modal_analysis"}
+            disabled={isRunning}
+            onClick={() => study.type !== "modal_analysis" && onChangeStudyType?.("modal_analysis")}
+          >Modal</button>
         </div>
       </div>
       <label className="field">
@@ -1203,6 +1220,21 @@ function RunPanel({ study, displayModel, runProgress, runError, runTiming, onRun
           </div>
           {frameEstimate && frameEstimate.count > 1000 && <p className="panel-copy">Large frame counts may slow result loading and playback.</p>}
           {frameEstimate?.hasFinalPartialStep && <p className="panel-copy">Final frame is clamped to the selected end time.</p>}
+        </>
+      )}
+      {modal && (
+        <>
+          <SectionTitle>Modal settings</SectionTitle>
+          <label className="field">
+            <span>Requested modes</span>
+            <select
+              value={modal.modeCount}
+              onChange={(event) => onUpdateSolverSettings?.({ modeCount: Number(event.currentTarget.value) })}
+            >
+              {Array.from({ length: 10 }, (_, index) => index + 1).map((modeCount) => <option key={modeCount} value={modeCount}>{modeCount}</option>)}
+            </select>
+          </label>
+          <p className="panel-copy">Mode shapes are normalized for visualization. Applied loads are not used in modal analysis.</p>
         </>
       )}
       <button
@@ -1337,8 +1369,8 @@ function solverBackendLabelForRunPanel(study: Study, displayModel: DisplayModel)
   return "Local (in-browser)";
 }
 
-function solverMethodForStudy(study: Study): "sparse_static" | "mdof_dynamic" {
-  return study.type === "dynamic_structural" ? "mdof_dynamic" : "sparse_static";
+function solverMethodForStudy(study: Study): "sparse_static" | "mdof_dynamic" | "block_shift_invert_modal" {
+  return study.type === "dynamic_structural" ? "mdof_dynamic" : study.type === "modal_analysis" ? "block_shift_invert_modal" : "sparse_static";
 }
 
 function solverRunnerLabelForStudy(study: Study, displayModel: DisplayModel): string {
@@ -1375,7 +1407,112 @@ function ResultsPanel(props: RightPanelProps) {
       </Panel>
     );
   }
+  if (isModalResultSummary(props.resultSummary)) {
+    return <ModalResultsPanelContent {...props} resultSummary={props.resultSummary} />;
+  }
   return <ResultsPanelContent {...props} resultSummary={props.resultSummary} />;
+}
+
+function ModalResultsPanelContent({
+  resultSummary,
+  resultFields = [],
+  selectedModeIndex = resultSummary.modes[0]?.modeIndex ?? 1,
+  showDeformed,
+  stressExaggeration,
+  resultFrameIndex = 0,
+  resultFramePosition = resultFrameIndex,
+  resultFrameOrdinalPosition,
+  resultPlaybackPlaying = false,
+  resultPlaybackFps = 12,
+  resultPlaybackReverseLoop = false,
+  resultPlaybackCacheLabel = "",
+  onSelectedModeIndexChange,
+  onResultFrameChange,
+  onResultPlaybackToggle,
+  onResultPlaybackFpsChange,
+  onResultPlaybackReverseLoopChange,
+  onToggleDeformed,
+  onStressExaggerationChange
+}: RightPanelProps & { resultSummary: ModalResultSummary }) {
+  const frames = dynamicPlaybackFrames(resultFields);
+  const frameIndexes = frames.map((frame) => frame.frameIndex);
+  const activeFramePosition = resultPlaybackPlaying ? resultFramePosition : resultFrameIndex;
+  const sliderPosition = resultPlaybackPlaying && typeof resultFrameOrdinalPosition === "number"
+    ? resultFrameOrdinalPosition
+    : playbackOrdinalForSolverFramePosition(frameIndexes, activeFramePosition);
+  const phaseDegrees = frames.length ? ((activeFramePosition / frames.length) * 360 + 360) % 360 : 0;
+  const activeMode = resultSummary.modes.find((mode) => mode.modeIndex === selectedModeIndex) ?? resultSummary.modes[0];
+  const resultProvenance = resultSummary.provenance;
+  return (
+    <Panel title="Results" helper="Inspect converged natural frequencies and normalized mode shapes.">
+      {resultSummary.warning && <p className="panel-warning" role="status"><AlertTriangle size={16} />{resultSummary.warning}</p>}
+      <div className="summary-box">
+        <Info label="Converged modes" value={`${resultSummary.convergedModeCount} / ${resultSummary.requestedModeCount}`} />
+        <Info label="Solver method" value="block_shift_invert_modal" />
+        <Info label="Result source" value={resultSourceLabelForPanel(resultSummary)} />
+        <Info label="Runner" value={solverRunnerLabelForResult(resultProvenance)} />
+      </div>
+      <SectionTitle>Modes</SectionTitle>
+      <div className="modal-mode-table" role="list" aria-label="Converged modes">
+        {resultSummary.modes.map((mode) => (
+          <button
+            key={mode.modeIndex}
+            type="button"
+            role="listitem"
+            className={mode.modeIndex === selectedModeIndex ? "primary" : "secondary"}
+            onClick={() => onSelectedModeIndexChange?.(mode.modeIndex)}
+          >
+            <strong>{`Mode ${mode.modeIndex}`}</strong>
+            <span>{`${Number(mode.frequencyHz.toPrecision(6))} Hz`}</span>
+            <small>{`Residual ${mode.scaledResidual.toExponential(2)}`}</small>
+          </button>
+        ))}
+      </div>
+      {activeMode && (
+        <div className="summary-box">
+          <Info label="Frequency" value={`${Number(activeMode.frequencyHz.toPrecision(6))} Hz`} />
+          <Info label="Eigenvalue" value={Number(activeMode.eigenvalue.toPrecision(6)).toString()} />
+          <Info label="Scaled residual" value={activeMode.scaledResidual.toExponential(3)} />
+          <Info label="Shape units" value="normalized" />
+        </div>
+      )}
+      {frames.length > 1 && (
+        <div className="dynamic-playback">
+          <SectionTitle>Phase</SectionTitle>
+          <label className="field range-field">
+            <span className="range-label"><span>Phase</span><strong>{`${phaseDegrees.toFixed(0)}°`}</strong></span>
+            <input
+              className="playback-time-range"
+              type="range"
+              aria-label="Mode phase"
+              min="0"
+              max={Math.max(frames.length - 1, 0)}
+              step={resultPlaybackPlaying ? "0.01" : "1"}
+              value={sliderPosition}
+              onChange={(event) => onResultFrameChange?.(frameIndexForRoundedPlaybackOrdinal(frameIndexes, Number(event.currentTarget.value)))}
+            />
+          </label>
+          <label className="field range-field">
+            <span className="range-label"><span>Animation speed</span><strong>{Math.round(resultPlaybackFps)} fps</strong></span>
+            <input type="range" min="1" max="30" step="1" value={resultPlaybackFps} onChange={(event) => onResultPlaybackFpsChange?.(Number(event.currentTarget.value))} />
+          </label>
+          <label className="toggle playback-loop-toggle">
+            <input type="checkbox" checked={resultPlaybackReverseLoop} onChange={(event) => onResultPlaybackReverseLoopChange?.(event.currentTarget.checked)} />
+            <span>Reverse loop</span>
+          </label>
+          <button className="secondary wide" type="button" onClick={onResultPlaybackToggle}>{resultPlaybackPlaying ? <Pause size={16} /> : <Play size={16} />}{resultPlaybackPlaying ? "Pause" : "Play"}</button>
+          {resultPlaybackCacheLabel && <small className="playback-cache-status">{resultPlaybackCacheLabel}</small>}
+        </div>
+      )}
+      <label className="toggle"><input type="checkbox" checked={showDeformed} onChange={onToggleDeformed} /> Animate mode shape</label>
+      <label className="field range-field">
+        <span className="range-label"><span>Visualization amplitude</span><strong>{stressExaggeration.toFixed(1)}x</strong></span>
+        <input type="range" min="0.5" max="4" step="0.1" value={stressExaggeration} onChange={(event) => onStressExaggerationChange(Number(event.currentTarget.value))} />
+      </label>
+      <p className="panel-copy">Amplitude and phase are visualization-only. Normalized mode shapes are not physical displacements.</p>
+      <div className="legend"><small>Node</small><span /><small>Antinode</small></div>
+    </Panel>
+  );
 }
 
 function ResultsPanelContent({
@@ -1385,6 +1522,8 @@ function ResultsPanelContent({
   stressExaggeration,
   resultSummary,
   resultFields = [],
+  resultProbes = [],
+  resultProbeLimitReached = false,
   study,
   resultFrameIndex = 0,
   resultFramePosition = resultFrameIndex,
@@ -1398,13 +1537,15 @@ function ResultsPanelContent({
   onResultPlaybackFpsChange,
   onResultPlaybackReverseLoopChange,
   onResultModeChange,
+  onRemoveResultProbe,
+  onClearResultProbes,
   onToggleDeformed,
   onStressExaggerationChange,
   onGenerateReport,
   reportBusy = false,
   reportError,
   reportDisabled = false
-}: RightPanelProps & { resultSummary: ResultSummary }) {
+}: RightPanelProps & { resultSummary: StructuralResultSummary }) {
   const [targetSafetyFactor, setTargetSafetyFactor] = useState(1.5);
   const [draftStressExaggeration, setDraftStressExaggeration] = useState(stressExaggeration);
   const stressExaggerationCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1546,6 +1687,25 @@ function ResultsPanelContent({
         {resultFields.some((field) => field.type === "acceleration") && <button className={resultMode === "acceleration" ? "primary" : "secondary"} onClick={() => onResultModeChange("acceleration")}>Acceleration</button>}
         <button className={resultMode === "safety_factor" ? "primary" : "secondary"} onClick={() => onResultModeChange("safety_factor")}>Safety factor</button>
       </div>
+      {(resultProbes.length > 0 || resultProbeLimitReached) && (
+        <section className="result-probe-list" aria-label="Pinned result probes">
+          <div className="result-probe-list-header">
+            <SectionTitle>Pinned probes</SectionTitle>
+            {resultProbes.length > 0 && onClearResultProbes && <button className="text-button" type="button" onClick={onClearResultProbes}>Clear All</button>}
+          </div>
+          {resultProbeLimitReached && <p className="panel-warning" role="status">Probe limit reached. Remove a pin to place another.</p>}
+          {resultProbes.length > 0 && (
+            <ol>
+              {resultProbes.map((probe, index) => (
+                <li key={probe.id}>
+                  <span><strong>{`P${index + 1}`}</strong><small>{formatProbeReading(probe)}</small></span>
+                  {onRemoveResultProbe && <button className="icon-button" type="button" aria-label={`Remove probe ${index + 1}`} onClick={() => onRemoveResultProbe(probe.id)}><X size={14} /></button>}
+                </li>
+              ))}
+            </ol>
+          )}
+        </section>
+      )}
       {resultMode === "stress" && (
         <label className="field range-field">
           <span className="range-label"><HelpLabel helpId="stressExaggeration">Deformation scale</HelpLabel><strong>{draftStressExaggeration.toFixed(1)}x</strong></span>
@@ -1614,12 +1774,17 @@ function ResultsPanelContent({
   );
 }
 
+function formatProbeReading(probe: ResolvedResultProbe): string {
+  const value = Number.isFinite(probe.value) ? Number(probe.value.toPrecision(6)) : probe.value;
+  return `${value}${probe.units ? ` ${probe.units}` : ""}`;
+}
+
 function resultSourceLabelForPanel(resultSummary: ResultSummary): string {
   const label = formatResultProvenanceLabel(resultSummary.provenance);
   return label === "OpenCAE Core Local (in-browser)" ? "Local (in-browser)" : label;
 }
 
-function resultContractHasMissingUnits(summary: ResultSummary, fields: ResultField[]): boolean {
+function resultContractHasMissingUnits(summary: StructuralResultSummary, fields: ResultField[]): boolean {
   return !hasResultUnit(summary.maxStressUnits) ||
     !hasResultUnit(summary.maxDisplacementUnits) ||
     !hasResultUnit(summary.reactionForceUnits) ||
@@ -1677,9 +1842,10 @@ const WORKFLOW_STEPS: Array<{ id: StepId; label: string }> = [
 ];
 
 function WorkflowNav({ activeStep, study, onStepSelect }: { activeStep: StepId; study: Study; onStepSelect: (step: StepId) => void }) {
-  const index = WORKFLOW_STEPS.findIndex((step) => step.id === activeStep);
-  const previousStep = index > 0 ? WORKFLOW_STEPS[index - 1] : undefined;
-  const nextStep = index >= 0 && index < WORKFLOW_STEPS.length - 1 ? WORKFLOW_STEPS[index + 1] : undefined;
+  const workflowSteps = study.type === "modal_analysis" ? WORKFLOW_STEPS.filter((step) => step.id !== "loads") : WORKFLOW_STEPS;
+  const index = workflowSteps.findIndex((step) => step.id === activeStep);
+  const previousStep = index > 0 ? workflowSteps[index - 1] : undefined;
+  const nextStep = index >= 0 && index < workflowSteps.length - 1 ? workflowSteps[index + 1] : undefined;
   const canGoNext = Boolean(nextStep && canNavigateToStep(nextStep.id, { meshStatus: study.meshSettings.status }));
   const backLabel = previousStep ? `Back: ${previousStep.label}` : "Back";
   const nextLabel = nextStep ? `Next: ${nextStep.label}` : "Next";
@@ -1900,7 +2066,7 @@ function interpolatedFrameTimeSeconds(frames: Array<{ frameIndex: number; timeSe
   return lower.timeSeconds + (upper.timeSeconds - lower.timeSeconds) * Math.max(0, Math.min(1, blend));
 }
 
-function peakDisplacementFrame(fields: ResultField[], summary: ResultSummary): { value: number; units: string; timeSeconds: number } | null {
+function peakDisplacementFrame(fields: ResultField[], summary: StructuralResultSummary): { value: number; units: string; timeSeconds: number } | null {
   const displacementFields = fields.filter((field) => field.type === "displacement");
   if (!displacementFields.length) {
     if (!summary.transient || !Number.isFinite(summary.maxDisplacement)) return null;

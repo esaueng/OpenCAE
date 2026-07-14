@@ -1,5 +1,5 @@
-import { classifyResultProvenance } from "@opencae/schema";
-import type { DisplayModel, Project, ResultField, ResultProvenance, ResultSummary, Study } from "@opencae/schema";
+import { classifyResultProvenance, isModalResultSummary } from "@opencae/schema";
+import type { DisplayModel, ModalResultSummary, Project, ResultField, ResultProvenance, ResultSummary, StructuralResultSummary, Study } from "@opencae/schema";
 
 export type UnitSystem = Project["unitSystem"];
 
@@ -58,7 +58,11 @@ export function loadValueForUnits(value: number, units: string, unitSystem: Unit
   return { value, units };
 }
 
+export function resultSummaryForUnits(summary: StructuralResultSummary, unitSystem: UnitSystem): StructuralResultSummary;
+export function resultSummaryForUnits(summary: ModalResultSummary, unitSystem: UnitSystem): ModalResultSummary;
+export function resultSummaryForUnits(summary: ResultSummary, unitSystem: UnitSystem): ResultSummary;
 export function resultSummaryForUnits(summary: ResultSummary, unitSystem: UnitSystem): ResultSummary {
+  if (isModalResultSummary(summary)) return summary;
   const stress = stressForUnits(summary.maxStress, summary.maxStressUnits, unitSystem);
   const displacement = lengthForUnits(summary.maxDisplacement, summary.maxDisplacementUnits, unitSystem);
   const reaction = forceForUnits(summary.reactionForce, summary.reactionForceUnits, unitSystem);
@@ -141,6 +145,7 @@ export function formatResultMetric(value: number, units: string | undefined): st
 export function solverMethodForResult(resultSummary: ResultSummary, study: Study): string {
   const provenanceMethod = (resultSummary.provenance as Record<string, unknown> | undefined)?.coreSolver;
   if (typeof provenanceMethod === "string" && provenanceMethod) return provenanceMethod;
+  if (isModalResultSummary(resultSummary) || study.type === "modal_analysis") return "block_shift_invert_modal";
   if (resultSummary.transient || study.type === "dynamic_structural") return "mdof_dynamic";
   return "sparse_static";
 }

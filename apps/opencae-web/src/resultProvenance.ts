@@ -1,3 +1,4 @@
+import { isModalResultSummary } from "@opencae/schema";
 import type { DisplayModel, ResultField, ResultProvenance, ResultSummary, Study } from "@opencae/schema";
 import { isComplexGeometry } from "./workers/opencaeCoreSolve";
 
@@ -28,6 +29,7 @@ export function hasNonzeroAppliedLoads(study: Study): boolean {
 }
 
 export function hasInvalidReactionForce(summary: ResultSummary | undefined, study?: Study): boolean {
+  if (!summary || isModalResultSummary(summary)) return false;
   const reaction = Number(summary?.reactionForce);
   return Boolean(study && hasNonzeroAppliedLoads(study) && (!Number.isFinite(reaction) || reaction <= 0));
 }
@@ -37,6 +39,7 @@ export function hasUnavailableReactionDiagnostic(summary: ResultSummary | undefi
 }
 
 export function canShowReverseLoadCapacity(summary: ResultSummary, displayModel: DisplayModel, fields: ResultField[], study: Study): boolean {
+  if (isModalResultSummary(summary)) return false;
   if (shouldBlockPreviewResultsForDisplayModel(displayModel, summary, fields, study)) return false;
   if (hasInvalidReactionForce(summary, study)) return false;
   if (hasUnavailableReactionDiagnostic(summary)) return false;

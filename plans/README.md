@@ -147,8 +147,10 @@ Dependency notes:
 | 016 WASM meshing and offline asset caching | TODO | Gmsh WASM smoke/licensing gate first; blocks full cloud infrastructure retirement. |
 | 017 Sunset Core repo (monorepo consolidation) | DONE | Executed 2026-07-09 (Run 5): Core packages imported, sibling checkout/pin bootstrap removed, Core tests wired into CI. |
 | 018 Mesh-failure repair probe + honest geometry errors | DONE | Executed 2026-07-10 (`fa2ae84`, with the Top-face heal cleanup in `f1aba34`). Re-test surfaced the true root error (Delaunay PLC segment/facet intersection) and two follow-up defects → plan 019. |
-| 019 Frontal fallback before repair bail + model-keyed probe guard | TODO | Delaunay-throw + ≥128-face heuristic skips the Frontal fallback entirely (wasmMesher.ts:477); saving mid-mesh silently suppresses the 018 repair probe (project object-identity guard). |
-| 020 One-click PDF simulation report | TODO | Generate-report button on the results panel → branded PDF (cover summary, setup sections, contour figures, diagnostics). Requires the new CadViewer capture seam; jsPDF must stay behind a dynamic import (175 KB budget gate). |
+| 019 Frontal fallback before repair bail + model-keyed probe guard | DONE | Executed: thrown Delaunay quality-repair candidates continue to Frontal; project actions use generation/client identity rather than fragile object identity. |
+| 020 One-click PDF simulation report | DONE | Executed: Results-panel PDF generation, persisted white-background captures, report data/layout, and unit/provenance honesty checks are shipped. |
+| 021 OpenCAE Quick-Wins Rollout | IN PROGRESS | Five staged releases: result probes, unified palettes, principal stresses, projection/PNG export, and recent project handles. |
+| 022 OpenCAE Medium-Feature Roadmap | IN PROGRESS | Flagship-first sequence. Increment 1 modal analysis released; open section and project-scoped custom materials are next. |
 
 Run 2 was non-interactive: plans 006–010 are the top findings by leverage (impact ÷ effort, confidence-weighted), selected by default per the advisor skill's non-interactive rule rather than by maintainer choice. Re-cut as desired.
 

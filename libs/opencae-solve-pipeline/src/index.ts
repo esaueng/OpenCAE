@@ -21,7 +21,7 @@ import {
   type CoreSolveResult,
   type OpenCAEModelJson
 } from "@opencae/core";
-import { solveCoreDynamic, solveCoreStatic, type SolverHooks } from "@opencae/solver-cpu";
+import { solveCoreDynamic, solveCoreModal, solveCoreStatic, type SolverHooks } from "@opencae/solver-cpu";
 
 export type { SolveProgressEvent, SolverHooks } from "@opencae/solver-cpu";
 
@@ -34,7 +34,7 @@ export const SOLVER_CPU_VERSION = "0.1.5";
  */
 export const BROWSER_RUNNER_VERSION = "browser-0.1.0";
 
-export type CorePipelineAnalysisType = "static_stress" | "dynamic_structural";
+export type CorePipelineAnalysisType = "static_stress" | "dynamic_structural" | "modal_analysis";
 
 export type CorePipelineSolverSettings = Record<string, unknown> & {
   stepIndex?: number;
@@ -47,6 +47,7 @@ export type CorePipelineSolverSettings = Record<string, unknown> & {
   timeStep?: number;
   outputInterval?: number;
   allowPreview?: boolean;
+  modeCount?: number;
 };
 
 /**
@@ -231,10 +232,11 @@ export function solveStudyModelWithCorePipeline(input: SolveStudyModelWithCorePi
     }
   }
 
-  const result =
-    input.analysisType === "static_stress"
-      ? solveCoreStatic(model, { ...solverSettings, method: "sparse", solverMode: "sparse", hooks: input.hooks })
-      : solveCoreDynamic(model, { ...solverSettings, hooks: input.hooks });
+  const result = input.analysisType === "static_stress"
+    ? solveCoreStatic(model, { ...solverSettings, method: "sparse", solverMode: "sparse", hooks: input.hooks })
+    : input.analysisType === "dynamic_structural"
+      ? solveCoreDynamic(model, { ...solverSettings, hooks: input.hooks })
+      : solveCoreModal(model, { ...solverSettings, hooks: input.hooks });
 
   if (!result.ok) {
     appendPreparedPhase(prepared, phaseDiagnostic("solve", "failed", result.error.message, {
@@ -242,7 +244,7 @@ export function solveStudyModelWithCorePipeline(input: SolveStudyModelWithCorePi
     }));
     return {
       ok: false,
-      status: result.error.code === "actual-volume-mesh-required" ? 422 : 500,
+      status: result.error.code === "actual-volume-mesh-required" || result.error.code === "insufficient-modal-constraints" ? 422 : 500,
       error: result.error,
       diagnostics: [...prepared.diagnostics, ...(result.diagnostics ? [result.diagnostics] : [])],
       artifacts: prepared.artifacts
@@ -356,6 +358,13 @@ export function boundedSolverSettings(
     settings.startTime = startTime;
     settings.endTime = Math.min(settings.endTime, maxFrameEndTime);
   }
+  if (analysisType === "modal_analysis") {
+    const modalStep = selectedStep?.type === "modal" ? selectedStep : undefined;
+    settings.modeCount = Math.min(
+      Math.max(positiveInteger(input?.modeCount) ?? positiveInteger(modalStep?.modeCount) ?? 6, 1),
+      10
+    );
+  }
   return settings;
 }
 
@@ -392,7 +401,9 @@ function resourceLimitsDiagnostic(
           timeStep: settings.timeStep,
           outputInterval: settings.outputInterval
         }
-      : {})
+      : analysisType === "modal_analysis"
+        ? { modeCount: settings.modeCount }
+        : {})
   };
 }
 
@@ -463,18 +474,11 @@ function stampBrowserProvenance(
     solverCpuVersion: SOLVER_CPU_VERSION,
     runnerVersion
   };
-  return {
-    ...result,
-    summary: {
-      ...result.summary,
-      provenance
-    },
-    provenance,
-    artifacts: {
-      ...(result.artifacts ?? {}),
-      ...artifacts
-    },
-    diagnostics: [...diagnostics, ...result.diagnostics.map((diagnostic) => {
+  const stampedArtifacts = {
+    ...(result.artifacts ?? {}),
+    ...artifacts
+  };
+  const stampedDiagnostics = [...diagnostics, ...result.diagnostics.map((diagnostic) => {
       if (!diagnostic || typeof diagnostic !== "object" || !("id" in diagnostic)) return diagnostic;
       if ((diagnostic as { id?: unknown }).id !== "core-solve-diagnostics") return diagnostic;
       return {
@@ -483,7 +487,29 @@ function stampBrowserProvenance(
         solverCpuVersion: SOLVER_CPU_VERSION,
         runnerVersion
       };
-    })]
+    })];
+  if (result.analysisType === "modal_analysis") {
+    return {
+      ...result,
+      analysisType: "modal_analysis",
+      summary: {
+        ...result.summary,
+        provenance
+      },
+      provenance,
+      artifacts: stampedArtifacts,
+      diagnostics: stampedDiagnostics
+    };
+  }
+  return {
+    ...result,
+    summary: {
+      ...result.summary,
+      provenance
+    },
+    provenance,
+    artifacts: stampedArtifacts,
+    diagnostics: stampedDiagnostics
   };
 }
 
