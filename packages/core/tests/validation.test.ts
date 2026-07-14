@@ -337,6 +337,79 @@ describe("validateModelJson", () => {
     expect(validateModelJson(model).ok).toBe(true);
   });
 
+  test("accepts schema 0.3 advanced load primitives on supported steps", () => {
+    const model = createSingleTetModel();
+    model.schemaVersion = "0.3.0";
+    model.materials = [{ ...model.materials[0], density: 7850 }];
+    model.elementSets = [{ name: "body", elements: [0] }];
+    model.surfaceFacets = extractBoundarySurfaceFacets(model);
+    model.surfaceSets = [
+      { name: "faceA", facets: [0] },
+      { name: "faceB", facets: [1] }
+    ];
+    model.loads = [
+      { name: "traction", type: "surfaceTraction", surfaceSet: "faceA", traction: [1000, 0, 0] },
+      { name: "bodyForce", type: "bodyForceDensity", elementSet: "body", forceDensity: [0, 0, -100] },
+      { name: "remote", type: "remoteForce", surfaceSet: "faceA", totalForce: [10, 0, 0], remotePoint: [0, 0, 2] },
+      { name: "preload", type: "equivalentBoltPreload", surfaceSetA: "faceA", surfaceSetB: "faceB", axis: [0, 0, 1], preloadForce: 500 }
+    ];
+    model.steps = [
+      {
+        name: "static",
+        type: "staticLinear",
+        boundaryConditions: ["fixedSupport"],
+        loads: ["traction", "bodyForce", "remote", "preload"]
+      },
+      {
+        name: "dynamic",
+        type: "dynamicLinear",
+        boundaryConditions: ["fixedSupport"],
+        loads: ["traction", "bodyForce", "remote"],
+        startTime: 0,
+        endTime: 0.1,
+        timeStep: 0.01,
+        outputInterval: 0.02,
+        loadProfile: "ramp"
+      }
+    ];
+
+    expect(validateModelJson(model).ok).toBe(true);
+  });
+
+  test("requires schema 0.3 for advanced loads and rejects dynamic bolt preload", () => {
+    const model = createSingleTetModel();
+    model.schemaVersion = "0.2.0";
+    model.surfaceFacets = extractBoundarySurfaceFacets(model);
+    model.surfaceSets = [
+      { name: "faceA", facets: [0] },
+      { name: "faceB", facets: [1] }
+    ];
+    model.loads = [{
+      name: "preload",
+      type: "equivalentBoltPreload",
+      surfaceSetA: "faceA",
+      surfaceSetB: "faceB",
+      axis: [0, 0, 1],
+      preloadForce: 500
+    }];
+    model.steps = [{
+      name: "dynamic",
+      type: "dynamicLinear",
+      boundaryConditions: ["fixedSupport"],
+      loads: ["preload"],
+      startTime: 0,
+      endTime: 0.1,
+      timeStep: 0.01,
+      outputInterval: 0.02,
+      loadProfile: "step"
+    }];
+
+    const codes = validateModelJson(model).errors.map((issue) => issue.code);
+
+    expect(codes).toContain("advanced-load-requires-schema-0.3.0");
+    expect(codes).toContain("bolt-preload-static-only");
+  });
+
   test("normalizes legacy v0.1.0 models while validation still accepts them", () => {
     const report = validateModelJson(createSingleTetModel());
 

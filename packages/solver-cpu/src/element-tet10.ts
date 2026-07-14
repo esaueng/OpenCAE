@@ -42,11 +42,6 @@ export const TET10_NODE_BARYCENTRIC: ReadonlyArray<readonly [number, number, num
   [0, 0, 0.5, 0.5]
 ];
 
-// HRZ (diagonal-scaled) lumped mass fractions: row-sum lumping yields negative vertex
-// masses for quadratic tets, so the consistent-mass diagonal is scaled to the element mass.
-export const TET10_HRZ_VERTEX_MASS_FRACTION = 1 / 36;
-export const TET10_HRZ_EDGE_MASS_FRACTION = 4 / 27;
-
 // Barycentric gradients with respect to reference coordinates (ξ, η, ζ); L0 = 1 - ξ - η - ζ.
 const BARYCENTRIC_GRADIENTS: ReadonlyArray<readonly [number, number, number]> = [
   [-1, -1, -1],

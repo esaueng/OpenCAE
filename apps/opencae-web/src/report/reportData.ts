@@ -440,14 +440,26 @@ function loadTable(study: Study, unitSystem: UnitSystem): ReportTable {
       const rawUnits = typeof load.parameters.units === "string" ? load.parameters.units : unitsForLoadType(load.type);
       const converted = Number.isFinite(rawValue) ? loadValueForUnits(rawValue, rawUnits, unitSystem) : null;
       return [
-        load.type === "force" ? "Force" : load.type === "pressure" ? "Pressure" : "Gravity / payload mass",
+        reportLoadTypeLabel(load.type),
         converted ? formatResultMetric(roundDisplayValue(converted.value), converted.units) : MISSING,
         formatDirection(load.parameters.direction),
-        selectionLabel(study, load.selectionRef)
+        load.type === "bolt_preload" && typeof load.parameters.secondarySelectionRef === "string"
+          ? `${selectionLabel(study, load.selectionRef)} ↔ ${selectionLabel(study, load.parameters.secondarySelectionRef)}`
+          : selectionLabel(study, load.selectionRef)
       ];
     }),
     emptyMessage: "No loads recorded."
   };
+}
+
+function reportLoadTypeLabel(type: Study["loads"][number]["type"]): string {
+  if (type === "force") return "Face force (total)";
+  if (type === "pressure") return "Pressure";
+  if (type === "surface_traction") return "Surface traction";
+  if (type === "volume_force") return "Volume force";
+  if (type === "remote_force") return "Remote force (distributed wrench)";
+  if (type === "bolt_preload") return "Equivalent bolt preload (bonded-linear)";
+  return "Gravity / payload mass";
 }
 
 function solverRows(input: BuildReportDataInput, summary: ResultSummary): ReportRow[] {

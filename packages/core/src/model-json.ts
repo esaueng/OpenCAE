@@ -141,7 +141,15 @@ export type PrescribedDisplacementBoundaryConditionJson = {
 
 export type DisplacementComponent = "x" | "y" | "z";
 
-export type LoadJson = NodalForceLoadJson | SurfaceForceLoadJson | PressureLoadJson | BodyGravityLoadJson;
+export type LoadJson =
+  | NodalForceLoadJson
+  | SurfaceForceLoadJson
+  | PressureLoadJson
+  | BodyGravityLoadJson
+  | SurfaceTractionLoadJson
+  | BodyForceDensityLoadJson
+  | RemoteForceLoadJson
+  | EquivalentBoltPreloadLoadJson;
 
 export type NodalForceLoadJson = {
   name: string;
@@ -169,6 +177,41 @@ export type BodyGravityLoadJson = {
   name: string;
   type: "bodyGravity";
   acceleration: [number, number, number];
+};
+
+/** Uniform force per unit area in the model's solver unit system. */
+export type SurfaceTractionLoadJson = {
+  name: string;
+  type: "surfaceTraction";
+  surfaceSet: string;
+  traction: [number, number, number];
+};
+
+/** Uniform force per unit volume over an explicit element set. */
+export type BodyForceDensityLoadJson = {
+  name: string;
+  type: "bodyForceDensity";
+  elementSet: string;
+  forceDensity: [number, number, number];
+};
+
+/** Distributed equivalent wrench; this is not a rigid MPC coupling. */
+export type RemoteForceLoadJson = {
+  name: string;
+  type: "remoteForce";
+  surfaceSet: string;
+  totalForce: [number, number, number];
+  remotePoint: [number, number, number];
+};
+
+/** Static bonded-linear preload approximation without contact or fastener stiffness. */
+export type EquivalentBoltPreloadLoadJson = {
+  name: string;
+  type: "equivalentBoltPreload";
+  surfaceSetA: string;
+  surfaceSetB: string;
+  axis: [number, number, number];
+  preloadForce: number;
 };
 
 export type StepJson = StaticLinearStepJson | DynamicLinearStepJson | ModalStepJson;

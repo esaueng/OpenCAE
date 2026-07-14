@@ -97,7 +97,7 @@ export function buildCoreModelFromCloudMesh(input: BuildCoreModelInput): OpenCAE
     material: material.name,
     connectivity: input.volumeMesh.elements.flatMap((element) => element.connectivity)
   }];
-  const elementCount = input.volumeMesh.elements.length;
+  const elementSets = elementSetsForVolumeMesh(input.volumeMesh);
   const surfaceSets = cloneSurfaceSets(input.volumeMesh.surfaceSets);
   const nodeSets: NodeSetJson[] = [];
   const boundaryConditions: BoundaryConditionJson[] = [];
@@ -134,6 +134,17 @@ export function buildCoreModelFromCloudMesh(input: BuildCoreModelInput): OpenCAE
       continue;
     }
 
+    if (loadType === "volume_force") {
+      const elementSet = mappedElementSetForSelection(input.study, input.displayModel, input.volumeMesh, elementSets, load.selectionRef ?? "body");
+      loads.push({
+        name: `bodyForceDensity${index}`,
+        type: "bodyForceDensity",
+        elementSet: elementSet.name,
+        forceDensity: forceDensityVector(load.parameters)
+      });
+      continue;
+    }
+
     const selectionRef = load.selectionRef ?? "L1";
     const surfaceSet = ensureMappedSurfaceSet({
       study: input.study,
@@ -151,6 +162,50 @@ export function buildCoreModelFromCloudMesh(input: BuildCoreModelInput): OpenCAE
         surfaceSet: surfaceSet.name,
         pressure: pressurePascals(load.parameters),
         direction: vector3(load.parameters?.direction) ?? [0, 0, -1]
+      });
+      continue;
+    }
+
+    if (loadType === "surface_traction") {
+      const direction = normalize(vector3(load.parameters?.direction) ?? [0, -1, 0]);
+      const magnitude = pressurePascals(load.parameters);
+      loads.push({
+        name: `surfaceTraction${index}`,
+        type: "surfaceTraction",
+        surfaceSet: surfaceSet.name,
+        traction: [direction[0] * magnitude, direction[1] * magnitude, direction[2] * magnitude]
+      });
+      continue;
+    }
+    if (loadType === "remote_force") {
+      loads.push({
+        name: `remoteForce${index}`,
+        type: "remoteForce",
+        surfaceSet: surfaceSet.name,
+        totalForce: forceVector(load.parameters),
+        remotePoint: vector3(load.parameters?.remotePoint) ?? [0, 0, 0]
+      });
+      continue;
+    }
+    if (loadType === "bolt_preload") {
+      if (input.analysisType !== "static_stress") throw new Error("Equivalent bolt preload is supported for static studies only.");
+      const secondarySelectionRef = typeof load.parameters?.secondarySelectionRef === "string" ? load.parameters.secondarySelectionRef : undefined;
+      if (!secondarySelectionRef || secondarySelectionRef === selectionRef) throw new Error("Equivalent bolt preload requires a different opposing face selection.");
+      const secondarySurfaceSet = ensureMappedSurfaceSet({
+        study: input.study,
+        displayModel: input.displayModel,
+        volumeMesh: input.volumeMesh,
+        selectionRef: secondarySelectionRef,
+        role: "load_surface",
+        diagnostics: input.mappingDiagnostics
+      }, surfaceSets);
+      loads.push({
+        name: `equivalentBoltPreload${index}`,
+        type: "equivalentBoltPreload",
+        surfaceSetA: surfaceSet.name,
+        surfaceSetB: secondarySurfaceSet.name,
+        axis: normalize(vector3(load.parameters?.direction) ?? [0, 0, 1]),
+        preloadForce: numberValue(load.parameters?.value) ?? 0
       });
       continue;
     }
@@ -194,7 +249,7 @@ export function buildCoreModelFromCloudMesh(input: BuildCoreModelInput): OpenCAE
     materials: [material],
     elementBlocks,
     nodeSets,
-    elementSets: [{ name: "allElements", elements: Array.from({ length: elementCount }, (_value, index) => index) }],
+    elementSets,
     surfaceFacets: input.volumeMesh.surfaceFacets.map((facet) => ({ ...facet, nodes: [...facet.nodes] })),
     surfaceSets,
     boundaryConditions,
@@ -779,6 +834,60 @@ function forceVector(parameters: Record<string, unknown> | undefined): [number, 
   const direction = normalize(vector3(parameters?.direction) ?? [0, -1, 0]);
   const value = numberValue(parameters?.value) ?? 0;
   return [direction[0] * value, direction[1] * value, direction[2] * value];
+}
+
+function forceDensityVector(parameters: Record<string, unknown> | undefined): [number, number, number] {
+  const direction = normalize(vector3(parameters?.direction) ?? [0, -1, 0]);
+  const value = numberValue(parameters?.value) ?? 0;
+  const units = typeof parameters?.units === "string" ? parameters.units.toLowerCase().replace(/³/g, "^3") : "n/m^3";
+  const magnitude = units === "kn/m^3"
+    ? value * 1_000
+    : units === "n/mm^3"
+      ? value * 1_000_000_000
+      : units === "lbf/in^3"
+        ? value * 271_447.14116097
+        : value;
+  return [direction[0] * magnitude, direction[1] * magnitude, direction[2] * magnitude];
+}
+
+function elementSetsForVolumeMesh(volumeMesh: CoreVolumeMeshArtifact): OpenCAEModelJson["elementSets"] {
+  const allElements = Array.from({ length: volumeMesh.elements.length }, (_value, index) => index);
+  const sets: OpenCAEModelJson["elementSets"] = [{ name: "allElements", elements: allElements }];
+  const byPhysicalName = new Map<string, number[]>();
+  volumeMesh.elements.forEach((element, index) => {
+    if (!element.physicalName) return;
+    const elements = byPhysicalName.get(element.physicalName);
+    if (elements) elements.push(index);
+    else byPhysicalName.set(element.physicalName, [index]);
+  });
+  for (const [name, elements] of byPhysicalName) {
+    if (normalizeName(name) === normalizeName("allElements")) continue;
+    sets.push({ name, elements });
+  }
+  return sets;
+}
+
+function mappedElementSetForSelection(
+  study: CloudStudyLike | undefined,
+  displayModel: unknown,
+  volumeMesh: CoreVolumeMeshArtifact,
+  elementSets: OpenCAEModelJson["elementSets"],
+  selectionRef: string
+): OpenCAEModelJson["elementSets"][number] {
+  const selection = study?.namedSelections?.find((candidate) => candidate.id === selectionRef);
+  const candidateNames = new Set([
+    selectionRef,
+    selection?.name,
+    ...(selection?.geometryRefs?.flatMap((reference) => [reference.entityId, reference.label]) ?? [])
+  ].filter((value): value is string => typeof value === "string").map(normalizeName));
+  const matched = elementSets.find((set) => set.name !== "allElements" && candidateNames.has(normalizeName(set.name)));
+  if (matched?.elements.length) return matched;
+  const bodyCount = objectValue(displayModel)?.bodyCount;
+  const physicalBodies = new Set(volumeMesh.elements.map((element) => element.physicalName).filter((name): name is string => Boolean(name)));
+  if ((typeof bodyCount === "number" && bodyCount > 1) || physicalBodies.size > 1) {
+    throw new Error(`Volume force ${selectionRef} has no body-to-element mapping in this multi-body mesh.`);
+  }
+  return elementSets[0]!;
 }
 
 function pressurePascals(parameters: Record<string, unknown> | undefined): number {

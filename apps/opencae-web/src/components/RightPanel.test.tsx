@@ -139,6 +139,56 @@ function uploadedStepProject(status: StepGeometryMetadata["status"], message?: s
   };
 }
 
+describe("RightPanel advanced loads", () => {
+  const advancedStudy: Study = {
+    ...study,
+    namedSelections: [
+      ...study.namedSelections,
+      {
+        id: "selection-bottom",
+        name: "Bottom face",
+        entityType: "face",
+        geometryRefs: [{ bodyId: "body-uploaded", entityType: "face", entityId: "face-bottom", label: "Bottom face" }],
+        fingerprint: "face-bottom"
+      },
+      {
+        id: "selection-body",
+        name: "Fixture body",
+        entityType: "body",
+        geometryRefs: [{ bodyId: "body-uploaded", entityType: "body", entityId: "body-uploaded", label: "Fixture body" }],
+        fingerprint: "body-uploaded"
+      }
+    ]
+  };
+
+  test("shows an explicit remote point and distributed-wrench disclaimer", () => {
+    const html = renderPanel("loads", {
+      study: advancedStudy,
+      selectedFace: displayModel.faces[0]!,
+      selectedLoadPoint: [1, 2, 3],
+      draftLoadType: "remote_force"
+    });
+
+    expect(html).toContain("Remote point coordinates");
+    expect(html).toContain("not a rigid MPC coupling");
+    expect(html).toContain("Surface traction");
+    expect(html).toContain("Volume force");
+  });
+
+  test("shows the opposing-face selector and bonded-linear warning for preload", () => {
+    const html = renderPanel("loads", {
+      study: advancedStudy,
+      selectedFace: displayModel.faces[0]!,
+      selectedLoadPoint: [0, 0, 0],
+      draftLoadType: "bolt_preload"
+    });
+
+    expect(html).toContain("Opposing face");
+    expect(html).toContain("Bottom face");
+    expect(html).toContain("Bonded-linear approximation only");
+  });
+});
+
 describe("RightPanel result probes", () => {
   test("lists raw engineering readings with removal, clear, and cap feedback", () => {
     const html = renderPanel("results", {
@@ -1627,21 +1677,21 @@ describe("RightPanel payload mass controls", () => {
     expect(html).toContain('<span class="workflow-nav-label">Next: Mesh</span><kbd>N</kbd>');
   });
 
-  test("requires a picked model point before adding a force load", () => {
+  test("requires a selected face before adding a face force", () => {
     const markup = renderPanel("loads");
 
     expect(markup).toContain(">Add load<");
     expect(markup).toContain('<button class="outline-action wide" disabled="">');
-    expect(markup).toContain("Select a point on the model, then click Add load.");
+    expect(markup).toContain("Select a face on the model, then add the load.");
   });
 
-  test("keeps a picked force location ready for the add load action", () => {
+  test("allows a face force without a picked visual point", () => {
     const markup = renderPanel("loads", {
       selectedFace: displayModel.faces[0],
-      selectedLoadPoint: [1, 2, 3]
+      selectedLoadPoint: null
     });
 
-    expect(markup).toContain("point picked");
+    expect(markup).toContain("Its visual point does not affect the solve.");
     expect(markup).toContain(">Add load<");
     expect(markup).not.toContain('<button class="outline-action wide" disabled="">');
   });

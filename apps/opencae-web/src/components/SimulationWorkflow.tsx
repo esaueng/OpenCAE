@@ -7,7 +7,7 @@ import { formatDensity, formatMaterialStress, type UnitSystem } from "../unitDis
 import dynamicAnalysisImage from "../assets/simulation-showcase/dynamic-analysis.png";
 import staticAnalysisImage from "../assets/simulation-showcase/static-analysis.png";
 
-type BoundaryConditionType = "fixed" | "prescribed_displacement" | "force" | "pressure" | "gravity";
+type BoundaryConditionType = "fixed" | "prescribed_displacement" | "force" | "pressure" | "gravity" | "surface_traction" | "volume_force" | "remote_force" | "bolt_preload";
 
 interface CreateSimulationModalProps {
   open: boolean;
@@ -464,7 +464,7 @@ function PreviewRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-export function BoundaryConditionMenu({ open, onSelect, onClose }: { open: boolean; onSelect: (type: BoundaryConditionType) => void; onClose: () => void }) {
+export function BoundaryConditionMenu({ open, studyType, onSelect, onClose }: { open: boolean; studyType?: "static_stress" | "dynamic_structural" | "modal_analysis"; onSelect: (type: BoundaryConditionType) => void; onClose: () => void }) {
   const firstButtonRef = useRef<HTMLButtonElement | null>(null);
   useEffect(() => {
     if (open) firstButtonRef.current?.focus();
@@ -473,11 +473,15 @@ export function BoundaryConditionMenu({ open, onSelect, onClose }: { open: boole
   const enabled: Array<{ type: BoundaryConditionType; label: string }> = [
     { type: "fixed", label: "Fixed support" },
     { type: "prescribed_displacement", label: "Prescribed displacement" },
-    { type: "force", label: "Force" },
+    { type: "force", label: "Face force (total)" },
     { type: "pressure", label: "Pressure" },
+    { type: "surface_traction", label: "Surface traction" },
+    { type: "volume_force", label: "Volume force" },
+    { type: "remote_force", label: "Remote force" },
+    ...(studyType === "static_stress" ? [{ type: "bolt_preload" as const, label: "Equivalent bolt preload" }] : []),
     { type: "gravity", label: "Payload mass" }
   ];
-  const future = ["Bolt preload", "Elastic support", "Remote displacement", "Remote force", "Surface load", "Volume load", "Hinge constraint"];
+  const future = ["Elastic support", "Remote displacement", "Hinge constraint"];
   return (
     <div
       className="condition-menu"

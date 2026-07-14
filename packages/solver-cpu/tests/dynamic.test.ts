@@ -32,6 +32,36 @@ describe("solvePreviewSdofTet4Cpu preview", () => {
 });
 
 describe("solveDynamicLinearTetMDOF", () => {
+  test("assembles volume-force density for dynamic steps and exposes conservation diagnostics", () => {
+    const model: OpenCAEModelJson = {
+      ...densityModel,
+      schemaVersion: "0.3.0",
+      loads: [{ name: "body", type: "bodyForceDensity", elementSet: "allElements", forceDensity: [0, 0, -600] }],
+      steps: [{
+        name: "dynamic",
+        type: "dynamicLinear",
+        boundaryConditions: ["fixedSupport", "settlement", "supportY", "supportZ"],
+        loads: ["body"],
+        startTime: 0,
+        endTime: 0.01,
+        timeStep: 0.005,
+        outputInterval: 0.005,
+        loadProfile: "ramp"
+      }]
+    };
+
+    const result = solveDynamicLinearTetMDOF(model);
+
+    expect(result.ok, result.ok ? undefined : result.error.message).toBe(true);
+    if (!result.ok) return;
+    expect(result.diagnostics.loadAssembly?.perLoad[0]).toMatchObject({
+      type: "bodyForceDensity",
+      volume: 1 / 6,
+      totalAppliedForce: [0, 0, -100],
+      distribution: "hrz_volume"
+    });
+  });
+
   test("shares K/M across dynamic cases while keeping independent zero initial conditions", () => {
     const progress: SolveProgressEvent[] = [];
     const completed: string[] = [];

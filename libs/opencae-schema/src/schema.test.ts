@@ -139,6 +139,47 @@ describe("ProjectSchema", () => {
     });
   });
 
+  it("round-trips advanced structural load metadata", () => {
+    const parsed = ProjectSchema.parse({
+      id: "project-advanced-loads",
+      name: "Advanced loads",
+      schemaVersion: "0.3.0",
+      unitSystem: "SI",
+      geometryFiles: [],
+      studies: [{
+        id: "study-advanced-loads",
+        projectId: "project-advanced-loads",
+        name: "Static",
+        type: "static_stress",
+        geometryScope: [],
+        materialAssignments: [],
+        namedSelections: [],
+        contacts: [],
+        constraints: [],
+        loads: [
+          { id: "traction", type: "surface_traction", selectionRef: "face-a", parameters: { value: 100, units: "kPa", direction: [1, 0, 0] }, status: "complete" },
+          { id: "body", type: "volume_force", selectionRef: "body-a", parameters: { value: 250, units: "N/m^3", direction: [0, 0, -1] }, status: "complete" },
+          { id: "remote", type: "remote_force", selectionRef: "face-a", parameters: { value: 500, units: "N", direction: [0, -1, 0], remotePoint: [1, 2, 3] }, status: "complete" },
+          { id: "preload", type: "bolt_preload", selectionRef: "face-a", parameters: { value: 800, units: "N", direction: [1, 0, 0], secondarySelectionRef: "face-b" }, status: "complete" }
+        ],
+        meshSettings: { preset: "medium", status: "not_started" },
+        solverSettings: {},
+        validation: [],
+        runs: []
+      }],
+      createdAt: "2026-07-14T12:00:00.000Z",
+      updatedAt: "2026-07-14T12:00:00.000Z"
+    });
+
+    expect(parsed.studies[0]?.loads.map((load) => load.type)).toEqual([
+      "surface_traction",
+      "volume_force",
+      "remote_force",
+      "bolt_preload"
+    ]);
+    expect(parsed.studies[0]?.loads[2]?.parameters.remotePoint).toEqual([1, 2, 3]);
+  });
+
   it("accepts dynamic structural studies and applies default solver settings", () => {
     const parsed = ProjectSchema.parse({
       id: "project-test",
