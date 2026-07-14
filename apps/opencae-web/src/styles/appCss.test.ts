@@ -4,6 +4,7 @@ import { describe, expect, test } from "vitest";
 
 const css = readFileSync(resolve(__dirname, "app.css"), "utf8");
 const tokens = readFileSync(resolve(__dirname, "../theme/tokens.css"), "utf8");
+const cadViewer = readFileSync(resolve(__dirname, "../components/CadViewer.tsx"), "utf8");
 const lightThemeBlock = tokens.match(/\.theme-light\s*\{(?<body>[\s\S]*?)\n\}/)?.groups?.body ?? "";
 
 function lightToken(name: string) {
@@ -71,7 +72,11 @@ describe("app CSS", () => {
   });
 
   test("scales result legend visual elements with resized content", () => {
-    expect(cssRule(".legend-scale")).toMatch(/height:\s*calc\(10px\s*\*\s*var\(--analysis-legend-scale,\s*1\)\)/);
+    const legendScale = cssRule(".legend-scale");
+    expect(legendScale).toMatch(/height:\s*calc\(10px\s*\*\s*var\(--analysis-legend-scale,\s*1\)\)/);
+    expect(legendScale).not.toMatch(/background:/);
+    expect(css).not.toContain(".analysis-legend.safety-scale");
+    expect(cadViewer).toContain('style={{ background: resultScaleCssGradient(colorScale) }}');
     expect(cssRule(".legend-values")).toMatch(/font-size:\s*calc\(var\(--fs-mini\)\s*\*\s*0\.9\s*\*\s*var\(--analysis-legend-scale,\s*1\)\)/);
   });
 

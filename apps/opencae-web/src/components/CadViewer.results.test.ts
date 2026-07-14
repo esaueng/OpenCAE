@@ -214,6 +214,43 @@ describe("CadViewer result coloring", () => {
     expect(color.getZ(3)).toBeCloseTo(maxColor.b, 5);
   });
 
+  test("uses the shared manual clamp and banding scale for solver-surface colors", () => {
+    const surfaceMesh = {
+      id: "solver-surface-scale",
+      nodes: [[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0]] as [number, number, number][],
+      triangles: [[0, 1, 2], [1, 3, 2]] as [number, number, number][]
+    };
+    const scalarField: ResultField = {
+      id: "stress-scale",
+      runId: "run-scale",
+      type: "stress",
+      component: "von_mises",
+      location: "node",
+      values: [0, 10, 20, 30],
+      min: 0,
+      max: 30,
+      units: "MPa",
+      surfaceMeshRef: surfaceMesh.id
+    };
+    const geometry = buildSolverSurfaceResultGeometry({
+      surfaceMesh,
+      scalarField,
+      resultMode: "stress",
+      showDeformed: false,
+      deformationScale: 1,
+      resultColorScale: { type: "stress", component: "von_mises", min: 10, max: 20, bands: "bands8" }
+    });
+    const colors = geometry.getAttribute("color") as THREE.BufferAttribute;
+
+    expect(colors.getX(0)).toBeCloseTo(colors.getX(1), 6);
+    expect(colors.getY(0)).toBeCloseTo(colors.getY(1), 6);
+    expect(colors.getZ(0)).toBeCloseTo(colors.getZ(1), 6);
+    expect(colors.getX(2)).toBeCloseTo(colors.getX(3), 6);
+    expect(colors.getY(2)).toBeCloseTo(colors.getY(3), 6);
+    expect(colors.getZ(2)).toBeCloseTo(colors.getZ(3), 6);
+    expect(colors.getX(0)).not.toBeCloseTo(colors.getX(3), 3);
+  });
+
   test("coerces non-finite solver-surface result data so one bad node cannot scramble the mesh", () => {
     const surfaceMesh = {
       id: "solver-surface",

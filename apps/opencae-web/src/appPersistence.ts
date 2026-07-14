@@ -15,6 +15,7 @@ import type { StepId } from "./components/StepBar";
 import type { SampleAnalysisType, SampleModelId } from "./lib/api";
 import type { CapturedResultView } from "./report/captureResultViews";
 import type { PayloadObjectSelection, ResultMode, StressComponent, ThemeMode, ViewMode } from "./workspaceViewTypes";
+import type { ResultColorScaleSettings } from "./resultColorScale";
 
 export { AUTOSAVE_STORAGE_KEY, AUTOSAVE_UI_STORAGE_KEY } from "./autosaveStorage";
 export type { ThemeMode } from "./workspaceViewTypes";
@@ -30,6 +31,7 @@ export interface WorkspaceUiSnapshot {
   themeMode: ThemeMode;
   resultMode: ResultMode;
   stressComponent?: StressComponent;
+  resultColorScaleSettings?: ResultColorScaleSettings;
   showDeformed: boolean;
   showDimensions: boolean;
   stressExaggeration: number;
@@ -439,6 +441,7 @@ function parseUiSnapshot(value: unknown): WorkspaceUiSnapshot | null {
     themeMode: readEnum(value.themeMode, THEMES, "dark"),
     resultMode: readEnum(value.resultMode, RESULT_MODES, "stress"),
     stressComponent: readEnum(value.stressComponent, STRESS_COMPONENTS, "von_mises"),
+    resultColorScaleSettings: parseResultColorScaleSettings(value.resultColorScaleSettings),
     showDeformed: value.showDeformed === true,
     showDimensions: value.showDimensions === true,
     stressExaggeration: readFiniteNumber(value.stressExaggeration, 1.8),
@@ -459,6 +462,25 @@ function parseUiSnapshot(value: unknown): WorkspaceUiSnapshot | null {
     status: typeof value.status === "string" ? value.status : "Ready",
     logs: parseLogEntries(value.logs)
   });
+}
+
+function parseResultColorScaleSettings(value: unknown): ResultColorScaleSettings {
+  if (!isRecord(value)) return {};
+  const settings: ResultColorScaleSettings = {};
+  for (const [key, candidate] of Object.entries(value)) {
+    if (!key || !isRecord(candidate)) continue;
+    const rangeMode = candidate.rangeMode === "manual" ? "manual" : "auto";
+    const bands = candidate.bands === "bands8" ? "bands8" : "continuous";
+    const manualMin = typeof candidate.manualMin === "number" && Number.isFinite(candidate.manualMin) ? candidate.manualMin : undefined;
+    const manualMax = typeof candidate.manualMax === "number" && Number.isFinite(candidate.manualMax) ? candidate.manualMax : undefined;
+    settings[key] = {
+      rangeMode,
+      bands,
+      ...(manualMin !== undefined ? { manualMin } : {}),
+      ...(manualMax !== undefined ? { manualMax } : {})
+    };
+  }
+  return settings;
 }
 
 function normalizeUiRunState(ui: WorkspaceUiSnapshot): WorkspaceUiSnapshot {

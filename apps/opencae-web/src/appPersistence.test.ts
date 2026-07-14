@@ -317,6 +317,30 @@ describe("app persistence", () => {
     expect(principal?.ui.stressComponent).toBe("principal_min");
   });
 
+  test("defaults legacy color scales and restores finite per-field settings", () => {
+    const snapshot = buildAutosavedWorkspace({ project, displayModel, ui: baseUi });
+    const legacy = parseAutosavedWorkspacePayload(JSON.stringify(snapshot));
+    const restored = parseAutosavedWorkspacePayload(JSON.stringify({
+      ...snapshot,
+      ui: {
+        ...snapshot.ui,
+        resultColorScaleSettings: {
+          "run\u0000stress\u0000node\u0000von_mises": { rangeMode: "manual", bands: "bands8", manualMin: 12, manualMax: 48 },
+          invalid: { rangeMode: "manual", bands: "bands8", manualMin: "bad", manualMax: null }
+        }
+      }
+    }));
+
+    expect(legacy?.ui.resultColorScaleSettings).toEqual({});
+    expect(restored?.ui.resultColorScaleSettings?.["run\u0000stress\u0000node\u0000von_mises"]).toEqual({
+      rangeMode: "manual",
+      bands: "bands8",
+      manualMin: 12,
+      manualMax: 48
+    });
+    expect(restored?.ui.resultColorScaleSettings?.invalid).toEqual({ rangeMode: "manual", bands: "bands8" });
+  });
+
   test("preserves enough logs to diagnose OpenCAE Core failures after reload", () => {
     const logs = Array.from({ length: 120 }, (_, index) => ({ message: `OpenCAE Core diagnostic ${index}`, at: 1714000000000 + index }));
     const snapshot = buildAutosavedWorkspace({
