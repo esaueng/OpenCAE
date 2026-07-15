@@ -54,6 +54,33 @@ describe("mapSelectionToSurfaceSet", () => {
 });
 
 describe("buildCoreModelFromCloudMesh", () => {
+  it("builds modal models without inventing a fallback L1 load surface", () => {
+    const model = buildCoreModelFromCloudMesh({
+      study: {
+        id: "modal-study",
+        type: "modal_analysis",
+        materialAssignments: [{ materialId: "mat-aluminum-6061" }],
+        namedSelections: [
+          { id: "bottom", name: "Bottom", entityType: "face", geometryRefs: [{ entityType: "face", entityId: "step-face-4" }] }
+        ],
+        constraints: [{ id: "fixed", type: "fixed", selectionRef: "bottom", parameters: {} }],
+        loads: [],
+        solverSettings: { modeCount: 4 }
+      },
+      volumeMesh: singleTetArtifact(),
+      analysisType: "modal_analysis",
+      solverSettings: {}
+    });
+
+    expect(model.loads).toEqual([]);
+    expect(model.steps).toEqual([{
+      name: "modalStep",
+      type: "modal",
+      boundaryConditions: ["fixedSupport0"],
+      modeCount: 4
+    }]);
+  });
+
   it("rejects an explicit dangling material assignment instead of substituting aluminum", () => {
     expect(() => buildCoreModelFromCloudMesh({
       study: {

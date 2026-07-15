@@ -8,7 +8,7 @@
 // WASM module inside the worker) are loaded via dynamic import only after the
 // flag check passes, so default builds and the initial bundle stay untouched.
 import type { DisplayModel, MeshQuality, Study } from "@opencae/schema";
-import type { CoreVolumeMeshArtifact, ElementOrderFallbackMetadata } from "@opencae/mesh-intake";
+import type { CloudAnalysisType, CoreVolumeMeshArtifact, ElementOrderFallbackMetadata } from "@opencae/mesh-intake";
 import { inferGlobalCriticalPrintAxis } from "@opencae/study-core";
 import { geometrySourceForStudy, studyForCoreGeometryDispatch, type CoreCloudGeometrySource } from "../workers/opencaeCoreSolve";
 import { unpackCoreVolumeMeshArtifact } from "../workers/meshProtocol";
@@ -91,6 +91,12 @@ function messageWithAttempt(message: string, attempt: WasmMeshPhaseProgress["att
 }
 
 export type WasmMeshStudyResult = { study: Study; message: string } | null;
+
+export function coreAnalysisTypeForStudy(study: Pick<Study, "type">): CloudAnalysisType {
+  if (study.type === "dynamic_structural") return "dynamic_structural";
+  if (study.type === "modal_analysis") return "modal_analysis";
+  return "static_stress";
+}
 
 /**
  * Mesh the study's geometry with gmsh-wasm in a worker, build the Core model
@@ -280,7 +286,7 @@ async function meshWorkerRunExclusive(options: WasmMeshOptions, cancellationGene
   // the browser solver's DOF budget. The artifact is authoritative: carrying
   // the requested order into the model would misconfigure a Tet4 solve.
   const actualElementOrder = actualElementOrderForArtifact(artifact);
-  const analysisType = study.type === "dynamic_structural" ? "dynamic_structural" : "static_stress";
+  const analysisType = coreAnalysisTypeForStudy(study);
   // The mirrored builder applies study load directions verbatim in the solver
   // frame (same contract as the cloud container), so hand it a solver-frame study.
   let dispatchStudy = studyForCoreGeometryDispatch(study, displayModel);
