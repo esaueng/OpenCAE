@@ -20,7 +20,7 @@ pnpm --filter @opencae/solver-cpu build
 
 ## Supported Model Schema
 
-The validation suite targets `opencae.model` schema `0.3.0`, while preserving compatibility with `0.1.0` and `0.2.0` models.
+The validation suite targets `opencae.model` schema `0.4.0`, while preserving compatibility with `0.1.0`, `0.2.0`, and `0.3.0` models.
 
 Supported mesh-native primitives:
 
@@ -120,59 +120,20 @@ The regression requires:
 
 This fixture is intentionally small. It validates topology, load routing, result surface extraction, and solver integration for non-block geometry. It is not a certified engineering benchmark.
 
-## OpenCAE Core Cloud
+## Local Browser Execution
 
-The `services/opencae-core-cloud` package is the container-oriented Core Cloud runner. It exposes:
+Every current product solve is performed in the browser. Geometry is meshed by the WebAssembly Gmsh worker, validated as a Core model, and transferred to the dedicated solve worker. Static, dynamic, modal, and thermal routes return their actual local solver identity in provenance. The WebGPU operator remains an explicit development/benchmark path while automatic routing is gated. There is no HTTP solve fallback.
 
-- `GET /health`
-- `POST /solve`
-
-The health response reports:
-
-- `mesher: "gmsh"`
-- `gmshAvailable: true | false`
-- `supportsProceduralGeometry: true`
-- `supportsUploadedCad: true`
-- `supportedAnalysisTypes: ["static_stress", "dynamic_structural"]`
-- `supportedSolvers: ["sparse_static", "mdof_dynamic"]`
-- `supportsActualVolumeMesh: true`
-- `supportsPreview: false`
-- `noCalculix: true`
-- `noLocalEstimateFallback: true`
-
-`POST /solve` accepts exactly one of an OpenCAE Core model, a Core volume mesh input, or a geometry source. Geometry requests use:
-
-```ts
-{
-  runId?: string;
-  analysisType: "static_stress" | "dynamic_structural";
-  study?: unknown;
-  displayModel?: unknown;
-  solverSettings?: Record<string, unknown>;
-  resultSettings?: Record<string, unknown>;
-  geometry?: {
-    kind: "sample_procedural" | "uploaded_cad" | "uploaded_mesh" | "structured_block";
-    sampleId?: "cantilever" | "beam" | "bracket";
-    format?: "step" | "stl" | "obj" | "msh" | "json";
-    filename?: string;
-    contentBase64?: string;
-    units?: "mm" | "m";
-    geometryDescriptor?: Record<string, unknown>;
-  };
-}
-```
-
-The geometry flow is always geometry source, actual volume mesh, mesh validation, Core model v0.3, Core solve, then `CoreSolveResult`. The retired cloud service used Gmsh only to mesh procedural or uploaded CAD geometry. Gmsh output was converted to Core nodes, Tet4/Tet10 element connectivity, boundary surface facets, physical surface sets, and source selection metadata before any solve was attempted.
-
-Procedural Bracket geometry creates a fused base, upright, and gusset/rib solid with cylindrical cutouts. It tags physical surfaces `fixed_support`, `load_surface`, `hole_surfaces`, `base_surfaces`, `upright_surfaces`, and `gusset_surfaces`; `fixed_support` maps to `FS1`/`face-base-left`, and `load_surface` maps to `L1`/`face-load-top`.
-
-If Gmsh is unavailable or meshing fails, `/solve` returns an explicit meshing error. The service does not run a local estimate, display-bounds proxy, or legacy file handoff. After model construction, `static_stress` routes to `solveCoreStatic`, `dynamic_structural` routes to `solveCoreDynamic`, preview requests are rejected, and the returned `CoreSolveResult` keeps `solver: "opencae-core-cloud"`, `meshSource: "actual_volume_mesh"`, and `resultSource: "computed"` provenance.
+The former container runner is retired and is not an execution path. Its fixtures remain only as a numeric regression oracle, and pre-retirement results keep their historical provenance when displayed. See [cloud-retirement.md](../../cloud-retirement.md).
 
 ## Known Limitations
 
 - CPU solving supports Tet4 and Tet10, but both remain small-strain linear elements and require valid, non-inverted Jacobians.
 - Remote force is a distributed wrench rather than rigid MPC coupling. Equivalent bolt preload is a bonded-linear load pair rather than contact or a fastener element.
-- The sparse static solver uses CG and expects a symmetric positive-definite constrained system.
-- Contact, tie, multi-part interaction, large deformation, plasticity, thermal loading, and nonlinear material behavior are not implemented.
+- The sparse static and thermal solvers use CG with automatic SSOR preconditioning and expect a symmetric positive-definite constrained system. The guarded CPU ceiling is 150,000 DOF.
+- Tie and initially closed frictionless small-sliding contact use node-to-surface penalty MPCs. Contact is linearized and bilateral; separation, re-closure, friction, and changing normals are not implemented.
+- Steady conduction supports temperature, surface heat flux, and volumetric generation. Thermal-stress coupling, convection, radiation, and transient thermal response are not implemented.
+- The WebGPU operator supports explicit development benchmarks for connection-free static Tet4 models with zero prescribed displacement. Automatic routing is disabled because the CG vector/reduction loop still crosses the CPU/GPU boundary every iteration; it must become GPU-resident and pass end-to-end browser benchmarks before release routing is restored.
+- Large deformation, plasticity, and nonlinear material behavior are not implemented.
 - The preview SDOF dynamic solver remains available only for legacy preview behavior. Complex Core FEA should use the MDOF dynamic solver.
 - The validation benchmarks are regression tests for Core behavior. They are not a substitute for mesh convergence, verification against reference solvers, or engineering certification.

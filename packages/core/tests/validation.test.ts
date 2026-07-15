@@ -123,6 +123,19 @@ describe("validateModelJson", () => {
     expect(codes).toContain("invalid-prescribed-displacement-value");
   });
 
+  test("rejects thermal features declared under pre-0.4 schema versions", () => {
+    const model = createSingleTetModel();
+    model.schemaVersion = "0.1.0";
+    model.materials[0] = { ...model.materials[0]!, thermalConductivity: 45 };
+    model.boundaryConditions = [{ name: "temperature", type: "prescribedTemperature", nodeSet: "fixedNodes", value: 20 }];
+    model.loads = [{ name: "flux", type: "surfaceHeatFlux", surfaceSet: "loadedSurface", flux: 100 }];
+    model.steps = [{ name: "thermal", type: "steadyStateThermal", boundaryConditions: ["temperature"], loads: ["flux"] }];
+
+    const report = validateModelJson(model);
+    expect(report.ok).toBe(false);
+    expect(report.errors.filter((issue) => issue.code === "thermal-feature-requires-schema-0.4.0")).toHaveLength(3);
+  });
+
   test("accepts fixed boundary conditions that resolve nodes from a surface set", () => {
     const model = {
       ...createSingleTetModel(),
@@ -583,6 +596,28 @@ describe("validateModelJson", () => {
     const codes = validateModelJson(model).errors.map((issue) => issue.code);
 
     expect(codes).toContain("disconnected-bodies-without-connections");
+
+    const surfaceFacets = extractBoundarySurfaceFacets(model);
+    const sourceFacet = surfaceFacets.find((facet) => facet.element === 0)!;
+    const targetFacet = surfaceFacets.find((facet) => facet.element === 1)!;
+    const withTie = {
+      ...model,
+      surfaceFacets,
+      surfaceSets: [
+        { name: "bodyAInterface", facets: [sourceFacet.id] },
+        { name: "bodyBInterface", facets: [targetFacet.id] }
+      ],
+      meshConnections: [{ type: "tie" as const, source: "bodyAInterface", target: "bodyBInterface" }]
+    };
+    expect(validateModelJson(withTie).ok).toBe(true);
+
+    const withUnappliedFuse = {
+      ...withTie,
+      meshConnections: [{ type: "fuse" as const, source: "bodyAInterface", target: "bodyBInterface" }]
+    };
+    const fuseCodes = validateModelJson(withUnappliedFuse).errors.map((issue) => issue.code);
+    expect(fuseCodes).toContain("unapplied-fuse-connection");
+    expect(fuseCodes).toContain("disconnected-bodies-without-connections");
   });
 
   test("accepts valid Tet10 connectivity but rejects invalid Tet10 connectivity length", () => {

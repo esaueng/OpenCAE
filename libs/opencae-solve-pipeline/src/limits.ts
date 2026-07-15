@@ -33,8 +33,8 @@ export const CLOUD_SOLVER_LIMITS: SolveLimits = {
 };
 
 /**
- * Active browser limits. maxDofs is the measured 100k product cap, verified by
- * scripts/verify-100k-solve.mjs through the real solve worker in Chromium and
+ * Active CPU browser limits. maxDofs is the guarded 150k product cap, verified by
+ * the scale benchmark through the real solve worker in Chromium and
  * WebKit. Memory and integration-step ceilings remain tighter than the retired
  * runner because the browser has no external wall-clock supervisor.
  *
@@ -45,7 +45,7 @@ export const CLOUD_SOLVER_LIMITS: SolveLimits = {
  */
 export const BROWSER_SOLVE_LIMITS: SolveLimits = {
   ...CLOUD_SOLVER_LIMITS,
-  maxDofs: 100000,
+  maxDofs: 150000,
   transientFieldBytes: 256e6,
   maxTimeSteps: 20000
 };

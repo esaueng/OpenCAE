@@ -40,10 +40,13 @@ export {
 } from "./element";
 export {
   computeTet10BMatrix,
+  computeTet10PhysicalGradients,
   computeTet10ElementStiffness,
   computeTet10Volume,
   recoverTet10CentroidStrain,
   TET10_EDGE_VERTICES,
+  TET10_GAUSS_POINTS,
+  TET10_GAUSS_WEIGHT,
   TET10_NODE_COUNT
 } from "./element-tet10";
 export { recoverNodalStressTensorsFromElements, recoverNodalVonMisesFromElements } from "./recovery";
@@ -71,13 +74,17 @@ export { solveDynamicLinearTetLoadCases, solveDynamicLinearTetMDOF, solveDynamic
 export type { DynamicLoadCaseBatchSolveResult, DynamicLoadCaseInput, DynamicLoadCaseSolve } from "./dynamic-mdof";
 export { solveModalLinearTet, solveModalSubspace } from "./modal";
 export {
+  assembleNodalForcesWithDiagnostics,
+  collectConstraints,
   combineStaticLinearTetResults,
+  recoverElementResults,
   prepareStaticLinearTetSystem,
   solvePreparedStaticLoadCase,
   solveStaticLinearTet,
   solveStaticLinearTet4Cpu,
   solveStaticLinearTetLoadCases
 } from "./solver";
+export { staticCoreResultFromSolve } from "./results";
 export type {
   PreparedStaticLinearTetResult,
   PreparedStaticLinearTetSystem,
@@ -87,6 +94,10 @@ export type {
   StaticLoadCaseSolve
 } from "./solver";
 export { solveStaticLinearTetSparse } from "./static-sparse";
+export { assembleMeshConnectionStiffness } from "./connections";
+export type { ConnectionAssemblyDiagnostics } from "./connections";
+export { solveSteadyStateThermal } from "./thermal";
+export type { SteadyStateThermalDiagnostics, SteadyStateThermalResult, SteadyStateThermalSolveResult } from "./thermal";
 export {
   hasAbruptStressDiscontinuity,
   nodalSafetyFactorValues,

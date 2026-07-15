@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { isModalResultSummary } from "@opencae/schema";
+import { isStructuralResultSummary } from "@opencae/schema";
 import type { DisplayModel, Project, RunEvent, Study } from "@opencae/schema";
 import { addLoad, addSupport, assignMaterial, cancelRun, createProject, dynamicOutputFrameEstimate, generateMesh, geometryWithMeshPreset, getResults, importLocalProject, loadSampleProject, probeUploadedStepRepairAfterMeshFailure, renameProject, runSimulation, STEP_REPAIR_PROBE_MODEL_CHANGED_MESSAGE, STEP_REPAIR_UNAVAILABLE_MESSAGE, subscribeToRun, updateStudy, uploadedStepRepairProbeDecision, uploadModel, withReportCaptures } from "./api";
 
@@ -267,6 +267,22 @@ describe("api", () => {
       expect(response.project.studies[0]?.type).toBe("dynamic_structural");
       expect(response.project.studies[0]?.loads[0]?.parameters.direction).toEqual([0, -1, 0]);
       expect(response.project.studies[0]?.runs[0]?.id).toBe(`run-${sample}-dynamic-seeded`);
+      expect(response.results).toBeUndefined();
+    }
+  });
+
+  test("requests and loads modal and thermal sample projects locally", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response("missing", { status: 404 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    for (const analysisType of ["modal_analysis", "steady_state_thermal"] as const) {
+      const response = await loadSampleProject("bracket", analysisType);
+      const requestInit = fetchMock.mock.calls[fetchMock.mock.calls.length - 1]?.[1];
+      const requestBody = JSON.parse(requestInit?.body as string) as Record<string, unknown>;
+
+      expect(requestBody).toEqual({ sample: "bracket", analysisType });
+      expect(response.project.studies[0]?.type).toBe(analysisType);
+      expect(response.project.geometryFiles[0]?.metadata.sampleAnalysisType).toBe(analysisType);
       expect(response.results).toBeUndefined();
     }
   });
@@ -743,9 +759,9 @@ describe("api", () => {
     expect(results.fields).toHaveLength(8);
     expect(results.fields.map((field) => field.component)).toEqual(expect.arrayContaining(["von_mises", "principal_max", "principal_min", "max_shear"]));
     expect(results.fields.every((field) => field.runId === response.run.id)).toBe(true);
-    expect(results.summary.provenance?.solver).toBe("opencae-core-cloud");
+    expect(results.summary.provenance?.solver).toBe("opencae-core-sparse-tet");
     expect((results.summary.provenance as { runnerVersion?: string })?.runnerVersion).toBe("browser-0.1.0");
-    if (isModalResultSummary(results.summary)) throw new Error("Expected structural results.");
+    if (!isStructuralResultSummary(results.summary)) throw new Error("Expected structural results.");
     expect(results.summary.maxStress).toBeGreaterThanOrEqual(0);
   });
 
@@ -779,9 +795,9 @@ describe("api", () => {
     expect(response.streamUrl).toMatch(/^local:run-local-/);
     expect(fetchMock.mock.calls.every(([input]) => !String(input).includes("/api/cloud-core"))).toBe(true);
     expect(completed.type).toBe("complete");
-    // The in-browser pipeline computed this (browser runner stamp), honestly
-    // labeled as a real computed FEA result, not a preview estimate.
-    expect(results.summary.provenance?.solver).toBe("opencae-core-cloud");
+    // The migration alias dispatches to the actual in-browser CPU solver and
+    // remains a real computed FEA result, not a preview estimate.
+    expect(results.summary.provenance?.solver).toBe("opencae-core-sparse-tet");
     expect((results.summary.provenance as { runnerVersion?: string })?.runnerVersion).toBe("browser-0.1.0");
     expect(results.summary.provenance?.resultSource).toBe("computed");
   });
@@ -817,7 +833,7 @@ describe("api", () => {
       ...displayModel,
       bodyCount: 1,
       dimensions: { x: 0.12, y: 0.04, z: 0.02, units: "m" },
-      // The cloud-fidelity model builder maps selections onto real display
+      // The local model builder maps selections onto real display
       // faces (no silent nearest-node fallback), so the fixture carries them.
       faces: [
         { id: "selection-face-1", label: "Fixed", color: "#94a3b8", center: [0, 0.02, 0.01], normal: [-1, 0, 0], stressValue: 0 },
@@ -829,7 +845,7 @@ describe("api", () => {
       materialAssignments: [{ id: "assign-1", materialId: "mat-aluminum-6061", selectionRef: "selection-body-1", status: "complete" }],
       constraints: [{ id: "constraint-1", type: "fixed", selectionRef: "selection-face-1", parameters: {}, status: "complete" }],
       loads: [{ id: "load-1", type: "force", selectionRef: "selection-face-1", parameters: { value: 500, units: "N", direction: [0, -1, 0] }, status: "complete" }],
-      // Medium keeps the shared cloud-density structured grid solveable in
+      // Medium keeps the structured grid solveable in
       // seconds for this test; density is preset-driven, not backend-driven.
       meshSettings: { preset: "medium", status: "complete", meshRef: "project-1/mesh/mesh-summary.json" },
       solverSettings: { backend: "opencae_core_local", fidelity: "standard" }
@@ -849,7 +865,7 @@ describe("api", () => {
     expect(response.streamUrl).toMatch(/^local:run-local-/);
     expect((response.run as { solverBackend?: string }).solverBackend).toBe("opencae-core-sparse-tet");
     expect(seen.map((event) => event.message).join(" ")).toContain("OpenCAE Core");
-    expect(results.summary.provenance?.solver).toBe("opencae-core-cloud");
+    expect(results.summary.provenance?.solver).toBe("opencae-core-sparse-tet");
     expect((results.summary.provenance as { runnerVersion?: string })?.runnerVersion).toBe("browser-0.1.0");
     expect(fetchMock.mock.calls.every(([input]) => !String(input).includes("/api/cloud-fea"))).toBe(true);
   });
@@ -971,10 +987,10 @@ describe("api", () => {
     expect((response.run as { solverBackend?: string }).solverBackend).toBe("opencae-core-mdof-tet");
     expect(response.message).toContain("OpenCAE Core Local simulation running");
     expect(seen.map((event) => event.message).join(" ")).toContain("OpenCAE Core dynamic");
-    if (isModalResultSummary(results.summary)) throw new Error("Expected dynamic structural results.");
+    if (!isStructuralResultSummary(results.summary)) throw new Error("Expected dynamic structural results.");
     expect(results.summary.transient?.frameCount).toBe(21);
     expect(results.fields.some((field) => field.type === "stress" && field.frameIndex === 20)).toBe(true);
-    expect(results.summary.provenance?.solver).toBe("opencae-core-cloud");
+    expect(results.summary.provenance?.solver).toBe("opencae-core-mdof-tet");
     expect((results.summary.provenance as { runnerVersion?: string })?.runnerVersion).toBe("browser-0.1.0");
     expect(fetchMock.mock.calls.every(([input]) => !String(input).includes("/api/cloud-fea"))).toBe(true);
   });

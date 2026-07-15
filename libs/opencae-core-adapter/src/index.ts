@@ -2,8 +2,10 @@ import {
   connectedComponents,
   deriveFixedSupportNodeSetFromSurface,
   elevateTet4MeshToTet10,
+  solverSurfaceMeshFromModel,
   validateModelJson,
   volumeMeshToModelJson,
+  OPENCAE_MODEL_SCHEMA_VERSION,
   type LoadJson,
   type OpenCAEModelJson,
   type CoreStructuralSolveResult,
@@ -11,7 +13,8 @@ import {
   type SurfaceFacetJson,
   type SurfaceSetJson
 } from "@opencae/core";
-import type { DynamicLoadProfile } from "@opencae/solver-cpu";
+import { solveSteadyStateThermal, type DynamicLoadProfile } from "@opencae/solver-cpu";
+import { CPU_TET_DOF_THRESHOLD, MAX_WEBGPU_TET4_DOFS, WEBGPU_TET4_AUTOMATIC_ENABLED, solveStaticTet4ModelWebGpu } from "@opencae/solver-webgpu";
 import {
   BROWSER_SOLVE_LIMITS,
   solveDynamicVariantsWithCorePipeline,
@@ -87,7 +90,7 @@ export type LocalSolveResult = {
   variants?: RunVariantResult[];
   variantRefs?: RunVariantRef[];
   activeVariantId?: string;
-  /** Solver-space render surface mesh (same contract as the cloud response). */
+  /** Solver-space render surface mesh returned by the local Core worker. */
   surfaceMesh?: unknown;
   /** Solver diagnostics entries (core-solve-diagnostics, phase diagnostics, ...). */
   diagnostics?: unknown[];
@@ -109,7 +112,7 @@ export type OpenCaeCoreEligibility =
   | { ok: false; reason: string };
 
 export type OpenCaeCoreSolveOutcome =
-  | { ok: true; result: LocalSolveResult; solverBackend: "opencae-core-sparse-tet" | "opencae-core-mdof-tet" | "opencae-core-modal-tet" }
+  | { ok: true; result: LocalSolveResult; solverBackend: "opencae-core-sparse-tet" | "opencae-core-mdof-tet" | "opencae-core-modal-tet" | "opencae-core-steady-thermal" | "opencae-core-webgpu-matrix-free-tet4" }
   | { ok: false; reason: string; code?: string };
 
 const STANDARD_GRAVITY = 9.80665;
@@ -193,7 +196,7 @@ export function hasActualCoreVolumeMesh(study: Study, displayModel?: DisplayMode
   const artifact = actualCoreVolumeMeshArtifact(study);
   if (!artifact?.model) return false;
   if (meshSourceForActualArtifact(artifact) !== "actual_volume_mesh") return false;
-  return connectedComponentCountForActualArtifact(artifact) === 1;
+  return connectedComponentCountForActualArtifact(artifact) === 1 || study.contacts.some((connection) => connection.type === "tie" || connection.type === "contact");
 }
 
 export function hasMeshableGeometrySource(study: Study, displayModel?: DisplayModel): boolean {
@@ -259,7 +262,7 @@ export function geometrySourceForStudy(study: Study, displayModel?: DisplayModel
 /**
  * Built-in sample geometry is authored in display-model space (Y axis = height) and the
  * viewer stands it upright with the legacy +90 deg X base rotation, while every OpenCAE
- * Core solver mesh for that geometry (cloud structured block, procedural bracket, and
+ * Core solver mesh for that geometry (structured block, procedural bracket, and
  * the structured block Core model built below) lives in the upright solver frame that
  * rotation produces (Z axis = height). Uploaded CAD/mesh geometry is meshed in its own
  * file coordinates, which the viewer renders without the base rotation, so its
@@ -293,10 +296,9 @@ function negated(value: number): number {
 }
 
 /**
- * Study load directions are recorded in display-model space, but OpenCAE Core Cloud
- * applies them verbatim in the solver frame when it meshes dispatched geometry. Rotate
- * them into the solver frame so the solved deformation matches the load arrows shown in
- * the viewer.
+ * Study load directions are recorded in display-model space, while the local Core
+ * pipeline applies them in the solver frame. Rotate them into that frame so the
+ * solved deformation matches the load arrows shown in the viewer.
  */
 export function studyForCoreGeometryDispatch(study: Study, displayModel: DisplayModel | undefined): Study {
   if (!displayModel || !displayModelUsesUprightSolverFrame(displayModel)) return study;
@@ -343,8 +345,8 @@ export function openCaeCoreEligibility(
   capabilities?: CoreSolveCapabilities,
   customMaterials: readonly CustomMaterial[] = []
 ): OpenCaeCoreEligibility {
-  if (study.type !== "static_stress" && study.type !== "dynamic_structural" && study.type !== "modal_analysis") {
-    return { ok: false, reason: "OpenCAE Core browser solve currently supports static, dynamic, and modal structural studies only." };
+  if (study.type !== "static_stress" && study.type !== "dynamic_structural" && study.type !== "modal_analysis" && study.type !== "steady_state_thermal") {
+    return { ok: false, reason: "OpenCAE Core browser solve does not support this analysis type." };
   }
   if (study.meshSettings.status !== "complete") return { ok: false, reason: "OpenCAE Core requires a completed mesh step." };
   if (!displayModel?.dimensions || !positiveDimensions(displayModel.dimensions)) {
@@ -362,6 +364,12 @@ export function openCaeCoreEligibility(
     material = materialForStudy(study, customMaterials);
   } catch (error) {
     return { ok: false, reason: error instanceof Error ? error.message : "OpenCAE Core could not resolve the assigned material." };
+  }
+  if (study.type === "steady_state_thermal") {
+    if (!material.material.thermalConductivity) return { ok: false, reason: "Steady thermal analysis requires material thermal conductivity." };
+    if (!study.constraints.some((constraint) => constraint.type === "prescribed_temperature")) return { ok: false, reason: "Steady thermal analysis requires a prescribed temperature." };
+    if (study.loads.some((load) => load.type !== "heat_flux" && load.type !== "heat_generation")) return { ok: false, reason: "Steady thermal studies accept heat flux and heat generation only." };
+    return { ok: true };
   }
   if (!study.constraints.some((constraint) => constraint.type === "fixed")) {
     return { ok: false, reason: "OpenCAE Core requires at least one fixed support." };
@@ -386,10 +394,9 @@ export function openCaeCoreEligibility(
 }
 
 /**
- * Browser-local solve at parity with the deployed Core Cloud runner: the same
- * high-fidelity model builder the cloud request path uses (surface sets,
- * surfaceForce/pressure loads, solver-frame rotation) feeds the mirrored cloud
- * pipeline in @opencae/solve-pipeline, under BROWSER_SOLVE_LIMITS.
+ * Browser-local solve using the high-fidelity model builder (surface sets,
+ * surfaceForce/pressure loads, and solver-frame rotation) and the local
+ * pipeline in @opencae/solve-pipeline under BROWSER_SOLVE_LIMITS.
  */
 export function trySolveOpenCaeCoreStudy({ study, runId, displayModel, customMaterials = [], hooks, onVariantComplete }: {
   study: Study;
@@ -408,7 +415,49 @@ export function trySolveOpenCaeCoreStudy({ study, runId, displayModel, customMat
       ? "dynamic_structural"
       : study.type === "modal_analysis"
         ? "modal_analysis"
-        : "static_stress";
+        : study.type === "steady_state_thermal"
+          ? "steady_state_thermal"
+          : "static_stress";
+    if (study.type === "steady_state_thermal") {
+      const solved = solveSteadyStateThermal(coreBuild.model, { maxDofs: BROWSER_SOLVE_LIMITS.maxDofs, maxIterations: BROWSER_SOLVE_LIMITS.maxIterations, tolerance: BROWSER_SOLVE_LIMITS.tolerance, hooks });
+      if (!solved.ok) return { ok: false, code: solved.error.code, reason: `OpenCAE Core thermal solve failed: ${solved.error.message}` };
+      const surfaceMesh = solverSurfaceMeshFromModel(coreBuild.model, `${runId}-surface`);
+      const nodeMap = surfaceMesh.nodeMap ?? [];
+      const temperature = nodeMap.map((node) => solved.result.temperature[node] ?? 0);
+      const heatFlux = nodeMap.map((node) => solved.result.heatFluxMagnitude[node] ?? 0);
+      const heatFluxVectors = nodeMap.map((node) => [solved.result.heatFlux[node * 3] ?? 0, solved.result.heatFlux[node * 3 + 1] ?? 0, solved.result.heatFlux[node * 3 + 2] ?? 0] as Vec3);
+      let minTemperature = Infinity, maxTemperature = -Infinity, minHeatFlux = Infinity, maxHeatFlux = -Infinity;
+      for (const value of temperature) { minTemperature = Math.min(minTemperature, value); maxTemperature = Math.max(maxTemperature, value); }
+      for (const value of heatFlux) { minHeatFlux = Math.min(minHeatFlux, value); maxHeatFlux = Math.max(maxHeatFlux, value); }
+      const provenance = { kind: "opencae_core_fea" as const, solver: "opencae-core-steady-thermal", meshSource: coreBuild.meshSource, resultSource: "computed" as const, units: coreBuild.model.coordinateSystem?.solverUnits ?? "m-N-s-Pa" };
+      return {
+        ok: true,
+        solverBackend: "opencae-core-steady-thermal",
+        result: {
+          summary: {
+            analysisType: "steady_state_thermal",
+            minTemperature,
+            maxTemperature,
+            temperatureUnits: "°C",
+            maxHeatFlux,
+            heatFluxUnits: solved.result.units.heatFlux,
+            appliedHeat: solved.diagnostics.appliedSurfaceHeatW,
+            generatedHeat: solved.diagnostics.generatedHeatW,
+            reactionHeat: solved.diagnostics.reactionHeatW,
+            heatRateUnits: "W",
+            energyBalanceRelativeError: solved.diagnostics.energyBalanceRelativeError,
+            provenance
+          },
+          fields: [
+            { id: `${runId}-temperature`, runId, type: "temperature", location: "node", values: temperature, min: minTemperature, max: maxTemperature, units: "°C", surfaceMeshRef: surfaceMesh.id, provenance },
+            { id: `${runId}-heat-flux`, runId, type: "heat_flux", location: "node", values: heatFlux, vectors: heatFluxVectors, min: minHeatFlux, max: maxHeatFlux, units: solved.result.units.heatFlux, surfaceMeshRef: surfaceMesh.id, provenance }
+          ],
+          surfaceMesh,
+          diagnostics: [solved.diagnostics],
+          artifacts: { ...(coreBuild.meshConnectivity ? { meshConnectivity: coreBuild.meshConnectivity } : {}), meshStatistics: meshStatisticsForCoreModel(coreBuild) }
+        }
+      };
+    }
     if (study.type === "static_stress") {
       const loadCases = structuralLoadCases(study);
       const enabledCombinations = structuralLoadCombinations(study).filter((combination) => combination.enabled);
@@ -536,7 +585,7 @@ export function trySolveOpenCaeCoreStudy({ study, runId, displayModel, customMat
     }
     const solved = solveStudyModelWithCorePipeline({
       model: coreBuild.model,
-      analysisType,
+      analysisType: analysisType as "static_stress" | "dynamic_structural" | "modal_analysis",
       solverSettings: pipelineSolverSettingsForStudy(study),
       limits: BROWSER_SOLVE_LIMITS,
       hooks
@@ -550,9 +599,8 @@ export function trySolveOpenCaeCoreStudy({ study, runId, displayModel, customMat
           : `OpenCAE Core solve failed: ${solved.error.message}`
       };
     }
-    // The pipeline result is the cloud response contract (mm-N-s-MPa summary,
-    // surface-aligned fields, solver-surface mesh); the ResultSummary/ResultField
-    // schema types describe that same JSON shape.
+    // The local pipeline returns the stable mm-N-s-MPa summary, surface-aligned
+    // fields, and solver-surface mesh contract.
     const result = solved.result as unknown as Omit<LocalSolveResult, "artifacts"> & { artifacts?: Record<string, unknown> };
     return {
       ok: true,
@@ -575,8 +623,89 @@ export function trySolveOpenCaeCoreStudy({ study, runId, displayModel, customMat
   }
 }
 
+/** Automatic browser route: CPU through 150k DOFs. The experimental WebGPU
+ * matrix-free operator is gated until its CG loop is GPU-resident and the
+ * end-to-end large-model route has a benchmark-derived release ceiling. */
+export async function trySolveOpenCaeCoreStudyAutomatic(args: {
+  study: Study;
+  runId: string;
+  displayModel?: DisplayModel;
+  customMaterials?: readonly CustomMaterial[];
+  hooks?: SolverHooks;
+  onVariantComplete?: (variant: RunVariantResult, surfaceMesh?: unknown) => void;
+}): Promise<OpenCaeCoreSolveOutcome> {
+  const { study, runId, displayModel, customMaterials = [], hooks, onVariantComplete } = args;
+  if (study.type !== "static_stress") return trySolveOpenCaeCoreStudy(args);
+  const eligibility = openCaeCoreEligibility(study, displayModel, undefined, customMaterials);
+  if (!eligibility.ok) return eligibility;
+  try {
+    const coreBuild = buildOpenCaeCoreModelForStudy(study, displayModel, customMaterials);
+    const dofs = coreBuild.model.nodes.coordinates.length;
+    if (dofs <= CPU_TET_DOF_THRESHOLD) return trySolveOpenCaeCoreStudy(args);
+    if (!WEBGPU_TET4_AUTOMATIC_ENABLED) {
+      return {
+        ok: false,
+        code: "webgpu-automatic-route-disabled",
+        reason: `Model has ${dofs.toLocaleString()} DOFs, above the verified ${CPU_TET_DOF_THRESHOLD.toLocaleString()}-DOF browser CPU ceiling. Automatic WebGPU CG is disabled until its iteration loop is GPU-resident and benchmarked end to end.`
+      };
+    }
+    if (dofs > MAX_WEBGPU_TET4_DOFS) {
+      return { ok: false, code: "max-dofs-exceeded", reason: `Model has ${dofs.toLocaleString()} DOFs, above the WebGPU Tet4 ceiling of ${MAX_WEBGPU_TET4_DOFS.toLocaleString()}.` };
+    }
+    if (coreBuild.model.elementBlocks.some((block) => block.type !== "Tet4")) {
+      return { ok: false, code: "webgpu-tet4-required", reason: `Models above ${CPU_TET_DOF_THRESHOLD.toLocaleString()} DOFs require an all-Tet4 mesh for automatic WebGPU execution.` };
+    }
+    if ((coreBuild.model.meshConnections?.length ?? 0) > 0) {
+      return { ok: false, code: "webgpu-connections-unsupported", reason: "Large tie/contact assembly models currently require the CPU penalty-operator route; the WebGPU matrix-free operator does not omit connection stiffness." };
+    }
+    const enabledCombinations = structuralLoadCombinations(study).filter((combination) => combination.enabled);
+    if (enabledCombinations.length) {
+      return { ok: false, code: "webgpu-combinations-unsupported", reason: "WebGPU matrix-free execution currently supports independent static load cases, not load combinations." };
+    }
+    const loadCases = structuralLoadCases(study).filter((loadCase) => loadCase.enabled);
+    if (!loadCases.length) return { ok: false, code: "missing-load-cases", reason: "OpenCAE Core requires at least one enabled static load case." };
+    const variants: RunVariantResult[] = [];
+    let firstCore: CoreStructuralSolveResult | undefined;
+    for (const loadCase of loadCases) {
+      if (hooks?.shouldCancel?.()) return { ok: false, code: "cancelled", reason: "OpenCAE Core solve cancelled." };
+      const stepIndex = coreStepIndexForLoadCase(coreBuild.model, loadCase.id);
+      const solved = await solveStaticTet4ModelWebGpu(coreBuild.model, stepIndex, {
+        tolerance: Math.max(BROWSER_SOLVE_LIMITS.tolerance, 1e-6),
+        maxIterations: BROWSER_SOLVE_LIMITS.maxIterations,
+        hooks
+      });
+      if (!solved.ok) return { ok: false, code: solved.error.code, reason: `OpenCAE Core WebGPU solve failed: ${solved.error.message}` };
+      firstCore ??= solved.result;
+      const variant = runVariantFromCoreResult({ id: `case:${loadCase.id}`, name: loadCase.name, kind: "case", caseId: loadCase.id, result: solved.result, runId });
+      variants.push(variant);
+      onVariantComplete?.(variant, solved.result.surfaceMesh);
+    }
+    const active = variants[0];
+    if (!active || !firstCore) return { ok: false, code: "missing-load-cases", reason: "WebGPU solve returned no completed load case." };
+    return {
+      ok: true,
+      solverBackend: "opencae-core-webgpu-matrix-free-tet4",
+      result: {
+        summary: active.summary,
+        fields: active.fields,
+        variants,
+        activeVariantId: active.id,
+        surfaceMesh: firstCore.surfaceMesh,
+        diagnostics: firstCore.diagnostics,
+        artifacts: {
+          ...(firstCore.artifacts ?? {}),
+          ...(coreBuild.meshConnectivity ? { meshConnectivity: coreBuild.meshConnectivity } : {}),
+          meshStatistics: meshStatisticsForCoreModel(coreBuild)
+        }
+      }
+    };
+  } catch (error) {
+    return { ok: false, reason: error instanceof Error ? error.message : "OpenCAE Core automatic solve failed." };
+  }
+}
+
 /**
- * Solver settings handed to the mirrored cloud pipeline. Static studies pass
+ * Solver settings handed to the local browser pipeline. Static studies pass
  * their study settings through (bounded by the pipeline); dynamic studies pass
  * the same clamped transient settings that were written into the model's
  * dynamicLinear step, so the run matches both the step and the UI's frame
@@ -604,7 +733,7 @@ export function buildOpenCaeCoreModelForStudy(
   displayModel: DisplayModel | undefined,
   customMaterials: readonly CustomMaterial[] = []
 ): CoreStudyModel {
-  if (!displayModel?.dimensions) throw new Error("OpenCAE Core Cloud requires display dimensions before generating a Core model.");
+  if (!displayModel?.dimensions) throw new Error("OpenCAE Core Local requires display dimensions before generating a Core model.");
   const actualMesh = actualCoreVolumeMeshArtifact(study);
   const material = materialForStudy(study, customMaterials);
   const criticalLayerAxis = inferGlobalCriticalPrintAxis(study, displayModel.faces.map((face) => ({
@@ -621,7 +750,8 @@ export function buildOpenCaeCoreModelForStudy(
     youngModulus: effective.youngsModulus,
     poissonRatio: effective.poissonRatio,
     yieldStrength: effective.yieldStrength ?? material.material.yieldStrength,
-    density: effective.density ?? material.material.density
+    density: effective.density ?? material.material.density,
+    thermalConductivity: effective.thermalConductivity ?? material.material.thermalConductivity
   };
 
   let model: OpenCAEModelJson;
@@ -631,9 +761,9 @@ export function buildOpenCaeCoreModelForStudy(
 
   if (actualMesh?.model) {
     if (!hasActualCoreVolumeMesh(study, displayModel)) {
-      throw new Error("OpenCAE Core Cloud requires an actual Core volume mesh with actual_volume_mesh provenance and one connected component.");
+      throw new Error("OpenCAE Core Local requires an actual Core volume mesh with actual_volume_mesh provenance and a connected or explicitly joined assembly.");
     }
-    model = cloneModelForCloud(actualMesh.model);
+    model = cloneModelForLocalSolve(actualMesh.model);
     renderNodePoints = actualMesh.renderNodePoints?.length ? actualMesh.renderNodePoints : renderNodePointsForModel(model);
     meshSource = "actual_volume_mesh";
     meshConnectivity = connectedComponentCountForActualArtifact(actualMesh)
@@ -648,7 +778,7 @@ export function buildOpenCaeCoreModelForStudy(
       }
       throw new Error(OPENCAE_CORE_MESH_REQUIRED_REASON);
     }
-    const mesh = tetMeshForDisplayModel(displayModel, study.meshSettings.preset, CLOUD_STRUCTURED_BLOCK_TET10_NODE_BUDGET);
+    const mesh = tetMeshForDisplayModel(displayModel, study.meshSettings.preset, LOCAL_STRUCTURED_BLOCK_TET10_NODE_BUDGET);
     model = volumeMeshToModelJson({
       nodes: { coordinates: solverFrameCoordinates(mesh.solverCoordinates, displayModel) },
       materials: [coreMaterial],
@@ -661,7 +791,7 @@ export function buildOpenCaeCoreModelForStudy(
       coordinateSystem: { solverUnits: "m-N-s-Pa", renderCoordinateSpace: "solver" },
       meshProvenance: {
         kind: "opencae_core_fea",
-        solver: "opencae-core-cloud",
+        solver: "opencae-core-local",
         resultSource: "computed",
         meshSource: "structured_block_core"
       }
@@ -672,7 +802,7 @@ export function buildOpenCaeCoreModelForStudy(
 
   model = {
     ...model,
-    schemaVersion: "0.3.0",
+    schemaVersion: OPENCAE_MODEL_SCHEMA_VERSION,
     materials: [coreMaterial],
     // Stored mesh artifacts carry the material resolved at mesh time; the run
     // applies the study's current material, so every block must follow it or
@@ -682,7 +812,7 @@ export function buildOpenCaeCoreModelForStudy(
     )),
     meshProvenance: {
       kind: "opencae_core_fea",
-      solver: "opencae-core-cloud",
+      solver: "opencae-core-local",
       resultSource: "computed",
       meshSource
     },
@@ -697,7 +827,7 @@ export function buildOpenCaeCoreModelForStudy(
   const coreLoadNameByStudyLoadId = new Map<string, string>();
 
   for (const [index, constraint] of study.constraints.entries()) {
-    if (constraint.type !== "fixed") continue;
+    if (constraint.type !== "fixed" && constraint.type !== "prescribed_temperature") continue;
     const surfaceSet = ensureSurfaceSetForSelection({
       model,
       renderNodePoints,
@@ -707,13 +837,26 @@ export function buildOpenCaeCoreModelForStudy(
       surfaceSets
     });
     const nodeSet = deriveFixedSupportNodeSetFromSurface(`fixedNodes${index}`, surfaceSet.name, { ...model, surfaceSets });
-    if (!nodeSet.nodes.length) throw new Error(`OpenCAE Core Cloud could not map fixed support ${constraint.selectionRef} to mesh nodes.`);
+    if (!nodeSet.nodes.length) throw new Error(`OpenCAE Core Local could not map boundary ${constraint.selectionRef} to mesh nodes.`);
     nodeSets.push(nodeSet);
-    boundaryConditions.push({ name: `fixedSupport${index}`, type: "fixed", nodeSet: nodeSet.name, components: ["x", "y", "z"] });
+    boundaryConditions.push(constraint.type === "prescribed_temperature"
+      ? { name: `prescribedTemperature${index}`, type: "prescribedTemperature", nodeSet: nodeSet.name, value: Number(constraint.parameters.value ?? 20) }
+      : { name: `fixedSupport${index}`, type: "fixed", nodeSet: nodeSet.name, components: ["x", "y", "z"] });
   }
 
   const density = coreMaterial.density ?? material.material.density;
   for (const [index, load] of study.loads.entries()) {
+    if (load.type === "heat_generation") {
+      const elementSet = ensureElementSetForSelection(model, elementSets, study, displayModel, load.selectionRef);
+      const raw = Number(load.parameters.value ?? 0);
+      const units = String(load.parameters.units ?? "W/m^3").toLowerCase().replace(/³/g, "^3");
+      const mm = model.coordinateSystem?.solverUnits === "mm-N-s-MPa";
+      const generation = mm ? (units === "w/mm^3" ? raw : raw / 1e9) : (units === "w/mm^3" ? raw * 1e9 : raw);
+      const name = `volumetricHeatGeneration${index}`;
+      loads.push({ name, type: "volumetricHeatGeneration", elementSet: elementSet.name, generation });
+      coreLoadNameByStudyLoadId.set(load.id, name);
+      continue;
+    }
     if (load.type === "volume_force") {
       const elementSet = ensureElementSetForSelection(model, elementSets, study, displayModel, load.selectionRef);
       const direction = normalize(vector3(load.parameters.direction) ?? [0, 0, -1]);
@@ -738,6 +881,16 @@ export function buildOpenCaeCoreModelForStudy(
       selectionRef: load.selectionRef,
       surfaceSets
     });
+    if (load.type === "heat_flux") {
+      const raw = Number(load.parameters.value ?? 0);
+      const units = String(load.parameters.units ?? "W/m^2").toLowerCase().replace(/²/g, "^2");
+      const mm = model.coordinateSystem?.solverUnits === "mm-N-s-MPa";
+      const flux = mm ? (units === "w/mm^2" ? raw : raw / 1e6) : (units === "w/mm^2" ? raw * 1e6 : raw);
+      const name = `surfaceHeatFlux${index}`;
+      loads.push({ name, type: "surfaceHeatFlux", surfaceSet: surfaceSet.name, flux });
+      coreLoadNameByStudyLoadId.set(load.id, name);
+      continue;
+    }
     if (load.type === "pressure") {
       const pressure = pressurePascals(load);
       if (pressure <= 0) continue;
@@ -829,8 +982,39 @@ export function buildOpenCaeCoreModelForStudy(
     coreLoadNameByStudyLoadId.set(load.id, name);
   }
 
-  if (!boundaryConditions.length) throw new Error("OpenCAE Core Cloud requires at least one mapped fixed support.");
-  if (study.type !== "modal_analysis" && !loads.length) throw new Error("OpenCAE Core Cloud requires at least one mapped load.");
+  if (!boundaryConditions.length) throw new Error(study.type === "steady_state_thermal" ? "OpenCAE Core requires a mapped prescribed temperature." : "OpenCAE Core requires at least one mapped fixed support.");
+  if (study.type !== "modal_analysis" && study.type !== "steady_state_thermal" && !loads.length) throw new Error("OpenCAE Core requires at least one mapped load.");
+
+  const meshConnections: NonNullable<OpenCAEModelJson["meshConnections"]> = [];
+  for (const connection of study.contacts ?? []) {
+    // Boolean fuse is already reflected in the stored tetrahedral topology.
+    // Rebuilding it as a solver connection would be a silent no-op.
+    if (connection.type === "fuse") continue;
+    const source = ensureSurfaceSetForSelection({
+      model,
+      renderNodePoints,
+      displayModel,
+      study,
+      selectionRef: connection.source,
+      surfaceSets
+    });
+    const target = ensureSurfaceSetForSelection({
+      model,
+      renderNodePoints,
+      displayModel,
+      study,
+      selectionRef: connection.target,
+      surfaceSets
+    });
+    meshConnections.push({
+      type: connection.type,
+      source: source.name,
+      target: target.name,
+      ...(connection.type === "contact" ? { formulation: "frictionless" as const, kinematics: "small_sliding" as const } : {}),
+      ...(connection.searchTolerance !== undefined ? { searchTolerance: connection.searchTolerance } : {}),
+      ...(connection.penaltyScale !== undefined ? { penaltyScale: connection.penaltyScale } : {})
+    });
+  }
 
   model = {
     ...model,
@@ -839,12 +1023,13 @@ export function buildOpenCaeCoreModelForStudy(
     nodeSets,
     boundaryConditions,
     loads,
-    steps: coreCloudStepsForStudy(study, boundaryConditions.map((condition) => condition.name), coreLoadNameByStudyLoadId)
+    meshConnections,
+    steps: localStepsForStudy(study, boundaryConditions.map((condition) => condition.name), coreLoadNameByStudyLoadId)
   };
   const validation = validateModelJson(model);
   if (!validation.ok) {
     const first = validation.errors[0];
-    throw new Error(`OpenCAE Core Cloud generated an invalid Core model: ${first?.message ?? "validation failed"}`);
+    throw new Error(`OpenCAE Core Local generated an invalid Core model: ${first?.message ?? "validation failed"}`);
   }
 
   return {
@@ -864,7 +1049,7 @@ export function coreMeshStatisticsForStudy(
 }
 
 
-function cloneModelForCloud(model: OpenCAEModelJson): OpenCAEModelJson {
+function cloneModelForLocalSolve(model: OpenCAEModelJson): OpenCAEModelJson {
   return {
     ...model,
     nodes: { coordinates: [...model.nodes.coordinates] },
@@ -909,7 +1094,7 @@ function ensureSurfaceSetForSelection({
   const facets = sourceMatches.length
     ? sourceMatches
     : facetsForDisplaySelection(model.surfaceFacets ?? [], renderNodePoints, displayModel, study, selectionRef);
-  if (!facets.length) throw new Error(`OpenCAE Core Cloud could not map selection ${selectionRef} to Core surface facets.`);
+  if (!facets.length) throw new Error(`OpenCAE Core Local could not map selection ${selectionRef} to Core surface facets.`);
   const next = { name: selectionRef, facets: [...new Set(facets)].sort((left, right) => left - right) };
   surfaceSets.push(next);
   return next;
@@ -981,13 +1166,16 @@ function facetsForDisplaySelection(
   return [...result];
 }
 
-function coreCloudStepsForStudy(
+function localStepsForStudy(
   study: Study,
   boundaryConditions: string[],
   coreLoadNameByStudyLoadId: ReadonlyMap<string, string>
 ): StepJson[] {
   if (study.type === "modal_analysis") {
     return [{ name: "modalStep", type: "modal", boundaryConditions, modeCount: modalSettingsForStudy(study).modeCount }];
+  }
+  if (study.type === "steady_state_thermal") {
+    return [{ name: "thermalStep", type: "steadyStateThermal", boundaryConditions, loads: [...coreLoadNameByStudyLoadId.values()] }];
   }
   if (study.type !== "dynamic_structural") {
     return structuralLoadCases(study).map((loadCase) => ({
@@ -1274,7 +1462,7 @@ function meshStatisticsForCoreModel(coreModel: CoreStudyModel): CoreMeshStatisti
         ? [...new Set((surfaceSetByName.get(boundaryCondition.surfaceSet) ?? []).flatMap((facetId) => Array.from(facetById.get(facetId) ?? [])))]
         : undefined;
     if (!constrainedNodes) continue;
-    const components = boundaryCondition.type === "fixed" ? boundaryCondition.components : [boundaryCondition.component];
+    const components = boundaryCondition.type === "fixed" ? boundaryCondition.components : boundaryCondition.type === "prescribedDisplacement" ? [boundaryCondition.component] : [];
     for (const node of constrainedNodes) {
       for (const component of components) {
         const index = componentIndex.get(component);
@@ -1324,7 +1512,7 @@ function representativeElementSizeMm(model: OpenCAEModelJson): number {
 function tetMeshForDisplayModel(
   displayModel: DisplayModel,
   preset: Study["meshSettings"]["preset"],
-  nodeBudget = CLOUD_STRUCTURED_BLOCK_TET10_NODE_BUDGET
+  nodeBudget = LOCAL_STRUCTURED_BLOCK_TET10_NODE_BUDGET
 ): CoreTetMesh {
   const dimensions = displayModel.dimensions;
   if (!dimensions) throw new Error("OpenCAE Core requires display dimensions.");
@@ -1457,18 +1645,16 @@ function renderBoundsForDisplayModel(displayModel: DisplayModel): { min: Vec3; m
 }
 
 // The axis-aligned box face an outward face normal points at: the dominant-axis extreme of
-// the render bounds. Used by cloud facet selection so both backends resolve a selection to
-// the same face.
+// the render bounds. Used by local facet selection to resolve a selection to the
+// same face as the viewer.
 function facePlaneForNormal(normal: Vec3, bounds: { min: Vec3; max: Vec3 }): { axis: 0 | 1 | 2; plane: number } {
   const axis = dominantAxis(normal);
   return { axis, plane: normal[axis] < 0 ? bounds.min[axis] : bounds.max[axis] };
 }
 
-// Dimension-aware structured grid sizing, mirroring the cloud mesher: presets choose
+// Dimension-aware structured grid sizing: presets choose
 // how many cells span the smallest dimension, all axes target near-cubic cells, and
-// the elevated Tet10 grid stays inside the shared structured-block node budget.
-// Local and cloud structured-block solves now use the same density (the local
-// backend runs the full cloud pipeline on a dedicated solve worker).
+// the elevated Tet10 grid stays inside the local structured-block node budget.
 const LOCAL_CELLS_ACROSS_MIN_DIMENSION: Record<string, number> = {
   coarse: 2,
   medium: 3,
@@ -1476,12 +1662,9 @@ const LOCAL_CELLS_ACROSS_MIN_DIMENSION: Record<string, number> = {
   ultra: 5
 };
 const LOCAL_MAX_DIVISIONS_PER_AXIS = 32;
-// Cloud-parity structured-block tier (simple geometry with no separate geometry source):
-// sized for the retired Core Cloud runner, which had no in-browser worker-thread
-// constraint — ~8000 Tet10 nodes (~24000 DOFs), well under that runner's 100000-DOF
-// limit (SOLVER_LIMITS.maxDofs in the retired core-cloud server lineage;
-// the frozen golden fixtures pin this behavior).
-const CLOUD_STRUCTURED_BLOCK_TET10_NODE_BUDGET = 8000;
+// Structured-block tier for simple geometry with no separate geometry source:
+// ~8000 Tet10 nodes (~24000 DOFs), kept below the guarded local CPU ceiling.
+const LOCAL_STRUCTURED_BLOCK_TET10_NODE_BUDGET = 8000;
 
 function meshDivisionsForDimensions(
   dimensions: [number, number, number],
