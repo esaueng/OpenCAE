@@ -1,8 +1,8 @@
-import { isModalResultSummary } from "@opencae/schema";
+import { isStructuralResultSummary } from "@opencae/schema";
 import type { DisplayFace, ResultField, ResultSummary, StructuralResultSummary } from "@opencae/schema";
 import { semanticResultFieldKey, stressComponentForField } from "./resultSelection";
 
-export type ResultFieldMode = "stress" | "displacement" | "safety_factor" | "velocity" | "acceleration" | "mode_shape";
+export type ResultFieldMode = "stress" | "displacement" | "safety_factor" | "velocity" | "acceleration" | "mode_shape" | "temperature" | "heat_flux";
 
 export interface FaceResultSample {
   face: DisplayFace;
@@ -1064,6 +1064,8 @@ function resultProbeLabel(mode: ResultFieldMode, value: number, units = "") {
   if (mode === "acceleration") return `Accel: ${formatResultValue(value)}${unit}`;
   if (mode === "safety_factor") return `FoS: ${formatResultValue(value)}`;
   if (mode === "mode_shape") return `Amplitude: ${formatResultValue(value)}${unit}`;
+  if (mode === "temperature") return `Temperature: ${formatResultValue(value)}${unit}`;
+  if (mode === "heat_flux") return `Heat flux: ${formatResultValue(value)}${unit}`;
   return `Stress: ${formatResultValue(value)}${unit}`;
 }
 
@@ -1090,7 +1092,7 @@ type SolverResultBundle = {
  */
 export function withDerivedSurfaceSafetyFactorFields(results: SolverResultBundle): ResultField[] {
   const fields = results.fields;
-  if (!results.summary || isModalResultSummary(results.summary)) return fields;
+  if (!results.summary || !isStructuralResultSummary(results.summary)) return fields;
   const yieldMpa = solverYieldStressMpa(results.summary);
   if (!yieldMpa) return fields;
   const surfaceStressFields = fields.filter((field) =>

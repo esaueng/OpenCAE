@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { isModalResultSummary } from "@opencae/schema";
+import { isModalResultSummary, isStructuralResultSummary } from "@opencae/schema";
 import type { DisplayModel, Study } from "@opencae/schema";
 import { bracketDemoProject, bracketDisplayModel } from "@opencae/db/sample-data";
 import { validateModelJson } from "@opencae/core";
@@ -120,7 +120,7 @@ describe("OpenCAE Core browser solver adapter", () => {
 
     expect(outcome.ok).toBe(true);
     if (!outcome.ok) throw new Error(outcome.reason);
-    if (isModalResultSummary(outcome.result.summary)) throw new Error("Expected structural results.");
+    if (!isStructuralResultSummary(outcome.result.summary)) throw new Error("Expected structural results.");
     expect(outcome.solverBackend).toBe("opencae-core-sparse-tet");
     // Cloud-parity contract: same provenance stamp as the deployed runner,
     // with a browser runnerVersion (honest about where it was computed).
@@ -212,7 +212,7 @@ describe("OpenCAE Core browser solver adapter", () => {
     expect(eligibility).toEqual({ ok: true });
     if (!outcome.ok) throw new Error(outcome.reason);
     expect(outcome.ok).toBe(true);
-    if (isModalResultSummary(outcome.result.summary)) throw new Error("Expected dynamic structural results.");
+    if (!isStructuralResultSummary(outcome.result.summary)) throw new Error("Expected dynamic structural results.");
     expect(outcome.solverBackend).toBe("opencae-core-mdof-tet");
     expect(outcome.result.summary.provenance).toMatchObject({
       kind: "opencae_core_fea",
@@ -272,7 +272,7 @@ describe("OpenCAE Core browser solver adapter", () => {
   test("builds a valid v0.3 Core Cloud model for a simple block study", () => {
     const result = buildOpenCaeCoreModelForStudy(staticStudy, displayModel);
 
-    expect(result.model.schemaVersion).toBe("0.3.0");
+    expect(result.model.schemaVersion).toBe("0.4.0");
     expect(validateModelJson(result.model).ok).toBe(true);
     expect(result.model.meshProvenance?.meshSource).toBe("structured_block_core");
     expect(result.model.surfaceFacets?.length).toBeGreaterThan(0);
@@ -395,7 +395,7 @@ describe("OpenCAE Core browser solver adapter", () => {
     expect(xBuild.ok).toBe(true);
     expect(yBuild.ok).toBe(true);
     if (!xBuild.ok || !yBuild.ok) throw new Error("Expected both directional FDM studies to solve.");
-    if (isModalResultSummary(xBuild.result.summary) || isModalResultSummary(yBuild.result.summary)) throw new Error("Expected structural FDM results.");
+    if (!isStructuralResultSummary(xBuild.result.summary) || !isStructuralResultSummary(yBuild.result.summary)) throw new Error("Expected structural FDM results.");
     expect(xBuild.result.summary.maxStress).toBeCloseTo(yBuild.result.summary.maxStress, 3);
     expect(xBuild.result.summary.maxDisplacement).toBeGreaterThan(yBuild.result.summary.maxDisplacement * 1.25);
     expect(xBuild.result.summary.safetyFactor).toBeLessThan(yBuild.result.summary.safetyFactor * 0.6);

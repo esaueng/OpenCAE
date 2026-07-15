@@ -1,6 +1,6 @@
 import type { SolveProgressEvent } from "@opencae/solve-pipeline";
 import type { RunVariantResult } from "@opencae/schema";
-import { trySolveOpenCaeCoreStudy } from "./opencaeCoreSolve";
+import { trySolveOpenCaeCoreStudyAutomatic } from "./opencaeCoreSolve";
 import type { LocalSolveResult } from "./performanceProtocol";
 import {
   createSolveWorkerRequestId,
@@ -134,13 +134,13 @@ function startInlineSolve(
   const completion = new Promise<LocalSolveCompletion>((resolve, reject) => {
     // Deferred one tick so callers can subscribe/cancel before the synchronous
     // solve blocks this thread.
-    setTimeout(() => {
+    setTimeout(async () => {
       if (cancelled) {
         reject(new LocalSolveError("OpenCAE Core solve cancelled.", "cancelled"));
         return;
       }
       try {
-        const outcome = trySolveOpenCaeCoreStudy({
+        const outcome = await trySolveOpenCaeCoreStudyAutomatic({
           study: payload.study,
           runId: payload.runId,
           displayModel: payload.displayModel,

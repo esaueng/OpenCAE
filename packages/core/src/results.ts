@@ -90,7 +90,8 @@ export type CoreSolveSummary = CoreStructuralSolveSummary | CoreModalSolveSummar
 
 export type CoreSolveProvenance = {
   kind: "opencae_core_fea";
-  solver: "opencae-core-cloud" | "opencae-core-sparse-tet" | "opencae-core-mdof-tet" | "opencae-core-modal-tet";
+  solver: "opencae-core-cloud" | "opencae-core-sparse-tet" | "opencae-core-mdof-tet" | "opencae-core-modal-tet" | "opencae-core-webgpu-matrix-free-tet4";
+  coreSolver?: string;
   resultSource: "computed";
   meshSource: "actual_volume_mesh" | "structured_block_core";
   units: "mm-N-s-MPa";

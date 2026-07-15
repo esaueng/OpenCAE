@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { isModalResultSummary } from "@opencae/schema";
-import { attachUploadedModelToProject, createLocalBlankProject, createLocalModalStudy, createLocalSampleProject, createLocalStaticStressStudy, openLocalProjectPayload, uploadedDisplayModelFor } from "./localProjectFactory";
+import { isStructuralResultSummary } from "@opencae/schema";
+import { attachUploadedModelToProject, createLocalBlankProject, createLocalModalStudy, createLocalSampleProject, createLocalStaticStressStudy, createLocalThermalStudy, openLocalProjectPayload, uploadedDisplayModelFor } from "./localProjectFactory";
 import { BRACKET_CORE_CLOUD_GEOMETRY, BRACKET_GEOMETRY_MIGRATION_NOTE } from "./bracketGeometryMigration";
 
 const sizedAsciiStlBase64 = btoa(`
@@ -54,6 +54,17 @@ describe("local project factory workflow", () => {
     expect(study.type).toBe("modal_analysis");
     expect(study.solverSettings).toMatchObject({ modeCount: 6 });
     expect(study.loads).toEqual([]);
+  });
+
+  test("creates steady thermal studies without structural load cases", () => {
+    const project = createLocalBlankProject("2026-04-28T12:00:00.000Z").project;
+    const displayModel = uploadedDisplayModelFor("sample-bar.stl", sizedAsciiStlBase64);
+    const study = createLocalThermalStudy(project, displayModel, "study-thermal", "2026-04-28T12:02:00.000Z");
+    expect(study.type).toBe("steady_state_thermal");
+    expect(study.name).toBe("Steady-State Thermal");
+    expect(study.constraints).toEqual([]);
+    expect(study.loads).toEqual([]);
+    expect(study.loadCases).toEqual([]);
   });
 
   test("uses the uploaded file name as the default project name", () => {
@@ -222,7 +233,7 @@ describe("local project factory workflow", () => {
     });
 
     expect(response.displayModel.id).toBe("display-saved");
-    if (!response.results || isModalResultSummary(response.results.summary)) throw new Error("Expected structural results.");
+    if (!response.results || !isStructuralResultSummary(response.results.summary)) throw new Error("Expected structural results.");
     expect(response.results?.summary.maxStress).toBe(12);
     expect(response.results?.fields).toHaveLength(1);
   });

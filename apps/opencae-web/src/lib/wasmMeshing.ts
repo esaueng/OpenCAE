@@ -95,6 +95,7 @@ export type WasmMeshStudyResult = { study: Study; message: string } | null;
 export function coreAnalysisTypeForStudy(study: Pick<Study, "type">): CloudAnalysisType {
   if (study.type === "dynamic_structural") return "dynamic_structural";
   if (study.type === "modal_analysis") return "modal_analysis";
+  if (study.type === "steady_state_thermal") return "steady_state_thermal";
   return "static_stress";
 }
 
@@ -237,6 +238,7 @@ async function meshWorkerRunExclusive(options: WasmMeshOptions, cancellationGene
         units: geometry.units ?? "mm",
         meshSizeMm: options.meshSizeMm,
         structuralBodyBounds: stepStructuralBodyPlan?.structuralBodyBounds,
+        preservePartIdentity: study.contacts.some((connection) => connection.type === "tie" || connection.type === "contact"),
         attribution
       },
       onWorkerProgress

@@ -194,7 +194,7 @@ function compareStructures(
   // The fixtures remain an honest record of runner 0.1.6. The current reader
   // upgrades those embedded v0.2 models before solving, so only this diagnostic
   // version stamp is expected to advance.
-  if (path.endsWith(".coreModelSchemaVersion") && actual === "0.3.0" && expected === "0.2.0") return;
+  if (path.endsWith(".coreModelSchemaVersion") && actual === "0.4.0" && (expected === "0.2.0" || expected === "0.3.0")) return;
   if (!Object.is(actual, expected)) {
     mismatches.push(`${path}: ${String(actual)} != ${String(expected)}`);
   }
