@@ -42,4 +42,18 @@ describe("SampleOptionCard", () => {
     expect(onOpen).toHaveBeenCalledTimes(1);
     expect(onOpen).toHaveBeenCalledWith("plate");
   });
+
+  test("describes modal and thermal sample setup instead of structural loads", () => {
+    const modalHtml = renderToStaticMarkup(
+      <SampleOptionCard option={SAMPLE_OPTIONS[0]!} selected analysisType="modal_analysis" onSelect={vi.fn()} onOpen={vi.fn()} />
+    );
+    const thermalHtml = renderToStaticMarkup(
+      <SampleOptionCard option={SAMPLE_OPTIONS[0]!} selected analysisType="steady_state_thermal" onSelect={vi.fn()} onOpen={vi.fn()} />
+    );
+
+    expect(modalHtml).toContain("6 natural modes");
+    expect(modalHtml).not.toContain("Top face force");
+    expect(thermalHtml).toContain("20 °C reference");
+    expect(thermalHtml).toContain("10 kW/m² heat flux");
+  });
 });

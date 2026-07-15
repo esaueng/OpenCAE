@@ -640,6 +640,9 @@ describe("RightPanel payload mass controls", () => {
     expect(html).toContain("Cantilever Demo");
     expect(html).toContain("Static");
     expect(html).toContain("Dynamic");
+    expect(html).toContain("Modal");
+    expect(html).toContain("Thermal");
+    expect(html).toContain("sample-analysis-type-grid");
     expect(html).toContain("Load dynamic sample");
     expect(html).toContain("Dynamic Structural");
   });

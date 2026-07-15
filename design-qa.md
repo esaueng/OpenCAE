@@ -39,3 +39,46 @@ No actionable P0, P1, or P2 mismatch remains.
 - Production result: `cae.esau.app` loaded `Download Project` and the 2 x 2 selector from Cloudflare version `5e287837-2763-4b8c-b4bb-8b5ece210117` with no console errors or warnings.
 
 final result: passed
+
+# Design QA: Sample Analysis Projects
+
+- Source visual truth: the production sample-project picker before this change, captured at `/private/tmp/opencae-sample-menu-before.png`
+- Implementation screenshots: `/private/tmp/opencae-sample-menu-after.png`, `/private/tmp/opencae-sample-thermal-run.png`, and `/private/tmp/opencae-sample-menu-mobile.png`
+- Viewports: 1280 x 720 desktop and 390 x 844 responsive
+- States: sample picker with Static selected; Modal Beam Demo; Thermal Bracket Demo at the Run step
+
+## Full-view comparison evidence
+
+The source and implementation captures preserve the existing centered start-screen composition, sample cards, typography, colors, and primary action. The intentional change is a second analysis row containing `Modal` and `Thermal`. Each analysis type retains the same three geometry choices, producing twelve built-in sample combinations without enlarging the surrounding cards.
+
+## Focused region comparison evidence
+
+The desktop picker is a 180 x 62 px two-column grid with four 30 px controls. The responsive picker preserves the same 2 x 2 arrangement and reports zero horizontal document overflow. Modal cards replace force details with `6 natural modes`; Thermal cards show `20 °C reference` and `10 kW/m² heat flux`.
+
+## Required fidelity surfaces
+
+- Fonts and typography: unchanged; the existing monospace control and metadata styles are reused.
+- Spacing and layout rhythm: the selector adds one compact row while preserving the width and alignment of the sample cards and primary action.
+- Colors and visual tokens: unchanged; existing active, border, surface, and semantic tokens are reused.
+- Image quality and asset fidelity: existing procedural sample thumbnails are reused. Modal suppresses the misleading load arrow, while Thermal retains the face-direction cue.
+- Copy and content: labels use `Modal` and `Thermal`; project headers use the full study names `Modal Analysis` and `Steady-State Thermal`.
+
+## Findings
+
+No actionable P0, P1, or P2 mismatch remains.
+
+## Comparison history
+
+1. Initial state: only Static and Dynamic were available in the sample-project picker.
+2. Fixes: introduced shared four-mode options; added valid Modal and Thermal factories in the browser and API; added mode-specific metadata, summaries, and Run readiness.
+3. Post-fix evidence: all four analysis types are present in a balanced grid; Modal and Thermal samples load across Bracket, Beam, and Cantilever geometries; desktop and responsive layouts do not overflow.
+
+## Interaction and runtime checks
+
+- Modal flow: sample menu -> Modal -> Beam Demo -> Run. The project loads with a fixed support, six requested natural modes, no force load, and an enabled Run action.
+- Thermal flow: sample menu -> Thermal -> Bracket Demo -> Run. The project loads with a 20 °C prescribed-temperature reference, a 10,000 W/m² heat-flux load, completed readiness checks, and an enabled Run action.
+- Schema result: every new geometry/analysis combination validates against `ProjectSchema`; `validateStudy` reports no diagnostics for Modal or Thermal samples.
+- Responsive result: at 390 x 844, the analysis options remain in a two-column grid with no horizontal document overflow.
+- Runtime result: local browser checks completed without application console errors; the only warning was the expected analytics suppression on localhost.
+
+final result: passed

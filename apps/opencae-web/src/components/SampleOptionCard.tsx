@@ -12,6 +12,8 @@ interface SampleOptionCardProps {
 }
 
 export function SampleOptionCard({ option, selected, compact = false, analysisType = "static_stress", onSelect, onOpen }: SampleOptionCardProps) {
+  const meta = sampleMetaForAnalysis(option, analysisType);
+
   function handleKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
     if (event.key !== "Enter" && event.key !== " ") return;
     event.preventDefault();
@@ -28,20 +30,23 @@ export function SampleOptionCard({ option, selected, compact = false, analysisTy
       onDoubleClick={() => onOpen(option.id)}
       onKeyDown={handleKeyDown}
     >
-      <SampleThumbnail option={option} dynamic={analysisType === "dynamic_structural"} />
+      <SampleThumbnail option={option} analysisType={analysisType} />
       <span className="sample-option-copy">
         <strong>{option.title}</strong>
         <small>{option.description}</small>
       </span>
       <span className="sample-option-meta">
-        <span>{option.support}</span>
-        <span>{option.load}</span>
+        <span>{meta.support}</span>
+        <span>{meta.action}</span>
       </span>
     </button>
   );
 }
 
-function SampleThumbnail({ option, dynamic }: { option: SampleOption; dynamic: boolean }) {
+function SampleThumbnail({ option, analysisType }: { option: SampleOption; analysisType: SampleAnalysisType }) {
+  const vibrating = analysisType === "dynamic_structural" || analysisType === "modal_analysis";
+  const dynamicLoad = analysisType === "dynamic_structural";
+  const showLoad = analysisType !== "modal_analysis";
   if (option.imageSrc) {
     return (
       <span className={`sample-thumbnail sample-thumbnail-${option.thumbnail}`} aria-hidden="true">
@@ -54,9 +59,9 @@ function SampleThumbnail({ option, dynamic }: { option: SampleOption; dynamic: b
     <span className={`sample-thumbnail sample-thumbnail-${option.thumbnail}`} aria-hidden="true">
       <svg viewBox="0 0 160 104" role="img">
         <ThumbnailDefs id={option.id} />
-        {option.thumbnail === "bracket" && <BracketArt id={option.id} dynamic={dynamic} />}
-        {option.thumbnail === "beam" && <BeamArt id={option.id} dynamic={dynamic} />}
-        {option.thumbnail === "cantilever" && <CantileverArt id={option.id} dynamic={dynamic} />}
+        {option.thumbnail === "bracket" && <BracketArt id={option.id} vibrating={vibrating} dynamicLoad={dynamicLoad} showLoad={showLoad} />}
+        {option.thumbnail === "beam" && <BeamArt id={option.id} vibrating={vibrating} dynamicLoad={dynamicLoad} showLoad={showLoad} />}
+        {option.thumbnail === "cantilever" && <CantileverArt id={option.id} vibrating={vibrating} dynamicLoad={dynamicLoad} showLoad={showLoad} />}
       </svg>
     </span>
   );
@@ -129,7 +134,14 @@ function DynamicWaveBadge() {
   return <path className="sample-wave" d="M118 92 q4 -8 8 0 q4 8 8 0 q4 -8 8 0" />;
 }
 
-function BracketArt({ id, dynamic }: { id: string; dynamic: boolean }) {
+interface SampleArtProps {
+  id: string;
+  vibrating: boolean;
+  dynamicLoad: boolean;
+  showLoad: boolean;
+}
+
+function BracketArt({ id, vibrating, dynamicLoad, showLoad }: SampleArtProps) {
   return (
     <g>
       <ellipse className="sample-shadow" cx="74" cy="92" rx="52" ry="9" fill={`url(#oc-shadow-${id})`} />
@@ -149,14 +161,14 @@ function BracketArt({ id, dynamic }: { id: string; dynamic: boolean }) {
       <ellipse className="sample-hole" cx="68.5" cy="63" rx="5" ry="2.8" transform="rotate(-24 68.5 63)" />
       <ellipse className="sample-support-ring" cx="50.6" cy="70.8" rx="7.6" ry="4.4" transform="rotate(-24 50.6 70.8)" />
       <ellipse className="sample-support-ring" cx="68.5" cy="63" rx="7.6" ry="4.4" transform="rotate(-24 68.5 63)" />
-      {dynamic && <VibrationArcs x={84} y={11} />}
-      {dynamic && <DynamicWaveBadge />}
-      <LoadArrow x={84} tipY={22} length={dynamic ? 18 : 16} dynamic={dynamic} />
+      {vibrating && <VibrationArcs x={84} y={11} />}
+      {vibrating && <DynamicWaveBadge />}
+      {showLoad && <LoadArrow x={84} tipY={22} length={dynamicLoad ? 18 : 16} dynamic={dynamicLoad} />}
     </g>
   );
 }
 
-function BeamArt({ id, dynamic }: { id: string; dynamic: boolean }) {
+function BeamArt({ id, vibrating, dynamicLoad, showLoad }: SampleArtProps) {
   return (
     <g>
       <ellipse className="sample-shadow" cx="78" cy="90" rx="58" ry="9" fill={`url(#oc-shadow-${id})`} />
@@ -175,14 +187,14 @@ function BeamArt({ id, dynamic }: { id: string; dynamic: boolean }) {
       <path className="sample-face" fill={`url(#oc-pay-end-${id})`} d="M92.1 23.5 L104.2 30.1 L104.2 45.1 L92.1 38.5 Z" />
       <path className="sample-face" fill={`url(#oc-pay-side-${id})`} d="M104.2 30.1 L122.6 24.5 L122.6 39.5 L104.2 45.1 Z" />
       <path className="sample-face" fill={`url(#oc-pay-top-${id})`} d="M92.1 23.5 L110.5 17.9 L122.6 24.5 L104.2 30.1 Z" />
-      {dynamic && <VibrationArcs x={107} y={10} />}
-      {dynamic && <DynamicWaveBadge />}
-      <LoadArrow x={107} tipY={16} length={dynamic ? 14 : 12} dynamic={dynamic} />
+      {vibrating && <VibrationArcs x={107} y={10} />}
+      {vibrating && <DynamicWaveBadge />}
+      {showLoad && <LoadArrow x={107} tipY={16} length={dynamicLoad ? 14 : 12} dynamic={dynamicLoad} />}
     </g>
   );
 }
 
-function CantileverArt({ id, dynamic }: { id: string; dynamic: boolean }) {
+function CantileverArt({ id, vibrating, dynamicLoad, showLoad }: SampleArtProps) {
   return (
     <g>
       <ellipse className="sample-shadow" cx="82" cy="93" rx="56" ry="8" fill={`url(#oc-shadow-${id})`} />
@@ -199,9 +211,15 @@ function CantileverArt({ id, dynamic }: { id: string; dynamic: boolean }) {
       <path className="sample-face" fill={`url(#oc-end-${id})`} d="M122 27 L138 36 L138 54 L122 45 Z" />
       <path className="sample-face" fill={`url(#oc-side-${id})`} d="M50 60 L138 36 L138 54 L50 78 Z" />
       <path className="sample-face" fill={`url(#oc-top-${id})`} d="M34 51 L122 27 L138 36 L50 60 Z" />
-      {dynamic && <VibrationArcs x={130} y={15} />}
-      {dynamic && <DynamicWaveBadge />}
-      <LoadArrow x={130} tipY={29} length={dynamic ? 23 : 21} dynamic={dynamic} />
+      {vibrating && <VibrationArcs x={130} y={15} />}
+      {vibrating && <DynamicWaveBadge />}
+      {showLoad && <LoadArrow x={130} tipY={29} length={dynamicLoad ? 23 : 21} dynamic={dynamicLoad} />}
     </g>
   );
+}
+
+function sampleMetaForAnalysis(option: SampleOption, analysisType: SampleAnalysisType): { support: string; action: string } {
+  if (analysisType === "modal_analysis") return { support: option.support, action: "6 natural modes" };
+  if (analysisType === "steady_state_thermal") return { support: "20 °C reference", action: "10 kW/m² heat flux" };
+  return { support: option.support, action: option.load };
 }
