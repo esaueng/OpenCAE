@@ -1669,7 +1669,7 @@ function RunPanel({ study, displayModel, runProgress, runError, runTiming, onRun
       <SectionTitle helpId="simulationSettings">Simulation settings</SectionTitle>
       <div className="field">
         <span>Analysis type</span>
-        <div className="segmented analysis-type" role="group" aria-label="Analysis type">
+        <div className="segmented analysis-type run-analysis-type" role="group" aria-label="Analysis type">
           <button
             className={study.type === "static_stress" ? "active" : ""}
             type="button"

@@ -104,6 +104,16 @@ describe("app CSS", () => {
     expect(shortcutPopover).toMatch(/box-shadow:\s*var\(--shadow-panel\)/);
   });
 
+  test("balances the four Run analysis types in a two-column grid", () => {
+    const runAnalysisType = cssRule(".segmented.run-analysis-type");
+    const evenButtons = cssRule(".segmented.run-analysis-type button:nth-child(2n)");
+    const firstRowButtons = cssRule(".segmented.run-analysis-type button:nth-child(-n + 2)");
+
+    expect(runAnalysisType).toMatch(/grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/);
+    expect(evenButtons).toMatch(/border-right:\s*0/);
+    expect(firstRowButtons).toMatch(/border-bottom:\s*var\(--border-thin\)/);
+  });
+
   test("keeps light mode shared text colors above contrast requirements", () => {
     const lightSurface = lightToken("--color-surface");
     const textTokens = ["--color-text", "--color-text-muted", "--color-text-subtle", "--color-accent", "--color-warning", "--color-error", "--color-success"];

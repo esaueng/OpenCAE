@@ -677,6 +677,7 @@ describe("RightPanel payload mass controls", () => {
   test("offers an analysis-type switch on the run panel reflecting the study type", () => {
     const staticHtml = renderPanel("run");
     expect(staticHtml).toContain('aria-label="Analysis type"');
+    expect(staticHtml).toContain('class="segmented analysis-type run-analysis-type"');
     expect(staticHtml).toMatch(/aria-pressed="true"[^>]*>Static</);
     expect(staticHtml).toMatch(/aria-pressed="false"[^>]*>Dynamic</);
 
