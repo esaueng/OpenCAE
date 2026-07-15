@@ -57,8 +57,8 @@ export const SETTING_HELP: Record<SettingHelpId, SettingHelp> = {
     visual: "dimensions"
   },
   orientation: {
-    title: "Model orientation",
-    body: "Rotates the imported model around the global X, Y, or Z axis so the part matches the Z-up coordinate system used for directions, gravity, and dimensions.",
+    title: "Orientation",
+    body: "Aims the camera straight down the global X, Y, or Z axis, so you can check the part against the Z-up frame that directions, gravity, and dimensions are measured in. These buttons move the camera only: the model is never rotated, which is why the angles below stay at zero and Reset stays greyed out.",
     visual: "axis"
   },
   materialLibrary: {
@@ -128,7 +128,7 @@ export const SETTING_HELP: Record<SettingHelpId, SettingHelp> = {
   },
   loadCases: {
     title: "Load cases",
-    body: "Groups loads into named scenarios that share the same geometry, supports, material, and mesh, so only the loads differ between them. Every load belongs to exactly one case: add a second case and each load gains a Case picker to move it. A case cannot be deleted while it still holds loads, or while a combination refers to it.",
+    body: "Groups loads into named scenarios that share the same geometry, supports, material, and mesh, so only the loads differ between them. Every load belongs to exactly one case: add a second case and each load gains a Case picker to move it. Only enabled cases are solved and returned as results — a disabled case is still solved behind the scenes when an enabled combination needs it, but it never appears as a result of its own. A case cannot be deleted while it still holds loads, or while a combination refers to it.",
     visual: "load"
   },
   meshQuality: {
