@@ -1,12 +1,14 @@
 export const OPENCAE_MODEL_SCHEMA = "opencae.model";
-export const OPENCAE_MODEL_SCHEMA_VERSION = "0.3.0";
-export const OPENCAE_PREVIOUS_MODEL_SCHEMA_VERSION = "0.2.0";
-export const OPENCAE_LEGACY_MODEL_SCHEMA_VERSION = "0.1.0";
+export const OPENCAE_MODEL_SCHEMA_VERSION = "0.4.0";
+export const OPENCAE_PREVIOUS_MODEL_SCHEMA_VERSION = "0.3.0";
+export const OPENCAE_LEGACY_MODEL_SCHEMA_VERSION = "0.2.0";
+export const OPENCAE_OLDEST_MODEL_SCHEMA_VERSION = "0.1.0";
 
 export type OpenCAEModelSchemaVersion =
   | typeof OPENCAE_MODEL_SCHEMA_VERSION
   | typeof OPENCAE_PREVIOUS_MODEL_SCHEMA_VERSION
-  | typeof OPENCAE_LEGACY_MODEL_SCHEMA_VERSION;
+  | typeof OPENCAE_LEGACY_MODEL_SCHEMA_VERSION
+  | typeof OPENCAE_OLDEST_MODEL_SCHEMA_VERSION;
 
 export type ElementType = "Tet4" | "Tet10";
 
@@ -37,6 +39,8 @@ export type IsotropicLinearElasticMaterialJson = {
   poissonRatio: number;
   yieldStrength?: number;
   density?: number;
+  /** Isotropic conductivity in W/(m*K) for m-N-s-Pa or W/(mm*K) for mm-N-s-MPa. */
+  thermalConductivity?: number;
 };
 
 export type ElementBlockJson = {
@@ -102,6 +106,12 @@ export type MeshConnectionJson = {
   type: "tie" | "contact" | "fuse";
   source: string;
   target: string;
+  /** Small-sliding node-to-surface search tolerance in solver length units. */
+  searchTolerance?: number;
+  /** Dimensionless multiplier on E*h for penalty MPC enforcement. */
+  penaltyScale?: number;
+  formulation?: "frictionless";
+  kinematics?: "small_sliding";
 };
 
 export type PhysicalGroupJson = {
@@ -114,7 +124,7 @@ export type PhysicalGroupJson = {
   material?: string;
 };
 
-export type BoundaryConditionJson = FixedBoundaryConditionJson | PrescribedDisplacementBoundaryConditionJson;
+export type BoundaryConditionJson = FixedBoundaryConditionJson | PrescribedDisplacementBoundaryConditionJson | PrescribedTemperatureBoundaryConditionJson;
 
 export type FixedBoundaryConditionJson = {
   name: string;
@@ -139,6 +149,16 @@ export type PrescribedDisplacementBoundaryConditionJson = {
   value: number;
 };
 
+export type PrescribedTemperatureBoundaryConditionJson = {
+  name: string;
+  type: "prescribedTemperature";
+  /** Temperature in degrees Celsius; steady conduction depends on differences. */
+  value: number;
+} & (
+  | { nodeSet: string; surfaceSet?: never }
+  | { surfaceSet: string; nodeSet?: never }
+);
+
 export type DisplacementComponent = "x" | "y" | "z";
 
 export type LoadJson =
@@ -149,7 +169,9 @@ export type LoadJson =
   | SurfaceTractionLoadJson
   | BodyForceDensityLoadJson
   | RemoteForceLoadJson
-  | EquivalentBoltPreloadLoadJson;
+  | EquivalentBoltPreloadLoadJson
+  | SurfaceHeatFluxLoadJson
+  | VolumetricHeatGenerationLoadJson;
 
 export type NodalForceLoadJson = {
   name: string;
@@ -214,7 +236,23 @@ export type EquivalentBoltPreloadLoadJson = {
   preloadForce: number;
 };
 
-export type StepJson = StaticLinearStepJson | DynamicLinearStepJson | ModalStepJson;
+/** Positive heat flux enters the body; units follow coordinateSystem solver length. */
+export type SurfaceHeatFluxLoadJson = {
+  name: string;
+  type: "surfaceHeatFlux";
+  surfaceSet: string;
+  flux: number;
+};
+
+/** Uniform volumetric heat generation; units are W/m^3 or W/mm^3. */
+export type VolumetricHeatGenerationLoadJson = {
+  name: string;
+  type: "volumetricHeatGeneration";
+  elementSet: string;
+  generation: number;
+};
+
+export type StepJson = StaticLinearStepJson | DynamicLinearStepJson | ModalStepJson | SteadyStateThermalStepJson;
 
 export type StaticLinearStepJson = {
   name: string;
@@ -247,6 +285,13 @@ export type ModalStepJson = {
   type: "modal";
   boundaryConditions: string[];
   modeCount: number;
+};
+
+export type SteadyStateThermalStepJson = {
+  name: string;
+  type: "steadyStateThermal";
+  boundaryConditions: string[];
+  loads: string[];
 };
 
 export type ResultSampleLocation = "node" | "element" | "integration_point";

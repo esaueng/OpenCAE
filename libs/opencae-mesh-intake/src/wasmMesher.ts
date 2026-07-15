@@ -32,6 +32,8 @@ export type StepMeshWasmOptions = MeshWasmOptions & {
   meshSizeMm?: number;
   /** Exact preview-body bounds to retain as structural solids; other disconnected STEP volumes are payload/visual-only. */
   structuralBodyBounds?: StepBodyBounds[];
+  /** Preserve imported STEP volumes as separate mesh components for assembly connections. Defaults to false for legacy single-part studies. */
+  preservePartIdentity?: boolean;
 };
 
 export type StepBodyBounds = {
@@ -634,7 +636,7 @@ function meshStepSession(
       // solver rejects as multiple components. Fuse them into one part up
       // front; genuinely disjoint bodies are left alone (the payload-body plan
       // and the connected-component check own that case).
-      multiBodyFusion = fuseImportedStepVolumes(gmsh);
+      if (!options.preservePartIdentity) multiBodyFusion = fuseImportedStepVolumes(gmsh);
       const importedSurfaceCount = entityTags(gmsh, 2).length;
       const importedOpenBoundaryCurveCount = openBoundaryCurveTags(gmsh).length;
       preferQualityRepair = repairProfile === false &&

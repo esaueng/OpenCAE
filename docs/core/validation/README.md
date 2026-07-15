@@ -12,7 +12,7 @@ OpenCAE Core requires an actual volume mesh for complex geometry. Use Cloud FEA 
 
 ## Model Schema
 
-Schema `0.2.0` adds Tet4/Tet10 element blocks, surface facets, surface sets, surface force and pressure loads, dynamic linear steps, coordinate metadata, mesh provenance, and optional mesh connection metadata. Schema `0.3.0` adds modal steps, normalized vector mode-shape results, surface traction, body force density, remote force, and equivalent bolt preload. Legacy `0.1.0` and `0.2.0` models remain accepted.
+Schema `0.2.0` adds Tet4/Tet10 element blocks, surface facets, surface sets, surface force and pressure loads, dynamic linear steps, coordinate metadata, mesh provenance, and optional mesh connection metadata. Schema `0.3.0` adds modal steps, normalized vector mode-shape results, surface traction, body force density, remote force, and equivalent bolt preload. Schema `0.4.0` adds thermal material data, steady conduction boundary conditions/loads/steps, and solved tie/contact metadata. Legacy `0.1.0`, `0.2.0`, and `0.3.0` models remain accepted.
 
 The CPU solver supports Tet4 and Tet10 stiffness, recovery, mass, and load integration. Tet10 inertial and body-force lumping uses positive HRZ weights with exact total-mass/resultant conservation.
 
@@ -20,7 +20,9 @@ The CPU solver supports Tet4 and Tet10 stiffness, recovery, mass, and load integ
 
 Validation rejects invalid node indices, invalid connectivity, empty node or surface sets, orphan surface facets, missing load/BC/step references, non-positive Tet4 volume, unsupported element types, and disconnected bodies without `meshConnections`.
 
-For a fused single-solid fixture, `connectedComponents(mesh).componentCount` must be `1`. If a mesh has multiple disconnected bodies, callers must provide explicit tie/contact/fuse metadata or route the job to a solver that supports the intended contact model.
+For a fused single-solid fixture, `connectedComponents(mesh).componentCount` must be `1`. Multiple disconnected bodies must provide explicit tie/contact/fuse metadata. Tie and small-sliding frictionless contact are assembled as spatially projected node-to-surface penalty MPCs; missing or unmappable faces fail before solve.
+
+Steady thermal validation requires positive conductivity for every referenced material, at least one prescribed-temperature node, valid heat-load selections, finite assembled values, CG convergence, and a reported energy-balance residual. Surface and volumetric heat input use consistent facet/element integration for Tet4 and Tet10.
 
 ## Loads And Results
 

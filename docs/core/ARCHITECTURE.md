@@ -39,7 +39,7 @@ web app (github.com/esaueng/OpenCAE)
   `elevateTet4MeshToTet10` in `@opencae/core` upgrades straight-sided meshes.
 - Materials: isotropic linear elastic with density and yield strength.
 
-Not implemented: modal/eigen analysis, thermal, contact, plasticity or other
+Not implemented: nonlinear unilateral contact, thermal-stress coupling, plasticity or other
 nonlinearity, shells/beams.
 
 ## Tier differentiation
