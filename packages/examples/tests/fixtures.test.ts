@@ -1,4 +1,4 @@
-import { connectedComponents, validateModelJson } from "@opencae/core";
+import { connectedComponents, OPENCAE_MODEL_SCHEMA_VERSION, validateModelJson } from "@opencae/core";
 import { describe, expect, test } from "vitest";
 import {
   bracketActualMeshFixture,
@@ -34,7 +34,7 @@ describe("Phase 1 fixtures", () => {
     const components = connectedComponents(bracketActualMeshFixture);
 
     expect(report.ok).toBe(true);
-    expect(bracketActualMeshFixture.schemaVersion).toBe("0.3.0");
+    expect(bracketActualMeshFixture.schemaVersion).toBe(OPENCAE_MODEL_SCHEMA_VERSION);
     expect(components.componentCount).toBe(1);
     expect(bracketActualMeshFixture.surfaceSets?.map((set) => set.name)).toEqual(
       expect.arrayContaining(["base_mount", "upright_load", "hole_wall", "gusset_skin"])
