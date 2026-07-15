@@ -40,6 +40,51 @@ No actionable P0, P1, or P2 mismatch remains.
 
 final result: passed
 
+# Design QA: Results Legend Resize Handle
+
+- Source visual truth: current production Results view before this change, captured at `/private/tmp/opencae-legend-handle-before-matched.png`
+- Implementation screenshots: `/private/tmp/opencae-legend-handle-after.png` at the default size and `/private/tmp/opencae-legend-handle-expanded.png` after a down-right drag
+- Viewport: 1280 x 720 desktop
+- State: dark theme, Static Stress Bracket Demo, Results step, stress legend visible
+
+## Full-view comparison evidence
+
+The production reference and local implementation use the same viewport and Results state. The workflow rail, top bar, viewer, legend dimensions, typography, scale, and right-panel composition remain unchanged. The requested difference is isolated to the legend: its blue resize corner moves from the upper-right to the lower-right.
+
+## Focused region comparison evidence
+
+The full-resolution captures make the 360 x 159 px legend readable without an additional crop. Browser geometry confirms the 28 x 28 px handle shares the legend's right and bottom edges, uses the `nwse-resize` cursor, and is the topmost hit target at its center. The `Max` label remains visible because the extrema row reserves 20 px beside the handle.
+
+## Required fidelity surfaces
+
+- Fonts and typography: unchanged; all legend labels retain the existing monospace family, weights, and scale behavior.
+- Spacing and layout rhythm: legend size and top-left placement are unchanged; only the handle anchor and the small right-side clearance on the extrema row changed.
+- Colors and visual tokens: unchanged; the handle continues to use the existing accent color and legend tokens.
+- Image quality and asset fidelity: no image or icon assets changed; the resize indicator remains the existing CSS corner treatment.
+- Copy and content: all result values, labels, units, and accessible names remain unchanged.
+
+## Findings
+
+No actionable P0, P1, or P2 mismatch remains.
+
+## Comparison history
+
+1. Initial state: the resize corner was anchored to the legend's upper-right and vertical resizing grew opposite the drag direction.
+2. First implementation: moved the corner to the lower-right, changed the cursor and corner border orientation, and made downward dragging increase height.
+3. Interaction finding: the later-painted extrema row could intercept pointer input over the relocated corner, preventing the drag from starting.
+4. Fix: raised the resize target above legend content with `z-index: 1` and kept `Max` clear with 20 px right padding.
+5. Post-fix evidence: dragging from (481, 200) to (561, 260) resized the legend from 360 x 159 px to 440 x 219 px; the handle remained attached to the new bottom-right corner. Double-click restored the default size.
+
+## Interaction and runtime checks
+
+- Primary flow: start screen -> Static Bracket Demo -> Results -> drag the legend's lower-right resize corner down and right -> double-click the legend to reset.
+- Interaction result: the legend grew by 80 px horizontally and 60 px vertically in the drag direction, then reset with no stale inline dimensions.
+- Hit-target result: `elementFromPoint` at the handle center resolves to `.analysis-legend-resize`.
+- Console result: no application errors; only the expected Plausible analytics `Ignoring Event: localhost` warning was present.
+- Automated result: 139 focused tests passed and the full production build completed.
+
+final result: passed
+
 # Design QA: Sample Analysis Projects
 
 - Source visual truth: the production sample-project picker before this change, captured at `/private/tmp/opencae-sample-menu-before.png`

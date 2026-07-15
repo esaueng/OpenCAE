@@ -2165,26 +2165,27 @@ img {
 
 .analysis-legend-resize {
   position: absolute;
-  top: 0;
+  bottom: 0;
   right: 0;
+  z-index: 1;
   width: 28px;
   height: 28px;
   padding: 0;
   color: var(--color-accent);
   background: transparent;
   border: 0;
-  cursor: nesw-resize;
+  cursor: nwse-resize;
   touch-action: none;
 }
 
 .analysis-legend-resize::after {
   content: "";
   position: absolute;
-  top: 7px;
+  bottom: 7px;
   right: 7px;
   width: 10px;
   height: 10px;
-  border-top: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
   border-right: 2px solid currentColor;
   opacity: 0.8;
 }
@@ -2258,6 +2259,7 @@ img {
   grid-column: 1 / -1;
   display: flex;
   justify-content: space-between;
+  padding-right: 20px;
   color: var(--color-text-muted);
   line-height: 1.15;
 }
