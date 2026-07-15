@@ -52,4 +52,12 @@ describe("ProjectStorageNotice", () => {
     expect(workspaceSource).not.toContain("This project is larger than the browser autosave limit.");
     expect(workspaceSource).not.toContain("Choose Cancel to keep everything local");
   });
+
+  test("labels the local project export as a download", () => {
+    const workspaceSource = readFileSync(resolve(__dirname, "../WorkspaceApp.tsx"), "utf8");
+
+    expect(workspaceSource).toContain('aria-label="Download Project"');
+    expect(workspaceSource).toContain('<span className="topbar-action-label">Download Project</span>');
+    expect(workspaceSource).toContain('<Download size={16} aria-hidden="true" />');
+  });
 });
