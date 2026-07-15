@@ -189,6 +189,7 @@ async function meshWorkerRunExclusive(options: WasmMeshOptions, cancellationGene
   let actualMeshSizeMm: number | undefined;
   let stepFaceRegistry: import("../stepFaces").StepFaceRegistry | undefined;
   let stepStructuralBodyPlan: import("../stepStructuralBodies").StepStructuralBodyPlan | undefined;
+  let stepFuseBodyGroups: import("@opencae/mesh-intake").StepBodyBounds[][] | undefined;
 
   if (geometry.kind === "sample_procedural" && geometry.sampleId === "bracket") {
     // Native curved Gmsh Tet10 elements can invert around the bracket's
@@ -221,13 +222,23 @@ async function meshWorkerRunExclusive(options: WasmMeshOptions, cancellationGene
       ]);
       const planningStudy = remapStepFaceSelectionsInStudy(study, displayModel, registry);
       stepStructuralBodyPlan = structuralBodies.planStepStructuralBodies(planningStudy, registry) ?? undefined;
+      const fuseBodyGroups = structuralBodies.stepFuseBodyGroups(planningStudy, registry);
       attribution = stepFaces.stepAttributionForRegistry(registry, stepStructuralBodyPlan?.structuralMeshIndices);
       stepFaceRegistry = registry;
       if (stepStructuralBodyPlan) structuralBodyNote = structuralBodies.stepStructuralBodyWarning(stepStructuralBodyPlan);
-    } catch {
+      if (fuseBodyGroups.length) {
+        // Keep the resolved groups on the local plan object without persisting
+        // derived preview bounds into the editable study.
+        stepFuseBodyGroups = fuseBodyGroups;
+      }
+    } catch (error) {
+      if (study.contacts.some((connection) => connection.type === "fuse")) {
+        throw new Error(`Boolean fuse requires stable STEP body selections: ${error instanceof Error ? error.message : "STEP face registry unavailable."}`);
+      }
       attribution = undefined;
       stepFaceRegistry = undefined;
       stepStructuralBodyPlan = undefined;
+      stepFuseBodyGroups = undefined;
       structuralBodyNote = undefined;
     }
     throwIfMeshingCancelled(cancellationGeneration);
@@ -238,6 +249,7 @@ async function meshWorkerRunExclusive(options: WasmMeshOptions, cancellationGene
         units: geometry.units ?? "mm",
         meshSizeMm: options.meshSizeMm,
         structuralBodyBounds: stepStructuralBodyPlan?.structuralBodyBounds,
+        fuseBodyGroups: stepFuseBodyGroups,
         preservePartIdentity: study.contacts.some((connection) => connection.type === "tie" || connection.type === "contact"),
         attribution
       },
@@ -319,6 +331,7 @@ async function meshWorkerRunExclusive(options: WasmMeshOptions, cancellationGene
       namedSelections: dispatchStudy.namedSelections,
       constraints: dispatchStudy.constraints,
       loads: dispatchStudy.loads,
+      contacts: dispatchStudy.contacts,
       solverSettings: dispatchStudy.solverSettings as Record<string, unknown> | undefined
     },
     displayModel,

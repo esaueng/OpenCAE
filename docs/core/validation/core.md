@@ -122,7 +122,7 @@ This fixture is intentionally small. It validates topology, load routing, result
 
 ## Local Browser Execution
 
-Every current solve is performed in the browser. Geometry is meshed by the WebAssembly Gmsh worker, validated as a Core model, and transferred to the dedicated solve worker. Static, dynamic, modal, thermal, and eligible WebGPU routes all return their actual local solver identity in provenance. There is no HTTP solve fallback.
+Every current product solve is performed in the browser. Geometry is meshed by the WebAssembly Gmsh worker, validated as a Core model, and transferred to the dedicated solve worker. Static, dynamic, modal, and thermal routes return their actual local solver identity in provenance. The WebGPU operator remains an explicit development/benchmark path while automatic routing is gated. There is no HTTP solve fallback.
 
 The former container runner is retired and is not an execution path. Its fixtures remain only as a numeric regression oracle, and pre-retirement results keep their historical provenance when displayed. See [cloud-retirement.md](../../cloud-retirement.md).
 
@@ -133,7 +133,7 @@ The former container runner is retired and is not an execution path. Its fixture
 - The sparse static and thermal solvers use CG with automatic SSOR preconditioning and expect a symmetric positive-definite constrained system. The guarded CPU ceiling is 150,000 DOF.
 - Tie and initially closed frictionless small-sliding contact use node-to-surface penalty MPCs. Contact is linearized and bilateral; separation, re-closure, friction, and changing normals are not implemented.
 - Steady conduction supports temperature, surface heat flux, and volumetric generation. Thermal-stress coupling, convection, radiation, and transient thermal response are not implemented.
-- The automatic WebGPU route supports connection-free static Tet4 models with zero prescribed displacement from 150,001 through 500,000 DOF. Tet10 and the full CG vector/reduction loop remain CPU-side limitations of the beta route.
+- The WebGPU operator supports explicit development benchmarks for connection-free static Tet4 models with zero prescribed displacement. Automatic routing is disabled because the CG vector/reduction loop still crosses the CPU/GPU boundary every iteration; it must become GPU-resident and pass end-to-end browser benchmarks before release routing is restored.
 - Large deformation, plasticity, and nonlinear material behavior are not implemented.
 - The preview SDOF dynamic solver remains available only for legacy preview behavior. Complex Core FEA should use the MDOF dynamic solver.
 - The validation benchmarks are regression tests for Core behavior. They are not a substitute for mesh convergence, verification against reference solvers, or engineering certification.

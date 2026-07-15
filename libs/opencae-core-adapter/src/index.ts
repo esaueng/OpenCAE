@@ -14,7 +14,7 @@ import {
   type SurfaceSetJson
 } from "@opencae/core";
 import { solveSteadyStateThermal, type DynamicLoadProfile } from "@opencae/solver-cpu";
-import { CPU_TET_DOF_THRESHOLD, MAX_WEBGPU_TET4_DOFS, solveStaticTet4ModelWebGpu } from "@opencae/solver-webgpu";
+import { CPU_TET_DOF_THRESHOLD, MAX_WEBGPU_TET4_DOFS, WEBGPU_TET4_AUTOMATIC_ENABLED, solveStaticTet4ModelWebGpu } from "@opencae/solver-webgpu";
 import {
   BROWSER_SOLVE_LIMITS,
   solveDynamicVariantsWithCorePipeline,
@@ -623,8 +623,9 @@ export function trySolveOpenCaeCoreStudy({ study, runId, displayModel, customMat
   }
 }
 
-/** Automatic browser route: CPU through 150k DOFs, then WebGPU matrix-free CG
- * for supported linear-static Tet4 models through 500k DOFs. */
+/** Automatic browser route: CPU through 150k DOFs. The experimental WebGPU
+ * matrix-free operator is gated until its CG loop is GPU-resident and the
+ * end-to-end large-model route has a benchmark-derived release ceiling. */
 export async function trySolveOpenCaeCoreStudyAutomatic(args: {
   study: Study;
   runId: string;
@@ -641,6 +642,13 @@ export async function trySolveOpenCaeCoreStudyAutomatic(args: {
     const coreBuild = buildOpenCaeCoreModelForStudy(study, displayModel, customMaterials);
     const dofs = coreBuild.model.nodes.coordinates.length;
     if (dofs <= CPU_TET_DOF_THRESHOLD) return trySolveOpenCaeCoreStudy(args);
+    if (!WEBGPU_TET4_AUTOMATIC_ENABLED) {
+      return {
+        ok: false,
+        code: "webgpu-automatic-route-disabled",
+        reason: `Model has ${dofs.toLocaleString()} DOFs, above the verified ${CPU_TET_DOF_THRESHOLD.toLocaleString()}-DOF browser CPU ceiling. Automatic WebGPU CG is disabled until its iteration loop is GPU-resident and benchmarked end to end.`
+      };
+    }
     if (dofs > MAX_WEBGPU_TET4_DOFS) {
       return { ok: false, code: "max-dofs-exceeded", reason: `Model has ${dofs.toLocaleString()} DOFs, above the WebGPU Tet4 ceiling of ${MAX_WEBGPU_TET4_DOFS.toLocaleString()}.` };
     }
@@ -826,8 +834,7 @@ export function buildOpenCaeCoreModelForStudy(
       displayModel,
       study,
       selectionRef: constraint.selectionRef,
-      surfaceSets,
-      storedSurfaceSetName: storedSurfaceSetNameForConstraint(actualMesh?.model, index, constraint.type)
+      surfaceSets
     });
     const nodeSet = deriveFixedSupportNodeSetFromSurface(`fixedNodes${index}`, surfaceSet.name, { ...model, surfaceSets });
     if (!nodeSet.nodes.length) throw new Error(`OpenCAE Core Local could not map boundary ${constraint.selectionRef} to mesh nodes.`);
@@ -872,8 +879,7 @@ export function buildOpenCaeCoreModelForStudy(
       displayModel,
       study,
       selectionRef: load.selectionRef,
-      surfaceSets,
-      storedSurfaceSetName: storedSurfaceSetNameForLoad(actualMesh?.model, index, load.type, "primary")
+      surfaceSets
     });
     if (load.type === "heat_flux") {
       const raw = Number(load.parameters.value ?? 0);
@@ -946,8 +952,7 @@ export function buildOpenCaeCoreModelForStudy(
         displayModel,
         study,
         selectionRef: secondarySelectionRef,
-        surfaceSets,
-        storedSurfaceSetName: storedSurfaceSetNameForLoad(actualMesh?.model, index, load.type, "secondary")
+        surfaceSets
       });
       const axis = normalize(vector3(load.parameters.direction) ?? [0, 0, 1]);
       const preloadForce = Number(load.parameters.value);
@@ -980,6 +985,37 @@ export function buildOpenCaeCoreModelForStudy(
   if (!boundaryConditions.length) throw new Error(study.type === "steady_state_thermal" ? "OpenCAE Core requires a mapped prescribed temperature." : "OpenCAE Core requires at least one mapped fixed support.");
   if (study.type !== "modal_analysis" && study.type !== "steady_state_thermal" && !loads.length) throw new Error("OpenCAE Core requires at least one mapped load.");
 
+  const meshConnections: NonNullable<OpenCAEModelJson["meshConnections"]> = [];
+  for (const connection of study.contacts ?? []) {
+    // Boolean fuse is already reflected in the stored tetrahedral topology.
+    // Rebuilding it as a solver connection would be a silent no-op.
+    if (connection.type === "fuse") continue;
+    const source = ensureSurfaceSetForSelection({
+      model,
+      renderNodePoints,
+      displayModel,
+      study,
+      selectionRef: connection.source,
+      surfaceSets
+    });
+    const target = ensureSurfaceSetForSelection({
+      model,
+      renderNodePoints,
+      displayModel,
+      study,
+      selectionRef: connection.target,
+      surfaceSets
+    });
+    meshConnections.push({
+      type: connection.type,
+      source: source.name,
+      target: target.name,
+      ...(connection.type === "contact" ? { formulation: "frictionless" as const, kinematics: "small_sliding" as const } : {}),
+      ...(connection.searchTolerance !== undefined ? { searchTolerance: connection.searchTolerance } : {}),
+      ...(connection.penaltyScale !== undefined ? { penaltyScale: connection.penaltyScale } : {})
+    });
+  }
+
   model = {
     ...model,
     surfaceSets,
@@ -987,6 +1023,7 @@ export function buildOpenCaeCoreModelForStudy(
     nodeSets,
     boundaryConditions,
     loads,
+    meshConnections,
     steps: localStepsForStudy(study, boundaryConditions.map((condition) => condition.name), coreLoadNameByStudyLoadId)
   };
   const validation = validateModelJson(model);
@@ -1034,8 +1071,7 @@ function ensureSurfaceSetForSelection({
   displayModel,
   study,
   selectionRef,
-  surfaceSets,
-  storedSurfaceSetName
+  surfaceSets
 }: {
   model: OpenCAEModelJson;
   renderNodePoints: Vec3[];
@@ -1043,19 +1079,9 @@ function ensureSurfaceSetForSelection({
   study: Study;
   selectionRef: string;
   surfaceSets: SurfaceSetJson[];
-  storedSurfaceSetName?: string;
 }): SurfaceSetJson {
   const existing = surfaceSets.find((set) => set.name === selectionRef);
   if (existing?.facets.length) return existing;
-
-  // Older mesh artifacts stored the resolved physical set only in their
-  // generated support/load records. Reuse that proven mapping before falling
-  // back to face attribution or display-space geometry so saved projects made
-  // before selection aliases were persisted remain runnable without remeshing.
-  const stored = storedSurfaceSetName
-    ? surfaceSets.find((set) => set.name === storedSurfaceSetName)
-    : undefined;
-  if (stored?.facets.length) return stored;
 
   const selection = study.namedSelections.find((candidate) => candidate.id === selectionRef);
   const selectionNames = new Set([
@@ -1072,47 +1098,6 @@ function ensureSurfaceSetForSelection({
   const next = { name: selectionRef, facets: [...new Set(facets)].sort((left, right) => left - right) };
   surfaceSets.push(next);
   return next;
-}
-
-function storedSurfaceSetNameForConstraint(
-  model: OpenCAEModelJson | undefined,
-  index: number,
-  type: Study["constraints"][number]["type"]
-): string | undefined {
-  if (!model) return undefined;
-  const name = type === "prescribed_temperature" ? `prescribedTemperature${index}` : `fixedSupport${index}`;
-  const condition = model.boundaryConditions.find((candidate) => candidate.name === name);
-  if (!condition || !("nodeSet" in condition) || typeof condition.nodeSet !== "string") return undefined;
-  return model.surfaceSets?.find((set) => `${set.name}_nodes` === condition.nodeSet && set.facets.length > 0)?.name;
-}
-
-function storedSurfaceSetNameForLoad(
-  model: OpenCAEModelJson | undefined,
-  index: number,
-  type: Study["loads"][number]["type"],
-  side: "primary" | "secondary"
-): string | undefined {
-  if (!model) return undefined;
-  const prefix = type === "pressure"
-    ? "pressure"
-    : type === "heat_flux"
-      ? "surfaceHeatFlux"
-      : type === "surface_traction"
-        ? "surfaceTraction"
-        : type === "remote_force"
-          ? "remoteForce"
-          : type === "bolt_preload"
-            ? "equivalentBoltPreload"
-            : type === "gravity"
-              ? "payloadGravity"
-              : "appliedForce";
-  const load = model.loads.find((candidate) => candidate.name === `${prefix}${index}`);
-  if (!load) return undefined;
-  const key = type === "bolt_preload"
-    ? (side === "secondary" ? "surfaceSetB" : "surfaceSetA")
-    : "surfaceSet";
-  const value = key in load ? load[key as keyof typeof load] : undefined;
-  return typeof value === "string" ? value : undefined;
 }
 
 function ensureElementSetForSelection(

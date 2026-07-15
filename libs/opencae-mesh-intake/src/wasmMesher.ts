@@ -32,6 +32,8 @@ export type StepMeshWasmOptions = MeshWasmOptions & {
   meshSizeMm?: number;
   /** Exact preview-body bounds to retain as structural solids; other disconnected STEP volumes are payload/visual-only. */
   structuralBodyBounds?: StepBodyBounds[];
+  /** Exact STEP body groups requested by explicit pairwise Boolean-fuse connections. */
+  fuseBodyGroups?: StepBodyBounds[][];
   /** Preserve imported STEP volumes as separate mesh components for assembly connections. Defaults to false for legacy single-part studies. */
   preservePartIdentity?: boolean;
 };
@@ -636,7 +638,11 @@ function meshStepSession(
       // solver rejects as multiple components. Fuse them into one part up
       // front; genuinely disjoint bodies are left alone (the payload-body plan
       // and the connected-component check own that case).
-      if (!options.preservePartIdentity) multiBodyFusion = fuseImportedStepVolumes(gmsh);
+      if (options.fuseBodyGroups?.length) {
+        multiBodyFusion = fuseRequestedStepVolumeGroups(gmsh, options.fuseBodyGroups);
+      } else if (!options.preservePartIdentity) {
+        multiBodyFusion = fuseImportedStepVolumes(gmsh);
+      }
       const importedSurfaceCount = entityTags(gmsh, 2).length;
       const importedOpenBoundaryCurveCount = openBoundaryCurveTags(gmsh).length;
       preferQualityRepair = repairProfile === false &&
@@ -783,6 +789,62 @@ function fuseImportedStepVolumes(gmsh: GmshApi): StepMultiBodyFusionReport | und
   }
   const fusedVolumeCount = entityTags(gmsh, 3).length;
   if (fusedVolumeCount === 0 || fusedVolumeCount >= volumeTags.length) return undefined;
+  return { inputVolumeCount: volumeTags.length, fusedVolumeCount };
+}
+
+/**
+ * Apply only the Boolean unions explicitly selected in the assembly editor.
+ * Bounds are matched against the original OCC volumes before any topology is
+ * changed, preventing a source/target face pair from silently degenerating
+ * into the former "fuse every imported body" behavior.
+ */
+function fuseRequestedStepVolumeGroups(gmsh: GmshApi, requestedGroups: StepBodyBounds[][]): StepMultiBodyFusionReport {
+  const volumeTags = entityTags(gmsh, 3);
+  const candidates = volumeTags.map((tag) => ({
+    tag,
+    bounds: boundsFromGmsh(gmsh.model.getBoundingBox(3, tag))
+  }));
+  const unmatched = new Set(volumeTags);
+  const taggedGroups: number[][] = [];
+
+  for (const group of requestedGroups) {
+    if (group.length < 2) throw new StepGeometryError("Each Boolean fuse group must contain at least two STEP solid bodies.");
+    const tags: number[] = [];
+    for (const target of group) {
+      const ranked = candidates
+        .filter((candidate) => unmatched.has(candidate.tag))
+        .map((candidate) => ({ candidate, score: stepBoundsMatchScore(target, candidate.bounds) }))
+        .sort((left, right) => left.score - right.score);
+      const best = ranked[0];
+      if (!best || best.score > 0.1) {
+        throw new StepGeometryError("Could not identify a selected Boolean-fuse body in the imported STEP model.");
+      }
+      tags.push(best.candidate.tag);
+      unmatched.delete(best.candidate.tag);
+    }
+    taggedGroups.push(tags);
+  }
+
+  for (const tags of taggedGroups) {
+    const [firstTag, ...restTags] = tags;
+    try {
+      gmsh.model.occ.fuse([3, firstTag!], restTags.flatMap((tag) => [3, tag]));
+      gmsh.model.occ.synchronize();
+    } catch (error) {
+      try {
+        gmsh.model.occ.synchronize();
+      } catch {
+        /* preserve the original OCC error below */
+      }
+      throw new StepGeometryError(`Boolean fuse failed for the selected STEP bodies: ${error instanceof Error ? error.message : "OpenCASCADE union failed."}`);
+    }
+  }
+
+  const fusedVolumeCount = entityTags(gmsh, 3).length;
+  const expectedMaximum = volumeTags.length - taggedGroups.reduce((reduction, group) => reduction + group.length - 1, 0);
+  if (fusedVolumeCount > expectedMaximum) {
+    throw new StepGeometryError("Boolean fuse did not join every selected STEP body. Confirm that each selected body pair touches or overlaps.");
+  }
   return { inputVolumeCount: volumeTags.length, fusedVolumeCount };
 }
 

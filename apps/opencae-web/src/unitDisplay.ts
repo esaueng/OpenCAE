@@ -68,6 +68,14 @@ export function resultSummaryForUnits(summary: ResultSummary, unitSystem: UnitSy
 export function resultSummaryForUnits(summary: ResultSummary, unitSystem: UnitSystem): ResultSummary {
   if (isModalResultSummary(summary)) return summary;
   if (isThermalResultSummary(summary)) {
+    if (unitSystem === "SI" && summary.temperatureUnits === "°F") {
+      return {
+        ...summary,
+        minTemperature: roundDisplayValue((summary.minTemperature - 32) * 5 / 9),
+        maxTemperature: roundDisplayValue((summary.maxTemperature - 32) * 5 / 9),
+        temperatureUnits: "°C"
+      };
+    }
     if (unitSystem === "SI" || summary.temperatureUnits === "°F") return summary;
     return {
       ...summary,
@@ -134,6 +142,13 @@ export function resultValueForUnits(field: Pick<ResultField, "type" | "units">, 
 }
 
 export function resultValueFromDisplayUnits(field: Pick<ResultField, "type" | "units">, value: number, unitSystem: UnitSystem): number {
+  // Temperature conversion is affine, so it cannot be inverted by dividing
+  // through the converted value of one (the offset would corrupt the range).
+  if (field.type === "temperature") {
+    if (unitSystem === "US" && field.units !== "°F") return (value - 32) * 5 / 9;
+    if (unitSystem === "SI" && field.units === "°F") return value * 9 / 5 + 32;
+    return value;
+  }
   const displayUnitValue = resultValueForUnits(field, 1, unitSystem).value;
   return Number.isFinite(displayUnitValue) && Math.abs(displayUnitValue) > Number.EPSILON ? value / displayUnitValue : value;
 }
@@ -141,6 +156,9 @@ export function resultValueFromDisplayUnits(field: Pick<ResultField, "type" | "u
 function resultValueConverter(field: Pick<ResultField, "type" | "units">, unitSystem: UnitSystem) {
   if (field.type === "temperature" && unitSystem === "US" && field.units !== "°F") {
     return (value: number) => ({ value: value * 9 / 5 + 32, units: "°F" });
+  }
+  if (field.type === "temperature" && unitSystem === "SI" && field.units === "°F") {
+    return (value: number) => ({ value: (value - 32) * 5 / 9, units: "°C" });
   }
   return field.type === "stress"
     ? (value: number) => stressForUnits(value, field.units, unitSystem)

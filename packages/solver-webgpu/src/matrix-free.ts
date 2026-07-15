@@ -1,5 +1,11 @@
 export const MAX_WEBGPU_TET4_DOFS = 500_000;
 export const CPU_TET_DOF_THRESHOLD = 150_000;
+/**
+ * The operator is available for explicit experiments, but automatic product
+ * routing stays disabled until CG vectors and reductions remain GPU-resident
+ * and end-to-end browser benchmarks establish a safe release ceiling.
+ */
+export const WEBGPU_TET4_AUTOMATIC_ENABLED = false;
 
 export type Tet4MatrixFreeData = {
   dofs: number;
@@ -27,7 +33,7 @@ export type MatrixFreeCgResult =
 
 export function automaticTetSolverBackend(input: { elementType: "Tet4" | "Tet10"; dofs: number; webGpuAvailable: boolean }): "cpu" | "webgpu" | "unsupported" {
   if (input.dofs <= CPU_TET_DOF_THRESHOLD) return "cpu";
-  if (input.elementType === "Tet4" && input.webGpuAvailable && input.dofs <= MAX_WEBGPU_TET4_DOFS) return "webgpu";
+  if (WEBGPU_TET4_AUTOMATIC_ENABLED && input.elementType === "Tet4" && input.webGpuAvailable && input.dofs <= MAX_WEBGPU_TET4_DOFS) return "webgpu";
   return "unsupported";
 }
 

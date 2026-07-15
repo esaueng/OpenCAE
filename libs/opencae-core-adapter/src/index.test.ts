@@ -612,7 +612,7 @@ describe("per-model solver backend resolution", () => {
     }
   });
 
-  test("reuses stored physical surface mappings from pre-alias mesh artifacts", () => {
+  test("rejects unverifiable index-only mappings from pre-alias mesh artifacts", () => {
     const storedModel = actualCoreModelFixture();
     storedModel.surfaceFacets = storedModel.surfaceFacets.map(({ sourceSelectionRef: _selection, sourceFaceId: _face, ...facet }) => facet);
     storedModel.surfaceSets = [
@@ -659,11 +659,9 @@ describe("per-model solver backend resolution", () => {
       }
     });
 
-    const rebuilt = buildOpenCaeCoreModelForStudy(study, cantileverDisplayModel());
-
-    expect(rebuilt.model.boundaryConditions[0]).toMatchObject({ nodeSet: "fixedNodes0" });
-    expect(rebuilt.model.loads[0]).toMatchObject({ type: "surfaceForce", surfaceSet: "physical_load" });
-    expect(rebuilt.model.nodeSets.find((set) => set.name === "fixedNodes0")?.nodes).toEqual([0, 2, 3]);
+    expect(() => buildOpenCaeCoreModelForStudy(study, cantileverDisplayModel())).toThrow(
+      /could not map selection selection-step-face-3 to Core surface facets/
+    );
   });
 
   test("builds and validates with a project custom material while rejecting unknown IDs", () => {

@@ -73,10 +73,11 @@ dependency. See [cloud-retirement.md](../cloud-retirement.md).
 
 ## Resource boundaries and limitations
 
-The guarded CPU ceiling is 150,000 DOF. The automatic WebGPU route accepts
-eligible connection-free static Tet4 models with zero prescribed displacement
-from 150,001 through 500,000 DOF. Tet10 and unsupported WebGPU model features
-remain on the CPU route and fail preflight when they exceed its limit.
+The guarded automatic browser ceiling is 150,000 DOF on CPU. The experimental
+WebGPU operator supports connection-free static Tet4 models with zero prescribed
+displacement, but automatic routing is disabled until CG vectors/reductions stay
+GPU-resident and benchmark-derived browser limits replace the provisional cap.
+Models above the verified CPU ceiling fail preflight with an explicit error.
 
 Contact is linearized and bilateral: separation, re-closure, friction, and
 changing normals are not implemented. Thermal-stress coupling, convection,

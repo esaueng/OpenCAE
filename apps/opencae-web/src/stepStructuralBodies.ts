@@ -23,6 +23,55 @@ export type StepStructuralBodyPlan = {
 };
 
 /**
+ * Resolve explicit Boolean-fuse connections to the exact STEP preview bodies
+ * selected by the user. Connected fuse pairs are coalesced into one group so
+ * the mesher can perform one deterministic OCC union per requested assembly
+ * component without touching unrelated bodies.
+ */
+export function stepFuseBodyGroups(study: Study, registry: StepFaceRegistry): StepBodyBounds[][] {
+  const parent = new Map<number, number>();
+  const find = (meshIndex: number): number => {
+    const current = parent.get(meshIndex) ?? meshIndex;
+    if (current === meshIndex) return current;
+    const root = find(current);
+    parent.set(meshIndex, root);
+    return root;
+  };
+  const union = (left: number, right: number): void => {
+    const leftRoot = find(left);
+    const rightRoot = find(right);
+    if (leftRoot !== rightRoot) parent.set(rightRoot, leftRoot);
+  };
+
+  for (const connection of (study.contacts ?? []).filter((candidate) => candidate.type === "fuse")) {
+    const source = meshIndexForSelection(study, registry, connection.source);
+    const target = meshIndexForSelection(study, registry, connection.target);
+    if (source === null || target === null) {
+      throw new Error(`Boolean fuse ${connection.source} -> ${connection.target} must reference faces on identifiable STEP solid bodies.`);
+    }
+    if (source === target) {
+      throw new Error(`Boolean fuse ${connection.source} -> ${connection.target} selects the same STEP solid body on both sides.`);
+    }
+    parent.set(source, find(source));
+    parent.set(target, find(target));
+    union(source, target);
+  }
+
+  const groups = new Map<number, number[]>();
+  for (const meshIndex of parent.keys()) {
+    const root = find(meshIndex);
+    const group = groups.get(root) ?? [];
+    group.push(meshIndex);
+    groups.set(root, group);
+  }
+  return [...groups.values()].map((meshIndices) => meshIndices.map((meshIndex) => {
+    const bounds = stepBodyBoundsForMesh(registry, meshIndex);
+    if (!bounds) throw new Error(`Could not determine STEP body bounds for Boolean fuse body ${meshIndex + 1}.`);
+    return bounds;
+  }));
+}
+
+/**
  * Identify the one connected structural body from its support/non-payload
  * selections. Payload object bodies and unselected disconnected bodies are
  * excluded from tetrahedral meshing, while their selected weights are mapped
@@ -34,6 +83,11 @@ export function planStepStructuralBodies(study: Study, registry: StepFaceRegistr
     .filter(({ mesh }) => mesh.positions.length >= 3)
     .map(({ meshIndex }) => meshIndex);
   if (nonEmptyMeshIndices.length <= 1) return null;
+
+  // Any explicit assembly connection makes both selected bodies structural.
+  // Payload isolation is a single-body convenience and must not delete a body
+  // participating in a tie, contact, or Boolean fuse operation.
+  if ((study.contacts?.length ?? 0) > 0) return null;
 
   const payloadLoads = study.loads
     .map((load) => ({ load, payload: payloadObjectForLoad(load) }))
