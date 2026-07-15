@@ -1,25 +1,25 @@
-# Design QA: Result Legend Placement
+# Design QA: Run Controls
 
-- Source visual truth: user browser annotation targeting the simulation-details legend; matched production capture at `/private/tmp/opencae-result-legend-before-matched.png`
-- Implementation screenshot: `/private/tmp/opencae-result-legend-after-matched.png`
+- Source visual truth: browser annotations for `Save project` and the Run-panel `Analysis type` region; supporting capture at `/var/folders/t_/tvn84c292rzdfcbj06vltnsw0000gn/T/codex-clipboard-62f3d5b2-ae6c-4efb-915f-dbbee39f71b1.png`
+- Implementation screenshot: `/private/tmp/opencae-run-controls-live.png`
 - Viewport: 1949 x 1606 desktop; responsive geometry also checked at 390 x 844
-- State: dark theme, Dynamic Bracket Demo, Results step, default legend size
+- State: dark theme, Dynamic Bracket Demo, Run step, Dynamic selected
 
 ## Full-view comparison evidence
 
-The matched production and local screenshots were opened together at the same viewport and workflow state. The source places the legend 12 px from the viewer's bottom-left. The implementation places the same unchanged legend 12 px from the viewer's top-left, matching the annotation while preserving the workflow rail, right Results panel, viewer controls, and footer.
+The annotated source and deployed implementation were opened together. The surrounding top bar, workflow rail, 3D viewer, Run-panel hierarchy, typography, colors, field density, and navigation remain consistent. The two requested differences are visible: the top-bar action now reads `Download Project` with a download icon, and the four analysis types occupy a balanced 2 x 2 grid instead of leaving two empty cells beside `Thermal`.
 
 ## Focused region comparison evidence
 
-A separate crop was not needed: at original resolution the complete legend is isolated against the viewer background and its typography, border, resize affordance, values, and color scale are legible in both matched screenshots. Browser geometry independently measured the implementation at `left: 12 px; top: 12 px` relative to `.viewer-shell`.
+The controls are readable in the full-resolution captures, so a separate crop was not needed. Browser geometry independently confirmed the deployed analysis group is 311 px wide with two equal 154.5 px columns. `Static` and `Dynamic` occupy the first row; `Modal` and `Thermal` occupy the second. The top-bar action exposes matching visible text and accessible name, `Download Project`, with the title `Download project to local disk`.
 
 ## Required fidelity surfaces
 
-- Fonts and typography: unchanged; the existing monospace family, sizes, weights, line heights, and value hierarchy are preserved.
-- Spacing and layout rhythm: the only intended difference is replacing the 12 px bottom inset with a 12 px top inset. Card size, internal spacing, radius, and resize behavior are unchanged.
-- Colors and visual tokens: unchanged; the existing surface, border, text, warning, and result-scale colors remain intact.
-- Image quality and asset fidelity: no image or icon assets were added, removed, regenerated, or substituted.
-- Copy and content: unchanged; node and element counts, result type, units, tick labels, extrema, and deformation note use the existing component.
+- Fonts and typography: unchanged; existing IBM Plex Sans and monospace hierarchy, weights, sizes, line heights, and truncation behavior are preserved.
+- Spacing and layout rhythm: only the selected controls changed. The analysis group retains its 62 px height, 30 px controls, radius, and panel spacing while redistributing the options evenly across two columns.
+- Colors and visual tokens: unchanged; existing surface, border, text, active-accent, and semantic colors are reused.
+- Image quality and asset fidelity: no raster assets were added or changed. The project action uses the existing Lucide icon library.
+- Copy and content: the selected top-bar label is now exactly `Download Project`; analysis labels and all adjacent Run settings remain unchanged.
 
 ## Findings
 
@@ -27,14 +27,15 @@ No actionable P0, P1, or P2 mismatch remains.
 
 ## Comparison history
 
-1. Initial finding: the selected legend was anchored at the viewer bottom-left, contrary to the requested top-left placement.
-2. Fix: changed `.analysis-legend` from `bottom: 12px` to `top: 12px` while retaining `left: 12px`.
-3. Post-fix evidence: desktop browser geometry reports a 12 px top and left inset; the 390 x 844 check reports the same 12 px inset, a 280 px legend width inside a 302 px viewer, and no horizontal document overflow.
+1. Initial findings: the project action read `Save project`; the four analysis types used a three-column grid, leaving visible empty space in the second row.
+2. Fixes: changed the action copy, accessible name, title, and icon to the download treatment; scoped a two-column grid and internal row/column dividers to the Run-panel selector only.
+3. Post-fix evidence: the deployed screenshot shows the requested label and balanced grid. Production geometry reports two equal columns, four equal 30 px controls, and zero horizontal document overflow.
 
 ## Interaction and runtime checks
 
-- Primary flow: start screen -> sample menu -> Dynamic -> load Bracket Demo -> Results.
-- Interaction result: Results becomes active and the legend renders in the upper-left of the 3D viewer.
-- Console: no relevant application errors; one existing localhost analytics warning (`Ignoring Event: localhost`).
+- Primary flow: start screen -> sample menu -> Dynamic -> load Bracket Demo -> Run.
+- Interaction result: selecting `Modal` changed the pressed state, removed Dynamic settings, and displayed Modal settings; selecting `Dynamic` restored the original state.
+- Responsive result: at 390 x 844 the selector remained a two-column grid with 129 px columns and no horizontal overflow; the download action remained accessible while its text collapsed under the existing compact top-bar rule.
+- Production result: `cae.esau.app` loaded `Download Project` and the 2 x 2 selector from Cloudflare version `5e287837-2763-4b8c-b4bb-8b5ece210117` with no console errors or warnings.
 
 final result: passed
