@@ -1,6 +1,6 @@
 # Validation
 
-OpenCAE runs production structural solves locally in the browser with OpenCAE Core (wasm meshing + local solve pipeline). The former OpenCAE Core Cloud backend was retired in July 2026 — see [docs/cloud-retirement.md](../cloud-retirement.md) — and its exact solve contract is frozen as golden fixtures that the local pipeline must keep reproducing.
+OpenCAE runs production structural solves locally in the browser with OpenCAE Core (wasm meshing + local solve pipeline). The former OpenCAE Core Cloud backend was retired in July 2026 — see [docs/cloud-retirement.md](../cloud-retirement.md) — and its historical solve contract is frozen as a numeric regression oracle. Replays preserve current local solver provenance rather than impersonating the retired runner.
 
 - **OpenCAE Core (local, in-browser)** is the production backend. Results must carry `opencae_core_fea`, `computed` result provenance, and `actual_volume_mesh` or `structured_block_core` mesh provenance.
 - **OpenCAE Core Preview** is allowed only for explicit local development/demo flows. It uses structured display-bounds proxy meshes and must never be presented as production FEA.
@@ -25,7 +25,7 @@ Run only the frozen cloud-contract and Worker validation:
 pnpm vitest run libs/opencae-solve-pipeline/src/goldenParity.test.ts apps/opencae-web/src/lib/coreCloudGolden.test.ts apps/opencae-web/worker/index.test.ts scripts/core-cloud-validation-docs.test.mjs
 ```
 
-The golden parity suite replays every recorded OpenCAE Core Cloud solve fixture (`apps/opencae-web/src/testdata/core-cloud-golden`) through the browser pipeline and requires the retired production responses to be reproduced (1e-12 relative numeric tolerance). No local estimate fallback is allowed in these tests.
+The golden parity suite replays every recorded OpenCAE Core Cloud solve fixture (`apps/opencae-web/src/testdata/core-cloud-golden`) through the browser pipeline and compares the retired production response numerically while requiring local solver and runner provenance. No local estimate fallback is allowed in these tests.
 
 ## Historical: Validate Deployed Cloud (retired 2026-07)
 
@@ -146,4 +146,4 @@ Validation fails if any of these conditions are found:
 - A load is unassigned or repeated across cases, a combination references another combination, or a dynamic study contains combinations.
 - Combination von Mises or principal stresses are formed by scalar superposition instead of recomputation from the combined stress tensor.
 - Legacy or retired backend settings are exposed as selectable runtime options instead of being normalized to the local backend.
-- New work is dispatched to the retired OpenCAE Core Cloud surface (guarded by `scripts/cloud-retirement-guard.test.mjs`).
+- New work is dispatched to any retired OpenCAE Core Cloud surface (guarded by `scripts/cloud-retirement-guard.test.mjs`).

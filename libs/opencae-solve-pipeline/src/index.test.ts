@@ -30,7 +30,7 @@ function fixtureModel(name: string): OpenCAEModelJson {
 }
 
 describe("browser solve limits", () => {
-  test("browser limits deviate from cloud limits only where documented", () => {
+  test("browser limits deviate from historical reference limits only where documented", () => {
     // The active browser accepts 150k CPU DOFs with typed-array CSR + SSOR;
     // the retired cloud runner remains pinned at 100k for golden parity.
     expect(BROWSER_SOLVE_LIMITS.maxDofs).toBe(150000);
@@ -52,12 +52,12 @@ describe("browser solve limits", () => {
     if (!outcome.ok) return;
     const deviation = outcome.result.diagnostics.find(
       (entry) => entry && typeof entry === "object" && (entry as { id?: unknown }).id === "browser-solve-limits"
-    ) as { deviations?: Record<string, { applied: number; cloud: number }> } | undefined;
+    ) as { deviations?: Record<string, { applied: number; reference: number }> } | undefined;
     expect(deviation).toBeDefined();
     expect(deviation?.deviations).toEqual({
-      maxDofs: { applied: 150_000, cloud: 100_000 },
-      transientFieldBytes: { applied: 256e6, cloud: 1.5e9 },
-      maxTimeSteps: { applied: 20000, cloud: 100000 }
+      maxDofs: { applied: 150_000, reference: 100_000 },
+      transientFieldBytes: { applied: 256e6, reference: 1.5e9 },
+      maxTimeSteps: { applied: 20000, reference: 100000 }
     });
   });
 
@@ -81,7 +81,7 @@ describe("browser solve limits", () => {
     const outcome = solveStudyModelWithCorePipeline({ model, analysisType: "modal_analysis", solverSettings: { modeCount: 2 }, limits: BROWSER_SOLVE_LIMITS });
     expect(outcome.ok, outcome.ok ? undefined : outcome.error.message).toBe(true);
     if (!outcome.ok) return;
-    const resource = outcome.result.diagnostics.find((entry) => entry && typeof entry === "object" && (entry as { id?: unknown }).id === "core-cloud-resource-limits") as { maxDofs?: number; modeCount?: number } | undefined;
+    const resource = outcome.result.diagnostics.find((entry) => entry && typeof entry === "object" && (entry as { id?: unknown }).id === "core-local-resource-limits") as { maxDofs?: number; modeCount?: number } | undefined;
     expect(resource).toMatchObject({ maxDofs: 150_000, modeCount: 2 });
   });
 
@@ -267,16 +267,20 @@ describe("hooks", () => {
     expect(outcome.error.code).toBe("cancelled");
   });
 
-  test("stamps browser runner provenance on successful solves", () => {
+  test("stamps local solver and browser runner provenance on successful solves", () => {
     const outcome = solveStudyModelWithCorePipeline({
       model: fixtureModel("beam-static"),
       analysisType: "static_stress"
     });
     expect(outcome.ok).toBe(true);
     if (!outcome.ok) return;
-    expect(outcome.result.provenance.solver).toBe("opencae-core-cloud");
+    expect(outcome.result.provenance.solver).toBe("opencae-core-sparse-tet");
     expect(outcome.result.provenance.runnerVersion).toBe("browser-0.1.0");
     expect(outcome.result.summary.provenance).toEqual(outcome.result.provenance);
+    expect(outcome.result.diagnostics.some(
+      (entry) => entry && typeof entry === "object" && (entry as { id?: unknown }).id === "core-local-phase"
+    )).toBe(true);
+    expect(JSON.stringify(outcome.result)).not.toContain("opencae-core-cloud");
   });
 });
 
@@ -342,7 +346,7 @@ function structuredTet10BlockModel(divisions: number): OpenCAEModelJson {
     coordinateSystem: { solverUnits: "m-N-s-Pa", renderCoordinateSpace: "solver" },
     meshProvenance: {
       kind: "opencae_core_fea",
-      solver: "opencae-core-cloud",
+      solver: "opencae-core-local",
       resultSource: "computed",
       meshSource: "structured_block_core"
     }

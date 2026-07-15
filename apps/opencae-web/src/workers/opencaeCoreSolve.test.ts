@@ -122,11 +122,10 @@ describe("OpenCAE Core browser solver adapter", () => {
     if (!outcome.ok) throw new Error(outcome.reason);
     if (!isStructuralResultSummary(outcome.result.summary)) throw new Error("Expected structural results.");
     expect(outcome.solverBackend).toBe("opencae-core-sparse-tet");
-    // Cloud-parity contract: same provenance stamp as the deployed runner,
-    // with a browser runnerVersion (honest about where it was computed).
+    // Preserve the actual local CPU solver identity and browser runner stamp.
     expect(outcome.result.summary.provenance).toMatchObject({
       kind: "opencae_core_fea",
-      solver: "opencae-core-cloud",
+      solver: "opencae-core-sparse-tet",
       meshSource: "structured_block_core",
       resultSource: "computed",
       units: "mm-N-s-MPa",
@@ -216,7 +215,7 @@ describe("OpenCAE Core browser solver adapter", () => {
     expect(outcome.solverBackend).toBe("opencae-core-mdof-tet");
     expect(outcome.result.summary.provenance).toMatchObject({
       kind: "opencae_core_fea",
-      solver: "opencae-core-cloud",
+      solver: "opencae-core-mdof-tet",
       meshSource: "structured_block_core",
       resultSource: "computed",
       runnerVersion: "browser-0.1.0"
@@ -261,7 +260,7 @@ describe("OpenCAE Core browser solver adapter", () => {
     expect(outcome.solverBackend).toBe("opencae-core-sparse-tet");
     expect(outcome.result.summary.provenance).toMatchObject({
       kind: "opencae_core_fea",
-      solver: "opencae-core-cloud",
+      solver: "opencae-core-sparse-tet",
       meshSource: "actual_volume_mesh",
       resultSource: "computed",
       runnerVersion: "browser-0.1.0"
@@ -269,7 +268,7 @@ describe("OpenCAE Core browser solver adapter", () => {
     expect(outcome.result.artifacts?.meshConnectivity?.connectedComponents).toBe(1);
   });
 
-  test("builds a valid v0.3 Core Cloud model for a simple block study", () => {
+  test("builds a valid v0.4 local Core model for a simple block study", () => {
     const result = buildOpenCaeCoreModelForStudy(staticStudy, displayModel);
 
     expect(result.model.schemaVersion).toBe("0.4.0");
@@ -284,7 +283,7 @@ describe("OpenCAE Core browser solver adapter", () => {
     expect(result.model.materials[0]).toMatchObject({ density: 2700, yieldStrength: 276000000 });
   });
 
-  test("builds a valid dynamic Core Cloud model with dynamic solver settings", () => {
+  test("builds a valid dynamic local Core model with dynamic solver settings", () => {
     const dynamicStudy = {
       ...staticStudy,
       type: "dynamic_structural",
@@ -401,11 +400,11 @@ describe("OpenCAE Core browser solver adapter", () => {
     expect(xBuild.result.summary.safetyFactor).toBeLessThan(yBuild.result.summary.safetyFactor * 0.6);
   });
 
-  test("does not build a local Core Cloud model for bracket geometry that should be meshed in the container", () => {
+  test("requires a local volume mesh before building a bracket Core model", () => {
     expect(() => buildOpenCaeCoreModelForStudy(bracketDemoProject.studies[0]!, bracketDisplayModel)).toThrow(/must be meshed into a Core volume mesh before solving/i);
   });
 
-  test("fails complex Core Cloud model building when no geometry source exists", () => {
+  test("fails complex local Core model building when no geometry source exists", () => {
     const complexDisplayModel = {
       ...displayModel,
       id: "display-complex-casting",
