@@ -3,6 +3,7 @@ import type { SampleAnalysisType, SampleModelId } from "../lib/api";
 import { getOfflineReadiness, offlineReadinessLabel, subscribeOfflineReadiness } from "../lib/offlineStatus";
 import { OpenCaeLogoMark } from "./OpenCaeLogoMark";
 import { SampleOptionCard } from "./SampleOptionCard";
+import { SAMPLE_ANALYSIS_OPTIONS } from "./sampleAnalysisOptions";
 import { SAMPLE_OPTIONS } from "./sampleOptions";
 import { defaultRecentProjectService, isRecentProjectsSupported, pickRecentProjectFile, projectNameFromFile, requestRecentProjectFile, type RecentProjectEntry, type RecentProjectFileHandle, type RecentProjectService } from "../recentProjects";
 
@@ -266,9 +267,18 @@ export function SampleProjectMenu({ selectedSample, selectedAnalysisType, onBack
       <div className="start-sample-setup" aria-label="Sample setup">
         <div className="start-sample-header">
           <span>Sample model</span>
-          <div className="segmented analysis-type start-analysis-type" role="group" aria-label="Analysis type">
-            <button className={selectedAnalysisType === "static_stress" ? "active" : ""} type="button" aria-pressed={selectedAnalysisType === "static_stress"} onClick={() => onSelectAnalysisType("static_stress")}>Static</button>
-            <button className={selectedAnalysisType === "dynamic_structural" ? "active" : ""} type="button" aria-pressed={selectedAnalysisType === "dynamic_structural"} onClick={() => onSelectAnalysisType("dynamic_structural")}>Dynamic</button>
+          <div className="segmented analysis-type sample-analysis-type-grid start-analysis-type" role="group" aria-label="Analysis type">
+            {SAMPLE_ANALYSIS_OPTIONS.map((option) => (
+              <button
+                key={option.id}
+                className={selectedAnalysisType === option.id ? "active" : ""}
+                type="button"
+                aria-pressed={selectedAnalysisType === option.id}
+                onClick={() => onSelectAnalysisType(option.id)}
+              >
+                {option.label}
+              </button>
+            ))}
           </div>
         </div>
         <div className="sample-option-grid start-sample-grid" role="group" aria-label="Sample model">

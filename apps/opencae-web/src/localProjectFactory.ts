@@ -1,4 +1,4 @@
-import type { DisplayModel, Load, Project } from "@opencae/schema";
+import type { Constraint, DisplayModel, Load, Project } from "@opencae/schema";
 import { ProjectSchema } from "@opencae/schema";
 import { bracketDemoProject, bracketDisplayModel } from "@opencae/db/sample-data";
 import { stlDimensionsFromBase64 } from "@opencae/units";
@@ -12,6 +12,7 @@ const BEAM_RENDER_HEIGHT = 0.28;
 const BEAM_RENDER_DEPTH = 0.36;
 const BEAM_PHYSICAL_LENGTH_MM = 160;
 const BEAM_PAYLOAD_VOLUME_M3 = 0.00018432;
+const SAMPLE_ANALYSIS_TYPES: readonly SampleAnalysisType[] = ["static_stress", "dynamic_structural", "modal_analysis", "steady_state_thermal"];
 const BEAM_STRUCTURAL_DIMENSIONS: NonNullable<DisplayModel["dimensions"]> = {
   x: BEAM_PHYSICAL_LENGTH_MM,
   y: BEAM_PHYSICAL_LENGTH_MM * (BEAM_RENDER_HEIGHT / BEAM_RENDER_LENGTH),
@@ -44,8 +45,9 @@ const SAMPLE_META: Record<SampleModelId, { projectName: string; modelName: strin
 };
 
 export async function createLocalSampleProject(sample: SampleModelId = "bracket", analysisTypeOrNow: SampleAnalysisType | string = "static_stress", maybeNow?: string): Promise<SampleProjectResponse> {
-  const analysisType: SampleAnalysisType = analysisTypeOrNow === "dynamic_structural" ? "dynamic_structural" : "static_stress";
-  const now = analysisTypeOrNow === "dynamic_structural" || analysisTypeOrNow === "static_stress" ? maybeNow ?? new Date().toISOString() : analysisTypeOrNow;
+  const hasAnalysisType = isSampleAnalysisType(analysisTypeOrNow);
+  const analysisType: SampleAnalysisType = hasAnalysisType ? analysisTypeOrNow : "static_stress";
+  const now = hasAnalysisType ? maybeNow ?? new Date().toISOString() : analysisTypeOrNow;
   const meta = SAMPLE_META[sample];
   const templateStudy = bracketDemoProject.studies[0];
   const geometry = bracketDemoProject.geometryFiles[0];
@@ -97,8 +99,45 @@ export async function createLocalSampleProject(sample: SampleModelId = "bracket"
         loadCombinations: []
       }
     : undefined;
+  const thermalConstraints: Constraint[] = [{
+    id: "constraint-reference-temperature",
+    type: "prescribed_temperature",
+    selectionRef: "selection-fixed-face",
+    parameters: { value: 20, units: "°C" },
+    status: "complete"
+  }];
+  const thermalLoads: Load[] = [{
+    id: "load-surface-heat-flux",
+    type: "heat_flux",
+    selectionRef: "selection-load-face",
+    parameters: { value: 10_000, units: "W/m²", direction: [0, -1, 0], directionMode: "opposite_normal" },
+    status: "complete"
+  }];
   const sampleStudy: Project["studies"][number] | undefined = sampleStudyBase
-    ? analysisType === "dynamic_structural"
+    ? analysisType === "modal_analysis"
+      ? {
+          ...sampleStudyBase,
+          name: "Modal Analysis",
+          type: "modal_analysis",
+          loads: [],
+          loadCases: undefined,
+          loadCombinations: undefined,
+          solverSettings: { modeCount: 6 },
+          runs: []
+        }
+      : analysisType === "steady_state_thermal"
+        ? {
+            ...sampleStudyBase,
+            name: "Steady-State Thermal",
+            type: "steady_state_thermal",
+            constraints: thermalConstraints,
+            loads: thermalLoads,
+            loadCases: undefined,
+            loadCombinations: undefined,
+            solverSettings: { backend: "auto", fidelity: "standard" },
+            runs: []
+          }
+        : analysisType === "dynamic_structural"
       ? {
           ...sampleStudyBase,
           name: "Dynamic Structural",
@@ -114,19 +153,19 @@ export async function createLocalSampleProject(sample: SampleModelId = "bracket"
           },
           runs: [dynamicSampleRun(sample, bracketDemoProject.id, templateStudy!.id, now)]
         }
-      : {
-          ...sampleStudyBase,
-          name: "Static Stress",
-          type: "static_stress",
-          solverSettings: sampleStudyBase.solverSettings,
-          runs: sample === "bracket" ? sampleStudyBase.runs : []
-        }
+          : {
+              ...sampleStudyBase,
+              name: "Static Stress",
+              type: "static_stress",
+              solverSettings: sampleStudyBase.solverSettings,
+              runs: sample === "bracket" ? sampleStudyBase.runs : []
+            }
     : undefined;
 
   const project: Project = {
     ...bracketDemoProject,
     id: bracketDemoProject.id,
-    name: meta.projectName,
+    name: sampleProjectNameForAnalysis(meta.projectName, analysisType),
     unitSystem: "SI",
     geometryFiles: geometry
       ? [{
@@ -156,8 +195,26 @@ export async function createLocalSampleProject(sample: SampleModelId = "bracket"
     project,
     displayModel,
     ...(results ? { results } : {}),
-    message: analysisType === "dynamic_structural" ? `${meta.projectName} dynamic sample loaded.` : `${meta.projectName} loaded.`
+    message: sampleProjectMessage(meta.projectName, analysisType)
   };
+}
+
+function isSampleAnalysisType(value: string): value is SampleAnalysisType {
+  return SAMPLE_ANALYSIS_TYPES.some((analysisType) => analysisType === value);
+}
+
+function sampleProjectNameForAnalysis(projectName: string, analysisType: SampleAnalysisType): string {
+  const modelName = projectName.replace(/ Demo$/, "");
+  if (analysisType === "modal_analysis") return `${modelName} Modal Demo`;
+  if (analysisType === "steady_state_thermal") return `${modelName} Thermal Demo`;
+  return projectName;
+}
+
+function sampleProjectMessage(projectName: string, analysisType: SampleAnalysisType): string {
+  if (analysisType === "dynamic_structural") return `${projectName} dynamic sample loaded.`;
+  if (analysisType === "modal_analysis") return `${projectName} modal sample loaded.`;
+  if (analysisType === "steady_state_thermal") return `${projectName} thermal sample loaded.`;
+  return `${projectName} loaded.`;
 }
 
 function dynamicSampleRun(sample: SampleModelId, projectId: string, studyId: string, now: string) {
@@ -266,6 +323,24 @@ export function createLocalDynamicStructuralStudy(project: Project, displayModel
 
 export function createLocalModalStudy(project: Project, displayModel: DisplayModel, studyId = `study-${newLocalId()}`): Project["studies"][number] {
   return createModalStudyForProject(project, displayModel, studyId);
+}
+
+export function createLocalThermalStudy(project: Project, displayModel: DisplayModel, studyId = `study-${newLocalId()}`, now = new Date().toISOString()): Project["studies"][number] {
+  const structural = createStaticStressStudyForProject(project, displayModel, studyId, now);
+  return {
+    ...structural,
+    name: "Steady-State Thermal",
+    type: "steady_state_thermal",
+    constraints: [],
+    loads: [],
+    loadCases: [],
+    loadCombinations: [],
+    solverSettings: {
+      backend: structural.solverSettings.backend ?? "auto",
+      fidelity: structural.solverSettings.fidelity ?? "standard",
+      createdAt: now
+    }
+  };
 }
 
 export function openLocalProjectPayload(payload: unknown): SampleProjectResponse {

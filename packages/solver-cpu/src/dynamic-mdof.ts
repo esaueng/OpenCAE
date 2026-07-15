@@ -498,7 +498,11 @@ function initialAcceleration(
 }
 
 function effectiveMatrix(stiffness: CsrMatrix, mass: Float64Array, massScale: number, stiffnessScale: number): CsrMatrix {
-  const builder = createSparseMatrixBuilder(stiffness.rowCount, stiffness.colCount);
+  const builder = createSparseMatrixBuilder(
+    stiffness.rowCount,
+    stiffness.colCount,
+    stiffness.values.length + mass.length
+  );
   for (let row = 0; row < stiffness.rowCount; row += 1) {
     for (let entry = stiffness.rowPtr[row]; entry < stiffness.rowPtr[row + 1]; entry += 1) {
       addSparseEntry(builder, row, stiffness.colInd[entry], stiffness.values[entry] * stiffnessScale);

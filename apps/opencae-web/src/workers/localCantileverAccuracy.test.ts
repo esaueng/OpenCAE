@@ -72,13 +72,12 @@ describe("local cantilever accuracy", () => {
     const outcome = trySolveOpenCaeCoreStudy({ study: cantileverStudy("static_stress"), runId: "run-bench", displayModel });
     expect(outcome.ok).toBe(true);
     if (!outcome.ok) return;
-    // The local backend now runs the mirrored Core Cloud pipeline (B2): the
-    // result must carry the cloud-parity provenance with a browser runner
-    // stamp and the solver-surface render mesh, not the retired preview tier.
+    // The local backend must preserve its CPU solver identity, browser runner
+    // stamp, and solver-surface render mesh rather than the retired preview tier.
     expect(outcome.solverBackend).toBe("opencae-core-sparse-tet");
     expect(outcome.result.summary.provenance).toMatchObject({
       kind: "opencae_core_fea",
-      solver: "opencae-core-cloud",
+      solver: "opencae-core-sparse-tet",
       meshSource: "structured_block_core",
       resultSource: "computed",
       runnerVersion: "browser-0.1.0"
@@ -110,7 +109,7 @@ describe("local cantilever accuracy", () => {
     expect(outcome.solverBackend).toBe("opencae-core-mdof-tet");
     expect(outcome.result.summary.provenance).toMatchObject({
       kind: "opencae_core_fea",
-      solver: "opencae-core-cloud",
+      solver: "opencae-core-mdof-tet",
       resultSource: "computed",
       runnerVersion: "browser-0.1.0"
     });

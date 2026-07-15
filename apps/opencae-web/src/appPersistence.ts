@@ -87,7 +87,7 @@ const SECTION_PLANE_AXES: SectionPlaneState["axis"][] = ["x", "y", "z"];
 const LOAD_TYPES: LoadType[] = ["force", "pressure", "gravity", "surface_traction", "volume_force", "remote_force", "bolt_preload"];
 const LOAD_DIRECTIONS: LoadDirectionLabel[] = [...LOAD_DIRECTION_LABELS];
 const SAMPLE_MODELS: SampleModelId[] = ["bracket", "plate", "cantilever"];
-const SAMPLE_ANALYSIS_TYPES: SampleAnalysisType[] = ["static_stress", "dynamic_structural"];
+const SAMPLE_ANALYSIS_TYPES: SampleAnalysisType[] = ["static_stress", "dynamic_structural", "modal_analysis", "steady_state_thermal"];
 
 export function buildAutosavedWorkspace({
   project,

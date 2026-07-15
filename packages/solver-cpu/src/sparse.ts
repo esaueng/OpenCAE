@@ -43,7 +43,8 @@ export type ConjugateGradientResult =
 export type ConjugateGradientOptions = {
   tolerance?: number;
   maxIterations?: number;
-  preconditioner?: "none" | "jacobi";
+  preconditioner?: "none" | "jacobi" | "ssor";
+  ssorOmega?: number;
   initialGuess?: Float64Array;
   hooks?: SolverHooks;
 };
@@ -65,20 +66,28 @@ export class CooAccumulator {
 }
 
 const INITIAL_TRIPLET_CAPACITY = 256;
+const SPARSE_ZERO_EPSILON = Number.MIN_VALUE;
 
-export function createSparseMatrixBuilder(rowCount: number, colCount = rowCount): SparseMatrixBuilder {
+export function createSparseMatrixBuilder(
+  rowCount: number,
+  colCount = rowCount,
+  initialCapacity = INITIAL_TRIPLET_CAPACITY
+): SparseMatrixBuilder {
+  const capacity = Number.isFinite(initialCapacity)
+    ? Math.max(Math.floor(initialCapacity), INITIAL_TRIPLET_CAPACITY)
+    : INITIAL_TRIPLET_CAPACITY;
   return {
     rowCount,
     colCount,
     entryCount: 0,
-    rowIndices: new Int32Array(INITIAL_TRIPLET_CAPACITY),
-    colIndices: new Int32Array(INITIAL_TRIPLET_CAPACITY),
-    entryValues: new Float64Array(INITIAL_TRIPLET_CAPACITY)
+    rowIndices: new Int32Array(capacity),
+    colIndices: new Int32Array(capacity),
+    entryValues: new Float64Array(capacity)
   };
 }
 
 export function addSparseEntry(builder: SparseMatrixBuilder, row: number, col: number, value: number): void {
-  if (value === 0) return;
+  if (Math.abs(value) <= SPARSE_ZERO_EPSILON) return;
   if (builder.entryCount === builder.rowIndices.length) growTripletBuffers(builder);
   const index = builder.entryCount;
   builder.rowIndices[index] = row;
@@ -123,21 +132,24 @@ export function toCsrMatrix(builder: SparseMatrixBuilder): CsrMatrix {
   }
 
   const rowPtr = new Int32Array(rowCount + 1);
-  const mergedCols = new Int32Array(entryCount);
-  const mergedValues = new Float64Array(entryCount);
   let nonZeroCount = 0;
   let keyScratch = new Float64Array(0);
+  let valueScratch = new Float64Array(0);
   for (let row = 0; row < rowCount; row += 1) {
     rowPtr[row] = nonZeroCount;
     const start = rowStart[row];
     const length = rowStart[row + 1] - start;
     if (length === 0) continue;
-    if (keyScratch.length < length) keyScratch = new Float64Array(length);
+    if (keyScratch.length < length) {
+      keyScratch = new Float64Array(length);
+      valueScratch = new Float64Array(length);
+    }
     // Pack (col, local insertion index) into one number so the typed-array numeric
     // sort orders by column with insertion order preserved among duplicates. Values
     // stay below 2^53 (col < colCount, local < length), so decoding is exact.
     for (let local = 0; local < length; local += 1) {
       keyScratch[local] = bucketedCols[start + local] * length + local;
+      valueScratch[local] = bucketedValues[start + local];
     }
     const keys = keyScratch.subarray(0, length);
     keys.sort();
@@ -148,13 +160,13 @@ export function toCsrMatrix(builder: SparseMatrixBuilder): CsrMatrix {
       const key = keys[k];
       const local = key % length;
       const col = (key - local) / length;
-      const value = bucketedValues[start + local];
+      const value = valueScratch[local];
       if (hasEntry && col === currentCol) {
         sum += value;
       } else {
-        if (hasEntry && sum !== 0) {
-          mergedCols[nonZeroCount] = currentCol;
-          mergedValues[nonZeroCount] = sum;
+        if (hasEntry && Math.abs(sum) > SPARSE_ZERO_EPSILON) {
+          bucketedCols[nonZeroCount] = currentCol;
+          bucketedValues[nonZeroCount] = sum;
           nonZeroCount += 1;
         }
         currentCol = col;
@@ -162,9 +174,9 @@ export function toCsrMatrix(builder: SparseMatrixBuilder): CsrMatrix {
         hasEntry = true;
       }
     }
-    if (hasEntry && sum !== 0) {
-      mergedCols[nonZeroCount] = currentCol;
-      mergedValues[nonZeroCount] = sum;
+    if (hasEntry && Math.abs(sum) > SPARSE_ZERO_EPSILON) {
+      bucketedCols[nonZeroCount] = currentCol;
+      bucketedValues[nonZeroCount] = sum;
       nonZeroCount += 1;
     }
   }
@@ -173,8 +185,8 @@ export function toCsrMatrix(builder: SparseMatrixBuilder): CsrMatrix {
     rowCount,
     colCount,
     rowPtr,
-    colInd: mergedCols.slice(0, nonZeroCount),
-    values: mergedValues.slice(0, nonZeroCount)
+    colInd: bucketedCols.slice(0, nonZeroCount),
+    values: bucketedValues.slice(0, nonZeroCount)
   };
 }
 
@@ -217,12 +229,13 @@ export function jacobiPreconditioner(matrix: CsrMatrix): Float64Array {
 export function conjugateGradient(
   matrix: CsrMatrix,
   rhs: Float64Array,
-  options: { tolerance?: number; maxIterations?: number; jacobi?: boolean; initialGuess?: Float64Array; hooks?: SolverHooks } = {}
+  options: { tolerance?: number; maxIterations?: number; jacobi?: boolean; preconditioner?: "none" | "jacobi" | "ssor"; ssorOmega?: number; initialGuess?: Float64Array; hooks?: SolverHooks } = {}
 ): ConjugateGradientResult {
   return solveConjugateGradient(matrix, rhs, {
     tolerance: options.tolerance,
     maxIterations: options.maxIterations,
-    preconditioner: options.jacobi === false ? "none" : "jacobi",
+    preconditioner: options.preconditioner ?? (options.jacobi === false ? "none" : "jacobi"),
+    ssorOmega: options.ssorOmega,
     initialGuess: options.initialGuess,
     hooks: options.hooks
   });
@@ -249,8 +262,10 @@ export function solveConjugateGradient(
   }
   const z = new Float64Array(rhs.length);
   const p = new Float64Array(rhs.length);
-  const diagonal = options.preconditioner === "none" ? undefined : csrDiagonal(matrix);
-  applyPreconditioner(r, z, diagonal);
+  const preconditioner = options.preconditioner ?? "jacobi";
+  const diagonal = preconditioner === "none" ? undefined : csrDiagonal(matrix);
+  const ssorOmega = validSsorOmega(options.ssorOmega);
+  applyPreconditioner(matrix, r, z, diagonal, preconditioner, ssorOmega);
   p.set(z);
   let rzOld = dot(r, z);
   const rhsNorm = Math.max(norm(rhs), 1);
@@ -304,7 +319,7 @@ export function solveConjugateGradient(
     if (iteration % 25 === 0) {
       emitProgress(iteration, relativeResidual);
     }
-    applyPreconditioner(r, z, diagonal);
+    applyPreconditioner(matrix, r, z, diagonal, preconditioner, ssorOmega);
     const rzNew = dot(r, z);
     const beta = rzNew / rzOld;
     for (let i = 0; i < p.length; i += 1) {
@@ -334,7 +349,9 @@ export function reduceCsrSystem(
 ): { matrix: CsrMatrix; rhs: Float64Array } {
   const freeIndexByDof = new Map<number, number>();
   free.forEach((dof, index) => freeIndexByDof.set(dof, index));
-  const builder = createSparseMatrixBuilder(free.length);
+  // At most every full-system nonzero survives the free-DOF reduction. Reserving
+  // that upper bound avoids a grow-and-copy peak while both matrices are live.
+  const builder = createSparseMatrixBuilder(free.length, free.length, matrix.values.length);
   const reducedRhs = reduceCsrRhs(matrix, rhs, free, constraints);
 
   for (let reducedRow = 0; reducedRow < free.length; reducedRow += 1) {
@@ -374,11 +391,60 @@ export function reduceCsrRhs(
   return reducedRhs;
 }
 
-function applyPreconditioner(source: Float64Array, target: Float64Array, diagonal: Float64Array | undefined): void {
+function applyPreconditioner(
+  matrix: CsrMatrix,
+  source: Float64Array,
+  target: Float64Array,
+  diagonal: Float64Array | undefined,
+  preconditioner: "none" | "jacobi" | "ssor",
+  omega: number
+): void {
+  if (preconditioner === "ssor" && diagonal) {
+    applySsorPreconditioner(matrix, source, target, diagonal, omega);
+    return;
+  }
   for (let i = 0; i < source.length; i += 1) {
     const d = diagonal?.[i];
     target[i] = d && Math.abs(d) > 1e-30 ? source[i] / d : source[i];
   }
+}
+
+/** Apply M^-1 for M=(D+wL)D^-1(D+wU)/(w(2-w)); suitable for SPD CG. */
+export function applySsorPreconditioner(
+  matrix: CsrMatrix,
+  source: Float64Array,
+  target: Float64Array,
+  diagonal = csrDiagonal(matrix),
+  omega = 1
+): void {
+  const forward = new Float64Array(source.length);
+  for (let row = 0; row < matrix.rowCount; row += 1) {
+    let value = source[row];
+    for (let entry = matrix.rowPtr[row]; entry < matrix.rowPtr[row + 1]; entry += 1) {
+      const col = matrix.colInd[entry];
+      if (col < row) value -= omega * matrix.values[entry] * forward[col];
+    }
+    const d = diagonal[row];
+    forward[row] = Math.abs(d) > 1e-30 ? value / d : value;
+  }
+  const factor = omega * (2 - omega);
+  for (let row = matrix.rowCount - 1; row >= 0; row -= 1) {
+    let value = diagonal[row] * forward[row];
+    for (let entry = matrix.rowPtr[row]; entry < matrix.rowPtr[row + 1]; entry += 1) {
+      const col = matrix.colInd[entry];
+      if (col > row) value -= omega * matrix.values[entry] * target[col];
+    }
+    const d = diagonal[row];
+    target[row] = factor * (Math.abs(d) > 1e-30 ? value / d : value);
+  }
+}
+
+export function estimateCsrMemoryBytes(matrix: CsrMatrix): number {
+  return matrix.rowPtr.byteLength + matrix.colInd.byteLength + matrix.values.byteLength;
+}
+
+function validSsorOmega(value: number | undefined): number {
+  return value !== undefined && Number.isFinite(value) && value > Number.EPSILON && value < 2 - Number.EPSILON ? value : 1;
 }
 
 export function dot(a: Float64Array, b: Float64Array): number {

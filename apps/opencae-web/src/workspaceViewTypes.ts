@@ -2,7 +2,7 @@ import type { PackedPreparedPlaybackCache } from "./resultPlaybackCache";
 export type { StressComponent } from "@opencae/schema";
 
 export type ViewMode = "model" | "mesh" | "results";
-export type ResultMode = "stress" | "displacement" | "safety_factor" | "velocity" | "acceleration" | "mode_shape";
+export type ResultMode = "stress" | "displacement" | "safety_factor" | "velocity" | "acceleration" | "mode_shape" | "temperature" | "heat_flux";
 export type ThemeMode = "dark" | "light";
 export type ProjectionMode = "perspective" | "orthographic";
 export type PrintLayerOrientation = "x" | "y" | "z";

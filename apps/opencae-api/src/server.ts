@@ -43,7 +43,9 @@ import {
   normalizeSampleAnalysisType,
   normalizeSampleId,
   sampleDisplayModelFor,
+  sampleProjectMessage,
   sampleProjectName,
+  sampleProjectNameForAnalysis,
   uploadedDisplayModelFor,
   type SampleModelId
 } from "./projectFactory";
@@ -126,7 +128,7 @@ api.post("/api/sample-project/load", async (request) => {
   await ensureSampleArtifacts();
   if (dynamicResults) await persistSampleResults(project, dynamicResults);
   return {
-    message: analysisType === "dynamic_structural" ? `${sampleProjectName(sample)} dynamic sample loaded.` : `${sampleProjectName(sample)} loaded.`,
+    message: sampleProjectMessage(sample, analysisType),
     project: db.getProject(bracketDemoProject.id),
     displayModel: sampleDisplayModelFor(sample),
     ...(dynamicResults ? { results: dynamicResults } : {})
@@ -154,7 +156,7 @@ api.post("/api/projects", mutatingRateLimit, async (request) => {
   const project = createSampleProject(sample, {
     projectId: `project-${crypto.randomUUID()}`,
     studyId: `study-${crypto.randomUUID()}`,
-    name: body?.name ?? `Untitled ${sampleProjectName(sample)}`,
+    name: body?.name ?? `Untitled ${sampleProjectNameForAnalysis(sampleProjectName(sample), analysisType)}`,
     now,
     includeSeedRun: analysisType === "dynamic_structural",
     analysisType

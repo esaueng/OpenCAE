@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { buildStepFaceRegistry, stepAttributionForRegistry } from "./stepFaces";
 import {
   planStepStructuralBodies,
+  stepFuseBodyGroups,
   stepStructuralBodyWarning,
   studyWithStepPayloadContacts
 } from "./stepStructuralBodies";
@@ -60,6 +61,26 @@ describe("STEP structural body planning", () => {
     });
     study.namedSelections.push(faceSelection("selection-third", "step-face-2"));
 
+    expect(planStepStructuralBodies(study, registry)).toBeNull();
+  });
+
+  it("resolves pairwise Boolean fuse selections to only their connected STEP bodies", () => {
+    const registry = buildStepFaceRegistry([
+      oneFaceBody([[0, 0, 0], [2, 0, 0], [0, 2, 0]], [0, 0, 1]),
+      oneFaceBody([[2, 0, 0], [4, 0, 0], [2, 2, 0]], [4, 2, 1]),
+      oneFaceBody([[10, 0, 0], [12, 0, 0], [10, 2, 0]], [12, 2, 1])
+    ]);
+    const study = payloadStudy();
+    study.namedSelections = [
+      faceSelection("fuse-source", "step-face-0"),
+      faceSelection("fuse-target", "step-face-1")
+    ];
+    study.contacts = [{ id: "fuse-1", status: "ready", type: "fuse", source: "fuse-source", target: "fuse-target", kinematics: "small_sliding" }];
+
+    expect(stepFuseBodyGroups(study, registry)).toEqual([[
+      { min: [0, 0, 0], max: [2, 2, 1] },
+      { min: [2, 0, 0], max: [4, 2, 1] }
+    ]]);
     expect(planStepStructuralBodies(study, registry)).toBeNull();
   });
 });

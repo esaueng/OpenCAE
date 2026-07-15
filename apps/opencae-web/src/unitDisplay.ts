@@ -1,5 +1,5 @@
-import { classifyResultProvenance, isModalResultSummary } from "@opencae/schema";
-import type { DisplayModel, ModalResultSummary, Project, ResultField, ResultProvenance, ResultSummary, StructuralResultSummary, Study } from "@opencae/schema";
+import { classifyResultProvenance, isModalResultSummary, isThermalResultSummary } from "@opencae/schema";
+import type { DisplayModel, ModalResultSummary, Project, ResultField, ResultProvenance, ResultSummary, StructuralResultSummary, Study, ThermalResultSummary } from "@opencae/schema";
 
 export type UnitSystem = Project["unitSystem"];
 
@@ -63,9 +63,27 @@ export function loadValueForUnits(value: number, units: string, unitSystem: Unit
 
 export function resultSummaryForUnits(summary: StructuralResultSummary, unitSystem: UnitSystem): StructuralResultSummary;
 export function resultSummaryForUnits(summary: ModalResultSummary, unitSystem: UnitSystem): ModalResultSummary;
+export function resultSummaryForUnits(summary: ThermalResultSummary, unitSystem: UnitSystem): ThermalResultSummary;
 export function resultSummaryForUnits(summary: ResultSummary, unitSystem: UnitSystem): ResultSummary;
 export function resultSummaryForUnits(summary: ResultSummary, unitSystem: UnitSystem): ResultSummary {
   if (isModalResultSummary(summary)) return summary;
+  if (isThermalResultSummary(summary)) {
+    if (unitSystem === "SI" && summary.temperatureUnits === "°F") {
+      return {
+        ...summary,
+        minTemperature: roundDisplayValue((summary.minTemperature - 32) * 5 / 9),
+        maxTemperature: roundDisplayValue((summary.maxTemperature - 32) * 5 / 9),
+        temperatureUnits: "°C"
+      };
+    }
+    if (unitSystem === "SI" || summary.temperatureUnits === "°F") return summary;
+    return {
+      ...summary,
+      minTemperature: roundDisplayValue(summary.minTemperature * 9 / 5 + 32),
+      maxTemperature: roundDisplayValue(summary.maxTemperature * 9 / 5 + 32),
+      temperatureUnits: "°F"
+    };
+  }
   const stress = stressForUnits(summary.maxStress, summary.maxStressUnits, unitSystem);
   const displacement = lengthForUnits(summary.maxDisplacement, summary.maxDisplacementUnits, unitSystem);
   const reaction = forceForUnits(summary.reactionForce, summary.reactionForceUnits, unitSystem);
@@ -124,11 +142,24 @@ export function resultValueForUnits(field: Pick<ResultField, "type" | "units">, 
 }
 
 export function resultValueFromDisplayUnits(field: Pick<ResultField, "type" | "units">, value: number, unitSystem: UnitSystem): number {
+  // Temperature conversion is affine, so it cannot be inverted by dividing
+  // through the converted value of one (the offset would corrupt the range).
+  if (field.type === "temperature") {
+    if (unitSystem === "US" && field.units !== "°F") return (value - 32) * 5 / 9;
+    if (unitSystem === "SI" && field.units === "°F") return value * 9 / 5 + 32;
+    return value;
+  }
   const displayUnitValue = resultValueForUnits(field, 1, unitSystem).value;
   return Number.isFinite(displayUnitValue) && Math.abs(displayUnitValue) > Number.EPSILON ? value / displayUnitValue : value;
 }
 
 function resultValueConverter(field: Pick<ResultField, "type" | "units">, unitSystem: UnitSystem) {
+  if (field.type === "temperature" && unitSystem === "US" && field.units !== "°F") {
+    return (value: number) => ({ value: value * 9 / 5 + 32, units: "°F" });
+  }
+  if (field.type === "temperature" && unitSystem === "SI" && field.units === "°F") {
+    return (value: number) => ({ value: (value - 32) * 5 / 9, units: "°C" });
+  }
   return field.type === "stress"
     ? (value: number) => stressForUnits(value, field.units, unitSystem)
     : field.type === "displacement" || field.type === "velocity" || field.type === "acceleration"
@@ -143,8 +174,6 @@ export function formatResultProvenanceLabel(provenance: ResultProvenance | undef
   if (tier === "local_estimate") return "Estimate (not FEA)";
   if (tier === "analytical_benchmark") return "Analytical benchmark";
   if (tier === "production_fea") {
-    // Browser-pipeline results keep the runner's solver id for golden byte-parity;
-    // runnerVersion "browser-*" marks them as local solves (plan 015, open question 4).
     if (provenance?.runnerVersion?.startsWith("browser-")) return "OpenCAE Core Local (in-browser)";
     return provenance?.solver === "opencae-core-cloud" ? "OpenCAE Core Cloud" : "OpenCAE Core Local";
   }
@@ -163,6 +192,7 @@ export function solverMethodForResult(resultSummary: ResultSummary, study: Study
   const provenanceMethod = (resultSummary.provenance as Record<string, unknown> | undefined)?.coreSolver;
   if (typeof provenanceMethod === "string" && provenanceMethod) return provenanceMethod;
   if (isModalResultSummary(resultSummary) || study.type === "modal_analysis") return "block_shift_invert_modal";
+  if (isThermalResultSummary(resultSummary) || study.type === "steady_state_thermal") return "sparse_steady_thermal";
   if (resultSummary.transient || study.type === "dynamic_structural") return "mdof_dynamic";
   return "sparse_static";
 }
@@ -186,7 +216,7 @@ export function formatMeshSourceLabel(meshSource: ResultProvenance["meshSource"]
 
 export function legacyResultWarningForProvenance(provenance: ResultProvenance | undefined): string | null {
   return isLegacyBackendResult(provenance)
-    ? "This result is historical and read-only. Re-run with OpenCAE Core Cloud for production results."
+    ? "This result is historical and read-only. Re-run locally in this browser for current production results."
     : null;
 }
 

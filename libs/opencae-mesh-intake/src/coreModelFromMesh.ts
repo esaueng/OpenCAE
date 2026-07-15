@@ -92,7 +92,13 @@ const BUILT_IN_MATERIAL_IDS = new Set(starterMaterials.map((material) => materia
 
 export function buildCoreModelFromCloudMesh(input: BuildCoreModelInput): OpenCAEModelJson {
   validateVolumeMeshArtifact(input.volumeMesh);
-  const material = resolveMaterial(input);
+  const resolvedMaterial = resolveMaterial(input);
+  const material: IsotropicLinearElasticMaterialJson = {
+    ...resolvedMaterial,
+    ...(resolvedMaterial.thermalConductivity !== undefined
+      ? { thermalConductivity: input.volumeMesh.coordinateSystem.solverUnits === "mm-N-s-MPa" ? resolvedMaterial.thermalConductivity / 1000 : resolvedMaterial.thermalConductivity }
+      : {})
+  };
   const elementBlocks = [{
     name: "solid",
     type: input.volumeMesh.elements[0]?.type ?? "Tet4",
@@ -104,9 +110,10 @@ export function buildCoreModelFromCloudMesh(input: BuildCoreModelInput): OpenCAE
   const nodeSets: NodeSetJson[] = [];
   const boundaryConditions: BoundaryConditionJson[] = [];
   const loads: LoadJson[] = [];
+  const meshConnections: NonNullable<OpenCAEModelJson["meshConnections"]> = [];
 
   for (const [index, constraint] of (input.study?.constraints ?? []).entries()) {
-    if (constraint.type !== "fixed") continue;
+    if (constraint.type !== "fixed" && constraint.type !== "prescribed_temperature") continue;
     const selectionRef = constraint.selectionRef ?? "FS1";
     const surfaceSet = ensureMappedSurfaceSet({
       study: input.study,
@@ -117,7 +124,12 @@ export function buildCoreModelFromCloudMesh(input: BuildCoreModelInput): OpenCAE
       diagnostics: input.mappingDiagnostics
     }, surfaceSets);
     const nodeSetName = ensureNodeSetForSurfaceSet(nodeSets, surfaceSet, input.volumeMesh.surfaceFacets);
-    boundaryConditions.push({
+    boundaryConditions.push(constraint.type === "prescribed_temperature" ? {
+      name: `prescribedTemperature${index}`,
+      type: "prescribedTemperature",
+      nodeSet: nodeSetName,
+      value: numberValue(constraint.parameters?.value) ?? 20
+    } : {
       name: `fixedSupport${index}`,
       type: "fixed",
       nodeSet: nodeSetName,
@@ -146,6 +158,16 @@ export function buildCoreModelFromCloudMesh(input: BuildCoreModelInput): OpenCAE
       });
       continue;
     }
+    if (loadType === "heat_generation") {
+      const elementSet = mappedElementSetForSelection(input.study, input.displayModel, input.volumeMesh, elementSets, load.selectionRef ?? "body");
+      const value = numberValue(load.parameters?.value) ?? 0;
+      const units = typeof load.parameters?.units === "string" ? load.parameters.units.toLowerCase().replace(/³/g, "^3") : "w/m^3";
+      const generation = input.volumeMesh.coordinateSystem.solverUnits === "mm-N-s-MPa"
+        ? (units === "w/mm^3" ? value : value / 1_000_000_000)
+        : (units === "w/mm^3" ? value * 1_000_000_000 : value);
+      loads.push({ name: `volumetricHeatGeneration${index}`, type: "volumetricHeatGeneration", elementSet: elementSet.name, generation });
+      continue;
+    }
 
     const selectionRef = load.selectionRef ?? "L1";
     const surfaceSet = ensureMappedSurfaceSet({
@@ -165,6 +187,15 @@ export function buildCoreModelFromCloudMesh(input: BuildCoreModelInput): OpenCAE
         pressure: pressurePascals(load.parameters),
         direction: vector3(load.parameters?.direction) ?? [0, 0, -1]
       });
+      continue;
+    }
+    if (loadType === "heat_flux") {
+      const value = numberValue(load.parameters?.value) ?? 0;
+      const units = typeof load.parameters?.units === "string" ? load.parameters.units.toLowerCase().replace(/²/g, "^2") : "w/m^2";
+      const flux = input.volumeMesh.coordinateSystem.solverUnits === "mm-N-s-MPa"
+        ? (units === "w/mm^2" ? value : value / 1_000_000)
+        : (units === "w/mm^2" ? value * 1_000_000 : value);
+      loads.push({ name: `surfaceHeatFlux${index}`, type: "surfaceHeatFlux", surfaceSet: surfaceSet.name, flux });
       continue;
     }
 
@@ -220,7 +251,7 @@ export function buildCoreModelFromCloudMesh(input: BuildCoreModelInput): OpenCAE
     });
   }
 
-  if (boundaryConditions.length === 0) {
+  if (boundaryConditions.length === 0 && input.analysisType !== "steady_state_thermal") {
     const surfaceSet = ensureMappedSurfaceSet({
       study: input.study,
       displayModel: input.displayModel,
@@ -232,7 +263,7 @@ export function buildCoreModelFromCloudMesh(input: BuildCoreModelInput): OpenCAE
     const nodeSetName = ensureNodeSetForSurfaceSet(nodeSets, surfaceSet, input.volumeMesh.surfaceFacets);
     boundaryConditions.push({ name: "fixedSupport0", type: "fixed", nodeSet: nodeSetName, components: ["x", "y", "z"] });
   }
-  if (input.analysisType !== "modal_analysis" && loads.length === 0) {
+  if (input.analysisType !== "modal_analysis" && input.analysisType !== "steady_state_thermal" && loads.length === 0) {
     const surfaceSet = ensureMappedSurfaceSet({
       study: input.study,
       displayModel: input.displayModel,
@@ -243,6 +274,25 @@ export function buildCoreModelFromCloudMesh(input: BuildCoreModelInput): OpenCAE
     }, surfaceSets);
     loads.push({ name: "appliedForce0", type: "surfaceForce", surfaceSet: surfaceSet.name, totalForce: [0, -500, 0] });
   }
+
+  for (const connection of input.study?.contacts ?? []) {
+    if (!connection.type || !connection.source || !connection.target) continue;
+    // Boolean fuse is a geometry operation completed before tetrahedral
+    // meshing. It must not survive as a no-op solver connection, and its
+    // selected interface faces may legitimately disappear after the union.
+    if (connection.type === "fuse") continue;
+    const source = ensureMappedSurfaceSet({ study: input.study, displayModel: input.displayModel, volumeMesh: input.volumeMesh, selectionRef: connection.source, role: "load_surface", diagnostics: input.mappingDiagnostics }, surfaceSets);
+    const target = ensureMappedSurfaceSet({ study: input.study, displayModel: input.displayModel, volumeMesh: input.volumeMesh, selectionRef: connection.target, role: "load_surface", diagnostics: input.mappingDiagnostics }, surfaceSets);
+    meshConnections.push({
+      type: connection.type,
+      source: source.name,
+      target: target.name,
+      ...(connection.type === "contact" ? { formulation: "frictionless" as const, kinematics: "small_sliding" as const } : {}),
+      ...(connection.searchTolerance !== undefined ? { searchTolerance: connection.searchTolerance } : {}),
+      ...(connection.penaltyScale !== undefined ? { penaltyScale: connection.penaltyScale } : {})
+    });
+  }
+  validateAssemblyConnectionCoverage(input.volumeMesh, surfaceSets, meshConnections);
 
   const model: OpenCAEModelJson = {
     schema: OPENCAE_MODEL_SCHEMA,
@@ -260,18 +310,19 @@ export function buildCoreModelFromCloudMesh(input: BuildCoreModelInput): OpenCAE
     coordinateSystem: input.volumeMesh.coordinateSystem,
     meshProvenance: {
       kind: "opencae_core_fea",
-      solver: "opencae-core-cloud",
+      solver: "opencae-core-local",
       resultSource: "computed",
       meshSource: input.volumeMesh.metadata.source === "structured_block" ? "structured_block_core" : "actual_volume_mesh"
-    }
+    },
+    ...(meshConnections.length ? { meshConnections } : {})
   };
   const validation = validateModelJson(model);
   if (!validation.ok) {
-    throw new Error(`OpenCAE Core Cloud generated an invalid Core model: ${validation.errors[0]?.message ?? "validation failed"}`);
+    throw new Error(`OpenCAE Core Local generated an invalid Core model: ${validation.errors[0]?.message ?? "validation failed"}`);
   }
   const preflight = preflightCoreModel(model, { requireSurfaceSelections: true });
   if (!preflight.ok) {
-    throw new Error(`OpenCAE Core Cloud model preflight failed: ${preflight.errors[0]?.message ?? "preflight failed"}`);
+    throw new Error(`OpenCAE Core Local model preflight failed: ${preflight.errors[0]?.message ?? "preflight failed"}`);
   }
   return model;
 }
@@ -301,7 +352,7 @@ export function mapSelectionToSurfaceSet(input: SelectionMappingInput): SurfaceS
 
   const roleLabel = input.role === "fixed_support" ? "support" : "load";
   throw new Error(
-    `OpenCAE Core Cloud could not map selection ${input.selectionRef} to a high-confidence ${input.role} surface set. ` +
+    `OpenCAE Core Local could not map selection ${input.selectionRef} to a high-confidence ${input.role} surface set. ` +
     `Re-select the ${roleLabel} face on the model (its stored face reference no longer matches the geometry), then generate the mesh again.`
   );
 }
@@ -325,12 +376,96 @@ function recordMapping(
 function validateVolumeMeshArtifact(volumeMesh: CoreVolumeMeshArtifact): void {
   if (volumeMesh.elements.length === 0) throw new Error("Cloud meshing produced no volume elements.");
   if (volumeMesh.surfaceFacets.length === 0) throw new Error("Cloud meshing produced no boundary surface facets.");
-  if (volumeMesh.metadata.connectedComponentCount !== 1) {
-    throw new Error(`Cloud meshing produced ${volumeMesh.metadata.connectedComponentCount} connected components; one fused solid is required.`);
-  }
   if (volumeMesh.metadata.meshQuality.invertedElementCount > 0) {
     throw new Error(`Cloud meshing produced ${volumeMesh.metadata.meshQuality.invertedElementCount} inverted elements.`);
   }
+}
+
+function validateAssemblyConnectionCoverage(
+  volumeMesh: CoreVolumeMeshArtifact,
+  surfaceSets: SurfaceSetJson[],
+  meshConnections: NonNullable<OpenCAEModelJson["meshConnections"]>
+): void {
+  const { componentIds, componentCount } = elementComponentIds(volumeMesh.elements);
+  if (componentCount !== volumeMesh.metadata.connectedComponentCount) {
+    throw new Error(`Mesh component metadata reported ${volumeMesh.metadata.connectedComponentCount} components, but connectivity contains ${componentCount}. Regenerate the mesh artifact.`);
+  }
+  if (componentCount === 1) return;
+  if (meshConnections.length === 0) {
+    throw new Error(`Cloud meshing produced ${componentCount} connected components; one fused solid or explicit tie/contact connections are required.`);
+  }
+  const facetById = new Map(volumeMesh.surfaceFacets.map((facet) => [facet.id, facet]));
+  const setByName = new Map(surfaceSets.map((set) => [set.name, set]));
+  const adjacency = Array.from({ length: componentCount }, () => new Set<number>());
+
+  const componentsForSurface = (surfaceName: string): Set<number> => {
+    const components = new Set<number>();
+    for (const facetId of setByName.get(surfaceName)?.facets ?? []) {
+      const element = facetById.get(facetId)?.element;
+      if (element !== undefined && componentIds[element] !== undefined) components.add(componentIds[element]!);
+    }
+    return components;
+  };
+
+  for (const connection of meshConnections) {
+    const sourceComponents = componentsForSurface(connection.source);
+    const targetComponents = componentsForSurface(connection.target);
+    if (sourceComponents.size !== 1 || targetComponents.size !== 1) {
+      throw new Error(`Assembly connection ${connection.source} -> ${connection.target} must map each side to exactly one mesh component.`);
+    }
+    const source = [...sourceComponents][0]!;
+    const target = [...targetComponents][0]!;
+    if (source === target) {
+      throw new Error(`Assembly connection ${connection.source} -> ${connection.target} maps both sides to the same mesh component.`);
+    }
+    adjacency[source]!.add(target);
+    adjacency[target]!.add(source);
+  }
+
+  const reached = new Set<number>([0]);
+  const pending = [0];
+  while (pending.length) {
+    const component = pending.pop()!;
+    for (const neighbor of adjacency[component]!) {
+      if (reached.has(neighbor)) continue;
+      reached.add(neighbor);
+      pending.push(neighbor);
+    }
+  }
+  if (reached.size !== componentCount) {
+    throw new Error(`Tie/contact definitions connect ${reached.size} of ${componentCount} mesh components. Add connections for every structural body or fuse the intended bodies.`);
+  }
+}
+
+function elementComponentIds(elements: CoreVolumeMeshArtifact["elements"]): { componentIds: Int32Array; componentCount: number } {
+  const componentIds = new Int32Array(elements.length);
+  componentIds.fill(-1);
+  const elementsByNode = new Map<number, number[]>();
+  elements.forEach((element, elementIndex) => {
+    for (const node of element.connectivity) {
+      const owners = elementsByNode.get(node) ?? [];
+      owners.push(elementIndex);
+      elementsByNode.set(node, owners);
+    }
+  });
+  let componentCount = 0;
+  for (let start = 0; start < elements.length; start += 1) {
+    if (componentIds[start] !== -1) continue;
+    const pending = [start];
+    componentIds[start] = componentCount;
+    while (pending.length) {
+      const element = pending.pop()!;
+      for (const node of elements[element]!.connectivity) {
+        for (const neighbor of elementsByNode.get(node) ?? []) {
+          if (componentIds[neighbor] !== -1) continue;
+          componentIds[neighbor] = componentCount;
+          pending.push(neighbor);
+        }
+      }
+    }
+    componentCount += 1;
+  }
+  return { componentIds, componentCount };
 }
 
 function resolveMaterial(input: BuildCoreModelInput): IsotropicLinearElasticMaterialJson {
@@ -427,7 +562,8 @@ function materialFromBuiltIn(
     youngModulus: effective.youngsModulus,
     poissonRatio: effective.poissonRatio,
     density: effective.density,
-    yieldStrength: effective.yieldStrength
+    yieldStrength: effective.yieldStrength,
+    thermalConductivity: effective.thermalConductivity
   };
 }
 
@@ -436,6 +572,7 @@ function materialObjectFromUnknown(raw: Record<string, unknown>): BuiltInMateria
   const poissonRatio = numberValue(raw.poissonRatio);
   const density = numberValue(raw.density);
   const yieldStrength = numberValue(raw.yieldStrength);
+  const thermalConductivity = numberValue(raw.thermalConductivity);
   if (!youngModulus || poissonRatio === undefined || !density || !yieldStrength) return undefined;
   return materialDefinition(
     stringValue(raw.name) ?? stringValue(raw.id) ?? "material",
@@ -443,7 +580,8 @@ function materialObjectFromUnknown(raw: Record<string, unknown>): BuiltInMateria
     poissonRatio,
     density,
     yieldStrength,
-    printProfileFromUnknown(raw.printProfile)
+    printProfileFromUnknown(raw.printProfile),
+    thermalConductivity
   );
 }
 
@@ -453,7 +591,8 @@ function materialDefinition(
   poissonRatio: number,
   density: number,
   yieldStrength: number,
-  printProfile?: PrintMaterialProfile
+  printProfile?: PrintMaterialProfile,
+  thermalConductivity?: number
 ): BuiltInMaterial {
   return {
     name,
@@ -462,6 +601,7 @@ function materialDefinition(
     poissonRatio,
     density,
     yieldStrength,
+    ...(thermalConductivity !== undefined ? { thermalConductivity } : {}),
     ...(printProfile ? { printProfile } : {})
   };
 }
@@ -521,7 +661,8 @@ function stripPrintProfile(material: BuiltInMaterial): IsotropicLinearElasticMat
     youngModulus: material.youngModulus,
     poissonRatio: material.poissonRatio,
     density: material.density,
-    yieldStrength: material.yieldStrength
+    yieldStrength: material.yieldStrength,
+    thermalConductivity: material.thermalConductivity
   };
 }
 
@@ -558,9 +699,19 @@ function ensureNodeSetForSurfaceSet(nodeSets: NodeSetJson[], surfaceSet: Surface
 function ensureMappedSurfaceSet(input: SelectionMappingInput, surfaceSets: SurfaceSetJson[]): SurfaceSetJson {
   const mapped = mapSelectionToSurfaceSet(input);
   const existing = surfaceSets.find((set) => set.name === mapped.name);
-  if (existing) return existing;
-  surfaceSets.push(mapped);
-  return mapped;
+  const resolved = existing ?? mapped;
+  if (!existing) surfaceSets.push(resolved);
+
+  // The physical Gmsh set name is useful for diagnostics and lets repeated
+  // selections share one node set, but it is not a durable study reference.
+  // Persist a lightweight alias keyed by the named-selection id so a later
+  // run can rebuild supports/loads from the stored Core model even when the
+  // original mapping used the geometric fallback and no facet carries a
+  // sourceFaceId.
+  if (input.selectionRef !== resolved.name && !surfaceSets.some((set) => set.name === input.selectionRef)) {
+    surfaceSets.push({ name: input.selectionRef, facets: [...resolved.facets] });
+  }
+  return resolved;
 }
 
 function cloneSurfaceSets(surfaceSets: SurfaceSetJson[]): SurfaceSetJson[] {
@@ -828,6 +979,9 @@ function stepFor(
   }
   if (analysisType === "static_stress") {
     return { name: "loadStep", type: "staticLinear", ...names };
+  }
+  if (analysisType === "steady_state_thermal") {
+    return { name: "thermalStep", type: "steadyStateThermal", ...names };
   }
   const settings = { ...(study?.solverSettings ?? {}), ...(solverSettings ?? {}) };
   return {
