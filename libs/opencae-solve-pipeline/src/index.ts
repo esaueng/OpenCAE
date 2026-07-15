@@ -36,12 +36,12 @@ import { BROWSER_SOLVE_LIMITS, CLOUD_SOLVER_LIMITS, type SolveLimits } from "./l
 export type { SolveProgressEvent, SolverHooks } from "@opencae/solver-cpu";
 export { BROWSER_SOLVE_LIMITS, CLOUD_SOLVER_LIMITS, type SolveLimits } from "./limits";
 
-/** Mirror of the deployed runner's SOLVER_CPU_VERSION stamp (server.ts). */
+/** Version stamp for the CPU solver package used by this browser pipeline. */
 export const SOLVER_CPU_VERSION = "0.1.5";
 /**
- * Browser runner stamp. Same solver ids as the deployed runner, but the
- * runnerVersion identifies the in-browser pipeline and the web app release it
- * shipped with. Keep the suffix in sync with apps/opencae-web/package.json.
+ * Browser runner stamp identifying the in-browser pipeline and the web app
+ * release it shipped with. Keep the suffix in sync with
+ * apps/opencae-web/package.json.
  */
 export const BROWSER_RUNNER_VERSION = "browser-0.1.0";
 
@@ -228,7 +228,7 @@ export function solveStudyModelWithCorePipeline(input: SolveStudyModelWithCorePi
     code: "core-solve-complete"
   }));
 
-  const stamped = stampBrowserProvenance(result.result, runnerVersion, prepared.diagnostics, prepared.artifacts ?? {});
+  const stamped = stampLocalBrowserProvenance(result.result, runnerVersion, prepared.diagnostics, prepared.artifacts ?? {});
   const resultValidation = validateCoreResult(stamped);
   if (!resultValidation.ok) {
     return {
@@ -407,7 +407,7 @@ function stampAndValidateStaticVariant(
   runnerVersion: string,
   diagnostics: unknown[]
 ): CoreStructuralSolveResult {
-  const stamped = stampBrowserProvenance(result, runnerVersion, diagnostics) as CoreStructuralSolveResult;
+  const stamped = stampLocalBrowserProvenance(result, runnerVersion, diagnostics) as CoreStructuralSolveResult;
   const validation = validateCoreResult(stamped);
   if (!validation.ok) throw new Error(coreResultValidationFailureMessage(validation));
   return stamped;
@@ -443,7 +443,7 @@ function appendPreparedPhase(prepared: PreparedState, diagnostic: Record<string,
 
 function phaseDiagnostic(phase: string, status: "started" | "complete" | "failed", message: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    id: "core-cloud-phase",
+    id: "core-local-phase",
     phase,
     status,
     message,
@@ -451,7 +451,7 @@ function phaseDiagnostic(phase: string, status: "started" | "complete" | "failed
   };
 }
 
-/** Port of the deployed runner's boundedSolverSettings, parameterized by limits. */
+/** Bound requested settings to the selected local solve limits. */
 export function boundedSolverSettings(
   analysisType: CorePipelineAnalysisType,
   input: CorePipelineSolverSettings | undefined,
@@ -503,7 +503,7 @@ export function boundedSolverSettings(
 // Each stored frame holds displacement/velocity/acceleration per node plus
 // strain/stress/von Mises/safety factor per element, all Float64. Cap the frame
 // count so a large mesh cannot exhaust memory through the transient buffer.
-// (Port of the runner's transientFrameBudget with a configurable byte budget.)
+// The byte budget is configurable for deterministic fixture replay.
 function transientFrameBudget(model: OpenCAEModelJson, transientFieldBytes: number): number {
   const nodes = Math.max(Math.floor((model.nodes?.coordinates?.length ?? 0) / 3), 1);
   const elements = Math.max(
@@ -522,7 +522,7 @@ function resourceLimitsDiagnostic(
   settings: CorePipelineSolverSettings
 ): Record<string, unknown> {
   return {
-    id: "core-cloud-resource-limits",
+    id: "core-local-resource-limits",
     maxDofs: settings.maxDofs,
     maxIterations: settings.maxIterations,
     tolerance: settings.tolerance,
@@ -540,21 +540,20 @@ function resourceLimitsDiagnostic(
 }
 
 /**
- * Honest-results: whenever this pipeline runs with tighter limits than the
- * deployed cloud runner, say so in the result diagnostics instead of silently
- * behaving differently. Absent when running at full cloud limits (parity mode).
+ * Record the active browser limits whenever they differ from the historical
+ * reference limits. Absent when replaying fixtures at those reference limits.
  */
 function browserLimitsDeviationDiagnostic(limits: SolveLimits): Record<string, unknown> | undefined {
-  const deviations: Record<string, { applied: number; cloud: number }> = {};
+  const deviations: Record<string, { applied: number; reference: number }> = {};
   for (const key of Object.keys(CLOUD_SOLVER_LIMITS) as Array<keyof SolveLimits>) {
     if (limits[key] !== CLOUD_SOLVER_LIMITS[key]) {
-      deviations[key] = { applied: limits[key], cloud: CLOUD_SOLVER_LIMITS[key] };
+      deviations[key] = { applied: limits[key], reference: CLOUD_SOLVER_LIMITS[key] };
     }
   }
   if (!Object.keys(deviations).length) return undefined;
   return {
     id: "browser-solve-limits",
-    message: "In-browser solve limits are tighter than the OpenCAE Core Cloud runner limits.",
+    message: "The local browser solve is using its guarded resource limits.",
     deviations
   };
 }
@@ -564,8 +563,7 @@ function dynamicBudgetGuard(
   settings: CorePipelineSolverSettings,
   limits: SolveLimits
 ): CorePipelineError | undefined {
-  // The dynamic MDOF solver does not enforce maxDofs itself (the cloud runner
-  // relied on its 300 s Worker timeout); fail fast in the browser instead of
+  // The dynamic MDOF solver does not enforce maxDofs itself; fail fast in the browser instead of
   // blocking the solve worker on an oversized model.
   const modelDofs = model.nodes?.coordinates?.length ?? 0;
   const maxDofs = positiveInteger(settings.maxDofs) ?? limits.maxDofs;
@@ -589,11 +587,8 @@ function dynamicBudgetGuard(
   return undefined;
 }
 
-/**
- * Port of the runner's stampCloudProvenance: identical solver/core/solver-cpu
- * ids, with the runnerVersion identifying the browser pipeline.
- */
-export function stampBrowserProvenance(
+/** Stamp the actual local solver identity and browser worker version. */
+export function stampLocalBrowserProvenance(
   result: CoreSolveResult,
   runnerVersion: string,
   diagnostics: unknown[] = [],
@@ -601,7 +596,6 @@ export function stampBrowserProvenance(
 ): CoreSolveResult {
   const provenance = {
     ...result.provenance,
-    solver: "opencae-core-cloud" as const,
     coreVersion: OPENCAE_CORE_VERSION,
     solverCpuVersion: SOLVER_CPU_VERSION,
     runnerVersion

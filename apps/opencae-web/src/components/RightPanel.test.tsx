@@ -438,7 +438,7 @@ describe("RightPanel payload mass controls", () => {
     });
 
     expect(html).toContain("Legacy backend result");
-    expect(html).toContain("This result is historical and read-only. Re-run with OpenCAE Core Cloud for production results.");
+    expect(html).toContain("This result is historical and read-only. Re-run locally in this browser for current production results.");
   });
 
   test("blocks preview deformation and reverse-check capacity for complex geometry", () => {

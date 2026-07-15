@@ -185,8 +185,8 @@ export const ResultSampleSchema = z.object({
 export const ResultProvenanceSchema = z.object({
   kind: z.enum(["opencae_core_fea", "local_estimate", "analytical_benchmark"]),
   solver: z.string(),
-  // Core Cloud results report coreVersion/solverCpuVersion/runnerVersion instead
-  // of solverVersion; requiring it made every cloud result fail restore parsing.
+  // Core results report coreVersion/solverCpuVersion/runnerVersion instead of
+  // solverVersion. Keep every version field optional for historical restores.
   solverVersion: z.string().optional(),
   coreVersion: z.string().optional(),
   solverCpuVersion: z.string().optional(),
@@ -202,6 +202,7 @@ export const ResultProvenanceSchema = z.object({
   coreSolver: z.string().optional()
 });
 
+/** Historical validator retained only for restoring results from the retired runner. */
 export const CoreCloudResultProvenanceSchema = ResultProvenanceSchema.superRefine((provenance, context) => {
   if (new RegExp(["calcu", "lix"].join(""), "i").test(provenance.solver)) {
     context.addIssue({ code: z.ZodIssueCode.custom, message: "OpenCAE Core Cloud results must use opencae-core-cloud solver provenance." });

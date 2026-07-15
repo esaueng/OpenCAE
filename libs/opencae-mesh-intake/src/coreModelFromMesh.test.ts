@@ -73,6 +73,7 @@ describe("buildCoreModelFromCloudMesh", () => {
     });
 
     expect(model.loads).toEqual([]);
+    expect(model.meshProvenance?.solver).toBe("opencae-core-local");
     expect(model.steps).toEqual([{
       name: "modalStep",
       type: "modal",

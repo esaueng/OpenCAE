@@ -305,7 +305,7 @@ export function buildCoreModelFromCloudMesh(input: BuildCoreModelInput): OpenCAE
     coordinateSystem: input.volumeMesh.coordinateSystem,
     meshProvenance: {
       kind: "opencae_core_fea",
-      solver: "opencae-core-cloud",
+      solver: "opencae-core-local",
       resultSource: "computed",
       meshSource: input.volumeMesh.metadata.source === "structured_block" ? "structured_block_core" : "actual_volume_mesh"
     },
@@ -313,11 +313,11 @@ export function buildCoreModelFromCloudMesh(input: BuildCoreModelInput): OpenCAE
   };
   const validation = validateModelJson(model);
   if (!validation.ok) {
-    throw new Error(`OpenCAE Core Cloud generated an invalid Core model: ${validation.errors[0]?.message ?? "validation failed"}`);
+    throw new Error(`OpenCAE Core Local generated an invalid Core model: ${validation.errors[0]?.message ?? "validation failed"}`);
   }
   const preflight = preflightCoreModel(model, { requireSurfaceSelections: true });
   if (!preflight.ok) {
-    throw new Error(`OpenCAE Core Cloud model preflight failed: ${preflight.errors[0]?.message ?? "preflight failed"}`);
+    throw new Error(`OpenCAE Core Local model preflight failed: ${preflight.errors[0]?.message ?? "preflight failed"}`);
   }
   return model;
 }
@@ -347,7 +347,7 @@ export function mapSelectionToSurfaceSet(input: SelectionMappingInput): SurfaceS
 
   const roleLabel = input.role === "fixed_support" ? "support" : "load";
   throw new Error(
-    `OpenCAE Core Cloud could not map selection ${input.selectionRef} to a high-confidence ${input.role} surface set. ` +
+    `OpenCAE Core Local could not map selection ${input.selectionRef} to a high-confidence ${input.role} surface set. ` +
     `Re-select the ${roleLabel} face on the model (its stored face reference no longer matches the geometry), then generate the mesh again.`
   );
 }

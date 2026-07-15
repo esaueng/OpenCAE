@@ -90,7 +90,7 @@ export type LocalSolveResult = {
   variants?: RunVariantResult[];
   variantRefs?: RunVariantRef[];
   activeVariantId?: string;
-  /** Solver-space render surface mesh (same contract as the cloud response). */
+  /** Solver-space render surface mesh returned by the local Core worker. */
   surfaceMesh?: unknown;
   /** Solver diagnostics entries (core-solve-diagnostics, phase diagnostics, ...). */
   diagnostics?: unknown[];
@@ -262,7 +262,7 @@ export function geometrySourceForStudy(study: Study, displayModel?: DisplayModel
 /**
  * Built-in sample geometry is authored in display-model space (Y axis = height) and the
  * viewer stands it upright with the legacy +90 deg X base rotation, while every OpenCAE
- * Core solver mesh for that geometry (cloud structured block, procedural bracket, and
+ * Core solver mesh for that geometry (structured block, procedural bracket, and
  * the structured block Core model built below) lives in the upright solver frame that
  * rotation produces (Z axis = height). Uploaded CAD/mesh geometry is meshed in its own
  * file coordinates, which the viewer renders without the base rotation, so its
@@ -296,10 +296,9 @@ function negated(value: number): number {
 }
 
 /**
- * Study load directions are recorded in display-model space, but OpenCAE Core Cloud
- * applies them verbatim in the solver frame when it meshes dispatched geometry. Rotate
- * them into the solver frame so the solved deformation matches the load arrows shown in
- * the viewer.
+ * Study load directions are recorded in display-model space, while the local Core
+ * pipeline applies them in the solver frame. Rotate them into that frame so the
+ * solved deformation matches the load arrows shown in the viewer.
  */
 export function studyForCoreGeometryDispatch(study: Study, displayModel: DisplayModel | undefined): Study {
   if (!displayModel || !displayModelUsesUprightSolverFrame(displayModel)) return study;
@@ -395,10 +394,9 @@ export function openCaeCoreEligibility(
 }
 
 /**
- * Browser-local solve at parity with the deployed Core Cloud runner: the same
- * high-fidelity model builder the cloud request path uses (surface sets,
- * surfaceForce/pressure loads, solver-frame rotation) feeds the mirrored cloud
- * pipeline in @opencae/solve-pipeline, under BROWSER_SOLVE_LIMITS.
+ * Browser-local solve using the high-fidelity model builder (surface sets,
+ * surfaceForce/pressure loads, and solver-frame rotation) and the local
+ * pipeline in @opencae/solve-pipeline under BROWSER_SOLVE_LIMITS.
  */
 export function trySolveOpenCaeCoreStudy({ study, runId, displayModel, customMaterials = [], hooks, onVariantComplete }: {
   study: Study;
@@ -601,9 +599,8 @@ export function trySolveOpenCaeCoreStudy({ study, runId, displayModel, customMat
           : `OpenCAE Core solve failed: ${solved.error.message}`
       };
     }
-    // The pipeline result is the cloud response contract (mm-N-s-MPa summary,
-    // surface-aligned fields, solver-surface mesh); the ResultSummary/ResultField
-    // schema types describe that same JSON shape.
+    // The local pipeline returns the stable mm-N-s-MPa summary, surface-aligned
+    // fields, and solver-surface mesh contract.
     const result = solved.result as unknown as Omit<LocalSolveResult, "artifacts"> & { artifacts?: Record<string, unknown> };
     return {
       ok: true,
@@ -700,7 +697,7 @@ export async function trySolveOpenCaeCoreStudyAutomatic(args: {
 }
 
 /**
- * Solver settings handed to the mirrored cloud pipeline. Static studies pass
+ * Solver settings handed to the local browser pipeline. Static studies pass
  * their study settings through (bounded by the pipeline); dynamic studies pass
  * the same clamped transient settings that were written into the model's
  * dynamicLinear step, so the run matches both the step and the UI's frame
@@ -728,7 +725,7 @@ export function buildOpenCaeCoreModelForStudy(
   displayModel: DisplayModel | undefined,
   customMaterials: readonly CustomMaterial[] = []
 ): CoreStudyModel {
-  if (!displayModel?.dimensions) throw new Error("OpenCAE Core Cloud requires display dimensions before generating a Core model.");
+  if (!displayModel?.dimensions) throw new Error("OpenCAE Core Local requires display dimensions before generating a Core model.");
   const actualMesh = actualCoreVolumeMeshArtifact(study);
   const material = materialForStudy(study, customMaterials);
   const criticalLayerAxis = inferGlobalCriticalPrintAxis(study, displayModel.faces.map((face) => ({
@@ -756,9 +753,9 @@ export function buildOpenCaeCoreModelForStudy(
 
   if (actualMesh?.model) {
     if (!hasActualCoreVolumeMesh(study, displayModel)) {
-      throw new Error("OpenCAE Core Cloud requires an actual Core volume mesh with actual_volume_mesh provenance and one connected component.");
+      throw new Error("OpenCAE Core Local requires an actual Core volume mesh with actual_volume_mesh provenance and a connected or explicitly joined assembly.");
     }
-    model = cloneModelForCloud(actualMesh.model);
+    model = cloneModelForLocalSolve(actualMesh.model);
     renderNodePoints = actualMesh.renderNodePoints?.length ? actualMesh.renderNodePoints : renderNodePointsForModel(model);
     meshSource = "actual_volume_mesh";
     meshConnectivity = connectedComponentCountForActualArtifact(actualMesh)
@@ -773,7 +770,7 @@ export function buildOpenCaeCoreModelForStudy(
       }
       throw new Error(OPENCAE_CORE_MESH_REQUIRED_REASON);
     }
-    const mesh = tetMeshForDisplayModel(displayModel, study.meshSettings.preset, CLOUD_STRUCTURED_BLOCK_TET10_NODE_BUDGET);
+    const mesh = tetMeshForDisplayModel(displayModel, study.meshSettings.preset, LOCAL_STRUCTURED_BLOCK_TET10_NODE_BUDGET);
     model = volumeMeshToModelJson({
       nodes: { coordinates: solverFrameCoordinates(mesh.solverCoordinates, displayModel) },
       materials: [coreMaterial],
@@ -786,7 +783,7 @@ export function buildOpenCaeCoreModelForStudy(
       coordinateSystem: { solverUnits: "m-N-s-Pa", renderCoordinateSpace: "solver" },
       meshProvenance: {
         kind: "opencae_core_fea",
-        solver: "opencae-core-cloud",
+        solver: "opencae-core-local",
         resultSource: "computed",
         meshSource: "structured_block_core"
       }
@@ -807,7 +804,7 @@ export function buildOpenCaeCoreModelForStudy(
     )),
     meshProvenance: {
       kind: "opencae_core_fea",
-      solver: "opencae-core-cloud",
+      solver: "opencae-core-local",
       resultSource: "computed",
       meshSource
     },
@@ -832,7 +829,7 @@ export function buildOpenCaeCoreModelForStudy(
       surfaceSets
     });
     const nodeSet = deriveFixedSupportNodeSetFromSurface(`fixedNodes${index}`, surfaceSet.name, { ...model, surfaceSets });
-    if (!nodeSet.nodes.length) throw new Error(`OpenCAE Core Cloud could not map fixed support ${constraint.selectionRef} to mesh nodes.`);
+    if (!nodeSet.nodes.length) throw new Error(`OpenCAE Core Local could not map boundary ${constraint.selectionRef} to mesh nodes.`);
     nodeSets.push(nodeSet);
     boundaryConditions.push(constraint.type === "prescribed_temperature"
       ? { name: `prescribedTemperature${index}`, type: "prescribedTemperature", nodeSet: nodeSet.name, value: Number(constraint.parameters.value ?? 20) }
@@ -987,12 +984,12 @@ export function buildOpenCaeCoreModelForStudy(
     nodeSets,
     boundaryConditions,
     loads,
-    steps: coreCloudStepsForStudy(study, boundaryConditions.map((condition) => condition.name), coreLoadNameByStudyLoadId)
+    steps: localStepsForStudy(study, boundaryConditions.map((condition) => condition.name), coreLoadNameByStudyLoadId)
   };
   const validation = validateModelJson(model);
   if (!validation.ok) {
     const first = validation.errors[0];
-    throw new Error(`OpenCAE Core Cloud generated an invalid Core model: ${first?.message ?? "validation failed"}`);
+    throw new Error(`OpenCAE Core Local generated an invalid Core model: ${first?.message ?? "validation failed"}`);
   }
 
   return {
@@ -1012,7 +1009,7 @@ export function coreMeshStatisticsForStudy(
 }
 
 
-function cloneModelForCloud(model: OpenCAEModelJson): OpenCAEModelJson {
+function cloneModelForLocalSolve(model: OpenCAEModelJson): OpenCAEModelJson {
   return {
     ...model,
     nodes: { coordinates: [...model.nodes.coordinates] },
@@ -1057,7 +1054,7 @@ function ensureSurfaceSetForSelection({
   const facets = sourceMatches.length
     ? sourceMatches
     : facetsForDisplaySelection(model.surfaceFacets ?? [], renderNodePoints, displayModel, study, selectionRef);
-  if (!facets.length) throw new Error(`OpenCAE Core Cloud could not map selection ${selectionRef} to Core surface facets.`);
+  if (!facets.length) throw new Error(`OpenCAE Core Local could not map selection ${selectionRef} to Core surface facets.`);
   const next = { name: selectionRef, facets: [...new Set(facets)].sort((left, right) => left - right) };
   surfaceSets.push(next);
   return next;
@@ -1129,7 +1126,7 @@ function facetsForDisplaySelection(
   return [...result];
 }
 
-function coreCloudStepsForStudy(
+function localStepsForStudy(
   study: Study,
   boundaryConditions: string[],
   coreLoadNameByStudyLoadId: ReadonlyMap<string, string>
@@ -1475,7 +1472,7 @@ function representativeElementSizeMm(model: OpenCAEModelJson): number {
 function tetMeshForDisplayModel(
   displayModel: DisplayModel,
   preset: Study["meshSettings"]["preset"],
-  nodeBudget = CLOUD_STRUCTURED_BLOCK_TET10_NODE_BUDGET
+  nodeBudget = LOCAL_STRUCTURED_BLOCK_TET10_NODE_BUDGET
 ): CoreTetMesh {
   const dimensions = displayModel.dimensions;
   if (!dimensions) throw new Error("OpenCAE Core requires display dimensions.");
@@ -1608,18 +1605,16 @@ function renderBoundsForDisplayModel(displayModel: DisplayModel): { min: Vec3; m
 }
 
 // The axis-aligned box face an outward face normal points at: the dominant-axis extreme of
-// the render bounds. Used by cloud facet selection so both backends resolve a selection to
-// the same face.
+// the render bounds. Used by local facet selection to resolve a selection to the
+// same face as the viewer.
 function facePlaneForNormal(normal: Vec3, bounds: { min: Vec3; max: Vec3 }): { axis: 0 | 1 | 2; plane: number } {
   const axis = dominantAxis(normal);
   return { axis, plane: normal[axis] < 0 ? bounds.min[axis] : bounds.max[axis] };
 }
 
-// Dimension-aware structured grid sizing, mirroring the cloud mesher: presets choose
+// Dimension-aware structured grid sizing: presets choose
 // how many cells span the smallest dimension, all axes target near-cubic cells, and
-// the elevated Tet10 grid stays inside the shared structured-block node budget.
-// Local and cloud structured-block solves now use the same density (the local
-// backend runs the full cloud pipeline on a dedicated solve worker).
+// the elevated Tet10 grid stays inside the local structured-block node budget.
 const LOCAL_CELLS_ACROSS_MIN_DIMENSION: Record<string, number> = {
   coarse: 2,
   medium: 3,
@@ -1627,12 +1622,9 @@ const LOCAL_CELLS_ACROSS_MIN_DIMENSION: Record<string, number> = {
   ultra: 5
 };
 const LOCAL_MAX_DIVISIONS_PER_AXIS = 32;
-// Cloud-parity structured-block tier (simple geometry with no separate geometry source):
-// sized for the retired Core Cloud runner, which had no in-browser worker-thread
-// constraint — ~8000 Tet10 nodes (~24000 DOFs), well under that runner's 100000-DOF
-// limit (SOLVER_LIMITS.maxDofs in the retired core-cloud server lineage;
-// the frozen golden fixtures pin this behavior).
-const CLOUD_STRUCTURED_BLOCK_TET10_NODE_BUDGET = 8000;
+// Structured-block tier for simple geometry with no separate geometry source:
+// ~8000 Tet10 nodes (~24000 DOFs), kept below the guarded local CPU ceiling.
+const LOCAL_STRUCTURED_BLOCK_TET10_NODE_BUDGET = 8000;
 
 function meshDivisionsForDimensions(
   dimensions: [number, number, number],

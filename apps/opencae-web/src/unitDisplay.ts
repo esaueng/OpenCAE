@@ -156,8 +156,6 @@ export function formatResultProvenanceLabel(provenance: ResultProvenance | undef
   if (tier === "local_estimate") return "Estimate (not FEA)";
   if (tier === "analytical_benchmark") return "Analytical benchmark";
   if (tier === "production_fea") {
-    // Browser-pipeline results keep the runner's solver id for golden byte-parity;
-    // runnerVersion "browser-*" marks them as local solves (plan 015, open question 4).
     if (provenance?.runnerVersion?.startsWith("browser-")) return "OpenCAE Core Local (in-browser)";
     return provenance?.solver === "opencae-core-cloud" ? "OpenCAE Core Cloud" : "OpenCAE Core Local";
   }
@@ -200,7 +198,7 @@ export function formatMeshSourceLabel(meshSource: ResultProvenance["meshSource"]
 
 export function legacyResultWarningForProvenance(provenance: ResultProvenance | undefined): string | null {
   return isLegacyBackendResult(provenance)
-    ? "This result is historical and read-only. Re-run with OpenCAE Core Cloud for production results."
+    ? "This result is historical and read-only. Re-run locally in this browser for current production results."
     : null;
 }
 

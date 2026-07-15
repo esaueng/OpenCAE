@@ -120,53 +120,11 @@ The regression requires:
 
 This fixture is intentionally small. It validates topology, load routing, result surface extraction, and solver integration for non-block geometry. It is not a certified engineering benchmark.
 
-## OpenCAE Core Cloud
+## Local Browser Execution
 
-The `services/opencae-core-cloud` package is the container-oriented Core Cloud runner. It exposes:
+Every current solve is performed in the browser. Geometry is meshed by the WebAssembly Gmsh worker, validated as a Core model, and transferred to the dedicated solve worker. Static, dynamic, modal, thermal, and eligible WebGPU routes all return their actual local solver identity in provenance. There is no HTTP solve fallback.
 
-- `GET /health`
-- `POST /solve`
-
-The health response reports:
-
-- `mesher: "gmsh"`
-- `gmshAvailable: true | false`
-- `supportsProceduralGeometry: true`
-- `supportsUploadedCad: true`
-- `supportedAnalysisTypes: ["static_stress", "dynamic_structural"]`
-- `supportedSolvers: ["sparse_static", "mdof_dynamic"]`
-- `supportsActualVolumeMesh: true`
-- `supportsPreview: false`
-- `noCalculix: true`
-- `noLocalEstimateFallback: true`
-
-`POST /solve` accepts exactly one of an OpenCAE Core model, a Core volume mesh input, or a geometry source. Geometry requests use:
-
-```ts
-{
-  runId?: string;
-  analysisType: "static_stress" | "dynamic_structural";
-  study?: unknown;
-  displayModel?: unknown;
-  solverSettings?: Record<string, unknown>;
-  resultSettings?: Record<string, unknown>;
-  geometry?: {
-    kind: "sample_procedural" | "uploaded_cad" | "uploaded_mesh" | "structured_block";
-    sampleId?: "cantilever" | "beam" | "bracket";
-    format?: "step" | "stl" | "obj" | "msh" | "json";
-    filename?: string;
-    contentBase64?: string;
-    units?: "mm" | "m";
-    geometryDescriptor?: Record<string, unknown>;
-  };
-}
-```
-
-The geometry flow is always geometry source, actual volume mesh, mesh validation, Core model v0.3, Core solve, then `CoreSolveResult`. The retired cloud service used Gmsh only to mesh procedural or uploaded CAD geometry. Gmsh output was converted to Core nodes, Tet4/Tet10 element connectivity, boundary surface facets, physical surface sets, and source selection metadata before any solve was attempted.
-
-Procedural Bracket geometry creates a fused base, upright, and gusset/rib solid with cylindrical cutouts. It tags physical surfaces `fixed_support`, `load_surface`, `hole_surfaces`, `base_surfaces`, `upright_surfaces`, and `gusset_surfaces`; `fixed_support` maps to `FS1`/`face-base-left`, and `load_surface` maps to `L1`/`face-load-top`.
-
-If Gmsh is unavailable or meshing fails, `/solve` returns an explicit meshing error. The service does not run a local estimate, display-bounds proxy, or legacy file handoff. After model construction, `static_stress` routes to `solveCoreStatic`, `dynamic_structural` routes to `solveCoreDynamic`, preview requests are rejected, and the returned `CoreSolveResult` keeps `solver: "opencae-core-cloud"`, `meshSource: "actual_volume_mesh"`, and `resultSource: "computed"` provenance.
+The former container runner is retired and is not an execution path. Its fixtures remain only as a numeric regression oracle, and pre-retirement results keep their historical provenance when displayed. See [cloud-retirement.md](../../cloud-retirement.md).
 
 ## Known Limitations
 

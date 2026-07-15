@@ -559,7 +559,8 @@ function validateProvenance(provenance: CoreSolveProvenance, errors: CoreResultV
     provenance.solver !== "opencae-core-cloud" &&
     provenance.solver !== "opencae-core-sparse-tet" &&
     provenance.solver !== "opencae-core-mdof-tet" &&
-    provenance.solver !== "opencae-core-modal-tet"
+    provenance.solver !== "opencae-core-modal-tet" &&
+    provenance.solver !== "opencae-core-webgpu-matrix-free-tet4"
   ) {
     errors.push(issue("invalid-provenance", "Production Core result solver must be an OpenCAE Core solver.", "provenance.solver"));
   }

@@ -5,7 +5,7 @@ import { volumeMeshToModelJson, type OpenCAEModelJson, type VolumeMeshToModelInp
 import { CLOUD_SOLVER_LIMITS, solveStudyModelWithCorePipeline } from "./index";
 
 /**
- * B2 gate: golden parity against the deployed OpenCAE Core Cloud runner.
+ * Numeric parity gate against historical OpenCAE Core Cloud fixtures.
  *
  * Each fixture in apps/opencae-web/src/testdata/core-cloud-golden freezes a
  * request/response pair recorded from the production runner (runnerVersion
@@ -14,8 +14,8 @@ import { CLOUD_SOLVER_LIMITS, solveStudyModelWithCorePipeline } from "./index";
  *  - numeric field arrays and summary numbers within 1e-12 relative,
  *  - field ids/units/locations and surfaceMesh structure exactly,
  *  - diagnostics and artifacts structurally,
- *  - provenance structurally (runnerVersion differs by design:
- *    "browser-<web app version>" vs "0.1.6").
+ *  - provenance structurally except for the intentionally local solver and
+ *    runner identities.
  *
  * Model extraction mirrors the runner's modelForRequest: coreModel, then
  * coreVolumeMesh (volumeMeshToModelJson), then geometry. All five recorded
@@ -195,6 +195,16 @@ function compareStructures(
   // upgrades those embedded v0.2 models before solving, so only this diagnostic
   // version stamp is expected to advance.
   if (path.endsWith(".coreModelSchemaVersion") && actual === "0.4.0" && (expected === "0.2.0" || expected === "0.3.0")) return;
+  if (
+    path.endsWith(".id") &&
+    ((expected === "core-cloud-phase" && actual === "core-local-phase") ||
+      (expected === "core-cloud-resource-limits" && actual === "core-local-resource-limits"))
+  ) return;
+  if (
+    path.endsWith(".provenance.solver") &&
+    expected === "opencae-core-cloud" &&
+    (actual === "opencae-core-sparse-tet" || actual === "opencae-core-mdof-tet" || actual === "opencae-core-modal-tet")
+  ) return;
   if (!Object.is(actual, expected)) {
     mismatches.push(`${path}: ${String(actual)} != ${String(expected)}`);
   }
@@ -225,8 +235,8 @@ function legacyResultField(field: unknown): unknown {
   return legacy;
 }
 
-describe("golden parity: browser pipeline vs deployed Core Cloud runner", () => {
-  test.each([...ALL_CASES])("%s reproduces the recorded cloud response", { timeout: 120000 }, (name) => {
+describe("golden parity: local browser pipeline vs historical fixtures", () => {
+  test.each([...ALL_CASES])("%s reproduces the recorded numeric response", { timeout: 120000 }, (name) => {
     const fixture = loadFixture(name);
     expect(fixture.meta.runnerVersion).toBe(EXPECTED_CLOUD_RUNNER_VERSION);
     const { model } = modelForFixture(fixture);
@@ -243,6 +253,11 @@ describe("golden parity: browser pipeline vs deployed Core Cloud runner", () => 
 
     expect(outcome.ok, outcome.ok ? undefined : JSON.stringify(outcome.error)).toBe(true);
     if (!outcome.ok) return;
+    expect(outcome.result.provenance.solver).toBe(
+      fixture.request.analysisType === "dynamic_structural"
+        ? "opencae-core-mdof-tet"
+        : "opencae-core-sparse-tet"
+    );
 
     const stats: DeltaStats = { comparisons: 0, maxAbsDelta: 0, maxRelDelta: 0, maxAbsPath: "-", maxRelPath: "-" };
     const mismatches: string[] = [];
@@ -286,7 +301,7 @@ describe("golden parity: browser pipeline vs deployed Core Cloud runner", () => 
       }
     }
 
-    // Provenance parity is structural; the runner stamp differs by design.
+    // The fixture keeps its historical runner stamp; the replay is explicitly local.
     const actualVersions = new Set<string>();
     collectRunnerVersions(outcome.result, actualVersions);
     expect([...actualVersions]).toEqual(["browser-0.1.0"]);

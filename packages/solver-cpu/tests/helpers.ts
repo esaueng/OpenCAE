@@ -181,7 +181,7 @@ export function createStructuredCantileverModel(options: {
     coordinateSystem: { solverUnits: "m-N-s-Pa", renderCoordinateSpace: "solver" },
     meshProvenance: {
       kind: "opencae_core_fea",
-      solver: "opencae-core-cloud",
+      solver: "opencae-core-local",
       resultSource: "computed",
       meshSource: "actual_volume_mesh"
     }
