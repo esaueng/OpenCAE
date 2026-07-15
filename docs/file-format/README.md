@@ -15,7 +15,7 @@ OpenCAE local project files use JSON and are saved with `.opencae.json` by defau
 
 - `project` contains schema-versioned project metadata, geometry file records, studies, loads, supports, mesh settings, and run references.
 - `displayModel` contains the browser display representation, face references, optional visual mesh data, and optional native CAD metadata.
-- `results` is optional and stores the active/completed run id, a structural or modal result summary, and result fields for completed local files.
+- `results` is optional and stores the active/completed run id, a structural, modal, or steady-state thermal result summary and result fields for completed local files.
 
 Static and dynamic structural studies may contain `loadCases` and `loadCombinations`. Each load id appears in exactly one case. Cases do not contain their own supports, material, geometry, mesh, or solver settings. Combination factors are finite signed numbers that reference static case ids directly; nested combinations are not valid. Readers synthesize one enabled `Default` case containing every load when those arrays are absent in an older project.
 
@@ -23,7 +23,7 @@ Structural `results` may include `variants`, lightweight `variantRefs`, and `act
 
 Uploaded STEP, STP, STL, and OBJ source data can be embedded into the project metadata as base64 when the browser has the uploaded model content available. This makes saved local project files self-contained for reopening in the web app.
 
-`project.customMaterials` is optional. Each entry uses a UUID id, name, category, Young's modulus and yield strength in Pa, density in kg/m³, Poisson ratio, optional copied additive `printProfile`, and `verification: "user_supplied_unverified"`. These definitions are project-scoped; there is no global browser material library. Because this is an optional backward-readable field, the outer container remains version 2.
+`project.customMaterials` is optional. Each entry uses a UUID id, name, category, Young's modulus and yield strength in Pa, density in kg/m³, Poisson ratio, optional thermal conductivity in `W/(m·K)`, optional copied additive `printProfile`, and `verification: "user_supplied_unverified"`. These definitions are project-scoped; there is no global browser material library. Because this is an optional backward-readable field, the outer container remains version 2.
 
 `project.convergenceRecords` is also optional. Each static-case record stores its study/case ids, probe point and source, completion timestamps, classification, last-step percentage changes, and exactly three `coarse`, `medium`, and `fine` rung summaries. Rungs contain actual mesh/DOF counts and size when available, raw element peak von Mises stress, probe displacement magnitude, status, and an optional skip/failure reason. Solver meshes, surface fields, and result bundles are deliberately excluded. These compact records persist through workspace autosave and the same version-2 portable container.
 
@@ -31,9 +31,9 @@ The open-section clipping plane is not part of this file format. Its enabled sta
 
 Runtime artifacts are stored separately under `data/artifacts` during local API use. Those artifacts include uploaded models, display metadata, mesh summaries, solver inputs/logs, result bundles, HTML reports, and PDF reports.
 
-## OpenCAE Core model schema 0.3.0
+## OpenCAE Core model schema 0.4.0
 
-Core readers accept `0.1.0`, `0.2.0`, and `0.3.0`. Schema `0.3.0` adds a `modal` step with `boundaryConditions` and `modeCount` (1–10). Modal steps use material density and supports but no load references.
+Core readers accept `0.1.0`, `0.2.0`, `0.3.0`, and `0.4.0`. Schema `0.3.0` adds a `modal` step with `boundaryConditions` and `modeCount` (1–10). Modal steps use material density and supports but no load references.
 
 Schema `0.3.0` also adds four mesh-native load records. Values are always stored in the model coordinate system's canonical force units:
 
@@ -46,4 +46,17 @@ The project-level load discriminators are `surface_traction`, `volume_force`, `r
 
 Modal result bundles are discriminated by `summary.analysisType: "modal_analysis"`. Each mode records its 1-based index, frequency in Hz, eigenvalue, scaled residual, and field id. Its `mode_shape` field is a node-located 3-vector surface field with `normalized` units; it is never labeled as displacement. Shape vectors are normalized to a maximum nodal vector magnitude of 1 and have deterministic, physically arbitrary sign.
 
+Schema `0.4.0` adds steady-state conduction and solved assembly connections:
+
+- `isotropicLinearElastic` materials may carry `thermalConductivity`. It is `W/(m·K)` in `m-N-s-Pa` models and `W/(mm·K)` in `mm-N-s-MPa` models; adapters convert catalog values explicitly.
+- `prescribedTemperature` fixes a node or surface set in degrees Celsius. `surfaceHeatFlux` is positive heat entering a surface in `W/m²` or `W/mm²`. `volumetricHeatGeneration` is positive internally generated heat in `W/m³` or `W/mm³`.
+- `steadyStateThermal` references the temperature boundary conditions and heat loads. Thermal results report Celsius temperatures, heat-flux vectors, and relative energy-balance error.
+- `meshConnections` records `fuse`, `tie`, or `contact`. Tie and contact reference source/target surface sets and may provide positive search tolerance and penalty scale. Contact is `frictionless` and `small_sliding`.
+
+The schema 0.4 contact implementation is a linearized initially closed normal penalty. It does not encode separation/re-closure, friction, or large-sliding state history.
+
 The outer `opencae-local-project` container remains version 2 because the new study and result shapes are backward-readable additions. Legacy structural summary/field bundles continue parsing as one Default run variant.
+
+## Self-contained result viewer
+
+The `.html` result export is a separate, standalone artifact rather than a project container. It embeds one `opencae-result-viewer` version-1 payload containing the display metadata, solved surface mesh, summary, fields, and provenance. The file uses inline CSS/JavaScript and makes no server or network requests.

@@ -30,3 +30,15 @@ Connect loading, setup, solve, viewing, and export into a usable browser workflo
 
 ## Phase 8 - Performance Pass
 Benchmark, profile, and optimize the MVP workflow.
+
+## Phase 9 - Beta Solver Expansion
+
+Implemented on `beta`: CSR/SSOR CPU solving to a guarded 150k DOF, steady-state Tet4/Tet10 conduction, assembly-aware fuse/tie/linearized frictionless contact, and automatic matrix-free Tet4 WebGPU routing to 500k DOF.
+
+## Phase 10 - Trust And Sharing
+
+Implemented on `beta`: an in-app validation gallery with live worker reruns and a single-file offline HTML result viewer.
+
+## Phase 11 - Nonlinear Contact And GPU Residency
+
+Replace the beta bilateral contact penalty with unilateral active-set separation/re-closure and keep CG vectors, reductions, and convergence checks resident on WebGPU. Add benchmark-derived release ceilings per browser/device rather than treating the guarded limits as guaranteed capacity.

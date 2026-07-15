@@ -15,7 +15,7 @@ import { createSingleTetModel } from "./fixtures";
 describe("@opencae/core public API", () => {
   test("exports schema constants and core utilities", () => {
     expect(OPENCAE_MODEL_SCHEMA).toBe("opencae.model");
-    expect(OPENCAE_MODEL_SCHEMA_VERSION).toBe("0.3.0");
+    expect(OPENCAE_MODEL_SCHEMA_VERSION).toBe("0.4.0");
     expect(typeof validateModelJson).toBe("function");
     expect(typeof normalizeModelJson).toBe("function");
     expect(typeof elementNodeCount).toBe("function");
@@ -30,7 +30,7 @@ describe("@opencae/core public API", () => {
 
     expect(normalized.ok).toBe(true);
     if (!normalized.ok) return;
-    expect(normalized.model.schemaVersion).toBe("0.3.0");
+    expect(normalized.model.schemaVersion).toBe("0.4.0");
     expect(solverSurfaceMeshFromModel(normalized.model).triangles.length).toBe(4);
   });
 });

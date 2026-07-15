@@ -8,7 +8,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { isModalResultSummary } from "@opencae/schema";
+import { isStructuralResultSummary } from "@opencae/schema";
 import type { DisplayModel, Study } from "@opencae/schema";
 import { hasActualCoreVolumeMesh, openCaeCoreEligibility, trySolveOpenCaeCoreStudy } from "@opencae/core-adapter";
 import {
@@ -109,7 +109,7 @@ describe("wasm-meshed bracket through the adapter (display-frame contract)", () 
     expect(outcome.ok, outcome.ok ? undefined : outcome.reason).toBe(true);
     if (!outcome.ok) return;
     expect(outcome.solverBackend).toBe("opencae-core-sparse-tet");
-    if (isModalResultSummary(outcome.result.summary)) throw new Error("Expected structural adapter results.");
+    if (!isStructuralResultSummary(outcome.result.summary)) throw new Error("Expected structural adapter results.");
     const goldenSummary = golden.response.summary;
     expect(Math.abs(outcome.result.summary.maxStress - goldenSummary.maxStress) / goldenSummary.maxStress).toBeLessThan(0.02);
     expect(Math.abs(outcome.result.summary.maxDisplacement - goldenSummary.maxDisplacement) / goldenSummary.maxDisplacement).toBeLessThan(0.02);

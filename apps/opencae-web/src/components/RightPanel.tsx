@@ -2,8 +2,8 @@ import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSP
 import { createPortal } from "react-dom";
 import { AlertTriangle, Anchor, ArrowDown, Atom, Check, ChevronDown, ChevronRight, CircleHelp, Eye, Factory, FileDown, Gauge, Grid3X3, Layers3, Maximize2, Pause, Play, Plus, RotateCcw, Ruler, ScanLine, ShieldCheck, Upload, Weight, Wrench, X } from "lucide-react";
 import { compatibleManufacturingProcessesFor, defaultManufacturingParametersFor, defaultManufacturingProcessIdFor, effectiveMaterialProperties, fdmPropertyFactorsFor, isManufacturingProcessCompatible, manufacturingParametersForAssignment, manufacturingProcessForId, massKgForPayloadMaterial, materialCatalog, materialCategoryLabel, normalizeManufacturingParameters, payloadMaterialForId, payloadMaterials, type ManufacturingParameters, type ManufacturingProcessId, type PayloadMaterialCategory } from "@opencae/materials";
-import { assessResultFailure, estimateAllowableLoadForSafetyFactor, isModalResultSummary } from "@opencae/schema";
-import type { Constraint, CustomMaterial, DisplayFace, DisplayModel, DynamicSolverSettings, Load, LoadCase, LoadCombination, Material, MeshConvergenceRecord, MeshQuality, ModalResultSummary, ModalSolverSettings, Project, ResultField, ResultSummary, RunTimingEstimate, RunVariantRef, SimulationFidelity, StructuralResultSummary, Study } from "@opencae/schema";
+import { assessResultFailure, estimateAllowableLoadForSafetyFactor, isModalResultSummary, isThermalResultSummary } from "@opencae/schema";
+import type { Constraint, CustomMaterial, DisplayFace, DisplayModel, DynamicSolverSettings, Load, LoadCase, LoadCombination, Material, MeshConnection, MeshConvergenceRecord, MeshQuality, ModalResultSummary, ModalSolverSettings, Project, ResultField, ResultSummary, RunTimingEstimate, RunVariantRef, SimulationFidelity, StructuralResultSummary, Study, ThermalResultSummary } from "@opencae/schema";
 import { inferGlobalCriticalPrintAxis } from "@opencae/study-core";
 import type { StepId } from "./StepBar";
 import { applicationPointForLoad, createViewerLoadMarkers, directionLabelForLoad, directionVectorForLabel, equivalentForceForLoad, LOAD_DIRECTION_LABELS, loadMarkerOrdinalLabel, payloadObjectForLoad, unitsForLoadType, type LoadApplicationPoint, type LoadDirectionLabel, type LoadType, type PayloadLoadMetadata, type PayloadMassMode } from "../loadPreview";
@@ -83,11 +83,14 @@ interface RightPanelProps {
   runTiming?: RunTimingEstimate | null;
   onGenerateReport?: (options?: { targetSafetyFactor?: number }) => Promise<void>;
   onExportResultPng?: () => Promise<void>;
+  onExportResultHtml?: () => Promise<void>;
   reportBusy?: boolean;
   reportError?: string | null;
   reportDisabled?: boolean;
   pngExportBusy?: boolean;
   pngExportError?: string | null;
+  htmlExportBusy?: boolean;
+  htmlExportError?: string | null;
   sampleModel: SampleModelId;
   sampleAnalysisType?: SampleAnalysisType;
   draftLoadType: LoadType;
@@ -117,7 +120,7 @@ interface RightPanelProps {
   onDeleteCustomMaterial?: (materialId: string) => void;
   /** null suppresses the preview while editing; undefined clears the preview so the assigned orientation shows again. */
   onPreviewPrintLayerOrientation?: (orientation: "x" | "y" | "z" | null | undefined) => void;
-  onAddSupport: (selectionRef?: string) => void;
+  onAddSupport: (selectionRef?: string, options?: { type: "fixed" | "prescribed_temperature"; value?: number }) => void;
   onUpdateSupport: (support: Constraint) => void;
   onRemoveSupport: (supportId: string) => void;
   onDraftLoadTypeChange: (type: LoadType) => void;
@@ -130,6 +133,7 @@ interface RightPanelProps {
   onRemoveLoad: (loadId: string) => void;
   onLoadCasesChange?: (loadCases: LoadCase[], loadCombinations: LoadCombination[]) => void;
   onGenerateMesh: (preset: MeshQuality) => void;
+  onConnectionsChange?: (connections: MeshConnection[]) => void;
   onCancelMesh?: () => void;
   meshPhaseProgress?: WasmMeshPhaseProgress | null;
   onRunMeshConvergence?: (caseId: string, probe: ConvergenceProbe) => void;
@@ -627,14 +631,17 @@ function ManufacturingProcessIcon({ processId }: { processId: ManufacturingProce
 
 function SupportsPanel({ selectedFace, study, onAddSupport, onUpdateSupport, onRemoveSupport }: RightPanelProps) {
   const selectedFromViewport = selectedFace ? selectionForFace(study, selectedFace.id) : undefined;
-  const addLabel = study.constraints.length ? "Add another fixed support" : "Add fixed support";
+  const thermal = study.type === "steady_state_thermal";
+  const [temperature, setTemperature] = useState(20);
+  const addLabel = thermal ? "Add prescribed temperature" : study.constraints.length ? "Add another fixed support" : "Add fixed support";
   return (
-    <Panel title="Supports" helper="Choose where the part is held fixed. Select a face, or click inside a cylindrical hole to constrain its wall. You can add more than one support.">
+    <Panel title={thermal ? "Temperature boundaries" : "Supports"} helper={thermal ? "Select a face and prescribe its steady boundary temperature." : "Choose where the part is held fixed. Select a face, or click inside a cylindrical hole to constrain its wall. You can add more than one support."}>
       <HelpNote helpId="supportPlacement" />
       <PlacementReadout selectedRef={selectedFromViewport} fallbackLabel={selectedFace?.label} />
-      <button className="outline-action wide" disabled={!selectedFromViewport} onClick={() => selectedFromViewport && onAddSupport(selectedFromViewport.id)}><Plus size={18} />{addLabel}</button>
+      {thermal && <label className="field">Temperature<span className="input-with-unit"><input type="number" value={temperature} onChange={(event) => setTemperature(Number(event.currentTarget.value))} /><span>°C</span></span></label>}
+      <button className="outline-action wide" disabled={!selectedFromViewport || (thermal && !Number.isFinite(temperature))} onClick={() => selectedFromViewport && onAddSupport(selectedFromViewport.id, thermal ? { type: "prescribed_temperature", value: temperature } : { type: "fixed" })}><Plus size={18} />{addLabel}</button>
       <SupportEditorList study={study} onUpdateSupport={onUpdateSupport} onRemoveSupport={onRemoveSupport} />
-      <Callout>Fixed supports prevent any motion of the selected face.</Callout>
+      <Callout>{thermal ? "At least one prescribed temperature is required to make the conduction system unique." : "Fixed supports prevent any motion of the selected face."}</Callout>
     </Panel>
   );
 }
@@ -659,12 +666,13 @@ function LoadsPanel({
   onRemoveLoad,
   onLoadCasesChange
 }: RightPanelProps) {
+  const thermal = study.type === "steady_state_thermal";
   const selectedFromViewport = selectedFace ? selectionForFace(study, selectedFace.id) : undefined;
   const bodySelection = study.namedSelections.find((selection) => selection.entityType === "body");
-  const placementSelection = draftLoadType === "gravity" ? undefined : draftLoadType === "volume_force" ? bodySelection : selectedFromViewport;
+  const placementSelection = draftLoadType === "gravity" ? undefined : draftLoadType === "volume_force" || draftLoadType === "heat_generation" ? bodySelection : selectedFromViewport;
   const units = unitsForLoadType(draftLoadType);
-  const valueLabel = draftLoadType === "gravity" ? "Payload mass" : "Magnitude";
-  const addLabel = draftLoadType === "gravity" ? "Add payload mass" : "Add load";
+  const valueLabel = draftLoadType === "gravity" ? "Payload mass" : draftLoadType === "heat_flux" ? "Inward heat flux" : draftLoadType === "heat_generation" ? "Volumetric heat generation" : "Magnitude";
+  const addLabel = draftLoadType === "gravity" ? "Add payload mass" : thermal ? "Add thermal load" : "Add load";
   const [payloadMaterialId, setPayloadMaterialId] = useState("payload-steel");
   const [payloadMassMode, setPayloadMassMode] = useState<PayloadMassMode>("material");
   const [remotePoint, setRemotePoint] = useState<LoadApplicationPoint>(() => selectedLoadPoint ?? selectedFace?.center ?? [0, 0, 0]);
@@ -681,7 +689,7 @@ function LoadsPanel({
   const canAddPayloadMass = payloadMassMode === "manual" ? draftLoadValue > 0 : calculatedPayloadMass > 0;
   const canAddDraftLoad = draftLoadType === "gravity"
     ? Boolean(selectedPayloadObject) && canAddPayloadMass
-    : draftLoadType === "volume_force"
+    : draftLoadType === "volume_force" || draftLoadType === "heat_generation"
       ? Boolean(bodySelection)
       : draftLoadType === "bolt_preload"
         ? Boolean(selectedFace && secondarySelectionRef)
@@ -698,6 +706,15 @@ function LoadsPanel({
     onDraftLoadValueChange(baseValue.value);
   }
   useEffect(() => {
+    if (thermal && draftLoadType !== "heat_flux" && draftLoadType !== "heat_generation") {
+      onDraftLoadTypeChange("heat_flux");
+      onDraftLoadValueChange(defaultValueForLoadType("heat_flux"));
+    } else if (!thermal && (draftLoadType === "heat_flux" || draftLoadType === "heat_generation")) {
+      onDraftLoadTypeChange("force");
+      onDraftLoadValueChange(defaultValueForLoadType("force"));
+    }
+  }, [draftLoadType, onDraftLoadTypeChange, onDraftLoadValueChange, thermal]);
+  useEffect(() => {
     onDraftPayloadPreviewChange(
       draftLoadType === "gravity"
         ? { value: effectiveDraftValue, metadata: payloadMetadata }
@@ -712,7 +729,8 @@ function LoadsPanel({
       setSecondarySelectionRef(secondaryFaceOptions[0]?.id ?? "");
     }
   }, [secondaryFaceOptions, secondarySelectionRef]);
-  const loadCases = study.type === "modal_analysis" ? [] : structuralLoadCasesForPanel(study);
+  const structuralStudy = study.type === "static_stress" || study.type === "dynamic_structural" ? study : null;
+  const loadCases = structuralStudy ? structuralLoadCasesForPanel(structuralStudy) : [];
   const loadCombinations = study.type === "static_stress" ? study.loadCombinations ?? [] : [];
   function assignLoadToCase(loadId: string, caseId: string) {
     if (!onLoadCasesChange) return;
@@ -724,7 +742,7 @@ function LoadsPanel({
     })), loadCombinations);
   }
   return (
-    <Panel title="Loads" helper={draftLoadType === "gravity" ? "Choose the object carrying payload mass, then add its weight as a load." : draftLoadType === "volume_force" ? "Apply a force density to the selected structural body." : "Select a face on the model, then add the load."}>
+    <Panel title={thermal ? "Thermal loads" : "Loads"} helper={thermal ? (draftLoadType === "heat_generation" ? "Apply uniform heat generation throughout the selected body." : "Select a face and apply inward surface heat flux.") : draftLoadType === "gravity" ? "Choose the object carrying payload mass, then add its weight as a load." : draftLoadType === "volume_force" ? "Apply a force density to the selected structural body." : "Select a face on the model, then add the load."}>
       <HelpNote helpId="loadPlacement" />
       <PlacementReadout
         selectedRef={placementSelection}
@@ -741,13 +759,15 @@ function LoadsPanel({
             if (type !== draftLoadType) onDraftLoadValueChange(defaultValueForLoadType(type));
           }}
         >
-          <option value="force">Face force (total)</option>
-          <option value="pressure">Pressure</option>
-          <option value="surface_traction">Surface traction</option>
-          <option value="volume_force">Volume force</option>
-          <option value="remote_force">Remote force</option>
-          {study.type === "static_stress" ? <option value="bolt_preload">Equivalent bolt preload</option> : null}
-          <option value="gravity">Payload mass</option>
+          {thermal ? <><option value="heat_flux">Surface heat flux</option><option value="heat_generation">Volumetric heat generation</option></> : <>
+            <option value="force">Face force (total)</option>
+            <option value="pressure">Pressure</option>
+            <option value="surface_traction">Surface traction</option>
+            <option value="volume_force">Volume force</option>
+            <option value="remote_force">Remote force</option>
+            {study.type === "static_stress" ? <option value="bolt_preload">Equivalent bolt preload</option> : null}
+            <option value="gravity">Payload mass</option>
+          </>}
         </select>
       </div>
       {draftLoadType === "gravity" ? (
@@ -807,14 +827,14 @@ function LoadsPanel({
           <Callout>Bonded-linear approximation only: no contact, slip, or fastener stiffness.</Callout>
         </>
       ) : null}
-      <label className="field">
+      {!thermal && <label className="field">
         <HelpLabel helpId="loadDirection">Direction</HelpLabel>
         <select value={draftLoadDirection} onChange={(event) => onDraftLoadDirectionChange(event.currentTarget.value as LoadDirectionLabel)}>
           {LOAD_DIRECTION_LABELS.map((option) => (
             <option key={option} value={option}>{directionOptionLabel(option)}</option>
           ))}
         </select>
-      </label>
+      </label>}
       <button className="outline-action wide" disabled={!canAddDraftLoad} onClick={() => canAddDraftLoad && onAddLoad(
         draftLoadType,
         effectiveDraftValue,
@@ -826,9 +846,9 @@ function LoadsPanel({
           ...(draftLoadType === "bolt_preload" ? { secondarySelectionRef } : {})
         }
       )}><Plus size={18} />{addLabel}</button>
-      {study.type !== "modal_analysis" && (
+      {structuralStudy && (
         <LoadCasesEditor
-          studyType={study.type}
+          studyType={structuralStudy.type}
           loadCases={loadCases}
           loadCombinations={loadCombinations}
           onChange={(cases, combinations) => onLoadCasesChange?.(cases, combinations)}
@@ -1258,8 +1278,9 @@ function SupportEditorList({ study, onUpdateSupport, onRemoveSupport }: { study:
   if (!study.constraints.length) return <EmptyEditableList title="Supports" />;
   let fixedSupportCount = 0;
   let prescribedSupportCount = 0;
+  let thermalSupportCount = 0;
   const supportItems = study.constraints.map((support) => {
-    const supportOrdinal = support.type === "fixed" ? ++fixedSupportCount : ++prescribedSupportCount;
+    const supportOrdinal = support.type === "fixed" ? ++fixedSupportCount : support.type === "prescribed_temperature" ? ++thermalSupportCount : ++prescribedSupportCount;
     return { support, displayLabel: supportDisplayLabel(support, supportOrdinal) };
   });
 
@@ -1274,7 +1295,7 @@ function SupportEditorList({ study, onUpdateSupport, onRemoveSupport }: { study:
           <div className="editable-item" key={support.id}>
             <div className="editable-summary">
               <span className="item-icon warning"><SupportIcon /></span>
-              <strong>{displayLabel} · {support.type === "fixed" ? "Fixed support" : "Prescribed displacement"}</strong>
+              <strong>{displayLabel} · {support.type === "fixed" ? "Fixed support" : support.type === "prescribed_temperature" ? `Prescribed temperature (${Number(support.parameters.value ?? 0)} °C)` : "Prescribed displacement"}</strong>
               <small>{label}</small>
               <button className="remove-glyph" type="button" aria-label="Remove support" onClick={() => onRemoveSupport(support.id)}><X size={16} /></button>
             </div>
@@ -1305,20 +1326,22 @@ function LoadTypeIcon({ type }: { type: LoadType }) {
 }
 
 function SupportEditForm({ support, study, onSave, onCancel }: { support: Constraint; study: Study; onSave: (support: Constraint) => void; onCancel: () => void }) {
-  const [type, setType] = useState<"fixed" | "prescribed_displacement">(support.type);
+  const thermal = study.type === "steady_state_thermal";
+  const [type, setType] = useState<Constraint["type"]>(support.type);
+  const [temperature, setTemperature] = useState(Number(support.parameters.value ?? 20));
   const selectedRef = study.namedSelections.find((selection) => selection.id === support.selectionRef);
   return (
     <div className="edit-form">
       <label className="field">
         <HelpLabel helpId="supportType">Support type</HelpLabel>
-        <select value={type} onChange={(event) => setType(event.currentTarget.value as "fixed" | "prescribed_displacement")}>
-          <option value="fixed">Fixed support</option>
-          <option value="prescribed_displacement">Prescribed displacement</option>
+        <select value={type} onChange={(event) => setType(event.currentTarget.value as Constraint["type"])}>
+          {thermal ? <option value="prescribed_temperature">Prescribed temperature</option> : <><option value="fixed">Fixed support</option><option value="prescribed_displacement">Prescribed displacement</option></>}
         </select>
       </label>
+      {thermal && <label className="field">Temperature<span className="input-with-unit"><input type="number" value={temperature} onChange={(event) => setTemperature(Number(event.currentTarget.value))} /><span>°C</span></span></label>}
       <PlacementReadout selectedRef={selectedRef} />
       <div className="edit-actions">
-        <button className="primary" type="button" onClick={() => onSave({ ...support, type })}>Save</button>
+        <button className="primary" type="button" disabled={thermal && !Number.isFinite(temperature)} onClick={() => onSave({ ...support, type, parameters: thermal ? { ...support.parameters, value: temperature, units: "°C" } : support.parameters })}>Save</button>
         <button className="secondary" type="button" onClick={onCancel}>Cancel</button>
       </div>
     </div>
@@ -1338,7 +1361,11 @@ function selectionForFace(study: Study, faceId: string) {
   return study.namedSelections.find((item) => item.entityType === "face" && item.geometryRefs.some((ref) => ref.entityId === faceId));
 }
 
-function MeshPanel({ project, displayModel, study, onGenerateMesh, onCancelMesh, meshPhaseProgress, onRepairModel, isRepairingModel = false, onRunMeshConvergence, convergenceBusy = false, convergenceProgress = "" }: RightPanelProps) {
+function selectionLabelForPanel(study: Study, selectionRef: string): string {
+  return study.namedSelections.find((selection) => selection.id === selectionRef)?.name ?? selectionRef;
+}
+
+function MeshPanel({ project, displayModel, study, onGenerateMesh, onConnectionsChange, onCancelMesh, meshPhaseProgress, onRepairModel, isRepairingModel = false, onRunMeshConvergence, convergenceBusy = false, convergenceProgress = "" }: RightPanelProps) {
   const [preset, setPreset] = useState<MeshQuality>(study.meshSettings.preset);
   const meshing = Boolean(meshPhaseProgress);
   const stepGeometry = stepGeometryMetadataForProject(project);
@@ -1364,6 +1391,10 @@ function MeshPanel({ project, displayModel, study, onGenerateMesh, onCancelMesh,
   const latestRecord = [...(project.convergenceRecords ?? [])]
     .reverse()
     .find((record) => record.studyId === study.id && record.caseId === convergenceCaseId);
+  const faceSelections = study.namedSelections.filter((selection) => selection.entityType === "face");
+  const [connectionType, setConnectionType] = useState<MeshConnection["type"]>("tie");
+  const [connectionSource, setConnectionSource] = useState(faceSelections[0]?.id ?? "");
+  const [connectionTarget, setConnectionTarget] = useState(faceSelections[1]?.id ?? "");
 
   function selectConvergenceCase(caseId: string) {
     setConvergenceCaseId(caseId);
@@ -1393,6 +1424,25 @@ function MeshPanel({ project, displayModel, study, onGenerateMesh, onCancelMesh,
           ))}
         </div>
       </div>
+      {displayModel.bodyCount > 1 || study.contacts.length ? (
+        <section className="load-case-editor" aria-label="Assembly connections">
+          <SectionTitle>Assembly connections</SectionTitle>
+          <label className="field">Behavior<select value={connectionType} onChange={(event) => setConnectionType(event.currentTarget.value as MeshConnection["type"])}><option value="tie">Tied</option><option value="contact">Frictionless contact</option><option value="fuse">Boolean fuse</option></select></label>
+          <label className="field">Source face<select value={connectionSource} onChange={(event) => setConnectionSource(event.currentTarget.value)}>{faceSelections.map((selection) => <option key={selection.id} value={selection.id}>{selection.name}</option>)}</select></label>
+          <label className="field">Target face<select value={connectionTarget} onChange={(event) => setConnectionTarget(event.currentTarget.value)}>{faceSelections.map((selection) => <option key={selection.id} value={selection.id}>{selection.name}</option>)}</select></label>
+          <button className="secondary wide" type="button" disabled={!connectionSource || !connectionTarget || connectionSource === connectionTarget || !onConnectionsChange} onClick={() => onConnectionsChange?.([...study.contacts, {
+            id: `connection-${crypto.randomUUID()}`,
+            type: connectionType,
+            source: connectionSource,
+            target: connectionTarget,
+            ...(connectionType === "contact" ? { formulation: "frictionless" as const } : {}),
+            kinematics: "small_sliding",
+            status: "ready"
+          }])}><Plus size={16} />Add connection</button>
+          {study.contacts.map((connection) => <div className="load-case-row" key={connection.id}><span><strong>{connection.type === "tie" ? "Tied" : connection.type === "contact" ? "Frictionless contact" : "Boolean fuse"}</strong><small>{selectionLabelForPanel(study, connection.source)} → {selectionLabelForPanel(study, connection.target)}</small></span><button className="remove-glyph" type="button" aria-label="Remove connection" onClick={() => onConnectionsChange?.(study.contacts.filter((candidate) => candidate.id !== connection.id))}><X size={15} /></button></div>)}
+          {connectionType === "contact" && <Callout>Small-sliding, frictionless node-to-surface penalty contact. Large sliding and friction are outside this beta.</Callout>}
+        </section>
+      ) : null}
       <button
         className="primary wide"
         type="button"
@@ -1587,6 +1637,7 @@ function RunPanel({ study, displayModel, runProgress, runError, runTiming, onRun
   ];
   const dynamic = study.type === "dynamic_structural" ? study.solverSettings : null;
   const modal = study.type === "modal_analysis" ? study.solverSettings : null;
+  const thermal = study.type === "steady_state_thermal";
   const fidelity = solverFidelityForStudy(study);
   const updateSolverChoice = (settings: SolverSettingsPatch) => {
     onUpdateSolverSettings?.(settings);
@@ -1605,7 +1656,7 @@ function RunPanel({ study, displayModel, runProgress, runError, runTiming, onRun
   const loadProfile = isDynamicLoadProfile(dynamic?.loadProfile) ? dynamic.loadProfile : "ramp";
   const loadProfileHelper = DYNAMIC_LOAD_PROFILE_OPTIONS.find((option) => option.value === loadProfile)?.helper ?? DEFAULT_DYNAMIC_LOAD_PROFILE_HELPER;
   return (
-    <Panel title="Run" helper={modal ? "Solve for natural frequencies and normalized mode shapes." : "Run the simulation to estimate stress and displacement."}>
+    <Panel title="Run" helper={modal ? "Solve for natural frequencies and normalized mode shapes." : thermal ? "Solve for steady temperature and heat-flux fields." : "Run the simulation to estimate stress and displacement."}>
       <SectionTitle helpId="runReadiness">Readiness</SectionTitle>
       <div className="checklist">
         {checks.map(([label, done]) => <span key={label} className={done ? "check done" : "check"}><span>{done ? <Check size={18} /> : null}</span>{label}</span>)}
@@ -1640,6 +1691,13 @@ function RunPanel({ study, displayModel, runProgress, runError, runTiming, onRun
             disabled={isRunning}
             onClick={() => study.type !== "modal_analysis" && onChangeStudyType?.("modal_analysis")}
           >Modal</button>
+          <button
+            className={thermal ? "active" : ""}
+            type="button"
+            aria-pressed={thermal}
+            disabled={isRunning}
+            onClick={() => !thermal && onChangeStudyType?.("steady_state_thermal")}
+          >Thermal</button>
         </div>
       </div>
       <label className="field">
@@ -1864,7 +1922,52 @@ function ResultsPanel(props: RightPanelProps) {
   if (isModalResultSummary(props.resultSummary)) {
     return <ModalResultsPanelContent {...props} resultSummary={props.resultSummary} />;
   }
+  if (isThermalResultSummary(props.resultSummary)) {
+    return <ThermalResultsPanelContent {...props} resultSummary={props.resultSummary} />;
+  }
   return <ResultsPanelContent {...props} resultSummary={props.resultSummary} />;
+}
+
+function ThermalResultsPanelContent({
+  resultSummary,
+  resultMode,
+  onResultModeChange,
+  onGenerateReport,
+  onExportResultPng,
+  onExportResultHtml,
+  reportBusy = false,
+  pngExportBusy = false,
+  htmlExportBusy = false,
+  reportError,
+  pngExportError,
+  htmlExportError
+}: RightPanelProps & { resultSummary: ThermalResultSummary }) {
+  return (
+    <Panel title="Thermal results" helper="Inspect steady temperature and conductive heat-flux fields on the solved mesh.">
+      <div className="segmented" role="group" aria-label="Thermal result field">
+        <button type="button" className={resultMode === "temperature" ? "active" : ""} onClick={() => onResultModeChange("temperature")}>Temperature</button>
+        <button type="button" className={resultMode === "heat_flux" ? "active" : ""} onClick={() => onResultModeChange("heat_flux")}>Heat flux</button>
+      </div>
+      <div className="summary-box">
+        <Info label="Minimum temperature" value={formatResultMetric(resultSummary.minTemperature, resultSummary.temperatureUnits)} />
+        <Info label="Maximum temperature" value={formatResultMetric(resultSummary.maxTemperature, resultSummary.temperatureUnits)} />
+        <Info label="Maximum heat flux" value={formatResultMetric(resultSummary.maxHeatFlux, resultSummary.heatFluxUnits)} />
+        <Info label="Energy balance error" value={formatResultMetric(resultSummary.energyBalanceRelativeError * 100, "%")} />
+      </div>
+      <div className="summary-box">
+        <Info label="Applied surface heat" value={formatResultMetric(resultSummary.appliedHeat, "W")} />
+        <Info label="Generated heat" value={formatResultMetric(resultSummary.generatedHeat, "W")} />
+        <Info label="Boundary reaction" value={formatResultMetric(resultSummary.reactionHeat, "W")} />
+        <Info label="Result source" value={resultSourceLabelForPanel(resultSummary)} />
+      </div>
+      <button className="secondary wide" type="button" disabled={reportBusy} onClick={() => void onGenerateReport?.()}><FileDown size={16} />{reportBusy ? "Generating…" : "Generate report"}</button>
+      <button className="secondary wide" type="button" disabled={pngExportBusy} onClick={() => void onExportResultPng?.()}><FileDown size={16} />{pngExportBusy ? "Exporting…" : "Export PNG"}</button>
+      <button className="secondary wide" type="button" disabled={htmlExportBusy} onClick={() => void onExportResultHtml?.()}><FileDown size={16} />{htmlExportBusy ? "Exporting…" : "Export standalone HTML"}</button>
+      {reportError && <p className="panel-warning">{reportError}</p>}
+      {pngExportError && <p className="panel-warning">{pngExportError}</p>}
+      {htmlExportError && <p className="panel-warning">{htmlExportError}</p>}
+    </Panel>
+  );
 }
 
 function ModalResultsPanelContent({
@@ -2005,11 +2108,14 @@ function ResultsPanelContent({
   onStressExaggerationChange,
   onGenerateReport,
   onExportResultPng,
+  onExportResultHtml,
   reportBusy = false,
   reportError,
   reportDisabled = false,
   pngExportBusy = false,
-  pngExportError
+  pngExportError,
+  htmlExportBusy = false,
+  htmlExportError
 }: RightPanelProps & { resultSummary: StructuralResultSummary }) {
   const [targetSafetyFactor, setTargetSafetyFactor] = useState(1.5);
   const [draftStressExaggeration, setDraftStressExaggeration] = useState(stressExaggeration);
@@ -2126,8 +2232,14 @@ function ResultsPanelContent({
           <FileDown size={18} />{pngExportBusy ? "Exporting…" : "Export PNG"}
         </button>
       )}
+      {onExportResultHtml && (
+        <button className="secondary wide" type="button" disabled={htmlExportBusy || reportDisabled} onClick={() => void onExportResultHtml()}>
+          <FileDown size={18} />{htmlExportBusy ? "Packaging…" : "Export offline HTML"}
+        </button>
+      )}
       {reportError && <p className="panel-warning" role="alert"><AlertTriangle size={16} />{reportError}</p>}
       {pngExportError && <p className="panel-warning" role="alert"><AlertTriangle size={16} />{pngExportError}</p>}
+      {htmlExportError && <p className="panel-warning" role="alert"><AlertTriangle size={16} />{htmlExportError}</p>}
       <div className={`failure-assessment ${assessment.status}`}>
         <span className="assessment-icon"><AssessmentIcon size={20} /></span>
         <span>
@@ -2690,6 +2802,8 @@ function formatInputValue(value: number) {
 }
 
 function loadTypeLabel(type: LoadType) {
+  if (type === "heat_flux") return "Surface heat flux";
+  if (type === "heat_generation") return "Volumetric heat generation";
   if (type === "gravity") return "Payload mass";
   if (type === "force") return "Face force (total)";
   if (type === "surface_traction") return "Surface traction";
@@ -2700,6 +2814,8 @@ function loadTypeLabel(type: LoadType) {
 }
 
 function defaultValueForLoadType(type: LoadType) {
+  if (type === "heat_flux") return 10_000;
+  if (type === "heat_generation") return 1_000_000;
   if (type === "pressure" || type === "surface_traction") return 100;
   if (type === "volume_force") return 1000;
   if (type === "gravity") return 5;

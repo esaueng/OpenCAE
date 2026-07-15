@@ -44,7 +44,7 @@ describe("actual volume mesh adapter", () => {
       ]
     });
 
-    expect(model.schemaVersion).toBe("0.3.0");
+    expect(model.schemaVersion).toBe("0.4.0");
     expect(model.surfaceFacets?.length).toBe(6);
     expect(model.surfaceSets?.[0].facets.length).toBeGreaterThan(0);
     expect(model.meshProvenance?.meshSource).toBe("actual_volume_mesh");

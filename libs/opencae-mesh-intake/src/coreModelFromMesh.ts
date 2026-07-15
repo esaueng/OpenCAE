@@ -92,7 +92,13 @@ const BUILT_IN_MATERIAL_IDS = new Set(starterMaterials.map((material) => materia
 
 export function buildCoreModelFromCloudMesh(input: BuildCoreModelInput): OpenCAEModelJson {
   validateVolumeMeshArtifact(input.volumeMesh);
-  const material = resolveMaterial(input);
+  const resolvedMaterial = resolveMaterial(input);
+  const material: IsotropicLinearElasticMaterialJson = {
+    ...resolvedMaterial,
+    ...(resolvedMaterial.thermalConductivity !== undefined
+      ? { thermalConductivity: input.volumeMesh.coordinateSystem.solverUnits === "mm-N-s-MPa" ? resolvedMaterial.thermalConductivity / 1000 : resolvedMaterial.thermalConductivity }
+      : {})
+  };
   const elementBlocks = [{
     name: "solid",
     type: input.volumeMesh.elements[0]?.type ?? "Tet4",
@@ -104,9 +110,10 @@ export function buildCoreModelFromCloudMesh(input: BuildCoreModelInput): OpenCAE
   const nodeSets: NodeSetJson[] = [];
   const boundaryConditions: BoundaryConditionJson[] = [];
   const loads: LoadJson[] = [];
+  const meshConnections: NonNullable<OpenCAEModelJson["meshConnections"]> = [];
 
   for (const [index, constraint] of (input.study?.constraints ?? []).entries()) {
-    if (constraint.type !== "fixed") continue;
+    if (constraint.type !== "fixed" && constraint.type !== "prescribed_temperature") continue;
     const selectionRef = constraint.selectionRef ?? "FS1";
     const surfaceSet = ensureMappedSurfaceSet({
       study: input.study,
@@ -117,7 +124,12 @@ export function buildCoreModelFromCloudMesh(input: BuildCoreModelInput): OpenCAE
       diagnostics: input.mappingDiagnostics
     }, surfaceSets);
     const nodeSetName = ensureNodeSetForSurfaceSet(nodeSets, surfaceSet, input.volumeMesh.surfaceFacets);
-    boundaryConditions.push({
+    boundaryConditions.push(constraint.type === "prescribed_temperature" ? {
+      name: `prescribedTemperature${index}`,
+      type: "prescribedTemperature",
+      nodeSet: nodeSetName,
+      value: numberValue(constraint.parameters?.value) ?? 20
+    } : {
       name: `fixedSupport${index}`,
       type: "fixed",
       nodeSet: nodeSetName,
@@ -146,6 +158,16 @@ export function buildCoreModelFromCloudMesh(input: BuildCoreModelInput): OpenCAE
       });
       continue;
     }
+    if (loadType === "heat_generation") {
+      const elementSet = mappedElementSetForSelection(input.study, input.displayModel, input.volumeMesh, elementSets, load.selectionRef ?? "body");
+      const value = numberValue(load.parameters?.value) ?? 0;
+      const units = typeof load.parameters?.units === "string" ? load.parameters.units.toLowerCase().replace(/³/g, "^3") : "w/m^3";
+      const generation = input.volumeMesh.coordinateSystem.solverUnits === "mm-N-s-MPa"
+        ? (units === "w/mm^3" ? value : value / 1_000_000_000)
+        : (units === "w/mm^3" ? value * 1_000_000_000 : value);
+      loads.push({ name: `volumetricHeatGeneration${index}`, type: "volumetricHeatGeneration", elementSet: elementSet.name, generation });
+      continue;
+    }
 
     const selectionRef = load.selectionRef ?? "L1";
     const surfaceSet = ensureMappedSurfaceSet({
@@ -165,6 +187,15 @@ export function buildCoreModelFromCloudMesh(input: BuildCoreModelInput): OpenCAE
         pressure: pressurePascals(load.parameters),
         direction: vector3(load.parameters?.direction) ?? [0, 0, -1]
       });
+      continue;
+    }
+    if (loadType === "heat_flux") {
+      const value = numberValue(load.parameters?.value) ?? 0;
+      const units = typeof load.parameters?.units === "string" ? load.parameters.units.toLowerCase().replace(/²/g, "^2") : "w/m^2";
+      const flux = input.volumeMesh.coordinateSystem.solverUnits === "mm-N-s-MPa"
+        ? (units === "w/mm^2" ? value : value / 1_000_000)
+        : (units === "w/mm^2" ? value * 1_000_000 : value);
+      loads.push({ name: `surfaceHeatFlux${index}`, type: "surfaceHeatFlux", surfaceSet: surfaceSet.name, flux });
       continue;
     }
 
@@ -220,7 +251,7 @@ export function buildCoreModelFromCloudMesh(input: BuildCoreModelInput): OpenCAE
     });
   }
 
-  if (boundaryConditions.length === 0) {
+  if (boundaryConditions.length === 0 && input.analysisType !== "steady_state_thermal") {
     const surfaceSet = ensureMappedSurfaceSet({
       study: input.study,
       displayModel: input.displayModel,
@@ -232,7 +263,7 @@ export function buildCoreModelFromCloudMesh(input: BuildCoreModelInput): OpenCAE
     const nodeSetName = ensureNodeSetForSurfaceSet(nodeSets, surfaceSet, input.volumeMesh.surfaceFacets);
     boundaryConditions.push({ name: "fixedSupport0", type: "fixed", nodeSet: nodeSetName, components: ["x", "y", "z"] });
   }
-  if (input.analysisType !== "modal_analysis" && loads.length === 0) {
+  if (input.analysisType !== "modal_analysis" && input.analysisType !== "steady_state_thermal" && loads.length === 0) {
     const surfaceSet = ensureMappedSurfaceSet({
       study: input.study,
       displayModel: input.displayModel,
@@ -242,6 +273,20 @@ export function buildCoreModelFromCloudMesh(input: BuildCoreModelInput): OpenCAE
       diagnostics: input.mappingDiagnostics
     }, surfaceSets);
     loads.push({ name: "appliedForce0", type: "surfaceForce", surfaceSet: surfaceSet.name, totalForce: [0, -500, 0] });
+  }
+
+  for (const connection of input.study?.contacts ?? []) {
+    if (!connection.type || !connection.source || !connection.target) continue;
+    const source = ensureMappedSurfaceSet({ study: input.study, displayModel: input.displayModel, volumeMesh: input.volumeMesh, selectionRef: connection.source, role: "load_surface", diagnostics: input.mappingDiagnostics }, surfaceSets);
+    const target = ensureMappedSurfaceSet({ study: input.study, displayModel: input.displayModel, volumeMesh: input.volumeMesh, selectionRef: connection.target, role: "load_surface", diagnostics: input.mappingDiagnostics }, surfaceSets);
+    meshConnections.push({
+      type: connection.type,
+      source: source.name,
+      target: target.name,
+      ...(connection.type === "contact" ? { formulation: "frictionless" as const, kinematics: "small_sliding" as const } : {}),
+      ...(connection.searchTolerance !== undefined ? { searchTolerance: connection.searchTolerance } : {}),
+      ...(connection.penaltyScale !== undefined ? { penaltyScale: connection.penaltyScale } : {})
+    });
   }
 
   const model: OpenCAEModelJson = {
@@ -263,7 +308,8 @@ export function buildCoreModelFromCloudMesh(input: BuildCoreModelInput): OpenCAE
       solver: "opencae-core-cloud",
       resultSource: "computed",
       meshSource: input.volumeMesh.metadata.source === "structured_block" ? "structured_block_core" : "actual_volume_mesh"
-    }
+    },
+    ...(meshConnections.length ? { meshConnections } : {})
   };
   const validation = validateModelJson(model);
   if (!validation.ok) {
@@ -427,7 +473,8 @@ function materialFromBuiltIn(
     youngModulus: effective.youngsModulus,
     poissonRatio: effective.poissonRatio,
     density: effective.density,
-    yieldStrength: effective.yieldStrength
+    yieldStrength: effective.yieldStrength,
+    thermalConductivity: effective.thermalConductivity
   };
 }
 
@@ -436,6 +483,7 @@ function materialObjectFromUnknown(raw: Record<string, unknown>): BuiltInMateria
   const poissonRatio = numberValue(raw.poissonRatio);
   const density = numberValue(raw.density);
   const yieldStrength = numberValue(raw.yieldStrength);
+  const thermalConductivity = numberValue(raw.thermalConductivity);
   if (!youngModulus || poissonRatio === undefined || !density || !yieldStrength) return undefined;
   return materialDefinition(
     stringValue(raw.name) ?? stringValue(raw.id) ?? "material",
@@ -443,7 +491,8 @@ function materialObjectFromUnknown(raw: Record<string, unknown>): BuiltInMateria
     poissonRatio,
     density,
     yieldStrength,
-    printProfileFromUnknown(raw.printProfile)
+    printProfileFromUnknown(raw.printProfile),
+    thermalConductivity
   );
 }
 
@@ -453,7 +502,8 @@ function materialDefinition(
   poissonRatio: number,
   density: number,
   yieldStrength: number,
-  printProfile?: PrintMaterialProfile
+  printProfile?: PrintMaterialProfile,
+  thermalConductivity?: number
 ): BuiltInMaterial {
   return {
     name,
@@ -462,6 +512,7 @@ function materialDefinition(
     poissonRatio,
     density,
     yieldStrength,
+    ...(thermalConductivity !== undefined ? { thermalConductivity } : {}),
     ...(printProfile ? { printProfile } : {})
   };
 }
@@ -521,7 +572,8 @@ function stripPrintProfile(material: BuiltInMaterial): IsotropicLinearElasticMat
     youngModulus: material.youngModulus,
     poissonRatio: material.poissonRatio,
     density: material.density,
-    yieldStrength: material.yieldStrength
+    yieldStrength: material.yieldStrength,
+    thermalConductivity: material.thermalConductivity
   };
 }
 
@@ -828,6 +880,9 @@ function stepFor(
   }
   if (analysisType === "static_stress") {
     return { name: "loadStep", type: "staticLinear", ...names };
+  }
+  if (analysisType === "steady_state_thermal") {
+    return { name: "thermalStep", type: "steadyStateThermal", ...names };
   }
   const settings = { ...(study?.solverSettings ?? {}), ...(solverSettings ?? {}) };
   return {

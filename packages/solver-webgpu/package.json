@@ -12,6 +12,10 @@
       "import": "./dist/index.js"
     }
   },
+  "dependencies": {
+    "@opencae/core": "workspace:*",
+    "@opencae/solver-cpu": "workspace:*"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",

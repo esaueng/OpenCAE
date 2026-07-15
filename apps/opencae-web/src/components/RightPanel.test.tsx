@@ -1688,7 +1688,7 @@ describe("RightPanel payload mass controls", () => {
         rungs: [
           { ...completeRung, requestedPreset: "coarse" },
           { ...completeRung, requestedPreset: "medium", totalDofs: 600 },
-          { requestedPreset: "fine", status: "skipped", actualNodeCount: 40_000, actualElementCount: 120_000, totalDofs: 120_000, freeDofs: 119_970, actualMeshSizeMm: 8, skipReason: "Generated mesh exceeds the 100,000 DOF cap." }
+          { requestedPreset: "fine", status: "skipped", actualNodeCount: 55_000, actualElementCount: 165_000, totalDofs: 165_000, freeDofs: 164_970, actualMeshSizeMm: 8, skipReason: "Generated mesh exceeds the 150,000 DOF cap." }
         ]
       }]
     };
@@ -1698,8 +1698,8 @@ describe("RightPanel payload mass controls", () => {
     expect(html).toContain("Run coarse → medium → fine");
     expect(html).toContain("Displacement probe");
     expect(html).toContain("Inconclusive");
-    expect(html).toContain("120,000 total · 119,970 free DOF");
-    expect(html).toContain("40,000 nodes · 120,000 elements · 8.000 mm");
+    expect(html).toContain("165,000 total · 164,970 free DOF");
+    expect(html).toContain("55,000 nodes · 165,000 elements · 8.000 mm");
     expect(html).toContain("chart-skipped");
     expect(html).toContain("Probe displacement and raw element peak stress versus actual degrees of freedom");
   });

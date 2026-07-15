@@ -11,12 +11,14 @@ import { computeTet4ElementStiffness, computeTet4Geometry, computeVonMisesStress
 import { computeTet10ElementStiffness, computeTet10Volume, recoverTet10CentroidStrain, recoverTet10NodalStrains, TET10_NODE_COUNT } from "./element-tet10";
 import { solveDenseLinearSystem } from "./linear-solve";
 import { computeLinearElasticDMatrix } from "./material";
+import { assembleMeshConnectionStiffness } from "./connections";
 import { staticCoreResultFromSolve } from "./results";
 import {
   addSparseEntry,
   conjugateGradient,
   createSparseMatrixBuilder,
   csrMatVec,
+  estimateCsrMemoryBytes,
   reduceCsrRhs,
   reduceCsrSystem,
   toCsrMatrix,
@@ -86,7 +88,7 @@ export function solveStaticLinearTet4Cpu(
 
   const model = modelResult.model;
   const dofs = model.counts.nodes * 3;
-  const maxDofs = options.maxDofs ?? 30000;
+  const maxDofs = options.maxDofs ?? 150000;
   if (dofs > maxDofs) {
     return failure("max-dofs-exceeded", `Model has ${dofs} DOFs, which exceeds maxDofs ${maxDofs}.`, {
       dofs
@@ -168,7 +170,7 @@ export function prepareStaticLinearTetSystem(
   if (!modelResult.ok) return modelResult;
   const model = modelResult.model;
   const dofs = model.counts.nodes * 3;
-  const maxDofs = options.maxDofs ?? 30000;
+  const maxDofs = options.maxDofs ?? 150000;
   if (dofs > maxDofs) return preparedFailure("max-dofs-exceeded", `Model has ${dofs} DOFs, which exceeds maxDofs ${maxDofs}.`, { dofs });
   const constraints = collectConstraints(model, boundaryConditionNames);
   if (!constraints.ok) return preparedFailure(constraints.error.code, constraints.error.message, { dofs });
@@ -215,7 +217,8 @@ export function solvePreparedStaticLoadCase(
   const solve = conjugateGradient(prepared.reducedStiffness, reducedRhs, {
     tolerance: options.tolerance ?? 1e-10,
     maxIterations: options.maxIterations,
-    jacobi: true,
+    preconditioner: resolvePreconditioner(options),
+    ssorOmega: options.ssorOmega,
     initialGuess,
     hooks: options.hooks
   });
@@ -243,6 +246,8 @@ export function solvePreparedStaticLoadCase(
       converged: true,
       matrixRows: prepared.dofs,
       matrixNonZeros: prepared.stiffness.values.length,
+      preconditioner: resolvePreconditioner(options),
+      estimatedMatrixBytes: estimateCsrMemoryBytes(prepared.stiffness),
       visualizationSmoothing: options.visualizationSmoothing,
       ...(hasAdvancedLoadPrimitives(prepared.model, loadNames) ? { loadAssembly: loadAssembly.diagnostics } : {})
     }
@@ -397,6 +402,9 @@ export function assembleSparseStiffness(model: NormalizedOpenCAEModel, hooks?: S
   }, hooks);
   if (!elementAssembly.ok) return elementAssembly;
 
+  const connections = assembleMeshConnectionStiffness(builder, model);
+  if (!connections.ok) return connections;
+
   return { ok: true, stiffness: toCsrMatrix(builder) };
 }
 
@@ -447,7 +455,7 @@ export function collectConstraints(model: NormalizedOpenCAEModel, boundaryCondit
           if (conflict) return conflict;
         }
       }
-    } else {
+    } else if (boundaryCondition.type === "prescribedDisplacement") {
       for (const node of nodes) {
         const conflict = setConstraint(
           values,
@@ -562,7 +570,8 @@ function solveSparseSystem(
   const solve = conjugateGradient(reduced.matrix, reduced.rhs, {
     tolerance: options.tolerance ?? 1e-10,
     maxIterations: options.maxIterations,
-    jacobi: true,
+    preconditioner: resolvePreconditioner(options),
+    ssorOmega: options.ssorOmega,
     hooks: options.hooks
   });
   if (!solve.ok) {
@@ -583,9 +592,17 @@ function solveSparseSystem(
     converged: true,
     matrixRows: model.counts.nodes * 3,
     matrixNonZeros: stiffness.values.length,
+    preconditioner: resolvePreconditioner(options),
+    estimatedMatrixBytes: estimateCsrMemoryBytes(stiffness),
     visualizationSmoothing: options.visualizationSmoothing,
     ...(loadAssembly ? { loadAssembly } : {})
   });
+}
+
+function resolvePreconditioner(options: CpuSolverOptions): "none" | "jacobi" | "ssor" {
+  return options.preconditioner === "none" || options.preconditioner === "jacobi" || options.preconditioner === "ssor"
+    ? options.preconditioner
+    : "ssor";
 }
 
 function finishSolve(
@@ -595,7 +612,7 @@ function finishSolve(
   free: Int32Array,
   freeSolution: Float64Array,
   multiplyFull: (displacement: Float64Array) => Float64Array,
-  diagnostics: Pick<CpuSolverDiagnostics, "solverMode" | "iterations" | "converged" | "matrixRows" | "matrixNonZeros" | "visualizationSmoothing" | "loadAssembly">
+  diagnostics: Pick<CpuSolverDiagnostics, "solverMode" | "iterations" | "converged" | "matrixRows" | "matrixNonZeros" | "preconditioner" | "estimatedMatrixBytes" | "visualizationSmoothing" | "loadAssembly">
 ): StaticLinearTet4CpuSolveResult {
   const dofs = model.counts.nodes * 3;
   const displacement = new Float64Array(dofs);
@@ -996,6 +1013,7 @@ function selectSolverMode(
   model: NormalizedOpenCAEModel,
   activeLoadNames: string[]
 ): "dense" | "sparse" {
+  if (model.meshConnections.some((connection) => connection.type === "tie" || connection.type === "contact")) return "sparse";
   if (options.solverMode === "dense" || options.solverMode === "sparse") return options.solverMode;
   if (activeLoadsRequireSparse(model, activeLoadNames)) return "sparse";
   return dofs <= 300 ? "dense" : "sparse";

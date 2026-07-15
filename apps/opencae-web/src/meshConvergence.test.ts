@@ -125,7 +125,7 @@ describe("static mesh convergence", () => {
     expect(solve).toHaveBeenCalledTimes(3);
   });
 
-  test("skips a generated rung above the 100k pipeline limit before solving", async () => {
+  test("skips a generated rung above the 150k pipeline limit before solving", async () => {
     const solve = vi.fn(async () => solveResult(1, 10));
     const record = await runStaticMeshConvergence({
       study,
@@ -133,12 +133,12 @@ describe("static mesh convergence", () => {
       probe: { point: [250, 250, 0], source: "explicit" },
       prepareMesh: async (preset, isolatedStudy) => ({
         study: isolatedStudy,
-        statistics: { ...statistics(preset === "coarse" ? 0 : preset === "medium" ? 1 : 2), ...(preset === "fine" ? { nodes: 40_000, totalDofs: 120_000, freeDofs: 119_970 } : {}) }
+        statistics: { ...statistics(preset === "coarse" ? 0 : preset === "medium" ? 1 : 2), ...(preset === "fine" ? { nodes: 55_000, totalDofs: 165_000, freeDofs: 164_970 } : {}) }
       }),
       solve
     });
 
-    expect(record.rungs[2]).toMatchObject({ status: "skipped", totalDofs: 120_000, skipReason: expect.stringContaining("100,000") });
+    expect(record.rungs[2]).toMatchObject({ status: "skipped", totalDofs: 165_000, skipReason: expect.stringContaining("150,000") });
     expect(solve).toHaveBeenCalledTimes(2);
     expect(record.classification).toBe("inconclusive");
   });
