@@ -334,7 +334,7 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, se
       </button>
       <HelpNote helpId="dimensions" />
       {showDimensions && <ModelDimensions displayModel={displayModel} />}
-      <SectionTitle>Open section</SectionTitle>
+      <SectionTitle helpId="sectionPlane">Open section</SectionTitle>
       <button
         className={sectionPlane.enabled ? "primary wide" : "secondary wide"}
         type="button"
@@ -387,7 +387,7 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, se
       </div>
       {!isBlankProject && !isUploadedProject && (
         <>
-          <SectionTitle>Preconfigured</SectionTitle>
+          <SectionTitle helpId="preconfigured">Preconfigured</SectionTitle>
           <div className="concept-card-list">
             <ConceptCard icon={<SupportIcon />} title="Fixed support" detail={preconfigured.support} tone="warning" />
             <ConceptCard icon={<ArrowDown size={18} />} title={sampleLoadTitle} detail={preconfigured.load} tone="accent" />
@@ -573,7 +573,7 @@ function MaterialPanel({ project, displayModel, study, onAssignMaterial, onSaveC
         </>
       ) : null}
 
-      <SectionTitle>Simulation Properties</SectionTitle>
+      <SectionTitle helpId="simulationProperties">Simulation Properties</SectionTitle>
       <div className="summary-box material-simulation-properties">
         {fdmFactors ? <Info label="Governing load path" value={fdmFactors.criticalAxis ? `${fdmFactors.criticalAxis.toUpperCase()} axis` : "Conservative"} /> : null}
         {fdmFactors ? <Info label="Layer response" value={fdmLayerResponseLabel(fdmFactors.loadPathRelation)} /> : null}
@@ -600,7 +600,7 @@ function MaterialPanel({ project, displayModel, study, onAssignMaterial, onSaveC
         }}
         onClose={() => setShowLibrary(false)}
       />
-      <SectionTitle>Assigned</SectionTitle>
+      <SectionTitle helpId="assignedMaterial">Assigned</SectionTitle>
       {currentAssignment && !resolvedAssignedMaterial ? <Callout>Unknown material “{currentAssignment.materialId}”. Choose a valid material before solving.</Callout> : null}
       {currentAssignment ? (
         <div className="concept-card-list">
@@ -962,7 +962,7 @@ function LoadCasesEditor({ studyType, loadCases, loadCombinations, onChange }: {
       ], loadCombinations)}><Plus size={16} />Add load case</button>
       {studyType === "static_stress" && (
         <>
-          <SectionTitle>Combinations</SectionTitle>
+          <SectionTitle helpId="loadCombinations">Combinations</SectionTitle>
           {loadCombinations.map((combination) => (
             <div className="load-combination-row" key={combination.id}>
               <input aria-label={`Combination name ${combination.name}`} value={combination.name} onChange={(event) => updateCombination(combination.id, { name: event.currentTarget.value || "Untitled combination" })} />
@@ -1615,7 +1615,7 @@ function RunPanel({ study, displayModel, runProgress, runError, runTiming, onRun
           below states the backend; solverSettings.backend stays in the schema
           so older project files (including retired cloud selections) still
           round-trip. */}
-      <SectionTitle>Simulation settings</SectionTitle>
+      <SectionTitle helpId="simulationSettings">Simulation settings</SectionTitle>
       <div className="field">
         <span>Analysis type</span>
         <div className="segmented analysis-type" role="group" aria-label="Analysis type">
@@ -1673,7 +1673,7 @@ function RunPanel({ study, displayModel, runProgress, runError, runTiming, onRun
       )}
       {modal && (
         <>
-          <SectionTitle>Modal settings</SectionTitle>
+          <SectionTitle helpId="modalSettings">Modal settings</SectionTitle>
           <label className="field">
             <span>Requested modes</span>
             <select
@@ -1906,7 +1906,7 @@ function ModalResultsPanelContent({
         <Info label="Result source" value={resultSourceLabelForPanel(resultSummary)} />
         <Info label="Runner" value={solverRunnerLabelForResult(resultProvenance)} />
       </div>
-      <SectionTitle>Modes</SectionTitle>
+      <SectionTitle helpId="modalModes">Modes</SectionTitle>
       <div className="modal-mode-table" role="list" aria-label="Converged modes">
         {resultSummary.modes.map((mode) => (
           <button
@@ -1932,7 +1932,7 @@ function ModalResultsPanelContent({
       )}
       {frames.length > 1 && (
         <div className="dynamic-playback">
-          <SectionTitle>Phase</SectionTitle>
+          <SectionTitle helpId="modePhase">Phase</SectionTitle>
           <label className="field range-field">
             <span className="range-label"><span>Phase</span><strong>{`${phaseDegrees.toFixed(0)}°`}</strong></span>
             <input
@@ -2137,7 +2137,7 @@ function ResultsPanelContent({
       </div>
       {hasPlayback && (
         <div className="dynamic-playback">
-          <SectionTitle>Frame</SectionTitle>
+          <SectionTitle helpId="resultFrame">Frame</SectionTitle>
           <label className="field range-field">
             <span className="range-label"><span>Current time</span><strong>{`${activeTimeSeconds.toFixed(4)} s · Frame ${currentFrameNumber} / ${frames.length}`}</strong></span>
             <span
@@ -2201,7 +2201,7 @@ function ResultsPanelContent({
       </div>
       {resultMode === "stress" && stressComponents.length > 0 && (
         <div className="field">
-          <SectionTitle>Stress measure</SectionTitle>
+          <SectionTitle helpId="stressMeasure">Stress measure</SectionTitle>
           <div className="segmented" role="group" aria-label="Stress measure">
             {stressComponents.map((component) => (
               <button
@@ -2218,7 +2218,7 @@ function ResultsPanelContent({
       {resultColorScaleControl && (
         <section className="result-scale-controls" aria-label="Result color scale">
           <div className="result-probe-list-header">
-            <SectionTitle>Color scale</SectionTitle>
+            <SectionTitle helpId="colorScale">Color scale</SectionTitle>
             <button className="text-button" type="button" onClick={() => {
               setDraftScaleMin(String(resultColorScaleControl.automaticMin));
               setDraftScaleMax(String(resultColorScaleControl.automaticMax));
@@ -2252,7 +2252,7 @@ function ResultsPanelContent({
       {(resultProbes.length > 0 || resultProbeLimitReached) && (
         <section className="result-probe-list" aria-label="Pinned result probes">
           <div className="result-probe-list-header">
-            <SectionTitle>Pinned probes</SectionTitle>
+            <SectionTitle helpId="pinnedProbes">Pinned probes</SectionTitle>
             {resultProbes.length > 0 && onClearResultProbes && <button className="text-button" type="button" onClick={onClearResultProbes}>Clear All</button>}
           </div>
           {resultProbeLimitReached && <p className="panel-warning" role="status">Probe limit reached. Remove a pin to place another.</p>}
