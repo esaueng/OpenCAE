@@ -941,7 +941,7 @@ function LoadCasesEditor({ studyType, loadCases, loadCombinations, onChange }: {
   );
   return (
     <section className="load-case-editor" aria-label="Load cases">
-      <SectionTitle>Load cases</SectionTitle>
+      <SectionTitle helpId="loadCases">Load cases</SectionTitle>
       {loadCases.map((loadCase) => {
         const canDelete = loadCases.length > 1 && loadCase.loadIds.length === 0 && !referencedCaseIds.has(loadCase.id);
         return (
