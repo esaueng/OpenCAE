@@ -610,9 +610,19 @@ function ensureNodeSetForSurfaceSet(nodeSets: NodeSetJson[], surfaceSet: Surface
 function ensureMappedSurfaceSet(input: SelectionMappingInput, surfaceSets: SurfaceSetJson[]): SurfaceSetJson {
   const mapped = mapSelectionToSurfaceSet(input);
   const existing = surfaceSets.find((set) => set.name === mapped.name);
-  if (existing) return existing;
-  surfaceSets.push(mapped);
-  return mapped;
+  const resolved = existing ?? mapped;
+  if (!existing) surfaceSets.push(resolved);
+
+  // The physical Gmsh set name is useful for diagnostics and lets repeated
+  // selections share one node set, but it is not a durable study reference.
+  // Persist a lightweight alias keyed by the named-selection id so a later
+  // run can rebuild supports/loads from the stored Core model even when the
+  // original mapping used the geometric fallback and no facet carries a
+  // sourceFaceId.
+  if (input.selectionRef !== resolved.name && !surfaceSets.some((set) => set.name === input.selectionRef)) {
+    surfaceSets.push({ name: input.selectionRef, facets: [...resolved.facets] });
+  }
+  return resolved;
 }
 
 function cloneSurfaceSets(surfaceSets: SurfaceSetJson[]): SurfaceSetJson[] {
