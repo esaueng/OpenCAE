@@ -13,12 +13,13 @@ import {
 
 describe("static simulation workflow components", () => {
   test("renders static, dynamic, and modal simulation choices", () => {
-    const html = renderToStaticMarkup(<CreateSimulationModal open onCreateStatic={vi.fn()} onCreateDynamic={vi.fn()} onCreateModal={vi.fn()} onClose={vi.fn()} />);
+    const html = renderToStaticMarkup(<CreateSimulationModal open onCreateStatic={vi.fn()} onCreateDynamic={vi.fn()} onCreateModal={vi.fn()} onCreateThermal={vi.fn()} onClose={vi.fn()} />);
 
     expect(html).toContain("Create Simulation");
     expect(html).toContain("Static Analysis");
     expect(html).toContain("Dynamic Analysis");
     expect(html).toContain("Modal Analysis");
+    expect(html).toContain("Steady Thermal");
     expect(html).toContain("Static stress example");
     expect(html).toContain("Dynamic stress frame sequence example");
     expect(html).toContain("Time-dependent");
@@ -30,7 +31,7 @@ describe("static simulation workflow components", () => {
   });
 
   test("renders simulation showcase renders with native overlays instead of inline SVG images", () => {
-    const html = renderToStaticMarkup(<CreateSimulationModal open onCreateStatic={vi.fn()} onCreateDynamic={vi.fn()} onCreateModal={vi.fn()} onClose={vi.fn()} />);
+    const html = renderToStaticMarkup(<CreateSimulationModal open onCreateStatic={vi.fn()} onCreateDynamic={vi.fn()} onCreateModal={vi.fn()} onCreateThermal={vi.fn()} onClose={vi.fn()} />);
 
     expect(html).toContain("analysis-showcase analysis-showcase--compact analysis-showcase--static");
     expect(html).toContain("analysis-showcase analysis-showcase--large analysis-showcase--static");
@@ -48,12 +49,13 @@ describe("static simulation workflow components", () => {
   });
 
   test("renders a required simulation type screen without a close action", () => {
-    const html = renderToStaticMarkup(<CreateSimulationScreen onCreateStatic={vi.fn()} onCreateDynamic={vi.fn()} onCreateModal={vi.fn()} />);
+    const html = renderToStaticMarkup(<CreateSimulationScreen onCreateStatic={vi.fn()} onCreateDynamic={vi.fn()} onCreateModal={vi.fn()} onCreateThermal={vi.fn()} />);
 
     expect(html).toContain("Choose simulation type");
     expect(html).toContain("Static Analysis");
     expect(html).toContain("Dynamic Analysis");
     expect(html).toContain("Modal Analysis");
+    expect(html).toContain("Steady Thermal");
     expect(html).toContain(">Create Simulation</button>");
     expect(html).not.toContain("Close create simulation");
   });

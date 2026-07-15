@@ -7,17 +7,18 @@ import { formatDensity, formatMaterialStress, type UnitSystem } from "../unitDis
 import dynamicAnalysisImage from "../assets/simulation-showcase/dynamic-analysis.png";
 import staticAnalysisImage from "../assets/simulation-showcase/static-analysis.png";
 
-type BoundaryConditionType = "fixed" | "prescribed_displacement" | "force" | "pressure" | "gravity" | "surface_traction" | "volume_force" | "remote_force" | "bolt_preload";
+type BoundaryConditionType = "fixed" | "prescribed_displacement" | "prescribed_temperature" | "force" | "pressure" | "gravity" | "surface_traction" | "volume_force" | "remote_force" | "bolt_preload" | "heat_flux" | "heat_generation";
 
 interface CreateSimulationModalProps {
   open: boolean;
   onCreateStatic: () => void;
   onCreateDynamic: () => void;
   onCreateModal: () => void;
+  onCreateThermal: () => void;
   onClose: () => void;
 }
 
-export function CreateSimulationModal({ open, onCreateStatic, onCreateDynamic, onCreateModal, onClose }: CreateSimulationModalProps) {
+export function CreateSimulationModal({ open, onCreateStatic, onCreateDynamic, onCreateModal, onCreateThermal, onClose }: CreateSimulationModalProps) {
   const dialogRef = useFocusTrap<HTMLElement>(open, onClose);
   if (!open) return null;
   return (
@@ -29,13 +30,13 @@ export function CreateSimulationModal({ open, onCreateStatic, onCreateDynamic, o
             <X size={18} />
           </button>
         </header>
-        <SimulationTypePicker onCreateStatic={onCreateStatic} onCreateDynamic={onCreateDynamic} onCreateModal={onCreateModal} />
+        <SimulationTypePicker onCreateStatic={onCreateStatic} onCreateDynamic={onCreateDynamic} onCreateModal={onCreateModal} onCreateThermal={onCreateThermal} />
       </section>
     </div>
   );
 }
 
-export function CreateSimulationScreen({ onCreateStatic, onCreateDynamic, onCreateModal }: Omit<CreateSimulationModalProps, "open" | "onClose">) {
+export function CreateSimulationScreen({ onCreateStatic, onCreateDynamic, onCreateModal, onCreateThermal }: Omit<CreateSimulationModalProps, "open" | "onClose">) {
   return (
     <main className="simulation-type-screen" aria-labelledby="simulation-type-title">
       <section className="workflow-modal create-simulation-dialog simulation-type-card">
@@ -45,19 +46,25 @@ export function CreateSimulationScreen({ onCreateStatic, onCreateDynamic, onCrea
             <h2 id="simulation-type-title">Choose Simulation Type</h2>
           </span>
         </header>
-        <SimulationTypePicker onCreateStatic={onCreateStatic} onCreateDynamic={onCreateDynamic} onCreateModal={onCreateModal} />
+        <SimulationTypePicker onCreateStatic={onCreateStatic} onCreateDynamic={onCreateDynamic} onCreateModal={onCreateModal} onCreateThermal={onCreateThermal} />
       </section>
     </main>
   );
 }
 
-type AnalysisChoice = "static" | "dynamic" | "modal";
+type AnalysisChoice = "static" | "dynamic" | "modal" | "thermal";
 
-function SimulationTypePicker({ onCreateStatic, onCreateDynamic, onCreateModal }: Omit<CreateSimulationModalProps, "open" | "onClose">) {
+function SimulationTypePicker({ onCreateStatic, onCreateDynamic, onCreateModal, onCreateThermal }: Omit<CreateSimulationModalProps, "open" | "onClose">) {
   const [selectedType, setSelectedType] = useState<AnalysisChoice>("static");
   const options = ANALYSIS_OPTIONS;
   const selectedAnalysis = options.find((option) => option.type === selectedType) ?? staticAnalysisOption;
-  const handleCreate = selectedType === "static" ? onCreateStatic : selectedType === "dynamic" ? onCreateDynamic : onCreateModal;
+  const createHandlers: Record<AnalysisChoice, () => void> = {
+    static: onCreateStatic,
+    dynamic: onCreateDynamic,
+    modal: onCreateModal,
+    thermal: onCreateThermal
+  };
+  const handleCreate = createHandlers[selectedType];
   return (
     <>
       <div className="simulation-picker-layout">
@@ -69,7 +76,7 @@ function SimulationTypePicker({ onCreateStatic, onCreateDynamic, onCreateModal }
               type="button"
               aria-pressed={selectedType === option.type}
               onClick={() => setSelectedType(option.type)}
-              onDoubleClick={() => (option.type === "static" ? onCreateStatic : option.type === "dynamic" ? onCreateDynamic : onCreateModal)()}
+              onDoubleClick={createHandlers[option.type]}
             >
               <AnalysisShowcase option={option} variant="compact" />
               <span>
@@ -89,7 +96,7 @@ function SimulationTypePicker({ onCreateStatic, onCreateDynamic, onCreateModal }
         </article>
       </div>
       <footer className="workflow-modal-footer">
-        <span><strong>Need Help?</strong> Static handles steady loads, Dynamic handles transient loads, and Modal finds natural frequencies.</span>
+        <span><strong>Need Help?</strong> Static handles steady loads, Dynamic handles transient loads, Modal finds natural frequencies, and Thermal solves steady conduction.</span>
         <button className="primary" type="button" onClick={handleCreate}>Create Simulation</button>
       </footer>
     </>
@@ -110,7 +117,7 @@ function AnalysisShowcase({ option, variant }: { option: AnalysisOption; variant
   return (
     <figure className={`analysis-showcase analysis-showcase--${variant} analysis-showcase--${option.type}`}>
       <img src={option.image} alt={variant === "large" ? `${option.imageAlt} large preview` : option.imageAlt} />
-      {option.type === "static" ? <StaticShowcaseOverlay /> : option.type === "dynamic" ? <DynamicShowcaseOverlay /> : <ModalShowcaseOverlay />}
+      {option.type === "static" ? <StaticShowcaseOverlay /> : option.type === "dynamic" ? <DynamicShowcaseOverlay /> : option.type === "thermal" ? <ThermalShowcaseOverlay /> : <ModalShowcaseOverlay />}
     </figure>
   );
 }
@@ -175,6 +182,19 @@ function ModalShowcaseOverlay() {
   );
 }
 
+function ThermalShowcaseOverlay() {
+  return (
+    <svg className="analysis-showcase-overlay" viewBox="0 0 720 360" aria-hidden="true" focusable="false">
+      <path className="showcase-support-post" d="M104 106 L104 274" />
+      <text className="showcase-label showcase-label--load" x="112" y="82">100 °C</text>
+      <text className="showcase-label" x="565" y="82">20 °C</text>
+      <path className="showcase-load-shaft" d="M188 180 L548 180" />
+      <path className="showcase-load-chevron" d="M536 170 L550 180 L536 190" />
+      <text className="showcase-frame-label" x="360" y="220" textAnchor="middle">Heat flow</text>
+    </svg>
+  );
+}
+
 const staticAnalysisOption = {
   type: "static" as AnalysisChoice,
   title: "Static Analysis",
@@ -205,7 +225,17 @@ const modalAnalysisOption = {
   tags: ["Solid", "Natural frequencies", "Mode shapes", "Local solver"]
 } satisfies AnalysisOption;
 
-const ANALYSIS_OPTIONS = [staticAnalysisOption, dynamicAnalysisOption, modalAnalysisOption] as const;
+const thermalAnalysisOption = {
+  type: "thermal" as AnalysisChoice,
+  title: "Steady Thermal",
+  summary: "Temperature and heat-flow distribution",
+  description: "Solve conduction through solid Tet4 or Tet10 meshes with prescribed temperatures, surface heat flux, and volumetric heat generation.",
+  imageAlt: "Steady thermal conduction example",
+  image: staticAnalysisImage,
+  tags: ["Solid", "Conduction", "Temperature", "Heat flux"]
+} satisfies AnalysisOption;
+
+const ANALYSIS_OPTIONS = [staticAnalysisOption, dynamicAnalysisOption, modalAnalysisOption, thermalAnalysisOption] as const;
 
 interface MaterialLibraryModalProps {
   open: boolean;
@@ -229,6 +259,7 @@ type MaterialEditorDraft = {
   poissonRatio: number;
   density: number;
   yieldStrength: number;
+  thermalConductivity: number;
   printProfile?: Material["printProfile"];
 };
 
@@ -281,6 +312,7 @@ export function MaterialLibraryModal({
       poissonRatio: source.poissonRatio,
       density: densityForEditor(source.density, unitSystem),
       yieldStrength: stressForEditor(source.yieldStrength, unitSystem),
+      thermalConductivity: source.thermalConductivity ?? 0,
       ...(source.printProfile ? { printProfile: structuredClone(source.printProfile) } : {})
     });
     setEditorError(null);
@@ -299,6 +331,7 @@ export function MaterialLibraryModal({
       poissonRatio: editor.poissonRatio,
       density: densityFromEditor(editor.density, unitSystem),
       yieldStrength: stressFromEditor(editor.yieldStrength, unitSystem),
+      ...(editor.thermalConductivity > 0 ? { thermalConductivity: editor.thermalConductivity } : {}),
       ...(editor.printProfile ? { printProfile: editor.printProfile } : {}),
       verification: "user_supplied_unverified"
     };
@@ -364,6 +397,7 @@ export function MaterialLibraryModal({
                 <PreviewRow label="Poisson's ratio" value={String(selectedMaterial.poissonRatio)} />
                 <PreviewRow label="Density" value={formatDensity(selectedMaterial.density, "kg/m^3", unitSystem)} />
                 <PreviewRow label="Yield strength" value={formatMaterialStress(selectedMaterial.yieldStrength, unitSystem)} />
+                <PreviewRow label="Thermal conductivity" value={selectedMaterial.thermalConductivity ? `${selectedMaterial.thermalConductivity} W/(m·K)` : "Not specified"} />
                 <div className="material-editor-actions">
                   <button className="secondary" type="button" onClick={() => beginEditor(selectedMaterial, false)} disabled={!onSaveCustomMaterial}>Duplicate &amp; edit</button>
                   {selectedIsCustom ? <button className="secondary" type="button" onClick={() => beginEditor(selectedMaterial, true)}>Edit</button> : null}
@@ -429,6 +463,7 @@ function MaterialEditor({ draft, unitSystem, error, onChange, onCancel, onSave }
       <label>Poisson ratio<input type="number" min="-0.999" max="0.499" step="0.001" value={draft.poissonRatio} onChange={(event) => onChange({ poissonRatio: Number(event.currentTarget.value) })} /></label>
       <label>Density ({densityUnit})<input type="number" min="0" step="any" value={draft.density} onChange={(event) => onChange({ density: Number(event.currentTarget.value) })} /></label>
       <label>Yield strength ({stressUnit})<input type="number" min="0" step="any" value={draft.yieldStrength} onChange={(event) => onChange({ yieldStrength: Number(event.currentTarget.value) })} /></label>
+      <label>Thermal conductivity (W/(m·K))<input type="number" min="0" step="any" value={draft.thermalConductivity} onChange={(event) => onChange({ thermalConductivity: Number(event.currentTarget.value) })} /></label>
       {draft.printProfile ? <p className="material-editor-profile">Copied {draft.printProfile.process} print profile retained.</p> : <p className="material-editor-profile">No additive profile. CNC/bulk use is unvalidated.</p>}
       {error ? <p className="material-editor-error" role="alert">{error}</p> : null}
       <div className="material-editor-actions"><button className="secondary" type="button" onClick={onCancel}>Cancel edit</button><button className="primary" type="button" onClick={onSave}>Save custom material</button></div>
@@ -464,13 +499,17 @@ function PreviewRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-export function BoundaryConditionMenu({ open, studyType, onSelect, onClose }: { open: boolean; studyType?: "static_stress" | "dynamic_structural" | "modal_analysis"; onSelect: (type: BoundaryConditionType) => void; onClose: () => void }) {
+export function BoundaryConditionMenu({ open, studyType, onSelect, onClose }: { open: boolean; studyType?: "static_stress" | "dynamic_structural" | "modal_analysis" | "steady_state_thermal"; onSelect: (type: BoundaryConditionType) => void; onClose: () => void }) {
   const firstButtonRef = useRef<HTMLButtonElement | null>(null);
   useEffect(() => {
     if (open) firstButtonRef.current?.focus();
   }, [open]);
   if (!open) return null;
-  const enabled: Array<{ type: BoundaryConditionType; label: string }> = [
+  const enabled: Array<{ type: BoundaryConditionType; label: string }> = studyType === "steady_state_thermal" ? [
+    { type: "prescribed_temperature", label: "Prescribed temperature" },
+    { type: "heat_flux", label: "Surface heat flux" },
+    { type: "heat_generation", label: "Volumetric heat generation" }
+  ] : [
     { type: "fixed", label: "Fixed support" },
     { type: "prescribed_displacement", label: "Prescribed displacement" },
     { type: "force", label: "Face force (total)" },

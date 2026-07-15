@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { isModalResultSummary } from "@opencae/schema";
+import { isStructuralResultSummary } from "@opencae/schema";
 import type { DisplayModel, Project, ResultField, ResultSummary, Study } from "@opencae/schema";
 import {
   AUTOSAVE_STORAGE_KEY,
@@ -197,7 +197,7 @@ describe("app persistence", () => {
       fields
     });
     expect(bundle).toBeDefined();
-    if (!bundle || isModalResultSummary(bundle.summary)) throw new Error("Expected structural transient results.");
+    if (!bundle || !isStructuralResultSummary(bundle.summary)) throw new Error("Expected structural transient results.");
     expect(bundle?.summary.transient?.frameCount).toBe(21);
   });
 

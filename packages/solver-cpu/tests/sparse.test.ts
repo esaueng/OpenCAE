@@ -47,6 +47,27 @@ describe("sparse matrix utilities", () => {
     expect(result.relativeResidual).toBeLessThan(1e-10);
   });
 
+  test("solves an SPD system with the symmetric SSOR preconditioner", () => {
+    const coo = new CooAccumulator(3);
+    for (const [row, col, value] of [[0, 0, 4], [0, 1, -1], [1, 0, -1], [1, 1, 4], [1, 2, -1], [2, 1, -1], [2, 2, 3]] as const) {
+      coo.addEntry(row, col, value);
+    }
+    const result = solveConjugateGradient(coo.finalizeCsr(), new Float64Array([15, 10, 10]), {
+      tolerance: 1e-12,
+      maxIterations: 20,
+      preconditioner: "ssor",
+      ssorOmega: 1
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(Array.from(result.solution)).toEqual(expect.arrayContaining([
+      expect.closeTo(5, 9),
+      expect.closeTo(5, 9),
+      expect.closeTo(5, 9)
+    ]));
+  });
+
   test("exposes vector primitives", () => {
     const x = new Float64Array([1, 2]);
     axpy(3, new Float64Array([2, -1]), x);

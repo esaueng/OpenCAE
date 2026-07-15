@@ -268,6 +268,24 @@ export function createLocalModalStudy(project: Project, displayModel: DisplayMod
   return createModalStudyForProject(project, displayModel, studyId);
 }
 
+export function createLocalThermalStudy(project: Project, displayModel: DisplayModel, studyId = `study-${newLocalId()}`, now = new Date().toISOString()): Project["studies"][number] {
+  const structural = createStaticStressStudyForProject(project, displayModel, studyId, now);
+  return {
+    ...structural,
+    name: "Steady-State Thermal",
+    type: "steady_state_thermal",
+    constraints: [],
+    loads: [],
+    loadCases: [],
+    loadCombinations: [],
+    solverSettings: {
+      backend: structural.solverSettings.backend ?? "auto",
+      fidelity: structural.solverSettings.fidelity ?? "standard",
+      createdAt: now
+    }
+  };
+}
+
 export function openLocalProjectPayload(payload: unknown): SampleProjectResponse {
   const candidate = hasObjectKey(payload, "project") ? payload.project : payload;
   const parsed = ProjectSchema.safeParse(candidate);

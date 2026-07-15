@@ -1,4 +1,4 @@
-import { isModalResultSummary } from "@opencae/schema";
+import { isModalResultSummary, isStructuralResultSummary } from "@opencae/schema";
 import type { AnalysisMesh, CustomMaterial, DisplayModel, DynamicSolverSettings, MeshConvergenceRecord, MeshQuality, Project, ResultField, ResultRenderBounds, ResultSummary, RunEvent, RunVariantRef, RunVariantResult, Study, StudyRun } from "@opencae/schema";
 import type { StepGeometryInspection, StepGeometryRepairReport } from "@opencae/mesh-intake";
 import { assertCompatibleManufacturingProcess, resolveMaterial } from "@opencae/materials";
@@ -790,7 +790,8 @@ export async function addLoad(studyId: string, type: LoadType, value: number, se
     () => {
       if (!currentStudy) throw new Error("Could not add load without an open study.");
       const loadId = `load-${crypto.randomUUID()}`;
-      const loadCases = currentStudy.type === "modal_analysis" ? undefined : loadCasesWithAddedLoad(currentStudy, loadId);
+      const structuralStudy = currentStudy.type === "static_stress" || currentStudy.type === "dynamic_structural" ? currentStudy : null;
+      const loadCases = structuralStudy ? loadCasesWithAddedLoad(structuralStudy, loadId) : undefined;
       return {
         study: {
           ...currentStudy,
@@ -915,7 +916,7 @@ const DERIVED_SAFETY_FACTOR_CAP = 1000;
 // alignment, so Safety Factor mode used to fall back to demo geometry. Derive a
 // per-node field from the surface stress field and the summary yield margin.
 export function withDerivedSafetyFactorSurfaceField(results: ResultsResponse): ResultsResponse {
-  if (isModalResultSummary(results.summary)) return results;
+  if (!isStructuralResultSummary(results.summary)) return results;
   const surfaceMesh = results.surfaceMesh;
   if (!surfaceMesh) return results;
   const aligned = (field: ResultField) => field.location === "node" && field.surfaceMeshRef === surfaceMesh.id && field.values.length === surfaceMesh.nodes.length;

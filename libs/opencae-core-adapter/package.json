@@ -12,6 +12,7 @@
     "@opencae/schema": "workspace:*",
     "@opencae/solve-pipeline": "workspace:*",
     "@opencae/solver-cpu": "workspace:*",
+    "@opencae/solver-webgpu": "workspace:*",
     "@opencae/study-core": "workspace:*"
   },
   "license": "Apache-2.0"

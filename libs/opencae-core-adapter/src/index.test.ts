@@ -612,6 +612,58 @@ describe("per-model solver backend resolution", () => {
     }
   });
 
+  test("rejects unverifiable index-only mappings from pre-alias mesh artifacts", () => {
+    const storedModel = actualCoreModelFixture();
+    storedModel.surfaceFacets = storedModel.surfaceFacets.map(({ sourceSelectionRef: _selection, sourceFaceId: _face, ...facet }) => facet);
+    storedModel.surfaceSets = [
+      { name: "physical_support", facets: [0] },
+      { name: "physical_load", facets: [1] }
+    ];
+    storedModel.nodeSets = [{ name: "physical_support_nodes", nodes: [0, 2, 3] }];
+    storedModel.boundaryConditions = [{ name: "fixedSupport0", type: "fixed", nodeSet: "physical_support_nodes", components: ["x", "y", "z"] }];
+    storedModel.loads = [{ name: "appliedForce0", type: "surfaceForce", surfaceSet: "physical_load", totalForce: [0, -500, 0] }];
+
+    const study = studyFixture({
+      namedSelections: [
+        {
+          id: "selection-step-face-3",
+          name: "FS 1",
+          entityType: "face",
+          geometryRefs: [{ bodyId: "body-uploaded", entityType: "face", entityId: "step-face-3", label: "STEP face 3" }],
+          fingerprint: "step-face-3"
+        },
+        {
+          id: "selection-step-face-7",
+          name: "L 1",
+          entityType: "face",
+          geometryRefs: [{ bodyId: "body-uploaded", entityType: "face", entityId: "step-face-7", label: "STEP face 7" }],
+          fingerprint: "step-face-7"
+        }
+      ],
+      constraints: [{ id: "constraint-1", type: "fixed", selectionRef: "selection-step-face-3", parameters: {}, status: "complete" }],
+      loads: [{ id: "load-1", type: "force", selectionRef: "selection-step-face-7", parameters: { value: 500, units: "N", direction: [0, 0, -1] }, status: "complete" }],
+      meshSettings: {
+        preset: "medium",
+        status: "complete",
+        meshRef: "actual-core-model",
+        summary: {
+          nodes: 4,
+          elements: 1,
+          warnings: [],
+          source: "actual_volume_mesh",
+          artifacts: {
+            meshConnectivity: { connectedComponents: 1 },
+            actualCoreModel: { model: storedModel }
+          }
+        }
+      }
+    });
+
+    expect(() => buildOpenCaeCoreModelForStudy(study, cantileverDisplayModel())).toThrow(
+      /could not map selection selection-step-face-3 to Core surface facets/
+    );
+  });
+
   test("builds and validates with a project custom material while rejecting unknown IDs", () => {
     const custom = {
       id: "0ac4dbda-1d37-43c0-b3ac-9d1d2cc28e84",

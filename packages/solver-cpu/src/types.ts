@@ -24,6 +24,10 @@ export type CpuSolverOptions = {
   method?: "auto" | "dense" | "sparse";
   tolerance?: number;
   maxIterations?: number;
+  /** Symmetric preconditioners preserve CG's SPD requirement. Auto selects SSOR for sparse structural solves. */
+  preconditioner?: "auto" | "none" | "jacobi" | "ssor";
+  /** SSOR relaxation factor, constrained to 0 < omega < 2. */
+  ssorOmega?: number;
   visualizationSmoothing?: {
     iterations?: number;
     alpha?: number;
@@ -103,6 +107,8 @@ export type CpuSolverDiagnostics = {
   converged?: boolean;
   matrixRows?: number;
   matrixNonZeros?: number;
+  preconditioner?: "none" | "jacobi" | "ssor";
+  estimatedMatrixBytes?: number;
   loadAssembly?: LoadAssemblyDiagnostics;
   reactionBalance?: {
     appliedLoad: [number, number, number];

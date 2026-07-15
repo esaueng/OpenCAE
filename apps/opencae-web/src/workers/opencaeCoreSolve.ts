@@ -14,6 +14,7 @@ export {
   resolveSolverBackend,
   studyForCoreGeometryDispatch,
   trySolveOpenCaeCoreStudy,
+  trySolveOpenCaeCoreStudyAutomatic,
   type CoreCloudGeometrySource,
   type CoreMeshStatistics,
   type CoreSolveCapabilities,

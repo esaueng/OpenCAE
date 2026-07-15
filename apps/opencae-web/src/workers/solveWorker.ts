@@ -1,5 +1,5 @@
 import type { SolveProgressEvent } from "@opencae/solve-pipeline";
-import { normalizeSolverBackend, trySolveOpenCaeCoreStudy } from "./opencaeCoreSolve";
+import { normalizeSolverBackend, trySolveOpenCaeCoreStudyAutomatic } from "./opencaeCoreSolve";
 import {
   isSolveWorkerResult,
   normalizeSolveWorkerError,
@@ -38,11 +38,11 @@ workerScope.addEventListener("message", (event) => {
     return;
   }
   if (request.kind === "solve") {
-    handleSolve(request.id, request.payload);
+    void handleSolve(request.id, request.payload);
   }
 });
 
-function handleSolve(id: string, payload: SolveWorkerSolvePayload): void {
+async function handleSolve(id: string, payload: SolveWorkerSolvePayload): Promise<void> {
   let lastForwardedAt = 0;
   let lastPhase = "";
   // Peak worker-heap watermark, sampled where the blocked worker thread
@@ -65,7 +65,7 @@ function handleSolve(id: string, payload: SolveWorkerSolvePayload): void {
     if (normalizeSolverBackend(payload.study) !== "opencae_core_local") {
       throw new Error("Unsupported solver backend for a local solve. Simulations run locally in your browser with OpenCAE Core (the cloud backend was retired).");
     }
-    const outcome = trySolveOpenCaeCoreStudy({
+    const outcome = await trySolveOpenCaeCoreStudyAutomatic({
       study: payload.study,
       runId: payload.runId,
       displayModel: payload.displayModel,

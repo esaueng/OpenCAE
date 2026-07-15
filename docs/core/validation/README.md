@@ -7,12 +7,12 @@ OpenCAE Core solves the volume mesh supplied in the model JSON. Complex geometry
 If a complex display model has no actual volume mesh, preflight should fail with:
 
 ```text
-OpenCAE Core requires an actual volume mesh for complex geometry. Use Cloud FEA or generate a Core mesh.
+OpenCAE Core requires an actual volume mesh for complex geometry. Generate a Core mesh locally in the browser.
 ```
 
 ## Model Schema
 
-Schema `0.2.0` adds Tet4/Tet10 element blocks, surface facets, surface sets, surface force and pressure loads, dynamic linear steps, coordinate metadata, mesh provenance, and optional mesh connection metadata. Schema `0.3.0` adds modal steps, normalized vector mode-shape results, surface traction, body force density, remote force, and equivalent bolt preload. Legacy `0.1.0` and `0.2.0` models remain accepted.
+Schema `0.2.0` adds Tet4/Tet10 element blocks, surface facets, surface sets, surface force and pressure loads, dynamic linear steps, coordinate metadata, mesh provenance, and optional mesh connection metadata. Schema `0.3.0` adds modal steps, normalized vector mode-shape results, surface traction, body force density, remote force, and equivalent bolt preload. Schema `0.4.0` adds thermal material data, steady conduction boundary conditions/loads/steps, and solved tie/contact metadata. Legacy `0.1.0`, `0.2.0`, and `0.3.0` models remain accepted.
 
 The CPU solver supports Tet4 and Tet10 stiffness, recovery, mass, and load integration. Tet10 inertial and body-force lumping uses positive HRZ weights with exact total-mass/resultant conservation.
 
@@ -20,7 +20,9 @@ The CPU solver supports Tet4 and Tet10 stiffness, recovery, mass, and load integ
 
 Validation rejects invalid node indices, invalid connectivity, empty node or surface sets, orphan surface facets, missing load/BC/step references, non-positive Tet4 volume, unsupported element types, and disconnected bodies without `meshConnections`.
 
-For a fused single-solid fixture, `connectedComponents(mesh).componentCount` must be `1`. If a mesh has multiple disconnected bodies, callers must provide explicit tie/contact/fuse metadata or route the job to a solver that supports the intended contact model.
+For a fused single-solid fixture, `connectedComponents(mesh).componentCount` must be `1`. Multiple disconnected bodies must provide explicit tie/contact/fuse metadata. Tie and small-sliding frictionless contact are assembled as spatially projected node-to-surface penalty MPCs; missing or unmappable faces fail before solve.
+
+Steady thermal validation requires positive conductivity for every referenced material, at least one prescribed-temperature node, valid heat-load selections, finite assembled values, CG convergence, and a reported energy-balance residual. Surface and volumetric heat input use consistent facet/element integration for Tet4 and Tet10.
 
 ## Loads And Results
 
@@ -39,11 +41,11 @@ Core emits a `stress-visualization` diagnostic with the engineering max in MPa, 
 The consuming app adapter should use these paths:
 
 - Use `actualCoreMesh` directly when present.
-- Convert Cloud FEA/Gmsh, uploaded mesh, procedural fixture, or future browser mesher output with `volumeMeshToModelJson`.
+- Convert browser-Gmsh, uploaded mesh, or procedural fixture output with `volumeMeshToModelJson`.
 - Use structured block meshes only for simple one-body rectangular cantilever/block/beam display models.
-- Reject complex geometry without actual mesh and route to Cloud FEA or mesh generation.
+- Reject complex geometry without an actual mesh and run local mesh generation before solving.
 
-OpenCAE Core Cloud can now accept a geometry source and produce the actual volume mesh inside the container. A complex cloud request should include `study`, `displayModel`, solver/result settings, and one geometry source:
+The browser meshing worker accepts `study`, `displayModel`, solver/result settings, and one geometry source:
 
 ```json
 {
@@ -65,12 +67,8 @@ OpenCAE Core Cloud can now accept a geometry source and produce the actual volum
 }
 ```
 
-`geometry.kind` may be `sample_procedural`, `uploaded_cad`, `uploaded_mesh`, or `structured_block`. Bracket sample geometry maps `FS1` to `fixed_support` and `L1` to `load_surface`. If a complex request reaches Core Cloud without a procedural or uploaded geometry source, preflight returns:
+`geometry.kind` may be `sample_procedural`, `uploaded_cad`, `uploaded_mesh`, or `structured_block`. Bracket sample geometry maps `FS1` to `fixed_support` and `L1` to `load_surface`. If a complex model has neither a saved volume mesh nor a local meshable geometry source, preflight fails before solve.
 
-```text
-Complex geometry requires procedural or uploaded geometry for Core Cloud meshing.
-```
-
-Gmsh is used only as a cloud mesher. The solve still runs through OpenCAE Core sparse static or MDOF dynamic APIs. If Gmsh is missing or meshing fails, the service returns an explicit meshing error and does not use a local estimate or display-bounds proxy.
+Gmsh runs through WebAssembly in the browser meshing worker. The resulting Core model is transferred to the dedicated browser solve worker, which routes product solves to sparse static, MDOF dynamic, modal, or steady thermal execution. The WebGPU static operator is retained for explicit development benchmarks while automatic routing is gated. If local meshing is unavailable or fails, the run returns an explicit error and does not call a network solver, use a local estimate, or substitute a display-bounds proxy.
 
 For production result rendering, downstream viewers must render `result.surfaceMesh.nodes` and `result.surfaceMesh.triangles` directly when a field such as `stress-surface` has a matching `surfaceMeshRef`. Vertex colors come directly from `stress-surface.values` in the same surface-node order. Production Core rendering must reject missing solver surface meshes or misaligned field values instead of inventing replacement samples.
