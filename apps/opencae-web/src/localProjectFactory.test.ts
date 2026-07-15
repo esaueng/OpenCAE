@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { isStructuralResultSummary } from "@opencae/schema";
+import { ProjectSchema, isStructuralResultSummary } from "@opencae/schema";
+import { validateStudy } from "@opencae/study-core";
 import { attachUploadedModelToProject, createLocalBlankProject, createLocalModalStudy, createLocalSampleProject, createLocalStaticStressStudy, createLocalThermalStudy, openLocalProjectPayload, uploadedDisplayModelFor } from "./localProjectFactory";
 import { BRACKET_CORE_CLOUD_GEOMETRY, BRACKET_GEOMETRY_MIGRATION_NOTE } from "./bracketGeometryMigration";
 
@@ -101,6 +102,51 @@ describe("local project factory workflow", () => {
 
     expect(load?.parameters.direction).toEqual([0, -1, 0]);
     expect(response.project.studies[0]?.type === "modal_analysis" ? undefined : response.project.studies[0]?.loadCases?.[0]?.loadIds).toEqual([load?.id]);
+  });
+
+  test("creates ready-to-configure modal samples for every built-in model", async () => {
+    for (const sampleModel of ["bracket", "plate", "cantilever"] as const) {
+      const response = await createLocalSampleProject(sampleModel, "modal_analysis", "2026-04-28T12:00:00.000Z");
+      const study = response.project.studies[0];
+
+      expect(response.project.name).toContain("Modal Demo");
+      expect(response.message).toContain("modal sample loaded");
+      expect(study?.type).toBe("modal_analysis");
+      expect(study?.constraints).toHaveLength(1);
+      expect(study?.constraints[0]?.type).toBe("fixed");
+      expect(study?.loads).toEqual([]);
+      expect(study?.solverSettings).toMatchObject({ modeCount: 6 });
+      expect(study?.runs).toEqual([]);
+      expect(study ? validateStudy(study) : []).toEqual([]);
+      expect(response.project.geometryFiles[0]?.metadata.sampleAnalysisType).toBe("modal_analysis");
+      expect(ProjectSchema.safeParse(response.project).success).toBe(true);
+    }
+  });
+
+  test("creates steady thermal samples with a temperature reference and surface heat flux", async () => {
+    for (const sampleModel of ["bracket", "plate", "cantilever"] as const) {
+      const response = await createLocalSampleProject(sampleModel, "steady_state_thermal", "2026-04-28T12:00:00.000Z");
+      const study = response.project.studies[0];
+
+      expect(response.project.name).toContain("Thermal Demo");
+      expect(response.message).toContain("thermal sample loaded");
+      expect(study?.type).toBe("steady_state_thermal");
+      expect(study?.constraints).toEqual([expect.objectContaining({
+        type: "prescribed_temperature",
+        selectionRef: "selection-fixed-face",
+        parameters: { value: 20, units: "°C" }
+      })]);
+      expect(study?.loads).toEqual([expect.objectContaining({
+        type: "heat_flux",
+        selectionRef: "selection-load-face",
+        parameters: expect.objectContaining({ value: 10_000, units: "W/m²" })
+      })]);
+      expect(study?.materialAssignments).toHaveLength(1);
+      expect(study?.runs).toEqual([]);
+      expect(study ? validateStudy(study) : []).toEqual([]);
+      expect(response.project.geometryFiles[0]?.metadata.sampleAnalysisType).toBe("steady_state_thermal");
+      expect(ProjectSchema.safeParse(response.project).success).toBe(true);
+    }
   });
 
   test("rejects payloads without a valid project", () => {

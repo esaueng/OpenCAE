@@ -24,6 +24,7 @@ import { canNavigateToStep } from "../appShellState";
 import { MaterialLibraryModal } from "./SimulationWorkflow";
 import { ParametricPartBuilder } from "./ParametricPartBuilder";
 import { SampleOptionCard } from "./SampleOptionCard";
+import { SAMPLE_ANALYSIS_OPTIONS, sampleAnalysisOptionFor } from "./sampleAnalysisOptions";
 import { SAMPLE_OPTIONS, sampleOptionFor } from "./sampleOptions";
 import { dynamicPlaybackFrames } from "../resultFields";
 import { resultScaleCssGradient, validManualResultRange, type ResolvedResultColorScale, type ResultColorScaleSetting } from "../resultColorScale";
@@ -206,7 +207,8 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, se
   const stepGeometry = stepGeometryMetadataForProject(project);
   const stepGeometryResolvedByMesh = Boolean(study.meshSettings.summary?.artifacts?.actualCoreModel);
   const sampleLabel = sampleOptionFor(pendingSampleModel).title;
-  const sampleAnalysisLabel = sampleAnalysisType === "dynamic_structural" ? "Dynamic Structural" : "Static Stress";
+  const sampleAnalysis = sampleAnalysisOptionFor(sampleAnalysisType);
+  const sampleAnalysisLabel = sampleAnalysis.fullLabel;
   const sampleForceLabel = formatEquivalentForce(500, project.unitSystem);
   // The beam summary describes the structural body only. The separate
   // 0.498 kg payload is reported below as a load and must not be counted as
@@ -222,6 +224,32 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, se
       : pendingSampleModel === "plate"
         ? { support: "fixed end face", load: "end payload mass · -Y direction", callout: "A simple beam is fixed at one end and carries a payload mass sitting on the free end, producing bending stress along the span." }
         : { support: "fixed end face", load: "free end face · -Z direction", callout: "A cantilever beam is fixed at one end and loaded at the free end, producing bending stress along the beam span." };
+  const sampleSetup = sampleAnalysisType === "modal_analysis"
+    ? {
+        boundaryTitle: "Fixed support",
+        boundaryDetail: preconfigured.support,
+        actionTitle: "6 natural modes",
+        actionDetail: "Natural frequencies and mode shapes",
+        actionIcon: <Atom size={18} />,
+        callout: `The ${sampleLabel.toLowerCase()} is supported without an external load so its first six natural frequencies and mode shapes can be calculated.`
+      }
+    : sampleAnalysisType === "steady_state_thermal"
+      ? {
+          boundaryTitle: "20 °C reference",
+          boundaryDetail: preconfigured.support,
+          actionTitle: "Heat flux · 10 kW/m²",
+          actionDetail: pendingSampleModel === "bracket" ? "Top face" : "Free-end face",
+          actionIcon: <Factory size={18} />,
+          callout: `A 20 °C reference temperature and an inward 10 kW/m² heat flux create a steady conduction gradient through the ${sampleLabel.toLowerCase()}.`
+        }
+      : {
+          boundaryTitle: "Fixed support",
+          boundaryDetail: preconfigured.support,
+          actionTitle: sampleLoadTitle,
+          actionDetail: preconfigured.load,
+          actionIcon: <ArrowDown size={18} />,
+          callout: preconfigured.callout
+        };
 
   function handleLoadSampleClick() {
     if (!confirmSampleLoad) {
@@ -262,9 +290,18 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, se
             ))}
           </div>
           <HelpLabel helpId="sampleModel">Analysis type</HelpLabel>
-          <div className="segmented analysis-type" role="group" aria-label="Analysis type">
-            <button className={sampleAnalysisType === "static_stress" ? "active" : ""} type="button" aria-pressed={sampleAnalysisType === "static_stress"} onClick={() => onSampleAnalysisTypeChange?.("static_stress")}>Static</button>
-            <button className={sampleAnalysisType === "dynamic_structural" ? "active" : ""} type="button" aria-pressed={sampleAnalysisType === "dynamic_structural"} onClick={() => onSampleAnalysisTypeChange?.("dynamic_structural")}>Dynamic</button>
+          <div className="segmented analysis-type sample-analysis-type-grid" role="group" aria-label="Analysis type">
+            {SAMPLE_ANALYSIS_OPTIONS.map((option) => (
+              <button
+                key={option.id}
+                className={sampleAnalysisType === option.id ? "active" : ""}
+                type="button"
+                aria-pressed={sampleAnalysisType === option.id}
+                onClick={() => onSampleAnalysisTypeChange?.(option.id)}
+              >
+                {option.label}
+              </button>
+            ))}
           </div>
           <button
             className={confirmSampleLoad ? "primary wide" : "secondary wide"}
@@ -273,7 +310,7 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, se
             title={confirmSampleLoad ? "Click again to reload the sample project" : "Prepare to reload the sample project"}
           >
             <RotateCcw size={16} />
-            {confirmSampleLoad ? "Click again to load sample" : `Load ${sampleAnalysisType === "dynamic_structural" ? "dynamic" : "static"} sample`}
+            {confirmSampleLoad ? "Click again to load sample" : `Load ${sampleAnalysis.label.toLowerCase()} sample`}
           </button>
           {confirmSampleLoad && <span className="panel-copy confirm-copy">This will reload {sampleLabel} as {sampleAnalysisLabel} and reset the sample setup.</span>}
         </div>
@@ -393,10 +430,10 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, se
         <>
           <SectionTitle helpId="preconfigured">Preconfigured</SectionTitle>
           <div className="concept-card-list">
-            <ConceptCard icon={<SupportIcon />} title="Fixed support" detail={preconfigured.support} tone="warning" />
-            <ConceptCard icon={<ArrowDown size={18} />} title={sampleLoadTitle} detail={preconfigured.load} tone="accent" />
+            <ConceptCard icon={<SupportIcon />} title={sampleSetup.boundaryTitle} detail={sampleSetup.boundaryDetail} tone="warning" />
+            <ConceptCard icon={sampleSetup.actionIcon} title={sampleSetup.actionTitle} detail={sampleSetup.actionDetail} tone="accent" />
           </div>
-          <Callout>{preconfigured.callout}</Callout>
+          <Callout>{sampleSetup.callout}</Callout>
         </>
       )}
       <Info label="Study" value={study.name} />

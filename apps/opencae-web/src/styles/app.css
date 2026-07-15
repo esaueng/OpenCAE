@@ -2910,6 +2910,18 @@ img {
   grid-template-columns: repeat(3, 1fr);
 }
 
+.segmented.sample-analysis-type-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.segmented.sample-analysis-type-grid button:nth-child(2n) {
+  border-right: 0;
+}
+
+.segmented.sample-analysis-type-grid button:nth-child(-n + 2) {
+  border-bottom: var(--border-thin);
+}
+
 .segmented.run-analysis-type {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
