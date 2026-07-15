@@ -826,7 +826,8 @@ export function buildOpenCaeCoreModelForStudy(
       displayModel,
       study,
       selectionRef: constraint.selectionRef,
-      surfaceSets
+      surfaceSets,
+      storedSurfaceSetName: storedSurfaceSetNameForConstraint(actualMesh?.model, index, constraint.type)
     });
     const nodeSet = deriveFixedSupportNodeSetFromSurface(`fixedNodes${index}`, surfaceSet.name, { ...model, surfaceSets });
     if (!nodeSet.nodes.length) throw new Error(`OpenCAE Core Local could not map boundary ${constraint.selectionRef} to mesh nodes.`);
@@ -871,7 +872,8 @@ export function buildOpenCaeCoreModelForStudy(
       displayModel,
       study,
       selectionRef: load.selectionRef,
-      surfaceSets
+      surfaceSets,
+      storedSurfaceSetName: storedSurfaceSetNameForLoad(actualMesh?.model, index, load.type, "primary")
     });
     if (load.type === "heat_flux") {
       const raw = Number(load.parameters.value ?? 0);
@@ -944,7 +946,8 @@ export function buildOpenCaeCoreModelForStudy(
         displayModel,
         study,
         selectionRef: secondarySelectionRef,
-        surfaceSets
+        surfaceSets,
+        storedSurfaceSetName: storedSurfaceSetNameForLoad(actualMesh?.model, index, load.type, "secondary")
       });
       const axis = normalize(vector3(load.parameters.direction) ?? [0, 0, 1]);
       const preloadForce = Number(load.parameters.value);
@@ -1031,7 +1034,8 @@ function ensureSurfaceSetForSelection({
   displayModel,
   study,
   selectionRef,
-  surfaceSets
+  surfaceSets,
+  storedSurfaceSetName
 }: {
   model: OpenCAEModelJson;
   renderNodePoints: Vec3[];
@@ -1039,9 +1043,19 @@ function ensureSurfaceSetForSelection({
   study: Study;
   selectionRef: string;
   surfaceSets: SurfaceSetJson[];
+  storedSurfaceSetName?: string;
 }): SurfaceSetJson {
   const existing = surfaceSets.find((set) => set.name === selectionRef);
   if (existing?.facets.length) return existing;
+
+  // Older mesh artifacts stored the resolved physical set only in their
+  // generated support/load records. Reuse that proven mapping before falling
+  // back to face attribution or display-space geometry so saved projects made
+  // before selection aliases were persisted remain runnable without remeshing.
+  const stored = storedSurfaceSetName
+    ? surfaceSets.find((set) => set.name === storedSurfaceSetName)
+    : undefined;
+  if (stored?.facets.length) return stored;
 
   const selection = study.namedSelections.find((candidate) => candidate.id === selectionRef);
   const selectionNames = new Set([
@@ -1058,6 +1072,47 @@ function ensureSurfaceSetForSelection({
   const next = { name: selectionRef, facets: [...new Set(facets)].sort((left, right) => left - right) };
   surfaceSets.push(next);
   return next;
+}
+
+function storedSurfaceSetNameForConstraint(
+  model: OpenCAEModelJson | undefined,
+  index: number,
+  type: Study["constraints"][number]["type"]
+): string | undefined {
+  if (!model) return undefined;
+  const name = type === "prescribed_temperature" ? `prescribedTemperature${index}` : `fixedSupport${index}`;
+  const condition = model.boundaryConditions.find((candidate) => candidate.name === name);
+  if (!condition || !("nodeSet" in condition) || typeof condition.nodeSet !== "string") return undefined;
+  return model.surfaceSets?.find((set) => `${set.name}_nodes` === condition.nodeSet && set.facets.length > 0)?.name;
+}
+
+function storedSurfaceSetNameForLoad(
+  model: OpenCAEModelJson | undefined,
+  index: number,
+  type: Study["loads"][number]["type"],
+  side: "primary" | "secondary"
+): string | undefined {
+  if (!model) return undefined;
+  const prefix = type === "pressure"
+    ? "pressure"
+    : type === "heat_flux"
+      ? "surfaceHeatFlux"
+      : type === "surface_traction"
+        ? "surfaceTraction"
+        : type === "remote_force"
+          ? "remoteForce"
+          : type === "bolt_preload"
+            ? "equivalentBoltPreload"
+            : type === "gravity"
+              ? "payloadGravity"
+              : "appliedForce";
+  const load = model.loads.find((candidate) => candidate.name === `${prefix}${index}`);
+  if (!load) return undefined;
+  const key = type === "bolt_preload"
+    ? (side === "secondary" ? "surfaceSetB" : "surfaceSetA")
+    : "surfaceSet";
+  const value = key in load ? load[key as keyof typeof load] : undefined;
+  return typeof value === "string" ? value : undefined;
 }
 
 function ensureElementSetForSelection(

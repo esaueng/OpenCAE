@@ -131,6 +131,43 @@ describe("buildCoreModelFromCloudMesh", () => {
       "surface_bottom_nodes",
       "surface_bottom_nodes"
     ]);
+    expect(model.surfaceSets).toEqual(expect.arrayContaining([
+      { name: "selection-fs-a", facets: [3] },
+      { name: "selection-fs-b", facets: [3] },
+      { name: "selection-l1", facets: [2] }
+    ]));
+  });
+
+  it("persists selection aliases when a face only resolves geometrically", () => {
+    const selectionRef = "selection-step-face-3";
+    const faceId = "step-face-3";
+    const artifact = singleTetArtifact();
+    delete artifact.surfaceFacets[2]!.sourceFaceId;
+
+    const model = buildCoreModelFromCloudMesh({
+      study: {
+        id: "picked-step-face-study",
+        type: "modal_analysis",
+        materialAssignments: [{ materialId: "mat-aluminum-6061" }],
+        namedSelections: [{
+          id: selectionRef,
+          name: "FS 1",
+          entityType: "face",
+          geometryRefs: [{ entityType: "face", entityId: faceId }]
+        }],
+        constraints: [{ id: "fixed", type: "fixed", selectionRef, parameters: {} }],
+        loads: []
+      },
+      displayModel: {
+        faces: [{ id: faceId, center: [0.0133, 0, 0.0133], normal: [0, -1, 0] }]
+      },
+      volumeMesh: artifact,
+      analysisType: "modal_analysis",
+      solverSettings: {}
+    });
+
+    expect(model.boundaryConditions[0]).toMatchObject({ nodeSet: "surface_load_nodes" });
+    expect(model.surfaceSets).toContainEqual({ name: selectionRef, facets: [2] });
   });
 
   it("round-trips advanced load primitives through the meshed-model contract", () => {
