@@ -17,6 +17,7 @@ import { buildStepFaceRegistry, stepAttributionForRegistry } from "../stepFaces"
 import { STEP_PROOF_LOAD_NEWTONS, stepProofScenario, studyWithWasmMeshSummary } from "../workers/stepProofScenario";
 import boxWithBoreStep from "../../../../libs/opencae-mesh-intake/fixtures/box-with-bore.step?raw";
 import type { ValidationBenchmarkId, ValidationBenchmarkResult, ValidationMetric } from "./benchmarkRegistry";
+import { validationOcctImportOptions } from "./validationWasmRuntime";
 
 const FORCE_N = 500;
 const YOUNG_PA = 200e9;
@@ -134,7 +135,7 @@ async function runPlateWithHole(startedAt: number, measuredAt: string): Promise<
 
 async function runScale100k(startedAt: number, measuredAt: string): Promise<ValidationBenchmarkResult> {
   const { default: occtimportjs } = await import("occt-import-js");
-  const occt = await occtimportjs();
+  const occt = await occtimportjs(validationOcctImportOptions());
   const imported = occt.ReadStepFile(new TextEncoder().encode(boxWithBoreStep), null);
   if (!imported.success) throw new Error("The 100k validation STEP fixture could not be inspected.");
   const registry = buildStepFaceRegistry(imported.meshes ?? []);
