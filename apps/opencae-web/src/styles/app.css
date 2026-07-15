@@ -459,6 +459,53 @@ img {
   background-size: 20px 20px, 20px 20px, auto, auto;
   border: 1px solid rgba(139, 148, 158, 0.18);
   border-radius: calc(var(--radius-md) - 2px);
+
+  /* Machined-metal shading for the sample art. Kept local to the thumbnail
+     rather than in tokens.css: these are presentation values for one drawing,
+     not design tokens the rest of the app consumes. */
+  --sample-top-a: #ccd8e1;
+  --sample-top-b: #8494a0;
+  --sample-side-a: #90a0ac;
+  --sample-side-b: #54616c;
+  --sample-end-a: #6c7a86;
+  --sample-end-b: #3c4853;
+  --sample-pay-top-a: #fcd34d;
+  --sample-pay-top-b: #f59e0b;
+  --sample-pay-side-a: #f59e0b;
+  --sample-pay-side-b: #b45309;
+  --sample-pay-end-a: #d97706;
+  --sample-pay-end-b: #92400e;
+  --sample-edge: rgba(226, 232, 240, 0.26);
+  --sample-warn: #f8b928;
+  --sample-support: #22c55e;
+  --sample-ghost: rgba(125, 190, 255, 0.55);
+}
+
+/* The start screen is always dark, but these cards also render in the
+   RightPanel's compact form, which does follow the theme. */
+.theme-light .sample-thumbnail {
+  background:
+    linear-gradient(rgba(11, 99, 182, 0.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(11, 99, 182, 0.07) 1px, transparent 1px),
+    radial-gradient(circle at 68% 18%, rgba(11, 99, 182, 0.1), transparent 38%),
+    #f7f9fc;
+  border-color: rgba(83, 97, 112, 0.22);
+  --sample-top-a: #ffffff;
+  --sample-top-b: #c3cfd9;
+  --sample-side-a: #cfdae3;
+  --sample-side-b: #93a1ad;
+  --sample-end-a: #a8b4c0;
+  --sample-end-b: #75818d;
+  --sample-pay-top-a: #fbbf24;
+  --sample-pay-top-b: #d97706;
+  --sample-pay-side-a: #d97706;
+  --sample-pay-side-b: #92400e;
+  --sample-pay-end-a: #b45309;
+  --sample-pay-end-b: #78350f;
+  --sample-edge: rgba(23, 32, 43, 0.34);
+  --sample-warn: #b45309;
+  --sample-support: #15803d;
+  --sample-ghost: rgba(11, 99, 182, 0.5);
 }
 
 .sample-thumbnail img,
@@ -468,62 +515,72 @@ img {
 }
 
 .sample-face {
-  stroke: rgba(226, 232, 240, 0.26);
+  stroke: var(--sample-edge);
   stroke-width: 1;
   stroke-linejoin: round;
 }
 
 .sample-fixed-face {
-  fill: rgba(34, 197, 94, 0.26);
-  stroke: rgba(134, 239, 172, 0.6);
+  fill: color-mix(in srgb, var(--sample-support) 26%, transparent);
+  stroke: color-mix(in srgb, var(--sample-support) 62%, transparent);
   stroke-width: 1;
   stroke-linejoin: round;
 }
 
 .sample-hatch path {
   fill: none;
-  stroke: rgba(134, 239, 172, 0.55);
-  stroke-width: 1.3;
+  stroke: color-mix(in srgb, var(--sample-support) 62%, transparent);
+  stroke-width: 1.2;
   stroke-linecap: round;
 }
 
-.sample-hole {
-  fill: #0a1017;
-  stroke: rgba(226, 232, 240, 0.35);
+/* The bracket's fixed support is its base underside, so it reads as a fixture
+   run along the bottom edges rather than rings on the bolt holes. */
+.sample-ground path {
+  fill: none;
+  stroke: color-mix(in srgb, var(--sample-support) 70%, transparent);
   stroke-width: 1;
+  stroke-linecap: round;
 }
 
-.sample-support-ring {
-  fill: none;
-  stroke: #4da3ff;
+.sample-ground .sample-ground-edge {
+  stroke: var(--sample-support);
   stroke-width: 1.6;
-  opacity: 0.9;
+  stroke-linejoin: round;
 }
 
 .sample-load line {
-  stroke: #f8b928;
-  stroke-width: 3.5;
+  stroke: var(--sample-warn);
+  stroke-width: 3.2;
   stroke-linecap: round;
 }
 
 .sample-load path {
-  fill: #f8b928;
+  fill: var(--sample-warn);
 }
 
-.sample-ghost path {
+/* Steady-state thermal takes a heat flux and a reference temperature, not a
+   force — so it gets a source and a sink glyph rather than a load arrow. */
+.sample-heat path {
   fill: none;
-  stroke: rgba(125, 190, 255, 0.6);
-  stroke-width: 1.6;
+  stroke: var(--sample-warn);
+  stroke-width: 1.8;
   stroke-linecap: round;
-  stroke-dasharray: 4 3;
 }
 
-.sample-wave {
+.sample-cold path {
   fill: none;
-  stroke: #f8b928;
-  stroke-width: 2;
+  stroke: var(--color-ramp-1);
+  stroke-width: 1.8;
   stroke-linecap: round;
-  opacity: 0.85;
+}
+
+.sample-ghost {
+  fill: color-mix(in srgb, var(--sample-ghost) 16%, transparent);
+  stroke: var(--sample-ghost);
+  stroke-width: 1;
+  stroke-linejoin: round;
+  stroke-dasharray: 3 2.5;
 }
 
 .sample-option-copy,
