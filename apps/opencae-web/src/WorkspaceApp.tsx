@@ -1,13 +1,14 @@
 import { lazy, startTransition, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { DynamicSolverSettingsSchema, isModalResultSummary, isRunResultReadyStatus, isStructuralResultSummary, ModalSolverSettingsSchema } from "@opencae/schema";
 import type { Constraint, CustomMaterial, DisplayFace, DisplayModel, DynamicSolverSettings, Load, MeshQuality, ModalSolverSettings, NamedSelection, Project, ResultField, ResultRenderBounds, ResultSummary, RunEvent, RunTimingEstimate, RunVariantRef, RunVariantResult, SimulationFidelity, Study } from "@opencae/schema";
-import { Activity, RotateCcw, Save, X } from "lucide-react";
+import { Activity, CloudUpload, HardDrive, RotateCcw, Save, X } from "lucide-react";
 import { addLoad, addSupport, assignMaterial, cancelRun, createProject, generateMesh, getResults, getRunVariant, importLocalProject, isStepGeometryMeshFailure, loadSampleProject, probeUploadedStepRepairAfterMeshFailure, renameProject, repairUploadedStepModel, runMeshConvergence, runSimulation, saveRunReportCaptures, STEP_REPAIR_UNAVAILABLE_MESSAGE, subscribeToRun, updateStudy as saveStudyPatch, uploadedStepRepairProbeDecision, uploadModel, type SampleAnalysisType, type SampleModelId } from "./lib/api";
 import { cancelWasmMeshing, type WasmMeshPhaseProgress } from "./lib/wasmMeshing";
 import { resolveSolverBackend } from "./workers/opencaeCoreSolve";
 import { manufacturingProcessForId, normalizeManufacturingParameters, resolveMaterial } from "@opencae/materials";
 import { BottomPanel, KeyboardShortcutGuide, type WorkspaceLogEntry } from "./components/BottomPanel";
 import { OpenCaeLogoMark } from "./components/OpenCaeLogoMark";
+import { ProjectStorageNotice } from "./components/ProjectStorageNotice";
 import { RightPanel } from "./components/RightPanel";
 import { StartScreen } from "./components/StartScreen";
 import { StepBar, type StepId } from "./components/StepBar";
@@ -31,7 +32,7 @@ import { pngDataUrlToBlob, suggestedResultPngFilename } from "./report/resultPng
 import { buildResultViewerHtml, suggestedResultHtmlFilename } from "./resultViewerHtml";
 import { buildAutosavedWorkspace, buildAutosavedWorkspaceUiSnapshot, flushAutosavedWorkspace, installAutosavePageHideFlush, localRunIdForResultsRestore, parseAutosavedWorkspacePayload, readAutosavedWorkspace, scheduleAutosavedUiSnapshotWrite, scheduleAutosavedWorkspaceWrite, WORKSPACE_LOG_LIMIT } from "./appPersistence";
 import type { AutosavedWorkspace, WorkspaceUiSnapshot } from "./appPersistence";
-import { requestPersistentBrowserStorage, restoreEncryptedCloudBackup, saveEncryptedCloudBackup } from "./cloudBackup";
+import { readCloudBackupPreference, requestPersistentBrowserStorage, restoreEncryptedCloudBackup, saveEncryptedCloudBackup, writeCloudBackupPreference, type CloudBackupPreference } from "./cloudBackup";
 import {
   canNavigateToStep,
   isEditableShortcutTarget,
@@ -171,6 +172,10 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const [htmlExportBusy, setHtmlExportBusy] = useState(false);
   const [htmlExportError, setHtmlExportError] = useState<string | null>(null);
   const [overflowRecoveryRequest, setOverflowRecoveryRequest] = useState(0);
+  const [cloudBackupPreference, setCloudBackupPreference] = useState<CloudBackupPreference | null>(() => readCloudBackupPreference());
+  const [storageRecoveryAvailable, setStorageRecoveryAvailable] = useState(false);
+  const [storageRecoveryNoticeOpen, setStorageRecoveryNoticeOpen] = useState(false);
+  const [cloudBackupBusy, setCloudBackupBusy] = useState(false);
   const [activeRunId, setActiveRunId] = useState(restoredUi?.activeRunId || restoredResults?.activeRunId || restoredResults?.completedRunId || "run-bracket-demo-seeded");
   const [completedRunId, setCompletedRunId] = useState(restoredUi?.completedRunId || restoredResults?.completedRunId || "run-bracket-demo-seeded");
   const [processingRunId, setProcessingRunId] = useState<string | null>(null);
@@ -228,7 +233,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const projectActionClientIdRef = useRef<string | null>(null);
   const autosaveWriteFailureNotifiedRef = useRef(false);
   const autosaveDegradedNotifiedRef = useRef(false);
-  const cloudBackupPromptedRef = useRef(false);
+  const overflowRecoveryHandledRef = useRef(false);
   const fullAutosaveSnapshotRef = useRef<() => AutosavedWorkspace | null>(() => null);
   const flushAutosaveRef = useRef<() => void>(() => undefined);
   const stepFaceHealNotifiedRef = useRef(false);
@@ -980,38 +985,54 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   }
 
   async function offerOverflowRecoveryOptions() {
-    if (cloudBackupPromptedRef.current) return;
-    cloudBackupPromptedRef.current = true;
+    if (overflowRecoveryHandledRef.current) return;
+    overflowRecoveryHandledRef.current = true;
+    setStorageRecoveryAvailable(true);
     try {
       const persistent = await requestPersistentBrowserStorage();
       if (persistent) pushMessage("Persistent browser storage enabled to reduce automatic eviction.");
     } catch {
-      // Persistence is best-effort; the explicit cloud decision still follows.
+      // Persistence is best-effort; the saved recovery preference still follows.
     }
-    const allowed = window.confirm([
-      "This project is larger than the browser autosave limit.",
-      "",
-      "Allow OpenCAE to upload one encrypted recovery backup to Cloudflare R2 for 30 days?",
-      "The simulation still runs locally. Encryption happens in this browser, and the cloud service never receives the decryption key.",
-      "",
-      "Choose Cancel to keep everything local and use Save project to write a file instead."
-    ].join("\n"));
-    if (!allowed) {
+    if (cloudBackupPreference === "local") {
       pushMessage("Cloud backup not enabled. Use Save project to keep a complete local file.");
       return;
     }
+    if (cloudBackupPreference === "cloud") {
+      await saveOverflowRecoveryBackup();
+      return;
+    }
+    setStorageRecoveryNoticeOpen(true);
+  }
+
+  async function saveOverflowRecoveryBackup() {
     const snapshot = fullAutosaveSnapshotRef.current();
     const runId = completedRunId || activeRunId;
     if (!snapshot || !runId) {
       pushMessage("Cloud backup could not start because there is no completed workspace snapshot.");
       return;
     }
+    setCloudBackupBusy(true);
     try {
       const backup = await saveEncryptedCloudBackup(snapshot, runId);
       pushMessage(`Encrypted cloud recovery backup saved until ${new Date(backup.expiresAt).toLocaleDateString()}.`);
     } catch (error) {
       pushMessage(`${errorMessage(error, "Cloud backup failed.")} Use Save project to keep a complete local file.`);
+    } finally {
+      setCloudBackupBusy(false);
     }
+  }
+
+  function handleStoragePreference(preference: CloudBackupPreference) {
+    setCloudBackupPreference(preference);
+    setStorageRecoveryNoticeOpen(false);
+    const remembered = writeCloudBackupPreference(preference);
+    if (preference === "local") {
+      pushMessage("Project recovery will stay local. Use Save project to keep a complete file.");
+    } else {
+      void saveOverflowRecoveryBackup();
+    }
+    if (!remembered) pushMessage("This storage choice could not be remembered after the browser closes.");
   }
 
   // A normal reload tears down the delayed autosave effects before their
@@ -2302,6 +2323,20 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
             </div>
           ) : null}
         </div>
+        {storageRecoveryAvailable ? (
+          <button
+            className={`storage-status-button ${cloudBackupPreference ?? "unselected"}`}
+            type="button"
+            aria-label={`Project storage: ${cloudBackupPreference === "cloud" ? "recovery on" : cloudBackupPreference === "local" ? "local only" : "choose storage"}`}
+            aria-expanded={storageRecoveryNoticeOpen}
+            aria-controls="project-storage-notice"
+            title="Review project storage choice"
+            onClick={() => setStorageRecoveryNoticeOpen((open) => !open)}
+          >
+            {cloudBackupPreference === "cloud" ? <CloudUpload size={15} aria-hidden="true" /> : <HardDrive size={15} aria-hidden="true" />}
+            <span>{cloudBackupPreference === "cloud" ? "Recovery on" : cloudBackupPreference === "local" ? "Local only" : "Storage"}</span>
+          </button>
+        ) : null}
         {showRunButton ? (
           <button
             className={`primary topbar-action ${solverRunning ? "running" : ""}`}
@@ -2599,6 +2634,14 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         solverStatus={solverRunning ? "Running" : runProgress >= 100 ? "Complete" : "Idle"}
         onClearLogs={clearLogs}
       />
+      {storageRecoveryAvailable && storageRecoveryNoticeOpen ? (
+        <ProjectStorageNotice
+          preference={cloudBackupPreference}
+          busy={cloudBackupBusy}
+          onChooseCloud={() => handleStoragePreference("cloud")}
+          onChooseLocal={() => handleStoragePreference("local")}
+        />
+      ) : null}
       {validationGalleryOpen ? (
         <Suspense fallback={null}>
           <ValidationGallery onClose={() => setValidationGalleryOpen(false)} />

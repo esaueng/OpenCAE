@@ -1,6 +1,6 @@
 import { describe, expect, test, vi } from "vitest";
 import type { AutosavedWorkspace } from "./appPersistence";
-import { readCloudBackupDescriptor, requestPersistentBrowserStorage, restoreEncryptedCloudBackup, saveEncryptedCloudBackup } from "./cloudBackup";
+import { readCloudBackupDescriptor, readCloudBackupPreference, requestPersistentBrowserStorage, restoreEncryptedCloudBackup, saveEncryptedCloudBackup, writeCloudBackupPreference } from "./cloudBackup";
 
 function memoryStorage() {
   const values = new Map<string, string>();
@@ -51,5 +51,25 @@ describe("encrypted cloud backup", () => {
     await expect(requestPersistentBrowserStorage()).resolves.toBe(true);
     expect(persist).toHaveBeenCalledTimes(1);
     vi.unstubAllGlobals();
+  });
+
+  test("remembers a validated recovery preference in browser storage", () => {
+    const storage = memoryStorage();
+
+    expect(readCloudBackupPreference(storage)).toBeNull();
+    expect(writeCloudBackupPreference("local", storage)).toBe(true);
+    expect(readCloudBackupPreference(storage)).toBe("local");
+    expect(writeCloudBackupPreference("cloud", storage)).toBe(true);
+    expect(readCloudBackupPreference(storage)).toBe("cloud");
+  });
+
+  test("fails closed when the recovery preference cannot be stored", () => {
+    const storage = {
+      getItem: () => "unexpected",
+      setItem: () => { throw new Error("storage denied"); }
+    };
+
+    expect(readCloudBackupPreference(storage)).toBeNull();
+    expect(writeCloudBackupPreference("cloud", storage)).toBe(false);
   });
 });
