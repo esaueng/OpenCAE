@@ -63,27 +63,16 @@ export function validateModelJson(input: unknown): ValidationReport {
   const boundaryConditionNames = validateBoundaryConditions(input.boundaryConditions, nodeSetNames, surfaceSetNames, errors);
   const loadTypes = validateLoads(input.loads, nodeSetNames, elementSetNames, surfaceSetNames, input.schemaVersion, errors);
   validateSteps(input.steps, boundaryConditionNames, new Set(loadTypes.keys()), loadTypes, errors);
+  validateThermalSchemaVersion(input.schemaVersion, input.boundaryConditions, input.loads, input.steps, errors);
   validateCoordinateSystem(input.coordinateSystem, errors);
   validateMeshProvenance(input.meshProvenance, errors);
-  validateMeshConnections(input.meshConnections, errors);
+  validateMeshConnections(input.meshConnections, surfaceSetNames, errors);
   validateInertialMaterialDensity(input.steps, input.elementBlocks, materials.densityByName, errors);
   validateThermalMaterialConductivity(input.steps, input.elementBlocks, materials.conductivityByName, errors);
 
-  if (
-    elementValidation.connectivityOk &&
-    elementValidation.totalElements > 1 &&
-    (!Array.isArray(input.meshConnections) || input.meshConnections.length === 0)
-  ) {
+  if (elementValidation.connectivityOk && elementValidation.totalElements > 1) {
     const components = connectedComponents({ elementBlocks: elementValidation.blocks });
-    if (components.componentCount > 1) {
-      errors.push(
-        issue(
-          "disconnected-bodies-without-connections",
-          "Geometry has disconnected bodies without contact/tie definitions.",
-          "$.elementBlocks"
-        )
-      );
-    }
+    validateMeshConnectionCoverage(input.meshConnections, input.surfaceSets, input.surfaceFacets, components, errors);
   }
 
   return report(errors);
@@ -764,6 +753,49 @@ function validateSteps(
   });
 }
 
+function validateThermalSchemaVersion(
+  schemaVersion: unknown,
+  boundaryConditions: unknown,
+  loads: unknown,
+  steps: unknown,
+  errors: ValidationIssue[]
+): void {
+  if (schemaVersion === OPENCAE_MODEL_SCHEMA_VERSION) return;
+  if (Array.isArray(boundaryConditions)) {
+    boundaryConditions.forEach((condition, index) => {
+      if (isRecord(condition) && condition.type === "prescribedTemperature") {
+        errors.push(issue(
+          "thermal-feature-requires-schema-0.4.0",
+          "Prescribed temperature boundary conditions require schemaVersion 0.4.0.",
+          `$.boundaryConditions[${index}].type`
+        ));
+      }
+    });
+  }
+  if (Array.isArray(loads)) {
+    loads.forEach((load, index) => {
+      if (isRecord(load) && (load.type === "surfaceHeatFlux" || load.type === "volumetricHeatGeneration")) {
+        errors.push(issue(
+          "thermal-feature-requires-schema-0.4.0",
+          "Thermal loads require schemaVersion 0.4.0.",
+          `$.loads[${index}].type`
+        ));
+      }
+    });
+  }
+  if (Array.isArray(steps)) {
+    steps.forEach((step, index) => {
+      if (isRecord(step) && step.type === "steadyStateThermal") {
+        errors.push(issue(
+          "thermal-feature-requires-schema-0.4.0",
+          "Steady thermal steps require schemaVersion 0.4.0.",
+          `$.steps[${index}].type`
+        ));
+      }
+    });
+  }
+}
+
 function validateCoordinateSystem(coordinateSystem: unknown, errors: ValidationIssue[]): void {
   if (coordinateSystem === undefined) return;
   if (!isRecord(coordinateSystem)) {
@@ -873,7 +905,7 @@ function validateThermalMaterialConductivity(
   });
 }
 
-function validateMeshConnections(meshConnections: unknown, errors: ValidationIssue[]): void {
+function validateMeshConnections(meshConnections: unknown, surfaceSetNames: Set<string>, errors: ValidationIssue[]): void {
   if (meshConnections === undefined) return;
   if (!Array.isArray(meshConnections)) {
     errors.push(issue("invalid-mesh-connections", "meshConnections must be an array.", "$.meshConnections"));
@@ -888,8 +920,17 @@ function validateMeshConnections(meshConnections: unknown, errors: ValidationIss
     if (connection.type !== "tie" && connection.type !== "contact" && connection.type !== "fuse") {
       errors.push(issue("invalid-mesh-connection-type", "Mesh connection type must be tie, contact, or fuse.", `${path}.type`));
     }
+    if (connection.type === "fuse") {
+      errors.push(issue("unapplied-fuse-connection", "Boolean fuse must be applied to geometry before meshing and cannot remain in a solver model.", `${path}.type`));
+    }
     if (!isNonEmptyString(connection.source)) errors.push(issue("invalid-mesh-connection-source", "Mesh connection source must be a string.", `${path}.source`));
     if (!isNonEmptyString(connection.target)) errors.push(issue("invalid-mesh-connection-target", "Mesh connection target must be a string.", `${path}.target`));
+    if (isNonEmptyString(connection.source) && !surfaceSetNames.has(connection.source)) {
+      errors.push(issue("missing-mesh-connection-surface", "Mesh connection source must reference an existing surface set.", `${path}.source`));
+    }
+    if (isNonEmptyString(connection.target) && !surfaceSetNames.has(connection.target)) {
+      errors.push(issue("missing-mesh-connection-surface", "Mesh connection target must reference an existing surface set.", `${path}.target`));
+    }
     if (connection.source === connection.target) errors.push(issue("duplicate-mesh-connection-surfaces", "Mesh connection source and target must differ.", path));
     if (connection.searchTolerance !== undefined && (!isFiniteNumber(connection.searchTolerance) || connection.searchTolerance <= 0)) {
       errors.push(issue("invalid-mesh-connection-tolerance", "Mesh connection searchTolerance must be positive.", `${path}.searchTolerance`));
@@ -900,6 +941,86 @@ function validateMeshConnections(meshConnections: unknown, errors: ValidationIss
     if (connection.formulation !== undefined && connection.formulation !== "frictionless") errors.push(issue("invalid-contact-formulation", "Only frictionless contact is supported.", `${path}.formulation`));
     if (connection.kinematics !== undefined && connection.kinematics !== "small_sliding") errors.push(issue("invalid-contact-kinematics", "Only small_sliding contact is supported.", `${path}.kinematics`));
   });
+}
+
+function validateMeshConnectionCoverage(
+  meshConnections: unknown,
+  surfaceSets: unknown,
+  surfaceFacets: unknown,
+  components: { componentCount: number; elementComponentIds: Int32Array },
+  errors: ValidationIssue[]
+): void {
+  if (components.componentCount <= 1) return;
+  const connections = Array.isArray(meshConnections)
+    ? meshConnections.filter((connection) => isRecord(connection) && (connection.type === "tie" || connection.type === "contact"))
+    : [];
+  if (connections.length === 0) {
+    errors.push(issue(
+      "disconnected-bodies-without-connections",
+      "Geometry has disconnected bodies without contact/tie definitions.",
+      "$.elementBlocks"
+    ));
+    return;
+  }
+  if (!Array.isArray(surfaceSets) || !Array.isArray(surfaceFacets)) return;
+
+  const elementByFacetId = new Map<number, number>();
+  for (const facet of surfaceFacets) {
+    if (isRecord(facet) && Number.isInteger(facet.id) && Number.isInteger(facet.element)) {
+      elementByFacetId.set(facet.id as number, facet.element as number);
+    }
+  }
+  const componentsBySurface = new Map<string, Set<number>>();
+  for (const surface of surfaceSets) {
+    if (!isRecord(surface) || !isNonEmptyString(surface.name) || !Array.isArray(surface.facets)) continue;
+    const componentIds = new Set<number>();
+    for (const facetId of surface.facets) {
+      if (!Number.isInteger(facetId)) continue;
+      const element = elementByFacetId.get(facetId as number);
+      const component = element === undefined ? undefined : components.elementComponentIds[element];
+      if (component !== undefined && component >= 0) componentIds.add(component);
+    }
+    componentsBySurface.set(surface.name, componentIds);
+  }
+
+  const adjacency = Array.from({ length: components.componentCount }, () => new Set<number>());
+  let coverageMappingsValid = true;
+  connections.forEach((connection, index) => {
+    const source = componentsBySurface.get(connection.source as string) ?? new Set<number>();
+    const target = componentsBySurface.get(connection.target as string) ?? new Set<number>();
+    if (source.size !== 1 || target.size !== 1) {
+      coverageMappingsValid = false;
+      errors.push(issue(
+        "ambiguous-mesh-connection-component",
+        "Each tie/contact side must resolve to exactly one connected mesh component.",
+        `$.meshConnections[${index}]`
+      ));
+      return;
+    }
+    const sourceComponent = [...source][0]!;
+    const targetComponent = [...target][0]!;
+    adjacency[sourceComponent]!.add(targetComponent);
+    adjacency[targetComponent]!.add(sourceComponent);
+  });
+  if (!coverageMappingsValid) return;
+
+  const reached = new Set<number>([0]);
+  const pending = [0];
+  while (pending.length) {
+    const component = pending.pop()!;
+    for (const neighbor of adjacency[component]!) {
+      if (reached.has(neighbor)) continue;
+      reached.add(neighbor);
+      pending.push(neighbor);
+    }
+  }
+  if (reached.size !== components.componentCount) {
+    errors.push(issue(
+      "disconnected-bodies-with-incomplete-connections",
+      `Tie/contact definitions connect ${reached.size} of ${components.componentCount} mesh components.`,
+      "$.meshConnections"
+    ));
+  }
 }
 
 function countElements(elementBlocks: OpenCAEModelJson["elementBlocks"]): number {

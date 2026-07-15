@@ -277,6 +277,10 @@ export function buildCoreModelFromCloudMesh(input: BuildCoreModelInput): OpenCAE
 
   for (const connection of input.study?.contacts ?? []) {
     if (!connection.type || !connection.source || !connection.target) continue;
+    // Boolean fuse is a geometry operation completed before tetrahedral
+    // meshing. It must not survive as a no-op solver connection, and its
+    // selected interface faces may legitimately disappear after the union.
+    if (connection.type === "fuse") continue;
     const source = ensureMappedSurfaceSet({ study: input.study, displayModel: input.displayModel, volumeMesh: input.volumeMesh, selectionRef: connection.source, role: "load_surface", diagnostics: input.mappingDiagnostics }, surfaceSets);
     const target = ensureMappedSurfaceSet({ study: input.study, displayModel: input.displayModel, volumeMesh: input.volumeMesh, selectionRef: connection.target, role: "load_surface", diagnostics: input.mappingDiagnostics }, surfaceSets);
     meshConnections.push({
@@ -288,6 +292,7 @@ export function buildCoreModelFromCloudMesh(input: BuildCoreModelInput): OpenCAE
       ...(connection.penaltyScale !== undefined ? { penaltyScale: connection.penaltyScale } : {})
     });
   }
+  validateAssemblyConnectionCoverage(input.volumeMesh, surfaceSets, meshConnections);
 
   const model: OpenCAEModelJson = {
     schema: OPENCAE_MODEL_SCHEMA,
@@ -371,12 +376,96 @@ function recordMapping(
 function validateVolumeMeshArtifact(volumeMesh: CoreVolumeMeshArtifact): void {
   if (volumeMesh.elements.length === 0) throw new Error("Cloud meshing produced no volume elements.");
   if (volumeMesh.surfaceFacets.length === 0) throw new Error("Cloud meshing produced no boundary surface facets.");
-  if (volumeMesh.metadata.connectedComponentCount !== 1) {
-    throw new Error(`Cloud meshing produced ${volumeMesh.metadata.connectedComponentCount} connected components; one fused solid is required.`);
-  }
   if (volumeMesh.metadata.meshQuality.invertedElementCount > 0) {
     throw new Error(`Cloud meshing produced ${volumeMesh.metadata.meshQuality.invertedElementCount} inverted elements.`);
   }
+}
+
+function validateAssemblyConnectionCoverage(
+  volumeMesh: CoreVolumeMeshArtifact,
+  surfaceSets: SurfaceSetJson[],
+  meshConnections: NonNullable<OpenCAEModelJson["meshConnections"]>
+): void {
+  const { componentIds, componentCount } = elementComponentIds(volumeMesh.elements);
+  if (componentCount !== volumeMesh.metadata.connectedComponentCount) {
+    throw new Error(`Mesh component metadata reported ${volumeMesh.metadata.connectedComponentCount} components, but connectivity contains ${componentCount}. Regenerate the mesh artifact.`);
+  }
+  if (componentCount === 1) return;
+  if (meshConnections.length === 0) {
+    throw new Error(`Cloud meshing produced ${componentCount} connected components; one fused solid or explicit tie/contact connections are required.`);
+  }
+  const facetById = new Map(volumeMesh.surfaceFacets.map((facet) => [facet.id, facet]));
+  const setByName = new Map(surfaceSets.map((set) => [set.name, set]));
+  const adjacency = Array.from({ length: componentCount }, () => new Set<number>());
+
+  const componentsForSurface = (surfaceName: string): Set<number> => {
+    const components = new Set<number>();
+    for (const facetId of setByName.get(surfaceName)?.facets ?? []) {
+      const element = facetById.get(facetId)?.element;
+      if (element !== undefined && componentIds[element] !== undefined) components.add(componentIds[element]!);
+    }
+    return components;
+  };
+
+  for (const connection of meshConnections) {
+    const sourceComponents = componentsForSurface(connection.source);
+    const targetComponents = componentsForSurface(connection.target);
+    if (sourceComponents.size !== 1 || targetComponents.size !== 1) {
+      throw new Error(`Assembly connection ${connection.source} -> ${connection.target} must map each side to exactly one mesh component.`);
+    }
+    const source = [...sourceComponents][0]!;
+    const target = [...targetComponents][0]!;
+    if (source === target) {
+      throw new Error(`Assembly connection ${connection.source} -> ${connection.target} maps both sides to the same mesh component.`);
+    }
+    adjacency[source]!.add(target);
+    adjacency[target]!.add(source);
+  }
+
+  const reached = new Set<number>([0]);
+  const pending = [0];
+  while (pending.length) {
+    const component = pending.pop()!;
+    for (const neighbor of adjacency[component]!) {
+      if (reached.has(neighbor)) continue;
+      reached.add(neighbor);
+      pending.push(neighbor);
+    }
+  }
+  if (reached.size !== componentCount) {
+    throw new Error(`Tie/contact definitions connect ${reached.size} of ${componentCount} mesh components. Add connections for every structural body or fuse the intended bodies.`);
+  }
+}
+
+function elementComponentIds(elements: CoreVolumeMeshArtifact["elements"]): { componentIds: Int32Array; componentCount: number } {
+  const componentIds = new Int32Array(elements.length);
+  componentIds.fill(-1);
+  const elementsByNode = new Map<number, number[]>();
+  elements.forEach((element, elementIndex) => {
+    for (const node of element.connectivity) {
+      const owners = elementsByNode.get(node) ?? [];
+      owners.push(elementIndex);
+      elementsByNode.set(node, owners);
+    }
+  });
+  let componentCount = 0;
+  for (let start = 0; start < elements.length; start += 1) {
+    if (componentIds[start] !== -1) continue;
+    const pending = [start];
+    componentIds[start] = componentCount;
+    while (pending.length) {
+      const element = pending.pop()!;
+      for (const node of elements[element]!.connectivity) {
+        for (const neighbor of elementsByNode.get(node) ?? []) {
+          if (componentIds[neighbor] !== -1) continue;
+          componentIds[neighbor] = componentCount;
+          pending.push(neighbor);
+        }
+      }
+    }
+    componentCount += 1;
+  }
+  return { componentIds, componentCount };
 }
 
 function resolveMaterial(input: BuildCoreModelInput): IsotropicLinearElasticMaterialJson {

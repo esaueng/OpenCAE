@@ -2,9 +2,9 @@ import { describe, expect, test } from "vitest";
 import { automaticTetSolverBackend, buildTet4DofAdjacency, buildTet4ElementData, tet4MatrixFreeInternalForce, tet4MatrixFreeMatVec, type Tet4MatrixFreeData } from "../src";
 
 describe("matrix-free Tet4 backend", () => {
-  test("routes only large supported Tet4 systems to WebGPU", () => {
+  test("keeps the readback-heavy WebGPU CG route out of automatic execution", () => {
     expect(automaticTetSolverBackend({ elementType: "Tet4", dofs: 150_000, webGpuAvailable: true })).toBe("cpu");
-    expect(automaticTetSolverBackend({ elementType: "Tet4", dofs: 150_001, webGpuAvailable: true })).toBe("webgpu");
+    expect(automaticTetSolverBackend({ elementType: "Tet4", dofs: 150_001, webGpuAvailable: true })).toBe("unsupported");
     expect(automaticTetSolverBackend({ elementType: "Tet4", dofs: 500_001, webGpuAvailable: true })).toBe("unsupported");
     expect(automaticTetSolverBackend({ elementType: "Tet10", dofs: 200_000, webGpuAvailable: true })).toBe("unsupported");
   });

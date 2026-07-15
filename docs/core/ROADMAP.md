@@ -33,7 +33,7 @@ Benchmark, profile, and optimize the MVP workflow.
 
 ## Phase 9 - Beta Solver Expansion
 
-Implemented on `beta`: CSR/SSOR CPU solving to a guarded 150k DOF, steady-state Tet4/Tet10 conduction, assembly-aware fuse/tie/linearized frictionless contact, and automatic matrix-free Tet4 WebGPU routing to 500k DOF.
+Implemented on `beta`: CSR/SSOR CPU solving to a guarded 150k DOF, steady-state Tet4/Tet10 conduction, assembly-aware pairwise fuse/tie/linearized frictionless contact, and an experimental matrix-free Tet4 WebGPU operator. Automatic WebGPU routing remains gated until the CG loop is GPU-resident and benchmarked end to end.
 
 ## Phase 10 - Trust And Sharing
 
