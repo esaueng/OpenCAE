@@ -7,7 +7,7 @@ OpenCAE Core solves the volume mesh supplied in the model JSON. Complex geometry
 If a complex display model has no actual volume mesh, preflight should fail with:
 
 ```text
-OpenCAE Core requires an actual volume mesh for complex geometry. Use Cloud FEA or generate a Core mesh.
+OpenCAE Core requires an actual volume mesh for complex geometry. Generate a Core mesh locally in the browser.
 ```
 
 ## Model Schema
@@ -41,11 +41,11 @@ Core emits a `stress-visualization` diagnostic with the engineering max in MPa, 
 The consuming app adapter should use these paths:
 
 - Use `actualCoreMesh` directly when present.
-- Convert Cloud FEA/Gmsh, uploaded mesh, procedural fixture, or future browser mesher output with `volumeMeshToModelJson`.
+- Convert browser-Gmsh, uploaded mesh, or procedural fixture output with `volumeMeshToModelJson`.
 - Use structured block meshes only for simple one-body rectangular cantilever/block/beam display models.
-- Reject complex geometry without actual mesh and route to Cloud FEA or mesh generation.
+- Reject complex geometry without an actual mesh and run local mesh generation before solving.
 
-OpenCAE Core Cloud can now accept a geometry source and produce the actual volume mesh inside the container. A complex cloud request should include `study`, `displayModel`, solver/result settings, and one geometry source:
+The browser meshing worker accepts `study`, `displayModel`, solver/result settings, and one geometry source:
 
 ```json
 {
@@ -67,12 +67,8 @@ OpenCAE Core Cloud can now accept a geometry source and produce the actual volum
 }
 ```
 
-`geometry.kind` may be `sample_procedural`, `uploaded_cad`, `uploaded_mesh`, or `structured_block`. Bracket sample geometry maps `FS1` to `fixed_support` and `L1` to `load_surface`. If a complex request reaches Core Cloud without a procedural or uploaded geometry source, preflight returns:
+`geometry.kind` may be `sample_procedural`, `uploaded_cad`, `uploaded_mesh`, or `structured_block`. Bracket sample geometry maps `FS1` to `fixed_support` and `L1` to `load_surface`. If a complex model has neither a saved volume mesh nor a local meshable geometry source, preflight fails before solve.
 
-```text
-Complex geometry requires procedural or uploaded geometry for Core Cloud meshing.
-```
-
-Gmsh is used only as a cloud mesher. The solve still runs through OpenCAE Core sparse static or MDOF dynamic APIs. If Gmsh is missing or meshing fails, the service returns an explicit meshing error and does not use a local estimate or display-bounds proxy.
+Gmsh runs through WebAssembly in the browser meshing worker. The resulting Core model is transferred to the dedicated browser solve worker, which routes to sparse static, MDOF dynamic, modal, steady thermal, or the eligible WebGPU static path. If local meshing is unavailable or fails, the run returns an explicit error and does not call a network solver, use a local estimate, or substitute a display-bounds proxy.
 
 For production result rendering, downstream viewers must render `result.surfaceMesh.nodes` and `result.surfaceMesh.triangles` directly when a field such as `stress-surface` has a matching `surfaceMeshRef`. Vertex colors come directly from `stress-surface.values` in the same surface-node order. Production Core rendering must reject missing solver surface meshes or misaligned field values instead of inventing replacement samples.

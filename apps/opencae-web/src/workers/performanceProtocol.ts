@@ -12,7 +12,7 @@ export interface LocalSolveResult {
   variants?: RunVariantResult[];
   variantRefs?: RunVariantRef[];
   activeVariantId?: string;
-  /** Solver-space render surface mesh (cloud response contract). */
+  /** Solver-space render surface mesh returned by the local Core worker. */
   surfaceMesh?: unknown;
   /** Solver diagnostics entries (core-solve-diagnostics, phase diagnostics, ...). */
   diagnostics?: unknown[];

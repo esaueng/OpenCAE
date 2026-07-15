@@ -53,7 +53,7 @@ describe("Core result structures", () => {
     expect([...surfaceMesh.nodeMap].sort()).toEqual([0, 1, 2, 3]);
   });
 
-  test("validates finite non-empty fields and surface mesh triangle references", () => {
+  test("validates finite WebGPU fields and surface mesh triangle references", () => {
     const surfaceMesh = solverSurfaceMeshFromModel(createSingleTetModel());
     const result: CoreSolveResult = {
       summary: {
@@ -65,7 +65,7 @@ describe("Core result structures", () => {
         reactionForceUnits: "N",
         provenance: {
           kind: "opencae_core_fea",
-          solver: "opencae-core-sparse-tet",
+          solver: "opencae-core-webgpu-matrix-free-tet4",
           resultSource: "computed",
           meshSource: "actual_volume_mesh",
           units: "mm-N-s-MPa"
@@ -115,7 +115,7 @@ describe("Core result structures", () => {
       ],
       provenance: {
         kind: "opencae_core_fea",
-        solver: "opencae-core-sparse-tet",
+        solver: "opencae-core-webgpu-matrix-free-tet4",
         resultSource: "computed",
         meshSource: "actual_volume_mesh",
         units: "mm-N-s-MPa"
