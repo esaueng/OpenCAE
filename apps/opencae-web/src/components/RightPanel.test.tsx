@@ -179,6 +179,55 @@ function uploadedStepProject(status: StepGeometryMetadata["status"], message?: s
   };
 }
 
+describe("RightPanel advanced loads", () => {
+  const advancedStudy: Study = {
+    ...study,
+    namedSelections: [
+      ...study.namedSelections,
+      {
+        id: "selection-bottom",
+        name: "Bottom face",
+        entityType: "face",
+        geometryRefs: [{ bodyId: "body-uploaded", entityType: "face", entityId: "face-bottom", label: "Bottom face" }],
+        fingerprint: "face-bottom"
+      },
+      {
+        id: "selection-body",
+        name: "Fixture body",
+        entityType: "body",
+        geometryRefs: [{ bodyId: "body-uploaded", entityType: "body", entityId: "body-uploaded", label: "Fixture body" }],
+        fingerprint: "body-uploaded"
+      }
+    ]
+  };
+
+  test("shows an explicit remote point and distributed-wrench disclaimer", () => {
+    const html = renderPanel("loads", {
+      study: advancedStudy,
+      selectedFace: displayModel.faces[0]!,
+      selectedLoadPoint: [1, 2, 3],
+      draftLoadType: "remote_force"
+    });
+
+    expect(html).toContain("Remote point coordinates");
+    expect(html).toContain("not a rigid MPC coupling");
+    expect(html).toContain("Surface traction");
+    expect(html).toContain("Volume force");
+  });
+
+  test("shows the opposing-face selector and bonded-linear warning for preload", () => {
+    const html = renderPanel("loads", {
+      study: advancedStudy,
+      selectedFace: displayModel.faces[0]!,
+      selectedLoadPoint: [0, 0, 0],
+      draftLoadType: "bolt_preload"
+    });
+
+    expect(html).toContain("Opposing face");
+    expect(html).toContain("Bottom face");
+    expect(html).toContain("Bonded-linear approximation only");
+  });
+});
 describe("RightPanel result probes", () => {
   test("lists raw engineering readings with removal, clear, and cap feedback", () => {
     const html = renderPanel("results", {
@@ -187,7 +236,8 @@ describe("RightPanel result probes", () => {
         anchor: { kind: "sample", point: [1, 2, 3] },
         point: [1, 2, 3],
         value: 0.000456789,
-        units: "MPa"
+        units: "MPa",
+        governingVariantName: "Service"
       }],
       resultProbeLimitReached: true,
       onRemoveResultProbe: vi.fn(),
@@ -196,12 +246,76 @@ describe("RightPanel result probes", () => {
 
     expect(html).toContain("Pinned probes");
     expect(html).toContain("0.000456789 MPa");
+    expect(html).toContain("Governed near probe by Service");
     expect(html).toContain("Clear All");
     expect(html).toContain('aria-label="Remove probe 1"');
     expect(html).toContain("Probe limit reached. Remove a pin to place another.");
   });
 });
 
+describe("RightPanel open section", () => {
+  test("shows axis, normalized offset, and flip controls when the plane is active", () => {
+    const html = renderPanel("model", {
+      sectionPlane: { enabled: true, axis: "y", offset: 0.37, flipped: false },
+      onSectionPlaneChange: vi.fn()
+    });
+
+    expect(html).toContain("Open section");
+    expect(html).toContain("Close section");
+    expect(html).toContain("Normalized offset · 37%");
+    expect(html).toContain("Flip cut side");
+    expect(html).toContain("Section plane axis");
+  });
+});
+
+describe("RightPanel run variants and load cases", () => {
+  test("renders case assignment, static combinations, and enabled controls", () => {
+    const caseStudy: Study = {
+      ...study,
+      loads: [{ id: "load-1", type: "force", selectionRef: "selection-top", parameters: { value: 100, units: "N", direction: [0, 0, -1] }, status: "complete" }],
+      loadCases: [
+        { id: "case-service", name: "Service", enabled: true, loadIds: ["load-1"] },
+        { id: "case-reverse", name: "Reverse", enabled: true, loadIds: [] }
+      ],
+      loadCombinations: [{
+        id: "combination-net",
+        name: "Net signed",
+        enabled: true,
+        factors: [{ caseId: "case-service", factor: 1 }, { caseId: "case-reverse", factor: -1 }]
+      }]
+    };
+
+    const html = renderPanel("loads", { study: caseStudy, onLoadCasesChange: vi.fn() });
+
+    expect(html).toContain("Load cases");
+    expect(html).toContain("Service");
+    expect(html).toContain("Reverse");
+    expect(html).toContain("Net signed");
+    expect(html).toContain("Add load case");
+    expect(html).toContain("Add combination");
+    expect(html).toContain("Case</span><select");
+  });
+
+  test("shows the active case, combination, and envelope in the results selector", () => {
+    const variants = [
+      { id: "case:service", name: "Service", kind: "case" as const, caseId: "case-service" },
+      { id: "combination:net", name: "Net signed", kind: "combination" as const, combinationId: "combination-net" },
+      { id: "envelope", name: "Envelope", kind: "envelope" as const }
+    ];
+
+    const html = renderPanel("results", {
+      resultVariants: variants,
+      activeResultVariantId: "combination:net",
+      onResultVariantChange: vi.fn()
+    });
+
+    expect(html).toContain("Run variant");
+    expect(html).toContain("Service");
+    expect(html).toContain("Net signed");
+    expect(html).toContain("Envelope · envelope");
+    expect(html).toContain('value="combination:net" selected=""');
+  });
+});
 describe("RightPanel payload mass controls", () => {
   test("offers the opposite face normal as a load direction", () => {
     const markup = renderPanel("loads");
@@ -395,6 +509,50 @@ describe("RightPanel payload mass controls", () => {
     expect(markup).toContain("About 4s remaining");
     expect(markup).toContain("Elapsed");
     expect(markup).toContain("2s");
+  });
+
+  test("skips loads for modal readiness and shows mode-count settings", () => {
+    const modalStudy: Study = { ...study, name: "Modal Analysis", type: "modal_analysis", solverSettings: { modeCount: 6 } };
+    const markup = renderPanel("run", { study: modalStudy });
+    expect(markup).toContain("Requested modes");
+    expect(markup).toContain("Modal settings");
+    expect(markup).not.toContain("Load added");
+    expect(markup).toContain("block_shift_invert_modal");
+  });
+
+  test("renders a selectable modal table and phase playback", () => {
+    const modalStudy: Study = { ...study, name: "Modal Analysis", type: "modal_analysis", solverSettings: { modeCount: 2 } };
+    const modalSummary: ResultSummary = {
+      analysisType: "modal_analysis",
+      requestedModeCount: 2,
+      convergedModeCount: 2,
+      modes: [
+        { modeIndex: 1, frequencyHz: 81.5, eigenvalue: 262_188, scaledResidual: 1e-8, fieldId: "mode-1" },
+        { modeIndex: 2, frequencyHz: 220, eigenvalue: 1_910_751, scaledResidual: 2e-8, fieldId: "mode-2" }
+      ]
+    };
+    const modalFields: ResultField[] = [0, 1].map((frameIndex) => ({
+      id: `mode-1-phase-${frameIndex}`,
+      runId: "run-modal",
+      type: "mode_shape",
+      location: "node",
+      values: [1],
+      vectors: [[1, 0, 0]],
+      min: 0,
+      max: 1,
+      units: "normalized",
+      modeIndex: 1,
+      frequencyHz: 81.5,
+      eigenvalue: 262_188,
+      scaledResidual: 1e-8,
+      frameIndex,
+      timeSeconds: frameIndex / 2
+    }));
+    const markup = renderPanel("results", { study: modalStudy, resultSummary: modalSummary, resultFields: modalFields, resultMode: "mode_shape", selectedModeIndex: 1 });
+    expect(markup).toContain("Mode 1");
+    expect(markup).toContain("81.5 Hz");
+    expect(markup).toContain("Phase");
+    expect(markup).toContain("visualization-only");
   });
 
   test("does not show the selected face as a persistent right-panel banner", () => {
@@ -1498,6 +1656,54 @@ describe("RightPanel payload mass controls", () => {
     expect(html).not.toContain('aria-label="Stop mesh generation" disabled');
   });
 
+  test("shows static convergence controls, persisted metrics, and capped SVG markers", () => {
+    const convergenceStudy = {
+      ...study,
+      loads: [{ id: "load-1", type: "force", selectionRef: "selection-top", parameters: { value: 10, units: "N", direction: [0, 0, -1], applicationPoint: [0, 0, 0] }, status: "complete" }],
+      loadCases: [{ id: "case-default", name: "Default", enabled: true, loadIds: ["load-1"] }],
+      loadCombinations: []
+    } satisfies Study;
+    const completeRung = {
+      status: "complete" as const,
+      actualNodeCount: 100,
+      actualElementCount: 300,
+      totalDofs: 300,
+      freeDofs: 270,
+      actualMeshSizeMm: 12,
+      rawElementPeakVonMises: 42,
+      stressUnits: "MPa",
+      probeDisplacement: 0.15,
+      displacementUnits: "mm"
+    };
+    const convergenceProject: Project = {
+      ...project,
+      convergenceRecords: [{
+        id: "convergence-1",
+        studyId: study.id,
+        caseId: "case-default",
+        createdAt: "2026-07-14T12:00:00.000Z",
+        completedAt: "2026-07-14T12:01:00.000Z",
+        probe: { point: [0, 0, 0], source: "primary_load" },
+        classification: "inconclusive",
+        rungs: [
+          { ...completeRung, requestedPreset: "coarse" },
+          { ...completeRung, requestedPreset: "medium", totalDofs: 600 },
+          { requestedPreset: "fine", status: "skipped", actualNodeCount: 40_000, actualElementCount: 120_000, totalDofs: 120_000, freeDofs: 119_970, actualMeshSizeMm: 8, skipReason: "Generated mesh exceeds the 100,000 DOF cap." }
+        ]
+      }]
+    };
+
+    const html = renderPanel("mesh", { project: convergenceProject, study: convergenceStudy, onRunMeshConvergence: vi.fn() });
+
+    expect(html).toContain("Run coarse → medium → fine");
+    expect(html).toContain("Displacement probe");
+    expect(html).toContain("Inconclusive");
+    expect(html).toContain("120,000 total · 119,970 free DOF");
+    expect(html).toContain("40,000 nodes · 120,000 elements · 8.000 mm");
+    expect(html).toContain("chart-skipped");
+    expect(html).toContain("Probe displacement and raw element peak stress versus actual degrees of freedom");
+  });
+
   test("shows Back and Next hotkey hints on workflow navigation buttons", () => {
     const html = renderPanel("loads", { study: { ...study, meshSettings: { preset: "medium", status: "complete" } } });
 
@@ -1509,21 +1715,21 @@ describe("RightPanel payload mass controls", () => {
     expect(html).toContain('<span class="workflow-nav-label">Next: Mesh</span><kbd>N</kbd>');
   });
 
-  test("requires a picked model point before adding a force load", () => {
+  test("requires a selected face before adding a face force", () => {
     const markup = renderPanel("loads");
 
     expect(markup).toContain(">Add load<");
     expect(markup).toContain('<button class="outline-action wide" disabled="">');
-    expect(markup).toContain("Select a point on the model, then click Add load.");
+    expect(markup).toContain("Select a face on the model, then add the load.");
   });
 
-  test("keeps a picked force location ready for the add load action", () => {
+  test("allows a face force without a picked visual point", () => {
     const markup = renderPanel("loads", {
       selectedFace: displayModel.faces[0],
-      selectedLoadPoint: [1, 2, 3]
+      selectedLoadPoint: null
     });
 
-    expect(markup).toContain("point picked");
+    expect(markup).toContain("Its visual point does not affect the solve.");
     expect(markup).toContain(">Add load<");
     expect(markup).not.toContain('<button class="outline-action wide" disabled="">');
   });

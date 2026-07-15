@@ -5,6 +5,8 @@ import {
   barycentricScalar,
   appendResultProbe,
   availableStressComponents,
+  barycentricVector,
+  governingVariantIdForProbe,
   interpolateScalarFromSamples,
   resolveResultProbe,
   resultProbeTopologySignature,
@@ -78,16 +80,46 @@ describe("active result field selection", () => {
     expect(availableStressComponents([field()])).toEqual(["von_mises"]);
     expect(selectActiveResultField({ fields: [field()], resultMode: "stress", stressComponent: "principal_max" }).scalarField).toBeUndefined();
   });
+
+  test("separates modal identities and selects the requested mode", () => {
+    const mode1 = field({ id: "mode-1", type: "mode_shape", units: "normalized", modeIndex: 1, vectors: [[1, 0, 0], [0, 0, 0], [0, 0, 0]] });
+    const mode2 = field({ id: "mode-2", type: "mode_shape", units: "normalized", modeIndex: 2, vectors: [[0, 1, 0], [0, 0, 0], [0, 0, 0]] });
+    expect(semanticResultFieldKey(mode1)).not.toBe(semanticResultFieldKey(mode2));
+    const selected = selectActiveResultField({ fields: [mode1, mode2], resultMode: "mode_shape", modeIndex: 2, surfaceMesh });
+    expect(selected.scalarField).toBe(mode2);
+    expect(selected.displacementField).toBe(mode2);
+  });
+
+  test("separates active run variants in semantic identities", () => {
+    expect(semanticResultFieldKey(field({ variantId: "case:a" }))).not.toBe(
+      semanticResultFieldKey(field({ variantId: "case:b" }))
+    );
+  });
 });
 
 describe("result probes", () => {
   test("interpolates aligned nodal values with retained barycentric weights", () => {
     const weights: [number, number, number] = [0.2, 0.3, 0.5];
     expect(barycentricScalar([10, 20, 40], [0, 1, 2], weights)).toBeCloseTo(28, 12);
+    expect(barycentricVector([[0, 0, 0], [1, 2, 3], [2, 4, 6]], [0, 1, 2], weights)).toEqual([1.3, 2.6, 3.9]);
     expect(barycentricPoint(surfaceMesh.nodes, [0, 1, 2], weights)).toEqual([0.3, 0.5, 0]);
     expect(resolveResultProbe({ id: "probe-1", anchor: { kind: "surface", surfaceMeshId: surfaceMesh.id, triangle: [0, 1, 2], barycentric: weights } }, field(), surfaceMesh)).toMatchObject({ value: 28, point: [0.3, 0.5, 0] });
   });
 
+  test("maps compact envelope indices to the barycentrically governing variant", () => {
+    const pin = {
+      id: "probe-envelope",
+      anchor: { kind: "surface" as const, surfaceMeshId: surfaceMesh.id, triangle: [0, 1, 2] as [number, number, number], barycentric: [0.2, 0.3, 0.5] as [number, number, number] }
+    };
+    const governing = {
+      variantIds: ["case:service", "combination:reverse"],
+      stress: [0, 1, 1],
+      displacement: [0, 0, 1]
+    };
+
+    expect(governingVariantIdForProbe(pin, governing, "stress")).toBe("combination:reverse");
+    expect(governingVariantIdForProbe(pin, governing, "displacement")).toBe("case:service");
+  });
   test("uses exact and inverse-distance sampled interpolation without display rounding", () => {
     const samples = [
       { point: [0, 0, 0] as [number, number, number], normal: [0, 0, 1] as [number, number, number], value: 0.000_456_789 },
@@ -108,11 +140,12 @@ describe("result probes", () => {
     expect(appendResultProbe(pins, anchor, "probe-19").pins).toHaveLength(20);
   });
 
-  test("changes the clear signature for a new run, project, model, or surface topology", () => {
-    const baseline = resultProbeTopologySignature("project-1", "run-1", "model-1", surfaceMesh);
+  test("changes the clear signature for a new run, variant, project, model, or surface topology", () => {
+    const baseline = resultProbeTopologySignature("project-1", "run-1", "model-1", surfaceMesh, "case:a");
     expect(resultProbeTopologySignature("project-2", "run-1", "model-1", surfaceMesh)).not.toBe(baseline);
     expect(resultProbeTopologySignature("project-1", "run-2", "model-1", surfaceMesh)).not.toBe(baseline);
     expect(resultProbeTopologySignature("project-1", "run-1", "model-2", surfaceMesh)).not.toBe(baseline);
+    expect(resultProbeTopologySignature("project-1", "run-1", "model-1", surfaceMesh, "case:b")).not.toBe(baseline);
     expect(resultProbeTopologySignature("project-1", "run-1", "model-1", { ...surfaceMesh, triangles: [...surfaceMesh.triangles, [0, 2, 1]] })).not.toBe(baseline);
   });
 });

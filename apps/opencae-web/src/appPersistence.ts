@@ -1,6 +1,8 @@
 import {
   ProjectSchema,
   ResultFieldSchema,
+  RunVariantRefSchema,
+  RunVariantResultSchema,
   ResultSummarySchema,
   type DisplayFace,
   type DisplayModel,
@@ -16,6 +18,7 @@ import type { SampleAnalysisType, SampleModelId } from "./lib/api";
 import type { CapturedResultView } from "./report/captureResultViews";
 import type { PayloadObjectSelection, ProjectionMode, ResultMode, StressComponent, ThemeMode, ViewMode } from "./workspaceViewTypes";
 import type { ResultColorScaleSettings } from "./resultColorScale";
+import type { SectionPlaneState } from "./workspaceViewTypes";
 
 export { AUTOSAVE_STORAGE_KEY, AUTOSAVE_UI_STORAGE_KEY } from "./autosaveStorage";
 export type { ThemeMode } from "./workspaceViewTypes";
@@ -33,8 +36,10 @@ export interface WorkspaceUiSnapshot {
   resultMode: ResultMode;
   stressComponent?: StressComponent;
   resultColorScaleSettings?: ResultColorScaleSettings;
+  selectedModeIndex?: number;
   showDeformed: boolean;
   showDimensions: boolean;
+  sectionPlane?: SectionPlaneState;
   stressExaggeration: number;
   resultFrameIndex?: number;
   resultPlaybackFps?: number;
@@ -74,11 +79,12 @@ interface IdleCallbackHandle {
 
 const STEPS: StepId[] = ["model", "material", "supports", "loads", "mesh", "run", "results"];
 const VIEW_MODES: ViewMode[] = ["model", "mesh", "results"];
-const RESULT_MODES: ResultMode[] = ["stress", "displacement", "safety_factor", "velocity", "acceleration"];
+const RESULT_MODES: ResultMode[] = ["stress", "displacement", "safety_factor", "velocity", "acceleration", "mode_shape"];
 const STRESS_COMPONENTS: StressComponent[] = ["von_mises", "principal_max", "principal_min", "max_shear"];
 const THEMES: ThemeMode[] = ["dark", "light"];
 const PROJECTION_MODES: ProjectionMode[] = ["perspective", "orthographic"];
-const LOAD_TYPES: LoadType[] = ["force", "pressure", "gravity"];
+const SECTION_PLANE_AXES: SectionPlaneState["axis"][] = ["x", "y", "z"];
+const LOAD_TYPES: LoadType[] = ["force", "pressure", "gravity", "surface_traction", "volume_force", "remote_force", "bolt_preload"];
 const LOAD_DIRECTIONS: LoadDirectionLabel[] = [...LOAD_DIRECTION_LABELS];
 const SAMPLE_MODELS: SampleModelId[] = ["bracket", "plate", "cantilever"];
 const SAMPLE_ANALYSIS_TYPES: SampleAnalysisType[] = ["static_stress", "dynamic_structural"];
@@ -358,12 +364,49 @@ export function parseResultBundle(value: unknown): LocalResultBundle | undefined
   const surfaceMesh = parseSolverSurfaceMesh(value.surfaceMesh);
   const solverMeshSummary = parseSolverMeshSummary(value.solverMeshSummary);
   const reportCaptures = parseResultViewCaptures(value.reportCaptures);
+  const variants = RunVariantResultSchema.array().safeParse(value.variants);
+  const variantRefs = RunVariantRefSchema.array().safeParse(value.variantRefs);
   if (!summary.success || !fields.success || fields.data.length === 0) return undefined;
+  const parsedVariants = variants.success ? variants.data : [];
+  const explicitVariantRefs = variantRefs.success ? variantRefs.data : [];
+  const requestedActiveVariantId = typeof value.activeVariantId === "string" ? value.activeVariantId : undefined;
+  const activeExplicitRef = explicitVariantRefs.find((reference) => reference.id === requestedActiveVariantId) ?? explicitVariantRefs[0];
+  const structuralVariants = parsedVariants.length
+    ? parsedVariants
+    : "analysisType" in summary.data && summary.data.analysisType === "modal_analysis"
+      ? []
+      : [activeExplicitRef
+        ? {
+          id: activeExplicitRef.id,
+          name: activeExplicitRef.name,
+          kind: activeExplicitRef.kind,
+          ...(activeExplicitRef.caseId ? { caseId: activeExplicitRef.caseId } : {}),
+          ...(activeExplicitRef.combinationId ? { combinationId: activeExplicitRef.combinationId } : {}),
+          summary: summary.data,
+          fields: fields.data.map((field) => ({ ...field, variantId: field.variantId ?? activeExplicitRef.id }))
+        }
+        : {
+          id: "case:default",
+          name: "Default",
+          kind: "case" as const,
+          caseId: "case-default",
+          summary: summary.data,
+          fields: fields.data.map((field) => ({ ...field, variantId: field.variantId ?? "case:default" }))
+        }];
+  const parsedVariantRefs = explicitVariantRefs.length
+    ? explicitVariantRefs
+    : structuralVariants.map(({ id, name, kind, caseId, combinationId }) => ({ id, name, kind, caseId, combinationId }));
+  const activeVariantId = requestedActiveVariantId && parsedVariantRefs.some((reference) => reference.id === requestedActiveVariantId)
+    ? requestedActiveVariantId
+    : structuralVariants[0]?.id;
   return {
     activeRunId: typeof value.activeRunId === "string" ? value.activeRunId : undefined,
     completedRunId: typeof value.completedRunId === "string" ? value.completedRunId : undefined,
     summary: summary.data,
     fields: fields.data,
+    ...(structuralVariants.length ? { variants: structuralVariants } : {}),
+    ...(parsedVariantRefs.length ? { variantRefs: parsedVariantRefs } : {}),
+    ...(activeVariantId ? { activeVariantId } : {}),
     ...(surfaceMesh ? { surfaceMesh } : {}),
     ...(solverMeshSummary ? { solverMeshSummary } : {}),
     ...(reportCaptures ? { reportCaptures } : {})
@@ -446,10 +489,12 @@ function parseUiSnapshot(value: unknown): WorkspaceUiSnapshot | null {
     themeMode: readEnum(value.themeMode, THEMES, "dark"),
     projectionMode: readEnum(value.projectionMode, PROJECTION_MODES, "perspective"),
     resultMode: readEnum(value.resultMode, RESULT_MODES, "stress"),
+    selectedModeIndex: Math.max(1, Math.min(10, Math.trunc(readFiniteNumber(value.selectedModeIndex, 1)))),
     stressComponent: readEnum(value.stressComponent, STRESS_COMPONENTS, "von_mises"),
     resultColorScaleSettings: parseResultColorScaleSettings(value.resultColorScaleSettings),
     showDeformed: value.showDeformed === true,
     showDimensions: value.showDimensions === true,
+    sectionPlane: parseSectionPlane(value.sectionPlane),
     stressExaggeration: readFiniteNumber(value.stressExaggeration, 1.8),
     resultFrameIndex: Math.max(0, Math.trunc(readFiniteNumber(value.resultFrameIndex, 0))),
     resultPlaybackFps: clamp(readFiniteNumber(value.resultPlaybackFps, 12), 1, 60),
@@ -487,6 +532,16 @@ function parseResultColorScaleSettings(value: unknown): ResultColorScaleSettings
     };
   }
   return settings;
+}
+
+function parseSectionPlane(value: unknown): SectionPlaneState | undefined {
+  if (!isRecord(value)) return undefined;
+  return {
+    enabled: value.enabled === true,
+    axis: readEnum(value.axis, SECTION_PLANE_AXES, "x"),
+    offset: clamp(readFiniteNumber(value.offset, 0.5), 0, 1),
+    flipped: value.flipped === true
+  };
 }
 
 function normalizeUiRunState(ui: WorkspaceUiSnapshot): WorkspaceUiSnapshot {

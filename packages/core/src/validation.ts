@@ -2,6 +2,7 @@ import {
   OPENCAE_LEGACY_MODEL_SCHEMA_VERSION,
   OPENCAE_MODEL_SCHEMA,
   OPENCAE_MODEL_SCHEMA_VERSION,
+  OPENCAE_PREVIOUS_MODEL_SCHEMA_VERSION,
   type OpenCAEModelJson,
   type ElementType,
   type ValidationIssue,
@@ -34,10 +35,11 @@ export function validateModelJson(input: unknown): ValidationReport {
 
   if (
     input.schemaVersion !== OPENCAE_MODEL_SCHEMA_VERSION &&
+    input.schemaVersion !== OPENCAE_PREVIOUS_MODEL_SCHEMA_VERSION &&
     input.schemaVersion !== OPENCAE_LEGACY_MODEL_SCHEMA_VERSION
   ) {
     errors.push(
-      issue("invalid-schema-version", "Model schemaVersion must be 0.1.0 or 0.2.0.", "$.schemaVersion")
+      issue("invalid-schema-version", "Model schemaVersion must be 0.1.0, 0.2.0, or 0.3.0.", "$.schemaVersion")
     );
   }
 
@@ -53,16 +55,16 @@ export function validateModelJson(input: unknown): ValidationReport {
     errors
   );
   const nodeSetNames = validateNodeSets(input.nodeSets, nodeCount, errors);
-  validateElementSets(input.elementSets, elementValidation.totalElements, errors);
+  const elementSetNames = validateElementSets(input.elementSets, elementValidation.totalElements, errors);
   const surfaceFacetIds = validateSurfaceFacets(input.surfaceFacets, elementValidation.elements, nodeCount, errors);
   const surfaceSetNames = validateSurfaceSets(input.surfaceSets, surfaceFacetIds, errors);
   const boundaryConditionNames = validateBoundaryConditions(input.boundaryConditions, nodeSetNames, surfaceSetNames, errors);
-  const loadNames = validateLoads(input.loads, nodeSetNames, surfaceSetNames, errors);
-  validateSteps(input.steps, boundaryConditionNames, loadNames, errors);
+  const loadTypes = validateLoads(input.loads, nodeSetNames, elementSetNames, surfaceSetNames, input.schemaVersion, errors);
+  validateSteps(input.steps, boundaryConditionNames, new Set(loadTypes.keys()), loadTypes, errors);
   validateCoordinateSystem(input.coordinateSystem, errors);
   validateMeshProvenance(input.meshProvenance, errors);
   validateMeshConnections(input.meshConnections, errors);
-  validateDynamicMaterialDensity(input.steps, input.elementBlocks, materials.densityByName, errors);
+  validateInertialMaterialDensity(input.steps, input.elementBlocks, materials.densityByName, errors);
 
   if (
     elementValidation.connectivityOk &&
@@ -120,8 +122,11 @@ export function preflightCoreModel(
   const orphans = orphanNodes(model);
   const step = model.steps[options.stepIndex ?? 0];
   const fixedNodes = step ? activeBoundaryNodes(model, step.boundaryConditions) : new Set<number>();
-  const loadNodes = step ? activeLoadNodes(model, step.loads, facets) : new Set<number>();
-  const loadDiagnostics = step ? assembleNodalLoadVectorWithDiagnostics({ ...model, surfaceFacets: facets }, step.loads).diagnostics : undefined;
+  const activeLoads = step && step.type !== "modal" ? step.loads : [];
+  const loadNodes = step ? activeLoadNodes(model, activeLoads, facets) : new Set<number>();
+  const loadDiagnostics = step && step.type !== "modal"
+    ? assembleNodalLoadVectorWithDiagnostics({ ...model, surfaceFacets: facets }, activeLoads).diagnostics
+    : undefined;
 
   if (orphans.length > 0) {
     errors.push(issue("orphan-nodes", "Production preflight requires all nodes to belong to at least one element.", "$.nodes"));
@@ -136,7 +141,7 @@ export function preflightCoreModel(
     if (!hasBoundarySurfaceSelection(model, step.boundaryConditions, facets)) {
       errors.push(issue("missing-support-surface-set", "Production supports must map to a non-empty surface set.", "$.boundaryConditions"));
     }
-    if (!hasLoadSurfaceSelection(model, step.loads)) {
+    if (step.type !== "modal" && !hasLoadSurfaceSelection(model, step.loads)) {
       errors.push(issue("missing-load-surface-set", "Production loads must map to a non-empty surface set.", "$.loads"));
     }
   }
@@ -372,10 +377,10 @@ function validateNodeSets(nodeSets: unknown, nodeCount: number, errors: Validati
   return names;
 }
 
-function validateElementSets(elementSets: unknown, elementCount: number, errors: ValidationIssue[]): void {
+function validateElementSets(elementSets: unknown, elementCount: number, errors: ValidationIssue[]): Set<string> {
   if (!Array.isArray(elementSets)) {
     errors.push(issue("invalid-element-sets", "elementSets must be an array.", "$.elementSets"));
-    return;
+    return new Set();
   }
 
   const names = new Set<string>();
@@ -387,6 +392,7 @@ function validateElementSets(elementSets: unknown, elementCount: number, errors:
     }
     validateNamedIndexSet(elementSet, "elements", elementCount, names, "element-set", path, errors);
   });
+  return names;
 }
 
 function validateSurfaceFacets(
@@ -583,15 +589,18 @@ function validateBoundarySelection(
 function validateLoads(
   loads: unknown,
   nodeSetNames: Set<string>,
+  elementSetNames: Set<string>,
   surfaceSetNames: Set<string>,
+  schemaVersion: unknown,
   errors: ValidationIssue[]
-): Set<string> {
+): Map<string, string> {
   if (!Array.isArray(loads)) {
     errors.push(issue("invalid-loads", "loads must be an array.", "$.loads"));
-    return new Set();
+    return new Map();
   }
 
   const names = new Set<string>();
+  const types = new Map<string, string>();
   loads.forEach((load, index) => {
     const path = `$.loads[${index}]`;
     if (!isRecord(load)) {
@@ -599,6 +608,13 @@ function validateLoads(
       return;
     }
     validateUniqueName(load.name, names, "load", `${path}.name`, errors);
+    if (isNonEmptyString(load.name) && typeof load.type === "string") types.set(load.name, load.type);
+    if (
+      schemaVersion !== OPENCAE_MODEL_SCHEMA_VERSION &&
+      (load.type === "surfaceTraction" || load.type === "bodyForceDensity" || load.type === "remoteForce" || load.type === "equivalentBoltPreload")
+    ) {
+      errors.push(issue("advanced-load-requires-schema-0.3.0", "Advanced load primitives require schemaVersion 0.3.0.", `${path}.type`));
+    }
     if (load.type === "nodalForce") {
       validateNodeSetReference(load.nodeSet, nodeSetNames, `${path}.nodeSet`, errors);
       validateVector3(load.vector, `${path}.vector`, "invalid-load-vector", "Nodal force vector must contain three finite numbers.", errors);
@@ -621,15 +637,45 @@ function validateLoads(
       validateVector3(load.acceleration, `${path}.acceleration`, "invalid-gravity-acceleration", "Body gravity acceleration must contain three finite numbers.", errors);
       return;
     }
-    errors.push(issue("invalid-load-type", "Load type must be nodalForce, surfaceForce, pressure, or bodyGravity.", `${path}.type`));
+    if (load.type === "surfaceTraction") {
+      validateSurfaceSetReference(load.surfaceSet, surfaceSetNames, `${path}.surfaceSet`, errors);
+      validateVector3(load.traction, `${path}.traction`, "invalid-traction-vector", "Surface traction must contain three finite numbers.", errors);
+      return;
+    }
+    if (load.type === "bodyForceDensity") {
+      validateElementSetReference(load.elementSet, elementSetNames, `${path}.elementSet`, errors);
+      validateVector3(load.forceDensity, `${path}.forceDensity`, "invalid-body-force-density", "Body force density must contain three finite numbers.", errors);
+      return;
+    }
+    if (load.type === "remoteForce") {
+      validateSurfaceSetReference(load.surfaceSet, surfaceSetNames, `${path}.surfaceSet`, errors);
+      validateVector3(load.totalForce, `${path}.totalForce`, "invalid-remote-force", "Remote force totalForce must contain three finite numbers.", errors);
+      validateVector3(load.remotePoint, `${path}.remotePoint`, "invalid-remote-point", "Remote force remotePoint must contain three finite numbers.", errors);
+      return;
+    }
+    if (load.type === "equivalentBoltPreload") {
+      validateSurfaceSetReference(load.surfaceSetA, surfaceSetNames, `${path}.surfaceSetA`, errors);
+      validateSurfaceSetReference(load.surfaceSetB, surfaceSetNames, `${path}.surfaceSetB`, errors);
+      if (load.surfaceSetA === load.surfaceSetB) {
+        errors.push(issue("duplicate-bolt-preload-surfaces", "Bolt preload surfaces A and B must be different.", path));
+      }
+      validateVector3(load.axis, `${path}.axis`, "invalid-bolt-preload-axis", "Bolt preload axis must contain three finite numbers.", errors);
+      if (Array.isArray(load.axis) && load.axis.length === 3 && load.axis.every(isFiniteNumber) && Math.hypot(load.axis[0], load.axis[1], load.axis[2]) <= 1e-15) {
+        errors.push(issue("zero-bolt-preload-axis", "Bolt preload axis must be nonzero.", `${path}.axis`));
+      }
+      validatePositive(load.preloadForce, `${path}.preloadForce`, "invalid-bolt-preload-force", errors);
+      return;
+    }
+    errors.push(issue("invalid-load-type", "Load type must be nodalForce, surfaceForce, pressure, bodyGravity, surfaceTraction, bodyForceDensity, remoteForce, or equivalentBoltPreload.", `${path}.type`));
   });
-  return names;
+  return types;
 }
 
 function validateSteps(
   steps: unknown,
   boundaryConditionNames: Set<string>,
   loadNames: Set<string>,
+  loadTypes: Map<string, string>,
   errors: ValidationIssue[]
 ): void {
   if (!Array.isArray(steps)) {
@@ -645,12 +691,17 @@ function validateSteps(
       return;
     }
     validateUniqueName(step.name, names, "step", `${path}.name`, errors);
-    if (step.type !== "staticLinear" && step.type !== "dynamicLinear") {
-      errors.push(issue("invalid-step-type", "Step type must be staticLinear or dynamicLinear.", `${path}.type`));
+    if (step.type !== "staticLinear" && step.type !== "dynamicLinear" && step.type !== "modal") {
+      errors.push(issue("invalid-step-type", "Step type must be staticLinear, dynamicLinear, or modal.", `${path}.type`));
     }
     validateNameReferenceArray(step.boundaryConditions, boundaryConditionNames, "missing-boundary-condition-reference", `${path}.boundaryConditions`, errors);
-    validateNameReferenceArray(step.loads, loadNames, "missing-load-reference", `${path}.loads`, errors);
+    if (step.type !== "modal") {
+      validateNameReferenceArray(step.loads, loadNames, "missing-load-reference", `${path}.loads`, errors);
+    }
     if (step.type === "dynamicLinear") {
+      if (Array.isArray(step.loads) && step.loads.some((loadName) => typeof loadName === "string" && loadTypes.get(loadName) === "equivalentBoltPreload")) {
+        errors.push(issue("bolt-preload-static-only", "Equivalent bolt preload is supported for staticLinear steps only.", `${path}.loads`));
+      }
       validateFinite(step.startTime, `${path}.startTime`, "invalid-dynamic-time", errors);
       validateFinite(step.endTime, `${path}.endTime`, "invalid-dynamic-time", errors);
       validatePositive(step.timeStep, `${path}.timeStep`, "invalid-dynamic-time-step", errors);
@@ -664,6 +715,14 @@ function validateSteps(
       validateOptionalNonNegative(step.dampingRatio, `${path}.dampingRatio`, "invalid-damping-ratio", errors);
       validateOptionalNonNegative(step.rayleighAlpha, `${path}.rayleighAlpha`, "invalid-rayleigh-alpha", errors);
       validateOptionalNonNegative(step.rayleighBeta, `${path}.rayleighBeta`, "invalid-rayleigh-beta", errors);
+    }
+    if (step.type === "modal") {
+      if (!isInteger(step.modeCount) || step.modeCount < 1 || step.modeCount > 10) {
+        errors.push(issue("invalid-modal-mode-count", "Modal modeCount must be an integer from 1 through 10.", `${path}.modeCount`));
+      }
+      if (!Array.isArray(step.boundaryConditions) || step.boundaryConditions.length === 0) {
+        errors.push(issue("missing-modal-support", "Modal analysis requires at least one support in the supports step.", `${path}.boundaryConditions`));
+      }
     }
   });
 }
@@ -728,13 +787,16 @@ function validateMeshProvenance(meshProvenance: unknown, errors: ValidationIssue
   }
 }
 
-function validateDynamicMaterialDensity(
+function validateInertialMaterialDensity(
   steps: unknown,
   elementBlocks: unknown,
   densityByName: Map<string, number | undefined>,
   errors: ValidationIssue[]
 ): void {
-  if (!Array.isArray(steps) || !steps.some((step) => isRecord(step) && step.type === "dynamicLinear")) return;
+  if (!Array.isArray(steps)) return;
+  const hasDynamicStep = steps.some((step) => isRecord(step) && step.type === "dynamicLinear");
+  const hasModalStep = steps.some((step) => isRecord(step) && step.type === "modal");
+  if (!hasDynamicStep && !hasModalStep) return;
   if (!Array.isArray(elementBlocks)) return;
   elementBlocks.forEach((block, index) => {
     if (!isRecord(block) || typeof block.material !== "string") return;
@@ -742,8 +804,10 @@ function validateDynamicMaterialDensity(
     if (!isFiniteNumber(density) || density <= 0) {
       errors.push(
         issue(
-          "missing-dynamic-material-density",
-          "Dynamic linear steps require positive material density for every solved element block.",
+          hasDynamicStep ? "missing-dynamic-material-density" : "missing-inertial-material-density",
+          hasDynamicStep
+            ? "Dynamic steps require positive material density for every solved element block."
+            : "Modal steps require positive material density for every solved element block.",
           `$.elementBlocks[${index}].material`
         )
       );
@@ -805,11 +869,20 @@ function activeLoadNodes(model: OpenCAEModelJson, loadNames: string[], facets = 
     if (!active.has(load.name)) continue;
     if (load.type === "nodalForce") {
       for (const node of nodeSets.get(load.nodeSet) ?? []) nodes.add(node);
-    } else if (load.type === "surfaceForce" || load.type === "pressure") {
+    } else if (load.type === "surfaceForce" || load.type === "pressure" || load.type === "surfaceTraction" || load.type === "remoteForce") {
       const surfaceSet = surfaceSets.get(load.surfaceSet);
       for (const facetId of surfaceSet?.facets ?? []) {
         for (const node of facetById.get(facetId)?.nodes ?? []) nodes.add(node);
       }
+    } else if (load.type === "equivalentBoltPreload") {
+      for (const surfaceSetName of [load.surfaceSetA, load.surfaceSetB]) {
+        const surfaceSet = surfaceSets.get(surfaceSetName);
+        for (const facetId of surfaceSet?.facets ?? []) {
+          for (const node of facetById.get(facetId)?.nodes ?? []) nodes.add(node);
+        }
+      }
+    } else if (load.type === "bodyForceDensity") {
+      for (const node of nodesForElementSet(model, load.elementSet)) nodes.add(node);
     } else if (load.type === "bodyGravity") {
       for (let node = 0; node < Math.floor(model.nodes.coordinates.length / 3); node += 1) nodes.add(node);
     }
@@ -846,15 +919,45 @@ function hasBoundarySurfaceSelection(model: OpenCAEModelJson, boundaryConditionN
 function hasLoadSurfaceSelection(model: OpenCAEModelJson, loadNames: string[]): boolean {
   const active = new Set(loadNames);
   const surfaceSets = new Map((model.surfaceSets ?? []).map((set) => [set.name, set]));
+  const nodeSets = new Map(model.nodeSets.map((set) => [set.name, set]));
+  const elementSets = new Map(model.elementSets.map((set) => [set.name, set]));
   let sawLoad = false;
   for (const load of model.loads) {
     if (!active.has(load.name)) continue;
     sawLoad = true;
-    if ((load.type === "surfaceForce" || load.type === "pressure") && (surfaceSets.get(load.surfaceSet)?.facets.length ?? 0) > 0) {
-      return true;
+    if (load.type === "surfaceForce" || load.type === "pressure" || load.type === "surfaceTraction" || load.type === "remoteForce") {
+      if (!(surfaceSets.get(load.surfaceSet)?.facets.length ?? 0)) return false;
+      continue;
+    }
+    if (load.type === "equivalentBoltPreload") {
+      if (!(surfaceSets.get(load.surfaceSetA)?.facets.length ?? 0) || !(surfaceSets.get(load.surfaceSetB)?.facets.length ?? 0)) return false;
+      continue;
+    }
+    if (load.type === "bodyForceDensity") {
+      if (!(elementSets.get(load.elementSet)?.elements.length ?? 0)) return false;
+      continue;
+    }
+    if (load.type === "nodalForce") {
+      if (!(nodeSets.get(load.nodeSet)?.nodes.length ?? 0)) return false;
+      continue;
+    }
+    if (load.type === "bodyGravity") continue;
+  }
+  return sawLoad || loadNames.length === 0;
+}
+
+function nodesForElementSet(model: OpenCAEModelJson, elementSetName: string): number[] {
+  const selected = new Set(model.elementSets.find((set) => set.name === elementSetName)?.elements ?? []);
+  const nodes = new Set<number>();
+  let globalElement = 0;
+  for (const block of model.elementBlocks) {
+    const count = nodesPerElement(block.type);
+    for (let offset = 0; offset + count <= block.connectivity.length; offset += count, globalElement += 1) {
+      if (!selected.has(globalElement)) continue;
+      for (let local = 0; local < count; local += 1) nodes.add(block.connectivity[offset + local]!);
     }
   }
-  return !sawLoad;
+  return [...nodes];
 }
 
 function isSubset(candidate: Set<number>, container: Set<number>): boolean {
@@ -939,6 +1042,12 @@ function validateComponent(component: unknown, path: string, errors: ValidationI
 function validateNodeSetReference(nodeSet: unknown, nodeSetNames: Set<string>, path: string, errors: ValidationIssue[]): void {
   if (!isNonEmptyString(nodeSet) || !nodeSetNames.has(nodeSet)) {
     errors.push(issue("missing-node-set-reference", "Reference must point to an existing node set.", path));
+  }
+}
+
+function validateElementSetReference(elementSet: unknown, elementSetNames: Set<string>, path: string, errors: ValidationIssue[]): void {
+  if (!isNonEmptyString(elementSet) || !elementSetNames.has(elementSet)) {
+    errors.push(issue("missing-element-set-reference", "Reference must point to an existing element set.", path));
   }
 }
 

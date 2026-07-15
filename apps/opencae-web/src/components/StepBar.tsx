@@ -36,7 +36,7 @@ export function StepBar({ activeStep, project, study, hasResults, collapsed, the
     model: true,
     material: study.materialAssignments.length > 0,
     supports: study.constraints.length > 0,
-    loads: study.loads.length > 0,
+    loads: study.type === "modal_analysis" || study.loads.length > 0,
     mesh: study.meshSettings.status === "complete",
     run: hasResults || study.runs.some((run) => isRunResultReadyStatus(run.status)),
     results: hasResults || study.runs.some((run) => isRunResultReadyStatus(run.status))
@@ -45,7 +45,7 @@ export function StepBar({ activeStep, project, study, hasResults, collapsed, the
   const unitShort = project.unitSystem === "SI" ? "mm" : "in";
   const currentUnitLabel = project.unitSystem === "SI" ? "Metric" : "Imperial";
   const nextUnitSystem = project.unitSystem === "SI" ? "US" : "SI";
-  const studyTypeLabel = study.type === "dynamic_structural" ? "dynamic" : "static";
+  const studyTypeLabel = study.type === "dynamic_structural" ? "dynamic" : study.type === "modal_analysis" ? "modal" : "static";
   const ThemeIcon = themeMode === "dark" ? Sun : Moon;
 
   return (
@@ -64,7 +64,7 @@ export function StepBar({ activeStep, project, study, hasResults, collapsed, the
         </button>
       </div>
       <div className="step-list">
-      {steps.map((step) => {
+      {steps.filter((step) => study.type !== "modal_analysis" || step.id !== "loads").map((step) => {
         const isActive = activeStep === step.id;
         const isComplete = completed[step.id];
         const canSelect = canNavigateToStep(step.id, { meshStatus: study.meshSettings.status });

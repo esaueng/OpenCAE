@@ -1,16 +1,18 @@
-import type { AnalysisMesh, DisplayModel, DynamicSolverSettings, MeshQuality, Project, ResultField, ResultRenderBounds, ResultSummary, RunEvent, Study, StudyRun } from "@opencae/schema";
+import { isModalResultSummary } from "@opencae/schema";
+import type { AnalysisMesh, CustomMaterial, DisplayModel, DynamicSolverSettings, MeshConvergenceRecord, MeshQuality, Project, ResultField, ResultRenderBounds, ResultSummary, RunEvent, RunVariantRef, RunVariantResult, Study, StudyRun } from "@opencae/schema";
 import type { StepGeometryInspection, StepGeometryRepairReport } from "@opencae/mesh-intake";
-import { assertCompatibleManufacturingProcess } from "@opencae/materials";
-import type { LoadApplicationPoint, LoadDirection, LoadDirectionLabel, LoadType, PayloadLoadMetadata } from "../loadPreview";
+import { assertCompatibleManufacturingProcess, resolveMaterial } from "@opencae/materials";
+import { unitsForLoadType, type LoadApplicationPoint, type LoadDirection, type LoadDirectionLabel, type LoadType, type PayloadLoadMetadata } from "../loadPreview";
 import type { PayloadObjectSelection } from "../workspaceViewTypes";
 import { embedUploadedModelFile, type EmbeddedModelFile, type LocalResultBundle, type SolverSurfaceMesh } from "../projectFile";
 import { createLocalBlankProject, createLocalSampleProject, createLocalUploadResponse, openLocalProjectPayload } from "../localProjectFactory";
 import type { SolveProgressEvent } from "@opencae/solve-pipeline";
 import type { ResultViewCaptures } from "../report/captureResultViews";
 import { isCancelledSolveError, startLocalSolve } from "../workers/solveWorkerClient";
-import { loadLocalRunResults, saveLocalRunResults } from "./localResultsStore";
+import { deleteLocalRunVariantResults, loadLocalRunResults, loadLocalRunVariantResult, saveLocalRunResults, saveLocalRunVariantResult } from "./localResultsStore";
 import { cancelWasmMeshing, canMeshStudyOnDemand, generateWasmMeshForStudy, type WasmMeshPhaseProgress } from "./wasmMeshing";
-import { geometrySourceForStudy, hasActualCoreVolumeMesh, isComplexGeometry, normalizeSolverBackend, openCaeCoreEligibility, OPENCAE_CORE_MESH_REQUIRED_REASON, type NormalizedBrowserSolverBackend } from "../workers/opencaeCoreSolve";
+import { coreMeshStatisticsForStudy, geometrySourceForStudy, hasActualCoreVolumeMesh, isComplexGeometry, normalizeSolverBackend, openCaeCoreEligibility, OPENCAE_CORE_MESH_REQUIRED_REASON, type NormalizedBrowserSolverBackend } from "../workers/opencaeCoreSolve";
+import { runStaticMeshConvergence, type ConvergenceProbe } from "../meshConvergence";
 
 export interface SampleProjectResponse {
   message?: string;
@@ -47,12 +49,15 @@ export type SampleAnalysisType = "static_stress" | "dynamic_structural";
 export interface ResultsResponse {
   summary: ResultSummary;
   fields: ResultField[];
+  variants?: RunVariantResult[];
+  variantRefs?: RunVariantRef[];
+  activeVariantId?: string;
   surfaceMesh?: SolverSurfaceMesh;
   /** Solver diagnostics entries (e.g. core-solve-diagnostics with real mesh counts). */
   diagnostics?: unknown[];
   artifacts?: {
     meshConnectivity?: { connectedComponents: number };
-    meshStatistics?: { nodes: number; elements: number };
+    meshStatistics?: { nodes: number; elements: number; totalDofs?: number; constrainedDofs?: number; freeDofs?: number; representativeElementSizeMm?: number };
   };
   reportCaptures?: ResultViewCaptures;
 }
@@ -60,12 +65,23 @@ export interface ResultsResponse {
 export interface RunSimulationOptions {
   onRunStatus?: (message: string) => void;
   resultRenderBounds?: ResultRenderBounds | null;
+  customMaterials?: CustomMaterial[];
   /**
    * Called when a run had to mesh its geometry first (A-M4 local-first
    * meshing): receives the study with the freshly stored mesh artifact so the
    * caller can persist it (same shape generateMesh returns).
    */
   onStudyMeshed?: (study: Study) => void;
+}
+
+export interface RunMeshConvergenceOptions {
+  customMaterials?: CustomMaterial[];
+  onProgress?: (message: string) => void;
+}
+
+export interface GenerateMeshOptions {
+  /** Keep isolated workflows, such as convergence ladders, from mutating the API-owned study. */
+  localOnly?: boolean;
 }
 
 const localResultsByRunId = new Map<string, ResultsResponse>();
@@ -570,7 +586,7 @@ export async function renameProject(projectId: string, name: string, currentProj
   );
 }
 
-export async function generateMesh(studyId: string, preset: MeshQuality, currentStudy?: Study, displayModel?: DisplayModel, onProgress?: (message: string) => void, onPhaseProgress?: (progress: WasmMeshPhaseProgress) => void): Promise<{ study: Study; message: string }> {
+export async function generateMesh(studyId: string, preset: MeshQuality, currentStudy?: Study, displayModel?: DisplayModel, onProgress?: (message: string) => void, onPhaseProgress?: (progress: WasmMeshPhaseProgress) => void, options: GenerateMeshOptions = {}): Promise<{ study: Study; message: string }> {
   // In-browser gmsh-wasm meshing (production default since A-M4). Returns
   // null in opt-out builds or when the geometry has no wasm-meshable source,
   // and falls through to the existing preset-estimate path on transient
@@ -600,6 +616,24 @@ export async function generateMesh(studyId: string, preset: MeshQuality, current
       onProgress?.(`In-browser meshing failed (${messageFromUnknownError(error) || "unknown error"}). Falling back to preset estimates.`);
     }
   }
+  const localFallback = () => {
+    if (!currentStudy) throw new Error("Could not generate mesh without an open study.");
+    const analysisMesh = displayModel ? analysisMeshForDisplayModel(displayModel, preset) : undefined;
+    const summary = meshSummaryForPreset(preset, analysisMesh);
+    return {
+      study: {
+        ...currentStudy,
+        meshSettings: {
+          preset,
+          status: "complete" as const,
+          meshRef: `${currentStudy.projectId}/mesh/mesh-summary.json`,
+          summary
+        }
+      },
+      message: "Mesh generated locally."
+    };
+  };
+  if (options.localOnly) return localFallback();
   return fetchJsonWithFallback(
     `/api/studies/${studyId}/mesh`,
     {
@@ -607,29 +641,70 @@ export async function generateMesh(studyId: string, preset: MeshQuality, current
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ preset })
     },
-    () => {
-      if (!currentStudy) throw new Error("Could not generate mesh without an open study.");
-      const analysisMesh = displayModel ? analysisMeshForDisplayModel(displayModel, preset) : undefined;
-      const summary = meshSummaryForPreset(preset, analysisMesh);
-      return {
-        study: {
-          ...currentStudy,
-          meshSettings: {
-            preset,
-            status: "complete" as const,
-            meshRef: `${currentStudy.projectId}/mesh/mesh-summary.json`,
-            summary
-          }
-        },
-        message: "Mesh generated locally."
-      };
-    }
+    localFallback
   );
 }
 
-export async function assignMaterial(studyId: string, materialId: string, parameters: Record<string, unknown> = {}, currentStudy?: Study): Promise<{ study: Study; message: string }> {
+export async function runMeshConvergence(
+  currentStudy: Study,
+  caseId: string,
+  probe: ConvergenceProbe,
+  displayModel: DisplayModel,
+  options: RunMeshConvergenceOptions = {}
+): Promise<MeshConvergenceRecord> {
+  if (currentStudy.type !== "static_stress") throw new Error("Mesh convergence is available for static load cases only.");
+  return runStaticMeshConvergence({
+    study: currentStudy,
+    caseId,
+    probe,
+    onProgress: (preset, phase) => options.onProgress?.(`${capitalizeWord(preset)} convergence rung: ${phase}.`),
+    prepareMesh: async (preset, isolatedStudy) => {
+      const generated = await generateMesh(
+        isolatedStudy.id,
+        preset,
+        isolatedStudy,
+        displayModel,
+        options.onProgress,
+        undefined,
+        { localOnly: true }
+      );
+      if (generated.study.type !== "static_stress") throw new Error("Convergence meshing changed the static study type unexpectedly.");
+      const coreStatistics = coreMeshStatisticsForStudy(generated.study, displayModel, options.customMaterials);
+      const density = generated.study.meshSettings.summary?.density;
+      const actualMeshSizeMm = finitePositiveNumber(density?.actualMeshSizeMm) ?? coreStatistics.representativeElementSizeMm;
+      return {
+        study: generated.study,
+        statistics: {
+          nodes: coreStatistics.nodes,
+          elements: coreStatistics.elements,
+          totalDofs: coreStatistics.totalDofs,
+          freeDofs: coreStatistics.freeDofs,
+          actualMeshSizeMm
+        }
+      };
+    },
+    solve: async (isolatedStudy, preset) => {
+      const runId = `run-convergence-${preset}-${randomUuid()}`;
+      const handle = startLocalSolve(
+        { runId, study: studyWithLocalBackend(isolatedStudy), displayModel, customMaterials: options.customMaterials },
+        (event) => options.onProgress?.(`${capitalizeWord(preset)} solve: ${event.phase}.`)
+      );
+      const { result } = await handle.completion;
+      return result;
+    }
+  });
+}
+
+export async function assignMaterial(
+  studyId: string,
+  materialId: string,
+  parameters: Record<string, unknown> = {},
+  currentStudy?: Study,
+  customMaterials: readonly CustomMaterial[] = []
+): Promise<{ study: Study; message: string }> {
+  resolveMaterial(materialId, customMaterials);
   if (parameters.manufacturingProcessId !== undefined) {
-    assertCompatibleManufacturingProcess(materialId, parameters.manufacturingProcessId);
+    assertCompatibleManufacturingProcess(materialId, parameters.manufacturingProcessId, customMaterials);
   }
   return fetchJsonWithFallback(
     `/api/studies/${studyId}/materials`,
@@ -714,24 +789,34 @@ export async function addLoad(studyId: string, type: LoadType, value: number, se
     },
     () => {
       if (!currentStudy) throw new Error("Could not add load without an open study.");
+      const loadId = `load-${crypto.randomUUID()}`;
+      const loadCases = currentStudy.type === "modal_analysis" ? undefined : loadCasesWithAddedLoad(currentStudy, loadId);
       return {
         study: {
           ...currentStudy,
           loads: [
             ...currentStudy.loads,
             {
-              id: `load-${crypto.randomUUID()}`,
+              id: loadId,
               type,
               selectionRef,
-              parameters: { value, units: type === "pressure" ? "kPa" : type === "gravity" ? "kg" : "N", direction, ...(directionMode ? { directionMode } : {}), ...(applicationPoint ? { applicationPoint } : {}), ...(payloadObject ? { payloadObject } : {}), ...(type === "gravity" ? payloadMetadata : {}) },
+              parameters: { value, units: unitsForLoadType(type), direction, ...(directionMode ? { directionMode } : {}), ...(applicationPoint ? { applicationPoint } : {}), ...(payloadObject ? { payloadObject } : {}), ...(type === "gravity" || type === "remote_force" || type === "bolt_preload" ? payloadMetadata : {}) },
               status: "complete" as const
             }
-          ]
+          ],
+          ...(loadCases ? { loadCases } : {})
         },
         message: "Load added."
       };
     }
   );
+}
+
+function loadCasesWithAddedLoad(study: Extract<Study, { type: "static_stress" | "dynamic_structural" }>, loadId: string) {
+  const cases = study.loadCases?.length
+    ? study.loadCases
+    : [{ id: "case-default", name: "Default", enabled: true, loadIds: study.loads.map((load) => load.id) }];
+  return cases.map((loadCase, index) => index === 0 ? { ...loadCase, loadIds: [...loadCase.loadIds, loadId] } : loadCase);
 }
 
 export async function runSimulation(studyId: string, currentStudy?: Study, displayModel?: DisplayModel, options: RunSimulationOptions = {}): Promise<{ run: { id: string }; streamUrl: string; message: string }> {
@@ -751,9 +836,9 @@ function studyWithLocalBackend(study: Study): Study {
   if (study.solverSettings.backend === "opencae_core_local") return study;
   // The identical-looking branches keep the static/dynamic study union narrowed
   // so each spread pairs solverSettings with its own study variant.
-  return study.type === "dynamic_structural"
-    ? { ...study, solverSettings: { ...study.solverSettings, backend: "opencae_core_local" } }
-    : { ...study, solverSettings: { ...study.solverSettings, backend: "opencae_core_local" } };
+  if (study.type === "dynamic_structural") return { ...study, solverSettings: { ...study.solverSettings, backend: "opencae_core_local" } };
+  if (study.type === "modal_analysis") return { ...study, solverSettings: { ...study.solverSettings, backend: "opencae_core_local" } };
+  return { ...study, solverSettings: { ...study.solverSettings, backend: "opencae_core_local" } };
 }
 
 export async function getResults(runId: string): Promise<ResultsResponse> {
@@ -798,13 +883,30 @@ export async function saveRunReportCaptures(runId: string, reportCaptures: Resul
 // Deployed Core Cloud runners omit runId on result fields; the schema (and
 // autosave restore) requires it, so stamp the owning run before use.
 export function withFieldRunIds(runId: string, results: ResultsResponse): ResultsResponse {
-  const stamped = !Array.isArray(results.fields) || results.fields.every((field) => typeof field.runId === "string" && field.runId)
-    ? results
-    : {
-        ...results,
-        fields: results.fields.map((field) => (typeof field.runId === "string" && field.runId ? field : { ...field, runId }))
-      };
+  const stampFields = (fields: ResultField[], variantId?: string) => fields.map((field) => ({
+    ...field,
+    ...(!field.runId ? { runId } : {}),
+    ...(variantId && !field.variantId ? { variantId } : {})
+  }));
+  const stamped = {
+    ...results,
+    fields: stampFields(results.fields, results.activeVariantId),
+    ...(results.variants ? {
+      variants: results.variants.map((variant) => ({ ...variant, fields: stampFields(variant.fields, variant.id) }))
+    } : {})
+  };
   return withDerivedSafetyFactorSurfaceField(stamped);
+}
+
+export async function getRunVariant(runId: string, variantId: string): Promise<RunVariantResult> {
+  const inMemory = localResultsByRunId.get(runId)?.variants?.find((variant) => variant.id === variantId);
+  if (inMemory) return inMemory;
+  const stored = await loadLocalRunVariantResult<RunVariantResult>(runId, variantId);
+  if (!stored) throw new Error(`Result variant ${variantId} is no longer available in browser storage. Re-run the simulation.`);
+  return {
+    ...stored,
+    fields: stored.fields.map((field) => ({ ...field, runId: field.runId || runId, variantId: field.variantId || variantId }))
+  };
 }
 
 const DERIVED_SAFETY_FACTOR_CAP = 1000;
@@ -813,6 +915,7 @@ const DERIVED_SAFETY_FACTOR_CAP = 1000;
 // alignment, so Safety Factor mode used to fall back to demo geometry. Derive a
 // per-node field from the surface stress field and the summary yield margin.
 export function withDerivedSafetyFactorSurfaceField(results: ResultsResponse): ResultsResponse {
+  if (isModalResultSummary(results.summary)) return results;
   const surfaceMesh = results.surfaceMesh;
   if (!surfaceMesh) return results;
   const aligned = (field: ResultField) => field.location === "node" && field.surfaceMeshRef === surfaceMesh.id && field.values.length === surfaceMesh.nodes.length;
@@ -855,6 +958,7 @@ export async function cancelRun(runId: string): Promise<{ run: StudyRun; message
       // become no-ops: exactly one terminal event per run.
       finishLocalRun(localRecord, "cancelled", { type: "cancelled", message: "Simulation cancelled." });
       cancelSolve?.();
+      void deleteLocalRunVariantResults(runId).catch(() => undefined);
     }
     localResultsByRunId.delete(runId);
     return {
@@ -953,7 +1057,7 @@ function runSimulationLocally(study: Study, displayModel?: DisplayModel, options
   const needsMesh = isComplexGeometry(displayModel, study) && !hasActualCoreVolumeMesh(study, displayModel);
   const capabilities = { canMeshOnDemand: needsMesh && canMeshStudyOnDemand(study, displayModel) };
   const meshFirst = needsMesh && capabilities.canMeshOnDemand;
-  const coreEligibility = openCaeCoreEligibility(study, displayModel, capabilities);
+  const coreEligibility = openCaeCoreEligibility(study, displayModel, capabilities, options.customMaterials);
   const now = new Date().toISOString();
   if (!coreEligibility.ok) {
     const record = createLocalRunRecord(runId, "failed");
@@ -999,6 +1103,7 @@ function runSimulationLocally(study: Study, displayModel?: DisplayModel, options
   });
 
   const solveProgressOffset = meshFirst ? MESH_FIRST_SOLVE_PROGRESS_OFFSET : 0;
+  const variantWrites: Promise<void>[] = [];
   void (async () => {
     let solveStudy = study;
     if (meshFirst) {
@@ -1010,15 +1115,49 @@ function runSimulationLocally(study: Study, displayModel?: DisplayModel, options
       // caller so the workspace persists it like a mesh-step result.
       options.onStudyMeshed?.(solveStudy);
     }
+    let variantPersistenceWarning: string | undefined;
     const handle = startLocalSolve(
-      { runId, study: solveStudy, displayModel, debugResults: debugResultsEnabled() },
-      (progress) => handleLocalSolveProgress(record, progress, solveProgressOffset)
+      { runId, study: solveStudy, displayModel, customMaterials: options.customMaterials, debugResults: debugResultsEnabled() },
+      (progress) => handleLocalSolveProgress(record, progress, solveProgressOffset),
+      (variant) => {
+        emitLocalRunEvent(record, {
+          type: "message",
+          message: `Completed ${variant.name}; saving it separately.`
+        });
+        variantWrites.push(saveLocalRunVariantResult(runId, variant.id, variant)
+          .then(() => {
+            if (record.status === "running") emitLocalRunEvent(record, { type: "message", message: `Stored ${variant.name}.` });
+          })
+          .catch((error) => {
+            variantPersistenceWarning = messageFromUnknownError(error) || "A completed dynamic case could not be persisted.";
+          }));
+      }
     );
     record.cancelSolve = handle.cancel;
     const { result } = await handle.completion;
+    await Promise.all(variantWrites);
     if (record.status !== "running") return;
     emitLocalRunEvent(record, { type: "progress", progress: 92, message: "Writing OpenCAE Core result fields." });
-    const results = await persistLocalRunResults(runId, withFieldRunIds(runId, result as ResultsResponse));
+    let stampedResults = withFieldRunIds(runId, result as ResultsResponse);
+    if (variantPersistenceWarning) {
+      stampedResults = {
+        ...stampedResults,
+        summary: {
+          ...stampedResults.summary,
+          diagnostics: [
+            ...(stampedResults.summary.diagnostics ?? []),
+            {
+              id: "dynamic-case-persistence",
+              severity: "warning",
+              source: "local_job",
+              message: `Dynamic cases completed, but not every case could be saved separately: ${variantPersistenceWarning}`,
+              suggestedActions: []
+            }
+          ]
+        }
+      };
+    }
+    const results = await persistLocalRunResults(runId, stampedResults);
     if (record.status !== "running") return;
     setCappedRunEntry(localResultsByRunId, runId, results);
     finishLocalRun(record, "complete", {
@@ -1027,7 +1166,9 @@ function runSimulationLocally(study: Study, displayModel?: DisplayModel, options
       estimatedRemainingMs: 0,
       message: dynamic ? "OpenCAE Core dynamic simulation complete." : "OpenCAE Core simulation complete."
     });
-  })().catch((error) => {
+  })().catch(async (error) => {
+    await Promise.allSettled(variantWrites);
+    await deleteLocalRunVariantResults(runId).catch(() => undefined);
     if (record.status !== "running") return;
     if (isCancelledSolveError(error)) {
       finishLocalRun(record, "cancelled", { type: "cancelled", message: "Simulation cancelled." });
@@ -1118,6 +1259,20 @@ export function dynamicOutputFrameEstimate(study: Study, options: { backend?: st
 
 function finiteOr(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function finitePositiveNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+function capitalizeWord(value: string): string {
+  return value.length ? `${value[0]!.toUpperCase()}${value.slice(1)}` : value;
+}
+
+function randomUuid(): string {
+  return typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
 
 type Vec3 = [number, number, number];

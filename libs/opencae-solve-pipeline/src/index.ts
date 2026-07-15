@@ -18,12 +18,23 @@ import {
   validateCoreResult,
   validateModelJson,
   type CoreResultValidationReport,
+  type CoreStructuralSolveResult,
   type CoreSolveResult,
   type OpenCAEModelJson
 } from "@opencae/core";
-import { solveCoreDynamic, solveCoreStatic, type SolverHooks } from "@opencae/solver-cpu";
+import {
+  combineStaticLinearTetResults,
+  solveDynamicLinearTetLoadCases,
+  solveCoreDynamic,
+  solveCoreModal,
+  solveCoreStatic,
+  solveStaticLinearTetLoadCases,
+  type SolverHooks
+} from "@opencae/solver-cpu";
+import { BROWSER_SOLVE_LIMITS, CLOUD_SOLVER_LIMITS, type SolveLimits } from "./limits";
 
 export type { SolveProgressEvent, SolverHooks } from "@opencae/solver-cpu";
+export { BROWSER_SOLVE_LIMITS, CLOUD_SOLVER_LIMITS, type SolveLimits } from "./limits";
 
 /** Mirror of the deployed runner's SOLVER_CPU_VERSION stamp (server.ts). */
 export const SOLVER_CPU_VERSION = "0.1.5";
@@ -34,7 +45,7 @@ export const SOLVER_CPU_VERSION = "0.1.5";
  */
 export const BROWSER_RUNNER_VERSION = "browser-0.1.0";
 
-export type CorePipelineAnalysisType = "static_stress" | "dynamic_structural";
+export type CorePipelineAnalysisType = "static_stress" | "dynamic_structural" | "modal_analysis";
 
 export type CorePipelineSolverSettings = Record<string, unknown> & {
   stepIndex?: number;
@@ -47,68 +58,7 @@ export type CorePipelineSolverSettings = Record<string, unknown> & {
   timeStep?: number;
   outputInterval?: number;
   allowPreview?: boolean;
-};
-
-/**
- * Resource limits applied by boundedSolverSettings. The first seven entries are
- * the deployed runner's SOLVER_LIMITS verbatim; transientFieldBytes mirrors its
- * MAX_TRANSIENT_FIELD_BYTES; maxTimeSteps is a browser-only integration-step
- * ceiling the cloud never needed because its Worker enforced a 300 s wall-clock
- * timeout around the whole solve.
- */
-export type SolveLimits = {
-  maxDofs: number;
-  maxIterations: number;
-  tolerance: number;
-  maxFrames: number;
-  endTimeSeconds: number;
-  minTimeStepSeconds: number;
-  minOutputIntervalSeconds: number;
-  transientFieldBytes: number;
-  maxTimeSteps: number;
-};
-
-/**
- * The deployed runner's limits (server.ts SOLVER_LIMITS + MAX_TRANSIENT_FIELD_BYTES).
- * maxTimeSteps = endTimeSeconds / minTimeStepSeconds — the runner's implicit
- * ceiling; in the container the real backstop was the 300 s Worker timeout.
- * Use these for golden-fixture parity runs.
- */
-export const CLOUD_SOLVER_LIMITS: SolveLimits = {
-  maxDofs: 100000,
-  maxIterations: 50000,
-  tolerance: 1e-10,
-  maxFrames: 2000,
-  endTimeSeconds: 10,
-  minTimeStepSeconds: 0.0001,
-  minOutputIntervalSeconds: 0.0005,
-  transientFieldBytes: 1.5e9,
-  maxTimeSteps: 100000
-};
-
-/**
- * Browser runtime defaults. Deviations from the cloud limits:
- * - transientFieldBytes 256 MB (browser tab memory, not a 4 GB container),
- * - maxTimeSteps 20k: with no supervisor timeout, a runaway Newmark integration
- *   would block the solve worker for minutes. 20k steps at the conservative
- *   DEFAULT_DYNAMIC_MS_PER_STEP calibration is a ~5 minute worst case, already
- *   past what an interactive tab should attempt (cloud ceiling: 100k steps
- *   backstopped by its 300 s timeout).
- * maxDofs matches the retired cloud runner's 100k since 2026-07. The cap was
- * staged at 60k until (a) the pinned solver gained the typed-array COO->CSR
- * assembly builder (opencae-core bc6c305, bounding transient assembly memory)
- * and (b) a measured target-scale browser run existed on a non-V8 engine.
- * Both landed: scripts/verify-100k-solve.mjs solves a ~99.3k-DOF Tet10 STEP
- * mesh through the real solve worker in headless Chrome AND Playwright WebKit
- * (?solveBench=1 harness) with cross-engine result parity and bounded heap.
- * Every deviation that changes an accepted request surfaces in result
- * diagnostics via the browser-solve-limits diagnostic below (honest results).
- */
-export const BROWSER_SOLVE_LIMITS: SolveLimits = {
-  ...CLOUD_SOLVER_LIMITS,
-  maxDofs: 100000,
-  transientFieldBytes: 256e6,
-  maxTimeSteps: 20000
+  modeCount?: number;
 };
 
 /**
@@ -155,6 +105,31 @@ export type CorePipelineOutcome =
       diagnostics?: unknown[];
       artifacts?: Record<string, unknown>;
     };
+
+export type StaticPipelineCase = { id: string; stepIndex: number };
+export type StaticPipelineCombination = {
+  id: string;
+  factors: Array<{ caseId: string; factor: number }>;
+};
+export type StaticVariantPipelineOutcome =
+  | {
+      ok: true;
+      cases: Array<{ id: string; result: CoreStructuralSolveResult }>;
+      combinations: Array<{ id: string; result: CoreStructuralSolveResult }>;
+    }
+  | {
+      ok: false;
+      status: number;
+      error: CorePipelineError;
+      diagnostics?: unknown[];
+      caseId?: string;
+      combinationId?: string;
+    };
+
+export type DynamicPipelineCase = { id: string; stepIndex: number };
+export type DynamicVariantPipelineOutcome =
+  | { ok: true; cases: Array<{ id: string; result: CoreStructuralSolveResult }> }
+  | { ok: false; status: number; error: CorePipelineError; diagnostics?: unknown[]; caseId?: string };
 
 export type SolveStudyModelWithCorePipelineInput = {
   model: OpenCAEModelJson;
@@ -231,10 +206,11 @@ export function solveStudyModelWithCorePipeline(input: SolveStudyModelWithCorePi
     }
   }
 
-  const result =
-    input.analysisType === "static_stress"
-      ? solveCoreStatic(model, { ...solverSettings, method: "sparse", solverMode: "sparse", hooks: input.hooks })
-      : solveCoreDynamic(model, { ...solverSettings, hooks: input.hooks });
+  const result = input.analysisType === "static_stress"
+    ? solveCoreStatic(model, { ...solverSettings, method: "sparse", solverMode: "sparse", hooks: input.hooks })
+    : input.analysisType === "dynamic_structural"
+      ? solveCoreDynamic(model, { ...solverSettings, hooks: input.hooks })
+      : solveCoreModal(model, { ...solverSettings, hooks: input.hooks });
 
   if (!result.ok) {
     appendPreparedPhase(prepared, phaseDiagnostic("solve", "failed", result.error.message, {
@@ -242,7 +218,7 @@ export function solveStudyModelWithCorePipeline(input: SolveStudyModelWithCorePi
     }));
     return {
       ok: false,
-      status: result.error.code === "actual-volume-mesh-required" ? 422 : 500,
+      status: result.error.code === "actual-volume-mesh-required" || result.error.code === "insufficient-modal-constraints" ? 422 : 500,
       error: result.error,
       diagnostics: [...prepared.diagnostics, ...(result.diagnostics ? [result.diagnostics] : [])],
       artifacts: prepared.artifacts
@@ -281,6 +257,164 @@ export function solveStudyModelWithCorePipeline(input: SolveStudyModelWithCorePi
   }
 
   return { ok: true, result: stamped };
+}
+
+/**
+ * Static multi-case pipeline. The solver owns one prepared Kff and reuses the
+ * previous case displacement as the next CG initial guess; combinations are
+ * formed from raw vectors/tensors before any derived stress scalar is rebuilt.
+ */
+export function solveStaticVariantsWithCorePipeline(input: {
+  model: OpenCAEModelJson;
+  cases: StaticPipelineCase[];
+  combinations?: StaticPipelineCombination[];
+  solverSettings?: CorePipelineSolverSettings;
+  limits?: SolveLimits;
+  hooks?: SolverHooks;
+  runnerVersion?: string;
+}): StaticVariantPipelineOutcome {
+  const validation = validateModelJson(input.model);
+  if (!validation.ok) {
+    return { ok: false, status: 422, error: { code: "validation-failed", message: "Input model failed OpenCAE Core validation.", report: validation } };
+  }
+  if (!input.cases.length) {
+    return { ok: false, status: 422, error: { code: "missing-load-cases", message: "At least one enabled static load case is required." } };
+  }
+  const steps = input.cases.map((loadCase) => ({ loadCase, step: input.model.steps[loadCase.stepIndex] }));
+  if (steps.some(({ step }) => step?.type !== "staticLinear")) {
+    return { ok: false, status: 422, error: { code: "invalid-step", message: "Every static load case must reference a staticLinear step." } };
+  }
+  const staticSteps = steps.map(({ loadCase, step }) => ({ loadCase, step: step! as Extract<typeof step, { type: "staticLinear" }> }));
+  const boundaryConditions = staticSteps[0]!.step.boundaryConditions;
+  if (staticSteps.some(({ step }) => !sameStrings(step.boundaryConditions, boundaryConditions))) {
+    return { ok: false, status: 422, error: { code: "case-support-mismatch", message: "Static load cases must share identical supports." } };
+  }
+  const limits = input.limits ?? BROWSER_SOLVE_LIMITS;
+  const settings = boundedSolverSettings("static_stress", input.solverSettings, input.model, limits);
+  const limitsDeviation = browserLimitsDeviationDiagnostic(limits);
+  const diagnostics: unknown[] = [
+    resourceLimitsDiagnostic("static_stress", settings),
+    ...(limitsDeviation ? [limitsDeviation] : [])
+  ];
+  const batch = solveStaticLinearTetLoadCases(
+    input.model,
+    boundaryConditions,
+    staticSteps.map(({ loadCase, step }) => ({ id: loadCase.id, loadNames: step.loads })),
+    {
+      method: "sparse",
+      solverMode: "sparse",
+      maxDofs: settings.maxDofs,
+      maxIterations: settings.maxIterations,
+      tolerance: settings.tolerance,
+      hooks: input.hooks
+    }
+  );
+  if (!batch.ok) {
+    return {
+      ok: false,
+      status: batch.error.code === "max-dofs-exceeded" ? 422 : 500,
+      error: batch.error,
+      diagnostics: [...diagnostics, ...(batch.diagnostics ? [batch.diagnostics] : [])],
+      ...(batch.caseId ? { caseId: batch.caseId } : {})
+    };
+  }
+  const runnerVersion = input.runnerVersion ?? BROWSER_RUNNER_VERSION;
+  const cases = batch.cases.map((solvedCase) => ({
+    id: solvedCase.id,
+    result: stampAndValidateStaticVariant(solvedCase.result.coreResult!, runnerVersion, diagnostics)
+  }));
+  const rawByCaseId = new Map(batch.cases.map((solvedCase) => [solvedCase.id, solvedCase.result]));
+  const combinations: Array<{ id: string; result: CoreStructuralSolveResult }> = [];
+  for (const combination of input.combinations ?? []) {
+    const terms = combination.factors.flatMap((factor) => {
+      const result = rawByCaseId.get(factor.caseId);
+      return result ? [{ factor: factor.factor, result }] : [];
+    });
+    if (terms.length !== combination.factors.length) {
+      return { ok: false, status: 422, combinationId: combination.id, error: { code: "unknown-combination-case", message: `Load combination ${combination.id} references an unsolved or disabled case.` } };
+    }
+    const combined = combineStaticLinearTetResults(batch.prepared, terms, { visualizationSmoothing: settings.visualizationSmoothing as { iterations?: number; alpha?: number } | undefined });
+    if (!combined.ok) {
+      return { ok: false, status: 500, combinationId: combination.id, error: combined.error, diagnostics: combined.diagnostics ? [combined.diagnostics] : undefined };
+    }
+    combinations.push({
+      id: combination.id,
+      result: stampAndValidateStaticVariant(combined.result.coreResult!, runnerVersion, diagnostics)
+    });
+  }
+  return { ok: true, cases, combinations };
+}
+
+/** Dynamic cases share K/M and stream each completed case without retaining the aggregate transient payload. */
+export function solveDynamicVariantsWithCorePipeline(input: {
+  model: OpenCAEModelJson;
+  cases: DynamicPipelineCase[];
+  solverSettings?: CorePipelineSolverSettings;
+  limits?: SolveLimits;
+  hooks?: SolverHooks;
+  runnerVersion?: string;
+  onCaseComplete?: (entry: { id: string; result: CoreStructuralSolveResult }) => void;
+}): DynamicVariantPipelineOutcome {
+  const validation = validateModelJson(input.model);
+  if (!validation.ok) {
+    return { ok: false, status: 422, error: { code: "validation-failed", message: "Input model failed OpenCAE Core validation.", report: validation } };
+  }
+  if (!input.cases.length) {
+    return { ok: false, status: 422, error: { code: "missing-load-cases", message: "At least one enabled dynamic load case is required." } };
+  }
+  const limits = input.limits ?? BROWSER_SOLVE_LIMITS;
+  const settings = boundedSolverSettings("dynamic_structural", { ...input.solverSettings, stepIndex: input.cases[0]!.stepIndex }, input.model, limits);
+  const guard = dynamicBudgetGuard(input.model, settings, limits);
+  if (guard) return { ok: false, status: 422, error: guard };
+  const limitsDeviation = browserLimitsDeviationDiagnostic(limits);
+  const diagnostics: unknown[] = [
+    resourceLimitsDiagnostic("dynamic_structural", settings),
+    ...(limitsDeviation ? [limitsDeviation] : [])
+  ];
+  const runnerVersion = input.runnerVersion ?? BROWSER_RUNNER_VERSION;
+  const firstCompleted: Array<{ id: string; result: CoreStructuralSolveResult }> = [];
+  const solved = solveDynamicLinearTetLoadCases(
+    input.model,
+    input.cases,
+    {
+      ...settings,
+      hooks: input.hooks,
+      maxDofs: settings.maxDofs,
+      maxIterations: settings.maxIterations,
+      tolerance: settings.tolerance
+    },
+    (entry) => {
+      const result = stampAndValidateStaticVariant(entry.result.coreResult!, runnerVersion, diagnostics);
+      if (!firstCompleted.length) firstCompleted.push({ id: entry.id, result });
+      input.onCaseComplete?.({ id: entry.id, result });
+    },
+    false
+  );
+  if (!solved.ok) {
+    return {
+      ok: false,
+      status: solved.error.code === "max-dofs-exceeded" ? 422 : 500,
+      error: solved.error,
+      diagnostics: solved.diagnostics ? [...diagnostics, solved.diagnostics] : diagnostics,
+      ...(solved.caseId ? { caseId: solved.caseId } : {})
+    };
+  }
+  return { ok: true, cases: firstCompleted };
+}
+
+function stampAndValidateStaticVariant(
+  result: CoreStructuralSolveResult,
+  runnerVersion: string,
+  diagnostics: unknown[]
+): CoreStructuralSolveResult {
+  const stamped = stampBrowserProvenance(result, runnerVersion, diagnostics) as CoreStructuralSolveResult;
+  const validation = validateCoreResult(stamped);
+  if (!validation.ok) throw new Error(coreResultValidationFailureMessage(validation));
+  return stamped;
+}
+
+function sameStrings(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 export function coreResultValidationFailureMessage(report: CoreResultValidationReport): string {
@@ -356,6 +490,13 @@ export function boundedSolverSettings(
     settings.startTime = startTime;
     settings.endTime = Math.min(settings.endTime, maxFrameEndTime);
   }
+  if (analysisType === "modal_analysis") {
+    const modalStep = selectedStep?.type === "modal" ? selectedStep : undefined;
+    settings.modeCount = Math.min(
+      Math.max(positiveInteger(input?.modeCount) ?? positiveInteger(modalStep?.modeCount) ?? 6, 1),
+      10
+    );
+  }
   return settings;
 }
 
@@ -392,7 +533,9 @@ function resourceLimitsDiagnostic(
           timeStep: settings.timeStep,
           outputInterval: settings.outputInterval
         }
-      : {})
+      : analysisType === "modal_analysis"
+        ? { modeCount: settings.modeCount }
+        : {})
   };
 }
 
@@ -450,7 +593,7 @@ function dynamicBudgetGuard(
  * Port of the runner's stampCloudProvenance: identical solver/core/solver-cpu
  * ids, with the runnerVersion identifying the browser pipeline.
  */
-function stampBrowserProvenance(
+export function stampBrowserProvenance(
   result: CoreSolveResult,
   runnerVersion: string,
   diagnostics: unknown[] = [],
@@ -463,18 +606,11 @@ function stampBrowserProvenance(
     solverCpuVersion: SOLVER_CPU_VERSION,
     runnerVersion
   };
-  return {
-    ...result,
-    summary: {
-      ...result.summary,
-      provenance
-    },
-    provenance,
-    artifacts: {
-      ...(result.artifacts ?? {}),
-      ...artifacts
-    },
-    diagnostics: [...diagnostics, ...result.diagnostics.map((diagnostic) => {
+  const stampedArtifacts = {
+    ...(result.artifacts ?? {}),
+    ...artifacts
+  };
+  const stampedDiagnostics = [...diagnostics, ...result.diagnostics.map((diagnostic) => {
       if (!diagnostic || typeof diagnostic !== "object" || !("id" in diagnostic)) return diagnostic;
       if ((diagnostic as { id?: unknown }).id !== "core-solve-diagnostics") return diagnostic;
       return {
@@ -483,7 +619,29 @@ function stampBrowserProvenance(
         solverCpuVersion: SOLVER_CPU_VERSION,
         runnerVersion
       };
-    })]
+    })];
+  if (result.analysisType === "modal_analysis") {
+    return {
+      ...result,
+      analysisType: "modal_analysis",
+      summary: {
+        ...result.summary,
+        provenance
+      },
+      provenance,
+      artifacts: stampedArtifacts,
+      diagnostics: stampedDiagnostics
+    };
+  }
+  return {
+    ...result,
+    summary: {
+      ...result.summary,
+      provenance
+    },
+    provenance,
+    artifacts: stampedArtifacts,
+    diagnostics: stampedDiagnostics
   };
 }
 

@@ -1,9 +1,11 @@
 export const OPENCAE_MODEL_SCHEMA = "opencae.model";
-export const OPENCAE_MODEL_SCHEMA_VERSION = "0.2.0";
+export const OPENCAE_MODEL_SCHEMA_VERSION = "0.3.0";
+export const OPENCAE_PREVIOUS_MODEL_SCHEMA_VERSION = "0.2.0";
 export const OPENCAE_LEGACY_MODEL_SCHEMA_VERSION = "0.1.0";
 
 export type OpenCAEModelSchemaVersion =
   | typeof OPENCAE_MODEL_SCHEMA_VERSION
+  | typeof OPENCAE_PREVIOUS_MODEL_SCHEMA_VERSION
   | typeof OPENCAE_LEGACY_MODEL_SCHEMA_VERSION;
 
 export type ElementType = "Tet4" | "Tet10";
@@ -139,7 +141,15 @@ export type PrescribedDisplacementBoundaryConditionJson = {
 
 export type DisplacementComponent = "x" | "y" | "z";
 
-export type LoadJson = NodalForceLoadJson | SurfaceForceLoadJson | PressureLoadJson | BodyGravityLoadJson;
+export type LoadJson =
+  | NodalForceLoadJson
+  | SurfaceForceLoadJson
+  | PressureLoadJson
+  | BodyGravityLoadJson
+  | SurfaceTractionLoadJson
+  | BodyForceDensityLoadJson
+  | RemoteForceLoadJson
+  | EquivalentBoltPreloadLoadJson;
 
 export type NodalForceLoadJson = {
   name: string;
@@ -169,7 +179,42 @@ export type BodyGravityLoadJson = {
   acceleration: [number, number, number];
 };
 
-export type StepJson = StaticLinearStepJson | DynamicLinearStepJson;
+/** Uniform force per unit area in the model's solver unit system. */
+export type SurfaceTractionLoadJson = {
+  name: string;
+  type: "surfaceTraction";
+  surfaceSet: string;
+  traction: [number, number, number];
+};
+
+/** Uniform force per unit volume over an explicit element set. */
+export type BodyForceDensityLoadJson = {
+  name: string;
+  type: "bodyForceDensity";
+  elementSet: string;
+  forceDensity: [number, number, number];
+};
+
+/** Distributed equivalent wrench; this is not a rigid MPC coupling. */
+export type RemoteForceLoadJson = {
+  name: string;
+  type: "remoteForce";
+  surfaceSet: string;
+  totalForce: [number, number, number];
+  remotePoint: [number, number, number];
+};
+
+/** Static bonded-linear preload approximation without contact or fastener stiffness. */
+export type EquivalentBoltPreloadLoadJson = {
+  name: string;
+  type: "equivalentBoltPreload";
+  surfaceSetA: string;
+  surfaceSetB: string;
+  axis: [number, number, number];
+  preloadForce: number;
+};
+
+export type StepJson = StaticLinearStepJson | DynamicLinearStepJson | ModalStepJson;
 
 export type StaticLinearStepJson = {
   name: string;
@@ -196,6 +241,13 @@ export type DynamicLinearStepJson = {
 };
 
 export type DynamicStepJson = DynamicLinearStepJson;
+
+export type ModalStepJson = {
+  name: string;
+  type: "modal";
+  boundaryConditions: string[];
+  modeCount: number;
+};
 
 export type ResultSampleLocation = "node" | "element" | "integration_point";
 

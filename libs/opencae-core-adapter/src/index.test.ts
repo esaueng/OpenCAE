@@ -270,6 +270,100 @@ describe("core cloud structured block model frame", () => {
   });
 });
 
+describe("advanced load adapter contracts", () => {
+  function withBodySelection(study: Study): Study {
+    return {
+      ...study,
+      namedSelections: [{
+        id: "selection-body-1",
+        name: "Cantilever body",
+        entityType: "body",
+        geometryRefs: [{ bodyId: "body-1", entityType: "body", entityId: "body-1", label: "Cantilever body" }],
+        fingerprint: "body-1"
+      }, ...study.namedSelections]
+    };
+  }
+
+  test("maps traction and volume-force density into canonical solver units", () => {
+    const study = withBodySelection(studyFixture({
+      loads: [
+        { id: "traction", type: "surface_traction", selectionRef: "selection-load-face", parameters: { value: 125, units: "kPa", direction: [0, -1, 0] }, status: "complete" },
+        { id: "volume", type: "volume_force", selectionRef: "selection-body-1", parameters: { value: 2.5, units: "kN/m^3", direction: [0, -1, 0] }, status: "complete" }
+      ]
+    }));
+
+    const model = buildOpenCaeCoreModelForStudy(study, cantileverDisplayModel()).model;
+    const traction = model.loads.find((load) => load.type === "surfaceTraction");
+    const volume = model.loads.find((load) => load.type === "bodyForceDensity");
+
+    expect(traction).toMatchObject({ type: "surfaceTraction", traction: [0, 0, -125_000] });
+    expect(volume).toMatchObject({ type: "bodyForceDensity", elementSet: "allElements", forceDensity: [0, 0, -2_500] });
+  });
+
+  test("maps remote force point and records distributed-wrench diagnostics", () => {
+    const study = studyFixture({
+      loads: [{
+        id: "remote",
+        type: "remote_force",
+        selectionRef: "selection-load-face",
+        parameters: { value: 200, units: "N", direction: [0, -1, 0], remotePoint: [2.4, 0.8, 0] },
+        status: "complete"
+      }]
+    });
+
+    const coreBuild = buildOpenCaeCoreModelForStudy(study, cantileverDisplayModel());
+    const remote = coreBuild.model.loads.find((load) => load.type === "remoteForce");
+    expect(remote).toMatchObject({ type: "remoteForce", totalForce: [0, 0, -200] });
+    expect(remote?.type === "remoteForce" ? remote.remotePoint.every(Number.isFinite) : false).toBe(true);
+    const solved = solveCoreStatic(coreBuild.model, { method: "sparse", solverMode: "sparse" });
+    expect(solved.ok, solved.ok ? undefined : solved.error.message).toBe(true);
+    if (!solved.ok) return;
+    const loadAssembly = solved.diagnostics.loadAssembly;
+    expect(loadAssembly?.perLoad[0]).toMatchObject({
+      distribution: "area_weighted_minimum_norm",
+      approximation: expect.stringMatching(/no rigid MPC coupling/i)
+    });
+    expect(loadAssembly?.perLoad[0]?.forceBalanceError).toBeLessThan(1e-9);
+    expect(loadAssembly?.perLoad[0]?.momentBalanceError).toBeLessThan(1e-9);
+  });
+
+  test("maps a static equivalent preload and rejects it for dynamic studies", () => {
+    const preload = {
+      id: "preload",
+      type: "bolt_preload" as const,
+      selectionRef: "selection-fixed-face",
+      parameters: { value: 1_200, units: "N", direction: [1, 0, 0], secondarySelectionRef: "selection-load-face" },
+      status: "complete" as const
+    };
+    const staticStudy = studyFixture({ loads: [preload] });
+    const model = buildOpenCaeCoreModelForStudy(staticStudy, cantileverDisplayModel()).model;
+    expect(model.loads[0]).toMatchObject({
+      type: "equivalentBoltPreload",
+      axis: [1, 0, 0],
+      preloadForce: 1_200
+    });
+    const dynamicStudy = studyFixture({
+      name: "Dynamic",
+      type: "dynamic_structural",
+      loads: [preload],
+      solverSettings: {
+        backend: "opencae_core_local",
+        startTime: 0,
+        endTime: 0.1,
+        timeStep: 0.01,
+        outputInterval: 0.01,
+        dampingRatio: 0.02,
+        integrationMethod: "newmark_average_acceleration",
+        loadProfile: "ramp"
+      }
+    });
+    expect(openCaeCoreEligibility(dynamicStudy, cantileverDisplayModel())).toEqual({
+      ok: false,
+      reason: "Equivalent bolt preload is supported for static studies only."
+    });
+  });
+});
+
 function coordinateSpans(coordinates: number[]): { x: number; y: number; z: number } {
   const min = [Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY];
   const max = [Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY];
@@ -301,6 +395,126 @@ describe("local core solve mesh statistics", () => {
     // shared midside nodes: (2*23+1)*(2*3+1)*(2*3+1) = 2303 nodes.
     expect(stats!.nodes).toBe(2303);
     expect(stats!.elements).toBe(23 * 3 * 3 * 6);
+    expect(stats!.totalDofs).toBe(stats!.nodes * 3);
+    expect(stats!.freeDofs).toBeLessThan(stats!.totalDofs);
+    expect(stats!.constrainedDofs).toBe(stats!.totalDofs - stats!.freeDofs);
+    expect(stats!.representativeElementSizeMm).toBeGreaterThan(0);
+  });
+});
+
+describe("load-case run variants", () => {
+  test("ignores disabled empty cases without invalidating the enabled solve", () => {
+    const study = studyFixture({
+      loadCases: [
+        { id: "service", name: "Service", enabled: true, loadIds: ["load-1"] },
+        { id: "draft", name: "Draft", enabled: false, loadIds: [] }
+      ],
+      loadCombinations: []
+    });
+
+    const solved = trySolveOpenCaeCoreStudy({ study, runId: "run-disabled-case", displayModel: cantileverDisplayModel() });
+
+    expect(solved.ok, solved.ok ? undefined : solved.reason).toBe(true);
+    if (!solved.ok) return;
+    expect(solved.result.variants?.map((variant) => variant.id)).toEqual(["case:service"]);
+  });
+
+  test("solves enabled cases and signed combinations, then creates a governing envelope", () => {
+    const study = studyFixture({
+      loads: [
+        { id: "load-down", type: "force", selectionRef: "selection-load-face", parameters: { value: 500, units: "N", direction: [0, -1, 0] }, status: "complete" },
+        { id: "load-side", type: "force", selectionRef: "selection-load-face", parameters: { value: 250, units: "N", direction: [0, 0, -1] }, status: "complete" }
+      ],
+      loadCases: [
+        { id: "down", name: "Down", enabled: true, loadIds: ["load-down"] },
+        { id: "side", name: "Side", enabled: true, loadIds: ["load-side"] }
+      ],
+      loadCombinations: [{
+        id: "down-minus-side",
+        name: "Down - 0.5 Side",
+        enabled: true,
+        factors: [{ caseId: "down", factor: 1 }, { caseId: "side", factor: -0.5 }]
+      }]
+    });
+    const solved = trySolveOpenCaeCoreStudy({ study, runId: "run-cases", displayModel: cantileverDisplayModel() });
+    expect(solved.ok).toBe(true);
+    if (!solved.ok) return;
+    expect(solved.result.variants?.map((variant) => [variant.id, variant.kind])).toEqual([
+      ["case:down", "case"],
+      ["case:side", "case"],
+      ["combination:down-minus-side", "combination"],
+      ["envelope", "envelope"]
+    ]);
+    expect(solved.result.activeVariantId).toBe("case:down");
+    expect(solved.result.fields.every((field) => field.runId === "run-cases" && field.variantId === "case:down")).toBe(true);
+    const envelope = solved.result.variants?.at(-1);
+    expect(envelope?.governingVariantIndices?.variantIds).toEqual([
+      "case:down",
+      "case:side",
+      "combination:down-minus-side"
+    ]);
+    expect(envelope?.governingVariantIndices?.stress.length).toBe(solved.result.surfaceMesh?.nodes.length);
+    expect(envelope?.governingVariantIndices?.displacement.length).toBe(solved.result.surfaceMesh?.nodes.length);
+  });
+
+  test("streams dynamic cases separately and retains only the active transient payload", () => {
+    const loads = [
+      { id: "load-down", type: "force" as const, selectionRef: "selection-load-face", parameters: { value: 40, units: "N", direction: [0, -1, 0] }, status: "complete" as const },
+      { id: "load-side", type: "force" as const, selectionRef: "selection-load-face", parameters: { value: 20, units: "N", direction: [0, 0, -1] }, status: "complete" as const }
+    ];
+    const study = studyFixture({
+      name: "Dynamic cases",
+      type: "dynamic_structural",
+      loads,
+      loadCases: [
+        { id: "down", name: "Down", enabled: true, loadIds: ["load-down"] },
+        { id: "side", name: "Side", enabled: true, loadIds: ["load-side"] }
+      ],
+      loadCombinations: [],
+      meshSettings: {
+        preset: "coarse",
+        status: "complete",
+        meshRef: "actual-core-model",
+        summary: {
+          nodes: 4,
+          elements: 1,
+          warnings: [],
+          artifacts: { actualCoreModel: { model: actualCoreModelFixture() } }
+        }
+      },
+      solverSettings: {
+        backend: "opencae_core_local",
+        startTime: 0,
+        endTime: 0.01,
+        timeStep: 0.005,
+        outputInterval: 0.005,
+        dampingRatio: 0.02,
+        integrationMethod: "newmark_average_acceleration",
+        loadProfile: "ramp"
+      }
+    });
+    const streamed: Array<{ id: string; frameCount: number }> = [];
+
+    const solved = trySolveOpenCaeCoreStudy({
+      study,
+      runId: "run-dynamic-cases",
+      displayModel: cantileverDisplayModel(),
+      onVariantComplete: (variant) => streamed.push({
+        id: variant.id,
+        frameCount: variant.fields.filter((field) => field.type === "displacement").length
+      })
+    });
+
+    expect(solved.ok).toBe(true);
+    if (!solved.ok) return;
+    expect(streamed.map((variant) => variant.id)).toEqual(["case:down", "case:side"]);
+    expect(streamed.every((variant) => variant.frameCount === 3)).toBe(true);
+    expect(solved.result.variants?.map((variant) => variant.id)).toEqual(["case:down"]);
+    expect(solved.result.variantRefs).toEqual([
+      { id: "case:down", name: "Down", kind: "case", caseId: "down", persistedSeparately: true },
+      { id: "case:side", name: "Side", kind: "case", caseId: "side", persistedSeparately: true }
+    ]);
+    expect(solved.result.activeVariantId).toBe("case:down");
   });
 });
 
@@ -396,6 +610,34 @@ describe("per-model solver backend resolution", () => {
     for (const block of coreBuild.model.elementBlocks) {
       expect(block.material).toBe("mat-petg");
     }
+  });
+
+  test("builds and validates with a project custom material while rejecting unknown IDs", () => {
+    const custom = {
+      id: "0ac4dbda-1d37-43c0-b3ac-9d1d2cc28e84",
+      name: "Shop aluminum",
+      category: "metal" as const,
+      youngsModulus: 70e9,
+      poissonRatio: 0.33,
+      density: 2710,
+      yieldStrength: 290e6,
+      verification: "user_supplied_unverified" as const
+    };
+    const customStudy = studyFixture({
+      materialAssignments: [{ ...studyFixture().materialAssignments[0]!, materialId: custom.id }]
+    });
+    const unknownStudy = studyFixture({
+      materialAssignments: [{ ...studyFixture().materialAssignments[0]!, materialId: "deleted-custom-material" }]
+    });
+
+    expect(openCaeCoreEligibility(customStudy, cantileverDisplayModel(), undefined, [custom])).toEqual({ ok: true });
+    const coreBuild = buildOpenCaeCoreModelForStudy(customStudy, cantileverDisplayModel(), [custom]);
+    expect(coreBuild.model.materials[0]).toMatchObject({
+      name: custom.id,
+      youngModulus: custom.youngsModulus,
+      density: custom.density
+    });
+    expect(openCaeCoreEligibility(unknownStudy, cantileverDisplayModel())).toEqual({ ok: false, reason: 'Unknown material "deleted-custom-material".' });
   });
 
   test("a retired explicit cloud choice resolves as auto local (old saves keep working)", () => {

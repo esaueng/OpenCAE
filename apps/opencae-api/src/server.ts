@@ -7,7 +7,7 @@ import { SQLiteDatabaseProvider } from "@opencae/db";
 import { bracketDemoMaterial, bracketDemoProject, bracketDisplayModel, bracketResultFields, bracketResultSummary } from "@opencae/db/sample-data";
 import { InMemoryJobQueueProvider, LocalRunStateProvider } from "@opencae/jobs";
 import { MockMeshService } from "@opencae/mesh-service";
-import { assertCompatibleManufacturingProcess } from "@opencae/materials";
+import { assertCompatibleManufacturingProcess, resolveMaterial } from "@opencae/materials";
 import { buildHtmlReport, buildPdfReport, LocalReportProvider, reportPdfKeyFor } from "@opencae/post-service";
 import { solveDynamicStudy } from "@opencae/solver-service";
 import {
@@ -32,7 +32,7 @@ import {
 import { mutatingRateLimit, pdfFilename, projectsReadRateLimit, sanitizeFilename, sanitizeProjectName } from "./security";
 import { hasActualCoreVolumeMesh, openCaeCoreEligibility, trySolveOpenCaeCoreStudy } from "@opencae/core-adapter";
 import { FileSystemObjectStorageProvider } from "@opencae/storage";
-import { validateStaticStressStudy, validateStudy } from "@opencae/study-core";
+import { validateStudy } from "@opencae/study-core";
 import {
   attachUploadedModelToProject,
   blankDisplayModel,
@@ -348,7 +348,8 @@ api.post("/api/studies/:studyId/validate", async (request, reply) => {
   const { studyId } = request.params as { studyId: string };
   const study = db.getStudy(studyId);
   if (!study) return reply.code(404).send({ error: "Study not found" });
-  const diagnostics = validateStaticStressStudy(study).map((diagnostic) => diagnostic.message);
+  const project = db.getProject(study.projectId);
+  const diagnostics = validateStudy(study, project?.customMaterials).map((diagnostic) => diagnostic.message);
   return { ready: diagnostics.length === 0, diagnostics };
 });
 
@@ -359,12 +360,14 @@ api.post("/api/studies/:studyId/materials", async (request, reply) => {
   const body = request.body as { materialId?: string; parameters?: Record<string, unknown> } | undefined;
   const materialId = body?.materialId ?? bracketDemoMaterial.id;
   const parameters = body?.parameters ?? {};
-  if (parameters.manufacturingProcessId !== undefined) {
-    try {
-      assertCompatibleManufacturingProcess(materialId, parameters.manufacturingProcessId);
-    } catch (error) {
-      return reply.code(400).send({ error: error instanceof Error ? error.message : "Invalid material and manufacturing process." });
+  try {
+    const project = db.getProject(study.projectId);
+    resolveMaterial(materialId, project?.customMaterials);
+    if (parameters.manufacturingProcessId !== undefined) {
+      assertCompatibleManufacturingProcess(materialId, parameters.manufacturingProcessId, project?.customMaterials);
     }
+  } catch (error) {
+    return reply.code(400).send({ error: error instanceof Error ? error.message : "Invalid material and manufacturing process." });
   }
   const bodySelection = study.namedSelections.find((selection) => selection.entityType === "body");
   const assignment = {
@@ -400,20 +403,25 @@ api.post("/api/studies/:studyId/loads", async (request, reply) => {
   const { studyId } = request.params as { studyId: string };
   const study = db.getStudy(studyId);
   if (!study) return reply.code(404).send({ error: "Study not found" });
-  const body = request.body as Partial<Load> & { value?: number; selectionRef?: string; direction?: [number, number, number]; directionMode?: string; applicationPoint?: [number, number, number]; payloadObject?: unknown; payloadMaterialId?: string; payloadVolumeM3?: number; payloadMassMode?: string } | undefined;
+  const body = request.body as Partial<Load> & { value?: number; selectionRef?: string; direction?: [number, number, number]; directionMode?: string; applicationPoint?: [number, number, number]; remotePoint?: [number, number, number]; secondarySelectionRef?: string; payloadObject?: unknown; payloadMaterialId?: string; payloadVolumeM3?: number; payloadMassMode?: string } | undefined;
   const type = body?.type ?? "force";
   if (!isLoadType(type)) return reply.code(400).send({ error: "Invalid load type." });
+  if (type === "bolt_preload" && study.type !== "static_stress") return reply.code(400).send({ error: "Equivalent bolt preload is static-only." });
   if (body?.directionMode !== undefined && !isLoadDirectionMode(body.directionMode)) return reply.code(400).send({ error: "Invalid load direction mode." });
   const payloadVolumeM3 = body?.payloadVolumeM3;
   const load: Load = {
     id: `load-${crypto.randomUUID()}`,
     type,
     selectionRef: body?.selectionRef ?? "selection-load-face",
-    parameters: { value: body?.value ?? 500, units: unitsForLoadType(type), direction: body?.direction ?? [0, 0, -1], ...(body?.directionMode ? { directionMode: body.directionMode } : {}), ...(body?.applicationPoint ? { applicationPoint: body.applicationPoint } : {}), ...(body?.payloadObject ? { payloadObject: body.payloadObject } : {}), ...(type === "gravity" && body?.payloadMaterialId ? { payloadMaterialId: body.payloadMaterialId } : {}), ...(type === "gravity" && Number.isFinite(payloadVolumeM3) ? { payloadVolumeM3 } : {}), ...(type === "gravity" && body?.payloadMassMode ? { payloadMassMode: body.payloadMassMode } : {}) },
+    parameters: { value: body?.value ?? 500, units: unitsForLoadType(type), direction: body?.direction ?? [0, 0, -1], ...(body?.directionMode ? { directionMode: body.directionMode } : {}), ...(body?.applicationPoint ? { applicationPoint: body.applicationPoint } : {}), ...(type === "remote_force" && body?.remotePoint ? { remotePoint: body.remotePoint } : {}), ...(type === "bolt_preload" && body?.secondarySelectionRef ? { secondarySelectionRef: body.secondarySelectionRef } : {}), ...(body?.payloadObject ? { payloadObject: body.payloadObject } : {}), ...(type === "gravity" && body?.payloadMaterialId ? { payloadMaterialId: body.payloadMaterialId } : {}), ...(type === "gravity" && Number.isFinite(payloadVolumeM3) ? { payloadVolumeM3 } : {}), ...(type === "gravity" && body?.payloadMassMode ? { payloadMassMode: body.payloadMassMode } : {}) },
     status: "complete"
   };
-  const next = { ...study, loads: [...study.loads, load] };
-  const loadDiagnostics = validateStaticStressStudy(next).filter((diagnostic) => diagnostic.id.includes(load.id));
+  const loadCases = study.type === "modal_analysis" ? undefined : (study.loadCases?.length
+    ? study.loadCases
+    : [{ id: "case-default", name: "Default", enabled: true, loadIds: study.loads.map((item) => item.id) }])
+      .map((loadCase, index) => index === 0 ? { ...loadCase, loadIds: [...loadCase.loadIds, load.id] } : loadCase);
+  const next = { ...study, loads: [...study.loads, load], ...(loadCases ? { loadCases } : {}) } as Study;
+  const loadDiagnostics = validateStudy(next).filter((diagnostic) => diagnostic.id.includes(load.id));
   if (loadDiagnostics.length) {
     return reply.code(400).send({ error: "Invalid load.", diagnostics: loadDiagnostics });
   }
@@ -440,12 +448,12 @@ api.post("/api/studies/:studyId/runs", mutatingRateLimit, async (request, reply)
   const { studyId } = request.params as { studyId: string };
   const study = db.getStudy(studyId);
   if (!study) return reply.code(404).send({ error: "Study not found" });
-  const runDiagnostics = validateStudy(study);
+  const project = db.getProject(study.projectId);
+  const runDiagnostics = validateStudy(study, project?.customMaterials);
   if (runDiagnostics.length) return reply.code(400).send({ error: "Study is not ready.", diagnostics: runDiagnostics });
   const studySnapshot = structuredClone(study);
-  const project = db.getProject(studySnapshot.projectId);
   const displayModel = project ? await displayModelForProject(project) : blankDisplayModel();
-  const eligibility = openCaeCoreEligibility(studySnapshot, displayModel);
+  const eligibility = openCaeCoreEligibility(studySnapshot, displayModel, undefined, project?.customMaterials);
   const runId = `run-${crypto.randomUUID()}`;
   const jobId = `job-${crypto.randomUUID()}`;
   const run: StudyRun = {
@@ -467,7 +475,7 @@ api.post("/api/studies/:studyId/runs", mutatingRateLimit, async (request, reply)
       if (runCancelled()) return;
       publish(runId, "state", 3, "OpenCAE Core simulation running.");
       publish(runId, "progress", 18, studySnapshot.type === "dynamic_structural" ? "OpenCAE Core dynamic Tet4 solver started." : "OpenCAE Core CPU Tet4 solver started.");
-      const solved = trySolveOpenCaeCoreStudy({ study: studySnapshot, runId, displayModel });
+      const solved = trySolveOpenCaeCoreStudy({ study: studySnapshot, runId, displayModel, customMaterials: project?.customMaterials });
       if (runCancelled()) return;
       if (!solved.ok) {
         const failed = {
@@ -651,7 +659,7 @@ function completeRunMessage(resultTier: ResultProvenanceTier): string {
 }
 
 function isLoadType(type: unknown): type is Load["type"] {
-  return type === "force" || type === "pressure" || type === "gravity";
+  return type === "force" || type === "pressure" || type === "gravity" || type === "surface_traction" || type === "volume_force" || type === "remote_force" || type === "bolt_preload";
 }
 
 function isLoadDirectionMode(value: unknown): value is string {
@@ -659,7 +667,8 @@ function isLoadDirectionMode(value: unknown): value is string {
 }
 
 function unitsForLoadType(type: Load["type"]) {
-  if (type === "pressure") return "kPa";
+  if (type === "pressure" || type === "surface_traction") return "kPa";
+  if (type === "volume_force") return "N/m^3";
   if (type === "gravity") return "kg";
   return "N";
 }

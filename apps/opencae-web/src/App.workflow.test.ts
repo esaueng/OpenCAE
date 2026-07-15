@@ -87,7 +87,7 @@ describe("App workflow layout", () => {
   test("rejects dynamic results that do not contain animation frames before showing Results", () => {
     expect(appSource).toContain("hasDynamicPlaybackFrames(results.summary, results.fields)");
     expect(appSource).toContain("Dynamic results did not include animation frames.");
-    expect(appSource).toContain('if (study.type === "dynamic_structural" && !hasDynamicPlaybackFrames(results.summary, results.fields))');
+    expect(appSource).toContain('if (study.type === "dynamic_structural" && (isModalResultSummary(results.summary) || !hasDynamicPlaybackFrames(results.summary, results.fields)))');
   });
 
   test("surfaces run creation failures instead of leaving the run button inert", () => {

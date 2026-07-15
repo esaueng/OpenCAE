@@ -1,5 +1,5 @@
-import { classifyResultProvenance } from "@opencae/schema";
-import type { DisplayModel, Project, ResultField, ResultProvenance, ResultSummary, Study } from "@opencae/schema";
+import { classifyResultProvenance, isModalResultSummary } from "@opencae/schema";
+import type { DisplayModel, ModalResultSummary, Project, ResultField, ResultProvenance, ResultSummary, StructuralResultSummary, Study } from "@opencae/schema";
 
 export type UnitSystem = Project["unitSystem"];
 
@@ -12,6 +12,7 @@ const CUBIC_MM_PER_CUBIC_INCH = MM_PER_INCH ** 3;
 const CUBIC_CM_PER_CUBIC_METER = 1_000_000;
 const CUBIC_IN_PER_CUBIC_METER = 61_023.7440947323;
 const LB_PER_KG_PER_CUBIC_METER = 0.0624279605761;
+const NEWTONS_PER_CUBIC_METER_PER_LBF_PER_CUBIC_INCH = 271_447.14116097;
 
 export function formatUnitSystemLabel(unitSystem: UnitSystem): string {
   return unitSystem === "US" ? "Imperial · in" : "Metric · mm";
@@ -55,10 +56,16 @@ export function loadValueForUnits(value: number, units: string, unitSystem: Unit
   if (units === "N" || units === "lbf") return forceForUnits(value, units, unitSystem);
   if (units === "kPa" || units === "psi") return pressureForUnits(value, units, unitSystem);
   if (units === "kg" || units === "lb") return massForUnits(value, units, unitSystem);
+  if (units === "N/m^3" && unitSystem === "US") return { value: value / NEWTONS_PER_CUBIC_METER_PER_LBF_PER_CUBIC_INCH, units: "lbf/in^3" };
+  if (units === "lbf/in^3" && unitSystem === "SI") return { value: value * NEWTONS_PER_CUBIC_METER_PER_LBF_PER_CUBIC_INCH, units: "N/m^3" };
   return { value, units };
 }
 
+export function resultSummaryForUnits(summary: StructuralResultSummary, unitSystem: UnitSystem): StructuralResultSummary;
+export function resultSummaryForUnits(summary: ModalResultSummary, unitSystem: UnitSystem): ModalResultSummary;
+export function resultSummaryForUnits(summary: ResultSummary, unitSystem: UnitSystem): ResultSummary;
 export function resultSummaryForUnits(summary: ResultSummary, unitSystem: UnitSystem): ResultSummary {
+  if (isModalResultSummary(summary)) return summary;
   const stress = stressForUnits(summary.maxStress, summary.maxStressUnits, unitSystem);
   const displacement = lengthForUnits(summary.maxDisplacement, summary.maxDisplacementUnits, unitSystem);
   const reaction = forceForUnits(summary.reactionForce, summary.reactionForceUnits, unitSystem);
@@ -155,6 +162,7 @@ export function formatResultMetric(value: number, units: string | undefined): st
 export function solverMethodForResult(resultSummary: ResultSummary, study: Study): string {
   const provenanceMethod = (resultSummary.provenance as Record<string, unknown> | undefined)?.coreSolver;
   if (typeof provenanceMethod === "string" && provenanceMethod) return provenanceMethod;
+  if (isModalResultSummary(resultSummary) || study.type === "modal_analysis") return "block_shift_invert_modal";
   if (resultSummary.transient || study.type === "dynamic_structural") return "mdof_dynamic";
   return "sparse_static";
 }
