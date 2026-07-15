@@ -11,6 +11,129 @@ interface SampleOptionCardProps {
   onOpen: (sample: SampleModelId) => void;
 }
 
+type FaceFill = "top" | "side" | "end" | "pt" | "ps" | "pe";
+
+interface ThumbArt {
+  /** [cx, cy, rx] of the contact shadow. */
+  shadow: [number, number, number];
+  /** Offset outlines showing the envelope of the motion. */
+  ghosts: string[];
+  /** Faces of the fixed-support wall. */
+  fixed: string[];
+  /** Face the support hatching is clipped to. */
+  hatchClip?: string;
+  /** Shaded faces, already in back-to-front order. */
+  faces: Array<[FaceFill, string]>;
+  /** Extruded profile cap; needs evenodd so the bores punch through. */
+  cap?: string;
+  capFill?: FaceFill;
+  /** Fixture run under a fixed underside: [edge, ticks]. */
+  ground?: [string, string[]] | null;
+  /** [x, tipY, bidirectional] */
+  load: [number, number, boolean];
+}
+
+// GENERATED ART DATA — Direction A "Refined Solid".
+// Isometric path data computed from the sample geometry rather than hand-authored;
+const SAMPLE_ART: Record<SampleModelId, Record<"static" | "dynamic", ThumbArt>> = {
+  bracket: {
+    static: {
+      shadow: [80, 96, 40],
+      ghosts: [],
+      fixed: [],
+      faces: [
+        ["side", "M75.84 78.37 L94.13 51.34 L99.56 53.09 L81.27 80.13 Z"],
+        ["end", "M99.56 74.21 L81.27 80.13 L99.56 53.09 Z"],
+        ["top", "M88.99 31.53 L99.99 27.97 L115.71 33.05 L104.7 36.61 Z"],
+        ["top", "M88.99 70.8 L88.99 31.53 L104.7 36.61 L104.7 75.88 Z"],
+        ["top", "M44.26 85.26 L88.99 70.8 L104.7 75.88 L59.98 90.34 Z"],
+        ["top", "M44.26 93.18 L44.26 85.26 L59.98 90.34 L59.98 98.26 Z"],
+      ],
+      cap: "M115.71 80.24 L59.98 98.26 L59.98 90.34 L104.7 75.88 L104.7 36.61 L115.71 33.05 Z M113.14 52.69 L113.09 52.16 L112.95 51.68 L112.73 51.27 L112.42 50.94 L112.06 50.71 L111.64 50.58 L111.18 50.57 L110.71 50.67 L110.23 50.88 L109.78 51.19 L109.36 51.58 L108.99 52.05 L108.69 52.57 L108.46 53.13 L108.32 53.7 L108.28 54.26 L108.32 54.79 L108.46 55.28 L108.69 55.69 L108.99 56.02 L109.36 56.25 L109.78 56.37 L110.23 56.38 L110.71 56.28 L111.18 56.07 L111.64 55.77 L112.06 55.37 L112.42 54.91 L112.73 54.38 L112.95 53.82 L113.09 53.25 Z M91.99 83.95 L91.95 83.54 L91.85 83.17 L91.67 82.86 L91.44 82.61 L91.16 82.43 L90.84 82.34 L90.49 82.33 L90.13 82.4 L89.77 82.56 L89.42 82.8 L89.1 83.1 L88.82 83.46 L88.59 83.86 L88.41 84.28 L88.31 84.72 L88.27 85.15 L88.31 85.56 L88.41 85.93 L88.59 86.24 L88.82 86.49 L89.1 86.67 L89.42 86.76 L89.77 86.77 L90.13 86.69 L90.49 86.54 L90.84 86.3 L91.16 86 L91.44 85.64 L91.67 85.24 L91.85 84.82 L91.95 84.38 Z M78.27 88.38 L78.23 87.98 L78.13 87.61 L77.96 87.29 L77.73 87.04 L77.44 86.87 L77.12 86.77 L76.77 86.76 L76.41 86.84 L76.05 87 L75.7 87.23 L75.38 87.54 L75.1 87.89 L74.87 88.29 L74.7 88.72 L74.59 89.16 L74.55 89.59 L74.59 89.99 L74.7 90.36 L74.87 90.68 L75.1 90.93 L75.38 91.1 L75.7 91.2 L76.05 91.21 L76.41 91.13 L76.77 90.97 L77.12 90.74 L77.44 90.43 L77.73 90.08 L77.96 89.68 L78.13 89.25 L78.23 88.81 Z",
+      capFill: "side",
+      ground: ["M44.26 93.18 L59.98 98.26 L115.71 80.24", ["M44.26 93.18 L40.86 98.18", "M47.4 94.2 L44 99.2", "M50.55 95.21 L47.15 100.21", "M53.69 96.23 L50.29 101.23", "M56.84 97.24 L53.44 102.24", "M59.98 98.26 L56.58 103.26", "M59.98 98.26 L56.58 103.26", "M71.13 94.66 L67.73 99.66", "M82.27 91.05 L78.87 96.05", "M93.42 87.45 L90.02 92.45", "M104.56 83.84 L101.16 88.84", "M115.71 80.24 L112.31 85.24"]],
+      load: [102.35, 29.29, false],
+    },
+    dynamic: {
+      shadow: [80, 96, 40],
+      ghosts: ["M115.71 80.24 L59.98 98.26 L59.98 90.34 L104.7 75.88 L98.99 38.46 L109.99 34.9 Z", "M115.71 80.24 L59.98 98.26 L59.98 90.34 L104.7 75.88 L110.42 34.76 L121.42 31.2 Z"],
+      fixed: [],
+      faces: [
+        ["side", "M75.84 78.37 L96.28 50.64 L101.71 52.4 L81.27 80.13 Z"],
+        ["end", "M99.56 74.21 L81.27 80.13 L101.71 52.4 Z"],
+        ["top", "M92.99 30.23 L103.99 26.67 L119.71 31.76 L108.71 35.31 Z"],
+        ["top", "M88.99 70.8 L92.99 30.23 L108.71 35.31 L104.7 75.88 Z"],
+        ["top", "M44.26 85.26 L88.99 70.8 L104.7 75.88 L59.98 90.34 Z"],
+        ["top", "M44.26 93.18 L44.26 85.26 L59.98 90.34 L59.98 98.26 Z"],
+      ],
+      cap: "M115.71 80.24 L59.98 98.26 L59.98 90.34 L104.7 75.88 L108.71 35.31 L119.71 31.76 Z M115.22 52.02 L115.17 51.49 L115.04 51 L114.81 50.59 L114.51 50.26 L114.14 50.03 L113.72 49.91 L113.26 49.9 L112.79 50 L112.32 50.21 L111.86 50.51 L111.44 50.91 L111.07 51.37 L110.77 51.9 L110.55 52.46 L110.41 53.03 L110.36 53.59 L110.41 54.12 L110.55 54.6 L110.77 55.01 L111.07 55.34 L111.44 55.57 L111.86 55.7 L112.32 55.71 L112.79 55.61 L113.26 55.4 L113.72 55.09 L114.14 54.7 L114.51 54.23 L114.81 53.71 L115.04 53.15 L115.17 52.58 Z M91.99 83.95 L91.95 83.54 L91.85 83.17 L91.67 82.86 L91.44 82.61 L91.16 82.43 L90.84 82.34 L90.49 82.33 L90.13 82.4 L89.77 82.56 L89.42 82.8 L89.1 83.1 L88.82 83.46 L88.59 83.86 L88.41 84.28 L88.31 84.72 L88.27 85.15 L88.31 85.56 L88.41 85.93 L88.59 86.24 L88.82 86.49 L89.1 86.67 L89.42 86.76 L89.77 86.77 L90.13 86.69 L90.49 86.54 L90.84 86.3 L91.16 86 L91.44 85.64 L91.67 85.24 L91.85 84.82 L91.95 84.38 Z M78.27 88.38 L78.23 87.98 L78.13 87.61 L77.96 87.29 L77.73 87.04 L77.44 86.87 L77.12 86.77 L76.77 86.76 L76.41 86.84 L76.05 87 L75.7 87.23 L75.38 87.54 L75.1 87.89 L74.87 88.29 L74.7 88.72 L74.59 89.16 L74.55 89.59 L74.59 89.99 L74.7 90.36 L74.87 90.68 L75.1 90.93 L75.38 91.1 L75.7 91.2 L76.05 91.21 L76.41 91.13 L76.77 90.97 L77.12 90.74 L77.44 90.43 L77.73 90.08 L77.96 89.68 L78.13 89.25 L78.23 88.81 Z",
+      capFill: "side",
+      ground: ["M44.26 93.18 L59.98 98.26 L115.71 80.24", ["M44.26 93.18 L40.86 98.18", "M47.4 94.2 L44 99.2", "M50.55 95.21 L47.15 100.21", "M53.69 96.23 L50.29 101.23", "M56.84 97.24 L53.44 102.24", "M59.98 98.26 L56.58 103.26", "M59.98 98.26 L56.58 103.26", "M71.13 94.66 L67.73 99.66", "M82.27 91.05 L78.87 96.05", "M93.42 87.45 L90.02 92.45", "M104.56 83.84 L101.16 88.84", "M115.71 80.24 L112.31 85.24"]],
+      load: [106.35, 27.99, true],
+    }
+  },
+  plate: {
+    static: {
+      shadow: [84, 96, 54],
+      ghosts: [],
+      fixed: ["M15.19 68.8 L31.26 73.99 L31.26 97.99 L15.19 92.8 Z", "M31.26 73.99 L36.8 72.2 L36.8 96.2 L31.26 97.99 Z", "M15.19 68.8 L20.73 67 L36.8 72.2 L31.26 73.99 Z"],
+      hatchClip: "M31.26 73.99 L36.8 72.2 L36.8 96.2 L31.26 97.99 Z",
+      faces: [
+        ["end", "M23.5 76.07 L34 79.46 L34 88.9 L23.5 85.5 Z"],
+        ["side", "M34 79.46 L38.27 78.08 L42.53 76.68 L46.79 75.27 L51.06 73.86 L55.32 72.43 L59.58 70.99 L63.85 69.54 L68.11 68.08 L72.37 66.61 L76.64 65.14 L80.9 63.66 L85.17 62.17 L89.43 60.67 L93.69 59.17 L97.96 57.66 L102.22 56.14 L106.48 54.63 L110.75 53.1 L115.01 51.58 L119.27 50.05 L123.54 48.51 L127.8 46.98 L132.06 45.44 L136.33 43.9 L140.59 42.36 L144.85 40.82 L144.85 50.26 L140.59 51.8 L136.33 53.34 L132.06 54.87 L127.8 56.41 L123.54 57.95 L119.27 59.48 L115.01 61.01 L110.75 62.54 L106.48 64.06 L102.22 65.58 L97.96 67.09 L93.69 68.6 L89.43 70.1 L85.17 71.6 L80.9 73.09 L76.64 74.57 L72.37 76.04 L68.11 77.51 L63.85 78.97 L59.58 80.42 L55.32 81.86 L51.06 83.29 L46.79 84.71 L42.53 86.11 L38.27 87.51 L34 88.9 Z"],
+        ["top", "M23.5 76.07 L27.76 74.68 L32.03 73.29 L36.29 71.88 L40.55 70.46 L44.82 69.03 L49.08 67.59 L53.34 66.14 L57.61 64.68 L61.87 63.22 L66.14 61.74 L70.4 60.26 L74.66 58.77 L78.93 57.27 L83.19 55.77 L87.45 54.26 L91.72 52.75 L95.98 51.23 L100.24 49.71 L104.51 48.18 L108.77 46.65 L113.03 45.12 L117.3 43.58 L121.56 42.05 L125.82 40.51 L130.09 38.97 L134.35 37.43 L144.85 40.82 L140.59 42.36 L136.33 43.9 L132.06 45.44 L127.8 46.98 L123.54 48.51 L119.27 50.05 L115.01 51.58 L110.75 53.1 L106.48 54.63 L102.22 56.14 L97.96 57.66 L93.69 59.17 L89.43 60.67 L85.17 62.17 L80.9 63.66 L76.64 65.14 L72.37 66.61 L68.11 68.08 L63.85 69.54 L59.58 70.99 L55.32 72.43 L51.06 73.86 L46.79 75.27 L42.53 76.68 L38.27 78.08 L34 79.46 Z"],
+        ["pe", "M103.87 31.96 L114.37 35.36 L114.37 51.36 L103.87 47.96 Z"],
+        ["ps", "M114.37 35.36 L139.31 27.29 L139.31 43.29 L114.37 51.36 Z"],
+        ["pt", "M103.87 31.96 L128.81 23.9 L139.31 27.29 L114.37 35.36 Z"],
+      ],
+      load: [121.59, 26.63, false],
+    },
+    dynamic: {
+      shadow: [84, 96, 54],
+      ghosts: ["M34 79.46 L38.27 78.1 L42.53 76.76 L46.79 75.44 L51.06 74.15 L55.32 72.88 L59.58 71.64 L63.85 70.41 L68.11 69.2 L72.37 68.01 L76.64 66.84 L80.9 65.68 L85.17 64.54 L89.43 63.42 L93.69 62.31 L97.96 61.21 L102.22 60.12 L106.48 59.04 L110.75 57.97 L115.01 56.91 L119.27 55.85 L123.54 54.81 L127.8 53.76 L132.06 52.73 L136.33 51.69 L140.59 50.66 L144.85 49.62 L144.85 59.06 L140.59 60.09 L136.33 61.12 L132.06 62.16 L127.8 63.2 L123.54 64.24 L119.27 65.29 L115.01 66.34 L110.75 67.4 L106.48 68.47 L102.22 69.55 L97.96 70.64 L93.69 71.74 L89.43 72.85 L85.17 73.98 L80.9 75.12 L76.64 76.27 L72.37 77.44 L68.11 78.63 L63.85 79.84 L59.58 81.07 L55.32 82.32 L51.06 83.58 L46.79 84.88 L42.53 86.19 L38.27 87.53 L34 88.9 Z", "M34 79.46 L38.27 78.07 L42.53 76.66 L46.79 75.21 L51.06 73.75 L55.32 72.26 L59.58 70.75 L63.85 69.22 L68.11 67.67 L72.37 66.1 L76.64 64.52 L80.9 62.92 L85.17 61.3 L89.43 59.67 L93.69 58.02 L97.96 56.37 L102.22 54.7 L106.48 53.02 L110.75 51.33 L115.01 49.64 L119.27 47.93 L123.54 46.23 L127.8 44.51 L132.06 42.79 L136.33 41.07 L140.59 39.35 L144.85 37.62 L144.85 47.06 L140.59 48.78 L136.33 50.5 L132.06 52.23 L127.8 53.94 L123.54 55.66 L119.27 57.37 L115.01 59.07 L110.75 60.77 L106.48 62.45 L102.22 64.13 L97.96 65.8 L93.69 67.46 L89.43 69.1 L85.17 70.73 L80.9 72.35 L76.64 73.95 L72.37 75.54 L68.11 77.1 L63.85 78.65 L59.58 80.18 L55.32 81.69 L51.06 83.18 L46.79 84.65 L42.53 86.09 L38.27 87.5 L34 88.9 Z"],
+      fixed: ["M15.19 68.8 L31.26 73.99 L31.26 97.99 L15.19 92.8 Z", "M31.26 73.99 L36.8 72.2 L36.8 96.2 L31.26 97.99 Z", "M15.19 68.8 L20.73 67 L36.8 72.2 L31.26 73.99 Z"],
+      hatchClip: "M31.26 73.99 L36.8 72.2 L36.8 96.2 L31.26 97.99 Z",
+      faces: [
+        ["end", "M23.5 76.07 L34 79.46 L34 88.9 L23.5 85.5 Z"],
+        ["side", "M34 79.46 L38.27 78.08 L42.53 76.67 L46.79 75.25 L51.06 73.82 L55.32 72.36 L59.58 70.9 L63.85 69.42 L68.11 67.93 L72.37 66.42 L76.64 64.91 L80.9 63.38 L85.17 61.84 L89.43 60.29 L93.69 58.74 L97.96 57.17 L102.22 55.6 L106.48 54.02 L110.75 52.44 L115.01 50.85 L119.27 49.25 L123.54 47.66 L127.8 46.05 L132.06 44.45 L136.33 42.84 L140.59 41.23 L144.85 39.62 L144.85 49.06 L140.59 50.66 L136.33 52.27 L132.06 53.88 L127.8 55.49 L123.54 57.09 L119.27 58.69 L115.01 60.28 L110.75 61.87 L106.48 63.46 L102.22 65.03 L97.96 66.61 L93.69 68.17 L89.43 69.73 L85.17 71.27 L80.9 72.81 L76.64 74.34 L72.37 75.85 L68.11 77.36 L63.85 78.85 L59.58 80.33 L55.32 81.8 L51.06 83.25 L46.79 84.68 L42.53 86.1 L38.27 87.51 L34 88.9 Z"],
+        ["top", "M23.5 76.07 L27.76 74.68 L32.03 73.28 L36.29 71.86 L40.55 70.42 L44.82 68.97 L49.08 67.5 L53.34 66.02 L57.61 64.53 L61.87 63.03 L66.14 61.51 L70.4 59.98 L74.66 58.44 L78.93 56.9 L83.19 55.34 L87.45 53.78 L91.72 52.21 L95.98 50.63 L100.24 49.04 L104.51 47.45 L108.77 45.86 L113.03 44.26 L117.3 42.66 L121.56 41.05 L125.82 39.45 L130.09 37.84 L134.35 36.23 L144.85 39.62 L140.59 41.23 L136.33 42.84 L132.06 44.45 L127.8 46.05 L123.54 47.66 L119.27 49.25 L115.01 50.85 L110.75 52.44 L106.48 54.02 L102.22 55.6 L97.96 57.17 L93.69 58.74 L89.43 60.29 L85.17 61.84 L80.9 63.38 L76.64 64.91 L72.37 66.42 L68.11 67.93 L63.85 69.42 L59.58 70.9 L55.32 72.36 L51.06 73.82 L46.79 75.25 L42.53 76.67 L38.27 78.08 L34 79.46 Z"],
+        ["pe", "M103.87 31.05 L114.37 34.45 L114.37 50.45 L103.87 47.05 Z"],
+        ["ps", "M114.37 34.45 L139.31 26.38 L139.31 42.38 L114.37 50.45 Z"],
+        ["pt", "M103.87 31.05 L128.81 22.99 L139.31 26.38 L114.37 34.45 Z"],
+      ],
+      load: [121.59, 25.72, true],
+    }
+  },
+  cantilever: {
+    static: {
+      shadow: [86, 96, 54],
+      ghosts: [],
+      fixed: ["M12.29 53.64 L33.49 60.5 L33.49 97.94 L12.29 91.08 Z", "M33.49 60.5 L38.48 58.89 L38.48 96.33 L33.49 97.94 Z", "M12.29 53.64 L17.28 52.03 L38.48 58.89 L33.49 60.5 Z"],
+      hatchClip: "M33.49 60.5 L38.48 58.89 L38.48 96.33 L33.49 97.94 Z",
+      faces: [
+        ["end", "M20.4 63.12 L35.36 67.96 L35.36 85.24 L20.4 80.4 Z"],
+        ["side", "M35.36 67.96 L39.68 66.56 L44 65.15 L48.32 63.72 L52.63 62.29 L56.95 60.85 L61.27 59.4 L65.58 57.94 L69.9 56.47 L74.22 55 L78.53 53.51 L82.85 52.02 L87.17 50.53 L91.48 49.03 L95.8 47.52 L100.12 46.01 L104.43 44.49 L108.75 42.97 L113.07 41.44 L117.38 39.91 L121.7 38.38 L126.02 36.85 L130.33 35.31 L134.65 33.77 L138.97 32.23 L143.29 30.69 L147.6 29.15 L147.6 46.43 L143.29 47.97 L138.97 49.51 L134.65 51.05 L130.33 52.59 L126.02 54.13 L121.7 55.66 L117.38 57.19 L113.07 58.72 L108.75 60.25 L104.43 61.77 L100.12 63.29 L95.8 64.8 L91.48 66.31 L87.17 67.81 L82.85 69.3 L78.53 70.79 L74.22 72.28 L69.9 73.75 L65.58 75.22 L61.27 76.68 L56.95 78.13 L52.63 79.57 L48.32 81 L44 82.43 L39.68 83.84 L35.36 85.24 Z"],
+        ["top", "M20.4 63.12 L24.72 61.72 L29.03 60.31 L33.35 58.88 L37.67 57.45 L41.98 56.01 L46.3 54.56 L50.62 53.1 L54.93 51.63 L59.25 50.16 L63.57 48.68 L67.88 47.19 L72.2 45.69 L76.52 44.19 L80.84 42.68 L85.15 41.17 L89.47 39.65 L93.79 38.13 L98.1 36.6 L102.42 35.07 L106.74 33.54 L111.05 32.01 L115.37 30.47 L119.69 28.93 L124 27.39 L128.32 25.85 L132.64 24.31 L147.6 29.15 L143.29 30.69 L138.97 32.23 L134.65 33.77 L130.33 35.31 L126.02 36.85 L121.7 38.38 L117.38 39.91 L113.07 41.44 L108.75 42.97 L104.43 44.49 L100.12 46.01 L95.8 47.52 L91.48 49.03 L87.17 50.53 L82.85 52.02 L78.53 53.51 L74.22 55 L69.9 56.47 L65.58 57.94 L61.27 59.4 L56.95 60.85 L52.63 62.29 L48.32 63.72 L44 65.15 L39.68 66.56 L35.36 67.96 Z"],
+      ],
+      load: [140.12, 23.73, false],
+    },
+    dynamic: {
+      shadow: [86, 96, 54],
+      ghosts: ["M35.36 67.96 L39.68 66.57 L44 65.21 L48.32 63.88 L52.63 62.56 L56.95 61.26 L61.27 59.98 L65.58 58.72 L69.9 57.48 L74.22 56.26 L78.53 55.05 L82.85 53.85 L87.17 52.67 L91.48 51.5 L95.8 50.35 L100.12 49.2 L104.43 48.07 L108.75 46.94 L113.07 45.82 L117.38 44.71 L121.7 43.61 L126.02 42.51 L130.33 41.42 L134.65 40.33 L138.97 39.24 L143.29 38.15 L147.6 37.07 L147.6 54.35 L143.29 55.43 L138.97 56.52 L134.65 57.61 L130.33 58.7 L126.02 59.79 L121.7 60.89 L117.38 61.99 L113.07 63.1 L108.75 64.22 L104.43 65.35 L100.12 66.48 L95.8 67.63 L91.48 68.78 L87.17 69.95 L82.85 71.13 L78.53 72.33 L74.22 73.54 L69.9 74.76 L65.58 76 L61.27 77.26 L56.95 78.54 L52.63 79.84 L48.32 81.16 L44 82.49 L39.68 83.85 L35.36 85.24 Z", "M35.36 67.96 L39.68 66.55 L44 65.12 L48.32 63.67 L52.63 62.19 L56.95 60.7 L61.27 59.19 L65.58 57.65 L69.9 56.1 L74.22 54.54 L78.53 52.96 L82.85 51.36 L87.17 49.75 L91.48 48.13 L95.8 46.49 L100.12 44.85 L104.43 43.19 L108.75 41.52 L113.07 39.85 L117.38 38.17 L121.7 36.48 L126.02 34.79 L130.33 33.09 L134.65 31.39 L138.97 29.68 L143.29 27.98 L147.6 26.27 L147.6 43.55 L143.29 45.26 L138.97 46.96 L134.65 48.67 L130.33 50.37 L126.02 52.07 L121.7 53.76 L117.38 55.45 L113.07 57.13 L108.75 58.8 L104.43 60.47 L100.12 62.13 L95.8 63.77 L91.48 65.41 L87.17 67.03 L82.85 68.64 L78.53 70.24 L74.22 71.82 L69.9 73.38 L65.58 74.93 L61.27 76.47 L56.95 77.98 L52.63 79.47 L48.32 80.95 L44 82.4 L39.68 83.83 L35.36 85.24 Z"],
+      fixed: ["M12.29 53.64 L33.49 60.5 L33.49 97.94 L12.29 91.08 Z", "M33.49 60.5 L38.48 58.89 L38.48 96.33 L33.49 97.94 Z", "M12.29 53.64 L17.28 52.03 L38.48 58.89 L33.49 60.5 Z"],
+      hatchClip: "M33.49 60.5 L38.48 58.89 L38.48 96.33 L33.49 97.94 Z",
+      faces: [
+        ["end", "M20.4 63.12 L35.36 67.96 L35.36 85.24 L20.4 80.4 Z"],
+        ["side", "M35.36 67.96 L39.68 66.55 L44 65.14 L48.32 63.7 L52.63 62.25 L56.95 60.79 L61.27 59.32 L65.58 57.83 L69.9 56.33 L74.22 54.82 L78.53 53.31 L82.85 51.78 L87.17 50.24 L91.48 48.69 L95.8 47.13 L100.12 45.57 L104.43 44 L108.75 42.43 L113.07 40.85 L117.38 39.26 L121.7 37.67 L126.02 36.07 L130.33 34.48 L134.65 32.88 L138.97 31.28 L143.29 29.67 L147.6 28.07 L147.6 45.35 L143.29 46.95 L138.97 48.56 L134.65 50.16 L130.33 51.76 L126.02 53.35 L121.7 54.95 L117.38 56.54 L113.07 58.13 L108.75 59.71 L104.43 61.28 L100.12 62.85 L95.8 64.41 L91.48 65.97 L87.17 67.52 L82.85 69.06 L78.53 70.59 L74.22 72.1 L69.9 73.61 L65.58 75.11 L61.27 76.6 L56.95 78.07 L52.63 79.53 L48.32 80.98 L44 82.42 L39.68 83.83 L35.36 85.24 Z"],
+        ["top", "M20.4 63.12 L24.72 61.72 L29.03 60.3 L33.35 58.86 L37.67 57.42 L41.98 55.95 L46.3 54.48 L50.62 52.99 L54.93 51.5 L59.25 49.99 L63.57 48.47 L67.88 46.94 L72.2 45.4 L76.52 43.85 L80.84 42.3 L85.15 40.73 L89.47 39.16 L93.79 37.59 L98.1 36.01 L102.42 34.42 L106.74 32.83 L111.05 31.24 L115.37 29.64 L119.69 28.04 L124 26.44 L128.32 24.84 L132.64 23.23 L147.6 28.07 L143.29 29.67 L138.97 31.28 L134.65 32.88 L130.33 34.48 L126.02 36.07 L121.7 37.67 L117.38 39.26 L113.07 40.85 L108.75 42.43 L104.43 44 L100.12 45.57 L95.8 47.13 L91.48 48.69 L87.17 50.24 L82.85 51.78 L78.53 53.31 L74.22 54.82 L69.9 56.33 L65.58 57.83 L61.27 59.32 L56.95 60.79 L52.63 62.25 L48.32 63.7 L44 65.14 L39.68 66.55 L35.36 67.96 Z"],
+      ],
+      load: [140.12, 22.65, true],
+    }
+  },
+};
+
+const HATCH = ["M-40 110 L20 -10", "M-26 110 L34 -10", "M-12 110 L48 -10", "M2 110 L62 -10", "M16 110 L76 -10"];
+
 export function SampleOptionCard({ option, selected, compact = false, analysisType = "static_stress", onSelect, onOpen }: SampleOptionCardProps) {
   function handleKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
     if (event.key !== "Enter" && event.key !== " ") return;
@@ -50,13 +173,12 @@ function SampleThumbnail({ option, dynamic }: { option: SampleOption; dynamic: b
     );
   }
 
+  const art = SAMPLE_ART[option.id][dynamic ? "dynamic" : "static"];
   return (
     <span className={`sample-thumbnail sample-thumbnail-${option.thumbnail}`} aria-hidden="true">
       <svg viewBox="0 0 160 104" role="img">
         <ThumbnailDefs id={option.id} />
-        {option.thumbnail === "bracket" && <BracketArt id={option.id} dynamic={dynamic} />}
-        {option.thumbnail === "beam" && <BeamArt id={option.id} dynamic={dynamic} />}
-        {option.thumbnail === "cantilever" && <CantileverArt id={option.id} dynamic={dynamic} />}
+        <SampleArt id={option.id} art={art} />
       </svg>
     </span>
   );
@@ -66,142 +188,76 @@ function ThumbnailDefs({ id }: { id: string }) {
   return (
     <defs>
       <linearGradient id={`oc-top-${id}`} x1="0" x2="1" y1="0" y2="1">
-        <stop offset="0%" stopColor="#ccd8e1" />
-        <stop offset="100%" stopColor="#8494a0" />
+        <stop offset="0%" style={{ stopColor: "var(--sample-top-a)" }} />
+        <stop offset="100%" style={{ stopColor: "var(--sample-top-b)" }} />
       </linearGradient>
       <linearGradient id={`oc-side-${id}`} x1="0" x2="1" y1="0" y2="1">
-        <stop offset="0%" stopColor="#90a0ac" />
-        <stop offset="100%" stopColor="#54616c" />
+        <stop offset="0%" style={{ stopColor: "var(--sample-side-a)" }} />
+        <stop offset="100%" style={{ stopColor: "var(--sample-side-b)" }} />
       </linearGradient>
       <linearGradient id={`oc-end-${id}`} x1="0" x2="0" y1="0" y2="1">
-        <stop offset="0%" stopColor="#6c7a86" />
-        <stop offset="100%" stopColor="#3c4853" />
+        <stop offset="0%" style={{ stopColor: "var(--sample-end-a)" }} />
+        <stop offset="100%" style={{ stopColor: "var(--sample-end-b)" }} />
       </linearGradient>
-      <linearGradient id={`oc-pay-top-${id}`} x1="0" x2="1" y1="0" y2="1">
-        <stop offset="0%" stopColor="#fcd34d" />
-        <stop offset="100%" stopColor="#f59e0b" />
+      <linearGradient id={`oc-pt-${id}`} x1="0" x2="1" y1="0" y2="1">
+        <stop offset="0%" style={{ stopColor: "var(--sample-pay-top-a)" }} />
+        <stop offset="100%" style={{ stopColor: "var(--sample-pay-top-b)" }} />
       </linearGradient>
-      <linearGradient id={`oc-pay-side-${id}`} x1="0" x2="0" y1="0" y2="1">
-        <stop offset="0%" stopColor="#f59e0b" />
-        <stop offset="100%" stopColor="#b45309" />
+      <linearGradient id={`oc-ps-${id}`} x1="0" x2="0" y1="0" y2="1">
+        <stop offset="0%" style={{ stopColor: "var(--sample-pay-side-a)" }} />
+        <stop offset="100%" style={{ stopColor: "var(--sample-pay-side-b)" }} />
       </linearGradient>
-      <linearGradient id={`oc-pay-end-${id}`} x1="0" x2="0" y1="0" y2="1">
-        <stop offset="0%" stopColor="#d97706" />
-        <stop offset="100%" stopColor="#92400e" />
+      <linearGradient id={`oc-pe-${id}`} x1="0" x2="0" y1="0" y2="1">
+        <stop offset="0%" style={{ stopColor: "var(--sample-pay-end-a)" }} />
+        <stop offset="100%" style={{ stopColor: "var(--sample-pay-end-b)" }} />
       </linearGradient>
       <radialGradient id={`oc-shadow-${id}`}>
-        <stop offset="0%" stopColor="#000000" stopOpacity="0.42" />
+        <stop offset="0%" stopColor="#000000" stopOpacity="0.4" />
         <stop offset="100%" stopColor="#000000" stopOpacity="0" />
       </radialGradient>
     </defs>
   );
 }
 
-function LoadArrow({ x, tipY, length, dynamic }: { x: number; tipY: number; length: number; dynamic: boolean }) {
-  const topY = tipY - length;
-  if (!dynamic) {
-    return (
-      <g className="sample-load">
-        <line x1={x} y1={topY} x2={x} y2={tipY - 8} />
-        <path d={`M${x - 6} ${tipY - 9} L${x + 6} ${tipY - 9} L${x} ${tipY} Z`} />
-      </g>
-    );
-  }
+function SampleArt({ id, art }: { id: string; art: ThumbArt }) {
+  return (
+    <g>
+      <ellipse className="sample-shadow" cx={art.shadow[0]} cy={art.shadow[1]} rx={art.shadow[2]} ry="7" fill={`url(#oc-shadow-${id})`} />
+      {art.ghosts.map((d, i) => <path key={`g${i}`} className="sample-ghost" d={d} />)}
+      {art.fixed.map((d, i) => <path key={`f${i}`} className="sample-fixed-face" d={d} />)}
+      {art.hatchClip && (
+        <>
+          <clipPath id={`oc-hatch-${id}`}><path d={art.hatchClip} /></clipPath>
+          <g className="sample-hatch" clipPath={`url(#oc-hatch-${id})`}>
+            {HATCH.map((d, i) => <path key={`h${i}`} d={d} />)}
+          </g>
+        </>
+      )}
+      {art.faces.map(([fill, d], i) => <path key={`p${i}`} className="sample-face" fill={`url(#oc-${fill}-${id})`} d={d} />)}
+      {art.cap && <path className="sample-face" fillRule="evenodd" fill={`url(#oc-${art.capFill}-${id})`} d={art.cap} />}
+      {art.ground && (
+        <g className="sample-ground">
+          <path className="sample-ground-edge" d={art.ground[0]} />
+          {art.ground[1].map((d, i) => <path key={`t${i}`} d={d} />)}
+        </g>
+      )}
+      <LoadArrow x={art.load[0]} tipY={art.load[1]} bidir={art.load[2]} />
+    </g>
+  );
+}
+
+function LoadArrow({ x, tipY, bidir }: { x: number; tipY: number; bidir: boolean }) {
+  // A bidirectional arrow needs a longer shaft and smaller heads, or the two
+  // heads meet and the whole mark reads as a diamond.
+  const headH = bidir ? 6.5 : 7.5;
+  const halfW = bidir ? 4.6 : 5.4;
+  const topY = tipY - (bidir ? 22 : 15);
+  const head = (y: number, dir: number) => `M${x - halfW} ${y - dir * headH} L${x + halfW} ${y - dir * headH} L${x} ${y} Z`;
   return (
     <g className="sample-load">
-      <line x1={x} y1={topY + 8} x2={x} y2={tipY - 8} />
-      <path d={`M${x - 6} ${tipY - 9} L${x + 6} ${tipY - 9} L${x} ${tipY} Z`} />
-      <path d={`M${x - 6} ${topY + 9} L${x + 6} ${topY + 9} L${x} ${topY} Z`} />
-    </g>
-  );
-}
-
-function VibrationArcs({ x, y }: { x: number; y: number }) {
-  return (
-    <g className="sample-ghost">
-      <path d={`M${x - 14} ${y - 7} q -5 7 0 14`} />
-      <path d={`M${x + 14} ${y - 7} q 5 7 0 14`} />
-    </g>
-  );
-}
-
-function DynamicWaveBadge() {
-  return <path className="sample-wave" d="M118 92 q4 -8 8 0 q4 8 8 0 q4 -8 8 0" />;
-}
-
-function BracketArt({ id, dynamic }: { id: string; dynamic: boolean }) {
-  return (
-    <g>
-      <ellipse className="sample-shadow" cx="74" cy="92" rx="52" ry="9" fill={`url(#oc-shadow-${id})`} />
-      {/* base flange */}
-      <path className="sample-face" fill={`url(#oc-end-${id})`} d="M28 67 L55 80 L55 88 L28 75 Z" />
-      <path className="sample-face" fill={`url(#oc-side-${id})`} d="M55 80 L119 52 L119 60 L55 88 Z" />
-      <path className="sample-face" fill={`url(#oc-top-${id})`} d="M28 67 L92 39 L119 52 L55 80 Z" />
-      {/* vertical wall at the far end */}
-      <path className="sample-face" fill={`url(#oc-end-${id})`} d="M75.8 29.5 L67.7 25.6 L67.7 49.6 L75.8 53.5 Z" />
-      <path className="sample-face" fill={`url(#oc-end-${id})`} d="M100.1 18.9 L92 15 L92 39 L100.1 42.9 Z" />
-      <path className="sample-face" fill={`url(#oc-side-${id})`} d="M75.8 53.5 L100.1 42.9 L100.1 18.9 L75.8 29.5 Z" />
-      <path className="sample-face" fill={`url(#oc-top-${id})`} d="M75.8 29.5 L100.1 18.9 L92 15 L67.7 25.6 Z" />
-      {/* gusset running down to the base */}
-      <path className="sample-face" fill={`url(#oc-top-${id})`} d="M75.8 33 L50.2 64.7 L75.8 53.5 Z" />
-      {/* bolt holes with support rings */}
-      <ellipse className="sample-hole" cx="50.6" cy="70.8" rx="5" ry="2.8" transform="rotate(-24 50.6 70.8)" />
-      <ellipse className="sample-hole" cx="68.5" cy="63" rx="5" ry="2.8" transform="rotate(-24 68.5 63)" />
-      <ellipse className="sample-support-ring" cx="50.6" cy="70.8" rx="7.6" ry="4.4" transform="rotate(-24 50.6 70.8)" />
-      <ellipse className="sample-support-ring" cx="68.5" cy="63" rx="7.6" ry="4.4" transform="rotate(-24 68.5 63)" />
-      {dynamic && <VibrationArcs x={84} y={11} />}
-      {dynamic && <DynamicWaveBadge />}
-      <LoadArrow x={84} tipY={22} length={dynamic ? 18 : 16} dynamic={dynamic} />
-    </g>
-  );
-}
-
-function BeamArt({ id, dynamic }: { id: string; dynamic: boolean }) {
-  return (
-    <g>
-      <ellipse className="sample-shadow" cx="78" cy="90" rx="58" ry="9" fill={`url(#oc-shadow-${id})`} />
-      {/* beam */}
-      <path className="sample-face" fill={`url(#oc-side-${id})`} d="M42 69 L134 41 L134 59 L42 87 Z" />
-      <path className="sample-face" fill={`url(#oc-top-${id})`} d="M20 57 L112 29 L134 41 L42 69 Z" />
-      {/* fixed end face */}
-      <path className="sample-face" fill={`url(#oc-end-${id})`} d="M20 57 L42 69 L42 87 L20 75 Z" />
-      <path className="sample-fixed-face" d="M20 57 L42 69 L42 87 L20 75 Z" />
-      <g className="sample-hatch">
-        <path d="M24 75 L34 64" />
-        <path d="M27 81 L40 69" />
-        <path d="M33 86 L42 77" />
-      </g>
-      {/* payload mass at free end */}
-      <path className="sample-face" fill={`url(#oc-pay-end-${id})`} d="M92.1 23.5 L104.2 30.1 L104.2 45.1 L92.1 38.5 Z" />
-      <path className="sample-face" fill={`url(#oc-pay-side-${id})`} d="M104.2 30.1 L122.6 24.5 L122.6 39.5 L104.2 45.1 Z" />
-      <path className="sample-face" fill={`url(#oc-pay-top-${id})`} d="M92.1 23.5 L110.5 17.9 L122.6 24.5 L104.2 30.1 Z" />
-      {dynamic && <VibrationArcs x={107} y={10} />}
-      {dynamic && <DynamicWaveBadge />}
-      <LoadArrow x={107} tipY={16} length={dynamic ? 14 : 12} dynamic={dynamic} />
-    </g>
-  );
-}
-
-function CantileverArt({ id, dynamic }: { id: string; dynamic: boolean }) {
-  return (
-    <g>
-      <ellipse className="sample-shadow" cx="82" cy="93" rx="56" ry="8" fill={`url(#oc-shadow-${id})`} />
-      {/* fixed wall */}
-      <path className="sample-face" fill={`url(#oc-top-${id})`} d="M24 22 L50 38 L42.3 40.3 L16.3 24.3 Z" />
-      <path className="sample-face" fill={`url(#oc-side-${id})`} d="M24 22 L50 38 L50 92 L24 76 Z" />
-      <path className="sample-fixed-face" d="M24 22 L50 38 L50 92 L24 76 Z" />
-      <g className="sample-hatch">
-        <path d="M27 33 L45 51" />
-        <path d="M27 49 L45 67" />
-        <path d="M27 65 L45 83" />
-      </g>
-      {/* beam */}
-      <path className="sample-face" fill={`url(#oc-end-${id})`} d="M122 27 L138 36 L138 54 L122 45 Z" />
-      <path className="sample-face" fill={`url(#oc-side-${id})`} d="M50 60 L138 36 L138 54 L50 78 Z" />
-      <path className="sample-face" fill={`url(#oc-top-${id})`} d="M34 51 L122 27 L138 36 L50 60 Z" />
-      {dynamic && <VibrationArcs x={130} y={15} />}
-      {dynamic && <DynamicWaveBadge />}
-      <LoadArrow x={130} tipY={29} length={dynamic ? 23 : 21} dynamic={dynamic} />
+      <line x1={x} y1={bidir ? topY + headH : topY} x2={x} y2={tipY - headH} />
+      <path d={head(tipY, 1)} />
+      {bidir && <path d={head(topY, -1)} />}
     </g>
   );
 }
