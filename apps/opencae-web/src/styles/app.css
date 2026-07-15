@@ -2136,7 +2136,7 @@ img {
 
 .analysis-legend {
   position: absolute;
-  bottom: 12px;
+  top: 12px;
   left: 12px;
   z-index: var(--z-viewer-overlay);
   box-sizing: border-box;
