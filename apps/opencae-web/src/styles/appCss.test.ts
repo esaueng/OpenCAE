@@ -51,6 +51,9 @@ describe("app CSS", () => {
     const resizeHandle = cssRule(".analysis-legend-resize");
     const resizeHandleAfter = cssRule(".analysis-legend-resize::after");
 
+    expect(analysisLegend).toMatch(/top:\s*12px/);
+    expect(analysisLegend).toMatch(/left:\s*12px/);
+    expect(analysisLegend).not.toMatch(/bottom:/);
     expect(analysisLegend).toMatch(/width:\s*360px/);
     expect(analysisLegend).toMatch(/min-width:\s*280px/);
     expect(analysisLegend).toMatch(/min-height:\s*154px/);
