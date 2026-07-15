@@ -75,6 +75,7 @@ export async function createLocalSampleProject(sample: SampleModelId = "bracket"
       fingerprint: `${face.id}-${sample}-v1`
     };
   });
+  const sampleLoads = templateStudy ? sampleLoadsFor(sample, templateStudy.loads, displayModel, meta.displayName) : [];
   const sampleStudyBase = templateStudy
     ? {
         ...templateStudy,
@@ -91,7 +92,9 @@ export async function createLocalSampleProject(sample: SampleModelId = "bracket"
             : []),
           ...faceSelections
         ],
-        loads: sampleLoadsFor(sample, templateStudy.loads, displayModel, meta.displayName)
+        loads: sampleLoads,
+        loadCases: [defaultLoadCase(sampleLoads.map((load) => load.id))],
+        loadCombinations: []
       }
     : undefined;
   const sampleStudy: Project["studies"][number] | undefined = sampleStudyBase
@@ -259,6 +262,10 @@ export function createLocalStaticStressStudy(project: Project, displayModel: Dis
 
 export function createLocalDynamicStructuralStudy(project: Project, displayModel: DisplayModel, studyId = `study-${newLocalId()}`, now = new Date().toISOString()): Project["studies"][number] {
   return createDynamicStructuralStudyForProject(project, displayModel, studyId, now);
+}
+
+export function createLocalModalStudy(project: Project, displayModel: DisplayModel, studyId = `study-${newLocalId()}`): Project["studies"][number] {
+  return createModalStudyForProject(project, displayModel, studyId);
 }
 
 export function openLocalProjectPayload(payload: unknown): SampleProjectResponse {
@@ -452,6 +459,9 @@ export function attachUploadedModelToProject(
     namedSelections: namedSelectionsForDisplayModel(bodyLabel, options.displayModel),
     constraints: [],
     loads: [],
+    ...((study.type === "static_stress" || study.type === "dynamic_structural")
+      ? { loadCases: [defaultLoadCase()], loadCombinations: [] }
+      : {}),
     meshSettings: {
       ...study.meshSettings,
       status: "not_started" as const,
@@ -516,6 +526,8 @@ function createStaticStressStudyForProject(project: Project, displayModel: Displ
     contacts: [],
     constraints: [],
     loads: [],
+    loadCases: [defaultLoadCase()],
+    loadCombinations: [],
     meshSettings: {
       preset: "medium",
       status: "not_started"
@@ -547,6 +559,8 @@ function createDynamicStructuralStudyForProject(project: Project, displayModel: 
     contacts: [],
     constraints: [],
     loads: [],
+    loadCases: [defaultLoadCase()],
+    loadCombinations: [],
     meshSettings: {
       preset: "medium",
       status: "not_started"
@@ -560,6 +574,34 @@ function createDynamicStructuralStudyForProject(project: Project, displayModel: 
       integrationMethod: "newmark_average_acceleration",
       loadProfile: "ramp"
     },
+    validation: [],
+    runs: []
+  };
+}
+
+function defaultLoadCase(loadIds: string[] = []) {
+  return { id: "case-default", name: "Default", enabled: true, loadIds };
+}
+
+function createModalStudyForProject(project: Project, displayModel: DisplayModel, studyId: string): Project["studies"][number] {
+  const geometry = project.geometryFiles[0];
+  const modelName = geometry ? baseNameForModel(geometry.filename) : displayModel.name || "model";
+  const bodyLabel = `${modelName} body`;
+  return {
+    id: studyId,
+    projectId: project.id,
+    name: "Modal Analysis",
+    type: "modal_analysis",
+    geometryScope: displayModel.bodyCount > 0
+      ? [{ bodyId: "body-uploaded", entityType: "body" as const, entityId: "body-uploaded", label: bodyLabel }]
+      : [],
+    materialAssignments: [],
+    namedSelections: displayModel.bodyCount > 0 ? namedSelectionsForDisplayModel(bodyLabel, displayModel) : [],
+    contacts: [],
+    constraints: [],
+    loads: [],
+    meshSettings: { preset: "medium", status: "not_started" },
+    solverSettings: { modeCount: 6 },
     validation: [],
     runs: []
   };

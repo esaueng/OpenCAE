@@ -1,4 +1,4 @@
-import type { AnalysisMesh, DisplayModel, ResultField, ResultSummary, Study } from "@opencae/schema";
+import type { AnalysisMesh, DisplayModel, ResultField, ResultSummary, RunVariantRef, RunVariantResult, Study } from "@opencae/schema";
 import {
   packedResultFieldsForPlaybackTransferables,
   preparedPlaybackTransferables,
@@ -9,13 +9,16 @@ import {
 export interface LocalSolveResult {
   summary: ResultSummary;
   fields: ResultField[];
+  variants?: RunVariantResult[];
+  variantRefs?: RunVariantRef[];
+  activeVariantId?: string;
   /** Solver-space render surface mesh (cloud response contract). */
   surfaceMesh?: unknown;
   /** Solver diagnostics entries (core-solve-diagnostics, phase diagnostics, ...). */
   diagnostics?: unknown[];
   artifacts?: Record<string, unknown> & {
     meshConnectivity?: { connectedComponents: number };
-    meshStatistics?: { nodes: number; elements: number };
+    meshStatistics?: { nodes: number; elements: number; totalDofs?: number; constrainedDofs?: number; freeDofs?: number; representativeElementSizeMm?: number };
   };
 }
 

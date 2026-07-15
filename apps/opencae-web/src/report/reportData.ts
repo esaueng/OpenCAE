@@ -1,10 +1,10 @@
-import { assessResultFailure, classifyResultProvenance, estimateAllowableLoadForSafetyFactor } from "@opencae/schema";
-import type { DisplayModel, Material, Project, ResultField, ResultSummary, RunTimingEstimate, Study } from "@opencae/schema";
+import { assessResultFailure, classifyResultProvenance, estimateAllowableLoadForSafetyFactor, isModalResultSummary } from "@opencae/schema";
+import type { DisplayModel, FailureAssessment, Material, ModalResultSummary, Project, ResultField, ResultSummary, RunTimingEstimate, StructuralResultSummary, Study } from "@opencae/schema";
 import {
   effectiveMaterialProperties,
   manufacturingProcessForId,
   normalizeManufacturingParameters,
-  starterMaterials,
+  resolveMaterial,
   type ManufacturingParameters,
   type ManufacturingProcess
 } from "@opencae/materials";
@@ -81,7 +81,7 @@ export interface ReportData {
   provenanceLabel: string;
   coverMeta: ReportRow[];
   keyResults: ReportRow[];
-  failureAssessment: NonNullable<ResultSummary["failureAssessment"]>;
+  failureAssessment: FailureAssessment;
   geometry: ReportRow[];
   geometryFiles: ReportTable;
   materials: ReportTable;
@@ -126,6 +126,7 @@ const FOOTER_DISCLAIMER = "Development-grade analysis. Not a substitute for prof
 export function buildReportData(input: BuildReportDataInput): ReportData {
   const summary = resultSummaryForUnits(input.resultSummary, input.unitSystem);
   const fields = input.resultFields.map((field) => resultFieldForUnits(field, input.unitSystem));
+  if (isModalResultSummary(summary)) return buildModalReportData(input, summary, fields);
   const assessment = summary.failureAssessment ?? assessResultFailure(summary);
   const provenance = summary.provenance;
   const provenanceTier = classifyResultProvenance(provenance);
@@ -175,8 +176,8 @@ export function buildReportData(input: BuildReportDataInput): ReportData {
       ]),
       emptyMessage: "No geometry file recorded."
     },
-    materials: materialTable(input.study, input.unitSystem, criticalLayerAxis),
-    manufacturing: manufacturingTable(input.study),
+    materials: materialTable(input.study, input.unitSystem, criticalLayerAxis, input.project.customMaterials),
+    manufacturing: manufacturingTable(input.study, input.project.customMaterials),
     supports: supportTable(input.study),
     loads: loadTable(input.study, input.unitSystem),
     boundaryFigure: boundaryFigureData(input.study, input.captures.boundary),
@@ -199,6 +200,90 @@ export function buildReportData(input: BuildReportDataInput): ReportData {
     diagnostics,
     includeSmoothingDisclaimer: provenance?.kind === "opencae_core_fea",
     footerDisclaimer: FOOTER_DISCLAIMER
+  };
+}
+
+function buildModalReportData(input: BuildReportDataInput, summary: ModalResultSummary, fields: ResultField[]): ReportData {
+  const provenance = summary.provenance;
+  const meshSummary = input.solverMeshSummary ?? input.study.meshSettings.summary ?? null;
+  const actualMeshCounts = input.solverMeshSummary?.source === "core_solver" || input.study.meshSettings.summary?.source === "core_solver";
+  const generatedAtIso = input.generatedAt.toISOString();
+  const reportDate = localIsoDate(input.generatedAt);
+  const firstMode = summary.modes[0];
+  const lastMode = summary.modes[summary.modes.length - 1];
+  const modeField = fieldForReport(fields, "mode_shape", input.captures.displacement);
+  const assessment: FailureAssessment = summary.convergedModeCount === summary.requestedModeCount
+    ? { status: "pass", title: "Requested modes converged", message: `All ${summary.requestedModeCount} requested modes met the scaled residual tolerance.` }
+    : { status: "warning", title: "Partial modal convergence", message: summary.warning ?? `${summary.convergedModeCount} of ${summary.requestedModeCount} requested modes converged.` };
+  const criticalLayerAxis = input.displayModel
+    ? inferGlobalCriticalPrintAxis(input.study, input.displayModel.faces.map((face) => ({
+        entityId: face.id,
+        center: face.center,
+        ...(face.area ? { areaM2: face.area * 1e-6 } : {})
+      })), input.displayModel)
+    : undefined;
+  const diagnostics = new Set<string>((summary.diagnostics ?? []).map((diagnostic) => diagnostic.message));
+  if (summary.warning) diagnostics.add(summary.warning);
+  for (const warning of input.solverMeshSummary?.warnings ?? []) diagnostics.add(warning);
+  const modalFigure = figureData("Normalized mode shape", modeField, input.captures.displacement, fields, input);
+  return {
+    pageFormat: input.unitSystem === "US" ? "letter" : "a4",
+    filename: suggestedReportFilename(input.project.name, input.generatedAt),
+    generatedAtIso,
+    reportDate,
+    title: "Modal Analysis Report",
+    projectName: input.project.name,
+    studyName: input.study.name,
+    unitSystemLabel: input.unitSystem === "US" ? "US (in, psi)" : "SI (m, Pa)",
+    provenanceTier: classifyResultProvenance(provenance),
+    provenanceLabel: formatResultProvenanceLabel(provenance),
+    coverMeta: coverMetaRows(input, summary, meshSummary),
+    keyResults: [
+      { label: "Requested modes", value: String(summary.requestedModeCount) },
+      { label: "Converged modes", value: String(summary.convergedModeCount) },
+      { label: "First frequency", value: firstMode ? `${Number(firstMode.frequencyHz.toPrecision(6))} Hz` : MISSING },
+      { label: "Highest returned frequency", value: lastMode ? `${Number(lastMode.frequencyHz.toPrecision(6))} Hz` : MISSING }
+    ],
+    failureAssessment: assessment,
+    geometry: geometryRows(input.project, input.displayModel ? displayModelForUnits(input.displayModel, input.unitSystem) : null),
+    geometryFiles: {
+      headers: ["File", "Format", "Size"],
+      rows: input.project.geometryFiles.map((geometry) => [geometry.filename, geometryFormat(geometry.filename), geometryFileSize(geometry.metadata)]),
+      emptyMessage: "No geometry file recorded."
+    },
+    materials: materialTable(input.study, input.unitSystem, criticalLayerAxis, input.project.customMaterials),
+    manufacturing: manufacturingTable(input.study, input.project.customMaterials),
+    supports: supportTable(input.study),
+    loads: { headers: ["Load", "Magnitude", "Direction", "Target"], rows: [], emptyMessage: "Applied loads are not used in modal analysis." },
+    boundaryFigure: boundaryFigureData(input.study, input.captures.boundary),
+    mesh: [
+      { label: "Preset", value: humanize(input.study.meshSettings.preset) },
+      { label: "Nodes", value: meshCount(meshSummary?.nodes, actualMeshCounts) },
+      { label: "Elements", value: meshCount(meshSummary?.elements, actualMeshCounts) },
+      { label: "Element type", value: elementTypeForMesh(provenance?.meshSource) },
+      { label: "Source", value: input.solverMeshSummary ? "Core solver" : formatMeshSourceLabel(provenance?.meshSource, input.displayModel ?? undefined) }
+    ],
+    solver: solverRows(input, summary),
+    figures: {
+      stress: { title: "Natural frequencies", unavailableLabel: "See modal results table", legendMin: MISSING, legendMax: MISSING, caption: "Natural frequencies are listed in the results table." },
+      displacement: modalFigure
+    },
+    results: [
+      { label: "Result source", value: formatResultProvenanceLabel(provenance) },
+      { label: "Solver method", value: solverMethodForResult(summary, input.study) },
+      { label: "Requested modes", value: String(summary.requestedModeCount) },
+      { label: "Converged modes", value: String(summary.convergedModeCount) },
+      { label: "Normalization", value: "Maximum nodal vector magnitude = 1" },
+      { label: "Shape sign", value: "Deterministic but arbitrary" }
+    ],
+    loadCapacity: [],
+    transientResults: summary.modes.map((mode) => ({
+      label: `Mode ${mode.modeIndex}`,
+      value: `${Number(mode.frequencyHz.toPrecision(6))} Hz · residual ${mode.scaledResidual.toExponential(3)}`
+    })),
+    diagnostics: [...diagnostics],
+    includeSmoothingDisclaimer: false,
+    footerDisclaimer: `${FOOTER_DISCLAIMER} Mode-shape amplitude and phase are visualization-only.`
   };
 }
 
@@ -262,13 +347,18 @@ function geometryRows(project: Project, displayModel: DisplayModel | null): Repo
   ];
 }
 
-function materialTable(study: Study, unitSystem: UnitSystem, criticalLayerAxis: "x" | "y" | "z" | undefined): ReportTable {
+function materialTable(
+  study: Study,
+  unitSystem: UnitSystem,
+  criticalLayerAxis: "x" | "y" | "z" | undefined,
+  customMaterials: Project["customMaterials"]
+): ReportTable {
   return {
     headers: ["Material / target", "Young's modulus", "Poisson ratio", "Density", "Yield strength"],
     rows: study.materialAssignments.flatMap((assignment) => {
-      const material = starterMaterials.find((candidate) => candidate.id === assignment.materialId);
+      const material = tryResolveReportMaterial(assignment.materialId, customMaterials);
       const datasheetRow = [
-        `${material?.name ?? assignment.materialId} / ${selectionLabel(study, assignment.selectionRef)}`,
+        `${material ? reportMaterialName(material) : assignment.materialId} / ${selectionLabel(study, assignment.selectionRef)}`,
         material ? formatMaterialStress(material.youngsModulus, unitSystem) : MISSING,
         material ? String(material.poissonRatio) : MISSING,
         material ? formatDensity(material.density, "kg/m^3", unitSystem) : MISSING,
@@ -293,12 +383,12 @@ function materialTable(study: Study, unitSystem: UnitSystem, criticalLayerAxis: 
   };
 }
 
-function manufacturingTable(study: Study): ReportTable {
+function manufacturingTable(study: Study, customMaterials: Project["customMaterials"]): ReportTable {
   return {
     headers: ["Material / target", "Process", "Process settings"],
     rows: study.materialAssignments.map((assignment) => {
-      const material = starterMaterials.find((candidate) => candidate.id === assignment.materialId);
-      const target = `${material?.name ?? assignment.materialId} / ${selectionLabel(study, assignment.selectionRef)}`;
+      const material = tryResolveReportMaterial(assignment.materialId, customMaterials);
+      const target = `${material ? reportMaterialName(material) : assignment.materialId} / ${selectionLabel(study, assignment.selectionRef)}`;
       if (!material) return [target, MISSING, MISSING];
       const process = assignmentProcess(material, assignment.parameters);
       if (!process) return [target, MISSING, MISSING];
@@ -312,6 +402,20 @@ function manufacturingTable(study: Study): ReportTable {
     }),
     emptyMessage: "No material assignments recorded."
   };
+}
+
+function tryResolveReportMaterial(materialId: string, customMaterials: Project["customMaterials"]): Material | undefined {
+  try {
+    return resolveMaterial(materialId, customMaterials);
+  } catch {
+    return undefined;
+  }
+}
+
+function reportMaterialName(material: Material): string {
+  return (material as Material & { verification?: string }).verification === "user_supplied_unverified"
+    ? `${material.name} (user-supplied, unverified)`
+    : material.name;
 }
 
 function assignmentProcess(material: Material, parameters: Record<string, unknown> | undefined): ManufacturingProcess | undefined {
@@ -348,10 +452,12 @@ function loadTable(study: Study, unitSystem: UnitSystem): ReportTable {
       const rawUnits = typeof load.parameters.units === "string" ? load.parameters.units : unitsForLoadType(load.type);
       const converted = Number.isFinite(rawValue) ? loadValueForUnits(rawValue, rawUnits, unitSystem) : null;
       return [
-        load.type === "force" ? "Force" : load.type === "pressure" ? "Pressure" : "Gravity / payload mass",
+        reportLoadTypeLabel(load.type),
         converted ? formatResultMetric(roundDisplayValue(converted.value), converted.units) : MISSING,
         formatDirection(load.parameters.direction),
-        selectionLabel(study, load.selectionRef)
+        load.type === "bolt_preload" && typeof load.parameters.secondarySelectionRef === "string"
+          ? `${selectionLabel(study, load.selectionRef)} ↔ ${selectionLabel(study, load.parameters.secondarySelectionRef)}`
+          : selectionLabel(study, load.selectionRef)
       ];
     }),
     emptyMessage: "No loads recorded."
@@ -375,11 +481,21 @@ function boundaryFigureData(study: Study, capture: CapturedBoundaryView | undefi
   };
 }
 
+function reportLoadTypeLabel(type: Study["loads"][number]["type"]): string {
+  if (type === "force") return "Face force (total)";
+  if (type === "pressure") return "Pressure";
+  if (type === "surface_traction") return "Surface traction";
+  if (type === "volume_force") return "Volume force";
+  if (type === "remote_force") return "Remote force (distributed wrench)";
+  if (type === "bolt_preload") return "Equivalent bolt preload (bonded-linear)";
+  return "Gravity / payload mass";
+}
+
 function solverRows(input: BuildReportDataInput, summary: ResultSummary): ReportRow[] {
   const provenance = summary.provenance;
   const settings = input.study.solverSettings;
   const rows: ReportRow[] = [
-    { label: "Analysis type", value: input.study.type === "dynamic_structural" ? "Dynamic structural" : "Static stress" },
+    { label: "Analysis type", value: input.study.type === "dynamic_structural" ? "Dynamic structural" : input.study.type === "modal_analysis" ? "Modal analysis" : "Static stress" },
     { label: "Backend", value: settings.backend === "opencae_core_local" ? "OpenCAE Core local" : "Automatic (local-first)" },
     { label: "Fidelity", value: humanize(settings.fidelity ?? "standard") },
     { label: "Solver method", value: solverMethodForResult(summary, input.study) },
@@ -398,10 +514,11 @@ function solverRows(input: BuildReportDataInput, summary: ResultSummary): Report
       { label: "Load profile", value: humanize(provenance?.loadProfile ?? input.study.solverSettings.loadProfile) }
     );
   }
+  if (input.study.type === "modal_analysis") rows.push({ label: "Requested modes", value: String(input.study.solverSettings.modeCount) });
   return rows;
 }
 
-function resultRows(project: Project, study: Study, summary: ResultSummary, displayModel: DisplayModel | null): ReportRow[] {
+function resultRows(project: Project, study: Study, summary: StructuralResultSummary, displayModel: DisplayModel | null): ReportRow[] {
   const provenance = summary.provenance;
   const assessment = summary.failureAssessment ?? assessResultFailure(summary);
   return [
@@ -424,7 +541,7 @@ const DEFAULT_TARGET_SAFETY_FACTOR = 1.5;
 
 // Mirrors the results panel's Reverse Check gating: only report a load
 // capacity when the reaction force is trustworthy and units are intact.
-function loadCapacityRows(input: BuildReportDataInput, summary: ResultSummary, fields: ResultField[]): ReportRow[] {
+function loadCapacityRows(input: BuildReportDataInput, summary: StructuralResultSummary, fields: ResultField[]): ReportRow[] {
   const target = Number.isFinite(input.targetSafetyFactor) && input.targetSafetyFactor! > 0
     ? input.targetSafetyFactor!
     : DEFAULT_TARGET_SAFETY_FACTOR;
@@ -442,7 +559,7 @@ function loadCapacityRows(input: BuildReportDataInput, summary: ResultSummary, f
   ];
 }
 
-function transientRows(summary: ResultSummary): ReportRow[] {
+function transientRows(summary: StructuralResultSummary): ReportRow[] {
   const transient = summary.transient;
   if (!transient) return [];
   return [
@@ -493,7 +610,7 @@ function collectDiagnostics(input: BuildReportDataInput, summary: ResultSummary,
   const legacyWarning = legacyResultWarningForProvenance(summary.provenance);
   if (legacyWarning) entries.add(legacyWarning);
   if (hasInvalidReactionForce(summary, input.study) || hasUnavailableReactionDiagnostic(summary)) entries.add(INVALID_REACTION_WARNING);
-  if (!hasResultUnit(summary.maxStressUnits) || !hasResultUnit(summary.maxDisplacementUnits) || !hasResultUnit(summary.reactionForceUnits) || fields.some((field) => !hasResultUnit(field.units))) {
+  if (!isModalResultSummary(summary) && (!hasResultUnit(summary.maxStressUnits) || !hasResultUnit(summary.maxDisplacementUnits) || !hasResultUnit(summary.reactionForceUnits) || fields.some((field) => !hasResultUnit(field.units)))) {
     entries.add("Unit missing");
   }
   for (const warning of input.solverMeshSummary?.warnings ?? []) entries.add(warning);

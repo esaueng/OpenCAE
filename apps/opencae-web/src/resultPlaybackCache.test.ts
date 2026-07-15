@@ -110,6 +110,21 @@ describe("result playback cache", () => {
     expect(unpacked.find((field) => field.type === "displacement" && field.frameIndex === 1)?.values).toEqual([3, 4]);
   });
 
+  test("preserves the active run variant in packed playback descriptors", () => {
+    const fields = [0, 1].map((frameIndex) => ({
+      ...resultField(frameIndex, [frameIndex, frameIndex + 1]),
+      variantId: "case:gust"
+    }));
+
+    const packed = packResultFieldsForPlayback(fields);
+    const unpacked = unpackResultFieldsForPlayback(packed!);
+    const prepared = preparePlaybackFrames({ packedFields: packed!, frameIndexes: [0, 1], playbackFps: 30, budgetBytes: 100_000 });
+
+    expect(packed?.fieldDescriptors[0]?.variantId).toBe("case:gust");
+    expect(unpacked.every((field) => field.variantId === "case:gust")).toBe(true);
+    expect(prepared.packed?.fieldDescriptors[0]?.variantId).toBe("case:gust");
+  });
+
   test("packed playback input preserves dense sample buffers", () => {
     const fields = [
       {
@@ -338,7 +353,6 @@ describe("result playback cache", () => {
     const halfway = prepared.frames.find((frame) => Math.abs(frame.framePosition - 0.5) < 0.001)!;
     expect(hydratePreparedPlaybackFrame(halfway).fields.find((field) => field.type === "stress")?.tensorValues).toEqual([150, 0, 0, 0, 0, 0]);
   });
-
   test("falls back to all playback fields when the selected result mode is unavailable", () => {
     const fields = [0, 1].flatMap((frameIndex) => [
       typedResultField(frameIndex, "stress", [10 + frameIndex]),

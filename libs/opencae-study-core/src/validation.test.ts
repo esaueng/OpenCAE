@@ -9,7 +9,7 @@ describe("validateStaticStressStudy", () => {
     name: "Static Stress",
     type: "static_stress",
     geometryScope: [],
-    materialAssignments: [{ id: "assign", materialId: "mat", selectionRef: "body", status: "complete" }],
+    materialAssignments: [{ id: "assign", materialId: "mat-aluminum-6061", selectionRef: "body", status: "complete" }],
     contacts: [],
     constraints: [{ id: "fixed", type: "fixed", selectionRef: "face", parameters: {}, status: "complete" }],
     namedSelections: [
@@ -66,6 +66,24 @@ describe("validateStaticStressStudy", () => {
     ]);
   });
 
+  it("requires each load to belong to exactly one structurally shared load case", () => {
+    const study: Study = {
+      ...readyStudy,
+      loadCases: [
+        { id: "case-a", name: "Case A", enabled: false, loadIds: ["force", "missing"] },
+        { id: "case-b", name: "Case B", enabled: false, loadIds: ["force"] }
+      ],
+      loadCombinations: [{ id: "combo", name: "Bad combo", enabled: true, factors: [{ caseId: "missing-case", factor: 1 }] }]
+    };
+
+    expect(validateStaticStressStudy(study).map((item) => item.message)).toEqual(expect.arrayContaining([
+      "Load case Case A references unknown load missing.",
+      "Load force belongs to more than one load case.",
+      "Enable at least one non-empty load case.",
+      "Combination Bad combo references unknown load case missing-case."
+    ]));
+  });
+
   it("rejects a zero-length load direction", () => {
     const study = {
       ...readyStudy,
@@ -76,6 +94,41 @@ describe("validateStaticStressStudy", () => {
       "Load force needs a 3D direction vector."
     ]);
     expect(inferCriticalPrintAxis(study, [{ selectionId: "face", entityId: "face-1", center: [1, 0, 0] }])).toBeUndefined();
+  });
+
+  it("validates advanced load selection and static-only contracts", () => {
+    const selections = [
+      ...readyStudy.namedSelections,
+      { id: "face-b", name: "Face B", entityType: "face" as const, geometryRefs: [{ bodyId: "body", entityType: "face" as const, entityId: "face-2", label: "Face B" }], fingerprint: "face-b" },
+      { id: "body", name: "Body", entityType: "body" as const, geometryRefs: [{ bodyId: "body", entityType: "body" as const, entityId: "body", label: "Body" }], fingerprint: "body" }
+    ];
+    const advanced: Study = {
+      ...readyStudy,
+      namedSelections: selections,
+      loads: [
+        { id: "traction", type: "surface_traction", selectionRef: "face", parameters: { value: 10, direction: [1, 0, 0] }, status: "complete" },
+        { id: "volume", type: "volume_force", selectionRef: "body", parameters: { value: 10, direction: [0, -1, 0] }, status: "complete" },
+        { id: "remote", type: "remote_force", selectionRef: "face", parameters: { value: 10, direction: [0, 0, -1], remotePoint: [0, 0, 0] }, status: "complete" },
+        { id: "preload", type: "bolt_preload", selectionRef: "face", parameters: { value: 10, direction: [1, 0, 0], secondarySelectionRef: "face-b" }, status: "complete" }
+      ]
+    };
+
+    expect(validateStaticStressStudy(advanced)).toEqual([]);
+    const dynamic = {
+      ...advanced,
+      name: "Dynamic",
+      type: "dynamic_structural" as const,
+      solverSettings: {
+        startTime: 0,
+        endTime: 0.1,
+        timeStep: 0.01,
+        outputInterval: 0.01,
+        dampingRatio: 0.02,
+        integrationMethod: "newmark_average_acceleration" as const,
+        loadProfile: "ramp" as const
+      }
+    };
+    expect(validateStudy(dynamic).map((diagnostic) => diagnostic.message)).toContain("Load preload is an equivalent bolt preload and is static-only.");
   });
 
   it("retains the dominant bending span when the cantilever clamp normal follows the span", () => {
@@ -287,6 +340,30 @@ describe("validateStaticStressStudy", () => {
     expect(validateStudy(readyStudy)).toEqual([]);
   });
 
+  it("resolves project custom materials and reports dangling material IDs clearly", () => {
+    const custom = {
+      id: "0ac4dbda-1d37-43c0-b3ac-9d1d2cc28e84",
+      name: "Shop aluminum",
+      category: "metal" as const,
+      youngsModulus: 70e9,
+      poissonRatio: 0.33,
+      density: 2710,
+      yieldStrength: 290e6,
+      verification: "user_supplied_unverified" as const
+    };
+    const customStudy = {
+      ...readyStudy,
+      materialAssignments: [{ ...readyStudy.materialAssignments[0]!, materialId: custom.id }]
+    };
+    const unknownStudy = {
+      ...readyStudy,
+      materialAssignments: [{ ...readyStudy.materialAssignments[0]!, materialId: "deleted-custom-material" }]
+    };
+
+    expect(validateStudy(customStudy, [custom])).toEqual([]);
+    expect(validateStudy(unknownStudy).map((diagnostic) => diagnostic.message)).toContain('Unknown material "deleted-custom-material".');
+  });
+
   it("validates dynamic structural time settings and required setup", () => {
     const dynamicStudy: Study = {
       ...readyStudy,
@@ -316,6 +393,25 @@ describe("validateStaticStressStudy", () => {
       "Dynamic output interval must be greater than zero and no smaller than the time step.",
       "Dynamic damping ratio cannot be negative."
     ]);
+  });
+
+  it("rejects combinations on dynamic studies", () => {
+    const dynamicStudy: Study = {
+      ...readyStudy,
+      type: "dynamic_structural",
+      loadCases: [{ id: "case-default", name: "Default", enabled: true, loadIds: ["force"] }],
+      loadCombinations: [{ id: "combo", name: "Not supported", enabled: true, factors: [{ caseId: "case-default", factor: 1 }] }],
+      solverSettings: {
+        startTime: 0,
+        endTime: 0.1,
+        timeStep: 0.01,
+        outputInterval: 0.01,
+        dampingRatio: 0.02,
+        integrationMethod: "newmark_average_acceleration"
+      }
+    };
+
+    expect(validateStudy(dynamicStudy).map((item) => item.message)).toContain("Dynamic load combinations are not supported.");
   });
 
   it("rejects dynamic time settings that request an excessive number of integration steps", () => {

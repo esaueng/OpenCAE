@@ -1,13 +1,16 @@
 import { solvePreviewSdofTet4Cpu } from "./dynamic-preview-sdof";
 import { solveDynamicLinearTetMDOF } from "./dynamic-mdof";
+import { solveModalLinearTet } from "./modal";
 import { solveStaticLinearTet } from "./solver";
 import { validateCoreResult } from "@opencae/core";
 import type {
   CoreDynamicSolveResult,
+  CoreModalSolveResult,
   CoreStaticSolveResult,
   CpuSolverInput,
   CpuSolverOptions,
   DynamicTet4CpuOptions,
+  ModalCpuOptions,
   PreviewDynamicResult,
   PreviewDynamicSolveResult
 } from "./types";
@@ -100,6 +103,40 @@ export function solveCoreDynamic(
     result: coreResult,
     diagnostics: result.diagnostics
   };
+}
+
+export function solveCoreModal(
+  model: CpuSolverInput,
+  options: ModalCpuOptions = {}
+): CoreModalSolveResult {
+  const meshError = actualMeshError(model);
+  if (meshError) return meshError;
+  const step = model.steps[options.stepIndex ?? 0];
+  if (!step || step.type !== "modal") {
+    return {
+      ok: false,
+      error: { code: "invalid-modal-step", message: "Production modal solves require a modal step." }
+    };
+  }
+  const solved = solveModalLinearTet(model, options);
+  if (!solved.ok) return solved;
+  const coreResult = solved.result.coreResult;
+  if (!coreResult) {
+    return {
+      ok: false,
+      error: { code: "missing-core-result", message: "Modal solve completed without a CoreSolveResult." },
+      diagnostics: solved.diagnostics
+    };
+  }
+  const validation = validateCoreResult(coreResult);
+  if (!validation.ok) {
+    return {
+      ok: false,
+      error: { code: "result-validation-failed", message: "Modal Core result failed validation." },
+      diagnostics: solved.diagnostics
+    };
+  }
+  return { ok: true, result: coreResult, diagnostics: solved.diagnostics };
 }
 
 export function solveCorePreviewDynamic(

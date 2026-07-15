@@ -9,8 +9,9 @@
  */
 
 const DB_NAME = "opencae-local-results";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE_NAME = "results";
+const VARIANT_STORE_NAME = "variants";
 /** Keep bookkeeping consistent with the in-memory run caches (RUN_BOOKKEEPING_LIMIT). */
 const MAX_STORED_RESULTS = 4;
 
@@ -18,6 +19,14 @@ type StoredLocalRunResults = {
   runId: string;
   savedAt: number;
   results: unknown;
+};
+
+type StoredLocalRunVariant = {
+  key: string;
+  runId: string;
+  variantId: string;
+  savedAt: number;
+  result: unknown;
 };
 
 export function isLocalResultsStoreAvailable(): boolean {
@@ -51,6 +60,46 @@ export async function loadLocalRunResults<T>(runId: string): Promise<T | null> {
   }
 }
 
+export async function saveLocalRunVariantResult(runId: string, variantId: string, result: unknown): Promise<void> {
+  const db = await openResultsDb();
+  try {
+    await runStoreTransaction(db, VARIANT_STORE_NAME, "readwrite", (store) => {
+      store.put({ key: `${runId}\u0000${variantId}`, runId, variantId, savedAt: Date.now(), result } satisfies StoredLocalRunVariant);
+    });
+  } finally {
+    db.close();
+  }
+}
+
+export async function loadLocalRunVariantResult<T>(runId: string, variantId: string): Promise<T | null> {
+  const db = await openResultsDb();
+  try {
+    const entry = await new Promise<StoredLocalRunVariant | undefined>((resolve, reject) => {
+      const transaction = db.transaction(VARIANT_STORE_NAME, "readonly");
+      const request = transaction.objectStore(VARIANT_STORE_NAME).get(`${runId}\u0000${variantId}`);
+      request.onsuccess = () => resolve(request.result as StoredLocalRunVariant | undefined);
+      request.onerror = () => reject(requestError(request.error, "read"));
+    });
+    return (entry?.result as T | undefined) ?? null;
+  } finally {
+    db.close();
+  }
+}
+
+export async function deleteLocalRunVariantResults(runId: string): Promise<void> {
+  const db = await openResultsDb();
+  try {
+    await runStoreTransaction(db, VARIANT_STORE_NAME, "readwrite", (store) => {
+      const request = store.index("runId").getAll(IDBKeyRange.only(runId));
+      request.onsuccess = () => {
+        for (const entry of (request.result ?? []) as StoredLocalRunVariant[]) store.delete(entry.key);
+      };
+    });
+  } finally {
+    db.close();
+  }
+}
+
 async function pruneOldEntries(db: IDBDatabase): Promise<void> {
   const entries = await new Promise<StoredLocalRunResults[]>((resolve, reject) => {
     const transaction = db.transaction(STORE_NAME, "readonly");
@@ -66,6 +115,14 @@ async function pruneOldEntries(db: IDBDatabase): Promise<void> {
   await runTransaction(db, "readwrite", (store) => {
     for (const runId of stale) store.delete(runId);
   });
+  await runStoreTransaction(db, VARIANT_STORE_NAME, "readwrite", (store) => {
+    const request = store.getAll();
+    request.onsuccess = () => {
+      for (const entry of (request.result ?? []) as StoredLocalRunVariant[]) {
+        if (stale.includes(entry.runId)) store.delete(entry.key);
+      }
+    };
+  });
 }
 
 function openResultsDb(): Promise<IDBDatabase> {
@@ -79,6 +136,10 @@ function openResultsDb(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(STORE_NAME)) {
         db.createObjectStore(STORE_NAME, { keyPath: "runId" });
       }
+      if (!db.objectStoreNames.contains(VARIANT_STORE_NAME)) {
+        const store = db.createObjectStore(VARIANT_STORE_NAME, { keyPath: "key" });
+        store.createIndex("runId", "runId", { unique: false });
+      }
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(requestError(request.error, "open"));
@@ -87,12 +148,16 @@ function openResultsDb(): Promise<IDBDatabase> {
 }
 
 function runTransaction(db: IDBDatabase, mode: IDBTransactionMode, apply: (store: IDBObjectStore) => void): Promise<void> {
+  return runStoreTransaction(db, STORE_NAME, mode, apply);
+}
+
+function runStoreTransaction(db: IDBDatabase, storeName: string, mode: IDBTransactionMode, apply: (store: IDBObjectStore) => void): Promise<void> {
   return new Promise((resolve, reject) => {
-    const transaction = db.transaction(STORE_NAME, mode);
+    const transaction = db.transaction(storeName, mode);
     transaction.oncomplete = () => resolve();
     transaction.onerror = () => reject(requestError(transaction.error, "write"));
     transaction.onabort = () => reject(requestError(transaction.error, "write"));
-    apply(transaction.objectStore(STORE_NAME));
+    apply(transaction.objectStore(storeName));
   });
 }
 

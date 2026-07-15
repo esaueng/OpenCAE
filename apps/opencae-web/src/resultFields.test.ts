@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import type { DisplayFace, ResultField, ResultSummary } from "@opencae/schema";
+import type { DisplayFace, ResultField, ResultSummary, StructuralResultSummary } from "@opencae/schema";
 import {
   createPackedResultPlaybackCache,
   createResultFrameCache,
@@ -16,6 +16,7 @@ import {
   resultProbeSamplesForFaces,
   resultSamplesForFaces,
   solverMeshSummaryFromResults,
+  synthesizeModalPhaseFields,
   withDerivedSurfaceSafetyFactorFields
 } from "./resultFields";
 
@@ -23,6 +24,32 @@ const faces: DisplayFace[] = [
   { id: "face-a", label: "A", color: "#fff", center: [0, 0, 0], normal: [0, 1, 0], stressValue: 10 },
   { id: "face-b", label: "B", color: "#fff", center: [1, 0, 0], normal: [0, 1, 0], stressValue: 20 }
 ];
+
+describe("modal phase playback", () => {
+  test("synthesizes twenty-four signed phase frames for the selected mode", () => {
+    const field: ResultField = {
+      id: "mode-2",
+      runId: "run-modal",
+      type: "mode_shape",
+      location: "node",
+      values: [0.5, 1],
+      vectors: [[0.5, 0, 0], [0, 1, 0]],
+      min: 0,
+      max: 1,
+      units: "normalized",
+      modeIndex: 2,
+      frequencyHz: 80,
+      eigenvalue: 252_661.8727,
+      scaledResidual: 1e-8
+    };
+    const frames = synthesizeModalPhaseFields([field], 2);
+    expect(frames).toHaveLength(24);
+    expect(frames[0]?.vectors).toEqual(field.vectors);
+    expect(frames[6]?.vectors?.[1]?.[1]).toBeCloseTo(0, 12);
+    expect(frames[12]?.vectors?.[1]?.[1]).toBeCloseTo(-1, 12);
+    expect(frames.every((frame) => frame.modeIndex === 2 && frame.type === "mode_shape")).toBe(true);
+  });
+});
 
 describe("resultSamplesForFaces", () => {
   test("maps solver field values onto display faces by face order", () => {
@@ -685,10 +712,10 @@ describe("withDerivedSurfaceSafetyFactorFields", () => {
     units: "MPa",
     surfaceMeshRef: "solver-surface"
   };
-  const summary = { maxStress: 200, safetyFactor: 2 } as Pick<ResultSummary, "maxStress" | "safetyFactor">;
+  const summary: StructuralResultSummary = { maxStress: 200, maxStressUnits: "MPa", maxDisplacement: 1, maxDisplacementUnits: "mm", safetyFactor: 2, reactionForce: 1, reactionForceUnits: "N" };
 
   test("derives a surface-node safety factor field from the surface stress field", () => {
-    const fields = withDerivedSurfaceSafetyFactorFields({ summary: summary as ResultSummary, fields: [surfaceStressField] });
+    const fields = withDerivedSurfaceSafetyFactorFields({ summary, fields: [surfaceStressField] });
     const derived = fields.find((field) => field.type === "safety_factor" && field.surfaceMeshRef === "solver-surface");
     expect(derived).toBeDefined();
     expect(derived?.location).toBe("node");
@@ -711,7 +738,7 @@ describe("withDerivedSurfaceSafetyFactorFields", () => {
       units: "ratio",
       surfaceMeshRef: "solver-surface"
     };
-    const fields = withDerivedSurfaceSafetyFactorFields({ summary: summary as ResultSummary, fields: [surfaceStressField, existing] });
+    const fields = withDerivedSurfaceSafetyFactorFields({ summary, fields: [surfaceStressField, existing] });
     expect(fields).toHaveLength(2);
   });
 
@@ -722,7 +749,7 @@ describe("withDerivedSurfaceSafetyFactorFields", () => {
       frameIndex,
       timeSeconds: frameIndex * 0.005
     }));
-    const fields = withDerivedSurfaceSafetyFactorFields({ summary: summary as ResultSummary, fields: frames });
+    const fields = withDerivedSurfaceSafetyFactorFields({ summary, fields: frames });
     const derived = fields.filter((field) => field.type === "safety_factor");
     expect(derived).toHaveLength(2);
     expect(derived.map((field) => field.frameIndex)).toEqual([0, 1]);
@@ -731,7 +758,7 @@ describe("withDerivedSurfaceSafetyFactorFields", () => {
 
   test("skips derivation when the summary has no usable yield point", () => {
     const fields = withDerivedSurfaceSafetyFactorFields({
-      summary: { maxStress: 0, safetyFactor: 0 } as ResultSummary,
+      summary: { ...summary, maxStress: 0, safetyFactor: 0 },
       fields: [surfaceStressField]
     });
     expect(fields).toHaveLength(1);
@@ -739,7 +766,7 @@ describe("withDerivedSurfaceSafetyFactorFields", () => {
 
   test("ignores element-located stress fields without a surface mesh", () => {
     const elementField: ResultField = { ...surfaceStressField, id: "stress-element", location: "element", surfaceMeshRef: undefined };
-    const fields = withDerivedSurfaceSafetyFactorFields({ summary: summary as ResultSummary, fields: [elementField] });
+    const fields = withDerivedSurfaceSafetyFactorFields({ summary, fields: [elementField] });
     expect(fields).toHaveLength(1);
   });
 

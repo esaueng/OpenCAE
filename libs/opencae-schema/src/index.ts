@@ -58,6 +58,12 @@ export const MaterialSchema = z.object({
   printProfile: MaterialPrintProfileSchema.optional()
 });
 
+export const CustomMaterialSchema = MaterialSchema.extend({
+  id: z.string().uuid(),
+  category: z.enum(["metal", "plastic", "composite", "resin"]),
+  verification: z.literal("user_supplied_unverified")
+});
+
 export const GeometryReferenceSchema = z.object({
   bodyId: z.string(),
   entityType: z.enum(["body", "face", "edge", "vertex"]),
@@ -83,14 +89,33 @@ export const ConstraintSchema = z.object({
 
 export const LoadSchema = z.object({
   id: z.string(),
-  type: z.enum(["force", "pressure", "gravity"]),
+  type: z.enum(["force", "pressure", "gravity", "surface_traction", "volume_force", "remote_force", "bolt_preload"]),
   selectionRef: z.string(),
   parameters: z.record(z.unknown()),
   status: z.enum(["not_started", "ready", "warning", "complete"])
 });
 
+export const LoadCaseSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().trim().min(1),
+  enabled: z.boolean().default(true),
+  loadIds: z.array(z.string().min(1))
+});
+
+export const LoadCombinationFactorSchema = z.object({
+  caseId: z.string().min(1),
+  factor: z.number().finite()
+});
+
+export const LoadCombinationSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().trim().min(1),
+  enabled: z.boolean().default(true),
+  factors: z.array(LoadCombinationFactorSchema).min(1)
+});
+
 const Vec3Schema = z.tuple([z.number(), z.number(), z.number()]);
-export const StudyAnalysisTypeSchema = z.enum(["static_stress", "dynamic_structural"]);
+export const StudyAnalysisTypeSchema = z.enum(["static_stress", "dynamic_structural", "modal_analysis"]);
 export const MeshQualitySchema = z.enum(["coarse", "medium", "fine", "ultra"]);
 // "auto" means the user never made an explicit backend choice; the run router
 // resolves it (local — the client cloud solve path was retired in B4a). An
@@ -120,6 +145,12 @@ export const DynamicSolverSettingsSchema = z.object({
   rayleighAlpha: z.number().nonnegative().optional(),
   rayleighBeta: z.number().nonnegative().optional(),
   allowFreeMotion: z.boolean().optional()
+});
+
+export const ModalSolverSettingsSchema = z.object({
+  backend: SolverBackendSchema.optional(),
+  fidelity: SimulationFidelitySchema.optional(),
+  modeCount: z.number().int().min(1).max(10).default(6)
 });
 
 export const AnalysisSampleSchema = z.object({
@@ -195,7 +226,8 @@ export const StressComponentSchema = z.enum(["von_mises", "principal_max", "prin
 export const ResultFieldSchema = z.object({
   id: z.string(),
   runId: z.string(),
-  type: z.enum(["stress", "displacement", "safety_factor", "velocity", "acceleration"]),
+  variantId: z.string().optional(),
+  type: z.enum(["stress", "displacement", "safety_factor", "velocity", "acceleration", "mode_shape"]),
   component: StressComponentSchema.optional(),
   location: z.enum(["node", "element", "face"]),
   values: z.array(z.number()),
@@ -211,6 +243,10 @@ export const ResultFieldSchema = z.object({
   engineeringSource: z.string().optional(),
   frameIndex: z.number().int().min(0).optional(),
   timeSeconds: z.number().min(0).optional(),
+  modeIndex: z.number().int().min(1).optional(),
+  frequencyHz: z.number().positive().optional(),
+  eigenvalue: z.number().positive().optional(),
+  scaledResidual: z.number().nonnegative().optional(),
   provenance: ResultProvenanceSchema.optional()
 });
 
@@ -298,20 +334,213 @@ const StudyBaseSchema = z.object({
   runs: z.array(StudyRunSchema).default([])
 });
 
-export const StaticStudySchema = StudyBaseSchema.extend({
+const StructuralVariantSchema = z.object({
+  loadCases: z.array(LoadCaseSchema).min(1).optional(),
+  loadCombinations: z.array(LoadCombinationSchema).optional()
+});
+
+export const StaticStudySchema = StudyBaseSchema.merge(StructuralVariantSchema).extend({
   type: z.literal("static_stress"),
   solverSettings: z.object({
     backend: SolverBackendSchema.optional(),
     fidelity: SimulationFidelitySchema.optional()
   }).passthrough()
-});
+}).superRefine((study, context) => validateStructuralVariants(study, context, true));
 
-export const DynamicStudySchema = StudyBaseSchema.extend({
+export const DynamicStudySchema = StudyBaseSchema.merge(StructuralVariantSchema).extend({
   type: z.literal("dynamic_structural"),
   solverSettings: DynamicSolverSettingsSchema
+}).superRefine((study, context) => validateStructuralVariants(study, context, false));
+
+export const ModalStudySchema = StudyBaseSchema.extend({
+  type: z.literal("modal_analysis"),
+  solverSettings: ModalSolverSettingsSchema
 });
 
-export const StudySchema = z.discriminatedUnion("type", [StaticStudySchema, DynamicStudySchema]);
+const StudyUnionSchema = z.union([StaticStudySchema, DynamicStudySchema, ModalStudySchema]);
+export const StudySchema = z.preprocess(migrateLegacyStructuralVariants, StudyUnionSchema);
+
+function migrateLegacyStructuralVariants(value: unknown): unknown {
+  if (!value || typeof value !== "object") return value;
+  const study = value as Record<string, unknown>;
+  if (study.type !== "static_stress" && study.type !== "dynamic_structural") return value;
+  if (Array.isArray(study.loadCases)) {
+    return Array.isArray(study.loadCombinations) ? value : { ...study, loadCombinations: [] };
+  }
+  const loads = Array.isArray(study.loads) ? study.loads : [];
+  const loadIds = loads.flatMap((load) => {
+    if (!load || typeof load !== "object") return [];
+    const id = (load as { id?: unknown }).id;
+    return typeof id === "string" ? [id] : [];
+  });
+  return {
+    ...study,
+    loadCases: [{ id: "case-default", name: "Default", enabled: true, loadIds }],
+    loadCombinations: []
+  };
+}
+
+function validateStructuralVariants(
+  study: {
+    loads: Array<{ id: string }>;
+    loadCases?: Array<{ id: string; loadIds: string[] }>;
+    loadCombinations?: Array<{ id: string; factors: Array<{ caseId: string }> }>;
+  },
+  context: z.RefinementCtx,
+  allowCombinations: boolean
+): void {
+  const loadCases = study.loadCases;
+  if (!loadCases) return;
+  const loadIds = new Set(study.loads.map((load) => load.id));
+  const caseIds = new Set<string>();
+  const assignedCount = new Map<string, number>();
+  for (const [caseIndex, loadCase] of loadCases.entries()) {
+    if (caseIds.has(loadCase.id)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["loadCases", caseIndex, "id"],
+        message: `Load case id ${loadCase.id} is duplicated.`
+      });
+    }
+    caseIds.add(loadCase.id);
+    const localIds = new Set<string>();
+    for (const [loadIndex, loadId] of loadCase.loadIds.entries()) {
+      if (!loadIds.has(loadId)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["loadCases", caseIndex, "loadIds", loadIndex],
+          message: `Load case ${loadCase.id} references unknown load ${loadId}.`
+        });
+      }
+      if (localIds.has(loadId)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["loadCases", caseIndex, "loadIds", loadIndex],
+          message: `Load ${loadId} is repeated in load case ${loadCase.id}.`
+        });
+      }
+      localIds.add(loadId);
+      assignedCount.set(loadId, (assignedCount.get(loadId) ?? 0) + 1);
+    }
+  }
+  for (const loadId of loadIds) {
+    const count = assignedCount.get(loadId) ?? 0;
+    if (count !== 1) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["loadCases"],
+        message: count === 0
+          ? `Load ${loadId} must belong to exactly one load case.`
+          : `Load ${loadId} belongs to ${count} load cases; exactly one is required.`
+      });
+    }
+  }
+
+  const combinations = study.loadCombinations ?? [];
+  if (!allowCombinations && combinations.length) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["loadCombinations"],
+      message: "Dynamic load combinations are not supported."
+    });
+    return;
+  }
+  const combinationIds = new Set<string>();
+  for (const [combinationIndex, combination] of combinations.entries()) {
+    if (combinationIds.has(combination.id)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["loadCombinations", combinationIndex, "id"],
+        message: `Load combination id ${combination.id} is duplicated.`
+      });
+    }
+    combinationIds.add(combination.id);
+    const referencedCases = new Set<string>();
+    for (const [factorIndex, factor] of combination.factors.entries()) {
+      if (!caseIds.has(factor.caseId)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["loadCombinations", combinationIndex, "factors", factorIndex, "caseId"],
+          message: `Load combination ${combination.id} references unknown static case ${factor.caseId}.`
+        });
+      }
+      if (referencedCases.has(factor.caseId)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["loadCombinations", combinationIndex, "factors", factorIndex, "caseId"],
+          message: `Load combination ${combination.id} repeats case ${factor.caseId}.`
+        });
+      }
+      referencedCases.add(factor.caseId);
+    }
+  }
+}
+
+export const MeshConvergenceRungSchema = z.object({
+  requestedPreset: z.enum(["coarse", "medium", "fine"]),
+  status: z.enum(["complete", "failed", "skipped"]),
+  actualNodeCount: z.number().int().positive().optional(),
+  actualElementCount: z.number().int().positive().optional(),
+  totalDofs: z.number().int().positive().optional(),
+  freeDofs: z.number().int().nonnegative().optional(),
+  actualMeshSizeMm: z.number().positive().optional(),
+  rawElementPeakVonMises: z.number().nonnegative().optional(),
+  stressUnits: z.string().optional(),
+  probeDisplacement: z.number().nonnegative().optional(),
+  displacementUnits: z.string().optional(),
+  skipReason: z.string().optional()
+}).superRefine((rung, context) => {
+  if (rung.status !== "complete") {
+    if (!rung.skipReason?.trim()) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["skipReason"], message: "Failed or skipped convergence rung requires a reason." });
+    }
+    return;
+  }
+  const required = [
+    "actualNodeCount",
+    "actualElementCount",
+    "totalDofs",
+    "freeDofs",
+    "actualMeshSizeMm",
+    "rawElementPeakVonMises",
+    "stressUnits",
+    "probeDisplacement",
+    "displacementUnits"
+  ] as const;
+  for (const key of required) {
+    if (rung[key] !== undefined) continue;
+    context.addIssue({ code: z.ZodIssueCode.custom, path: [key], message: `Completed convergence rung requires ${key}.` });
+  }
+});
+
+export const MeshConvergenceRecordSchema = z.object({
+  id: z.string().min(1),
+  studyId: z.string().min(1),
+  caseId: z.string().min(1),
+  createdAt: z.string(),
+  completedAt: z.string(),
+  probe: z.object({
+    point: Vec3Schema,
+    source: z.enum(["explicit", "primary_load"]),
+    label: z.string().optional()
+  }),
+  rungs: z.array(MeshConvergenceRungSchema).length(3),
+  classification: z.enum(["apparent_convergence", "unconverged", "inconclusive"]),
+  lastStepChanges: z.object({
+    displacement: z.number().nonnegative(),
+    stress: z.number().nonnegative()
+  }).optional()
+}).superRefine((record, context) => {
+  const expected = ["coarse", "medium", "fine"] as const;
+  record.rungs.forEach((rung, index) => {
+    if (rung.requestedPreset === expected[index]) return;
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["rungs", index, "requestedPreset"],
+      message: "Convergence rungs must be ordered coarse, medium, fine."
+    });
+  });
+});
 
 export const ProjectSchema = z.object({
   id: z.string(),
@@ -319,6 +548,8 @@ export const ProjectSchema = z.object({
   schemaVersion: z.string(),
   unitSystem: z.enum(["SI", "US"]),
   geometryFiles: z.array(GeometryFileSchema),
+  customMaterials: z.array(CustomMaterialSchema).optional(),
+  convergenceRecords: z.array(MeshConvergenceRecordSchema).optional(),
   studies: z.array(StudySchema),
   createdAt: z.string(),
   updatedAt: z.string()
@@ -337,7 +568,7 @@ export const MeshSummarySchema = z.object({
   resultSampleCoordinateSpace: z.string().optional()
 });
 
-export const ResultSummarySchema = z.object({
+export const StructuralResultSummarySchema = z.object({
   maxStress: z.number(),
   maxStressUnits: z.string(),
   maxDisplacement: z.number(),
@@ -381,6 +612,49 @@ export const ResultSummarySchema = z.object({
     .optional()
 });
 
+export const ModalResultSummarySchema = z.object({
+  analysisType: z.literal("modal_analysis"),
+  requestedModeCount: z.number().int().min(1).max(10),
+  convergedModeCount: z.number().int().min(0).max(10),
+  modes: z.array(z.object({
+    modeIndex: z.number().int().min(1),
+    frequencyHz: z.number().positive(),
+    eigenvalue: z.number().positive(),
+    scaledResidual: z.number().nonnegative(),
+    fieldId: z.string()
+  })),
+  warning: z.string().optional(),
+  resultTier: ResultProvenanceTierSchema.optional(),
+  provenance: ResultProvenanceSchema.optional(),
+  diagnostics: z.array(DiagnosticSchema).optional().default([])
+});
+
+export const ResultSummarySchema = z.union([StructuralResultSummarySchema, ModalResultSummarySchema]);
+
+export const RunVariantKindSchema = z.enum(["case", "combination", "envelope"]);
+export const GoverningVariantIndexSchema = z.object({
+  variantIds: z.array(z.string()),
+  stress: z.array(z.number().int().nonnegative()),
+  displacement: z.array(z.number().int().nonnegative())
+});
+export const RunVariantResultSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  kind: RunVariantKindSchema,
+  caseId: z.string().optional(),
+  combinationId: z.string().optional(),
+  summary: ResultSummarySchema,
+  fields: z.array(ResultFieldSchema),
+  governingVariantIndices: GoverningVariantIndexSchema.optional()
+});
+export const RunVariantRefSchema = RunVariantResultSchema.pick({
+  id: true,
+  name: true,
+  kind: true,
+  caseId: true,
+  combinationId: true
+}).extend({ persistedSeparately: z.boolean().optional() });
+
 export const RunEventSchema = z.object({
   runId: z.string(),
   type: z.enum(["state", "progress", "message", "log", "diagnostic", "complete", "cancelled", "error"]),
@@ -399,11 +673,16 @@ export type MeshQuality = z.infer<typeof MeshQualitySchema>;
 export type SolverBackend = z.infer<typeof SolverBackendSchema>;
 export type SimulationFidelity = z.infer<typeof SimulationFidelitySchema>;
 export type DynamicSolverSettings = z.infer<typeof DynamicSolverSettingsSchema>;
+export type ModalSolverSettings = z.infer<typeof ModalSolverSettingsSchema>;
 export type Material = z.infer<typeof MaterialSchema>;
+export type CustomMaterial = z.infer<typeof CustomMaterialSchema>;
 export type GeometryReference = z.infer<typeof GeometryReferenceSchema>;
 export type NamedSelection = z.infer<typeof NamedSelectionSchema>;
 export type Constraint = z.infer<typeof ConstraintSchema>;
 export type Load = z.infer<typeof LoadSchema>;
+export type LoadCase = z.infer<typeof LoadCaseSchema>;
+export type LoadCombinationFactor = z.infer<typeof LoadCombinationFactorSchema>;
+export type LoadCombination = z.infer<typeof LoadCombinationSchema>;
 export type AnalysisSample = z.infer<typeof AnalysisSampleSchema>;
 export type AnalysisMesh = z.infer<typeof AnalysisMeshSchema>;
 export type ResultSample = z.infer<typeof ResultSampleSchema>;
@@ -413,12 +692,20 @@ export type StressComponent = z.infer<typeof StressComponentSchema>;
 export type ResultField = z.infer<typeof ResultFieldSchema>;
 export type GeometryFile = z.infer<typeof GeometryFileSchema>;
 export type MeshSummary = z.infer<typeof MeshSummarySchema>;
-export type ResultSummary = Omit<z.infer<typeof ResultSummarySchema>, "diagnostics"> & { diagnostics?: Diagnostic[] };
+export type StructuralResultSummary = Omit<z.infer<typeof StructuralResultSummarySchema>, "diagnostics"> & { diagnostics?: Diagnostic[] };
+export type ModalResultSummary = Omit<z.infer<typeof ModalResultSummarySchema>, "diagnostics"> & { diagnostics?: Diagnostic[] };
+export type ResultSummary = StructuralResultSummary | ModalResultSummary;
+export type RunVariantKind = z.infer<typeof RunVariantKindSchema>;
+export type GoverningVariantIndex = z.infer<typeof GoverningVariantIndexSchema>;
+export type RunVariantResult = Omit<z.infer<typeof RunVariantResultSchema>, "summary"> & { summary: ResultSummary };
+export type RunVariantRef = z.infer<typeof RunVariantRefSchema>;
+export type MeshConvergenceRung = z.infer<typeof MeshConvergenceRungSchema>;
+export type MeshConvergenceRecord = z.infer<typeof MeshConvergenceRecordSchema>;
 export type StudyRun = z.infer<typeof StudyRunSchema>;
 export type Study = z.infer<typeof StudySchema>;
 export type Project = z.infer<typeof ProjectSchema>;
 export type RunEvent = z.infer<typeof RunEventSchema>;
-export type FailureAssessment = NonNullable<ResultSummary["failureAssessment"]>;
+export type FailureAssessment = NonNullable<StructuralResultSummary["failureAssessment"]>;
 
 export type RunTimingEstimate = Pick<RunEvent, "elapsedMs" | "estimatedDurationMs" | "estimatedRemainingMs">;
 
@@ -470,7 +757,7 @@ export interface LoadCapacityEstimate {
   loadUnits: string;
 }
 
-export function assessResultFailure(summary: Pick<ResultSummary, "safetyFactor" | "maxStress" | "maxStressUnits">): FailureAssessment {
+export function assessResultFailure(summary: Pick<StructuralResultSummary, "safetyFactor" | "maxStress" | "maxStressUnits">): FailureAssessment {
   const safetyFactor = Number(summary.safetyFactor);
   if (!Number.isFinite(safetyFactor) || safetyFactor <= 0) {
     return {
@@ -510,7 +797,7 @@ function formatAssessmentNumber(value: number): string {
 }
 
 export function estimateAllowableLoadForSafetyFactor(
-  summary: Pick<ResultSummary, "safetyFactor" | "reactionForce" | "reactionForceUnits">,
+  summary: Pick<StructuralResultSummary, "safetyFactor" | "reactionForce" | "reactionForceUnits">,
   targetSafetyFactor: number
 ): LoadCapacityEstimate {
   const currentSafetyFactor = Number(summary.safetyFactor);
@@ -536,6 +823,10 @@ export function estimateAllowableLoadForSafetyFactor(
     loadScale: roundAssessmentNumber(loadScale),
     loadUnits: summary.reactionForceUnits
   };
+}
+
+export function isModalResultSummary(summary: ResultSummary): summary is ModalResultSummary {
+  return "analysisType" in summary && summary.analysisType === "modal_analysis";
 }
 
 function roundAssessmentNumber(value: number): number {

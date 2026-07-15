@@ -1,4 +1,4 @@
-import type { DisplayModel, Study } from "@opencae/schema";
+import type { CustomMaterial, DisplayModel, RunVariantResult, Study } from "@opencae/schema";
 import type { SolveProgressEvent } from "@opencae/solve-pipeline";
 import type { LocalSolveResult } from "./performanceProtocol";
 
@@ -16,6 +16,7 @@ export type SolveWorkerSolvePayload = {
   runId: string;
   study: Study;
   displayModel?: DisplayModel;
+  customMaterials?: CustomMaterial[];
   debugResults?: boolean;
 };
 
@@ -27,6 +28,13 @@ export type SolveWorkerProgressMessage = {
   kind: "progress";
   id: string;
   event: SolveProgressEvent;
+};
+
+export type SolveWorkerVariantMessage = {
+  kind: "variant";
+  id: string;
+  variant: RunVariantResult;
+  surfaceMesh?: unknown;
 };
 
 export type SolveWorkerErrorShape = {
@@ -53,7 +61,7 @@ export type SolveWorkerResultMessage =
     }
   | { kind: "result"; id: string; ok: false; error: SolveWorkerErrorShape };
 
-export type SolveWorkerResponse = SolveWorkerProgressMessage | SolveWorkerResultMessage;
+export type SolveWorkerResponse = SolveWorkerProgressMessage | SolveWorkerVariantMessage | SolveWorkerResultMessage;
 
 let solveRequestCounter = 0;
 
@@ -67,6 +75,10 @@ export function createSolveWorkerRequestId(): string {
 
 export function isSolveWorkerProgress(value: unknown): value is SolveWorkerProgressMessage {
   return isRecord(value) && value.kind === "progress" && typeof value.id === "string" && isRecord(value.event);
+}
+
+export function isSolveWorkerVariant(value: unknown): value is SolveWorkerVariantMessage {
+  return isRecord(value) && value.kind === "variant" && typeof value.id === "string" && isRecord(value.variant);
 }
 
 export function isSolveWorkerResult(value: unknown): value is SolveWorkerResultMessage {
@@ -96,8 +108,16 @@ export function normalizeSolveWorkerError(error: unknown, code?: string): SolveW
  * back typed-array fields they transfer for free.
  */
 export function transferablesForSolveResult(result: LocalSolveResult): Transferable[] {
+  return transferablesForFields(result.fields ?? []);
+}
+
+export function transferablesForVariant(variant: RunVariantResult): Transferable[] {
+  return transferablesForFields(variant.fields);
+}
+
+function transferablesForFields(fields: RunVariantResult["fields"]): Transferable[] {
   const buffers = new Set<ArrayBuffer>();
-  for (const field of result.fields ?? []) {
+  for (const field of fields) {
     const values = (field as { values?: unknown }).values;
     if (values instanceof Float64Array || values instanceof Float32Array) buffers.add(values.buffer as ArrayBuffer);
   }

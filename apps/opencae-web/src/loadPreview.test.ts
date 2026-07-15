@@ -161,6 +161,25 @@ describe("load preview helpers", () => {
     });
   });
 
+  test("uses canonical UI units for advanced distributed loads", () => {
+    expect(unitsForLoadType("surface_traction")).toBe("kPa");
+    expect(unitsForLoadType("volume_force")).toBe("N/m^3");
+    expect(unitsForLoadType("remote_force")).toBe("N");
+    expect(unitsForLoadType("bolt_preload")).toBe("N");
+  });
+
+  test("places a remote-force marker at its explicit remote point", () => {
+    const load: Load = {
+      id: "remote",
+      type: "remote_force",
+      selectionRef: "selection-side",
+      parameters: { value: 500, units: "N", direction: [0, 0, -1], applicationPoint: [1, 2, 3], remotePoint: [4, 5, 6] },
+      status: "complete"
+    };
+
+    expect(loadMarkerFromLoad(load, study, 0)?.point).toEqual([4, 5, 6]);
+  });
+
   test("does not create an unsaved marker for the selected load face", () => {
     const markers = createViewerLoadMarkers({
       study

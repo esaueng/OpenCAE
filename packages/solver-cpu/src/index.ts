@@ -4,6 +4,7 @@ export type {
   CpuSolverInput,
   CpuSolverOptions,
   CoreDynamicSolveResult,
+  CoreModalSolveResult,
   CoreFeaResult,
   CoreStaticSolveResult,
   DenseLinearSolveResult,
@@ -14,6 +15,11 @@ export type {
   DynamicTet4CpuOptions,
   DynamicTet4CpuResult,
   DynamicTet4CpuSolveResult,
+  ModalCpuDiagnostics,
+  ModalCpuOptions,
+  ModalCpuResult,
+  ModalCpuSolveResult,
+  ModalMode,
   PreviewDynamicResult,
   PreviewDynamicSolveResult,
   SolveProgressEvent,
@@ -28,6 +34,7 @@ export { computeLinearElasticDMatrix } from "./material";
 export {
   computeTet4BMatrix,
   computeTet4ElementStiffness,
+  computePrincipalStressMeasures,
   computeVonMisesStress,
   smoothNodalScalarField
 } from "./element";
@@ -39,7 +46,7 @@ export {
   TET10_EDGE_VERTICES,
   TET10_NODE_COUNT
 } from "./element-tet10";
-export { recoverNodalVonMisesFromElements } from "./recovery";
+export { recoverNodalStressTensorsFromElements, recoverNodalVonMisesFromElements } from "./recovery";
 export { solveDenseLinearSystem } from "./linear-solve";
 export {
   addSparseEntry,
@@ -52,6 +59,7 @@ export {
   dot,
   jacobiPreconditioner,
   norm,
+  reduceCsrRhs,
   reduceCsrSystem,
   solveConjugateGradient,
   sparseMatVec,
@@ -59,8 +67,25 @@ export {
 } from "./sparse";
 export type { ConjugateGradientOptions, ConjugateGradientResult, CsrMatrix, SparseMatrixBuilder } from "./sparse";
 export { solvePreviewSdofTet4Cpu } from "./dynamic";
-export { solveDynamicLinearTetMDOF, solveDynamicMdofTet4Cpu } from "./dynamic-mdof";
-export { solveStaticLinearTet, solveStaticLinearTet4Cpu } from "./solver";
+export { solveDynamicLinearTetLoadCases, solveDynamicLinearTetMDOF, solveDynamicMdofTet4Cpu } from "./dynamic-mdof";
+export type { DynamicLoadCaseBatchSolveResult, DynamicLoadCaseInput, DynamicLoadCaseSolve } from "./dynamic-mdof";
+export { solveModalLinearTet, solveModalSubspace } from "./modal";
+export {
+  combineStaticLinearTetResults,
+  prepareStaticLinearTetSystem,
+  solvePreparedStaticLoadCase,
+  solveStaticLinearTet,
+  solveStaticLinearTet4Cpu,
+  solveStaticLinearTetLoadCases
+} from "./solver";
+export type {
+  PreparedStaticLinearTetResult,
+  PreparedStaticLinearTetSystem,
+  PreparedStaticLoadCaseSolveResult,
+  StaticLoadCaseBatchSolveResult,
+  StaticLoadCaseInput,
+  StaticLoadCaseSolve
+} from "./solver";
 export { solveStaticLinearTetSparse } from "./static-sparse";
 export {
   hasAbruptStressDiscontinuity,
@@ -71,6 +96,7 @@ export {
 } from "./results";
 export {
   solveCoreDynamic,
+  solveCoreModal,
   solveCorePreviewDynamic,
   solveCoreStatic
 } from "./core-api";

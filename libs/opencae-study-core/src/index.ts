@@ -1,5 +1,5 @@
-import type { Diagnostic, DisplayModel, DynamicSolverSettings, Load, Study } from "@opencae/schema";
-import { manufacturingProcessCompatibilityError } from "@opencae/materials";
+import type { CustomMaterial, Diagnostic, DisplayModel, DynamicSolverSettings, Load, ModalSolverSettings, Study } from "@opencae/schema";
+import { manufacturingProcessCompatibilityError, resolveMaterial } from "@opencae/materials";
 
 export type PrintCriticalAxis = "x" | "y" | "z";
 
@@ -53,42 +53,68 @@ export function usesLegacySampleFrame(displayModel: DisplayModel): boolean {
     !displayModel.id.includes("uploaded");
 }
 
-export function validateStaticStressStudy(study: Study): Diagnostic[] {
+export function validateStaticStressStudy(study: Study, customMaterials: readonly CustomMaterial[] = []): Diagnostic[] {
   const diagnostics: Diagnostic[] = [];
   if (study.materialAssignments.length === 0) diagnostics.push(issue("validation-material", "Choose what the part is made of."));
-  diagnostics.push(...materialProcessDiagnostics(study));
+  diagnostics.push(...materialProcessDiagnostics(study, customMaterials));
   if (study.constraints.length === 0) diagnostics.push(issue("validation-support", "Choose where the part is held fixed."));
   if (study.loads.length === 0) diagnostics.push(issue("validation-load", "Choose where force, pressure, or payload weight is applied."));
+  diagnostics.push(...structuralVariantDiagnostics(study));
   for (const load of study.loads) {
     const selection = study.namedSelections.find((item) => item.id === load.selectionRef);
-    if (!selection || selection.entityType !== "face") {
-      diagnostics.push(issue(`validation-load-selection-${load.id}`, `Load ${load.id} must reference a face selection.`));
+    const expectedSelectionType = load.type === "volume_force" ? "body" : "face";
+    if (!selection || selection.entityType !== expectedSelectionType) {
+      diagnostics.push(issue(`validation-load-selection-${load.id}`, `Load ${load.id} must reference a ${expectedSelectionType} selection.`));
     }
     if (!isPositiveFinite(load.parameters.value)) {
       diagnostics.push(issue(`validation-load-value-${load.id}`, `Load ${load.id} needs a positive finite magnitude.`));
     }
     if (!isDirection(load.parameters.direction)) {
       diagnostics.push(issue(`validation-load-direction-${load.id}`, `Load ${load.id} needs a 3D direction vector.`));
+    }
+    if (load.type === "remote_force" && !isFiniteVec3(load.parameters.remotePoint)) {
+      diagnostics.push(issue(`validation-load-remote-point-${load.id}`, `Remote force ${load.id} needs explicit remote-point coordinates.`));
+    }
+    if (load.type === "bolt_preload") {
+      const secondarySelection = study.namedSelections.find((item) => item.id === load.parameters.secondarySelectionRef);
+      if (!secondarySelection || secondarySelection.entityType !== "face" || secondarySelection.id === selection?.id) {
+        diagnostics.push(issue(`validation-load-secondary-selection-${load.id}`, `Bolt preload ${load.id} needs a different opposing face selection.`));
+      }
     }
   }
   if (study.meshSettings.status !== "complete") diagnostics.push(issue("validation-mesh", "Generate the mesh before running."));
   return diagnostics;
 }
 
-export function validateStudy(study: Study): Diagnostic[] {
-  if (study.type === "dynamic_structural") return validateDynamicStructuralStudy(study);
-  return validateStaticStressStudy(study);
+export function validateStudy(study: Study, customMaterials: readonly CustomMaterial[] = []): Diagnostic[] {
+  if (study.type === "dynamic_structural") return validateDynamicStructuralStudy(study, customMaterials);
+  if (study.type === "modal_analysis") return validateModalStudy(study, customMaterials);
+  return validateStaticStressStudy(study, customMaterials);
 }
 
-export function validateDynamicStructuralStudy(study: Study): Diagnostic[] {
+export function validateModalStudy(study: Extract<Study, { type: "modal_analysis" }>, customMaterials: readonly CustomMaterial[] = []): Diagnostic[] {
+  const diagnostics: Diagnostic[] = [];
+  const settings = study.solverSettings as ModalSolverSettings;
+  if (study.materialAssignments.length === 0) diagnostics.push(issue("validation-material", "Choose what the part is made of."));
+  diagnostics.push(...materialProcessDiagnostics(study, customMaterials));
+  if (study.constraints.length === 0) diagnostics.push(issue("validation-modal-support", "Add at least one support for modal analysis."));
+  if (study.meshSettings.status !== "complete") diagnostics.push(issue("validation-mesh", "Generate the mesh before running."));
+  if (!Number.isInteger(settings.modeCount) || settings.modeCount < 1 || settings.modeCount > 10) {
+    diagnostics.push(issue("validation-modal-mode-count", "Modal mode count must be from 1 through 10."));
+  }
+  return diagnostics;
+}
+
+export function validateDynamicStructuralStudy(study: Study, customMaterials: readonly CustomMaterial[] = []): Diagnostic[] {
   const diagnostics: Diagnostic[] = [];
   const solverSettings = study.solverSettings as DynamicSolverSettings;
   if (study.materialAssignments.length === 0) diagnostics.push(issue("validation-material", "Choose what the part is made of."));
-  diagnostics.push(...materialProcessDiagnostics(study));
+  diagnostics.push(...materialProcessDiagnostics(study, customMaterials));
   for (const load of study.loads) {
     const selection = study.namedSelections.find((item) => item.id === load.selectionRef);
-    if (!selection || selection.entityType !== "face") {
-      diagnostics.push(issue(`validation-load-selection-${load.id}`, `Load ${load.id} must reference a face selection.`));
+    const expectedSelectionType = load.type === "volume_force" ? "body" : "face";
+    if (!selection || selection.entityType !== expectedSelectionType) {
+      diagnostics.push(issue(`validation-load-selection-${load.id}`, `Load ${load.id} must reference a ${expectedSelectionType} selection.`));
     }
     if (!isPositiveFinite(load.parameters.value)) {
       diagnostics.push(issue(`validation-load-value-${load.id}`, `Load ${load.id} needs a positive finite magnitude.`));
@@ -96,8 +122,15 @@ export function validateDynamicStructuralStudy(study: Study): Diagnostic[] {
     if (!isDirection(load.parameters.direction)) {
       diagnostics.push(issue(`validation-load-direction-${load.id}`, `Load ${load.id} needs a 3D direction vector.`));
     }
+    if (load.type === "remote_force" && !isFiniteVec3(load.parameters.remotePoint)) {
+      diagnostics.push(issue(`validation-load-remote-point-${load.id}`, `Remote force ${load.id} needs explicit remote-point coordinates.`));
+    }
+    if (load.type === "bolt_preload") {
+      diagnostics.push(issue(`validation-load-static-only-${load.id}`, `Load ${load.id} is an equivalent bolt preload and is static-only.`));
+    }
   }
   if (study.loads.length === 0) diagnostics.push(issue("validation-load", "Choose where force, pressure, or payload weight is applied."));
+  diagnostics.push(...structuralVariantDiagnostics(study));
   if (study.meshSettings.status !== "complete") diagnostics.push(issue("validation-mesh", "Generate the mesh before running."));
   if (study.constraints.length === 0 && solverSettings.allowFreeMotion !== true) {
     diagnostics.push(issue("validation-dynamic-support", "Add at least one support or enable free motion for the dynamic run."));
@@ -115,6 +148,51 @@ export function validateDynamicStructuralStudy(study: Study): Diagnostic[] {
   }
   if (!(solverSettings.dampingRatio >= 0)) {
     diagnostics.push(issue("validation-dynamic-damping", "Dynamic damping ratio cannot be negative."));
+  }
+  return diagnostics;
+}
+
+function structuralVariantDiagnostics(study: Study): Diagnostic[] {
+  if (study.type !== "static_stress" && study.type !== "dynamic_structural") return [];
+  const loadCases = study.loadCases;
+  if (loadCases === undefined) return []; // Legacy in-memory studies behave as one synthesized Default case.
+  if (!loadCases.length) return [issue("validation-load-case-required", "Add at least one load case.")];
+  const diagnostics: Diagnostic[] = [];
+  const caseIds = new Set<string>();
+  const assignmentCounts = new Map(study.loads.map((load) => [load.id, 0]));
+  for (const loadCase of loadCases) {
+    if (caseIds.has(loadCase.id)) diagnostics.push(issue(`validation-load-case-duplicate-${loadCase.id}`, `Load case ID ${loadCase.id} is duplicated.`));
+    caseIds.add(loadCase.id);
+    for (const loadId of loadCase.loadIds) {
+      const count = assignmentCounts.get(loadId);
+      if (count === undefined) {
+        diagnostics.push(issue(`validation-load-case-unknown-load-${loadCase.id}-${loadId}`, `Load case ${loadCase.name} references unknown load ${loadId}.`));
+      } else {
+        assignmentCounts.set(loadId, count + 1);
+      }
+    }
+  }
+  for (const [loadId, count] of assignmentCounts) {
+    if (count === 0) diagnostics.push(issue(`validation-load-case-unassigned-${loadId}`, `Load ${loadId} must belong to exactly one load case.`));
+    if (count > 1) diagnostics.push(issue(`validation-load-case-repeated-${loadId}`, `Load ${loadId} belongs to more than one load case.`));
+  }
+  if (study.loads.length > 0 && !loadCases.some((loadCase) => loadCase.enabled && loadCase.loadIds.length > 0)) {
+    diagnostics.push(issue("validation-load-case-enabled", "Enable at least one non-empty load case."));
+  }
+  const combinations = study.loadCombinations ?? [];
+  if (study.type === "dynamic_structural" && combinations.length) {
+    diagnostics.push(issue("validation-dynamic-combinations", "Dynamic load combinations are not supported."));
+    return diagnostics;
+  }
+  for (const combination of combinations) {
+    for (const factor of combination.factors) {
+      if (!caseIds.has(factor.caseId)) {
+        diagnostics.push(issue(`validation-combination-case-${combination.id}-${factor.caseId}`, `Combination ${combination.name} references unknown load case ${factor.caseId}.`));
+      }
+      if (!Number.isFinite(factor.factor)) {
+        diagnostics.push(issue(`validation-combination-factor-${combination.id}-${factor.caseId}`, `Combination ${combination.name} has a non-finite factor.`));
+      }
+    }
   }
   return diagnostics;
 }
@@ -198,11 +276,19 @@ function equivalentLoadForceNewtons(load: Load, face: PrintCriticalFace): number
   return units === "lbf" ? value * 4.4482216152605 : value;
 }
 
-function materialProcessDiagnostics(study: Study): Diagnostic[] {
+function materialProcessDiagnostics(study: Study, customMaterials: readonly CustomMaterial[]): Diagnostic[] {
   return study.materialAssignments.flatMap((assignment) => {
+    try {
+      resolveMaterial(assignment.materialId, customMaterials);
+    } catch (error) {
+      return [issue(
+        `validation-material-resolution-${assignment.id}`,
+        error instanceof Error ? error.message : `Unknown material "${assignment.materialId}".`
+      )];
+    }
     const processId = assignment.parameters?.manufacturingProcessId;
     if (processId === undefined) return [];
-    const error = manufacturingProcessCompatibilityError(assignment.materialId, processId);
+    const error = manufacturingProcessCompatibilityError(assignment.materialId, processId, customMaterials);
     return error ? [issue(`validation-material-process-${assignment.id}`, error)] : [];
   });
 }
@@ -224,6 +310,12 @@ function isDirection(value: unknown): value is [number, number, number] {
     value.length === 3 &&
     value.every((item) => typeof item === "number" && Number.isFinite(item)) &&
     Math.hypot(value[0], value[1], value[2]) > 1e-12;
+}
+
+function isFiniteVec3(value: unknown): value is [number, number, number] {
+  return Array.isArray(value) &&
+    value.length === 3 &&
+    value.every((item) => typeof item === "number" && Number.isFinite(item));
 }
 
 function vectorForAxis(axis: PrintCriticalAxis): [number, number, number] {

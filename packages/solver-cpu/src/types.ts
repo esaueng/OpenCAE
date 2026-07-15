@@ -1,4 +1,4 @@
-import type { CoreSolveResult, NormalizedOpenCAEModel, OpenCAEModelJson, ValidationReport } from "@opencae/core";
+import type { CoreModalSolveResult as CoreModalFeaResult, CoreSolveResult, CoreStructuralSolveResult, LoadAssemblyDiagnostics, NormalizedOpenCAEModel, OpenCAEModelJson, ValidationReport } from "@opencae/core";
 
 export type CpuSolverInput = OpenCAEModelJson | NormalizedOpenCAEModel;
 
@@ -45,6 +45,43 @@ export type DynamicTet4CpuOptions = CpuSolverOptions & {
   maxFrames?: number;
 };
 
+export type ModalCpuOptions = CpuSolverOptions & {
+  modeCount?: number;
+  modalTolerance?: number;
+  maxSubspaceIterations?: number;
+};
+
+export type ModalMode = {
+  modeIndex: number;
+  frequencyHz: number;
+  eigenvalue: number;
+  scaledResidual: number;
+  shape: Float64Array;
+};
+
+export type ModalCpuDiagnostics = {
+  dofs: number;
+  freeDofs: number;
+  constrainedDofs: number;
+  requestedModeCount: number;
+  convergedModeCount: number;
+  blockSize: number;
+  subspaceIterations: number;
+  tolerance: number;
+  totalMass: number;
+  partialConvergenceWarning?: string;
+  solver: "opencae-core-block-shift-invert";
+};
+
+export type ModalCpuResult = {
+  modes: ModalMode[];
+  coreResult?: CoreModalFeaResult;
+};
+
+export type ModalCpuSolveResult =
+  | { ok: true; result: ModalCpuResult; diagnostics: ModalCpuDiagnostics }
+  | { ok: false; error: CpuSolverError; diagnostics?: Partial<ModalCpuDiagnostics> };
+
 export type CpuSolverError = {
   code: string;
   message: string;
@@ -66,6 +103,7 @@ export type CpuSolverDiagnostics = {
   converged?: boolean;
   matrixRows?: number;
   matrixNonZeros?: number;
+  loadAssembly?: LoadAssemblyDiagnostics;
   reactionBalance?: {
     appliedLoad: [number, number, number];
     reaction: [number, number, number];
@@ -90,7 +128,7 @@ export type StaticLinearTet4CpuResult = {
   nodalStress?: Float64Array;
   /** Per-element peak von Mises over the element's node samples; conservative basis for safety factors. */
   vonMisesPeak?: Float64Array;
-  coreResult?: CoreSolveResult;
+  coreResult?: CoreStructuralSolveResult;
   provenance?: {
     kind: "opencae_core_fea" | "local_estimate";
     solver: "opencae-core-sparse-tet" | "opencae-core-preview-sdof";
@@ -138,7 +176,7 @@ export type DynamicResultField = {
 export type DynamicTet4CpuResult = {
   staticResult: StaticLinearTet4CpuResult;
   frames: DynamicTet4CpuFrame[];
-  coreResult?: CoreSolveResult;
+  coreResult?: CoreStructuralSolveResult;
 };
 
 export type PreviewDynamicResult = DynamicTet4CpuResult & {
@@ -203,7 +241,7 @@ export type DynamicTet4CpuSolveResult =
 export type CoreStaticSolveResult =
   | {
       ok: true;
-      result: CoreFeaResult;
+      result: CoreStructuralSolveResult;
       diagnostics: CpuSolverDiagnostics;
     }
   | {
@@ -215,7 +253,7 @@ export type CoreStaticSolveResult =
 export type CoreDynamicSolveResult =
   | {
       ok: true;
-      result: CoreFeaResult;
+      result: CoreStructuralSolveResult;
       diagnostics: DynamicTet4CpuDiagnostics;
     }
   | {
@@ -223,6 +261,10 @@ export type CoreDynamicSolveResult =
       error: CpuSolverError;
       diagnostics?: Partial<DynamicTet4CpuDiagnostics>;
     };
+
+export type CoreModalSolveResult =
+  | { ok: true; result: CoreModalFeaResult; diagnostics: ModalCpuDiagnostics }
+  | { ok: false; error: CpuSolverError; diagnostics?: Partial<ModalCpuDiagnostics> };
 
 export type PreviewDynamicSolveResult =
   | {

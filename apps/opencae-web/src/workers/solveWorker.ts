@@ -4,6 +4,7 @@ import {
   isSolveWorkerResult,
   normalizeSolveWorkerError,
   transferablesForSolveResult,
+  transferablesForVariant,
   type SolveWorkerRequest,
   type SolveWorkerResponse,
   type SolveWorkerSolvePayload
@@ -68,9 +69,13 @@ function handleSolve(id: string, payload: SolveWorkerSolvePayload): void {
       study: payload.study,
       runId: payload.runId,
       displayModel: payload.displayModel,
+      customMaterials: payload.customMaterials,
       hooks: {
         onProgress,
         shouldCancel: () => cancelledRequestIds.has(id)
+      },
+      onVariantComplete: (variant, surfaceMesh) => {
+        workerScope.postMessage({ kind: "variant", id, variant, surfaceMesh } satisfies SolveWorkerResponse, transferablesForVariant(variant));
       }
     });
     if (!outcome.ok) {

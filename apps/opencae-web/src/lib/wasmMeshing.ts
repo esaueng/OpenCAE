@@ -178,6 +178,8 @@ async function meshWorkerRunExclusive(options: WasmMeshOptions, cancellationGene
   let elementOrderFallbackNote: string | undefined;
   let attributionNote: string | undefined;
   let structuralBodyNote: string | undefined;
+  let requestedMeshSizeMm: number | undefined;
+  let actualMeshSizeMm: number | undefined;
   let stepFaceRegistry: import("../stepFaces").StepFaceRegistry | undefined;
   let stepStructuralBodyPlan: import("../stepStructuralBodies").StepStructuralBodyPlan | undefined;
 
@@ -186,6 +188,8 @@ async function meshWorkerRunExclusive(options: WasmMeshOptions, cancellationGene
     // drilled holes, so the bracket meshes with linear elements (the same
     // policy the retired cloud dispatch used).
     elementOrder = 1;
+    requestedMeshSizeMm = finitePositive(geometry.descriptor?.meshSize);
+    actualMeshSizeMm = requestedMeshSizeMm;
     meshedPacked = await client.meshGeoScriptInWorker(
       {
         geoScript: intake.bracketGeoScript(geometry.descriptor ?? {}),
@@ -231,6 +235,8 @@ async function meshWorkerRunExclusive(options: WasmMeshOptions, cancellationGene
       },
       onWorkerProgress
     );
+    requestedMeshSizeMm = finitePositive(options.meshSizeMm);
+    actualMeshSizeMm = stepResult.qualityRefinement?.usedMeshSizeMm ?? requestedMeshSizeMm;
     meshedPacked = stepResult;
     if (stepResult.algorithm3D === "frontal") {
       algorithmNote = "Delaunay 3D meshing failed in the browser mesher; the Frontal algorithm produced this mesh.";
@@ -325,6 +331,11 @@ async function meshWorkerRunExclusive(options: WasmMeshOptions, cancellationGene
     quality: preset,
     source: "wasm_gmsh",
     units: "m",
+    density: {
+      ...(requestedMeshSizeMm ? { requestedMeshSizeMm } : {}),
+      ...(actualMeshSizeMm ? { actualMeshSizeMm } : {}),
+      elementOrder: actualElementOrder
+    },
     solverCoordinateSpace: "solver",
     artifacts: {
       actualCoreModel: { model },
@@ -353,6 +364,10 @@ async function meshWorkerRunExclusive(options: WasmMeshOptions, cancellationGene
 
 function formatMeshSizeMm(value: number): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
+
+function finitePositive(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
 }
 
 export function actualElementOrderForArtifact(artifact: Pick<CoreVolumeMeshArtifact, "elements">): 1 | 2 {

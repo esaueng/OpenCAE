@@ -1,6 +1,6 @@
 import { effectiveMaterialProperties } from "@opencae/materials";
 import { assessResultFailure } from "@opencae/schema";
-import type { AnalysisMesh, DisplayModel, Load, Material, ResultField, ResultProvenance, ResultSample, ResultSummary, Study } from "@opencae/schema";
+import type { AnalysisMesh, CustomMaterial, DisplayModel, Load, Material, ResultField, ResultProvenance, ResultSample, StructuralResultSummary, Study } from "@opencae/schema";
 import { inferCriticalPrintAxis, modelAxisToGlobalBuildAxis } from "@opencae/study-core";
 import { loadForceNewtons, materialForStudy, materialParametersForStudy, STANDARD_GRAVITY } from "./studyInputs";
 
@@ -29,6 +29,7 @@ export type BeamDemoPhysicalModel = {
 export type BeamDemoSolveOptions = {
   analysisMesh?: AnalysisMesh;
   displayModel?: DisplayModel;
+  customMaterials?: readonly CustomMaterial[];
   beamModel?: BeamDemoPhysicalModel;
   debugResults?: boolean;
 };
@@ -41,7 +42,7 @@ const DEFAULT_BEAM_PRINT_DISPLAY_MODEL: DisplayModel = {
 };
 
 export type BeamDemoSolveResult = {
-  summary: ResultSummary;
+  summary: StructuralResultSummary;
   fields: ResultField[];
   faceCount: number;
   loadCount: number;
@@ -123,7 +124,7 @@ export function isBeamDemoStudy(study: Study): boolean {
 export function solveBeamDemoStudy(study: Study, runId: string, optionsInput?: AnalysisMesh | BeamDemoSolveOptions): BeamDemoSolveResult {
   const options = normalizeBeamDemoSolveOptions(optionsInput);
   const beamModel = options.beamModel ?? DEFAULT_BEAM_DEMO_PHYSICAL_MODEL;
-  const material = materialForStudy(study);
+  const material = materialForStudy(study, options.customMaterials);
   const materialParameters = materialParametersForStudy(study);
   const modelCriticalLayerAxis = beamCriticalPrintAxis(study);
   const effectiveMaterial = effectiveMaterialProperties(material, materialParameters, {
@@ -188,7 +189,7 @@ export function solveBeamDemoStudy(study: Study, runId: string, optionsInput?: A
     reactionForce: round(loadForceN, 6),
     reactionForceUnits: "N"
   };
-  const summary: ResultSummary = {
+  const summary: StructuralResultSummary = {
     ...summaryBase,
     failureAssessment: assessResultFailure(summaryBase),
     provenance: BEAM_DEMO_PROVENANCE,
@@ -359,7 +360,7 @@ export function auditBeamDemoInputs(
   study: Study,
   displayModel: DisplayModel | undefined,
   beamModel: BeamDemoPhysicalModel,
-  result?: { summary: ResultSummary; material: Material; loadForceN: number }
+  result?: { summary: StructuralResultSummary; material: Material; loadForceN: number }
 ) {
   const material = result?.material ?? effectiveMaterialProperties(materialForStudy(study), materialParametersForStudy(study));
   const load = primaryBeamLoad(study);

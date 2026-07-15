@@ -20,22 +20,21 @@ pnpm --filter @opencae/solver-cpu build
 
 ## Supported Model Schema
 
-The validation suite targets `opencae.model` schema `0.2.0`, while preserving compatibility with normalized `0.1.0` static Tet4 models.
+The validation suite targets `opencae.model` schema `0.3.0`, while preserving compatibility with `0.1.0` and `0.2.0` models.
 
 Supported mesh-native primitives:
 
-- Tet4 volume elements for CPU solving.
-- Tet10 as schema-valid mesh data, currently rejected by the CPU solver with `unsupported-element-type`.
+- Tet4 and Tet10 volume elements for CPU solving and recovery.
 - Surface facets and surface sets for load application and result surface extraction.
 - Node sets, element sets, fixed and prescribed-displacement boundary conditions.
-- Nodal force, surface force, pressure, and body gravity loads.
-- Static linear and dynamic linear steps.
+- Nodal force, total surface force, pressure, surface traction, body gravity, body force density, remote force, and equivalent bolt preload loads.
+- Static linear, dynamic linear, and modal steps. Equivalent bolt preload is static-only.
 - Material density and yield strength metadata.
 - Solver coordinate metadata using `m-N-s-Pa` or `mm-N-s-MPa`.
 
 ## Solver Assumptions
 
-The CPU reference solver assumes small-strain, linear isotropic elasticity on Tet4 meshes. The sparse static path assembles a CSR stiffness matrix and solves free DOFs with conjugate gradient. The dynamic MDOF path uses lumped Tet4 mass, optional Rayleigh damping, and Newmark average acceleration.
+The CPU reference solver assumes small-strain, linear isotropic elasticity on Tet4 or Tet10 meshes. The sparse static path assembles a CSR stiffness matrix and solves free DOFs with conjugate gradient. The dynamic MDOF path uses positive lumped mass, optional Rayleigh damping, and Newmark average acceleration.
 
 Constraints must remove rigid-body modes. Missing or insufficient constraints are expected to fail clearly, usually through a singular CG system.
 
@@ -59,6 +58,10 @@ The static validation suite covers:
 - Cantilever beam: tip displacement and stress are compared to elementary beam theory with coarse Tet4 tolerance.
 - Pressure patch: total load is checked as `pressure * selected surface area`.
 - Body gravity: total reaction is checked as `density * volume * acceleration`.
+- Surface traction: Tri3/Tri6 integration is checked against `traction * selected surface area`.
+- Body force density: Tet4/Tet10 integration is checked against `force density * selected volume`, including positive HRZ Tet10 weights.
+- Remote force: nodal distribution is checked against the requested resultant and remote-point moment; deficient selections must fail the 6x6 rank check.
+- Equivalent bolt preload: the opposing traction pair is checked for zero net force and moment and for static-only validation.
 
 The axial and load-balance checks use tight force-balance tolerances. The cantilever benchmark uses a deliberately coarse one-cell Tet4 mesh and only guards order-of-magnitude beam behavior. The documented tolerance is `0.05x` to `25x` of beam-theory displacement and stress, because this fixture is a regression guard for solver wiring, not a mesh-converged beam benchmark.
 
@@ -159,7 +162,7 @@ The health response reports:
 }
 ```
 
-The geometry flow is always geometry source, actual volume mesh, mesh validation, Core model v0.2, Core solve, then `CoreSolveResult`. The cloud service uses Gmsh only to mesh procedural or uploaded CAD geometry. Gmsh output is converted to Core nodes, Tet4/Tet10 element connectivity, boundary surface facets, physical surface sets, and source selection metadata before any solve is attempted.
+The geometry flow is always geometry source, actual volume mesh, mesh validation, Core model v0.3, Core solve, then `CoreSolveResult`. The retired cloud service used Gmsh only to mesh procedural or uploaded CAD geometry. Gmsh output was converted to Core nodes, Tet4/Tet10 element connectivity, boundary surface facets, physical surface sets, and source selection metadata before any solve was attempted.
 
 Procedural Bracket geometry creates a fused base, upright, and gusset/rib solid with cylindrical cutouts. It tags physical surfaces `fixed_support`, `load_surface`, `hole_surfaces`, `base_surfaces`, `upright_surfaces`, and `gusset_surfaces`; `fixed_support` maps to `FS1`/`face-base-left`, and `load_surface` maps to `L1`/`face-load-top`.
 
@@ -167,8 +170,8 @@ If Gmsh is unavailable or meshing fails, `/solve` returns an explicit meshing er
 
 ## Known Limitations
 
-- CPU solving currently supports Tet4 only.
-- Tet10 is retained in schema and mesh topology utilities but rejected by the CPU solver.
+- CPU solving supports Tet4 and Tet10, but both remain small-strain linear elements and require valid, non-inverted Jacobians.
+- Remote force is a distributed wrench rather than rigid MPC coupling. Equivalent bolt preload is a bonded-linear load pair rather than contact or a fastener element.
 - The sparse static solver uses CG and expects a symmetric positive-definite constrained system.
 - Contact, tie, multi-part interaction, large deformation, plasticity, thermal loading, and nonlinear material behavior are not implemented.
 - The preview SDOF dynamic solver remains available only for legacy preview behavior. Complex Core FEA should use the MDOF dynamic solver.

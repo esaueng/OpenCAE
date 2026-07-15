@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import { isModalResultSummary } from "@opencae/schema";
 import type { DisplayModel, Study } from "@opencae/schema";
 import { bracketDemoProject, bracketDisplayModel } from "@opencae/db/sample-data";
 import { validateModelJson } from "@opencae/core";
@@ -119,6 +120,7 @@ describe("OpenCAE Core browser solver adapter", () => {
 
     expect(outcome.ok).toBe(true);
     if (!outcome.ok) throw new Error(outcome.reason);
+    if (isModalResultSummary(outcome.result.summary)) throw new Error("Expected structural results.");
     expect(outcome.solverBackend).toBe("opencae-core-sparse-tet");
     // Cloud-parity contract: same provenance stamp as the deployed runner,
     // with a browser runnerVersion (honest about where it was computed).
@@ -136,6 +138,9 @@ describe("OpenCAE Core browser solver adapter", () => {
       "displacement-surface",
       "safety-factor",
       "safety-factor-surface",
+      "stress-max-shear-surface",
+      "stress-principal-max-surface",
+      "stress-principal-min-surface",
       "stress-surface",
       "stress-von-mises-element"
     ]);
@@ -146,6 +151,37 @@ describe("OpenCAE Core browser solver adapter", () => {
     expect(displacement?.values.length).toBe(surfaceMesh.nodes.length);
     expect(displacement?.vectors?.length).toBe(surfaceMesh.nodes.length);
     expect(outcome.result.diagnostics?.some((entry) => (entry as { id?: unknown })?.id === "browser-solve-limits")).toBe(true);
+  });
+
+  test("solves modal studies without applied loads through the 100k-DOF browser pipeline", { timeout: 60000 }, () => {
+    const modalDisplayModel = {
+      ...displayModel,
+      dimensions: { x: 10, y: 10, z: 10, units: "mm" }
+    } satisfies DisplayModel;
+    const modalStudy = {
+      ...staticStudy,
+      id: "study-modal",
+      name: "Modal Analysis",
+      type: "modal_analysis",
+      loads: [],
+      // This assertion exercises the pipeline contract rather than mesh density.
+      // Keep it small so the root suite can run modal and transient cases together.
+      meshSettings: { preset: "coarse", status: "complete", meshRef: "project-1/mesh/mesh-summary.json" },
+      solverSettings: { backend: "opencae_core_local", fidelity: "standard", modeCount: 1 }
+    } satisfies Study;
+    expect(openCaeCoreEligibility(modalStudy, modalDisplayModel)).toEqual({ ok: true });
+    const outcome = trySolveOpenCaeCoreStudy({ study: modalStudy, runId: "run-core-modal-1", displayModel: modalDisplayModel });
+    expect(outcome.ok, outcome.ok ? undefined : outcome.reason).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.solverBackend).toBe("opencae-core-modal-tet");
+    expect(isModalResultSummary(outcome.result.summary)).toBe(true);
+    if (!isModalResultSummary(outcome.result.summary)) return;
+    expect(outcome.result.summary.requestedModeCount).toBe(1);
+    expect(
+      outcome.result.summary.convergedModeCount,
+      JSON.stringify(outcome.result.summary)
+    ).toBeGreaterThan(0);
+    expect(outcome.result.fields.every((field) => field.type === "mode_shape" && field.units === "normalized")).toBe(true);
   });
 
   test("solves dynamic studies with OpenCAE Core transient fields", { timeout: 120000 }, () => {
@@ -176,6 +212,7 @@ describe("OpenCAE Core browser solver adapter", () => {
     expect(eligibility).toEqual({ ok: true });
     if (!outcome.ok) throw new Error(outcome.reason);
     expect(outcome.ok).toBe(true);
+    if (isModalResultSummary(outcome.result.summary)) throw new Error("Expected dynamic structural results.");
     expect(outcome.solverBackend).toBe("opencae-core-mdof-tet");
     expect(outcome.result.summary.provenance).toMatchObject({
       kind: "opencae_core_fea",
@@ -232,10 +269,10 @@ describe("OpenCAE Core browser solver adapter", () => {
     expect(outcome.result.artifacts?.meshConnectivity?.connectedComponents).toBe(1);
   });
 
-  test("builds a valid v0.2 Core Cloud model for a simple block study", () => {
+  test("builds a valid v0.3 Core Cloud model for a simple block study", () => {
     const result = buildOpenCaeCoreModelForStudy(staticStudy, displayModel);
 
-    expect(result.model.schemaVersion).toBe("0.2.0");
+    expect(result.model.schemaVersion).toBe("0.3.0");
     expect(validateModelJson(result.model).ok).toBe(true);
     expect(result.model.meshProvenance?.meshSource).toBe("structured_block_core");
     expect(result.model.surfaceFacets?.length).toBeGreaterThan(0);
@@ -358,6 +395,7 @@ describe("OpenCAE Core browser solver adapter", () => {
     expect(xBuild.ok).toBe(true);
     expect(yBuild.ok).toBe(true);
     if (!xBuild.ok || !yBuild.ok) throw new Error("Expected both directional FDM studies to solve.");
+    if (isModalResultSummary(xBuild.result.summary) || isModalResultSummary(yBuild.result.summary)) throw new Error("Expected structural FDM results.");
     expect(xBuild.result.summary.maxStress).toBeCloseTo(yBuild.result.summary.maxStress, 3);
     expect(xBuild.result.summary.maxDisplacement).toBeGreaterThan(yBuild.result.summary.maxDisplacement * 1.25);
     expect(xBuild.result.summary.safetyFactor).toBeLessThan(yBuild.result.summary.safetyFactor * 0.6);

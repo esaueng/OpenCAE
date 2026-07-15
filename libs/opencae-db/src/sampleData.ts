@@ -1,4 +1,4 @@
-import type { DisplayModel, Material, Project, ResultField, ResultSummary } from "@opencae/schema";
+import type { DisplayModel, Material, Project, ResultField, StructuralResultSummary } from "@opencae/schema";
 
 const now = "2026-04-24T12:00:00.000Z";
 
@@ -24,7 +24,7 @@ export const bracketDisplayModel: DisplayModel = {
   ]
 };
 
-export const bracketResultSummary: ResultSummary = {
+export const bracketResultSummary: StructuralResultSummary = {
   maxStress: 142,
   maxStressUnits: "MPa",
   maxDisplacement: 0.184,

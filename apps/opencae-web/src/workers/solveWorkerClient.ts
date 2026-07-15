@@ -1,10 +1,12 @@
 import type { SolveProgressEvent } from "@opencae/solve-pipeline";
+import type { RunVariantResult } from "@opencae/schema";
 import { trySolveOpenCaeCoreStudy } from "./opencaeCoreSolve";
 import type { LocalSolveResult } from "./performanceProtocol";
 import {
   createSolveWorkerRequestId,
   isSolveWorkerProgress,
   isSolveWorkerResult,
+  isSolveWorkerVariant,
   type SolveWorkerRequest,
   type SolveWorkerResponse,
   type SolveWorkerSolvePayload
@@ -57,6 +59,7 @@ type PendingSolve = {
   resolve: (completion: LocalSolveCompletion) => void;
   reject: (error: Error) => void;
   onProgress?: (event: SolveProgressEvent) => void;
+  onVariantComplete?: (variant: RunVariantResult, surfaceMesh?: unknown) => void;
   cancelTimer?: ReturnType<typeof setTimeout>;
 };
 
@@ -65,9 +68,10 @@ const pendingSolves = new Map<string, PendingSolve>();
 
 export function startLocalSolve(
   payload: SolveWorkerSolvePayload,
-  onProgress?: (event: SolveProgressEvent) => void
+  onProgress?: (event: SolveProgressEvent) => void,
+  onVariantComplete?: (variant: RunVariantResult, surfaceMesh?: unknown) => void
 ): LocalSolveHandle {
-  if (typeof Worker === "undefined") return startInlineSolve(payload, onProgress);
+  if (typeof Worker === "undefined") return startInlineSolve(payload, onProgress, onVariantComplete);
 
   const id = createSolveWorkerRequestId();
   let worker: Worker;
@@ -77,7 +81,7 @@ export function startLocalSolve(
     return rejectedSolveHandle(workerClientError(error, "Could not start the solve worker."));
   }
   const completion = new Promise<LocalSolveCompletion>((resolve, reject) => {
-    pendingSolves.set(id, { id, resolve, reject, onProgress });
+    pendingSolves.set(id, { id, resolve, reject, onProgress, onVariantComplete });
   });
   const request: SolveWorkerRequest = { kind: "solve", id, payload };
   try {
@@ -123,7 +127,8 @@ function rejectedSolveHandle(error: Error): LocalSolveHandle {
 
 function startInlineSolve(
   payload: SolveWorkerSolvePayload,
-  onProgress?: (event: SolveProgressEvent) => void
+  onProgress?: (event: SolveProgressEvent) => void,
+  onVariantComplete?: (variant: RunVariantResult, surfaceMesh?: unknown) => void
 ): LocalSolveHandle {
   let cancelled = false;
   const completion = new Promise<LocalSolveCompletion>((resolve, reject) => {
@@ -139,10 +144,12 @@ function startInlineSolve(
           study: payload.study,
           runId: payload.runId,
           displayModel: payload.displayModel,
+          customMaterials: payload.customMaterials,
           hooks: {
             onProgress,
             shouldCancel: () => cancelled
-          }
+          },
+          onVariantComplete
         });
         if (!outcome.ok) {
           reject(new LocalSolveError(outcome.reason, outcome.code));
@@ -174,6 +181,10 @@ function handleSolveWorkerMessage(event: MessageEvent<SolveWorkerResponse>): voi
   const response = event.data;
   if (isSolveWorkerProgress(response)) {
     pendingSolves.get(response.id)?.onProgress?.(response.event);
+    return;
+  }
+  if (isSolveWorkerVariant(response)) {
+    pendingSolves.get(response.id)?.onVariantComplete?.(response.variant, response.surfaceMesh);
     return;
   }
   if (!isSolveWorkerResult(response)) return;

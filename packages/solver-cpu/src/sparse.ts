@@ -335,22 +335,16 @@ export function reduceCsrSystem(
   const freeIndexByDof = new Map<number, number>();
   free.forEach((dof, index) => freeIndexByDof.set(dof, index));
   const builder = createSparseMatrixBuilder(free.length);
-  const reducedRhs = new Float64Array(free.length);
+  const reducedRhs = reduceCsrRhs(matrix, rhs, free, constraints);
 
   for (let reducedRow = 0; reducedRow < free.length; reducedRow += 1) {
     const fullRow = free[reducedRow];
-    reducedRhs[reducedRow] = rhs[fullRow];
     for (let entry = matrix.rowPtr[fullRow]; entry < matrix.rowPtr[fullRow + 1]; entry += 1) {
       const fullCol = matrix.colInd[entry];
       const value = matrix.values[entry];
       const reducedCol = freeIndexByDof.get(fullCol);
       if (reducedCol !== undefined) {
         addSparseEntry(builder, reducedRow, reducedCol, value);
-      } else {
-        const constrainedValue = constraints.get(fullCol);
-        if (constrainedValue !== undefined) {
-          reducedRhs[reducedRow] -= value * constrainedValue;
-        }
       }
     }
   }
@@ -359,6 +353,25 @@ export function reduceCsrSystem(
     matrix: toCsrMatrix(builder),
     rhs: reducedRhs
   };
+}
+
+/** Reduce only the right-hand side against a previously reduced stiffness matrix. */
+export function reduceCsrRhs(
+  matrix: CsrMatrix,
+  rhs: Float64Array,
+  free: Int32Array,
+  constraints: Map<number, number>
+): Float64Array {
+  const reducedRhs = new Float64Array(free.length);
+  for (let reducedRow = 0; reducedRow < free.length; reducedRow += 1) {
+    const fullRow = free[reducedRow];
+    reducedRhs[reducedRow] = rhs[fullRow];
+    for (let entry = matrix.rowPtr[fullRow]; entry < matrix.rowPtr[fullRow + 1]; entry += 1) {
+      const constrainedValue = constraints.get(matrix.colInd[entry]);
+      if (constrainedValue !== undefined) reducedRhs[reducedRow] -= matrix.values[entry] * constrainedValue;
+    }
+  }
+  return reducedRhs;
 }
 
 function applyPreconditioner(source: Float64Array, target: Float64Array, diagonal: Float64Array | undefined): void {

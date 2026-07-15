@@ -1,11 +1,13 @@
 import { describe, expect, test } from "vitest";
-import type { ResultSummary } from "@opencae/schema";
+import type { ResultSummary, RunVariantResult } from "@opencae/schema";
 import {
   createSolveWorkerRequestId,
   isSolveWorkerProgress,
   isSolveWorkerResult,
+  isSolveWorkerVariant,
   normalizeSolveWorkerError,
-  transferablesForSolveResult
+  transferablesForSolveResult,
+  transferablesForVariant
 } from "./solveProtocol";
 import type { LocalSolveResult } from "./performanceProtocol";
 
@@ -24,6 +26,8 @@ describe("solve worker protocol", () => {
     expect(isSolveWorkerResult({ kind: "result", id: "solve-1", ok: false, error: { name: "Error", message: "nope" } })).toBe(true);
     expect(isSolveWorkerResult({ kind: "result", id: "solve-1", ok: false, error: {} })).toBe(false);
     expect(isSolveWorkerResult({ kind: "progress", id: "solve-1" })).toBe(false);
+    expect(isSolveWorkerVariant({ kind: "variant", id: "solve-1", variant: { id: "case:gust" } })).toBe(true);
+    expect(isSolveWorkerVariant({ kind: "variant", id: "solve-1", variant: null })).toBe(false);
   });
 
   test("normalizes errors with optional machine-readable codes", () => {
@@ -41,5 +45,19 @@ describe("solve worker protocol", () => {
       ]
     } as unknown as LocalSolveResult;
     expect(transferablesForSolveResult(result)).toEqual([typed.buffer]);
+  });
+
+  test("collects streamed variant buffers independently", () => {
+    const typed = new Float32Array([4, 5, 6]);
+    const variant = {
+      id: "case:gust",
+      name: "Gust",
+      kind: "case",
+      caseId: "gust",
+      summary: {} as ResultSummary,
+      fields: [{ id: "field-gust", values: typed }]
+    } as unknown as RunVariantResult;
+
+    expect(transferablesForVariant(variant)).toEqual([typed.buffer]);
   });
 });

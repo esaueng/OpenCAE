@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CoreCloudResultProvenanceSchema, DynamicSolverSettingsSchema, MaterialSchema, ProjectSchema, ResultFieldSchema, ResultSummarySchema, RunEventSchema, SolverBackendSchema, StudyRunSchema, classifyResultProvenance, runStatusForResultProvenance } from "./index";
+import { CoreCloudResultProvenanceSchema, CustomMaterialSchema, DynamicSolverSettingsSchema, MaterialSchema, MeshConvergenceRecordSchema, ProjectSchema, ResultFieldSchema, ResultSummarySchema, RunEventSchema, RunVariantResultSchema, SolverBackendSchema, StudyRunSchema, classifyResultProvenance, runStatusForResultProvenance } from "./index";
 
 describe("ProjectSchema", () => {
   it("accepts the minimum local project shape", () => {
@@ -15,6 +15,76 @@ describe("ProjectSchema", () => {
     });
 
     expect(parsed.name).toBe("Test Project");
+  });
+
+  it("persists compact three-rung static convergence records", () => {
+    const completeRung = {
+      status: "complete" as const,
+      actualNodeCount: 100,
+      actualElementCount: 300,
+      totalDofs: 300,
+      freeDofs: 270,
+      actualMeshSizeMm: 12,
+      rawElementPeakVonMises: 42,
+      stressUnits: "MPa",
+      probeDisplacement: 0.15,
+      displacementUnits: "mm"
+    };
+    const record = MeshConvergenceRecordSchema.parse({
+      id: "convergence-1",
+      studyId: "study-1",
+      caseId: "case-default",
+      createdAt: "2026-07-14T12:00:00.000Z",
+      completedAt: "2026-07-14T12:01:00.000Z",
+      probe: { point: [1, 2, 3], source: "primary_load" },
+      rungs: [
+        { ...completeRung, requestedPreset: "coarse" },
+        { ...completeRung, requestedPreset: "medium", totalDofs: 600 },
+        { ...completeRung, requestedPreset: "fine", totalDofs: 900 }
+      ],
+      classification: "apparent_convergence",
+      lastStepChanges: { displacement: 0.03, stress: 0.08 }
+    });
+
+    expect(record.rungs.map((rung) => rung.requestedPreset)).toEqual(["coarse", "medium", "fine"]);
+    expect(() => MeshConvergenceRecordSchema.parse({
+      ...record,
+      rungs: [{ requestedPreset: "coarse", status: "complete" }, ...record.rungs.slice(1)]
+    })).toThrow(/requires actualNodeCount/);
+    expect(() => MeshConvergenceRecordSchema.parse({
+      ...record,
+      rungs: [record.rungs[1], record.rungs[0], record.rungs[2]]
+    })).toThrow(/ordered coarse, medium, fine/);
+    expect(() => MeshConvergenceRecordSchema.parse({
+      ...record,
+      rungs: [{ requestedPreset: "coarse", status: "skipped" }, ...record.rungs.slice(1)]
+    })).toThrow(/requires a reason/);
+  });
+
+  it("round-trips project-scoped custom materials in canonical SI units", () => {
+    const customMaterial = {
+      id: "0ac4dbda-1d37-43c0-b3ac-9d1d2cc28e84",
+      name: "Shop aluminum",
+      category: "metal" as const,
+      youngsModulus: 70e9,
+      poissonRatio: 0.33,
+      density: 2710,
+      yieldStrength: 290e6,
+      verification: "user_supplied_unverified" as const
+    };
+    const parsed = ProjectSchema.parse({
+      id: "project-custom-material",
+      name: "Custom material project",
+      schemaVersion: "0.3.0",
+      unitSystem: "US",
+      geometryFiles: [],
+      customMaterials: [customMaterial],
+      studies: [],
+      createdAt: "2026-04-24T12:00:00.000Z",
+      updatedAt: "2026-04-24T12:00:00.000Z"
+    });
+
+    expect(parsed.customMaterials?.[0]).toEqual(customMaterial);
   });
 
   it("round-trips manufacturing process and 3D print parameters on material assignments", () => {
@@ -69,6 +139,47 @@ describe("ProjectSchema", () => {
     });
   });
 
+  it("round-trips advanced structural load metadata", () => {
+    const parsed = ProjectSchema.parse({
+      id: "project-advanced-loads",
+      name: "Advanced loads",
+      schemaVersion: "0.3.0",
+      unitSystem: "SI",
+      geometryFiles: [],
+      studies: [{
+        id: "study-advanced-loads",
+        projectId: "project-advanced-loads",
+        name: "Static",
+        type: "static_stress",
+        geometryScope: [],
+        materialAssignments: [],
+        namedSelections: [],
+        contacts: [],
+        constraints: [],
+        loads: [
+          { id: "traction", type: "surface_traction", selectionRef: "face-a", parameters: { value: 100, units: "kPa", direction: [1, 0, 0] }, status: "complete" },
+          { id: "body", type: "volume_force", selectionRef: "body-a", parameters: { value: 250, units: "N/m^3", direction: [0, 0, -1] }, status: "complete" },
+          { id: "remote", type: "remote_force", selectionRef: "face-a", parameters: { value: 500, units: "N", direction: [0, -1, 0], remotePoint: [1, 2, 3] }, status: "complete" },
+          { id: "preload", type: "bolt_preload", selectionRef: "face-a", parameters: { value: 800, units: "N", direction: [1, 0, 0], secondarySelectionRef: "face-b" }, status: "complete" }
+        ],
+        meshSettings: { preset: "medium", status: "not_started" },
+        solverSettings: {},
+        validation: [],
+        runs: []
+      }],
+      createdAt: "2026-07-14T12:00:00.000Z",
+      updatedAt: "2026-07-14T12:00:00.000Z"
+    });
+
+    expect(parsed.studies[0]?.loads.map((load) => load.type)).toEqual([
+      "surface_traction",
+      "volume_force",
+      "remote_force",
+      "bolt_preload"
+    ]);
+    expect(parsed.studies[0]?.loads[2]?.parameters.remotePoint).toEqual([1, 2, 3]);
+  });
+
   it("accepts dynamic structural studies and applies default solver settings", () => {
     const parsed = ProjectSchema.parse({
       id: "project-test",
@@ -108,6 +219,163 @@ describe("ProjectSchema", () => {
       integrationMethod: "newmark_average_acceleration",
       loadProfile: "ramp"
     });
+    expect(parsed.studies[0]).toMatchObject({
+      loadCases: [{ id: "case-default", name: "Default", enabled: true, loadIds: [] }],
+      loadCombinations: []
+    });
+  });
+
+  it("migrates legacy structural loads into one default case", () => {
+    const parsed = ProjectSchema.parse({
+      id: "project-cases",
+      name: "Legacy cases",
+      schemaVersion: "0.2.0",
+      unitSystem: "SI",
+      geometryFiles: [],
+      studies: [{
+        id: "study-cases",
+        projectId: "project-cases",
+        name: "Static",
+        type: "static_stress",
+        geometryScope: [],
+        materialAssignments: [],
+        namedSelections: [],
+        contacts: [],
+        constraints: [],
+        loads: [{ id: "load-a", type: "force", selectionRef: "face-a", parameters: {}, status: "complete" }],
+        meshSettings: { preset: "medium", status: "not_started" },
+        solverSettings: {},
+        validation: [],
+        runs: []
+      }],
+      createdAt: "2026-04-24T12:00:00.000Z",
+      updatedAt: "2026-04-24T12:00:00.000Z"
+    });
+
+    expect(parsed.studies[0]).toMatchObject({
+      loadCases: [{ id: "case-default", name: "Default", loadIds: ["load-a"] }],
+      loadCombinations: []
+    });
+  });
+
+  it("enforces a one-case load partition and static-only finite combinations", () => {
+    const project = {
+      id: "project-cases",
+      name: "Cases",
+      schemaVersion: "0.3.0",
+      unitSystem: "SI" as const,
+      geometryFiles: [],
+      studies: [{
+        id: "study-cases",
+        projectId: "project-cases",
+        name: "Static",
+        type: "static_stress" as const,
+        geometryScope: [],
+        materialAssignments: [],
+        namedSelections: [],
+        contacts: [],
+        constraints: [],
+        loads: [{ id: "load-a", type: "force" as const, selectionRef: "face-a", parameters: {}, status: "complete" as const }],
+        loadCases: [
+          { id: "case-a", name: "A", enabled: true, loadIds: ["load-a"] },
+          { id: "case-b", name: "B", enabled: true, loadIds: ["load-a"] }
+        ],
+        loadCombinations: [{ id: "combo", name: "A-B", enabled: true, factors: [{ caseId: "case-a", factor: 1 }, { caseId: "case-b", factor: -1 }] }],
+        meshSettings: { preset: "medium" as const, status: "not_started" as const },
+        solverSettings: {},
+        validation: [],
+        runs: []
+      }],
+      createdAt: "2026-04-24T12:00:00.000Z",
+      updatedAt: "2026-04-24T12:00:00.000Z"
+    };
+    const duplicate = ProjectSchema.safeParse(project);
+    expect(duplicate.success).toBe(false);
+    if (!duplicate.success) expect(duplicate.error.issues.some((issue) => issue.message.includes("2 load cases"))).toBe(true);
+
+    const dynamic = structuredClone(project);
+    dynamic.studies[0]!.type = "dynamic_structural" as "static_stress";
+    const dynamicCombination = ProjectSchema.safeParse(dynamic);
+    expect(dynamicCombination.success).toBe(false);
+    if (!dynamicCombination.success) expect(dynamicCombination.error.issues.some((issue) => issue.message.includes("Dynamic load combinations"))).toBe(true);
+  });
+
+  it("parses run variants and governing envelope indices", () => {
+    const summary = {
+      maxStress: 42,
+      maxStressUnits: "MPa",
+      maxDisplacement: 0.25,
+      maxDisplacementUnits: "mm",
+      safetyFactor: 2,
+      reactionForce: 500,
+      reactionForceUnits: "N"
+    };
+    expect(RunVariantResultSchema.parse({
+      id: "variant-envelope",
+      name: "Envelope",
+      kind: "envelope",
+      summary,
+      fields: [],
+      governingVariantIndices: {
+        variantIds: ["case-a", "combo-a-b"],
+        stress: [0, 1],
+        displacement: [1, 0]
+      }
+    }).governingVariantIndices?.stress).toEqual([0, 1]);
+  });
+
+  it("accepts modal studies and defaults to six requested modes", () => {
+    const parsed = ProjectSchema.parse({
+      id: "project-modal",
+      name: "Modal Project",
+      schemaVersion: "0.3.0",
+      unitSystem: "SI",
+      geometryFiles: [],
+      studies: [{
+        id: "study-modal",
+        projectId: "project-modal",
+        name: "Modal Analysis",
+        type: "modal_analysis",
+        geometryScope: [],
+        materialAssignments: [],
+        namedSelections: [],
+        contacts: [],
+        constraints: [],
+        loads: [],
+        meshSettings: { preset: "medium", status: "not_started" },
+        solverSettings: {},
+        validation: [],
+        runs: []
+      }],
+      createdAt: "2026-04-24T12:00:00.000Z",
+      updatedAt: "2026-04-24T12:00:00.000Z"
+    });
+    expect(parsed.studies[0]).toMatchObject({ type: "modal_analysis", solverSettings: { modeCount: 6 } });
+  });
+
+  it("accepts modal summaries and normalized vector fields", () => {
+    expect(ResultSummarySchema.parse({
+      analysisType: "modal_analysis",
+      requestedModeCount: 2,
+      convergedModeCount: 1,
+      modes: [{ modeIndex: 1, frequencyHz: 81.5, eigenvalue: 262_188, scaledResidual: 2e-8, fieldId: "mode-1" }],
+      warning: "Only 1 of 2 requested modes converged."
+    })).toMatchObject({ analysisType: "modal_analysis", convergedModeCount: 1 });
+    expect(ResultFieldSchema.parse({
+      id: "mode-1",
+      runId: "run-modal",
+      type: "mode_shape",
+      location: "node",
+      values: [0, 1],
+      vectors: [[0, 0, 0], [0, 1, 0]],
+      min: 0,
+      max: 1,
+      units: "normalized",
+      modeIndex: 1,
+      frequencyHz: 81.5,
+      eigenvalue: 262_188,
+      scaledResidual: 2e-8
+    }).modeIndex).toBe(1);
   });
 
   it("accepts framed velocity and acceleration result fields while keeping unframed static fields valid", () => {
@@ -533,6 +801,18 @@ describe("MaterialSchema", () => {
 
   it("accepts physically valid materials", () => {
     expect(MaterialSchema.parse(aluminum).id).toBe("mat-aluminum-6061");
+  });
+
+  it("requires UUID-backed custom materials to be marked unverified", () => {
+    const custom = {
+      ...aluminum,
+      id: "0ac4dbda-1d37-43c0-b3ac-9d1d2cc28e84",
+      category: "metal" as const,
+      verification: "user_supplied_unverified" as const
+    };
+    expect(CustomMaterialSchema.parse(custom).verification).toBe("user_supplied_unverified");
+    expect(() => CustomMaterialSchema.parse({ ...custom, id: "shop-aluminum" })).toThrow();
+    expect(() => CustomMaterialSchema.parse({ ...custom, verification: "verified" })).toThrow();
   });
 
   it("rejects non-positive stiffness, density, and strength", () => {
