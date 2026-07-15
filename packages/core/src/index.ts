@@ -32,18 +32,22 @@ export type {
   PhysicalGroupJson,
   PressureLoadJson,
   PrescribedDisplacementBoundaryConditionJson,
+  PrescribedTemperatureBoundaryConditionJson,
   ResultFieldJson,
   ResultSampleLocation,
   SolverSurfaceMeshJson,
   StaticLinearStepJson,
+  SteadyStateThermalStepJson,
   StepJson,
   SurfaceFacetJson,
   SurfaceForceLoadJson,
   SurfaceTractionLoadJson,
+  SurfaceHeatFluxLoadJson,
   SurfaceSetJson,
   RemoteForceLoadJson,
   Tet10ElementBlockJson,
   Tet4ElementBlockJson,
+  VolumetricHeatGenerationLoadJson,
   ValidationIssue,
   ValidationReport
 } from "./model-json";
@@ -51,6 +55,7 @@ export {
   OPENCAE_LEGACY_MODEL_SCHEMA_VERSION,
   OPENCAE_MODEL_SCHEMA,
   OPENCAE_MODEL_SCHEMA_VERSION,
+  OPENCAE_OLDEST_MODEL_SCHEMA_VERSION,
   OPENCAE_PREVIOUS_MODEL_SCHEMA_VERSION
 } from "./model-json";
 export type {

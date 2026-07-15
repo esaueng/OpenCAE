@@ -64,8 +64,9 @@ since B4a). The cloud solve infrastructure was removed in two steps:
 - **Golden fixtures + recorder**
   (`apps/opencae-web/src/testdata/core-cloud-golden/`,
   `scripts/record-core-cloud-golden.mts`, `coreCloudGolden.test.ts`,
-  `goldenParity.test.ts`): they freeze the retired runner's exact
-  request/response contract, and the local pipeline must keep reproducing it.
+  `goldenParity.test.ts`): they freeze the retired runner's request/response
+  contract as a numeric oracle. Replays keep the current local solver identity
+  instead of stamping new results as cloud output.
 - **Historical provenance labeling**: results solved on the cloud before the
   retirement keep their "OpenCAE Core Cloud" / cloud-container labels — old
   data is labeled truthfully, never re-attributed.

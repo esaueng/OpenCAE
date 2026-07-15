@@ -55,6 +55,8 @@ export const MaterialSchema = z.object({
   poissonRatio: z.number().gt(-1).lt(0.5),
   density: z.number().positive(),
   yieldStrength: z.number().positive(),
+  /** Catalog value in W/(m*K); converted explicitly when building mm-based Core models. */
+  thermalConductivity: z.number().positive().optional(),
   printProfile: MaterialPrintProfileSchema.optional()
 });
 
@@ -81,7 +83,7 @@ export const NamedSelectionSchema = z.object({
 
 export const ConstraintSchema = z.object({
   id: z.string(),
-  type: z.enum(["fixed", "prescribed_displacement"]),
+  type: z.enum(["fixed", "prescribed_displacement", "prescribed_temperature"]),
   selectionRef: z.string(),
   parameters: z.record(z.unknown()),
   status: z.enum(["not_started", "ready", "warning", "complete"])
@@ -89,7 +91,7 @@ export const ConstraintSchema = z.object({
 
 export const LoadSchema = z.object({
   id: z.string(),
-  type: z.enum(["force", "pressure", "gravity", "surface_traction", "volume_force", "remote_force", "bolt_preload"]),
+  type: z.enum(["force", "pressure", "gravity", "surface_traction", "volume_force", "remote_force", "bolt_preload", "heat_flux", "heat_generation"]),
   selectionRef: z.string(),
   parameters: z.record(z.unknown()),
   status: z.enum(["not_started", "ready", "warning", "complete"])
@@ -115,7 +117,7 @@ export const LoadCombinationSchema = z.object({
 });
 
 const Vec3Schema = z.tuple([z.number(), z.number(), z.number()]);
-export const StudyAnalysisTypeSchema = z.enum(["static_stress", "dynamic_structural", "modal_analysis"]);
+export const StudyAnalysisTypeSchema = z.enum(["static_stress", "dynamic_structural", "modal_analysis", "steady_state_thermal"]);
 export const MeshQualitySchema = z.enum(["coarse", "medium", "fine", "ultra"]);
 // "auto" means the user never made an explicit backend choice; the run router
 // resolves it (local — the client cloud solve path was retired in B4a). An
@@ -183,8 +185,8 @@ export const ResultSampleSchema = z.object({
 export const ResultProvenanceSchema = z.object({
   kind: z.enum(["opencae_core_fea", "local_estimate", "analytical_benchmark"]),
   solver: z.string(),
-  // Core Cloud results report coreVersion/solverCpuVersion/runnerVersion instead
-  // of solverVersion; requiring it made every cloud result fail restore parsing.
+  // Core results report coreVersion/solverCpuVersion/runnerVersion instead of
+  // solverVersion. Keep every version field optional for historical restores.
   solverVersion: z.string().optional(),
   coreVersion: z.string().optional(),
   solverCpuVersion: z.string().optional(),
@@ -196,9 +198,11 @@ export const ResultProvenanceSchema = z.object({
   integrationMethod: z.string().optional(),
   loadProfile: z.string().optional(),
   dynamicProfile: z.string().optional(),
-  accelerationSource: z.string().optional()
+  accelerationSource: z.string().optional(),
+  coreSolver: z.string().optional()
 });
 
+/** Historical validator retained only for restoring results from the retired runner. */
 export const CoreCloudResultProvenanceSchema = ResultProvenanceSchema.superRefine((provenance, context) => {
   if (new RegExp(["calcu", "lix"].join(""), "i").test(provenance.solver)) {
     context.addIssue({ code: z.ZodIssueCode.custom, message: "OpenCAE Core Cloud results must use opencae-core-cloud solver provenance." });
@@ -227,7 +231,7 @@ export const ResultFieldSchema = z.object({
   id: z.string(),
   runId: z.string(),
   variantId: z.string().optional(),
-  type: z.enum(["stress", "displacement", "safety_factor", "velocity", "acceleration", "mode_shape"]),
+  type: z.enum(["stress", "displacement", "safety_factor", "velocity", "acceleration", "mode_shape", "temperature", "heat_flux"]),
   component: StressComponentSchema.optional(),
   location: z.enum(["node", "element", "face"]),
   values: z.array(z.number()),
@@ -319,6 +323,18 @@ const MaterialAssignmentSchema = z.object({
   status: z.enum(["not_started", "ready", "warning", "complete"])
 });
 
+export const MeshConnectionSchema = z.object({
+  id: z.string(),
+  type: z.enum(["tie", "contact", "fuse"]),
+  source: z.string(),
+  target: z.string(),
+  formulation: z.literal("frictionless").optional(),
+  kinematics: z.literal("small_sliding").default("small_sliding"),
+  searchTolerance: z.number().positive().optional(),
+  penaltyScale: z.number().positive().optional(),
+  status: z.enum(["not_started", "ready", "warning", "complete"]).default("ready")
+});
+
 const StudyBaseSchema = z.object({
   id: z.string(),
   projectId: z.string(),
@@ -326,12 +342,14 @@ const StudyBaseSchema = z.object({
   geometryScope: z.array(GeometryReferenceSchema),
   materialAssignments: z.array(MaterialAssignmentSchema),
   namedSelections: z.array(NamedSelectionSchema),
-  contacts: z.array(z.unknown()).default([]),
+  contacts: z.array(MeshConnectionSchema).default([]),
   constraints: z.array(ConstraintSchema),
   loads: z.array(LoadSchema),
   meshSettings: MeshSettingsSchema,
   validation: z.array(DiagnosticSchema).default([]),
-  runs: z.array(StudyRunSchema).default([])
+  runs: z.array(StudyRunSchema).default([]),
+  loadCases: z.array(LoadCaseSchema).optional(),
+  loadCombinations: z.array(LoadCombinationSchema).optional()
 });
 
 const StructuralVariantSchema = z.object({
@@ -357,7 +375,15 @@ export const ModalStudySchema = StudyBaseSchema.extend({
   solverSettings: ModalSolverSettingsSchema
 });
 
-const StudyUnionSchema = z.union([StaticStudySchema, DynamicStudySchema, ModalStudySchema]);
+export const ThermalStudySchema = StudyBaseSchema.extend({
+  type: z.literal("steady_state_thermal"),
+  solverSettings: z.object({
+    backend: SolverBackendSchema.optional(),
+    fidelity: SimulationFidelitySchema.optional()
+  }).passthrough()
+});
+
+const StudyUnionSchema = z.union([StaticStudySchema, DynamicStudySchema, ModalStudySchema, ThermalStudySchema]);
 export const StudySchema = z.preprocess(migrateLegacyStructuralVariants, StudyUnionSchema);
 
 function migrateLegacyStructuralVariants(value: unknown): unknown {
@@ -629,7 +655,24 @@ export const ModalResultSummarySchema = z.object({
   diagnostics: z.array(DiagnosticSchema).optional().default([])
 });
 
-export const ResultSummarySchema = z.union([StructuralResultSummarySchema, ModalResultSummarySchema]);
+export const ThermalResultSummarySchema = z.object({
+  analysisType: z.literal("steady_state_thermal"),
+  minTemperature: z.number(),
+  maxTemperature: z.number(),
+  temperatureUnits: z.string(),
+  maxHeatFlux: z.number().nonnegative(),
+  heatFluxUnits: z.string(),
+  appliedHeat: z.number(),
+  generatedHeat: z.number(),
+  reactionHeat: z.number(),
+  heatRateUnits: z.literal("W"),
+  energyBalanceRelativeError: z.number().nonnegative(),
+  resultTier: ResultProvenanceTierSchema.optional(),
+  provenance: ResultProvenanceSchema.optional(),
+  diagnostics: z.array(DiagnosticSchema).optional().default([])
+});
+
+export const ResultSummarySchema = z.union([StructuralResultSummarySchema, ModalResultSummarySchema, ThermalResultSummarySchema]);
 
 export const RunVariantKindSchema = z.enum(["case", "combination", "envelope"]);
 export const GoverningVariantIndexSchema = z.object({
@@ -674,6 +717,7 @@ export type SolverBackend = z.infer<typeof SolverBackendSchema>;
 export type SimulationFidelity = z.infer<typeof SimulationFidelitySchema>;
 export type DynamicSolverSettings = z.infer<typeof DynamicSolverSettingsSchema>;
 export type ModalSolverSettings = z.infer<typeof ModalSolverSettingsSchema>;
+export type MeshConnection = z.infer<typeof MeshConnectionSchema>;
 export type Material = z.infer<typeof MaterialSchema>;
 export type CustomMaterial = z.infer<typeof CustomMaterialSchema>;
 export type GeometryReference = z.infer<typeof GeometryReferenceSchema>;
@@ -694,7 +738,8 @@ export type GeometryFile = z.infer<typeof GeometryFileSchema>;
 export type MeshSummary = z.infer<typeof MeshSummarySchema>;
 export type StructuralResultSummary = Omit<z.infer<typeof StructuralResultSummarySchema>, "diagnostics"> & { diagnostics?: Diagnostic[] };
 export type ModalResultSummary = Omit<z.infer<typeof ModalResultSummarySchema>, "diagnostics"> & { diagnostics?: Diagnostic[] };
-export type ResultSummary = StructuralResultSummary | ModalResultSummary;
+export type ThermalResultSummary = Omit<z.infer<typeof ThermalResultSummarySchema>, "diagnostics"> & { diagnostics?: Diagnostic[] };
+export type ResultSummary = StructuralResultSummary | ModalResultSummary | ThermalResultSummary;
 export type RunVariantKind = z.infer<typeof RunVariantKindSchema>;
 export type GoverningVariantIndex = z.infer<typeof GoverningVariantIndexSchema>;
 export type RunVariantResult = Omit<z.infer<typeof RunVariantResultSchema>, "summary"> & { summary: ResultSummary };
@@ -827,6 +872,14 @@ export function estimateAllowableLoadForSafetyFactor(
 
 export function isModalResultSummary(summary: ResultSummary): summary is ModalResultSummary {
   return "analysisType" in summary && summary.analysisType === "modal_analysis";
+}
+
+export function isThermalResultSummary(summary: ResultSummary): summary is ThermalResultSummary {
+  return "analysisType" in summary && summary.analysisType === "steady_state_thermal";
+}
+
+export function isStructuralResultSummary(summary: ResultSummary): summary is StructuralResultSummary {
+  return !isModalResultSummary(summary) && !isThermalResultSummary(summary);
 }
 
 function roundAssessmentNumber(value: number): number {

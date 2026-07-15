@@ -65,16 +65,23 @@ export interface CaptureResultViewsOptions {
   waitForBoundaryViewReady?: () => Promise<void>;
 }
 
-const REPORT_RESULT_MODES = ["stress", "displacement"] as const;
+const REPORT_RESULT_CAPTURES = [
+  { mode: "stress", slot: "stress" },
+  { mode: "displacement", slot: "displacement" },
+  // The report data contract has two primary figure slots. Thermal reports
+  // intentionally reuse them for temperature and heat flux respectively.
+  { mode: "temperature", slot: "stress" },
+  { mode: "heat_flux", slot: "displacement" }
+] as const satisfies ReadonlyArray<{ mode: ResultMode; slot: "stress" | "displacement" }>;
 
 export async function captureResultViews(options: CaptureResultViewsOptions): Promise<ResultViewCaptures> {
   if (options.getViewMode() !== "results") {
     throw new Error("Open the Results view before generating a report.");
   }
 
-  const availableModes = REPORT_RESULT_MODES.filter((mode) => options.resultFields.some((field) => field.type === mode));
+  const availableCaptures = REPORT_RESULT_CAPTURES.filter(({ mode }) => options.resultFields.some((field) => field.type === mode));
   const captureBoundary = Boolean(options.captureBoundaryView && options.setViewMode);
-  if ((availableModes.length || captureBoundary) && !options.capture) {
+  if ((availableCaptures.length || captureBoundary) && !options.capture) {
     throw new Error("The 3D result view is still loading. Wait for it to appear, then generate the report again.");
   }
 
@@ -86,7 +93,7 @@ export async function captureResultViews(options: CaptureResultViewsOptions): Pr
 
   try {
     if (originalPlaybackPlaying) options.setPlaybackPlaying(false);
-    for (const mode of availableModes) {
+    for (const { mode, slot } of availableCaptures) {
       assertCurrent(options);
       const peakField = peakResultField(options.resultFields, mode, options.surfaceMeshRef);
       if (!peakField) continue;
@@ -95,7 +102,7 @@ export async function captureResultViews(options: CaptureResultViewsOptions): Pr
       await waitForFrame();
       await waitForFrame();
       assertCurrent(options);
-      captures[mode] = {
+      captures[slot] = {
         png: await options.capture!(),
         fieldId: peakField.id,
         selection: peakField.frameIndex === undefined ? "static" : "peak",
@@ -130,7 +137,7 @@ async function captureBoundaryView(options: CaptureResultViewsOptions, waitForFr
   }
 }
 
-export function peakResultField(fields: ResultField[], mode: "stress" | "displacement", surfaceMeshRef?: string): ResultField | undefined {
+export function peakResultField(fields: ResultField[], mode: "stress" | "displacement" | "temperature" | "heat_flux", surfaceMeshRef?: string): ResultField | undefined {
   const modeFields = fields.filter((field) => field.type === mode);
   if (!modeFields.length) return undefined;
 

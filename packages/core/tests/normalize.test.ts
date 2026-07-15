@@ -46,7 +46,7 @@ describe("normalizeModelJson", () => {
       surfaceFacets: 0,
       surfaceSets: 0
     });
-    expect(result.model?.schemaVersion).toBe("0.3.0");
+    expect(result.model?.schemaVersion).toBe("0.4.0");
   });
 
   test("computes counts for a valid two-tet model", () => {
@@ -89,7 +89,7 @@ describe("normalizeModelJson", () => {
     const result = normalizeModelJson(model);
 
     expect(result.ok).toBe(true);
-    expect(result.model?.schemaVersion).toBe("0.3.0");
+    expect(result.model?.schemaVersion).toBe("0.4.0");
     expect(result.model?.surfaceFacets[0].nodes).toBeInstanceOf(Uint32Array);
     expect(result.model?.surfaceSets[0].facets).toBeInstanceOf(Uint32Array);
     expect(result.model?.coordinateSystem.solverUnits).toBe("m-N-s-Pa");
