@@ -4,21 +4,29 @@ import type { CloudBackupPreference } from "../cloudBackup";
 interface ProjectStorageNoticeProps {
   preference: CloudBackupPreference | null;
   busy: boolean;
+  recoveryNeeded: boolean;
   onChooseCloud: () => void;
   onChooseLocal: () => void;
 }
 
-export function ProjectStorageNotice({ preference, busy, onChooseCloud, onChooseLocal }: ProjectStorageNoticeProps) {
+export function ProjectStorageNotice({ preference, busy, recoveryNeeded, onChooseCloud, onChooseLocal }: ProjectStorageNoticeProps) {
   const title = preference === "cloud"
-    ? "Encrypted recovery is on"
+    ? recoveryNeeded ? "Encrypted recovery is on" : "Encrypted recovery is ready"
     : preference === "local"
       ? "This project stays local"
-      : "Choose how to protect this project";
+      : recoveryNeeded ? "Choose how to protect this project" : "Choose your recovery preference";
   const description = preference === "cloud"
-    ? "When the complete project cannot fit in browser autosave, OpenCAE keeps an encrypted recovery copy for 30 days. Simulation still runs locally."
+    ? recoveryNeeded
+      ? "The complete project no longer fits in browser autosave, so OpenCAE will keep an encrypted recovery copy for 30 days. Simulation still runs locally."
+      : "Browser autosave is active. If the complete project outgrows browser storage, OpenCAE will keep an encrypted recovery copy for 30 days."
     : preference === "local"
       ? "OpenCAE will not upload recovery data. Use Save project whenever you need a complete file outside this browser."
-      : "The complete project is larger than browser autosave can hold. Pick a recovery option without leaving or blocking the workspace.";
+      : recoveryNeeded
+        ? "The complete project is larger than browser autosave can hold. Pick a recovery option without leaving or blocking the workspace."
+        : "Browser autosave is active for this project. Choose what OpenCAE should do if the complete project grows beyond the browser storage limit.";
+  const recoveryFacts = preference === "local"
+    ? ["No project upload", "Manual file saves"]
+    : ["Encrypted in this browser", "Deleted after 30 days"];
 
   return (
     <aside className="storage-recovery-card" id="project-storage-notice" aria-labelledby="project-storage-title">
@@ -30,9 +38,8 @@ export function ProjectStorageNotice({ preference, busy, onChooseCloud, onChoose
         </span>
       </header>
       <p>{description}</p>
-      <div className="storage-recovery-facts" aria-label="Encrypted recovery details">
-        <span>Encrypted in this browser</span>
-        <span>Deleted after 30 days</span>
+      <div className="storage-recovery-facts" aria-label="Storage choice details">
+        {recoveryFacts.map((fact) => <span key={fact}>{fact}</span>)}
       </div>
       <div className="storage-recovery-actions">
         <button

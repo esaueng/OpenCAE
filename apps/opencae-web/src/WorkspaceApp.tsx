@@ -173,7 +173,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const [htmlExportError, setHtmlExportError] = useState<string | null>(null);
   const [overflowRecoveryRequest, setOverflowRecoveryRequest] = useState(0);
   const [cloudBackupPreference, setCloudBackupPreference] = useState<CloudBackupPreference | null>(() => readCloudBackupPreference());
-  const [storageRecoveryAvailable, setStorageRecoveryAvailable] = useState(false);
+  const [overflowRecoveryNeeded, setOverflowRecoveryNeeded] = useState(false);
   const [storageRecoveryNoticeOpen, setStorageRecoveryNoticeOpen] = useState(false);
   const [cloudBackupBusy, setCloudBackupBusy] = useState(false);
   const [activeRunId, setActiveRunId] = useState(restoredUi?.activeRunId || restoredResults?.activeRunId || restoredResults?.completedRunId || "run-bracket-demo-seeded");
@@ -987,7 +987,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   async function offerOverflowRecoveryOptions() {
     if (overflowRecoveryHandledRef.current) return;
     overflowRecoveryHandledRef.current = true;
-    setStorageRecoveryAvailable(true);
+    setOverflowRecoveryNeeded(true);
     try {
       const persistent = await requestPersistentBrowserStorage();
       if (persistent) pushMessage("Persistent browser storage enabled to reduce automatic eviction.");
@@ -1029,6 +1029,8 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     const remembered = writeCloudBackupPreference(preference);
     if (preference === "local") {
       pushMessage("Project recovery will stay local. Use Save project to keep a complete file.");
+    } else if (!overflowRecoveryNeeded) {
+      pushMessage("Encrypted recovery preference saved. OpenCAE will use it if this project outgrows browser autosave.");
     } else {
       void saveOverflowRecoveryBackup();
     }
@@ -2323,20 +2325,18 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
             </div>
           ) : null}
         </div>
-        {storageRecoveryAvailable ? (
-          <button
-            className={`storage-status-button ${cloudBackupPreference ?? "unselected"}`}
-            type="button"
-            aria-label={`Project storage: ${cloudBackupPreference === "cloud" ? "recovery on" : cloudBackupPreference === "local" ? "local only" : "choose storage"}`}
-            aria-expanded={storageRecoveryNoticeOpen}
-            aria-controls="project-storage-notice"
-            title="Review project storage choice"
-            onClick={() => setStorageRecoveryNoticeOpen((open) => !open)}
-          >
-            {cloudBackupPreference === "cloud" ? <CloudUpload size={15} aria-hidden="true" /> : <HardDrive size={15} aria-hidden="true" />}
-            <span>{cloudBackupPreference === "cloud" ? "Recovery on" : cloudBackupPreference === "local" ? "Local only" : "Storage"}</span>
-          </button>
-        ) : null}
+        <button
+          className={`storage-status-button ${cloudBackupPreference ?? "unselected"}`}
+          type="button"
+          aria-label={`Project storage: ${cloudBackupPreference === "cloud" ? "recovery on" : cloudBackupPreference === "local" ? "local only" : "choose storage"}`}
+          aria-expanded={storageRecoveryNoticeOpen}
+          aria-controls="project-storage-notice"
+          title="Review project storage choice"
+          onClick={() => setStorageRecoveryNoticeOpen((open) => !open)}
+        >
+          {cloudBackupPreference === "cloud" ? <CloudUpload size={15} aria-hidden="true" /> : <HardDrive size={15} aria-hidden="true" />}
+          <span>{cloudBackupPreference === "cloud" ? "Recovery on" : cloudBackupPreference === "local" ? "Local only" : "Storage"}</span>
+        </button>
         {showRunButton ? (
           <button
             className={`primary topbar-action ${solverRunning ? "running" : ""}`}
@@ -2358,6 +2358,19 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     );
   }
 
+  function renderStorageRecoveryNotice() {
+    if (!storageRecoveryNoticeOpen) return null;
+    return (
+      <ProjectStorageNotice
+        preference={cloudBackupPreference}
+        busy={cloudBackupBusy}
+        recoveryNeeded={overflowRecoveryNeeded}
+        onChooseCloud={() => handleStoragePreference("cloud")}
+        onChooseLocal={() => handleStoragePreference("local")}
+      />
+    );
+  }
+
   if (shouldShowStartScreen({ homeRequested, hasProject: Boolean(project), hasDisplayModel: Boolean(displayModel), hasStudy: Boolean(study) }) || !project || !displayModel || !displayModelForUi) {
     return <StartScreen onLoadSample={handleLoadSample} onCreateProject={handleCreateProject} onOpenProject={handleOpenProject} />;
   }
@@ -2373,6 +2386,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           onCreateThermal={handleCreateThermalSimulation}
         />
         <BottomPanel status={status} logs={logs} meshStatus="Not generated" solverStatus="Idle" onClearLogs={clearLogs} />
+        {renderStorageRecoveryNotice()}
       </div>
     );
   }
@@ -2634,14 +2648,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         solverStatus={solverRunning ? "Running" : runProgress >= 100 ? "Complete" : "Idle"}
         onClearLogs={clearLogs}
       />
-      {storageRecoveryAvailable && storageRecoveryNoticeOpen ? (
-        <ProjectStorageNotice
-          preference={cloudBackupPreference}
-          busy={cloudBackupBusy}
-          onChooseCloud={() => handleStoragePreference("cloud")}
-          onChooseLocal={() => handleStoragePreference("local")}
-        />
-      ) : null}
+      {renderStorageRecoveryNotice()}
       {validationGalleryOpen ? (
         <Suspense fallback={null}>
           <ValidationGallery onClose={() => setValidationGalleryOpen(false)} />
