@@ -73,6 +73,7 @@ describe("buildCoreModelFromCloudMesh", () => {
     });
 
     expect(model.loads).toEqual([]);
+    expect(model.meshProvenance?.solver).toBe("opencae-core-local");
     expect(model.steps).toEqual([{
       name: "modalStep",
       type: "modal",
@@ -130,6 +131,71 @@ describe("buildCoreModelFromCloudMesh", () => {
       "surface_bottom_nodes",
       "surface_bottom_nodes"
     ]);
+    expect(model.surfaceSets).toEqual(expect.arrayContaining([
+      { name: "selection-fs-a", facets: [3] },
+      { name: "selection-fs-b", facets: [3] },
+      { name: "selection-l1", facets: [2] }
+    ]));
+  });
+
+  it("persists selection aliases when a face only resolves geometrically", () => {
+    const selectionRef = "selection-step-face-3";
+    const faceId = "step-face-3";
+    const artifact = singleTetArtifact();
+    delete artifact.surfaceFacets[2]!.sourceFaceId;
+
+    const model = buildCoreModelFromCloudMesh({
+      study: {
+        id: "picked-step-face-study",
+        type: "modal_analysis",
+        materialAssignments: [{ materialId: "mat-aluminum-6061" }],
+        namedSelections: [{
+          id: selectionRef,
+          name: "FS 1",
+          entityType: "face",
+          geometryRefs: [{ entityType: "face", entityId: faceId }]
+        }],
+        constraints: [{ id: "fixed", type: "fixed", selectionRef, parameters: {} }],
+        loads: []
+      },
+      displayModel: {
+        faces: [{ id: faceId, center: [0.0133, 0, 0.0133], normal: [0, -1, 0] }]
+      },
+      volumeMesh: artifact,
+      analysisType: "modal_analysis",
+      solverSettings: {}
+    });
+
+    expect(model.boundaryConditions[0]).toMatchObject({ nodeSet: "surface_load_nodes" });
+    expect(model.surfaceSets).toContainEqual({ name: selectionRef, facets: [2] });
+  });
+
+  it("accepts disconnected assembly bodies only when tie/contact definitions connect every component", () => {
+    const volumeMesh = twoTetAssemblyArtifact();
+    const study = {
+      id: "two-body-assembly",
+      type: "static_stress" as const,
+      materialAssignments: [{ materialId: "mat-aluminum-6061" }],
+      namedSelections: [
+        { id: "support", name: "Support", entityType: "face", geometryRefs: [{ entityType: "face", entityId: "body-a-support" }] },
+        { id: "load", name: "Load", entityType: "face", geometryRefs: [{ entityType: "face", entityId: "body-b-load" }] },
+        { id: "interface-a", name: "Interface A", entityType: "face", geometryRefs: [{ entityType: "face", entityId: "body-a-interface" }] },
+        { id: "interface-b", name: "Interface B", entityType: "face", geometryRefs: [{ entityType: "face", entityId: "body-b-interface" }] }
+      ],
+      constraints: [{ id: "fixed", type: "fixed", selectionRef: "support", parameters: {} }],
+      loads: [{ id: "force", type: "force", selectionRef: "load", parameters: { value: 10, units: "N", direction: [1, 0, 0] } }],
+      contacts: [{ id: "tie", type: "tie" as const, source: "interface-a", target: "interface-b", searchTolerance: 0.01 }]
+    };
+
+    const model = buildCoreModelFromCloudMesh({ study, volumeMesh, analysisType: "static_stress", solverSettings: {} });
+    expect(model.meshConnections).toEqual([expect.objectContaining({ type: "tie", source: "surface_interface_a", target: "surface_interface_b" })]);
+
+    expect(() => buildCoreModelFromCloudMesh({
+      study: { ...study, contacts: [] },
+      volumeMesh,
+      analysisType: "static_stress",
+      solverSettings: {}
+    })).toThrow(/one fused solid or explicit tie\/contact connections are required/);
   });
 
   it("round-trips advanced load primitives through the meshed-model contract", () => {
@@ -194,6 +260,48 @@ function singleTetArtifact(): CoreVolumeMeshArtifact {
       meshQuality: { minTetVolume: 1e-8, maxTetVolume: 1e-8, invertedElementCount: 0 },
       diagnostics: [],
       units: "m"
+    }
+  };
+}
+
+function twoTetAssemblyArtifact(): CoreVolumeMeshArtifact {
+  const first = singleTetArtifact();
+  const secondOffset = first.nodes.coordinates.map((value, index) => value + (index % 3 === 0 ? 0.05 : 0));
+  return {
+    ...first,
+    nodes: { coordinates: [...first.nodes.coordinates, ...secondOffset] },
+    elements: [
+      first.elements[0]!,
+      { type: "Tet4", connectivity: [4, 5, 6, 7] }
+    ],
+    surfaceFacets: [
+      ...first.surfaceFacets.map((facet) => ({
+        ...facet,
+        ...(facet.id === 0 ? { sourceFaceId: "body-a-interface" } : {}),
+        ...(facet.id === 3 ? { sourceFaceId: "body-a-support" } : {})
+      })),
+      ...first.surfaceFacets.map((facet) => ({
+        ...facet,
+        id: facet.id + 4,
+        element: 1,
+        nodes: facet.nodes.map((node) => node + 4),
+        center: facet.center ? [facet.center[0] + 0.05, facet.center[1], facet.center[2]] as [number, number, number] : undefined,
+        ...(facet.id === 1 ? { sourceFaceId: "body-b-interface" } : {}),
+        ...(facet.id === 2 ? { sourceFaceId: "body-b-load" } : {})
+      }))
+    ],
+    surfaceSets: [
+      { name: "surface_interface_a", facets: [0] },
+      { name: "surface_support_a", facets: [3] },
+      { name: "surface_interface_b", facets: [5] },
+      { name: "surface_load_b", facets: [6] }
+    ],
+    metadata: {
+      ...first.metadata,
+      nodeCount: 8,
+      elementCount: 2,
+      surfaceFacetCount: 8,
+      connectedComponentCount: 2
     }
   };
 }

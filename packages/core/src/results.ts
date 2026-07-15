@@ -90,7 +90,8 @@ export type CoreSolveSummary = CoreStructuralSolveSummary | CoreModalSolveSummar
 
 export type CoreSolveProvenance = {
   kind: "opencae_core_fea";
-  solver: "opencae-core-cloud" | "opencae-core-sparse-tet" | "opencae-core-mdof-tet" | "opencae-core-modal-tet";
+  solver: "opencae-core-cloud" | "opencae-core-sparse-tet" | "opencae-core-mdof-tet" | "opencae-core-modal-tet" | "opencae-core-webgpu-matrix-free-tet4";
+  coreSolver?: string;
   resultSource: "computed";
   meshSource: "actual_volume_mesh" | "structured_block_core";
   units: "mm-N-s-MPa";
@@ -558,7 +559,8 @@ function validateProvenance(provenance: CoreSolveProvenance, errors: CoreResultV
     provenance.solver !== "opencae-core-cloud" &&
     provenance.solver !== "opencae-core-sparse-tet" &&
     provenance.solver !== "opencae-core-mdof-tet" &&
-    provenance.solver !== "opencae-core-modal-tet"
+    provenance.solver !== "opencae-core-modal-tet" &&
+    provenance.solver !== "opencae-core-webgpu-matrix-free-tet4"
   ) {
     errors.push(issue("invalid-provenance", "Production Core result solver must be an OpenCAE Core solver.", "provenance.solver"));
   }

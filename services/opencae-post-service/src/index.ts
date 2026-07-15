@@ -1,5 +1,5 @@
-import { assessResultFailure, classifyResultProvenance, isModalResultSummary } from "@opencae/schema";
-import type { ModalResultSummary, ResultField, ResultProvenanceTier, ResultSummary, StructuralResultSummary, Study } from "@opencae/schema";
+import { assessResultFailure, classifyResultProvenance, isModalResultSummary, isThermalResultSummary } from "@opencae/schema";
+import type { ModalResultSummary, ResultField, ResultProvenanceTier, ResultSummary, StructuralResultSummary, Study, ThermalResultSummary } from "@opencae/schema";
 import type { ObjectStorageProvider } from "@opencae/storage";
 
 export class LocalReportProvider {
@@ -24,6 +24,7 @@ const ASSESSMENT_STATUSES = ["pass", "warning", "fail", "unknown"] as const;
 
 export function buildHtmlReport(runId: string, summary: ResultSummary): string {
   if (isModalResultSummary(summary)) return buildModalHtmlReport(runId, summary);
+  if (isThermalResultSummary(summary)) return buildThermalHtmlReport(runId, summary);
   const stressScore = summary.safetyFactor > 0 ? clamp(1 / summary.safetyFactor, 0, 1) : 1;
   const assessment = summary.failureAssessment ?? assessResultFailure(summary);
   const assessmentStatusClass = ASSESSMENT_STATUSES.includes(assessment.status) ? assessment.status : "unknown";
@@ -142,6 +143,7 @@ export function buildHtmlReport(runId: string, summary: ResultSummary): string {
 
 export function buildPdfReport(runId: string, summary: ResultSummary): Buffer {
   if (isModalResultSummary(summary)) return buildModalPdfReport(runId, summary);
+  if (isThermalResultSummary(summary)) return buildThermalPdfReport(runId, summary);
   const assessment = summary.failureAssessment ?? assessResultFailure(summary);
   const analysisLabel = summary.transient ? "Dynamic structural" : "Static stress";
   const provenanceTier = resultTierForSummary(summary);
@@ -192,6 +194,24 @@ export function buildPdfReport(runId: string, summary: ResultSummary): Buffer {
     "Q"
   ].join("\n");
   return makePdf(commands);
+}
+
+function buildThermalHtmlReport(runId: string, summary: ThermalResultSummary): string {
+  return `<!doctype html><html><head><meta charset="utf-8"><title>OpenCAE Thermal Report</title><style>body{font:14px/1.5 system-ui;margin:40px;color:#111827}main{max-width:760px;margin:auto}header{padding:28px;color:white;background:#14396f}table{width:100%;border-collapse:collapse;margin-top:24px}td{padding:10px;border-bottom:1px solid #d8dee8}td:last-child{text-align:right;font-weight:700}</style></head><body><main><header><small>OpenCAE steady-state thermal simulation</small><h1>Thermal Analysis Report</h1><div>Run ${escapeHtml(runId)}</div></header><table><tr><td>Minimum temperature</td><td>${format(summary.minTemperature)} ${escapeHtml(summary.temperatureUnits)}</td></tr><tr><td>Maximum temperature</td><td>${format(summary.maxTemperature)} ${escapeHtml(summary.temperatureUnits)}</td></tr><tr><td>Maximum heat flux</td><td>${format(summary.maxHeatFlux)} ${escapeHtml(summary.heatFluxUnits)}</td></tr><tr><td>Applied surface heat</td><td>${format(summary.appliedHeat)} W</td></tr><tr><td>Generated heat</td><td>${format(summary.generatedHeat)} W</td></tr><tr><td>Boundary reaction</td><td>${format(summary.reactionHeat)} W</td></tr><tr><td>Energy balance error</td><td>${format(summary.energyBalanceRelativeError * 100)}%</td></tr></table></main></body></html>`;
+}
+
+function buildThermalPdfReport(runId: string, summary: ThermalResultSummary): Buffer {
+  return makePdf([
+    "q", "0.95 0.97 1 rg 0 0 612 792 re f", "0.04 0.07 0.13 rg 0 618 612 174 re f",
+    text("OpenCAE STEADY-STATE THERMAL SIMULATION", 48, 744, 10, "F2", [0.75, 0.85, 1]),
+    text("Thermal Analysis Report", 48, 704, 26, "F1", [1, 1, 1]), text(`Run ${runId}`, 48, 680, 10, "F2", [0.78, 0.86, 0.96]),
+    text("Key Results", 48, 586, 18, "F1"),
+    kpiBox(48, 510, "MIN TEMPERATURE", `${format(summary.minTemperature)} ${summary.temperatureUnits}`, [0.12, 0.45, 0.95]),
+    kpiBox(220, 510, "MAX TEMPERATURE", `${format(summary.maxTemperature)} ${summary.temperatureUnits}`, [0.91, 0.25, 0.21]),
+    kpiBox(392, 510, "MAX HEAT FLUX", `${format(summary.maxHeatFlux)} ${summary.heatFluxUnits}`, [0.95, 0.58, 0.18]),
+    tableRow(48, 430, "Applied surface heat", `${format(summary.appliedHeat)} W`), tableRow(48, 400, "Generated heat", `${format(summary.generatedHeat)} W`),
+    tableRow(48, 370, "Boundary reaction", `${format(summary.reactionHeat)} W`), tableRow(48, 340, "Energy balance error", `${format(summary.energyBalanceRelativeError * 100)}%`), "Q"
+  ].join("\n"));
 }
 
 function buildModalHtmlReport(runId: string, summary: ModalResultSummary): string {

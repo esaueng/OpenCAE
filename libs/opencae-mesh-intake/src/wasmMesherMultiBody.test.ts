@@ -26,6 +26,22 @@ describe("multi-body STEP fusion", () => {
     expect(artifact.metadata.connectedComponentCount).toBe(1);
   });
 
+  it("honors an explicit pairwise fuse group while preserving part identity", { timeout: 300_000 }, async () => {
+    const step = await generateTouchingTBarStep();
+    const result = await meshStepToMshV2(step, {
+      elementOrder: 1,
+      meshSizeMm: 8,
+      preservePartIdentity: true,
+      fuseBodyGroups: [[
+        { min: [0, -10, 0], max: [160, 10, 10] },
+        { min: [-10, -30, 0], max: [0, 30, 10] }
+      ]]
+    });
+    expect(result.multiBodyFusion).toEqual({ inputVolumeCount: 2, fusedVolumeCount: 1 });
+    const artifact = parseGmshMeshToCoreVolumeMesh(result.msh, { units: "mm" });
+    expect(artifact.metadata.connectedComponentCount).toBe(1);
+  });
+
   it("leaves genuinely disjoint bodies un-fused with no fusion report", { timeout: 300_000 }, async () => {
     const step = await generateDisjointBarsStep();
     const result = await meshStepToMshV2(step, { elementOrder: 1, meshSizeMm: 8 });

@@ -3,7 +3,7 @@ import { hasAutosavedWorkspace } from "./autosaveStorage";
 import { StartScreen } from "./components/StartScreen";
 
 type SampleModelId = "bracket" | "plate" | "cantilever";
-type SampleAnalysisType = "static_stress" | "dynamic_structural";
+type SampleAnalysisType = "static_stress" | "dynamic_structural" | "modal_analysis" | "steady_state_thermal";
 
 export type WorkspaceInitialAction =
   | { type: "loadSample"; sample?: SampleModelId; analysisType?: SampleAnalysisType }

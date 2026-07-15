@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { isModalResultSummary } from "@opencae/schema";
+import { isStructuralResultSummary } from "@opencae/schema";
 import type { DisplayModel, Project, ResultField, ResultSummary, Study } from "@opencae/schema";
 import {
   AUTOSAVE_STORAGE_KEY,
@@ -197,7 +197,7 @@ describe("app persistence", () => {
       fields
     });
     expect(bundle).toBeDefined();
-    if (!bundle || isModalResultSummary(bundle.summary)) throw new Error("Expected structural transient results.");
+    if (!bundle || !isStructuralResultSummary(bundle.summary)) throw new Error("Expected structural transient results.");
     expect(bundle?.summary.transient?.frameCount).toBe(21);
   });
 
@@ -397,6 +397,8 @@ describe("app persistence", () => {
 
     expect(parseAutosavedWorkspacePayload(JSON.stringify(snapshot))?.ui.sampleModel).toBe("plate");
     expect(parseAutosavedWorkspacePayload(JSON.stringify(snapshot))?.ui.sampleAnalysisType).toBe("dynamic_structural");
+    expect(parseAutosavedWorkspacePayload(JSON.stringify({ ...snapshot, ui: { ...snapshot.ui, sampleAnalysisType: "modal_analysis" } }))?.ui.sampleAnalysisType).toBe("modal_analysis");
+    expect(parseAutosavedWorkspacePayload(JSON.stringify({ ...snapshot, ui: { ...snapshot.ui, sampleAnalysisType: "steady_state_thermal" } }))?.ui.sampleAnalysisType).toBe("steady_state_thermal");
     expect(parseAutosavedWorkspacePayload(JSON.stringify(snapshot))?.ui.selectedLoadPoint).toBeNull();
     expect(parseAutosavedWorkspacePayload(JSON.stringify(snapshot))?.ui.selectedPayloadObject).toBeNull();
     expect(parseAutosavedWorkspacePayload(JSON.stringify(snapshot))?.ui.draftLoadDirection).toBe("Opposite normal");

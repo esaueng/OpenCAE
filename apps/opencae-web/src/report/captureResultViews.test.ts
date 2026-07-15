@@ -17,6 +17,11 @@ const dynamicFields = [
   { id: "displacement-surface-2", runId: "run", type: "displacement", location: "node", surfaceMeshRef: "surface", values: [0, 7], min: 0, max: 7, units: "mm", frameIndex: 2, timeSeconds: 0.1 }
 ] satisfies ResultField[];
 
+const thermalFields = [
+  { id: "temperature", runId: "run", type: "temperature", location: "node", values: [20, 85], min: 20, max: 85, units: "°C" },
+  { id: "heat-flux", runId: "run", type: "heat_flux", location: "face", values: [0, 12], min: 0, max: 12, units: "W/m²" }
+] satisfies ResultField[];
+
 describe("captureResultViews", () => {
   test("serializes automatic and manual capture tasks and continues after failures", async () => {
     const queue = createCaptureQueue();
@@ -173,6 +178,26 @@ describe("captureResultViews", () => {
 
     expect(result.stress).toMatchObject({ fieldId: "stress", selection: "static" });
     expect(result.displacement).toMatchObject({ fieldId: "displacement", selection: "static" });
+  });
+
+  test("captures thermal temperature and heat-flux figures into the report figure slots", async () => {
+    let mode: ResultMode = "temperature";
+    const result = await captureResultViews({
+      getViewMode: () => "results",
+      getResultMode: () => mode,
+      setResultMode: (next) => { mode = next; },
+      getResultFrameIndex: () => 0,
+      setResultFrameIndex: () => undefined,
+      getPlaybackPlaying: () => false,
+      setPlaybackPlaying: () => undefined,
+      resultFields: thermalFields,
+      capture: () => `data:image/png;base64,${mode}`,
+      isCurrent: () => true,
+      waitForAnimationFrame: async () => undefined
+    });
+
+    expect(result.stress).toMatchObject({ fieldId: "temperature", png: "data:image/png;base64,temperature" });
+    expect(result.displacement).toMatchObject({ fieldId: "heat-flux", png: "data:image/png;base64,heat_flux" });
   });
 });
 

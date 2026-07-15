@@ -1,6 +1,11 @@
 (() => {
   const refreshParam = "opencae-sw-refresh";
-  const refreshVersion = "2026-07-08-csp-eval";
+  // A service worker activates once per newly installed build. Use that
+  // activation's timestamp instead of a hand-maintained release string so
+  // every deploy moves already-open tabs onto the new precached app shell.
+  // A frozen value leaves long-lived CAE sessions running old mesh/solver
+  // code even after a corrected bundle has reached production.
+  const refreshVersion = String(Date.now());
 
   self.addEventListener("activate", (event) => {
     event.waitUntil(

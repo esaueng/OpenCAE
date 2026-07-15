@@ -7,7 +7,7 @@
 // @opencae/solver-cpu, which the browser intake path must not depend on.
 import type { ElementType, SurfaceFacetJson, SurfaceSetJson } from "@opencae/core";
 
-export type CloudAnalysisType = "static_stress" | "dynamic_structural" | "modal_analysis";
+export type CloudAnalysisType = "static_stress" | "dynamic_structural" | "modal_analysis" | "steady_state_thermal";
 
 export type CloudStudyLike = {
   id?: string;
@@ -37,6 +37,15 @@ export type CloudStudyLike = {
     type?: string;
     selectionRef?: string;
     parameters?: Record<string, unknown>;
+  }>;
+  contacts?: Array<{
+    id?: string;
+    type?: "tie" | "contact" | "fuse";
+    source?: string;
+    target?: string;
+    searchTolerance?: number;
+    penaltyScale?: number;
+    kinematics?: "small_sliding";
   }>;
   solverSettings?: Record<string, unknown>;
 };

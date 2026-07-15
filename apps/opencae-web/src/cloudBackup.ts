@@ -2,7 +2,10 @@ import type { AutosavedWorkspace } from "./appPersistence";
 import { getBrowserStorage, readStorageItem, type StorageLike } from "./autosaveStorage";
 
 const CLOUD_BACKUP_STORAGE_KEY = "opencae.workspace.cloud-backup.v1";
+const CLOUD_BACKUP_PREFERENCE_STORAGE_KEY = "opencae.workspace.cloud-backup.preference.v1";
 const CLOUD_BACKUP_PATH = "/api/project-backups";
+
+export type CloudBackupPreference = "cloud" | "local";
 
 export interface CloudBackupDescriptor {
   version: 1;
@@ -86,6 +89,21 @@ export function readCloudBackupDescriptor(storage = getBrowserStorage()): CloudB
       : null;
   } catch {
     return null;
+  }
+}
+
+export function readCloudBackupPreference(storage = getBrowserStorage()): CloudBackupPreference | null {
+  const preference = readStorageItem(storage, CLOUD_BACKUP_PREFERENCE_STORAGE_KEY);
+  return preference === "cloud" || preference === "local" ? preference : null;
+}
+
+export function writeCloudBackupPreference(preference: CloudBackupPreference, storage = getBrowserStorage()): boolean {
+  if (!storage) return false;
+  try {
+    storage.setItem(CLOUD_BACKUP_PREFERENCE_STORAGE_KEY, preference);
+    return true;
+  } catch {
+    return false;
   }
 }
 

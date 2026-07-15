@@ -16,13 +16,13 @@ export const TET10_EDGE_VERTICES: ReadonlyArray<readonly [number, number]> = [
 // 4-point Gauss rule on the reference tetrahedron, exact for quadratic integrands.
 const GAUSS_A = 0.5854101966249685;
 const GAUSS_B = 0.13819660112501053;
-const GAUSS_POINTS: ReadonlyArray<readonly [number, number, number, number]> = [
+export const TET10_GAUSS_POINTS: ReadonlyArray<readonly [number, number, number, number]> = [
   [GAUSS_A, GAUSS_B, GAUSS_B, GAUSS_B],
   [GAUSS_B, GAUSS_A, GAUSS_B, GAUSS_B],
   [GAUSS_B, GAUSS_B, GAUSS_A, GAUSS_B],
   [GAUSS_B, GAUSS_B, GAUSS_B, GAUSS_A]
 ];
-const GAUSS_WEIGHT = 1 / 24;
+export const TET10_GAUSS_WEIGHT = 1 / 24;
 const CENTROID: readonly [number, number, number, number] = [0.25, 0.25, 0.25, 0.25];
 
 // Barycentric coordinates of each of the 10 nodes (4 vertices, then the 6 edge
@@ -83,7 +83,7 @@ function shapeDerivativesRef(barycentric: readonly [number, number, number, numb
   return derivatives;
 }
 
-function physicalGradients(
+export function computeTet10PhysicalGradients(
   coordinates: Float64Array,
   barycentric: readonly [number, number, number, number],
   tolerance: number
@@ -168,10 +168,10 @@ export function computeTet10ElementStiffness(
   const stiffness = new Float64Array(cols * cols);
   let volume = 0;
 
-  for (const point of GAUSS_POINTS) {
-    const local = physicalGradients(coordinates, point, tolerance);
+  for (const point of TET10_GAUSS_POINTS) {
+    const local = computeTet10PhysicalGradients(coordinates, point, tolerance);
     if (!local.ok) return local;
-    const weight = GAUSS_WEIGHT * local.detJ;
+    const weight = TET10_GAUSS_WEIGHT * local.detJ;
     volume += weight;
     const b = computeTet10BMatrix(local.gradients);
     const db = new Float64Array(6 * cols);
@@ -214,10 +214,10 @@ export function computeTet10ElementStiffness(
 
 export function computeTet10Volume(coordinates: Float64Array, tolerance = 1e-14): Tet10VolumeResult {
   let volume = 0;
-  for (const point of GAUSS_POINTS) {
-    const local = physicalGradients(coordinates, point, tolerance);
+  for (const point of TET10_GAUSS_POINTS) {
+    const local = computeTet10PhysicalGradients(coordinates, point, tolerance);
     if (!local.ok) return local;
-    volume += GAUSS_WEIGHT * local.detJ;
+    volume += TET10_GAUSS_WEIGHT * local.detJ;
   }
   if (!(volume > tolerance)) {
     return {
@@ -240,7 +240,7 @@ export function recoverTet10NodalStrains(
 ): { ok: true; strains: Float64Array } | { ok: false; error: CpuSolverError } {
   const strains = new Float64Array(TET10_NODE_COUNT * 6);
   for (let node = 0; node < TET10_NODE_COUNT; node += 1) {
-    const local = physicalGradients(coordinates, TET10_NODE_BARYCENTRIC[node], tolerance);
+    const local = computeTet10PhysicalGradients(coordinates, TET10_NODE_BARYCENTRIC[node], tolerance);
     if (!local.ok) return local;
     const b = computeTet10BMatrix(local.gradients);
     for (let row = 0; row < 6; row += 1) {
@@ -259,7 +259,7 @@ export function recoverTet10CentroidStrain(
   elementDisplacement: Float64Array,
   tolerance = 1e-14
 ): Tet10StrainResult {
-  const local = physicalGradients(coordinates, CENTROID, tolerance);
+  const local = computeTet10PhysicalGradients(coordinates, CENTROID, tolerance);
   if (!local.ok) return local;
   const b = computeTet10BMatrix(local.gradients);
   const strain = new Float64Array(6);

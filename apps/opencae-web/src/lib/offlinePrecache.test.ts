@@ -2,6 +2,7 @@
 // The dist listings mirror real builds: default (gmsh .wasm.gz + stable
 // manifest json, raw wasm deleted by compressGmshWasmForDeploy) and
 // VITE_WASM_MESHING=0 (no gmsh assets at all).
+import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
 import {
   DONT_CACHE_BUST_URLS,
@@ -114,6 +115,12 @@ describe("workbox settings", () => {
 
   test("service-worker updates import the stale-client refresh hook", () => {
     expect(SW_FORCE_REFRESH_SCRIPT).toBe("sw-force-refresh.js");
+  });
+
+  test("each activated service-worker build gets a fresh client-refresh version", () => {
+    const refreshSource = readFileSync(new URL("../../public/sw-force-refresh.js", import.meta.url), "utf8");
+    expect(refreshSource).toContain("String(Date.now())");
+    expect(refreshSource).not.toMatch(/refreshVersion\s*=\s*["']\d{4}-\d{2}-\d{2}/);
   });
 
   test("glob ignores keep the raw gmsh wasm out of the precache", () => {

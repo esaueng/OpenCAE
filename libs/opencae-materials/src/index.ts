@@ -21,27 +21,27 @@ export interface PayloadMaterial {
 }
 
 export const starterMaterials: Material[] = [
-  { id: "mat-aluminum-6061", name: "Aluminum 6061", category: "metal", youngsModulus: 68900000000, poissonRatio: 0.33, density: 2700, yieldStrength: 276000000 },
-  { id: "mat-aluminum-7075", name: "Aluminum 7075", category: "metal", youngsModulus: 71700000000, poissonRatio: 0.33, density: 2810, yieldStrength: 503000000 },
-  { id: "mat-steel", name: "Steel", category: "metal", youngsModulus: 200000000000, poissonRatio: 0.29, density: 7850, yieldStrength: 250000000 },
-  { id: "mat-stainless-304", name: "Stainless Steel 304", category: "metal", youngsModulus: 193000000000, poissonRatio: 0.29, density: 8000, yieldStrength: 215000000 },
-  { id: "mat-titanium-grade-5", name: "Titanium Grade 5", category: "metal", youngsModulus: 114000000000, poissonRatio: 0.34, density: 4430, yieldStrength: 880000000 },
-  { id: "mat-copper", name: "Copper", category: "metal", youngsModulus: 117000000000, poissonRatio: 0.34, density: 8960, yieldStrength: 70000000 },
-  { id: "mat-brass", name: "Brass", category: "metal", youngsModulus: 100000000000, poissonRatio: 0.34, density: 8530, yieldStrength: 200000000 },
-  { id: "mat-abs", name: "ABS Plastic", category: "plastic", youngsModulus: 2100000000, poissonRatio: 0.35, density: 1040, yieldStrength: 40000000, printProfile: fdmProfile(35, 3, 0.7) },
-  { id: "mat-pla", name: "PLA Plastic", category: "plastic", youngsModulus: 3500000000, poissonRatio: 0.36, density: 1240, yieldStrength: 60000000, printProfile: fdmProfile(35, 3, 0.68) },
-  { id: "mat-pla-plus", name: "PLA+ Plastic", category: "plastic", youngsModulus: 3900000000, poissonRatio: 0.36, density: 1240, yieldStrength: 68000000, printProfile: fdmProfile(35, 3, 0.7) },
-  { id: "mat-petg", name: "PETG", category: "plastic", youngsModulus: 2100000000, poissonRatio: 0.38, density: 1270, yieldStrength: 50000000, printProfile: fdmProfile(40, 3, 0.72) },
-  { id: "mat-asa", name: "ASA", category: "plastic", youngsModulus: 2200000000, poissonRatio: 0.35, density: 1070, yieldStrength: 46000000, printProfile: fdmProfile(35, 3, 0.7) },
-  { id: "mat-nylon", name: "Nylon", category: "plastic", youngsModulus: 2800000000, poissonRatio: 0.39, density: 1150, yieldStrength: 70000000, printProfile: fdmProfile(40, 3, 0.74) },
-  { id: "mat-nylon-cf", name: "Carbon Fiber Nylon", category: "composite", youngsModulus: 7600000000, poissonRatio: 0.34, density: 1180, yieldStrength: 105000000, printProfile: fdmProfile(40, 4, 0.78) },
-  { id: "mat-pa12-sls", name: "PA12 Nylon", category: "plastic", youngsModulus: 1700000000, poissonRatio: 0.39, density: 1010, yieldStrength: 48000000, printProfile: { process: "SLS", defaultInfillDensity: 100, defaultWallCount: 2, defaultLayerOrientation: "z", layerStrengthFactor: 0.9 } },
-  { id: "mat-polycarbonate", name: "Polycarbonate", category: "plastic", youngsModulus: 2400000000, poissonRatio: 0.37, density: 1200, yieldStrength: 65000000, printProfile: fdmProfile(40, 3, 0.74) },
-  { id: "mat-pc-abs", name: "PC-ABS", category: "plastic", youngsModulus: 2300000000, poissonRatio: 0.36, density: 1150, yieldStrength: 56000000, printProfile: fdmProfile(40, 3, 0.72) },
-  { id: "mat-peek", name: "PEEK", category: "plastic", youngsModulus: 3700000000, poissonRatio: 0.4, density: 1300, yieldStrength: 97000000, printProfile: fdmProfile(50, 4, 0.78) },
-  { id: "mat-sla-tough-resin", name: "Tough Resin", category: "resin", youngsModulus: 2800000000, poissonRatio: 0.38, density: 1180, yieldStrength: 55000000, printProfile: { process: "SLA", defaultInfillDensity: 100, defaultWallCount: 1, defaultLayerOrientation: "z", layerStrengthFactor: 0.86 } },
-  { id: "mat-sla-standard-resin", name: "Standard Resin", category: "resin", youngsModulus: 2200000000, poissonRatio: 0.38, density: 1120, yieldStrength: 42000000, printProfile: { process: "SLA", defaultInfillDensity: 100, defaultWallCount: 1, defaultLayerOrientation: "z", layerStrengthFactor: 0.82 } },
-  { id: "mat-316l-am", name: "Stainless Steel 316L", category: "metal", youngsModulus: 180000000000, poissonRatio: 0.3, density: 7900, yieldStrength: 470000000, printProfile: { process: "Metal AM", defaultInfillDensity: 100, defaultWallCount: 1, defaultLayerOrientation: "z", layerStrengthFactor: 0.92 } }
+  { id: "mat-aluminum-6061", name: "Aluminum 6061", category: "metal", youngsModulus: 68900000000, poissonRatio: 0.33, density: 2700, yieldStrength: 276000000, thermalConductivity: 167 },
+  { id: "mat-aluminum-7075", name: "Aluminum 7075", category: "metal", youngsModulus: 71700000000, poissonRatio: 0.33, density: 2810, yieldStrength: 503000000, thermalConductivity: 130 },
+  { id: "mat-steel", name: "Steel", category: "metal", youngsModulus: 200000000000, poissonRatio: 0.29, density: 7850, yieldStrength: 250000000, thermalConductivity: 50 },
+  { id: "mat-stainless-304", name: "Stainless Steel 304", category: "metal", youngsModulus: 193000000000, poissonRatio: 0.29, density: 8000, yieldStrength: 215000000, thermalConductivity: 16.2 },
+  { id: "mat-titanium-grade-5", name: "Titanium Grade 5", category: "metal", youngsModulus: 114000000000, poissonRatio: 0.34, density: 4430, yieldStrength: 880000000, thermalConductivity: 6.7 },
+  { id: "mat-copper", name: "Copper", category: "metal", youngsModulus: 117000000000, poissonRatio: 0.34, density: 8960, yieldStrength: 70000000, thermalConductivity: 401 },
+  { id: "mat-brass", name: "Brass", category: "metal", youngsModulus: 100000000000, poissonRatio: 0.34, density: 8530, yieldStrength: 200000000, thermalConductivity: 109 },
+  { id: "mat-abs", name: "ABS Plastic", category: "plastic", youngsModulus: 2100000000, poissonRatio: 0.35, density: 1040, yieldStrength: 40000000, thermalConductivity: 0.18, printProfile: fdmProfile(35, 3, 0.7) },
+  { id: "mat-pla", name: "PLA Plastic", category: "plastic", youngsModulus: 3500000000, poissonRatio: 0.36, density: 1240, yieldStrength: 60000000, thermalConductivity: 0.13, printProfile: fdmProfile(35, 3, 0.68) },
+  { id: "mat-pla-plus", name: "PLA+ Plastic", category: "plastic", youngsModulus: 3900000000, poissonRatio: 0.36, density: 1240, yieldStrength: 68000000, thermalConductivity: 0.13, printProfile: fdmProfile(35, 3, 0.7) },
+  { id: "mat-petg", name: "PETG", category: "plastic", youngsModulus: 2100000000, poissonRatio: 0.38, density: 1270, yieldStrength: 50000000, thermalConductivity: 0.2, printProfile: fdmProfile(40, 3, 0.72) },
+  { id: "mat-asa", name: "ASA", category: "plastic", youngsModulus: 2200000000, poissonRatio: 0.35, density: 1070, yieldStrength: 46000000, thermalConductivity: 0.17, printProfile: fdmProfile(35, 3, 0.7) },
+  { id: "mat-nylon", name: "Nylon", category: "plastic", youngsModulus: 2800000000, poissonRatio: 0.39, density: 1150, yieldStrength: 70000000, thermalConductivity: 0.25, printProfile: fdmProfile(40, 3, 0.74) },
+  { id: "mat-nylon-cf", name: "Carbon Fiber Nylon", category: "composite", youngsModulus: 7600000000, poissonRatio: 0.34, density: 1180, yieldStrength: 105000000, thermalConductivity: 0.45, printProfile: fdmProfile(40, 4, 0.78) },
+  { id: "mat-pa12-sls", name: "PA12 Nylon", category: "plastic", youngsModulus: 1700000000, poissonRatio: 0.39, density: 1010, yieldStrength: 48000000, thermalConductivity: 0.25, printProfile: { process: "SLS", defaultInfillDensity: 100, defaultWallCount: 2, defaultLayerOrientation: "z", layerStrengthFactor: 0.9 } },
+  { id: "mat-polycarbonate", name: "Polycarbonate", category: "plastic", youngsModulus: 2400000000, poissonRatio: 0.37, density: 1200, yieldStrength: 65000000, thermalConductivity: 0.2, printProfile: fdmProfile(40, 3, 0.74) },
+  { id: "mat-pc-abs", name: "PC-ABS", category: "plastic", youngsModulus: 2300000000, poissonRatio: 0.36, density: 1150, yieldStrength: 56000000, thermalConductivity: 0.2, printProfile: fdmProfile(40, 3, 0.72) },
+  { id: "mat-peek", name: "PEEK", category: "plastic", youngsModulus: 3700000000, poissonRatio: 0.4, density: 1300, yieldStrength: 97000000, thermalConductivity: 0.25, printProfile: fdmProfile(50, 4, 0.78) },
+  { id: "mat-sla-tough-resin", name: "Tough Resin", category: "resin", youngsModulus: 2800000000, poissonRatio: 0.38, density: 1180, yieldStrength: 55000000, thermalConductivity: 0.2, printProfile: { process: "SLA", defaultInfillDensity: 100, defaultWallCount: 1, defaultLayerOrientation: "z", layerStrengthFactor: 0.86 } },
+  { id: "mat-sla-standard-resin", name: "Standard Resin", category: "resin", youngsModulus: 2200000000, poissonRatio: 0.38, density: 1120, yieldStrength: 42000000, thermalConductivity: 0.2, printProfile: { process: "SLA", defaultInfillDensity: 100, defaultWallCount: 1, defaultLayerOrientation: "z", layerStrengthFactor: 0.82 } },
+  { id: "mat-316l-am", name: "Stainless Steel 316L", category: "metal", youngsModulus: 180000000000, poissonRatio: 0.3, density: 7900, yieldStrength: 470000000, thermalConductivity: 14.6, printProfile: { process: "Metal AM", defaultInfillDensity: 100, defaultWallCount: 1, defaultLayerOrientation: "z", layerStrengthFactor: 0.92 } }
 ];
 
 export function materialCatalog(customMaterials: readonly CustomMaterial[] = []): Material[] {

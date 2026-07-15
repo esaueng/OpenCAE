@@ -100,6 +100,14 @@ describe("unit display formatting", () => {
     const inchesPerSecond = resultValueForUnits(motionField, 25.4, "US");
     expect(inchesPerSecond).toEqual({ value: 1, units: "in/s" });
     expect(resultValueFromDisplayUnits(motionField, 1, "US")).toBeCloseTo(25.4, 12);
+
+    const celsiusField = { type: "temperature" as const, units: "°C" };
+    expect(resultValueForUnits(celsiusField, 20, "US")).toEqual({ value: 68, units: "°F" });
+    expect(resultValueFromDisplayUnits(celsiusField, 68, "US")).toBeCloseTo(20, 12);
+
+    const fahrenheitField = { type: "temperature" as const, units: "°F" };
+    expect(resultValueForUnits(fahrenheitField, 68, "SI")).toEqual({ value: 20, units: "°C" });
+    expect(resultValueFromDisplayUnits(fahrenheitField, 20, "SI")).toBeCloseTo(68, 12);
   });
 
   test("converts raw stress tensors with the scalar field without rounding", () => {

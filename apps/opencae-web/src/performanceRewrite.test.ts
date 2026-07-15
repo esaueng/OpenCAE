@@ -58,7 +58,7 @@ describe("Worker UI performance rewrite boundaries", () => {
   });
 
   test("keeps OpenCAE Core dynamic integration in the Core solver package", () => {
-    // The adapter delegates solving to the mirrored cloud pipeline, which
+    // The adapter delegates solving to the local Core pipeline, which
     // calls the Core solver package's solveCoreStatic/solveCoreDynamic; no
     // hand-rolled integration lives in the web/adapter layer.
     expect(coreAdapterSource).toContain("solveStudyModelWithCorePipeline");

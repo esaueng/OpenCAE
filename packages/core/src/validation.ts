@@ -2,6 +2,7 @@ import {
   OPENCAE_LEGACY_MODEL_SCHEMA_VERSION,
   OPENCAE_MODEL_SCHEMA,
   OPENCAE_MODEL_SCHEMA_VERSION,
+  OPENCAE_OLDEST_MODEL_SCHEMA_VERSION,
   OPENCAE_PREVIOUS_MODEL_SCHEMA_VERSION,
   type OpenCAEModelJson,
   type ElementType,
@@ -36,10 +37,11 @@ export function validateModelJson(input: unknown): ValidationReport {
   if (
     input.schemaVersion !== OPENCAE_MODEL_SCHEMA_VERSION &&
     input.schemaVersion !== OPENCAE_PREVIOUS_MODEL_SCHEMA_VERSION &&
-    input.schemaVersion !== OPENCAE_LEGACY_MODEL_SCHEMA_VERSION
+    input.schemaVersion !== OPENCAE_LEGACY_MODEL_SCHEMA_VERSION &&
+    input.schemaVersion !== OPENCAE_OLDEST_MODEL_SCHEMA_VERSION
   ) {
     errors.push(
-      issue("invalid-schema-version", "Model schemaVersion must be 0.1.0, 0.2.0, or 0.3.0.", "$.schemaVersion")
+      issue("invalid-schema-version", "Model schemaVersion must be 0.1.0, 0.2.0, 0.3.0, or 0.4.0.", "$.schemaVersion")
     );
   }
 
@@ -61,26 +63,16 @@ export function validateModelJson(input: unknown): ValidationReport {
   const boundaryConditionNames = validateBoundaryConditions(input.boundaryConditions, nodeSetNames, surfaceSetNames, errors);
   const loadTypes = validateLoads(input.loads, nodeSetNames, elementSetNames, surfaceSetNames, input.schemaVersion, errors);
   validateSteps(input.steps, boundaryConditionNames, new Set(loadTypes.keys()), loadTypes, errors);
+  validateThermalSchemaVersion(input.schemaVersion, input.boundaryConditions, input.loads, input.steps, errors);
   validateCoordinateSystem(input.coordinateSystem, errors);
   validateMeshProvenance(input.meshProvenance, errors);
-  validateMeshConnections(input.meshConnections, errors);
+  validateMeshConnections(input.meshConnections, surfaceSetNames, errors);
   validateInertialMaterialDensity(input.steps, input.elementBlocks, materials.densityByName, errors);
+  validateThermalMaterialConductivity(input.steps, input.elementBlocks, materials.conductivityByName, errors);
 
-  if (
-    elementValidation.connectivityOk &&
-    elementValidation.totalElements > 1 &&
-    (!Array.isArray(input.meshConnections) || input.meshConnections.length === 0)
-  ) {
+  if (elementValidation.connectivityOk && elementValidation.totalElements > 1) {
     const components = connectedComponents({ elementBlocks: elementValidation.blocks });
-    if (components.componentCount > 1) {
-      errors.push(
-        issue(
-          "disconnected-bodies-without-connections",
-          "Geometry has disconnected bodies without contact/tie definitions.",
-          "$.elementBlocks"
-        )
-      );
-    }
+    validateMeshConnectionCoverage(input.meshConnections, input.surfaceSets, input.surfaceFacets, components, errors);
   }
 
   return report(errors);
@@ -124,7 +116,7 @@ export function preflightCoreModel(
   const fixedNodes = step ? activeBoundaryNodes(model, step.boundaryConditions) : new Set<number>();
   const activeLoads = step && step.type !== "modal" ? step.loads : [];
   const loadNodes = step ? activeLoadNodes(model, activeLoads, facets) : new Set<number>();
-  const loadDiagnostics = step && step.type !== "modal"
+  const loadDiagnostics = step && step.type !== "modal" && step.type !== "steadyStateThermal"
     ? assembleNodalLoadVectorWithDiagnostics({ ...model, surfaceFacets: facets }, activeLoads).diagnostics
     : undefined;
 
@@ -197,15 +189,16 @@ function validateCoordinates(coordinates: unknown, errors: ValidationIssue[]): n
   return Math.floor(coordinates.length / 3);
 }
 
-function validateMaterials(materials: unknown, errors: ValidationIssue[]): { names: string[]; densityByName: Map<string, number | undefined> } {
+function validateMaterials(materials: unknown, errors: ValidationIssue[]): { names: string[]; densityByName: Map<string, number | undefined>; conductivityByName: Map<string, number | undefined> } {
   if (!Array.isArray(materials)) {
     errors.push(issue("invalid-materials", "materials must be an array.", "$.materials"));
-    return { names: [], densityByName: new Map() };
+    return { names: [], densityByName: new Map(), conductivityByName: new Map() };
   }
 
   const names = new Set<string>();
   const validNames: string[] = [];
   const densityByName = new Map<string, number | undefined>();
+  const conductivityByName = new Map<string, number | undefined>();
   materials.forEach((material, index) => {
     const path = `$.materials[${index}]`;
     if (!isRecord(material)) {
@@ -222,6 +215,7 @@ function validateMaterials(materials: unknown, errors: ValidationIssue[]): { nam
       names.add(material.name);
       validNames.push(material.name);
       densityByName.set(material.name, typeof material.density === "number" ? material.density : undefined);
+      conductivityByName.set(material.name, typeof material.thermalConductivity === "number" ? material.thermalConductivity : undefined);
     }
 
     if (material.type !== "isotropicLinearElastic") {
@@ -249,9 +243,12 @@ function validateMaterials(materials: unknown, errors: ValidationIssue[]): { nam
     if (material.density !== undefined && (!isFiniteNumber(material.density) || material.density <= 0)) {
       errors.push(issue("invalid-density", "density must be a positive finite number.", `${path}.density`));
     }
+    if (material.thermalConductivity !== undefined && (!isFiniteNumber(material.thermalConductivity) || material.thermalConductivity <= 0)) {
+      errors.push(issue("invalid-thermal-conductivity", "thermalConductivity must be a positive finite number.", `${path}.thermalConductivity`));
+    }
   });
 
-  return { names: validNames, densityByName };
+  return { names: validNames, densityByName, conductivityByName };
 }
 
 function validateElementBlocks(
@@ -557,7 +554,15 @@ function validateBoundaryConditions(
       return;
     }
 
-    errors.push(issue("invalid-boundary-condition-type", "Boundary condition type must be fixed or prescribedDisplacement.", `${path}.type`));
+    if (bc.type === "prescribedTemperature") {
+      validateBoundarySelection(bc, nodeSetNames, surfaceSetNames, path, errors);
+      if (!isFiniteNumber(bc.value)) {
+        errors.push(issue("invalid-prescribed-temperature-value", "prescribed temperature must be finite.", `${path}.value`));
+      }
+      return;
+    }
+
+    errors.push(issue("invalid-boundary-condition-type", "Boundary condition type must be fixed, prescribedDisplacement, or prescribedTemperature.", `${path}.type`));
   });
   return names;
 }
@@ -610,7 +615,7 @@ function validateLoads(
     validateUniqueName(load.name, names, "load", `${path}.name`, errors);
     if (isNonEmptyString(load.name) && typeof load.type === "string") types.set(load.name, load.type);
     if (
-      schemaVersion !== OPENCAE_MODEL_SCHEMA_VERSION &&
+      schemaVersion !== OPENCAE_MODEL_SCHEMA_VERSION && schemaVersion !== OPENCAE_PREVIOUS_MODEL_SCHEMA_VERSION &&
       (load.type === "surfaceTraction" || load.type === "bodyForceDensity" || load.type === "remoteForce" || load.type === "equivalentBoltPreload")
     ) {
       errors.push(issue("advanced-load-requires-schema-0.3.0", "Advanced load primitives require schemaVersion 0.3.0.", `${path}.type`));
@@ -666,7 +671,17 @@ function validateLoads(
       validatePositive(load.preloadForce, `${path}.preloadForce`, "invalid-bolt-preload-force", errors);
       return;
     }
-    errors.push(issue("invalid-load-type", "Load type must be nodalForce, surfaceForce, pressure, bodyGravity, surfaceTraction, bodyForceDensity, remoteForce, or equivalentBoltPreload.", `${path}.type`));
+    if (load.type === "surfaceHeatFlux") {
+      validateSurfaceSetReference(load.surfaceSet, surfaceSetNames, `${path}.surfaceSet`, errors);
+      if (!isFiniteNumber(load.flux)) errors.push(issue("invalid-surface-heat-flux", "Surface heat flux must be finite.", `${path}.flux`));
+      return;
+    }
+    if (load.type === "volumetricHeatGeneration") {
+      validateElementSetReference(load.elementSet, elementSetNames, `${path}.elementSet`, errors);
+      if (!isFiniteNumber(load.generation)) errors.push(issue("invalid-volumetric-heat-generation", "Volumetric heat generation must be finite.", `${path}.generation`));
+      return;
+    }
+    errors.push(issue("invalid-load-type", "Load type is not supported by OpenCAE Core.", `${path}.type`));
   });
   return types;
 }
@@ -691,12 +706,23 @@ function validateSteps(
       return;
     }
     validateUniqueName(step.name, names, "step", `${path}.name`, errors);
-    if (step.type !== "staticLinear" && step.type !== "dynamicLinear" && step.type !== "modal") {
-      errors.push(issue("invalid-step-type", "Step type must be staticLinear, dynamicLinear, or modal.", `${path}.type`));
+    if (step.type !== "staticLinear" && step.type !== "dynamicLinear" && step.type !== "modal" && step.type !== "steadyStateThermal") {
+      errors.push(issue("invalid-step-type", "Step type must be staticLinear, dynamicLinear, modal, or steadyStateThermal.", `${path}.type`));
     }
     validateNameReferenceArray(step.boundaryConditions, boundaryConditionNames, "missing-boundary-condition-reference", `${path}.boundaryConditions`, errors);
     if (step.type !== "modal") {
       validateNameReferenceArray(step.loads, loadNames, "missing-load-reference", `${path}.loads`, errors);
+    }
+    if ((step.type === "staticLinear" || step.type === "dynamicLinear") && Array.isArray(step.loads) && step.loads.some((name) => typeof name === "string" && (loadTypes.get(name) === "surfaceHeatFlux" || loadTypes.get(name) === "volumetricHeatGeneration"))) {
+      errors.push(issue("thermal-load-structural-step", "Thermal loads require a steadyStateThermal step.", `${path}.loads`));
+    }
+    if (step.type === "steadyStateThermal") {
+      if (Array.isArray(step.loads) && step.loads.some((name) => typeof name === "string" && loadTypes.get(name) !== "surfaceHeatFlux" && loadTypes.get(name) !== "volumetricHeatGeneration")) {
+        errors.push(issue("structural-load-thermal-step", "Steady thermal steps accept heat flux and volumetric generation loads only.", `${path}.loads`));
+      }
+      if (!Array.isArray(step.boundaryConditions) || step.boundaryConditions.length === 0) {
+        errors.push(issue("missing-thermal-temperature", "Steady thermal analysis requires at least one prescribed temperature.", `${path}.boundaryConditions`));
+      }
     }
     if (step.type === "dynamicLinear") {
       if (Array.isArray(step.loads) && step.loads.some((loadName) => typeof loadName === "string" && loadTypes.get(loadName) === "equivalentBoltPreload")) {
@@ -725,6 +751,49 @@ function validateSteps(
       }
     }
   });
+}
+
+function validateThermalSchemaVersion(
+  schemaVersion: unknown,
+  boundaryConditions: unknown,
+  loads: unknown,
+  steps: unknown,
+  errors: ValidationIssue[]
+): void {
+  if (schemaVersion === OPENCAE_MODEL_SCHEMA_VERSION) return;
+  if (Array.isArray(boundaryConditions)) {
+    boundaryConditions.forEach((condition, index) => {
+      if (isRecord(condition) && condition.type === "prescribedTemperature") {
+        errors.push(issue(
+          "thermal-feature-requires-schema-0.4.0",
+          "Prescribed temperature boundary conditions require schemaVersion 0.4.0.",
+          `$.boundaryConditions[${index}].type`
+        ));
+      }
+    });
+  }
+  if (Array.isArray(loads)) {
+    loads.forEach((load, index) => {
+      if (isRecord(load) && (load.type === "surfaceHeatFlux" || load.type === "volumetricHeatGeneration")) {
+        errors.push(issue(
+          "thermal-feature-requires-schema-0.4.0",
+          "Thermal loads require schemaVersion 0.4.0.",
+          `$.loads[${index}].type`
+        ));
+      }
+    });
+  }
+  if (Array.isArray(steps)) {
+    steps.forEach((step, index) => {
+      if (isRecord(step) && step.type === "steadyStateThermal") {
+        errors.push(issue(
+          "thermal-feature-requires-schema-0.4.0",
+          "Steady thermal steps require schemaVersion 0.4.0.",
+          `$.steps[${index}].type`
+        ));
+      }
+    });
+  }
 }
 
 function validateCoordinateSystem(coordinateSystem: unknown, errors: ValidationIssue[]): void {
@@ -815,7 +884,28 @@ function validateInertialMaterialDensity(
   });
 }
 
-function validateMeshConnections(meshConnections: unknown, errors: ValidationIssue[]): void {
+function validateThermalMaterialConductivity(
+  steps: unknown,
+  elementBlocks: unknown,
+  conductivityByName: Map<string, number | undefined>,
+  errors: ValidationIssue[]
+): void {
+  if (!Array.isArray(steps) || !steps.some((step) => isRecord(step) && step.type === "steadyStateThermal")) return;
+  if (!Array.isArray(elementBlocks)) return;
+  elementBlocks.forEach((block, index) => {
+    if (!isRecord(block) || typeof block.material !== "string") return;
+    const conductivity = conductivityByName.get(block.material);
+    if (!isFiniteNumber(conductivity) || conductivity <= 0) {
+      errors.push(issue(
+        "missing-thermal-conductivity",
+        "Steady thermal steps require positive thermalConductivity for every solved element block.",
+        `$.elementBlocks[${index}].material`
+      ));
+    }
+  });
+}
+
+function validateMeshConnections(meshConnections: unknown, surfaceSetNames: Set<string>, errors: ValidationIssue[]): void {
   if (meshConnections === undefined) return;
   if (!Array.isArray(meshConnections)) {
     errors.push(issue("invalid-mesh-connections", "meshConnections must be an array.", "$.meshConnections"));
@@ -830,9 +920,107 @@ function validateMeshConnections(meshConnections: unknown, errors: ValidationIss
     if (connection.type !== "tie" && connection.type !== "contact" && connection.type !== "fuse") {
       errors.push(issue("invalid-mesh-connection-type", "Mesh connection type must be tie, contact, or fuse.", `${path}.type`));
     }
+    if (connection.type === "fuse") {
+      errors.push(issue("unapplied-fuse-connection", "Boolean fuse must be applied to geometry before meshing and cannot remain in a solver model.", `${path}.type`));
+    }
     if (!isNonEmptyString(connection.source)) errors.push(issue("invalid-mesh-connection-source", "Mesh connection source must be a string.", `${path}.source`));
     if (!isNonEmptyString(connection.target)) errors.push(issue("invalid-mesh-connection-target", "Mesh connection target must be a string.", `${path}.target`));
+    if (isNonEmptyString(connection.source) && !surfaceSetNames.has(connection.source)) {
+      errors.push(issue("missing-mesh-connection-surface", "Mesh connection source must reference an existing surface set.", `${path}.source`));
+    }
+    if (isNonEmptyString(connection.target) && !surfaceSetNames.has(connection.target)) {
+      errors.push(issue("missing-mesh-connection-surface", "Mesh connection target must reference an existing surface set.", `${path}.target`));
+    }
+    if (connection.source === connection.target) errors.push(issue("duplicate-mesh-connection-surfaces", "Mesh connection source and target must differ.", path));
+    if (connection.searchTolerance !== undefined && (!isFiniteNumber(connection.searchTolerance) || connection.searchTolerance <= 0)) {
+      errors.push(issue("invalid-mesh-connection-tolerance", "Mesh connection searchTolerance must be positive.", `${path}.searchTolerance`));
+    }
+    if (connection.penaltyScale !== undefined && (!isFiniteNumber(connection.penaltyScale) || connection.penaltyScale <= 0)) {
+      errors.push(issue("invalid-mesh-connection-penalty", "Mesh connection penaltyScale must be positive.", `${path}.penaltyScale`));
+    }
+    if (connection.formulation !== undefined && connection.formulation !== "frictionless") errors.push(issue("invalid-contact-formulation", "Only frictionless contact is supported.", `${path}.formulation`));
+    if (connection.kinematics !== undefined && connection.kinematics !== "small_sliding") errors.push(issue("invalid-contact-kinematics", "Only small_sliding contact is supported.", `${path}.kinematics`));
   });
+}
+
+function validateMeshConnectionCoverage(
+  meshConnections: unknown,
+  surfaceSets: unknown,
+  surfaceFacets: unknown,
+  components: { componentCount: number; elementComponentIds: Int32Array },
+  errors: ValidationIssue[]
+): void {
+  if (components.componentCount <= 1) return;
+  const connections = Array.isArray(meshConnections)
+    ? meshConnections.filter((connection) => isRecord(connection) && (connection.type === "tie" || connection.type === "contact"))
+    : [];
+  if (connections.length === 0) {
+    errors.push(issue(
+      "disconnected-bodies-without-connections",
+      "Geometry has disconnected bodies without contact/tie definitions.",
+      "$.elementBlocks"
+    ));
+    return;
+  }
+  if (!Array.isArray(surfaceSets) || !Array.isArray(surfaceFacets)) return;
+
+  const elementByFacetId = new Map<number, number>();
+  for (const facet of surfaceFacets) {
+    if (isRecord(facet) && Number.isInteger(facet.id) && Number.isInteger(facet.element)) {
+      elementByFacetId.set(facet.id as number, facet.element as number);
+    }
+  }
+  const componentsBySurface = new Map<string, Set<number>>();
+  for (const surface of surfaceSets) {
+    if (!isRecord(surface) || !isNonEmptyString(surface.name) || !Array.isArray(surface.facets)) continue;
+    const componentIds = new Set<number>();
+    for (const facetId of surface.facets) {
+      if (!Number.isInteger(facetId)) continue;
+      const element = elementByFacetId.get(facetId as number);
+      const component = element === undefined ? undefined : components.elementComponentIds[element];
+      if (component !== undefined && component >= 0) componentIds.add(component);
+    }
+    componentsBySurface.set(surface.name, componentIds);
+  }
+
+  const adjacency = Array.from({ length: components.componentCount }, () => new Set<number>());
+  let coverageMappingsValid = true;
+  connections.forEach((connection, index) => {
+    const source = componentsBySurface.get(connection.source as string) ?? new Set<number>();
+    const target = componentsBySurface.get(connection.target as string) ?? new Set<number>();
+    if (source.size !== 1 || target.size !== 1) {
+      coverageMappingsValid = false;
+      errors.push(issue(
+        "ambiguous-mesh-connection-component",
+        "Each tie/contact side must resolve to exactly one connected mesh component.",
+        `$.meshConnections[${index}]`
+      ));
+      return;
+    }
+    const sourceComponent = [...source][0]!;
+    const targetComponent = [...target][0]!;
+    adjacency[sourceComponent]!.add(targetComponent);
+    adjacency[targetComponent]!.add(sourceComponent);
+  });
+  if (!coverageMappingsValid) return;
+
+  const reached = new Set<number>([0]);
+  const pending = [0];
+  while (pending.length) {
+    const component = pending.pop()!;
+    for (const neighbor of adjacency[component]!) {
+      if (reached.has(neighbor)) continue;
+      reached.add(neighbor);
+      pending.push(neighbor);
+    }
+  }
+  if (reached.size !== components.componentCount) {
+    errors.push(issue(
+      "disconnected-bodies-with-incomplete-connections",
+      `Tie/contact definitions connect ${reached.size} of ${components.componentCount} mesh components.`,
+      "$.meshConnections"
+    ));
+  }
 }
 
 function countElements(elementBlocks: OpenCAEModelJson["elementBlocks"]): number {
@@ -847,7 +1035,7 @@ function activeBoundaryNodes(model: OpenCAEModelJson, boundaryConditionNames: st
   const nodes = new Set<number>();
   for (const condition of model.boundaryConditions) {
     if (!active.has(condition.name)) continue;
-    if (condition.type === "fixed" && "surfaceSet" in condition && condition.surfaceSet) {
+    if ((condition.type === "fixed" || condition.type === "prescribedTemperature") && "surfaceSet" in condition && condition.surfaceSet) {
       const surfaceSet = surfaceSets.get(condition.surfaceSet);
       for (const facetId of surfaceSet?.facets ?? []) {
         for (const node of facetById.get(facetId)?.nodes ?? []) nodes.add(node);
@@ -882,6 +1070,13 @@ function activeLoadNodes(model: OpenCAEModelJson, loadNames: string[], facets = 
         }
       }
     } else if (load.type === "bodyForceDensity") {
+      for (const node of nodesForElementSet(model, load.elementSet)) nodes.add(node);
+    } else if (load.type === "surfaceHeatFlux") {
+      const surfaceSet = surfaceSets.get(load.surfaceSet);
+      for (const facetId of surfaceSet?.facets ?? []) {
+        for (const node of facetById.get(facetId)?.nodes ?? []) nodes.add(node);
+      }
+    } else if (load.type === "volumetricHeatGeneration") {
       for (const node of nodesForElementSet(model, load.elementSet)) nodes.add(node);
     } else if (load.type === "bodyGravity") {
       for (let node = 0; node < Math.floor(model.nodes.coordinates.length / 3); node += 1) nodes.add(node);
@@ -927,6 +1122,14 @@ function hasLoadSurfaceSelection(model: OpenCAEModelJson, loadNames: string[]): 
     sawLoad = true;
     if (load.type === "surfaceForce" || load.type === "pressure" || load.type === "surfaceTraction" || load.type === "remoteForce") {
       if (!(surfaceSets.get(load.surfaceSet)?.facets.length ?? 0)) return false;
+      continue;
+    }
+    if (load.type === "surfaceHeatFlux") {
+      if (!(surfaceSets.get(load.surfaceSet)?.facets.length ?? 0)) return false;
+      continue;
+    }
+    if (load.type === "volumetricHeatGeneration") {
+      if (!(elementSets.get(load.elementSet)?.elements.length ?? 0)) return false;
       continue;
     }
     if (load.type === "equivalentBoltPreload") {

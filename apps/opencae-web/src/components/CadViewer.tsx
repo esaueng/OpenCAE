@@ -6501,7 +6501,7 @@ export function resultLegendResizeDimensions({
 }): ResultLegendSize {
   return {
     width: Math.round(clampNumber(startWidth + currentClientX - startClientX, minWidth, maxWidth)),
-    height: Math.round(clampNumber(startHeight + startClientY - currentClientY, minHeight, maxHeight))
+    height: Math.round(clampNumber(startHeight + currentClientY - startClientY, minHeight, maxHeight))
   };
 }
 

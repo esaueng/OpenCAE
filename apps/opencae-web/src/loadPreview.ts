@@ -34,6 +34,8 @@ const DIRECTION_VECTORS: Record<Exclude<LoadDirectionLabel, "Normal" | "Opposite
 };
 
 export function unitsForLoadType(type: LoadType) {
+  if (type === "heat_flux") return "W/m²";
+  if (type === "heat_generation") return "W/m³";
   if (type === "pressure" || type === "surface_traction") return "kPa";
   if (type === "volume_force") return "N/m^3";
   if (type === "gravity") return "kg";

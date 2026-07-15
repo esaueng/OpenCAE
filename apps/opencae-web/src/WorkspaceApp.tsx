@@ -1,13 +1,14 @@
 import { lazy, startTransition, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { DynamicSolverSettingsSchema, isModalResultSummary, isRunResultReadyStatus, ModalSolverSettingsSchema } from "@opencae/schema";
+import { DynamicSolverSettingsSchema, isModalResultSummary, isRunResultReadyStatus, isStructuralResultSummary, ModalSolverSettingsSchema } from "@opencae/schema";
 import type { Constraint, CustomMaterial, DisplayFace, DisplayModel, DynamicSolverSettings, Load, MeshQuality, ModalSolverSettings, NamedSelection, Project, ResultField, ResultRenderBounds, ResultSummary, RunEvent, RunTimingEstimate, RunVariantRef, RunVariantResult, SimulationFidelity, Study } from "@opencae/schema";
-import { RotateCcw, Save, X } from "lucide-react";
+import { Activity, CloudUpload, Download, HardDrive, RotateCcw, X } from "lucide-react";
 import { addLoad, addSupport, assignMaterial, cancelRun, createProject, generateMesh, getResults, getRunVariant, importLocalProject, isStepGeometryMeshFailure, loadSampleProject, probeUploadedStepRepairAfterMeshFailure, renameProject, repairUploadedStepModel, runMeshConvergence, runSimulation, saveRunReportCaptures, STEP_REPAIR_UNAVAILABLE_MESSAGE, subscribeToRun, updateStudy as saveStudyPatch, uploadedStepRepairProbeDecision, uploadModel, type SampleAnalysisType, type SampleModelId } from "./lib/api";
 import { cancelWasmMeshing, type WasmMeshPhaseProgress } from "./lib/wasmMeshing";
 import { resolveSolverBackend } from "./workers/opencaeCoreSolve";
 import { manufacturingProcessForId, normalizeManufacturingParameters, resolveMaterial } from "@opencae/materials";
 import { BottomPanel, KeyboardShortcutGuide, type WorkspaceLogEntry } from "./components/BottomPanel";
 import { OpenCaeLogoMark } from "./components/OpenCaeLogoMark";
+import { ProjectStorageNotice } from "./components/ProjectStorageNotice";
 import { RightPanel } from "./components/RightPanel";
 import { StartScreen } from "./components/StartScreen";
 import { StepBar, type StepId } from "./components/StepBar";
@@ -28,9 +29,10 @@ import { prepareBlobSaveToDisk, type SaveFilePickerHandle } from "./lib/fileSave
 import { BOUNDARY_CAPTURE_REVISION, captureResultViews, createCaptureQueue, type CaptureQueue, type ResultViewCaptures } from "./report/captureResultViews";
 import { buildReportData, suggestedReportFilename } from "./report/reportData";
 import { pngDataUrlToBlob, suggestedResultPngFilename } from "./report/resultPngExport";
+import { buildResultViewerHtml, suggestedResultHtmlFilename } from "./resultViewerHtml";
 import { buildAutosavedWorkspace, buildAutosavedWorkspaceUiSnapshot, flushAutosavedWorkspace, installAutosavePageHideFlush, localRunIdForResultsRestore, parseAutosavedWorkspacePayload, readAutosavedWorkspace, scheduleAutosavedUiSnapshotWrite, scheduleAutosavedWorkspaceWrite, WORKSPACE_LOG_LIMIT } from "./appPersistence";
 import type { AutosavedWorkspace, WorkspaceUiSnapshot } from "./appPersistence";
-import { requestPersistentBrowserStorage, restoreEncryptedCloudBackup, saveEncryptedCloudBackup } from "./cloudBackup";
+import { readCloudBackupPreference, requestPersistentBrowserStorage, restoreEncryptedCloudBackup, saveEncryptedCloudBackup, writeCloudBackupPreference, type CloudBackupPreference } from "./cloudBackup";
 import {
   canNavigateToStep,
   isEditableShortcutTarget,
@@ -45,7 +47,7 @@ import { supportDisplayLabel } from "./supportLabels";
 import { nextSelectedPayloadObject, shouldClearPayloadSelectionOnViewerMiss } from "./payloadSelection";
 import { hasLegacyStepUploadFaces, hasUnresolvedStepFaceSelections, healStepFaceSelections, healStepHoleSupportSelections, legacyStepFaceHealMessage } from "./stepFaceHealing";
 import { stepGeometryMetadataForProject, stepGeometryNeedsRepair } from "./stepGeometryState";
-import { createLocalDynamicStructuralStudy, createLocalModalStudy, createLocalStaticStressStudy } from "./localProjectFactory";
+import { createLocalDynamicStructuralStudy, createLocalModalStudy, createLocalStaticStressStudy, createLocalThermalStudy } from "./localProjectFactory";
 import { createPackedResultPlaybackCache, createResultFrameCache, hasDynamicPlaybackFrames, solverMeshSummaryFromResults, synthesizeModalPhaseFields, withDerivedSurfaceSafetyFactorFields, type SolverMeshSummary } from "./resultFields";
 import { appendResultProbe, availableStressComponents, derivedStressFieldsForComponent, governingVariantIdForProbe, MAX_RESULT_PROBES, resolveResultProbe, resultProbeTopologySignature, selectActiveResultField, semanticResultFieldKey, type ResultProbeAnchor, type ResultProbePin } from "./resultSelection";
 import { automaticResultFieldRange, DEFAULT_RESULT_COLOR_SCALE_SETTING, resolveResultColorScale, type ResultColorScaleSetting, type ResultColorScaleSettings } from "./resultColorScale";
@@ -65,6 +67,7 @@ import { defaultRecentProjectService, isRecentProjectsSupported } from "./recent
 
 const lazyCadViewerImport = () => import("./components/CadViewer").then((module) => ({ default: module.CadViewer }));
 const CadViewer = lazy(lazyCadViewerImport);
+const ValidationGallery = lazy(() => import("./components/ValidationGallery").then((module) => ({ default: module.ValidationGallery })));
 const DEBUG_RESULT_PARAMS = typeof window === "undefined" ? new URLSearchParams() : new URLSearchParams(window.location.search);
 const DEBUG_RESULTS = import.meta.env.DEV && DEBUG_RESULT_PARAMS.get("debugResults") === "1";
 const DEBUG_RESULT_FRAME_CACHE_ONLY = DEBUG_RESULTS && DEBUG_RESULT_PARAMS.get("bypassPacked") === "1";
@@ -166,7 +169,13 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const [reportError, setReportError] = useState<string | null>(null);
   const [pngExportBusy, setPngExportBusy] = useState(false);
   const [pngExportError, setPngExportError] = useState<string | null>(null);
+  const [htmlExportBusy, setHtmlExportBusy] = useState(false);
+  const [htmlExportError, setHtmlExportError] = useState<string | null>(null);
   const [overflowRecoveryRequest, setOverflowRecoveryRequest] = useState(0);
+  const [cloudBackupPreference, setCloudBackupPreference] = useState<CloudBackupPreference | null>(() => readCloudBackupPreference());
+  const [overflowRecoveryNeeded, setOverflowRecoveryNeeded] = useState(false);
+  const [storageRecoveryNoticeOpen, setStorageRecoveryNoticeOpen] = useState(false);
+  const [cloudBackupBusy, setCloudBackupBusy] = useState(false);
   const [activeRunId, setActiveRunId] = useState(restoredUi?.activeRunId || restoredResults?.activeRunId || restoredResults?.completedRunId || "run-bracket-demo-seeded");
   const [completedRunId, setCompletedRunId] = useState(restoredUi?.completedRunId || restoredResults?.completedRunId || "run-bracket-demo-seeded");
   const [processingRunId, setProcessingRunId] = useState<string | null>(null);
@@ -213,6 +222,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     }
   });
   const [shortcutGuideOpen, setShortcutGuideOpen] = useState(false);
+  const [validationGalleryOpen, setValidationGalleryOpen] = useState(false);
   const didRequestRestoredHomeView = useRef(false);
   const activeRunSourceRef = useRef<EventSource | null>(null);
   const processingRunIdRef = useRef<string | null>(null);
@@ -223,7 +233,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const projectActionClientIdRef = useRef<string | null>(null);
   const autosaveWriteFailureNotifiedRef = useRef(false);
   const autosaveDegradedNotifiedRef = useRef(false);
-  const cloudBackupPromptedRef = useRef(false);
+  const overflowRecoveryHandledRef = useRef(false);
   const fullAutosaveSnapshotRef = useRef<() => AutosavedWorkspace | null>(() => null);
   const flushAutosaveRef = useRef<() => void>(() => undefined);
   const stepFaceHealNotifiedRef = useRef(false);
@@ -975,38 +985,56 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   }
 
   async function offerOverflowRecoveryOptions() {
-    if (cloudBackupPromptedRef.current) return;
-    cloudBackupPromptedRef.current = true;
+    if (overflowRecoveryHandledRef.current) return;
+    overflowRecoveryHandledRef.current = true;
+    setOverflowRecoveryNeeded(true);
     try {
       const persistent = await requestPersistentBrowserStorage();
       if (persistent) pushMessage("Persistent browser storage enabled to reduce automatic eviction.");
     } catch {
-      // Persistence is best-effort; the explicit cloud decision still follows.
+      // Persistence is best-effort; the saved recovery preference still follows.
     }
-    const allowed = window.confirm([
-      "This project is larger than the browser autosave limit.",
-      "",
-      "Allow OpenCAE to upload one encrypted recovery backup to Cloudflare R2 for 30 days?",
-      "The simulation still runs locally. Encryption happens in this browser, and the cloud service never receives the decryption key.",
-      "",
-      "Choose Cancel to keep everything local and use Save project to write a file instead."
-    ].join("\n"));
-    if (!allowed) {
+    if (cloudBackupPreference === "local") {
       pushMessage("Cloud backup not enabled. Use Save project to keep a complete local file.");
       return;
     }
+    if (cloudBackupPreference === "cloud") {
+      await saveOverflowRecoveryBackup();
+      return;
+    }
+    setStorageRecoveryNoticeOpen(true);
+  }
+
+  async function saveOverflowRecoveryBackup() {
     const snapshot = fullAutosaveSnapshotRef.current();
     const runId = completedRunId || activeRunId;
     if (!snapshot || !runId) {
       pushMessage("Cloud backup could not start because there is no completed workspace snapshot.");
       return;
     }
+    setCloudBackupBusy(true);
     try {
       const backup = await saveEncryptedCloudBackup(snapshot, runId);
       pushMessage(`Encrypted cloud recovery backup saved until ${new Date(backup.expiresAt).toLocaleDateString()}.`);
     } catch (error) {
       pushMessage(`${errorMessage(error, "Cloud backup failed.")} Use Save project to keep a complete local file.`);
+    } finally {
+      setCloudBackupBusy(false);
     }
+  }
+
+  function handleStoragePreference(preference: CloudBackupPreference) {
+    setCloudBackupPreference(preference);
+    setStorageRecoveryNoticeOpen(false);
+    const remembered = writeCloudBackupPreference(preference);
+    if (preference === "local") {
+      pushMessage("Project recovery will stay local. Use Save project to keep a complete file.");
+    } else if (!overflowRecoveryNeeded) {
+      pushMessage("Encrypted recovery preference saved. OpenCAE will use it if this project outgrows browser autosave.");
+    } else {
+      void saveOverflowRecoveryBackup();
+    }
+    if (!remembered) pushMessage("This storage choice could not be remembered after the browser closes.");
   }
 
   // A normal reload tears down the delayed autosave effects before their
@@ -1454,6 +1482,41 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     }
   }
 
+  async function handleExportResultHtml() {
+    if (!project || !study || !displayModel || !resultSummary || !resultFields.length || !resultSurfaceMesh) {
+      setHtmlExportError("Run a result with a solver surface mesh before exporting the offline viewer.");
+      return;
+    }
+    const suggestedName = suggestedResultHtmlFilename(project.name);
+    setHtmlExportBusy(true);
+    setHtmlExportError(null);
+    try {
+      const saveTarget = await prepareBlobSaveToDisk(suggestedName, {
+        description: "Self-contained OpenCAE result viewer",
+        accept: { "text/html": [".html"] }
+      });
+      if (saveTarget === "cancelled") return;
+      const html = buildResultViewerHtml({
+        project,
+        study,
+        displayModel,
+        summary: resultSummary,
+        fields: resultFields,
+        surfaceMesh: resultSurfaceMesh
+      });
+      const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+      if (blob.size > 50 * 1024 * 1024 && !window.confirm(`The offline viewer is ${(blob.size / 1024 / 1024).toFixed(1)} MB. Save it anyway?`)) return;
+      await saveTarget.save(blob);
+      pushMessage(`Exported ${suggestedName}.`);
+    } catch (error) {
+      const message = errorMessage(error, "Could not export the offline result viewer.");
+      setHtmlExportError(message);
+      pushMessage(message);
+    } finally {
+      setHtmlExportBusy(false);
+    }
+  }
+
   const boundaryConditionCount = (study?.constraints.length ?? 0) + (study?.loads.length ?? 0);
   const hasNativeCadModel = Boolean(displayModel?.nativeCad);
   useEffect(() => {
@@ -1754,19 +1817,19 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     const existingSelection = study.namedSelections.find((item) => item.entityType === "face" && item.geometryRefs.some((ref) => ref.entityId === face.id));
     const selection = existingSelection ?? namedSelectionForFace(study, face);
     if (study.constraints.some((support) => support.selectionRef === selection.id)) {
-      pushMessage(`Fixed support already exists on ${selection.name}.`);
+      pushMessage(`${study.type === "steady_state_thermal" ? "Temperature boundary" : "Fixed support"} already exists on ${selection.name}.`);
       return;
     }
     const nextSelections = existingSelection ? study.namedSelections : [...study.namedSelections, selection];
     const nextSupport: Constraint = {
       id: `constraint-${crypto.randomUUID()}`,
-      type: "fixed",
+      type: study.type === "steady_state_thermal" ? "prescribed_temperature" : "fixed",
       selectionRef: selection.id,
-      parameters: {},
+      parameters: study.type === "steady_state_thermal" ? { value: 20, units: "°C" } : {},
       status: "complete"
     };
     await updateStudy(
-      saveStudyPatch(study.id, { namedSelections: nextSelections, constraints: [...study.constraints, nextSupport] }, "Fixed support added.", study)
+      saveStudyPatch(study.id, { namedSelections: nextSelections, constraints: [...study.constraints, nextSupport] }, study.type === "steady_state_thermal" ? "Temperature boundary added." : "Fixed support added.", study)
     );
   }
 
@@ -1782,7 +1845,8 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       parameters: { value, units: unitsForLoadType(type), direction: directionVectorForLabel(direction, face, displayModel ?? undefined), directionMode: direction, ...(applicationPoint ? { applicationPoint } : {}), ...(payloadObject ? { payloadObject } : {}), ...(type === "gravity" || type === "remote_force" || type === "bolt_preload" ? payloadMetadata : {}) },
       status: "complete"
     };
-    const loadCases = study.type === "modal_analysis" ? undefined : loadCasesWithAddedLoad(study, load.id);
+    const structuralStudy = study.type === "static_stress" || study.type === "dynamic_structural" ? study : null;
+    const loadCases = structuralStudy ? loadCasesWithAddedLoad(structuralStudy, load.id) : undefined;
     await updateStudy(
       saveStudyPatch(study.id, { namedSelections: nextSelections, loads: [...study.loads, load], ...(loadCases ? { loadCases } : {}) }, "Load added.", study)
     );
@@ -1861,6 +1925,16 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     pushMessage("Modal analysis created.");
   }
 
+  function handleCreateThermalSimulation() {
+    if (!project || !displayModel) return;
+    const nextStudy = createLocalThermalStudy(project, displayModel);
+    const nextProject = { ...project, studies: [nextStudy], updatedAt: new Date().toISOString() };
+    recordUndoSnapshot(project);
+    setProject(nextProject);
+    applyStep(displayModel.bodyCount > 0 ? "material" : "model");
+    pushMessage("Steady-state thermal simulation created.");
+  }
+
   function invalidateCompletedRunState() {
     setCompletedRunId("");
     setReportCaptures(null);
@@ -1902,23 +1976,33 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     const backend = study.solverSettings.backend;
     const fidelity = study.solverSettings.fidelity;
     const carried = { ...(backend ? { backend } : {}), ...(fidelity ? { fidelity } : {}) };
-    const defaultNames = ["Static Stress", "Dynamic Structural", "Modal Analysis"];
+    const defaultNames = ["Static Stress", "Dynamic Structural", "Modal Analysis", "Steady-State Thermal"];
     const name = defaultNames.includes(study.name)
-      ? (type === "dynamic_structural" ? "Dynamic Structural" : type === "modal_analysis" ? "Modal Analysis" : "Static Stress")
+      ? (type === "dynamic_structural" ? "Dynamic Structural" : type === "modal_analysis" ? "Modal Analysis" : type === "steady_state_thermal" ? "Steady-State Thermal" : "Static Stress")
       : study.name;
     const patch: Partial<Study> = type === "dynamic_structural"
-      ? { type, name, solverSettings: DynamicSolverSettingsSchema.parse(carried) }
+      ? { type, name, constraints: study.type === "steady_state_thermal" ? [] : study.constraints, loads: study.type === "steady_state_thermal" ? [] : study.loads, loadCases: study.type === "steady_state_thermal" ? [{ id: "case-default", name: "Default", enabled: true, loadIds: [] }] : study.loadCases, loadCombinations: study.type === "steady_state_thermal" ? [] : study.loadCombinations, solverSettings: DynamicSolverSettingsSchema.parse(carried) }
       : type === "modal_analysis"
-        ? { type, name, solverSettings: ModalSolverSettingsSchema.parse(carried) }
-        : { type, name, solverSettings: carried };
+        ? { type, name, constraints: study.type === "steady_state_thermal" ? [] : study.constraints, loads: study.type === "steady_state_thermal" ? [] : study.loads, solverSettings: ModalSolverSettingsSchema.parse(carried) }
+        : type === "steady_state_thermal"
+          ? { type, name, constraints: [], loads: [], loadCases: [], loadCombinations: [], solverSettings: carried }
+          : { type, name, constraints: study.type === "steady_state_thermal" ? [] : study.constraints, loads: study.type === "steady_state_thermal" ? [] : study.loads, loadCases: study.type === "steady_state_thermal" ? [{ id: "case-default", name: "Default", enabled: true, loadIds: [] }] : study.loadCases, loadCombinations: study.type === "steady_state_thermal" ? [] : study.loadCombinations, solverSettings: carried };
     void updateStudy(saveStudyPatch(
       study.id,
       patch,
       type === "dynamic_structural"
-        ? "Study switched to dynamic structural analysis."
+        ? study.type === "steady_state_thermal"
+          ? "Study switched to dynamic structural analysis. Thermal boundaries and loads were cleared."
+          : "Study switched to dynamic structural analysis."
         : type === "modal_analysis"
-          ? "Study switched to modal analysis. Saved loads are not used by the modal solve."
-          : "Study switched to static stress analysis.",
+          ? study.type === "steady_state_thermal"
+            ? "Study switched to modal analysis. Thermal boundaries and loads were cleared."
+            : "Study switched to modal analysis. Saved loads are not used by the modal solve."
+          : type === "steady_state_thermal"
+            ? "Study switched to steady-state thermal analysis. Structural supports and loads were cleared."
+            : study.type === "steady_state_thermal"
+              ? "Study switched to static stress analysis. Thermal boundaries and loads were cleared."
+              : "Study switched to static stress analysis.",
       study
     ));
   }
@@ -1945,11 +2029,11 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     return value === "ramp" || value === "step" || value === "quasi_static" || value === "sinusoidal";
   }
 
-  function handleBoundaryConditionType(type: "fixed" | "prescribed_displacement" | LoadType) {
+  function handleBoundaryConditionType(type: "fixed" | "prescribed_displacement" | "prescribed_temperature" | LoadType) {
     setShowBoundaryConditionMenu(false);
-    if (type === "fixed" || type === "prescribed_displacement") {
+    if (type === "fixed" || type === "prescribed_displacement" || type === "prescribed_temperature") {
       applyStep("supports");
-      if (type === "fixed" && selectedFace) void addFixedSupportForFace(selectedFace);
+      if ((type === "fixed" || type === "prescribed_temperature") && selectedFace) void addFixedSupportForFace(selectedFace);
       return;
     }
     setDraftLoadType(type);
@@ -2099,7 +2183,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         setRunTiming(null);
         try {
           const results = await getResults(response.run.id);
-          if (study.type === "dynamic_structural" && (isModalResultSummary(results.summary) || !hasDynamicPlaybackFrames(results.summary, results.fields))) {
+          if (study.type === "dynamic_structural" && (!isStructuralResultSummary(results.summary) || !hasDynamicPlaybackFrames(results.summary, results.fields))) {
             pushMessage("Dynamic results did not include animation frames.");
             setResultPlaybackPlaying(false);
             setRunProgress(0);
@@ -2207,6 +2291,16 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           <button
             className="icon-button"
             type="button"
+            title="Open validation gallery"
+            aria-label="Open validation gallery"
+            aria-expanded={validationGalleryOpen}
+            onClick={() => setValidationGalleryOpen(true)}
+          >
+            <Activity size={17} aria-hidden="true" />
+          </button>
+          <button
+            className="icon-button"
+            type="button"
             aria-expanded={shortcutGuideOpen}
             aria-controls="workspace-shortcut-guide"
             title="Show keyboard shortcuts"
@@ -2231,6 +2325,18 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
             </div>
           ) : null}
         </div>
+        <button
+          className={`storage-status-button ${cloudBackupPreference ?? "unselected"}`}
+          type="button"
+          aria-label={`Project storage: ${cloudBackupPreference === "cloud" ? "recovery on" : cloudBackupPreference === "local" ? "local only" : "choose storage"}`}
+          aria-expanded={storageRecoveryNoticeOpen}
+          aria-controls="project-storage-notice"
+          title="Review project storage choice"
+          onClick={() => setStorageRecoveryNoticeOpen((open) => !open)}
+        >
+          {cloudBackupPreference === "cloud" ? <CloudUpload size={15} aria-hidden="true" /> : <HardDrive size={15} aria-hidden="true" />}
+          <span>{cloudBackupPreference === "cloud" ? "Recovery on" : cloudBackupPreference === "local" ? "Local only" : "Storage"}</span>
+        </button>
         {showRunButton ? (
           <button
             className={`primary topbar-action ${solverRunning ? "running" : ""}`}
@@ -2244,11 +2350,24 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
             <span aria-hidden="true">▶</span><span className="topbar-action-label">{solverRunning ? `Running… ${runButtonProgress}%` : "Run simulation"}</span>
           </button>
         ) : null}
-        <button className="secondary topbar-action" type="button" onClick={handleSaveProject} title="Save project to local disk" aria-label="Save project">
-          <Save size={16} aria-hidden="true" />
-          <span className="topbar-action-label">Save project</span>
+        <button className="secondary topbar-action" type="button" onClick={handleSaveProject} title="Download project to local disk" aria-label="Download Project">
+          <Download size={16} aria-hidden="true" />
+          <span className="topbar-action-label">Download Project</span>
         </button>
       </header>
+    );
+  }
+
+  function renderStorageRecoveryNotice() {
+    if (!storageRecoveryNoticeOpen) return null;
+    return (
+      <ProjectStorageNotice
+        preference={cloudBackupPreference}
+        busy={cloudBackupBusy}
+        recoveryNeeded={overflowRecoveryNeeded}
+        onChooseCloud={() => handleStoragePreference("cloud")}
+        onChooseLocal={() => handleStoragePreference("local")}
+      />
     );
   }
 
@@ -2264,8 +2383,10 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           onCreateStatic={handleCreateStaticSimulation}
           onCreateDynamic={handleCreateDynamicSimulation}
           onCreateModal={handleCreateModalSimulation}
+          onCreateThermal={handleCreateThermalSimulation}
         />
         <BottomPanel status={status} logs={logs} meshStatus="Not generated" solverStatus="Idle" onClearLogs={clearLogs} />
+        {renderStorageRecoveryNotice()}
       </div>
     );
   }
@@ -2366,11 +2487,14 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           runTiming={runTiming}
           onGenerateReport={handleGenerateReport}
           onExportResultPng={handleExportResultPng}
+          onExportResultHtml={handleExportResultHtml}
           reportBusy={reportBusy}
           reportError={reportError}
           reportDisabled={solverRunning || convergenceBusy}
           pngExportBusy={pngExportBusy}
           pngExportError={pngExportError}
+          htmlExportBusy={htmlExportBusy}
+          htmlExportError={htmlExportError}
           sampleModel={sampleModel}
           sampleAnalysisType={sampleAnalysisType}
           draftLoadType={draftLoadType}
@@ -2406,7 +2530,20 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           onSaveCustomMaterial={handleSaveCustomMaterial}
           onDeleteCustomMaterial={handleDeleteCustomMaterial}
           onPreviewPrintLayerOrientation={setPreviewPrintLayerOrientation}
-          onAddSupport={(selectionRef) => updateStudy(addSupport(study.id, selectionRef, study))}
+          onAddSupport={(selectionRef, options) => {
+            if (options?.type === "prescribed_temperature") {
+              const constraint: Constraint = {
+                id: `constraint-${crypto.randomUUID()}`,
+                type: "prescribed_temperature",
+                selectionRef: selectionRef ?? "",
+                parameters: { value: options.value ?? 20, units: "°C" },
+                status: "complete"
+              };
+              updateStudy(saveStudyPatch(study.id, { constraints: [...study.constraints, constraint] }, "Temperature boundary added.", study));
+              return;
+            }
+            updateStudy(addSupport(study.id, selectionRef, study));
+          }}
           onUpdateSupport={(support: Constraint) =>
             updateStudy(
               saveStudyPatch(
@@ -2459,15 +2596,16 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           onRemoveLoad={(loadId) =>
             updateStudy(saveStudyPatch(study.id, {
               loads: study.loads.filter((item) => item.id !== loadId),
-              ...(study.type === "modal_analysis" ? {} : {
+              ...((study.type === "static_stress" || study.type === "dynamic_structural") ? {
                 loadCases: structuralLoadCases(study).map((loadCase) => ({ ...loadCase, loadIds: loadCase.loadIds.filter((id) => id !== loadId) }))
-              })
+              } : {})
             }, "Load removed.", study))
           }
           onLoadCasesChange={(loadCases, loadCombinations) =>
             updateStudy(saveStudyPatch(study.id, { loadCases, loadCombinations }, "Load cases updated.", study))
           }
           onGenerateMesh={handleGenerateMesh}
+          onConnectionsChange={(contacts) => updateStudy(saveStudyPatch(study.id, { contacts, meshSettings: { ...study.meshSettings, status: "not_started", meshRef: undefined, summary: undefined } }, "Assembly connections updated. Regenerate the mesh.", study))}
           onCancelMesh={handleCancelMesh}
           meshPhaseProgress={meshPhaseProgress}
           onRunMeshConvergence={(caseId, probe) => void handleRunMeshConvergence(caseId, probe)}
@@ -2510,6 +2648,12 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         solverStatus={solverRunning ? "Running" : runProgress >= 100 ? "Complete" : "Idle"}
         onClearLogs={clearLogs}
       />
+      {renderStorageRecoveryNotice()}
+      {validationGalleryOpen ? (
+        <Suspense fallback={null}>
+          <ValidationGallery onClose={() => setValidationGalleryOpen(false)} />
+        </Suspense>
+      ) : null}
     </div>
   );
 }
@@ -2739,6 +2883,8 @@ function faceForPayloadObject(payloadObject: PayloadObjectSelection): DisplayFac
 }
 
 function defaultValueForLoadType(type: LoadType) {
+  if (type === "heat_flux") return 10_000;
+  if (type === "heat_generation") return 1_000_000;
   if (type === "pressure" || type === "surface_traction") return 100;
   if (type === "volume_force") return 1000;
   if (type === "gravity") return 5;
