@@ -46,7 +46,7 @@ describe("app CSS", () => {
     expect(css).toMatch(/\.theme-light\s+\.analysis-legend\s+\.legend-scale\s*\{[\s\S]*?border-color:\s*rgba\(82,\s*103,\s*130,\s*0\.24\)/);
   });
 
-  test("makes the analysis legend larger by default with a top-right resize handle", () => {
+  test("makes the analysis legend larger by default with a bottom-right resize handle", () => {
     const analysisLegend = cssRule(".analysis-legend");
     const resizeHandle = cssRule(".analysis-legend-resize");
     const resizeHandleAfter = cssRule(".analysis-legend-resize::after");
@@ -67,11 +67,13 @@ describe("app CSS", () => {
     expect(analysisLegend).toMatch(/gap:\s*calc\(6px\s*\*\s*var\(--analysis-legend-scale,\s*1\)\)\s+calc\(12px\s*\*\s*var\(--analysis-legend-scale,\s*1\)\)/);
     expect(analysisLegend).toMatch(/padding:\s*calc\(12px\s*\*\s*var\(--analysis-legend-scale,\s*1\)\)\s+calc\(14px\s*\*\s*var\(--analysis-legend-scale,\s*1\)\)\s+calc\(8px\s*\*\s*var\(--analysis-legend-scale,\s*1\)\)/);
     expect(resizeHandle).toMatch(/position:\s*absolute/);
-    expect(resizeHandle).toMatch(/top:\s*0/);
+    expect(resizeHandle).toMatch(/bottom:\s*0/);
     expect(resizeHandle).toMatch(/right:\s*0/);
-    expect(resizeHandle).toMatch(/cursor:\s*nesw-resize/);
-    expect(resizeHandleAfter).toMatch(/border-top:\s*2px\s+solid/);
+    expect(resizeHandle).toMatch(/z-index:\s*1/);
+    expect(resizeHandle).toMatch(/cursor:\s*nwse-resize/);
+    expect(resizeHandleAfter).toMatch(/border-bottom:\s*2px\s+solid/);
     expect(resizeHandleAfter).toMatch(/border-right:\s*2px\s+solid/);
+    expect(cssRule(".legend-extrema")).toMatch(/padding-right:\s*20px/);
   });
 
   test("scales result legend visual elements with resized content", () => {

@@ -1122,7 +1122,7 @@ describe("CadViewer result coloring", () => {
     expect(legendMeshStats(undefined)).toEqual({ nodes: "--", elements: "--" });
   });
 
-  test("resizes the result legend from a top-right handle", () => {
+  test("resizes the result legend from a bottom-right handle", () => {
     expect(cadViewerSource).toContain("analysis-legend-resize");
     expect(cadViewerSource).toContain("Resize results legend");
     expect(cadViewerSource).toContain("const RESULT_LEGEND_MIN_HEIGHT = 154");
@@ -1130,7 +1130,7 @@ describe("CadViewer result coloring", () => {
 
     expect(resultLegendResizeDimensions({
       currentClientX: 520,
-      currentClientY: 120,
+      currentClientY: 240,
       maxHeight: 576,
       maxWidth: 976,
       minHeight: 154,
@@ -1145,7 +1145,7 @@ describe("CadViewer result coloring", () => {
   test("clamps result legend resize to viewport-safe dimensions", () => {
     expect(resultLegendResizeDimensions({
       currentClientX: 80,
-      currentClientY: -800,
+      currentClientY: 980,
       maxHeight: 576,
       maxWidth: 976,
       minHeight: 154,
