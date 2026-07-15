@@ -24,6 +24,7 @@ export type SettingHelpId =
   | "loadType"
   | "loadMagnitude"
   | "loadDirection"
+  | "loadCases"
   | "meshQuality"
   | "runReadiness"
   | "solver"
@@ -124,6 +125,11 @@ export const SETTING_HELP: Record<SettingHelpId, SettingHelp> = {
     title: "Direction",
     body: "Chooses the load direction in global axes, along the selected face normal, or opposite the face normal. With Z-up, -Z usually means downward gravity.",
     visual: "axis"
+  },
+  loadCases: {
+    title: "Load cases",
+    body: "Groups loads into named scenarios that share the same geometry, supports, material, and mesh, so only the loads differ between them. Every load belongs to exactly one case: add a second case and each load gains a Case picker to move it. A case cannot be deleted while it still holds loads, or while a combination refers to it.",
+    visual: "load"
   },
   meshQuality: {
     title: "Mesh quality",
