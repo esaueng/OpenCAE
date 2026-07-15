@@ -105,6 +105,23 @@ describe("LocalMockComputeBackend", () => {
     expect(() => solveStudy(beamPayloadStudy("mat-unobtanium"), "run-unknown-beam-material")).toThrow(/Unknown material "mat-unobtanium"/);
   });
 
+  test("uses project custom materials when the solver options provide the project catalog", () => {
+    const custom = {
+      id: "0ac4dbda-1d37-43c0-b3ac-9d1d2cc28e84",
+      name: "Shop aluminum",
+      category: "metal" as const,
+      youngsModulus: 70e9,
+      poissonRatio: 0.33,
+      density: 2710,
+      yieldStrength: 290e6,
+      verification: "user_supplied_unverified" as const
+    };
+    const load = { id: "load-a", type: "force" as const, value: 500, direction: [0, -1, 0] as [number, number, number] };
+    const solved = solveStudy(studyWithLoads([load], custom.id), "run-custom-material", { customMaterials: [custom] });
+
+    expect(solved.material).toMatchObject({ id: custom.id, youngsModulus: custom.youngsModulus, density: custom.density });
+  });
+
   test("falls back to the default material only when no material is assigned", () => {
     const load = { id: "load-a", type: "force" as const, value: 500, direction: [0, -1, 0] as [number, number, number] };
     const solved = solveStudy({ ...studyWithLoads([load]), materialAssignments: [] }, "run-no-material");

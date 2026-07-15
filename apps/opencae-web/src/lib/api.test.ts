@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { isModalResultSummary } from "@opencae/schema";
 import type { DisplayModel, Project, RunEvent, Study } from "@opencae/schema";
 import { addLoad, addSupport, assignMaterial, cancelRun, createProject, dynamicOutputFrameEstimate, generateMesh, geometryWithMeshPreset, getResults, importLocalProject, loadSampleProject, probeUploadedStepRepairAfterMeshFailure, renameProject, runSimulation, STEP_REPAIR_PROBE_MODEL_CHANGED_MESSAGE, STEP_REPAIR_UNAVAILABLE_MESSAGE, subscribeToRun, updateStudy, uploadedStepRepairProbeDecision, uploadModel, withReportCaptures } from "./api";
 
@@ -440,6 +441,12 @@ describe("api", () => {
       parameters: { value: 500, units: "N", direction: [0, 0, -1], applicationPoint: [1, 2, 3] },
       status: "complete"
     });
+    expect(response.study.type === "modal_analysis" ? undefined : response.study.loadCases).toEqual([{
+      id: "case-default",
+      name: "Default",
+      enabled: true,
+      loadIds: [response.study.loads[0]?.id]
+    }]);
     expect(response.message).toBe("Load added.");
   });
 
@@ -449,6 +456,16 @@ describe("api", () => {
     const response = await addLoad("study-1", "force", 500, "selection-face-1", [0, 0, -1], [1, 2, 3], null, study, {}, "Opposite normal");
 
     expect(response.study.loads[0]?.parameters.directionMode).toBe("Opposite normal");
+  });
+
+  test("preserves advanced load metadata and canonical units when adding locally", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("missing", { status: 404 })));
+
+    const remote = await addLoad("study-1", "remote_force", 500, "selection-face-1", [0, 0, -1], null, null, study, { remotePoint: [4, 5, 6] });
+    const volume = await addLoad("study-1", "volume_force", 1200, "selection-body-1", [0, -1, 0], null, null, study);
+
+    expect(remote.study.loads[0]?.parameters).toMatchObject({ units: "N", remotePoint: [4, 5, 6] });
+    expect(volume.study.loads[0]?.parameters).toMatchObject({ units: "N/m^3" });
   });
 
   test("adds payload material metadata locally while preserving value as mass", async () => {
@@ -507,6 +524,16 @@ describe("api", () => {
       }
     });
     expect(response.message).toBe("Mesh generated locally.");
+  });
+
+  test("keeps isolated mesh generation off the project API", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await generateMesh("study-1", "coarse", study, undefined, undefined, undefined, { localOnly: true });
+
+    expect(response.study.meshSettings.preset).toBe("coarse");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   test("does not mask a STEP topology failure with a completed preset estimate", async () => {
@@ -711,11 +738,14 @@ describe("api", () => {
     expect(response.message).toContain("OpenCAE Core Local");
     expect((response.run as { solverBackend?: string }).solverBackend).toBe("opencae-core-sparse-tet");
     expect(completed.progress).toBe(100);
-    // Cloud-parity contract: five surface/element fields, all stamped with the run id.
-    expect(results.fields).toHaveLength(5);
+    // Structural contract: displacement, von Mises, three tensor-derived
+    // principal measures, element stress, and two safety-factor fields.
+    expect(results.fields).toHaveLength(8);
+    expect(results.fields.map((field) => field.component)).toEqual(expect.arrayContaining(["von_mises", "principal_max", "principal_min", "max_shear"]));
     expect(results.fields.every((field) => field.runId === response.run.id)).toBe(true);
     expect(results.summary.provenance?.solver).toBe("opencae-core-cloud");
     expect((results.summary.provenance as { runnerVersion?: string })?.runnerVersion).toBe("browser-0.1.0");
+    if (isModalResultSummary(results.summary)) throw new Error("Expected structural results.");
     expect(results.summary.maxStress).toBeGreaterThanOrEqual(0);
   });
 
@@ -941,6 +971,7 @@ describe("api", () => {
     expect((response.run as { solverBackend?: string }).solverBackend).toBe("opencae-core-mdof-tet");
     expect(response.message).toContain("OpenCAE Core Local simulation running");
     expect(seen.map((event) => event.message).join(" ")).toContain("OpenCAE Core dynamic");
+    if (isModalResultSummary(results.summary)) throw new Error("Expected dynamic structural results.");
     expect(results.summary.transient?.frameCount).toBe(21);
     expect(results.fields.some((field) => field.type === "stress" && field.frameIndex === 20)).toBe(true);
     expect(results.summary.provenance?.solver).toBe("opencae-core-cloud");
@@ -981,6 +1012,10 @@ describe("api", () => {
     expect(apiSource).toContain("persistLocalRunResults");
     expect(apiSource).toContain("local-results-persistence");
     expect(apiSource).toContain("restoreLocalRunResults");
+    expect(apiSource).toContain("saveLocalRunVariantResult");
+    expect(apiSource).toContain("loadLocalRunVariantResult");
+    expect(apiSource).toContain("deleteLocalRunVariantResults");
+    expect(apiSource).toContain("dynamic-case-persistence");
   });
 
   test("reports real dynamic frame-writing progress with a derivable ETA before completion", { timeout: 60000 }, async () => {

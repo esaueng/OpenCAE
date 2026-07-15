@@ -35,6 +35,11 @@ import { CLOUD_SOLVER_LIMITS, solveStudyModelWithCorePipeline } from "./index";
 const FIXTURE_DIR = resolve(__dirname, "../../../apps/opencae-web/src/testdata/core-cloud-golden");
 const EXPECTED_CLOUD_RUNNER_VERSION = "0.1.6";
 const RELATIVE_TOLERANCE = 1e-12;
+const PRINCIPAL_FIELD_SUFFIXES = [
+  "stress-principal-max-surface",
+  "stress-principal-min-surface",
+  "stress-max-shear-surface"
+] as const;
 
 const ALL_CASES = [
   "cantilever-static",
@@ -122,7 +127,13 @@ type DeltaStats = {
   maxRelPath: string;
 };
 
-function compareStructures(actual: unknown, expected: unknown, path: string, stats: DeltaStats, mismatches: string[]): void {
+function compareStructures(
+  actual: unknown,
+  expected: unknown,
+  path: string,
+  stats: DeltaStats,
+  mismatches: string[]
+): void {
   if (mismatches.length > 25) return;
   if (typeof expected === "number" && typeof actual === "number") {
     stats.comparisons += 1;
@@ -180,6 +191,10 @@ function compareStructures(actual: unknown, expected: unknown, path: string, sta
     }
     return;
   }
+  // The fixtures remain an honest record of runner 0.1.6. The current reader
+  // upgrades those embedded v0.2 models before solving, so only this diagnostic
+  // version stamp is expected to advance.
+  if (path.endsWith(".coreModelSchemaVersion") && actual === "0.3.0" && expected === "0.2.0") return;
   if (!Object.is(actual, expected)) {
     mismatches.push(`${path}: ${String(actual)} != ${String(expected)}`);
   }
@@ -194,6 +209,20 @@ function collectRunnerVersions(value: unknown, out: Set<string>): void {
   const record = value as Record<string, unknown>;
   if (typeof record.runnerVersion === "string") out.add(record.runnerVersion);
   for (const key of Object.keys(record)) collectRunnerVersions(record[key], out);
+}
+
+function isPrincipalMeasureField(field: unknown): field is Record<string, unknown> & { id: string } {
+  if (!field || typeof field !== "object") return false;
+  const id = (field as { id?: unknown }).id;
+  return typeof id === "string" && PRINCIPAL_FIELD_SUFFIXES.some((suffix) => id.endsWith(suffix));
+}
+
+function legacyResultField(field: unknown): unknown {
+  if (!field || typeof field !== "object") return field;
+  // Field components are additive identity metadata introduced after the
+  // recorded runner contract; the legacy payload remains the numeric oracle.
+  const { component: _component, ...legacy } = field as Record<string, unknown>;
+  return legacy;
 }
 
 describe("golden parity: browser pipeline vs deployed Core Cloud runner", () => {
@@ -219,12 +248,17 @@ describe("golden parity: browser pipeline vs deployed Core Cloud runner", () => 
     const mismatches: string[] = [];
     // The fixtures froze the HTTP wire contract; JSON round-trip the in-process
     // result the same way (drops undefined-valued optional keys).
-    const wireResult = JSON.parse(JSON.stringify(outcome.result)) as unknown;
-    compareStructures(wireResult, fixture.response, "response", stats, mismatches);
-    const stressFields = outcome.result.fields.filter((field) => field.type === "stress");
-    expect(stressFields.every((field) => field.component === "von_mises")).toBe(true);
-    expect(stressFields.some((field) => field.component === "principal_max" || field.component === "principal_min" || field.component === "max_shear")).toBe(false);
-    const tensorFields = stressFields.filter((field) => field.location === "node");
+    const wireResult = JSON.parse(JSON.stringify(outcome.result)) as GoldenFixture["response"];
+    const principalFields = wireResult.fields.filter(isPrincipalMeasureField);
+    const legacyWireResult = {
+      ...wireResult,
+      // Runner 0.1.6 predates the additive principal/max-shear fields. Keep its
+      // recorded fields as an exact numeric parity oracle while validating the
+      // new tensor-derived fields independently below.
+      fields: wireResult.fields.filter((field) => !isPrincipalMeasureField(field)).map(legacyResultField)
+    };
+    compareStructures(legacyWireResult, fixture.response, "response", stats, mismatches);
+    const tensorFields = outcome.result.fields.filter((field) => field.type === "stress" && field.location === "node" && field.component === "von_mises");
     expect(tensorFields.every((field) => field.tensorValues?.length === field.values.length * 6)).toBe(true);
     expect(tensorFields.every((field) => field.tensorValues?.every(Number.isFinite))).toBe(true);
     // eslint-disable-next-line no-console
@@ -235,6 +269,22 @@ describe("golden parity: browser pipeline vs deployed Core Cloud runner", () => 
     );
     expect(mismatches, mismatches.slice(0, 10).join("\n")).toEqual([]);
     expect(stats.maxRelDelta).toBeLessThanOrEqual(RELATIVE_TOLERANCE);
+
+    const frameIndices = new Set(
+      fixture.response.fields.map((field) => (field as { frameIndex?: unknown }).frameIndex ?? "static")
+    );
+    expect(principalFields).toHaveLength(frameIndices.size * PRINCIPAL_FIELD_SUFFIXES.length);
+    for (const frameIndex of frameIndices) {
+      const frameFields = principalFields.filter((field) => (field.frameIndex ?? "static") === frameIndex);
+      expect(frameFields.map((field) => PRINCIPAL_FIELD_SUFFIXES.find((suffix) => field.id.endsWith(suffix))).sort()).toEqual(
+        [...PRINCIPAL_FIELD_SUFFIXES].sort()
+      );
+      for (const field of frameFields) {
+        expect(field.location).toBe("node");
+        expect(field.units).toBe("MPa");
+        expect(field.values).toHaveLength((wireResult.surfaceMesh.nodes as unknown[]).length);
+      }
+    }
 
     // Provenance parity is structural; the runner stamp differs by design.
     const actualVersions = new Set<string>();

@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { describe, expect, test, vi } from "vitest";
-import { REPORT_CAPTURE_BACKGROUND, VIEWER_AXIS_HEAD_RADIUS, VIEWER_AXIS_LABEL_BADGE_COLOR, VIEWER_AXIS_LABEL_BADGE_RADIUS, VIEWER_AXIS_LABEL_COLOR, VIEWER_AXIS_LABEL_FONT_SIZE, VIEWER_AXIS_LABEL_FONT_WEIGHT, VIEWER_AXIS_LABEL_OUTLINE_COLOR, VIEWER_AXIS_LABEL_OUTLINE_WIDTH, VIEWER_CREDIT_URL, VIEWER_GIZMO_ALIGNMENT, VIEWER_GIZMO_AXIS_LENGTH, VIEWER_GIZMO_LABEL_DISTANCE, VIEWER_GIZMO_MARGIN, VIEWER_GIZMO_SCALE, VIEWER_ISOMETRIC_GIZMO_VIEW, VIEWER_VIEW_CUBE_BODY_OPACITY, VIEWER_VIEW_CUBE_CORNER_HIT_RADIUS, VIEWER_VIEW_CUBE_CORNER_RADIUS, VIEWER_VIEW_CUBE_EDGE_COLOR, VIEWER_VIEW_CUBE_FACE_HOVER_OPACITY, VIEWER_VIEW_CUBE_FACE_LABEL_FONT_SIZE, VIEWER_VIEW_CUBE_FACE_OPACITY, VIEWER_VIEW_CUBE_SIZE, applyResultFrameToGeometry, axisLabelToViewAxis, beamDemoDisplacementAtStation, beamDemoPayloadOffset, beamDemoStationForPoint, buildSolverSurfaceOutlineGeometry, buildSolverSurfaceResultGeometry, cameraDistanceForBounds, cameraViewForAxis, cloneResultPreviewObject, colorizeResultObject, colorizeSampleResultGeometry, createBeamDemoCoordinate, createRenderedFrameCaptureController, createUndeformedResultOutlineObject, defaultHomeViewTarget, deformationScaleForResultFields, dimensionLabelFlipped, displayedLegendTickLabels, finalVisualScaleForDisplacementField, getViewCubeCornerDescriptors, getViewCubeFaceDescriptors, gizmoViewTargetToRequest, interpolateDisplacementAtPoint, legendMeshStats, legendTickLabels, normalizedPointLoadCantileverShape, opaqueContentCropRect, payloadHighlightObjectId, pointLoadCantileverShape, printLayerVisualizationForBounds, recoverSurfaceNodeScalarField, renderReportCapture, reportCaptureBounds, resultFieldValuesAlignedToGeometry, resultLegendContentScale, resultLegendResizeDimensions, resultProbesForKind, resultValueForPoint, rotatedCameraOrbit, shouldDisableResultDeformation, shouldShowDimensionOverlay, shouldShowModelHitLabel, shouldShowResultMarkers, shouldShowUndeformedResultOutline, shouldShowViewCubeFaceLabel, solverSpaceResultCoordinateTransform, solverSurfaceDisplayFootprint, solverSurfaceResultFields, updatePackedSamples, viewCubeFaceToGizmoView, viewerCameraResetPose, viewerGizmoLayout } from "./CadViewer";
+import { REPORT_CAPTURE_BACKGROUND, VIEWER_AXIS_HEAD_RADIUS, VIEWER_AXIS_LABEL_BADGE_COLOR, VIEWER_AXIS_LABEL_BADGE_RADIUS, VIEWER_AXIS_LABEL_COLOR, VIEWER_AXIS_LABEL_FONT_SIZE, VIEWER_AXIS_LABEL_FONT_WEIGHT, VIEWER_AXIS_LABEL_OUTLINE_COLOR, VIEWER_AXIS_LABEL_OUTLINE_WIDTH, VIEWER_CREDIT_URL, VIEWER_GIZMO_ALIGNMENT, VIEWER_GIZMO_AXIS_LENGTH, VIEWER_GIZMO_LABEL_DISTANCE, VIEWER_GIZMO_MARGIN, VIEWER_GIZMO_SCALE, VIEWER_ISOMETRIC_GIZMO_VIEW, VIEWER_VIEW_CUBE_BODY_OPACITY, VIEWER_VIEW_CUBE_CORNER_HIT_RADIUS, VIEWER_VIEW_CUBE_CORNER_RADIUS, VIEWER_VIEW_CUBE_EDGE_COLOR, VIEWER_VIEW_CUBE_FACE_HOVER_OPACITY, VIEWER_VIEW_CUBE_FACE_LABEL_FONT_SIZE, VIEWER_VIEW_CUBE_FACE_OPACITY, VIEWER_VIEW_CUBE_SIZE, applyResultFrameToGeometry, applySectionClippingToObject, axisLabelToViewAxis, beamDemoDisplacementAtStation, beamDemoPayloadOffset, beamDemoStationForPoint, buildSolverSurfaceOutlineGeometry, buildSolverSurfaceResultGeometry, cameraDistanceForBounds, cameraViewForAxis, cloneResultPreviewObject, colorizeResultObject, colorizeSampleResultGeometry, createBeamDemoCoordinate, createRenderedFrameCaptureController, createUndeformedResultOutlineObject, defaultHomeViewTarget, deformationScaleForResultFields, dimensionLabelFlipped, displayedLegendTickLabels, finalVisualScaleForDisplacementField, getViewCubeCornerDescriptors, getViewCubeFaceDescriptors, gizmoViewTargetToRequest, interpolateDisplacementAtPoint, legendMeshStats, legendTickLabels, normalizedPointLoadCantileverShape, opaqueContentCropRect, payloadHighlightObjectId, pointLoadCantileverShape, printLayerVisualizationForBounds, recoverSurfaceNodeScalarField, renderReportCapture, reportCaptureBounds, resultFieldValuesAlignedToGeometry, resultLegendContentScale, resultLegendResizeDimensions, resultProbesForKind, resultValueForPoint, rotatedCameraOrbit, sectionPlaneForBounds, shouldDisableResultDeformation, shouldShowDimensionOverlay, shouldShowModelHitLabel, shouldShowResultMarkers, shouldShowUndeformedResultOutline, shouldShowViewCubeFaceLabel, solverSpaceResultCoordinateTransform, solverSurfaceDisplayFootprint, solverSurfaceResultFields, updatePackedSamples, viewCubeFaceToGizmoView, viewerCameraResetPose, viewerGizmoLayout } from "./CadViewer";
 import { cameraForProjection, cameraVerticalSpanAtTarget, captureExcludedObjects, fitOrthographicCamera, orthographicVerticalSpanForBounds, panCamera, resizeProjectionCamera, solverSurfaceDisplayBoundsForDisplayModel } from "./CadViewer";
 import { createPackedResultPlaybackCache, createResultFrameCache, type FaceResultSample } from "../resultFields";
 import type { DisplayFace, DisplayModel, ResultField } from "@opencae/schema";
@@ -1670,6 +1670,46 @@ describe("CadViewer result coloring", () => {
 
     expect(outlineBounds.min.x).toBeCloseTo(modelBounds.min.x);
     expect(outlineBounds.max.x).toBeCloseTo(modelBounds.max.x);
+  });
+
+  test("clips solid and feature-edge materials while leaving annotations excluded", () => {
+    const root = new THREE.Group();
+    const geometryRoot = new THREE.Group();
+    geometryRoot.userData.opencaeSectionClippable = true;
+    const solidMaterial = new THREE.MeshStandardMaterial();
+    const edgeMaterial = new THREE.LineBasicMaterial();
+    geometryRoot.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), solidMaterial));
+    geometryRoot.add(new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 1)), edgeMaterial));
+    const excluded = new THREE.Group();
+    excluded.userData.opencaeSectionExclude = true;
+    const excludedMaterial = new THREE.MeshBasicMaterial();
+    excluded.add(new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.1), excludedMaterial));
+    geometryRoot.add(excluded);
+    const annotationMaterial = new THREE.MeshBasicMaterial();
+    root.add(geometryRoot, new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.1), annotationMaterial));
+    const plane = new THREE.Plane(new THREE.Vector3(1, 0, 0), 0);
+
+    const restore = applySectionClippingToObject(root, plane);
+
+    expect(solidMaterial.clippingPlanes).toEqual([plane]);
+    expect(edgeMaterial.clippingPlanes).toEqual([plane]);
+    expect(excludedMaterial.clippingPlanes).toBeNull();
+    expect(annotationMaterial.clippingPlanes).toBeNull();
+    restore();
+    expect(solidMaterial.clippingPlanes).toBeNull();
+    expect(edgeMaterial.clippingPlanes).toBeNull();
+  });
+
+  test("maps a normalized, flippable section offset into model bounds and renders its capture label", () => {
+    const bounds = new THREE.Box3(new THREE.Vector3(-2, -1, -0.5), new THREE.Vector3(6, 3, 0.5));
+    const plane = sectionPlaneForBounds({ enabled: true, axis: "x", offset: 0.25, flipped: false }, bounds);
+    const flipped = sectionPlaneForBounds({ enabled: true, axis: "x", offset: 0.25, flipped: true }, bounds);
+
+    expect(plane?.distanceToPoint(new THREE.Vector3(0, 0, 0))).toBeCloseTo(0);
+    expect(plane?.normal.toArray()).toEqual([1, 0, 0]);
+    expect(flipped?.normal.toArray()).toEqual([-1, 0, 0]);
+    expect(cadViewerSource).toContain("localClippingEnabled = true");
+    expect(cadViewerSource).toContain(">Open section</Text>");
   });
 
   test("keeps uploaded result geometry undeformed when the active displacement frame is zero", () => {

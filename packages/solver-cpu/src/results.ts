@@ -4,20 +4,22 @@ import {
   connectedComponents,
   createCoreResultField,
   OPENCAE_CORE_VERSION,
+  nodesPerElement,
   solverSurfaceMeshFromModel,
   validateProductionSurfaceFieldInvariant,
   type BoundaryConditionJson,
   type CoreResultField,
+  type CoreModalSolveResult,
   type CoreSolveDiagnostics,
   type CoreSolveProvenance,
-  type CoreSolveResult,
+  type CoreStructuralSolveResult,
   type LoadJson,
   type NormalizedOpenCAEModel,
   type SolverSurfaceMesh
 } from "@opencae/core";
-import { smoothNodalScalarField } from "./element";
-import { recoverNodalVonMisesFromElements } from "./recovery";
-import type { DynamicTet4CpuResult, DynamicTet4CpuDiagnostics, StaticLinearTet4CpuResult, CpuSolverDiagnostics } from "./types";
+import { computePrincipalStressMeasures, smoothNodalScalarField } from "./element";
+import { recoverNodalStressTensorsFromElements, recoverNodalVonMisesFromElements } from "./recovery";
+import type { DynamicTet4CpuResult, DynamicTet4CpuDiagnostics, ModalCpuDiagnostics, ModalCpuResult, StaticLinearTet4CpuResult, CpuSolverDiagnostics } from "./types";
 
 export const SOLVER_CPU_VERSION = "0.1.5";
 
@@ -25,7 +27,7 @@ export function staticCoreResultFromSolve(
   model: NormalizedOpenCAEModel,
   result: StaticLinearTet4CpuResult,
   diagnostics: CpuSolverDiagnostics
-): CoreSolveResult {
+): CoreStructuralSolveResult {
   const surfaceMesh = solverSurfaceMeshFromModel(model);
   const safetyFactor = computeSafetyFactor(model, result.vonMisesPeak ?? result.vonMises);
   const provenance = coreProvenance(model, "opencae-core-sparse-tet");
@@ -76,6 +78,7 @@ export function staticCoreResultFromSolve(
   const fields: CoreResultField[] = [
     displacementSurfaceField,
     stressSurfaceField,
+    ...principalStressSurfaceFields(model, surfaceMesh, result.stress, stressScale),
     createCoreResultField({
       id: "stress-von-mises-element",
       type: "stress",
@@ -143,7 +146,7 @@ export function staticCoreResultFromSolve(
       message: "Displacement is exactly zero even though the solved reaction force is nonzero."
     });
   }
-  const coreResult: CoreSolveResult = {
+  const coreResult: CoreStructuralSolveResult = {
     summary: {
       maxStress: displayMaxStress,
       maxStressUnits: "MPa",
@@ -173,7 +176,7 @@ export function dynamicCoreResultFromSolve(
   model: NormalizedOpenCAEModel,
   result: DynamicTet4CpuResult,
   diagnostics: DynamicTet4CpuDiagnostics
-): CoreSolveResult {
+): CoreStructuralSolveResult {
   const surfaceMesh = solverSurfaceMeshFromModel(model);
   const provenance = coreProvenance(model, "opencae-core-mdof-tet");
   const fields: CoreResultField[] = [];
@@ -256,6 +259,11 @@ export function dynamicCoreResultFromSolve(
         visualizationSource: "surface_acceleration_magnitude"
       }),
       stressSurfaceField,
+      ...principalStressSurfaceFields(model, surfaceMesh, frame.stress.values, stressScale, {
+        idPrefix: `frame-${frame.frameIndex}-`,
+        frameIndex: frame.frameIndex,
+        timeSeconds: frame.timeSeconds
+      }),
       createCoreResultField({
         id: `frame-${frame.frameIndex}-stress-von-mises-element`,
         type: "stress",
@@ -336,7 +344,7 @@ export function dynamicCoreResultFromSolve(
     displayMaxStress
   );
 
-  const coreResult: CoreSolveResult = {
+  const coreResult: CoreStructuralSolveResult = {
     summary: {
       maxStress: displayMaxStress,
       maxStressUnits: "MPa",
@@ -384,6 +392,86 @@ export function dynamicCoreResultFromSolve(
     });
   }
   return coreResult;
+}
+
+function principalStressSurfaceFields(
+  model: NormalizedOpenCAEModel,
+  surfaceMesh: SolverSurfaceMesh,
+  elementStress: ArrayLike<number>,
+  stressScale: number,
+  metadata: { idPrefix?: string; frameIndex?: number; timeSeconds?: number } = {}
+): CoreResultField[] {
+  const nodalStress = recoverNodalStressTensorsFromElements(model, elementStress);
+  const principalMax = new Float64Array(model.counts.nodes);
+  const principalMin = new Float64Array(model.counts.nodes);
+  const maxShear = new Float64Array(model.counts.nodes);
+  for (let node = 0; node < model.counts.nodes; node += 1) {
+    const measures = computePrincipalStressMeasures(nodalStress.subarray(node * 6, node * 6 + 6));
+    principalMax[node] = measures.principalMax;
+    principalMin[node] = measures.principalMin;
+    maxShear[node] = measures.maxShear;
+  }
+  const shared = {
+    type: "stress" as const,
+    location: "node" as const,
+    units: "MPa",
+    surfaceMeshRef: surfaceMesh.id,
+    visualizationSource: "volume_weighted_recovered_stress_tensor",
+    engineeringSource: "combined_or_recovered_stress_tensor",
+    ...(metadata.frameIndex !== undefined ? { frameIndex: metadata.frameIndex } : {}),
+    ...(metadata.timeSeconds !== undefined ? { timeSeconds: metadata.timeSeconds } : {})
+  };
+  const idPrefix = metadata.idPrefix ?? "";
+  return [
+    createCoreResultField({ ...shared, id: `${idPrefix}stress-principal-max-surface`, component: "principal_max", values: surfaceNodeScalars(surfaceMesh, principalMax, stressScale) }),
+    createCoreResultField({ ...shared, id: `${idPrefix}stress-principal-min-surface`, component: "principal_min", values: surfaceNodeScalars(surfaceMesh, principalMin, stressScale) }),
+    createCoreResultField({ ...shared, id: `${idPrefix}stress-max-shear-surface`, component: "max_shear", values: surfaceNodeScalars(surfaceMesh, maxShear, stressScale) })
+  ];
+}
+
+export function modalCoreResultFromSolve(
+  model: NormalizedOpenCAEModel,
+  result: Pick<ModalCpuResult, "modes">,
+  diagnostics: ModalCpuDiagnostics
+): CoreModalSolveResult {
+  const surfaceMesh = solverSurfaceMeshFromModel(model);
+  const provenance = coreProvenance(model, "opencae-core-modal-tet");
+  const fields = result.modes.map((mode) => createCoreResultField({
+    id: `mode-${mode.modeIndex}-shape`,
+    type: "mode_shape" as const,
+    location: "node" as const,
+    values: surfaceVectorMagnitudes(surfaceMesh, mode.shape, 1),
+    vectors: surfaceNodeVectors(surfaceMesh, mode.shape, 1),
+    units: "normalized",
+    surfaceMeshRef: surfaceMesh.id,
+    modeIndex: mode.modeIndex,
+    frequencyHz: mode.frequencyHz,
+    eigenvalue: mode.eigenvalue,
+    scaledResidual: mode.scaledResidual,
+    visualizationSource: "normalized_modal_eigenvector"
+  }));
+  return {
+    analysisType: "modal_analysis",
+    summary: {
+      analysisType: "modal_analysis",
+      requestedModeCount: diagnostics.requestedModeCount,
+      convergedModeCount: result.modes.length,
+      modes: result.modes.map((mode) => ({
+        modeIndex: mode.modeIndex,
+        frequencyHz: mode.frequencyHz,
+        eigenvalue: mode.eigenvalue,
+        scaledResidual: mode.scaledResidual,
+        fieldId: `mode-${mode.modeIndex}-shape`
+      })),
+      ...(diagnostics.partialConvergenceWarning ? { warning: diagnostics.partialConvergenceWarning } : {}),
+      provenance
+    },
+    fields,
+    surfaceMesh,
+    diagnostics: [{ id: "modal-solve-diagnostics", ...diagnostics }],
+    provenance,
+    artifacts: { rawUnits: model.coordinateSystem.solverUnits }
+  };
 }
 
 function computeSafetyFactor(model: NormalizedOpenCAEModel, vonMises: Float64Array): Float64Array {
@@ -790,15 +878,40 @@ function addLoadNodes(model: NormalizedOpenCAEModel, load: LoadJson, nodeIds: Se
     addNodeSetNodes(model, load.nodeSet, nodeIds);
     return;
   }
-  if (load.type === "surfaceForce" || load.type === "pressure") {
-    const surfaceSet = model.surfaceSets.find((set) => set.name === load.surfaceSet);
-    if (!surfaceSet) return;
-    const facetById = new Map(model.surfaceFacets.map((facet) => [facet.id, facet]));
-    for (const facetId of surfaceSet.facets) {
-      const facet = facetById.get(facetId);
-      if (!facet) continue;
-      for (const node of facet.nodes) nodeIds.add(node);
+  if (load.type === "surfaceForce" || load.type === "pressure" || load.type === "surfaceTraction" || load.type === "remoteForce") {
+    addSurfaceSetNodes(model, load.surfaceSet, nodeIds);
+    return;
+  }
+  if (load.type === "equivalentBoltPreload") {
+    addSurfaceSetNodes(model, load.surfaceSetA, nodeIds);
+    addSurfaceSetNodes(model, load.surfaceSetB, nodeIds);
+    return;
+  }
+  if (load.type === "bodyForceDensity") {
+    const selected = new Set(model.elementSets.find((set) => set.name === load.elementSet)?.elements ?? []);
+    let globalElement = 0;
+    for (const block of model.elementBlocks) {
+      const count = nodesPerElement(block.type);
+      for (let offset = 0; offset + count <= block.connectivity.length; offset += count, globalElement += 1) {
+        if (!selected.has(globalElement)) continue;
+        for (let local = 0; local < count; local += 1) nodeIds.add(block.connectivity[offset + local]!);
+      }
     }
+    return;
+  }
+  if (load.type === "bodyGravity") {
+    for (let node = 0; node < model.counts.nodes; node += 1) nodeIds.add(node);
+  }
+}
+
+function addSurfaceSetNodes(model: NormalizedOpenCAEModel, surfaceSetName: string, nodeIds: Set<number>): void {
+  const surfaceSet = model.surfaceSets.find((set) => set.name === surfaceSetName);
+  if (!surfaceSet) return;
+  const facetById = new Map(model.surfaceFacets.map((facet) => [facet.id, facet]));
+  for (const facetId of surfaceSet.facets) {
+    const facet = facetById.get(facetId);
+    if (!facet) continue;
+    for (const node of facet.nodes) nodeIds.add(node);
   }
 }
 

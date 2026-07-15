@@ -78,8 +78,13 @@ const hydratedFrames = new WeakMap<PreparedPlaybackFrame, { framePosition: numbe
 export interface PackedPreparedPlaybackFieldDescriptor {
   id: string;
   runId: string;
+  variantId?: string;
   type: ResultField["type"];
   component?: ResultField["component"];
+  modeIndex?: number;
+  frequencyHz?: number;
+  eigenvalue?: number;
+  scaledResidual?: number;
   location: ResultField["location"];
   units: string;
   surfaceMeshRef?: string;
@@ -425,7 +430,7 @@ export function playbackFieldsForResultMode(
       && field.tensorValues?.length === field.values.length * 6);
   }
   if (!selected.length) return fields;
-  if (resultMode === "displacement") return selected;
+  if (resultMode === "displacement" || resultMode === "mode_shape") return selected;
   const displacement = fields.filter((field) => field.type === "displacement");
   return displacement.length ? [...selected, ...displacement] : selected;
 }
@@ -710,12 +715,17 @@ function packPreparedPlaybackFrames(frames: PreparedPlaybackFrame[]): PackedPrep
   };
 }
 
-function descriptorForPackedPlaybackField(field: Pick<ResultField, "id" | "runId" | "type" | "component" | "location" | "units" | "surfaceMeshRef" | "visualizationSource" | "engineeringSource" | "provenance">): PackedPreparedPlaybackFieldDescriptor {
+function descriptorForPackedPlaybackField(field: Pick<ResultField, "id" | "runId" | "variantId" | "type" | "component" | "modeIndex" | "frequencyHz" | "eigenvalue" | "scaledResidual" | "location" | "units" | "surfaceMeshRef" | "visualizationSource" | "engineeringSource" | "provenance">): PackedPreparedPlaybackFieldDescriptor {
   return {
     id: field.id,
     runId: field.runId,
+    ...(field.variantId ? { variantId: field.variantId } : {}),
     type: field.type,
     ...(field.component ? { component: field.component } : {}),
+    ...(field.modeIndex !== undefined ? { modeIndex: field.modeIndex } : {}),
+    ...(field.frequencyHz !== undefined ? { frequencyHz: field.frequencyHz } : {}),
+    ...(field.eigenvalue !== undefined ? { eigenvalue: field.eigenvalue } : {}),
+    ...(field.scaledResidual !== undefined ? { scaledResidual: field.scaledResidual } : {}),
     location: field.location,
     units: field.units,
     ...(field.surfaceMeshRef ? { surfaceMeshRef: field.surfaceMeshRef } : {}),

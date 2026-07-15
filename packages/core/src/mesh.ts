@@ -39,6 +39,20 @@ const TET10_FACES = [
   [0, 2, 1, 6, 5, 4]
 ] as const;
 
+export const TET10_HRZ_VERTEX_MASS_FRACTION = 1 / 36;
+export const TET10_HRZ_EDGE_MASS_FRACTION = 4 / 27;
+
+const TET10_EDGE_VERTICES = [[0, 1], [1, 2], [0, 2], [0, 3], [1, 3], [2, 3]] as const;
+const TET10_GAUSS_A = 0.5854101966249685;
+const TET10_GAUSS_B = 0.13819660112501053;
+const TET10_GAUSS_POINTS = [
+  [TET10_GAUSS_A, TET10_GAUSS_B, TET10_GAUSS_B, TET10_GAUSS_B],
+  [TET10_GAUSS_B, TET10_GAUSS_A, TET10_GAUSS_B, TET10_GAUSS_B],
+  [TET10_GAUSS_B, TET10_GAUSS_B, TET10_GAUSS_A, TET10_GAUSS_B],
+  [TET10_GAUSS_B, TET10_GAUSS_B, TET10_GAUSS_B, TET10_GAUSS_A]
+] as const;
+const BARYCENTRIC_GRADIENTS = [[-1, -1, -1], [1, 0, 0], [0, 1, 0], [0, 0, 1]] as const;
+
 export function elementNodeCount(type: ElementType): number {
   return type === "Tet4" ? 4 : 10;
 }
@@ -57,6 +71,46 @@ export function tet4Volume(coordinates: ArrayLike<number>, nodeIds: ArrayLike<nu
   const dy = coordinateAt(coordinates, nodeIds[3], 1) - ay;
   const dz = coordinateAt(coordinates, nodeIds[3], 2) - az;
   return (bx * (cy * dz - cz * dy) - cx * (by * dz - bz * dy) + dx * (by * cz - bz * cy)) / 6;
+}
+
+/** Four-point quadratic-tetrahedron volume integration, exact for the Tet10 Jacobian determinant. */
+export function tet10Volume(coordinates: ArrayLike<number>, nodeIds: ArrayLike<number>): number {
+  if (nodeIds.length < 10) return Number.NaN;
+  let volume = 0;
+  for (const barycentric of TET10_GAUSS_POINTS) {
+    const derivatives = new Float64Array(30);
+    for (let vertex = 0; vertex < 4; vertex += 1) {
+      const scale = 4 * barycentric[vertex] - 1;
+      const gradient = BARYCENTRIC_GRADIENTS[vertex];
+      derivatives[vertex * 3] = scale * gradient[0];
+      derivatives[vertex * 3 + 1] = scale * gradient[1];
+      derivatives[vertex * 3 + 2] = scale * gradient[2];
+    }
+    for (let edge = 0; edge < TET10_EDGE_VERTICES.length; edge += 1) {
+      const [left, right] = TET10_EDGE_VERTICES[edge];
+      const leftGradient = BARYCENTRIC_GRADIENTS[left];
+      const rightGradient = BARYCENTRIC_GRADIENTS[right];
+      const node = 4 + edge;
+      for (let component = 0; component < 3; component += 1) {
+        derivatives[node * 3 + component] = 4 * (
+          barycentric[left] * rightGradient[component] + barycentric[right] * leftGradient[component]
+        );
+      }
+    }
+    const jacobian = new Float64Array(9);
+    for (let localNode = 0; localNode < 10; localNode += 1) {
+      const node = nodeIds[localNode];
+      if (node === undefined) return Number.NaN;
+      for (let component = 0; component < 3; component += 1) {
+        const derivative = derivatives[localNode * 3 + component];
+        jacobian[component] += coordinateAt(coordinates, node, 0) * derivative;
+        jacobian[3 + component] += coordinateAt(coordinates, node, 1) * derivative;
+        jacobian[6 + component] += coordinateAt(coordinates, node, 2) * derivative;
+      }
+    }
+    volume += determinant3(jacobian) / 24;
+  }
+  return volume;
 }
 
 export function elementFaces(type: ElementType, connectivity: ArrayLike<number>): ElementFace[] {
@@ -136,7 +190,12 @@ export function surfaceNormalAverage(surfaceSet: SurfaceSetJson, surfaceFacets: 
   return length > 0 ? [x / length, y / length, z / length] : [0, 0, 0];
 }
 
-export function connectedComponents(model: Pick<OpenCAEModelJson, "elementBlocks">): MeshConnectedComponents {
+export function connectedComponents(model: {
+  elementBlocks: Array<{
+    type: ElementType;
+    connectivity: ArrayLike<number>;
+  }>;
+}): MeshConnectedComponents {
   const elementNodes = collectElementNodes(model.elementBlocks);
   const components: number[][] = [];
   const componentByElement = new Int32Array(elementNodes.length);
@@ -232,16 +291,20 @@ export function meshQualitySummary(model: MeshUtilityModel): MeshQualitySummary 
 }
 
 function forEachElement(
-  block: Pick<ElementBlockJson, "type" | "connectivity">,
+  block: { type: ElementType; connectivity: ArrayLike<number> },
   callback: (connectivity: number[]) => void
 ): void {
   const nodesPerElement = elementNodeCount(block.type);
   for (let offset = 0; offset + nodesPerElement <= block.connectivity.length; offset += nodesPerElement) {
-    callback(block.connectivity.slice(offset, offset + nodesPerElement));
+    const connectivity = new Array<number>(nodesPerElement);
+    for (let localNode = 0; localNode < nodesPerElement; localNode += 1) {
+      connectivity[localNode] = block.connectivity[offset + localNode] ?? -1;
+    }
+    callback(connectivity);
   }
 }
 
-function collectElementNodes(blocks: Pick<ElementBlockJson, "type" | "connectivity">[]): number[][] {
+function collectElementNodes(blocks: Array<{ type: ElementType; connectivity: ArrayLike<number> }>): number[][] {
   const elements: number[][] = [];
   for (const block of blocks) {
     forEachElement(block, (connectivity) => {
@@ -291,4 +354,10 @@ function triangleGeometry(
 
 function coordinateAt(coordinates: ArrayLike<number>, node: number, component: number): number {
   return coordinates[node * 3 + component] ?? 0;
+}
+
+function determinant3(matrix: ArrayLike<number>): number {
+  return (matrix[0] ?? 0) * ((matrix[4] ?? 0) * (matrix[8] ?? 0) - (matrix[5] ?? 0) * (matrix[7] ?? 0))
+    - (matrix[1] ?? 0) * ((matrix[3] ?? 0) * (matrix[8] ?? 0) - (matrix[5] ?? 0) * (matrix[6] ?? 0))
+    + (matrix[2] ?? 0) * ((matrix[3] ?? 0) * (matrix[7] ?? 0) - (matrix[4] ?? 0) * (matrix[6] ?? 0));
 }

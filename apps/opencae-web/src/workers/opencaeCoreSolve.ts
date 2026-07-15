@@ -1,6 +1,7 @@
 export {
   autoSolverBackend,
   buildOpenCaeCoreModelForStudy,
+  coreMeshStatisticsForStudy,
   geometrySourceForStudy,
   explicitSolverBackend,
   hasActualCoreVolumeMesh,
@@ -14,6 +15,7 @@ export {
   studyForCoreGeometryDispatch,
   trySolveOpenCaeCoreStudy,
   type CoreCloudGeometrySource,
+  type CoreMeshStatistics,
   type CoreSolveCapabilities,
   type NormalizedBrowserSolverBackend,
   type OpenCaeCoreEligibility,

@@ -1,4 +1,4 @@
-import type { Material } from "@opencae/schema";
+import type { CustomMaterial, Material } from "@opencae/schema";
 
 export type PayloadMaterialCategory =
   | "metal"
@@ -43,6 +43,17 @@ export const starterMaterials: Material[] = [
   { id: "mat-sla-standard-resin", name: "Standard Resin", category: "resin", youngsModulus: 2200000000, poissonRatio: 0.38, density: 1120, yieldStrength: 42000000, printProfile: { process: "SLA", defaultInfillDensity: 100, defaultWallCount: 1, defaultLayerOrientation: "z", layerStrengthFactor: 0.82 } },
   { id: "mat-316l-am", name: "Stainless Steel 316L", category: "metal", youngsModulus: 180000000000, poissonRatio: 0.3, density: 7900, yieldStrength: 470000000, printProfile: { process: "Metal AM", defaultInfillDensity: 100, defaultWallCount: 1, defaultLayerOrientation: "z", layerStrengthFactor: 0.92 } }
 ];
+
+export function materialCatalog(customMaterials: readonly CustomMaterial[] = []): Material[] {
+  return [...starterMaterials, ...customMaterials];
+}
+
+export function resolveMaterial(materialId: string, customMaterials: readonly CustomMaterial[] = []): Material {
+  const customMaterial = customMaterials.find((candidate) => candidate.id === materialId);
+  const material = customMaterial ?? starterMaterials.find((candidate) => candidate.id === materialId);
+  if (!material) throw new Error(`Unknown material "${materialId}".`);
+  return material;
+}
 
 export type ManufacturingProcessId =
   | "cnc_machining"
@@ -226,7 +237,8 @@ export function materialManufacturingProfilesFor(material: Material | string): M
   const materialId = typeof material === "string" ? material : material.id;
   const configured = manufacturingProfilesByMaterialId[materialId];
   if (configured) return configured.map((profile) => ({ ...profile }));
-  if (typeof material === "string" || !material.printProfile) return [];
+  if (typeof material === "string") return [];
+  if (!material.printProfile) return [bulkProfile("cnc_machining")];
   const processId = legacyManufacturingProcessId(material.printProfile.process);
   if (!processId) return [];
   const profile = material.printProfile;
@@ -257,9 +269,17 @@ export function isManufacturingProcessCompatible(material: Material | string, pr
   return materialManufacturingProfilesFor(material).some((profile) => profile.processId === processId);
 }
 
-export function manufacturingProcessCompatibilityError(materialId: string, processId: unknown): string | null {
-  const material = starterMaterials.find((candidate) => candidate.id === materialId);
-  if (!material) return `Unknown material ${materialId}.`;
+export function manufacturingProcessCompatibilityError(
+  materialOrId: Material | string,
+  processId: unknown,
+  customMaterials: readonly CustomMaterial[] = []
+): string | null {
+  let material: Material;
+  try {
+    material = typeof materialOrId === "string" ? resolveMaterial(materialOrId, customMaterials) : materialOrId;
+  } catch (error) {
+    return error instanceof Error ? error.message : `Unknown material "${String(materialOrId)}".`;
+  }
   if (!isManufacturingProcessId(processId)) return "Choose a recognized manufacturing process.";
   if (isManufacturingProcessCompatible(material, processId)) return null;
   const process = manufacturingProcessForId(processId)!;
@@ -269,8 +289,12 @@ export function manufacturingProcessCompatibilityError(materialId: string, proce
   return `${process.label} does not have a validated material profile for ${material.name}.`;
 }
 
-export function assertCompatibleManufacturingProcess(materialId: string, processId: unknown): asserts processId is ManufacturingProcessId {
-  const error = manufacturingProcessCompatibilityError(materialId, processId);
+export function assertCompatibleManufacturingProcess(
+  materialOrId: Material | string,
+  processId: unknown,
+  customMaterials: readonly CustomMaterial[] = []
+): asserts processId is ManufacturingProcessId {
+  const error = manufacturingProcessCompatibilityError(materialOrId, processId, customMaterials);
   if (error) throw new Error(error);
 }
 

@@ -1,16 +1,17 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { AlertTriangle, Anchor, ArrowDown, Atom, Check, ChevronDown, ChevronRight, CircleHelp, Eye, Factory, FileDown, Gauge, Grid3X3, Layers3, Maximize2, Pause, Play, Plus, RotateCcw, Ruler, ScanLine, ShieldCheck, Upload, Weight, Wrench, X } from "lucide-react";
-import { compatibleManufacturingProcessesFor, defaultManufacturingParametersFor, defaultManufacturingProcessIdFor, effectiveMaterialProperties, fdmPropertyFactorsFor, isManufacturingProcessCompatible, manufacturingParametersForAssignment, manufacturingProcessForId, massKgForPayloadMaterial, materialCategoryLabel, normalizeManufacturingParameters, payloadMaterialForId, payloadMaterials, starterMaterials, type ManufacturingParameters, type ManufacturingProcessId, type PayloadMaterialCategory } from "@opencae/materials";
-import { assessResultFailure, estimateAllowableLoadForSafetyFactor } from "@opencae/schema";
-import type { Constraint, DisplayFace, DisplayModel, DynamicSolverSettings, Load, MeshQuality, Project, ResultField, ResultSummary, RunTimingEstimate, SimulationFidelity, StressComponent, Study } from "@opencae/schema";
+import { compatibleManufacturingProcessesFor, defaultManufacturingParametersFor, defaultManufacturingProcessIdFor, effectiveMaterialProperties, fdmPropertyFactorsFor, isManufacturingProcessCompatible, manufacturingParametersForAssignment, manufacturingProcessForId, massKgForPayloadMaterial, materialCatalog, materialCategoryLabel, normalizeManufacturingParameters, payloadMaterialForId, payloadMaterials, type ManufacturingParameters, type ManufacturingProcessId, type PayloadMaterialCategory } from "@opencae/materials";
+import { assessResultFailure, estimateAllowableLoadForSafetyFactor, isModalResultSummary } from "@opencae/schema";
+import type { Constraint, CustomMaterial, DisplayFace, DisplayModel, DynamicSolverSettings, Load, LoadCase, LoadCombination, Material, MeshConvergenceRecord, MeshQuality, ModalResultSummary, ModalSolverSettings, Project, ResultField, ResultSummary, RunTimingEstimate, RunVariantRef, SimulationFidelity, StructuralResultSummary, Study } from "@opencae/schema";
 import { inferGlobalCriticalPrintAxis } from "@opencae/study-core";
 import type { StepId } from "./StepBar";
 import { applicationPointForLoad, createViewerLoadMarkers, directionLabelForLoad, directionVectorForLabel, equivalentForceForLoad, LOAD_DIRECTION_LABELS, loadMarkerOrdinalLabel, payloadObjectForLoad, unitsForLoadType, type LoadApplicationPoint, type LoadDirectionLabel, type LoadType, type PayloadLoadMetadata, type PayloadMassMode } from "../loadPreview";
-import type { PayloadObjectSelection, ResultMode, ViewMode } from "../workspaceViewTypes";
+import { DEFAULT_SECTION_PLANE, type PayloadObjectSelection, type ResultMode, type SectionPlaneState, type StressComponent, type ViewMode } from "../workspaceViewTypes";
 import { availableStressComponents, type ResolvedResultProbe } from "../resultSelection";
 import type { SampleAnalysisType, SampleModelId } from "../lib/api";
 import type { WasmMeshPhaseProgress } from "../lib/wasmMeshing";
+import { defaultConvergenceProbe, type ConvergenceProbe } from "../meshConvergence";
 import { stepGeometryMetadataForProject } from "../stepGeometryState";
 import { dimensionValuesForDisplayModel } from "../modelDimensions";
 import { formatModelOrientation, getModelOrientation, type RotationAxis } from "../modelOrientation";
@@ -52,9 +53,11 @@ interface RightPanelProps {
   selectedFace: DisplayFace | null;
   viewMode: ViewMode;
   resultMode: ResultMode;
+  selectedModeIndex?: number;
   stressComponent?: StressComponent;
   showDeformed: boolean;
   showDimensions: boolean;
+  sectionPlane?: SectionPlaneState;
   stressExaggeration: number;
   resultSummary: ResultSummary | null;
   resultFields?: ResultField[];
@@ -72,6 +75,9 @@ interface RightPanelProps {
   resultProbeLimitReached?: boolean;
   onRemoveResultProbe?: (probeId: string) => void;
   onClearResultProbes?: () => void;
+  resultVariants?: RunVariantRef[];
+  activeResultVariantId?: string;
+  onResultVariantChange?: (variantId: string) => void | Promise<void>;
   runProgress: number;
   runError?: string | null;
   runTiming?: RunTimingEstimate | null;
@@ -100,11 +106,15 @@ interface RightPanelProps {
   onSampleAnalysisTypeChange?: (analysisType: SampleAnalysisType) => void;
   onViewModeChange: (mode: ViewMode) => void;
   onResultModeChange: (mode: ResultMode) => void;
+  onSelectedModeIndexChange?: (modeIndex: number) => void;
   onStressComponentChange?: (component: StressComponent) => void;
   onToggleDeformed: () => void;
   onToggleDimensions: () => void;
+  onSectionPlaneChange?: (state: SectionPlaneState) => void;
   onStressExaggerationChange: (value: number) => void;
   onAssignMaterial: (materialId: string, parameters?: Record<string, unknown>) => void;
+  onSaveCustomMaterial?: (material: CustomMaterial) => void;
+  onDeleteCustomMaterial?: (materialId: string) => void;
   /** null suppresses the preview while editing; undefined clears the preview so the assigned orientation shows again. */
   onPreviewPrintLayerOrientation?: (orientation: "x" | "y" | "z" | null | undefined) => void;
   onAddSupport: (selectionRef?: string) => void;
@@ -118,9 +128,13 @@ interface RightPanelProps {
   onUpdateLoad: (load: Load) => void;
   onPreviewLoadEdit: (load: Load | null) => void;
   onRemoveLoad: (loadId: string) => void;
+  onLoadCasesChange?: (loadCases: LoadCase[], loadCombinations: LoadCombination[]) => void;
   onGenerateMesh: (preset: MeshQuality) => void;
   onCancelMesh?: () => void;
   meshPhaseProgress?: WasmMeshPhaseProgress | null;
+  onRunMeshConvergence?: (caseId: string, probe: ConvergenceProbe) => void;
+  convergenceBusy?: boolean;
+  convergenceProgress?: string;
   onUpdateSolverSettings?: (settings: SolverSettingsPatch) => void;
   onChangeStudyType?: (type: Study["type"]) => void;
   onRunSimulation: () => void;
@@ -144,7 +158,7 @@ interface RightPanelProps {
 
 const EMPTY_PARAMETERS: Record<string, unknown> = {};
 const noopDraftPayloadPreviewChange = () => undefined;
-type SolverSettingsPatch = Partial<DynamicSolverSettings> & { fidelity?: SimulationFidelity };
+type SolverSettingsPatch = Partial<DynamicSolverSettings & ModalSolverSettings> & { fidelity?: SimulationFidelity };
 const MESH_PRESETS: MeshQuality[] = ["coarse", "medium", "fine", "ultra"];
 const SIMULATION_FIDELITIES: SimulationFidelity[] = ["standard", "detailed", "ultra"];
 
@@ -170,7 +184,7 @@ export function RightPanel(props: RightPanelProps) {
   );
 }
 
-function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sampleModel, sampleAnalysisType = "static_stress", onFitView, onRotateModel, onResetModelOrientation, onViewModeChange, onToggleDimensions, onLoadSample, onUploadModel, onRepairModel, isRepairingModel = false, onSampleModelChange, onSampleAnalysisTypeChange }: RightPanelProps) {
+function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sectionPlane = DEFAULT_SECTION_PLANE, sampleModel, sampleAnalysisType = "static_stress", onFitView, onRotateModel, onResetModelOrientation, onViewModeChange, onToggleDimensions, onSectionPlaneChange, onLoadSample, onUploadModel, onRepairModel, isRepairingModel = false, onSampleModelChange, onSampleAnalysisTypeChange }: RightPanelProps) {
   const [confirmSampleLoad, setConfirmSampleLoad] = useState(false);
   const [pendingSampleModel, setPendingSampleModel] = useState<SampleModelId>(sampleModel);
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
@@ -320,6 +334,39 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sa
       </button>
       <HelpNote helpId="dimensions" />
       {showDimensions && <ModelDimensions displayModel={displayModel} />}
+      <SectionTitle>Open section</SectionTitle>
+      <button
+        className={sectionPlane.enabled ? "primary wide" : "secondary wide"}
+        type="button"
+        aria-pressed={sectionPlane.enabled}
+        onClick={() => onSectionPlaneChange?.({ ...sectionPlane, enabled: !sectionPlane.enabled })}
+      >
+        <ScanLine size={16} />
+        {sectionPlane.enabled ? "Close section" : "Open section"}
+      </button>
+      {sectionPlane.enabled ? (
+        <div className="section-plane-controls">
+          <div className="segmented" role="group" aria-label="Section plane axis">
+            {(["x", "y", "z"] as const).map((axis) => (
+              <button
+                key={axis}
+                className={sectionPlane.axis === axis ? "active" : ""}
+                type="button"
+                aria-pressed={sectionPlane.axis === axis}
+                onClick={() => onSectionPlaneChange?.({ ...sectionPlane, axis })}
+              >{axis.toUpperCase()}</button>
+            ))}
+          </div>
+          <label className="field">
+            <span>Normalized offset · {Math.round(sectionPlane.offset * 100)}%</span>
+            <input type="range" min="0" max="1" step="0.01" value={sectionPlane.offset} onChange={(event) => onSectionPlaneChange?.({ ...sectionPlane, offset: Number(event.currentTarget.value) })} />
+          </label>
+          <button className="secondary wide" type="button" onClick={() => onSectionPlaneChange?.({ ...sectionPlane, flipped: !sectionPlane.flipped })}>
+            <RotateCcw size={15} />Flip cut side
+          </button>
+          <p className="panel-copy">Geometry, mesh, result contours, feature edges, and the undeformed outline are clipped. Loads, supports, probes, and annotations stay visible.</p>
+        </div>
+      ) : null}
       <SectionTitle helpId="orientation">Orientation</SectionTitle>
       <div className="orientation-controls" role="group" aria-label="Axis view">
         {(["x", "y", "z"] as const).map((axis) => (
@@ -354,26 +401,30 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sa
   );
 }
 
-function MaterialPanel({ project, displayModel, study, onAssignMaterial, onPreviewPrintLayerOrientation }: RightPanelProps) {
+function MaterialPanel({ project, displayModel, study, onAssignMaterial, onSaveCustomMaterial, onDeleteCustomMaterial, onPreviewPrintLayerOrientation }: RightPanelProps) {
+  const materials = useMemo(() => materialCatalog(project.customMaterials), [project.customMaterials]);
+  const defaultMaterial = materials[0]!;
   const currentAssignment = study.materialAssignments[0];
   const current = currentAssignment?.materialId ?? "mat-aluminum-6061";
   const currentParameters = currentAssignment?.parameters ?? EMPTY_PARAMETERS;
-  const [selectedMaterialId, setSelectedMaterialId] = useState(current);
+  const initialMaterial = materialForId(current, materials) ?? defaultMaterial;
+  const [selectedMaterialId, setSelectedMaterialId] = useState(initialMaterial.id);
   const [manufacturingParameters, setManufacturingParameters] = useState<ManufacturingParameters>(() =>
-    normalizeManufacturingParameters(materialForId(current), currentParameters)
+    normalizeManufacturingParameters(initialMaterial, currentParameters)
   );
   const [showLibrary, setShowLibrary] = useState(false);
   const [compatibilityNote, setCompatibilityNote] = useState<string | null>(null);
 
   useEffect(() => {
-    const material = materialForId(current);
-    setSelectedMaterialId(current);
+    const material = materialForId(current, materials) ?? defaultMaterial;
+    setSelectedMaterialId(material.id);
     setManufacturingParameters(normalizeManufacturingParameters(material, currentParameters));
     setCompatibilityNote(null);
-  }, [current, currentParameters]);
+  }, [current, currentParameters, defaultMaterial, materials]);
 
-  const selectedMaterial = materialForId(selectedMaterialId);
-  const assignedMaterial = materialForId(current);
+  const selectedMaterial = materialForId(selectedMaterialId, materials) ?? defaultMaterial;
+  const resolvedAssignedMaterial = materialForId(current, materials);
+  const assignedMaterial = resolvedAssignedMaterial ?? defaultMaterial;
   const selectedProcessId = manufacturingParameters.manufacturingProcessId ?? defaultManufacturingProcessIdFor(selectedMaterial);
   const selectedProcess = manufacturingProcessForId(selectedProcessId)!;
   const compatibleProcesses = compatibleManufacturingProcessesFor(selectedMaterial);
@@ -398,7 +449,8 @@ function MaterialPanel({ project, displayModel, study, onAssignMaterial, onPrevi
   }, [manufacturingParameters.layerOrientation, onPreviewPrintLayerOrientation, processUsesBuildDirection]);
 
   function handleMaterialChange(materialId: string) {
-    const material = materialForId(materialId);
+    const material = materialForId(materialId, materials);
+    if (!material) return;
     const previousProcessId = manufacturingParameters.manufacturingProcessId;
     const canKeepProcess = previousProcessId ? isManufacturingProcessCompatible(material, previousProcessId) : false;
     const nextProcessId = canKeepProcess ? previousProcessId! : defaultManufacturingProcessIdFor(material);
@@ -537,6 +589,11 @@ function MaterialPanel({ project, displayModel, study, onAssignMaterial, onPrevi
         selectedMaterialId={selectedMaterialId}
         assignedSelectionLabel={assignedSelectionLabel}
         unitSystem={project.unitSystem}
+        materials={materials}
+        customMaterialIds={project.customMaterials?.map((material) => material.id)}
+        assignedMaterialIds={project.studies.flatMap((candidate) => candidate.materialAssignments.map((assignment) => assignment.materialId))}
+        onSaveCustomMaterial={onSaveCustomMaterial}
+        onDeleteCustomMaterial={onDeleteCustomMaterial}
         onApply={(materialId) => {
           handleMaterialChange(materialId);
           setShowLibrary(false);
@@ -544,9 +601,10 @@ function MaterialPanel({ project, displayModel, study, onAssignMaterial, onPrevi
         onClose={() => setShowLibrary(false)}
       />
       <SectionTitle>Assigned</SectionTitle>
+      {currentAssignment && !resolvedAssignedMaterial ? <Callout>Unknown material “{currentAssignment.materialId}”. Choose a valid material before solving.</Callout> : null}
       {currentAssignment ? (
         <div className="concept-card-list">
-          <ConceptCard icon={<Check size={18} />} title={assignedMaterial.name} detail={`${assignedSelectionLabel} · ${assignedDetail}`} tone="accent" />
+          <ConceptCard icon={<Check size={18} />} title={resolvedAssignedMaterial?.name ?? currentAssignment.materialId} detail={`${assignedSelectionLabel} · ${resolvedAssignedMaterial ? assignedDetail : "Unresolved material"}`} tone="accent" />
         </div>
       ) : (
         <Callout>No material assigned</Callout>
@@ -598,22 +656,36 @@ function LoadsPanel({
   onAddLoad,
   onUpdateLoad,
   onPreviewLoadEdit,
-  onRemoveLoad
+  onRemoveLoad,
+  onLoadCasesChange
 }: RightPanelProps) {
   const selectedFromViewport = selectedFace ? selectionForFace(study, selectedFace.id) : undefined;
-  const placementSelection = draftLoadType === "gravity" ? undefined : selectedFromViewport;
+  const bodySelection = study.namedSelections.find((selection) => selection.entityType === "body");
+  const placementSelection = draftLoadType === "gravity" ? undefined : draftLoadType === "volume_force" ? bodySelection : selectedFromViewport;
   const units = unitsForLoadType(draftLoadType);
   const valueLabel = draftLoadType === "gravity" ? "Payload mass" : "Magnitude";
   const addLabel = draftLoadType === "gravity" ? "Add payload mass" : "Add load";
   const [payloadMaterialId, setPayloadMaterialId] = useState("payload-steel");
   const [payloadMassMode, setPayloadMassMode] = useState<PayloadMassMode>("material");
+  const [remotePoint, setRemotePoint] = useState<LoadApplicationPoint>(() => selectedLoadPoint ?? selectedFace?.center ?? [0, 0, 0]);
+  const secondaryFaceOptions = useMemo(
+    () => study.namedSelections.filter((selection) => selection.entityType === "face" && selection.id !== selectedFromViewport?.id),
+    [selectedFromViewport?.id, study.namedSelections]
+  );
+  const [secondarySelectionRef, setSecondarySelectionRef] = useState(secondaryFaceOptions[0]?.id ?? "");
   const payloadVolumeM3 = selectedPayloadObject?.volumeM3;
   const calculatedPayloadMass = payloadVolumeM3 ? massKgForPayloadMaterial(payloadMaterialId, payloadVolumeM3) : 0;
   const effectiveDraftValue = draftLoadType === "gravity" && payloadMassMode === "material" && calculatedPayloadMass > 0 ? calculatedPayloadMass : draftLoadValue;
   const displayDraftLoad = loadValueForUnits(effectiveDraftValue, units, project.unitSystem);
   const selectedPayloadMaterial = payloadMaterialForId(payloadMaterialId);
   const canAddPayloadMass = payloadMassMode === "manual" ? draftLoadValue > 0 : calculatedPayloadMass > 0;
-  const canAddDraftLoad = draftLoadType === "gravity" ? Boolean(selectedPayloadObject) && canAddPayloadMass : Boolean(selectedFace && selectedLoadPoint);
+  const canAddDraftLoad = draftLoadType === "gravity"
+    ? Boolean(selectedPayloadObject) && canAddPayloadMass
+    : draftLoadType === "volume_force"
+      ? Boolean(bodySelection)
+      : draftLoadType === "bolt_preload"
+        ? Boolean(selectedFace && secondarySelectionRef)
+        : Boolean(selectedFace);
   const payloadMetadata: PayloadLoadMetadata = draftLoadType === "gravity"
     ? {
       payloadMaterialId,
@@ -632,8 +704,27 @@ function LoadsPanel({
         : null
     );
   }, [draftLoadType, effectiveDraftValue, onDraftPayloadPreviewChange, payloadMassMode, payloadMaterialId, payloadVolumeM3]);
+  useEffect(() => {
+    if (draftLoadType === "remote_force" && selectedLoadPoint) setRemotePoint(selectedLoadPoint);
+  }, [draftLoadType, selectedLoadPoint]);
+  useEffect(() => {
+    if (!secondaryFaceOptions.some((selection) => selection.id === secondarySelectionRef)) {
+      setSecondarySelectionRef(secondaryFaceOptions[0]?.id ?? "");
+    }
+  }, [secondaryFaceOptions, secondarySelectionRef]);
+  const loadCases = study.type === "modal_analysis" ? [] : structuralLoadCasesForPanel(study);
+  const loadCombinations = study.type === "static_stress" ? study.loadCombinations ?? [] : [];
+  function assignLoadToCase(loadId: string, caseId: string) {
+    if (!onLoadCasesChange) return;
+    onLoadCasesChange(loadCases.map((loadCase) => ({
+      ...loadCase,
+      loadIds: loadCase.id === caseId
+        ? [...loadCase.loadIds.filter((id) => id !== loadId), loadId]
+        : loadCase.loadIds.filter((id) => id !== loadId)
+    })), loadCombinations);
+  }
   return (
-    <Panel title="Loads" helper={draftLoadType === "gravity" ? "Choose the object carrying payload mass, then add its weight as a load." : "Select a point on the model, then click Add load."}>
+    <Panel title="Loads" helper={draftLoadType === "gravity" ? "Choose the object carrying payload mass, then add its weight as a load." : draftLoadType === "volume_force" ? "Apply a force density to the selected structural body." : "Select a face on the model, then add the load."}>
       <HelpNote helpId="loadPlacement" />
       <PlacementReadout
         selectedRef={placementSelection}
@@ -642,22 +733,22 @@ function LoadsPanel({
       />
       <div className="field">
         <HelpLabel helpId="loadType">Load type</HelpLabel>
-        <div className="segmented" role="group" aria-label="Load type">
-          {(["force", "pressure", "gravity"] as const).map((type) => (
-            <button
-              key={type}
-              className={draftLoadType === type ? "active" : ""}
-              type="button"
-              aria-pressed={draftLoadType === type}
-              onClick={() => {
-                onDraftLoadTypeChange(type);
-                if (type !== draftLoadType) onDraftLoadValueChange(defaultValueForLoadType(type));
-              }}
-            >
-              {loadTypeLabel(type)}
-            </button>
-          ))}
-        </div>
+        <select
+          value={draftLoadType}
+          onChange={(event) => {
+            const type = event.currentTarget.value as LoadType;
+            onDraftLoadTypeChange(type);
+            if (type !== draftLoadType) onDraftLoadValueChange(defaultValueForLoadType(type));
+          }}
+        >
+          <option value="force">Face force (total)</option>
+          <option value="pressure">Pressure</option>
+          <option value="surface_traction">Surface traction</option>
+          <option value="volume_force">Volume force</option>
+          <option value="remote_force">Remote force</option>
+          {study.type === "static_stress" ? <option value="bolt_preload">Equivalent bolt preload</option> : null}
+          <option value="gravity">Payload mass</option>
+        </select>
       </div>
       {draftLoadType === "gravity" ? (
         <PayloadMassControls
@@ -691,6 +782,31 @@ function LoadsPanel({
           <Callout>{formatEquivalentForce(equivalentForceForLoad({ type: "gravity", parameters: { value: effectiveDraftValue } }), project.unitSystem)} equivalent weight.</Callout>
         </>
       )}
+      {draftLoadType === "force" ? <Callout>Face force is a total force distributed over the selected face. Its visual point does not affect the solve.</Callout> : null}
+      {draftLoadType === "remote_force" ? (
+        <fieldset className="field">
+          <legend>Remote point coordinates</legend>
+          <div className="vector-inputs">
+            {(["X", "Y", "Z"] as const).map((axis, index) => (
+              <label key={axis}>{axis}<input type="number" value={remotePoint[index]} onChange={(event) => {
+                const next = [...remotePoint] as LoadApplicationPoint;
+                next[index] = Number(event.currentTarget.value);
+                setRemotePoint(next);
+              }} /></label>
+            ))}
+          </div>
+          <small>Distributed force and moment only; this is not a rigid MPC coupling.</small>
+        </fieldset>
+      ) : null}
+      {draftLoadType === "bolt_preload" ? (
+        <>
+          <label className="field">Opposing face<select value={secondarySelectionRef} onChange={(event) => setSecondarySelectionRef(event.currentTarget.value)}>
+            <option value="">Choose a different face</option>
+            {secondaryFaceOptions.map((selection) => <option key={selection.id} value={selection.id}>{selection.name}</option>)}
+          </select></label>
+          <Callout>Bonded-linear approximation only: no contact, slip, or fastener stiffness.</Callout>
+        </>
+      ) : null}
       <label className="field">
         <HelpLabel helpId="loadDirection">Direction</HelpLabel>
         <select value={draftLoadDirection} onChange={(event) => onDraftLoadDirectionChange(event.currentTarget.value as LoadDirectionLabel)}>
@@ -699,8 +815,26 @@ function LoadsPanel({
           ))}
         </select>
       </label>
-      <button className="outline-action wide" disabled={!canAddDraftLoad} onClick={() => canAddDraftLoad && onAddLoad(draftLoadType, effectiveDraftValue, selectedFromViewport?.id, draftLoadDirection, payloadMetadata)}><Plus size={18} />{addLabel}</button>
-      <LoadEditorList study={study} displayModel={displayModel} unitSystem={project.unitSystem} onUpdateLoad={onUpdateLoad} onPreviewLoadEdit={onPreviewLoadEdit} onRemoveLoad={onRemoveLoad} />
+      <button className="outline-action wide" disabled={!canAddDraftLoad} onClick={() => canAddDraftLoad && onAddLoad(
+        draftLoadType,
+        effectiveDraftValue,
+        placementSelection?.id,
+        draftLoadDirection,
+        {
+          ...payloadMetadata,
+          ...(draftLoadType === "remote_force" ? { remotePoint } : {}),
+          ...(draftLoadType === "bolt_preload" ? { secondarySelectionRef } : {})
+        }
+      )}><Plus size={18} />{addLabel}</button>
+      {study.type !== "modal_analysis" && (
+        <LoadCasesEditor
+          studyType={study.type}
+          loadCases={loadCases}
+          loadCombinations={loadCombinations}
+          onChange={(cases, combinations) => onLoadCasesChange?.(cases, combinations)}
+        />
+      )}
+      <LoadEditorList study={study} displayModel={displayModel} unitSystem={project.unitSystem} loadCases={loadCases} onAssignLoadToCase={assignLoadToCase} onUpdateLoad={onUpdateLoad} onPreviewLoadEdit={onPreviewLoadEdit} onRemoveLoad={onRemoveLoad} />
     </Panel>
   );
 }
@@ -790,7 +924,92 @@ function PayloadMassControls({
   );
 }
 
-function LoadEditorList({ study, displayModel, unitSystem, onUpdateLoad, onPreviewLoadEdit, onRemoveLoad }: { study: Study; displayModel: DisplayModel; unitSystem: UnitSystem; onUpdateLoad: (load: Load) => void; onPreviewLoadEdit: (load: Load | null) => void; onRemoveLoad: (loadId: string) => void }) {
+function LoadCasesEditor({ studyType, loadCases, loadCombinations, onChange }: {
+  studyType: "static_stress" | "dynamic_structural";
+  loadCases: LoadCase[];
+  loadCombinations: LoadCombination[];
+  onChange: (loadCases: LoadCase[], loadCombinations: LoadCombination[]) => void;
+}) {
+  const referencedCaseIds = new Set(loadCombinations.flatMap((combination) => combination.factors.map((factor) => factor.caseId)));
+  const updateCase = (caseId: string, patch: Partial<LoadCase>) => onChange(
+    loadCases.map((loadCase) => loadCase.id === caseId ? { ...loadCase, ...patch } : loadCase),
+    loadCombinations
+  );
+  const updateCombination = (combinationId: string, patch: Partial<LoadCombination>) => onChange(
+    loadCases,
+    loadCombinations.map((combination) => combination.id === combinationId ? { ...combination, ...patch } : combination)
+  );
+  return (
+    <section className="load-case-editor" aria-label="Load cases">
+      <SectionTitle>Load cases</SectionTitle>
+      {loadCases.map((loadCase) => {
+        const canDelete = loadCases.length > 1 && loadCase.loadIds.length === 0 && !referencedCaseIds.has(loadCase.id);
+        return (
+          <div className="load-case-row" key={loadCase.id}>
+            <input aria-label={`Load case name ${loadCase.name}`} value={loadCase.name} onChange={(event) => updateCase(loadCase.id, { name: event.currentTarget.value || "Untitled case" })} />
+            <label className="toggle compact-toggle">
+              <input type="checkbox" checked={loadCase.enabled} onChange={(event) => updateCase(loadCase.id, { enabled: event.currentTarget.checked })} />
+              <span>Enabled</span>
+            </label>
+            <small>{loadCase.loadIds.length} load{loadCase.loadIds.length === 1 ? "" : "s"}</small>
+            <button type="button" className="remove-glyph" aria-label={`Delete load case ${loadCase.name}`} disabled={!canDelete} onClick={() => onChange(loadCases.filter((candidate) => candidate.id !== loadCase.id), loadCombinations)}><X size={15} /></button>
+          </div>
+        );
+      })}
+      <button className="secondary wide" type="button" onClick={() => onChange([
+        ...loadCases,
+        { id: `case-${crypto.randomUUID()}`, name: `Case ${loadCases.length + 1}`, enabled: true, loadIds: [] }
+      ], loadCombinations)}><Plus size={16} />Add load case</button>
+      {studyType === "static_stress" && (
+        <>
+          <SectionTitle>Combinations</SectionTitle>
+          {loadCombinations.map((combination) => (
+            <div className="load-combination-row" key={combination.id}>
+              <input aria-label={`Combination name ${combination.name}`} value={combination.name} onChange={(event) => updateCombination(combination.id, { name: event.currentTarget.value || "Untitled combination" })} />
+              <label className="toggle compact-toggle">
+                <input type="checkbox" checked={combination.enabled} onChange={(event) => updateCombination(combination.id, { enabled: event.currentTarget.checked })} />
+                <span>Enabled</span>
+              </label>
+              {combination.factors.map((factor) => (
+                <label className="combination-factor" key={factor.caseId}>
+                  <span>{loadCases.find((loadCase) => loadCase.id === factor.caseId)?.name ?? factor.caseId}</span>
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={factor.factor}
+                    onChange={(event) => updateCombination(combination.id, {
+                      factors: combination.factors.map((candidate) => candidate.caseId === factor.caseId
+                        ? { ...candidate, factor: Number.isFinite(Number(event.currentTarget.value)) ? Number(event.currentTarget.value) : 0 }
+                        : candidate)
+                    })}
+                  />
+                </label>
+              ))}
+              <button type="button" className="secondary" onClick={() => onChange(loadCases, loadCombinations.filter((candidate) => candidate.id !== combination.id))}>Delete combination</button>
+            </div>
+          ))}
+          <button className="secondary wide" type="button" disabled={!loadCases.length} onClick={() => onChange(loadCases, [
+            ...loadCombinations,
+            {
+              id: `combination-${crypto.randomUUID()}`,
+              name: `Combination ${loadCombinations.length + 1}`,
+              enabled: true,
+              factors: loadCases.slice(0, 2).map((loadCase) => ({ caseId: loadCase.id, factor: 1 }))
+            }
+          ])}><Plus size={16} />Add combination</button>
+        </>
+      )}
+    </section>
+  );
+}
+
+function structuralLoadCasesForPanel(study: Extract<Study, { type: "static_stress" | "dynamic_structural" }>): LoadCase[] {
+  return study.loadCases?.length
+    ? study.loadCases
+    : [{ id: "case-default", name: "Default", enabled: true, loadIds: study.loads.map((load) => load.id) }];
+}
+
+function LoadEditorList({ study, displayModel, unitSystem, loadCases, onAssignLoadToCase, onUpdateLoad, onPreviewLoadEdit, onRemoveLoad }: { study: Study; displayModel: DisplayModel; unitSystem: UnitSystem; loadCases: LoadCase[]; onAssignLoadToCase: (loadId: string, caseId: string) => void; onUpdateLoad: (load: Load) => void; onPreviewLoadEdit: (load: Load | null) => void; onRemoveLoad: (loadId: string) => void }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   if (!study.loads.length) return <EmptyEditableList title="Loads" />;
   const loadLabelsById = new Map(createViewerLoadMarkers({ study, displayModel }).map((marker) => [marker.id, loadMarkerOrdinalLabel(marker)]));
@@ -812,6 +1031,7 @@ function LoadEditorList({ study, displayModel, unitSystem, onUpdateLoad, onPrevi
           : applicationPointForLoad(load) ? " · point load" : "";
         const equivalentForce = load.type === "gravity" ? ` · ${formatEquivalentForce(equivalentForceForLoad(load), unitSystem)} weight` : "";
         const loadLabel = loadLabelsById.get(load.id);
+        const loadCaseId = loadCases.find((loadCase) => loadCase.loadIds.includes(load.id))?.id ?? loadCases[0]?.id ?? "";
         const editLabel = `Edit ${loadLabel ? `${loadLabel} ` : ""}${load.type} load`;
         const beginEdit = () => setEditingId(load.id);
         return (
@@ -832,6 +1052,14 @@ function LoadEditorList({ study, displayModel, unitSystem, onUpdateLoad, onPrevi
               <span className={`item-icon load-type-icon ${load.type}`}><LoadTypeIcon type={load.type} /></span>
               <strong>{loadLabel ? `${loadLabel} · ` : ""}{loadTypeLabel(load.type)} · {formatNumber(displayLoad.value)} {displayLoad.units}</strong>
               <small>{label}{pointLabel} · {directionOptionLabel(directionLabelForLoad(load, displayModel, selectedFace))} direction{equivalentForce}</small>
+              {loadCases.length > 1 && (
+                <label className="load-case-assignment" onClick={(event) => event.stopPropagation()}>
+                  <span>Case</span>
+                  <select value={loadCaseId} onChange={(event) => onAssignLoadToCase(load.id, event.currentTarget.value)}>
+                    {loadCases.map((loadCase) => <option key={loadCase.id} value={loadCase.id}>{loadCase.name}</option>)}
+                  </select>
+                </label>
+              )}
               <button
                 className="remove-glyph"
                 type="button"
@@ -867,17 +1095,24 @@ function LoadEditorList({ study, displayModel, unitSystem, onUpdateLoad, onPrevi
 }
 
 function LoadEditForm({ load, study, displayModel, unitSystem, onSave, onCancel, onPreviewChange }: { load: Load; study: Study; displayModel: DisplayModel; unitSystem: UnitSystem; onSave: (load: Load) => void; onCancel: () => void; onPreviewChange: (load: Load | null) => void }) {
-  const [type, setType] = useState<"force" | "pressure" | "gravity">(load.type);
+  const [type, setType] = useState<LoadType>(load.type);
   const [value, setValue] = useState(() => {
     const initialUnits = String(load.parameters.units ?? unitsForLoadType(load.type));
     return formatInputValue(loadValueForUnits(Number(load.parameters.value ?? 500), initialUnits, unitSystem).value);
   });
   const selectedRef = study.namedSelections.find((selection) => selection.id === load.selectionRef);
+  const selectionIsBody = selectedRef?.entityType === "body";
   const selectedFace = selectedRef?.geometryRefs[0];
   const selectedDisplayFace = displayModel.faces.find((face) => face.id === selectedFace?.entityId);
   const [direction, setDirection] = useState<LoadDirectionLabel>(directionLabelForLoad(load, displayModel, selectedDisplayFace));
   const [payloadMaterialId, setPayloadMaterialId] = useState(String(load.parameters.payloadMaterialId ?? "payload-steel"));
   const [payloadMassMode, setPayloadMassMode] = useState<PayloadMassMode>(load.parameters.payloadMassMode === "manual" ? "manual" : "material");
+  const [remotePoint, setRemotePoint] = useState<LoadApplicationPoint>(() => finiteVector3(load.parameters.remotePoint) ?? selectedDisplayFace?.center ?? [0, 0, 0]);
+  const secondaryFaceOptions = useMemo(
+    () => study.namedSelections.filter((selection) => selection.entityType === "face" && selection.id !== load.selectionRef),
+    [load.selectionRef, study.namedSelections]
+  );
+  const [secondarySelectionRef, setSecondarySelectionRef] = useState(typeof load.parameters.secondarySelectionRef === "string" ? load.parameters.secondarySelectionRef : secondaryFaceOptions[0]?.id ?? "");
   const units = unitsForLoadType(type);
   const displayUnits = loadValueForUnits(defaultValueForLoadType(type), units, unitSystem).units;
   const payloadObject = payloadObjectForLoad(load) ?? null;
@@ -888,7 +1123,11 @@ function LoadEditForm({ load, study, displayModel, unitSystem, onSave, onCancel,
   // Memoized on scalar inputs: a fresh object here would retrigger the preview effect every render and loop with the parent setState.
   const payloadMetadata = useMemo<PayloadLoadMetadata>(() => type === "gravity"
     ? { payloadMaterialId, ...(payloadVolumeM3 ? { payloadVolumeM3 } : {}), payloadMassMode }
-    : {}, [payloadMassMode, payloadMaterialId, payloadVolumeM3, type]);
+    : type === "remote_force"
+      ? { remotePoint }
+      : type === "bolt_preload"
+        ? { secondarySelectionRef }
+        : {}, [payloadMassMode, payloadMaterialId, payloadVolumeM3, remotePoint, secondarySelectionRef, type]);
   const selectedPayloadMaterial = payloadMaterialForId(payloadMaterialId);
   const directionFace: DisplayFace = useMemo(() => selectedDisplayFace ?? ({
     id: selectedFace?.entityId ?? "selected-face",
@@ -909,10 +1148,21 @@ function LoadEditForm({ load, study, displayModel, unitSystem, onSave, onCancel,
     <div className="edit-form">
       <label className="field">
         <HelpLabel helpId="loadType">Load type</HelpLabel>
-        <select value={type} onChange={(event) => setType(event.currentTarget.value as "force" | "pressure" | "gravity")}>
-          <option value="force">Force</option>
-          <option value="pressure">Pressure</option>
-          <option value="gravity">Payload mass</option>
+        <select value={type} onChange={(event) => setType(event.currentTarget.value as LoadType)}>
+          {selectionIsBody ? (
+            <>
+              <option value="volume_force">Volume force</option>
+              <option value="gravity">Payload mass</option>
+            </>
+          ) : (
+            <>
+              <option value="force">Face force (total)</option>
+              <option value="pressure">Pressure</option>
+              <option value="surface_traction">Surface traction</option>
+              <option value="remote_force">Remote force</option>
+              {study.type === "static_stress" ? <option value="bolt_preload">Equivalent bolt preload</option> : null}
+            </>
+          )}
         </select>
       </label>
       {type === "gravity" ? (
@@ -941,6 +1191,21 @@ function LoadEditForm({ load, study, displayModel, unitSystem, onSave, onCancel,
         </label>
       )}
       <PlacementReadout selectedRef={selectedRef} />
+      {type === "remote_force" ? (
+        <fieldset className="field"><legend>Remote point coordinates</legend><div className="vector-inputs">
+          {(["X", "Y", "Z"] as const).map((axis, index) => <label key={axis}>{axis}<input type="number" value={remotePoint[index]} onChange={(event) => {
+            const next = [...remotePoint] as LoadApplicationPoint;
+            next[index] = Number(event.currentTarget.value);
+            setRemotePoint(next);
+          }} /></label>)}
+        </div></fieldset>
+      ) : null}
+      {type === "bolt_preload" ? (
+        <label className="field">Opposing face<select value={secondarySelectionRef} onChange={(event) => setSecondarySelectionRef(event.currentTarget.value)}>
+          <option value="">Choose a different face</option>
+          {secondaryFaceOptions.map((selection) => <option key={selection.id} value={selection.id}>{selection.name}</option>)}
+        </select></label>
+      ) : null}
       <label className="field">
         <HelpLabel helpId="loadDirection">Direction</HelpLabel>
         <select value={direction} onChange={(event) => setDirection(event.currentTarget.value as LoadDirectionLabel)}>
@@ -973,13 +1238,19 @@ function editedLoadForForm(load: Load, type: LoadType, value: string, displayUni
       units,
       direction: directionVectorForLabel(direction, directionFace, displayModel),
       directionMode: direction,
-      ...(type === "gravity" ? payloadMetadata : {})
+      ...(type === "gravity" || type === "remote_force" || type === "bolt_preload" ? payloadMetadata : {})
     }
   };
 }
 
 function positiveNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
+function finiteVector3(value: unknown): LoadApplicationPoint | null {
+  return Array.isArray(value) && value.length === 3 && value.every((item) => typeof item === "number" && Number.isFinite(item))
+    ? [value[0], value[1], value[2]]
+    : null;
 }
 
 function SupportEditorList({ study, onUpdateSupport, onRemoveSupport }: { study: Study; onUpdateSupport: (support: Constraint) => void; onRemoveSupport: (supportId: string) => void }) {
@@ -1028,7 +1299,7 @@ function SupportEditorList({ study, onUpdateSupport, onRemoveSupport }: { study:
 }
 
 function LoadTypeIcon({ type }: { type: LoadType }) {
-  if (type === "pressure") return <Gauge size={16} />;
+  if (type === "pressure" || type === "surface_traction") return <Gauge size={16} />;
   if (type === "gravity") return <Weight size={16} />;
   return <ScanLine size={16} />;
 }
@@ -1067,25 +1338,65 @@ function selectionForFace(study: Study, faceId: string) {
   return study.namedSelections.find((item) => item.entityType === "face" && item.geometryRefs.some((ref) => ref.entityId === faceId));
 }
 
-function MeshPanel({ project, study, onGenerateMesh, onCancelMesh, meshPhaseProgress, onRepairModel, isRepairingModel = false }: RightPanelProps) {
+function MeshPanel({ project, displayModel, study, onGenerateMesh, onCancelMesh, meshPhaseProgress, onRepairModel, isRepairingModel = false, onRunMeshConvergence, convergenceBusy = false, convergenceProgress = "" }: RightPanelProps) {
   const [preset, setPreset] = useState<MeshQuality>(study.meshSettings.preset);
   const meshing = Boolean(meshPhaseProgress);
   const stepGeometry = stepGeometryMetadataForProject(project);
   const stepGeometryResolvedByMesh = Boolean(study.meshSettings.summary?.artifacts?.actualCoreModel);
+  const staticStudy = study.type === "static_stress" ? study : null;
+  const convergenceCases = staticStudy ? structuralLoadCasesForPanel(staticStudy).filter((loadCase) => loadCase.enabled && loadCase.loadIds.length) : [];
+  const [convergenceCaseId, setConvergenceCaseId] = useState(convergenceCases[0]?.id ?? "");
+  const initialProbe = staticStudy && convergenceCaseId ? defaultConvergenceProbe(staticStudy, convergenceCaseId, displayModel) : null;
+  const [probeCoordinates, setProbeCoordinates] = useState<[string, string, string]>(() => initialProbe
+    ? initialProbe.point.map((value) => String(value)) as [string, string, string]
+    : ["", "", ""]);
+  const [probeEdited, setProbeEdited] = useState(false);
+  useEffect(() => {
+    if (!staticStudy || !convergenceCases.length) return;
+    const caseId = convergenceCases.some((loadCase) => loadCase.id === convergenceCaseId) ? convergenceCaseId : convergenceCases[0]!.id;
+    if (caseId !== convergenceCaseId) setConvergenceCaseId(caseId);
+    const probe = defaultConvergenceProbe(staticStudy, caseId, displayModel);
+    setProbeCoordinates(probe ? probe.point.map((value) => String(value)) as [string, string, string] : ["", "", ""]);
+    setProbeEdited(false);
+  }, [displayModel, staticStudy?.id, staticStudy?.loads, staticStudy?.loadCases, convergenceCaseId]);
+  const probePoint = probeCoordinates.map(Number) as [number, number, number];
+  const validProbe = probeCoordinates.every((value) => value.trim() !== "") && probePoint.every(Number.isFinite);
+  const latestRecord = [...(project.convergenceRecords ?? [])]
+    .reverse()
+    .find((record) => record.studyId === study.id && record.caseId === convergenceCaseId);
+
+  function selectConvergenceCase(caseId: string) {
+    setConvergenceCaseId(caseId);
+    if (!staticStudy) return;
+    const probe = defaultConvergenceProbe(staticStudy, caseId, displayModel);
+    setProbeCoordinates(probe ? probe.point.map((value) => String(value)) as [string, string, string] : ["", "", ""]);
+    setProbeEdited(false);
+  }
+
+  function runConvergence() {
+    if (!staticStudy || !validProbe || !convergenceCaseId) return;
+    const fallback = defaultConvergenceProbe(staticStudy, convergenceCaseId, displayModel);
+    onRunMeshConvergence?.(convergenceCaseId, {
+      point: probePoint,
+      source: probeEdited ? "explicit" : fallback?.source ?? "explicit",
+      ...(probeEdited ? { label: "Explicit displacement probe" } : fallback?.label ? { label: fallback.label } : {})
+    });
+  }
+
   return (
     <Panel title="Mesh" helper="The mesh breaks the model into small pieces so OpenCAE can calculate results.">
       <div className="field">
         <HelpLabel helpId="meshQuality">Quality preset</HelpLabel>
         <div className="segmented mesh-quality" role="group" aria-label="Mesh quality">
           {MESH_PRESETS.map((option) => (
-            <button key={option} className={preset === option ? "active" : ""} type="button" aria-pressed={preset === option} disabled={meshing} onClick={() => setPreset(option)}>{capitalize(option)}</button>
+            <button key={option} className={preset === option ? "active" : ""} type="button" aria-pressed={preset === option} disabled={meshing || convergenceBusy} onClick={() => setPreset(option)}>{capitalize(option)}</button>
           ))}
         </div>
       </div>
       <button
         className="primary wide"
         type="button"
-        disabled={meshing && !onCancelMesh}
+        disabled={convergenceBusy || (meshing && !onCancelMesh)}
         aria-label={meshing ? "Stop mesh generation" : "Generate mesh"}
         onClick={() => meshing ? onCancelMesh?.() : onGenerateMesh(preset)}
       >
@@ -1140,8 +1451,127 @@ function MeshPanel({ project, study, onGenerateMesh, onCancelMesh, meshPhaseProg
         </div>
       )}
       <p className="panel-copy">Meshing runs locally in your browser at the selected quality; final node and element counts appear with the results.</p>
+      {staticStudy ? (
+        <section className="convergence-card" aria-label="Static mesh convergence">
+          <h3>Mesh convergence</h3>
+          <p className="panel-copy">Runs an isolated static case at coarse, medium, then fine. Your working mesh and active results stay unchanged.</p>
+          <label className="field">
+            <span>Static case</span>
+            <select value={convergenceCaseId} disabled={convergenceBusy} onChange={(event) => selectConvergenceCase(event.currentTarget.value)}>
+              {convergenceCases.map((loadCase) => <option key={loadCase.id} value={loadCase.id}>{loadCase.name}</option>)}
+            </select>
+          </label>
+          <div className="field">
+            <span>Displacement probe ({displayModel.dimensions?.units ?? "model units"})</span>
+            <div className="convergence-probe-grid">
+              {(["X", "Y", "Z"] as const).map((axis, index) => (
+                <label key={axis}>
+                  <span>{axis}</span>
+                  <input
+                    type="number"
+                    value={probeCoordinates[index]}
+                    disabled={convergenceBusy}
+                    onChange={(event) => {
+                      const next = [...probeCoordinates] as [string, string, string];
+                      next[index] = event.currentTarget.value;
+                      setProbeCoordinates(next);
+                      setProbeEdited(true);
+                    }}
+                  />
+                </label>
+              ))}
+            </div>
+          </div>
+          {!validProbe && <p className="panel-warning"><AlertTriangle size={16} />Choose a finite displacement probe point before running convergence.</p>}
+          <button className="secondary wide" type="button" disabled={!onRunMeshConvergence || convergenceBusy || meshing || !validProbe || !convergenceCaseId} onClick={runConvergence}>
+            <ScanLine size={16} />{convergenceBusy ? "Running convergence…" : "Run coarse → medium → fine"}
+          </button>
+          {convergenceBusy && <p className="panel-copy" aria-live="polite">{convergenceProgress || "Running convergence study."}</p>}
+          {latestRecord && <ConvergenceRecordCard record={latestRecord} />}
+        </section>
+      ) : (
+        <p className="panel-copy">Mesh-convergence studies are available for static load cases only.</p>
+      )}
     </Panel>
   );
+}
+
+function ConvergenceRecordCard({ record }: { record: MeshConvergenceRecord }) {
+  const classification = record.classification === "apparent_convergence"
+    ? "Apparent convergence"
+    : record.classification === "unconverged"
+      ? "Unconverged"
+      : "Inconclusive";
+  return (
+    <div className="convergence-record">
+      <strong>{classification}</strong>
+      {record.lastStepChanges && (
+        <small>Last step: displacement {(record.lastStepChanges.displacement * 100).toFixed(1)}% · stress {(record.lastStepChanges.stress * 100).toFixed(1)}%</small>
+      )}
+      <ConvergenceChart record={record} />
+      <div className="convergence-rungs">
+        {record.rungs.map((rung) => (
+          <div key={rung.requestedPreset} className={`convergence-rung ${rung.status}`}>
+            <span>{capitalize(rung.requestedPreset)}</span>
+            <small>{rung.totalDofs?.toLocaleString() ?? "—"} total · {rung.freeDofs?.toLocaleString() ?? "—"} free DOF</small>
+            <small>{rung.actualNodeCount?.toLocaleString() ?? "—"} nodes · {rung.actualElementCount?.toLocaleString() ?? "—"} elements · {formatCompact(rung.actualMeshSizeMm)} mm</small>
+            <small>{rung.status === "complete"
+              ? `${formatCompact(rung.probeDisplacement)} ${rung.displacementUnits} · ${formatCompact(rung.rawElementPeakVonMises)} ${rung.stressUnits}`
+              : rung.skipReason ?? capitalize(rung.status)}</small>
+          </div>
+        ))}
+      </div>
+      <p className="panel-copy">Apparent convergence requires three increasing-DOF rungs, ≤5% displacement change, and ≤10% raw element stress change.</p>
+    </div>
+  );
+}
+
+function ConvergenceChart({ record }: { record: MeshConvergenceRecord }) {
+  const plottable = record.rungs.filter((rung) => rung.totalDofs !== undefined);
+  const complete = plottable.filter((rung) => rung.status === "complete" && rung.probeDisplacement !== undefined && rung.rawElementPeakVonMises !== undefined);
+  if (!plottable.length) return null;
+  const dofs = plottable.map((rung) => rung.totalDofs!);
+  const minDof = Math.min(...dofs);
+  const maxDof = Math.max(...dofs);
+  const x = (dof: number) => 18 + ((dof - minDof) / Math.max(1, maxDof - minDof)) * 204;
+  const normalizedY = (value: number, values: number[]) => {
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    return 82 - ((value - min) / Math.max(Number.EPSILON, max - min)) * 58;
+  };
+  const displacementValues = complete.map((rung) => rung.probeDisplacement!);
+  const stressValues = complete.map((rung) => rung.rawElementPeakVonMises!);
+  const displacementPoints = complete.map((rung) => `${x(rung.totalDofs!)},${normalizedY(rung.probeDisplacement!, displacementValues)}`).join(" ");
+  const stressPoints = complete.map((rung) => `${x(rung.totalDofs!)},${normalizedY(rung.rawElementPeakVonMises!, stressValues)}`).join(" ");
+  return (
+    <svg className="convergence-chart" viewBox="0 0 240 112" role="img" aria-label="Probe displacement and raw element peak stress versus actual degrees of freedom">
+      <title>Convergence metrics versus actual degrees of freedom</title>
+      <line x1="18" y1="86" x2="222" y2="86" className="chart-axis" />
+      <line x1="18" y1="18" x2="18" y2="86" className="chart-axis" />
+      {displacementPoints && <polyline points={displacementPoints} className="chart-displacement" />}
+      {stressPoints && <polyline points={stressPoints} className="chart-stress" />}
+      {complete.map((rung) => (
+        <g key={`point-${rung.requestedPreset}`}>
+          <circle cx={x(rung.totalDofs!)} cy={normalizedY(rung.probeDisplacement!, displacementValues)} r="3" className="chart-displacement" />
+          <circle cx={x(rung.totalDofs!)} cy={normalizedY(rung.rawElementPeakVonMises!, stressValues)} r="3" className="chart-stress" />
+        </g>
+      ))}
+      {plottable.filter((rung) => rung.status !== "complete").map((rung) => (
+        <g key={`skip-${rung.requestedPreset}`} className="chart-skipped" aria-label={`${rung.requestedPreset} ${rung.status}`}>
+          <line x1={x(rung.totalDofs!) - 4} y1="78" x2={x(rung.totalDofs!) + 4} y2="86" />
+          <line x1={x(rung.totalDofs!) + 4} y1="78" x2={x(rung.totalDofs!) - 4} y2="86" />
+        </g>
+      ))}
+      <text x="22" y="104" className="chart-displacement-label">Displacement</text>
+      <text x="100" y="104" className="chart-stress-label">Stress</text>
+      <text x="190" y="104" className="chart-axis-label">DOF</text>
+    </svg>
+  );
+}
+
+function formatCompact(value: number | undefined): string {
+  if (value === undefined || !Number.isFinite(value)) return "—";
+  return Math.abs(value) >= 100 ? value.toFixed(1) : Math.abs(value) >= 1 ? value.toFixed(3) : value.toExponential(3);
 }
 
 function RunPanel({ study, displayModel, runProgress, runError, runTiming, onRunSimulation, onCancelSimulation, canCancelSimulation, onUpdateSolverSettings, onChangeStudyType, canRunSimulation, missingRunItems }: RightPanelProps) {
@@ -1149,13 +1579,14 @@ function RunPanel({ study, displayModel, runProgress, runError, runTiming, onRun
   const isRunning = canCancelSimulation ?? (progressPercent > 0 && progressPercent < 100);
   const remainingLabel = formatSimulationEta(runTiming?.estimatedRemainingMs, isRunning);
   const elapsedLabel = formatSimulationElapsed(runTiming?.elapsedMs);
-  const checks = [
+  const checks: Array<readonly [string, boolean]> = [
     ["Material assigned", study.materialAssignments.length > 0],
     ["Support added", study.constraints.length > 0],
-    ["Load added", study.loads.length > 0],
+    ...(study.type === "modal_analysis" ? [] : [["Load added", study.loads.length > 0] as const]),
     ["Mesh generated", study.meshSettings.status === "complete"]
-  ] as const;
+  ];
   const dynamic = study.type === "dynamic_structural" ? study.solverSettings : null;
+  const modal = study.type === "modal_analysis" ? study.solverSettings : null;
   const fidelity = solverFidelityForStudy(study);
   const updateSolverChoice = (settings: SolverSettingsPatch) => {
     onUpdateSolverSettings?.(settings);
@@ -1174,7 +1605,7 @@ function RunPanel({ study, displayModel, runProgress, runError, runTiming, onRun
   const loadProfile = isDynamicLoadProfile(dynamic?.loadProfile) ? dynamic.loadProfile : "ramp";
   const loadProfileHelper = DYNAMIC_LOAD_PROFILE_OPTIONS.find((option) => option.value === loadProfile)?.helper ?? DEFAULT_DYNAMIC_LOAD_PROFILE_HELPER;
   return (
-    <Panel title="Run" helper="Run the simulation to estimate stress and displacement.">
+    <Panel title="Run" helper={modal ? "Solve for natural frequencies and normalized mode shapes." : "Run the simulation to estimate stress and displacement."}>
       <SectionTitle helpId="runReadiness">Readiness</SectionTitle>
       <div className="checklist">
         {checks.map(([label, done]) => <span key={label} className={done ? "check done" : "check"}><span>{done ? <Check size={18} /> : null}</span>{label}</span>)}
@@ -1202,6 +1633,13 @@ function RunPanel({ study, displayModel, runProgress, runError, runTiming, onRun
             disabled={isRunning}
             onClick={() => study.type !== "dynamic_structural" && onChangeStudyType?.("dynamic_structural")}
           >Dynamic</button>
+          <button
+            className={study.type === "modal_analysis" ? "active" : ""}
+            type="button"
+            aria-pressed={study.type === "modal_analysis"}
+            disabled={isRunning}
+            onClick={() => study.type !== "modal_analysis" && onChangeStudyType?.("modal_analysis")}
+          >Modal</button>
         </div>
       </div>
       <label className="field">
@@ -1231,6 +1669,21 @@ function RunPanel({ study, displayModel, runProgress, runError, runTiming, onRun
           </div>
           {frameEstimate && frameEstimate.count > 1000 && <p className="panel-copy">Large frame counts may slow result loading and playback.</p>}
           {frameEstimate?.hasFinalPartialStep && <p className="panel-copy">Final frame is clamped to the selected end time.</p>}
+        </>
+      )}
+      {modal && (
+        <>
+          <SectionTitle>Modal settings</SectionTitle>
+          <label className="field">
+            <span>Requested modes</span>
+            <select
+              value={modal.modeCount}
+              onChange={(event) => onUpdateSolverSettings?.({ modeCount: Number(event.currentTarget.value) })}
+            >
+              {Array.from({ length: 10 }, (_, index) => index + 1).map((modeCount) => <option key={modeCount} value={modeCount}>{modeCount}</option>)}
+            </select>
+          </label>
+          <p className="panel-copy">Mode shapes are normalized for visualization. Applied loads are not used in modal analysis.</p>
         </>
       )}
       <button
@@ -1365,8 +1818,8 @@ function solverBackendLabelForRunPanel(study: Study, displayModel: DisplayModel)
   return "Local (in-browser)";
 }
 
-function solverMethodForStudy(study: Study): "sparse_static" | "mdof_dynamic" {
-  return study.type === "dynamic_structural" ? "mdof_dynamic" : "sparse_static";
+function solverMethodForStudy(study: Study): "sparse_static" | "mdof_dynamic" | "block_shift_invert_modal" {
+  return study.type === "dynamic_structural" ? "mdof_dynamic" : study.type === "modal_analysis" ? "block_shift_invert_modal" : "sparse_static";
 }
 
 function solverRunnerLabelForStudy(study: Study, displayModel: DisplayModel): string {
@@ -1408,7 +1861,112 @@ function ResultsPanel(props: RightPanelProps) {
       </Panel>
     );
   }
+  if (isModalResultSummary(props.resultSummary)) {
+    return <ModalResultsPanelContent {...props} resultSummary={props.resultSummary} />;
+  }
   return <ResultsPanelContent {...props} resultSummary={props.resultSummary} />;
+}
+
+function ModalResultsPanelContent({
+  resultSummary,
+  resultFields = [],
+  selectedModeIndex = resultSummary.modes[0]?.modeIndex ?? 1,
+  showDeformed,
+  stressExaggeration,
+  resultFrameIndex = 0,
+  resultFramePosition = resultFrameIndex,
+  resultFrameOrdinalPosition,
+  resultPlaybackPlaying = false,
+  resultPlaybackFps = 12,
+  resultPlaybackReverseLoop = false,
+  resultPlaybackCacheLabel = "",
+  onSelectedModeIndexChange,
+  onResultFrameChange,
+  onResultPlaybackToggle,
+  onResultPlaybackFpsChange,
+  onResultPlaybackReverseLoopChange,
+  onToggleDeformed,
+  onStressExaggerationChange
+}: RightPanelProps & { resultSummary: ModalResultSummary }) {
+  const frames = dynamicPlaybackFrames(resultFields);
+  const frameIndexes = frames.map((frame) => frame.frameIndex);
+  const activeFramePosition = resultPlaybackPlaying ? resultFramePosition : resultFrameIndex;
+  const sliderPosition = resultPlaybackPlaying && typeof resultFrameOrdinalPosition === "number"
+    ? resultFrameOrdinalPosition
+    : playbackOrdinalForSolverFramePosition(frameIndexes, activeFramePosition);
+  const phaseDegrees = frames.length ? ((activeFramePosition / frames.length) * 360 + 360) % 360 : 0;
+  const activeMode = resultSummary.modes.find((mode) => mode.modeIndex === selectedModeIndex) ?? resultSummary.modes[0];
+  const resultProvenance = resultSummary.provenance;
+  return (
+    <Panel title="Results" helper="Inspect converged natural frequencies and normalized mode shapes.">
+      {resultSummary.warning && <p className="panel-warning" role="status"><AlertTriangle size={16} />{resultSummary.warning}</p>}
+      <div className="summary-box">
+        <Info label="Converged modes" value={`${resultSummary.convergedModeCount} / ${resultSummary.requestedModeCount}`} />
+        <Info label="Solver method" value="block_shift_invert_modal" />
+        <Info label="Result source" value={resultSourceLabelForPanel(resultSummary)} />
+        <Info label="Runner" value={solverRunnerLabelForResult(resultProvenance)} />
+      </div>
+      <SectionTitle>Modes</SectionTitle>
+      <div className="modal-mode-table" role="list" aria-label="Converged modes">
+        {resultSummary.modes.map((mode) => (
+          <button
+            key={mode.modeIndex}
+            type="button"
+            role="listitem"
+            className={mode.modeIndex === selectedModeIndex ? "primary" : "secondary"}
+            onClick={() => onSelectedModeIndexChange?.(mode.modeIndex)}
+          >
+            <strong>{`Mode ${mode.modeIndex}`}</strong>
+            <span>{`${Number(mode.frequencyHz.toPrecision(6))} Hz`}</span>
+            <small>{`Residual ${mode.scaledResidual.toExponential(2)}`}</small>
+          </button>
+        ))}
+      </div>
+      {activeMode && (
+        <div className="summary-box">
+          <Info label="Frequency" value={`${Number(activeMode.frequencyHz.toPrecision(6))} Hz`} />
+          <Info label="Eigenvalue" value={Number(activeMode.eigenvalue.toPrecision(6)).toString()} />
+          <Info label="Scaled residual" value={activeMode.scaledResidual.toExponential(3)} />
+          <Info label="Shape units" value="normalized" />
+        </div>
+      )}
+      {frames.length > 1 && (
+        <div className="dynamic-playback">
+          <SectionTitle>Phase</SectionTitle>
+          <label className="field range-field">
+            <span className="range-label"><span>Phase</span><strong>{`${phaseDegrees.toFixed(0)}°`}</strong></span>
+            <input
+              className="playback-time-range"
+              type="range"
+              aria-label="Mode phase"
+              min="0"
+              max={Math.max(frames.length - 1, 0)}
+              step={resultPlaybackPlaying ? "0.01" : "1"}
+              value={sliderPosition}
+              onChange={(event) => onResultFrameChange?.(frameIndexForRoundedPlaybackOrdinal(frameIndexes, Number(event.currentTarget.value)))}
+            />
+          </label>
+          <label className="field range-field">
+            <span className="range-label"><span>Animation speed</span><strong>{Math.round(resultPlaybackFps)} fps</strong></span>
+            <input type="range" min="1" max="30" step="1" value={resultPlaybackFps} onChange={(event) => onResultPlaybackFpsChange?.(Number(event.currentTarget.value))} />
+          </label>
+          <label className="toggle playback-loop-toggle">
+            <input type="checkbox" checked={resultPlaybackReverseLoop} onChange={(event) => onResultPlaybackReverseLoopChange?.(event.currentTarget.checked)} />
+            <span>Reverse loop</span>
+          </label>
+          <button className="secondary wide" type="button" onClick={onResultPlaybackToggle}>{resultPlaybackPlaying ? <Pause size={16} /> : <Play size={16} />}{resultPlaybackPlaying ? "Pause" : "Play"}</button>
+          {resultPlaybackCacheLabel && <small className="playback-cache-status">{resultPlaybackCacheLabel}</small>}
+        </div>
+      )}
+      <label className="toggle"><input type="checkbox" checked={showDeformed} onChange={onToggleDeformed} /> Animate mode shape</label>
+      <label className="field range-field">
+        <span className="range-label"><span>Visualization amplitude</span><strong>{stressExaggeration.toFixed(1)}x</strong></span>
+        <input type="range" min="0.5" max="4" step="0.1" value={stressExaggeration} onChange={(event) => onStressExaggerationChange(Number(event.currentTarget.value))} />
+      </label>
+      <p className="panel-copy">Amplitude and phase are visualization-only. Normalized mode shapes are not physical displacements.</p>
+      <div className="legend"><small>Node</small><span /><small>Antinode</small></div>
+    </Panel>
+  );
 }
 
 function ResultsPanelContent({
@@ -1421,6 +1979,8 @@ function ResultsPanelContent({
   resultFields = [],
   resultColorScale,
   resultColorScaleControl,
+  resultVariants = [],
+  activeResultVariantId = resultVariants[0]?.id ?? "",
   resultProbes = [],
   resultProbeLimitReached = false,
   study,
@@ -1438,6 +1998,7 @@ function ResultsPanelContent({
   onResultModeChange,
   onStressComponentChange,
   onResultColorScaleSettingChange,
+  onResultVariantChange,
   onRemoveResultProbe,
   onClearResultProbes,
   onToggleDeformed,
@@ -1449,7 +2010,7 @@ function ResultsPanelContent({
   reportDisabled = false,
   pngExportBusy = false,
   pngExportError
-}: RightPanelProps & { resultSummary: ResultSummary }) {
+}: RightPanelProps & { resultSummary: StructuralResultSummary }) {
   const [targetSafetyFactor, setTargetSafetyFactor] = useState(1.5);
   const [draftStressExaggeration, setDraftStressExaggeration] = useState(stressExaggeration);
   const [draftScaleMin, setDraftScaleMin] = useState(() => String(resultColorScaleControl?.displayMin ?? 0));
@@ -1545,6 +2106,16 @@ function ResultsPanelContent({
 
   return (
     <Panel title="Results" helper="View stress and displacement directly on the 3D model.">
+      {resultVariants.length > 1 && (
+        <label className="field result-variant-selector">
+          <span>Run variant</span>
+          <select value={activeResultVariantId} onChange={(event) => void onResultVariantChange?.(event.currentTarget.value)}>
+            {resultVariants.map((variant) => (
+              <option key={variant.id} value={variant.id}>{variant.name}{variant.kind === "envelope" ? " · envelope" : ""}</option>
+            ))}
+          </select>
+        </label>
+      )}
       {onGenerateReport && (
         <button className="primary wide" type="button" disabled={reportBusy || reportDisabled} onClick={() => void onGenerateReport({ targetSafetyFactor })}>
           <FileDown size={18} />{reportBusy ? "Generating…" : "Generate report"}
@@ -1689,7 +2260,11 @@ function ResultsPanelContent({
             <ol>
               {resultProbes.map((probe, index) => (
                 <li key={probe.id}>
-                  <span><strong>{`P${index + 1}`}</strong><small>{formatProbeReading(probe)}</small></span>
+                  <span>
+                    <strong>{`P${index + 1}`}</strong>
+                    <small>{formatProbeReading(probe)}</small>
+                    {probe.governingVariantName && <small>{`Governed near probe by ${probe.governingVariantName}`}</small>}
+                  </span>
                   {onRemoveResultProbe && <button className="icon-button" type="button" aria-label={`Remove probe ${index + 1}`} onClick={() => onRemoveResultProbe(probe.id)}><X size={14} /></button>}
                 </li>
               ))}
@@ -1770,7 +2345,7 @@ function resultSourceLabelForPanel(resultSummary: ResultSummary): string {
   return label === "OpenCAE Core Local (in-browser)" ? "Local (in-browser)" : label;
 }
 
-function resultContractHasMissingUnits(summary: ResultSummary, fields: ResultField[]): boolean {
+function resultContractHasMissingUnits(summary: StructuralResultSummary, fields: ResultField[]): boolean {
   return !hasResultUnit(summary.maxStressUnits) ||
     !hasResultUnit(summary.maxDisplacementUnits) ||
     !hasResultUnit(summary.reactionForceUnits) ||
@@ -1828,9 +2403,10 @@ const WORKFLOW_STEPS: Array<{ id: StepId; label: string }> = [
 ];
 
 function WorkflowNav({ activeStep, study, onStepSelect }: { activeStep: StepId; study: Study; onStepSelect: (step: StepId) => void }) {
-  const index = WORKFLOW_STEPS.findIndex((step) => step.id === activeStep);
-  const previousStep = index > 0 ? WORKFLOW_STEPS[index - 1] : undefined;
-  const nextStep = index >= 0 && index < WORKFLOW_STEPS.length - 1 ? WORKFLOW_STEPS[index + 1] : undefined;
+  const workflowSteps = study.type === "modal_analysis" ? WORKFLOW_STEPS.filter((step) => step.id !== "loads") : WORKFLOW_STEPS;
+  const index = workflowSteps.findIndex((step) => step.id === activeStep);
+  const previousStep = index > 0 ? workflowSteps[index - 1] : undefined;
+  const nextStep = index >= 0 && index < workflowSteps.length - 1 ? workflowSteps[index + 1] : undefined;
   const canGoNext = Boolean(nextStep && canNavigateToStep(nextStep.id, { meshStatus: study.meshSettings.status }));
   const backLabel = previousStep ? `Back: ${previousStep.label}` : "Back";
   const nextLabel = nextStep ? `Next: ${nextStep.label}` : "Next";
@@ -2016,8 +2592,8 @@ function PlacementReadout({ selectedRef, fallbackLabel, detail }: { selectedRef:
   );
 }
 
-function materialForId(materialId: string) {
-  return starterMaterials.find((material) => material.id === materialId) ?? starterMaterials[0]!;
+function materialForId(materialId: string, materials: readonly Material[]): Material | undefined {
+  return materials.find((material) => material.id === materialId);
 }
 
 function SupportIcon() {
@@ -2051,7 +2627,7 @@ function interpolatedFrameTimeSeconds(frames: Array<{ frameIndex: number; timeSe
   return lower.timeSeconds + (upper.timeSeconds - lower.timeSeconds) * Math.max(0, Math.min(1, blend));
 }
 
-function peakDisplacementFrame(fields: ResultField[], summary: ResultSummary): { value: number; units: string; timeSeconds: number } | null {
+function peakDisplacementFrame(fields: ResultField[], summary: StructuralResultSummary): { value: number; units: string; timeSeconds: number } | null {
   const displacementFields = fields.filter((field) => field.type === "displacement");
   if (!displacementFields.length) {
     if (!summary.transient || !Number.isFinite(summary.maxDisplacement)) return null;
@@ -2115,11 +2691,17 @@ function formatInputValue(value: number) {
 
 function loadTypeLabel(type: LoadType) {
   if (type === "gravity") return "Payload mass";
+  if (type === "force") return "Face force (total)";
+  if (type === "surface_traction") return "Surface traction";
+  if (type === "volume_force") return "Volume force";
+  if (type === "remote_force") return "Remote force";
+  if (type === "bolt_preload") return "Equivalent bolt preload";
   return capitalize(type);
 }
 
 function defaultValueForLoadType(type: LoadType) {
-  if (type === "pressure") return 100;
+  if (type === "pressure" || type === "surface_traction") return 100;
+  if (type === "volume_force") return 1000;
   if (type === "gravity") return 5;
   return 500;
 }

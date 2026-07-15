@@ -1,4 +1,4 @@
-import type { ResultField, StressComponent } from "@opencae/schema";
+import type { ResultField, RunVariantResult, StressComponent } from "@opencae/schema";
 import type { SolverSurfaceMesh } from "./projectFile";
 import type { ResultMode } from "./workspaceViewTypes";
 import { deriveStressScalars } from "./stressTensor";
@@ -29,17 +29,20 @@ export interface ResolvedResultProbe {
   point: [number, number, number];
   value: number;
   units: string;
+  governingVariantName?: string;
 }
 
 export function resultProbeTopologySignature(
   projectId: string | undefined,
   runId: string | undefined,
   modelId: string | undefined,
-  surfaceMesh?: Pick<SolverSurfaceMesh, "id" | "nodes" | "triangles">
+  surfaceMesh?: Pick<SolverSurfaceMesh, "id" | "nodes" | "triangles">,
+  variantId?: string
 ): string {
   return [
     projectId ?? "no-project",
     runId ?? "no-run",
+    variantId ?? "no-variant",
     modelId ?? "no-model",
     surfaceMesh?.id ?? "no-surface",
     surfaceMesh?.nodes.length ?? 0,
@@ -67,6 +70,7 @@ export interface ActiveResultFieldOptions {
   stressComponent?: StressComponent;
   surfaceMesh?: SolverSurfaceMesh;
   frameIndex?: number;
+  modeIndex?: number;
 }
 
 const derivedStressFieldCache = new WeakMap<ResultField, Map<StressComponent, ResultField>>();
@@ -91,9 +95,10 @@ export function selectActiveResultField({
   resultMode,
   stressComponent = DEFAULT_STRESS_COMPONENT,
   surfaceMesh,
-  frameIndex
+  frameIndex,
+  modeIndex
 }: ActiveResultFieldOptions): ActiveResultFieldSelection {
-  const frameFields = fieldsForRequestedFrame(fields, frameIndex);
+  const frameFields = fieldsForRequestedMode(fieldsForRequestedFrame(fields, frameIndex), modeIndex);
   let candidates = frameFields.filter((field) =>
     field.type === resultMode && (resultMode !== "stress" || stressComponentForField(field) === stressComponent)
   );
@@ -108,7 +113,7 @@ export function selectActiveResultField({
     : candidates.find((field) => field.location === "face")
       ?? candidates.find((field) => Boolean(field.samples?.length))
       ?? candidates[0];
-  const displacementCandidates = frameFields.filter((field) => field.type === "displacement");
+  const displacementCandidates = frameFields.filter((field) => field.type === (resultMode === "mode_shape" ? "mode_shape" : "displacement"));
   const displacementField = surfaceMesh
     ? displacementCandidates.find((field) => isAlignedSurfaceNodeField(field, surfaceMesh)) ?? displacementCandidates[0]
     : displacementCandidates[0];
@@ -152,14 +157,13 @@ function derivedStressField(source: ResultField, component: StressComponent): Re
   byComponent.set(component, derived);
   return derived;
 }
-
 export function stressComponentForField(field: Pick<ResultField, "type" | "component">): StressComponent | undefined {
   if (field.type !== "stress") return undefined;
   return field.component ?? DEFAULT_STRESS_COMPONENT;
 }
 
-export function semanticResultFieldKey(field: Pick<ResultField, "runId" | "type" | "location" | "component">): string {
-  return `${field.runId}\u0000${field.type}\u0000${field.location}\u0000${stressComponentForField(field) ?? "none"}`;
+export function semanticResultFieldKey(field: Pick<ResultField, "runId" | "variantId" | "type" | "location" | "component" | "modeIndex">): string {
+  return `${field.runId}\u0000${field.variantId ?? "default"}\u0000${field.type}\u0000${field.location}\u0000${stressComponentForField(field) ?? "none"}\u0000${field.modeIndex ?? "none"}`;
 }
 
 export function isAlignedSurfaceNodeField(field: ResultField, surfaceMesh: SolverSurfaceMesh): boolean {
@@ -189,6 +193,32 @@ export function resolveResultProbe(
   return { id: pin.id, anchor: pin.anchor, point: pin.anchor.point, value, units: scalarField.units };
 }
 
+/** Resolve the compact envelope index near a barycentric surface probe. */
+export function governingVariantIdForProbe(
+  pin: ResultProbePin,
+  governing: RunVariantResult["governingVariantIndices"],
+  mode: "stress" | "displacement"
+): string | undefined {
+  if (!governing || pin.anchor.kind !== "surface") return undefined;
+  const nodeIndices = governing[mode];
+  const votes = new Map<number, number>();
+  for (let localNode = 0; localNode < 3; localNode += 1) {
+    const node = pin.anchor.triangle[localNode];
+    const weight = pin.anchor.barycentric[localNode];
+    if (node === undefined || weight === undefined) continue;
+    const governingIndex = nodeIndices[node];
+    if (governingIndex === undefined || !Number.isInteger(governingIndex) || !Number.isFinite(weight) || weight < 0 || governingIndex < 0 || governingIndex >= governing.variantIds.length) continue;
+    votes.set(governingIndex, (votes.get(governingIndex) ?? 0) + weight);
+  }
+  let bestIndex: number | undefined;
+  let bestWeight = Number.NEGATIVE_INFINITY;
+  for (const [index, weight] of votes) {
+    if (weight <= bestWeight + 1e-12) continue;
+    bestIndex = index;
+    bestWeight = weight;
+  }
+  return bestIndex === undefined ? undefined : governing.variantIds[bestIndex];
+}
 export function barycentricScalar(
   values: ArrayLike<number>,
   triangle: [number, number, number],
@@ -203,6 +233,21 @@ export function barycentricScalar(
   return (va ?? 0) * wa + (vb ?? 0) * wb + (vc ?? 0) * wc;
 }
 
+export function barycentricVector(
+  values: ArrayLike<[number, number, number]>,
+  triangle: [number, number, number],
+  barycentric: [number, number, number]
+): [number, number, number] | null {
+  const a = values[triangle[0]];
+  const b = values[triangle[1]];
+  const c = values[triangle[2]];
+  if (!a || !b || !c || ![...a, ...b, ...c, ...barycentric].every(Number.isFinite)) return null;
+  return [
+    a[0] * barycentric[0] + b[0] * barycentric[1] + c[0] * barycentric[2],
+    a[1] * barycentric[0] + b[1] * barycentric[1] + c[1] * barycentric[2],
+    a[2] * barycentric[0] + b[2] * barycentric[1] + c[2] * barycentric[2]
+  ];
+}
 export function barycentricPoint(
   points: ArrayLike<[number, number, number]>,
   triangle: [number, number, number],
@@ -248,6 +293,11 @@ function fieldsForRequestedFrame(fields: ResultField[], frameIndex: number | und
   return exact.length ? exact : fields;
 }
 
+function fieldsForRequestedMode(fields: ResultField[], modeIndex: number | undefined): ResultField[] {
+  if (modeIndex === undefined || !fields.some((field) => field.modeIndex !== undefined)) return fields;
+  const exact = fields.filter((field) => field.modeIndex === modeIndex);
+  return exact.length ? exact : fields;
+}
 function squaredDistance(left: [number, number, number], right: [number, number, number]): number {
   const dx = left[0] - right[0];
   const dy = left[1] - right[1];

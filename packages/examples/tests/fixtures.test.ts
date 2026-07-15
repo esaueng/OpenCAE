@@ -29,12 +29,12 @@ describe("Phase 1 fixtures", () => {
     );
   });
 
-  test("bracket-actual-mesh is a valid connected v0.2 fixture with real surface sets", () => {
+  test("bracket-actual-mesh is a valid connected current-schema fixture with real surface sets", () => {
     const report = validateModelJson(bracketActualMeshFixture);
     const components = connectedComponents(bracketActualMeshFixture);
 
     expect(report.ok).toBe(true);
-    expect(bracketActualMeshFixture.schemaVersion).toBe("0.2.0");
+    expect(bracketActualMeshFixture.schemaVersion).toBe("0.3.0");
     expect(components.componentCount).toBe(1);
     expect(bracketActualMeshFixture.surfaceSets?.map((set) => set.name)).toEqual(
       expect.arrayContaining(["base_mount", "upright_load", "hole_wall", "gusset_skin"])

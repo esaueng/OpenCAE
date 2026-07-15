@@ -1,6 +1,7 @@
 export const OPENCAE_CORE_VERSION = "0.1.5";
 export type {
   BoundaryConditionJson,
+  BodyForceDensityLoadJson,
   BodyGravityLoadJson,
   CoordinateSystemJson,
   DisplacementComponent,
@@ -11,10 +12,12 @@ export type {
   ElementBlockJson,
   ElementType,
   FixedBoundaryConditionJson,
+  EquivalentBoltPreloadLoadJson,
   IsotropicLinearElasticMaterialJson,
   LoadJson,
   MeshConnectionJson,
   MeshProvenanceJson,
+  ModalStepJson,
   ModelNormalizationResult,
   NodalForceLoadJson,
   NodeSetJson,
@@ -36,7 +39,9 @@ export type {
   StepJson,
   SurfaceFacetJson,
   SurfaceForceLoadJson,
+  SurfaceTractionLoadJson,
   SurfaceSetJson,
+  RemoteForceLoadJson,
   Tet10ElementBlockJson,
   Tet4ElementBlockJson,
   ValidationIssue,
@@ -45,7 +50,8 @@ export type {
 export {
   OPENCAE_LEGACY_MODEL_SCHEMA_VERSION,
   OPENCAE_MODEL_SCHEMA,
-  OPENCAE_MODEL_SCHEMA_VERSION
+  OPENCAE_MODEL_SCHEMA_VERSION,
+  OPENCAE_PREVIOUS_MODEL_SCHEMA_VERSION
 } from "./model-json";
 export type {
   BuildSurfaceFacetsInput,
@@ -84,7 +90,10 @@ export {
   orphanNodes,
   surfaceArea,
   surfaceNormalAverage,
-  tet4Volume
+  TET10_HRZ_EDGE_MASS_FRACTION,
+  TET10_HRZ_VERTEX_MASS_FRACTION,
+  tet4Volume,
+  tet10Volume
 } from "./mesh";
 export type {
   LoadAssemblyDiagnostics,
@@ -106,10 +115,15 @@ export type {
   CoreResultField,
   CoreResultValidationIssue,
   CoreResultValidationReport,
+  CoreModalModeSummary,
+  CoreModalSolveResult,
+  CoreModalSolveSummary,
   CoreSolveDiagnostics,
   CoreSolveResult,
   CoreSolveProvenance,
   CoreSolveSummary,
+  CoreStructuralSolveResult,
+  CoreStructuralSolveSummary,
   CoreTransientSummary,
   ProductionSurfaceFieldInvariantInput,
   ProductionSurfaceFieldInvariantOptions,

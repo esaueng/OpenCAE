@@ -55,6 +55,7 @@ describe("projectFactory", () => {
     expect(study.materialAssignments).toEqual([]);
     expect(study.constraints).toEqual([]);
     expect(study.loads).toEqual([]);
+    expect(study.type === "modal_analysis" ? undefined : study.loadCases).toEqual([{ id: "case-default", name: "Default", enabled: true, loadIds: [] }]);
     expect(study.meshSettings.status).toBe("not_started");
   });
 
@@ -79,6 +80,7 @@ describe("projectFactory", () => {
       expect(project.studies[0]?.geometryScope[0]?.label.toLowerCase()).toContain(expectedSampleName);
       expect(project.studies[0]?.namedSelections.filter((selection) => selection.entityType === "face")).toHaveLength(sampleDisplayModelFor(sampleId).faces.length);
       expect(project.studies[0]?.loads[0]?.parameters.direction).toEqual([0, -1, 0]);
+      expect(project.studies[0]?.type === "modal_analysis" ? undefined : project.studies[0]?.loadCases?.[0]?.loadIds).toEqual(project.studies[0]?.loads.map((load) => load.id));
     }
   });
 
@@ -107,6 +109,7 @@ describe("projectFactory", () => {
       expect(study?.materialAssignments).toHaveLength(1);
       expect(study?.constraints).toHaveLength(1);
       expect(study?.loads).toHaveLength(1);
+      expect(study?.type === "modal_analysis" ? undefined : study?.loadCases?.[0]?.loadIds).toEqual(study?.loads.map((load) => load.id));
       expect(study?.meshSettings.status).toBe("complete");
       expect(study?.runs[0]).toMatchObject({
         id: `run-${sampleId}-dynamic-seeded`,

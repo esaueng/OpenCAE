@@ -7,8 +7,11 @@ import {
   fdmPropertyFactorsFor,
   isManufacturingProcessCompatible,
   massKgForPayloadMaterial,
+  materialCatalog,
+  materialManufacturingProfilesFor,
   normalizeManufacturingParameters,
   payloadMaterials,
+  resolveMaterial,
   starterMaterials
 } from "./index";
 
@@ -52,6 +55,43 @@ describe("starterMaterials", () => {
     expect(() => assertCompatibleManufacturingProcess("mat-abs", "sla")).toThrow(
       /SLA printing.*not compatible with ABS/i
     );
+  });
+
+  test("resolves project custom materials without changing the built-in catalog", () => {
+    const custom = {
+      id: "0ac4dbda-1d37-43c0-b3ac-9d1d2cc28e84",
+      name: "Shop aluminum",
+      category: "metal" as const,
+      youngsModulus: 70e9,
+      poissonRatio: 0.33,
+      density: 2710,
+      yieldStrength: 290e6,
+      verification: "user_supplied_unverified" as const
+    };
+
+    expect(resolveMaterial(custom.id, [custom])).toBe(custom);
+    expect(materialCatalog([custom]).at(-1)).toBe(custom);
+    expect(() => resolveMaterial("missing-material", [custom])).toThrow('Unknown material "missing-material".');
+  });
+
+  test("defaults custom bulk materials to an unvalidated CNC profile and preserves copied additive profiles", () => {
+    const customBulk = {
+      id: "0ac4dbda-1d37-43c0-b3ac-9d1d2cc28e84",
+      name: "Shop aluminum",
+      category: "metal" as const,
+      youngsModulus: 70e9,
+      poissonRatio: 0.33,
+      density: 2710,
+      yieldStrength: 290e6
+    };
+    const customPrinted = {
+      ...customBulk,
+      id: "16a41211-8a49-40e4-a667-60acc6a2ecc8",
+      printProfile: starterMaterials.find((material) => material.id === "mat-petg")!.printProfile
+    };
+
+    expect(materialManufacturingProfilesFor(customBulk).map((profile) => profile.processId)).toEqual(["cnc_machining"]);
+    expect(materialManufacturingProfilesFor(customPrinted).map((profile) => profile.processId)).toEqual(["cnc_machining", "fdm"]);
   });
 
   test("keeps solid CNC properties unchanged even when stale print settings are present", () => {

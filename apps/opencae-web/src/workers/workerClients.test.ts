@@ -15,10 +15,31 @@ class ThrowingWorker {
   }
 }
 
+class MessagingWorker {
+  static instances: MessagingWorker[] = [];
+
+  readonly terminate = vi.fn();
+  readonly postMessage = vi.fn();
+  private messageListener?: (event: MessageEvent) => void;
+
+  readonly addEventListener = vi.fn((type: string, listener: EventListener) => {
+    if (type === "message") this.messageListener = listener as (event: MessageEvent) => void;
+  });
+
+  constructor() {
+    MessagingWorker.instances.push(this);
+  }
+
+  emitMessage(data: unknown) {
+    this.messageListener?.({ data } as MessageEvent);
+  }
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.resetModules();
   ThrowingWorker.instances = [];
+  MessagingWorker.instances = [];
 });
 
 describe("worker clients", () => {
@@ -63,5 +84,36 @@ describe("worker clients", () => {
     const error = await handle.completion.catch((reason: unknown) => reason);
     expect(isCancelledSolveError(error)).toBe(true);
     expect(CancelThrowingWorker.instances[0]?.terminate).toHaveBeenCalledOnce();
+  });
+
+  test("delivers streamed dynamic variants before the final solve result", async () => {
+    vi.stubGlobal("Worker", MessagingWorker);
+    const { startLocalSolve } = await import("./solveWorkerClient");
+    const onVariantComplete = vi.fn();
+    const handle = startLocalSolve({} as SolveWorkerSolvePayload, undefined, onVariantComplete);
+    const worker = MessagingWorker.instances[0]!;
+    const request = worker.postMessage.mock.calls[0]?.[0] as { id: string };
+    const summary = {
+      maxStress: 1,
+      maxStressUnits: "MPa",
+      maxDisplacement: 1,
+      maxDisplacementUnits: "mm",
+      safetyFactor: 1,
+      reactionForce: 1,
+      reactionForceUnits: "N"
+    };
+    const variant = { id: "case:gust", name: "Gust", kind: "case", caseId: "gust", summary, fields: [] };
+
+    worker.emitMessage({ kind: "variant", id: request.id, variant, surfaceMesh: { id: "surface-1" } });
+    expect(onVariantComplete).toHaveBeenCalledWith(variant, { id: "surface-1" });
+
+    worker.emitMessage({
+      kind: "result",
+      id: request.id,
+      ok: true,
+      solverBackend: "opencae-core-sparse-tet-dynamic",
+      result: { summary, fields: [] }
+    });
+    await expect(handle.completion).resolves.toMatchObject({ solverBackend: "opencae-core-sparse-tet-dynamic" });
   });
 });
