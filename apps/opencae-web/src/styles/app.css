@@ -1251,6 +1251,169 @@ img {
   margin-left: auto;
 }
 
+.storage-status-button {
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 9px;
+  color: var(--color-text-muted);
+  background: var(--color-surface-2);
+  border: var(--border-thin);
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono);
+  font-size: var(--fs-mini);
+  white-space: nowrap;
+}
+
+.storage-status-button:hover,
+.storage-status-button:focus-visible,
+.storage-status-button.unselected {
+  color: var(--color-text);
+  border-color: var(--color-accent-border);
+}
+
+.storage-status-button.cloud {
+  color: var(--color-success);
+}
+
+.storage-recovery-card {
+  position: fixed;
+  top: calc(var(--topbar-h) + var(--sp-3));
+  right: calc(var(--context-w) + var(--sp-3));
+  z-index: calc(var(--z-log-drawer) + 1);
+  width: min(390px, calc(100vw - 24px));
+  display: grid;
+  gap: 11px;
+  padding: 15px;
+  color: var(--color-text);
+  background: color-mix(in srgb, var(--color-surface) 96%, transparent);
+  border: 1px solid var(--color-accent-border);
+  border-radius: 8px;
+  box-shadow: var(--shadow-panel);
+  backdrop-filter: blur(12px);
+}
+
+.storage-recovery-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.storage-recovery-mark {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  color: var(--color-accent);
+  background: var(--color-accent-dim);
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-md);
+}
+
+.storage-recovery-header > span:last-child {
+  display: grid;
+  gap: 1px;
+}
+
+.storage-recovery-header small {
+  color: var(--color-text-subtle);
+  font-family: var(--font-mono);
+  font-size: var(--fs-mini);
+  letter-spacing: var(--ls-eyebrow);
+  text-transform: uppercase;
+}
+
+.storage-recovery-header strong {
+  font-size: var(--fs-md);
+  font-weight: var(--fw-medium);
+}
+
+.storage-recovery-card > p {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--fs-sm);
+  line-height: 1.55;
+}
+
+.storage-recovery-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.storage-recovery-facts span {
+  padding: 3px 7px;
+  color: var(--color-text-subtle);
+  background: var(--color-surface-2);
+  border: var(--border-thin);
+  border-radius: var(--radius-pill);
+  font-family: var(--font-mono);
+  font-size: var(--fs-mini);
+}
+
+.storage-recovery-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.storage-choice {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 9px;
+  color: var(--color-text-muted);
+  background: var(--color-surface-2);
+  border: var(--border-thin);
+  border-radius: var(--radius-md);
+  text-align: left;
+}
+
+.storage-choice:hover,
+.storage-choice:focus-visible,
+.storage-choice.selected {
+  color: var(--color-text);
+  border-color: var(--color-accent-border);
+}
+
+.storage-choice.selected {
+  background: var(--color-accent-dim);
+}
+
+.storage-choice:disabled {
+  opacity: 0.65;
+}
+
+.storage-choice strong,
+.storage-choice small {
+  display: block;
+}
+
+.storage-choice strong {
+  overflow: hidden;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.storage-choice small {
+  margin-top: 2px;
+  color: var(--color-text-subtle);
+  font-size: var(--fs-mini);
+  line-height: 1.25;
+}
+
+.storage-recovery-footnote {
+  color: var(--color-text-subtle);
+  font-size: var(--fs-mini);
+  line-height: 1.4;
+}
+
 .shortcut-popover {
   position: absolute;
   z-index: 40;
@@ -4427,6 +4590,10 @@ button:disabled {
 }
 
 @media (max-width: 980px) {
+  .storage-recovery-card {
+    right: var(--sp-3);
+  }
+
   .app-shell {
     --stepbar-w: 104px;
     overflow: auto;
@@ -4520,6 +4687,27 @@ button:disabled {
 }
 
 @media (max-width: 640px) {
+  .storage-recovery-card {
+    top: calc(var(--topbar-h) + var(--sp-2));
+    right: var(--sp-2);
+    width: calc(100vw - 16px);
+  }
+
+  .storage-recovery-actions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .storage-status-button {
+    width: 34px;
+    min-width: 34px;
+    justify-content: center;
+    padding: 0;
+  }
+
+  .storage-status-button > span {
+    display: none;
+  }
+
   .app-shell {
     --stepbar-w: 78px;
   }
