@@ -66,6 +66,23 @@ describe("browser solve limits", () => {
     expect(settings.maxDofs).toBe(150000);
   });
 
+  test("bounds dynamic frames against raw and converted result fields", () => {
+    const model = fixtureModel("beam-dynamic");
+    const nodes = Math.floor(model.nodes.coordinates.length / 3);
+    const elements = model.elementBlocks.reduce((count, block) => {
+      const nodesPerElement = block.type === "Tet10" ? 10 : 4;
+      return count + Math.floor(block.connectivity.length / nodesPerElement);
+    }, 0);
+    const bytesPerFrame = (nodes * 36 + elements * 17) * 8;
+    const settings = boundedSolverSettings(
+      "dynamic_structural",
+      { maxFrames: 100 },
+      model,
+      { ...BROWSER_SOLVE_LIMITS, transientFieldBytes: bytesPerFrame * 3 }
+    );
+    expect(settings.maxFrames).toBe(3);
+  });
+
   test("threads the 150k browser limit and bounded mode count into modal solves", () => {
     const dynamic = fixtureModel("beam-dynamic");
     const step = dynamic.steps[0];

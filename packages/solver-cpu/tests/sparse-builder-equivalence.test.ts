@@ -139,6 +139,16 @@ describe("typed-array COO builder equivalence with the Map-per-row reference", (
     expectIdenticalCsr(second, first);
   });
 
+  test("reserves a known FEM scatter capacity without changing growth behavior", () => {
+    const builder = createSparseMatrixBuilder(4, 4, 512);
+    expect(builder.rowIndices.length).toBe(512);
+    for (let index = 0; index < 513; index += 1) {
+      addSparseEntry(builder, index % 4, index % 4, index + 1);
+    }
+    expect(builder.rowIndices.length).toBe(1024);
+    expect(toCsrMatrix(builder).values.length).toBe(4);
+  });
+
   test("benchmark: ~25k-DOF FEM-pattern assembly, reference Map builder vs typed-array builder", { timeout: 60000 }, () => {
     // Structured 60x10x10 hex grid split into 5 tets per cube: 7381 nodes -> 22143 DOFs,
     // 30000 Tet4 elements, 144 stiffness entries scattered per element (4.32M triplets).

@@ -393,7 +393,10 @@ export function assembleSparseStiffness(model: NormalizedOpenCAEModel, hooks?: S
   | { ok: true; stiffness: CsrMatrix }
   | { ok: false; error: CpuSolverError } {
   const dofs = model.counts.nodes * 3;
-  const builder = createSparseMatrixBuilder(dofs);
+  // Element and penalty-equation scatter counts are known before assembly.
+  // Reserving them once avoids grow-by-doubling copies of multi-million-entry
+  // COO buffers in browser workers.
+  const builder = createSparseMatrixBuilder(dofs, dofs, sparseStiffnessTripletCapacity(model));
 
   const elementAssembly = assembleElementStiffnesses(model, {
     add(block, elementOffset, elementStiffness, nodeCount) {
@@ -406,6 +409,41 @@ export function assembleSparseStiffness(model: NormalizedOpenCAEModel, hooks?: S
   if (!connections.ok) return connections;
 
   return { ok: true, stiffness: toCsrMatrix(builder) };
+}
+
+function sparseStiffnessTripletCapacity(model: NormalizedOpenCAEModel): number {
+  let capacity = 0;
+  for (const block of model.elementBlocks) {
+    const nodeCount = elementNodeCountForBlock(block);
+    if (nodeCount === undefined) continue;
+    const elementCount = Math.floor(block.connectivity.length / nodeCount);
+    const elementDofs = nodeCount * 3;
+    capacity += elementCount * elementDofs * elementDofs;
+  }
+
+  if (!model.meshConnections.length) return capacity;
+  const facets = new Map(model.surfaceFacets.map((facet) => [facet.id, facet]));
+  const surfaceSets = new Map(model.surfaceSets.map((surface) => [surface.name, surface]));
+  for (const connection of model.meshConnections) {
+    if (connection.type !== "tie" && connection.type !== "contact") continue;
+    const sourceSet = surfaceSets.get(connection.source);
+    const targetSet = surfaceSets.get(connection.target);
+    if (!sourceSet || !targetSet) continue;
+    const sourceNodes = new Set<number>();
+    for (const facetId of sourceSet.facets) {
+      for (const node of facets.get(facetId)?.nodes ?? []) sourceNodes.add(node);
+    }
+    let targetNodeCount = 0;
+    for (const facetId of targetSet.facets) {
+      targetNodeCount = Math.max(targetNodeCount, facets.get(facetId)?.nodes.length ?? 0);
+    }
+    const scalarTerms = 1 + targetNodeCount;
+    const equationEntries = connection.type === "tie"
+      ? 3 * scalarTerms * scalarTerms
+      : (3 * scalarTerms) ** 2;
+    capacity += sourceNodes.size * equationEntries;
+  }
+  return capacity;
 }
 
 export function assembleNodalForces(model: NormalizedOpenCAEModel, loadNames: string[]): Float64Array {

@@ -68,14 +68,21 @@ export class CooAccumulator {
 const INITIAL_TRIPLET_CAPACITY = 256;
 const SPARSE_ZERO_EPSILON = Number.MIN_VALUE;
 
-export function createSparseMatrixBuilder(rowCount: number, colCount = rowCount): SparseMatrixBuilder {
+export function createSparseMatrixBuilder(
+  rowCount: number,
+  colCount = rowCount,
+  initialCapacity = INITIAL_TRIPLET_CAPACITY
+): SparseMatrixBuilder {
+  const capacity = Number.isFinite(initialCapacity)
+    ? Math.max(Math.floor(initialCapacity), INITIAL_TRIPLET_CAPACITY)
+    : INITIAL_TRIPLET_CAPACITY;
   return {
     rowCount,
     colCount,
     entryCount: 0,
-    rowIndices: new Int32Array(INITIAL_TRIPLET_CAPACITY),
-    colIndices: new Int32Array(INITIAL_TRIPLET_CAPACITY),
-    entryValues: new Float64Array(INITIAL_TRIPLET_CAPACITY)
+    rowIndices: new Int32Array(capacity),
+    colIndices: new Int32Array(capacity),
+    entryValues: new Float64Array(capacity)
   };
 }
 
@@ -125,21 +132,24 @@ export function toCsrMatrix(builder: SparseMatrixBuilder): CsrMatrix {
   }
 
   const rowPtr = new Int32Array(rowCount + 1);
-  const mergedCols = new Int32Array(entryCount);
-  const mergedValues = new Float64Array(entryCount);
   let nonZeroCount = 0;
   let keyScratch = new Float64Array(0);
+  let valueScratch = new Float64Array(0);
   for (let row = 0; row < rowCount; row += 1) {
     rowPtr[row] = nonZeroCount;
     const start = rowStart[row];
     const length = rowStart[row + 1] - start;
     if (length === 0) continue;
-    if (keyScratch.length < length) keyScratch = new Float64Array(length);
+    if (keyScratch.length < length) {
+      keyScratch = new Float64Array(length);
+      valueScratch = new Float64Array(length);
+    }
     // Pack (col, local insertion index) into one number so the typed-array numeric
     // sort orders by column with insertion order preserved among duplicates. Values
     // stay below 2^53 (col < colCount, local < length), so decoding is exact.
     for (let local = 0; local < length; local += 1) {
       keyScratch[local] = bucketedCols[start + local] * length + local;
+      valueScratch[local] = bucketedValues[start + local];
     }
     const keys = keyScratch.subarray(0, length);
     keys.sort();
@@ -150,13 +160,13 @@ export function toCsrMatrix(builder: SparseMatrixBuilder): CsrMatrix {
       const key = keys[k];
       const local = key % length;
       const col = (key - local) / length;
-      const value = bucketedValues[start + local];
+      const value = valueScratch[local];
       if (hasEntry && col === currentCol) {
         sum += value;
       } else {
         if (hasEntry && Math.abs(sum) > SPARSE_ZERO_EPSILON) {
-          mergedCols[nonZeroCount] = currentCol;
-          mergedValues[nonZeroCount] = sum;
+          bucketedCols[nonZeroCount] = currentCol;
+          bucketedValues[nonZeroCount] = sum;
           nonZeroCount += 1;
         }
         currentCol = col;
@@ -165,8 +175,8 @@ export function toCsrMatrix(builder: SparseMatrixBuilder): CsrMatrix {
       }
     }
     if (hasEntry && Math.abs(sum) > SPARSE_ZERO_EPSILON) {
-      mergedCols[nonZeroCount] = currentCol;
-      mergedValues[nonZeroCount] = sum;
+      bucketedCols[nonZeroCount] = currentCol;
+      bucketedValues[nonZeroCount] = sum;
       nonZeroCount += 1;
     }
   }
@@ -175,8 +185,8 @@ export function toCsrMatrix(builder: SparseMatrixBuilder): CsrMatrix {
     rowCount,
     colCount,
     rowPtr,
-    colInd: mergedCols.slice(0, nonZeroCount),
-    values: mergedValues.slice(0, nonZeroCount)
+    colInd: bucketedCols.slice(0, nonZeroCount),
+    values: bucketedValues.slice(0, nonZeroCount)
   };
 }
 
@@ -339,7 +349,9 @@ export function reduceCsrSystem(
 ): { matrix: CsrMatrix; rhs: Float64Array } {
   const freeIndexByDof = new Map<number, number>();
   free.forEach((dof, index) => freeIndexByDof.set(dof, index));
-  const builder = createSparseMatrixBuilder(free.length);
+  // At most every full-system nonzero survives the free-DOF reduction. Reserving
+  // that upper bound avoids a grow-and-copy peak while both matrices are live.
+  const builder = createSparseMatrixBuilder(free.length, free.length, matrix.values.length);
   const reducedRhs = reduceCsrRhs(matrix, rhs, free, constraints);
 
   for (let reducedRow = 0; reducedRow < free.length; reducedRow += 1) {

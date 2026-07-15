@@ -500,9 +500,11 @@ export function boundedSolverSettings(
   return settings;
 }
 
-// Each stored frame holds displacement/velocity/acceleration per node plus
-// strain/stress/von Mises/safety factor per element, all Float64. Cap the frame
-// count so a large mesh cannot exhaust memory through the transient buffer.
+// During result conversion each stored frame retains both the raw dynamic fields
+// and the Core result fields. Budget the peak, not only the raw frame: nodal
+// displacement/velocity/acceleration, stress, reactions and derived surface
+// fields plus element strain/stress/von Mises/safety-factor fields, all Float64.
+// Cap the frame count so a large mesh cannot exhaust the worker heap.
 // The byte budget is configurable for deterministic fixture replay.
 function transientFrameBudget(model: OpenCAEModelJson, transientFieldBytes: number): number {
   const nodes = Math.max(Math.floor((model.nodes?.coordinates?.length ?? 0) / 3), 1);
@@ -513,7 +515,7 @@ function transientFrameBudget(model: OpenCAEModelJson, transientFieldBytes: numb
     }, 0),
     1
   );
-  const bytesPerFrame = (nodes * 9 + elements * 14) * 8;
+  const bytesPerFrame = (nodes * 36 + elements * 17) * 8;
   return Math.max(Math.floor(transientFieldBytes / bytesPerFrame), 2);
 }
 
