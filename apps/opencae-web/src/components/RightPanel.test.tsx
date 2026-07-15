@@ -288,6 +288,8 @@ describe("RightPanel run variants and load cases", () => {
     const html = renderPanel("loads", { study: caseStudy, onLoadCasesChange: vi.fn() });
 
     expect(html).toContain("Load cases");
+    // The section explains itself like every other configuration option.
+    expect(html).toContain("Load cases help");
     expect(html).toContain("Service");
     expect(html).toContain("Reverse");
     expect(html).toContain("Net signed");
