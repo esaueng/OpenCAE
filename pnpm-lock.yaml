@@ -187,6 +187,9 @@ importers:
       '@opencae/solver-cpu':
         specifier: workspace:*
         version: link:../../packages/solver-cpu
+      '@opencae/solver-webgpu':
+        specifier: workspace:*
+        version: link:../../packages/solver-webgpu
       '@opencae/study-core':
         specifier: workspace:*
         version: link:../opencae-study-core
@@ -311,7 +314,14 @@ importers:
 
   packages/solver-wasm: {}
 
-  packages/solver-webgpu: {}
+  packages/solver-webgpu:
+    dependencies:
+      '@opencae/core':
+        specifier: workspace:*
+        version: link:../core
+      '@opencae/solver-cpu':
+        specifier: workspace:*
+        version: link:../solver-cpu
 
   packages/viewer:
     dependencies:

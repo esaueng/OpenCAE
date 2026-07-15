@@ -30,13 +30,13 @@ function fixtureModel(name: string): OpenCAEModelJson {
 }
 
 describe("browser solve limits", () => {
-  test("browser limits deviate from cloud limits only where documented", () => {
-    // maxDofs matches the retired cloud runner's 100k since 2026-07 (typed-array
-    // CSR assembly in the pinned solver + measured Chrome/WebKit runs at ~99.3k
-    // DOF via scripts/verify-100k-solve.mjs).
-    expect(BROWSER_SOLVE_LIMITS.maxDofs).toBe(100000);
+  test("browser limits deviate from historical reference limits only where documented", () => {
+    // The active browser accepts 150k CPU DOFs with typed-array CSR + SSOR;
+    // the retired cloud runner remains pinned at 100k for golden parity.
+    expect(BROWSER_SOLVE_LIMITS.maxDofs).toBe(150000);
     expect(BROWSER_SOLVE_LIMITS).toEqual({
       ...CLOUD_SOLVER_LIMITS,
+      maxDofs: 150000,
       transientFieldBytes: 256e6,
       maxTimeSteps: 20000
     });
@@ -52,22 +52,21 @@ describe("browser solve limits", () => {
     if (!outcome.ok) return;
     const deviation = outcome.result.diagnostics.find(
       (entry) => entry && typeof entry === "object" && (entry as { id?: unknown }).id === "browser-solve-limits"
-    ) as { deviations?: Record<string, { applied: number; cloud: number }> } | undefined;
+    ) as { deviations?: Record<string, { applied: number; reference: number }> } | undefined;
     expect(deviation).toBeDefined();
-    // maxDofs no longer deviates from the cloud limits; claiming it did would
-    // be dishonest diagnostics.
     expect(deviation?.deviations).toEqual({
-      transientFieldBytes: { applied: 256e6, cloud: 1.5e9 },
-      maxTimeSteps: { applied: 20000, cloud: 100000 }
+      maxDofs: { applied: 150_000, reference: 100_000 },
+      transientFieldBytes: { applied: 256e6, reference: 1.5e9 },
+      maxTimeSteps: { applied: 20000, reference: 100000 }
     });
   });
 
   test("solver settings cannot raise maxDofs above the browser limit", () => {
     const settings = boundedSolverSettings("static_stress", { maxDofs: 250000 }, fixtureModel("beam-static"), BROWSER_SOLVE_LIMITS);
-    expect(settings.maxDofs).toBe(100000);
+    expect(settings.maxDofs).toBe(150000);
   });
 
-  test("threads the 100k browser limit and bounded mode count into modal solves", () => {
+  test("threads the 150k browser limit and bounded mode count into modal solves", () => {
     const dynamic = fixtureModel("beam-dynamic");
     const step = dynamic.steps[0];
     if (!step || step.type !== "dynamicLinear") throw new Error("Expected the dynamic golden fixture.");
@@ -78,16 +77,16 @@ describe("browser solve limits", () => {
       steps: [{ name: "modes", type: "modal", boundaryConditions: step.boundaryConditions, modeCount: 2 }]
     };
     const settings = boundedSolverSettings("modal_analysis", { maxDofs: 250_000, modeCount: 20 }, model, BROWSER_SOLVE_LIMITS);
-    expect(settings).toMatchObject({ maxDofs: 100_000, modeCount: 10 });
+    expect(settings).toMatchObject({ maxDofs: 150_000, modeCount: 10 });
     const outcome = solveStudyModelWithCorePipeline({ model, analysisType: "modal_analysis", solverSettings: { modeCount: 2 }, limits: BROWSER_SOLVE_LIMITS });
     expect(outcome.ok, outcome.ok ? undefined : outcome.error.message).toBe(true);
     if (!outcome.ok) return;
-    const resource = outcome.result.diagnostics.find((entry) => entry && typeof entry === "object" && (entry as { id?: unknown }).id === "core-cloud-resource-limits") as { maxDofs?: number; modeCount?: number } | undefined;
-    expect(resource).toMatchObject({ maxDofs: 100_000, modeCount: 2 });
+    const resource = outcome.result.diagnostics.find((entry) => entry && typeof entry === "object" && (entry as { id?: unknown }).id === "core-local-resource-limits") as { maxDofs?: number; modeCount?: number } | undefined;
+    expect(resource).toMatchObject({ maxDofs: 150_000, modeCount: 2 });
   });
 
-  test("a static model above 100k DOFs fails fast with the actionable max-dofs error", { timeout: 120_000 }, () => {
-    const model = structuredTet10BlockModel(16); // (2*16+1)^3 = 35,937 nodes = 107,811 DOFs
+  test("a static model above 150k DOFs fails fast with the actionable max-dofs error", { timeout: 120_000 }, () => {
+    const model = structuredTet10BlockModel(18); // (2*18+1)^3 = 50,653 nodes = 151,959 DOFs
     expect(Math.floor(model.nodes.coordinates.length / 3) * 3).toBeGreaterThan(BROWSER_SOLVE_LIMITS.maxDofs);
     const outcome = solveStudyModelWithCorePipeline({
       model,
@@ -97,8 +96,8 @@ describe("browser solve limits", () => {
     expect(outcome.ok).toBe(false);
     if (outcome.ok) return;
     expect(outcome.error.code).toBe("max-dofs-exceeded");
-    expect(outcome.error.message).toContain("107811");
-    expect(outcome.error.message).toContain("100000");
+    expect(outcome.error.message).toContain("151959");
+    expect(outcome.error.message).toContain("150000");
   });
 
   test("running at cloud limits emits no deviation diagnostic (parity mode)", () => {
@@ -268,16 +267,20 @@ describe("hooks", () => {
     expect(outcome.error.code).toBe("cancelled");
   });
 
-  test("stamps browser runner provenance on successful solves", () => {
+  test("stamps local solver and browser runner provenance on successful solves", () => {
     const outcome = solveStudyModelWithCorePipeline({
       model: fixtureModel("beam-static"),
       analysisType: "static_stress"
     });
     expect(outcome.ok).toBe(true);
     if (!outcome.ok) return;
-    expect(outcome.result.provenance.solver).toBe("opencae-core-cloud");
+    expect(outcome.result.provenance.solver).toBe("opencae-core-sparse-tet");
     expect(outcome.result.provenance.runnerVersion).toBe("browser-0.1.0");
     expect(outcome.result.summary.provenance).toEqual(outcome.result.provenance);
+    expect(outcome.result.diagnostics.some(
+      (entry) => entry && typeof entry === "object" && (entry as { id?: unknown }).id === "core-local-phase"
+    )).toBe(true);
+    expect(JSON.stringify(outcome.result)).not.toContain("opencae-core-cloud");
   });
 });
 
@@ -343,7 +346,7 @@ function structuredTet10BlockModel(divisions: number): OpenCAEModelJson {
     coordinateSystem: { solverUnits: "m-N-s-Pa", renderCoordinateSpace: "solver" },
     meshProvenance: {
       kind: "opencae_core_fea",
-      solver: "opencae-core-cloud",
+      solver: "opencae-core-local",
       resultSource: "computed",
       meshSource: "structured_block_core"
     }

@@ -16,7 +16,7 @@ import { meshGeoScriptInWorker, meshStepFileInWorker } from "./meshWorkerClient"
 import { trySolveOpenCaeCoreStudy } from "@opencae/core-adapter";
 import { stepAttributionForRegistry, stepFaceRegistryFromBase64 } from "../stepFaces";
 import { STEP_PROOF_LOAD_NEWTONS, stepProofScenario, studyWithWasmMeshSummary } from "./stepProofScenario";
-import { isModalResultSummary } from "@opencae/schema";
+import { isStructuralResultSummary } from "@opencae/schema";
 // The corpus STEP fixture ships inline in the (flag-on-only) harness chunk so
 // the browser proof runs the real upload path without network fetches.
 import boxWithBoreStep from "../../../../libs/opencae-mesh-intake/fixtures/box-with-bore.step?raw";
@@ -163,7 +163,7 @@ async function runStepProof(): Promise<StepProofResult> {
 
     const solvableStudy = studyWithWasmMeshSummary({ study: scenario.study, artifact, model, mappingDiagnostics });
     const outcome = trySolveOpenCaeCoreStudy({ study: solvableStudy, runId: "run-meshproof-step", displayModel: scenario.displayModel });
-    const summary = outcome.ok && !isModalResultSummary(outcome.result.summary) ? outcome.result.summary : undefined;
+    const summary = outcome.ok && isStructuralResultSummary(outcome.result.summary) ? outcome.result.summary : undefined;
     return {
       ok: true,
       brepFaceCount: registry.faces.length,
@@ -275,7 +275,7 @@ async function runMeshThenSolveRunProof(): Promise<RunProofResult> {
 
     const completed = terminal.type === "complete";
     const results = completed ? await api.getResults(response.run.id) : undefined;
-    const structuralSummary = results && !isModalResultSummary(results.summary) ? results.summary : undefined;
+    const structuralSummary = results && isStructuralResultSummary(results.summary) ? results.summary : undefined;
     const provenance = results?.summary.provenance as
       | { solver?: string; runnerVersion?: string; resultSource?: string }
       | undefined;
