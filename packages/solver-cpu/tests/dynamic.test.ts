@@ -175,8 +175,11 @@ describe("solveDynamicLinearTetMDOF", () => {
     expect(coreResult?.fields.some((field) => field.type === "acceleration" && field.timeSeconds === 0.02)).toBe(true);
     expect(coreResult?.fields.some((field) => field.type === "safety_factor" && field.frameIndex === 0)).toBe(true);
     expect(coreResult?.fields.every((field) => field.values.length > 0)).toBe(true);
-    const surfaceStressFields = coreResult?.fields.filter((field) => field.type === "stress" && field.location === "node") ?? [];
-    expect(surfaceStressFields.every((field) => field.component === "von_mises" && field.tensorValues?.length === field.values.length * 6)).toBe(true);
+    // Only von Mises carries the tensor it was recovered from; the principal
+    // and max-shear components are derived scalars, so they have none.
+    const surfaceStressFields = coreResult?.fields.filter((field) => field.type === "stress" && field.location === "node" && field.component === "von_mises") ?? [];
+    expect(surfaceStressFields.length).toBeGreaterThan(0);
+    expect(surfaceStressFields.every((field) => field.tensorValues?.length === field.values.length * 6)).toBe(true);
     expect(validateCoreResult(coreResult!).ok).toBe(true);
   });
 
