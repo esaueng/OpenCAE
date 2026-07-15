@@ -149,7 +149,7 @@ Dependency notes:
 | 018 Mesh-failure repair probe + honest geometry errors | DONE | Executed 2026-07-10 (`fa2ae84`, with the Top-face heal cleanup in `f1aba34`). Re-test surfaced the true root error (Delaunay PLC segment/facet intersection) and two follow-up defects → plan 019. |
 | 019 Frontal fallback before repair bail + model-keyed probe guard | DONE | Executed: thrown Delaunay quality-repair candidates continue to Frontal; project actions use generation/client identity rather than fragile object identity. |
 | 020 One-click PDF simulation report | DONE | Executed: Results-panel PDF generation, persisted white-background captures, report data/layout, and unit/provenance honesty checks are shipped. |
-| 021 OpenCAE Quick-Wins Rollout | IN PROGRESS | Five staged releases: result probes, unified palettes, principal stresses, projection/PNG export, and recent project handles. |
+| 021 OpenCAE Quick-Wins Rollout | COMPLETE | All five staged releases landed: result probes, unified palettes, principal stresses, projection/PNG export, and recent project handles. |
 | 022 OpenCAE Medium-Feature Roadmap | COMPLETE | All five flagship-first increments released: modal analysis; open sections and custom materials; structural cases/combinations/envelopes; static convergence studies; and advanced loads with equivalent bolt preload. |
 
 Run 2 was non-interactive: plans 006–010 are the top findings by leverage (impact ÷ effort, confidence-weighted), selected by default per the advisor skill's non-interactive rule rather than by maintainer choice. Re-cut as desired.

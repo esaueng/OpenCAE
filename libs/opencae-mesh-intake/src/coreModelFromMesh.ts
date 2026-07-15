@@ -12,6 +12,8 @@
 //     byte-identical to upstream. Sync upstream when plan 016's extraction lands.
 //  3. Built-in materials resolve through @opencae/materials so manufacturing-process
 //     compatibility and effective-property calculations cannot drift from the app.
+//  4. Modal studies emit a load-free modal step instead of the legacy fallback load;
+//     this mirrors the browser Core builder added by the medium-feature roadmap.
 import {
   OPENCAE_MODEL_SCHEMA,
   OPENCAE_MODEL_SCHEMA_VERSION,
@@ -123,7 +125,7 @@ export function buildCoreModelFromCloudMesh(input: BuildCoreModelInput): OpenCAE
     });
   }
 
-  for (const [index, load] of (input.study?.loads ?? []).entries()) {
+  for (const [index, load] of (input.analysisType === "modal_analysis" ? [] : (input.study?.loads ?? [])).entries()) {
     const loadType = load.type ?? "force";
     if (loadType === "gravity" && !load.selectionRef) {
       loads.push({
@@ -230,7 +232,7 @@ export function buildCoreModelFromCloudMesh(input: BuildCoreModelInput): OpenCAE
     const nodeSetName = ensureNodeSetForSurfaceSet(nodeSets, surfaceSet, input.volumeMesh.surfaceFacets);
     boundaryConditions.push({ name: "fixedSupport0", type: "fixed", nodeSet: nodeSetName, components: ["x", "y", "z"] });
   }
-  if (loads.length === 0) {
+  if (input.analysisType !== "modal_analysis" && loads.length === 0) {
     const surfaceSet = ensureMappedSurfaceSet({
       study: input.study,
       displayModel: input.displayModel,
@@ -811,6 +813,19 @@ function stepFor(
     boundaryConditions: boundaryConditions.map((condition) => condition.name),
     loads: loads.map((load) => load.name)
   };
+  if (analysisType === "modal_analysis") {
+    const settings = { ...(study?.solverSettings ?? {}), ...(solverSettings ?? {}) };
+    const requestedModeCount = numberValue(settings.modeCount);
+    const modeCount = requestedModeCount !== undefined && Number.isInteger(requestedModeCount)
+      ? Math.min(10, Math.max(1, requestedModeCount))
+      : 6;
+    return {
+      name: "modalStep",
+      type: "modal",
+      boundaryConditions: names.boundaryConditions,
+      modeCount
+    };
+  }
   if (analysisType === "static_stress") {
     return { name: "loadStep", type: "staticLinear", ...names };
   }
