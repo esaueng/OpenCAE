@@ -271,6 +271,22 @@ describe("api", () => {
     }
   });
 
+  test("requests and loads modal and thermal sample projects locally", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response("missing", { status: 404 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    for (const analysisType of ["modal_analysis", "steady_state_thermal"] as const) {
+      const response = await loadSampleProject("bracket", analysisType);
+      const requestInit = fetchMock.mock.calls[fetchMock.mock.calls.length - 1]?.[1];
+      const requestBody = JSON.parse(requestInit?.body as string) as Record<string, unknown>;
+
+      expect(requestBody).toEqual({ sample: "bracket", analysisType });
+      expect(response.project.studies[0]?.type).toBe(analysisType);
+      expect(response.project.geometryFiles[0]?.metadata.sampleAnalysisType).toBe(analysisType);
+      expect(response.results).toBeUndefined();
+    }
+  });
+
   test("loads the beam sample locally with a payload mass sitting on the free end", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("missing", { status: 404 })));
 

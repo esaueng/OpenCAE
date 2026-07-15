@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { attachUploadedModelToProject, blankDisplayModel, createBlankProject, createStaticStressStudy, uploadedDisplayModelFor, createSampleProject, sampleDisplayModelFor } from "./projectFactory";
+import { ProjectSchema } from "@opencae/schema";
+import { attachUploadedModelToProject, blankDisplayModel, createBlankProject, createStaticStressStudy, uploadedDisplayModelFor, createSampleProject, normalizeSampleAnalysisType, sampleDisplayModelFor } from "./projectFactory";
 
 const sizedAsciiStlBase64 = btoa(`
 solid tray
@@ -122,6 +123,46 @@ describe("projectFactory", () => {
         sampleModel: sampleId,
         sampleAnalysisType: "dynamic_structural"
       });
+    }
+  });
+
+  test("normalizes and creates the new modal and thermal sample types", () => {
+    expect(normalizeSampleAnalysisType("modal_analysis")).toBe("modal_analysis");
+    expect(normalizeSampleAnalysisType("steady_state_thermal")).toBe("steady_state_thermal");
+    expect(normalizeSampleAnalysisType("unsupported")).toBe("static_stress");
+
+    for (const sampleId of ["bracket", "plate", "cantilever"] as const) {
+      const modal = createSampleProject(sampleId, {
+        projectId: `project-${sampleId}-modal`,
+        studyId: `study-${sampleId}-modal`,
+        now: "2026-04-24T12:00:00.000Z",
+        includeSeedRun: false,
+        analysisType: "modal_analysis"
+      });
+      const thermal = createSampleProject(sampleId, {
+        projectId: `project-${sampleId}-thermal`,
+        studyId: `study-${sampleId}-thermal`,
+        now: "2026-04-24T12:00:00.000Z",
+        includeSeedRun: false,
+        analysisType: "steady_state_thermal"
+      });
+
+      expect(modal.name).toContain("Modal Demo");
+      expect(modal.studies[0]).toMatchObject({
+        type: "modal_analysis",
+        loads: [],
+        solverSettings: { modeCount: 6 },
+        runs: []
+      });
+      expect(thermal.name).toContain("Thermal Demo");
+      expect(thermal.studies[0]).toMatchObject({
+        type: "steady_state_thermal",
+        constraints: [{ type: "prescribed_temperature", parameters: { value: 20, units: "°C" } }],
+        loads: [{ type: "heat_flux", parameters: expect.objectContaining({ value: 10_000, units: "W/m²" }) }],
+        runs: []
+      });
+      expect(ProjectSchema.safeParse(modal).success).toBe(true);
+      expect(ProjectSchema.safeParse(thermal).success).toBe(true);
     }
   });
 

@@ -114,6 +114,16 @@ describe("app CSS", () => {
     expect(firstRowButtons).toMatch(/border-bottom:\s*var\(--border-thin\)/);
   });
 
+  test("balances the four sample analysis types in a two-column grid", () => {
+    const sampleAnalysisType = cssRule(".segmented.sample-analysis-type-grid");
+    const evenButtons = cssRule(".segmented.sample-analysis-type-grid button:nth-child(2n)");
+    const firstRowButtons = cssRule(".segmented.sample-analysis-type-grid button:nth-child(-n + 2)");
+
+    expect(sampleAnalysisType).toMatch(/grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/);
+    expect(evenButtons).toMatch(/border-right:\s*0/);
+    expect(firstRowButtons).toMatch(/border-bottom:\s*var\(--border-thin\)/);
+  });
+
   test("keeps light mode shared text colors above contrast requirements", () => {
     const lightSurface = lightToken("--color-surface");
     const textTokens = ["--color-text", "--color-text-muted", "--color-text-subtle", "--color-accent", "--color-warning", "--color-error", "--color-success"];

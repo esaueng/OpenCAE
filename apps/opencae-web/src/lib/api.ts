@@ -44,7 +44,7 @@ export type ModelMutationOptions = {
 };
 
 export type SampleModelId = "bracket" | "plate" | "cantilever";
-export type SampleAnalysisType = "static_stress" | "dynamic_structural";
+export type SampleAnalysisType = "static_stress" | "dynamic_structural" | "modal_analysis" | "steady_state_thermal";
 
 export interface ResultsResponse {
   summary: ResultSummary;

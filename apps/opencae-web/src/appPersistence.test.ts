@@ -397,6 +397,8 @@ describe("app persistence", () => {
 
     expect(parseAutosavedWorkspacePayload(JSON.stringify(snapshot))?.ui.sampleModel).toBe("plate");
     expect(parseAutosavedWorkspacePayload(JSON.stringify(snapshot))?.ui.sampleAnalysisType).toBe("dynamic_structural");
+    expect(parseAutosavedWorkspacePayload(JSON.stringify({ ...snapshot, ui: { ...snapshot.ui, sampleAnalysisType: "modal_analysis" } }))?.ui.sampleAnalysisType).toBe("modal_analysis");
+    expect(parseAutosavedWorkspacePayload(JSON.stringify({ ...snapshot, ui: { ...snapshot.ui, sampleAnalysisType: "steady_state_thermal" } }))?.ui.sampleAnalysisType).toBe("steady_state_thermal");
     expect(parseAutosavedWorkspacePayload(JSON.stringify(snapshot))?.ui.selectedLoadPoint).toBeNull();
     expect(parseAutosavedWorkspacePayload(JSON.stringify(snapshot))?.ui.selectedPayloadObject).toBeNull();
     expect(parseAutosavedWorkspacePayload(JSON.stringify(snapshot))?.ui.draftLoadDirection).toBe("Opposite normal");
