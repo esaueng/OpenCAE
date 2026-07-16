@@ -3,6 +3,7 @@ import type { DisplayFace, ResultField, ResultSummary, StructuralResultSummary }
 import {
   createPackedResultPlaybackCache,
   createResultFrameCache,
+  compatibleResultModeForSummary,
   dynamicPlaybackFrames,
   fieldsForResultFrame,
   fieldWithOwnValueRange,
@@ -19,6 +20,45 @@ import {
   synthesizeModalPhaseFields,
   withDerivedSurfaceSafetyFactorFields
 } from "./resultFields";
+
+describe("result mode compatibility", () => {
+  const structuralSummary: StructuralResultSummary = {
+    maxStress: 10,
+    maxStressUnits: "MPa",
+    maxDisplacement: 0.1,
+    maxDisplacementUnits: "mm",
+    safetyFactor: 2,
+    reactionForce: 100,
+    reactionForceUnits: "N"
+  };
+
+  test("selects thermal and modal fields instead of retaining an incompatible structural mode", () => {
+    expect(compatibleResultModeForSummary({
+      analysisType: "steady_state_thermal",
+      minTemperature: 20,
+      maxTemperature: 80,
+      temperatureUnits: "°C",
+      maxHeatFlux: 12_000,
+      heatFluxUnits: "W/m²",
+      appliedHeat: 6.12,
+      generatedHeat: 0,
+      reactionHeat: -6.12,
+      heatRateUnits: "W",
+      energyBalanceRelativeError: 1e-9
+    }, "stress")).toBe("temperature");
+    expect(compatibleResultModeForSummary({
+      analysisType: "modal_analysis",
+      requestedModeCount: 1,
+      convergedModeCount: 1,
+      modes: [{ modeIndex: 1, frequencyHz: 100, eigenvalue: 394_784, scaledResidual: 1e-8, fieldId: "mode-1" }]
+    }, "temperature")).toBe("mode_shape");
+  });
+
+  test("preserves compatible user selections and resets incompatible static fields", () => {
+    expect(compatibleResultModeForSummary(structuralSummary, "displacement")).toBe("displacement");
+    expect(compatibleResultModeForSummary(structuralSummary, "heat_flux")).toBe("stress");
+  });
+});
 
 const faces: DisplayFace[] = [
   { id: "face-a", label: "A", color: "#fff", center: [0, 0, 0], normal: [0, 1, 0], stressValue: 10 },

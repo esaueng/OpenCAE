@@ -185,7 +185,12 @@ export function hasResultUnit(units: string | undefined): units is string {
 }
 
 export function formatResultMetric(value: number, units: string | undefined): string {
-  return hasResultUnit(units) ? `${value} ${units}` : "Unit missing";
+  return hasResultUnit(units) ? `${formatResultNumber(value)} ${units}` : "Unit missing";
+}
+
+export function formatResultNumber(value: number): string {
+  if (!Number.isFinite(value) || value === 0) return String(value);
+  return String(Number(value.toPrecision(6)));
 }
 
 export function solverMethodForResult(resultSummary: ResultSummary, study: Study): string {
