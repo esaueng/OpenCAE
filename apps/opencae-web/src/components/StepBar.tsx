@@ -45,7 +45,13 @@ export function StepBar({ activeStep, project, study, hasResults, collapsed, the
   const unitShort = project.unitSystem === "SI" ? "mm" : "in";
   const currentUnitLabel = project.unitSystem === "SI" ? "Metric" : "Imperial";
   const nextUnitSystem = project.unitSystem === "SI" ? "US" : "SI";
-  const studyTypeLabel = study.type === "dynamic_structural" ? "dynamic" : study.type === "modal_analysis" ? "modal" : "static";
+  const studyTypeLabel = study.type === "dynamic_structural"
+    ? "dynamic"
+    : study.type === "modal_analysis"
+      ? "modal"
+      : study.type === "steady_state_thermal"
+        ? "thermal"
+        : "static";
   const ThemeIcon = themeMode === "dark" ? Sun : Moon;
 
   return (

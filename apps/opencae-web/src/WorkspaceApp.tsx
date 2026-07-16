@@ -1,5 +1,5 @@
 import { lazy, startTransition, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { DynamicSolverSettingsSchema, isModalResultSummary, isRunResultReadyStatus, isStructuralResultSummary, ModalSolverSettingsSchema } from "@opencae/schema";
+import { DynamicSolverSettingsSchema, isModalResultSummary, isRunResultReadyStatus, isStructuralResultSummary, isThermalResultSummary, ModalSolverSettingsSchema } from "@opencae/schema";
 import type { Constraint, CustomMaterial, DisplayFace, DisplayModel, DynamicSolverSettings, Load, MeshQuality, ModalSolverSettings, NamedSelection, Project, ResultField, ResultRenderBounds, ResultSummary, RunEvent, RunTimingEstimate, RunVariantRef, RunVariantResult, SimulationFidelity, Study } from "@opencae/schema";
 import { Activity, CloudUpload, Download, HardDrive, RotateCcw, X } from "lucide-react";
 import { addLoad, addSupport, assignMaterial, cancelRun, createProject, generateMesh, getResults, getRunVariant, importLocalProject, isStepGeometryMeshFailure, loadSampleProject, probeUploadedStepRepairAfterMeshFailure, renameProject, repairUploadedStepModel, runMeshConvergence, runSimulation, saveRunReportCaptures, STEP_REPAIR_UNAVAILABLE_MESSAGE, subscribeToRun, updateStudy as saveStudyPatch, uploadedStepRepairProbeDecision, uploadModel, type SampleAnalysisType, type SampleModelId } from "./lib/api";
@@ -48,7 +48,7 @@ import { nextSelectedPayloadObject, shouldClearPayloadSelectionOnViewerMiss } fr
 import { hasLegacyStepUploadFaces, hasUnresolvedStepFaceSelections, healStepFaceSelections, healStepHoleSupportSelections, legacyStepFaceHealMessage } from "./stepFaceHealing";
 import { stepGeometryMetadataForProject, stepGeometryNeedsRepair } from "./stepGeometryState";
 import { createLocalDynamicStructuralStudy, createLocalModalStudy, createLocalStaticStressStudy, createLocalThermalStudy } from "./localProjectFactory";
-import { createPackedResultPlaybackCache, createResultFrameCache, hasDynamicPlaybackFrames, solverMeshSummaryFromResults, synthesizeModalPhaseFields, withDerivedSurfaceSafetyFactorFields, type SolverMeshSummary } from "./resultFields";
+import { compatibleResultModeForSummary, createPackedResultPlaybackCache, createResultFrameCache, hasDynamicPlaybackFrames, solverMeshSummaryFromResults, synthesizeModalPhaseFields, withDerivedSurfaceSafetyFactorFields, type SolverMeshSummary } from "./resultFields";
 import { appendResultProbe, availableStressComponents, derivedStressFieldsForComponent, governingVariantIdForProbe, MAX_RESULT_PROBES, resolveResultProbe, resultProbeTopologySignature, selectActiveResultField, semanticResultFieldKey, type ResultProbeAnchor, type ResultProbePin } from "./resultSelection";
 import { automaticResultFieldRange, DEFAULT_RESULT_COLOR_SCALE_SETTING, resolveResultColorScale, type ResultColorScaleSetting, type ResultColorScaleSettings } from "./resultColorScale";
 import { packResultFieldsForPlayback, packedPreparedPlaybackFrameOrdinal, playbackFieldsForResultMode, playbackMemoryBudgetBytes, type PackedPreparedPlaybackCache, type PreparedPlaybackFrameCache } from "./resultPlaybackCache";
@@ -141,7 +141,10 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const [viewMode, setViewMode] = useState<ViewMode>(restoredUi?.viewMode ?? (restoredResults?.fields.length ? "results" : "model"));
   const [themeMode, setThemeMode] = useState<ThemeMode>(restoredUi?.themeMode ?? "dark");
   const [projectionMode, setProjectionMode] = useState<ProjectionMode>(restoredUi?.projectionMode ?? "perspective");
-  const [resultMode, setResultMode] = useState<ResultMode>(restoredUi?.resultMode ?? "stress");
+  const [resultMode, setResultMode] = useState<ResultMode>(() => compatibleResultModeForSummary(
+    restoredResults?.summary,
+    restoredUi?.resultMode ?? "stress"
+  ));
   const [selectedModeIndex, setSelectedModeIndex] = useState(restoredUi?.selectedModeIndex ?? 1);
   const [stressComponent, setStressComponent] = useState<StressComponent>(restoredUi?.stressComponent ?? "von_mises");
   const [resultColorScaleSettings, setResultColorScaleSettings] = useState<ResultColorScaleSettings>(restoredUi?.resultColorScaleSettings ?? {});
@@ -481,6 +484,10 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const effectiveCanRunSimulation = canRunSimulation && !openStepNeedsRepair;
   const canUndoAction = undoStack.length > 0;
   const canRedoAction = redoStack.length > 0;
+
+  useEffect(() => {
+    setResultMode((currentMode) => compatibleResultModeForSummary(resultSummary, currentMode));
+  }, [resultSummary]);
 
   useEffect(() => {
     projectRef.current = project;
@@ -2200,6 +2207,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           setResultFrameIndex(0);
           setResultPlaybackPlaying(false);
           if (study.type === "dynamic_structural") setResultMode("stress");
+          if (isThermalResultSummary(results.summary)) setResultMode("temperature");
           if (isModalResultSummary(results.summary)) {
             setSelectedModeIndex(results.summary.modes[0]?.modeIndex ?? 1);
             setResultMode("mode_shape");
