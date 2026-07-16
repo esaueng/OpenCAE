@@ -19,7 +19,7 @@ import { shouldShowSampleModelPicker } from "../modelPanelState";
 import { SETTING_HELP, type SettingHelpId, type SettingHelpVisual } from "../settingHelp";
 import { supportDisplayLabel } from "../supportLabels";
 import { getViewportTooltipPosition } from "../tooltipPosition";
-import { forceForUnits, formatDensity, formatMass, formatMaterialStress, formatMeshSourceLabel, formatResultMetric, formatResultProvenanceLabel, formatVolume, hasResultUnit, legacyResultWarningForProvenance, loadValueForUnits, solverMethodForResult, solverRunnerLabelForResult, type UnitSystem } from "../unitDisplay";
+import { forceForUnits, formatDensity, formatMass, formatMaterialStress, formatMeshSourceLabel, formatResultMetric, formatResultNumber, formatResultProvenanceLabel, formatVolume, hasResultUnit, legacyResultWarningForProvenance, loadValueForUnits, solverMethodForResult, solverRunnerLabelForResult, type UnitSystem } from "../unitDisplay";
 import { canNavigateToStep } from "../appShellState";
 import { MaterialLibraryModal } from "./SimulationWorkflow";
 import { ParametricPartBuilder } from "./ParametricPartBuilder";
@@ -272,7 +272,7 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, se
   }
 
   return (
-    <Panel title="Model" helper="Inspect the 3D part. Orbit with left-drag, pan with right-drag, zoom with scroll.">
+    <Panel title="Model" step="model" helper="Inspect the 3D part. Orbit with left-drag, pan with right-drag, zoom with scroll.">
       {showSampleModelPicker && (
         <div className="field">
           <HelpLabel helpId="sampleModel">Sample model</HelpLabel>
@@ -519,7 +519,7 @@ function MaterialPanel({ project, displayModel, study, onAssignMaterial, onSaveC
   }
 
   return (
-    <Panel title="Material" helper="Choose the material, then how it is made.">
+    <Panel title="Material" step="material" helper="Choose the material, then how it is made.">
       <SectionTitle helpId="materialLibrary">Base Material</SectionTitle>
       <div className="base-material-card">
         <button className="base-material-selector" type="button" onClick={() => setShowLibrary(true)} aria-label={`Change base material. Current material: ${selectedMaterial.name}`}>
@@ -672,7 +672,7 @@ function SupportsPanel({ selectedFace, study, onAddSupport, onUpdateSupport, onR
   const [temperature, setTemperature] = useState(20);
   const addLabel = thermal ? "Add prescribed temperature" : study.constraints.length ? "Add another fixed support" : "Add fixed support";
   return (
-    <Panel title={thermal ? "Temperature boundaries" : "Supports"} helper={thermal ? "Select a face and prescribe its steady boundary temperature." : "Choose where the part is held fixed. Select a face, or click inside a cylindrical hole to constrain its wall. You can add more than one support."}>
+    <Panel title={thermal ? "Temperature boundaries" : "Supports"} step="supports" helper={thermal ? "Select a face and prescribe its steady boundary temperature." : "Choose where the part is held fixed. Select a face, or click inside a cylindrical hole to constrain its wall. You can add more than one support."}>
       <HelpNote helpId="supportPlacement" />
       <PlacementReadout selectedRef={selectedFromViewport} fallbackLabel={selectedFace?.label} />
       {thermal && <label className="field">Temperature<span className="input-with-unit"><input type="number" value={temperature} onChange={(event) => setTemperature(Number(event.currentTarget.value))} /><span>°C</span></span></label>}
@@ -779,7 +779,7 @@ function LoadsPanel({
     })), loadCombinations);
   }
   return (
-    <Panel title={thermal ? "Thermal loads" : "Loads"} helper={thermal ? (draftLoadType === "heat_generation" ? "Apply uniform heat generation throughout the selected body." : "Select a face and apply inward surface heat flux.") : draftLoadType === "gravity" ? "Choose the object carrying payload mass, then add its weight as a load." : draftLoadType === "volume_force" ? "Apply a force density to the selected structural body." : "Select a face on the model, then add the load."}>
+    <Panel title={thermal ? "Thermal loads" : "Loads"} step="loads" helper={thermal ? (draftLoadType === "heat_generation" ? "Apply uniform heat generation throughout the selected body." : "Select a face and apply inward surface heat flux.") : draftLoadType === "gravity" ? "Choose the object carrying payload mass, then add its weight as a load." : draftLoadType === "volume_force" ? "Apply a force density to the selected structural body." : "Select a face on the model, then add the load."}>
       <HelpNote helpId="loadPlacement" />
       <PlacementReadout
         selectedRef={placementSelection}
@@ -1452,7 +1452,7 @@ function MeshPanel({ project, displayModel, study, onGenerateMesh, onConnections
   }
 
   return (
-    <Panel title="Mesh" helper="The mesh breaks the model into small pieces so OpenCAE can calculate results.">
+    <Panel title="Mesh" step="mesh" helper="The mesh breaks the model into small pieces so OpenCAE can calculate results.">
       <div className="field">
         <HelpLabel helpId="meshQuality">Quality preset</HelpLabel>
         <div className="segmented mesh-quality" role="group" aria-label="Mesh quality">
@@ -1693,7 +1693,7 @@ function RunPanel({ study, displayModel, runProgress, runError, runTiming, onRun
   const loadProfile = isDynamicLoadProfile(dynamic?.loadProfile) ? dynamic.loadProfile : "ramp";
   const loadProfileHelper = DYNAMIC_LOAD_PROFILE_OPTIONS.find((option) => option.value === loadProfile)?.helper ?? DEFAULT_DYNAMIC_LOAD_PROFILE_HELPER;
   return (
-    <Panel title="Run" helper={modal ? "Solve for natural frequencies and normalized mode shapes." : thermal ? "Solve for steady temperature and heat-flux fields." : "Run the simulation to estimate stress and displacement."}>
+    <Panel title="Run" step="run" helper={modal ? "Solve for natural frequencies and normalized mode shapes." : thermal ? "Solve for steady temperature and heat-flux fields." : "Run the simulation to estimate stress and displacement."}>
       <SectionTitle helpId="runReadiness">Readiness</SectionTitle>
       <div className="checklist">
         {checks.map(([label, done]) => <span key={label} className={done ? "check done" : "check"}><span>{done ? <Check size={18} /> : null}</span>{label}</span>)}
@@ -1951,7 +1951,7 @@ function formatProbeReading(probe: ResolvedResultProbe): string {
 function ResultsPanel(props: RightPanelProps) {
   if (!props.resultSummary) {
     return (
-      <Panel title="Results" helper="View stress and displacement directly on the 3D model.">
+      <Panel title="Results" step="results" helper="View stress and displacement directly on the 3D model.">
         <Callout>Run a simulation to see results.</Callout>
       </Panel>
     );
@@ -1980,7 +1980,7 @@ function ThermalResultsPanelContent({
   htmlExportError
 }: RightPanelProps & { resultSummary: ThermalResultSummary }) {
   return (
-    <Panel title="Thermal results" helper="Inspect steady temperature and conductive heat-flux fields on the solved mesh.">
+    <Panel title="Thermal results" step="results" helper="Inspect steady temperature and conductive heat-flux fields on the solved mesh.">
       <div className="segmented" role="group" aria-label="Thermal result field">
         <button type="button" className={resultMode === "temperature" ? "active" : ""} onClick={() => onResultModeChange("temperature")}>Temperature</button>
         <button type="button" className={resultMode === "heat_flux" ? "active" : ""} onClick={() => onResultModeChange("heat_flux")}>Heat flux</button>
@@ -2038,21 +2038,21 @@ function ModalResultsPanelContent({
   const activeMode = resultSummary.modes.find((mode) => mode.modeIndex === selectedModeIndex) ?? resultSummary.modes[0];
   const resultProvenance = resultSummary.provenance;
   return (
-    <Panel title="Results" helper="Inspect converged natural frequencies and normalized mode shapes.">
+    <Panel title="Results" step="results" helper="Inspect converged natural frequencies and normalized mode shapes.">
       {resultSummary.warning && <p className="panel-warning" role="status"><AlertTriangle size={16} />{resultSummary.warning}</p>}
       <div className="summary-box">
         <Info label="Converged modes" value={`${resultSummary.convergedModeCount} / ${resultSummary.requestedModeCount}`} />
-        <Info label="Solver method" value="block_shift_invert_modal" />
+        <Info label="Solver method" value="Block shift-invert" />
         <Info label="Result source" value={resultSourceLabelForPanel(resultSummary)} />
         <Info label="Runner" value={solverRunnerLabelForResult(resultProvenance)} />
       </div>
       <SectionTitle helpId="modalModes">Modes</SectionTitle>
-      <div className="modal-mode-table" role="list" aria-label="Converged modes">
+      <div className="modal-mode-table" role="group" aria-label="Converged modes">
         {resultSummary.modes.map((mode) => (
           <button
             key={mode.modeIndex}
             type="button"
-            role="listitem"
+            aria-pressed={mode.modeIndex === selectedModeIndex}
             className={mode.modeIndex === selectedModeIndex ? "primary" : "secondary"}
             onClick={() => onSelectedModeIndexChange?.(mode.modeIndex)}
           >
@@ -2248,7 +2248,7 @@ function ResultsPanelContent({
   }
 
   return (
-    <Panel title="Results" helper="View stress and displacement directly on the 3D model.">
+    <Panel title="Results" step="results" helper="View stress and displacement directly on the 3D model.">
       {resultVariants.length > 1 && (
         <label className="field result-variant-selector">
           <span>Run variant</span>
@@ -2443,7 +2443,7 @@ function ResultsPanelContent({
       {legacyResultWarning && <p className="panel-warning">{legacyResultWarning}</p>}
       {reactionForceInvalid && <p className="panel-warning">{INVALID_REACTION_WARNING}</p>}
       {unitMissingDiagnostic && <p className="panel-warning">{unitMissingDiagnostic}</p>}
-      <p className="panel-copy">Red areas have higher stress. Blue areas have lower stress.</p>
+      <p className="panel-copy">{resultModeExplanation(resultMode)}</p>
       <div className="summary-box">
         <Info label="Result source" value={resultSourceLabelForPanel(resultSummary)} />
         <Info label="Mesh source" value={formatMeshSourceLabel(resultProvenance?.meshSource, displayModel)} />
@@ -2451,7 +2451,7 @@ function ResultsPanelContent({
         <Info label="Runner" value={solverRunnerLabelForResult(resultProvenance)} />
         <Info label="Max stress" value={formatResultMetric(resultSummary.maxStress, resultSummary.maxStressUnits)} />
         <Info label="Max displacement" value={formatResultMetric(resultSummary.maxDisplacement, resultSummary.maxDisplacementUnits)} />
-        <Info label="Safety factor" value={String(resultSummary.safetyFactor)} />
+        <Info label="Safety factor" value={formatResultNumber(resultSummary.safetyFactor)} />
         <Info label="Failure check" value={assessment.title} />
         <Info label="Reaction force" value={formatResultMetric(resultSummary.reactionForce, resultSummary.reactionForceUnits)} />
       </div>
@@ -2525,14 +2525,33 @@ export function playbackPeakMarkerPercent(frames: Array<{ frameIndex: number; ti
   return 0;
 }
 
-function Panel({ title, helper, children }: { title: string; helper: string; children: ReactNode }) {
-  const step = ["Model", "Material", "Supports", "Loads", "Mesh", "Run", "Results"].indexOf(title) + 1;
+export function resultModeExplanation(resultMode: ResultMode): string {
+  const field = resultMode === "displacement"
+    ? "displacement magnitude"
+    : resultMode === "velocity"
+      ? "velocity magnitude"
+      : resultMode === "acceleration"
+        ? "acceleration magnitude"
+        : resultMode === "safety_factor"
+          ? "safety factor"
+          : resultMode === "temperature"
+            ? "temperature"
+            : resultMode === "heat_flux"
+              ? "heat flux"
+              : resultMode === "mode_shape"
+                ? "normalized mode-shape amplitude"
+          : "stress";
+  return `Red areas have higher ${field}. Blue areas have lower ${field}.`;
+}
+
+function Panel({ title, step, helper, children }: { title: string; step: StepId; helper: string; children: ReactNode }) {
+  const stepNumber = WORKFLOW_STEPS.findIndex((workflowStep) => workflowStep.id === step) + 1;
   return (
     <div className="panel-section">
       <div className="panel-header">
         <div className="panel-title-row">
           <h2>{title}</h2>
-          <div className="panel-eyebrow">Step {step || 1} of 7</div>
+          <div className="panel-eyebrow">Step {stepNumber} of 7</div>
         </div>
         <p className="helper">{helper}</p>
       </div>

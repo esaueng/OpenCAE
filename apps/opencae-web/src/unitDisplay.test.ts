@@ -1,7 +1,14 @@
 import { describe, expect, test } from "vitest";
-import { displayModelForUnits, formatDensity, formatForce, formatLength, formatMass, formatMaterialStress, formatResultProvenanceLabel, formatStress, formatUnitSystemLabel, formatVolume, loadValueForUnits, resultFieldForUnits, resultSummaryForUnits, resultValueForUnits, resultValueFromDisplayUnits } from "./unitDisplay";
+import { displayModelForUnits, formatDensity, formatForce, formatLength, formatMass, formatMaterialStress, formatResultMetric, formatResultNumber, formatResultProvenanceLabel, formatStress, formatUnitSystemLabel, formatVolume, loadValueForUnits, resultFieldForUnits, resultSummaryForUnits, resultValueForUnits, resultValueFromDisplayUnits } from "./unitDisplay";
 
 describe("unit display formatting", () => {
+  test("formats solver metrics with bounded significant precision", () => {
+    expect(formatResultMetric(24.830578943767595, "°C")).toBe("24.8306 °C");
+    expect(formatResultMetric(19207.968569501394, "W/m²")).toBe("19208 W/m²");
+    expect(formatResultMetric(5.955570096632689e-9, "%")).toBe("5.95557e-9 %");
+    expect(formatResultNumber(151.10482851265246)).toBe("151.105");
+  });
+
   test("labels project unit systems for the workspace footer", () => {
     expect(formatUnitSystemLabel("SI")).toBe("Metric · mm");
     expect(formatUnitSystemLabel("US")).toBe("Imperial · in");

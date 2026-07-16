@@ -6442,6 +6442,22 @@ export function displayedLegendTickLabels(minValue: number, maxValue: number) {
   return [ticks[0], ticks[2], ticks[4]];
 }
 
+export function resultLegendTitle(resultMode: ResultMode, stressComponent: StressComponent): string {
+  if (resultMode === "stress") {
+    if (stressComponent === "principal_max") return "Principal Stress σ₁";
+    if (stressComponent === "principal_min") return "Principal Stress σ₃";
+    if (stressComponent === "max_shear") return "Maximum Shear Stress";
+    return "Von Mises Stress";
+  }
+  if (resultMode === "displacement") return "Displacement";
+  if (resultMode === "velocity") return "Velocity";
+  if (resultMode === "acceleration") return "Acceleration";
+  if (resultMode === "mode_shape") return "Normalized Mode Shape";
+  if (resultMode === "temperature") return "Temperature";
+  if (resultMode === "heat_flux") return "Heat Flux";
+  return "Safety Factor";
+}
+
 export function legendMeshStats(meshSummary: MeshSummary | undefined) {
   if (!meshSummary) return { nodes: "--", elements: "--" };
   // Preset summaries are planning estimates; only solver-reported statistics are exact.
@@ -6548,17 +6564,13 @@ function ResultLegend({ resultMode, resultFields, unitSystem, meshSummary, surfa
     const unitFactor = displacementField.units === "mm" && surfaceMesh.coordinateSpace === "solver" ? 1000 : 1;
     return legendDeformationLabel(appliedScale * unitFactor);
   }, [deformationScale, resultFields, resultMode, showDeformed, surfaceMesh]);
-  const title = resultMode === "stress"
-    ? stressComponent === "principal_max" ? "Principal Stress σ₁"
-      : stressComponent === "principal_min" ? "Principal Stress σ₃"
-        : stressComponent === "max_shear" ? "Maximum Shear Stress" : "Von Mises Stress"
-    : resultMode === "displacement" ? "Displacement" : resultMode === "velocity" ? "Velocity" : resultMode === "acceleration" ? "Acceleration" : resultMode === "mode_shape" ? "Normalized Mode Shape" : "Safety Factor";
+  const title = resultLegendTitle(resultMode, stressComponent);
   // Prefer the field actually rendered on the solver surface mesh so the legend
   // range matches the contours; fall back to the face/sample field otherwise.
   const surfaceField = surfaceMesh ? resultFields.find((candidate) => isSolverSurfaceNodeField(candidate, surfaceMesh, resultMode)) : undefined;
   const field = surfaceField ?? selectedResultField(resultFields, resultMode);
-  const fallbackMin = resultMode === "stress" ? stressForUnits(28, "MPa", unitSystem) : resultMode === "displacement" || resultMode === "velocity" || resultMode === "acceleration" ? lengthForUnits(0, "mm", unitSystem) : resultMode === "mode_shape" ? { value: 0, units: "normalized" } : { value: 1.8, units: "" };
-  const fallbackMax = resultMode === "stress" ? stressForUnits(142, "MPa", unitSystem) : resultMode === "displacement" || resultMode === "velocity" || resultMode === "acceleration" ? lengthForUnits(0.184, "mm", unitSystem) : resultMode === "mode_shape" ? { value: 1, units: "normalized" } : { value: 7.6, units: "" };
+  const fallbackMin = resultMode === "stress" ? stressForUnits(28, "MPa", unitSystem) : resultMode === "displacement" || resultMode === "velocity" || resultMode === "acceleration" ? lengthForUnits(0, "mm", unitSystem) : resultMode === "mode_shape" ? { value: 0, units: "normalized" } : resultMode === "temperature" ? { value: 0, units: unitSystem === "US" ? "°F" : "°C" } : resultMode === "heat_flux" ? { value: 0, units: unitSystem === "US" ? "BTU/(h·ft²)" : "W/m²" } : { value: 1.8, units: "" };
+  const fallbackMax = resultMode === "stress" ? stressForUnits(142, "MPa", unitSystem) : resultMode === "displacement" || resultMode === "velocity" || resultMode === "acceleration" ? lengthForUnits(0.184, "mm", unitSystem) : resultMode === "mode_shape" ? { value: 1, units: "normalized" } : resultMode === "temperature" ? { value: unitSystem === "US" ? 212 : 100, units: unitSystem === "US" ? "°F" : "°C" } : resultMode === "heat_flux" ? { value: 1, units: unitSystem === "US" ? "BTU/(h·ft²)" : "W/m²" } : { value: 7.6, units: "" };
   const unit = field?.units ?? fallbackMax.units;
   const colorScale = contextColorScale ?? resultColorScaleForField(field, resultMode);
   const minValue = colorScale.min ?? fallbackMin.value;

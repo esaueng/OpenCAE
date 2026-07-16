@@ -1,8 +1,23 @@
-import { isStructuralResultSummary } from "@opencae/schema";
+import { isModalResultSummary, isStructuralResultSummary, isThermalResultSummary } from "@opencae/schema";
 import type { DisplayFace, ResultField, ResultSummary, StructuralResultSummary } from "@opencae/schema";
 import { semanticResultFieldKey, stressComponentForField } from "./resultSelection";
+import type { ResultMode } from "./workspaceViewTypes";
 
 export type ResultFieldMode = "stress" | "displacement" | "safety_factor" | "velocity" | "acceleration" | "mode_shape" | "temperature" | "heat_flux";
+
+export function compatibleResultModeForSummary(summary: ResultSummary | null | undefined, currentMode: ResultMode): ResultMode {
+  if (!summary) return currentMode;
+  if (isThermalResultSummary(summary)) {
+    return currentMode === "temperature" || currentMode === "heat_flux" ? currentMode : "temperature";
+  }
+  if (isModalResultSummary(summary)) return "mode_shape";
+  if (summary.transient) {
+    return currentMode === "stress" || currentMode === "displacement" || currentMode === "safety_factor" || currentMode === "velocity" || currentMode === "acceleration"
+      ? currentMode
+      : "stress";
+  }
+  return currentMode === "stress" || currentMode === "displacement" || currentMode === "safety_factor" ? currentMode : "stress";
+}
 
 export interface FaceResultSample {
   face: DisplayFace;
@@ -1070,7 +1085,8 @@ function resultProbeLabel(mode: ResultFieldMode, value: number, units = "") {
 }
 
 export function formatResultValue(value: number) {
-  return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(3)));
+  if (!Number.isFinite(value) || Number.isInteger(value)) return String(value);
+  return String(Number(value.toPrecision(6)));
 }
 
 const SAFETY_FACTOR_DISPLAY_CAP = 10000;

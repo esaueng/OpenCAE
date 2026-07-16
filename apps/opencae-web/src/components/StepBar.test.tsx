@@ -145,6 +145,25 @@ describe("StepBar", () => {
     expect(html).toContain("<span>study</span><strong>dynamic</strong>");
   });
 
+  test("labels steady-state thermal studies as thermal", () => {
+    const html = renderToStaticMarkup(
+      <StepBar
+        activeStep="results"
+        project={project}
+        study={{ ...study, name: "Steady Thermal", type: "steady_state_thermal" }}
+        hasResults
+        collapsed={false}
+        themeMode="dark"
+        onSelect={vi.fn()}
+        onToggleCollapsed={vi.fn()}
+        onToggleTheme={vi.fn()}
+        onUnitSystemChange={vi.fn()}
+      />
+    );
+
+    expect(html).toContain("<span>study</span><strong>thermal</strong>");
+  });
+
   test("omits redundant solver backend metadata from the footer", () => {
     const html = renderToStaticMarkup(
       <StepBar

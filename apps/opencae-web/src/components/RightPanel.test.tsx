@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test, vi } from "vitest";
 import { bracketDisplayModel } from "@opencae/db/sample-data";
 import type { DisplayModel, Project, ResultField, ResultSummary, Study } from "@opencae/schema";
-import { editableNumberCommitValue, playbackPeakMarkerPercent, RightPanel, rangeProgressPercent } from "./RightPanel";
+import { editableNumberCommitValue, playbackPeakMarkerPercent, resultModeExplanation, RightPanel, rangeProgressPercent } from "./RightPanel";
 import type { StepId } from "./StepBar";
 import type { StepGeometryMetadata } from "../lib/api";
 
@@ -555,6 +555,44 @@ describe("RightPanel payload mass controls", () => {
     expect(markup).toContain("81.5 Hz");
     expect(markup).toContain("Phase");
     expect(markup).toContain("visualization-only");
+    expect(markup).toContain('role="group" aria-label="Converged modes"');
+    expect(markup).toContain('aria-pressed="true"');
+    expect(markup).not.toContain('role="listitem"');
+    expect(markup).toContain("Block shift-invert");
+  });
+
+  test("renders thermal results as the final workflow step with readable metrics", () => {
+    const thermalStudy: Study = { ...study, name: "Steady Thermal", type: "steady_state_thermal" };
+    const html = renderPanel("results", {
+      study: thermalStudy,
+      resultMode: "temperature",
+      resultSummary: {
+        analysisType: "steady_state_thermal",
+        minTemperature: 20,
+        maxTemperature: 24.830578943767595,
+        temperatureUnits: "°C",
+        maxHeatFlux: 19207.968569501394,
+        heatFluxUnits: "W/m²",
+        appliedHeat: 6.120000000000002,
+        generatedHeat: 0,
+        reactionHeat: -6.120000000364483,
+        heatRateUnits: "W",
+        energyBalanceRelativeError: 5.955570096632689e-11
+      }
+    });
+
+    expect(html).toContain("Thermal results");
+    expect(html).toContain("Step 7 of 7");
+    expect(html).toContain('class="active">Temperature</button>');
+    expect(html).toContain("24.8306 °C");
+    expect(html).toContain("19208 W/m²");
+    expect(html).toContain("5.95557e-9 %");
+  });
+
+  test("describes the currently displayed result quantity", () => {
+    expect(resultModeExplanation("stress")).toBe("Red areas have higher stress. Blue areas have lower stress.");
+    expect(resultModeExplanation("displacement")).toBe("Red areas have higher displacement magnitude. Blue areas have lower displacement magnitude.");
+    expect(resultModeExplanation("velocity")).toBe("Red areas have higher velocity magnitude. Blue areas have lower velocity magnitude.");
   });
 
   test("does not show the selected face as a persistent right-panel banner", () => {
