@@ -56,6 +56,8 @@ export async function runStaticMeshConvergence(input: MeshConvergenceRunInput): 
   const isolated = convergenceStudyForCase(input.study, input.caseId);
   const rungs: MeshConvergenceRung[] = [];
   const maxDofs = input.maxDofs ?? BROWSER_SOLVE_LIMITS.maxDofs;
+  let stableDefaultPoint: [number, number, number] | null = null;
+  let resolvedRecordProbe = input.probe;
 
   for (const preset of CONVERGENCE_PRESETS) {
     input.onProgress?.(preset, "mesh");
@@ -90,8 +92,19 @@ export async function runStaticMeshConvergence(input: MeshConvergenceRunInput): 
     input.onProgress?.(preset, "solve");
     try {
       const result = await input.solve(prepared.study, preset);
-      const metrics = convergenceMetrics(result, input.caseId, input.probe.point);
-      rungs.push({ ...base, status: "complete", ...metrics });
+      const resolved = convergenceMetrics(result, input.caseId, input.probe, stableDefaultPoint);
+      if (input.probe.source === "primary_load") {
+        const firstResolvedDefault = stableDefaultPoint === null;
+        stableDefaultPoint = resolved.resolvedPoint;
+        if (firstResolvedDefault) {
+          resolvedRecordProbe = {
+            ...input.probe,
+            point: resolved.recordPoint,
+            label: input.probe.label ?? "Primary load surface projection"
+          };
+        }
+      }
+      rungs.push({ ...base, status: "complete", ...resolved.metrics });
       input.onProgress?.(preset, "complete");
     } catch (error) {
       rungs.push({ ...base, status: "failed", skipReason: errorMessage(error, "Solve or probe mapping failed.") });
@@ -106,7 +119,7 @@ export async function runStaticMeshConvergence(input: MeshConvergenceRunInput): 
     caseId: input.caseId,
     createdAt,
     completedAt: now(),
-    probe: input.probe,
+    probe: resolvedRecordProbe,
     rungs,
     classification: classification.classification,
     ...(classification.lastStepChanges ? { lastStepChanges: classification.lastStepChanges } : {})
@@ -173,11 +186,22 @@ export type MappedSurfaceProbe = {
   surfaceMeshId: string;
   triangle: [number, number, number];
   barycentric: [number, number, number];
+  point: [number, number, number];
   distance: number;
+  tolerance: number;
   coordinateScale: number;
 };
 
 export function mapPointToNearestSurfaceTriangle(
+  point: [number, number, number],
+  surfaceMesh: SolverSurfaceMesh,
+  coordinateScales: readonly number[] = [1, 0.001, 1000]
+): MappedSurfaceProbe | null {
+  const nearest = nearestSurfaceTriangle(point, surfaceMesh, coordinateScales);
+  return nearest && nearest.distance <= nearest.tolerance + Number.EPSILON * Math.max(1, nearest.tolerance) ? nearest : null;
+}
+
+function nearestSurfaceTriangle(
   point: [number, number, number],
   surfaceMesh: SolverSurfaceMesh,
   coordinateScales: readonly number[] = [1, 0.001, 1000]
@@ -201,24 +225,41 @@ export function mapPointToNearestSurfaceTriangle(
         surfaceMeshId: surfaceMesh.id,
         triangle,
         barycentric: closest.barycentric,
+        point: closest.point,
         distance: Math.sqrt(closest.distanceSquared),
+        tolerance,
         distanceSquared: closest.distanceSquared,
         coordinateScale
       };
     }
   }
-  if (!best || best.distance > tolerance) return null;
+  if (!best) return null;
   const { distanceSquared: _distanceSquared, ...mapped } = best;
   return mapped;
 }
 
-function convergenceMetrics(result: ConvergenceSolveResult, caseId: string, probePoint: [number, number, number]) {
+function convergenceMetrics(
+  result: ConvergenceSolveResult,
+  caseId: string,
+  probe: ConvergenceProbe,
+  stableDefaultPoint: [number, number, number] | null
+) {
   const variant = result.variants?.find((candidate) => candidate.caseId === caseId || candidate.id === `case:${caseId}`);
   const fields = variant?.fields ?? result.fields;
   const surfaceMesh = solverSurfaceMesh(result.surfaceMesh);
   if (!surfaceMesh) throw new Error("Convergence solve returned no solver-surface mesh for the displacement probe.");
-  const mapped = mapPointToNearestSurfaceTriangle(probePoint, surfaceMesh);
-  if (!mapped) throw new Error("Displacement probe could not be mapped to the nearest solver-surface triangle within the scale-aware tolerance.");
+  const seedPoint = stableDefaultPoint ?? probe.point;
+  const coordinateScales = stableDefaultPoint ? [1] : [1, 0.001, 1000];
+  const nearest = nearestSurfaceTriangle(seedPoint, surfaceMesh, coordinateScales);
+  if (!nearest) throw new Error("Displacement probe could not be mapped because the solver-surface mesh has no valid triangles.");
+  const mapped = probe.source === "primary_load"
+    ? nearest
+    : nearest.distance <= nearest.tolerance + Number.EPSILON * Math.max(1, nearest.tolerance)
+      ? nearest
+      : null;
+  if (!mapped) {
+    throw new Error(`Explicit displacement probe is ${formatDistance(nearest.distance)} from the nearest solver-surface triangle; allowed tolerance is ${formatDistance(nearest.tolerance)}.`);
+  }
   const displacement = fields.find((field) => field.type === "displacement"
     && field.location === "node"
     && field.surfaceMeshRef === surfaceMesh.id
@@ -233,10 +274,16 @@ function convergenceMetrics(result: ConvergenceSolveResult, caseId: string, prob
   const rawElementPeakVonMises = maxFiniteAbsolute(stress.values);
   if (!Number.isFinite(rawElementPeakVonMises)) throw new Error("Raw element von Mises field contained no finite values.");
   return {
-    rawElementPeakVonMises,
-    stressUnits: stress.units,
-    probeDisplacement: Math.hypot(vector[0], vector[1], vector[2]),
-    displacementUnits: displacement.units
+    metrics: {
+      rawElementPeakVonMises,
+      stressUnits: stress.units,
+      probeDisplacement: Math.hypot(vector[0], vector[1], vector[2]),
+      displacementUnits: displacement.units
+    },
+    resolvedPoint: mapped.point,
+    recordPoint: stableDefaultPoint
+      ? mapped.point
+      : mapped.point.map((value) => value / mapped.coordinateScale) as [number, number, number]
   };
 }
 
@@ -269,7 +316,7 @@ function closestPointOnTriangle(
   a: [number, number, number],
   b: [number, number, number],
   c: [number, number, number]
-): { barycentric: [number, number, number]; distanceSquared: number } | null {
+): { barycentric: [number, number, number]; point: [number, number, number]; distanceSquared: number } | null {
   const ab = subtract(b, a);
   const ac = subtract(c, a);
   const bc = subtract(c, b);
@@ -324,7 +371,11 @@ function closestPointOnTriangle(
     a[1] * barycentric[0] + b[1] * barycentric[1] + c[1] * barycentric[2],
     a[2] * barycentric[0] + b[2] * barycentric[1] + c[2] * barycentric[2]
   ];
-  return { barycentric, distanceSquared: squaredNorm(subtract(point, closest)) };
+  return { barycentric, point: closest, distanceSquared: squaredNorm(subtract(point, closest)) };
+}
+
+function formatDistance(value: number): string {
+  return Number.isFinite(value) ? value.toExponential(3) : String(value);
 }
 
 function surfaceDiagonal(nodes: ArrayLike<[number, number, number]>): number {
