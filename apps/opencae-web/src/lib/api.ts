@@ -6,6 +6,7 @@ import { unitsForLoadType, type LoadApplicationPoint, type LoadDirection, type L
 import type { PayloadObjectSelection } from "../workspaceViewTypes";
 import { embedUploadedModelFile, type EmbeddedModelFile, type LocalResultBundle, type SolverSurfaceMesh } from "../projectFile";
 import { createLocalBlankProject, createLocalSampleProject, createLocalUploadResponse, openLocalProjectPayload } from "../localProjectFactory";
+import { peekStepSurfacePreview } from "../stepSurfacePreviewFallback";
 import type { SolveProgressEvent } from "@opencae/solve-pipeline";
 import type { ResultViewCaptures } from "../report/captureResultViews";
 import { isCancelledSolveError, startLocalSolve } from "../workers/solveWorkerClient";
@@ -403,6 +404,8 @@ async function inspectStepGeometryForUpload(filename: string, contentBase64: str
     return { status: "unchecked", message: "STEP topology could not be checked in this browser build." };
   }
   try {
+    const cached = peekStepSurfacePreview(contentBase64);
+    if (cached) return stepGeometryMetadataFromInspection(cached.inspection);
     const client = await import("../workers/meshWorkerClient");
     const { inspection, repairProbe } = await client.inspectStepFileInWorker({ stepContent: base64ToArrayBuffer(contentBase64) });
     return stepGeometryMetadataFromInspection(inspection, repairProbe);

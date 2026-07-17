@@ -13,7 +13,8 @@ import type {
   StepBodyBounds,
   StepAttributionTessellation,
   StepGeometryInspection,
-  StepGeometryRepairReport
+  StepGeometryRepairReport,
+  StepSurfacePreview
 } from "@opencae/mesh-intake";
 
 export type MeshWorkerPhase = MeshPhase | "parse";
@@ -47,6 +48,8 @@ export type MeshWorkerPayloads = {
   inspectStepFile: {
     /** UTF-8 encoded STEP file content (transferable). */
     stepContent: ArrayBuffer;
+    /** Retain the generated 2D mesh when the caller needs a preview fallback. */
+    includeSurfacePreview?: boolean;
     /** Trial-run explicit repair even when ordinary inspection finds a nominal solid. */
     probeRepairEvenIfSolid?: boolean;
   };
@@ -118,6 +121,8 @@ export type MeshWorkerResults = {
   };
   inspectStepFile: {
     inspection: StepGeometryInspection;
+    /** Surface tessellation retained from topology inspection for preview fallback. */
+    surfacePreview?: StepSurfacePreview;
     /** Present when the worker actually trial-ran the Fix open surfaces operation. */
     repairProbe?: "succeeded" | "failed";
   };
@@ -292,10 +297,17 @@ export function transferablesForMeshWorkerRequest(request: MeshWorkerRequest): T
 
 export function transferablesForMeshWorkerResult(result: unknown): Transferable[] {
   if (!isRecord(result)) return [];
-  if (result.stepContent instanceof Uint8Array) return [result.stepContent.buffer];
-  if (!isRecord(result.packed)) return [];
-  const packed = result.packed as Partial<PackedCoreVolumeMeshArtifact>;
   const transfers: Transferable[] = [];
+  if (result.stepContent instanceof Uint8Array) transfers.push(result.stepContent.buffer);
+  if (isRecord(result.surfacePreview) && Array.isArray(result.surfacePreview.meshes)) {
+    for (const mesh of result.surfacePreview.meshes) {
+      if (!isRecord(mesh)) continue;
+      if (mesh.positions instanceof Float32Array) transfers.push(mesh.positions.buffer);
+      if (mesh.indices instanceof Uint32Array) transfers.push(mesh.indices.buffer);
+    }
+  }
+  if (!isRecord(result.packed)) return transfers;
+  const packed = result.packed as Partial<PackedCoreVolumeMeshArtifact>;
   if (packed.coordinates instanceof Float64Array) transfers.push(packed.coordinates.buffer);
   if (packed.connectivity instanceof Uint32Array) transfers.push(packed.connectivity.buffer);
   return transfers;

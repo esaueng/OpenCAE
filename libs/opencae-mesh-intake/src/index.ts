@@ -45,6 +45,7 @@ export {
   diagnoseStepMeshFailure,
   generateBoxWithBoreStep,
   inspectStepGeometry,
+  inspectStepGeometryWithPreview,
   loadGmshWasm,
   meshGeoScriptToMshV2,
   meshStepToMshV2,
@@ -52,6 +53,7 @@ export {
   STEP_GEOMETRY_REPAIR_LOST_VOLUME_ERROR_NAME,
   stepGeometryNoRepairedVolumeError,
   stepMeshFailureAfterRepairAttempt,
+  stepSurfacePreviewFromGmsh,
   StepGeometryError,
   type GeoMeshResult,
   type GmshApi,
@@ -65,8 +67,11 @@ export {
   type StepMultiBodyFusionReport,
   type StepBodyBounds,
   type StepGeometryInspection,
+  type StepGeometryInspectionWithPreview,
   type StepGeometryRepairReport,
-  type StepGeometryRepairResult
+  type StepGeometryRepairResult,
+  type StepSurfacePreview,
+  type StepSurfacePreviewMesh
 } from "./wasmMesher";
 export type {
   CloudAnalysisType,
