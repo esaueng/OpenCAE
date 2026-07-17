@@ -277,6 +277,7 @@ describe("RightPanel open section", () => {
     expect(html).toContain("Normalized offset · 37%");
     expect(html).toContain("Flip cut side");
     expect(html).toContain("Section plane axis");
+    expect(html).toContain('aria-pressed="false"');
   });
 });
 
@@ -595,7 +596,8 @@ describe("RightPanel payload mass controls", () => {
 
     expect(html).toContain("Thermal results");
     expect(html).toContain("Step 7 of 7");
-    expect(html).toContain('class="active">Temperature</button>');
+    expect(html).toContain('class="active" aria-pressed="true">Temperature</button>');
+    expect(html).toContain('aria-pressed="false">Heat flux</button>');
     expect(html).toContain("24.8306 °C");
     expect(html).toContain("19208 W/m²");
     expect(html).toContain("5.95557e-9 %");
@@ -1963,4 +1965,12 @@ describe("RightPanel payload mass controls", () => {
     expect(html).toContain("Add to project");
     expect(html).toContain("Download .step");
   });
+});
+
+test("hides the add-load workflow while editing and restores load-row focus", () => {
+  expect(rightPanelSource).toContain('<div hidden={editingLoadId !== null}>');
+  expect(rightPanelSource).toContain('role="group" aria-label={accessibleName}');
+  expect(rightPanelSource).toContain("window.requestAnimationFrame(() => loadItemRefs.current.get(loadId)?.focus())");
+  expect(rightPanelSource).toContain('aria-pressed={viewMode === "mesh"}');
+  expect(rightPanelSource).toContain('aria-pressed={resultMode === "stress"}');
 });
