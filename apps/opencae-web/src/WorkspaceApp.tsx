@@ -50,6 +50,7 @@ import { stepGeometryMetadataForProject, stepGeometryNeedsRepair } from "./stepG
 import { createLocalDynamicStructuralStudy, createLocalModalStudy, createLocalStaticStressStudy, createLocalThermalStudy } from "./localProjectFactory";
 import { compatibleResultModeForSummary, createPackedResultPlaybackCache, createResultFrameCache, hasDynamicPlaybackFrames, solverMeshSummaryFromResults, synthesizeModalPhaseFields, withDerivedSurfaceSafetyFactorFields, type SolverMeshSummary } from "./resultFields";
 import { appendResultProbe, availableStressComponents, derivedStressFieldsForComponent, governingVariantIdForProbe, MAX_RESULT_PROBES, resolveResultProbe, resultProbeTopologySignature, selectActiveResultField, semanticResultFieldKey, type ResultProbeAnchor, type ResultProbePin } from "./resultSelection";
+import { isResultDisplayEligible } from "./resultDisplayState";
 import { automaticResultFieldRange, DEFAULT_RESULT_COLOR_SCALE_SETTING, resolveResultColorScale, type ResultColorScaleSetting, type ResultColorScaleSettings } from "./resultColorScale";
 import { packResultFieldsForPlayback, packedPreparedPlaybackFrameOrdinal, playbackFieldsForResultMode, playbackMemoryBudgetBytes, type PackedPreparedPlaybackCache, type PreparedPlaybackFrameCache } from "./resultPlaybackCache";
 import {
@@ -350,6 +351,17 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     frameIndex: resultFrameIndex,
     modeIndex: selectedModeIndex
   }), [resultFrameIndex, resultMode, resultSurfaceMesh, selectedModeIndex, stressComponent, visibleResultFieldsForUi]);
+  const resultDisplayEligible = useMemo(() => study ? isResultDisplayEligible({
+    studyType: study.type,
+    summary: resultSummary,
+    fields: visibleResultFieldsForUi,
+    completedRunId,
+    resultMode,
+    stressComponent,
+    surfaceMesh: resultSurfaceMesh,
+    frameIndex: resultFrameIndex,
+    modeIndex: selectedModeIndex
+  }) : false, [completedRunId, resultFrameIndex, resultMode, resultSummary, resultSurfaceMesh, selectedModeIndex, stressComponent, study, visibleResultFieldsForUi]);
   useEffect(() => {
     const available = availableStressComponents(resultFields);
     if (available.length > 0 && !available.includes(stressComponent)) setStressComponent("von_mises");
@@ -1266,6 +1278,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     processingRunIdRef.current = null;
     setProcessingRunId(null);
     setRunTiming(null);
+    invalidateCompletedRunState();
     setHomeRequested(false);
     stepFaceHealNotifiedRef.current = false;
     // Keep the imperative snapshot in sync immediately. The effect below is
@@ -1304,16 +1317,6 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     } else {
       applyStep("model");
       setViewMode("model");
-      setResultSummary(null);
-      setResultFields([]);
-      setResultVariants([]);
-      setResultVariantRefs([]);
-      setActiveResultVariantId("");
-      setResultSurfaceMesh(undefined);
-      setSolverMeshSummary(null);
-      setReportCaptures(null);
-      setResultFrameIndex(0);
-      setRunProgress(0);
       const nextCompletedRunId = latestCompletedRunId(response.project.studies[0] ?? null, "") ?? "";
       setActiveRunId(nextCompletedRunId);
       setCompletedRunId(nextCompletedRunId);
@@ -1955,6 +1958,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   }
 
   function invalidateCompletedRunState() {
+    setResultSummary(null);
     setCompletedRunId("");
     setReportCaptures(null);
     setActiveRunId("");
@@ -1967,7 +1971,16 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     setSolverMeshSummary(null);
     setResultFrameIndex(0);
     setResultPlaybackFramePosition(0);
+    setResultPlaybackOrdinalPosition(0);
     setResultPlaybackPlaying(false);
+    setResultPlaybackCacheState({ status: "idle" });
+    setResultMode("stress");
+    setStressComponent("von_mises");
+    setSelectedModeIndex(1);
+    setShowDeformed(false);
+    setResultProbes([]);
+    setResultProbeLimitReached(false);
+    setCaptureViewMode(null);
   }
 
   function handleUpdateSolverSettings(settings: Partial<DynamicSolverSettings & ModalSolverSettings> & { fidelity?: SimulationFidelity }) {
@@ -2183,9 +2196,8 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       pushMessage(message);
       return;
     }
+    invalidateCompletedRunState();
     setActiveRunId(response.run.id);
-    setCompletedRunId("");
-    setReportCaptures(null);
     setProcessingRunId(response.run.id);
     setRunProgress(0);
     setRunTiming(null);
@@ -2197,11 +2209,11 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       if (event.type === "complete") {
         source.close();
         if (activeRunSourceRef.current === source) activeRunSourceRef.current = null;
-        if (processingRunIdRef.current === response.run.id) processingRunIdRef.current = null;
-        setProcessingRunId(null);
         setRunTiming(null);
         try {
           const results = await getResults(response.run.id);
+          const currentStudy = projectRef.current?.studies.find((candidate) => candidate.id === study.id);
+          if (processingRunIdRef.current !== response.run.id || currentStudy?.type !== study.type) return;
           if (study.type === "dynamic_structural" && (!isStructuralResultSummary(results.summary) || !hasDynamicPlaybackFrames(results.summary, results.fields))) {
             pushMessage("Dynamic results did not include animation frames.");
             setResultPlaybackPlaying(false);
@@ -2226,6 +2238,8 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
             setShowDeformed(true);
           }
           setCompletedRunId(response.run.id);
+          processingRunIdRef.current = null;
+          setProcessingRunId(null);
           setViewMode("results");
           setActiveStep("results");
           if (results.summary.diagnostics?.some((diagnostic) => diagnostic.id === "local-results-persistence")) {
@@ -2233,6 +2247,9 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
             setOverflowRecoveryRequest((request) => request + 1);
           }
         } catch (error) {
+          if (processingRunIdRef.current !== response.run.id) return;
+          processingRunIdRef.current = null;
+          setProcessingRunId(null);
           const message = errorMessage(error, "Could not load simulation results.");
           setRunError(message);
           pushMessage(message);
@@ -2430,7 +2447,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           onToggleTheme={() => setThemeMode((mode) => (mode === "dark" ? "light" : "dark"))}
           onUnitSystemChange={handleUnitSystemChange}
           study={study}
-          hasResults={viewMode === "results" || resultFields.length > 0}
+          hasResults={resultDisplayEligible}
         />
         <Suspense fallback={<section className="viewer-shell viewer-loading" aria-label="3D CAD viewer loading">Loading viewer…</section>}>
           <CadViewer
@@ -2443,6 +2460,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
             onViewerMiss={handleViewerMiss}
             onSelectFace={handleViewportFaceSelect}
             viewMode={captureViewMode ?? viewMode}
+            resultsEligible={resultDisplayEligible}
             resultMode={resultMode}
             stressComponent={stressComponent}
             showDeformed={showDeformed}
@@ -2491,8 +2509,8 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           showDimensions={showDimensions}
           sectionPlane={sectionPlane}
           stressExaggeration={stressExaggeration}
-          resultSummary={resultSummaryForUi}
-          resultFields={resultFieldsForUi}
+          resultSummary={resultDisplayEligible ? resultSummaryForUi : null}
+          resultFields={resultDisplayEligible ? resultFieldsForUi : []}
           resultColorScale={activeResultColorScale}
           resultColorScaleControl={activeResultColorScaleControl}
           onResultColorScaleSettingChange={handleResultColorScaleSettingChange}

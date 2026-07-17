@@ -31,6 +31,11 @@ function expectVectorCloseTo(actual: THREE.Vector3, expected: number[]) {
 }
 
 describe("CadViewer result coloring", () => {
+  test("requires explicit result eligibility before entering the result render path", () => {
+    expect(cadViewerSource).toContain('props.viewMode === "results" && props.resultsEligible ? "results" : "model"');
+    expect(cadViewerSource).toContain('effectiveViewMode === "results" && <ResultLegend');
+  });
+
   test("projection switching preserves the target, direction, and apparent scale", () => {
     const target = new THREE.Vector3(1, -2, 0.5);
     const perspective = new THREE.PerspectiveCamera(42, 1.6, 0.1, 1000);
