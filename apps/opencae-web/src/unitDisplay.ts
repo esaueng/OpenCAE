@@ -196,9 +196,16 @@ export function formatResultNumber(value: number): string {
 export function solverMethodForResult(resultSummary: ResultSummary, study: Study): string {
   const provenanceMethod = (resultSummary.provenance as Record<string, unknown> | undefined)?.coreSolver;
   if (typeof provenanceMethod === "string" && provenanceMethod) return provenanceMethod;
-  if (isModalResultSummary(resultSummary) || study.type === "modal_analysis") return "block_shift_invert_modal";
-  if (isThermalResultSummary(resultSummary) || study.type === "steady_state_thermal") return "sparse_steady_thermal";
-  if (resultSummary.transient || study.type === "dynamic_structural") return "mdof_dynamic";
+  if (isModalResultSummary(resultSummary)) return "block_shift_invert_modal";
+  if (isThermalResultSummary(resultSummary)) return "sparse_steady_thermal";
+  if (resultSummary.transient) return "mdof_dynamic";
+  return defaultSolverMethodForStudy(study);
+}
+
+export function defaultSolverMethodForStudy(study: Pick<Study, "type">): "sparse_static" | "mdof_dynamic" | "block_shift_invert_modal" | "sparse_steady_thermal" {
+  if (study.type === "dynamic_structural") return "mdof_dynamic";
+  if (study.type === "modal_analysis") return "block_shift_invert_modal";
+  if (study.type === "steady_state_thermal") return "sparse_steady_thermal";
   return "sparse_static";
 }
 
