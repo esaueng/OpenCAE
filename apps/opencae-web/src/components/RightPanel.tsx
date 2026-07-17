@@ -412,7 +412,7 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, se
             <span>Normalized offset · {Math.round(sectionPlane.offset * 100)}%</span>
             <input type="range" min="0" max="1" step="0.01" value={sectionPlane.offset} onChange={(event) => onSectionPlaneChange?.({ ...sectionPlane, offset: Number(event.currentTarget.value) })} />
           </label>
-          <button className="secondary wide" type="button" onClick={() => onSectionPlaneChange?.({ ...sectionPlane, flipped: !sectionPlane.flipped })}>
+          <button className="secondary wide" type="button" aria-pressed={sectionPlane.flipped} onClick={() => onSectionPlaneChange?.({ ...sectionPlane, flipped: !sectionPlane.flipped })}>
             <RotateCcw size={15} />Flip cut side
           </button>
           <p className="panel-copy">Geometry, mesh, result contours, feature edges, and the undeformed outline are clipped. Loads, supports, probes, and annotations stay visible.</p>
@@ -434,7 +434,7 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, se
       <p className="orientation-readout">{formatModelOrientation(displayModel)}</p>
       <div className="button-grid">
         <button className="secondary" onClick={onFitView}><Maximize2 size={16} />Fit view</button>
-        <button className={viewMode === "mesh" ? "primary" : "secondary"} onClick={() => onViewModeChange(viewMode === "mesh" ? "model" : "mesh")}><Eye size={16} />Toggle mesh</button>
+        <button type="button" className={viewMode === "mesh" ? "primary" : "secondary"} aria-pressed={viewMode === "mesh"} onClick={() => onViewModeChange(viewMode === "mesh" ? "model" : "mesh")}><Eye size={16} />Toggle mesh</button>
       </div>
       {!isBlankProject && !isUploadedProject && (
         <>
@@ -713,6 +713,7 @@ function LoadsPanel({
   onRemoveLoad,
   onLoadCasesChange
 }: RightPanelProps) {
+  const [editingLoadId, setEditingLoadId] = useState<string | null>(null);
   const thermal = study.type === "steady_state_thermal";
   const selectedFromViewport = selectedFace ? selectionForFace(study, selectedFace.id) : undefined;
   const bodySelection = study.namedSelections.find((selection) => selection.entityType === "body");
@@ -790,6 +791,7 @@ function LoadsPanel({
   }
   return (
     <Panel title={thermal ? "Thermal loads" : "Loads"} step="loads" helper={thermal ? (draftLoadType === "heat_generation" ? "Apply uniform heat generation throughout the selected body." : "Select a face and apply inward surface heat flux.") : draftLoadType === "gravity" ? "Choose the object carrying payload mass, then add its weight as a load." : draftLoadType === "volume_force" ? "Apply a force density to the selected structural body." : "Select a face on the model, then add the load."}>
+      <div hidden={editingLoadId !== null}>
       <HelpNote helpId="loadPlacement" />
       <PlacementReadout
         selectedRef={placementSelection}
@@ -893,6 +895,7 @@ function LoadsPanel({
           ...(draftLoadType === "bolt_preload" ? { secondarySelectionRef } : {})
         }
       )}><Plus size={18} />{addLabel}</button>
+      </div>
       {structuralStudy && (
         <LoadCasesEditor
           studyType={structuralStudy.type}
@@ -901,7 +904,7 @@ function LoadsPanel({
           onChange={(cases, combinations) => onLoadCasesChange?.(cases, combinations)}
         />
       )}
-      <LoadEditorList study={study} displayModel={displayModel} unitSystem={project.unitSystem} loadCases={loadCases} onAssignLoadToCase={assignLoadToCase} onUpdateLoad={onUpdateLoad} onPreviewLoadEdit={onPreviewLoadEdit} onRemoveLoad={onRemoveLoad} />
+      <LoadEditorList editingId={editingLoadId} onEditingIdChange={setEditingLoadId} study={study} displayModel={displayModel} unitSystem={project.unitSystem} loadCases={loadCases} onAssignLoadToCase={assignLoadToCase} onUpdateLoad={onUpdateLoad} onPreviewLoadEdit={onPreviewLoadEdit} onRemoveLoad={onRemoveLoad} />
     </Panel>
   );
 }
@@ -1076,10 +1079,15 @@ function structuralLoadCasesForPanel(study: Extract<Study, { type: "static_stres
     : [{ id: "case-default", name: "Default", enabled: true, loadIds: study.loads.map((load) => load.id) }];
 }
 
-function LoadEditorList({ study, displayModel, unitSystem, loadCases, onAssignLoadToCase, onUpdateLoad, onPreviewLoadEdit, onRemoveLoad }: { study: Study; displayModel: DisplayModel; unitSystem: UnitSystem; loadCases: LoadCase[]; onAssignLoadToCase: (loadId: string, caseId: string) => void; onUpdateLoad: (load: Load) => void; onPreviewLoadEdit: (load: Load | null) => void; onRemoveLoad: (loadId: string) => void }) {
-  const [editingId, setEditingId] = useState<string | null>(null);
+function LoadEditorList({ editingId, onEditingIdChange, study, displayModel, unitSystem, loadCases, onAssignLoadToCase, onUpdateLoad, onPreviewLoadEdit, onRemoveLoad }: { editingId: string | null; onEditingIdChange: (loadId: string | null) => void; study: Study; displayModel: DisplayModel; unitSystem: UnitSystem; loadCases: LoadCase[]; onAssignLoadToCase: (loadId: string, caseId: string) => void; onUpdateLoad: (load: Load) => void; onPreviewLoadEdit: (load: Load | null) => void; onRemoveLoad: (loadId: string) => void }) {
+  const loadItemRefs = useRef(new Map<string, HTMLDivElement>());
   if (!study.loads.length) return <EmptyEditableList title="Loads" />;
   const loadLabelsById = new Map(createViewerLoadMarkers({ study, displayModel }).map((marker) => [marker.id, loadMarkerOrdinalLabel(marker)]));
+
+  function finishEditing(loadId: string) {
+    onEditingIdChange(null);
+    window.requestAnimationFrame(() => loadItemRefs.current.get(loadId)?.focus());
+  }
 
   return (
     <div className="editable-list">
@@ -1100,11 +1108,15 @@ function LoadEditorList({ study, displayModel, unitSystem, loadCases, onAssignLo
         const loadLabel = loadLabelsById.get(load.id);
         const loadCaseId = loadCases.find((loadCase) => loadCase.loadIds.includes(load.id))?.id ?? loadCases[0]?.id ?? "";
         const editLabel = `Edit ${loadLabel ? `${loadLabel} ` : ""}${load.type} load`;
-        const beginEdit = () => setEditingId(load.id);
+        const beginEdit = () => onEditingIdChange(load.id);
         return (
           <div
             className={`editable-item load-item ${editing ? "" : "clickable"}`}
             key={load.id}
+            ref={(node) => {
+              if (node) loadItemRefs.current.set(load.id, node);
+              else loadItemRefs.current.delete(load.id);
+            }}
             role={editing ? undefined : "button"}
             tabIndex={editing ? undefined : 0}
             aria-label={editing ? undefined : editLabel}
@@ -1145,12 +1157,13 @@ function LoadEditorList({ study, displayModel, unitSystem, loadCases, onAssignLo
                 study={study}
                 displayModel={displayModel}
                 unitSystem={unitSystem}
+                accessibleName={`${loadLabel ?? loadTypeLabel(load.type)} load editor`}
                 onPreviewChange={onPreviewLoadEdit}
-                onCancel={() => setEditingId(null)}
+                onCancel={() => finishEditing(load.id)}
                 onSave={(nextLoad) => {
                   onPreviewLoadEdit(null);
                   onUpdateLoad(nextLoad);
-                  setEditingId(null);
+                  finishEditing(load.id);
                 }}
               />
             ) : null}
@@ -1161,7 +1174,7 @@ function LoadEditorList({ study, displayModel, unitSystem, loadCases, onAssignLo
   );
 }
 
-function LoadEditForm({ load, study, displayModel, unitSystem, onSave, onCancel, onPreviewChange }: { load: Load; study: Study; displayModel: DisplayModel; unitSystem: UnitSystem; onSave: (load: Load) => void; onCancel: () => void; onPreviewChange: (load: Load | null) => void }) {
+function LoadEditForm({ load, study, displayModel, unitSystem, accessibleName, onSave, onCancel, onPreviewChange }: { load: Load; study: Study; displayModel: DisplayModel; unitSystem: UnitSystem; accessibleName: string; onSave: (load: Load) => void; onCancel: () => void; onPreviewChange: (load: Load | null) => void }) {
   const [type, setType] = useState<LoadType>(load.type);
   const [value, setValue] = useState(() => {
     const initialUnits = String(load.parameters.units ?? unitsForLoadType(load.type));
@@ -1212,7 +1225,7 @@ function LoadEditForm({ load, study, displayModel, unitSystem, onSave, onCancel,
   }, [onPreviewChange, previewLoad]);
 
   return (
-    <div className="edit-form">
+    <div className="edit-form" role="group" aria-label={accessibleName}>
       <label className="field">
         <HelpLabel helpId="loadType">Load type</HelpLabel>
         <select value={type} onChange={(event) => setType(event.currentTarget.value as LoadType)}>
@@ -1992,8 +2005,8 @@ function ThermalResultsPanelContent({
   return (
     <Panel title="Thermal results" step="results" helper="Inspect steady temperature and conductive heat-flux fields on the solved mesh.">
       <div className="segmented" role="group" aria-label="Thermal result field">
-        <button type="button" className={resultMode === "temperature" ? "active" : ""} onClick={() => onResultModeChange("temperature")}>Temperature</button>
-        <button type="button" className={resultMode === "heat_flux" ? "active" : ""} onClick={() => onResultModeChange("heat_flux")}>Heat flux</button>
+        <button type="button" className={resultMode === "temperature" ? "active" : ""} aria-pressed={resultMode === "temperature"} onClick={() => onResultModeChange("temperature")}>Temperature</button>
+        <button type="button" className={resultMode === "heat_flux" ? "active" : ""} aria-pressed={resultMode === "heat_flux"} onClick={() => onResultModeChange("heat_flux")}>Heat flux</button>
       </div>
       <div className="summary-box">
         <Info label="Minimum temperature" value={formatResultMetric(resultSummary.minTemperature, resultSummary.temperatureUnits)} />
@@ -2352,11 +2365,11 @@ function ResultsPanelContent({
       )}
       <SectionTitle helpId="resultMode">Result mode</SectionTitle>
       <div className="result-buttons">
-        <button className={resultMode === "stress" ? "primary" : "secondary"} onClick={() => onResultModeChange("stress")}>Stress</button>
-        <button className={resultMode === "displacement" ? "primary" : "secondary"} onClick={() => onResultModeChange("displacement")}>Displacement</button>
-        {resultFields.some((field) => field.type === "velocity") && <button className={resultMode === "velocity" ? "primary" : "secondary"} onClick={() => onResultModeChange("velocity")}>Velocity</button>}
-        {resultFields.some((field) => field.type === "acceleration") && <button className={resultMode === "acceleration" ? "primary" : "secondary"} onClick={() => onResultModeChange("acceleration")}>Acceleration</button>}
-        <button className={resultMode === "safety_factor" ? "primary" : "secondary"} onClick={() => onResultModeChange("safety_factor")}>Safety factor</button>
+        <button type="button" className={resultMode === "stress" ? "primary" : "secondary"} aria-pressed={resultMode === "stress"} onClick={() => onResultModeChange("stress")}>Stress</button>
+        <button type="button" className={resultMode === "displacement" ? "primary" : "secondary"} aria-pressed={resultMode === "displacement"} onClick={() => onResultModeChange("displacement")}>Displacement</button>
+        {resultFields.some((field) => field.type === "velocity") && <button type="button" className={resultMode === "velocity" ? "primary" : "secondary"} aria-pressed={resultMode === "velocity"} onClick={() => onResultModeChange("velocity")}>Velocity</button>}
+        {resultFields.some((field) => field.type === "acceleration") && <button type="button" className={resultMode === "acceleration" ? "primary" : "secondary"} aria-pressed={resultMode === "acceleration"} onClick={() => onResultModeChange("acceleration")}>Acceleration</button>}
+        <button type="button" className={resultMode === "safety_factor" ? "primary" : "secondary"} aria-pressed={resultMode === "safety_factor"} onClick={() => onResultModeChange("safety_factor")}>Safety factor</button>
       </div>
       {resultMode === "stress" && stressComponents.length > 0 && (
         <div className="field">
