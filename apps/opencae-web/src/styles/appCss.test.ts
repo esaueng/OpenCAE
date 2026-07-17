@@ -35,6 +35,18 @@ function cssRule(selector: string) {
 }
 
 describe("app CSS", () => {
+  test("centers model import progress over the viewer", () => {
+    const importOverlay = cssRule(".viewer-import-overlay");
+
+    expect(cadViewer).toContain('aria-busy={props.importingModelFilename ? true : undefined}');
+    expect(cadViewer).toContain('className="viewer-import-overlay" role="status"');
+    expect(cadViewer).toContain("Large files may take a while.");
+    expect(importOverlay).toMatch(/position:\s*absolute/);
+    expect(importOverlay).toMatch(/inset:\s*0/);
+    expect(importOverlay).toMatch(/place-items:\s*center/);
+    expect(importOverlay).toMatch(/z-index:\s*20/);
+  });
+
   test("does not ship the removed viewer reset HUD button styles", () => {
     expect(css).not.toContain(".viewer-hud");
     expect(css).not.toContain(".viewer-reset");

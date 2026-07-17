@@ -23,6 +23,15 @@ describe("App workflow layout", () => {
     expect(appSource).toContain("applyStep(options.nextStep);");
   });
 
+  test("shows model import progress in the viewer until the active upload settles", () => {
+    expect(appSource).toContain("const [modelImport, setModelImport]");
+    expect(appSource).toContain("const MODEL_IMPORT_INDICATOR_MIN_MS = 500;");
+    expect(appSource).toContain("setModelImport({ id: importId, filename: file.name });");
+    expect(appSource).toContain("MODEL_IMPORT_INDICATOR_MIN_MS - (Date.now() - importStartedAt)");
+    expect(appSource).toContain("setModelImport((current) => current?.id === importId ? null : current);");
+    expect(appSource).toContain("importingModelFilename={modelImport?.filename}");
+  });
+
   test("keeps the workspace top bar focused on project controls", () => {
     expect(appSource).not.toContain('href="https://ko-fi.com/petergn"');
     expect(appSource).not.toContain("Buy me a coffee");

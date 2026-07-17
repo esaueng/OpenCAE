@@ -99,6 +99,7 @@ const PLAYBACK_CACHE_PREP_FPS = 30;
 const PLAYBACK_ENDPOINT_EPSILON = 0.0001;
 const AUTOSAVE_UI_WRITE_DELAY_MS = 650;
 const AUTOSAVE_HEAVY_WRITE_DELAY_MS = 5000;
+const MODEL_IMPORT_INDICATOR_MIN_MS = 500;
 
 type ResultPlaybackCacheState =
   | { status: "idle" }
@@ -226,6 +227,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   });
   const [shortcutGuideOpen, setShortcutGuideOpen] = useState(false);
   const [validationGalleryOpen, setValidationGalleryOpen] = useState(false);
+  const [modelImport, setModelImport] = useState<{ id: number; filename: string } | null>(null);
   const didRequestRestoredHomeView = useRef(false);
   const activeRunSourceRef = useRef<EventSource | null>(null);
   const processingRunIdRef = useRef<string | null>(null);
@@ -234,6 +236,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const projectActionAbortRef = useRef<AbortController | null>(null);
   const projectActionSourceRef = useRef<Project | null>(null);
   const projectActionClientIdRef = useRef<string | null>(null);
+  const modelImportSequenceRef = useRef(0);
   const autosaveWriteFailureNotifiedRef = useRef(false);
   const autosaveDegradedNotifiedRef = useRef(false);
   const overflowRecoveryHandledRef = useRef(false);
@@ -1343,6 +1346,10 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     if (!project) return;
     const sourceProject = project;
     const actionHandle = beginProjectAction(sourceProject);
+    const importStartedAt = Date.now();
+    const importId = modelImportSequenceRef.current + 1;
+    modelImportSequenceRef.current = importId;
+    setModelImport({ id: importId, filename: file.name });
     const extension = file.name.trim().split(".").pop()?.toLowerCase();
     pushMessage(extension === "step" || extension === "stp" ? "Uploading model and checking STEP topology..." : "Uploading model...");
     void openProjectResponse(uploadModel(project.id, file, project, {
@@ -1353,6 +1360,11 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     }), { actionHandle }).catch((error: unknown) => {
       if (isAbortError(error)) return;
       pushMessage(error instanceof Error ? error.message : "Could not upload model.");
+    }).finally(() => {
+      const remainingIndicatorMs = Math.max(0, MODEL_IMPORT_INDICATOR_MIN_MS - (Date.now() - importStartedAt));
+      window.setTimeout(() => {
+        setModelImport((current) => current?.id === importId ? null : current);
+      }, remainingIndicatorMs);
     });
   }
 
@@ -2423,6 +2435,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         <Suspense fallback={<section className="viewer-shell viewer-loading" aria-label="3D CAD viewer loading">Loading viewer…</section>}>
           <CadViewer
             displayModel={displayModelForUi}
+            importingModelFilename={modelImport?.filename}
             activeStep={activeStep}
             selectedFaceId={selectedFaceId}
             payloadObjectSelectionMode={Boolean(study && activeStep === "loads" && draftLoadType === "gravity")}

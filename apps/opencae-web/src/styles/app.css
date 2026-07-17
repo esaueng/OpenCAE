@@ -2153,6 +2153,75 @@ img {
   background: var(--color-viewport-bg);
 }
 
+.viewer-import-overlay {
+  position: absolute;
+  z-index: 20;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: var(--sp-5);
+  background: color-mix(in srgb, var(--color-viewport-bg) 48%, transparent);
+  backdrop-filter: blur(2px);
+  cursor: wait;
+}
+
+.viewer-import-card {
+  width: min(360px, 100%);
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 24px;
+  color: var(--color-text);
+  background: color-mix(in srgb, var(--color-surface) 96%, transparent);
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-md);
+  text-align: center;
+  box-shadow: var(--shadow-panel);
+}
+
+.viewer-import-card strong {
+  font-size: var(--fs-md);
+  font-weight: var(--fw-medium);
+}
+
+.viewer-import-card small {
+  max-width: 280px;
+  color: var(--color-text-muted);
+  font-size: var(--fs-xs);
+  line-height: 1.45;
+}
+
+.viewer-import-filename {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--color-accent);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.viewer-import-spinner {
+  width: 34px;
+  height: 34px;
+  border: 3px solid var(--color-accent-dim);
+  border-top-color: var(--color-accent);
+  border-radius: 50%;
+  animation: viewer-import-spin 800ms linear infinite;
+}
+
+@keyframes viewer-import-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .viewer-import-spinner {
+    animation: none;
+  }
+}
+
 .model-notice {
   width: 260px;
   display: grid;
