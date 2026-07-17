@@ -106,7 +106,7 @@ interface RightPanelProps {
   onUploadModel: (file: File) => void;
   onRepairModel?: () => void;
   isRepairingModel?: boolean;
-  onSampleModelChange: (sample: SampleModelId) => void;
+  onSampleModelChange?: (sample: SampleModelId) => void;
   onSampleAnalysisTypeChange?: (analysisType: SampleAnalysisType) => void;
   onViewModeChange: (mode: ViewMode) => void;
   onResultModeChange: (mode: ResultMode) => void;
@@ -189,13 +189,19 @@ export function RightPanel(props: RightPanelProps) {
   );
 }
 
-function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sectionPlane = DEFAULT_SECTION_PLANE, sampleModel, sampleAnalysisType = "static_stress", onFitView, onRotateModel, onResetModelOrientation, onViewModeChange, onToggleDimensions, onSectionPlaneChange, onLoadSample, onUploadModel, onRepairModel, isRepairingModel = false, onSampleModelChange, onSampleAnalysisTypeChange }: RightPanelProps) {
+function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sectionPlane = DEFAULT_SECTION_PLANE, sampleModel, sampleAnalysisType = "static_stress", onFitView, onRotateModel, onResetModelOrientation, onViewModeChange, onToggleDimensions, onSectionPlaneChange, onLoadSample, onUploadModel, onRepairModel, isRepairingModel = false }: RightPanelProps) {
   const [confirmSampleLoad, setConfirmSampleLoad] = useState(false);
   const [pendingSampleModel, setPendingSampleModel] = useState<SampleModelId>(sampleModel);
+  const [pendingAnalysisType, setPendingAnalysisType] = useState<SampleAnalysisType>(sampleAnalysisType);
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
   useEffect(() => {
     setPendingSampleModel(sampleModel);
+    setConfirmSampleLoad(false);
   }, [sampleModel]);
+  useEffect(() => {
+    setPendingAnalysisType(sampleAnalysisType);
+    setConfirmSampleLoad(false);
+  }, [sampleAnalysisType]);
   const geometry = project.geometryFiles[0];
   const isBlankProject = !geometry;
   const isUploadedProject = geometry?.metadata.source === "local-upload";
@@ -207,7 +213,7 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, se
   const stepGeometry = stepGeometryMetadataForProject(project);
   const stepGeometryResolvedByMesh = Boolean(study.meshSettings.summary?.artifacts?.actualCoreModel);
   const sampleLabel = sampleOptionFor(pendingSampleModel).title;
-  const sampleAnalysis = sampleAnalysisOptionFor(sampleAnalysisType);
+  const sampleAnalysis = sampleAnalysisOptionFor(pendingAnalysisType);
   const sampleAnalysisLabel = sampleAnalysis.fullLabel;
   const sampleForceLabel = formatEquivalentForce(500, project.unitSystem);
   // The beam summary describes the structural body only. The separate
@@ -224,7 +230,7 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, se
       : pendingSampleModel === "plate"
         ? { support: "fixed end face", load: "end payload mass · -Y direction", callout: "A simple beam is fixed at one end and carries a payload mass sitting on the free end, producing bending stress along the span." }
         : { support: "fixed end face", load: "free end face · -Z direction", callout: "A cantilever beam is fixed at one end and loaded at the free end, producing bending stress along the beam span." };
-  const sampleSetup = sampleAnalysisType === "modal_analysis"
+  const sampleSetup = pendingAnalysisType === "modal_analysis"
     ? {
         boundaryTitle: "Fixed support",
         boundaryDetail: preconfigured.support,
@@ -233,7 +239,7 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, se
         actionIcon: <Atom size={18} />,
         callout: `The ${sampleLabel.toLowerCase()} is supported without an external load so its first six natural frequencies and mode shapes can be calculated.`
       }
-    : sampleAnalysisType === "steady_state_thermal"
+    : pendingAnalysisType === "steady_state_thermal"
       ? {
           boundaryTitle: "20 °C reference",
           boundaryDetail: preconfigured.support,
@@ -257,7 +263,7 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, se
       return;
     }
     setConfirmSampleLoad(false);
-    onLoadSample(pendingSampleModel, sampleAnalysisType);
+    onLoadSample(pendingSampleModel, pendingAnalysisType);
   }
 
   function handleSampleSelect(sample: SampleModelId) {
@@ -267,8 +273,12 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, se
 
   function handleSampleOpen(sample: SampleModelId) {
     setPendingSampleModel(sample);
+    setConfirmSampleLoad(true);
+  }
+
+  function handleAnalysisSelect(analysisType: SampleAnalysisType) {
+    setPendingAnalysisType(analysisType);
     setConfirmSampleLoad(false);
-    onLoadSample(sample, sampleAnalysisType);
   }
 
   return (
@@ -283,7 +293,7 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, se
                 option={option}
                 selected={pendingSampleModel === option.id}
                 compact
-                analysisType={sampleAnalysisType}
+                analysisType={pendingAnalysisType}
                 onSelect={handleSampleSelect}
                 onOpen={handleSampleOpen}
               />
@@ -294,10 +304,10 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, se
             {SAMPLE_ANALYSIS_OPTIONS.map((option) => (
               <button
                 key={option.id}
-                className={sampleAnalysisType === option.id ? "active" : ""}
+                className={pendingAnalysisType === option.id ? "active" : ""}
                 type="button"
-                aria-pressed={sampleAnalysisType === option.id}
-                onClick={() => onSampleAnalysisTypeChange?.(option.id)}
+                aria-pressed={pendingAnalysisType === option.id}
+                onClick={() => handleAnalysisSelect(option.id)}
               >
                 {option.label}
               </button>

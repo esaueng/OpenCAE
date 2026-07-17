@@ -19,8 +19,14 @@ describe("App workflow layout", () => {
   });
 
   test("keeps sample model and analysis changes on the model step", () => {
-    expect(appSource).toContain('await openProjectResponse(loadSampleProject(nextSample, nextAnalysisType), { actionHandle, nextStep: "model" });');
+    expect(appSource).toContain('const opened = await openProjectResponse(loadSampleProject(nextSample, nextAnalysisType), { actionHandle, nextStep: "model" });');
+    expect(appSource).toContain("if (opened) {");
     expect(appSource).toContain("applyStep(options.nextStep);");
+  });
+
+  test("does not wire sample selectors directly to project reloads", () => {
+    expect(appSource).not.toContain("onSampleModelChange={handleLoadSample}");
+    expect(appSource).not.toContain("onSampleAnalysisTypeChange={(analysisType) => void handleLoadSample");
   });
 
   test("shows model import progress in the viewer until the active upload settles", () => {

@@ -1327,9 +1327,11 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
 
   async function handleLoadSample(nextSample = sampleModel, nextAnalysisType = sampleAnalysisType) {
     const actionHandle = beginProjectAction(projectRef.current);
-    setSampleModel(nextSample);
-    setSampleAnalysisType(nextAnalysisType);
-    await openProjectResponse(loadSampleProject(nextSample, nextAnalysisType), { actionHandle, nextStep: "model" });
+    const opened = await openProjectResponse(loadSampleProject(nextSample, nextAnalysisType), { actionHandle, nextStep: "model" });
+    if (opened) {
+      setSampleModel(nextSample);
+      setSampleAnalysisType(nextAnalysisType);
+    }
   }
 
   function handleCreateProject() {
@@ -2548,8 +2550,6 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           onUploadModel={handleUploadModel}
           onRepairModel={() => void handleRepairModel()}
           isRepairingModel={isRepairingModel}
-          onSampleModelChange={handleLoadSample}
-          onSampleAnalysisTypeChange={(analysisType) => void handleLoadSample(sampleModel, analysisType)}
           onViewModeChange={setViewMode}
           onResultModeChange={setResultMode}
           onSelectedModeIndexChange={(modeIndex) => {

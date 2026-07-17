@@ -1,10 +1,14 @@
 import { renderToStaticMarkup } from "react-dom/server";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, test, vi } from "vitest";
 import { bracketDisplayModel } from "@opencae/db/sample-data";
 import type { DisplayModel, Project, ResultField, ResultSummary, Study } from "@opencae/schema";
 import { editableNumberCommitValue, playbackPeakMarkerPercent, resultModeExplanation, RightPanel, rangeProgressPercent } from "./RightPanel";
 import type { StepId } from "./StepBar";
 import type { StepGeometryMetadata } from "../lib/api";
+
+const rightPanelSource = readFileSync(resolve(__dirname, "RightPanel.tsx"), "utf8");
 
 const project: Project = {
   id: "project-1",
@@ -143,6 +147,14 @@ test("renders per-field range and band controls from the shared color-scale cont
   expect(html).toContain('aria-pressed="true">8 bands');
   expect(html).toContain("Automatic run range: 0–60 MPa");
   expect(html).toContain("linear-gradient(90deg");
+});
+
+test("keeps sample model and analysis choices as drafts until confirmation", () => {
+  expect(rightPanelSource).toContain("const [pendingAnalysisType, setPendingAnalysisType]");
+  expect(rightPanelSource).toContain("onLoadSample(pendingSampleModel, pendingAnalysisType)");
+  expect(rightPanelSource).toContain("onClick={() => handleAnalysisSelect(option.id)}");
+  expect(rightPanelSource).toContain("setConfirmSampleLoad(true);");
+  expect(rightPanelSource).not.toContain("onLoadSample(sample, sampleAnalysisType)");
 });
 
 test("shows tensor-backed stress measures and hides them for legacy fields", () => {
