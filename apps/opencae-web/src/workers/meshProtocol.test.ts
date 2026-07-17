@@ -25,6 +25,15 @@ describe("mesh worker protocol", () => {
     expect(transferablesForMeshWorkerResult({ stepContent })).toEqual([stepContent.buffer]);
   });
 
+  test("transfers retained STEP surface preview buffers", () => {
+    const positions = new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]);
+    const indices = new Uint32Array([0, 1, 2]);
+
+    expect(transferablesForMeshWorkerResult({
+      surfacePreview: { meshes: [{ name: "body", positions, indices, faceRanges: [{ first: 0, last: 0 }] }] }
+    })).toEqual([positions.buffer, indices.buffer]);
+  });
+
   test("carries the forced solid-repair probe flag to the worker", () => {
     const request = createMeshWorkerRequest("inspectStepFile", {
       stepContent: new ArrayBuffer(16),
@@ -32,6 +41,15 @@ describe("mesh worker protocol", () => {
     });
 
     expect(request.payload.probeRepairEvenIfSolid).toBe(true);
+  });
+
+  test("carries the opt-in surface-preview retention flag to the worker", () => {
+    const request = createMeshWorkerRequest("inspectStepFile", {
+      stepContent: new ArrayBuffer(16),
+      includeSurfacePreview: true
+    });
+
+    expect(request.payload.includeSurfacePreview).toBe(true);
   });
 
   test("only probes nominal solids when the caller explicitly requests it", () => {

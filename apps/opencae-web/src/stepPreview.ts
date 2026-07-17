@@ -2,6 +2,12 @@ import * as THREE from "three";
 import type { OcctImporter, OcctMesh } from "occt-import-js";
 import occtWasmUrl from "occt-import-js/dist/occt-import-js.wasm?url";
 import { meshVolumeM3FromTriangles, type Triangle } from "@opencae/units";
+import {
+  loadStepSurfacePreviewFallback,
+  occtMeshesFromStepSurfacePreview,
+  peekStepSurfacePreview,
+  preferStepSurfacePreview
+} from "./stepSurfacePreviewFallback";
 
 let occtPromise: Promise<OcctImporter> | null = null;
 
@@ -54,10 +60,19 @@ export function normalizedStepPreviewFromMeshes(meshes: OcctMesh[], color: strin
   const edgeMaterial = includeEdges ? new THREE.LineBasicMaterial({ color: "#c8d3df", transparent: true, opacity: 0.72 }) : null;
 
   for (const [index, importedMesh] of meshes.entries()) {
-    const geometry = geometryFromOcctMesh(importedMesh);
-    const mesh = new THREE.Mesh(geometry, shareMaterials ? material : material.clone());
     const importedName = (importedMesh as { name?: unknown }).name;
     const label = typeof importedName === "string" && importedName.trim() ? importedName.trim() : `Part ${index + 1}`;
+    if (!hasRenderableOcctMesh(importedMesh)) {
+      // Keep child indexes aligned with the B-Rep registry even when an
+      // importer emits an empty assembly placeholder before real meshes.
+      const placeholder = new THREE.Group();
+      placeholder.name = label;
+      placeholder.userData.opencaeEmptyStepMesh = true;
+      group.add(placeholder);
+      continue;
+    }
+    const geometry = geometryFromOcctMesh(importedMesh);
+    const mesh = new THREE.Mesh(geometry, shareMaterials ? material : material.clone());
     mesh.name = label;
     mesh.userData.opencaeObjectId = `step-object-${index + 1}`;
     mesh.userData.opencaeObjectLabel = label;
@@ -75,7 +90,7 @@ export function normalizedStepPreviewFromMeshes(meshes: OcctMesh[], color: strin
     group.add(mesh);
   }
 
-  if (group.children.length === 0) {
+  if (!group.children.some((child) => child instanceof THREE.Mesh)) {
     throw new Error("STEP file did not produce renderable meshes.");
   }
 
@@ -124,15 +139,36 @@ function vertexAt(positions: THREE.BufferAttribute | THREE.InterleavedBufferAttr
 }
 
 export async function stepPreviewFromBase64(contentBase64: string, color: string, options?: StepPreviewOptions): Promise<StepPreview> {
+  const cached = peekStepSurfacePreview(contentBase64);
+  if (cached?.preferred) {
+    return normalizedStepPreviewFromMeshes(occtMeshesFromStepSurfacePreview(cached.surfacePreview), color, options);
+  }
+
   const importer = await getOcctImporter();
   const bytes = base64ToUint8Array(contentBase64);
   const result = importer.ReadStepFile(bytes, null);
 
-  if (!result.success) {
-    throw new Error(`STEP import failed${result.errorCode ? ` (${result.errorCode})` : ""}.`);
+  if (result.success && (result.meshes ?? []).some(hasRenderableOcctMesh)) {
+    return normalizedStepPreviewFromMeshes(result.meshes ?? [], color, options);
   }
 
-  return normalizedStepPreviewFromMeshes(result.meshes ?? [], color, options);
+  try {
+    const fallback = await loadStepSurfacePreviewFallback(contentBase64);
+    preferStepSurfacePreview(contentBase64);
+    return normalizedStepPreviewFromMeshes(occtMeshesFromStepSurfacePreview(fallback.surfacePreview), color, options);
+  } catch (fallbackError) {
+    const primary = result.success
+      ? "STEP import succeeded but did not produce a surface tessellation."
+      : `STEP import failed${result.errorCode ? ` (${result.errorCode})` : ""}.`;
+    const fallbackMessage = fallbackError instanceof Error ? fallbackError.message : "Gmsh preview fallback failed.";
+    throw new Error(`${primary} ${fallbackMessage}`);
+  }
+}
+
+function hasRenderableOcctMesh(mesh: OcctMesh): boolean {
+  const positionCount = mesh.attributes?.position?.array?.length ?? 0;
+  const indexCount = mesh.index?.array?.length ?? 0;
+  return positionCount >= 9 && (indexCount >= 3 || positionCount % 9 === 0);
 }
 
 export function getOcctImporter(): Promise<OcctImporter> {
