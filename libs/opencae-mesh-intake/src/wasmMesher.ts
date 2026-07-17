@@ -111,6 +111,27 @@ export type StepGeometryInspection = {
   message?: string;
 };
 
+/**
+ * Renderable surface tessellation produced by the same Gmsh/OCC import used
+ * for STEP topology inspection. Face ranges use inclusive triangle ordinals,
+ * matching occt-import-js' `brep_faces` contract.
+ */
+export type StepSurfacePreviewMesh = {
+  name: string;
+  positions: Float32Array;
+  indices: Uint32Array;
+  faceRanges: Array<{ first: number; last: number }>;
+};
+
+export type StepSurfacePreview = {
+  meshes: StepSurfacePreviewMesh[];
+};
+
+export type StepGeometryInspectionWithPreview = {
+  inspection: StepGeometryInspection;
+  surfacePreview?: StepSurfacePreview;
+};
+
 export type StepGeometryRepairReport = {
   method: "heal" | "heal_and_cap";
   profile: "automatic" | "quality" | "explicit";
@@ -931,6 +952,23 @@ function boundsSize(bounds: StepBodyBounds): [number, number, number] {
  * tetrahedral mesh.
  */
 export async function inspectStepGeometry(stepContent: Uint8Array | string): Promise<StepGeometryInspection> {
+  return (await inspectStepGeometrySession(stepContent, false)).inspection;
+}
+
+/**
+ * Inspect STEP topology and retain the already-generated surface mesh. This is
+ * the robust preview fallback for valid STEP solids that occt-import-js can
+ * read topologically but returns without any vertex positions (notably large
+ * faceted B-Reps exported from triangle meshes).
+ */
+export async function inspectStepGeometryWithPreview(stepContent: Uint8Array | string): Promise<StepGeometryInspectionWithPreview> {
+  return inspectStepGeometrySession(stepContent, true);
+}
+
+async function inspectStepGeometrySession(
+  stepContent: Uint8Array | string,
+  includePreview: boolean
+): Promise<StepGeometryInspectionWithPreview> {
   const gmsh = await loadGmshWasm();
   gmsh.initialize();
   quietLogger(gmsh);
@@ -940,7 +978,7 @@ export async function inspectStepGeometry(stepContent: Uint8Array | string): Pro
       gmsh.model.occ.importShapes("/inspect.step", false);
       gmsh.model.occ.synchronize();
     } catch (error) {
-      return {
+      return { inspection: {
         status: "invalid",
         volumeCount: 0,
         surfaceCount: 0,
@@ -950,7 +988,7 @@ export async function inspectStepGeometry(stepContent: Uint8Array | string): Pro
         repairable: false,
         issue: "import_failed",
         message: `STEP geometry could not be imported: ${messageOf(error)}`
-      };
+      } };
     }
 
     const volumeCount = entityTags(gmsh, 3).length;
@@ -967,7 +1005,7 @@ export async function inspectStepGeometry(stepContent: Uint8Array | string): Pro
     }
 
     if (!surfaceMeshValid) {
-      return {
+      return { inspection: {
         status: "open_shell",
         volumeCount,
         surfaceCount,
@@ -977,10 +1015,11 @@ export async function inspectStepGeometry(stepContent: Uint8Array | string): Pro
         repairable: false,
         issue: "invalid_surface_loop",
         message: `Open or invalid STEP surface detected: ${surfaceMeshError}`
-      };
+      } };
     }
+    const surfacePreview = includePreview ? stepSurfacePreviewFromGmsh(gmsh) : undefined;
     if (volumeCount === 0) {
-      return {
+      return { inspection: {
         status: "open_shell",
         volumeCount,
         surfaceCount,
@@ -990,10 +1029,10 @@ export async function inspectStepGeometry(stepContent: Uint8Array | string): Pro
         repairable: false,
         issue: "no_solid_volume",
         message: "The STEP file contains an open surface shell instead of a closed solid volume."
-      };
+      }, ...(surfacePreview ? { surfacePreview } : {}) };
     }
     if (hasDegenerateVolumes(gmsh)) {
-      return {
+      return { inspection: {
         status: "invalid",
         volumeCount,
         surfaceCount,
@@ -1003,10 +1042,10 @@ export async function inspectStepGeometry(stepContent: Uint8Array | string): Pro
         repairable: false,
         issue: "degenerate_volume",
         message: "The STEP file contains a zero-volume or degenerate solid body."
-      };
+      }, ...(surfacePreview ? { surfacePreview } : {}) };
     }
     if (orphanSurfaceCount > 0) {
-      return {
+      return { inspection: {
         status: "open_shell",
         volumeCount,
         surfaceCount,
@@ -1016,9 +1055,9 @@ export async function inspectStepGeometry(stepContent: Uint8Array | string): Pro
         repairable: false,
         issue: "orphan_surfaces",
         message: `The STEP file contains ${orphanSurfaceCount.toLocaleString()} open surface ${orphanSurfaceCount === 1 ? "sheet" : "sheets"} that do not belong to a solid volume.`
-      };
+      }, ...(surfacePreview ? { surfacePreview } : {}) };
     }
-    return {
+    return { inspection: {
       status: "solid",
       volumeCount,
       surfaceCount,
@@ -1030,10 +1069,97 @@ export async function inspectStepGeometry(stepContent: Uint8Array | string): Pro
       openBoundaryCurveCount,
       surfaceMeshValid: true,
       repairable: false
-    };
+    }, ...(surfacePreview ? { surfacePreview } : {}) };
   } finally {
     safeFinalize(gmsh);
   }
+}
+
+/** Build one render mesh per imported solid while preserving B-Rep surface ranges. */
+export function stepSurfacePreviewFromGmsh(gmsh: GmshApi): StepSurfacePreview {
+  const nodes = gmsh.model.mesh.getNodes();
+  const coordinateOffsetByTag = new Map<number, number>();
+  nodes.nodeTags.forEach((tag, index) => coordinateOffsetByTag.set(tag, index * 3));
+
+  const allSurfaceTags = entityTags(gmsh, 2).sort((left, right) => left - right);
+  const claimedSurfaceTags = new Set<number>();
+  const surfaceGroups = entityTags(gmsh, 3)
+    .sort((left, right) => left - right)
+    .map((volumeTag) => {
+      const boundary = gmsh.model.getBoundary([3, volumeTag], false, true, false).outDimTags;
+      const surfaces: Array<{ tag: number; reversed: boolean }> = [];
+      for (let index = 0; index + 1 < boundary.length; index += 2) {
+        if (boundary[index] !== 2) continue;
+        const signedTag = boundary[index + 1]!;
+        const tag = Math.abs(signedTag);
+        surfaces.push({ tag, reversed: signedTag < 0 });
+        claimedSurfaceTags.add(tag);
+      }
+      return {
+        name: `STEP body ${volumeTag}`,
+        surfaces: [...new Map(surfaces.map((surface) => [surface.tag, surface])).values()].sort((left, right) => left.tag - right.tag)
+      };
+    })
+    .filter((group) => group.surfaces.length > 0);
+
+  const unclaimed = allSurfaceTags.filter((tag) => !claimedSurfaceTags.has(tag));
+  if (unclaimed.length > 0 || surfaceGroups.length === 0) {
+    surfaceGroups.push({
+      name: surfaceGroups.length === 0 ? "STEP body" : "STEP surfaces",
+      surfaces: (unclaimed.length ? unclaimed : allSurfaceTags).map((tag) => ({ tag, reversed: false }))
+    });
+  }
+
+  const meshes: StepSurfacePreviewMesh[] = [];
+  for (const group of surfaceGroups) {
+    const positions: number[] = [];
+    const indices: number[] = [];
+    const localIndexByNodeTag = new Map<number, number>();
+    const faceRanges: StepSurfacePreviewMesh["faceRanges"] = [];
+
+    const localIndexForNode = (nodeTag: number): number => {
+      const existing = localIndexByNodeTag.get(nodeTag);
+      if (existing !== undefined) return existing;
+      const coordinateOffset = coordinateOffsetByTag.get(nodeTag);
+      if (coordinateOffset === undefined) throw new StepGeometryError(`Gmsh surface mesh references missing node ${nodeTag}.`);
+      const localIndex = positions.length / 3;
+      positions.push(
+        nodes.coord[coordinateOffset] ?? 0,
+        nodes.coord[coordinateOffset + 1] ?? 0,
+        nodes.coord[coordinateOffset + 2] ?? 0
+      );
+      localIndexByNodeTag.set(nodeTag, localIndex);
+      return localIndex;
+    };
+
+    for (const surface of group.surfaces) {
+      const triangleNodes = gmsh.model.mesh.getElementsByType(2, surface.tag).nodeTags;
+      const first = indices.length / 3;
+      for (let offset = 0; offset + 2 < triangleNodes.length; offset += 3) {
+        const firstNode = localIndexForNode(triangleNodes[offset]!);
+        const secondNode = localIndexForNode(triangleNodes[offset + 1]!);
+        const thirdNode = localIndexForNode(triangleNodes[offset + 2]!);
+        if (surface.reversed) indices.push(firstNode, thirdNode, secondNode);
+        else indices.push(firstNode, secondNode, thirdNode);
+      }
+      const last = indices.length / 3 - 1;
+      if (last >= first) faceRanges.push({ first, last });
+    }
+
+    if (indices.length > 0) {
+      meshes.push({
+        name: group.name,
+        positions: Float32Array.from(positions),
+        indices: Uint32Array.from(indices),
+        faceRanges
+      });
+    }
+  }
+
+  if (meshes.length === 0) {
+    throw new StepGeometryError("Gmsh surface inspection did not produce renderable triangles.");
+  }
+  return { meshes };
 }
 
 /** Heal/sew an uploaded STEP shell, cap closed free-edge loops, and export it. */

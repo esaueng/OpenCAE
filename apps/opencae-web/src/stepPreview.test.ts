@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { describe, expect, test } from "vitest";
 import { geometryFromOcctMesh, normalizedStepPreviewFromMeshes } from "./stepPreview";
+import { occtMeshesFromStepSurfacePreview, rememberStepSurfacePreview } from "./stepSurfacePreviewFallback";
 
 const importedMesh = {
   attributes: {
@@ -79,5 +80,59 @@ describe("STEP preview helpers", () => {
 
     expect(meshes).toHaveLength(2);
     expect(meshes[0]?.material).toBe(meshes[1]?.material);
+  });
+
+  test("keeps empty OCCT assembly placeholders without hiding later renderable meshes", () => {
+    const preview = normalizedStepPreviewFromMeshes([
+      { attributes: { position: { array: [] } }, index: { array: [] }, name: "Empty assembly" },
+      importedMesh
+    ], "#9aa7b4");
+
+    expect(preview.object.children[0]).toBeInstanceOf(THREE.Group);
+    expect(preview.object.children[0]).not.toBeInstanceOf(THREE.Mesh);
+    expect(preview.object.children[1]).toBeInstanceOf(THREE.Mesh);
+    expect(preview.dimensions).toEqual({ x: 10, y: 4, z: 0, units: "mm" });
+  });
+
+  test("converts the retained Gmsh surface mesh into the OCCT-compatible preview contract", () => {
+    const meshes = occtMeshesFromStepSurfacePreview({
+      meshes: [{
+        name: "Faceted body",
+        positions: new Float32Array([0, 0, 0, 10, 0, 0, 0, 4, 0]),
+        indices: new Uint32Array([0, 1, 2]),
+        faceRanges: [{ first: 0, last: 0 }]
+      }]
+    });
+    const preview = normalizedStepPreviewFromMeshes(meshes, "#9aa7b4");
+
+    expect(preview.object.children[0]?.name).toBe("Faceted body");
+    expect(preview.dimensions).toEqual({ x: 10, y: 4, z: 0, units: "mm" });
+    expect(meshes[0]?.brep_faces).toEqual([{ first: 0, last: 0, color: null }]);
+  });
+
+  test("remembers when the Gmsh surface must be preferred over an empty OCCT result", async () => {
+    const contentBase64 = "cached-faceted-step";
+    rememberStepSurfacePreview(contentBase64, {
+      status: "solid",
+      volumeCount: 1,
+      surfaceCount: 1,
+      orphanSurfaceCount: 0,
+      openBoundaryCurveCount: 0,
+      surfaceMeshValid: true,
+      repairable: false
+    }, {
+      meshes: [{
+        name: "Fallback body",
+        positions: new Float32Array([0, 0, 0, 10, 0, 0, 0, 4, 0]),
+        indices: new Uint32Array([0, 1, 2]),
+        faceRanges: [{ first: 0, last: 0 }]
+      }]
+    }, { preferred: true });
+
+    const { stepPreviewFromBase64 } = await import("./stepPreview");
+    const preview = await stepPreviewFromBase64(contentBase64, "#9aa7b4");
+
+    expect(preview.object.children[0]?.name).toBe("Fallback body");
+    expect(preview.dimensions).toEqual({ x: 10, y: 4, z: 0, units: "mm" });
   });
 });
