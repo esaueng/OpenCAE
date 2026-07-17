@@ -4428,6 +4428,23 @@ button:disabled {
   gap: var(--sp-2);
 }
 
+.log-copy-feedback {
+  align-self: center;
+  max-width: 280px;
+  color: var(--color-text-muted);
+  font-size: var(--fs-xs);
+  font-weight: 400;
+}
+
+.log-copy-feedback.copied {
+  color: var(--color-success);
+}
+
+.log-copy-feedback.failed,
+.log-copy-feedback.unavailable {
+  color: var(--color-warning);
+}
+
 .log-copy-button,
 .log-clear-button {
   min-height: 26px;

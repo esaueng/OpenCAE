@@ -603,6 +603,11 @@ describe("RightPanel payload mass controls", () => {
     expect(html).toContain("5.95557e-9 %");
   });
 
+  test("shows the canonical thermal solver method on the run step", () => {
+    const thermalStudy: Study = { ...study, name: "Steady Thermal", type: "steady_state_thermal" };
+    expect(renderPanel("run", { study: thermalStudy })).toContain("sparse_steady_thermal");
+  });
+
   test("describes the currently displayed result quantity", () => {
     expect(resultModeExplanation("stress")).toBe("Red areas have higher stress. Blue areas have lower stress.");
     expect(resultModeExplanation("displacement")).toBe("Red areas have higher displacement magnitude. Blue areas have lower displacement magnitude.");

@@ -1,7 +1,14 @@
 import { describe, expect, test } from "vitest";
-import { displayModelForUnits, formatDensity, formatForce, formatLength, formatMass, formatMaterialStress, formatResultMetric, formatResultNumber, formatResultProvenanceLabel, formatStress, formatUnitSystemLabel, formatVolume, loadValueForUnits, resultFieldForUnits, resultSummaryForUnits, resultValueForUnits, resultValueFromDisplayUnits } from "./unitDisplay";
+import { defaultSolverMethodForStudy, displayModelForUnits, formatDensity, formatForce, formatLength, formatMass, formatMaterialStress, formatResultMetric, formatResultNumber, formatResultProvenanceLabel, formatStress, formatUnitSystemLabel, formatVolume, loadValueForUnits, resultFieldForUnits, resultSummaryForUnits, resultValueForUnits, resultValueFromDisplayUnits } from "./unitDisplay";
 
 describe("unit display formatting", () => {
+  test("uses one canonical solver method for each study type", () => {
+    expect(defaultSolverMethodForStudy({ type: "static_stress" })).toBe("sparse_static");
+    expect(defaultSolverMethodForStudy({ type: "dynamic_structural" })).toBe("mdof_dynamic");
+    expect(defaultSolverMethodForStudy({ type: "modal_analysis" })).toBe("block_shift_invert_modal");
+    expect(defaultSolverMethodForStudy({ type: "steady_state_thermal" })).toBe("sparse_steady_thermal");
+  });
+
   test("formats solver metrics with bounded significant precision", () => {
     expect(formatResultMetric(24.830578943767595, "°C")).toBe("24.8306 °C");
     expect(formatResultMetric(19207.968569501394, "W/m²")).toBe("19208 W/m²");

@@ -28,6 +28,17 @@ export const COFFEE_ANIMATION_DURATION_MS = 1800;
 export const COFFEE_ANIMATION_REPLAY_DELAY_MS = { min: 18000, max: 45000 } as const;
 const COFFEE_LINK_TEXT = "Buy me a coffee";
 const ESAU_ENGINEERING_URL = "https://esauengineering.com/";
+const COPY_FEEDBACK_DURATION_MS = 2200;
+
+export async function writeWorkspaceLogsToClipboard(text: string, clipboard?: Pick<Clipboard, "writeText">): Promise<"copied" | "unavailable" | "failed"> {
+  if (!clipboard) return "unavailable";
+  try {
+    await clipboard.writeText(text);
+    return "copied";
+  } catch {
+    return "failed";
+  }
+}
 
 export function coffeeAnimationReplayDelayMs(randomValue = Math.random()) {
   const safeRandomValue = Number.isFinite(randomValue) ? randomValue : 0;
@@ -40,11 +51,13 @@ export function BottomPanel({ status, logs, meshStatus, solverStatus, onClearLog
   const [tab, setTab] = useState<"tips" | "logs" | null>(null);
   const [drawerHeight, setDrawerHeight] = useState(320);
   const [clearPromptVisible, setClearPromptVisible] = useState(false);
+  const [copyFeedback, setCopyFeedback] = useState<"idle" | "copied" | "unavailable" | "failed">("idle");
   const [coffeeAnimating, setCoffeeAnimating] = useState(false);
   const [coffeeAnimationRun, setCoffeeAnimationRun] = useState(0);
   const dragStart = useRef<{ y: number; height: number } | null>(null);
   const animationTimeoutRef = useRef(0);
   const replayTimeoutRef = useRef(0);
+  const copyFeedbackTimeoutRef = useRef(0);
   const expanded = tab !== null;
   const displayStatus = statusForDisplay(status, solverStatus);
   const healthy = solverStatus === "Running" ? "running" : displayStatus.endsWith("error") || displayStatus === "Needs attention" ? "warning" : meshStatus === "Ready" ? "ready" : "warning";
@@ -56,6 +69,8 @@ export function BottomPanel({ status, logs, meshStatus, solverStatus, onClearLog
     const timeoutId = window.setTimeout(() => setClearPromptVisible(false), 2200);
     return () => window.clearTimeout(timeoutId);
   }, [clearPromptVisible]);
+
+  useEffect(() => () => window.clearTimeout(copyFeedbackTimeoutRef.current), []);
 
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
@@ -131,9 +146,14 @@ export function BottomPanel({ status, logs, meshStatus, solverStatus, onClearLog
     setDrawerHeight(clamp(nextHeight));
   }
 
-  function copyLogs() {
-    if (typeof navigator === "undefined" || !navigator.clipboard) return;
-    void navigator.clipboard.writeText(formattedLogs.join("\n"));
+  async function copyLogs() {
+    window.clearTimeout(copyFeedbackTimeoutRef.current);
+    const outcome = await writeWorkspaceLogsToClipboard(
+      formattedLogs.join("\n"),
+      typeof navigator === "undefined" ? undefined : navigator.clipboard
+    );
+    setCopyFeedback(outcome);
+    copyFeedbackTimeoutRef.current = window.setTimeout(() => setCopyFeedback("idle"), COPY_FEEDBACK_DURATION_MS);
   }
 
   function clearLogs(event: MouseEvent<HTMLButtonElement>) {
@@ -170,7 +190,10 @@ export function BottomPanel({ status, logs, meshStatus, solverStatus, onClearLog
           <div className="logs-drawer-header">
             <span>Run logs</span>
             <div className="logs-drawer-actions">
-              <button type="button" className="log-copy-button" onClick={copyLogs}>Copy logs</button>
+              <span className={`log-copy-feedback ${copyFeedback}`} role="status" aria-live="polite" aria-atomic="true">
+                {copyFeedback === "copied" ? "Logs copied to clipboard." : copyFeedback === "unavailable" ? "Clipboard unavailable. Select the logs and copy manually." : copyFeedback === "failed" ? "Copy failed. Select the logs and copy manually." : ""}
+              </span>
+              <button type="button" className="log-copy-button" onClick={() => void copyLogs()}>{copyFeedback === "copied" ? "Copied" : copyFeedback === "failed" || copyFeedback === "unavailable" ? "Copy failed" : "Copy logs"}</button>
               <button
                 type="button"
                 className="log-clear-button"

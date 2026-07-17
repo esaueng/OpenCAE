@@ -19,7 +19,7 @@ import { shouldShowSampleModelPicker } from "../modelPanelState";
 import { SETTING_HELP, type SettingHelpId, type SettingHelpVisual } from "../settingHelp";
 import { supportDisplayLabel } from "../supportLabels";
 import { getViewportTooltipPosition } from "../tooltipPosition";
-import { forceForUnits, formatDensity, formatMass, formatMaterialStress, formatMeshSourceLabel, formatResultMetric, formatResultNumber, formatResultProvenanceLabel, formatVolume, hasResultUnit, legacyResultWarningForProvenance, loadValueForUnits, solverMethodForResult, solverRunnerLabelForResult, type UnitSystem } from "../unitDisplay";
+import { defaultSolverMethodForStudy, forceForUnits, formatDensity, formatMass, formatMaterialStress, formatMeshSourceLabel, formatResultMetric, formatResultNumber, formatResultProvenanceLabel, formatVolume, hasResultUnit, legacyResultWarningForProvenance, loadValueForUnits, solverMethodForResult, solverRunnerLabelForResult, type UnitSystem } from "../unitDisplay";
 import { canNavigateToStep } from "../appShellState";
 import { MaterialLibraryModal } from "./SimulationWorkflow";
 import { ParametricPartBuilder } from "./ParametricPartBuilder";
@@ -1831,7 +1831,7 @@ function RunPanel({ study, displayModel, runProgress, runError, runTiming, onRun
       <div className="summary-box">
         <Info label="Backend" value={solverBackendLabelForRunPanel(study, displayModel)} />
         <Info label="Version" value="0.1.0" />
-        <Info label="Solver method" value={solverMethodForStudy(study)} />
+        <Info label="Solver method" value={defaultSolverMethodForStudy(study)} />
         <Info label="Runner" value={solverRunnerLabelForStudy(study, displayModel)} />
       </div>
     </Panel>
@@ -1934,10 +1934,6 @@ function solverBackendLabelForRunPanel(study: Study, displayModel: DisplayModel)
   void study;
   void displayModel;
   return "Local (in-browser)";
-}
-
-function solverMethodForStudy(study: Study): "sparse_static" | "mdof_dynamic" | "block_shift_invert_modal" {
-  return study.type === "dynamic_structural" ? "mdof_dynamic" : study.type === "modal_analysis" ? "block_shift_invert_modal" : "sparse_static";
 }
 
 function solverRunnerLabelForStudy(study: Study, displayModel: DisplayModel): string {

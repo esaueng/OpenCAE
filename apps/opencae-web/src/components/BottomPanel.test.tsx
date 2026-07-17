@@ -1,14 +1,15 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import {
   BottomPanel,
   COFFEE_ANIMATION_REPLAY_DELAY_MS,
   KeyboardShortcutGuide,
   WORKSPACE_SHORTCUT_GUIDE,
   coffeeAnimationReplayDelayMs,
-  resolveLogClearIntent
+  resolveLogClearIntent,
+  writeWorkspaceLogsToClipboard
 } from "./BottomPanel";
 
 const bottomPanelSource = readFileSync(resolve(__dirname, "BottomPanel.tsx"), "utf8");
@@ -130,10 +131,20 @@ describe("BottomPanel", () => {
     expect(html).not.toContain('class="status-state ready"');
   });
 
-  test("defines a copy logs control inside the logs drawer", () => {
+  test("defines visible and assistive copy-log feedback inside the logs drawer", () => {
     expect(bottomPanelSource).toContain('className="log-copy-button"');
     expect(bottomPanelSource).toContain("Copy logs");
-    expect(bottomPanelSource).toContain("navigator.clipboard.writeText");
+    expect(bottomPanelSource).toContain('role="status" aria-live="polite"');
+    expect(bottomPanelSource).toContain("Logs copied to clipboard.");
+    expect(bottomPanelSource).toContain("Select the logs and copy manually.");
+  });
+
+  test("reports clipboard success, rejection, and unavailable support", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    await expect(writeWorkspaceLogsToClipboard("log text", { writeText })).resolves.toBe("copied");
+    expect(writeText).toHaveBeenCalledWith("log text");
+    await expect(writeWorkspaceLogsToClipboard("log text", { writeText: vi.fn().mockRejectedValue(new Error("denied")) })).resolves.toBe("failed");
+    await expect(writeWorkspaceLogsToClipboard("log text")).resolves.toBe("unavailable");
   });
 
   test("renders the real log entry timestamp instead of a fabricated offset", () => {
