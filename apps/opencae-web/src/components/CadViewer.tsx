@@ -35,6 +35,7 @@ export type { PrintLayerOrientation, ResultMode, ResultPlaybackFrameController, 
 
 interface CadViewerProps {
   displayModel: DisplayModel;
+  importingModelFilename?: string;
   activeStep: StepId;
   selectedFaceId: string | null;
   payloadObjectSelectionMode: boolean;
@@ -270,7 +271,11 @@ export function CadViewer(props: CadViewerProps) {
   return (
     <ResultColorScaleContext.Provider value={resultColorScale}>
       <StressComponentContext.Provider value={stressComponent}>
-    <section className={`viewer-shell ${effectiveViewMode === "results" ? "results-view" : ""}`} aria-label="3D CAD viewer">
+    <section
+      className={`viewer-shell ${effectiveViewMode === "results" ? "results-view" : ""}`}
+      aria-busy={props.importingModelFilename ? true : undefined}
+      aria-label="3D CAD viewer"
+    >
       <Canvas frameloop="demand" dpr={viewerDpr} camera={{ position: [4.8, 4.8, 4.8], up: ISO_CAMERA_UP.toArray(), fov: DEFAULT_CAMERA_FOV }} onCreated={({ gl }) => { gl.localClippingEnabled = true; }} onPointerMissed={props.onViewerMiss}>
         <ProjectionCameraController projectionMode={projectionMode} controlsRef={controlsRef} />
         <SectionClippingController state={props.sectionPlane} bounds={sectionBounds} />
@@ -362,6 +367,16 @@ export function CadViewer(props: CadViewerProps) {
         </GizmoHelper>
         {viewerStatsEnabled && <ViewerRendererStatsProbe />}
       </Canvas>
+      {props.importingModelFilename ? (
+        <div className="viewer-import-overlay" role="status" aria-live="polite" aria-atomic="true">
+          <div className="viewer-import-card">
+            <span className="viewer-import-spinner" aria-hidden="true" />
+            <strong>Importing model…</strong>
+            <span className="viewer-import-filename">{props.importingModelFilename}</span>
+            <small>Reading geometry and preparing the model. Large files may take a while.</small>
+          </div>
+        </div>
+      ) : null}
       {props.displayModel.faces.length > 0 && (
         <div className="viewer-a11y-faces" role="group" aria-label="Select a face with the keyboard">
           <span>Select a face to place supports or loads.</span>
