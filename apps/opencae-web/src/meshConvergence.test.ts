@@ -186,7 +186,52 @@ describe("static mesh convergence", () => {
     const mapped = mapPointToNearestSurfaceTriangle([250, 250, 0], surfaceMesh);
     expect(mapped).toMatchObject({ coordinateScale: 0.001, triangle: [0, 1, 2] });
     expect(mapped?.barycentric).toEqual([0.5, 0.25, 0.25]);
+    expect(mapped?.point).toEqual([0.25, 0.25, 0]);
     expect(mapPointToNearestSurfaceTriangle([250, 250, 500], surfaceMesh)).toBeNull();
+  });
+
+  test("projects a system default once and keeps the resolved surface point across rungs", async () => {
+    const shiftedSurfaces = [0, 0.000001, -0.000001].map((z, index) => ({
+      ...surfaceMesh,
+      id: `solver-surface-${index}`,
+      nodes: surfaceMesh.nodes.map(([x, y]) => [x, y, z] as [number, number, number])
+    }));
+    const presetIndex = new Map(["coarse", "medium", "fine"].map((preset, index) => [preset, index]));
+    const record = await runStaticMeshConvergence({
+      study,
+      caseId: "case-a",
+      probe: { point: [250, 250, 500], source: "primary_load", label: "Loaded face" },
+      prepareMesh: async (preset, isolatedStudy) => ({ study: isolatedStudy, statistics: statistics(presetIndex.get(preset)!) }),
+      solve: async (_isolated, preset) => {
+        const index = presetIndex.get(preset)!;
+        const result = solveResult(1 + index * 0.01, 10 + index * 0.1);
+        const nextSurface = shiftedSurfaces[index]!;
+        return {
+          ...result,
+          surfaceMesh: nextSurface,
+          fields: result.fields.map((field) => field.type === "displacement" ? { ...field, surfaceMeshRef: nextSurface.id } : field)
+        };
+      }
+    });
+
+    expect(record.rungs.every((rung) => rung.status === "complete")).toBe(true);
+    expect(record.probe).toMatchObject({ point: [250, 250, 0], source: "primary_load", label: "Loaded face" });
+    expect(record.classification).not.toBe("inconclusive");
+  });
+
+  test("keeps explicit off-surface probes strict and reports mapping evidence", async () => {
+    const record = await runStaticMeshConvergence({
+      study,
+      caseId: "case-a",
+      probe: { point: [250, 250, 500], source: "explicit" },
+      prepareMesh: async (preset, isolatedStudy) => ({ study: isolatedStudy, statistics: statistics(preset === "coarse" ? 0 : preset === "medium" ? 1 : 2) }),
+      solve: async () => solveResult(1, 10)
+    });
+
+    expect(record.rungs.every((rung) => rung.status === "failed")).toBe(true);
+    expect(record.rungs[0]?.skipReason).toContain("Explicit displacement probe is");
+    expect(record.rungs[0]?.skipReason).toContain("allowed tolerance");
+    expect(record.probe.point).toEqual([250, 250, 500]);
   });
 
   test("defaults the probe to the primary load application point and falls back to its face center", () => {
