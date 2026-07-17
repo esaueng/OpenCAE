@@ -569,6 +569,12 @@ export function cameraForProjection(
   const next = projectionMode === "orthographic"
     ? new THREE.OrthographicCamera(-verticalSpan * safeAspect / 2, verticalSpan * safeAspect / 2, verticalSpan / 2, -verticalSpan / 2, near, far)
     : new THREE.PerspectiveCamera(DEFAULT_CAMERA_FOV, safeAspect, near, far);
+  if (next instanceof THREE.OrthographicCamera) {
+    // React Three Fiber otherwise replaces a custom orthographic frustum with
+    // canvas-pixel extents whenever DPR changes (including interaction DPR).
+    // ProjectionCameraController owns this frustum and resizes it explicitly.
+    (next as THREE.OrthographicCamera & { manual?: boolean }).manual = true;
+  }
   const distance = projectionMode === "perspective"
     ? verticalSpan / (2 * Math.tan(THREE.MathUtils.degToRad(DEFAULT_CAMERA_FOV) / 2))
     : camera.position.distanceTo(target);

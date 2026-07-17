@@ -48,6 +48,7 @@ describe("CadViewer result coloring", () => {
 
     const orthographic = cameraForProjection(perspective, target, "orthographic", 1.6);
     expect(orthographic).toBeInstanceOf(THREE.OrthographicCamera);
+    expect((orthographic as THREE.OrthographicCamera & { manual?: boolean }).manual).toBe(true);
     expect(cameraVerticalSpanAtTarget(orthographic, target)).toBeCloseTo(originalSpan, 10);
     expect(orthographic.position.clone().sub(target).normalize().angleTo(originalDirection)).toBeLessThan(1e-9);
 
