@@ -9,7 +9,7 @@ Four advisory runs are indexed here:
 - **Run 5 — 2026-07-09**, repo consolidation (plan 017). Imported OpenCAE Core packages into this monorepo, removed the sibling checkout/pin bootstrap, and wired Core package tests into this repo's CI.
 - **2026-07-10**, mesh-failure UX (plan 018, from a live failing upload rather than an advisor run). A nominal-solid STEP (428 faces) failed 3D meshing; the automatic repair sew destroyed the imported volume and the surfaced error pointed at a Fix open surfaces button that never renders for parts inspected as "solid" at upload.
 - **2026-07-10**, product feature (plan 020, maintainer request). One-click professional PDF simulation report from the results page: full setup (geometry, material, BCs, mesh, solver) + results with contour figures, built on the honest-results formatters, lazy-loaded jsPDF, and a new viewer capture seam.
-- **2026-07-17**, production E2E remediation (plan 023). A full browser pass on `cae.esau.app` found stale cross-analysis result visualization, confirmation bypasses, default convergence-probe mapping failure, accessibility-state gaps, a thermal solver-label mismatch, and missing Copy Logs feedback.
+- **2026-07-17**, production E2E remediation (plan 023). A full browser pass on `cae.esau.app` found stale cross-analysis result visualization, confirmation bypasses, default convergence-probe mapping failure, accessibility-state gaps, a thermal solver-label mismatch, and missing Copy Logs feedback. All five remediation increments are implemented and locally browser-verified; production deployment smoke testing remains the release follow-up.
 
 These plans are written for a fresh executor with no context from the surveys. Each is self-contained.
 
@@ -153,7 +153,7 @@ Dependency notes:
 | 020 One-click PDF simulation report | DONE | Executed: Results-panel PDF generation, persisted white-background captures, report data/layout, and unit/provenance honesty checks are shipped. |
 | 021 OpenCAE Quick-Wins Rollout | COMPLETE | All five staged releases landed: result probes, unified palettes, principal stresses, projection/PNG export, and recent project handles. |
 | 022 OpenCAE Medium-Feature Roadmap | COMPLETE | All five flagship-first increments released: modal analysis; open sections and custom materials; structural cases/combinations/envelopes; static convergence studies; and advanced loads with equivalent bolt preload. |
-| 023 Production E2E QA Fixes | READY | Six production findings; stale cross-analysis results are P1 and must land first. No solver, unit, API, or file-format changes planned. |
+| 023 Production E2E QA Fixes | COMPLETE | Five implementation commits fix all six findings. Focused tests, typecheck, build, desktop browser QA, 390 px mobile QA, static solve, and three-rung bracket convergence pass; production deployment smoke remains. |
 
 Run 2 was non-interactive: plans 006–010 are the top findings by leverage (impact ÷ effort, confidence-weighted), selected by default per the advisor skill's non-interactive rule rather than by maintainer choice. Re-cut as desired.
 

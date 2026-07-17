@@ -2,7 +2,29 @@
 
 ## Status
 
-**READY** — grounded in a full production-browser pass against `https://cae.esau.app` on 2026-07-17.
+**COMPLETE** — implemented and locally browser-verified on 2026-07-17. Production deployment smoke testing remains a release follow-up.
+
+## Implementation record
+
+The five planned increments landed as independently verified commits:
+
+1. `38b008a` — Prevent stale result visualization
+2. `2c52133` — Confirm sample analysis changes
+3. `5b47f43` — Stabilize convergence probe mapping
+4. `b27b620` — Fix workflow accessibility state
+5. `5ca12f2` — Correct solver labels and copy feedback
+
+Focused Vitest coverage, the monorepo typecheck, and the production build pass. A rendered in-app-browser pass at desktop and 390 x 844 mobile widths additionally verified:
+
+- static results are cleared before a confirmed thermal sample load, leaving the unsolved Results step without a contour legend;
+- analysis choices remain drafts until the explicit second confirmation;
+- the bracket's coarse/medium/fine convergence run completes all three rungs and classifies numerically instead of failing probe mapping;
+- load editing exposes one active editor and restores focus after Cancel;
+- result, mesh, and section-side toggles expose synchronized pressed state;
+- Thermal reports `sparse_steady_thermal`; and
+- Copy Logs displays and announces its success state.
+
+The browser pass produced no application errors. The only console warning was the expected local Plausible analytics message that localhost events are ignored. Native save-picker and STEP file-chooser behavior remain manual release checks, as scoped below.
 
 ## Goal
 
