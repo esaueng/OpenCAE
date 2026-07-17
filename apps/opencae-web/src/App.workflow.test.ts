@@ -96,7 +96,14 @@ describe("App workflow layout", () => {
   test("rejects dynamic results that do not contain animation frames before showing Results", () => {
     expect(appSource).toContain("hasDynamicPlaybackFrames(results.summary, results.fields)");
     expect(appSource).toContain("Dynamic results did not include animation frames.");
-    expect(appSource).toContain('if (study.type === "dynamic_structural" && (isModalResultSummary(results.summary) || !hasDynamicPlaybackFrames(results.summary, results.fields)))');
+    expect(appSource).toContain('if (study.type === "dynamic_structural" && (!isStructuralResultSummary(results.summary) || !hasDynamicPlaybackFrames(results.summary, results.fields)))');
+  });
+
+  test("gates result rendering by current study and run identity", () => {
+    expect(appSource).toContain("const resultDisplayEligible = useMemo");
+    expect(appSource).toContain("resultsEligible={resultDisplayEligible}");
+    expect(appSource).toContain("resultSummary={resultDisplayEligible ? resultSummaryForUi : null}");
+    expect(appSource).toContain("processingRunIdRef.current !== response.run.id || currentStudy?.type !== study.type");
   });
 
   test("surfaces run creation failures instead of leaving the run button inert", () => {

@@ -43,6 +43,7 @@ interface CadViewerProps {
   onViewerMiss: () => void;
   onSelectFace: (face: DisplayFace, point?: [number, number, number], payloadObject?: PayloadObjectSelection) => void;
   viewMode: ViewMode;
+  resultsEligible?: boolean;
   resultMode: ResultMode;
   stressComponent?: StressComponent;
   showDeformed: boolean;
@@ -205,7 +206,9 @@ export function CadViewer(props: CadViewerProps) {
   const [uploadedPreviewBounds, setUploadedPreviewBounds] = useState<THREE.Box3 | null>(null);
   const [gizmoViewRequest, setGizmoViewRequest] = useState<{ view: GizmoViewRequest | null; signal: number }>({ view: null, signal: 0 });
   const [viewerInteracting, setViewerInteracting] = useState(false);
-  const effectiveViewMode: ViewMode = props.activeStep === "results" ? props.viewMode : props.viewMode === "mesh" ? "mesh" : "model";
+  const effectiveViewMode: ViewMode = props.activeStep === "results"
+    ? props.viewMode === "results" && props.resultsEligible ? "results" : "model"
+    : props.viewMode === "mesh" ? "mesh" : "model";
   const suppressPlaybackOverlays = props.resultPlaybackPlaying;
   const showDimensionOverlay = shouldShowDimensionOverlay(props.showDimensions, effectiveViewMode) && !suppressPlaybackOverlays;
   const viewerDpr = props.resultPlaybackPlaying || viewerInteracting ? VIEWER_ACTIVE_DPR_RANGE : VIEWER_IDLE_DPR_RANGE;
