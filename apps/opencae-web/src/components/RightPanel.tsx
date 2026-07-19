@@ -2370,7 +2370,7 @@ function ResultsPanelContent({
       {resultMode === "stress" && stressComponents.length > 0 && (
         <div className="field">
           <SectionTitle helpId="stressMeasure">Stress measure</SectionTitle>
-          <div className="segmented" role="group" aria-label="Stress measure">
+          <div className="segmented stress-measure" role="group" aria-label="Stress measure">
             {stressComponents.map((component) => (
               <button
                 key={component}
