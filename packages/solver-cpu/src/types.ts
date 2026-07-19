@@ -65,6 +65,7 @@ export type ModalMode = {
 
 export type ModalCpuDiagnostics = {
   dofs: number;
+  sourceDofs: number;
   freeDofs: number;
   constrainedDofs: number;
   requestedModeCount: number;
@@ -74,6 +75,14 @@ export type ModalCpuDiagnostics = {
   tolerance: number;
   totalMass: number;
   partialConvergenceWarning?: string;
+  approximationWarning?: string;
+  meshProjection?: {
+    sourceElementOrder: "Tet10";
+    solveElementOrder: "Tet4";
+    sourceDofs: number;
+    solveDofs: number;
+    reason: "local-modal-performance";
+  };
   solver: "opencae-core-block-shift-invert";
 };
 

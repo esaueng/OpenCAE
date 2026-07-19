@@ -889,8 +889,11 @@ export async function saveRunReportCaptures(runId: string, reportCaptures: Resul
 export function withFieldRunIds(runId: string, results: ResultsResponse): ResultsResponse {
   const stampFields = (fields: ResultField[], variantId?: string) => fields.map((field) => ({
     ...field,
-    ...(!field.runId ? { runId } : {}),
-    ...(variantId && !field.variantId ? { variantId } : {})
+    // A result bundle belongs to this run even if an upstream field carries a
+    // placeholder or stale id. Eligibility filters use exact run ownership,
+    // so preserving a truthy old id makes a completed modal run look empty.
+    runId,
+    ...(variantId ? { variantId } : {})
   }));
   const stamped = {
     ...results,

@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { isStructuralResultSummary } from "@opencae/schema";
 import type { DisplayModel, Project, RunEvent, Study } from "@opencae/schema";
-import { addLoad, addSupport, assignMaterial, cancelRun, createProject, dynamicOutputFrameEstimate, generateMesh, geometryWithMeshPreset, getResults, importLocalProject, loadSampleProject, probeUploadedStepRepairAfterMeshFailure, renameProject, runSimulation, STEP_REPAIR_PROBE_MODEL_CHANGED_MESSAGE, STEP_REPAIR_UNAVAILABLE_MESSAGE, subscribeToRun, updateStudy, uploadedStepRepairProbeDecision, uploadModel, withReportCaptures } from "./api";
+import { addLoad, addSupport, assignMaterial, cancelRun, createProject, dynamicOutputFrameEstimate, generateMesh, geometryWithMeshPreset, getResults, importLocalProject, loadSampleProject, probeUploadedStepRepairAfterMeshFailure, renameProject, runSimulation, STEP_REPAIR_PROBE_MODEL_CHANGED_MESSAGE, STEP_REPAIR_UNAVAILABLE_MESSAGE, subscribeToRun, updateStudy, uploadedStepRepairProbeDecision, uploadModel, withFieldRunIds, withReportCaptures } from "./api";
 
 const TestFile = globalThis.File ?? class extends Blob {
   name: string;
@@ -111,6 +111,24 @@ function uploadedStepProjectForRepairProbe(status: "solid" | "unchecked"): Proje
 }
 
 describe("api", () => {
+  test("stamps completed fields with their owning run instead of preserving stale ids", () => {
+    const results = withFieldRunIds("run-current", {
+      summary: {} as never,
+      fields: [{
+        id: "mode-1-shape",
+        runId: "run-stale",
+        type: "mode_shape",
+        location: "node",
+        values: [0],
+        min: 0,
+        max: 0,
+        units: "normalized"
+      }]
+    } as never);
+
+    expect(results.fields[0]?.runId).toBe("run-current");
+  });
+
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();

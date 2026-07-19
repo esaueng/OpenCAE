@@ -76,4 +76,34 @@ describe("result display eligibility", () => {
     expect(isResultDisplayEligible({ ...base, studyType: "steady_state_thermal" })).toBe(false);
     expect(isResultDisplayEligible({ ...base, resultMode: "displacement" })).toBe(false);
   });
+
+  test("keeps a completed modal bundle visible when an upstream field carries a stale run id", () => {
+    const summary: ResultSummary = {
+      analysisType: "modal_analysis",
+      requestedModeCount: 1,
+      convergedModeCount: 1,
+      modes: [{ modeIndex: 1, frequencyHz: 20, eigenvalue: 4, scaledResidual: 1e-8, fieldId: "mode-1" }]
+    };
+    const modeField: ResultField = {
+      id: "mode-1",
+      runId: "run-stale",
+      type: "mode_shape",
+      location: "node",
+      values: [1],
+      vectors: [[1, 0, 0]],
+      min: 1,
+      max: 1,
+      units: "normalized",
+      modeIndex: 1
+    };
+
+    expect(isResultDisplayEligible({
+      studyType: "modal_analysis",
+      summary,
+      fields: [modeField],
+      completedRunId: "run-current",
+      resultMode: "mode_shape",
+      modeIndex: 1
+    })).toBe(true);
+  });
 });
