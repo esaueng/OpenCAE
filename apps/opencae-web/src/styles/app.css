@@ -3090,6 +3090,15 @@ img {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+.segmented.stress-measure {
+  display: flex;
+}
+
+.segmented.stress-measure button {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
 .segmented button {
   min-height: 30px;
   color: var(--color-text-muted);
