@@ -35,6 +35,14 @@ export function isResultDisplayEligible({
   modeIndex
 }: ResultDisplayEligibilityInput): boolean {
   if (!summary || !completedRunId || !resultSummaryMatchesStudy(summary, studyType)) return false;
+  if (isModalResultSummary(summary)) {
+    if (resultMode !== "mode_shape") return false;
+    // Modal fields are produced as one immutable bundle and then expanded into
+    // phase frames in memory. A stale upstream field runId must not hide an
+    // otherwise valid completed modal result; the run start clears old fields
+    // before this bundle is installed.
+    return fields.some((field) => field.type === "mode_shape" && (modeIndex === undefined || field.modeIndex === modeIndex));
+  }
   const currentRunFields = fields.filter((field) => field.runId === completedRunId);
   if (!currentRunFields.length) return false;
   return Boolean(selectActiveResultField({

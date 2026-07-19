@@ -6,7 +6,7 @@ import {
   type OpenCAEModelJson
 } from "@opencae/core";
 import { singleTetStaticFixture } from "@opencae/examples";
-import { solveModalLinearTet, solveModalSubspace, toCsrMatrix, createSparseMatrixBuilder, addSparseEntry } from "../src";
+import { linearizeTet10ModelForModal, solveModalLinearTet, solveModalSubspace, toCsrMatrix, createSparseMatrixBuilder, addSparseEntry } from "../src";
 import { assembleLumpedMass, prepareStructuralSystem, type PreparedStructuralSystem } from "../src/structural-system";
 
 function diagonalSystem(stiffness: number[], mass: number[]): PreparedStructuralSystem {
@@ -84,6 +84,19 @@ describe("block shift-invert modal solver", () => {
     expect(solved.ok ? undefined : solved.error.code).toBe("cancelled");
   });
 
+  test("reports nested CG work against the enclosing modal workload", () => {
+    const progress: Array<{ completed: number; total: number; iteration?: number }> = [];
+    const solved = solveModalSubspace(diagonalSystem([4, 9, 16], [1, 1, 1]), 2, {
+      maxCgIterations: 10_000,
+      hooks: { onProgress: (event) => progress.push(event) }
+    });
+
+    expect(solved.ok).toBe(true);
+    expect(progress.some((event) => event.iteration !== undefined)).toBe(true);
+    expect(progress.every((event) => event.total === 30)).toBe(true);
+    expect(progress.every((event) => event.completed >= 0 && event.completed <= event.total)).toBe(true);
+  });
+
   test("exports normalized signed vector mode shapes and a valid modal result contract", () => {
     const solved = solveModalLinearTet(modalFixture, { maxDofs: 100_000 });
     expect(solved.ok).toBe(true);
@@ -130,6 +143,33 @@ describe("block shift-invert modal solver", () => {
     expect(tet10Mass.ok).toBe(true);
     if (!tet10Mass.ok) return;
     expect(tet10Mass.totalMass).toBeCloseTo(tet4Mass.totalMass, 10);
+  });
+
+  test("projects oversized Tet10 modal meshes to explicit corner-node Tet4 models", () => {
+    const elevated = elevateTet4MeshToTet10({
+      coordinates: modalFixture.nodes.coordinates,
+      elements: [modalFixture.elementBlocks[0].connectivity]
+    });
+    const normalized = normalizeModelJson({
+      ...modalFixture,
+      nodes: { coordinates: elevated.coordinates },
+      elementBlocks: [{ ...modalFixture.elementBlocks[0], type: "Tet10", connectivity: elevated.elements.flat() }]
+    });
+    expect(normalized.ok).toBe(true);
+    if (!normalized.ok) return;
+
+    const projected = linearizeTet10ModelForModal(normalized.model, 1);
+    expect(projected.projection).toEqual({
+      sourceElementOrder: "Tet10",
+      solveElementOrder: "Tet4",
+      sourceDofs: normalized.model.counts.nodes * 3,
+      solveDofs: modalFixture.nodes.coordinates.length,
+      reason: "local-modal-performance"
+    });
+    expect(projected.model.elementBlocks[0].type).toBe("Tet4");
+    expect(Array.from(projected.model.elementBlocks[0].connectivity)).toEqual(modalFixture.elementBlocks[0].connectivity);
+    expect(projected.model.surfaceFacets.every((facet) => facet.nodes.length === 3)).toBe(true);
+    expect(projected.model.counts.elements).toBe(normalized.model.counts.elements);
   });
 
   test("keeps the compatibility frequency estimate within modal calibration tolerance", () => {

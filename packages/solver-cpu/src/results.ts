@@ -450,6 +450,9 @@ export function modalCoreResultFromSolve(
     scaledResidual: mode.scaledResidual,
     visualizationSource: "normalized_modal_eigenvector"
   }));
+  const warning = [diagnostics.approximationWarning, diagnostics.partialConvergenceWarning]
+    .filter((message): message is string => Boolean(message))
+    .join(" ");
   return {
     analysisType: "modal_analysis",
     summary: {
@@ -463,7 +466,7 @@ export function modalCoreResultFromSolve(
         scaledResidual: mode.scaledResidual,
         fieldId: `mode-${mode.modeIndex}-shape`
       })),
-      ...(diagnostics.partialConvergenceWarning ? { warning: diagnostics.partialConvergenceWarning } : {}),
+      ...(warning ? { warning } : {}),
       provenance
     },
     fields,

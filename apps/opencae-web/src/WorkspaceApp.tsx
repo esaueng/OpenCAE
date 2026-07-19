@@ -2183,9 +2183,14 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         // solving, persist the meshed study (with its stored artifact) so
         // later runs reuse it instead of re-meshing.
         onStudyMeshed: (meshedStudy) => {
-          setProject((current) => current
-            ? { ...current, studies: current.studies.map((item) => (item.id === meshedStudy.id ? meshedStudy : item)) }
-            : current);
+          const current = projectRef.current;
+          if (!current) return;
+          const next = { ...current, studies: current.studies.map((item) => (item.id === meshedStudy.id ? meshedStudy : item)) };
+          // Keep the imperative snapshot synchronized before the worker can
+          // finish. A fast solve may complete before React commits the state
+          // update, and the completion guard below must see the meshed study.
+          projectRef.current = next;
+          setProject(next);
         }
       });
     } catch (error) {
@@ -2215,7 +2220,10 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         try {
           const results = await getResults(response.run.id);
           const currentStudy = projectRef.current?.studies.find((candidate) => candidate.id === study.id);
-          if (processingRunIdRef.current !== response.run.id || currentStudy?.type !== study.type) return;
+          if (processingRunIdRef.current !== response.run.id || currentStudy?.type !== study.type) {
+            pushMessage("Completed results were ignored because the active project or analysis changed during the run.");
+            return;
+          }
           if (study.type === "dynamic_structural" && (!isStructuralResultSummary(results.summary) || !hasDynamicPlaybackFrames(results.summary, results.fields))) {
             pushMessage("Dynamic results did not include animation frames.");
             setResultPlaybackPlaying(false);

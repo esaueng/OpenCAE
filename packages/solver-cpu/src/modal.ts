@@ -15,10 +15,22 @@ import type {
 const DEFAULT_MODE_COUNT = 6;
 const DEFAULT_MODAL_TOLERANCE = 1e-6;
 const DEFAULT_SUBSPACE_ITERATIONS = 30;
+// Earlier subspace passes use a looser forcing term and are warm-started below.
+// Keep the final inverse solves at 1e-9: the large-model Tet4 projection showed
+// that 1e-8 can plateau just above the unchanged 1e-6 exported mode residual.
 const DEFAULT_INNER_TOLERANCE = 1e-9;
 const FREQUENCY_ESTIMATE_INNER_TOLERANCE = 1e-8;
 const DEFAULT_MAX_DOFS = 30_000;
 const DEFAULT_FREQUENCY_ESTIMATE_ITERATIONS = 4;
+const DEFAULT_TET10_PROJECTION_DOF_THRESHOLD = 50_000;
+
+export type ModalMeshProjection = {
+  sourceElementOrder: "Tet10";
+  solveElementOrder: "Tet4";
+  sourceDofs: number;
+  solveDofs: number;
+  reason: "local-modal-performance";
+};
 
 export type ModalSubspaceMode = {
   modeIndex: number;
@@ -42,7 +54,10 @@ export type ModalSubspaceResult =
 export function solveModalLinearTet(input: CpuSolverInput, options: ModalCpuOptions = {}): ModalCpuSolveResult {
   const normalized = getNormalizedModel(input);
   if (!normalized.ok) return normalized;
-  const model = normalized.model;
+  const sourceModel = normalized.model;
+  const sourceDofs = sourceModel.counts.nodes * 3;
+  const projected = linearizeTet10ModelForModal(sourceModel);
+  const model = projected.model;
   const dofs = model.counts.nodes * 3;
   const maxDofs = positiveInteger(options.maxDofs) ?? DEFAULT_MAX_DOFS;
   if (dofs > maxDofs) {
@@ -60,6 +75,8 @@ export function solveModalLinearTet(input: CpuSolverInput, options: ModalCpuOpti
     tolerance,
     maxSubspaceIterations: positiveInteger(options.maxSubspaceIterations) ?? DEFAULT_SUBSPACE_ITERATIONS,
     maxCgIterations: options.maxIterations,
+    preconditioner: modalPreconditioner(options.preconditioner),
+    ssorOmega: options.ssorOmega,
     hooks: options.hooks
   });
   if (!subspace.ok) return subspace;
@@ -72,6 +89,7 @@ export function solveModalLinearTet(input: CpuSolverInput, options: ModalCpuOpti
   }));
   const diagnostics: ModalCpuDiagnostics = {
     dofs,
+    sourceDofs,
     freeDofs: prepared.system.free.length,
     constrainedDofs: prepared.system.constraints.size,
     requestedModeCount,
@@ -81,6 +99,10 @@ export function solveModalLinearTet(input: CpuSolverInput, options: ModalCpuOpti
     tolerance,
     totalMass: prepared.system.totalMass,
     ...(subspace.warning ? { partialConvergenceWarning: subspace.warning } : {}),
+    ...(projected.projection ? {
+      approximationWarning: modalProjectionWarning(projected.projection),
+      meshProjection: projected.projection
+    } : {}),
     solver: "opencae-core-block-shift-invert"
   };
   const result = { modes };
@@ -91,6 +113,94 @@ export function solveModalLinearTet(input: CpuSolverInput, options: ModalCpuOpti
   };
 }
 
+/**
+ * Reduce oversized quadratic meshes to their corner-node Tet4 topology for a
+ * local modal solve. The source project and mesh are never mutated. A caller
+ * receives structured projection diagnostics so the approximation cannot be
+ * mistaken for a full quadratic solve.
+ */
+export function linearizeTet10ModelForModal(
+  model: NormalizedOpenCAEModel,
+  dofThreshold = DEFAULT_TET10_PROJECTION_DOF_THRESHOLD
+): { model: NormalizedOpenCAEModel; projection?: ModalMeshProjection } {
+  const sourceDofs = model.counts.nodes * 3;
+  if (sourceDofs <= dofThreshold || !model.elementBlocks.some((block) => block.type === "Tet10")) {
+    return { model };
+  }
+
+  const cornerNodes = new Set<number>();
+  for (const block of model.elementBlocks) {
+    const nodeCount = block.type === "Tet10" ? 10 : 4;
+    for (let offset = 0; offset < block.connectivity.length; offset += nodeCount) {
+      for (let local = 0; local < 4; local += 1) cornerNodes.add(block.connectivity[offset + local]);
+    }
+  }
+  const sourceNodeIds = [...cornerNodes].sort((left, right) => left - right);
+  const oldToNew = new Int32Array(model.counts.nodes);
+  oldToNew.fill(-1);
+  sourceNodeIds.forEach((node, index) => { oldToNew[node] = index; });
+  const coordinates = new Float64Array(sourceNodeIds.length * 3);
+  for (let index = 0; index < sourceNodeIds.length; index += 1) {
+    const source = sourceNodeIds[index] * 3;
+    coordinates[index * 3] = model.nodes.coordinates[source];
+    coordinates[index * 3 + 1] = model.nodes.coordinates[source + 1];
+    coordinates[index * 3 + 2] = model.nodes.coordinates[source + 2];
+  }
+
+  const elementBlocks = model.elementBlocks.map((block) => {
+    const sourceNodeCount = block.type === "Tet10" ? 10 : 4;
+    const elementCount = block.connectivity.length / sourceNodeCount;
+    const connectivity = new Uint32Array(elementCount * 4);
+    for (let element = 0; element < elementCount; element += 1) {
+      for (let local = 0; local < 4; local += 1) {
+        connectivity[element * 4 + local] = mappedNode(oldToNew, block.connectivity[element * sourceNodeCount + local]);
+      }
+    }
+    return { ...block, type: "Tet4" as const, connectivity };
+  });
+  const nodeSets = model.nodeSets.map((nodeSet) => ({
+    ...nodeSet,
+    nodes: Uint32Array.from(new Set(Array.from(nodeSet.nodes)
+      .map((node) => oldToNew[node])
+      .filter((node) => node >= 0)))
+  }));
+  const surfaceFacets = model.surfaceFacets.map((facet) => ({
+    ...facet,
+    nodes: Uint32Array.from(Array.from(facet.nodes).slice(0, 3).map((node) => mappedNode(oldToNew, node)))
+  }));
+  const projectedModel: NormalizedOpenCAEModel = {
+    ...model,
+    nodes: { coordinates },
+    elementBlocks,
+    nodeSets,
+    surfaceFacets,
+    counts: { ...model.counts, nodes: sourceNodeIds.length }
+  };
+  const solveDofs = projectedModel.counts.nodes * 3;
+  return {
+    model: projectedModel,
+    projection: {
+      sourceElementOrder: "Tet10",
+      solveElementOrder: "Tet4",
+      sourceDofs,
+      solveDofs,
+      reason: "local-modal-performance"
+    }
+  };
+}
+
+function mappedNode(oldToNew: Int32Array, sourceNode: number): number {
+  const mapped = oldToNew[sourceNode];
+  if (mapped < 0) throw new Error(`Modal Tet10 projection could not map corner node ${sourceNode}.`);
+  return mapped;
+}
+
+function modalProjectionWarning(projection: ModalMeshProjection): string {
+  return `Local modal analysis used a linear Tet4 projection (${projection.solveDofs.toLocaleString()} DOFs) of the ` +
+    `${projection.sourceDofs.toLocaleString()}-DOF quadratic mesh to keep the browser solve tractable. ` +
+    "Natural frequencies may differ from a full Tet10 solve.";
+}
+
 export function solveModalSubspace(
   system: PreparedStructuralSystem,
   requestedModeCount: number,
@@ -98,6 +208,8 @@ export function solveModalSubspace(
     tolerance?: number;
     maxSubspaceIterations?: number;
     maxCgIterations?: number;
+    preconditioner?: "none" | "jacobi" | "ssor";
+    ssorOmega?: number;
     hooks?: ModalCpuOptions["hooks"];
     /**
      * Dynamic Rayleigh calibration compatibility path. Modal analysis never
@@ -131,17 +243,27 @@ export function solveModalSubspace(
   if (!massOrthonormalize(basis, system.mass)) return insufficientConstraints();
   let latestModes: ModalSubspaceMode[] = [];
   let completedIterations = 0;
+  let basisEigenvalues: number[] | undefined;
 
   for (let iteration = 1; iteration <= maxSubspaceIterations; iteration += 1) {
     if (options.hooks?.shouldCancel?.()) return failureResult("cancelled", "Solve cancelled.");
     const inverseBlock: Float64Array[] = [];
-    for (const vector of basis) {
+    for (let blockIndex = 0; blockIndex < basis.length; blockIndex += 1) {
+      const vector = basis[blockIndex];
       const rhs = massProduct(system.mass, vector);
       const solved = conjugateGradient(system.stiffness, rhs, {
-        tolerance: DEFAULT_INNER_TOLERANCE,
+        tolerance: modalInnerTolerance(iteration),
         maxIterations: options.maxCgIterations,
-        jacobi: true,
-        hooks: options.hooks
+        preconditioner: options.preconditioner ?? "jacobi",
+        ssorOmega: options.ssorOmega,
+        initialGuess: modalInverseInitialGuess(vector, basisEigenvalues?.[blockIndex]),
+        hooks: modalInnerSolveHooks(
+          options.hooks,
+          iteration,
+          blockIndex,
+          blockSize,
+          maxSubspaceIterations
+        )
       });
       if (!solved.ok) {
         if (solved.error.code === "cancelled") return { ok: false, error: solved.error };
@@ -152,6 +274,7 @@ export function solveModalSubspace(
     if (!massOrthonormalize(inverseBlock, system.mass)) return insufficientConstraints();
     const projected = projectedStiffness(system, inverseBlock);
     const eigensystem = symmetricEigenDecomposition(projected, blockSize);
+    basisEigenvalues = eigensystem.values;
     const ritzVectors = rotateBlock(inverseBlock, eigensystem.vectors);
     if (!massOrthonormalize(ritzVectors, system.mass)) return insufficientConstraints();
     latestModes = eigensystem.values.map((eigenvalue, index) => {
@@ -200,6 +323,58 @@ export function solveModalSubspace(
     subspaceIterations: completedIterations,
     warning
   };
+}
+
+/**
+ * Keep nested CG progress monotonic across all vectors and subspace passes.
+ * The raw CG max-iteration fraction previously drove the whole run meter to
+ * roughly 36%, then every new right-hand side restarted at zero. The run
+ * stream clamps progress monotonically, so the UI appeared frozen even while
+ * later inverse solves were active. The CG iteration/residual stay visible in
+ * logs, while completed/total now describe the enclosing modal workload.
+ */
+function modalInnerSolveHooks(
+  hooks: ModalCpuOptions["hooks"] | undefined,
+  subspaceIteration: number,
+  blockIndex: number,
+  blockSize: number,
+  maxSubspaceIterations: number
+): ModalCpuOptions["hooks"] | undefined {
+  if (!hooks) return undefined;
+  return {
+    shouldCancel: hooks.shouldCancel,
+    onProgress: hooks.onProgress
+      ? (event) => {
+          const innerFraction = event.total > 0
+            ? Math.min(Math.max(event.completed / event.total, 0), 1)
+            : 0;
+          hooks.onProgress?.({
+            ...event,
+            completed: (subspaceIteration - 1) + (blockIndex + innerFraction) / blockSize,
+            total: maxSubspaceIterations
+          });
+        }
+      : undefined
+  };
+}
+
+function modalPreconditioner(value: ModalCpuOptions["preconditioner"]): "none" | "jacobi" | "ssor" {
+  return value === "none" || value === "jacobi" || value === "ssor" ? value : "jacobi";
+}
+
+function modalInnerTolerance(subspaceIteration: number): number {
+  if (subspaceIteration <= 1) return 1e-3;
+  if (subspaceIteration === 2) return 1e-5;
+  if (subspaceIteration === 3) return 1e-7;
+  return DEFAULT_INNER_TOLERANCE;
+}
+
+function modalInverseInitialGuess(vector: Float64Array, eigenvalue: number | undefined): Float64Array | undefined {
+  if (!(eigenvalue && eigenvalue > 0 && Number.isFinite(eigenvalue))) return undefined;
+  const guess = new Float64Array(vector.length);
+  const inverseEigenvalue = 1 / eigenvalue;
+  for (let index = 0; index < vector.length; index += 1) guess[index] = vector[index] * inverseEigenvalue;
+  return guess;
 }
 
 /**

@@ -72,7 +72,8 @@ export type { ConjugateGradientOptions, ConjugateGradientResult, CsrMatrix, Spar
 export { solvePreviewSdofTet4Cpu } from "./dynamic";
 export { solveDynamicLinearTetLoadCases, solveDynamicLinearTetMDOF, solveDynamicMdofTet4Cpu } from "./dynamic-mdof";
 export type { DynamicLoadCaseBatchSolveResult, DynamicLoadCaseInput, DynamicLoadCaseSolve } from "./dynamic-mdof";
-export { solveModalLinearTet, solveModalSubspace } from "./modal";
+export { linearizeTet10ModelForModal, solveModalLinearTet, solveModalSubspace } from "./modal";
+export type { ModalMeshProjection } from "./modal";
 export {
   assembleNodalForcesWithDiagnostics,
   collectConstraints,
