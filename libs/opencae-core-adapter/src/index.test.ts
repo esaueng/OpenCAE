@@ -11,7 +11,10 @@ import {
   explicitSolverBackend,
   openCaeCoreEligibility,
   resolveSolverBackend,
+  selectionPlaneMatches,
+  selectionPlaneTolerance,
   studyForCoreGeometryDispatch,
+  topologySpanIsUsable,
   trySolveOpenCaeCoreStudy
 } from "./index";
 
@@ -78,6 +81,30 @@ function bracketDisplayModelFixture(): DisplayModel {
     ]
   };
 }
+
+describe("topology mapping tolerance policy", () => {
+  test("makes the same selection-plane decision for equivalent metre and millimetre geometry", () => {
+    const axisSpanMeters = 0.18;
+    const characteristicLengthMeters = Math.hypot(0.18, 0.024, 0.024);
+    const scale = 1_000;
+
+    expect(selectionPlaneTolerance(axisSpanMeters * scale, characteristicLengthMeters * scale))
+      .toBeCloseTo(selectionPlaneTolerance(axisSpanMeters, characteristicLengthMeters) * scale, 12);
+
+    const insideRelativeOffset = axisSpanMeters * 0.5e-5;
+    const outsideRelativeOffset = axisSpanMeters * 2e-5;
+    expect(selectionPlaneMatches(insideRelativeOffset, axisSpanMeters, characteristicLengthMeters)).toBe(true);
+    expect(selectionPlaneMatches(insideRelativeOffset * scale, axisSpanMeters * scale, characteristicLengthMeters * scale)).toBe(true);
+    expect(selectionPlaneMatches(outsideRelativeOffset, axisSpanMeters, characteristicLengthMeters)).toBe(false);
+    expect(selectionPlaneMatches(outsideRelativeOffset * scale, axisSpanMeters * scale, characteristicLengthMeters * scale)).toBe(false);
+  });
+
+  test("uses machine precision only to reject numerically collapsed spans", () => {
+    expect(topologySpanIsUsable(0, 1)).toBe(false);
+    expect(topologySpanIsUsable(32 * Number.EPSILON, 1)).toBe(false);
+    expect(topologySpanIsUsable(128 * Number.EPSILON, 1)).toBe(true);
+  });
+});
 
 describe("bracket mesh preset sizing", () => {
   test("maps each mesh preset to a distinct gmsh characteristic size", () => {
