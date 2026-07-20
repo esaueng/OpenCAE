@@ -39,7 +39,7 @@ export type ModelMutationOptions = {
   signal?: AbortSignal;
   /** Rechecked after expensive CAD work and immediately before persistence. */
   isCurrent?: () => boolean;
-  /** Monotonic token used by the API to reject out-of-order model writes. */
+  /** Retained project-file mutation identity; local writes are guarded by isCurrent. */
   clientId?: string;
   generation?: number;
 };
@@ -88,7 +88,6 @@ export interface GenerateMeshOptions {
 const localResultsByRunId = new Map<string, ResultsResponse>();
 const localRunsByRunId = new Map<string, LocalRunRecord>();
 const RUN_BOOKKEEPING_LIMIT = 4;
-const EVENT_SOURCE_CLOSED_READY_STATE = 2;
 const DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.005;
 const MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.001;
 /** Prefix of retired client-dispatched cloud runs; kept only to recognize historical run ids from old autosaves. */
@@ -264,27 +263,11 @@ async function persistLocalRunResults(runId: string, results: ResultsResponse): 
 }
 
 export async function loadSampleProject(sample: SampleModelId = "bracket", analysisType: SampleAnalysisType = "static_stress"): Promise<SampleProjectResponse> {
-  return fetchJsonWithFallback(
-    "/api/sample-project/load",
-    {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ sample, analysisType })
-    },
-    () => createLocalSampleProject(sample, analysisType)
-  );
+  return createLocalSampleProject(sample, analysisType);
 }
 
 export async function createProject(): Promise<SampleProjectResponse> {
-  return fetchJsonWithFallback(
-    "/api/projects",
-    {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ mode: "blank" })
-    },
-    () => createLocalBlankProject()
-  );
+  return createLocalBlankProject();
 }
 
 export async function importLocalProject(file: File): Promise<SampleProjectResponse> {
@@ -295,15 +278,7 @@ export async function importLocalProject(file: File): Promise<SampleProjectRespo
   } catch {
     throw new Error("The selected file is not a valid OpenCAE project file.");
   }
-  return fetchJsonWithFallback(
-    "/api/projects/import",
-    {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(payload)
-    },
-    () => openLocalProjectPayload(payload)
-  );
+  return openLocalProjectPayload(payload);
 }
 
 export async function uploadModel(
@@ -335,20 +310,9 @@ async function uploadModelWithGeometry(
   assertCurrentModelMutation(mutationOptions);
   const stepGeometry = knownStepGeometry ?? await inspectStepGeometryForUpload(file.name, contentBase64);
   assertCurrentModelMutation(mutationOptions);
-  const modelMutation = modelMutationForRequest(currentProject, mutationOptions);
-  const data = await fetchJsonWithFallback(
-    `/api/projects/${projectId}/uploads`,
-    {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ ...embeddedModel, ...(modelMutation ? { modelMutation } : {}) }),
-      ...(mutationOptions.signal ? { signal: mutationOptions.signal } : {})
-    },
-    () => {
-      if (!currentProject) throw new Error("Could not upload model without an open project.");
-      return createLocalUploadResponse(currentProject, embeddedModel, undefined, { stepDisplayFaces });
-    }
-  );
+  void projectId;
+  if (!currentProject) throw new Error("Could not upload model without an open project.");
+  const data = createLocalUploadResponse(currentProject, embeddedModel, undefined, { stepDisplayFaces });
   let nextProject = embedUploadedModelFile(data.project, embeddedModel);
   if (stepGeometry) nextProject = attachStepGeometryMetadata(nextProject, embeddedModel.filename, stepGeometry);
   const notice = stepGeometryUploadNotice(stepGeometry);
@@ -568,25 +532,16 @@ async function stepDisplayFacesForUpload(filename: string, contentBase64: string
 }
 
 export async function renameProject(projectId: string, name: string, currentProject?: Project): Promise<{ project: Project; message: string }> {
-  return fetchJsonWithFallback(
-    `/api/projects/${projectId}`,
-    {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name })
+  void projectId;
+  if (!currentProject) throw new Error("Could not rename project without an open project.");
+  return {
+    project: {
+      ...currentProject,
+      name,
+      updatedAt: new Date().toISOString()
     },
-    () => {
-      if (!currentProject) throw new Error("Could not rename project without an open project.");
-      return {
-        project: {
-          ...currentProject,
-          name,
-          updatedAt: new Date().toISOString()
-        },
-        message: "Project renamed locally."
-      };
-    }
-  );
+    message: "Project renamed locally."
+  };
 }
 
 export async function generateMesh(studyId: string, preset: MeshQuality, currentStudy?: Study, displayModel?: DisplayModel, onProgress?: (message: string) => void, onPhaseProgress?: (progress: WasmMeshPhaseProgress) => void, options: GenerateMeshOptions = {}): Promise<{ study: Study; message: string }> {
@@ -636,16 +591,9 @@ export async function generateMesh(studyId: string, preset: MeshQuality, current
       message: "Mesh generated locally."
     };
   };
-  if (options.localOnly) return localFallback();
-  return fetchJsonWithFallback(
-    `/api/studies/${studyId}/mesh`,
-    {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ preset })
-    },
-    localFallback
-  );
+  void studyId;
+  void options.localOnly;
+  return localFallback();
 }
 
 export async function runMeshConvergence(
@@ -709,111 +657,75 @@ export async function assignMaterial(
   if (parameters.manufacturingProcessId !== undefined) {
     assertCompatibleManufacturingProcess(materialId, parameters.manufacturingProcessId, customMaterials);
   }
-  return fetchJsonWithFallback(
-    `/api/studies/${studyId}/materials`,
-    {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ materialId, parameters })
+  void studyId;
+  if (!currentStudy) throw new Error("Could not assign material without an open study.");
+  const bodySelection = currentStudy.namedSelections.find((selection) => selection.entityType === "body");
+  const selectionRef = bodySelection?.id ?? currentStudy.geometryScope[0]?.entityId ?? "selection-body-local";
+  return {
+    study: {
+      ...currentStudy,
+      materialAssignments: [{
+        id: "assign-material-current",
+        materialId,
+        selectionRef,
+        parameters,
+        status: "complete" as const
+      }]
     },
-    () => {
-      if (!currentStudy) throw new Error("Could not assign material without an open study.");
-      const bodySelection = currentStudy.namedSelections.find((selection) => selection.entityType === "body");
-      const selectionRef = bodySelection?.id ?? currentStudy.geometryScope[0]?.entityId ?? "selection-body-local";
-      return {
-        study: {
-          ...currentStudy,
-          materialAssignments: [{
-            id: "assign-material-current",
-            materialId,
-            selectionRef,
-            parameters,
-            status: "complete" as const
-          }]
-        },
-        message: `Material assigned to ${bodySelection?.name ?? "model"}.`
-      };
-    }
-  );
+    message: `Material assigned to ${bodySelection?.name ?? "model"}.`
+  };
 }
 
 export async function addSupport(studyId: string, selectionRef?: string, currentStudy?: Study): Promise<{ study: Study; message: string }> {
-  return fetchJsonWithFallback(
-    `/api/studies/${studyId}/supports`,
-    {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ selectionRef })
+  void studyId;
+  if (!currentStudy) throw new Error("Could not add support without an open study.");
+  return {
+    study: {
+      ...currentStudy,
+      constraints: [
+        ...currentStudy.constraints,
+        {
+          id: `constraint-${crypto.randomUUID()}`,
+          type: "fixed" as const,
+          selectionRef: selectionRef ?? currentStudy.namedSelections.find((selection) => selection.entityType === "face")?.id ?? "selection-fixed-face",
+          parameters: {},
+          status: "complete" as const
+        }
+      ]
     },
-    () => {
-      if (!currentStudy) throw new Error("Could not add support without an open study.");
-      return {
-        study: {
-          ...currentStudy,
-          constraints: [
-            ...currentStudy.constraints,
-            {
-              id: `constraint-${crypto.randomUUID()}`,
-              type: "fixed" as const,
-              selectionRef: selectionRef ?? currentStudy.namedSelections.find((selection) => selection.entityType === "face")?.id ?? "selection-fixed-face",
-              parameters: {},
-              status: "complete" as const
-            }
-          ]
-        },
-        message: "Fixed support added."
-      };
-    }
-  );
+    message: "Fixed support added."
+  };
 }
 
 export async function updateStudy(studyId: string, patch: Partial<Study>, message = "Study updated.", currentStudy?: Study): Promise<{ study: Study; message: string }> {
-  return fetchJsonWithFallback(
-    `/api/studies/${studyId}`,
-    {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(patch)
-    },
-    () => {
-      if (!currentStudy) throw new Error("Could not update study without an open study.");
-      return { study: { ...currentStudy, ...patch } as Study, message };
-    }
-  ).then((data) => ({ ...data, message }));
+  void studyId;
+  if (!currentStudy) throw new Error("Could not update study without an open study.");
+  return { study: { ...currentStudy, ...patch } as Study, message };
 }
 
 export async function addLoad(studyId: string, type: LoadType, value: number, selectionRef: string, direction: LoadDirection, applicationPoint?: LoadApplicationPoint | null, payloadObject?: PayloadObjectSelection | null, currentStudy?: Study, payloadMetadata: PayloadLoadMetadata = {}, directionMode?: LoadDirectionLabel): Promise<{ study: Study; message: string }> {
-  return fetchJsonWithFallback(
-    `/api/studies/${studyId}/loads`,
-    {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ type, value, selectionRef, direction, directionMode, applicationPoint, payloadObject, ...payloadMetadata })
+  void studyId;
+  if (!currentStudy) throw new Error("Could not add load without an open study.");
+  const loadId = `load-${crypto.randomUUID()}`;
+  const structuralStudy = currentStudy.type === "static_stress" || currentStudy.type === "dynamic_structural" ? currentStudy : null;
+  const loadCases = structuralStudy ? loadCasesWithAddedLoad(structuralStudy, loadId) : undefined;
+  return {
+    study: {
+      ...currentStudy,
+      loads: [
+        ...currentStudy.loads,
+        {
+          id: loadId,
+          type,
+          selectionRef,
+          parameters: { value, units: unitsForLoadType(type), direction, ...(directionMode ? { directionMode } : {}), ...(applicationPoint ? { applicationPoint } : {}), ...(payloadObject ? { payloadObject } : {}), ...(type === "gravity" || type === "remote_force" || type === "bolt_preload" ? payloadMetadata : {}) },
+          status: "complete" as const
+        }
+      ],
+      ...(loadCases ? { loadCases } : {})
     },
-    () => {
-      if (!currentStudy) throw new Error("Could not add load without an open study.");
-      const loadId = `load-${crypto.randomUUID()}`;
-      const structuralStudy = currentStudy.type === "static_stress" || currentStudy.type === "dynamic_structural" ? currentStudy : null;
-      const loadCases = structuralStudy ? loadCasesWithAddedLoad(structuralStudy, loadId) : undefined;
-      return {
-        study: {
-          ...currentStudy,
-          loads: [
-            ...currentStudy.loads,
-            {
-              id: loadId,
-              type,
-              selectionRef,
-              parameters: { value, units: unitsForLoadType(type), direction, ...(directionMode ? { directionMode } : {}), ...(applicationPoint ? { applicationPoint } : {}), ...(payloadObject ? { payloadObject } : {}), ...(type === "gravity" || type === "remote_force" || type === "bolt_preload" ? payloadMetadata : {}) },
-              status: "complete" as const
-            }
-          ],
-          ...(loadCases ? { loadCases } : {})
-        },
-        message: "Load added."
-      };
-    }
-  );
+    message: "Load added."
+  };
 }
 
 function loadCasesWithAddedLoad(study: Extract<Study, { type: "static_stress" | "dynamic_structural" }>, loadId: string) {
@@ -826,7 +738,7 @@ function loadCasesWithAddedLoad(study: Extract<Study, { type: "static_stress" | 
 export async function runSimulation(studyId: string, currentStudy?: Study, displayModel?: DisplayModel, options: RunSimulationOptions = {}): Promise<{ run: { id: string }; streamUrl: string; message: string }> {
   // B4a: every run executes locally in the browser (complex geometry without
   // a stored mesh artifact is wasm-meshed first when this build/browser can).
-  // The legacy POST /api/studies/{id}/runs dispatch branch is gone: since B3
+  // The legacy server-dispatched run branch is gone: since B3
   // no reachable caller runs without the open study.
   void studyId;
   if (!currentStudy) throw new Error("runSimulation requires the open study; server-dispatched runs were removed.");
@@ -854,8 +766,7 @@ export async function getResults(runId: string): Promise<ResultsResponse> {
   // Historical cloud runs (pre-B4a autosaves): the client cloud path is gone,
   // so never fetch the dead endpoints — fail with an honest explanation.
   if (runId.startsWith(HISTORICAL_CLOUD_RUN_ID_PREFIX)) throw new Error(HISTORICAL_CLOUD_RUN_MESSAGE);
-  const response = await fetch(`/api/runs/${runId}/results`);
-  return withFieldRunIds(runId, await readJson(response, `GET /api/runs/${runId}/results`));
+  throw new Error("Results for this run are not available in browser storage. Re-run the simulation locally.");
 }
 
 async function restoreLocalRunResults(runId: string): Promise<ResultsResponse> {
@@ -973,9 +884,7 @@ export async function cancelRun(runId: string): Promise<{ run: StudyRun; message
       message: "Simulation cancelled."
     };
   }
-  const response = await fetch(`/api/runs/${runId}/cancel`, { method: "POST" });
-  const payload = await readJson<{ run: StudyRun }>(response, `POST /api/runs/${runId}/cancel`);
-  return { ...payload, message: "Simulation cancelled." };
+  throw new Error("This run is not active in the current browser session and cannot be cancelled.");
 }
 
 function cancelledStudyRun(runId: string, solverBackend: string): StudyRun {
@@ -1007,25 +916,10 @@ export function subscribeToRun(runId: string, onEvent: (event: RunEvent) => void
     ), 0);
     return { close: () => globalThis.clearTimeout(timer) } as EventSource;
   }
-  const source = new EventSource(`/api/runs/${runId}/stream`);
-  const eventTypes: RunEvent["type"][] = ["state", "progress", "message", "log", "diagnostic", "complete", "cancelled", "error"];
-  for (const type of eventTypes) {
-    source.addEventListener(type, (message) => {
-      let event: RunEvent;
-      try {
-        event = JSON.parse((message as MessageEvent).data) as RunEvent;
-      } catch {
-        return; // Ignore stream messages that are not valid JSON run events.
-      }
-      onEvent(event);
-    });
-  }
-  source.onerror = () => {
-    // EventSource reconnects on transient errors; only a CLOSED stream is terminal.
-    if (source.readyState !== EVENT_SOURCE_CLOSED_READY_STATE) return;
-    deliverFailure("Lost the connection to the solver event stream.");
-  };
-  return source;
+  const timer = globalThis.setTimeout(() => deliverFailure(
+    "This run is not active in the current browser session. Re-run the simulation locally."
+  ), 0);
+  return { close: () => globalThis.clearTimeout(timer) } as EventSource;
 }
 
 function syntheticRunErrorEvent(runId: string, message: string): RunEvent {
@@ -1373,45 +1267,6 @@ function subscribeToLocalRunRecord(record: LocalRunRecord, onEvent: (event: RunE
   } as EventSource;
 }
 
-async function readJson<T>(response: Response, endpoint = response.url || "request"): Promise<T> {
-  if (!response.ok) {
-    const text = await response.text();
-    let message = text;
-    try {
-      const parsed = JSON.parse(text) as { error?: string; message?: string };
-      message = parsed.error === "Not Found" && parsed.message ? parsed.message : parsed.error ?? parsed.message ?? text;
-    } catch {
-      // Use the raw response body when the server did not return JSON.
-    }
-    throw new HttpResponseError(formatHttpError(endpoint, response.status, response.statusText, message), response.status);
-  }
-  return response.json() as Promise<T>;
-}
-
-function formatHttpError(endpoint: string, status: number, statusText: string, message: string): string {
-  const compactMessage = compactResponseMessage(message);
-  const statusLabel = statusText ? `HTTP ${status} ${statusText}` : `HTTP ${status}`;
-  return compactMessage ? `${endpoint} failed with ${statusLabel}: ${compactMessage}` : `${endpoint} failed with ${statusLabel}.`;
-}
-
-function compactResponseMessage(message: string): string {
-  const compact = message.replace(/\s+/g, " ").trim();
-  return compact.length > 500 ? `${compact.slice(0, 497)}...` : compact;
-}
-
-async function fetchJsonWithFallback<T>(input: RequestInfo | URL, init: RequestInit, fallback: () => T | Promise<T>): Promise<T> {
-  try {
-    const response = await fetch(input, init);
-    return await readJson<T>(response, typeof input === "string" ? `${init.method ?? "GET"} ${input}` : undefined);
-  } catch (error) {
-    // A superseded model mutation is deliberately cancelled. Falling back to
-    // the local write path would resurrect the stale response the abort was
-    // intended to discard.
-    if (isAbortError(error) || (error instanceof HttpResponseError && error.status === 409)) throw error;
-    return fallback();
-  }
-}
-
 const MESH_PRESET_ESTIMATE_WARNING = "Node and element counts are preset planning estimates. The solver reports actual mesh statistics with the results.";
 
 function meshSummaryForPreset(preset: MeshQuality, analysisMesh?: AnalysisMesh) {
@@ -1478,28 +1333,4 @@ function assertCurrentModelMutation(options: ModelMutationOptions): void {
   const error = new Error("This model action was superseded by a newer workspace change.");
   error.name = "AbortError";
   throw error;
-}
-
-function modelMutationForRequest(project: Project | undefined, options: ModelMutationOptions) {
-  if (!options.clientId || !Number.isSafeInteger(options.generation) || options.generation! < 0) return undefined;
-  const geometry = project?.geometryFiles.find((candidate) => candidate.metadata.source === "local-upload")
-    ?? project?.geometryFiles[0];
-  return {
-    clientId: options.clientId,
-    generation: options.generation!,
-    expectedGeometryId: geometry?.id ?? null,
-    expectedUpdatedAt: project?.updatedAt ?? null
-  };
-}
-
-class HttpResponseError extends Error {
-  override name = "HttpResponseError";
-
-  constructor(message: string, readonly status: number) {
-    super(message);
-  }
-}
-
-function isAbortError(error: unknown): boolean {
-  return error instanceof Error && error.name === "AbortError";
 }
