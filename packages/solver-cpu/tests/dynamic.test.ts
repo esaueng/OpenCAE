@@ -1,7 +1,18 @@
 import { describe, expect, test } from "vitest";
 import { singleTetStaticFixture } from "@opencae/examples";
 import { validateCoreResult, type OpenCAEModelJson } from "@opencae/core";
-import { solveDynamicLinearTetLoadCases, solveDynamicLinearTetMDOF, solvePreviewSdofTet4Cpu, solveStaticLinearTet4Cpu, type SolveProgressEvent } from "../src";
+import {
+  boundedTimeStepSeconds,
+  solveDynamicLinearTetLoadCases,
+  solveDynamicLinearTetMDOF,
+  solvePreviewSdofTet4Cpu,
+  solveStaticLinearTet4Cpu,
+  timeComparisonToleranceSeconds,
+  timeHasReachedTarget,
+  timeIsBeforeTarget,
+  timeValuesMatch,
+  type SolveProgressEvent
+} from "../src";
 import { minimumPositiveFinite } from "../src/dynamic-mdof";
 
 const densityModel = {
@@ -15,6 +26,21 @@ const densityModel = {
     }
   ]
 } satisfies OpenCAEModelJson;
+
+describe("time integration tolerance policy", () => {
+  test("keeps the absolute minimum time step explicit", () => {
+    expect(boundedTimeStepSeconds(1e-9)).toBe(1e-6);
+    expect(boundedTimeStepSeconds(0.005)).toBe(0.005);
+  });
+
+  test("combines the absolute event band with machine-relative resolution", () => {
+    expect(timeComparisonToleranceSeconds(0.1)).toBe(1e-12);
+    expect(timeComparisonToleranceSeconds(1e9)).toBeGreaterThan(1e-6);
+    expect(timeValuesMatch(0.1 + 5e-13, 0.1)).toBe(true);
+    expect(timeIsBeforeTarget(0.1 - 2e-12, 0.1)).toBe(true);
+    expect(timeHasReachedTarget(0.1 - 5e-13, 0.1)).toBe(true);
+  });
+});
 
 describe("solvePreviewSdofTet4Cpu preview", () => {
   test("remains the preview SDOF dynamic approximation", () => {
