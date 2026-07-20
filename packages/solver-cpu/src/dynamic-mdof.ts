@@ -11,6 +11,12 @@ import {
 import { addSparseEntry, conjugateGradient, createSparseMatrixBuilder, csrMatVec, reduceCsrRhs, toCsrMatrix, type CsrMatrix } from "./sparse";
 import { expandFreeVector, hasAdvancedLoadPrimitives, prepareStructuralSystem, type PreparedStructuralSystem } from "./structural-system";
 import { solveModalSubspace } from "./modal";
+import {
+  boundedTimeStepSeconds,
+  timeHasReachedTarget,
+  timeIsBeforeTarget,
+  timeValuesMatch
+} from "./time-policy";
 import type {
   CpuSolverError,
   CpuSolverInput,
@@ -182,13 +188,13 @@ function solveDynamicPreparedSystem(
 
   const maxSteps = Math.ceil((settings.endTime - settings.startTime) / settings.timeStep) + 2;
   let effectiveCache: { dt: number; matrix: CsrMatrix } | undefined;
-  for (let stepIndex = 0; stepIndex < maxSteps && time < settings.endTime - 1e-12; stepIndex += 1) {
+  for (let stepIndex = 0; stepIndex < maxSteps && timeIsBeforeTarget(time, settings.endTime); stepIndex += 1) {
     if (hooks?.shouldCancel?.()) {
       return failure("cancelled", "Solve cancelled.");
     }
     const nextTime = Math.min(time + settings.timeStep, settings.endTime);
     const dt = nextTime - time;
-    if (!effectiveCache || effectiveCache.dt !== dt) {
+    if (!effectiveCache || !timeValuesMatch(effectiveCache.dt, dt)) {
       // The effective Newmark matrix only depends on dt, so it is factor-free reusable across steps.
       const a0 = 1 / (0.25 * dt * dt);
       const a1 = 0.5 / (0.25 * dt);
@@ -203,7 +209,7 @@ function solveDynamicPreparedSystem(
     v.set(next.v);
     a = next.a;
     time = nextTime;
-    if (time >= nextOutputTime - 1e-12 || time >= settings.endTime - 1e-12) {
+    if (timeHasReachedTarget(time, nextOutputTime) || timeHasReachedTarget(time, settings.endTime)) {
       convergence.push({
         frameIndex,
         timeSeconds: round(time, 9),
@@ -213,7 +219,7 @@ function solveDynamicPreparedSystem(
       });
       const frameError = pushFrame(loadScaleAt(time, settings));
       if (frameError) return { ok: false, error: frameError };
-      while (nextOutputTime <= time + 1e-12) nextOutputTime += settings.outputInterval;
+      while (timeHasReachedTarget(time, nextOutputTime)) nextOutputTime += settings.outputInterval;
     }
   }
 
@@ -303,14 +309,19 @@ function sameDynamicStepSettings(
   left: Extract<NormalizedOpenCAEModel["steps"][number], { type: "dynamicLinear" }>,
   right: Extract<NormalizedOpenCAEModel["steps"][number], { type: "dynamicLinear" }>
 ): boolean {
-  return left.startTime === right.startTime
-    && left.endTime === right.endTime
-    && left.timeStep === right.timeStep
-    && left.outputInterval === right.outputInterval
+  return optionalTimeValuesMatch(left.startTime, right.startTime)
+    && optionalTimeValuesMatch(left.endTime, right.endTime)
+    && optionalTimeValuesMatch(left.timeStep, right.timeStep)
+    && optionalTimeValuesMatch(left.outputInterval, right.outputInterval)
     && left.loadProfile === right.loadProfile
     && left.dampingRatio === right.dampingRatio
     && left.rayleighAlpha === right.rayleighAlpha
     && left.rayleighBeta === right.rayleighBeta;
+}
+
+function optionalTimeValuesMatch(left: number | undefined, right: number | undefined): boolean {
+  if (left === undefined || right === undefined) return left === right;
+  return timeValuesMatch(left, right);
 }
 
 /**
@@ -334,7 +345,7 @@ export function minimumPositiveFinite(fields: Iterable<ArrayLike<number>>): numb
 function dynamicSettings(model: NormalizedOpenCAEModel, options: DynamicTet4CpuOptions): DynamicSettings {
   const selectedStep = model.steps[options.stepIndex ?? 0];
   const dynamicStep = selectedStep?.type === "dynamicLinear" ? selectedStep : undefined;
-  const timeStep = Math.max(finiteOr(options.timeStep, dynamicStep?.timeStep ?? DEFAULT_TIME_STEP_SECONDS), 1e-6);
+  const timeStep = boundedTimeStepSeconds(finiteOr(options.timeStep, dynamicStep?.timeStep ?? DEFAULT_TIME_STEP_SECONDS));
   const profile = options.loadProfile ?? dynamicStep?.loadProfile ?? "ramp";
   return {
     startTime: finiteOr(options.startTime, dynamicStep?.startTime ?? 0),

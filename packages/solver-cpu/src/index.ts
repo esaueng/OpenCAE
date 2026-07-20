@@ -83,6 +83,14 @@ export {
   usableSparseDiagonal,
   validSparseSsorOmega
 } from "./sparse-policy";
+export {
+  boundedTimeStepSeconds,
+  TIME_INTEGRATION_POLICY,
+  timeComparisonToleranceSeconds,
+  timeHasReachedTarget,
+  timeIsBeforeTarget,
+  timeValuesMatch
+} from "./time-policy";
 export type { ConjugateGradientOptions, ConjugateGradientResult, CsrMatrix, SparseMatrixBuilder } from "./sparse";
 export { solvePreviewSdofTet4Cpu } from "./dynamic";
 export { solveDynamicLinearTetLoadCases, solveDynamicLinearTetMDOF, solveDynamicMdofTet4Cpu } from "./dynamic-mdof";
