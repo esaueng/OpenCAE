@@ -115,7 +115,7 @@ export async function solveStaticTet4ModelWebGpu(
     dofs,
     freeDofs: dofs - constraints.values.size,
     constrainedDofs: constraints.values.size,
-    residualNorm: solved.relativeResidual * Math.max(vectorNorm(rhs), 1),
+    residualNorm: solved.relativeResidual * vectorNorm(rhs),
     relativeResidual: solved.relativeResidual,
     maxDisplacement: maxNodeVectorNorm(displacement),
     maxVonMisesStress: maxAbs(recovery.vonMisesPeak),

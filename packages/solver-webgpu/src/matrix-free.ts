@@ -121,6 +121,16 @@ export function tet4MatrixFreeInternalForce(data: Tet4MatrixFreeData, vector: Fl
 export async function solveTet4MatrixFreeWebGpu(data: Tet4MatrixFreeData, rhs: Float32Array, options: MatrixFreeCgOptions = {}): Promise<MatrixFreeCgResult> {
   if (data.dofs > MAX_WEBGPU_TET4_DOFS) return failure("max-dofs-exceeded", `WebGPU Tet4 solve is limited to ${MAX_WEBGPU_TET4_DOFS.toLocaleString()} DOFs.`, 0, Infinity);
   if (rhs.length !== data.dofs) return failure("invalid-rhs", "Matrix-free RHS length does not match DOFs.", 0, Infinity);
+  const rhsNorm = Math.sqrt(dot(rhs, rhs));
+  if (rhsNorm === 0) {
+    return {
+      ok: true,
+      solution: new Float32Array(data.dofs),
+      iterations: 0,
+      relativeResidual: 0,
+      backend: "webgpu-matrix-free-tet4"
+    };
+  }
   const operator = await createWebGpuOperator(data, options.navigator);
   if (!operator.ok) return failure(operator.error.code, operator.error.message, 0, Infinity);
   const tolerance = options.tolerance ?? 1e-6;
@@ -134,7 +144,6 @@ export async function solveTet4MatrixFreeWebGpu(data: Tet4MatrixFreeData, rhs: F
     z[index] = Math.abs(d) > 1e-20 ? r[index] / d : r[index];
     p[index] = z[index];
   }
-  const rhsNorm = Math.max(Math.sqrt(dot(rhs, rhs)), 1);
   let rz = dot(r, z);
   try {
     for (let iteration = 1; iteration <= maxIterations; iteration += 1) {
