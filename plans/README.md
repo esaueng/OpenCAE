@@ -10,6 +10,7 @@ Four advisory runs are indexed here:
 - **2026-07-10**, mesh-failure UX (plan 018, from a live failing upload rather than an advisor run). A nominal-solid STEP (428 faces) failed 3D meshing; the automatic repair sew destroyed the imported volume and the surfaced error pointed at a Fix open surfaces button that never renders for parts inspected as "solid" at upload.
 - **2026-07-10**, product feature (plan 020, maintainer request). One-click professional PDF simulation report from the results page: full setup (geometry, material, BCs, mesh, solver) + results with contour figures, built on the honest-results formatters, lazy-loaded jsPDF, and a new viewer capture seam.
 - **2026-07-17**, production E2E remediation (plan 023). A full browser pass on `cae.esau.app` found stale cross-analysis result visualization, confirmation bypasses, default convergence-probe mapping failure, accessibility-state gaps, a thermal solver-label mismatch, and missing Copy Logs feedback. All five remediation increments are implemented and locally browser-verified; production deployment smoke testing remains the release follow-up.
+- **2026-07-19**, codebase health and solver capability roadmap (plan 024). Reconciled a broad code review against current `main`, kept the confirmed numeric/architecture/maintenance findings, rejected stale claims about the active DOF cap, SSOR, and WebGPU, and sequenced raw export, cleanup, modernization, harmonic response, buckling, shells, and beams behind explicit numerical gates.
 
 These plans are written for a fresh executor with no context from the surveys. Each is self-contained.
 
@@ -154,6 +155,7 @@ Dependency notes:
 | 021 OpenCAE Quick-Wins Rollout | COMPLETE | All five staged releases landed: result probes, unified palettes, principal stresses, projection/PNG export, and recent project handles. |
 | 022 OpenCAE Medium-Feature Roadmap | COMPLETE | All five flagship-first increments released: modal analysis; open sections and custom materials; structural cases/combinations/envelopes; static convergence studies; and advanced loads with equivalent bolt preload. |
 | 023 Production E2E QA Fixes | COMPLETE | Five implementation commits fix all six findings. Focused tests, typecheck, build, desktop browser QA, 390 px mobile QA, static solve, and three-rung bracket convergence pass; production deployment smoke remains. |
+| 024 Codebase Health and Solver Capability Roadmap | PROPOSED | Release train for correctness/limits/CI, raw result export, backend retirement, solver benchmarking, dependency/UI modernization, harmonic response, buckling, shells, and beams. |
 
 Run 2 was non-interactive: plans 006–010 are the top findings by leverage (impact ÷ effort, confidence-weighted), selected by default per the advisor skill's non-interactive rule rather than by maintainer choice. Re-cut as desired.
 
