@@ -463,6 +463,31 @@ describe("solveStaticLinearTet4Cpu", () => {
     expect(Math.max(...Array.from(result.result.displacement).map(Math.abs))).toBeLessThan(1e-14);
     expect(result.diagnostics.relativeResidual).toBe(0);
   });
+
+  test("keeps static displacement and residual diagnostics invariant across load scales", () => {
+    const scales = [1e-9, 1, 1e9];
+    const results = scales.map((scale) => solveStaticLinearTet4Cpu({
+      ...singleTetStaticFixture,
+      loads: [{
+        name: "tipLoad",
+        type: "nodalForce",
+        nodeSet: "loadNodes",
+        vector: [0, 0, -100 * scale]
+      }]
+    }, { solverMode: "sparse", tolerance: 1e-12 }));
+
+    expect(results.every((result) => result.ok)).toBe(true);
+    const baseline = results[1];
+    if (!baseline.ok) return;
+    results.forEach((result, index) => {
+      if (!result.ok) return;
+      const scale = scales[index];
+      for (let dof = 0; dof < result.result.displacement.length; dof += 1) {
+        expect(result.result.displacement[dof] / scale).toBeCloseTo(baseline.result.displacement[dof], 10);
+      }
+      expect(result.diagnostics.relativeResidual).toBeLessThanOrEqual(1e-12);
+    });
+  });
 });
 
 function sumVectorDofs(values: Float64Array): [number, number, number] {
