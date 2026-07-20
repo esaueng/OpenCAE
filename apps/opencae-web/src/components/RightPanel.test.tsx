@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, test, vi } from "vitest";
-import { bracketDisplayModel } from "@opencae/db/sample-data";
+import { bracketDisplayModel } from "@opencae/samples";
 import type { DisplayModel, Project, ResultField, ResultSummary, Study } from "@opencae/schema";
 import { editableNumberCommitValue, playbackPeakMarkerPercent, resultModeExplanation, RightPanel, rangeProgressPercent } from "./RightPanel";
 import type { StepId } from "./StepBar";

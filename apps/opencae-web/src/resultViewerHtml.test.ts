@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { bracketDemoProject, bracketDisplayModel } from "@opencae/db/sample-data";
+import { bracketDemoProject, bracketDisplayModel } from "@opencae/samples";
 import type { ResultField, ResultSummary } from "@opencae/schema";
 import { buildResultViewerHtml, resultViewerPayloadFromHtml, suggestedResultHtmlFilename } from "./resultViewerHtml";
 

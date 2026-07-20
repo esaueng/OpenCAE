@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { isModalResultSummary, isStructuralResultSummary } from "@opencae/schema";
 import type { DisplayModel, Study } from "@opencae/schema";
-import { bracketDemoProject, bracketDisplayModel } from "@opencae/db/sample-data";
+import { bracketDemoProject, bracketDisplayModel } from "@opencae/samples";
 import { validateModelJson } from "@opencae/core";
 import {
   buildOpenCaeCoreModelForStudy,
