@@ -75,6 +75,26 @@ function expectIdenticalCsr(actual: CsrMatrix, expected: CsrMatrix): void {
 }
 
 describe("typed-array COO builder equivalence with the Map-per-row reference", () => {
+  test("retains subnormal FEM contributions while preserving exact symmetry and equilibrium", () => {
+    const builder = createSparseMatrixBuilder(2);
+    const stiffness = Number.MIN_VALUE;
+    addSparseEntry(builder, 0, 0, stiffness);
+    addSparseEntry(builder, 0, 1, -stiffness);
+    addSparseEntry(builder, 1, 0, -stiffness);
+    addSparseEntry(builder, 1, 1, stiffness);
+    // An exact duplicate cancellation is structural zero and must still disappear.
+    addSparseEntry(builder, 0, 0, stiffness);
+    addSparseEntry(builder, 0, 0, -stiffness);
+
+    const matrix = toCsrMatrix(builder);
+    expect(Array.from(matrix.rowPtr)).toEqual([0, 2, 4]);
+    expect(Array.from(matrix.colInd)).toEqual([0, 1, 0, 1]);
+    expect(Array.from(matrix.values)).toEqual([stiffness, -stiffness, -stiffness, stiffness]);
+    expect(matrix.values[1]).toBe(matrix.values[2]);
+    expect(matrix.values[0] + matrix.values[1]).toBe(0);
+    expect(matrix.values[2] + matrix.values[3]).toBe(0);
+  });
+
   test("random small sparse symmetric matrices produce identical rowPtr/colInd/values", () => {
     const random = mulberry32(0x5eed);
     for (let trial = 0; trial < 50; trial += 1) {

@@ -24,6 +24,17 @@ describe("sparse matrix utilities", () => {
     expect(Array.from(jacobiPreconditioner(csr))).toEqual([1 / 4, 1 / 5]);
   });
 
+  test("scales the preconditioner diagonal floor with the matrix instead of physical units", () => {
+    for (const scale of [1e-300, 1e-20, 1, 1e20, 1e200]) {
+      const coo = new CooAccumulator(2);
+      coo.addEntry(0, 0, 4 * scale);
+      coo.addEntry(1, 1, 5 * scale);
+      const inverse = jacobiPreconditioner(coo.finalizeCsr());
+      expect(inverse[0] * scale).toBeCloseTo(1 / 4, 12);
+      expect(inverse[1] * scale).toBeCloseTo(1 / 5, 12);
+    }
+  });
+
   test("solves symmetric positive definite systems with CG diagnostics", () => {
     const coo = new CooAccumulator(2);
     coo.addEntry(0, 0, 4);

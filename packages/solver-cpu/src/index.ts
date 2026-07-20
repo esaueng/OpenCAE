@@ -74,6 +74,14 @@ export {
   sparseMatVec,
   toCsrMatrix
 } from "./sparse";
+export {
+  SPARSE_ALGEBRA_POLICY,
+  retainSparseAssemblyValue,
+  sparseCurvatureTolerance,
+  sparseDiagonalTolerance,
+  usableSparseDiagonal,
+  validSparseSsorOmega
+} from "./sparse-policy";
 export type { ConjugateGradientOptions, ConjugateGradientResult, CsrMatrix, SparseMatrixBuilder } from "./sparse";
 export { solvePreviewSdofTet4Cpu } from "./dynamic";
 export { solveDynamicLinearTetLoadCases, solveDynamicLinearTetMDOF, solveDynamicMdofTet4Cpu } from "./dynamic-mdof";

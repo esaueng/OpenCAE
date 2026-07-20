@@ -1,4 +1,12 @@
 import type { SolverHooks } from "./types";
+import {
+  retainSparseAssemblyValue,
+  sparseCurvatureTolerance,
+  sparseDiagonalTolerance,
+  SPARSE_ALGEBRA_POLICY,
+  usableSparseDiagonal,
+  validSparseSsorOmega
+} from "./sparse-policy";
 
 export type CsrMatrix = {
   rowCount: number;
@@ -66,7 +74,6 @@ export class CooAccumulator {
 }
 
 const INITIAL_TRIPLET_CAPACITY = 256;
-const SPARSE_ZERO_EPSILON = Number.MIN_VALUE;
 
 export function createSparseMatrixBuilder(
   rowCount: number,
@@ -87,7 +94,7 @@ export function createSparseMatrixBuilder(
 }
 
 export function addSparseEntry(builder: SparseMatrixBuilder, row: number, col: number, value: number): void {
-  if (Math.abs(value) <= SPARSE_ZERO_EPSILON) return;
+  if (!retainSparseAssemblyValue(value)) return;
   if (builder.entryCount === builder.rowIndices.length) growTripletBuffers(builder);
   const index = builder.entryCount;
   builder.rowIndices[index] = row;
@@ -164,7 +171,7 @@ export function toCsrMatrix(builder: SparseMatrixBuilder): CsrMatrix {
       if (hasEntry && col === currentCol) {
         sum += value;
       } else {
-        if (hasEntry && Math.abs(sum) > SPARSE_ZERO_EPSILON) {
+        if (hasEntry && retainSparseAssemblyValue(sum)) {
           bucketedCols[nonZeroCount] = currentCol;
           bucketedValues[nonZeroCount] = sum;
           nonZeroCount += 1;
@@ -174,7 +181,7 @@ export function toCsrMatrix(builder: SparseMatrixBuilder): CsrMatrix {
         hasEntry = true;
       }
     }
-    if (hasEntry && Math.abs(sum) > SPARSE_ZERO_EPSILON) {
+    if (hasEntry && retainSparseAssemblyValue(sum)) {
       bucketedCols[nonZeroCount] = currentCol;
       bucketedValues[nonZeroCount] = sum;
       nonZeroCount += 1;
@@ -219,9 +226,10 @@ export function csrDiagonal(matrix: CsrMatrix): Float64Array {
 
 export function jacobiPreconditioner(matrix: CsrMatrix): Float64Array {
   const diagonal = csrDiagonal(matrix);
+  const diagonalTolerance = sparseDiagonalTolerance(diagonal);
   const inverse = new Float64Array(diagonal.length);
   for (let i = 0; i < diagonal.length; i += 1) {
-    inverse[i] = Math.abs(diagonal[i]) > 1e-30 ? 1 / diagonal[i] : 1;
+    inverse[i] = usableSparseDiagonal(diagonal[i], diagonalTolerance) ? 1 / diagonal[i] : 1;
   }
   return inverse;
 }
@@ -246,7 +254,7 @@ export function solveConjugateGradient(
   rhs: Float64Array,
   options: ConjugateGradientOptions = {}
 ): ConjugateGradientResult {
-  const tolerance = options.tolerance ?? 1e-10;
+  const tolerance = options.tolerance ?? SPARSE_ALGEBRA_POLICY.defaultRelativeResidualTolerance;
   const maxIterations = options.maxIterations ?? Math.max(100, matrix.rowCount * 20);
   const onProgress = options.hooks?.onProgress;
   const shouldCancel = options.hooks?.shouldCancel;
@@ -264,8 +272,9 @@ export function solveConjugateGradient(
   const p = new Float64Array(rhs.length);
   const preconditioner = options.preconditioner ?? "jacobi";
   const diagonal = preconditioner === "none" ? undefined : csrDiagonal(matrix);
-  const ssorOmega = validSsorOmega(options.ssorOmega);
-  applyPreconditioner(matrix, r, z, diagonal, preconditioner, ssorOmega);
+  const diagonalTolerance = diagonal ? sparseDiagonalTolerance(diagonal) : 0;
+  const ssorOmega = validSparseSsorOmega(options.ssorOmega);
+  applyPreconditioner(matrix, r, z, diagonal, diagonalTolerance, preconditioner, ssorOmega);
   p.set(z);
   let rzOld = dot(r, z);
   const rhsNorm = norm(rhs);
@@ -303,7 +312,7 @@ export function solveConjugateGradient(
     }
     const ap = csrMatVec(matrix, p);
     const denominator = dot(p, ap);
-    const denominatorTolerance = 16 * Number.EPSILON * norm(p) * norm(ap);
+    const denominatorTolerance = sparseCurvatureTolerance(norm(p), norm(ap));
     if (!Number.isFinite(denominator) || denominator <= denominatorTolerance) {
       const residualNorm = norm(r);
       const relativeResidual = relativeResidualFor(residualNorm);
@@ -333,7 +342,7 @@ export function solveConjugateGradient(
     if (iteration % 25 === 0) {
       emitProgress(iteration, relativeResidual);
     }
-    applyPreconditioner(matrix, r, z, diagonal, preconditioner, ssorOmega);
+    applyPreconditioner(matrix, r, z, diagonal, diagonalTolerance, preconditioner, ssorOmega);
     const rzNew = dot(r, z);
     const beta = rzNew / rzOld;
     for (let i = 0; i < p.length; i += 1) {
@@ -412,16 +421,17 @@ function applyPreconditioner(
   source: Float64Array,
   target: Float64Array,
   diagonal: Float64Array | undefined,
+  diagonalTolerance: number,
   preconditioner: "none" | "jacobi" | "ssor",
   omega: number
 ): void {
   if (preconditioner === "ssor" && diagonal) {
-    applySsorPreconditioner(matrix, source, target, diagonal, omega);
+    applySsorPreconditioner(matrix, source, target, diagonal, omega, diagonalTolerance);
     return;
   }
   for (let i = 0; i < source.length; i += 1) {
     const d = diagonal?.[i];
-    target[i] = d && Math.abs(d) > 1e-30 ? source[i] / d : source[i];
+    target[i] = d !== undefined && usableSparseDiagonal(d, diagonalTolerance) ? source[i] / d : source[i];
   }
 }
 
@@ -431,7 +441,8 @@ export function applySsorPreconditioner(
   source: Float64Array,
   target: Float64Array,
   diagonal = csrDiagonal(matrix),
-  omega = 1
+  omega = 1,
+  diagonalTolerance = sparseDiagonalTolerance(diagonal)
 ): void {
   const forward = new Float64Array(source.length);
   for (let row = 0; row < matrix.rowCount; row += 1) {
@@ -441,7 +452,7 @@ export function applySsorPreconditioner(
       if (col < row) value -= omega * matrix.values[entry] * forward[col];
     }
     const d = diagonal[row];
-    forward[row] = Math.abs(d) > 1e-30 ? value / d : value;
+    forward[row] = usableSparseDiagonal(d, diagonalTolerance) ? value / d : value;
   }
   const factor = omega * (2 - omega);
   for (let row = matrix.rowCount - 1; row >= 0; row -= 1) {
@@ -451,16 +462,12 @@ export function applySsorPreconditioner(
       if (col > row) value -= omega * matrix.values[entry] * target[col];
     }
     const d = diagonal[row];
-    target[row] = factor * (Math.abs(d) > 1e-30 ? value / d : value);
+    target[row] = factor * (usableSparseDiagonal(d, diagonalTolerance) ? value / d : value);
   }
 }
 
 export function estimateCsrMemoryBytes(matrix: CsrMatrix): number {
   return matrix.rowPtr.byteLength + matrix.colInd.byteLength + matrix.values.byteLength;
-}
-
-function validSsorOmega(value: number | undefined): number {
-  return value !== undefined && Number.isFinite(value) && value > Number.EPSILON && value < 2 - Number.EPSILON ? value : 1;
 }
 
 export function dot(a: Float64Array, b: Float64Array): number {
