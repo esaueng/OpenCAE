@@ -1,9 +1,12 @@
 import { normalizeModelJson, type CoreStructuralSolveResult, type OpenCAEModelJson } from "@opencae/core";
 import {
   assembleNodalForcesWithDiagnostics,
+  boundedStructuralMaxDofs,
   collectConstraints,
   recoverElementResults,
   staticCoreResultFromSolve,
+  structuralDofCount,
+  structuralDofLimitError,
   type CpuSolverDiagnostics,
   type SolverHooks,
   type StaticLinearTet4CpuResult
@@ -19,6 +22,7 @@ import {
 
 export type StaticTet4WebGpuOptions = MatrixFreeCgOptions & {
   hooks?: SolverHooks;
+  maxDofs?: number;
 };
 
 export type StaticTet4WebGpuResult =
@@ -39,6 +43,10 @@ export async function solveStaticTet4ModelWebGpu(
   const normalized = normalizeModelJson(input);
   if (!normalized.ok) return { ok: false, error: { code: "validation-failed", message: "WebGPU input model failed Core validation." } };
   const model = normalized.model;
+  const dofs = structuralDofCount(model);
+  const maxDofs = boundedStructuralMaxDofs(options.maxDofs);
+  const limitError = structuralDofLimitError(dofs, maxDofs);
+  if (limitError) return { ok: false, error: limitError };
   const step = model.steps[stepIndex];
   if (!step || step.type !== "staticLinear") return { ok: false, error: { code: "unsupported-step", message: "WebGPU matrix-free execution requires a staticLinear step." } };
   if (model.elementBlocks.some((block) => block.type !== "Tet4")) return { ok: false, error: { code: "unsupported-element-type", message: "WebGPU matrix-free execution supports Tet4 elements only." } };
@@ -52,7 +60,6 @@ export async function solveStaticTet4ModelWebGpu(
   const loadAssembly = assembleNodalForcesWithDiagnostics(model, step.loads);
   if (!loadAssembly.ok) return { ok: false, error: loadAssembly.error };
 
-  const dofs = model.counts.nodes * 3;
   const connectivity = flattenConnectivity(model.elementBlocks.map((block) => block.connectivity));
   const youngModulus = new Float64Array(model.counts.elements);
   const poissonRatio = new Float64Array(model.counts.elements);

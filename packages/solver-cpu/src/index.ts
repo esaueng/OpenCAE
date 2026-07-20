@@ -30,6 +30,12 @@ export type {
   Tet4GeometryResult
 } from "./types";
 export { computeTet4Geometry } from "./geometry";
+export {
+  boundedStructuralMaxDofs,
+  DEFAULT_STRUCTURAL_MAX_DOFS,
+  structuralDofCount,
+  structuralDofLimitError
+} from "./limits";
 export { computeLinearElasticDMatrix } from "./material";
 export {
   computeTet4BMatrix,

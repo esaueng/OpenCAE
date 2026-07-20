@@ -27,6 +27,20 @@ function caseModel(): OpenCAEModelJson {
 }
 
 describe("static load-case batch solving", () => {
+  test("rejects an over-limit batch before shared stiffness assembly", () => {
+    const model = caseModel();
+    const solved = solveStaticLinearTetLoadCases(
+      model,
+      model.steps[0]!.boundaryConditions,
+      [{ id: "a", loadNames: ["caseA"] }],
+      { maxDofs: 3 }
+    );
+
+    expect(solved.ok).toBe(false);
+    expect(solved.ok ? undefined : solved.error.code).toBe("max-dofs-exceeded");
+    expect(solved.ok ? undefined : solved.diagnostics?.dofs).toBe(12);
+  });
+
   test("assembles and reduces K once, then warm-starts each case", () => {
     const progress: SolveProgressEvent[] = [];
     const model = caseModel();

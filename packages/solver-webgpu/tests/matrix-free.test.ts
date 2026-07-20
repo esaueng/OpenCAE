@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { automaticTetSolverBackend, buildTet4DofAdjacency, buildTet4ElementData, solveTet4MatrixFreeWebGpu, tet4MatrixFreeInternalForce, tet4MatrixFreeMatVec, type Tet4MatrixFreeData } from "../src";
+import { singleTetStaticFixture } from "@opencae/examples";
+import { automaticTetSolverBackend, buildTet4DofAdjacency, buildTet4ElementData, solveStaticTet4ModelWebGpu, solveTet4MatrixFreeWebGpu, tet4MatrixFreeInternalForce, tet4MatrixFreeMatVec, type Tet4MatrixFreeData } from "../src";
 
 describe("matrix-free Tet4 backend", () => {
   test("keeps the readback-heavy WebGPU CG route out of automatic execution", () => {
@@ -61,5 +62,26 @@ describe("matrix-free Tet4 backend", () => {
 
     expect(solved).toMatchObject({ ok: true, iterations: 0, relativeResidual: 0 });
     expect(solved.ok && Array.from(solved.solution)).toEqual([0, 0, 0]);
+  });
+
+  test("guards the public WebGPU model entry before GPU allocation", async () => {
+    const solved = await solveStaticTet4ModelWebGpu(singleTetStaticFixture, 0, {
+      maxDofs: 3,
+      navigator: {
+        gpu: {
+          requestAdapter: () => {
+            throw new Error("WebGPU must not be requested for an over-limit model.");
+          }
+        }
+      }
+    });
+
+    expect(solved).toEqual({
+      ok: false,
+      error: {
+        code: "max-dofs-exceeded",
+        message: "Model has 12 DOFs, which exceeds maxDofs 3."
+      }
+    });
   });
 });
