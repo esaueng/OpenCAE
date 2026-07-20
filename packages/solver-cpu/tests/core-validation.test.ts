@@ -24,6 +24,58 @@ import {
 } from "../src/results";
 
 describe("Core validation suite static benchmarks", () => {
+  test("produces equivalent physical results in m-Pa and mm-MPa solver units", () => {
+    const meterModel: OpenCAEModelJson = {
+      ...singleTetStaticFixture,
+      coordinateSystem: { solverUnits: "m-N-s-Pa", renderCoordinateSpace: "solver" },
+      materials: [{
+        ...singleTetStaticFixture.materials[0],
+        yieldStrength: 250e6
+      }]
+    };
+    const millimeterModel: OpenCAEModelJson = {
+      ...meterModel,
+      coordinateSystem: { solverUnits: "mm-N-s-MPa", renderCoordinateSpace: "solver" },
+      nodes: {
+        coordinates: meterModel.nodes.coordinates.map((coordinate) => coordinate * 1_000)
+      },
+      materials: meterModel.materials.map((material) => ({
+        ...material,
+        youngModulus: material.youngModulus / 1_000_000,
+        yieldStrength: material.yieldStrength === undefined ? undefined : material.yieldStrength / 1_000_000
+      }))
+    };
+
+    const meterSolve = solveStaticLinearTet(meterModel, { method: "sparse", tolerance: 1e-12 });
+    const millimeterSolve = solveStaticLinearTet(millimeterModel, { method: "sparse", tolerance: 1e-12 });
+
+    expect(meterSolve.ok).toBe(true);
+    expect(millimeterSolve.ok).toBe(true);
+    if (!meterSolve.ok || !millimeterSolve.ok) return;
+
+    for (let index = 0; index < meterSolve.result.displacement.length; index += 1) {
+      expect(millimeterSolve.result.displacement[index]).toBeCloseTo(meterSolve.result.displacement[index] * 1_000, 8);
+    }
+    for (let index = 0; index < meterSolve.result.stress.length; index += 1) {
+      expect(millimeterSolve.result.stress[index]).toBeCloseTo(meterSolve.result.stress[index] / 1_000_000, 8);
+    }
+
+    expectRelativeClose(
+      millimeterSolve.result.coreResult?.summary.maxDisplacement,
+      meterSolve.result.coreResult?.summary.maxDisplacement
+    );
+    expectRelativeClose(
+      millimeterSolve.result.coreResult?.summary.maxStress,
+      meterSolve.result.coreResult?.summary.maxStress
+    );
+    expectRelativeClose(
+      millimeterSolve.result.coreResult?.summary.safetyFactor,
+      meterSolve.result.coreResult?.summary.safetyFactor
+    );
+    expect(millimeterSolve.diagnostics.reactionBalance?.relativeError)
+      .toBeCloseTo(meterSolve.diagnostics.reactionBalance?.relativeError ?? Number.NaN, 10);
+  });
+
   test("axial bar tension tracks F/A stress, FL/AE displacement, and reaction balance", () => {
     const length = 1;
     const area = 1;
@@ -623,6 +675,13 @@ function highStressSurfaceNodes(
 function uniqueRounded(values: number[], decimals: number): Set<number> {
   const scale = 10 ** decimals;
   return new Set(values.map((value) => Math.round(value * scale) / scale));
+}
+
+function expectRelativeClose(actual: number | undefined, expected: number | undefined, tolerance = 1e-12): void {
+  expect(actual).toBeTypeOf("number");
+  expect(expected).toBeTypeOf("number");
+  const scale = Math.max(Math.abs(actual ?? 0), Math.abs(expected ?? 0), Number.EPSILON);
+  expect(Math.abs((actual ?? 0) - (expected ?? 0)) / scale).toBeLessThanOrEqual(tolerance);
 }
 
 function isStressVisualizationDiagnostic(value: unknown): value is {
