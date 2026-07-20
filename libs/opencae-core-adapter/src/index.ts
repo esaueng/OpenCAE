@@ -38,6 +38,18 @@ import {
   type Study
 } from "@opencae/schema";
 import { inferGlobalCriticalPrintAxis } from "@opencae/study-core";
+import {
+  selectionPlaneMatches,
+  topologySpanIsUsable
+} from "./topology-policy";
+
+export {
+  TOPOLOGY_MAPPING_POLICY,
+  selectionPlaneMatches,
+  selectionPlaneTolerance,
+  topologySpanIsUsable,
+  topologySpanTolerance
+} from "./topology-policy";
 
 type Vec3 = [number, number, number];
 
@@ -281,10 +293,11 @@ export function displayPointToSolverFrame(point: Vec3, displayModel: DisplayMode
   }
   const bounds = renderBoundsForDisplayModel(displayModel);
   const dimensions = dimensionMeters(displayModel.dimensions);
+  const boundsLength = boundsCharacteristicLength(bounds);
   const physical: Vec3 = [0, 0, 0];
   for (let axis = 0; axis < 3; axis += 1) {
     const span = bounds.max[axis]! - bounds.min[axis]!;
-    physical[axis] = span > 1e-15
+    physical[axis] = topologySpanIsUsable(span, boundsLength)
       ? ((point[axis]! - bounds.min[axis]!) / span) * dimensions[axis]!
       : dimensions[axis]! / 2;
   }
@@ -1149,15 +1162,15 @@ function facetsForDisplaySelection(
   if (!faces.length) return [];
 
   const bounds = renderBoundsForPoints(renderNodePoints);
+  const boundsLength = boundsCharacteristicLength(bounds);
   const result = new Set<number>();
   for (const face of faces) {
     const normal = normalize(face.normal);
     if (!normal) continue;
     const { axis, plane: target } = facePlaneForNormal(normal, bounds);
-    const span = Math.max(bounds.max[axis] - bounds.min[axis], 1);
-    const tolerance = Math.max(span * 1e-5, 1e-8);
+    const span = bounds.max[axis] - bounds.min[axis];
     const matching = surfaceFacets
-      .filter((facet) => Math.abs(facetCenterFromRenderNodes(facet, renderNodePoints)[axis] - target) <= tolerance)
+      .filter((facet) => selectionPlaneMatches(facetCenterFromRenderNodes(facet, renderNodePoints)[axis] - target, span, boundsLength))
       .map((facet) => facet.id);
     for (const facetId of matching.length ? matching : nearestSurfaceFacets(surfaceFacets, renderNodePoints, [face.center], 8)) {
       result.add(facetId);
@@ -1740,11 +1753,12 @@ function renderPointToSolverPoint(
   if (displayModelUsesUprightSolverFrame(displayModel)) return displayPointToSolverFrame(point, displayModel);
   const renderBounds = renderBoundsForPoints(renderNodePoints);
   const solverBounds = coordinateBounds(solverCoordinates);
+  const renderBoundsLength = boundsCharacteristicLength(renderBounds);
   const mapped: Vec3 = [0, 0, 0];
   for (let axis = 0; axis < 3; axis += 1) {
     const renderSpan = renderBounds.max[axis]! - renderBounds.min[axis]!;
     const solverSpan = solverBounds.max[axis]! - solverBounds.min[axis]!;
-    mapped[axis] = renderSpan > 1e-15
+    mapped[axis] = topologySpanIsUsable(renderSpan, renderBoundsLength)
       ? solverBounds.min[axis]! + ((point[axis]! - renderBounds.min[axis]!) / renderSpan) * solverSpan
       : (solverBounds.min[axis]! + solverBounds.max[axis]!) / 2;
   }
@@ -1762,6 +1776,14 @@ function coordinateBounds(coordinates: ArrayLike<number>): { min: Vec3; max: Vec
     }
   }
   return { min, max };
+}
+
+function boundsCharacteristicLength(bounds: { min: Vec3; max: Vec3 }): number {
+  return Math.hypot(
+    bounds.max[0] - bounds.min[0],
+    bounds.max[1] - bounds.min[1],
+    bounds.max[2] - bounds.min[2]
+  );
 }
 
 function dominantAxis(vector: Vec3): 0 | 1 | 2 {
