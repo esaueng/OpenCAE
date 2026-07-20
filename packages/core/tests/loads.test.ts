@@ -229,6 +229,30 @@ describe("assembleNodalLoadVector", () => {
     expect(result.diagnostics.perLoad[0].momentBalanceError).toBeLessThan(1e-10);
   });
 
+  test("keeps remote-wrench equilibrium decisions invariant between m and mm geometry", () => {
+    const meterModel = baseModel();
+    meterModel.schemaVersion = "0.3.0";
+    meterModel.loads = [{
+      name: "remote",
+      type: "remoteForce",
+      surfaceSet: "sloped",
+      totalForce: [4, -3, 7],
+      remotePoint: [2, -1, 3]
+    }];
+    const millimeterModel = scaleModelGeometry(meterModel, 1000);
+
+    const meter = assembleNodalLoadVectorWithDiagnostics(meterModel, ["remote"]);
+    const millimeter = assembleNodalLoadVectorWithDiagnostics(millimeterModel, ["remote"]);
+    expect(meter.diagnostics.errors).toEqual([]);
+    expect(millimeter.diagnostics.errors).toEqual([]);
+    expectApproxVector(sumVector(meter.vector), sumVector(millimeter.vector));
+    const meterMoment = momentAboutOrigin(meterModel.nodes.coordinates, meter.vector);
+    const millimeterMomentInMeters = momentAboutOrigin(millimeterModel.nodes.coordinates, millimeter.vector).map((value) => value / 1000) as [number, number, number];
+    expectApproxVector(millimeterMomentInMeters, meterMoment);
+    expect(millimeter.diagnostics.perLoad[0].forceBalanceError).toBeCloseTo(meter.diagnostics.perLoad[0].forceBalanceError ?? 0, 12);
+    expect(millimeter.diagnostics.perLoad[0].momentBalanceError).toBeCloseTo(meter.diagnostics.perLoad[0].momentBalanceError ?? 0, 12);
+  });
+
   test("rejects rank-deficient remote-force selections", () => {
     const model = baseModel();
     model.schemaVersion = "0.3.0";
@@ -264,6 +288,19 @@ describe("assembleNodalLoadVector", () => {
       distribution: "bonded_linear_preload",
       approximation: expect.stringMatching(/without contact, slip, or fastener stiffness/i)
     });
+  });
+
+  test("keeps bolt-preload equilibrium decisions invariant between m and mm geometry", () => {
+    const meterModel = boltModel();
+    const millimeterModel = scaleModelGeometry(meterModel, 1000);
+    const meter = assembleNodalLoadVectorWithDiagnostics(meterModel, ["preload"]);
+    const millimeter = assembleNodalLoadVectorWithDiagnostics(millimeterModel, ["preload"]);
+    expect(meter.diagnostics.errors).toEqual([]);
+    expect(millimeter.diagnostics.errors).toEqual([]);
+    expectApproxVector(sumVector(meter.vector), [0, 0, 0]);
+    expectApproxVector(sumVector(millimeter.vector), [0, 0, 0]);
+    expect(millimeter.diagnostics.perLoad[0].forceBalanceError).toBeCloseTo(meter.diagnostics.perLoad[0].forceBalanceError ?? 0, 12);
+    expect(millimeter.diagnostics.perLoad[0].momentBalanceError).toBeCloseTo(meter.diagnostics.perLoad[0].momentBalanceError ?? 0, 12);
   });
 
   test("rejects a bolt preload when face normals are not opposed", () => {
@@ -343,6 +380,20 @@ function boltModel(): OpenCAEModelJson {
       preloadForce: 900
     }]
   };
+}
+
+function scaleModelGeometry(source: OpenCAEModelJson, scale: number): OpenCAEModelJson {
+  const model = JSON.parse(JSON.stringify(source)) as OpenCAEModelJson;
+  model.nodes.coordinates = model.nodes.coordinates.map((value) => value * scale);
+  model.surfaceFacets = model.surfaceFacets?.map((facet) => ({
+    ...facet,
+    ...(facet.area === undefined ? {} : { area: facet.area * scale * scale }),
+    ...(facet.center === undefined ? {} : { center: facet.center.map((value) => value * scale) as [number, number, number] })
+  }));
+  model.loads = model.loads.map((load) => load.type === "remoteForce"
+    ? { ...load, remotePoint: load.remotePoint.map((value) => value * scale) as [number, number, number] }
+    : load);
+  return model;
 }
 
 function nodeForce(vector: Float64Array, node: number): [number, number, number] {
