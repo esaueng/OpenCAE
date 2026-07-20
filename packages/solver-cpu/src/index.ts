@@ -30,6 +30,7 @@ export type {
   Tet4GeometryResult
 } from "./types";
 export { computeTet4Geometry } from "./geometry";
+export { ELEMENT_GEOMETRY_POLICY, elementCharacteristicLength, elementVolumeTolerance } from "./geometry-policy";
 export {
   boundedStructuralMaxDofs,
   DEFAULT_STRUCTURAL_MAX_DOFS,

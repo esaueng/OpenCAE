@@ -9,6 +9,10 @@ import {
 
 const unitTet = new Float64Array([0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1]);
 
+function scaledTet(length: number, relativeHeight = 1): Float64Array {
+  return new Float64Array([0, 0, 0, length, 0, 0, 0, length, 0, 0, 0, length * relativeHeight]);
+}
+
 describe("Tet4 reference math", () => {
   test("computes unit Tet4 volume and gradients", () => {
     const geometry = computeTet4Geometry(unitTet);
@@ -41,6 +45,30 @@ describe("Tet4 reference math", () => {
 
     expect(geometry.ok).toBe(false);
     expect(geometry.ok ? undefined : geometry.error.code).toBe("inverted-element");
+  });
+
+  test("classifies equivalent mm and m Tet4 geometry identically", () => {
+    const millimeter = computeTet4Geometry(scaledTet(100));
+    const meter = computeTet4Geometry(scaledTet(0.1));
+    expect(millimeter.ok).toBe(true);
+    expect(meter.ok).toBe(true);
+    if (!millimeter.ok || !meter.ok) return;
+    expect(millimeter.volume * 1e-9).toBeCloseTo(meter.volume, 15);
+
+    const millimeterSliver = computeTet4Geometry(scaledTet(100, 1e-13));
+    const meterSliver = computeTet4Geometry(scaledTet(0.1, 1e-13));
+    expect(millimeterSliver.ok).toBe(false);
+    expect(meterSliver.ok).toBe(false);
+    expect(millimeterSliver.ok ? undefined : millimeterSliver.error.code).toBe("degenerate-element");
+    expect(meterSliver.ok ? undefined : meterSliver.error.code).toBe("degenerate-element");
+  });
+
+  test("rejects non-finite Tet4 coordinates as degenerate geometry", () => {
+    const coordinates = Float64Array.from(unitTet);
+    coordinates[3] = Number.NaN;
+    const geometry = computeTet4Geometry(coordinates);
+    expect(geometry.ok).toBe(false);
+    expect(geometry.ok ? undefined : geometry.error.code).toBe("degenerate-element");
   });
 
   test("computes symmetric isotropic D matrix entries", () => {

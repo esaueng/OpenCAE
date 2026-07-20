@@ -1,6 +1,7 @@
 import type { Tet4GeometryResult } from "./types";
+import { elementVolumeTolerance } from "./geometry-policy";
 
-export function computeTet4Geometry(coordinates: Float64Array, tolerance = 1e-14): Tet4GeometryResult {
+export function computeTet4Geometry(coordinates: Float64Array): Tet4GeometryResult {
   if (coordinates.length !== 12) {
     return {
       ok: false,
@@ -31,8 +32,9 @@ export function computeTet4Geometry(coordinates: Float64Array, tolerance = 1e-14
   ]);
   const determinant = det3(j);
   const signedVolume = determinant / 6;
+  const tolerance = elementVolumeTolerance(coordinates);
 
-  if (Math.abs(signedVolume) <= tolerance) {
+  if (!Number.isFinite(signedVolume) || Math.abs(signedVolume) <= tolerance) {
     return {
       ok: false,
       error: {

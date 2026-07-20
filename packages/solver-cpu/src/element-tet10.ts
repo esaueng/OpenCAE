@@ -1,4 +1,5 @@
 import type { CpuSolverError } from "./types";
+import { elementVolumeTolerance } from "./geometry-policy";
 
 export const TET10_NODE_COUNT = 10;
 export const TET10_DOFS = TET10_NODE_COUNT * 3;
@@ -85,8 +86,7 @@ function shapeDerivativesRef(barycentric: readonly [number, number, number, numb
 
 export function computeTet10PhysicalGradients(
   coordinates: Float64Array,
-  barycentric: readonly [number, number, number, number],
-  tolerance: number
+  barycentric: readonly [number, number, number, number]
 ): { ok: true; gradients: Float64Array; detJ: number } | { ok: false; error: CpuSolverError } {
   const reference = shapeDerivativesRef(barycentric);
   const j = new Float64Array(9);
@@ -102,6 +102,7 @@ export function computeTet10PhysicalGradients(
     }
   }
   const detJ = det3(j);
+  const tolerance = elementVolumeTolerance(coordinates);
   if (!(detJ > tolerance)) {
     return {
       ok: false,
@@ -152,8 +153,7 @@ export function computeTet10BMatrix(gradients: Float64Array): Float64Array {
 
 export function computeTet10ElementStiffness(
   coordinates: Float64Array,
-  dMatrix: Float64Array,
-  tolerance = 1e-14
+  dMatrix: Float64Array
 ): Tet10StiffnessResult {
   if (coordinates.length !== TET10_DOFS) {
     return {
@@ -169,7 +169,7 @@ export function computeTet10ElementStiffness(
   let volume = 0;
 
   for (const point of TET10_GAUSS_POINTS) {
-    const local = computeTet10PhysicalGradients(coordinates, point, tolerance);
+    const local = computeTet10PhysicalGradients(coordinates, point);
     if (!local.ok) return local;
     const weight = TET10_GAUSS_WEIGHT * local.detJ;
     volume += weight;
@@ -200,7 +200,7 @@ export function computeTet10ElementStiffness(
     }
   }
 
-  if (!(volume > tolerance)) {
+  if (!(volume > elementVolumeTolerance(coordinates))) {
     return {
       ok: false,
       error: {
@@ -212,14 +212,14 @@ export function computeTet10ElementStiffness(
   return { ok: true, stiffness, volume };
 }
 
-export function computeTet10Volume(coordinates: Float64Array, tolerance = 1e-14): Tet10VolumeResult {
+export function computeTet10Volume(coordinates: Float64Array): Tet10VolumeResult {
   let volume = 0;
   for (const point of TET10_GAUSS_POINTS) {
-    const local = computeTet10PhysicalGradients(coordinates, point, tolerance);
+    const local = computeTet10PhysicalGradients(coordinates, point);
     if (!local.ok) return local;
     volume += TET10_GAUSS_WEIGHT * local.detJ;
   }
-  if (!(volume > tolerance)) {
+  if (!(volume > elementVolumeTolerance(coordinates))) {
     return {
       ok: false,
       error: {
@@ -235,12 +235,11 @@ export function computeTet10Volume(coordinates: Float64Array, tolerance = 1e-14)
 // stress recovery; falls back element-by-element to the caller on degenerate Jacobians.
 export function recoverTet10NodalStrains(
   coordinates: Float64Array,
-  elementDisplacement: Float64Array,
-  tolerance = 1e-14
+  elementDisplacement: Float64Array
 ): { ok: true; strains: Float64Array } | { ok: false; error: CpuSolverError } {
   const strains = new Float64Array(TET10_NODE_COUNT * 6);
   for (let node = 0; node < TET10_NODE_COUNT; node += 1) {
-    const local = computeTet10PhysicalGradients(coordinates, TET10_NODE_BARYCENTRIC[node], tolerance);
+    const local = computeTet10PhysicalGradients(coordinates, TET10_NODE_BARYCENTRIC[node]);
     if (!local.ok) return local;
     const b = computeTet10BMatrix(local.gradients);
     for (let row = 0; row < 6; row += 1) {
@@ -256,10 +255,9 @@ export function recoverTet10NodalStrains(
 
 export function recoverTet10CentroidStrain(
   coordinates: Float64Array,
-  elementDisplacement: Float64Array,
-  tolerance = 1e-14
+  elementDisplacement: Float64Array
 ): Tet10StrainResult {
-  const local = computeTet10PhysicalGradients(coordinates, CENTROID, tolerance);
+  const local = computeTet10PhysicalGradients(coordinates, CENTROID);
   if (!local.ok) return local;
   const b = computeTet10BMatrix(local.gradients);
   const strain = new Float64Array(6);
