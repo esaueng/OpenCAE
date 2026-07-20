@@ -172,7 +172,7 @@ function tet10Conductivity(coordinates: Float64Array, conductivity: number): { o
   const matrix = new Float64Array(TET10_NODE_COUNT * TET10_NODE_COUNT);
   let volume = 0;
   for (const point of TET10_GAUSS_POINTS) {
-    const local = computeTet10PhysicalGradients(coordinates, point, 1e-14);
+    const local = computeTet10PhysicalGradients(coordinates, point);
     if (!local.ok) return local;
     const weight = local.detJ * TET10_GAUSS_WEIGHT;
     volume += weight;
@@ -277,7 +277,7 @@ function recoverNodalHeatFlux(model: NormalizedOpenCAEModel, temperature: Float6
         gradients = geometry.gradients;
         volume = geometry.volume;
       } else {
-        const geometry = computeTet10PhysicalGradients(coordinates, [0.25, 0.25, 0.25, 0.25], 1e-14);
+        const geometry = computeTet10PhysicalGradients(coordinates, [0.25, 0.25, 0.25, 0.25]);
         if (!geometry.ok) return geometry;
         const volumeResult = computeTet10Volume(coordinates);
         if (!volumeResult.ok) return volumeResult;

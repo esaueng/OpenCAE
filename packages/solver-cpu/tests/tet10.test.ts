@@ -26,6 +26,10 @@ const UNIT_TET10_COORDINATES = new Float64Array([
   0, 0.5, 0.5
 ]);
 
+function scaledTet10(scale: number): Float64Array {
+  return Float64Array.from(UNIT_TET10_COORDINATES, (value) => value * scale);
+}
+
 const STEEL = {
   name: "steel",
   type: "isotropicLinearElastic" as const,
@@ -49,6 +53,24 @@ describe("Tet10 element", () => {
     for (let node = 0; node < 10; node += 1) inverted[node * 3 + 2] *= -1;
     const volume = computeTet10Volume(inverted);
     expect(volume.ok).toBe(false);
+  });
+
+  test("classifies equivalent mm and m Tet10 geometry identically", () => {
+    const millimeter = computeTet10Volume(scaledTet10(100));
+    const meter = computeTet10Volume(scaledTet10(0.1));
+    expect(millimeter.ok).toBe(true);
+    expect(meter.ok).toBe(true);
+    if (!millimeter.ok || !meter.ok) return;
+    expect(millimeter.volume * 1e-9).toBeCloseTo(meter.volume, 14);
+
+    const sliverMm = scaledTet10(100);
+    const sliverM = scaledTet10(0.1);
+    for (let node = 0; node < 10; node += 1) {
+      sliverMm[node * 3 + 2] *= 1e-13;
+      sliverM[node * 3 + 2] *= 1e-13;
+    }
+    expect(computeTet10Volume(sliverMm).ok).toBe(false);
+    expect(computeTet10Volume(sliverM).ok).toBe(false);
   });
 
   test("recovers an imposed uniform strain field exactly (patch test)", () => {
