@@ -41,3 +41,9 @@ jobs:
 
       - name: Test
         run: pnpm test
+
+      - name: Build Cloudflare production bundle
+        run: pnpm build:cloudflare
+
+      - name: Enforce web bundle budget
+        run: pnpm --filter @opencae/web check:bundle
