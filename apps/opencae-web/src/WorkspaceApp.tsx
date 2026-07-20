@@ -4,7 +4,7 @@ import type { Constraint, CustomMaterial, DisplayFace, DisplayModel, DynamicSolv
 import { Activity, CloudUpload, Download, HardDrive, RotateCcw, X } from "lucide-react";
 import { addLoad, addSupport, assignMaterial, cancelRun, createProject, generateMesh, getResults, getRunVariant, importLocalProject, isStepGeometryMeshFailure, loadSampleProject, probeUploadedStepRepairAfterMeshFailure, renameProject, repairUploadedStepModel, runMeshConvergence, runSimulation, saveRunReportCaptures, STEP_REPAIR_UNAVAILABLE_MESSAGE, subscribeToRun, updateStudy as saveStudyPatch, uploadedStepRepairProbeDecision, uploadModel, type SampleAnalysisType, type SampleModelId } from "./lib/api";
 import { cancelWasmMeshing, type WasmMeshPhaseProgress } from "./lib/wasmMeshing";
-import { resolveSolverBackend } from "./workers/opencaeCoreSolve";
+import { buildOpenCaeCoreModelForStudy, resolveSolverBackend } from "./workers/opencaeCoreSolve";
 import { manufacturingProcessForId, normalizeManufacturingParameters, resolveMaterial } from "@opencae/materials";
 import { BottomPanel, KeyboardShortcutGuide, type WorkspaceLogEntry } from "./components/BottomPanel";
 import { OpenCaeLogoMark } from "./components/OpenCaeLogoMark";
@@ -29,6 +29,7 @@ import { prepareBlobSaveToDisk, type SaveFilePickerHandle } from "./lib/fileSave
 import { BOUNDARY_CAPTURE_REVISION, captureResultViews, createCaptureQueue, type CaptureQueue, type ResultViewCaptures } from "./report/captureResultViews";
 import { buildReportData, suggestedReportFilename } from "./report/reportData";
 import { pngDataUrlToBlob, suggestedResultPngFilename } from "./report/resultPngExport";
+import { buildSelectedResultExport, selectedResultExportFilename, type SelectedResultExportFormat, type SelectedResultExportInput, type SelectedResultState } from "./report/selectedResultExport";
 import { buildResultViewerHtml, suggestedResultHtmlFilename } from "./resultViewerHtml";
 import { buildAutosavedWorkspace, buildAutosavedWorkspaceUiSnapshot, flushAutosavedWorkspace, installAutosavePageHideFlush, localRunIdForResultsRestore, parseAutosavedWorkspacePayload, readAutosavedWorkspace, scheduleAutosavedUiSnapshotWrite, scheduleAutosavedWorkspaceWrite, WORKSPACE_LOG_LIMIT } from "./appPersistence";
 import type { AutosavedWorkspace, WorkspaceUiSnapshot } from "./appPersistence";
@@ -176,6 +177,8 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const [pngExportError, setPngExportError] = useState<string | null>(null);
   const [htmlExportBusy, setHtmlExportBusy] = useState(false);
   const [htmlExportError, setHtmlExportError] = useState<string | null>(null);
+  const [dataExportBusy, setDataExportBusy] = useState<SelectedResultExportFormat | null>(null);
+  const [dataExportError, setDataExportError] = useState<string | null>(null);
   const [overflowRecoveryRequest, setOverflowRecoveryRequest] = useState(0);
   const [cloudBackupPreference, setCloudBackupPreference] = useState<CloudBackupPreference | null>(() => readCloudBackupPreference());
   const [overflowRecoveryNeeded, setOverflowRecoveryNeeded] = useState(false);
@@ -1541,6 +1544,51 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     }
   }
 
+  async function handleExportResultData(format: SelectedResultExportFormat) {
+    if (!project || !study || !displayModel || !resultSummary || !resultFields.length || !resultSurfaceMesh) {
+      setDataExportError("Run an analysis with a canonical solver mesh before exporting raw result data.");
+      return;
+    }
+    setDataExportBusy(format);
+    setDataExportError(null);
+    try {
+      const canonicalModel = buildOpenCaeCoreModelForStudy(study, displayModel, project.customMaterials).model;
+      const variantRef = resultVariantRefs.find((variant) => variant.id === activeResultVariantId);
+      const state = selectedResultStateForExport({
+        summary: resultSummary,
+        fields: resultFields,
+        selectedModeIndex,
+        selectedFrameIndex: resultPlaybackPlaying
+          ? nearestResultFrameIndex(playbackFrameIndexes, resultVisualFramePosition)
+          : resultFrameIndex
+      });
+      const exportInput: SelectedResultExportInput = {
+        projectName: project.name,
+        projectSchemaVersion: project.schemaVersion,
+        analysisType: study.type,
+        ...(variantRef ? { variant: { id: variantRef.id, name: variantRef.name } } : {}),
+        state,
+        model: canonicalModel,
+        surfaceMesh: resultSurfaceMesh,
+        fields: resultFields
+      };
+      const suggestedName = selectedResultExportFilename(exportInput, format);
+      const saveTarget = await prepareBlobSaveToDisk(suggestedName, format === "csv"
+        ? { description: "OpenCAE selected-state result CSV", accept: { "text/csv": [".csv"] } }
+        : { description: "VTK XML unstructured-grid result", accept: { "application/vnd.vtk.vtu+xml": [".vtu"] } });
+      if (saveTarget === "cancelled") return;
+      const exported = buildSelectedResultExport(exportInput, format);
+      await saveTarget.save(new Blob(exported.parts, { type: exported.mimeType }));
+      pushMessage(`Exported ${suggestedName} (${exported.selectedFields.length} canonical fields, selected state only).`);
+    } catch (error) {
+      const message = errorMessage(error, `Could not export the selected result as ${format.toUpperCase()}.`);
+      setDataExportError(message);
+      pushMessage(message);
+    } finally {
+      setDataExportBusy(null);
+    }
+  }
+
   const boundaryConditionCount = (study?.constraints.length ?? 0) + (study?.loads.length ?? 0);
   const hasNativeCadModel = Boolean(displayModel?.nativeCad);
   useEffect(() => {
@@ -2537,6 +2585,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           onGenerateReport={handleGenerateReport}
           onExportResultPng={handleExportResultPng}
           onExportResultHtml={handleExportResultHtml}
+          onExportResultData={handleExportResultData}
           reportBusy={reportBusy}
           reportError={reportError}
           reportDisabled={solverRunning || convergenceBusy}
@@ -2544,6 +2593,8 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           pngExportError={pngExportError}
           htmlExportBusy={htmlExportBusy}
           htmlExportError={htmlExportError}
+          dataExportBusy={dataExportBusy}
+          dataExportError={dataExportError}
           sampleModel={sampleModel}
           sampleAnalysisType={sampleAnalysisType}
           draftLoadType={draftLoadType}
@@ -2825,6 +2876,47 @@ function playbackDirectionForLoopStart(ordinalPosition: number, frameCount: numb
   if (!reverseLoop || frameCount < 2) return 1;
   const lastOrdinal = frameCount - 1;
   return ordinalPosition >= lastOrdinal - PLAYBACK_ENDPOINT_EPSILON ? -1 : 1;
+}
+
+function selectedResultStateForExport({
+  summary,
+  fields,
+  selectedModeIndex,
+  selectedFrameIndex
+}: {
+  summary: ResultSummary;
+  fields: ResultField[];
+  selectedModeIndex: number;
+  selectedFrameIndex: number;
+}): SelectedResultState {
+  if (isModalResultSummary(summary)) {
+    const mode = summary.modes.find((candidate) => candidate.modeIndex === selectedModeIndex) ?? summary.modes[0];
+    if (!mode) throw new Error("The selected modal result has no converged mode to export.");
+    return { kind: "modal_mode", modeIndex: mode.modeIndex, frequencyHz: mode.frequencyHz };
+  }
+  if (isStructuralResultSummary(summary) && summary.transient) {
+    const frameField = fields.find((field) => field.frameIndex === selectedFrameIndex && field.timeSeconds !== undefined);
+    return {
+      kind: "dynamic_frame",
+      frameIndex: selectedFrameIndex,
+      ...(frameField?.timeSeconds === undefined ? {} : { timeSeconds: frameField.timeSeconds })
+    };
+  }
+  return { kind: "static" };
+}
+
+function nearestResultFrameIndex(frameIndexes: readonly number[], framePosition: number): number {
+  if (!frameIndexes.length) return Math.max(0, Math.round(framePosition));
+  let nearest = frameIndexes[0]!;
+  let distance = Math.abs(nearest - framePosition);
+  for (let index = 1; index < frameIndexes.length; index += 1) {
+    const candidate = frameIndexes[index]!;
+    const candidateDistance = Math.abs(candidate - framePosition);
+    if (candidateDistance >= distance) continue;
+    nearest = candidate;
+    distance = candidateDistance;
+  }
+  return nearest;
 }
 
 function readinessForStudy(study: Study | null) {

@@ -2,7 +2,7 @@
 
 [![Production health](https://img.shields.io/website?url=https%3A%2F%2Fcae.esau.app%2Fhealth&label=production%20health)](https://cae.esau.app/health)
 
-OpenCAE is a local-first CAD/CAE simulation workspace: set up a structural study, solve it in the browser with OpenCAE Core, and review the results. It supports static stress and dynamic structural studies, sample projects, local `.opencae.json` project files, uploaded geometry previews, browser-local CPU solves, and HTML/PDF report export.
+OpenCAE is a local-first CAD/CAE simulation workspace: set up a structural study, solve it in the browser with OpenCAE Core, and review the results. It supports static stress and dynamic structural studies, sample projects, local `.opencae.json` project files, uploaded geometry previews, browser-local CPU solves, selected-state CSV/VTU result export, and HTML/PDF report export.
 
 The project is organized around service boundaries so the React workspace, Fastify API, CAD import, meshing, OpenCAE Core solver, post-processing, storage, and job runners can evolve independently.
 

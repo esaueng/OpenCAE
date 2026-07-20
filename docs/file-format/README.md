@@ -60,3 +60,9 @@ The outer `opencae-local-project` container remains version 2 because the new st
 ## Self-contained result viewer
 
 The `.html` result export is a separate, standalone artifact rather than a project container. It embeds one `opencae-result-viewer` version-1 payload containing the display metadata, solved surface mesh, summary, fields, and provenance. The file uses inline CSS/JavaScript and makes no server or network requests.
+
+## Selected-state raw result exports
+
+CSV and VTK XML UnstructuredGrid (`.vtu`) exports use `opencae_export_schema_version` 1.0.0. Both formats contain one active result variant and one selected static state, dynamic frame, modal mode, or harmonic frequency. They preserve canonical field values and explicitly record the right-handed Z-up coordinate system, length units, per-field units/components/locations, variant identity, and state identity.
+
+CSV is a mixed node/element table with stable one-based source identifiers and canonical connectivity. Field column headers encode field id, type, location, component, and units. VTU stores Tet4/Tet10 volume cells using VTK cell types 10/24. Its `OpenCAE.Metadata.UTF8` `UInt8` FieldData array is UTF-8 JSON containing the export metadata and field catalog. Solver-surface nodal fields are mapped through the retained volume-node map; volume-interior tuples are `NaN`, never extrapolated. Export is chunked and has a 128 MB estimated browser-memory ceiling.

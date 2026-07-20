@@ -563,7 +563,7 @@ describe("RightPanel payload mass controls", () => {
       frameIndex,
       timeSeconds: frameIndex / 2
     }));
-    const markup = renderPanel("results", { study: modalStudy, resultSummary: modalSummary, resultFields: modalFields, resultMode: "mode_shape", selectedModeIndex: 1 });
+    const markup = renderPanel("results", { study: modalStudy, resultSummary: modalSummary, resultFields: modalFields, resultMode: "mode_shape", selectedModeIndex: 1, onExportResultData: vi.fn() });
     expect(markup).toContain("Mode 1");
     expect(markup).toContain("81.5 Hz");
     expect(markup).toContain("Phase");
@@ -572,6 +572,8 @@ describe("RightPanel payload mass controls", () => {
     expect(markup).toContain('aria-pressed="true"');
     expect(markup).not.toContain('role="listitem"');
     expect(markup).toContain("Block shift-invert");
+    expect(markup).toContain("Export selected-mode CSV");
+    expect(markup).toContain("Export selected-mode VTU");
   });
 
   test("renders thermal results as the final workflow step with readable metrics", () => {
@@ -1828,6 +1830,19 @@ describe("RightPanel payload mass controls", () => {
     expect(busy).toContain('disabled=""');
     expect(failed).toContain('role="alert"');
     expect(failed).toContain("PNG capture failed.");
+  });
+
+  test("labels raw downloads as selected-state CSV and VTU with shared busy and error states", () => {
+    const idle = renderPanel("results", { onExportResultData: vi.fn() });
+    const busy = renderPanel("results", { onExportResultData: vi.fn(), dataExportBusy: "csv" });
+    const failed = renderPanel("results", { onExportResultData: vi.fn(), dataExportError: "Canonical mesh mismatch." });
+
+    expect(idle).toContain("Export selected-state CSV");
+    expect(idle).toContain("Export selected-state VTU");
+    expect(busy).toContain("Exporting…");
+    expect(busy.match(/disabled=""/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(failed).toContain('role="alert"');
+    expect(failed).toContain("Canonical mesh mismatch.");
   });
 
   test("hides the sample Volume and Mass rows for blank and uploaded projects", () => {

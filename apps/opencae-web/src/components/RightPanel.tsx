@@ -85,6 +85,7 @@ interface RightPanelProps {
   onGenerateReport?: (options?: { targetSafetyFactor?: number }) => Promise<void>;
   onExportResultPng?: () => Promise<void>;
   onExportResultHtml?: () => Promise<void>;
+  onExportResultData?: (format: "csv" | "vtu") => Promise<void>;
   reportBusy?: boolean;
   reportError?: string | null;
   reportDisabled?: boolean;
@@ -92,6 +93,8 @@ interface RightPanelProps {
   pngExportError?: string | null;
   htmlExportBusy?: boolean;
   htmlExportError?: string | null;
+  dataExportBusy?: "csv" | "vtu" | null;
+  dataExportError?: string | null;
   sampleModel: SampleModelId;
   sampleAnalysisType?: SampleAnalysisType;
   draftLoadType: LoadType;
@@ -1991,12 +1994,16 @@ function ThermalResultsPanelContent({
   onGenerateReport,
   onExportResultPng,
   onExportResultHtml,
+  onExportResultData,
   reportBusy = false,
   pngExportBusy = false,
   htmlExportBusy = false,
+  dataExportBusy = null,
   reportError,
   pngExportError,
-  htmlExportError
+  htmlExportError,
+  dataExportError,
+  reportDisabled = false
 }: RightPanelProps & { resultSummary: ThermalResultSummary }) {
   return (
     <Panel title="Thermal results" step="results" helper="Inspect steady temperature and conductive heat-flux fields on the solved mesh.">
@@ -2019,9 +2026,12 @@ function ThermalResultsPanelContent({
       <button className="secondary wide" type="button" disabled={reportBusy} onClick={() => void onGenerateReport?.()}><FileDown size={16} />{reportBusy ? "Generating…" : "Generate report"}</button>
       <button className="secondary wide" type="button" disabled={pngExportBusy} onClick={() => void onExportResultPng?.()}><FileDown size={16} />{pngExportBusy ? "Exporting…" : "Export PNG"}</button>
       <button className="secondary wide" type="button" disabled={htmlExportBusy} onClick={() => void onExportResultHtml?.()}><FileDown size={16} />{htmlExportBusy ? "Exporting…" : "Export standalone HTML"}</button>
+      {onExportResultData && <button className="secondary wide" type="button" disabled={dataExportBusy !== null || reportDisabled} onClick={() => void onExportResultData("csv")}><FileDown size={16} />{dataExportBusy === "csv" ? "Exporting…" : "Export selected-state CSV"}</button>}
+      {onExportResultData && <button className="secondary wide" type="button" disabled={dataExportBusy !== null || reportDisabled} onClick={() => void onExportResultData("vtu")}><FileDown size={16} />{dataExportBusy === "vtu" ? "Exporting…" : "Export selected-state VTU"}</button>}
       {reportError && <p className="panel-warning">{reportError}</p>}
       {pngExportError && <p className="panel-warning">{pngExportError}</p>}
       {htmlExportError && <p className="panel-warning">{htmlExportError}</p>}
+      {dataExportError && <p className="panel-warning" role="alert"><AlertTriangle size={16} />{dataExportError}</p>}
     </Panel>
   );
 }
@@ -2045,7 +2055,11 @@ function ModalResultsPanelContent({
   onResultPlaybackFpsChange,
   onResultPlaybackReverseLoopChange,
   onToggleDeformed,
-  onStressExaggerationChange
+  onStressExaggerationChange,
+  onExportResultData,
+  dataExportBusy = null,
+  dataExportError,
+  reportDisabled = false
 }: RightPanelProps & { resultSummary: ModalResultSummary }) {
   const frames = dynamicPlaybackFrames(resultFields);
   const frameIndexes = frames.map((frame) => frame.frameIndex);
@@ -2123,6 +2137,9 @@ function ModalResultsPanelContent({
         <input type="range" min="0.5" max="4" step="0.1" value={stressExaggeration} onChange={(event) => onStressExaggerationChange(Number(event.currentTarget.value))} />
       </label>
       <p className="panel-copy">Amplitude and phase are visualization-only. Normalized mode shapes are not physical displacements.</p>
+      {onExportResultData && <button className="secondary wide" type="button" disabled={dataExportBusy !== null || reportDisabled} onClick={() => void onExportResultData("csv")}><FileDown size={16} />{dataExportBusy === "csv" ? "Exporting…" : "Export selected-mode CSV"}</button>}
+      {onExportResultData && <button className="secondary wide" type="button" disabled={dataExportBusy !== null || reportDisabled} onClick={() => void onExportResultData("vtu")}><FileDown size={16} />{dataExportBusy === "vtu" ? "Exporting…" : "Export selected-mode VTU"}</button>}
+      {dataExportError && <p className="panel-warning" role="alert"><AlertTriangle size={16} />{dataExportError}</p>}
       <div className="legend"><small>Node</small><span /><small>Antinode</small></div>
     </Panel>
   );
@@ -2165,13 +2182,16 @@ function ResultsPanelContent({
   onGenerateReport,
   onExportResultPng,
   onExportResultHtml,
+  onExportResultData,
   reportBusy = false,
   reportError,
   reportDisabled = false,
   pngExportBusy = false,
   pngExportError,
   htmlExportBusy = false,
-  htmlExportError
+  htmlExportError,
+  dataExportBusy = null,
+  dataExportError
 }: RightPanelProps & { resultSummary: StructuralResultSummary }) {
   const [targetSafetyFactor, setTargetSafetyFactor] = useState(1.5);
   const [draftStressExaggeration, setDraftStressExaggeration] = useState(stressExaggeration);
@@ -2293,9 +2313,20 @@ function ResultsPanelContent({
           <FileDown size={18} />{htmlExportBusy ? "Packaging…" : "Export offline HTML"}
         </button>
       )}
+      {onExportResultData && (
+        <button className="secondary wide" type="button" disabled={dataExportBusy !== null || reportDisabled} onClick={() => void onExportResultData("csv")}>
+          <FileDown size={18} />{dataExportBusy === "csv" ? "Exporting…" : "Export selected-state CSV"}
+        </button>
+      )}
+      {onExportResultData && (
+        <button className="secondary wide" type="button" disabled={dataExportBusy !== null || reportDisabled} onClick={() => void onExportResultData("vtu")}>
+          <FileDown size={18} />{dataExportBusy === "vtu" ? "Exporting…" : "Export selected-state VTU"}
+        </button>
+      )}
       {reportError && <p className="panel-warning" role="alert"><AlertTriangle size={16} />{reportError}</p>}
       {pngExportError && <p className="panel-warning" role="alert"><AlertTriangle size={16} />{pngExportError}</p>}
       {htmlExportError && <p className="panel-warning" role="alert"><AlertTriangle size={16} />{htmlExportError}</p>}
+      {dataExportError && <p className="panel-warning" role="alert"><AlertTriangle size={16} />{dataExportError}</p>}
       <div className={`failure-assessment ${assessment.status}`}>
         <span className="assessment-icon"><AssessmentIcon size={20} /></span>
         <span>
