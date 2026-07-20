@@ -268,17 +268,27 @@ export function solveConjugateGradient(
   applyPreconditioner(matrix, r, z, diagonal, preconditioner, ssorOmega);
   p.set(z);
   let rzOld = dot(r, z);
-  const rhsNorm = Math.max(norm(rhs), 1);
+  const rhsNorm = norm(rhs);
   const initialResidualNorm = norm(r);
-  if (initialResidualNorm / rhsNorm <= tolerance) {
-    emitProgress(0, 0);
-    return { ok: true, solution: x, iterations: 0, residualNorm: initialResidualNorm, relativeResidual: 0 };
+  const residualReference = rhsNorm > 0 ? rhsNorm : initialResidualNorm;
+  const relativeResidualFor = (residualNorm: number): number =>
+    residualReference > 0 ? residualNorm / residualReference : 0;
+  const initialRelativeResidual = relativeResidualFor(initialResidualNorm);
+  if (initialRelativeResidual <= tolerance) {
+    emitProgress(0, initialRelativeResidual);
+    return {
+      ok: true,
+      solution: x,
+      iterations: 0,
+      residualNorm: initialResidualNorm,
+      relativeResidual: initialRelativeResidual
+    };
   }
 
   for (let iteration = 1; iteration <= maxIterations; iteration += 1) {
     if (shouldCancel?.()) {
       const residualNorm = norm(r);
-      const relativeResidual = residualNorm / rhsNorm;
+      const relativeResidual = relativeResidualFor(residualNorm);
       emitProgress(iteration - 1, relativeResidual);
       return {
         ok: false,
@@ -294,7 +304,9 @@ export function solveConjugateGradient(
     const ap = csrMatVec(matrix, p);
     const denominator = dot(p, ap);
     if (!Number.isFinite(denominator) || Math.abs(denominator) <= 1e-30) {
-      emitProgress(iteration, norm(r) / rhsNorm);
+      const residualNorm = norm(r);
+      const relativeResidual = relativeResidualFor(residualNorm);
+      emitProgress(iteration, relativeResidual);
       return {
         ok: false,
         error: {
@@ -302,8 +314,8 @@ export function solveConjugateGradient(
           message: "Sparse CG encountered a singular or indefinite system."
         },
         iterations: iteration,
-        residualNorm: norm(r),
-        relativeResidual: norm(r) / rhsNorm
+        residualNorm,
+        relativeResidual
       };
     }
     const alpha = rzOld / denominator;
@@ -311,10 +323,11 @@ export function solveConjugateGradient(
       x[i] += alpha * p[i];
       r[i] -= alpha * ap[i];
     }
-    const relativeResidual = norm(r) / rhsNorm;
+    const residualNorm = norm(r);
+    const relativeResidual = relativeResidualFor(residualNorm);
     if (relativeResidual <= tolerance) {
       emitProgress(iteration, relativeResidual);
-      return { ok: true, solution: x, iterations: iteration, residualNorm: norm(r), relativeResidual };
+      return { ok: true, solution: x, iterations: iteration, residualNorm, relativeResidual };
     }
     if (iteration % 25 === 0) {
       emitProgress(iteration, relativeResidual);
@@ -328,7 +341,9 @@ export function solveConjugateGradient(
     rzOld = rzNew;
   }
 
-  emitProgress(maxIterations, norm(r) / rhsNorm);
+  const residualNorm = norm(r);
+  const relativeResidual = relativeResidualFor(residualNorm);
+  emitProgress(maxIterations, relativeResidual);
   return {
     ok: false,
     error: {
@@ -336,8 +351,8 @@ export function solveConjugateGradient(
       message: "Sparse CG did not converge within maxIterations."
     },
     iterations: maxIterations,
-    residualNorm: norm(r),
-    relativeResidual: norm(r) / rhsNorm
+    residualNorm,
+    relativeResidual
   };
 }
 

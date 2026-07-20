@@ -994,7 +994,7 @@ function computeResidualStats(
   const reference = Math.sqrt(referenceNormSquared);
   return {
     norm: residualNorm,
-    relative: reference === 0 && residualNorm === 0 ? 0 : residualNorm / Math.max(reference, 1)
+    relative: reference > 0 ? residualNorm / reference : residualNorm === 0 ? 0 : 1
   };
 }
 
