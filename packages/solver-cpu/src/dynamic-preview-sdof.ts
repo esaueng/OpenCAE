@@ -1,4 +1,9 @@
 import { maxAbs, solveStaticLinearTet4Cpu } from "./solver";
+import {
+  boundedTimeStepSeconds,
+  timeIsBeforeTarget,
+  timeValuesMatch
+} from "./time-policy";
 import type {
   CpuSolverInput,
   DynamicLoadProfile,
@@ -20,7 +25,7 @@ export function solvePreviewSdofTet4Cpu(
 
   const startTime = finiteOr(options.startTime, 0);
   const endTime = finiteOr(options.endTime, 0.1);
-  const timeStep = Math.max(finiteOr(options.timeStep, 0.005), 1e-6);
+  const timeStep = boundedTimeStepSeconds(finiteOr(options.timeStep, 0.005));
   const outputInterval = Math.max(finiteOr(options.outputInterval, 0.005), timeStep);
   const loadProfile = canonicalDynamicLoadProfile(options.loadProfile ?? "ramp");
   if (endTime <= startTime) {
@@ -119,15 +124,15 @@ export function solvePreviewSdofTet4Cpu(
 
 function outputTimes(startTime: number, endTime: number, outputInterval: number): number[] {
   const times = [startTime];
-  for (let time = startTime + outputInterval; time < endTime - 1e-12; time += outputInterval) {
+  for (let time = startTime + outputInterval; timeIsBeforeTarget(time, endTime); time += outputInterval) {
     times.push(round(time, 9));
   }
-  if (times[times.length - 1] !== endTime) times.push(round(endTime, 9));
+  if (!timeValuesMatch(times[times.length - 1]!, endTime)) times.push(round(endTime, 9));
   return times;
 }
 
 function loadScaleAt(time: number, startTime: number, endTime: number, loadProfile: DynamicLoadProfile): number {
-  const s = Math.max(0, Math.min(1, (time - startTime) / Math.max(endTime - startTime, 1e-12)));
+  const s = Math.max(0, Math.min(1, (time - startTime) / (endTime - startTime)));
   if (loadProfile === "ramp") return s;
   if (loadProfile === "quasi_static") return 3 * s * s - 2 * s * s * s;
   if (loadProfile === "half_sine") return Math.sin(Math.PI * s);
