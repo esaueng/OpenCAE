@@ -90,15 +90,15 @@ importers:
       '@opencae/core-adapter':
         specifier: workspace:*
         version: link:../../libs/opencae-core-adapter
-      '@opencae/db':
-        specifier: workspace:*
-        version: link:../../libs/opencae-db
       '@opencae/materials':
         specifier: workspace:*
         version: link:../../libs/opencae-materials
       '@opencae/mesh-intake':
         specifier: workspace:*
         version: link:../../libs/opencae-mesh-intake
+      '@opencae/samples':
+        specifier: workspace:*
+        version: link:../../libs/opencae-samples
       '@opencae/schema':
         specifier: workspace:*
         version: link:../../libs/opencae-schema
@@ -202,6 +202,9 @@ importers:
       '@opencae/post-service':
         specifier: workspace:*
         version: link:../../services/opencae-post-service
+      '@opencae/samples':
+        specifier: workspace:*
+        version: link:../opencae-samples
       '@opencae/schema':
         specifier: workspace:*
         version: link:../opencae-schema
@@ -255,6 +258,12 @@ importers:
       occt-import-js:
         specifier: ^0.0.23
         version: 0.0.23
+
+  libs/opencae-samples:
+    dependencies:
+      '@opencae/schema':
+        specifier: workspace:*
+        version: link:../opencae-schema
 
   libs/opencae-schema:
     dependencies:

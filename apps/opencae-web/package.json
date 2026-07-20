@@ -12,7 +12,7 @@
   "dependencies": {
     "@opencae/core": "workspace:*",
     "@opencae/core-adapter": "workspace:*",
-    "@opencae/db": "workspace:*",
+    "@opencae/samples": "workspace:*",
     "@opencae/materials": "workspace:*",
     "@opencae/mesh-intake": "workspace:*",
     "@opencae/schema": "workspace:*",
