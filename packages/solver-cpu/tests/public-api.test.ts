@@ -6,6 +6,7 @@ import { validateCoreResult, type OpenCAEModelJson } from "@opencae/core";
 import {
   SOLVER_CPU_VERSION,
   solveCoreDynamic,
+  solveCoreModal,
   solveCorePreviewDynamic,
   solveCoreStatic,
   solvePreviewSdofTet4Cpu,
@@ -38,6 +39,17 @@ const densityModel = {
       loadProfile: "ramp"
     }
   ]
+} satisfies OpenCAEModelJson;
+
+const modalModel = {
+  ...densityModel,
+  loads: [],
+  steps: [{
+    name: "modes",
+    type: "modal",
+    boundaryConditions: ["fixedSupport", "settlement", "supportY", "supportZ"],
+    modeCount: 2
+  }]
 } satisfies OpenCAEModelJson;
 
 describe("public Core solver APIs", () => {
@@ -105,6 +117,21 @@ describe("public Core solver APIs", () => {
     expect(JSON.stringify(result.result)).not.toContain("local_estimate");
     expect(JSON.stringify(result.result)).not.toContain("computed_preview");
     expect(validateCoreResult(result.result).ok).toBe(true);
+  });
+
+  test("every public Core solve entry rejects an over-limit model before assembly", () => {
+    const staticResult = solveCoreStatic(singleTetStaticFixture, { maxDofs: 3 });
+    const dynamicResult = solveCoreDynamic(densityModel, { maxDofs: 3 });
+    const modalResult = solveCoreModal(modalModel, { maxDofs: 3 });
+
+    for (const result of [staticResult, dynamicResult, modalResult]) {
+      expect(result.ok).toBe(false);
+      expect(result.ok ? undefined : result.error).toEqual({
+        code: "max-dofs-exceeded",
+        message: "Model has 12 DOFs, which exceeds maxDofs 3."
+      });
+      expect(result.ok ? undefined : result.diagnostics?.dofs).toBe(12);
+    }
   });
 
   test("production APIs reject display proxy mesh sources without estimate fallback", () => {

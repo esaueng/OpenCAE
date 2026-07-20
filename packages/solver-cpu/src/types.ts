@@ -66,6 +66,12 @@ export type ModalMode = {
 export type ModalCpuDiagnostics = {
   dofs: number;
   sourceDofs: number;
+  dofLimit: {
+    maximum: number;
+    appliedTo: "solve_model";
+    sourceDofs: number;
+    solveDofs: number;
+  };
   freeDofs: number;
   constrainedDofs: number;
   requestedModeCount: number;

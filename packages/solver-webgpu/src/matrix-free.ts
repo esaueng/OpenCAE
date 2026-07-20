@@ -1,5 +1,7 @@
+import { DEFAULT_STRUCTURAL_MAX_DOFS } from "@opencae/solver-cpu";
+
 export const MAX_WEBGPU_TET4_DOFS = 500_000;
-export const CPU_TET_DOF_THRESHOLD = 150_000;
+export const CPU_TET_DOF_THRESHOLD = DEFAULT_STRUCTURAL_MAX_DOFS;
 /**
  * The operator is available for explicit experiments, but automatic product
  * routing stays disabled until CG vectors and reductions remain GPU-resident
@@ -150,7 +152,8 @@ export async function solveTet4MatrixFreeWebGpu(data: Tet4MatrixFreeData, rhs: F
       if (options.shouldCancel?.()) return failure("cancelled", "WebGPU solve cancelled.", iteration - 1, Math.sqrt(dot(r, r)) / rhsNorm);
       const ap = await operator.multiply(p);
       const denominator = dot(p, ap);
-      if (!Number.isFinite(denominator) || Math.abs(denominator) <= 1e-30) return failure("singular-system", "WebGPU matrix-free CG encountered a singular or indefinite system.", iteration, Math.sqrt(dot(r, r)) / rhsNorm);
+      const denominatorTolerance = 16 * 2 ** -23 * Math.sqrt(dot(p, p)) * Math.sqrt(dot(ap, ap));
+      if (!Number.isFinite(denominator) || denominator <= denominatorTolerance) return failure("singular-system", "WebGPU matrix-free CG encountered a singular or indefinite system.", iteration, Math.sqrt(dot(r, r)) / rhsNorm);
       const alpha = rz / denominator;
       for (let index = 0; index < data.dofs; index += 1) { x[index] += alpha * p[index]; r[index] -= alpha * ap[index]; }
       const relativeResidual = Math.sqrt(dot(r, r)) / rhsNorm;

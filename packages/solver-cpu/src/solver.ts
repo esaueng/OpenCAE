@@ -10,6 +10,7 @@ import { collectTetCoordinates, recoverStress, recoverTet4Strain } from "./eleme
 import { computeTet4ElementStiffness, computeTet4Geometry, computeVonMisesStress } from "./element";
 import { computeTet10ElementStiffness, computeTet10Volume, recoverTet10CentroidStrain, recoverTet10NodalStrains, TET10_NODE_COUNT } from "./element-tet10";
 import { solveDenseLinearSystem } from "./linear-solve";
+import { boundedStructuralMaxDofs, structuralDofCount, structuralDofLimitError } from "./limits";
 import { computeLinearElasticDMatrix } from "./material";
 import { assembleMeshConnectionStiffness } from "./connections";
 import { staticCoreResultFromSolve } from "./results";
@@ -87,13 +88,10 @@ export function solveStaticLinearTet4Cpu(
   }
 
   const model = modelResult.model;
-  const dofs = model.counts.nodes * 3;
-  const maxDofs = options.maxDofs ?? 150000;
-  if (dofs > maxDofs) {
-    return failure("max-dofs-exceeded", `Model has ${dofs} DOFs, which exceeds maxDofs ${maxDofs}.`, {
-      dofs
-    });
-  }
+  const dofs = structuralDofCount(model);
+  const maxDofs = boundedStructuralMaxDofs(options.maxDofs);
+  const limitError = structuralDofLimitError(dofs, maxDofs);
+  if (limitError) return failure(limitError.code, limitError.message, { dofs });
 
   const step = model.steps[options.stepIndex ?? 0];
   if (!step || step.type !== "staticLinear") {
@@ -169,9 +167,10 @@ export function prepareStaticLinearTetSystem(
   const modelResult = getNormalizedModel(input);
   if (!modelResult.ok) return modelResult;
   const model = modelResult.model;
-  const dofs = model.counts.nodes * 3;
-  const maxDofs = options.maxDofs ?? 150000;
-  if (dofs > maxDofs) return preparedFailure("max-dofs-exceeded", `Model has ${dofs} DOFs, which exceeds maxDofs ${maxDofs}.`, { dofs });
+  const dofs = structuralDofCount(model);
+  const maxDofs = boundedStructuralMaxDofs(options.maxDofs);
+  const limitError = structuralDofLimitError(dofs, maxDofs);
+  if (limitError) return preparedFailure(limitError.code, limitError.message, { dofs });
   const constraints = collectConstraints(model, boundaryConditionNames);
   if (!constraints.ok) return preparedFailure(constraints.error.code, constraints.error.message, { dofs });
   const free = enumerateFreeDofs(dofs, constraints.values);

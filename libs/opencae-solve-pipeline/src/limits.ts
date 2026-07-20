@@ -1,3 +1,5 @@
+import { DEFAULT_STRUCTURAL_MAX_DOFS } from "@opencae/solver-cpu";
+
 /**
  * Resource limits applied by the browser pipeline's bounded solver settings.
  * The first seven entries mirror the retired deployed runner; transient bytes
@@ -45,7 +47,7 @@ export const CLOUD_SOLVER_LIMITS: SolveLimits = {
  */
 export const BROWSER_SOLVE_LIMITS: SolveLimits = {
   ...CLOUD_SOLVER_LIMITS,
-  maxDofs: 150000,
+  maxDofs: DEFAULT_STRUCTURAL_MAX_DOFS,
   transientFieldBytes: 256e6,
   maxTimeSteps: 20000
 };

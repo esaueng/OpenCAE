@@ -322,6 +322,10 @@ importers:
       '@opencae/solver-cpu':
         specifier: workspace:*
         version: link:../solver-cpu
+    devDependencies:
+      '@opencae/examples':
+        specifier: workspace:*
+        version: link:../examples
 
   packages/viewer:
     dependencies:

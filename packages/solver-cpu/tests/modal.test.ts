@@ -172,6 +172,19 @@ describe("block shift-invert modal solver", () => {
     expect(projected.model.counts.elements).toBe(normalized.model.counts.elements);
   });
 
+  test("reports source and solved DOFs and applies the shared cap to the solved model", () => {
+    const solved = solveModalLinearTet(modalFixture, { modeCount: 1 });
+
+    expect(solved.ok).toBe(true);
+    if (!solved.ok) return;
+    expect(solved.diagnostics.dofLimit).toEqual({
+      maximum: 150_000,
+      appliedTo: "solve_model",
+      sourceDofs: 12,
+      solveDofs: 12
+    });
+  });
+
   test("keeps the compatibility frequency estimate within modal calibration tolerance", () => {
     const system = diagonalSystem([4, 100, 400], [1, 1, 1]);
     system.load.set([1, 1, 1]);

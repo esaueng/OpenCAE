@@ -1,5 +1,6 @@
 import type { NormalizedOpenCAEModel } from "@opencae/core";
 import { modalCoreResultFromSolve } from "./results";
+import { boundedStructuralMaxDofs, structuralDofCount, structuralDofLimitError } from "./limits";
 import { getNormalizedModel } from "./solver";
 import { conjugateGradient, csrDiagonal, csrMatVec, norm } from "./sparse";
 import { expandFreeVector, prepareStructuralSystem, type PreparedStructuralSystem } from "./structural-system";
@@ -20,7 +21,6 @@ const DEFAULT_SUBSPACE_ITERATIONS = 30;
 // that 1e-8 can plateau just above the unchanged 1e-6 exported mode residual.
 const DEFAULT_INNER_TOLERANCE = 1e-9;
 const FREQUENCY_ESTIMATE_INNER_TOLERANCE = 1e-8;
-const DEFAULT_MAX_DOFS = 30_000;
 const DEFAULT_FREQUENCY_ESTIMATE_ITERATIONS = 4;
 const DEFAULT_TET10_PROJECTION_DOF_THRESHOLD = 50_000;
 
@@ -55,13 +55,20 @@ export function solveModalLinearTet(input: CpuSolverInput, options: ModalCpuOpti
   const normalized = getNormalizedModel(input);
   if (!normalized.ok) return normalized;
   const sourceModel = normalized.model;
-  const sourceDofs = sourceModel.counts.nodes * 3;
+  const sourceDofs = structuralDofCount(sourceModel);
   const projected = linearizeTet10ModelForModal(sourceModel);
   const model = projected.model;
-  const dofs = model.counts.nodes * 3;
-  const maxDofs = positiveInteger(options.maxDofs) ?? DEFAULT_MAX_DOFS;
-  if (dofs > maxDofs) {
-    return failure("max-dofs-exceeded", `Model has ${dofs} DOFs, which exceeds maxDofs ${maxDofs}.`);
+  const dofs = structuralDofCount(model);
+  const maxDofs = boundedStructuralMaxDofs(options.maxDofs);
+  const limitError = structuralDofLimitError(dofs, maxDofs);
+  const dofLimit = { maximum: maxDofs, appliedTo: "solve_model" as const, sourceDofs, solveDofs: dofs };
+  if (limitError) {
+    return failure(limitError.code, limitError.message, {
+      dofs,
+      sourceDofs,
+      dofLimit,
+      ...(projected.projection ? { meshProjection: projected.projection } : {})
+    });
   }
   const step = model.steps[options.stepIndex ?? 0];
   if (!step || step.type !== "modal") {
@@ -90,6 +97,7 @@ export function solveModalLinearTet(input: CpuSolverInput, options: ModalCpuOpti
   const diagnostics: ModalCpuDiagnostics = {
     dofs,
     sourceDofs,
+    dofLimit,
     freeDofs: prepared.system.free.length,
     constrainedDofs: prepared.system.constraints.size,
     requestedModeCount,
@@ -634,6 +642,6 @@ function failureResult(code: string, message: string): ModalSubspaceResult {
   return { ok: false, error: { code, message } };
 }
 
-function failure(code: string, message: string): ModalCpuSolveResult {
-  return { ok: false, error: { code, message } };
+function failure(code: string, message: string, diagnostics?: Partial<ModalCpuDiagnostics>): ModalCpuSolveResult {
+  return { ok: false, error: { code, message }, ...(diagnostics ? { diagnostics } : {}) };
 }

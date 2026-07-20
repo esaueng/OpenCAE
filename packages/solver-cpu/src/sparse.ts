@@ -303,7 +303,8 @@ export function solveConjugateGradient(
     }
     const ap = csrMatVec(matrix, p);
     const denominator = dot(p, ap);
-    if (!Number.isFinite(denominator) || Math.abs(denominator) <= 1e-30) {
+    const denominatorTolerance = 16 * Number.EPSILON * norm(p) * norm(ap);
+    if (!Number.isFinite(denominator) || denominator <= denominatorTolerance) {
       const residualNorm = norm(r);
       const relativeResidual = relativeResidualFor(residualNorm);
       emitProgress(iteration, relativeResidual);
