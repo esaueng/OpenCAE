@@ -32,6 +32,17 @@ describe("solvePreviewSdofTet4Cpu preview", () => {
 });
 
 describe("solveDynamicLinearTetMDOF", () => {
+  test("rejects single and batch dynamic solves before structural assembly", () => {
+    const single = solveDynamicLinearTetMDOF(densityModel, { maxDofs: 3 });
+    const batch = solveDynamicLinearTetLoadCases(densityModel, [{ id: "a", stepIndex: 0 }], { maxDofs: 3 });
+
+    for (const solved of [single, batch]) {
+      expect(solved.ok).toBe(false);
+      expect(solved.ok ? undefined : solved.error.code).toBe("max-dofs-exceeded");
+      expect(solved.ok ? undefined : solved.diagnostics?.dofs).toBe(12);
+    }
+  });
+
   test("assembles volume-force density for dynamic steps and exposes conservation diagnostics", () => {
     const model: OpenCAEModelJson = {
       ...densityModel,

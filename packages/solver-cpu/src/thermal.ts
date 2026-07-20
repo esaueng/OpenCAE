@@ -11,6 +11,10 @@ import { collectElementCoordinates, elementNodeCountForBlock } from "./solver";
 import { addSparseEntry, createSparseMatrixBuilder, csrMatVec, estimateCsrMemoryBytes, reduceCsrSystem, solveConjugateGradient, toCsrMatrix } from "./sparse";
 import type { CpuSolverError, CpuSolverInput, CpuSolverOptions } from "./types";
 
+// Thermal has one scalar temperature DOF per node; this is intentionally
+// separate from the structural translation-DOF product contract.
+const DEFAULT_THERMAL_MAX_DOFS = 150_000;
+
 export type SteadyStateThermalResult = {
   temperature: Float64Array;
   heatFlux: Float64Array;
@@ -51,7 +55,7 @@ export function solveSteadyStateThermal(
   if (!normalized.ok) return { ok: false, error: { code: "validation-failed", message: "Thermal model failed OpenCAE Core validation.", report: normalized.report } };
   const model = normalized.model;
   const nodeCount = model.counts.nodes;
-  const maxDofs = options.maxDofs ?? 150000;
+  const maxDofs = options.maxDofs ?? DEFAULT_THERMAL_MAX_DOFS;
   if (nodeCount > maxDofs) return fail("max-dofs-exceeded", `Thermal model has ${nodeCount} DOFs, which exceeds maxDofs ${maxDofs}.`);
   const step = model.steps[options.stepIndex ?? 0];
   if (!step || step.type !== "steadyStateThermal") return fail("invalid-step", "Selected step must have type steadyStateThermal.");

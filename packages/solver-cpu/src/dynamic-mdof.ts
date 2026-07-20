@@ -1,5 +1,6 @@
 import { type NormalizedOpenCAEModel } from "@opencae/core";
 import { dynamicCoreResultFromSolve } from "./results";
+import { boundedStructuralMaxDofs, structuralDofCount, structuralDofLimitError } from "./limits";
 import {
   assembleNodalForcesWithDiagnostics,
   elementNodeCountForBlock,
@@ -62,6 +63,10 @@ export function solveDynamicMdofTet4Cpu(
   const modelResult = getNormalizedModel(input);
   if (!modelResult.ok) return { ok: false, error: modelResult.error };
   const model = modelResult.model;
+  const dofs = structuralDofCount(model);
+  const maxDofs = boundedStructuralMaxDofs(options.maxDofs);
+  const limitError = structuralDofLimitError(dofs, maxDofs);
+  if (limitError) return { ok: false, error: limitError, diagnostics: { dofs } };
   const settings = dynamicSettings(model, options);
   if (settings.endTime <= settings.startTime) {
     return failure("invalid-time-range", "Dynamic solve endTime must be greater than startTime.");
@@ -93,6 +98,10 @@ export function solveDynamicLinearTetLoadCases(
   const modelResult = getNormalizedModel(input);
   if (!modelResult.ok) return { ok: false, error: modelResult.error };
   const model = modelResult.model;
+  const dofs = structuralDofCount(model);
+  const maxDofs = boundedStructuralMaxDofs(options.maxDofs);
+  const limitError = structuralDofLimitError(dofs, maxDofs);
+  if (limitError) return { ok: false, error: limitError, diagnostics: { dofs } };
   if (!cases.length) return { ok: false, error: { code: "missing-load-cases", message: "At least one enabled dynamic load case is required." } };
   const steps = cases.map((loadCase) => ({ loadCase, step: model.steps[loadCase.stepIndex] }));
   if (steps.some(({ step }) => step?.type !== "dynamicLinear")) {
@@ -217,7 +226,7 @@ function solveDynamicPreparedSystem(
   const equivalentStiffness = estimateEquivalentStiffness(system);
 
   const diagnostics: DynamicTet4CpuDiagnostics = {
-    dofs: model.counts.nodes * 3,
+    dofs: structuralDofCount(model),
     freeDofs: free.length,
     constrainedDofs: system.constraints.size,
     relativeResidual: 0,

@@ -16,6 +16,9 @@
     "@opencae/core": "workspace:*",
     "@opencae/solver-cpu": "workspace:*"
   },
+  "devDependencies": {
+    "@opencae/examples": "workspace:*"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",

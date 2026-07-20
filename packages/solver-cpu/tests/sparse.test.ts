@@ -74,7 +74,7 @@ describe("sparse matrix utilities", () => {
       coo.addEntry(row, col, value);
     }
     const matrix = coo.finalizeCsr();
-    const scales = [1e-9, 1, 1e9];
+    const scales = [1e-18, 1e-9, 1, 1e9];
     const solved = scales.map((scale) => solveConjugateGradient(
       matrix,
       new Float64Array([15 * scale, 10 * scale, 10 * scale]),
@@ -83,7 +83,7 @@ describe("sparse matrix utilities", () => {
 
     expect(solved.every((result) => result.ok)).toBe(true);
     const iterations = solved.map((result) => result.iterations);
-    expect(iterations).toEqual([iterations[0], iterations[0], iterations[0]]);
+    expect(new Set(iterations).size).toBe(1);
     solved.forEach((result, index) => {
       if (!result.ok) return;
       const scale = scales[index];
