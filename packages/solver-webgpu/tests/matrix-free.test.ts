@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { automaticTetSolverBackend, buildTet4DofAdjacency, buildTet4ElementData, tet4MatrixFreeInternalForce, tet4MatrixFreeMatVec, type Tet4MatrixFreeData } from "../src";
+import { automaticTetSolverBackend, buildTet4DofAdjacency, buildTet4ElementData, solveTet4MatrixFreeWebGpu, tet4MatrixFreeInternalForce, tet4MatrixFreeMatVec, type Tet4MatrixFreeData } from "../src";
 
 describe("matrix-free Tet4 backend", () => {
   test("keeps the readback-heavy WebGPU CG route out of automatic execution", () => {
@@ -35,5 +35,31 @@ describe("matrix-free Tet4 backend", () => {
     displacement[3] = 1e-6;
     expect(tet4MatrixFreeMatVec(data, displacement)[0]).toBe(0);
     expect(Math.abs(tet4MatrixFreeInternalForce(data, displacement)[0])).toBeGreaterThan(0);
+  });
+
+  test("returns the exact zero solution without requesting WebGPU for a zero right-hand side", async () => {
+    const data: Tet4MatrixFreeData = {
+      dofs: 3,
+      connectivity: new Uint32Array(0),
+      elementData: new Float32Array(0),
+      rowPtr: new Uint32Array(4),
+      adjacencyElements: new Uint32Array(0),
+      adjacencyLocalRows: new Uint32Array(0),
+      diagonal: new Float32Array(3),
+      constrained: new Uint32Array(3)
+    };
+
+    const solved = await solveTet4MatrixFreeWebGpu(data, new Float32Array(3), {
+      navigator: {
+        gpu: {
+          requestAdapter: () => {
+            throw new Error("WebGPU must not be requested for an exact zero solve.");
+          }
+        }
+      }
+    });
+
+    expect(solved).toMatchObject({ ok: true, iterations: 0, relativeResidual: 0 });
+    expect(solved.ok && Array.from(solved.solution)).toEqual([0, 0, 0]);
   });
 });
