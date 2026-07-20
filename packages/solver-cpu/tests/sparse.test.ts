@@ -68,6 +68,87 @@ describe("sparse matrix utilities", () => {
     ]));
   });
 
+  test("keeps relative convergence invariant across right-hand-side scales", () => {
+    const coo = new CooAccumulator(3);
+    for (const [row, col, value] of [[0, 0, 4], [0, 1, -1], [1, 0, -1], [1, 1, 4], [1, 2, -1], [2, 1, -1], [2, 2, 3]] as const) {
+      coo.addEntry(row, col, value);
+    }
+    const matrix = coo.finalizeCsr();
+    const scales = [1e-9, 1, 1e9];
+    const solved = scales.map((scale) => solveConjugateGradient(
+      matrix,
+      new Float64Array([15 * scale, 10 * scale, 10 * scale]),
+      { tolerance: 1e-12, maxIterations: 20, preconditioner: "jacobi" }
+    ));
+
+    expect(solved.every((result) => result.ok)).toBe(true);
+    const iterations = solved.map((result) => result.iterations);
+    expect(iterations).toEqual([iterations[0], iterations[0], iterations[0]]);
+    solved.forEach((result, index) => {
+      if (!result.ok) return;
+      const scale = scales[index];
+      expect(Array.from(result.solution, (value) => value / scale)).toEqual(expect.arrayContaining([
+        expect.closeTo(5, 8),
+        expect.closeTo(5, 8),
+        expect.closeTo(5, 8)
+      ]));
+      expect(result.relativeResidual).toBeLessThanOrEqual(1e-12);
+    });
+  });
+
+  test("returns the exact zero solution for a zero right-hand side", () => {
+    const coo = new CooAccumulator(2);
+    coo.addEntry(0, 0, 2);
+    coo.addEntry(1, 1, 3);
+
+    const result = solveConjugateGradient(coo.finalizeCsr(), new Float64Array(2));
+
+    expect(result).toMatchObject({
+      ok: true,
+      iterations: 0,
+      residualNorm: 0,
+      relativeResidual: 0
+    });
+    expect(result.ok && Array.from(result.solution)).toEqual([0, 0]);
+  });
+
+  test("uses the initial residual as the zero-load reference when a guess is supplied", () => {
+    const coo = new CooAccumulator(2);
+    coo.addEntry(0, 0, 2);
+    coo.addEntry(1, 1, 3);
+
+    const result = solveConjugateGradient(coo.finalizeCsr(), new Float64Array(2), {
+      initialGuess: new Float64Array([2, -3]),
+      tolerance: 1e-12,
+      maxIterations: 10
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(Array.from(result.solution)).toEqual(expect.arrayContaining([
+      expect.closeTo(0, 12),
+      expect.closeTo(0, 12)
+    ]));
+    expect(result.iterations).toBeGreaterThan(0);
+    expect(result.relativeResidual).toBeLessThanOrEqual(1e-12);
+  });
+
+  test("reports dimensionless residuals for cancellation and singular systems", () => {
+    const identity = new CooAccumulator(2);
+    identity.addEntry(0, 0, 1);
+    identity.addEntry(1, 1, 1);
+    const cancelledWithHook = solveConjugateGradient(identity.finalizeCsr(), new Float64Array([1e-9, -2e-9]), {
+      hooks: { shouldCancel: () => true }
+    });
+    expect(cancelledWithHook).toMatchObject({ ok: false, error: { code: "cancelled" }, relativeResidual: 1 });
+
+    const singular = new CooAccumulator(2);
+    singular.addEntry(1, 1, 1);
+    const failed = solveConjugateGradient(singular.finalizeCsr(), new Float64Array([1e-9, 0]));
+    expect(failed).toMatchObject({ ok: false, error: { code: "singular-system" }, relativeResidual: 1 });
+    expect(Number.isFinite(failed.residualNorm)).toBe(true);
+  });
+
   test("exposes vector primitives", () => {
     const x = new Float64Array([1, 2]);
     axpy(3, new Float64Array([2, -1]), x);
