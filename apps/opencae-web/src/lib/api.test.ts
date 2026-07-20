@@ -151,18 +151,12 @@ describe("api", () => {
   });
 
   test("keeps uploaded model bytes on the project returned from upload", async () => {
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
-      new Response(JSON.stringify({ project, displayModel, message: "Uploaded." }), {
-        headers: { "content-type": "application/json" }
-      })
-    );
+    const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
     const file = new TestFile([new Uint8Array([1, 2, 3])], "uploaded-bracket.stl", { type: "model/stl" });
-    const response = await uploadModel("project-1", file);
+    const response = await uploadModel("project-1", file, project);
 
-    const requestInit = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
-    const requestBody = JSON.parse(requestInit?.body as string) as Record<string, unknown>;
     const expectedEmbeddedModel = {
       filename: "uploaded-bracket.stl",
       contentType: "model/stl",
@@ -170,7 +164,7 @@ describe("api", () => {
       contentBase64: "AQID"
     };
 
-    expect(requestBody).toEqual(expectedEmbeddedModel);
+    expect(fetchMock).not.toHaveBeenCalled();
     expect(response.project.geometryFiles[0]?.metadata.embeddedModel).toEqual(expectedEmbeddedModel);
   });
 
@@ -186,49 +180,31 @@ describe("api", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  test("sends a conditional monotonic token with guarded model uploads", async () => {
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify({ project, displayModel, message: "Uploaded." }), {
-      headers: { "content-type": "application/json" }
-    }));
+  test("keeps guarded model uploads on the browser-local path", async () => {
+    const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
     const file = new TestFile([sizedAsciiStl], "newer.stl", { type: "model/stl" });
-    await uploadModel("project-1", file, project, {
+    const response = await uploadModel("project-1", file, project, {
       clientId: "workspace-session",
       generation: 7,
       isCurrent: () => true
     });
 
-    const requestInit = fetchMock.mock.calls[0]?.[1] as RequestInit;
-    const requestBody = JSON.parse(requestInit.body as string) as Record<string, unknown>;
-    expect(requestBody.modelMutation).toEqual({
-      clientId: "workspace-session",
-      generation: 7,
-      expectedGeometryId: "geometry-1",
-      expectedUpdatedAt: project.updatedAt
-    });
+    expect(response.project.geometryFiles[0]?.filename).toBe("newer.stl");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  test("does not fall back to a local stale upload when persistence is cancelled", async () => {
+  test("does not write a local upload when its signal is already cancelled", async () => {
     const controller = new AbortController();
-    const fetchMock = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
-      const rejectAsAborted = () => {
-        const error = new Error("The operation was aborted.");
-        error.name = "AbortError";
-        reject(error);
-      };
-      if (init?.signal?.aborted) rejectAsAborted();
-      else init?.signal?.addEventListener("abort", rejectAsAborted, { once: true });
-    }));
+    controller.abort();
+    const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
     const file = new TestFile([sizedAsciiStl], "cancelled.stl", { type: "model/stl" });
-    const upload = uploadModel("project-1", file, project, { signal: controller.signal });
-    const rejectedUpload = expect(upload).rejects.toMatchObject({ name: "AbortError" });
-    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
-    controller.abort();
-
-    await rejectedUpload;
+    await expect(uploadModel("project-1", file, project, { signal: controller.signal }))
+      .rejects.toMatchObject({ name: "AbortError" });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   test("uploads a model locally when the API is unavailable", async () => {
@@ -272,37 +248,33 @@ describe("api", () => {
     expect(response.message).toBe("Bracket Demo loaded.");
   });
 
-  test("requests and loads seeded dynamic sample projects locally", async () => {
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response("missing", { status: 404 }));
+  test("loads seeded dynamic sample projects without a network request", async () => {
+    const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
     for (const sample of ["bracket", "plate", "cantilever"] as const) {
       const response = await loadSampleProject(sample, "dynamic_structural");
-      const requestInit = fetchMock.mock.calls[fetchMock.mock.calls.length - 1]?.[1];
-      const requestBody = JSON.parse(requestInit?.body as string) as Record<string, unknown>;
 
-      expect(requestBody).toEqual({ sample, analysisType: "dynamic_structural" });
       expect(response.project.studies[0]?.type).toBe("dynamic_structural");
       expect(response.project.studies[0]?.loads[0]?.parameters.direction).toEqual([0, -1, 0]);
       expect(response.project.studies[0]?.runs[0]?.id).toBe(`run-${sample}-dynamic-seeded`);
       expect(response.results).toBeUndefined();
     }
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  test("requests and loads modal and thermal sample projects locally", async () => {
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response("missing", { status: 404 }));
+  test("loads modal and thermal sample projects without a network request", async () => {
+    const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
     for (const analysisType of ["modal_analysis", "steady_state_thermal"] as const) {
       const response = await loadSampleProject("bracket", analysisType);
-      const requestInit = fetchMock.mock.calls[fetchMock.mock.calls.length - 1]?.[1];
-      const requestBody = JSON.parse(requestInit?.body as string) as Record<string, unknown>;
 
-      expect(requestBody).toEqual({ sample: "bracket", analysisType });
       expect(response.project.studies[0]?.type).toBe(analysisType);
       expect(response.project.geometryFiles[0]?.metadata.sampleAnalysisType).toBe(analysisType);
       expect(response.results).toBeUndefined();
     }
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   test("loads the beam sample locally with a payload mass sitting on the free end", async () => {
@@ -424,8 +396,8 @@ describe("api", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  test("sends and persists a compatible explicit material and manufacturing process", async () => {
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response("missing", { status: 404 }));
+  test("persists a compatible explicit material and manufacturing process locally", async () => {
+    const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
     const parameters = {
       manufacturingProcessId: "fdm",
@@ -436,12 +408,7 @@ describe("api", () => {
     };
 
     const response = await assignMaterial("study-1", "mat-abs", parameters, study);
-    const requestInit = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
-
-    expect(JSON.parse(requestInit?.body as string)).toEqual({
-      materialId: "mat-abs",
-      parameters
-    });
+    expect(fetchMock).not.toHaveBeenCalled();
     expect(response.study.materialAssignments[0]).toMatchObject({
       materialId: "mat-abs",
       parameters
@@ -1172,6 +1139,8 @@ describe("api", () => {
     expect(apiSource).not.toContain("x-opencae-run-token");
     expect(apiSource).not.toContain("/api/cloud-core");
     expect(apiSource).not.toContain("cloudResultsUrlByRunId");
+    expect(apiSource).not.toContain("fetchJsonWithFallback");
+    expect(apiSource).not.toContain("/api/");
     expect(apiSource).toContain("run-cloud-core-");
   });
 });
