@@ -107,6 +107,12 @@ export type {
   LoadAssemblyPerLoadDiagnostics,
   LoadAssemblyResult
 } from "./loads";
+export {
+  LOAD_EQUILIBRIUM_POLICY,
+  centroidSeparationTolerance,
+  relativeBalanceError,
+  remoteGramPivotTolerance
+} from "./load-policy";
 export type {
   CoreModelPreflightDiagnostics,
   CoreModelPreflightOptions,

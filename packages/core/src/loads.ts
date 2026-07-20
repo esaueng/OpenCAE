@@ -22,6 +22,12 @@ import {
   tet4Volume,
   tet10Volume
 } from "./mesh";
+import {
+  centroidSeparationTolerance,
+  LOAD_EQUILIBRIUM_POLICY,
+  relativeBalanceError,
+  remoteGramPivotTolerance
+} from "./load-policy";
 
 export type LoadAssemblyModel = OpenCAEModelJson | NormalizedOpenCAEModel;
 
@@ -530,9 +536,12 @@ function assembleRemoteForce(
   }
   const targetMoment = crossVector(load.remotePoint, load.totalForce);
   const forceBalanceError = relativeVectorError(loadTotal, load.totalForce, vectorMagnitude(load.totalForce));
-  const momentScale = Math.max(vectorMagnitude(load.totalForce) * geometry.characteristicLength, vectorMagnitude(targetMoment), 1e-30);
+  const momentScale = Math.max(vectorMagnitude(load.totalForce) * geometry.characteristicLength, vectorMagnitude(targetMoment));
   const momentBalanceError = relativeVectorError(appliedMoment, targetMoment, momentScale);
-  if (forceBalanceError > 1e-9 || momentBalanceError > 1e-9) {
+  if (
+    forceBalanceError > LOAD_EQUILIBRIUM_POLICY.forceBalanceRelativeTolerance ||
+    momentBalanceError > LOAD_EQUILIBRIUM_POLICY.remoteMomentBalanceRelativeTolerance
+  ) {
     diagnostics.errors.push({
       code: "remote-wrench-imbalance",
       loadName: load.name,
@@ -588,7 +597,8 @@ function assembleEquivalentBoltPreload(
   const separation = subtractVector(geometryB.centroid, geometryA.centroid);
   const separationLength = vectorMagnitude(separation);
   const separationDirection = normalizeVector(separation);
-  if (!(separationLength > 1e-12) || !separationDirection || dotVector(separationDirection, axis) <= 0.5) {
+  const separationTolerance = centroidSeparationTolerance(geometryA.characteristicLength, geometryB.characteristicLength);
+  if (!(separationLength > separationTolerance) || !separationDirection || dotVector(separationDirection, axis) <= 0.5) {
     diagnostics.errors.push({
       code: "invalid-bolt-preload-axis",
       loadName: load.name,
@@ -599,9 +609,12 @@ function assembleEquivalentBoltPreload(
   const appliedMoment: [number, number, number] = [0, 0, 0];
   distributeTotalSurfaceForce(model, vector, selectionA.facets, scaleVector(axis, load.preloadForce), loadTotal, appliedMoment);
   distributeTotalSurfaceForce(model, vector, selectionB.facets, scaleVector(axis, -load.preloadForce), loadTotal, appliedMoment);
-  const forceBalanceError = vectorMagnitude(loadTotal) / Math.max(2 * load.preloadForce, 1e-30);
-  const momentBalanceError = vectorMagnitude(appliedMoment) / Math.max(load.preloadForce * separationLength, 1e-30);
-  if (forceBalanceError > 1e-9 || momentBalanceError > 1e-6) {
+  const forceBalanceError = relativeBalanceError(vectorMagnitude(loadTotal), 2 * load.preloadForce);
+  const momentBalanceError = relativeBalanceError(vectorMagnitude(appliedMoment), load.preloadForce * separationLength);
+  if (
+    forceBalanceError > LOAD_EQUILIBRIUM_POLICY.forceBalanceRelativeTolerance ||
+    momentBalanceError > LOAD_EQUILIBRIUM_POLICY.preloadMomentBalanceRelativeTolerance
+  ) {
     diagnostics.errors.push({
       code: "bolt-preload-imbalance",
       loadName: load.name,
@@ -736,7 +749,7 @@ function solveRankChecked6x6(matrix: Float64Array, rightHandSide: Float64Array):
   const b = new Float64Array(rightHandSide);
   let matrixScale = 0;
   for (const value of a) matrixScale = Math.max(matrixScale, Math.abs(value));
-  const pivotTolerance = Math.max(matrixScale * 1e-12, 1e-15);
+  const pivotTolerance = remoteGramPivotTolerance(matrixScale);
   for (let column = 0; column < size; column += 1) {
     let pivotRow = column;
     let pivotMagnitude = Math.abs(a[column * size + column] ?? 0);
@@ -943,7 +956,7 @@ function dotVector(left: [number, number, number], right: [number, number, numbe
 
 function normalizeVector(vector: [number, number, number]): [number, number, number] | undefined {
   const magnitude = vectorMagnitude(vector);
-  return magnitude > 1e-15 && Number.isFinite(magnitude) ? scaleVector(vector, 1 / magnitude) : undefined;
+  return magnitude > 0 && Number.isFinite(magnitude) ? scaleVector(vector, 1 / magnitude) : undefined;
 }
 
 function nodePoint(model: LoadAssemblyModel, node: number): [number, number, number] {
@@ -959,7 +972,7 @@ function relativeVectorError(
   expected: [number, number, number],
   scale: number
 ): number {
-  return vectorMagnitude(subtractVector(actual, expected)) / Math.max(scale, 1e-30);
+  return relativeBalanceError(vectorMagnitude(subtractVector(actual, expected)), scale);
 }
 
 function coordinateAt(coordinates: ArrayLike<number>, node: number, component: number): number {
