@@ -1,6 +1,6 @@
 import type { Constraint, DisplayModel, Load, Project } from "@opencae/schema";
 import { ProjectSchema } from "@opencae/schema";
-import { bracketDemoProject, bracketDisplayModel } from "@opencae/db/sample-data";
+import { bracketDemoProject, bracketDisplayModel } from "@opencae/samples";
 import { stlDimensionsFromBase64 } from "@opencae/units";
 import { parseDisplayModel, parseResultBundle } from "./appPersistence";
 import { BRACKET_CORE_CLOUD_GEOMETRY, BRACKET_GEOMETRY_MIGRATION_NOTE, refreshBracketSampleGeometry } from "./bracketGeometryMigration";
