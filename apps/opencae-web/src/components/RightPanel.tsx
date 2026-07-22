@@ -2023,11 +2023,13 @@ function ThermalResultsPanelContent({
         <Info label="Boundary reaction" value={formatResultMetric(resultSummary.reactionHeat, "W")} />
         <Info label="Result source" value={resultSourceLabelForPanel(resultSummary)} />
       </div>
-      <button className="secondary wide" type="button" disabled={reportBusy} onClick={() => void onGenerateReport?.()}><FileDown size={16} />{reportBusy ? "Generating…" : "Generate report"}</button>
-      <button className="secondary wide" type="button" disabled={pngExportBusy} onClick={() => void onExportResultPng?.()}><FileDown size={16} />{pngExportBusy ? "Exporting…" : "Export PNG"}</button>
-      <button className="secondary wide" type="button" disabled={htmlExportBusy} onClick={() => void onExportResultHtml?.()}><FileDown size={16} />{htmlExportBusy ? "Exporting…" : "Export standalone HTML"}</button>
-      {onExportResultData && <button className="secondary wide" type="button" disabled={dataExportBusy !== null || reportDisabled} onClick={() => void onExportResultData("csv")}><FileDown size={16} />{dataExportBusy === "csv" ? "Exporting…" : "Export selected-state CSV"}</button>}
-      {onExportResultData && <button className="secondary wide" type="button" disabled={dataExportBusy !== null || reportDisabled} onClick={() => void onExportResultData("vtu")}><FileDown size={16} />{dataExportBusy === "vtu" ? "Exporting…" : "Export selected-state VTU"}</button>}
+      <div className="result-actions">
+        <button className="secondary wide" type="button" disabled={reportBusy} onClick={() => void onGenerateReport?.()}><FileDown size={16} />{reportBusy ? "Generating…" : "Generate report"}</button>
+        <button className="secondary wide" type="button" disabled={pngExportBusy} onClick={() => void onExportResultPng?.()}><FileDown size={16} />{pngExportBusy ? "Exporting…" : "Export PNG"}</button>
+        <button className="secondary wide" type="button" disabled={htmlExportBusy} onClick={() => void onExportResultHtml?.()}><FileDown size={16} />{htmlExportBusy ? "Exporting…" : "Export standalone HTML"}</button>
+        {onExportResultData && <button className="secondary wide" type="button" disabled={dataExportBusy !== null || reportDisabled} onClick={() => void onExportResultData("csv")}><FileDown size={16} />{dataExportBusy === "csv" ? "Exporting…" : "Export selected-state CSV"}</button>}
+        {onExportResultData && <button className="secondary wide" type="button" disabled={dataExportBusy !== null || reportDisabled} onClick={() => void onExportResultData("vtu")}><FileDown size={16} />{dataExportBusy === "vtu" ? "Exporting…" : "Export selected-state VTU"}</button>}
+      </div>
       {reportError && <p className="panel-warning">{reportError}</p>}
       {pngExportError && <p className="panel-warning">{pngExportError}</p>}
       {htmlExportError && <p className="panel-warning">{htmlExportError}</p>}
@@ -2137,8 +2139,12 @@ function ModalResultsPanelContent({
         <input type="range" min="0.5" max="4" step="0.1" value={stressExaggeration} onChange={(event) => onStressExaggerationChange(Number(event.currentTarget.value))} />
       </label>
       <p className="panel-copy">Amplitude and phase are visualization-only. Normalized mode shapes are not physical displacements.</p>
-      {onExportResultData && <button className="secondary wide" type="button" disabled={dataExportBusy !== null || reportDisabled} onClick={() => void onExportResultData("csv")}><FileDown size={16} />{dataExportBusy === "csv" ? "Exporting…" : "Export selected-mode CSV"}</button>}
-      {onExportResultData && <button className="secondary wide" type="button" disabled={dataExportBusy !== null || reportDisabled} onClick={() => void onExportResultData("vtu")}><FileDown size={16} />{dataExportBusy === "vtu" ? "Exporting…" : "Export selected-mode VTU"}</button>}
+      {onExportResultData && (
+        <div className="result-actions">
+          <button className="secondary wide" type="button" disabled={dataExportBusy !== null || reportDisabled} onClick={() => void onExportResultData("csv")}><FileDown size={16} />{dataExportBusy === "csv" ? "Exporting…" : "Export selected-mode CSV"}</button>
+          <button className="secondary wide" type="button" disabled={dataExportBusy !== null || reportDisabled} onClick={() => void onExportResultData("vtu")}><FileDown size={16} />{dataExportBusy === "vtu" ? "Exporting…" : "Export selected-mode VTU"}</button>
+        </div>
+      )}
       {dataExportError && <p className="panel-warning" role="alert"><AlertTriangle size={16} />{dataExportError}</p>}
       <div className="legend"><small>Node</small><span /><small>Antinode</small></div>
     </Panel>
@@ -2298,7 +2304,7 @@ function ResultsPanelContent({
           </select>
         </label>
       )}
-      {(onGenerateReport || onExportResultPng) && (
+      {(onGenerateReport || onExportResultPng || onExportResultHtml || onExportResultData) && (
         <div className="result-actions">
           {onGenerateReport && (
             <button className="primary wide" type="button" disabled={reportBusy || reportDisabled} onClick={() => void onGenerateReport({ targetSafetyFactor })}>
@@ -2310,22 +2316,22 @@ function ResultsPanelContent({
               <FileDown size={18} />{pngExportBusy ? "Exporting…" : "Export PNG"}
             </button>
           )}
+          {onExportResultHtml && (
+            <button className="secondary wide" type="button" disabled={htmlExportBusy || reportDisabled} onClick={() => void onExportResultHtml()}>
+              <FileDown size={18} />{htmlExportBusy ? "Packaging…" : "Export offline HTML"}
+            </button>
+          )}
+          {onExportResultData && (
+            <button className="secondary wide" type="button" disabled={dataExportBusy !== null || reportDisabled} onClick={() => void onExportResultData("csv")}>
+              <FileDown size={18} />{dataExportBusy === "csv" ? "Exporting…" : "Export selected-state CSV"}
+            </button>
+          )}
+          {onExportResultData && (
+            <button className="secondary wide" type="button" disabled={dataExportBusy !== null || reportDisabled} onClick={() => void onExportResultData("vtu")}>
+              <FileDown size={18} />{dataExportBusy === "vtu" ? "Exporting…" : "Export selected-state VTU"}
+            </button>
+          )}
         </div>
-      )}
-      {onExportResultHtml && (
-        <button className="secondary wide" type="button" disabled={htmlExportBusy || reportDisabled} onClick={() => void onExportResultHtml()}>
-          <FileDown size={18} />{htmlExportBusy ? "Packaging…" : "Export offline HTML"}
-        </button>
-      )}
-      {onExportResultData && (
-        <button className="secondary wide" type="button" disabled={dataExportBusy !== null || reportDisabled} onClick={() => void onExportResultData("csv")}>
-          <FileDown size={18} />{dataExportBusy === "csv" ? "Exporting…" : "Export selected-state CSV"}
-        </button>
-      )}
-      {onExportResultData && (
-        <button className="secondary wide" type="button" disabled={dataExportBusy !== null || reportDisabled} onClick={() => void onExportResultData("vtu")}>
-          <FileDown size={18} />{dataExportBusy === "vtu" ? "Exporting…" : "Export selected-state VTU"}
-        </button>
       )}
       {reportError && <p className="panel-warning" role="alert"><AlertTriangle size={16} />{reportError}</p>}
       {pngExportError && <p className="panel-warning" role="alert"><AlertTriangle size={16} />{pngExportError}</p>}
