@@ -2116,15 +2116,19 @@ function ResultsPanelContent({
           </select>
         </label>
       )}
-      {onGenerateReport && (
-        <button className="primary wide" type="button" disabled={reportBusy || reportDisabled} onClick={() => void onGenerateReport({ targetSafetyFactor })}>
-          <FileDown size={18} />{reportBusy ? "Generating…" : "Generate report"}
-        </button>
-      )}
-      {onExportResultPng && (
-        <button className="secondary wide" type="button" disabled={pngExportBusy || reportDisabled} onClick={() => void onExportResultPng()}>
-          <FileDown size={18} />{pngExportBusy ? "Exporting…" : "Export PNG"}
-        </button>
+      {(onGenerateReport || onExportResultPng) && (
+        <div className="result-actions">
+          {onGenerateReport && (
+            <button className="primary wide" type="button" disabled={reportBusy || reportDisabled} onClick={() => void onGenerateReport({ targetSafetyFactor })}>
+              <FileDown size={18} />{reportBusy ? "Generating…" : "Generate report"}
+            </button>
+          )}
+          {onExportResultPng && (
+            <button className="secondary wide" type="button" disabled={pngExportBusy || reportDisabled} onClick={() => void onExportResultPng()}>
+              <FileDown size={18} />{pngExportBusy ? "Exporting…" : "Export PNG"}
+            </button>
+          )}
+        </div>
       )}
       {reportError && <p className="panel-warning" role="alert"><AlertTriangle size={16} />{reportError}</p>}
       {pngExportError && <p className="panel-warning" role="alert"><AlertTriangle size={16} />{pngExportError}</p>}

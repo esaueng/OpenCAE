@@ -3107,6 +3107,29 @@ button:disabled {
   width: 100%;
 }
 
+/* Results export/report actions: one left-aligned column so every download
+   icon and label lines up in a shared gutter instead of each button centering
+   its own icon+label to a different x. The assessment card below reuses the
+   same 20px icon gutter and text column (see .failure-assessment). */
+.result-actions {
+  display: grid;
+  gap: var(--sp-2);
+  margin: 0 0 14px;
+}
+
+.result-actions .primary,
+.result-actions .secondary {
+  justify-content: flex-start;
+  gap: 10px;
+}
+
+.result-actions .primary svg,
+.result-actions .secondary svg {
+  width: 20px;
+  height: 20px;
+  flex: none;
+}
+
 .button-grid,
 .result-buttons {
   display: grid;
@@ -3307,10 +3330,12 @@ button:disabled {
 .failure-assessment {
   margin-top: 14px;
   display: grid;
-  grid-template-columns: 28px minmax(0, 1fr);
+  grid-template-columns: 20px minmax(0, 1fr);
   gap: 10px;
   align-items: start;
-  padding: 12px;
+  /* 3px left border + 9px padding = 12px content start, matching the action
+     buttons above (1px border + 11px padding) so icons and text stay in column. */
+  padding: 12px 12px 12px 9px;
   color: var(--color-text);
   background: rgba(77, 163, 255, 0.12);
   border-left: 3px solid var(--color-accent);
@@ -3333,8 +3358,8 @@ button:disabled {
 }
 
 .failure-assessment .assessment-icon {
-  width: 28px;
-  height: 28px;
+  width: 20px;
+  height: 20px;
   display: inline-grid;
   place-items: center;
   align-self: center;
