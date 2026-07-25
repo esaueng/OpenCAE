@@ -9,16 +9,17 @@ import "./styles/app.css";
 initPlausibleAnalytics();
 registerOfflineCaching();
 
-// In-browser wasm meshing proof harness (plan A-M2). On by default (A-M4);
-// statically dead-code eliminated in VITE_WASM_MESHING=0 opt-out builds. It
-// loads as its own lazy chunk so the initial bundle stays untouched.
+// Debug/verification harnesses (plan A-M2). Both are statically dead-code
+// eliminated in VITE_WASM_MESHING=0 opt-out builds, and both load only when the
+// URL asks for them, so a normal session never fetches either chunk:
+// - ?meshProof=1|step|run drives a real end-to-end mesh and exposes
+//   window.__opencaeMeshProof (scripts/verify-wasm-mesh-browser.mjs and
+//   scripts/verify-offline-pwa.mjs always navigate with this parameter).
+// - ?solveBench=1 runs the 100k-DOF solve benchmark.
 if (import.meta.env.VITE_WASM_MESHING !== "0") {
-  void import("./workers/meshHarness");
-  // 100k-DOF solve benchmark harness (?solveBench=1): only loaded when the
-  // URL asks for it, so normal sessions never fetch the chunk.
-  if (new URLSearchParams(window.location.search).has("solveBench")) {
-    void import("./workers/solveBenchHarness");
-  }
+  const debugParams = new URLSearchParams(window.location.search);
+  if (debugParams.has("meshProof")) void import("./workers/meshHarness");
+  if (debugParams.has("solveBench")) void import("./workers/solveBenchHarness");
 }
 
 createRoot(document.getElementById("root")!).render(

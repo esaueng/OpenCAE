@@ -713,7 +713,6 @@ img {
 
 .workflow-modal-header h2,
 .workflow-modal-header h3,
-.simulation-group h3,
 .material-list-pane h3,
 .material-preview-pane h3 {
   margin: 0;
@@ -3508,7 +3507,6 @@ button:disabled {
 }
 
 .summary-box,
-.list-block,
 .placement-chip {
   margin-top: 14px;
   padding: 10px;
@@ -3532,7 +3530,6 @@ button:disabled {
   line-height: var(--lh-loose);
 }
 
-.list-block h3,
 .editable-list h3,
 .section-title {
   margin: 0 0 8px;
@@ -3934,11 +3931,6 @@ button:disabled {
   font-weight: var(--fw-medium);
 }
 
-.list-block p {
-  margin: 6px 0;
-  color: var(--color-text-muted);
-}
-
 .editable-list {
   display: grid;
   gap: 8px;
@@ -4174,14 +4166,12 @@ button:disabled {
   border-radius: var(--radius-sm);
 }
 
-.concept-card-list,
-.report-list {
+.concept-card-list {
   display: grid;
   gap: 10px;
 }
 
-.concept-card,
-.report-list div {
+.concept-card {
   display: grid;
   align-items: center;
   min-height: 54px;
@@ -4211,8 +4201,7 @@ button:disabled {
   display: block;
 }
 
-.concept-card strong,
-.report-list div {
+.concept-card strong {
   color: var(--color-text);
   font-weight: var(--fw-medium);
 }
@@ -4365,13 +4354,6 @@ button:disabled {
 
 .status-state.running i {
   background: var(--color-accent);
-}
-
-.mock-backend {
-  margin-left: auto;
-  color: var(--color-text-subtle);
-  font-family: var(--font-mono);
-  font-size: var(--fs-xs);
 }
 
 .bottom-content {
@@ -4984,7 +4966,6 @@ button:disabled {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .mock-backend,
   .status-attribution {
     display: none;
   }
