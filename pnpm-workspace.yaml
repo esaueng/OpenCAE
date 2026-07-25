@@ -11,6 +11,26 @@ overrides:
   # kept flagging GHSA-c2j3-45gr-mqc4 against the installed 3.4.11. 3.4.12 is the
   # patched release and satisfies jsPDF's ^3.3.1.
   dompurify: 3.4.12
+  # brace-expansion GHSA-mh99-v99m-4gvg (high): expand() bounds the number of
+  # results but not their length, so ~7.5 KB of chained brace groups exhausts
+  # memory and kills the process with an uncatchable OOM.
+  #
+  # We carry two copies. glob@11 -> minimatch@10 already resolves the patched
+  # 5.0.8. The flagged one is 2.1.2, reached only through filelist -> minimatch@5,
+  # under vite-plugin-pwa (a devDependency): build-machine code that never ships,
+  # fed only by our own glob patterns from src/lib/offlinePrecache.ts.
+  #
+  # It is still worth closing, but NOT by overriding brace-expansion itself:
+  # there is no patched 2.x (the maintenance-v2 tag is the vulnerable 2.1.2),
+  # and 5.x's CJS entry exports an object, not a function, while minimatch@5
+  # does `const expand = require('brace-expansion')` and calls `expand(...)`.
+  # Forcing 5.0.8 breaks the build with "expand is not a function".
+  #
+  # Overriding minimatch instead collapses this path onto the 5.0.8 copy that is
+  # already installed. filelist is the only minimatch@5 consumer and only ever
+  # calls the static `minimatch.match()`, which minimatch@10 still exports with
+  # identical behavior.
+  "filelist>minimatch": "^10"
 allowBuilds:
   better-sqlite3: true
   core-js: false
