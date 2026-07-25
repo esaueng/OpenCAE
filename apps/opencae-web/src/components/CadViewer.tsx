@@ -6,6 +6,7 @@ import { configureTextBuilder } from "troika-three-text";
 import type { ThreeEvent } from "@react-three/fiber";
 import type { DisplayFace, DisplayModel, MeshSummary, ResultField, ResultRenderBounds } from "@opencae/schema";
 import { globalBuildAxisToModelAxis } from "@opencae/study-core";
+import { SUPPORTED_GEOMETRY_FORMAT_LABEL } from "../geometryFormats";
 import { meshVolumeM3FromTriangles, type Triangle } from "@opencae/units";
 import * as THREE from "three";
 import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
@@ -3004,7 +3005,7 @@ function UnsupportedUploadedModelNotice({ filename }: { filename: string }) {
       <Html center position={[0, 0.35, 0]} className="model-notice">
         <strong>Preview unavailable</strong>
         <span>{filename.replace(" uploaded model", "")}</span>
-        <small>This local viewer can import STEP, STP, STL, or OBJ files. Replace this model with a supported file.</small>
+        <small>This local viewer can import {SUPPORTED_GEOMETRY_FORMAT_LABEL} files. Replace this model with a supported file.</small>
       </Html>
     </group>
   );
