@@ -24,6 +24,8 @@ OpenCAE Core packages live in this monorepo under `packages/*`; no sibling check
 
 The API creates and seeds the local SQLite database if needed. The web app can create a blank project, open a local `.opencae.json` project file, load bracket/beam/cantilever samples, or upload STEP, STP, STL, and OBJ models for the local viewer.
 
+**The web app does not call the API.** Since the July 2026 local-first move ([docs/cloud-retirement.md](docs/cloud-retirement.md)), the workspace creates projects, meshes, solves, and writes reports entirely in the browser; it makes no request to `/api`. `apps/opencae-api` and the `services/*` implementations behind it are a separate, independently runnable reference backend over the same schema — useful for inspecting the data model or driving the flow over HTTP, but not part of the production path. `pnpm dev` starts both so the reference backend stays exercised; running only `pnpm --filter @opencae/web dev` gives you the full product.
+
 ## Current Workflow
 
 OpenCAE guides a study through Model, Material, Supports, Loads, Mesh, Run, Results, and Report steps:
@@ -103,15 +105,15 @@ The `/health` route verifies the production Worker is reachable and reports `sol
 ## Workspace Layout
 
 - `apps/opencae-web` - React/Vite CAD workspace for static and dynamic structural workflows.
-- `apps/opencae-api` - Fastify API for projects, uploads, studies, jobs, artifacts, reports, and service orchestration.
-- `packages/*` - OpenCAE Core model, examples, solver, wasm/webgpu stubs, and viewer packages.
-- `libs/*` - Shared schema, units, materials, storage, jobs, validation (study-core), database, and core-adapter packages.
-- `services/*` - CAD, mesh, solver, post-processing, and legacy container reference implementations. (The `opencae-core-cloud` runner mirror was removed in the July 2026 cloud retirement.)
+- `apps/opencae-api` - Fastify reference API for projects, uploads, studies, jobs, artifacts, reports, and service orchestration. Not on the production path; the web app does not call it.
+- `packages/*` - OpenCAE Core model, examples, CPU solver, WebGPU solver, and viewer packages. (The never-implemented `solver-wasm` placeholder was removed in July 2026; browser WebAssembly is Gmsh meshing in `libs/opencae-mesh-intake`.)
+- `libs/*` - Shared schema, units, materials, storage, jobs, validation (study-core), database, mesh intake, solve pipeline, and core-adapter packages.
+- `services/*` - CAD, mesh, solver, and post-processing reference implementations behind the reference API, plus a legacy CalculiX container note. (The `opencae-core-cloud` runner mirror was removed in the July 2026 cloud retirement.)
 - `runners/opencae-runner-local` - Local runner package for job execution flows.
 - `examples/*` - Sample project documentation and fixtures.
 - `docs/*` - Architecture, local development, file format, validation, and user guide notes.
 - `infra/local/*` - Local SQLite, storage, and jobs setup notes.
-- `data/*` - Local runtime data directories for artifacts, logs, reports, uploads, and SQLite state.
+- `data/*` - Local runtime data directories for the reference API: `artifacts` (including each project's uploads), `logs`, `reports`, and `sqlite` state.
 
 ## Simulation Flow
 
