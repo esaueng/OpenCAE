@@ -89,7 +89,45 @@ export function validateStaticStressStudy(study: Study, customMaterials: readonl
 export function validateStudy(study: Study, customMaterials: readonly CustomMaterial[] = []): Diagnostic[] {
   if (study.type === "dynamic_structural") return validateDynamicStructuralStudy(study, customMaterials);
   if (study.type === "modal_analysis") return validateModalStudy(study, customMaterials);
+  if (study.type === "steady_state_thermal") return validateSteadyStateThermalStudy(study, customMaterials);
   return validateStaticStressStudy(study, customMaterials);
+}
+
+/**
+ * Steady conduction has different rules from the structural cases, and routing
+ * it through `validateStaticStressStudy` gets all three of them wrong: a
+ * volumetric heat generation carries a *body* selection, thermal loads carry no
+ * direction vector, and an inward surface heat flux is signed — a negative
+ * value is cooling, not an error. Only zero and non-finite are wrong.
+ */
+export function validateSteadyStateThermalStudy(study: Study, customMaterials: readonly CustomMaterial[] = []): Diagnostic[] {
+  const diagnostics: Diagnostic[] = [];
+  if (study.materialAssignments.length === 0) diagnostics.push(issue("validation-material", "Choose what the part is made of."));
+  diagnostics.push(...materialProcessDiagnostics(study, customMaterials));
+  if (!study.constraints.some((constraint) => constraint.type === "prescribed_temperature")) {
+    // Without a prescribed temperature the conduction system is singular: every
+    // solution shifted by a constant is equally valid.
+    diagnostics.push(issue("validation-thermal-support", "Prescribe at least one boundary temperature."));
+  }
+  for (const constraint of study.constraints) {
+    if (constraint.type !== "prescribed_temperature") continue;
+    if (typeof constraint.parameters.value !== "number" || !Number.isFinite(constraint.parameters.value)) {
+      diagnostics.push(issue(`validation-thermal-support-value-${constraint.id}`, `Boundary temperature ${constraint.id} needs a finite value.`));
+    }
+  }
+  if (study.loads.length === 0) diagnostics.push(issue("validation-thermal-load", "Apply a surface heat flux or volumetric heat generation."));
+  for (const load of study.loads) {
+    const selection = study.namedSelections.find((item) => item.id === load.selectionRef);
+    const expectedSelectionType = load.type === "heat_generation" ? "body" : "face";
+    if (!selection || selection.entityType !== expectedSelectionType) {
+      diagnostics.push(issue(`validation-load-selection-${load.id}`, `Load ${load.id} must reference a ${expectedSelectionType} selection.`));
+    }
+    if (!isFiniteNonZero(load.parameters.value)) {
+      diagnostics.push(issue(`validation-load-value-${load.id}`, `Load ${load.id} needs a finite non-zero magnitude.`));
+    }
+  }
+  if (study.meshSettings.status !== "complete") diagnostics.push(issue("validation-mesh", "Generate the mesh before running."));
+  return diagnostics;
 }
 
 export function validateModalStudy(study: Extract<Study, { type: "modal_analysis" }>, customMaterials: readonly CustomMaterial[] = []): Diagnostic[] {
@@ -299,6 +337,10 @@ function issue(id: string, message: string): Diagnostic {
 
 function isPositiveFinite(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
+function isFiniteNonZero(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value !== 0;
 }
 
 function positiveNumber(value: unknown): number | undefined {

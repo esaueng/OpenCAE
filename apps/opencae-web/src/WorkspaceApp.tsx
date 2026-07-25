@@ -12,6 +12,7 @@ import { ProjectStorageNotice } from "./components/ProjectStorageNotice";
 import { RightPanel } from "./components/RightPanel";
 import { StartScreen } from "./components/StartScreen";
 import { StepBar, type StepId } from "./components/StepBar";
+import { readinessForStudy } from "./runReadiness";
 import { BoundaryConditionMenu, CreateSimulationScreen } from "./components/SimulationWorkflow";
 import {
   createViewerLoadMarkers,
@@ -493,7 +494,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const solverRunning = Boolean(processingRunId) || (runProgress > 0 && runProgress < 100);
   const runButtonProgress = Math.min(100, Math.max(0, Math.round(runProgress)));
   reportStateRef.current = { viewMode, resultMode, resultSummary, completedRunId, resultPlaybackPlaying };
-  const runReadiness = useMemo(() => readinessForStudy(study), [study]);
+  const runReadiness = useMemo(() => readinessForStudy(study, project?.customMaterials), [project?.customMaterials, study]);
   const canRunSimulation = runReadiness.every((item) => item.done) && !solverRunning && !convergenceBusy;
   const missingRunItems = runReadiness.filter((item) => !item.done).map((item) => item.label);
   const hasActualVolumeMesh = Boolean(study?.meshSettings.summary?.artifacts?.actualCoreModel);
@@ -2716,6 +2717,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           canCancelSimulation={solverRunning}
           canRunSimulation={effectiveCanRunSimulation}
           missingRunItems={effectiveMissingRunItems}
+          runReadiness={runReadiness}
           resultFrameIndex={resultFrameIndex}
           resultFramePosition={resultVisualFramePosition}
           resultFrameOrdinalPosition={resultVisualOrdinalPosition}
@@ -2743,7 +2745,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         status={status}
         logs={logs}
         meshStatus={study?.meshSettings.status === "complete" ? "Ready" : "Not generated"}
-        solverStatus={solverRunning ? "Running" : runProgress >= 100 ? "Complete" : "Idle"}
+        solverStatus={solverRunning ? "Running" : runError ? "Error" : runProgress >= 100 ? "Complete" : "Idle"}
         onClearLogs={clearLogs}
       />
       {renderStorageRecoveryNotice()}
@@ -2917,15 +2919,6 @@ function nearestResultFrameIndex(frameIndexes: readonly number[], framePosition:
     distance = candidateDistance;
   }
   return nearest;
-}
-
-function readinessForStudy(study: Study | null) {
-  return [
-    { label: "Material assigned", done: Boolean(study?.materialAssignments.length) },
-    { label: "Support added", done: Boolean(study?.constraints.length) },
-    ...(study?.type === "modal_analysis" ? [] : [{ label: "Load added", done: Boolean(study?.loads.length) }]),
-    { label: "Mesh generated", done: study?.meshSettings.status === "complete" }
-  ];
 }
 
 function createResultPlaybackFrameController(): MutableResultPlaybackFrameController {

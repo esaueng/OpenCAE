@@ -6,6 +6,7 @@ import { bracketDisplayModel } from "@opencae/samples";
 import type { DisplayModel, Project, ResultField, ResultSummary, Study } from "@opencae/schema";
 import { editableNumberCommitValue, playbackPeakMarkerPercent, resultModeExplanation, RightPanel, rangeProgressPercent } from "./RightPanel";
 import type { StepId } from "./StepBar";
+import { readinessForStudy } from "../runReadiness";
 import type { StepGeometryMetadata } from "../lib/api";
 
 const rightPanelSource = readFileSync(resolve(__dirname, "RightPanel.tsx"), "utf8");
@@ -120,6 +121,7 @@ function renderPanel(activeStep: StepId, overrides: Partial<Parameters<typeof Ri
       onResultPlaybackFpsChange={vi.fn()}
       onResultPlaybackReverseLoopChange={vi.fn()}
       onStepSelect={vi.fn()}
+      runReadiness={readinessForStudy(overrides.study ?? study)}
       {...overrides}
     />
   );
@@ -1454,6 +1456,7 @@ describe("RightPanel payload mass controls", () => {
           project={project}
           displayModel={displayModel}
           study={study}
+          runReadiness={readinessForStudy(study)}
           selectedFace={displayModel.faces[0] ?? null}
           viewMode="model"
           resultMode="stress"
@@ -1521,6 +1524,7 @@ describe("RightPanel payload mass controls", () => {
         activeStep="loads"
         project={project}
         displayModel={displayModel}
+        runReadiness={readinessForStudy(study)}
         study={{
           ...study,
           loads: [{
@@ -1586,6 +1590,7 @@ describe("RightPanel payload mass controls", () => {
         activeStep="loads"
         project={project}
         displayModel={displayModel}
+        runReadiness={readinessForStudy(study)}
         study={{
           ...study,
           loads: [{
@@ -1657,6 +1662,7 @@ describe("RightPanel payload mass controls", () => {
         project={project}
         displayModel={displayModel}
         study={{ ...study, meshSettings: { preset: "medium", status: "not_started" } }}
+        runReadiness={readinessForStudy(study)}
         selectedFace={displayModel.faces[0] ?? null}
         viewMode="model"
         resultMode="stress"
@@ -1984,6 +1990,35 @@ describe("RightPanel payload mass controls", () => {
     expect(html).toContain("Create parametric part");
     expect(html).toContain("Add to project");
     expect(html).toContain("Download .step");
+  });
+  test("refuses a non-positive load magnitude at the point of entry", () => {
+    // A -1 N load used to save cleanly, read as ready, and only be refused once
+    // the solver had started. The editor now applies the validator's own rule.
+    const negative = renderPanel("loads", { draftLoadValue: -1, selectedFace: displayModel.faces[0] ?? null });
+    expect(negative).toContain("Magnitude must be greater than zero.");
+
+    const zero = renderPanel("loads", { draftLoadValue: 0, selectedFace: displayModel.faces[0] ?? null });
+    expect(zero).toContain("Magnitude cannot be zero.");
+
+    const positive = renderPanel("loads", { draftLoadValue: 500, selectedFace: displayModel.faces[0] ?? null });
+    expect(positive).not.toContain("Magnitude must be greater than zero.");
+    expect(positive).not.toContain("Magnitude cannot be zero.");
+  });
+
+  test("shows why the run gate is closed in the readiness checklist", () => {
+    const markup = renderPanel("run", {
+      study: {
+        ...study,
+        loads: [{
+          id: "load-1",
+          type: "force",
+          selectionRef: "selection-top",
+          parameters: { value: -1, units: "N", direction: [0, 0, -1] },
+          status: "complete"
+        }]
+      } as Study
+    });
+    expect(markup).toContain("positive finite magnitude");
   });
 });
 

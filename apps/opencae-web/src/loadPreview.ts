@@ -42,6 +42,27 @@ export function unitsForLoadType(type: LoadType) {
   return "N";
 }
 
+/**
+ * The editor-side mirror of the domain validator's load-magnitude rule.
+ *
+ * `validateStudy` rejects a non-positive structural magnitude and a zero or
+ * non-finite thermal one, but it only runs at the Run gate. Without the same
+ * rule at the point of entry, a -1 N load saved cleanly, read as ready, and was
+ * only refused once the solver had already started. Returns the message to show
+ * beside the field, or null when the magnitude is acceptable.
+ *
+ * Thermal flux is signed on purpose: a negative inward surface heat flux is
+ * cooling, and rejecting it would refuse a legitimate model.
+ */
+export function loadMagnitudeError(valueSi: number, studyType: Study["type"]): string | null {
+  if (!Number.isFinite(valueSi)) return "Enter a number.";
+  if (valueSi === 0) return "Magnitude cannot be zero.";
+  if (studyType !== "steady_state_thermal" && valueSi < 0) {
+    return "Magnitude must be greater than zero. Use Direction to reverse the load.";
+  }
+  return null;
+}
+
 export function equivalentForceForLoad(load: Pick<Load, "type" | "parameters">): number {
   const rawValue = Number(load.parameters.value ?? 0);
   if (!Number.isFinite(rawValue) || rawValue <= 0) return 0;
