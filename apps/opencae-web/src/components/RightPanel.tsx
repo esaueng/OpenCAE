@@ -5,8 +5,9 @@ import { compatibleManufacturingProcessesFor, defaultManufacturingParametersFor,
 import { assessResultFailure, estimateAllowableLoadForSafetyFactor, isModalResultSummary, isThermalResultSummary } from "@opencae/schema";
 import type { Constraint, CustomMaterial, DisplayFace, DisplayModel, DynamicSolverSettings, Load, LoadCase, LoadCombination, Material, MeshConnection, MeshConvergenceRecord, MeshQuality, ModalResultSummary, ModalSolverSettings, Project, ResultField, ResultSummary, RunTimingEstimate, RunVariantRef, SimulationFidelity, StructuralResultSummary, Study, ThermalResultSummary } from "@opencae/schema";
 import { inferGlobalCriticalPrintAxis } from "@opencae/study-core";
+import type { RunReadinessItem } from "../runReadiness";
 import type { StepId } from "./StepBar";
-import { applicationPointForLoad, createViewerLoadMarkers, directionLabelForLoad, directionVectorForLabel, equivalentForceForLoad, LOAD_DIRECTION_LABELS, loadMarkerOrdinalLabel, payloadObjectForLoad, unitsForLoadType, type LoadApplicationPoint, type LoadDirectionLabel, type LoadType, type PayloadLoadMetadata, type PayloadMassMode } from "../loadPreview";
+import { applicationPointForLoad, createViewerLoadMarkers, directionLabelForLoad, directionVectorForLabel, equivalentForceForLoad, LOAD_DIRECTION_LABELS, loadMagnitudeError, loadMarkerOrdinalLabel, payloadObjectForLoad, unitsForLoadType, type LoadApplicationPoint, type LoadDirectionLabel, type LoadType, type PayloadLoadMetadata, type PayloadMassMode } from "../loadPreview";
 import { DEFAULT_SECTION_PLANE, type PayloadObjectSelection, type ResultMode, type SectionPlaneState, type StressComponent, type ViewMode } from "../workspaceViewTypes";
 import { availableStressComponents, type ResolvedResultProbe } from "../resultSelection";
 import type { SampleAnalysisType, SampleModelId } from "../lib/api";
@@ -150,6 +151,7 @@ interface RightPanelProps {
   canCancelSimulation?: boolean;
   canRunSimulation: boolean;
   missingRunItems: string[];
+  runReadiness: RunReadinessItem[];
   resultFrameIndex?: number;
   resultFramePosition?: number;
   resultFrameOrdinalPosition?: number;
@@ -738,13 +740,15 @@ function LoadsPanel({
   const displayDraftLoad = loadValueForUnits(effectiveDraftValue, units, project.unitSystem);
   const selectedPayloadMaterial = payloadMaterialForId(payloadMaterialId);
   const canAddPayloadMass = payloadMassMode === "manual" ? draftLoadValue > 0 : calculatedPayloadMass > 0;
-  const canAddDraftLoad = draftLoadType === "gravity"
+  const draftMagnitudeError = loadMagnitudeError(effectiveDraftValue, study.type);
+  const hasDraftPlacement = draftLoadType === "gravity"
     ? Boolean(selectedPayloadObject) && canAddPayloadMass
     : draftLoadType === "volume_force" || draftLoadType === "heat_generation"
       ? Boolean(bodySelection)
       : draftLoadType === "bolt_preload"
         ? Boolean(selectedFace && secondarySelectionRef)
         : Boolean(selectedFace);
+  const canAddDraftLoad = hasDraftPlacement && !draftMagnitudeError;
   const payloadMetadata: PayloadLoadMetadata = draftLoadType === "gravity"
     ? {
       payloadMaterialId,
@@ -887,7 +891,8 @@ function LoadsPanel({
           ))}
         </select>
       </label>}
-      <button className="outline-action wide" disabled={!canAddDraftLoad} onClick={() => canAddDraftLoad && onAddLoad(
+      {hasDraftPlacement && draftMagnitudeError && <p className="field-error" role="alert">{draftMagnitudeError}</p>}
+      <button className="outline-action wide" disabled={!canAddDraftLoad} title={draftMagnitudeError ?? undefined} onClick={() => canAddDraftLoad && onAddLoad(
         draftLoadType,
         effectiveDraftValue,
         placementSelection?.id,
@@ -1221,6 +1226,15 @@ function LoadEditForm({ load, study, displayModel, unitSystem, accessibleName, o
     stressValue: 0
   }), [selectedDisplayFace, selectedFace?.entityId, selectedFace?.label]);
   const previewLoad = useMemo(() => editedLoadForForm(load, type, value, displayUnits, units, direction, directionFace, displayModel, payloadMetadata, editedValue), [direction, directionFace, displayModel, displayUnits, editedValue, load, payloadMetadata, type, units, value]);
+  const magnitudeError = loadMagnitudeError(editedValue, study.type);
+  const opposingFaceError = type === "bolt_preload" && (!secondarySelectionRef || secondarySelectionRef === load.selectionRef)
+    ? "Choose a different opposing face."
+    : null;
+  const remotePointError = type === "remote_force" && !remotePoint.every((component) => Number.isFinite(component))
+    ? "Remote point coordinates must be numbers."
+    : null;
+  const saveBlockedBy = magnitudeError ?? opposingFaceError ?? remotePointError;
+  const magnitudeErrorId = `${load.id}-magnitude-error`;
 
   useEffect(() => {
     onPreviewChange(previewLoad);
@@ -1268,11 +1282,18 @@ function LoadEditForm({ load, study, displayModel, unitSystem, accessibleName, o
         <label className="field">
           <HelpLabel helpId="loadMagnitude">Magnitude</HelpLabel>
           <span className="input-with-unit">
-            <input type="number" value={value} onChange={(event) => setValue(event.currentTarget.value)} />
+            <input
+              type="number"
+              value={value}
+              aria-invalid={magnitudeError ? true : undefined}
+              aria-describedby={magnitudeError ? magnitudeErrorId : undefined}
+              onChange={(event) => setValue(event.currentTarget.value)}
+            />
             <span>{displayUnits}</span>
           </span>
         </label>
       )}
+      {magnitudeError && <p className="field-error" id={magnitudeErrorId} role="alert">{magnitudeError}</p>}
       <PlacementReadout selectedRef={selectedRef} />
       {type === "remote_force" ? (
         <fieldset className="field"><legend>Remote point coordinates</legend><div className="vector-inputs">
@@ -1301,7 +1322,9 @@ function LoadEditForm({ load, study, displayModel, unitSystem, accessibleName, o
         <button
           className="primary"
           type="button"
-          onClick={() => onSave(previewLoad)}
+          disabled={Boolean(saveBlockedBy)}
+          title={saveBlockedBy ?? undefined}
+          onClick={() => !saveBlockedBy && onSave(previewLoad)}
         >
           Save
         </button>
@@ -1687,17 +1710,11 @@ function formatCompact(value: number | undefined): string {
   return Math.abs(value) >= 100 ? value.toFixed(1) : Math.abs(value) >= 1 ? value.toFixed(3) : value.toExponential(3);
 }
 
-function RunPanel({ study, displayModel, runProgress, runError, runTiming, onRunSimulation, onCancelSimulation, canCancelSimulation, onUpdateSolverSettings, onChangeStudyType, canRunSimulation, missingRunItems }: RightPanelProps) {
+function RunPanel({ study, displayModel, runProgress, runError, runTiming, onRunSimulation, onCancelSimulation, canCancelSimulation, onUpdateSolverSettings, onChangeStudyType, canRunSimulation, missingRunItems, runReadiness }: RightPanelProps) {
   const progressPercent = Math.max(0, Math.min(100, Math.round(runProgress)));
   const isRunning = canCancelSimulation ?? (progressPercent > 0 && progressPercent < 100);
   const remainingLabel = formatSimulationEta(runTiming?.estimatedRemainingMs, isRunning);
   const elapsedLabel = formatSimulationElapsed(runTiming?.elapsedMs);
-  const checks: Array<readonly [string, boolean]> = [
-    ["Material assigned", study.materialAssignments.length > 0],
-    ["Support added", study.constraints.length > 0],
-    ...(study.type === "modal_analysis" ? [] : [["Load added", study.loads.length > 0] as const]),
-    ["Mesh generated", study.meshSettings.status === "complete"]
-  ];
   const dynamic = study.type === "dynamic_structural" ? study.solverSettings : null;
   const modal = study.type === "modal_analysis" ? study.solverSettings : null;
   const thermal = study.type === "steady_state_thermal";
@@ -1722,7 +1739,11 @@ function RunPanel({ study, displayModel, runProgress, runError, runTiming, onRun
     <Panel title="Run" step="run" helper={modal ? "Solve for natural frequencies and normalized mode shapes." : thermal ? "Solve for steady temperature and heat-flux fields." : "Run the simulation to estimate stress and displacement."}>
       <SectionTitle helpId="runReadiness">Readiness</SectionTitle>
       <div className="checklist">
-        {checks.map(([label, done]) => <span key={label} className={done ? "check done" : "check"}><span>{done ? <Check size={18} /> : null}</span>{label}</span>)}
+        {runReadiness.map(({ label, done, blockers }) => (
+          <span key={label} className={done ? "check done" : "check"} title={blockers.join(" ")}>
+            <span>{done ? <Check size={18} /> : null}</span>{label}
+          </span>
+        ))}
       </div>
       {/* B5: the backend picker is gone — every simulation runs locally in the
           browser, so a choice would be routing theater. The Solver info block
