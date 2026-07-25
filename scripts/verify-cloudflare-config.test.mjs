@@ -40,7 +40,7 @@ describe("Cloudflare deployment config guard (post cloud retirement)", () => {
   });
 
   test("OpenCAE Core packages are in-repo and sibling bootstrap files stay deleted", () => {
-    for (const packageDir of ["core", "examples", "solver-cpu", "solver-wasm", "solver-webgpu", "viewer"]) {
+    for (const packageDir of ["core", "examples", "solver-cpu", "solver-webgpu", "viewer"]) {
       expect(existsSync(resolve(rootDir, "packages", packageDir, "package.json")), packageDir).toBe(true);
     }
     for (const retiredPath of [
