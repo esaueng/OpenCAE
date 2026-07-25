@@ -505,7 +505,9 @@ function nonProductionBanner(tier: ResultProvenanceTier): { title: string; messa
   if (tier === "imported_legacy") {
     return {
       title: "LEGACY RESULT",
-      message: "This historical result is read-only. Re-run with OpenCAE Core Cloud for production FEA."
+      // OpenCAE Core Cloud was retired in July 2026 (docs/cloud-retirement.md);
+      // re-running now solves locally in the browser.
+      message: "This historical result is read-only. Re-run the simulation to solve it locally with OpenCAE Core."
     };
   }
   return {

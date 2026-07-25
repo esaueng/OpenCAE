@@ -293,6 +293,92 @@ describe("OpenCAE API server", () => {
     expect(imported.studies[0]!.runs.find((run) => run.id === runId)?.status).toBe("complete_estimate");
   });
 
+  test("stores imported results under the canonical report key the readers use", async () => {
+    const api = await buildApi();
+    const sample = await api.inject({ method: "GET", url: "/api/sample-project" });
+    const project = structuredClone(sample.json().project) as {
+      id: string;
+      studies: Array<{ runs: Array<{ id: string; reportRef?: string }> }>;
+    };
+    const runId = project.studies[0]!.runs[0]!.id;
+    // Force the fallback path: with no ref on the run, the import must mint the
+    // same key LocalReportProvider produces for real solves.
+    delete project.studies[0]!.runs[0]!.reportRef;
+
+    const response = await api.inject({
+      method: "POST",
+      url: "/api/projects/import",
+      remoteAddress: "203.0.113.28",
+      payload: { project, results: importedResultBundle(runId) }
+    });
+
+    expect(response.statusCode).toBe(200);
+    const imported = response.json().project as { id: string; studies: Array<{ runs: Array<{ id: string; reportRef?: string }> }> };
+    const run = imported.studies[0]!.runs.find((candidate) => candidate.id === runId);
+    expect(run?.reportRef).toBe(`${imported.id}/reports/${runId}/report.html`);
+    // The artifact must actually be readable at that key, not just referenced.
+    const report = await api.inject({ method: "GET", url: `/api/runs/${runId}/report` });
+    expect(report.statusCode).toBe(200);
+    expect(report.headers["content-type"]).toBe("text/html; charset=utf-8");
+  });
+
+  test("rejects loads whose magnitude or geometry is not a finite number", async () => {
+    const api = await buildApi();
+    const create = await api.inject({
+      method: "POST",
+      url: "/api/projects",
+      remoteAddress: "203.0.113.29",
+      payload: { mode: "sample", sample: "cantilever" }
+    });
+    const studyId = (create.json().project as { studies: Array<{ id: string }> }).studies[0]!.id;
+    const addLoad = (payload: Record<string, unknown>) => api.inject({
+      method: "POST",
+      url: `/api/studies/${studyId}/loads`,
+      remoteAddress: "203.0.113.29",
+      payload
+    });
+
+    // JSON has no NaN/Infinity literal, so those arrive as strings or nulls.
+    for (const value of ["500", null, {}]) {
+      const response = await addLoad({ type: "force", value });
+      expect(response.statusCode, `value ${JSON.stringify(value)} was accepted`).toBe(400);
+      expect(response.json().error).toBe("Load value must be a finite number.");
+    }
+    const shortVector = await addLoad({ type: "force", value: 500, direction: [0, -1] });
+    expect(shortVector.statusCode).toBe(400);
+    expect(shortVector.json().error).toBe("Load direction must be three finite numbers.");
+
+    const zeroVector = await addLoad({ type: "force", value: 500, direction: [0, 0, 0] });
+    expect(zeroVector.statusCode).toBe(400);
+    expect(zeroVector.json().error).toBe("Load direction must not be a zero vector.");
+
+    const negativeVolume = await addLoad({ type: "gravity", value: 5, payloadVolumeM3: -1 });
+    expect(negativeVolume.statusCode).toBe(400);
+    expect(negativeVolume.json().error).toBe("Payload volume must be a positive finite number.");
+
+    const accepted = await addLoad({ type: "force", value: 500, direction: [0, 0, -1] });
+    expect(accepted.statusCode).toBe(200);
+  });
+
+  test("rate limits project renaming", async () => {
+    const api = await buildApi();
+    const create = await api.inject({ method: "POST", url: "/api/projects", remoteAddress: "203.0.113.30", payload: {} });
+    const projectId = (create.json().project as { id: string }).id;
+    const responses = [];
+    // Rate-limit buckets are per route, so the create above does not count here.
+    for (let index = 0; index < 31; index += 1) {
+      responses.push(await api.inject({
+        method: "PUT",
+        url: `/api/projects/${projectId}`,
+        remoteAddress: "203.0.113.30",
+        payload: { name: `Renamed ${index}` }
+      }));
+    }
+
+    expect(responses.slice(0, 30).every((response) => response.statusCode === 200)).toBe(true);
+    expect(responses[30]?.statusCode).toBe(429);
+  });
+
   // The browser/local backend now runs the full production Core pipeline
   // (B2: cloud-parity solve, provenance kind opencae_core_fea / computed with
   // a browser runner stamp), so eligible local runs finish as production FEA.
@@ -325,6 +411,41 @@ describe("OpenCAE API server", () => {
     expect(run.status).toBe("complete");
   });
 });
+
+function importedResultBundle(runId: string) {
+  const provenance = {
+    kind: "local_estimate",
+    solver: "opencae-local-heuristic-surface",
+    solverVersion: "0.1.0",
+    meshSource: "mock",
+    resultSource: "generated",
+    units: "mm-N-s-MPa"
+  };
+  return {
+    completedRunId: runId,
+    summary: {
+      maxStress: 100,
+      maxStressUnits: "MPa",
+      maxDisplacement: 0.2,
+      maxDisplacementUnits: "mm",
+      safetyFactor: 2,
+      reactionForce: 500,
+      reactionForceUnits: "N",
+      provenance
+    },
+    fields: [{
+      id: "stress",
+      runId,
+      type: "stress",
+      location: "face",
+      values: [100],
+      min: 100,
+      max: 100,
+      units: "MPa",
+      provenance
+    }]
+  };
+}
 
 async function waitForTerminalRun(api: Awaited<ReturnType<typeof buildApi>>, runId: string): Promise<{ status: string }> {
   for (let attempt = 0; attempt < 20; attempt += 1) {
