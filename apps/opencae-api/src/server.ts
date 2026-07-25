@@ -1,6 +1,6 @@
 import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
-import Fastify from "fastify";
+import Fastify, { type FastifyReply } from "fastify";
 import { fileURLToPath } from "node:url";
 import { inspectStepFile } from "@opencae/cad-service";
 import { SQLiteDatabaseProvider } from "@opencae/db";
@@ -105,14 +105,14 @@ api.get("/health", async () => ({ ok: true, mode: "local", service: "opencae-api
 api.get("/api/sample-project", async (request) => {
   const sample = normalizeSampleId((request.query as { sample?: string }).sample);
   return {
-  project: db.getProject(bracketDemoProject.id),
-  displayModel: sampleDisplayModelFor(sample),
-  material: bracketDemoMaterial,
-  resultSummary: bracketResultSummary
-};
+    project: db.getProject(bracketDemoProject.id),
+    displayModel: sampleDisplayModelFor(sample),
+    material: bracketDemoMaterial,
+    resultSummary: bracketResultSummary
+  };
 });
 
-api.post("/api/sample-project/load", async (request) => {
+api.post("/api/sample-project/load", mutatingRateLimit, async (request) => {
   const sample = normalizeSampleId((request.body as { sample?: string } | undefined)?.sample);
   const analysisType = normalizeSampleAnalysisType((request.body as { analysisType?: string } | undefined)?.analysisType);
   const now = new Date().toISOString();
@@ -126,7 +126,7 @@ api.post("/api/sample-project/load", async (request) => {
   const dynamicResults = analysisType === "dynamic_structural" ? dynamicSampleResults(project) : undefined;
   db.upsertProject(project);
   await ensureSampleArtifacts();
-  if (dynamicResults) await persistSampleResults(project, dynamicResults);
+  if (dynamicResults) await persistResultBundle(project, dynamicResults, { withPdf: true });
   return {
     message: sampleProjectMessage(sample, analysisType),
     project: db.getProject(bracketDemoProject.id),
@@ -164,7 +164,7 @@ api.post("/api/projects", mutatingRateLimit, async (request) => {
   const dynamicResults = analysisType === "dynamic_structural" ? dynamicSampleResults(project) : undefined;
   db.upsertProject(project);
   await storage.putObject(project.geometryFiles[0]?.artifactKey ?? `${project.id}/geometry/display.json`, JSON.stringify(sampleDisplayModelFor(sample), null, 2));
-  if (dynamicResults) await persistSampleResults(project, dynamicResults);
+  if (dynamicResults) await persistResultBundle(project, dynamicResults, { withPdf: true });
   return { project, displayModel: sampleDisplayModelFor(sample), ...(dynamicResults ? { results: dynamicResults } : {}), message: "Project created." };
 });
 
@@ -180,7 +180,7 @@ api.post("/api/projects/import", { ...mutatingRateLimit, bodyLimit: MAX_LOCAL_PR
   const importedProject = results ? projectWithImportedResultRefs(project, results) : project;
   db.upsertProject(importedProject);
   await persistImportedModelArtifacts(importedProject, displayModel);
-  if (results) await persistImportedResults(importedProject, results);
+  if (results) await persistResultBundle(importedProject, results, { withPdf: false });
   return { project: importedProject, displayModel, results, message: `${importedProject.name} opened from local file.` };
 });
 
@@ -191,7 +191,7 @@ api.get("/api/projects/:projectId", async (request, reply) => {
   return { project, displayModel: await displayModelForProject(project) };
 });
 
-api.put("/api/projects/:projectId", async (request, reply) => {
+api.put("/api/projects/:projectId", mutatingRateLimit, async (request, reply) => {
   const { projectId } = request.params as { projectId: string };
   const project = db.getProject(projectId);
   if (!project) return reply.code(404).send({ error: "Project not found" });
@@ -282,29 +282,15 @@ api.get("/api/projects/:projectId/report", async (request, reply) => {
   const { projectId } = request.params as { projectId: string };
   const project = db.getProject(projectId);
   if (!project) return reply.code(404).send({ error: "Project not found" });
-
-  const run = latestCompletedRunForProject(project);
-  const reportRef = run?.reportRef;
-  if (!reportRef) return reply.code(404).send({ error: "Report not found. Run the simulation before generating a report." });
-
-  const html = await storage.getObject(reportRef);
-  reply.header("content-type", "text/html; charset=utf-8");
-  return html.toString("utf8");
+  return replyWithHtmlReport(reply, latestCompletedRunForProject(project)?.reportRef);
 });
 
 api.get("/api/projects/:projectId/report.pdf", async (request, reply) => {
   const { projectId } = request.params as { projectId: string };
   const project = db.getProject(projectId);
   if (!project) return reply.code(404).send({ error: "Project not found" });
-
   const run = latestCompletedRunForProject(project);
-  const reportRef = run?.reportRef;
-  if (!reportRef) return reply.code(404).send({ error: "Report not found. Run the simulation before downloading a PDF." });
-
-  const pdf = await pdfForReport(run, reportRef);
-  reply.header("content-type", "application/pdf");
-  reply.header("content-disposition", `attachment; filename="${pdfFilename(project.name)}"`);
-  return pdf;
+  return replyWithPdfReport(reply, run, run?.reportRef, pdfFilename(project.name));
 });
 
 api.get("/api/projects/:projectId/studies", async (request) => {
@@ -355,7 +341,7 @@ api.post("/api/studies/:studyId/validate", async (request, reply) => {
   return { ready: diagnostics.length === 0, diagnostics };
 });
 
-api.post("/api/studies/:studyId/materials", async (request, reply) => {
+api.post("/api/studies/:studyId/materials", mutatingRateLimit, async (request, reply) => {
   const { studyId } = request.params as { studyId: string };
   const study = db.getStudy(studyId);
   if (!study) return reply.code(404).send({ error: "Study not found" });
@@ -384,7 +370,7 @@ api.post("/api/studies/:studyId/materials", async (request, reply) => {
   return { study: next, message: `Material assigned to ${bodySelection?.name ?? "model"}.` };
 });
 
-api.post("/api/studies/:studyId/supports", async (request, reply) => {
+api.post("/api/studies/:studyId/supports", mutatingRateLimit, async (request, reply) => {
   const { studyId } = request.params as { studyId: string };
   const study = db.getStudy(studyId);
   if (!study) return reply.code(404).send({ error: "Study not found" });
@@ -401,7 +387,7 @@ api.post("/api/studies/:studyId/supports", async (request, reply) => {
   return { study: next, message: "Fixed support added." };
 });
 
-api.post("/api/studies/:studyId/loads", async (request, reply) => {
+api.post("/api/studies/:studyId/loads", mutatingRateLimit, async (request, reply) => {
   const { studyId } = request.params as { studyId: string };
   const study = db.getStudy(studyId);
   if (!study) return reply.code(404).send({ error: "Study not found" });
@@ -410,6 +396,28 @@ api.post("/api/studies/:studyId/loads", async (request, reply) => {
   if (!isLoadType(type)) return reply.code(400).send({ error: "Invalid load type." });
   if (type === "bolt_preload" && study.type !== "static_stress") return reply.code(400).send({ error: "Equivalent bolt preload is static-only." });
   if (body?.directionMode !== undefined && !isLoadDirectionMode(body.directionMode)) return reply.code(400).send({ error: "Invalid load direction mode." });
+  // Reject non-finite and non-numeric magnitudes and geometry at the boundary.
+  // `?? 500` only substitutes for an absent value, so NaN, Infinity, and a
+  // numeric string would otherwise reach the stored study and only surface as a
+  // solver failure or a NaN in a report.
+  if (body?.value !== undefined && !isFiniteNumber(body.value)) {
+    return reply.code(400).send({ error: "Load value must be a finite number." });
+  }
+  for (const [field, vector] of [
+    ["direction", body?.direction],
+    ["applicationPoint", body?.applicationPoint],
+    ["remotePoint", body?.remotePoint]
+  ] as const) {
+    if (vector !== undefined && !isVector3(vector)) {
+      return reply.code(400).send({ error: `Load ${field} must be three finite numbers.` });
+    }
+  }
+  if (body?.direction !== undefined && isVector3(body.direction) && body.direction.every((component) => component === 0)) {
+    return reply.code(400).send({ error: "Load direction must not be a zero vector." });
+  }
+  if (body?.payloadVolumeM3 !== undefined && !(isFiniteNumber(body.payloadVolumeM3) && body.payloadVolumeM3 > 0)) {
+    return reply.code(400).send({ error: "Payload volume must be a positive finite number." });
+  }
   const payloadVolumeM3 = body?.payloadVolumeM3;
   const load: Load = {
     id: `load-${crypto.randomUUID()}`,
@@ -591,6 +599,8 @@ api.get("/api/runs/:runId/stream", async (request, reply) => {
   });
 });
 
+// Deliberately not rate limited: this is the abort path for a running solve, and
+// throttling it could leave a user unable to stop a job they started.
 api.post("/api/runs/:runId/cancel", async (request, reply) => {
   const { runId } = request.params as { runId: string };
   const run = db.getRun(runId);
@@ -620,32 +630,58 @@ api.get("/api/runs/:runId/results", async (request, reply) => {
 api.get("/api/runs/:runId/report", async (request, reply) => {
   const { runId } = request.params as { runId: string };
   const run = db.getRun(runId);
-  const reportRef = reportRefForRun(runId, run);
-  if (!reportRef) return reply.code(404).send({ error: "Report not found. Run the simulation before generating a report." });
-  try {
-    const html = await storage.getObject(reportRef);
-    reply.header("content-type", "text/html; charset=utf-8");
-    return html.toString("utf8");
-  } catch {
-    return reply.code(404).send({ error: "Report artifact is missing or unreadable." });
-  }
+  return replyWithHtmlReport(reply, reportRefForRun(runId, run));
 });
 
 api.get("/api/runs/:runId/report.pdf", async (request, reply) => {
   const { runId } = request.params as { runId: string };
   const run = db.getRun(runId);
-  const reportRef = reportRefForRun(runId, run);
-  if (!reportRef) return reply.code(404).send({ error: "Report not found. Run the simulation before downloading a PDF." });
-  const pdf = await pdfForReport(run, reportRef);
-  reply.header("content-type", "application/pdf");
-  reply.header("content-disposition", `attachment; filename="${pdfFilename(runId)}"`);
-  return pdf;
+  return replyWithPdfReport(reply, run, reportRefForRun(runId, run), pdfFilename(runId));
 });
 
 function reportRefForRun(runId: string, run: StudyRun | undefined): string | undefined {
   if (run?.reportRef) return run.reportRef;
   if (runId === "run-bracket-demo-seeded") return "project-bracket-demo/reports/report.html";
   return undefined;
+}
+
+const REPORT_NOT_RUN_HTML_MESSAGE = "Report not found. Run the simulation before generating a report.";
+const REPORT_NOT_RUN_PDF_MESSAGE = "Report not found. Run the simulation before downloading a PDF.";
+const REPORT_ARTIFACT_MISSING_MESSAGE = "Report artifact is missing or unreadable.";
+
+/**
+ * The project-scoped and run-scoped report routes resolve a run differently but
+ * must answer identically once they have a ref. Both distinguish "no report has
+ * been produced yet" from "the ref survived but its artifact did not" (a pruned
+ * local data directory); neither is a server fault, so both are 404.
+ */
+async function replyWithHtmlReport(reply: FastifyReply, reportRef: string | undefined) {
+  if (!reportRef) return reply.code(404).send({ error: REPORT_NOT_RUN_HTML_MESSAGE });
+  try {
+    const html = await storage.getObject(reportRef);
+    reply.header("content-type", "text/html; charset=utf-8");
+    return html.toString("utf8");
+  } catch {
+    return reply.code(404).send({ error: REPORT_ARTIFACT_MISSING_MESSAGE });
+  }
+}
+
+async function replyWithPdfReport(
+  reply: FastifyReply,
+  run: StudyRun | undefined,
+  reportRef: string | undefined,
+  filename: string
+) {
+  if (!reportRef) return reply.code(404).send({ error: REPORT_NOT_RUN_PDF_MESSAGE });
+  let pdf: Buffer;
+  try {
+    pdf = await pdfForReport(run, reportRef);
+  } catch {
+    return reply.code(404).send({ error: REPORT_ARTIFACT_MISSING_MESSAGE });
+  }
+  reply.header("content-type", "application/pdf");
+  reply.header("content-disposition", `attachment; filename="${filename}"`);
+  return pdf;
 }
 
 function publish(runId: string, type: RunEvent["type"], progress: number | undefined, message: string): void {
@@ -700,6 +736,22 @@ async function summaryForResult(resultRef: string): Promise<typeof bracketResult
   return parsed.summary ?? bracketResultSummary;
 }
 
+/**
+ * Canonical artifact keys for one run's results and report.
+ *
+ * `LocalReportProvider.generateReport` owns these paths for real solves; every
+ * other writer and every ref rewriter derives them here so a run cannot end up
+ * with its artifact stored under one key and its ref pointing at another. The
+ * import path previously built `reports/<runId>.html` by hand, which no reader
+ * or PDF derivation ever produced.
+ */
+function runArtifactKeys(projectId: string, runId: string): { resultRef: string; reportRef: string } {
+  return {
+    resultRef: `${projectId}/results/${runId}/results.json`,
+    reportRef: `${projectId}/reports/${runId}/report.html`
+  };
+}
+
 interface ImportedResultBundle {
   activeRunId?: string;
   completedRunId?: string;
@@ -730,8 +782,9 @@ function parseLocalResults(value: unknown, project: Project): ImportedResultBund
 }
 
 function projectWithImportedResultRefs(project: Project, results: ImportedResultBundle): Project {
-  const runId = results.completedRunId ?? results.activeRunId ?? results.fields[0]?.runId;
+  const runId = resultBundleRunId(results);
   if (!runId) return project;
+  const canonical = runArtifactKeys(project.id, runId);
   return {
     ...project,
     studies: project.studies.map((study) => ({
@@ -742,8 +795,8 @@ function projectWithImportedResultRefs(project: Project, results: ImportedResult
               ...run,
               status: runStatusForResultProvenance(results.summary.provenance),
               resultTier: results.resultTier,
-              resultRef: run.resultRef ?? `${project.id}/results/${runId}/results.json`,
-              reportRef: run.reportRef ?? `${project.id}/reports/${runId}.html`
+              resultRef: run.resultRef ?? canonical.resultRef,
+              reportRef: run.reportRef ?? canonical.reportRef
             }
           : run
       )
@@ -791,15 +844,30 @@ async function persistImportedModelArtifacts(project: Project, displayModel: Dis
   }
 }
 
-async function persistImportedResults(project: Project, results: ImportedResultBundle): Promise<void> {
-  const runId = results.completedRunId ?? results.activeRunId ?? results.fields[0]?.runId;
+function resultBundleRunId(results: ImportedResultBundle): string | undefined {
+  return results.completedRunId ?? results.activeRunId ?? results.fields[0]?.runId;
+}
+
+/**
+ * Write one result bundle's artifacts under the run's existing refs, falling
+ * back to the canonical keys. `withPdf` mirrors the sample path, which serves a
+ * PDF straight from storage without a run record to derive it from.
+ */
+async function persistResultBundle(
+  project: Project,
+  results: ImportedResultBundle,
+  options: { withPdf: boolean }
+): Promise<void> {
+  const runId = resultBundleRunId(results);
   if (!runId) return;
+  const canonical = runArtifactKeys(project.id, runId);
   const run = project.studies.flatMap((study) => study.runs).find((item) => item.id === runId);
-  const resultRef = run?.resultRef ?? `${project.id}/results/${runId}/results.json`;
-  const reportRef = run?.reportRef ?? `${project.id}/reports/${runId}.html`;
+  const resultRef = run?.resultRef ?? canonical.resultRef;
+  const reportRef = run?.reportRef ?? canonical.reportRef;
   const summary = { ...results.summary, resultTier: results.resultTier };
   await storage.putObject(resultRef, JSON.stringify({ summary, fields: results.fields }, null, 2));
   await storage.putObject(reportRef, buildHtmlReport(runId, summary));
+  if (options.withPdf) await storage.putObject(reportPdfKeyFor(reportRef), buildPdfReport(runId, summary));
 }
 
 function dynamicSampleResults(project: Project): ImportedResultBundle | undefined {
@@ -815,18 +883,6 @@ function dynamicSampleResults(project: Project): ImportedResultBundle | undefine
     fields: solved.fields,
     resultTier: classifyResultProvenance(solved.summary.provenance)
   };
-}
-
-async function persistSampleResults(project: Project, results: ImportedResultBundle): Promise<void> {
-  const runId = results.completedRunId ?? results.activeRunId ?? results.fields[0]?.runId;
-  if (!runId) return;
-  const run = project.studies.flatMap((study) => study.runs).find((item) => item.id === runId);
-  const resultRef = run?.resultRef ?? `${project.id}/results/${runId}/results.json`;
-  const reportRef = run?.reportRef ?? `${project.id}/reports/${runId}/report.html`;
-  const summary = { ...results.summary, resultTier: results.resultTier };
-  await storage.putObject(resultRef, JSON.stringify({ summary, fields: results.fields }, null, 2));
-  await storage.putObject(reportRef, buildHtmlReport(runId, summary));
-  await storage.putObject(reportPdfKeyFor(reportRef), buildPdfReport(runId, summary));
 }
 
 async function displayModelForProject(project: Project): Promise<DisplayModel> {
@@ -947,8 +1003,12 @@ function isDisplayFace(value: unknown): boolean {
   );
 }
 
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
 function isVector3(value: unknown): value is [number, number, number] {
-  return Array.isArray(value) && value.length === 3 && value.every((item) => typeof item === "number" && Number.isFinite(item));
+  return Array.isArray(value) && value.length === 3 && value.every(isFiniteNumber);
 }
 
 function coreSolverBackendForRun(study: Study, displayModel: DisplayModel, eligibility: ReturnType<typeof openCaeCoreEligibility>): string {
