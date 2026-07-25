@@ -19,14 +19,14 @@
     "@opencae/post-service": "workspace:*",
     "@opencae/schema": "workspace:*",
     "@opencae/solver-service": "workspace:*",
-    "@opencae/study-core": "workspace:*",
     "@opencae/storage": "workspace:*",
+    "@opencae/study-core": "workspace:*",
     "@opencae/units": "workspace:*",
-    "fastify": "^5.2.1"
+    "fastify": "^5.10.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",
-    "tsx": "^4.19.2"
+    "tsx": "^4.23.1"
   },
   "license": "Apache-2.0"
 }

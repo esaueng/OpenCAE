@@ -208,6 +208,29 @@ passes; the layer order is readable in one place.
 Acceptance: `pnpm typecheck`, `pnpm test`, `pnpm build` pass; README claims
 match the code.
 
+## Dependency decisions
+
+Applied (both already inside the declared semver range — a lockfile refresh, not
+a range change; manifests were bumped to the resolved floor):
+
+| Package | From | To | Verified by |
+| - | - | - | - |
+| `fastify` | 5.8.5 | 5.10.0 | `apps/opencae-api` suite, typecheck |
+| `tsx` | 4.21.0 | 4.23.1 | dev runner only; typecheck, full suite |
+
+Deferred, with reasons:
+
+| Package | Behind | Why not now |
+| - | - | - |
+| `@fastify/cors`, `@fastify/rate-limit` | 10 → 11 | Major, and only the reference API depends on them. Plan 024 wants these decided together with that backend's future. |
+| `react`, `react-dom`, `@types/react*` | 18 → 19 | Major with `@react-three/*` peer coupling; must move as one cohort with drei 9→10 and fiber 8→9. |
+| `three`, `@types/three` | 0.171 → 0.185 | Fourteen minors of a renderer the 7.3k-line viewer drives directly. Needs visual regression evidence, not a cleanup pass. |
+| `vite` 6→8, `@vitejs/plugin-react` 4→6 | Major | The build has three custom plugins with documented `closeBundle` ordering constraints (gmsh compression before PWA globbing). |
+| `zod` 3→4 | Major | Owns the persisted project-file schema; a validation-semantics change is a data-format risk. |
+| `typescript` 5→7, `vitest` 3→4 | Major | Toolchain majors; combine with nothing else. |
+| `wrangler` 4.85 → 4.114 | Minor | In range, but it is the deploy tool and cannot be verified here beyond `verify:cloudflare-config` (a real deploy needs an authenticated session). |
+| `jspdf` 3→4, `lucide-react` 0.468→1.x, `better-sqlite3` 11→13, `concurrently` 9→10, `@types/node` 22→26, `@loumalouomega/gmsh-wasm` 0.1→0.2 | Major | Each needs its own verification; the mesher bump in particular would need the browser mesh proofs re-run. |
+
 ## Explicitly out of scope
 
 Backend retirement; `CadViewer.tsx` / `WorkspaceApp.tsx` / `RightPanel.tsx`
