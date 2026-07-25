@@ -6,6 +6,12 @@ packages:
   - "runners/*"
 overrides:
   fast-uri: 3.1.2
+  # jsPDF pulls dompurify in as an optionalDependency for its html() path. That
+  # path is aliased to a throwing stub in apps/opencae-web/vite.config.ts, so no
+  # dompurify code ships — but Dependabot reads the lockfile, not the bundle, and
+  # kept flagging GHSA-c2j3-45gr-mqc4 against the installed 3.4.11. 3.4.12 is the
+  # patched release and satisfies jsPDF's ^3.3.1.
+  dompurify: 3.4.12
 allowBuilds:
   better-sqlite3: true
   core-js: false
