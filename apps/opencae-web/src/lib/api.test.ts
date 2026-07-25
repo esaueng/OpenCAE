@@ -1115,6 +1115,16 @@ describe("api", () => {
     expect(response.message).toBe("Support added.");
   });
 
+  test("still refuses a caller that omits the open study", async () => {
+    // `currentStudy` was optional in the signature but mandatory at runtime, so
+    // undo/redo's three-argument call compiled and then threw on every
+    // invocation. The parameter is required now — `pnpm typecheck` is the real
+    // guard — and this pins the runtime check that backs it for untyped
+    // callers rather than letting a missing study through silently.
+    await expect(updateStudy("study-1", {}, "Study updated.", undefined as unknown as Study))
+      .rejects.toThrow("Could not update study without an open study.");
+  });
+
   test("opens a local project file without requiring the API", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("missing", { status: 404 })));
     const file = new TestFile([JSON.stringify({ project, displayModel })], "project.opencae.json", { type: "application/json" });

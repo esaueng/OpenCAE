@@ -2152,6 +2152,11 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     pushMessage(`Project units switched to ${unitSystem === "SI" ? "metric" : "imperial"}.`);
   }
 
+  // Undo and redo persist the same way every other whole-project edit does —
+  // through `setProject`, which the autosave effect writes. They previously
+  // also called `saveStudyPatch` without the current study it requires at
+  // runtime, so every undo threw, logged a failure, and left "Needs attention"
+  // over a change that had in fact applied.
   function handleUndoAction() {
     if (!project || !canUndoAction) return;
     const previous = undoStack[undoStack.length - 1];
@@ -2159,7 +2164,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     setUndoStack(undoStack.slice(0, -1));
     setRedoStack([...redoStack, cloneProjectSharingEmbeddedModels(project)]);
     setProject(cloneProjectSharingEmbeddedModels(previous));
-    void persistProjectSnapshot(previous, "Undo applied.");
+    pushMessage("Undo applied.");
   }
 
   function handleRedoAction() {
@@ -2169,18 +2174,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     setRedoStack(redoStack.slice(0, -1));
     setUndoStack([...undoStack, cloneProjectSharingEmbeddedModels(project)].slice(-30));
     setProject(cloneProjectSharingEmbeddedModels(next));
-    void persistProjectSnapshot(next, "Redo applied.");
-  }
-
-  async function persistProjectSnapshot(snapshot: Project, message: string) {
-    const snapshotStudy = snapshot.studies[0];
-    if (!snapshotStudy) return;
-    try {
-      await saveStudyPatch(snapshotStudy.id, snapshotStudy, message);
-      pushMessage(message);
-    } catch (error) {
-      pushMessage(error instanceof Error ? error.message : "Could not update undo history.");
-    }
+    pushMessage("Redo applied.");
   }
 
   async function handleResultVariantChange(variantId: string) {
