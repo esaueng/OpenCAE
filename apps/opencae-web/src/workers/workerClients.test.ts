@@ -1,12 +1,17 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { SolveWorkerSolvePayload } from "./solveProtocol";
 
+type PostMessage = (message?: unknown, transfer?: unknown) => void;
+
 class ThrowingWorker {
   static instances: ThrowingWorker[] = [];
 
   readonly addEventListener = vi.fn();
   readonly terminate = vi.fn();
-  readonly postMessage = vi.fn(() => {
+  // Annotated rather than inferred: an always-throwing implementation infers
+  // Mock<() => never>, which subclasses cannot override with a mock that
+  // sometimes returns normally.
+  readonly postMessage = vi.fn<PostMessage>(() => {
     throw new DOMException("The payload could not be cloned.", "DataCloneError");
   });
 
@@ -69,7 +74,7 @@ describe("worker clients", () => {
 
   test("hard-cancels a solve when the cooperative cancel message cannot be sent", async () => {
     class CancelThrowingWorker extends ThrowingWorker {
-      override readonly postMessage = vi.fn()
+      override readonly postMessage = vi.fn<PostMessage>()
         .mockImplementationOnce(() => undefined)
         .mockImplementationOnce(() => {
           throw new DOMException("The worker is no longer running.", "InvalidStateError");
