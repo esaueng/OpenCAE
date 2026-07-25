@@ -44,7 +44,27 @@ describe("app CSS", () => {
     expect(importOverlay).toMatch(/position:\s*absolute/);
     expect(importOverlay).toMatch(/inset:\s*0/);
     expect(importOverlay).toMatch(/place-items:\s*center/);
-    expect(importOverlay).toMatch(/z-index:\s*20/);
+    expect(importOverlay).toMatch(/z-index:\s*var\(--z-viewer-import-overlay\)/);
+    expect(tokens).toMatch(/--z-viewer-import-overlay:\s*20;/);
+  });
+
+  test("stacks app layers through the shared z-index scale", () => {
+    // Every app-level layer resolves through a token so the stacking order is
+    // readable in one place. Bare z-index values are still allowed for ordering
+    // siblings inside a single component's stacking context.
+    const scale = ["--z-base", "--z-viewer-overlay", "--z-log-drawer", "--z-viewer-import-overlay",
+      "--z-modal-backdrop", "--z-condition-menu", "--z-popover", "--z-gallery-backdrop",
+      "--z-tooltip", "--z-skip-link"];
+    const depths = scale.map((name) => {
+      const match = tokens.match(new RegExp(`${name}:\\s*(\\d+);`));
+      if (!match?.[1]) throw new Error(`Missing z-index token ${name}`);
+      return Number(match[1]);
+    });
+    expect(depths).toEqual([...depths].sort((left, right) => left - right));
+    expect(new Set(depths).size).toBe(depths.length);
+
+    const bareDepths = [...css.matchAll(/z-index:\s*(\d+);/gu)].map((match) => Number(match[1]));
+    expect(bareDepths.every((depth) => depth === 1), `unnamed app layer depth in app.css: ${bareDepths.filter((depth) => depth !== 1).join(", ")}`).toBe(true);
   });
 
   test("does not ship the removed viewer reset HUD button styles", () => {

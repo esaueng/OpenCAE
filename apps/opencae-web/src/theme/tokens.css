@@ -92,12 +92,28 @@
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
 
-  /* ── Z-index scale ────────────────────────────────────── */
+  /* ── Z-index scale ──────────────────────────────────────
+     One source of truth for the app's stacking order, lowest first. Values are
+     the ones the app already rendered before they were named; --z-modal (50)
+     and --z-start-screen (100) were dropped because no layer sits at those
+     depths. Bare `z-index: 1` inside a component stays bare: it orders siblings
+     within one stacking context and is not an app layer.
+
+     Known inconsistency, left alone deliberately: the two modal backdrops sit
+     at different depths (--z-modal-backdrop 30 vs --z-gallery-backdrop 120)
+     with the condition menu and popover between them, so a popover floats over
+     the workflow modal's backdrop but under the gallery's. Aligning them is a
+     visible stacking change and needs its own review. */
   --z-base: 0;
   --z-viewer-overlay: 2;
   --z-log-drawer: 5;
-  --z-modal: 50;
-  --z-start-screen: 100;
+  --z-viewer-import-overlay: 20;
+  --z-modal-backdrop: 30;
+  --z-condition-menu: 35;
+  --z-popover: 40;
+  --z-gallery-backdrop: 120;
+  --z-tooltip: 1000;
+  --z-skip-link: 9999;
 }
 
 .theme-light {
