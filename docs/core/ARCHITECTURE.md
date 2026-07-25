@@ -40,8 +40,9 @@ geometry, mesh, load, or result is sent to a server for computation.
 - `@opencae/solver-webgpu` provides the matrix-free WebGPU Tet4 static route for
   eligible large models.
 - `@opencae/mesh-intake` and the browser meshing adapter provide WebAssembly
-  Gmsh geometry-to-volume-mesh execution. `@opencae/solver-wasm` remains a
-  placeholder and is not a solve route.
+  Gmsh geometry-to-volume-mesh execution. (This is the only WebAssembly
+  subsystem: the never-implemented `@opencae/solver-wasm` placeholder package
+  was removed in July 2026.)
 - `@opencae/viewer` and the web application render the returned solver surface
   mesh and aligned result fields.
 

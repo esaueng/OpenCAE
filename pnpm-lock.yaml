@@ -321,7 +321,6 @@ importers:
         specifier: workspace:*
         version: link:../examples
 
-  packages/solver-wasm: {}
 
   packages/solver-webgpu:
     dependencies:

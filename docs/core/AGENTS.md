@@ -20,7 +20,6 @@ Use the following naming convention:
 - core package: `@opencae/core`
 - WebGPU solver package: `@opencae/solver-webgpu`
 - CPU reference solver package: `@opencae/solver-cpu`
-- Wasm solver package: `@opencae/solver-wasm`
 - viewer package: `@opencae/viewer`
 - examples package: `@opencae/examples`
 - web app package: `@opencae/web`
