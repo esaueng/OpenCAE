@@ -7,6 +7,7 @@ import type { DisplayModel, Project, ResultField, ResultSummary, Study } from "@
 import { dynamicSettingConstraintMessage, editableNumberCommitValue, playbackPeakMarkerPercent, resultModeExplanation, RightPanel, rangeProgressPercent } from "./RightPanel";
 import type { StepId } from "./StepBar";
 import { readinessForStudy } from "../runReadiness";
+import { SUPPORTED_GEOMETRY_FORMAT_LABEL } from "../geometryFormats";
 import type { StepGeometryMetadata } from "../lib/api";
 
 const rightPanelSource = readFileSync(resolve(__dirname, "RightPanel.tsx"), "utf8");
@@ -1994,6 +1995,14 @@ describe("RightPanel payload mass controls", () => {
     expect(html).toContain("Add to project");
     expect(html).toContain("Download .step");
   });
+  test("names every importable geometry format from one source", () => {
+    // The file input accepted .obj while the help text listed only STEP, STP,
+    // and STL — three copies of the list, one stale since OBJ landed.
+    const html = renderPanel("model", { study: { ...study, geometryScope: [] } as Study });
+    expect(html).toContain('accept=".step,.stp,.stl,.obj"');
+    expect(SUPPORTED_GEOMETRY_FORMAT_LABEL).toBe("STEP, STP, STL, or OBJ");
+  });
+
   test("refuses a non-positive load magnitude at the point of entry", () => {
     // A -1 N load used to save cleanly, read as ready, and only be refused once
     // the solver had started. The editor now applies the validator's own rule.
