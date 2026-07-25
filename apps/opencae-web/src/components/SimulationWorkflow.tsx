@@ -4,8 +4,8 @@ import { compatibleManufacturingProcessesFor, materialCategoryLabel, starterMate
 import type { CustomMaterial, Material } from "@opencae/schema";
 import { useFocusTrap } from "../hooks/useFocusTrap";
 import { formatDensity, formatMaterialStress, type UnitSystem } from "../unitDisplay";
-import dynamicAnalysisImage from "../assets/simulation-showcase/dynamic-analysis.png";
-import staticAnalysisImage from "../assets/simulation-showcase/static-analysis.png";
+import dynamicAnalysisImage from "../assets/simulation-showcase/dynamic-analysis.webp";
+import staticAnalysisImage from "../assets/simulation-showcase/static-analysis.webp";
 
 type BoundaryConditionType = "fixed" | "prescribed_displacement" | "prescribed_temperature" | "force" | "pressure" | "gravity" | "surface_traction" | "volume_force" | "remote_force" | "bolt_preload" | "heat_flux" | "heat_generation";
 

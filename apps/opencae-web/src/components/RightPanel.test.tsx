@@ -4,8 +4,10 @@ import { resolve } from "node:path";
 import { describe, expect, test, vi } from "vitest";
 import { bracketDisplayModel } from "@opencae/samples";
 import type { DisplayModel, Project, ResultField, ResultSummary, Study } from "@opencae/schema";
-import { editableNumberCommitValue, playbackPeakMarkerPercent, resultModeExplanation, RightPanel, rangeProgressPercent } from "./RightPanel";
+import { dynamicSettingConstraintMessage, editableNumberCommitValue, playbackPeakMarkerPercent, resultModeExplanation, RightPanel, rangeProgressPercent } from "./RightPanel";
 import type { StepId } from "./StepBar";
+import { readinessForStudy } from "../runReadiness";
+import { SUPPORTED_GEOMETRY_FORMAT_LABEL } from "../geometryFormats";
 import type { StepGeometryMetadata } from "../lib/api";
 
 const rightPanelSource = readFileSync(resolve(__dirname, "RightPanel.tsx"), "utf8");
@@ -120,6 +122,7 @@ function renderPanel(activeStep: StepId, overrides: Partial<Parameters<typeof Ri
       onResultPlaybackFpsChange={vi.fn()}
       onResultPlaybackReverseLoopChange={vi.fn()}
       onStepSelect={vi.fn()}
+      runReadiness={readinessForStudy(overrides.study ?? study)}
       {...overrides}
     />
   );
@@ -600,9 +603,9 @@ describe("RightPanel payload mass controls", () => {
     expect(html).toContain("Step 7 of 7");
     expect(html).toContain('class="active" aria-pressed="true">Temperature</button>');
     expect(html).toContain('aria-pressed="false">Heat flux</button>');
-    expect(html).toContain("24.8306 °C");
-    expect(html).toContain("19208 W/m²");
-    expect(html).toContain("5.95557e-9 %");
+    expect(html).toContain("24.83 °C");
+    expect(html).toContain("19,208 W/m²");
+    expect(html).toContain("5.956e-9 %");
   });
 
   test("shows the canonical thermal solver method on the run step", () => {
@@ -1454,6 +1457,7 @@ describe("RightPanel payload mass controls", () => {
           project={project}
           displayModel={displayModel}
           study={study}
+          runReadiness={readinessForStudy(study)}
           selectedFace={displayModel.faces[0] ?? null}
           viewMode="model"
           resultMode="stress"
@@ -1521,6 +1525,7 @@ describe("RightPanel payload mass controls", () => {
         activeStep="loads"
         project={project}
         displayModel={displayModel}
+        runReadiness={readinessForStudy(study)}
         study={{
           ...study,
           loads: [{
@@ -1576,8 +1581,11 @@ describe("RightPanel payload mass controls", () => {
     );
 
     expect(html).not.toContain("Edit load");
-    expect(html).toContain('role="button"');
-    expect(html).toContain('aria-label="Edit L1 force load"');
+    // The summary is a real button and Remove is its sibling: a div[role=button]
+    // wrapping the native Remove button nests interactive content in a control.
+    expect(html).toContain('<button class="editable-summary-trigger" type="button" aria-label="Edit L1 force load"');
+    expect(html).not.toContain('role="button" tabindex="0" aria-label="Edit L1 force load"');
+    expect(html).toContain('</button><button class="remove-glyph" type="button" aria-label="Remove Face force (total) load"');
   });
 
   test("shows the selected payload material in applied payload mass loads", () => {
@@ -1586,6 +1594,7 @@ describe("RightPanel payload mass controls", () => {
         activeStep="loads"
         project={project}
         displayModel={displayModel}
+        runReadiness={readinessForStudy(study)}
         study={{
           ...study,
           loads: [{
@@ -1657,6 +1666,7 @@ describe("RightPanel payload mass controls", () => {
         project={project}
         displayModel={displayModel}
         study={{ ...study, meshSettings: { preset: "medium", status: "not_started" } }}
+        runReadiness={readinessForStudy(study)}
         selectedFace={displayModel.faces[0] ?? null}
         viewMode="model"
         resultMode="stress"
@@ -1985,12 +1995,61 @@ describe("RightPanel payload mass controls", () => {
     expect(html).toContain("Add to project");
     expect(html).toContain("Download .step");
   });
+  test("names every importable geometry format from one source", () => {
+    // The file input accepted .obj while the help text listed only STEP, STP,
+    // and STL — three copies of the list, one stale since OBJ landed.
+    const html = renderPanel("model", { study: { ...study, geometryScope: [] } as Study });
+    expect(html).toContain('accept=".step,.stp,.stl,.obj"');
+    expect(SUPPORTED_GEOMETRY_FORMAT_LABEL).toBe("STEP, STP, STL, or OBJ");
+  });
+
+  test("refuses a non-positive load magnitude at the point of entry", () => {
+    // A -1 N load used to save cleanly, read as ready, and only be refused once
+    // the solver had started. The editor now applies the validator's own rule.
+    const negative = renderPanel("loads", { draftLoadValue: -1, selectedFace: displayModel.faces[0] ?? null });
+    expect(negative).toContain("Magnitude must be greater than zero.");
+
+    const zero = renderPanel("loads", { draftLoadValue: 0, selectedFace: displayModel.faces[0] ?? null });
+    expect(zero).toContain("Magnitude cannot be zero.");
+
+    const positive = renderPanel("loads", { draftLoadValue: 500, selectedFace: displayModel.faces[0] ?? null });
+    expect(positive).not.toContain("Magnitude must be greater than zero.");
+    expect(positive).not.toContain("Magnitude cannot be zero.");
+  });
+
+  test("states the constraint for a dynamic setting draft that will not commit", () => {
+    // A "-1" End time stayed visible while Estimated frames kept using the
+    // previous value and Run stayed enabled — the field and the computation
+    // disagreed with nothing on screen saying which one Run would use.
+    expect(dynamicSettingConstraintMessage(0.005, "s")).toBe("Enter a number of at least 0.005 s.");
+    expect(editableNumberCommitValue("-1", 0.005)).toBeNull();
+    expect(editableNumberCommitValue("0.05", 0.005)).toBe(0.05);
+  });
+
+  test("shows why the run gate is closed in the readiness checklist", () => {
+    const markup = renderPanel("run", {
+      study: {
+        ...study,
+        loads: [{
+          id: "load-1",
+          type: "force",
+          selectionRef: "selection-top",
+          parameters: { value: -1, units: "N", direction: [0, 0, -1] },
+          status: "complete"
+        }]
+      } as Study
+    });
+    expect(markup).toContain("positive finite magnitude");
+  });
 });
 
 test("hides the add-load workflow while editing and restores load-row focus", () => {
   expect(rightPanelSource).toContain('<div hidden={editingLoadId !== null}>');
   expect(rightPanelSource).toContain('role="group" aria-label={accessibleName}');
   expect(rightPanelSource).toContain("window.requestAnimationFrame(() => loadItemRefs.current.get(loadId)?.focus())");
+  // Cancelling the support form used to unmount it with nothing to focus, so
+  // focus fell to <body> instead of returning to Edit support.
+  expect(rightPanelSource).toContain("window.requestAnimationFrame(() => editButtonRefs.current.get(supportId)?.focus())");
   expect(rightPanelSource).toContain('aria-pressed={viewMode === "mesh"}');
   expect(rightPanelSource).toContain('aria-pressed={resultMode === "stress"}');
 });

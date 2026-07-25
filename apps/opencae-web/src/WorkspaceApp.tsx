@@ -12,6 +12,7 @@ import { ProjectStorageNotice } from "./components/ProjectStorageNotice";
 import { RightPanel } from "./components/RightPanel";
 import { StartScreen } from "./components/StartScreen";
 import { StepBar, type StepId } from "./components/StepBar";
+import { readinessForStudy } from "./runReadiness";
 import { BoundaryConditionMenu, CreateSimulationScreen } from "./components/SimulationWorkflow";
 import {
   createViewerLoadMarkers,
@@ -493,7 +494,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const solverRunning = Boolean(processingRunId) || (runProgress > 0 && runProgress < 100);
   const runButtonProgress = Math.min(100, Math.max(0, Math.round(runProgress)));
   reportStateRef.current = { viewMode, resultMode, resultSummary, completedRunId, resultPlaybackPlaying };
-  const runReadiness = useMemo(() => readinessForStudy(study), [study]);
+  const runReadiness = useMemo(() => readinessForStudy(study, project?.customMaterials), [project?.customMaterials, study]);
   const canRunSimulation = runReadiness.every((item) => item.done) && !solverRunning && !convergenceBusy;
   const missingRunItems = runReadiness.filter((item) => !item.done).map((item) => item.label);
   const hasActualVolumeMesh = Boolean(study?.meshSettings.summary?.artifacts?.actualCoreModel);
@@ -2151,6 +2152,11 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     pushMessage(`Project units switched to ${unitSystem === "SI" ? "metric" : "imperial"}.`);
   }
 
+  // Undo and redo persist the same way every other whole-project edit does —
+  // through `setProject`, which the autosave effect writes. They previously
+  // also called `saveStudyPatch` without the current study it requires at
+  // runtime, so every undo threw, logged a failure, and left "Needs attention"
+  // over a change that had in fact applied.
   function handleUndoAction() {
     if (!project || !canUndoAction) return;
     const previous = undoStack[undoStack.length - 1];
@@ -2158,7 +2164,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     setUndoStack(undoStack.slice(0, -1));
     setRedoStack([...redoStack, cloneProjectSharingEmbeddedModels(project)]);
     setProject(cloneProjectSharingEmbeddedModels(previous));
-    void persistProjectSnapshot(previous, "Undo applied.");
+    pushMessage("Undo applied.");
   }
 
   function handleRedoAction() {
@@ -2168,18 +2174,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     setRedoStack(redoStack.slice(0, -1));
     setUndoStack([...undoStack, cloneProjectSharingEmbeddedModels(project)].slice(-30));
     setProject(cloneProjectSharingEmbeddedModels(next));
-    void persistProjectSnapshot(next, "Redo applied.");
-  }
-
-  async function persistProjectSnapshot(snapshot: Project, message: string) {
-    const snapshotStudy = snapshot.studies[0];
-    if (!snapshotStudy) return;
-    try {
-      await saveStudyPatch(snapshotStudy.id, snapshotStudy, message);
-      pushMessage(message);
-    } catch (error) {
-      pushMessage(error instanceof Error ? error.message : "Could not update undo history.");
-    }
+    pushMessage("Redo applied.");
   }
 
   async function handleResultVariantChange(variantId: string) {
@@ -2716,6 +2711,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           canCancelSimulation={solverRunning}
           canRunSimulation={effectiveCanRunSimulation}
           missingRunItems={effectiveMissingRunItems}
+          runReadiness={runReadiness}
           resultFrameIndex={resultFrameIndex}
           resultFramePosition={resultVisualFramePosition}
           resultFrameOrdinalPosition={resultVisualOrdinalPosition}
@@ -2743,7 +2739,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         status={status}
         logs={logs}
         meshStatus={study?.meshSettings.status === "complete" ? "Ready" : "Not generated"}
-        solverStatus={solverRunning ? "Running" : runProgress >= 100 ? "Complete" : "Idle"}
+        solverStatus={solverRunning ? "Running" : runError ? "Error" : runProgress >= 100 ? "Complete" : "Idle"}
         onClearLogs={clearLogs}
       />
       {renderStorageRecoveryNotice()}
@@ -2771,8 +2767,14 @@ function ProjectNameChip({ name, onRename }: { name: string; onRename: (name: st
 
   if (editing) {
     return (
+      <>
+      <span className="visually-hidden" id="project-name-hint">Press Enter to save, Escape to cancel.</span>
       <input
         className="breadcrumb-chip breadcrumb-input"
+        // The breadcrumb gives this field its meaning visually; without a name
+        // it reads as an unlabelled textbox to assistive technology.
+        aria-label="Project name"
+        aria-describedby="project-name-hint"
         value={draftName}
         autoFocus
         onChange={(event) => setDraftName(event.currentTarget.value)}
@@ -2785,6 +2787,7 @@ function ProjectNameChip({ name, onRename }: { name: string; onRename: (name: st
           }
         }}
       />
+      </>
     );
   }
 
@@ -2917,15 +2920,6 @@ function nearestResultFrameIndex(frameIndexes: readonly number[], framePosition:
     distance = candidateDistance;
   }
   return nearest;
-}
-
-function readinessForStudy(study: Study | null) {
-  return [
-    { label: "Material assigned", done: Boolean(study?.materialAssignments.length) },
-    { label: "Support added", done: Boolean(study?.constraints.length) },
-    ...(study?.type === "modal_analysis" ? [] : [{ label: "Load added", done: Boolean(study?.loads.length) }]),
-    { label: "Mesh generated", done: study?.meshSettings.status === "complete" }
-  ];
 }
 
 function createResultPlaybackFrameController(): MutableResultPlaybackFrameController {
