@@ -600,9 +600,9 @@ describe("RightPanel payload mass controls", () => {
     expect(html).toContain("Step 7 of 7");
     expect(html).toContain('class="active" aria-pressed="true">Temperature</button>');
     expect(html).toContain('aria-pressed="false">Heat flux</button>');
-    expect(html).toContain("24.8306 °C");
-    expect(html).toContain("19208 W/m²");
-    expect(html).toContain("5.95557e-9 %");
+    expect(html).toContain("24.83 °C");
+    expect(html).toContain("19,208 W/m²");
+    expect(html).toContain("5.956e-9 %");
   });
 
   test("shows the canonical thermal solver method on the run step", () => {
