@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { AlertTriangle, Anchor, ArrowDown, Atom, Check, ChevronDown, ChevronRight, CircleHelp, Eye, Factory, FileDown, Gauge, Grid3X3, Layers3, Maximize2, Pause, Play, Plus, RotateCcw, Ruler, ScanLine, ShieldCheck, Upload, Weight, Wrench, X } from "lucide-react";
 import { compatibleManufacturingProcessesFor, defaultManufacturingParametersFor, defaultManufacturingProcessIdFor, effectiveMaterialProperties, fdmPropertyFactorsFor, isManufacturingProcessCompatible, manufacturingParametersForAssignment, manufacturingProcessForId, massKgForPayloadMaterial, materialCatalog, materialCategoryLabel, normalizeManufacturingParameters, payloadMaterialForId, payloadMaterials, type ManufacturingParameters, type ManufacturingProcessId, type PayloadMaterialCategory } from "@opencae/materials";
@@ -1715,6 +1715,15 @@ function RunPanel({ study, displayModel, runProgress, runError, runTiming, onRun
   const isRunning = canCancelSimulation ?? (progressPercent > 0 && progressPercent < 100);
   const remainingLabel = formatSimulationEta(runTiming?.estimatedRemainingMs, isRunning);
   const elapsedLabel = formatSimulationElapsed(runTiming?.elapsedMs);
+  const [invalidSettingFields, setInvalidSettingFields] = useState<readonly string[]>([]);
+  const trackSettingValidity = useCallback((field: string, invalid: boolean) => {
+    setInvalidSettingFields((current) => {
+      const has = current.includes(field);
+      if (invalid === has) return current;
+      return invalid ? [...current, field] : current.filter((item) => item !== field);
+    });
+  }, []);
+  const hasInvalidSettingDraft = invalidSettingFields.length > 0;
   const dynamic = study.type === "dynamic_structural" ? study.solverSettings : null;
   const modal = study.type === "modal_analysis" ? study.solverSettings : null;
   const thermal = study.type === "steady_state_thermal";
@@ -1793,10 +1802,10 @@ function RunPanel({ study, displayModel, runProgress, runError, runTiming, onRun
       {dynamic && (
         <>
           <SectionTitle>Dynamic settings</SectionTitle>
-          <DynamicNumberField label="Start time" helpId="dynamicStartTime" unit="s" value={dynamic.startTime} min={0} step={dynamic.timeStep} onCommit={(value) => updateDynamicNumber("startTime", value)} />
-          <DynamicNumberField label="End time" helpId="dynamicEndTime" unit="s" value={dynamic.endTime} min={dynamic.startTime + dynamic.timeStep} step={dynamic.timeStep} onCommit={(value) => updateDynamicNumber("endTime", value)} />
-          <DynamicNumberField label="Time step" helpId="dynamicTimeStep" unit="s" value={dynamic.timeStep} min={0.0001} step="0.0005" onCommit={(value) => updateDynamicNumber("timeStep", value)} />
-          <DynamicNumberField label="Output interval" helpId="dynamicOutputInterval" unit="s" value={outputIntervalValue} min={outputIntervalMinimum} step={outputIntervalMinimum} onCommit={(value) => updateDynamicNumber("outputInterval", value)} />
+          <DynamicNumberField label="Start time" helpId="dynamicStartTime" unit="s" value={dynamic.startTime} min={0} step={dynamic.timeStep} onCommit={(value) => updateDynamicNumber("startTime", value)} onValidityChange={trackSettingValidity} />
+          <DynamicNumberField label="End time" helpId="dynamicEndTime" unit="s" value={dynamic.endTime} min={dynamic.startTime + dynamic.timeStep} step={dynamic.timeStep} onCommit={(value) => updateDynamicNumber("endTime", value)} onValidityChange={trackSettingValidity} />
+          <DynamicNumberField label="Time step" helpId="dynamicTimeStep" unit="s" value={dynamic.timeStep} min={0.0001} step="0.0005" onCommit={(value) => updateDynamicNumber("timeStep", value)} onValidityChange={trackSettingValidity} />
+          <DynamicNumberField label="Output interval" helpId="dynamicOutputInterval" unit="s" value={outputIntervalValue} min={outputIntervalMinimum} step={outputIntervalMinimum} onCommit={(value) => updateDynamicNumber("outputInterval", value)} onValidityChange={trackSettingValidity} />
           <label className="field">
             <HelpLabel helpId="dynamicLoadProfile">Load profile</HelpLabel>
             <select value={loadProfile} onChange={(event) => updateDynamicLoadProfile(event.currentTarget.value)}>
@@ -1804,11 +1813,12 @@ function RunPanel({ study, displayModel, runProgress, runError, runTiming, onRun
             </select>
           </label>
           <p className="panel-copy">{loadProfileHelper}</p>
-          <DynamicNumberField label="Damping ratio" helpId="dynamicDampingRatio" unit="ζ" value={dynamic.dampingRatio} min={0} step="0.01" onCommit={(value) => updateDynamicNumber("dampingRatio", value)} />
+          <DynamicNumberField label="Damping ratio" helpId="dynamicDampingRatio" unit="ζ" value={dynamic.dampingRatio} min={0} step="0.01" onCommit={(value) => updateDynamicNumber("dampingRatio", value)} onValidityChange={trackSettingValidity} />
           <div className="summary-box">
             <Info label="Estimated frames" value={frameEstimate ? frameEstimate.count.toLocaleString() : "--"} />
             <Info label="Output cadence" value={`Every ${formatSeconds(normalizedDynamicOutputInterval(dynamic))}`} />
           </div>
+          {hasInvalidSettingDraft && <p className="field-error" role="alert">Estimated frames use the last saved settings until every field holds a valid value.</p>}
           {frameEstimate && frameEstimate.count > 1000 && <p className="panel-copy">Large frame counts may slow result loading and playback.</p>}
           {frameEstimate?.hasFinalPartialStep && <p className="panel-copy">Final frame is clamped to the selected end time.</p>}
         </>
@@ -1832,8 +1842,8 @@ function RunPanel({ study, displayModel, runProgress, runError, runTiming, onRun
         className="primary wide"
         type="button"
         onClick={isRunning ? onCancelSimulation : onRunSimulation}
-        disabled={isRunning ? !onCancelSimulation : !canRunSimulation}
-        title={isRunning ? "Stop simulation" : (missingRunItems.length ? `Complete before running: ${missingRunItems.join(", ")}` : "Run simulation")}
+        disabled={isRunning ? !onCancelSimulation : (!canRunSimulation || hasInvalidSettingDraft)}
+        title={isRunning ? "Stop simulation" : hasInvalidSettingDraft ? "Correct the highlighted simulation settings" : (missingRunItems.length ? `Complete before running: ${missingRunItems.join(", ")}` : "Run simulation")}
         aria-label={isRunning ? "Stop simulation" : "Run simulation"}
       >
         {isRunning ? <X size={16} /> : <Play size={16} />}
@@ -1869,7 +1879,8 @@ function DynamicNumberField({
   value,
   min,
   step,
-  onCommit
+  onCommit,
+  onValidityChange
 }: {
   label: string;
   helpId: SettingHelpId;
@@ -1878,14 +1889,28 @@ function DynamicNumberField({
   min: number;
   step: number | string;
   onCommit: (value: number) => void;
+  onValidityChange?: (field: SettingHelpId, invalid: boolean) => void;
 }) {
   const formattedValue = formatEditableNumberValue(value);
   const [draftValue, setDraftValue] = useState(formattedValue);
   const [editing, setEditing] = useState(false);
+  // A draft that will not commit stays on screen while the solver keeps using
+  // the last committed value. Reporting the disagreement is the whole point:
+  // silently returning from commitDraft left "-1" in the field with Estimated
+  // frames still computed from the previous end time, and Run still enabled.
+  const invalid = editing && editableNumberCommitValue(draftValue, min) === null;
+  const errorId = `${helpId}-error`;
 
   useEffect(() => {
     if (!editing) setDraftValue(formattedValue);
   }, [editing, formattedValue]);
+
+  useEffect(() => {
+    onValidityChange?.(helpId, invalid);
+    // Leaving the field with an uncommitted draft must not leave the Run
+    // button disabled by a control that is no longer on screen.
+    return () => onValidityChange?.(helpId, false);
+  }, [helpId, invalid, onValidityChange]);
 
   function commitDraft(rawValue: string) {
     const parsed = editableNumberCommitValue(rawValue, min);
@@ -1903,6 +1928,8 @@ function DynamicNumberField({
           min={min}
           step={step}
           value={editing ? draftValue : formattedValue}
+          aria-invalid={invalid ? true : undefined}
+          aria-describedby={invalid ? errorId : undefined}
           onFocus={() => {
             setEditing(true);
             setDraftValue(formattedValue);
@@ -1923,8 +1950,17 @@ function DynamicNumberField({
         />
         <span>{unit}</span>
       </span>
+      {invalid && (
+        <span className="field-error" id={errorId} role="alert">
+          {dynamicSettingConstraintMessage(min, unit)} Settings below still use {formatEditableNumberValue(value)} {unit}.
+        </span>
+      )}
     </label>
   );
+}
+
+export function dynamicSettingConstraintMessage(min: number, unit: string): string {
+  return `Enter a number of at least ${formatEditableNumberValue(min)} ${unit}.`;
 }
 
 export function editableNumberCommitValue(rawValue: string, min: number): number | null {

@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { describe, expect, test, vi } from "vitest";
 import { bracketDisplayModel } from "@opencae/samples";
 import type { DisplayModel, Project, ResultField, ResultSummary, Study } from "@opencae/schema";
-import { editableNumberCommitValue, playbackPeakMarkerPercent, resultModeExplanation, RightPanel, rangeProgressPercent } from "./RightPanel";
+import { dynamicSettingConstraintMessage, editableNumberCommitValue, playbackPeakMarkerPercent, resultModeExplanation, RightPanel, rangeProgressPercent } from "./RightPanel";
 import type { StepId } from "./StepBar";
 import { readinessForStudy } from "../runReadiness";
 import type { StepGeometryMetadata } from "../lib/api";
@@ -2003,6 +2003,15 @@ describe("RightPanel payload mass controls", () => {
     const positive = renderPanel("loads", { draftLoadValue: 500, selectedFace: displayModel.faces[0] ?? null });
     expect(positive).not.toContain("Magnitude must be greater than zero.");
     expect(positive).not.toContain("Magnitude cannot be zero.");
+  });
+
+  test("states the constraint for a dynamic setting draft that will not commit", () => {
+    // A "-1" End time stayed visible while Estimated frames kept using the
+    // previous value and Run stayed enabled — the field and the computation
+    // disagreed with nothing on screen saying which one Run would use.
+    expect(dynamicSettingConstraintMessage(0.005, "s")).toBe("Enter a number of at least 0.005 s.");
+    expect(editableNumberCommitValue("-1", 0.005)).toBeNull();
+    expect(editableNumberCommitValue("0.05", 0.005)).toBe(0.05);
   });
 
   test("shows why the run gate is closed in the readiness checklist", () => {
