@@ -5,7 +5,6 @@ packages:
   - "services/*"
   - "runners/*"
 overrides:
-  fast-uri: 3.1.2
   # jsPDF pulls dompurify in as an optionalDependency for its html() path. That
   # path is aliased to a throwing stub in apps/opencae-web/vite.config.ts, so no
   # dompurify code ships — but Dependabot reads the lockfile, not the bundle, and
