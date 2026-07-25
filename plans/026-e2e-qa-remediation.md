@@ -2,7 +2,26 @@
 
 ## Status
 
-Proposed on 2026-07-25 against `main` at `66ec912` (clean working tree).
+**Executed** on 2026-07-25 on branch `plan/026-e2e-qa-remediation`, seven
+commits (`d2eac0b`..`077729e`) from `main` at `66ec912`. All seven stages
+landed. `pnpm typecheck`, `pnpm build`, `pnpm verify:perf`, and
+`check:bundle` pass; `pnpm test` is **149 files / 1522 tests, all green**.
+
+Two corrections to this plan's diagnoses, recorded rather than quietly
+absorbed:
+
+- **Finding 9 (start-screen flash)** blamed `shouldShowStartScreen`. Wrong:
+  the restore path fills the workspace synchronously from the autosave memo,
+  so that function never returns true on the first frame. The cause is one
+  line up in `App.tsx` — `WorkspaceApp` is a lazy chunk whose Suspense
+  fallback *was* the start screen. Fixed there instead.
+- **Finding 2 (Stage 2)** needed unplanned work in `@opencae/study-core`:
+  `validateStudy` had no thermal branch, so steady conduction fell through to
+  the structural validator. Wiring the Run gate to the validator without
+  `validateSteadyStateThermalStudy` would have refused valid thermal models
+  (body selections, absent direction vectors, negative cooling flux).
+
+Originally proposed against `main` at `66ec912` (clean working tree).
 
 This plan turns the end-to-end testing report into work. The report was
 produced against `main` at `a15bf97`, which is an ancestor of the current

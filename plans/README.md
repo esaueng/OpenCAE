@@ -158,7 +158,7 @@ Dependency notes:
 | 023 Production E2E QA Fixes | COMPLETE | Five implementation commits fix all six findings. Focused tests, typecheck, build, desktop browser QA, 390 px mobile QA, static solve, and three-rung bracket convergence pass; production deployment smoke remains. |
 | 024 Codebase Health and Solver Capability Roadmap | PROPOSED | Release train for correctness/limits/CI, raw result export, backend retirement, solver benchmarking, dependency/UI modernization, harmonic response, buckling, shells, and beams. |
 | 025 Cleanup and Refinement Pass | PARTIALLY LANDED | Stage 1 landed: `main` CI is green again (golden-parity re-toleranced off the CG stopping criterion; the stale playback source-text assertion replaced). Remaining stages — local API structural cleanup, dead-code removal, one stacking scale, dependency/documentation — not confirmed here. |
-| 026 End-to-End QA Remediation | PROPOSED | Eleven live-verified defects from the E2E testing report: imperial display rounding to zero, an unwired domain validator behind the Run gate, undo/redo persistence, invalid dynamic drafts, four accessibility repairs, the start-screen flash, upload copy, and lazy/precache budgets. |
+| 026 End-to-End QA Remediation | COMPLETE | Eleven live-verified defects from the E2E testing report: imperial display rounding to zero, an unwired domain validator behind the Run gate, undo/redo persistence, invalid dynamic drafts, four accessibility repairs, the start-screen flash, upload copy, and lazy/precache budgets. |
 
 Run 2 was non-interactive: plans 006–010 are the top findings by leverage (impact ÷ effort, confidence-weighted), selected by default per the advisor skill's non-interactive rule rather than by maintainer choice. Re-cut as desired.
 
