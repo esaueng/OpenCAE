@@ -1088,7 +1088,7 @@ function structuralLoadCasesForPanel(study: Extract<Study, { type: "static_stres
 }
 
 function LoadEditorList({ editingId, onEditingIdChange, study, displayModel, unitSystem, loadCases, onAssignLoadToCase, onUpdateLoad, onPreviewLoadEdit, onRemoveLoad }: { editingId: string | null; onEditingIdChange: (loadId: string | null) => void; study: Study; displayModel: DisplayModel; unitSystem: UnitSystem; loadCases: LoadCase[]; onAssignLoadToCase: (loadId: string, caseId: string) => void; onUpdateLoad: (load: Load) => void; onPreviewLoadEdit: (load: Load | null) => void; onRemoveLoad: (loadId: string) => void }) {
-  const loadItemRefs = useRef(new Map<string, HTMLDivElement>());
+  const loadItemRefs = useRef(new Map<string, HTMLButtonElement>());
   if (!study.loads.length) return <EmptyEditableList title="Loads" />;
   const loadLabelsById = new Map(createViewerLoadMarkers({ study, displayModel }).map((marker) => [marker.id, loadMarkerOrdinalLabel(marker)]));
 
@@ -1118,29 +1118,29 @@ function LoadEditorList({ editingId, onEditingIdChange, study, displayModel, uni
         const editLabel = `Edit ${loadLabel ? `${loadLabel} ` : ""}${load.type} load`;
         const beginEdit = () => onEditingIdChange(load.id);
         return (
-          <div
-            className={`editable-item load-item ${editing ? "" : "clickable"}`}
-            key={load.id}
-            ref={(node) => {
-              if (node) loadItemRefs.current.set(load.id, node);
-              else loadItemRefs.current.delete(load.id);
-            }}
-            role={editing ? undefined : "button"}
-            tabIndex={editing ? undefined : 0}
-            aria-label={editing ? undefined : editLabel}
-            onClick={editing ? undefined : beginEdit}
-            onKeyDown={editing ? undefined : (event) => {
-              if (event.key !== "Enter" && event.key !== " ") return;
-              event.preventDefault();
-              beginEdit();
-            }}
-          >
+          <div className="editable-item load-item" key={load.id}>
+            {/* The row's summary is a real button, sibling to Remove and to the
+                load-case select. It used to be a div[role=button] wrapping
+                them, which nests interactive content inside a control. */}
             <div className="editable-summary">
-              <span className={`item-icon load-type-icon ${load.type}`}><LoadTypeIcon type={load.type} /></span>
-              <strong>{loadLabel ? `${loadLabel} · ` : ""}{loadTypeLabel(load.type)} · {formatNumber(displayLoad.value)} {displayLoad.units}</strong>
-              <small>{label}{pointLabel} · {directionOptionLabel(directionLabelForLoad(load, displayModel, selectedFace))} direction{equivalentForce}</small>
+              <button
+                className="editable-summary-trigger"
+                type="button"
+                ref={(node) => {
+                  if (node) loadItemRefs.current.set(load.id, node);
+                  else loadItemRefs.current.delete(load.id);
+                }}
+                aria-label={editLabel}
+                aria-expanded={editing}
+                disabled={editing}
+                onClick={beginEdit}
+              >
+                <span className={`item-icon load-type-icon ${load.type}`}><LoadTypeIcon type={load.type} /></span>
+                <strong>{loadLabel ? `${loadLabel} · ` : ""}{loadTypeLabel(load.type)} · {formatNumber(displayLoad.value)} {displayLoad.units}</strong>
+                <small>{label}{pointLabel} · {directionOptionLabel(directionLabelForLoad(load, displayModel, selectedFace))} direction{equivalentForce}</small>
+              </button>
               {loadCases.length > 1 && (
-                <label className="load-case-assignment" onClick={(event) => event.stopPropagation()}>
+                <label className="load-case-assignment">
                   <span>Case</span>
                   <select value={loadCaseId} onChange={(event) => onAssignLoadToCase(load.id, event.currentTarget.value)}>
                     {loadCases.map((loadCase) => <option key={loadCase.id} value={loadCase.id}>{loadCase.name}</option>)}
@@ -1151,10 +1151,7 @@ function LoadEditorList({ editingId, onEditingIdChange, study, displayModel, uni
                 className="remove-glyph"
                 type="button"
                 aria-label={`Remove ${loadTypeLabel(load.type)} load`}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onRemoveLoad(load.id);
-                }}
+                onClick={() => onRemoveLoad(load.id)}
               >
                 <X size={16} />
               </button>
@@ -1361,7 +1358,16 @@ function finiteVector3(value: unknown): LoadApplicationPoint | null {
 
 function SupportEditorList({ study, onUpdateSupport, onRemoveSupport }: { study: Study; onUpdateSupport: (support: Constraint) => void; onRemoveSupport: (supportId: string) => void }) {
   const [editingId, setEditingId] = useState<string | null>(null);
+  // Mirrors the load rows: closing the form must return focus to the control
+  // that opened it, or the form's unmount drops focus to <body>.
+  const editButtonRefs = useRef(new Map<string, HTMLButtonElement>());
   if (!study.constraints.length) return <EmptyEditableList title="Supports" />;
+
+  function finishEditing(supportId: string) {
+    setEditingId(null);
+    window.requestAnimationFrame(() => editButtonRefs.current.get(supportId)?.focus());
+  }
+
   let fixedSupportCount = 0;
   let prescribedSupportCount = 0;
   let thermalSupportCount = 0;
@@ -1389,14 +1395,24 @@ function SupportEditorList({ study, onUpdateSupport, onRemoveSupport }: { study:
               <SupportEditForm
                 support={support}
                 study={study}
-                onCancel={() => setEditingId(null)}
+                onCancel={() => finishEditing(support.id)}
                 onSave={(nextSupport) => {
                   onUpdateSupport(nextSupport);
-                  setEditingId(null);
+                  finishEditing(support.id);
                 }}
               />
             ) : (
-              <button className="secondary wide" type="button" onClick={() => setEditingId(support.id)}>Edit support</button>
+              <button
+                className="secondary wide"
+                type="button"
+                ref={(node) => {
+                  if (node) editButtonRefs.current.set(support.id, node);
+                  else editButtonRefs.current.delete(support.id);
+                }}
+                onClick={() => setEditingId(support.id)}
+              >
+                Edit support
+              </button>
             )}
           </div>
         );

@@ -1580,8 +1580,11 @@ describe("RightPanel payload mass controls", () => {
     );
 
     expect(html).not.toContain("Edit load");
-    expect(html).toContain('role="button"');
-    expect(html).toContain('aria-label="Edit L1 force load"');
+    // The summary is a real button and Remove is its sibling: a div[role=button]
+    // wrapping the native Remove button nests interactive content in a control.
+    expect(html).toContain('<button class="editable-summary-trigger" type="button" aria-label="Edit L1 force load"');
+    expect(html).not.toContain('role="button" tabindex="0" aria-label="Edit L1 force load"');
+    expect(html).toContain('</button><button class="remove-glyph" type="button" aria-label="Remove Face force (total) load"');
   });
 
   test("shows the selected payload material in applied payload mass loads", () => {
@@ -2035,6 +2038,9 @@ test("hides the add-load workflow while editing and restores load-row focus", ()
   expect(rightPanelSource).toContain('<div hidden={editingLoadId !== null}>');
   expect(rightPanelSource).toContain('role="group" aria-label={accessibleName}');
   expect(rightPanelSource).toContain("window.requestAnimationFrame(() => loadItemRefs.current.get(loadId)?.focus())");
+  // Cancelling the support form used to unmount it with nothing to focus, so
+  // focus fell to <body> instead of returning to Edit support.
+  expect(rightPanelSource).toContain("window.requestAnimationFrame(() => editButtonRefs.current.get(supportId)?.focus())");
   expect(rightPanelSource).toContain('aria-pressed={viewMode === "mesh"}');
   expect(rightPanelSource).toContain('aria-pressed={resultMode === "stress"}');
 });
