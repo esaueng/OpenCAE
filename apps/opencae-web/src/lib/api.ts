@@ -544,7 +544,7 @@ export async function renameProject(projectId: string, name: string, currentProj
   };
 }
 
-export async function generateMesh(studyId: string, preset: MeshQuality, currentStudy?: Study, displayModel?: DisplayModel, onProgress?: (message: string) => void, onPhaseProgress?: (progress: WasmMeshPhaseProgress) => void, options: GenerateMeshOptions = {}): Promise<{ study: Study; message: string }> {
+export async function generateMesh(studyId: string, preset: MeshQuality, currentStudy: Study, displayModel?: DisplayModel, onProgress?: (message: string) => void, onPhaseProgress?: (progress: WasmMeshPhaseProgress) => void, options: GenerateMeshOptions = {}): Promise<{ study: Study; message: string }> {
   // In-browser gmsh-wasm meshing (production default since A-M4). Returns
   // null in opt-out builds or when the geometry has no wasm-meshable source,
   // and falls through to the existing preset-estimate path on transient
@@ -650,7 +650,7 @@ export async function assignMaterial(
   studyId: string,
   materialId: string,
   parameters: Record<string, unknown> = {},
-  currentStudy?: Study,
+  currentStudy: Study,
   customMaterials: readonly CustomMaterial[] = []
 ): Promise<{ study: Study; message: string }> {
   resolveMaterial(materialId, customMaterials);
@@ -676,7 +676,7 @@ export async function assignMaterial(
   };
 }
 
-export async function addSupport(studyId: string, selectionRef?: string, currentStudy?: Study): Promise<{ study: Study; message: string }> {
+export async function addSupport(studyId: string, selectionRef: string | undefined, currentStudy: Study): Promise<{ study: Study; message: string }> {
   void studyId;
   if (!currentStudy) throw new Error("Could not add support without an open study.");
   return {
@@ -697,13 +697,13 @@ export async function addSupport(studyId: string, selectionRef?: string, current
   };
 }
 
-export async function updateStudy(studyId: string, patch: Partial<Study>, message = "Study updated.", currentStudy?: Study): Promise<{ study: Study; message: string }> {
+export async function updateStudy(studyId: string, patch: Partial<Study>, message = "Study updated.", currentStudy: Study): Promise<{ study: Study; message: string }> {
   void studyId;
   if (!currentStudy) throw new Error("Could not update study without an open study.");
   return { study: { ...currentStudy, ...patch } as Study, message };
 }
 
-export async function addLoad(studyId: string, type: LoadType, value: number, selectionRef: string, direction: LoadDirection, applicationPoint?: LoadApplicationPoint | null, payloadObject?: PayloadObjectSelection | null, currentStudy?: Study, payloadMetadata: PayloadLoadMetadata = {}, directionMode?: LoadDirectionLabel): Promise<{ study: Study; message: string }> {
+export async function addLoad(studyId: string, type: LoadType, value: number, selectionRef: string, direction: LoadDirection, applicationPoint: LoadApplicationPoint | null | undefined, payloadObject: PayloadObjectSelection | null | undefined, currentStudy: Study, payloadMetadata: PayloadLoadMetadata = {}, directionMode?: LoadDirectionLabel): Promise<{ study: Study; message: string }> {
   void studyId;
   if (!currentStudy) throw new Error("Could not add load without an open study.");
   const loadId = `load-${crypto.randomUUID()}`;
@@ -735,7 +735,7 @@ function loadCasesWithAddedLoad(study: Extract<Study, { type: "static_stress" | 
   return cases.map((loadCase, index) => index === 0 ? { ...loadCase, loadIds: [...loadCase.loadIds, loadId] } : loadCase);
 }
 
-export async function runSimulation(studyId: string, currentStudy?: Study, displayModel?: DisplayModel, options: RunSimulationOptions = {}): Promise<{ run: { id: string }; streamUrl: string; message: string }> {
+export async function runSimulation(studyId: string, currentStudy: Study, displayModel?: DisplayModel, options: RunSimulationOptions = {}): Promise<{ run: { id: string }; streamUrl: string; message: string }> {
   // B4a: every run executes locally in the browser (complex geometry without
   // a stored mesh artifact is wasm-meshed first when this build/browser can).
   // The legacy server-dispatched run branch is gone: since B3
