@@ -39,6 +39,26 @@ function stubMeshWorkerClientWhenDisabled(): PluginOption {
   };
 }
 
+// jsPDF declares html2canvas, canvg, and dompurify as optionalDependencies and
+// imports them statically in its ESM build, so Rollup bundles all three even
+// though nothing here calls doc.html() (report/reportPdf.ts draws with
+// text/rect/addImage/autoTable and outputs an arraybuffer). Aliasing them to a
+// throwing stub drops ~110 kB gzip of unreachable code and removes the app's
+// only dompurify exposure. The stub throws if html() is ever wired up, so the
+// omission cannot fail silently.
+const JSPDF_HTML_ONLY_DEPENDENCIES = new Set(["html2canvas", "canvg", "dompurify"]);
+
+function stubJsPdfHtmlDependencies(): PluginOption {
+  const stubPath = fileURLToPath(new URL("./src/report/jspdfHtml.disabled.ts", import.meta.url));
+  return {
+    name: "opencae:stub-jspdf-html-dependencies",
+    enforce: "pre",
+    resolveId(source) {
+      return JSPDF_HTML_ONLY_DEPENDENCIES.has(source) ? stubPath : null;
+    }
+  };
+}
+
 // Cloudflare Workers static assets cap out at 25 MiB per file, but
 // gmsh-core.wasm is ~44 MB. Default builds therefore never ship the raw
 // .wasm: this plugin post-processes dist, gzip-compressing the emitted asset
@@ -169,7 +189,7 @@ function offlineAssetCaching(): PluginOption {
 }
 
 export default defineConfig({
-  plugins: [react(), stubMeshWorkerClientWhenDisabled(), compressGmshWasmForDeploy(), offlineAssetCaching()],
+  plugins: [react(), stubJsPdfHtmlDependencies(), stubMeshWorkerClientWhenDisabled(), compressGmshWasmForDeploy(), offlineAssetCaching()],
   worker: {
     format: "es"
   },
