@@ -4060,6 +4060,18 @@ button:disabled {
   gap: 8px;
 }
 
+/* Inline validation message shown beside the field that produced it. */
+.field-error {
+  margin: -2px 0 0;
+  color: var(--color-error);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-loose);
+}
+
+input[aria-invalid="true"] {
+  border-color: var(--color-error);
+}
+
 .checklist {
   display: grid;
   gap: 10px;
