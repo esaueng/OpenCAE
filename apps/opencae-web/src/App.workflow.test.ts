@@ -184,4 +184,9 @@ describe("App workflow layout", () => {
     expect(appSource).toContain("mergedSettings.timeStep,");
     expect(appSource).toContain("MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS");
   });
+
+  test("names the inline project rename field for assistive technology", () => {
+    expect(appSource).toContain('aria-label="Project name"');
+    expect(appSource).toContain('id="project-name-hint"');
+  });
 });

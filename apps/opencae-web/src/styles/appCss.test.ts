@@ -292,4 +292,17 @@ describe("app CSS", () => {
     expect(playbackMozThumb).toMatch(/width:\s*4px/);
     expect(playbackMozThumb).toMatch(/border-radius:\s*3px/);
   });
+  test("gives compact controls a 24px minimum target", () => {
+    // WCAG 2.5.8. Measured before this: camera presets ~22px, the brand
+    // control 18px, footer links 16-17px.
+    expect(css).toContain(".brand-button {\n  min-height: 24px;");
+    expect(css).toContain(".viewer-view-presets button {\n  min-height: 24px;");
+    expect(css).toContain(".status-link {\n  min-height: 24px;");
+    expect(css).toContain(".status-attribution {\n  min-height: 24px;");
+  });
+
+  test("styles the load row summary as a real button rather than a clickable row", () => {
+    expect(css).toContain(".editable-summary-trigger {");
+    expect(css).not.toContain(".editable-item.clickable");
+  });
 });

@@ -71,16 +71,16 @@ export function resultSummaryForUnits(summary: ResultSummary, unitSystem: UnitSy
     if (unitSystem === "SI" && summary.temperatureUnits === "°F") {
       return {
         ...summary,
-        minTemperature: roundDisplayValue((summary.minTemperature - 32) * 5 / 9),
-        maxTemperature: roundDisplayValue((summary.maxTemperature - 32) * 5 / 9),
+        minTemperature: (summary.minTemperature - 32) * 5 / 9,
+        maxTemperature: (summary.maxTemperature - 32) * 5 / 9,
         temperatureUnits: "°C"
       };
     }
     if (unitSystem === "SI" || summary.temperatureUnits === "°F") return summary;
     return {
       ...summary,
-      minTemperature: roundDisplayValue(summary.minTemperature * 9 / 5 + 32),
-      maxTemperature: roundDisplayValue(summary.maxTemperature * 9 / 5 + 32),
+      minTemperature: summary.minTemperature * 9 / 5 + 32,
+      maxTemperature: summary.maxTemperature * 9 / 5 + 32,
       temperatureUnits: "°F"
     };
   }
@@ -92,18 +92,18 @@ export function resultSummaryForUnits(summary: ResultSummary, unitSystem: UnitSy
   const transient = summary.transient
     ? {
       ...summary.transient,
-      peakDisplacement: roundDisplayValue(lengthForUnits(summary.transient.peakDisplacement, summary.maxDisplacementUnits, unitSystem).value)
+      peakDisplacement: lengthForUnits(summary.transient.peakDisplacement, summary.maxDisplacementUnits, unitSystem).value
     }
     : undefined;
   return {
     ...summary,
     failureAssessment: undefined,
     ...(transient ? { transient } : {}),
-    maxStress: roundDisplayValue(stress.value),
+    maxStress: stress.value,
     maxStressUnits: stress.units,
-    maxDisplacement: roundDisplayValue(displacement.value),
+    maxDisplacement: displacement.value,
     maxDisplacementUnits: displacement.units,
-    reactionForce: roundDisplayValue(reaction.value),
+    reactionForce: reaction.value,
     reactionForceUnits: reaction.units
   };
 }
@@ -188,9 +188,13 @@ export function formatResultMetric(value: number, units: string | undefined): st
   return hasResultUnit(units) ? `${formatResultNumber(value)} ${units}` : "Unit missing";
 }
 
+/**
+ * Unitless result scalars (safety factor, load scale). Shares the adaptive
+ * precision of `formatDisplayNumber` so every readout in the app and in the
+ * PDF report rounds at one place and by one rule.
+ */
 export function formatResultNumber(value: number): string {
-  if (!Number.isFinite(value) || value === 0) return String(value);
-  return String(Number(value.toPrecision(6)));
+  return formatDisplayNumber(value);
 }
 
 export function solverMethodForResult(resultSummary: ResultSummary, study: Study): string {
@@ -246,9 +250,9 @@ export function displayModelForUnits(displayModel: DisplayModel, unitSystem: Uni
   return {
     ...displayModel,
     dimensions: {
-      x: roundDisplayValue(x.value),
-      y: roundDisplayValue(y.value),
-      z: roundDisplayValue(z.value),
+      x: roundBoundingDimension(x.value),
+      y: roundBoundingDimension(y.value),
+      z: roundBoundingDimension(z.value),
       units: x.units
     }
   };
@@ -303,11 +307,47 @@ export function densityForUnits(value: number, units: string, unitSystem: UnitSy
   return { value, units };
 }
 
-function formatDisplayNumber(value: number): string {
-  return roundDisplayValue(value).toLocaleString(undefined, { maximumFractionDigits: 3 });
+/** Below this magnitude, fixed decimals stop carrying information. */
+const SMALL_MAGNITUDE_FLOOR = 0.001;
+/** Below this magnitude, significant-figure decimals stop being readable. */
+const EXPONENT_MAGNITUDE_FLOOR = 1e-6;
+const SIGNIFICANT_DIGITS = 4;
+
+/**
+ * The one display formatter for converted quantities.
+ *
+ * Precision adapts to magnitude instead of rounding the number itself. That
+ * matters at the bottom of the range: a 0.001 mm deflection is 0.00003937 in,
+ * and any fixed three-decimal rendering prints a real, load-bearing result as
+ * "0". Above the small-magnitude floor the output is byte-identical to the
+ * previous fixed-decimal rendering; below it, significant figures take over,
+ * and below the exponent floor the value switches to exponent notation rather
+ * than growing a run of leading zeros.
+ *
+ * Rounding happens here, at the string boundary, and nowhere upstream — see
+ * `resultFieldForUnits` for why rounding converted *values* is destructive.
+ */
+export function formatDisplayNumber(value: number): string {
+  if (!Number.isFinite(value)) return String(value);
+  const magnitude = Math.abs(value);
+  if (magnitude === 0) return "0";
+  if (magnitude >= 100) return value.toLocaleString(undefined, { maximumFractionDigits: 1 });
+  if (magnitude >= 10) return value.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  if (magnitude >= SMALL_MAGNITUDE_FLOOR) return value.toLocaleString(undefined, { maximumFractionDigits: 3 });
+  if (magnitude >= EXPONENT_MAGNITUDE_FLOOR) return value.toLocaleString(undefined, { maximumSignificantDigits: SIGNIFICANT_DIGITS });
+  return Number(value.toPrecision(SIGNIFICANT_DIGITS)).toExponential();
 }
 
-export function roundDisplayValue(value: number): number {
+/**
+ * Coarse rounding for the display model's overall bounding dimensions only.
+ *
+ * These are a human-facing size readout of a whole part, never a solved
+ * quantity, and the unit conversion leaves float dust on exact values
+ * (76.2 mm / 25.4 = 3.0000000000000004 in). Rounding is safe here because a
+ * bounding dimension is never small enough to collapse to zero. Do not reach
+ * for this on result data — use `formatDisplayNumber` at the point of display.
+ */
+function roundBoundingDimension(value: number): number {
   if (!Number.isFinite(value)) return value;
   const magnitude = Math.abs(value);
   if (magnitude >= 100) return Math.round(value * 10) / 10;

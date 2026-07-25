@@ -4,8 +4,7 @@ import { readFileSync } from "node:fs";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { gzipSync } from "node:zlib";
-
-const INITIAL_JS_GZIP_BUDGET_BYTES = 175 * 1024;
+import { INITIAL_JS_GZIP_BUDGET_BYTES } from "./web-asset-budgets.mjs";
 
 const root = new URL("../", import.meta.url);
 const dist = new URL("apps/opencae-web/dist/", root);

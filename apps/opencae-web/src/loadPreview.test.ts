@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import type { DisplayFace, DisplayModel, Load, NamedSelection, Study } from "@opencae/schema";
-import { createViewerLoadMarkers, directionLabelForLoad, directionVectorForLabel, directionLabelForVector, loadMarkerDisplayLabel, loadMarkerFromLoad, loadMarkerViewportPresentation, payloadObjectForLoad, unitsForLoadType } from "./loadPreview";
+import { createViewerLoadMarkers, directionLabelForLoad, directionVectorForLabel, directionLabelForVector, loadMagnitudeError, loadMarkerDisplayLabel, loadMarkerFromLoad, loadMarkerViewportPresentation, payloadObjectForLoad, unitsForLoadType } from "./loadPreview";
 
 const face: DisplayFace = {
   id: "face-side",
@@ -429,5 +429,18 @@ describe("load preview helpers", () => {
 
     expect(markers.map(loadMarkerDisplayLabel)).toEqual(["L1 F 500 N -Z", "L2 F 500 N -Z"]);
     expect(markers.map((marker) => marker.stackIndex)).toEqual([0, 0]);
+  });
+  test("mirrors the domain validator's load-magnitude rule at the point of entry", () => {
+    // Structural magnitudes are positive; direction is chosen separately, so a
+    // negative number is a mistake rather than a reversed load.
+    expect(loadMagnitudeError(500, "static_stress")).toBeNull();
+    expect(loadMagnitudeError(-1, "static_stress")).toContain("greater than zero");
+    expect(loadMagnitudeError(0, "static_stress")).toContain("cannot be zero");
+    expect(loadMagnitudeError(Number.NaN, "static_stress")).toBe("Enter a number.");
+    expect(loadMagnitudeError(-1, "dynamic_structural")).toContain("greater than zero");
+
+    // Inward surface heat flux is signed: negative is cooling.
+    expect(loadMagnitudeError(-500, "steady_state_thermal")).toBeNull();
+    expect(loadMagnitudeError(0, "steady_state_thermal")).toContain("cannot be zero");
   });
 });
