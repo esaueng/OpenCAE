@@ -6,6 +6,7 @@ import { assessResultFailure, estimateAllowableLoadForSafetyFactor, isModalResul
 import type { Constraint, CustomMaterial, DisplayFace, DisplayModel, DynamicSolverSettings, Load, LoadCase, LoadCombination, Material, MeshConnection, MeshConvergenceRecord, MeshQuality, ModalResultSummary, ModalSolverSettings, Project, ResultField, ResultSummary, RunTimingEstimate, RunVariantRef, SimulationFidelity, StructuralResultSummary, Study, ThermalResultSummary } from "@opencae/schema";
 import { inferGlobalCriticalPrintAxis } from "@opencae/study-core";
 import type { RunReadinessItem } from "../runReadiness";
+import { GEOMETRY_FILE_ACCEPT, SUPPORTED_GEOMETRY_FORMAT_LABEL } from "../geometryFormats";
 import type { StepId } from "./StepBar";
 import { applicationPointForLoad, createViewerLoadMarkers, directionLabelForLoad, directionVectorForLabel, equivalentForceForLoad, LOAD_DIRECTION_LABELS, loadMagnitudeError, loadMarkerOrdinalLabel, payloadObjectForLoad, unitsForLoadType, type LoadApplicationPoint, type LoadDirectionLabel, type LoadType, type PayloadLoadMetadata, type PayloadMassMode } from "../loadPreview";
 import { DEFAULT_SECTION_PLANE, type PayloadObjectSelection, type ResultMode, type SectionPlaneState, type StressComponent, type ViewMode } from "../workspaceViewTypes";
@@ -336,7 +337,7 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, se
         type="file"
         tabIndex={-1}
         aria-hidden="true"
-        accept=".step,.stp,.stl,.obj"
+        accept={GEOMETRY_FILE_ACCEPT}
         onChange={(event) => {
           const file = event.currentTarget.files?.[0];
           event.currentTarget.value = "";
@@ -348,9 +349,9 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, se
         {isBlankProject ? "Upload model" : "Replace model"}
       </button>
       {isBlankProject ? (
-        <Callout>Upload STEP, STP, or STL to import a model. STL files use the mesh preview; STEP files import as a selectable CAD body.</Callout>
+        <Callout>Upload {SUPPORTED_GEOMETRY_FORMAT_LABEL} to import a model. STL and OBJ files use the mesh preview; STEP files import as a selectable CAD body.</Callout>
       ) : isUploadedProject ? (
-        <Callout>{isNativeCadImport ? `${geometry.filename} is loaded as a selectable STEP import.` : uploadPreviewFormat ? `${geometry.filename} is loaded with a ${uploadPreviewFormat} viewport preview.` : `${geometry.filename} cannot be previewed in this local viewer. Replace it with STEP, STP, or STL.`}</Callout>
+        <Callout>{isNativeCadImport ? `${geometry.filename} is loaded as a selectable STEP import.` : uploadPreviewFormat ? `${geometry.filename} is loaded with a ${uploadPreviewFormat} viewport preview.` : `${geometry.filename} cannot be previewed in this local viewer. Replace it with ${SUPPORTED_GEOMETRY_FORMAT_LABEL}.`}</Callout>
       ) : null}
       {stepGeometry?.status === "repairable" && !stepGeometryResolvedByMesh && (
         <div className="step-repair-card" role="alert" aria-label="Open STEP surfaces detected">
