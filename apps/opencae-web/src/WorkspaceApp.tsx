@@ -2767,8 +2767,14 @@ function ProjectNameChip({ name, onRename }: { name: string; onRename: (name: st
 
   if (editing) {
     return (
+      <>
+      <span className="visually-hidden" id="project-name-hint">Press Enter to save, Escape to cancel.</span>
       <input
         className="breadcrumb-chip breadcrumb-input"
+        // The breadcrumb gives this field its meaning visually; without a name
+        // it reads as an unlabelled textbox to assistive technology.
+        aria-label="Project name"
+        aria-describedby="project-name-hint"
         value={draftName}
         autoFocus
         onChange={(event) => setDraftName(event.currentTarget.value)}
@@ -2781,6 +2787,7 @@ function ProjectNameChip({ name, onRename }: { name: string; onRename: (name: st
           }
         }}
       />
+      </>
     );
   }
 
