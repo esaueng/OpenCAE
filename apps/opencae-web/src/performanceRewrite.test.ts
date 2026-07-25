@@ -120,7 +120,19 @@ describe("Worker UI performance rewrite boundaries", () => {
     expect(workspaceSource).toContain("playbackFieldsForResultMode(resultFieldsForUi, resultMode, stressComponent)");
     expect(workspaceSource).toContain("packResultFieldsForPlayback(playbackFieldsForSelectedMode)");
     expect(workspaceSource).toContain("...(packedFields ? { packedFields } : { fields: playbackFieldsForSelectedMode })");
-    expect(workspaceSource).toContain("resultFields={resultFieldsForUi}");
+    // Every resultFields prop handed to the viewer must come from the
+    // unit-converted memo chain (resultFieldsForUi and the frame caches derived
+    // from it), never from the raw resultFields state — that is the boundary
+    // this test defends. Assert that shape rather than one literal expression:
+    // pinning the literal made a conditional prop
+    // (`resultDisplayEligible ? resultFieldsForUi : []`) read as a regression
+    // and left this suite red on main.
+    const resultFieldsProps = [...workspaceSource.matchAll(/resultFields=\{([^}]*)\}/gu)].map((match) => match[1]);
+    expect(resultFieldsProps.length).toBeGreaterThan(0);
+    for (const expression of resultFieldsProps) {
+      expect(expression, `resultFields={${expression}} bypasses the resultFieldsForUi memo chain`)
+        .toMatch(/\bresultFieldsForUi\b|\bvisibleResultFieldsForUi\b/u);
+    }
     expect(viewerSource).toContain("resultPlaybackFrameController");
     expect(viewerSource).toContain("usePackedPlaybackGeometry");
     expect(viewerSource).not.toContain("useSyncExternalStore");
