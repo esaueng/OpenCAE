@@ -19,13 +19,13 @@ import {
   formatMaterialStress,
   formatMeshSourceLabel,
   formatResultMetric,
+  formatResultNumber,
   formatResultProvenanceLabel,
   hasResultUnit,
   legacyResultWarningForProvenance,
   loadValueForUnits,
   resultFieldForUnits,
   resultSummaryForUnits,
-  roundDisplayValue,
   solverMethodForResult,
   solverRunnerLabelForResult,
   type UnitSystem
@@ -163,7 +163,7 @@ export function buildReportData(input: BuildReportDataInput): ReportData {
     keyResults: [
       { label: "Max von Mises stress", value: formatResultMetric(summary.maxStress, summary.maxStressUnits) },
       { label: "Max displacement", value: formatResultMetric(summary.maxDisplacement, summary.maxDisplacementUnits) },
-      { label: "Safety factor", value: String(roundDisplayValue(summary.safetyFactor)) },
+      { label: "Safety factor", value: formatResultNumber(summary.safetyFactor) },
       { label: "Reaction force", value: formatResultMetric(summary.reactionForce, summary.reactionForceUnits) }
     ],
     failureAssessment: assessment,
@@ -296,8 +296,8 @@ function buildThermalReportData(input: BuildReportDataInput, summary: ThermalRes
   const heatFluxField = fieldForReport(fields, "heat_flux", input.captures.displacement);
   const balancePasses = summary.energyBalanceRelativeError <= 1e-5;
   const assessment: FailureAssessment = balancePasses
-    ? { status: "pass", title: "Energy balance converged", message: `The relative steady-state heat balance error is ${formatResultMetric(roundDisplayValue(summary.energyBalanceRelativeError * 100), "%")}.` }
-    : { status: "warning", title: "Review energy balance", message: `The relative steady-state heat balance error is ${formatResultMetric(roundDisplayValue(summary.energyBalanceRelativeError * 100), "%")}. Refine the mesh or solver tolerance before design use.` };
+    ? { status: "pass", title: "Energy balance converged", message: `The relative steady-state heat balance error is ${formatResultMetric(summary.energyBalanceRelativeError * 100, "%")}.` }
+    : { status: "warning", title: "Review energy balance", message: `The relative steady-state heat balance error is ${formatResultMetric(summary.energyBalanceRelativeError * 100, "%")}. Refine the mesh or solver tolerance before design use.` };
   const diagnostics = new Set<string>((summary.diagnostics ?? []).map((diagnostic) => diagnostic.message));
   for (const warning of input.solverMeshSummary?.warnings ?? []) diagnostics.add(warning);
   return {
@@ -316,7 +316,7 @@ function buildThermalReportData(input: BuildReportDataInput, summary: ThermalRes
       { label: "Minimum temperature", value: formatResultMetric(summary.minTemperature, summary.temperatureUnits) },
       { label: "Maximum temperature", value: formatResultMetric(summary.maxTemperature, summary.temperatureUnits) },
       { label: "Maximum heat flux", value: formatResultMetric(summary.maxHeatFlux, summary.heatFluxUnits) },
-      { label: "Energy balance error", value: formatResultMetric(roundDisplayValue(summary.energyBalanceRelativeError * 100), "%") }
+      { label: "Energy balance error", value: formatResultMetric(summary.energyBalanceRelativeError * 100, "%") }
     ],
     failureAssessment: assessment,
     geometry: geometryRows(input.project, input.displayModel ? displayModelForUnits(input.displayModel, input.unitSystem) : null),
@@ -346,7 +346,7 @@ function buildThermalReportData(input: BuildReportDataInput, summary: ThermalRes
       { label: "Applied surface heat", value: formatResultMetric(summary.appliedHeat, summary.heatRateUnits) },
       { label: "Generated heat", value: formatResultMetric(summary.generatedHeat, summary.heatRateUnits) },
       { label: "Boundary reaction", value: formatResultMetric(summary.reactionHeat, summary.heatRateUnits) },
-      { label: "Relative energy balance error", value: formatResultMetric(roundDisplayValue(summary.energyBalanceRelativeError * 100), "%") }
+      { label: "Relative energy balance error", value: formatResultMetric(summary.energyBalanceRelativeError * 100, "%") }
     ],
     loadCapacity: [],
     transientResults: [],
@@ -522,7 +522,7 @@ function loadTable(study: Study, unitSystem: UnitSystem): ReportTable {
       const converted = Number.isFinite(rawValue) ? loadValueForUnits(rawValue, rawUnits, unitSystem) : null;
       return [
         reportLoadTypeLabel(load.type),
-        converted ? formatResultMetric(roundDisplayValue(converted.value), converted.units) : MISSING,
+        converted ? formatResultMetric(converted.value, converted.units) : MISSING,
         formatDirection(load.parameters.direction),
         load.type === "bolt_preload" && typeof load.parameters.secondarySelectionRef === "string"
           ? `${selectionLabel(study, load.selectionRef)} ↔ ${selectionLabel(study, load.parameters.secondarySelectionRef)}`
@@ -602,7 +602,7 @@ function resultRows(project: Project, study: Study, summary: StructuralResultSum
     { label: "Local fallback", value: "none" },
     { label: "Max stress", value: formatResultMetric(summary.maxStress, summary.maxStressUnits) },
     { label: "Max displacement", value: formatResultMetric(summary.maxDisplacement, summary.maxDisplacementUnits) },
-    { label: "Safety factor", value: String(roundDisplayValue(summary.safetyFactor)) },
+    { label: "Safety factor", value: formatResultNumber(summary.safetyFactor) },
     { label: "Failure check", value: assessment.title },
     { label: "Reaction force", value: formatResultMetric(summary.reactionForce, summary.reactionForceUnits) }
   ];
@@ -623,10 +623,10 @@ function loadCapacityRows(input: BuildReportDataInput, summary: StructuralResult
     return [];
   }
   return [
-    { label: "Current applied load", value: formatResultMetric(roundDisplayValue(atTarget.currentLoad), atTarget.loadUnits) },
-    { label: "Max theoretical load (at FoS 1.0)", value: formatResultMetric(roundDisplayValue(atYield.allowableLoad), atYield.loadUnits) },
-    { label: "Target factor of safety", value: String(roundDisplayValue(target)) },
-    { label: "Max load at target FoS", value: `${formatResultMetric(roundDisplayValue(atTarget.allowableLoad), atTarget.loadUnits)} (${roundDisplayValue(atTarget.loadScale)}x current)` }
+    { label: "Current applied load", value: formatResultMetric(atTarget.currentLoad, atTarget.loadUnits) },
+    { label: "Max theoretical load (at FoS 1.0)", value: formatResultMetric(atYield.allowableLoad, atYield.loadUnits) },
+    { label: "Target factor of safety", value: formatResultNumber(target) },
+    { label: "Max load at target FoS", value: `${formatResultMetric(atTarget.allowableLoad, atTarget.loadUnits)} (${formatResultNumber(atTarget.loadScale)}x current)` }
   ];
 }
 

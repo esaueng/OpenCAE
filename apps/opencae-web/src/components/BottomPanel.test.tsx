@@ -6,6 +6,7 @@ import {
   BottomPanel,
   COFFEE_ANIMATION_REPLAY_DELAY_MS,
   KeyboardShortcutGuide,
+  statusForDisplay,
   WORKSPACE_SHORTCUT_GUIDE,
   coffeeAnimationReplayDelayMs,
   resolveLogClearIntent,
@@ -204,5 +205,22 @@ describe("BottomPanel", () => {
     expect(html).toContain("Next workflow step");
     expect(html).toContain("<kbd>Ctrl/Cmd</kbd>");
     expect(html).toContain("Save project");
+  });
+  test("reports run health from the run state, not from words in the log message", () => {
+    // The reported defect: this rejection contains "opencae core" but none of
+    // the error words, so the footer read "OpenCAE Core active" while the run
+    // had just been refused.
+    const rejection = "OpenCAE Core requires a load with a finite positive value and direction";
+    expect(statusForDisplay(rejection, "Error")).toBe("OpenCAE Core error");
+    expect(statusForDisplay(rejection, "Idle")).toBe("OpenCAE Core active");
+    expect(statusForDisplay("Simulation complete.", "Error")).toBe("OpenCAE Core error");
+  });
+
+  test("keeps the existing status wording when no run has failed", () => {
+    expect(statusForDisplay("Ready", "Idle")).toBe("Ready");
+    expect(statusForDisplay("Simulation complete.", "Complete")).toBe("Results ready");
+    expect(statusForDisplay("Could not update study.", "Idle")).toBe("Needs attention");
+    expect(statusForDisplay("OpenCAE Core solving.", "Running")).toBe("Simulating");
+    expect(statusForDisplay("OpenCAE Core is not configured.", "Idle")).toBe("OpenCAE Core error");
   });
 });

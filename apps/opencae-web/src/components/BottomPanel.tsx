@@ -333,12 +333,24 @@ export function KeyboardShortcutGuide() {
   );
 }
 
-function statusForDisplay(status: string, solverStatus: string) {
+/**
+ * Run health comes from the run's own state; the log message is only a
+ * fallback for statuses restored from a previous session.
+ *
+ * The word list below cannot classify prose it was not written for. A solver
+ * rejection reading "OpenCAE Core requires a load with a finite positive value
+ * and direction" contains "opencae core" and none of these words, so it fell
+ * through to "OpenCAE Core active" — the footer reported health while the run
+ * had just been refused. Any future message phrased outside the list would do
+ * the same, which is why `solverStatus` is consulted first.
+ */
+export function statusForDisplay(status: string, solverStatus: string) {
+  if (solverStatus === "Error") return "OpenCAE Core error";
   const normalized = status.toLowerCase();
   if (normalized.includes("opencae core") && /(error|fail|failed|unavailable|not configured|not enabled|not ready)/.test(normalized)) return "OpenCAE Core error";
   if (/(could not|failed)/.test(normalized)) return "Needs attention";
   if (solverStatus === "Running") return "Simulating";
-  if (status.toLowerCase().includes("complete")) return "Results ready";
+  if (normalized.includes("complete")) return "Results ready";
   if (normalized.includes("opencae core")) return "OpenCAE Core active";
   return "Ready";
 }

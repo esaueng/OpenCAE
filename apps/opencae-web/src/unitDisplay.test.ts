@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { defaultSolverMethodForStudy, displayModelForUnits, formatDensity, formatForce, formatLength, formatMass, formatMaterialStress, formatResultMetric, formatResultNumber, formatResultProvenanceLabel, formatStress, formatUnitSystemLabel, formatVolume, loadValueForUnits, resultFieldForUnits, resultSummaryForUnits, resultValueForUnits, resultValueFromDisplayUnits } from "./unitDisplay";
+import { defaultSolverMethodForStudy, displayModelForUnits, formatDensity, formatDisplayNumber, formatForce, formatLength, formatMass, formatMaterialStress, formatResultMetric, formatResultNumber, formatResultProvenanceLabel, formatStress, formatUnitSystemLabel, formatVolume, loadValueForUnits, resultFieldForUnits, resultSummaryForUnits, resultValueForUnits, resultValueFromDisplayUnits } from "./unitDisplay";
 
 describe("unit display formatting", () => {
   test("uses one canonical solver method for each study type", () => {
@@ -9,11 +9,15 @@ describe("unit display formatting", () => {
     expect(defaultSolverMethodForStudy({ type: "steady_state_thermal" })).toBe("sparse_steady_thermal");
   });
 
-  test("formats solver metrics with bounded significant precision", () => {
-    expect(formatResultMetric(24.830578943767595, "°C")).toBe("24.8306 °C");
-    expect(formatResultMetric(19207.968569501394, "W/m²")).toBe("19208 W/m²");
-    expect(formatResultMetric(5.955570096632689e-9, "%")).toBe("5.95557e-9 %");
-    expect(formatResultNumber(151.10482851265246)).toBe("151.105");
+  test("formats solver metrics with adaptive precision", () => {
+    // Every readout — panel, report, unitless scalar — goes through one
+    // formatter whose precision follows magnitude, so nothing rounds twice.
+    expect(formatResultMetric(24.830578943767595, "°C")).toBe("24.83 °C");
+    expect(formatResultMetric(19207.968569501394, "W/m²")).toBe("19,208 W/m²");
+    expect(formatResultMetric(5.955570096632689e-9, "%")).toBe("5.956e-9 %");
+    expect(formatResultNumber(151.10482851265246)).toBe("151.1");
+    expect(formatResultNumber(1.8)).toBe("1.8");
+    expect(formatResultMetric(1, undefined)).toBe("Unit missing");
   });
 
   test("labels project unit systems for the workspace footer", () => {
@@ -36,6 +40,53 @@ describe("unit display formatting", () => {
   test("formats small payload volumes without rounding to zero", () => {
     expect(formatVolume(0.0000682, "m^3", "SI")).toBe("68.2 cm^3");
     expect(formatVolume(0.0000682, "m^3", "US")).toBe("4.162 in^3");
+  });
+
+  test("adapts display precision so a nonzero quantity never prints as zero", () => {
+    // The reported defect: a 0.001 mm deflection is 0.00003937 in, and a fixed
+    // three-decimal rendering printed the imperial summary as "0 in".
+    expect(formatLength(0.001, "mm", "US")).toBe("0.00003937 in");
+    expect(formatLength(0.001, "mm", "SI")).toBe("0.001 mm");
+    // Below the significant-figure floor, exponent notation beats a run of
+    // leading zeros — but the value is still not zero.
+    expect(formatDisplayNumber(5.955570096632689e-9)).toBe("5.956e-9");
+    expect(formatDisplayNumber(0)).toBe("0");
+    expect(formatDisplayNumber(Number.NaN)).toBe("NaN");
+  });
+
+  test("keeps fixed-decimal rendering unchanged above the small-magnitude floor", () => {
+    // Everything at ordinary engineering magnitudes must format exactly as it
+    // did before precision became adaptive.
+    expect(formatDisplayNumber(9993.100129611415)).toBe("9,993.1");
+    expect(formatDisplayNumber(151.10482851265246)).toBe("151.1");
+    expect(formatDisplayNumber(20.59535875768971)).toBe("20.6");
+    expect(formatDisplayNumber(2.519060156230549)).toBe("2.519");
+    expect(formatDisplayNumber(0.0012345)).toBe("0.001");
+  });
+
+  test("converts result summaries without rounding the converted magnitudes", () => {
+    // Rounding belongs at the string boundary. A summary that rounds here
+    // destroys small imperial displacements before anything can format them.
+    const summary = resultSummaryForUnits({
+      maxStress: 142,
+      maxStressUnits: "MPa",
+      maxDisplacement: 0.001,
+      maxDisplacementUnits: "mm",
+      safetyFactor: 1.8,
+      reactionForce: 500,
+      reactionForceUnits: "N"
+    }, "US");
+
+    expect(summary.maxDisplacement).toBeCloseTo(0.001 / 25.4, 12);
+    expect(summary.maxDisplacement).not.toBe(0);
+    expect(formatResultMetric(summary.maxDisplacement, summary.maxDisplacementUnits)).toBe("0.00003937 in");
+  });
+
+  test("keeps a converged thermal energy balance error visible in the report", () => {
+    // reportData prints `energyBalanceRelativeError * 100`; pre-rounding turned
+    // a converged 1e-6 balance into "0 %".
+    expect(formatResultMetric(1e-6 * 100, "%")).toBe("0.0001 %");
+    expect(formatResultMetric(5.955570096632689e-9 * 100, "%")).toBe("5.956e-7 %");
   });
 
   test("converts result summaries and fields without changing safety factors", () => {

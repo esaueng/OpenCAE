@@ -1,12 +1,14 @@
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { AlertTriangle, Anchor, ArrowDown, Atom, Check, ChevronDown, ChevronRight, CircleHelp, Eye, Factory, FileDown, Gauge, Grid3X3, Layers3, Maximize2, Pause, Play, Plus, RotateCcw, Ruler, ScanLine, ShieldCheck, Upload, Weight, Wrench, X } from "lucide-react";
 import { compatibleManufacturingProcessesFor, defaultManufacturingParametersFor, defaultManufacturingProcessIdFor, effectiveMaterialProperties, fdmPropertyFactorsFor, isManufacturingProcessCompatible, manufacturingParametersForAssignment, manufacturingProcessForId, massKgForPayloadMaterial, materialCatalog, materialCategoryLabel, normalizeManufacturingParameters, payloadMaterialForId, payloadMaterials, type ManufacturingParameters, type ManufacturingProcessId, type PayloadMaterialCategory } from "@opencae/materials";
 import { assessResultFailure, estimateAllowableLoadForSafetyFactor, isModalResultSummary, isThermalResultSummary } from "@opencae/schema";
 import type { Constraint, CustomMaterial, DisplayFace, DisplayModel, DynamicSolverSettings, Load, LoadCase, LoadCombination, Material, MeshConnection, MeshConvergenceRecord, MeshQuality, ModalResultSummary, ModalSolverSettings, Project, ResultField, ResultSummary, RunTimingEstimate, RunVariantRef, SimulationFidelity, StructuralResultSummary, Study, ThermalResultSummary } from "@opencae/schema";
 import { inferGlobalCriticalPrintAxis } from "@opencae/study-core";
+import type { RunReadinessItem } from "../runReadiness";
+import { GEOMETRY_FILE_ACCEPT, SUPPORTED_GEOMETRY_FORMAT_LABEL } from "../geometryFormats";
 import type { StepId } from "./StepBar";
-import { applicationPointForLoad, createViewerLoadMarkers, directionLabelForLoad, directionVectorForLabel, equivalentForceForLoad, LOAD_DIRECTION_LABELS, loadMarkerOrdinalLabel, payloadObjectForLoad, unitsForLoadType, type LoadApplicationPoint, type LoadDirectionLabel, type LoadType, type PayloadLoadMetadata, type PayloadMassMode } from "../loadPreview";
+import { applicationPointForLoad, createViewerLoadMarkers, directionLabelForLoad, directionVectorForLabel, equivalentForceForLoad, LOAD_DIRECTION_LABELS, loadMagnitudeError, loadMarkerOrdinalLabel, payloadObjectForLoad, unitsForLoadType, type LoadApplicationPoint, type LoadDirectionLabel, type LoadType, type PayloadLoadMetadata, type PayloadMassMode } from "../loadPreview";
 import { DEFAULT_SECTION_PLANE, type PayloadObjectSelection, type ResultMode, type SectionPlaneState, type StressComponent, type ViewMode } from "../workspaceViewTypes";
 import { availableStressComponents, type ResolvedResultProbe } from "../resultSelection";
 import type { SampleAnalysisType, SampleModelId } from "../lib/api";
@@ -150,6 +152,7 @@ interface RightPanelProps {
   canCancelSimulation?: boolean;
   canRunSimulation: boolean;
   missingRunItems: string[];
+  runReadiness: RunReadinessItem[];
   resultFrameIndex?: number;
   resultFramePosition?: number;
   resultFrameOrdinalPosition?: number;
@@ -334,7 +337,7 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, se
         type="file"
         tabIndex={-1}
         aria-hidden="true"
-        accept=".step,.stp,.stl,.obj"
+        accept={GEOMETRY_FILE_ACCEPT}
         onChange={(event) => {
           const file = event.currentTarget.files?.[0];
           event.currentTarget.value = "";
@@ -346,9 +349,9 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, se
         {isBlankProject ? "Upload model" : "Replace model"}
       </button>
       {isBlankProject ? (
-        <Callout>Upload STEP, STP, or STL to import a model. STL files use the mesh preview; STEP files import as a selectable CAD body.</Callout>
+        <Callout>Upload {SUPPORTED_GEOMETRY_FORMAT_LABEL} to import a model. STL and OBJ files use the mesh preview; STEP files import as a selectable CAD body.</Callout>
       ) : isUploadedProject ? (
-        <Callout>{isNativeCadImport ? `${geometry.filename} is loaded as a selectable STEP import.` : uploadPreviewFormat ? `${geometry.filename} is loaded with a ${uploadPreviewFormat} viewport preview.` : `${geometry.filename} cannot be previewed in this local viewer. Replace it with STEP, STP, or STL.`}</Callout>
+        <Callout>{isNativeCadImport ? `${geometry.filename} is loaded as a selectable STEP import.` : uploadPreviewFormat ? `${geometry.filename} is loaded with a ${uploadPreviewFormat} viewport preview.` : `${geometry.filename} cannot be previewed in this local viewer. Replace it with ${SUPPORTED_GEOMETRY_FORMAT_LABEL}.`}</Callout>
       ) : null}
       {stepGeometry?.status === "repairable" && !stepGeometryResolvedByMesh && (
         <div className="step-repair-card" role="alert" aria-label="Open STEP surfaces detected">
@@ -738,13 +741,15 @@ function LoadsPanel({
   const displayDraftLoad = loadValueForUnits(effectiveDraftValue, units, project.unitSystem);
   const selectedPayloadMaterial = payloadMaterialForId(payloadMaterialId);
   const canAddPayloadMass = payloadMassMode === "manual" ? draftLoadValue > 0 : calculatedPayloadMass > 0;
-  const canAddDraftLoad = draftLoadType === "gravity"
+  const draftMagnitudeError = loadMagnitudeError(effectiveDraftValue, study.type);
+  const hasDraftPlacement = draftLoadType === "gravity"
     ? Boolean(selectedPayloadObject) && canAddPayloadMass
     : draftLoadType === "volume_force" || draftLoadType === "heat_generation"
       ? Boolean(bodySelection)
       : draftLoadType === "bolt_preload"
         ? Boolean(selectedFace && secondarySelectionRef)
         : Boolean(selectedFace);
+  const canAddDraftLoad = hasDraftPlacement && !draftMagnitudeError;
   const payloadMetadata: PayloadLoadMetadata = draftLoadType === "gravity"
     ? {
       payloadMaterialId,
@@ -887,7 +892,8 @@ function LoadsPanel({
           ))}
         </select>
       </label>}
-      <button className="outline-action wide" disabled={!canAddDraftLoad} onClick={() => canAddDraftLoad && onAddLoad(
+      {hasDraftPlacement && draftMagnitudeError && <p className="field-error" role="alert">{draftMagnitudeError}</p>}
+      <button className="outline-action wide" disabled={!canAddDraftLoad} title={draftMagnitudeError ?? undefined} onClick={() => canAddDraftLoad && onAddLoad(
         draftLoadType,
         effectiveDraftValue,
         placementSelection?.id,
@@ -1083,7 +1089,7 @@ function structuralLoadCasesForPanel(study: Extract<Study, { type: "static_stres
 }
 
 function LoadEditorList({ editingId, onEditingIdChange, study, displayModel, unitSystem, loadCases, onAssignLoadToCase, onUpdateLoad, onPreviewLoadEdit, onRemoveLoad }: { editingId: string | null; onEditingIdChange: (loadId: string | null) => void; study: Study; displayModel: DisplayModel; unitSystem: UnitSystem; loadCases: LoadCase[]; onAssignLoadToCase: (loadId: string, caseId: string) => void; onUpdateLoad: (load: Load) => void; onPreviewLoadEdit: (load: Load | null) => void; onRemoveLoad: (loadId: string) => void }) {
-  const loadItemRefs = useRef(new Map<string, HTMLDivElement>());
+  const loadItemRefs = useRef(new Map<string, HTMLButtonElement>());
   if (!study.loads.length) return <EmptyEditableList title="Loads" />;
   const loadLabelsById = new Map(createViewerLoadMarkers({ study, displayModel }).map((marker) => [marker.id, loadMarkerOrdinalLabel(marker)]));
 
@@ -1113,29 +1119,29 @@ function LoadEditorList({ editingId, onEditingIdChange, study, displayModel, uni
         const editLabel = `Edit ${loadLabel ? `${loadLabel} ` : ""}${load.type} load`;
         const beginEdit = () => onEditingIdChange(load.id);
         return (
-          <div
-            className={`editable-item load-item ${editing ? "" : "clickable"}`}
-            key={load.id}
-            ref={(node) => {
-              if (node) loadItemRefs.current.set(load.id, node);
-              else loadItemRefs.current.delete(load.id);
-            }}
-            role={editing ? undefined : "button"}
-            tabIndex={editing ? undefined : 0}
-            aria-label={editing ? undefined : editLabel}
-            onClick={editing ? undefined : beginEdit}
-            onKeyDown={editing ? undefined : (event) => {
-              if (event.key !== "Enter" && event.key !== " ") return;
-              event.preventDefault();
-              beginEdit();
-            }}
-          >
+          <div className="editable-item load-item" key={load.id}>
+            {/* The row's summary is a real button, sibling to Remove and to the
+                load-case select. It used to be a div[role=button] wrapping
+                them, which nests interactive content inside a control. */}
             <div className="editable-summary">
-              <span className={`item-icon load-type-icon ${load.type}`}><LoadTypeIcon type={load.type} /></span>
-              <strong>{loadLabel ? `${loadLabel} · ` : ""}{loadTypeLabel(load.type)} · {formatNumber(displayLoad.value)} {displayLoad.units}</strong>
-              <small>{label}{pointLabel} · {directionOptionLabel(directionLabelForLoad(load, displayModel, selectedFace))} direction{equivalentForce}</small>
+              <button
+                className="editable-summary-trigger"
+                type="button"
+                ref={(node) => {
+                  if (node) loadItemRefs.current.set(load.id, node);
+                  else loadItemRefs.current.delete(load.id);
+                }}
+                aria-label={editLabel}
+                aria-expanded={editing}
+                disabled={editing}
+                onClick={beginEdit}
+              >
+                <span className={`item-icon load-type-icon ${load.type}`}><LoadTypeIcon type={load.type} /></span>
+                <strong>{loadLabel ? `${loadLabel} · ` : ""}{loadTypeLabel(load.type)} · {formatNumber(displayLoad.value)} {displayLoad.units}</strong>
+                <small>{label}{pointLabel} · {directionOptionLabel(directionLabelForLoad(load, displayModel, selectedFace))} direction{equivalentForce}</small>
+              </button>
               {loadCases.length > 1 && (
-                <label className="load-case-assignment" onClick={(event) => event.stopPropagation()}>
+                <label className="load-case-assignment">
                   <span>Case</span>
                   <select value={loadCaseId} onChange={(event) => onAssignLoadToCase(load.id, event.currentTarget.value)}>
                     {loadCases.map((loadCase) => <option key={loadCase.id} value={loadCase.id}>{loadCase.name}</option>)}
@@ -1146,10 +1152,7 @@ function LoadEditorList({ editingId, onEditingIdChange, study, displayModel, uni
                 className="remove-glyph"
                 type="button"
                 aria-label={`Remove ${loadTypeLabel(load.type)} load`}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onRemoveLoad(load.id);
-                }}
+                onClick={() => onRemoveLoad(load.id)}
               >
                 <X size={16} />
               </button>
@@ -1221,6 +1224,15 @@ function LoadEditForm({ load, study, displayModel, unitSystem, accessibleName, o
     stressValue: 0
   }), [selectedDisplayFace, selectedFace?.entityId, selectedFace?.label]);
   const previewLoad = useMemo(() => editedLoadForForm(load, type, value, displayUnits, units, direction, directionFace, displayModel, payloadMetadata, editedValue), [direction, directionFace, displayModel, displayUnits, editedValue, load, payloadMetadata, type, units, value]);
+  const magnitudeError = loadMagnitudeError(editedValue, study.type);
+  const opposingFaceError = type === "bolt_preload" && (!secondarySelectionRef || secondarySelectionRef === load.selectionRef)
+    ? "Choose a different opposing face."
+    : null;
+  const remotePointError = type === "remote_force" && !remotePoint.every((component) => Number.isFinite(component))
+    ? "Remote point coordinates must be numbers."
+    : null;
+  const saveBlockedBy = magnitudeError ?? opposingFaceError ?? remotePointError;
+  const magnitudeErrorId = `${load.id}-magnitude-error`;
 
   useEffect(() => {
     onPreviewChange(previewLoad);
@@ -1268,11 +1280,18 @@ function LoadEditForm({ load, study, displayModel, unitSystem, accessibleName, o
         <label className="field">
           <HelpLabel helpId="loadMagnitude">Magnitude</HelpLabel>
           <span className="input-with-unit">
-            <input type="number" value={value} onChange={(event) => setValue(event.currentTarget.value)} />
+            <input
+              type="number"
+              value={value}
+              aria-invalid={magnitudeError ? true : undefined}
+              aria-describedby={magnitudeError ? magnitudeErrorId : undefined}
+              onChange={(event) => setValue(event.currentTarget.value)}
+            />
             <span>{displayUnits}</span>
           </span>
         </label>
       )}
+      {magnitudeError && <p className="field-error" id={magnitudeErrorId} role="alert">{magnitudeError}</p>}
       <PlacementReadout selectedRef={selectedRef} />
       {type === "remote_force" ? (
         <fieldset className="field"><legend>Remote point coordinates</legend><div className="vector-inputs">
@@ -1301,7 +1320,9 @@ function LoadEditForm({ load, study, displayModel, unitSystem, accessibleName, o
         <button
           className="primary"
           type="button"
-          onClick={() => onSave(previewLoad)}
+          disabled={Boolean(saveBlockedBy)}
+          title={saveBlockedBy ?? undefined}
+          onClick={() => !saveBlockedBy && onSave(previewLoad)}
         >
           Save
         </button>
@@ -1338,7 +1359,16 @@ function finiteVector3(value: unknown): LoadApplicationPoint | null {
 
 function SupportEditorList({ study, onUpdateSupport, onRemoveSupport }: { study: Study; onUpdateSupport: (support: Constraint) => void; onRemoveSupport: (supportId: string) => void }) {
   const [editingId, setEditingId] = useState<string | null>(null);
+  // Mirrors the load rows: closing the form must return focus to the control
+  // that opened it, or the form's unmount drops focus to <body>.
+  const editButtonRefs = useRef(new Map<string, HTMLButtonElement>());
   if (!study.constraints.length) return <EmptyEditableList title="Supports" />;
+
+  function finishEditing(supportId: string) {
+    setEditingId(null);
+    window.requestAnimationFrame(() => editButtonRefs.current.get(supportId)?.focus());
+  }
+
   let fixedSupportCount = 0;
   let prescribedSupportCount = 0;
   let thermalSupportCount = 0;
@@ -1366,14 +1396,24 @@ function SupportEditorList({ study, onUpdateSupport, onRemoveSupport }: { study:
               <SupportEditForm
                 support={support}
                 study={study}
-                onCancel={() => setEditingId(null)}
+                onCancel={() => finishEditing(support.id)}
                 onSave={(nextSupport) => {
                   onUpdateSupport(nextSupport);
-                  setEditingId(null);
+                  finishEditing(support.id);
                 }}
               />
             ) : (
-              <button className="secondary wide" type="button" onClick={() => setEditingId(support.id)}>Edit support</button>
+              <button
+                className="secondary wide"
+                type="button"
+                ref={(node) => {
+                  if (node) editButtonRefs.current.set(support.id, node);
+                  else editButtonRefs.current.delete(support.id);
+                }}
+                onClick={() => setEditingId(support.id)}
+              >
+                Edit support
+              </button>
             )}
           </div>
         );
@@ -1687,17 +1727,20 @@ function formatCompact(value: number | undefined): string {
   return Math.abs(value) >= 100 ? value.toFixed(1) : Math.abs(value) >= 1 ? value.toFixed(3) : value.toExponential(3);
 }
 
-function RunPanel({ study, displayModel, runProgress, runError, runTiming, onRunSimulation, onCancelSimulation, canCancelSimulation, onUpdateSolverSettings, onChangeStudyType, canRunSimulation, missingRunItems }: RightPanelProps) {
+function RunPanel({ study, displayModel, runProgress, runError, runTiming, onRunSimulation, onCancelSimulation, canCancelSimulation, onUpdateSolverSettings, onChangeStudyType, canRunSimulation, missingRunItems, runReadiness }: RightPanelProps) {
   const progressPercent = Math.max(0, Math.min(100, Math.round(runProgress)));
   const isRunning = canCancelSimulation ?? (progressPercent > 0 && progressPercent < 100);
   const remainingLabel = formatSimulationEta(runTiming?.estimatedRemainingMs, isRunning);
   const elapsedLabel = formatSimulationElapsed(runTiming?.elapsedMs);
-  const checks: Array<readonly [string, boolean]> = [
-    ["Material assigned", study.materialAssignments.length > 0],
-    ["Support added", study.constraints.length > 0],
-    ...(study.type === "modal_analysis" ? [] : [["Load added", study.loads.length > 0] as const]),
-    ["Mesh generated", study.meshSettings.status === "complete"]
-  ];
+  const [invalidSettingFields, setInvalidSettingFields] = useState<readonly string[]>([]);
+  const trackSettingValidity = useCallback((field: string, invalid: boolean) => {
+    setInvalidSettingFields((current) => {
+      const has = current.includes(field);
+      if (invalid === has) return current;
+      return invalid ? [...current, field] : current.filter((item) => item !== field);
+    });
+  }, []);
+  const hasInvalidSettingDraft = invalidSettingFields.length > 0;
   const dynamic = study.type === "dynamic_structural" ? study.solverSettings : null;
   const modal = study.type === "modal_analysis" ? study.solverSettings : null;
   const thermal = study.type === "steady_state_thermal";
@@ -1722,7 +1765,11 @@ function RunPanel({ study, displayModel, runProgress, runError, runTiming, onRun
     <Panel title="Run" step="run" helper={modal ? "Solve for natural frequencies and normalized mode shapes." : thermal ? "Solve for steady temperature and heat-flux fields." : "Run the simulation to estimate stress and displacement."}>
       <SectionTitle helpId="runReadiness">Readiness</SectionTitle>
       <div className="checklist">
-        {checks.map(([label, done]) => <span key={label} className={done ? "check done" : "check"}><span>{done ? <Check size={18} /> : null}</span>{label}</span>)}
+        {runReadiness.map(({ label, done, blockers }) => (
+          <span key={label} className={done ? "check done" : "check"} title={blockers.join(" ")}>
+            <span>{done ? <Check size={18} /> : null}</span>{label}
+          </span>
+        ))}
       </div>
       {/* B5: the backend picker is gone — every simulation runs locally in the
           browser, so a choice would be routing theater. The Solver info block
@@ -1772,10 +1819,10 @@ function RunPanel({ study, displayModel, runProgress, runError, runTiming, onRun
       {dynamic && (
         <>
           <SectionTitle>Dynamic settings</SectionTitle>
-          <DynamicNumberField label="Start time" helpId="dynamicStartTime" unit="s" value={dynamic.startTime} min={0} step={dynamic.timeStep} onCommit={(value) => updateDynamicNumber("startTime", value)} />
-          <DynamicNumberField label="End time" helpId="dynamicEndTime" unit="s" value={dynamic.endTime} min={dynamic.startTime + dynamic.timeStep} step={dynamic.timeStep} onCommit={(value) => updateDynamicNumber("endTime", value)} />
-          <DynamicNumberField label="Time step" helpId="dynamicTimeStep" unit="s" value={dynamic.timeStep} min={0.0001} step="0.0005" onCommit={(value) => updateDynamicNumber("timeStep", value)} />
-          <DynamicNumberField label="Output interval" helpId="dynamicOutputInterval" unit="s" value={outputIntervalValue} min={outputIntervalMinimum} step={outputIntervalMinimum} onCommit={(value) => updateDynamicNumber("outputInterval", value)} />
+          <DynamicNumberField label="Start time" helpId="dynamicStartTime" unit="s" value={dynamic.startTime} min={0} step={dynamic.timeStep} onCommit={(value) => updateDynamicNumber("startTime", value)} onValidityChange={trackSettingValidity} />
+          <DynamicNumberField label="End time" helpId="dynamicEndTime" unit="s" value={dynamic.endTime} min={dynamic.startTime + dynamic.timeStep} step={dynamic.timeStep} onCommit={(value) => updateDynamicNumber("endTime", value)} onValidityChange={trackSettingValidity} />
+          <DynamicNumberField label="Time step" helpId="dynamicTimeStep" unit="s" value={dynamic.timeStep} min={0.0001} step="0.0005" onCommit={(value) => updateDynamicNumber("timeStep", value)} onValidityChange={trackSettingValidity} />
+          <DynamicNumberField label="Output interval" helpId="dynamicOutputInterval" unit="s" value={outputIntervalValue} min={outputIntervalMinimum} step={outputIntervalMinimum} onCommit={(value) => updateDynamicNumber("outputInterval", value)} onValidityChange={trackSettingValidity} />
           <label className="field">
             <HelpLabel helpId="dynamicLoadProfile">Load profile</HelpLabel>
             <select value={loadProfile} onChange={(event) => updateDynamicLoadProfile(event.currentTarget.value)}>
@@ -1783,11 +1830,12 @@ function RunPanel({ study, displayModel, runProgress, runError, runTiming, onRun
             </select>
           </label>
           <p className="panel-copy">{loadProfileHelper}</p>
-          <DynamicNumberField label="Damping ratio" helpId="dynamicDampingRatio" unit="ζ" value={dynamic.dampingRatio} min={0} step="0.01" onCommit={(value) => updateDynamicNumber("dampingRatio", value)} />
+          <DynamicNumberField label="Damping ratio" helpId="dynamicDampingRatio" unit="ζ" value={dynamic.dampingRatio} min={0} step="0.01" onCommit={(value) => updateDynamicNumber("dampingRatio", value)} onValidityChange={trackSettingValidity} />
           <div className="summary-box">
             <Info label="Estimated frames" value={frameEstimate ? frameEstimate.count.toLocaleString() : "--"} />
             <Info label="Output cadence" value={`Every ${formatSeconds(normalizedDynamicOutputInterval(dynamic))}`} />
           </div>
+          {hasInvalidSettingDraft && <p className="field-error" role="alert">Estimated frames use the last saved settings until every field holds a valid value.</p>}
           {frameEstimate && frameEstimate.count > 1000 && <p className="panel-copy">Large frame counts may slow result loading and playback.</p>}
           {frameEstimate?.hasFinalPartialStep && <p className="panel-copy">Final frame is clamped to the selected end time.</p>}
         </>
@@ -1811,8 +1859,8 @@ function RunPanel({ study, displayModel, runProgress, runError, runTiming, onRun
         className="primary wide"
         type="button"
         onClick={isRunning ? onCancelSimulation : onRunSimulation}
-        disabled={isRunning ? !onCancelSimulation : !canRunSimulation}
-        title={isRunning ? "Stop simulation" : (missingRunItems.length ? `Complete before running: ${missingRunItems.join(", ")}` : "Run simulation")}
+        disabled={isRunning ? !onCancelSimulation : (!canRunSimulation || hasInvalidSettingDraft)}
+        title={isRunning ? "Stop simulation" : hasInvalidSettingDraft ? "Correct the highlighted simulation settings" : (missingRunItems.length ? `Complete before running: ${missingRunItems.join(", ")}` : "Run simulation")}
         aria-label={isRunning ? "Stop simulation" : "Run simulation"}
       >
         {isRunning ? <X size={16} /> : <Play size={16} />}
@@ -1848,7 +1896,8 @@ function DynamicNumberField({
   value,
   min,
   step,
-  onCommit
+  onCommit,
+  onValidityChange
 }: {
   label: string;
   helpId: SettingHelpId;
@@ -1857,14 +1906,28 @@ function DynamicNumberField({
   min: number;
   step: number | string;
   onCommit: (value: number) => void;
+  onValidityChange?: (field: SettingHelpId, invalid: boolean) => void;
 }) {
   const formattedValue = formatEditableNumberValue(value);
   const [draftValue, setDraftValue] = useState(formattedValue);
   const [editing, setEditing] = useState(false);
+  // A draft that will not commit stays on screen while the solver keeps using
+  // the last committed value. Reporting the disagreement is the whole point:
+  // silently returning from commitDraft left "-1" in the field with Estimated
+  // frames still computed from the previous end time, and Run still enabled.
+  const invalid = editing && editableNumberCommitValue(draftValue, min) === null;
+  const errorId = `${helpId}-error`;
 
   useEffect(() => {
     if (!editing) setDraftValue(formattedValue);
   }, [editing, formattedValue]);
+
+  useEffect(() => {
+    onValidityChange?.(helpId, invalid);
+    // Leaving the field with an uncommitted draft must not leave the Run
+    // button disabled by a control that is no longer on screen.
+    return () => onValidityChange?.(helpId, false);
+  }, [helpId, invalid, onValidityChange]);
 
   function commitDraft(rawValue: string) {
     const parsed = editableNumberCommitValue(rawValue, min);
@@ -1882,6 +1945,8 @@ function DynamicNumberField({
           min={min}
           step={step}
           value={editing ? draftValue : formattedValue}
+          aria-invalid={invalid ? true : undefined}
+          aria-describedby={invalid ? errorId : undefined}
           onFocus={() => {
             setEditing(true);
             setDraftValue(formattedValue);
@@ -1902,8 +1967,17 @@ function DynamicNumberField({
         />
         <span>{unit}</span>
       </span>
+      {invalid && (
+        <span className="field-error" id={errorId} role="alert">
+          {dynamicSettingConstraintMessage(min, unit)} Settings below still use {formatEditableNumberValue(value)} {unit}.
+        </span>
+      )}
     </label>
   );
+}
+
+export function dynamicSettingConstraintMessage(min: number, unit: string): string {
+  return `Enter a number of at least ${formatEditableNumberValue(min)} ${unit}.`;
 }
 
 export function editableNumberCommitValue(rawValue: string, min: number): number | null {
