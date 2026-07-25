@@ -680,7 +680,7 @@ img {
 .workflow-modal-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 30;
+  z-index: var(--z-modal-backdrop);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -987,7 +987,7 @@ img {
 
 .condition-menu {
   position: fixed;
-  z-index: 35;
+  z-index: var(--z-condition-menu);
   top: 116px;
   left: calc(var(--stepbar-w) + 24px);
   width: 280px;
@@ -1472,7 +1472,7 @@ img {
 
 .shortcut-popover {
   position: absolute;
-  z-index: 40;
+  z-index: var(--z-popover);
   top: calc(100% + 10px);
   right: 0;
   width: min(520px, calc(100vw - 24px));
@@ -1800,7 +1800,7 @@ img {
 .topbar-action.running::before {
   position: absolute;
   inset: 0 auto 0 0;
-  z-index: 0;
+  z-index: var(--z-base);
   width: var(--run-progress);
   content: "";
   background: linear-gradient(
@@ -2154,7 +2154,7 @@ img {
 
 .viewer-import-overlay {
   position: absolute;
-  z-index: 20;
+  z-index: var(--z-viewer-import-overlay);
   inset: 0;
   display: grid;
   place-items: center;
@@ -2558,7 +2558,7 @@ img {
 
 .field-tooltip {
   position: fixed;
-  z-index: 1000;
+  z-index: var(--z-tooltip);
   display: grid;
   grid-template-columns: 58px minmax(0, 1fr);
   gap: 10px;
@@ -4668,7 +4668,7 @@ button:disabled {
   position: absolute;
   left: 8px;
   top: -48px;
-  z-index: 9999;
+  z-index: var(--z-skip-link);
   padding: 8px 14px;
   background: var(--color-accent);
   color: #04121f;
@@ -4975,7 +4975,7 @@ button:disabled {
   }
 }
 .validation-gallery-backdrop {
-  z-index: 120;
+  z-index: var(--z-gallery-backdrop);
 }
 
 .validation-gallery {
