@@ -44,7 +44,13 @@ export function ValidationGallery({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div className="workflow-modal-backdrop validation-gallery-backdrop" role="presentation">
+    <div
+      className="workflow-modal-backdrop validation-gallery-backdrop"
+      role="presentation"
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
       <section ref={dialogRef} className="validation-gallery" role="dialog" aria-modal="true" aria-labelledby="validation-gallery-title">
         <header className="validation-gallery-header">
           <span className="validation-gallery-heading-icon"><Activity size={20} aria-hidden="true" /></span>
