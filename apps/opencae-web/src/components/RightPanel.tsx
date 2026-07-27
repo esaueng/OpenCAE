@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { AlertTriangle, Anchor, ArrowDown, Atom, Check, ChevronDown, ChevronRight, CircleHelp, Eye, Factory, FileDown, Gauge, Grid3X3, Layers3, Maximize2, Pause, Play, Plus, RotateCcw, Ruler, ScanLine, ShieldCheck, Upload, Weight, Wrench, X } from "lucide-react";
+import { AlertTriangle, Anchor, ArrowDown, Atom, Boxes, Check, ChevronDown, ChevronRight, CircleHelp, Eye, Factory, FileCode2, FileDown, FileImage, FolderDown, Gauge, Grid3X3, Layers3, Maximize2, Pause, Play, Plus, RotateCcw, Ruler, ScanLine, ShieldCheck, Table2, Upload, Weight, Wrench, X } from "lucide-react";
 import { compatibleManufacturingProcessesFor, defaultManufacturingParametersFor, defaultManufacturingProcessIdFor, effectiveMaterialProperties, fdmPropertyFactorsFor, isManufacturingProcessCompatible, manufacturingParametersForAssignment, manufacturingProcessForId, massKgForPayloadMaterial, materialCatalog, materialCategoryLabel, normalizeManufacturingParameters, payloadMaterialForId, payloadMaterials, type ManufacturingParameters, type ManufacturingProcessId, type PayloadMaterialCategory } from "@opencae/materials";
 import { assessResultFailure, estimateAllowableLoadForSafetyFactor, isModalResultSummary, isThermalResultSummary } from "@opencae/schema";
 import type { Constraint, CustomMaterial, DisplayFace, DisplayModel, DynamicSolverSettings, Load, LoadCase, LoadCombination, Material, MeshConnection, MeshConvergenceRecord, MeshQuality, ModalResultSummary, ModalSolverSettings, Project, ResultField, ResultSummary, RunTimingEstimate, RunVariantRef, SimulationFidelity, StructuralResultSummary, Study, ThermalResultSummary } from "@opencae/schema";
@@ -23,6 +23,7 @@ import { supportDisplayLabel } from "../supportLabels";
 import { getViewportTooltipPosition } from "../tooltipPosition";
 import { defaultSolverMethodForStudy, forceForUnits, formatDensity, formatMass, formatMaterialStress, formatMeshSourceLabel, formatResultMetric, formatResultNumber, formatResultProvenanceLabel, formatVolume, hasResultUnit, legacyResultWarningForProvenance, loadValueForUnits, solverMethodForResult, solverRunnerLabelForResult, type UnitSystem } from "../unitDisplay";
 import { canNavigateToStep } from "../appShellState";
+import { useFocusTrap } from "../hooks/useFocusTrap";
 import { MaterialLibraryModal } from "./SimulationWorkflow";
 import { ParametricPartBuilder } from "./ParametricPartBuilder";
 import { SampleOptionCard } from "./SampleOptionCard";
@@ -88,6 +89,7 @@ interface RightPanelProps {
   onExportResultPng?: () => Promise<void>;
   onExportResultHtml?: () => Promise<void>;
   onExportResultData?: (format: "csv" | "vtu") => Promise<void>;
+  onSaveProject?: () => Promise<void> | void;
   reportBusy?: boolean;
   reportError?: string | null;
   reportDisabled?: boolean;
@@ -2225,6 +2227,79 @@ function ModalResultsPanelContent({
   );
 }
 
+type ResultExportItem = {
+  id: string;
+  label: string;
+  busyLabel: string;
+  busy: boolean;
+  disabled?: boolean;
+  icon: ReactNode;
+  run: () => void;
+};
+
+/**
+ * Collapses the result download actions into one "Export" trigger plus a
+ * popover menu so the Results panel keeps a single primary action ("Generate
+ * report") instead of a column of five equally weighted buttons. While an
+ * export is running the trigger itself carries that item's busy label, so the
+ * state stays visible without reopening the menu.
+ */
+function ResultExportMenu({ items }: { items: ResultExportItem[] }) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const menuRef = useFocusTrap<HTMLDivElement>(open, () => setOpen(false));
+  const busyItem = items.find((item) => item.busy) ?? null;
+  const allDisabled = items.every((item) => item.disabled);
+
+  useEffect(() => {
+    if (!open) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!containerRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [open]);
+
+  if (items.length === 0) return null;
+
+  return (
+    <div className="export-menu" ref={containerRef}>
+      <button
+        className="secondary wide export-menu-trigger"
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        disabled={allDisabled}
+        onClick={() => setOpen((current) => !current)}
+      >
+        <FileDown size={18} />
+        {busyItem ? busyItem.busyLabel : "Export"}
+        <ChevronDown className="export-menu-caret" size={16} />
+      </button>
+      {open && (
+        <div className="export-menu-popover" role="menu" aria-label="Export formats" ref={menuRef}>
+          {items.map((item) => (
+            <button
+              key={item.id}
+              className="export-menu-item"
+              type="button"
+              role="menuitem"
+              disabled={item.disabled || busyItem !== null}
+              onClick={() => {
+                setOpen(false);
+                item.run();
+              }}
+            >
+              {item.icon}
+              {item.busy ? item.busyLabel : item.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ResultsPanelContent({
   displayModel,
   resultMode,
@@ -2263,6 +2338,7 @@ function ResultsPanelContent({
   onExportResultPng,
   onExportResultHtml,
   onExportResultData,
+  onSaveProject,
   reportBusy = false,
   reportError,
   reportDisabled = false,
@@ -2366,6 +2442,55 @@ function ResultsPanelContent({
     updateColorScaleSetting({ rangeMode: "manual", manualMin: parsedScaleMin, manualMax: parsedScaleMax });
   }
 
+  const exportMenuItems: ResultExportItem[] = [
+    ...(onExportResultPng ? [{
+      id: "png",
+      label: "PNG image",
+      busyLabel: "Exporting PNG…",
+      busy: pngExportBusy,
+      disabled: reportDisabled,
+      icon: <FileImage size={16} />,
+      run: () => void onExportResultPng()
+    }] : []),
+    ...(onExportResultHtml ? [{
+      id: "html",
+      label: "Offline HTML",
+      busyLabel: "Packaging HTML…",
+      busy: htmlExportBusy,
+      disabled: reportDisabled,
+      icon: <FileCode2 size={16} />,
+      run: () => void onExportResultHtml()
+    }] : []),
+    ...(onExportResultData ? [{
+      id: "csv",
+      label: "Selected-state CSV",
+      busyLabel: "Exporting CSV…",
+      busy: dataExportBusy === "csv",
+      disabled: reportDisabled,
+      icon: <Table2 size={16} />,
+      run: () => void onExportResultData("csv")
+    }, {
+      id: "vtu",
+      label: "Selected-state VTU",
+      busyLabel: "Exporting VTU…",
+      busy: dataExportBusy === "vtu",
+      disabled: reportDisabled,
+      icon: <Boxes size={16} />,
+      run: () => void onExportResultData("vtu")
+    }] : []),
+    // The project file bundles geometry, study setup and the stored results, so
+    // it stays available while a run is in flight (unlike the result exports,
+    // which need a settled result state).
+    ...(onSaveProject ? [{
+      id: "project",
+      label: "Full project file",
+      busyLabel: "Saving project…",
+      busy: false,
+      icon: <FolderDown size={16} />,
+      run: () => void onSaveProject()
+    }] : [])
+  ];
+
   return (
     <Panel title="Results" step="results" helper="View stress and displacement directly on the 3D model.">
       {resultVariants.length > 1 && (
@@ -2378,33 +2503,14 @@ function ResultsPanelContent({
           </select>
         </label>
       )}
-      {(onGenerateReport || onExportResultPng || onExportResultHtml || onExportResultData) && (
+      {(onGenerateReport || exportMenuItems.length > 0) && (
         <div className="result-actions">
           {onGenerateReport && (
             <button className="primary wide" type="button" disabled={reportBusy || reportDisabled} onClick={() => void onGenerateReport({ targetSafetyFactor })}>
               <FileDown size={18} />{reportBusy ? "Generating…" : "Generate report"}
             </button>
           )}
-          {onExportResultPng && (
-            <button className="secondary wide" type="button" disabled={pngExportBusy || reportDisabled} onClick={() => void onExportResultPng()}>
-              <FileDown size={18} />{pngExportBusy ? "Exporting…" : "Export PNG"}
-            </button>
-          )}
-          {onExportResultHtml && (
-            <button className="secondary wide" type="button" disabled={htmlExportBusy || reportDisabled} onClick={() => void onExportResultHtml()}>
-              <FileDown size={18} />{htmlExportBusy ? "Packaging…" : "Export offline HTML"}
-            </button>
-          )}
-          {onExportResultData && (
-            <button className="secondary wide" type="button" disabled={dataExportBusy !== null || reportDisabled} onClick={() => void onExportResultData("csv")}>
-              <FileDown size={18} />{dataExportBusy === "csv" ? "Exporting…" : "Export selected-state CSV"}
-            </button>
-          )}
-          {onExportResultData && (
-            <button className="secondary wide" type="button" disabled={dataExportBusy !== null || reportDisabled} onClick={() => void onExportResultData("vtu")}>
-              <FileDown size={18} />{dataExportBusy === "vtu" ? "Exporting…" : "Export selected-state VTU"}
-            </button>
-          )}
+          <ResultExportMenu items={exportMenuItems} />
         </div>
       )}
       {reportError && <p className="panel-warning" role="alert"><AlertTriangle size={16} />{reportError}</p>}
