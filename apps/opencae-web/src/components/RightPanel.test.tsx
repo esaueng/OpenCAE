@@ -1820,29 +1820,61 @@ describe("RightPanel payload mass controls", () => {
     expect(failed).toContain("Capture failed.");
   });
 
-  test("offers PNG export with independent busy and error states", () => {
-    const idle = renderPanel("results", { onExportResultPng: vi.fn() });
-    const busy = renderPanel("results", { onExportResultPng: vi.fn(), pngExportBusy: true });
-    const failed = renderPanel("results", { onExportResultPng: vi.fn(), pngExportError: "PNG capture failed." });
+  test("collapses the downloads into one closed export menu trigger", () => {
+    const idle = renderPanel("results", {
+      onExportResultPng: vi.fn(),
+      onExportResultHtml: vi.fn(),
+      onExportResultData: vi.fn(),
+      onSaveProject: vi.fn()
+    });
 
-    expect(idle).toContain("Export PNG");
-    expect(busy).toContain("Exporting…");
-    expect(busy).toContain('disabled=""');
-    expect(failed).toContain('role="alert"');
-    expect(failed).toContain("PNG capture failed.");
+    expect(idle).toContain('aria-haspopup="menu"');
+    expect(idle).toContain('aria-expanded="false"');
+    expect(idle).toContain(">Export<");
+    // The formats live in the popover, so nothing but the trigger renders closed.
+    expect(idle).not.toContain("PNG image");
+    expect(idle).not.toContain("Selected-state CSV");
+    expect(idle).not.toContain("Full project file");
   });
 
-  test("labels raw downloads as selected-state CSV and VTU with shared busy and error states", () => {
-    const idle = renderPanel("results", { onExportResultData: vi.fn() });
-    const busy = renderPanel("results", { onExportResultData: vi.fn(), dataExportBusy: "csv" });
-    const failed = renderPanel("results", { onExportResultData: vi.fn(), dataExportError: "Canonical mesh mismatch." });
+  test("surfaces each export's busy state on the collapsed trigger", () => {
+    const pngBusy = renderPanel("results", { onExportResultPng: vi.fn(), pngExportBusy: true });
+    const htmlBusy = renderPanel("results", { onExportResultHtml: vi.fn(), htmlExportBusy: true });
+    const csvBusy = renderPanel("results", { onExportResultData: vi.fn(), dataExportBusy: "csv" });
+    const vtuBusy = renderPanel("results", { onExportResultData: vi.fn(), dataExportBusy: "vtu" });
 
-    expect(idle).toContain("Export selected-state CSV");
-    expect(idle).toContain("Export selected-state VTU");
-    expect(busy).toContain("Exporting…");
-    expect(busy.match(/disabled=""/g)?.length).toBeGreaterThanOrEqual(2);
-    expect(failed).toContain('role="alert"');
-    expect(failed).toContain("Canonical mesh mismatch.");
+    expect(pngBusy).toContain("Exporting PNG…");
+    expect(htmlBusy).toContain("Packaging HTML…");
+    expect(csvBusy).toContain("Exporting CSV…");
+    expect(vtuBusy).toContain("Exporting VTU…");
+  });
+
+  test("keeps export error alerts outside the menu so failures stay visible when it closes", () => {
+    const pngFailed = renderPanel("results", { onExportResultPng: vi.fn(), pngExportError: "PNG capture failed." });
+    const dataFailed = renderPanel("results", { onExportResultData: vi.fn(), dataExportError: "Canonical mesh mismatch." });
+
+    expect(pngFailed).toContain('role="alert"');
+    expect(pngFailed).toContain("PNG capture failed.");
+    expect(dataFailed).toContain('role="alert"');
+    expect(dataFailed).toContain("Canonical mesh mismatch.");
+  });
+
+  test("disables the export trigger only when every format is unavailable", () => {
+    const running = renderPanel("results", {
+      onExportResultPng: vi.fn(),
+      onExportResultData: vi.fn(),
+      reportDisabled: true
+    });
+    const runningWithProject = renderPanel("results", {
+      onExportResultPng: vi.fn(),
+      onExportResultData: vi.fn(),
+      onSaveProject: vi.fn(),
+      reportDisabled: true
+    });
+
+    expect(running).toContain('aria-haspopup="menu" aria-expanded="false" disabled=""');
+    expect(runningWithProject).toContain('aria-haspopup="menu" aria-expanded="false"');
+    expect(runningWithProject).not.toContain('aria-haspopup="menu" aria-expanded="false" disabled=""');
   });
 
   test("hides the sample Volume and Mass rows for blank and uploaded projects", () => {
