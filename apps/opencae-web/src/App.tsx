@@ -1,5 +1,5 @@
-import { lazy, Suspense, useMemo, useState } from "react";
-import { hasAutosavedWorkspace } from "./autosaveStorage";
+import { lazy, Suspense, useState } from "react";
+import { hasAutosavedWorkspace, readAutosavedThemeMode } from "./autosaveStorage";
 import { StartScreen } from "./components/StartScreen";
 
 type SampleModelId = "bracket" | "plate" | "cantilever";
@@ -21,16 +21,22 @@ const WorkspaceApp = lazy(lazyWorkspaceImport);
  * the user is arriving *from* the start screen the fallback is continuous and
  * stays as it was; only the restore path needs something neutral.
  */
-function WorkspaceRestoringShell() {
+function WorkspaceRestoringShell({ themeMode }: { themeMode: "dark" | "light" }) {
   return (
-    <div className="workspace-restoring" role="status" aria-live="polite">
+    <div className={`workspace-restoring theme-${themeMode}`} role="status" aria-live="polite">
       <span>Restoring your workspace...</span>
     </div>
   );
 }
 
 export function App() {
-  const hasRestoredWorkspace = useMemo(() => hasAutosavedWorkspace(), []);
+  const [{ hasRestoredWorkspace, restoredThemeMode }] = useState(() => {
+    const hasWorkspace = hasAutosavedWorkspace();
+    return {
+      hasRestoredWorkspace: hasWorkspace,
+      restoredThemeMode: hasWorkspace ? readAutosavedThemeMode() : "dark"
+    } as const;
+  });
   const [initialAction, setInitialAction] = useState<WorkspaceInitialAction | null>(null);
   const [workspaceRequested, setWorkspaceRequested] = useState(hasRestoredWorkspace);
 
@@ -50,7 +56,7 @@ export function App() {
   if (!workspaceRequested) return startScreen;
 
   return (
-    <Suspense fallback={initialAction ? startScreen : <WorkspaceRestoringShell />}>
+    <Suspense fallback={initialAction ? startScreen : <WorkspaceRestoringShell themeMode={restoredThemeMode} />}>
       <WorkspaceApp initialAction={initialAction} />
     </Suspense>
   );
