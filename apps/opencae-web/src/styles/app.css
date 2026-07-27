@@ -1464,6 +1464,31 @@ img {
   line-height: 1.25;
 }
 
+/* Manual full-project download, offered alongside the recovery choices the
+   card already explains. */
+.storage-recovery-download {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px;
+  text-align: left;
+}
+
+.storage-recovery-download strong {
+  display: block;
+  color: var(--color-text);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+}
+
+.storage-recovery-download small {
+  display: block;
+  color: var(--color-text-subtle);
+  font-size: var(--fs-mini);
+}
+
 .storage-recovery-footnote {
   color: var(--color-text-subtle);
   font-size: var(--fs-mini);
