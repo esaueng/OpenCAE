@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { AUTOSAVE_STORAGE_KEY } from "./autosaveStorage";
+import { AUTOSAVE_STORAGE_KEY, AUTOSAVE_UI_STORAGE_KEY } from "./autosaveStorage";
 import { App } from "./App";
 
 function stubWindowWithAutosave(entries: Record<string, string>) {
@@ -26,9 +26,25 @@ describe("workspace restore shell", () => {
 
     const html = renderToStaticMarkup(<App />);
 
-    expect(html).toContain('class="workspace-restoring"');
+    expect(html).toContain('class="workspace-restoring theme-dark"');
     expect(html).toContain("Restoring your workspace");
     expect(html).not.toContain("Create new project");
+  });
+
+  test("uses the saved light theme before the workspace chunk loads", () => {
+    stubWindowWithAutosave({
+      [AUTOSAVE_STORAGE_KEY]: "{}",
+      [AUTOSAVE_UI_STORAGE_KEY]: JSON.stringify({
+        version: 1,
+        savedAt: "2026-07-27T22:00:00.000Z",
+        ui: { themeMode: "light" }
+      })
+    });
+
+    const html = renderToStaticMarkup(<App />);
+
+    expect(html).toContain('class="workspace-restoring theme-light"');
+    expect(html).not.toContain('class="workspace-restoring theme-dark"');
   });
 
   test("shows the start screen when there is nothing to restore", () => {

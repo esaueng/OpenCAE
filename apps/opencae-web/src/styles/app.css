@@ -9,7 +9,8 @@ img {
 }
 
 /* Restore shell: the app background without any workflow chrome, so a reload
-   of a saved project never flashes the start screen on its way back in. */
+   of a saved project never flashes the start screen or wrong theme on its way
+   back in. */
 .workspace-restoring {
   min-height: 100%;
   display: flex;
@@ -18,7 +19,7 @@ img {
   color: var(--color-text-subtle);
   font-family: var(--font-mono);
   font-size: var(--fs-xs);
-  background: linear-gradient(#0b0f14, #080c10);
+  background: var(--color-bg);
 }
 
 .start-screen {
