@@ -53,11 +53,12 @@ describe("ProjectStorageNotice", () => {
     expect(workspaceSource).not.toContain("Choose Cancel to keep everything local");
   });
 
-  test("labels the local project export as a download", () => {
+  test("routes the local project export through the Results export menu, not the top bar", () => {
     const workspaceSource = readFileSync(resolve(__dirname, "../WorkspaceApp.tsx"), "utf8");
 
-    expect(workspaceSource).toContain('aria-label="Download Project"');
-    expect(workspaceSource).toContain('<span className="topbar-action-label">Download Project</span>');
-    expect(workspaceSource).toContain('<Download size={16} aria-hidden="true" />');
+    expect(workspaceSource).not.toContain('aria-label="Download Project"');
+    expect(workspaceSource).toContain("onSaveProject={handleSaveProject}");
+    // Cmd/Ctrl+S keeps saving reachable from every step, not just Results.
+    expect(workspaceSource).toContain("void handleSaveProject();");
   });
 });
