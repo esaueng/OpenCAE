@@ -2586,6 +2586,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           onExportResultPng={handleExportResultPng}
           onExportResultHtml={handleExportResultHtml}
           onExportResultData={handleExportResultData}
+          onSaveProject={handleSaveProject}
           reportBusy={reportBusy}
           reportError={reportError}
           reportDisabled={solverRunning || convergenceBusy}

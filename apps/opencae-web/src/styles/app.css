@@ -3453,6 +3453,73 @@ button:disabled {
   flex: none;
 }
 
+/* Export dropdown: one secondary trigger under the primary report button,
+   with the format list in a popover anchored to it. */
+.export-menu {
+  position: relative;
+}
+
+.export-menu-trigger {
+  width: 100%;
+}
+
+.export-menu-trigger .export-menu-caret {
+  width: 16px;
+  height: 16px;
+  margin-left: auto;
+}
+
+.export-menu-trigger[aria-expanded="true"] .export-menu-caret {
+  transform: rotate(180deg);
+}
+
+.export-menu-popover {
+  position: absolute;
+  z-index: var(--z-popover);
+  top: calc(100% + var(--sp-1));
+  left: 0;
+  right: 0;
+  display: grid;
+  gap: 2px;
+  padding: var(--sp-1);
+  background: var(--color-surface-2);
+  border: var(--border-thin);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-panel);
+}
+
+.export-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 9px;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  font: var(--fw-regular) var(--fs-base) / var(--lh-normal) var(--font-ui);
+  text-align: left;
+  cursor: pointer;
+}
+
+.export-menu-item svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  color: var(--color-text-muted);
+}
+
+.export-menu-item:hover:not(:disabled),
+.export-menu-item:focus-visible {
+  background: var(--color-surface-hover);
+}
+
+.export-menu-item:disabled {
+  color: var(--color-text-subtle);
+  cursor: not-allowed;
+}
+
 .button-grid,
 .result-buttons {
   display: grid;
