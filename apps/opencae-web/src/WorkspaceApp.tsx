@@ -2458,6 +2458,10 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         recoveryNeeded={overflowRecoveryNeeded}
         onChooseCloud={() => handleStoragePreference("cloud")}
         onChooseLocal={() => handleStoragePreference("local")}
+        onDownloadProject={() => {
+          setStorageRecoveryNoticeOpen(false);
+          void handleSaveProject();
+        }}
       />
     );
   }
