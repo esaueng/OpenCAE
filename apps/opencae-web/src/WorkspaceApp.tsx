@@ -1,7 +1,7 @@
 import { lazy, startTransition, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { DynamicSolverSettingsSchema, isModalResultSummary, isRunResultReadyStatus, isStructuralResultSummary, isThermalResultSummary, ModalSolverSettingsSchema } from "@opencae/schema";
 import type { Constraint, CustomMaterial, DisplayFace, DisplayModel, DynamicSolverSettings, Load, MeshQuality, ModalSolverSettings, NamedSelection, Project, ResultField, ResultRenderBounds, ResultSummary, RunEvent, RunTimingEstimate, RunVariantRef, RunVariantResult, SimulationFidelity, Study } from "@opencae/schema";
-import { Activity, CloudUpload, Download, HardDrive, RotateCcw, X } from "lucide-react";
+import { Activity, CloudUpload, HardDrive, RotateCcw, X } from "lucide-react";
 import { addLoad, addSupport, assignMaterial, cancelRun, createProject, generateMesh, getResults, getRunVariant, importLocalProject, isStepGeometryMeshFailure, loadSampleProject, probeUploadedStepRepairAfterMeshFailure, renameProject, repairUploadedStepModel, runMeshConvergence, runSimulation, saveRunReportCaptures, STEP_REPAIR_UNAVAILABLE_MESSAGE, subscribeToRun, updateStudy as saveStudyPatch, uploadedStepRepairProbeDecision, uploadModel, type SampleAnalysisType, type SampleModelId } from "./lib/api";
 import { cancelWasmMeshing, type WasmMeshPhaseProgress } from "./lib/wasmMeshing";
 import { buildOpenCaeCoreModelForStudy, resolveSolverBackend } from "./workers/opencaeCoreSolve";
@@ -2440,10 +2440,6 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
             <span aria-hidden="true">▶</span><span className="topbar-action-label">{solverRunning ? `Running… ${runButtonProgress}%` : "Run simulation"}</span>
           </button>
         ) : null}
-        <button className="secondary topbar-action" type="button" onClick={handleSaveProject} title="Download project to local disk" aria-label="Download Project">
-          <Download size={16} aria-hidden="true" />
-          <span className="topbar-action-label">Download Project</span>
-        </button>
       </header>
     );
   }
@@ -2457,6 +2453,10 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         recoveryNeeded={overflowRecoveryNeeded}
         onChooseCloud={() => handleStoragePreference("cloud")}
         onChooseLocal={() => handleStoragePreference("local")}
+        onDownloadProject={() => {
+          setStorageRecoveryNoticeOpen(false);
+          void handleSaveProject();
+        }}
       />
     );
   }
@@ -2581,6 +2581,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           onExportResultPng={handleExportResultPng}
           onExportResultHtml={handleExportResultHtml}
           onExportResultData={handleExportResultData}
+          onSaveProject={handleSaveProject}
           reportBusy={reportBusy}
           reportError={reportError}
           reportDisabled={solverRunning || convergenceBusy}

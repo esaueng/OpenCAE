@@ -1,4 +1,4 @@
-import { CloudUpload, HardDrive, ShieldCheck } from "lucide-react";
+import { CloudUpload, Download, HardDrive, ShieldCheck } from "lucide-react";
 import type { CloudBackupPreference } from "../cloudBackup";
 
 interface ProjectStorageNoticeProps {
@@ -7,9 +7,10 @@ interface ProjectStorageNoticeProps {
   recoveryNeeded: boolean;
   onChooseCloud: () => void;
   onChooseLocal: () => void;
+  onDownloadProject?: () => void;
 }
 
-export function ProjectStorageNotice({ preference, busy, recoveryNeeded, onChooseCloud, onChooseLocal }: ProjectStorageNoticeProps) {
+export function ProjectStorageNotice({ preference, busy, recoveryNeeded, onChooseCloud, onChooseLocal, onDownloadProject }: ProjectStorageNoticeProps) {
   const title = preference === "cloud"
     ? recoveryNeeded ? "Encrypted recovery is on" : "Encrypted recovery is ready"
     : preference === "local"
@@ -69,6 +70,15 @@ export function ProjectStorageNotice({ preference, busy, recoveryNeeded, onChoos
           </span>
         </button>
       </div>
+      {onDownloadProject && (
+        <button className="secondary storage-recovery-download" type="button" onClick={onDownloadProject}>
+          <Download size={16} aria-hidden="true" />
+          <span>
+            <strong>Download project file</strong>
+            <small>Complete project, saved to your disk</small>
+          </span>
+        </button>
+      )}
       <small className="storage-recovery-footnote">Remembered in this browser. Change it anytime from Storage in the toolbar.</small>
     </aside>
   );

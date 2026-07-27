@@ -53,11 +53,26 @@ describe("ProjectStorageNotice", () => {
     expect(workspaceSource).not.toContain("Choose Cancel to keep everything local");
   });
 
-  test("labels the local project export as a download", () => {
+  test("offers the full project download alongside the recovery choices", () => {
+    const html = renderToStaticMarkup(
+      <ProjectStorageNotice preference="local" busy={false} recoveryNeeded={false} onChooseCloud={vi.fn()} onChooseLocal={vi.fn()} onDownloadProject={vi.fn()} />
+    );
+    const withoutHandler = renderToStaticMarkup(
+      <ProjectStorageNotice preference="local" busy={false} recoveryNeeded={false} onChooseCloud={vi.fn()} onChooseLocal={vi.fn()} />
+    );
+
+    expect(html).toContain("Download project file");
+    expect(html).toContain("Complete project, saved to your disk");
+    expect(withoutHandler).not.toContain("Download project file");
+  });
+
+  test("routes the local project export through the storage card and Results menu, not the top bar", () => {
     const workspaceSource = readFileSync(resolve(__dirname, "../WorkspaceApp.tsx"), "utf8");
 
-    expect(workspaceSource).toContain('aria-label="Download Project"');
-    expect(workspaceSource).toContain('<span className="topbar-action-label">Download Project</span>');
-    expect(workspaceSource).toContain('<Download size={16} aria-hidden="true" />');
+    expect(workspaceSource).not.toContain('aria-label="Download Project"');
+    expect(workspaceSource).toContain("onSaveProject={handleSaveProject}");
+    expect(workspaceSource).toContain("onDownloadProject={() => {");
+    // Cmd/Ctrl+S keeps saving reachable without opening either surface.
+    expect(workspaceSource).toContain("void handleSaveProject();");
   });
 });
