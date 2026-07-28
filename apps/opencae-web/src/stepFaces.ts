@@ -26,6 +26,10 @@ import {
   peekStepSurfacePreview,
   preferStepSurfacePreview
 } from "./stepSurfacePreviewFallback";
+import {
+  readStepFileForDisplay,
+  stepDisplayCacheKey
+} from "./stepDisplayTessellation";
 
 export type StepFaceRecord = {
   /** Stable per-import id, global across meshes: "step-face-<k>". */
@@ -508,7 +512,10 @@ export function peekStepFaceRegistryForBase64(contentBase64: string): StepFaceRe
 async function importStepRegistry(contentBase64: string): Promise<StepFaceRegistry> {
   const { getOcctImporter } = await import("./stepPreview");
   const importer = await getOcctImporter();
-  const result = importer.ReadStepFile(base64ToUint8Array(contentBase64), null);
+  // Keep picking/highlight triangle ranges aligned with the detailed viewport
+  // tessellation. A different profile here would make the B-rep face registry
+  // point at triangles that do not exist in the rendered mesh.
+  const result = readStepFileForDisplay(importer, base64ToUint8Array(contentBase64));
   if (!result.success) {
     throw new Error(`STEP face registry import failed${result.errorCode ? ` (${result.errorCode})` : ""}.`);
   }
@@ -529,12 +536,7 @@ function hasRenderableMesh(mesh: OcctMesh): boolean {
 }
 
 function registryCacheKey(contentBase64: string): string {
-  // djb2 over the base64 payload; length included to keep collisions harmless.
-  let hash = 5381;
-  for (let index = 0; index < contentBase64.length; index += 1) {
-    hash = ((hash << 5) + hash + contentBase64.charCodeAt(index)) | 0;
-  }
-  return `${contentBase64.length}:${hash}`;
+  return stepDisplayCacheKey(contentBase64);
 }
 
 // ---------------------------------------------------------------------------

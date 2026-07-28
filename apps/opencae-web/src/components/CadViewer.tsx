@@ -3213,7 +3213,11 @@ function UploadedNativeCadResultModel({
   useEffect(() => {
     let cancelled = false;
     setPreview({ status: "loading" });
-    stepPreviewFromBase64(contentBase64, "#63a9e5", { includeEdges: !lightweightResultPlayback, shareMaterials: lightweightResultPlayback })
+    stepPreviewFromBase64(contentBase64, "#63a9e5", {
+      includeEdges: !lightweightResultPlayback,
+      shareMaterials: lightweightResultPlayback,
+      lod: lightweightResultPlayback ? "balanced" : "detailed"
+    })
       .then((nextPreview) => {
         if (cancelled) return;
         setPreview({
