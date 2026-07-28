@@ -2246,19 +2246,52 @@ type ResultExportItem = {
  */
 function ResultExportMenu({ items }: { items: ResultExportItem[] }) {
   const [open, setOpen] = useState(false);
+  const [menuStyle, setMenuStyle] = useState<CSSProperties>();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const menuRef = useFocusTrap<HTMLDivElement>(open, () => setOpen(false));
   const busyItem = items.find((item) => item.busy) ?? null;
   const allDisabled = items.every((item) => item.disabled);
 
+  const updateMenuPosition = useCallback(() => {
+    const trigger = containerRef.current;
+    if (!trigger || typeof window === "undefined") return;
+    const triggerRect = trigger.getBoundingClientRect();
+    const menuRect = menuRef.current?.getBoundingClientRect();
+    const menuWidth = triggerRect.width;
+    const position = getViewportTooltipPosition({
+      triggerRect,
+      viewport: { width: window.innerWidth, height: window.innerHeight },
+      tooltip: { width: menuWidth, height: menuRect?.height || 188 },
+      gap: 4,
+      margin: 12
+    });
+    setMenuStyle({ top: position.top, left: position.left, width: menuWidth });
+  }, [menuRef]);
+
+  useIsomorphicLayoutEffect(() => {
+    if (!open) return;
+    updateMenuPosition();
+  }, [open, updateMenuPosition]);
+
+  useEffect(() => {
+    if (!open || typeof window === "undefined") return;
+    window.addEventListener("resize", updateMenuPosition);
+    window.addEventListener("scroll", updateMenuPosition, true);
+    return () => {
+      window.removeEventListener("resize", updateMenuPosition);
+      window.removeEventListener("scroll", updateMenuPosition, true);
+    };
+  }, [open, updateMenuPosition]);
+
   useEffect(() => {
     if (!open) return;
     const handlePointerDown = (event: PointerEvent) => {
-      if (!containerRef.current?.contains(event.target as Node)) setOpen(false);
+      const target = event.target as Node;
+      if (!containerRef.current?.contains(target) && !menuRef.current?.contains(target)) setOpen(false);
     };
     document.addEventListener("pointerdown", handlePointerDown);
     return () => document.removeEventListener("pointerdown", handlePointerDown);
-  }, [open]);
+  }, [menuRef, open]);
 
   if (items.length === 0) return null;
 
@@ -2276,8 +2309,14 @@ function ResultExportMenu({ items }: { items: ResultExportItem[] }) {
         {busyItem ? busyItem.busyLabel : "Export"}
         <ChevronDown className="export-menu-caret" size={16} />
       </button>
-      {open && (
-        <div className="export-menu-popover" role="menu" aria-label="Export formats" ref={menuRef}>
+      {open && typeof document !== "undefined" && createPortal(
+        <div
+          className="export-menu-popover export-menu-popover--floating"
+          role="menu"
+          aria-label="Export formats"
+          ref={menuRef}
+          style={menuStyle}
+        >
           {items.map((item) => (
             <button
               key={item.id}
@@ -2294,7 +2333,8 @@ function ResultExportMenu({ items }: { items: ResultExportItem[] }) {
               {item.busy ? item.busyLabel : item.label}
             </button>
           ))}
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

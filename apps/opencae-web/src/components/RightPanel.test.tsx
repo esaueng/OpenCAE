@@ -1847,6 +1847,13 @@ describe("RightPanel payload mass controls", () => {
     expect(idle).not.toContain("Full project file");
   });
 
+  test("ports the open export menu to viewport coordinates so panel overflow cannot clip mobile actions", () => {
+    expect(rightPanelSource).toContain('className="export-menu-popover export-menu-popover--floating"');
+    expect(rightPanelSource).toContain("getViewportTooltipPosition({");
+    expect(rightPanelSource).toContain("setMenuStyle({ top: position.top, left: position.left, width: menuWidth });");
+    expect(rightPanelSource).toContain("!menuRef.current?.contains(target)");
+  });
+
   test("surfaces each export's busy state on the collapsed trigger", () => {
     const pngBusy = renderPanel("results", { onExportResultPng: vi.fn(), pngExportBusy: true });
     const htmlBusy = renderPanel("results", { onExportResultHtml: vi.fn(), htmlExportBusy: true });
