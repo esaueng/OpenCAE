@@ -8,6 +8,10 @@ import {
   peekStepSurfacePreview,
   preferStepSurfacePreview
 } from "./stepSurfacePreviewFallback";
+import {
+  readStepFileForDisplay,
+  type StepDisplayLod
+} from "./stepDisplayTessellation";
 
 let occtPromise: Promise<OcctImporter> | null = null;
 
@@ -25,6 +29,7 @@ export interface StepPreview {
 export interface StepPreviewOptions {
   includeEdges?: boolean;
   shareMaterials?: boolean;
+  lod?: StepDisplayLod;
 }
 
 export function geometryFromOcctMesh(mesh: OcctMesh): THREE.BufferGeometry {
@@ -85,6 +90,9 @@ export function normalizedStepPreviewFromMeshes(meshes: OcctMesh[], color: strin
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     if (includeEdges) {
+      // Generate the outline from the exact same refined display geometry as
+      // the shaded surface. Boundary curves therefore share every sampled
+      // point with the visible silhouette instead of drifting away from it.
       mesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(geometry, 15), edgeMaterial!));
     }
     group.add(mesh);
@@ -146,7 +154,7 @@ export async function stepPreviewFromBase64(contentBase64: string, color: string
 
   const importer = await getOcctImporter();
   const bytes = base64ToUint8Array(contentBase64);
-  const result = importer.ReadStepFile(bytes, null);
+  const result = readStepFileForDisplay(importer, bytes, options?.lod);
 
   if (result.success && (result.meshes ?? []).some(hasRenderableOcctMesh)) {
     return normalizedStepPreviewFromMeshes(result.meshes ?? [], color, options);
