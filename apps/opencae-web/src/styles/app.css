@@ -3532,6 +3532,14 @@ button:disabled {
   box-shadow: var(--shadow-panel);
 }
 
+.export-menu-popover.export-menu-popover--floating {
+  position: fixed;
+  right: auto;
+  bottom: auto;
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
+}
+
 .export-menu-item {
   display: flex;
   align-items: center;
