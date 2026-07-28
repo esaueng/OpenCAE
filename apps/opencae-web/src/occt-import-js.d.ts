@@ -3,6 +3,13 @@ declare module "occt-import-js" {
     locateFile?: (path: string) => string;
   }
 
+  export interface OcctTessellationParameters {
+    linearUnit?: "millimeter" | "centimeter" | "meter" | "inch" | "foot";
+    linearDeflectionType?: "bounding_box_ratio" | "absolute_value";
+    linearDeflection?: number;
+    angularDeflection?: number;
+  }
+
   /** Inclusive triangle range of one B-rep face within the mesh's index buffer. */
   export interface OcctBrepFace {
     first: number;
@@ -29,7 +36,7 @@ declare module "occt-import-js" {
   }
 
   export interface OcctImporter {
-    ReadStepFile(buffer: Uint8Array, params: unknown): OcctImportResult;
+    ReadStepFile(buffer: Uint8Array, params: OcctTessellationParameters | null): OcctImportResult;
   }
 
   export default function occtimportjs(options?: OcctImportOptions): Promise<OcctImporter>;
