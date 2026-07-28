@@ -138,6 +138,15 @@ describe("app CSS", () => {
     expect(shortcutPopover).toMatch(/box-shadow:\s*var\(--shadow-panel\)/);
   });
 
+  test("keeps the Results export menu in the viewport instead of clipping it inside the mobile panel", () => {
+    const floatingExportMenu = cssRule(".export-menu-popover.export-menu-popover--floating");
+
+    expect(floatingExportMenu).toMatch(/position:\s*fixed/);
+    expect(floatingExportMenu).toMatch(/right:\s*auto/);
+    expect(floatingExportMenu).toMatch(/max-height:\s*calc\(100vh\s*-\s*24px\)/);
+    expect(floatingExportMenu).toMatch(/overflow-y:\s*auto/);
+  });
+
   test("balances the four Run analysis types in a two-column grid", () => {
     const runAnalysisType = cssRule(".segmented.run-analysis-type");
     const evenButtons = cssRule(".segmented.run-analysis-type button:nth-child(2n)");
