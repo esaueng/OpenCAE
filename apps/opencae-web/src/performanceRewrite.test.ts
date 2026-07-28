@@ -230,10 +230,11 @@ describe("Worker UI performance rewrite boundaries", () => {
     expect(stepPreviewSource).toContain("includeEdges?: boolean");
     expect(stepPreviewSource).toContain("if (includeEdges)");
     expect(stepPreviewSource).toContain("shareMaterials?: boolean");
+    expect(stepPreviewSource).toContain("lod?: StepDisplayLod");
     expect(viewerSource).toContain("const lightweightResultPlayback = Boolean(resultPlaybackFrameController)");
-    expect(viewerSource).toContain("stepPreviewFromBase64(contentBase64, \"#63a9e5\", { includeEdges: !lightweightResultPlayback, shareMaterials: lightweightResultPlayback })");
+    expect(viewerSource).toMatch(/stepPreviewFromBase64\(contentBase64, "#63a9e5", \{[\s\S]*?includeEdges: !lightweightResultPlayback,[\s\S]*?shareMaterials: lightweightResultPlayback,[\s\S]*?lod: lightweightResultPlayback \? "balanced" : "detailed"[\s\S]*?\}\)/);
     expect(viewerSource).toContain("{!lightweightResultPlayback && <Edges color=\"#43556a\" threshold={18} />}");
-    expect(workerSource).toContain("stepPreviewFromBase64(request.payload.contentBase64, request.payload.color, { includeEdges: false, shareMaterials: true })");
+    expect(workerSource).toMatch(/stepPreviewFromBase64\(request\.payload\.contentBase64, request\.payload\.color, \{[\s\S]*?includeEdges: false,[\s\S]*?shareMaterials: true,[\s\S]*?lod: "balanced"[\s\S]*?\}\)/);
   });
 
   test("keeps viewer renderer stats behind explicit development opt-in flags", () => {
