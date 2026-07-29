@@ -10,6 +10,7 @@
     "build:core": "pnpm --filter @opencae/core build && pnpm --filter @opencae/examples build && pnpm --filter @opencae/solver-cpu build && pnpm --filter @opencae/solver-webgpu build && pnpm --filter @opencae/viewer build",
     "build:cloudflare": "pnpm build:core && pnpm --filter @opencae/web build",
     "verify:perf": "pnpm build:core && pnpm --filter @opencae/web build && node scripts/verify-web-performance.mjs",
+    "verify:step-selection-browser": "node scripts/verify-step-selection-browser.mjs",
     "verify:cloudflare-config": "node scripts/verify-cloudflare-config.mjs",
     "deploy:cloudflare": "pnpm verify:cloudflare-config && pnpm build:cloudflare && wrangler deploy",
     "deploy:cloudflare:dry-run": "pnpm verify:cloudflare-config && pnpm build:cloudflare && wrangler deploy --dry-run",
