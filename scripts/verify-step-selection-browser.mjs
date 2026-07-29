@@ -93,7 +93,8 @@ async function connectCdp() {
       pending.delete(message.id);
       return;
     }
-    handlers.get(message.method)?.(message.params);
+    const handler = handlers.get(message.method);
+    if (typeof handler === "function") handler(message.params);
   };
   return {
     send(method, params = {}) {
