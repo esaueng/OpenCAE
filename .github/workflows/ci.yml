@@ -41,6 +41,9 @@ jobs:
       - name: Test
         run: pnpm test
 
+      - name: Verify STEP selection across display LODs in Chrome
+        run: pnpm verify:step-selection-browser
+
       - name: Build Cloudflare production bundle
         run: pnpm build:cloudflare
 
