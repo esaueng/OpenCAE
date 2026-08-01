@@ -164,7 +164,16 @@ describe("App workflow layout", () => {
     expect(appSource).toContain('aria-controls="workspace-shortcut-guide"');
     expect(appSource).toContain("<KeyboardShortcutGuide />");
     expect(appSource).toContain("checked={singleKeyShortcutsEnabled}");
-    expect(appSource).toContain('if (event.key === "Escape") setShortcutGuideOpen(false);');
+    expect(appSource).toContain("useFocusTrap<HTMLDivElement>(shortcutGuideOpen");
+    expect(appSource).toContain('role="dialog" aria-modal="true"');
+    expect(appSource).toContain('className="shortcut-popover-backdrop"');
+  });
+
+  test("moves skip-link focus to the main workspace target", () => {
+    expect(appSource).toContain('href="#workspace-main" onClick={handleSkipToMain}');
+    expect(appSource).toContain('window.history.replaceState(window.history.state, "", "#workspace-main");');
+    expect(appSource).toContain("main.focus();");
+    expect(appSource).toContain('ref={workspaceMainRef} className="workspace" id="workspace-main" tabIndex={-1}');
   });
 
   test("invalidates completed results after dynamic solver settings change", () => {

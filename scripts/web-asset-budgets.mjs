@@ -18,13 +18,13 @@ export const INITIAL_JS_GZIP_BUDGET_BYTES = 175 * 1024;
 /**
  * Ceiling for any single lazy JS chunk, gzip.
  *
- * The largest today is `viewer-three` at ~265 KiB gzip (~962 KiB raw): all of
- * three.js plus the drei/fiber layer the 7.3k-line viewer drives directly. It
- * is one manual chunk on purpose — plan 024 owns the question of splitting the
- * viewer's subsystems, which needs visual regression evidence rather than a
- * budget line.
+ * Viewer libraries are split by subsystem so no individual transfer becomes
+ * an oversized parse/compile task on slower devices.
  */
 export const LAZY_JS_CHUNK_GZIP_BUDGET_BYTES = 300 * 1024;
+
+/** Ceiling for any single lazy JavaScript response before compression. */
+export const LAZY_JS_CHUNK_RAW_BUDGET_BYTES = 500 * 1024;
 
 /** All JS the build emits, gzip — catches growth spread thinly across chunks. */
 export const TOTAL_JS_GZIP_BUDGET_BYTES = 1500 * 1024;
