@@ -1,4 +1,4 @@
-import { lazy, startTransition, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { lazy, startTransition, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from "react";
 import { DynamicSolverSettingsSchema, isModalResultSummary, isRunResultReadyStatus, isStructuralResultSummary, isThermalResultSummary, ModalSolverSettingsSchema } from "@opencae/schema";
 import type { Constraint, CustomMaterial, DisplayFace, DisplayModel, DynamicSolverSettings, Load, MeshQuality, ModalSolverSettings, NamedSelection, Project, ResultField, ResultRenderBounds, ResultSummary, RunEvent, RunTimingEstimate, RunVariantRef, RunVariantResult, SimulationFidelity, Study } from "@opencae/schema";
 import { Activity, CloudUpload, HardDrive, RotateCcw, X } from "lucide-react";
@@ -67,6 +67,7 @@ import { preparePlaybackFramesInWorker } from "./workers/performanceClient";
 import type { WorkspaceInitialAction } from "./App";
 import { DEFAULT_SECTION_PLANE, type PayloadObjectSelection, type PrintLayerOrientation, type ProjectionMode, type ResultMode, type ResultPlaybackFrameController, type SectionPlaneState, type StressComponent, type ThemeMode, type ViewerLoadMarker, type ViewerSupportMarker, type ViewMode } from "./workspaceViewTypes";
 import { defaultRecentProjectService, isRecentProjectsSupported } from "./recentProjects";
+import { useFocusTrap } from "./hooks/useFocusTrap";
 
 const lazyCadViewerImport = () => import("./components/CadViewer").then((module) => ({ default: module.CadViewer }));
 const CadViewer = lazy(lazyCadViewerImport);
@@ -250,6 +251,8 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const stepFaceHealNotifiedRef = useRef(false);
   const stepHoleSupportAuditRef = useRef<string | null>(null);
   const workspaceShortcutHandlerRef = useRef<(event: KeyboardEvent) => void>(() => undefined);
+  const workspaceMainRef = useRef<HTMLElement | null>(null);
+  const shortcutGuideRef = useFocusTrap<HTMLDivElement>(shortcutGuideOpen, () => setShortcutGuideOpen(false));
   const resultFrameIndexRef = useRef(0);
   const resultPlaybackFramePositionRef = useRef(0);
   const resultPlaybackOrdinalPositionRef = useRef(0);
@@ -919,14 +922,13 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     return () => window.removeEventListener("keydown", handleShortcut);
   }, []);
 
-  useEffect(() => {
-    if (!shortcutGuideOpen) return undefined;
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setShortcutGuideOpen(false);
-    };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [shortcutGuideOpen]);
+  function handleSkipToMain(event: ReactMouseEvent<HTMLAnchorElement>) {
+    event.preventDefault();
+    const main = workspaceMainRef.current;
+    if (!main) return;
+    window.history.replaceState(window.history.state, "", "#workspace-main");
+    main.focus();
+  }
 
   const autosaveUiSnapshot = useMemo<WorkspaceUiSnapshot>(() => ({
     activeStep,
@@ -2400,19 +2402,22 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
             Keys
           </button>
           {shortcutGuideOpen ? (
-            <div className="shortcut-popover" id="workspace-shortcut-guide" role="dialog" aria-label="Keyboard shortcuts">
-              <button className="shortcut-popover-close" type="button" aria-label="Close keyboard shortcuts" onClick={() => setShortcutGuideOpen(false)}>
-                <X size={16} aria-hidden="true" />
-              </button>
-              <KeyboardShortcutGuide />
-              <label className="shortcut-toggle">
-                <input type="checkbox" checked={singleKeyShortcutsEnabled} onChange={handleToggleSingleKeyShortcuts} />
-                <span>
-                  <strong>Single-key shortcuts</strong>
-                  <small>Enable N, B, and H when you are not typing in a field.</small>
-                </span>
-              </label>
-            </div>
+            <>
+              <div className="shortcut-popover-backdrop" aria-hidden="true" onMouseDown={() => setShortcutGuideOpen(false)} />
+              <div ref={shortcutGuideRef} className="shortcut-popover" id="workspace-shortcut-guide" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
+                <button className="shortcut-popover-close" type="button" aria-label="Close keyboard shortcuts" onClick={() => setShortcutGuideOpen(false)}>
+                  <X size={16} aria-hidden="true" />
+                </button>
+                <KeyboardShortcutGuide />
+                <label className="shortcut-toggle">
+                  <input type="checkbox" checked={singleKeyShortcutsEnabled} onChange={handleToggleSingleKeyShortcuts} />
+                  <span>
+                    <strong>Single-key shortcuts</strong>
+                    <small>Enable N, B, and H when you are not typing in a field.</small>
+                  </span>
+                </label>
+              </div>
+            </>
           ) : null}
         </div>
         <button
@@ -2485,11 +2490,11 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
 
   return (
     <div className={`app-shell theme-${themeMode} ${isStepbarCollapsed ? "stepbar-collapsed" : ""}`}>
-      <a className="skip-link" href="#workspace-main">Skip to main content</a>
+      <a className="skip-link" href="#workspace-main" onClick={handleSkipToMain}>Skip to main content</a>
       <h1 className="visually-hidden">{project?.name ? `OpenCAE — ${project.name}` : "OpenCAE workspace"}</h1>
       {renderTopbar(true)}
 
-      <main className="workspace" id="workspace-main" tabIndex={-1}>
+      <main ref={workspaceMainRef} className="workspace" id="workspace-main" tabIndex={-1}>
         <StepBar
           activeStep={activeStep}
           collapsed={isStepbarCollapsed}

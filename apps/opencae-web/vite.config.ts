@@ -204,16 +204,30 @@ export default defineConfig({
   },
   build: {
     modulePreload: false,
-    rollupOptions: {
+    rolldownOptions: {
       output: {
-        manualChunks(id) {
-          if (id.includes("vite/preload-helper")) return "react-vendor";
-          if (id.includes("/node_modules/.pnpm/react@") || id.includes("/node_modules/.pnpm/react-dom@") || id.includes("/node_modules/.pnpm/scheduler@")) {
-            return "react-vendor";
-          }
-          if (id.includes("occt-import-js")) return "cad-import";
-          if (id.includes("@react-three") || id.includes("/node_modules/.pnpm/three@") || id.includes("three/examples")) return "viewer-three";
-          return undefined;
+        codeSplitting: {
+          groups: [
+            {
+              name: "react-vendor",
+              test: (id) => id.includes("vite/preload-helper")
+                || id.includes("/node_modules/.pnpm/react@")
+                || id.includes("/node_modules/.pnpm/react-dom@")
+                || id.includes("/node_modules/.pnpm/scheduler@"),
+              priority: 30
+            },
+            { name: "cad-import", test: /occt-import-js/, priority: 25 },
+            {
+              // Rolldown's maxSize splits the viewer dependency graph into
+              // stable parse/compile tasks below the 500 KiB raw budget.
+              name: "viewer-three",
+              test: (id) => id.includes("@react-three")
+                || id.includes("/node_modules/.pnpm/three@")
+                || id.includes("three/examples"),
+              maxSize: 400 * 1024,
+              priority: 20
+            }
+          ]
         }
       }
     }

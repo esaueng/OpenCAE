@@ -125,6 +125,7 @@ describe("app CSS", () => {
     const shortcutItem = cssRule(".shortcut-item");
     const shortcutKey = cssRule(".shortcut-key");
     const shortcutPopover = cssRule(".shortcut-popover");
+    const shortcutBackdrop = cssRule(".shortcut-popover-backdrop");
 
     expect(workflowNavButton).toMatch(/display:\s*flex/);
     expect(workflowNavButton).toMatch(/justify-content:\s*space-between/);
@@ -136,6 +137,15 @@ describe("app CSS", () => {
     expect(shortcutKey).toMatch(/font-family:\s*var\(--font-mono\)/);
     expect(shortcutPopover).toMatch(/position:\s*absolute/);
     expect(shortcutPopover).toMatch(/box-shadow:\s*var\(--shadow-panel\)/);
+    expect(shortcutBackdrop).toMatch(/position:\s*fixed/);
+    expect(shortcutBackdrop).toMatch(/inset:\s*0/);
+    expect(shortcutBackdrop).toMatch(/z-index:\s*var\(--z-modal-backdrop\)/);
+  });
+
+  test("keeps compact interactive controls at least 24px high", () => {
+    expect(css).toMatch(/\.unit-switch\s+\.unit-toggle\s*\{[^}]*min-height:\s*24px/);
+    expect(css).toMatch(/\.tooltip-trigger\s*\{[^}]*width:\s*24px[^}]*height:\s*24px/);
+    expect(css).toMatch(/\.status-tabs\s+button\s*\{[^}]*min-height:\s*24px/);
   });
 
   test("keeps the Results export menu in the viewport instead of clipping it inside the mobile panel", () => {

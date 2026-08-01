@@ -3,8 +3,9 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { AUTOSAVE_STORAGE_KEY, AUTOSAVE_UI_STORAGE_KEY } from "./autosaveStorage";
 import { App } from "./App";
 
-function stubWindowWithAutosave(entries: Record<string, string>) {
+function stubWindowWithAutosave(entries: Record<string, string>, pathname = "/") {
   vi.stubGlobal("window", {
+    location: { pathname },
     localStorage: {
       getItem: (key: string) => entries[key] ?? null,
       setItem: () => undefined,
@@ -54,5 +55,15 @@ describe("workspace restore shell", () => {
 
     expect(html).toContain("Create new project");
     expect(html).not.toContain('class="workspace-restoring"');
+  });
+
+  test("shows an explicit not-found page for unsupported direct routes", () => {
+    stubWindowWithAutosave({}, "/definitely-not-a-route");
+
+    const html = renderToStaticMarkup(<App />);
+
+    expect(html).toContain("Page not found");
+    expect(html).toContain('href="/"');
+    expect(html).not.toContain("Create new project");
   });
 });
