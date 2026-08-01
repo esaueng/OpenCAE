@@ -5,6 +5,7 @@ import { gzipSync } from "node:zlib";
 import {
   INITIAL_JS_GZIP_BUDGET_BYTES,
   LAZY_JS_CHUNK_GZIP_BUDGET_BYTES,
+  LAZY_JS_CHUNK_RAW_BUDGET_BYTES,
   PRECACHE_TOTAL_BUDGET_BYTES,
   STATIC_ASSET_BUDGET_BYTES,
   STATIC_ASSET_EXEMPTIONS,
@@ -47,6 +48,9 @@ for (const entry of allJs) {
   if (entry.gzip > LAZY_JS_CHUNK_GZIP_BUDGET_BYTES) {
     failures.push(`Lazy chunk over budget: ${basename(entry.file)} is ${entry.gzip} gzip bytes > ${LAZY_JS_CHUNK_GZIP_BUDGET_BYTES}.`);
   }
+  if (entry.raw > LAZY_JS_CHUNK_RAW_BUDGET_BYTES) {
+    failures.push(`Lazy chunk over raw budget: ${basename(entry.file)} is ${entry.raw} bytes > ${LAZY_JS_CHUNK_RAW_BUDGET_BYTES}.`);
+  }
 }
 
 for (const entry of staticAssets(distAssetsDir)) {
@@ -67,10 +71,12 @@ if (failures.length) {
 }
 
 const largestLazy = allJs.filter((entry) => !initialFiles.has(entry.file)).sort((left, right) => right.gzip - left.gzip)[0];
+const largestLazyByRaw = allJs.filter((entry) => !initialFiles.has(entry.file)).sort((left, right) => right.raw - left.raw)[0];
 console.log([
   `Initial JS gzip: ${gzipBytes} / ${INITIAL_JS_GZIP_BUDGET_BYTES} bytes.`,
   `Total JS gzip: ${totalJsGzip} / ${TOTAL_JS_GZIP_BUDGET_BYTES} bytes.`,
-  largestLazy ? `Largest lazy chunk: ${basename(largestLazy.file)} ${largestLazy.gzip} / ${LAZY_JS_CHUNK_GZIP_BUDGET_BYTES} gzip bytes.` : "",
+  largestLazy ? `Largest lazy chunk (gzip): ${basename(largestLazy.file)} ${largestLazy.gzip} / ${LAZY_JS_CHUNK_GZIP_BUDGET_BYTES} bytes.` : "",
+  largestLazyByRaw ? `Largest lazy chunk (raw): ${basename(largestLazyByRaw.file)} ${largestLazyByRaw.raw} / ${LAZY_JS_CHUNK_RAW_BUDGET_BYTES} bytes.` : "",
   `Service-worker precache: ${precacheBytes} / ${PRECACHE_TOTAL_BUDGET_BYTES} bytes.`
 ].filter(Boolean).join("\n"));
 

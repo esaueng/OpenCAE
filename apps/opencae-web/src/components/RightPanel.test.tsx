@@ -810,6 +810,32 @@ describe("RightPanel payload mass controls", () => {
     expect(meshHtml).toContain("45,000");
   });
 
+  test("does not present preset fallback counts as geometry-specific mesh estimates", () => {
+    const meshHtml = renderPanel("mesh", {
+      study: {
+        ...study,
+        meshSettings: {
+          preset: "medium",
+          status: "complete",
+          summary: {
+            nodes: 42381,
+            elements: 26944,
+            warnings: ["Preset fallback"],
+            analysisSampleCount: 4800,
+            quality: "medium",
+            source: "preset_estimate"
+          }
+        }
+      }
+    });
+
+    expect(meshHtml).toContain("Reported after solve");
+    expect(meshHtml).toContain("4,800");
+    expect(meshHtml).not.toContain("42,381");
+    expect(meshHtml).not.toContain("26,944");
+    expect(meshHtml).not.toContain("Nodes (est.)");
+  });
+
   test("offers no backend picker: the solver is local, informationally stated (B5)", () => {
     const runHtml = renderPanel("run", {
       study: {

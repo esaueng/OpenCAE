@@ -1473,6 +1473,8 @@ function selectionLabelForPanel(study: Study, selectionRef: string): string {
 function MeshPanel({ project, displayModel, study, onGenerateMesh, onConnectionsChange, onCancelMesh, meshPhaseProgress, onRepairModel, isRepairingModel = false, onRunMeshConvergence, convergenceBusy = false, convergenceProgress = "" }: RightPanelProps) {
   const [preset, setPreset] = useState<MeshQuality>(study.meshSettings.preset);
   const meshing = Boolean(meshPhaseProgress);
+  const meshSummary = study.meshSettings.summary;
+  const hasPresetOnlyMeshSummary = meshSummary?.source === "preset_estimate";
   const stepGeometry = stepGeometryMetadataForProject(project);
   const stepGeometryResolvedByMesh = Boolean(study.meshSettings.summary?.artifacts?.actualCoreModel);
   const staticStudy = study.type === "static_stress" ? study : null;
@@ -1591,21 +1593,24 @@ function MeshPanel({ project, displayModel, study, onGenerateMesh, onConnections
         </>
       )}
       <Callout>{capitalize(preset)} creates a {meshPresetDescription(preset)}.</Callout>
-      {study.meshSettings.summary && (
+      {meshSummary && (
         <div className="summary-box">
-          <Info
-            label={study.meshSettings.summary.source === "core_solver" ? "Nodes" : "Nodes (est.)"}
-            value={study.meshSettings.summary.nodes.toLocaleString()}
-          />
-          <Info
-            label={study.meshSettings.summary.source === "core_solver" ? "Elements" : "Elements (est.)"}
-            value={study.meshSettings.summary.elements.toLocaleString()}
-          />
-          <Info label="Analysis samples" value={(study.meshSettings.summary.analysisSampleCount ?? 0).toLocaleString()} />
-          <Info label="Warnings" value={String(study.meshSettings.summary.warnings.length)} />
+          {hasPresetOnlyMeshSummary ? (
+            <>
+              <Info label="Nodes" value="Reported after solve" />
+              <Info label="Elements" value="Reported after solve" />
+            </>
+          ) : (
+            <>
+              <Info label="Nodes" value={meshSummary.nodes.toLocaleString()} />
+              <Info label="Elements" value={meshSummary.elements.toLocaleString()} />
+            </>
+          )}
+          <Info label="Analysis samples" value={(meshSummary.analysisSampleCount ?? 0).toLocaleString()} />
+          <Info label="Warnings" value={String(meshSummary.warnings.length)} />
         </div>
       )}
-      <p className="panel-copy">Meshing runs locally in your browser at the selected quality; final node and element counts appear with the results.</p>
+      <p className="panel-copy">Meshing runs locally in your browser at the selected quality. Preset-only summaries do not predict solver mesh counts; actual node and element counts appear with the results.</p>
       {staticStudy ? (
         <section className="convergence-card" aria-label="Static mesh convergence">
           <h3>Mesh convergence</h3>

@@ -72,7 +72,8 @@ describe("Worker UI performance rewrite boundaries", () => {
   });
 
   test("declares explicit chunks and a bundle budget command", () => {
-    expect(viteConfigSource).toContain("manualChunks");
+    expect(viteConfigSource).toContain("codeSplitting");
+    expect(viteConfigSource).toContain("maxSize: 400 * 1024");
     expect(viteConfigSource).toContain("modulePreload: false");
     expect(viteConfigSource).toContain("viewer-three");
     expect(viteConfigSource).toContain("cad-import");

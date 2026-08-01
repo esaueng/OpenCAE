@@ -13,6 +13,26 @@ export type WorkspaceInitialAction =
 const lazyWorkspaceImport = () => import("./WorkspaceApp").then((module) => ({ default: module.WorkspaceApp }));
 const WorkspaceApp = lazy(lazyWorkspaceImport);
 
+export function isSupportedAppPath(pathname: string): boolean {
+  return pathname === "/" || pathname === "/index.html";
+}
+
+function NotFoundScreen() {
+  return (
+    <main className="start-screen app-not-found">
+      <section className="start-brand" aria-labelledby="not-found-title">
+        <p className="app-not-found-code">404</p>
+        <h1 id="not-found-title">Page not found</h1>
+        <p className="app-not-found-copy">OpenCAE currently has one local workspace route.</p>
+        <a className="start-action primary app-not-found-home" href="/">
+          <strong>Return to OpenCAE</strong>
+          <span aria-hidden="true">→</span>
+        </a>
+      </section>
+    </main>
+  );
+}
+
 /**
  * Neutral shell shown while the workspace chunk loads on a restore.
  *
@@ -30,6 +50,13 @@ function WorkspaceRestoringShell({ themeMode }: { themeMode: "dark" | "light" })
 }
 
 export function App() {
+  const pathname = typeof window === "undefined" ? "/" : window.location?.pathname ?? "/";
+  if (!isSupportedAppPath(pathname)) return <NotFoundScreen />;
+
+  return <WorkspaceRoute />;
+}
+
+function WorkspaceRoute() {
   const [{ hasRestoredWorkspace, restoredThemeMode }] = useState(() => {
     const hasWorkspace = hasAutosavedWorkspace();
     return {
