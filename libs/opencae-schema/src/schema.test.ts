@@ -591,6 +591,22 @@ describe("ProjectSchema", () => {
       units: "mm-N-s-MPa"
     })).toBe("complete");
     expect(runStatusForResultProvenance({
+      kind: "opencae_core_fea",
+      solver: "opencae-core-sparse-tet",
+      solverVersion: "0.1.0",
+      meshSource: "structured_block_core",
+      resultSource: "computed",
+      units: "mm-N-s-MPa"
+    })).toBe("complete_preview");
+    expect(runStatusForResultProvenance({
+      kind: "opencae_core_fea",
+      solver: "opencae-core-cloud",
+      solverVersion: "0.1.0",
+      meshSource: "structured_block_core",
+      resultSource: "computed",
+      units: "mm-N-s-MPa"
+    })).toBe("complete");
+    expect(runStatusForResultProvenance({
       kind: "local_estimate",
       solver: "opencae-core-preview-tet4",
       solverVersion: "0.1.0",
