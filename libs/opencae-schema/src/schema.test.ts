@@ -40,7 +40,7 @@ describe("ProjectSchema", () => {
       rungs: [
         { ...completeRung, requestedPreset: "coarse" },
         { ...completeRung, requestedPreset: "medium", totalDofs: 600 },
-        { ...completeRung, requestedPreset: "fine", totalDofs: 900 }
+        { ...completeRung, requestedPreset: "fine", totalDofs: 900, probeDisplacement: 0.1455, rawElementPeakVonMises: 38.64 }
       ],
       classification: "apparent_convergence",
       lastStepChanges: { displacement: 0.03, stress: 0.08 }
@@ -59,6 +59,18 @@ describe("ProjectSchema", () => {
       ...record,
       rungs: [{ requestedPreset: "coarse", status: "skipped" }, ...record.rungs.slice(1)]
     })).toThrow(/requires a reason/);
+    expect(() => MeshConvergenceRecordSchema.parse({
+      ...record,
+      rungs: record.rungs.map((rung) => ({ requestedPreset: rung.requestedPreset, status: "skipped", skipReason: "Forged import" }))
+    })).toThrow(/must be classified as inconclusive/);
+    expect(() => MeshConvergenceRecordSchema.parse({
+      ...record,
+      lastStepChanges: { displacement: 0.01, stress: 0.01 }
+    })).toThrow(/must match the medium and fine rung metrics/);
+    expect(() => MeshConvergenceRecordSchema.parse({
+      ...record,
+      rungs: [record.rungs[0], { ...record.rungs[1], totalDofs: 900 }, { ...record.rungs[2], totalDofs: 600 }]
+    })).toThrow(/non-increasing DOF counts/);
   });
 
   it("round-trips project-scoped custom materials in canonical SI units", () => {
