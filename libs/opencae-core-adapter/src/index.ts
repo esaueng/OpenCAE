@@ -1967,8 +1967,6 @@ function meshSourceForActualArtifact(artifact: ActualCoreVolumeMeshArtifact): st
 }
 
 function connectedComponentCountForActualArtifact(artifact: ActualCoreVolumeMeshArtifact): number | undefined {
-  const explicit = artifact.meshConnectivity?.connectedComponents;
-  if (typeof explicit === "number" && Number.isInteger(explicit) && explicit > 0) return explicit;
   const components = connectedComponents({ elementBlocks: artifact.model.elementBlocks });
   return components.componentCount;
 }
