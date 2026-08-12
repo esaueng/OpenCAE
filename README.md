@@ -1,10 +1,10 @@
 # OpenCAE
 
-[![Production health](https://img.shields.io/website?url=https%3A%2F%2Fcae.esau.app%2Fhealth&label=production%20health)](https://cae.esau.app/health)
+[![Production health](https://github.com/esaueng/OpenCAE/actions/workflows/production-health.yml/badge.svg?branch=main)](https://github.com/esaueng/OpenCAE/actions/workflows/production-health.yml)
 
-OpenCAE is a local-first CAD/CAE simulation workspace: set up a structural study, solve it in the browser with OpenCAE Core, and review the results. It supports static stress and dynamic structural studies, sample projects, local `.opencae.json` project files, uploaded geometry previews, browser-local CPU solves, selected-state CSV/VTU result export, and HTML/PDF report export.
+OpenCAE is an engineering-preview, local-first browser CAD/CAE workspace for structural and thermal simulation. Import CAD or create an analytic STEP part, define a study, mesh and solve it in the browser with OpenCAE Core, inspect the results, and export a self-contained project or report.
 
-The project is organized around service boundaries so the React workspace, Fastify API, CAD import, meshing, OpenCAE Core solver, post-processing, storage, and job runners can evolve independently.
+The workspace supports linear static stress, transient structural dynamics, modal analysis, and steady-state thermal conduction. Built-in samples, local `.opencae.json` project files, STEP/STP/STL/OBJ uploads, browser-local solves, selected-state CSV/VTU export, and HTML/PDF reports work without a production API or cloud solver.
 
 ## Local Development
 
@@ -30,14 +30,14 @@ The API creates and seeds the local SQLite database if needed. The web app can c
 
 OpenCAE guides a study through Model, Material, Supports, Loads, Mesh, Run, Results, and Report steps:
 
-- Choose a static stress or dynamic structural study when creating a project.
-- Load built-in bracket, beam, or cantilever samples in static or dynamic mode.
-- Upload geometry, inspect selectable faces, show dimensions, and adjust model orientation.
+- Choose a static stress, dynamic structural, modal, or steady-state thermal study.
+- Start from a blank project, an analytic parametric STEP part, or a bracket, beam, or cantilever sample.
+- Upload STEP, STP, STL, or OBJ geometry; inspect selectable faces; show dimensions; and adjust model orientation.
 - Assign starter materials, including additive-manufacturing print settings that affect effective material properties.
-- Add fixed supports and force, pressure, or payload-weight loads.
-- Generate coarse, medium, fine, or ultra mesh summaries for local analysis sampling.
+- Add structural supports, temperature boundaries, loads, and multi-body connections as the study requires.
+- Generate coarse, medium, fine, or ultra volume meshes for local analysis.
 - Run local simulations with progress events, logs, cancellation, result artifacts, HTML reports, and PDF reports.
-- Inspect stress, displacement, safety factor, velocity, and acceleration fields where available.
+- Inspect stress, displacement, safety factor, velocity, acceleration, natural frequencies, mode shapes, temperature, and heat flux where available.
 - Play dynamic result frames with cached playback preparation for smoother browser rendering.
 - Save a self-contained local project file with embedded uploaded model data and completed results.
 
@@ -51,6 +51,7 @@ pnpm build
 pnpm typecheck
 pnpm test
 pnpm verify:perf
+node scripts/check-production-health.mjs
 ```
 
 ## Cloudflare Worker Deploy
@@ -100,7 +101,9 @@ The live app runs at `https://cae.esau.app`. Uptime monitors should check the Wo
 curl -fsS https://cae.esau.app/health
 ```
 
-The `/health` route verifies the production Worker is reachable and reports `solverRuntime: "browser-opencae-core"`. There is no separate solver-readiness endpoint: the solver ships inside the app bundle and runs in the browser. Retired cloud solve routes return HTTP 410.
+The scheduled [Production Health workflow](.github/workflows/production-health.yml) checks this contract every 30 minutes and powers the badge at the top of this README. It requires HTTP 200 plus the expected Worker, service, and `solverRuntime: "browser-opencae-core"` fields, so a generic success page cannot produce a false green result.
+
+This endpoint proves that the production Worker is reachable and serving the expected local-first release contract. It is not a separate solver-readiness probe: the solver ships inside the app bundle and runs in the browser. Retired cloud solve routes return HTTP 410.
 
 ## Workspace Layout
 
