@@ -357,7 +357,13 @@ export function openLocalProjectPayload(payload: unknown): SampleProjectResponse
   const migrationNote = carriesRetiredCloudBackend(candidate) ? ` ${RETIRED_CLOUD_BACKEND_MIGRATION_NOTE}` : "";
   // Saved Bracket Demo projects embed the solver geometry at creation time;
   // refresh outdated descriptors (and their stale wedge meshes) honestly.
-  const bracket = refreshBracketSampleGeometry(parsed.data, displayModel);
+  // Core mesh artifacts are an in-memory optimization produced by the local
+  // mesher, not a trusted part of an imported project.  Never let a project
+  // file supply the model that will be solved and reported as computed FEA.
+  // Clearing the mesh state makes the normal run flow regenerate it from the
+  // imported geometry and the current study inputs.
+  const importedProject = discardImportedCoreMeshArtifacts(parsed.data);
+  const bracket = refreshBracketSampleGeometry(importedProject, displayModel);
   const bracketNote = bracket.migrated ? ` ${BRACKET_GEOMETRY_MIGRATION_NOTE}` : "";
   return {
     project: bracket.project,
@@ -365,6 +371,18 @@ export function openLocalProjectPayload(payload: unknown): SampleProjectResponse
     ...(results ? { results } : {}),
     message: `${parsed.data.name} opened from local file.${migrationNote}${bracketNote}`
   };
+}
+
+function discardImportedCoreMeshArtifacts(project: Project): Project {
+  const studies = project.studies.map((study) => {
+    const artifacts = study.meshSettings.summary?.artifacts as Record<string, unknown> | undefined;
+    if (!artifacts || (!artifacts.actualCoreModel && !artifacts.coreModel && !artifacts.volumeMesh)) return study;
+    return {
+      ...study,
+      meshSettings: { preset: study.meshSettings.preset, status: "not_started" as const }
+    };
+  });
+  return studies.every((study, index) => study === project.studies[index]) ? project : { ...project, studies };
 }
 
 export const RETIRED_CLOUD_BACKEND_MIGRATION_NOTE =
