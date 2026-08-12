@@ -566,6 +566,62 @@ export const MeshConvergenceRecordSchema = z.object({
       message: "Convergence rungs must be ordered coarse, medium, fine."
     });
   });
+
+  const completeRungs = record.rungs.filter((rung) =>
+    rung.status === "complete"
+      && rung.totalDofs !== undefined
+      && rung.probeDisplacement !== undefined
+      && rung.rawElementPeakVonMises !== undefined
+  );
+  if (completeRungs.length !== 3
+    || completeRungs.some((rung, index) => index > 0 && rung.totalDofs! <= completeRungs[index - 1]!.totalDofs!)) {
+    if (record.classification !== "inconclusive") {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["classification"],
+        message: "Incomplete convergence rungs or non-increasing DOF counts must be classified as inconclusive."
+      });
+    }
+    if (record.lastStepChanges !== undefined) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["lastStepChanges"],
+        message: "Inconclusive convergence records must not include last-step changes."
+      });
+    }
+    return;
+  }
+
+  const medium = completeRungs[1]!;
+  const fine = completeRungs[2]!;
+  const relativeChange = (previous: number, current: number) => {
+    const scale = Math.max(Math.abs(previous), Math.abs(current));
+    return scale <= Number.MIN_VALUE ? 0 : Math.abs(current - previous) / scale;
+  };
+  const expectedChanges = {
+    displacement: relativeChange(medium.probeDisplacement!, fine.probeDisplacement!),
+    stress: relativeChange(medium.rawElementPeakVonMises!, fine.rawElementPeakVonMises!)
+  };
+  const expectedClassification = expectedChanges.displacement <= 0.05 + 1e-12
+    && expectedChanges.stress <= 0.1 + 1e-12
+    ? "apparent_convergence"
+    : "unconverged";
+  if (record.classification !== expectedClassification) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["classification"],
+      message: "Convergence classification must match the recorded rung metrics."
+    });
+  }
+  if (record.lastStepChanges === undefined
+    || Math.abs(record.lastStepChanges.displacement - expectedChanges.displacement) > 1e-12
+    || Math.abs(record.lastStepChanges.stress - expectedChanges.stress) > 1e-12) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["lastStepChanges"],
+      message: "Last-step changes must match the medium and fine rung metrics."
+    });
+  }
 });
 
 export const ProjectSchema = z.object({
