@@ -19,7 +19,7 @@ describe("encrypted cloud backup", () => {
       if (init?.method === "PUT") {
         uploaded = init.body as Blob;
         expect(await uploaded.text()).not.toContain(snapshot.savedAt);
-        return Response.json({ expiresAt: "2026-08-11T12:00:00.000Z" }, { status: 201 });
+        return Response.json({ expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString() }, { status: 201 });
       }
       return new Response(uploaded, { status: 200, headers: { "content-type": "application/octet-stream" } });
     });
