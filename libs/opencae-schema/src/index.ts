@@ -840,6 +840,10 @@ export function isPreviewResultProvenance(provenance: ResultProvenance | undefin
   if (!provenance) return false;
   return provenance.solver === "opencae-core-preview-sdof" ||
     provenance.solver === "opencae-core-preview-tet4" ||
+    // Browser-local structured blocks are reconstructed from display metadata,
+    // not from a volume mesh of the source geometry.  Never allow a producer to
+    // promote that proxy to production merely by claiming computed Core output.
+    (provenance.meshSource === "structured_block_core" && provenance.solver !== "opencae-core-cloud") ||
     provenance.meshSource === "structured_block_proxy" ||
     provenance.meshSource === "display_bounds_proxy" ||
     provenance.resultSource === "computed_preview";
