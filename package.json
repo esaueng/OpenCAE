@@ -2,7 +2,7 @@
   "name": "opencae",
   "version": "0.1.0",
   "private": true,
-  "description": "OpenCAE local CAD/CAE simulation MVP scaffold.",
+  "description": "Local-first browser CAD/CAE workspace for structural and thermal simulation.",
   "type": "module",
   "scripts": {
     "dev": "concurrently -n api,web -c cyan,blue \"pnpm --filter @opencae/api dev\" \"pnpm --filter @opencae/web dev\"",
