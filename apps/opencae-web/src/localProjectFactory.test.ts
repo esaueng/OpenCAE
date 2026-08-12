@@ -224,6 +224,30 @@ describe("local project factory workflow", () => {
     expect(cantileverResponse.message).not.toContain(BRACKET_GEOMETRY_MIGRATION_NOTE);
   });
 
+  test("discards solver models embedded in imported project files", async () => {
+    const sample = await createLocalSampleProject("cantilever", "static_stress", "2026-04-28T12:00:00.000Z");
+    const project = structuredClone(sample.project);
+    const study = project.studies[0]!;
+    study.meshSettings = {
+      preset: "fine",
+      status: "complete",
+      meshRef: "attacker-controlled-mesh",
+      summary: {
+        nodes: 4,
+        elements: 1,
+        warnings: [],
+        artifacts: {
+          meshConnectivity: { connectedComponents: 1 },
+          actualCoreModel: { model: { meshProvenance: { meshSource: "actual_volume_mesh" } } }
+        }
+      }
+    };
+
+    const response = openLocalProjectPayload({ project, displayModel: sample.displayModel });
+
+    expect(response.project.studies[0]?.meshSettings).toEqual({ preset: "fine", status: "not_started" });
+  });
+
   test("ignores crafted display models with malformed faces instead of crashing face selection", () => {
     const blank = createLocalBlankProject("2026-04-28T12:00:00.000Z").project;
     const response = openLocalProjectPayload({
