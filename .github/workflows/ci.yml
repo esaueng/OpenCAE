@@ -41,11 +41,11 @@ jobs:
       - name: Test
         run: pnpm test
 
-      - name: Verify STEP selection across display LODs in Chrome
-        run: pnpm verify:step-selection-browser
-
-      - name: Build Cloudflare production bundle
-        run: pnpm build:cloudflare
+      - name: Build web app
+        run: pnpm --filter @opencae/web build
 
       - name: Enforce web bundle budget
-        run: pnpm --filter @opencae/web check:bundle
+        run: node scripts/check-web-bundle-budget.mjs
+
+      - name: Verify STEP selection across display LODs in Chrome
+        run: pnpm verify:step-selection-browser
