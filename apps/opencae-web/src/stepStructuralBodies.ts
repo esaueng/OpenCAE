@@ -157,10 +157,15 @@ export function studyWithStepPayloadContacts(
   registry: StepFaceRegistry,
   plan: StepStructuralBodyPlan
 ): Study {
+  const occupiedSelectionIds = new Set(study.namedSelections.map((selection) => selection.id));
+  const contactSelectionIdByLoadId = new Map<string, string>();
   const contactSelections = Object.entries(plan.payloadContactFaceByLoadId).map(([loadId, faceId]) => {
     const displayFace = registry.displayFaces.find((face) => face.id === faceId);
+    const selectionId = availablePayloadContactSelectionId(loadId, occupiedSelectionIds);
+    occupiedSelectionIds.add(selectionId);
+    contactSelectionIdByLoadId.set(loadId, selectionId);
     return {
-      id: payloadContactSelectionId(loadId),
+      id: selectionId,
       name: `Payload contact · ${displayFace?.label ?? faceId}`,
       entityType: "face" as const,
       geometryRefs: [{
@@ -172,16 +177,12 @@ export function studyWithStepPayloadContacts(
       fingerprint: `payload-contact:${faceId}`
     };
   });
-  const replacedSelectionIds = new Set(contactSelections.map((selection) => selection.id));
   return {
     ...study,
-    namedSelections: [
-      ...study.namedSelections.filter((selection) => !replacedSelectionIds.has(selection.id)),
-      ...contactSelections
-    ],
+    namedSelections: [...study.namedSelections, ...contactSelections],
     loads: study.loads.map((load) => {
       if (!plan.payloadContactFaceByLoadId[load.id]) return load;
-      return { ...load, selectionRef: payloadContactSelectionId(load.id) };
+      return { ...load, selectionRef: contactSelectionIdByLoadId.get(load.id)! };
     })
   };
 }
@@ -236,4 +237,15 @@ function supportPointOnBounds(bounds: StepBodyBounds, direction: [number, number
 
 function payloadContactSelectionId(loadId: string): string {
   return `selection-payload-contact-${loadId}`;
+}
+
+function availablePayloadContactSelectionId(loadId: string, occupiedIds: ReadonlySet<string>): string {
+  const baseId = payloadContactSelectionId(loadId);
+  let candidate = baseId;
+  let suffix = 2;
+  while (occupiedIds.has(candidate)) {
+    candidate = `${baseId}-${suffix}`;
+    suffix += 1;
+  }
+  return candidate;
 }

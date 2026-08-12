@@ -519,8 +519,8 @@ describe("api", () => {
         quality: "fine",
         source: "preset_estimate",
         warnings: [
-          "Node and element counts are preset planning estimates. The solver reports actual mesh statistics with the results.",
-          "Fine surface analysis sampling enabled for higher-quality local results."
+          "Node and element counts are preset planning estimates, not a generated finite-element mesh. Surface analysis samples are heuristic; the solver reports actual mesh statistics with computed FEA results.",
+          "Fine heuristic surface-sample density selected."
         ]
       }
     });
