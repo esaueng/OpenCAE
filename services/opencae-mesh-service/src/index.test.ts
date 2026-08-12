@@ -42,7 +42,9 @@ describe("MockMeshService", () => {
     expect(medium.summary.analysisSampleCount).toBeLessThan(fine.summary.analysisSampleCount ?? 0);
     expect(fine.summary.analysisSampleCount).toBeLessThan(ultra.summary.analysisSampleCount ?? 0);
     expect(ultra.summary.quality).toBe("ultra");
-    expect(fine.summary.warnings.join(" ")).not.toContain("mocked");
+    expect(coarse.summary.source).toBe("preset_estimate");
+    expect(fine.summary.warnings.join(" ")).toContain("not a generated finite-element mesh");
+    expect(fine.summary.warnings.join(" ")).toContain("heuristic surface-sample density");
   });
 
   test("writes study-scoped mesh artifacts so studies in a project do not collide", async () => {
