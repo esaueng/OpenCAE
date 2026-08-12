@@ -408,7 +408,7 @@ describe("OpenCAE API server", () => {
     expect(start.statusCode).toBe(200);
     const runId = (start.json().run as { id: string }).id;
     const run = await waitForTerminalRun(api, runId);
-    expect(run.status).toBe("complete");
+    expect(run.status).toBe("complete_preview");
   });
 });
 
