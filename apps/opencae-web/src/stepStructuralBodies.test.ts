@@ -64,6 +64,39 @@ describe("STEP structural body planning", () => {
     expect(planStepStructuralBodies(study, registry)).toBeNull();
   });
 
+  it("does not replace or retarget an existing selection when a payload contact ID collides", () => {
+    const registry = buildStepFaceRegistry([
+      oneFaceBody([[-2, -2, 0], [2, -2, 0], [0, 2, 0]], [0, 0, -1]),
+      oneFaceBody([[-0.5, -0.5, 1], [0.5, -0.5, 1], [0, 0.5, 1]], [0, 0, 2])
+    ]);
+    const study = payloadStudy();
+    const collidingId = "selection-payload-contact-payload-rod-1";
+    study.namedSelections.push(faceSelection(collidingId, "step-face-1"));
+    study.loads.push({
+      id: "unrelated-force",
+      type: "force",
+      selectionRef: collidingId,
+      parameters: { value: 10, units: "N", direction: [0, 0, -1] },
+      status: "ready"
+    });
+    const plan = {
+      structuralMeshIndices: [0],
+      structuralBodyBounds: [{ min: [-2, -2, -1] as [number, number, number], max: [2, 2, 0] as [number, number, number] }],
+      excludedBodyCount: 1,
+      payloadContactFaceByLoadId: { "payload-rod-1": "step-face-0" }
+    };
+
+    const dispatchStudy = studyWithStepPayloadContacts(study, registry, plan);
+
+    expect(dispatchStudy.namedSelections.find((selection) => selection.id === collidingId)?.geometryRefs[0]?.entityId)
+      .toBe("step-face-1");
+    expect(dispatchStudy.loads.find((load) => load.id === "unrelated-force")?.selectionRef).toBe(collidingId);
+    expect(dispatchStudy.loads.find((load) => load.id === "payload-rod-1")?.selectionRef)
+      .toBe(`${collidingId}-2`);
+    expect(dispatchStudy.namedSelections.find((selection) => selection.id === `${collidingId}-2`)?.geometryRefs[0]?.entityId)
+      .toBe("step-face-0");
+  });
+
   it("resolves pairwise Boolean fuse selections to only their connected STEP bodies", () => {
     const registry = buildStepFaceRegistry([
       oneFaceBody([[0, 0, 0], [2, 0, 0], [0, 2, 0]], [0, 0, 1]),
