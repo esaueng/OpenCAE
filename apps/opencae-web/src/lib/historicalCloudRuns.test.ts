@@ -77,12 +77,12 @@ describe("historical cloud runs from pre-B4a project files", () => {
     const reopened = openLocalProjectPayload(JSON.parse(JSON.stringify(opened)));
     expect(reopened.project.studies[0]?.solverSettings.backend).toBe("auto");
 
-    // The saved cloud results still parse, with runIds and historical
-    // provenance intact ("cloud container" labeling stays for old data).
+    // Historical fields still parse, but imported provenance is deliberately
+    // demoted so an untrusted project file cannot assert production FEA.
     expect(opened.results?.completedRunId).toBe(HISTORICAL_CLOUD_RUN_ID);
     expect(opened.results?.fields[0]?.runId).toBe(HISTORICAL_CLOUD_RUN_ID);
-    expect(opened.results?.summary.provenance?.solver).toBe("opencae-core-cloud");
-    expect(opened.results?.summary.provenance?.resultSource).toBe("computed");
+    expect(opened.results?.summary.provenance?.solver).toBe("imported-project");
+    expect(opened.results?.summary.provenance?.resultSource).toBe("generated");
   });
 
   test("getResults on a historical cloud run id fails clearly without touching dead endpoints", async () => {

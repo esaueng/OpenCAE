@@ -199,6 +199,7 @@ export async function loadGmshWasm(): Promise<GmshApi> {
  * never leak model state into each other.
  */
 export async function meshGeoScriptToMshV2(geoScript: string, options: MeshWasmOptions = {}): Promise<GeoMeshResult> {
+  if (geoScript.length <= 0 || geoScript.length > 1024 * 1024) throw new StepGeometryError("Gmsh GEO input must be between 1 byte and 1 MiB.");
   const totalStart = now();
   const timings: MeshTimings = {};
   const gmsh = await timePhase(timings, options, "load", totalStart, async () => loadGmshWasm());
@@ -235,11 +236,16 @@ export async function meshGeoScriptToMshV2(geoScript: string, options: MeshWasmO
 // produces a passing 18k-tet mesh at 2 mm. This rung is still guarded by the
 // existing tet/DOF limits, so genuinely large refinements cannot enter the
 // browser solver unchecked.
-const QUALITY_SIZE_MULTIPLIERS = [1, 3 / 2, 2 / 3, 4 / 9, 1 / 6] as const;
+const QUALITY_SIZE_MULTIPLIERS = [1, 3 / 2, 2 / 3, 4 / 9] as const;
 /** Stop refining once a mesh gets this large — the solver caps DOF anyway. */
 const MAX_QUALITY_REFINEMENT_TETS = 80_000;
 /** The browser solve pipeline accepts at most 100,000 displacement DOFs. */
 const MAX_BROWSER_SOLVE_NODES = Math.floor(100_000 / 3);
+const MAX_STEP_INPUT_BYTES = 32 * 1024 * 1024;
+const MAX_MSH_OUTPUT_CHARACTERS = 64 * 1024 * 1024;
+const MIN_BROWSER_MESH_SIZE_MM = 0.5;
+const MAX_AUTOMATIC_FUSION_VOLUMES = 32;
+const MAX_EXPLICIT_FUSION_VOLUMES = 32;
 /**
  * Large imported solids with residual free-edge seams can exhaust a browser
  * worker when every size and 3D-algorithm candidate is tried before OCC
@@ -272,6 +278,10 @@ const MAX_QUALITY_REPAIR_SIZE_MM = 6;
  *   recorded so callers can surface it honestly.
  */
 export async function meshStepToMshV2(stepContent: Uint8Array | string, options: StepMeshWasmOptions = {}): Promise<StepMeshResult> {
+  assertBoundedStepInput(stepContent);
+  if (options.meshSizeMm !== undefined && (!Number.isFinite(options.meshSizeMm) || options.meshSizeMm < MIN_BROWSER_MESH_SIZE_MM)) {
+    throw new StepGeometryError(`STEP mesh size must be at least ${MIN_BROWSER_MESH_SIZE_MM} mm.`);
+  }
   const totalStart = now();
   const requestedSizeMm = options.meshSizeMm;
   type Candidate = StepMeshCandidate & { sizeMm?: number };
@@ -796,18 +806,27 @@ function meshStepSession(
 function fuseImportedStepVolumes(gmsh: GmshApi): StepMultiBodyFusionReport | undefined {
   const volumeTags = entityTags(gmsh, 3);
   if (volumeTags.length <= 1) return undefined;
-  const [firstTag, ...restTags] = volumeTags;
-  try {
-    gmsh.model.occ.fuse([3, firstTag!], restTags.flatMap((tag) => [3, tag]));
-    gmsh.model.occ.synchronize();
-  } catch {
+  if (volumeTags.length > MAX_AUTOMATIC_FUSION_VOLUMES) return undefined;
+  const candidates = volumeTags.map((tag) => ({ tag, bounds: boundsFromGmsh(gmsh.model.getBoundingBox(3, tag)) }));
+  const groups = overlappingVolumeGroups(candidates);
+  let attempted = false;
+  for (const group of groups) {
+    if (group.length <= 1) continue;
+    attempted = true;
+    const [firstTag, ...restTags] = group;
     try {
+      gmsh.model.occ.fuse([3, firstTag!], restTags.flatMap((tag) => [3, tag]));
       gmsh.model.occ.synchronize();
     } catch {
-      /* leave the import as-is */
+      try {
+        gmsh.model.occ.synchronize();
+      } catch {
+        /* leave the import as-is */
+      }
+      return undefined;
     }
-    return undefined;
   }
+  if (!attempted) return undefined;
   const fusedVolumeCount = entityTags(gmsh, 3).length;
   if (fusedVolumeCount === 0 || fusedVolumeCount >= volumeTags.length) return undefined;
   return { inputVolumeCount: volumeTags.length, fusedVolumeCount };
@@ -821,6 +840,9 @@ function fuseImportedStepVolumes(gmsh: GmshApi): StepMultiBodyFusionReport | und
  */
 function fuseRequestedStepVolumeGroups(gmsh: GmshApi, requestedGroups: StepBodyBounds[][]): StepMultiBodyFusionReport {
   const volumeTags = entityTags(gmsh, 3);
+  if (requestedGroups.reduce((sum, group) => sum + group.length, 0) > MAX_EXPLICIT_FUSION_VOLUMES) {
+    throw new StepGeometryError("Boolean fuse selection exceeds the 32-body browser limit.");
+  }
   const candidates = volumeTags.map((tag) => ({
     tag,
     bounds: boundsFromGmsh(gmsh.model.getBoundingBox(3, tag))
@@ -969,6 +991,7 @@ async function inspectStepGeometrySession(
   stepContent: Uint8Array | string,
   includePreview: boolean
 ): Promise<StepGeometryInspectionWithPreview> {
+  assertBoundedStepInput(stepContent);
   const gmsh = await loadGmshWasm();
   gmsh.initialize();
   quietLogger(gmsh);
@@ -1078,10 +1101,12 @@ async function inspectStepGeometrySession(
 /** Build one render mesh per imported solid while preserving B-Rep surface ranges. */
 export function stepSurfacePreviewFromGmsh(gmsh: GmshApi): StepSurfacePreview {
   const nodes = gmsh.model.mesh.getNodes();
+  if (nodes.nodeTags.length > 1_000_000 || nodes.coord.length > 3_000_000) throw new StepGeometryError("STEP surface preview exceeds the browser node limit.");
   const coordinateOffsetByTag = new Map<number, number>();
   nodes.nodeTags.forEach((tag, index) => coordinateOffsetByTag.set(tag, index * 3));
 
   const allSurfaceTags = entityTags(gmsh, 2).sort((left, right) => left - right);
+  if (allSurfaceTags.length > 20_000) throw new StepGeometryError("STEP surface preview exceeds the browser face limit.");
   const claimedSurfaceTags = new Set<number>();
   const surfaceGroups = entityTags(gmsh, 3)
     .sort((left, right) => left - right)
@@ -1134,6 +1159,7 @@ export function stepSurfacePreviewFromGmsh(gmsh: GmshApi): StepSurfacePreview {
 
     for (const surface of group.surfaces) {
       const triangleNodes = gmsh.model.mesh.getElementsByType(2, surface.tag).nodeTags;
+      if (indices.length + triangleNodes.length > 3_000_000) throw new StepGeometryError("STEP surface preview exceeds the browser triangle limit.");
       const first = indices.length / 3;
       for (let offset = 0; offset + 2 < triangleNodes.length; offset += 3) {
         const firstNode = localIndexForNode(triangleNodes[offset]!);
@@ -1164,6 +1190,7 @@ export function stepSurfacePreviewFromGmsh(gmsh: GmshApi): StepSurfacePreview {
 
 /** Heal/sew an uploaded STEP shell, cap closed free-edge loops, and export it. */
 export async function repairStepGeometry(stepContent: Uint8Array | string): Promise<StepGeometryRepairResult> {
+  assertBoundedStepInput(stepContent);
   const gmsh = await loadGmshWasm();
   gmsh.initialize();
   quietLogger(gmsh);
@@ -1504,7 +1531,41 @@ export async function generateBoxWithBoreStep(dimensions: { x: number; y: number
 function writeMshV2(gmsh: GmshApi): string {
   gmsh.option.setNumber("Mesh.MshFileVersion", 2.2);
   gmsh.write("/out.msh");
-  return gmsh.FS.readFile("/out.msh", { encoding: "utf8" }) as string;
+  const msh = gmsh.FS.readFile("/out.msh", { encoding: "utf8" }) as string;
+  if (msh.length > MAX_MSH_OUTPUT_CHARACTERS) throw new StepGeometryError("Generated mesh exceeds the 64 MiB browser output limit.");
+  return msh;
+}
+
+function assertBoundedStepInput(stepContent: Uint8Array | string): void {
+  const byteLength = typeof stepContent === "string" ? stepContent.length : stepContent.byteLength;
+  if (byteLength <= 0 || byteLength > MAX_STEP_INPUT_BYTES) throw new StepGeometryError("STEP input must be between 1 byte and 32 MiB.");
+}
+
+function overlappingVolumeGroups(candidates: Array<{ tag: number; bounds: StepBodyBounds }>): number[][] {
+  const remaining = new Set(candidates.map((candidate) => candidate.tag));
+  const byTag = new Map(candidates.map((candidate) => [candidate.tag, candidate.bounds]));
+  const groups: number[][] = [];
+  while (remaining.size) {
+    const first = remaining.values().next().value as number;
+    remaining.delete(first);
+    const group = [first];
+    for (let index = 0; index < group.length; index += 1) {
+      const source = byTag.get(group[index]!)!;
+      for (const tag of [...remaining]) {
+        if (!stepBoundsOverlap(source, byTag.get(tag)!)) continue;
+        remaining.delete(tag);
+        group.push(tag);
+      }
+    }
+    groups.push(group);
+  }
+  return groups;
+}
+
+function stepBoundsOverlap(left: StepBodyBounds, right: StepBodyBounds): boolean {
+  const scale = Math.max(...boundsSize(left), ...boundsSize(right), 1);
+  const tolerance = scale * 1e-8;
+  return left.min.every((minimum, axis) => minimum <= right.max[axis]! + tolerance && left.max[axis]! + tolerance >= right.min[axis]!);
 }
 
 function quietLogger(gmsh: GmshApi): void {

@@ -283,11 +283,11 @@ describe("projectFactory", () => {
     expect(project.studies).toEqual([]);
   });
 
-  test("imports STEP as a selectable native CAD display model", () => {
+  test("does not fabricate selectable STEP geometry before parsing", () => {
     const displayModel = uploadedDisplayModelFor("hat-clip.step", "SVNPMTAzMDM=");
 
-    expect(displayModel.bodyCount).toBe(1);
-    expect(displayModel.faces).toHaveLength(6);
+    expect(displayModel.bodyCount).toBe(0);
+    expect(displayModel.faces).toHaveLength(0);
     expect(displayModel.dimensions).toBeUndefined();
     expect(displayModel.nativeCad?.format).toBe("step");
     expect(displayModel.nativeCad?.contentBase64).toBe("SVNPMTAzMDM=");

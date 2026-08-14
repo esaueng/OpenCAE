@@ -3,7 +3,7 @@
 Base commit: open-cae `fa2ae84` (plan 018 implementation).
 Status: TODO
 Category: meshing robustness / honest-failure UX
-Driver: 2026-07-10 09:31 re-test of Corning Seed Holder 8PC v7-2 CAE_TEST.step after plan 018 deployed. The honest error now shows the true root failure — `gmshModelMeshGenerate: PLC Error: A segment and a facet intersect at point` — and exposed two remaining defects.
+Driver: a re-test of the uploaded STEP regression fixture after plan 018 exposed a PLC segment/facet intersection and two remaining defects.
 
 ## What the re-test proved
 

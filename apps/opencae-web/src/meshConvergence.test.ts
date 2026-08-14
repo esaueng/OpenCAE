@@ -190,7 +190,7 @@ describe("static mesh convergence", () => {
     expect(mapPointToNearestSurfaceTriangle([250, 250, 500], surfaceMesh)).toBeNull();
   });
 
-  test("projects a system default once and keeps the resolved surface point across rungs", async () => {
+  test("rejects a primary-load probe outside the solver-surface tolerance", async () => {
     const shiftedSurfaces = [0, 0.000001, -0.000001].map((z, index) => ({
       ...surfaceMesh,
       id: `solver-surface-${index}`,
@@ -214,9 +214,9 @@ describe("static mesh convergence", () => {
       }
     });
 
-    expect(record.rungs.every((rung) => rung.status === "complete")).toBe(true);
-    expect(record.probe).toMatchObject({ point: [250, 250, 0], source: "primary_load", label: "Loaded face" });
-    expect(record.classification).not.toBe("inconclusive");
+    expect(record.rungs.every((rung) => rung.status === "failed")).toBe(true);
+    expect(record.rungs[0]?.skipReason).toContain("allowed tolerance");
+    expect(record.classification).toBe("inconclusive");
   });
 
   test("keeps explicit off-surface probes strict and reports mapping evidence", async () => {
@@ -229,7 +229,7 @@ describe("static mesh convergence", () => {
     });
 
     expect(record.rungs.every((rung) => rung.status === "failed")).toBe(true);
-    expect(record.rungs[0]?.skipReason).toContain("Explicit displacement probe is");
+    expect(record.rungs[0]?.skipReason).toContain("Displacement probe is");
     expect(record.rungs[0]?.skipReason).toContain("allowed tolerance");
     expect(record.probe.point).toEqual([250, 250, 500]);
   });

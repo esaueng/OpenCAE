@@ -128,7 +128,7 @@ export function buildReportData(input: BuildReportDataInput): ReportData {
   const fields = input.resultFields.map((field) => resultFieldForUnits(field, input.unitSystem));
   if (isModalResultSummary(summary)) return buildModalReportData(input, summary, fields);
   if (isThermalResultSummary(summary)) return buildThermalReportData(input, summary, fields);
-  const assessment = summary.failureAssessment ?? assessResultFailure(summary);
+  const assessment = assessResultFailure(summary);
   const provenance = summary.provenance;
   const provenanceTier = classifyResultProvenance(provenance);
   const stressField = fieldForReport(fields, "stress", input.captures.stress);
@@ -591,7 +591,7 @@ function solverRows(input: BuildReportDataInput, summary: ResultSummary): Report
 
 function resultRows(project: Project, study: Study, summary: StructuralResultSummary, displayModel: DisplayModel | null): ReportRow[] {
   const provenance = summary.provenance;
-  const assessment = summary.failureAssessment ?? assessResultFailure(summary);
+  const assessment = assessResultFailure(summary);
   return [
     { label: "Result source", value: formatResultProvenanceLabel(provenance) },
     { label: "Core solver version", value: provenance?.solverVersion ?? provenance?.solverCpuVersion ?? provenance?.coreVersion ?? MISSING },
