@@ -71,6 +71,10 @@ export type AttributeFacetsOptions = {
   maxSamplesPerSet?: number;
   /** Max centroid -> tessellation distance for a vote, in meters. Default 5% of the tessellation bbox diagonal. */
   maxDistance?: number;
+  /** Minimum winning-vote share required to bind an entire surface set. Default 0.6. */
+  minimumAgreement?: number;
+  /** Minimum independent facet samples required for attribution. Default 3. */
+  minimumVotes?: number;
 };
 
 /**
@@ -140,6 +144,8 @@ export function attributeFacetsToStepFaces(
   const normalAgreementMin = options.normalAgreementMin ?? 0.6;
   const maxSamplesPerSet = options.maxSamplesPerSet ?? 48;
   const maxDistance = options.maxDistance ?? soup.bboxDiagonal * 0.05;
+  const minimumAgreement = options.minimumAgreement ?? 0.6;
+  const minimumVotes = options.minimumVotes ?? 3;
 
   const facetById = new Map(artifact.surfaceFacets.map((facet) => [facet.id, facet]));
   const sets: SurfaceSetAttribution[] = [];
@@ -170,7 +176,11 @@ export function attributeFacetsToStepFaces(
 
     const ranked = [...votes.entries()].sort((left, right) => right[1] - left[1]);
     const winner = ranked[0];
-    const faceId = winner ? winner[0] : null;
+    const runnerUp = ranked[1]?.[1] ?? 0;
+    const winningAgreement = winner && sampled.length > 0 ? winner[1] / sampled.length : 0;
+    const faceId = winner && winner[1] >= minimumVotes && winner[1] > runnerUp && winningAgreement >= minimumAgreement
+      ? winner[0]
+      : null;
     if (faceId) {
       for (const facet of facets) {
         facet.sourceFaceId = faceId;
@@ -182,7 +192,7 @@ export function attributeFacetsToStepFaces(
       facetCount: facets.length,
       sampledFacetCount: sampled.length,
       faceId,
-      agreement: winner && sampled.length > 0 ? winner[1] / sampled.length : 0,
+      agreement: faceId ? winningAgreement : 0,
       votes: ranked.map(([id, count]) => ({ faceId: id, votes: count }))
     });
   }

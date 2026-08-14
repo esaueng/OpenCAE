@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import type { OcctImporter, OcctMesh } from "occt-import-js";
 import occtWasmUrl from "occt-import-js/dist/occt-import-js.wasm?url";
-import { meshVolumeM3FromTriangles, type Triangle } from "@opencae/units";
+import { meshVolumeM3FromTriangleSource, type Triangle } from "@opencae/units";
 import {
   loadStepSurfacePreviewFallback,
   occtMeshesFromStepSurfacePreview,
@@ -12,6 +12,7 @@ import {
   readStepFileForDisplay,
   type StepDisplayLod
 } from "./stepDisplayTessellation";
+import { readStepFileInDisplayWorker } from "./workers/stepDisplayWorkerClient";
 
 let occtPromise: Promise<OcctImporter> | null = null;
 
@@ -36,6 +37,9 @@ export function geometryFromOcctMesh(mesh: OcctMesh): THREE.BufferGeometry {
   const positions = mesh.attributes?.position?.array;
   if (!positions?.length) {
     throw new Error("STEP mesh does not contain positions.");
+  }
+  if (positions.length > 3_000_000 || (mesh.index?.array?.length ?? 0) > 3_000_000) {
+    throw new Error("STEP display tessellation exceeds the browser preview limit.");
   }
 
   const geometry = new THREE.BufferGeometry();
@@ -124,22 +128,18 @@ export function normalizedStepPreviewFromMeshes(meshes: OcctMesh[], color: strin
 function volumeM3FromGeometry(geometry: THREE.BufferGeometry): number | undefined {
   const positions = geometry.getAttribute("position");
   if (!positions) return undefined;
-  const triangles: Triangle[] = [];
   const index = geometry.getIndex();
-  if (index) {
-    for (let offset = 0; offset + 2 < index.count; offset += 3) {
-      triangles.push([
+  const triangleCount = Math.floor((index?.count ?? positions.count) / 3);
+  return meshVolumeM3FromTriangleSource(triangleCount, (triangleIndex): Triangle => {
+    const offset = triangleIndex * 3;
+    return index
+      ? [
         vertexAt(positions, index.getX(offset)),
         vertexAt(positions, index.getX(offset + 1)),
         vertexAt(positions, index.getX(offset + 2))
-      ]);
-    }
-  } else {
-    for (let offset = 0; offset + 2 < positions.count; offset += 3) {
-      triangles.push([vertexAt(positions, offset), vertexAt(positions, offset + 1), vertexAt(positions, offset + 2)]);
-    }
-  }
-  return meshVolumeM3FromTriangles(triangles);
+      ]
+      : [vertexAt(positions, offset), vertexAt(positions, offset + 1), vertexAt(positions, offset + 2)];
+  });
 }
 
 function vertexAt(positions: THREE.BufferAttribute | THREE.InterleavedBufferAttribute, index: number): [number, number, number] {
@@ -152,9 +152,10 @@ export async function stepPreviewFromBase64(contentBase64: string, color: string
     return normalizedStepPreviewFromMeshes(occtMeshesFromStepSurfacePreview(cached.surfacePreview), color, options);
   }
 
-  const importer = await getOcctImporter();
   const bytes = base64ToUint8Array(contentBase64);
-  const result = readStepFileForDisplay(importer, bytes, options?.lod);
+  const result = typeof Worker === "undefined"
+    ? readStepFileForDisplay(await getOcctImporter(), bytes, options?.lod)
+    : await readStepFileInDisplayWorker(bytes, options?.lod);
 
   if (result.success && (result.meshes ?? []).some(hasRenderableOcctMesh)) {
     return normalizedStepPreviewFromMeshes(result.meshes ?? [], color, options);

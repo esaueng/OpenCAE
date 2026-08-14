@@ -7,7 +7,7 @@ import type { ThreeEvent } from "@react-three/fiber";
 import type { DisplayFace, DisplayModel, MeshSummary, ResultField, ResultRenderBounds } from "@opencae/schema";
 import { globalBuildAxisToModelAxis } from "@opencae/study-core";
 import { SUPPORTED_GEOMETRY_FORMAT_LABEL } from "../geometryFormats";
-import { meshVolumeM3FromTriangles, type Triangle } from "@opencae/units";
+import { meshVolumeM3FromTriangleSource, type Triangle } from "@opencae/units";
 import * as THREE from "three";
 import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
 import type { StepId } from "./StepBar";
@@ -123,6 +123,7 @@ type ModelPickHandlers = {
   onPointerOut?: () => void;
   onClick?: (event: ThreeEvent<MouseEvent>) => void;
 };
+const MAX_A11Y_FACE_BUTTONS = 256;
 export const VIEWER_GIZMO_ALIGNMENT = "bottom-right";
 export const VIEWER_GIZMO_MARGIN: [number, number] = [112, 112];
 export const VIEWER_GIZMO_SCALE = 40;
@@ -384,7 +385,7 @@ export function CadViewer(props: CadViewerProps) {
       {props.displayModel.faces.length > 0 && (
         <div className="viewer-a11y-faces" role="group" aria-label="Select a face with the keyboard">
           <span>Select a face to place supports or loads.</span>
-          {props.displayModel.faces.map((face) => (
+          {props.displayModel.faces.slice(0, MAX_A11Y_FACE_BUTTONS).map((face) => (
             <button
               key={face.id}
               type="button"
@@ -394,6 +395,7 @@ export function CadViewer(props: CadViewerProps) {
               {face.label || face.id}
             </button>
           ))}
+          {props.displayModel.faces.length > MAX_A11Y_FACE_BUTTONS ? <span>Use pointer selection for additional faces.</span> : null}
         </div>
       )}
       <div className="viewer-view-presets" role="group" aria-label="Camera views">
@@ -1658,12 +1660,12 @@ function BracketModel({
     setSelectedHit(face ? { face, point: face.center } : null);
   }, [displayModel.faces, selectedFaceId, selectedHit?.face.id]);
 
-  function hitFromEvent(event: ThreeEvent<PointerEvent> | ThreeEvent<MouseEvent>): ModelSelectionHit | null {
+  function hitFromEvent(event: ThreeEvent<PointerEvent> | ThreeEvent<MouseEvent>, allowExactFallback: boolean): ModelSelectionHit | null {
     if (!placementMode || isResultView) return null;
     if (modelKind === "uploaded") {
       // Real B-rep face picking for STEP imports (A-M3); ad-hoc point/normal
       // faces remain the fallback for other uploads or a cold registry.
-      const stepHit = stepFaceHitFromEvent(event, displayModel, activeStep === "supports");
+      const stepHit = stepFaceHitFromEvent(event, displayModel, activeStep === "supports", allowExactFallback);
       const liveStepRegistry = hasLiveStepFaceRegistry(displayModel);
       // Once the STEP registry is live, never manufacture another
       // "face-upload-picked-*" placeholder. If triangle attribution misses,
@@ -1696,7 +1698,7 @@ function BracketModel({
 
   const pickHandlers: ModelPickHandlers = {
     onPointerMove: (event) => {
-      const hit = hitFromEvent(event);
+      const hit = hitFromEvent(event, false);
       setHoveredHit(hit);
       setSnapResult(hit?.snapResult ?? null);
     },
@@ -1705,7 +1707,7 @@ function BracketModel({
       setSnapResult(null);
     },
     onClick: (event) => {
-      const hit = hitFromEvent(event);
+      const hit = hitFromEvent(event, true);
       if (!hit) return;
       event.stopPropagation();
       setSelectedHit(hit);
@@ -1763,7 +1765,7 @@ function BracketModel({
             kind={modelKind}
             displayModel={displayModel}
             color={materialColor("face-base-bottom")}
-            pickHandlers={pickHandlers}
+            pickHandlers={placementMode ? pickHandlers : undefined}
             enableHoleWallPicking={activeStep === "supports"}
             activePayloadObjectId={activePayloadObjectId}
             selectedFaceId={selectedFaceId}
@@ -2413,7 +2415,8 @@ function warmStepFaceRegistry(contentBase64: string | undefined): Promise<void> 
 function stepFaceHitFromEvent(
   event: ThreeEvent<PointerEvent> | ThreeEvent<MouseEvent>,
   displayModel: DisplayModel,
-  preferHoleWall: boolean
+  preferHoleWall: boolean,
+  allowExactFallback = true
 ): ModelSelectionHit | null {
   const api = stepFacesApi;
   const contentBase64 = displayModel.nativeCad?.contentBase64;
@@ -2427,7 +2430,7 @@ function stepFaceHitFromEvent(
   let faceId = holeWallFaceId ?? (meshIndex !== null && typeof triangleIndex === "number"
     ? api.stepFaceIdForMeshTriangle(registry, meshIndex, triangleIndex)
     : null);
-  if (!faceId) {
+  if (!faceId && allowExactFallback) {
     const worldNormal = event.face?.normal.clone().transformDirection(event.object.matrixWorld).normalize() ?? new THREE.Vector3(0, 0, 1);
     const normal = viewerNormalToModelSpace(worldNormal, displayModel).toArray() as [number, number, number];
     faceId = api.resolvePickedStepFace(registry, point, normal)?.faceId ?? null;
@@ -2935,6 +2938,14 @@ function UploadedObjModel({ displayModel, pickHandlers, activePayloadObjectId }:
     } catch {
       return null;
     }
+    let positionCount = 0;
+    parsed.traverse((child) => {
+      if (child instanceof THREE.Mesh) positionCount += child.geometry.getAttribute("position")?.count ?? 0;
+    });
+    if (positionCount > 1_000_000) {
+      disposeObjectTree(parsed);
+      return null;
+    }
     const box = new THREE.Box3().setFromObject(parsed);
     const size = box.getSize(new THREE.Vector3());
     const center = box.getCenter(new THREE.Vector3());
@@ -2977,18 +2988,14 @@ function UploadedObjModel({ displayModel, pickHandlers, activePayloadObjectId }:
 function volumeM3FromThreeGeometry(geometry: THREE.BufferGeometry): number | undefined {
   const positions = geometry.getAttribute("position");
   if (!positions) return undefined;
-  const triangles: Triangle[] = [];
   const index = geometry.getIndex();
-  if (index) {
-    for (let offset = 0; offset + 2 < index.count; offset += 3) {
-      triangles.push([threeVertexAt(positions, index.getX(offset)), threeVertexAt(positions, index.getX(offset + 1)), threeVertexAt(positions, index.getX(offset + 2))]);
-    }
-  } else {
-    for (let offset = 0; offset + 2 < positions.count; offset += 3) {
-      triangles.push([threeVertexAt(positions, offset), threeVertexAt(positions, offset + 1), threeVertexAt(positions, offset + 2)]);
-    }
-  }
-  return meshVolumeM3FromTriangles(triangles);
+  const triangleCount = Math.floor((index?.count ?? positions.count) / 3);
+  return meshVolumeM3FromTriangleSource(triangleCount, (triangleIndex): Triangle => {
+    const offset = triangleIndex * 3;
+    return index
+      ? [threeVertexAt(positions, index.getX(offset)), threeVertexAt(positions, index.getX(offset + 1)), threeVertexAt(positions, index.getX(offset + 2))]
+      : [threeVertexAt(positions, offset), threeVertexAt(positions, offset + 1), threeVertexAt(positions, offset + 2)];
+  });
 }
 
 function threeVertexAt(positions: THREE.BufferAttribute | THREE.InterleavedBufferAttribute, index: number): [number, number, number] {
@@ -3656,6 +3663,7 @@ export function recoverSurfaceNodeScalarField(
     (sample) => Number.isFinite(sample.value) && sample.point.length === 3 && sample.point.every(Number.isFinite)
   );
   if (!source || !samples || !samples.length) return null;
+  if (surfaceMesh.nodes.length * samples.length > 5_000_000) return null;
 
   const values = surfaceMesh.nodes.map((node) =>
     interpolateScalarFromSamples(node, samples)
@@ -4171,6 +4179,7 @@ export function applyResultFrameToGeometry({
 }
 
 const vertexResultMappingCache = new WeakMap<THREE.BufferGeometry, Map<string, VertexResultMapping>>();
+const MAX_VERTEX_RESULT_MAPPINGS_PER_GEOMETRY = 4;
 
 function prepareResultGeometryAttributes(geometry: THREE.BufferGeometry, position: THREE.BufferAttribute) {
   const prepared = geometry.userData.opencaeResultAttributesPrepared === true;
@@ -4200,6 +4209,10 @@ function vertexResultMappingForGeometry(
   const existing = mappings.get(signature);
   if (existing && existing.vertexCount === Math.floor(basePositions.length / 3)) return existing;
   const mapping = createVertexResultMapping({ basePositions, samples: field.samples ?? [], maxNeighbors: 8 });
+  if (mappings.size >= MAX_VERTEX_RESULT_MAPPINGS_PER_GEOMETRY) {
+    const oldest = mappings.keys().next().value;
+    if (oldest !== undefined) mappings.delete(oldest);
+  }
   mappings.set(signature, mapping);
   return mapping;
 }
@@ -4841,11 +4854,19 @@ function nearestResultSamples(
   samples: NonNullable<ResultField["samples"]>,
   predicate: (sample: NonNullable<ResultField["samples"]>[number]) => boolean
 ) {
-  return samples
-    .map((sample) => ({ sample, distanceSq: squaredDistanceToPointArray(point, sample.point) }))
-    .filter((entry) => predicate(entry.sample) && Number.isFinite(entry.distanceSq))
-    .sort((left, right) => left.distanceSq - right.distanceSq)
-    .slice(0, Math.min(8, Math.max(3, samples.length)));
+  const nearest: Array<{ sample: NonNullable<ResultField["samples"]>[number]; distanceSq: number }> = [];
+  const maxNeighbors = Math.min(8, Math.max(3, samples.length));
+  for (const sample of samples) {
+    if (!predicate(sample)) continue;
+    const distanceSq = squaredDistanceToPointArray(point, sample.point);
+    if (!Number.isFinite(distanceSq)) continue;
+    let index = nearest.length;
+    while (index > 0 && distanceSq < nearest[index - 1]!.distanceSq) index -= 1;
+    if (index >= maxNeighbors) continue;
+    nearest.splice(index, 0, { sample, distanceSq });
+    if (nearest.length > maxNeighbors) nearest.pop();
+  }
+  return nearest;
 }
 
 const loggedResultFieldDiagnostics = new Set<string>();
@@ -5526,14 +5547,12 @@ function displacementFieldForResults(fields: ResultField[]): ResultField | undef
 
 type ResultPayloadObjectRefs = {
   ids: Set<string>;
-  labels: Set<string>;
 };
 
 function resultPayloadObjectRefs(loadMarkers: ViewerLoadMarker[]): ResultPayloadObjectRefs {
-  const refs: ResultPayloadObjectRefs = { ids: new Set(), labels: new Set() };
+  const refs: ResultPayloadObjectRefs = { ids: new Set() };
   for (const marker of loadMarkers) {
     addResultPayloadRef(refs.ids, marker.payloadObject?.id);
-    addResultPayloadRef(refs.labels, marker.payloadObject?.label);
   }
   return refs;
 }
@@ -5570,7 +5589,6 @@ function isResultPayloadObject(object: THREE.Object3D, refs: ResultPayloadObject
   let current: THREE.Object3D | null = object;
   while (current) {
     if (refs.ids.has(normalizedResultPayloadRef(current.userData.opencaeObjectId))) return true;
-    if (refs.labels.has(normalizedResultPayloadRef(current.userData.opencaeObjectLabel))) return true;
     current = current.parent;
   }
   return false;
@@ -5633,13 +5651,16 @@ export function deformationScaleForResultFields(fields: ResultField[]): number |
   if (!displacementFields.length) return undefined;
   // Gate on the run-wide peak, not just the first frame: a transient's opening frame is ~0,
   // so checking only that frame would wrongly disable deformation for the entire animation.
-  const peak = Math.max(0, ...displacementFields.map((field) => resultFieldAbsMax(field)));
+  let peak = 0;
+  for (const field of displacementFields) peak = Math.max(peak, resultFieldAbsMax(field));
   return peak > 0 ? 1 : 0;
 }
 
 function deformationScaleForSamples(resultMode: ResultMode, samples: FaceResultSample[]) {
   if (resultMode !== "displacement") return 1;
-  return deformationScaleForMagnitude(Math.max(0, ...samples.map((sample) => Math.abs(sample.value))), "mm");
+  let peak = 0;
+  for (const sample of samples) peak = Math.max(peak, Math.abs(sample.value));
+  return deformationScaleForMagnitude(peak, "mm");
 }
 
 function resultFieldAbsMax(field: ResultField) {
@@ -5920,7 +5941,10 @@ function deformedPointForKind(kind: SampleModelKind, point: THREE.Vector3, stres
 
 export function resultValueForPoint(kind: SampleModelKind, resultMode: ResultMode, stressExaggeration: number, point: THREE.Vector3, samples: FaceResultSample[]) {
   const fieldSampleValue = resultFractionFromFieldSamples(point, samples);
-  const sampleValue = fieldSampleValue ?? resultFractionFromSamples(point, samples);
+  const faceSampleValue = resultFractionFromSamples(point, samples);
+  const sampleValue = resultMode === "stress" && fieldSampleValue !== null && faceSampleValue !== null
+    ? Math.max(fieldSampleValue, faceSampleValue)
+    : fieldSampleValue ?? faceSampleValue;
   if (sampleValue !== null) return Math.max(0, Math.min(1, sampleValue));
   const stress = kind === "cantilever" ? cantileverBendingStressFraction(point) : stressFractionForPoint(kind, point);
   const displacement = displacementFractionForPoint(kind, point);
@@ -5938,7 +5962,7 @@ function resultFractionFromSamples(point: THREE.Vector3, samples: FaceResultSamp
   let totalWeight = 0;
   for (const sample of samples) {
     const radius = Math.max(span * 0.28, 0.001);
-    const weight = Math.exp(-0.5 * squaredDistanceToPointArray(point, sample.face.center) / (radius * radius)) + 0.015;
+    const weight = Math.exp(-0.5 * normalizedSquaredDistance(point, sample.face.center, radius)) + 0.015;
     weighted += sample.normalized * weight;
     totalWeight += weight;
   }
@@ -5953,7 +5977,7 @@ function resultFractionFromFieldSamples(point: THREE.Vector3, samples: FaceResul
   let totalWeight = 0;
   for (const sample of fieldSamples) {
     const radius = Math.max(span * 0.055, 0.001);
-    const weight = Math.exp(-0.5 * squaredDistanceToPointArray(point, sample.point) / (radius * radius));
+    const weight = Math.exp(-0.5 * normalizedSquaredDistance(point, sample.point, radius));
     weighted += sample.normalized * weight;
     totalWeight += weight;
   }
@@ -5986,6 +6010,15 @@ function squaredDistanceToPointArray(point: THREE.Vector3, target: [number, numb
   const dy = point.y - target[1];
   const dz = point.z - target[2];
   return dx * dx + dy * dy + dz * dz;
+}
+
+function normalizedSquaredDistance(point: THREE.Vector3, target: [number, number, number], radius: number) {
+  if (!Number.isFinite(radius) || radius <= 0) return Number.POSITIVE_INFINITY;
+  const dx = (point.x - target[0]) / radius;
+  const dy = (point.y - target[1]) / radius;
+  const dz = (point.z - target[2]) / radius;
+  const distance = dx * dx + dy * dy + dz * dz;
+  return Number.isFinite(distance) ? distance : Number.POSITIVE_INFINITY;
 }
 
 function stressFractionForPoint(kind: SampleModelKind, point: THREE.Vector3) {

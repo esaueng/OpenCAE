@@ -26,7 +26,7 @@ export function buildHtmlReport(runId: string, summary: ResultSummary): string {
   if (isModalResultSummary(summary)) return buildModalHtmlReport(runId, summary);
   if (isThermalResultSummary(summary)) return buildThermalHtmlReport(runId, summary);
   const stressScore = summary.safetyFactor > 0 ? clamp(1 / summary.safetyFactor, 0, 1) : 1;
-  const assessment = summary.failureAssessment ?? assessResultFailure(summary);
+  const assessment = assessResultFailure(summary);
   const assessmentStatusClass = ASSESSMENT_STATUSES.includes(assessment.status) ? assessment.status : "unknown";
   const analysisLabel = summary.transient ? "Dynamic structural" : "Static stress";
   const provenanceTier = resultTierForSummary(summary);
@@ -144,7 +144,7 @@ export function buildHtmlReport(runId: string, summary: ResultSummary): string {
 export function buildPdfReport(runId: string, summary: ResultSummary): Buffer {
   if (isModalResultSummary(summary)) return buildModalPdfReport(runId, summary);
   if (isThermalResultSummary(summary)) return buildThermalPdfReport(runId, summary);
-  const assessment = summary.failureAssessment ?? assessResultFailure(summary);
+  const assessment = assessResultFailure(summary);
   const analysisLabel = summary.transient ? "Dynamic structural" : "Static stress";
   const provenanceTier = resultTierForSummary(summary);
   const provenanceLabel = resultTierLabel(provenanceTier);

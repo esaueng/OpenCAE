@@ -2,7 +2,7 @@ import { lazy, startTransition, Suspense, useCallback, useEffect, useMemo, useRe
 import { DynamicSolverSettingsSchema, isModalResultSummary, isRunResultReadyStatus, isStructuralResultSummary, isThermalResultSummary, ModalSolverSettingsSchema } from "@opencae/schema";
 import type { Constraint, CustomMaterial, DisplayFace, DisplayModel, DynamicSolverSettings, Load, MeshQuality, ModalSolverSettings, NamedSelection, Project, ResultField, ResultRenderBounds, ResultSummary, RunEvent, RunTimingEstimate, RunVariantRef, RunVariantResult, SimulationFidelity, Study } from "@opencae/schema";
 import { Activity, CloudUpload, HardDrive, RotateCcw, X } from "lucide-react";
-import { addLoad, addSupport, assignMaterial, cancelRun, createProject, generateMesh, getResults, getRunVariant, importLocalProject, isStepGeometryMeshFailure, loadSampleProject, probeUploadedStepRepairAfterMeshFailure, renameProject, repairUploadedStepModel, runMeshConvergence, runSimulation, saveRunReportCaptures, STEP_REPAIR_UNAVAILABLE_MESSAGE, subscribeToRun, updateStudy as saveStudyPatch, uploadedStepRepairProbeDecision, uploadModel, type SampleAnalysisType, type SampleModelId } from "./lib/api";
+import { addLoad, addSupport, assignMaterial, cancelRun, createProject, generateMesh, getResults, getRunVariant, importLocalProject, loadSampleProject, renameProject, repairUploadedStepModel, runMeshConvergence, runSimulation, saveRunReportCaptures, subscribeToRun, updateStudy as saveStudyPatch, uploadModel, type SampleAnalysisType, type SampleModelId } from "./lib/api";
 import { cancelWasmMeshing, type WasmMeshPhaseProgress } from "./lib/wasmMeshing";
 import { buildOpenCaeCoreModelForStudy, resolveSolverBackend } from "./workers/opencaeCoreSolve";
 import { manufacturingProcessForId, normalizeManufacturingParameters, resolveMaterial } from "@opencae/materials";
@@ -114,6 +114,7 @@ type ResultPlaybackCacheState =
 
 type MutableResultPlaybackFrameController = ResultPlaybackFrameController & {
   setPackedFrame: (cache: PackedPreparedPlaybackCache, framePosition: number) => void;
+  clear: () => void;
 };
 
 type ProjectActionHandle = {
@@ -522,7 +523,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     if (!reloadResultsRunId) return undefined;
     const sourceProject = projectRef.current;
     let cancelled = false;
-    void getResults(reloadResultsRunId)
+    void getResults(reloadResultsRunId, project && study ? { projectId: project.id, studyId: study.id } : undefined)
       .then((results) => {
         if (cancelled || projectRef.current !== sourceProject) return;
         applyReloadedResults(results, reloadResultsRunId, "Simulation results restored after reload.");
@@ -587,6 +588,9 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     requestDefaultHomeView();
   }, [displayModel, homeRequested, project, restoredProjectFile]);
 
+  useEffect(() => {
+    resultPlaybackFrameControllerRef.current?.clear();
+  }, [resultPlaybackCacheKey]);
   useEffect(() => {
     if (!playbackFrameIndexes.length) return;
     setResultFrameIndex((current) => playbackFrameIndexes.includes(current) ? current : playbackFrameIndexes[0] ?? 0);
@@ -1775,11 +1779,9 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
 
   function handleGenerateMesh(preset: MeshQuality) {
     if (!project || !study) return;
-    const sourceProject = project;
     setMeshPhaseProgress({ phase: "load", phaseIndex: 0, phaseCount: 8, message: "Loading gmsh WebAssembly module..." });
-    // generateMesh rethrows quality-gate and STEP topology rejections by
-    // design. Surface the primary failure immediately, then trial-run the
-    // exact Fix action only for geometry-class failures on the same model.
+    // generateMesh rethrows quality-gate and STEP topology rejections so the
+    // primary failure remains visible without starting another heavy CAD job.
     void updateStudy(generateMesh(study.id, preset, study, displayModel ?? undefined, pushMessage, setMeshPhaseProgress), shouldAutoAdvanceAfterMeshGeneration() ? "run" : undefined)
       .catch(async (error: unknown) => {
         setMeshPhaseProgress(null);
@@ -1788,38 +1790,6 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           return;
         }
         pushMessage(`Mesh generation failed: ${error instanceof Error ? error.message : String(error)}`);
-        if (!isStepGeometryMeshFailure(error)) return;
-        const probeDecision = uploadedStepRepairProbeDecision(sourceProject, projectRef.current);
-        if (!probeDecision.shouldProbe) {
-          pushMessage(probeDecision.reason);
-          return;
-        }
-        const liveProject = probeDecision.project;
-        const currentStepGeometry = stepGeometryMetadataForProject(liveProject);
-        if (currentStepGeometry && currentStepGeometry.status !== "solid" && currentStepGeometry.status !== "unchecked") return;
-
-        pushMessage("Checking whether Fix open surfaces can repair this model...");
-        const actionHandle = beginProjectAction(liveProject);
-        try {
-          const probe = await probeUploadedStepRepairAfterMeshFailure(liveProject, {
-            signal: actionHandle.signal,
-            isCurrent: actionHandle.isCurrent,
-            clientId: actionHandle.clientId,
-            generation: actionHandle.generation
-          });
-          if (!probe || !actionHandle.isCurrent()) return;
-          completeProjectAction(actionHandle);
-          projectRef.current = probe.project;
-          setProject(probe.project);
-          pushMessage(probe.stepGeometry.status === "repairable"
-            ? "Fix open surfaces is available on the Model and Mesh steps."
-            : STEP_REPAIR_UNAVAILABLE_MESSAGE);
-        } catch (probeError) {
-          if (isAbortError(probeError)) return;
-          pushMessage(`Could not check automatic STEP repair: ${probeError instanceof Error ? probeError.message : String(probeError)}`);
-        } finally {
-          completeProjectAction(actionHandle);
-        }
       })
       .finally(() => setMeshPhaseProgress(null));
   }
@@ -2263,7 +2233,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         if (activeRunSourceRef.current === source) activeRunSourceRef.current = null;
         setRunTiming(null);
         try {
-          const results = await getResults(response.run.id);
+          const results = await getResults(response.run.id, { projectId: study.projectId, studyId: study.id });
           const currentStudy = projectRef.current?.studies.find((candidate) => candidate.id === study.id);
           if (processingRunIdRef.current !== response.run.id || currentStudy?.type !== study.type) {
             pushMessage("Completed results were ignored because the active project or analysis changed during the run.");
@@ -2535,7 +2505,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
             onAddResultProbe={handleAddResultProbe}
             surfaceMesh={resultSurfaceMesh}
             resultPlaybackBufferCache={resultPlaybackBufferCacheForViewer}
-            resultPlaybackFrameController={resultPlaybackPlaying ? resultPlaybackFrameControllerRef.current : undefined}
+            resultPlaybackFrameController={resultPlaybackPlaying && resultPlaybackCacheState.status === "ready" && resultPlaybackCacheState.cache.packed ? resultPlaybackFrameControllerRef.current : undefined}
             meshSummary={solverMeshSummary ?? study.meshSettings.summary}
             unitSystem={displayUnitSystem}
             themeMode={themeMode}
@@ -2945,6 +2915,9 @@ function createResultPlaybackFrameController(): MutableResultPlaybackFrameContro
       const nextSnapshot = { cache, framePosition };
       snapshot = nextSnapshot;
       for (const listener of listeners) listener(nextSnapshot);
+    },
+    clear() {
+      snapshot = null;
     }
   };
 }

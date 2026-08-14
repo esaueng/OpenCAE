@@ -32,6 +32,8 @@ export type BeamDemoSolveOptions = {
   customMaterials?: readonly CustomMaterial[];
   beamModel?: BeamDemoPhysicalModel;
   debugResults?: boolean;
+  /** Internal sample-fixture gate. Never derive this from imported project data. */
+  trustedBeamDemo?: boolean;
 };
 
 const DEFAULT_BEAM_PRINT_DISPLAY_MODEL: DisplayModel = {

@@ -186,21 +186,11 @@ describe("STEP quality recovery orchestration", () => {
     ]);
   });
 
-  test("refines through coarse PLC intersections until a feature-safe mesh succeeds", async () => {
+  test("does not enter an unbounded deep-refinement rung after PLC failures", async () => {
     fake.state.scenario = "deep_refinement";
 
-    const result = await meshStepToMshV2(new Uint8Array([1]), { elementOrder: 2, meshSizeMm: 12 });
-
-    expect(result.qualityMinSICN).toBe(0.2);
-    expect(result.geometryRepair).toBeUndefined();
-    expect(result.qualityRepair).toBeUndefined();
-    expect(result.qualityRefinement).toEqual({
-      requestedMeshSizeMm: 12,
-      usedMeshSizeMm: 2,
-      triedMeshSizesMm: [12, 18, 8, 12 * (4 / 9), 2],
-      direction: "finer"
-    });
-    expect(fake.state.attempts.at(-1)).toEqual({ algorithm: "delaunay", sizeMm: 2 });
+    await expect(meshStepToMshV2(new Uint8Array([1]), { elementOrder: 2, meshSizeMm: 12 })).rejects.toThrow(/surfaces pass through each other/);
+    expect(fake.state.attempts.some((attempt) => attempt.sizeMm < 4)).toBe(false);
   });
 
   test("heals sliver features and uses MeshAdapt without lowering the quality floor", async () => {

@@ -3,7 +3,7 @@
 Base commit: open-cae `2f42af2`.
 Status: TODO
 Category: meshing robustness / honest-failure UX
-Driver: real-world session (2026-07-10, Corning Seed Holder 8PC v7-2 CAE_TEST.step, 1 body / 428 faces) hit a dead end: mesh failed with "Open STEP surfaces remain after sewing and boundary patching… Use Fix open surfaces on the Model step", but the Model step showed no such button.
+Driver: a real-world uploaded STEP session hit a dead end: meshing reported open surfaces and directed the user to a repair action that the Model step did not expose.
 
 ## Problem
 

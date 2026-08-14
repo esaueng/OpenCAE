@@ -274,7 +274,7 @@ describe("app persistence", () => {
     const { parseResultBundle } = await import("./appPersistence");
     const reportCaptures = {
       stress: {
-        png: "data:image/png;base64,stress",
+        png: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB",
         fieldId: "field-1",
         selection: "peak" as const,
         frameIndex: 2,
@@ -291,6 +291,27 @@ describe("app persistence", () => {
     });
 
     expect(bundle?.reportCaptures).toEqual(reportCaptures);
+  });
+
+  test("normalizes imported result integrity metadata and rejects invalid surface topology", async () => {
+    const { parseResultBundle } = await import("./appPersistence");
+    const bundle = parseResultBundle({
+      summary: {
+        ...summary,
+        safetyFactor: 0.2,
+        failureAssessment: { status: "pass", title: "Safe", message: "Forged" }
+      },
+      fields: [{ ...fields[0], values: [0, 100], min: 1_000, max: 0 }],
+      surfaceMesh: { id: "surface-1", nodes: [[0, 0, 0]], triangles: [[0, 1, 2]] },
+      reportCaptures: {
+        stress: { png: "data:image/png;base64,not-a-png", fieldId: "field-1", selection: "peak" }
+      }
+    });
+
+    expect(bundle?.summary).toMatchObject({ failureAssessment: { status: "fail" } });
+    expect(bundle?.fields[0]).toMatchObject({ min: 0, max: 100 });
+    expect(bundle?.surfaceMesh).toBeUndefined();
+    expect(bundle?.reportCaptures).toBeUndefined();
   });
 
   test("builds a reloadable snapshot with project, model, results, and UI state", () => {

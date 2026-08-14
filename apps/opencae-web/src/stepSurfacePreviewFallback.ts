@@ -10,6 +10,10 @@ type CachedStepSurfacePreview = {
 // A STEP payload can exceed 100 MB. Keep only the active model's fallback so
 // replacing a model does not retain another large surface mesh and base64 key.
 const MAX_CACHED_STEP_SURFACES = 1;
+const MAX_STEP_SURFACE_MESHES = 10_000;
+const MAX_STEP_SURFACE_POSITION_COMPONENTS = 3_000_000;
+const MAX_STEP_SURFACE_INDICES = 3_000_000;
+const MAX_STEP_SURFACE_FACES = 20_000;
 const resolved = new Map<string, CachedStepSurfacePreview>();
 const pending = new Map<string, Promise<CachedStepSurfacePreview>>();
 
@@ -19,6 +23,7 @@ export function rememberStepSurfacePreview(
   surfacePreview: StepSurfacePreview,
   options: { preferred?: boolean } = {}
 ): CachedStepSurfacePreview {
+  validateStepSurfacePreview(surfacePreview);
   const current = resolved.get(contentBase64);
   const cached = {
     inspection,
@@ -78,12 +83,33 @@ export async function loadStepSurfacePreviewFallback(contentBase64: string): Pro
 }
 
 export function occtMeshesFromStepSurfacePreview(surfacePreview: StepSurfacePreview): OcctMesh[] {
+  validateStepSurfacePreview(surfacePreview);
   return surfacePreview.meshes.map((mesh) => ({
     name: mesh.name,
     attributes: { position: { array: mesh.positions } },
     index: { array: mesh.indices },
     brep_faces: mesh.faceRanges.map((range) => ({ ...range, color: null }))
   }));
+}
+
+export function validateStepSurfacePreview(surfacePreview: StepSurfacePreview): void {
+  if (surfacePreview.meshes.length > MAX_STEP_SURFACE_MESHES) throw new Error("STEP surface preview contains too many meshes.");
+  let positions = 0;
+  let indices = 0;
+  let faces = 0;
+  for (const mesh of surfacePreview.meshes) {
+    positions += mesh.positions.length;
+    indices += mesh.indices.length;
+    faces += mesh.faceRanges.length;
+    if (positions > MAX_STEP_SURFACE_POSITION_COMPONENTS || indices > MAX_STEP_SURFACE_INDICES || faces > MAX_STEP_SURFACE_FACES) {
+      throw new Error("STEP surface preview exceeds browser geometry limits.");
+    }
+    if (mesh.positions.length % 3 !== 0 || mesh.indices.length % 3 !== 0) throw new Error("STEP surface preview arrays are malformed.");
+    const vertexCount = mesh.positions.length / 3;
+    for (const index of mesh.indices) {
+      if (!Number.isInteger(index) || index < 0 || index >= vertexCount) throw new Error("STEP surface preview contains an invalid triangle index.");
+    }
+  }
 }
 
 function base64ToUint8Array(value: string): Uint8Array {

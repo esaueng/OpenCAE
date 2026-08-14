@@ -511,7 +511,10 @@ function filenamePart(value: string): string {
 }
 
 function csvCell(value: unknown): string {
-  const text = String(value ?? "");
+  const raw = String(value ?? "");
+  const trimmed = raw.trim();
+  const isNumeric = /^-?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/iu.test(trimmed) || trimmed === "NaN";
+  const text = !isNumeric && (/^[\t\r]/u.test(raw) || /^[\t\r ]*[=+\-@]/u.test(raw)) ? `'${raw}` : raw;
   return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 

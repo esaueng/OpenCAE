@@ -64,8 +64,8 @@ describe("result playback cache", () => {
   test("falls back through reduced fps and integer solver frames before disabling cache", () => {
     const fields = [resultField(0, Array(100).fill(1)), resultField(1, Array(100).fill(2))];
 
-    expect(planPlaybackFrameCache({ fields, frameIndexes: [0, 1], playbackFps: 30, budgetBytes: 3_600 }).mode).toBe("reducedFps");
-    expect(planPlaybackFrameCache({ fields, frameIndexes: [0, 1], playbackFps: 30, budgetBytes: 1_900 }).mode).toBe("integerFrames");
+    expect(planPlaybackFrameCache({ fields, frameIndexes: [0, 1], playbackFps: 30, budgetBytes: 7_000 }).mode).toBe("reducedFps");
+    expect(planPlaybackFrameCache({ fields, frameIndexes: [0, 1], playbackFps: 30, budgetBytes: 3_600 }).mode).toBe("integerFrames");
     expect(planPlaybackFrameCache({ fields, frameIndexes: [0, 1], playbackFps: 30, budgetBytes: 900 }).mode).toBe("fallback");
   });
 

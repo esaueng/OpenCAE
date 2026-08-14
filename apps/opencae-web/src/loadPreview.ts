@@ -98,7 +98,6 @@ export function directionLabelForVector(direction: unknown, displayModel?: Displ
 }
 
 export function directionLabelForLoad(load: Load, displayModel?: DisplayModel, face?: DisplayFace): LoadDirectionLabel {
-  if (isLoadDirectionLabel(load.parameters.directionMode)) return load.parameters.directionMode;
   return directionLabelForVector(load.parameters.direction, displayModel, face);
 }
 
@@ -109,6 +108,7 @@ export function applicationPointForLoad(load: Load): LoadApplicationPoint | unde
 export function payloadObjectForLoad(load: Load): PayloadObjectSelection | undefined {
   const value = load.parameters.payloadObject;
   if (!isRecord(value) || typeof value.id !== "string" || typeof value.label !== "string" || !isVector3(value.center)) return undefined;
+  if (value.id.length < 1 || value.id.length > 128 || value.label.length < 1 || value.label.length > 128) return undefined;
   return {
     id: value.id,
     label: value.label,
@@ -229,10 +229,6 @@ function modelDirectionToViewerSpace(direction: THREE.Vector3, displayModel?: Di
 
 function isDirection(value: unknown): value is LoadDirection {
   return isVector3(value);
-}
-
-function isLoadDirectionLabel(value: unknown): value is LoadDirectionLabel {
-  return typeof value === "string" && (LOAD_DIRECTION_LABELS as readonly string[]).includes(value);
 }
 
 function vectorToLoadDirection(vector: THREE.Vector3): LoadDirection {
