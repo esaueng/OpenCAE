@@ -37,19 +37,49 @@ export function stlVolumeM3FromBase64(contentBase64?: string): number | undefine
 }
 
 export function stlVolumeM3FromBytes(bytes: Uint8Array): number | undefined {
-  const triangles = isExactBinaryStl(bytes) ? binaryStlTriangles(bytes) : asciiStlTriangles(bytes);
-  if (!triangles.length) return undefined;
-  return meshVolumeM3FromTriangles(triangles);
+  if (isExactBinaryStl(bytes)) return binaryStlVolumeM3(bytes);
+  const vertices = asciiStlVertices(bytes);
+  return meshVolumeM3FromTriangleSource(Math.floor(vertices.length / 3), (index) => {
+    const offset = index * 3;
+    const a = vertices[offset];
+    const b = vertices[offset + 1];
+    const c = vertices[offset + 2];
+    return a && b && c ? [a, b, c] : undefined;
+  });
 }
 
 export function meshVolumeM3FromTriangles(triangles: Triangle[]): number | undefined {
-  if (!triangles.length) return undefined;
+  return meshVolumeM3FromTriangleSource(triangles.length, (index) => triangles[index]);
+}
+
+export function meshVolumeM3FromTriangleSource(triangleCount: number, triangleAt: (index: number) => Triangle | undefined): number | undefined {
+  if (!Number.isSafeInteger(triangleCount) || triangleCount <= 0) return undefined;
   let volumeMm3 = 0;
-  for (const [a, b, c] of triangles) {
+  for (let index = 0; index < triangleCount; index += 1) {
+    const triangle = triangleAt(index);
+    if (!triangle) return undefined;
+    const [a, b, c] = triangle;
     volumeMm3 += dot(a, cross(b, c)) / 6;
   }
   const volume = Math.abs(volumeMm3) / 1_000_000_000;
   return Number.isFinite(volume) && volume > 0 ? volume : undefined;
+}
+
+function binaryStlVolumeM3(bytes: Uint8Array): number | undefined {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const triangleCount = view.getUint32(80, true);
+  return meshVolumeM3FromTriangleSource(triangleCount, (triangleIndex) => {
+    const triangleOffset = 84 + triangleIndex * 50 + 12;
+    const triangle: Triangle = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+    for (let vertexIndex = 0; vertexIndex < 3; vertexIndex += 1) {
+      for (let axis = 0; axis < 3; axis += 1) {
+        const value = view.getFloat32(triangleOffset + vertexIndex * 12 + axis * 4, true);
+        if (!Number.isFinite(value)) return undefined;
+        triangle[vertexIndex]![axis] = value;
+      }
+    }
+    return triangle;
+  });
 }
 
 function binaryStlBounds(bytes: Uint8Array) {
@@ -71,26 +101,6 @@ function binaryStlBounds(bytes: Uint8Array) {
   return { min, max };
 }
 
-function binaryStlTriangles(bytes: Uint8Array): Triangle[] {
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  const triangleCount = view.getUint32(80, true);
-  const triangles: Triangle[] = [];
-  for (let triangleIndex = 0; triangleIndex < triangleCount; triangleIndex += 1) {
-    const triangleOffset = 84 + triangleIndex * 50 + 12;
-    const triangle: Triangle = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
-    for (let vertexIndex = 0; vertexIndex < 3; vertexIndex += 1) {
-      const vertex = triangle[vertexIndex]!;
-      for (let axis = 0; axis < 3; axis += 1) {
-        const value = view.getFloat32(triangleOffset + vertexIndex * 12 + axis * 4, true);
-        if (!Number.isFinite(value)) return [];
-        vertex[axis] = value;
-      }
-    }
-    triangles.push(triangle);
-  }
-  return triangles;
-}
-
 function asciiStlBounds(bytes: Uint8Array) {
   const vertices = asciiStlVertices(bytes);
   if (!vertices.length) return undefined;
@@ -104,15 +114,6 @@ function asciiStlBounds(bytes: Uint8Array) {
     }
   }
   return { min, max };
-}
-
-function asciiStlTriangles(bytes: Uint8Array): Triangle[] {
-  const vertices = asciiStlVertices(bytes);
-  const triangles: Triangle[] = [];
-  for (let index = 0; index + 2 < vertices.length; index += 3) {
-    triangles.push([vertices[index]!, vertices[index + 1]!, vertices[index + 2]!]);
-  }
-  return triangles;
 }
 
 function asciiStlVertices(bytes: Uint8Array): Array<[number, number, number]> {

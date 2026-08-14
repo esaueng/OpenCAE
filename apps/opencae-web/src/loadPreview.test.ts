@@ -54,7 +54,7 @@ describe("load preview helpers", () => {
     expect(directionLabelForVector([0, 0, -1], undefined, face)).toBe("Opposite normal");
   });
 
-  test("prefers a saved direction mode when a global axis matches the face normal", () => {
+  test("derives the displayed direction from the solved vector instead of untrusted directionMode", () => {
     const load = {
       id: "load-global-z",
       type: "force",
@@ -63,7 +63,7 @@ describe("load preview helpers", () => {
       status: "complete"
     } as Load;
 
-    expect(directionLabelForLoad(load, undefined, face)).toBe("-Z");
+    expect(directionLabelForLoad(load, undefined, face)).toBe("Opposite normal");
   });
 
   test("maps viewer global directions through legacy sample orientation when saving", () => {
@@ -99,6 +99,23 @@ describe("load preview helpers", () => {
     };
 
     expect(payloadObjectForLoad(load)).toEqual({ id: "part-1", label: "Payload part", center: [1, 2, 3] });
+  });
+
+  test("rejects payload labels that exceed the viewport text budget", () => {
+    const load: Load = {
+      id: "load-payload",
+      type: "gravity",
+      selectionRef: "selection-side",
+      parameters: {
+        value: 5,
+        units: "kg",
+        direction: [0, 0, -1],
+        payloadObject: { id: "part-1", label: "x".repeat(129), center: [1, 2, 3] }
+      },
+      status: "complete"
+    };
+
+    expect(payloadObjectForLoad(load)).toBeUndefined();
   });
 
   test("uses payload object center for gravity load markers when no point is saved", () => {

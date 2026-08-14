@@ -230,6 +230,26 @@ export function createPackedResultPlaybackCache(fields: ResultField[]): PackedRe
 
   const frameCount = frameIndexes.length;
   const fieldCount = descriptorKeys.length;
+  const slotCount = frameCount * fieldCount;
+  if (!Number.isSafeInteger(slotCount) || slotCount > 10_000_000) return null;
+  let valueCount = 0;
+  let tensorCount = 0;
+  let vectorCount = 0;
+  let sampleCount = 0;
+  for (const frameIndex of frameIndexes) {
+    const frameFieldMap = fieldMapsByFrame.get(frameIndex);
+    for (const key of descriptorKeys) {
+      const field = frameFieldMap?.get(key);
+      valueCount += field?.values.length ?? 0;
+      tensorCount += field?.tensorValues?.length ?? 0;
+      vectorCount += field?.vectors?.length ?? 0;
+      sampleCount += field?.samples?.length ?? 0;
+    }
+  }
+  const estimatedPackedBytes = frameCount * 2 * Int32Array.BYTES_PER_ELEMENT
+    + slotCount * 12 * Int32Array.BYTES_PER_ELEMENT
+    + (valueCount + tensorCount + vectorCount * 3 + sampleCount * 10) * Float32Array.BYTES_PER_ELEMENT;
+  if (!Number.isSafeInteger(estimatedPackedBytes) || estimatedPackedBytes > 192 * 1024 * 1024) return null;
   const frameIndexArray = new Int32Array(frameIndexes);
   const times = new Float32Array(frameCount);
   const fieldOffsets = new Int32Array(frameCount * fieldCount);
@@ -243,10 +263,10 @@ export function createPackedResultPlaybackCache(fields: ResultField[]): PackedRe
   const sampleOffsets = new Int32Array(frameCount * fieldCount);
   const sampleLengths = new Int32Array(frameCount * fieldCount);
   const descriptors: PackedResultPlaybackFieldDescriptor[] = [];
-  let valueCount = 0;
-  let tensorCount = 0;
-  let vectorCount = 0;
-  let sampleCount = 0;
+  let valueOffset = 0;
+  let tensorOffset = 0;
+  let vectorOffset = 0;
+  let sampleOffset = 0;
 
   for (let frameOrdinal = 0; frameOrdinal < frameCount; frameOrdinal += 1) {
     const frameIndex = frameIndexes[frameOrdinal] ?? 0;
@@ -255,20 +275,20 @@ export function createPackedResultPlaybackCache(fields: ResultField[]): PackedRe
     for (let fieldOrdinal = 0; fieldOrdinal < fieldCount; fieldOrdinal += 1) {
       const field = frameFieldMap?.get(descriptorKeys[fieldOrdinal]!);
       const slot = frameOrdinal * fieldCount + fieldOrdinal;
-      fieldOffsets[slot] = valueCount;
+      fieldOffsets[slot] = valueOffset;
       fieldLengths[slot] = field?.values.length ?? 0;
       fieldMins[slot] = field ? Number(field.min) : 0;
       fieldMaxes[slot] = field ? Number(field.max) : 0;
-      vectorOffsets[slot] = vectorCount;
-      tensorOffsets[slot] = tensorCount;
+      vectorOffsets[slot] = vectorOffset;
+      tensorOffsets[slot] = tensorOffset;
       tensorLengths[slot] = field?.tensorValues?.length ?? 0;
       vectorLengths[slot] = field?.vectors?.length ?? 0;
-      sampleOffsets[slot] = sampleCount;
+      sampleOffsets[slot] = sampleOffset;
       sampleLengths[slot] = field?.samples?.length ?? 0;
-      valueCount += field?.values.length ?? 0;
-      tensorCount += field?.tensorValues?.length ?? 0;
-      vectorCount += field?.vectors?.length ?? 0;
-      sampleCount += field?.samples?.length ?? 0;
+      valueOffset += field?.values.length ?? 0;
+      tensorOffset += field?.tensorValues?.length ?? 0;
+      vectorOffset += field?.vectors?.length ?? 0;
+      sampleOffset += field?.samples?.length ?? 0;
       if (frameOrdinal === 0) {
         const descriptorField = field ?? firstFieldForSeries(fieldMapsByFrame, descriptorKeys[fieldOrdinal]!);
         if (descriptorField) {
@@ -914,11 +934,17 @@ function finiteOrNeutral(value: unknown, mode: ResultFieldMode): number {
 }
 
 function interpolatedFieldSampleValue(point: [number, number, number], samples: NonNullable<ResultField["samples"]>, mode: ResultFieldMode): number {
-  const neighbors = samples
-    .map((sample) => ({ sample, distanceSq: squaredDistance(point, sample.point) }))
-    .filter((entry) => Number.isFinite(entry.sample.value) && Number.isFinite(entry.distanceSq))
-    .sort((left, right) => left.distanceSq - right.distanceSq)
-    .slice(0, Math.min(8, Math.max(3, samples.length)));
+  const neighbors: Array<{ sample: NonNullable<ResultField["samples"]>[number]; distanceSq: number }> = [];
+  const maxNeighbors = Math.min(8, Math.max(3, samples.length));
+  for (const sample of samples) {
+    const distanceSq = squaredDistance(point, sample.point);
+    if (!Number.isFinite(sample.value) || !Number.isFinite(distanceSq)) continue;
+    let index = neighbors.length;
+    while (index > 0 && distanceSq < neighbors[index - 1]!.distanceSq) index -= 1;
+    if (index >= maxNeighbors) continue;
+    neighbors.splice(index, 0, { sample, distanceSq });
+    if (neighbors.length > maxNeighbors) neighbors.pop();
+  }
   const exact = neighbors.find((entry) => entry.distanceSq <= 1e-18);
   if (exact) return exact.sample.value;
   let weighted = 0;

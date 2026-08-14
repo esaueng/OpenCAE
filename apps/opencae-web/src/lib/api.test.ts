@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { isStructuralResultSummary } from "@opencae/schema";
 import type { DisplayModel, Project, RunEvent, Study } from "@opencae/schema";
-import { addLoad, addSupport, assignMaterial, cancelRun, createProject, dynamicOutputFrameEstimate, generateMesh, geometryWithMeshPreset, getResults, importLocalProject, loadSampleProject, probeUploadedStepRepairAfterMeshFailure, renameProject, runSimulation, STEP_REPAIR_PROBE_MODEL_CHANGED_MESSAGE, STEP_REPAIR_UNAVAILABLE_MESSAGE, subscribeToRun, updateStudy, uploadedStepRepairProbeDecision, uploadModel, withFieldRunIds, withReportCaptures } from "./api";
+import { addLoad, addSupport, assignMaterial, cancelRun, createProject, dynamicOutputFrameEstimate, generateMesh, geometryWithMeshPreset, getResults, importLocalProject, loadSampleProject, renameProject, runSimulation, subscribeToRun, updateStudy, uploadModel, withFieldRunIds, withReportCaptures } from "./api";
 
 const TestFile = globalThis.File ?? class extends Blob {
   name: string;
@@ -89,26 +89,6 @@ endsolid tray
 `;
 
 const apiSource = readFileSync(resolve(__dirname, "api.ts"), "utf8");
-
-function uploadedStepProjectForRepairProbe(status: "solid" | "unchecked"): Project {
-  return {
-    ...project,
-    geometryFiles: [{
-      ...project.geometryFiles[0]!,
-      filename: "nominal-solid.step",
-      metadata: {
-        source: "local-upload",
-        embeddedModel: {
-          filename: "nominal-solid.step",
-          contentType: "model/step",
-          size: 4,
-          contentBase64: "U1RFUA=="
-        },
-        stepGeometry: { status }
-      }
-    }]
-  };
-}
 
 describe("api", () => {
   test("stamps completed fields with their owning run instead of preserving stale ids", () => {
@@ -544,20 +524,27 @@ describe("api", () => {
     vi.stubGlobal("fetch", fetchMock);
     class FailingStepWorker {
       private listeners = new Map<string, (event: MessageEvent | ErrorEvent) => void>();
+      onmessage: ((event: MessageEvent) => void) | null = null;
 
       addEventListener(type: string, listener: (event: MessageEvent | ErrorEvent) => void) {
         this.listeners.set(type, listener);
       }
 
-      postMessage(request: { id: string; operation: string }) {
-        queueMicrotask(() => this.listeners.get("message")?.({
-          data: {
-            id: request.id,
-            operation: request.operation,
-            ok: false,
-            error: { name: "StepGeometryError", message: "STEP geometry has open surfaces." }
-          }
-        } as MessageEvent));
+      postMessage(request: { id: string | number; operation?: string }) {
+        queueMicrotask(() => {
+          const event = {
+            data: typeof request.id === "number"
+              ? { id: request.id, ok: false, message: "STEP display import failed." }
+              : {
+                  id: request.id,
+                  operation: request.operation,
+                  ok: false,
+                  error: { name: "StepGeometryError", message: "STEP geometry has open surfaces." }
+                }
+          } as MessageEvent;
+          if (typeof request.id === "number") this.onmessage?.(event);
+          else this.listeners.get("message")?.(event);
+        });
       }
 
       terminate() {}
@@ -578,137 +565,6 @@ describe("api", () => {
 
     expect(fetchMock).not.toHaveBeenCalled();
     expect(progress.some((message) => message.includes("Falling back to preset estimates"))).toBe(false);
-  });
-
-  test("force-probes a nominal STEP solid after meshing fails and stores an unrepairable result", async () => {
-    const workerRequests: Array<{ payload: { probeRepairEvenIfSolid?: boolean } }> = [];
-    class InspectingStepWorker {
-      private listeners = new Map<string, (event: MessageEvent | ErrorEvent) => void>();
-
-      addEventListener(type: string, listener: (event: MessageEvent | ErrorEvent) => void) {
-        this.listeners.set(type, listener);
-      }
-
-      postMessage(request: { id: string; operation: string; payload: { probeRepairEvenIfSolid?: boolean } }) {
-        workerRequests.push(request);
-        queueMicrotask(() => this.listeners.get("message")?.({
-          data: {
-            id: request.id,
-            operation: request.operation,
-            ok: true,
-            result: {
-              inspection: {
-                status: "solid",
-                volumeCount: 1,
-                surfaceCount: 428,
-                orphanSurfaceCount: 0,
-                openBoundaryCurveCount: 8,
-                surfaceMeshValid: true,
-                repairable: false
-              },
-              repairProbe: "failed"
-            }
-          }
-        } as MessageEvent));
-      }
-
-      terminate() {}
-    }
-    vi.stubGlobal("Worker", InspectingStepWorker);
-    const nominalStepProject = uploadedStepProjectForRepairProbe("solid");
-
-    const result = await probeUploadedStepRepairAfterMeshFailure(nominalStepProject, { isCurrent: () => true });
-
-    expect(workerRequests[0]?.payload.probeRepairEvenIfSolid).toBe(true);
-    expect(result?.stepGeometry).toMatchObject({
-      status: "unrepairable",
-      message: STEP_REPAIR_UNAVAILABLE_MESSAGE
-    });
-    expect(result?.project.geometryFiles[0]?.metadata.stepGeometry).toMatchObject({
-      status: "unrepairable",
-      message: STEP_REPAIR_UNAVAILABLE_MESSAGE
-    });
-  });
-
-  test("keeps the repair probe eligible after project metadata changes without replacing the STEP model", () => {
-    const sourceProject = uploadedStepProjectForRepairProbe("solid");
-    const savedProject = {
-      ...sourceProject,
-      name: "Renamed while meshing",
-      updatedAt: "2026-07-10T13:30:58.000Z"
-    };
-
-    const decision = uploadedStepRepairProbeDecision(sourceProject, savedProject);
-
-    expect(decision.shouldProbe).toBe(true);
-    if (decision.shouldProbe) expect(decision.project).toBe(savedProject);
-  });
-
-  test("rejects the repair probe when the embedded STEP model changed", () => {
-    const sourceProject = uploadedStepProjectForRepairProbe("solid");
-    const replacedProject: Project = {
-      ...sourceProject,
-      geometryFiles: sourceProject.geometryFiles.map((geometry) => ({
-        ...geometry,
-        metadata: {
-          ...geometry.metadata,
-          embeddedModel: {
-            filename: "replacement.step",
-            contentType: "model/step",
-            size: 7,
-            contentBase64: "TkVXU1RFUA=="
-          }
-        }
-      }))
-    };
-
-    expect(uploadedStepRepairProbeDecision(sourceProject, replacedProject)).toEqual({
-      shouldProbe: false,
-      reason: STEP_REPAIR_PROBE_MODEL_CHANGED_MESSAGE
-    });
-  });
-
-  test("discards a forced STEP repair probe when the workspace generation changes", async () => {
-    let current = true;
-    class SupersededProbeWorker {
-      private listeners = new Map<string, (event: MessageEvent | ErrorEvent) => void>();
-
-      addEventListener(type: string, listener: (event: MessageEvent | ErrorEvent) => void) {
-        this.listeners.set(type, listener);
-      }
-
-      postMessage(request: { id: string; operation: string }) {
-        queueMicrotask(() => {
-          current = false;
-          this.listeners.get("message")?.({
-            data: {
-              id: request.id,
-              operation: request.operation,
-              ok: true,
-              result: {
-                inspection: {
-                  status: "solid",
-                  volumeCount: 1,
-                  surfaceCount: 428,
-                  orphanSurfaceCount: 0,
-                  openBoundaryCurveCount: 8,
-                  surfaceMeshValid: true,
-                  repairable: true
-                },
-                repairProbe: "succeeded"
-              }
-            }
-          } as MessageEvent);
-        });
-      }
-
-      terminate() {}
-    }
-    vi.stubGlobal("Worker", SupersededProbeWorker);
-
-    await expect(probeUploadedStepRepairAfterMeshFailure(uploadedStepProjectForRepairProbe("solid"), {
-      isCurrent: () => current
-    })).rejects.toMatchObject({ name: "AbortError" });
   });
 
   test("runs explicit OpenCAE Core Local static solves without local estimate fallback", async () => {

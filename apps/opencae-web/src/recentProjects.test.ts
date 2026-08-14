@@ -50,6 +50,14 @@ describe("recent projects", () => {
     expect(await service.list()).toEqual([]);
   });
 
+  test("bounds names loaded from persistent recent-project storage", async () => {
+    const storedHandle = handle("x".repeat(400));
+    const persistence = memoryPersistence([{ id: "id", filename: "f".repeat(400), projectName: "p".repeat(10_000), lastOpenedAt: 1, handle: storedHandle }]);
+    const [entry] = await createRecentProjectService(persistence).list();
+    expect(entry?.filename).toHaveLength(255);
+    expect(entry?.projectName).toHaveLength(128);
+  });
+
   test("requests read permission only when opening and reports denial or stale handles", async () => {
     const deniedHandle = handle("denied.json");
     deniedHandle.queryPermission = vi.fn(async (): Promise<PermissionState> => "prompt");

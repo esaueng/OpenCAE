@@ -13,10 +13,8 @@ export function boundedTimeStepSeconds(timeStepSeconds: number): number {
 }
 
 export function timeComparisonToleranceSeconds(...timeValuesSeconds: number[]): number {
-  let scaleSeconds = 0;
-  for (const value of timeValuesSeconds) {
-    if (Number.isFinite(value)) scaleSeconds = Math.max(scaleSeconds, Math.abs(value));
-  }
+  const finite = timeValuesSeconds.filter(Number.isFinite);
+  const scaleSeconds = finite.length > 1 ? Math.max(...finite) - Math.min(...finite) : Math.abs(finite[0] ?? 0);
   return Math.max(
     TIME_INTEGRATION_POLICY.eventAbsoluteToleranceSeconds,
     TIME_INTEGRATION_POLICY.eventEpsilonMultiplier * Number.EPSILON * scaleSeconds

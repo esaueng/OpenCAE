@@ -16,6 +16,7 @@ import { computeTet4SignedVolume, connectedComponents, nodesPerElement } from ".
 const COMPONENTS = new Set(["x", "y", "z"]);
 const ELEMENT_TYPES = new Set(["Tet4", "Tet10"]);
 const DYNAMIC_PROFILES = new Set(["step", "ramp", "quasi_static", "half_sine", "sinusoidal"]);
+export const MAX_CORE_MODEL_ELEMENTS = 500_000;
 
 export function validateModelJson(input: unknown): ValidationReport {
   const errors: ValidationIssue[] = [];
@@ -301,6 +302,12 @@ function validateElementBlocks(
 
     const elementType = block.type as ElementType;
     const nodesPer = nodesPerElement(elementType);
+    const blockElementCount = Math.floor(block.connectivity.length / nodesPer);
+    if (totalElements + blockElementCount > MAX_CORE_MODEL_ELEMENTS) {
+      errors.push(issue("element-limit-exceeded", `Model exceeds the ${MAX_CORE_MODEL_ELEMENTS.toLocaleString()}-element solver limit.`, `${path}.connectivity`));
+      connectivityOk = false;
+      return;
+    }
     if (block.connectivity.length % nodesPer !== 0) {
       errors.push(
         issue(
@@ -344,7 +351,7 @@ function validateElementBlocks(
       }
     }
 
-    totalElements += Math.floor(block.connectivity.length / nodesPer);
+    totalElements += blockElementCount;
     blocks.push({
       name: isNonEmptyString(block.name) ? block.name : `block-${blockIndex}`,
       type: elementType,
@@ -435,9 +442,12 @@ function validateSurfaceFacets(
         validateSurfaceFacetMatchesOwnerFace(facet.nodes, ownerFace.nodes, `${path}.nodes`, errors);
       }
     }
-    if (!Array.isArray(facet.nodes) || facet.nodes.length < 3) {
-      errors.push(issue("invalid-surface-facet-nodes", "Surface facet nodes must contain at least three nodes.", `${path}.nodes`));
+    if (!Array.isArray(facet.nodes) || (facet.nodes.length !== 3 && facet.nodes.length !== 6)) {
+      errors.push(issue("invalid-surface-facet-nodes", "Surface facet nodes must contain exactly three or six nodes.", `${path}.nodes`));
     } else {
+      if (new Set(facet.nodes).size !== facet.nodes.length) {
+        errors.push(issue("duplicate-surface-facet-node", "Surface facet nodes must be unique.", `${path}.nodes`));
+      }
       facet.nodes.forEach((node, nodeIndex) => {
         if (!Number.isInteger(node)) {
           errors.push(issue("surface-facet-node-not-integer", "Surface facet node indices must be integers.", `${path}.nodes[${nodeIndex}]`));

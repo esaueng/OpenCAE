@@ -30,6 +30,7 @@ import {
   readStepFileForDisplay,
   stepDisplayCacheKey
 } from "./stepDisplayTessellation";
+import { readStepFileInDisplayWorker } from "./workers/stepDisplayWorkerClient";
 
 export type StepFaceRecord = {
   /** Stable per-import id, global across meshes: "step-face-<k>". */
@@ -104,6 +105,12 @@ export function isStepFaceId(value: string | null | undefined): value is string 
  * so meshIndex still lines up with the viewer's preview children.
  */
 export function buildStepFaceRegistry(meshes: OcctMesh[]): StepFaceRegistry {
+  const positionComponents = meshes.reduce((total, mesh) => total + (mesh.attributes?.position?.array?.length ?? 0), 0);
+  const indexCount = meshes.reduce((total, mesh) => total + (mesh.index?.array?.length ?? 0), 0);
+  const faceCount = meshes.reduce((total, mesh) => total + (mesh.brep_faces?.length ?? 0), 0);
+  if (positionComponents > 3_000_000 || indexCount > 3_000_000 || faceCount > 20_000) {
+    throw new Error("STEP face registry exceeds the browser selection limit.");
+  }
   const registryMeshes: StepFaceRegistryMesh[] = meshes.map((mesh) => ({
     positions: Float32Array.from(mesh.attributes?.position?.array ?? []),
     indices: Uint32Array.from(mesh.index?.array ?? []),
@@ -510,12 +517,13 @@ export function peekStepFaceRegistryForBase64(contentBase64: string): StepFaceRe
 }
 
 async function importStepRegistry(contentBase64: string): Promise<StepFaceRegistry> {
-  const { getOcctImporter } = await import("./stepPreview");
-  const importer = await getOcctImporter();
+  const bytes = base64ToUint8Array(contentBase64);
   // Keep picking/highlight triangle ranges aligned with the detailed viewport
   // tessellation. A different profile here would make the B-rep face registry
   // point at triangles that do not exist in the rendered mesh.
-  const result = readStepFileForDisplay(importer, base64ToUint8Array(contentBase64));
+  const result = typeof Worker === "undefined"
+    ? readStepFileForDisplay(await (await import("./stepPreview")).getOcctImporter(), bytes)
+    : await readStepFileInDisplayWorker(bytes);
   if (!result.success) {
     throw new Error(`STEP face registry import failed${result.errorCode ? ` (${result.errorCode})` : ""}.`);
   }

@@ -50,8 +50,6 @@ export type MeshWorkerPayloads = {
     stepContent: ArrayBuffer;
     /** Retain the generated 2D mesh when the caller needs a preview fallback. */
     includeSurfacePreview?: boolean;
-    /** Trial-run explicit repair even when ordinary inspection finds a nominal solid. */
-    probeRepairEvenIfSolid?: boolean;
   };
   repairStepFile: {
     /** UTF-8 encoded STEP file content (transferable). */
@@ -123,8 +121,6 @@ export type MeshWorkerResults = {
     inspection: StepGeometryInspection;
     /** Surface tessellation retained from topology inspection for preview fallback. */
     surfacePreview?: StepSurfacePreview;
-    /** Present when the worker actually trial-ran the Fix open surfaces operation. */
-    repairProbe?: "succeeded" | "failed";
   };
   repairStepFile: {
     stepContent: Uint8Array;
@@ -221,10 +217,6 @@ export function normalizeMeshWorkerError(error: unknown): MeshWorkerError {
     name: "Error",
     message: typeof error === "string" ? error : "Mesh worker operation failed."
   };
-}
-
-export function shouldProbeStepRepair(inspection: StepGeometryInspection, probeRepairEvenIfSolid = false): boolean {
-  return inspection.status === "open_shell" || (probeRepairEvenIfSolid && inspection.status === "solid");
 }
 
 export function packCoreVolumeMeshArtifact(artifact: CoreVolumeMeshArtifact): PackedCoreVolumeMeshArtifact {

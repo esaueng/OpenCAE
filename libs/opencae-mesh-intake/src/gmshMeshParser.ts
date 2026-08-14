@@ -21,6 +21,10 @@ type ParsedElement = {
   nodes: number[];
 };
 
+const MAX_GMSH_TEXT_CHARACTERS = 64 * 1024 * 1024;
+const MAX_GMSH_NODES = 500_000;
+const MAX_GMSH_ELEMENTS = 2_000_000;
+
 export type ParseOptions = {
   units?: "mm" | "m";
   sourceSelectionRefs?: Record<string, SourceSelectionMetadata>;
@@ -54,6 +58,7 @@ export class CoreCloudMeshingError extends Error {
 }
 
 export function parseGmshMeshToCoreVolumeMesh(meshFile: string, options: ParseOptions = {}): CoreVolumeMeshArtifact {
+  if (meshFile.length > MAX_GMSH_TEXT_CHARACTERS) throw new CoreCloudMeshingError("mesh-too-large", "Gmsh mesh exceeds the 64 MiB parser limit");
   const sections = gmshSections(meshFile);
   const physicalNames = parsePhysicalNames(sections.get("PhysicalNames") ?? []);
   const nodes = parseNodes(sections.get("Nodes") ?? [], options.units ?? "m");
@@ -201,6 +206,7 @@ function parsePhysicalNames(lines: string[]): GmshPhysicalName[] {
 function parseNodes(lines: string[], units: "mm" | "m"): Map<number, [number, number, number]> {
   const scale = units === "mm" ? 0.001 : 1;
   const count = Number.parseInt(lines[0] ?? "0", 10);
+  if (!Number.isInteger(count) || count < 0 || count > MAX_GMSH_NODES) throw new CoreCloudMeshingError("node-limit-exceeded", "Gmsh mesh exceeds the 500,000-node parser limit");
   const nodes = new Map<number, [number, number, number]>();
   for (const line of lines.slice(1, count + 1)) {
     const parts = line.split(/\s+/);
@@ -218,6 +224,7 @@ function parseNodes(lines: string[], units: "mm" | "m"): Map<number, [number, nu
 
 function parseElements(lines: string[]): ParsedElement[] {
   const count = Number.parseInt(lines[0] ?? "0", 10);
+  if (!Number.isInteger(count) || count < 0 || count > MAX_GMSH_ELEMENTS) throw new CoreCloudMeshingError("element-limit-exceeded", "Gmsh mesh exceeds the 2,000,000-record parser limit");
   const elements: ParsedElement[] = [];
   for (const line of lines.slice(1, count + 1)) {
     const parts = line.split(/\s+/).map((part) => Number.parseInt(part, 10));

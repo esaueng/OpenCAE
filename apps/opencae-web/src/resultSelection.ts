@@ -143,13 +143,19 @@ function derivedStressField(source: ResultField, component: StressComponent): Re
   const cached = byComponent.get(component);
   if (cached) return cached;
   const values = deriveStressScalars(source.tensorValues ?? [], component);
+  let min = Number.POSITIVE_INFINITY;
+  let max = Number.NEGATIVE_INFINITY;
+  for (const value of values) {
+    if (value < min) min = value;
+    if (value > max) max = value;
+  }
   const derived: ResultField = {
     ...source,
     id: `${source.id}-${component}`,
     component,
     values,
-    min: Math.min(...values),
-    max: Math.max(...values),
+    min: min <= max ? min : 0,
+    max: min <= max ? max : 0,
     ...(source.samples?.length === values.length
       ? { samples: source.samples.map((sample, index) => ({ ...sample, value: values[index] ?? sample.value })) }
       : { samples: undefined })

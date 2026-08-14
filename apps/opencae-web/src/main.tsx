@@ -18,10 +18,10 @@ registerOfflineCaching();
 // - ?stepSelectionProof=1 is a dev-only regression for real-browser STEP
 //   wall/top picking and support/load identity across display LODs.
 // - ?solveBench=1 runs the 100k-DOF solve benchmark.
-if (import.meta.env.VITE_WASM_MESHING !== "0") {
+if (import.meta.env.DEV && import.meta.env.VITE_WASM_MESHING !== "0") {
   const debugParams = new URLSearchParams(window.location.search);
   if (debugParams.has("meshProof")) void import("./workers/meshHarness");
-  if (import.meta.env.DEV && debugParams.has("stepSelectionProof")) void import("./workers/stepSelectionHarness");
+  if (debugParams.has("stepSelectionProof")) void import("./workers/stepSelectionHarness");
   if (debugParams.has("solveBench")) void import("./workers/solveBenchHarness");
 }
 

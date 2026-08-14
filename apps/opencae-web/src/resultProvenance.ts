@@ -40,6 +40,7 @@ export function hasUnavailableReactionDiagnostic(summary: ResultSummary | undefi
 
 export function canShowReverseLoadCapacity(summary: ResultSummary, displayModel: DisplayModel, fields: ResultField[], study: Study): boolean {
   if (!isStructuralResultSummary(summary)) return false;
+  if (summary.provenance?.kind !== "opencae_core_fea" || summary.provenance.resultSource !== "computed") return false;
   if (shouldBlockPreviewResultsForDisplayModel(displayModel, summary, fields, study)) return false;
   if (hasInvalidReactionForce(summary, study)) return false;
   if (hasUnavailableReactionDiagnostic(summary)) return false;

@@ -1474,7 +1474,7 @@ function MeshPanel({ project, displayModel, study, onGenerateMesh, onConnections
   const [preset, setPreset] = useState<MeshQuality>(study.meshSettings.preset);
   const meshing = Boolean(meshPhaseProgress);
   const meshSummary = study.meshSettings.summary;
-  const hasPresetOnlyMeshSummary = meshSummary?.source === "preset_estimate";
+  const hasVerifiedMeshSummary = meshSummary?.source === "core_solver" || meshSummary?.source === "wasm_gmsh";
   const stepGeometry = stepGeometryMetadataForProject(project);
   const stepGeometryResolvedByMesh = Boolean(study.meshSettings.summary?.artifacts?.actualCoreModel);
   const staticStudy = study.type === "static_stress" ? study : null;
@@ -1595,15 +1595,15 @@ function MeshPanel({ project, displayModel, study, onGenerateMesh, onConnections
       <Callout>{capitalize(preset)} creates a {meshPresetDescription(preset)}.</Callout>
       {meshSummary && (
         <div className="summary-box">
-          {hasPresetOnlyMeshSummary ? (
-            <>
-              <Info label="Nodes" value="Reported after solve" />
-              <Info label="Elements" value="Reported after solve" />
-            </>
-          ) : (
+          {hasVerifiedMeshSummary ? (
             <>
               <Info label="Nodes" value={meshSummary.nodes.toLocaleString()} />
               <Info label="Elements" value={meshSummary.elements.toLocaleString()} />
+            </>
+          ) : (
+            <>
+              <Info label="Nodes" value="Reported after solve" />
+              <Info label="Elements" value="Reported after solve" />
             </>
           )}
           <Info label="Analysis samples" value={(meshSummary.analysisSampleCount ?? 0).toLocaleString()} />
@@ -2400,7 +2400,7 @@ function ResultsPanelContent({
   const [draftScaleMax, setDraftScaleMax] = useState(() => String(resultColorScaleControl?.displayMax ?? 1));
   const stressExaggerationCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const committedStressExaggerationRef = useRef(stressExaggeration);
-  const assessment = resultSummary.failureAssessment ?? assessResultFailure(resultSummary);
+  const assessment = assessResultFailure(resultSummary);
   const loadCapacity = estimateAllowableLoadForSafetyFactor(resultSummary, targetSafetyFactor);
   const loadCapacityAtOne = estimateAllowableLoadForSafetyFactor(resultSummary, 1);
   const blockPreviewResults = shouldBlockPreviewResultsForDisplayModel(displayModel, resultSummary, resultFields, study);

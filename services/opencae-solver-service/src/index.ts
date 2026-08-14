@@ -216,7 +216,7 @@ export type LocalSolveOptions = AnalysisMesh | BeamDemoSolveOptions;
 
 export function solveStudy(study: Study, runId: string, optionsInput?: LocalSolveOptions) {
   const options = normalizeLocalSolveOptions(optionsInput);
-  if (isBeamDemoStudy(study)) return solveBeamDemoStudy(study, runId, options);
+  if (options.trustedBeamDemo === true && isBeamDemoStudy(study)) return solveBeamDemoStudy(study, runId, options);
   return solveHeuristicSurfaceStudy(study, runId, options);
 }
 

@@ -502,12 +502,13 @@ export function uploadedDisplayModelFor(filename: string, contentBase64?: string
     ? stlDimensionsFromBase64(contentBase64) ?? { x: 96, y: 48, z: 32, units: "mm" as const }
     : undefined;
   if (nativeFormat) {
+    const faces = options.stepDisplayFaces ?? [];
     return {
       id: "display-uploaded",
-      name: `${modelName} imported body`,
-      bodyCount: 1,
+      name: faces.length ? `${modelName} imported body` : `${modelName} uploaded model`,
+      bodyCount: faces.length ? 1 : 0,
       dimensions,
-      faces: options.stepDisplayFaces?.length ? options.stepDisplayFaces : uploadedBoxFaces(),
+      faces,
       nativeCad: {
         format: nativeFormat,
         filename,

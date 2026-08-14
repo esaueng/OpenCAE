@@ -1,4 +1,4 @@
-import { isModalResultSummary, isStructuralResultSummary } from "@opencae/schema";
+import { MAX_EMBEDDED_MODEL_BYTES, MAX_VISUAL_MESH_BYTES, isModalResultSummary, isStructuralResultSummary } from "@opencae/schema";
 import type { AnalysisMesh, CustomMaterial, DisplayModel, DynamicSolverSettings, MeshConvergenceRecord, MeshQuality, Project, ResultField, ResultRenderBounds, ResultSummary, RunEvent, RunVariantRef, RunVariantResult, Study, StudyRun } from "@opencae/schema";
 import type { StepGeometryInspection, StepGeometryRepairReport } from "@opencae/mesh-intake";
 import { assertCompatibleManufacturingProcess, resolveMaterial } from "@opencae/materials";
@@ -29,11 +29,7 @@ export type StepGeometryMetadata = {
   message?: string;
 };
 
-export const STEP_REPAIR_UNAVAILABLE_MESSAGE =
-  "Automatic repair cannot close this model. Re-export it from CAD as a solid body (stitch/heal in CAD; the gaps exceed the 0.05 mm in-app sew tolerance).";
-
-const STEP_REPAIR_AVAILABLE_MESSAGE =
-  "Automatic repair can re-close this model's faces. Use Fix open surfaces before simulation.";
+export const MAX_LOCAL_PROJECT_FILE_BYTES = 96 * 1024 * 1024;
 
 export type ModelMutationOptions = {
   signal?: AbortSignal;
@@ -48,6 +44,7 @@ export type SampleModelId = "bracket" | "plate" | "cantilever";
 export type SampleAnalysisType = "static_stress" | "dynamic_structural" | "modal_analysis" | "steady_state_thermal";
 
 export interface ResultsResponse {
+  owner?: { projectId: string; studyId: string };
   summary: ResultSummary;
   fields: ResultField[];
   variants?: RunVariantResult[];
@@ -271,6 +268,9 @@ export async function createProject(): Promise<SampleProjectResponse> {
 }
 
 export async function importLocalProject(file: File): Promise<SampleProjectResponse> {
+  if (file.size > MAX_LOCAL_PROJECT_FILE_BYTES) {
+    throw new Error("The selected OpenCAE project exceeds the 96 MiB local import limit.");
+  }
   const text = await file.text();
   let payload: unknown;
   try {
@@ -298,6 +298,11 @@ async function uploadModelWithGeometry(
   mutationOptions: ModelMutationOptions = {}
 ): Promise<SampleProjectResponse> {
   assertCurrentModelMutation(mutationOptions);
+  const extension = file.name.trim().split(".").pop()?.toLowerCase();
+  const uploadLimit = extension === "stl" || extension === "obj" ? MAX_VISUAL_MESH_BYTES : MAX_EMBEDDED_MODEL_BYTES;
+  if (file.size <= 0 || file.size > uploadLimit) {
+    throw new Error(`CAD and mesh uploads must be between 1 byte and ${uploadLimit / (1024 * 1024)} MiB for this format.`);
+  }
   const contentBase64 = await fileToBase64(file);
   assertCurrentModelMutation(mutationOptions);
   const embeddedModel: EmbeddedModelFile = {
@@ -371,8 +376,8 @@ async function inspectStepGeometryForUpload(filename: string, contentBase64: str
     const cached = peekStepSurfacePreview(contentBase64);
     if (cached) return stepGeometryMetadataFromInspection(cached.inspection);
     const client = await import("../workers/meshWorkerClient");
-    const { inspection, repairProbe } = await client.inspectStepFileInWorker({ stepContent: base64ToArrayBuffer(contentBase64) });
-    return stepGeometryMetadataFromInspection(inspection, repairProbe);
+    const { inspection } = await client.inspectStepFileInWorker({ stepContent: base64ToArrayBuffer(contentBase64) });
+    return stepGeometryMetadataFromInspection(inspection);
   } catch (error) {
     return {
       status: "unchecked",
@@ -382,84 +387,16 @@ async function inspectStepGeometryForUpload(filename: string, contentBase64: str
 }
 
 export function stepGeometryMetadataFromInspection(
-  inspection: StepGeometryInspection,
-  repairProbe?: "succeeded" | "failed"
+  inspection: StepGeometryInspection
 ): StepGeometryMetadata {
-  const status: StepGeometryMetadata["status"] = repairProbe === "succeeded" || inspection.repairable
+  const status: StepGeometryMetadata["status"] = inspection.repairable || inspection.status === "open_shell"
     ? "repairable"
-    : repairProbe === "failed"
-      ? "unrepairable"
-      : inspection.status === "solid"
-        ? "solid"
-        : inspection.status === "invalid"
-          ? "invalid"
-          : "unrepairable";
+    : inspection.status === "solid"
+      ? "solid"
+      : inspection.status === "invalid"
+        ? "invalid"
+        : "unrepairable";
   return { status, inspection, ...(inspection.message ? { message: inspection.message } : {}) };
-}
-
-/**
- * A nominal solid can still fail during 3D meshing. Trial-run the exact repair
- * behind Fix open surfaces and persist only its repairability result onto the
- * current uploaded model; the original STEP bytes remain untouched.
- */
-export async function probeUploadedStepRepairAfterMeshFailure(
-  currentProject: Project,
-  mutationOptions: ModelMutationOptions = {}
-): Promise<{ project: Project; stepGeometry: StepGeometryMetadata } | null> {
-  assertCurrentModelMutation(mutationOptions);
-  const embeddedModel = embeddedStepModel(currentProject);
-  if (!embeddedModel) return null;
-  const currentStatus = uploadedStepGeometryStatus(currentProject) ?? "unchecked";
-  if (currentStatus !== "solid" && currentStatus !== "unchecked") return null;
-  if (import.meta.env.VITE_WASM_MESHING === "0" || typeof Worker === "undefined") {
-    throw new Error("STEP repairability checking is unavailable in this browser build.");
-  }
-  const client = await import("../workers/meshWorkerClient");
-  assertCurrentModelMutation(mutationOptions);
-  const { inspection, repairProbe } = await client.inspectStepFileInWorker({
-    stepContent: base64ToArrayBuffer(embeddedModel.contentBase64),
-    probeRepairEvenIfSolid: true
-  });
-  assertCurrentModelMutation(mutationOptions);
-  const mapped = stepGeometryMetadataFromInspection(inspection, repairProbe);
-  const stepGeometry: StepGeometryMetadata = mapped.status === "repairable"
-    ? { ...mapped, message: STEP_REPAIR_AVAILABLE_MESSAGE }
-    : { ...mapped, status: "unrepairable", message: STEP_REPAIR_UNAVAILABLE_MESSAGE };
-  return {
-    project: attachStepGeometryMetadata(currentProject, embeddedModel.filename, stepGeometry),
-    stepGeometry
-  };
-}
-
-export function isStepGeometryMeshFailure(error: unknown): boolean {
-  return error instanceof Error && (
-    error.name === "StepGeometryError" ||
-    error.name === "StepGeometryRepairLostVolume"
-  );
-}
-
-export const STEP_REPAIR_PROBE_MODEL_CHANGED_MESSAGE =
-  "Skipped the Fix open surfaces check because the model changed during meshing.";
-
-/** Project metadata may change during a long mesh; only STEP byte identity matters for a follow-up probe. */
-export function uploadedStepRepairProbeDecision<CurrentProject extends Pick<Project, "id" | "geometryFiles">>(
-  sourceProject: Pick<Project, "id" | "geometryFiles"> | null | undefined,
-  currentProject: CurrentProject | null | undefined
-): { shouldProbe: true; project: CurrentProject } | { shouldProbe: false; reason: string } {
-  if (!sourceProject || !currentProject || sourceProject.id !== currentProject.id) {
-    return { shouldProbe: false, reason: STEP_REPAIR_PROBE_MODEL_CHANGED_MESSAGE };
-  }
-  const sourceModel = embeddedStepModel(sourceProject);
-  const currentModel = embeddedStepModel(currentProject);
-  const sameModel = Boolean(
-    sourceModel &&
-    currentModel &&
-    sourceModel.size === currentModel.size &&
-    sourceModel.contentBase64 === currentModel.contentBase64
-  );
-  return sameModel
-    ? { shouldProbe: true, project: currentProject }
-    : { shouldProbe: false, reason: STEP_REPAIR_PROBE_MODEL_CHANGED_MESSAGE };
 }
 
 function attachStepGeometryMetadata(project: Project, filename: string, stepGeometry: StepGeometryMetadata): Project {
@@ -475,14 +412,6 @@ function attachStepGeometryMetadata(project: Project, filename: string, stepGeom
         : geometry
     )
   };
-}
-
-function uploadedStepGeometryStatus(project: Project): StepGeometryMetadata["status"] | undefined {
-  const geometry = project.geometryFiles.find((candidate) => candidate.metadata.source === "local-upload");
-  const value = geometry?.metadata.stepGeometry;
-  if (!value || typeof value !== "object") return undefined;
-  const status = (value as Partial<StepGeometryMetadata>).status;
-  return status;
 }
 
 function stepGeometryUploadNotice(stepGeometry: StepGeometryMetadata | undefined): string {
@@ -757,19 +686,19 @@ function studyWithLocalBackend(study: Study): Study {
   return { ...study, solverSettings: { ...study.solverSettings, backend: "opencae_core_local" } };
 }
 
-export async function getResults(runId: string): Promise<ResultsResponse> {
+export async function getResults(runId: string, expectedOwner?: ResultsResponse["owner"]): Promise<ResultsResponse> {
   const localResults = localResultsByRunId.get(runId);
-  if (localResults) return localResults;
+  if (localResults) return resultsForOwner(localResults, expectedOwner);
   // Local run ids never exist server-side; restore from the browser store
   // (post-reload) or fail with a clear reason instead of a confusing 404.
-  if (runId.startsWith("run-local-")) return restoreLocalRunResults(runId);
+  if (runId.startsWith("run-local-")) return restoreLocalRunResults(runId, expectedOwner);
   // Historical cloud runs (pre-B4a autosaves): the client cloud path is gone,
   // so never fetch the dead endpoints — fail with an honest explanation.
   if (runId.startsWith(HISTORICAL_CLOUD_RUN_ID_PREFIX)) throw new Error(HISTORICAL_CLOUD_RUN_MESSAGE);
   throw new Error("Results for this run are not available in browser storage. Re-run the simulation locally.");
 }
 
-async function restoreLocalRunResults(runId: string): Promise<ResultsResponse> {
+async function restoreLocalRunResults(runId: string, expectedOwner?: ResultsResponse["owner"]): Promise<ResultsResponse> {
   let stored: ResultsResponse | null;
   try {
     stored = await loadLocalRunResults<ResultsResponse>(runId);
@@ -777,8 +706,16 @@ async function restoreLocalRunResults(runId: string): Promise<ResultsResponse> {
     throw new Error(`Local results for this run could not be restored: ${messageFromUnknownError(error) || "browser storage unavailable."}`);
   }
   if (!stored) throw new Error("Results for this local run are no longer available in this browser (storage cleared or run pruned). Re-run the simulation.");
-  const results = withFieldRunIds(runId, stored);
+  const results = resultsForOwner(withFieldRunIds(runId, stored), expectedOwner);
   setCappedRunEntry(localResultsByRunId, runId, results);
+  return results;
+}
+
+function resultsForOwner(results: ResultsResponse, expectedOwner?: ResultsResponse["owner"]): ResultsResponse {
+  if (!expectedOwner) return results;
+  if (results.owner?.projectId !== expectedOwner.projectId || results.owner.studyId !== expectedOwner.studyId) {
+    throw new Error("Stored results belong to a different project or analysis. Re-run the simulation for the current project.");
+  }
   return results;
 }
 
@@ -1039,7 +976,10 @@ function runSimulationLocally(study: Study, displayModel?: DisplayModel, options
     await Promise.all(variantWrites);
     if (record.status !== "running") return;
     emitLocalRunEvent(record, { type: "progress", progress: 92, message: "Writing OpenCAE Core result fields." });
-    let stampedResults = withFieldRunIds(runId, result as ResultsResponse);
+    let stampedResults: ResultsResponse = {
+      ...withFieldRunIds(runId, result as ResultsResponse),
+      owner: { projectId: solveStudy.projectId, studyId: solveStudy.id }
+    };
     if (variantPersistenceWarning) {
       stampedResults = {
         ...stampedResults,
