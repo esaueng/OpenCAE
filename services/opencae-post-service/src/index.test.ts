@@ -87,7 +87,7 @@ describe("LocalReportProvider", () => {
     expect(html).toContain("exceeds the assigned material yield limit");
   });
 
-  test("escapes and whitelists the assessment status against script injection", () => {
+  test("recomputes the assessment instead of trusting imported display text", () => {
     const html = buildHtmlReport("run-a", {
       ...summary(500),
       failureAssessment: {
@@ -99,8 +99,8 @@ describe("LocalReportProvider", () => {
 
     expect(html).not.toContain("<script>alert(1)</script>");
     expect(html).not.toContain('class="assessment "><script>');
-    expect(html).toContain('class="assessment unknown"');
-    expect(html).toContain("Injected &lt;title&gt;");
+    expect(html).toContain('class="assessment pass"');
+    expect(html).not.toContain("Injected &lt;title&gt;");
   });
 
   test("positions the stress marker by safety-factor utilization", () => {

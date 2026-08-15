@@ -145,7 +145,7 @@ const DESKTOP_PLAYBACK_BUDGET_BYTES = 192 * 1024 * 1024;
 const CONSTRAINED_PLAYBACK_BUDGET_BYTES = 64 * 1024 * 1024;
 const CONSTRAINED_DEVICE_MEMORY_GB = 4;
 const PRESENTATION_FPS_CANDIDATES = [60, 30, 24] as const;
-const ESTIMATE_OVERHEAD_MULTIPLIER = 1.25;
+const ESTIMATE_OVERHEAD_MULTIPLIER = 2.5;
 
 export function playbackMemoryBudgetBytes(deviceMemoryGb?: number): number {
   if (typeof deviceMemoryGb === "number" && Number.isFinite(deviceMemoryGb) && deviceMemoryGb <= CONSTRAINED_DEVICE_MEMORY_GB) {
@@ -766,12 +766,17 @@ function presentationFramePositions(frameIndexes: number[], playbackFps: number,
 }
 
 function estimatePreparedFrameBytes(fields: ResultField[], fallbackFrameIndex: number): number {
-  const fieldsForFrame = fields.filter((field) => (field.frameIndex ?? fallbackFrameIndex) === fallbackFrameIndex);
-  const visibleFields = fieldsForFrame.length ? fieldsForFrame : fields;
-  const valueCount = visibleFields.reduce((total, field) => total + field.values.length, 0);
-  const tensorCount = visibleFields.reduce((total, field) => total + (field.tensorValues?.length ?? 0), 0);
-  const sampleCount = visibleFields.reduce((total, field) => total + (field.samples?.length ?? 0), 0);
-  return Math.max(1, valueCount + tensorCount) * Float64Array.BYTES_PER_ELEMENT + sampleCount * 10 * Float32Array.BYTES_PER_ELEMENT;
+  const bytesByFrame = new Map<number, number>();
+  for (const field of fields) {
+    const frameIndex = field.frameIndex ?? fallbackFrameIndex;
+    const fieldBytes = (field.values.length + (field.tensorValues?.length ?? 0)) * Float64Array.BYTES_PER_ELEMENT
+      + (field.vectors?.length ?? 0) * 3 * Float64Array.BYTES_PER_ELEMENT
+      + (field.samples?.length ?? 0) * 10 * Float64Array.BYTES_PER_ELEMENT;
+    bytesByFrame.set(frameIndex, (bytesByFrame.get(frameIndex) ?? 0) + fieldBytes);
+  }
+  let maxBytes = 1;
+  for (const bytes of bytesByFrame.values()) maxBytes = Math.max(maxBytes, bytes);
+  return maxBytes;
 }
 
 function estimateTotalBytes(perFrameBytes: number, frameCount: number): number {

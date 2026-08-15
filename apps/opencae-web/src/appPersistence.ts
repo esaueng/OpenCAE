@@ -1,12 +1,20 @@
 import {
+  DisplayModelSchema,
+  MAX_RESULT_FIELDS,
+  MAX_RESULT_VARIANTS,
   ProjectSchema,
   ResultFieldSchema,
   RunVariantRefSchema,
   RunVariantResultSchema,
   ResultSummarySchema,
-  type DisplayFace,
+  assessResultFailure,
+  isStructuralResultSummary,
   type DisplayModel,
-  type Project
+  type Project,
+  type ResultField,
+  type ResultProvenance,
+  type ResultSummary,
+  type RunVariantResult
 } from "@opencae/schema";
 import { BRACKET_GEOMETRY_MIGRATION_NOTE, refreshBracketSampleGeometry } from "./bracketGeometryMigration";
 import { buildLocalProjectFile, type EmbeddedModelFile, type LocalProjectFile, type LocalResultBundle } from "./projectFile";
@@ -23,6 +31,11 @@ import type { SectionPlaneState } from "./workspaceViewTypes";
 export { AUTOSAVE_STORAGE_KEY, AUTOSAVE_UI_STORAGE_KEY } from "./autosaveStorage";
 export type { ThemeMode } from "./workspaceViewTypes";
 export const WORKSPACE_LOG_LIMIT = 100;
+const MAX_IMPORTED_RESULT_NUMBERS = 8_000_000;
+const MAX_IMPORTED_SURFACE_NODES = 500_000;
+const MAX_IMPORTED_SURFACE_TRIANGLES = 1_000_000;
+const MAX_REPORT_CAPTURE_DATA_URL_LENGTH = 8 * 1024 * 1024;
+const IMPORTED_RESULT_DIAGNOSTIC_ID = "imported-result-provenance-unverified";
 
 export interface WorkspaceUiSnapshot {
   activeStep: StepId;
@@ -360,14 +373,22 @@ function parseProjectFile(value: unknown): LocalProjectFile | null {
 export function parseResultBundle(value: unknown): LocalResultBundle | undefined {
   if (!isRecord(value)) return undefined;
   const summary = ResultSummarySchema.safeParse(value.summary);
-  const fields = ResultFieldSchema.array().safeParse(value.fields);
+  const fields = ResultFieldSchema.array().max(MAX_RESULT_FIELDS).safeParse(value.fields);
   const surfaceMesh = parseSolverSurfaceMesh(value.surfaceMesh);
   const solverMeshSummary = parseSolverMeshSummary(value.solverMeshSummary);
   const reportCaptures = parseResultViewCaptures(value.reportCaptures);
-  const variants = RunVariantResultSchema.array().safeParse(value.variants);
-  const variantRefs = RunVariantRefSchema.array().safeParse(value.variantRefs);
+  const variants = RunVariantResultSchema.array().max(MAX_RESULT_VARIANTS).safeParse(value.variants);
+  const variantRefs = RunVariantRefSchema.array().max(MAX_RESULT_VARIANTS).safeParse(value.variantRefs);
   if (!summary.success || !fields.success || fields.data.length === 0) return undefined;
-  const parsedVariants = variants.success ? variants.data : [];
+  const normalizedFields = fields.data.map(normalizeImportedResultField);
+  const parsedVariants = variants.success
+    ? variants.data.map((variant) => ({
+        ...variant,
+        summary: normalizeImportedResultSummary(variant.summary),
+        fields: variant.fields.map(normalizeImportedResultField)
+      }))
+    : [];
+  if (importedResultNumericCount(normalizedFields, parsedVariants) > MAX_IMPORTED_RESULT_NUMBERS) return undefined;
   const explicitVariantRefs = variantRefs.success ? variantRefs.data : [];
   const requestedActiveVariantId = typeof value.activeVariantId === "string" ? value.activeVariantId : undefined;
   const activeExplicitRef = explicitVariantRefs.find((reference) => reference.id === requestedActiveVariantId) ?? explicitVariantRefs[0];
@@ -382,16 +403,16 @@ export function parseResultBundle(value: unknown): LocalResultBundle | undefined
           kind: activeExplicitRef.kind,
           ...(activeExplicitRef.caseId ? { caseId: activeExplicitRef.caseId } : {}),
           ...(activeExplicitRef.combinationId ? { combinationId: activeExplicitRef.combinationId } : {}),
-          summary: summary.data,
-          fields: fields.data.map((field) => ({ ...field, variantId: field.variantId ?? activeExplicitRef.id }))
+          summary: normalizeImportedResultSummary(summary.data),
+          fields: normalizedFields.map((field) => ({ ...field, variantId: field.variantId ?? activeExplicitRef.id }))
         }
         : {
           id: "case:default",
           name: "Default",
           kind: "case" as const,
           caseId: "case-default",
-          summary: summary.data,
-          fields: fields.data.map((field) => ({ ...field, variantId: field.variantId ?? "case:default" }))
+          summary: normalizeImportedResultSummary(summary.data),
+          fields: normalizedFields.map((field) => ({ ...field, variantId: field.variantId ?? "case:default" }))
         }];
   const parsedVariantRefs = explicitVariantRefs.length
     ? explicitVariantRefs
@@ -402,8 +423,8 @@ export function parseResultBundle(value: unknown): LocalResultBundle | undefined
   return {
     activeRunId: typeof value.activeRunId === "string" ? value.activeRunId : undefined,
     completedRunId: typeof value.completedRunId === "string" ? value.completedRunId : undefined,
-    summary: summary.data,
-    fields: fields.data,
+    summary: normalizeImportedResultSummary(summary.data),
+    fields: normalizedFields,
     ...(structuralVariants.length ? { variants: structuralVariants } : {}),
     ...(parsedVariantRefs.length ? { variantRefs: parsedVariantRefs } : {}),
     ...(activeVariantId ? { activeVariantId } : {}),
@@ -413,10 +434,77 @@ export function parseResultBundle(value: unknown): LocalResultBundle | undefined
   };
 }
 
+function normalizeImportedResultSummary(summary: ResultSummary): ResultSummary {
+  const diagnostics = summary.diagnostics?.some((diagnostic) => diagnostic.id === IMPORTED_RESULT_DIAGNOSTIC_ID)
+    ? summary.diagnostics
+    : [...(summary.diagnostics ?? []), {
+        id: IMPORTED_RESULT_DIAGNOSTIC_ID,
+        severity: "warning" as const,
+        source: "validation" as const,
+        message: "Imported result provenance is unverified. Re-run the study before using it for engineering decisions.",
+        suggestedActions: ["Re-run the study locally"]
+      }];
+  const normalized = {
+    ...summary,
+    resultTier: "imported_legacy" as const,
+    provenance: importedResultProvenance(summary.provenance),
+    diagnostics
+  };
+  return isStructuralResultSummary(summary)
+    ? { ...normalized, failureAssessment: assessResultFailure(summary) }
+    : normalized;
+}
+
+function normalizeImportedResultField(field: ResultField): ResultField {
+  let min = Number.POSITIVE_INFINITY;
+  let max = Number.NEGATIVE_INFINITY;
+  const consider = (value: number) => {
+    if (value < min) min = value;
+    if (value > max) max = value;
+  };
+  for (const value of field.values) consider(value);
+  for (const sample of field.samples ?? []) consider(sample.value);
+  return {
+    ...field,
+    ...(min <= max ? { min, max } : {}),
+    provenance: importedResultProvenance(field.provenance)
+  };
+}
+
+function importedResultProvenance(original: ResultProvenance | undefined): ResultProvenance {
+  return {
+    kind: "local_estimate",
+    solver: "imported-project",
+    meshSource: "unknown",
+    resultSource: "generated",
+    units: original?.units ?? "unknown"
+  };
+}
+
+function importedResultNumericCount(fields: ResultField[], variants: RunVariantResult[]): number {
+  let count = 0;
+  const addFields = (items: ResultField[]) => {
+    for (const field of items) {
+      count += field.values.length;
+      count += field.tensorValues?.length ?? 0;
+      count += (field.vectors?.length ?? 0) * 3;
+      count += (field.samples?.length ?? 0) * 10;
+      if (count > MAX_IMPORTED_RESULT_NUMBERS) return;
+    }
+  };
+  addFields(fields);
+  for (const variant of variants) {
+    addFields(variant.fields);
+    if (count > MAX_IMPORTED_RESULT_NUMBERS) break;
+  }
+  return count;
+}
+
 function parseResultViewCaptures(value: unknown): LocalResultBundle["reportCaptures"] | undefined {
   if (!isRecord(value)) return undefined;
+  const isBoundedPng = (png: unknown): png is string => isBoundedPngDataUri(png);
   const parseCapture = (capture: unknown): CapturedResultView | undefined => {
-    if (!isRecord(capture) || typeof capture.png !== "string" || !capture.png.startsWith("data:image/png;base64,")) return undefined;
+    if (!isRecord(capture) || !isBoundedPng(capture.png)) return undefined;
     if (typeof capture.fieldId !== "string" || (capture.selection !== "peak" && capture.selection !== "static")) return undefined;
     return {
       png: capture.png,
@@ -428,7 +516,7 @@ function parseResultViewCaptures(value: unknown): LocalResultBundle["reportCaptu
   };
   const stress = parseCapture(value.stress);
   const displacement = parseCapture(value.displacement);
-  const boundary = isRecord(value.boundary) && typeof value.boundary.png === "string" && value.boundary.png.startsWith("data:image/png;base64,")
+  const boundary = isRecord(value.boundary) && isBoundedPng(value.boundary.png)
     ? {
         png: value.boundary.png,
         ...(typeof value.boundary.revision === "number" && Number.isInteger(value.boundary.revision) ? { revision: value.boundary.revision } : {})
@@ -437,6 +525,22 @@ function parseResultViewCaptures(value: unknown): LocalResultBundle["reportCaptu
   return stress || displacement || boundary
     ? { ...(stress ? { stress } : {}), ...(displacement ? { displacement } : {}), ...(boundary ? { boundary } : {}) }
     : undefined;
+}
+
+function isBoundedPngDataUri(value: unknown): value is string {
+  if (typeof value !== "string" || value.length > MAX_REPORT_CAPTURE_DATA_URL_LENGTH || !value.startsWith("data:image/png;base64,")) return false;
+  const encoded = value.slice("data:image/png;base64,".length);
+  if (!/^[A-Za-z0-9+/]+={0,2}$/u.test(encoded) || encoded.length % 4 !== 0) return false;
+  try {
+    const header = globalThis.atob(encoded.slice(0, 32));
+    if (header.length < 24 || header.slice(0, 8) !== "\x89PNG\r\n\x1a\n" || header.slice(12, 16) !== "IHDR") return false;
+    const dimension = (offset: number) => ((header.charCodeAt(offset) << 24) | (header.charCodeAt(offset + 1) << 16) | (header.charCodeAt(offset + 2) << 8) | header.charCodeAt(offset + 3)) >>> 0;
+    const width = dimension(16);
+    const height = dimension(20);
+    return width > 0 && height > 0 && width <= 8_192 && height <= 8_192 && width * height <= 16_000_000;
+  } catch {
+    return false;
+  }
 }
 
 function parseSolverMeshSummary(value: unknown): LocalResultBundle["solverMeshSummary"] | undefined {
@@ -455,6 +559,7 @@ function parseSolverSurfaceMesh(value: unknown): LocalResultBundle["surfaceMesh"
   if (!isRecord(value)) return undefined;
   if (typeof value.id !== "string") return undefined;
   if (!Array.isArray(value.nodes) || !Array.isArray(value.triangles)) return undefined;
+  if (value.nodes.length > MAX_IMPORTED_SURFACE_NODES || value.triangles.length > MAX_IMPORTED_SURFACE_TRIANGLES) return undefined;
   const nodes = value.nodes.filter(isVector3);
   const triangles = value.triangles.filter((triangle): triangle is [number, number, number] =>
     Array.isArray(triangle) &&
@@ -462,6 +567,8 @@ function parseSolverSurfaceMesh(value: unknown): LocalResultBundle["surfaceMesh"
     triangle.every((node) => Number.isInteger(node) && node >= 0)
   );
   if (nodes.length !== value.nodes.length || triangles.length !== value.triangles.length) return undefined;
+  if (triangles.some((triangle) => triangle.some((node) => node >= nodes.length))) return undefined;
+  if (Array.isArray(value.nodeMap) && value.nodeMap.some((node) => !Number.isInteger(node) || node < 0 || node >= nodes.length)) return undefined;
   return {
     id: value.id,
     nodes,
@@ -551,22 +658,8 @@ function normalizeUiRunState(ui: WorkspaceUiSnapshot): WorkspaceUiSnapshot {
 }
 
 export function parseDisplayModel(value: unknown): DisplayModel | null {
-  if (!isRecord(value)) return null;
-  if (typeof value.id !== "string" || typeof value.name !== "string" || typeof value.bodyCount !== "number" || !Array.isArray(value.faces)) return null;
-  if (!value.faces.every(isDisplayFace)) return null;
-  return value as unknown as DisplayModel;
-}
-
-function isDisplayFace(value: unknown): value is DisplayFace {
-  if (!isRecord(value)) return false;
-  return (
-    typeof value.id === "string" &&
-    typeof value.label === "string" &&
-    typeof value.color === "string" &&
-    typeof value.stressValue === "number" &&
-    isVector3(value.center) &&
-    isVector3(value.normal)
-  );
+  const parsed = DisplayModelSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
 }
 
 function parseLogEntries(value: unknown): WorkspaceLogEntry[] {

@@ -2704,7 +2704,7 @@ describe("CadViewer result coloring", () => {
     });
   });
 
-  test("keeps split meshes for the same payload-loaded object solid grey", () => {
+  test("matches payload meshes only by stable object id, not duplicate labels", () => {
     const simulatedGeometry = new THREE.BufferGeometry();
     simulatedGeometry.setAttribute("position", new THREE.Float32BufferAttribute([-0.2, 0, 0, 0, 0, 0, 0.2, 0, 0], 3));
     const simulatedMesh = new THREE.Mesh(simulatedGeometry, new THREE.MeshStandardMaterial({ color: "#63a9e5" }));
@@ -2746,8 +2746,7 @@ describe("CadViewer result coloring", () => {
 
     expect((selectedPayloadMesh.material as THREE.MeshStandardMaterial).vertexColors).toBe(false);
     expect((selectedPayloadMesh.material as THREE.MeshStandardMaterial).color.getHexString()).toBe("8f9aa5");
-    expect((siblingPayloadMesh.material as THREE.MeshStandardMaterial).vertexColors).toBe(false);
-    expect((siblingPayloadMesh.material as THREE.MeshStandardMaterial).color.getHexString()).toBe("8f9aa5");
+    expect((siblingPayloadMesh.material as THREE.MeshStandardMaterial).vertexColors).toBe(true);
     expect((simulatedMesh.material as THREE.MeshStandardMaterial).vertexColors).toBe(true);
   });
 });

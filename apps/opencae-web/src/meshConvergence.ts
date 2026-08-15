@@ -252,13 +252,11 @@ function convergenceMetrics(
   const coordinateScales = stableDefaultPoint ? [1] : [1, 0.001, 1000];
   const nearest = nearestSurfaceTriangle(seedPoint, surfaceMesh, coordinateScales);
   if (!nearest) throw new Error("Displacement probe could not be mapped because the solver-surface mesh has no valid triangles.");
-  const mapped = probe.source === "primary_load"
+  const mapped = nearest.distance <= nearest.tolerance + Number.EPSILON * Math.max(1, nearest.tolerance)
     ? nearest
-    : nearest.distance <= nearest.tolerance + Number.EPSILON * Math.max(1, nearest.tolerance)
-      ? nearest
-      : null;
+    : null;
   if (!mapped) {
-    throw new Error(`Explicit displacement probe is ${formatDistance(nearest.distance)} from the nearest solver-surface triangle; allowed tolerance is ${formatDistance(nearest.tolerance)}.`);
+    throw new Error(`Displacement probe is ${formatDistance(nearest.distance)} from the nearest solver-surface triangle; allowed tolerance is ${formatDistance(nearest.tolerance)}.`);
   }
   const displacement = fields.find((field) => field.type === "displacement"
     && field.location === "node"

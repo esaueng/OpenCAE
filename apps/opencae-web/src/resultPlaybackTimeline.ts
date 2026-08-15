@@ -17,6 +17,8 @@ export interface AdvancePlaybackTimelineOptions {
   state: PlaybackTimelineState;
 }
 
+const normalizedFrameIndexCache = new WeakMap<number[], number[]>();
+
 export function playbackOrdinalForSolverFramePosition(frameIndexes: number[], framePosition: number): number {
   const frames = normalizedFrameIndexes(frameIndexes);
   if (!frames.length || frames.length === 1) return 0;
@@ -126,8 +128,12 @@ export function boundedPlaybackOrdinalDelta(elapsedMs: number, frameDurationMs: 
 }
 
 function normalizedFrameIndexes(frameIndexes: number[]): number[] {
-  return [...new Set(frameIndexes.filter(Number.isFinite).map((frameIndex) => Math.floor(frameIndex)))]
+  const cached = normalizedFrameIndexCache.get(frameIndexes);
+  if (cached) return cached;
+  const normalized = [...new Set(frameIndexes.filter(Number.isFinite).map((frameIndex) => Math.floor(frameIndex)))]
     .sort((left, right) => left - right);
+  normalizedFrameIndexCache.set(frameIndexes, normalized);
+  return normalized;
 }
 
 function clamp01(value: number): number {
