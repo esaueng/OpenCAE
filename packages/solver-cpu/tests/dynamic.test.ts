@@ -39,6 +39,8 @@ describe("time integration tolerance policy", () => {
     expect(timeValuesMatch(0.1 + 5e-13, 0.1)).toBe(true);
     expect(timeIsBeforeTarget(0.1 - 2e-12, 0.1)).toBe(true);
     expect(timeHasReachedTarget(0.1 - 5e-13, 0.1)).toBe(true);
+    expect(timeComparisonToleranceSeconds(1e12, 1e12 + 0.01)).toBeLessThan(0.01);
+    expect(timeIsBeforeTarget(1e12, 1e12 + 0.01)).toBe(true);
   });
 });
 

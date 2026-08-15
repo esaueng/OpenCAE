@@ -11,6 +11,7 @@ import { assertCompatibleManufacturingProcess, resolveMaterial } from "@opencae/
 import { buildHtmlReport, buildPdfReport, LocalReportProvider, reportPdfKeyFor } from "@opencae/post-service";
 import { solveDynamicStudy } from "@opencae/solver-service";
 import {
+  DisplayModelSchema,
   ProjectSchema,
   ResultFieldSchema,
   ResultSummarySchema,
@@ -51,7 +52,7 @@ import {
 } from "./projectFactory";
 
 export const API_LISTEN_HOST = process.env.OPENCAE_API_HOST ?? "127.0.0.1";
-export const MAX_LOCAL_PROJECT_IMPORT_BYTES = 256 * 1024 * 1024;
+export const MAX_LOCAL_PROJECT_IMPORT_BYTES = 32 * 1024 * 1024;
 
 const allowedCorsOrigins = new Set([
   "http://localhost:5173",
@@ -901,18 +902,8 @@ async function displayModelForProject(project: Project): Promise<DisplayModel> {
 }
 
 function parseDisplayModel(value: unknown): DisplayModel | undefined {
-  if (!value || typeof value !== "object") return undefined;
-  const candidate = value as Partial<DisplayModel>;
-  if (
-    typeof candidate.id === "string" &&
-    typeof candidate.name === "string" &&
-    typeof candidate.bodyCount === "number" &&
-    Array.isArray(candidate.faces) &&
-    candidate.faces.every(isDisplayFace)
-  ) {
-    return candidate as DisplayModel;
-  }
-  return undefined;
+  const parsed = DisplayModelSchema.safeParse(value);
+  return parsed.success ? parsed.data : undefined;
 }
 
 type UploadModelMutation = {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CoreCloudResultProvenanceSchema, CustomMaterialSchema, DynamicSolverSettingsSchema, MaterialSchema, MeshConvergenceRecordSchema, ProjectSchema, ResultFieldSchema, ResultSummarySchema, RunEventSchema, RunVariantResultSchema, SolverBackendSchema, StudyRunSchema, classifyResultProvenance, runStatusForResultProvenance } from "./index";
+import { CoreCloudResultProvenanceSchema, CustomMaterialSchema, DisplayModelSchema, DynamicSolverSettingsSchema, MAX_LOAD_COMBINATIONS, MAX_PROJECT_NAME_LENGTH, MaterialSchema, MeshConvergenceRecordSchema, ProjectSchema, ResultFieldSchema, ResultSummarySchema, RunEventSchema, RunVariantResultSchema, SolverBackendSchema, StudyRunSchema, classifyResultProvenance, runStatusForResultProvenance } from "./index";
 
 describe("ProjectSchema", () => {
   it("accepts the minimum local project shape", () => {
@@ -814,6 +814,84 @@ describe("ProjectSchema", () => {
       provenance,
       samples: [{ point: [100, 15, 10], normal: [0, 0, 1], value: 0.0014, vector: [0, 0, -0.0014], nodeId: "N2", source: "opencae_core" }]
     }).samples?.[0]?.vector).toEqual([0, 0, -0.0014]);
+  });
+
+  it("rejects persistently oversized project names", () => {
+    expect(ProjectSchema.safeParse({
+      id: "project-test",
+      name: "x".repeat(MAX_PROJECT_NAME_LENGTH + 1),
+      schemaVersion: "0.1.0",
+      unitSystem: "SI",
+      geometryFiles: [],
+      studies: [],
+      createdAt: "2026-04-24T12:00:00.000Z",
+      updatedAt: "2026-04-24T12:00:00.000Z"
+    }).success).toBe(false);
+  });
+
+  it("rejects unbounded structural load combinations", () => {
+    const base = {
+      id: "study-1",
+      projectId: "project-test",
+      name: "Static",
+      type: "static_stress",
+      geometryScope: [],
+      materialAssignments: [],
+      namedSelections: [],
+      contacts: [],
+      constraints: [],
+      loads: [],
+      meshSettings: { preset: "medium", status: "not_started" },
+      solverSettings: {},
+      validation: [],
+      runs: [],
+      loadCases: [{ id: "case-1", name: "Default", enabled: true, loadIds: [] }],
+      loadCombinations: Array.from({ length: MAX_LOAD_COMBINATIONS + 1 }, (_, index) => ({
+        id: `combination-${index}`,
+        name: `Combination ${index}`,
+        enabled: true,
+        factors: [{ caseId: "case-1", factor: 1 }]
+      }))
+    };
+    expect(() => ProjectSchema.parse({
+      id: "project-test",
+      name: "Test",
+      schemaVersion: "0.1.0",
+      unitSystem: "SI",
+      geometryFiles: [],
+      studies: [base],
+      createdAt: "2026-04-24T12:00:00.000Z",
+      updatedAt: "2026-04-24T12:00:00.000Z"
+    })).toThrow();
+  });
+});
+
+describe("DisplayModelSchema", () => {
+  const valid = {
+    id: "display-1",
+    name: "Bracket",
+    bodyCount: 1,
+    faces: [{ id: "face-1", label: "Top", color: "#fff", center: [0, 0, 0], normal: [0, 1, 0], stressValue: 0 }]
+  };
+
+  it("accepts bounded finite display geometry", () => {
+    expect(DisplayModelSchema.parse(valid).faces).toHaveLength(1);
+  });
+
+  it.each([
+    { dimensions: { x: null, y: 1, z: 1, units: "mm" } },
+    { dimensions: { x: 1, y: 1, z: 1, units: "u".repeat(33) } },
+    { visualMesh: { format: "stl", filename: "bad.stl", contentBase64: "%%%=" } },
+    { coreCloudGeometry: { kind: "structured_block", sampleId: 1 } }
+  ])("rejects malformed imported optional geometry %#", (extra) => {
+    expect(DisplayModelSchema.safeParse({ ...valid, ...extra }).success).toBe(false);
+  });
+
+  it("rejects malformed cylindrical surface metadata", () => {
+    expect(DisplayModelSchema.safeParse({
+      ...valid,
+      faces: [{ ...valid.faces[0], surfaceType: "cylindrical", surfaceAxis: {} }]
+    }).success).toBe(false);
   });
 });
 

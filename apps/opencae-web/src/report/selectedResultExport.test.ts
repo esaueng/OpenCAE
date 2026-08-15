@@ -101,6 +101,12 @@ function numericDataArray(xml: string, name: string): number[] {
 }
 
 describe("selected-state raw result export", () => {
+  test("neutralizes spreadsheet formulas in imported metadata", () => {
+    const csv = text(buildSelectedResultExport(input({ variant: { id: "case-a", name: "=2+2" } }), "csv"));
+    expect(csv).toContain("# variant_name,'=2+2");
+    expect(csv).not.toContain("# variant_name,=2+2");
+  });
+
   test("selects only the active variant and dynamic frame", () => {
     expect(selectedCanonicalResultFields(input()).map((field) => field.id)).toEqual([
       "displacement-surface",

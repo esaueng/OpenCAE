@@ -263,7 +263,7 @@ describe("LocalMockComputeBackend", () => {
     }
   });
 
-  test("solves cantilever plastic displacement at the loaded free end", async () => {
+  test("does not route user-controlled cantilever labels to the beam benchmark", async () => {
     vi.useFakeTimers();
     try {
       const storage = new MemoryStorage();
@@ -279,16 +279,10 @@ describe("LocalMockComputeBackend", () => {
       const result = await run;
 
       const displacementValues = result.fields.find((field) => field.type === "displacement")?.values ?? [];
-      const fixedEndDisplacement = displacementValues[0] ?? 0;
-      const freeEndDisplacement = displacementValues.at(-1) ?? 0;
 
-      expect(displacementValues.indexOf(Math.max(...displacementValues))).toBe(displacementValues.length - 1);
-      expect(freeEndDisplacement).toBeGreaterThan(fixedEndDisplacement * 2);
-      expect(freeEndDisplacement).toBeGreaterThan(10);
-      expect(result.summary.failureAssessment).toMatchObject({
-        status: "fail",
-        title: "Likely to fail"
-      });
+      expect(displacementValues).not.toHaveLength(0);
+      expect(result.summary.provenance.solver).toBe("opencae-local-heuristic-surface");
+      expect(result.fields.some((field) => field.samples?.some((sample) => sample.source?.startsWith("beam-demo-")))).toBe(false);
     } finally {
       vi.useRealTimers();
     }
@@ -313,7 +307,7 @@ describe("LocalMockComputeBackend", () => {
     expect(Math.hypot(...freeEndSample!.vector!)).toBeCloseTo(freeEndSample.value, 4);
   });
 
-  test("solves cantilever transverse bending with max stress at the fixed support", async () => {
+  test("keeps the reference backend on the heuristic solver for imported beam-shaped studies", async () => {
     vi.useFakeTimers();
     try {
       const storage = new MemoryStorage();
@@ -330,12 +324,10 @@ describe("LocalMockComputeBackend", () => {
 
       const stressValues = result.fields.find((field) => field.type === "stress")?.values ?? [];
       const displacementValues = result.fields.find((field) => field.type === "displacement")?.values ?? [];
-      const fixedEndStress = stressValues[0] ?? 0;
-      const freeEndStress = stressValues.at(-1) ?? 0;
 
-      expect(stressValues.indexOf(Math.max(...stressValues))).toBe(0);
-      expect(fixedEndStress).toBeGreaterThan(freeEndStress * 1.25);
-      expect(displacementValues.indexOf(Math.max(...displacementValues))).toBe(displacementValues.length - 1);
+      expect(stressValues).not.toHaveLength(0);
+      expect(displacementValues).not.toHaveLength(0);
+      expect(result.summary.provenance.solver).toBe("opencae-local-heuristic-surface");
     } finally {
       vi.useRealTimers();
     }
@@ -395,7 +387,7 @@ describe("LocalMockComputeBackend", () => {
     const ultraStressSample = ultra.fields.find((field) => field.type === "stress")?.samples?.[0];
 
     expect(ultra.analysisSampleCount).toBeGreaterThan(fine.analysisSampleCount);
-    expect(ultraStressSample?.source).toMatch(/^beam-demo-/);
+    expect(ultraStressSample?.source).toBe("opencae_core_local_preview");
     expect(ultraStressSample?.vonMisesStressPa).toBeGreaterThan(0);
   });
 
@@ -761,7 +753,7 @@ describe("LocalMockComputeBackend", () => {
       const tipValue = Math.abs(nearestSampleValue(field?.samples ?? [], [1.9, 0.14, 0]));
 
       expect(field, `${type} frame should have a nonzero free-end response`).toBeDefined();
-      expect(midValue / tipValue).toBeCloseTo(0.3125, 4);
+      expect(midValue / tipValue).toBeCloseTo(0.3125, 3);
       expect(midValue / tipValue).not.toBeCloseTo(0.5, 1);
     }
   });

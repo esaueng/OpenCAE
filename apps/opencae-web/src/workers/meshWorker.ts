@@ -6,7 +6,6 @@ import type { MeshAttemptContext } from "@opencae/mesh-intake";
 import {
   normalizeMeshWorkerError,
   packCoreVolumeMeshArtifact,
-  shouldProbeStepRepair,
   transferablesForMeshWorkerResult,
   type MeshWorkerPhase,
   type MeshWorkerRequest,
@@ -93,25 +92,7 @@ async function runOperation(request: MeshWorkerRequest, reportPhase: (phase: Mes
     const inspected = request.payload.includeSurfacePreview
       ? await intake.inspectStepGeometryWithPreview(stepContent)
       : { inspection: await intake.inspectStepGeometry(stepContent) };
-    const { inspection, surfacePreview } = inspected;
-    if (!shouldProbeStepRepair(inspection, request.payload.probeRepairEvenIfSolid)) return inspected;
-    // Do not infer repairability from face/edge counts. Prove it with the same
-    // explicit repair operation the Fix model button will run, then discard
-    // the trial bytes; the original upload remains untouched.
-    try {
-      await intake.repairStepGeometry(stepContent);
-      return {
-        inspection: { ...inspection, repairable: true },
-        ...(surfacePreview ? { surfacePreview } : {}),
-        repairProbe: "succeeded" as const
-      };
-    } catch {
-      return {
-        inspection: { ...inspection, repairable: false },
-        ...(surfacePreview ? { surfacePreview } : {}),
-        repairProbe: "failed" as const
-      };
-    }
+    return inspected;
   }
 
   if (request.operation === "repairStepFile") {

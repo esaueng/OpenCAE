@@ -91,11 +91,16 @@ async function handleProjectBackup(request: Request, env: Env, backupId: string)
       return backupJson({ error: "Encrypted cloud backups must be between 13 bytes and 95 MiB. Save this project to a local file instead." }, 413);
     }
     if (!request.body) return backupJson({ error: "Cloud backup body is missing." }, 400);
+    const tokenHash = await sha256Hex(token);
+    const existing = await env.PROJECT_BACKUPS.head(key);
+    if (existing && !constantTimeEqual(existing.customMetadata?.tokenHash ?? "", tokenHash)) {
+      return backupJson({ error: "Cloud backup authorization failed." }, 403);
+    }
     const expiresAt = new Date(Date.now() + PROJECT_BACKUP_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString();
     await env.PROJECT_BACKUPS.put(key, request.body, {
       httpMetadata: { contentType: "application/octet-stream" },
       customMetadata: {
-        tokenHash: await sha256Hex(token),
+        tokenHash,
         expiresAt,
         runId: sanitizeMetadata(request.headers.get("x-opencae-run-id"))
       }

@@ -56,4 +56,15 @@ describe("self-contained result viewer", () => {
   test("creates a filesystem-safe filename", () => {
     expect(suggestedResultHtmlFilename("  Payload Bracket #4  ")).toBe("payload-bracket-4-results.html");
   });
+
+  test("rejects unit markup before generating the offline viewer", () => {
+    expect(() => buildResultViewerHtml({
+      project: bracketDemoProject,
+      study: bracketDemoProject.studies[0]!,
+      displayModel: bracketDisplayModel,
+      summary: { ...summary, maxStressUnits: "</strong><svg onload=alert(1)>" },
+      fields,
+      surfaceMesh: { id: "surface", nodes: [[0, 0, 0], [1, 0, 0], [0, 1, 0]], triangles: [[0, 1, 2]], coordinateSpace: "model-mm" }
+    })).toThrow("unsafe HTML characters");
+  });
 });

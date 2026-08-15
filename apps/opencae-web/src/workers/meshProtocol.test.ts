@@ -3,7 +3,6 @@ import { describe, expect, test } from "vitest";
 import {
   createMeshWorkerRequest,
   normalizeMeshWorkerError,
-  shouldProbeStepRepair,
   transferablesForMeshWorkerRequest,
   transferablesForMeshWorkerResult
 } from "./meshProtocol";
@@ -34,15 +33,6 @@ describe("mesh worker protocol", () => {
     })).toEqual([positions.buffer, indices.buffer]);
   });
 
-  test("carries the forced solid-repair probe flag to the worker", () => {
-    const request = createMeshWorkerRequest("inspectStepFile", {
-      stepContent: new ArrayBuffer(16),
-      probeRepairEvenIfSolid: true
-    });
-
-    expect(request.payload.probeRepairEvenIfSolid).toBe(true);
-  });
-
   test("carries the opt-in surface-preview retention flag to the worker", () => {
     const request = createMeshWorkerRequest("inspectStepFile", {
       stepContent: new ArrayBuffer(16),
@@ -50,22 +40,6 @@ describe("mesh worker protocol", () => {
     });
 
     expect(request.payload.includeSurfacePreview).toBe(true);
-  });
-
-  test("only probes nominal solids when the caller explicitly requests it", () => {
-    const inspection = {
-      status: "solid" as const,
-      volumeCount: 1,
-      surfaceCount: 6,
-      orphanSurfaceCount: 0,
-      openBoundaryCurveCount: 2,
-      surfaceMeshValid: true,
-      repairable: false
-    };
-
-    expect(shouldProbeStepRepair(inspection)).toBe(false);
-    expect(shouldProbeStepRepair(inspection, true)).toBe(true);
-    expect(shouldProbeStepRepair({ ...inspection, status: "invalid" }, true)).toBe(false);
   });
 
   test("preserves StepGeometryError names across the worker boundary", () => {

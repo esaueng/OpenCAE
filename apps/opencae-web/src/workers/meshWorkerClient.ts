@@ -31,6 +31,7 @@ type PendingRequest<Operation extends MeshWorkerOperation = MeshWorkerOperation>
   resolve: (result: MeshWorkerResults[Operation]) => void;
   reject: (error: Error) => void;
   onProgress?: MeshProgressListener;
+  timeoutId: ReturnType<typeof globalThis.setTimeout>;
 };
 
 let workerInstance: Worker | null = null;
@@ -85,11 +86,14 @@ export async function postMeshWorkerRequest<Operation extends MeshWorkerOperatio
   }
   const request = createMeshWorkerRequest(operation, payload);
   return new Promise((resolve, reject) => {
-    pendingRequests.set(request.id, { operation, resolve, reject, onProgress } as PendingRequest);
+    const timeoutMs = operation === "inspectStepFile" ? 30_000 : operation === "repairStepFile" ? 120_000 : 180_000;
+    const timeoutId = globalThis.setTimeout(() => cancelMeshWork(`Mesh worker ${operation} exceeded its ${timeoutMs / 1000} second browser limit.`), timeoutMs);
+    pendingRequests.set(request.id, { operation, resolve, reject, onProgress, timeoutId } as PendingRequest);
     try {
       worker.postMessage(request, transferablesForMeshWorkerRequest(request));
     } catch (error) {
       pendingRequests.delete(request.id);
+      globalThis.clearTimeout(timeoutId);
       releaseMeshWorkerIfIdle();
       reject(workerClientError(error, "Could not send work to the mesh worker."));
     }
@@ -105,6 +109,7 @@ export function cancelMeshWork(reason = "Meshing was cancelled."): void {
   const error = new Error(reason);
   error.name = "AbortError";
   for (const pending of pendingRequests.values()) {
+    globalThis.clearTimeout(pending.timeoutId);
     pending.reject(error);
   }
   pendingRequests.clear();
@@ -131,6 +136,7 @@ function handleMeshWorkerMessage(event: MessageEvent<MeshWorkerResponse>) {
   const pending = pendingRequests.get(response.id);
   if (!pending) return;
   pendingRequests.delete(response.id);
+  globalThis.clearTimeout(pending.timeoutId);
   if (isMeshWorkerFailure(response)) {
     const error = new Error(response.error.message);
     // Preserve the error identity across the worker boundary so callers can
@@ -160,6 +166,7 @@ function releaseMeshWorkerIfIdle(): void {
 function handleMeshWorkerError(event: ErrorEvent) {
   const error = new Error(event.message || "Mesh worker failed.");
   for (const pending of pendingRequests.values()) {
+    globalThis.clearTimeout(pending.timeoutId);
     pending.reject(error);
   }
   pendingRequests.clear();
