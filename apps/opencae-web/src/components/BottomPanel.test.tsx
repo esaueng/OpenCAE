@@ -48,7 +48,7 @@ describe("BottomPanel", () => {
     expect(html).toContain('class="status-links"');
     expect(html).toContain('class="status-link"');
     expect(html).toContain('href="https://form.esauengineering.com/opencae-feedback"');
-    expect(html).toContain('href="https://ko-fi.com/petergn"');
+    expect(html).toContain('href="https://ko-fi.com/esau"');
     expect(html).toContain('href="https://github.com/esaueng/OpenCAE"');
     expect(html).toContain(">feedback</a>");
     expect(textContent(html)).toContain("Buy me a coffee");
@@ -57,9 +57,9 @@ describe("BottomPanel", () => {
     expect(html).toContain('href="https://esauengineering.com/"');
     expect(html).toContain("Built by Esau Engineering");
     expect(html.indexOf("Results ready")).toBeLessThan(html.indexOf("Built by Esau Engineering"));
-    expect(html.indexOf("Built by Esau Engineering")).toBeLessThan(html.indexOf('href="https://ko-fi.com/petergn"'));
-    expect(html.indexOf('href="https://ko-fi.com/petergn"')).toBeLessThan(html.indexOf('href="https://form.esauengineering.com/opencae-feedback"'));
-    expect(html.indexOf('href="https://ko-fi.com/petergn"')).toBeLessThan(html.indexOf('href="https://github.com/esaueng/OpenCAE"'));
+    expect(html.indexOf("Built by Esau Engineering")).toBeLessThan(html.indexOf('href="https://ko-fi.com/esau"'));
+    expect(html.indexOf('href="https://ko-fi.com/esau"')).toBeLessThan(html.indexOf('href="https://form.esauengineering.com/opencae-feedback"'));
+    expect(html.indexOf('href="https://ko-fi.com/esau"')).toBeLessThan(html.indexOf('href="https://github.com/esaueng/OpenCAE"'));
   });
 
   test("renders decorative coffee animation elements and wave text without changing link copy", () => {
