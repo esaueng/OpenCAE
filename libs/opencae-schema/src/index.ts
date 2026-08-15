@@ -1,5 +1,24 @@
 import { z } from "zod";
 
+export const MAX_PROJECT_NAME_LENGTH = 128;
+export const MAX_LOAD_CASES = 64;
+export const MAX_LOAD_COMBINATIONS = 64;
+export const MAX_LOAD_COMBINATION_FACTORS = 64;
+export const MAX_DISPLAY_MODEL_FACES = 20_000;
+export const MAX_EMBEDDED_MODEL_BYTES = 32 * 1024 * 1024;
+export const MAX_VISUAL_MESH_BYTES = 8 * 1024 * 1024;
+export const MAX_RESULT_FIELD_VALUES = 500_000;
+export const MAX_RESULT_FIELD_SAMPLES = 50_000;
+export const MAX_RESULT_FIELDS = 8_192;
+export const MAX_RESULT_VARIANTS = 64;
+export const MAX_RESULT_UNIT_LENGTH = 32;
+
+const MAX_EMBEDDED_MODEL_BASE64_LENGTH = Math.ceil(MAX_EMBEDDED_MODEL_BYTES / 3) * 4;
+const MAX_VISUAL_MESH_BASE64_LENGTH = Math.ceil(MAX_VISUAL_MESH_BYTES / 3) * 4;
+const boundedId = z.string().min(1).max(256);
+const boundedLabel = z.string().max(512);
+const finiteNumber = z.number().finite();
+
 export const DiagnosticSchema = z.object({
   id: z.string(),
   severity: z.enum(["info", "warning", "error"]),
@@ -98,10 +117,10 @@ export const LoadSchema = z.object({
 });
 
 export const LoadCaseSchema = z.object({
-  id: z.string().min(1),
-  name: z.string().trim().min(1),
+  id: boundedId,
+  name: z.string().trim().min(1).max(128),
   enabled: z.boolean().default(true),
-  loadIds: z.array(z.string().min(1))
+  loadIds: z.array(boundedId).max(256)
 });
 
 export const LoadCombinationFactorSchema = z.object({
@@ -110,13 +129,13 @@ export const LoadCombinationFactorSchema = z.object({
 });
 
 export const LoadCombinationSchema = z.object({
-  id: z.string().min(1),
-  name: z.string().trim().min(1),
+  id: boundedId,
+  name: z.string().trim().min(1).max(128),
   enabled: z.boolean().default(true),
-  factors: z.array(LoadCombinationFactorSchema).min(1)
+  factors: z.array(LoadCombinationFactorSchema).min(1).max(MAX_LOAD_COMBINATION_FACTORS)
 });
 
-const Vec3Schema = z.tuple([z.number(), z.number(), z.number()]);
+const Vec3Schema = z.tuple([finiteNumber, finiteNumber, finiteNumber]);
 export const StudyAnalysisTypeSchema = z.enum(["static_stress", "dynamic_structural", "modal_analysis", "steady_state_thermal"]);
 export const MeshQualitySchema = z.enum(["coarse", "medium", "fine", "ultra"]);
 // "auto" means the user never made an explicit backend choice; the run router
@@ -174,12 +193,12 @@ export const AnalysisMeshSchema = z.object({
 export const ResultSampleSchema = z.object({
   point: Vec3Schema,
   normal: Vec3Schema,
-  value: z.number(),
+  value: finiteNumber,
   vector: Vec3Schema.optional(),
-  nodeId: z.string().optional(),
-  elementId: z.string().optional(),
-  source: z.string().optional(),
-  vonMisesStressPa: z.number().optional()
+  nodeId: boundedId.optional(),
+  elementId: boundedId.optional(),
+  source: boundedLabel.optional(),
+  vonMisesStressPa: finiteNumber.optional()
 });
 
 export const ResultProvenanceSchema = z.object({
@@ -228,30 +247,37 @@ const terminalRunResultStatuses = new Set(["complete", "complete_preview", "comp
 export const StressComponentSchema = z.enum(["von_mises", "principal_max", "principal_min", "max_shear"]);
 
 export const ResultFieldSchema = z.object({
-  id: z.string(),
-  runId: z.string(),
-  variantId: z.string().optional(),
+  id: boundedId,
+  runId: boundedId,
+  variantId: boundedId.optional(),
   type: z.enum(["stress", "displacement", "safety_factor", "velocity", "acceleration", "mode_shape", "temperature", "heat_flux"]),
   component: StressComponentSchema.optional(),
   location: z.enum(["node", "element", "face"]),
-  values: z.array(z.number()),
+  values: z.array(finiteNumber).max(MAX_RESULT_FIELD_VALUES),
   /** Flat symmetric tensors in [xx, yy, zz, xy, yz, xz] order, one per value. */
-  tensorValues: z.array(z.number()).optional(),
-  min: z.number(),
-  max: z.number(),
-  units: z.string(),
-  samples: z.array(ResultSampleSchema).optional(),
-  vectors: z.array(Vec3Schema).optional(),
-  surfaceMeshRef: z.string().optional(),
-  visualizationSource: z.string().optional(),
-  engineeringSource: z.string().optional(),
+  tensorValues: z.array(finiteNumber).max(MAX_RESULT_FIELD_VALUES * 6).optional(),
+  min: finiteNumber,
+  max: finiteNumber,
+  units: z.string().max(MAX_RESULT_UNIT_LENGTH),
+  samples: z.array(ResultSampleSchema).max(MAX_RESULT_FIELD_SAMPLES).optional(),
+  vectors: z.array(Vec3Schema).max(MAX_RESULT_FIELD_VALUES).optional(),
+  surfaceMeshRef: boundedId.optional(),
+  visualizationSource: boundedLabel.optional(),
+  engineeringSource: boundedLabel.optional(),
   frameIndex: z.number().int().min(0).optional(),
   timeSeconds: z.number().min(0).optional(),
   modeIndex: z.number().int().min(1).optional(),
-  frequencyHz: z.number().positive().optional(),
-  eigenvalue: z.number().positive().optional(),
-  scaledResidual: z.number().nonnegative().optional(),
+  frequencyHz: finiteNumber.positive().optional(),
+  eigenvalue: finiteNumber.positive().optional(),
+  scaledResidual: finiteNumber.nonnegative().optional(),
   provenance: ResultProvenanceSchema.optional()
+}).superRefine((field, context) => {
+  if (field.tensorValues !== undefined && (field.type !== "stress" || field.tensorValues.length !== field.values.length * 6)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["tensorValues"], message: "Stress tensors must contain six components per scalar value." });
+  }
+  if (field.vectors !== undefined && field.vectors.length !== field.values.length) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["vectors"], message: "Result vectors must align with scalar values." });
+  }
 });
 
 export const GeometryFileSchema = z.object({
@@ -348,13 +374,13 @@ const StudyBaseSchema = z.object({
   meshSettings: MeshSettingsSchema,
   validation: z.array(DiagnosticSchema).default([]),
   runs: z.array(StudyRunSchema).default([]),
-  loadCases: z.array(LoadCaseSchema).optional(),
-  loadCombinations: z.array(LoadCombinationSchema).optional()
+  loadCases: z.array(LoadCaseSchema).max(MAX_LOAD_CASES).optional(),
+  loadCombinations: z.array(LoadCombinationSchema).max(MAX_LOAD_COMBINATIONS).optional()
 });
 
 const StructuralVariantSchema = z.object({
-  loadCases: z.array(LoadCaseSchema).min(1).optional(),
-  loadCombinations: z.array(LoadCombinationSchema).optional()
+  loadCases: z.array(LoadCaseSchema).min(1).max(MAX_LOAD_CASES).optional(),
+  loadCombinations: z.array(LoadCombinationSchema).max(MAX_LOAD_COMBINATIONS).optional()
 });
 
 export const StaticStudySchema = StudyBaseSchema.merge(StructuralVariantSchema).extend({
@@ -625,8 +651,8 @@ export const MeshConvergenceRecordSchema = z.object({
 });
 
 export const ProjectSchema = z.object({
-  id: z.string(),
-  name: z.string(),
+  id: boundedId,
+  name: z.string().min(1).max(MAX_PROJECT_NAME_LENGTH),
   schemaVersion: z.string(),
   unitSystem: z.enum(["SI", "US"]),
   geometryFiles: z.array(GeometryFileSchema),
@@ -651,20 +677,20 @@ export const MeshSummarySchema = z.object({
 });
 
 export const StructuralResultSummarySchema = z.object({
-  maxStress: z.number(),
-  maxStressUnits: z.string(),
-  maxDisplacement: z.number(),
-  maxDisplacementUnits: z.string(),
-  safetyFactor: z.number(),
+  maxStress: finiteNumber,
+  maxStressUnits: z.string().max(MAX_RESULT_UNIT_LENGTH),
+  maxDisplacement: finiteNumber,
+  maxDisplacementUnits: z.string().max(MAX_RESULT_UNIT_LENGTH),
+  safetyFactor: finiteNumber,
   failureAssessment: z
     .object({
       status: z.enum(["pass", "warning", "fail", "unknown"]),
-      title: z.string(),
-      message: z.string()
+      title: boundedLabel,
+      message: z.string().max(2_048)
     })
     .optional(),
-  reactionForce: z.number(),
-  reactionForceUnits: z.string(),
+  reactionForce: finiteNumber,
+  reactionForceUnits: z.string().max(MAX_RESULT_UNIT_LENGTH),
   resultTier: ResultProvenanceTierSchema.optional(),
   provenance: ResultProvenanceSchema.optional(),
   diagnostics: z.array(DiagnosticSchema).optional().default([]),
@@ -704,11 +730,15 @@ export const ModalResultSummarySchema = z.object({
     eigenvalue: z.number().positive(),
     scaledResidual: z.number().nonnegative(),
     fieldId: z.string()
-  })),
+  })).max(10),
   warning: z.string().optional(),
   resultTier: ResultProvenanceTierSchema.optional(),
   provenance: ResultProvenanceSchema.optional(),
   diagnostics: z.array(DiagnosticSchema).optional().default([])
+}).superRefine((summary, context) => {
+  if (summary.modes.length !== summary.convergedModeCount) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["modes"], message: "Modal mode entries must match the converged mode count." });
+  }
 });
 
 export const ThermalResultSummarySchema = z.object({
@@ -743,7 +773,7 @@ export const RunVariantResultSchema = z.object({
   caseId: z.string().optional(),
   combinationId: z.string().optional(),
   summary: ResultSummarySchema,
-  fields: z.array(ResultFieldSchema),
+  fields: z.array(ResultFieldSchema).max(MAX_RESULT_FIELDS),
   governingVariantIndices: GoverningVariantIndexSchema.optional()
 });
 export const RunVariantRefSchema = RunVariantResultSchema.pick({
@@ -1004,6 +1034,69 @@ export interface DisplayModel {
     geometryDescriptor?: Record<string, unknown>;
   };
 }
+
+const Base64PayloadSchema = z.string()
+  .min(4)
+  .max(MAX_EMBEDDED_MODEL_BASE64_LENGTH)
+  .refine((value) => value.length % 4 === 0 && /^[A-Za-z0-9+/]*={0,2}$/.test(value), "Invalid base64 payload.");
+
+const VisualMeshBase64PayloadSchema = z.string()
+  .min(4)
+  .max(MAX_VISUAL_MESH_BASE64_LENGTH)
+  .refine((value) => value.length % 4 === 0 && /^[A-Za-z0-9+/]*={0,2}$/.test(value), "Invalid base64 payload.");
+
+export const DisplayFaceSchema = z.object({
+  id: boundedId,
+  label: boundedLabel,
+  color: z.string().min(1).max(64),
+  center: Vec3Schema,
+  normal: Vec3Schema,
+  stressValue: finiteNumber,
+  area: finiteNumber.nonnegative().optional(),
+  surfaceType: z.enum(["planar", "cylindrical", "curved"]).optional(),
+  surfaceAxis: Vec3Schema.optional(),
+  surfaceRadius: finiteNumber.positive().optional(),
+  surfaceLength: finiteNumber.positive().optional(),
+  interiorSurface: z.boolean().optional()
+});
+
+export const DisplayModelSchema: z.ZodType<DisplayModel> = z.object({
+  id: boundedId,
+  name: z.string().min(1).max(256),
+  bodyCount: z.number().int().min(0).max(10_000),
+  faces: z.array(DisplayFaceSchema).max(MAX_DISPLAY_MODEL_FACES),
+  orientation: z.object({ x: finiteNumber, y: finiteNumber, z: finiteNumber }).optional(),
+  dimensions: z.object({
+    x: finiteNumber.nonnegative(),
+    y: finiteNumber.nonnegative(),
+    z: finiteNumber.nonnegative(),
+    units: z.string().min(1).max(MAX_RESULT_UNIT_LENGTH)
+  }).optional(),
+  nativeCad: z.object({
+    format: z.literal("step"),
+    filename: z.string().min(1).max(256),
+    contentBase64: Base64PayloadSchema.optional()
+  }).optional(),
+  visualMesh: z.object({
+    format: z.enum(["stl", "obj"]),
+    filename: z.string().min(1).max(256),
+    contentBase64: VisualMeshBase64PayloadSchema
+  }).optional(),
+  coreCloudGeometry: z.object({
+    kind: z.enum(["sample_procedural", "uploaded_cad", "uploaded_mesh", "structured_block"]),
+    sampleId: z.enum(["cantilever", "beam", "bracket"]).optional(),
+    format: z.enum(["step", "stl", "obj", "msh", "json"]).optional(),
+    filename: z.string().min(1).max(256).optional(),
+    contentBase64: Base64PayloadSchema.optional(),
+    units: z.enum(["mm", "m"]).optional(),
+    descriptor: z.record(z.unknown()).optional(),
+    geometryDescriptor: z.record(z.unknown()).optional()
+  }).optional()
+}).superRefine((model, context) => {
+  if (model.faces.length > model.bodyCount * MAX_DISPLAY_MODEL_FACES && model.bodyCount > 0) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["faces"], message: "Display face count is inconsistent with the body count." });
+  }
+});
 
 export interface ResultRenderBounds {
   min: [number, number, number];

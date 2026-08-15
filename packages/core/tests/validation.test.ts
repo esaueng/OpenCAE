@@ -74,6 +74,18 @@ describe("validateModelJson", () => {
     expect(codes).toContain("node-index-out-of-range");
   });
 
+  test("rejects oversized or duplicate surface-facet interpolation nodes", () => {
+    const model = createSingleTetModel();
+    const facets = extractBoundarySurfaceFacets(model);
+    const first = facets[0]!;
+    model.surfaceFacets = [{ ...first, nodes: [...first.nodes, first.nodes[0]!] }];
+    const codes = validateModelJson(model).errors.map((issue) => issue.code);
+    expect(codes).toContain("invalid-surface-facet-nodes");
+    const duplicateModel = createSingleTetModel();
+    duplicateModel.surfaceFacets = [{ ...first, nodes: [first.nodes[0]!, first.nodes[1]!, first.nodes[0]!] }];
+    expect(validateModelJson(duplicateModel).errors.map((issue) => issue.code)).toContain("duplicate-surface-facet-node");
+  });
+
   test("rejects non-integer Tet4 connectivity and missing materials", () => {
     const model = createSingleTetModel();
     model.elementBlocks[0].material = "missing";

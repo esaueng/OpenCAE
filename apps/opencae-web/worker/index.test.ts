@@ -32,6 +32,10 @@ function createEnv(assetBody = "asset"): Env {
           customMetadata: object.customMetadata
         } : null;
       },
+      head: async (key: string) => {
+        const object = objects.get(key);
+        return object ? { size: object.bytes.byteLength, customMetadata: object.customMetadata } : null;
+      },
       delete: async (key: string) => { objects.delete(key); }
     }
   } as unknown as Env;
@@ -164,6 +168,24 @@ describe("Cloudflare local-first worker", () => {
     const response = await dispatchWorker(new Request(`https://cae.esau.app/api/project-backups/${backupId}`), createEnv());
 
     expect(response.status).toBe(401);
+  });
+
+  test("does not overwrite an existing backup with a different capability token", async () => {
+    const env = createEnv();
+    const backupId = "11111111-1111-4111-8111-111111111111";
+    const firstToken = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMN1234567890-_";
+    const otherToken = "zyxwvutsrqponmlkjihgfedcbaABCDEFGHIJ1234567890-_";
+    const request = (token: string, fill: number) => new Request(`https://cae.esau.app/api/project-backups/${backupId}`, {
+      method: "PUT",
+      headers: { "content-length": "32", "x-opencae-backup-token": token },
+      body: new Uint8Array(32).fill(fill)
+    });
+    expect((await dispatchWorker(request(firstToken, 1), env)).status).toBe(201);
+    expect((await dispatchWorker(request(otherToken, 2), env)).status).toBe(403);
+    const restored = await dispatchWorker(new Request(`https://cae.esau.app/api/project-backups/${backupId}`, {
+      headers: { "x-opencae-backup-token": firstToken }
+    }), env);
+    expect(new Uint8Array(await restored.arrayBuffer())).toEqual(new Uint8Array(32).fill(1));
   });
 
   test("serves static assets for non-api routes", async () => {

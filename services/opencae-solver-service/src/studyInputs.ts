@@ -4,10 +4,6 @@ import type { CustomMaterial, Load, Material, Study } from "@opencae/schema";
 export const STANDARD_GRAVITY = 9.80665;
 
 export function loadForceNewtons(load: Load, fallbackMassKg = 0): number {
-  if (load.type === "gravity") {
-    const equivalentForce = Number(load.parameters.equivalentForceN);
-    if (Number.isFinite(equivalentForce) && equivalentForce > 0) return equivalentForce;
-  }
   const rawValue = Number(load.parameters.value ?? 0);
   const value = Number.isFinite(rawValue) && rawValue > 0 ? rawValue : 0;
   if (load.type === "gravity" && load.parameters.units === "kg") {

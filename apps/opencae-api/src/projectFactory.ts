@@ -144,10 +144,10 @@ export function uploadedDisplayModelFor(filename: string, contentBase64?: string
   if (nativeFormat) {
     return {
       id: "display-uploaded",
-      name: `${modelName} imported body`,
-      bodyCount: 1,
+      name: `${modelName} uploaded model`,
+      bodyCount: 0,
       dimensions,
-      faces: uploadedBoxFaces(),
+      faces: [],
       nativeCad: {
         format: nativeFormat,
         filename,

@@ -2,6 +2,8 @@ const DB_NAME = "opencae-recent-projects";
 const DB_VERSION = 1;
 const STORE_NAME = "projects";
 export const MAX_RECENT_PROJECTS = 8;
+const MAX_RECENT_PROJECT_NAME_LENGTH = 128;
+const MAX_RECENT_FILENAME_LENGTH = 255;
 
 export interface RecentProjectFileHandle {
   kind?: "file";
@@ -38,7 +40,7 @@ export function createRecentProjectService(
 ): RecentProjectService {
   const createId = options.createId ?? createRecentProjectId;
   const now = options.now ?? Date.now;
-  const list = async () => sortRecentProjects(await persistence.readAll());
+  const list = async () => sortRecentProjects((await persistence.readAll()).map(normalizeRecentProjectEntry).filter((entry): entry is RecentProjectEntry => entry !== null)).slice(0, MAX_RECENT_PROJECTS);
   return {
     list,
     add: async (handle, metadata) => {
@@ -52,8 +54,8 @@ export function createRecentProjectService(
       }
       const candidate: RecentProjectEntry = {
         id: match?.id ?? createId(),
-        filename: metadata.filename ?? handle.name,
-        projectName: metadata.projectName,
+        filename: boundedRecentText(metadata.filename ?? handle.name, MAX_RECENT_FILENAME_LENGTH, "project.opencae"),
+        projectName: boundedRecentText(metadata.projectName, MAX_RECENT_PROJECT_NAME_LENGTH, "Untitled project"),
         lastOpenedAt: metadata.lastOpenedAt ?? now(),
         handle
       };
@@ -68,6 +70,21 @@ export function createRecentProjectService(
     },
     clear: async () => persistence.replaceAll([])
   };
+}
+
+function normalizeRecentProjectEntry(entry: RecentProjectEntry): RecentProjectEntry | null {
+  if (!entry || typeof entry.id !== "string" || !entry.handle || typeof entry.handle.getFile !== "function") return null;
+  return {
+    ...entry,
+    id: entry.id.slice(0, 128),
+    filename: boundedRecentText(entry.filename, MAX_RECENT_FILENAME_LENGTH, "project.opencae"),
+    projectName: boundedRecentText(entry.projectName, MAX_RECENT_PROJECT_NAME_LENGTH, "Untitled project"),
+    lastOpenedAt: Number.isFinite(entry.lastOpenedAt) ? entry.lastOpenedAt : 0
+  };
+}
+
+function boundedRecentText(value: unknown, maxLength: number, fallback: string): string {
+  return typeof value === "string" && value.trim() ? value.trim().slice(0, maxLength) : fallback;
 }
 
 export function isRecentProjectsSupported(): boolean {
