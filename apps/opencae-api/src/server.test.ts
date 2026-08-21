@@ -231,6 +231,38 @@ describe("OpenCAE API server", () => {
     expect(response.json().project.id).toBe(template.id);
   });
 
+  test("discards solver models embedded in imported project files", async () => {
+    const api = await buildApi();
+    const sample = await api.inject({ method: "GET", url: "/api/sample-project" });
+    const project = structuredClone(sample.json().project) as {
+      studies: Array<{ meshSettings: Record<string, unknown> }>;
+    };
+    project.studies[0]!.meshSettings = {
+      preset: "fine",
+      status: "complete",
+      meshRef: "attacker-controlled-mesh",
+      summary: {
+        nodes: 4,
+        elements: 1,
+        warnings: [],
+        artifacts: {
+          meshConnectivity: { connectedComponents: 1 },
+          actualCoreModel: { model: { meshProvenance: { meshSource: "actual_volume_mesh" } } }
+        }
+      }
+    };
+
+    const response = await api.inject({
+      method: "POST",
+      url: "/api/projects/import",
+      remoteAddress: "203.0.113.27",
+      payload: { project }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().project.studies[0].meshSettings).toEqual({ preset: "fine", status: "not_started" });
+  });
+
   test("imported local estimate results are not marked as complete production runs", async () => {
     const api = await buildApi();
     const sample = await api.inject({ method: "GET", url: "/api/sample-project" });
