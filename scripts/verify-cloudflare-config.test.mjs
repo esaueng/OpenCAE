@@ -23,6 +23,7 @@ describe("Cloudflare deployment config guard (post cloud retirement)", () => {
     expect(defaultConfig.containers).toBeUndefined();
     expect(defaultConfig.durable_objects).toBeUndefined();
     expect(defaultConfig.r2_buckets).toEqual([{ binding: "PROJECT_BACKUPS", bucket_name: "opencae-project-backups" }]);
+    expect(defaultConfig.triggers?.crons).toEqual(["17 3 * * *"]);
     expect(readme).toContain("Deploy command: npx wrangler deploy");
     expect(readme).toContain("Do not use `npx wrangler versions upload` for the production Worker");
     expect(retiredDoCleanupConfig.migrations).toEqual([
@@ -110,6 +111,16 @@ describe("Cloudflare deployment config guard (post cloud retirement)", () => {
 
     expect(() => validateCloudflareConfigs({ defaultConfig, staticConfig, packageJson })).toThrow(
       /must bind only PROJECT_BACKUPS/
+    );
+  });
+
+  test("fails if the scheduled backup retention cleanup is removed", () => {
+    const { staticConfig, packageJson } = readCloudflareConfigs(rootDir);
+    const defaultConfig = clone(readConfig("wrangler.jsonc"));
+    delete defaultConfig.triggers;
+
+    expect(() => validateCloudflareConfigs({ defaultConfig, staticConfig, packageJson })).toThrow(
+      /must schedule the daily encrypted-backup retention cleanup/
     );
   });
 

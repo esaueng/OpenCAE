@@ -67,11 +67,35 @@ export default {
     return withSecurityHeaders(await env.ASSETS.fetch(request));
   },
 
+  async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
+    if (!env.PROJECT_BACKUPS) return;
+    await deleteExpiredProjectBackups(env.PROJECT_BACKUPS, Date.now());
+  },
+
   // Inert queue handler for stale legacy Workers Builds consumers.
   async queue(): Promise<void> {
     return undefined;
   }
 } satisfies ExportedHandler<Env>;
+
+async function deleteExpiredProjectBackups(bucket: Env["PROJECT_BACKUPS"], now: number): Promise<void> {
+  let cursor: string | undefined;
+  do {
+    const page = await bucket.list({
+      prefix: PROJECT_BACKUP_PREFIX,
+      cursor,
+      include: ["customMetadata"]
+    });
+    const expiredKeys = page.objects
+      .filter((object) => {
+        const expiresAt = Date.parse(object.customMetadata?.expiresAt ?? "");
+        return !Number.isFinite(expiresAt) || expiresAt <= now;
+      })
+      .map((object) => object.key);
+    if (expiredKeys.length > 0) await bucket.delete(expiredKeys);
+    cursor = page.truncated ? page.cursor : undefined;
+  } while (cursor);
+}
 
 async function handleProjectBackup(request: Request, env: Env, backupId: string): Promise<Response> {
   if (!env.PROJECT_BACKUPS || !env.PROJECT_BACKUP_RATE_LIMITER) {
