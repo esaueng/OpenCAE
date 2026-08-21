@@ -58,6 +58,9 @@ function validateProductionConfig(label, config, failures) {
   if (JSON.stringify(config.r2_buckets) !== JSON.stringify(expectedBackupBinding)) {
     failures.push(`${label} config must bind only PROJECT_BACKUPS to opencae-project-backups`);
   }
+  if (JSON.stringify(config.triggers?.crons) !== JSON.stringify(["17 3 * * *"])) {
+    failures.push(`${label} config must schedule the daily encrypted-backup retention cleanup`);
+  }
 
   // The checked-in default config must carry NO migrations: Workers Builds
   // uploads PR preview versions, and pending Durable Object migrations cannot

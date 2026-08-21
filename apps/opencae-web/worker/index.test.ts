@@ -36,7 +36,16 @@ function createEnv(assetBody = "asset"): Env {
         const object = objects.get(key);
         return object ? { size: object.bytes.byteLength, customMetadata: object.customMetadata } : null;
       },
-      delete: async (key: string) => { objects.delete(key); }
+      list: async ({ prefix = "", cursor }: { prefix?: string; cursor?: string }) => ({
+        objects: [...objects.entries()]
+          .filter(([key]) => key.startsWith(prefix))
+          .map(([key, object]) => ({ key, size: object.bytes.byteLength, customMetadata: object.customMetadata })),
+        truncated: false,
+        cursor
+      }),
+      delete: async (keys: string | string[]) => {
+        for (const key of Array.isArray(keys) ? keys : [keys]) objects.delete(key);
+      }
     }
   } as unknown as Env;
 }
@@ -66,6 +75,7 @@ describe("Cloudflare local-first worker", () => {
       r2_buckets?: unknown;
       migrations?: Array<{ tag?: string; deleted_classes?: string[] }>;
       assets?: { run_worker_first?: string[] };
+      triggers?: { crons?: string[] };
     };
 
     expect(defaultConfig.name).toBe("opencae");
@@ -74,6 +84,7 @@ describe("Cloudflare local-first worker", () => {
     expect(defaultConfig.durable_objects).toBeUndefined();
     expect(defaultConfig.r2_buckets).toEqual([{ binding: "PROJECT_BACKUPS", bucket_name: "opencae-project-backups" }]);
     expect(defaultConfig.assets?.run_worker_first).toEqual(expect.arrayContaining(["/api/*", "/health"]));
+    expect(defaultConfig.triggers?.crons).toEqual(["17 3 * * *"]);
     // Checked-in migrations break Workers Builds version uploads; the retired
     // Durable Object cleanup is a one-off manual deploy step documented in
     // docs/cloud-retirement.md.
@@ -186,6 +197,21 @@ describe("Cloudflare local-first worker", () => {
       headers: { "x-opencae-backup-token": firstToken }
     }), env);
     expect(new Uint8Array(await restored.arrayBuffer())).toEqual(new Uint8Array(32).fill(1));
+  });
+
+  test("scheduled cleanup deletes expired and malformed backup objects", async () => {
+    const env = createEnv();
+    const bucket = env.PROJECT_BACKUPS;
+    const body = new Uint8Array(16).fill(1);
+    await bucket.put("project-backups/expired", body, { customMetadata: { expiresAt: "2026-01-01T00:00:00.000Z" } });
+    await bucket.put("project-backups/current", body, { customMetadata: { expiresAt: "2099-01-01T00:00:00.000Z" } });
+    await bucket.put("project-backups/malformed", body, { customMetadata: { expiresAt: "invalid" } });
+
+    await worker.scheduled?.({ scheduledTime: Date.now(), cron: "17 3 * * *", noRetry() {} }, env);
+
+    await expect(bucket.head("project-backups/expired")).resolves.toBeNull();
+    await expect(bucket.head("project-backups/malformed")).resolves.toBeNull();
+    await expect(bucket.head("project-backups/current")).resolves.not.toBeNull();
   });
 
   test("serves static assets for non-api routes", async () => {

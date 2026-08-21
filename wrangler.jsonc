@@ -37,6 +37,11 @@
       "simple": { "limit": 2, "period": 60 }
     }
   ],
+  // Proactively enforce backup retention even when an uploaded object is never
+  // requested again. The Worker also retains its lazy expiry check on reads.
+  "triggers": {
+    "crons": ["17 3 * * *"]
+  },
   // No migrations in the checked-in config: Workers Builds uploads PR preview
   // versions, and pending Durable Object migrations cannot ride a version
   // upload. Deleting the retired OpenCaeCoreCloudContainer class is a one-off
