@@ -818,9 +818,13 @@ function withCanonicalArtifactRefs(project: Project): Project {
     })),
     studies: project.studies.map((study) => ({
       ...study,
-      meshSettings: isCanonicalRef(study.meshSettings.meshRef)
-        ? study.meshSettings
-        : { ...study.meshSettings, meshRef: undefined },
+      // Solver-ready mesh models are runtime artifacts, not trusted project
+      // input. Imported files must regenerate them from the imported geometry.
+      meshSettings: hasEmbeddedCoreMesh(study.meshSettings.summary?.artifacts)
+        ? { preset: study.meshSettings.preset, status: "not_started" }
+        : isCanonicalRef(study.meshSettings.meshRef)
+          ? study.meshSettings
+          : { ...study.meshSettings, meshRef: undefined },
       runs: study.runs.map((run) => ({
         ...run,
         meshRef: isCanonicalRef(run.meshRef) ? run.meshRef : undefined,
@@ -829,6 +833,12 @@ function withCanonicalArtifactRefs(project: Project): Project {
       }))
     }))
   };
+}
+
+function hasEmbeddedCoreMesh(artifacts: unknown): boolean {
+  if (!artifacts || typeof artifacts !== "object") return false;
+  const candidate = artifacts as Record<string, unknown>;
+  return Boolean(candidate.actualCoreModel || candidate.coreModel || candidate.volumeMesh);
 }
 
 async function persistImportedModelArtifacts(project: Project, displayModel: DisplayModel): Promise<void> {
