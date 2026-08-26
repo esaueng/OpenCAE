@@ -4,6 +4,10 @@ const STORE_NAME = "projects";
 export const MAX_RECENT_PROJECTS = 8;
 const MAX_RECENT_PROJECT_NAME_LENGTH = 128;
 const MAX_RECENT_FILENAME_LENGTH = 255;
+// Mirrors MAX_LOCAL_PROJECT_FILE_BYTES in lib/api.ts. Duplicated locally so the
+// start-screen bootstrap chunk does not pull in the full API client just to
+// reject an oversized pick before reading it into memory.
+const MAX_PROJECT_NAME_PROBE_BYTES = 96 * 1024 * 1024;
 
 export interface RecentProjectFileHandle {
   kind?: "file";
@@ -113,6 +117,11 @@ export async function requestRecentProjectFile(entry: RecentProjectEntry): Promi
 }
 
 export async function projectNameFromFile(file: File): Promise<string> {
+  // file.text() reads the whole pick into memory; reject oversized files
+  // before that read. The real import path enforces the same cap.
+  if (file.size > MAX_PROJECT_NAME_PROBE_BYTES) {
+    throw new Error("The selected file is too large to be an OpenCAE project file.");
+  }
   let payload: unknown;
   try {
     payload = JSON.parse(await file.text()) as unknown;
