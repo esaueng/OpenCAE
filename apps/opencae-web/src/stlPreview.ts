@@ -63,7 +63,21 @@ function stlLoaderInputFor(buffer: ArrayBuffer): ArrayBuffer | string {
     return new TextDecoder().decode(buffer).replace(/^\uFEFF/, "").trimStart();
   }
 
+  // The buffer is neither an exact-fit binary STL nor ASCII, so STLLoader will
+  // take its binary path, which trusts the declared face count at offset 80 and
+  // sizes its typed arrays from it before any bounds check. A truncated or
+  // crafted file can declare far more faces than fit in the buffer and force
+  // gigabyte-scale allocations. Reject impossible declarations up front.
+  rejectImpossibleBinaryStl(buffer);
   return buffer;
+}
+
+function rejectImpossibleBinaryStl(buffer: ArrayBuffer): void {
+  if (buffer.byteLength < 84) return;
+  const faces = new DataView(buffer).getUint32(80, true);
+  if (84 + faces * 50 > buffer.byteLength) {
+    throw new Error("STL file declares more faces than its size allows.");
+  }
 }
 
 function isExactBinaryStl(buffer: ArrayBuffer): boolean {

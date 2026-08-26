@@ -74,4 +74,32 @@ endsolid part
     expect(geometry).not.toBeNull();
     expect(geometry?.getAttribute("position").count).toBe(3);
   });
+
+  test("rejects binary STL input whose declared face count exceeds its size", () => {
+    // three's binary parser sizes its typed arrays from the declared face
+    // count before any bounds check, so an inflated declaration in a small
+    // file forces a giant allocation. The preview must reject it up front.
+    const stl = new ArrayBuffer(84);
+    new DataView(stl).setUint32(80, 100_000_000, true);
+
+    expect(() => normalizedStlGeometryFromBuffer(stl)).toThrow("STL file declares more faces than its size allows.");
+    expect(tryNormalizedStlGeometryFromBuffer(stl)).toBeNull();
+  });
+
+  test("still accepts binary STL input with extra trailing bytes beyond the declared faces", () => {
+    const triangle = new ArrayBuffer(84 + 50);
+    const view = new DataView(triangle);
+    view.setUint32(80, 1, true);
+    // One triangle in the z=0 plane.
+    view.setFloat32(84 + 12, 10, true);
+    view.setFloat32(84 + 24, 10, true);
+    view.setFloat32(84 + 34, 10, true);
+    const padded = new Uint8Array(84 + 50 + 16);
+    padded.set(new Uint8Array(triangle), 0);
+
+    const geometry = tryNormalizedStlGeometryFromBuffer(padded.buffer);
+
+    expect(geometry).not.toBeNull();
+    expect(geometry?.getAttribute("position").count).toBe(3);
+  });
 });
