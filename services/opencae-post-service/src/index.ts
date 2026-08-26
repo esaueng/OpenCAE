@@ -218,7 +218,7 @@ function buildModalHtmlReport(runId: string, summary: ModalResultSummary): strin
   const provenanceTier = resultTierForSummary(summary);
   const provenanceLabel = resultTierLabel(provenanceTier);
   const modeRows = summary.modes.map((mode) => `
-            <tr><td>${mode.modeIndex}</td><td>${format(mode.frequencyHz)} Hz</td><td>${format(mode.eigenvalue)}</td><td>${mode.scaledResidual.toExponential(3)}</td></tr>`).join("");
+            <tr><td>${escapeHtml(String(mode.modeIndex))}</td><td>${format(mode.frequencyHz)} Hz</td><td>${format(mode.eigenvalue)}</td><td>${mode.scaledResidual.toExponential(3)}</td></tr>`).join("");
   return `<!doctype html>
 <html>
   <head>
@@ -238,7 +238,7 @@ function buildModalHtmlReport(runId: string, summary: ModalResultSummary): strin
   </head>
   <body><main>
     <header><div>OpenCAE modal simulation</div><h1>Modal Analysis Report</h1><div>Run ${escapeHtml(runId)}</div></header>
-    <section><h2>Convergence</h2><p>${summary.convergedModeCount} of ${summary.requestedModeCount} requested modes converged.</p>${summary.warning ? `<p class="warning">${escapeHtml(summary.warning)}</p>` : ""}</section>
+    <section><h2>Convergence</h2><p>${escapeHtml(String(summary.convergedModeCount))} of ${escapeHtml(String(summary.requestedModeCount))} requested modes converged.</p>${summary.warning ? `<p class="warning">${escapeHtml(summary.warning)}</p>` : ""}</section>
     <section><h2>Natural frequencies</h2><table><thead><tr><th>Mode</th><th>Frequency</th><th>Eigenvalue</th><th>Scaled residual</th></tr></thead><tbody>${modeRows}</tbody></table></section>
     <section><h2>Result basis</h2><p>Result source: ${escapeHtml(provenanceLabel)}. Solver: ${escapeHtml(summary.provenance?.solver ?? "unknown")}.</p><p class="note">Mode shapes are normalized so the largest nodal vector magnitude is 1. Their sign is deterministic but arbitrary. Display amplitude and phase animation are visualization-only and are not physical displacements.</p></section>
   </main></body>
