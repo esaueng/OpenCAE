@@ -18,8 +18,23 @@ import {
 describe("starterMaterials", () => {
   test("includes common engineering and 3D printed material options", () => {
     expect(starterMaterials.map((material) => material.id)).toEqual(
-      expect.arrayContaining(["mat-petg", "mat-asa", "mat-nylon-cf", "mat-peek", "mat-sla-tough-resin"])
+      expect.arrayContaining(["mat-petg", "mat-asa", "mat-nylon-cf", "mat-peek", "mat-sla-tough-resin", "mat-acrylic"])
     );
+  });
+
+  test("offers acrylic PMMA as a CNC machining material", () => {
+    const acrylic = starterMaterials.find((material) => material.id === "mat-acrylic");
+
+    expect(acrylic).toMatchObject({
+      name: "Acrylic PMMA",
+      category: "plastic",
+      youngsModulus: 3_200_000_000,
+      poissonRatio: 0.35,
+      density: 1_180,
+      yieldStrength: 65_000_000,
+      thermalConductivity: 0.19
+    });
+    expect(compatibleManufacturingProcessesFor(acrylic!).map((process) => process.id)).toEqual(["cnc_machining"]);
   });
 
   test("marks printable materials with default print parameters", () => {

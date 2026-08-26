@@ -79,6 +79,7 @@ describe("static simulation workflow components", () => {
     expect(html).toContain("Composites");
     expect(html).toContain("Photopolymer resins");
     expect(html).toContain("ABS Plastic");
+    expect(html).toContain("Acrylic PMMA");
     expect(html).toContain("3 compatible processes");
     expect(html).toContain("Compatible processes");
     expect(html).toContain("CNC machining");
