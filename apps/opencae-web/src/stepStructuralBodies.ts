@@ -30,11 +30,22 @@ export type StepStructuralBodyPlan = {
  */
 export function stepFuseBodyGroups(study: Study, registry: StepFaceRegistry): StepBodyBounds[][] {
   const parent = new Map<number, number>();
+  // Iterative with path compression: a recursive find overflows the stack on
+  // long fuse chains that crafted projects can build.
   const find = (meshIndex: number): number => {
-    const current = parent.get(meshIndex) ?? meshIndex;
-    if (current === meshIndex) return current;
-    const root = find(current);
-    parent.set(meshIndex, root);
+    let root = meshIndex;
+    let next = parent.get(root);
+    while (next !== undefined && next !== root) {
+      root = next;
+      next = parent.get(root);
+    }
+    let current = meshIndex;
+    let following = parent.get(current);
+    while (following !== undefined && following !== root) {
+      parent.set(current, root);
+      current = following;
+      following = parent.get(current);
+    }
     return root;
   };
   const union = (left: number, right: number): void => {
