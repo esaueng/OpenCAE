@@ -18,3 +18,11 @@ data/reports/**
 !data/reports/.gitkeep
 .wrangler/
 .claude/
+
+# Local secrets and credentials — never commit
+.env
+.env.*
+!.env.example
+.dev.vars
+*.pem
+*.key

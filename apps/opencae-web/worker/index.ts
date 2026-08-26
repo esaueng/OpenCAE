@@ -70,6 +70,13 @@ export default {
   // Inert queue handler for stale legacy Workers Builds consumers.
   async queue(): Promise<void> {
     return undefined;
+  },
+
+  // Daily sweep: request-time expiry only deletes a backup when it is read
+  // after expiring, so backups that are never restored would linger forever.
+  // This enforces the promised PROJECT_BACKUP_RETENTION_DAYS for them.
+  async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(deleteExpiredProjectBackups(env));
   }
 } satisfies ExportedHandler<Env>;
 
@@ -113,8 +120,7 @@ async function handleProjectBackup(request: Request, env: Env, backupId: string)
   if (!constantTimeEqual(object.customMetadata?.tokenHash ?? "", await sha256Hex(token))) {
     return backupJson({ error: "Cloud backup authorization failed." }, 403);
   }
-  const expiresAt = object.customMetadata?.expiresAt ?? "";
-  if (!Number.isFinite(Date.parse(expiresAt)) || Date.parse(expiresAt) <= Date.now()) {
+  if (isBackupExpired(object.customMetadata?.expiresAt, Date.now())) {
     await env.PROJECT_BACKUPS.delete(key);
     return backupJson({ error: "Cloud backup has expired." }, 410);
   }
@@ -136,6 +142,29 @@ async function handleProjectBackup(request: Request, env: Env, backupId: string)
 function projectBackupId(pathname: string): string | null {
   const match = pathname.match(/^\/api\/project-backups\/([^/]+)$/u);
   return match?.[1] ?? null;
+}
+
+function isBackupExpired(expiresAt: string | undefined, now: number): boolean {
+  const parsed = Date.parse(expiresAt ?? "");
+  return !Number.isFinite(parsed) || parsed <= now;
+}
+
+async function deleteExpiredProjectBackups(env: Env): Promise<void> {
+  if (!env.PROJECT_BACKUPS) return;
+  const now = Date.now();
+  let cursor: string | undefined;
+  do {
+    const page = await env.PROJECT_BACKUPS.list({
+      prefix: PROJECT_BACKUP_PREFIX,
+      include: ["customMetadata"],
+      ...(cursor ? { cursor } : {})
+    });
+    const expiredKeys = page.objects
+      .filter((object) => isBackupExpired(object.customMetadata?.expiresAt, now))
+      .map((object) => object.key);
+    if (expiredKeys.length > 0) await env.PROJECT_BACKUPS.delete(expiredKeys);
+    cursor = page.truncated ? page.cursor : undefined;
+  } while (cursor);
 }
 
 function backupJson(body: Record<string, unknown>, status: number): Response {
@@ -193,6 +222,7 @@ function securityHeaders(): Record<string, string> {
     ].join("; "),
     "x-content-type-options": "nosniff",
     "referrer-policy": "strict-origin-when-cross-origin",
+    "strict-transport-security": "max-age=63072000; includeSubDomains; preload",
     "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=()"
   };
 }

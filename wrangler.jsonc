@@ -37,6 +37,11 @@
       "simple": { "limit": 2, "period": 60 }
     }
   ],
+  // Daily sweep that enforces the 30-day encrypted-backup retention for
+  // backups that are never restored (request-time expiry only runs on reads).
+  "triggers": {
+    "crons": ["17 3 * * *"]
+  },
   // No migrations in the checked-in config: Workers Builds uploads PR preview
   // versions, and pending Durable Object migrations cannot ride a version
   // upload. Deleting the retired OpenCaeCoreCloudContainer class is a one-off

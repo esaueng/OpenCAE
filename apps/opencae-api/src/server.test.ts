@@ -162,6 +162,53 @@ describe("OpenCAE API server", () => {
     expect(response.json().study.projectId).toBe(project.id);
   });
 
+  test("study updates strip artifact refs that point outside the project", async () => {
+    const api = await buildApi();
+    const create = await api.inject({
+      method: "POST",
+      url: "/api/projects",
+      remoteAddress: "203.0.113.29",
+      payload: { mode: "sample", sample: "bracket" }
+    });
+    const project = create.json().project as { id: string; studies: Array<{ id: string }> };
+    const studyId = project.studies[0]!.id;
+    const injectedRun = {
+      id: "run-injected",
+      studyId,
+      status: "complete",
+      jobId: "job-injected",
+      solverBackend: "test-backend",
+      solverVersion: "0",
+      meshRef: `${project.id}/mesh/mesh-summary.json`,
+      resultRef: "project-bracket-demo/results/results.json",
+      reportRef: "../outside/report.html"
+    };
+
+    const response = await api.inject({
+      method: "PUT",
+      url: `/api/studies/${studyId}`,
+      remoteAddress: "203.0.113.29",
+      payload: {
+        runs: [injectedRun],
+        meshSettings: { preset: "medium", status: "complete", meshRef: "project-bracket-demo/mesh/mesh-summary.json" }
+      }
+    });
+    expect(response.statusCode).toBe(200);
+    const updated = response.json().study as {
+      runs: Array<{ meshRef?: string; resultRef?: string; reportRef?: string }>;
+      meshSettings: { meshRef?: string };
+    };
+    expect(updated.runs[0]?.meshRef).toBe(`${project.id}/mesh/mesh-summary.json`);
+    expect(updated.runs[0]?.resultRef).toBeUndefined();
+    expect(updated.runs[0]?.reportRef).toBeUndefined();
+    expect(updated.meshSettings.meshRef).toBeUndefined();
+
+    const reread = await api.inject({ method: "GET", url: `/api/studies/${studyId}`, remoteAddress: "203.0.113.29" });
+    const persisted = reread.json().study as { runs: Array<{ resultRef?: string; reportRef?: string }> };
+    expect(persisted.runs[0]?.resultRef).toBeUndefined();
+    expect(persisted.runs[0]?.reportRef).toBeUndefined();
+  });
+
   test("does not serve the bracket demo report for unrelated runs without a report", async () => {
     const api = await buildApi();
     const response = await api.inject({ method: "GET", url: "/api/runs/run-unrelated-missing/report" });

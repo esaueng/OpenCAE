@@ -13,8 +13,17 @@ function readJsonc(path: string) {
   return parseJsonc(readFileSync(resolve(__dirname, path), "utf8"), path);
 }
 
-function createEnv(assetBody = "asset"): Env {
+function createEnv(
+  assetBody = "asset",
+  options?: { listPageSize?: number; backups?: Array<{ key: string; expiresAt?: string }> }
+): Env {
   const objects = new Map<string, { bytes: Uint8Array; customMetadata: Record<string, string> }>();
+  for (const backup of options?.backups ?? []) {
+    objects.set(backup.key, {
+      bytes: new Uint8Array(32).fill(1),
+      customMetadata: { tokenHash: "seeded", ...(backup.expiresAt ? { expiresAt: backup.expiresAt } : {}) }
+    });
+  }
   return {
     ASSETS: { fetch: async () => new Response(assetBody, { headers: { "content-type": "text/html" } }) },
     PROJECT_BACKUP_RATE_LIMITER: { limit: async () => ({ success: true }) },
@@ -36,9 +45,33 @@ function createEnv(assetBody = "asset"): Env {
         const object = objects.get(key);
         return object ? { size: object.bytes.byteLength, customMetadata: object.customMetadata } : null;
       },
-      delete: async (key: string) => { objects.delete(key); }
+      list: async (listOptions?: { prefix?: string; limit?: number; cursor?: string }) => {
+        const matching = [...objects.keys()].filter((key) => key.startsWith(listOptions?.prefix ?? "")).sort();
+        // Cursor anchors to the last returned key (like real R2) so deleting
+        // the current page during a sweep cannot shift the next page.
+        const start = listOptions?.cursor ? matching.filter((key) => key <= listOptions.cursor!).length : 0;
+        const limit = listOptions?.limit ?? options?.listPageSize ?? matching.length;
+        const pageKeys = matching.slice(start, start + limit);
+        const end = start + pageKeys.length;
+        return {
+          objects: pageKeys.map((key) => ({ key, customMetadata: objects.get(key)?.customMetadata ?? {} })),
+          truncated: end < matching.length,
+          cursor: pageKeys[pageKeys.length - 1],
+          delimitedPrefixes: []
+        };
+      },
+      delete: async (keys: string | string[]) => {
+        for (const key of Array.isArray(keys) ? keys : [keys]) objects.delete(key);
+      }
     }
   } as unknown as Env;
+}
+
+async function dispatchScheduled(env: Env): Promise<void> {
+  const pending: Promise<unknown>[] = [];
+  const ctx = { waitUntil: (promise: Promise<unknown>) => { pending.push(promise); } } as unknown as ExecutionContext;
+  await worker.scheduled?.({} as ScheduledController, env, ctx);
+  await Promise.all(pending);
 }
 
 describe("Cloudflare local-first worker", () => {
@@ -201,6 +234,7 @@ describe("Cloudflare local-first worker", () => {
     expect(response.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
     expect(response.headers.get("x-content-type-options")).toBe("nosniff");
     expect(response.headers.get("referrer-policy")).toBe("strict-origin-when-cross-origin");
+    expect(response.headers.get("strict-transport-security")).toBe("max-age=63072000; includeSubDomains; preload");
   });
 
   test("csp permits the OCCT STEP importer embind runtime", async () => {
@@ -218,7 +252,52 @@ describe("Cloudflare local-first worker", () => {
     expect(headersFile).toContain(`Content-Security-Policy: ${workerCsp}`);
     expect(headersFile).toContain("X-Content-Type-Options: nosniff");
     expect(headersFile).toContain("Referrer-Policy: strict-origin-when-cross-origin");
+    expect(headersFile).toContain("Strict-Transport-Security: max-age=63072000; includeSubDomains; preload");
     expect(headersFile).toContain("Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=()");
+  });
+
+  test("scheduled sweep deletes expired backups that are never restored", async () => {
+    const futureExpiry = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString();
+    const pastExpiry = new Date(Date.now() - 60 * 1000).toISOString();
+    const env = createEnv("asset", {
+      backups: [
+        { key: "project-backups/11111111-1111-4111-8111-111111111111", expiresAt: futureExpiry },
+        { key: "project-backups/22222222-2222-4222-8222-222222222222", expiresAt: pastExpiry },
+        { key: "project-backups/33333333-3333-4333-8333-333333333333" },
+        { key: "unrelated/keep", expiresAt: pastExpiry }
+      ]
+    });
+
+    await dispatchScheduled(env);
+
+    // Fresh backups survive; expired ones and objects without a valid expiry
+    // are deleted; keys outside the backup prefix are never touched.
+    await expect(env.PROJECT_BACKUPS.head("project-backups/11111111-1111-4111-8111-111111111111")).resolves.not.toBeNull();
+    await expect(env.PROJECT_BACKUPS.head("project-backups/22222222-2222-4222-8222-222222222222")).resolves.toBeNull();
+    await expect(env.PROJECT_BACKUPS.head("project-backups/33333333-3333-4333-8333-333333333333")).resolves.toBeNull();
+    await expect(env.PROJECT_BACKUPS.head("unrelated/keep")).resolves.not.toBeNull();
+  });
+
+  test("scheduled sweep follows list pagination", async () => {
+    const pastExpiry = new Date(Date.now() - 60 * 1000).toISOString();
+    const env = createEnv("asset", {
+      listPageSize: 1,
+      backups: [
+        { key: "project-backups/11111111-1111-4111-8111-111111111111", expiresAt: pastExpiry },
+        { key: "project-backups/22222222-2222-4222-8222-222222222222", expiresAt: pastExpiry }
+      ]
+    });
+
+    await dispatchScheduled(env);
+
+    await expect(env.PROJECT_BACKUPS.head("project-backups/11111111-1111-4111-8111-111111111111")).resolves.toBeNull();
+    await expect(env.PROJECT_BACKUPS.head("project-backups/22222222-2222-4222-8222-222222222222")).resolves.toBeNull();
+  });
+
+  test("wrangler config schedules the daily retention sweep", () => {
+    const defaultConfig = readJsonc("../../../wrangler.jsonc") as { triggers?: { crons?: string[] } };
+
+    expect(defaultConfig.triggers?.crons).toHaveLength(1);
   });
 
   test("includes an inert queue handler for stale legacy Workers Builds consumers", async () => {

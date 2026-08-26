@@ -6,6 +6,8 @@ OpenCAE is an engineering-preview, local-first browser CAD/CAE workspace for str
 
 The workspace supports linear static stress, transient structural dynamics, modal analysis, and steady-state thermal conduction. Built-in samples, local `.opencae.json` project files, STEP/STP/STL/OBJ uploads, browser-local solves, selected-state CSV/VTU export, and HTML/PDF reports work without a production API or cloud solver.
 
+**Privacy:** projects, geometry, meshes, and results never leave the browser. The only optional server flow is the consent-gated, client-side-encrypted 30-day recovery backup (the server stores ciphertext it cannot read). The deployed app also sends anonymous usage analytics (page views and outbound-link clicks) to Plausible; no project or simulation data is tracked, and you can turn it off anytime from the Storage card in the toolbar.
+
 ## Local Development
 
 Install dependencies and start the API and web app from the repo root:
@@ -25,6 +27,8 @@ OpenCAE Core packages live in this monorepo under `packages/*`; no sibling check
 The API creates and seeds the local SQLite database if needed. The web app can create a blank project, open a local `.opencae.json` project file, load bracket/beam/cantilever samples, or upload STEP, STP, STL, and OBJ models for the local viewer.
 
 **The web app does not call the API.** Since the July 2026 local-first move ([docs/cloud-retirement.md](docs/cloud-retirement.md)), the workspace creates projects, meshes, solves, and writes reports entirely in the browser; it makes no request to `/api`. `apps/opencae-api` and the `services/*` implementations behind it are a separate, independently runnable reference backend over the same schema — useful for inspecting the data model or driving the flow over HTTP, but not part of the production path. `pnpm dev` starts both so the reference backend stays exercised; running only `pnpm --filter @opencae/web dev` gives you the full product.
+
+> **Security note:** the reference API has no authentication or tenant isolation by design. It binds `127.0.0.1` by default and must stay loopback-only; never expose it as a shared or network-reachable service. The server logs a warning if started on a non-loopback host.
 
 ## Current Workflow
 
