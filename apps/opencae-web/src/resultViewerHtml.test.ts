@@ -67,4 +67,22 @@ describe("self-contained result viewer", () => {
       surfaceMesh: { id: "surface", nodes: [[0, 0, 0], [1, 0, 0], [0, 1, 0]], triangles: [[0, 1, 2]], coordinateSpace: "model-mm" }
     })).toThrow("unsafe HTML characters");
   });
+
+  test("renders metrics through text-only DOM, with no innerHTML sink", () => {
+    // The export-time unit check above fails closed, but the generated viewer
+    // is a standalone file a recipient could edit. Metric values and units
+    // must be written with textContent so no payload string can become markup.
+    const html = buildResultViewerHtml({
+      project: bracketDemoProject,
+      study: bracketDemoProject.studies[0]!,
+      displayModel: bracketDisplayModel,
+      summary,
+      fields,
+      surfaceMesh: { id: "surface", nodes: [[0, 0, 0], [1, 0, 0], [0, 1, 0]], triangles: [[0, 1, 2]], coordinateSpace: "model-mm" }
+    });
+
+    expect(html).not.toContain("innerHTML");
+    expect(html).toContain("metrics.replaceChildren(");
+    expect(html).toContain("st.textContent=fmt(v)+' '+u");
+  });
 });
