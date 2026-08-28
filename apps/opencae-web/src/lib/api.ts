@@ -1,4 +1,4 @@
-import { MAX_EMBEDDED_MODEL_BYTES, MAX_VISUAL_MESH_BYTES, isModalResultSummary, isStructuralResultSummary } from "@opencae/schema";
+import { MAX_EMBEDDED_MODEL_BYTES, MAX_VISUAL_MESH_BYTES, isStructuralResultSummary } from "@opencae/schema";
 import type { AnalysisMesh, CustomMaterial, DisplayModel, DynamicSolverSettings, MeshConvergenceRecord, MeshQuality, Project, ResultField, ResultRenderBounds, ResultSummary, RunEvent, RunVariantRef, RunVariantResult, Study, StudyRun } from "@opencae/schema";
 import type { StepGeometryInspection, StepGeometryRepairReport } from "@opencae/mesh-intake";
 import { assertCompatibleManufacturingProcess, resolveMaterial } from "@opencae/materials";

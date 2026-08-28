@@ -147,7 +147,8 @@ async function connectCdp() {
       pending.delete(message.id);
       return;
     }
-    eventHandlers.get(message.method)?.(message.params);
+    const handler = eventHandlers.get(message.method);
+    if (typeof handler === "function") handler(message.params);
   };
   return {
     send: (method, params = {}) =>

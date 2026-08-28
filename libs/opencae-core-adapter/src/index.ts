@@ -1143,7 +1143,12 @@ function ensureElementSetForSelection(
 }
 
 function normalizedSelectionName(value: string): string {
-  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  const collapsed = value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_");
+  let start = 0;
+  let end = collapsed.length;
+  while (start < end && collapsed.charCodeAt(start) === 0x5f) start += 1;
+  while (end > start && collapsed.charCodeAt(end - 1) === 0x5f) end -= 1;
+  return collapsed.slice(start, end);
 }
 
 function facetsForDisplaySelection(
