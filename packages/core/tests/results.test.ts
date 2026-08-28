@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { describe, expect, test } from "vitest";
 import {
   assertProductionSurfaceFieldInvariant,
+  createCoreResultField,
   solverSurfaceMeshFromModel,
   validateProductionSurfaceFieldInvariant,
   validateCoreResult,
@@ -51,6 +52,57 @@ describe("Core result structures", () => {
     expect(surfaceMesh.triangles).toHaveLength(4);
     expect(surfaceMesh.nodes).toHaveLength(4);
     expect([...surfaceMesh.nodeMap].sort()).toEqual([0, 1, 2, 3]);
+  });
+
+  test("assembles and validates element-scale fields without spread-argument stack overflow", () => {
+    // Tet4 meshes at the top of the browser solve budget carry ~300k elements.
+    // Math.min(...values) throws RangeError above ~120k spread arguments, so
+    // element-located field extents must come from a loop.
+    const values = Array.from({ length: 300_000 }, (_, index) => (index % 997) - 500);
+    const field = createCoreResultField({
+      id: "stress-von-mises-element",
+      type: "stress",
+      component: "von_mises",
+      location: "element",
+      values,
+      units: "MPa",
+      meshRef: "solver-volume"
+    });
+    expect(field.values).toHaveLength(300_000);
+    expect(field.min).toBe(-500);
+    expect(field.max).toBe(496);
+
+    const surfaceMesh = solverSurfaceMeshFromModel(createSingleTetModel());
+    const result: CoreSolveResult = {
+      summary: {
+        maxStress: 496,
+        maxStressUnits: "MPa",
+        maxDisplacement: 0.1,
+        maxDisplacementUnits: "mm",
+        reactionForce: 5,
+        reactionForceUnits: "N",
+        provenance: {
+          kind: "opencae_core_fea",
+          solver: "opencae-core-cpu-tet4",
+          resultSource: "computed",
+          meshSource: "actual_volume_mesh",
+          units: "mm-N-s-MPa"
+        }
+      },
+      fields: [field],
+      surfaceMesh,
+      diagnostics: [],
+      provenance: {
+        kind: "opencae_core_fea",
+        solver: "opencae-core-cpu-tet4",
+        resultSource: "computed",
+        meshSource: "actual_volume_mesh",
+        units: "mm-N-s-MPa"
+      }
+    };
+    // Alignment errors are fine here (one-tet fixture vs. 300k values); the
+    // regression is that validation returns at all instead of throwing.
+    expect(() => validateCoreResult(result)).not.toThrow();
   });
 
   test("validates finite WebGPU fields and surface mesh triangle references", () => {

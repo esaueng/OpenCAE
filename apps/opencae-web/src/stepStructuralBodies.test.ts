@@ -116,6 +116,35 @@ describe("STEP structural body planning", () => {
     ]]);
     expect(planStepStructuralBodies(study, registry)).toBeNull();
   });
+
+  it("groups long fuse chains without recursion depth limits", () => {
+    // Contacts ordered high-to-low build a parent chain as deep as the body
+    // count in the union-find; a recursive find overflows the stack on
+    // crafted projects with thousands of bodies.
+    const bodyCount = 10_000;
+    const registry = buildStepFaceRegistry(
+      Array.from({ length: bodyCount }, (_, index) =>
+        oneFaceBody([[index * 10, 0, 0], [index * 10 + 1, 0, 0], [index * 10, 1, 0]], [index * 10, 0, 1]))
+    );
+    const study = payloadStudy();
+    study.namedSelections = Array.from({ length: bodyCount }, (_, index) => faceSelection(`fuse-${index}`, `step-face-${index}`));
+    study.contacts = [];
+    for (let index = bodyCount - 1; index >= 1; index -= 1) {
+      study.contacts.push({
+        id: `fuse-contact-${index}`,
+        status: "ready",
+        type: "fuse",
+        source: `fuse-${index}`,
+        target: `fuse-${index - 1}`,
+        kinematics: "small_sliding"
+      });
+    }
+
+    const groups = stepFuseBodyGroups(study, registry);
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toHaveLength(bodyCount);
+  });
 });
 
 function payloadStudy(): Study {

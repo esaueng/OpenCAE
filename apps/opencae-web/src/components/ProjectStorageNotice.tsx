@@ -5,12 +5,14 @@ interface ProjectStorageNoticeProps {
   preference: CloudBackupPreference | null;
   busy: boolean;
   recoveryNeeded: boolean;
+  analyticsEnabled: boolean;
   onChooseCloud: () => void;
   onChooseLocal: () => void;
+  onAnalyticsEnabledChange: (enabled: boolean) => void;
   onDownloadProject?: () => void;
 }
 
-export function ProjectStorageNotice({ preference, busy, recoveryNeeded, onChooseCloud, onChooseLocal, onDownloadProject }: ProjectStorageNoticeProps) {
+export function ProjectStorageNotice({ preference, busy, recoveryNeeded, analyticsEnabled, onChooseCloud, onChooseLocal, onAnalyticsEnabledChange, onDownloadProject }: ProjectStorageNoticeProps) {
   const title = preference === "cloud"
     ? recoveryNeeded ? "Encrypted recovery is on" : "Encrypted recovery is ready"
     : preference === "local"
@@ -79,6 +81,17 @@ export function ProjectStorageNotice({ preference, busy, recoveryNeeded, onChoos
           </span>
         </button>
       )}
+      <label className="shortcut-toggle storage-analytics-toggle">
+        <input
+          type="checkbox"
+          checked={analyticsEnabled}
+          onChange={(event) => onAnalyticsEnabledChange(event.currentTarget.checked)}
+        />
+        <span>
+          <strong>Anonymous usage analytics</strong>
+          <small>Page views and outbound-link clicks go to Plausible — never project, geometry, or simulation data. Turning this off applies from the next app launch.</small>
+        </span>
+      </label>
       <small className="storage-recovery-footnote">Remembered in this browser. Change it anytime from Storage in the toolbar.</small>
     </aside>
   );

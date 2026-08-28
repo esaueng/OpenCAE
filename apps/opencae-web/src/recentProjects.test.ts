@@ -79,6 +79,15 @@ describe("recent projects", () => {
     await expect(projectNameFromFile(new File([JSON.stringify({ project: { id: "broken" } })], "bad.json"))).rejects.toThrow("not a valid OpenCAE project");
   });
 
+  test("rejects oversized files before reading them into memory", async () => {
+    // The probe runs before the import path's 96 MiB cap, so it must enforce
+    // the same limit itself instead of reading a multi-GB pick.
+    const oversized = new File(["{}"], "oversized.json");
+    Object.defineProperty(oversized, "size", { value: 97 * 1024 * 1024 });
+
+    await expect(projectNameFromFile(oversized)).rejects.toThrow("too large");
+  });
+
   test("uses the handle picker only when both File System Access and IndexedDB are available", async () => {
     const selectedHandle = handle("fixture.opencae.json");
     const showOpenFilePicker = vi.fn(async () => [selectedHandle]);

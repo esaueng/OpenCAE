@@ -35,6 +35,7 @@ import { buildResultViewerHtml, suggestedResultHtmlFilename } from "./resultView
 import { buildAutosavedWorkspace, buildAutosavedWorkspaceUiSnapshot, flushAutosavedWorkspace, installAutosavePageHideFlush, localRunIdForResultsRestore, parseAutosavedWorkspacePayload, readAutosavedWorkspace, scheduleAutosavedUiSnapshotWrite, scheduleAutosavedWorkspaceWrite, WORKSPACE_LOG_LIMIT } from "./appPersistence";
 import type { AutosavedWorkspace, WorkspaceUiSnapshot } from "./appPersistence";
 import { readCloudBackupPreference, requestPersistentBrowserStorage, restoreEncryptedCloudBackup, saveEncryptedCloudBackup, writeCloudBackupPreference, type CloudBackupPreference } from "./cloudBackup";
+import { isAnalyticsEnabled, setAnalyticsEnabled } from "./analytics";
 import {
   canNavigateToStep,
   isEditableShortcutTarget,
@@ -184,6 +185,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const [dataExportError, setDataExportError] = useState<string | null>(null);
   const [overflowRecoveryRequest, setOverflowRecoveryRequest] = useState(0);
   const [cloudBackupPreference, setCloudBackupPreference] = useState<CloudBackupPreference | null>(() => readCloudBackupPreference());
+  const [analyticsEnabled, setAnalyticsEnabledState] = useState(() => isAnalyticsEnabled());
   const [overflowRecoveryNeeded, setOverflowRecoveryNeeded] = useState(false);
   const [storageRecoveryNoticeOpen, setStorageRecoveryNoticeOpen] = useState(false);
   const [cloudBackupBusy, setCloudBackupBusy] = useState(false);
@@ -2321,6 +2323,14 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     setHomeRequested(true);
   }
 
+  function handleAnalyticsEnabledChange(enabled: boolean) {
+    if (!setAnalyticsEnabled(enabled)) {
+      pushMessage("OpenCAE could not save the analytics choice in this browser. The current setting was not changed.");
+      return;
+    }
+    setAnalyticsEnabledState(enabled);
+  }
+
   function handleToggleSingleKeyShortcuts() {
     setSingleKeyShortcutsEnabled((enabled) => {
       const next = !enabled;
@@ -2426,8 +2436,10 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         preference={cloudBackupPreference}
         busy={cloudBackupBusy}
         recoveryNeeded={overflowRecoveryNeeded}
+        analyticsEnabled={analyticsEnabled}
         onChooseCloud={() => handleStoragePreference("cloud")}
         onChooseLocal={() => handleStoragePreference("local")}
+        onAnalyticsEnabledChange={handleAnalyticsEnabledChange}
         onDownloadProject={() => {
           setStorageRecoveryNoticeOpen(false);
           void handleSaveProject();

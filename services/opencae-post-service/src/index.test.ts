@@ -133,6 +133,23 @@ describe("LocalReportProvider", () => {
     expect(buildPdfReport("run-a", dynamicSummary).toString("latin1")).toContain("OpenCAE DYNAMIC STRUCTURAL SIMULATION");
     expect(buildPdfReport("run-a", summary(500)).toString("latin1")).toContain("OpenCAE STATIC STRESS SIMULATION");
   });
+
+  test("escapes modal report counters even when the summary carries markup", () => {
+    // The solver emits real numbers, but the report HTML is a trust boundary:
+    // a malformed summary must not become markup in a served text/html page.
+    const hostile = "<img src=x onerror=alert(1)>";
+    const modalSummary = {
+      analysisType: "modal_analysis",
+      requestedModeCount: hostile,
+      convergedModeCount: hostile,
+      modes: [{ modeIndex: hostile, frequencyHz: 42, eigenvalue: 1, scaledResidual: 0.001 }]
+    } as unknown as ResultSummary;
+
+    const html = buildHtmlReport("run-modal", modalSummary);
+
+    expect(html).not.toContain(hostile);
+    expect(html).toContain("&lt;img src=x onerror=alert(1)&gt;");
+  });
 });
 
 function summary(reactionForce: number, safetyFactor = 2): ResultSummary {

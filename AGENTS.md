@@ -37,7 +37,7 @@ pnpm --filter @opencae/web check:bundle
 
 There is no root lint script and CI has no lint job. The five `packages/*` lint scripts are aliases for their typechecks; `pnpm typecheck` is the workspace-wide check.
 
-Known baseline failure, audited 2026-08-11: `pnpm test` has 1 failure out of 1,543 tests in `apps/opencae-web/src/cloudBackup.test.ts`. Its mocked backup expires at `2026-08-11T12:00:00.000Z`, and production restore code correctly returns `null` after that time; the targeted test reproduces on untouched `origin/main`. The latest recorded main CI run (`bb306e0`, 2026-08-01) passed before the fixture expired. Every other CI verification command in the block passed; dependency installation was not rerun.
+Re-verified 2026-08-15: every command in the block passes, including `pnpm test` (1,569 tests). The earlier known baseline failure in `apps/opencae-web/src/cloudBackup.test.ts` — a mocked backup expiring at `2026-08-11T12:00:00.000Z`, audited 2026-08-11 — no longer exists; the fixture now uses relative and far-future dates.
 
 Do not use `deploy:*`, `db:*`, or `reset:local` as verification commands. They require credentials, external state, or mutate local data; run them only when the task explicitly requires that operation.
 
@@ -48,4 +48,4 @@ Do not use `deploy:*`, `db:*`, or `reset:local` as verification commands. They r
 - Coordinate systems are explicit. Core models accept `m-N-s-Pa` or `mm-N-s-MPa`, while display geometry may use a different coordinate space. Preserve `coordinateSystem.solverUnits` and `renderCoordinateSpace`; use the existing `@opencae/units` and mesh-intake conversion paths instead of inferring units from magnitudes.
 - Computed production fields must remain tied to the solver surface mesh. `packages/core` validates field length/alignment and provenance; preview, estimate, benchmark, legacy, and computed FEA tiers must not be relabeled as one another.
 - The production web build intentionally rewrites the emitted raw Gmsh WASM into a gzip asset plus `gmsh-wasm.json`, then generates the service-worker precache. Keep that build ordering; the Vite plugin and final bundle-budget command enforce the per-asset and precache limits.
-- The Worker still owns `/api/project-backups` and `/health`; those routes do not make `apps/opencae-api` part of production. Keep browser solves local and use `verify-cloudflare-config` after changing Wrangler files or deploy scripts.
+- The Worker still owns `/api/project-backups` and `/health`; those routes do not make `apps/opencae-api` part of production. Keep browser solves local and use `verify-cloudflare-config` after changing Wrangler files or deploy scripts. A daily cron trigger (`17 3 * * *`) sweeps the backup bucket and deletes objects past their 30-day expiry, because request-time expiry only runs when an expired backup is read.

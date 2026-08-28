@@ -7,7 +7,7 @@ import { ProjectStorageNotice } from "./ProjectStorageNotice";
 describe("ProjectStorageNotice", () => {
   test("offers remembered cloud and local choices without modal semantics", () => {
     const html = renderToStaticMarkup(
-      <ProjectStorageNotice preference={null} busy={false} recoveryNeeded onChooseCloud={vi.fn()} onChooseLocal={vi.fn()} />
+      <ProjectStorageNotice preference={null} busy={false} recoveryNeeded analyticsEnabled={true} onChooseCloud={vi.fn()} onChooseLocal={vi.fn()} onAnalyticsEnabledChange={vi.fn()} />
     );
 
     expect(html).toContain("Choose how to protect this project");
@@ -21,7 +21,7 @@ describe("ProjectStorageNotice", () => {
 
   test("shows and marks a previously saved local preference", () => {
     const html = renderToStaticMarkup(
-      <ProjectStorageNotice preference="local" busy={false} recoveryNeeded={false} onChooseCloud={vi.fn()} onChooseLocal={vi.fn()} />
+      <ProjectStorageNotice preference="local" busy={false} recoveryNeeded={false} analyticsEnabled={true} onChooseCloud={vi.fn()} onChooseLocal={vi.fn()} onAnalyticsEnabledChange={vi.fn()} />
     );
 
     expect(html).toContain("This project stays local");
@@ -32,7 +32,7 @@ describe("ProjectStorageNotice", () => {
 
   test("explains the saved preference before a new project needs overflow recovery", () => {
     const html = renderToStaticMarkup(
-      <ProjectStorageNotice preference={null} busy={false} recoveryNeeded={false} onChooseCloud={vi.fn()} onChooseLocal={vi.fn()} />
+      <ProjectStorageNotice preference={null} busy={false} recoveryNeeded={false} analyticsEnabled={true} onChooseCloud={vi.fn()} onChooseLocal={vi.fn()} onAnalyticsEnabledChange={vi.fn()} />
     );
 
     expect(html).toContain("Choose your recovery preference");
@@ -46,6 +46,8 @@ describe("ProjectStorageNotice", () => {
     expect(workspaceSource).toContain("<ProjectStorageNotice");
     expect(workspaceSource).toContain("readCloudBackupPreference()");
     expect(workspaceSource).toContain("writeCloudBackupPreference(preference)");
+    expect(workspaceSource).toContain("if (!setAnalyticsEnabled(enabled))");
+    expect(workspaceSource).toContain("The current setting was not changed.");
     expect(workspaceSource).toContain('title="Review project storage choice"');
     expect(workspaceSource.match(/\{renderStorageRecoveryNotice\(\)\}/g)).toHaveLength(2);
     expect(workspaceSource).not.toContain("storageRecoveryAvailable");
@@ -55,15 +57,31 @@ describe("ProjectStorageNotice", () => {
 
   test("offers the full project download alongside the recovery choices", () => {
     const html = renderToStaticMarkup(
-      <ProjectStorageNotice preference="local" busy={false} recoveryNeeded={false} onChooseCloud={vi.fn()} onChooseLocal={vi.fn()} onDownloadProject={vi.fn()} />
+      <ProjectStorageNotice preference="local" busy={false} recoveryNeeded={false} analyticsEnabled={true} onChooseCloud={vi.fn()} onChooseLocal={vi.fn()} onAnalyticsEnabledChange={vi.fn()} onDownloadProject={vi.fn()} />
     );
     const withoutHandler = renderToStaticMarkup(
-      <ProjectStorageNotice preference="local" busy={false} recoveryNeeded={false} onChooseCloud={vi.fn()} onChooseLocal={vi.fn()} />
+      <ProjectStorageNotice preference="local" busy={false} recoveryNeeded={false} analyticsEnabled={true} onChooseCloud={vi.fn()} onChooseLocal={vi.fn()} onAnalyticsEnabledChange={vi.fn()} />
     );
 
     expect(html).toContain("Download project file");
     expect(html).toContain("Complete project, saved to your disk");
     expect(withoutHandler).not.toContain("Download project file");
+  });
+
+  test("discloses anonymous analytics with an opt-out toggle", () => {
+    const html = renderToStaticMarkup(
+      <ProjectStorageNotice preference="local" busy={false} recoveryNeeded={false} analyticsEnabled={true} onChooseCloud={vi.fn()} onChooseLocal={vi.fn()} onAnalyticsEnabledChange={vi.fn()} />
+    );
+    const optedOut = renderToStaticMarkup(
+      <ProjectStorageNotice preference="local" busy={false} recoveryNeeded={false} analyticsEnabled={false} onChooseCloud={vi.fn()} onChooseLocal={vi.fn()} onAnalyticsEnabledChange={vi.fn()} />
+    );
+
+    expect(html).toContain("Anonymous usage analytics");
+    expect(html).toContain("Page views and outbound-link clicks go to Plausible");
+    expect(html).toContain("never project, geometry, or simulation data");
+    expect(html).toContain("next app launch");
+    expect(html).toContain('type="checkbox"');
+    expect(optedOut).toContain("Anonymous usage analytics");
   });
 
   test("routes the local project export through the storage card and Results menu, not the top bar", () => {

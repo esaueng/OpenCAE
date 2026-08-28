@@ -1535,6 +1535,10 @@ img {
   line-height: 1.4;
 }
 
+.storage-analytics-toggle {
+  margin-top: 4px;
+}
+
 .shortcut-popover-backdrop {
   position: fixed;
   z-index: var(--z-modal-backdrop);

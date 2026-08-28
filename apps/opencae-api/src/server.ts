@@ -329,8 +329,13 @@ api.put("/api/studies/:studyId", mutatingRateLimit, async (request, reply) => {
   const merged = { ...study, ...request.body, id: study.id, projectId: study.projectId };
   const parsed = StudySchema.safeParse(merged);
   if (!parsed.success) return reply.code(400).send({ error: "Invalid study update.", issues: parsed.error.issues.map((issue) => issue.message) });
-  db.upsertStudy(parsed.data);
-  return { study: parsed.data };
+  // Artifact refs (mesh/result/report) are server-owned storage keys. Strip
+  // any ref that does not point inside the study's own project so a study
+  // update cannot inject cross-project artifact references (mirrors the
+  // withCanonicalArtifactRefs guard on the import path).
+  const sanitized = withCanonicalStudyArtifactRefs(parsed.data);
+  db.upsertStudy(sanitized);
+  return { study: sanitized };
 });
 
 api.post("/api/studies/:studyId/validate", async (request, reply) => {
@@ -805,8 +810,28 @@ function projectWithImportedResultRefs(project: Project, results: ImportedResult
   };
 }
 
+function isCanonicalArtifactRef(projectId: string, ref: unknown): ref is string {
+  return typeof ref === "string" && ref.startsWith(`${projectId}/`) && !ref.includes("..");
+}
+
+function withCanonicalStudyArtifactRefs(study: Study): Study {
+  const isCanonicalRef = (ref: unknown): ref is string => isCanonicalArtifactRef(study.projectId, ref);
+  return {
+    ...study,
+    meshSettings: isCanonicalRef(study.meshSettings.meshRef)
+      ? study.meshSettings
+      : { ...study.meshSettings, meshRef: undefined },
+    runs: study.runs.map((run) => ({
+      ...run,
+      meshRef: isCanonicalRef(run.meshRef) ? run.meshRef : undefined,
+      resultRef: isCanonicalRef(run.resultRef) ? run.resultRef : undefined,
+      reportRef: isCanonicalRef(run.reportRef) ? run.reportRef : undefined
+    }))
+  };
+}
+
 function withCanonicalArtifactRefs(project: Project): Project {
-  const isCanonicalRef = (ref: unknown): ref is string => typeof ref === "string" && ref.startsWith(`${project.id}/`) && !ref.includes("..");
+  const isCanonicalRef = (ref: unknown): ref is string => isCanonicalArtifactRef(project.id, ref);
   return {
     ...project,
     geometryFiles: project.geometryFiles.map((geometry, index) => ({
@@ -1045,7 +1070,15 @@ export async function buildApi() {
   return api;
 }
 
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "::1", "localhost"]);
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const port = Number(process.env.PORT ?? 4317);
+  if (!LOOPBACK_HOSTS.has(API_LISTEN_HOST)) {
+    api.log.warn(
+      { host: API_LISTEN_HOST },
+      "opencae-api has no authentication or tenant isolation: it is the local-first reference backend. Binding it to a non-loopback interface gives anyone who can reach it anonymous read/write access to every project, upload, and run. Do not expose it as a shared service."
+    );
+  }
   await api.listen({ port, host: API_LISTEN_HOST });
 }
