@@ -121,8 +121,11 @@ describe("STEP geometry inspection and repair", () => {
       profile: "explicit",
       cappedSurfaceCount: 1,
       originalVolumeCount: 0,
-      repairedVolumeCount: 1
+      repairedVolumeCount: 1,
+      repairedVolumeMm3: expect.any(Number)
     });
+    expect(repaired.repair.repairedVolumeMm3).toBeGreaterThan(0);
+    expect(repaired.repair.relativeVolumeChange).toBeUndefined();
     expect(repaired.inspection).toMatchObject({
       status: "solid",
       volumeCount: 1,

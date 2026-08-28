@@ -1299,7 +1299,7 @@ function repairImportedStepGeometry(
     throw new StepGeometryError("CAD healing produced a zero-volume or degenerate solid, so the model is not safe to simulate.");
   }
   const relativeBoundsChange = relativeChange(originalBoundsDiagonal, repairedBoundsDiagonal);
-  const relativeVolumeChange = originalVolumeMm3 !== undefined && repairedVolumeMm3 !== undefined
+  const relativeVolumeChange = originalVolumeMm3 !== undefined
     ? relativeChange(originalVolumeMm3, repairedVolumeMm3)
     : undefined;
   const isAutomatic = profile !== "explicit";
@@ -1324,7 +1324,7 @@ function repairImportedStepGeometry(
     originalOrphanSurfaceCount,
     repairedOrphanSurfaceCount,
     ...(originalVolumeMm3 !== undefined ? { originalVolumeMm3 } : {}),
-    ...(repairedVolumeMm3 !== undefined ? { repairedVolumeMm3 } : {}),
+    repairedVolumeMm3,
     ...(relativeVolumeChange !== undefined ? { relativeVolumeChange } : {}),
     relativeBoundsChange
   };

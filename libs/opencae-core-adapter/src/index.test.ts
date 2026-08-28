@@ -639,6 +639,38 @@ describe("per-model solver backend resolution", () => {
     }
   });
 
+  test("matches imported element-set names with long punctuation runs in multi-body models", () => {
+    const physicalName = `!!Body${"_".repeat(50_000)}Selection??`;
+    const storedModel = actualCoreModelFixture();
+    storedModel.elementSets = [{ name: physicalName, elements: [0] }];
+    const meshSettings = actualMeshSettings();
+    const actualModel = meshSettings.summary?.artifacts?.actualCoreModel;
+    if (!actualModel) throw new Error("Expected the actual Core model fixture.");
+    actualModel.model = storedModel;
+    const study = autoStudy({
+      namedSelections: [{
+        id: "selection-body-1",
+        name: "Body Selection",
+        entityType: "body",
+        geometryRefs: [{ bodyId: "body-1", entityType: "body", entityId: "body-1", label: "Body Selection" }],
+        fingerprint: "body-1"
+      }, ...studyFixture().namedSelections],
+      loads: [{
+        id: "volume",
+        type: "volume_force",
+        selectionRef: "selection-body-1",
+        parameters: { value: 2.5, units: "kN/m^3", direction: [0, -1, 0] },
+        status: "complete"
+      }],
+      meshSettings
+    });
+
+    const model = buildOpenCaeCoreModelForStudy(study, { ...cantileverDisplayModel(), bodyCount: 2 }).model;
+    const volume = model.loads.find((load) => load.type === "bodyForceDensity");
+
+    expect(volume).toMatchObject({ type: "bodyForceDensity", elementSet: physicalName });
+  });
+
   test("rejects unverifiable index-only mappings from pre-alias mesh artifacts", () => {
     const storedModel = actualCoreModelFixture();
     storedModel.surfaceFacets = storedModel.surfaceFacets.map(({ sourceSelectionRef: _selection, sourceFaceId: _face, ...facet }) => facet);
