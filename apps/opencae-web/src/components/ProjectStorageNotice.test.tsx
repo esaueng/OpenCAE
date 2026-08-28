@@ -46,6 +46,8 @@ describe("ProjectStorageNotice", () => {
     expect(workspaceSource).toContain("<ProjectStorageNotice");
     expect(workspaceSource).toContain("readCloudBackupPreference()");
     expect(workspaceSource).toContain("writeCloudBackupPreference(preference)");
+    expect(workspaceSource).toContain("if (!setAnalyticsEnabled(enabled))");
+    expect(workspaceSource).toContain("The current setting was not changed.");
     expect(workspaceSource).toContain('title="Review project storage choice"');
     expect(workspaceSource.match(/\{renderStorageRecoveryNotice\(\)\}/g)).toHaveLength(2);
     expect(workspaceSource).not.toContain("storageRecoveryAvailable");

@@ -264,7 +264,7 @@ export function BottomPanel({ status, logs, meshStatus, solverStatus, onClearLog
         </div>
         <a className="status-attribution" href={ESAU_ENGINEERING_URL} target="_blank" rel="noreferrer">Built by Esau Engineering</a>
         <div className="status-links" aria-label="Project links">
-          <a className={donateLinkClassName} href="https://ko-fi.com/petergn" target="_blank" rel="noreferrer" title="Support OpenCAE on Ko-fi" onMouseEnter={runCoffeeAnimation}>
+          <a className={donateLinkClassName} href="https://ko-fi.com/esau" target="_blank" rel="noreferrer" title="Support OpenCAE on Ko-fi" onMouseEnter={runCoffeeAnimation}>
             <span className="coffee-mark" aria-hidden="true" key={`coffee-mark-${coffeeAnimationRun}`}>
               <span className="coffee-steam coffee-steam-one" />
               <span className="coffee-steam coffee-steam-two" />

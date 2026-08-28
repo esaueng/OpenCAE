@@ -99,6 +99,7 @@ describe("Cloudflare local-first worker", () => {
       r2_buckets?: unknown;
       migrations?: Array<{ tag?: string; deleted_classes?: string[] }>;
       assets?: { run_worker_first?: string[] };
+      triggers?: { crons?: string[] };
     };
 
     expect(defaultConfig.name).toBe("opencae");
@@ -107,6 +108,7 @@ describe("Cloudflare local-first worker", () => {
     expect(defaultConfig.durable_objects).toBeUndefined();
     expect(defaultConfig.r2_buckets).toEqual([{ binding: "PROJECT_BACKUPS", bucket_name: "opencae-project-backups" }]);
     expect(defaultConfig.assets?.run_worker_first).toEqual(expect.arrayContaining(["/api/*", "/health"]));
+    expect(defaultConfig.triggers?.crons).toEqual(["17 3 * * *"]);
     // Checked-in migrations break Workers Builds version uploads; the retired
     // Durable Object cleanup is a one-off manual deploy step documented in
     // docs/cloud-retirement.md.

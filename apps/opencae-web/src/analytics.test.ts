@@ -33,7 +33,7 @@ describe("initPlausibleAnalytics", () => {
 
     expect(initMock).toHaveBeenCalledWith({
       domain: "cae.esau.app",
-      fileDownloads: true,
+      fileDownloads: false,
       outboundLinks: true
     });
   });
@@ -46,7 +46,7 @@ describe("initPlausibleAnalytics", () => {
 
     expect(initMock).toHaveBeenCalledWith({
       domain: "preview.cae.esau.app",
-      fileDownloads: true,
+      fileDownloads: false,
       outboundLinks: true
     });
   });
@@ -70,11 +70,25 @@ describe("initPlausibleAnalytics", () => {
     const store = stubBrowserLocalStorage();
 
     expect(isAnalyticsEnabled()).toBe(true);
-    setAnalyticsEnabled(false);
+    expect(setAnalyticsEnabled(false)).toBe(true);
     expect(store.get("opencae.analytics.optOut.v1")).toBe("1");
     expect(isAnalyticsEnabled()).toBe(false);
-    setAnalyticsEnabled(true);
+    expect(setAnalyticsEnabled(true)).toBe(true);
     expect(store.has("opencae.analytics.optOut.v1")).toBe(false);
+    expect(isAnalyticsEnabled()).toBe(true);
+  });
+
+  test("reports a storage failure instead of claiming the preference changed", () => {
+    vi.stubGlobal("window", {
+      localStorage: {
+        getItem: () => null,
+        setItem: () => { throw new Error("storage unavailable"); },
+        removeItem: () => { throw new Error("storage unavailable"); }
+      }
+    });
+
+    expect(setAnalyticsEnabled(false)).toBe(false);
+    expect(setAnalyticsEnabled(true)).toBe(false);
     expect(isAnalyticsEnabled()).toBe(true);
   });
 });

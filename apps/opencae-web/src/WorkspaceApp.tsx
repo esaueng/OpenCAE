@@ -2324,7 +2324,10 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   }
 
   function handleAnalyticsEnabledChange(enabled: boolean) {
-    setAnalyticsEnabled(enabled);
+    if (!setAnalyticsEnabled(enabled)) {
+      pushMessage("OpenCAE could not save the analytics choice in this browser. The current setting was not changed.");
+      return;
+    }
     setAnalyticsEnabledState(enabled);
   }
 
