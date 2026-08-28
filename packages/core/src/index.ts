@@ -147,5 +147,7 @@ export {
   validateProductionSurfaceFieldInvariant,
   validateCoreResult
 } from "./results";
+export type { FiniteExtrema } from "./numeric";
+export { finiteExtrema } from "./numeric";
 export { normalizeModelJson } from "./normalize";
 export { preflightCoreModel, validateModelJson } from "./validation";

@@ -2,6 +2,7 @@ import {
   connectedComponents,
   deriveFixedSupportNodeSetFromSurface,
   elevateTet4MeshToTet10,
+  finiteExtrema,
   solverSurfaceMeshFromModel,
   validateModelJson,
   volumeMeshToModelJson,
@@ -1303,9 +1304,15 @@ export function staticEnvelopeVariant(variants: RunVariantResult[], runId: strin
   const referenceStress = stressFields[0]!;
   const referenceDisplacement = displacementFields[0]!;
   const structuralSummaries = variants.map((variant) => variant.summary).filter((summary): summary is Extract<ResultSummary, { maxStress: number }> => "maxStress" in summary);
-  const maxStress = Math.max(...stress, 0);
-  const maxDisplacement = Math.max(...displacement, 0);
-  const safetyFactor = Math.min(...structuralSummaries.map((summary) => summary.safetyFactor).filter((value) => Number.isFinite(value) && value > 0), Number.POSITIVE_INFINITY);
+  const stressExtent = finiteExtrema(stress) ?? { min: 0, max: 0 };
+  const displacementExtent = finiteExtrema(displacement) ?? { min: 0, max: 0 };
+  const safetyFactor = finiteExtrema(structuralSummaries, (summary) => {
+    const value = summary.safetyFactor;
+    return Number.isFinite(value) && value > 0 ? value : Number.NaN;
+  })?.min ?? Number.POSITIVE_INFINITY;
+  const reactionForce = finiteExtrema(structuralSummaries, (summary) => summary.reactionForce)?.max ?? 0;
+  const maxStress = Math.max(stressExtent.max, 0);
+  const maxDisplacement = Math.max(displacementExtent.max, 0);
   return {
     id: "envelope",
     name: "Envelope",
@@ -1316,7 +1323,7 @@ export function staticEnvelopeVariant(variants: RunVariantResult[], runId: strin
       maxDisplacement,
       maxDisplacementUnits: referenceDisplacement.units,
       safetyFactor: Number.isFinite(safetyFactor) ? safetyFactor : 0,
-      reactionForce: Math.max(...structuralSummaries.map((summary) => summary.reactionForce), 0),
+      reactionForce: Math.max(reactionForce, 0),
       reactionForceUnits: structuralSummaries[0]?.reactionForceUnits ?? "N",
       provenance: structuralSummaries[0]?.provenance,
       diagnostics: []
@@ -1329,7 +1336,7 @@ export function staticEnvelopeVariant(variants: RunVariantResult[], runId: strin
         variantId: "envelope",
         component: "von_mises",
         values: stress,
-        min: Math.min(...stress),
+        min: stressExtent.min,
         max: maxStress
       },
       {
@@ -1339,7 +1346,7 @@ export function staticEnvelopeVariant(variants: RunVariantResult[], runId: strin
         variantId: "envelope",
         values: displacement,
         vectors: displacementVectors,
-        min: Math.min(...displacement),
+        min: displacementExtent.min,
         max: maxDisplacement
       }
     ],

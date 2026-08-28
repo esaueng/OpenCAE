@@ -1,3 +1,4 @@
+import { finiteExtrema, type FiniteExtrema } from "@opencae/core";
 import { isModalResultSummary, isStructuralResultSummary, isThermalResultSummary } from "@opencae/schema";
 import type { DisplayFace, ResultField, ResultSummary, StructuralResultSummary } from "@opencae/schema";
 import { semanticResultFieldKey, stressComponentForField } from "./resultSelection";
@@ -487,9 +488,10 @@ export function normalizeTransientFieldRanges(fields: ResultField[]): ResultFiel
     if (!transient) continue;
     const key = transientFieldRangeKey(field);
     const existing = rangesByGroup.get(key) ?? { min: Number.POSITIVE_INFINITY, max: Number.NEGATIVE_INFINITY, transient, type: field.type, component: field.component };
-    for (const value of finiteFieldValues(field)) {
-      existing.min = Math.min(existing.min, value);
-      existing.max = Math.max(existing.max, value);
+    const extent = finiteFieldExtrema(field);
+    if (extent) {
+      existing.min = Math.min(existing.min, extent.min);
+      existing.max = Math.max(existing.max, extent.max);
     }
     rangesByGroup.set(key, existing);
   }
@@ -790,8 +792,9 @@ export function resultSamplesForFaces(faces: DisplayFace[], fields: ResultField[
     values: faces.map(() => neutralValue(mode)),
     diagnostic: undefined
   };
-  const min = Number.isFinite(field?.min) ? Number(field?.min) : Math.min(...mapped.values);
-  const max = Number.isFinite(field?.max) ? Number(field?.max) : Math.max(...mapped.values);
+  const mappedExtent = finiteExtrema(mapped.values) ?? { min: 0, max: 0 };
+  const min = Number.isFinite(field?.min) ? Number(field?.min) : mappedExtent.min;
+  const max = Number.isFinite(field?.max) ? Number(field?.max) : mappedExtent.max;
   const fieldSamples = field?.samples?.map((sample) => ({
     point: sample.point,
     normal: sample.normal,
@@ -978,16 +981,11 @@ export function normalizeValueForRender(value: number, min: number, max: number)
 
 export function fieldWithOwnValueRange(field: ResultField): ResultField {
   if (typeof field.frameIndex === "number") return field;
-  let min = Number.POSITIVE_INFINITY;
-  let max = Number.NEGATIVE_INFINITY;
-  const consider = (value: number) => {
-    if (!Number.isFinite(value)) return;
-    if (value < min) min = value;
-    if (value > max) max = value;
-  };
-  for (const value of field.values) consider(value);
-  for (const sample of field.samples ?? []) consider(sample.value);
-  if (min > max) return field;
+  const valueExtent = finiteExtrema(field.values);
+  const sampleExtent = finiteExtrema(field.samples ?? [], (sample) => sample.value);
+  if (!valueExtent && !sampleExtent) return field;
+  const min = Math.min(valueExtent?.min ?? Number.POSITIVE_INFINITY, sampleExtent?.min ?? Number.POSITIVE_INFINITY);
+  const max = Math.max(valueExtent?.max ?? Number.NEGATIVE_INFINITY, sampleExtent?.max ?? Number.NEGATIVE_INFINITY);
   return {
     ...field,
     min,
@@ -1003,13 +1001,15 @@ function isTransientField(field: ResultField): boolean {
   return typeof field.frameIndex === "number" && typeof field.timeSeconds === "number";
 }
 
-function finiteFieldValues(field: ResultField): number[] {
-  return [
-    ...field.values,
-    ...(field.samples?.map((sample) => sample.value) ?? []),
-    field.min,
-    field.max
-  ].filter(Number.isFinite);
+function finiteFieldExtrema(field: ResultField): FiniteExtrema | null {
+  const valueExtent = finiteExtrema(field.values);
+  const sampleExtent = finiteExtrema(field.samples ?? [], (sample) => sample.value);
+  const storedExtent = finiteExtrema([field.min, field.max]);
+  if (!valueExtent && !sampleExtent && !storedExtent) return null;
+  return {
+    min: Math.min(valueExtent?.min ?? Number.POSITIVE_INFINITY, sampleExtent?.min ?? Number.POSITIVE_INFINITY, storedExtent?.min ?? Number.POSITIVE_INFINITY),
+    max: Math.max(valueExtent?.max ?? Number.NEGATIVE_INFINITY, sampleExtent?.max ?? Number.NEGATIVE_INFINITY, storedExtent?.max ?? Number.NEGATIVE_INFINITY)
+  };
 }
 
 function normalizedRangeForFieldType(type: ResultField["type"], min: number, max: number, component?: ResultField["component"]): { min: number; max: number } {
@@ -1154,21 +1154,15 @@ export function withDerivedSurfaceSafetyFactorFields(results: SolverResultBundle
       (field.frameIndex ?? 0) === (frameIndex ?? 0));
     if (alreadyPresent) continue;
     const values = stressField.values.map((stress) => clampSafetyFactor(yieldMpa / Math.max(Math.abs(stress), 1e-9)));
-    // Loop instead of Math.min(...values): surface-node arrays can exceed the V8 argument limit.
-    let minValue = Number.POSITIVE_INFINITY;
-    let maxValue = Number.NEGATIVE_INFINITY;
-    for (const value of values) {
-      if (value < minValue) minValue = value;
-      if (value > maxValue) maxValue = value;
-    }
+    const extent = finiteExtrema(values) ?? { min: 0, max: 0 };
     derived.push({
       id: frameIndex === undefined ? `${stressField.id}-derived-safety-factor` : `${stressField.id}-derived-safety-factor-frame-${frameIndex}`,
       runId: stressField.runId,
       type: "safety_factor",
       location: "node",
       values,
-      min: Number.isFinite(minValue) ? minValue : 0,
-      max: Number.isFinite(maxValue) ? maxValue : 0,
+      min: extent.min,
+      max: extent.max,
       units: "ratio",
       surfaceMeshRef: stressField.surfaceMeshRef,
       ...(frameIndex === undefined ? {} : { frameIndex }),

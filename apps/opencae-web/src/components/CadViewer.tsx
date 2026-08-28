@@ -4,6 +4,7 @@ import { Billboard, Bounds, Edges, GizmoHelper, Html, Line, OrbitControls, Text,
 import { addAfterEffect, Canvas, useFrame, useThree } from "@react-three/fiber";
 import { configureTextBuilder } from "troika-three-text";
 import type { ThreeEvent } from "@react-three/fiber";
+import { finiteExtrema } from "@opencae/core";
 import type { DisplayFace, DisplayModel, MeshSummary, ResultField, ResultRenderBounds } from "@opencae/schema";
 import { globalBuildAxisToModelAxis } from "@opencae/study-core";
 import { SUPPORTED_GEOMETRY_FORMAT_LABEL } from "../geometryFormats";
@@ -6261,15 +6262,12 @@ function resultProbeSurfaceForFace(kind: SampleModelKind, face: DisplayFace): { 
 
 function resultProbeLabels(resultMode: ResultMode, resultFields: ResultField[], unitSystem: UnitSystem) {
   const field = selectedResultField(resultFields, resultMode);
-  const values = field ? [
-    ...field.values,
-    ...(field.samples?.map((sample) => sample.value) ?? [])
-  ].filter(Number.isFinite) : [];
-  if (field && values.length) {
-    const sorted = [...values].sort((left, right) => left - right);
-    const min = sorted[0] ?? field.min;
-    const mid = sorted[Math.floor(sorted.length / 2)] ?? (field.min + field.max) / 2;
-    const max = sorted.at(-1) ?? field.max;
+  const valueExtent = field ? finiteExtrema(field.values) : null;
+  const sampleExtent = field ? finiteExtrema(field.samples ?? [], (sample) => sample.value) : null;
+  if (field && (valueExtent || sampleExtent)) {
+    const min = Math.min(valueExtent?.min ?? Number.POSITIVE_INFINITY, sampleExtent?.min ?? Number.POSITIVE_INFINITY);
+    const max = Math.max(valueExtent?.max ?? Number.NEGATIVE_INFINITY, sampleExtent?.max ?? Number.NEGATIVE_INFINITY);
+    const mid = (min + max) / 2;
     const unit = field.units ? ` ${field.units}` : "";
     if (resultMode === "displacement") return { max: `Disp: ${formatResultValue(max)}${unit}`, mid: `Disp: ${formatResultValue(mid)}${unit}`, min: `Disp: ${formatResultValue(min)}${unit}` };
     if (resultMode === "velocity") return { max: `Vel: ${formatResultValue(max)}${unit}`, mid: `Vel: ${formatResultValue(mid)}${unit}`, min: `Vel: ${formatResultValue(min)}${unit}` };

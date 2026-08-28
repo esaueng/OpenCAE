@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { AlertTriangle, Anchor, ArrowDown, Atom, Boxes, Check, ChevronDown, ChevronRight, CircleHelp, Eye, Factory, FileCode2, FileDown, FileImage, FolderDown, Gauge, Grid3X3, Layers3, Maximize2, Pause, Play, Plus, RotateCcw, Ruler, ScanLine, ShieldCheck, Table2, Upload, Weight, Wrench, X } from "lucide-react";
+import { finiteExtrema } from "@opencae/core";
 import { compatibleManufacturingProcessesFor, defaultManufacturingParametersFor, defaultManufacturingProcessIdFor, effectiveMaterialProperties, fdmPropertyFactorsFor, isManufacturingProcessCompatible, manufacturingParametersForAssignment, manufacturingProcessForId, massKgForPayloadMaterial, materialCatalog, materialCategoryLabel, normalizeManufacturingParameters, payloadMaterialForId, payloadMaterials, type ManufacturingParameters, type ManufacturingProcessId, type PayloadMaterialCategory } from "@opencae/materials";
 import { assessResultFailure, estimateAllowableLoadForSafetyFactor, isModalResultSummary, isThermalResultSummary } from "@opencae/schema";
 import type { Constraint, CustomMaterial, DisplayFace, DisplayModel, DynamicSolverSettings, Load, LoadCase, LoadCombination, Material, MeshConnection, MeshConvergenceRecord, MeshQuality, ModalResultSummary, ModalSolverSettings, Project, ResultField, ResultSummary, RunTimingEstimate, RunVariantRef, SimulationFidelity, StructuralResultSummary, Study, ThermalResultSummary } from "@opencae/schema";
@@ -3097,11 +3098,10 @@ function peakDisplacementFrame(fields: ResultField[], summary: StructuralResultS
 }
 
 function activeFieldAbsMax(field: ResultField): number {
-  const values = [
-    ...field.values.map((value) => Math.abs(value)).filter(Number.isFinite),
-    ...(field.samples?.map((sample) => Math.abs(sample.value)).filter(Number.isFinite) ?? [])
-  ];
-  if (values.length) return Math.max(...values);
+  const valueExtent = finiteExtrema(field.values, (value) => Math.abs(value));
+  const sampleExtent = finiteExtrema(field.samples ?? [], (sample) => Math.abs(sample.value));
+  const maximum = Math.max(valueExtent?.max ?? 0, sampleExtent?.max ?? 0);
+  if (valueExtent || sampleExtent) return maximum;
   return Math.max(Math.abs(Number(field.min) || 0), Math.abs(Number(field.max) || 0));
 }
 

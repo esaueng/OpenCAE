@@ -1,10 +1,10 @@
-// Target-scale smoke for the 100k-DOF browser solve cap (Node/V8 leg; the
+// Target-scale smoke for the approximately 100k-DOF validation checkpoint (Node/V8 leg; the
 // cross-engine browser evidence lives in scripts/verify-100k-solve.mjs +
 // ?solveBench=1). Same pipeline as stepUploadEndToEnd.test.ts — registry ->
 // selections -> gmsh-wasm mesh -> attribution -> Core model -> adapter solve —
 // but at the bench density (2.22 mm -> 33,115 Tet10 nodes = 99,345 DOFs),
 // under the PRODUCTION BROWSER_SOLVE_LIMITS. Guards two regressions:
-//   - the cap silently dropping back below target scale, and
+//   - the guarded product ceiling silently dropping below this checkpoint, and
 //   - target-scale models failing (memory/convergence) under default limits.
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";

@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { isStructuralResultSummary } from "@opencae/schema";
 import type { DisplayModel, Project, RunEvent, Study } from "@opencae/schema";
-import { addLoad, addSupport, assignMaterial, cancelRun, createProject, dynamicOutputFrameEstimate, generateMesh, geometryWithMeshPreset, getResults, importLocalProject, loadSampleProject, renameProject, runSimulation, subscribeToRun, updateStudy, uploadModel, withFieldRunIds, withReportCaptures } from "./api";
+import { addLoad, addSupport, assignMaterial, cancelRun, createProject, dynamicOutputFrameEstimate, generateMesh, geometryWithMeshPreset, getResults, importLocalProject, loadSampleProject, renameProject, runSimulation, subscribeToRun, updateStudy, uploadModel, withDerivedSafetyFactorSurfaceField, withFieldRunIds, withReportCaptures } from "./api";
 
 const TestFile = globalThis.File ?? class extends Blob {
   name: string;
@@ -107,6 +107,35 @@ describe("api", () => {
     } as never);
 
     expect(results.fields[0]?.runId).toBe("run-current");
+  });
+
+  test("processes an imported result field above the browser ceiling without a spread RangeError", () => {
+    const valueCount = 200_001;
+    const values = new Array<number>(valueCount).fill(100);
+    values[0] = 50;
+    values[123_456] = Number.NaN;
+    values[valueCount - 1] = 200;
+    const results = withFieldRunIds("run-imported", {
+      summary: { maxStress: 200, maxStressUnits: "MPa", maxDisplacement: 1, maxDisplacementUnits: "mm", safetyFactor: 2, reactionForce: 500, reactionForceUnits: "N" },
+      surfaceMesh: { id: "surface", nodes: new Array(valueCount), triangles: [], nodeMap: [], coordinateSpace: "solver", source: "opencae_core_volume_mesh" },
+      fields: [{ id: "stress", runId: "stale", type: "stress", location: "node", surfaceMeshRef: "surface", values, min: 50, max: 200, units: "MPa" }]
+    } as never);
+
+    const derived = results.fields.find((field) => field.type === "safety_factor");
+    expect(derived?.values).toHaveLength(valueCount);
+    expect(derived?.min).toBe(2);
+    expect(derived?.max).toBe(8);
+    expect(derived?.runId).toBe("run-imported");
+  });
+
+  test("leaves an imported all-nonfinite field unchanged", () => {
+    const results = {
+      summary: { maxStress: 200, maxStressUnits: "MPa", maxDisplacement: 1, maxDisplacementUnits: "mm", safetyFactor: 2, reactionForce: 500, reactionForceUnits: "N" },
+      surfaceMesh: { id: "surface", nodes: new Array(1), triangles: [], nodeMap: [], coordinateSpace: "solver", source: "opencae_core_volume_mesh" },
+      fields: [{ id: "stress", runId: "run", type: "stress", location: "node", surfaceMeshRef: "surface", values: [Number.NaN], min: 0, max: 0, units: "MPa" }]
+    } as never;
+
+    expect(withDerivedSafetyFactorSurfaceField(results).fields).toHaveLength(1);
   });
 
   afterEach(() => {

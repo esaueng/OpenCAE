@@ -1,4 +1,4 @@
-// Cross-engine browser proof for the 100k-DOF solve cap (plan 015: the cap
+// Cross-engine browser proof for the approximately 100k-DOF validation benchmark (plan 015: the staged cap
 // stays at 60k "until the typed-array builder and a WebKit target-scale run
 // land" — this is that run, automated). Drives the ?solveBench=1 harness
 // (apps/opencae-web/src/workers/solveBenchHarness.ts) through a REAL
@@ -386,7 +386,7 @@ function engineGates(label, result, gates) {
     return;
   }
   if (result.dofs < 90_000 || result.dofs > 100_000) gates.push(`${label}: dofs ${result.dofs} outside the 90k..100k target band`);
-  if (result.appliedLimitMaxDofs !== 100_000) gates.push(`${label}: bench ran under maxDofs ${result.appliedLimitMaxDofs}, expected 100000`);
+  if (result.appliedLimitMaxDofs !== 150_000) gates.push(`${label}: bench ran under maxDofs ${result.appliedLimitMaxDofs}, expected the current 150000-DOF product ceiling`);
   if (!result.sanity.finiteMaxStress) gates.push(`${label}: maxStress not finite/positive`);
   if (!result.sanity.finiteMaxDisplacement) gates.push(`${label}: maxDisplacement not finite/positive`);
   if (!result.sanity.reactionMatchesApplied) {

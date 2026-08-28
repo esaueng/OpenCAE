@@ -76,7 +76,9 @@ Dynamic case validation requires one K/M assembly, shared damping calibration, i
 
 The automatic convergence ladder is available only for a selected static load case and always runs `coarse`, `medium`, then `fine`; `ultra` is intentionally manual. The displacement probe defaults to the primary load application point but remains explicit and editable. It must map to the nearest solver-surface triangle through barycentric interpolation within a scale-aware tolerance. Failure to map is a failed rung, not permission to sample an arbitrary node.
 
-Each rung records actual generated node/element counts, total/free DOF, actual mesh size, the raw element peak von Mises stress, and the interpolated displacement magnitude. A generated mesh above the 100,000-DOF browser pipeline limit is marked skipped before a solve begins, and later rungs are still attempted so failures and caps remain visible.
+Each rung records actual generated node/element counts, total/free DOF, actual mesh size, the raw element peak von Mises stress, and the interpolated displacement magnitude. A generated mesh above the current 150,000-DOF guarded product ceiling from `BROWSER_SOLVE_LIMITS` is marked skipped before a solve begins, and later rungs are still attempted so failures and caps remain visible.
+
+The approximately 100,000-DOF Chromium/WebKit benchmark is the existing cross-browser validation checkpoint. It does not establish a runtime or memory envelope at the 150,000-DOF product ceiling.
 
 "Apparent convergence" requires all three rungs to complete with strictly increasing actual DOF. The symmetric last-step change from medium to fine must be at most 5% for probe displacement and 10% for raw peak stress. Three successful increasing rungs outside either threshold are `unconverged`; missing, skipped, failed, or non-increasing rungs are `inconclusive`. This is a mesh-ladder indicator, not a proof of asymptotic convergence.
 

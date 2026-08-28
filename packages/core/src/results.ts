@@ -1,4 +1,5 @@
 import { extractBoundarySurfaceFacets } from "./mesh";
+import { finiteExtrema } from "./numeric";
 import type {
   ElementBlockJson,
   NormalizedOpenCAEModel,
@@ -244,29 +245,14 @@ function facetTriangles(nodes: ArrayLike<number>): [number, number, number][] {
 export function createCoreResultField(
   field: Omit<CoreResultField, "values" | "min" | "max"> & { values: ArrayLike<number> }
 ): CoreResultField {
+  const extent = finiteExtrema(field.values) ?? { min: 0, max: 0 };
   const values = Array.from(field.values);
-  const finiteValues = values.filter(Number.isFinite);
-  // Loop instead of Math.min(...values): spreading element-scale arrays hits
-  // the V8 argument-count limit (~120k) and crashes result assembly for
-  // meshes that are still inside the solve budget.
-  const extent = finiteValues.length > 0 ? finiteExtent(finiteValues) : { min: 0, max: 0 };
   return {
     ...field,
     values,
     min: extent.min,
     max: extent.max
   };
-}
-
-function finiteExtent(values: ArrayLike<number>): { min: number; max: number } {
-  let min = Number.POSITIVE_INFINITY;
-  let max = Number.NEGATIVE_INFINITY;
-  for (let index = 0; index < values.length; index += 1) {
-    const value = values[index] ?? 0;
-    if (value < min) min = value;
-    if (value > max) max = value;
-  }
-  return { min, max };
 }
 
 export function validateCoreResult(result: CoreSolveResult): CoreResultValidationReport {
@@ -717,7 +703,7 @@ function validateField(
     errors.push(issue("missing-field-units", "Core result field units must be present.", `${path}.units`));
   }
   if (field.values.length > 0 && field.values.every(Number.isFinite)) {
-    const { min: actualMin, max: actualMax } = finiteExtent(field.values);
+    const { min: actualMin, max: actualMax } = finiteExtrema(field.values)!;
     if (field.min > actualMin + 1e-12 || field.max < actualMax - 1e-12) {
       errors.push(issue("invalid-field-range", "Core result field min/max must enclose field values.", path));
     }

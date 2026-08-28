@@ -152,7 +152,7 @@ describe("OpenCAE Core browser solver adapter", () => {
     expect(outcome.result.diagnostics?.some((entry) => (entry as { id?: unknown })?.id === "browser-solve-limits")).toBe(true);
   });
 
-  test("solves modal studies without applied loads through the 100k-DOF browser pipeline", { timeout: 60000 }, () => {
+  test("solves modal studies without applied loads through the guarded browser pipeline", { timeout: 60000 }, () => {
     const modalDisplayModel = {
       ...displayModel,
       dimensions: { x: 10, y: 10, z: 10, units: "mm" }
