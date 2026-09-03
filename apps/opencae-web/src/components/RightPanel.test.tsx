@@ -644,6 +644,19 @@ describe("RightPanel payload mass controls", () => {
     expect(markup).not.toContain("selection-readout");
   });
 
+  test("counts modal steps against the rail the user can actually see", () => {
+    // A modal study has no loads step: StepBar and the Back/Next pair both filter it out,
+    // but the eyebrow counted the unfiltered list against a hardcoded 7, so the Mesh
+    // panel read "Step 5 of 7" beside a six-item rail.
+    const modalStudy: Study = { ...study, name: "Modal", type: "modal_analysis" };
+
+    expect(renderPanel("mesh", { study: modalStudy })).toContain(">Step 4 of 6<");
+    expect(renderPanel("run", { study: modalStudy })).toContain(">Step 5 of 6<");
+    expect(renderPanel("supports", { study: modalStudy })).toContain(">Step 3 of 6<");
+    // Everything that keeps its loads step still counts to seven.
+    expect(renderPanel("mesh")).toContain(">Step 5 of 7<");
+  });
+
   test("places every step title and step number on the same header row", () => {
     const steps: Array<{ id: StepId; title: string; step: number }> = [
       { id: "model", title: "Model", step: 1 },

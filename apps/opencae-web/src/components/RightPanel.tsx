@@ -292,7 +292,7 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, se
   }
 
   return (
-    <Panel title="Model" step="model" helper="Inspect the 3D part. Orbit with left-drag, pan with right-drag, zoom with scroll.">
+    <Panel title="Model" step="model" helper="Inspect the 3D part. Orbit with left-drag, pan with right-drag, zoom with scroll." study={study}>
       {showSampleModelPicker && (
         <div className="field">
           <HelpLabel helpId="sampleModel">Sample model</HelpLabel>
@@ -539,7 +539,7 @@ function MaterialPanel({ project, displayModel, study, onAssignMaterial, onSaveC
   }
 
   return (
-    <Panel title="Material" step="material" helper="Choose the material, then how it is made.">
+    <Panel title="Material" step="material" helper="Choose the material, then how it is made." study={study}>
       <SectionTitle helpId="materialLibrary">Base Material</SectionTitle>
       <div className="base-material-card">
         <button className="base-material-selector" type="button" onClick={() => setShowLibrary(true)} aria-label={`Change base material. Current material: ${selectedMaterial.name}`}>
@@ -692,7 +692,7 @@ function SupportsPanel({ selectedFace, study, onAddSupport, onUpdateSupport, onR
   const [temperature, setTemperature] = useState(20);
   const addLabel = thermal ? "Add prescribed temperature" : study.constraints.length ? "Add another fixed support" : "Add fixed support";
   return (
-    <Panel title={thermal ? "Temperature boundaries" : "Supports"} step="supports" helper={thermal ? "Select a face and prescribe its steady boundary temperature." : "Choose where the part is held fixed. Select a face, or click inside a cylindrical hole to constrain its wall. You can add more than one support."}>
+    <Panel title={thermal ? "Temperature boundaries" : "Supports"} step="supports" helper={thermal ? "Select a face and prescribe its steady boundary temperature." : "Choose where the part is held fixed. Select a face, or click inside a cylindrical hole to constrain its wall. You can add more than one support."} study={study}>
       <HelpNote helpId="supportPlacement" />
       <PlacementReadout selectedRef={selectedFromViewport} fallbackLabel={selectedFace?.label} />
       {thermal && <label className="field">Temperature<span className="input-with-unit"><input type="number" value={temperature} onChange={(event) => setTemperature(Number(event.currentTarget.value))} /><span>°C</span></span></label>}
@@ -802,7 +802,7 @@ function LoadsPanel({
     })), loadCombinations);
   }
   return (
-    <Panel title={thermal ? "Thermal loads" : "Loads"} step="loads" helper={thermal ? (draftLoadType === "heat_generation" ? "Apply uniform heat generation throughout the selected body." : "Select a face and apply inward surface heat flux.") : draftLoadType === "gravity" ? "Choose the object carrying payload mass, then add its weight as a load." : draftLoadType === "volume_force" ? "Apply a force density to the selected structural body." : "Select a face on the model, then add the load."}>
+    <Panel title={thermal ? "Thermal loads" : "Loads"} step="loads" helper={thermal ? (draftLoadType === "heat_generation" ? "Apply uniform heat generation throughout the selected body." : "Select a face and apply inward surface heat flux.") : draftLoadType === "gravity" ? "Choose the object carrying payload mass, then add its weight as a load." : draftLoadType === "volume_force" ? "Apply a force density to the selected structural body." : "Select a face on the model, then add the load."} study={study}>
       <div hidden={editingLoadId !== null}>
       <HelpNote helpId="loadPlacement" />
       <PlacementReadout
@@ -1524,7 +1524,7 @@ function MeshPanel({ project, displayModel, study, onGenerateMesh, onConnections
   }
 
   return (
-    <Panel title="Mesh" step="mesh" helper="The mesh breaks the model into small pieces so OpenCAE can calculate results.">
+    <Panel title="Mesh" step="mesh" helper="The mesh breaks the model into small pieces so OpenCAE can calculate results." study={study}>
       <div className="field">
         <HelpLabel helpId="meshQuality">Quality preset</HelpLabel>
         <div className="segmented mesh-quality" role="group" aria-label="Mesh quality">
@@ -1771,7 +1771,7 @@ function RunPanel({ study, displayModel, runProgress, runError, runTiming, solve
   const loadProfile = isDynamicLoadProfile(dynamic?.loadProfile) ? dynamic.loadProfile : "ramp";
   const loadProfileHelper = DYNAMIC_LOAD_PROFILE_OPTIONS.find((option) => option.value === loadProfile)?.helper ?? DEFAULT_DYNAMIC_LOAD_PROFILE_HELPER;
   return (
-    <Panel title="Run" step="run" helper={modal ? "Solve for natural frequencies and normalized mode shapes." : thermal ? "Solve for steady temperature and heat-flux fields." : "Run the simulation to estimate stress and displacement."}>
+    <Panel title="Run" step="run" helper={modal ? "Solve for natural frequencies and normalized mode shapes." : thermal ? "Solve for steady temperature and heat-flux fields." : "Run the simulation to estimate stress and displacement."} study={study}>
       <SectionTitle helpId="runReadiness">Readiness</SectionTitle>
       <div className="checklist">
         {runReadiness.map(({ label, done, blockers }) => (
@@ -2059,7 +2059,7 @@ function formatProbeReading(probe: ResolvedResultProbe): string {
 function ResultsPanel(props: RightPanelProps) {
   if (!props.resultSummary) {
     return (
-      <Panel title="Results" step="results" helper="View stress and displacement directly on the 3D model.">
+      <Panel title="Results" step="results" helper="View stress and displacement directly on the 3D model." study={props.study}>
         <Callout>Run a simulation to see results.</Callout>
       </Panel>
     );
@@ -2074,6 +2074,7 @@ function ResultsPanel(props: RightPanelProps) {
 }
 
 function ThermalResultsPanelContent({
+  study,
   resultSummary,
   resultMode,
   onResultModeChange,
@@ -2092,7 +2093,7 @@ function ThermalResultsPanelContent({
   reportDisabled = false
 }: RightPanelProps & { resultSummary: ThermalResultSummary }) {
   return (
-    <Panel title="Thermal results" step="results" helper="Inspect steady temperature and conductive heat-flux fields on the solved mesh.">
+    <Panel title="Thermal results" step="results" helper="Inspect steady temperature and conductive heat-flux fields on the solved mesh." study={study}>
       <div className="segmented" role="group" aria-label="Thermal result field">
         <button type="button" className={resultMode === "temperature" ? "active" : ""} aria-pressed={resultMode === "temperature"} onClick={() => onResultModeChange("temperature")}>Temperature</button>
         <button type="button" className={resultMode === "heat_flux" ? "active" : ""} aria-pressed={resultMode === "heat_flux"} onClick={() => onResultModeChange("heat_flux")}>Heat flux</button>
@@ -2125,6 +2126,7 @@ function ThermalResultsPanelContent({
 }
 
 function ModalResultsPanelContent({
+  study,
   resultSummary,
   resultFields = [],
   selectedModeIndex = resultSummary.modes[0]?.modeIndex ?? 1,
@@ -2159,7 +2161,7 @@ function ModalResultsPanelContent({
   const activeMode = resultSummary.modes.find((mode) => mode.modeIndex === selectedModeIndex) ?? resultSummary.modes[0];
   const resultProvenance = resultSummary.provenance;
   return (
-    <Panel title="Results" step="results" helper="Inspect converged natural frequencies and normalized mode shapes.">
+    <Panel title="Results" step="results" helper="Inspect converged natural frequencies and normalized mode shapes." study={study}>
       {resultSummary.warning && <p className="panel-warning" role="status"><AlertTriangle size={16} />{resultSummary.warning}</p>}
       <div className="summary-box">
         <Info label="Converged modes" value={`${resultSummary.convergedModeCount} / ${resultSummary.requestedModeCount}`} />
@@ -2542,7 +2544,7 @@ function ResultsPanelContent({
   ];
 
   return (
-    <Panel title="Results" step="results" helper="View stress and displacement directly on the 3D model.">
+    <Panel title="Results" step="results" helper="View stress and displacement directly on the 3D model." study={study}>
       {resultVariants.length > 1 && (
         <label className="field result-variant-selector">
           <span>Run variant</span>
@@ -2834,14 +2836,15 @@ export function resultModeExplanation(resultMode: ResultMode): string {
   return `Red areas have higher ${field}. Blue areas have lower ${field}.`;
 }
 
-function Panel({ title, step, helper, children }: { title: string; step: StepId; helper: string; children: ReactNode }) {
-  const stepNumber = WORKFLOW_STEPS.findIndex((workflowStep) => workflowStep.id === step) + 1;
+function Panel({ title, step, helper, study, children }: { title: string; step: StepId; helper: string; study: Study; children: ReactNode }) {
+  const workflowSteps = workflowStepsForStudy(study);
+  const stepNumber = workflowSteps.findIndex((workflowStep) => workflowStep.id === step) + 1;
   return (
     <div className="panel-section">
       <div className="panel-header">
         <div className="panel-title-row">
           <h2>{title}</h2>
-          <div className="panel-eyebrow">Step {stepNumber} of 7</div>
+          <div className="panel-eyebrow">Step {stepNumber} of {workflowSteps.length}</div>
         </div>
         <p className="helper">{helper}</p>
       </div>
@@ -2860,8 +2863,14 @@ const WORKFLOW_STEPS: Array<{ id: StepId; label: string }> = [
   { id: "results", label: "Results" }
 ];
 
+/* Modal studies have no loads step. The rail, the Back/Next pair and the "Step N of M"
+   eyebrow must all count the same list, or the panel numbers a step the rail does not show. */
+function workflowStepsForStudy(study: Study) {
+  return study.type === "modal_analysis" ? WORKFLOW_STEPS.filter((step) => step.id !== "loads") : WORKFLOW_STEPS;
+}
+
 function WorkflowNav({ activeStep, study, onStepSelect }: { activeStep: StepId; study: Study; onStepSelect: (step: StepId) => void }) {
-  const workflowSteps = study.type === "modal_analysis" ? WORKFLOW_STEPS.filter((step) => step.id !== "loads") : WORKFLOW_STEPS;
+  const workflowSteps = workflowStepsForStudy(study);
   const index = workflowSteps.findIndex((step) => step.id === activeStep);
   const previousStep = index > 0 ? workflowSteps[index - 1] : undefined;
   const nextStep = index >= 0 && index < workflowSteps.length - 1 ? workflowSteps[index + 1] : undefined;
