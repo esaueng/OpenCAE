@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, test } from "vitest";
+import { STRESS_RAMP } from "../resultColorScale";
 
 const css = readFileSync(resolve(__dirname, "app.css"), "utf8");
 const tokens = readFileSync(resolve(__dirname, "../theme/tokens.css"), "utf8");
@@ -578,6 +579,20 @@ describe("app CSS", () => {
     // NOT seeded from the document root: theme-light lives on the .app-shell div, so the
     // root always reports the dark tokens.
     expect(cadViewer).not.toMatch(/getComputedStyle\(document\.documentElement\)/);
+  });
+
+  test("keeps the CSS ramp tokens in step with the one TypeScript definition", () => {
+    // The ramp is hand-maintained in four places in three formats. The three TypeScript
+    // consumers import STRESS_RAMP; CSS cannot, so this is the guard that stops tokens.css
+    // drifting and splitting what a colour means between the screen and the PDF.
+    STRESS_RAMP.forEach((hex, index) => {
+      expect(tokens, `--color-ramp-${index} should be ${hex}`).toMatch(
+        new RegExp(`--color-ramp-${index}:\\s*${hex};`, "i"),
+      );
+    });
+    // And no sixth stop has appeared in CSS without one in the source.
+    const cssStops = [...tokens.matchAll(/--color-ramp-(\d+):/g)].map((match) => Number(match[1]));
+    expect(Math.max(...cssStops) + 1).toBe(STRESS_RAMP.length);
   });
 
   test("resolves every custom property it references", () => {

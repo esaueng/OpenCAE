@@ -21,7 +21,21 @@ export interface ResolvedResultColorScale {
   bands: ResultColorBands;
 }
 
-const STRESS_RAMP = ["#0759d6", "#0ea5e9", "#22c55e", "#facc15", "#f97316", "#ef4444"];
+/* The one definition of the stress ramp. It was hand-copied into four places in three
+   different formats — here, the report theme, the offline viewer's normalized float
+   triples, and tokens.css — so a change to any one of them would have silently split what
+   a colour means between the screen, the PDF and the exported viewer. The three TypeScript
+   consumers import this; tokens.css cannot, so appCss.test.ts pins it against this list. */
+export const STRESS_RAMP = ["#0759d6", "#0ea5e9", "#22c55e", "#facc15", "#f97316", "#ef4444"];
+
+/** The same stops as normalized 0-1 RGB triples, for WebGL consumers. */
+export function stressRampFloatStops(): number[][] {
+  return STRESS_RAMP.map((hex) => [
+    parseInt(hex.slice(1, 3), 16) / 255,
+    parseInt(hex.slice(3, 5), 16) / 255,
+    parseInt(hex.slice(5, 7), 16) / 255
+  ].map((channel) => Number(channel.toFixed(3))));
+}
 const MOTION_RAMP = ["#0759d6", "#0ea5e9", "#10b8f0", "#2ee875", "#f2e94e", "#ff8f1f", "#ef4444"];
 // Low factors of safety are dangerous and remain red; high values remain green.
 const SAFETY_RAMP = ["#ef4444", "#fb923c", "#facc15", "#a3e635", "#4ade80", "#22c55e"];
