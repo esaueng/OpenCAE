@@ -84,6 +84,7 @@ interface RightPanelProps {
   onResultVariantChange?: (variantId: string) => void | Promise<void>;
   runProgress: number;
   runError?: string | null;
+  meshError?: string | null;
   runTiming?: RunTimingEstimate | null;
   /** Wall time of the run that produced the current results, once it is no longer an estimate. */
   solveElapsedMs?: number | null;
@@ -1472,7 +1473,7 @@ function selectionLabelForPanel(study: Study, selectionRef: string): string {
   return study.namedSelections.find((selection) => selection.id === selectionRef)?.name ?? selectionRef;
 }
 
-function MeshPanel({ project, displayModel, study, onGenerateMesh, onConnectionsChange, onCancelMesh, meshPhaseProgress, onRepairModel, isRepairingModel = false, onRunMeshConvergence, convergenceBusy = false, convergenceProgress = "" }: RightPanelProps) {
+function MeshPanel({ project, displayModel, study, onGenerateMesh, onConnectionsChange, onCancelMesh, meshPhaseProgress, meshError, onRepairModel, isRepairingModel = false, onRunMeshConvergence, convergenceBusy = false, convergenceProgress = "" }: RightPanelProps) {
   const [preset, setPreset] = useState<MeshQuality>(study.meshSettings.preset);
   const meshing = Boolean(meshPhaseProgress);
   const meshSummary = study.meshSettings.summary;
@@ -1562,6 +1563,14 @@ function MeshPanel({ project, displayModel, study, onGenerateMesh, onConnections
         {meshing ? <X size={18} /> : <Grid3X3 size={18} />}
         {meshing ? "Stop meshing" : "Generate mesh"}
       </button>
+      {meshError && !meshing && (
+        <div className="mesh-failure" role="alert">
+          <p className="panel-warning"><AlertTriangle size={16} />{meshError}</p>
+          <button className="secondary wide" type="button" disabled={convergenceBusy} onClick={() => onGenerateMesh(preset)}>
+            <Grid3X3 size={16} />Try meshing again
+          </button>
+        </div>
+      )}
       {stepGeometry?.status === "repairable" && !stepGeometryResolvedByMesh && (
         <div className="step-repair-card" role="alert" aria-label="Open STEP surfaces detected">
           <p className="panel-warning"><AlertTriangle size={16} />{stepGeometry.message ?? "This STEP model has open or invalid surfaces and is not a closed simulation solid."}</p>

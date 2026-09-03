@@ -49,7 +49,7 @@ import { displayModelForUnits, loadValueForUnits, resultFieldForUnits, resultSum
 import { supportDisplayLabel } from "./supportLabels";
 import { nextSelectedPayloadObject, shouldClearPayloadSelectionOnViewerMiss } from "./payloadSelection";
 import { hasLegacyStepUploadFaces, hasUnresolvedStepFaceSelections, healStepFaceSelections, healStepHoleSupportSelections, legacyStepFaceHealMessage } from "./stepFaceHealing";
-import { stepGeometryMetadataForProject, stepGeometryNeedsRepair } from "./stepGeometryState";
+import { stepGeometryNeedsRepair } from "./stepGeometryState";
 import { createLocalDynamicStructuralStudy, createLocalModalStudy, createLocalStaticStressStudy, createLocalThermalStudy } from "./localProjectFactory";
 import { compatibleResultModeForSummary, createPackedResultPlaybackCache, createResultFrameCache, hasDynamicPlaybackFrames, solverMeshSummaryFromResults, synthesizeModalPhaseFields, withDerivedSurfaceSafetyFactorFields, type SolverMeshSummary } from "./resultFields";
 import { appendResultProbe, availableStressComponents, derivedStressFieldsForComponent, governingVariantIdForProbe, MAX_RESULT_PROBES, resolveResultProbe, resultProbeTopologySignature, selectActiveResultField, semanticResultFieldKey, type ResultProbeAnchor, type ResultProbePin } from "./resultSelection";
@@ -171,6 +171,10 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     : (restoredProjectFile ? ["Workspace restored after reload.", "Ready | Local Mode"] : ["Ready | Local Mode"]).map((message) => ({ message, at: Date.now() })));
   const [runProgress, setRunProgress] = useState(restoredUi?.runProgress ?? (restoredResults?.fields.length ? 100 : 0));
   const [meshPhaseProgress, setMeshPhaseProgress] = useState<WasmMeshPhaseProgress | null>(null);
+  // Meshing is the most likely first failure, and until now the reason survived only as a
+  // status-bar string and one line in a collapsed drawer: the progress card vanished and
+  // the Mesh panel returned to its idle state, showing nothing at all. Mirrors runError.
+  const [meshError, setMeshError] = useState<string | null>(null);
   const [convergenceBusy, setConvergenceBusy] = useState(false);
   const [convergenceProgress, setConvergenceProgress] = useState("");
   const [runTiming, setRunTiming] = useState<RunTimingEstimate | null>(null);
@@ -1797,17 +1801,20 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
 
   function handleGenerateMesh(preset: MeshQuality) {
     if (!project || !study) return;
+    setMeshError(null);
     setMeshPhaseProgress({ phase: "load", phaseIndex: 0, phaseCount: 8, message: "Loading gmsh WebAssembly module..." });
     // generateMesh rethrows quality-gate and STEP topology rejections so the
     // primary failure remains visible without starting another heavy CAD job.
     void updateStudy(generateMesh(study.id, preset, study, displayModel ?? undefined, pushMessage, setMeshPhaseProgress), shouldAutoAdvanceAfterMeshGeneration() ? "run" : undefined)
-      .catch(async (error: unknown) => {
+      .catch((error: unknown) => {
         setMeshPhaseProgress(null);
         if (isAbortError(error)) {
           pushMessage(error.message || "Mesh generation cancelled.");
           return;
         }
-        pushMessage(`Mesh generation failed: ${error instanceof Error ? error.message : String(error)}`);
+        const meshFailure = error instanceof Error ? error.message : String(error);
+        setMeshError(meshFailure);
+        pushMessage(`Mesh generation failed: ${meshFailure}`);
       })
       .finally(() => setMeshPhaseProgress(null));
   }
@@ -2721,6 +2728,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           onConnectionsChange={(contacts) => updateStudy(saveStudyPatch(study.id, { contacts, meshSettings: { ...study.meshSettings, status: "not_started", meshRef: undefined, summary: undefined } }, "Assembly connections updated. Regenerate the mesh.", study))}
           onCancelMesh={handleCancelMesh}
           meshPhaseProgress={meshPhaseProgress}
+          meshError={meshError}
           onRunMeshConvergence={(caseId, probe) => void handleRunMeshConvergence(caseId, probe)}
           convergenceBusy={convergenceBusy}
           convergenceProgress={convergenceProgress}

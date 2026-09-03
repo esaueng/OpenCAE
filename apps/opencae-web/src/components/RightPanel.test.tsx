@@ -626,6 +626,22 @@ describe("RightPanel payload mass controls", () => {
     expect(html).toContain("5.956e-9 %");
   });
 
+  test("states a mesh failure beside the control that produced it", () => {
+    // The reason used to survive only as a status-bar string and one line in a collapsed
+    // drawer: the progress card vanished and the Mesh panel returned to its idle state.
+    const failed = renderPanel("mesh", { meshError: "Element quality gate failed: min Jacobian 0.01." });
+
+    expect(failed).toContain('role="alert"');
+    expect(failed).toContain("Element quality gate failed: min Jacobian 0.01.");
+    expect(failed).toContain("Try meshing again");
+    // Not shown while a mesh is actually running, and not shown when nothing failed.
+    expect(renderPanel("mesh")).not.toContain("Try meshing again");
+    expect(renderPanel("mesh", {
+      meshError: "Element quality gate failed.",
+      meshPhaseProgress: { phase: "mesh", phaseIndex: 3, phaseCount: 8, message: "Meshing volume..." }
+    })).not.toContain("Try meshing again");
+  });
+
   test("shows the canonical thermal solver method on the run step", () => {
     const thermalStudy: Study = { ...study, name: "Steady Thermal", type: "steady_state_thermal" };
     expect(renderPanel("run", { study: thermalStudy })).toContain("sparse_steady_thermal");

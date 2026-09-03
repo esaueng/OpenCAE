@@ -2582,6 +2582,24 @@ img {
   vertical-align: -3px;
 }
 
+/* A failed mesh states itself where the failure happened, directly under the control that
+   produced it, rather than only as a status-bar string and a line in a collapsed drawer.
+   Same shape as .step-repair-card, which already does this for STEP geometry. */
+.mesh-failure {
+  display: grid;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+  padding: var(--sp-3);
+  background: var(--color-surface-2);
+  border: var(--border-thin);
+  border-left: 3px solid var(--color-error);
+  border-radius: var(--radius-md);
+}
+
+.mesh-failure .panel-warning {
+  margin: 0;
+}
+
 .step-repair-card {
   display: grid;
   gap: 8px;
