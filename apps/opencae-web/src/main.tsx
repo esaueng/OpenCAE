@@ -1,6 +1,7 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+import { AppErrorBoundary } from "./components/AppErrorBoundary";
 import { initPlausibleAnalytics } from "./analytics";
 import { registerOfflineCaching } from "./lib/registerOfflineCaching";
 import "./theme/tokens.css";
@@ -27,6 +28,8 @@ if (import.meta.env.DEV && import.meta.env.VITE_WASM_MESHING !== "0") {
 
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <App />
+    <AppErrorBoundary>
+      <App />
+    </AppErrorBoundary>
   </React.StrictMode>
 );
