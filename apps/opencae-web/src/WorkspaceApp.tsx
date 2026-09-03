@@ -941,6 +941,15 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     main.focus();
   }
 
+  useEffect(() => {
+    if (!storageRecoveryNoticeOpen) return undefined;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setStorageRecoveryNoticeOpen(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [storageRecoveryNoticeOpen]);
+
   const autosaveUiSnapshot = useMemo<WorkspaceUiSnapshot>(() => ({
     activeStep,
     homeRequested,
@@ -2390,7 +2399,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
             aria-controls="workspace-shortcut-guide"
             title="Show keyboard shortcuts"
             aria-label="Show keyboard shortcuts"
-            onClick={() => setShortcutGuideOpen((open) => !open)}
+            onClick={() => { setStorageRecoveryNoticeOpen(false); setShortcutGuideOpen((open) => !open); }}
           >
             Keys
           </button>
@@ -2420,7 +2429,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           aria-expanded={storageRecoveryNoticeOpen}
           aria-controls="project-storage-notice"
           title="Review project storage choice"
-          onClick={() => setStorageRecoveryNoticeOpen((open) => !open)}
+          onClick={() => { setShortcutGuideOpen(false); setStorageRecoveryNoticeOpen((open) => !open); }}
         >
           {cloudBackupPreference === "cloud" ? <CloudUpload size={15} aria-hidden="true" /> : <HardDrive size={15} aria-hidden="true" />}
           <span>{cloudBackupPreference === "cloud" ? "Recovery on" : cloudBackupPreference === "local" ? "Local only" : "Storage"}</span>
@@ -2457,6 +2466,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           setStorageRecoveryNoticeOpen(false);
           void handleSaveProject();
         }}
+        onDismiss={() => setStorageRecoveryNoticeOpen(false)}
       />
     );
   }

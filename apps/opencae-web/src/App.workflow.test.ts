@@ -182,6 +182,18 @@ describe("App workflow layout", () => {
     expect(appSource).toContain("setResultFields([]);");
   });
 
+  test("lets the storage card be closed and keeps the top-bar panels exclusive", () => {
+    // The card sat at a z-index below --z-popover, so the shortcut popover painted over
+    // it; and it had no dismissal at all, so it floated over the viewer until a
+    // preference was chosen.
+    expect(appSource).toContain("onDismiss={() => setStorageRecoveryNoticeOpen(false)}");
+    expect(appSource).toMatch(
+      /if \(!storageRecoveryNoticeOpen\) return undefined;[\s\S]{0,200}?if \(event\.key === "Escape"\) setStorageRecoveryNoticeOpen\(false\);/,
+    );
+    expect(appSource).toContain("onClick={() => { setStorageRecoveryNoticeOpen(false); setShortcutGuideOpen((open) => !open); }}");
+    expect(appSource).toContain("onClick={() => { setShortcutGuideOpen(false); setStorageRecoveryNoticeOpen((open) => !open); }}");
+  });
+
   test("clears progress when a completed run's results are thrown away", () => {
     // Without this the abandoned run leaves runProgress at 100, so solverStatus stays
     // "Complete" and the status pill reads "Results ready" for results it just discarded.
