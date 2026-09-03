@@ -57,14 +57,40 @@
   --ls-eyebrow: 0.14em;
   --ls-tagline: 0.2em;
 
-  /* ── Spacing scale (4-based) ──────────────────────────── */
+  /* ── Spacing scale (4-based) ──────────────────────────────
+     --sp-15 and --sp-25 are the half-steps the stylesheet had already been writing
+     by hand ~115 times; naming them is what lets the component tier below exist. */
   --sp-1: 4px;
+  --sp-15: 6px;
   --sp-2: 8px;
+  --sp-25: 10px;
   --sp-3: 12px;
   --sp-4: 16px;
   --sp-5: 24px;
   --sp-6: 32px;
-  --sp-7: 48px;
+
+  /* ── Component tier ───────────────────────────────────────
+     tokens.css had primitives and app.css had components, with nothing in between —
+     so 800-odd rules each re-derived their own box and the interface could express
+     value but not rank. These are the shared shapes; every value here is one the app
+     already rendered, so introducing them moved nothing. */
+
+  /* Interactive heights. Six distinct values existed; these are the three that matter. */
+  --control-h-sm: 24px;
+  --control-h-md: 30px;
+  --control-h-lg: 34px;
+
+  /* Card interiors. */
+  --card-pad: 10px;
+  --card-pad-tight: 8px;
+  --card-radius: 4px;
+
+  /* Grouping. One value was doing both jobs, which is why nothing grouped. */
+  --gap-block: 12px;
+  --gap-section: 28px;
+
+  --fw-semibold: 600;
+  --lh-snug: 1.45;
 
   /* ── Radii ────────────────────────────────────────────── */
   --radius-sm: 3px;
@@ -83,7 +109,6 @@
   --statusbar-h: 30px;
   --stepbar-w: 124px;
   --context-w: 344px;
-  --log-drawer-h: 200px;
 
   /* ── Motion ───────────────────────────────────────────── */
   --dur-fast: 100ms;

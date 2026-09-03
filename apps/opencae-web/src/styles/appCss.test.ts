@@ -420,6 +420,32 @@ describe("app CSS", () => {
     expect(cssRule(".app-shell")).toMatch(/color:\s*var\(--color-text\)/);
   });
 
+  test("keeps a component tier between the primitives and the components", () => {
+    // tokens.css had primitives and app.css had components with nothing in between, so
+    // every rule re-derived its own box and the UI could express value but not rank.
+    for (const name of ["--sp-15", "--sp-25", "--control-h-sm", "--control-h-md", "--control-h-lg",
+      "--card-pad", "--card-pad-tight", "--card-radius", "--gap-block", "--gap-section",
+      "--fw-semibold", "--lh-snug"]) {
+      expect(tokens, `missing component token ${name}`).toMatch(new RegExp(`${name}:\\s*[^;]+;`));
+    }
+
+    // Spacing is expressed through the scale, not re-typed. A handful of orphan values
+    // (5/7/9/11px and friends) are deliberately left alone rather than rounded onto it.
+    const spacingLiterals = [...css.matchAll(/^\s*(?:padding|margin|gap|row-gap|column-gap)(?:-(?:top|right|bottom|left))?:\s*([^;]+);/gm)]
+      .flatMap((match) => (match[1] ?? "").split(/\s+/))
+      .filter((value) => /^(4|6|8|10|12|16|24|32)px$/.test(value));
+    expect(spacingLiterals).toEqual([]);
+
+    expect(css).not.toMatch(/font-weight:\s*600;/);
+    expect(css).not.toMatch(/line-height:\s*1\.(35|45);/);
+
+    // Zero-use tokens are gone; --radius-pill is NOT dead (one real consumer) and is 10px,
+    // so the 999px pills must keep their literal or they visibly square off.
+    expect(tokens).not.toContain("--sp-7:");
+    expect(tokens).not.toContain("--log-drawer-h:");
+    expect(css).toMatch(/border-radius:\s*999px/);
+  });
+
   test("resolves every custom property it references", () => {
     // An undefined custom property invalidates its whole declaration at computed-value
     // time, so `padding: var(--typo) 6px` silently becomes `padding: 0` — a class of bug
