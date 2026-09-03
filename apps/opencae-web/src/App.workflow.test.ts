@@ -202,6 +202,25 @@ describe("App workflow layout", () => {
     );
   });
 
+  test("drops result data on invalidation without discarding how the user was looking at it", () => {
+    // Invalidating a run used to reset resultMode, stressComponent, selectedModeIndex and
+    // showDeformed as well, so tweaking a load and re-running silently threw away the
+    // user's view every time. Everything here is reconciled against the next summary.
+    const body = appSource.match(/function invalidateCompletedRunState\(\) \{[\s\S]*?\n  \}/)?.[0] ?? "";
+    expect(body).toContain("setResultSummary(null)");
+    expect(body).not.toContain('setResultMode("stress")');
+    expect(body).not.toContain('setStressComponent("von_mises")');
+    expect(body).not.toContain("setSelectedModeIndex(1)");
+    expect(body).not.toContain("setShowDeformed(false)");
+
+    // Probes are the exception: they resolve by index into one run's surface mesh, so
+    // carrying them across would silently mis-resolve them onto different geometry.
+    expect(body).toContain("setResultProbes([])");
+
+    // The reconciliation this relies on has to stay.
+    expect(appSource).toContain("setResultMode((currentMode) => compatibleResultModeForSummary(resultSummary, currentMode));");
+  });
+
   test("keeps the completed solve time so the report can state it", () => {
     // runTiming is nulled on the "complete" event, which is the exact moment the elapsed
     // time stops being an estimate — so every report used to print "Solve wall time: --".

@@ -2023,10 +2023,17 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     setResultPlaybackOrdinalPosition(0);
     setResultPlaybackPlaying(false);
     setResultPlaybackCacheState({ status: "idle" });
-    setResultMode("stress");
-    setStressComponent("von_mises");
-    setSelectedModeIndex(1);
-    setShowDeformed(false);
+    /* View state is deliberately NOT reset here. Invalidating a run drops the result DATA;
+       resetting how the user was looking at it as well meant that tweaking a load and
+       re-running silently threw away their stress measure, their result mode and the
+       deformed-shape toggle every single time. Everything here is reconciled against the
+       next summary anyway: compatibleResultModeForSummary re-derives the mode, the
+       component effect re-guards an unavailable stress component, and the completion
+       branch sets the mode and mode index for thermal, modal and dynamic runs.
+
+       Probes are the exception and must still be cleared: they resolve by index into one
+       specific run's surface mesh, so carrying them across would silently mis-resolve
+       them onto different geometry. */
     setResultProbes([]);
     setResultProbeLimitReached(false);
     setCaptureViewMode(null);
