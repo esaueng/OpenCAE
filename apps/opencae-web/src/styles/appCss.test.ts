@@ -361,6 +361,26 @@ describe("app CSS", () => {
     expect(cssRule(".coffee-label")).toMatch(/display:\s*inline-flex/);
   });
 
+  test("covers the gap between the viewer mounting and the scene drawing", () => {
+    // CadViewer's own render returns in tens of milliseconds; the seconds-long blank on a
+    // cold boot is the Three scene building inside <Canvas>. The overlay is a DOM sibling
+    // of the canvas so it paints in that first fast render.
+    expect(cadViewer).toContain("<strong>Preparing the 3D view…</strong>");
+    expect(cadViewer).toContain('<SceneFirstFrameSignal onPainted={handleScenePainted} />');
+    // addAfterEffect fires AFTER a rendered frame; useFrame runs before one, so it would
+    // clear the overlay a frame early. Matched against the function's own body.
+    const signalBody = cadViewer.match(/function SceneFirstFrameSignal\([\s\S]*?\n\}/)?.[0] ?? "";
+    expect(signalBody).toContain("addAfterEffect(");
+    expect(signalBody).not.toContain("useFrame(");
+    // Held back so a warm mount never flashes it, and bounded so a scene that never draws
+    // leaves a bare viewport rather than a spinner promising a model that is not coming.
+    expect(cadViewer).toMatch(/SCENE_LOADING_REVEAL_MS = \d+/);
+    expect(cadViewer).toMatch(/SCENE_LOADING_TIMEOUT_MS = \d+/);
+    expect(cadViewer).toContain('setSceneLoadingPhase("expired")');
+    // Never stacked on top of the model-import overlay.
+    expect(cadViewer).toContain('{!props.importingModelFilename && !scenePainted && sceneLoadingPhase === "visible" ? (');
+  });
+
   test("gives the viewer's loading fallback the same treatment as the import overlay", () => {
     // .viewer-loading had no rule at all, so the Suspense fallback rendered unstyled text
     // in the corner of a black box — the first thing a returning user sees on a cold boot.

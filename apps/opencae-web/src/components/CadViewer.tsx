@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ElementRef, MouseEvent as ReactMouseEvent, MutableRefObject, PointerEvent as ReactPointerEvent } from "react";
 import { Billboard, Bounds, Edges, GizmoHelper, Html, Line, OrbitControls, Text, useBounds } from "@react-three/drei";
 import { addAfterEffect, Canvas, useFrame, useThree } from "@react-three/fiber";
@@ -203,11 +203,54 @@ export function viewerGizmoLayout() {
   };
 }
 
+const SCENE_LOADING_REVEAL_MS = 400;
+/* If the scene has not drawn by now something is wrong rather than slow — a lost WebGL
+   context, a driver refusing the canvas. Fall back to the bare viewport rather than
+   leaving a spinner promising a model that is never going to arrive. */
+const SCENE_LOADING_TIMEOUT_MS = 20000;
+
+/* addAfterEffect fires after a rendered frame, unlike useFrame which runs before one, so
+   this resolves only once pixels exist. frameloop="demand" still renders on mount.
+   The callback stays subscribed for the component's lifetime and guards itself with a
+   ref: unsubscribing from inside the callback splices R3F's effect array while it is
+   being iterated, which drops the entry after this one — including the render itself. */
+function SceneFirstFrameSignal({ onPainted }: { onPainted: () => void }) {
+  const painted = useRef(false);
+  useEffect(() => {
+    const unsubscribe = addAfterEffect(() => {
+      if (painted.current) return;
+      painted.current = true;
+      onPainted();
+    });
+    return unsubscribe;
+  }, [onPainted]);
+  return null;
+}
+
 export function CadViewer(props: CadViewerProps) {
   const controlsRef = useRef<ViewerOrbitControls | null>(null);
   const [uploadedPreviewBounds, setUploadedPreviewBounds] = useState<THREE.Box3 | null>(null);
   const [gizmoViewRequest, setGizmoViewRequest] = useState<{ view: GizmoViewRequest | null; signal: number }>({ view: null, signal: 0 });
   const [viewerInteracting, setViewerInteracting] = useState(false);
+  // The viewer's own render returns in a few tens of milliseconds; what takes seconds on a
+  // cold boot is the Three scene building and compiling inside <Canvas>, during which the
+  // shell paints an empty viewport with nothing to say for itself. This overlay is a DOM
+  // sibling of the canvas, so it paints in that first fast render and clears on the first
+  // frame the scene actually draws. Held back briefly so a warm mount never flashes it.
+  const [scenePainted, setScenePainted] = useState(false);
+  const [sceneLoadingPhase, setSceneLoadingPhase] = useState<"waiting" | "visible" | "expired">("waiting");
+  // Stable, so the after-render subscription is not torn down and rebuilt every render.
+  const handleScenePainted = useCallback(() => setScenePainted(true), []);
+
+  useEffect(() => {
+    if (scenePainted) return undefined;
+    const reveal = window.setTimeout(() => setSceneLoadingPhase("visible"), SCENE_LOADING_REVEAL_MS);
+    const expiry = window.setTimeout(() => setSceneLoadingPhase("expired"), SCENE_LOADING_TIMEOUT_MS);
+    return () => {
+      window.clearTimeout(reveal);
+      window.clearTimeout(expiry);
+    };
+  }, [scenePainted]);
   const effectiveViewMode: ViewMode = props.activeStep === "results"
     ? props.viewMode === "results" && props.resultsEligible ? "results" : "model"
     : props.viewMode === "mesh" ? "mesh" : "model";
@@ -282,6 +325,7 @@ export function CadViewer(props: CadViewerProps) {
       aria-label="3D CAD viewer"
     >
       <Canvas frameloop="demand" dpr={viewerDpr} camera={{ position: [4.8, 4.8, 4.8], up: ISO_CAMERA_UP.toArray(), fov: DEFAULT_CAMERA_FOV }} onCreated={({ gl }) => { gl.localClippingEnabled = true; }} onPointerMissed={props.onViewerMiss}>
+        <SceneFirstFrameSignal onPainted={handleScenePainted} />
         <ProjectionCameraController projectionMode={projectionMode} controlsRef={controlsRef} />
         <SectionClippingController state={props.sectionPlane} bounds={sectionBounds} />
         <ViewerInvalidator
@@ -372,6 +416,15 @@ export function CadViewer(props: CadViewerProps) {
         </GizmoHelper>
         {viewerStatsEnabled && <ViewerRendererStatsProbe />}
       </Canvas>
+      {!props.importingModelFilename && !scenePainted && sceneLoadingPhase === "visible" ? (
+        <div className="viewer-import-overlay" role="status" aria-live="polite" aria-atomic="true">
+          <div className="viewer-import-card">
+            <span className="viewer-import-spinner" aria-hidden="true" />
+            <strong>Preparing the 3D view…</strong>
+            <small>Building the scene. The model appears as soon as it is ready.</small>
+          </div>
+        </div>
+      ) : null}
       {props.importingModelFilename ? (
         <div className="viewer-import-overlay" role="status" aria-live="polite" aria-atomic="true">
           <div className="viewer-import-card">
