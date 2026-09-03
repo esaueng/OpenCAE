@@ -420,6 +420,36 @@ describe("app CSS", () => {
     expect(cssRule(".app-shell")).toMatch(/color:\s*var\(--color-text\)/);
   });
 
+  test("anchors small text to the scale instead of the browser default", () => {
+    // There is zero relative font sizing in this stylesheet, which made the UA's
+    // `small { font-size: smaller }` provably the only source of the app's sub-11px text:
+    // the legend labels at 9.58px and the colour-scale range line at 10.83px — a measured
+    // value rendering smaller than its own caption.
+    expect(tokens).toMatch(/\bsmall \{[^}]*font-size:\s*var\(--fs-xs\)/);
+    // Unstyled headings otherwise render at the UA's bold 700 and em-based sizes, which is
+    // where the off-token weights came from.
+    expect(tokens).toMatch(/h1, h2, h3, h4, h5, h6 \{[^}]*font-weight:\s*var\(--fw-medium\)/);
+    expect(tokens).toMatch(/h1, h2, h3, h4, h5, h6 \{[^}]*font-size:\s*inherit/);
+    // `strong` is deliberately NOT reset: 17 rules already set --fw-medium on it, which is
+    // evidence the codebase treats bold-vs-medium as a per-component choice.
+    expect(tokens).not.toMatch(/\bstrong,?\s*b?\s*\{[^}]*font-weight/);
+  });
+
+  test("gives result figures the one display level in the app", () => {
+    // --fs-xl was defined and used zero times, so the largest type in the workspace was
+    // 16px and the number a user ran the solve for rendered at the same size and weight as
+    // the solver-runner string beside it.
+    const headline = cssRule(".result-headline-item strong");
+    expect(headline).toMatch(/font-size:\s*var\(--fs-xl\)/);
+    expect(headline).toMatch(/font-family:\s*var\(--font-mono\)/);
+    expect(headline).toMatch(/overflow-wrap:\s*anywhere/);
+
+    // Two-up, and one column in the narrow tier: at ~130px a value splits from its unit.
+    expect(cssRule(".result-headline")).toMatch(/grid-template-columns:\s*repeat\(2/);
+    const narrowTier = css.match(/@media \(max-width: 640px\) \{(?<body>[\s\S]*?)\n\}/)?.groups?.body ?? "";
+    expect(narrowTier).toMatch(/\.result-headline \{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)/);
+  });
+
   test("keeps a component tier between the primitives and the components", () => {
     // tokens.css had primitives and app.css had components with nothing in between, so
     // every rule re-derived its own box and the UI could express value but not rank.

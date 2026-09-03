@@ -3773,6 +3773,49 @@ button:disabled {
   overflow-wrap: anywhere;
 }
 
+/* The app's display level. Two-up rather than three, because 22px mono in a 344px panel
+   leaves ~95px per column three-up and a five-significant-figure MPa value wraps.
+   overflow-wrap matches .info-row strong, which already needed it for the same reason. */
+.result-headline {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-3);
+  margin-bottom: var(--gap-block);
+  padding: var(--card-pad) var(--card-pad) var(--sp-3);
+  background: var(--color-surface-2);
+  border: var(--border-thin);
+  border-radius: var(--card-radius);
+}
+
+.result-headline-item {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.result-headline-item span {
+  color: var(--color-text-muted);
+  font-size: var(--fs-mini);
+  letter-spacing: var(--ls-eyebrow);
+  text-transform: uppercase;
+}
+
+.result-headline-item strong {
+  overflow-wrap: anywhere;
+  min-width: 0;
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xl);
+  font-weight: var(--fw-medium);
+  line-height: var(--lh-tight);
+  font-variant-numeric: tabular-nums;
+}
+
+/* A single headline figure gets the full width rather than a stranded half. */
+.result-headline:has(> .result-headline-item:only-child) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .summary-box,
 .placement-chip {
   margin-top: 14px;
@@ -5201,6 +5244,12 @@ input[aria-invalid="true"] {
 }
 
 @media (max-width: 640px) {
+  /* Two-up leaves ~130px per column here, which splits a value from its unit across
+     two lines. One column, full width, keeps each figure on one line. */
+  .result-headline {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   /* The mug alone still reads as the donate action; the wordmark is what pushed
      .status-links wide enough to squeeze the tab group out of its track. */
   .coffee-label {

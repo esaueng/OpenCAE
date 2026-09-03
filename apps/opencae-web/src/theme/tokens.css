@@ -196,6 +196,26 @@ button:disabled {
   cursor: not-allowed;
 }
 
+/* There is zero relative font sizing anywhere in this app's CSS, which makes the browser
+   default `small { font-size: smaller }` (0.8333em) provably the only source of the
+   sub-11px text the interface was rendering — the legend's Low/High at 9.58px and the
+   colour-scale range line at 10.83px, a measured value rendering smaller than its own
+   caption. Anchor it to the scale instead.
+
+   `strong` is deliberately NOT reset here: 17 rules already set --fw-medium on it
+   explicitly, which is evidence the codebase treats bold-vs-medium as a per-component
+   choice rather than a global one. */
+small {
+  font-size: var(--fs-xs);
+}
+
+/* Unstyled headings otherwise render at the UA's bold 700 and em-based sizes, which is
+   where the off-token weights came from. Components set their own real size. */
+h1, h2, h3, h4, h5, h6 {
+  font-size: inherit;
+  font-weight: var(--fw-medium);
+}
+
 button:focus-visible,
 input:focus-visible,
 select:focus-visible,

@@ -2107,10 +2107,12 @@ function ThermalResultsPanelContent({
         <button type="button" className={resultMode === "temperature" ? "active" : ""} aria-pressed={resultMode === "temperature"} onClick={() => onResultModeChange("temperature")}>Temperature</button>
         <button type="button" className={resultMode === "heat_flux" ? "active" : ""} aria-pressed={resultMode === "heat_flux"} onClick={() => onResultModeChange("heat_flux")}>Heat flux</button>
       </div>
+      <Headline items={[
+        { label: "Minimum temperature", value: formatResultMetric(resultSummary.minTemperature, resultSummary.temperatureUnits) },
+        { label: "Maximum temperature", value: formatResultMetric(resultSummary.maxTemperature, resultSummary.temperatureUnits) },
+        { label: "Maximum heat flux", value: formatResultMetric(resultSummary.maxHeatFlux, resultSummary.heatFluxUnits) }
+      ]} />
       <div className="summary-box">
-        <Info label="Minimum temperature" value={formatResultMetric(resultSummary.minTemperature, resultSummary.temperatureUnits)} />
-        <Info label="Maximum temperature" value={formatResultMetric(resultSummary.maxTemperature, resultSummary.temperatureUnits)} />
-        <Info label="Maximum heat flux" value={formatResultMetric(resultSummary.maxHeatFlux, resultSummary.heatFluxUnits)} />
         <Info label="Energy balance error" value={formatResultMetric(resultSummary.energyBalanceRelativeError * 100, "%")} />
       </div>
       <div className="summary-box">
@@ -2172,8 +2174,10 @@ function ModalResultsPanelContent({
   return (
     <Panel title="Results" step="results" helper="Inspect converged natural frequencies and normalized mode shapes." study={study}>
       {resultSummary.warning && <p className="panel-warning" role="status"><AlertTriangle size={16} />{resultSummary.warning}</p>}
+      <Headline items={[
+        { label: "Converged modes", value: `${resultSummary.convergedModeCount} / ${resultSummary.requestedModeCount}` }
+      ]} />
       <div className="summary-box">
-        <Info label="Converged modes" value={`${resultSummary.convergedModeCount} / ${resultSummary.requestedModeCount}`} />
         <Info label="Solver method" value="Block shift-invert" />
         <Info label="Result source" value={resultSourceLabelForPanel(resultSummary)} />
         <Info label="Runner" value={solverRunnerLabelForResult(resultProvenance)} />
@@ -2571,12 +2575,12 @@ function ResultsPanelContent({
           <small>{assessment.message}</small>
         </span>
       </div>
-      <div className="summary-box">
-        <Info label="Max stress" value={formatResultMetric(resultSummary.maxStress, resultSummary.maxStressUnits)} />
-        <Info label="Max displacement" value={formatResultMetric(resultSummary.maxDisplacement, resultSummary.maxDisplacementUnits)} />
-        <Info label="Safety factor" value={formatResultNumber(resultSummary.safetyFactor)} />
-        <Info label="Reaction force" value={formatResultMetric(resultSummary.reactionForce, resultSummary.reactionForceUnits)} />
-      </div>
+      <Headline items={[
+        { label: "Max stress", value: formatResultMetric(resultSummary.maxStress, resultSummary.maxStressUnits) },
+        { label: "Max displacement", value: formatResultMetric(resultSummary.maxDisplacement, resultSummary.maxDisplacementUnits) },
+        { label: "Safety factor", value: formatResultNumber(resultSummary.safetyFactor) },
+        { label: "Reaction force", value: formatResultMetric(resultSummary.reactionForce, resultSummary.reactionForceUnits) }
+      ]} />
       {hasPlayback && (
         <div className="dynamic-playback">
           <SectionTitle helpId="resultFrame">Frame</SectionTitle>
@@ -3004,6 +3008,23 @@ function HelpVisual({ kind }: { kind: SettingHelpVisual }) {
 
 function Info({ label, value }: { label: string; value: string }) {
   return <div className="info-row"><span>{label}</span><strong>{value}</strong></div>;
+}
+
+/* The one display level in the app. --fs-xl was defined in tokens.css and used nowhere,
+   so the largest type in the workspace was 16px and the number a user ran the solve for
+   rendered at the same size and weight as the solver-runner string. Every result panel
+   states its headline figures through this, so the answer reads as the answer. */
+function Headline({ items }: { items: Array<{ label: string; value: string }> }) {
+  return (
+    <div className="result-headline">
+      {items.map((item) => (
+        <div className="result-headline-item" key={item.label}>
+          <span>{item.label}</span>
+          <strong>{item.value}</strong>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 function ModelDimensions({ displayModel }: { displayModel: DisplayModel }) {
