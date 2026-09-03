@@ -5,6 +5,7 @@ import { describe, expect, test } from "vitest";
 const css = readFileSync(resolve(__dirname, "app.css"), "utf8");
 const tokens = readFileSync(resolve(__dirname, "../theme/tokens.css"), "utf8");
 const cadViewer = readFileSync(resolve(__dirname, "../components/CadViewer.tsx"), "utf8");
+const appSource = readFileSync(resolve(__dirname, "../WorkspaceApp.tsx"), "utf8");
 const lightThemeBlock = tokens.match(/\.theme-light\s*\{(?<body>[\s\S]*?)\n\}/)?.groups?.body ?? "";
 
 function lightToken(name: string) {
@@ -358,6 +359,20 @@ describe("app CSS", () => {
     expect(narrowRule(".status-state-label")).not.toMatch(/display:\s*none/);
     // The base rule keeps the Ko-fi wordmark laid out at full width.
     expect(cssRule(".coffee-label")).toMatch(/display:\s*inline-flex/);
+  });
+
+  test("gives the viewer's loading fallback the same treatment as the import overlay", () => {
+    // .viewer-loading had no rule at all, so the Suspense fallback rendered unstyled text
+    // in the corner of a black box — the first thing a returning user sees on a cold boot.
+    const loading = cssRule(".viewer-loading");
+
+    expect(loading).toMatch(/display:\s*grid/);
+    expect(loading).toMatch(/place-items:\s*center/);
+    expect(appSource).toContain('className="viewer-shell viewer-loading"');
+    expect(appSource).toContain('<span className="viewer-import-spinner" aria-hidden="true" />');
+    expect(appSource).toContain('<strong>Preparing the 3D view…</strong>');
+    // The spinner it reuses already opts out of animation under reduced motion.
+    expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\.viewer-import-spinner \{\s*animation:\s*none/);
   });
 
   test("makes accent-filled buttons legible when focused and when disabled", () => {

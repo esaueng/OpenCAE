@@ -2512,7 +2512,15 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           study={study}
           hasResults={resultDisplayEligible}
         />
-        <Suspense fallback={<section className="viewer-shell viewer-loading" aria-label="3D CAD viewer loading">Loading viewer…</section>}>
+        <Suspense fallback={(
+          <section className="viewer-shell viewer-loading" aria-label="3D CAD viewer loading">
+            <div className="viewer-import-card" role="status" aria-live="polite">
+              <span className="viewer-import-spinner" aria-hidden="true" />
+              <strong>Preparing the 3D view…</strong>
+              <small>Loading the viewer. The model appears as soon as it is ready.</small>
+            </div>
+          </section>
+        )}>
           <CadViewer
             displayModel={displayModelForUi}
             importingModelFilename={modelImport?.filename}

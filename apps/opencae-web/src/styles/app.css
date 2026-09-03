@@ -2327,6 +2327,16 @@ img {
   }
 }
 
+/* The Suspense fallback while the viewer chunk loads. It had no rule at all, so a cold
+   boot into a restored project showed unstyled text in the corner of a black box for as
+   long as the chunk took — the first thing a returning user sees. Same treatment as the
+   import overlay above, which is the app's existing honest-progress pattern. */
+.viewer-loading {
+  display: grid;
+  place-items: center;
+  padding: var(--sp-5);
+}
+
 .model-notice {
   width: 260px;
   display: grid;
