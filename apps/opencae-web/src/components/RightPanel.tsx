@@ -2925,6 +2925,8 @@ function HelpNote({ helpId }: { helpId: SettingHelpId }) {
   );
 }
 
+const TOOLTIP_CLOSE_DELAY_MS = 140;
+
 function SettingHelpTrigger({ helpId }: { helpId: SettingHelpId }) {
   const tooltipId = useId();
   const help = SETTING_HELP[helpId];
@@ -2932,6 +2934,31 @@ function SettingHelpTrigger({ helpId }: { helpId: SettingHelpId }) {
   const tooltipRef = useRef<HTMLSpanElement | null>(null);
   const [isTooltipOpen, setIsTooltipOpen] = useState(false);
   const [tooltipStyle, setTooltipStyle] = useState<CSSProperties | undefined>();
+  const closeTimerRef = useRef(0);
+
+  /* WCAG 1.4.13 Hoverable: the panel portals ~8px from the trigger, so moving the pointer
+     toward it left the trigger and closed the tooltip before it could be reached — and
+     .field-tooltip's `pointer-events: none` meant it could not be hovered anyway. The
+     grace period spans the gap; the portaled node cancels it on enter. */
+  const cancelClose = () => window.clearTimeout(closeTimerRef.current);
+  const closeSoon = () => {
+    cancelClose();
+    closeTimerRef.current = window.setTimeout(() => setIsTooltipOpen(false), TOOLTIP_CLOSE_DELAY_MS);
+  };
+
+  useEffect(() => () => window.clearTimeout(closeTimerRef.current), []);
+
+  useEffect(() => {
+    if (!isTooltipOpen || typeof window === "undefined") return undefined;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.stopPropagation();
+      cancelClose();
+      setIsTooltipOpen(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [isTooltipOpen]);
 
   const updateTooltipPosition = () => {
     const trigger = triggerRef.current;
@@ -2967,11 +2994,11 @@ function SettingHelpTrigger({ helpId }: { helpId: SettingHelpId }) {
       tabIndex={0}
       role="button"
       aria-label={`${help.title} help`}
-      aria-describedby={tooltipId}
-      onMouseEnter={() => setIsTooltipOpen(true)}
-      onMouseLeave={() => setIsTooltipOpen(false)}
-      onFocus={() => setIsTooltipOpen(true)}
-      onBlur={() => setIsTooltipOpen(false)}
+      aria-describedby={isTooltipOpen ? tooltipId : undefined}
+      onMouseEnter={() => { cancelClose(); setIsTooltipOpen(true); }}
+      onMouseLeave={closeSoon}
+      onFocus={() => { cancelClose(); setIsTooltipOpen(true); }}
+      onBlur={() => { cancelClose(); setIsTooltipOpen(false); }}
       onClick={(event) => {
         event.preventDefault();
         event.stopPropagation();
@@ -2985,7 +3012,15 @@ function SettingHelpTrigger({ helpId }: { helpId: SettingHelpId }) {
       <CircleHelp size={15} aria-hidden="true" />
       {isTooltipOpen &&
         createPortal(
-          <span ref={tooltipRef} id={tooltipId} className="field-tooltip field-tooltip--floating" role="tooltip" style={tooltipStyle}>
+          <span
+            ref={tooltipRef}
+            id={tooltipId}
+            className="field-tooltip field-tooltip--floating"
+            role="tooltip"
+            style={tooltipStyle}
+            onMouseEnter={cancelClose}
+            onMouseLeave={closeSoon}
+          >
             <HelpVisual kind={help.visual} />
             <strong>{help.title}</strong>
             <span>{help.body}</span>

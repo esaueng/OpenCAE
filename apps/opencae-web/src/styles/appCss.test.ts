@@ -6,6 +6,7 @@ const css = readFileSync(resolve(__dirname, "app.css"), "utf8");
 const tokens = readFileSync(resolve(__dirname, "../theme/tokens.css"), "utf8");
 const cadViewer = readFileSync(resolve(__dirname, "../components/CadViewer.tsx"), "utf8");
 const appSource = readFileSync(resolve(__dirname, "../WorkspaceApp.tsx"), "utf8");
+const rightPanel = readFileSync(resolve(__dirname, "../components/RightPanel.tsx"), "utf8");
 const lightThemeBlock = tokens.match(/\.theme-light\s*\{(?<body>[\s\S]*?)\n\}/)?.groups?.body ?? "";
 
 function lightToken(name: string) {
@@ -517,6 +518,31 @@ describe("app CSS", () => {
     expect(infoRow).toMatch(/padding:\s*var\(--sp-1\) 0/);
     expect(infoRow).toMatch(/line-height:\s*var\(--lh-tight\)/);
     expect(infoRow).not.toMatch(/font-size/);
+  });
+
+  test("makes setting help hoverable, dismissible and bounded", () => {
+    // WCAG 1.4.13. The panel portals ~8px from the trigger, so moving toward it left the
+    // trigger and closed the tooltip — and the base rule's pointer-events: none meant it
+    // could not have been hovered even if it had stayed open.
+    expect(cssRule(".field-tooltip--floating")).toMatch(/pointer-events:\s*auto/);
+    // Bodies run to 848 characters in a box that had no max-height and no overflow.
+    const tooltip = cssRule(".field-tooltip");
+    expect(tooltip).toMatch(/max-height:\s*min\(/);
+    expect(tooltip).toMatch(/overflow-y:\s*auto/);
+    // It toggles on click, so it is a control: pointer cursor at the 24px minimum target.
+    // The literal (not --control-h-sm) matches the pinned WCAG 2.5.8 target-size test
+    // above, which regexes this exact rule for `width: 24px` — both encode the same
+    // 24px guarantee, and this rule keeps the literal so the two pins do not fight.
+    const trigger = cssRule(".tooltip-trigger");
+    expect(trigger).toMatch(/cursor:\s*pointer/);
+    expect(trigger).toMatch(/width:\s*24px/);
+
+    // The grace period spans the gap, and Escape dismisses.
+    expect(rightPanel).toMatch(/TOOLTIP_CLOSE_DELAY_MS = \d+/);
+    expect(rightPanel).toContain("onMouseEnter={cancelClose}");
+    expect(rightPanel).toContain('if (event.key !== "Escape") return;');
+    // describedby stops pointing at a node that is not in the document.
+    expect(rightPanel).toContain("aria-describedby={isTooltipOpen ? tooltipId : undefined}");
   });
 
   test("resolves every custom property it references", () => {
