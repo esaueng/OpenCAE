@@ -144,6 +144,28 @@ img {
   align-items: center;
 }
 
+/* One eyebrow. This recipe was retyped across twelve rules; each of them still owns its
+   own colour and layout, but the type treatment lives here so changing it is one edit.
+   Every class name is unchanged — the pinned CSS tests look selectors up literally, and
+   RightPanel.test.tsx pins .panel-eyebrow's exact markup. */
+.start-sample-menu-bar,
+.start-sample-header,
+.simulation-type-header small,
+.storage-recovery-header small,
+.stepbar-eyebrow,
+.stepbar-footer,
+.panel-eyebrow,
+.editable-list h3,
+.section-title,
+.collapsible-subtitle,
+.app-crash-eyebrow,
+.app-crash-detail span {
+  font-family: var(--font-mono);
+  font-size: var(--fs-mini);
+  letter-spacing: var(--ls-eyebrow);
+  text-transform: uppercase;
+}
+
 .start-sample-menu-bar {
   width: min(430px, 100%);
   margin: 0 auto var(--sp-25);
@@ -151,11 +173,7 @@ img {
   grid-template-columns: 70px minmax(0, 1fr) 70px;
   align-items: center;
   color: var(--color-text-subtle);
-  font-family: var(--font-mono);
-  font-size: var(--fs-mini);
-  letter-spacing: var(--ls-eyebrow);
   text-align: center;
-  text-transform: uppercase;
 }
 
 .start-menu-back {
@@ -189,10 +207,6 @@ img {
   align-items: center;
   gap: var(--sp-3);
   color: var(--color-text-subtle);
-  font-family: var(--font-mono);
-  font-size: var(--fs-mini);
-  letter-spacing: var(--ls-eyebrow);
-  text-transform: uppercase;
 }
 
 .start-analysis-type {
@@ -783,10 +797,6 @@ img {
   display: block;
   margin-bottom: 3px;
   color: var(--color-text-muted);
-  font-family: var(--font-mono);
-  font-size: var(--fs-mini);
-  letter-spacing: var(--ls-eyebrow);
-  text-transform: uppercase;
 }
 
 .simulation-picker-layout,
@@ -1445,10 +1455,6 @@ img {
 
 .storage-recovery-header small {
   color: var(--color-text-subtle);
-  font-family: var(--font-mono);
-  font-size: var(--fs-mini);
-  letter-spacing: var(--ls-eyebrow);
-  text-transform: uppercase;
 }
 
 .storage-recovery-header strong {
@@ -1615,11 +1621,11 @@ img {
   align-items: start;
   gap: 9px;
   margin-top: var(--sp-25);
-  padding: var(--sp-25);
+  padding: var(--card-pad);
   color: var(--color-text-muted);
   background: var(--color-surface-2);
   border: var(--border-thin);
-  border-radius: var(--radius-md);
+  border-radius: var(--card-radius);
   cursor: pointer;
 }
 
@@ -1948,10 +1954,6 @@ img {
 .stepbar-eyebrow,
 .stepbar-footer {
   color: var(--color-text-subtle);
-  font-family: var(--font-mono);
-  font-size: var(--fs-mini);
-  letter-spacing: var(--ls-eyebrow);
-  text-transform: uppercase;
 }
 
 .stepbar-collapse {
@@ -2535,13 +2537,8 @@ img {
   margin-bottom: var(--sp-1);
 }
 
-.panel-eyebrow,
-.section-title {
+.panel-eyebrow {
   color: var(--color-text-subtle);
-  font-family: var(--font-mono);
-  font-size: var(--fs-mini);
-  letter-spacing: var(--ls-eyebrow);
-  text-transform: uppercase;
 }
 
 .panel-section h2 {
@@ -2593,7 +2590,7 @@ img {
   background: var(--color-surface-2);
   border: var(--border-thin);
   border-left: 3px solid var(--color-error);
-  border-radius: var(--radius-md);
+  border-radius: var(--card-radius);
 }
 
 /* .panel-warning's amber clears AA on the panel's own surface but only reaches 3.67:1 on
@@ -2753,11 +2750,11 @@ img {
   align-items: center;
   gap: var(--sp-25);
   margin: 0 0 14px;
-  padding: var(--sp-25);
+  padding: var(--card-pad);
   color: var(--color-text-muted);
   background: var(--color-surface-2);
   border: var(--border-thin);
-  border-radius: var(--radius-md);
+  border-radius: var(--card-radius);
 }
 
 .help-note--collapsed {
@@ -3105,9 +3102,9 @@ img {
 .result-probe-list {
   display: grid;
   gap: var(--sp-2);
-  padding: var(--sp-25);
+  padding: var(--card-pad);
   border: var(--border-thin);
-  border-radius: var(--radius-md);
+  border-radius: var(--card-radius);
   background: var(--color-surface-2);
 }
 
@@ -3154,9 +3151,9 @@ img {
 .result-scale-controls {
   display: grid;
   gap: var(--sp-25);
-  padding: var(--sp-25);
+  padding: var(--card-pad);
   border: var(--border-thin);
-  border-radius: var(--radius-md);
+  border-radius: var(--card-radius);
   background: var(--color-surface-2);
 }
 
@@ -3500,10 +3497,10 @@ input {
   display: grid;
   gap: var(--sp-2);
   margin: var(--sp-25) 0 var(--sp-3);
-  padding: var(--sp-2);
+  padding: var(--card-pad-tight);
   background: var(--color-surface-2);
   border: var(--border-thin);
-  border-radius: var(--radius-md);
+  border-radius: var(--card-radius);
 }
 
 .print-settings-grid {
@@ -3829,10 +3826,10 @@ button:disabled {
 .summary-box,
 .placement-chip {
   margin-top: 14px;
-  padding: var(--sp-25);
+  padding: var(--card-pad);
   background: var(--color-surface-2);
   border: var(--border-thin);
-  border-radius: var(--radius-md);
+  border-radius: var(--card-radius);
 }
 
 .editable-list {
@@ -3909,10 +3906,6 @@ button:disabled {
 .collapsible-subtitle {
   margin-left: auto;
   color: var(--color-text-subtle);
-  font-family: var(--font-mono);
-  font-size: var(--fs-mini);
-  letter-spacing: var(--ls-eyebrow);
-  text-transform: uppercase;
 }
 
 .collapsible-chevron {
@@ -4043,7 +4036,7 @@ button:disabled {
   padding: var(--sp-3);
   background: var(--color-surface-2);
   border: var(--border-thin);
-  border-radius: var(--radius-md);
+  border-radius: var(--card-radius);
 }
 
 .load-capacity-tool .field {
@@ -4066,10 +4059,10 @@ button:disabled {
   grid-template-columns: minmax(0, 1fr) auto 28px;
   align-items: center;
   gap: 7px;
-  padding: var(--sp-25);
+  padding: var(--card-pad);
   background: var(--color-surface-2);
   border: var(--border-thin);
-  border-radius: var(--radius-md);
+  border-radius: var(--card-radius);
 }
 
 .load-case-row > small {
@@ -4152,7 +4145,7 @@ button:disabled {
   gap: var(--sp-2);
   padding: var(--sp-3);
   border: var(--border-thin);
-  border-radius: var(--radius-md);
+  border-radius: var(--card-radius);
   background: var(--color-surface-2);
 }
 
@@ -4263,7 +4256,7 @@ button:disabled {
   padding: var(--sp-3);
   background: var(--color-surface-2);
   border: var(--border-thin);
-  border-radius: var(--radius-md);
+  border-radius: var(--card-radius);
 }
 
 .editable-item.load-item {
@@ -5657,10 +5650,6 @@ input[aria-invalid="true"] {
 .app-crash-eyebrow {
   margin: 0;
   color: var(--color-error);
-  font-family: var(--font-mono);
-  font-size: var(--fs-mini);
-  letter-spacing: var(--ls-eyebrow);
-  text-transform: uppercase;
 }
 
 .app-crash-card h1 {
@@ -5699,10 +5688,6 @@ input[aria-invalid="true"] {
 
 .app-crash-detail span {
   color: var(--color-text-subtle);
-  font-family: var(--font-mono);
-  font-size: var(--fs-mini);
-  letter-spacing: var(--ls-eyebrow);
-  text-transform: uppercase;
 }
 
 .app-crash-detail code {

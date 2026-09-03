@@ -476,6 +476,27 @@ describe("app CSS", () => {
     expect(css).toMatch(/border-radius:\s*999px/);
   });
 
+  test("keeps one eyebrow recipe and one card recipe rather than a copy per component", () => {
+    // The mono/mini/tracked/uppercase eyebrow was retyped across twelve rules. It lives in
+    // one grouped rule now; each component still owns its own colour and layout, and every
+    // class name is unchanged because the assertions here look selectors up literally.
+    const eyebrowCopies = [...css.matchAll(/letter-spacing:\s*var\(--ls-eyebrow\);/g)].length;
+    expect(eyebrowCopies).toBeLessThanOrEqual(4);
+
+    // .section-title used to be declared twice: once beside .panel-eyebrow and again in
+    // .editable-list h3, which re-declared all five properties at equal specificity later
+    // in the file, so the first was dead.
+    expect(css).not.toMatch(/\.panel-eyebrow,\n\.section-title \{/);
+
+    // Card interiors resolve through the shared tokens.
+    for (const selector of [".help-note", ".result-probe-list", ".result-scale-controls",
+      ".placement-chip", ".load-combination-row", ".shortcut-toggle"]) {
+      expect(cssRule(selector), selector).toMatch(/padding:\s*var\(--card-pad\)/);
+    }
+    // --card-radius resolves to the primitive rather than repeating its value.
+    expect(tokens).toMatch(/--card-radius:\s*var\(--radius-md\)/);
+  });
+
   test("resolves every custom property it references", () => {
     // An undefined custom property invalidates its whole declaration at computed-value
     // time, so `padding: var(--typo) 6px` silently becomes `padding: 0` — a class of bug

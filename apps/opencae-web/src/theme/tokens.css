@@ -83,7 +83,7 @@
   /* Card interiors. */
   --card-pad: 10px;
   --card-pad-tight: 8px;
-  --card-radius: 4px;
+  --card-radius: var(--radius-md);
 
   /* Grouping. One value was doing both jobs, which is why nothing grouped. */
   --gap-block: 12px;
