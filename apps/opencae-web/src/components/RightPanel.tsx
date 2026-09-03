@@ -2555,26 +2555,18 @@ function ResultsPanelContent({
           </select>
         </label>
       )}
-      {(onGenerateReport || exportMenuItems.length > 0) && (
-        <div className="result-actions">
-          {onGenerateReport && (
-            <button className="primary wide" type="button" disabled={reportBusy || reportDisabled} onClick={() => void onGenerateReport({ targetSafetyFactor })}>
-              <FileDown size={18} />{reportBusy ? "Generating…" : "Generate report"}
-            </button>
-          )}
-          <ResultExportMenu items={exportMenuItems} />
-        </div>
-      )}
-      {reportError && <p className="panel-warning" role="alert"><AlertTriangle size={16} />{reportError}</p>}
-      {pngExportError && <p className="panel-warning" role="alert"><AlertTriangle size={16} />{pngExportError}</p>}
-      {htmlExportError && <p className="panel-warning" role="alert"><AlertTriangle size={16} />{htmlExportError}</p>}
-      {dataExportError && <p className="panel-warning" role="alert"><AlertTriangle size={16} />{dataExportError}</p>}
       <div className={`failure-assessment ${assessment.status}`}>
         <span className="assessment-icon"><AssessmentIcon size={20} /></span>
         <span>
           <strong>{assessment.title}</strong>
           <small>{assessment.message}</small>
         </span>
+      </div>
+      <div className="summary-box">
+        <Info label="Max stress" value={formatResultMetric(resultSummary.maxStress, resultSummary.maxStressUnits)} />
+        <Info label="Max displacement" value={formatResultMetric(resultSummary.maxDisplacement, resultSummary.maxDisplacementUnits)} />
+        <Info label="Safety factor" value={formatResultNumber(resultSummary.safetyFactor)} />
+        <Info label="Reaction force" value={formatResultMetric(resultSummary.reactionForce, resultSummary.reactionForceUnits)} />
       </div>
       {hasPlayback && (
         <div className="dynamic-playback">
@@ -2741,11 +2733,6 @@ function ResultsPanelContent({
         <Info label="Mesh source" value={formatMeshSourceLabel(resultProvenance?.meshSource, displayModel)} />
         <Info label="Solver method" value={solverMethodForResult(resultSummary, study)} />
         <Info label="Runner" value={solverRunnerLabelForResult(resultProvenance)} />
-        <Info label="Max stress" value={formatResultMetric(resultSummary.maxStress, resultSummary.maxStressUnits)} />
-        <Info label="Max displacement" value={formatResultMetric(resultSummary.maxDisplacement, resultSummary.maxDisplacementUnits)} />
-        <Info label="Safety factor" value={formatResultNumber(resultSummary.safetyFactor)} />
-        <Info label="Failure check" value={assessment.title} />
-        <Info label="Reaction force" value={formatResultMetric(resultSummary.reactionForce, resultSummary.reactionForceUnits)} />
       </div>
       {canEstimateLoad && (
         <>
@@ -2777,6 +2764,20 @@ function ResultsPanelContent({
         </>
       )}
       <div className="legend"><small>Low</small><span style={resultColorScale ? { background: resultScaleCssGradient(resultColorScale) } : undefined} /><small>High</small></div>
+      {(onGenerateReport || exportMenuItems.length > 0) && (
+        <div className="result-actions">
+          {onGenerateReport && (
+            <button className="primary wide" type="button" disabled={reportBusy || reportDisabled} onClick={() => void onGenerateReport({ targetSafetyFactor })}>
+              <FileDown size={18} />{reportBusy ? "Generating…" : "Generate report"}
+            </button>
+          )}
+          <ResultExportMenu items={exportMenuItems} />
+        </div>
+      )}
+      {reportError && <p className="panel-warning" role="alert"><AlertTriangle size={16} />{reportError}</p>}
+      {pngExportError && <p className="panel-warning" role="alert"><AlertTriangle size={16} />{pngExportError}</p>}
+      {htmlExportError && <p className="panel-warning" role="alert"><AlertTriangle size={16} />{htmlExportError}</p>}
+      {dataExportError && <p className="panel-warning" role="alert"><AlertTriangle size={16} />{dataExportError}</p>}
     </Panel>
   );
 }

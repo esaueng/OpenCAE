@@ -1875,6 +1875,37 @@ describe("RightPanel payload mass controls", () => {
     expect(html).not.toContain("Result mode");
   });
 
+  test("leads the results panel with the answer, not with the exports", () => {
+    const markup = renderPanel("results", {
+      onGenerateReport: vi.fn(),
+      onExportResultPng: vi.fn(),
+      onExportResultHtml: vi.fn(),
+      onExportResultData: vi.fn()
+    });
+
+    const verdict = markup.indexOf("failure-assessment");
+    const maxStress = markup.indexOf("Max stress");
+    const provenance = markup.indexOf("Result source");
+    const exports = markup.indexOf("Generate report");
+
+    // Five stacked export buttons used to be the first thing in the panel, pushing the
+    // number the user ran the solve for to row five of a nine-row table below them.
+    expect(verdict).toBeGreaterThan(-1);
+    expect(verdict).toBeLessThan(maxStress);
+    expect(maxStress).toBeLessThan(provenance);
+    expect(provenance).toBeLessThan(exports);
+
+    // The secondary exports collapse into one reachable "Export" menu next to the
+    // primary action, rather than a column of five equally weighted buttons.
+    expect(markup).toContain("export-menu-trigger");
+    expect(markup).toContain('aria-haspopup="menu"');
+    expect(markup.indexOf("Generate report")).toBeLessThan(markup.indexOf("export-menu-trigger"));
+    // The verdict card already states the assessment title, so the row that repeated it
+    // is gone. Matched as the row's own label, since the card's title can itself read
+    // "Failure check unavailable".
+    expect(markup).not.toContain("<span>Failure check</span>");
+  });
+
   test("offers one-click report generation with busy and error states", () => {
     const idle = renderPanel("results", { onGenerateReport: vi.fn() });
     const busy = renderPanel("results", { onGenerateReport: vi.fn(), reportBusy: true });

@@ -3560,12 +3560,14 @@ button:disabled {
 
 /* Results export/report actions: one left-aligned column so every download
    icon and label lines up in a shared gutter instead of each button centering
-   its own icon+label to a different x. The assessment card below reuses the
-   same 20px icon gutter and text column (see .failure-assessment). */
+   its own icon+label to a different x. These sit at the foot of the panel,
+   below the answer they export, so the margin is above rather than below.
+   The secondary exports collapse into ResultExportMenu's own popover rather
+   than a second .result-actions nested here. */
 .result-actions {
   display: grid;
   gap: var(--sp-2);
-  margin: 0 0 14px;
+  margin: 14px 0 0;
 }
 
 .result-actions .primary,
@@ -3852,13 +3854,14 @@ button:disabled {
 }
 
 .failure-assessment {
-  margin-top: 14px;
+  margin-top: 0;
   display: grid;
   grid-template-columns: 20px minmax(0, 1fr);
   gap: 10px;
   align-items: start;
-  /* 3px left border + 9px padding = 12px content start, matching the action
-     buttons above (1px border + 11px padding) so icons and text stay in column. */
+  /* 3px left border + 9px padding = 12px content start, matching the export buttons
+     (1px border + 11px padding) so icons and text share a column even though the two
+     blocks now sit at opposite ends of the panel. */
   padding: 12px 12px 12px 9px;
   color: var(--color-text);
   background: rgba(77, 163, 255, 0.12);
