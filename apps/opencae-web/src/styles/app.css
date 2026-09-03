@@ -4630,13 +4630,13 @@ input[aria-invalid="true"] {
   background: var(--color-surface-2);
 }
 
+/* Hover and selected may share a look; focus must not. Collapsing all three onto one rule
+   that ends in `outline: none` meant tabbing to these produced no visible change at all. */
 .status-tabs button:hover,
-.status-tabs button:focus-visible,
 .status-tabs button.active {
   color: var(--color-text);
   background: var(--color-surface-2);
   border-color: var(--color-accent-border);
-  outline: none;
 }
 
 .count-pill {
@@ -4876,13 +4876,10 @@ input[aria-invalid="true"] {
 }
 
 .log-copy-button:hover,
-.log-copy-button:focus-visible,
-.log-clear-button:hover,
-.log-clear-button:focus-visible {
+.log-clear-button:hover {
   color: var(--color-text);
   background: var(--color-surface-2);
   border-color: var(--color-accent-border);
-  outline: none;
 }
 
 .log-clear-button {
@@ -5120,6 +5117,13 @@ input[aria-invalid="true"] {
   text-align: left;
 }
 
+/* border-color alone paints nothing here: the base button reset is `border: none`, so the
+   selected face had no visible state. A transparent border gives it something to colour,
+   the way the sibling .viewer-view-presets rule already works. */
+.viewer-a11y-faces button {
+  border: 1px solid transparent;
+}
+
 .viewer-a11y-faces button[aria-pressed="true"] {
   color: var(--color-accent);
   border-color: var(--color-accent-border);
@@ -5160,11 +5164,19 @@ input[aria-invalid="true"] {
   border-radius: var(--radius-sm);
 }
 
-.viewer-view-presets button:hover,
-.viewer-view-presets button:focus-visible,
-.viewer-view-presets button[aria-pressed="true"] {
+.viewer-view-presets button:hover {
   color: var(--color-accent);
   border-color: var(--color-accent-border);
+}
+
+/* A mode should look like a mode. Hover previously rendered identically to selected, so
+   the active camera view was indistinguishable from whichever button was under the
+   pointer. This is the recipe .segmented button.active already uses. */
+.viewer-view-presets button[aria-pressed="true"] {
+  color: var(--color-accent);
+  background: var(--color-accent-dim);
+  border-color: var(--color-accent-border);
+  box-shadow: inset 0 0 0 1px var(--color-accent-border);
 }
 
 .unit-toggle:focus-visible {

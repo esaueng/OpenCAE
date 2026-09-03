@@ -123,6 +123,10 @@ export function StartScreen({ onLoadSample, onCreateProject, onOpenProject }: St
           if (sampleMenuOpen) loadSelectedSample();
           else setSampleMenuOpen(true);
         }
+        // Only when <main> itself has focus, matching the Enter branch above. Unguarded,
+        // these fired from any focused descendant — WCAG 2.1.4, which the workspace's own
+        // single-key handler already cites and honours.
+        if (event.target !== event.currentTarget) return;
         if (!event.metaKey && !event.ctrlKey && !event.altKey && event.key.toLowerCase() === "n") {
           event.preventDefault();
           onCreateProject();
