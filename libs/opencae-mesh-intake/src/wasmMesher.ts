@@ -7,6 +7,7 @@
 
 import { MESH_QUALITY_REJECT_MIN_SICN } from "./meshQualityGate";
 import type { ElementOrderFallbackMetadata } from "./types";
+import { BROWSER_SOLVE_LIMITS } from "@opencae/solve-pipeline/limits";
 
 type GmshWasmModule = typeof import("@loumalouomega/gmsh-wasm");
 export type GmshApi = Awaited<ReturnType<GmshWasmModule["default"]>>;
@@ -239,8 +240,8 @@ export async function meshGeoScriptToMshV2(geoScript: string, options: MeshWasmO
 const QUALITY_SIZE_MULTIPLIERS = [1, 3 / 2, 2 / 3, 4 / 9] as const;
 /** Stop refining once a mesh gets this large — the solver caps DOF anyway. */
 const MAX_QUALITY_REFINEMENT_TETS = 80_000;
-/** The browser solve pipeline accepts at most 100,000 displacement DOFs. */
-const MAX_BROWSER_SOLVE_NODES = Math.floor(100_000 / 3);
+/** Three displacement DOFs per structural node under the authoritative browser guard. */
+const MAX_BROWSER_SOLVE_NODES = Math.floor(BROWSER_SOLVE_LIMITS.maxDofs / 3);
 const MAX_STEP_INPUT_BYTES = 32 * 1024 * 1024;
 const MAX_MSH_OUTPUT_CHARACTERS = 64 * 1024 * 1024;
 const MIN_BROWSER_MESH_SIZE_MM = 0.5;

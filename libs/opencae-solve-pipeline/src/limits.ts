@@ -35,10 +35,11 @@ export const CLOUD_SOLVER_LIMITS: SolveLimits = {
 };
 
 /**
- * Active CPU browser limits. maxDofs is the guarded 150k product cap, verified by
- * the scale benchmark through the real solve worker in Chromium and
- * WebKit. Memory and integration-step ceilings remain tighter than the retired
- * runner because the browser has no external wall-clock supervisor.
+ * Active CPU browser limits. maxDofs is the guarded 150k product ceiling. The
+ * cross-engine scale benchmark exercises the real solve worker at about 100k
+ * DOF in Chromium and WebKit; it does not performance-certify the 150k ceiling.
+ * Memory and integration-step ceilings remain tighter than the retired runner
+ * because the browser has no external wall-clock supervisor.
  *
  * Keeping this in a lightweight subpath lets preflight/UI orchestration share
  * the authoritative cap without pulling solver implementations into the main

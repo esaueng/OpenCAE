@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { solverSurfaceMeshFromModel } from "@opencae/core";
 import { solveCoreStatic } from "@opencae/solver-cpu";
-import type { DisplayModel, Study } from "@opencae/schema";
+import type { DisplayModel, RunVariantResult, Study } from "@opencae/schema";
 import {
   autoSolverBackend,
   bracketMeshSizeMmForPreset,
@@ -13,6 +13,7 @@ import {
   resolveSolverBackend,
   selectionPlaneMatches,
   selectionPlaneTolerance,
+  staticEnvelopeVariant,
   studyForCoreGeometryDispatch,
   topologySpanIsUsable,
   trySolveOpenCaeCoreStudy
@@ -775,6 +776,64 @@ describe("per-model solver backend resolution", () => {
   test("autoSolverBackend is local for every study (single execution path since B4a)", () => {
     expect(autoSolverBackend(autoStudy(), cantileverDisplayModel())).toBe("opencae_core_local");
     expect(autoSolverBackend(autoStudy(), bracketDisplayModelFixture())).toBe("opencae_core_local");
+  });
+});
+
+describe("static result envelopes", () => {
+  test("reduces supported-scale stress and displacement fields without spread overflow", () => {
+    const valueCount = 160_001;
+    const variant = (id: string, stressValue: number, displacementValue: number, reactionForce: number): RunVariantResult => ({
+      id,
+      name: id,
+      kind: "case",
+      summary: {
+        maxStress: stressValue,
+        maxStressUnits: "MPa",
+        maxDisplacement: displacementValue,
+        maxDisplacementUnits: "mm",
+        safetyFactor: 2,
+        reactionForce,
+        reactionForceUnits: "N"
+      },
+      fields: [
+        {
+          id: `${id}-stress`,
+          runId: "run",
+          type: "stress",
+          component: "von_mises",
+          location: "node",
+          values: new Array<number>(valueCount).fill(stressValue),
+          min: stressValue,
+          max: stressValue,
+          units: "MPa"
+        },
+        {
+          id: `${id}-displacement`,
+          runId: "run",
+          type: "displacement",
+          location: "node",
+          values: new Array<number>(valueCount).fill(displacementValue),
+          vectors: new Array<[number, number, number]>(valueCount).fill([0, displacementValue, 0]),
+          min: displacementValue,
+          max: displacementValue,
+          units: "mm"
+        }
+      ]
+    } as RunVariantResult);
+    const first = variant("case-a", 10, 1, 500);
+    const second = variant("case-b", 12, 2, 750);
+    first.fields[0]!.values[0] = -4;
+    second.fields[0]!.values[0] = -5;
+    second.fields[0]!.values[valueCount - 1] = 250;
+
+    let envelope: RunVariantResult | undefined;
+    expect(() => {
+      envelope = staticEnvelopeVariant([first, second], "run");
+    }).not.toThrow();
+
+    expect(envelope?.summary).toMatchObject({ maxStress: 250, maxDisplacement: 2, reactionForce: 750 });
+    expect(envelope?.fields.find((field) => field.type === "stress")).toMatchObject({ min: -4, max: 250 });
+    expect(envelope?.fields.find((field) => field.type === "displacement")).toMatchObject({ min: 2, max: 2 });
   });
 });
 

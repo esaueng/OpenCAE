@@ -1,4 +1,4 @@
-// Browser benchmark harness for the 100k-DOF browser solve cap (plan 015:
+// Browser benchmark harness for the approximately 100k-DOF validation checkpoint (plan 015:
 // "keep the staged cap at 60k until ... a WebKit target-scale run lands").
 // Flag-gated like the mesh proof harnesses: main.tsx lazy-imports this chunk
 // only when the URL carries ?solveBench, so normal sessions never load it and
@@ -24,7 +24,8 @@
 //      reaction ~= the applied 500 N load.
 //
 // scripts/verify-100k-solve.mjs drives this in headless Chrome AND Playwright
-// WebKit and hard-gates on both engines succeeding with matching results.
+// WebKit and hard-gates on both engines succeeding with matching results. It
+// does not certify performance at the 150k guarded product ceiling.
 import { buildCoreModelFromCloudMesh, type SelectionMappingDiagnostic } from "@opencae/mesh-intake";
 import { BROWSER_SOLVE_LIMITS, type SolveProgressEvent } from "@opencae/solve-pipeline";
 import { unpackCoreVolumeMeshArtifact, type MeshWorkerPhase } from "./meshProtocol";
@@ -38,6 +39,7 @@ import boxWithBoreStep from "../../../../libs/opencae-mesh-intake/fixtures/box-w
 export const DEFAULT_BENCH_MESH_SIZE_MM = 2.22;
 const TARGET_NODE_COUNT = 32000;
 const MIN_BENCH_DOFS = 90000;
+const MAX_BENCH_DOFS = 100000;
 const MAX_MESH_ATTEMPTS = 3;
 const MAIN_HEAP_SAMPLE_INTERVAL_MS = 250;
 
@@ -175,7 +177,7 @@ export async function runSolveBench(options: { meshSizeMm?: number; minDofs?: nu
       const nodeCount = attemptArtifact.metadata.nodeCount;
       const dofs = nodeCount * 3;
       meshAttempts.push({ meshSizeMm, nodeCount, dofs });
-      if (dofs >= minBenchDofs && dofs <= BROWSER_SOLVE_LIMITS.maxDofs) {
+      if (dofs >= minBenchDofs && dofs <= Math.min(MAX_BENCH_DOFS, BROWSER_SOLVE_LIMITS.maxDofs)) {
         meshed = attemptMeshed;
         meshPhases = phases;
         artifact = attemptArtifact;
@@ -186,7 +188,7 @@ export async function runSolveBench(options: { meshSizeMm?: number; minDofs?: nu
     if (!meshed || !artifact) {
       return {
         ok: false,
-        error: `Mesh never landed in the ${minBenchDofs}..${BROWSER_SOLVE_LIMITS.maxDofs} DOF band: ` +
+        error: `Mesh never landed in the ${minBenchDofs}..${MAX_BENCH_DOFS} DOF validation band: ` +
           meshAttempts.map((entry) => `${entry.meshSizeMm}mm -> ${entry.dofs} DOFs`).join(", ")
       };
     }

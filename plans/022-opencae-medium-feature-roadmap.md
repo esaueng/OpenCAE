@@ -12,7 +12,7 @@ Complete on `codex/022-medium-feature-roadmap`.
 | 4. Static mesh-convergence studies | Released (2026-07-14) | 265 focused tests, typecheck, build, 1,319-test full suite |
 | 5. Advanced loads and equivalent bolt preload | Released (2026-07-14) | 326 focused tests, typecheck, build, 1,340-test full suite |
 
-The plan runs after the result-identity, cache-key, and barycentric-probe foundation from plan 021 Stage 1. The browser solve limit is 100,000 DOF and must always be passed through `@opencae/solve-pipeline`; the solver package's internal 30,000-DOF default is not the product limit.
+The plan runs after the result-identity, cache-key, and barycentric-probe foundation from plan 021 Stage 1. At release the browser solve limit was 100,000 DOF; the current code authority is `BROWSER_SOLVE_LIMITS`, now a 150,000-DOF guarded product ceiling. The existing approximately 100,000-DOF benchmark is a validation checkpoint, not certification at the ceiling.
 
 ## Increment 1 — Modal analysis
 
@@ -47,13 +47,13 @@ The plan runs after the result-identity, cache-key, and barycentric-probe founda
 - Store case, combination, and envelope payloads as `RunVariantResult` entries over one shared surface mesh. Active variant identity now participates in field selection, probes, series, and packed-playback cache keys.
 - Keep portable container version 2 and parse old structural result bundles as one `Default` variant. Partial IndexedDB variant records are removed after cancellation or failure.
 - Add the case/combination editor and result-variant selector. Disabled cases remain editable but do not solve, and dynamic studies expose cases without combination/envelope controls.
-- Thread the 100,000-DOF browser limit through every variant pipeline and preserve the honest browser-limit diagnostic on case results.
+- Thread the authoritative browser limit through every variant pipeline and preserve the honest browser-limit diagnostic on case results (`BROWSER_SOLVE_LIMITS` was 100,000 DOF at release and is currently 150,000 DOF).
 
 ## Increment 4 — Static mesh-convergence studies
 
 - Add project-persisted convergence records for one selected static load case. Run the isolated `coarse -> medium -> fine` ladder without changing the working study's selected mesh or active results; `ultra` stays outside automatic v1 studies.
 - Default an explicit displacement probe to the primary case-load application point. Map it to the nearest solver-surface triangle with model-scale tolerance and reuse barycentric vector interpolation; a point that cannot map fails that rung honestly.
-- Preflight every generated Core mesh for actual node/element counts, total/free DOF, and representative mesh size. Import the authoritative 100,000-DOF cap through a lightweight solve-pipeline limits entry point and skip over-limit meshes before entering the solve worker.
+- Preflight every generated Core mesh for actual node/element counts, total/free DOF, and representative mesh size. Import the authoritative `BROWSER_SOLVE_LIMITS` ceiling through the lightweight solve-pipeline limits entry point and skip over-limit meshes before entering the solve worker.
 - Persist only compact rung metrics: requested preset, actual counts and size, raw element peak von Mises stress, probe displacement magnitude, status, and skip/failure reason. Full rung meshes and result fields remain transient.
 - Continue after individual mesh, solve, or mapping failures. Classify only three successful strictly increasing-DOF rungs; medium-to-fine changes at or below 5% displacement and 10% stress are labeled apparent convergence, threshold misses are unconverged, and missing/non-monotonic ladders are inconclusive.
 - Add a static-case/probe control and lightweight SVG plot of both metrics against actual DOF, including skipped/capped markers and the compact persisted rung details.

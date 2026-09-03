@@ -14,7 +14,7 @@ CAD entities remain the source of truth. Mesh entities are generated artifacts. 
 
 ## Solver Boundaries
 
-Static, dynamic, and modal structural studies run through OpenCAE Core with explicit attribution. The browser product limit is 100,000 DOF and is passed by `@opencae/solve-pipeline` into every solver call; callers must not rely on the solver package's lower internal default. Simple block or beam-like studies may use a structured proxy mesh and are labeled preview-only. Complex geometry is blocked from that path unless an actual connected Core volume mesh artifact is available, in which case the result can carry actual-volume-mesh FEA provenance.
+Static, dynamic, and modal structural studies run through OpenCAE Core with explicit attribution. `BROWSER_SOLVE_LIMITS.maxDofs` is the code authority for the guarded product ceiling, currently 150,000 DOF, and is passed by `@opencae/solve-pipeline` into every solver call. The cross-browser scale benchmark exercises approximately 100,000 DOF; it is a validation checkpoint, not performance certification of the 150,000-DOF ceiling. Simple block or beam-like studies may use a structured proxy mesh and are labeled preview-only. Complex geometry is blocked from that path unless an actual connected Core volume mesh artifact is available, in which case the result can carry actual-volume-mesh FEA provenance.
 
 Dynamic and modal analysis share sparse stiffness, constraint reduction, and positive HRZ lumped-mass assembly. Modal analysis uses deterministic block shift-invert subspace iteration and returns only modes that satisfy the scaled residual tolerance. Its normalized vector fields use the same deformation renderer as displacement, while the web app creates 24 phase frames without storing duplicate solver output.
 
@@ -28,7 +28,7 @@ Dynamic cases reuse one K/M preparation and Rayleigh calibration but start each 
 
 ## Static Mesh Convergence
 
-Static convergence studies are project records, not run variants. The browser clones one selected load case and executes `coarse -> medium -> fine` through isolated mesh and solve jobs, leaving the working study's mesh and active results unchanged. Each generated mesh is preflighted through the Core adapter for actual node, element, total-DOF, and free-DOF counts before solving. The 100,000-DOF browser cap is imported from the lightweight `@opencae/solve-pipeline/limits` entry point and a capped rung is persisted as skipped instead of entering the worker.
+Static convergence studies are project records, not run variants. The browser clones one selected load case and executes `coarse -> medium -> fine` through isolated mesh and solve jobs, leaving the working study's mesh and active results unchanged. Each generated mesh is preflighted through the Core adapter for actual node, element, total-DOF, and free-DOF counts before solving. The current 150,000-DOF guarded product ceiling is imported from the lightweight `@opencae/solve-pipeline/limits` entry point and an over-limit rung is persisted as skipped instead of entering the worker.
 
 The orchestrator retains only compact rung metrics: requested preset, actual mesh size and counts, raw element peak von Mises stress, and one interpolated displacement-probe magnitude. It reuses the result probe's barycentric vector interpolation on the nearest solver-surface triangle with a model-scale mapping tolerance. Full mesh and result fields remain transient to each worker job and are not attached to the convergence record.
 

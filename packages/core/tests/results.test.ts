@@ -59,6 +59,8 @@ describe("Core result structures", () => {
     // Math.min(...values) throws RangeError above ~120k spread arguments, so
     // element-located field extents must come from a loop.
     const values = Array.from({ length: 300_000 }, (_, index) => (index % 997) - 500);
+    values[180_000] = Number.NaN;
+    values[180_001] = Number.POSITIVE_INFINITY;
     const field = createCoreResultField({
       id: "stress-von-mises-element",
       type: "stress",
@@ -103,6 +105,18 @@ describe("Core result structures", () => {
     // Alignment errors are fine here (one-tet fixture vs. 300k values); the
     // regression is that validation returns at all instead of throwing.
     expect(() => validateCoreResult(result)).not.toThrow();
+  });
+
+  test("uses a finite zero range for an empty field", () => {
+    const field = createCoreResultField({
+      id: "empty-displacement",
+      type: "displacement",
+      location: "node",
+      values: [],
+      units: "mm"
+    });
+
+    expect(field).toMatchObject({ values: [], min: 0, max: 0 });
   });
 
   test("validates finite WebGPU fields and surface mesh triangle references", () => {

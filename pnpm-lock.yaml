@@ -184,12 +184,12 @@ importers:
       '@opencae/materials':
         specifier: workspace:*
         version: link:../opencae-materials
-      '@opencae/schema':
-        specifier: workspace:*
-        version: link:../opencae-schema
       '@opencae/solve-pipeline':
         specifier: workspace:*
         version: link:../opencae-solve-pipeline
+      '@opencae/schema':
+        specifier: workspace:*
+        version: link:../opencae-schema
       '@opencae/solver-cpu':
         specifier: workspace:*
         version: link:../../packages/solver-cpu
@@ -251,6 +251,9 @@ importers:
       '@opencae/materials':
         specifier: workspace:*
         version: link:../opencae-materials
+      '@opencae/solve-pipeline':
+        specifier: workspace:*
+        version: link:../opencae-solve-pipeline
     devDependencies:
       '@opencae/core-adapter':
         specifier: workspace:*

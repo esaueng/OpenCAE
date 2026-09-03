@@ -1,3 +1,4 @@
+import { finiteExtrema } from "@opencae/core";
 import { MAX_EMBEDDED_MODEL_BYTES, MAX_VISUAL_MESH_BYTES, isStructuralResultSummary } from "@opencae/schema";
 import type { AnalysisMesh, CustomMaterial, DisplayModel, DynamicSolverSettings, MeshConvergenceRecord, MeshQuality, Project, ResultField, ResultRenderBounds, ResultSummary, RunEvent, RunVariantRef, RunVariantResult, Study, StudyRun } from "@opencae/schema";
 import type { StepGeometryInspection, StepGeometryRepairReport } from "@opencae/mesh-intake";
@@ -783,8 +784,8 @@ export function withDerivedSafetyFactorSurfaceField(results: ResultsResponse): R
   const values = stressField.values.map((stress) =>
     Math.min(DERIVED_SAFETY_FACTOR_CAP, yieldStrength / Math.max(Math.abs(stress), yieldStrength / DERIVED_SAFETY_FACTOR_CAP))
   );
-  const finiteValues = values.filter(Number.isFinite);
-  if (!finiteValues.length) return results;
+  const extent = finiteExtrema(values);
+  if (!extent) return results;
   return {
     ...results,
     fields: [
@@ -794,8 +795,8 @@ export function withDerivedSafetyFactorSurfaceField(results: ResultsResponse): R
         id: `${stressField.id}-derived-safety-factor`,
         type: "safety_factor",
         values,
-        min: Math.min(...finiteValues),
-        max: Math.max(...finiteValues),
+        min: extent.min,
+        max: extent.max,
         units: "ratio",
         vectors: undefined,
         samples: undefined

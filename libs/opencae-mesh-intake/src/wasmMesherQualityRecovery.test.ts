@@ -119,7 +119,7 @@ const fake = vi.hoisted(() => {
             elementOrder = order;
           },
           getNodes() {
-            const nodeCount = state.scenario === "dof_fallback" && elementOrder === 2 ? 40_000 : 4;
+            const nodeCount = state.scenario === "dof_fallback" && elementOrder === 2 ? 60_000 : 4;
             return { nodeTags: new Array(nodeCount), coord: [], parametricCoord: [] };
           },
           getElementsByType(typeCode: number) {
@@ -312,7 +312,7 @@ describe("STEP quality recovery orchestration", () => {
     expect(fake.state.qualityRepairAttempts).toEqual([6]);
   });
 
-  test("retains Tet4 when the safe quadratic mesh would exceed 100,000 DOFs", async () => {
+  test("retains Tet4 when the safe quadratic mesh would exceed the 150,000-DOF browser ceiling", async () => {
     fake.state.scenario = "dof_fallback";
 
     const result = await meshStepToMshV2(new Uint8Array([1]), { elementOrder: 2, meshSizeMm: 8 });
@@ -321,7 +321,7 @@ describe("STEP quality recovery orchestration", () => {
       requested: 2,
       used: 1,
       reason: "browser_dof_limit",
-      quadraticNodeCount: 40_000
+      quadraticNodeCount: 60_000
     });
     expect(result.elevation).toBeUndefined();
     expect(result.msh).toContain("1 4 0 1 2 3 4");

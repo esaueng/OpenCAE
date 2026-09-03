@@ -3,6 +3,7 @@ import {
   assertProductionSurfaceFieldInvariant,
   connectedComponents,
   createCoreResultField,
+  finiteExtrema,
   OPENCAE_CORE_VERSION,
   nodesPerElement,
   solverSurfaceMeshFromModel,
@@ -758,11 +759,12 @@ function stressVisualizationDiagnostic(
   ).ok
     ? "ok"
     : "invalid";
+  const plotStressExtent = finiteExtrema(stressField.values) ?? { min: 0, max: 0 };
   return {
     id: "stress-visualization",
     engineeringStressMaxMpa,
-    plotStressMinMpa: stressField.values.length > 0 ? Math.min(...stressField.values) : 0,
-    plotStressMaxMpa: stressField.values.length > 0 ? Math.max(...stressField.values) : 0,
+    plotStressMinMpa: plotStressExtent.min,
+    plotStressMaxMpa: plotStressExtent.max,
     stressFieldLocation: stressField.location,
     surfaceMeshRef: stressField.surfaceMeshRef,
     visualizationSource: stressField.visualizationSource,

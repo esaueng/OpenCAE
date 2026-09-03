@@ -12,6 +12,7 @@ const rootDir = resolve(import.meta.dirname, "..");
 describe("validation and retirement documentation", () => {
   test("documents local validation, beam theory, and limitation flows", () => {
     const readme = readFileSync(resolve(rootDir, "docs/validation/README.md"), "utf8");
+    const architecture = readFileSync(resolve(rootDir, "docs/architecture/README.md"), "utf8");
 
     expect(readme).toContain("## Validate Locally");
     expect(readme).toContain("## Beam Theory Comparison");
@@ -34,6 +35,12 @@ describe("validation and retirement documentation", () => {
     expect(readme).toContain("## Historical: Validate Deployed Cloud (retired 2026-07)");
     expect(readme).toContain("cloud-retirement.md");
     expect(readme).toContain("goldenParity.test.ts");
+    expect(readme).toContain("150,000-DOF guarded product ceiling");
+    expect(readme).toContain("approximately 100,000-DOF Chromium/WebKit benchmark");
+    expect(architecture).toContain("`BROWSER_SOLVE_LIMITS.maxDofs` is the code authority");
+    expect(architecture).toContain("currently 150,000 DOF");
+    expect(architecture).toContain("approximately 100,000 DOF");
+    expect(architecture).not.toContain("browser product limit is 100,000 DOF");
     // No instructions may point at the removed cloud endpoints or gates.
     expect(readme).not.toContain("verify:runner-version");
     expect(readme).not.toContain("deploy:core-cloud");
