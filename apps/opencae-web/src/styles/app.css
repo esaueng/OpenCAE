@@ -5231,9 +5231,34 @@ input[aria-invalid="true"] {
     right: var(--sp-3);
   }
 
+  /* The shell's middle row is minmax(0, 1fr) at full size, which pins the workspace to
+     exactly the leftover height. Once .workspace stacks it asks for a 440px viewer plus a
+     panel, so on a short viewport the panel row collapsed — measured 440px/1px at 900x500,
+     i.e. the entire controls panel one pixel tall. `auto` lets the workspace take its
+     intrinsic height and the shell scroll instead.
+
+     The chrome then has to stay put, which is why the bar and strip go sticky: without
+     that, scrolling down to the panel carries save/undo and the status readout off screen
+     and leaves the fixed log drawer floating over nothing. */
   .app-shell {
     --stepbar-w: 104px;
+    grid-template-rows: var(--topbar-h) minmax(min-content, 1fr) var(--statusbar-h);
     overflow: auto;
+  }
+
+  .topbar,
+  .status-strip {
+    position: sticky;
+    z-index: 1;
+    background: var(--color-surface);
+  }
+
+  .topbar {
+    top: 0;
+  }
+
+  .status-strip {
+    bottom: 0;
   }
 
   .app-shell.stepbar-collapsed {
@@ -5324,6 +5349,15 @@ input[aria-invalid="true"] {
 }
 
 @media (max-width: 640px) {
+  /* The base rule pairs min-width: 280px with max-width: calc(100% - 24px). At 375px the
+     viewer is 297px wide, so the max computes to 273px and the min wins — the card renders
+     at 280px, 94% of the viewer it is supposed to be annotating, wider than its own safety
+     valve. Dropping the floor here lets the clamp actually clamp. The base 280px stays
+     (appCss.test.ts pins it, and resultLegendContentScale's JS defaults are keyed to it). */
+  .analysis-legend {
+    min-width: 0;
+  }
+
   /* Two-up leaves ~130px per column here, which splits a value from its unit across
      two lines. One column, full width, keeps each figure on one line. */
   .result-headline {
