@@ -4794,6 +4794,37 @@ input[aria-invalid="true"] {
   padding-top: var(--sp-3);
 }
 
+/* The drawer classified every line OK/ERR/INFO and then rendered them all in one muted
+   colour, so a mesh crash was visually identical to "Mesh generated". The level is a
+   column now, and a failure is the one thing that carries colour. */
+.log-line {
+  display: grid;
+  grid-template-columns: max-content 2.5em minmax(0, 1fr);
+  gap: 0 var(--sp-2);
+}
+
+.log-time {
+  color: var(--color-text-subtle);
+}
+
+.log-level {
+  color: var(--color-text-subtle);
+}
+
+.log-line.log-ok .log-level {
+  color: var(--color-success);
+}
+
+.log-line.log-err .log-level,
+.log-line.log-err .log-message {
+  color: var(--color-error);
+}
+
+.log-message {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
 .logs-drawer-header {
   display: flex;
   align-items: center;

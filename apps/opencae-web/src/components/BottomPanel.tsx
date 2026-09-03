@@ -206,7 +206,18 @@ export function BottomPanel({ status, logs, meshStatus, solverStatus, onClearLog
               </button>
             </div>
           </div>
-          <pre>{formattedLogs.join("\n")}</pre>
+          <pre tabIndex={0} aria-label="Run log output">
+            {logs.map((entry, index) => {
+              const { time, level, message } = logEntryParts(entry);
+              return (
+                <div className={`log-line log-${level.toLowerCase()}`} key={`${entry.at}-${index}`}>
+                  <span className="log-time">{time}</span>
+                  <span className="log-level">{level}</span>
+                  <span className="log-message">{message}</span>
+                </div>
+              );
+            })}
+          </pre>
         </div>
       )}
       {expanded && tab === "tips" && (
@@ -362,12 +373,27 @@ export function resolveLogClearIntent(clickDetail: number, armed: boolean): "con
   return armed || clickDetail >= 2 ? "clear" : "confirm";
 }
 
+export type WorkspaceLogLevel = "OK" | "ERR" | "INFO";
+
+export function workspaceLogLevel(message: string): WorkspaceLogLevel {
+  const normalized = message.toLowerCase();
+  if (normalized.includes("complete") || normalized.includes("generated")) return "OK";
+  if (/(error|fail|failed|unavailable|not configured|not enabled)/.test(normalized)) return "ERR";
+  return "INFO";
+}
+
+/* The level was computed for every line and then flattened straight back into one string,
+   so a mesh crash looked exactly like "Mesh generated" — same colour, same weight, only
+   the word differed. It is kept as data here and coloured at render. */
+function logEntryParts(entry: WorkspaceLogEntry) {
+  return {
+    time: new Date(entry.at).toLocaleTimeString([], { hour12: false }),
+    level: workspaceLogLevel(entry.message),
+    message: entry.message
+  };
+}
+
 function formatLogEntry(entry: WorkspaceLogEntry) {
-  const normalized = entry.message.toLowerCase();
-  const level = normalized.includes("complete") || normalized.includes("generated")
-    ? "OK"
-    : /(error|fail|failed|unavailable|not configured|not enabled)/.test(normalized)
-      ? "ERR"
-      : "INFO";
-  return `${new Date(entry.at).toLocaleTimeString([], { hour12: false })} ${level.padEnd(4, " ")} ${entry.message}`;
+  const { time, level, message } = logEntryParts(entry);
+  return `${time} ${level.padEnd(4, " ")} ${message}`;
 }
