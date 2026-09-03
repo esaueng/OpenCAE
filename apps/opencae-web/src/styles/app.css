@@ -3554,6 +3554,25 @@ button:disabled {
   opacity: 0.45;
 }
 
+/* An accent fill at 45% opacity is still the most saturated thing in a panel footer, so
+   a disabled primary read as "loading" or "nearly ready" rather than "not available".
+   Drop it to the neutral surface instead; --color-text-muted on --color-surface-2 is the
+   pair already documented for AA in tokens.css. */
+.primary:disabled {
+  color: var(--color-text-muted);
+  background: var(--color-surface-2);
+  border-color: var(--color-border);
+  opacity: 1;
+}
+
+/* The global focus ring is --color-accent one pixel outside the element. On an
+   accent-FILLED button that is the fill colour against itself, so it read as the button
+   growing by a pixel rather than as focus. Invert it against the fill and widen the gap. */
+.primary:focus-visible {
+  outline-color: var(--color-text);
+  outline-offset: 2px;
+}
+
 .wide {
   width: 100%;
 }

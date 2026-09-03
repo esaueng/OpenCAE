@@ -360,6 +360,24 @@ describe("app CSS", () => {
     expect(cssRule(".coffee-label")).toMatch(/display:\s*inline-flex/);
   });
 
+  test("makes accent-filled buttons legible when focused and when disabled", () => {
+    // The global ring is --color-accent one pixel outside the element, which on an
+    // accent-FILLED button is the fill colour against itself — it read as the button
+    // growing rather than as focus.
+    const primaryFocus = cssRule(".primary:focus-visible");
+    expect(primaryFocus).toMatch(/outline-color:\s*var\(--color-text\)/);
+    expect(primaryFocus).toMatch(/outline-offset:\s*2px/);
+
+    // A dimmed accent still dominates a panel footer and reads as "loading" rather than
+    // "unavailable", so a disabled primary drops to the neutral surface instead.
+    const primaryDisabled = cssRule(".primary:disabled");
+    expect(primaryDisabled).toMatch(/background:\s*var\(--color-surface-2\)/);
+    expect(primaryDisabled).toMatch(/color:\s*var\(--color-text-muted\)/);
+    expect(primaryDisabled).toMatch(/opacity:\s*1/);
+    // The generic rule stays, for every button that is not accent-filled.
+    expect(cssRule("button:disabled")).toMatch(/opacity:\s*0\.45/);
+  });
+
   test("keeps the light theme from inheriting dark-theme ink", () => {
     // body resolves var(--color-text) in :root scope — against the DARK value — and that
     // computed color inherits straight past .theme-light. .app-shell must re-declare it in
