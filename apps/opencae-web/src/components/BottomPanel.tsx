@@ -259,7 +259,7 @@ export function BottomPanel({ status, logs, meshStatus, solverStatus, onClearLog
             ))}
           </div>
           <div className="status-groups" aria-label="Simulation status">
-            <span className={`status-state ${healthy}`}><i />{displayStatus}</span>
+            <span className={`status-state ${healthy}`}><i /><span className="status-state-label">{displayStatus}</span></span>
           </div>
         </div>
         <a className="status-attribution" href={ESAU_ENGINEERING_URL} target="_blank" rel="noreferrer">Built by Esau Engineering</a>

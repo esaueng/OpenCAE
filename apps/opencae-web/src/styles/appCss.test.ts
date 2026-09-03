@@ -325,6 +325,32 @@ describe("app CSS", () => {
     expect(css).not.toContain(".editable-item.clickable");
   });
 
+  test("keeps the status strip from overprinting itself when it runs out of room", () => {
+    // The tab controls are fixed-size and .status-groups is the sibling built to give
+    // way (min-width: 0, overflow: hidden, white-space: nowrap). With the default
+    // flex-shrink the tabs were squeezed below their 121px min-content instead and the
+    // "Logs" pill painted over the status text and then over the Ko-fi link.
+    expect(cssRule(".status-tabs")).toMatch(/flex-shrink:\s*0/);
+    expect(cssRule(".status-primary")).toMatch(/min-width:\s*0/);
+    expect(cssRule(".status-primary")).toMatch(/overflow:\s*hidden/);
+    expect(cssRule(".status-groups")).toMatch(/overflow:\s*hidden/);
+
+    // Below the narrow tier the word no longer fits beside the controls. The dot still
+    // carries the state, so the word is clipped rather than removed — same treatment the
+    // collapsed rail gives its step labels — and stays in the accessibility tree.
+    const narrowTier = css.match(/@media \(max-width: 640px\) \{(?<body>[\s\S]*?)\n\}/)?.groups?.body ?? "";
+    const narrowRule = (selector: string) =>
+      narrowTier.match(new RegExp(`${selector.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")}\\s*\\{(?<body>[^}]*)\\}`))
+        ?.groups?.body ?? "";
+
+    expect(narrowRule(".status-state-label")).toMatch(/clip:\s*rect\(0, 0, 0, 0\)/);
+    expect(narrowRule(".coffee-label")).toMatch(/display:\s*none/);
+    // display: none would drop the state from the accessibility tree entirely.
+    expect(narrowRule(".status-state-label")).not.toMatch(/display:\s*none/);
+    // The base rule keeps the Ko-fi wordmark laid out at full width.
+    expect(cssRule(".coffee-label")).toMatch(/display:\s*inline-flex/);
+  });
+
   test("keeps the light theme from inheriting dark-theme ink", () => {
     // body resolves var(--color-text) in :root scope — against the DARK value — and that
     // computed color inherits straight past .theme-light. .app-shell must re-declare it in
