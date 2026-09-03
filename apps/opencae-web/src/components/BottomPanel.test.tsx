@@ -153,6 +153,22 @@ describe("BottomPanel", () => {
     expect(bottomPanelSource).not.toContain("Date.now() - index * 15000");
   });
 
+  test("only claims results are ready when the solver actually finished one", () => {
+    const pill = (status: string, solverStatus: string) =>
+      renderToStaticMarkup(
+        <BottomPanel status={status} logs={[]} meshStatus="Ready" solverStatus={solverStatus} onClearLogs={() => undefined} />
+      );
+
+    // A mesh-convergence study leaves the working mesh and the active results untouched,
+    // and an abandoned run threw its results away — neither means results are ready.
+    expect(pill("Mesh-convergence study complete: medium. Working mesh and active results were unchanged.", "Idle"))
+      .not.toContain(">Results ready</span>");
+    expect(pill("Completed results were ignored because the active project or analysis changed during the run.", "Idle"))
+      .not.toContain(">Results ready</span>");
+    // A real solve still reports it, whatever the message happens to say.
+    expect(pill("Simulation finished.", "Complete")).toContain(">Results ready</span>");
+  });
+
   test("shows a warning state for failed actions instead of collapsing them to ready", () => {
     const html = renderToStaticMarkup(
       <BottomPanel

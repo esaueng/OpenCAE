@@ -350,7 +350,10 @@ export function statusForDisplay(status: string, solverStatus: string) {
   if (normalized.includes("opencae core") && /(error|fail|failed|unavailable|not configured|not enabled|not ready)/.test(normalized)) return "OpenCAE Core error";
   if (/(could not|failed)/.test(normalized)) return "Needs attention";
   if (solverStatus === "Running") return "Simulating";
-  if (normalized.includes("complete")) return "Results ready";
+  // Keyed off the solver, not the words in the message: any status containing "complete"
+  // used to light the pill green, including "Mesh-convergence study complete" (which
+  // leaves the working mesh and results untouched) and "Completed results were ignored".
+  if (solverStatus === "Complete") return "Results ready";
   if (normalized.includes("opencae core")) return "OpenCAE Core active";
   return "Ready";
 }

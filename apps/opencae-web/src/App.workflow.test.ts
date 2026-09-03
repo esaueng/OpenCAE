@@ -182,6 +182,14 @@ describe("App workflow layout", () => {
     expect(appSource).toContain("setResultFields([]);");
   });
 
+  test("clears progress when a completed run's results are thrown away", () => {
+    // Without this the abandoned run leaves runProgress at 100, so solverStatus stays
+    // "Complete" and the status pill reads "Results ready" for results it just discarded.
+    expect(appSource).toMatch(
+      /pushMessage\("Completed results were ignored because the active project or analysis changed during the run\.\"\);[\s\S]{0,240}?setRunProgress\(0\);[\s\S]{0,40}?return;/,
+    );
+  });
+
   test("keeps the completed solve time so the report can state it", () => {
     // runTiming is nulled on the "complete" event, which is the exact moment the elapsed
     // time stops being an estimate — so every report used to print "Solve wall time: --".

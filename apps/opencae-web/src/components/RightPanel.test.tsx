@@ -648,7 +648,7 @@ describe("RightPanel payload mass controls", () => {
     // A modal study has no loads step: StepBar and the Back/Next pair both filter it out,
     // but the eyebrow counted the unfiltered list against a hardcoded 7, so the Mesh
     // panel read "Step 5 of 7" beside a six-item rail.
-    const modalStudy: Study = { ...study, name: "Modal", type: "modal_analysis" };
+    const modalStudy: Study = { ...study, name: "Modal", type: "modal_analysis", solverSettings: { modeCount: 6 } };
 
     expect(renderPanel("mesh", { study: modalStudy })).toContain(">Step 4 of 6<");
     expect(renderPanel("run", { study: modalStudy })).toContain(">Step 5 of 6<");

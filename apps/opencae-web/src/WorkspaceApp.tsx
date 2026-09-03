@@ -2249,6 +2249,9 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           const currentStudy = projectRef.current?.studies.find((candidate) => candidate.id === study.id);
           if (processingRunIdRef.current !== response.run.id || currentStudy?.type !== study.type) {
             pushMessage("Completed results were ignored because the active project or analysis changed during the run.");
+            // Leave no completed progress behind for an abandoned run, or the status pill
+            // reads "Results ready" for results this branch just threw away.
+            setRunProgress(0);
             return;
           }
           if (study.type === "dynamic_structural" && (!isStructuralResultSummary(results.summary) || !hasDynamicPlaybackFrames(results.summary, results.fields))) {
