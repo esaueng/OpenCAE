@@ -182,6 +182,16 @@ describe("App workflow layout", () => {
     expect(appSource).toContain("setResultFields([]);");
   });
 
+  test("keeps the completed solve time so the report can state it", () => {
+    // runTiming is nulled on the "complete" event, which is the exact moment the elapsed
+    // time stops being an estimate — so every report used to print "Solve wall time: --".
+    expect(appSource).toContain('const completedElapsedMs = timingFromRunEvent(event)?.elapsedMs;');
+    expect(appSource).toContain('if (typeof completedElapsedMs === "number") setSolveElapsedMs(completedElapsedMs);');
+    expect(appSource).toContain("runTiming: runTiming ?? (solveElapsedMs === null ? null : { elapsedMs: solveElapsedMs }),");
+    // ...and drops it with the results it describes, so it can never outlive them.
+    expect(appSource).toMatch(/function invalidateCompletedRunState\(\) \{[\s\S]*?setSolveElapsedMs\(null\);/);
+  });
+
   test("keeps dynamic output cadence separate from smaller integration time steps", () => {
     expect(appSource).toContain("normalizedDynamicSolverSettings(study.solverSettings, { ...study.solverSettings, ...settings }, settings)");
     expect(appSource).toContain("patch.outputInterval ?? currentSettings.outputInterval");

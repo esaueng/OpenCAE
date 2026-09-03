@@ -174,6 +174,11 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const [convergenceBusy, setConvergenceBusy] = useState(false);
   const [convergenceProgress, setConvergenceProgress] = useState("");
   const [runTiming, setRunTiming] = useState<RunTimingEstimate | null>(null);
+  // runTiming carries live estimates and is cleared the moment a run completes, which is
+  // exactly when the elapsed time stops being an estimate and becomes a fact. Keep that
+  // fact separately so the Run panel and the report can state it; it is cleared alongside
+  // the results it describes, never outliving them.
+  const [solveElapsedMs, setSolveElapsedMs] = useState<number | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
   const [reportBusy, setReportBusy] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
@@ -1695,7 +1700,9 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         resultSummary: sourceSummary,
         resultFields,
         solverMeshSummary,
-        runTiming,
+        // A report is always generated after the run finished, so runTiming is null by
+        // then; the completed elapsed time is what the "Solve wall time" row needs.
+        runTiming: runTiming ?? (solveElapsedMs === null ? null : { elapsedMs: solveElapsedMs }),
         unitSystem: displayUnitSystem,
         captures,
         generatedAt,
@@ -1984,6 +1991,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
 
   function invalidateCompletedRunState() {
     setResultSummary(null);
+    setSolveElapsedMs(null);
     setCompletedRunId("");
     setReportCaptures(null);
     setActiveRunId("");
@@ -2233,6 +2241,8 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       if (event.type === "complete") {
         source.close();
         if (activeRunSourceRef.current === source) activeRunSourceRef.current = null;
+        const completedElapsedMs = timingFromRunEvent(event)?.elapsedMs;
+        if (typeof completedElapsedMs === "number") setSolveElapsedMs(completedElapsedMs);
         setRunTiming(null);
         try {
           const results = await getResults(response.run.id, { projectId: study.projectId, studyId: study.id });
@@ -2564,6 +2574,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           runProgress={runProgress}
           runError={runError}
           runTiming={runTiming}
+          solveElapsedMs={solveElapsedMs}
           onGenerateReport={handleGenerateReport}
           onExportResultPng={handleExportResultPng}
           onExportResultHtml={handleExportResultHtml}

@@ -501,6 +501,24 @@ describe("RightPanel payload mass controls", () => {
     expect(markup).not.toContain('<div class="info-row"><span>Progress</span><strong>88%</strong></div>');
   });
 
+  test("hides the progress bar when no run is in flight", () => {
+    // An idle panel used to carry a permanent empty 0% trough, and a finished one a
+    // stale 100%. The bar belongs to a run, so it renders only while one is running.
+    expect(renderPanel("run", { runProgress: 0 })).not.toContain('role="progressbar"');
+    expect(renderPanel("run", { runProgress: 100 })).not.toContain('role="progressbar"');
+    expect(renderPanel("run", { runProgress: 42 })).toContain('role="progressbar"');
+  });
+
+  test("reports the completed solve time once it is no longer an estimate", () => {
+    const finished = renderPanel("run", { runProgress: 0, solveElapsedMs: 4200 });
+
+    expect(finished).toContain("Solved in");
+    expect(finished).toContain("4s");
+    // While the run is still in flight the live Elapsed row owns that number instead.
+    expect(renderPanel("run", { runProgress: 42, solveElapsedMs: 4200 })).not.toContain("Solved in");
+    expect(renderPanel("run", { runProgress: 0 })).not.toContain("Solved in");
+  });
+
   test("does not show an assigned material before one is applied", () => {
     const html = renderPanel("material", { study: { ...study, materialAssignments: [] } });
 

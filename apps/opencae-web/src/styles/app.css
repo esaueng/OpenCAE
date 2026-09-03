@@ -4344,17 +4344,27 @@ input[aria-invalid="true"] {
   transition: width var(--dur-base) var(--ease-out);
 }
 
+/* The label is centred over a bar whose ground changes as the fill passes under it, so
+   no single ink contrasts with both: in dark theme white read 2.4:1 on the accent fill,
+   in light theme 1.09:1 on the empty track. Giving it its own opaque plate makes it
+   legible at every fill level in both themes without moving the readout out of the bar. */
 .progress-label {
   position: absolute;
-  inset: 0;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #f8fbff;
-  font-size: var(--fs-xs);
+  padding: 0 var(--sp-2);
+  color: var(--color-text);
+  background: var(--color-surface);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--fs-mini);
   font-weight: 600;
-  line-height: 1;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
   pointer-events: none;
 }
 

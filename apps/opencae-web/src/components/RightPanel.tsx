@@ -85,6 +85,8 @@ interface RightPanelProps {
   runProgress: number;
   runError?: string | null;
   runTiming?: RunTimingEstimate | null;
+  /** Wall time of the run that produced the current results, once it is no longer an estimate. */
+  solveElapsedMs?: number | null;
   onGenerateReport?: (options?: { targetSafetyFactor?: number }) => Promise<void>;
   onExportResultPng?: () => Promise<void>;
   onExportResultHtml?: () => Promise<void>;
@@ -1734,7 +1736,7 @@ function formatCompact(value: number | undefined): string {
   return Math.abs(value) >= 100 ? value.toFixed(1) : Math.abs(value) >= 1 ? value.toFixed(3) : value.toExponential(3);
 }
 
-function RunPanel({ study, displayModel, runProgress, runError, runTiming, onRunSimulation, onCancelSimulation, canCancelSimulation, onUpdateSolverSettings, onChangeStudyType, canRunSimulation, missingRunItems, runReadiness }: RightPanelProps) {
+function RunPanel({ study, displayModel, runProgress, runError, runTiming, solveElapsedMs, onRunSimulation, onCancelSimulation, canCancelSimulation, onUpdateSolverSettings, onChangeStudyType, canRunSimulation, missingRunItems, runReadiness }: RightPanelProps) {
   const progressPercent = Math.max(0, Math.min(100, Math.round(runProgress)));
   const isRunning = canCancelSimulation ?? (progressPercent > 0 && progressPercent < 100);
   const remainingLabel = formatSimulationEta(runTiming?.estimatedRemainingMs, isRunning);
@@ -1875,10 +1877,12 @@ function RunPanel({ study, displayModel, runProgress, runError, runTiming, onRun
       </button>
       {missingRunItems.length > 0 && <p className="panel-copy">Complete {missingRunItems.join(", ").toLowerCase()} before running.</p>}
       {runError && !isRunning && <p className="panel-warning" role="alert">{runError}</p>}
-      <div className="progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progressPercent} aria-label="Simulation progress">
-        <span style={{ width: `${progressPercent}%` }} />
-        <strong className="progress-label">{progressPercent}%</strong>
-      </div>
+      {isRunning && (
+        <div className="progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progressPercent} aria-label="Simulation progress">
+          <span style={{ width: `${progressPercent}%` }} />
+          <strong className="progress-label">{progressPercent}%</strong>
+        </div>
+      )}
       {isRunning && (
         <div className="summary-box">
           <Info label="Time remaining" value={remainingLabel} />
@@ -1891,6 +1895,7 @@ function RunPanel({ study, displayModel, runProgress, runError, runTiming, onRun
         <Info label="Version" value="0.1.0" />
         <Info label="Solver method" value={defaultSolverMethodForStudy(study)} />
         <Info label="Runner" value={solverRunnerLabelForStudy(study, displayModel)} />
+        {typeof solveElapsedMs === "number" && !isRunning && <Info label="Solved in" value={formatSimulationElapsed(solveElapsedMs)} />}
       </div>
     </Panel>
   );
