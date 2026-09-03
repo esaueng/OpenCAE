@@ -324,4 +324,30 @@ describe("app CSS", () => {
     expect(css).toContain(".editable-summary-trigger {");
     expect(css).not.toContain(".editable-item.clickable");
   });
+
+  test("keeps the light theme from inheriting dark-theme ink", () => {
+    // body resolves var(--color-text) in :root scope — against the DARK value — and that
+    // computed color inherits straight past .theme-light. .app-shell must re-declare it in
+    // the themed scope or every descendant without its own color paints dark ink on light.
+    expect(cssRule(".app-shell")).toMatch(/color:\s*var\(--color-text\)/);
+  });
+
+  test("resolves every custom property it references", () => {
+    // An undefined custom property invalidates its whole declaration at computed-value
+    // time, so `padding: var(--typo) 6px` silently becomes `padding: 0` — a class of bug
+    // the literal-declaration assertions above are structurally blind to.
+    // Only properties written by component code at runtime may go unresolved here.
+    const runtimeAssigned = new Set(["--analysis-legend-scale", "--playback-peak-position"]);
+    const names = (source: string, pattern: RegExp) =>
+      [...source.matchAll(pattern)].flatMap((match) => (match[1] ? [match[1]] : []));
+    const declared = new Set([
+      ...names(css, /(--[A-Za-z0-9-]+)\s*:/g),
+      ...names(tokens, /(--[A-Za-z0-9-]+)\s*:/g),
+    ]);
+    const unresolved = [...new Set(names(css, /var\(\s*(--[A-Za-z0-9-]+)/g))]
+      .filter((name) => !declared.has(name) && !runtimeAssigned.has(name))
+      .sort();
+
+    expect(unresolved).toEqual([]);
+  });
 });

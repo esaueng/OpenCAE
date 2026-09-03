@@ -412,9 +412,13 @@ img {
   padding: 10px;
   color: var(--color-text);
   text-align: left;
-  background: rgba(17, 24, 33, 0.78);
+  /* Translucent so the start screen's blueprint grid reads through. Mixed from the
+     surface token rather than hardcoded: this card renders both on the always-dark
+     start screen and inside the themed Model panel, where a fixed dark ground put
+     light-theme ink at 1.09:1. Value-identical against the dark tokens. */
+  background: color-mix(in srgb, var(--color-surface) 78%, transparent);
   border: var(--border-thin);
-  border-color: rgba(139, 148, 158, 0.24);
+  border-color: color-mix(in srgb, var(--color-text-muted) 24%, transparent);
   border-radius: var(--radius-md);
   transition:
     transform var(--dur-fast) var(--ease-out),
@@ -431,9 +435,15 @@ img {
 }
 
 .sample-option-card.selected {
-  background: linear-gradient(180deg, rgba(77, 163, 255, 0.18), rgba(17, 24, 33, 0.9));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--color-accent) 18%, transparent),
+    color-mix(in srgb, var(--color-surface) 90%, transparent)
+  );
   border-color: var(--color-accent);
-  box-shadow: inset 0 0 0 1px rgba(77, 163, 255, 0.32), 0 14px 32px rgba(0, 0, 0, 0.22);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 32%, transparent),
+    0 14px 32px rgba(0, 0, 0, 0.22);
 }
 
 .start-sample-grid .sample-option-card {
@@ -1189,7 +1199,7 @@ img {
 
 .material-editor-error {
   margin: 0;
-  color: var(--color-danger);
+  color: var(--color-error);
 }
 
 .section-plane-controls {
@@ -1212,12 +1222,17 @@ img {
   }
 }
 
+/* `color` is re-declared here, not just inherited from html/body: body resolves
+   var(--color-text) in :root scope against the DARK value, and that computed color
+   inherits past .theme-light. Without this, every descendant that sets no color of
+   its own paints dark-theme ink on a light surface. */
 .app-shell {
   height: 100%;
   display: grid;
   grid-template-rows: var(--topbar-h) minmax(0, 1fr) var(--statusbar-h);
   overflow: hidden;
   background: var(--color-bg);
+  color: var(--color-text);
 }
 
 .app-shell.stepbar-collapsed {
@@ -3020,7 +3035,7 @@ img {
   padding: 10px;
   border: var(--border-thin);
   border-radius: var(--radius-md);
-  background: var(--color-surface-subtle);
+  background: var(--color-surface-2);
 }
 
 .result-probe-list-header {
@@ -3069,7 +3084,7 @@ img {
   padding: 10px;
   border: var(--border-thin);
   border-radius: var(--radius-md);
-  background: var(--color-surface-subtle);
+  background: var(--color-surface-2);
 }
 
 .result-scale-controls .segmented {
@@ -3226,7 +3241,10 @@ input {
   display: grid;
   place-items: center;
   color: var(--color-text-muted);
-  background: rgba(42, 52, 65, 0.45);
+  /* Mixed from the border token, not a fixed dark slate: on the light theme's input
+     ground a hardcoded #2a3441 at 45% composited to a mid grey and dropped the muted
+     unit label to 2.28:1. Value-identical against the dark tokens. */
+  background: color-mix(in srgb, var(--color-border) 45%, transparent);
   border-left: var(--border-thin);
   font-family: var(--font-mono);
 }
@@ -3495,6 +3513,20 @@ input {
 .outline-action:hover {
   border-color: var(--color-border-strong);
   background: var(--color-surface-hover);
+}
+
+/* Quiet inline action inside a section header ("Reset", "Clear All"). It carries no
+   chrome until hover, so the padding is what makes it a target rather than bare text. */
+.text-button {
+  min-height: 24px;
+  padding: var(--sp-1) var(--sp-2);
+  color: var(--color-accent);
+  font-size: var(--fs-xs);
+  border-radius: var(--radius-sm);
+}
+
+.text-button:hover {
+  background: var(--color-accent-dim);
 }
 
 button:disabled {
