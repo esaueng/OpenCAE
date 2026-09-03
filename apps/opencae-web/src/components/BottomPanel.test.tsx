@@ -10,6 +10,7 @@ import {
   WORKSPACE_SHORTCUT_GUIDE,
   coffeeAnimationReplayDelayMs,
   resolveLogClearIntent,
+  workspaceLogLevel,
   writeWorkspaceLogsToClipboard
 } from "./BottomPanel";
 
@@ -153,6 +154,22 @@ describe("BottomPanel", () => {
     expect(bottomPanelSource).not.toContain("Date.now() - index * 15000");
   });
 
+  test("only claims results are ready when the solver actually finished one", () => {
+    const pill = (status: string, solverStatus: string) =>
+      renderToStaticMarkup(
+        <BottomPanel status={status} logs={[]} meshStatus="Ready" solverStatus={solverStatus} onClearLogs={() => undefined} />
+      );
+
+    // A mesh-convergence study leaves the working mesh and the active results untouched,
+    // and an abandoned run threw its results away — neither means results are ready.
+    expect(pill("Mesh-convergence study complete: medium. Working mesh and active results were unchanged.", "Idle"))
+      .not.toContain(">Results ready</span>");
+    expect(pill("Completed results were ignored because the active project or analysis changed during the run.", "Idle"))
+      .not.toContain(">Results ready</span>");
+    // A real solve still reports it, whatever the message happens to say.
+    expect(pill("Simulation finished.", "Complete")).toContain(">Results ready</span>");
+  });
+
   test("shows a warning state for failed actions instead of collapsing them to ready", () => {
     const html = renderToStaticMarkup(
       <BottomPanel
@@ -167,6 +184,27 @@ describe("BottomPanel", () => {
     expect(html).toContain(">Needs attention</span>");
     expect(html).toContain('class="status-state warning"');
     expect(html).not.toContain('class="status-state ready"');
+  });
+
+  test("shows a failed log line as a failure instead of muting it like every other", () => {
+    // The level was computed for every line and then flattened straight back into a padded
+    // string, so a mesh crash rendered in exactly the same muted colour as "Mesh generated"
+    // and only the word differed.
+    expect(workspaceLogLevel("Mesh generated in 1.2s.")).toBe("OK");
+    expect(workspaceLogLevel("OpenCAE Core solve failed: singular matrix.")).toBe("ERR");
+    expect(workspaceLogLevel("Loading gmsh module...")).toBe("INFO");
+
+    // Rendered as structure rather than one joined string, which is what makes it
+    // colourable at all. (The drawer is closed by default, so this is not in static markup.)
+    expect(bottomPanelSource).toContain('className={`log-line log-${level.toLowerCase()}`}');
+    expect(bottomPanelSource).toContain('<span className="log-level">{level}</span>');
+    expect(bottomPanelSource).toContain('<span className="log-message">{message}</span>');
+    // Copying still yields the flat text form.
+    expect(bottomPanelSource).toContain("formattedLogs.join");
+    // No scroll-following: pushMessage prepends, so the newest entry is already at the top
+    // and chasing the bottom would scroll away from it.
+    expect(workspaceSource).toContain("[{ message, at: Date.now() }, ...current]");
+    expect(bottomPanelSource).not.toContain("scrollTop = ");
   });
 
   test("requires two clicks before clearing run logs", () => {

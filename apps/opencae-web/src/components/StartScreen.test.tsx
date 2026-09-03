@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { RecentProjectsSection, StartScreen } from "./StartScreen";
@@ -123,5 +125,17 @@ describe("SampleProjectMenu", () => {
     expect(html).toContain("Modal");
     expect(html).toContain("Thermal");
     expect(html).toContain("sample-analysis-type-grid");
+  });
+
+  test("does not fire single-key shortcuts from a focused descendant", () => {
+    // The workspace guards its single keys on an editable target, a user preference and
+    // any open dialog, with a comment citing WCAG 2.1.4. The start screen fired n and o
+    // from anywhere inside <main>, with nothing on screen announcing them.
+    const source = readFileSync(resolve(__dirname, "StartScreen.tsx"), "utf8");
+    expect(source).toContain("if (event.target !== event.currentTarget) return;");
+    const guardIndex = source.indexOf("if (event.target !== event.currentTarget) return;");
+    expect(guardIndex).toBeGreaterThan(-1);
+    expect(guardIndex).toBeLessThan(source.indexOf('event.key.toLowerCase() === "n"'));
+    expect(guardIndex).toBeLessThan(source.indexOf('event.key.toLowerCase() === "o"'));
   });
 });

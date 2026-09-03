@@ -1,4 +1,4 @@
-import { CloudUpload, Download, HardDrive, ShieldCheck } from "lucide-react";
+import { CloudUpload, Download, HardDrive, ShieldCheck, X } from "lucide-react";
 import type { CloudBackupPreference } from "../cloudBackup";
 
 interface ProjectStorageNoticeProps {
@@ -10,9 +10,10 @@ interface ProjectStorageNoticeProps {
   onChooseLocal: () => void;
   onAnalyticsEnabledChange: (enabled: boolean) => void;
   onDownloadProject?: () => void;
+  onDismiss: () => void;
 }
 
-export function ProjectStorageNotice({ preference, busy, recoveryNeeded, analyticsEnabled, onChooseCloud, onChooseLocal, onAnalyticsEnabledChange, onDownloadProject }: ProjectStorageNoticeProps) {
+export function ProjectStorageNotice({ preference, busy, recoveryNeeded, analyticsEnabled, onChooseCloud, onChooseLocal, onAnalyticsEnabledChange, onDownloadProject, onDismiss }: ProjectStorageNoticeProps) {
   const title = preference === "cloud"
     ? recoveryNeeded ? "Encrypted recovery is on" : "Encrypted recovery is ready"
     : preference === "local"
@@ -39,6 +40,9 @@ export function ProjectStorageNotice({ preference, busy, recoveryNeeded, analyti
           <small>Project storage</small>
           <strong id="project-storage-title">{title}</strong>
         </span>
+        <button className="storage-recovery-close" type="button" aria-label="Close project storage" onClick={onDismiss}>
+          <X size={15} aria-hidden="true" />
+        </button>
       </header>
       <p>{description}</p>
       <div className="storage-recovery-facts" aria-label="Storage choice details">

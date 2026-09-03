@@ -501,6 +501,24 @@ describe("RightPanel payload mass controls", () => {
     expect(markup).not.toContain('<div class="info-row"><span>Progress</span><strong>88%</strong></div>');
   });
 
+  test("hides the progress bar when no run is in flight", () => {
+    // An idle panel used to carry a permanent empty 0% trough, and a finished one a
+    // stale 100%. The bar belongs to a run, so it renders only while one is running.
+    expect(renderPanel("run", { runProgress: 0 })).not.toContain('role="progressbar"');
+    expect(renderPanel("run", { runProgress: 100 })).not.toContain('role="progressbar"');
+    expect(renderPanel("run", { runProgress: 42 })).toContain('role="progressbar"');
+  });
+
+  test("reports the completed solve time once it is no longer an estimate", () => {
+    const finished = renderPanel("run", { runProgress: 0, solveElapsedMs: 4200 });
+
+    expect(finished).toContain("Solved in");
+    expect(finished).toContain("4s");
+    // While the run is still in flight the live Elapsed row owns that number instead.
+    expect(renderPanel("run", { runProgress: 42, solveElapsedMs: 4200 })).not.toContain("Solved in");
+    expect(renderPanel("run", { runProgress: 0 })).not.toContain("Solved in");
+  });
+
   test("does not show an assigned material before one is applied", () => {
     const html = renderPanel("material", { study: { ...study, materialAssignments: [] } });
 
@@ -608,6 +626,22 @@ describe("RightPanel payload mass controls", () => {
     expect(html).toContain("5.956e-9 %");
   });
 
+  test("states a mesh failure beside the control that produced it", () => {
+    // The reason used to survive only as a status-bar string and one line in a collapsed
+    // drawer: the progress card vanished and the Mesh panel returned to its idle state.
+    const failed = renderPanel("mesh", { meshError: "Element quality gate failed: min Jacobian 0.01." });
+
+    expect(failed).toContain('role="alert"');
+    expect(failed).toContain("Element quality gate failed: min Jacobian 0.01.");
+    expect(failed).toContain("Try meshing again");
+    // Not shown while a mesh is actually running, and not shown when nothing failed.
+    expect(renderPanel("mesh")).not.toContain("Try meshing again");
+    expect(renderPanel("mesh", {
+      meshError: "Element quality gate failed.",
+      meshPhaseProgress: { phase: "mesh", phaseIndex: 3, phaseCount: 8, message: "Meshing volume..." }
+    })).not.toContain("Try meshing again");
+  });
+
   test("shows the canonical thermal solver method on the run step", () => {
     const thermalStudy: Study = { ...study, name: "Steady Thermal", type: "steady_state_thermal" };
     expect(renderPanel("run", { study: thermalStudy })).toContain("sparse_steady_thermal");
@@ -624,6 +658,19 @@ describe("RightPanel payload mass controls", () => {
 
     expect(markup).not.toContain("Face selected:");
     expect(markup).not.toContain("selection-readout");
+  });
+
+  test("counts modal steps against the rail the user can actually see", () => {
+    // A modal study has no loads step: StepBar and the Back/Next pair both filter it out,
+    // but the eyebrow counted the unfiltered list against a hardcoded 7, so the Mesh
+    // panel read "Step 5 of 7" beside a six-item rail.
+    const modalStudy: Study = { ...study, name: "Modal", type: "modal_analysis", solverSettings: { modeCount: 6 } };
+
+    expect(renderPanel("mesh", { study: modalStudy })).toContain(">Step 4 of 6<");
+    expect(renderPanel("run", { study: modalStudy })).toContain(">Step 5 of 6<");
+    expect(renderPanel("supports", { study: modalStudy })).toContain(">Step 3 of 6<");
+    // Everything that keeps its loads step still counts to seven.
+    expect(renderPanel("mesh")).toContain(">Step 5 of 7<");
   });
 
   test("places every step title and step number on the same header row", () => {
@@ -1842,6 +1889,37 @@ describe("RightPanel payload mass controls", () => {
     expect(html).not.toContain("Max stress");
     expect(html).not.toContain("Safety factor");
     expect(html).not.toContain("Result mode");
+  });
+
+  test("leads the results panel with the answer, not with the exports", () => {
+    const markup = renderPanel("results", {
+      onGenerateReport: vi.fn(),
+      onExportResultPng: vi.fn(),
+      onExportResultHtml: vi.fn(),
+      onExportResultData: vi.fn()
+    });
+
+    const verdict = markup.indexOf("failure-assessment");
+    const maxStress = markup.indexOf("Max stress");
+    const provenance = markup.indexOf("Result source");
+    const exports = markup.indexOf("Generate report");
+
+    // Five stacked export buttons used to be the first thing in the panel, pushing the
+    // number the user ran the solve for to row five of a nine-row table below them.
+    expect(verdict).toBeGreaterThan(-1);
+    expect(verdict).toBeLessThan(maxStress);
+    expect(maxStress).toBeLessThan(provenance);
+    expect(provenance).toBeLessThan(exports);
+
+    // The secondary exports collapse into one reachable "Export" menu next to the
+    // primary action, rather than a column of five equally weighted buttons.
+    expect(markup).toContain("export-menu-trigger");
+    expect(markup).toContain('aria-haspopup="menu"');
+    expect(markup.indexOf("Generate report")).toBeLessThan(markup.indexOf("export-menu-trigger"));
+    // The verdict card already states the assessment title, so the row that repeated it
+    // is gone. Matched as the row's own label, since the card's title can itself read
+    // "Failure check unavailable".
+    expect(markup).not.toContain("<span>Failure check</span>");
   });
 
   test("offers one-click report generation with busy and error states", () => {

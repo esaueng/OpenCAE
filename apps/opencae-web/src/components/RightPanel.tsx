@@ -84,7 +84,10 @@ interface RightPanelProps {
   onResultVariantChange?: (variantId: string) => void | Promise<void>;
   runProgress: number;
   runError?: string | null;
+  meshError?: string | null;
   runTiming?: RunTimingEstimate | null;
+  /** Wall time of the run that produced the current results, once it is no longer an estimate. */
+  solveElapsedMs?: number | null;
   onGenerateReport?: (options?: { targetSafetyFactor?: number }) => Promise<void>;
   onExportResultPng?: () => Promise<void>;
   onExportResultHtml?: () => Promise<void>;
@@ -290,7 +293,7 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, se
   }
 
   return (
-    <Panel title="Model" step="model" helper="Inspect the 3D part. Orbit with left-drag, pan with right-drag, zoom with scroll.">
+    <Panel title="Model" step="model" helper="Inspect the 3D part. Orbit with left-drag, pan with right-drag, zoom with scroll." study={study}>
       {showSampleModelPicker && (
         <div className="field">
           <HelpLabel helpId="sampleModel">Sample model</HelpLabel>
@@ -537,7 +540,7 @@ function MaterialPanel({ project, displayModel, study, onAssignMaterial, onSaveC
   }
 
   return (
-    <Panel title="Material" step="material" helper="Choose the material, then how it is made.">
+    <Panel title="Material" step="material" helper="Choose the material, then how it is made." study={study}>
       <SectionTitle helpId="materialLibrary">Base Material</SectionTitle>
       <div className="base-material-card">
         <button className="base-material-selector" type="button" onClick={() => setShowLibrary(true)} aria-label={`Change base material. Current material: ${selectedMaterial.name}`}>
@@ -690,7 +693,7 @@ function SupportsPanel({ selectedFace, study, onAddSupport, onUpdateSupport, onR
   const [temperature, setTemperature] = useState(20);
   const addLabel = thermal ? "Add prescribed temperature" : study.constraints.length ? "Add another fixed support" : "Add fixed support";
   return (
-    <Panel title={thermal ? "Temperature boundaries" : "Supports"} step="supports" helper={thermal ? "Select a face and prescribe its steady boundary temperature." : "Choose where the part is held fixed. Select a face, or click inside a cylindrical hole to constrain its wall. You can add more than one support."}>
+    <Panel title={thermal ? "Temperature boundaries" : "Supports"} step="supports" helper={thermal ? "Select a face and prescribe its steady boundary temperature." : "Choose where the part is held fixed. Select a face, or click inside a cylindrical hole to constrain its wall. You can add more than one support."} study={study}>
       <HelpNote helpId="supportPlacement" />
       <PlacementReadout selectedRef={selectedFromViewport} fallbackLabel={selectedFace?.label} />
       {thermal && <label className="field">Temperature<span className="input-with-unit"><input type="number" value={temperature} onChange={(event) => setTemperature(Number(event.currentTarget.value))} /><span>°C</span></span></label>}
@@ -800,7 +803,7 @@ function LoadsPanel({
     })), loadCombinations);
   }
   return (
-    <Panel title={thermal ? "Thermal loads" : "Loads"} step="loads" helper={thermal ? (draftLoadType === "heat_generation" ? "Apply uniform heat generation throughout the selected body." : "Select a face and apply inward surface heat flux.") : draftLoadType === "gravity" ? "Choose the object carrying payload mass, then add its weight as a load." : draftLoadType === "volume_force" ? "Apply a force density to the selected structural body." : "Select a face on the model, then add the load."}>
+    <Panel title={thermal ? "Thermal loads" : "Loads"} step="loads" helper={thermal ? (draftLoadType === "heat_generation" ? "Apply uniform heat generation throughout the selected body." : "Select a face and apply inward surface heat flux.") : draftLoadType === "gravity" ? "Choose the object carrying payload mass, then add its weight as a load." : draftLoadType === "volume_force" ? "Apply a force density to the selected structural body." : "Select a face on the model, then add the load."} study={study}>
       <div hidden={editingLoadId !== null}>
       <HelpNote helpId="loadPlacement" />
       <PlacementReadout
@@ -1470,7 +1473,7 @@ function selectionLabelForPanel(study: Study, selectionRef: string): string {
   return study.namedSelections.find((selection) => selection.id === selectionRef)?.name ?? selectionRef;
 }
 
-function MeshPanel({ project, displayModel, study, onGenerateMesh, onConnectionsChange, onCancelMesh, meshPhaseProgress, onRepairModel, isRepairingModel = false, onRunMeshConvergence, convergenceBusy = false, convergenceProgress = "" }: RightPanelProps) {
+function MeshPanel({ project, displayModel, study, onGenerateMesh, onConnectionsChange, onCancelMesh, meshPhaseProgress, meshError, onRepairModel, isRepairingModel = false, onRunMeshConvergence, convergenceBusy = false, convergenceProgress = "" }: RightPanelProps) {
   const [preset, setPreset] = useState<MeshQuality>(study.meshSettings.preset);
   const meshing = Boolean(meshPhaseProgress);
   const meshSummary = study.meshSettings.summary;
@@ -1522,7 +1525,7 @@ function MeshPanel({ project, displayModel, study, onGenerateMesh, onConnections
   }
 
   return (
-    <Panel title="Mesh" step="mesh" helper="The mesh breaks the model into small pieces so OpenCAE can calculate results.">
+    <Panel title="Mesh" step="mesh" helper="The mesh breaks the model into small pieces so OpenCAE can calculate results." study={study}>
       <div className="field">
         <HelpLabel helpId="meshQuality">Quality preset</HelpLabel>
         <div className="segmented mesh-quality" role="group" aria-label="Mesh quality">
@@ -1560,6 +1563,14 @@ function MeshPanel({ project, displayModel, study, onGenerateMesh, onConnections
         {meshing ? <X size={18} /> : <Grid3X3 size={18} />}
         {meshing ? "Stop meshing" : "Generate mesh"}
       </button>
+      {meshError && !meshing && (
+        <div className="mesh-failure" role="alert">
+          <p className="panel-warning"><AlertTriangle size={16} />{meshError}</p>
+          <button className="secondary wide" type="button" disabled={convergenceBusy} onClick={() => onGenerateMesh(preset)}>
+            <Grid3X3 size={16} />Try meshing again
+          </button>
+        </div>
+      )}
       {stepGeometry?.status === "repairable" && !stepGeometryResolvedByMesh && (
         <div className="step-repair-card" role="alert" aria-label="Open STEP surfaces detected">
           <p className="panel-warning"><AlertTriangle size={16} />{stepGeometry.message ?? "This STEP model has open or invalid surfaces and is not a closed simulation solid."}</p>
@@ -1734,7 +1745,7 @@ function formatCompact(value: number | undefined): string {
   return Math.abs(value) >= 100 ? value.toFixed(1) : Math.abs(value) >= 1 ? value.toFixed(3) : value.toExponential(3);
 }
 
-function RunPanel({ study, displayModel, runProgress, runError, runTiming, onRunSimulation, onCancelSimulation, canCancelSimulation, onUpdateSolverSettings, onChangeStudyType, canRunSimulation, missingRunItems, runReadiness }: RightPanelProps) {
+function RunPanel({ study, displayModel, runProgress, runError, runTiming, solveElapsedMs, onRunSimulation, onCancelSimulation, canCancelSimulation, onUpdateSolverSettings, onChangeStudyType, canRunSimulation, missingRunItems, runReadiness }: RightPanelProps) {
   const progressPercent = Math.max(0, Math.min(100, Math.round(runProgress)));
   const isRunning = canCancelSimulation ?? (progressPercent > 0 && progressPercent < 100);
   const remainingLabel = formatSimulationEta(runTiming?.estimatedRemainingMs, isRunning);
@@ -1769,7 +1780,7 @@ function RunPanel({ study, displayModel, runProgress, runError, runTiming, onRun
   const loadProfile = isDynamicLoadProfile(dynamic?.loadProfile) ? dynamic.loadProfile : "ramp";
   const loadProfileHelper = DYNAMIC_LOAD_PROFILE_OPTIONS.find((option) => option.value === loadProfile)?.helper ?? DEFAULT_DYNAMIC_LOAD_PROFILE_HELPER;
   return (
-    <Panel title="Run" step="run" helper={modal ? "Solve for natural frequencies and normalized mode shapes." : thermal ? "Solve for steady temperature and heat-flux fields." : "Run the simulation to estimate stress and displacement."}>
+    <Panel title="Run" step="run" helper={modal ? "Solve for natural frequencies and normalized mode shapes." : thermal ? "Solve for steady temperature and heat-flux fields." : "Run the simulation to estimate stress and displacement."} study={study}>
       <SectionTitle helpId="runReadiness">Readiness</SectionTitle>
       <div className="checklist">
         {runReadiness.map(({ label, done, blockers }) => (
@@ -1875,10 +1886,12 @@ function RunPanel({ study, displayModel, runProgress, runError, runTiming, onRun
       </button>
       {missingRunItems.length > 0 && <p className="panel-copy">Complete {missingRunItems.join(", ").toLowerCase()} before running.</p>}
       {runError && !isRunning && <p className="panel-warning" role="alert">{runError}</p>}
-      <div className="progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progressPercent} aria-label="Simulation progress">
-        <span style={{ width: `${progressPercent}%` }} />
-        <strong className="progress-label">{progressPercent}%</strong>
-      </div>
+      {isRunning && (
+        <div className="progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progressPercent} aria-label="Simulation progress">
+          <span style={{ width: `${progressPercent}%` }} />
+          <strong className="progress-label">{progressPercent}%</strong>
+        </div>
+      )}
       {isRunning && (
         <div className="summary-box">
           <Info label="Time remaining" value={remainingLabel} />
@@ -1891,6 +1904,7 @@ function RunPanel({ study, displayModel, runProgress, runError, runTiming, onRun
         <Info label="Version" value="0.1.0" />
         <Info label="Solver method" value={defaultSolverMethodForStudy(study)} />
         <Info label="Runner" value={solverRunnerLabelForStudy(study, displayModel)} />
+        {typeof solveElapsedMs === "number" && !isRunning && <Info label="Solved in" value={formatSimulationElapsed(solveElapsedMs)} />}
       </div>
     </Panel>
   );
@@ -2054,7 +2068,7 @@ function formatProbeReading(probe: ResolvedResultProbe): string {
 function ResultsPanel(props: RightPanelProps) {
   if (!props.resultSummary) {
     return (
-      <Panel title="Results" step="results" helper="View stress and displacement directly on the 3D model.">
+      <Panel title="Results" step="results" helper="View stress and displacement directly on the 3D model." study={props.study}>
         <Callout>Run a simulation to see results.</Callout>
       </Panel>
     );
@@ -2069,6 +2083,7 @@ function ResultsPanel(props: RightPanelProps) {
 }
 
 function ThermalResultsPanelContent({
+  study,
   resultSummary,
   resultMode,
   onResultModeChange,
@@ -2087,15 +2102,17 @@ function ThermalResultsPanelContent({
   reportDisabled = false
 }: RightPanelProps & { resultSummary: ThermalResultSummary }) {
   return (
-    <Panel title="Thermal results" step="results" helper="Inspect steady temperature and conductive heat-flux fields on the solved mesh.">
+    <Panel title="Thermal results" step="results" helper="Inspect steady temperature and conductive heat-flux fields on the solved mesh." study={study}>
       <div className="segmented" role="group" aria-label="Thermal result field">
         <button type="button" className={resultMode === "temperature" ? "active" : ""} aria-pressed={resultMode === "temperature"} onClick={() => onResultModeChange("temperature")}>Temperature</button>
         <button type="button" className={resultMode === "heat_flux" ? "active" : ""} aria-pressed={resultMode === "heat_flux"} onClick={() => onResultModeChange("heat_flux")}>Heat flux</button>
       </div>
+      <Headline items={[
+        { label: "Minimum temperature", value: formatResultMetric(resultSummary.minTemperature, resultSummary.temperatureUnits) },
+        { label: "Maximum temperature", value: formatResultMetric(resultSummary.maxTemperature, resultSummary.temperatureUnits) },
+        { label: "Maximum heat flux", value: formatResultMetric(resultSummary.maxHeatFlux, resultSummary.heatFluxUnits) }
+      ]} />
       <div className="summary-box">
-        <Info label="Minimum temperature" value={formatResultMetric(resultSummary.minTemperature, resultSummary.temperatureUnits)} />
-        <Info label="Maximum temperature" value={formatResultMetric(resultSummary.maxTemperature, resultSummary.temperatureUnits)} />
-        <Info label="Maximum heat flux" value={formatResultMetric(resultSummary.maxHeatFlux, resultSummary.heatFluxUnits)} />
         <Info label="Energy balance error" value={formatResultMetric(resultSummary.energyBalanceRelativeError * 100, "%")} />
       </div>
       <div className="summary-box">
@@ -2120,6 +2137,7 @@ function ThermalResultsPanelContent({
 }
 
 function ModalResultsPanelContent({
+  study,
   resultSummary,
   resultFields = [],
   selectedModeIndex = resultSummary.modes[0]?.modeIndex ?? 1,
@@ -2154,10 +2172,12 @@ function ModalResultsPanelContent({
   const activeMode = resultSummary.modes.find((mode) => mode.modeIndex === selectedModeIndex) ?? resultSummary.modes[0];
   const resultProvenance = resultSummary.provenance;
   return (
-    <Panel title="Results" step="results" helper="Inspect converged natural frequencies and normalized mode shapes.">
+    <Panel title="Results" step="results" helper="Inspect converged natural frequencies and normalized mode shapes." study={study}>
       {resultSummary.warning && <p className="panel-warning" role="status"><AlertTriangle size={16} />{resultSummary.warning}</p>}
+      <Headline items={[
+        { label: "Converged modes", value: `${resultSummary.convergedModeCount} / ${resultSummary.requestedModeCount}` }
+      ]} />
       <div className="summary-box">
-        <Info label="Converged modes" value={`${resultSummary.convergedModeCount} / ${resultSummary.requestedModeCount}`} />
         <Info label="Solver method" value="Block shift-invert" />
         <Info label="Result source" value={resultSourceLabelForPanel(resultSummary)} />
         <Info label="Runner" value={solverRunnerLabelForResult(resultProvenance)} />
@@ -2537,7 +2557,7 @@ function ResultsPanelContent({
   ];
 
   return (
-    <Panel title="Results" step="results" helper="View stress and displacement directly on the 3D model.">
+    <Panel title="Results" step="results" helper="View stress and displacement directly on the 3D model." study={study}>
       {resultVariants.length > 1 && (
         <label className="field result-variant-selector">
           <span>Run variant</span>
@@ -2548,20 +2568,6 @@ function ResultsPanelContent({
           </select>
         </label>
       )}
-      {(onGenerateReport || exportMenuItems.length > 0) && (
-        <div className="result-actions">
-          {onGenerateReport && (
-            <button className="primary wide" type="button" disabled={reportBusy || reportDisabled} onClick={() => void onGenerateReport({ targetSafetyFactor })}>
-              <FileDown size={18} />{reportBusy ? "Generating…" : "Generate report"}
-            </button>
-          )}
-          <ResultExportMenu items={exportMenuItems} />
-        </div>
-      )}
-      {reportError && <p className="panel-warning" role="alert"><AlertTriangle size={16} />{reportError}</p>}
-      {pngExportError && <p className="panel-warning" role="alert"><AlertTriangle size={16} />{pngExportError}</p>}
-      {htmlExportError && <p className="panel-warning" role="alert"><AlertTriangle size={16} />{htmlExportError}</p>}
-      {dataExportError && <p className="panel-warning" role="alert"><AlertTriangle size={16} />{dataExportError}</p>}
       <div className={`failure-assessment ${assessment.status}`}>
         <span className="assessment-icon"><AssessmentIcon size={20} /></span>
         <span>
@@ -2569,6 +2575,12 @@ function ResultsPanelContent({
           <small>{assessment.message}</small>
         </span>
       </div>
+      <Headline items={[
+        { label: "Max stress", value: formatResultMetric(resultSummary.maxStress, resultSummary.maxStressUnits) },
+        { label: "Max displacement", value: formatResultMetric(resultSummary.maxDisplacement, resultSummary.maxDisplacementUnits) },
+        { label: "Safety factor", value: formatResultNumber(resultSummary.safetyFactor) },
+        { label: "Reaction force", value: formatResultMetric(resultSummary.reactionForce, resultSummary.reactionForceUnits) }
+      ]} />
       {hasPlayback && (
         <div className="dynamic-playback">
           <SectionTitle helpId="resultFrame">Frame</SectionTitle>
@@ -2734,11 +2746,6 @@ function ResultsPanelContent({
         <Info label="Mesh source" value={formatMeshSourceLabel(resultProvenance?.meshSource, displayModel)} />
         <Info label="Solver method" value={solverMethodForResult(resultSummary, study)} />
         <Info label="Runner" value={solverRunnerLabelForResult(resultProvenance)} />
-        <Info label="Max stress" value={formatResultMetric(resultSummary.maxStress, resultSummary.maxStressUnits)} />
-        <Info label="Max displacement" value={formatResultMetric(resultSummary.maxDisplacement, resultSummary.maxDisplacementUnits)} />
-        <Info label="Safety factor" value={formatResultNumber(resultSummary.safetyFactor)} />
-        <Info label="Failure check" value={assessment.title} />
-        <Info label="Reaction force" value={formatResultMetric(resultSummary.reactionForce, resultSummary.reactionForceUnits)} />
       </div>
       {canEstimateLoad && (
         <>
@@ -2770,6 +2777,20 @@ function ResultsPanelContent({
         </>
       )}
       <div className="legend"><small>Low</small><span style={resultColorScale ? { background: resultScaleCssGradient(resultColorScale) } : undefined} /><small>High</small></div>
+      {(onGenerateReport || exportMenuItems.length > 0) && (
+        <div className="result-actions">
+          {onGenerateReport && (
+            <button className="primary wide" type="button" disabled={reportBusy || reportDisabled} onClick={() => void onGenerateReport({ targetSafetyFactor })}>
+              <FileDown size={18} />{reportBusy ? "Generating…" : "Generate report"}
+            </button>
+          )}
+          <ResultExportMenu items={exportMenuItems} />
+        </div>
+      )}
+      {reportError && <p className="panel-warning" role="alert"><AlertTriangle size={16} />{reportError}</p>}
+      {pngExportError && <p className="panel-warning" role="alert"><AlertTriangle size={16} />{pngExportError}</p>}
+      {htmlExportError && <p className="panel-warning" role="alert"><AlertTriangle size={16} />{htmlExportError}</p>}
+      {dataExportError && <p className="panel-warning" role="alert"><AlertTriangle size={16} />{dataExportError}</p>}
     </Panel>
   );
 }
@@ -2829,14 +2850,15 @@ export function resultModeExplanation(resultMode: ResultMode): string {
   return `Red areas have higher ${field}. Blue areas have lower ${field}.`;
 }
 
-function Panel({ title, step, helper, children }: { title: string; step: StepId; helper: string; children: ReactNode }) {
-  const stepNumber = WORKFLOW_STEPS.findIndex((workflowStep) => workflowStep.id === step) + 1;
+function Panel({ title, step, helper, study, children }: { title: string; step: StepId; helper: string; study: Study; children: ReactNode }) {
+  const workflowSteps = workflowStepsForStudy(study);
+  const stepNumber = workflowSteps.findIndex((workflowStep) => workflowStep.id === step) + 1;
   return (
     <div className="panel-section">
       <div className="panel-header">
         <div className="panel-title-row">
           <h2>{title}</h2>
-          <div className="panel-eyebrow">Step {stepNumber} of 7</div>
+          <div className="panel-eyebrow">Step {stepNumber} of {workflowSteps.length}</div>
         </div>
         <p className="helper">{helper}</p>
       </div>
@@ -2855,8 +2877,14 @@ const WORKFLOW_STEPS: Array<{ id: StepId; label: string }> = [
   { id: "results", label: "Results" }
 ];
 
+/* Modal studies have no loads step. The rail, the Back/Next pair and the "Step N of M"
+   eyebrow must all count the same list, or the panel numbers a step the rail does not show. */
+function workflowStepsForStudy(study: Study) {
+  return study.type === "modal_analysis" ? WORKFLOW_STEPS.filter((step) => step.id !== "loads") : WORKFLOW_STEPS;
+}
+
 function WorkflowNav({ activeStep, study, onStepSelect }: { activeStep: StepId; study: Study; onStepSelect: (step: StepId) => void }) {
-  const workflowSteps = study.type === "modal_analysis" ? WORKFLOW_STEPS.filter((step) => step.id !== "loads") : WORKFLOW_STEPS;
+  const workflowSteps = workflowStepsForStudy(study);
   const index = workflowSteps.findIndex((step) => step.id === activeStep);
   const previousStep = index > 0 ? workflowSteps[index - 1] : undefined;
   const nextStep = index >= 0 && index < workflowSteps.length - 1 ? workflowSteps[index + 1] : undefined;
@@ -2897,6 +2925,8 @@ function HelpNote({ helpId }: { helpId: SettingHelpId }) {
   );
 }
 
+const TOOLTIP_CLOSE_DELAY_MS = 140;
+
 function SettingHelpTrigger({ helpId }: { helpId: SettingHelpId }) {
   const tooltipId = useId();
   const help = SETTING_HELP[helpId];
@@ -2904,6 +2934,31 @@ function SettingHelpTrigger({ helpId }: { helpId: SettingHelpId }) {
   const tooltipRef = useRef<HTMLSpanElement | null>(null);
   const [isTooltipOpen, setIsTooltipOpen] = useState(false);
   const [tooltipStyle, setTooltipStyle] = useState<CSSProperties | undefined>();
+  const closeTimerRef = useRef(0);
+
+  /* WCAG 1.4.13 Hoverable: the panel portals ~8px from the trigger, so moving the pointer
+     toward it left the trigger and closed the tooltip before it could be reached — and
+     .field-tooltip's `pointer-events: none` meant it could not be hovered anyway. The
+     grace period spans the gap; the portaled node cancels it on enter. */
+  const cancelClose = () => window.clearTimeout(closeTimerRef.current);
+  const closeSoon = () => {
+    cancelClose();
+    closeTimerRef.current = window.setTimeout(() => setIsTooltipOpen(false), TOOLTIP_CLOSE_DELAY_MS);
+  };
+
+  useEffect(() => () => window.clearTimeout(closeTimerRef.current), []);
+
+  useEffect(() => {
+    if (!isTooltipOpen || typeof window === "undefined") return undefined;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.stopPropagation();
+      cancelClose();
+      setIsTooltipOpen(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [isTooltipOpen]);
 
   const updateTooltipPosition = () => {
     const trigger = triggerRef.current;
@@ -2939,11 +2994,11 @@ function SettingHelpTrigger({ helpId }: { helpId: SettingHelpId }) {
       tabIndex={0}
       role="button"
       aria-label={`${help.title} help`}
-      aria-describedby={tooltipId}
-      onMouseEnter={() => setIsTooltipOpen(true)}
-      onMouseLeave={() => setIsTooltipOpen(false)}
-      onFocus={() => setIsTooltipOpen(true)}
-      onBlur={() => setIsTooltipOpen(false)}
+      aria-describedby={isTooltipOpen ? tooltipId : undefined}
+      onMouseEnter={() => { cancelClose(); setIsTooltipOpen(true); }}
+      onMouseLeave={closeSoon}
+      onFocus={() => { cancelClose(); setIsTooltipOpen(true); }}
+      onBlur={() => { cancelClose(); setIsTooltipOpen(false); }}
       onClick={(event) => {
         event.preventDefault();
         event.stopPropagation();
@@ -2957,7 +3012,15 @@ function SettingHelpTrigger({ helpId }: { helpId: SettingHelpId }) {
       <CircleHelp size={15} aria-hidden="true" />
       {isTooltipOpen &&
         createPortal(
-          <span ref={tooltipRef} id={tooltipId} className="field-tooltip field-tooltip--floating" role="tooltip" style={tooltipStyle}>
+          <span
+            ref={tooltipRef}
+            id={tooltipId}
+            className="field-tooltip field-tooltip--floating"
+            role="tooltip"
+            style={tooltipStyle}
+            onMouseEnter={cancelClose}
+            onMouseLeave={closeSoon}
+          >
             <HelpVisual kind={help.visual} />
             <strong>{help.title}</strong>
             <span>{help.body}</span>
@@ -2980,6 +3043,23 @@ function HelpVisual({ kind }: { kind: SettingHelpVisual }) {
 
 function Info({ label, value }: { label: string; value: string }) {
   return <div className="info-row"><span>{label}</span><strong>{value}</strong></div>;
+}
+
+/* The one display level in the app. --fs-xl was defined in tokens.css and used nowhere,
+   so the largest type in the workspace was 16px and the number a user ran the solve for
+   rendered at the same size and weight as the solver-runner string. Every result panel
+   states its headline figures through this, so the answer reads as the answer. */
+function Headline({ items }: { items: Array<{ label: string; value: string }> }) {
+  return (
+    <div className="result-headline">
+      {items.map((item) => (
+        <div className="result-headline-item" key={item.label}>
+          <span>{item.label}</span>
+          <strong>{item.value}</strong>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 function ModelDimensions({ displayModel }: { displayModel: DisplayModel }) {

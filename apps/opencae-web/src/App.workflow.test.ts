@@ -182,6 +182,55 @@ describe("App workflow layout", () => {
     expect(appSource).toContain("setResultFields([]);");
   });
 
+  test("lets the storage card be closed and keeps the top-bar panels exclusive", () => {
+    // The card sat at a z-index below --z-popover, so the shortcut popover painted over
+    // it; and it had no dismissal at all, so it floated over the viewer until a
+    // preference was chosen.
+    expect(appSource).toContain("onDismiss={() => setStorageRecoveryNoticeOpen(false)}");
+    expect(appSource).toMatch(
+      /if \(!storageRecoveryNoticeOpen\) return undefined;[\s\S]{0,200}?if \(event\.key === "Escape"\) setStorageRecoveryNoticeOpen\(false\);/,
+    );
+    expect(appSource).toContain("onClick={() => { setStorageRecoveryNoticeOpen(false); setShortcutGuideOpen((open) => !open); }}");
+    expect(appSource).toContain("onClick={() => { setShortcutGuideOpen(false); setStorageRecoveryNoticeOpen((open) => !open); }}");
+  });
+
+  test("clears progress when a completed run's results are thrown away", () => {
+    // Without this the abandoned run leaves runProgress at 100, so solverStatus stays
+    // "Complete" and the status pill reads "Results ready" for results it just discarded.
+    expect(appSource).toMatch(
+      /pushMessage\("Completed results were ignored because the active project or analysis changed during the run\.\"\);[\s\S]{0,240}?setRunProgress\(0\);[\s\S]{0,40}?return;/,
+    );
+  });
+
+  test("drops result data on invalidation without discarding how the user was looking at it", () => {
+    // Invalidating a run used to reset resultMode, stressComponent, selectedModeIndex and
+    // showDeformed as well, so tweaking a load and re-running silently threw away the
+    // user's view every time. Everything here is reconciled against the next summary.
+    const body = appSource.match(/function invalidateCompletedRunState\(\) \{[\s\S]*?\n  \}/)?.[0] ?? "";
+    expect(body).toContain("setResultSummary(null)");
+    expect(body).not.toContain('setResultMode("stress")');
+    expect(body).not.toContain('setStressComponent("von_mises")');
+    expect(body).not.toContain("setSelectedModeIndex(1)");
+    expect(body).not.toContain("setShowDeformed(false)");
+
+    // Probes are the exception: they resolve by index into one run's surface mesh, so
+    // carrying them across would silently mis-resolve them onto different geometry.
+    expect(body).toContain("setResultProbes([])");
+
+    // The reconciliation this relies on has to stay.
+    expect(appSource).toContain("setResultMode((currentMode) => compatibleResultModeForSummary(resultSummary, currentMode));");
+  });
+
+  test("keeps the completed solve time so the report can state it", () => {
+    // runTiming is nulled on the "complete" event, which is the exact moment the elapsed
+    // time stops being an estimate — so every report used to print "Solve wall time: --".
+    expect(appSource).toContain('const completedElapsedMs = timingFromRunEvent(event)?.elapsedMs;');
+    expect(appSource).toContain('if (typeof completedElapsedMs === "number") setSolveElapsedMs(completedElapsedMs);');
+    expect(appSource).toContain("runTiming: runTiming ?? (solveElapsedMs === null ? null : { elapsedMs: solveElapsedMs }),");
+    // ...and drops it with the results it describes, so it can never outlive them.
+    expect(appSource).toMatch(/function invalidateCompletedRunState\(\) \{[\s\S]*?setSolveElapsedMs\(null\);/);
+  });
+
   test("keeps dynamic output cadence separate from smaller integration time steps", () => {
     expect(appSource).toContain("normalizedDynamicSolverSettings(study.solverSettings, { ...study.solverSettings, ...settings }, settings)");
     expect(appSource).toContain("patch.outputInterval ?? currentSettings.outputInterval");

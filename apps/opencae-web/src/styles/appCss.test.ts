@@ -1,10 +1,14 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, test } from "vitest";
+import { STRESS_RAMP } from "../resultColorScale";
 
 const css = readFileSync(resolve(__dirname, "app.css"), "utf8");
 const tokens = readFileSync(resolve(__dirname, "../theme/tokens.css"), "utf8");
 const cadViewer = readFileSync(resolve(__dirname, "../components/CadViewer.tsx"), "utf8");
+const appSource = readFileSync(resolve(__dirname, "../WorkspaceApp.tsx"), "utf8");
+const rightPanel = readFileSync(resolve(__dirname, "../components/RightPanel.tsx"), "utf8");
+const bottomPanel = readFileSync(resolve(__dirname, "../components/BottomPanel.tsx"), "utf8");
 const lightThemeBlock = tokens.match(/\.theme-light\s*\{(?<body>[\s\S]*?)\n\}/)?.groups?.body ?? "";
 
 function lightToken(name: string) {
@@ -293,6 +297,15 @@ describe("app CSS", () => {
     expect(rangeInput).toMatch(/padding:\s*0/);
     expect(rangeFocus).toMatch(/outline:\s*none/);
     expect(rangeFocus).not.toMatch(/outline-offset/);
+
+    // The suppressed outline is a decision about WHERE the ring goes, not whether there
+    // is one: the thumb carries it instead. Without these the sliders are keyboard
+    // operable with no visible focus state at all.
+    const webkitFocusThumb = cssRule('.range-field input[type="range"]:focus-visible::-webkit-slider-thumb');
+    const mozFocusThumb = cssRule('.range-field input[type="range"]:focus-visible::-moz-range-thumb');
+
+    expect(webkitFocusThumb).toMatch(/var\(--color-accent\)/);
+    expect(mozFocusThumb).toMatch(/var\(--color-accent\)/);
   });
 
   test("styles playback time as a passive playhead instead of a draggable slider", () => {
@@ -323,5 +336,281 @@ describe("app CSS", () => {
   test("styles the load row summary as a real button rather than a clickable row", () => {
     expect(css).toContain(".editable-summary-trigger {");
     expect(css).not.toContain(".editable-item.clickable");
+  });
+
+  test("keeps the status strip from overprinting itself when it runs out of room", () => {
+    // The tab controls are fixed-size and .status-groups is the sibling built to give
+    // way (min-width: 0, overflow: hidden, white-space: nowrap). With the default
+    // flex-shrink the tabs were squeezed below their 121px min-content instead and the
+    // "Logs" pill painted over the status text and then over the Ko-fi link.
+    expect(cssRule(".status-tabs")).toMatch(/flex-shrink:\s*0/);
+    expect(cssRule(".status-primary")).toMatch(/min-width:\s*0/);
+    expect(cssRule(".status-primary")).toMatch(/overflow:\s*hidden/);
+    expect(cssRule(".status-groups")).toMatch(/overflow:\s*hidden/);
+
+    // Below the narrow tier the word no longer fits beside the controls. The dot still
+    // carries the state, so the word is clipped rather than removed — same treatment the
+    // collapsed rail gives its step labels — and stays in the accessibility tree.
+    const narrowTier = css.match(/@media \(max-width: 640px\) \{(?<body>[\s\S]*?)\n\}/)?.groups?.body ?? "";
+    const narrowRule = (selector: string) =>
+      narrowTier.match(new RegExp(`${selector.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")}\\s*\\{(?<body>[^}]*)\\}`))
+        ?.groups?.body ?? "";
+
+    expect(narrowRule(".status-state-label")).toMatch(/clip:\s*rect\(0, 0, 0, 0\)/);
+    expect(narrowRule(".coffee-label")).toMatch(/display:\s*none/);
+    // display: none would drop the state from the accessibility tree entirely.
+    expect(narrowRule(".status-state-label")).not.toMatch(/display:\s*none/);
+    // The base rule keeps the Ko-fi wordmark laid out at full width.
+    expect(cssRule(".coffee-label")).toMatch(/display:\s*inline-flex/);
+  });
+
+  test("covers the gap between the viewer mounting and the scene drawing", () => {
+    // CadViewer's own render returns in tens of milliseconds; the seconds-long blank on a
+    // cold boot is the Three scene building inside <Canvas>. The overlay is a DOM sibling
+    // of the canvas so it paints in that first fast render.
+    expect(cadViewer).toContain("<strong>Preparing the 3D view…</strong>");
+    expect(cadViewer).toContain('<SceneFirstFrameSignal onPainted={handleScenePainted} />');
+    // addAfterEffect fires AFTER a rendered frame; useFrame runs before one, so it would
+    // clear the overlay a frame early. Matched against the function's own body.
+    const signalBody = cadViewer.match(/function SceneFirstFrameSignal\([\s\S]*?\n\}/)?.[0] ?? "";
+    expect(signalBody).toContain("addAfterEffect(");
+    expect(signalBody).not.toContain("useFrame(");
+    // Held back so a warm mount never flashes it, and bounded so a scene that never draws
+    // leaves a bare viewport rather than a spinner promising a model that is not coming.
+    expect(cadViewer).toMatch(/SCENE_LOADING_REVEAL_MS = \d+/);
+    expect(cadViewer).toMatch(/SCENE_LOADING_TIMEOUT_MS = \d+/);
+    expect(cadViewer).toContain('setSceneLoadingPhase("expired")');
+    // Never stacked on top of the model-import overlay.
+    expect(cadViewer).toContain('{!props.importingModelFilename && !scenePainted && sceneLoadingPhase === "visible" ? (');
+  });
+
+  test("gives the viewer's loading fallback the same treatment as the import overlay", () => {
+    // .viewer-loading had no rule at all, so the Suspense fallback rendered unstyled text
+    // in the corner of a black box — the first thing a returning user sees on a cold boot.
+    const loading = cssRule(".viewer-loading");
+
+    expect(loading).toMatch(/display:\s*grid/);
+    expect(loading).toMatch(/place-items:\s*center/);
+    expect(appSource).toContain('className="viewer-shell viewer-loading"');
+    expect(appSource).toContain('<span className="viewer-import-spinner" aria-hidden="true" />');
+    expect(appSource).toContain('<strong>Preparing the 3D view…</strong>');
+    // The spinner it reuses already opts out of animation under reduced motion.
+    expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\.viewer-import-spinner \{\s*animation:\s*none/);
+  });
+
+  test("makes accent-filled buttons legible when focused and when disabled", () => {
+    // The global ring is --color-accent one pixel outside the element, which on an
+    // accent-FILLED button is the fill colour against itself — it read as the button
+    // growing rather than as focus.
+    const primaryFocus = cssRule(".primary:focus-visible");
+    expect(primaryFocus).toMatch(/outline-color:\s*var\(--color-text\)/);
+    expect(primaryFocus).toMatch(/outline-offset:\s*2px/);
+
+    // A dimmed accent still dominates a panel footer and reads as "loading" rather than
+    // "unavailable", so a disabled primary drops to the neutral surface instead.
+    const primaryDisabled = cssRule(".primary:disabled");
+    expect(primaryDisabled).toMatch(/background:\s*var\(--color-surface-2\)/);
+    expect(primaryDisabled).toMatch(/color:\s*var\(--color-text-muted\)/);
+    expect(primaryDisabled).toMatch(/opacity:\s*1/);
+    // The generic rule stays, for every button that is not accent-filled.
+    expect(cssRule("button:disabled")).toMatch(/opacity:\s*0\.45/);
+  });
+
+  test("keeps the light theme from inheriting dark-theme ink", () => {
+    // body resolves var(--color-text) in :root scope — against the DARK value — and that
+    // computed color inherits straight past .theme-light. .app-shell must re-declare it in
+    // the themed scope or every descendant without its own color paints dark ink on light.
+    expect(cssRule(".app-shell")).toMatch(/color:\s*var\(--color-text\)/);
+  });
+
+  test("anchors small text to the scale instead of the browser default", () => {
+    // There is zero relative font sizing in this stylesheet, which made the UA's
+    // `small { font-size: smaller }` provably the only source of the app's sub-11px text:
+    // the legend labels at 9.58px and the colour-scale range line at 10.83px — a measured
+    // value rendering smaller than its own caption.
+    expect(tokens).toMatch(/\bsmall \{[^}]*font-size:\s*var\(--fs-xs\)/);
+    // Unstyled headings otherwise render at the UA's bold 700 and em-based sizes, which is
+    // where the off-token weights came from.
+    expect(tokens).toMatch(/h1, h2, h3, h4, h5, h6 \{[^}]*font-weight:\s*var\(--fw-medium\)/);
+    expect(tokens).toMatch(/h1, h2, h3, h4, h5, h6 \{[^}]*font-size:\s*inherit/);
+    // `strong` is deliberately NOT reset: 17 rules already set --fw-medium on it, which is
+    // evidence the codebase treats bold-vs-medium as a per-component choice.
+    expect(tokens).not.toMatch(/\bstrong,?\s*b?\s*\{[^}]*font-weight/);
+  });
+
+  test("gives result figures the one display level in the app", () => {
+    // --fs-xl was defined and used zero times, so the largest type in the workspace was
+    // 16px and the number a user ran the solve for rendered at the same size and weight as
+    // the solver-runner string beside it.
+    const headline = cssRule(".result-headline-item strong");
+    expect(headline).toMatch(/font-size:\s*var\(--fs-xl\)/);
+    expect(headline).toMatch(/font-family:\s*var\(--font-mono\)/);
+    expect(headline).toMatch(/overflow-wrap:\s*anywhere/);
+
+    // Two-up, and one column in the narrow tier: at ~130px a value splits from its unit.
+    expect(cssRule(".result-headline")).toMatch(/grid-template-columns:\s*repeat\(2/);
+    const narrowTier = css.match(/@media \(max-width: 640px\) \{(?<body>[\s\S]*?)\n\}/)?.groups?.body ?? "";
+    expect(narrowTier).toMatch(/\.result-headline \{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)/);
+  });
+
+  test("keeps a component tier between the primitives and the components", () => {
+    // tokens.css had primitives and app.css had components with nothing in between, so
+    // every rule re-derived its own box and the UI could express value but not rank.
+    for (const name of ["--sp-15", "--sp-25", "--control-h-sm", "--control-h-md", "--control-h-lg",
+      "--card-pad", "--card-pad-tight", "--card-radius", "--gap-block", "--gap-section",
+      "--fw-semibold", "--lh-snug"]) {
+      expect(tokens, `missing component token ${name}`).toMatch(new RegExp(`${name}:\\s*[^;]+;`));
+    }
+
+    // Spacing is expressed through the scale, not re-typed. A handful of orphan values
+    // (5/7/9/11px and friends) are deliberately left alone rather than rounded onto it.
+    const spacingLiterals = [...css.matchAll(/^\s*(?:padding|margin|gap|row-gap|column-gap)(?:-(?:top|right|bottom|left))?:\s*([^;]+);/gm)]
+      .flatMap((match) => (match[1] ?? "").split(/\s+/))
+      .filter((value) => /^(4|6|8|10|12|16|24|32)px$/.test(value));
+    expect(spacingLiterals).toEqual([]);
+
+    expect(css).not.toMatch(/font-weight:\s*600;/);
+    expect(css).not.toMatch(/line-height:\s*1\.(35|45);/);
+
+    // Zero-use tokens are gone; --radius-pill is NOT dead (one real consumer) and is 10px,
+    // so the 999px pills must keep their literal or they visibly square off.
+    expect(tokens).not.toContain("--sp-7:");
+    expect(tokens).not.toContain("--log-drawer-h:");
+    expect(css).toMatch(/border-radius:\s*999px/);
+  });
+
+  test("keeps one eyebrow recipe and one card recipe rather than a copy per component", () => {
+    // The mono/mini/tracked/uppercase eyebrow was retyped across twelve rules. It lives in
+    // one grouped rule now; each component still owns its own colour and layout, and every
+    // class name is unchanged because the assertions here look selectors up literally.
+    const eyebrowCopies = [...css.matchAll(/letter-spacing:\s*var\(--ls-eyebrow\);/g)].length;
+    expect(eyebrowCopies).toBeLessThanOrEqual(4);
+
+    // .section-title used to be declared twice: once beside .panel-eyebrow and again in
+    // .editable-list h3, which re-declared all five properties at equal specificity later
+    // in the file, so the first was dead.
+    expect(css).not.toMatch(/\.panel-eyebrow,\n\.section-title \{/);
+
+    // Card interiors resolve through the shared tokens.
+    for (const selector of [".help-note", ".result-probe-list", ".result-scale-controls",
+      ".placement-chip", ".load-combination-row", ".shortcut-toggle"]) {
+      expect(cssRule(selector), selector).toMatch(/padding:\s*var\(--card-pad\)/);
+    }
+    // --card-radius resolves to the primitive rather than repeating its value.
+    expect(tokens).toMatch(/--card-radius:\s*var\(--radius-md\)/);
+  });
+
+  test("separates the section boundary from the block gap enough to group", () => {
+    // 22px above a 14px block gap is a 1.57x ratio — too close for space to group anything,
+    // which is why every section also needed a rule under it. --gap-section makes it 2.0x.
+    // Identified by its border, not by name: cssRule() substring-matches, so
+    // ".section-title" resolves to `.result-probe-list-header .section-title` (margin: 0),
+    // and there is a second standalone rule carrying the shared type treatment.
+    const sectionBoundary = css.match(/^\.section-title \{[^}]*border-bottom[^}]*\}/m)?.[0] ?? "";
+    expect(sectionBoundary).toMatch(/margin:\s*var\(--gap-section\)/);
+    expect(tokens).toMatch(/--gap-section:\s*28px/);
+    // Not achieved by shrinking the block gap: .field carries it and sits on every form
+    // field on all seven steps, so retuning it is a global reflow rather than a panel change.
+    expect(cssRule(".field")).toMatch(/margin:\s*0 0 14px/);
+
+    // .info-row is the app's most-repeated data atom (64 instances). At 8px padding plus a
+    // 19.5px line plus a rule it was ~36.5px per row while the chrome around it was
+    // tool-tight. The font size is deliberately untouched.
+    const infoRow = cssRule(".info-row");
+    expect(infoRow).toMatch(/padding:\s*var\(--sp-1\) 0/);
+    expect(infoRow).toMatch(/line-height:\s*var\(--lh-tight\)/);
+    expect(infoRow).not.toMatch(/font-size/);
+  });
+
+  test("makes setting help hoverable, dismissible and bounded", () => {
+    // WCAG 1.4.13. The panel portals ~8px from the trigger, so moving toward it left the
+    // trigger and closed the tooltip — and the base rule's pointer-events: none meant it
+    // could not have been hovered even if it had stayed open.
+    expect(cssRule(".field-tooltip--floating")).toMatch(/pointer-events:\s*auto/);
+    // Bodies run to 848 characters in a box that had no max-height and no overflow.
+    const tooltip = cssRule(".field-tooltip");
+    expect(tooltip).toMatch(/max-height:\s*min\(/);
+    expect(tooltip).toMatch(/overflow-y:\s*auto/);
+    // It toggles on click, so it is a control: pointer cursor at the 24px minimum target.
+    // The literal (not --control-h-sm) matches the pinned WCAG 2.5.8 target-size test
+    // above, which regexes this exact rule for `width: 24px` — both encode the same
+    // 24px guarantee, and this rule keeps the literal so the two pins do not fight.
+    const trigger = cssRule(".tooltip-trigger");
+    expect(trigger).toMatch(/cursor:\s*pointer/);
+    expect(trigger).toMatch(/width:\s*24px/);
+
+    // The grace period spans the gap, and Escape dismisses.
+    expect(rightPanel).toMatch(/TOOLTIP_CLOSE_DELAY_MS = \d+/);
+    expect(rightPanel).toContain("onMouseEnter={cancelClose}");
+    expect(rightPanel).toContain('if (event.key !== "Escape") return;');
+    // describedby stops pointing at a node that is not in the document.
+    expect(rightPanel).toContain("aria-describedby={isTooltipOpen ? tooltipId : undefined}");
+  });
+
+  test("makes the settings tips drawer readable", () => {
+    // min-height pinned every grid row to 96px while the guide bodies run 250-400px, so
+    // all 43 cards overflowed and painted over each other. Cards size to their content.
+    expect(cssRule(".tip-card")).not.toMatch(/min-height/);
+    expect(cssRule(".tips-grid")).toMatch(/overflow:\s*auto/);
+    // Two rows, not three: the drawer used to repeat the top bar's Keys popover verbatim.
+    expect(cssRule(".tips-content")).toMatch(/grid-template-rows:\s*auto minmax\(0, 1fr\)/);
+    expect(bottomPanel).not.toContain("<KeyboardShortcutGuide />");
+    // 43 guides is more than anyone scans.
+    expect(bottomPanel).toContain('className="tips-filter"');
+    expect(bottomPanel).toContain("matchingTipIds");
+    // And the card ground is themed rather than a fixed dark tint.
+    expect(cssRule(".tip-card")).toMatch(/background:\s*color-mix/);
+  });
+
+  test("themes the in-canvas scene labels", () => {
+    // These are drawn into the WebGL canvas, so no DOM contrast check can reach them —
+    // which is how a palette built entirely for the dark viewport survived. Measured on the
+    // light ground the load callout ran about 1.7:1; the light entries clear 8:1.
+    expect(cadViewer).toContain("const SceneThemeContext = createContext<ThemeMode>");
+    expect(cadViewer).toContain("<SceneThemeContext.Provider value={props.themeMode}>");
+    expect(cadViewer).toMatch(/function sceneLabelColors\(tone: SceneLabelTone, themeMode: ThemeMode/);
+    expect(cadViewer).toContain('sceneLabelColors(tone, useContext(SceneThemeContext))');
+    expect(cadViewer).toContain('sceneLabelColors("dimension", useContext(SceneThemeContext))');
+    // Every tone carries both roles, so no tone can silently fall back to dark-only.
+    const palette = cadViewer.match(/const SCENE_LABEL_PALETTE[\s\S]*?\n\};/)?.[0] ?? "";
+    for (const tone of ["max", "mid", "min", "load", "active-load", "payload-mass", "dimension", "print", "support", "default"]) {
+      expect(palette, `missing tone ${tone}`).toMatch(new RegExp(`"?${tone}"?:\\s*\\{ dark:.*light:`));
+    }
+    // NOT seeded from the document root: theme-light lives on the .app-shell div, so the
+    // root always reports the dark tokens.
+    expect(cadViewer).not.toMatch(/getComputedStyle\(document\.documentElement\)/);
+  });
+
+  test("keeps the CSS ramp tokens in step with the one TypeScript definition", () => {
+    // The ramp is hand-maintained in four places in three formats. The three TypeScript
+    // consumers import STRESS_RAMP; CSS cannot, so this is the guard that stops tokens.css
+    // drifting and splitting what a colour means between the screen and the PDF.
+    STRESS_RAMP.forEach((hex, index) => {
+      expect(tokens, `--color-ramp-${index} should be ${hex}`).toMatch(
+        new RegExp(`--color-ramp-${index}:\\s*${hex};`, "i"),
+      );
+    });
+    // And no sixth stop has appeared in CSS without one in the source.
+    const cssStops = [...tokens.matchAll(/--color-ramp-(\d+):/g)].map((match) => Number(match[1]));
+    expect(Math.max(...cssStops) + 1).toBe(STRESS_RAMP.length);
+  });
+
+  test("resolves every custom property it references", () => {
+    // An undefined custom property invalidates its whole declaration at computed-value
+    // time, so `padding: var(--typo) 6px` silently becomes `padding: 0` — a class of bug
+    // the literal-declaration assertions above are structurally blind to.
+    // Only properties written by component code at runtime may go unresolved here.
+    const runtimeAssigned = new Set(["--analysis-legend-scale", "--playback-peak-position"]);
+    const names = (source: string, pattern: RegExp) =>
+      [...source.matchAll(pattern)].flatMap((match) => (match[1] ? [match[1]] : []));
+    const declared = new Set([
+      ...names(css, /(--[A-Za-z0-9-]+)\s*:/g),
+      ...names(tokens, /(--[A-Za-z0-9-]+)\s*:/g),
+    ]);
+    const unresolved = [...new Set(names(css, /var\(\s*(--[A-Za-z0-9-]+)/g))]
+      .filter((name) => !declared.has(name) && !runtimeAssigned.has(name))
+      .sort();
+
+    expect(unresolved).toEqual([]);
   });
 });

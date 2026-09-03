@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ElementRef, MouseEvent as ReactMouseEvent, MutableRefObject, PointerEvent as ReactPointerEvent } from "react";
 import { Billboard, Bounds, Edges, GizmoHelper, Html, Line, OrbitControls, Text, useBounds } from "@react-three/drei";
 import { addAfterEffect, Canvas, useFrame, useThree } from "@react-three/fiber";
@@ -179,6 +179,10 @@ const RESULT_DEFORMATION_TARGET_FRACTION = 0.08;
 const RESULT_DEFORMATION_CAP_FRACTION = DEBUG_RESULTS ? 1 : 0.25;
 const ResultColorScaleContext = createContext<ResolvedResultColorScale | null>(null);
 const StressComponentContext = createContext<StressComponent>("von_mises");
+/* Scene labels are drawn into the canvas, so no DOM contrast check can see them — which is
+   how a palette built entirely for the dark viewport survived: pale text on a near-white
+   ground measured about 1.7:1 in light mode, and the report's boundary figure inherits it. */
+const SceneThemeContext = createContext<ThemeMode>("dark");
 
 export function viewerGizmoLayout() {
   const cubeSize = VIEWER_VIEW_CUBE_SIZE;
@@ -203,11 +207,54 @@ export function viewerGizmoLayout() {
   };
 }
 
+const SCENE_LOADING_REVEAL_MS = 400;
+/* If the scene has not drawn by now something is wrong rather than slow — a lost WebGL
+   context, a driver refusing the canvas. Fall back to the bare viewport rather than
+   leaving a spinner promising a model that is never going to arrive. */
+const SCENE_LOADING_TIMEOUT_MS = 20000;
+
+/* addAfterEffect fires after a rendered frame, unlike useFrame which runs before one, so
+   this resolves only once pixels exist. frameloop="demand" still renders on mount.
+   The callback stays subscribed for the component's lifetime and guards itself with a
+   ref: unsubscribing from inside the callback splices R3F's effect array while it is
+   being iterated, which drops the entry after this one — including the render itself. */
+function SceneFirstFrameSignal({ onPainted }: { onPainted: () => void }) {
+  const painted = useRef(false);
+  useEffect(() => {
+    const unsubscribe = addAfterEffect(() => {
+      if (painted.current) return;
+      painted.current = true;
+      onPainted();
+    });
+    return unsubscribe;
+  }, [onPainted]);
+  return null;
+}
+
 export function CadViewer(props: CadViewerProps) {
   const controlsRef = useRef<ViewerOrbitControls | null>(null);
   const [uploadedPreviewBounds, setUploadedPreviewBounds] = useState<THREE.Box3 | null>(null);
   const [gizmoViewRequest, setGizmoViewRequest] = useState<{ view: GizmoViewRequest | null; signal: number }>({ view: null, signal: 0 });
   const [viewerInteracting, setViewerInteracting] = useState(false);
+  // The viewer's own render returns in a few tens of milliseconds; what takes seconds on a
+  // cold boot is the Three scene building and compiling inside <Canvas>, during which the
+  // shell paints an empty viewport with nothing to say for itself. This overlay is a DOM
+  // sibling of the canvas, so it paints in that first fast render and clears on the first
+  // frame the scene actually draws. Held back briefly so a warm mount never flashes it.
+  const [scenePainted, setScenePainted] = useState(false);
+  const [sceneLoadingPhase, setSceneLoadingPhase] = useState<"waiting" | "visible" | "expired">("waiting");
+  // Stable, so the after-render subscription is not torn down and rebuilt every render.
+  const handleScenePainted = useCallback(() => setScenePainted(true), []);
+
+  useEffect(() => {
+    if (scenePainted) return undefined;
+    const reveal = window.setTimeout(() => setSceneLoadingPhase("visible"), SCENE_LOADING_REVEAL_MS);
+    const expiry = window.setTimeout(() => setSceneLoadingPhase("expired"), SCENE_LOADING_TIMEOUT_MS);
+    return () => {
+      window.clearTimeout(reveal);
+      window.clearTimeout(expiry);
+    };
+  }, [scenePainted]);
   const effectiveViewMode: ViewMode = props.activeStep === "results"
     ? props.viewMode === "results" && props.resultsEligible ? "results" : "model"
     : props.viewMode === "mesh" ? "mesh" : "model";
@@ -275,6 +322,7 @@ export function CadViewer(props: CadViewerProps) {
   }, [props.displayModel, props.onResultRenderBoundsChange, uploadedPreviewBounds]);
   return (
     <ResultColorScaleContext.Provider value={resultColorScale}>
+      <SceneThemeContext.Provider value={props.themeMode}>
       <StressComponentContext.Provider value={stressComponent}>
     <section
       className={`viewer-shell ${effectiveViewMode === "results" ? "results-view" : ""}`}
@@ -282,6 +330,7 @@ export function CadViewer(props: CadViewerProps) {
       aria-label="3D CAD viewer"
     >
       <Canvas frameloop="demand" dpr={viewerDpr} camera={{ position: [4.8, 4.8, 4.8], up: ISO_CAMERA_UP.toArray(), fov: DEFAULT_CAMERA_FOV }} onCreated={({ gl }) => { gl.localClippingEnabled = true; }} onPointerMissed={props.onViewerMiss}>
+        <SceneFirstFrameSignal onPainted={handleScenePainted} />
         <ProjectionCameraController projectionMode={projectionMode} controlsRef={controlsRef} />
         <SectionClippingController state={props.sectionPlane} bounds={sectionBounds} />
         <ViewerInvalidator
@@ -372,6 +421,15 @@ export function CadViewer(props: CadViewerProps) {
         </GizmoHelper>
         {viewerStatsEnabled && <ViewerRendererStatsProbe />}
       </Canvas>
+      {!props.importingModelFilename && !scenePainted && sceneLoadingPhase === "visible" ? (
+        <div className="viewer-import-overlay" role="status" aria-live="polite" aria-atomic="true">
+          <div className="viewer-import-card">
+            <span className="viewer-import-spinner" aria-hidden="true" />
+            <strong>Preparing the 3D view…</strong>
+            <small>Building the scene. The model appears as soon as it is ready.</small>
+          </div>
+        </div>
+      ) : null}
       {props.importingModelFilename ? (
         <div className="viewer-import-overlay" role="status" aria-live="polite" aria-atomic="true">
           <div className="viewer-import-card">
@@ -410,6 +468,7 @@ export function CadViewer(props: CadViewerProps) {
       {effectiveViewMode === "results" && <ResultLegend resultMode={props.resultMode} resultFields={resultFields} unitSystem={props.unitSystem} meshSummary={props.meshSummary} surfaceMesh={props.surfaceMesh} showDeformed={effectiveShowDeformed} deformationScale={props.stressExaggeration} />}
     </section>
       </StressComponentContext.Provider>
+      </SceneThemeContext.Provider>
     </ResultColorScaleContext.Provider>
   );
 }
@@ -2275,7 +2334,7 @@ export function dimensionLabelFlipped(
 function DimensionLineLabel({ label, position, tangent, scale }: { label: string; position: [number, number, number]; tangent: [number, number, number]; scale: number }) {
   const groupRef = useRef<THREE.Group>(null);
   const flippedRef = useRef<boolean | null>(null);
-  const colors = sceneLabelColors("dimension");
+  const colors = sceneLabelColors("dimension", useContext(SceneThemeContext));
   useFrame(({ camera }) => {
     const group = groupRef.current;
     if (!group?.parent) return;
@@ -6364,7 +6423,7 @@ function SceneLabel({
   scale?: number;
 }) {
   const labelWidth = Math.max(1.02, label.length * 0.098);
-  const colors = sceneLabelColors(tone);
+  const colors = sceneLabelColors(tone, useContext(SceneThemeContext));
   return (
     <Billboard position={position} renderOrder={50}>
       <Text
@@ -6387,16 +6446,25 @@ function SceneLabel({
   );
 }
 
-function sceneLabelColors(tone: SceneLabelTone) {
-  if (tone === "max") return { outline: "#1f0707", text: "#fee2e2" };
-  if (tone === "mid") return { outline: "#1f1300", text: "#fef3c7" };
-  if (tone === "min") return { outline: "#06142a", text: "#dbeafe" };
-  if (tone === "dimension") return { outline: "#03101d", text: "#8cc8ff" };
-  if (tone === "print") return { outline: "#032018", text: "#a7f3d0" };
-  if (tone === "active-load") return { outline: "#03101d", text: "#8cc8ff" };
-  if (tone === "payload-mass") return { outline: "#032018", text: "#6ee7c8" };
-  if (tone === "support") return { outline: "#042f2a", text: "#99f6e4" };
-  return { outline: "#1f1300", text: "#ffe6a3" };
+/* Same hue per tone in both themes, so the load/support/dimension colour coding survives;
+   only the light/dark roles swap. Measured on the light viewport ground (#f7f9fc) these
+   run 8:1 or better, against roughly 1.7:1 before. */
+const SCENE_LABEL_PALETTE: Record<SceneLabelTone | "default", { dark: { outline: string; text: string }; light: { outline: string; text: string } }> = {
+  max: { dark: { outline: "#1f0707", text: "#fee2e2" }, light: { outline: "#fff5f5", text: "#7f1d1d" } },
+  mid: { dark: { outline: "#1f1300", text: "#fef3c7" }, light: { outline: "#fffbeb", text: "#78350f" } },
+  min: { dark: { outline: "#06142a", text: "#dbeafe" }, light: { outline: "#eff6ff", text: "#1e3a8a" } },
+  dimension: { dark: { outline: "#03101d", text: "#8cc8ff" }, light: { outline: "#f0f9ff", text: "#0b4a7a" } },
+  print: { dark: { outline: "#032018", text: "#a7f3d0" }, light: { outline: "#ecfdf5", text: "#065f46" } },
+  "active-load": { dark: { outline: "#03101d", text: "#8cc8ff" }, light: { outline: "#f0f9ff", text: "#0b4a7a" } },
+  "payload-mass": { dark: { outline: "#032018", text: "#6ee7c8" }, light: { outline: "#ecfdf5", text: "#065f46" } },
+  support: { dark: { outline: "#042f2a", text: "#99f6e4" }, light: { outline: "#f0fdfa", text: "#134e4a" } },
+  load: { dark: { outline: "#1f1300", text: "#ffe6a3" }, light: { outline: "#fffbeb", text: "#78350f" } },
+  default: { dark: { outline: "#1f1300", text: "#ffe6a3" }, light: { outline: "#fffbeb", text: "#78350f" } }
+};
+
+function sceneLabelColors(tone: SceneLabelTone, themeMode: ThemeMode = "dark") {
+  const entry = SCENE_LABEL_PALETTE[tone] ?? SCENE_LABEL_PALETTE.default;
+  return themeMode === "light" ? entry.light : entry.dark;
 }
 
 // Constraint teal keeps fixed supports visually distinct from amber loads,

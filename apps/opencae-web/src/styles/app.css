@@ -144,24 +144,42 @@ img {
   align-items: center;
 }
 
+/* One eyebrow. This recipe was retyped across twelve rules; each of them still owns its
+   own colour and layout, but the type treatment lives here so changing it is one edit.
+   Every class name is unchanged — the pinned CSS tests look selectors up literally, and
+   RightPanel.test.tsx pins .panel-eyebrow's exact markup. */
+.start-sample-menu-bar,
+.start-sample-header,
+.simulation-type-header small,
+.storage-recovery-header small,
+.stepbar-eyebrow,
+.stepbar-footer,
+.panel-eyebrow,
+.editable-list h3,
+.section-title,
+.collapsible-subtitle,
+.app-crash-eyebrow,
+.app-crash-detail span {
+  font-family: var(--font-mono);
+  font-size: var(--fs-mini);
+  letter-spacing: var(--ls-eyebrow);
+  text-transform: uppercase;
+}
+
 .start-sample-menu-bar {
   width: min(430px, 100%);
-  margin: 0 auto 10px;
+  margin: 0 auto var(--sp-25);
   display: grid;
   grid-template-columns: 70px minmax(0, 1fr) 70px;
   align-items: center;
   color: var(--color-text-subtle);
-  font-family: var(--font-mono);
-  font-size: var(--fs-mini);
-  letter-spacing: var(--ls-eyebrow);
   text-align: center;
-  text-transform: uppercase;
 }
 
 .start-menu-back {
   min-height: 30px;
   justify-self: start;
-  padding: 0 10px;
+  padding: 0 var(--sp-25);
   color: var(--color-text-muted);
   background: rgba(17, 24, 33, 0.72);
   border: var(--border-thin);
@@ -183,16 +201,12 @@ img {
 
 .start-sample-header {
   width: min(430px, 100%);
-  margin: 0 auto 10px;
+  margin: 0 auto var(--sp-25);
   display: grid;
   grid-template-columns: minmax(0, 1fr) 180px;
   align-items: center;
   gap: var(--sp-3);
   color: var(--color-text-subtle);
-  font-family: var(--font-mono);
-  font-size: var(--fs-mini);
-  letter-spacing: var(--ls-eyebrow);
-  text-transform: uppercase;
 }
 
 .start-analysis-type {
@@ -206,13 +220,13 @@ img {
   width: 320px;
   max-width: 100%;
   display: grid;
-  gap: 10px;
+  gap: var(--sp-25);
 }
 
 .recent-projects {
   width: min(430px, 100%);
-  margin-top: 16px;
-  padding: 10px;
+  margin-top: var(--sp-4);
+  padding: var(--sp-25);
   color: var(--color-text-muted);
   background: rgba(17, 24, 33, 0.72);
   border: var(--border-thin);
@@ -223,12 +237,12 @@ img {
 .recent-projects li {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--sp-2);
 }
 
 .recent-projects-header {
   justify-content: space-between;
-  margin-bottom: 8px;
+  margin-bottom: var(--sp-2);
 }
 
 .recent-projects h2 {
@@ -248,14 +262,14 @@ img {
 
 .recent-projects ul {
   display: grid;
-  gap: 6px;
+  gap: var(--sp-15);
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
 .recent-projects li {
-  padding-top: 6px;
+  padding-top: var(--sp-15);
   border-top: 1px solid rgba(139, 148, 158, 0.16);
 }
 
@@ -286,7 +300,7 @@ img {
 
 .recent-projects button {
   flex: 0 0 auto;
-  padding: 4px 7px;
+  padding: var(--sp-1) 7px;
   color: var(--color-text-muted);
   background: transparent;
   border: var(--border-thin);
@@ -302,7 +316,7 @@ img {
 
 .start-inline-error {
   width: min(430px, 100%);
-  margin: 10px 0 0;
+  margin: var(--sp-25) 0 0;
   color: var(--color-error);
   font-size: var(--fs-xs);
   line-height: var(--lh-loose);
@@ -316,7 +330,7 @@ img {
   align-items: center;
   justify-content: space-between;
   gap: var(--sp-3);
-  padding: 8px 11px;
+  padding: var(--sp-2) 11px;
   border-radius: var(--radius-md);
   border: var(--border-thin);
   text-align: left;
@@ -334,7 +348,7 @@ img {
 }
 
 .start-action.sample-action {
-  margin-top: 6px;
+  margin-top: var(--sp-15);
 }
 
 .start-action.secondary {
@@ -390,7 +404,7 @@ img {
 
 .sample-option-grid {
   display: grid;
-  gap: 10px;
+  gap: var(--sp-25);
 }
 
 .start-sample-grid {
@@ -409,12 +423,16 @@ img {
   display: grid;
   grid-template-rows: 82px auto auto;
   gap: 9px;
-  padding: 10px;
+  padding: var(--sp-25);
   color: var(--color-text);
   text-align: left;
-  background: rgba(17, 24, 33, 0.78);
+  /* Translucent so the start screen's blueprint grid reads through. Mixed from the
+     surface token rather than hardcoded: this card renders both on the always-dark
+     start screen and inside the themed Model panel, where a fixed dark ground put
+     light-theme ink at 1.09:1. Value-identical against the dark tokens. */
+  background: color-mix(in srgb, var(--color-surface) 78%, transparent);
   border: var(--border-thin);
-  border-color: rgba(139, 148, 158, 0.24);
+  border-color: color-mix(in srgb, var(--color-text-muted) 24%, transparent);
   border-radius: var(--radius-md);
   transition:
     transform var(--dur-fast) var(--ease-out),
@@ -431,9 +449,15 @@ img {
 }
 
 .sample-option-card.selected {
-  background: linear-gradient(180deg, rgba(77, 163, 255, 0.18), rgba(17, 24, 33, 0.9));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--color-accent) 18%, transparent),
+    color-mix(in srgb, var(--color-surface) 90%, transparent)
+  );
   border-color: var(--color-accent);
-  box-shadow: inset 0 0 0 1px rgba(77, 163, 255, 0.32), 0 14px 32px rgba(0, 0, 0, 0.22);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 32%, transparent),
+    0 14px 32px rgba(0, 0, 0, 0.22);
 }
 
 .start-sample-grid .sample-option-card {
@@ -441,7 +465,7 @@ img {
   grid-template-columns: 126px minmax(0, 1fr);
   grid-template-rows: auto auto;
   align-items: center;
-  gap: 8px 12px;
+  gap: var(--sp-2) var(--sp-3);
 }
 
 .start-sample-grid .sample-thumbnail {
@@ -462,7 +486,7 @@ img {
   grid-template-columns: 94px minmax(0, 1fr);
   grid-template-rows: auto auto;
   align-items: center;
-  gap: 8px 10px;
+  gap: var(--sp-2) var(--sp-25);
 }
 
 .sample-option-card.compact .sample-thumbnail {
@@ -637,7 +661,7 @@ img {
   margin-top: 3px;
   color: var(--color-text-muted);
   font-size: var(--fs-xs);
-  line-height: 1.35;
+  line-height: var(--lh-tight);
 }
 
 .sample-option-meta {
@@ -719,7 +743,7 @@ img {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 24px;
+  padding: var(--sp-5);
   background: rgba(0, 0, 0, 0.58);
 }
 
@@ -773,10 +797,6 @@ img {
   display: block;
   margin-bottom: 3px;
   color: var(--color-text-muted);
-  font-family: var(--font-mono);
-  font-size: var(--fs-mini);
-  letter-spacing: var(--ls-eyebrow);
-  text-transform: uppercase;
 }
 
 .simulation-picker-layout,
@@ -797,7 +817,7 @@ img {
 
 .simulation-choice-list h3,
 .material-list-pane h3 {
-  padding: 10px var(--sp-4);
+  padding: var(--sp-25) var(--sp-4);
   color: var(--color-text-muted);
   font-size: var(--fs-xs);
   text-transform: uppercase;
@@ -823,13 +843,13 @@ img {
   min-height: 168px;
   flex-direction: column;
   align-items: stretch;
-  gap: 12px;
+  gap: var(--sp-3);
   padding: var(--sp-4);
 }
 
 .simulation-choice-card span {
   display: grid;
-  gap: 4px;
+  gap: var(--sp-1);
 }
 
 .simulation-choice-card strong {
@@ -965,7 +985,7 @@ img {
   fill: #c8dcf2;
   font-family: var(--font-ui);
   font-size: 13px;
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
   letter-spacing: 0.14em;
   text-transform: uppercase;
   paint-order: stroke;
@@ -1007,7 +1027,7 @@ img {
 .analysis-tags {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--sp-2);
 }
 
 .analysis-tags span {
@@ -1150,7 +1170,7 @@ img {
 }
 
 .assigned-volumes span {
-  padding: 10px 12px;
+  padding: var(--sp-25) var(--sp-3);
   color: var(--color-accent);
   background: color-mix(in srgb, var(--color-accent) 12%, transparent);
   border: 1px solid var(--color-accent);
@@ -1170,7 +1190,7 @@ img {
 
 .material-editor label {
   display: grid;
-  gap: 6px;
+  gap: var(--sp-15);
   color: var(--color-text-muted);
   font-size: var(--fs-sm);
 }
@@ -1189,7 +1209,7 @@ img {
 
 .material-editor-error {
   margin: 0;
-  color: var(--color-danger);
+  color: var(--color-error);
 }
 
 .section-plane-controls {
@@ -1212,12 +1232,17 @@ img {
   }
 }
 
+/* `color` is re-declared here, not just inherited from html/body: body resolves
+   var(--color-text) in :root scope against the DARK value, and that computed color
+   inherits past .theme-light. Without this, every descendant that sets no color of
+   its own paints dark-theme ink on a light surface. */
 .app-shell {
   height: 100%;
   display: grid;
   grid-template-rows: var(--topbar-h) minmax(0, 1fr) var(--statusbar-h);
   overflow: hidden;
   background: var(--color-bg);
+  color: var(--color-text);
 }
 
 .app-shell.stepbar-collapsed {
@@ -1295,7 +1320,7 @@ img {
   min-width: 0;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--sp-2);
   overflow: hidden;
   white-space: nowrap;
 }
@@ -1343,7 +1368,7 @@ img {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--sp-2);
   margin-left: auto;
 }
 
@@ -1351,7 +1376,7 @@ img {
   min-height: 28px;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--sp-15);
   padding: 0 9px;
   color: var(--color-text-muted);
   background: var(--color-surface-2);
@@ -1377,7 +1402,7 @@ img {
   position: fixed;
   top: calc(var(--topbar-h) + var(--sp-3));
   right: calc(var(--context-w) + var(--sp-3));
-  z-index: calc(var(--z-log-drawer) + 1);
+  z-index: var(--z-popover);
   width: min(390px, calc(100vw - 24px));
   display: grid;
   gap: 11px;
@@ -1393,7 +1418,22 @@ img {
 .storage-recovery-header {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--sp-25);
+}
+
+.storage-recovery-close {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  margin-left: auto;
+  color: var(--color-text-muted);
+  border-radius: var(--radius-sm);
+}
+
+.storage-recovery-close:hover {
+  color: var(--color-text);
+  background: var(--color-surface-hover);
 }
 
 .storage-recovery-mark {
@@ -1415,10 +1455,6 @@ img {
 
 .storage-recovery-header small {
   color: var(--color-text-subtle);
-  font-family: var(--font-mono);
-  font-size: var(--fs-mini);
-  letter-spacing: var(--ls-eyebrow);
-  text-transform: uppercase;
 }
 
 .storage-recovery-header strong {
@@ -1436,7 +1472,7 @@ img {
 .storage-recovery-facts {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--sp-15);
 }
 
 .storage-recovery-facts span {
@@ -1452,7 +1488,7 @@ img {
 .storage-recovery-actions {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+  gap: var(--sp-2);
 }
 
 .storage-choice {
@@ -1460,7 +1496,7 @@ img {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
-  gap: 8px;
+  gap: var(--sp-2);
   padding: 9px;
   color: var(--color-text-muted);
   background: var(--color-surface-2);
@@ -1510,7 +1546,7 @@ img {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
-  gap: 8px;
+  gap: var(--sp-2);
   width: 100%;
   padding: 9px;
   text-align: left;
@@ -1536,7 +1572,7 @@ img {
 }
 
 .storage-analytics-toggle {
-  margin-top: 4px;
+  margin-top: var(--sp-1);
 }
 
 .shortcut-popover-backdrop {
@@ -1552,7 +1588,7 @@ img {
   top: calc(100% + 10px);
   right: 0;
   width: min(520px, calc(100vw - 24px));
-  padding: 12px;
+  padding: var(--sp-3);
   color: var(--color-text-muted);
   background: var(--color-surface);
   border: var(--border-thin);
@@ -1584,12 +1620,12 @@ img {
   grid-template-columns: auto minmax(0, 1fr);
   align-items: start;
   gap: 9px;
-  margin-top: 10px;
-  padding: 10px;
+  margin-top: var(--sp-25);
+  padding: var(--card-pad);
   color: var(--color-text-muted);
   background: var(--color-surface-2);
   border: var(--border-thin);
-  border-radius: var(--radius-md);
+  border-radius: var(--card-radius);
   cursor: pointer;
 }
 
@@ -1616,7 +1652,7 @@ img {
 .history-tools {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--sp-1);
 }
 
 .icon-button {
@@ -1902,7 +1938,7 @@ img {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  padding: var(--sp-4) 6px;
+  padding: var(--sp-4) var(--sp-15);
   background: var(--color-surface);
   border-right: var(--border-thin);
 }
@@ -1918,10 +1954,6 @@ img {
 .stepbar-eyebrow,
 .stepbar-footer {
   color: var(--color-text-subtle);
-  font-family: var(--font-mono);
-  font-size: var(--fs-mini);
-  letter-spacing: var(--ls-eyebrow);
-  text-transform: uppercase;
 }
 
 .stepbar-collapse {
@@ -1968,7 +2000,7 @@ img {
   grid-template-columns: 30px minmax(0, 1fr);
   align-items: center;
   gap: 7px;
-  padding: 0 6px;
+  padding: 0 var(--sp-15);
   color: var(--color-text-muted);
   border-left: 2px solid transparent;
   border-radius: 0 var(--radius-md) var(--radius-md) 0;
@@ -2041,14 +2073,14 @@ img {
 .stepbar-footer > div:not(.stepbar-actions) {
   display: flex;
   justify-content: space-between;
-  gap: 6px;
+  gap: var(--sp-15);
   min-width: 0;
 }
 
 .stepbar-footer > .unit-switch {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, auto);
-  gap: 4px 6px;
+  gap: var(--sp-1) var(--sp-15);
   align-items: center;
 }
 
@@ -2090,8 +2122,8 @@ img {
 .stepbar-actions {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 6px;
-  margin-bottom: 6px;
+  gap: var(--sp-15);
+  margin-bottom: var(--sp-15);
 }
 
 .stepbar-link {
@@ -2101,7 +2133,7 @@ img {
   gap: 7px;
   min-width: 0;
   min-height: 30px;
-  padding: 0 8px;
+  padding: 0 var(--sp-2);
   color: var(--color-text-muted);
   background: rgba(11, 15, 20, 0.28);
   border: var(--border-thin);
@@ -2127,8 +2159,8 @@ img {
 }
 
 .stepbar.collapsed {
-  padding-right: 6px;
-  padding-left: 6px;
+  padding-right: var(--sp-15);
+  padding-left: var(--sp-15);
 }
 
 .stepbar.collapsed .stepbar-header {
@@ -2157,7 +2189,7 @@ img {
 
 .stepbar.collapsed .stepbar-footer {
   justify-items: center;
-  gap: 6px;
+  gap: var(--sp-15);
   width: 100%;
 }
 
@@ -2166,7 +2198,7 @@ img {
 }
 
 .stepbar.collapsed .stepbar-actions {
-  gap: 6px;
+  gap: var(--sp-15);
   margin-bottom: 0;
 }
 
@@ -2244,8 +2276,8 @@ img {
   width: min(360px, 100%);
   display: grid;
   justify-items: center;
-  gap: 8px;
-  padding: 24px;
+  gap: var(--sp-2);
+  padding: var(--sp-5);
   color: var(--color-text);
   background: color-mix(in srgb, var(--color-surface) 96%, transparent);
   border: 1px solid var(--color-accent-border);
@@ -2263,7 +2295,7 @@ img {
   max-width: 280px;
   color: var(--color-text-muted);
   font-size: var(--fs-xs);
-  line-height: 1.45;
+  line-height: var(--lh-snug);
 }
 
 .viewer-import-filename {
@@ -2297,11 +2329,21 @@ img {
   }
 }
 
+/* The Suspense fallback while the viewer chunk loads. It had no rule at all, so a cold
+   boot into a restored project showed unstyled text in the corner of a black box for as
+   long as the chunk took — the first thing a returning user sees. Same treatment as the
+   import overlay above, which is the app's existing honest-progress pattern. */
+.viewer-loading {
+  display: grid;
+  place-items: center;
+  padding: var(--sp-5);
+}
+
 .model-notice {
   width: 260px;
   display: grid;
-  gap: 6px;
-  padding: 12px 14px;
+  gap: var(--sp-15);
+  padding: var(--sp-3) 14px;
   color: var(--color-text);
   background: rgba(17, 24, 33, 0.92);
   border: 1px solid var(--color-accent-border);
@@ -2322,12 +2364,12 @@ img {
 
 .model-notice small {
   font-size: var(--fs-xs);
-  line-height: 1.45;
+  line-height: var(--lh-snug);
 }
 
 .model-notice.compact {
   width: 180px;
-  padding: 8px 10px;
+  padding: var(--sp-2) var(--sp-25);
   font-size: var(--fs-xs);
 }
 
@@ -2415,7 +2457,7 @@ img {
 
 .analysis-legend .legend-deformation-note {
   color: var(--color-warning, #f59e0b);
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
 }
 
 .legend-scale {
@@ -2483,7 +2525,7 @@ img {
 }
 
 .panel-header {
-  padding: 10px 16px 8px;
+  padding: var(--sp-25) var(--sp-4) var(--sp-2);
   border-bottom: var(--border-thin);
 }
 
@@ -2491,17 +2533,12 @@ img {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 4px;
+  gap: var(--sp-4);
+  margin-bottom: var(--sp-1);
 }
 
-.panel-eyebrow,
-.section-title {
+.panel-eyebrow {
   color: var(--color-text-subtle);
-  font-family: var(--font-mono);
-  font-size: var(--fs-mini);
-  letter-spacing: var(--ls-eyebrow);
-  text-transform: uppercase;
 }
 
 .panel-section h2 {
@@ -2527,13 +2564,13 @@ img {
 
 .panel-warning {
   margin: 0;
-  padding: 8px 10px;
+  padding: var(--sp-2) var(--sp-25);
   color: var(--color-warning);
   background: color-mix(in srgb, var(--color-warning) 12%, transparent);
   border: 1px solid color-mix(in srgb, var(--color-warning) 35%, transparent);
   border-radius: var(--radius-sm);
   font-size: var(--fs-sm);
-  line-height: 1.45;
+  line-height: var(--lh-snug);
 }
 
 .panel-warning > svg {
@@ -2542,18 +2579,46 @@ img {
   vertical-align: -3px;
 }
 
+/* A failed mesh states itself where the failure happened, directly under the control that
+   produced it, rather than only as a status-bar string and a line in a collapsed drawer.
+   Same shape as .step-repair-card, which already does this for STEP geometry. */
+.mesh-failure {
+  display: grid;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+  padding: var(--sp-3);
+  background: var(--color-surface-2);
+  border: var(--border-thin);
+  border-left: 3px solid var(--color-error);
+  border-radius: var(--card-radius);
+}
+
+/* .panel-warning's amber clears AA on the panel's own surface but only reaches 3.67:1 on
+   this card's darker one, and --color-error is 4.37:1 there — also short. Severity is
+   already carried by the rail and the icon, so the message itself takes normal ink, which
+   is what a multi-line solver error wants to be read in anyway. */
+.mesh-failure .panel-warning {
+  margin: 0;
+  color: var(--color-text);
+}
+
+.mesh-failure .panel-warning svg {
+  color: var(--color-error);
+  flex: none;
+}
+
 .step-repair-card {
   display: grid;
-  gap: 8px;
+  gap: var(--sp-2);
 }
 
 .confirm-copy {
-  margin-top: 8px;
+  margin-top: var(--sp-2);
 }
 
 .panel-body {
   min-height: 0;
-  padding: 14px 16px;
+  padding: 14px var(--sp-4);
   overflow-y: auto;
 }
 
@@ -2561,7 +2626,7 @@ img {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: var(--sp-2);
-  padding: 12px 16px;
+  padding: var(--sp-3) var(--sp-4);
   border-top: var(--border-thin);
   background: var(--color-surface);
 }
@@ -2590,8 +2655,8 @@ img {
   border-radius: var(--radius-sm);
   font-family: var(--font-mono);
   font-size: var(--fs-mini);
-  font-weight: 600;
-  line-height: 1.35;
+  font-weight: var(--fw-semibold);
+  line-height: var(--lh-tight);
   text-align: center;
 }
 
@@ -2601,7 +2666,7 @@ img {
 
 .field {
   display: grid;
-  gap: 6px;
+  gap: var(--sp-15);
   margin: 0 0 14px;
   color: var(--color-text-muted);
   font-size: var(--fs-sm);
@@ -2611,7 +2676,7 @@ img {
 .field-label-with-help {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--sp-15);
   min-width: 0;
   width: fit-content;
 }
@@ -2623,7 +2688,9 @@ img {
   width: 24px;
   height: 24px;
   color: var(--color-text-subtle);
-  cursor: help;
+  /* It toggles on click as well as opening on hover, so it is a control, not an
+     annotation. 24px is the minimum target size. */
+  cursor: pointer;
   outline: none;
 }
 
@@ -2637,7 +2704,7 @@ img {
   z-index: var(--z-tooltip);
   display: grid;
   grid-template-columns: 58px minmax(0, 1fr);
-  gap: 10px;
+  gap: var(--sp-25);
   width: min(440px, calc(100vw - 24px));
   padding: 11px;
   color: var(--color-text);
@@ -2647,7 +2714,12 @@ img {
   box-shadow: var(--shadow-panel);
   font-size: var(--fs-xs);
   font-weight: var(--fw-regular);
-  line-height: 1.45;
+  line-height: var(--lh-snug);
+  /* Bounded: the longest help bodies overflowed a box with no max-height and no overflow,
+     so the app's best writing rendered as a transient popup that ran off screen. */
+  max-height: min(320px, calc(100vh - 32px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
   opacity: 0;
   pointer-events: none;
   transform: translateY(3px);
@@ -2657,6 +2729,9 @@ img {
 .field-tooltip--floating {
   opacity: 1;
   transform: translateY(0);
+  /* The base rule sets pointer-events: none and this never restored it, so the panel could
+     not be hovered, selected or scrolled — and its bodies run to 848 characters. */
+  pointer-events: auto;
 }
 
 .field-tooltip strong,
@@ -2683,19 +2758,19 @@ img {
   display: grid;
   grid-template-columns: 54px minmax(0, 1fr) 22px;
   align-items: center;
-  gap: 10px;
+  gap: var(--sp-25);
   margin: 0 0 14px;
-  padding: 10px;
+  padding: var(--card-pad);
   color: var(--color-text-muted);
   background: var(--color-surface-2);
   border: var(--border-thin);
-  border-radius: var(--radius-md);
+  border-radius: var(--card-radius);
 }
 
 .help-note--collapsed {
   display: flex;
   justify-content: flex-end;
-  margin: -4px 0 10px;
+  margin: -4px 0 var(--sp-25);
   padding: 0;
   background: transparent;
   border: 0;
@@ -2950,6 +3025,26 @@ img {
   box-shadow: 0 0 0 1px rgba(8, 12, 16, 0.5);
 }
 
+/* The focus ring lives on the thumb, not the input. The input's own outline is
+   suppressed above — deliberately, since a rectangle around the whole track reads as the
+   track being focused rather than the handle — but nothing ever replaced it, so six
+   keyboard-operable sliders had no visible focus state at all (WCAG 2.4.7). The inner
+   surface-coloured ring separates the accent halo from the track underneath it, so the
+   state reads on both the filled and unfilled sides in either theme. */
+.range-field input[type="range"]:focus-visible::-webkit-slider-thumb {
+  box-shadow:
+    0 0 0 1px rgba(8, 12, 16, 0.5),
+    0 0 0 3px var(--color-surface),
+    0 0 0 5px var(--color-accent);
+}
+
+.range-field input[type="range"]:focus-visible::-moz-range-thumb {
+  box-shadow:
+    0 0 0 1px rgba(8, 12, 16, 0.5),
+    0 0 0 3px var(--color-surface),
+    0 0 0 5px var(--color-accent);
+}
+
 .range-field input.playback-time-range {
   cursor: default;
 }
@@ -3016,18 +3111,18 @@ img {
 
 .result-probe-list {
   display: grid;
-  gap: 8px;
-  padding: 10px;
+  gap: var(--sp-2);
+  padding: var(--card-pad);
   border: var(--border-thin);
-  border-radius: var(--radius-md);
-  background: var(--color-surface-subtle);
+  border-radius: var(--card-radius);
+  background: var(--color-surface-2);
 }
 
 .result-probe-list-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--sp-2);
 }
 
 .result-probe-list-header .section-title {
@@ -3036,7 +3131,7 @@ img {
 
 .result-probe-list ol {
   display: grid;
-  gap: 6px;
+  gap: var(--sp-15);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -3046,8 +3141,8 @@ img {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  padding: 6px 8px;
+  gap: var(--sp-2);
+  padding: var(--sp-15) var(--sp-2);
   border-radius: var(--radius-sm);
   background: var(--color-surface);
 }
@@ -3055,7 +3150,7 @@ img {
 .result-probe-list li > span {
   display: flex;
   align-items: baseline;
-  gap: 8px;
+  gap: var(--sp-2);
   min-width: 0;
 }
 
@@ -3065,11 +3160,11 @@ img {
 
 .result-scale-controls {
   display: grid;
-  gap: 10px;
-  padding: 10px;
+  gap: var(--sp-25);
+  padding: var(--card-pad);
   border: var(--border-thin);
-  border-radius: var(--radius-md);
-  background: var(--color-surface-subtle);
+  border-radius: var(--card-radius);
+  background: var(--color-surface-2);
 }
 
 .result-scale-controls .segmented {
@@ -3085,7 +3180,7 @@ img {
 .result-scale-range-inputs {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+  gap: var(--sp-2);
 }
 
 .result-scale-range-inputs .field {
@@ -3139,15 +3234,15 @@ img {
 
 .modal-mode-table {
   display: grid;
-  gap: 8px;
-  margin: 10px 0 14px;
+  gap: var(--sp-2);
+  margin: var(--sp-25) 0 14px;
 }
 
 .modal-mode-table button {
   display: grid;
   grid-template-columns: minmax(72px, auto) 1fr;
   align-items: baseline;
-  gap: 2px 10px;
+  gap: 2px var(--sp-25);
   text-align: left;
 }
 
@@ -3226,7 +3321,10 @@ input {
   display: grid;
   place-items: center;
   color: var(--color-text-muted);
-  background: rgba(42, 52, 65, 0.45);
+  /* Mixed from the border token, not a fixed dark slate: on the light theme's input
+     ground a hardcoded #2a3441 at 45% composited to a mid grey and dropped the muted
+     unit label to 2.28:1. Value-identical against the dark tokens. */
+  background: color-mix(in srgb, var(--color-border) 45%, transparent);
   border-left: var(--border-thin);
   font-family: var(--font-mono);
 }
@@ -3248,8 +3346,8 @@ input {
   display: grid;
   grid-template-columns: 36px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 10px;
-  padding: 10px;
+  gap: var(--sp-25);
+  padding: var(--sp-25);
   color: var(--color-text);
   background: transparent;
   border: 0;
@@ -3304,7 +3402,7 @@ input {
 }
 
 .base-material-properties {
-  padding: 0 10px;
+  padding: 0 var(--sp-25);
 }
 
 .base-material-properties .info-row:last-child,
@@ -3313,10 +3411,10 @@ input {
 }
 
 .material-process-helper {
-  margin: 0 0 8px;
+  margin: 0 0 var(--sp-2);
   color: var(--color-text-muted);
   font-size: var(--fs-xs);
-  line-height: 1.45;
+  line-height: var(--lh-snug);
 }
 
 .material-process-list {
@@ -3331,7 +3429,7 @@ input {
   grid-template-columns: 22px 26px minmax(0, 1fr);
   align-items: center;
   gap: 9px;
-  padding: 9px 10px;
+  padding: 9px var(--sp-25);
   color: var(--color-text);
   background: var(--color-surface-2);
   border: var(--border-thin);
@@ -3395,30 +3493,30 @@ input {
 }
 
 .material-compatibility-note {
-  margin: 8px 0 0;
-  padding: 8px 9px;
+  margin: var(--sp-2) 0 0;
+  padding: var(--sp-2) 9px;
   color: var(--color-accent);
   background: var(--color-accent-dim);
   border-left: 2px solid var(--color-accent);
   border-radius: var(--radius-sm);
   font-size: var(--fs-xs);
-  line-height: 1.45;
+  line-height: var(--lh-snug);
 }
 
 .print-settings {
   display: grid;
-  gap: 8px;
-  margin: 10px 0 12px;
-  padding: 8px;
+  gap: var(--sp-2);
+  margin: var(--sp-25) 0 var(--sp-3);
+  padding: var(--card-pad-tight);
   background: var(--color-surface-2);
   border: var(--border-thin);
-  border-radius: var(--radius-md);
+  border-radius: var(--card-radius);
 }
 
 .print-settings-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+  gap: var(--sp-2);
 }
 
 .print-settings-grid .field {
@@ -3438,7 +3536,7 @@ input {
 }
 
 .material-apply-button {
-  margin-top: 12px;
+  margin-top: var(--sp-3);
 }
 
 .material-print-toggle {
@@ -3451,7 +3549,7 @@ input {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: var(--sp-2);
   min-height: 34px;
   padding: 7px 11px;
   border-radius: var(--radius-md);
@@ -3497,9 +3595,42 @@ input {
   background: var(--color-surface-hover);
 }
 
+/* Quiet inline action inside a section header ("Reset", "Clear All"). It carries no
+   chrome until hover, so the padding is what makes it a target rather than bare text. */
+.text-button {
+  min-height: 24px;
+  padding: var(--sp-1) var(--sp-2);
+  color: var(--color-accent);
+  font-size: var(--fs-xs);
+  border-radius: var(--radius-sm);
+}
+
+.text-button:hover {
+  background: var(--color-accent-dim);
+}
+
 button:disabled {
   cursor: not-allowed;
   opacity: 0.45;
+}
+
+/* An accent fill at 45% opacity is still the most saturated thing in a panel footer, so
+   a disabled primary read as "loading" or "nearly ready" rather than "not available".
+   Drop it to the neutral surface instead; --color-text-muted on --color-surface-2 is the
+   pair already documented for AA in tokens.css. */
+.primary:disabled {
+  color: var(--color-text-muted);
+  background: var(--color-surface-2);
+  border-color: var(--color-border);
+  opacity: 1;
+}
+
+/* The global focus ring is --color-accent one pixel outside the element. On an
+   accent-FILLED button that is the fill colour against itself, so it read as the button
+   growing by a pixel rather than as focus. Invert it against the fill and widen the gap. */
+.primary:focus-visible {
+  outline-color: var(--color-text);
+  outline-offset: 2px;
 }
 
 .wide {
@@ -3508,18 +3639,20 @@ button:disabled {
 
 /* Results export/report actions: one left-aligned column so every download
    icon and label lines up in a shared gutter instead of each button centering
-   its own icon+label to a different x. The assessment card below reuses the
-   same 20px icon gutter and text column (see .failure-assessment). */
+   its own icon+label to a different x. These sit at the foot of the panel,
+   below the answer they export, so the margin is above rather than below.
+   The secondary exports collapse into ResultExportMenu's own popover rather
+   than a second .result-actions nested here. */
 .result-actions {
   display: grid;
   gap: var(--sp-2);
-  margin: 0 0 14px;
+  margin: 14px 0 0;
 }
 
 .result-actions .primary,
 .result-actions .secondary {
   justify-content: flex-start;
-  gap: 10px;
+  gap: var(--sp-25);
 }
 
 .result-actions .primary svg,
@@ -3575,7 +3708,7 @@ button:disabled {
 .export-menu-item {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--sp-25);
   width: 100%;
   padding: 7px 9px;
   background: none;
@@ -3620,7 +3753,7 @@ button:disabled {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: var(--sp-2);
-  margin-top: 8px;
+  margin-top: var(--sp-2);
 }
 
 .orientation-controls button {
@@ -3629,18 +3762,23 @@ button:disabled {
 }
 
 .orientation-readout {
-  margin: 8px 0 14px;
+  margin: var(--sp-2) 0 14px;
   color: var(--color-text-muted);
   font-family: var(--font-mono);
   font-size: var(--fs-xs);
 }
 
+/* The app's most-repeated data atom — 64 instances. At 8px padding plus a 19.5px line
+   plus a rule each row was ~36.5px, so chrome was tool-tight while the actual engineering
+   data was spread out. The font size is left alone: dropping these mono values to 12px is
+   a separate decision on a panel already dense with small type. */
 .info-row {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: var(--sp-3);
-  padding: 8px 0;
+  padding: var(--sp-1) 0;
+  line-height: var(--lh-tight);
   border-bottom: 1px dotted rgba(139, 148, 158, 0.28);
 }
 
@@ -3657,13 +3795,56 @@ button:disabled {
   overflow-wrap: anywhere;
 }
 
+/* The app's display level. Two-up rather than three, because 22px mono in a 344px panel
+   leaves ~95px per column three-up and a five-significant-figure MPa value wraps.
+   overflow-wrap matches .info-row strong, which already needed it for the same reason. */
+.result-headline {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-3);
+  margin-bottom: var(--gap-block);
+  padding: var(--card-pad) var(--card-pad) var(--sp-3);
+  background: var(--color-surface-2);
+  border: var(--border-thin);
+  border-radius: var(--card-radius);
+}
+
+.result-headline-item {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.result-headline-item span {
+  color: var(--color-text-muted);
+  font-size: var(--fs-mini);
+  letter-spacing: var(--ls-eyebrow);
+  text-transform: uppercase;
+}
+
+.result-headline-item strong {
+  overflow-wrap: anywhere;
+  min-width: 0;
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xl);
+  font-weight: var(--fw-medium);
+  line-height: var(--lh-tight);
+  font-variant-numeric: tabular-nums;
+}
+
+/* A single headline figure gets the full width rather than a stranded half. */
+.result-headline:has(> .result-headline-item:only-child) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .summary-box,
 .placement-chip {
   margin-top: 14px;
-  padding: 10px;
+  padding: var(--card-pad);
   background: var(--color-surface-2);
   border: var(--border-thin);
-  border-radius: var(--radius-md);
+  border-radius: var(--card-radius);
 }
 
 .editable-list {
@@ -3675,7 +3856,7 @@ button:disabled {
 }
 
 .dimension-box p {
-  margin: 8px 0 0;
+  margin: var(--sp-2) 0 0;
   color: var(--color-text-muted);
   font-size: var(--fs-sm);
   line-height: var(--lh-loose);
@@ -3683,24 +3864,24 @@ button:disabled {
 
 .editable-list h3,
 .section-title {
-  margin: 0 0 8px;
+  margin: 0 0 var(--sp-2);
   color: var(--color-text-subtle);
-  font-family: var(--font-mono);
-  font-size: var(--fs-mini);
   font-weight: var(--fw-regular);
-  letter-spacing: var(--ls-eyebrow);
-  text-transform: uppercase;
 }
 
+/* The section boundary was 22px against a 14px block gap — a 1.57x ratio, too close for
+   space alone to group anything, which is why every section also needed a rule under it.
+   --gap-section makes it 2.0x. Deliberately NOT achieved by shrinking the block gap:
+   .field carries it and sits on every form field on all seven steps. */
 .section-title {
-  margin: 22px 0 8px;
+  margin: var(--gap-section) 0 var(--sp-2);
   padding-bottom: 7px;
   border-bottom: var(--border-thin);
 }
 
 .callout {
   margin: 14px 0 0;
-  padding: 10px 12px;
+  padding: var(--sp-25) var(--sp-3);
   color: var(--color-text-muted);
   background: var(--color-accent-dim);
   border-left: 2px solid var(--color-accent);
@@ -3710,7 +3891,7 @@ button:disabled {
 }
 
 .callout + .panel-copy {
-  margin-top: 12px;
+  margin-top: var(--sp-3);
 }
 
 .collapsible-section {
@@ -3723,8 +3904,8 @@ button:disabled {
 .collapsible-summary {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
+  gap: var(--sp-2);
+  padding: var(--sp-25) var(--sp-3);
   color: var(--color-text);
   font-size: var(--fs-sm);
   font-weight: var(--fw-medium);
@@ -3740,15 +3921,11 @@ button:disabled {
 .collapsible-subtitle {
   margin-left: auto;
   color: var(--color-text-subtle);
-  font-family: var(--font-mono);
-  font-size: var(--fs-mini);
-  letter-spacing: var(--ls-eyebrow);
-  text-transform: uppercase;
 }
 
 .collapsible-chevron {
   flex: none;
-  margin-left: 4px;
+  margin-left: var(--sp-1);
   color: var(--color-text-subtle);
   transition: transform 0.15s ease;
 }
@@ -3758,17 +3935,17 @@ button:disabled {
 }
 
 .collapsible-body {
-  padding: 0 12px 12px;
+  padding: 0 var(--sp-3) var(--sp-3);
 }
 
 .parametric-part-summary {
-  margin: 0 0 12px;
+  margin: 0 0 var(--sp-3);
 }
 
 .parametric-part-fields {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+  gap: var(--sp-2);
 }
 
 .parametric-part-fields .field {
@@ -3776,8 +3953,8 @@ button:disabled {
 }
 
 .parametric-part-problems {
-  margin: 10px 0 0;
-  padding: 8px 12px 8px 26px;
+  margin: var(--sp-25) 0 0;
+  padding: var(--sp-2) var(--sp-3) var(--sp-2) 26px;
   color: var(--color-text);
   background: rgba(239, 68, 68, 0.12);
   border-left: 2px solid var(--color-error);
@@ -3789,8 +3966,8 @@ button:disabled {
 .parametric-part-note {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin: 8px 0 0;
+  gap: var(--sp-15);
+  margin: var(--sp-2) 0 0;
   color: var(--color-text-subtle);
   font-size: var(--fs-mini);
 }
@@ -3800,14 +3977,15 @@ button:disabled {
 }
 
 .failure-assessment {
-  margin-top: 14px;
+  margin-top: 0;
   display: grid;
   grid-template-columns: 20px minmax(0, 1fr);
-  gap: 10px;
+  gap: var(--sp-25);
   align-items: start;
-  /* 3px left border + 9px padding = 12px content start, matching the action
-     buttons above (1px border + 11px padding) so icons and text stay in column. */
-  padding: 12px 12px 12px 9px;
+  /* 3px left border + 9px padding = 12px content start, matching the export buttons
+     (1px border + 11px padding) so icons and text share a column even though the two
+     blocks now sit at opposite ends of the panel. */
+  padding: var(--sp-3) var(--sp-3) var(--sp-3) 9px;
   color: var(--color-text);
   background: rgba(77, 163, 255, 0.12);
   border-left: 3px solid var(--color-accent);
@@ -3869,11 +4047,11 @@ button:disabled {
 
 .load-capacity-tool {
   display: grid;
-  gap: 10px;
-  padding: 12px;
+  gap: var(--sp-25);
+  padding: var(--sp-3);
   background: var(--color-surface-2);
   border: var(--border-thin);
-  border-radius: var(--radius-md);
+  border-radius: var(--card-radius);
 }
 
 .load-capacity-tool .field {
@@ -3881,13 +4059,13 @@ button:disabled {
 }
 
 .result-variant-selector {
-  margin-bottom: 12px;
+  margin-bottom: var(--sp-3);
 }
 
 .load-case-editor {
   display: grid;
-  gap: 8px;
-  margin-bottom: 12px;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-3);
 }
 
 .load-case-row,
@@ -3896,10 +4074,10 @@ button:disabled {
   grid-template-columns: minmax(0, 1fr) auto 28px;
   align-items: center;
   gap: 7px;
-  padding: 10px;
+  padding: var(--card-pad);
   background: var(--color-surface-2);
   border: var(--border-thin);
-  border-radius: var(--radius-md);
+  border-radius: var(--card-radius);
 }
 
 .load-case-row > small {
@@ -3926,7 +4104,7 @@ button:disabled {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 84px;
   align-items: center;
-  gap: 8px;
+  gap: var(--sp-2);
   color: var(--color-text-muted);
   font-size: var(--fs-xs);
 }
@@ -3935,22 +4113,22 @@ button:disabled {
   grid-column: 2;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--sp-15);
   color: var(--color-text-muted);
   font-size: var(--fs-mini);
 }
 
 .load-case-assignment select {
   min-width: 90px;
-  padding: 4px 6px;
+  padding: var(--sp-1) var(--sp-15);
   font-size: var(--fs-xs);
 }
 
 .convergence-card {
   display: grid;
-  gap: 12px;
+  gap: var(--sp-3);
   margin-top: 18px;
-  padding-top: 16px;
+  padding-top: var(--sp-4);
   border-top: 1px solid var(--color-border);
 }
 
@@ -3961,7 +4139,7 @@ button:disabled {
 .convergence-probe-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
+  gap: var(--sp-2);
 }
 
 .convergence-probe-grid label {
@@ -3979,10 +4157,10 @@ button:disabled {
 
 .convergence-record {
   display: grid;
-  gap: 8px;
-  padding: 12px;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
   border: var(--border-thin);
-  border-radius: var(--radius-md);
+  border-radius: var(--card-radius);
   background: var(--color-surface-2);
 }
 
@@ -4043,13 +4221,13 @@ button:disabled {
 
 .convergence-rungs {
   display: grid;
-  gap: 6px;
+  gap: var(--sp-15);
 }
 
 .convergence-rung {
   display: grid;
   grid-template-columns: 64px 72px minmax(0, 1fr);
-  gap: 6px;
+  gap: var(--sp-15);
   align-items: baseline;
 }
 
@@ -4065,7 +4243,7 @@ button:disabled {
 .capacity-readout {
   display: grid;
   gap: 3px;
-  padding-top: 10px;
+  padding-top: var(--sp-25);
   border-top: 1px dotted rgba(139, 148, 158, 0.28);
 }
 
@@ -4084,21 +4262,21 @@ button:disabled {
 
 .editable-list {
   display: grid;
-  gap: 8px;
+  gap: var(--sp-2);
 }
 
 .editable-item {
   display: grid;
-  gap: 8px;
-  padding: 12px;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
   background: var(--color-surface-2);
   border: var(--border-thin);
-  border-radius: var(--radius-md);
+  border-radius: var(--card-radius);
 }
 
 .editable-item.load-item {
-  gap: 6px;
-  padding: 8px 10px;
+  gap: var(--sp-15);
+  padding: var(--sp-2) var(--sp-25);
 }
 
 /* The load row's summary is a real button spanning the icon and text columns,
@@ -4111,7 +4289,7 @@ button:disabled {
   display: grid;
   grid-template-columns: 24px minmax(0, 1fr);
   align-items: baseline;
-  gap: 3px 10px;
+  gap: 3px var(--sp-25);
   padding: 0;
   color: inherit;
   font: inherit;
@@ -4139,7 +4317,7 @@ button:disabled {
   display: grid;
   grid-template-columns: 24px minmax(0, 1fr) 18px;
   align-items: baseline;
-  gap: 3px 10px;
+  gap: 3px var(--sp-25);
 }
 
 .editable-summary .item-icon {
@@ -4186,12 +4364,12 @@ button:disabled {
 
 .load-item .editable-summary {
   grid-template-columns: 20px minmax(0, 1fr) 18px;
-  gap: 2px 8px;
+  gap: 2px var(--sp-2);
 }
 
 .load-item .editable-summary-trigger {
   grid-template-columns: 20px minmax(0, 1fr);
-  gap: 2px 8px;
+  gap: 2px var(--sp-2);
 }
 
 .load-item .editable-summary strong {
@@ -4200,7 +4378,7 @@ button:disabled {
 
 .load-item .editable-summary small {
   font-size: var(--fs-mini);
-  line-height: 1.35;
+  line-height: var(--lh-tight);
 }
 
 .remove-glyph {
@@ -4223,7 +4401,7 @@ button:disabled {
 
 .edit-form {
   display: grid;
-  gap: 8px;
+  gap: var(--sp-2);
 }
 
 .edit-form .field {
@@ -4233,7 +4411,7 @@ button:disabled {
 .edit-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 8px;
+  gap: var(--sp-2);
 }
 
 /* Inline validation message shown beside the field that produced it. */
@@ -4250,15 +4428,15 @@ input[aria-invalid="true"] {
 
 .checklist {
   display: grid;
-  gap: 10px;
+  gap: var(--sp-25);
   margin-top: 0;
-  padding: 4px 0 12px;
+  padding: var(--sp-1) 0 var(--sp-3);
 }
 
 .check {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--sp-25);
   color: var(--color-text-muted);
   font-size: var(--fs-md);
 }
@@ -4298,7 +4476,7 @@ input[aria-invalid="true"] {
 .progress {
   position: relative;
   height: 22px;
-  margin: 14px 0 8px;
+  margin: 14px 0 var(--sp-2);
   overflow: hidden;
   background: var(--color-bg);
   border: var(--border-thin);
@@ -4312,25 +4490,35 @@ input[aria-invalid="true"] {
   transition: width var(--dur-base) var(--ease-out);
 }
 
+/* The label is centred over a bar whose ground changes as the fill passes under it, so
+   no single ink contrasts with both: in dark theme white read 2.4:1 on the accent fill,
+   in light theme 1.09:1 on the empty track. Giving it its own opaque plate makes it
+   legible at every fill level in both themes without moving the readout out of the bar. */
 .progress-label {
   position: absolute;
-  inset: 0;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #f8fbff;
-  font-size: var(--fs-xs);
-  font-weight: 600;
-  line-height: 1;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+  padding: 0 var(--sp-2);
+  color: var(--color-text);
+  background: var(--color-surface);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--fs-mini);
+  font-weight: var(--fw-semibold);
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
   pointer-events: none;
 }
 
 .toggle {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin: 12px 0;
+  gap: var(--sp-2);
+  margin: var(--sp-3) 0;
   color: var(--color-text-muted);
 }
 
@@ -4342,7 +4530,7 @@ input[aria-invalid="true"] {
   display: grid;
   grid-template-columns: auto 1fr auto;
   align-items: center;
-  gap: 8px;
+  gap: var(--sp-2);
   margin: 14px 0;
   color: var(--color-text-muted);
   font-family: var(--font-mono);
@@ -4356,14 +4544,14 @@ input[aria-invalid="true"] {
 
 .concept-card-list {
   display: grid;
-  gap: 10px;
+  gap: var(--sp-25);
 }
 
 .concept-card {
   display: grid;
   align-items: center;
   min-height: 54px;
-  padding: 10px 12px;
+  padding: var(--sp-25) var(--sp-3);
   background: var(--color-surface-2);
   border: var(--border-thin);
   border-radius: var(--radius-md);
@@ -4371,7 +4559,7 @@ input[aria-invalid="true"] {
 
 .concept-card {
   grid-template-columns: 24px minmax(0, 1fr);
-  gap: 10px;
+  gap: var(--sp-25);
 }
 
 .concept-icon {
@@ -4414,23 +4602,32 @@ input[aria-invalid="true"] {
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
   gap: var(--sp-3);
-  padding: 0 12px;
+  padding: 0 var(--sp-3);
   color: var(--color-text-muted);
   overflow: hidden;
 }
 
+/* Bounded to its grid track so the clipping actually happens here rather than the
+   group spilling out and painting over .status-links. */
 .status-primary {
   min-width: 0;
+  overflow: hidden;
   display: flex;
   align-items: center;
   gap: var(--sp-3);
 }
 
+/* These are controls, so they must not shrink: with the default flex-shrink the tab
+   group was squeezed below its 121px min-content inside .status-primary and the "Logs"
+   pill painted over the status text. .status-groups is the sibling built to give way —
+   it already carries min-width: 0, overflow: hidden and white-space: nowrap — so pinning
+   the tabs makes the status word clip instead of two runs overprinting. */
 .status-tabs {
   height: 100%;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--sp-15);
 }
 
 .status-tabs button {
@@ -4439,7 +4636,7 @@ input[aria-invalid="true"] {
   align-items: center;
   gap: 5px;
   min-height: 24px;
-  padding: 0 8px;
+  padding: 0 var(--sp-2);
   color: var(--color-text-muted);
   background: rgba(11, 15, 20, 0.24);
   border: var(--border-thin);
@@ -4451,13 +4648,13 @@ input[aria-invalid="true"] {
   background: var(--color-surface-2);
 }
 
+/* Hover and selected may share a look; focus must not. Collapsing all three onto one rule
+   that ends in `outline: none` meant tabbing to these produced no visible change at all. */
 .status-tabs button:hover,
-.status-tabs button:focus-visible,
 .status-tabs button.active {
   color: var(--color-text);
   background: var(--color-surface-2);
   border-color: var(--color-accent-border);
-  outline: none;
 }
 
 .count-pill {
@@ -4483,7 +4680,7 @@ input[aria-invalid="true"] {
 .status-groups > span {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--sp-15);
   font-family: var(--font-mono);
   font-size: var(--fs-xs);
 }
@@ -4492,7 +4689,7 @@ input[aria-invalid="true"] {
   display: inline-flex;
   align-items: center;
   justify-self: end;
-  gap: 10px;
+  gap: var(--sp-25);
 }
 
 .status-attribution {
@@ -4596,7 +4793,7 @@ input[aria-invalid="true"] {
 .bottom-content pre {
   height: 100%;
   margin: 0;
-  padding: 16px 12px 10px;
+  padding: var(--sp-4) var(--sp-3) var(--sp-25);
   overflow: auto;
   color: var(--color-text-muted);
   font-family: var(--font-mono);
@@ -4612,7 +4809,38 @@ input[aria-invalid="true"] {
 .logs-content pre {
   height: auto;
   min-height: 0;
-  padding-top: 12px;
+  padding-top: var(--sp-3);
+}
+
+/* The drawer classified every line OK/ERR/INFO and then rendered them all in one muted
+   colour, so a mesh crash was visually identical to "Mesh generated". The level is a
+   column now, and a failure is the one thing that carries colour. */
+.log-line {
+  display: grid;
+  grid-template-columns: max-content 2.5em minmax(0, 1fr);
+  gap: 0 var(--sp-2);
+}
+
+.log-time {
+  color: var(--color-text-subtle);
+}
+
+.log-level {
+  color: var(--color-text-subtle);
+}
+
+.log-line.log-ok .log-level {
+  color: var(--color-success);
+}
+
+.log-line.log-err .log-level,
+.log-line.log-err .log-message {
+  color: var(--color-error);
+}
+
+.log-message {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .logs-drawer-header {
@@ -4620,13 +4848,13 @@ input[aria-invalid="true"] {
   align-items: center;
   justify-content: space-between;
   gap: var(--sp-3);
-  padding: 12px 12px 10px;
+  padding: var(--sp-3) var(--sp-3) var(--sp-25);
   color: var(--color-text);
   border-bottom: var(--border-thin);
 }
 
 .logs-drawer-header span {
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
 }
 
 .logs-drawer-actions {
@@ -4656,7 +4884,7 @@ input[aria-invalid="true"] {
 .log-copy-button,
 .log-clear-button {
   min-height: 26px;
-  padding: 0 10px;
+  padding: 0 var(--sp-25);
   color: var(--color-text-muted);
   background: rgba(11, 15, 20, 0.32);
   border: var(--border-thin);
@@ -4666,13 +4894,10 @@ input[aria-invalid="true"] {
 }
 
 .log-copy-button:hover,
-.log-copy-button:focus-visible,
-.log-clear-button:hover,
-.log-clear-button:focus-visible {
+.log-clear-button:hover {
   color: var(--color-text);
   background: var(--color-surface-2);
   border-color: var(--color-accent-border);
-  outline: none;
 }
 
 .log-clear-button {
@@ -4697,23 +4922,25 @@ input[aria-invalid="true"] {
 
 .tips-content {
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
-  padding: 12px;
+  /* Two rows, not three: the drawer used to repeat the top bar's keyboard-shortcut
+     popover verbatim between the header and the first guide. */
+  grid-template-rows: auto minmax(0, 1fr);
+  padding: var(--sp-3);
   overflow: hidden;
 }
 
 .tips-drawer-header {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: var(--sp-3);
-  padding: 0 0 10px;
+  padding: 0 0 var(--sp-25);
   color: var(--color-text);
   border-bottom: var(--border-thin);
 }
 
 .tips-drawer-header span {
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
 }
 
 .tips-drawer-header strong {
@@ -4727,14 +4954,14 @@ input[aria-invalid="true"] {
   min-height: 0;
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 10px;
-  padding-top: 12px;
+  gap: var(--sp-25);
+  padding-top: var(--sp-3);
   overflow: auto;
 }
 
 .shortcut-guide {
-  margin-top: 12px;
-  padding: 10px;
+  margin-top: var(--sp-3);
+  padding: var(--sp-25);
   color: var(--color-text-muted);
   background: rgba(11, 15, 20, 0.2);
   border: var(--border-thin);
@@ -4746,7 +4973,7 @@ input[aria-invalid="true"] {
   align-items: baseline;
   justify-content: space-between;
   gap: var(--sp-3);
-  margin-bottom: 8px;
+  margin-bottom: var(--sp-2);
 }
 
 .shortcut-guide-header strong {
@@ -4763,13 +4990,13 @@ input[aria-invalid="true"] {
 .shortcut-list {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px 18px;
+  gap: var(--sp-2) 18px;
 }
 
 .shortcut-item {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  gap: 8px;
+  gap: var(--sp-2);
   align-items: center;
   min-width: 0;
   font-size: var(--fs-xs);
@@ -4778,14 +5005,14 @@ input[aria-invalid="true"] {
 .shortcut-keys {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: var(--sp-1);
   align-items: center;
 }
 
 .shortcut-key {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--sp-1);
   color: var(--color-text-subtle);
   font-family: var(--font-mono);
   font-size: var(--fs-mini);
@@ -4798,28 +5025,45 @@ input[aria-invalid="true"] {
   border: var(--border-thin);
   border-radius: var(--radius-sm);
   font: inherit;
-  font-weight: 600;
-  line-height: 1.35;
+  font-weight: var(--fw-semibold);
+  line-height: var(--lh-tight);
 }
 
 .shortcut-popover .shortcut-guide {
   margin-top: 0;
-  padding-right: 32px;
+  padding-right: var(--sp-6);
 }
 
 .shortcut-popover .shortcut-list {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.tips-filter {
+  min-width: 0;
+  max-width: 220px;
+  height: var(--control-h-sm);
+  margin-left: auto;
+  font-size: var(--fs-xs);
+}
+
+.tips-empty {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--fs-sm);
+}
+
+/* No min-height. It pinned every grid row to 96px while the guide bodies run 250-400px,
+   so all 43 cards overflowed and painted over each other — the drawer has never actually
+   been readable. Cards size to their content and the grid scrolls, which it already did. */
 .tip-card {
-  min-height: 96px;
   display: grid;
   grid-template-columns: 50px minmax(0, 1fr);
-  gap: 10px;
+  gap: var(--sp-25);
   align-items: start;
-  padding: 10px;
+  padding: var(--sp-25);
   color: var(--color-text-muted);
-  background: rgba(11, 15, 20, 0.26);
+  background: color-mix(in srgb, var(--color-bg) 26%, transparent);
   border: var(--border-thin);
   border-radius: var(--radius-md);
 }
@@ -4835,13 +5079,13 @@ input[aria-invalid="true"] {
 }
 
 .tip-card strong {
-  margin-bottom: 4px;
+  margin-bottom: var(--sp-1);
   color: var(--color-text);
   font-size: var(--fs-sm);
 }
 
 .tip-card small {
-  line-height: 1.45;
+  line-height: var(--lh-snug);
 }
 
 .visually-hidden {
@@ -4861,7 +5105,7 @@ input[aria-invalid="true"] {
   left: 8px;
   top: -48px;
   z-index: var(--z-skip-link);
-  padding: 8px 14px;
+  padding: var(--sp-2) 14px;
   background: var(--color-accent);
   color: #04121f;
   border-radius: var(--radius-md);
@@ -4889,10 +5133,10 @@ input[aria-invalid="true"] {
   z-index: var(--z-viewer-overlay);
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--sp-15);
   max-height: 60%;
   overflow: auto;
-  padding: 10px;
+  padding: var(--sp-25);
   background: var(--color-surface);
   border: var(--border-strong);
   border-radius: var(--radius-md);
@@ -4910,6 +5154,13 @@ input[aria-invalid="true"] {
   text-align: left;
 }
 
+/* border-color alone paints nothing here: the base button reset is `border: none`, so the
+   selected face had no visible state. A transparent border gives it something to colour,
+   the way the sibling .viewer-view-presets rule already works. */
+.viewer-a11y-faces button {
+  border: 1px solid transparent;
+}
+
 .viewer-a11y-faces button[aria-pressed="true"] {
   color: var(--color-accent);
   border-color: var(--color-accent-border);
@@ -4924,7 +5175,7 @@ input[aria-invalid="true"] {
   z-index: var(--z-viewer-overlay);
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: var(--sp-1);
   max-width: min(520px, calc(100% - 24px));
   opacity: 0.88;
   pointer-events: auto;
@@ -4942,7 +5193,7 @@ input[aria-invalid="true"] {
 
 .viewer-view-presets button {
   min-height: 24px;
-  padding: 4px 8px;
+  padding: var(--sp-1) var(--sp-2);
   font-size: var(--fs-xs);
   color: var(--color-text-muted);
   background: var(--color-surface-2);
@@ -4950,11 +5201,19 @@ input[aria-invalid="true"] {
   border-radius: var(--radius-sm);
 }
 
-.viewer-view-presets button:hover,
-.viewer-view-presets button:focus-visible,
-.viewer-view-presets button[aria-pressed="true"] {
+.viewer-view-presets button:hover {
   color: var(--color-accent);
   border-color: var(--color-accent-border);
+}
+
+/* A mode should look like a mode. Hover previously rendered identically to selected, so
+   the active camera view was indistinguishable from whichever button was under the
+   pointer. This is the recipe .segmented button.active already uses. */
+.viewer-view-presets button[aria-pressed="true"] {
+  color: var(--color-accent);
+  background: var(--color-accent-dim);
+  border-color: var(--color-accent-border);
+  box-shadow: inset 0 0 0 1px var(--color-accent-border);
 }
 
 .unit-toggle:focus-visible {
@@ -4972,9 +5231,34 @@ input[aria-invalid="true"] {
     right: var(--sp-3);
   }
 
+  /* The shell's middle row is minmax(0, 1fr) at full size, which pins the workspace to
+     exactly the leftover height. Once .workspace stacks it asks for a 440px viewer plus a
+     panel, so on a short viewport the panel row collapsed — measured 440px/1px at 900x500,
+     i.e. the entire controls panel one pixel tall. `auto` lets the workspace take its
+     intrinsic height and the shell scroll instead.
+
+     The chrome then has to stay put, which is why the bar and strip go sticky: without
+     that, scrolling down to the panel carries save/undo and the status readout off screen
+     and leaves the fixed log drawer floating over nothing. */
   .app-shell {
     --stepbar-w: 104px;
+    grid-template-rows: var(--topbar-h) minmax(min-content, 1fr) var(--statusbar-h);
     overflow: auto;
+  }
+
+  .topbar,
+  .status-strip {
+    position: sticky;
+    z-index: 1;
+    background: var(--color-surface);
+  }
+
+  .topbar {
+    top: 0;
+  }
+
+  .status-strip {
+    bottom: 0;
   }
 
   .app-shell.stepbar-collapsed {
@@ -5006,7 +5290,7 @@ input[aria-invalid="true"] {
     grid-template-rows: 32px minmax(14px, auto);
     justify-items: center;
     align-content: center;
-    gap: 6px;
+    gap: var(--sp-15);
     min-height: 70px;
     height: auto;
     padding: var(--sp-2) var(--sp-1);
@@ -5065,6 +5349,43 @@ input[aria-invalid="true"] {
 }
 
 @media (max-width: 640px) {
+  /* The base rule pairs min-width: 280px with max-width: calc(100% - 24px). At 375px the
+     viewer is 297px wide, so the max computes to 273px and the min wins — the card renders
+     at 280px, 94% of the viewer it is supposed to be annotating, wider than its own safety
+     valve. Dropping the floor here lets the clamp actually clamp. The base 280px stays
+     (appCss.test.ts pins it, and resultLegendContentScale's JS defaults are keyed to it). */
+  .analysis-legend {
+    min-width: 0;
+  }
+
+  /* Two-up leaves ~130px per column here, which splits a value from its unit across
+     two lines. One column, full width, keeps each figure on one line. */
+  .result-headline {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* The mug alone still reads as the donate action; the wordmark is what pushed
+     .status-links wide enough to squeeze the tab group out of its track. */
+  .coffee-label {
+    display: none;
+  }
+
+  /* Below this width the tab controls plus the status word no longer fit the strip.
+     The colour-coded dot still carries the state, so hide the word the same way the
+     collapsed rail hides its step labels — clipped, not removed, so it is still
+     announced. Without this the word was clipped mid-glyph by its container instead. */
+  .status-state-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
   .storage-recovery-card {
     top: calc(var(--topbar-h) + var(--sp-2));
     right: var(--sp-2);
@@ -5111,7 +5432,7 @@ input[aria-invalid="true"] {
   .start-footer {
     grid-template-columns: 1fr;
     justify-items: center;
-    gap: 8px;
+    gap: var(--sp-2);
   }
 
   .start-github {
@@ -5123,7 +5444,7 @@ input[aria-invalid="true"] {
   }
 
   .topbar-action {
-    padding: 6px 8px;
+    padding: var(--sp-15) var(--sp-2);
   }
 
   .topbar-action .topbar-action-label {
@@ -5187,8 +5508,8 @@ input[aria-invalid="true"] {
 .validation-gallery-footer {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 16px 18px;
+  gap: var(--sp-3);
+  padding: var(--sp-4) 18px;
   border-bottom: var(--border-thin);
 }
 
@@ -5223,7 +5544,7 @@ input[aria-invalid="true"] {
 
 .validation-benchmark-list {
   overflow: auto;
-  padding: 12px;
+  padding: var(--sp-3);
   border-right: var(--border-thin);
   background: var(--color-surface-2);
 }
@@ -5233,8 +5554,8 @@ input[aria-invalid="true"] {
   display: grid;
   grid-template-columns: auto 1fr;
   align-items: center;
-  gap: 10px;
-  padding: 12px;
+  gap: var(--sp-25);
+  padding: var(--sp-3);
   border: 1px solid transparent;
   border-radius: 10px;
   color: var(--color-text);
@@ -5264,7 +5585,7 @@ input[aria-invalid="true"] {
 
 .validation-benchmark-detail {
   overflow: auto;
-  padding: 24px;
+  padding: var(--sp-5);
 }
 
 .validation-benchmark-detail > p {
@@ -5276,11 +5597,11 @@ input[aria-invalid="true"] {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
+  gap: var(--sp-4);
 }
 
 .validation-detail-title h2 {
-  margin: 4px 0 0;
+  margin: var(--sp-1) 0 0;
   font-size: 24px;
 }
 
@@ -5294,8 +5615,8 @@ input[aria-invalid="true"] {
 .validation-pass-badge {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
+  gap: var(--sp-15);
+  padding: var(--sp-15) var(--sp-25);
   border-radius: 999px;
   font-size: 12px;
   font-weight: 700;
@@ -5306,9 +5627,9 @@ input[aria-invalid="true"] {
 
 .validation-oracle {
   display: grid;
-  gap: 4px;
+  gap: var(--sp-1);
   margin: 18px 0;
-  padding: 12px 14px;
+  padding: var(--sp-3) 14px;
   border-left: 3px solid var(--color-accent);
   background: var(--color-surface-2);
 }
@@ -5318,7 +5639,7 @@ input[aria-invalid="true"] {
 .validation-metric-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
+  gap: var(--sp-25);
 }
 
 .validation-metric-grid article {
@@ -5347,7 +5668,7 @@ input[aria-invalid="true"] {
 .validation-detail-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px 18px;
+  gap: var(--sp-2) 18px;
   padding-left: 18px;
   color: var(--color-text-subtle);
 }
@@ -5368,4 +5689,85 @@ input[aria-invalid="true"] {
   .validation-benchmark-list { display: flex; border-right: 0; border-bottom: var(--border-thin); }
   .validation-benchmark-list button { min-width: 220px; }
   .validation-metric-grid { grid-template-columns: 1fr; }
+}
+
+/* ── App crash screen ──────────────────────────────────────────────────────
+   Rendered by AppErrorBoundary when the tree throws. Deliberately not themed
+   through .app-shell: the shell is exactly what has just failed to render, so
+   this paints from the root tokens and stands on its own. */
+.app-crash {
+  height: 100%;
+  display: grid;
+  place-items: center;
+  padding: var(--sp-5);
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
+.app-crash-card {
+  width: min(460px, 100%);
+  display: grid;
+  gap: var(--sp-3);
+  padding: var(--sp-6);
+  background: var(--color-surface);
+  border: var(--border-thin);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-panel);
+}
+
+.app-crash-eyebrow {
+  margin: 0;
+  color: var(--color-error);
+}
+
+.app-crash-card h1 {
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-medium);
+  line-height: var(--lh-tight);
+}
+
+.app-crash-copy {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--fs-base);
+  line-height: var(--lh-normal);
+}
+
+.app-crash-actions {
+  display: flex;
+  gap: var(--sp-2);
+}
+
+.app-crash-actions .primary {
+  padding: 0 var(--sp-4);
+  min-height: 34px;
+  border: var(--border-thin);
+  border-radius: var(--radius-md);
+}
+
+.app-crash-detail {
+  display: grid;
+  gap: var(--sp-1);
+  margin: 0;
+  padding-top: var(--sp-3);
+  border-top: var(--border-thin);
+}
+
+.app-crash-detail span {
+  color: var(--color-text-subtle);
+}
+
+.app-crash-detail code {
+  overflow-wrap: anywhere;
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-normal);
+}
+
+.app-crash-footnote {
+  margin: 0;
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
 }

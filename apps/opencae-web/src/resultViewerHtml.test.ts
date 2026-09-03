@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import { bracketDemoProject, bracketDisplayModel } from "@opencae/samples";
 import type { ResultField, ResultSummary } from "@opencae/schema";
 import { buildResultViewerHtml, resultViewerPayloadFromHtml, suggestedResultHtmlFilename } from "./resultViewerHtml";
+import { STRESS_RAMP, stressRampFloatStops } from "./resultColorScale";
 
 const summary: ResultSummary = {
   maxStress: 142,
@@ -84,5 +85,30 @@ describe("self-contained result viewer", () => {
     expect(html).not.toContain("innerHTML");
     expect(html).toContain("metrics.replaceChildren(");
     expect(html).toContain("st.textContent=fmt(v)+' '+u");
+  });
+
+  test("emits the shared stress ramp rather than its own copy of the stops", () => {
+    // The ramp used to be hand-copied into four places in three formats: hex here and in
+    // the report theme, normalized float triples in this generated viewer, and CSS custom
+    // properties. A change to any one of them would have split what a colour means between
+    // the screen, the PDF and the exported viewer.
+    const stops = stressRampFloatStops();
+    expect(stops).toHaveLength(STRESS_RAMP.length);
+    // #0759d6 -> 7/255, 89/255, 214/255
+    expect(stops[0]).toEqual([0.027, 0.349, 0.839]);
+    expect(stops[stops.length - 1]).toEqual([0.937, 0.267, 0.267]);
+
+    const html = buildResultViewerHtml({
+      project: bracketDemoProject,
+      study: bracketDemoProject.studies[0]!,
+      displayModel: bracketDisplayModel,
+      summary,
+      fields,
+      surfaceMesh: { id: "surface", nodes: [[0, 0, 0], [1, 0, 0], [0, 1, 0]], triangles: [[0, 1, 2]], coordinateSpace: "model-mm" },
+      exportedAt: "2026-07-14T12:00:00.000Z"
+    });
+    expect(html).toContain(JSON.stringify(stops));
+    // The interpolation actually ran: no literal expression survives into the output.
+    expect(html).not.toContain("stressRampFloatStops()");
   });
 });

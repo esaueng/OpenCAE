@@ -7,7 +7,7 @@ import { ProjectStorageNotice } from "./ProjectStorageNotice";
 describe("ProjectStorageNotice", () => {
   test("offers remembered cloud and local choices without modal semantics", () => {
     const html = renderToStaticMarkup(
-      <ProjectStorageNotice preference={null} busy={false} recoveryNeeded analyticsEnabled={true} onChooseCloud={vi.fn()} onChooseLocal={vi.fn()} onAnalyticsEnabledChange={vi.fn()} />
+      <ProjectStorageNotice preference={null} busy={false} recoveryNeeded analyticsEnabled={true} onChooseCloud={vi.fn()} onChooseLocal={vi.fn()} onAnalyticsEnabledChange={vi.fn()} onDismiss={vi.fn()} />
     );
 
     expect(html).toContain("Choose how to protect this project");
@@ -19,9 +19,30 @@ describe("ProjectStorageNotice", () => {
     expect(html).not.toContain('aria-modal="true"');
   });
 
+  test("can be dismissed without choosing a preference", () => {
+    // The card is deliberately not modal — nothing behind it is blocked — but it had no
+    // close control and ignored Escape, so the only way out was to make the choice it
+    // was asking for. Meanwhile it floated over the viewer and survived step navigation.
+    const onDismiss = vi.fn();
+    const html = renderToStaticMarkup(
+      <ProjectStorageNotice
+        preference={null}
+        busy={false}
+        recoveryNeeded
+        analyticsEnabled={true}
+        onChooseCloud={vi.fn()}
+        onChooseLocal={vi.fn()}
+        onAnalyticsEnabledChange={vi.fn()}
+        onDismiss={onDismiss}
+      />
+    );
+
+    expect(html).toContain('aria-label="Close project storage"');
+  });
+
   test("shows and marks a previously saved local preference", () => {
     const html = renderToStaticMarkup(
-      <ProjectStorageNotice preference="local" busy={false} recoveryNeeded={false} analyticsEnabled={true} onChooseCloud={vi.fn()} onChooseLocal={vi.fn()} onAnalyticsEnabledChange={vi.fn()} />
+      <ProjectStorageNotice preference="local" busy={false} recoveryNeeded={false} analyticsEnabled={true} onChooseCloud={vi.fn()} onChooseLocal={vi.fn()} onAnalyticsEnabledChange={vi.fn()} onDismiss={vi.fn()} />
     );
 
     expect(html).toContain("This project stays local");
@@ -32,7 +53,7 @@ describe("ProjectStorageNotice", () => {
 
   test("explains the saved preference before a new project needs overflow recovery", () => {
     const html = renderToStaticMarkup(
-      <ProjectStorageNotice preference={null} busy={false} recoveryNeeded={false} analyticsEnabled={true} onChooseCloud={vi.fn()} onChooseLocal={vi.fn()} onAnalyticsEnabledChange={vi.fn()} />
+      <ProjectStorageNotice preference={null} busy={false} recoveryNeeded={false} analyticsEnabled={true} onChooseCloud={vi.fn()} onChooseLocal={vi.fn()} onAnalyticsEnabledChange={vi.fn()} onDismiss={vi.fn()} />
     );
 
     expect(html).toContain("Choose your recovery preference");
@@ -57,10 +78,10 @@ describe("ProjectStorageNotice", () => {
 
   test("offers the full project download alongside the recovery choices", () => {
     const html = renderToStaticMarkup(
-      <ProjectStorageNotice preference="local" busy={false} recoveryNeeded={false} analyticsEnabled={true} onChooseCloud={vi.fn()} onChooseLocal={vi.fn()} onAnalyticsEnabledChange={vi.fn()} onDownloadProject={vi.fn()} />
+      <ProjectStorageNotice preference="local" busy={false} recoveryNeeded={false} analyticsEnabled={true} onChooseCloud={vi.fn()} onChooseLocal={vi.fn()} onAnalyticsEnabledChange={vi.fn()} onDownloadProject={vi.fn()} onDismiss={vi.fn()} />
     );
     const withoutHandler = renderToStaticMarkup(
-      <ProjectStorageNotice preference="local" busy={false} recoveryNeeded={false} analyticsEnabled={true} onChooseCloud={vi.fn()} onChooseLocal={vi.fn()} onAnalyticsEnabledChange={vi.fn()} />
+      <ProjectStorageNotice preference="local" busy={false} recoveryNeeded={false} analyticsEnabled={true} onChooseCloud={vi.fn()} onChooseLocal={vi.fn()} onAnalyticsEnabledChange={vi.fn()} onDismiss={vi.fn()} />
     );
 
     expect(html).toContain("Download project file");
@@ -70,10 +91,10 @@ describe("ProjectStorageNotice", () => {
 
   test("discloses anonymous analytics with an opt-out toggle", () => {
     const html = renderToStaticMarkup(
-      <ProjectStorageNotice preference="local" busy={false} recoveryNeeded={false} analyticsEnabled={true} onChooseCloud={vi.fn()} onChooseLocal={vi.fn()} onAnalyticsEnabledChange={vi.fn()} />
+      <ProjectStorageNotice preference="local" busy={false} recoveryNeeded={false} analyticsEnabled={true} onChooseCloud={vi.fn()} onChooseLocal={vi.fn()} onAnalyticsEnabledChange={vi.fn()} onDismiss={vi.fn()} />
     );
     const optedOut = renderToStaticMarkup(
-      <ProjectStorageNotice preference="local" busy={false} recoveryNeeded={false} analyticsEnabled={false} onChooseCloud={vi.fn()} onChooseLocal={vi.fn()} onAnalyticsEnabledChange={vi.fn()} />
+      <ProjectStorageNotice preference="local" busy={false} recoveryNeeded={false} analyticsEnabled={false} onChooseCloud={vi.fn()} onChooseLocal={vi.fn()} onAnalyticsEnabledChange={vi.fn()} onDismiss={vi.fn()} />
     );
 
     expect(html).toContain("Anonymous usage analytics");

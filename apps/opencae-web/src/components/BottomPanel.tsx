@@ -52,6 +52,7 @@ export function BottomPanel({ status, logs, meshStatus, solverStatus, onClearLog
   const [drawerHeight, setDrawerHeight] = useState(320);
   const [clearPromptVisible, setClearPromptVisible] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState<"idle" | "copied" | "unavailable" | "failed">("idle");
+  const [tipFilter, setTipFilter] = useState("");
   const [coffeeAnimating, setCoffeeAnimating] = useState(false);
   const [coffeeAnimationRun, setCoffeeAnimationRun] = useState(0);
   const dragStart = useRef<{ y: number; height: number } | null>(null);
@@ -62,6 +63,15 @@ export function BottomPanel({ status, logs, meshStatus, solverStatus, onClearLog
   const displayStatus = statusForDisplay(status, solverStatus);
   const healthy = solverStatus === "Running" ? "running" : displayStatus.endsWith("error") || displayStatus === "Needs attention" ? "warning" : meshStatus === "Ready" ? "ready" : "warning";
   const formattedLogs = logs.map(formatLogEntry);
+  // 43 guides is more than anyone scans. Filter across title and body so a user who knows
+  // roughly what they are looking for can get to it.
+  const matchingTipIds = tipFilter.trim()
+    ? REQUIRED_SETTING_HELP_IDS.filter((helpId) => {
+        const help = SETTING_HELP[helpId];
+        const needle = tipFilter.trim().toLowerCase();
+        return help.title.toLowerCase().includes(needle) || help.body.toLowerCase().includes(needle);
+      })
+    : REQUIRED_SETTING_HELP_IDS;
   const donateLinkClassName = `status-link donate-link${coffeeAnimating ? " coffee-animating" : ""}`;
 
   useEffect(() => {
@@ -206,7 +216,18 @@ export function BottomPanel({ status, logs, meshStatus, solverStatus, onClearLog
               </button>
             </div>
           </div>
-          <pre>{formattedLogs.join("\n")}</pre>
+          <pre tabIndex={0} aria-label="Run log output">
+            {logs.map((entry, index) => {
+              const { time, level, message } = logEntryParts(entry);
+              return (
+                <div className={`log-line log-${level.toLowerCase()}`} key={`${entry.at}-${index}`}>
+                  <span className="log-time">{time}</span>
+                  <span className="log-level">{level}</span>
+                  <span className="log-message">{message}</span>
+                </div>
+              );
+            })}
+          </pre>
         </div>
       )}
       {expanded && tab === "tips" && (
@@ -229,11 +250,19 @@ export function BottomPanel({ status, logs, meshStatus, solverStatus, onClearLog
           />
           <div className="tips-drawer-header">
             <span>Settings tips</span>
-            <strong>{REQUIRED_SETTING_HELP_IDS.length} guides</strong>
+            <input
+              type="search"
+              className="tips-filter"
+              value={tipFilter}
+              placeholder="Filter guides"
+              aria-label="Filter settings guides"
+              onChange={(event) => setTipFilter(event.currentTarget.value)}
+            />
+            <strong>{matchingTipIds.length} of {REQUIRED_SETTING_HELP_IDS.length}</strong>
           </div>
-          <KeyboardShortcutGuide />
           <div className="tips-grid">
-            {REQUIRED_SETTING_HELP_IDS.map((helpId) => {
+            {matchingTipIds.length === 0 && <p className="tips-empty">No guide matches “{tipFilter}”.</p>}
+            {matchingTipIds.map((helpId) => {
               const help = SETTING_HELP[helpId];
               return (
                 <article className="tip-card" key={helpId}>
@@ -259,7 +288,7 @@ export function BottomPanel({ status, logs, meshStatus, solverStatus, onClearLog
             ))}
           </div>
           <div className="status-groups" aria-label="Simulation status">
-            <span className={`status-state ${healthy}`}><i />{displayStatus}</span>
+            <span className={`status-state ${healthy}`}><i /><span className="status-state-label">{displayStatus}</span></span>
           </div>
         </div>
         <a className="status-attribution" href={ESAU_ENGINEERING_URL} target="_blank" rel="noreferrer">Built by Esau Engineering</a>
@@ -350,7 +379,10 @@ export function statusForDisplay(status: string, solverStatus: string) {
   if (normalized.includes("opencae core") && /(error|fail|failed|unavailable|not configured|not enabled|not ready)/.test(normalized)) return "OpenCAE Core error";
   if (/(could not|failed)/.test(normalized)) return "Needs attention";
   if (solverStatus === "Running") return "Simulating";
-  if (normalized.includes("complete")) return "Results ready";
+  // Keyed off the solver, not the words in the message: any status containing "complete"
+  // used to light the pill green, including "Mesh-convergence study complete" (which
+  // leaves the working mesh and results untouched) and "Completed results were ignored".
+  if (solverStatus === "Complete") return "Results ready";
   if (normalized.includes("opencae core")) return "OpenCAE Core active";
   return "Ready";
 }
@@ -359,12 +391,27 @@ export function resolveLogClearIntent(clickDetail: number, armed: boolean): "con
   return armed || clickDetail >= 2 ? "clear" : "confirm";
 }
 
+export type WorkspaceLogLevel = "OK" | "ERR" | "INFO";
+
+export function workspaceLogLevel(message: string): WorkspaceLogLevel {
+  const normalized = message.toLowerCase();
+  if (normalized.includes("complete") || normalized.includes("generated")) return "OK";
+  if (/(error|fail|failed|unavailable|not configured|not enabled)/.test(normalized)) return "ERR";
+  return "INFO";
+}
+
+/* The level was computed for every line and then flattened straight back into one string,
+   so a mesh crash looked exactly like "Mesh generated" — same colour, same weight, only
+   the word differed. It is kept as data here and coloured at render. */
+function logEntryParts(entry: WorkspaceLogEntry) {
+  return {
+    time: new Date(entry.at).toLocaleTimeString([], { hour12: false }),
+    level: workspaceLogLevel(entry.message),
+    message: entry.message
+  };
+}
+
 function formatLogEntry(entry: WorkspaceLogEntry) {
-  const normalized = entry.message.toLowerCase();
-  const level = normalized.includes("complete") || normalized.includes("generated")
-    ? "OK"
-    : /(error|fail|failed|unavailable|not configured|not enabled)/.test(normalized)
-      ? "ERR"
-      : "INFO";
-  return `${new Date(entry.at).toLocaleTimeString([], { hour12: false })} ${level.padEnd(4, " ")} ${entry.message}`;
+  const { time, level, message } = logEntryParts(entry);
+  return `${time} ${level.padEnd(4, " ")} ${message}`;
 }

@@ -49,7 +49,7 @@ import { displayModelForUnits, loadValueForUnits, resultFieldForUnits, resultSum
 import { supportDisplayLabel } from "./supportLabels";
 import { nextSelectedPayloadObject, shouldClearPayloadSelectionOnViewerMiss } from "./payloadSelection";
 import { hasLegacyStepUploadFaces, hasUnresolvedStepFaceSelections, healStepFaceSelections, healStepHoleSupportSelections, legacyStepFaceHealMessage } from "./stepFaceHealing";
-import { stepGeometryMetadataForProject, stepGeometryNeedsRepair } from "./stepGeometryState";
+import { stepGeometryNeedsRepair } from "./stepGeometryState";
 import { createLocalDynamicStructuralStudy, createLocalModalStudy, createLocalStaticStressStudy, createLocalThermalStudy } from "./localProjectFactory";
 import { compatibleResultModeForSummary, createPackedResultPlaybackCache, createResultFrameCache, hasDynamicPlaybackFrames, solverMeshSummaryFromResults, synthesizeModalPhaseFields, withDerivedSurfaceSafetyFactorFields, type SolverMeshSummary } from "./resultFields";
 import { appendResultProbe, availableStressComponents, derivedStressFieldsForComponent, governingVariantIdForProbe, MAX_RESULT_PROBES, resolveResultProbe, resultProbeTopologySignature, selectActiveResultField, semanticResultFieldKey, type ResultProbeAnchor, type ResultProbePin } from "./resultSelection";
@@ -171,9 +171,18 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     : (restoredProjectFile ? ["Workspace restored after reload.", "Ready | Local Mode"] : ["Ready | Local Mode"]).map((message) => ({ message, at: Date.now() })));
   const [runProgress, setRunProgress] = useState(restoredUi?.runProgress ?? (restoredResults?.fields.length ? 100 : 0));
   const [meshPhaseProgress, setMeshPhaseProgress] = useState<WasmMeshPhaseProgress | null>(null);
+  // Meshing is the most likely first failure, and until now the reason survived only as a
+  // status-bar string and one line in a collapsed drawer: the progress card vanished and
+  // the Mesh panel returned to its idle state, showing nothing at all. Mirrors runError.
+  const [meshError, setMeshError] = useState<string | null>(null);
   const [convergenceBusy, setConvergenceBusy] = useState(false);
   const [convergenceProgress, setConvergenceProgress] = useState("");
   const [runTiming, setRunTiming] = useState<RunTimingEstimate | null>(null);
+  // runTiming carries live estimates and is cleared the moment a run completes, which is
+  // exactly when the elapsed time stops being an estimate and becomes a fact. Keep that
+  // fact separately so the Run panel and the report can state it; it is cleared alongside
+  // the results it describes, never outliving them.
+  const [solveElapsedMs, setSolveElapsedMs] = useState<number | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
   const [reportBusy, setReportBusy] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
@@ -936,6 +945,15 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     main.focus();
   }
 
+  useEffect(() => {
+    if (!storageRecoveryNoticeOpen) return undefined;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setStorageRecoveryNoticeOpen(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [storageRecoveryNoticeOpen]);
+
   const autosaveUiSnapshot = useMemo<WorkspaceUiSnapshot>(() => ({
     activeStep,
     homeRequested,
@@ -1695,7 +1713,9 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         resultSummary: sourceSummary,
         resultFields,
         solverMeshSummary,
-        runTiming,
+        // A report is always generated after the run finished, so runTiming is null by
+        // then; the completed elapsed time is what the "Solve wall time" row needs.
+        runTiming: runTiming ?? (solveElapsedMs === null ? null : { elapsedMs: solveElapsedMs }),
         unitSystem: displayUnitSystem,
         captures,
         generatedAt,
@@ -1781,17 +1801,20 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
 
   function handleGenerateMesh(preset: MeshQuality) {
     if (!project || !study) return;
+    setMeshError(null);
     setMeshPhaseProgress({ phase: "load", phaseIndex: 0, phaseCount: 8, message: "Loading gmsh WebAssembly module..." });
     // generateMesh rethrows quality-gate and STEP topology rejections so the
     // primary failure remains visible without starting another heavy CAD job.
     void updateStudy(generateMesh(study.id, preset, study, displayModel ?? undefined, pushMessage, setMeshPhaseProgress), shouldAutoAdvanceAfterMeshGeneration() ? "run" : undefined)
-      .catch(async (error: unknown) => {
+      .catch((error: unknown) => {
         setMeshPhaseProgress(null);
         if (isAbortError(error)) {
           pushMessage(error.message || "Mesh generation cancelled.");
           return;
         }
-        pushMessage(`Mesh generation failed: ${error instanceof Error ? error.message : String(error)}`);
+        const meshFailure = error instanceof Error ? error.message : String(error);
+        setMeshError(meshFailure);
+        pushMessage(`Mesh generation failed: ${meshFailure}`);
       })
       .finally(() => setMeshPhaseProgress(null));
   }
@@ -1984,6 +2007,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
 
   function invalidateCompletedRunState() {
     setResultSummary(null);
+    setSolveElapsedMs(null);
     setCompletedRunId("");
     setReportCaptures(null);
     setActiveRunId("");
@@ -1999,10 +2023,17 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     setResultPlaybackOrdinalPosition(0);
     setResultPlaybackPlaying(false);
     setResultPlaybackCacheState({ status: "idle" });
-    setResultMode("stress");
-    setStressComponent("von_mises");
-    setSelectedModeIndex(1);
-    setShowDeformed(false);
+    /* View state is deliberately NOT reset here. Invalidating a run drops the result DATA;
+       resetting how the user was looking at it as well meant that tweaking a load and
+       re-running silently threw away their stress measure, their result mode and the
+       deformed-shape toggle every single time. Everything here is reconciled against the
+       next summary anyway: compatibleResultModeForSummary re-derives the mode, the
+       component effect re-guards an unavailable stress component, and the completion
+       branch sets the mode and mode index for thermal, modal and dynamic runs.
+
+       Probes are the exception and must still be cleared: they resolve by index into one
+       specific run's surface mesh, so carrying them across would silently mis-resolve
+       them onto different geometry. */
     setResultProbes([]);
     setResultProbeLimitReached(false);
     setCaptureViewMode(null);
@@ -2233,12 +2264,17 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       if (event.type === "complete") {
         source.close();
         if (activeRunSourceRef.current === source) activeRunSourceRef.current = null;
+        const completedElapsedMs = timingFromRunEvent(event)?.elapsedMs;
+        if (typeof completedElapsedMs === "number") setSolveElapsedMs(completedElapsedMs);
         setRunTiming(null);
         try {
           const results = await getResults(response.run.id, { projectId: study.projectId, studyId: study.id });
           const currentStudy = projectRef.current?.studies.find((candidate) => candidate.id === study.id);
           if (processingRunIdRef.current !== response.run.id || currentStudy?.type !== study.type) {
             pushMessage("Completed results were ignored because the active project or analysis changed during the run.");
+            // Leave no completed progress behind for an abandoned run, or the status pill
+            // reads "Results ready" for results this branch just threw away.
+            setRunProgress(0);
             return;
           }
           if (study.type === "dynamic_structural" && (!isStructuralResultSummary(results.summary) || !hasDynamicPlaybackFrames(results.summary, results.fields))) {
@@ -2377,7 +2413,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
             aria-controls="workspace-shortcut-guide"
             title="Show keyboard shortcuts"
             aria-label="Show keyboard shortcuts"
-            onClick={() => setShortcutGuideOpen((open) => !open)}
+            onClick={() => { setStorageRecoveryNoticeOpen(false); setShortcutGuideOpen((open) => !open); }}
           >
             Keys
           </button>
@@ -2407,7 +2443,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           aria-expanded={storageRecoveryNoticeOpen}
           aria-controls="project-storage-notice"
           title="Review project storage choice"
-          onClick={() => setStorageRecoveryNoticeOpen((open) => !open)}
+          onClick={() => { setShortcutGuideOpen(false); setStorageRecoveryNoticeOpen((open) => !open); }}
         >
           {cloudBackupPreference === "cloud" ? <CloudUpload size={15} aria-hidden="true" /> : <HardDrive size={15} aria-hidden="true" />}
           <span>{cloudBackupPreference === "cloud" ? "Recovery on" : cloudBackupPreference === "local" ? "Local only" : "Storage"}</span>
@@ -2444,6 +2480,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           setStorageRecoveryNoticeOpen(false);
           void handleSaveProject();
         }}
+        onDismiss={() => setStorageRecoveryNoticeOpen(false)}
       />
     );
   }
@@ -2489,7 +2526,15 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           study={study}
           hasResults={resultDisplayEligible}
         />
-        <Suspense fallback={<section className="viewer-shell viewer-loading" aria-label="3D CAD viewer loading">Loading viewer…</section>}>
+        <Suspense fallback={(
+          <section className="viewer-shell viewer-loading" aria-label="3D CAD viewer loading">
+            <div className="viewer-import-card" role="status" aria-live="polite">
+              <span className="viewer-import-spinner" aria-hidden="true" />
+              <strong>Preparing the 3D view…</strong>
+              <small>Loading the viewer. The model appears as soon as it is ready.</small>
+            </div>
+          </section>
+        )}>
           <CadViewer
             displayModel={displayModelForUi}
             importingModelFilename={modelImport?.filename}
@@ -2564,6 +2609,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           runProgress={runProgress}
           runError={runError}
           runTiming={runTiming}
+          solveElapsedMs={solveElapsedMs}
           onGenerateReport={handleGenerateReport}
           onExportResultPng={handleExportResultPng}
           onExportResultHtml={handleExportResultHtml}
@@ -2689,6 +2735,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           onConnectionsChange={(contacts) => updateStudy(saveStudyPatch(study.id, { contacts, meshSettings: { ...study.meshSettings, status: "not_started", meshRef: undefined, summary: undefined } }, "Assembly connections updated. Regenerate the mesh.", study))}
           onCancelMesh={handleCancelMesh}
           meshPhaseProgress={meshPhaseProgress}
+          meshError={meshError}
           onRunMeshConvergence={(caseId, probe) => void handleRunMeshConvergence(caseId, probe)}
           convergenceBusy={convergenceBusy}
           convergenceProgress={convergenceProgress}

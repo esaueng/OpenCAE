@@ -1,3 +1,5 @@
+import { STRESS_RAMP } from "../resultColorScale";
+
 export const REPORT_THEME = {
   ink: "#0b0f14",
   inkMuted: "#57606a",
@@ -10,7 +12,8 @@ export const REPORT_THEME = {
   warningSoft: "#fff7e6",
   error: "#b91c1c",
   errorSoft: "#fdf0f0",
-  ramp: ["#0759d6", "#0ea5e9", "#22c55e", "#facc15", "#f97316", "#ef4444"]
+  // Imported, not re-typed: the screen, this PDF and the exported viewer must agree.
+  ramp: STRESS_RAMP
 } as const;
 
 export const REPORT_LAYOUT = {
