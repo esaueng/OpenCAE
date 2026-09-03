@@ -4922,14 +4922,16 @@ input[aria-invalid="true"] {
 
 .tips-content {
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  /* Two rows, not three: the drawer used to repeat the top bar's keyboard-shortcut
+     popover verbatim between the header and the first guide. */
+  grid-template-rows: auto minmax(0, 1fr);
   padding: var(--sp-3);
   overflow: hidden;
 }
 
 .tips-drawer-header {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: var(--sp-3);
   padding: 0 0 var(--sp-25);
@@ -5036,15 +5038,32 @@ input[aria-invalid="true"] {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.tips-filter {
+  min-width: 0;
+  max-width: 220px;
+  height: var(--control-h-sm);
+  margin-left: auto;
+  font-size: var(--fs-xs);
+}
+
+.tips-empty {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--fs-sm);
+}
+
+/* No min-height. It pinned every grid row to 96px while the guide bodies run 250-400px,
+   so all 43 cards overflowed and painted over each other — the drawer has never actually
+   been readable. Cards size to their content and the grid scrolls, which it already did. */
 .tip-card {
-  min-height: 96px;
   display: grid;
   grid-template-columns: 50px minmax(0, 1fr);
   gap: var(--sp-25);
   align-items: start;
   padding: var(--sp-25);
   color: var(--color-text-muted);
-  background: rgba(11, 15, 20, 0.26);
+  background: color-mix(in srgb, var(--color-bg) 26%, transparent);
   border: var(--border-thin);
   border-radius: var(--radius-md);
 }

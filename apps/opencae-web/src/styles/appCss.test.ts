@@ -7,6 +7,7 @@ const tokens = readFileSync(resolve(__dirname, "../theme/tokens.css"), "utf8");
 const cadViewer = readFileSync(resolve(__dirname, "../components/CadViewer.tsx"), "utf8");
 const appSource = readFileSync(resolve(__dirname, "../WorkspaceApp.tsx"), "utf8");
 const rightPanel = readFileSync(resolve(__dirname, "../components/RightPanel.tsx"), "utf8");
+const bottomPanel = readFileSync(resolve(__dirname, "../components/BottomPanel.tsx"), "utf8");
 const lightThemeBlock = tokens.match(/\.theme-light\s*\{(?<body>[\s\S]*?)\n\}/)?.groups?.body ?? "";
 
 function lightToken(name: string) {
@@ -543,6 +544,21 @@ describe("app CSS", () => {
     expect(rightPanel).toContain('if (event.key !== "Escape") return;');
     // describedby stops pointing at a node that is not in the document.
     expect(rightPanel).toContain("aria-describedby={isTooltipOpen ? tooltipId : undefined}");
+  });
+
+  test("makes the settings tips drawer readable", () => {
+    // min-height pinned every grid row to 96px while the guide bodies run 250-400px, so
+    // all 43 cards overflowed and painted over each other. Cards size to their content.
+    expect(cssRule(".tip-card")).not.toMatch(/min-height/);
+    expect(cssRule(".tips-grid")).toMatch(/overflow:\s*auto/);
+    // Two rows, not three: the drawer used to repeat the top bar's Keys popover verbatim.
+    expect(cssRule(".tips-content")).toMatch(/grid-template-rows:\s*auto minmax\(0, 1fr\)/);
+    expect(bottomPanel).not.toContain("<KeyboardShortcutGuide />");
+    // 43 guides is more than anyone scans.
+    expect(bottomPanel).toContain('className="tips-filter"');
+    expect(bottomPanel).toContain("matchingTipIds");
+    // And the card ground is themed rather than a fixed dark tint.
+    expect(cssRule(".tip-card")).toMatch(/background:\s*color-mix/);
   });
 
   test("resolves every custom property it references", () => {

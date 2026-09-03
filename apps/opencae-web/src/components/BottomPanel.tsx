@@ -52,6 +52,7 @@ export function BottomPanel({ status, logs, meshStatus, solverStatus, onClearLog
   const [drawerHeight, setDrawerHeight] = useState(320);
   const [clearPromptVisible, setClearPromptVisible] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState<"idle" | "copied" | "unavailable" | "failed">("idle");
+  const [tipFilter, setTipFilter] = useState("");
   const [coffeeAnimating, setCoffeeAnimating] = useState(false);
   const [coffeeAnimationRun, setCoffeeAnimationRun] = useState(0);
   const dragStart = useRef<{ y: number; height: number } | null>(null);
@@ -62,6 +63,15 @@ export function BottomPanel({ status, logs, meshStatus, solverStatus, onClearLog
   const displayStatus = statusForDisplay(status, solverStatus);
   const healthy = solverStatus === "Running" ? "running" : displayStatus.endsWith("error") || displayStatus === "Needs attention" ? "warning" : meshStatus === "Ready" ? "ready" : "warning";
   const formattedLogs = logs.map(formatLogEntry);
+  // 43 guides is more than anyone scans. Filter across title and body so a user who knows
+  // roughly what they are looking for can get to it.
+  const matchingTipIds = tipFilter.trim()
+    ? REQUIRED_SETTING_HELP_IDS.filter((helpId) => {
+        const help = SETTING_HELP[helpId];
+        const needle = tipFilter.trim().toLowerCase();
+        return help.title.toLowerCase().includes(needle) || help.body.toLowerCase().includes(needle);
+      })
+    : REQUIRED_SETTING_HELP_IDS;
   const donateLinkClassName = `status-link donate-link${coffeeAnimating ? " coffee-animating" : ""}`;
 
   useEffect(() => {
@@ -240,11 +250,19 @@ export function BottomPanel({ status, logs, meshStatus, solverStatus, onClearLog
           />
           <div className="tips-drawer-header">
             <span>Settings tips</span>
-            <strong>{REQUIRED_SETTING_HELP_IDS.length} guides</strong>
+            <input
+              type="search"
+              className="tips-filter"
+              value={tipFilter}
+              placeholder="Filter guides"
+              aria-label="Filter settings guides"
+              onChange={(event) => setTipFilter(event.currentTarget.value)}
+            />
+            <strong>{matchingTipIds.length} of {REQUIRED_SETTING_HELP_IDS.length}</strong>
           </div>
-          <KeyboardShortcutGuide />
           <div className="tips-grid">
-            {REQUIRED_SETTING_HELP_IDS.map((helpId) => {
+            {matchingTipIds.length === 0 && <p className="tips-empty">No guide matches “{tipFilter}”.</p>}
+            {matchingTipIds.map((helpId) => {
               const help = SETTING_HELP[helpId];
               return (
                 <article className="tip-card" key={helpId}>
