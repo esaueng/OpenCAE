@@ -561,6 +561,25 @@ describe("app CSS", () => {
     expect(cssRule(".tip-card")).toMatch(/background:\s*color-mix/);
   });
 
+  test("themes the in-canvas scene labels", () => {
+    // These are drawn into the WebGL canvas, so no DOM contrast check can reach them —
+    // which is how a palette built entirely for the dark viewport survived. Measured on the
+    // light ground the load callout ran about 1.7:1; the light entries clear 8:1.
+    expect(cadViewer).toContain("const SceneThemeContext = createContext<ThemeMode>");
+    expect(cadViewer).toContain("<SceneThemeContext.Provider value={props.themeMode}>");
+    expect(cadViewer).toMatch(/function sceneLabelColors\(tone: SceneLabelTone, themeMode: ThemeMode/);
+    expect(cadViewer).toContain('sceneLabelColors(tone, useContext(SceneThemeContext))');
+    expect(cadViewer).toContain('sceneLabelColors("dimension", useContext(SceneThemeContext))');
+    // Every tone carries both roles, so no tone can silently fall back to dark-only.
+    const palette = cadViewer.match(/const SCENE_LABEL_PALETTE[\s\S]*?\n\};/)?.[0] ?? "";
+    for (const tone of ["max", "mid", "min", "load", "active-load", "payload-mass", "dimension", "print", "support", "default"]) {
+      expect(palette, `missing tone ${tone}`).toMatch(new RegExp(`"?${tone}"?:\\s*\\{ dark:.*light:`));
+    }
+    // NOT seeded from the document root: theme-light lives on the .app-shell div, so the
+    // root always reports the dark tokens.
+    expect(cadViewer).not.toMatch(/getComputedStyle\(document\.documentElement\)/);
+  });
+
   test("resolves every custom property it references", () => {
     // An undefined custom property invalidates its whole declaration at computed-value
     // time, so `padding: var(--typo) 6px` silently becomes `padding: 0` — a class of bug

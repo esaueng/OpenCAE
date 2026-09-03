@@ -179,6 +179,10 @@ const RESULT_DEFORMATION_TARGET_FRACTION = 0.08;
 const RESULT_DEFORMATION_CAP_FRACTION = DEBUG_RESULTS ? 1 : 0.25;
 const ResultColorScaleContext = createContext<ResolvedResultColorScale | null>(null);
 const StressComponentContext = createContext<StressComponent>("von_mises");
+/* Scene labels are drawn into the canvas, so no DOM contrast check can see them — which is
+   how a palette built entirely for the dark viewport survived: pale text on a near-white
+   ground measured about 1.7:1 in light mode, and the report's boundary figure inherits it. */
+const SceneThemeContext = createContext<ThemeMode>("dark");
 
 export function viewerGizmoLayout() {
   const cubeSize = VIEWER_VIEW_CUBE_SIZE;
@@ -318,6 +322,7 @@ export function CadViewer(props: CadViewerProps) {
   }, [props.displayModel, props.onResultRenderBoundsChange, uploadedPreviewBounds]);
   return (
     <ResultColorScaleContext.Provider value={resultColorScale}>
+      <SceneThemeContext.Provider value={props.themeMode}>
       <StressComponentContext.Provider value={stressComponent}>
     <section
       className={`viewer-shell ${effectiveViewMode === "results" ? "results-view" : ""}`}
@@ -463,6 +468,7 @@ export function CadViewer(props: CadViewerProps) {
       {effectiveViewMode === "results" && <ResultLegend resultMode={props.resultMode} resultFields={resultFields} unitSystem={props.unitSystem} meshSummary={props.meshSummary} surfaceMesh={props.surfaceMesh} showDeformed={effectiveShowDeformed} deformationScale={props.stressExaggeration} />}
     </section>
       </StressComponentContext.Provider>
+      </SceneThemeContext.Provider>
     </ResultColorScaleContext.Provider>
   );
 }
@@ -2328,7 +2334,7 @@ export function dimensionLabelFlipped(
 function DimensionLineLabel({ label, position, tangent, scale }: { label: string; position: [number, number, number]; tangent: [number, number, number]; scale: number }) {
   const groupRef = useRef<THREE.Group>(null);
   const flippedRef = useRef<boolean | null>(null);
-  const colors = sceneLabelColors("dimension");
+  const colors = sceneLabelColors("dimension", useContext(SceneThemeContext));
   useFrame(({ camera }) => {
     const group = groupRef.current;
     if (!group?.parent) return;
@@ -6417,7 +6423,7 @@ function SceneLabel({
   scale?: number;
 }) {
   const labelWidth = Math.max(1.02, label.length * 0.098);
-  const colors = sceneLabelColors(tone);
+  const colors = sceneLabelColors(tone, useContext(SceneThemeContext));
   return (
     <Billboard position={position} renderOrder={50}>
       <Text
@@ -6440,16 +6446,25 @@ function SceneLabel({
   );
 }
 
-function sceneLabelColors(tone: SceneLabelTone) {
-  if (tone === "max") return { outline: "#1f0707", text: "#fee2e2" };
-  if (tone === "mid") return { outline: "#1f1300", text: "#fef3c7" };
-  if (tone === "min") return { outline: "#06142a", text: "#dbeafe" };
-  if (tone === "dimension") return { outline: "#03101d", text: "#8cc8ff" };
-  if (tone === "print") return { outline: "#032018", text: "#a7f3d0" };
-  if (tone === "active-load") return { outline: "#03101d", text: "#8cc8ff" };
-  if (tone === "payload-mass") return { outline: "#032018", text: "#6ee7c8" };
-  if (tone === "support") return { outline: "#042f2a", text: "#99f6e4" };
-  return { outline: "#1f1300", text: "#ffe6a3" };
+/* Same hue per tone in both themes, so the load/support/dimension colour coding survives;
+   only the light/dark roles swap. Measured on the light viewport ground (#f7f9fc) these
+   run 8:1 or better, against roughly 1.7:1 before. */
+const SCENE_LABEL_PALETTE: Record<SceneLabelTone | "default", { dark: { outline: string; text: string }; light: { outline: string; text: string } }> = {
+  max: { dark: { outline: "#1f0707", text: "#fee2e2" }, light: { outline: "#fff5f5", text: "#7f1d1d" } },
+  mid: { dark: { outline: "#1f1300", text: "#fef3c7" }, light: { outline: "#fffbeb", text: "#78350f" } },
+  min: { dark: { outline: "#06142a", text: "#dbeafe" }, light: { outline: "#eff6ff", text: "#1e3a8a" } },
+  dimension: { dark: { outline: "#03101d", text: "#8cc8ff" }, light: { outline: "#f0f9ff", text: "#0b4a7a" } },
+  print: { dark: { outline: "#032018", text: "#a7f3d0" }, light: { outline: "#ecfdf5", text: "#065f46" } },
+  "active-load": { dark: { outline: "#03101d", text: "#8cc8ff" }, light: { outline: "#f0f9ff", text: "#0b4a7a" } },
+  "payload-mass": { dark: { outline: "#032018", text: "#6ee7c8" }, light: { outline: "#ecfdf5", text: "#065f46" } },
+  support: { dark: { outline: "#042f2a", text: "#99f6e4" }, light: { outline: "#f0fdfa", text: "#134e4a" } },
+  load: { dark: { outline: "#1f1300", text: "#ffe6a3" }, light: { outline: "#fffbeb", text: "#78350f" } },
+  default: { dark: { outline: "#1f1300", text: "#ffe6a3" }, light: { outline: "#fffbeb", text: "#78350f" } }
+};
+
+function sceneLabelColors(tone: SceneLabelTone, themeMode: ThemeMode = "dark") {
+  const entry = SCENE_LABEL_PALETTE[tone] ?? SCENE_LABEL_PALETTE.default;
+  return themeMode === "light" ? entry.light : entry.dark;
 }
 
 // Constraint teal keeps fixed supports visually distinct from amber loads,
