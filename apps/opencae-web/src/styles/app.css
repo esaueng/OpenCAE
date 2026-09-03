@@ -2965,6 +2965,26 @@ img {
   box-shadow: 0 0 0 1px rgba(8, 12, 16, 0.5);
 }
 
+/* The focus ring lives on the thumb, not the input. The input's own outline is
+   suppressed above — deliberately, since a rectangle around the whole track reads as the
+   track being focused rather than the handle — but nothing ever replaced it, so six
+   keyboard-operable sliders had no visible focus state at all (WCAG 2.4.7). The inner
+   surface-coloured ring separates the accent halo from the track underneath it, so the
+   state reads on both the filled and unfilled sides in either theme. */
+.range-field input[type="range"]:focus-visible::-webkit-slider-thumb {
+  box-shadow:
+    0 0 0 1px rgba(8, 12, 16, 0.5),
+    0 0 0 3px var(--color-surface),
+    0 0 0 5px var(--color-accent);
+}
+
+.range-field input[type="range"]:focus-visible::-moz-range-thumb {
+  box-shadow:
+    0 0 0 1px rgba(8, 12, 16, 0.5),
+    0 0 0 3px var(--color-surface),
+    0 0 0 5px var(--color-accent);
+}
+
 .range-field input.playback-time-range {
   cursor: default;
 }

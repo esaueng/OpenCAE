@@ -293,6 +293,15 @@ describe("app CSS", () => {
     expect(rangeInput).toMatch(/padding:\s*0/);
     expect(rangeFocus).toMatch(/outline:\s*none/);
     expect(rangeFocus).not.toMatch(/outline-offset/);
+
+    // The suppressed outline is a decision about WHERE the ring goes, not whether there
+    // is one: the thumb carries it instead. Without these the sliders are keyboard
+    // operable with no visible focus state at all.
+    const webkitFocusThumb = cssRule('.range-field input[type="range"]:focus-visible::-webkit-slider-thumb');
+    const mozFocusThumb = cssRule('.range-field input[type="range"]:focus-visible::-moz-range-thumb');
+
+    expect(webkitFocusThumb).toMatch(/var\(--color-accent\)/);
+    expect(mozFocusThumb).toMatch(/var\(--color-accent\)/);
   });
 
   test("styles playback time as a passive playhead instead of a draggable slider", () => {
