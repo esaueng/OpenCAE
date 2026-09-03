@@ -2596,8 +2596,18 @@ img {
   border-radius: var(--radius-md);
 }
 
+/* .panel-warning's amber clears AA on the panel's own surface but only reaches 3.67:1 on
+   this card's darker one, and --color-error is 4.37:1 there — also short. Severity is
+   already carried by the rail and the icon, so the message itself takes normal ink, which
+   is what a multi-line solver error wants to be read in anyway. */
 .mesh-failure .panel-warning {
   margin: 0;
+  color: var(--color-text);
+}
+
+.mesh-failure .panel-warning svg {
+  color: var(--color-error);
+  flex: none;
 }
 
 .step-repair-card {
