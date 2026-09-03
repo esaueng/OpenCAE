@@ -497,6 +497,28 @@ describe("app CSS", () => {
     expect(tokens).toMatch(/--card-radius:\s*var\(--radius-md\)/);
   });
 
+  test("separates the section boundary from the block gap enough to group", () => {
+    // 22px above a 14px block gap is a 1.57x ratio — too close for space to group anything,
+    // which is why every section also needed a rule under it. --gap-section makes it 2.0x.
+    // Identified by its border, not by name: cssRule() substring-matches, so
+    // ".section-title" resolves to `.result-probe-list-header .section-title` (margin: 0),
+    // and there is a second standalone rule carrying the shared type treatment.
+    const sectionBoundary = css.match(/^\.section-title \{[^}]*border-bottom[^}]*\}/m)?.[0] ?? "";
+    expect(sectionBoundary).toMatch(/margin:\s*var\(--gap-section\)/);
+    expect(tokens).toMatch(/--gap-section:\s*28px/);
+    // Not achieved by shrinking the block gap: .field carries it and sits on every form
+    // field on all seven steps, so retuning it is a global reflow rather than a panel change.
+    expect(cssRule(".field")).toMatch(/margin:\s*0 0 14px/);
+
+    // .info-row is the app's most-repeated data atom (64 instances). At 8px padding plus a
+    // 19.5px line plus a rule it was ~36.5px per row while the chrome around it was
+    // tool-tight. The font size is deliberately untouched.
+    const infoRow = cssRule(".info-row");
+    expect(infoRow).toMatch(/padding:\s*var\(--sp-1\) 0/);
+    expect(infoRow).toMatch(/line-height:\s*var\(--lh-tight\)/);
+    expect(infoRow).not.toMatch(/font-size/);
+  });
+
   test("resolves every custom property it references", () => {
     // An undefined custom property invalidates its whole declaration at computed-value
     // time, so `padding: var(--typo) 6px` silently becomes `padding: 0` — a class of bug

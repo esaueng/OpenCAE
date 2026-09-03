@@ -3758,12 +3758,17 @@ button:disabled {
   font-size: var(--fs-xs);
 }
 
+/* The app's most-repeated data atom — 64 instances. At 8px padding plus a 19.5px line
+   plus a rule each row was ~36.5px, so chrome was tool-tight while the actual engineering
+   data was spread out. The font size is left alone: dropping these mono values to 12px is
+   a separate decision on a panel already dense with small type. */
 .info-row {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: var(--sp-3);
-  padding: var(--sp-2) 0;
+  padding: var(--sp-1) 0;
+  line-height: var(--lh-tight);
   border-bottom: 1px dotted rgba(139, 148, 158, 0.28);
 }
 
@@ -3851,15 +3856,15 @@ button:disabled {
 .section-title {
   margin: 0 0 var(--sp-2);
   color: var(--color-text-subtle);
-  font-family: var(--font-mono);
-  font-size: var(--fs-mini);
   font-weight: var(--fw-regular);
-  letter-spacing: var(--ls-eyebrow);
-  text-transform: uppercase;
 }
 
+/* The section boundary was 22px against a 14px block gap — a 1.57x ratio, too close for
+   space alone to group anything, which is why every section also needed a rule under it.
+   --gap-section makes it 2.0x. Deliberately NOT achieved by shrinking the block gap:
+   .field carries it and sits on every form field on all seven steps. */
 .section-title {
-  margin: 22px 0 var(--sp-2);
+  margin: var(--gap-section) 0 var(--sp-2);
   padding-bottom: 7px;
   border-bottom: var(--border-thin);
 }
